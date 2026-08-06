@@ -167,7 +167,22 @@
           return
         }
         if (seg && pages.find(p => p.id === seg)) page = seg
+        return
       }
+      // A hash that names no screen we have. Falling through here used to
+      // leave the PREVIOUS page mounted while the address bar showed the bad
+      // route, so a stale bookmark or a renamed route put you on Browser Trace
+      // with a URL claiming otherwise — and every in-page control, the tour
+      // included, then spoke about a screen you were not looking at.
+      //
+      // isPluginPage is a prefix test, not a lookup, so an unknown route is
+      // unambiguous even before the plugin mounts have loaded.
+      //
+      // replaceState, not pushState: the broken URL should not become a place
+      // the back button can return to.
+      page = 'dashboard'
+      sidebarOpen = false
+      history.replaceState({}, '', '#dashboard')
     }
     applyHash()
     try { navCollapsed = localStorage.getItem('soulacy-nav-collapsed') === '1' } catch (_) {}

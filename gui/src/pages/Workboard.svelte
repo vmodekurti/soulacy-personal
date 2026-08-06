@@ -42,10 +42,19 @@
         api.workboard.list(),
         api.agents.list().catch(() => null),
       ])
+      // `tasks` has the same hazard as `agents` below and one {#each} of its
+      // own — Vasu's fix caught it; keep it.
       tasks = Array.isArray(board?.tasks) ? board.tasks : []
-      agents = Array.isArray(agentList?.agents)
-        ? agentList.agents
-        : (Array.isArray(agentList) ? agentList : [])
+      // Only an array. `agentList?.agents || agentList || []` looks like it is
+      // being generous about the response shape, but `{}` is truthy: any answer
+      // that is neither {agents:[…]} nor an array — an error envelope, an empty
+      // body, a gateway version that renamed the field — put a plain object in
+      // `agents`, and `{#each agents}` then threw inside Svelte's flush. Svelte 4
+      // has no error boundary, so that did not break the Workboard, it froze the
+      // entire app until a reload.
+      agents = Array.isArray(agentList?.agents) ? agentList.agents
+        : Array.isArray(agentList) ? agentList
+        : []
     } catch (e) {
       error = e.message || 'Failed to load workboard'
     } finally {
