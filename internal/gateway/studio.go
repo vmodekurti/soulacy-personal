@@ -2811,6 +2811,28 @@ func (s *Server) studioDesignGraph(
 	// diagnose.
 	modelErr := ""
 
+	// Design on a context of our own, not the request's.
+	//
+	// Every graph the model built for a fan-out request arrived fine; roughly one
+	// attempt in four came back as:
+	//
+	//	ollama-cloud: request failed: Post ".../chat/completions": context canceled
+	//
+	// Cancelled, not timed out, and not the provider's doing. It cannot have been
+	// the client giving up either: that same request returned 200 to a caller
+	// still waiting on it — with the straight-line template, because the model
+	// call had been killed underneath. So the request context died while the
+	// handler carrying it kept running, and a 40-second generation was thrown
+	// away for it.
+	//
+	// This file already knows the shape of that problem: the streamed generate
+	// and Run Live both detach with context.WithoutCancel and say why. The
+	// single most expensive call in Studio was the one still passing c.Context()
+	// straight to the model. The timeout keeps a genuinely stuck call bounded —
+	// generously, since the slowest honest generation observed was 96s.
+	designCtx, cancelDesign := context.WithTimeout(context.WithoutCancel(c.Context()), 5*time.Minute)
+	defer cancelDesign()
+
 	if model := s.studioLLM(); model != nil {
 		designCat := cat
 		if detOK && studio.EncodesProcedure(detRes) {
@@ -2821,9 +2843,9 @@ func (s *Server) studioDesignGraph(
 		var res studio.Result
 		var lerr error
 		if advice.Mode == "workflow" {
-			res, lerr = studio.Compile(c.Context(), model, intent, designCat, answers)
+			res, lerr = studio.Compile(designCtx, model, intent, designCat, answers)
 		} else {
-			res, lerr = studio.CompileAgent(c.Context(), model, intent, designCat, strategy, answers)
+			res, lerr = studio.CompileAgent(designCtx, model, intent, designCat, strategy, answers)
 		}
 		if lerr != nil {
 			modelErr = lerr.Error()
@@ -2837,9 +2859,9 @@ func (s *Server) studioDesignGraph(
 			if StructureShortfallSeen := studio.StructureShortfall(intent, res); StructureShortfallSeen != "" {
 				res, _, _ = studio.RetryForStructure(intent, res, func(rc studio.Catalog) (studio.Result, error) {
 					if advice.Mode == "workflow" {
-						return studio.Compile(c.Context(), model, intent, rc, answers)
+						return studio.Compile(designCtx, model, intent, rc, answers)
 					}
-					return studio.CompileAgent(c.Context(), model, intent, rc, strategy, answers)
+					return studio.CompileAgent(designCtx, model, intent, rc, strategy, answers)
 				}, designCat)
 			}
 			in := s.preflightInput(c, cat)

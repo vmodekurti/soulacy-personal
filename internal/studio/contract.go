@@ -221,12 +221,17 @@ func assessAuthoringRules(draft Draft, opts contractOpts, add contractAdd, addFi
 	}
 
 	nodeCount := len(draft.Flow.Nodes)
+	// Judge on the steps a reader must FOLLOW, not the nodes on the canvas: a
+	// fan-out's peer branches are one idea, not N. See macrosize.go — without
+	// this, Studio generated the three-reviewer graph the user asked for and
+	// then blocked saving it for being too complex.
+	steps := MacroStepCount(draft.Flow)
 	switch {
 	case nodeCount == 0:
 		add("architecture.empty", "Architecture fit", "block", "", "This workflow has no runnable steps.", "Add at least one tool, Python, LLM, or agent step.")
-	case nodeCount <= 5:
+	case steps <= 5:
 		pass("architecture.size", "Macro-workflow size", fmt.Sprintf("The workflow has %d node(s), which fits the simple high-level Macro-Workflow guideline.", nodeCount))
-	case nodeCount <= 8:
+	case steps <= 8:
 		add("architecture.size", "Macro-workflow size", "warn", "", fmt.Sprintf("This workflow has %d nodes. Studio workflows should usually stay at 3-5 high-level steps.", nodeCount), "Steps that only reshape data can usually be one step: merge them into a single Custom Python block from the palette on the left. If the agent needs to choose tools as it goes, switch Mode to Auto at the top of the Build step.")
 	case knownDeterministicMacroWorkflow(draft):
 		add("architecture.size", "Macro-workflow size", "warn", "", fmt.Sprintf("This deterministic macro-workflow has %d high-level service steps. It is larger than the ideal visual graph, but it matches a known Soulacy pattern with explicit tool order and completion checks.", nodeCount), "Keep this as a workflow only when the ordering must be deterministic; otherwise convert it to an Auto/Plan-Execute agent.")
