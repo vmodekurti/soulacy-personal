@@ -2811,6 +2811,17 @@ func (s *Server) studioDesignGraph(
 			res, lerr = studio.CompileAgent(c.Context(), model, intent, designCat, strategy, answers)
 		}
 		if lerr == nil {
+			// Structure retry, shared with the streamed pipeline. A graph that
+			// flattens a described fan-out into one step is structurally valid and
+			// passes every check below, so nothing here would otherwise notice.
+			if StructureShortfallSeen := studio.StructureShortfall(intent, res); StructureShortfallSeen != "" {
+				res, _, _ = studio.RetryForStructure(intent, res, func(rc studio.Catalog) (studio.Result, error) {
+					if advice.Mode == "workflow" {
+						return studio.Compile(c.Context(), model, intent, rc, answers)
+					}
+					return studio.CompileAgent(c.Context(), model, intent, rc, strategy, answers)
+				}, designCat)
+			}
 			in := s.preflightInput(c, cat)
 			if contract := studio.AssessContract(res.Workflow, cat, in); contract.Blockers > 0 {
 				// Repair before discarding: most of what a weak builder model gets

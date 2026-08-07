@@ -372,6 +372,35 @@ func RunGeneratePipeline(ctx context.Context, llm LLM, intent string, catalog Ca
 			}
 		}
 
+		// Structure retry: the model built something valid but flattened the SHAPE
+		// the user described — three specialists in parallel became one step.
+		//
+		// Same mechanism as the coverage retry above and for the same reason:
+		// re-stating the brief to a model that has already read it once rarely
+		// helps, whereas naming the specific omission does. Runs at most once,
+		// and only when the intent explicitly asked for a fan-out.
+		if ok {
+			build := func(c Catalog) (Result, error) {
+				if advice.Mode == "workflow" {
+					return Compile(ctx, llm, compileIntent, c, opts.Answers)
+				}
+				return CompileAgent(ctx, llm, compileIntent, c, strategy, opts.Answers)
+			}
+			if short := StructureShortfall(coverageIntent, compileRes); short != "" {
+				emit(PipelineEvent{
+					Phase: PhaseBuildGraph, Status: StatusStart, Source: SourceLLM,
+					Message: "Retrying: the first graph " + short + ".",
+				})
+				next, changed, msg := RetryForStructure(coverageIntent, compileRes, build, designCat)
+				compileRes = next
+				status := StatusSkip
+				if changed {
+					status = StatusComplete
+				}
+				emit(PipelineEvent{Phase: PhaseBuildGraph, Status: status, Source: SourceLLM, Message: msg})
+			}
+		}
+
 		if ok {
 			if c := AssessContract(compileRes.Workflow, catalog, opts.In); c.Blockers > 0 {
 				// Repair BEFORE giving up on it. These are the same deterministic

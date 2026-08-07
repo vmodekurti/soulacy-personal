@@ -65,6 +65,11 @@ type Catalog struct {
 	// is unlikely to produce a different answer; naming the omission is.
 	MustUseTools  []string `json:"must_use_tools,omitempty"`
 	MustUseSkills []string `json:"must_use_skills,omitempty"`
+	// StructureCorrection is the same idea for SHAPE rather than capability: set
+	// on a structure retry, when the first graph collapsed a described fan-out
+	// into one step. Rendered verbatim ahead of the catalogue for the same
+	// reason MustUse is — it frames how the rest of the brief is read.
+	StructureCorrection string `json:"structure_correction,omitempty"`
 	// KnowledgeBases are the knowledge bases the agent could draw on, so Studio
 	// can attach a relevant KB instead of starting from scratch (Story #7).
 	KnowledgeBases []CatalogKB `json:"knowledge_bases,omitempty"`
@@ -438,6 +443,11 @@ const canonicalExample = `{
 // `graph` selects the wording: a workflow is corrected by adding a tool NODE, an
 // agent by adding to its tool allowlist.
 func writeMustUseBlock(sb *strings.Builder, catalog Catalog, graph bool) {
+	// Structure corrections ride in the same slot: both are "your last attempt
+	// missed something specific", and both must be read before the catalogue.
+	if c := strings.TrimSpace(catalog.StructureCorrection); c != "" {
+		sb.WriteString(c)
+	}
 	if len(catalog.MustUseTools) == 0 && len(catalog.MustUseSkills) == 0 {
 		return
 	}

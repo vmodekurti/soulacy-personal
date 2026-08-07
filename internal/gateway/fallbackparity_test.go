@@ -22,6 +22,7 @@ package gateway
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -64,4 +65,34 @@ func designGraphBody(t *testing.T, src string) string {
 		return rest[:end]
 	}
 	return rest
+}
+
+// The structure retry has the same two-path hazard as the fallback rule: it is
+// wired into internal/studio/generatepipeline.go (streamed) and into
+// studioDesignGraph (/studio/compile). The last rule that lived in two places
+// was fixed in one of them and shipped broken in the other, so this asserts
+// both call the shared helper rather than growing local variants.
+func TestStudioDesignGraph_RunsTheStructureRetry(t *testing.T) {
+	src, err := os.ReadFile("studio.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := designGraphBody(t, string(src))
+	if !strings.Contains(body, "studio.RetryForStructure(") {
+		t.Error("studioDesignGraph does not run the structure retry, so a graph built through /compile " +
+			"can still silently flatten a described fan-out while the streamed path repairs it")
+	}
+	if !strings.Contains(body, "studio.StructureShortfall(") {
+		t.Error("studioDesignGraph never checks for a structure shortfall")
+	}
+}
+
+func TestStreamedPipeline_RunsTheStructureRetry(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "studio", "generatepipeline.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), "RetryForStructure(") {
+		t.Error("the streamed pipeline no longer runs the structure retry")
+	}
 }

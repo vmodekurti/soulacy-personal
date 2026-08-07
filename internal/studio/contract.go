@@ -147,6 +147,7 @@ func AssessContract(draft Draft, cat Catalog, in PreflightInput, options ...Cont
 		add("runtime."+nonEmpty(w.Kind, "warning"), "Runtime warning", "warn", w.NodeID, w.Message, w.Fix)
 	}
 
+	assessStructureShortfall(draft, cat, addFix)
 	assessNameCollision(draft, cat, addFix, pass)
 	assessInboundInputUse(draft, add, pass)
 	assessAuthoringRules(draft, opts, add, addFix, pass)
@@ -840,4 +841,39 @@ func assessNameCollision(draft Draft, cat Catalog, addFix func(id, title, status
 		return
 	}
 	pass("identity.collision", "Name collision", "This name does not belong to an agent you already have.")
+}
+
+// assessStructureShortfall reports a graph that flattened the shape the user
+// described — three specialists in parallel built as one step.
+//
+// The pipeline retries once before this fires, so reaching here means the model
+// missed it twice. That is worth saying out loud rather than leaving the user
+// to notice by reading the nodes, which is how it went undetected: the thin
+// graph is structurally valid and passes every other check in this file.
+//
+// A WARNING, not a blocker. The reading is a heuristic over the user's own
+// words, and refusing to save a graph the user may well have meant would be
+// worse than the silence it replaces. Saying "this is not what you described,
+// here is the button to try again" is the honest strength of claim.
+//
+// Draft.Intent carries the refined prompt this graph was built from, which is
+// what makes the comparison possible at save time — the contract has no other
+// access to what was asked for.
+func assessStructureShortfall(draft Draft, cat Catalog, addFix contractAddFix) {
+	intent := strings.TrimSpace(draft.Intent)
+	if intent == "" {
+		intent = strings.TrimSpace(draft.RawIntent)
+	}
+	if intent == "" {
+		return // nothing to compare against; silence is the only honest answer
+	}
+	short := StructureShortfall(intent, Result{Workflow: draft})
+	if short == "" {
+		return
+	}
+	addFix("architecture.structure", "Structure", "warn", "",
+		"Your description "+short+".",
+		"Regenerate to try again — the builder model is inconsistent on this and a second attempt usually "+
+			"builds the separate steps. If one step really is what you want, this warning is safe to ignore.",
+		FixOpenStudio, "Regenerate", nil)
 }
