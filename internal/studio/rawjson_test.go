@@ -114,3 +114,56 @@ func TestParseDraft_StillRejectsRealGarbage(t *testing.T) {
 		t.Fatal("prose parsed as a draft")
 	}
 }
+
+// The second failure of the same family, found on the very next live run after
+// the newline fix shipped:
+//
+//	Falling back to the deterministic planner:
+//	studio: parse agent spec: invalid character '-' in string escape code
+//
+// The model wrote "\-" — markdown-style escaping of a hyphen. JSON permits only
+// \" \\ \/ \b \f \n \r \t and \uXXXX, so one stray backslash invalidated the
+// whole graph exactly as one stray newline had.
+func TestParseDraft_SurvivesAnIllegalEscapeSequence(t *testing.T) {
+	raw := `{"name":"Digest","system_prompt":"Rank tickers 1\-3 by urgency.","flow":{"entry":"n","nodes":[{"id":"n","kind":"llm","input":"go","output":"out"}]}}`
+	d, err := ParseDraft(raw)
+	if err != nil {
+		t.Fatalf("a workflow was discarded over one stray backslash: %v", err)
+	}
+	if !strings.Contains(d.SystemPrompt, `1\-3`) {
+		t.Errorf("the backslash should survive as a literal, got %q", d.SystemPrompt)
+	}
+}
+
+func TestParseAgentSpec_SurvivesAnIllegalEscapeSequence(t *testing.T) {
+	raw := `{"name":"Briefing","system_prompt":"Match \d+ digits, path C:\Users\me","strategy":"plan_execute"}`
+	if _, err := parseAgentSpec(raw); err != nil {
+		t.Fatalf("the agent spec was discarded over regex/path backslashes: %v", err)
+	}
+}
+
+// Legal escapes must be left exactly as they are — "repairing" \n into \\n
+// would turn a real line break into the two characters backslash and n.
+func TestEscapeRawControlChars_PreservesEveryLegalEscape(t *testing.T) {
+	raw := `{"a":"q\" b\\ s\/ bs\b ff\f nl\n cr\r tab\t uni\u00e9"}`
+	var out map[string]string
+	if err := json.Unmarshal([]byte(escapeRawControlChars(raw)), &out); err != nil {
+		t.Fatalf("repair broke valid escapes: %v", err)
+	}
+	if out["a"] != "q\" b\\ s/ bs\b ff\f nl\n cr\r tab\t uni\u00e9" {
+		t.Errorf("a legal escape was altered: %q", out["a"])
+	}
+}
+
+// A truncated \u is not a legal escape either, and passing it through would
+// only fail the parse a second time.
+func TestEscapeRawControlChars_HandlesTruncatedUnicodeEscape(t *testing.T) {
+	raw := `{"a":"bad \u12 end"}`
+	var out map[string]string
+	if err := json.Unmarshal([]byte(escapeRawControlChars(raw)), &out); err != nil {
+		t.Fatalf("truncated \\u should be treated as a literal backslash: %v", err)
+	}
+	if out["a"] != `bad \u12 end` {
+		t.Errorf("got %q", out["a"])
+	}
+}

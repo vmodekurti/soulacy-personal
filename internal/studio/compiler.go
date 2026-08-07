@@ -1692,8 +1692,21 @@ func escapeRawControlChars(s string) string {
 		}
 		switch {
 		case c == '\\' && inString:
-			b.WriteByte(c)
-			escaped = true
+			// A backslash that does not begin a legal escape. JSON allows only
+			// \" \\ \/ \b \f \n \r \t and \uXXXX; anything else is a parse
+			// error. Models produce these constantly — "\-" from markdown
+			// escaping, "\d" from a regex, a Windows path — and each one costs
+			// the whole document. Observed live: "parse agent spec: invalid
+			// character '-' in string escape code" discarded a generated graph.
+			//
+			// A backslash the model did not mean as an escape is a literal
+			// backslash, so write it as one.
+			if validJSONEscape(s, i+1) {
+				b.WriteByte(c)
+				escaped = true
+			} else {
+				b.WriteString(`\\`)
+			}
 		case c == '"':
 			inString = !inString
 			b.WriteByte(c)
@@ -1713,4 +1726,31 @@ func escapeRawControlChars(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// validJSONEscape reports whether the byte at i begins a legal JSON escape.
+//
+// \u is only legal with four hex digits behind it, so a truncated "\u12" is
+// treated as a literal backslash rather than passed through to fail the parse.
+func validJSONEscape(s string, i int) bool {
+	if i >= len(s) {
+		return false
+	}
+	switch s[i] {
+	case '"', '\\', '/', 'b', 'f', 'n', 'r', 't':
+		return true
+	case 'u':
+		if i+4 >= len(s) {
+			return false
+		}
+		for j := i + 1; j <= i+4; j++ {
+			c := s[j]
+			isHex := (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+			if !isHex {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
