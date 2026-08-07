@@ -127,6 +127,43 @@ func (p StructurePlan) wantedWorkers(intent string) int {
 	return len(p.Roles)
 }
 
+// StructureNamedButUnbuildable reports that the intent spells out a fan-out
+// that the deterministic templates cannot build, so they must decline it rather
+// than answer a different question.
+//
+// Every template in deterministic_workflow.go is a straight line: search →
+// clean → summarize → send. They are claimed by TOPIC keywords alone, which is
+// how this request —
+//
+//	"pull the latest incident reports, then run three reviewers in parallel over
+//	 that material: a severity reviewer …, a root-cause reviewer …, and a
+//	 customer-impact reviewer …. Finally an editor combines all three into one
+//	 incident digest and posts it to Telegram."
+//
+// — matched research_digest on the words "reports"/"digest"/"Telegram" and came
+// back as a two-node search-and-summarize graph. No LLM was ever asked. The
+// structure retry, the peer agents, the join barrier: all of it sits downstream
+// of a decision that had already been taken on a keyword.
+//
+// What made it worse than a bad graph is that it did not read like one. The
+// generation block said pattern_matched: true, confidence: "high",
+// next_action: "save", and the contract found 0 blockers — a confident
+// recommendation to ship something that answers a fraction of the request.
+//
+// This is the same over-claiming ConversationalIntent already guards, one axis
+// over. That one says: a fixed graph cannot hold a conversation, so an
+// interactive intent is not ours. This says: a straight line cannot fan out, so
+// a parallel intent is not ours either. Both are the same rule — do not claim
+// what you cannot build — and the second half was missing.
+//
+// Uses exactly the bar StructureShortfall uses, so the check that declines the
+// template and the check that judges the model's graph cannot disagree about
+// what counts as a described structure.
+func StructureNamedButUnbuildable(intent string) bool {
+	p := PlanFromIntent(intent)
+	return p.WantsFanOut && p.wantedWorkers(intent) >= 2
+}
+
 // StructureShortfall reports, in one sentence, how the built graph falls short
 // of the structure the intent describes. Empty means no shortfall — which
 // includes every intent that did not describe a specific structure.

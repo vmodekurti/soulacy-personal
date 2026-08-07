@@ -21,6 +21,12 @@ func CompileDeterministicWorkflow(intent string, cat Catalog, answers map[string
 	if intent == "" {
 		return Result{}, false
 	}
+	// A template can only answer a request whose SHAPE it is able to build. Every
+	// pattern below is a straight line, so an intent that spells out a fan-out
+	// must not be claimed here — see StructureNamedButUnbuildable.
+	if StructureNamedButUnbuildable(intent) {
+		return Result{}, false
+	}
 	if deterministicNotebookPodcastWorkflow(intent) {
 		return compileNotebookPodcastWorkflow(intent, cat, answers)
 	}
