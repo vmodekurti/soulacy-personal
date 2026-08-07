@@ -4808,6 +4808,10 @@ Use null for fields that are not present.`
            the Describe step's prompt box, and continuing existing work is the
            list beside it. Two toolbar buttons doing what step 1 already does
            made the wizard look like a veneer over the old screen. -->
+      <button class="btn" type="button" on:click={openLibrary}
+              data-tooltip="Open another agent, workflow or draft">
+        Open workflows{#if libCount}<span class="toolbar-count">{libCount}</span>{/if}
+      </button>
       <button class="btn" type="button" on:click={openRules} data-tooltip="Edit the SOUL.yaml authoring rules used when generating, validating, and fixing">📋 Rules</button>
       <button class="btn" type="button" on:click={openModelPicker} data-tooltip="Choose which in-framework provider/model Studio uses to BUILD agents">⚙ Builds with: {studioModelLabel}</button>
       {#if workflow}
@@ -4860,16 +4864,11 @@ Use null for fields that are not present.`
       {#if step === STEP_SAVE && saveBlocked}
         <span class="steprail-block" title={saveBlocked}>⚠ {saveBlocked}</span>
       {/if}
-      <!-- Reachable from EVERY step, not just Describe. Once you are in Build or
-           Test there was no way back to your other agents without abandoning the
-           draft to step 1. Lives on the rail rather than the toolbar so it is one
-           control in one place instead of the two that were removed. -->
-      <button class="btn btn-sm" type="button" on:click={openLibrary}
-        data-tooltip="Open another agent, workflow or draft">
-        Open… {#if libCount}<span class="steprail-count">{libCount}</span>{/if}
-      </button>
-      <button class="btn btn-sm" type="button" on:click={openModelPicker}
-        data-tooltip="Which model Studio uses to generate">Model: {studioModelLabel}</button>
+      <!-- "Open…" and "Model:" used to sit here. Both moved out: opening other
+           work is a toolbar action like every other navigation control, and the
+           model button duplicated the toolbar's "Builds with:" chip, which says
+           the same thing with the provider spelled out. Two controls for one
+           setting invites the reader to wonder which one is authoritative. -->
     </div>
   </div>
 
@@ -7931,16 +7930,29 @@ Use null for fields that are not present.`
      the action row won the space and squeezed the name into a three-line
      column. Wider modal, and the row wraps under the item rather than
      compressing it. */
-  .library-modal { width: min(860px, 94vw); }
+  /* `.modal` sets width: min(460px, 92vw) and is declared LATER in this file.
+     This was `.library-modal` — one class, same specificity, so the later rule
+     won and the wider modal never happened. The two overrides that do work
+     (.modal.model-modal, .modal.yaml-browser) both qualify with .modal; this
+     one did not, and nothing failed loudly — it just silently stayed narrow.
+
+     At 460px the six action buttons took the row, .picker-main collapsed to
+     almost nothing, and `overflow-wrap: anywhere` below then broke the name at
+     EVERY character: "Stock Advisor" rendered as a vertical column of single
+     letters. */
+  .modal.library-modal { width: min(860px, 94vw); }
   .lib-item { display: flex; align-items: center; flex-wrap: wrap; }
-  .lib-item .picker-main { flex: 1 1 320px; min-width: 0; }
+  /* A real floor, not min-width: 0. Zero lets flex crush this to nothing, and a
+     name column narrower than one character is what produced the vertical text.
+     Below the floor the actions wrap underneath instead. */
+  .lib-item .picker-main { flex: 1 1 320px; min-width: 200px; }
   .lib-actions {
     display: flex; gap: 6px; padding: 0 10px 10px; flex: 1 1 auto;
     flex-wrap: wrap; justify-content: flex-end;
   }
   /* Names and descriptions get the room back; long ones ellipsise instead of
      stacking one word per line. */
-  .lib-item .picker-name, .lib-item .picker-desc { overflow-wrap: anywhere; }
+  .lib-item .picker-name, .lib-item .picker-desc { overflow-wrap: break-word; }
   @media (min-width: 720px) {
     /* Wide enough for one row: actions sit beside the item again. */
     .lib-item { flex-wrap: nowrap; }
@@ -8307,7 +8319,10 @@ Use null for fields that are not present.`
   .build-diagnosis .bd-action:disabled { opacity: 0.5; cursor: not-allowed; }
 
   /* "Built as an agent, not a workflow" explainer modal */
-  .agent-route-modal { max-width: 560px; }
+  /* Was `max-width: 560px` on a box `.modal` had already fixed at 460px, so
+     it did nothing at all. Same intent as the library modal — be wider than
+     the default — and the same reason it never happened. */
+  .modal.agent-route-modal { width: min(560px, 94vw); }
   .agent-route-reason {
     margin: 12px 0; padding: 10px 12px;
     background: rgba(124, 132, 255, 0.10);
@@ -9816,4 +9831,13 @@ Use null for fields that are not present.`
   .security-apply { align-self: flex-start; margin-top: .3rem; }
   .security-actions { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .3rem; }
   .security-actions .security-apply { margin-top: 0; }
+  .toolbar-count {
+    margin-left: 6px;
+    font-size: 11px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+  }
 </style>
