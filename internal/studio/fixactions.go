@@ -59,6 +59,7 @@ const (
 	FixInternalChannelsOnly = "restrict_to_internal_channels"
 	FixIntentGateDeny       = "set_intent_gate_deny"
 	FixWriteHelperPrompt    = "write_helper_prompt"
+	FixSetJoinNode          = "set_join_node"
 )
 
 // FixAction is one entry in the vocabulary.
@@ -86,6 +87,7 @@ var fixActions = []FixAction{
 	{FixInternalChannelsOnly, "Use internal channels only", FixKindApply},
 	{FixIntentGateDeny, "Set the intent gate to deny", FixKindApply},
 	{FixWriteHelperPrompt, "Write a starter prompt", FixKindApply},
+	{FixSetJoinNode, "Set the join step", FixKindApply},
 }
 
 // FixActions returns the vocabulary. Copied so callers cannot mutate it.

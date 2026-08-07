@@ -153,8 +153,41 @@ func TestContract_BlocksAConvergingFanOutWithNoBarrier(t *testing.T) {
 	if c.NodeID != "fan_out_specialists" {
 		t.Errorf("the blocker should point at the fan-out, got node %q", c.NodeID)
 	}
-	if c.Action == "" || c.ActionLabel == "" {
-		t.Errorf("blocker has no way to act on it: action=%q label=%q", c.Action, c.ActionLabel)
+	// Studio computed where the branches meet, so the button should APPLY that
+	// rather than send the user to the canvas to work it out again.
+	if c.Action != FixSetJoinNode {
+		t.Errorf("an inferable barrier should be offered as a one-click fix, got action %q", c.Action)
+	}
+	if c.ActionParams["join"] != "editor" || c.ActionParams["node"] != "fan_out_specialists" {
+		t.Errorf("the fix carries the wrong target: %v", c.ActionParams)
+	}
+	if c.ActionLabel == "" {
+		t.Error("the button would render with no text on it")
+	}
+}
+
+// When the barrier cannot be worked out, the button must fall back to showing
+// the step rather than offering to apply a value Studio does not have.
+func TestContract_FallsBackToShowingTheStepWhenAmbiguous(t *testing.T) {
+	d := Draft{Name: "Ambiguous", Trigger: Trigger{Type: "cron"}, Flow: Flow{
+		Entry: "fan",
+		Nodes: []sdkr.FlowNode{
+			{ID: "fan", Kind: sdkr.FlowNodeParallel, Join: "all"},
+			{ID: "a", Kind: "llm"}, {ID: "b", Kind: "llm"},
+			{ID: "x", Kind: "llm"}, {ID: "y", Kind: "llm"},
+		},
+		Edges: []sdkr.FlowEdge{
+			{From: "fan", To: "a"}, {From: "fan", To: "b"},
+			{From: "a", To: "x"}, {From: "a", To: "y"},
+			{From: "b", To: "x"}, {From: "b", To: "y"},
+		},
+	}}
+	c, ok := checkFor(AssessContract(d, Catalog{}, PreflightInput{}), "graph.joinbarrier")
+	if !ok || c.Status != "block" {
+		t.Fatal("an ambiguous converging fan-out should still block")
+	}
+	if c.Action == FixSetJoinNode {
+		t.Error("offered to apply a barrier Studio could not work out")
 	}
 }
 

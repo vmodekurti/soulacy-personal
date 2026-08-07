@@ -918,6 +918,20 @@ func assessJoinBarrier(draft Draft, addFix contractAddFix, pass func(id, title, 
 			continue
 		}
 		unnamed++
+		// When the branches converge on one node the answer is computable, so
+		// offer to apply it rather than describing the edit. This is the case
+		// that matters most in practice: an already-SAVED workflow is not put
+		// through RepairWiring on load, so a graph generated before this check
+		// existed arrives here with a blocker Studio can resolve itself.
+		if join := ConvergenceOf(draft.Flow, n); join != "" {
+			addFix("graph.joinbarrier", "Parallel join", "block", n.ID,
+				"The \""+n.ID+"\" step runs branches that come back together at \""+join+"\", but it does not say so.",
+				"Each branch will otherwise run everything after it on its own, so \""+join+"\" runs once per branch and "+
+					"each copy only sees its own branch's results — the run fails on the first missing value. "+
+					"Studio can set the join step for you.",
+				FixSetJoinNode, "", map[string]string{"node": n.ID, "join": join})
+			continue
+		}
 		addFix("graph.joinbarrier", "Parallel join", "block", n.ID,
 			"The \""+n.ID+"\" step runs branches that come back together, but it does not say where they rejoin.",
 			"Each branch will run everything after it on its own, so the step they share runs once per branch and "+
