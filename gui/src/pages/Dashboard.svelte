@@ -3,6 +3,7 @@
   import { onMount, onDestroy } from 'svelte'
   import { connected } from '../lib/stores.js'
   import { api, createEventSocket } from '../lib/api.js'
+  import { waitForGateway, waitingMessage, timeoutMessage, UPGRADE_BUDGET } from '../lib/gatewaywait.js'
 
   let status  = null
   let agents  = []
@@ -29,6 +30,7 @@
   let updateInfo = null
   let upgrading = false
   let upgradeMessage = ''
+  let upgradeError = ''
 
   const EVENT_FILTERS = [
     { id: 'all', label: 'All' },
@@ -90,16 +92,25 @@
       return
     }
     upgrading = true
+    upgradeError = ''
     upgradeMessage = 'Downloading and installing the update...'
     try {
       const res = await api.updates.upgrade()
-      upgradeMessage = res.message || 'Upgrade complete. Waiting for server to restart...'
-      setTimeout(() => {
-        window.location.reload()
-      }, 5000)
+      upgradeMessage = res.message || 'Upgrade installed. Waiting for the gateway to restart...'
+      // Do NOT reload on a timer. The old process exits 250ms after this reply
+      // and the replacement still has to boot and bind the port; a fixed 5s
+      // wait reloaded into a dead port and showed "Failed to fetch" directly
+      // under a message saying the upgrade had succeeded.
+      const outcome = await waitForGateway(api.health, {
+        ...UPGRADE_BUDGET,
+        onAttempt: (n, total) => { upgradeMessage = waitingMessage(n, total) },
+      })
+      if (outcome.ok) { window.location.reload(); return }
+      upgrading = false
+      upgradeError = timeoutMessage('upgrade', outcome.waitedMs)
     } catch (e) {
       upgrading = false
-      alert('Upgrade failed: ' + (e.message || e))
+      upgradeError = 'Upgrade failed: ' + (e.message || e)
     }
   }
 
@@ -314,6 +325,13 @@
       <div class="upgrading-spinner"></div>
       <div class="upgrading-text">Upgrading Soulacy...</div>
       <div class="upgrading-subtext">{upgradeMessage}</div>
+    </div>
+  {/if}
+
+  {#if upgradeError}
+    <div class="banner err upgrade-err">
+      <span>{upgradeError}</span>
+      <button class="linkish" on:click={() => window.location.reload()}>Reload</button>
     </div>
   {/if}
 
@@ -1002,5 +1020,20 @@
     .slo-strip { flex-direction: column; align-items: flex-start; }
     .release-cmds { align-items: flex-start; min-width: 0; width: 100%; }
     .action-row { grid-template-columns: 1fr; gap: .25rem; }
+  }
+  .upgrade-err {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .upgrade-err .linkish {
+    background: none;
+    border: none;
+    color: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+    font: inherit;
+    padding: 0;
   }
 </style>

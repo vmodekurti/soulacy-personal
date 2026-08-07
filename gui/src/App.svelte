@@ -5,6 +5,7 @@
   import { pageTitle } from './lib/pagetitle.js'
   import { api } from './lib/api.js'
   import { pluginNavEntries, isPluginPage, pluginIdFromPage } from './lib/pluginui.js'
+  import { waitForGateway, waitingMessage, timeoutMessage, RESTART_BUDGET } from './lib/gatewaywait.js'
   import { looksLikeStaleAssetError, recoverFromStaleAssets } from './lib/stalerecovery.js'
   import { navPages, navGroups, navAnchor } from './lib/nav.js'
   import Walkthrough from './lib/walkthrough/Walkthrough.svelte'
@@ -35,6 +36,7 @@
   let showRestartModal = false
   let restarting = false
   let restartError = ''
+  let restartMessage = ''
 
   const pages = navPages
 
@@ -131,16 +133,18 @@
   // Poll /health until the re-exec'd gateway answers, then hard-reload the
   // SPA so every store/stream reconnects to the fresh process.
   async function waitForGatewayBack() {
-    for (let i = 0; i < 60; i++) {
-      await new Promise((r) => setTimeout(r, 1000))
-      try {
-        await api.health()
-        location.reload()
-        return
-      } catch (_) { /* not back yet — keep polling */ }
-    }
+    // Shared with the two upgrade buttons. This loop was the correct one all
+    // along; the upgrade paths each had their own five-second guess instead,
+    // which is how "upgrade successful" ended up sitting above "Failed to
+    // fetch". One implementation now, so there is nothing left to drift.
+    const outcome = await waitForGateway(api.health, {
+      ...RESTART_BUDGET,
+      onAttempt: (n, total) => { restartMessage = waitingMessage(n, total) },
+    })
+    if (outcome.ok) { location.reload(); return }
     restarting = false
-    restartError = 'The gateway did not come back within 60s — check the server logs.'
+    restartMessage = ''
+    restartError = timeoutMessage('restart', outcome.waitedMs)
   }
 
   onMount(() => {
@@ -346,7 +350,7 @@
     <div class="restart-card">
       <span class="restart-spinner" aria-hidden="true">⟳</span>
       <p>Restarting gateway…</p>
-      <small>Reconnecting as soon as the new process answers.</small>
+      <small>{restartMessage || 'Reconnecting as soon as the new process answers.'}</small>
     </div>
   </div>
 {/if}

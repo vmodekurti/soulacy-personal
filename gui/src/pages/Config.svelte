@@ -3,6 +3,7 @@
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
   import { rowsFromSettings, settingsPatchFromRows } from '../lib/pluginsettings.js'
+  import { waitForGateway, waitingMessage, timeoutMessage, UPGRADE_BUDGET } from '../lib/gatewaywait.js'
 
   let config   = null
   let loading  = true
@@ -19,6 +20,7 @@
   let updateInfo = null
   let upgrading = false
   let upgradeMessage = ''
+  let upgradeError = ''
 
 
   // Editable fields
@@ -321,16 +323,25 @@
       return
     }
     upgrading = true
+    upgradeError = ''
     upgradeMessage = 'Downloading and installing the update...'
     try {
       const res = await api.updates.upgrade()
-      upgradeMessage = res.message || 'Upgrade complete. Waiting for server to restart...'
-      setTimeout(() => {
-        window.location.reload()
-      }, 5000)
+      upgradeMessage = res.message || 'Upgrade installed. Waiting for the gateway to restart...'
+      // Do NOT reload on a timer. The old process exits 250ms after this reply
+      // and the replacement still has to boot and bind the port; a fixed 5s
+      // wait reloaded into a dead port and showed "Failed to fetch" directly
+      // under a message saying the upgrade had succeeded.
+      const outcome = await waitForGateway(api.health, {
+        ...UPGRADE_BUDGET,
+        onAttempt: (n, total) => { upgradeMessage = waitingMessage(n, total) },
+      })
+      if (outcome.ok) { window.location.reload(); return }
+      upgrading = false
+      upgradeError = timeoutMessage('upgrade', outcome.waitedMs)
     } catch (e) {
       upgrading = false
-      alert('Upgrade failed: ' + (e.message || e))
+      upgradeError = 'Upgrade failed: ' + (e.message || e)
     }
   }
 
@@ -504,6 +515,13 @@
       <div class="upgrading-spinner"></div>
       <div class="upgrading-text">Upgrading Soulacy...</div>
       <div class="upgrading-subtext">{upgradeMessage}</div>
+    </div>
+  {/if}
+
+  {#if upgradeError}
+    <div class="banner err upgrade-err">
+      <span>{upgradeError}</span>
+      <button class="linkish" on:click={() => window.location.reload()}>Reload</button>
     </div>
   {/if}
 
@@ -1370,5 +1388,20 @@
   .upgrading-subtext {
     font-size: 13px;
     color: #8a91b8;
+  }
+  .upgrade-err {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .upgrade-err .linkish {
+    background: none;
+    border: none;
+    color: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+    font: inherit;
+    padding: 0;
   }
 </style>
