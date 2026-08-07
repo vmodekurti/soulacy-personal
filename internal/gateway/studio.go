@@ -2845,18 +2845,33 @@ func (s *Server) studioDesignGraph(
 					//
 					// One function, both callers, so the next change cannot land in
 					// only one of them.
-					if detOK {
-						detC := studio.AssessContract(detRes.Workflow, cat, in)
-						if _, note := studio.KeepModelGraph(
-							studio.CoverageShortfall(intent, cat, res),
-							studio.CoverageShortfall(intent, cat, detRes),
-							contract.Blockers, detC.Blockers,
-						); note != "" {
-							res.Notes = append(res.Notes,
-								"This graph still has unresolved blockers, kept because "+note+
-									". Fix the blockers rather than regenerating.")
-							return res, true, nil
-						}
+					if !detOK {
+						// Nothing to fall back to. Discarding here dropped the
+						// model's graph on the floor and returned "describe the
+						// source, transform, and delivery steps more explicitly" —
+						// which is both untrue (a graph was built) and unactionable
+						// (it names nothing to change). A graph carrying blockers
+						// the UI already lists, next to a Save button those blockers
+						// already gate, is strictly more use than no graph.
+						//
+						// This is KeepModelGraph's own rule at its limit: do not
+						// throw the model's work away for an alternative that is not
+						// better. No alternative at all cannot be better.
+						res.Notes = append(res.Notes,
+							"This graph has unresolved blockers and there is no curated alternative for this shape, "+
+								"so it is shown as built. Fix the blockers listed below rather than regenerating.")
+						return res, true, nil
+					}
+					detC := studio.AssessContract(detRes.Workflow, cat, in)
+					if _, note := studio.KeepModelGraph(
+						studio.CoverageShortfall(intent, cat, res),
+						studio.CoverageShortfall(intent, cat, detRes),
+						contract.Blockers, detC.Blockers,
+					); note != "" {
+						res.Notes = append(res.Notes,
+							"This graph still has unresolved blockers, kept because "+note+
+								". Fix the blockers rather than regenerating.")
+						return res, true, nil
 					}
 				} else {
 					return res, true, nil
@@ -2871,6 +2886,26 @@ func (s *Server) studioDesignGraph(
 		return detRes, false, nil
 	}
 	if advice.Mode == "workflow" {
+		// Last resort. The curated templates declined because they cannot build
+		// the shape this intent describes, and the builder model has produced
+		// nothing at all — so the choice is no longer "right graph or wrong
+		// graph", it is "wrong graph or no graph".
+		//
+		// A straight-line template the user can open, read and rewire on the
+		// canvas beats an error telling them to describe it more explicitly,
+		// which names nothing to change and is untrue besides — the request was
+		// perfectly explicit, it just asked for a shape no template has.
+		//
+		// What made the original failure bad was not the graph, it was the
+		// silence: pattern_matched, confidence "high", next_action "save". So
+		// this says out loud what it is and what it is missing.
+		if fallback, ok := studio.CompileDeterministicWorkflowIgnoringShape(intent, cat, answers); ok {
+			fallback.Notes = append(fallback.Notes,
+				"The builder model did not return a usable graph, so this is Soulacy's curated template "+
+					"for this kind of job. It runs its steps one after another and does NOT contain the "+
+					"parallel specialists you described — wire them in on the canvas, or press Generate again.")
+			return fallback, false, nil
+		}
 		return studio.Result{}, false, fmt.Errorf("could not build this workflow; describe the source, transform, and delivery steps more explicitly")
 	}
 	return studio.Result{}, false, fmt.Errorf("could not build this agent; add at least one tool or choose a fixed workflow")
