@@ -180,6 +180,13 @@ func CompileFlow(spec sdkr.FlowSpec) (*FlowGraph, error) {
 		return nil, err
 	}
 
+	// Branch scoping (see branchscope.go). Runs after the fan-out shape checks,
+	// so an unreachable barrier is reported as such rather than as a variable
+	// that "the branch cannot see".
+	if err := validateBranchScope(spec, nodes, out); err != nil {
+		return nil, err
+	}
+
 	entry := spec.Entry
 	if entry == "" {
 		entry = spec.Nodes[0].ID

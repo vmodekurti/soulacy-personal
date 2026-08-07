@@ -5,14 +5,9 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/soulacy/soulacy/internal/reasoning"
 	sdkr "github.com/soulacy/soulacy/sdk/reasoning"
 )
-
-// tmplVarRe matches a flow-variable reference inside a Go-template expression:
-// the identifier immediately after a dot, e.g. `.articles` in
-// `{{ toJson .articles }}` or `{{ .notebook_id }}`. It deliberately ignores
-// method-style chains (only the leading identifier matters for our purpose).
-var tmplVarRe = regexp.MustCompile(`(?:{{|\s)\.([A-Za-z_][A-Za-z0-9_]*)`)
 
 // flowVarNameRe is the identifier grammar a node output variable must satisfy
 // to be referenceable from Go templates and Python inputs by name.
@@ -230,25 +225,13 @@ func isInboundAliasProbe(n sdkr.FlowNode, entry string, ref pythonInputRef) bool
 
 // referencedVars extracts the distinct flow-var identifiers referenced in a
 // node's input template. Returns nil for non-template inputs.
-func referencedVars(input string) []string {
-	if !strings.Contains(input, "{{") {
-		return nil
-	}
-	seen := map[string]bool{}
-	var out []string
-	for _, m := range tmplVarRe.FindAllStringSubmatch(input, -1) {
-		v := m[1]
-		// Skip template builtins that can follow a dot in rare cases; the common
-		// ones (toJson, len, gt) appear WITHOUT a leading dot, so this is mostly
-		// a guard against noise.
-		if seen[v] {
-			continue
-		}
-		seen[v] = true
-		out = append(out, v)
-	}
-	return out
-}
+//
+// Delegates to the engine's grammar rather than keeping a second copy of it.
+// Studio's data-flow check and the engine's branch-scope check must agree on
+// what a template reads, or one of them polices a dependency the other cannot
+// see — and a rule that disagrees with the thing it is guarding is worse than
+// no rule, because it reads as coverage.
+func referencedVars(input string) []string { return reasoning.TemplateVars(input) }
 
 func pythonInputRefs(code string) []pythonInputRef {
 	if !strings.Contains(code, "inputs") {
