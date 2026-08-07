@@ -28,6 +28,7 @@ export const FOCUS_ACTIONS = [
   'open_studio',
   'open_preflight',
   'reveal_node',
+  'rename_agent',
 ]
 
 // Channels that reach people outside the install — the exact set in

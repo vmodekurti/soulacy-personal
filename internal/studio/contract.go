@@ -95,7 +95,14 @@ func AssessContract(draft Draft, cat Catalog, in PreflightInput, options ...Cont
 	addFix := func(id, title, status, node, msg, fix, action, label string, params map[string]string) {
 		res.Checks = append(res.Checks, ContractCheck{
 			ID: id, Title: title, Status: status, NodeID: node, Message: msg, Fix: fix,
-			Action: action, ActionLabel: label, ActionParams: params,
+			// Resolve through the shared vocabulary rather than storing whatever
+			// was passed. A caller that has no special wording for its button
+			// should get the vocabulary's default, not an empty string — which
+			// renders as a button with nothing written on it. readiness.go's
+			// finishItem already worked this way; this was the one path that did
+			// not, so a check gained a silent blank button simply by not
+			// repeating a label the vocabulary already knows.
+			Action: action, ActionLabel: resolveFixLabel(action, label), ActionParams: params,
 		})
 		switch status {
 		case "block":
@@ -140,6 +147,7 @@ func AssessContract(draft Draft, cat Catalog, in PreflightInput, options ...Cont
 		add("runtime."+nonEmpty(w.Kind, "warning"), "Runtime warning", "warn", w.NodeID, w.Message, w.Fix)
 	}
 
+	assessNameCollision(draft, cat, addFix, pass)
 	assessInboundInputUse(draft, add, pass)
 	assessAuthoringRules(draft, opts, add, addFix, pass)
 	res.OK = res.Blockers == 0
@@ -786,3 +794,50 @@ func parseContractDuration(s string) time.Duration {
 }
 
 // dedupeStrings is defined in buildloop.go and shared across the studio pkg.
+
+// assessNameCollision catches a NEW draft whose name would take over an agent
+// that already exists.
+//
+// ToAgentDefinition derives the id from Draft.ID when a saved agent was opened
+// for editing, and from slug(Draft.Name) otherwise. The save path then does:
+//
+//	if existing := s.loader.Get(def.ID); existing != nil { … update in place }
+//
+// which is exactly right for a re-save and silent data loss for a new draft
+// that happens to slug onto someone else's id. Nothing warned about it.
+//
+// Seen live: describing a scheduled stock briefing produced a draft the builder
+// named "Stock Advisor" — the name of an agent already deployed on that
+// install. Saving would have written over a working agent, with no prompt, no
+// diff, and no mention on the Save step, which listed only tool-argument
+// blockers.
+//
+// The empty Draft.ID is the whole signal, so this fires only for drafts that
+// have never been saved. Re-saving an agent you opened is not a collision, and
+// must not be reported as one.
+//
+// slug() here is the same function ToAgentDefinition uses — deliberately, not
+// a second copy of the rule. A check that derived the id even slightly
+// differently from the save path would fire on names that are fine and stay
+// quiet on the ones that are not.
+func assessNameCollision(draft Draft, cat Catalog, addFix func(id, title, status, node, msg, fix, action, label string, params map[string]string), pass func(id, title, msg string)) {
+	if strings.TrimSpace(draft.ID) != "" {
+		return // an existing agent opened for editing — saving over it is the point
+	}
+	id := slug(draft.Name)
+	if id == "" {
+		return // the empty-name case is ToAgentDefinition's error to raise
+	}
+	for _, existing := range cat.Agents {
+		if !strings.EqualFold(strings.TrimSpace(existing), id) {
+			continue
+		}
+		addFix("identity.collision", "Name collision", "block", "",
+			"An agent called \""+draft.Name+"\" already exists, and saving this would replace it rather than add a new one.",
+			"Give this workflow a different name in the Save step — the existing \""+id+"\" agent keeps running untouched. "+
+				"If you did mean to change that agent, open it from Deployed and edit it there instead, so you can see what you are changing.",
+			FixRenameAgent, "", map[string]string{"id": id, "name": draft.Name})
+		return
+	}
+	pass("identity.collision", "Name collision", "This name does not belong to an agent you already have.")
+}

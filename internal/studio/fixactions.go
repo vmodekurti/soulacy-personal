@@ -53,6 +53,7 @@ const (
 	FixOpenStudio    = "open_studio"
 	FixOpenPreflight = "open_preflight"
 	FixRevealNode    = "reveal_node"
+	FixRenameAgent   = "rename_agent"
 
 	// Draft edits Studio performs itself.
 	FixInternalChannelsOnly = "restrict_to_internal_channels"
@@ -80,6 +81,7 @@ var fixActions = []FixAction{
 	{FixOpenStudio, "Open the editor", FixKindFocus},
 	{FixOpenPreflight, "Open the editor", FixKindFocus},
 	{FixRevealNode, "Show the step", FixKindFocus},
+	{FixRenameAgent, "Rename this agent", FixKindFocus},
 
 	{FixInternalChannelsOnly, "Use internal channels only", FixKindApply},
 	{FixIntentGateDeny, "Set the intent gate to deny", FixKindApply},

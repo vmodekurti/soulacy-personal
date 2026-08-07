@@ -408,15 +408,34 @@ func RunGeneratePipeline(ctx context.Context, llm LLM, intent string, catalog Ca
 			modelShort := CoverageShortfall(coverageIntent, catalog, compileRes)
 			if detRes, detOK := deterministic(); detOK {
 				detShort := CoverageShortfall(coverageIntent, catalog, detRes)
-				if detShort != "" && modelShort == "" {
+
+				// Does the fallback actually make this MORE ready to save?
+				//
+				// Coverage was the only question asked here, and it is not the only
+				// way the swap can be a downgrade. Observed live: a prompt naming
+				// three parallel analysts and an editor produced a model graph with
+				// one blocker, which was discarded for a deterministic skeleton
+				// carrying TWO blockers and two warnings of its own — a two-node
+				// "search then summarize" that had also dropped every agent the user
+				// asked for. We traded a rich graph with one fixable defect for a
+				// bare one with more, and told the user it was a fallback.
+				//
+				// The whole justification for falling back is that the replacement
+				// is sounder. When it is not, there is nothing to trade for: keep
+				// the graph that at least matches what was asked.
+				modelC := AssessContract(compileRes.Workflow, catalog, opts.In)
+				detC := AssessContract(detRes.Workflow, catalog, opts.In)
+
+				keepReason, noteReason := keepModelGraph(modelShort, detShort, modelC.Blockers, detC.Blockers)
+
+				if keepReason != "" {
 					emit(PipelineEvent{
 						Phase: PhaseBuildGraph, Status: StatusSkip, Source: SourceLLM,
-						Message: "Keeping the model's graph despite its blockers: " + detShort +
-							", so falling back would lose a capability you asked for.",
+						Message: "Keeping the model's graph despite its blockers: " + keepReason + ".",
 					})
 					compileRes.Notes = append(compileRes.Notes,
-						"This graph still has unresolved blockers, kept because the deterministic "+
-							"alternative "+detShort+". Fix the blockers rather than regenerating.")
+						"This graph still has unresolved blockers, kept because "+
+							noteReason+". Fix the blockers rather than regenerating.")
 					ok = true
 				} else {
 					emit(PipelineEvent{
@@ -597,4 +616,43 @@ func countIssues(pf PreflightResult, c ContractResult) int {
 		n += len(pf.Blockers)
 	}
 	return n
+}
+
+// keepModelGraph decides whether to keep the builder model's graph instead of
+// swapping in the deterministic skeleton, and says why.
+//
+// Returns ("", "") to fall back. The two strings are the progress-event reason
+// and the shorter note pinned to the draft.
+//
+// Two ways the swap can be a downgrade:
+//
+//  1. Coverage. The skeletons are hardcoded to web_search and name no MCP, so
+//     falling back can quietly replace a graph that used the capability the user
+//     asked for with one that does not. Blockers are on screen with a Fix
+//     button; "it used web_search instead of your travel MCP" is invisible until
+//     someone reads the nodes.
+//
+//  2. Contract health. This one was not checked at all, and it is the one that
+//     bit. Observed live: a prompt naming three parallel analysts and an editor
+//     produced a model graph carrying ONE blocker. It was discarded for a
+//     deterministic skeleton carrying TWO blockers and two warnings — a two-node
+//     "search then summarize" that had also dropped every agent in the request.
+//     The entire justification for falling back is that the replacement is
+//     sounder; when it is not, there is nothing being traded for, and the graph
+//     that at least matches the request should survive.
+//
+// Ties keep the model's graph deliberately. Equal blockers means the fallback
+// buys nothing, and the model's graph is the one shaped like what was asked.
+func keepModelGraph(modelShortfall, detShortfall string, modelBlockers, detBlockers int) (reason, note string) {
+	if detShortfall != "" && modelShortfall == "" {
+		return detShortfall + ", so falling back would lose a capability you asked for",
+			"the deterministic alternative " + detShortfall
+	}
+	if detBlockers >= modelBlockers {
+		return fmt.Sprintf(
+				"the deterministic alternative has %d blocker(s) of its own against this graph's %d, so falling back would not make it any readier to save",
+				detBlockers, modelBlockers),
+			fmt.Sprintf("the deterministic alternative carries %d blocker(s) of its own", detBlockers)
+	}
+	return "", ""
 }

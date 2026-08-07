@@ -2923,6 +2923,18 @@ Use null for fields that are not present.`
             closePreflight()
             openAgentModelPicker()
             return
+          case 'rename_agent':
+            // The collision is fixed by typing a different name, so put the
+            // user in front of that field with it selected. Sending them to the
+            // canvas — the default below — would land them nowhere near it.
+            closePreflight()
+            viewMode = 'canvas'
+            goStep(STEP_SAVE)
+            setTimeout(() => {
+              const el = document.querySelector('[data-agent-name-field]')
+              if (el) { el.focus(); el.select() }
+            }, 0)
+            return
           case 'add_assertions':
           case 'run_live':
             // Both are fixed at the bench: add an assertion, or exercise it live.
@@ -5022,7 +5034,8 @@ Use null for fields that are not present.`
               <h4 class="step-h">Agent details</h4>
               <label class="save-field">
                 <span>Agent name</span>
-                <input type="text" bind:value={workflow.name} placeholder="Name this agent" />
+                <input type="text" bind:value={workflow.name} placeholder="Name this agent"
+                       data-agent-name-field />
               </label>
 
               <div class="save-note">
