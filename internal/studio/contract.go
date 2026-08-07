@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/soulacy/soulacy/pkg/agent"
+	sdkr "github.com/soulacy/soulacy/sdk/reasoning"
 )
 
 // ContractOption tunes AssessContract without breaking backward callers. Story
@@ -147,6 +148,7 @@ func AssessContract(draft Draft, cat Catalog, in PreflightInput, options ...Cont
 		add("runtime."+nonEmpty(w.Kind, "warning"), "Runtime warning", "warn", w.NodeID, w.Message, w.Fix)
 	}
 
+	assessJoinBarrier(draft, addFix, pass)
 	assessStructureShortfall(draft, cat, addFix)
 	assessNameCollision(draft, cat, addFix, pass)
 	assessInboundInputUse(draft, add, pass)
@@ -876,4 +878,70 @@ func assessStructureShortfall(draft Draft, cat Catalog, addFix contractAddFix) {
 		"Regenerate to try again — the builder model is inconsistent on this and a second attempt usually "+
 			"builds the separate steps. If one step really is what you want, this warning is safe to ignore.",
 		FixOpenStudio, "Regenerate", nil)
+}
+
+// assessJoinBarrier catches a fan-out whose branches reconverge without naming
+// where.
+//
+// Each branch walks until it reaches the node named in `join_node`. With that
+// field empty the branches walk to the END of the graph instead, so a node they
+// share runs once per branch, and each copy sees only its own branch's
+// variables. The graph looks right on the canvas and dies on the first run.
+//
+// A BLOCKER, not a warning: this workflow cannot complete. Every other check
+// passed the one that surfaced this — VALID, 0 blockers, 0 warnings — and it
+// failed the moment it was dry-run.
+//
+// RepairWiring infers the barrier whenever the branches converge on one place,
+// so by the time a draft reaches here the only cases left are the ones that
+// cannot be inferred: branches meeting at several nodes with none of them
+// clearly first. Those need a person, because guessing runs the wrong node once
+// instead of the right node three times.
+func assessJoinBarrier(draft Draft, addFix contractAddFix, pass func(id, title, msg string)) {
+	if draft.IsAgent() || len(draft.Flow.Nodes) == 0 {
+		return
+	}
+	fanOuts, unnamed := 0, 0
+	for _, n := range draft.Flow.Nodes {
+		if n.Kind != sdkr.FlowNodeParallel {
+			continue
+		}
+		fanOuts++
+		if strings.TrimSpace(n.JoinNode) != "" {
+			continue
+		}
+		// Branches that genuinely end separately need no barrier.
+		if len(branchStarts(draft.Flow, n.ID)) < 2 {
+			continue
+		}
+		if !branchesShareANode(draft.Flow, n) {
+			continue
+		}
+		unnamed++
+		addFix("graph.joinbarrier", "Parallel join", "block", n.ID,
+			"The \""+n.ID+"\" step runs branches that come back together, but it does not say where they rejoin.",
+			"Each branch will run everything after it on its own, so the step they share runs once per branch and "+
+				"each copy only sees its own branch's results — the run fails on the first missing value. Open the "+
+				"step on the canvas and set its join step to the node the branches meet at.",
+			FixRevealNode, "", nil)
+	}
+	if fanOuts > 0 && unnamed == 0 {
+		pass("graph.joinbarrier", "Parallel join", "Every parallel step says where its branches rejoin.")
+	}
+}
+
+// branchesShareANode reports whether any two branches of `p` can reach a common
+// node — the signal that they are meant to reconverge.
+func branchesShareANode(flow Flow, p sdkr.FlowNode) bool {
+	starts := branchStarts(flow, p.ID)
+	seen := map[string]int{}
+	for _, s := range starts {
+		for id := range reachableFrom(flow, s, p.ID) {
+			seen[id]++
+			if seen[id] > 1 {
+				return true
+			}
+		}
+	}
+	return false
 }
