@@ -126,6 +126,18 @@ type PipelineOptions struct {
 	// touched the design. It is opt-in rather than the default so that choosing
 	// reproducibility over correctness is a deliberate act.
 	PreferDeterministic bool
+	// ForceWorkflow is the GUI's "Workflow" switch: build a fixed graph, not a
+	// reasoning agent.
+	//
+	// It had no field here at all, so the streamed generate path passed
+	// forceWorkflow=false to the strategy advisor unconditionally and the switch
+	// did nothing. Asked for three reviewers running in parallel with the switch
+	// on, the stream announced "Strategy: plan_execute (reasoning agent)" and
+	// returned a draft with zero nodes, while the synchronous /studio/compile —
+	// the same request, the other button — honoured it. Two entry points, two
+	// different kinds of thing, and no way for the user to tell which they had
+	// pressed.
+	ForceWorkflow bool
 }
 
 // PipelineResult mirrors compile.Result but is enriched with the phase
@@ -209,7 +221,7 @@ func RunGeneratePipeline(ctx context.Context, llm LLM, intent string, catalog Ca
 	// Phase 2 — choose_strategy (deterministic Strategy Advisor over the refined text).
 	emit(PipelineEvent{Phase: PhaseChooseStrategy, Status: StatusStart, Message: "Choosing execution strategy"})
 	combined := strings.TrimSpace(refinement.RefinedIntent + " " + intent)
-	advice := AdviseStrategy(combined, catalog, refinement.RecommendedMode, false)
+	advice := AdviseStrategy(combined, catalog, refinement.RecommendedMode, opts.ForceWorkflow)
 	strategy := advice.RuntimeStrategy
 	res.Strategy = strategy
 	strategyMsg := "workflow (fixed graph)"

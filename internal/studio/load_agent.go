@@ -34,8 +34,13 @@ func FromAgentDefinition(def agent.Definition) Draft {
 		// Preserve the agent's LLM config (provider/model/temperature/...) and the
 		// whole-run timeout so a Studio round-trip is lossless. Applies to BOTH the
 		// ReAct and workflow branches below since they share this construction.
-		LLM:          def.LLM,
-		RunTimeout:   def.RunTimeout,
+		LLM:        def.LLM,
+		RunTimeout: def.RunTimeout,
+		// Read back on BOTH branches. The agent branch already carried MaxTurns;
+		// the workflow branch carried neither it nor Memory, so opening a
+		// workflow and re-saving reset both to Studio's constants.
+		MaxTurns:     def.MaxTurns,
+		Memory:       cloneMemoryPolicy(def.Memory),
 		ConfirmTools: append([]string(nil), def.ConfirmTools...),
 		Security:     cloneSecurityConfig(def.Security),
 	}
@@ -77,7 +82,6 @@ func FromAgentDefinition(def agent.Definition) Draft {
 		d.TotalTimeout = def.Reasoning.TotalTimeout
 		d.MaxSteps = def.Reasoning.MaxSteps
 		d.MaxPlanSteps = def.Reasoning.MaxPlanSteps
-		d.MaxTurns = def.MaxTurns
 		for _, id := range def.Agents {
 			if id = strings.TrimSpace(id); id != "" {
 				d.NewAgents = append(d.NewAgents, NewAgent{ID: id})
@@ -107,6 +111,20 @@ func FromAgentDefinition(def agent.Definition) Draft {
 		}
 	}
 	return d
+}
+
+// cloneMemoryPolicy copies a definition's memory policy for the draft, so the
+// draft never aliases the loader's live definition. A zero policy reads as
+// "nothing was set" and is returned as nil, which is what makes ToAgentDefinition
+// apply Studio's default rather than persisting an all-zero block.
+func cloneMemoryPolicy(m agent.MemoryPolicy) *agent.MemoryPolicy {
+	if m.MaxTokens == 0 && len(m.ReadScopes) == 0 && len(m.WriteScopes) == 0 {
+		return nil
+	}
+	out := m
+	out.ReadScopes = append([]string(nil), m.ReadScopes...)
+	out.WriteScopes = append([]string(nil), m.WriteScopes...)
+	return &out
 }
 
 // agentToolList reassembles the draft's flat tool allowlist (builtin + mcp__

@@ -3419,7 +3419,12 @@ Use null for fields that are not present.`
       const alsoMade = peers.length
         ? ` Also created ${peers.length === 1 ? 'helper agent' : 'helper agents'} ${peers.join(', ')} — this workflow delegates to ${peers.length === 1 ? 'it' : 'them'}.`
         : ''
-      saveMsg = `Saved as disabled agent ${id} — enable it from Deployed.${alsoMade}`
+      // Say which of the two actually happened. A save that leaves a running
+      // agent running must not report it as disabled — that message was the
+      // only notice a user got, and for an edit it was wrong.
+      saveMsg = res.enabled
+        ? `Saved ${id} — it stays enabled and the schedule is updated.${alsoMade}`
+        : `Saved as disabled agent ${id} — enable it from Deployed.${alsoMade}`
       // The justification belongs to the save that consumed it; carrying it into
       // the next one would silently reuse a reason the user never re-affirmed.
       acceptReason = ''
@@ -5038,8 +5043,8 @@ Use null for fields that are not present.`
               </label>
 
               <div class="save-note">
-                <strong>Saved as disabled</strong>
-                <span>New agents are always saved disabled so you review and deploy them explicitly. Deploy from My workflows.</span>
+                <strong>New agents are saved disabled</strong>
+                <span>A new agent is staged so you review and deploy it explicitly — from My workflows. Editing an agent you have already enabled leaves it enabled, so a fix does not silently stop its schedule.</span>
               </div>
 
               {#if (workflow.channels || []).length}

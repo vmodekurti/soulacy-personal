@@ -270,6 +270,15 @@ type Draft struct {
 	MaxSteps     int    `json:"max_steps,omitempty"`
 	MaxPlanSteps int    `json:"max_plan_steps,omitempty"`
 	MaxTurns     int    `json:"max_turns,omitempty"`
+	// Memory is the agent's memory policy (scopes + token budget), carried so a
+	// Studio round-trip does not reset it.
+	//
+	// The budgets above were preserved only for AGENT drafts. A workflow draft
+	// dropped max_turns and memory on open and re-emitted hard-coded defaults on
+	// save, so opening a workflow to fix one node quietly reset a tuned
+	// max_tokens back to 8000 and max_turns back to 15 — with no diff shown and
+	// nothing in the save response to notice. nil means "use Studio's default".
+	Memory *agent.MemoryPolicy `json:"memory,omitempty"`
 	// RunTimeout is the whole-run wall-clock cap (top-level agent field, distinct
 	// from the reasoning step/total budgets). Carried so it survives a Studio
 	// round-trip — without it the code view re-rendered SOUL.yaml without the

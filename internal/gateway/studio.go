@@ -1041,6 +1041,12 @@ type studioGenerateStreamRequest struct {
 	Answers    map[string]string `json:"answers,omitempty"`
 	Light      bool              `json:"light,omitempty"`
 	AutoRepair bool              `json:"auto_repair,omitempty"`
+	// ForceWorkflow is the GUI's "Workflow" switch. The field was absent, so the
+	// switch could not reach this endpoint even in principle: the streamed
+	// generate always chose its own strategy, and a user who turned Workflow on
+	// got a reasoning agent with no graph. /studio/compile has honoured the same
+	// flag all along, which is what made the two buttons disagree.
+	ForceWorkflow bool `json:"force_workflow,omitempty"`
 }
 
 // handleStudioGenerateStream implements POST /api/v1/studio/generate/stream.
@@ -1121,10 +1127,11 @@ func (s *Server) handleStudioGenerateStream(c *fiber.Ctx) error {
 			}
 		}
 		opts := studio.PipelineOptions{
-			Answers:    req.Answers,
-			Light:      req.Light,
-			In:         in,
-			AutoRepair: req.AutoRepair,
+			Answers:       req.Answers,
+			Light:         req.Light,
+			In:            in,
+			AutoRepair:    req.AutoRepair,
+			ForceWorkflow: req.ForceWorkflow,
 			Emit: func(ev studio.PipelineEvent) {
 				b, _ := json.Marshal(ev)
 				emit("event", string(b))
@@ -2796,6 +2803,14 @@ func (s *Server) studioDesignGraph(
 	// model as a worked example so the model designs from a shape known to work.
 	detRes, detOK := deterministic()
 
+	// Why the builder model produced nothing, kept for the fallback note. The
+	// old code discarded lerr, so every model failure — a dead provider, a
+	// context cancellation, unparseable JSON, a refusal — arrived at the user as
+	// the same shrug. Nothing in the response, the notes or the logs said which,
+	// which made the one failure that matters most the only one nobody could
+	// diagnose.
+	modelErr := ""
+
 	if model := s.studioLLM(); model != nil {
 		designCat := cat
 		if detOK && studio.EncodesProcedure(detRes) {
@@ -2809,6 +2824,11 @@ func (s *Server) studioDesignGraph(
 			res, lerr = studio.Compile(c.Context(), model, intent, designCat, answers)
 		} else {
 			res, lerr = studio.CompileAgent(c.Context(), model, intent, designCat, strategy, answers)
+		}
+		if lerr != nil {
+			modelErr = lerr.Error()
+			s.log.Warn("studio: builder model produced no graph",
+				zap.String("mode", advice.Mode), zap.Error(lerr))
 		}
 		if lerr == nil {
 			// Structure retry, shared with the streamed pipeline. A graph that
@@ -2901,14 +2921,30 @@ func (s *Server) studioDesignGraph(
 		// this says out loud what it is and what it is missing.
 		if fallback, ok := studio.CompileDeterministicWorkflowIgnoringShape(intent, cat, answers); ok {
 			fallback.Notes = append(fallback.Notes,
-				"The builder model did not return a usable graph, so this is Soulacy's curated template "+
-					"for this kind of job. It runs its steps one after another and does NOT contain the "+
-					"parallel specialists you described — wire them in on the canvas, or press Generate again.")
+				"The builder model did not return a usable graph"+becauseOf(modelErr)+
+					", so this is Soulacy's curated template for this kind of job. It runs its steps one "+
+					"after another and does NOT contain the parallel specialists you described — wire them "+
+					"in on the canvas, or press Generate again.")
 			return fallback, false, nil
 		}
-		return studio.Result{}, false, fmt.Errorf("could not build this workflow; describe the source, transform, and delivery steps more explicitly")
+		return studio.Result{}, false, fmt.Errorf(
+			"the builder model could not produce a graph for this request%s, and no curated template matches its shape",
+			becauseOf(modelErr))
 	}
-	return studio.Result{}, false, fmt.Errorf("could not build this agent; add at least one tool or choose a fixed workflow")
+	return studio.Result{}, false, fmt.Errorf(
+		"could not build this agent%s; add at least one tool or choose a fixed workflow", becauseOf(modelErr))
+}
+
+// becauseOf renders a model failure as a clause that can be dropped into a
+// sentence, and nothing at all when there was no failure to report. Truncated
+// because a provider error can carry a whole response body, and a note the user
+// cannot read to the end is no better than no note.
+func becauseOf(modelErr string) string {
+	modelErr = strings.TrimSpace(modelErr)
+	if modelErr == "" {
+		return ""
+	}
+	return " (" + truncate(modelErr, 300) + ")"
 }
 
 // finalizeStudioCompileResult attaches the same deterministic contract used by
@@ -3662,8 +3698,24 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 		}
 	}
 
-	// Persist as a DISABLED agent — Studio saves are staged, not live.
-	def.Enabled = false
+	// A NEW agent is staged disabled so an operator reviews it before it runs.
+	// An EDIT of an agent the operator already turned on is not a new agent, and
+	// switching it off is not a review step — it is a live schedule stopping
+	// with no announcement. The Studio panel says as much in its own words:
+	// "New agents are always saved disabled so you review and deploy them
+	// explicitly." The code applied it to every save, so fixing a typo in a
+	// running daily digest silently ended the digest, and the only evidence was
+	// a briefing that stopped arriving.
+	//
+	// Whether a save should re-review a live agent is a real question, but it
+	// cannot be answered by having the code and the copy say different things.
+	// This makes them agree; the privileged-exposure consent gate above still
+	// runs on every save, so an edit cannot quietly widen what the agent reaches.
+	wasEnabled := false
+	if existing := s.loader.Get(def.ID); existing != nil {
+		wasEnabled = existing.Enabled
+	}
+	def.Enabled = wasEnabled
 
 	dir := ""
 	if len(s.cfg.AgentDirs) > 0 {
@@ -3710,7 +3762,10 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"agentId": def.ID,
-		"enabled": false,
+		// Report what was actually written, not what the old rule assumed. The
+		// GUI renders "Saved as disabled agent … — enable it from Deployed" off
+		// this, which was a lie for every edit of a running agent.
+		"enabled": def.Enabled,
 		// The helper agents this save had to create. Surfaced so the UI can say
 		// so out loud instead of silently growing the user's agent list.
 		"peerAgents": createdPeers,
