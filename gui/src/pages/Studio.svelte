@@ -11,6 +11,13 @@
   // sandboxed iframe plugin. The old postMessage RPC bridge is replaced by a
   // thin client that calls the gateway directly through the GUI's
   // authenticated `api` session (studioApi.js keeps the same `bridge` shape).
+  // `api` was USED in this file (three call sites) and never imported, so every
+  // one of them threw ReferenceError. All three sit inside try/catch, so the
+  // failure surfaced as "could not preview the change" — a message about the
+  // change, not about a missing import — and the repair-preview feature was
+  // quietly dead. Svelte compiles an undeclared identifier as a global, so
+  // nothing failed at build time either.
+  import { api } from '../lib/api.js'
   import { bridge } from '../lib/studio/studioApi.js'
   import { editAgent, studioDebugRun, studioSession } from '../lib/stores.js'
   import { toFlow, kindMeta } from '../lib/studio/graph.js'
@@ -3292,7 +3299,6 @@ Use null for fields that are not present.`
   // An apply-repair response for the selected failed run. Null until a repair
   // has been proposed AND judged, so the review UI only appears once there is
   // something real to review.
-  let failedRepair = null
   let loadingFailed = false
   let healing = '' // id currently being healed
   let healResult = null
@@ -3354,6 +3360,29 @@ Use null for fields that are not present.`
     showFailedRuns = !showFailedRuns
     if (showFailedRuns) await loadFailedRuns()
   }
+  // "Retry unchanged" has to run the agent unchanged.
+  //
+  // It was wired to healFailedRun — the same handler as "Propose a repair" —
+  // so the button offered next to a TRANSIENT fault (a timeout, a 503) instead
+  // diagnosed the agent and suggested editing it. Two buttons, two different
+  // promises, one behaviour, and the one that lied was the one whose whole
+  // point is that nothing needs changing.
+  async function retryFailedRun(run) {
+    const agentId = run && (run.agentId || run.agent_id)
+    if (!agentId || healing) return
+    healing = `retry:${agentId}`
+    saveError = ''
+    try {
+      await api.agents.trigger(agentId)
+      toast('Re-running — check Failed runs again in a moment to see whether it passed.')
+    } catch (e) {
+      // A 409 is the ordinary case when a schedule is mid-flight, not a fault.
+      saveError = (e && e.message) || 'could not re-run this agent'
+    } finally {
+      healing = ''
+    }
+  }
+
   async function healFailedRun(id) {
     if (healing) return
     healing = id
@@ -6261,13 +6290,11 @@ Use null for fields that are not present.`
               <FailedRunsPanel
                 runs={failedRuns}
                 diagnosis={runDiagnosis}
-                repair={failedRepair}
                 loading={loadingFailed}
                 busy={!!healing}
                 onSelect={(run) => { if (run && run.id) loadRunTrace(run.id, run.agentId).catch(() => {}) }}
                 onRepair={(run) => { if (run && run.id) healFailedRun(run.id) }}
-                onRetry={(run) => { if (run && run.id) healFailedRun(run.id) }}
-                onReject={() => (failedRepair = null)}
+                onRetry={(run) => retryFailedRun(run)}
                 onReveal={(nodeId) => { goStep(STEP_BUILD); revealNode(nodeId) }}
               />
               <button class="btn small" on:click={loadFailedRuns} disabled={loadingFailed}>Refresh</button>
