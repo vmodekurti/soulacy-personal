@@ -3647,6 +3647,17 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
 
+	// Tell the scheduler what just changed, exactly as the Code view's save does.
+	// Writing enabled: false is not on its own enough — the cron table keeps its
+	// own entry, and until this line existed a save left one pointing at an agent
+	// the operator could see was off. (The engine now also refuses a disabled
+	// agent at fire time; this keeps the table itself honest, and picks up an
+	// edited cron expression rather than leaving the old one to tick.)
+	s.scheduler.DeregisterAgent(def.ID)
+	if err := s.scheduler.RegisterAgent(&def); err != nil {
+		s.log.Warn("scheduler registration failed", zap.String("agent", def.ID), zap.Error(err))
+	}
+
 	// Record the save, and specifically record an ACCEPTED-WARNINGS save with the
 	// operator's stated reason. Without this the audit trail cannot distinguish a
 	// clean save from one that knowingly shipped past a warning, which is exactly
