@@ -266,8 +266,16 @@ func parseAgentSpec(raw string) (agentSpecPayload, error) {
 		return agentSpecPayload{}, fmt.Errorf("studio: no JSON object found in agent spec output")
 	}
 	var p agentSpecPayload
-	if err := json.Unmarshal([]byte(s[start:end+1]), &p); err != nil {
-		return agentSpecPayload{}, fmt.Errorf("studio: parse agent spec: %w", err)
+	body := s[start : end+1]
+	if err := json.Unmarshal([]byte(body), &p); err != nil {
+		// See escapeRawControlChars: an agent spec carries a multi-line system
+		// prompt, so this is the failure this parser hits most. Observed live —
+		// "parse agent spec: invalid character '\n' in string literal" threw away
+		// the whole generated workflow and fell back to a two-node skeleton.
+		if err2 := json.Unmarshal([]byte(escapeRawControlChars(body)), &p); err2 != nil {
+			return agentSpecPayload{}, fmt.Errorf("studio: parse agent spec: %w", err)
+		}
+		return p, nil
 	}
 	return p, nil
 }

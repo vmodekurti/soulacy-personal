@@ -721,6 +721,14 @@ func ParseDraft(raw string) (Draft, error) {
 		// the model may add, but still fail loudly on structurally bad JSON.
 		var d2 Draft
 		if err2 := json.Unmarshal([]byte(s), &d2); err2 != nil {
+			// Last tolerance: a raw newline inside a string literal. Node inputs
+			// and system prompts are multi-line, and a model that writes them out
+			// literally instead of escaping them produces JSON that is illegal by
+			// one byte per line. Repair and retry rather than discard the graph.
+			var d3 Draft
+			if err3 := json.Unmarshal([]byte(escapeRawControlChars(s)), &d3); err3 == nil {
+				return d3, nil
+			}
 			return Draft{}, fmt.Errorf("studio: parse draft: %w", err2)
 		}
 		return d2, nil
@@ -1645,4 +1653,64 @@ func analyze(d Draft) ([]Question, []string) {
 	notes = append(notes, fmt.Sprintf("Flow has %d node(s) entering at %q.", len(d.Flow.Nodes), d.Flow.Entry))
 
 	return questions, notes
+}
+
+// escapeRawControlChars escapes literal control characters that appear INSIDE a
+// JSON string literal, so a payload that is illegal by one byte per line parses
+// instead of being thrown away.
+//
+// JSON forbids a raw newline between quotes; it must be written \n. Models
+// routinely emit the real byte, because the values here are exactly the
+// multi-line ones — a system prompt, a node input carrying an embedded
+// document, a description written as a list. One un-escaped newline invalidates
+// the entire object.
+//
+// Observed live building a multi-agent workflow: the builder returned
+// "parse agent spec: invalid character '\n' in string literal", the whole graph
+// was discarded, and the run fell back to a deterministic two-node skeleton with
+// no agents in it. The user's structure was lost to a quoting slip.
+//
+// Only bytes inside a string literal are touched, and only ones that are
+// ILLEGAL there. Valid JSON contains no such bytes, so this is a no-op on it —
+// which is why callers can safely apply it as a retry after a parse failure
+// without risking a different interpretation of a document that already parsed.
+//
+// Escapes are tracked so a backslash-escaped quote does not look like the end
+// of the string; getting that wrong would corrupt every value after the first
+// escaped quote.
+func escapeRawControlChars(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) + 16)
+	inString := false
+	escaped := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if escaped {
+			b.WriteByte(c)
+			escaped = false
+			continue
+		}
+		switch {
+		case c == '\\' && inString:
+			b.WriteByte(c)
+			escaped = true
+		case c == '"':
+			inString = !inString
+			b.WriteByte(c)
+		case inString && c < 0x20:
+			switch c {
+			case '\n':
+				b.WriteString(`\n`)
+			case '\r':
+				b.WriteString(`\r`)
+			case '\t':
+				b.WriteString(`\t`)
+			default:
+				fmt.Fprintf(&b, `\u%04x`, c)
+			}
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
 }
