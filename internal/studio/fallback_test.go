@@ -26,7 +26,7 @@ import (
 
 func TestKeepModelGraph_WhenTheFallbackIsNoHealthier(t *testing.T) {
 	// The live case: model 1 blocker, deterministic 2.
-	reason, note := keepModelGraph("", "", 1, 2)
+	reason, note := KeepModelGraph("", "", 1, 2)
 	if reason == "" {
 		t.Fatal("fell back from a 1-blocker graph to a 2-blocker one — the swap costs the user their structure and buys nothing")
 	}
@@ -41,17 +41,17 @@ func TestKeepModelGraph_WhenTheFallbackIsNoHealthier(t *testing.T) {
 // A tie buys nothing either, and the model's graph is the one shaped like the
 // request. Keep it.
 func TestKeepModelGraph_OnATie(t *testing.T) {
-	if reason, _ := keepModelGraph("", "", 2, 2); reason == "" {
+	if reason, _ := KeepModelGraph("", "", 2, 2); reason == "" {
 		t.Fatal("an equal-blocker fallback replaces the user's structure for no gain")
 	}
 }
 
 // The swap is worth making when the fallback genuinely is sounder.
 func TestKeepModelGraph_FallsBackWhenTheAlternativeIsActuallyBetter(t *testing.T) {
-	if reason, _ := keepModelGraph("", "", 3, 0); reason != "" {
+	if reason, _ := KeepModelGraph("", "", 3, 0); reason != "" {
 		t.Fatalf("should have fallen back to a clean graph, but kept the model's: %s", reason)
 	}
-	if reason, _ := keepModelGraph("", "", 3, 1); reason != "" {
+	if reason, _ := KeepModelGraph("", "", 3, 1); reason != "" {
 		t.Fatalf("should have fallen back to a healthier graph, but kept the model's: %s", reason)
 	}
 }
@@ -61,7 +61,7 @@ func TestKeepModelGraph_FallsBackWhenTheAlternativeIsActuallyBetter(t *testing.T
 // one with visible blockers, because the blockers are on screen with a button
 // and the wrong tool is invisible until someone reads the nodes.
 func TestKeepModelGraph_StillProtectsANamedCapability(t *testing.T) {
-	reason, _ := keepModelGraph("", "drops the notebooklm MCP server you named", 3, 0)
+	reason, _ := KeepModelGraph("", "drops the notebooklm MCP server you named", 3, 0)
 	if reason == "" {
 		t.Fatal("fell back to a graph that drops a capability the user named")
 	}
@@ -73,10 +73,10 @@ func TestKeepModelGraph_StillProtectsANamedCapability(t *testing.T) {
 // When BOTH lose the capability, coverage is not a reason to keep either, so
 // the decision falls through to contract health.
 func TestKeepModelGraph_CoverageTieFallsThroughToBlockers(t *testing.T) {
-	if reason, _ := keepModelGraph("drops it", "drops it", 3, 0); reason != "" {
+	if reason, _ := KeepModelGraph("drops it", "drops it", 3, 0); reason != "" {
 		t.Fatalf("neither graph covers it, and the fallback is healthier, so it should be taken: %s", reason)
 	}
-	if reason, _ := keepModelGraph("drops it", "drops it", 1, 2); reason == "" {
+	if reason, _ := KeepModelGraph("drops it", "drops it", 1, 2); reason == "" {
 		t.Fatal("neither covers it and the fallback is worse — keep the model's graph")
 	}
 }

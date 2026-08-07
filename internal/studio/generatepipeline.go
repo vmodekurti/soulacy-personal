@@ -426,7 +426,7 @@ func RunGeneratePipeline(ctx context.Context, llm LLM, intent string, catalog Ca
 				modelC := AssessContract(compileRes.Workflow, catalog, opts.In)
 				detC := AssessContract(detRes.Workflow, catalog, opts.In)
 
-				keepReason, noteReason := keepModelGraph(modelShort, detShort, modelC.Blockers, detC.Blockers)
+				keepReason, noteReason := KeepModelGraph(modelShort, detShort, modelC.Blockers, detC.Blockers)
 
 				if keepReason != "" {
 					emit(PipelineEvent{
@@ -643,7 +643,10 @@ func countIssues(pf PreflightResult, c ContractResult) int {
 //
 // Ties keep the model's graph deliberately. Equal blockers means the fallback
 // buys nothing, and the model's graph is the one shaped like what was asked.
-func keepModelGraph(modelShortfall, detShortfall string, modelBlockers, detBlockers int) (reason, note string) {
+// KeepModelGraph is exported so the synchronous /compile handler takes the
+// SAME decision as the streamed pipeline. It was duplicated before, and only
+// one copy got fixed.
+func KeepModelGraph(modelShortfall, detShortfall string, modelBlockers, detBlockers int) (reason, note string) {
 	if detShortfall != "" && modelShortfall == "" {
 		return detShortfall + ", so falling back would lose a capability you asked for",
 			"the deterministic alternative " + detShortfall

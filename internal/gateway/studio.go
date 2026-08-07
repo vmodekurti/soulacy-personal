@@ -2819,16 +2819,33 @@ func (s *Server) studioDesignGraph(
 				studio.RepairWiring(&res.Workflow, cat)
 				contract = studio.AssessContract(res.Workflow, cat, in)
 				if contract.Blockers > 0 {
-					// Keep the model's graph anyway when falling back would COST a
-					// capability the user named. Visible blockers beat a clean graph
-					// that quietly does the wrong thing.
-					if detOK &&
-						studio.CoverageShortfall(intent, cat, detRes) != "" &&
-						studio.CoverageShortfall(intent, cat, res) == "" {
-						res.Notes = append(res.Notes,
-							"This graph still has unresolved blockers, kept because the deterministic "+
-								"alternative would drop a capability you asked for. Fix the blockers rather than regenerating.")
-						return res, true, nil
+					// Same decision as the streamed pipeline, taken by the same
+					// function.
+					//
+					// This was a second copy of the rule, and it had only the
+					// coverage half: keep the model's graph when falling back would
+					// cost a named capability. So fixing the streamed path left this
+					// one — the path the Workflow button actually uses, via
+					// /studio/compile — still discarding a 1-blocker graph for a
+					// 2-blocker skeleton. Live, that is exactly what happened: the
+					// streamed run reported "Keeping the model's graph despite its
+					// blockers", and the very next Workflow-mode run through this
+					// handler produced the canned two-node graph again.
+					//
+					// One function, both callers, so the next change cannot land in
+					// only one of them.
+					if detOK {
+						detC := studio.AssessContract(detRes.Workflow, cat, in)
+						if _, note := studio.KeepModelGraph(
+							studio.CoverageShortfall(intent, cat, res),
+							studio.CoverageShortfall(intent, cat, detRes),
+							contract.Blockers, detC.Blockers,
+						); note != "" {
+							res.Notes = append(res.Notes,
+								"This graph still has unresolved blockers, kept because "+note+
+									". Fix the blockers rather than regenerating.")
+							return res, true, nil
+						}
 					}
 				} else {
 					return res, true, nil
