@@ -908,6 +908,10 @@ func Compile(ctx context.Context, llm LLM, intent string, catalog Catalog, answe
 	// compiler still rejects these, since there the user asked for that step.
 	reconcileNodeKinds(&draft)
 
+	// Same class, different field: strip iteration settings from a node that
+	// cannot iterate, rather than discarding the graph they sit on.
+	reconcileIterationFields(&draft)
+
 	// Auto-declare any edge-referenced port the model forgot to list on a node.
 	// reasoning.CompileFlow is strict (a named from_port/to_port MUST appear in
 	// the node's declared Outputs/Inputs), and models occasionally name a port
@@ -1414,6 +1418,42 @@ func normalizeFlow(d *Draft) {
 // downgrading it would be wrong. But when generating a whole workflow, one
 // mislabelled step must not discard the entire otherwise-valid draft — the
 // strict compiler would throw away a good graph over a single slip.
+// reconcileIterationFields removes item_var / max_parallel from nodes that
+// cannot use them.
+//
+// A builder model wrote max_parallel and item_var onto a kind=parallel node —
+// which reads perfectly sensible, since a fan-out plainly does run things at
+// once — and CompileFlow answered:
+//
+//	flow: node "parallel_reviewers" declares item_var/max_parallel without for_each
+//
+// The entire three-specialist graph was thrown away over it, and the user got
+// the straight-line template. The engine now HONOURS max_parallel on a fan-out
+// (it bounds branch concurrency, which is what the model meant). item_var still
+// has no meaning there — a fan-out iterates over edges, not items — so it is
+// dropped here, along with both fields on any other kind that cannot iterate.
+//
+// Dropping is safe precisely because these fields did nothing: today they are a
+// hard compile error everywhere this function touches them, so no behaviour is
+// being silently changed — only a graph is being kept instead of binned.
+func reconcileIterationFields(d *Draft) {
+	if d == nil {
+		return
+	}
+	for i := range d.Flow.Nodes {
+		n := &d.Flow.Nodes[i]
+		if strings.TrimSpace(n.ForEach) != "" {
+			continue // a real for_each owns both fields
+		}
+		if n.Kind == sdkr.FlowNodeParallel {
+			n.ItemVar = "" // meaningless on a fan-out; max_parallel is kept and honoured
+			continue
+		}
+		n.ItemVar = ""
+		n.MaxParallel = 0
+	}
+}
+
 func reconcileNodeKinds(d *Draft) {
 	if d == nil {
 		return

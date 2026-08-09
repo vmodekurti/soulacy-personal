@@ -140,6 +140,23 @@ func CompileFlow(spec sdkr.FlowSpec) (*FlowGraph, error) {
 			if n.MaxParallel < 0 || n.MaxParallel > maxFlowParallelism {
 				return nil, fmt.Errorf("flow: node %q max_parallel must be between 0 and %d", n.ID, maxFlowParallelism)
 			}
+		} else if n.Kind == sdkr.FlowNodeParallel {
+			// max_parallel means the same thing on a fan-out as it does on a
+			// for_each — how many branches may run at once — and a builder model
+			// writes it there because it reads correct. It was rejected outright,
+			// which threw away an entire valid three-specialist graph over one
+			// inert field. Honour it instead (see runFlowParallel).
+			//
+			// item_var has no meaning here: a fan-out iterates over EDGES, and
+			// there is no item to bind. Studio strips it before this point; a
+			// hand-written flow that sets it is told so rather than having it
+			// silently ignored.
+			if n.ItemVar != "" {
+				return nil, fmt.Errorf("flow: node %q is kind=parallel and declares item_var, which only applies to for_each", n.ID)
+			}
+			if n.MaxParallel < 0 || n.MaxParallel > maxFlowParallelism {
+				return nil, fmt.Errorf("flow: node %q max_parallel must be between 0 and %d", n.ID, maxFlowParallelism)
+			}
 		} else if n.ItemVar != "" || n.MaxParallel != 0 {
 			return nil, fmt.Errorf("flow: node %q declares item_var/max_parallel without for_each", n.ID)
 		}
@@ -1101,11 +1118,7 @@ func runFlowParallel(
 	branchCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	limit := maxFlowParallelism
-	if n < limit {
-		limit = n
-	}
-	sem := make(chan struct{}, limit)
+	sem := make(chan struct{}, fanOutLimit(node, n))
 	finished := make(chan int, n)
 	var wg sync.WaitGroup
 	for i, b := range branches {
@@ -1192,6 +1205,27 @@ func runFlowParallel(
 }
 
 // flowJoinTarget is how many successes let a policy stop early; 0 = wait for all.
+// fanOutLimit is how many branches of a fan-out may run at once: the engine cap,
+// narrowed by the author's max_parallel when they set one, and never more than
+// the number of branches there are.
+//
+// Extracted so the bound is testable without standing up a run — it is the whole
+// behaviour behind accepting the field in the first place, and accepting a
+// setting while ignoring it would be its own quiet lie.
+func fanOutLimit(node sdkr.FlowNode, branches int) int {
+	limit := maxFlowParallelism
+	if node.MaxParallel > 0 && node.MaxParallel < limit {
+		limit = node.MaxParallel
+	}
+	if branches < limit {
+		limit = branches
+	}
+	if limit < 1 {
+		limit = 1
+	}
+	return limit
+}
+
 func flowJoinTarget(policy string, node sdkr.FlowNode, branches int) int {
 	switch policy {
 	case sdkr.JoinAny:
