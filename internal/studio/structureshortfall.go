@@ -30,6 +30,7 @@ package studio
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -118,7 +119,11 @@ func (p StructurePlan) wantedWorkers(intent string) int {
 	for _, m := range countCue.FindAllStringSubmatch(intent, -1) {
 		c := numberWords[strings.ToLower(m[1])]
 		if c == 0 {
-			fmt.Sscanf(m[1], "%d", &c)
+			parsed, err := strconv.Atoi(m[1])
+			if err != nil {
+				continue
+			}
+			c = parsed
 		}
 		if c >= 2 {
 			return c
