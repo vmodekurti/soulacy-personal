@@ -2991,6 +2991,10 @@ func (s *Server) finalizeStudioResult(res *studio.Result, cat studio.Catalog, in
 	if res == nil {
 		return
 	}
+	// Generated graphs must cross the same deterministic repair boundary as
+	// manually edited drafts. In particular, a parallel fan-out can imply its
+	// join barrier from the graph even when the builder omitted join_node.
+	studio.RepairWiring(&res.Workflow, cat)
 	pf := studio.Preflight(res.Workflow, in)
 	if res.Explanation != nil {
 		res.Explanation.NeedsConfig = preflightLines(pf)
@@ -3639,6 +3643,11 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 	// Resolving here also means the saved YAML names its provider/model outright
 	// instead of depending on a workspace default that can change under it.
 	req.Workflow = s.studioDraftWithRuntimeLLM(req.Workflow)
+	// Save is the authoritative last boundary before a graph becomes runnable.
+	// Apply deterministic repairs here as well as during generation so imports,
+	// stale browser tabs, and direct API clients cannot persist a known-fixable
+	// structural defect such as a missing parallel join barrier.
+	studio.RepairWiring(&req.Workflow, cat)
 	contract := studio.AssessContract(req.Workflow, cat, in)
 	if contract.Blockers > 0 {
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
