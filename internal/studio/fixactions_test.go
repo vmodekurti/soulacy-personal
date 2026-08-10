@@ -197,6 +197,26 @@ func TestEveryApplyActionIsEmittedBySomeFinding(t *testing.T) {
 		note(c.Action)
 	}
 
+	// A fan-out whose branches reconverge without naming the barrier. Kept in
+	// this corpus because the coverage rule is only as good as the shapes it is
+	// shown: this action existed and passed every other test while no draft here
+	// could produce it.
+	converging := Draft{
+		Name: "Digest",
+		Flow: Flow{Entry: "fan", Nodes: []sdkr.FlowNode{
+			{ID: "fan", Kind: sdkr.FlowNodeParallel, Join: "all"},
+			{ID: "a", Kind: "llm", Output: "a_out"},
+			{ID: "b", Kind: "llm", Output: "b_out"},
+			{ID: "join", Kind: "llm", Input: "{{ .a_out }} {{ .b_out }}", Output: "final"},
+		}, Edges: []sdkr.FlowEdge{
+			{From: "fan", To: "a"}, {From: "fan", To: "b"},
+			{From: "a", To: "join"}, {From: "b", To: "join"},
+		}},
+	}
+	for _, c := range AssessContract(converging, Catalog{}, PreflightInput{}).Checks {
+		note(c.Action)
+	}
+
 	for _, a := range FixActions() {
 		if a.Kind != FixKindApply {
 			continue

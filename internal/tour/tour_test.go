@@ -6,9 +6,39 @@ package tour
 // with extra steps.
 
 import (
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
+
+// navIDs reads the screen list out of gui/src/lib/nav.js.
+//
+// It used to be a hand-typed copy of that list sitting in this test. That is
+// the one shape of seam check that cannot fail: rename a screen on the client
+// and the copy here goes stale, the test keeps passing against a list nobody
+// navigates to any more, and the renamed screen quietly loses its story. This
+// codebase has been bitten by a hand-typed mirror three times now — the fix
+// action vocabulary, the shared-channel list, the walkthrough anchors — so
+// read the real file instead.
+func navIDs(t *testing.T) []string {
+	t.Helper()
+	path := filepath.Join("..", "..", "gui", "src", "lib", "nav.js")
+	src, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v — the tour's screen list has nothing to check itself against", path, err)
+	}
+	re := regexp.MustCompile(`\{\s*id:\s*'([^']+)'`)
+	var out []string
+	for _, m := range re.FindAllStringSubmatch(string(src), -1) {
+		out = append(out, m[1])
+	}
+	if len(out) < 20 {
+		t.Fatalf("only parsed %d screens out of %s — the extractor has stopped matching, so this test proves nothing", len(out), path)
+	}
+	return out
+}
 
 func fresh() InstallState { return InstallState{} }
 func working() InstallState {
@@ -20,14 +50,10 @@ func working() InstallState {
 }
 
 func TestEveryPageHasAStory(t *testing.T) {
-	// Mirrors gui/src/lib/nav.js. A screen with no story is a screen where
-	// "Show me around" is a button that apologises.
-	nav := []string{
-		"dashboard", "onboarding", "studio", "agents", "templates", "chat",
-		"memory", "knowledge", "queues", "workboard", "channels", "schedule",
-		"skills", "mcp", "pluginmgr", "providers", "secrets", "activity",
-		"browser", "config", "mobile", "logs",
-	}
+	// A screen with no story is a screen where "Show me around" is a button
+	// that apologises — which is worse than no button, because the user pressed
+	// it expecting help.
+	nav := navIDs(t)
 	for _, id := range nav {
 		if !Has(id) {
 			t.Errorf("no tour for %q", id)

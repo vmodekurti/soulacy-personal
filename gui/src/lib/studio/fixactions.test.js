@@ -191,3 +191,48 @@ describe('writing a helper prompt', () => {
     expect(res.message).toMatch(/no starter prompt/i)
   })
 })
+
+// The join-barrier fix: Studio worked out where the branches rejoin, so the
+// button sets it rather than sending the user to hunt on the canvas.
+describe('set_join_node', () => {
+  const flow = () => ({
+    entry: 'g',
+    nodes: [
+      { id: 'g', kind: 'llm', output: 'data' },
+      { id: 'fan', kind: 'parallel', join: 'all' },
+      { id: 'a', kind: 'agent', agent: 'a' },
+      { id: 'b', kind: 'agent', agent: 'b' },
+      { id: 'ed', kind: 'agent', agent: 'ed' },
+    ],
+  })
+
+  it('sets the barrier on the named fan-out only', () => {
+    const { draft, message } = applyDraftFix({ flow: flow() }, 'set_join_node', { node: 'fan', join: 'ed' })
+    const byId = Object.fromEntries(draft.flow.nodes.map((n) => [n.id, n]))
+    expect(byId.fan.join_node).toBe('ed')
+    expect(byId.a.join_node).toBeUndefined()
+    expect(message).toContain('ed')
+  })
+
+  it('does not mutate the draft it was given', () => {
+    const before = { flow: flow() }
+    applyDraftFix(before, 'set_join_node', { node: 'fan', join: 'ed' })
+    expect(before.flow.nodes.find((n) => n.id === 'fan').join_node).toBeUndefined()
+  })
+
+  it('says so when the barrier is already set', () => {
+    const d = { flow: flow() }
+    d.flow.nodes[1].join_node = 'ed'
+    const res = applyDraftFix(d, 'set_join_node', { node: 'fan', join: 'ed' })
+    expect(res.draft).toBeUndefined()
+    expect(res.message).toMatch(/already/i)
+  })
+
+  // Without both ids there is nothing to apply, and guessing would wire the
+  // wrong barrier — worse than the missing one.
+  it('refuses to guess when the server sent no target', () => {
+    const res = applyDraftFix({ flow: flow() }, 'set_join_node', {})
+    expect(res.draft).toBeUndefined()
+    expect(res.message).toMatch(/could not work out/i)
+  })
+})

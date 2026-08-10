@@ -3,6 +3,8 @@
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
   import { rowsFromSettings, settingsPatchFromRows } from '../lib/pluginsettings.js'
+  import { waitForGateway, waitingMessage, timeoutMessage, UPGRADE_BUDGET } from '../lib/gatewaywait.js'
+  import { versionSummary, lastCheckedLabel } from '../lib/versioninfo.js'
 
   let config   = null
   let loading  = true
@@ -19,6 +21,18 @@
   let updateInfo = null
   let upgrading = false
   let upgradeMessage = ''
+  let upgradeError = ''
+  let checkingUpdates = false
+  $: version = versionSummary(updateInfo)
+  $: lastChecked = lastCheckedLabel(updateInfo && updateInfo.last_check_time)
+
+  async function recheckUpdates() {
+    if (checkingUpdates) return
+    checkingUpdates = true
+    try { await api.updates.check() } catch (_) { /* the status call below reports it */ }
+    try { updateInfo = await api.updates.status() } catch { updateInfo = null }
+    checkingUpdates = false
+  }
 
 
   // Editable fields
@@ -321,16 +335,25 @@
       return
     }
     upgrading = true
+    upgradeError = ''
     upgradeMessage = 'Downloading and installing the update...'
     try {
       const res = await api.updates.upgrade()
-      upgradeMessage = res.message || 'Upgrade complete. Waiting for server to restart...'
-      setTimeout(() => {
-        window.location.reload()
-      }, 5000)
+      upgradeMessage = res.message || 'Upgrade installed. Waiting for the gateway to restart...'
+      // Do NOT reload on a timer. The old process exits 250ms after this reply
+      // and the replacement still has to boot and bind the port; a fixed 5s
+      // wait reloaded into a dead port and showed "Failed to fetch" directly
+      // under a message saying the upgrade had succeeded.
+      const outcome = await waitForGateway(api.health, {
+        ...UPGRADE_BUDGET,
+        onAttempt: (n, total) => { upgradeMessage = waitingMessage(n, total) },
+      })
+      if (outcome.ok) { window.location.reload(); return }
+      upgrading = false
+      upgradeError = timeoutMessage('upgrade', outcome.waitedMs)
     } catch (e) {
       upgrading = false
-      alert('Upgrade failed: ' + (e.message || e))
+      upgradeError = 'Upgrade failed: ' + (e.message || e)
     }
   }
 
@@ -485,6 +508,18 @@
         <TourButton />
     </div>
 
+  <div class="version-row" data-testid="version-row">
+    <span class="version-label">Version</span>
+    <code class="version-value">{version.version}</code>
+    <span class="version-detail" class:behind={version.status === 'behind'}
+          class:unknown={version.status === 'unknown'}>{version.detail}</span>
+    {#if lastChecked}<span class="version-checked">{lastChecked}</span>{/if}
+    <button class="btn-secondary btn-sm version-recheck"
+            on:click={recheckUpdates} disabled={checkingUpdates}>
+      {checkingUpdates ? 'Checking…' : 'Check for updates'}
+    </button>
+  </div>
+
   {#if updateInfo && updateInfo.update_available}
     <div class="update-banner">
       <div class="update-banner-icon">✨</div>
@@ -504,6 +539,13 @@
       <div class="upgrading-spinner"></div>
       <div class="upgrading-text">Upgrading Soulacy...</div>
       <div class="upgrading-subtext">{upgradeMessage}</div>
+    </div>
+  {/if}
+
+  {#if upgradeError}
+    <div class="banner err upgrade-err">
+      <span>{upgradeError}</span>
+      <button class="linkish" on:click={() => window.location.reload()}>Reload</button>
     </div>
   {/if}
 
@@ -1371,4 +1413,36 @@
     font-size: 13px;
     color: #8a91b8;
   }
+  .upgrade-err {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .upgrade-err .linkish {
+    background: none;
+    border: none;
+    color: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+    font: inherit;
+    padding: 0;
+  }
+  .version-row {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    flex-wrap: wrap;
+    padding: .55rem .9rem;
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 8px;
+    font-size: .85rem;
+  }
+  .version-label { opacity: .65; }
+  .version-value { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .version-detail { opacity: .75; }
+  .version-detail.behind { color: #e0b341; opacity: 1; }
+  .version-detail.unknown { color: #f06060; opacity: 1; }
+  .version-checked { opacity: .45; font-size: .78rem; }
+  .version-recheck { margin-left: auto; }
 </style>

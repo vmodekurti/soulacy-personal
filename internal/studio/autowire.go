@@ -23,6 +23,12 @@ func RepairWiring(draft *Draft, cat Catalog) int {
 	// dropped (applyFlowResult skips Output=="") and downstream wires/templates
 	// read null. The other passes rely on these names, so assign before them.
 	n := ensureOutputVars(&draft.Flow)
+	// Where a fan-out reconverges. Without it each branch walks to the end of
+	// the graph, so the shared node runs once PER BRANCH and each copy sees only
+	// its own branch's variables — the failure that made a generated
+	// three-specialist workflow die on <.risk_analysis> inside the fundamentals
+	// branch, after passing every static check. See joinnode.go.
+	n += InferJoinNodes(&draft.Flow)
 	n += normalizePlatformToolChoices(draft, cat)
 	n += normalizeKBWriteInputs(draft, cat)
 	n += AutoWire(draft, cat) + ReconcileVars(draft) + reconcileFieldRefs(draft) +

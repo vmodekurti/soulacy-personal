@@ -21,6 +21,33 @@ func CompileDeterministicWorkflow(intent string, cat Catalog, answers map[string
 	if intent == "" {
 		return Result{}, false
 	}
+	// A template can only answer a request whose SHAPE it is able to build. Every
+	// pattern below is a straight line, so an intent that spells out a fan-out
+	// must not be claimed here — see StructureNamedButUnbuildable.
+	//
+	// Declined, not deleted: CompileDeterministicWorkflowIgnoringShape still
+	// reaches these patterns, for the one caller that has nothing else left.
+	if StructureNamedButUnbuildable(intent) {
+		return Result{}, false
+	}
+	return CompileDeterministicWorkflowIgnoringShape(intent, cat, answers)
+}
+
+// CompileDeterministicWorkflowIgnoringShape is CompileDeterministicWorkflow
+// without the shape guard: it will happily answer a fan-out request with a
+// straight line.
+//
+// Exactly one caller should want this — the design path's last resort, where
+// the builder model has produced nothing at all and the alternative is not a
+// worse graph but no graph. A template that does the wrong shape can be looked
+// at, edited, and rewired on the canvas. "Describe the source, transform, and
+// delivery steps more explicitly" cannot. The caller owes the user a note
+// saying which of the two they are looking at.
+func CompileDeterministicWorkflowIgnoringShape(intent string, cat Catalog, answers map[string]string) (Result, bool) {
+	intent = strings.TrimSpace(intent)
+	if intent == "" {
+		return Result{}, false
+	}
 	if deterministicNotebookPodcastWorkflow(intent) {
 		return compileNotebookPodcastWorkflow(intent, cat, answers)
 	}

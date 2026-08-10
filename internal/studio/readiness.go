@@ -191,8 +191,23 @@ func Readiness(in ReadinessInput) ReadinessReport {
 		}
 		cr := AssessContract(in.Draft, cat, pin, opts...)
 		rep.Contract = &cr
+		items := contractItems(cr)
+		if rep.Preflight != nil {
+			// AssessContract runs preflight itself and republishes every issue it
+			// finds as a "runtime.*" check, so that the contract is useful on its
+			// own. Here it is not on its own: the preflight section above already
+			// reported those exact issues. Counting both made every runtime finding
+			// appear twice — the Save dialog said "Blockers (2)" from the contract
+			// while the readiness summary beside it said "4 blockers, 4 warnings"
+			// for the same two problems. Seen live on a generated workflow.
+			//
+			// Drop the contract's copies rather than preflight's: preflight is the
+			// section that owns these, and its items carry the preflight-specific
+			// fix actions.
+			items = withoutPreflightEchoes(items)
+		}
 		add(ReadinessSection{ID: ReadinessSectionContract, Title: "Generation contract"},
-			contractItems(cr))
+			items)
 	}
 
 	// ── security review ─────────────────────────────────────────────────────
@@ -415,4 +430,26 @@ func readinessSummary(rep ReadinessReport) string {
 		parts = append(parts, fmt.Sprintf("%d section(s) could not be evaluated: %s", n, strings.Join(ids, ", ")))
 	}
 	return "not ready — " + strings.Join(parts, "; ")
+}
+
+// withoutPreflightEchoes removes the contract checks that are re-reports of
+// preflight issues.
+//
+// AssessContract folds preflight in under ids prefixed "runtime." (see the
+// add("runtime."+…) calls in contract.go). That is right when the contract is
+// assessed alone. Inside Readiness, where preflight has its own section, those
+// checks are the same findings a second time.
+//
+// Matching on the id prefix rather than on message text: the prefix is the
+// contract's own declaration of where the check came from, whereas message
+// text is prose that either side may reword.
+func withoutPreflightEchoes(items []ReadinessItem) []ReadinessItem {
+	out := items[:0:0]
+	for _, it := range items {
+		if strings.HasPrefix(it.Kind, "runtime.") {
+			continue
+		}
+		out = append(out, it)
+	}
+	return out
 }

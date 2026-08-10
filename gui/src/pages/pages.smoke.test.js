@@ -42,7 +42,24 @@ const loaders = {
   logs: () => import('./Logs.svelte'),
 }
 
+// The freeze this file exists to catch does NOT arrive as a thrown exception
+// the test can await. onMount kicks off a request; the response lands later and
+// assigns state; Svelte schedules an update; the {#each} throws inside flush()
+// on a microtask nobody is awaiting. Node reports it as an unhandled rejection
+// and the test goes green.
+//
+// That is not hypothetical. Workboard did exactly this — `agents` was assigned
+// a plain object because `{}` is truthy, `{#each agents}` threw, and all
+// forty-five assertions here passed while vitest quietly printed "2 errors"
+// underneath them. A smoke test whose entire subject is "does this page throw"
+// must treat an async throw as a failure, or it is checking the one thing it
+// was written to check in the one way that cannot detect it.
+let asyncErrors = []
+const captureRejection = (err) => { asyncErrors.push(err) }
+
 beforeEach(() => {
+  asyncErrors = []
+  process.on('unhandledRejection', captureRejection)
   // Every gateway call answers with an empty object. A page that only works
   // when the server returns exactly the right shape is itself the bug.
   vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', {
@@ -51,7 +68,21 @@ beforeEach(() => {
   })))
 })
 
-afterEach(() => { vi.unstubAllGlobals() })
+afterEach(() => {
+  process.off('unhandledRejection', captureRejection)
+  vi.unstubAllGlobals()
+})
+
+/** Fail with the page's name and the original error, not just a stack. */
+function expectNoAsyncThrow(id) {
+  const messages = asyncErrors.map((e) => (e && e.message) || String(e))
+  expect(
+    messages,
+    `${id} threw after mount, off the await chain. In the browser this escapes ` +
+    `flush() and wedges Svelte's scheduler, so every page stops rendering ` +
+    `until a reload:\n  ${messages.join('\n  ')}`,
+  ).toEqual([])
+}
 
 describe('every nav page constructs and mounts', () => {
   it('has a loader for each nav entry', () => {
@@ -72,6 +103,7 @@ describe('every nav page constructs and mounts', () => {
     await new Promise((r) => setTimeout(r, 30))
     if (cmp) cmp.$destroy()
     target.remove()
+    expectNoAsyncThrow(id)
   })
 })
 

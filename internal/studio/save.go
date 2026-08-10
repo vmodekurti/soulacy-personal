@@ -111,8 +111,8 @@ func ToAgentDefinition(draft Draft, acceptPrivilegedExposure bool) (agent.Defini
 		// Disabled by construction: a Studio save stages an agent for the
 		// operator to review and enable.
 		Enabled:      false,
-		MaxTurns:     15,
-		Memory:       agent.MemoryPolicy{MaxTokens: 8000},
+		MaxTurns:     maxTurnsOr(draft.MaxTurns, 15),
+		Memory:       memoryOr(draft.Memory),
 		LLM:          llmConfigFor(draft),
 		RunTimeout:   strings.TrimSpace(draft.RunTimeout),
 		ConfirmTools: dedupeNonEmpty(draft.ConfirmTools),
@@ -232,7 +232,7 @@ func toReActAgentDefinition(draft Draft, id string, acceptPrivilegedExposure boo
 		StudioRawIntent: strings.TrimSpace(draft.RawIntent),
 		Enabled:         false, // staged for review, like every Studio save
 		MaxTurns:        maxTurnsOr(draft.MaxTurns, 15),
-		Memory:          agent.MemoryPolicy{MaxTokens: 8000},
+		Memory:          memoryOr(draft.Memory),
 		LLM:             llmConfigFor(draft),
 		RunTimeout:      runTimeout,
 		// The reasoning loop — the whole point. No Workflow block. Studio sets
@@ -603,6 +603,22 @@ func parsePositiveDuration(s string) time.Duration {
 
 // maxTurnsOr returns v when positive, else the fallback — so a user-tuned
 // max_turns survives the round-trip while an unset draft gets the default.
+// memoryOr returns the draft's memory policy, or Studio's default when the
+// draft carries none. Overwriting a policy the user tuned in SOUL.yaml with a
+// constant is the same class of loss as resetting max_turns.
+func memoryOr(m *agent.MemoryPolicy) agent.MemoryPolicy {
+	if m == nil {
+		return agent.MemoryPolicy{MaxTokens: 8000}
+	}
+	out := *m
+	if out.MaxTokens <= 0 {
+		out.MaxTokens = 8000
+	}
+	out.ReadScopes = append([]string(nil), m.ReadScopes...)
+	out.WriteScopes = append([]string(nil), m.WriteScopes...)
+	return out
+}
+
 func maxTurnsOr(v, fallback int) int {
 	if v > 0 {
 		return v

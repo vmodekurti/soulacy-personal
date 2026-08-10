@@ -28,6 +28,7 @@ export const FOCUS_ACTIONS = [
   'open_studio',
   'open_preflight',
   'reveal_node',
+  'rename_agent',
 ]
 
 // Channels that reach people outside the install — the exact set in
@@ -115,6 +116,31 @@ export const DRAFT_FIXES = {
     return {
       draft: { ...draft, new_agents: next },
       message: `Wrote a starter prompt for ${id}. Read it over — it is a floor, not a ceiling.`,
+    }
+  },
+
+  // The fan-out barrier. Studio computed WHERE the branches rejoin, so applying
+  // it is a one-field edit rather than a canvas hunt. Without it each branch
+  // runs everything downstream on its own and the shared step sees only that
+  // branch's results.
+  set_join_node(draft, params = {}) {
+    const nodeId = String(params.node || '').trim()
+    const join = String(params.join || '').trim()
+    if (!nodeId || !join) {
+      return { message: 'Studio could not work out where these branches rejoin — set the join step on the canvas.' }
+    }
+    const flow = draft.flow || {}
+    const nodes = Array.isArray(flow.nodes) ? flow.nodes : []
+    let changed = false
+    const next = nodes.map((n) => {
+      if (!n || n.id !== nodeId || n.join_node === join) return n
+      changed = true
+      return { ...n, join_node: join }
+    })
+    if (!changed) return { message: `"${nodeId}" already rejoins at "${join}".` }
+    return {
+      draft: { ...draft, flow: { ...flow, nodes: next } },
+      message: `"${nodeId}" now rejoins at "${join}" — its branches stop there and "${join}" runs once, with all of their results.`,
     }
   },
 

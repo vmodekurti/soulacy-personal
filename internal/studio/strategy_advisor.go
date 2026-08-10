@@ -147,6 +147,7 @@ func AdviseStrategy(intent string, cat Catalog, requested string, forceWorkflow 
 		} else {
 			advice.Reason = "Soulacy selected Plan-Execute because the task needs a multi-phase or fixed procedure, while workflow generation remains an experimental opt-in."
 		}
+		noteFanOutNeedsWorkflow(&advice, intent)
 		return advice
 	}
 	li := strings.ToLower(intent)
@@ -155,6 +156,7 @@ func AdviseStrategy(intent string, cat Catalog, requested string, forceWorkflow 
 		advice.RuntimeStrategy = "plan_execute"
 		advice.Confidence = "medium"
 		advice.Reason = "Soulacy selected Plan-Execute because the task needs multi-phase reasoning without a stable fixed workflow."
+		noteFanOutNeedsWorkflow(&advice, intent)
 		return advice
 	}
 	// Capability-driven (P0-5), replacing the model-name substring heuristic:
@@ -228,4 +230,33 @@ func dynamicSkillRoutingIntent(intent string) bool {
 		"based on the parsed intent", "based on the question",
 		"depending on the question", "selects the appropriate",
 		"select the appropriate", "routes to the", "route to the")
+}
+
+// noteFanOutNeedsWorkflow tells the user that the specific thing they described
+// lives behind the Workflow switch.
+//
+// Routing a fan-out request to Plan-Execute is the intended behaviour: graph
+// generation is an experimental opt-in and the advisor is not allowed to choose
+// it. But the reason it gave — "the task needs a multi-phase or fixed
+// procedure" — describes a category, not their request. Someone who wrote out
+// three named specialists working in parallel and an editor combining them gets
+// back a single reasoning agent with no graph, and nothing connects that
+// outcome to the switch that would have changed it. They are left to conclude
+// the product cannot do what they asked, when it can.
+//
+// Advice only: the routing is untouched, and this uses the same bar as
+// StructureShortfall and the template guard so all three agree about what
+// counts as a described structure.
+func noteFanOutNeedsWorkflow(advice *StrategyAdvice, intent string) {
+	if advice == nil || !StructureNamedButUnbuildable(intent) {
+		return
+	}
+	msg := "You described several specialists working in parallel. That is a fixed graph, which Studio only " +
+		"builds when you turn on the Workflow switch — this reasoning agent will work through the same steps " +
+		"one at a time instead."
+	if advice.CapabilityWarning == "" {
+		advice.CapabilityWarning = msg
+		return
+	}
+	advice.CapabilityWarning += " " + msg
 }

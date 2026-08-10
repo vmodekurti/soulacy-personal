@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/soulacy/soulacy/pkg/agent"
+	sdkr "github.com/soulacy/soulacy/sdk/reasoning"
 )
 
 // ContractOption tunes AssessContract without breaking backward callers. Story
@@ -95,7 +96,14 @@ func AssessContract(draft Draft, cat Catalog, in PreflightInput, options ...Cont
 	addFix := func(id, title, status, node, msg, fix, action, label string, params map[string]string) {
 		res.Checks = append(res.Checks, ContractCheck{
 			ID: id, Title: title, Status: status, NodeID: node, Message: msg, Fix: fix,
-			Action: action, ActionLabel: label, ActionParams: params,
+			// Resolve through the shared vocabulary rather than storing whatever
+			// was passed. A caller that has no special wording for its button
+			// should get the vocabulary's default, not an empty string — which
+			// renders as a button with nothing written on it. readiness.go's
+			// finishItem already worked this way; this was the one path that did
+			// not, so a check gained a silent blank button simply by not
+			// repeating a label the vocabulary already knows.
+			Action: action, ActionLabel: resolveFixLabel(action, label), ActionParams: params,
 		})
 		switch status {
 		case "block":
@@ -140,6 +148,9 @@ func AssessContract(draft Draft, cat Catalog, in PreflightInput, options ...Cont
 		add("runtime."+nonEmpty(w.Kind, "warning"), "Runtime warning", "warn", w.NodeID, w.Message, w.Fix)
 	}
 
+	assessJoinBarrier(draft, addFix, pass)
+	assessStructureShortfall(draft, cat, addFix)
+	assessNameCollision(draft, cat, addFix, pass)
 	assessInboundInputUse(draft, add, pass)
 	assessAuthoringRules(draft, opts, add, addFix, pass)
 	res.OK = res.Blockers == 0
@@ -210,12 +221,17 @@ func assessAuthoringRules(draft Draft, opts contractOpts, add contractAdd, addFi
 	}
 
 	nodeCount := len(draft.Flow.Nodes)
+	// Judge on the steps a reader must FOLLOW, not the nodes on the canvas: a
+	// fan-out's peer branches are one idea, not N. See macrosize.go — without
+	// this, Studio generated the three-reviewer graph the user asked for and
+	// then blocked saving it for being too complex.
+	steps := MacroStepCount(draft.Flow)
 	switch {
 	case nodeCount == 0:
 		add("architecture.empty", "Architecture fit", "block", "", "This workflow has no runnable steps.", "Add at least one tool, Python, LLM, or agent step.")
-	case nodeCount <= 5:
+	case steps <= 5:
 		pass("architecture.size", "Macro-workflow size", fmt.Sprintf("The workflow has %d node(s), which fits the simple high-level Macro-Workflow guideline.", nodeCount))
-	case nodeCount <= 8:
+	case steps <= 8:
 		add("architecture.size", "Macro-workflow size", "warn", "", fmt.Sprintf("This workflow has %d nodes. Studio workflows should usually stay at 3-5 high-level steps.", nodeCount), "Steps that only reshape data can usually be one step: merge them into a single Custom Python block from the palette on the left. If the agent needs to choose tools as it goes, switch Mode to Auto at the top of the Build step.")
 	case knownDeterministicMacroWorkflow(draft):
 		add("architecture.size", "Macro-workflow size", "warn", "", fmt.Sprintf("This deterministic macro-workflow has %d high-level service steps. It is larger than the ideal visual graph, but it matches a known Soulacy pattern with explicit tool order and completion checks.", nodeCount), "Keep this as a workflow only when the ordering must be deterministic; otherwise convert it to an Auto/Plan-Execute agent.")
@@ -786,3 +802,165 @@ func parseContractDuration(s string) time.Duration {
 }
 
 // dedupeStrings is defined in buildloop.go and shared across the studio pkg.
+
+// assessNameCollision catches a NEW draft whose name would take over an agent
+// that already exists.
+//
+// ToAgentDefinition derives the id from Draft.ID when a saved agent was opened
+// for editing, and from slug(Draft.Name) otherwise. The save path then does:
+//
+//	if existing := s.loader.Get(def.ID); existing != nil { … update in place }
+//
+// which is exactly right for a re-save and silent data loss for a new draft
+// that happens to slug onto someone else's id. Nothing warned about it.
+//
+// Seen live: describing a scheduled stock briefing produced a draft the builder
+// named "Stock Advisor" — the name of an agent already deployed on that
+// install. Saving would have written over a working agent, with no prompt, no
+// diff, and no mention on the Save step, which listed only tool-argument
+// blockers.
+//
+// The empty Draft.ID is the whole signal, so this fires only for drafts that
+// have never been saved. Re-saving an agent you opened is not a collision, and
+// must not be reported as one.
+//
+// slug() here is the same function ToAgentDefinition uses — deliberately, not
+// a second copy of the rule. A check that derived the id even slightly
+// differently from the save path would fire on names that are fine and stay
+// quiet on the ones that are not.
+func assessNameCollision(draft Draft, cat Catalog, addFix func(id, title, status, node, msg, fix, action, label string, params map[string]string), pass func(id, title, msg string)) {
+	if strings.TrimSpace(draft.ID) != "" {
+		return // an existing agent opened for editing — saving over it is the point
+	}
+	id := slug(draft.Name)
+	if id == "" {
+		return // the empty-name case is ToAgentDefinition's error to raise
+	}
+	for _, existing := range cat.Agents {
+		if !strings.EqualFold(strings.TrimSpace(existing), id) {
+			continue
+		}
+		addFix("identity.collision", "Name collision", "block", "",
+			"An agent called \""+draft.Name+"\" already exists, and saving this would replace it rather than add a new one.",
+			"Give this workflow a different name in the Save step — the existing \""+id+"\" agent keeps running untouched. "+
+				"If you did mean to change that agent, open it from Deployed and edit it there instead, so you can see what you are changing.",
+			FixRenameAgent, "", map[string]string{"id": id, "name": draft.Name})
+		return
+	}
+	pass("identity.collision", "Name collision", "This name does not belong to an agent you already have.")
+}
+
+// assessStructureShortfall reports a graph that flattened the shape the user
+// described — three specialists in parallel built as one step.
+//
+// The pipeline retries once before this fires, so reaching here means the model
+// missed it twice. That is worth saying out loud rather than leaving the user
+// to notice by reading the nodes, which is how it went undetected: the thin
+// graph is structurally valid and passes every other check in this file.
+//
+// A WARNING, not a blocker. The reading is a heuristic over the user's own
+// words, and refusing to save a graph the user may well have meant would be
+// worse than the silence it replaces. Saying "this is not what you described,
+// here is the button to try again" is the honest strength of claim.
+//
+// Draft.Intent carries the refined prompt this graph was built from, which is
+// what makes the comparison possible at save time — the contract has no other
+// access to what was asked for.
+func assessStructureShortfall(draft Draft, cat Catalog, addFix contractAddFix) {
+	intent := strings.TrimSpace(draft.Intent)
+	if intent == "" {
+		intent = strings.TrimSpace(draft.RawIntent)
+	}
+	if intent == "" {
+		return // nothing to compare against; silence is the only honest answer
+	}
+	short := StructureShortfall(intent, Result{Workflow: draft})
+	if short == "" {
+		return
+	}
+	addFix("architecture.structure", "Structure", "warn", "",
+		"Your description "+short+".",
+		"Regenerate to try again — the builder model is inconsistent on this and a second attempt usually "+
+			"builds the separate steps. If one step really is what you want, this warning is safe to ignore.",
+		FixOpenStudio, "Regenerate", nil)
+}
+
+// assessJoinBarrier catches a fan-out whose branches reconverge without naming
+// where.
+//
+// Each branch walks until it reaches the node named in `join_node`. With that
+// field empty the branches walk to the END of the graph instead, so a node they
+// share runs once per branch, and each copy sees only its own branch's
+// variables. The graph looks right on the canvas and dies on the first run.
+//
+// A BLOCKER, not a warning: this workflow cannot complete. Every other check
+// passed the one that surfaced this — VALID, 0 blockers, 0 warnings — and it
+// failed the moment it was dry-run.
+//
+// RepairWiring infers the barrier whenever the branches converge on one place,
+// so by the time a draft reaches here the only cases left are the ones that
+// cannot be inferred: branches meeting at several nodes with none of them
+// clearly first. Those need a person, because guessing runs the wrong node once
+// instead of the right node three times.
+func assessJoinBarrier(draft Draft, addFix contractAddFix, pass func(id, title, msg string)) {
+	if draft.IsAgent() || len(draft.Flow.Nodes) == 0 {
+		return
+	}
+	fanOuts, unnamed := 0, 0
+	for _, n := range draft.Flow.Nodes {
+		if n.Kind != sdkr.FlowNodeParallel {
+			continue
+		}
+		fanOuts++
+		if strings.TrimSpace(n.JoinNode) != "" {
+			continue
+		}
+		// Branches that genuinely end separately need no barrier.
+		if len(branchStarts(draft.Flow, n.ID)) < 2 {
+			continue
+		}
+		if !branchesShareANode(draft.Flow, n) {
+			continue
+		}
+		unnamed++
+		// When the branches converge on one node the answer is computable, so
+		// offer to apply it rather than describing the edit. This is the case
+		// that matters most in practice: an already-SAVED workflow is not put
+		// through RepairWiring on load, so a graph generated before this check
+		// existed arrives here with a blocker Studio can resolve itself.
+		if join := ConvergenceOf(draft.Flow, n); join != "" {
+			addFix("graph.joinbarrier", "Parallel join", "block", n.ID,
+				"The \""+n.ID+"\" step runs branches that come back together at \""+join+"\", but it does not say so.",
+				"Each branch will otherwise run everything after it on its own, so \""+join+"\" runs once per branch and "+
+					"each copy only sees its own branch's results — the run fails on the first missing value. "+
+					"Studio can set the join step for you.",
+				FixSetJoinNode, "", map[string]string{"node": n.ID, "join": join})
+			continue
+		}
+		addFix("graph.joinbarrier", "Parallel join", "block", n.ID,
+			"The \""+n.ID+"\" step runs branches that come back together, but it does not say where they rejoin.",
+			"Each branch will run everything after it on its own, so the step they share runs once per branch and "+
+				"each copy only sees its own branch's results — the run fails on the first missing value. Open the "+
+				"step on the canvas and set its join step to the node the branches meet at.",
+			FixRevealNode, "", nil)
+	}
+	if fanOuts > 0 && unnamed == 0 {
+		pass("graph.joinbarrier", "Parallel join", "Every parallel step says where its branches rejoin.")
+	}
+}
+
+// branchesShareANode reports whether any two branches of `p` can reach a common
+// node — the signal that they are meant to reconverge.
+func branchesShareANode(flow Flow, p sdkr.FlowNode) bool {
+	starts := branchStarts(flow, p.ID)
+	seen := map[string]int{}
+	for _, s := range starts {
+		for id := range reachableFrom(flow, s, p.ID) {
+			seen[id]++
+			if seen[id] > 1 {
+				return true
+			}
+		}
+	}
+	return false
+}

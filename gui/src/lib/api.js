@@ -785,7 +785,7 @@ export const api = {
      * events; the returned promise resolves with the `done` payload.
      */
     generateStream: (
-      { intent, answers, light, auto_repair } = {},
+      { intent, answers, light, auto_repair, force_workflow } = {},
       onEvent,
       signal,
     ) => {
@@ -797,6 +797,10 @@ export const api = {
           ...(answers ? { answers } : {}),
           ...(light ? { light: true } : {}),
           ...(auto_repair ? { auto_repair: true } : {}),
+          // Same flag name the synchronous compile uses. Without it a caller
+          // asking the streamed path for a fixed graph was silently given a
+          // reasoning agent instead.
+          ...(force_workflow ? { force_workflow: true } : {}),
         },
         ({ event, data }) => {
           let parsed

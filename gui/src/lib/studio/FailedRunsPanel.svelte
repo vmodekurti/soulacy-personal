@@ -8,29 +8,34 @@
   // now buried among them.
   //
   // Right: the diagnosis for the selected group — root cause, evidence,
-  // recommended fix — and the repair, which must be REVIEWED before it is
-  // applied to something already running in production.
+  // recommended fix — plus the two things you can do about it.
+  //
+  // This panel used to carry a second, parallel review-and-approve flow for a
+  // repair PROPOSAL: a verdict line, a field-level diff, a note box and an
+  // Approve & apply button. None of it could ever appear. `repair` was only
+  // ever assigned null by the page, and `onApply` was never passed at all, so
+  // the whole block rendered for nobody. The working review flow lives on the
+  // page (the diff strip under this panel), driven by diagnose-run, which
+  // returns a workflow with the trace repairs ALREADY applied — there is no
+  // proposal left for an apply-repair call to judge. Two implementations of one
+  // idea, one of them unreachable, is worse than one; the unreachable one is
+  // gone.
 
   import { groupFailures, categoryCounts, isRetryable, CATEGORY_LABEL, CATEGORY_HINT } from './failuregroup.js'
-  import { repairVerdict, repairProofLabel } from './repairverdict.js'
 
   export let runs = []            // /studio/failed-runs
   export let diagnosis = null     // /studio/run-diagnosis for the selected run
-  export let repair = null        // apply-repair response, once attempted
   export let loading = false
   export let error = ''
   export let busy = false
 
   export let onSelect = () => {}  // (run) => void — load trace + diagnosis
-  export let onRepair = () => {}  // (run) => void — propose a repair
-  export let onApply = () => {}   // (run, note) => void — approve & apply
-  export let onReject = () => {}  // () => void — discard the proposal
+  export let onRepair = () => {}  // (run) => void — diagnose and propose a fix
   export let onReveal = () => {}  // (nodeId) => void
   export let onRetry = () => {}   // (run) => void — re-run unchanged
 
   let selectedKey = ''
   let filter = ''
-  let note = ''
 
   $: groups = groupFailures(runs)
   $: counts = categoryCounts(groups)
@@ -47,7 +52,6 @@
 
   function pick(g) {
     selectedKey = g.key
-    note = ''
     onSelect(g.latest)
   }
   function when(ms) {
@@ -174,43 +178,6 @@
               </button>
             {/if}
           </div>
-
-          {#if repair}
-            <div class="fr-repair">
-              <div class="fr-verdict">
-                <strong>{repairVerdict(repair)}</strong>
-                {#if repairProofLabel(repair)}
-                  <span class="fr-proof">{repairProofLabel(repair)}</span>
-                {/if}
-              </div>
-
-              {#if repair.attempt && repair.attempt.diff}
-                <div class="fr-diff">
-                  <span class="fr-label">{repair.attempt.diff.field}</span>
-                  <div class="fr-diff-row">
-                    <span class="fr-before">{repair.attempt.diff.old || '—'}</span>
-                    <span aria-hidden="true">→</span>
-                    <span class="fr-after">{repair.attempt.diff.new || '—'}</span>
-                  </div>
-                </div>
-              {/if}
-
-              <!-- Applying to something already deployed is a production change,
-                   so it is reviewed and the reason is recorded with it. -->
-              <label class="fr-note">
-                <span>Note (recorded with this change)</span>
-                <input type="text" bind:value={note} placeholder="Why this fix is right" disabled={busy} />
-              </label>
-              <div class="fr-actions">
-                <button class="btn btn-sm" type="button" disabled={busy}
-                  on:click={() => { note = ''; onReject() }}>Reject</button>
-                <button class="btn btn-sm primary" type="button"
-                  disabled={busy || !repair.applied}
-                  data-tooltip={repair.applied ? '' : 'This repair did not hold up, so it cannot be applied'}
-                  on:click={() => onApply(selected.latest, note)}>Approve &amp; apply</button>
-              </div>
-            </div>
-          {/if}
         {/if}
       </div>
     </div>
@@ -280,17 +247,4 @@
 
   .fr-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 
-  .fr-repair {
-    display: flex; flex-direction: column; gap: 8px;
-    padding: 10px; border-radius: 8px;
-    border: 1px solid color-mix(in srgb, var(--accent, #6d5efc) 32%, transparent);
-  }
-  .fr-verdict { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: .84rem; }
-  .fr-proof { padding: 1px 8px; border-radius: 999px; font-size: .7rem; background: color-mix(in srgb, var(--ok, #2ea043) 20%, transparent); }
-  .fr-diff { display: flex; flex-direction: column; gap: 3px; }
-  .fr-diff-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-family: var(--mono, monospace); font-size: .78rem; }
-  .fr-before { color: var(--danger, #e5484d); text-decoration: line-through; }
-  .fr-after { color: var(--ok, #2ea043); }
-  .fr-note { display: flex; flex-direction: column; gap: 3px; font-size: .8rem; }
-  .fr-note input { width: 100%; box-sizing: border-box; }
 </style>

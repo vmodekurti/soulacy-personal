@@ -434,13 +434,41 @@ func (s *Scheduler) fire(agentID, triggerType string) {
 	s.fireAt(agentID, triggerType, time.Now().UTC())
 }
 
+// definition looks the agent up, tolerating a scheduler built without a loader
+// (embedded uses and some tests) — "no opinion" rather than a panic.
+func (s *Scheduler) definition(agentID string) *agent.Definition {
+	if s.loader == nil {
+		return nil
+	}
+	return s.loader.Get(agentID)
+}
+
 // fire synthesises a trigger message and dispatches it to the engine.
 func (s *Scheduler) fireAt(agentID, triggerType string, scheduledAt time.Time) {
-	// Readiness gate (ST-16). Checked FIRST — before the run lock, before the
-	// definition lookup, before any provider is dialled — because an agent that
-	// must not run must not consume anything either. A nil gate is a no-op, so
-	// non-Studio agents behave exactly as before. Re-checked on every tick, so
-	// fixing the blocker unblocks the schedule without a restart.
+	// "Disabled" has to mean disabled AT FIRE TIME, not only at registration
+	// time. RegisterAgent refuses a disabled agent, and DeregisterAgent drops
+	// its cron entry — but that only holds while every writer of Enabled
+	// remembers to tell the scheduler. One that forgets leaves a live cron entry
+	// pointing at an agent the operator can see is off, and it keeps running on
+	// a schedule nobody is watching. (A Studio save did exactly this: it wrote
+	// enabled: false and never touched the cron table.)
+	//
+	// Checking here makes the invariant self-enforcing instead of a convention
+	// spread across every call site. Re-read each tick, so re-enabling still
+	// takes effect without a restart, and the stale entry is dropped on the way
+	// out so this costs one wasted tick, not one per tick forever.
+	if def := s.definition(agentID); def != nil && !def.Enabled {
+		s.log.Warn("skipping scheduled run — agent is disabled",
+			zap.String("agent", agentID), zap.String("trigger", triggerType))
+		s.DeregisterAgent(agentID)
+		return
+	}
+
+	// Readiness gate (ST-16). Checked before the run lock, before the definition
+	// lookup, before any provider is dialled — because an agent that must not
+	// run must not consume anything either. A nil gate is a no-op, so non-Studio
+	// agents behave exactly as before. Re-checked on every tick, so fixing the
+	// blocker unblocks the schedule without a restart.
 	if s.blockedByReadiness(agentID, triggerType) {
 		return
 	}
@@ -478,7 +506,7 @@ func (s *Scheduler) fireAt(agentID, triggerType string, scheduledAt time.Time) {
 	// override it. Derived from s.appCtx so SIGTERM cancels in-flight runs
 	// (PRODUCTION_AUDIT → HIGH/Concurrency: previously context.Background()
 	// here meant graceful shutdown could hang for the full run_timeout).
-	def := s.loader.Get(agentID)
+	def := s.definition(agentID)
 	if def == nil {
 		s.log.Error("scheduled agent definition missing", zap.String("agent", agentID))
 		return

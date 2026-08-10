@@ -126,6 +126,18 @@ type PipelineOptions struct {
 	// touched the design. It is opt-in rather than the default so that choosing
 	// reproducibility over correctness is a deliberate act.
 	PreferDeterministic bool
+	// ForceWorkflow is the GUI's "Workflow" switch: build a fixed graph, not a
+	// reasoning agent.
+	//
+	// It had no field here at all, so the streamed generate path passed
+	// forceWorkflow=false to the strategy advisor unconditionally and the switch
+	// did nothing. Asked for three reviewers running in parallel with the switch
+	// on, the stream announced "Strategy: plan_execute (reasoning agent)" and
+	// returned a draft with zero nodes, while the synchronous /studio/compile —
+	// the same request, the other button — honoured it. Two entry points, two
+	// different kinds of thing, and no way for the user to tell which they had
+	// pressed.
+	ForceWorkflow bool
 }
 
 // PipelineResult mirrors compile.Result but is enriched with the phase
@@ -209,7 +221,7 @@ func RunGeneratePipeline(ctx context.Context, llm LLM, intent string, catalog Ca
 	// Phase 2 — choose_strategy (deterministic Strategy Advisor over the refined text).
 	emit(PipelineEvent{Phase: PhaseChooseStrategy, Status: StatusStart, Message: "Choosing execution strategy"})
 	combined := strings.TrimSpace(refinement.RefinedIntent + " " + intent)
-	advice := AdviseStrategy(combined, catalog, refinement.RecommendedMode, false)
+	advice := AdviseStrategy(combined, catalog, refinement.RecommendedMode, opts.ForceWorkflow)
 	strategy := advice.RuntimeStrategy
 	res.Strategy = strategy
 	strategyMsg := "workflow (fixed graph)"
@@ -372,6 +384,35 @@ func RunGeneratePipeline(ctx context.Context, llm LLM, intent string, catalog Ca
 			}
 		}
 
+		// Structure retry: the model built something valid but flattened the SHAPE
+		// the user described — three specialists in parallel became one step.
+		//
+		// Same mechanism as the coverage retry above and for the same reason:
+		// re-stating the brief to a model that has already read it once rarely
+		// helps, whereas naming the specific omission does. Runs at most once,
+		// and only when the intent explicitly asked for a fan-out.
+		if ok {
+			build := func(c Catalog) (Result, error) {
+				if advice.Mode == "workflow" {
+					return Compile(ctx, llm, compileIntent, c, opts.Answers)
+				}
+				return CompileAgent(ctx, llm, compileIntent, c, strategy, opts.Answers)
+			}
+			if short := StructureShortfall(coverageIntent, compileRes); short != "" {
+				emit(PipelineEvent{
+					Phase: PhaseBuildGraph, Status: StatusStart, Source: SourceLLM,
+					Message: "Retrying: the first graph " + short + ".",
+				})
+				next, changed, msg := RetryForStructure(coverageIntent, compileRes, build, designCat)
+				compileRes = next
+				status := StatusSkip
+				if changed {
+					status = StatusComplete
+				}
+				emit(PipelineEvent{Phase: PhaseBuildGraph, Status: status, Source: SourceLLM, Message: msg})
+			}
+		}
+
 		if ok {
 			if c := AssessContract(compileRes.Workflow, catalog, opts.In); c.Blockers > 0 {
 				// Repair BEFORE giving up on it. These are the same deterministic
@@ -408,15 +449,34 @@ func RunGeneratePipeline(ctx context.Context, llm LLM, intent string, catalog Ca
 			modelShort := CoverageShortfall(coverageIntent, catalog, compileRes)
 			if detRes, detOK := deterministic(); detOK {
 				detShort := CoverageShortfall(coverageIntent, catalog, detRes)
-				if detShort != "" && modelShort == "" {
+
+				// Does the fallback actually make this MORE ready to save?
+				//
+				// Coverage was the only question asked here, and it is not the only
+				// way the swap can be a downgrade. Observed live: a prompt naming
+				// three parallel analysts and an editor produced a model graph with
+				// one blocker, which was discarded for a deterministic skeleton
+				// carrying TWO blockers and two warnings of its own — a two-node
+				// "search then summarize" that had also dropped every agent the user
+				// asked for. We traded a rich graph with one fixable defect for a
+				// bare one with more, and told the user it was a fallback.
+				//
+				// The whole justification for falling back is that the replacement
+				// is sounder. When it is not, there is nothing to trade for: keep
+				// the graph that at least matches what was asked.
+				modelC := AssessContract(compileRes.Workflow, catalog, opts.In)
+				detC := AssessContract(detRes.Workflow, catalog, opts.In)
+
+				keepReason, noteReason := KeepModelGraph(modelShort, detShort, modelC.Blockers, detC.Blockers)
+
+				if keepReason != "" {
 					emit(PipelineEvent{
 						Phase: PhaseBuildGraph, Status: StatusSkip, Source: SourceLLM,
-						Message: "Keeping the model's graph despite its blockers: " + detShort +
-							", so falling back would lose a capability you asked for.",
+						Message: "Keeping the model's graph despite its blockers: " + keepReason + ".",
 					})
 					compileRes.Notes = append(compileRes.Notes,
-						"This graph still has unresolved blockers, kept because the deterministic "+
-							"alternative "+detShort+". Fix the blockers rather than regenerating.")
+						"This graph still has unresolved blockers, kept because "+
+							noteReason+". Fix the blockers rather than regenerating.")
 					ok = true
 				} else {
 					emit(PipelineEvent{
@@ -597,4 +657,46 @@ func countIssues(pf PreflightResult, c ContractResult) int {
 		n += len(pf.Blockers)
 	}
 	return n
+}
+
+// keepModelGraph decides whether to keep the builder model's graph instead of
+// swapping in the deterministic skeleton, and says why.
+//
+// Returns ("", "") to fall back. The two strings are the progress-event reason
+// and the shorter note pinned to the draft.
+//
+// Two ways the swap can be a downgrade:
+//
+//  1. Coverage. The skeletons are hardcoded to web_search and name no MCP, so
+//     falling back can quietly replace a graph that used the capability the user
+//     asked for with one that does not. Blockers are on screen with a Fix
+//     button; "it used web_search instead of your travel MCP" is invisible until
+//     someone reads the nodes.
+//
+//  2. Contract health. This one was not checked at all, and it is the one that
+//     bit. Observed live: a prompt naming three parallel analysts and an editor
+//     produced a model graph carrying ONE blocker. It was discarded for a
+//     deterministic skeleton carrying TWO blockers and two warnings — a two-node
+//     "search then summarize" that had also dropped every agent in the request.
+//     The entire justification for falling back is that the replacement is
+//     sounder; when it is not, there is nothing being traded for, and the graph
+//     that at least matches the request should survive.
+//
+// Ties keep the model's graph deliberately. Equal blockers means the fallback
+// buys nothing, and the model's graph is the one shaped like what was asked.
+// KeepModelGraph is exported so the synchronous /compile handler takes the
+// SAME decision as the streamed pipeline. It was duplicated before, and only
+// one copy got fixed.
+func KeepModelGraph(modelShortfall, detShortfall string, modelBlockers, detBlockers int) (reason, note string) {
+	if detShortfall != "" && modelShortfall == "" {
+		return detShortfall + ", so falling back would lose a capability you asked for",
+			"the deterministic alternative " + detShortfall
+	}
+	if detBlockers >= modelBlockers {
+		return fmt.Sprintf(
+				"the deterministic alternative has %d blocker(s) of its own against this graph's %d, so falling back would not make it any readier to save",
+				detBlockers, modelBlockers),
+			fmt.Sprintf("the deterministic alternative carries %d blocker(s) of its own", detBlockers)
+	}
+	return "", ""
 }

@@ -65,6 +65,11 @@ type Catalog struct {
 	// is unlikely to produce a different answer; naming the omission is.
 	MustUseTools  []string `json:"must_use_tools,omitempty"`
 	MustUseSkills []string `json:"must_use_skills,omitempty"`
+	// StructureCorrection is the same idea for SHAPE rather than capability: set
+	// on a structure retry, when the first graph collapsed a described fan-out
+	// into one step. Rendered verbatim ahead of the catalogue for the same
+	// reason MustUse is — it frames how the rest of the brief is read.
+	StructureCorrection string `json:"structure_correction,omitempty"`
 	// KnowledgeBases are the knowledge bases the agent could draw on, so Studio
 	// can attach a relevant KB instead of starting from scratch (Story #7).
 	KnowledgeBases []CatalogKB `json:"knowledge_bases,omitempty"`
@@ -265,6 +270,15 @@ type Draft struct {
 	MaxSteps     int    `json:"max_steps,omitempty"`
 	MaxPlanSteps int    `json:"max_plan_steps,omitempty"`
 	MaxTurns     int    `json:"max_turns,omitempty"`
+	// Memory is the agent's memory policy (scopes + token budget), carried so a
+	// Studio round-trip does not reset it.
+	//
+	// The budgets above were preserved only for AGENT drafts. A workflow draft
+	// dropped max_turns and memory on open and re-emitted hard-coded defaults on
+	// save, so opening a workflow to fix one node quietly reset a tuned
+	// max_tokens back to 8000 and max_turns back to 15 — with no diff shown and
+	// nothing in the save response to notice. nil means "use Studio's default".
+	Memory *agent.MemoryPolicy `json:"memory,omitempty"`
 	// RunTimeout is the whole-run wall-clock cap (top-level agent field, distinct
 	// from the reasoning step/total budgets). Carried so it survives a Studio
 	// round-trip — without it the code view re-rendered SOUL.yaml without the
@@ -438,6 +452,11 @@ const canonicalExample = `{
 // `graph` selects the wording: a workflow is corrected by adding a tool NODE, an
 // agent by adding to its tool allowlist.
 func writeMustUseBlock(sb *strings.Builder, catalog Catalog, graph bool) {
+	// Structure corrections ride in the same slot: both are "your last attempt
+	// missed something specific", and both must be read before the catalogue.
+	if c := strings.TrimSpace(catalog.StructureCorrection); c != "" {
+		sb.WriteString(c)
+	}
 	if len(catalog.MustUseTools) == 0 && len(catalog.MustUseSkills) == 0 {
 		return
 	}
@@ -721,6 +740,14 @@ func ParseDraft(raw string) (Draft, error) {
 		// the model may add, but still fail loudly on structurally bad JSON.
 		var d2 Draft
 		if err2 := json.Unmarshal([]byte(s), &d2); err2 != nil {
+			// Last tolerance: a raw newline inside a string literal. Node inputs
+			// and system prompts are multi-line, and a model that writes them out
+			// literally instead of escaping them produces JSON that is illegal by
+			// one byte per line. Repair and retry rather than discard the graph.
+			var d3 Draft
+			if err3 := json.Unmarshal([]byte(escapeRawControlChars(s)), &d3); err3 == nil {
+				return d3, nil
+			}
 			return Draft{}, fmt.Errorf("studio: parse draft: %w", err2)
 		}
 		return d2, nil
@@ -880,6 +907,10 @@ func Compile(ctx context.Context, llm LLM, intent string, catalog Catalog, answe
 	// kind it can actually satisfy instead. Whole-draft only — the per-node
 	// compiler still rejects these, since there the user asked for that step.
 	reconcileNodeKinds(&draft)
+
+	// Same class, different field: strip iteration settings from a node that
+	// cannot iterate, rather than discarding the graph they sit on.
+	reconcileIterationFields(&draft)
 
 	// Auto-declare any edge-referenced port the model forgot to list on a node.
 	// reasoning.CompileFlow is strict (a named from_port/to_port MUST appear in
@@ -1387,6 +1418,42 @@ func normalizeFlow(d *Draft) {
 // downgrading it would be wrong. But when generating a whole workflow, one
 // mislabelled step must not discard the entire otherwise-valid draft — the
 // strict compiler would throw away a good graph over a single slip.
+// reconcileIterationFields removes item_var / max_parallel from nodes that
+// cannot use them.
+//
+// A builder model wrote max_parallel and item_var onto a kind=parallel node —
+// which reads perfectly sensible, since a fan-out plainly does run things at
+// once — and CompileFlow answered:
+//
+//	flow: node "parallel_reviewers" declares item_var/max_parallel without for_each
+//
+// The entire three-specialist graph was thrown away over it, and the user got
+// the straight-line template. The engine now HONOURS max_parallel on a fan-out
+// (it bounds branch concurrency, which is what the model meant). item_var still
+// has no meaning there — a fan-out iterates over edges, not items — so it is
+// dropped here, along with both fields on any other kind that cannot iterate.
+//
+// Dropping is safe precisely because these fields did nothing: today they are a
+// hard compile error everywhere this function touches them, so no behaviour is
+// being silently changed — only a graph is being kept instead of binned.
+func reconcileIterationFields(d *Draft) {
+	if d == nil {
+		return
+	}
+	for i := range d.Flow.Nodes {
+		n := &d.Flow.Nodes[i]
+		if strings.TrimSpace(n.ForEach) != "" {
+			continue // a real for_each owns both fields
+		}
+		if n.Kind == sdkr.FlowNodeParallel {
+			n.ItemVar = "" // meaningless on a fan-out; max_parallel is kept and honoured
+			continue
+		}
+		n.ItemVar = ""
+		n.MaxParallel = 0
+	}
+}
+
 func reconcileNodeKinds(d *Draft) {
 	if d == nil {
 		return
@@ -1645,4 +1712,104 @@ func analyze(d Draft) ([]Question, []string) {
 	notes = append(notes, fmt.Sprintf("Flow has %d node(s) entering at %q.", len(d.Flow.Nodes), d.Flow.Entry))
 
 	return questions, notes
+}
+
+// escapeRawControlChars escapes literal control characters that appear INSIDE a
+// JSON string literal, so a payload that is illegal by one byte per line parses
+// instead of being thrown away.
+//
+// JSON forbids a raw newline between quotes; it must be written \n. Models
+// routinely emit the real byte, because the values here are exactly the
+// multi-line ones — a system prompt, a node input carrying an embedded
+// document, a description written as a list. One un-escaped newline invalidates
+// the entire object.
+//
+// Observed live building a multi-agent workflow: the builder returned
+// "parse agent spec: invalid character '\n' in string literal", the whole graph
+// was discarded, and the run fell back to a deterministic two-node skeleton with
+// no agents in it. The user's structure was lost to a quoting slip.
+//
+// Only bytes inside a string literal are touched, and only ones that are
+// ILLEGAL there. Valid JSON contains no such bytes, so this is a no-op on it —
+// which is why callers can safely apply it as a retry after a parse failure
+// without risking a different interpretation of a document that already parsed.
+//
+// Escapes are tracked so a backslash-escaped quote does not look like the end
+// of the string; getting that wrong would corrupt every value after the first
+// escaped quote.
+func escapeRawControlChars(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) + 16)
+	inString := false
+	escaped := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if escaped {
+			b.WriteByte(c)
+			escaped = false
+			continue
+		}
+		switch {
+		case c == '\\' && inString:
+			// A backslash that does not begin a legal escape. JSON allows only
+			// \" \\ \/ \b \f \n \r \t and \uXXXX; anything else is a parse
+			// error. Models produce these constantly — "\-" from markdown
+			// escaping, "\d" from a regex, a Windows path — and each one costs
+			// the whole document. Observed live: "parse agent spec: invalid
+			// character '-' in string escape code" discarded a generated graph.
+			//
+			// A backslash the model did not mean as an escape is a literal
+			// backslash, so write it as one.
+			if validJSONEscape(s, i+1) {
+				b.WriteByte(c)
+				escaped = true
+			} else {
+				b.WriteString(`\\`)
+			}
+		case c == '"':
+			inString = !inString
+			b.WriteByte(c)
+		case inString && c < 0x20:
+			switch c {
+			case '\n':
+				b.WriteString(`\n`)
+			case '\r':
+				b.WriteString(`\r`)
+			case '\t':
+				b.WriteString(`\t`)
+			default:
+				fmt.Fprintf(&b, `\u%04x`, c)
+			}
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
+
+// validJSONEscape reports whether the byte at i begins a legal JSON escape.
+//
+// \u is only legal with four hex digits behind it, so a truncated "\u12" is
+// treated as a literal backslash rather than passed through to fail the parse.
+func validJSONEscape(s string, i int) bool {
+	if i >= len(s) {
+		return false
+	}
+	switch s[i] {
+	case '"', '\\', '/', 'b', 'f', 'n', 'r', 't':
+		return true
+	case 'u':
+		if i+4 >= len(s) {
+			return false
+		}
+		for j := i + 1; j <= i+4; j++ {
+			c := s[j]
+			isHex := (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+			if !isHex {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }

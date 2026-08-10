@@ -11,6 +11,13 @@
   // sandboxed iframe plugin. The old postMessage RPC bridge is replaced by a
   // thin client that calls the gateway directly through the GUI's
   // authenticated `api` session (studioApi.js keeps the same `bridge` shape).
+  // `api` was USED in this file (three call sites) and never imported, so every
+  // one of them threw ReferenceError. All three sit inside try/catch, so the
+  // failure surfaced as "could not preview the change" — a message about the
+  // change, not about a missing import — and the repair-preview feature was
+  // quietly dead. Svelte compiles an undeclared identifier as a global, so
+  // nothing failed at build time either.
+  import { api } from '../lib/api.js'
   import { bridge } from '../lib/studio/studioApi.js'
   import { editAgent, studioDebugRun, studioSession } from '../lib/stores.js'
   import { toFlow, kindMeta } from '../lib/studio/graph.js'
@@ -2923,6 +2930,18 @@ Use null for fields that are not present.`
             closePreflight()
             openAgentModelPicker()
             return
+          case 'rename_agent':
+            // The collision is fixed by typing a different name, so put the
+            // user in front of that field with it selected. Sending them to the
+            // canvas — the default below — would land them nowhere near it.
+            closePreflight()
+            viewMode = 'canvas'
+            goStep(STEP_SAVE)
+            setTimeout(() => {
+              const el = document.querySelector('[data-agent-name-field]')
+              if (el) { el.focus(); el.select() }
+            }, 0)
+            return
           case 'add_assertions':
           case 'run_live':
             // Both are fixed at the bench: add an assertion, or exercise it live.
@@ -3280,7 +3299,6 @@ Use null for fields that are not present.`
   // An apply-repair response for the selected failed run. Null until a repair
   // has been proposed AND judged, so the review UI only appears once there is
   // something real to review.
-  let failedRepair = null
   let loadingFailed = false
   let healing = '' // id currently being healed
   let healResult = null
@@ -3342,6 +3360,29 @@ Use null for fields that are not present.`
     showFailedRuns = !showFailedRuns
     if (showFailedRuns) await loadFailedRuns()
   }
+  // "Retry unchanged" has to run the agent unchanged.
+  //
+  // It was wired to healFailedRun — the same handler as "Propose a repair" —
+  // so the button offered next to a TRANSIENT fault (a timeout, a 503) instead
+  // diagnosed the agent and suggested editing it. Two buttons, two different
+  // promises, one behaviour, and the one that lied was the one whose whole
+  // point is that nothing needs changing.
+  async function retryFailedRun(run) {
+    const agentId = run && (run.agentId || run.agent_id)
+    if (!agentId || healing) return
+    healing = `retry:${agentId}`
+    saveError = ''
+    try {
+      await api.agents.trigger(agentId)
+      toast('Re-running — check Failed runs again in a moment to see whether it passed.')
+    } catch (e) {
+      // A 409 is the ordinary case when a schedule is mid-flight, not a fault.
+      saveError = (e && e.message) || 'could not re-run this agent'
+    } finally {
+      healing = ''
+    }
+  }
+
   async function healFailedRun(id) {
     if (healing) return
     healing = id
@@ -3407,7 +3448,12 @@ Use null for fields that are not present.`
       const alsoMade = peers.length
         ? ` Also created ${peers.length === 1 ? 'helper agent' : 'helper agents'} ${peers.join(', ')} — this workflow delegates to ${peers.length === 1 ? 'it' : 'them'}.`
         : ''
-      saveMsg = `Saved as disabled agent ${id} — enable it from Deployed.${alsoMade}`
+      // Say which of the two actually happened. A save that leaves a running
+      // agent running must not report it as disabled — that message was the
+      // only notice a user got, and for an edit it was wrong.
+      saveMsg = res.enabled
+        ? `Saved ${id} — it stays enabled and the schedule is updated.${alsoMade}`
+        : `Saved as disabled agent ${id} — enable it from Deployed.${alsoMade}`
       // The justification belongs to the save that consumed it; carrying it into
       // the next one would silently reuse a reason the user never re-affirmed.
       acceptReason = ''
@@ -4796,6 +4842,10 @@ Use null for fields that are not present.`
            the Describe step's prompt box, and continuing existing work is the
            list beside it. Two toolbar buttons doing what step 1 already does
            made the wizard look like a veneer over the old screen. -->
+      <button class="btn" type="button" on:click={openLibrary}
+              data-tooltip="Open another agent, workflow or draft">
+        Open workflows{#if libCount}<span class="toolbar-count">{libCount}</span>{/if}
+      </button>
       <button class="btn" type="button" on:click={openRules} data-tooltip="Edit the SOUL.yaml authoring rules used when generating, validating, and fixing">📋 Rules</button>
       <button class="btn" type="button" on:click={openModelPicker} data-tooltip="Choose which in-framework provider/model Studio uses to BUILD agents">⚙ Builds with: {studioModelLabel}</button>
       {#if workflow}
@@ -4848,16 +4898,11 @@ Use null for fields that are not present.`
       {#if step === STEP_SAVE && saveBlocked}
         <span class="steprail-block" title={saveBlocked}>⚠ {saveBlocked}</span>
       {/if}
-      <!-- Reachable from EVERY step, not just Describe. Once you are in Build or
-           Test there was no way back to your other agents without abandoning the
-           draft to step 1. Lives on the rail rather than the toolbar so it is one
-           control in one place instead of the two that were removed. -->
-      <button class="btn btn-sm" type="button" on:click={openLibrary}
-        data-tooltip="Open another agent, workflow or draft">
-        Open… {#if libCount}<span class="steprail-count">{libCount}</span>{/if}
-      </button>
-      <button class="btn btn-sm" type="button" on:click={openModelPicker}
-        data-tooltip="Which model Studio uses to generate">Model: {studioModelLabel}</button>
+      <!-- "Open…" and "Model:" used to sit here. Both moved out: opening other
+           work is a toolbar action like every other navigation control, and the
+           model button duplicated the toolbar's "Builds with:" chip, which says
+           the same thing with the provider spelled out. Two controls for one
+           setting invites the reader to wonder which one is authoritative. -->
     </div>
   </div>
 
@@ -5022,12 +5067,13 @@ Use null for fields that are not present.`
               <h4 class="step-h">Agent details</h4>
               <label class="save-field">
                 <span>Agent name</span>
-                <input type="text" bind:value={workflow.name} placeholder="Name this agent" />
+                <input type="text" bind:value={workflow.name} placeholder="Name this agent"
+                       data-agent-name-field />
               </label>
 
               <div class="save-note">
-                <strong>Saved as disabled</strong>
-                <span>New agents are always saved disabled so you review and deploy them explicitly. Deploy from My workflows.</span>
+                <strong>New agents are saved disabled</strong>
+                <span>A new agent is staged so you review and deploy it explicitly — from My workflows. Editing an agent you have already enabled leaves it enabled, so a fix does not silently stop its schedule.</span>
               </div>
 
               {#if (workflow.channels || []).length}
@@ -6244,13 +6290,11 @@ Use null for fields that are not present.`
               <FailedRunsPanel
                 runs={failedRuns}
                 diagnosis={runDiagnosis}
-                repair={failedRepair}
                 loading={loadingFailed}
                 busy={!!healing}
                 onSelect={(run) => { if (run && run.id) loadRunTrace(run.id, run.agentId).catch(() => {}) }}
                 onRepair={(run) => { if (run && run.id) healFailedRun(run.id) }}
-                onRetry={(run) => { if (run && run.id) healFailedRun(run.id) }}
-                onReject={() => (failedRepair = null)}
+                onRetry={(run) => retryFailedRun(run)}
                 onReveal={(nodeId) => { goStep(STEP_BUILD); revealNode(nodeId) }}
               />
               <button class="btn small" on:click={loadFailedRuns} disabled={loadingFailed}>Refresh</button>
@@ -7918,16 +7962,29 @@ Use null for fields that are not present.`
      the action row won the space and squeezed the name into a three-line
      column. Wider modal, and the row wraps under the item rather than
      compressing it. */
-  .library-modal { width: min(860px, 94vw); }
+  /* `.modal` sets width: min(460px, 92vw) and is declared LATER in this file.
+     This was `.library-modal` — one class, same specificity, so the later rule
+     won and the wider modal never happened. The two overrides that do work
+     (.modal.model-modal, .modal.yaml-browser) both qualify with .modal; this
+     one did not, and nothing failed loudly — it just silently stayed narrow.
+
+     At 460px the six action buttons took the row, .picker-main collapsed to
+     almost nothing, and `overflow-wrap: anywhere` below then broke the name at
+     EVERY character: "Stock Advisor" rendered as a vertical column of single
+     letters. */
+  .modal.library-modal { width: min(860px, 94vw); }
   .lib-item { display: flex; align-items: center; flex-wrap: wrap; }
-  .lib-item .picker-main { flex: 1 1 320px; min-width: 0; }
+  /* A real floor, not min-width: 0. Zero lets flex crush this to nothing, and a
+     name column narrower than one character is what produced the vertical text.
+     Below the floor the actions wrap underneath instead. */
+  .lib-item .picker-main { flex: 1 1 320px; min-width: 200px; }
   .lib-actions {
     display: flex; gap: 6px; padding: 0 10px 10px; flex: 1 1 auto;
     flex-wrap: wrap; justify-content: flex-end;
   }
   /* Names and descriptions get the room back; long ones ellipsise instead of
      stacking one word per line. */
-  .lib-item .picker-name, .lib-item .picker-desc { overflow-wrap: anywhere; }
+  .lib-item .picker-name, .lib-item .picker-desc { overflow-wrap: break-word; }
   @media (min-width: 720px) {
     /* Wide enough for one row: actions sit beside the item again. */
     .lib-item { flex-wrap: nowrap; }
@@ -8294,7 +8351,10 @@ Use null for fields that are not present.`
   .build-diagnosis .bd-action:disabled { opacity: 0.5; cursor: not-allowed; }
 
   /* "Built as an agent, not a workflow" explainer modal */
-  .agent-route-modal { max-width: 560px; }
+  /* Was `max-width: 560px` on a box `.modal` had already fixed at 460px, so
+     it did nothing at all. Same intent as the library modal — be wider than
+     the default — and the same reason it never happened. */
+  .modal.agent-route-modal { width: min(560px, 94vw); }
   .agent-route-reason {
     margin: 12px 0; padding: 10px 12px;
     background: rgba(124, 132, 255, 0.10);
@@ -9803,4 +9863,13 @@ Use null for fields that are not present.`
   .security-apply { align-self: flex-start; margin-top: .3rem; }
   .security-actions { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .3rem; }
   .security-actions .security-apply { margin-top: 0; }
+  .toolbar-count {
+    margin-left: 6px;
+    font-size: 11px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+  }
 </style>
