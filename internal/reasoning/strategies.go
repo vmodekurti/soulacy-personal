@@ -1061,7 +1061,50 @@ func firstNonNilMap(values ...map[string]any) map[string]any {
 	return nil
 }
 
+// truncateAtFabricatedObservation cuts a model completion at the first
+// "Observation:" it writes, because an observation is not the model's to write.
+//
+// The Think prompt renders history as Thought/Action/Observation triplets
+// (formatStepHistory), which is the shape the model is being asked to continue.
+// Nothing stopped it continuing PAST its own action: with no stop sequence, a
+// model will happily author the observation it hopes to receive, then a further
+// thought, action and observation, inventing an entire trajectory in one turn.
+//
+// Seen live on the Portfolio Replacement Strategist. Its narration contained a
+// market overview keyed SPX/NDX/DJI/VIX with sector_performance and top_movers
+// blocks, and a correlation payload with diversification_score, sector_breakdown
+// and prose notes. The real tools return neither shape: the overview is keyed
+// "^GSPC"/"^DJI" with name/symbol fields and no envelope, and the correlation
+// tool returns a bare "matrix" of full-precision floats — 0.6453931054478129,
+// not the tidy 0.72 in the narration. The numbers were invented too: ^GSPC was
+// 7753.11 that day, the narration said SPX 6120.46.
+//
+// This is the worst failure mode available to a financial agent, because the
+// invention is indistinguishable from data: fabricated observations enter the
+// step history, become the prompt for the next turn, and the conclusions get
+// built on them and presented with the same confidence as real figures.
+//
+// Truncating leaves exactly one proposed action, which the runtime then executes
+// for real. The next turn continues from the observation that actually came
+// back, which is the whole point of the loop.
+func truncateAtFabricatedObservation(raw string) string {
+	lower := strings.ToLower(raw)
+	idx := strings.Index(lower, "observation:")
+	if idx < 0 {
+		return raw
+	}
+	// Only cut at a line-leading marker; "the observation: ..." inside a
+	// sentence is prose about an observation, not a forged one.
+	lineStart := strings.LastIndexByte(raw[:idx], '\n') + 1
+	if strings.TrimSpace(raw[lineStart:idx]) != "" {
+		return raw
+	}
+	return strings.TrimSpace(raw[:lineStart])
+}
+
 func recoverThinkResponseFromRaw(raw string, toolNames []string) (ThinkResponse, bool) {
+	// Only the runtime may write an Observation. See truncateAtFabricatedObservation.
+	raw = truncateAtFabricatedObservation(raw)
 	call, ok := recoverTextualToolCall(raw, toolNames)
 	if !ok {
 		answer := strings.TrimSpace(stripMarkdownFence(raw))
@@ -1238,7 +1281,45 @@ func canonicalAllowedTool(name string, toolNames []string) (string, bool) {
 			return canonicalName, true
 		}
 	}
-	return "", false
+	return resolveBareMCPTool(candidate, toolNames)
+}
+
+// resolveBareMCPTool matches a tool named WITHOUT its mcp__<server>__ prefix
+// against the one available tool that carries it.
+//
+// A model handed forty tools called mcp__maverick-mcp__market_data_get_quote
+// will sometimes write the readable half — market_data_get_quote — in a plan
+// step. Until now that made the tool "unavailable", and for plan_execute the
+// consequence was total: planUnavailableTool rejects the WHOLE plan on one
+// unrecognised name, so the run silently downgraded to ReAct and lost the very
+// things plan_execute is chosen for — the upfront plan, dependency gating,
+// parallel levels. What ran instead was greedy one-tool-at-a-time execution
+// that spent its whole step budget fetching and never reached an answer.
+//
+// Only an UNAMBIGUOUS match counts. If two servers both expose a "get_quote",
+// picking one would be guessing which server the author meant, and calling the
+// wrong server's tool is worse than reporting the name as unavailable.
+func resolveBareMCPTool(candidate string, toolNames []string) (string, bool) {
+	candidate = strings.TrimSpace(candidate)
+	if candidate == "" || strings.HasPrefix(candidate, "mcp__") {
+		return "", false
+	}
+	suffix := "__" + candidate
+	match := ""
+	for _, n := range toolNames {
+		n = strings.TrimSpace(n)
+		if !strings.HasPrefix(n, "mcp__") || !strings.HasSuffix(n, suffix) {
+			continue
+		}
+		if match != "" && match != n {
+			return "", false // two servers expose it; the author must say which
+		}
+		match = n
+	}
+	if match == "" {
+		return "", false
+	}
+	return match, true
 }
 
 func canonicalToolAlias(name string) string {

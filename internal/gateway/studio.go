@@ -2115,8 +2115,24 @@ func summarizeActionEvents(runID, sessionID string, events []message.Event) (stu
 			if txt := messagePayloadText(ev.Payload); txt != "" {
 				outParts = append(outParts, txt)
 			}
-			row.Status = "success"
-			row.Ok = true
+			// A reply sent AFTER a failure does not undo the failure.
+			//
+			// Events are replayed in timestamp order, and this arm used to set
+			// success unconditionally — so any run that errored and then still
+			// emitted something was filed as successful. That is the normal shape
+			// of a degraded run, not an exotic one: the loop gives up, the
+			// framework sends the last thing it has, and the run is recorded
+			// ok: true, status: "success", error: "context deadline exceeded" —
+			// all three at once, which cannot all be right.
+			//
+			// It is not cosmetic. Failed runs, the dead-letter queue and the
+			// scheduler's consecutive-failure auto-disable all read this. An agent
+			// that timed out every morning and replied with a fragment would never
+			// appear in any of them.
+			if row.Status != "failed" {
+				row.Status = "success"
+				row.Ok = true
+			}
 		case "error":
 			row.Status = "failed"
 			row.Ok = false
