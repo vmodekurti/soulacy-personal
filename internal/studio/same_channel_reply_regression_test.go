@@ -62,3 +62,45 @@ func TestGenerationDefaults_KeepsExplicitOutboundDelivery(t *testing.T) {
 		t.Fatalf("scheduled outbound delivery lost its confirmation policy: %v", d.ConfirmTools)
 	}
 }
+
+func TestCompileDeterministicAgent_AlwaysFillsEditableContract(t *testing.T) {
+	intent := "A conversational stock advisor that answers questions on the inbound http channel.\n\n1. TRIGGER: incoming http messages"
+	cat := Catalog{
+		Tools:    []string{"web_search"},
+		Channels: []string{"http"},
+	}
+	res, ok := CompileDeterministicAgent(intent, cat, "auto", nil)
+	if !ok {
+		t.Fatal("deterministic agent did not compile")
+	}
+	policy := res.Workflow.Policy
+	if policy == nil || policy.Contract == nil {
+		t.Fatal("deterministic agent left the editable contract absent")
+	}
+	c := policy.Contract
+	if c.Goal != "A conversational stock advisor that answers questions on the inbound http channel." {
+		t.Fatalf("goal = %q", c.Goal)
+	}
+	if strings.TrimSpace(c.Instructions) == "" {
+		t.Fatal("instructions were left blank")
+	}
+	if strings.TrimSpace(c.CompletionCriteria) == "" {
+		t.Fatal("completion criteria were left blank")
+	}
+}
+
+func TestGenerationDefaults_PreservesDesignerContract(t *testing.T) {
+	d := Draft{
+		Strategy: "auto",
+		Policy: &AgentPolicy{Contract: &AgentContract{
+			Goal:               "Keep this goal",
+			Instructions:       "Keep these instructions",
+			CompletionCriteria: "Keep this completion criterion",
+		}},
+	}
+	applyGenerationDefaults(&d, "a different intent")
+	c := d.Policy.Contract
+	if c.Goal != "Keep this goal" || c.Instructions != "Keep these instructions" || c.CompletionCriteria != "Keep this completion criterion" {
+		t.Fatalf("generation defaults overwrote the designer contract: %+v", c)
+	}
+}

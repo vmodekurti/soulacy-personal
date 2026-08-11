@@ -47,6 +47,9 @@ func applyGenerationDefaults(d *Draft, intent string) []string {
 	if strings.EqualFold(strings.TrimSpace(d.Trigger.Type), "schedule") {
 		d.Unattended = true
 	}
+	if ensureGeneratedAgentContract(d, intent) {
+		notes = append(notes, "Filled the editable agent contract from the requested outcome and runtime behavior.")
+	}
 	// Interactive replies already travel back through the request's channel.
 	// A builder that adds channel.send turns that ordinary response into a
 	// second, privileged outbound write, so Chat correctly stops for approval
@@ -84,6 +87,66 @@ func applyGenerationDefaults(d *Draft, intent string) []string {
 		}
 	}
 	return notes
+}
+
+// ensureGeneratedAgentContract makes the Build screen's editable contract a
+// contract of every generated reasoning agent, not an optional side effect of
+// which compiler path happened to run. Model-designed agents may provide richer
+// wording; deterministic and malformed-model fallbacks get concise, honest
+// defaults. Existing non-empty fields always win.
+func ensureGeneratedAgentContract(d *Draft, intent string) bool {
+	if d == nil || strings.TrimSpace(d.Strategy) == "" {
+		return false
+	}
+	changed := false
+	if d.Policy == nil {
+		d.Policy = &AgentPolicy{}
+		changed = true
+	}
+	if d.Policy.Contract == nil {
+		d.Policy.Contract = &AgentContract{}
+		changed = true
+	}
+	c := d.Policy.Contract
+	if strings.TrimSpace(c.Goal) == "" {
+		c.Goal = conciseContractGoal(intent)
+		changed = true
+	}
+	if strings.TrimSpace(c.Instructions) == "" {
+		c.Instructions = "Use only the capabilities attached to this agent. Read actual tool results before responding, never fabricate unavailable data or successful actions, and return a clear fallback when a required step cannot be completed."
+		changed = true
+	}
+	if strings.TrimSpace(c.CompletionCriteria) == "" {
+		switch {
+		case sameChannelReplyIntent(intent):
+			c.CompletionCriteria = "A complete, human-readable answer has been returned through the inbound channel, or a clear fallback explains what could not be completed."
+		case strings.EqualFold(strings.TrimSpace(d.Trigger.Type), "schedule") || d.Output != nil:
+			c.CompletionCriteria = "The requested result has been produced and delivered to the configured destination, or a clear fallback names the failed step."
+		default:
+			c.CompletionCriteria = "Every requested operation has completed and the final result, or a clear fallback, has been returned to the user."
+		}
+		changed = true
+	}
+	return changed
+}
+
+func conciseContractGoal(intent string) string {
+	text := strings.TrimSpace(intent)
+	if text == "" {
+		return "Complete the user's request using the agent's available capabilities."
+	}
+	// Refined Studio prompts often continue with numbered TRIGGER/INPUT/STEPS
+	// sections. The opening line is the actual outcome and is what belongs in a
+	// two-line Goal box; copying the entire refined specification makes the field
+	// technically non-empty but unusable.
+	if i := strings.IndexByte(text, '\n'); i >= 0 {
+		text = strings.TrimSpace(text[:i])
+	}
+	const maxGoal = 280
+	if len(text) > maxGoal {
+		text = strings.TrimSpace(text[:maxGoal]) + "…"
+	}
+	return text
 }
 
 func normalizeSameChannelReply(d *Draft, intent string) bool {
