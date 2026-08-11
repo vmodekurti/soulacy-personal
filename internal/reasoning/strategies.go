@@ -1281,7 +1281,45 @@ func canonicalAllowedTool(name string, toolNames []string) (string, bool) {
 			return canonicalName, true
 		}
 	}
-	return "", false
+	return resolveBareMCPTool(candidate, toolNames)
+}
+
+// resolveBareMCPTool matches a tool named WITHOUT its mcp__<server>__ prefix
+// against the one available tool that carries it.
+//
+// A model handed forty tools called mcp__maverick-mcp__market_data_get_quote
+// will sometimes write the readable half — market_data_get_quote — in a plan
+// step. Until now that made the tool "unavailable", and for plan_execute the
+// consequence was total: planUnavailableTool rejects the WHOLE plan on one
+// unrecognised name, so the run silently downgraded to ReAct and lost the very
+// things plan_execute is chosen for — the upfront plan, dependency gating,
+// parallel levels. What ran instead was greedy one-tool-at-a-time execution
+// that spent its whole step budget fetching and never reached an answer.
+//
+// Only an UNAMBIGUOUS match counts. If two servers both expose a "get_quote",
+// picking one would be guessing which server the author meant, and calling the
+// wrong server's tool is worse than reporting the name as unavailable.
+func resolveBareMCPTool(candidate string, toolNames []string) (string, bool) {
+	candidate = strings.TrimSpace(candidate)
+	if candidate == "" || strings.HasPrefix(candidate, "mcp__") {
+		return "", false
+	}
+	suffix := "__" + candidate
+	match := ""
+	for _, n := range toolNames {
+		n = strings.TrimSpace(n)
+		if !strings.HasPrefix(n, "mcp__") || !strings.HasSuffix(n, suffix) {
+			continue
+		}
+		if match != "" && match != n {
+			return "", false // two servers expose it; the author must say which
+		}
+		match = n
+	}
+	if match == "" {
+		return "", false
+	}
+	return match, true
 }
 
 func canonicalToolAlias(name string) string {
