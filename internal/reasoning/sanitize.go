@@ -3,6 +3,7 @@ package reasoning
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -388,15 +389,29 @@ func extractJSONStringField(s, key string) (string, bool) {
 	return "", false
 }
 
-// gracefulFallback derives a readable answer when no clean one is available:
-// the most recent non-empty tool observation if it looks human-readable,
-// otherwise a short message pointing at the reasoning trace.
+// gracefulFallback is what the user sees when the loop finished without
+// producing an answer. It shows the most recent readable observation, LABELLED
+// as an unfinished fragment — never dressed up as the reply.
+//
+// The label is the whole point. Asked to advise on replacing a three-stock
+// portfolio, an agent spent all 26 of its reasoning steps gathering data — the
+// three quotes, a correlation matrix, screens, fundamentals for nine candidate
+// replacements — hit its step ceiling before writing anything, and this
+// function handed back the last observation verbatim:
+//
+//	ticker: CVX; status: success; current_price: 194.91; outlook: strongly bullish
+//
+// One line, about a ticker the user never mentioned, presented as the answer to
+// their question. Nothing distinguished it from a real reply: not the wording,
+// not the shape, not the run status. Showing the fragment is defensible — it is
+// evidence, and binning it helps nobody. Showing it SILENTLY is not, because the
+// reader cannot tell an answer from a leftover.
 func gracefulFallback(steps []Step) string {
 	if obs := lastObservationDisplay(steps, false); obs != "" {
-		return obs
+		return unfinishedAnswer(obs, steps)
 	}
 	if obs := lastObservationDisplay(steps, true); obs != "" {
-		return obs
+		return unfinishedAnswer(obs, steps)
 	}
 	for i := len(steps) - 1; i >= 0; i-- {
 		content := strings.TrimSpace(steps[i].Obs.Content)
@@ -404,10 +419,27 @@ func gracefulFallback(steps []Step) string {
 			continue
 		}
 		if looksReadable(content) {
-			return content
+			return unfinishedAnswer(content, steps)
 		}
 	}
 	return "I worked through several reasoning steps but couldn't produce a clean final answer. Open the reasoning trace above to see what happened, or ask me to continue."
+}
+
+// UnfinishedAnswerPrefix marks a reply that is a fragment of the agent's working
+// rather than an answer. Exported so a caller can detect one without matching
+// prose — delivery, tests and the run ledger all need to tell the two apart.
+const UnfinishedAnswerPrefix = "I ran out of reasoning steps"
+
+// unfinishedAnswer frames a leftover observation as what it is.
+//
+// It names the step budget because that is the one thing the reader can act on,
+// and it is almost always the reason: a loop that ends holding data but no
+// answer has usually spent its steps fetching rather than concluding.
+func unfinishedAnswer(fragment string, steps []Step) string {
+	return UnfinishedAnswerPrefix + " (" + strconv.Itoa(len(steps)) +
+		" used) before I could write the answer, so this is unfinished. " +
+		"Below is the last thing I retrieved — a fragment of my working, not a reply to your question. " +
+		"Ask me to continue, or raise this agent's step budget.\n\n---\n\n" + strings.TrimSpace(fragment)
 }
 
 func isPlaceholderFinalAnswer(s string) bool {

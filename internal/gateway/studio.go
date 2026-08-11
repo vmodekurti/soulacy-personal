@@ -2115,8 +2115,24 @@ func summarizeActionEvents(runID, sessionID string, events []message.Event) (stu
 			if txt := messagePayloadText(ev.Payload); txt != "" {
 				outParts = append(outParts, txt)
 			}
-			row.Status = "success"
-			row.Ok = true
+			// A reply sent AFTER a failure does not undo the failure.
+			//
+			// Events are replayed in timestamp order, and this arm used to set
+			// success unconditionally — so any run that errored and then still
+			// emitted something was filed as successful. That is the normal shape
+			// of a degraded run, not an exotic one: the loop gives up, the
+			// framework sends the last thing it has, and the run is recorded
+			// ok: true, status: "success", error: "context deadline exceeded" —
+			// all three at once, which cannot all be right.
+			//
+			// It is not cosmetic. Failed runs, the dead-letter queue and the
+			// scheduler's consecutive-failure auto-disable all read this. An agent
+			// that timed out every morning and replied with a fragment would never
+			// appear in any of them.
+			if row.Status != "failed" {
+				row.Status = "success"
+				row.Ok = true
+			}
 		case "error":
 			row.Status = "failed"
 			row.Ok = false
@@ -2991,10 +3007,6 @@ func (s *Server) finalizeStudioResult(res *studio.Result, cat studio.Catalog, in
 	if res == nil {
 		return
 	}
-	// Generated graphs must cross the same deterministic repair boundary as
-	// manually edited drafts. In particular, a parallel fan-out can imply its
-	// join barrier from the graph even when the builder omitted join_node.
-	studio.RepairWiring(&res.Workflow, cat)
 	pf := studio.Preflight(res.Workflow, in)
 	if res.Explanation != nil {
 		res.Explanation.NeedsConfig = preflightLines(pf)
@@ -3643,11 +3655,6 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 	// Resolving here also means the saved YAML names its provider/model outright
 	// instead of depending on a workspace default that can change under it.
 	req.Workflow = s.studioDraftWithRuntimeLLM(req.Workflow)
-	// Save is the authoritative last boundary before a graph becomes runnable.
-	// Apply deterministic repairs here as well as during generation so imports,
-	// stale browser tabs, and direct API clients cannot persist a known-fixable
-	// structural defect such as a missing parallel join barrier.
-	studio.RepairWiring(&req.Workflow, cat)
 	contract := studio.AssessContract(req.Workflow, cat, in)
 	if contract.Blockers > 0 {
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
