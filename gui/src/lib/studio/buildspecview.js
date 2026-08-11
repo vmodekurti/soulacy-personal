@@ -45,6 +45,75 @@ function stageLines(stages) {
   }).filter((l) => l.trim())
 }
 
+function triggerQuestion(q) {
+  const text = `${q && q.id || ''} ${q && q.field || ''} ${q && q.question || ''}`.toLowerCase()
+  return /schedule|cron|time of day/.test(text)
+}
+
+/**
+ * Apply the operator's creation-time trigger choice to the review spec.
+ *
+ * The server spec is an inference from prose. Once a person selects a trigger,
+ * continuing to show the inferred schedule (and its required destination/time
+ * questions) makes the review panel contradict the value that will be saved.
+ * Return a copy so the raw server response remains available for comparison.
+ */
+export function specWithTrigger(spec, selection) {
+  if (!spec || !selection) return spec
+
+  const type = selection.type || 'auto'
+  const deliveryChoice = selection.delivery || 'auto'
+  if (type === 'auto' && deliveryChoice === 'auto') return spec
+  const channel = String(selection.channel || '').trim()
+  const destination = String(selection.destination || '').trim()
+  const cron = String(selection.cron || '').trim()
+  const labels = {
+    manual: 'manual / on demand',
+    schedule: 'schedule',
+    channel: channel ? `incoming ${channel} message` : 'incoming channel message',
+    webhook: 'inbound webhook',
+  }
+  const keepQuestion = (q) => {
+    // The trigger control owns this value and validates it separately.
+    if (type !== 'auto' && triggerQuestion(q)) return false
+    // Manual, webhook and same-channel conversational runs do not need the
+    // outbound destination that a scheduled job requires. A user can still add
+    // delivery after generation; it must not remain a stale generation gate.
+    if (((type !== 'auto' && type !== 'schedule' && deliveryChoice === 'auto') ||
+        deliveryChoice !== 'auto') && isDeliveryQuestion(q)) return false
+    // GenerationTrigger owns channel selection, so do not render a second,
+    // conflicting input-channel question below it.
+    if (type === 'channel' && (q?.field === 'trigger' || q?.id === 'input_channel')) return false
+    return true
+  }
+  const questions = (Array.isArray(spec.questions) ? spec.questions : []).filter(keepQuestion)
+  const blockers = (Array.isArray(spec.blockers) ? spec.blockers : []).filter(keepQuestion)
+  const next = {
+    ...spec,
+    trigger: type === 'auto' ? spec.trigger : (labels[type] || type),
+    schedule: type === 'auto' ? spec.schedule : (type === 'schedule' ? cron : ''),
+    schedule_text: type === 'auto' ? spec.schedule_text : (type === 'schedule' ? cron : ''),
+    questions,
+    blockers,
+    ready: blockers.length === 0 && !questions.some((q) => q && q.blocker),
+  }
+  if (deliveryChoice === 'reply') {
+    next.delivery = ['Reply on the inbound channel']
+  } else if (deliveryChoice === 'none') {
+    next.delivery = []
+  } else if (deliveryChoice !== 'auto') {
+    next.delivery = [destination ? `${deliveryChoice} → ${destination}` : deliveryChoice]
+  } else if (type !== 'auto' && type !== 'schedule') {
+    next.delivery = type === 'channel' && channel ? [`Reply on ${channel}`] : []
+  }
+  if (deliveryChoice === 'reply' || deliveryChoice === 'none' ||
+      (deliveryChoice === 'auto' && type !== 'auto' && type !== 'schedule')) {
+    next.security = (Array.isArray(spec.security) ? spec.security : [])
+      .filter((item) => !/^sends messages on your behalf/i.test(String(item || '')))
+  }
+  return next
+}
+
 /**
  * specRows builds the ordered review rows.
  * `spec` is the build-spec payload; `recommendation` is { mode, rationale }.

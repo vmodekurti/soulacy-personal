@@ -91,14 +91,55 @@ export function scheduleOutputPatch(draft, patch) {
 // runs. Apply it after compilation: the builder is still free to infer a
 // trigger when `type` is "auto", but it cannot replace a choice the user made.
 export function applyGenerationTrigger(draft, selection) {
-  if (!draft || !selection || selection.type === 'auto') return draft
+  if (!draft || !selection) return draft
 
   const type = selection.type
-  let next = { ...draft, ...triggerTypePatch(draft, type) }
+  let next = type === 'auto' ? draft : { ...draft, ...triggerTypePatch(draft, type) }
   if (type === 'schedule') {
     next = { ...next, ...triggerCronPatch(next, selection.cron || '') }
   } else if (type === 'channel') {
     next = { ...next, ...triggerChannelPatch(next, selection.channel || '') }
   }
+  const delivery = selection.delivery || 'auto'
+  if (delivery === 'reply' || delivery === 'none') {
+    next = { ...next, output: null }
+  } else if (delivery !== 'auto') {
+    const channels = channelsOf(next)
+    if (!channels.includes(delivery)) channels.push(delivery)
+    next = {
+      ...next,
+      channels,
+      output: { ...outputOf(next), channel: delivery, to: String(selection.destination || '').trim() },
+    }
+  }
   return next
+}
+
+// Give the builder/refiner the same authoritative choice that is applied to
+// the resulting draft. This prevents a model from writing a scheduled-agent
+// system prompt and then having only the YAML trigger patched to conversational.
+export function intentWithGenerationTrigger(intent, selection) {
+  const text = String(intent || '').trim()
+  if (!text || !selection) return text
+
+  const channel = String(selection.channel || '').trim()
+  const cron = String(selection.cron || '').trim()
+  const triggerInstruction = {
+    manual: 'Run only when invoked manually or from an interactive chat. Do not add a schedule or proactive delivery.',
+    schedule: `Run on this cron schedule: ${cron}. Treat this schedule as authoritative.`,
+    channel: `Run when a message arrives${channel ? ` on ${channel}` : ''}. Reply conversationally on that inbound channel. Do not convert this into a scheduled job or require a separate outbound destination.`,
+    webhook: 'Run only when an inbound webhook request arrives. Do not add a schedule or proactive delivery.',
+  }[selection.type]
+  const delivery = selection.delivery || 'auto'
+  const destination = String(selection.destination || '').trim()
+  const deliveryInstruction = delivery === 'reply'
+    ? 'Reply on the same inbound channel; do not invent a separate destination.'
+    : delivery === 'none'
+      ? 'Return the result to the caller only; do not send it to a channel.'
+      : delivery !== 'auto'
+        ? `Deliver outbound results through ${delivery}${destination ? ` to ${destination}` : ''}; do not substitute another channel.`
+        : ''
+  const instructions = [triggerInstruction, deliveryInstruction].filter(Boolean)
+  if (!instructions.length) return text
+  return `${text}\n\nStudio run settings (authoritative): ${instructions.join(' ')}`
 }

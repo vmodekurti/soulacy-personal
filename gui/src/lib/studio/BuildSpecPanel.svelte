@@ -79,6 +79,15 @@
     <div class="bs-error" role="alert">{error}</div>
   {/if}
 
+  <!-- This is an operator decision, not another inferred row. Keep it above
+       the interpretation it controls so changing it visibly updates every
+       dependent field below. -->
+  <GenerationTrigger
+    selection={generationTrigger}
+    {channels}
+    onChange={onGenerationTrigger}
+  />
+
   {#if loading}
     <p class="bs-muted">Reading your description…</p>
   {:else if !spec}
@@ -211,12 +220,6 @@
         {/each}
       </details>
     {/if}
-
-    <GenerationTrigger
-      selection={generationTrigger}
-      {channels}
-      onChange={onGenerationTrigger}
-    />
 
     <div class="bs-actions">
       <button class="btn" type="button" disabled={busy} on:click={onRefine}>
