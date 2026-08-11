@@ -47,6 +47,15 @@ func applyGenerationDefaults(d *Draft, intent string) []string {
 	if strings.EqualFold(strings.TrimSpace(d.Trigger.Type), "schedule") {
 		d.Unattended = true
 	}
+	// Interactive replies already travel back through the request's channel.
+	// A builder that adds channel.send turns that ordinary response into a
+	// second, privileged outbound write, so Chat correctly stops for approval
+	// and the user sees their answer trapped inside an Action Required modal.
+	// Enforce this after model/deterministic capability selection, before
+	// confirmation defaults are derived, so every Studio generation path agrees.
+	if normalizeSameChannelReply(d, intent) {
+		notes = append(notes, "Removed outbound channel tools from a same-channel conversational agent; normal replies are returned automatically.")
+	}
 
 	tools := allDraftTools(*d, nil)
 	var added []string
@@ -75,6 +84,68 @@ func applyGenerationDefaults(d *Draft, intent string) []string {
 		}
 	}
 	return notes
+}
+
+func normalizeSameChannelReply(d *Draft, intent string) bool {
+	if d == nil || !sameChannelReplyIntent(intent) {
+		return false
+	}
+	removed := false
+	d.Tools, removed = withoutChannelDeliveryTools(d.Tools)
+	var confirmRemoved bool
+	d.ConfirmTools, confirmRemoved = withoutChannelDeliveryTools(d.ConfirmTools)
+	removed = removed || confirmRemoved || d.Output != nil
+	d.Output = nil
+
+	// Model-written prompts can contradict their own ordinary-reply rule by
+	// requiring channel.send in a later Tool Usage or Completion section. Once
+	// the tool is removed, delete those stale lines and leave one unambiguous
+	// runtime rule. This is intentionally line-based: it preserves the agent's
+	// role, market/tool guidance, and all unrelated completion criteria.
+	var kept []string
+	for _, line := range strings.Split(d.SystemPrompt, "\n") {
+		low := strings.ToLower(line)
+		if strings.Contains(low, "channel.send") || strings.Contains(low, "channel.status") {
+			removed = true
+			continue
+		}
+		kept = append(kept, line)
+	}
+	d.SystemPrompt = strings.TrimSpace(strings.Join(kept, "\n"))
+	const replyRule = "For ordinary interactive replies, return the final answer normally; Soulacy automatically routes it back through the inbound channel. Do not perform a separate outbound send."
+	if !strings.Contains(d.SystemPrompt, replyRule) {
+		d.SystemPrompt = strings.TrimSpace(d.SystemPrompt) + "\n\n" + replyRule
+	}
+	// The editable operator contract is appended to the system prompt at save
+	// time. Sanitize it too, otherwise a removed channel.send instruction is
+	// silently reintroduced under "You are done only when".
+	if d.Policy != nil && d.Policy.Contract != nil {
+		c := d.Policy.Contract
+		c.Goal = sameChannelContractText(c.Goal)
+		c.Instructions = sameChannelContractText(c.Instructions)
+		c.CompletionCriteria = sameChannelContractText(c.CompletionCriteria)
+	}
+	return removed
+}
+
+func sameChannelContractText(text string) string {
+	text = strings.ReplaceAll(text, "channel.send", "the normal final response")
+	text = strings.ReplaceAll(text, "channel.status", "the inbound channel route")
+	return text
+}
+
+func withoutChannelDeliveryTools(tools []string) ([]string, bool) {
+	out := make([]string, 0, len(tools))
+	removed := false
+	for _, tool := range tools {
+		switch strings.ToLower(strings.TrimSpace(tool)) {
+		case "channel.send", "channel.status":
+			removed = true
+		default:
+			out = append(out, tool)
+		}
+	}
+	return out, removed
 }
 
 func shouldReplaceManualTrigger(trigger Trigger, intent string) bool {
