@@ -1,6 +1,7 @@
 <script>
   import { tick } from 'svelte'
   import { classifyCode } from './codeclass.js'
+  import TriggerSettings from './TriggerSettings.svelte'
   // Right-hand inspector.
   //   - When a flow node is selected: read-only view of its fields (Wave 1).
   //   - Otherwise (no node selected): editable workflow FRAMING — the trigger
@@ -264,14 +265,6 @@
     .map((e, index) => ({ e, index }))
     .filter(({ e }) => e && e.to && e.to !== 'end')
 
-  const TRIGGER_TYPES = ['schedule', 'channel', 'webhook', 'manual']
-  const CRON_HINTS = [
-    '0 8 * * 1-5  =  weekdays 8am',
-    '*/15 * * * *  =  every 15 minutes',
-    '0 0 * * 0  =  Sundays at midnight',
-  ]
-  const scheduleTemplatePlaceholder = 'Optional. Use {reply} for the agent result.'
-
   function entries(params) {
     if (!params || typeof params !== 'object') return []
     return Object.entries(params)
@@ -280,58 +273,6 @@
     if (v == null) return ''
     if (typeof v === 'object') return JSON.stringify(v, null, 2)
     return String(v)
-  }
-
-  // ── Trigger editing ───────────────────────────────────────────────────────
-  $: trigger = (workflow && workflow.trigger) || { type: '', config: {} }
-  $: triggerType = trigger.type || ''
-  $: triggerCron = (trigger.config && trigger.config.cron) || ''
-  $: triggerChannel = (trigger.config && trigger.config.channel) || ''
-
-  function setTriggerType(t) {
-    // Reset config to the shape the new type needs (keep nothing stale).
-    onChange({ trigger: { type: t, config: {} } })
-  }
-  function setTriggerCron(cron) {
-    onChange({ trigger: { type: 'schedule', config: { ...(trigger.config || {}), cron } } })
-  }
-  function setTriggerChannel(ch) {
-    onChange({ trigger: { type: 'channel', config: { ...(trigger.config || {}), channel: ch } } })
-  }
-
-  // ── Output channel(s) editing (multi) ─────────────────────────────────────
-  // workflow.channels is an array of channel ids (strings) or {type/name} objs;
-  // we normalise to a Set of selected ids for the multi-picker.
-  function channelKey(ch) {
-    if (typeof ch === 'string') return ch
-    return (ch && (ch.id || ch.type || ch.name)) || ''
-  }
-  $: selectedChannels = new Set(
-    ((workflow && Array.isArray(workflow.channels)) ? workflow.channels : []).map(channelKey),
-  )
-  function toggleOutputChannel(id, on) {
-    const next = new Set(selectedChannels)
-    if (on) next.add(id)
-    else next.delete(id)
-    const patch = { channels: Array.from(next) }
-    if (triggerType === 'schedule') {
-      const current = (workflow && workflow.output) || {}
-      if (on && !current.channel) {
-        patch.output = { ...current, channel: id }
-      } else if (!on && current.channel === id) {
-        patch.output = { ...current, channel: '', bot_name: '' }
-      }
-    }
-    onChange(patch)
-  }
-
-  $: scheduleOutput = (workflow && workflow.output) || {}
-  $: scheduleOutputChannel = scheduleOutput.channel || ''
-  $: scheduleOutputTo = scheduleOutput.to || ''
-  $: scheduleOutputBotName = scheduleOutput.bot_name || ''
-  $: scheduleOutputTemplate = scheduleOutput.template || ''
-  function setScheduleOutput(patch) {
-    onChange({ output: { ...scheduleOutput, ...patch } })
   }
 
   // ── Edge wiring helpers (rewire / add connections) ──────────────────────────
@@ -785,119 +726,7 @@
     <!-- No node selected: edit the workflow framing (start mode + channel surfaces). -->
     <p class="insp-hint">Editing how this workflow starts and which channels can deliver or expose it. Select a node to inspect it.</p>
 
-    <section class="frame">
-      <h3 class="sub">Start mode</h3>
-      <label class="field-label" for="trigger-type">primary start</label>
-      <select
-        id="trigger-type"
-        value={triggerType}
-        on:change={(e) => setTriggerType(e.target.value)}
-      >
-        <option value="" disabled selected={!triggerType}>Choose…</option>
-        {#each TRIGGER_TYPES as t}
-          <option value={t} selected={t === triggerType}>{t}</option>
-        {/each}
-      </select>
-
-      {#if triggerType === 'schedule'}
-        <label class="field-label" for="trigger-cron">cron</label>
-        <input
-          id="trigger-cron"
-          type="text"
-          placeholder="0 8 * * 1-5"
-          value={triggerCron}
-          on:input={(e) => setTriggerCron(e.target.value)}
-        />
-        <ul class="hints">
-          {#each CRON_HINTS as h}<li>{h}</li>{/each}
-        </ul>
-      {:else if triggerType === 'channel'}
-        <label class="field-label" for="trigger-channel">channel</label>
-        <select
-          id="trigger-channel"
-          value={triggerChannel}
-          on:change={(e) => setTriggerChannel(e.target.value)}
-        >
-          <option value="" disabled selected={!triggerChannel}>Choose channel…</option>
-          {#each channels as ch}
-            <option value={ch.id} selected={ch.id === triggerChannel}>{ch.name || ch.id}</option>
-          {/each}
-        </select>
-        {#if !channels.length}<p class="insp-empty">No channels in catalog.</p>{/if}
-      {:else if triggerType === 'webhook'}
-        <p class="insp-hint">Fires when an inbound webhook is received.</p>
-      {:else if triggerType === 'manual'}
-        <p class="insp-hint">Runs only when triggered by hand.</p>
-      {/if}
-      {#if triggerType === 'schedule' && selectedChannels.size > 0}
-        <p class="insp-hint">This agent can be scheduled and still respond through mapped interactive channel bots. Configure those bot mappings in Channels.</p>
-      {/if}
-    </section>
-
-    <section class="frame">
-      <h3 class="sub">Channels &amp; delivery</h3>
-      <p class="insp-hint">Select channels for scheduled delivery and channel exposure. Interactive bot-to-agent routing is configured on the Channels page.</p>
-      {#if !channels.length}
-        <p class="insp-empty">No channels in catalog.</p>
-      {:else}
-        <ul class="checklist">
-          {#each channels as ch}
-            <li>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={selectedChannels.has(ch.id)}
-                  on:change={(e) => toggleOutputChannel(ch.id, e.target.checked)}
-                />
-                <span>{ch.name || ch.id}</span>
-              </label>
-            </li>
-          {/each}
-        </ul>
-      {/if}
-      {#if triggerType === 'schedule' && selectedChannels.size > 0}
-        <div class="delivery-box">
-          <label class="field-label" for="schedule-out-channel">scheduled delivery bot</label>
-          <select
-            id="schedule-out-channel"
-            value={scheduleOutputChannel}
-            on:change={(e) => setScheduleOutput({ channel: e.target.value })}
-          >
-            <option value="" disabled selected={!scheduleOutputChannel}>Choose delivery channel…</option>
-            {#each channels.filter((ch) => selectedChannels.has(ch.id)) as ch}
-              <option value={ch.id} selected={ch.id === scheduleOutputChannel}>{ch.name || ch.id}</option>
-            {/each}
-          </select>
-          <label class="field-label" for="schedule-out-to">destination ID</label>
-          <input
-            id="schedule-out-to"
-            type="text"
-            placeholder="Telegram chat id, -100… channel id, or @channelusername"
-            value={scheduleOutputTo}
-            on:input={(e) => setScheduleOutput({ to: e.target.value })}
-          />
-          <label class="field-label" for="schedule-out-bot">bot label</label>
-          <input
-            id="schedule-out-bot"
-            type="text"
-            placeholder="Optional display name"
-            value={scheduleOutputBotName}
-            on:input={(e) => setScheduleOutput({ bot_name: e.target.value })}
-          />
-          <label class="field-label" for="schedule-out-template">message template</label>
-          <textarea
-            id="schedule-out-template"
-            rows="3"
-            placeholder={scheduleTemplatePlaceholder}
-            value={scheduleOutputTemplate}
-            on:input={(e) => setScheduleOutput({ template: e.target.value })}
-          ></textarea>
-          <p class="insp-hint">Telegram needs a real destination. For a channel, add the bot to the channel first and use the channel id or public @username.</p>
-        </div>
-      {:else if triggerType === 'schedule' && selectedChannels.size === 0}
-        <p class="insp-hint">Scheduled runs only post somewhere when you choose an output channel and destination.</p>
-      {/if}
-    </section>
+    <TriggerSettings {workflow} {channels} {onChange} />
 
     <!-- Edges list: edit each branch/flow edge's `if` predicate without having
          to click the edge on the canvas (also the fallback if edge-selection is
@@ -1004,25 +833,6 @@
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
   select:focus, input[type='text']:focus, textarea:focus { border-color: var(--accent); }
-  .delivery-box {
-    margin-top: 10px;
-    padding: 10px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: rgba(124, 92, 255, 0.06);
-  }
-  .hints {
-    list-style: none;
-    margin: 6px 0 0;
-    padding: 0;
-    font-family: ui-monospace, monospace;
-    font-size: 11px;
-    color: var(--text-muted);
-  }
-  .hints li { margin: 2px 0; }
-  .checklist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-  .checklist label { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); cursor: pointer; }
-  .checklist input[type='checkbox'] { accent-color: var(--accent); }
   .fields { margin: 0; }
   .fields dt {
     font-size: 11px;

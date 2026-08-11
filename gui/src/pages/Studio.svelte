@@ -46,6 +46,8 @@
   import { migrateEndpoints } from '../lib/studio/planlanes.js'
   import PlanView from '../lib/studio/PlanView.svelte'
   import StrategyPanel from '../lib/studio/StrategyPanel.svelte'
+  import TriggerSettings from '../lib/studio/TriggerSettings.svelte'
+  import { applyGenerationTrigger, toggleChannelPatch } from '../lib/studio/triggersettings.js'
   import BuildSpecPanel from '../lib/studio/BuildSpecPanel.svelte'
   import ReadinessPanel from '../lib/studio/ReadinessPanel.svelte'
   import { NAVIGATE_TARGETS, actionKind, applyDraftFix } from '../lib/studio/fixactions.js'
@@ -255,6 +257,14 @@
   let rawPrompt = ''           // the user's ORIGINAL prompt (intent holds the refined one)
   let modalRefining = false    // inline refine (from the prompt editor) in flight
   let promptError = ''         // error shown inside the prompt editor
+  // Optional creation-time override. "auto" keeps prompt inference; every
+  // other value is an explicit user decision applied after model generation.
+  let generationTrigger = { type: 'auto', cron: '', channel: '' }
+  $: generationTriggerError = generationTrigger.type === 'schedule' && !generationTrigger.cron.trim()
+    ? 'Enter a cron expression before generating.'
+    : generationTrigger.type === 'channel' && !generationTrigger.channel
+      ? 'Choose an inbound channel before generating.'
+      : ''
 
   // ── "Studio understood" — the structured spec behind the Describe step ────
   // Derived from the prompt BEFORE generation so the user verifies Studio's
@@ -1037,14 +1047,7 @@ Use null for fields that are not present.`
   // somewhere instead of being produced and dropped.
   function addDeliveryChannel(id) {
     if (!workflow || !id) return
-    const ch = Array.isArray(workflow.channels) ? workflow.channels.slice() : []
-    if (!ch.includes(id)) ch.push(id)
-    workflow = { ...workflow, channels: ch }
-  }
-  function removeDeliveryChannel(id) {
-    if (!workflow) return
-    const ch = (workflow.channels || []).filter((c) => c !== id)
-    workflow = { ...workflow, channels: ch }
+    applyFraming(toggleChannelPatch(workflow, id, true))
   }
   // True when the draft produces output but has nowhere to send it. A
   // channel-triggered agent replies on its trigger channel, so it's exempt.
@@ -1606,7 +1609,7 @@ Use null for fields that are not present.`
     // Remember which saved agent we were editing BEFORE reset clears it.
     const prevAgentId = loadedAgentId
     resetTransientDraftState()
-    workflow = (data && data.workflow) || null
+    workflow = applyGenerationTrigger((data && data.workflow) || null, generationTrigger)
     // If we were editing an existing saved agent, keep the freshly generated
     // draft bound to that agent so re-generating from a tweaked prompt UPDATES
     // it instead of silently saving a brand-new duplicate (the "Flight Finder →
@@ -2024,6 +2027,13 @@ Use null for fields that are not present.`
   function toggleMax(frame) { maximizedFrame = maximizedFrame === frame ? '' : frame }
   function toggleTests() { showTests = !showTests; persistLayout() }
   function toggleInspector() { showInspector = !showInspector; persistLayout() }
+  function openWorkflowSettings() {
+    selectedNode = null
+    selectedEdge = null
+    showInspector = true
+    maximizedFrame = ''
+    persistLayout()
+  }
 
   // ── Canvas ⇄ Code (SOUL.yaml) view ────────────────────────────────────────
   // Code view is authoritative: switching to it serializes the current draft to
@@ -4811,12 +4821,12 @@ Use null for fields that are not present.`
            look decorative. `title` carries the reason, since this button has no
            room for the explanatory text the panel shows beneath its own. -->
       <button class="btn primary" on:click={generateOrStream}
-              disabled={compiling || refining || pipelineRunning || !!refinement || !effectiveIntent || specUnresolved.length > 0}
+              disabled={compiling || refining || pipelineRunning || !!refinement || !effectiveIntent || specUnresolved.length > 0 || !!generationTriggerError}
               title={!effectiveIntent
                 ? 'Describe what you want built first'
                 : specUnresolved.length
                   ? `Answer ${specUnresolved.length} required detail${specUnresolved.length === 1 ? '' : 's'} first`
-                  : ''}>
+                  : generationTriggerError}>
         {refining ? 'Refining…' : compiling ? 'Generating…' : pipelineRunning ? 'Running pipeline…' : 'Generate'}
       </button>
       <!--
@@ -5028,7 +5038,10 @@ Use null for fields that are not present.`
                 error={buildSpecError}
                 answers={refineAnswers}
                 channels={catalog && catalog.channels}
+                {generationTrigger}
+                {generationTriggerError}
                 onAnswer={(id, v) => (refineAnswers = { ...refineAnswers, [id]: v })}
+                onGenerationTrigger={(value) => (generationTrigger = value)}
                 onRefine={refineFromModal}
                 onGenerate={generateOrStream}
                 refining={modalRefining || refining}
@@ -5523,6 +5536,12 @@ Use null for fields that are not present.`
               onUpdate={updatePolicy}
             />
 
+            <TriggerSettings
+              {workflow}
+              channels={channelOptions}
+              onChange={applyFraming}
+            />
+
             <label class="agent-field-label" for="agent-sys">System prompt (how the agent works)</label>
             <textarea id="agent-sys" class="agent-sys" rows="9" bind:value={workflow.system_prompt}></textarea>
 
@@ -5541,12 +5560,6 @@ Use null for fields that are not present.`
             <div class="agent-spec-meta">
               {#if workflow.knowledge && workflow.knowledge.length}<span><strong>Knowledge:</strong> {workflow.knowledge.join(', ')}</span>{/if}
               {#if workflow.new_agents && workflow.new_agents.length}<span><strong>Peer agents:</strong> {workflow.new_agents.map(a => a.name || a.id).join(', ')}</span>{/if}
-              {#if workflow.channels && workflow.channels.length}
-                <span><strong>Delivers to:</strong>
-                  {#each workflow.channels as c}<span class="dlv-chip">{c}<button class="dlv-x" type="button" data-tooltip="Remove delivery channel" on:click={() => removeDeliveryChannel(c)}>×</button></span>{/each}
-                </span>
-              {/if}
-              {#if workflow.trigger && workflow.trigger.type}<span><strong>Runs:</strong> {workflow.trigger.type}{#if workflow.trigger.config && workflow.trigger.config.cron} ({workflow.trigger.config.cron}){/if}</span>{/if}
             </div>
 
             <!-- Try it: run the unsaved agent against one sample question -->
@@ -5734,14 +5747,6 @@ Use null for fields that are not present.`
               {tierLabel(plan.tier)}
             </span>
           {/if}
-          <label class="unattended-toggle" data-tooltip="Let this agent's system/network steps run automatically on scheduled runs, with no approval prompt. Only enable if you trust the steps.">
-            <input
-              type="checkbox"
-              checked={!!(workflow && workflow.unattended)}
-              on:change={(e) => { if (workflow) workflow = { ...workflow, unattended: e.target.checked } }}
-            />
-            Unattended
-          </label>
           <button class="btn btn-sm view-toggle" type="button" on:click={toggleTests}
                   data-tooltip="Show or hide the test & self-heal panels below the canvas">
             {showTests ? 'Hide tests' : 'Show tests'}
@@ -5749,6 +5754,10 @@ Use null for fields that are not present.`
           <button class="btn btn-sm view-toggle" type="button" on:click={toggleInspector}
                   data-tooltip="Show or hide the inspector panel">
             {showInspector ? 'Hide inspector' : 'Show inspector'}
+          </button>
+          <button class="btn btn-sm view-toggle" type="button" on:click={openWorkflowSettings}
+                  data-tooltip="Change manual, cron, channel, or webhook start settings">
+            ⚙ Trigger &amp; delivery
           </button>
           {/if}
           {#if viewMode === 'code'}
@@ -7369,7 +7378,10 @@ Use null for fields that are not present.`
               error={buildSpecError}
               answers={refineAnswers}
               channels={catalog && catalog.channels}
+              {generationTrigger}
+              {generationTriggerError}
               onAnswer={(id, v) => (refineAnswers = { ...refineAnswers, [id]: v })}
+              onGenerationTrigger={(value) => (generationTrigger = value)}
               onRefine={refineFromModal}
               onGenerate={generateFromModal}
               refining={modalRefining || refining}
@@ -9656,9 +9668,6 @@ Use null for fields that are not present.`
     border: 1px solid var(--accent); cursor: pointer; margin-left: 4px;
   }
   .dlv-btn:hover { background: rgba(124, 132, 255, 0.15); }
-  .dlv-chip { display: inline-flex; align-items: center; gap: 3px; margin-left: 5px; padding: 1px 4px 1px 7px; border-radius: 10px; background: var(--bg-elev); border: 1px solid var(--border); }
-  .dlv-x { border: 0; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; }
-  .dlv-x:hover { color: var(--error); }
 
   /* Credentials (first-class secret binding) */
   .creds { padding: 4px 2px; }
@@ -9705,8 +9714,6 @@ Use null for fields that are not present.`
   .prompt-readonly { font-size: 12px; color: var(--text-muted); white-space: pre-wrap; line-height: 1.5; background: var(--bg-elev); border-radius: 6px; padding: 8px 10px; }
   .refine-mode { background: rgba(108,140,255,0.12); border-left: 3px solid var(--accent, #6c8cff); border-radius: 6px; padding: 9px 11px; margin: 0 0 12px; font-size: 13px; color: var(--text); }
   .refine-mode-sub { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
-  .unattended-toggle { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-muted); cursor: pointer; user-select: none; }
-  .unattended-toggle input { margin: 0; }
   .explain-actions { margin-top: 10px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .explain-hint { font-size: 12px; color: var(--text-muted); }
   .intent-guide {

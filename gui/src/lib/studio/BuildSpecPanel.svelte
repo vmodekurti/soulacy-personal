@@ -17,6 +17,7 @@
     specRows, specBlockers, specQuestions, changeSummary,
     deliveryPrompt, isDeliveryQuestion, knownDestinations, unresolvedBlockers,
   } from './buildspecview.js'
+  import GenerationTrigger from './GenerationTrigger.svelte'
 
   export let spec = null            // /studio/build-spec payload
   export let recommendation = null  // { mode, rationale }
@@ -24,10 +25,13 @@
   export let error = ''
   export let answers = {}           // { [questionId]: string }
   export let channels = []          // GET /channels payload, for destination options
+  export let generationTrigger = { type: 'auto', cron: '', channel: '' }
+  export let generationTriggerError = ''
 
   export let onAnswer = () => {}    // (id, value) => void
   export let onRefine = () => {}
   export let onGenerate = () => {}
+  export let onGenerationTrigger = () => {}
   // Both actions are builder-model calls that can take many seconds. The panel
   // used to know only `loading` (the spec READ), so pressing either button left
   // it enabled and unchanged for the whole call — the click looked ignored.
@@ -62,7 +66,7 @@
 
   $: unresolved = unresolvedBlockers(spec, answers)
   $: busy = loading || refining || generating
-  $: canGenerate = !busy && !!spec && unresolved.length === 0
+  $: canGenerate = !busy && !!spec && unresolved.length === 0 && !generationTriggerError
 </script>
 
 <div class="bs">
@@ -208,12 +212,18 @@
       </details>
     {/if}
 
+    <GenerationTrigger
+      selection={generationTrigger}
+      {channels}
+      onChange={onGenerationTrigger}
+    />
+
     <div class="bs-actions">
       <button class="btn" type="button" disabled={busy} on:click={onRefine}>
         {#if refining}<span class="bs-spin" aria-hidden="true"></span>Refining…{:else}Refine prompt{/if}
       </button>
       <button class="btn primary" type="button" disabled={!canGenerate} on:click={onGenerate}
-        data-tooltip={unresolved.length ? 'Answer the required questions first' : ''}>
+        data-tooltip={unresolved.length ? 'Answer the required questions first' : generationTriggerError}>
         {#if generating}<span class="bs-spin" aria-hidden="true"></span>Generating…{:else}Generate workflow{/if}
       </button>
     </div>
@@ -229,6 +239,8 @@
         {unresolved.length} required detail{unresolved.length === 1 ? '' : 's'} still missing — generating now would
         build something known to be incomplete.
       </p>
+    {:else if generationTriggerError}
+      <p class="bs-gate">{generationTriggerError}</p>
     {/if}
   {/if}
 </div>
