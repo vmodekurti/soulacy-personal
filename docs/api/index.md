@@ -67,8 +67,10 @@ credential as `?api_key=` on `/ws/events`.
 | Route | Description |
 |-------|-------------|
 | `POST /chat` | Send a message, get the reply |
+| `POST /chat/feedback` | Rate a completed response (`rating`: `1` or `-1`) |
 | `POST /chat/stream` · `GET /chat/stream` | Streamed reply (SSE) |
 | `POST /chat/confirm` | Answer a pending tool-confirmation prompt |
+| `GET /learning/feedback` | Review recent response-level feedback signals |
 | `GET /history/:session_id` · `GET /history/agent/:agent_id` | Conversation history |
 | `POST /history/:session_id/fork` | Fork a conversation at a checkpoint into a new branch |
 | `GET /runs/:session_id/metrics` | Run-level observability for one session |

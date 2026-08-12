@@ -14,7 +14,8 @@ llm:
 
 - **Workflow patterns:** sanitized intent family, tool sequence, node order,
   branch identity, and parallel-group structure. Tool arguments and results are
-  never stored.
+  never stored. Explicit helpful/unhelpful ratings boost or suppress matching
+  patterns without double-counting a user who changes their rating.
 - **Strategy fit:** aggregate pass/fail counts for provider, model, and strategy.
   Prompt text, output text, identities, and sessions are excluded.
 - **Preferences:** sanitized behavioral additions that recur across at least two
@@ -25,6 +26,22 @@ llm:
 Only explicit `run.completed` outcomes seed run learning. Degraded or failed
 runs cannot become workflow patterns. ActionLog replay after restart is
 idempotent by run ID.
+
+## Human feedback
+
+Chat responses expose 👍 and 👎 actions. The GUI submits the response's server-
+issued `run_id` and `response_id` to:
+
+```text
+POST /api/v1/chat/feedback
+```
+
+Ratings are stored durably, redacted, capped, and upserted per user/response.
+An unhelpful rating suppresses a single-run workflow pattern from future Studio
+retrieval; helpful ratings increase its ranking evidence. Optional written
+feedback becomes a pending procedural-learning proposal for review and never
+changes an agent's rulebook automatically. Operators can inspect recent signals
+with `GET /api/v1/learning/feedback`.
 
 ## Safety and control
 

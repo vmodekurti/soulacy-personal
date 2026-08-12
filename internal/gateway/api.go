@@ -1041,7 +1041,11 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 	// Return the full typed parts (text/image/audio/file) so the UI can render
 	// rich results — images, charts, audio (podcasts), files — not just text
 	// (Stories #26/#27/#28). `reply` stays for backward compatibility.
-	return c.JSON(fiber.Map{"reply": replyText, "parts": reply.Parts, "session_id": sessionID})
+	responseID := strings.TrimSpace(reply.ID)
+	if responseID == "" {
+		responseID = uuid.NewString()
+	}
+	return c.JSON(fiber.Map{"reply": replyText, "parts": reply.Parts, "session_id": sessionID, "run_id": msg.ID, "response_id": responseID})
 }
 
 func canOverrideModel(claims *auth.Claims) bool {

@@ -38,7 +38,7 @@ RUN npm run build
 # Stage 2 — Go builder. TARGETARCH is set by buildx based on --platform.
 # Bookworm has gcc + sqlite3-dev on amd64 and arm64 out of the box, so
 # the cgo build of sqlite-vec works natively without a cross-toolchain.
-FROM golang:1.25-bookworm AS gobuild
+FROM golang:1.26.5-bookworm AS gobuild
 ARG TARGETARCH
 ARG VERSION=dev
 WORKDIR /src

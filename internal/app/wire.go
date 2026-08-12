@@ -179,6 +179,10 @@ func (a *App) Run(parent context.Context) error {
 	// When both are unset, vector memory is disabled.
 	vectorStore, vecBackend := a.wireVector(archive, llmRouter)
 	_ = vecBackend // available for future memory-tool use; engine uses vectorStore directly
+	if brainStore != nil && vectorStore != nil {
+		brainStore.SetSemanticStore(&agentMemoryVectorAdapter{store: vectorStore})
+		log.Info("agent brain semantic memory enabled (sqlite-vec)")
+	}
 
 	// ── Python Executor Backend ───────────────────────────────────────────────
 	// "process" (default): one python3 subprocess per call, simple + compatible.

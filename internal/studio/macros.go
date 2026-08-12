@@ -28,6 +28,9 @@ type WorkflowPattern struct {
 	UpdatedAt time.Time         `json:"updated_at"`
 	Metadata  map[string]string `json:"metadata,omitempty"`
 	RunIDs    []string          `json:"run_ids,omitempty"`
+	Helpful   int               `json:"helpful,omitempty"`
+	Unhelpful int               `json:"unhelpful,omitempty"`
+	Ratings   map[string]int    `json:"ratings,omitempty"`
 }
 
 // WorkflowStep is a payload-free execution landmark. It preserves ordering,
@@ -107,7 +110,16 @@ func (s *MacroStore) Similar(intent string, limit int) []WorkflowPattern {
 	}
 	var matches []scored
 	for _, pattern := range s.All() {
+		// A pattern supported only by explicitly rejected runs is not proven and
+		// must not influence future generation.
+		if pattern.Helpful == 0 && pattern.Unhelpful >= pattern.Count {
+			continue
+		}
 		score := jaccard(query, semanticTerms(pattern.Intent+" "+strings.Join(pattern.Tools, " ")))
+		if total := pattern.Helpful + pattern.Unhelpful; total > 0 {
+			quality := float64(pattern.Helpful+1) / float64(total+2)
+			score *= 0.75 + 0.5*quality
+		}
 		if score >= 0.18 {
 			matches = append(matches, scored{pattern: pattern, score: score})
 		}
@@ -132,6 +144,59 @@ func (s *MacroStore) Similar(intent string, limit int) []WorkflowPattern {
 		out[i] = matches[i].pattern
 	}
 	return out
+}
+
+// RecordFeedback applies explicit human evaluation to every workflow pattern
+// distilled from runID. Ratings are upserted per run so changing a thumb does
+// not double-count. A net-rejected single-run pattern is suppressed by Similar.
+func (s *MacroStore) RecordFeedback(runID string, rating int) error {
+	runID = strings.TrimSpace(runID)
+	if runID == "" || (rating != 1 && rating != -1) {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	patterns := s.loadLocked()
+	changed := false
+	for i := range patterns {
+		if !macroContainsString(patterns[i].RunIDs, runID) {
+			continue
+		}
+		if patterns[i].Ratings == nil {
+			patterns[i].Ratings = map[string]int{}
+		}
+		previous := patterns[i].Ratings[runID]
+		if previous == rating {
+			continue
+		}
+		if previous == 1 {
+			patterns[i].Helpful--
+		}
+		if previous == -1 {
+			patterns[i].Unhelpful--
+		}
+		if rating == 1 {
+			patterns[i].Helpful++
+		} else {
+			patterns[i].Unhelpful++
+		}
+		patterns[i].Ratings[runID] = rating
+		patterns[i].UpdatedAt = time.Now().UTC()
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return s.writeLocked(patterns)
+}
+
+func macroContainsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *MacroStore) Delete(id string) error {

@@ -60,6 +60,7 @@
   let editingMsg = -1          // index of a user message being edited
   let editText = ''
   let copiedKey = ''           // transient "Copied!" feedback key
+  let feedbackBusy = {}        // run id -> request in flight
   let searchEl, composerEl, fileInputEl
   let artifactPanelOpen = false
   let artifactsByThread = {}
@@ -157,11 +158,12 @@
           createdAt: t.createdAt, updatedAt: t.updatedAt,
           branches: t.branches || [],
           messages: (t.messages || []).map(m => ({
-            role: m.role, text: m.text, via: m.via || '',
+            role: m.role, text: m.text, via: m.via || '', agentId: m.agentId || '',
             ts: m.ts instanceof Date ? m.ts.toISOString() : m.ts,
             metrics: m.metrics || null,
             parts: m.parts || null,
             attachments: m.attachments || null,
+            runId: m.runId || '', responseId: m.responseId || '', feedback: m.feedback || 0,
           })),
         }
       }
@@ -213,6 +215,35 @@
   function agentName(id) {
     const a = agents.find(x => x.id === id)
     return a?.name || id || 'No agent'
+  }
+
+  async function rateResponse(msg, rating) {
+    const thread = activeThread
+    const runId = msg?.runId || ''
+    if (!thread || !runId || feedbackBusy[runId]) return
+    feedbackBusy = { ...feedbackBusy, [runId]: true }
+    try {
+      await api.chatFeedback({
+        agent_id: msg.agentId || thread.agentId,
+        session_id: thread.sessionId,
+        run_id: runId,
+        response_id: msg.responseId || '',
+        rating,
+      })
+      updateActiveThread(t => ({
+        ...t,
+        messages: t.messages.map(m => m === msg ? { ...m, feedback: rating, feedbackError: '' } : m),
+      }))
+    } catch (e) {
+      updateActiveThread(t => ({
+        ...t,
+        messages: t.messages.map(m => m === msg ? { ...m, feedbackError: e.message || 'Could not save feedback' } : m),
+      }))
+    } finally {
+      const next = { ...feedbackBusy }
+      delete next[runId]
+      feedbackBusy = next
+    }
   }
 
   // resolveMention parses a leading `@agent` from a typed message and routes
@@ -513,7 +544,7 @@
         // Don't pollute the thread agent's metrics baseline with a routed turn.
         metricsBaseline: (curr && !route) ? { ...(t.metricsBaseline || {}), [runSessionId]: curr } : (t.metricsBaseline || {}),
         streamText: '',   // final reply is authoritative; drop the live preview
-        messages: [...t.messages, { role: 'assistant', text: res.reply, via: viaName, parts: (res.parts || []).filter(p => p && p.type && p.type !== 'text'), ts: new Date(), thinking: t.thinking || thinking, metrics: route ? null : delta }],
+        messages: [...t.messages, { role: 'assistant', text: res.reply, via: viaName, agentId: runAgentId, runId: res.run_id || '', responseId: res.response_id || '', feedback: 0, parts: (res.parts || []).filter(p => p && p.type && p.type !== 'text'), ts: new Date(), thinking: t.thinking || thinking, metrics: route ? null : delta }],
       }))
       await loadArtifacts(threadId, runAgentId, runSessionId)
     } catch (e) {
@@ -1865,6 +1896,12 @@
                     {#if msg.role === 'user'}
                       <button class="act" on:click={() => startEdit(mi)} disabled={isSending || forking} title="Edit & rerun">✎</button>
                     {:else}
+                      {#if msg.runId}
+                        <button class="act feedback-act" class:selected={msg.feedback === 1} aria-pressed={msg.feedback === 1}
+                          on:click={() => rateResponse(msg, 1)} disabled={!!feedbackBusy[msg.runId]} title="Mark this response helpful">👍</button>
+                        <button class="act feedback-act" class:selected={msg.feedback === -1} aria-pressed={msg.feedback === -1}
+                          on:click={() => rateResponse(msg, -1)} disabled={!!feedbackBusy[msg.runId]} title="Mark this response unhelpful">👎</button>
+                      {/if}
                       <button class="act" on:click={regenerate} disabled={isSending || forking} title="Regenerate">↻</button>
                       <button class="act" on:click={() => retryWithModel(mi)} disabled={isSending || forking} title="Retry with the model selected in Controls">⤺</button>
                       <button class="act" on:click={() => saveToMemory(msg.text, 'm'+k)} title="Save this reply to the agent's memory">{savedKey === 'm'+k ? '✓' : '✚'}</button>
@@ -1873,6 +1910,7 @@
                   </div>
                 {/if}
               </div>
+              {#if msg.feedbackError}<div class="feedback-error">⚠ {msg.feedbackError}</div>{/if}
             </div>
           </div>
         {/each}
@@ -2379,6 +2417,13 @@
 
   .msg-row       { display: flex; justify-content: flex-start; }
   .msg-row.user  { justify-content: flex-end; }
+
+  .feedback-act.selected {
+    color: #fff;
+    background: rgba(109, 94, 252, .35);
+    border-color: rgba(139, 126, 255, .75);
+  }
+  .feedback-error { margin-top: .3rem; color: #ff9aa9; font-size: .72rem; }
   .msg-row.sys   { justify-content: center; }
 
   .bubble {

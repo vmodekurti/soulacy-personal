@@ -450,7 +450,9 @@ func (a *App) wireVector(archive *memory.SQLiteArchive, llmRouter *llm.Router) (
 		vectorBackendKey = cfg.Memory.VectorDB // backwards-compat
 	}
 	if vectorBackendKey == "" {
-		return nil, nil
+		// sqlite-vec is embedded in the monolithic binary and is the secure,
+		// zero-service default. Operators can still select qdrant/external.
+		vectorBackendKey = "sqlite-vec"
 	}
 
 	var vectorStore *memory.VectorStore // kept for engine (sqlite-vec path only)

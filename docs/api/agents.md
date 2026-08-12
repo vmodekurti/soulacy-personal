@@ -48,9 +48,24 @@ Content-Type: application/json
 
 ```json
 {
-  "reply": "Here's a summary of the latest AI news..."
+  "reply": "Here's a summary of the latest AI news...",
+  "session_id": "http-...",
+  "run_id": "0c5f...",
+  "response_id": "7e91..."
 }
 ```
+
+Use the server-issued IDs to rate the response:
+
+```http
+POST /api/v1/chat/feedback
+Content-Type: application/json
+
+{"agent_id":"assistant","session_id":"http-...","run_id":"0c5f...","response_id":"7e91...","rating":1}
+```
+
+`rating` is `1` for helpful or `-1` for unhelpful. An optional `comment`
+creates a pending procedural-learning proposal for operator review.
 
 ### Streaming
 

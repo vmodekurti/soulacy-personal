@@ -751,6 +751,8 @@ func (s *Server) buildApp() *fiber.App {
 	// Chat — token-quota (user + agent) + per-agent RPM checks applied on top of user RPM.
 	api.Get("/chat/status", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.handleChatStatus)
 	api.Post("/chat", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{BodyField: "agent_id"}), s.rlTokenMW(), s.rlAgentTokenMW(), s.rlAgentMW(), s.handleChat)
+	api.Post("/chat/feedback", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{BodyField: "agent_id"}), s.handleChatFeedback)
+	api.Get("/learning/feedback", s.rbacMW(rbac.ResourceMemory, rbac.ActionRead), s.handleListChatFeedback)
 	api.Post("/chat/stream", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{BodyField: "agent_id"}), s.rlTokenMW(), s.rlAgentTokenMW(), s.rlAgentMW(), s.handleChatStream)
 	api.Get("/chat/stream", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{QueryParam: "agent_id"}), s.rlTokenMW(), s.rlAgentTokenMW(), s.rlAgentMW(), s.handleChatStream)
 	api.Post("/webhooks/:agent_id", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{PathParam: "agent_id"}), s.rlTokenMW(), s.rlAgentTokenMW(), s.rlAgentMW(), s.handleGenericWebhook)

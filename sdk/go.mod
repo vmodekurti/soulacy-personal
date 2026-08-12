@@ -2,4 +2,4 @@
 // See README.md for the compatibility policy.
 module github.com/soulacy/soulacy/sdk
 
-go 1.25.0
+go 1.26.5

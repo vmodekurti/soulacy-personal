@@ -132,3 +132,24 @@ func TestLearnedMemoryRejectsPersistentInstructionOverride(t *testing.T) {
 		t.Fatalf("unsafe learned memory persisted: %+v", got)
 	}
 }
+
+func TestMacroStoreFeedbackSuppressesRejectedPatternAndUpserts(t *testing.T) {
+	store := NewMacroStore(filepath.Join(t.TempDir(), "macros.json"))
+	pattern := WorkflowPattern{Intent: "research weather and notify", Tools: []string{"search", "send"}, RunIDs: []string{"run-1"}}
+	if err := store.Add(pattern); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordFeedback("run-1", -1); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.Similar("research weather and notify", 5); len(got) != 0 {
+		t.Fatalf("rejected pattern still retrieved: %+v", got)
+	}
+	if err := store.RecordFeedback("run-1", 1); err != nil {
+		t.Fatal(err)
+	}
+	got := store.Similar("research weather and notify", 5)
+	if len(got) != 1 || got[0].Helpful != 1 || got[0].Unhelpful != 0 {
+		t.Fatalf("updated feedback = %+v", got)
+	}
+}

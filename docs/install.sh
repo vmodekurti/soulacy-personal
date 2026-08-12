@@ -44,7 +44,7 @@ NEEDS_SUDO=0
 [[ "$BIN_DIR" == /usr/* || "$BIN_DIR" == /opt/* ]] && NEEDS_SUDO=1
 
 TOOLCHAIN="${HOME}/.soulacy/toolchain"
-GO_VERSION="1.25.12"
+GO_VERSION="1.26.5"
 NODE_VERSION="22.12.0"
 
 # Detect an existing config up-front (BEFORE anything is written) so we only run
@@ -201,13 +201,15 @@ ensure_go() {
     if command -v go >/dev/null 2>&1; then
         local local_ver
         local_ver="$(go version | awk '{print $3}' | sed 's/go//')"
-        local major minor
+        local major minor patch
         major=$(echo "$local_ver" | cut -d. -f1)
         minor=$(echo "$local_ver" | cut -d. -f2)
-        if [ "$major" -gt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -ge 25 ]; }; then
+        patch=$(echo "$local_ver" | cut -d. -f3 | sed 's/[^0-9].*//')
+        patch="${patch:-0}"
+        if [ "$major" -gt 1 ] || { [ "$major" -eq 1 ] && { [ "$minor" -gt 26 ] || { [ "$minor" -eq 26 ] && [ "$patch" -ge 5 ]; }; }; }; then
             return 0
         fi
-        warn "Local Go version ($local_ver) is lower than the required 1.25+."
+        warn "Local Go version ($local_ver) is lower than the required 1.26.5+."
     fi
     if [ -x "${TOOLCHAIN}/go/bin/go" ]; then
         export PATH="${TOOLCHAIN}/go/bin:${PATH}"
@@ -216,9 +218,9 @@ ensure_go() {
 
     local install_go="n"
     if [ -t 0 ]; then
-        read -r -p "  Go 1.25+ is required. Install Go ${GO_VERSION} privately to ${TOOLCHAIN}? [Y/n]: " install_go
+        read -r -p "  Go 1.26.5+ is required. Install Go ${GO_VERSION} privately to ${TOOLCHAIN}? [Y/n]: " install_go
         install_go="${install_go:-Y}"
-    elif [ -c /dev/tty ] && { read -r -p "  Go 1.25+ is required. Install Go ${GO_VERSION} privately to ${TOOLCHAIN}? [Y/n]: " install_go < /dev/tty; } 2>/dev/null; then
+    elif [ -c /dev/tty ] && { read -r -p "  Go 1.26.5+ is required. Install Go ${GO_VERSION} privately to ${TOOLCHAIN}? [Y/n]: " install_go < /dev/tty; } 2>/dev/null; then
         install_go="${install_go:-Y}"
     else
         install_go="Y"
@@ -238,7 +240,7 @@ ensure_go() {
         export PATH="${TOOLCHAIN}/go/bin:${PATH}"
         ok "Go $(go version | awk '{print $3}') ready"
     else
-        err "Go 1.25+ is required. Install from https://go.dev/dl/"
+        err "Go 1.26.5+ is required. Install from https://go.dev/dl/"
     fi
 }
 

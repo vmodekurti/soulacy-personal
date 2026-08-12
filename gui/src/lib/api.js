@@ -269,6 +269,11 @@ export const api = {
   shareChat: (body) => apiFetch('/chat/share', { method: 'POST', body: JSON.stringify(body) }),
   chatStatus: () => apiFetch('/chat/status'),
 
+  chatFeedback: (body) => apiFetch('/chat/feedback', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  }),
+
   chatArtifacts: (agentId, sessionId) =>
     apiFetch(`/chat/artifacts?agent_id=${encodeURIComponent(agentId)}&session_id=${encodeURIComponent(sessionId)}`),
 

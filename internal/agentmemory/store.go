@@ -9,8 +9,9 @@
 //	│   ├── episodic.jsonl   — one JSON record per line, append-only
 //	│   └── procedural.md    — agent operating rules, overwritten on update
 //
-// The InMemoryVectorStore is the dev-mode semantic backend.
-// TODO: swap for Chroma or pgvector when semantic retrieval becomes a bottleneck.
+// Semantic memory is supplied through SemanticStore. Production wiring uses
+// Soulacy's native sqlite-vec store; the in-memory implementation remains only
+// as an explicit lightweight test double.
 package agentmemory
 
 import (
@@ -68,6 +69,13 @@ type Store interface {
 	Write(r Record) error
 	Retrieve(q RetrieveQuery) (RetrieveResult, error)
 	UpdateProcedural(agentID, rules string) error
+}
+
+// SemanticStore is the narrow contract used by CompositeStore. Production
+// wiring adapts memory.VectorStore (sqlite-vec) to this interface.
+type SemanticStore interface {
+	Write(r Record) error
+	Search(agentID, query string, max int) ([]Record, error)
 }
 
 // ─── Episodic ────────────────────────────────────────────────────────────────
@@ -259,12 +267,10 @@ func (s *ProceduralStore) Update(agentID, rules string) error {
 	return os.WriteFile(s.path(agentID), []byte(rules), 0644)
 }
 
-// ─── Semantic (in-memory dev stub) ───────────────────────────────────────────
+// ─── Semantic test double ────────────────────────────────────────────────────
 
-// InMemoryVectorStore is a dev-mode semantic backend that uses keyword
-// frequency scoring to approximate semantic similarity.
-//
-// TODO: replace with Chroma or pgvector for production semantic retrieval.
+// InMemoryVectorStore is an explicit test double that uses keyword frequency.
+// Production composition never selects it implicitly; use sqlite-vec instead.
 type InMemoryVectorStore struct {
 	mu      sync.RWMutex
 	records []Record
@@ -292,7 +298,7 @@ func (v *InMemoryVectorStore) Write(r Record) error {
 
 // Search returns up to max records whose content overlaps with query words.
 // Results are ranked by keyword hit count, then recency.
-func (v *InMemoryVectorStore) Search(agentID, query string, max int) []Record {
+func (v *InMemoryVectorStore) Search(agentID, query string, max int) ([]Record, error) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 
@@ -334,7 +340,17 @@ func (v *InMemoryVectorStore) Search(agentID, query string, max int) []Record {
 		}
 		out = append(out, c.r)
 	}
-	return out
+	return out, nil
+}
+
+type unavailableSemanticStore struct{}
+
+func (unavailableSemanticStore) Write(Record) error {
+	return fmt.Errorf("agentmemory: semantic memory unavailable: sqlite-vec is not configured")
+}
+
+func (unavailableSemanticStore) Search(string, string, int) ([]Record, error) {
+	return nil, nil
 }
 
 // ─── Composite ───────────────────────────────────────────────────────────────
@@ -343,7 +359,7 @@ func (v *InMemoryVectorStore) Search(agentID, query string, max int) []Record {
 // interface. It is the primary entry point for agent memory access.
 type CompositeStore struct {
 	episodic   *EpisodicStore
-	semantic   *InMemoryVectorStore
+	semantic   SemanticStore
 	procedural *ProceduralStore
 	// rulelog versions every rulebook write (Story E23). nil when the
 	// rulebook db failed to open — writes then degrade to unversioned
@@ -352,10 +368,12 @@ type CompositeStore struct {
 }
 
 // NewCompositeStore creates a CompositeStore rooted at baseDir.
-// If vectorStore is nil, a fresh InMemoryVectorStore is created.
-func NewCompositeStore(baseDir string, vectorStore *InMemoryVectorStore) *CompositeStore {
+// A nil semantic store disables semantic writes until production wiring
+// attaches sqlite-vec with SetSemanticStore. It never silently falls back to
+// keyword matching.
+func NewCompositeStore(baseDir string, vectorStore SemanticStore) *CompositeStore {
 	if vectorStore == nil {
-		vectorStore = NewInMemoryVectorStore()
+		vectorStore = unavailableSemanticStore{}
 	}
 	rl, err := OpenRuleLog(filepath.Join(baseDir, "rulebook.db"))
 	if err != nil {
@@ -367,6 +385,15 @@ func NewCompositeStore(baseDir string, vectorStore *InMemoryVectorStore) *Compos
 		procedural: NewProceduralStore(baseDir),
 		rulelog:    rl,
 	}
+}
+
+// SetSemanticStore attaches the production semantic backend. It is intended
+// for startup-time composition, before the gateway begins accepting traffic.
+func (c *CompositeStore) SetSemanticStore(store SemanticStore) {
+	if c == nil || store == nil {
+		return
+	}
+	c.semantic = store
 }
 
 // Close releases the rulebook database (the other backends are files).
@@ -385,6 +412,12 @@ func (c *CompositeStore) Write(r Record) error {
 	}
 	switch r.Type {
 	case MemoryTypeSemantic:
+		if r.ID == "" {
+			r.ID = uuid.NewString()
+		}
+		if r.Timestamp.IsZero() {
+			r.Timestamp = time.Now().UTC()
+		}
 		return c.semantic.Write(r)
 	case MemoryTypeProcedural:
 		return c.procedural.Update(r.AgentID, r.Content)
@@ -414,7 +447,10 @@ func (c *CompositeStore) Retrieve(q RetrieveQuery) (RetrieveResult, error) {
 	}
 
 	if q.TaskInput != "" {
-		result.SemanticChunks = c.semantic.Search(q.AgentID, q.TaskInput, maxSem)
+		result.SemanticChunks, err = c.semantic.Search(q.AgentID, q.TaskInput, maxSem)
+		if err != nil {
+			return result, fmt.Errorf("agentmemory: Retrieve semantic: %w", err)
+		}
 	}
 
 	result.ProceduralRules = c.procedural.Read(q.AgentID)
