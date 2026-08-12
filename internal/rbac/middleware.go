@@ -1,11 +1,24 @@
 package rbac
 
 import (
+	"encoding/json"
+	"strings"
+
 	"github.com/gofiber/fiber/v2"
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/auth"
 )
+
+// AgentIDSource describes where a route carries its object identifier. Sources
+// are checked in order, allowing POST/GET variants of one route to share a
+// single policy declaration.
+type AgentIDSource struct {
+	PathParam  string
+	QueryParam string
+	BodyField  string
+	FormField  string
+}
 
 // Manager wires the Store into Fiber middleware helpers.
 // All methods return fiber.Handler values so they can be used inline on any
@@ -19,6 +32,18 @@ type Manager struct {
 // don't need per-agent overrides (apikey-only, single-user).
 func NewManager(store Store, log *zap.Logger) *Manager {
 	return &Manager{store: store, log: log}
+}
+
+// CanAccessAgentResource exposes the same object decision used by HTTP
+// middleware to non-HTTP transports such as the WebSocket event stream.
+func (m *Manager) CanAccessAgentResource(role, agentID, resource, action string) (bool, error) {
+	if m == nil || m.store == nil {
+		return false, nil
+	}
+	if rs, ok := m.store.(resourceAgentStore); ok {
+		return rs.CanAccessAgentResource(role, agentID, resource, action)
+	}
+	return m.store.CanAccessAgent(role, agentID, action)
 }
 
 // ---------------------------------------------------------------------------
@@ -103,6 +128,70 @@ func (m *Manager) RequireAgent(agentParam, action string) fiber.Handler {
 		)
 		return m.deny(c, cl.Role, ResourceAgents+":"+action+" agent="+agentID)
 	}
+}
+
+// RequireAgentFrom enforces object authorization for routes whose agent ID is
+// not necessarily a path parameter (chat JSON, query APIs, multipart uploads).
+func (m *Manager) RequireAgentFrom(resource, action string, sources ...AgentIDSource) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		cl := auth.ClaimsFromCtx(c)
+		if cl == nil {
+			return c.Next()
+		}
+		if !cl.AllowsResource(resource) {
+			return m.deny(c, cl.Role, resource+":"+action)
+		}
+		agentID := resolveAgentID(c, sources)
+		if agentID == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "agent_id is required for authorization"})
+		}
+		var allowed bool
+		var err error
+		if rs, ok := m.store.(resourceAgentStore); ok {
+			allowed, err = rs.CanAccessAgentResource(cl.Role, agentID, resource, action)
+		} else {
+			allowed, err = m.store.CanAccessAgent(cl.Role, agentID, action)
+		}
+		if err != nil {
+			m.log.Error("rbac: store error", zap.Error(err))
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "rbac store error"})
+		}
+		if !allowed {
+			return m.deny(c, cl.Role, resource+":"+action+" agent="+agentID)
+		}
+		c.Locals("authorized_agent_id", agentID)
+		return c.Next()
+	}
+}
+
+func resolveAgentID(c *fiber.Ctx, sources []AgentIDSource) string {
+	for _, src := range sources {
+		if src.PathParam != "" {
+			if value := strings.TrimSpace(c.Params(src.PathParam)); value != "" {
+				return value
+			}
+		}
+		if src.QueryParam != "" {
+			if value := strings.TrimSpace(c.Query(src.QueryParam)); value != "" {
+				return value
+			}
+		}
+		if src.FormField != "" {
+			if value := strings.TrimSpace(c.FormValue(src.FormField)); value != "" {
+				return value
+			}
+		}
+		if src.BodyField != "" && len(c.Body()) > 0 {
+			var body map[string]json.RawMessage
+			if json.Unmarshal(c.Body(), &body) == nil {
+				var value string
+				if json.Unmarshal(body[src.BodyField], &value) == nil && strings.TrimSpace(value) != "" {
+					return strings.TrimSpace(value)
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func (m *Manager) deny(c *fiber.Ctx, role, required string) error {

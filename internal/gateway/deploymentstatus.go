@@ -62,7 +62,7 @@ func (s *Server) deploymentReadiness(providersReady, usableOutbound, enabledAgen
 		}
 		return "warn"
 	}
-	authReady := s != nil && s.authEngine != nil
+	authReady := s != nil && s.authEngine != nil && s.authEngine.Effective()
 	if !authReady && s != nil && s.cfg != nil {
 		authReady = strings.TrimSpace(s.cfg.Server.APIKey) != ""
 	}

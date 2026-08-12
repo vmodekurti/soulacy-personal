@@ -14,6 +14,9 @@ import (
 
 // CompletionRequest is the provider-agnostic input to an LLM call.
 type CompletionRequest struct {
+	// Operation identifies the billable inference class. Empty means chat;
+	// "embedding" has no generated-output reservation.
+	Operation   string
 	Model       string
 	Messages    []ChatMessage
 	Tools       []ToolSchema
@@ -21,6 +24,9 @@ type CompletionRequest struct {
 	TopP        float64
 	MaxTokens   int
 	Stream      bool
+	// DisablePromptCaching lets the governance layer suppress explicit provider
+	// cache controls for data classes that have not opted in.
+	DisablePromptCaching bool
 	// Optional provider-specific tuning. Zero values preserve existing behavior.
 	PresencePenalty  float64
 	FrequencyPenalty float64
@@ -85,7 +91,23 @@ type CompletionResponse struct {
 	// turn (billed at 0.1× standard input rate — 90% discount).
 	CacheCreationTokens int
 	CacheReadTokens     int
+	// ReasoningTokens are provider-reported hidden thinking/reasoning tokens.
+	// ToolUsePromptTokens are prompt tokens attributable to tool definitions or
+	// tool-use context when the provider reports that dimension separately.
+	ReasoningTokens     int
+	ToolUsePromptTokens int
+	// TotalTokens is the provider-reported total. Callers should fall back to
+	// summing the dimensions above when it is zero.
+	TotalTokens int
+	// ProviderRequestID enables reconciliation with provider usage and billing
+	// exports without persisting prompt content.
+	ProviderRequestID string
+	// ProviderRequestIDs includes every HTTP retry attempt identifier in order.
+	// ProviderRequestID remains the final/successful identifier for compatibility.
+	ProviderRequestIDs []string
+	AttemptCount       int
 	// If Stream is true, tokens arrive on this channel. Closed when done.
+	// Providers update the usage fields above before closing this channel.
 	Stream <-chan string
 }
 

@@ -39,6 +39,14 @@ type Store interface {
 	Close() error
 }
 
+// resourceAgentStore is implemented by stores that can preserve per-agent
+// overrides while using the route's real resource for the static fallback.
+// It is intentionally optional so external Store implementations remain
+// source-compatible.
+type resourceAgentStore interface {
+	CanAccessAgentResource(role, agentID, resource, action string) (bool, error)
+}
+
 // ---------------------------------------------------------------------------
 // SQLite implementation
 // ---------------------------------------------------------------------------
@@ -79,6 +87,10 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 
 // CanAccessAgent implements Store.
 func (s *SQLiteStore) CanAccessAgent(role, agentID, action string) (bool, error) {
+	return s.CanAccessAgentResource(role, agentID, ResourceAgents, action)
+}
+
+func (s *SQLiteStore) CanAccessAgentResource(role, agentID, resource, action string) (bool, error) {
 	// 1. Exact match
 	if allowed, found, err := s.lookupGrant(role, agentID, action); err != nil {
 		return false, err
@@ -96,7 +108,7 @@ func (s *SQLiteStore) CanAccessAgent(role, agentID, action string) (bool, error)
 	}
 
 	// 3. Static default policy
-	return HasPermission(role, ResourceAgents, action), nil
+	return HasPermission(role, resource, action), nil
 }
 
 // lookupGrant returns (allowed, found, error). found is false when no row exists.
@@ -200,6 +212,9 @@ type NoopStore struct{}
 
 func (NoopStore) CanAccessAgent(role, _, action string) (bool, error) {
 	return HasPermission(role, ResourceAgents, action), nil
+}
+func (NoopStore) CanAccessAgentResource(role, _, resource, action string) (bool, error) {
+	return HasPermission(role, resource, action), nil
 }
 func (NoopStore) SetAgentGrant(AgentGrant) error                        { return nil }
 func (NoopStore) DeleteAgentGrant(_, _ string) error                    { return nil }

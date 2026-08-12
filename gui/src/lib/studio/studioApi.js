@@ -116,6 +116,7 @@ export const bridge = {
   buildSpec: (intent, previous_intent) => api.studio.buildSpec({ intent, previous_intent }),
   planView: (workflow) => api.studio.planView({ workflow }),
   modelCapabilities: (model, provider) => api.studio.modelCapabilities({ model, provider }),
+  strategyFit: (model, provider) => api.studio.strategyFit({ model, provider }),
   runPreview: (workflow) => api.studio.runPreview({ workflow }),
   readiness: (workflow, acceptPrivilegedExposure) =>
     api.studio.readiness({ workflow, acceptPrivilegedExposure }),
@@ -217,10 +218,10 @@ export const bridge = {
   // consent dialog: [{ nodeId, hash, capabilities, scope }].
   // acceptWarningsReason is the operator's recorded justification for saving
   // past a warnings-only report. Empty on a clean save.
-  save: async (workflow, acceptPrivilegedExposure, grants, acceptWarningsReason) => {
+  save: async (workflow, acceptPrivilegedExposure, grants, acceptWarningsReason, initialWorkflow) => {
     try {
       return await api.studio.save({
-        workflow, acceptPrivilegedExposure, grants, acceptWarningsReason,
+        workflow, initialWorkflow, acceptPrivilegedExposure, grants, acceptWarningsReason,
       })
     } catch (e) {
       throw hoistStudioError(e)

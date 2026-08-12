@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,10 +29,12 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/soulacy/soulacy/internal/agentvalidate"
+	"github.com/soulacy/soulacy/internal/auth"
 	"github.com/soulacy/soulacy/internal/builder"
 	"github.com/soulacy/soulacy/internal/channels"
 	wawebchan "github.com/soulacy/soulacy/internal/channels/whatsappweb"
 	"github.com/soulacy/soulacy/internal/config"
+	"github.com/soulacy/soulacy/internal/costs"
 	"github.com/soulacy/soulacy/internal/introspect"
 	"github.com/soulacy/soulacy/internal/llm"
 	"github.com/soulacy/soulacy/internal/mcp"
@@ -865,6 +868,7 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 		Username      string   `json:"username"`
 		Text          string   `json:"text"`
 		AttachmentIDs []string `json:"attachment_ids"`
+		ConfirmCost   bool     `json:"confirm_cost"`
 		Overrides     struct {
 			Provider         string   `json:"provider"`
 			Model            string   `json:"model"`
@@ -897,7 +901,12 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 	if req.AgentID == "" || req.Text == "" {
 		return s.errMsg(c, fiber.StatusBadRequest, "agent_id and text are required")
 	}
-	if req.UserID == "" {
+	claims := auth.ClaimsFromCtx(c)
+	// Billing identity comes from authenticated claims. A body-supplied user_id
+	// is only accepted in open mode, where no trusted subject exists.
+	if claims != nil && claims.Subject != "" {
+		req.UserID = claims.Subject
+	} else if req.UserID == "" {
 		req.UserID = "api-user"
 	}
 	if req.Username == "" {
@@ -905,7 +914,10 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 	}
 	sessionID := strings.TrimSpace(req.SessionID)
 	if sessionID == "" {
-		sessionID = fmt.Sprintf("http-%s", req.UserID)
+		sessionID = "http-" + uuid.NewString()
+	}
+	if err := s.claimSession(c, req.AgentID, sessionID); err != nil {
+		return err
 	}
 	text := req.Text
 	if len(req.AttachmentIDs) > 0 {
@@ -950,6 +962,9 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 	if strings.TrimSpace(req.Overrides.LLM.ToolChoice) != "" {
 		ovToolChoice = req.Overrides.LLM.ToolChoice
 	}
+	if (strings.TrimSpace(ovProvider) != "" || strings.TrimSpace(ovModel) != "") && !canOverrideModel(claims) {
+		return s.errMsg(c, fiber.StatusForbidden, "provider/model overrides require the admin or operator role")
+	}
 
 	msg := message.Message{
 		ID:        uuid.New().String(),
@@ -967,8 +982,11 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 
 	// Decouple client connection drop from background execution. Use the
 	// agent's declared run_timeout if set, otherwise the gateway default.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Context()), resolveRunTimeout(def))
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Context()), s.resolveRunTimeout(def))
 	defer cancel()
+	if principal, ok := requestPrincipal(c); ok {
+		ctx = runtime.WithPrincipal(ctx, principal)
+	}
 
 	// Register the run under its session id so a client can cancel a slow
 	// (local-model) run via POST /chat/cancel {run_id: <session_id>} (Story #22).
@@ -982,11 +1000,17 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 	if isTruthy(c.Get("X-Soulacy-Dry-Run")) {
 		ctx = runtime.WithDryRun(ctx, true)
 	}
+	ctx = llm.WithCallMetadata(ctx, llm.CallMetadata{
+		Subject: req.UserID, AgentID: req.AgentID, SessionID: sessionID,
+		RunID: msg.ID, Source: "http", CostConfirmed: req.ConfirmCost || isTruthy(c.Get("X-Soulacy-Cost-Confirmed")),
+		OverrideAuthorized: canOverrideModel(claims),
+	})
 
 	// Inject confirm sender so synchronous GUI chats can still receive tool confirmation
 	// requests over the global WebSocket event stream.
+	approvalPrincipal, _, _ := authenticatedPrincipal(c)
 	ctx = runtime.WithConfirmSender(ctx, func(req runtime.ConfirmRequest) <-chan bool {
-		resultCh := s.engine.Broker().RegisterRequest(req, msg.AgentID, msg.SessionID)
+		resultCh := s.engine.Broker().RegisterRequestForPrincipal(req, msg.AgentID, msg.SessionID, approvalPrincipal)
 		s.hub.Emit(message.Event{
 			Type:      "tool_confirm",
 			AgentID:   msg.AgentID,
@@ -999,6 +1023,11 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 
 	reply, err := s.engine.Handle(ctx, msg)
 	if err != nil {
+		var confirm *costs.ConfirmationRequiredError
+		if errors.As(err, &confirm) {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": confirm.Error(), "confirmation_required": true,
+				"estimate": confirm})
+		}
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
 
@@ -1012,7 +1041,14 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 	// Return the full typed parts (text/image/audio/file) so the UI can render
 	// rich results — images, charts, audio (podcasts), files — not just text
 	// (Stories #26/#27/#28). `reply` stays for backward compatibility.
-	return c.JSON(fiber.Map{"reply": replyText, "parts": reply.Parts})
+	return c.JSON(fiber.Map{"reply": replyText, "parts": reply.Parts, "session_id": sessionID})
+}
+
+func canOverrideModel(claims *auth.Claims) bool {
+	if claims == nil { // explicitly open development mode
+		return true
+	}
+	return strings.EqualFold(claims.Role, "admin") || strings.EqualFold(claims.Role, "operator")
 }
 
 func chatOverrideMetadata(provider, model string, temperature, topP *float64, maxTokens, maxTurns *int, toolChoice, responseFormat, reasoningEffort string, presencePenalty, frequencyPenalty *float64) map[string]string {
@@ -1072,10 +1108,11 @@ func chatOverrideMetadata(provider, model string, temperature, topP *float64, ma
 func (s *Server) handleChatStream(c *fiber.Ctx) error {
 	// Accept both POST (JSON body) and GET (query params) for EventSource compat.
 	var req struct {
-		AgentID  string `json:"agent_id"`
-		UserID   string `json:"user_id"`
-		Username string `json:"username"`
-		Text     string `json:"text"`
+		AgentID     string `json:"agent_id"`
+		UserID      string `json:"user_id"`
+		Username    string `json:"username"`
+		Text        string `json:"text"`
+		ConfirmCost bool   `json:"confirm_cost"`
 	}
 	if c.Method() == "POST" {
 		if err := c.BodyParser(&req); err != nil {
@@ -1086,21 +1123,28 @@ func (s *Server) handleChatStream(c *fiber.Ctx) error {
 		req.UserID = c.Query("user_id")
 		req.Username = c.Query("username")
 		req.Text = c.Query("text")
+		req.ConfirmCost = isTruthy(c.Query("confirm_cost"))
 	}
 	if req.AgentID == "" || req.Text == "" {
 		return s.errMsg(c, fiber.StatusBadRequest, "agent_id and text are required")
 	}
-	if req.UserID == "" {
+	if claims := auth.ClaimsFromCtx(c); claims != nil && claims.Subject != "" {
+		req.UserID = claims.Subject
+	} else if req.UserID == "" {
 		req.UserID = "api-user"
 	}
 	if req.Username == "" {
 		req.Username = req.UserID
 	}
+	sessionID := "http-" + uuid.NewString()
+	if err := s.claimSession(c, req.AgentID, sessionID); err != nil {
+		return err
+	}
 	def := s.loader.Get(req.AgentID)
 
 	msg := message.Message{
 		ID:        uuid.New().String(),
-		SessionID: fmt.Sprintf("http-%s", req.UserID),
+		SessionID: sessionID,
 		AgentID:   req.AgentID,
 		Channel:   "http",
 		ThreadID:  req.UserID,
@@ -1125,11 +1169,18 @@ func (s *Server) handleChatStream(c *fiber.Ctx) error {
 	// stream (see studio.go). Ownership belongs to the two places that actually
 	// know the run is over: the producer goroutine (work finished) and the stream
 	// writer (client went away).
-	runCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Context()), resolveRunTimeout(def))
+	runCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Context()), s.resolveRunTimeout(def))
+	if principal, ok := requestPrincipal(c); ok {
+		runCtx = runtime.WithPrincipal(runCtx, principal)
+	}
 
 	// Register this run so it can be cancelled mid-flight (Story #22). The id is
 	// emitted to the client below as a "run" event; POST /chat/cancel cancels it.
 	runID := msg.ID
+	if err := s.claimSession(c, req.AgentID, runID); err != nil {
+		cancel()
+		return err
+	}
 	if s.runReg != nil {
 		s.runReg.Register(runID, cancel)
 	}
@@ -1153,12 +1204,17 @@ func (s *Server) handleChatStream(c *fiber.Ctx) error {
 		case <-runCtx.Done():
 		}
 	})
+	streamCtx = llm.WithCallMetadata(streamCtx, llm.CallMetadata{
+		Subject: req.UserID, AgentID: req.AgentID, SessionID: msg.SessionID,
+		RunID: runID, Source: "http", CostConfirmed: req.ConfirmCost || isTruthy(c.Get("X-Soulacy-Cost-Confirmed")),
+	})
 
 	// Confirm sender emits a tool_confirm event and registers a result channel
 	// in the broker. The engine blocks on the result channel until the user
 	// approves or denies via POST /api/v1/chat/confirm.
+	approvalPrincipal, _, _ := authenticatedPrincipal(c)
 	streamCtx = runtime.WithConfirmSender(streamCtx, func(req runtime.ConfirmRequest) <-chan bool {
-		resultCh := s.engine.Broker().RegisterRequest(req, msg.AgentID, msg.SessionID)
+		resultCh := s.engine.Broker().RegisterRequestForPrincipal(req, msg.AgentID, msg.SessionID, approvalPrincipal)
 		data, _ := json.Marshal(req)
 		select {
 		case events <- sseEvent{Event: "tool_confirm", Data: string(data)}:
@@ -1242,6 +1298,9 @@ func (s *Server) handleChatCancel(c *fiber.Ctx) error {
 	if req.RunID == "" {
 		return s.errMsg(c, fiber.StatusBadRequest, "run_id is required")
 	}
+	if err := s.requireSession(c, "", req.RunID); err != nil {
+		return err
+	}
 	if s.runReg == nil || !s.runReg.Cancel(req.RunID) {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"error": "run not found — it may have already finished",
@@ -1259,7 +1318,6 @@ func (s *Server) handleToolConfirm(c *fiber.Ctx) error {
 	var req struct {
 		CallID   string `json:"call_id"`
 		Approved bool   `json:"approved"`
-		Approver string `json:"approver"` // optional display name of who decided
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return s.errJSON(c, fiber.StatusBadRequest, err)
@@ -1270,18 +1328,19 @@ func (s *Server) handleToolConfirm(c *fiber.Ctx) error {
 	// Capture the pending request's context (tool/agent/session) before it is
 	// resolved and removed, so we can record who approved what.
 	var tool, agentID, sessionID string
-	for _, p := range s.engine.Broker().List() {
+	principal, _, admin := authenticatedPrincipal(c)
+	for _, p := range s.engine.Broker().ListForPrincipal(principal, admin) {
 		if p.CallID == req.CallID {
 			tool, agentID, sessionID = p.Tool, p.AgentID, p.SessionID
 			break
 		}
 	}
-	if !s.engine.Broker().Resolve(req.CallID, req.Approved) {
+	if !s.engine.Broker().ResolveForPrincipal(req.CallID, req.Approved, principal, admin) {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"error": "call_id not found — it may have already timed out or been resolved",
 		})
 	}
-	s.recordApproval(agentID, sessionID, tool, req.CallID, req.Approved, approverIdentity(c, req.Approver))
+	s.recordApproval(agentID, sessionID, tool, req.CallID, req.Approved, approverIdentity(c))
 	return c.JSON(fiber.Map{"ok": true})
 }
 
@@ -1289,15 +1348,12 @@ func (s *Server) handleToolConfirm(c *fiber.Ctx) error {
 // single API key rather than per-user identity, so we record the client-provided
 // name when given, else the calling device by IP — the meaningful granularity of
 // "who approved what" available here.
-func approverIdentity(c *fiber.Ctx, provided string) string {
-	if p := strings.TrimSpace(provided); p != "" {
-		return p
+func approverIdentity(c *fiber.Ctx) string {
+	principal, authenticated, _ := authenticatedPrincipal(c)
+	if authenticated && principal != "" {
+		return principal
 	}
-	ip := strings.TrimSpace(c.IP())
-	if ip == "" {
-		return "operator"
-	}
-	return "operator@" + ip
+	return "authenticated-unknown"
 }
 
 // recordApproval writes an approval/denial to the durable action log so the
@@ -2361,8 +2417,9 @@ func (s *Server) handleManualTrigger(c *fiber.Ctx) error {
 	// Decouple client connection drop from background execution. Use the
 	// agent's run_timeout — long-running tools (e.g. NotebookLM audio gen)
 	// would blow the old 120s ceiling.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Context()), resolveRunTimeout(def))
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Context()), s.resolveRunTimeout(def))
 	defer cancel()
+	ctx = withRequestPrincipal(c, ctx)
 
 	reply, err := s.engine.Handle(ctx, msg)
 	elapsed := time.Since(runStart).Round(time.Millisecond)
@@ -2472,8 +2529,9 @@ func (s *Server) handleReplayAgentRun(c *fiber.Ctx) error {
 	msg.Metadata["replay_from_session"] = req.SessionID
 	msg.Metadata["replay_from_channel"] = orig.Channel
 
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Context()), resolveRunTimeout(def))
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Context()), s.resolveRunTimeout(def))
 	defer cancel()
+	ctx = withRequestPrincipal(c, ctx)
 
 	reply, err := s.engine.Handle(ctx, msg)
 	if err != nil {
@@ -2605,6 +2663,16 @@ func (s *Server) handleTestScheduledOutput(c *fiber.Ctx) error {
 // like NotebookLM audio generation).
 func resolveRunTimeout(def *agent.Definition) time.Duration {
 	return def.ResolvedRunTimeout(15 * time.Minute)
+}
+
+func (s *Server) resolveRunTimeout(def *agent.Definition) time.Duration {
+	fallback := 15 * time.Minute
+	if s != nil && s.cfg != nil {
+		if d, err := time.ParseDuration(s.cfg.Runtime.Timeouts.Run); err == nil && d > 0 {
+			fallback = d
+		}
+	}
+	return def.ResolvedRunTimeout(fallback)
 }
 
 // handleScheduleStatus returns live run state for polling by the GUI:
@@ -3735,18 +3803,24 @@ func (s *Server) handleListProviders(c *fiber.Ctx) error {
 			apiKey = "***"
 		}
 		providers[name] = fiber.Map{
-			"base_url":            pc.BaseURL,
-			"api_key":             apiKey,
-			"model":               pc.Model,
-			"keep_alive":          pc.KeepAlive,
-			"options":             pc.Options,
-			"prompt_caching":      pc.PromptCaching,
-			"thinking_budget":     pc.ThinkingBudget,
-			"safety_level":        pc.SafetyLevel,
-			"extended_thinking":   pc.ExtendedThinking,
-			"organization":        pc.Organization,
-			"parallel_tool_calls": pc.ParallelToolCalls,
-			"registered":          registered[name],
+			"base_url":                   pc.BaseURL,
+			"api_key":                    apiKey,
+			"model":                      pc.Model,
+			"keep_alive":                 pc.KeepAlive,
+			"options":                    pc.Options,
+			"prompt_caching":             pc.PromptCaching,
+			"region":                     pc.Region,
+			"retention":                  pc.Retention,
+			"local":                      pc.Local,
+			"allowed_data_classes":       pc.AllowedDataClasses,
+			"cache_allowed_data_classes": pc.CacheAllowedDataClasses,
+			"max_tokens_per_minute":      pc.MaxTokensPerMinute,
+			"thinking_budget":            pc.ThinkingBudget,
+			"safety_level":               pc.SafetyLevel,
+			"extended_thinking":          pc.ExtendedThinking,
+			"organization":               pc.Organization,
+			"parallel_tool_calls":        pc.ParallelToolCalls,
+			"registered":                 registered[name],
 		}
 	}
 	// Known provider IDs the GUI should always offer (even when not yet
@@ -3955,17 +4029,23 @@ func (s *Server) handleSetProviderCredentials(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "config file path unknown — cannot persist")
 	}
 	var req struct {
-		BaseURL           string         `json:"base_url"`
-		APIKey            string         `json:"api_key"`
-		Model             string         `json:"model"`
-		KeepAlive         string         `json:"keep_alive"`
-		Options           map[string]any `json:"options"`
-		PromptCaching     *bool          `json:"prompt_caching"`      // pointer: omitted ≠ false
-		ThinkingBudget    *int           `json:"thinking_budget"`     // Google/Anthropic: 0=off, -1=auto, N=tokens
-		SafetyLevel       *string        `json:"safety_level"`        // Google: ""|"default"|"off"|"strict"
-		ExtendedThinking  *bool          `json:"extended_thinking"`   // Anthropic: Claude 3.7+ thinking
-		Organization      *string        `json:"organization"`        // OpenAI: Org ID header
-		ParallelToolCalls *bool          `json:"parallel_tool_calls"` // OpenAI: false=serialize tool calls
+		BaseURL                 string         `json:"base_url"`
+		APIKey                  string         `json:"api_key"`
+		Model                   string         `json:"model"`
+		KeepAlive               string         `json:"keep_alive"`
+		Options                 map[string]any `json:"options"`
+		PromptCaching           *bool          `json:"prompt_caching"`      // pointer: omitted ≠ false
+		ThinkingBudget          *int           `json:"thinking_budget"`     // Google/Anthropic: 0=off, -1=auto, N=tokens
+		SafetyLevel             *string        `json:"safety_level"`        // Google: ""|"default"|"off"|"strict"
+		ExtendedThinking        *bool          `json:"extended_thinking"`   // Anthropic: Claude 3.7+ thinking
+		Organization            *string        `json:"organization"`        // OpenAI: Org ID header
+		ParallelToolCalls       *bool          `json:"parallel_tool_calls"` // OpenAI: false=serialize tool calls
+		Region                  *string        `json:"region"`
+		Retention               *string        `json:"retention"`
+		Local                   *bool          `json:"local"`
+		AllowedDataClasses      *[]string      `json:"allowed_data_classes"`
+		CacheAllowedDataClasses *[]string      `json:"cache_allowed_data_classes"`
+		MaxTokensPerMinute      *int           `json:"max_tokens_per_minute"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return s.errJSON(c, fiber.StatusBadRequest, err)
@@ -4011,6 +4091,24 @@ func (s *Server) handleSetProviderCredentials(c *fiber.Ctx) error {
 	}
 	if req.PromptCaching != nil {
 		provMap["prompt_caching"] = *req.PromptCaching
+	}
+	if req.Region != nil {
+		provMap["region"] = strings.TrimSpace(*req.Region)
+	}
+	if req.Retention != nil {
+		provMap["retention"] = strings.TrimSpace(*req.Retention)
+	}
+	if req.Local != nil {
+		provMap["local"] = *req.Local
+	}
+	if req.AllowedDataClasses != nil {
+		provMap["allowed_data_classes"] = *req.AllowedDataClasses
+	}
+	if req.CacheAllowedDataClasses != nil {
+		provMap["cache_allowed_data_classes"] = *req.CacheAllowedDataClasses
+	}
+	if req.MaxTokensPerMinute != nil {
+		provMap["max_tokens_per_minute"] = *req.MaxTokensPerMinute
 	}
 	if req.ThinkingBudget != nil {
 		provMap["thinking_budget"] = *req.ThinkingBudget
@@ -4059,6 +4157,24 @@ func (s *Server) handleSetProviderCredentials(c *fiber.Ctx) error {
 	if req.PromptCaching != nil {
 		pc.PromptCaching = *req.PromptCaching
 	}
+	if req.Region != nil {
+		pc.Region = strings.TrimSpace(*req.Region)
+	}
+	if req.Retention != nil {
+		pc.Retention = strings.TrimSpace(*req.Retention)
+	}
+	if req.Local != nil {
+		pc.Local = *req.Local
+	}
+	if req.AllowedDataClasses != nil {
+		pc.AllowedDataClasses = append([]string(nil), (*req.AllowedDataClasses)...)
+	}
+	if req.CacheAllowedDataClasses != nil {
+		pc.CacheAllowedDataClasses = append([]string(nil), (*req.CacheAllowedDataClasses)...)
+	}
+	if req.MaxTokensPerMinute != nil {
+		pc.MaxTokensPerMinute = *req.MaxTokensPerMinute
+	}
 	if req.ThinkingBudget != nil {
 		pc.ThinkingBudget = *req.ThinkingBudget
 	}
@@ -4101,6 +4217,7 @@ func (s *Server) handleSetProviderCredentials(c *fiber.Ctx) error {
 	}
 
 	s.log.Info("provider credentials updated", zap.String("provider", id))
+	s.recordAdminAudit(c, "provider.credentials.update", "provider", id, "ok", map[string]any{"credential_changed": hasNewAPIKey})
 	return c.JSON(fiber.Map{
 		"ok":      true,
 		"message": "Saved.",
@@ -4140,6 +4257,7 @@ func (s *Server) handleDeleteProvider(c *fiber.Ctx) error {
 	if s.cfg.LLM.Providers != nil {
 		delete(s.cfg.LLM.Providers, id)
 	}
+	s.recordAdminAudit(c, "provider.delete", "provider", id, "ok", nil)
 
 	return c.JSON(fiber.Map{"message": "Provider deleted."})
 }

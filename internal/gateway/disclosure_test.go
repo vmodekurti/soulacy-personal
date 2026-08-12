@@ -67,17 +67,21 @@ func TestRedactMCPServers_LeavesEmptyMapsAlone(t *testing.T) {
 
 // The route table is the enforcement point, so assert on it directly: reading a
 // decrypted value must not be reachable with a read-only permission.
-func TestCredentialValueRouteRequiresWrite(t *testing.T) {
-	if rbac.HasPermission("viewer", rbac.ResourceAgents, rbac.ActionWrite) {
-		t.Fatal("precondition changed: viewer now has agents:write, so this route is open again")
+func TestCredentialValueRouteRequiresDedicatedRevealPermission(t *testing.T) {
+	if rbac.HasPermission("viewer", rbac.ResourceCredentials, rbac.ActionReveal) {
+		t.Fatal("viewer unexpectedly has credential reveal permission")
 	}
-	if !rbac.HasPermission("viewer", rbac.ResourceAgents, rbac.ActionRead) {
-		t.Fatal("precondition changed: viewer lost agents:read")
+	if rbac.HasPermission("operator", rbac.ResourceCredentials, rbac.ActionReveal) {
+		t.Fatal("operator unexpectedly has credential reveal permission")
 	}
-	// The guarantee: listing names is a read, fetching a value is not.
+	if !rbac.HasPermission("admin", rbac.ResourceCredentials, rbac.ActionReveal) {
+		t.Fatal("admin lost credential reveal permission")
+	}
+	// The guarantee: fetching a value uses a dedicated reveal permission and
+	// an explicit confirmation, not agents:read/write.
 	src := readGatewaySource(t, "server.go")
 	line := findLine(t, src, `api.Get("/credentials/:agentID/:key"`)
-	if !strings.Contains(line, "rbac.ActionWrite") {
-		t.Errorf("the credential-value route is not write-gated: %s", strings.TrimSpace(line))
+	if !strings.Contains(line, "rbac.ResourceCredentials") || !strings.Contains(line, "rbac.ActionReveal") || !strings.Contains(line, "requireCredentialRevealConfirmation") {
+		t.Errorf("the credential-value route is not reveal-gated: %s", strings.TrimSpace(line))
 	}
 }

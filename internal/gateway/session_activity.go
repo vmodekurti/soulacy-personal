@@ -74,11 +74,11 @@ type RunningSession struct {
 // sessionActivityTracker is the in-memory heartbeat table. Attached to a
 // running EventHub via newSessionActivityTracker + hub wiring.
 type sessionActivityTracker struct {
-	mu              sync.RWMutex
-	sessions        map[string]*sessionRecord // key: session_id
-	hungThreshold   time.Duration
-	evictAfter      time.Duration
-	nowFn           func() time.Time
+	mu            sync.RWMutex
+	sessions      map[string]*sessionRecord // key: session_id
+	hungThreshold time.Duration
+	evictAfter    time.Duration
+	nowFn         func() time.Time
 }
 
 func newSessionActivityTracker() *sessionActivityTracker {

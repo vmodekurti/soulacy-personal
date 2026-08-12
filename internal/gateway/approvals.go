@@ -21,7 +21,8 @@ func isTruthy(s string) bool {
 // decision, so any paired device (including the mobile companion) can review and
 // resolve them — not just the browser tab that started the run.
 func (s *Server) handleListApprovals(c *fiber.Ctx) error {
-	return c.JSON(fiber.Map{"approvals": s.engine.Broker().List()})
+	principal, _, admin := authenticatedPrincipal(c)
+	return c.JSON(fiber.Map{"approvals": s.engine.Broker().ListForPrincipal(principal, admin)})
 }
 
 // handleResolveApproval approves or denies a pending tool call by id. `decide`
@@ -33,7 +34,8 @@ func (s *Server) handleResolveApproval(decide bool) fiber.Handler {
 		if id == "" {
 			return s.errMsg(c, fiber.StatusBadRequest, "call id is required")
 		}
-		if !s.engine.Broker().Resolve(id, decide) {
+		principal, _, admin := authenticatedPrincipal(c)
+		if !s.engine.Broker().ResolveForPrincipal(id, decide, principal, admin) {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 				"error": "call_id not found — it may have already been resolved or timed out",
 			})

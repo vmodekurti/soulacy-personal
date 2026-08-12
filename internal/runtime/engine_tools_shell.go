@@ -7,11 +7,9 @@
 package runtime
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -54,7 +52,7 @@ func (e *Engine) buildShellTools() []BuiltinTool {
 		{
 			Name:        "shell_exec",
 			Gate:        "",
-			Description: "Execute a shell command on the host OS and return stdout + stderr combined. Runs via /bin/sh -c so pipes, redirects, and shell built-ins work. Use for system administration, process management, git commands, and anything else you'd do in a terminal.",
+			Description: "Execute a shell command inside the configured isolated runtime and return stdout + stderr combined. The workspace is mounted at /workspace; host credentials and networking are unavailable.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -78,14 +76,13 @@ func (e *Engine) buildShellTools() []BuiltinTool {
 				if command == "" {
 					return "", fmt.Errorf("shell_exec: command is required")
 				}
-				workDir := argString(args, "working_dir")
-				homeDir, _ := os.UserHomeDir()
-				if workDir == "" {
-					workDir = homeDir
-				} else if workDir == "~" {
-					workDir = homeDir
-				} else if strings.HasPrefix(workDir, "~/") {
-					workDir = filepath.Join(homeDir, workDir[2:])
+				workDir := e.defaultPrivilegedWorkDir()
+				if requested := argString(args, "working_dir"); requested != "" {
+					var err error
+					workDir, err = e.resolveFilesystemPath(requested, false)
+					if err != nil {
+						return "", fmt.Errorf("shell_exec: working_dir: %w", err)
+					}
 				}
 				timeoutSecs := argInt(args, "timeout_seconds", 60)
 				if timeoutSecs <= 0 {
@@ -96,27 +93,13 @@ func (e *Engine) buildShellTools() []BuiltinTool {
 				}
 				tctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSecs)*time.Second)
 				defer cancel()
-				cmd := exec.CommandContext(tctx, "/bin/sh", "-c", command)
-				cmd.Dir = workDir
-				cmd.Env = e.shellEnviron()
-				var out bytes.Buffer
-				cmd.Stdout = &out
-				cmd.Stderr = &out
-				runErr := cmd.Run()
-				result := strings.TrimSpace(out.String())
-				if len(result) > 8000 {
-					result = result[:8000] + "\n[output truncated]"
-				}
-				if runErr != nil {
-					return fmt.Sprintf("exit_code: non-zero\n%s\nerror: %v", result, runErr), nil
-				}
-				return result, nil
+				return e.runPrivilegedCommand(tctx, PrivilegedCommand{Argv: []string{"/bin/sh", "-c", command}, WorkingDir: workDir, Env: e.shellEnviron()}, 8000)
 			},
 		},
 		{
 			Name:        "run_script",
 			Gate:        "",
-			Description: "Run a script file (Python, Bash, Node.js, Ruby, etc.) on the host. Interpreter is inferred from the file extension (.py→python3, .sh→bash, .js→node) or can be specified explicitly.",
+			Description: "Run a workspace script inside the configured isolated runtime. Interpreter is inferred from the extension or can be specified explicitly.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -141,11 +124,9 @@ func (e *Engine) buildShellTools() []BuiltinTool {
 				"required": []string{"path"},
 			},
 			Handler: func(ctx context.Context, args map[string]any) (string, error) {
-				path := argString(args, "path")
-				if strings.HasPrefix(path, "~/") {
-					if home, err := os.UserHomeDir(); err == nil {
-						path = filepath.Join(home, path[2:])
-					}
+				path, err := e.resolveFilesystemPath(argString(args, "path"), false)
+				if err != nil {
+					return "", fmt.Errorf("run_script: %w", err)
 				}
 				interp := argString(args, "interpreter")
 				if interp == "" {
@@ -166,27 +147,16 @@ func (e *Engine) buildShellTools() []BuiltinTool {
 				for _, a := range argStringSlice(args, "args") {
 					argv = append(argv, a)
 				}
-				workDir := argString(args, "working_dir")
-				if workDir == "" {
-					workDir = filepath.Dir(path)
+				workDir := filepath.Dir(path)
+				if requested := argString(args, "working_dir"); requested != "" {
+					workDir, err = e.resolveFilesystemPath(requested, false)
+					if err != nil {
+						return "", fmt.Errorf("run_script: working_dir: %w", err)
+					}
 				}
 				tctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 				defer cancel()
-				cmd := exec.CommandContext(tctx, argv[0], argv[1:]...)
-				cmd.Dir = workDir
-				cmd.Env = e.shellEnviron()
-				var out bytes.Buffer
-				cmd.Stdout = &out
-				cmd.Stderr = &out
-				runErr := cmd.Run()
-				result := strings.TrimSpace(out.String())
-				if len(result) > 8000 {
-					result = result[:8000] + "\n[output truncated]"
-				}
-				if runErr != nil {
-					return fmt.Sprintf("exit_code: non-zero\n%s\nerror: %v", result, runErr), nil
-				}
-				return result, nil
+				return e.runPrivilegedCommand(tctx, PrivilegedCommand{Argv: argv, WorkingDir: workDir, Env: e.shellEnviron()}, 8000)
 			},
 		},
 		{
@@ -207,20 +177,7 @@ func (e *Engine) buildShellTools() []BuiltinTool {
 				code := argString(args, "code")
 				tctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 				defer cancel()
-				cmd := exec.CommandContext(tctx, "python3", "-c", code)
-				cmd.Env = e.shellEnviron()
-				var out bytes.Buffer
-				cmd.Stdout = &out
-				cmd.Stderr = &out
-				runErr := cmd.Run()
-				result := strings.TrimSpace(out.String())
-				if len(result) > 8000 {
-					result = result[:8000] + "\n[output truncated]"
-				}
-				if runErr != nil {
-					return fmt.Sprintf("exit_code: non-zero\n%s\nerror: %v", result, runErr), nil
-				}
-				return result, nil
+				return e.runPrivilegedCommand(tctx, PrivilegedCommand{Argv: []string{"python3", "-c", code}, WorkingDir: e.defaultPrivilegedWorkDir(), Env: e.shellEnviron()}, 8000)
 			},
 		},
 		{
@@ -280,21 +237,25 @@ func (e *Engine) buildShellTools() []BuiltinTool {
 				}
 				tctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 				defer cancel()
-				cmd := exec.CommandContext(tctx, argv[0], argv[1:]...)
-				cmd.Env = e.shellEnviron()
-				var out bytes.Buffer
-				cmd.Stdout = &out
-				cmd.Stderr = &out
-				runErr := cmd.Run()
-				result := strings.TrimSpace(out.String())
-				if len(result) > 4000 {
-					result = result[:4000] + "\n[output truncated]"
+				result, err := e.runPrivilegedCommand(tctx, PrivilegedCommand{Argv: argv, WorkingDir: e.defaultPrivilegedWorkDir(), Env: e.shellEnviron()}, 4000)
+				if strings.Contains(result, "exit_code: non-zero") {
+					return "Installation failed:\n" + result, nil
 				}
-				if runErr != nil {
-					return fmt.Sprintf("Installation failed:\n%s\nerror: %v", result, runErr), nil
+				if err != nil {
+					return "", err
 				}
 				return fmt.Sprintf("Successfully installed %s:\n%s", pkg, result), nil
 			},
 		},
 	}
+}
+
+func (e *Engine) defaultPrivilegedWorkDir() string {
+	if strings.TrimSpace(e.privilegedWorkDir) != "" {
+		return e.privilegedWorkDir
+	}
+	if len(e.filesystemRoots) > 0 {
+		return e.filesystemRoots[0]
+	}
+	return ""
 }

@@ -117,6 +117,25 @@ func TestNewSQLiteStoreCreates(t *testing.T) {
 	}
 }
 
+func TestDedicatedSecretAndCredentialPolicy(t *testing.T) {
+	for _, action := range []string{ActionList, ActionSet, ActionDelete} {
+		if !HasPermission(RoleAdmin, ResourceSecrets, action) {
+			t.Fatalf("admin missing secrets:%s", action)
+		}
+		if HasPermission(RoleOperator, ResourceSecrets, action) || HasPermission(RoleViewer, ResourceSecrets, action) {
+			t.Fatalf("non-admin received secrets:%s", action)
+		}
+	}
+	for _, action := range []string{ActionList, ActionSet, ActionDelete, ActionRotate} {
+		if !HasPermission(RoleOperator, ResourceCredentials, action) {
+			t.Fatalf("operator missing credentials:%s", action)
+		}
+	}
+	if HasPermission(RoleOperator, ResourceCredentials, ActionReveal) || !HasPermission(RoleAdmin, ResourceCredentials, ActionReveal) {
+		t.Fatal("plaintext credential reveal is not admin-only")
+	}
+}
+
 func TestNewSQLiteStoreBadPath(t *testing.T) {
 	_, err := NewSQLiteStore("/no/such/dir/rbac.db")
 	if err == nil {

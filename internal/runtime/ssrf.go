@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/soulacy/soulacy/internal/netguard"
 )
@@ -31,4 +32,8 @@ func checkSSRF(rawURL string, ssrfProtection bool, allowedHosts []string) error 
 // client built from model-supplied URLs must carry this.
 func (e *Engine) ssrfRedirectHook() func(*http.Request, []*http.Request) error {
 	return netguard.CheckRedirect(e.ssrfProtection, e.allowPrivateHosts)
+}
+
+func (e *Engine) ssrfHTTPClient(timeout time.Duration) *http.Client {
+	return netguard.NewHTTPClient(timeout, e.ssrfProtection, e.allowPrivateHosts)
 }

@@ -167,6 +167,11 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req CompletionRequest) (*
 	// for tool turns and stream only on the final synthesis turn).
 	if req.Stream && len(req.Tools) == 0 {
 		body["stream"] = true
+		// Native OpenAI supports a final usage chunk. Compatibility providers vary;
+		// the router's tokenizer fallback accounts for those streams safely.
+		if p.id == "openai" {
+			body["stream_options"] = map[string]any{"include_usage": true}
+		}
 		streamPayload, _ := json.Marshal(body)
 		streamReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
 			p.baseURL+"/chat/completions", bytes.NewReader(streamPayload))
@@ -188,6 +193,9 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req CompletionRequest) (*
 			return nil, fmt.Errorf("%s: stream http %d: %s", p.id, streamResp.StatusCode, string(body))
 		}
 		ch := make(chan string, 64)
+		result := &CompletionResponse{
+			ProviderRequestID: firstNonEmpty(streamResp.Header.Get("x-request-id"), streamResp.Header.Get("request-id")),
+		}
 		go func() {
 			defer close(ch)
 			defer streamResp.Body.Close()
@@ -208,6 +216,17 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req CompletionRequest) (*
 						} `json:"delta"`
 						FinishReason string `json:"finish_reason"`
 					} `json:"choices"`
+					Usage *struct {
+						PromptTokens      int `json:"prompt_tokens"`
+						CompletionTokens  int `json:"completion_tokens"`
+						TotalTokens       int `json:"total_tokens"`
+						CompletionDetails struct {
+							ReasoningTokens int `json:"reasoning_tokens"`
+						} `json:"completion_tokens_details"`
+						PromptDetails struct {
+							CachedTokens int `json:"cached_tokens"`
+						} `json:"prompt_tokens_details"`
+					} `json:"usage"`
 				}
 				if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 					continue
@@ -215,13 +234,22 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req CompletionRequest) (*
 				if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
 					ch <- chunk.Choices[0].Delta.Content
 				}
+				if chunk.Usage != nil {
+					result.CacheReadTokens = chunk.Usage.PromptDetails.CachedTokens
+					result.InputTokens = max(0, chunk.Usage.PromptTokens-result.CacheReadTokens)
+					result.OutputTokens = chunk.Usage.CompletionTokens
+					result.TotalTokens = chunk.Usage.TotalTokens
+					result.ReasoningTokens = chunk.Usage.CompletionDetails.ReasoningTokens
+				}
 			}
 		}()
-		return &CompletionResponse{Stream: ch}, nil
+		result.Stream = ch
+		return result, nil
 	}
 
 	strippedOptional := map[string]bool{}
 	var bodyBytes []byte
+	var providerRequestID string
 	for {
 		payload, _ := json.Marshal(body)
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
@@ -248,6 +276,7 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req CompletionRequest) (*
 			return nil, fmt.Errorf("%s: request failed: %w", p.id, err)
 		}
 		bodyBytes, _ = io.ReadAll(resp.Body)
+		providerRequestID = firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("request-id"))
 		_ = resp.Body.Close()
 
 		if resp.StatusCode < 300 {
@@ -286,6 +315,13 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req CompletionRequest) (*
 		Usage struct {
 			PromptTokens     int `json:"prompt_tokens"`
 			CompletionTokens int `json:"completion_tokens"`
+			TotalTokens      int `json:"total_tokens"`
+			PromptDetails    struct {
+				CachedTokens int `json:"cached_tokens"`
+			} `json:"prompt_tokens_details"`
+			CompletionDetails struct {
+				ReasoningTokens int `json:"reasoning_tokens"`
+			} `json:"completion_tokens_details"`
 		} `json:"usage"`
 	}
 
@@ -297,9 +333,13 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req CompletionRequest) (*
 	}
 
 	r := &CompletionResponse{
-		Content:      result.Choices[0].Message.Content,
-		InputTokens:  result.Usage.PromptTokens,
-		OutputTokens: result.Usage.CompletionTokens,
+		Content:           result.Choices[0].Message.Content,
+		InputTokens:       max(0, result.Usage.PromptTokens-result.Usage.PromptDetails.CachedTokens),
+		OutputTokens:      result.Usage.CompletionTokens,
+		TotalTokens:       result.Usage.TotalTokens,
+		CacheReadTokens:   result.Usage.PromptDetails.CachedTokens,
+		ReasoningTokens:   result.Usage.CompletionDetails.ReasoningTokens,
+		ProviderRequestID: providerRequestID,
 	}
 	for _, tc := range result.Choices[0].Message.ToolCalls {
 		var args map[string]any

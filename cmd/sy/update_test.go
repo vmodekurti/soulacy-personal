@@ -33,7 +33,7 @@ func TestCheckForUpdateNoManifestConfigured(t *testing.T) {
 
 	updates.HTTPClient = &http.Client{
 		Transport: mockRoundTripper(func(req *http.Request) (*http.Response, error) {
-			body := `{"tag_name": "v1.2.3", "assets": []}`
+			body := `{"product":"soulacy","version":"1.2.3","artifacts":[]}`
 			return &http.Response{
 				StatusCode: 200,
 				Body:       io.NopCloser(strings.NewReader(body)),
@@ -73,6 +73,7 @@ func TestCheckForUpdateFindsNewerManifestAndPlatformArtifact(t *testing.T) {
 }
 
 func TestInstallUpdateDryRunVerifiesArtifactWithoutReplacing(t *testing.T) {
+	stubSigstoreVerification(t)
 	dir := t.TempDir()
 	archive := writeUpdateArchive(t, dir, "new soulacy", "new sy")
 	sum := fileSHA256(t, archive)
@@ -118,6 +119,7 @@ func TestInstallUpdateDryRunVerifiesArtifactWithoutReplacing(t *testing.T) {
 }
 
 func TestInstallUpdateInstallsAndBacksUpBinaries(t *testing.T) {
+	stubSigstoreVerification(t)
 	dir := t.TempDir()
 	archive := writeUpdateArchive(t, dir, "new soulacy", "new sy")
 	manifest := writeUpdateManifest(t, updates.UpdateManifest{
@@ -166,6 +168,13 @@ func TestInstallUpdateInstallsAndBacksUpBinaries(t *testing.T) {
 			t.Fatalf("backup %s missing: %v", backup, err)
 		}
 	}
+}
+
+func stubSigstoreVerification(t *testing.T) {
+	t.Helper()
+	old := updates.VerifySigstore
+	updates.VerifySigstore = func(context.Context, string, string, string) error { return nil }
+	t.Cleanup(func() { updates.VerifySigstore = old })
 }
 
 func TestInstallUpdateRejectsBadChecksum(t *testing.T) {

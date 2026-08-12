@@ -43,11 +43,9 @@ func (e *Engine) buildFileTools() []BuiltinTool {
 				"required": []string{"path"},
 			},
 			Handler: func(ctx context.Context, args map[string]any) (string, error) {
-				path := argString(args, "path")
-				if strings.HasPrefix(path, "~/") {
-					if home, err := os.UserHomeDir(); err == nil {
-						path = filepath.Join(home, path[2:])
-					}
+				path, err := e.resolveFilesystemPath(argString(args, "path"), false)
+				if err != nil {
+					return "", fmt.Errorf("read_file: %w", err)
 				}
 				maxBytes := argInt(args, "max_bytes", 100000)
 				if maxBytes <= 0 {
@@ -92,13 +90,11 @@ func (e *Engine) buildFileTools() []BuiltinTool {
 				"required": []string{"path", "content"},
 			},
 			Handler: func(ctx context.Context, args map[string]any) (string, error) {
-				path := argString(args, "path")
-				content := argString(args, "content")
-				if strings.HasPrefix(path, "~/") {
-					if home, err := os.UserHomeDir(); err == nil {
-						path = filepath.Join(home, path[2:])
-					}
+				path, err := e.resolveFilesystemPath(argString(args, "path"), true)
+				if err != nil {
+					return "", fmt.Errorf("write_file: %w", err)
 				}
+				content := argString(args, "content")
 				if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 					return "", fmt.Errorf("write_file: mkdir: %w", err)
 				}
@@ -138,11 +134,9 @@ func (e *Engine) buildFileTools() []BuiltinTool {
 				"required": []string{"path"},
 			},
 			Handler: func(ctx context.Context, args map[string]any) (string, error) {
-				path := argString(args, "path")
-				if strings.HasPrefix(path, "~/") {
-					if home, err := os.UserHomeDir(); err == nil {
-						path = filepath.Join(home, path[2:])
-					}
+				path, err := e.resolveFilesystemPath(argString(args, "path"), false)
+				if err != nil {
+					return "", fmt.Errorf("list_dir: %w", err)
 				}
 				showHidden := argBool(args, "show_hidden")
 				entries, err := os.ReadDir(path)
@@ -195,11 +189,9 @@ func (e *Engine) buildFileTools() []BuiltinTool {
 				"required": []string{"path"},
 			},
 			Handler: func(ctx context.Context, args map[string]any) (string, error) {
-				searchPath := os.ExpandEnv(argString(args, "path"))
-				if strings.HasPrefix(searchPath, "~/") {
-					if home, err := os.UserHomeDir(); err == nil {
-						searchPath = filepath.Join(home, searchPath[2:])
-					}
+				searchPath, err := e.resolveFilesystemPath(argString(args, "path"), false)
+				if err != nil {
+					return "", fmt.Errorf("find_files: %w", err)
 				}
 
 				namePattern := argString(args, "name_pattern")
@@ -244,11 +236,15 @@ func (e *Engine) buildFileTools() []BuiltinTool {
 						// immediate OOM. read_file, in this same file, has always capped
 						// at 1 MB; this path just never did. A content match beyond the
 						// first megabyte is not worth an unbounded allocation.
-						info, statErr := os.Stat(p)
+						safePath, policyErr := e.resolveFilesystemPath(p, false)
+						if policyErr != nil {
+							return nil
+						}
+						info, statErr := os.Stat(safePath)
 						if statErr != nil || info.Size() > maxScanBytes {
 							return nil
 						}
-						data, readErr := os.ReadFile(p)
+						data, readErr := os.ReadFile(safePath)
 						if readErr != nil {
 							return nil
 						}

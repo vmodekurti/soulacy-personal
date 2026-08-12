@@ -243,10 +243,43 @@ type TelemetryConfig struct {
 //	      input_per_mtok: 0.25
 //	      output_per_mtok: 0.75
 type CostConfig struct {
-	DailyBudgetUSD   float64                `mapstructure:"daily_budget_usd"`
-	MonthlyBudgetUSD float64                `mapstructure:"monthly_budget_usd"`
-	AlertThreshold   float64                `mapstructure:"alert_threshold"`
-	Pricing          map[string]CostPricing `mapstructure:"pricing"`
+	DailyBudgetUSD         float64 `mapstructure:"daily_budget_usd"`
+	MonthlyBudgetUSD       float64 `mapstructure:"monthly_budget_usd"`
+	PerUserDailyBudgetUSD  float64 `mapstructure:"per_user_daily_budget_usd"`
+	PerAgentDailyBudgetUSD float64 `mapstructure:"per_agent_daily_budget_usd"`
+	AlertThreshold         float64 `mapstructure:"alert_threshold"`
+	// EnforcementMode is "hard" (reject before overspend), "soft" (record and
+	// warn), or "off". Existing configurations default to soft for compatibility.
+	EnforcementMode string `mapstructure:"enforcement_mode"`
+	// UnknownPricing controls models without a matching pricing rule: "allow"
+	// or "block". Hard production deployments should use block.
+	UnknownPricing           string                   `mapstructure:"unknown_pricing"`
+	DefaultMaxOutputTokens   int                      `mapstructure:"default_max_output_tokens"`
+	MaxOutputTokensCeiling   int                      `mapstructure:"max_output_tokens_ceiling"`
+	ConfirmationThresholdUSD float64                  `mapstructure:"confirmation_threshold_usd"`
+	ReservationTTL           string                   `mapstructure:"reservation_ttl"`
+	MaxConcurrentPerProvider int                      `mapstructure:"max_concurrent_per_provider"`
+	CircuitFailureThreshold  int                      `mapstructure:"circuit_failure_threshold"`
+	CircuitCooldown          string                   `mapstructure:"circuit_cooldown"`
+	Reconciliation           CostReconciliationConfig `mapstructure:"reconciliation"`
+	Pricing                  map[string]CostPricing   `mapstructure:"pricing"`
+}
+
+// CostReconciliationConfig controls prompt-free imports from provider billing
+// APIs. Credentials are referenced by environment-variable name and are never
+// persisted in the usage or reconciliation ledgers.
+type CostReconciliationConfig struct {
+	Enabled                bool                                        `mapstructure:"enabled"`
+	Interval               string                                      `mapstructure:"interval"`
+	VarianceAlertThreshold float64                                     `mapstructure:"variance_alert_threshold"`
+	Providers              map[string]CostReconciliationProviderConfig `mapstructure:"providers"`
+}
+
+type CostReconciliationProviderConfig struct {
+	Type         string `mapstructure:"type"`
+	BaseURL      string `mapstructure:"base_url"`
+	APIKeyEnv    string `mapstructure:"api_key_env"`
+	Organization string `mapstructure:"organization"`
 }
 
 // OpsConfig controls launch-readiness SLO checks over the durable action log.
@@ -310,8 +343,14 @@ type SecurityConfig struct {
 
 // CostPricing is the YAML face of internal/costs.Pricing.
 type CostPricing struct {
-	InputPerMTok  float64 `mapstructure:"input_per_mtok"`
-	OutputPerMTok float64 `mapstructure:"output_per_mtok"`
+	InputPerMTok       float64 `mapstructure:"input_per_mtok"`
+	OutputPerMTok      float64 `mapstructure:"output_per_mtok"`
+	CachedInputPerMTok float64 `mapstructure:"cached_input_per_mtok"`
+	CacheWritePerMTok  float64 `mapstructure:"cache_write_per_mtok"`
+	ReasoningPerMTok   float64 `mapstructure:"reasoning_per_mtok"`
+	Source             string  `mapstructure:"source"`
+	EffectiveDate      string  `mapstructure:"effective_date"`
+	Version            string  `mapstructure:"version"`
 }
 
 // CredentialsConfig holds credential vault settings.
@@ -350,6 +389,13 @@ type RuntimeConfig struct {
 	DefaultMaxTurns       int    `mapstructure:"default_max_turns"`
 	PythonBin             string `mapstructure:"python_bin"`   // path to python3 interpreter
 	ToolTimeout           string `mapstructure:"tool_timeout"` // e.g. "30s"
+
+	// FilesystemRoots confines every host-filesystem builtin (read_file,
+	// list_dir, find_files, write_file, and download_file) to these roots.
+	// Relative tool paths are resolved from the first root. When empty, the app
+	// supplies the canonical Soulacy workspace root; HOME and / are never
+	// implicit roots. Containment is checked after symlink resolution.
+	FilesystemRoots []string `mapstructure:"filesystem_roots"`
 
 	// AdaptiveNodes is the global default for runtime LLM salvage of flow nodes
 	// that hit an unexpected data shape (see FlowNode.Adaptive). nil = enabled
@@ -450,15 +496,64 @@ type RuntimeConfig struct {
 	// (if present at index 0) is always preserved. Zero/negative defaults to
 	// 100. (PERF-2 — history windowing)
 	MaxHistoryTurns int `mapstructure:"max_history_turns"`
+
+	// Retention makes deletion of persisted conversations, action events and
+	// optional audit JSONL explicit. Empty values use the shipped defaults;
+	// "0" disables automatic deletion for that category.
+	Retention RetentionConfig `mapstructure:"retention"`
+
+	DefaultBudget RunBudgetConfig        `mapstructure:"default_budget"`
+	MaxBudget     RunBudgetConfig        `mapstructure:"max_budget"`
+	Timeouts      TimeoutHierarchyConfig `mapstructure:"timeouts"`
+}
+
+// TimeoutHierarchyConfig is ordered strictly: tool < llm < step < run < http.
+type TimeoutHierarchyConfig struct {
+	Tool string `mapstructure:"tool"`
+	LLM  string `mapstructure:"llm"`
+	Step string `mapstructure:"step"`
+	Run  string `mapstructure:"run"`
+	HTTP string `mapstructure:"http"`
+}
+
+type RunBudgetConfig struct {
+	MaxTokens   int `mapstructure:"max_tokens"`
+	MaxLLMCalls int `mapstructure:"max_llm_calls"`
+}
+
+type RetentionConfig struct {
+	ConversationHistory string `mapstructure:"conversation_history"`
+	ActionEvents        string `mapstructure:"action_events"`
+	AuditLogs           string `mapstructure:"audit_logs"`
+}
+
+// RetentionDuration parses a validated retention setting. The literal "0"
+// means keep indefinitely; empty uses fallback.
+func RetentionDuration(raw string, fallback time.Duration) time.Duration {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return fallback
+	}
+	if raw == "0" {
+		return 0
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return fallback
+	}
+	return d
 }
 
 // SandboxConfig is the YAML face of internal/sandbox.Limits.
 type SandboxConfig struct {
-	Enabled    bool `mapstructure:"enabled"`
-	CPUSeconds int  `mapstructure:"cpu_seconds"`
-	MemoryMB   int  `mapstructure:"memory_mb"`
-	OpenFiles  int  `mapstructure:"open_files"`
-	FileSizeMB int  `mapstructure:"file_size_mb"`
+	Enabled    bool   `mapstructure:"enabled"`
+	Mode       string `mapstructure:"mode"`  // docker (default) | unsandboxed
+	Image      string `mapstructure:"image"` // disposable command container
+	CPUSeconds int    `mapstructure:"cpu_seconds"`
+	MemoryMB   int    `mapstructure:"memory_mb"`
+	OpenFiles  int    `mapstructure:"open_files"`
+	FileSizeMB int    `mapstructure:"file_size_mb"`
+	PIDs       int    `mapstructure:"pids"`
 }
 
 type MemoryConfig struct {
@@ -595,8 +690,11 @@ type QueueConfig struct {
 }
 
 type LLMConfig struct {
-	DefaultProvider string                    `mapstructure:"default_provider"`
-	Providers       map[string]ProviderConfig `mapstructure:"providers"`
+	DefaultProvider  string                    `mapstructure:"default_provider"`
+	Providers        map[string]ProviderConfig `mapstructure:"providers"`
+	AllowedProviders []string                  `mapstructure:"allowed_providers"`
+	AllowedModels    []string                  `mapstructure:"allowed_models"`
+	AllowedRegions   []string                  `mapstructure:"allowed_regions"`
 
 	// Studio optionally overrides which provider/model the Studio visual
 	// builder uses for its COMPILE reasoning (turning a plain-language intent
@@ -654,7 +752,9 @@ type StudioLLMConfig struct {
 	// that pauses between each of the 5 phases (clarify → strategy → build
 	// → validate → repair) for the operator to review. Per-generation
 	// override is available via the Generate button toggle.
-	BuildUX string `mapstructure:"build_ux"`
+	BuildUX         string  `mapstructure:"build_ux"`
+	MaxBuildTokens  int     `mapstructure:"max_build_tokens"`
+	MaxBuildCostUSD float64 `mapstructure:"max_build_cost_usd"`
 }
 
 // PackagesConfig configures agent-package versioning (Story 7, Cohort C).
@@ -698,11 +798,17 @@ type SnapshotRetentionConfig struct {
 }
 
 type ProviderConfig struct {
-	BaseURL   string         `mapstructure:"base_url"`
-	APIKey    string         `mapstructure:"api_key"`
-	Model     string         `mapstructure:"model"`
-	KeepAlive string         `mapstructure:"keep_alive"`
-	Options   map[string]any `mapstructure:"options"`
+	BaseURL                 string         `mapstructure:"base_url"`
+	APIKey                  string         `mapstructure:"api_key"`
+	Model                   string         `mapstructure:"model"`
+	KeepAlive               string         `mapstructure:"keep_alive"`
+	Region                  string         `mapstructure:"region"`
+	Retention               string         `mapstructure:"retention"`
+	Local                   bool           `mapstructure:"local"`
+	AllowedDataClasses      []string       `mapstructure:"allowed_data_classes"`
+	CacheAllowedDataClasses []string       `mapstructure:"cache_allowed_data_classes"`
+	MaxTokensPerMinute      int            `mapstructure:"max_tokens_per_minute"`
+	Options                 map[string]any `mapstructure:"options"`
 	// RequestTimeout overrides the overall per-request HTTP timeout for
 	// OpenAI-compatible providers (openai, nvidia, and custom OpenAI endpoints).
 	// A Go duration string, e.g. "300s" or "10m". Empty = provider default
@@ -822,24 +928,41 @@ func Load(cfgPath string) (*Config, string, error) {
 	// minutes; the old 30s default silently SIGKILLed them unless every
 	// agent declared a per-tool override. 120s is the new sane floor;
 	// per-tool override at `tools[i].timeout` still applies.
-	v.SetDefault("runtime.tool_timeout", "120s")
-	// SEC-3: default to ["*"]. Destructive system tools (shell_exec, run_script,
-	// write_file, …) now require BOTH this server permit AND a per-agent
-	// `capabilities: [system]` declaration. Breaking change — see CHANGELOG.
-	v.SetDefault("runtime.allow_system_agents", []string{"*"})
+	defaults := DefaultTimeoutHierarchy()
+	// Preserve the historical canonical spelling for compatibility with API
+	// clients that compare the string value, while deriving the duration here.
+	v.SetDefault("runtime.tool_timeout", fmt.Sprintf("%ds", int(defaults.Tool/time.Second)))
+	v.SetDefault("runtime.timeouts.tool", fmt.Sprintf("%ds", int(defaults.Tool/time.Second)))
+	v.SetDefault("runtime.timeouts.llm", defaults.LLM.String())
+	v.SetDefault("runtime.timeouts.step", defaults.Step.String())
+	v.SetDefault("runtime.timeouts.run", defaults.Run.String())
+	v.SetDefault("runtime.timeouts.http", defaults.HTTP.String())
+	// Privileged tools require an explicit server allowlist in addition to the
+	// agent capability. Empty is the production-safe default.
+	v.SetDefault("runtime.allow_system_agents", []string{})
 	v.SetDefault("runtime.ssrf_protection", false)
 	v.SetDefault("runtime.session_ttl", "24h")
 	v.SetDefault("runtime.max_sessions", 10000)
 	v.SetDefault("runtime.max_history_turns", 100)
+	v.SetDefault("runtime.retention.conversation_history", "720h") // 30 days
+	v.SetDefault("runtime.retention.action_events", "2160h")       // 90 days
+	v.SetDefault("runtime.retention.audit_logs", "720h")           // 30 days
+	v.SetDefault("runtime.default_budget.max_tokens", 100000)
+	v.SetDefault("runtime.default_budget.max_llm_calls", 20)
+	v.SetDefault("runtime.max_budget.max_tokens", 1000000)
+	v.SetDefault("runtime.max_budget.max_llm_calls", 100)
 	// PRODUCTION_AUDIT → F1: sandbox defaults ON with conservative caps
 	// suitable for typical agent tools. Disable per-deployment by setting
 	// runtime.sandbox.enabled=false. Limits = 0 means "no cap for that knob"
 	// so an operator can relax only the constraints they need.
 	v.SetDefault("runtime.sandbox.enabled", true)
+	v.SetDefault("runtime.sandbox.mode", "docker")
+	v.SetDefault("runtime.sandbox.image", "python:3.12-slim")
 	v.SetDefault("runtime.sandbox.cpu_seconds", 30)
 	v.SetDefault("runtime.sandbox.memory_mb", 512)
 	v.SetDefault("runtime.sandbox.open_files", 256)
 	v.SetDefault("runtime.sandbox.file_size_mb", 64)
+	v.SetDefault("runtime.sandbox.pids", 128)
 	v.SetDefault("memory.max_history", 50)
 	v.SetDefault("memory.vector_db", "")
 	v.SetDefault("memory.vector_dims", 768)
@@ -862,6 +985,20 @@ func Load(cfgPath string) (*Config, string, error) {
 	v.SetDefault("llm.default_provider", "ollama")
 	v.SetDefault("llm.providers.ollama.base_url", "http://localhost:11434")
 	v.SetDefault("llm.providers.ollama.model", "llama3")
+	v.SetDefault("llm.studio.max_build_tokens", 100000)
+	v.SetDefault("llm.studio.max_build_cost_usd", 5.0)
+	v.SetDefault("costs.enforcement_mode", "soft")
+	v.SetDefault("costs.unknown_pricing", "allow")
+	v.SetDefault("costs.default_max_output_tokens", 4096)
+	v.SetDefault("costs.max_output_tokens_ceiling", 32768)
+	v.SetDefault("costs.confirmation_threshold_usd", 0)
+	v.SetDefault("costs.reservation_ttl", "15m")
+	v.SetDefault("costs.max_concurrent_per_provider", 8)
+	v.SetDefault("costs.circuit_failure_threshold", 5)
+	v.SetDefault("costs.circuit_cooldown", "30s")
+	v.SetDefault("costs.reconciliation.enabled", false)
+	v.SetDefault("costs.reconciliation.interval", "24h")
+	v.SetDefault("costs.reconciliation.variance_alert_threshold", 0.1)
 	v.SetDefault("knowledge.embedding_provider", "ollama")
 	v.SetDefault("knowledge.embedding_model", "nomic-embed-text")
 	v.SetDefault("knowledge.chunk_size", 1000)
@@ -915,10 +1052,34 @@ func Load(cfgPath string) (*Config, string, error) {
 	if resolvedPath == "" {
 		resolvedPath = ws.ConfigFile
 	}
+	if used := v.ConfigFileUsed(); used != "" {
+		if err := ValidateSchemaFile(used); err != nil {
+			return nil, "", fmt.Errorf("configuration schema: %w", err)
+		}
+	}
 
 	cfg := &Config{}
 	if err := v.Unmarshal(cfg); err != nil {
 		return nil, "", fmt.Errorf("unmarshalling config: %w", err)
+	}
+	_, legacyToolEnv := os.LookupEnv("SOULACY_RUNTIME_TOOL_TIMEOUT")
+	_, hierarchyToolEnv := os.LookupEnv("SOULACY_RUNTIME_TIMEOUTS_TOOL")
+	legacyToolExplicit := v.InConfig("runtime.tool_timeout") || legacyToolEnv
+	hierarchyToolExplicit := v.InConfig("runtime.timeouts.tool") || hierarchyToolEnv
+	if legacyToolExplicit && !hierarchyToolExplicit {
+		cfg.Runtime.Timeouts.Tool = cfg.Runtime.ToolTimeout
+	}
+	if hierarchyToolExplicit && !legacyToolExplicit {
+		cfg.Runtime.ToolTimeout = cfg.Runtime.Timeouts.Tool
+	}
+	// Shared/production workspaces default to blocking private destinations.
+	// Local development remains compatible with LAN services. An explicit YAML
+	// or environment value always wins in either direction.
+	_, ssrfEnvSet := os.LookupEnv("SOULACY_RUNTIME_SSRF_PROTECTION")
+	ssrfExplicit := v.InConfig("runtime.ssrf_protection") || ssrfEnvSet
+	profile := strings.ToLower(strings.TrimSpace(cfg.Deployment.Profile))
+	if !ssrfExplicit && (profile == "production" || profile == "shared") {
+		cfg.Runtime.SSRFProtection = true
 	}
 
 	// Viper lowercases EVERY key, which corrupts case-sensitive map *values*
@@ -1035,13 +1196,16 @@ func EnsureDirs(cfg *Config) error {
 		if d == "" {
 			continue
 		}
-		if err := os.MkdirAll(d, 0755); err != nil {
+		if err := os.MkdirAll(d, 0o700); err != nil {
 			return fmt.Errorf("creating dir %s: %w", d, err)
 		}
 	}
-	// Secrets hold key material — owner-only.
+	// Repair existing installations too; creation modes do not tighten files
+	// and directories left behind by an older release.
 	if ws, err := ResolveWorkspace(); err == nil {
-		_ = os.Chmod(ws.Secrets, 0o700)
+		if err := secureWorkspacePermissions(cfg, ws); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -1,17 +1,37 @@
 package studio
 
 import (
+	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+type semanticLessonEmbedder struct{ calls int }
+
+func (e *semanticLessonEmbedder) Identity() string { return "semantic-test-v1" }
+
+func (e *semanticLessonEmbedder) Embed(_ context.Context, text string) ([]float32, error) {
+	e.calls++
+	text = strings.ToLower(text)
+	switch {
+	case strings.Contains(text, "pagination") || strings.Contains(text, "page token"):
+		return []float32{1, 0, 0}, nil
+	case strings.Contains(text, "weather"):
+		return []float32{0, 1, 0}, nil
+	default:
+		return []float32{0, 0, 1}, nil
+	}
+}
 
 func TestLessonFromProposal(t *testing.T) {
 	// A shape drift with a rationale becomes a tool-scoped lesson.
 	p := RepairProposal{
 		NodeID: "fmt", Field: "input", Class: RepairShapeDrift,
-		Rationale: "The API response has no \"results\"; the list is under \"items\".",
+		Rationale:    "The API response has no \"results\"; the list is under \"items\".",
 		ObservedKeys: []string{"items", "meta"},
 	}
 	l, ok := LessonFromProposal(p, "web_search", "news digest")
@@ -119,6 +139,79 @@ func TestLessonsPromptBlock(t *testing.T) {
 	}
 	if !strings.Contains(block, "observed keys: items, meta") {
 		t.Fatalf("block missing observed keys: %q", block)
+	}
+}
+
+func TestLessonStoreSemanticRetrievalAcrossDifferentTools(t *testing.T) {
+	embedder := &semanticLessonEmbedder{}
+	store := NewSemanticLessonStore(filepath.Join(t.TempDir(), "lessons.db"), embedder)
+	github := Lesson{Tool: "github_api", Class: "shape_drift", Guidance: "Follow pagination using the returned page token.", Count: 1}
+	weather := Lesson{Tool: "weather_api", Class: "shape_drift", Guidance: "Weather temperatures are returned in Celsius.", Count: 1}
+	if err := store.Add(github); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Add(weather); err != nil {
+		t.Fatal(err)
+	}
+	if embedder.calls < 2 {
+		t.Fatalf("lessons were not embedded on save; calls=%d", embedder.calls)
+	}
+	got := store.Semantic(context.Background(), "Use gitlab_api and handle every pagination page token", 5, 0.8)
+	if len(got) != 1 || got[0].Tool != "github_api" {
+		t.Fatalf("semantic cross-tool result = %+v", got)
+	}
+}
+
+func TestLessonStoreMigratesLegacyJSONToSQLiteVec(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "studio-lessons.db")
+	lesson := Lesson{ID: "legacy", Tool: "github_api", Guidance: "Handle pagination with page tokens.", Count: 2, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	raw, _ := json.Marshal([]Lesson{lesson})
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := NewLessonStore(path)
+	all := store.All()
+	if len(all) != 1 || all[0].ID != "legacy" || all[0].Count != 2 {
+		t.Fatalf("legacy import = %+v", all)
+	}
+	header, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(header), "SQLite format 3") {
+		t.Fatalf("store is not SQLite after migration: %q", header[:min(len(header), 16)])
+	}
+	if _, err := os.Stat(path + ".legacy.json"); err != nil {
+		t.Fatalf("legacy backup missing: %v", err)
+	}
+}
+
+type identityEmbedder struct {
+	identity    string
+	queryVector []float32
+}
+
+func (e identityEmbedder) Identity() string { return e.identity }
+func (e identityEmbedder) Embed(_ context.Context, text string) ([]float32, error) {
+	if strings.Contains(text, "needle") {
+		return append([]float32(nil), e.queryVector...), nil
+	}
+	return append([]float32(nil), e.queryVector...), nil
+}
+
+func TestLessonStoreReindexesWhenEmbeddingIdentityChanges(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "lessons.db")
+	first := NewSemanticLessonStore(path, identityEmbedder{identity: "model-a", queryVector: []float32{1, 0}})
+	if err := first.Add(Lesson{ID: "one", Guidance: "needle pagination guidance"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	second := NewSemanticLessonStore(path, identityEmbedder{identity: "model-b", queryVector: []float32{0, 1}})
+	defer second.Close()
+	if got := second.Semantic(context.Background(), "needle", 5, 0.9); len(got) != 1 || got[0].ID != "one" {
+		t.Fatalf("reindexed results=%+v", got)
 	}
 }
 

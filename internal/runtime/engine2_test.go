@@ -5,6 +5,7 @@ package runtime
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -381,7 +382,12 @@ func newMinimalEngine(t *testing.T) *Engine {
 		t.Fatalf("memory store: %v", err)
 	}
 	router := llm.NewRouter("test")
-	return NewEngine(loader, router, mem, nil, "", time.Second, zap.NewNop(), nil, nil, "", nil, nil, nil, nil, nil)
+	e := NewEngine(loader, router, mem, nil, "", time.Second, zap.NewNop(), nil, nil, "", nil, nil, nil, nil, nil)
+	e.SetPrivilegedCommandRunner(HostPrivilegedRunner{})
+	if err := e.SetFilesystemRoots([]string{os.TempDir()}); err != nil {
+		t.Fatalf("filesystem roots: %v", err)
+	}
+	return e
 }
 
 func TestBuildSystemPrefix_EmptyCatalogs(t *testing.T) {

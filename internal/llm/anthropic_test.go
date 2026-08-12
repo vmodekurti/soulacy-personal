@@ -114,6 +114,36 @@ func TestAnthropicCompleteSerializesCachingThinkingAndParsesToolUse(t *testing.T
 	}
 }
 
+func TestAnthropicRequestCanDisablePromptCachingPerCall(t *testing.T) {
+	var body map[string]any
+	var beta string
+	provider := NewAnthropicProviderWithOptions("http://anthropic.test", "sk-ant", "claude-test", true, false, 0)
+	provider.client = clientWithRoundTripper(func(r *http.Request) (*http.Response, error) {
+		beta = r.Header.Get("anthropic-beta")
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		return jsonResponse(200, `{"content":[{"type":"text","text":"ok"}],"usage":{}}`), nil
+	})
+	_, err := provider.Complete(context.Background(), CompletionRequest{
+		DisablePromptCaching: true, Messages: []ChatMessage{{Role: "system", Content: "secret"}},
+		Tools: []ToolSchema{{Name: "tool", Parameters: map[string]any{"type": "object"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(beta, "prompt-caching") {
+		t.Fatalf("beta=%q", beta)
+	}
+	if _, ok := body["system"].(string); !ok {
+		t.Fatalf("system should be uncached string: %#v", body["system"])
+	}
+	tools := body["tools"].([]any)
+	if _, ok := tools[0].(map[string]any)["cache_control"]; ok {
+		t.Fatalf("tools unexpectedly cached: %#v", tools)
+	}
+}
+
 func TestAnthropicStructuredOutputReturnsForcedToolInputAsContent(t *testing.T) {
 	provider := NewAnthropicProvider("http://anthropic.test", "sk-ant", "claude-test")
 	provider.client = clientWithRoundTripper(func(r *http.Request) (*http.Response, error) {

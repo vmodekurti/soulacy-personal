@@ -1,6 +1,14 @@
 package runtime
 
-import "testing"
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"github.com/soulacy/soulacy/internal/llm"
+	"github.com/soulacy/soulacy/pkg/agent"
+	"github.com/soulacy/soulacy/pkg/message"
+)
 
 // TestBudgetExceeded covers the per-run budget gate logic (S3.1).
 func TestBudgetExceeded(t *testing.T) {
@@ -25,6 +33,48 @@ func TestBudgetExceeded(t *testing.T) {
 					tc.tokenLimit, tc.usedTokens, tc.callLimit, tc.usedCalls, got, tc.wantHalt)
 			}
 		})
+	}
+}
+
+func TestEffectiveRunBudgetInheritanceOverridesAndCeilings(t *testing.T) {
+	e := &Engine{}
+	if tokens, calls := e.effectiveRunBudget(&agent.Definition{}); tokens != defaultRunBudgetTokens || calls != defaultRunBudgetCalls {
+		t.Fatalf("shipped inherited budget = %d/%d", tokens, calls)
+	}
+	e.SetRunBudgets(agent.BudgetConfig{MaxTokens: 1000, MaxLLMCalls: 10}, agent.BudgetConfig{MaxTokens: 2000, MaxLLMCalls: 20})
+	for _, tc := range []struct {
+		name          string
+		budget        *agent.BudgetConfig
+		tokens, calls int
+	}{
+		{"inherits", nil, 1000, 10},
+		{"lower override", &agent.BudgetConfig{MaxTokens: 500, MaxLLMCalls: 5}, 500, 5},
+		{"higher within ceiling", &agent.BudgetConfig{MaxTokens: 1500, MaxLLMCalls: 15}, 1500, 15},
+		{"clamped", &agent.BudgetConfig{MaxTokens: 9000, MaxLLMCalls: 90}, 2000, 20},
+		{"explicit unlimited", &agent.BudgetConfig{MaxTokens: 0, MaxLLMCalls: 0}, 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gotT, gotC := e.effectiveRunBudget(&agent.Definition{Budget: tc.budget})
+			if gotT != tc.tokens || gotC != tc.calls {
+				t.Fatalf("got %d/%d, want %d/%d", gotT, gotC, tc.tokens, tc.calls)
+			}
+		})
+	}
+}
+
+func TestInheritedBudgetHaltReturnsPartialToolOutput(t *testing.T) {
+	def := &agent.Definition{ID: "budgeted", Name: "Budgeted", Enabled: true, LLM: agent.LLMConfig{Provider: "test", Model: "fake-model"}, MaxTurns: 3, Builtins: strListPtr("lookup")}
+	e, provider := newHandleTestEngine(t, def)
+	e.SetRunBudgets(agent.BudgetConfig{MaxTokens: 100000, MaxLLMCalls: 1}, agent.BudgetConfig{MaxTokens: 100000, MaxLLMCalls: 10})
+	e.builtins = []BuiltinTool{{Name: "lookup", Parameters: map[string]any{"type": "object"}, Handler: func(context.Context, map[string]any) (string, error) { return "partial evidence survives", nil }}}
+	provider.responses = []llm.CompletionResponse{{InputTokens: 10, OutputTokens: 2, ToolCalls: []message.ToolCall{{ID: "c", Name: "lookup"}}}}
+	reply, err := e.Handle(context.Background(), testUserMessage(def.ID, "budget-session", "work"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := flattenParts(reply.Parts)
+	if !strings.Contains(got, "partial evidence survives") || !strings.Contains(got, "Run halted") {
+		t.Fatalf("partial budget reply = %q", got)
 	}
 }
 

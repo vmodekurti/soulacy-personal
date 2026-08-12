@@ -4,6 +4,9 @@ package costs
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -12,15 +15,33 @@ import (
 
 // UsageRecord records one LLM call's token consumption.
 type UsageRecord struct {
-	AgentID      string
-	SessionID    string
-	Provider     string
-	Model        string
-	PromptTokens int
-	CompTokens   int
-	TotalTokens  int
-	CostUSD      float64 // estimated; 0 if pricing not configured
-	CreatedAt    time.Time
+	Subject             string    `json:"subject"`
+	Workspace           string    `json:"workspace"`
+	AgentID             string    `json:"agent_id"`
+	SessionID           string    `json:"session_id"`
+	RunID               string    `json:"run_id"`
+	CallID              string    `json:"call_id"`
+	Source              string    `json:"source"`
+	Trigger             string    `json:"trigger"`
+	Provider            string    `json:"provider"`
+	Model               string    `json:"model"`
+	PromptTokens        int       `json:"prompt_tokens"`
+	CompTokens          int       `json:"completion_tokens"`
+	TotalTokens         int       `json:"total_tokens"`
+	CacheCreationTokens int       `json:"cache_creation_tokens"`
+	CacheReadTokens     int       `json:"cache_read_tokens"`
+	ReasoningTokens     int       `json:"reasoning_tokens"`
+	ToolUsePromptTokens int       `json:"tool_use_prompt_tokens"`
+	CostUSD             float64   `json:"cost_usd"` // estimated; 0 if pricing not configured
+	CostMicros          int64     `json:"cost_micros"`
+	PricingStatus       string    `json:"pricing_status"`
+	PricingVersion      string    `json:"pricing_version"`
+	ProviderRequestID   string    `json:"provider_request_id"`
+	ProviderRequestIDs  []string  `json:"provider_request_ids,omitempty"`
+	AttemptCount        int       `json:"attempt_count"`
+	Status              string    `json:"status"`
+	ErrorCode           string    `json:"error_code"`
+	CreatedAt           time.Time `json:"created_at"`
 }
 
 // AgentCost is the aggregated cost summary for one agent.
@@ -38,6 +59,94 @@ type SessionCost struct {
 	TotalTokens int     `json:"total_tokens"`
 	CostUSD     float64 `json:"cost_usd"`
 }
+
+type ChargebackRow struct {
+	Subject     string  `json:"subject,omitempty"`
+	Source      string  `json:"source,omitempty"`
+	Provider    string  `json:"provider,omitempty"`
+	Model       string  `json:"model,omitempty"`
+	Calls       int     `json:"calls"`
+	Attempts    int     `json:"attempts"`
+	TotalTokens int64   `json:"total_tokens"`
+	CostMicros  int64   `json:"cost_micros"`
+	CostUSD     float64 `json:"cost_usd"`
+}
+
+// UsageStats summarizes ledger completeness for operational dashboards.
+type UsageStats struct {
+	Calls           int   `json:"calls"`
+	AttributedCalls int   `json:"attributed_calls"`
+	RejectedCalls   int   `json:"rejected_calls"`
+	Attempts        int64 `json:"attempts"`
+	UnknownPriced   int   `json:"unknown_priced_calls"`
+	FailedCalls     int   `json:"failed_calls"`
+	TotalTokens     int64 `json:"total_tokens"`
+	CostMicros      int64 `json:"cost_micros"`
+}
+
+// Reconciliation compares Soulacy's estimate with a provider billing export.
+type Reconciliation struct {
+	Provider        string    `json:"provider"`
+	PeriodStart     time.Time `json:"period_start"`
+	PeriodEnd       time.Time `json:"period_end"`
+	EstimatedMicros int64     `json:"estimated_micros"`
+	ActualMicros    int64     `json:"actual_micros"`
+	VarianceMicros  int64     `json:"variance_micros"`
+	Source          string    `json:"source"`
+	ImportedAt      time.Time `json:"imported_at"`
+}
+
+// VarianceRatio returns absolute estimate-vs-actual variance. When the local
+// estimate is zero, any non-zero provider charge is a full (100%) variance.
+func (r Reconciliation) VarianceRatio() float64 {
+	denominator := r.EstimatedMicros
+	if r.ActualMicros > denominator {
+		denominator = r.ActualMicros
+	}
+	if denominator <= 0 {
+		return 0
+	}
+	variance := r.VarianceMicros
+	if variance < 0 {
+		variance = -variance
+	}
+	return float64(variance) / float64(denominator)
+}
+
+// ReservationPolicy is evaluated in the same SQLite transaction that inserts
+// the reservation, preventing concurrent gateway processes from all observing
+// the same remaining budget.
+type ReservationPolicy struct {
+	Now                      time.Time
+	DailyStart               time.Time
+	MonthlyStart             time.Time
+	TokenWindowStart         time.Time
+	ProviderTokenWindowStart time.Time
+	GlobalDailyMicros        int64
+	GlobalMonthlyMicros      int64
+	UserDailyMicros          int64
+	AgentDailyMicros         int64
+	UserTokenLimit           int64
+	AgentTokenLimit          int64
+	ProviderTokenLimit       int64
+}
+
+type ReservationCapacity struct {
+	AvailableMicros int64
+	AvailableTokens int64
+}
+
+// ReservationRejectedError reports the tightest remaining capacity observed
+// atomically. Callers may safely clamp and retry; the second transaction will
+// recheck all concurrent reservations.
+type ReservationRejectedError struct {
+	Capacity ReservationCapacity
+	Reason   string
+	Scope    string
+	ResetAt  time.Time
+}
+
+func (e *ReservationRejectedError) Error() string { return e.Reason }
 
 // Store persists token usage records to SQLite.
 type Store struct {
@@ -62,6 +171,60 @@ CREATE INDEX IF NOT EXISTS idx_usage_session ON token_usage(session_id);
 CREATE INDEX IF NOT EXISTS idx_usage_created ON token_usage(created_at);
 `
 
+const usageSchemaV2 = `
+ALTER TABLE token_usage ADD COLUMN subject TEXT NOT NULL DEFAULT '';
+ALTER TABLE token_usage ADD COLUMN workspace TEXT NOT NULL DEFAULT '';
+ALTER TABLE token_usage ADD COLUMN run_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE token_usage ADD COLUMN call_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE token_usage ADD COLUMN source TEXT NOT NULL DEFAULT '';
+ALTER TABLE token_usage ADD COLUMN trigger_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE token_usage ADD COLUMN cache_creation_tokens INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE token_usage ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE token_usage ADD COLUMN reasoning_tokens INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE token_usage ADD COLUMN tool_use_prompt_tokens INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE token_usage ADD COLUMN cost_micros INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE token_usage ADD COLUMN pricing_status TEXT NOT NULL DEFAULT 'unknown';
+ALTER TABLE token_usage ADD COLUMN pricing_version TEXT NOT NULL DEFAULT '';
+ALTER TABLE token_usage ADD COLUMN provider_request_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE token_usage ADD COLUMN status TEXT NOT NULL DEFAULT 'success';
+ALTER TABLE token_usage ADD COLUMN error_code TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_usage_subject ON token_usage(subject);
+CREATE INDEX IF NOT EXISTS idx_usage_run ON token_usage(run_id);
+CREATE INDEX IF NOT EXISTS idx_usage_source ON token_usage(source);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_call_unique ON token_usage(call_id) WHERE call_id <> '';
+CREATE TABLE IF NOT EXISTS cost_reservations (
+    id             TEXT PRIMARY KEY,
+	 subject        TEXT NOT NULL DEFAULT '',
+	 agent_id       TEXT NOT NULL DEFAULT '',
+    estimated_micros INTEGER NOT NULL DEFAULT 0,
+    estimated_tokens INTEGER NOT NULL DEFAULT 0,
+    created_at     DATETIME NOT NULL,
+    expires_at     DATETIME NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cost_reservation_expiry ON cost_reservations(expires_at);
+CREATE TABLE IF NOT EXISTS cost_reconciliations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider TEXT NOT NULL,
+    period_start DATETIME NOT NULL,
+    period_end DATETIME NOT NULL,
+    estimated_micros INTEGER NOT NULL,
+    actual_micros INTEGER NOT NULL,
+    source TEXT NOT NULL DEFAULT '',
+    imported_at DATETIME NOT NULL,
+    UNIQUE(provider, period_start, period_end)
+);
+`
+
+const usageSchemaV3 = `
+ALTER TABLE token_usage ADD COLUMN provider_request_ids_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE token_usage ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 1;
+`
+
+const usageSchemaV4 = `
+ALTER TABLE cost_reservations ADD COLUMN provider TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_cost_reservation_provider ON cost_reservations(provider);
+`
+
 // NewStore opens (or creates) the costs SQLite database at path.
 func NewStore(path string) (*Store, error) {
 	db, err := sqlitex.Open(path, sqlitex.DefaultOptions())
@@ -79,6 +242,12 @@ func NewStore(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	if _, err := sqlitex.MigrateSchema(db, "costs", []sqlitex.SchemaMigration{
+		{Version: 2, SQL: usageSchemaV2}, {Version: 3, SQL: usageSchemaV3}, {Version: 4, SQL: usageSchemaV4},
+	}); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &Store{db: db}, nil
 }
 
@@ -88,15 +257,414 @@ func (s *Store) Record(ctx context.Context, r UsageRecord) error {
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
 	}
+	requestIDs, _ := json.Marshal(r.ProviderRequestIDs)
+	if r.AttemptCount <= 0 && r.Status != "rejected" {
+		r.AttemptCount = 1
+	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO token_usage
-		    (agent_id, session_id, provider, model, prompt_tokens, comp_tokens, total_tokens, cost_usd, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		r.AgentID, r.SessionID, r.Provider, r.Model,
-		r.PromptTokens, r.CompTokens, r.TotalTokens, r.CostUSD,
+		`INSERT OR IGNORE INTO token_usage
+		    (subject, workspace, agent_id, session_id, run_id, call_id, source, trigger_name,
+		     provider, model, prompt_tokens, comp_tokens, total_tokens,
+		     cache_creation_tokens, cache_read_tokens, reasoning_tokens, tool_use_prompt_tokens,
+		     cost_usd, cost_micros, pricing_status, pricing_version, provider_request_id,
+		     provider_request_ids_json, attempt_count, status, error_code, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.Subject, r.Workspace, r.AgentID, r.SessionID, r.RunID, r.CallID, r.Source, r.Trigger,
+		r.Provider, r.Model, r.PromptTokens, r.CompTokens, r.TotalTokens,
+		r.CacheCreationTokens, r.CacheReadTokens, r.ReasoningTokens, r.ToolUsePromptTokens,
+		r.CostUSD, r.CostMicros, r.PricingStatus, r.PricingVersion, r.ProviderRequestID,
+		string(requestIDs), r.AttemptCount, r.Status, r.ErrorCode,
 		createdAt.UTC().Format("2006-01-02 15:04:05"),
 	)
 	return err
+}
+
+// SumCostMicrosSince returns durable recorded spend since the supplied time.
+func (s *Store) SumCostMicrosSince(ctx context.Context, since time.Time) (int64, error) {
+	var total int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(cost_micros), 0) FROM token_usage WHERE created_at >= ?`,
+		since.UTC().Format("2006-01-02 15:04:05")).Scan(&total)
+	return total, err
+}
+
+func (s *Store) SumCostMicrosScope(ctx context.Context, since time.Time, subject, agentID string) (int64, error) {
+	query := `SELECT COALESCE(SUM(cost_micros), 0) FROM token_usage WHERE created_at >= ?`
+	args := []any{since.UTC().Format("2006-01-02 15:04:05")}
+	if subject != "" {
+		query += ` AND subject = ?`
+		args = append(args, subject)
+	}
+	if agentID != "" {
+		query += ` AND agent_id = ?`
+		args = append(args, agentID)
+	}
+	var total int64
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(&total)
+	return total, err
+}
+
+// StatsSince reports accounting coverage and outcomes since a boundary.
+func (s *Store) StatsSince(ctx context.Context, since time.Time) (UsageStats, error) {
+	var stats UsageStats
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*),
+		COALESCE(SUM(CASE WHEN call_id <> '' THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(attempt_count), 0),
+		COALESCE(SUM(CASE WHEN pricing_status = 'unknown' THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN status <> 'success' THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(total_tokens), 0), COALESCE(SUM(cost_micros), 0)
+		FROM token_usage WHERE created_at >= ?`, since.UTC().Format("2006-01-02 15:04:05")).
+		Scan(&stats.Calls, &stats.AttributedCalls, &stats.RejectedCalls, &stats.Attempts,
+			&stats.UnknownPriced, &stats.FailedCalls, &stats.TotalTokens, &stats.CostMicros)
+	return stats, err
+}
+
+// TotalsBySource returns cumulative usage for a feature surface. It is used by
+// bounded multi-call operations such as Studio's repair loop.
+func (s *Store) TotalsBySource(ctx context.Context, source string) (UsageRecord, error) {
+	var out UsageRecord
+	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(prompt_tokens), 0),
+		COALESCE(SUM(comp_tokens), 0), COALESCE(SUM(total_tokens), 0),
+		COALESCE(SUM(cost_usd), 0), COALESCE(SUM(cost_micros), 0)
+		FROM token_usage WHERE source = ?`, source).
+		Scan(&out.PromptTokens, &out.CompTokens, &out.TotalTokens, &out.CostUSD, &out.CostMicros)
+	return out, err
+}
+
+// TotalsByRun isolates bounded multi-call operations from concurrent work on
+// the same feature surface.
+func (s *Store) TotalsByRun(ctx context.Context, runID string) (UsageRecord, error) {
+	var out UsageRecord
+	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(prompt_tokens), 0),
+		COALESCE(SUM(comp_tokens), 0), COALESCE(SUM(total_tokens), 0),
+		COALESCE(SUM(cost_usd), 0), COALESCE(SUM(cost_micros), 0)
+		FROM token_usage WHERE run_id = ?`, runID).
+		Scan(&out.PromptTokens, &out.CompTokens, &out.TotalTokens, &out.CostUSD, &out.CostMicros)
+	return out, err
+}
+
+// ListUsage returns recent prompt-free accounting records for operations and
+// reconciliation. The bounded limit prevents accidental unbounded exports.
+func (s *Store) ListUsage(ctx context.Context, since time.Time, limit int) ([]UsageRecord, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 200
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT subject, workspace, agent_id, session_id,
+		run_id, call_id, source, trigger_name, provider, model, prompt_tokens,
+		comp_tokens, total_tokens, cache_creation_tokens, cache_read_tokens,
+		reasoning_tokens, tool_use_prompt_tokens, cost_usd, cost_micros,
+		pricing_status, pricing_version, provider_request_id, provider_request_ids_json,
+		attempt_count, status, error_code, created_at
+		FROM token_usage WHERE created_at >= ? ORDER BY created_at DESC, id DESC LIMIT ?`,
+		since.UTC().Format("2006-01-02 15:04:05"), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]UsageRecord, 0)
+	for rows.Next() {
+		var record UsageRecord
+		var requestIDs string
+		if err := rows.Scan(&record.Subject, &record.Workspace, &record.AgentID, &record.SessionID,
+			&record.RunID, &record.CallID, &record.Source, &record.Trigger, &record.Provider, &record.Model,
+			&record.PromptTokens, &record.CompTokens, &record.TotalTokens, &record.CacheCreationTokens,
+			&record.CacheReadTokens, &record.ReasoningTokens, &record.ToolUsePromptTokens, &record.CostUSD,
+			&record.CostMicros, &record.PricingStatus, &record.PricingVersion, &record.ProviderRequestID,
+			&requestIDs, &record.AttemptCount,
+			&record.Status, &record.ErrorCode, &record.CreatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal([]byte(requestIDs), &record.ProviderRequestIDs)
+		out = append(out, record)
+	}
+	return out, rows.Err()
+}
+
+// ReconcileProvider upserts one provider billing period and calculates the
+// variance from the detailed local ledger.
+func (s *Store) ReconcileProvider(ctx context.Context, provider string, start, end time.Time, actualMicros int64, source string) (Reconciliation, error) {
+	var estimated int64
+	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(cost_micros), 0) FROM token_usage
+		WHERE provider = ? AND created_at >= ? AND created_at < ?`, provider,
+		start.UTC().Format("2006-01-02 15:04:05"), end.UTC().Format("2006-01-02 15:04:05")).Scan(&estimated)
+	if err != nil {
+		return Reconciliation{}, err
+	}
+	imported := time.Now().UTC()
+	_, err = s.db.ExecContext(ctx, `INSERT INTO cost_reconciliations
+		(provider, period_start, period_end, estimated_micros, actual_micros, source, imported_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(provider, period_start, period_end) DO UPDATE SET
+		estimated_micros=excluded.estimated_micros, actual_micros=excluded.actual_micros,
+		source=excluded.source, imported_at=excluded.imported_at`, provider,
+		start.UTC().Format("2006-01-02 15:04:05"), end.UTC().Format("2006-01-02 15:04:05"),
+		estimated, actualMicros, source, imported.Format("2006-01-02 15:04:05"))
+	if err != nil {
+		return Reconciliation{}, err
+	}
+	return Reconciliation{Provider: provider, PeriodStart: start.UTC(), PeriodEnd: end.UTC(),
+		EstimatedMicros: estimated, ActualMicros: actualMicros,
+		VarianceMicros: actualMicros - estimated, Source: source, ImportedAt: imported}, nil
+}
+
+func (s *Store) ListReconciliations(ctx context.Context, limit int) ([]Reconciliation, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT provider, period_start, period_end,
+		estimated_micros, actual_micros, source, imported_at
+		FROM cost_reconciliations ORDER BY period_end DESC, id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]Reconciliation, 0)
+	for rows.Next() {
+		var item Reconciliation
+		if err := rows.Scan(&item.Provider, &item.PeriodStart, &item.PeriodEnd,
+			&item.EstimatedMicros, &item.ActualMicros, &item.Source, &item.ImportedAt); err != nil {
+			return nil, err
+		}
+		item.VarianceMicros = item.ActualMicros - item.EstimatedMicros
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+// Reserve records in-flight worst-case spend. The caller serializes the
+// check-and-reserve decision; the durable row prevents a restart from losing
+// visibility into outstanding reservations.
+func (s *Store) Reserve(ctx context.Context, id, subject, agentID, provider string, costMicros int64, tokens int, expiresAt time.Time) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO cost_reservations
+		(id, subject, agent_id, provider, estimated_micros, estimated_tokens, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, subject, agentID, provider, costMicros, tokens, time.Now().UTC().Format("2006-01-02 15:04:05"),
+		expiresAt.UTC().Format("2006-01-02 15:04:05"))
+	return err
+}
+
+// TryReserve atomically checks every configured scope and inserts an in-flight
+// reservation. A write is performed first so SQLite serializes competing
+// admissions before any capacity reads occur.
+func (s *Store) TryReserve(ctx context.Context, id, subject, agentID, provider string, costMicros int64, tokens int, expiresAt time.Time, policy ReservationPolicy) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := policy.Now.UTC()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM cost_reservations WHERE expires_at <= ?`, now.Format("2006-01-02 15:04:05")); err != nil {
+		return err
+	}
+	capacity := ReservationCapacity{AvailableMicros: int64(^uint64(0) >> 1), AvailableTokens: int64(^uint64(0) >> 1)}
+	limitedCost, limitedTokens := false, false
+	costScopes := []struct {
+		limit    int64
+		since    time.Time
+		subject  string
+		agentID  string
+		required bool
+		label    string
+		resetAt  time.Time
+	}{
+		{policy.GlobalDailyMicros, policy.DailyStart, "", "", false, "global_daily", policy.DailyStart.AddDate(0, 0, 1)},
+		{policy.GlobalMonthlyMicros, policy.MonthlyStart, "", "", false, "global_monthly", policy.MonthlyStart.AddDate(0, 1, 0)},
+		{policy.UserDailyMicros, policy.DailyStart, subject, "", true, "user_daily", policy.DailyStart.AddDate(0, 0, 1)},
+		{policy.AgentDailyMicros, policy.DailyStart, "", agentID, true, "agent_daily", policy.DailyStart.AddDate(0, 0, 1)},
+	}
+	tightCostScope := ""
+	var tightCostReset time.Time
+	for _, scope := range costScopes {
+		if scope.limit <= 0 || (scope.required && scope.subject == "" && scope.agentID == "") {
+			continue
+		}
+		used, reserved, err := txCostScope(ctx, tx, scope.since, scope.subject, scope.agentID)
+		if err != nil {
+			return err
+		}
+		remaining := scope.limit - used - reserved
+		if !limitedCost || remaining < capacity.AvailableMicros {
+			capacity.AvailableMicros = remaining
+			tightCostScope, tightCostReset = scope.label, scope.resetAt
+		}
+		limitedCost = true
+	}
+	tokenScopes := []struct {
+		limit    int64
+		since    time.Time
+		subject  string
+		agentID  string
+		provider string
+		label    string
+		resetAt  time.Time
+	}{
+		{policy.UserTokenLimit, policy.TokenWindowStart, subject, "", "", "user_tokens_24h", policy.Now.Add(24 * time.Hour)},
+		{policy.AgentTokenLimit, policy.TokenWindowStart, "", agentID, "", "agent_tokens_24h", policy.Now.Add(24 * time.Hour)},
+		{policy.ProviderTokenLimit, policy.ProviderTokenWindowStart, "", "", provider, "provider_tokens_1m", policy.Now.Add(time.Minute)},
+	}
+	tightTokenScope := ""
+	var tightTokenReset time.Time
+	for _, scope := range tokenScopes {
+		if scope.limit <= 0 || (scope.subject == "" && scope.agentID == "" && scope.provider == "") {
+			continue
+		}
+		used, reserved, err := txTokenScope(ctx, tx, scope.since, scope.subject, scope.agentID, scope.provider)
+		if err != nil {
+			return err
+		}
+		remaining := scope.limit - used - reserved
+		if !limitedTokens || remaining < capacity.AvailableTokens {
+			capacity.AvailableTokens = remaining
+			tightTokenScope = scope.label
+			tightTokenReset = scope.resetAt
+		}
+		limitedTokens = true
+	}
+	if limitedCost && costMicros > capacity.AvailableMicros {
+		return &ReservationRejectedError{Capacity: capacity, Scope: tightCostScope, ResetAt: tightCostReset,
+			Reason: fmt.Sprintf("%s dollar budget exhausted: %d micro-dollars available; resets at %s", tightCostScope, capacity.AvailableMicros, tightCostReset.Format(time.RFC3339))}
+	}
+	if limitedTokens && int64(tokens) > capacity.AvailableTokens {
+		return &ReservationRejectedError{Capacity: capacity, Scope: tightTokenScope, ResetAt: tightTokenReset,
+			Reason: fmt.Sprintf("%s budget exhausted: %d tokens available; rolling window frees capacity by %s", tightTokenScope, capacity.AvailableTokens, tightTokenReset.Format(time.RFC3339))}
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO cost_reservations
+		(id, subject, agent_id, provider, estimated_micros, estimated_tokens, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, subject, agentID, provider, costMicros, tokens, now.Format("2006-01-02 15:04:05"),
+		expiresAt.UTC().Format("2006-01-02 15:04:05")); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func txCostScope(ctx context.Context, tx *sql.Tx, since time.Time, subject, agentID string) (int64, int64, error) {
+	usageQuery := `SELECT COALESCE(SUM(cost_micros), 0) FROM token_usage WHERE created_at >= ?`
+	reserveQuery := `SELECT COALESCE(SUM(estimated_micros), 0) FROM cost_reservations WHERE 1=1`
+	usageArgs := []any{since.UTC().Format("2006-01-02 15:04:05")}
+	reserveArgs := []any{}
+	if subject != "" {
+		usageQuery += ` AND subject = ?`
+		reserveQuery += ` AND subject = ?`
+		usageArgs, reserveArgs = append(usageArgs, subject), append(reserveArgs, subject)
+	}
+	if agentID != "" {
+		usageQuery += ` AND agent_id = ?`
+		reserveQuery += ` AND agent_id = ?`
+		usageArgs, reserveArgs = append(usageArgs, agentID), append(reserveArgs, agentID)
+	}
+	var used, reserved int64
+	if err := tx.QueryRowContext(ctx, usageQuery, usageArgs...).Scan(&used); err != nil {
+		return 0, 0, err
+	}
+	if err := tx.QueryRowContext(ctx, reserveQuery, reserveArgs...).Scan(&reserved); err != nil {
+		return 0, 0, err
+	}
+	return used, reserved, nil
+}
+
+func txTokenScope(ctx context.Context, tx *sql.Tx, since time.Time, subject, agentID, provider string) (int64, int64, error) {
+	usageQuery := `SELECT COALESCE(SUM(total_tokens), 0) FROM token_usage WHERE created_at >= ?`
+	reserveQuery := `SELECT COALESCE(SUM(estimated_tokens), 0) FROM cost_reservations WHERE 1=1`
+	usageArgs := []any{since.UTC().Format("2006-01-02 15:04:05")}
+	reserveArgs := []any{}
+	if subject != "" {
+		usageQuery += ` AND subject = ?`
+		reserveQuery += ` AND subject = ?`
+		usageArgs, reserveArgs = append(usageArgs, subject), append(reserveArgs, subject)
+	}
+	if agentID != "" {
+		usageQuery += ` AND agent_id = ?`
+		reserveQuery += ` AND agent_id = ?`
+		usageArgs, reserveArgs = append(usageArgs, agentID), append(reserveArgs, agentID)
+	}
+	if provider != "" {
+		usageQuery += ` AND provider = ?`
+		reserveQuery += ` AND provider = ?`
+		usageArgs, reserveArgs = append(usageArgs, provider), append(reserveArgs, provider)
+	}
+	var used, reserved int64
+	if err := tx.QueryRowContext(ctx, usageQuery, usageArgs...).Scan(&used); err != nil {
+		return 0, 0, err
+	}
+	if err := tx.QueryRowContext(ctx, reserveQuery, reserveArgs...).Scan(&reserved); err != nil {
+		return 0, 0, err
+	}
+	return used, reserved, nil
+}
+
+// Release removes an in-flight reservation after completion or failure.
+func (s *Store) Release(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM cost_reservations WHERE id = ?`, id)
+	return err
+}
+
+// ReservedCostMicros returns live reservations and removes expired entries.
+func (s *Store) ReservedCostMicros(ctx context.Context, now time.Time) (int64, error) {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM cost_reservations WHERE expires_at <= ?`,
+		now.UTC().Format("2006-01-02 15:04:05")); err != nil {
+		return 0, err
+	}
+	var total int64
+	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(estimated_micros), 0) FROM cost_reservations`).Scan(&total)
+	return total, err
+}
+
+func (s *Store) ReservedCostMicrosScope(ctx context.Context, now time.Time, subject, agentID string) (int64, error) {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM cost_reservations WHERE expires_at <= ?`,
+		now.UTC().Format("2006-01-02 15:04:05")); err != nil {
+		return 0, err
+	}
+	query := `SELECT COALESCE(SUM(estimated_micros), 0) FROM cost_reservations WHERE 1=1`
+	args := []any{}
+	if subject != "" {
+		query += ` AND subject = ?`
+		args = append(args, subject)
+	}
+	if agentID != "" {
+		query += ` AND agent_id = ?`
+		args = append(args, agentID)
+	}
+	var total int64
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(&total)
+	return total, err
+}
+
+// SumTokensSince returns recorded tokens for an optional subject and/or agent.
+func (s *Store) SumTokensSince(ctx context.Context, since time.Time, subject, agentID string) (int64, error) {
+	query := `SELECT COALESCE(SUM(total_tokens), 0) FROM token_usage WHERE created_at >= ?`
+	args := []any{since.UTC().Format("2006-01-02 15:04:05")}
+	if subject != "" {
+		query += ` AND subject = ?`
+		args = append(args, subject)
+	}
+	if agentID != "" {
+		query += ` AND agent_id = ?`
+		args = append(args, agentID)
+	}
+	var total int64
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(&total)
+	return total, err
+}
+
+// ReservedTokens returns in-flight token reservations for an optional scope.
+func (s *Store) ReservedTokens(ctx context.Context, now time.Time, subject, agentID string) (int64, error) {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM cost_reservations WHERE expires_at <= ?`,
+		now.UTC().Format("2006-01-02 15:04:05")); err != nil {
+		return 0, err
+	}
+	query := `SELECT COALESCE(SUM(estimated_tokens), 0) FROM cost_reservations WHERE 1=1`
+	args := []any{}
+	if subject != "" {
+		query += ` AND subject = ?`
+		args = append(args, subject)
+	}
+	if agentID != "" {
+		query += ` AND agent_id = ?`
+		args = append(args, agentID)
+	}
+	var total int64
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(&total)
+	return total, err
 }
 
 // SumByAgent returns total tokens and estimated cost grouped by agent_id.
@@ -186,6 +754,60 @@ func (s *Store) SumBySession(ctx context.Context, agentID string, since time.Tim
 			return nil, err
 		}
 		out = append(out, sc)
+	}
+	return out, rows.Err()
+}
+
+// Chargeback groups prompt-free usage by an explicit allowlisted dimension
+// set. Supported names are user, feature, provider, and model.
+func (s *Store) Chargeback(ctx context.Context, since time.Time, groupBy []string) ([]ChargebackRow, error) {
+	selected := map[string]bool{}
+	for _, dimension := range groupBy {
+		switch strings.ToLower(strings.TrimSpace(dimension)) {
+		case "user":
+			selected["subject"] = true
+		case "feature":
+			selected["source"] = true
+		case "provider":
+			selected["provider"] = true
+		case "model":
+			selected["model"] = true
+		default:
+			return nil, fmt.Errorf("unsupported chargeback dimension %q", dimension)
+		}
+	}
+	if len(selected) == 0 {
+		selected = map[string]bool{"subject": true, "source": true, "provider": true, "model": true}
+	}
+	columns := []string{"subject", "source", "provider", "model"}
+	selects, groups := make([]string, 0, 4), make([]string, 0, 4)
+	for _, column := range columns {
+		if selected[column] {
+			selects = append(selects, column)
+			groups = append(groups, column)
+		} else {
+			selects = append(selects, "'' AS "+column)
+		}
+	}
+	query := `SELECT ` + strings.Join(selects, ", ") + `,
+		COUNT(*) AS calls, COALESCE(SUM(attempt_count), 0) AS attempts,
+		COALESCE(SUM(total_tokens), 0) AS total_tokens,
+		COALESCE(SUM(cost_micros), 0) AS cost_micros, COALESCE(SUM(cost_usd), 0) AS cost_usd
+		FROM token_usage WHERE created_at >= ? GROUP BY ` + strings.Join(groups, ", ") +
+		` ORDER BY cost_micros DESC, total_tokens DESC`
+	rows, err := s.db.QueryContext(ctx, query, since.UTC().Format("2006-01-02 15:04:05"))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]ChargebackRow, 0)
+	for rows.Next() {
+		var row ChargebackRow
+		if err := rows.Scan(&row.Subject, &row.Source, &row.Provider, &row.Model,
+			&row.Calls, &row.Attempts, &row.TotalTokens, &row.CostMicros, &row.CostUSD); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
 	}
 	return out, rows.Err()
 }

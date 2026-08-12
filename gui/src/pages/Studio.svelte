@@ -233,6 +233,7 @@
   let compiling = false
   let compileError = ''
   let workflow = null
+  let initialGeneratedWorkflow = null // immutable baseline for preference diff mining
   let questions = []
   let notes = []
   let notesExpanded = false  // collapse the compiler-notes pills by default
@@ -1090,6 +1091,15 @@ Use null for fields that are not present.`
   // What the strategy advisor concluded about the selected model, carried
   // through from the compile response so an override can be informed (ST-02).
   let strategyAdvice = null   // { warning, confidence, capabilities, mode, reason }
+  let strategyFit = null      // aggregate local model/strategy outcome evidence
+  $: unreliableStrategies = ((strategyFit && strategyFit.strategies) || [])
+    .filter((row) => row && row.unreliable)
+    .map((row) => row.strategy)
+  function isStrategyUnreliable(mode) { return unreliableStrategies.includes(mode) }
+
+  async function refreshStrategyFit(model = '', provider = '') {
+    try { strategyFit = await bridge.strategyFit(model, provider) } catch (_) { strategyFit = null }
+  }
 
   // The model the capability badge is ABOUT. Deliberately derived from the
   // advisor's own profile rather than from studioModelLabel: that one is the
@@ -1593,6 +1603,7 @@ Use null for fields that are not present.`
     runAck = null
     runBlockers = []
     strategyAdvice = null
+    initialGeneratedWorkflow = null
     // A readiness verdict describes ONE draft. Leaving it up across a swap let
     // the Save step answer "ready?" about the draft the user just replaced.
     readiness = null
@@ -1624,6 +1635,10 @@ Use null for fields that are not present.`
       loadedAgentId = prevAgentId
       workflow.id = prevAgentId
     }
+    // Preserve exactly what generation produced. Later Goal/Instructions/prompt
+    // edits are sent alongside the final draft so the backend can mine repeated
+    // preferences across agents without guessing from the saved file.
+    try { initialGeneratedWorkflow = workflow ? JSON.parse(JSON.stringify(workflow)) : null } catch (_) { initialGeneratedWorkflow = null }
     questions = (data && Array.isArray(data.questions)) ? data.questions : []
     notes = (data && Array.isArray(data.notes)) ? data.notes : []
     notesExpanded = false
@@ -1643,6 +1658,7 @@ Use null for fields that are not present.`
           reason: (data && data.strategy_reason) || '',
         }
       : null
+    refreshStrategyFit(workflow && workflow.llm && workflow.llm.model, workflow && workflow.llm && workflow.llm.provider).catch(() => {})
     if (gate && data && data.contract) {
       const generatedGate = contractToPreflight(data.contract)
       if (generatedGate.blockers.length) {
@@ -3453,7 +3469,7 @@ Use null for fields that are not present.`
   async function doSave(acceptPrivilegedExposure, grants) {
     saveError = ''
     try {
-      const res = await bridge.save(workflow, acceptPrivilegedExposure, grants, acceptReason.trim())
+      const res = await bridge.save(workflow, acceptPrivilegedExposure, grants, acceptReason.trim(), initialGeneratedWorkflow)
       const id = res.agentId
       loadedAgentId = id || loadedAgentId
       // A workflow that delegates to a peer the workspace didn't have causes
@@ -4390,6 +4406,7 @@ Use null for fields that are not present.`
       if (res && typeof res.current === 'string') studioPresetCurrent = res.current
     }).catch(() => { studioPresets = [] })
     refreshModelAdvice()
+    refreshStrategyFit()
   })
 
   async function saveStudioPreset(name) {
@@ -5143,11 +5160,11 @@ Use null for fields that are not present.`
             <button class="ms-btn" class:active={currentMode === 'workflow'} type="button"
                     disabled={compiling} on:click={() => switchMode('workflow')}>Workflow</button>
             <button class="ms-btn" class:active={currentMode === 'auto'} type="button"
-                    disabled={compiling} on:click={() => switchMode('auto')}>Auto</button>
+                    disabled={compiling || isStrategyUnreliable('auto')} on:click={() => switchMode('auto')}>Auto {isStrategyUnreliable('auto') ? '⚠' : ''}</button>
             <button class="ms-btn" class:active={currentMode === 'react'} type="button"
-                    disabled={compiling} on:click={() => switchMode('react')}>ReAct (advanced)</button>
+                    disabled={compiling || isStrategyUnreliable('react')} on:click={() => switchMode('react')}>ReAct (advanced) {isStrategyUnreliable('react') ? '⚠' : ''}</button>
             <button class="ms-btn" class:active={currentMode === 'plan_execute'} type="button"
-                    disabled={compiling} on:click={() => switchMode('plan_execute')}>Plan-Execute</button>
+                    disabled={compiling || isStrategyUnreliable('plan_execute')} on:click={() => switchMode('plan_execute')}>Plan-Execute {isStrategyUnreliable('plan_execute') ? '⚠' : ''}</button>
           </div>
         </div>
       {/if}
@@ -5537,6 +5554,7 @@ Use null for fields that are not present.`
               model={adviceModelLabel}
               busy={compiling}
               warnings={policyWarnings}
+              unreliable={unreliableStrategies}
               onSwitchMode={switchMode}
               onUpdate={updatePolicy}
             />

@@ -17,3 +17,14 @@ if (typeof globalThis.localStorage === 'undefined') {
 if (typeof globalThis.location === 'undefined') {
   globalThis.location = { protocol: 'http:', host: 'localhost:8080' }
 }
+
+// jsdom intentionally does not implement layout observers. Svelte 5 uses one
+// for element-size bindings, so component tests need a no-op observer just as
+// they would need a layout engine in a real browser.
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+}

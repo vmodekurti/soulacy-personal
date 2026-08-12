@@ -1,5 +1,25 @@
 # Security Posture
 
+Security settings are validated against Soulacy's runtime schema. Unknown keys
+fail startup rather than silently creating a false control:
+
+```yaml
+server:
+  allow_unauthenticated: false
+runtime:
+  allow_system_agents: []
+  ssrf_protection: true
+  sandbox:
+    enabled: true
+    mode: docker
+security:
+  intent_gate: deny
+```
+
+`runtime.allow_system_tools` is not an alias; use the explicit
+`allow_system_agents` ID list. Production should leave the list empty unless a
+reviewed agent genuinely needs privileged tools.
+
 Soulacy is designed first as a self-hosted, single-operator or same-trust-team
 agent runtime. It can run powerful tools on the host, so treat any user who can
 edit agent definitions, configure channels, or message a tool-enabled shared

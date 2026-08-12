@@ -29,11 +29,11 @@ func TestResolveWebhookTarget_RefusesTheMetadataEndpoint(t *testing.T) {
 // The legitimate case this override exists for: addressing a specific thread or
 // room under the operator's own webhook host.
 func TestResolveWebhookTarget_AllowsADifferentPathOnTheSameHost(t *testing.T) {
-	got, err := ResolveWebhookTarget("webhook", "https://hooks.example.com/services/T1", "https://hooks.example.com/services/T2")
+	got, err := ResolveWebhookTarget("webhook", "https://localhost/services/T1", "https://localhost/services/T2")
 	if err != nil {
 		t.Fatalf("a same-host override was refused, which breaks per-thread routing: %v", err)
 	}
-	if got != "https://hooks.example.com/services/T2" {
+	if got != "https://localhost/services/T2" {
 		t.Errorf("target = %q, want the override", got)
 	}
 }
@@ -43,11 +43,11 @@ func TestResolveWebhookTarget_AllowsADifferentPathOnTheSameHost(t *testing.T) {
 // have become an error.
 func TestResolveWebhookTarget_NonURLOverridesAreIgnored(t *testing.T) {
 	for _, override := range []string{"", "  ", "-1001234567890", "general", "spaces/AAAA"} {
-		got, err := ResolveWebhookTarget("webhook", "https://hooks.example.com/x", override)
+		got, err := ResolveWebhookTarget("webhook", "https://localhost/x", override)
 		if err != nil {
 			t.Fatalf("override %q turned into an error: %v", override, err)
 		}
-		if got != "https://hooks.example.com/x" {
+		if got != "https://localhost/x" {
 			t.Errorf("override %q changed the target to %q", override, got)
 		}
 	}
@@ -56,7 +56,7 @@ func TestResolveWebhookTarget_NonURLOverridesAreIgnored(t *testing.T) {
 // Host comparison must not be case-sensitive, or the guarantee is trivially
 // bypassed by shouting the hostname.
 func TestResolveWebhookTarget_HostMatchIsCaseInsensitive(t *testing.T) {
-	if _, err := ResolveWebhookTarget("webhook", "https://hooks.example.com/x", "https://HOOKS.EXAMPLE.COM/y"); err != nil {
+	if _, err := ResolveWebhookTarget("webhook", "https://localhost/x", "https://LOCALHOST/y"); err != nil {
 		t.Fatalf("same host in different case was refused: %v", err)
 	}
 }

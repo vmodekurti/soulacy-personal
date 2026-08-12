@@ -1,72 +1,57 @@
-# Python tool sandbox
+# Tool isolation
 
-Soulacy can run user-supplied Python tools under host-enforced **resource
-limits** (`internal/sandbox`). This page describes precisely what that sandbox
-does and — just as importantly — what it does **not** do, so operators do not
-over-trust it.
+Soulacy uses two different protections. They are intentionally named here so
+operators do not mistake resource limits for a security boundary.
 
-> **One-line summary:** the sandbox is a *resource-exhaustion* guard, not a
-> security boundary. It caps CPU, memory, file descriptors, and single-file
-> write size. It does **not** isolate the filesystem, network, processes, or
-> credentials. Treat every Python tool as code running with the **full
-> privileges of the gateway process**.
+## Privileged builtins: disposable container boundary
 
-## What the sandbox DOES
+`shell_exec`, `run_script`, `python_eval`, `install_library`, `write_file`, and
+`download_file` all pass through one privileged-tool chokepoint. With the
+shipped configuration, command execution uses a new Docker container per call:
 
-When `runtime.sandbox.enabled: true`, each Python tool subprocess is launched
-through a hidden re-exec of the soulacy binary (`__exec-sandbox`) that applies
-POSIX `setrlimit(2)` caps before `execve`-ing the real command:
+- no network (`--network none`), including no cloud metadata endpoint;
+- read-only container root, all Linux capabilities dropped, and
+  `no-new-privileges`;
+- PID, memory, CPU, file-descriptor, file-size, and caller wall-clock bounds;
+- only `<workspace>/data/sandbox` mounted at `/workspace`;
+- no gateway environment, config file, credential vault, database, logs, agent
+  manifests, or other host directories;
+- failure to contact Docker refuses the call; there is no host fallback.
 
-| Limit        | rlimit          | Default | Effect                                                            |
-| ------------ | --------------- | ------- | ----------------------------------------------------------------- |
-| `cpu_seconds`| `RLIMIT_CPU`    | 30      | Kernel sends `SIGXCPU` then `SIGKILL` when CPU time is exhausted. |
-| `memory_mb`  | `RLIMIT_AS`     | 512     | Caps the process's virtual address space.                         |
-| `open_files` | `RLIMIT_NOFILE` | 256     | Caps the number of open file descriptors.                         |
-| `file_size_mb`| `RLIMIT_FSIZE` | 64      | Caps the largest single file the process may write.               |
+Scripts must therefore be written into the isolated workspace before
+`run_script` can execute them. Package installation is ephemeral and, with the
+default network-off policy, cannot download from public registries.
 
-These limits stop a buggy or runaway tool from consuming unbounded CPU/RAM,
-leaking file descriptors, or filling the disk via a single `open()`. That is
-the entire scope of the protection.
+```yaml
+runtime:
+  sandbox:
+    enabled: true
+    mode: docker
+    image: python:3.12-slim
+    cpu_seconds: 30
+    memory_mb: 512
+    open_files: 256
+    file_size_mb: 64
+    pids: 128
+```
 
-It works as a single static binary on every Unix host — no external sandboxer,
-container runtime, or kernel feature is required.
+`mode: unsandboxed` (or legacy `enabled: false`) is an explicit compatibility
+escape hatch. It runs commands as the gateway user and emits an error-level
+warning on every startup. Do not use it on shared or production systems.
 
-## What the sandbox does NOT do
+Filesystem-native `write_file` and `download_file` still execute in the host
+process after the chokepoint, but their targets pass the same symlink-aware
+workspace containment policy used by all filesystem tools. They cannot write
+outside configured roots.
 
-The sandbox provides **no isolation** of any kind beyond the resource caps
-above. In particular it does **NOT**:
+## Ordinary Python tools: resource limits only
 
-- **Filesystem isolation** — the tool can read and write any path the gateway
-  user can. There is no chroot, mount namespace, or read-only root. (Use
-  `runtime.allowed_tool_dirs` to constrain *where tool scripts may live*, but
-  that does not constrain what a running tool can touch.)
-- **Network isolation** — the tool has the gateway's full network access. It
-  can open arbitrary outbound connections. (SSRF protection on *built-in* HTTP
-  tools is separate and does not cover arbitrary Python.)
-- **Process / namespace isolation** — no PID, user, IPC, UTS, or network
-  namespaces; no seccomp filter; no capability dropping. The tool runs as the
-  same OS user with the same privileges as the gateway.
-- **Credential isolation** — the tool inherits the gateway's environment,
-  including any secrets present in it.
+Agent/plugin Python execution still uses the `__exec-sandbox` POSIX rlimit
+wrapper. It caps CPU, address space, open descriptors, and single-file size and
+filters the environment. This wrapper is a resource-exhaustion guard, not a
+filesystem or network boundary. Use a Docker executor for untrusted ordinary
+Python tools as well.
 
-## Platform and reliability caveats
-
-- **`RLIMIT_AS` is advisory on macOS.** Linux enforces the address-space cap
-  strictly; macOS enforces it loosely — some `mmap`'d allocations can exceed
-  the limit before the kernel notices. The cap still discourages large
-  allocations but must not be relied on as a hard memory ceiling on macOS.
-- **`setrlimit` failure is non-fatal.** If applying a limit fails (for example
-  an edge case on Darwin), the sandbox logs a warning to stderr and **runs the
-  tool anyway** rather than aborting it
-  (`internal/sandbox/sandbox.go`, `RunSandboxedAndExit`). A tool may therefore
-  run with fewer limits than configured, or none.
-- **Windows / non-Unix hosts:** the wrapper is a no-op passthrough — no limits
-  are applied at all.
-
-## Recommendation
-
-Only install Python tools you trust. If you need real isolation (untrusted
-tools, multi-tenant deployments), run the gateway itself inside a container,
-VM, or other OS-level sandbox with the filesystem, network, and privilege
-boundaries you require. The built-in sandbox is a complement to such measures,
-not a replacement.
+On macOS `RLIMIT_AS` is advisory; on non-Unix systems the rlimit wrapper is a
+no-op. These limitations do not weaken the Docker boundary for privileged
+builtins.

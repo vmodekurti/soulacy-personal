@@ -36,10 +36,29 @@ func (c *Config) Validate() error {
 		}
 	}
 	dur("runtime.tool_timeout", c.Runtime.ToolTimeout)
+	dur("runtime.timeouts.tool", c.Runtime.Timeouts.Tool)
+	dur("runtime.timeouts.llm", c.Runtime.Timeouts.LLM)
+	dur("runtime.timeouts.step", c.Runtime.Timeouts.Step)
+	dur("runtime.timeouts.run", c.Runtime.Timeouts.Run)
+	dur("runtime.timeouts.http", c.Runtime.Timeouts.HTTP)
 	dur("runtime.session_ttl", c.Runtime.SessionTTL)
+	dur("runtime.retention.conversation_history", c.Runtime.Retention.ConversationHistory)
+	dur("runtime.retention.action_events", c.Runtime.Retention.ActionEvents)
+	dur("runtime.retention.audit_logs", c.Runtime.Retention.AuditLogs)
 	dur("auth.jwt_access_ttl", c.Auth.JWTAccessTTL)
 	dur("auth.jwt_refresh_ttl", c.Auth.JWTRefreshTTL)
 	dur("queue.nats_ack_wait", c.Queue.NATSAckWait)
+	if c.Runtime.ToolTimeout != "" && c.Runtime.Timeouts.Tool != "" && c.Runtime.ToolTimeout != c.Runtime.Timeouts.Tool {
+		errs = append(errs, fmt.Errorf("runtime.tool_timeout (%s) must match runtime.timeouts.tool (%s); prefer runtime.timeouts.tool", c.Runtime.ToolTimeout, c.Runtime.Timeouts.Tool))
+	}
+	ordered := []struct{ name, raw string }{{"tool", c.Runtime.Timeouts.Tool}, {"llm", c.Runtime.Timeouts.LLM}, {"step", c.Runtime.Timeouts.Step}, {"run", c.Runtime.Timeouts.Run}, {"http", c.Runtime.Timeouts.HTTP}}
+	for i := 1; i < len(ordered); i++ {
+		prev, e1 := time.ParseDuration(ordered[i-1].raw)
+		next, e2 := time.ParseDuration(ordered[i].raw)
+		if e1 == nil && e2 == nil && prev >= next {
+			errs = append(errs, fmt.Errorf("runtime timeout hierarchy requires %s < %s (got %s >= %s)", ordered[i-1].name, ordered[i].name, prev, next))
+		}
+	}
 
 	// --- Server ---
 	if c.Server.Port < 1 || c.Server.Port > 65535 {
@@ -75,6 +94,16 @@ func (c *Config) Validate() error {
 	if c.Runtime.MaxHistoryTurns < 0 {
 		errs = append(errs, fmt.Errorf("runtime.max_history_turns: %d must not be negative", c.Runtime.MaxHistoryTurns))
 	}
+	for field, value := range map[string]int{
+		"runtime.default_budget.max_tokens":    c.Runtime.DefaultBudget.MaxTokens,
+		"runtime.default_budget.max_llm_calls": c.Runtime.DefaultBudget.MaxLLMCalls,
+		"runtime.max_budget.max_tokens":        c.Runtime.MaxBudget.MaxTokens,
+		"runtime.max_budget.max_llm_calls":     c.Runtime.MaxBudget.MaxLLMCalls,
+	} {
+		if value < 0 {
+			errs = append(errs, fmt.Errorf("%s: %d must not be negative", field, value))
+		}
+	}
 
 	// --- Sandbox: all rlimit knobs are "0 = unlimited", negatives are invalid. ---
 	if c.Runtime.Sandbox.CPUSeconds < 0 {
@@ -88,6 +117,14 @@ func (c *Config) Validate() error {
 	}
 	if c.Runtime.Sandbox.FileSizeMB < 0 {
 		errs = append(errs, fmt.Errorf("runtime.sandbox.file_size_mb: %d must not be negative", c.Runtime.Sandbox.FileSizeMB))
+	}
+	if c.Runtime.Sandbox.PIDs < 0 {
+		errs = append(errs, fmt.Errorf("runtime.sandbox.pids: %d must not be negative", c.Runtime.Sandbox.PIDs))
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Runtime.Sandbox.Mode)) {
+	case "", "docker", "unsandboxed":
+	default:
+		errs = append(errs, fmt.Errorf("runtime.sandbox.mode: unsupported value %q", c.Runtime.Sandbox.Mode))
 	}
 
 	// --- Executor ---

@@ -14,7 +14,7 @@ import (
 // provider-agnostic safeguards:
 //
 //   1. modelContextLimit — a conservative per-model context-window table.
-//   2. estimateTokens     — a chars/4 heuristic over messages + tool schemas.
+//   2. estimateTokens     — the shared conservative LLM request counter.
 //   3. trimMessagesToFit  — drop oldest non-system turns until the estimate fits.
 //
 // Plus isContextExceededErr, used by the engine to auto-trim and retry once when
@@ -100,27 +100,11 @@ func isHostedCloudProvider(provider string) bool {
 		strings.Contains(p, "fireworks")
 }
 
-// estimateTokens is a deliberately rough chars/4 approximation of the prompt
-// size: every message's content (and tool-call payloads) plus each tool
-// schema's name/description/parameter surface. It overestimates slightly, which
-// is the safe direction for a budget check.
+// estimateTokens delegates to the single counter used by LLM admission and
+// accounting fallback. Context trimming and cost controls therefore cannot
+// disagree because they counted different prompt surfaces or scripts.
 func estimateTokens(msgs []llm.ChatMessage, tools []llm.ToolSchema) int {
-	chars := 0
-	for _, msg := range msgs {
-		chars += len(msg.Content) + len(msg.Name)
-		for _, tc := range msg.ToolCalls {
-			// Arguments is a decoded map; approximate its serialized weight by
-			// the number of keys (~a short field each).
-			chars += len(tc.Name) + 40*len(tc.Arguments)
-		}
-	}
-	for _, t := range tools {
-		chars += len(t.Name) + len(t.Description)
-		// A tool's JSON Schema isn't free; approximate its weight by the count
-		// of declared parameter keys (each ~ a short line of schema).
-		chars += 40 * len(t.Parameters)
-	}
-	return chars / 4
+	return llm.EstimateRequestTokens(llm.CompletionRequest{Messages: msgs, Tools: tools})
 }
 
 // trimMessagesToFit returns msgs trimmed so that estimateTokens(result, tools)
@@ -140,14 +124,37 @@ func trimMessagesToFit(msgs []llm.ChatMessage, tools []llm.ToolSchema, inputBudg
 	}
 	system := msgs[:sysEnd]
 	rest := append([]llm.ChatMessage(nil), msgs[sysEnd:]...)
+	// The latest user instruction is part of the immutable request contract,
+	// even when a newer assistant/tool message exists. Mark it by current index
+	// and adjust the marker as older entries are removed.
+	latestUser := -1
+	for i := len(rest) - 1; i >= 0; i-- {
+		if rest[i].Role == "user" {
+			latestUser = i
+			break
+		}
+	}
 
 	dropped := 0
 	for len(rest) > 1 && estimateTokens(append(append([]llm.ChatMessage(nil), system...), rest...), tools) > inputBudget {
-		rest = rest[1:]
+		remove := 0
+		if latestUser == 0 {
+			remove = 1
+			if remove >= len(rest) {
+				break
+			}
+		}
+		rest = append(rest[:remove], rest[remove+1:]...)
+		if latestUser > remove {
+			latestUser--
+		}
 		dropped++
 		// Don't start the surviving history on an orphan tool result.
 		for len(rest) > 1 && rest[0].Role == "tool" {
 			rest = rest[1:]
+			if latestUser > 0 {
+				latestUser--
+			}
 			dropped++
 		}
 	}

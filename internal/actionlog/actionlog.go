@@ -36,6 +36,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/metrics"
+	"github.com/soulacy/soulacy/internal/redact"
 	"github.com/soulacy/soulacy/internal/sqlitex"
 	"github.com/soulacy/soulacy/pkg/message"
 )
@@ -104,8 +105,10 @@ type Logger struct {
 	pruneRequest chan string
 
 	// PERF-3 rotation config (per-Logger so tests can use small thresholds).
-	maxRotateBytes int64
-	maxRotated     int
+	maxRotateBytes     int64
+	maxRotated         int
+	retention          time.Duration
+	lastRetentionSweep time.Time
 }
 
 // Option configures a Logger at construction time. Defined as a variadic on
@@ -127,12 +130,18 @@ func WithRotation(maxBytes int64, maxBackups int) Option {
 	}
 }
 
+// WithRetention deletes durable events and expired rotated files older than d.
+// Zero disables age-based deletion (size-based rotation remains active).
+func WithRetention(d time.Duration) Option {
+	return func(l *Logger) { l.retention = d }
+}
+
 // New creates a Logger. dir is the per-agent log directory (created if missing);
 // dbPath is the SQLite database for durable event history. The async writer
 // goroutine is started before New returns; callers must invoke Close() on
 // shutdown to flush any pending events.
 func New(dir, dbPath string, log *zap.Logger, opts ...Option) (*Logger, error) {
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("actionlog: create dir %s: %w", dir, err)
 	}
 	// PRODUCTION_AUDIT → F3 (2026-05-27): centralised WAL + NORMAL synchronous
@@ -164,6 +173,7 @@ func New(dir, dbPath string, log *zap.Logger, opts ...Option) (*Logger, error) {
 		stop:           make(chan struct{}),
 		maxRotateBytes: defaultMaxRotateBytes,
 		maxRotated:     defaultMaxRotated,
+		retention:      90 * 24 * time.Hour,
 	}
 	for _, opt := range opts {
 		opt(l)
@@ -189,6 +199,10 @@ func (l *Logger) Append(ev message.Event) {
 	if ev.Timestamp.IsZero() {
 		ev.Timestamp = time.Now().UTC()
 	}
+	// The event hub may need the full live payload, but neither the JSONL nor
+	// SQLite persistence layer does. Copy and redact at this boundary so tool
+	// arguments/results cannot bypass protection through a new event type.
+	ev.Payload = redact.Value(ev.Payload)
 	select {
 	case l.queue <- ev:
 		metrics.ActionlogQueueDepth.Set(float64(len(l.queue)))
@@ -284,7 +298,7 @@ func (l *Logger) flush(batch []message.Event) {
 
 func (l *Logger) writeFileBatch(agentID string, events []message.Event) {
 	path := l.Path(agentID)
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		l.log.Warn("actionlog: open file", zap.String("path", path), zap.Error(err))
 		return
@@ -759,6 +773,10 @@ func (l *Logger) pruneLoop() {
 				l.pruneIfLarge(path)
 			}
 			pending = make(map[string]struct{})
+			if l.retention > 0 && time.Since(l.lastRetentionSweep) >= time.Hour {
+				_ = l.DeleteBefore(time.Now().Add(-l.retention))
+				l.lastRetentionSweep = time.Now()
+			}
 		case <-l.stop:
 			// Drain remaining requests, prune once each, then exit.
 			drain := true
@@ -777,6 +795,32 @@ func (l *Logger) pruneLoop() {
 			return
 		}
 	}
+}
+
+// DeleteBefore applies the configured deletion policy immediately. It removes
+// matching SQLite rows and rotated log files whose modification time predates
+// cutoff. Active logs remain size-bounded and may contain newer records.
+func (l *Logger) DeleteBefore(cutoff time.Time) error {
+	if l == nil || l.db == nil {
+		return nil
+	}
+	if _, err := l.db.Exec(`DELETE FROM agent_events WHERE created_at < ?`, cutoff.UTC()); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(l.dir)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.Contains(entry.Name(), ".log.") {
+			continue
+		}
+		info, err := entry.Info()
+		if err == nil && info.ModTime().Before(cutoff) {
+			_ = os.Remove(filepath.Join(l.dir, entry.Name()))
+		}
+	}
+	return nil
 }
 
 // pruneIfLarge rewrites a log file keeping only the last keepLines once it grows
@@ -804,7 +848,7 @@ func (l *Logger) pruneIfLarge(path string) {
 	}
 	lines = lines[len(lines)-keepLines:]
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+	if err := os.WriteFile(tmp, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 		return
 	}
 	_ = os.Rename(tmp, path)
@@ -882,7 +926,7 @@ func gzipFile(src, dst string) (err error) {
 	}
 	defer in.Close()
 
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}

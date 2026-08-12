@@ -9,12 +9,24 @@ function authHeaders() {
 }
 
 export async function apiFetch(path, opts = {}) {
+	const { _costConfirmed, ...requestOpts } = opts
   const res = await fetch('/api/v1' + path, {
-    ...opts,
-    headers: { ...authHeaders(), ...(opts.headers || {}) },
+	...requestOpts,
+	headers: { ...authHeaders(), ...(requestOpts.headers || {}) },
   })
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
+	// Cost confirmation is deliberately user-driven. Retry the identical
+	// request only after the user accepts the server's concrete estimate.
+	if (res.status === 409 && body.confirmation_required && !_costConfirmed &&
+	    typeof window !== 'undefined' && window.confirm(costConfirmationText(body.estimate))) {
+	  return apiFetch(path, {
+	    ...opts,
+	    _costConfirmed: true,
+	    headers: { ...(opts.headers || {}), 'X-Soulacy-Cost-Confirmed': 'true' },
+	    body: withCostConfirmation(opts.body),
+	  })
+	}
     if (res.status === 401 || res.status === 403) authRequired.set(true)
     // Preserve the full error body alongside the status so callers can read
     // structured fields (e.g. Studio's 409 consent fallback carries
@@ -29,6 +41,19 @@ export async function apiFetch(path, opts = {}) {
   if (res.status === 204) return null
   const text = await res.text()
   return text ? JSON.parse(text) : null
+}
+
+function withCostConfirmation(body) {
+  if (typeof body !== 'string' || !body.trim()) return body
+  try { return JSON.stringify({ ...JSON.parse(body), confirm_cost: true }) } catch (_) { return body }
+}
+
+function costConfirmationText(estimate = {}) {
+  const usd = Number(estimate.estimated_usd || 0)
+  const tokens = Number(estimate.estimated_tokens || 0)
+  const model = [estimate.provider, estimate.model].filter(Boolean).join('/')
+  return `This experimental AI operation may use up to ${tokens.toLocaleString()} tokens` +
+    `${model ? ` on ${model}` : ''} (estimated $${usd.toFixed(4)}). Continue?`
 }
 
 async function apiBlob(path, opts = {}) {
@@ -66,10 +91,31 @@ function filenameFromDisposition(disposition) {
  * next flush and uses to cancel the run.
  */
 export async function streamSSE(path, body, onEvent, signal) {
+	let costConfirmed = false
+	if (path.startsWith('/studio/')) {
+	  try {
+	    // Include a conservative allowance for Studio's hidden rules/tool catalog
+	    // in addition to the visible request body.
+	    const inputTokens = Math.ceil(JSON.stringify(body || {}).length / 4) + 10000
+	    const estimate = await apiFetch('/costs/estimate', {
+	      method: 'POST', body: JSON.stringify({ input_tokens: inputTokens }),
+	    })
+	    if (estimate && estimate.confirmation_required) {
+	      if (typeof window === 'undefined' || !window.confirm(costConfirmationText(estimate))) {
+	        throw Object.assign(new Error('Cost confirmation was declined.'), { status: 409, body: estimate })
+	      }
+	      costConfirmed = true
+	    }
+	  } catch (e) {
+	    // A real confirmation rejection must stop. An unavailable estimate
+	    // endpoint degrades to the server's hard admission boundary.
+	    if (e && e.status === 409) throw e
+	  }
+	}
   const res = await fetch('/api/v1' + path, {
     method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify(body),
+    headers: { ...authHeaders(), ...(costConfirmed ? { 'X-Soulacy-Cost-Confirmed': 'true' } : {}) },
+    body: JSON.stringify({ ...(body || {}), ...(costConfirmed ? { confirm_cost: true } : {}) }),
     signal,
   })
   if (!res.ok || !res.body) {
@@ -631,6 +677,14 @@ export const api = {
       const qs = q.toString()
       return apiFetch(`/studio/model-capabilities${qs ? `?${qs}` : ''}`)
     },
+    /** Aggregate local pass/fail evidence for execution strategies on a model. */
+    strategyFit: ({ model, provider } = {}) => {
+			const params = new URLSearchParams()
+			if (model) params.set('model', model)
+			if (provider) params.set('provider', provider)
+			const q = params.toString()
+			return apiFetch(`/studio/strategy-fit${q ? `?${q}` : ''}`)
+    },
     /** What a live run would actually touch — tools, destinations, consent — without running it. */
     runPreview: ({ workflow } = {}) =>
       apiFetch('/studio/run-preview', { method: 'POST', body: JSON.stringify({ workflow }) }),
@@ -953,11 +1007,12 @@ export const api = {
      * when plan reported requiresConsent. On a 409 consent fallback the thrown
      * error carries .body.requiresConsent + .body.consentItems.
      */
-    save: ({ workflow, acceptPrivilegedExposure, grants, acceptWarningsReason } = {}) =>
+    save: ({ workflow, initialWorkflow, acceptPrivilegedExposure, grants, acceptWarningsReason } = {}) =>
       apiFetch('/studio/save', {
         method: 'POST',
         body: JSON.stringify({
           workflow,
+          ...(initialWorkflow ? { initial_workflow: initialWorkflow } : {}),
           acceptPrivilegedExposure: !!acceptPrivilegedExposure,
           ...(Array.isArray(grants) && grants.length ? { grants } : {}),
           // Recorded justification when the operator saved past warnings.

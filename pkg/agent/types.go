@@ -248,6 +248,12 @@ type LLMConfig struct {
 	// the agent can never accidentally hit anthropic / openai / gemini,
 	// no matter how the GUI dropdown gets fat-fingered.
 	AllowedProviders []string `yaml:"allowed_providers,omitempty" json:"allowed_providers,omitempty"`
+	// AllowedModels optionally pins this agent to an explicit set of model IDs.
+	// It is enforced after Studio/playground overrides are applied.
+	AllowedModels []string `yaml:"allowed_models,omitempty" json:"allowed_models,omitempty"`
+	// DataClassification is matched against the selected provider's
+	// allowed_data_classes policy before any prompt leaves the process.
+	DataClassification string `yaml:"data_classification,omitempty" json:"data_classification,omitempty"`
 }
 
 // SecurityConfig holds access-control settings for an agent.
@@ -495,10 +501,9 @@ type Definition struct {
 	// in YAML so a GUI round-trip preserves the user's intent.
 	Builtins *[]string `yaml:"builtins,omitempty" json:"builtins,omitempty"`
 
-	// --- MCP tool allowlists (opt-in restriction) ---
+	// --- External tool allowlists (default deny) ---
 	// MCPServers limits which connected MCP servers this agent can see and call.
-	// Nil / absent preserves legacy behavior: all connected MCP servers are
-	// available. A present empty list means no MCP servers are available. Use
+	// Nil / absent means no MCP servers are available. Use
 	// ["*"] or ["all"] to explicitly allow every connected MCP server.
 	MCPServers *[]string `yaml:"mcp_servers,omitempty" json:"mcp_servers,omitempty"`
 
@@ -507,6 +512,10 @@ type Definition struct {
 	// MCPServers; a tool is allowed when either allowlist admits it. Nil means
 	// no per-tool restriction unless MCPServers is also set.
 	MCPTools *[]string `yaml:"mcp_tools,omitempty" json:"mcp_tools,omitempty"`
+
+	// PluginTools lists the full plugin__<plugin>__<tool> names this agent may
+	// invoke. Nil and an empty list both mean none; ["*"] explicitly grants all.
+	PluginTools *[]string `yaml:"plugin_tools,omitempty" json:"plugin_tools,omitempty"`
 
 	// SystemTools, when true, opts this agent into the OS-level built-in tool set
 	// (shell_exec, run_script, install_library, write_file, download_file, …).
@@ -802,6 +811,7 @@ func (d *Definition) Clone() *Definition {
 	// LLM — clone slice/map sub-fields.
 	cp.LLM = d.LLM
 	cp.LLM.AllowedProviders = cloneStrSlice(d.LLM.AllowedProviders)
+	cp.LLM.AllowedModels = cloneStrSlice(d.LLM.AllowedModels)
 	if d.LLM.OutputSchema != nil {
 		cp.LLM.OutputSchema = cloneMapAny(d.LLM.OutputSchema)
 	}
@@ -826,6 +836,10 @@ func (d *Definition) Clone() *Definition {
 	if d.MCPTools != nil {
 		cloned := cloneStrSlice(*d.MCPTools)
 		cp.MCPTools = &cloned
+	}
+	if d.PluginTools != nil {
+		cloned := cloneStrSlice(*d.PluginTools)
+		cp.PluginTools = &cloned
 	}
 
 	// Tools — each ToolDef's Parameters map gets its own header copy.

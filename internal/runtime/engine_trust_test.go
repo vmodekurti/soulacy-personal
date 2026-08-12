@@ -387,6 +387,7 @@ func TestIntentGate_DeniesInjectionSteeredChannelSend(t *testing.T) {
 func TestIntentGate_AllowsUserRequestedShell(t *testing.T) {
 	sink := &trustSink{}
 	e := newTrustTestEngine(t, sink)
+	e.SetPrivilegedCommandRunner(HostPrivilegedRunner{})
 
 	var shellCalled bool
 	e.builtins = []BuiltinTool{

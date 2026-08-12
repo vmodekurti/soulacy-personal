@@ -38,11 +38,10 @@ services:
       # only and http://localhost:18789 from the host would connection-refuse.
       SOULACY_SERVER_HOST: 0.0.0.0
 
-      # Auth — leaving SOULACY_API_KEY empty makes the gateway refuse to start
-      # because 0.0.0.0 is not a loopback address (SEC-4). For pure-loopback
-      # dev, change SOULACY_SERVER_HOST above back to 127.0.0.1 and clear
-      # SOULACY_API_KEY. For any actual use, set a key in .env.
-      SOULACY_SERVER_API_KEY: ${SOULACY_API_KEY:-}
+      # Auth — this published-port profile requires an explicit key. Compose
+      # stops during interpolation when SOULACY_API_KEY is absent or empty.
+      # Generate one with: openssl rand -hex 32
+      SOULACY_SERVER_API_KEY: ${SOULACY_API_KEY:?Set SOULACY_API_KEY before starting Soulacy Lite}
 
       # ── Security defaults (development-shaped) ────────────────────────────────
       # Lite compose is dev-first: readiness verdict stays advisory (development

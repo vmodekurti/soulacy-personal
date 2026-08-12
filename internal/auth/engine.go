@@ -89,8 +89,8 @@ func (e *Engine) SetAPIKeyStore(s apikeys.Store) {
 }
 
 // New constructs an Engine and performs OIDC discovery synchronously (if
-// configured). A failed OIDC discovery is non-fatal: the engine starts without
-// the OIDC validator and logs a warning.
+// configured). Discovery failure is fatal when OIDC is the only usable
+// authentication method; otherwise the configured fallback remains effective.
 func New(cfg Config, staticKey string, log *zap.Logger) (*Engine, error) {
 	cfg.applyDefaults()
 
@@ -120,6 +120,9 @@ func New(cfg Config, staticKey string, log *zap.Logger) (*Engine, error) {
 	if cfg.OIDCIssuer != "" {
 		oidcVal, err := newOIDCValidator(cfg.OIDCIssuer, cfg.OIDCAudience)
 		if err != nil {
+			if e.staticKey == "" && e.issuer == nil {
+				return nil, fmt.Errorf("auth OIDC discovery: %w", err)
+			}
 			log.Warn("auth: OIDC discovery failed — OIDC tokens will be rejected until next restart",
 				zap.String("issuer", cfg.OIDCIssuer),
 				zap.Error(err),
@@ -143,12 +146,6 @@ func New(cfg Config, staticKey string, log *zap.Logger) (*Engine, error) {
 // Validated claims are stored via SetClaims() for downstream use.
 // Returns 401 if no credential matches.
 func (e *Engine) Middleware() fiber.Handler {
-	if e.staticKey == "" && e.issuer == nil && e.oidc == nil {
-		e.log.Warn("⚠  auth: no credentials configured — gateway is OPEN. " +
-			"Set server.api_key or auth.mode=jwt in config.yaml for production.")
-		return func(c *fiber.Ctx) error { return c.Next() }
-	}
-
 	return func(c *fiber.Ctx) error {
 		token := strings.TrimPrefix(c.Get("Authorization"), "Bearer ")
 		// WebSocket connections cannot set headers; accept ?api_key= as fallback.
@@ -201,6 +198,13 @@ func (e *Engine) Middleware() fiber.Handler {
 			"error": "invalid or missing credentials",
 		})
 	}
+}
+
+// Effective reports whether this engine has at least one usable credential
+// verifier. It deliberately describes capability, not object construction:
+// an allocated apikey engine with no key is not effective authentication.
+func (e *Engine) Effective() bool {
+	return e != nil && (e.staticKey != "" || e.issuer != nil || e.oidc != nil || e.apiKeyStore != nil)
 }
 
 // HandleTokenRequest handles POST /api/v1/auth/token.

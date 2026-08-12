@@ -142,7 +142,7 @@
     try {
       const res = await api.pairing.redeem(redeemCode.trim())
       redeemMsg = res.paired ? '✓ Paired.' + (res.token ? ' Token issued.' : '') : 'Pairing failed.'
-      if (res.token) { try { localStorage.setItem('soulacy-mobile-token', res.token) } catch (_) {} }
+      if (res.token) { try { sessionStorage.setItem('soulacy-mobile-token', res.token); localStorage.removeItem('soulacy-mobile-token') } catch (_) {} }
       redeemCode = ''
     } catch (e) { redeemMsg = e.message }
   }

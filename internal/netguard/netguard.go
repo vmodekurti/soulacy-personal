@@ -26,12 +26,95 @@
 package netguard
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
+
+type resolver interface {
+	LookupIPAddr(context.Context, string) ([]net.IPAddr, error)
+}
+
+type dialContextFunc func(context.Context, string, string) (net.Conn, error)
+
+// GuardedTransport validates and pins DNS exactly once for each outbound
+// request. Redirects pass through RoundTrip again and therefore receive their
+// own independently validated, pinned address.
+type GuardedTransport struct {
+	Base         *http.Transport
+	Resolver     resolver
+	DialContext  dialContextFunc
+	BlockPrivate bool
+	AllowedHosts []string
+}
+
+// NewHTTPClient returns a client suitable for URLs influenced by users,
+// models, or remote content. The validated address is the address dialled.
+func NewHTTPClient(timeout time.Duration, blockPrivate bool, allowedHosts []string) *http.Client {
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &GuardedTransport{
+			BlockPrivate: blockPrivate,
+			AllowedHosts: append([]string(nil), allowedHosts...),
+		},
+		CheckRedirect: CheckRedirect(blockPrivate, allowedHosts),
+	}
+}
+
+func (t *GuardedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req == nil || req.URL == nil {
+		return nil, fmt.Errorf("ssrf: request has no URL")
+	}
+	ips, err := resolveAllowed(req.Context(), req.URL, t.BlockPrivate, t.AllowedHosts, t.resolver())
+	if err != nil {
+		return nil, err
+	}
+	base := t.Base
+	if base == nil {
+		base, _ = http.DefaultTransport.(*http.Transport)
+	}
+	if base == nil {
+		base = &http.Transport{}
+	}
+	transport := base.Clone()
+	transport.DisableKeepAlives = true
+	dial := t.DialContext
+	if dial == nil {
+		dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
+		dial = dialer.DialContext
+	}
+	expectedHost := strings.TrimSuffix(strings.ToLower(req.URL.Hostname()), ".")
+	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(address)
+		if err != nil {
+			return nil, fmt.Errorf("ssrf: invalid dial address: %w", err)
+		}
+		if strings.TrimSuffix(strings.ToLower(host), ".") != expectedHost {
+			return nil, fmt.Errorf("ssrf: transport attempted unexpected host %q", host)
+		}
+		var lastErr error
+		for _, ip := range ips {
+			conn, err := dial(ctx, network, net.JoinHostPort(ip.String(), port))
+			if err == nil {
+				return conn, nil
+			}
+			lastErr = err
+		}
+		return nil, fmt.Errorf("ssrf: dial validated addresses: %w", lastErr)
+	}
+	return transport.RoundTrip(req)
+}
+
+func (t *GuardedTransport) resolver() resolver {
+	if t.Resolver != nil {
+		return t.Resolver
+	}
+	return net.DefaultResolver
+}
 
 var (
 	// alwaysBlocked is refused no matter how the deployment is configured.
@@ -88,12 +171,20 @@ func Check(rawURL string, blockPrivate bool, allowedHosts []string) error {
 // CheckURL is Check for an already-parsed URL, which is the shape the redirect
 // hook receives.
 func CheckURL(u *url.URL, blockPrivate bool, allowedHosts []string) error {
+	_, err := resolveAllowed(context.Background(), u, blockPrivate, allowedHosts, net.DefaultResolver)
+	return err
+}
+
+func resolveAllowed(ctx context.Context, u *url.URL, blockPrivate bool, allowedHosts []string, r resolver) ([]net.IP, error) {
 	if u == nil {
-		return fmt.Errorf("ssrf: no URL")
+		return nil, fmt.Errorf("ssrf: no URL")
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return nil, fmt.Errorf("ssrf: unsupported URL scheme %q", u.Scheme)
 	}
 	host := u.Hostname()
 	if host == "" {
-		return fmt.Errorf("ssrf: URL has no host")
+		return nil, fmt.Errorf("ssrf: URL has no host")
 	}
 
 	exempt := false
@@ -104,20 +195,22 @@ func CheckURL(u *url.URL, blockPrivate bool, allowedHosts []string) error {
 		}
 	}
 
-	ips, err := net.LookupHost(host)
+	addresses, err := r.LookupIPAddr(ctx, host)
 	if err != nil {
-		// Resolution failed: let the request itself fail naturally rather than
-		// reporting a confusing security error for what is really a typo or a
-		// DNS outage.
-		return nil
+		return nil, fmt.Errorf("ssrf: resolve %s: %w", host, err)
 	}
-
-	for _, ipStr := range ips {
-		ip := net.ParseIP(ipStr)
+	if len(addresses) == 0 {
+		return nil, fmt.Errorf("ssrf: resolve %s returned no addresses", host)
+	}
+	approved := make([]net.IP, 0, len(addresses))
+	for _, address := range addresses {
+		ip := address.IP
 		if ip == nil {
-			continue
+			return nil, fmt.Errorf("ssrf: resolver returned an invalid address for %s", host)
 		}
+		ipStr := ip.String()
 		if ip.IsLoopback() {
+			approved = append(approved, append(net.IP(nil), ip...))
 			continue
 		}
 		// Normalise a v4-mapped v6 address (::ffff:169.254.169.254) down to its
@@ -127,18 +220,19 @@ func CheckURL(u *url.URL, blockPrivate bool, allowedHosts []string) error {
 		}
 		for _, block := range alwaysBlocked {
 			if block.Contains(ip) {
-				return fmt.Errorf("ssrf: request to %s (%s) is blocked — cloud metadata and link-local addresses are never allowed", host, ipStr)
+				return nil, fmt.Errorf("ssrf: request to %s (%s) is blocked — cloud metadata and link-local addresses are never allowed", host, ipStr)
 			}
 		}
 		if blockPrivate && !exempt {
 			for _, block := range privateRanges {
 				if block.Contains(ip) {
-					return fmt.Errorf("ssrf: request to %s (%s) is blocked — private network addresses require ssrf_protection: false or an explicit allow_private_hosts entry", host, ipStr)
+					return nil, fmt.Errorf("ssrf: request to %s (%s) is blocked — private network addresses require ssrf_protection: false or an explicit allow_private_hosts entry", host, ipStr)
 				}
 			}
 		}
+		approved = append(approved, append(net.IP(nil), ip...))
 	}
-	return nil
+	return approved, nil
 }
 
 // CheckRedirect builds the http.Client hook that re-validates every hop.
@@ -151,6 +245,9 @@ func CheckRedirect(blockPrivate bool, allowedHosts []string) func(*http.Request,
 	return func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 10 {
 			return fmt.Errorf("stopped after 10 redirects")
+		}
+		if len(via) > 0 && strings.EqualFold(via[len(via)-1].URL.Scheme, "https") && !strings.EqualFold(req.URL.Scheme, "https") {
+			return fmt.Errorf("ssrf: refusing redirect downgrade from HTTPS to %s", req.URL.Scheme)
 		}
 		return CheckURL(req.URL, blockPrivate, allowedHosts)
 	}

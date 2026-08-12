@@ -77,6 +77,7 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 	// to the server's tool-catalog cache.
 	srv := gateway.New(cfg, cfgPath, d.engine, d.loader, d.llmRouter, d.chanReg, d.sched, d.httpAdapter, d.waAdapter, d.skillLoader, d.actionBackend, d.mcpClient, d.hub, log)
 	srv.SetAuth(d.authEngine)
+	logEffectiveSecuritySummary(log, cfg, d.authEngine != nil && d.authEngine.Effective())
 	srv.SetRBAC(d.rbacManager)
 	if d.credVault != nil {
 		srv.SetCredentialVault(d.credVault)
@@ -86,7 +87,7 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 	// (Story E8). Every loaded plugin's capability set registers with the
 	// enforcer; GUI mounts surface in the shell nav.
 	{
-		capsEnforcer := caps.NewEnforcer(audit.New(cfg.Runtime.AuditDir), log)
+		capsEnforcer := caps.NewEnforcer(audit.NewWithRetention(cfg.Runtime.AuditDir, config.RetentionDuration(cfg.Runtime.Retention.AuditLogs, 30*24*time.Hour)), log)
 		var uiMounts []gateway.PluginUIMount
 		for _, lp := range d.pluginLoader.All() {
 			if lp.Caps != nil {
@@ -248,7 +249,7 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 
 	// ── Conversation History Store ────────────────────────────────────────────
 	historyPath := ws.DB("history")
-	if histStore, histErr := session.NewSQLiteHistoryStore(historyPath); histErr != nil {
+	if histStore, histErr := session.NewSQLiteHistoryStore(historyPath, session.WithHistoryRetention(config.RetentionDuration(cfg.Runtime.Retention.ConversationHistory, 30*24*time.Hour))); histErr != nil {
 		log.Warn("conversation history store unavailable", zap.Error(histErr))
 	} else {
 		stack.pushClose("history-store", histStore)
@@ -285,5 +286,6 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 		stack.push("file-watcher", func() error { fsWatcher.Stop(); return nil })
 	}
 
+	stack.pushClose("gateway-learning", srv)
 	return srv
 }

@@ -23,11 +23,27 @@ import (
 	"github.com/soulacy/soulacy/pkg/message"
 )
 
+const wsPrincipalKey = "ws_event_principal"
+
+// eventPrincipal is copied into the upgraded connection's locals. It contains
+// no credential material and is immutable for the connection lifetime.
+type eventPrincipal struct {
+	Principal     string
+	Role          string
+	Scopes        []string
+	Admin         bool
+	Authenticated bool
+}
+
+type eventAuthorizer func(eventPrincipal, message.Event) bool
+type eventObserver func(message.Event)
+
 // wsClient wraps a WebSocket connection with a buffered send queue so a slow or
 // stale client can never block the broadcaster (and thus the agent engine).
 type wsClient struct {
-	conn *fws.Conn
-	send chan []byte
+	conn      *fws.Conn
+	send      chan []byte
+	principal eventPrincipal
 }
 
 // EventHub broadcasts events to all connected WebSocket clients and persists
@@ -46,16 +62,32 @@ type eventPublisher interface {
 }
 
 type EventHub struct {
-	mu        sync.RWMutex
-	clients   map[*wsClient]struct{}
-	log       *zap.Logger
-	actions   storage.ActionLogBackend       // nil = persistence disabled
-	publisher atomic.Pointer[eventPublisher] // nil = queue publishing disabled
+	mu          sync.RWMutex
+	clients     map[*wsClient]struct{}
+	log         *zap.Logger
+	actions     storage.ActionLogBackend       // nil = persistence disabled
+	publisher   atomic.Pointer[eventPublisher] // nil = queue publishing disabled
+	authorize   eventAuthorizer                // startup-only; nil preserves broadcast compatibility
+	observersMu sync.RWMutex
+	observers   []eventObserver
 
 	// activity is the E4c hung-session tracker. Every event that passes through
 	// Emit() is noted so /activity/running can render "session hung" callouts
 	// for runs that stopped emitting for longer than the tracker's threshold.
 	activity *sessionActivityTracker
+}
+
+// SetEventAuthorizer installs per-connection event filtering. It must be wired
+// before clients connect.
+func (h *EventHub) SetEventAuthorizer(fn eventAuthorizer) { h.authorize = fn }
+
+func (h *EventHub) AddObserver(fn eventObserver) {
+	if fn == nil {
+		return
+	}
+	h.observersMu.Lock()
+	h.observers = append(h.observers, fn)
+	h.observersMu.Unlock()
 }
 
 // maxWSFrameBytes caps an inbound WebSocket frame. The event stream is
@@ -116,12 +148,32 @@ func (h *EventHub) Emit(event message.Event) {
 	if h.activity != nil {
 		h.activity.Note(event)
 	}
+	h.observersMu.RLock()
+	observers := append([]eventObserver(nil), h.observers...)
+	h.observersMu.RUnlock()
+	for _, observe := range observers {
+		observe(event)
+	}
 	data, err := json.Marshal(event)
 	if err != nil {
 		h.log.Error("event marshal failed", zap.Error(err))
 		return
 	}
-	h.broadcast(data)
+	h.broadcastEvent(data, event)
+}
+
+func (h *EventHub) broadcastEvent(data []byte, event message.Event) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for c := range h.clients {
+		if h.authorize != nil && !h.authorize(c.principal, event) {
+			continue
+		}
+		select {
+		case c.send <- data:
+		default:
+		}
+	}
 }
 
 // broadcast enqueues data to every client's send buffer without blocking.
@@ -141,7 +193,8 @@ func (h *EventHub) broadcast(data []byte) {
 // Handler is the Fiber WebSocket handler. Each connecting client gets a buffered
 // send queue and a dedicated writer goroutine; the read loop detects disconnect.
 func (h *EventHub) Handler(conn *fws.Conn) {
-	c := &wsClient{conn: conn, send: make(chan []byte, 256)}
+	principal, _ := conn.Locals(wsPrincipalKey).(eventPrincipal)
+	c := &wsClient{conn: conn, send: make(chan []byte, 256), principal: principal}
 
 	h.mu.Lock()
 	h.clients[c] = struct{}{}
@@ -208,7 +261,9 @@ func (h *EventHub) PublishProgress(ev message.ProgressEvent) {
 	}
 	// Format as a proper SSE frame: "event: progress\ndata: <json>\n\n"
 	frame := "event: progress\ndata: " + string(data) + "\n\n"
-	h.broadcast([]byte(frame))
+	// A progress event is scoped by run ID. Streaming chat binds the run ID to
+	// the same principal as its session before registering the run.
+	h.broadcastEvent([]byte(frame), message.Event{Type: "progress", SessionID: ev.RunID, Timestamp: ev.Timestamp})
 }
 
 // ClientCount returns the number of connected WebSocket clients.

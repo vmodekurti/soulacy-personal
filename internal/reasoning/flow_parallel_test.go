@@ -320,7 +320,9 @@ func TestRunFlow_ParallelBranchesOverlapInTime(t *testing.T) {
 		if recs[0].StartedAt.IsZero() {
 			t.Fatalf("node %q: record carries no StartedAt, overlap is not computable", id)
 		}
-		if !recs[0].StartedAt.Before(releasedAt) {
+		// Equal is valid because trace timestamps are normalised to a coarser
+		// precision than time.Now on some platforms.
+		if recs[0].StartedAt.After(releasedAt) {
 			t.Fatalf("node %q started at %v, after the moment all three were in flight (%v)", id, recs[0].StartedAt, releasedAt)
 		}
 		if recs[0].BranchID == "" || recs[0].ParallelGroup != "fan" {

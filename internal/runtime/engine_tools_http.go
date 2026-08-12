@@ -96,7 +96,7 @@ func (e *Engine) buildHTTPTools() []BuiltinTool {
 				httpReq.Header.Set("User-Agent", "Soulacy/1.0")
 				httpReq.Header.Set("Accept", "text/plain, text/html, */*")
 
-				client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: e.ssrfRedirectHook()}
+				client := e.ssrfHTTPClient(30 * time.Second)
 				resp, err := client.Do(httpReq)
 				if err != nil {
 					return "", fmt.Errorf("fetch_url: request failed: %w", err)
@@ -207,7 +207,7 @@ func (e *Engine) buildHTTPTools() []BuiltinTool {
 					}
 				}
 
-				client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: e.ssrfRedirectHook()}
+				client := e.ssrfHTTPClient(30 * time.Second)
 				resp, err := client.Do(req)
 				if err != nil {
 					return "", fmt.Errorf("http_request: request failed: %w", err)
@@ -265,14 +265,9 @@ func (e *Engine) buildHTTPTools() []BuiltinTool {
 					return "", err
 				}
 
-				destPath := os.ExpandEnv(argString(args, "dest_path"))
-				if strings.HasPrefix(destPath, "~/") {
-					if home, err := os.UserHomeDir(); err == nil {
-						destPath = filepath.Join(home, destPath[2:])
-					}
-				}
-				if destPath == "" {
-					return "", fmt.Errorf("download_file: dest_path is required")
+				destPath, err := e.resolveFilesystemPath(argString(args, "dest_path"), true)
+				if err != nil {
+					return "", fmt.Errorf("download_file: %w", err)
 				}
 				if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 					return "", fmt.Errorf("download_file: create dirs: %w", err)
@@ -284,7 +279,7 @@ func (e *Engine) buildHTTPTools() []BuiltinTool {
 				}
 				req.Header.Set("User-Agent", "Soulacy/1.0")
 
-				client := &http.Client{Timeout: 5 * time.Minute, CheckRedirect: e.ssrfRedirectHook()} // longer timeout for large files
+				client := e.ssrfHTTPClient(5 * time.Minute) // longer timeout for large files
 				resp, err := client.Do(req)
 				if err != nil {
 					return "", fmt.Errorf("download_file: request failed: %w", err)

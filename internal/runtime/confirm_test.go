@@ -52,3 +52,20 @@ func TestConfirmBroker_BackCompatRegister(t *testing.T) {
 		t.Fatalf("expected denied")
 	}
 }
+
+func TestConfirmBroker_PrincipalIsolation(t *testing.T) {
+	b := newConfirmBroker()
+	alice := b.RegisterRequestForPrincipal(ConfirmRequest{CallID: "alice-call", Tool: "write_file"}, "agent", "s-alice", "viewer:alice")
+	b.RegisterRequestForPrincipal(ConfirmRequest{CallID: "bob-call", Tool: "shell_exec"}, "agent", "s-bob", "viewer:bob")
+
+	list := b.ListForPrincipal("viewer:alice", false)
+	if len(list) != 1 || list[0].CallID != "alice-call" {
+		t.Fatalf("alice approvals = %+v", list)
+	}
+	if b.ResolveForPrincipal("bob-call", true, "viewer:alice", false) {
+		t.Fatal("cross-principal approval resolution succeeded")
+	}
+	if !b.ResolveForPrincipal("alice-call", false, "viewer:alice", false) || <-alice {
+		t.Fatal("owner could not deny their approval")
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -29,12 +30,13 @@ type UpdateManifest struct {
 }
 
 type UpdateArtifact struct {
-	Name   string `json:"name"`
-	OS     string `json:"os"`
-	Arch   string `json:"arch"`
-	SHA256 string `json:"sha256"`
-	Bytes  int64  `json:"bytes"`
-	URL    string `json:"url,omitempty"`
+	Name      string `json:"name"`
+	OS        string `json:"os"`
+	Arch      string `json:"arch"`
+	SHA256    string `json:"sha256"`
+	Bytes     int64  `json:"bytes"`
+	URL       string `json:"url,omitempty"`
+	BundleURL string `json:"bundle_url,omitempty"`
 }
 
 type UpdateCheckResult struct {
@@ -74,7 +76,16 @@ type githubRelease struct {
 
 const defaultGitHubRepo = "vmodekurti/soulacy"
 
+const (
+	maxUpdateManifestBytes  = 2 << 20
+	maxUpdateArtifactBytes  = 1 << 30
+	maxSigstoreBundleBytes  = 8 << 20
+	githubActionsOIDCIssuer = "https://token.actions.githubusercontent.com"
+)
+
 var HTTPClient = http.DefaultClient
+var renameUpdateFile = os.Rename
+var VerifySigstore = verifySigstoreBundle
 
 func CheckForUpdate(ctx context.Context, manifestSource, currentVersion string) (UpdateCheckResult, error) {
 	currentVersion = strings.TrimSpace(currentVersion)
@@ -91,18 +102,12 @@ func CheckForUpdate(ctx context.Context, manifestSource, currentVersion string) 
 	var err error
 
 	if manifestSource == "" {
-		// Fallback: Query GitHub Releases directly
-		manifest, err = fetchLatestGitHubReleaseManifest(ctx, defaultGitHubRepo)
-		if err != nil {
-			res.Message = fmt.Sprintf("Failed to check GitHub releases: %v", err)
-			return res, err
-		}
-		res.ManifestSource = "github-releases"
-	} else {
-		manifest, err = readUpdateManifest(ctx, manifestSource)
-		if err != nil {
-			return res, err
-		}
+		manifestSource = fmt.Sprintf("https://github.com/%s/releases/latest/download/release-manifest.json", defaultGitHubRepo)
+		res.ManifestSource = manifestSource
+	}
+	manifest, err = readUpdateManifest(ctx, manifestSource)
+	if err != nil {
+		return res, err
 	}
 
 	res.LatestVersion = strings.TrimSpace(manifest.Version)
@@ -151,14 +156,24 @@ func InstallUpdate(ctx context.Context, opts UpdateInstallOptions) (UpdateInstal
 	}
 	res.InstallDir = installDir
 
-	data, source, err := readUpdateArtifact(ctx, check.ManifestSource, *check.Artifact)
+	if err := validateArtifactIdentity(check.LatestVersion, *check.Artifact); err != nil {
+		return res, err
+	}
+	if err := verifySignedSource(ctx, check.ManifestSource, check.LatestVersion, maxUpdateManifestBytes); err != nil {
+		return res, fmt.Errorf("update manifest signature: %w", err)
+	}
+	artifactPath, source, cleanup, err := downloadUpdateArtifact(ctx, check.ManifestSource, *check.Artifact)
 	if err != nil {
 		return res, err
 	}
-	if err := verifyUpdateArtifact(*check.Artifact, data); err != nil {
+	defer cleanup()
+	if err := verifyUpdateArtifactFile(*check.Artifact, artifactPath); err != nil {
 		return res, err
 	}
-	files, err := unpackUpdateArchive(data)
+	if err := verifySignedFile(ctx, source, artifactPath, check.LatestVersion); err != nil {
+		return res, fmt.Errorf("update artifact signature: %w", err)
+	}
+	files, err := unpackUpdateArchiveFile(artifactPath)
 	if err != nil {
 		return res, err
 	}
@@ -316,7 +331,10 @@ func readUpdateManifest(ctx context.Context, source string) (UpdateManifest, err
 }
 
 func readUpdateManifestBytes(ctx context.Context, source string) ([]byte, error) {
-	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
+	if strings.HasPrefix(source, "http://") {
+		return nil, fmt.Errorf("update manifest: remote source must use HTTPS")
+	}
+	if strings.HasPrefix(source, "https://") {
 		ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 		defer cancel()
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, source, nil)
@@ -332,9 +350,132 @@ func readUpdateManifestBytes(ctx context.Context, source string) ([]byte, error)
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			return nil, fmt.Errorf("update manifest: HTTP %d from %s", resp.StatusCode, source)
 		}
-		return io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+		return readLimited(resp.Body, maxUpdateManifestBytes, "update manifest")
 	}
 	return os.ReadFile(source)
+}
+
+func readLimited(r io.Reader, limit int64, label string) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%s exceeds %d byte limit", label, limit)
+	}
+	return data, nil
+}
+
+func validateArtifactIdentity(version string, artifact UpdateArtifact) error {
+	want := fmt.Sprintf("soulacy_%s_%s_%s.tar.gz", version, artifact.OS, artifact.Arch)
+	if artifact.Name != want {
+		return fmt.Errorf("update artifact: name %q does not bind product/version/platform (want %q)", artifact.Name, want)
+	}
+	return nil
+}
+
+func expectedWorkflowIdentity(version string) string {
+	tag := strings.TrimSpace(version)
+	if !strings.HasPrefix(tag, "v") {
+		tag = "v" + tag
+	}
+	return "https://github.com/" + defaultGitHubRepo + "/.github/workflows/release.yml@refs/tags/" + tag
+}
+
+func verifySigstoreBundle(ctx context.Context, artifactPath, bundlePath, identity string) error {
+	cosign, err := exec.LookPath("cosign")
+	if err != nil {
+		return fmt.Errorf("cosign is required for update verification: %w", err)
+	}
+	cmd := exec.CommandContext(ctx, cosign, "verify-blob",
+		"--bundle", bundlePath,
+		"--certificate-identity", identity,
+		"--certificate-oidc-issuer", githubActionsOIDCIssuer,
+		artifactPath,
+	)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("cosign verification failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func verifySignedSource(ctx context.Context, source, version string, maxSourceBytes int64) error {
+	path, cleanup, err := downloadUpdateSource(ctx, source, maxSourceBytes)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	return verifySignedFile(ctx, source, path, version)
+}
+
+func verifySignedFile(ctx context.Context, source, path, version string) error {
+	bundleSource := source + ".cosign.bundle"
+	bundlePath, cleanup, err := downloadUpdateSource(ctx, bundleSource, maxSigstoreBundleBytes)
+	if err != nil {
+		return fmt.Errorf("load Sigstore bundle: %w", err)
+	}
+	defer cleanup()
+	return VerifySigstore(ctx, path, bundlePath, expectedWorkflowIdentity(version))
+}
+
+func downloadUpdateSource(ctx context.Context, source string, limit int64) (string, func(), error) {
+	if strings.HasPrefix(source, "http://") {
+		return "", func() {}, fmt.Errorf("remote update source must use HTTPS: %s", source)
+	}
+	if !strings.HasPrefix(source, "https://") {
+		if !filepath.IsAbs(source) {
+			abs, err := filepath.Abs(source)
+			if err != nil {
+				return "", func() {}, err
+			}
+			source = abs
+		}
+		return source, func() {}, nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, source, nil)
+	if err != nil {
+		return "", func() {}, err
+	}
+	req.Header.Set("User-Agent", "soulacy-updater")
+	resp, err := HTTPClient.Do(req)
+	if err != nil {
+		return "", func() {}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", func() {}, fmt.Errorf("HTTP %d from %s", resp.StatusCode, source)
+	}
+	if resp.ContentLength > limit {
+		return "", func() {}, fmt.Errorf("update source exceeds %d byte limit", limit)
+	}
+	tmp, err := os.CreateTemp("", "soulacy-update-verify-*")
+	if err != nil {
+		return "", func() {}, err
+	}
+	path := tmp.Name()
+	cleanup := func() { _ = os.Remove(path) }
+	n, copyErr := io.Copy(tmp, io.LimitReader(resp.Body, limit+1))
+	closeErr := tmp.Close()
+	if copyErr != nil || closeErr != nil || n > limit {
+		cleanup()
+		if copyErr != nil {
+			return "", func() {}, copyErr
+		}
+		if closeErr != nil {
+			return "", func() {}, closeErr
+		}
+		return "", func() {}, fmt.Errorf("update source exceeds %d byte limit", limit)
+	}
+	return path, cleanup, nil
+}
+
+func downloadUpdateArtifact(ctx context.Context, manifestSource string, artifact UpdateArtifact) (string, string, func(), error) {
+	source, err := resolveUpdateArtifactSource(manifestSource, artifact)
+	if err != nil {
+		return "", "", func() {}, err
+	}
+	path, cleanup, err := downloadUpdateSource(ctx, source, maxUpdateArtifactBytes)
+	return path, source, cleanup, err
 }
 
 func readUpdateArtifact(ctx context.Context, manifestSource string, artifact UpdateArtifact) ([]byte, string, error) {
@@ -398,10 +539,11 @@ func verifyUpdateArtifact(artifact UpdateArtifact, data []byte) error {
 		return fmt.Errorf("update artifact: byte size mismatch for %s: got %d want %d", artifact.Name, len(data), artifact.Bytes)
 	}
 	want := strings.ToLower(strings.TrimSpace(artifact.SHA256))
-	if want == "" {
-		// If we queried GitHub directly and couldn't parse the checksums file, we can proceed without validation
-		// but log a warning.
-		return nil
+	if len(want) != sha256.Size*2 {
+		return fmt.Errorf("update artifact: valid sha256 is required for %s", artifact.Name)
+	}
+	if _, err := hex.DecodeString(want); err != nil {
+		return fmt.Errorf("update artifact: malformed sha256 for %s: %w", artifact.Name, err)
 	}
 	sum := sha256.Sum256(data)
 	got := hex.EncodeToString(sum[:])
@@ -411,8 +553,52 @@ func verifyUpdateArtifact(artifact UpdateArtifact, data []byte) error {
 	return nil
 }
 
+func verifyUpdateArtifactFile(artifact UpdateArtifact, path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	if artifact.Bytes > 0 && info.Size() != artifact.Bytes {
+		return fmt.Errorf("update artifact: byte size mismatch for %s: got %d want %d", artifact.Name, info.Size(), artifact.Bytes)
+	}
+	want := strings.ToLower(strings.TrimSpace(artifact.SHA256))
+	if len(want) != sha256.Size*2 {
+		return fmt.Errorf("update artifact: valid sha256 is required for %s", artifact.Name)
+	}
+	if _, err := hex.DecodeString(want); err != nil {
+		return fmt.Errorf("update artifact: malformed sha256 for %s: %w", artifact.Name, err)
+	}
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return err
+	}
+	got := hex.EncodeToString(hash.Sum(nil))
+	if got != want {
+		return fmt.Errorf("update artifact: sha256 mismatch for %s: got %s want %s", artifact.Name, got, want)
+	}
+	return nil
+}
+
+func unpackUpdateArchiveFile(path string) (map[string][]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	return unpackUpdateArchiveReader(file)
+}
+
 func unpackUpdateArchive(data []byte) (map[string][]byte, error) {
-	gz, err := gzip.NewReader(bytes.NewReader(data))
+	return unpackUpdateArchiveReader(bytes.NewReader(data))
+}
+
+func unpackUpdateArchiveReader(reader io.Reader) (map[string][]byte, error) {
+	gz, err := gzip.NewReader(reader)
 	if err != nil {
 		return nil, fmt.Errorf("update archive: open gzip: %w", err)
 	}
@@ -430,14 +616,20 @@ func unpackUpdateArchive(data []byte) (map[string][]byte, error) {
 		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
+		if hdr.Size < 0 || hdr.Size > 512<<20 {
+			return nil, fmt.Errorf("update archive: %s exceeds binary size limit", hdr.Name)
+		}
 		name := strings.TrimPrefix(filepath.Clean(hdr.Name), string(filepath.Separator))
 		base := filepath.Base(name)
 		if name == "." || strings.Contains(name, "..") || (base != "soulacy" && base != "sy") {
 			continue
 		}
-		body, err := io.ReadAll(io.LimitReader(tr, 512<<20))
+		body, err := io.ReadAll(io.LimitReader(tr, hdr.Size+1))
 		if err != nil {
 			return nil, fmt.Errorf("update archive: read %s: %w", hdr.Name, err)
+		}
+		if int64(len(body)) != hdr.Size {
+			return nil, fmt.Errorf("update archive: size mismatch for %s", hdr.Name)
 		}
 		files[base] = body
 	}
@@ -448,41 +640,91 @@ func installUpdateFiles(installDir string, files map[string][]byte) ([]string, e
 	if err := os.MkdirAll(installDir, 0o755); err != nil {
 		return nil, err
 	}
-	stamp := time.Now().UTC().Format("20060102T150405Z")
-	backups := []string{}
-	for _, name := range []string{"soulacy", "sy"} {
-		data := files[name]
-		dest := filepath.Join(installDir, name)
-		if st, err := os.Stat(dest); err == nil && st.Mode().IsRegular() {
-			backup := fmt.Sprintf("%s.bak-%s", dest, stamp)
-			if err := os.Rename(dest, backup); err != nil {
-				return backups, err
-			}
-			backups = append(backups, backup)
+	names := []string{"soulacy", "sy"}
+	staged := make(map[string]string, len(names))
+	cleanupStaged := func() {
+		for _, path := range staged {
+			_ = os.Remove(path)
+		}
+	}
+	// Stage and verify every binary before moving either live destination.
+	for _, name := range names {
+		data, ok := files[name]
+		if !ok || len(data) == 0 {
+			cleanupStaged()
+			return nil, fmt.Errorf("update install: missing or empty %s binary", name)
 		}
 		tmp, err := os.CreateTemp(installDir, "."+name+".update-*")
 		if err != nil {
-			return backups, err
+			cleanupStaged()
+			return nil, err
 		}
-		tmpPath := tmp.Name()
+		path := tmp.Name()
+		staged[name] = path
 		if _, err := tmp.Write(data); err != nil {
 			_ = tmp.Close()
-			_ = os.Remove(tmpPath)
-			return backups, err
+			cleanupStaged()
+			return nil, err
 		}
 		if err := tmp.Chmod(0o755); err != nil {
 			_ = tmp.Close()
-			_ = os.Remove(tmpPath)
-			return backups, err
+			cleanupStaged()
+			return nil, err
+		}
+		if err := tmp.Sync(); err != nil {
+			_ = tmp.Close()
+			cleanupStaged()
+			return nil, err
 		}
 		if err := tmp.Close(); err != nil {
-			_ = os.Remove(tmpPath)
-			return backups, err
+			cleanupStaged()
+			return nil, err
 		}
-		if err := os.Rename(tmpPath, dest); err != nil {
-			_ = os.Remove(tmpPath)
-			return backups, err
+		stagedData, err := os.ReadFile(path)
+		if err != nil || !bytes.Equal(stagedData, data) {
+			cleanupStaged()
+			return nil, fmt.Errorf("update install: staged %s verification failed", name)
 		}
+	}
+
+	stamp := time.Now().UTC().Format("20060102T150405Z")
+	backups := []string{}
+	backupByName := make(map[string]string, len(names))
+	installed := make(map[string]bool, len(names))
+	restore := func() {
+		for _, name := range names {
+			dest := filepath.Join(installDir, name)
+			if installed[name] {
+				_ = os.Remove(dest)
+			}
+			if backup := backupByName[name]; backup != "" {
+				_ = os.Remove(dest)
+				_ = renameUpdateFile(backup, dest)
+			}
+		}
+	}
+	for _, name := range names {
+		dest := filepath.Join(installDir, name)
+		if st, err := os.Stat(dest); err == nil && st.Mode().IsRegular() {
+			backup := fmt.Sprintf("%s.bak-%s", dest, stamp)
+			if err := renameUpdateFile(dest, backup); err != nil {
+				restore()
+				cleanupStaged()
+				return backups, err
+			}
+			backupByName[name] = backup
+			backups = append(backups, backup)
+		}
+	}
+	for _, name := range names {
+		dest := filepath.Join(installDir, name)
+		if err := renameUpdateFile(staged[name], dest); err != nil {
+			restore()
+			cleanupStaged()
+			return nil, fmt.Errorf("update install: replace %s: %w", name, err)
+		}
+		installed[name] = true
+		delete(staged, name)
 	}
 	return backups, nil
 }

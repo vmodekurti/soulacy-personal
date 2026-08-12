@@ -267,7 +267,7 @@ func (s *Server) enterpriseParityPosture() enterpriseParityPosture {
 	controls := make([]string, 0, 5)
 	missing := make([]string, 0, 5)
 
-	authReady := s != nil && s.authEngine != nil
+	authReady := s != nil && s.authEngine != nil && s.authEngine.Effective()
 	if !authReady && s != nil && s.cfg != nil {
 		authReady = strings.TrimSpace(s.cfg.Server.APIKey) != ""
 	}

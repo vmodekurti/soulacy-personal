@@ -335,6 +335,9 @@ func validateLLMFit(report *Report, def *agent.Definition, opts Options) {
 		report.add(Warn, "llm.model", "no model set; runtime will rely on provider defaults", "set llm.model explicitly for reproducible agent behavior", modelAlternatives(opts, provider))
 		return
 	}
+	if len(def.LLM.AllowedModels) > 0 && !contains(def.LLM.AllowedModels, model) {
+		report.add(Error, "llm.allowed_models", fmt.Sprintf("active model %q is blocked by allowed_models", model), "add the model to allowed_models or select an allowed model", def.LLM.AllowedModels)
+	}
 	if models := modelsFor(opts, provider); len(models) > 0 && !contains(models, model) {
 		sev := Warn
 		suggestion := "choose one of the currently available models"

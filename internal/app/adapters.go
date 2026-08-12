@@ -118,8 +118,14 @@ func costPriceTableFromConfig(in map[string]config.CostPricing) costs.PriceTable
 			continue
 		}
 		out[normalized] = costs.Pricing{
-			InputPerMTok:  price.InputPerMTok,
-			OutputPerMTok: price.OutputPerMTok,
+			InputPerMTok:       price.InputPerMTok,
+			OutputPerMTok:      price.OutputPerMTok,
+			CachedInputPerMTok: price.CachedInputPerMTok,
+			CacheWritePerMTok:  price.CacheWritePerMTok,
+			ReasoningPerMTok:   price.ReasoningPerMTok,
+			Source:             price.Source,
+			EffectiveDate:      price.EffectiveDate,
+			Version:            price.Version,
 		}
 	}
 	if len(out) == 0 {

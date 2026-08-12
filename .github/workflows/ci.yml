@@ -31,6 +31,20 @@ jobs:
   go:
     name: Go build & test
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: soulacy
+          POSTGRES_PASSWORD: soulacy-test-only
+          POSTGRES_DB: soulacy_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U soulacy -d soulacy_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -59,6 +73,8 @@ jobs:
 
       - name: go test (race detector)
         run: CGO_ENABLED=1 go test -race -timeout 120s ./...
+        env:
+          SOULACY_TEST_POSTGRES_DSN: postgres://soulacy:soulacy-test-only@localhost:5432/soulacy_test?sslmode=disable
 
       - name: go vet
         run: go vet ./...
@@ -118,6 +134,10 @@ jobs:
       - name: Install dependencies
         working-directory: gui
         run: npm ci
+
+      - name: Audit production dependencies
+        working-directory: gui
+        run: npm audit --omit=dev --audit-level=moderate
 
       - name: Test
         working-directory: gui

@@ -1010,11 +1010,16 @@ func TestGatewayChatHandler_SessionIDDefaults(t *testing.T) {
 		t.Fatalf("create: status=%d", st)
 	}
 
-	// Send chat without session_id — it should default to "http-<user_id>".
+	// Send chat without session_id — it must receive an unguessable identifier,
+	// not the former deterministic "http-<user_id>" value.
 	status, body := gatewayJSON(t, s, http.MethodPost, "/api/v1/chat", "secret",
 		`{"agent_id":"sess-default-agent","user_id":"alice","text":"hello"}`)
 	if status != http.StatusOK {
 		t.Fatalf("chat status = %d body=%v", status, body)
+	}
+	sessionID, _ := body["session_id"].(string)
+	if sessionID == "" || sessionID == "http-alice" || !strings.HasPrefix(sessionID, "http-") {
+		t.Fatalf("generated session_id is not opaque: %q", sessionID)
 	}
 	_ = provider
 }

@@ -60,6 +60,36 @@ func TestEventHub_ForwardsToQueuePublisher(t *testing.T) {
 	}
 }
 
+func TestEventHub_FiltersEventsByPrincipal(t *testing.T) {
+	hub := NewEventHub(zap.NewNop(), nil)
+	hub.SetEventAuthorizer(func(p eventPrincipal, event message.Event) bool {
+		return p.Admin || p.Principal == "viewer:"+event.SessionID
+	})
+	alice := &wsClient{send: make(chan []byte, 1), principal: eventPrincipal{Principal: "viewer:alice", Authenticated: true}}
+	bob := &wsClient{send: make(chan []byte, 1), principal: eventPrincipal{Principal: "viewer:bob", Authenticated: true}}
+	admin := &wsClient{send: make(chan []byte, 1), principal: eventPrincipal{Admin: true, Authenticated: true}}
+	hub.clients[alice] = struct{}{}
+	hub.clients[bob] = struct{}{}
+	hub.clients[admin] = struct{}{}
+
+	hub.Emit(message.Event{Type: "tool.call", SessionID: "alice", Payload: "private"})
+	select {
+	case <-alice.send:
+	default:
+		t.Fatal("owner did not receive event")
+	}
+	select {
+	case <-admin.send:
+	default:
+		t.Fatal("admin did not receive event")
+	}
+	select {
+	case leaked := <-bob.send:
+		t.Fatalf("event leaked to another principal: %s", leaked)
+	default:
+	}
+}
+
 func TestWorkboardRun_EmitsLifecycleEvents(t *testing.T) {
 	s := newTestGatewayWithWorkboard(t)
 
