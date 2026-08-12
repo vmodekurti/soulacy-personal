@@ -2,6 +2,11 @@
 
 **One binary. YAML agents. Runs anywhere — no cloud required.**
 
+!!! info "Documentation version"
+    These pages describe **Soulacy v0.1.8**. When running an older installation,
+    check `sy version` and review the [upgrade guide](deployment/upgrades.md)
+    before following configuration examples.
+
 Soulacy is a self-hosted AI agent runtime. Write an agent in a single YAML file, point it at any LLM (Ollama, OpenAI, Anthropic, Gemini, or anything OpenAI-compatible), and run it from a laptop, a $5 VPS, or a Raspberry Pi — with a full web GUI, chat, voice, scheduling, memory, skills, and plugins built into the one binary.
 
 Think of it as Ollama — but for agents.
@@ -9,8 +14,10 @@ Think of it as Ollama — but for agents.
 ## Build it. Run it. Fix and learn.
 
 - **Build it** — describe what you want in plain English in [Studio](using/studio.md),
-  or start from a [template](template-guides/index.md). Soulacy drafts the plan,
-  generates the workflow, and checks it end-to-end before you save.
+  or start from a [template](template-guides/index.md). Soulacy recommends an
+  agent strategy, lets you make the trigger and destination authoritative, and
+  checks the result before you save. Fixed-graph workflow generation is an
+  explicit experimental option in v0.1.8.
 - **Run it** — deploy to Telegram, Slack, Discord, WhatsApp, HTTP, or a schedule.
   One binary, no cloud required.
 - **Fix and learn** — when a run fails, **Debug in Studio** explains it plainly and
@@ -19,7 +26,7 @@ Think of it as Ollama — but for agents.
 
 ```bash
 # install, set up, talk to your first agent — under five minutes
-curl -fsSL https://vmodekurti.github.io/soulacy/install.sh | bash
+curl -fsSL https://soulacy.io/install.sh | bash
 sy setup
 sy chat --agent assistant "What can you do?"
 ```

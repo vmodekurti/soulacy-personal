@@ -1,6 +1,15 @@
 # Your First Agent
 
-This guide walks through building a capable `SOUL.yaml` agent step by step.
+This guide walks through building and verifying a conversational `SOUL.yaml`
+agent. If you prefer the GUI, [Studio](../using/studio.md) creates the same
+definition, but you should still inspect the resulting YAML.
+
+## Before writing YAML
+
+Open **Providers**, configure the provider you intend to use, and select **Test
+connection**. Provider and model names in an agent are references to the
+gateway's registered catalog; Soulacy does not silently substitute an invented
+provider when the reference is wrong.
 
 ## Minimal Agent
 
@@ -20,8 +29,14 @@ system_prompt: You are a helpful assistant.
 enabled: true
 ```
 
-Place this at `agents/helper/SOUL.yaml`. Soulacy's watcher reloads YAML changes
-without a gateway restart in normal operation.
+Place this at
+`~/.soulacy/soulspace/agents/helper/SOUL.yaml`. Soulacy's watcher reloads YAML
+changes without a gateway restart in normal operation.
+
+`trigger: channel` means an inbound message starts the agent. The `http`
+channel includes Chat and API conversations. The final answer is returned to
+the active conversation; a basic conversational agent does not need
+`channel.send`.
 
 ## Add a Persona
 
@@ -129,6 +144,18 @@ enabled: true
 
 Each channel still needs credentials and routing in `config.yaml`.
 
+## Choose the trigger deliberately
+
+| YAML value | Starts when | Additional configuration |
+| --- | --- | --- |
+| `channel` | A bound channel receives a message | At least one item in `channels` and channel credentials/routing |
+| `internal` | Chat, CLI/API, another agent, or an operator starts it | No cron required |
+| `cron` | The scheduler fires | A `schedule` block and an outbound destination when delivery is required |
+| `webhook` | The agent webhook endpoint receives an event | Webhook authentication and expected input shape |
+
+Manual in Studio is saved as the internal/programmatic trigger. Do not add a
+cron schedule merely because the agent may be run repeatedly.
+
 ## Full Example
 
 ```yaml title="agents/concierge/SOUL.yaml"
@@ -163,6 +190,33 @@ memory:
 max_turns: 8
 enabled: true
 ```
+
+## Validate and exercise it
+
+```bash
+sy agent validate ~/.soulacy/soulspace/agents/concierge/SOUL.yaml
+sy chat --agent concierge "What can you help me with?"
+```
+
+Then open **Activity** and verify the completed run used the expected provider,
+model, tools, and channel. If validation reports an unknown provider, return to
+**Providers** and use the registered provider ID rather than guessing.
+
+## Add outbound delivery only when needed
+
+Use `channel.send` for a scheduled notification, a one-off send, or delivery to
+a destination other than the active conversation. It is a write action and is
+commonly included in `confirm_tools`:
+
+```yaml
+builtins:
+  - channel.send
+confirm_tools:
+  - channel.send
+```
+
+That configuration opens an approval dialog before sending. Do not add it to a
+normal chat agent merely to display the final answer.
 
 ## Next Steps
 

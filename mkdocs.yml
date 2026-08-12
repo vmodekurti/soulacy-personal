@@ -136,7 +136,7 @@ nav:
     - GUI Tour: getting-started/gui-tour.md
   - Using Soulacy:
     - Chat: using/chat.md
-    - Studio (Workflow Builder): using/studio.md
+    - Studio (Agent Builder): using/studio.md
     - Voice Conversations: using/voice.md
     - Dashboard & Activity: using/dashboard.md
     - Workboard: using/workboard.md
@@ -197,8 +197,10 @@ nav:
     - Rate Limiting: configuration/rate-limiting.md
     - Telemetry: configuration/telemetry.md
   - Security:
+    - Overview: security/index.md
     - Tool Sandbox: security/sandbox.md
     - Audit & Incident Records: security/audit.md
+  - Compare: comparison-chart.md
   - API Reference:
     - Overview: api/index.md
     - Auth: api/auth.md

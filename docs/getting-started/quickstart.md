@@ -12,7 +12,7 @@ all in one binary, all local by default.
 === "macOS / Linux"
 
     ```bash
-    curl -fsSL https://vmodekurti.github.io/soulacy/install.sh | bash
+    curl -fsSL https://soulacy.io/install.sh | bash
     ```
 
 === "From source"
@@ -91,10 +91,13 @@ Changes hot-reload — no restart. The full schema (tools, memory, reasoning, sc
 ## 6. Five things to try next
 
 1. **Generate an agent from plain English** — open **Studio**, describe the
-   automation, hit **Generate** (Streamed by default streams the pipeline
+   outcome, explicitly review the trigger and delivery controls beside the
+   prompt, then hit **Generate** (Streamed by default streams the pipeline
    phases live below the canvas; the Wizard variant lets you step through
    `clarify_intent → choose_strategy → build_graph → validate → repair`).
-   Pick a **Runtime intent** preset (Fast local / Reliable local / Cloud
+   Studio defaults to a native tool-calling agent; generated fixed workflows
+   are experimental and require explicit opt-in. Pick a **Runtime intent**
+   preset (Fast local / Reliable local / Cloud
    quality) in the Studio model modal to bake sensible timeouts into the
    agent. → [Studio](../using/studio.md)
 2. **Give it skills** — add the public skill directory and install one:
@@ -127,3 +130,24 @@ Changes hot-reload — no restart. The full schema (tools, memory, reasoning, sc
 | Config file | `config.yaml` in the workspace — [reference](../configuration/index.md) |
 | GUI | `http://localhost:18789` — [tour](gui-tour.md) |
 | CLI | `sy` — [reference](../cli/reference.md) |
+
+## Verify the first run
+
+Do not stop at “the page opened.” Confirm the full path:
+
+```bash
+sy version
+sy doctor
+```
+
+Then check:
+
+1. **Providers** reports at least one tested connection.
+2. **Chat** returns a response from the selected agent.
+3. **Activity** contains the completed run and no unresolved tool or provider
+   error.
+4. The selected agent's `SOUL.yaml` contains the provider, model, trigger, and
+   channels you intended.
+
+If the gateway runs as a service, execute Doctor with the same user and
+environment as that service; see [Linux/VPS deployment](../deployment/linux.md).
