@@ -56,3 +56,42 @@ describe('parseMarkdown video support', () => {
     expect(html).not.toContain('evil.example.com')
   })
 })
+
+describe('parseMarkdown audio support', () => {
+  it('turns a bare audio link into an <audio> player', () => {
+    const html = parseMarkdown('https://example.com/overview.mp3')
+    expect(html).toContain('<audio')
+    expect(html).toContain('controls')
+    expect(html).toContain('src="https://example.com/overview.mp3"')
+    expect(html).not.toContain('<video')
+  })
+
+  it('handles the formats a generated recording actually arrives in', () => {
+    for (const ext of ['wav', 'm4a', 'aac', 'flac', 'oga', 'opus', 'weba']) {
+      const html = parseMarkdown(`https://example.com/clip.${ext}`)
+      expect(html, ext).toContain('<audio')
+    }
+  })
+
+  it('handles an audio URL with query/hash', () => {
+    const html = parseMarkdown('https://cdn.example.com/a/b.m4a?token=xyz#t=30')
+    expect(html).toContain('<audio')
+    expect(html).toContain('b.m4a?token=xyz#t=30')
+  })
+
+  // .ogg is ambiguous by extension. Video is checked first, so a video/ogg file
+  // keeps its picture rather than becoming an audio-only player.
+  it('keeps .ogg as video rather than silently dropping the picture', () => {
+    const html = parseMarkdown('https://example.com/clip.ogg')
+    expect(html).toContain('<video')
+    expect(html).not.toContain('<audio')
+  })
+
+  // Same rule as video: only bare links become players, so a link the author
+  // wrapped around words stays a link.
+  it('leaves a described audio link as a link', () => {
+    const html = parseMarkdown('[listen to the briefing](https://example.com/a.mp3)')
+    expect(html).not.toContain('<audio')
+    expect(html).toContain('<a')
+  })
+})
