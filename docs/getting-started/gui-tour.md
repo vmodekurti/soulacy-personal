@@ -8,7 +8,10 @@ Open it at:
 http://localhost:18789
 ```
 
-If pages show **🔒 Authentication required**, click the **🔑** button in the sidebar footer and paste the `server.api_key` from `~/.soulacy/config.yaml`.
+If pages show **🔒 Authentication required**, click the **🔑** button in the
+sidebar footer and paste `server.api_key` from
+`~/.soulacy/soulspace/config.yaml` (or the file selected by
+`SOULACY_CONFIG_PATH`).
 
 The sidebar is split into three groups: **main** (day-to-day work), **ops** (integrations), and **system** (observability).
 
@@ -37,9 +40,14 @@ The guided setup path for a fresh workspace. It helps you choose a first focus, 
 
 ## Studio
 
-![Studio Workflow Builder](../assets/screenshots/studio_workflow.png)
+![Studio agent builder](../assets/screenshots/studio_workflow.png)
 
-The one-stop agent development surface. Describe an agent in plain language, let Studio draft the workflow, inspect the generated plan, edit nodes and connections on the canvas, run dry/live tests, validate integrity, and use self-heal when a real run fails. Studio can author Workflow, ReAct, and Plan-Execute agents, then save them as normal SOUL.yaml agents.
+The one-stop agent development surface. Describe an agent in plain language,
+review the trigger and delivery controls beside the prompt, refine or generate,
+run dry/live tests, validate integrity, and use self-heal when a real run fails.
+Studio defaults to the Auto tool-calling strategy and can also author ReAct and
+Plan-Execute agents. Generated fixed workflows are experimental and require an
+explicit warning acknowledgement.
 
 - **Generate** has a **Streamed / Wizard** split-button. Streamed (default)
   runs all five pipeline phases (`clarify_intent → choose_strategy →
@@ -52,6 +60,10 @@ The one-stop agent development surface. Describe an agent in plain language, let
   model, tight timeouts, high loop cap), **Reliable local** (patient
   timeouts, the default), **Cloud quality** (long total budget, applied
   even for cloud providers).
+- **Trigger and delivery** are editable on the main intent page and again from
+  the Build toolbar. Schedule requires a cron expression, Channel requires an
+  inbound channel, and outbound delivery requires a destination. Explicit
+  selections override assumptions made during refinement.
 - **Contract panel** for reasoning agents runs blocker/warning checks on the
   system prompt, tool allowlist, peer graph, prompt hygiene, step budget,
   channel delivery, LLM fit, capability scope, persona consistency, and
@@ -65,7 +77,9 @@ The one-stop agent development surface. Describe an agent in plain language, let
   bot not invited, rate limit, invalid destination) and **What Studio
   changed** (plain-language rollup of each attempt's edits).
 
-**Try first:** type "an agent that summarizes RSS articles every morning", generate a draft, run **Dry run**, then click any node to inspect its inputs and outputs.
+**Try first:** type "a conversational research assistant that replies in Chat",
+set Trigger to **Channel** and Delivery to **Reply**, generate an Auto agent,
+then run **Dry run** and inspect its contract and YAML.
 
 ## Agents
 

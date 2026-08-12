@@ -17,6 +17,8 @@ recent error rate, and prints a specific remedy for each failed check.
 | Service won't start on login | Daemon not installed | `sy daemon install`, then `sy daemon status` |
 | `sy doctor` warns `no update manifest configured` | Production upgrade path is not wired | Set `updates.manifest_url` in `config.yaml` or export `SOULACY_UPDATE_MANIFEST` |
 | `sy doctor` warns `update manifest could not be checked` | Manifest URL/file is unreachable or invalid | Verify the URL/file path, JSON shape, and artifact links before launch |
+| API key works with `soulacy serve` but not systemd | Foreground and service processes loaded different config files or workspaces | Inspect `User`, `HOME`, `SOULACY_CONFIG_PATH`, and `SOULACY_WORKSPACE`; follow the [VPS verification checklist](../deployment/linux.md#5-prove-the-service-loaded-the-intended-config) |
+| `sy update` says versions are not comparable | Installed binary identifies itself by a source commit, not a tagged release version | Install the intended tagged bundle explicitly; do not override the comparison |
 
 ## LLM providers (Provider Doctor)
 
@@ -88,6 +90,11 @@ before wiring it into a schedule or workflow.
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
+| Refine turns a conversational request into a scheduled job | Trigger was left on Auto or an assumption in the refined text was accepted | Set Trigger to Channel or Manual on the main Studio page, correct the refined prompt, and regenerate |
+| Generated provider/model is not one you configured | Execution model inherited a default or the generated YAML was not reviewed | Choose **Model this agent runs on** from the registered catalog, test it on Providers, and verify `llm.provider` / `llm.model` in YAML |
+| Studio repeatedly chooses Telegram | Delivery remained on Auto or the draft retained an earlier output channel | Select Reply, None, or the intended channel; set/clear the destination before regenerating |
+| Final response appears inside an Action Required dialog | The agent called outbound `channel.send`, which is confirmation-gated | For ordinary conversation use Delivery: Reply and remove unnecessary `channel.send`; approve only intentional outbound delivery |
+| Agent contract Goal or Instructions is generic | Sparse intent or deterministic fallback filled missing model output | Add observable success/failure criteria, regenerate, or edit the populated contract before saving |
 | Save blocked by integrity check | Dangling reference, missing variable, invalid Python | Read the specific check message; fix the flagged node |
 | Run fails with `template variable not found` | A `{{var}}` is used before it's set | Use **Debug in Studio** → it identifies the unset variable and proposes a binding |
 | Repair won't converge | The failure needs external input (e.g. a missing secret) | Provide the secret/tool, then re-run **Build until it works** |

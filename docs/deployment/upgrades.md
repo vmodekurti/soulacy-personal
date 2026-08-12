@@ -5,7 +5,53 @@ API contracts are pinned by tests, and a broken plugin can never take the
 gateway down. This page covers the standard upgrade flow, what guarantees
 back it, and the (destructive) full-reinstall escape hatch.
 
-## Standard upgrade flow
+## Identify how Soulacy was installed
+
+```bash
+soulacy --version
+sy version
+command -v soulacy
+command -v sy
+```
+
+A tagged release such as `0.1.8` can be compared with the release manifest. A
+source build may identify itself by a commit such as `8c2c66f`; the updater
+cannot reliably determine whether that commit is newer or older than a semantic
+release and reports **versions are not comparable**. In that case, install the
+desired tagged release explicitly rather than overriding the comparison.
+
+## Release installation: standard upgrade
+
+```bash
+sy update check
+sy update install --dry-run
+sudo sy update install --yes
+```
+
+Use `sudo` only when the binaries are root-owned under `/usr/local/bin`. Restart
+the same service that normally runs the gateway:
+
+!!! tip "Root-owned binaries with config outside root's home"
+    `sudo` may not load your user's or service's `config.yaml`. Pass the release
+    manifest explicitly:
+
+    ```bash
+    MANIFEST=https://github.com/vmodekurti/soulacy/releases/latest/download/release-manifest.json
+    sudo sy update install --manifest "$MANIFEST" --dry-run
+    sudo sy update install --manifest "$MANIFEST" --yes
+    ```
+
+```bash
+# system service on a VPS
+sudo systemctl restart soulacy
+
+# user service installed by sy daemon
+systemctl --user restart soulacy
+```
+
+Verify the version and startup logs after restarting.
+
+## Source checkout: rebuild upgrade
 
 ```bash
 cd ~/path/to/soulacy
@@ -24,8 +70,9 @@ On macOS checkouts, `build-and-restart.command` wraps the rebuild +
 restart steps. Under launchd/systemd, replace the last two steps with
 your service manager's restart.
 
-That's it — no migration commands. Stores upgrade their own schemas at
-boot.
+Do not mix a source checkout upgrade with `sy update install` unless you intend
+to replace the source-built binaries with release binaries. Stores upgrade
+their own schemas at boot; there is no separate migration command.
 
 !!! note "Agent packages: v1 deprecation timeline"
     If you install agent packages via `sy pull` / **Agents → Import**, note
@@ -37,8 +84,7 @@ boot.
 
 ## Why upgrades are safe
 
-Three guard layers (design:
-[`docs/UPGRADE_STABILITY.md`](../UPGRADE_STABILITY.md)):
+Three guard layers protect the normal path:
 
 ### 1. Database schema versioning — additive only, never down
 
@@ -151,6 +197,5 @@ current config is never destroyed — it's saved next to the restored one as
 
 ## See also
 
-- [`docs/UPGRADE_STABILITY.md`](../UPGRADE_STABILITY.md) — full design
 - [Workspace Layout](../configuration/workspace.md) — what to back up
 - [macOS deployment](macos.md) · [Linux / VPS](linux.md) · [Docker](docker.md)

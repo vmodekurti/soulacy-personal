@@ -5,7 +5,7 @@ The fastest path is the one-command installer — it brings its own dependencies
 ## One command (macOS / Linux — recommended)
 
 ```bash
-curl -fsSL https://vmodekurti.github.io/soulacy/install.sh | bash
+curl -fsSL https://soulacy.io/install.sh | bash
 ```
 
 What it does:
@@ -22,7 +22,7 @@ What it does:
 6. Offers to start the gateway and open the GUI at `http://localhost:18789`.
 
 !!! tip "Pin a version"
-    `SOULACY_VERSION=v0.2.0 curl -fsSL https://vmodekurti.github.io/soulacy/install.sh | bash`
+    `SOULACY_VERSION=v0.1.8 curl -fsSL https://soulacy.io/install.sh | bash`
 
 ## Requirements
 
@@ -72,8 +72,8 @@ Tagged releases publish `soulacy_<version>_<os>_<arch>.tar.gz` bundles
 [GitHub Releases](https://github.com/vmodekurti/soulacy/releases):
 
 ```bash
-grep 'soulacy_v0.2.0_darwin_arm64.tar.gz' SHA256SUMS | shasum -a 256 -c -
-tar -xzf soulacy_v0.2.0_darwin_arm64.tar.gz
+grep 'soulacy_v0.1.8_darwin_arm64.tar.gz' checksums.sha256 | shasum -a 256 -c -
+tar -xzf soulacy_v0.1.8_darwin_arm64.tar.gz
 sudo install -m755 soulacy sy /usr/local/bin/
 ```
 
@@ -87,11 +87,33 @@ falls back to a source build automatically.
 ## Verify
 
 ```bash
+soulacy --version  # gateway version
 sy version         # CLI + framework version
 sy doctor          # checks workspace, config, providers, and the gateway
 ```
 
-(`soulacy` itself takes no `version` subcommand — running it starts the gateway.)
+Both `soulacy --version` and `sy version` are supported in v0.1.8. If a build
+prints only a commit hash, it was probably installed from source; use a tagged
+release when you want `sy update` to compare versions automatically.
+
+## Understand where configuration lives
+
+Fresh installations use:
+
+```text
+~/.soulacy/soulspace/config.yaml
+```
+
+Soulacy resolves configuration in this order:
+
+1. `SOULACY_CONFIG_PATH` when explicitly set;
+2. `config.yaml` inside `SOULACY_WORKSPACE` or the resolved workspace;
+3. the legacy `~/.soulacy/config.yaml` location;
+4. `./config.yaml` for a development checkout.
+
+Services do not necessarily share your login user's home or environment. If a
+foreground gateway accepts an API key but systemd does not, follow the
+[Linux/VPS service configuration checklist](../deployment/linux.md#5-prove-the-service-loaded-the-intended-config).
 
 ## What's next?
 
