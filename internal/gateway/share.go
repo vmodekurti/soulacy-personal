@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -103,6 +104,12 @@ func (s *Server) handleCreateShare(c *fiber.Ctx) error {
 	if err != nil {
 		return s.errMsg(c, fiber.StatusInternalServerError, "could not encode share")
 	}
+	// Prune before writing. Nothing else ever touched this directory: there was
+	// no expiry, no per-caller cap and no delete route, and POST /chat/share is
+	// gated on chat:READ — the weakest permission in the table. A single
+	// authenticated viewer could therefore grow the disk by ~2.4 GB/min, forever,
+	// within the rate limiter's budget.
+	pruneShares(dir)
 	if err := os.WriteFile(filepath.Join(dir, snap.Token+".json"), data, 0o600); err != nil {
 		return s.errMsg(c, fiber.StatusInternalServerError, "could not save share: "+err.Error())
 	}
@@ -129,4 +136,52 @@ func (s *Server) handleShareView(c *fiber.Ctx) error {
 	// Shared snapshots are immutable; let clients/CDNs cache briefly.
 	c.Set("Cache-Control", "public, max-age=300")
 	return c.Send(data)
+}
+
+const (
+	// shareTTL is how long a shared snapshot stays readable. A share is a link
+	// someone pastes into a chat; a month is generous for that and finite, which
+	// the previous "forever" was not.
+	shareTTL = 30 * 24 * time.Hour
+	// maxShares bounds the directory even when shares are created faster than the
+	// TTL retires them. That, not the TTL, is what actually caps the disk.
+	maxShares = 2000
+)
+
+// pruneShares deletes expired snapshots and, if the directory is still over the
+// cap, the oldest remaining ones. Errors are ignored throughout: pruning is
+// housekeeping, and failing a user's share because a stale file could not be
+// removed would be the wrong trade.
+func pruneShares(dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	type aged struct {
+		name string
+		mod  time.Time
+	}
+	cutoff := time.Now().Add(-shareTTL)
+	var live []aged
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if info.ModTime().Before(cutoff) {
+			_ = os.Remove(filepath.Join(dir, e.Name()))
+			continue
+		}
+		live = append(live, aged{name: e.Name(), mod: info.ModTime()})
+	}
+	if len(live) < maxShares {
+		return
+	}
+	sort.Slice(live, func(i, j int) bool { return live[i].mod.Before(live[j].mod) })
+	for _, a := range live[:len(live)-maxShares+1] {
+		_ = os.Remove(filepath.Join(dir, a.name))
+	}
 }

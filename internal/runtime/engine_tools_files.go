@@ -17,6 +17,11 @@ import (
 
 // buildFileTools returns the files-domain OS-level built-in tools. Extracted
 // from buildSystemTools (ARCH-2) — identical definitions, no behaviour change.
+// maxScanBytes caps what find_files will read to test a content_pattern.
+// find_files is in the always-available SAFE tool partition, so any chat user —
+// or any untrusted page an agent reads — can drive it.
+const maxScanBytes = 4 << 20
+
 func (e *Engine) buildFileTools() []BuiltinTool {
 	return []BuiltinTool{
 		{
@@ -233,6 +238,16 @@ func (e *Engine) buildFileTools() []BuiltinTool {
 						}
 					}
 					if contentRe != nil {
+						// Only the number of MATCHES is bounded by max_results, so a
+						// content_pattern that matches nothing used to read every file
+						// under the root fully into memory — a single large file was an
+						// immediate OOM. read_file, in this same file, has always capped
+						// at 1 MB; this path just never did. A content match beyond the
+						// first megabyte is not worth an unbounded allocation.
+						info, statErr := os.Stat(p)
+						if statErr != nil || info.Size() > maxScanBytes {
+							return nil
+						}
 						data, readErr := os.ReadFile(p)
 						if readErr != nil {
 							return nil

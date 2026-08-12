@@ -23,7 +23,6 @@ package runtime
 
 import (
 	"context"
-	"net"
 	"strings"
 	"sync"
 	"testing"
@@ -127,70 +126,57 @@ func TestCheckSSRF_MalformedURL(t *testing.T) {
 	_ = err // just verify no panic
 }
 
-// Test that the privateRanges and alwaysBlockedRanges are initialised (non-nil).
-func TestSSRFRangesInitialised(t *testing.T) {
-	if len(alwaysBlockedRanges) == 0 {
-		t.Error("alwaysBlockedRanges should be non-empty after init")
-	}
-	if len(privateRanges) == 0 {
-		t.Error("privateRanges should be non-empty after init")
+// The CIDR tables used to be asserted directly (len(privateRanges) > 0, block
+// .Contains(ip)). That tested the data structure, not the decision — a table
+// could be correct while nothing consulted it. These assert the decision, via
+// checkSSRF, for a literal IP so no DNS is involved.
+
+func TestSSRF_MetadataEndpointIsBlockedWithProtectionOff(t *testing.T) {
+	if err := checkSSRF("http://169.254.169.254/latest/meta-data/", false, nil); err == nil {
+		t.Error("the cloud metadata endpoint is reachable even though it is meant to be blocked unconditionally")
 	}
 }
 
-// Verify the CIDR ranges contain expected IPs.
-func TestSSRFLinkLocalRangeContainsMetadataIP(t *testing.T) {
-	ip := net.ParseIP("169.254.169.254")
-	found := false
-	for _, block := range alwaysBlockedRanges {
-		if block.Contains(ip) {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("alwaysBlockedRanges should contain 169.254.169.254")
+// AWS serves IMDS over IPv6 at fd00:ec2::254. That address is inside fc00::/7,
+// which is the PRIVATE list — and private-range blocking is off by default. So
+// on a default configuration the v4 metadata address was blocked and the v6 one
+// was not: the same credentials, one flag away.
+func TestSSRF_IPv6MetadataEndpointIsBlockedWithProtectionOff(t *testing.T) {
+	if err := checkSSRF("http://[fd00:ec2::254]/latest/meta-data/", false, nil); err == nil {
+		t.Error("the IPv6 cloud metadata endpoint is reachable with ssrf_protection off")
 	}
 }
 
-func TestSSRFPrivateRangesContain10Block(t *testing.T) {
-	ip := net.ParseIP("10.0.0.1")
-	found := false
-	for _, block := range privateRanges {
-		if block.Contains(ip) {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("privateRanges should contain 10.0.0.1")
+func TestSSRF_IPv6LinkLocalIsBlockedWithProtectionOff(t *testing.T) {
+	if err := checkSSRF("http://[fe80::1]/", false, nil); err == nil {
+		t.Error("IPv6 link-local is reachable with ssrf_protection off")
 	}
 }
 
-func TestSSRFPrivateRangesContain172Block(t *testing.T) {
-	ip := net.ParseIP("172.16.0.1")
-	found := false
-	for _, block := range privateRanges {
-		if block.Contains(ip) {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("privateRanges should contain 172.16.0.1")
+// A v4-mapped v6 literal is the same address wearing a different hat. If the
+// rules only match the 4-byte form, this spelling walks past them.
+func TestSSRF_V4MappedMetadataAddressIsBlocked(t *testing.T) {
+	if err := checkSSRF("http://[::ffff:169.254.169.254]/", false, nil); err == nil {
+		t.Error("the v4-mapped spelling of the metadata address is reachable")
 	}
 }
 
-func TestSSRFPrivateRangesContain192Block(t *testing.T) {
-	ip := net.ParseIP("192.168.0.1")
-	found := false
-	for _, block := range privateRanges {
-		if block.Contains(ip) {
-			found = true
-			break
+func TestSSRF_PrivateRangesBlockedOnlyWhenProtectionOn(t *testing.T) {
+	for _, ip := range []string{"10.0.0.1", "172.16.0.1", "192.168.0.1"} {
+		if err := checkSSRF("http://"+ip+"/api", true, nil); err == nil {
+			t.Errorf("%s allowed with ssrf_protection on", ip)
+		}
+		if err := checkSSRF("http://"+ip+"/api", false, nil); err != nil {
+			t.Errorf("%s blocked with ssrf_protection off — a self-hosted deployment needs its own LAN: %v", ip, err)
 		}
 	}
-	if !found {
-		t.Error("privateRanges should contain 192.168.0.1")
+}
+
+// An allow-list entry means "this internal service is fine", not "hand out my
+// instance role". Naming the metadata address must not unblock it.
+func TestSSRF_AllowListDoesNotUnblockMetadata(t *testing.T) {
+	if err := checkSSRF("http://169.254.169.254/latest/meta-data/", true, []string{"169.254.169.254"}); err == nil {
+		t.Error("an allow_private_hosts entry unblocked the cloud metadata endpoint")
 	}
 }
 

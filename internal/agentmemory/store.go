@@ -117,7 +117,8 @@ func (s *EpisodicStore) Write(r Record) error {
 		return fmt.Errorf("agentmemory: mkdir %s: %w", s.agentDir(r.AgentID), err)
 	}
 
-	f, err := os.OpenFile(s.episodicPath(r.AgentID), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	path := s.episodicPath(r.AgentID)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("agentmemory: open episodic: %w", err)
 	}
@@ -127,8 +128,36 @@ func (s *EpisodicStore) Write(r Record) error {
 	if err != nil {
 		return fmt.Errorf("agentmemory: marshal record: %w", err)
 	}
-	_, err = fmt.Fprintf(f, "%s\n", line)
-	return err
+	if _, err := fmt.Fprintf(f, "%s\n", line); err != nil {
+		return err
+	}
+	return s.rotateLocked(path)
+}
+
+// maxEpisodicBytes is the point at which the log is rolled.
+//
+// The file was append-only with no rotation, and ReadRecent parsed ALL of it and
+// sorted ALL of it before keeping the newest five. That read happens on every
+// agent run, to build the system prompt — so an agent that had been running for
+// months paid for its whole history on every single turn, and the file itself
+// grew without limit from a memory:write endpoint at 32 KB a request.
+const maxEpisodicBytes = 8 << 20
+
+// maxEpisodicScanRecords bounds the window ReadRecent keeps in memory when the
+// caller asks for "everything". Callers ask for 5.
+const maxEpisodicScanRecords = 500
+
+// rotateLocked rolls episodic.jsonl to episodic.jsonl.1 once it passes the cap,
+// discarding whatever the previous .1 held. Caller holds s.mu.
+//
+// One generation, not many: episodic memory is a recency store — ReadRecent asks
+// for the newest handful — so keeping deep history costs disk to serve nothing.
+func (s *EpisodicStore) rotateLocked(path string) error {
+	info, err := os.Stat(path)
+	if err != nil || info.Size() <= maxEpisodicBytes {
+		return nil //nolint:nilerr // a failed stat is not a failed write
+	}
+	return os.Rename(path, path+".1")
 }
 
 // ReadRecent returns up to max records for agentID, newest first.
@@ -147,7 +176,15 @@ func (s *EpisodicStore) ReadRecent(agentID string, max int) ([]Record, error) {
 	}
 	defer f.Close()
 
-	var records []Record
+	// Keep only a bounded window of the most recent records while scanning,
+	// rather than accumulating the whole file and sorting it afterwards. This
+	// read is on the hot path — it runs on every agent turn to build the system
+	// prompt — and the file is append-ordered, so the tail is what matters.
+	keep := max
+	if keep <= 0 || keep > maxEpisodicScanRecords {
+		keep = maxEpisodicScanRecords
+	}
+	ring := make([]Record, 0, keep)
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 1<<20), 1<<20) // 1 MB per line
 	for scanner.Scan() {
@@ -159,8 +196,13 @@ func (s *EpisodicStore) ReadRecent(agentID string, max int) ([]Record, error) {
 		if err := json.Unmarshal([]byte(line), &r); err != nil {
 			continue // skip malformed lines rather than failing the whole read
 		}
-		records = append(records, r)
+		if len(ring) == keep {
+			copy(ring, ring[1:])
+			ring = ring[:keep-1]
+		}
+		ring = append(ring, r)
 	}
+	records := ring
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("agentmemory: scan episodic: %w", err)
 	}

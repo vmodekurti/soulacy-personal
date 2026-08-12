@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/soulacy/soulacy/internal/channels"
+	"github.com/soulacy/soulacy/internal/netguard"
 	"github.com/soulacy/soulacy/pkg/message"
 )
 
@@ -97,11 +98,16 @@ func (a *Adapter) Send(ctx context.Context, msg message.Message) error {
 	if a.title != "" {
 		text = "**" + a.title + "**\n\n" + text
 	}
-	target := a.webhookURL
-	if override := strings.TrimSpace(msg.ThreadID); isHTTPURL(override) {
-		target = override
-	} else if override := strings.TrimSpace(msg.Metadata["to"]); isHTTPURL(override) {
-		target = override
+	// The per-message destination override is model output (channel.send's `to`),
+	// not operator config — see netguard.ResolveWebhookTarget. It may vary the
+	// path on the configured host and nothing else.
+	override := strings.TrimSpace(msg.ThreadID)
+	if !netguard.IsHTTPURL(override) {
+		override = strings.TrimSpace(msg.Metadata["to"])
+	}
+	target, err := netguard.ResolveWebhookTarget("teams", a.webhookURL, override)
+	if err != nil {
+		return err
 	}
 	body, err := json.Marshal(map[string]string{"text": text})
 	if err != nil {
@@ -136,9 +142,4 @@ func messageText(msg message.Message) string {
 		}
 	}
 	return channels.PlainTextForMessaging(strings.Join(parts, "\n\n"))
-}
-
-func isHTTPURL(s string) bool {
-	u, err := url.Parse(strings.TrimSpace(s))
-	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }

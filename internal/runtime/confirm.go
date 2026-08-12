@@ -122,6 +122,23 @@ func (b *ConfirmBroker) RegisterRequest(req ConfirmRequest, agentID, sessionID s
 	return ch
 }
 
+// Forget drops a pending approval that nobody will ever answer.
+//
+// Resolve was the ONLY deletion, so every run that timed out or was cancelled
+// with a confirmation outstanding left a permanent map entry — holding the full
+// tool-call arguments, and still listed by GET /api/v1/approvals as though a
+// human could still act on it. On a long-lived gateway that is unbounded growth
+// plus a steadily more misleading approvals page.
+//
+// Returns whether an entry was actually removed.
+func (b *ConfirmBroker) Forget(callID string) bool {
+	b.mu.Lock()
+	_, ok := b.pending[callID]
+	delete(b.pending, callID)
+	b.mu.Unlock()
+	return ok
+}
+
 // List returns all currently pending approvals, newest first.
 func (b *ConfirmBroker) List() []PendingApproval {
 	b.mu.Lock()

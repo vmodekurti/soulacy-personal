@@ -13,6 +13,7 @@ package gateway
 import (
 	"encoding/json"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	fws "github.com/gofiber/websocket/v2"
@@ -48,8 +49,8 @@ type EventHub struct {
 	mu        sync.RWMutex
 	clients   map[*wsClient]struct{}
 	log       *zap.Logger
-	actions   storage.ActionLogBackend // nil = persistence disabled
-	publisher eventPublisher           // nil = queue publishing disabled
+	actions   storage.ActionLogBackend       // nil = persistence disabled
+	publisher atomic.Pointer[eventPublisher] // nil = queue publishing disabled
 
 	// activity is the E4c hung-session tracker. Every event that passes through
 	// Emit() is noted so /activity/running can render "session hung" callouts
@@ -57,11 +58,27 @@ type EventHub struct {
 	activity *sessionActivityTracker
 }
 
-// SetEventPublisher wires an external event publisher (story E1). Must be
-// called before the first request is served. When nil, events are only
-// persisted + broadcast to WebSocket clients, exactly as before.
+// maxWSFrameBytes caps an inbound WebSocket frame. The event stream is
+// server→client only; a client frame is never parsed, so this only needs to be
+// large enough for protocol control frames.
+const maxWSFrameBytes = 64 << 10
+
+// SetEventPublisher wires an external event publisher (story E1). Documented as
+// startup-only, and that is how it is called — but Emit reads this field from
+// arbitrary request goroutines, so "documented" and "safe" are not the same
+// thing. An atomic pointer costs nothing and removes the footgun for whoever
+// next decides to call this at runtime. When nil, events are only persisted +
+// broadcast to WebSocket clients, exactly as before.
 func (h *EventHub) SetEventPublisher(p eventPublisher) {
-	h.publisher = p
+	h.publisher.Store(&p)
+}
+
+// eventPublisherOrNil returns the wired publisher, or nil.
+func (h *EventHub) eventPublisherOrNil() eventPublisher {
+	if p := h.publisher.Load(); p != nil {
+		return *p
+	}
+	return nil
 }
 
 // NewEventHub creates an EventHub. actions may be nil to disable persistence.
@@ -90,8 +107,8 @@ func (h *EventHub) Emit(event message.Event) {
 	if h.actions != nil {
 		h.actions.Append(event)
 	}
-	if h.publisher != nil {
-		h.publisher.PublishEvent(event) // non-blocking by contract
+	if p := h.eventPublisherOrNil(); p != nil {
+		p.PublishEvent(event) // non-blocking by contract
 	}
 	// E4c — session heartbeat: note before broadcast so /activity/running sees
 	// the update at the same instant WebSocket clients do. Cheap map bump under
@@ -156,6 +173,14 @@ func (h *EventHub) Handler(conn *fws.Conn) {
 	}
 
 	// Read loop — discard client frames; returns on disconnect.
+	//
+	// The read limit is not optional. The websocket library defaults to NO limit,
+	// ReadMessage is an io.ReadAll under the hood, and fiber's BodyLimit does not
+	// apply to a hijacked connection — nor does the IP rate limiter, which skips
+	// /ws by design. One authenticated client sending a single huge text frame
+	// therefore buffered the whole thing in RAM. Nothing here reads client frames
+	// at all, so a small limit costs nothing.
+	conn.SetReadLimit(maxWSFrameBytes)
 	for {
 		if _, _, err := conn.ReadMessage(); err != nil {
 			break

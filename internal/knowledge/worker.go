@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"time"
 
 	"go.uber.org/zap"
@@ -134,7 +135,7 @@ func (w *Worker) loop(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			worked, err := w.step(ctx)
+			worked, err := w.safeStep(ctx)
 			if err != nil {
 				w.log.Warn("knowledge: ingest worker step failed", zap.Error(err))
 			}
@@ -149,6 +150,28 @@ func (w *Worker) loop(ctx context.Context) {
 		case <-t.C:
 		}
 	}
+}
+
+// safeStep is step with a panic barrier.
+//
+// step parses attacker-supplied bytes: a .pdf goes to a third-party PDF parser,
+// a .docx to encoding/xml, and either can be malformed on purpose. This worker
+// runs on its own goroutine, outside fiber's recover middleware, so a panic in
+// an extractor took the WHOLE GATEWAY down — every agent, every channel — from
+// one bad upload. The HTTP path that reaches the same extractors survives such a
+// panic; this one did not, which is an inconsistency rather than a decision.
+//
+// A panic is reported as an ordinary job error so the job follows the normal
+// retry-then-park path and the operator sees the reason on the job row.
+func (w *Worker) safeStep(ctx context.Context) (worked bool, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("knowledge: ingest worker panicked: %v", r)
+			w.log.Error("knowledge: ingest worker panicked", zap.Any("panic", r), zap.ByteString("stack", debug.Stack()))
+			worked = true // something was claimed; keep the loop moving
+		}
+	}()
+	return w.step(ctx)
 }
 
 // step claims and runs at most one job. Reports whether it did work.
@@ -205,6 +228,11 @@ func (w *Worker) step(ctx context.Context) (bool, error) {
 	if ferr != nil {
 		return true, ferr
 	}
+	// The spool file was only deleted on the SUCCESS path, so every permanently
+	// failed job kept up to knowledge.max_document_bytes (50 MB by default) of
+	// disk forever. Nothing will read it again — the job is parked and its reason
+	// is on the row — so it goes now.
+	_ = os.Remove(job.SpoolPath)
 	if w.dlq != nil {
 		w.dlq.IngestDeadLetter(failed, ingestErr)
 	}

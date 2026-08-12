@@ -608,10 +608,14 @@ func executeMappedFlowNode(
 				executions[index] = flowNodeExecution{err: ctx.Err()}
 				return
 			}
-			itemVars := make(map[string]any, len(vars)+2)
-			for k, v := range vars {
-				itemVars[k] = v
-			}
+			// copyFlowVars, not a flat range-copy. A shallow copy leaves every
+			// concurrent iteration aliasing the same nested map[string]any and
+			// []any values — which is what the parallel-branch path already
+			// avoids with this same helper. Nothing writes through those nested
+			// values today; the first thing that does (hooks.RepairInput receives
+			// this map) would turn it into "fatal error: concurrent map writes",
+			// with a stack pointing nowhere near here.
+			itemVars := copyFlowVars(vars)
 			itemVars[itemVar] = value
 			itemVars[itemVar+"_index"] = index
 			itemVisit := fmt.Sprintf("%s[%d]", visitKey, index+1)

@@ -196,12 +196,21 @@ func (a *Adapter) Status() channels.AdapterStatus {
 // Verify checks Meta's GET webhook challenge.
 // Returns (challenge, true) on success, ("", false) on failure.
 func (a *Adapter) Verify(mode, token, challenge string) (string, bool) {
-	if mode == "subscribe" && token == a.verifyToken {
+	// subtle.ConstantTimeCompare, not ==: a byte-at-a-time comparison against a
+	// shared secret on an unauthenticated endpoint is measurable, and this
+	// endpoint can be probed at will. The HMAC check in this same file already
+	// uses it.
+	//
+	// The failed attempt is no longer logged with the token in it either. That
+	// line wrote the caller's guess — and, on a misconfiguration where the real
+	// token reached the wrong adapter, the real secret — into a log file that is
+	// collected in support bundles.
+	ok := subtle.ConstantTimeCompare([]byte(token), []byte(a.verifyToken)) == 1
+	if mode == "subscribe" && ok {
 		a.log.Info("whatsapp: webhook verified by Meta")
 		return challenge, true
 	}
-	a.log.Warn("whatsapp: webhook verification failed",
-		zap.String("mode", mode), zap.String("token", token))
+	a.log.Warn("whatsapp: webhook verification failed", zap.String("mode", mode))
 	return "", false
 }
 

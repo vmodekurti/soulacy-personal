@@ -5,6 +5,12 @@
 //   • LaTeX math via KaTeX  ( \(…\) $…$ inline, \[…\] $$…$$ block )
 //   • syntax-highlighted fenced code via highlight.js
 //   • Mermaid charts/diagrams from ```mermaid / ```xychart fences
+//   • inline players for linked media: video files, YouTube/Vimeo embeds,
+//     audio files (a generated podcast plays in the bubble rather than arriving
+//     as a download link), and OpenStreetMap/Google Maps links as live maps
+//   • tables from ```csv / ```tsv / ```data fences
+//   • image galleries: a run of images becomes a grid, and any image zooms
+//   • inline preview for a PDF this gateway serves (an agent's own report)
 //   • interactive data charts (Apache ECharts) from a ```chart JSON fence:
 //       ```chart
 //       { "xAxis": {"type":"category","data":[...]},
@@ -32,6 +38,7 @@
 import { marked } from 'marked'
 import markedKatex from 'marked-katex-extension'
 import DOMPurify from 'dompurify'
+import { tableFromFence } from './datatable.js'
 import hljs from 'highlight.js'
 import mermaid from 'mermaid'
 import * as echarts from 'echarts'
@@ -63,12 +70,34 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
 // Any iframe whose src is not a whitelisted embed URL is dropped — an agent can't
 // smuggle an arbitrary iframe past this even though the tag is allowed.
 const VIDEO_FILE_RE = /\.(mp4|webm|ogg|ogv|mov|m4v)(\?[^#\s]*)?(#[^\s]*)?$/i
-const EMBED_HOST_RE = /^https:\/\/(www\.)?(youtube\.com\/embed\/|player\.vimeo\.com\/video\/)/i
+// Audio gets its own player. Without this an agent that produced a recording —
+// a NotebookLM audio overview, a generated podcast, a voice note — could only
+// offer a link to download, which is a worse answer than the one it actually
+// produced. Note .ogg appears in both lists: it is ambiguous by extension, and
+// video is checked first so a video/ogg file keeps its picture.
+const AUDIO_FILE_RE = /\.(mp3|wav|m4a|aac|flac|oga|opus|weba)(\?[^#\s]*)?(#[^\s]*)?$/i
+const PDF_FILE_RE = /\.pdf(\?[^#\s]*)?(#[^\s]*)?$/i
+const EMBED_HOST_RE = /^https:\/\/(www\.)?(youtube\.com\/embed\/|player\.vimeo\.com\/video\/|openstreetmap\.org\/export\/embed\.html|maps\.google\.com\/maps\?)/i
+// A PDF the agent itself produced is served by this gateway, so it can be
+// previewed without widening the iframe policy: same-origin content is already
+// as trusted as the page doing the rendering. A PDF on someone else's origin
+// stays a link — the rule that an agent cannot point an iframe at an arbitrary
+// host is the main thing standing between untrusted output and the DOM, and a
+// document preview is not worth spending it.
+function isSameOrigin(href) {
+  try {
+    if (typeof window === 'undefined' || !window.location) return false
+    return new URL(href, window.location.href).origin === window.location.origin
+  } catch (_) {
+    return false
+  }
+}
+
 DOMPurify.addHook('uponSanitizeElement', (node, data) => {
   if (data.tagName !== 'iframe') return
   const src = (node.getAttribute && node.getAttribute('src')) || ''
-  if (!EMBED_HOST_RE.test(src)) {
-    // Not a trusted embed — remove the element entirely.
+  if (!EMBED_HOST_RE.test(src) && !isSameOrigin(src)) {
+    // Not a trusted embed and not our own origin — remove the element entirely.
     if (node.parentNode) node.parentNode.removeChild(node)
   }
 })
@@ -101,6 +130,52 @@ function toEmbedURL(href) {
   return null
 }
 
+// Map a link to a slippy-map embed, or null when it is not a map link.
+//
+// Same discipline as the video embeds: this returns a URL on a host already in
+// EMBED_HOST_RE, so a map link cannot become a route for arbitrary iframes.
+// OpenStreetMap is preferred wherever a coordinate is available — it needs no
+// API key and sets no advertising cookies. Google is accepted because it is
+// what people actually paste, via the keyless `output=embed` form.
+function toMapEmbedURL(href) {
+  try {
+    const u = new URL(href)
+    const host = u.hostname.replace(/^www\./, '')
+
+    if (host === 'openstreetmap.org' || host === 'osm.org') {
+      // Share links carry the view in the fragment: #map=<zoom>/<lat>/<lon>
+      const m = (u.hash || '').match(/map=(\d+(?:\.\d+)?)\/(-?\d+(?:\.\d+)?)\/(-?\d+(?:\.\d+)?)/)
+      if (m) return osmEmbed(Number(m[2]), Number(m[3]), Number(m[1]))
+      const lat = Number(u.searchParams.get('mlat'))
+      const lon = Number(u.searchParams.get('mlon'))
+      if (Number.isFinite(lat) && Number.isFinite(lon)) return osmEmbed(lat, lon, 15)
+    }
+
+    if (host === 'google.com' || host === 'maps.google.com' || host.endsWith('.google.com')) {
+      if (!u.pathname.startsWith('/maps') && host !== 'maps.google.com') return null
+      // A place URL carries its coordinate in the @lat,lng,zoom segment.
+      const at = u.pathname.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/)
+      if (at) return osmEmbed(Number(at[1]), Number(at[2]), 15)
+      const q = u.searchParams.get('q')
+      if (q) return `https://maps.google.com/maps?q=${encodeURIComponent(q)}&output=embed`
+    }
+  } catch (_) { /* not a URL */ }
+  return null
+}
+
+// A small bounding box around a point, which is what OSM's embed takes. The
+// span shrinks as zoom rises; the exact constant is cosmetic, not load-bearing.
+function osmEmbed(lat, lon, zoom) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null
+  const span = Math.max(0.0015, 360 / Math.pow(2, Math.min(Math.max(zoom || 15, 1), 19)))
+  const w = (lon - span).toFixed(5)
+  const e = (lon + span).toFixed(5)
+  const sLat = (lat - span / 2).toFixed(5)
+  const n = (lat + span / 2).toFixed(5)
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${w},${sLat},${e},${n}` +
+    `&layer=mapnik&marker=${lat.toFixed(5)},${lon.toFixed(5)}`
+}
+
 // Replace links that point at a playable video with an inline player. Runs on the
 // parsed-but-unsanitized HTML; DOMPurify (below) then vets the result, so even
 // the markup we inject is subject to the same sanitisation as everything else.
@@ -127,6 +202,38 @@ function embedVideos(html) {
       v.setAttribute('src', href)
       v.className = 'md-video'
       a.replaceWith(v)
+      return
+    }
+    if (PDF_FILE_RE.test(href) && isSameOrigin(href)) {
+      const wrap = doc.createElement('div')
+      wrap.className = 'md-pdf'
+      const f = doc.createElement('iframe')
+      f.setAttribute('src', href)
+      f.setAttribute('loading', 'lazy')
+      f.setAttribute('title', 'PDF preview')
+      wrap.appendChild(f)
+      a.replaceWith(wrap)
+      return
+    }
+    if (AUDIO_FILE_RE.test(href)) {
+      const au = doc.createElement('audio')
+      au.setAttribute('controls', '')
+      au.setAttribute('preload', 'metadata')
+      au.setAttribute('src', href)
+      au.className = 'md-audio'
+      a.replaceWith(au)
+      return
+    }
+    const mapEmbed = toMapEmbedURL(href)
+    if (mapEmbed) {
+      const wrap = doc.createElement('div')
+      wrap.className = 'md-map'
+      const f = doc.createElement('iframe')
+      f.setAttribute('src', mapEmbed)
+      f.setAttribute('loading', 'lazy')
+      f.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin')
+      wrap.appendChild(f)
+      a.replaceWith(wrap)
       return
     }
     const embed = toEmbedURL(href)
@@ -175,7 +282,11 @@ export function parseMarkdown(text) {
     return DOMPurify.sanitize(str)
   }
   return DOMPurify.sanitize(html, {
-    ADD_TAGS: ['video', 'source', 'iframe'],
+    // audio/video and their `controls` attribute are already in DOMPurify's
+    // defaults; they are listed for symmetry and so a future ALLOWED_TAGS
+    // override cannot silently strip the players. Verified by mutation: removing
+    // either changes nothing, so neither line is what makes playback work.
+    ADD_TAGS: ['video', 'audio', 'source', 'iframe'],
     ADD_ATTR: ['target', 'rel', 'controls', 'preload', 'src', 'type', 'allow', 'allowfullscreen', 'loading', 'referrerpolicy', 'frameborder'],
   })
 }
@@ -545,6 +656,107 @@ export function richRenderer(node, value = '') {
     }
   }
 
+  // Build a table element from parsed rows. Every value goes in via textContent,
+  // never innerHTML — the data is agent-authored and has already been through
+  // DOMPurify once as text; re-injecting it as markup would hand it a second
+  // chance to be interpreted.
+  function buildTable({ columns, rows, truncated }) {
+    const wrap = document.createElement('div')
+    wrap.className = 'md-table-wrap'
+    const table = document.createElement('table')
+    table.className = 'md-data-table'
+
+    const thead = document.createElement('thead')
+    const hr = document.createElement('tr')
+    columns.forEach((c) => {
+      const th = document.createElement('th')
+      th.textContent = c
+      hr.appendChild(th)
+    })
+    thead.appendChild(hr)
+    table.appendChild(thead)
+
+    const tbody = document.createElement('tbody')
+    rows.forEach((r) => {
+      const tr = document.createElement('tr')
+      r.forEach((cell) => {
+        const td = document.createElement('td')
+        td.textContent = cell
+        // Right-align numbers so a column of figures lines up on the decimal.
+        if (cell !== '' && !Number.isNaN(Number(cell))) td.className = 'num'
+        tr.appendChild(td)
+      })
+      tbody.appendChild(tr)
+    })
+    table.appendChild(tbody)
+    wrap.appendChild(table)
+
+    if (truncated) {
+      const note = document.createElement('div')
+      note.className = 'md-table-note'
+      note.textContent = `Showing the first ${rows.length} rows.`
+      wrap.appendChild(note)
+    }
+    return wrap
+  }
+
+
+  // Group consecutive images into a grid and open any image full-size on click.
+  //
+  // Only images that are alone in their paragraph are grouped: an image the
+  // author placed inline with text belongs where they put it.
+  function layoutImages(root) {
+    const paras = Array.from(root.querySelectorAll('p'))
+    let run = []
+    const flush = () => {
+      if (run.length > 1) {
+        const grid = document.createElement('div')
+        grid.className = 'md-gallery'
+        run[0].before(grid)
+        run.forEach((p) => grid.appendChild(p.querySelector('img')))
+        run.forEach((p) => p.remove())
+      }
+      run = []
+    }
+    for (const p of paras) {
+      const imgs = p.querySelectorAll('img')
+      const loneImage = imgs.length === 1 && (p.textContent || '').trim() === ''
+      if (loneImage) run.push(p)
+      else flush()
+    }
+    flush()
+
+    root.querySelectorAll('img').forEach((img) => {
+      if (img.dataset.zoomable) return
+      img.dataset.zoomable = '1'
+      img.classList.add('md-zoomable')
+      img.addEventListener('click', () => openLightbox(img.getAttribute('src'), img.getAttribute('alt') || ''))
+    })
+  }
+
+  // A single overlay reused for every image, removed on click or Escape. Kept
+  // deliberately plain: the job is "see it bigger", not a carousel.
+  function openLightbox(src, alt) {
+    if (!src) return
+    const overlay = document.createElement('div')
+    overlay.className = 'md-lightbox'
+    overlay.setAttribute('role', 'dialog')
+    overlay.setAttribute('aria-label', alt || 'Image')
+    const big = document.createElement('img')
+    big.setAttribute('src', src)
+    if (alt) big.setAttribute('alt', alt)
+    overlay.appendChild(big)
+
+    const close = () => {
+      overlay.remove()
+      document.removeEventListener('keydown', onKey)
+    }
+    const onKey = (e) => { if (e.key === 'Escape') close() }
+    overlay.addEventListener('click', close)
+    document.addEventListener('keydown', onKey)
+    document.body.appendChild(overlay)
+  }
+
   function run() {
     disposeCharts()
 
@@ -555,6 +767,9 @@ export function richRenderer(node, value = '') {
         cls.includes('language-mermaid') ||
         cls.includes('language-xychart') ||
         cls.includes('language-chart') ||
+        cls.includes('language-csv') ||
+        cls.includes('language-tsv') ||
+        cls.includes('language-data') ||
         el.dataset.hl
       )
         return
@@ -604,6 +819,33 @@ export function richRenderer(node, value = '') {
         }
       })
     }
+
+    // (5) Images: group a run of them into a gallery and make each one zoomable.
+    //
+    // Several images in a row used to stack vertically at full width, so three
+    // charts meant three screens of scrolling, and a dense one could not be read
+    // at bubble width with no way to enlarge it.
+    layoutImages(node)
+
+    // (4) Render ```csv / ```tsv / ```data fences as real tables.
+    //
+    // A dataset an agent emitted used to arrive as highlighted source: the data
+    // was all there, but you could not scan a column or compare two rows, which
+    // is the entire reason it was put in a table shape to begin with.
+    node.querySelectorAll('code.language-csv, code.language-tsv, code.language-data').forEach((codeEl) => {
+      const pre = codeEl.closest('pre') || codeEl
+      if (pre.dataset.done) return
+      pre.dataset.done = '1'
+      const lang = (codeEl.className || '').replace(/^.*language-/, '').split(/\s/)[0]
+      const table = tableFromFence(lang, codeEl.textContent || '')
+      if (!table) {
+        // Leave the source visible rather than replacing it with an error: the
+        // text is still the data, and the reader can act on it.
+        delete pre.dataset.done
+        return
+      }
+      pre.replaceWith(buildTable(table))
+    })
 
     // (3) Render ```chart JSON fences as interactive ECharts charts.
     node.querySelectorAll('code.language-chart').forEach((codeEl) => {

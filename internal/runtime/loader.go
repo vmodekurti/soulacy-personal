@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -363,6 +364,26 @@ func (l *Loader) SetEnabledInMemory(id string, enabled bool) bool {
 	return true
 }
 
+// agentIDRe is the set of IDs that are safe to use as a directory name and as
+// part of a tool name. Deliberately narrow: an ID is a slug, not a filename.
+var agentIDRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+
+// ValidateAgentID rejects IDs that cannot safely become a path segment.
+//
+// "." and ".." are excluded explicitly even though the pattern would admit them,
+// because both match `[a-z0-9._-]` and both traverse.
+func ValidateAgentID(id string) error {
+	if id == "." || id == ".." {
+		return fmt.Errorf("agent ID %q is not a usable directory name", id)
+	}
+	if !agentIDRe.MatchString(id) {
+		return fmt.Errorf(
+			"agent ID %q is not allowed: use 1-64 characters of a-z, 0-9, '.', '_' or '-', starting with a letter or digit. "+
+				"The ID becomes a folder name and part of every tool name for this agent", id)
+	}
+	return nil
+}
+
 // Upsert writes or overwrites an agent definition to disk and reloads it in memory.
 // Used by the GUI and CLI to persist agent changes without touching the filesystem directly.
 //
@@ -371,6 +392,17 @@ func (l *Loader) SetEnabledInMemory(id string, enabled bool) bool {
 func (l *Loader) Upsert(dir string, def *agent.Definition) error {
 	if def.ID == "" {
 		return fmt.Errorf("agent ID is required")
+	}
+	// The ID becomes a path segment on the very next line, and the ways an ID
+	// gets here are not all typed by a person: the package importer takes it from
+	// an uploaded archive, and Studio derives peer agent IDs from a MODEL-authored
+	// workflow draft. `id: "../../../../root/.ssh"` therefore wrote SOUL.yaml (and
+	// any package files) outside the agent root. agentvalidate only Warned about
+	// path separators, and a Warn does not make a report invalid, so the import
+	// route's validity check passed. Refuse here, at the point where the ID
+	// actually becomes a path — the one place every caller goes through.
+	if err := ValidateAgentID(def.ID); err != nil {
+		return err
 	}
 	if def.ID == SystemAgentID {
 		def.Enabled = true

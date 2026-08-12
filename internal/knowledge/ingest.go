@@ -164,9 +164,9 @@ func ChunkText(text string, size, overlap int) []string {
 //  2. Within each paragraph, advance a rune cursor. When the cursor lands on
 //     '.', '!', or '?', check what follows:
 //     a. Skip any closing quote or paren characters (", ', )) that
-//        conventionally follow the punctuation.
+//     conventionally follow the punctuation.
 //     b. If the character after those is a space, newline, or end-of-string,
-//        treat the punctuation as a sentence boundary and emit the sentence.
+//     treat the punctuation as a sentence boundary and emit the sentence.
 //     c. Otherwise (e.g. "3.14" or "Mr. Smith") advance without splitting.
 //  3. Any remaining text in a paragraph with no terminal punctuation is
 //     emitted as its own sentence fragment.
@@ -353,6 +353,20 @@ type docxBody struct {
 	} `xml:"body"`
 }
 
+// maxDocXMLBytes caps the DECOMPRESSED size of a .docx's document.xml.
+//
+// A .docx is a zip, and every guard on this path measured the COMPRESSED input:
+// fiber's BodyLimit and knowledge.max_document_bytes both apply to the uploaded
+// file. DEFLATE reaches roughly 1000:1 on repetitive input, so a 1 MB upload
+// expanded to ~1 GB inside a single io.ReadAll — from POST /chat/attachments,
+// which needs only the chat permission. The sibling plugin-archive extractor has
+// capped this since it was written (see plugininstall/archive.go); this path was
+// simply missed.
+//
+// 32 MB of XML is a document of several thousand pages. Anything past that is
+// not a document anyone is trying to read.
+const maxDocXMLBytes = 32 << 20
+
 func extractDOCX(data []byte) (string, error) {
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
@@ -361,14 +375,23 @@ func extractDOCX(data []byte) (string, error) {
 	var docXML []byte
 	for _, f := range zr.File {
 		if f.Name == "word/document.xml" {
+			// The declared size is checked first so an obvious bomb costs nothing
+			// to reject; the LimitReader below is what actually holds, because the
+			// header is attacker-controlled and can lie.
+			if f.UncompressedSize64 > maxDocXMLBytes {
+				return "", fmt.Errorf("docx: document.xml declares %d bytes, over the %d byte limit", f.UncompressedSize64, maxDocXMLBytes)
+			}
 			rc, err := f.Open()
 			if err != nil {
 				return "", fmt.Errorf("docx: open document.xml: %w", err)
 			}
-			docXML, err = io.ReadAll(rc)
+			docXML, err = io.ReadAll(io.LimitReader(rc, maxDocXMLBytes+1))
 			rc.Close()
 			if err != nil {
 				return "", err
+			}
+			if len(docXML) > maxDocXMLBytes {
+				return "", fmt.Errorf("docx: document.xml expands past the %d byte limit", maxDocXMLBytes)
 			}
 			break
 		}

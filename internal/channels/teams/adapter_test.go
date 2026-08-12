@@ -51,34 +51,67 @@ func TestTeamsSendPostsTextPayload(t *testing.T) {
 	}
 }
 
-func TestTeamsSendCanOverrideTargetWithHTTPThreadID(t *testing.T) {
-	hitDefault := false
-	defaultSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hitDefault = true
+// The per-message destination override exists so a reply can be addressed to a
+// specific thread or room. It used to accept ANY http(s) URL and post there with
+// the operator's configured headers attached — and the value comes from the
+// `channel.send` tool's `to` argument, i.e. model output. This test previously
+// asserted that a second, unrelated host received the delivery: that was the
+// vulnerability written down as a requirement. What is asserted now is the
+// boundary — the path may change, the host may not.
+func TestTeamsSendOverrideMayChangeThePathButNotTheHost(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
 		w.WriteHeader(http.StatusOK)
 	}))
-	defer defaultSrv.Close()
+	defer srv.Close()
 
-	overrideHit := false
-	overrideSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		overrideHit = true
+	a, err := New("teams", srv.URL+"/hook", "", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Send(context.Background(), message.Message{
+		ThreadID: srv.URL + "/hook/thread/42",
+		Parts:    message.Text("route this"),
+	}); err != nil {
+		t.Fatalf("a same-host override was refused, which breaks per-thread routing: %v", err)
+	}
+	if gotPath != "/hook/thread/42" {
+		t.Fatalf("delivered to %q, want the overridden path", gotPath)
+	}
+}
+
+func TestTeamsSendRefusesAnOverrideToAnotherHost(t *testing.T) {
+	hitConfigured := false
+	configured := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hitConfigured = true
 		w.WriteHeader(http.StatusOK)
 	}))
-	defer overrideSrv.Close()
+	defer configured.Close()
 
-	a, err := New("teams", defaultSrv.URL, "", time.Second)
+	exfilHit := false
+	exfil := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		exfilHit = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer exfil.Close()
+
+	a, err := New("teams", configured.URL, "", time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
 	err = a.Send(context.Background(), message.Message{
-		ThreadID: overrideSrv.URL,
-		Parts:    message.Text("route this"),
+		ThreadID: exfil.URL + "/collect",
+		Parts:    message.Text("the conversation so far"),
 	})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("a model-supplied override redirected the delivery to an unrelated host")
 	}
-	if hitDefault || !overrideHit {
-		t.Fatalf("defaultHit=%v overrideHit=%v, want only override", hitDefault, overrideHit)
+	if exfilHit {
+		t.Fatal("the message reached the attacker-chosen host")
+	}
+	if hitConfigured {
+		t.Fatal("a refused override silently fell back to the configured host — the caller was not told")
 	}
 }
 

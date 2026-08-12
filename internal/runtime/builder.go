@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -101,6 +102,7 @@ func (e *Engine) BuilderChat(ctx context.Context, sessionID, message, provider, 
 
 	sess.mu.Lock()
 	sess.History = append(sess.History, llm.ChatMessage{Role: "user", Content: message})
+	trimBuilderHistoryLocked(sess)
 	msgs := buildBuilderMessages(sess.History)
 	if catalog != "" {
 		// Inject AFTER the system prompt, BEFORE the conversation history, so
@@ -135,6 +137,7 @@ func (e *Engine) BuilderChat(ctx context.Context, sessionID, message, provider, 
 
 	sess.mu.Lock()
 	sess.History = append(sess.History, llm.ChatMessage{Role: "assistant", Content: resp.Content})
+	trimBuilderHistoryLocked(sess)
 	if understanding != nil {
 		sess.Understanding = understanding
 	}
@@ -181,12 +184,77 @@ func (e *Engine) DeleteBuilderSession(sessionID string) {
 
 // ── Builder session management ────────────────────────────────────────────────
 
+// Builder sessions are keyed by a CLIENT-SUPPLIED session id and were only ever
+// removed by an explicit DELETE. LastActive was written on every turn and read
+// nowhere; the package doc above promised a 2-hour expiry that did not exist. A
+// caller holding builder:write could therefore pin unbounded memory by varying
+// the id, and History grew without limit within a single session because the
+// user message is appended BEFORE the LLM call — so even a failing provider
+// still cost memory per request.
+const (
+	builderSessionTTL      = 2 * time.Hour
+	maxBuilderSessions     = 200
+	maxBuilderHistoryTurns = 60 // 30 exchanges; the Blueprint is summarised, not replayed
+)
+
 func (e *Engine) getOrCreateBuilderSession(id string) *builderSession {
+	e.sweepBuilderSessions()
 	val, _ := e.builderSessions.LoadOrStore(id, &builderSession{
 		ID:         id,
 		LastActive: time.Now(),
 	})
-	return val.(*builderSession)
+	sess := val.(*builderSession)
+	sess.mu.Lock()
+	sess.LastActive = time.Now()
+	sess.mu.Unlock()
+	return sess
+}
+
+// sweepBuilderSessions drops sessions idle past the TTL, and — if the map is
+// still over the cap after that — the least recently active ones. The cap is the
+// part that actually bounds memory: a caller can create sessions far faster than
+// the TTL retires them.
+func (e *Engine) sweepBuilderSessions() {
+	type aged struct {
+		id   string
+		last time.Time
+	}
+	cutoff := time.Now().Add(-builderSessionTTL)
+	var live []aged
+	e.builderSessions.Range(func(k, v any) bool {
+		sess, ok := v.(*builderSession)
+		if !ok {
+			return true
+		}
+		sess.mu.Lock()
+		last := sess.LastActive
+		sess.mu.Unlock()
+		if last.Before(cutoff) {
+			e.builderSessions.Delete(k)
+			return true
+		}
+		if id, ok := k.(string); ok {
+			live = append(live, aged{id: id, last: last})
+		}
+		return true
+	})
+	// Note the "-1" and the "<": the sweep runs BEFORE the caller inserts, so it
+	// has to leave room for the session about to be created. Trimming to exactly
+	// maxBuilderSessions here means the map settles at maxBuilderSessions+1.
+	if len(live) < maxBuilderSessions {
+		return
+	}
+	sort.Slice(live, func(i, j int) bool { return live[i].last.Before(live[j].last) })
+	for _, a := range live[:len(live)-maxBuilderSessions+1] {
+		e.builderSessions.Delete(a.id)
+	}
+}
+
+// trimBuilderHistoryLocked keeps the most recent turns. Caller holds sess.mu.
+func trimBuilderHistoryLocked(sess *builderSession) {
+	if len(sess.History) > maxBuilderHistoryTurns {
+		sess.History = append([]llm.ChatMessage(nil), sess.History[len(sess.History)-maxBuilderHistoryTurns:]...)
+	}
 }
 
 func buildBuilderMessages(history []llm.ChatMessage) []llm.ChatMessage {

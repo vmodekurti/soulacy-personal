@@ -900,6 +900,9 @@ func (e *Engine) maybeConfirm(ctx context.Context, def *agent.Definition, call m
 		Tool:   call.Name,
 		Args:   call.Arguments,
 	})
+	// Resolve deletes the pending entry; a run that ends without an answer must
+	// clean up after itself, or the approval sits in the broker forever.
+	defer e.Broker().Forget(callID)
 
 	select {
 	case approved := <-resultCh:
@@ -938,6 +941,7 @@ func (e *Engine) dynamicConfirm(ctx context.Context, def *agent.Definition, call
 		Args:   call.Arguments,
 		Reason: reason,
 	})
+	defer e.Broker().Forget(callID)
 
 	select {
 	case approved := <-resultCh:
@@ -1430,11 +1434,23 @@ func (e *Engine) buildSemanticMemoryBuiltin() BuiltinTool {
 //
 // SAFE (read-only, always on): read_file, list_dir, find_files, fetch_url,
 //
-//	http_request, env_get, sys_info. (http_request can POST, but it cannot
+//	http_request, sys_info. (http_request can POST, but it cannot
 //	touch the local filesystem or spawn processes; it is governed instead by
 //	SSRF protection + per-agent confirm_tools, so it stays in the SAFE set.)
 var privilegedSystemTools = map[string]bool{
-	"shell_exec":      true,
+	"shell_exec": true,
+	// python_eval runs `python3 -c <whatever the model wrote>`. That is the same
+	// capability as shell_exec wearing a different hat, and it sat in the SAFE
+	// partition — offered to every agent, with no capability and no
+	// allow_system_agents entry required, and dispatched without the
+	// deterministic guardrail that privileged tools get.
+	//
+	// Studio already knew. internal/studio/validate.go lists python_eval in
+	// gatedSystemTools and says it "mirrors the runtime's privilegedSystemTools
+	// plus python_eval" — the divergence was written down as though it were a
+	// deliberate superset rather than the runtime missing a gate. The parity
+	// test in enginetoolparity_test.go now fails if the two lists drift again.
+	"python_eval":     true,
 	"run_script":      true,
 	"install_library": true,
 	"write_file":      true,
@@ -5675,15 +5691,19 @@ func (e *Engine) deterministicGuardrail(ctx context.Context, def *agent.Definiti
 		return GuardrailActionConfirm, fmt.Sprintf("Writing to file outside workspace: %s", targetPath), nil
 
 	case "run_script":
+		// No isPathSafe here, deliberately. isPathSafe answers "is it safe to
+		// WRITE here" — /tmp and the workspace are scratch space, so a write there
+		// is unremarkable. Reusing it to decide whether to EXECUTE turned the two
+		// calls into a confirmation bypass: write_file{path:"/tmp/x.sh"} is SAFE,
+		// then run_script{path:"/tmp/x.sh"} is SAFE, and the pair is exactly
+		// shell_exec — which this same function confirms unconditionally, three
+		// cases below. Where the script sits says nothing about what it does; the
+		// agent wrote it a moment ago.
 		var targetPath string
 		if p, ok := call.Arguments["path"].(string); ok {
 			targetPath = p
 		}
-
-		if targetPath != "" && isPathSafe(targetPath, ws) {
-			return GuardrailActionSafe, "", nil
-		}
-		return GuardrailActionConfirm, fmt.Sprintf("Executing script outside workspace: %s", targetPath), nil
+		return GuardrailActionConfirm, fmt.Sprintf("Executing a script is arbitrary code execution: %s", targetPath), nil
 
 	case "install_library":
 		// Installing global/environment packages always requires confirmation

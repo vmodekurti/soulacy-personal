@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/soulacy/soulacy/internal/sandbox"
 )
 
 // SetAgentShellEnv sets extra KEY=VALUE entries exposed to shell_exec /
@@ -24,13 +26,25 @@ func (e *Engine) SetAgentShellEnv(extra []string) {
 }
 
 // shellEnviron returns the environment for an agent shell subprocess: the
-// process env plus the canonical-path hints. Returns nil (inherit unchanged)
-// when no extras are configured, preserving prior behaviour.
+// SEC-5 allowlist (PATH/HOME/LANG/TMPDIR) plus the canonical-path hints.
+//
+// It used to return os.Environ() — or nil, which exec.Cmd treats as "inherit
+// everything" — so shell_exec, run_script, python_eval and install_library all
+// ran with the gateway's full environment. `env` was a working exfiltration
+// primitive for ANTHROPIC_API_KEY, OPENAI_API_KEY, database URLs and anything
+// else the operator exported.
+//
+// The allowlist it now uses is the same one internal/sandbox/env.go already
+// applied to the agent Python path, whose comment states the goal outright:
+// "most importantly gateway secrets such as ANTHROPIC_API_KEY … is withheld".
+// One half of the codebase enforced that and the other did not.
+//
+// agentShellEnv entries are KEY=VALUE pairs the gateway sets deliberately
+// (SOULACY_WORKSPACE and friends), so they are appended after filtering rather
+// than looked up in the parent environment.
 func (e *Engine) shellEnviron() []string {
-	if len(e.agentShellEnv) == 0 {
-		return nil
-	}
-	return append(os.Environ(), e.agentShellEnv...)
+	env := sandbox.FilteredEnv(os.Environ(), nil)
+	return append(env, e.agentShellEnv...)
 }
 
 // buildShellTools returns the shell-domain OS-level built-in tools. Extracted
