@@ -481,9 +481,16 @@ func TestBuiltinDownloadFile_SSRFBlocksMetadata(t *testing.T) {
 // env_get / sys_info — read-only introspection tools
 // ---------------------------------------------------------------------------
 
+// These two used to assert that env_get returns ANY environment variable —
+// which was the tool reading os.Environ() unrestricted, and is the hole that
+// made ANTHROPIC_API_KEY a single tool call away. They were testing that the
+// tool worked, not protecting a requirement, so they now state the boundary
+// instead. See envget_test.go for the leak cases.
+
 func TestBuiltinEnvGet_NamedVariable(t *testing.T) {
 	e := newMinimalEngine(t)
-	t.Setenv("SOULACY_TEST_VAR", "pinned-value")
+	// A variable the gateway deliberately exposes is readable...
+	e.SetAgentShellEnv([]string{"SOULACY_TEST_VAR=pinned-value"})
 	tool := systemTool(t, e, "env_get")
 	out, err := tool.Handler(context.Background(), map[string]any{"name": "SOULACY_TEST_VAR"})
 	if err != nil {
@@ -494,6 +501,20 @@ func TestBuiltinEnvGet_NamedVariable(t *testing.T) {
 	}
 }
 
+func TestBuiltinEnvGet_UndeclaredVariableIsNotReadable(t *testing.T) {
+	e := newMinimalEngine(t)
+	// ...while one merely present in the gateway's own environment is not.
+	t.Setenv("SOULACY_TEST_VAR", "pinned-value")
+	tool := systemTool(t, e, "env_get")
+	out, err := tool.Handler(context.Background(), map[string]any{"name": "SOULACY_TEST_VAR"})
+	if err != nil {
+		t.Fatalf("env_get: %v", err)
+	}
+	if strings.Contains(out, "pinned-value") {
+		t.Errorf("an undeclared gateway variable was readable: %q", out)
+	}
+}
+
 func TestBuiltinEnvGet_UnsetVariable(t *testing.T) {
 	e := newMinimalEngine(t)
 	tool := systemTool(t, e, "env_get")
@@ -501,8 +522,8 @@ func TestBuiltinEnvGet_UnsetVariable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("env_get: %v", err)
 	}
-	if !strings.Contains(out, "(not set)") {
-		t.Errorf("env_get unset = %q, want '(not set)'", out)
+	if !strings.Contains(out, "not set") {
+		t.Errorf("env_get unset = %q, want it to report the variable as unavailable", out)
 	}
 }
 

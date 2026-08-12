@@ -129,8 +129,13 @@ func Definition(def *agent.Definition, path string, opts Options, report Report)
 func validateDefinitionShape(report *Report, def *agent.Definition, path string) {
 	if strings.TrimSpace(def.ID) == "" {
 		report.add(Error, "id", "required", "", nil)
-	} else if strings.ContainsAny(def.ID, "/\\ \t\n\r") {
-		report.add(Warn, "id", "avoid whitespace and path separators; the ID is used in file paths and tool names", "", nil)
+	} else if strings.ContainsAny(def.ID, "/\\ \t\n\r") || def.ID == "." || def.ID == ".." {
+		// Error, not Warn. report.Valid is `Errors == 0`, so a Warn here let the
+		// package importer's `if !inspected.Validation.Valid` check pass on an ID
+		// like "../../../root/.ssh" — which then became a directory name. The
+		// loader now refuses these too; this is the earlier, clearer stop, and it
+		// names the field the operator has to change.
+		report.add(Error, "id", "must not contain whitespace or path separators: the ID becomes a folder name and part of every tool name for this agent", "", nil)
 	}
 	if def.Trigger == "" {
 		report.add(Warn, "trigger", "not set; runtime defaults may not match the intended activation mode", "", nil)

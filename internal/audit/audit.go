@@ -43,22 +43,57 @@ type Entry struct {
 // redacted before they are written to disk.
 var secretPattern = regexp.MustCompile(`(?i)(api[_-]?key|password|secret|token|credential|auth)`)
 
-// redactArgs returns a shallow copy of args with secret values replaced by
-// "[REDACTED]". Only string values are inspected; nested objects are left
-// as-is to avoid deep-copying large structures.
+// maxRedactDepth bounds the walk below. Tool arguments are JSON the model
+// produced, so a pathological nesting depth is possible; 12 is far past anything
+// a real tool call uses.
+const maxRedactDepth = 12
+
+// redactArgs copies args with secret-looking values replaced by "[REDACTED]".
+//
+// It used to inspect only TOP-LEVEL keys, on the stated reasoning that
+// deep-copying large structures was wasteful. But arguments carrying credentials
+// are almost never flat: an http_request call puts its bearer token in
+// {"headers":{"Authorization":"…"}}, and an MCP tool call nests everything under
+// an object. The redaction therefore ran, matched nothing, and wrote the token
+// into the audit log — which is precisely the file an operator ships to someone
+// else when asking for help.
 func redactArgs(args map[string]any) map[string]any {
 	if len(args) == 0 {
 		return args
 	}
-	out := make(map[string]any, len(args))
-	for k, v := range args {
+	return redactMap(args, 0)
+}
+
+func redactMap(in map[string]any, depth int) map[string]any {
+	out := make(map[string]any, len(in))
+	for k, v := range in {
 		if secretPattern.MatchString(k) {
 			out[k] = "[REDACTED]"
-		} else {
-			out[k] = v
+			continue
 		}
+		out[k] = redactValue(v, depth)
 	}
 	return out
+}
+
+func redactValue(v any, depth int) any {
+	if depth >= maxRedactDepth {
+		// Too deep to keep walking. Returning the value unexamined would defeat
+		// the point, so the subtree is dropped instead.
+		return "[REDACTED: too deeply nested to inspect]"
+	}
+	switch t := v.(type) {
+	case map[string]any:
+		return redactMap(t, depth+1)
+	case []any:
+		out := make([]any, len(t))
+		for i, item := range t {
+			out[i] = redactValue(item, depth+1)
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 // Logger writes audit entries to a per-session JSONL file under dir.

@@ -19,6 +19,14 @@ import (
 
 // buildHTTPTools returns the http-domain OS-level built-in tools. Extracted
 // from buildSystemTools (ARCH-2) — identical definitions, no behaviour change.
+// maxDownloadBytes caps what download_file will write to disk in one call.
+// 512 MB is far past any legitimate artefact an agent fetches and far short of
+// filling a host volume.
+//
+// A var rather than a const purely so a test can exercise the limit without
+// moving half a gigabyte. Nothing in the running system writes it.
+var maxDownloadBytes int64 = 512 << 20
+
 func (e *Engine) buildHTTPTools() []BuiltinTool {
 	return []BuiltinTool{
 		{
@@ -88,7 +96,7 @@ func (e *Engine) buildHTTPTools() []BuiltinTool {
 				httpReq.Header.Set("User-Agent", "Soulacy/1.0")
 				httpReq.Header.Set("Accept", "text/plain, text/html, */*")
 
-				client := &http.Client{Timeout: 30 * time.Second}
+				client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: e.ssrfRedirectHook()}
 				resp, err := client.Do(httpReq)
 				if err != nil {
 					return "", fmt.Errorf("fetch_url: request failed: %w", err)
@@ -199,7 +207,7 @@ func (e *Engine) buildHTTPTools() []BuiltinTool {
 					}
 				}
 
-				client := &http.Client{Timeout: 30 * time.Second}
+				client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: e.ssrfRedirectHook()}
 				resp, err := client.Do(req)
 				if err != nil {
 					return "", fmt.Errorf("http_request: request failed: %w", err)
@@ -276,7 +284,7 @@ func (e *Engine) buildHTTPTools() []BuiltinTool {
 				}
 				req.Header.Set("User-Agent", "Soulacy/1.0")
 
-				client := &http.Client{Timeout: 5 * time.Minute} // longer timeout for large files
+				client := &http.Client{Timeout: 5 * time.Minute, CheckRedirect: e.ssrfRedirectHook()} // longer timeout for large files
 				resp, err := client.Do(req)
 				if err != nil {
 					return "", fmt.Errorf("download_file: request failed: %w", err)
@@ -293,9 +301,19 @@ func (e *Engine) buildHTTPTools() []BuiltinTool {
 				}
 				defer f.Close()
 
-				n, err := io.Copy(f, resp.Body)
+				// Bounded, unlike before: the only limit used to be the client's
+				// 5-minute timeout, which on a fast link is tens of gigabytes onto
+				// the host disk. The URL comes from model output, so a prompt-injected
+				// page could pick the target. fetch_url and http_request above have
+				// both always capped their reads; this one did not.
+				n, err := io.Copy(f, io.LimitReader(resp.Body, maxDownloadBytes+1))
 				if err != nil {
 					return "", fmt.Errorf("download_file: write: %w", err)
+				}
+				if n > maxDownloadBytes {
+					_ = f.Close()
+					_ = os.Remove(destPath)
+					return "", fmt.Errorf("download_file: response exceeds the %d byte limit", maxDownloadBytes)
 				}
 				return fmt.Sprintf("Downloaded %d bytes → %s", n, destPath), nil
 			},

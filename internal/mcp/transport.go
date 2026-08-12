@@ -57,6 +57,10 @@ type rpcError struct {
 	Data    any    `json:"data,omitempty"`
 }
 
+// maxHTTPResponseBytes caps a single JSON-RPC response read over the HTTP
+// transport, matching the 16 MB budget the stdio scanner already uses.
+const maxHTTPResponseBytes = 16 << 20
+
 func jsonUnmarshal(data []byte, v any) error {
 	if len(data) == 0 {
 		return fmt.Errorf("empty payload")
@@ -71,8 +75,15 @@ type stdioTx struct {
 	stdin   io.WriteCloser
 	log     *zap.Logger
 	nextID  atomic.Int64
-	mu      sync.Mutex
+	mu      sync.Mutex // guards pending ONLY
 	pending map[int64]chan rpcMsg
+	// writeMu serialises writes to the child's stdin. It is deliberately NOT mu:
+	// holding mu across a blocking Write deadlocks the transport. Cycle: this
+	// goroutine holds mu writing a large request into a full stdin pipe; the
+	// child is not draining stdin because it is blocked writing a large response
+	// into a full stdout pipe; readLoop cannot drain stdout because it needs mu
+	// to dispatch. Two mutexes, no cycle.
+	writeMu sync.Mutex
 	closed  atomic.Bool
 }
 
@@ -181,9 +192,9 @@ func (t *stdioTx) request(ctx context.Context, method string, params any) (json.
 		m["params"] = params
 	}
 	payload, _ := json.Marshal(m)
-	t.mu.Lock()
+	t.writeMu.Lock()
 	_, err := t.stdin.Write(append(payload, '\n'))
-	t.mu.Unlock()
+	t.writeMu.Unlock()
 	if err != nil {
 		t.mu.Lock()
 		delete(t.pending, id)
@@ -217,8 +228,8 @@ func (t *stdioTx) notify(method string, params any) error {
 		m["params"] = params
 	}
 	payload, _ := json.Marshal(m)
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.writeMu.Lock()
+	defer t.writeMu.Unlock()
 	_, err := t.stdin.Write(append(payload, '\n'))
 	return err
 }
@@ -287,7 +298,10 @@ func (t *httpTx) request(ctx context.Context, method string, params any) (json.R
 		t.sessionID.Store(&sid)
 	}
 
-	body, _ := io.ReadAll(resp.Body)
+	// Bounded to the same budget as the stdio scanner below. An MCP server is
+	// third-party code by definition — a compromised or simply broken one should
+	// not be able to exhaust the gateway's memory with one oversized response.
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxHTTPResponseBytes))
 	if resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("http %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}

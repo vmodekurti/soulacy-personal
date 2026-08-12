@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/gofiber/fiber/v2"
+	"github.com/golang-jwt/jwt/v5"
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/auth/apikeys"
@@ -73,12 +73,12 @@ func (c *Config) applyDefaults() {
 //	                       (3) validates OIDC-provider JWTs when oidc_issuer is set.
 //	                       Tokens carry Claims (sub, email, role) for downstream RBAC.
 type Engine struct {
-	cfg          Config
-	staticKey    string         // server.api_key; always checked, any mode
-	issuer       *Issuer        // non-nil when cfg.Mode == "jwt"
-	oidc         *OIDCValidator // non-nil when cfg.OIDCIssuer != ""
-	log          *zap.Logger
-	apiKeyStore  apikeys.Store  // non-nil when managed API keys are enabled
+	cfg         Config
+	staticKey   string         // server.api_key; always checked, any mode
+	issuer      *Issuer        // non-nil when cfg.Mode == "jwt"
+	oidc        *OIDCValidator // non-nil when cfg.OIDCIssuer != ""
+	log         *zap.Logger
+	apiKeyStore apikeys.Store // non-nil when managed API keys are enabled
 }
 
 // SetAPIKeyStore wires the managed API key store. When set, tokens with the
@@ -171,6 +171,11 @@ func (e *Engine) Middleware() fiber.Handler {
 					Email:            ak.Name,
 					Role:             "operator",
 					Kind:             "access",
+					// Carry the key's stored scopes so RBAC can honour them.
+					// They were persisted and echoed back but never enforced, so
+					// every sk_ key was a full operator whatever it was minted
+					// with.
+					Scopes: ak.Scopes,
 				})
 				return c.Next()
 			}

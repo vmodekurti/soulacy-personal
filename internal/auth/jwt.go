@@ -137,7 +137,15 @@ func newRefreshStore() *refreshStore {
 // put stores a new refresh token and returns the opaque token string.
 func (s *refreshStore) put(subject, email, role string, exp time.Time) string {
 	b := make([]byte, 32)
-	rand.Read(b) //nolint:errcheck — crypto/rand.Read never errors on supported OS
+	if _, err := rand.Read(b); err != nil {
+		// Unreachable on any supported OS — but the failure mode if it ever were
+		// reachable is a refresh token built from 32 zero bytes, i.e. the same
+		// token for every session. That must never be papered over with a nolint,
+		// which is what used to be here (and with malformed syntax at that: an
+		// em-dash is not a comment separator, so golangci read the explanation as
+		// a list of linter names).
+		panic("auth: crypto/rand unavailable, refusing to mint a predictable refresh token: " + err.Error())
+	}
 	tok := hex.EncodeToString(b)
 	s.mu.Lock()
 	s.tokens[tok] = refreshEntry{subject: subject, email: email, role: role, expiresAt: exp}

@@ -1047,7 +1047,12 @@ func (s *Server) buildApp() *fiber.App {
 	credAPI := credentials.NewLazyAPI(s, s.log)
 	api.Post("/credentials/:agentID", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), credAPI.HandleSet)
 	api.Get("/credentials/:agentID", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), credAPI.HandleList)
-	api.Get("/credentials/:agentID/:key", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), credAPI.HandleGet)
+	// Reading a DECRYPTED vault value is an act of trust on the level of writing
+	// one, not of listing agents. Under agents:read the viewer role — whose whole
+	// purpose is look-but-don't-touch — could GET the plaintext of any stored
+	// credential, which defeats the point of encrypting the vault at all.
+	// Listing key NAMES stays on read; fetching a VALUE requires write.
+	api.Get("/credentials/:agentID/:key", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), credAPI.HandleGet)
 	api.Delete("/credentials/:agentID/:key", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), credAPI.HandleDelete)
 	// Credential rotation (type-assert to VersionedVault at request time)
 	api.Post("/credentials/:agentID/:key/rotate", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), func(c *fiber.Ctx) error {

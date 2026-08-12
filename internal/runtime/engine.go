@@ -900,6 +900,9 @@ func (e *Engine) maybeConfirm(ctx context.Context, def *agent.Definition, call m
 		Tool:   call.Name,
 		Args:   call.Arguments,
 	})
+	// Resolve deletes the pending entry; a run that ends without an answer must
+	// clean up after itself, or the approval sits in the broker forever.
+	defer e.Broker().Forget(callID)
 
 	select {
 	case approved := <-resultCh:
@@ -938,6 +941,7 @@ func (e *Engine) dynamicConfirm(ctx context.Context, def *agent.Definition, call
 		Args:   call.Arguments,
 		Reason: reason,
 	})
+	defer e.Broker().Forget(callID)
 
 	select {
 	case approved := <-resultCh:
@@ -5687,15 +5691,19 @@ func (e *Engine) deterministicGuardrail(ctx context.Context, def *agent.Definiti
 		return GuardrailActionConfirm, fmt.Sprintf("Writing to file outside workspace: %s", targetPath), nil
 
 	case "run_script":
+		// No isPathSafe here, deliberately. isPathSafe answers "is it safe to
+		// WRITE here" — /tmp and the workspace are scratch space, so a write there
+		// is unremarkable. Reusing it to decide whether to EXECUTE turned the two
+		// calls into a confirmation bypass: write_file{path:"/tmp/x.sh"} is SAFE,
+		// then run_script{path:"/tmp/x.sh"} is SAFE, and the pair is exactly
+		// shell_exec — which this same function confirms unconditionally, three
+		// cases below. Where the script sits says nothing about what it does; the
+		// agent wrote it a moment ago.
 		var targetPath string
 		if p, ok := call.Arguments["path"].(string); ok {
 			targetPath = p
 		}
-
-		if targetPath != "" && isPathSafe(targetPath, ws) {
-			return GuardrailActionSafe, "", nil
-		}
-		return GuardrailActionConfirm, fmt.Sprintf("Executing script outside workspace: %s", targetPath), nil
+		return GuardrailActionConfirm, fmt.Sprintf("Executing a script is arbitrary code execution: %s", targetPath), nil
 
 	case "install_library":
 		// Installing global/environment packages always requires confirmation

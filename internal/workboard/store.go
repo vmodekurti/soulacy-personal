@@ -298,8 +298,20 @@ func (s *Store) Update(ctx context.Context, id int64, u Update) (Task, error) {
 }
 
 // Delete removes a task and its run history, or returns ErrNotFound.
+//
+// One transaction, because the parent row went first and the four statements ran
+// independently: an error (or a crash) after the first left runs, artifacts and
+// comments pointing at a task id that no longer existed — invisible rows that
+// nothing lists and nothing cleans up. Every other multi-statement write in this
+// package is already transactional.
 func (s *Store) Delete(ctx context.Context, id int64) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM workboard_tasks WHERE id = ?`, id)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }() // no-op once Commit has succeeded
+
+	res, err := tx.ExecContext(ctx, `DELETE FROM workboard_tasks WHERE id = ?`, id)
 	if err != nil {
 		return err
 	}
@@ -310,14 +322,16 @@ func (s *Store) Delete(ctx context.Context, id int64) error {
 	if n == 0 {
 		return ErrNotFound
 	}
-	if _, err = s.db.ExecContext(ctx, `DELETE FROM workboard_runs WHERE task_id = ?`, id); err != nil {
-		return err
+	for _, stmt := range []string{
+		`DELETE FROM workboard_runs WHERE task_id = ?`,
+		`DELETE FROM workboard_artifacts WHERE task_id = ?`,
+		`DELETE FROM workboard_comments WHERE task_id = ?`,
+	} {
+		if _, err := tx.ExecContext(ctx, stmt, id); err != nil {
+			return err
+		}
 	}
-	if _, err = s.db.ExecContext(ctx, `DELETE FROM workboard_artifacts WHERE task_id = ?`, id); err != nil {
-		return err
-	}
-	_, err = s.db.ExecContext(ctx, `DELETE FROM workboard_comments WHERE task_id = ?`, id)
-	return err
+	return tx.Commit()
 }
 
 // Close closes the DB.

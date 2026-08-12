@@ -324,9 +324,14 @@ func (c *Client) ReadScratchFile(relPath string) (string, error) {
 	if scratch == "" {
 		return "", fmt.Errorf("extstorage: scratch directory not initialized")
 	}
-	// Prevent directory traversal
-	path := filepath.Clean(filepath.Join(scratch, relPath))
-	if !strings.HasPrefix(path, filepath.Clean(scratch)) {
+	// Prevent directory traversal. The separator on the prefix is the whole
+	// point: without it, "/…/scratch-abc" is a prefix of "/…/scratch-abcdef", so
+	// a sibling directory whose name merely EXTENDS the scratch dir's passes the
+	// check. plugininstall/archive.go and gateway/plugins.go both terminate the
+	// prefix for this reason; this one did not.
+	base := filepath.Clean(scratch)
+	path := filepath.Clean(filepath.Join(base, relPath))
+	if path != base && !strings.HasPrefix(path, base+string(os.PathSeparator)) {
 		return "", fmt.Errorf("extstorage: content file escapes scratch directory")
 	}
 	b, err := os.ReadFile(path)

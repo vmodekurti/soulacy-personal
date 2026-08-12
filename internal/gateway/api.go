@@ -1112,15 +1112,26 @@ func (s *Server) handleChatStream(c *fiber.Ctx) error {
 	}
 
 	// Decouple the client connection lifetime from background execution.
+	//
+	// NOTE: no `defer cancel()` and no `defer s.runReg.Done()` here. Fiber hands
+	// the connection to the stream writer below and this handler RETURNS
+	// IMMEDIATELY — a handler-scoped defer therefore fired before the writer, and
+	// before the engine goroutine's first LLM call, had got anywhere. Every
+	// streamed chat died a few hundred microseconds in with nothing on the wire
+	// but the opening `run` event, and POST /chat/cancel could never find the run
+	// because it had already been deregistered.
+	//
+	// This is the same bug, and the same fix, as studioDesignGraph's generate
+	// stream (see studio.go). Ownership belongs to the two places that actually
+	// know the run is over: the producer goroutine (work finished) and the stream
+	// writer (client went away).
 	runCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Context()), resolveRunTimeout(def))
-	defer cancel()
 
 	// Register this run so it can be cancelled mid-flight (Story #22). The id is
 	// emitted to the client below as a "run" event; POST /chat/cancel cancels it.
 	runID := msg.ID
 	if s.runReg != nil {
 		s.runReg.Register(runID, cancel)
-		defer s.runReg.Done(runID)
 	}
 
 	// sseEvent is the unified event type for the SSE stream.
@@ -1157,6 +1168,17 @@ func (s *Server) handleChatStream(c *fiber.Ctx) error {
 	})
 
 	go func() {
+		// The run is over when this goroutine returns, whatever happened — so
+		// this is where the registry entry is released and the run context torn
+		// down. Deferred LIFO: the final frame is queued by the body below, then
+		// the channel closes so the writer's range terminates, then the context
+		// is released.
+		defer func() {
+			cancel()
+			if s.runReg != nil {
+				s.runReg.Done(runID)
+			}
+		}()
 		defer close(events)
 		_, err := s.engine.Handle(streamCtx, msg)
 		if err != nil {
@@ -1180,6 +1202,11 @@ func (s *Server) handleChatStream(c *fiber.Ctx) error {
 
 	c.Context().SetBodyStreamWriter(fasthttp.StreamWriter(func(w *bufio.Writer) {
 		// Tell the client the run id up front so it can cancel this run (#22).
+		// A failed flush is the ONLY signal that the client went away once the
+		// connection has been handed to the stream writer. Cancelling the run then
+		// stops work nobody is waiting for, instead of burning model tokens for a
+		// closed tab.
+		defer cancel()
 		fmt.Fprintf(w, "event: run\ndata: {\"run_id\":%q}\n\n", runID) //nolint:errcheck
 		w.Flush()                                                      //nolint:errcheck
 		for ev := range events {
@@ -1187,7 +1214,14 @@ func (s *Server) handleChatStream(c *fiber.Ctx) error {
 				fmt.Fprintf(w, "event: %s\n", ev.Event) //nolint:errcheck
 			}
 			fmt.Fprintf(w, "data: %s\n\n", ev.Data) //nolint:errcheck
-			w.Flush()                               //nolint:errcheck
+			if err := w.Flush(); err != nil {
+				cancel()
+				// Keep draining: the producer's sends must not block on a channel
+				// nobody is reading, or its goroutine leaks holding a session lock.
+				for range events {
+				}
+				return
+			}
 		}
 	}))
 
@@ -2861,7 +2895,47 @@ func (s *Server) handleListMCP(c *fiber.Ctx) error {
 	if s.mcp == nil {
 		return c.JSON(fiber.Map{"servers": []any{}, "note": "MCP not initialised"})
 	}
-	return c.JSON(fiber.Map{"servers": s.mcp.ServersSnapshot()})
+	return c.JSON(fiber.Map{"servers": redactMCPServers(s.mcp.ServersSnapshot())})
+}
+
+// redactMCPServers masks the credential-bearing fields of an MCP server before
+// the status list leaves the process.
+//
+// An MCP server is configured with `env` and `headers` — which is where its
+// GITHUB_TOKEN or `Authorization: Bearer sk-…` lives — and the snapshot
+// returned them verbatim to anyone holding mcp:read, a permission the VIEWER
+// role has. The channels list and the providers list have both redacted for
+// this exact reason (see safeChannelsView); the MCP list did not.
+//
+// Names are kept and values masked: an operator debugging a server needs to see
+// THAT a token is configured, never what it is.
+func redactMCPServers(servers []mcp.ServerStatus) []mcp.ServerStatus {
+	out := make([]mcp.ServerStatus, 0, len(servers))
+	for _, srv := range servers {
+		srv.Env = maskValues(srv.Env)
+		srv.Headers = maskValues(srv.Headers)
+		out = append(out, srv)
+	}
+	return out
+}
+
+// maskValues copies a map, replacing every non-empty value with "***". Every
+// value is masked rather than only the secret-looking ones: an MCP server's env
+// is arbitrary operator-supplied configuration, so there is no reliable way to
+// tell a credential from a setting, and guessing wrong leaks the credential.
+func maskValues(m map[string]string) map[string]string {
+	if len(m) == 0 {
+		return m
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		if strings.TrimSpace(v) == "" {
+			out[k] = v
+			continue
+		}
+		out[k] = "***"
+	}
+	return out
 }
 
 // mcpServerBody is the shape the GUI POSTs/PATCHes to add or edit an MCP
