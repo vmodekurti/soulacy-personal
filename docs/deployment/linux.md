@@ -1,90 +1,122 @@
 # Linux / VPS Deployment
 
-Deploy Soulacy on a Linux VPS as a systemd service with a Caddy reverse proxy for automatic HTTPS.
+This guide installs Soulacy v0.1.8 as a system-wide systemd service behind
+Caddy. It keeps configuration read-only under `/etc/soulacy` and runtime state
+under `/var/lib/soulacy`.
+
+For a single-user machine, `sy daemon install` creates a simpler systemd
+**user** unit. Use the system service below for a dedicated `soulacy` account,
+boot-time startup, and clearer file ownership.
 
 ## Prerequisites
 
-- Ubuntu 22.04+ / Debian 12+ / any systemd-based distro
-- A domain name pointing to your server's IP
+- Ubuntu 22.04+, Debian 12+, or another systemd-based distribution.
+- Root or sudo access.
+- `curl`, `tar`, and `ca-certificates`.
+- A domain pointed at the VPS when exposing the GUI remotely.
+- An LLM provider reachable from the VPS.
 
----
+Examples below assume Linux AMD64. Replace `amd64` with `arm64` on an ARM VPS.
 
-## Install the binary
+## 1. Install a released binary
 
 ```bash
-# Download a tagged release bundle
-curl -sL https://github.com/vmodekurti/soulacy/releases/download/v0.2.0/soulacy_v0.2.0_linux_amd64.tar.gz \
-  | tar -xz -C /usr/local/bin/
+cd /tmp
+curl -fLO https://github.com/vmodekurti/soulacy/releases/download/v0.1.8/soulacy_v0.1.8_linux_amd64.tar.gz
+curl -fLO https://github.com/vmodekurti/soulacy/releases/download/v0.1.8/checksums.sha256
+grep 'soulacy_v0.1.8_linux_amd64.tar.gz' checksums.sha256 | sha256sum -c -
+tar -xzf soulacy_v0.1.8_linux_amd64.tar.gz
+sudo install -m 0755 soulacy sy /usr/local/bin/
+```
 
+Verify both binaries:
+
+```bash
 soulacy --version
+sy version
 ```
 
----
+Use a tagged release rather than a source commit for production. A build that
+reports only a commit such as `8c2c66f` cannot always be ordered against a
+semantic release such as `0.1.8`, so `sy update` may correctly report that the
+versions are not comparable.
 
-## Create a system user
+## 2. Create the service account and directories
 
 ```bash
-useradd --system --no-create-home --shell /usr/sbin/nologin soulacy
+sudo useradd --system \
+  --home-dir /var/lib/soulacy \
+  --create-home \
+  --shell /usr/sbin/nologin \
+  soulacy
+
+sudo install -d -o root -g soulacy -m 0750 /etc/soulacy
+sudo install -d -o soulacy -g soulacy -m 0750 /var/lib/soulacy/soulspace
 ```
 
----
+The account may show `/usr/sbin/nologin` or `/bin/false`; that is normal for a
+service account. systemd can still start the binary as that user.
 
-## Set up directories
+## 3. Create the configuration
 
-```bash
-mkdir -p /etc/soulacy /var/lib/soulacy /etc/soulacy/agents
-chown -R soulacy:soulacy /var/lib/soulacy /etc/soulacy
-```
+Create `/etc/soulacy/config.yaml`:
 
----
-
-## Create config
-
-```bash
-cat > /etc/soulacy/config.yaml << 'EOF'
+```yaml title="/etc/soulacy/config.yaml"
 server:
   host: 127.0.0.1
   port: 18789
-  api_key: "sy_CHANGE_ME"
+  api_key: "replace-with-a-long-random-value"
 
 llm:
   default_provider: openai
   providers:
     openai:
-      api_key: "sk-..."
+      api_key: "replace-with-provider-key"
 
 storage:
   backend: sqlite
 
-memory:
-  sqlite_path: /var/lib/soulacy/soulacy.db
-
-agent_dirs:
-  - /etc/soulacy/agents
-
 updates:
   manifest_url: https://github.com/vmodekurti/soulacy/releases/latest/download/release-manifest.json
-EOF
-
-chown soulacy:soulacy /etc/soulacy/config.yaml
-chmod 600 /etc/soulacy/config.yaml   # secrets — readable only by soulacy user
 ```
 
----
+Generate the server key without storing it in shell history:
 
-## Create systemd service
+```bash
+openssl rand -hex 32
+```
+
+Then protect the file:
+
+```bash
+sudo chown root:soulacy /etc/soulacy/config.yaml
+sudo chmod 0640 /etc/soulacy/config.yaml
+```
+
+!!! warning "The service does not inherit your login environment"
+    A foreground `soulacy serve` runs as your login user and normally finds
+    `~/.soulacy/soulspace/config.yaml`. The system service runs as `soulacy`,
+    whose home is `/var/lib/soulacy`. Make the service config and workspace
+    explicit or the two launch methods may read different API keys and agents.
+
+## 4. Create the systemd unit
 
 ```ini title="/etc/systemd/system/soulacy.service"
 [Unit]
-Description=Soulacy AI Agent Server
-After=network.target
+Description=Soulacy gateway
+Documentation=https://docs.soulacy.io/deployment/linux/
+After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=soulacy
 Group=soulacy
-ExecStart=/usr/local/bin/soulacy serve --config /etc/soulacy/config.yaml
+Environment=HOME=/var/lib/soulacy
+Environment=SOULACY_CONFIG_PATH=/etc/soulacy/config.yaml
+Environment=SOULACY_WORKSPACE=/var/lib/soulacy/soulspace
+WorkingDirectory=/var/lib/soulacy/soulspace
+ExecStart=/usr/local/bin/soulacy serve
 Restart=on-failure
 RestartSec=5s
 
@@ -92,10 +124,10 @@ RestartSec=5s
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=/var/lib/soulacy
+ProtectHome=true
 ReadOnlyPaths=/etc/soulacy
+ReadWritePaths=/var/lib/soulacy
 
-# Logging
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=soulacy
@@ -104,68 +136,162 @@ SyslogIdentifier=soulacy
 WantedBy=multi-user.target
 ```
 
-```bash
-systemctl daemon-reload
-systemctl enable soulacy
-systemctl start soulacy
-systemctl status soulacy
-```
+`soulacy serve` does not use a `--config` flag. `SOULACY_CONFIG_PATH` is the
+supported explicit config selector, and `SOULACY_WORKSPACE` determines where
+agents, databases, logs, memory, skills, and secrets live.
 
----
-
-## Install Caddy (reverse proxy + automatic TLS)
+Load and start it:
 
 ```bash
-apt install -y debian-keyring debian-archive-keyring apt-transport-https
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
-  | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
-  | tee /etc/apt/sources.list.d/caddy-stable.list
-apt update && apt install caddy
+sudo systemctl daemon-reload
+sudo systemctl enable --now soulacy
+sudo systemctl status soulacy --no-pager
 ```
+
+## 5. Prove the service loaded the intended config
+
+Inspect the effective identity and command:
+
+```bash
+sudo systemctl show soulacy \
+  -p User -p Group -p ExecStart --no-pager
+
+sudo systemctl show soulacy -p Environment --value \
+  | tr ' ' '\n' \
+  | grep -E '^(HOME|SOULACY_CONFIG_PATH|SOULACY_WORKSPACE)='
+```
+
+Expected values:
+
+```text
+HOME=/var/lib/soulacy
+SOULACY_CONFIG_PATH=/etc/soulacy/config.yaml
+SOULACY_WORKSPACE=/var/lib/soulacy/soulspace
+```
+
+Verify the service user can read the configuration and write the workspace:
+
+```bash
+sudo -u soulacy test -r /etc/soulacy/config.yaml && echo 'config readable'
+sudo -u soulacy test -w /var/lib/soulacy/soulspace && echo 'workspace writable'
+```
+
+Check startup logs:
+
+```bash
+sudo journalctl -u soulacy -b --no-pager -n 100
+```
+
+Finally, run Doctor with the same environment as the service:
+
+```bash
+sudo -u soulacy env \
+  HOME=/var/lib/soulacy \
+  SOULACY_CONFIG_PATH=/etc/soulacy/config.yaml \
+  SOULACY_WORKSPACE=/var/lib/soulacy/soulspace \
+  /usr/local/bin/sy doctor
+```
+
+If the browser rejects a key that works in a foreground process, do not rotate
+keys yet. First compare these paths and environments—the usual cause is two
+different `config.yaml` files.
+
+## 6. Put Caddy in front of Soulacy
+
+Install Caddy using its current official instructions, then configure:
 
 ```caddyfile title="/etc/caddy/Caddyfile"
-yourdomain.com {
-    reverse_proxy localhost:18789 {
+soulacy.example.com {
+    reverse_proxy 127.0.0.1:18789 {
         header_up X-Real-IP {remote_host}
-        flush_interval -1    # required for SSE streaming
+        flush_interval -1
     }
 }
 ```
 
 ```bash
-systemctl reload caddy
+sudo systemctl reload caddy
 ```
 
-Caddy automatically provisions and renews a Let's Encrypt TLS certificate.
+Keep port `18789` closed to the public. Caddy terminates TLS on ports 80/443
+and proxies to Soulacy over loopback. Preserve streaming by retaining
+`flush_interval -1`.
 
----
-
-## Manage the service
+## 7. Firewall
 
 ```bash
-# View live logs
-journalctl -u soulacy -f
-
-# Restart after config change
-systemctl restart soulacy
-
-# Upgrade binary
-sy update check
-sy update install --dry-run
-sy update install --yes
-systemctl restart soulacy
+sudo ufw allow 22/tcp
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw enable
 ```
 
----
+Do not open port `18789` when using the loopback/Caddy configuration.
 
-## Firewall
+## Service operations
 
 ```bash
-ufw allow 22/tcp    # SSH
-ufw allow 80/tcp    # HTTP (Caddy redirects to HTTPS)
-ufw allow 443/tcp   # HTTPS
-ufw enable
+# Status and recent logs
+sudo systemctl status soulacy --no-pager
+sudo journalctl -u soulacy -n 100 --no-pager
+
+# Follow logs
+sudo journalctl -u soulacy -f
+
+# Restart after config changes
+sudo systemctl restart soulacy
+
+# Validate the unit after editing it
+sudo systemd-analyze verify /etc/systemd/system/soulacy.service
 ```
 
-Port 18789 should remain closed — Soulacy binds to `127.0.0.1` and traffic arrives via Caddy.
+## Upgrade a release installation
+
+Back up first:
+
+```bash
+sudo systemctl stop soulacy
+sudo tar -C /var/lib -czf "/root/soulacy-backup-$(date +%F-%H%M%S).tar.gz" soulacy
+sudo systemctl start soulacy
+```
+
+Then check the release update path:
+
+```bash
+UPDATE_MANIFEST=https://github.com/vmodekurti/soulacy/releases/latest/download/release-manifest.json
+sy update check --manifest "$UPDATE_MANIFEST"
+sudo sy update install --manifest "$UPDATE_MANIFEST" --dry-run
+sudo sy update install --manifest "$UPDATE_MANIFEST" --yes
+sudo systemctl restart soulacy
+```
+
+Passing `--manifest` matters when `sudo` changes `HOME` and does not inherit the
+service's config environment. It makes the release source explicit instead of
+accidentally reading root's empty workspace.
+
+If the installed build is a source commit and reports “versions are not
+comparable,” install the desired tagged release bundle explicitly using step 1.
+Do not edit version strings to bypass the safety check.
+
+After every upgrade:
+
+```bash
+soulacy --version
+sudo systemctl restart soulacy
+sudo journalctl -u soulacy -b --no-pager -n 100
+```
+
+See [Upgrades and reinstall](upgrades.md) for rollback and migration behavior.
+
+## Troubleshooting matrix
+
+| Symptom | Check | Fix |
+| --- | --- | --- |
+| API key works in foreground but not systemd | Compare `SOULACY_CONFIG_PATH`, `SOULACY_WORKSPACE`, `HOME`, and service user | Add the explicit Environment entries, reload, and restart |
+| `/etc/soulacy/config.yaml` does not exist | `sudo ls -l /etc/soulacy/config.yaml` | Create it or point `SOULACY_CONFIG_PATH` at the real file |
+| Service cannot read config | `sudo -u soulacy test -r ...` | Set owner `root:soulacy` and mode `0640` |
+| Service cannot create databases/logs | Test workspace write access | `sudo chown -R soulacy:soulacy /var/lib/soulacy` |
+| Service uses no agents | Inspect `SOULACY_WORKSPACE` and `agent_dirs` | Put agents under the selected workspace or configure absolute agent directories |
+| Browser gets 401 after config change | Service was not restarted or browser retained an old key | Restart, then enter the key from the service's config—not the login user's config |
+| Caddy buffers responses | Missing streaming proxy setting | Add `flush_interval -1` and reload Caddy |
+| Update says versions are not comparable | Current binary is identified by a commit rather than a release version | Install a tagged release bundle explicitly |

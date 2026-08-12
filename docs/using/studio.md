@@ -1,165 +1,260 @@
-# Studio — Intent-First Workflow Builder
+# Studio — Intent-First Agent Builder
 
-![Studio Visual Workflow Diagram](../assets/screenshots/studio_workflow.png)
+![Studio agent builder](../assets/screenshots/studio_workflow.png)
 
-Studio turns a plain-English description of the automation you want into a
-runnable Soulacy workflow. You describe the outcome; Studio drafts a step plan,
-generates the graph, checks it end-to-end, and — when a run fails — proposes a
-fix you can review before saving.
+Studio turns a plain-English description into a reviewable Soulacy agent. In
+v0.1.8, Studio defaults to a native tool-calling agent strategy. Generating a
+fixed workflow graph is an **experimental**, explicit opt-in.
 
+The important rule is simple: suggestions from the refinement model are not
+authoritative. Your selected provider, model, trigger, delivery behavior, and
+destination are applied to the generated definition.
 
-You never have to start by dragging boxes on a canvas. The graph is *generated
-from your intent*, not the other way around.
+## Before you start
 
-## The three views
+1. Open **Providers**, configure at least one provider, and select **Test
+   connection**.
+2. Configure any inbound or outbound channel the agent will use.
+3. Open **Studio** and verify the Studio builder model shown at the top.
+4. Decide whether the agent is conversational, manually run, scheduled, or
+   webhook-driven.
 
-Every workflow can be inspected three ways, and you can switch between them at
-any time:
+Studio can only select providers, models, tools, MCP servers, skills, knowledge
+bases, and channels that the running gateway reports. If something is missing,
+configure it first rather than naming an unregistered resource in the prompt.
 
-| View | What it shows | Use it to |
+## The authoring path
+
+### 1. Describe the outcome
+
+Write the job in user terms. Include the information that changes execution:
+
+- what starts the agent;
+- what the agent must accomplish;
+- which real tools or data sources it may use;
+- where the result belongs;
+- whether delivery is a reply or a separate outbound message;
+- success criteria and important limits.
+
+Example conversational intent:
+
+> Build a conversational weather expert. A user asks about current conditions,
+> forecasts, or alerts in Chat or Telegram. Resolve place names with the
+> registered weather MCP tools and reply in the same conversation. Do not run on
+> a schedule and do not initiate outbound messages.
+
+Example scheduled intent:
+
+> At 07:00 America/Chicago every weekday, fetch the forecast for Chicago and
+> send a short commute advisory to Telegram chat 123456789. If weather data is
+> unavailable, send a brief failure notice rather than inventing a forecast.
+
+### 2. Make trigger and delivery authoritative
+
+The **Studio understood** panel sits beside the prompt on the main Studio page.
+Use its controls before selecting **Refine prompt** or **Generate**.
+
+#### Trigger choices
+
+| Choice | Use it for | Dependent settings |
 | --- | --- | --- |
-| **Plan** | The workflow as plain-English steps, grouped into lanes | Understand and edit *what* happens |
-| **Canvas** | The generated node graph | See data flow and wiring |
-| **SOUL.yaml** | The underlying agent definition | Review or hand-edit the source of truth |
+| **Auto** | Let Studio infer the trigger | Review the inferred trigger before saving |
+| **Manual** | Runs started from Studio, Chat, CLI, or API | No cron or inbound channel required |
+| **Schedule** | Unattended cron execution | A valid cron expression is required; configure outbound delivery if a person must receive the result |
+| **Channel** | A message arriving on a channel | Choose the inbound channel; ordinary output should normally reply to that conversation |
+| **Webhook** | An external HTTP event | Configure the webhook/event input expected by the agent |
 
-The Plan is the primary surface. Canvas and SOUL.yaml are always kept in sync
-with it.
+Changing the trigger updates the dependent requirements. Schedule asks for a
+cron expression; Channel asks for an inbound channel. Those requirements block
+generation when incomplete, so a model cannot silently fill them with guesses.
 
-## Plan lanes
+#### Delivery choices
 
-The Plan organizes steps into six lanes that map to how an automation actually
-runs:
+| Choice | Meaning |
+| --- | --- |
+| **Auto** | Studio infers delivery from the confirmed trigger and intent |
+| **Reply** | Return the answer through the conversation that started the run |
+| **None** | Produce a result without channel delivery |
+| **Named channel** | Initiate outbound delivery through that configured channel |
 
-1. **Trigger** — what starts the workflow (a message, a schedule, a webhook).
-2. **Gather** — collecting inputs and context (fetch a URL, read the knowledge
-   base, pull a file).
-3. **Think** — reasoning, analysis, or an LLM/agent step that decides what to do.
-4. **Act** — taking an action (call a tool, run Python, hit an API).
-5. **Verify** — checking the result is sane before anyone sees it.
-6. **Deliver** — sending the result to a channel or returning it in Chat.
+A named outbound channel requires a destination. For Telegram this is normally
+a numeric chat ID; Slack and Discord use their platform-native channel IDs.
+Changing away from outbound delivery removes the destination requirement.
 
-Entry and exit are **implicit** — you won't see confusing "start"/"end" blocks
-to wire up. Studio adds them for you.
+!!! warning "Reply is not `channel.send`"
+    A normal conversational response is returned by the active run. It should
+    not call `channel.send`. That tool is for scheduled, one-off, or cross-channel
+    outbound delivery and may correctly open an **Action Required** approval
+    dialog when listed in `confirm_tools`.
 
-## Building a workflow
+### 3. Refine without surrendering control
 
-1. Open **Studio** and describe the automation in one or two sentences, e.g.
-   *"Every morning, summarize my unread email and post the summary to Slack."*
-2. Studio drafts a **Plan**. Read it top to bottom — it should match your intent.
-3. Add or change steps in natural language ("also attach the original links",
-   "only include emails from my team"). Studio recommends the right block type —
-   a Python step, a tool call, or a sub-agent — for each addition.
-4. Switch to **Canvas** to see the generated graph, or **SOUL.yaml** to read the
-   source.
-5. Save. Every workflow passes a **whole-workflow integrity check** before it can
-   be saved — dangling references, missing variables, unroutable outputs, and
-   invalid Python are caught here, not at runtime.
+**Refine prompt** asks the configured Studio model to rewrite the request as a
+clearer specification. Review:
 
-### Streamed vs Wizard generation
+- the refined prompt;
+- assumptions made;
+- unanswered questions;
+- the recommended agent strategy.
 
-The **Generate** button has a Streamed / Wizard split — Streamed (the default)
-runs all five pipeline phases (`clarify_intent → choose_strategy →
-build_graph → validate → repair`) in one shot and streams a live transcript
-below the canvas so you can see each LLM I/O as it lands. Wizard mode opens
-the refinement modal with a **Wizard-steps breadcrumb** at the top, letting
-you inspect and edit intermediate output between phases. A `(once)` label
-appears on the split-button when you're overriding the persisted default; the
-default itself lives under **Studio model modal → Generate presentation**.
+Edit incorrect assumptions directly. The trigger and delivery controls remain
+authoritative even when the refined text suggests something else.
 
-### Runtime intent presets
+Refinement is optional. **Generate** can build directly from the original
+prompt.
 
-The Studio model modal has a **Runtime intent** section with three named
-presets:
+### 4. Generate and choose a strategy
 
-- **Fast local** — small local model, tight timeouts, high loop cap. Best for
-  quick "does the shape look right?" iteration.
-- **Reliable local** — patient timeouts sized for weaker local models, so a
-  slow-first-token model doesn't get killed mid-turn. The default.
-- **Cloud quality** — long total budget with generous per-step timeouts,
-  applied even for cloud providers so long plans have room to breathe.
+Studio exposes four execution strategies:
 
-Selecting an intent persists to `llm.studio.preset`; the next Save bakes those
-timeouts into any agent Definition that doesn't already override them.
+| Strategy | Status | Best for |
+| --- | --- | --- |
+| **Auto** | Recommended default | Native model tool-calling with bounded turns; most conversational and tool-using agents |
+| **ReAct (advanced)** | Manual advanced option | Models that reliably alternate reasoning and tool calls; looping research or investigation |
+| **Plan-Execute** | Advanced | Longer tasks that benefit from an internal plan and observable phase completion |
+| **Workflow** | **Experimental** | A truly fixed graph whose ordering and bindings must be deterministic |
 
-### Reasoning-agent contract checks
+Studio does not generate Workflow by default. Selecting it displays an
+experimental warning and requires confirmation before generating the graph.
+Treat the output as a draft: inspect every binding, test realistic inputs, and
+keep a fallback for missing credentials, unavailable tools, and partial data.
 
-Studio's contract validator runs a full battery of checks on **reasoning
-agents** (agents authored as a system prompt + tool allowlist rather than a
-graph). Each check produces a blocker (Save-blocking) or warning:
+No agent strategy is universally production quality. Reliability depends on
+the model's tool-calling behavior, the tool contracts, timeouts, external
+services, and the quality of tests. Auto is the safest general default, not a
+guarantee.
 
-- `agent.system_prompt` — blocks an empty prompt (the prompt IS the agent
-  spec); warns under ~40 words.
-- `agent.tool_allowlist` — blocks a ReAct loop with no tools / peers / skills
-  / knowledge bases; warns on the same for non-ReAct.
-- `agent.peer_graph` — flags dangling `agent__<id>` mentions in the system
-  prompt.
-- `agent.prompt_hygiene` — warns when the prompt says "use \`X\`" for a tool
-  that isn't in the allowlist.
-- `agent.step_budget` — realism band on MaxTurns / StepTimeout / TotalTimeout
-  / RunTimeout; blocks unbounded ReAct > 40 turns; warns when
-  `total_timeout < max_turns × step_timeout`.
-- `agent.channel_delivery` — warns when `channel.send` is in Tools but
-  Channels is empty.
-- `agent.llm_fit` — blocks embedding models; warns on weak-JSON models,
-  small-context + high-turn combos, and provider-not-in-allowed_providers.
-- `agent.capability_scope` — warns on privileged scheduled non-Unattended
-  agents, and on very open policies.
-- `agent.persona_consistency` — flags contradictions like `MustNot` +
-  `tool_choice=required`, or JSON-format constraints without
-  `response_format`.
-- `agent.builtin_scope` — blocks opt-out-of-everything shapes; warns on
-  `kb_search` without Knowledge or `read_skill` without Skills.
+### 5. Verify provider and model
 
-The Save-blocking capability audit runs on top of these: any save that would
-escalate an agent's tier (ReadOnly → Active → Privileged) while it has
-interactive channel bindings pops a blocking modal listing the tier diff,
-warnings, and affected bindings, and requires an explicit acknowledgement
-before the save proceeds.
+Studio has two separate model choices:
 
-## When a run fails: Debug in Studio
+- **Studio model** — the configured provider/model used to refine and generate.
+- **Model this agent runs on** — written to the saved agent's `SOUL.yaml`.
 
-Any failed run in **Activity** has a **Debug in Studio** button. It loads the
-exact failed run trace so Studio can see what really happened:
+Open the model picker to set the execution provider and model from the
+gateway's registered catalog. Leaving provider blank inherits the configured
+default. If a provider reports no model list, Studio permits a manual model ID,
+but you should verify that ID on **Providers** before deployment.
 
-- which node failed, and its inputs and outputs;
-- any missing variables or bad tool arguments;
-- channel/delivery errors.
+Before saving, inspect the generated `llm.provider` and `llm.model`. Never
+accept a provider or model merely because it appeared in refined prose.
 
-Studio then proposes a fix **in plain English** ("the `city` variable is never
-set before the *Gather* step — bind it from the trigger message"). Three
-things happen when you click Debug in Studio:
+### 6. Review the generated contract
 
-1. **The failing input is pre-filled** into the test bench so the fix can be
-   verified against the exact input that broke the run — no reconstructing.
-2. **The structured run trace loads** into the runTrace panel and the
-   run-history picker, alongside the compacted evidence blob inside the heal
-   result — so you're not restricted to the summary.
-3. **The heal result routes through a diff panel** with **Apply this fix** /
-   **Cancel** buttons. The canvas only changes when you confirm; the proposed
-   diff is visible before it becomes reality.
+For reasoning agents, the **Agent contract** explains the generated behavior:
 
-### Build until it works
+- **Goal** — the observable outcome of a successful run;
+- **Instructions** — behavioral rules and execution constraints;
+- **Available capabilities** — the actual tools, MCP calls, peers, skills, and
+  knowledge resources the agent may use.
 
-If you'd rather not iterate by hand, choose **Build until it works**. Studio runs
-a *bounded* series of repair attempts, testing after each one, and stops as soon
-as the workflow succeeds (or reports clearly if it can't converge). When a repair
-succeeds, Studio captures the failing case as a **regression test** so the same
-break can't silently return.
+Studio fills Goal and Instructions deterministically when model output omits
+them. Still review both fields: a populated contract can be wrong even when it
+is syntactically complete.
 
-The Build report has two sections above the attempt log so you can tell
-"needs my input" from "still trying":
+The contract validator checks the prompt, tool allowlist, peer references,
+step/time budgets, provider fit, channel delivery, capability scope, persona
+consistency, and built-in use. Blockers prevent saving; warnings require human
+judgment.
 
-- **Needs your input** — external blockers Studio can't fix on its own
-  (missing credential, bot not invited, rate limit, invalid destination). The
-  report header prefers this over a raw residual dump — "Stopped — needs
-  your input: …" rather than "Could not fully fix it automatically".
-- **What Studio changed** — a plain-language rollup, one bullet per changed
-  attempt, of the edits the loop applied. Makes it obvious what actually
-  moved between attempts.
+### 7. Inspect, test, and save
+
+Depending on the strategy, use these views:
+
+| View | What it shows |
+| --- | --- |
+| **Agent** | Reasoning-agent contract, capabilities, and strategy settings |
+| **Plan** | Plain-language Trigger, Work Plan, and Delivery lanes for workflows |
+| **Canvas** | Advanced graph wiring and node configuration |
+| **SOUL.yaml** | The complete saved definition and final source of truth |
+
+Then:
+
+1. Select **Preview a run** or **Dry run** to inspect behavior without firing
+   tools.
+2. Use a realistic test input.
+3. Run live only after resolving execution and security blockers.
+4. Confirm trigger, channels, destination, provider, model, tools, and
+   `confirm_tools` in `SOUL.yaml`.
+5. Select **Review & save**. New agents are saved disabled so deployment is a
+   separate, explicit action.
+
+## Streamed and Wizard generation
+
+The Generate control supports two presentations:
+
+- **Streamed** runs `clarify_intent → choose_strategy → build → validate →
+  repair` and displays a live transcript.
+- **Wizard** pauses for review of intermediate output before generation.
+
+This presentation choice does not change the authoritative trigger/delivery
+controls or the saved strategy.
+
+## Runtime intent presets
+
+The Studio model dialog includes timeout/budget presets:
+
+- **Fast local** — tighter budgets for quick local iteration.
+- **Reliable local** — more patient timeouts for slower local models.
+- **Cloud quality** — generous budgets for long or complex cloud-backed runs.
+
+The preset informs runtime budgets; it does not replace provider/model
+selection or make an unsuitable model reliable.
+
+## Editing trigger or delivery after generation
+
+Select **Trigger & delivery** in the Build toolbar to change manual, cron,
+channel, or webhook settings on the draft. Recheck the dependent fields after
+every change:
+
+- removing Schedule should also remove stale cron behavior;
+- switching to Channel should establish an inbound channel and usually Reply;
+- switching to outbound delivery should require a destination;
+- switching to Reply should not retain an unnecessary `channel.send` tool.
+
+Always review the resulting YAML after changing execution shape.
+
+## Debugging failed runs
+
+A failed run in **Activity** can be opened with **Debug in Studio**. Studio
+loads the original input and structured trace, proposes a change, and shows the
+diff before applying it.
+
+**Build until it works** performs a bounded repair loop. It stops on success or
+reports external blockers such as missing credentials, an unavailable model,
+an unconfigured destination, or a tool the agent cannot access. Successful
+repairs can become regression tests.
+
+## Production checklist
+
+- [ ] Provider connection tested and exact execution model confirmed.
+- [ ] Trigger explicitly matches the intended lifecycle.
+- [ ] Cron and timezone reviewed for schedules.
+- [ ] Inbound channel selected for conversational agents.
+- [ ] Delivery is Reply, None, or an explicit channel/destination as intended.
+- [ ] Tools and MCP names exist in Available capabilities.
+- [ ] Goal and Instructions describe observable success and failure behavior.
+- [ ] Confirmation policy matches write and outbound actions.
+- [ ] Dry run and realistic live test succeeded.
+- [ ] Agent saved, reviewed, and deliberately enabled.
+
+## Common symptoms
+
+| Symptom | Likely cause | Fix |
+| --- | --- | --- |
+| Refined prompt invents a schedule | Trigger left on Auto or assumption not corrected | Select Manual or Channel explicitly, edit the refined prompt, then regenerate |
+| Generated agent uses the wrong provider/model | Execution model inherited or was not reviewed | Open **Model this agent runs on**, choose a registered provider/model, and verify YAML |
+| Telegram keeps appearing as destination | Delivery left on Auto or prior draft retained a channel | Choose Reply, None, or the intended channel and clear/change the destination |
+| Response appears in an approval modal | Agent called outbound `channel.send` and it requires confirmation | For ordinary conversation, use Reply and remove unnecessary `channel.send`; otherwise approve the intentional outbound action |
+| Goal or Instructions are generic | Sparse intent or fallback contract generation | Add measurable success/failure criteria and regenerate or edit the contract |
+| Plan-Execute stops without a final answer | Model exhausted its loop/budget or failed final synthesis | Use a better tool-calling model, reduce the task, increase justified budgets, and inspect the run trace |
+| Save is blocked | Contract, integrity, readiness, or security blocker | Open the reported panel and resolve each blocker rather than bypassing it |
 
 ## See also
 
-- [Workflow Templates](templates.md) — start from a vetted workflow instead of a
-  blank Plan.
-- [Evaluations](evaluations.md) — lock in behavior with `sy eval`.
-- [Troubleshooting: Common failures](../troubleshooting/common-failures.md).
+- [Your first agent](../getting-started/first-agent.md)
+- [Reasoning strategies](../agents/reasoning.md)
+- [Workflow steps](../agents/workflow.md)
+- [Schedules](schedules.md)
+- [Channel overview](../channels/index.md)
+- [Common failures](../troubleshooting/common-failures.md)
