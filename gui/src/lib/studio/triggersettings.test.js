@@ -3,8 +3,10 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { tick } from 'svelte'
 import TriggerSettings from './TriggerSettings.svelte'
+import GenerationTrigger from './GenerationTrigger.svelte'
 import {
   applyGenerationTrigger,
+  intentWithGenerationTrigger,
   toggleChannelPatch,
   triggerChannelPatch,
   triggerTypePatch,
@@ -20,12 +22,33 @@ afterEach(() => {
   target = null
 })
 
-function mount(props) {
+function mount(props, Component = TriggerSettings) {
   target = document.createElement('div')
   document.body.appendChild(target)
-  component = new TriggerSettings({ target, props })
+  component = new Component({ target, props })
   return target
 }
+
+describe('GenerationTrigger', () => {
+  it('defaults a channel trigger to same-channel reply and drops it when leaving', async () => {
+    const changes = []
+    const root = mount({
+      selection: { type: 'auto', delivery: 'auto' },
+      channels: [{ id: 'telegram', name: 'Telegram' }],
+      onChange: (value) => changes.push(value),
+    }, GenerationTrigger)
+    const type = root.querySelector('#generation-trigger-type')
+    type.value = 'channel'
+    type.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(changes.at(-1).delivery).toBe('reply')
+
+    component.$set({ selection: changes.at(-1) })
+    await tick()
+    type.value = 'manual'
+    type.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(changes.at(-1).delivery).toBe('auto')
+  })
+})
 
 describe('TriggerSettings', () => {
   it('changes a manual agent to cron and reveals only schedule settings', async () => {
@@ -124,6 +147,33 @@ describe('trigger settings transitions', () => {
       output: null,
       unattended: false,
       channels: ['telegram', 'slack'],
+    })
+  })
+
+  it('grounds refinement and generation in a conversational channel choice', () => {
+    const text = intentWithGenerationTrigger('Build a weather expert.', {
+      type: 'channel', channel: 'telegram',
+    })
+    expect(text).toContain('Build a weather expert.')
+    expect(text).toContain('message arrives on telegram')
+    expect(text).toContain('Do not convert this into a scheduled job')
+  })
+
+  it('does not alter the prompt while trigger inference is enabled', () => {
+    expect(intentWithGenerationTrigger('Build a weather expert.', { type: 'auto' }))
+      .toBe('Build a weather expert.')
+  })
+
+  it('overrides an inferred Telegram destination in both prompt and draft', () => {
+    const selection = { type: 'auto', delivery: 'slack', destination: '#weather' }
+    expect(intentWithGenerationTrigger('Send updates to Telegram.', selection))
+      .toContain('through slack to #weather; do not substitute another channel')
+    expect(applyGenerationTrigger({
+      trigger: { type: 'schedule', config: { cron: '0 7 * * *' } },
+      channels: ['telegram'], output: { channel: 'telegram', to: 'old' },
+    }, selection)).toEqual({
+      trigger: { type: 'schedule', config: { cron: '0 7 * * *' } },
+      channels: ['telegram', 'slack'], output: { channel: 'slack', to: '#weather' },
     })
   })
 })

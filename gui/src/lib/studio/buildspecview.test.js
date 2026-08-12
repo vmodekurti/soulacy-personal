@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   strategyLabel, specRows, specBlockers, specQuestions, specReady, changeSummary,
   detectChannel, deliveryPrompt, isDeliveryQuestion, knownDestinations,
+  specWithTrigger,
 } from './buildspecview.js'
 
 const spec = {
@@ -99,6 +100,52 @@ describe('specBlockers / specQuestions', () => {
   it('handles a spec with no questions at all', () => {
     expect(specBlockers({})).toEqual([])
     expect(specQuestions({})).toEqual([])
+  })
+})
+
+describe('specWithTrigger', () => {
+  const scheduled = {
+    trigger: 'schedule', schedule: '0 8 * * *', schedule_text: 'every morning',
+    delivery: ['Telegram'], security: ['sends messages on your behalf to Telegram'],
+    questions: [
+      { id: 'schedule_time', field: 'schedule', blocker: true },
+      { id: 'destination', field: 'delivery', blocker: true },
+      { id: 'sources', field: 'inputs', blocker: false },
+    ],
+    blockers: [
+      { id: 'schedule_time', field: 'schedule', blocker: true },
+      { id: 'destination', field: 'delivery', blocker: true },
+    ],
+  }
+
+  it('turns an inferred schedule into a same-channel conversational spec', () => {
+    const next = specWithTrigger(scheduled, { type: 'channel', channel: 'telegram' })
+    expect(next.trigger).toBe('incoming telegram message')
+    expect(next.schedule).toBe('')
+    expect(next.delivery).toEqual(['Reply on telegram'])
+    expect(next.blockers).toEqual([])
+    expect(next.questions.map((q) => q.id)).toEqual(['sources'])
+    expect(next.ready).toBe(true)
+    expect(scheduled.schedule).toBe('0 8 * * *') // the server response is not mutated
+  })
+
+  it('uses the operator cron and keeps delivery requirements for scheduled runs', () => {
+    const next = specWithTrigger(scheduled, { type: 'schedule', cron: '15 9 * * 1-5' })
+    expect(next.schedule).toBe('15 9 * * 1-5')
+    expect(next.delivery).toEqual(['Telegram'])
+    expect(next.blockers.map((q) => q.id)).toEqual(['destination'])
+  })
+
+  it('lets an explicit destination replace the channel inferred from the prompt', () => {
+    const next = specWithTrigger(scheduled, {
+      type: 'auto', delivery: 'slack', destination: '#weather',
+    })
+    expect(next.delivery).toEqual(['slack → #weather'])
+    expect(next.blockers.map((q) => q.id)).toEqual(['schedule_time'])
+  })
+
+  it('leaves prompt inference untouched in auto mode', () => {
+    expect(specWithTrigger(scheduled, { type: 'auto' })).toBe(scheduled)
   })
 })
 

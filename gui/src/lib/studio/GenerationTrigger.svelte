@@ -1,7 +1,7 @@
 <script>
   import { TRIGGER_OPTIONS } from './triggersettings.js'
 
-  export let selection = { type: 'auto', cron: '', channel: '' }
+  export let selection = { type: 'auto', cron: '', channel: '', delivery: 'auto', destination: '' }
   export let channels = []
   export let onChange = () => {}
 
@@ -9,7 +9,17 @@
   $: type = (selection && selection.type) || 'auto'
 
   function change(patch) {
-    onChange({ type: 'auto', cron: '', channel: '', ...selection, ...patch })
+    onChange({ type: 'auto', cron: '', channel: '', delivery: 'auto', destination: '', ...selection, ...patch })
+  }
+
+  function changeType(nextType) {
+    const patch = { type: nextType }
+    // Same-channel reply is the coherent default for a conversational trigger.
+    // When leaving that trigger, stop carrying the dependent reply choice into
+    // a schedule/manual/webhook where there may be no inbound channel at all.
+    if (nextType === 'channel' && (selection.delivery || 'auto') === 'auto') patch.delivery = 'reply'
+    if (nextType !== 'channel' && selection.delivery === 'reply') patch.delivery = 'auto'
+    change(patch)
   }
 </script>
 
@@ -18,7 +28,7 @@
   <select
     id="generation-trigger-type"
     value={type}
-    on:change={(e) => change({ type: e.target.value })}
+    on:change={(e) => changeType(e.target.value)}
   >
     <option value="auto">Use the prompt</option>
     {#each TRIGGER_OPTIONS as option}
@@ -53,10 +63,36 @@
     </select>
   {/if}
 
+  <label for="generation-delivery">Delivery</label>
+  <select
+    id="generation-delivery"
+    value={selection.delivery || 'auto'}
+    on:change={(e) => change({ delivery: e.target.value, destination: '' })}
+  >
+    <option value="auto">Use the prompt</option>
+    <option value="reply" disabled={type !== 'channel'}>Reply on inbound channel</option>
+    <option value="none">Return result only</option>
+    {#each channelList as channel}
+      <option value={channel.id}>{channel.name || channel.id}</option>
+    {/each}
+  </select>
+
+  {#if !['auto', 'reply', 'none'].includes(selection.delivery || 'auto')}
+    <label for="generation-destination">Destination</label>
+    <input
+      id="generation-destination"
+      type="text"
+      value={selection.destination || ''}
+      placeholder="Chat, channel, address, or destination ID"
+      required
+      on:input={(e) => change({ destination: e.target.value })}
+    />
+  {/if}
+
   <p>
-    {type === 'auto'
+    {type === 'auto' && (selection.delivery || 'auto') === 'auto'
       ? 'Studio will infer the trigger from your prompt.'
-      : 'Your explicit choice is authoritative and will be applied after generation.'}
+      : 'Your choices are authoritative. Studio will update this plan and generate from them.'}
   </p>
 </div>
 

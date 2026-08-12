@@ -38,7 +38,7 @@
   import { stepResultsByNode } from '../lib/studio/testresults.js'
   import { repairVerdict, repairProofLabel } from '../lib/studio/repairverdict.js'
   import { fixturesFromWorkflow, outcomeWithFixtures } from '../lib/studio/benchfixtures.js'
-  import { unresolvedBlockers } from '../lib/studio/buildspecview.js'
+  import { specWithTrigger, unresolvedBlockers } from '../lib/studio/buildspecview.js'
   import { snapshotSession, sessionAfterDelete, promptsForDraft } from '../lib/studio/session.js'
   import {
     partitionLibrary, filterLibrary, libraryFacets, hasActiveFilters, emptyQuery,
@@ -47,7 +47,9 @@
   import PlanView from '../lib/studio/PlanView.svelte'
   import StrategyPanel from '../lib/studio/StrategyPanel.svelte'
   import TriggerSettings from '../lib/studio/TriggerSettings.svelte'
-  import { applyGenerationTrigger, toggleChannelPatch } from '../lib/studio/triggersettings.js'
+  import {
+    applyGenerationTrigger, intentWithGenerationTrigger, toggleChannelPatch,
+  } from '../lib/studio/triggersettings.js'
   import BuildSpecPanel from '../lib/studio/BuildSpecPanel.svelte'
   import ReadinessPanel from '../lib/studio/ReadinessPanel.svelte'
   import { NAVIGATE_TARGETS, actionKind, applyDraftFix } from '../lib/studio/fixactions.js'
@@ -259,12 +261,14 @@
   let promptError = ''         // error shown inside the prompt editor
   // Optional creation-time override. "auto" keeps prompt inference; every
   // other value is an explicit user decision applied after model generation.
-  let generationTrigger = { type: 'auto', cron: '', channel: '' }
+  let generationTrigger = { type: 'auto', cron: '', channel: '', delivery: 'auto', destination: '' }
   $: generationTriggerError = generationTrigger.type === 'schedule' && !generationTrigger.cron.trim()
     ? 'Enter a cron expression before generating.'
     : generationTrigger.type === 'channel' && !generationTrigger.channel
       ? 'Choose an inbound channel before generating.'
-      : ''
+      : !['auto', 'reply', 'none'].includes(generationTrigger.delivery || 'auto') && !String(generationTrigger.destination || '').trim()
+        ? 'Enter the delivery destination before generating.'
+        : ''
 
   // ── "Studio understood" — the structured spec behind the Describe step ────
   // Derived from the prompt BEFORE generation so the user verifies Studio's
@@ -285,7 +289,8 @@
 
   // Required spec details the user has not answered yet. Shared with
   // BuildSpecPanel so both Generate buttons enforce the same gate.
-  $: specUnresolved = unresolvedBlockers(buildSpec, refineAnswers)
+  $: effectiveBuildSpec = specWithTrigger(buildSpec, generationTrigger)
+  $: specUnresolved = unresolvedBlockers(effectiveBuildSpec, refineAnswers)
 
   // The prompt Studio should actually build from.
   //
@@ -909,7 +914,7 @@ Use null for fields that are not present.`
       // the raw prompt. Don't overwrite an original the user typed in the editor,
       // and don't clobber it on a light re-refine of already-refined text.
       if (!light && !rawPrompt.trim()) rawPrompt = text
-      const data = await bridge.refinePrompt(text, compactCatalog(catalog), light)
+      const data = await bridge.refinePrompt(intentWithGenerationTrigger(text, generationTrigger), compactCatalog(catalog), light)
       refineAnswers = {}
       refinement = {
         original: (data && data.original) || text,
@@ -1023,7 +1028,7 @@ Use null for fields that are not present.`
     compiling = true
     compileError = ''
     try {
-      const data = await bridge.compileAgent(text, mode, ans, compactCatalog(catalog))
+      const data = await bridge.compileAgent(intentWithGenerationTrigger(text, generationTrigger), mode, ans, compactCatalog(catalog))
       applyCompile(data)
       // Mark the prompt as refined so a later edit + Generate uses the fast
       // LIGHT touch-up pass; persists via the workflow's `refined` field.
@@ -1448,7 +1453,7 @@ Use null for fields that are not present.`
     compiling = true
     compileError = ''
     try {
-      const data = await bridge.compile(text, ans, compactCatalog(catalog), rawPrompt, forceWorkflow)
+      const data = await bridge.compile(intentWithGenerationTrigger(text, generationTrigger), ans, compactCatalog(catalog), rawPrompt, forceWorkflow)
       applyCompile(data)
       // Remember the prompt on the draft so it persists through save/load and
       // the box stays populated for further edits. Mark it refined so a later
@@ -1479,7 +1484,7 @@ Use null for fields that are not present.`
     // summary, and without a baseline all a refine can show is a new spec.
     buildSpecPrevIntent = (intent || raw).trim()
     try {
-      const data = await bridge.refinePrompt(raw, compactCatalog(catalog), false)
+      const data = await bridge.refinePrompt(intentWithGenerationTrigger(raw, generationTrigger), compactCatalog(catalog), false)
       intent = (data && data.refined_intent) || raw
       if (workflow) workflow = { ...workflow, raw_intent: raw }
     } catch (e) {
@@ -1515,7 +1520,7 @@ Use null for fields that are not present.`
     try {
       // intentOf for the same reason as generate(): re-compiling with
       // answers must use the prompt the user actually wrote, refined or not.
-      const data = await bridge.compile(intentOf(intent, rawPrompt), answers, compactCatalog(catalog))
+      const data = await bridge.compile(intentWithGenerationTrigger(intentOf(intent, rawPrompt), generationTrigger), answers, compactCatalog(catalog))
       applyCompile(data)
     } catch (e) {
       compileError = e.message || 'compile failed'
@@ -4445,7 +4450,7 @@ Use null for fields that are not present.`
       const light = !!(workflow && workflow.refined)
       if (!light && !rawPrompt.trim()) rawPrompt = text
       const done = await bridge.generateStream(
-        text,
+        intentWithGenerationTrigger(text, generationTrigger),
         { light, auto_repair: true },
         (ev) => {
           if (!ev || !ev.phase) return
@@ -5032,7 +5037,7 @@ Use null for fields that are not present.`
             </div>
             <div class="describe-right">
               <BuildSpecPanel
-                spec={buildSpec}
+                spec={effectiveBuildSpec}
                 recommendation={specRecommendation}
                 loading={buildSpecLoading}
                 error={buildSpecError}
@@ -7372,7 +7377,7 @@ Use null for fields that are not present.`
 
           <div class="describe-right">
             <BuildSpecPanel
-              spec={buildSpec}
+              spec={effectiveBuildSpec}
               recommendation={specRecommendation}
               loading={buildSpecLoading}
               error={buildSpecError}
