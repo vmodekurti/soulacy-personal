@@ -96,7 +96,7 @@ const (
 var defaultPolicy = map[string]map[string]map[string]bool{
 	RoleAdmin: {
 		ResourceAgents:      {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionEnable: true},
-		ResourceChat:        {ActionChat: true},
+		ResourceChat:        {ActionRead: true, ActionChat: true},
 		ResourceMemory:      {ActionRead: true, ActionDelete: true},
 		ResourceChannels:    {ActionRead: true, ActionWrite: true, ActionEnable: true},
 		ResourceProviders:   {ActionRead: true, ActionWrite: true},
@@ -115,7 +115,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 	},
 	RoleOperator: {
 		ResourceAgents:      {ActionRead: true, ActionWrite: true, ActionEnable: true},
-		ResourceChat:        {ActionChat: true},
+		ResourceChat:        {ActionRead: true, ActionChat: true},
 		ResourceMemory:      {ActionRead: true, ActionDelete: true},
 		ResourceChannels:    {ActionRead: true, ActionEnable: true},
 		ResourceProviders:   {ActionRead: true},
@@ -134,7 +134,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 	},
 	RoleViewer: {
 		ResourceAgents:      {ActionRead: true},
-		ResourceChat:        {ActionChat: true},
+		ResourceChat:        {ActionRead: true, ActionChat: true},
 		ResourceMemory:      {ActionRead: true},
 		ResourceChannels:    {ActionRead: true},
 		ResourceProviders:   {ActionRead: true},

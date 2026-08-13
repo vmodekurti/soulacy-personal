@@ -6,7 +6,10 @@ import (
 )
 
 func TestChatStatusReportsExperienceChecks(t *testing.T) {
-	s := newTestGateway(t, "secret")
+	// Production wires RBAC after constructing the gateway. Keep it active here
+	// so this test catches drift between the route's chat:read requirement and
+	// the static role policy.
+	s := newTestGatewayWithRBAC(t)
 
 	status, resp := gatewayJSON(t, s, http.MethodGet, "/api/v1/chat/status", "secret", "")
 	if status != http.StatusOK {

@@ -92,6 +92,14 @@ func TestHasPermissionAdminCanChat(t *testing.T) {
 	}
 }
 
+func TestHasPermissionChatRolesCanReadChatState(t *testing.T) {
+	for _, role := range []string{RoleAdmin, RoleOperator, RoleViewer} {
+		if !HasPermission(role, ResourceChat, ActionRead) {
+			t.Errorf("%s should be able to read chat state", role)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // SQLiteStore helpers
 // ---------------------------------------------------------------------------

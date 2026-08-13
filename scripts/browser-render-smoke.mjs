@@ -116,6 +116,13 @@ try {
   page.on('pageerror', err => {
     consoleErrors.push(err.message)
   })
+  const networkErrors = []
+  page.on('response', response => {
+    const status = response.status()
+    if (status >= 400 && !/\/favicon(?:\.|$)/i.test(new URL(response.url()).pathname)) {
+      networkErrors.push(`HTTP ${status} ${response.request().method()} ${response.url()}`)
+    }
+  })
 
   const routes = [
     ['dashboard', '/'],
@@ -143,6 +150,7 @@ try {
 
   for (const [name, path] of routes) {
     consoleErrors.length = 0
+    networkErrors.length = 0
     await page.goto(`${baseURL}${path}`, { waitUntil: 'networkidle', timeout: 30000 })
     const screenshotPath = join(outDir, `${name}.png`)
     await page.screenshot({ path: screenshotPath, fullPage: true })
@@ -150,9 +158,12 @@ try {
     if (!text || text.length < 20) {
       throw new Error(`${name} rendered too little text`)
     }
-    const serious = consoleErrors.filter(line =>
-      !/favicon|ResizeObserver loop|Failed to load resource: the server responded with a status of 404/i.test(line)
-    )
+    const serious = [
+      ...networkErrors,
+      ...consoleErrors.filter(line =>
+        !/favicon|ResizeObserver loop|Failed to load resource: the server responded with a status of 404/i.test(line)
+      ),
+    ]
     if (serious.length) {
       throw new Error(`${name} console error: ${serious[0]}`)
     }
