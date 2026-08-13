@@ -153,13 +153,22 @@ default queue.
 
 OS-level tools require **both** sides to opt in:
 
-1. `runtime.allow_system_tools: true` in `config.yaml`.
-2. `system_tools: true` in the agent's `SOUL.yaml`.
+1. The agent ID is listed in `runtime.allow_system_agents` in `config.yaml`.
+2. The agent declares `capabilities: [system]` in `SOUL.yaml` (the legacy
+   `system_tools: true` field remains an agent-side alias).
+
+```yaml
+# config.yaml
+runtime:
+  allow_system_agents: [maintenance-agent]
+  filesystem_roots: [/var/lib/soulacy/workspace]
+```
 
 !!! warning
     System tools execute with the gateway's OS permissions. On shared or
     internet-exposed deployments, leave them off and use narrower Python or
-    MCP tools instead.
+    MCP tools instead. Keep `filesystem_roots` narrow even for an approved
+    system agent.
 
 ## Confirmation Gates
 

@@ -113,7 +113,8 @@ curl http://localhost:18789/api/v1/costs \
   -H "Authorization: Bearer $SOULACY_API_KEY"
 
 # Filter by agent
-curl "http://localhost:18789/api/v1/costs?agent_id=assistant&period=7d"
+curl "http://localhost:18789/api/v1/costs?agent_id=assistant&since=7d" \
+  -H "Authorization: Bearer $SOULACY_API_KEY"
 ```
 
 See the [Costs API reference](../api/costs.md) for full details.

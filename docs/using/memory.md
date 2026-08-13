@@ -42,10 +42,36 @@ sy memory list --agent <agent-id>
 Brain memory is long-term, structured memory with three independent layers (toggle each in the agent editor's **Brain memory** cards):
 
 - **🕐 Episodic** — a record of past tasks and their outcomes, injected as "Recent task history". Written automatically after each reply; you can also write records by hand.
-- **🔍 Semantic** — knowledge chunks retrieved by vector search relevant to the current task.
+- **🔍 Semantic** — agent-scoped records retrieved by persistent native
+  sqlite-vec similarity search. Production does not silently fall back to an
+  in-process vector index.
 - **📋 Procedural** — a markdown rulebook of operating rules, injected into the system prompt as `## Operating rules`.
 
 Each layer has a `max_inject` knob (how many items to inject per task). Brain memory requires a memory directory — if the Brain Mem page warns it isn't enabled, set the `SOULACY_MEMORY_DIR` environment variable and restart.
+
+### Semantic storage and embeddings
+
+The embedded semantic backend is the effective default:
+
+```yaml
+vector:
+  backend: sqlite-vec
+  dims: 768
+
+knowledge:
+  embedding_provider: ollama
+  embedding_model: nomic-embed-text
+```
+
+Entries are written to the workspace SQLite archive and remain available after
+restart. Searches include the agent ID as a storage-level filter, preventing
+one agent's semantic records from entering another agent's results. If the
+vector store or embedder cannot initialize, semantic writes and retrieval fail
+explicitly and startup logs explain why.
+
+Changing embedding models can change vector dimensions. Update `vector.dims`
+to match and rebuild or reindex affected semantic content. See
+[Storage & backends](../configuration/storage.md).
 
 ### The Brain Mem page
 

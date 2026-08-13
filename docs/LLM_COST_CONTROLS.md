@@ -177,3 +177,19 @@ The admin key is read only from the named environment variable and is never
 written to usage records, reconciliation reports, or logs. Re-imports are
 idempotent. Variance above the configured threshold degrades cost readiness
 and participates in the existing operator alert flow.
+
+## Deployment verification
+
+Before enabling unattended agents:
+
+1. call `GET /api/v1/costs/status` and confirm accounting attribution is 100%;
+2. ensure every permitted model has current pricing metadata;
+3. verify recorded plus reserved spend is below the configured thresholds;
+4. exercise `POST /api/v1/costs/estimate` with representative token counts;
+5. confirm provider concurrency, TPM, retry, and circuit-breaker settings match
+   the provider account limits;
+6. compare the first full UTC day against the provider invoice or enable
+   reconciliation.
+
+Budget enforcement is a safety boundary, not a billing system of record.
+Provider invoices remain authoritative.

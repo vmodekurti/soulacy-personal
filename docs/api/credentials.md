@@ -1,119 +1,108 @@
 # Credentials API
 
-The credential vault stores sensitive values (API keys, tokens, passwords) encrypted with AES-256-GCM. Agents can reference stored credentials by name at runtime without embedding secrets in SOUL.yaml.
+The credential vault stores agent-scoped sensitive values encrypted at rest.
+The API deliberately separates listing a key name from revealing its value.
+Global credential scope is denied on these routes; always provide an agent ID.
 
-## Store a credential
+All values sent to or returned by the vault API are base64-encoded bytes.
 
-```
-POST /v1/credentials
-Authorization: Bearer sy_your-server-key
+## Store or replace a credential
+
+```http
+POST /api/v1/credentials/{agentID}
+Authorization: Bearer <token>
 Content-Type: application/json
 ```
 
-### Request
-
 ```json
 {
-  "name": "openai-prod",
-  "value": "sk-...",
-  "description": "OpenAI production API key"
+  "key": "openai_api_key",
+  "value": "c2stLi4u"
 }
 ```
 
-### Response
+A successful write returns `204 No Content` and emits an audit event.
 
-```json
-{
-  "id": "cred_abc123",
-  "name": "openai-prod",
-  "description": "OpenAI production API key",
-  "created_at": "2026-05-28T10:00:00Z"
-}
-```
+## List credential names
 
-The plaintext `value` is never returned after creation.
-
----
-
-## List credentials
-
-```
-GET /v1/credentials
+```http
+GET /api/v1/credentials/{agentID}
 Authorization: Bearer <token>
 ```
 
-### Response
-
 ```json
 {
-  "credentials": [
-    {
-      "id": "cred_abc123",
-      "name": "openai-prod",
-      "description": "OpenAI production API key",
-      "created_at": "2026-05-28T10:00:00Z",
-      "last_rotated_at": null
-    }
-  ]
+  "keys": ["openai_api_key"]
 }
 ```
 
----
+This route does not decrypt or return values.
+
+## Reveal a credential value
+
+Revealing plaintext requires the credential-reveal RBAC action and an explicit
+confirmation header. The operation is audited.
+
+```http
+GET /api/v1/credentials/{agentID}/{key}
+Authorization: Bearer <token>
+X-Soulacy-Confirm-Credential-Reveal: true
+```
+
+```json
+{
+  "value": "c2stLi4u"
+}
+```
+
+Decode the value only in the trusted process that needs it. Avoid printing it
+to a terminal, log, support bundle, or CI output.
 
 ## Delete a credential
 
-```
-DELETE /v1/credentials/{id}
-Authorization: Bearer sy_your-server-key
-```
-
-### Response
-
-```
-204 No Content
+```http
+DELETE /api/v1/credentials/{agentID}/{key}
+Authorization: Bearer <token>
 ```
 
----
+A successful delete returns `204 No Content`.
 
 ## Rotate a credential
 
-```
-PUT /v1/credentials/{id}/rotate
-Authorization: Bearer sy_your-server-key
-Content-Type: application/json
-```
+Versioned vault backends can rotate a key without accepting a new plaintext
+value from the caller:
 
-### Request
+```http
+POST /api/v1/credentials/{agentID}/{key}/rotate
+Authorization: Bearer <token>
+```
 
 ```json
 {
-  "value": "sk-new-key-value"
+  "agent_id": "weather-expert",
+  "key": "openai_api_key",
+  "new_version": 2
 }
 ```
 
-### Response
+List retained versions with:
 
-```json
-{
-  "id": "cred_abc123",
-  "name": "openai-prod",
-  "rotated_at": "2026-05-28T12:00:00Z"
-}
+```http
+GET /api/v1/credentials/{agentID}/{key}/versions
+Authorization: Bearer <token>
 ```
 
----
+Backends without versioning return `501 Not Implemented` for rotation and
+version listing.
 
 ## Using credentials
 
-Use stored credentials from gateway/provider/channel configuration rather than
-embedding secrets in `SOUL.yaml`. Agents should select providers by name:
+Keep secrets out of `SOUL.yaml`. Select a configured provider by name and let
+the runtime resolve its credential through the configured provider/vault path:
 
 ```yaml
 id: my-agent
 llm:
   provider: openai
-  model: gpt-4o
+  model: gpt-4.1-mini
 ```
-
-At runtime, the configured provider supplies the decrypted credential to the LLM
-adapter.

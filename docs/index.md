@@ -2,10 +2,11 @@
 
 **One binary. YAML agents. Runs anywhere — no cloud required.**
 
-!!! info "Documentation version"
-    These pages describe **Soulacy v0.1.8**. When running an older installation,
-    check `sy version` and review the [upgrade guide](deployment/upgrades.md)
-    before following configuration examples.
+!!! info "Documentation channel"
+    These pages track the current `main` branch and may describe capabilities
+    newer than the latest tagged binary. Check `sy version`, review
+    [Recent platform updates](recent-updates.md), and use the
+    [upgrade guide](deployment/upgrades.md) before changing a production host.
 
 Soulacy is a self-hosted AI agent runtime. Write an agent in a single YAML file, point it at any LLM (Ollama, OpenAI, Anthropic, Gemini, or anything OpenAI-compatible), and run it from a laptop, a $5 VPS, or a Raspberry Pi — with a full web GUI, chat, voice, scheduling, memory, skills, and plugins built into the one binary.
 
@@ -21,8 +22,9 @@ Think of it as Ollama — but for agents.
 - **Run it** — deploy to Telegram, Slack, Discord, WhatsApp, HTTP, or a schedule.
   One binary, no cloud required.
 - **Fix and learn** — when a run fails, **Debug in Studio** explains it plainly and
-  proposes a fix you can preview; successful repairs become regression tests, and
-  the [learning loop](using/memory.md) shows what Soulacy has learned.
+  proposes a fix you can preview; successful repairs become regression tests,
+  explicit 👍/👎 feedback improves workflow-pattern ranking, and the
+  [learning loop](studio-learning-memory.md) shows what Soulacy has learned.
 
 ```bash
 # install, set up, talk to your first agent — under five minutes
@@ -76,7 +78,9 @@ sy chat --agent assistant "What can you do?"
 
     ---
 
-    Session/agent/global memory scopes, semantic vector search, and versioned procedural rulebooks the agent can update — with locks, diffs, and rollback.
+    Session/agent/global memory scopes, persistent native sqlite-vec retrieval,
+    and versioned procedural rulebooks — with locks, diffs, rollback, and
+    reviewable human feedback.
 
     [:octicons-arrow-right-24: Memory & rulebooks](using/memory.md)
 
@@ -100,7 +104,9 @@ sy chat --agent assistant "What can you do?"
 
     ---
 
-    Every run emits schema-versioned events: live activity feed, signed webhooks, costs per agent, rate limits, RBAC, audit logs.
+    Every run emits schema-versioned events: live activity, signed webhooks,
+    atomic spend reservations, model allowlists, rate limits, object-scoped
+    RBAC, audit logs, and readiness checks.
 
     [:octicons-arrow-right-24: Events & webhooks](configuration/events.md)
 

@@ -17,6 +17,11 @@ layers so those decisions are visible and reviewable.
 | Python sandbox | Resource and process limits for agent-local Python tools | `runtime.sandbox` and [Tool sandbox](sandbox.md) |
 | Untrusted-content handling | Prompt-injection signals in fetched or external material | Security Doctor, run findings, and audit records |
 | Audit trail | What ran, who approved it, and what failed | **Activity**, **Logs**, and [Audit records](audit.md) |
+| Object authorization | Which agent/session records a principal may read or mutate | RBAC agent grants and authenticated session ownership |
+| Filesystem confinement | Path traversal, symlink escape, and writes outside approved roots | Runtime filesystem roots and approved workspace paths |
+| Outbound network policy | Metadata, link-local, private-network, DNS, and redirect abuse | SSRF policy applied before requests and on every redirect |
+| Data minimization | Secrets leaking through logs, learning stores, attachments, or support bundles | Central redaction, bounded retention, and redacted support exports |
+| Cost admission | Runaway fan-out, retry storms, and unknown-priced inference | [LLM cost controls](../LLM_COST_CONTROLS.md) |
 
 ## Recommended production baseline
 
@@ -33,6 +38,33 @@ layers so those decisions are visible and reviewable.
 6. Run `sy doctor` after installation and after changes to providers, channels,
    storage, or the service account.
 7. Back up the workspace and test restore before upgrading a production host.
+8. Set `costs.enforcement_mode: hard` and block unknown pricing before allowing
+   unattended or high-fan-out agents.
+9. Check both `GET /api/v1/readiness` and
+   `GET /api/v1/security/readiness`; production readiness fails when privileged
+   agents are exposed to shared channels without explicit acknowledgement.
+
+## Filesystem and outbound-network boundaries
+
+File tools resolve paths against canonical configured roots. Relative paths
+start at the first root; traversal and symlink escapes are rejected. Writes
+outside those roots require confirmation or are denied according to the agent
+policy. Executing a script remains privileged even when the script lives in a
+temporary directory.
+
+HTTP tools validate their destination before connecting and again on every
+redirect. Cloud metadata, link-local, and carrier-grade NAT ranges are blocked;
+private ranges follow the configured SSRF policy. Host allowlists narrow
+intentional exceptions but do not turn redirects into an unchecked path.
+
+## Redaction and retention
+
+The same redaction layer is applied to action logs, audit records, learned
+lessons and preferences, feedback comments, attachments, and support bundles.
+Persistent stores use bounded retention, and sensitive workspace outputs are
+created with restrictive file permissions. Treat a generated support bundle as
+sensitive operational evidence even though known credential patterns are
+removed.
 
 ## Interactive replies versus outbound delivery
 

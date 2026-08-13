@@ -41,12 +41,13 @@ storage:
 
 ## Vector search (`vector:`)
 
-Semantic memory search. When `vector.backend` is empty, the legacy
-`memory.vector_db` setting is used for backwards compatibility.
+Semantic memory search. When `vector.backend` and the legacy
+`memory.vector_db` setting are both empty, runtime selects the built-in
+`sqlite-vec` backend. This keeps semantic agent memory persistent by default.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `backend` | `""` (inherits `memory.vector_db`) | `sqlite-vec`, `qdrant`, or `external` |
+| `backend` | `sqlite-vec` (effective runtime default) | `sqlite-vec`, `qdrant`, or `external` |
 | `url` | — | Qdrant base URL, e.g. `http://localhost:6333` |
 | `collection` | — | Qdrant collection name, e.g. `soulacy_memory` |
 | `api_key` | — | Qdrant API key (optional) |
@@ -54,7 +55,7 @@ Semantic memory search. When `vector.backend` is empty, the legacy
 | `command` / `args` | — | Sidecar process (external only) |
 
 ```yaml
-# Built-in (default behaviour when memory.vector_db: sqlite-vec)
+# Built-in and recommended default
 vector:
   backend: sqlite-vec
 
@@ -155,13 +156,17 @@ The default embedding model (`nomic-embed-text`) produces 768-dimension
 vectors, matching the `vector.dims` / `memory.vector_dims` default of
 `768`. If you change embedders, keep these in sync.
 
+The empty legacy `memory.vector_db` value no longer disables the modern vector
+layer when `vector.backend` is also empty; runtime selects sqlite-vec. To use a
+different implementation, set `vector.backend` explicitly.
+
 ## Memory settings (`memory:`)
 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `dir` | `<workspace>/memory` | Base directory for file memory |
 | `sqlite_path` | `<workspace>/data/archive.db` | SQLite memory archive |
-| `vector_db` | `""` (disabled) | Legacy vector toggle: `sqlite-vec` or empty |
+| `vector_db` | `""` | Legacy compatibility toggle; the modern effective default remains sqlite-vec |
 | `vector_dims` | `768` | Embedding dimensions |
 | `max_history` | `50` | Max messages kept in hot memory |
 

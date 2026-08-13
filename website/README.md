@@ -92,6 +92,9 @@ jobs:
 Every headline claim maps back to:
 
 - Security stack: `docs/PRODUCTIZATION_REVIEW.md` §Cohort F (`internal/trust/`, `internal/injection/`, `internal/intent/`, `internal/securitydoctor/`)
+- Recent platform work: `docs/recent-updates.md`, `docs/studio-learning-memory.md`, `docs/LLM_COST_CONTROLS.md`, and the linked operational pages
+- Persistent semantic memory: `internal/app/adapters.go`, `internal/memory/vector.go`, and `internal/agentmemory/store.go`
+- Human feedback: `internal/gateway/chat_feedback.go` and `internal/learning/feedback.go`
 - Comparison chart: `docs/LAUNCH_STRATEGY.md` §3 (with cited URLs per competitor)
 - "What Soulacy is NOT": `docs/LAUNCH_STRATEGY.md` §5
 

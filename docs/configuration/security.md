@@ -8,6 +8,8 @@ server:
   allow_unauthenticated: false
 runtime:
   allow_system_agents: []
+  filesystem_roots:
+    - /var/lib/soulacy/workspace
   ssrf_protection: true
   sandbox:
     enabled: true
@@ -55,7 +57,8 @@ server:
 ```
 
 When `server.api_key` is empty and the server binds to a non-loopback host,
-Soulacy logs a startup warning because API endpoints are unauthenticated.
+startup fails unless `server.allow_unauthenticated: true` explicitly accepts
+the risk.
 
 ## Tool Execution Boundary
 
@@ -72,7 +75,9 @@ Recommended hardening:
 
 ```yaml
 runtime:
-  allow_system_tools: false
+  allow_system_agents: []
+  filesystem_roots:
+    - /var/lib/soulacy/workspace
   allowed_tool_dirs:
     - "/opt/soulacy/tools"
   sandbox:
@@ -135,8 +140,8 @@ The OS-level built-ins are split into two partitions:
   `write_file`, `download_file`. These can mutate the host or run arbitrary
   code, so they require a **double opt-in**:
 
-  1. `runtime.allow_system_tools: true` in `config.yaml` (server permit;
-     **defaults to `false`** as of SEC-3).
+  1. The agent ID appears in `runtime.allow_system_agents` in `config.yaml`
+     (server permit; the list is empty by default).
   2. `capabilities: [system]` in the agent's `SOUL.yaml`. The legacy
      `system_tools: true` flag is honoured as an alias.
 
@@ -169,6 +174,18 @@ env:
 Gateway secrets (e.g. `ANTHROPIC_API_KEY`) are NOT visible to tool code unless
 explicitly listed. Values are read from the gateway's own environment at spawn
 time; names with no value are skipped.
+
+### Filesystem roots and SSRF
+
+`runtime.filesystem_roots` is the canonical allowlist for host file tools.
+Relative paths resolve from its first entry; traversal and symlink escapes are
+rejected. Keep tool source locations in `allowed_tool_dirs` and writable agent
+data in `filesystem_roots` rather than granting a broad parent directory.
+
+With `runtime.ssrf_protection: true`, model-controlled HTTP destinations are
+checked before connecting and on every redirect. Metadata and link-local
+destinations remain blocked. Use `runtime.allow_private_hosts` only for narrow,
+reviewed internal services.
 
 ## MCP and Built-in Allowlists
 
@@ -210,7 +227,9 @@ server:
   api_key: "sy_replace_with_a_long_random_secret"
 
 runtime:
-  allow_system_tools: false
+  allow_system_agents: []
+  filesystem_roots:
+    - /var/lib/soulacy/workspace
   allowed_tool_dirs:
     - "/opt/soulacy/tools"
   sandbox:

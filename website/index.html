@@ -3,20 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Soulacy — The agent framework you can put in production without a security memo</title>
-  <meta name="description" content="Soulacy is a local-first agent operating system. Single Go binary. YAML agents. A shipped defense-in-depth security stack — envelope, injection scanner, intent gate, red-team pack, Security Doctor. Runs on your laptop, a $5 VPS, or a Raspberry Pi." />
+  <title>Soulacy — Secure, self-hosted AI agents in one Go binary</title>
+  <meta name="description" content="Build and run self-hosted AI agents with Studio, native MCP, persistent sqlite-vec memory, human feedback learning, governed LLM spend, and defense-in-depth runtime controls—all in one Go binary." />
   <link rel="canonical" href="https://soulacy.io/" />
   <link rel="icon" type="image/svg+xml" href="https://soulacy.io/favicon.svg" />
 
   <!-- Open Graph / Social -->
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Soulacy" />
-  <meta property="og:title" content="Soulacy — The agent framework you can put in production without a security memo" />
-  <meta property="og:description" content="Local-first agent framework with a shipped defense-in-depth security stack. Single Go binary. YAML agents. Runs anywhere Go runs." />
+  <meta property="og:title" content="Soulacy — Secure, self-hosted AI agents in one Go binary" />
+  <meta property="og:description" content="Local-first agents with Studio, native MCP, persistent semantic memory, feedback learning, cost controls, and a defense-in-depth runtime." />
   <meta property="og:url" content="https://soulacy.io/" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Soulacy" />
-  <meta name="twitter:description" content="The agent framework you can put in production without a security memo." />
+  <meta name="twitter:description" content="Secure, self-hosted AI agents with persistent memory and governed LLM spend." />
 
   <script>
     // Inline script to prevent theme flash
@@ -141,6 +141,7 @@
         Soulacy
       </a>
       <div class="hidden md:flex items-center gap-6 text-sm text-ink-400">
+        <a href="#recent" class="hover:text-ink-100">What's new</a>
         <a href="#security" class="hover:text-ink-100">Security</a>
         <a href="#compare"  class="hover:text-ink-100">Compare</a>
         <a href="#install"  class="hover:text-ink-100">Install</a>
@@ -163,7 +164,7 @@
     <div class="max-w-6xl mx-auto px-5 pt-16 md:pt-24 pb-16 md:pb-20">
       <div class="max-w-3xl">
         <div class="mb-5 inline-flex items-center gap-2 text-xs">
-          <span class="chip chip-green">v0.1.8</span>
+          <span class="chip chip-green">v0.1.10</span>
           <span class="chip">local-first agent OS</span>
           <span class="chip">Apache 2.0</span>
         </div>
@@ -172,7 +173,7 @@
           put in production <span class="gradient-text">without a security memo.</span>
         </h1>
         <p class="mt-5 text-lg md:text-xl text-ink-400 leading-relaxed">
-          Soulacy is a <strong class="text-ink-100">local-first agent operating system</strong>: single Go binary, YAML agents, a shipped defense-in-depth security stack, and a healing Studio. Runs on your laptop, a $5 VPS, or a Raspberry Pi.
+          Soulacy is a <strong class="text-ink-100">local-first agent operating system</strong>: one Go binary, YAML agents, native MCP, persistent semantic memory, governed LLM spend, and a Studio that learns from proven runs and explicit feedback.
         </p>
         <div class="mt-8 flex flex-wrap items-center gap-3">
           <a href="#install" class="inline-flex items-center rounded-xl bg-wire-500 hover:bg-wire-600 text-white px-5 py-3 text-sm font-medium shadow-glow-wire">
@@ -285,6 +286,57 @@
     </div>
   </section>
 
+  <!-- ── RECENT PLATFORM UPDATES ───────────────────────────────────────────── -->
+  <section id="recent" class="border-t border-white/5 bg-ink-900/40">
+    <div class="max-w-6xl mx-auto px-5 py-16 md:py-24">
+      <div class="max-w-3xl">
+        <div class="chip chip-green mb-4">recent platform work</div>
+        <h2 class="text-3xl md:text-4xl font-bold tracking-tight">Memory that persists. Learning you control. Spend you can bound.</h2>
+        <p class="mt-4 text-ink-400 text-lg leading-relaxed">
+          The latest mainline work strengthens Soulacy from model call to operator review: semantic memory survives restarts, every inference path shares one cost governor, and human feedback improves reusable workflow evidence without silently rewriting an agent.
+        </p>
+      </div>
+
+      <div class="mt-10 grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div class="card p-5">
+          <div class="text-lg mb-2">🧠</div>
+          <h3 class="font-semibold text-ink-100">Native sqlite-vec memory</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Agent-scoped semantic records live in the embedded SQLite archive and remain searchable after restart. Production no longer silently falls back to an in-memory vector index.</p>
+        </div>
+        <div class="card p-5">
+          <div class="text-lg mb-2">👍</div>
+          <h3 class="font-semibold text-ink-100">Human feedback learning</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Rate completed Chat responses helpful or unhelpful. Durable, redacted signals boost or suppress matching workflow patterns; written guidance stays pending until reviewed.</p>
+        </div>
+        <div class="card p-5">
+          <div class="text-lg mb-2">🧭</div>
+          <h3 class="font-semibold text-ink-100">Studio macro-memory</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Studio distills successful multi-tool runs, learns repeated authoring preferences, retrieves semantically related repair lessons, and warns when a model/strategy pairing is historically unreliable.</p>
+        </div>
+        <div class="card p-5">
+          <div class="text-lg mb-2">💳</div>
+          <h3 class="font-semibold text-ink-100">LLM cost admission</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Reserve worst-case spend before calling a provider. Enforce daily, monthly, per-user, and per-agent budgets plus pricing policy, output ceilings, TPM, concurrency, and circuit breakers.</p>
+        </div>
+        <div class="card p-5">
+          <div class="text-lg mb-2">🔐</div>
+          <h3 class="font-semibold text-ink-100">Hardened runtime boundaries</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Object-scoped RBAC, session ownership, canonical filesystem roots, redirect-aware SSRF protection, privileged execution isolation, redaction, retention, and production readiness checks.</p>
+        </div>
+        <div class="card p-5">
+          <div class="text-lg mb-2">⚙️</div>
+          <h3 class="font-semibold text-ink-100">Go 1.26.5 toolchain</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Source builds, CI, release workflows, containers, and installers are aligned on Go 1.26.5. Binary installs remain dependency-free.</p>
+        </div>
+      </div>
+
+      <div class="mt-10 flex items-center gap-3 text-sm text-ink-400">
+        <span class="w-8 h-px bg-white/10"></span>
+        <a href="https://docs.soulacy.io/recent-updates/" class="text-ink-100 hover:text-wire-500">Read the complete platform update →</a>
+      </div>
+    </div>
+  </section>
+
   <!-- ── SECURITY DEEP DIVE ─────────────────────────────────────────────────── -->
   <section id="security" class="border-t border-white/5">
     <div class="max-w-6xl mx-auto px-5 py-16 md:py-24">
@@ -292,7 +344,7 @@
         <div class="chip mb-4">Why we exist</div>
         <h2 class="text-3xl md:text-4xl font-bold tracking-tight">A shipped defense-in-depth security stack.</h2>
         <p class="mt-4 text-ink-400 text-lg leading-relaxed">
-          Prompt injection is <strong class="text-ink-100">up 340% YoY</strong> and ranks <strong class="text-ink-100">#1 on OWASP LLM Top 10</strong>. Every other framework treats it as the operator's problem. Soulacy ships seven layers — not as a bolt-on plugin, but as a first-class product surface.
+          Self-hosting does not make agent actions safe by itself. Soulacy treats untrusted content, capability scope, confirmation, filesystem access, outbound networking, identity, audit, and spend admission as first-class runtime boundaries—not optional plugins.
         </p>
       </div>
 
@@ -572,7 +624,7 @@
         <div class="card p-5">
           <div class="text-lg mb-2">🧭</div>
           <h3 class="font-semibold text-ink-100">Studio</h3>
-          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Visual + LLM-generated workflow authoring. 11 deterministic contract checks. Build-until-it-works repair loop. Debug in Studio replays failed runs with diff-preview repairs you approve before applying.</p>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Intent-first agent authoring with authoritative trigger, destination, provider, and model controls. Auto is the default; fixed-graph Workflow stays explicit and experimental. Debug repairs remain diff-previewed and reviewable.</p>
         </div>
         <div class="card p-5">
           <div class="text-lg mb-2">📡</div>
@@ -587,7 +639,7 @@
         <div class="card p-5">
           <div class="text-lg mb-2">🧠</div>
           <h3 class="font-semibold text-ink-100">Learning loop</h3>
-          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Failed runs propose reviewable lessons. Accepted skills get reused; longitudinal reuse counters and repeated-error reduction render on the Memory portfolio panel.</p>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Successful runs become sanitized structural patterns; accepted repairs become semantic lessons; repeated edits become user-scoped preferences; thumbs feedback adjusts evidence without auto-editing the agent.</p>
         </div>
         <div class="card p-5">
           <div class="text-lg mb-2">🔌</div>
@@ -595,9 +647,9 @@
           <p class="mt-2 text-sm text-ink-400 leading-relaxed">Connect to any MCP server (stdio or HTTP). Expose Soulacy itself as an MCP server via <span class="code-font text-ink-100">sy mcp serve</span>.</p>
         </div>
         <div class="card p-5">
-          <div class="text-lg mb-2">📦</div>
-          <h3 class="font-semibold text-ink-100">Package v2</h3>
-          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Calendar versioning. Namespaced publisher IDs. Install-time secret gate refuses import when required providers, channels, or MCP servers are missing.</p>
+          <div class="text-lg mb-2">📊</div>
+          <h3 class="font-semibold text-ink-100">Cost governance</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Prompt-free estimates, atomic reservations, hard or soft budgets, chargeback dimensions, pricing coverage, provider reconciliation, and readiness alerts across every inference path.</p>
         </div>
       </div>
     </div>
@@ -650,7 +702,7 @@
         Put agents in production.<br />Not on a whiteboard.
       </h2>
       <p class="mt-5 text-ink-400 text-lg max-w-2xl mx-auto">
-        Single binary. YAML agents. Defense-in-depth security. Everything shipped, versioned, and running in under a minute.
+        Single binary. YAML agents. Persistent memory. Governed inference. Defense-in-depth runtime controls. Running in under a minute.
       </p>
       <div class="mt-8 flex flex-wrap gap-3 justify-center">
         <a href="#install" class="inline-flex items-center rounded-xl bg-wire-500 hover:bg-wire-600 text-white px-6 py-3.5 text-sm font-medium shadow-glow-wire">Install now</a>
@@ -683,6 +735,7 @@
       <div>
         <div class="text-xs text-ink-400 font-semibold uppercase tracking-wide mb-3">Product</div>
         <ul class="space-y-2 text-sm">
+          <li><a href="#recent" class="hover:text-ink-100">What's new</a></li>
           <li><a href="#security" class="hover:text-ink-100">Security stack</a></li>
           <li><a href="#compare" class="hover:text-ink-100">Compare</a></li>
           <li><a href="#install" class="hover:text-ink-100">Install</a></li>
@@ -693,6 +746,7 @@
         <div class="text-xs text-ink-400 font-semibold uppercase tracking-wide mb-3">Learn</div>
         <ul class="space-y-2 text-sm">
           <li><a href="https://docs.soulacy.io" class="hover:text-ink-100">Docs</a></li>
+          <li><a href="https://docs.soulacy.io/recent-updates/" class="hover:text-ink-100">Recent updates</a></li>
           <li><a href="https://docs.soulacy.io/getting-started/quickstart/" class="hover:text-ink-100">Quickstart</a></li>
           <li><a href="https://docs.soulacy.io/using/studio/" class="hover:text-ink-100">Studio</a></li>
           <li><a href="https://docs.soulacy.io/security/" class="hover:text-ink-100">Security</a></li>

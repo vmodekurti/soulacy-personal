@@ -1,107 +1,109 @@
 # Auth API
 
-## Login
+Soulacy supports shared API-key authentication and short-lived JWT access
+tokens. All protected requests use the standard bearer header:
 
-Issue a short-lived JWT.
-
+```http
+Authorization: Bearer <api-key-or-access-token>
 ```
-POST /v1/auth/login
-```
 
-### Request
+## Exchange the server key for JWTs
+
+This endpoint is available when `auth.mode: jwt` is enabled. It exchanges the
+configured static server API key for an access/refresh pair.
+
+```http
+POST /api/v1/auth/token
+Content-Type: application/json
+```
 
 ```json
 {
-  "email": "user@example.com",
-  "password": "secret"
+  "api_key": "sy_your-server-key"
 }
 ```
-
-### Response
 
 ```json
 {
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "expires_at": "2026-05-29T12:00:00Z",
-  "role": "operator"
+  "access_token": "eyJ...",
+  "refresh_token": "opaque-refresh-token",
+  "expires_in": 900,
+  "token_type": "Bearer"
 }
 ```
 
-Use the `token` value in subsequent requests: `Authorization: Bearer eyJ...`
+## Refresh an access token
 
----
+Refresh tokens are single-use: a successful refresh rotates the refresh token
+and returns a replacement alongside the new access token.
 
-## Create API key
-
-Create a managed API key (`sk_` prefix). Requires `admin` role.
-
-```
-POST /v1/admin/api-keys
-Authorization: Bearer sy_your-server-key
+```http
+POST /api/v1/auth/refresh
+Content-Type: application/json
 ```
 
-### Request
+```json
+{
+  "refresh_token": "opaque-refresh-token"
+}
+```
+
+## Inspect the current identity
+
+```http
+GET /api/v1/auth/me
+Authorization: Bearer <token>
+```
+
+The response includes the authentication `mode`, subject and role. JWT
+identities may also include `email`, `iat`, and `exp`.
+
+## Create a managed API key
+
+Managed keys use the `sk_` prefix. Creating and managing them requires config
+administration permission.
+
+```http
+POST /api/v1/admin/api-keys
+Authorization: Bearer <admin-token>
+Content-Type: application/json
+```
 
 ```json
 {
   "name": "ci-bot",
-  "role": "operator"
+  "scopes": ["read", "write"]
 }
 ```
 
-### Response
+The `201 Created` response contains the key record and a plaintext `key`. Save
+that value immediately; list operations never return it again.
+
+## List managed API keys
+
+```http
+GET /api/v1/admin/api-keys
+Authorization: Bearer <admin-token>
+```
+
+Pass `?include_revoked=true` to include revoked records.
+
+## Revoke a managed API key
+
+```http
+DELETE /api/v1/admin/api-keys/{id}
+Authorization: Bearer <admin-token>
+```
+
+Successful revocation returns:
 
 ```json
 {
-  "id": "ak_abc123",
-  "name": "ci-bot",
-  "key": "sk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-  "role": "operator",
-  "created_at": "2026-05-28T10:00:00Z"
+  "status": "revoked",
+  "id": "<id>"
 }
 ```
 
-!!! warning "Save the key"
-    The `key` value is shown only once. Store it securely — it cannot be retrieved later.
-
----
-
-## List API keys
-
-```
-GET /v1/admin/api-keys
-Authorization: Bearer sy_your-server-key
-```
-
-### Response
-
-```json
-{
-  "keys": [
-    {
-      "id": "ak_abc123",
-      "name": "ci-bot",
-      "role": "operator",
-      "created_at": "2026-05-28T10:00:00Z",
-      "last_used_at": "2026-05-28T11:30:00Z"
-    }
-  ]
-}
-```
-
-The plaintext key is never returned after creation.
-
----
-
-## Revoke API key
-
-```
-DELETE /v1/admin/api-keys/{id}
-Authorization: Bearer sy_your-server-key
-```
-
-### Response
-
-```
-204 No Content
-```
+!!! warning "Do not expose validation endpoints"
+    API-key management routes are administrative surfaces. Keep them behind
+    Soulacy authentication and a trusted network boundary.

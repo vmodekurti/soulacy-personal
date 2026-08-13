@@ -48,7 +48,7 @@ credential as `?api_key=` on `/ws/events`.
 |-------|-------------|
 | `GET /ping` | Unauthenticated liveness + auth posture |
 | `GET /api/v1/health` | Authenticated health check |
-| `POST /api/v1/auth/token` · `POST /auth/refresh` · `GET /auth/me` | JWT issuance, rotation, identity ([Auth](auth.md)) |
+| `POST /api/v1/auth/token` · `POST /api/v1/auth/refresh` · `GET /api/v1/auth/me` | JWT issuance, rotation, identity ([Auth](auth.md)) |
 
 ### Agents
 
@@ -162,6 +162,10 @@ Task CRUD, runs, artifacts (incl. download), comments — see
 | `GET /ws/events` (WebSocket) | Live event stream ([Events](../configuration/events.md)) |
 | `GET /voice/status` · `POST /voice/ephemeral` | Voice availability + ephemeral client keys ([Voice](../configuration/voice.md)) |
 | `GET /costs` · `GET /costs/:agent_id` | Token-cost summaries ([Costs](costs.md)) |
+| `GET /costs/status` | Pricing, budget, reservation, attribution, forecast, and reconciliation readiness |
+| `POST /costs/estimate` | Prompt-free estimate from provider/model and token counts |
+| `GET /costs/usage` · `GET /costs/chargeback` | Bounded call records and grouped allocation |
+| `GET /costs/reconciliations` · `POST /costs/reconcile` | Inspect or record provider-billing reconciliation |
 | `GET /rate-limit/status` | Current quota state |
 | `GET /metrics` | Prometheus metrics (same auth as the API) |
 
