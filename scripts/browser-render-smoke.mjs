@@ -119,7 +119,11 @@ try {
   const networkErrors = []
   page.on('response', response => {
     const status = response.status()
-    if (status >= 400 && !/\/favicon(?:\.|$)/i.test(new URL(response.url()).pathname)) {
+    const pathname = new URL(response.url()).pathname
+    const expectedEmptyMetrics = status === 404 &&
+      response.request().method() === 'GET' &&
+      /^\/api\/v1\/runs\/[^/]+\/metrics$/.test(pathname)
+    if (status >= 400 && !/\/favicon(?:\.|$)/i.test(pathname) && !expectedEmptyMetrics) {
       networkErrors.push(`HTTP ${status} ${response.request().method()} ${response.url()}`)
     }
   })
