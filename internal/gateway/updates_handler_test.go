@@ -29,7 +29,7 @@ func TestTriggerUpdatesCheckMocked(t *testing.T) {
 	s, _ := newTestGatewayWithLLM(t, "secret")
 
 	// Set a mock manifest URL
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		manifest := updates.UpdateManifest{
 			Product: "soulacy",
@@ -46,6 +46,9 @@ func TestTriggerUpdatesCheckMocked(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(manifest)
 	}))
 	defer ts.Close()
+	oldClient := updates.HTTPClient
+	updates.HTTPClient = ts.Client()
+	t.Cleanup(func() { updates.HTTPClient = oldClient })
 
 	s.cfg.Updates.ManifestURL = ts.URL
 

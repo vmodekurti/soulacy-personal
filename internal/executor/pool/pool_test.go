@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 func newTestPool(t *testing.T) *Pool {
@@ -19,6 +20,40 @@ func newTestPool(t *testing.T) *Pool {
 	}
 	t.Cleanup(func() { _ = p.Close() })
 	return p
+}
+
+func TestWorkerKillWaitsForPipeReader(t *testing.T) {
+	p := newTestPool(t)
+	w := <-p.workers
+	result := make(chan error, 1)
+	go func() {
+		_, err := w.send(map[string]string{
+			"inline":   "import time\ndef run(inputs):\n    time.sleep(0.05)\n    return 'x' * 900000\n",
+			"funcName": "run",
+			"argsJSON": "{}",
+		})
+		result <- err
+	}()
+	// Ensure send entered its pipe read before cancellation.
+	time.Sleep(10 * time.Millisecond)
+	killed := make(chan struct{})
+	go func() {
+		w.kill()
+		close(killed)
+	}()
+	select {
+	case <-killed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker kill deadlocked waiting for stdout reader")
+	}
+	select {
+	case err := <-result:
+		if err != nil && strings.Contains(strings.ToLower(err.Error()), "file already closed") {
+			t.Fatalf("Wait closed stdout while reader was active: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("stdout reader did not finish before kill returned")
+	}
 }
 
 // Regression: the documented inline signature `def run(inputs):` (a single

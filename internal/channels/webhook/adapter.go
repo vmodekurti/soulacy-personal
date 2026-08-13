@@ -69,7 +69,7 @@ func New(id, endpoint, method string, headers map[string]string, template, secre
 		headers:  headers,
 		template: template,
 		secret:   strings.TrimSpace(secret),
-		client:   &http.Client{Timeout: timeout},
+		client:   netguard.NewHTTPClient(timeout, false, nil),
 	}, nil
 }
 

@@ -256,6 +256,9 @@ func (s *Server) handleChatArtifacts(c *fiber.Ctx) error {
 	if agentID == "" || sessionID == "" {
 		return s.errMsg(c, fiber.StatusBadRequest, "agent_id and session_id are required")
 	}
+	if err := s.requireSession(c, agentID, sessionID); err != nil {
+		return err
+	}
 	arts, err := s.listChatArtifacts(agentID, sessionID)
 	if err != nil {
 		if fe, ok := err.(*fiber.Error); ok {
@@ -277,6 +280,9 @@ func (s *Server) handleChatArtifactDownload(c *fiber.Ctx) error {
 	requested := strings.TrimSpace(c.Query("path"))
 	if agentID == "" || sessionID == "" || requested == "" {
 		return s.errMsg(c, fiber.StatusBadRequest, "agent_id, session_id, and path are required")
+	}
+	if err := s.requireSession(c, agentID, sessionID); err != nil {
+		return err
 	}
 	arts, err := s.listChatArtifacts(agentID, sessionID)
 	if err != nil {

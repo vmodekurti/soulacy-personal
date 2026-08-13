@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net"
@@ -131,7 +132,9 @@ type Server struct {
 	costStore *costs.Store
 
 	// runReg tracks cancellable in-flight chat/stream runs (Story #22).
-	runReg *runRegistry
+	runReg         *runRegistry
+	sessionOwnerMu sync.RWMutex
+	sessionOwners  map[string]sessionOwner
 
 	// workboardStore is the optional Kanban task store (Story 5). Wired via
 	// SetWorkboardStore after construction. When nil, /api/v1/workboard
@@ -161,7 +164,18 @@ type Server struct {
 	// voiceMinter is the realtime-voice control plane (Story 11). Wired via
 	// SetVoiceMinter; nil = voice unavailable (graceful fallback).
 	// Guarded by pluginMu (same wire-after-New lifecycle).
-	voiceMinter VoiceMinter
+	voiceMinter           VoiceMinter
+	workflowDistiller     *studio.WorkflowDistiller
+	strategyCollector     *studio.StrategyFitCollector
+	lessonStoreOnce       sync.Once
+	lessonStoreCached     *studio.LessonStore
+	preferenceStoreOnce   sync.Once
+	preferenceStoreCached *studio.PreferenceStore
+	generationProofMu     sync.Mutex
+	generationProofs      map[string]generationProofRecord
+	preferenceJobs        chan preferenceMineJob
+	preferenceJobsWG      sync.WaitGroup
+	learningReplayWG      sync.WaitGroup
 }
 
 // New creates and configures the Fiber server but does not start listening.
@@ -184,21 +198,36 @@ func New(
 	log *zap.Logger,
 ) *Server {
 	s := &Server{
-		cfg:         cfg,
-		cfgPath:     cfgPath,
-		engine:      engine,
-		loader:      loader,
-		llmRouter:   llmRouter,
-		channels:    chanReg,
-		scheduler:   sched,
-		httpChan:    httpChan,
-		waChan:      waChan,
-		skillLoader: skillLoader,
-		actions:     actions,
-		mcp:         mcpClient,
-		hub:         hub,
-		log:         log,
-		runReg:      newRunRegistry(),
+		cfg:              cfg,
+		cfgPath:          cfgPath,
+		engine:           engine,
+		loader:           loader,
+		llmRouter:        llmRouter,
+		channels:         chanReg,
+		scheduler:        sched,
+		httpChan:         httpChan,
+		waChan:           waChan,
+		skillLoader:      skillLoader,
+		actions:          actions,
+		mcp:              mcpClient,
+		hub:              hub,
+		log:              log,
+		runReg:           newRunRegistry(),
+		sessionOwners:    make(map[string]sessionOwner),
+		generationProofs: make(map[string]generationProofRecord),
+		preferenceJobs:   make(chan preferenceMineJob, 128),
+	}
+	go s.runPreferenceMiner()
+	if s.hub != nil {
+		s.hub.SetEventAuthorizer(s.authorizeEvent)
+		if s.studioLearningEnabled() {
+			s.workflowDistiller = studio.NewWorkflowDistiller(s.macroStore())
+			s.hub.AddObserver(s.workflowDistiller.Observe)
+			s.strategyCollector = studio.NewStrategyFitCollector(s.strategyFitStore(), s.resolveAgentStrategy)
+			s.hub.AddObserver(s.strategyCollector.Observe)
+			s.learningReplayWG.Add(1)
+			go func() { defer s.learningReplayWG.Done(); s.replayStudioLearning() }()
+		}
 	}
 	s.app = s.buildApp()
 	return s
@@ -208,6 +237,12 @@ func New(
 // given HTTP status. It is the single helper for the gateway's error responses
 // so the JSON shape stays consistent (contract tests pin this envelope).
 func (s *Server) errJSON(c *fiber.Ctx, status int, err error) error {
+	var confirmation *costs.ConfirmationRequiredError
+	if errors.As(err, &confirmation) {
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"error": confirmation.Error(), "confirmation_required": true, "estimate": confirmation,
+		})
+	}
 	return c.Status(status).JSON(fiber.Map{"error": err.Error()})
 }
 
@@ -348,18 +383,31 @@ func (s *Server) rlAgentTokenMW() fiber.Handler {
 // rbacMW returns an RBAC middleware for (resource, action). Returns a no-op
 // handler when no RBAC manager is configured, preserving backwards compatibility.
 func (s *Server) rbacMW(resource, action string) fiber.Handler {
-	if s.rbacManager == nil {
-		return func(c *fiber.Ctx) error { return c.Next() }
+	return func(c *fiber.Ctx) error {
+		if s.rbacManager == nil {
+			return c.Next()
+		}
+		return s.rbacManager.Require(resource, action)(c)
 	}
-	return s.rbacManager.Require(resource, action)
 }
 
 // rbacAgentMW returns a per-agent RBAC middleware (param "id", given action).
 func (s *Server) rbacAgentMW(action string) fiber.Handler {
-	if s.rbacManager == nil {
-		return func(c *fiber.Ctx) error { return c.Next() }
+	return func(c *fiber.Ctx) error {
+		if s.rbacManager == nil {
+			return c.Next()
+		}
+		return s.rbacManager.RequireAgent("id", action)(c)
 	}
-	return s.rbacManager.RequireAgent("id", action)
+}
+
+func (s *Server) rbacAgentFromMW(resource, action string, sources ...rbac.AgentIDSource) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		if s.rbacManager == nil {
+			return c.Next()
+		}
+		return s.rbacManager.RequireAgentFrom(resource, action, sources...)(c)
+	}
 }
 
 // authHandler returns the Fiber middleware that enforces authentication.
@@ -386,20 +434,10 @@ func (s *Server) buildApp() *fiber.App {
 		// corrupted "phantom" agents (e.g. "daily-briefing" → "e/statusiefing").
 		Immutable:   true,
 		ReadTimeout: 30 * time.Second,
-		// WriteTimeout is deliberately 0 (no fixed cap on how long a response may
-		// take to finish writing). This server legitimately holds connections open
-		// far longer than any fixed timeout:
-		//   • SSE streams — "Build until it works" (/studio/build-stream) and chat
-		//     streaming push events for minutes while the agent actually runs.
-		//   • Synchronous LLM work — /studio/compile and /studio/build call a
-		//     (often cloud) model and can easily exceed a minute.
-		// A fixed WriteTimeout (was 60s) severed these mid-flight, surfacing as a
-		// browser "network error" with no server-side failure. We instead reap
-		// genuinely idle keep-alive connections via IdleTimeout, and bound inbound
-		// request reads via ReadTimeout — so slow-client protection remains without
-		// guillotining long, legitimate responses. Per-operation limits (tool
-		// timeouts, the build attempt budget) bound the actual work.
-		WriteTimeout: 0,
+		// The HTTP deadline is the outermost configured request budget and is
+		// intentionally longer than run/step/LLM/tool. Validation rejects an
+		// inverted hierarchy before this server starts.
+		WriteTimeout: s.httpRequestTimeout(),
 		IdleTimeout:  120 * time.Second,
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
 			status := fiber.StatusInternalServerError
@@ -414,6 +452,31 @@ func (s *Server) buildApp() *fiber.App {
 
 	// --- Middleware ---
 	app.Use(fibrecover.New())
+	// Browser hardening applies to the GUI, plugin frames, API responses, and
+	// errors alike. The CSP permits only bundled code; rich-media frames remain
+	// limited to the same hosts the renderer explicitly sanitizes.
+	app.Use(func(c *fiber.Ctx) error {
+		c.Set("Content-Security-Policy", strings.Join([]string{
+			"default-src 'self'",
+			"base-uri 'none'",
+			"object-src 'none'",
+			"script-src 'self'",
+			"style-src 'self' 'unsafe-inline'",
+			"font-src 'self' data:",
+			"img-src 'self' data: blob: https:",
+			"media-src 'self' blob: https:",
+			"connect-src 'self' ws: wss:",
+			"frame-src 'self' https://www.youtube.com https://player.vimeo.com https://www.openstreetmap.org https://maps.google.com",
+			"frame-ancestors 'self'",
+			"form-action 'self'",
+			"upgrade-insecure-requests",
+		}, "; "))
+		c.Set("X-Content-Type-Options", "nosniff")
+		c.Set("Referrer-Policy", "no-referrer")
+		c.Set("Permissions-Policy", "camera=(), geolocation=(), microphone=(self), payment=(), usb=()")
+		c.Set("X-Frame-Options", "SAMEORIGIN")
+		return c.Next()
+	})
 	// Request-ID middleware: assign a fresh UUID to every inbound request
 	// (unless one is already supplied via X-Request-ID) and stash it on
 	// fiber.Ctx Locals + response header so callers + downstream logs can
@@ -518,6 +581,10 @@ func (s *Server) buildApp() *fiber.App {
 			return err
 		}
 		return s.authHandler()(c)
+	})
+	app.Use("/ws", func(c *fiber.Ctx) error {
+		c.Locals(wsPrincipalKey, websocketPrincipalFromCtx(c))
+		return c.Next()
 	})
 	app.Get("/ws/events", fws.New(s.hub.Handler))
 
@@ -683,19 +750,21 @@ func (s *Server) buildApp() *fiber.App {
 
 	// Chat — token-quota (user + agent) + per-agent RPM checks applied on top of user RPM.
 	api.Get("/chat/status", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.handleChatStatus)
-	api.Post("/chat", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.rlTokenMW(), s.rlAgentTokenMW(), s.rlAgentMW(), s.handleChat)
-	api.Post("/chat/stream", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.rlTokenMW(), s.rlAgentTokenMW(), s.rlAgentMW(), s.handleChatStream)
-	api.Get("/chat/stream", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.rlTokenMW(), s.rlAgentTokenMW(), s.rlAgentMW(), s.handleChatStream)
-	api.Post("/webhooks/:agent_id", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.rlTokenMW(), s.rlAgentTokenMW(), s.rlAgentMW(), s.handleGenericWebhook)
+	api.Post("/chat", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{BodyField: "agent_id"}), s.rlTokenMW(), s.rlAgentTokenMW(), s.rlAgentMW(), s.handleChat)
+	api.Post("/chat/feedback", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{BodyField: "agent_id"}), s.handleChatFeedback)
+	api.Get("/learning/feedback", s.rbacMW(rbac.ResourceMemory, rbac.ActionRead), s.handleListChatFeedback)
+	api.Post("/chat/stream", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{BodyField: "agent_id"}), s.rlTokenMW(), s.rlAgentTokenMW(), s.rlAgentMW(), s.handleChatStream)
+	api.Get("/chat/stream", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{QueryParam: "agent_id"}), s.rlTokenMW(), s.rlAgentTokenMW(), s.rlAgentMW(), s.handleChatStream)
+	api.Post("/webhooks/:agent_id", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{PathParam: "agent_id"}), s.rlTokenMW(), s.rlAgentTokenMW(), s.rlAgentMW(), s.handleGenericWebhook)
 	api.Post("/chat/confirm", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleToolConfirm)
 	// Cancel an in-flight run (Story #22): stop a slow local-model run.
 	api.Post("/chat/cancel", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleChatCancel)
 	api.Post("/chat/share", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.handleCreateShare)
-	api.Get("/chat/artifacts", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.handleChatArtifacts)
-	api.Get("/chat/artifacts/download", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.handleChatArtifactDownload)
-	api.Post("/chat/attachments", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleChatAttachmentUpload)
-	api.Get("/chat/attachments", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.handleChatAttachments)
-	api.Get("/chat/attachments/:id/download", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.handleChatAttachmentDownload)
+	api.Get("/chat/artifacts", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{QueryParam: "agent_id"}), s.handleChatArtifacts)
+	api.Get("/chat/artifacts/download", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{QueryParam: "agent_id"}), s.handleChatArtifactDownload)
+	api.Post("/chat/attachments", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{FormField: "agent_id"}), s.handleChatAttachmentUpload)
+	api.Get("/chat/attachments", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{QueryParam: "agent_id"}), s.handleChatAttachments)
+	api.Get("/chat/attachments/:id/download", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{QueryParam: "agent_id"}), s.handleChatAttachmentDownload)
 
 	// Channels
 	api.Get("/channels", s.rbacMW(rbac.ResourceChannels, rbac.ActionRead), s.handleListChannels)
@@ -718,23 +787,23 @@ func (s *Server) buildApp() *fiber.App {
 	api.Get("/agents/:id/actions", s.rbacAgentMW(rbac.ActionRead), s.handleAgentActions)
 
 	// Session memory (existing)
-	api.Get("/memory/:agent_id", s.rbacMW(rbac.ResourceMemory, rbac.ActionRead), s.handleListMemory)
-	api.Delete("/memory/:agent_id/:session_id", s.rbacMW(rbac.ResourceMemory, rbac.ActionDelete), s.handleDeleteMemorySession)
+	api.Get("/memory/:agent_id", s.rbacAgentFromMW(rbac.ResourceMemory, rbac.ActionRead, rbac.AgentIDSource{PathParam: "agent_id"}), s.handleListMemory)
+	api.Delete("/memory/:agent_id/:session_id", s.rbacAgentFromMW(rbac.ResourceMemory, rbac.ActionDelete, rbac.AgentIDSource{PathParam: "agent_id"}), s.requirePathSessionMW("session_id", "agent_id"), s.handleDeleteMemorySession)
 
 	// Brain memory — three-layer long-term agent memory (episodic / procedural / semantic)
 	api.Get("/brain-memory", s.rbacMW(rbac.ResourceMemory, rbac.ActionRead), s.handleBrainMemoryStats)
-	api.Get("/brain-memory/:agentID/episodic", s.rbacMW(rbac.ResourceMemory, rbac.ActionRead), s.handleGetEpisodic)
-	api.Post("/brain-memory/:agentID/episodic", s.rbacMW(rbac.ResourceMemory, rbac.ActionWrite), s.handleWriteEpisodic)
-	api.Delete("/brain-memory/:agentID/episodic", s.rbacMW(rbac.ResourceMemory, rbac.ActionDelete), s.handleClearEpisodic)
-	api.Get("/brain-memory/:agentID/procedural", s.rbacMW(rbac.ResourceMemory, rbac.ActionRead), s.handleGetProcedural)
-	api.Put("/brain-memory/:agentID/procedural", s.rbacMW(rbac.ResourceMemory, rbac.ActionWrite), s.handleUpdateProcedural)
-	api.Delete("/brain-memory/:agentID/procedural", s.rbacMW(rbac.ResourceMemory, rbac.ActionDelete), s.handleClearProcedural)
-	api.Post("/brain-memory/:agentID/context-preview", s.rbacMW(rbac.ResourceMemory, rbac.ActionRead), s.handleContextPreview)
+	api.Get("/brain-memory/:agentID/episodic", s.rbacAgentFromMW(rbac.ResourceMemory, rbac.ActionRead, rbac.AgentIDSource{PathParam: "agentID"}), s.handleGetEpisodic)
+	api.Post("/brain-memory/:agentID/episodic", s.rbacAgentFromMW(rbac.ResourceMemory, rbac.ActionWrite, rbac.AgentIDSource{PathParam: "agentID"}), s.handleWriteEpisodic)
+	api.Delete("/brain-memory/:agentID/episodic", s.rbacAgentFromMW(rbac.ResourceMemory, rbac.ActionDelete, rbac.AgentIDSource{PathParam: "agentID"}), s.handleClearEpisodic)
+	api.Get("/brain-memory/:agentID/procedural", s.rbacAgentFromMW(rbac.ResourceMemory, rbac.ActionRead, rbac.AgentIDSource{PathParam: "agentID"}), s.handleGetProcedural)
+	api.Put("/brain-memory/:agentID/procedural", s.rbacAgentFromMW(rbac.ResourceMemory, rbac.ActionWrite, rbac.AgentIDSource{PathParam: "agentID"}), s.handleUpdateProcedural)
+	api.Delete("/brain-memory/:agentID/procedural", s.rbacAgentFromMW(rbac.ResourceMemory, rbac.ActionDelete, rbac.AgentIDSource{PathParam: "agentID"}), s.handleClearProcedural)
+	api.Post("/brain-memory/:agentID/context-preview", s.rbacAgentFromMW(rbac.ResourceMemory, rbac.ActionRead, rbac.AgentIDSource{PathParam: "agentID"}), s.handleContextPreview)
 	// Versioned rulebooks (Story E23): history, single versions, rollback, lock.
-	api.Get("/brain-memory/:agentID/rulebook", s.rbacMW(rbac.ResourceMemory, rbac.ActionRead), s.handleRulebookHistory)
-	api.Get("/brain-memory/:agentID/rulebook/:version", s.rbacMW(rbac.ResourceMemory, rbac.ActionRead), s.handleRulebookVersion)
-	api.Post("/brain-memory/:agentID/rulebook/rollback", s.rbacMW(rbac.ResourceMemory, rbac.ActionWrite), s.handleRulebookRollback)
-	api.Post("/brain-memory/:agentID/rulebook/lock", s.rbacMW(rbac.ResourceMemory, rbac.ActionWrite), s.handleRulebookLock)
+	api.Get("/brain-memory/:agentID/rulebook", s.rbacAgentFromMW(rbac.ResourceMemory, rbac.ActionRead, rbac.AgentIDSource{PathParam: "agentID"}), s.handleRulebookHistory)
+	api.Get("/brain-memory/:agentID/rulebook/:version", s.rbacAgentFromMW(rbac.ResourceMemory, rbac.ActionRead, rbac.AgentIDSource{PathParam: "agentID"}), s.handleRulebookVersion)
+	api.Post("/brain-memory/:agentID/rulebook/rollback", s.rbacAgentFromMW(rbac.ResourceMemory, rbac.ActionWrite, rbac.AgentIDSource{PathParam: "agentID"}), s.handleRulebookRollback)
+	api.Post("/brain-memory/:agentID/rulebook/lock", s.rbacAgentFromMW(rbac.ResourceMemory, rbac.ActionWrite, rbac.AgentIDSource{PathParam: "agentID"}), s.handleRulebookLock)
 	api.Get("/learning/summary", s.rbacMW(rbac.ResourceMemory, rbac.ActionRead), s.handleLearningSummary)
 	api.Get("/learning/evidence", s.rbacMW(rbac.ResourceMemory, rbac.ActionRead), s.handleLearningEvidence)
 	api.Get("/proactive/suggestions", s.rbacMW(rbac.ResourceMemory, rbac.ActionRead), s.handleProactiveSuggestions)
@@ -844,6 +913,9 @@ func (s *Server) buildApp() *fiber.App {
 	// ST-09: the model capability registry the Strategy Advisor decides from, so
 	// "Soulacy selected Workflow" can be checked rather than trusted.
 	api.Get("/studio/model-capabilities", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioModelCapabilities)
+	api.Get("/studio/strategy-fit", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioStrategyFit)
+	api.Get("/studio/learning-memory", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioLearningMemory)
+	api.Delete("/studio/learning-memory/:kind/:id", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleStudioDeleteLearningMemory)
 	// Studio plugin backend: consolidated pre-save validation (missing tools/MCP/
 	// channels/secrets, empty required args, invalid schedules).
 	api.Post("/studio/preflight", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioPreflight)
@@ -1002,14 +1074,19 @@ func (s *Server) buildApp() *fiber.App {
 	// reads from s.costStore at request time so the nil guard works.
 	api.Get("/costs", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.handleGetCosts)
 	api.Get("/costs/status", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.handleCostStatus)
-	api.Get("/costs/:agent_id", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.handleGetAgentCosts)
+	api.Post("/costs/estimate", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.handleCostEstimate)
+	api.Get("/costs/usage", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.handleGetCostUsage)
+	api.Get("/costs/chargeback", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.handleGetCostChargeback)
+	api.Get("/costs/reconciliations", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.handleGetCostReconciliations)
+	api.Post("/costs/reconcile", s.rbacMW(rbac.ResourceMetrics, rbac.ActionWrite), s.handlePostCostReconciliation)
+	api.Get("/costs/:agent_id", s.rbacAgentFromMW(rbac.ResourceMetrics, rbac.ActionRead, rbac.AgentIDSource{PathParam: "agent_id"}), s.handleGetAgentCosts)
 	api.Get("/ops/alerts/status", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.handleOpsAlertStatus)
 	api.Post("/ops/alerts/test", s.rbacMW(rbac.ResourceChannels, rbac.ActionWrite), s.handleOpsAlertTest)
 	api.Post("/ops/alerts/evaluate", s.rbacMW(rbac.ResourceChannels, rbac.ActionWrite), s.handleOpsAlertEvaluate)
 
 	// --- Chat checkpoints & branching (Story 8) ---
 	// Fork a session's conversation at a checkpoint entry into a new branch.
-	api.Post("/history/:session_id/fork", s.rbacMW(rbac.ResourceChat, rbac.ActionWrite), s.handleForkSession)
+	api.Post("/history/:session_id/fork", s.rbacMW(rbac.ResourceChat, rbac.ActionWrite), s.requirePathSessionMW("session_id", ""), s.handleForkSession)
 
 	// --- Run-level observability (Story 7) ---
 	// Stores checked at request time; 503 when neither costs nor action log
@@ -1018,7 +1095,7 @@ func (s *Server) buildApp() *fiber.App {
 	api.Get("/runs/slo-status", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.handleSLOStatus)
 	api.Get("/runs/ledger", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.handleRunLedger)
 	api.Get("/runs/events", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.handleRunEvents)
-	api.Get("/runs/:session_id/metrics", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.handleRunMetrics)
+	api.Get("/runs/:session_id/metrics", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.requirePathSessionMW("session_id", ""), s.handleRunMetrics)
 	// E4c — hung-session tracker snapshot for the Activity page's "Running now"
 	// strip. Read-only, cheap, safe to poll every couple of seconds.
 	api.Get("/activity/running", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.handleActivityRunning)
@@ -1045,17 +1122,17 @@ func (s *Server) buildApp() *fiber.App {
 	// s.credVault is checked at request time so SetCredentialVault() can be
 	// called after New() but before the server starts listening.
 	credAPI := credentials.NewLazyAPI(s, s.log)
-	api.Post("/credentials/:agentID", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), credAPI.HandleSet)
-	api.Get("/credentials/:agentID", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), credAPI.HandleList)
+	api.Post("/credentials/:agentID", s.credentialAudit("credential.set"), s.denyGlobalCredentialScope, s.rbacAgentFromMW(rbac.ResourceCredentials, rbac.ActionSet, rbac.AgentIDSource{PathParam: "agentID"}), credAPI.HandleSet)
+	api.Get("/credentials/:agentID", s.denyGlobalCredentialScope, s.rbacAgentFromMW(rbac.ResourceCredentials, rbac.ActionList, rbac.AgentIDSource{PathParam: "agentID"}), credAPI.HandleList)
 	// Reading a DECRYPTED vault value is an act of trust on the level of writing
 	// one, not of listing agents. Under agents:read the viewer role — whose whole
 	// purpose is look-but-don't-touch — could GET the plaintext of any stored
 	// credential, which defeats the point of encrypting the vault at all.
 	// Listing key NAMES stays on read; fetching a VALUE requires write.
-	api.Get("/credentials/:agentID/:key", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), credAPI.HandleGet)
-	api.Delete("/credentials/:agentID/:key", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), credAPI.HandleDelete)
+	api.Get("/credentials/:agentID/:key", s.credentialAudit("credential.reveal"), s.denyGlobalCredentialScope, s.rbacAgentFromMW(rbac.ResourceCredentials, rbac.ActionReveal, rbac.AgentIDSource{PathParam: "agentID"}), s.requireCredentialRevealConfirmation, credAPI.HandleGet)
+	api.Delete("/credentials/:agentID/:key", s.credentialAudit("credential.delete"), s.denyGlobalCredentialScope, s.rbacAgentFromMW(rbac.ResourceCredentials, rbac.ActionDelete, rbac.AgentIDSource{PathParam: "agentID"}), credAPI.HandleDelete)
 	// Credential rotation (type-assert to VersionedVault at request time)
-	api.Post("/credentials/:agentID/:key/rotate", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), func(c *fiber.Ctx) error {
+	api.Post("/credentials/:agentID/:key/rotate", s.credentialAudit("credential.rotate"), s.denyGlobalCredentialScope, s.rbacAgentFromMW(rbac.ResourceCredentials, rbac.ActionRotate, rbac.AgentIDSource{PathParam: "agentID"}), func(c *fiber.Ctx) error {
 		if s.credVault == nil {
 			return s.errMsg(c, fiber.StatusServiceUnavailable, "credential vault not configured")
 		}
@@ -1070,7 +1147,7 @@ func (s *Server) buildApp() *fiber.App {
 		}
 		return c.JSON(fiber.Map{"agent_id": c.Params("agentID"), "key": c.Params("key"), "new_version": ver})
 	})
-	api.Get("/credentials/:agentID/:key/versions", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), func(c *fiber.Ctx) error {
+	api.Get("/credentials/:agentID/:key/versions", s.denyGlobalCredentialScope, s.rbacAgentFromMW(rbac.ResourceCredentials, rbac.ActionList, rbac.AgentIDSource{PathParam: "agentID"}), func(c *fiber.Ctx) error {
 		if s.credVault == nil {
 			return s.errMsg(c, fiber.StatusServiceUnavailable, "credential vault not configured")
 		}
@@ -1089,9 +1166,9 @@ func (s *Server) buildApp() *fiber.App {
 	// Gateway-global secrets layered over the credential vault. The Manager is
 	// built per-request from s.CredentialVault() so it's nil-safe and picks up
 	// SetCredentialVault() called after New(). Values are never returned.
-	api.Get("/secrets", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleListSecrets)
-	api.Put("/secrets/:name", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleSetSecret)
-	api.Delete("/secrets/:name", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleDeleteSecret)
+	api.Get("/secrets", s.rbacMW(rbac.ResourceSecrets, rbac.ActionList), s.handleListSecrets)
+	api.Put("/secrets/:name", s.rbacMW(rbac.ResourceSecrets, rbac.ActionSet), s.handleSetSecret)
+	api.Delete("/secrets/:name", s.rbacMW(rbac.ResourceSecrets, rbac.ActionDelete), s.handleDeleteSecret)
 
 	// --- API Key Management (admin) ---
 	api.Post("/admin/api-keys", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite), func(c *fiber.Ctx) error {
@@ -1185,7 +1262,7 @@ func (s *Server) buildApp() *fiber.App {
 		}
 		return c.JSON(fiber.Map{"hits": hits, "query": query})
 	})
-	api.Get("/history/:session_id", s.rbacMW(rbac.ResourceMemory, rbac.ActionRead), func(c *fiber.Ctx) error {
+	api.Get("/history/:session_id", s.rbacMW(rbac.ResourceMemory, rbac.ActionRead), s.requirePathSessionMW("session_id", ""), func(c *fiber.Ctx) error {
 		if s.historyStore == nil {
 			return s.errMsg(c, fiber.StatusServiceUnavailable, "history store not configured")
 		}
@@ -1199,7 +1276,7 @@ func (s *Server) buildApp() *fiber.App {
 		}
 		return c.JSON(fiber.Map{"entries": entries, "session_id": c.Params("session_id")})
 	})
-	api.Get("/history/agent/:agent_id", s.rbacMW(rbac.ResourceMemory, rbac.ActionRead), func(c *fiber.Ctx) error {
+	api.Get("/history/agent/:agent_id", s.rbacAgentFromMW(rbac.ResourceMemory, rbac.ActionRead, rbac.AgentIDSource{PathParam: "agent_id"}), func(c *fiber.Ctx) error {
 		if s.historyStore == nil {
 			return s.errMsg(c, fiber.StatusServiceUnavailable, "history store not configured")
 		}
@@ -1235,6 +1312,15 @@ func (s *Server) buildApp() *fiber.App {
 	}
 
 	return app
+}
+
+func (s *Server) httpRequestTimeout() time.Duration {
+	if s != nil && s.cfg != nil {
+		if d, err := time.ParseDuration(s.cfg.Runtime.Timeouts.HTTP); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 16 * time.Minute
 }
 
 // mountStaticGUI serves the built GUI with the cache policy an upgradeable SPA
@@ -1321,6 +1407,112 @@ func (s *Server) handleGetCosts(c *fiber.Ctx) error {
 	})
 }
 
+// handleGetCostUsage exposes bounded, prompt-free per-call accounting for
+// chargeback and provider reconciliation.
+func (s *Server) handleGetCostUsage(c *fiber.Ctx) error {
+	if s.costStore == nil {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "cost tracking not enabled"})
+	}
+	since, label, err := parseCostSince(c.Query("since", "24h"))
+	if err != nil {
+		return s.errJSON(c, fiber.StatusBadRequest, err)
+	}
+	limit, err := strconv.Atoi(c.Query("limit", "200"))
+	if err != nil || limit <= 0 || limit > 1000 {
+		return s.errMsg(c, fiber.StatusBadRequest, "limit must be between 1 and 1000")
+	}
+	records, err := s.costStore.ListUsage(c.Context(), since, limit)
+	if err != nil {
+		s.log.Error("costs: ListUsage failed", zap.Error(err))
+		return s.errMsg(c, fiber.StatusInternalServerError, "internal error")
+	}
+	if records == nil {
+		records = []costs.UsageRecord{}
+	}
+	return c.JSON(fiber.Map{"usage": records, "period": label, "generated_at": time.Now().UTC().Format(time.RFC3339)})
+}
+
+func (s *Server) handleGetCostChargeback(c *fiber.Ctx) error {
+	if s.costStore == nil {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "cost tracking not enabled"})
+	}
+	since, label, err := parseCostSince(c.Query("since", "30d"))
+	if err != nil {
+		return s.errJSON(c, fiber.StatusBadRequest, err)
+	}
+	var dimensions []string
+	if raw := strings.TrimSpace(c.Query("group_by")); raw != "" {
+		dimensions = strings.Split(raw, ",")
+	}
+	rows, err := s.costStore.Chargeback(c.Context(), since, dimensions)
+	if err != nil {
+		return s.errJSON(c, fiber.StatusBadRequest, err)
+	}
+	return c.JSON(fiber.Map{"chargeback": rows, "period": label, "group_by": dimensions,
+		"generated_at": time.Now().UTC().Format(time.RFC3339)})
+}
+
+func (s *Server) handleGetCostReconciliations(c *fiber.Ctx) error {
+	if s.costStore == nil {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "cost tracking not enabled"})
+	}
+	limit, err := strconv.Atoi(c.Query("limit", "100"))
+	if err != nil || limit <= 0 || limit > 1000 {
+		return s.errMsg(c, fiber.StatusBadRequest, "limit must be between 1 and 1000")
+	}
+	items, err := s.costStore.ListReconciliations(c.Context(), limit)
+	if err != nil {
+		return s.errMsg(c, fiber.StatusInternalServerError, "internal error")
+	}
+	return c.JSON(fiber.Map{"reconciliations": items})
+}
+
+func (s *Server) handlePostCostReconciliation(c *fiber.Ctx) error {
+	if s.costStore == nil {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "cost tracking not enabled"})
+	}
+	var req struct {
+		Provider  string  `json:"provider"`
+		Start     string  `json:"period_start"`
+		End       string  `json:"period_end"`
+		ActualUSD float64 `json:"actual_usd"`
+		Source    string  `json:"source"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return s.errJSON(c, fiber.StatusBadRequest, err)
+	}
+	if strings.TrimSpace(req.Provider) == "" || req.ActualUSD < 0 {
+		return s.errMsg(c, fiber.StatusBadRequest, "provider and non-negative actual_usd are required")
+	}
+	start, err := parseReconciliationTime(req.Start)
+	if err != nil {
+		return s.errJSON(c, fiber.StatusBadRequest, fmt.Errorf("period_start: %w", err))
+	}
+	end, err := parseReconciliationTime(req.End)
+	if err != nil {
+		return s.errJSON(c, fiber.StatusBadRequest, fmt.Errorf("period_end: %w", err))
+	}
+	if !end.After(start) {
+		return s.errMsg(c, fiber.StatusBadRequest, "period_end must be after period_start")
+	}
+	item, err := s.costStore.ReconcileProvider(c.Context(), strings.TrimSpace(req.Provider), start, end,
+		int64(req.ActualUSD*1_000_000+0.5), strings.TrimSpace(req.Source))
+	if err != nil {
+		return s.errMsg(c, fiber.StatusInternalServerError, "internal error")
+	}
+	return c.JSON(item)
+}
+
+func parseReconciliationTime(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	for _, layout := range []string{time.RFC3339, "2006-01-02"} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed.UTC(), nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("must be RFC3339 or YYYY-MM-DD")
+}
+
 // handleGetAgentCosts handles GET /api/v1/costs/:agent_id
 // Query params: ?since=<duration|date>
 func (s *Server) handleGetAgentCosts(c *fiber.Ctx) error {
@@ -1394,7 +1586,9 @@ func parseCostSince(s string) (time.Time, string, error) {
 // Production startup always calls SetAuth() with an auth.Engine.
 func (s *Server) legacyAuthMiddleware() fiber.Handler {
 	if s.cfg.Server.APIKey == "" {
-		s.log.Warn("⚠  API key not set — gateway is OPEN. Set server.api_key in config.yaml for production.")
+		// Test/embedding compatibility only: production always wires auth.Engine,
+		// whose middleware fails closed when no verifier is effective.
+		s.log.Warn("legacy gateway constructed without auth engine; authentication is bypassed")
 		return func(c *fiber.Ctx) error { return c.Next() }
 	}
 	return func(c *fiber.Ctx) error {
@@ -1405,6 +1599,11 @@ func (s *Server) legacyAuthMiddleware() fiber.Handler {
 		if !gwSecretEqual(got, s.cfg.Server.APIKey) {
 			return s.errMsg(c, fiber.StatusUnauthorized, "invalid or missing API key")
 		}
+		// Directly-constructed gateways are retained for tests and embedding.
+		// Their static key has the same authority as the production auth engine's
+		// static key, so attach the same claims rather than creating an
+		// authenticated-but-anonymous request that bypasses ownership semantics.
+		auth.SetClaims(c, &auth.Claims{Role: "admin", Kind: "access"})
 		return c.Next()
 	}
 }
@@ -1434,19 +1633,22 @@ func isLoopbackHost(host string) bool {
 	return false
 }
 
-// checkAuthBindSafety enforces SEC-4: refuse to start an unauthenticated
-// gateway on a non-loopback address unless the operator has explicitly opted
-// in. Returns nil when the configuration is safe (or explicitly allowed).
-func checkAuthBindSafety(cfg *config.Config, authConfigured bool) error {
-	authDisabled := cfg.Server.APIKey == "" && !authConfigured
+// checkAuthBindSafety enforces SEC-4 using the auth engine's effective
+// verifier state rather than its mere allocation.
+func (s *Server) checkAuthBindSafety() error {
+	cfg := s.cfg
+	if cfg.Server.AllowUnauthenticated {
+		s.log.Error("SECURITY WARNING: unauthenticated startup override is enabled",
+			zap.String("host", cfg.Server.Host),
+			zap.String("remediation", "remove --allow-unauthenticated and configure server.api_key or OIDC"))
+		return nil
+	}
+	authDisabled := s.authEngine == nil || !s.authEngine.Effective()
 	if !authDisabled {
 		return nil
 	}
 	if isLoopbackHost(cfg.Server.Host) {
 		return nil // local-only + no key: allowed (dev convenience)
-	}
-	if cfg.Server.AllowUnauthenticated {
-		return nil // operator explicitly accepted the risk
 	}
 	return fmt.Errorf(
 		"refusing to start: gateway bound to non-loopback host %q with no API key — "+
@@ -1459,7 +1661,7 @@ func checkAuthBindSafety(cfg *config.Config, authConfigured bool) error {
 
 // Listen starts the server. Blocks until ctx is cancelled or an error occurs.
 func (s *Server) Listen(ctx context.Context) error {
-	if err := checkAuthBindSafety(s.cfg, s.authEngine != nil); err != nil {
+	if err := s.checkAuthBindSafety(); err != nil {
 		return err
 	}
 

@@ -359,6 +359,7 @@ func (p *GeminiProvider) Complete(ctx context.Context, req CompletionRequest) (*
 
 	strippedOptional := map[string]bool{}
 	var bodyBytes []byte
+	var providerRequestID string
 	for {
 		payload, err := json.Marshal(body)
 		if err != nil {
@@ -379,6 +380,7 @@ func (p *GeminiProvider) Complete(ctx context.Context, req CompletionRequest) (*
 			return nil, fmt.Errorf("google: request failed: %w", err)
 		}
 		bodyBytes, _ = io.ReadAll(resp.Body)
+		providerRequestID = firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("x-goog-request-id"))
 		_ = resp.Body.Close()
 
 		if resp.StatusCode < 300 {
@@ -418,8 +420,12 @@ func (p *GeminiProvider) Complete(ctx context.Context, req CompletionRequest) (*
 			} `json:"content"`
 		} `json:"candidates"`
 		UsageMetadata struct {
-			PromptTokenCount     int `json:"promptTokenCount"`
-			CandidatesTokenCount int `json:"candidatesTokenCount"`
+			PromptTokenCount        int `json:"promptTokenCount"`
+			CandidatesTokenCount    int `json:"candidatesTokenCount"`
+			TotalTokenCount         int `json:"totalTokenCount"`
+			ThoughtsTokenCount      int `json:"thoughtsTokenCount"`
+			ToolUsePromptTokenCount int `json:"toolUsePromptTokenCount"`
+			CachedContentTokenCount int `json:"cachedContentTokenCount"`
 		} `json:"usageMetadata"`
 	}
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
@@ -427,8 +433,13 @@ func (p *GeminiProvider) Complete(ctx context.Context, req CompletionRequest) (*
 	}
 
 	r := &CompletionResponse{
-		InputTokens:  result.UsageMetadata.PromptTokenCount,
-		OutputTokens: result.UsageMetadata.CandidatesTokenCount,
+		InputTokens:         max(0, result.UsageMetadata.PromptTokenCount-result.UsageMetadata.CachedContentTokenCount-result.UsageMetadata.ToolUsePromptTokenCount),
+		OutputTokens:        result.UsageMetadata.CandidatesTokenCount,
+		TotalTokens:         result.UsageMetadata.TotalTokenCount,
+		ReasoningTokens:     result.UsageMetadata.ThoughtsTokenCount,
+		ToolUsePromptTokens: result.UsageMetadata.ToolUsePromptTokenCount,
+		CacheReadTokens:     result.UsageMetadata.CachedContentTokenCount,
+		ProviderRequestID:   providerRequestID,
 	}
 	if len(result.Candidates) == 0 {
 		return r, nil

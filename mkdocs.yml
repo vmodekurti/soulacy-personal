@@ -137,6 +137,7 @@ nav:
   - Using Soulacy:
     - Chat: using/chat.md
     - Studio (Agent Builder): using/studio.md
+    - Studio Learning & Memory: studio-learning-memory.md
     - Voice Conversations: using/voice.md
     - Dashboard & Activity: using/dashboard.md
     - Workboard: using/workboard.md
@@ -189,6 +190,8 @@ nav:
     - Web GUI: configuration/gui.md
     - Server: configuration/server.md
     - LLM Providers: configuration/llm.md
+    - LLM Cost Controls: LLM_COST_CONTROLS.md
+    - Request Timeouts: configuration/timeouts.md
     - Storage & Backends: configuration/storage.md
     - Events & Webhooks: configuration/events.md
     - Voice: configuration/voice.md

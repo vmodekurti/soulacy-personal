@@ -265,10 +265,10 @@ func TestMCPToolAllowed(t *testing.T) {
 		want     bool
 	}{
 		{
-			name:     "legacy absent allowlists permit all MCP tools",
+			name:     "absent allowlists deny MCP tools",
 			def:      &agent.Definition{ID: "legacy"},
 			fullName: "mcp__rocketmoney__get_accounts",
-			want:     true,
+			want:     false,
 		},
 		{
 			name:     "server allowlist permits every tool on that server",
@@ -806,6 +806,7 @@ func sortedSchemaNames(names map[string]bool) []string {
 type fakeHandleProvider struct {
 	mu        sync.Mutex
 	responses []llm.CompletionResponse
+	errors    []error
 	requests  []llm.CompletionRequest
 }
 
@@ -816,6 +817,9 @@ func (p *fakeHandleProvider) Complete(ctx context.Context, req llm.CompletionReq
 	defer p.mu.Unlock()
 	p.requests = append(p.requests, req)
 	idx := len(p.requests) - 1
+	if idx < len(p.errors) && p.errors[idx] != nil {
+		return nil, p.errors[idx]
+	}
 	if idx >= len(p.responses) {
 		return &llm.CompletionResponse{Content: "default fake response"}, nil
 	}
@@ -849,7 +853,12 @@ func newHandleTestEngine(t *testing.T, def *agent.Definition) (*Engine, *fakeHan
 	if err != nil {
 		t.Fatalf("memory store: %v", err)
 	}
-	return NewEngine(loader, router, mem, nil, "", time.Second, zap.NewNop(), nil, nil, "", nil, nil, nil, nil, nil), provider
+	e := NewEngine(loader, router, mem, nil, "", time.Second, zap.NewNop(), nil, nil, "", nil, nil, nil, nil, nil)
+	e.SetPrivilegedCommandRunner(HostPrivilegedRunner{})
+	if err := e.SetFilesystemRoots([]string{t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	return e, provider
 }
 
 func testUserMessage(agentID, sessionID, text string) message.Message {

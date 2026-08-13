@@ -31,6 +31,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -342,15 +343,51 @@ func TestSecretEqual(t *testing.T) {
 // Group 3: Engine.Middleware via Fiber app.Test
 // ---------------------------------------------------------------------------
 
-// TestMiddlewareOpenMode verifies that when no credentials are configured,
-// all requests pass through without authentication.
-func TestMiddlewareOpenMode(t *testing.T) {
+// TestMiddlewareNoCredentialsFailsClosed verifies an allocated engine without
+// a usable verifier cannot silently make the gateway public.
+func TestMiddlewareNoCredentialsFailsClosed(t *testing.T) {
 	e := newTestEngine(t, "apikey", "") // apikey mode, no static key
 	app := newAuthApp(e)
 
 	status, body := fiberJSON(t, app, http.MethodGet, "/me", "", "")
-	if status != http.StatusOK {
-		t.Fatalf("open mode /me status = %d body = %v", status, body)
+	if status != http.StatusUnauthorized {
+		t.Fatalf("credential-free /me status = %d body = %v", status, body)
+	}
+}
+
+func TestEffectiveTracksUsableVerifier(t *testing.T) {
+	without := newTestEngine(t, "apikey", "")
+	if without.Effective() {
+		t.Fatal("allocated engine without credentials reported effective")
+	}
+	withKey := newTestEngine(t, "apikey", "static-key")
+	if !withKey.Effective() {
+		t.Fatal("static-key engine did not report effective")
+	}
+	withIssuer := newTestEngine(t, "jwt", "")
+	if !withIssuer.Effective() {
+		t.Fatal("working local JWT issuer did not report effective")
+	}
+}
+
+func TestOIDCDiscoveryFailureFatalWhenOnlyAuthMethod(t *testing.T) {
+	issuer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer issuer.Close()
+	if _, err := New(Config{Mode: "apikey", OIDCIssuer: issuer.URL}, "", zap.NewNop()); err == nil {
+		t.Fatal("OIDC-only discovery failure did not abort auth construction")
+	}
+
+	// A usable static verifier may keep serving while the optional OIDC path is
+	// unavailable; the engine must still truthfully report effective.
+	e, err := New(Config{Mode: "apikey", OIDCIssuer: issuer.URL}, "fallback-key", zap.NewNop())
+	if err != nil {
+		t.Fatalf("static fallback should survive OIDC outage: %v", err)
+	}
+	defer e.Close()
+	if !e.Effective() {
+		t.Fatal("static fallback not effective")
 	}
 }
 
@@ -1269,4 +1306,3 @@ func TestParseECPublicKeyP521Roundtrip(t *testing.T) {
 		t.Error("curve is not P-521")
 	}
 }
-

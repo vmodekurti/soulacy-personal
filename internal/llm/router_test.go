@@ -411,12 +411,17 @@ func TestDoWithRetryRetriesOn503(t *testing.T) {
 	client := clientWithRoundTripper(func(r *http.Request) (*http.Response, error) {
 		calls++
 		if calls < 2 {
-			return jsonResponse(503, `{}`), nil
+			resp := jsonResponse(503, `{}`)
+			resp.Header.Set("x-request-id", "attempt-1")
+			return resp, nil
 		}
-		return jsonResponse(200, `{}`), nil
+		resp := jsonResponse(200, `{}`)
+		resp.Header.Set("x-request-id", "attempt-2")
+		return resp, nil
 	})
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://test/", nil)
-	resp, err := DoWithRetry(context.Background(), client, req, RetryConfig{
+	ctx, stats := withRetryStats(context.Background())
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://test/", nil)
+	resp, err := DoWithRetry(ctx, client, req, RetryConfig{
 		MaxAttempts:  3,
 		InitialDelay: time.Microsecond, // near-zero to keep test fast
 		MaxDelay:     time.Millisecond,
@@ -430,6 +435,10 @@ func TestDoWithRetryRetriesOn503(t *testing.T) {
 	}
 	if resp.StatusCode != 200 {
 		t.Errorf("final status = %d, want 200", resp.StatusCode)
+	}
+	attempts, ids := stats.snapshot()
+	if attempts != 2 || strings.Join(ids, ",") != "attempt-1,attempt-2" {
+		t.Fatalf("retry stats attempts=%d ids=%v", attempts, ids)
 	}
 }
 
@@ -498,6 +507,31 @@ func TestDoWithRetryRetriesOn429(t *testing.T) {
 	defer resp.Body.Close()
 	if calls != 2 {
 		t.Errorf("calls = %d, want 2", calls)
+	}
+}
+
+func TestDoWithRetryCapsProviderRetryAfter(t *testing.T) {
+	calls := 0
+	client := clientWithRoundTripper(func(r *http.Request) (*http.Response, error) {
+		calls++
+		resp := jsonResponse(200, `{}`)
+		if calls == 1 {
+			resp = jsonResponse(429, `{}`)
+			resp.Header.Set("Retry-After", "3600")
+		}
+		return resp, nil
+	})
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://test/", nil)
+	started := time.Now()
+	resp, err := DoWithRetry(context.Background(), client, req, RetryConfig{
+		MaxAttempts: 2, InitialDelay: time.Microsecond, MaxDelay: time.Millisecond, MaxRetryAfter: time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if calls != 2 || time.Since(started) > 250*time.Millisecond {
+		t.Fatalf("calls=%d elapsed=%s", calls, time.Since(started))
 	}
 }
 

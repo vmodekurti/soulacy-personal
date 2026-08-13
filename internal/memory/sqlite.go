@@ -9,12 +9,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
+	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/soulacy/soulacy/internal/sqlitex"
 )
+
+var archiveSQLiteVecAuto sync.Once
 
 const schema = `
 CREATE TABLE IF NOT EXISTS memories (
@@ -44,6 +48,11 @@ type SQLiteArchive struct {
 
 // NewSQLiteArchive opens (or creates) the SQLite database at path.
 func NewSQLiteArchive(path string) (*SQLiteArchive, error) {
+	// Register sqlite-vec before sqlitex opens its first SQLite connection.
+	// Previously this happened incidentally only when the Knowledge subsystem
+	// was enabled, leaving native vector memory unavailable in valid setups
+	// that used agent memory without a knowledge base.
+	archiveSQLiteVecAuto.Do(sqlite_vec.Auto)
 	// PRODUCTION_AUDIT → F3 (2026-05-27): WAL + NORMAL synchronous + 30s
 	// busy_timeout + tuned pool via internal/sqlitex. Lets CLI/GUI readers
 	// coexist with gateway archive writes without lock contention.

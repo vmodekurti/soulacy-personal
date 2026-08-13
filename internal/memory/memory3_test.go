@@ -331,24 +331,18 @@ func TestSQLiteArchiveReadByScopeWrongSession(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// VectorStore — NewVectorStore returns error without sqlite-vec extension
+// VectorStore — sqlite-vec is registered by the archive
 // ---------------------------------------------------------------------------
 
-// TestNewVectorStoreWithoutSqliteVecReturnsError verifies that constructing a
-// VectorStore against a plain sqlite3 database (no vec0 extension loaded)
-// returns a descriptive error rather than panicking or silently succeeding.
-func TestNewVectorStoreWithoutSqliteVecReturnsError(t *testing.T) {
+// TestNewVectorStoreHasNativeSQLiteVec verifies that opening the archive makes
+// vec0 available even when the Knowledge subsystem was never constructed.
+func TestNewVectorStoreHasNativeSQLiteVec(t *testing.T) {
 	a := newTestArchive(t)
 	db := a.DB()
 
 	embedder := &stubEmbedder{dims: 4, vec: []float32{0.1, 0.2, 0.3, 0.4}}
-	_, err := NewVectorStore(db, embedder, 4)
-	if err == nil {
-		t.Fatal("NewVectorStore should fail when sqlite-vec is not loaded")
-	}
-	// The error message should mention the missing extension.
-	if !strings.Contains(err.Error(), "sqlite-vec") && !strings.Contains(err.Error(), "no such module") {
-		t.Errorf("error message should mention sqlite-vec or 'no such module', got: %v", err)
+	if _, err := NewVectorStore(db, embedder, 4); err != nil {
+		t.Fatalf("native sqlite-vec should be registered: %v", err)
 	}
 }
 

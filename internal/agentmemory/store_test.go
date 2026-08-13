@@ -305,7 +305,7 @@ func TestInMemoryVectorStore_WriteAndSearch(t *testing.T) {
 	_ = vs.Write(agentmemory.Record{AgentID: agentID, Content: "retrieval augmented generation"})
 	_ = vs.Write(agentmemory.Record{AgentID: agentID, Content: "totally unrelated document"})
 
-	results := vs.Search(agentID, "retrieval augmented", 5)
+	results, _ := vs.Search(agentID, "retrieval augmented", 5)
 	if len(results) == 0 {
 		t.Fatal("expected at least one result for matching query")
 	}
@@ -319,7 +319,7 @@ func TestInMemoryVectorStore_Search_AgentIsolation(t *testing.T) {
 	_ = vs.Write(agentmemory.Record{AgentID: "a1", Content: "relevant data"})
 	_ = vs.Write(agentmemory.Record{AgentID: "a2", Content: "relevant data"})
 
-	results := vs.Search("a1", "relevant", 10)
+	results, _ := vs.Search("a1", "relevant", 10)
 	for _, r := range results {
 		if r.AgentID != "a1" {
 			t.Errorf("search returned record for wrong agent %q", r.AgentID)
@@ -333,7 +333,7 @@ func TestInMemoryVectorStore_Search_MaxLimit(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		_ = vs.Write(agentmemory.Record{AgentID: agentID, Content: "keyword content " + string(rune('a'+i))})
 	}
-	results := vs.Search(agentID, "keyword", 3)
+	results, _ := vs.Search(agentID, "keyword", 3)
 	if len(results) > 3 {
 		t.Errorf("Search should honour max=3, got %d", len(results))
 	}
@@ -342,7 +342,7 @@ func TestInMemoryVectorStore_Search_MaxLimit(t *testing.T) {
 func TestInMemoryVectorStore_Search_NoMatch(t *testing.T) {
 	vs := agentmemory.NewInMemoryVectorStore()
 	_ = vs.Write(agentmemory.Record{AgentID: "ag", Content: "unrelated content here"})
-	results := vs.Search("ag", "zebra giraffe", 5)
+	results, _ := vs.Search("ag", "zebra giraffe", 5)
 	if len(results) != 0 {
 		t.Errorf("expected 0 results for non-matching query, got %d", len(results))
 	}
@@ -351,7 +351,7 @@ func TestInMemoryVectorStore_Search_NoMatch(t *testing.T) {
 func TestInMemoryVectorStore_Write_SetsTypeAndID(t *testing.T) {
 	vs := agentmemory.NewInMemoryVectorStore()
 	_ = vs.Write(agentmemory.Record{AgentID: "ag", Content: "content"})
-	results := vs.Search("ag", "content", 1)
+	results, _ := vs.Search("ag", "content", 1)
 	if len(results) == 0 {
 		t.Fatal("expected one result")
 	}
@@ -367,7 +367,7 @@ func TestInMemoryVectorStore_Write_SetsTypeAndID(t *testing.T) {
 
 func TestCompositeStore_Write_SemanticType(t *testing.T) {
 	dir := t.TempDir()
-	store := agentmemory.NewCompositeStore(dir, nil)
+	store := agentmemory.NewCompositeStore(dir, agentmemory.NewInMemoryVectorStore())
 	agentID := "sem-agent"
 
 	err := store.Write(agentmemory.Record{
@@ -557,20 +557,20 @@ func TestResultToEpisodicRecord_TruncatesOversized(t *testing.T) {
 	}
 }
 
-// ─── CompositeStore: nil vector store uses fresh InMemory ─────────────────────
+// ─── CompositeStore: nil vector store disables semantic writes ───────────────
 
-func TestCompositeStore_NilVectorStoreUsesDefault(t *testing.T) {
+func TestCompositeStore_NilVectorStoreRequiresProductionWiring(t *testing.T) {
 	dir := t.TempDir()
 	// Passing nil vectorStore should not panic and should create a default.
 	store := agentmemory.NewCompositeStore(dir, nil)
 	if store == nil {
 		t.Fatal("NewCompositeStore returned nil")
 	}
-	// Should be able to write semantic without panic.
+	// Semantic writes must not silently degrade to keyword matching.
 	err := store.Write(agentmemory.Record{
 		AgentID: "ag", Type: agentmemory.MemoryTypeSemantic, Content: "test",
 	})
-	if err != nil {
-		t.Fatalf("Write semantic with default vs: %v", err)
+	if err == nil {
+		t.Fatal("Write semantic without sqlite-vec should fail")
 	}
 }

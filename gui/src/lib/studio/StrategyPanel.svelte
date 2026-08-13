@@ -20,6 +20,7 @@
   export let model = ''                 // e.g. "anthropic / claude-sonnet-4.5"
   export let busy = false
   export let warnings = []              // ValidatePolicy output
+  export let unreliable = []            // strategies below the local fit threshold
 
   export let onSwitchMode = () => {}
   export let onUpdate = () => {}        // (patch) => void, merged into draft.policy
@@ -55,6 +56,7 @@
   function patchPlan(field, value)     { onUpdate({ plan: { ...plan, [field]: value } }) }
 
   function num(e) { const n = Number(e.target.value); return Number.isFinite(n) ? n : 0 }
+  function historicallyUnreliable(id) { return (unreliable || []).includes(id) }
 
   // ── Plan steps ────────────────────────────────────────────────────────────
   $: steps = Array.isArray(plan.steps) ? plan.steps : []
@@ -90,11 +92,13 @@
       <button
         class="sp-mode" class:active={mode === m.id}
         role="tab" aria-selected={mode === m.id}
-        type="button" disabled={busy}
+        type="button" disabled={busy || historicallyUnreliable(m.id)}
+        title={historicallyUnreliable(m.id) ? 'Disabled: this model is below the local strategy reliability threshold.' : ''}
         on:click={() => onSwitchMode(m.id)}
       >
         <span>{m.label}</span>
         {#if m.experimental}<span class="sp-exp">Experimental</span>{/if}
+        {#if historicallyUnreliable(m.id)}<span class="sp-risk" aria-label="Historically unreliable">⚠</span>{/if}
       </button>
     {/each}
   </div>
@@ -380,6 +384,8 @@
     background: color-mix(in srgb, var(--warn, #f0ad4e) 12%, transparent);
   }
   .sp-mode.active .sp-exp { color: #fff; border-color: rgba(255, 255, 255, .65); }
+  .sp-risk { color: var(--warn, #f0ad4e); font-weight: 700; }
+  .sp-mode:disabled .sp-risk { opacity: 1; }
 
   .sp-head { display: flex; gap: 10px; align-items: stretch; flex-wrap: wrap; }
   .sp-banner {

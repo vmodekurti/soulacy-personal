@@ -18,11 +18,15 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/testcontainers/testcontainers-go"
+	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
+	"github.com/testcontainers/testcontainers-go/wait"
 	"go.uber.org/zap/zaptest"
 
 	"github.com/soulacy/soulacy/internal/memory"
@@ -32,6 +36,56 @@ import (
 // dsnEnvVar is the environment variable that supplies the Postgres connection
 // string. When unset/empty, all tests in this file skip.
 const dsnEnvVar = "SOULACY_TEST_POSTGRES_DSN"
+
+var (
+	containerOnce sync.Once
+	containerDSN  string
+	containerErr  error
+	pgContainer   *tcpostgres.PostgresContainer
+)
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if pgContainer != nil {
+		_ = testcontainers.TerminateContainer(pgContainer)
+	}
+	os.Exit(code)
+}
+
+func integrationDSN(t *testing.T) string {
+	t.Helper()
+	if dsn := os.Getenv(dsnEnvVar); dsn != "" {
+		return dsn
+	}
+	containerOnce.Do(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+		pgContainer, containerErr = runPostgresContainer(ctx,
+			tcpostgres.WithDatabase("soulacy_test"),
+			tcpostgres.WithUsername("soulacy"),
+			tcpostgres.WithPassword("soulacy-test-only"),
+			testcontainers.WithWaitStrategy(wait.ForLog("database system is ready to accept connections").WithOccurrence(2).WithStartupTimeout(60*time.Second)),
+		)
+		if containerErr == nil {
+			containerDSN, containerErr = pgContainer.ConnectionString(ctx, "sslmode=disable")
+		}
+	})
+	if containerErr != nil {
+		t.Skipf("POSTGRES INTEGRATION SKIPPED LOUDLY: Docker/testcontainer unavailable: %v", containerErr)
+	}
+	return containerDSN
+}
+
+func runPostgresContainer(ctx context.Context, opts ...testcontainers.ContainerCustomizer) (container *tcpostgres.PostgresContainer, err error) {
+	// testcontainers panics while discovering Docker on some desktop setups.
+	// Integration unavailability is a loud skip, never a unit-test process crash.
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("Docker discovery failed: %v", recovered)
+		}
+	}()
+	return tcpostgres.Run(ctx, "postgres:16-alpine", opts...)
+}
 
 // pgSeq generates unique memory-entry IDs across the test binary lifetime.
 var pgSeq int64
@@ -46,10 +100,7 @@ var pgSeq int64
 func testStores(t *testing.T) (*ActionLog, *MemoryStore, *pgxpool.Pool) {
 	t.Helper()
 
-	dsn := os.Getenv(dsnEnvVar)
-	if dsn == "" {
-		t.Skipf("set %s to run Postgres parity tests", dsnEnvVar)
-	}
+	dsn := integrationDSN(t)
 
 	log := zaptest.NewLogger(t)
 
@@ -443,5 +494,88 @@ func TestPostgresMigrationRoundTrip(t *testing.T) {
 		if !exists {
 			t.Errorf("table %s missing after migration round-trip", tbl)
 		}
+	}
+}
+
+func TestPostgresConcurrentIngestClaimsAreUnique(t *testing.T) {
+	_, _, pool := testStores(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	_, _ = pool.Exec(ctx, `DROP TABLE IF EXISTS test_ingest_jobs`)
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DROP TABLE IF EXISTS test_ingest_jobs`) })
+	_, err := pool.Exec(ctx, `CREATE TABLE test_ingest_jobs (
+		id BIGSERIAL PRIMARY KEY, status TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const jobs = 24
+	if _, err := pool.Exec(ctx, `INSERT INTO test_ingest_jobs(status) SELECT 'queued' FROM generate_series(1,$1)`, jobs); err != nil {
+		t.Fatal(err)
+	}
+
+	claimed := make(chan int64, jobs)
+	errs := make(chan error, jobs)
+	var wg sync.WaitGroup
+	for i := 0; i < jobs; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var id int64
+			err := pool.QueryRow(ctx, `
+				WITH next AS (
+					SELECT id FROM test_ingest_jobs WHERE status='queued'
+					ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT 1
+				)
+				UPDATE test_ingest_jobs j SET status='running' FROM next
+				WHERE j.id=next.id RETURNING j.id`).Scan(&id)
+			if err != nil {
+				errs <- err
+				return
+			}
+			claimed <- id
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	close(claimed)
+	for err := range errs {
+		t.Errorf("concurrent claim: %v", err)
+	}
+	seen := map[int64]bool{}
+	for id := range claimed {
+		if seen[id] {
+			t.Errorf("job %d claimed more than once", id)
+		}
+		seen[id] = true
+	}
+	if len(seen) != jobs {
+		t.Fatalf("unique claims = %d, want %d", len(seen), jobs)
+	}
+}
+
+func TestPostgresRollbackLeavesNoPartialState(t *testing.T) {
+	_, _, pool := testStores(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO memories(id,agent_id,scope,provenance,content) VALUES('rollback-probe','agent','session','','first')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO memories(id,agent_id,scope,provenance,content) VALUES('rollback-probe','agent','session','','duplicate')`); err == nil {
+		t.Fatal("expected duplicate-key failure")
+	}
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM memories WHERE id='rollback-probe'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("failed transaction left %d partial rows", count)
 	}
 }

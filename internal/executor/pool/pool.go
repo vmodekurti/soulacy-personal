@@ -44,7 +44,6 @@ import (
 	"github.com/soulacy/soulacy/pkg/message"
 )
 
-
 // compile-time interface check
 var _ executor.Backend = (*Pool)(nil)
 
@@ -144,14 +143,18 @@ for raw_line in sys.stdin:
 
 // worker is one long-lived Python process connected via stdin/stdout pipes.
 type worker struct {
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout *bufio.Scanner
+	cmd      *exec.Cmd
+	stdin    io.WriteCloser
+	stdout   *bufio.Scanner
+	ioMu     sync.Mutex // held while Scanner may be reading an os/exec pipe
+	killOnce sync.Once
 }
 
 // send serialises req, writes it to the worker, and waits for a response.
 // Returns an error on I/O failure or when the Python code reports an error.
 func (w *worker) send(req map[string]string) (string, error) {
+	w.ioMu.Lock()
+	defer w.ioMu.Unlock()
 	line, err := json.Marshal(req)
 	if err != nil {
 		return "", err
@@ -182,11 +185,21 @@ func (w *worker) send(req map[string]string) (string, error) {
 
 // kill terminates the worker process.
 func (w *worker) kill() {
-	_ = w.stdin.Close()
-	if w.cmd.Process != nil {
-		_ = w.cmd.Process.Kill()
-	}
-	_ = w.cmd.Wait()
+	w.killOnce.Do(func() {
+		_ = w.stdin.Close()
+		if w.cmd.Process != nil {
+			_ = w.cmd.Process.Kill()
+		}
+		// os/exec closes StdoutPipe inside Wait. Wait must therefore happen
+		// only after the goroutine in send has returned from Scanner.Scan;
+		// otherwise a timeout can turn a normal cancellation into a spurious
+		// "file already closed" worker failure. Killing the process above
+		// unblocks Scan, and ioMu is the explicit reader-completion barrier.
+		w.ioMu.Lock()
+		_ = w.stdout.Err()
+		w.ioMu.Unlock()
+		_ = w.cmd.Wait()
+	})
 }
 
 // ---------------------------------------------------------------------------

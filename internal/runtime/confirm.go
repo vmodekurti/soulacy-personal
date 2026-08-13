@@ -60,6 +60,7 @@ type PendingApproval struct {
 	Reason    string         `json:"reason,omitempty"`
 	AgentID   string         `json:"agent_id,omitempty"`
 	SessionID string         `json:"session_id,omitempty"`
+	Principal string         `json:"-"`
 	CreatedAt time.Time      `json:"created_at"`
 }
 
@@ -102,6 +103,10 @@ func (b *ConfirmBroker) Register(callID string) chan bool {
 // RegisterRequest stores a result channel plus the request metadata and returns
 // the channel. The engine blocks on it until Resolve is called.
 func (b *ConfirmBroker) RegisterRequest(req ConfirmRequest, agentID, sessionID string) chan bool {
+	return b.RegisterRequestForPrincipal(req, agentID, sessionID, "")
+}
+
+func (b *ConfirmBroker) RegisterRequestForPrincipal(req ConfirmRequest, agentID, sessionID, principal string) chan bool {
 	ch := make(chan bool, 1)
 	meta := PendingApproval{
 		CallID:    req.CallID,
@@ -110,6 +115,7 @@ func (b *ConfirmBroker) RegisterRequest(req ConfirmRequest, agentID, sessionID s
 		Reason:    req.Reason,
 		AgentID:   agentID,
 		SessionID: sessionID,
+		Principal: principal,
 		CreatedAt: time.Now().UTC(),
 	}
 	b.mu.Lock()
@@ -141,9 +147,16 @@ func (b *ConfirmBroker) Forget(callID string) bool {
 
 // List returns all currently pending approvals, newest first.
 func (b *ConfirmBroker) List() []PendingApproval {
+	return b.ListForPrincipal("", true)
+}
+
+func (b *ConfirmBroker) ListForPrincipal(principal string, admin bool) []PendingApproval {
 	b.mu.Lock()
 	out := make([]PendingApproval, 0, len(b.pending))
 	for _, e := range b.pending {
+		if !admin && (principal == "" || e.meta.Principal != principal) {
+			continue
+		}
 		out = append(out, e.meta)
 	}
 	b.mu.Unlock()
@@ -154,8 +167,15 @@ func (b *ConfirmBroker) List() []PendingApproval {
 // Resolve delivers the user's decision (approved) for callID.
 // Returns true if callID was found and the decision was delivered.
 func (b *ConfirmBroker) Resolve(callID string, approved bool) bool {
+	return b.ResolveForPrincipal(callID, approved, "", true)
+}
+
+func (b *ConfirmBroker) ResolveForPrincipal(callID string, approved bool, principal string, admin bool) bool {
 	b.mu.Lock()
 	e, ok := b.pending[callID]
+	if ok && !admin && (principal == "" || e.meta.Principal != principal) {
+		ok = false
+	}
 	if ok {
 		delete(b.pending, callID)
 	}

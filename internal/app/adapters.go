@@ -7,15 +7,65 @@ package app
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
+	"github.com/soulacy/soulacy/internal/agentmemory"
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/costs"
 	"github.com/soulacy/soulacy/internal/llm"
+	"github.com/soulacy/soulacy/internal/memory"
 	"github.com/soulacy/soulacy/internal/plugins"
 	"github.com/soulacy/soulacy/internal/queue/dlq"
 	"github.com/soulacy/soulacy/internal/runtime"
 	"github.com/soulacy/soulacy/internal/telemetry"
 )
+
+// agentMemoryVectorAdapter makes the native sqlite-vec store the semantic
+// backend for agentmemory.CompositeStore. The composition root owns this glue
+// so neither memory package needs to depend on the other.
+type agentMemoryVectorAdapter struct{ store *memory.VectorStore }
+
+func (a *agentMemoryVectorAdapter) Write(r agentmemory.Record) error {
+	if a == nil || a.store == nil {
+		return fmt.Errorf("agent memory sqlite-vec store is unavailable")
+	}
+	if r.ID == "" {
+		return fmt.Errorf("agent memory semantic record id is required")
+	}
+	created := r.Timestamp
+	if created.IsZero() {
+		created = time.Now().UTC()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return a.store.Write(ctx, memory.Entry{
+		ID: r.ID, AgentID: r.AgentID, Scope: memory.ScopeAgent, Key: r.ID,
+		Content: r.Content, Metadata: map[string]string{"tags": strings.Join(r.Tags, ",")}, CreatedAt: created,
+	})
+}
+
+func (a *agentMemoryVectorAdapter) Search(agentID, query string, max int) ([]agentmemory.Record, error) {
+	if a == nil || a.store == nil {
+		return nil, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	hits, err := a.store.SearchFiltered(ctx, query, max, agentID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]agentmemory.Record, 0, len(hits))
+	for _, hit := range hits {
+		out = append(out, agentmemory.Record{
+			ID: hit.Entry.Key, AgentID: hit.Entry.AgentID, Type: agentmemory.MemoryTypeSemantic,
+			Timestamp: hit.Entry.CreatedAt, Content: hit.Entry.Content,
+			Tags: strings.FieldsFunc(hit.Entry.Metadata["tags"], func(r rune) bool { return r == ',' }),
+			Meta: map[string]string{"distance": fmt.Sprintf("%.6f", hit.Distance)},
+		})
+	}
+	return out, nil
+}
 
 // llmEmbedAdapter wraps an llm.Embedder so it satisfies memory.Embedder.
 // The llm.Embedder interface takes a model name and a slice of texts; memory
@@ -118,8 +168,14 @@ func costPriceTableFromConfig(in map[string]config.CostPricing) costs.PriceTable
 			continue
 		}
 		out[normalized] = costs.Pricing{
-			InputPerMTok:  price.InputPerMTok,
-			OutputPerMTok: price.OutputPerMTok,
+			InputPerMTok:       price.InputPerMTok,
+			OutputPerMTok:      price.OutputPerMTok,
+			CachedInputPerMTok: price.CachedInputPerMTok,
+			CacheWritePerMTok:  price.CacheWritePerMTok,
+			ReasoningPerMTok:   price.ReasoningPerMTok,
+			Source:             price.Source,
+			EffectiveDate:      price.EffectiveDate,
+			Version:            price.Version,
 		}
 	}
 	if len(out) == 0 {

@@ -42,6 +42,7 @@ import (
 	"github.com/soulacy/soulacy/internal/agentvalidate"
 	"github.com/soulacy/soulacy/internal/auth"
 	"github.com/soulacy/soulacy/internal/config"
+	"github.com/soulacy/soulacy/internal/costs"
 	"github.com/soulacy/soulacy/internal/llm"
 	reasoningpkg "github.com/soulacy/soulacy/internal/reasoning"
 	"github.com/soulacy/soulacy/internal/runtime"
@@ -55,12 +56,28 @@ import (
 // the configured default provider and resolves that provider's model from
 // config, mirroring how the gateway otherwise reaches the LLM layer.
 type routerLLM struct {
-	router   *llm.Router
-	provider string
-	model    string
+	router    *llm.Router
+	provider  string
+	model     string
+	store     *costs.Store
+	runID     string
+	confirmed bool
+}
+
+func (a routerLLM) Usage() costs.UsageRecord {
+	if a.store == nil {
+		return costs.UsageRecord{}
+	}
+	usage, _ := a.store.TotalsByRun(context.Background(), a.runID)
+	return usage
 }
 
 func (a routerLLM) Complete(ctx context.Context, prompt string) (string, error) {
+	metadata := llm.CallMetadataFromContext(ctx)
+	metadata.Source = "studio"
+	metadata.RunID = a.runID
+	metadata.CostConfirmed = metadata.CostConfirmed || a.confirmed
+	ctx = llm.WithCallMetadata(ctx, metadata)
 	resp, err := a.router.Complete(ctx, a.provider, llm.CompletionRequest{
 		Model: a.model,
 		Messages: []llm.ChatMessage{
@@ -80,6 +97,11 @@ func (a routerLLM) Complete(ctx context.Context, prompt string) (string, error) 
 // keeps OpenAI in non-strict mode instead of rejecting it. Providers without
 // schema support (Ollama) transparently fall back to JSON mode + post-validation.
 func (a routerLLM) CompleteSchema(ctx context.Context, prompt string, schema map[string]any) (string, error) {
+	metadata := llm.CallMetadataFromContext(ctx)
+	metadata.Source = "studio"
+	metadata.RunID = a.runID
+	metadata.CostConfirmed = metadata.CostConfirmed || a.confirmed
+	ctx = llm.WithCallMetadata(ctx, metadata)
 	resp, err := a.router.Complete(ctx, a.provider, llm.CompletionRequest{
 		Model: a.model,
 		Messages: []llm.ChatMessage{
@@ -97,12 +119,17 @@ func (a routerLLM) CompleteSchema(ctx context.Context, prompt string, schema map
 
 // studioLLM builds the studio.LLM the compiler will use, wiring the default
 // provider + model out of config. Returns nil when no router is available.
-func (s *Server) studioLLM() studio.LLM {
+func (s *Server) studioLLM(request ...*fiber.Ctx) studio.LLM {
 	if s.llmRouter == nil {
 		return nil
 	}
 	provider, model := s.studioProviderModel()
-	return routerLLM{router: s.llmRouter, provider: provider, model: model}
+	confirmed := false
+	if len(request) > 0 && request[0] != nil {
+		confirmed = isTruthy(request[0].Get("X-Soulacy-Cost-Confirmed"))
+	}
+	return routerLLM{router: s.llmRouter, provider: provider, model: model, store: s.costStore,
+		runID: uuid.New().String(), confirmed: confirmed}
 }
 
 // studioProviderModel resolves the builder (llm.studio) provider + model the
@@ -288,9 +315,13 @@ func (s *Server) groundCatalog(cat *studio.Catalog) {
 	// Inject the authoring rulebook so the builder follows the same rules the
 	// validator and AI fixer enforce.
 	cat.Rules = s.soulRules()
-	// Inject lessons learned from accepted live-run repairs so generation avoids
-	// repeating real shape mistakes (gated by llm.studio.learning).
-	s.groundLessons(cat)
+	s.groundStrategyFit(cat)
+	// Successful multi-tool runs are distilled into payload-free procedural
+	// patterns. RawIntent is authoritative here; refine callers also ground with
+	// their request intent because older clients may omit RawIntent.
+	if strings.TrimSpace(cat.RawIntent) != "" {
+		s.groundWorkflowPatterns(cat, cat.RawIntent)
+	}
 	// Installed skills (so "yahoo finance" maps to the real "yfinance").
 	if s.skillLoader != nil {
 		cat.Skills = cat.Skills[:0]
@@ -341,6 +372,22 @@ func (s *Server) groundCatalog(cat *studio.Catalog) {
 			}
 		}
 	}
+	// Run semantic retrieval only after the authoritative tool inventory and its
+	// descriptions have been assembled.
+	s.groundLessons(cat, cat.RawIntent)
+}
+
+func studioLearningOwner(c *fiber.Ctx) string {
+	if claims := auth.ClaimsFromCtx(c); claims != nil {
+		if subject := strings.TrimSpace(claims.Subject); subject != "" {
+			return subject
+		}
+		if email := strings.TrimSpace(claims.Email); email != "" {
+			return strings.ToLower(email)
+		}
+	}
+	// Open/dev and static-key installations remain one workspace-local scope.
+	return ""
 }
 
 // groundGenerationProfile stamps the compile request with the actual builder
@@ -417,11 +464,14 @@ func (s *Server) handleStudioRefinePrompt(c *fiber.Ctx) error {
 	if strings.TrimSpace(req.Intent) == "" {
 		return s.errMsg(c, fiber.StatusBadRequest, "intent is required")
 	}
-	model := s.studioLLM()
+	model := s.studioLLM(c)
 	if model == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "LLM router unavailable")
 	}
 	s.groundCatalog(&req.Catalog)
+	s.groundPreferencesFor(&req.Catalog, studioLearningOwner(c))
+	s.groundLessons(&req.Catalog, req.Intent)
+	s.groundWorkflowPatterns(&req.Catalog, req.Intent)
 
 	refine := studio.RefinePrompt
 	if req.Light {
@@ -432,6 +482,24 @@ func (s *Server) handleStudioRefinePrompt(c *fiber.Ctx) error {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
 	return c.JSON(res)
+}
+
+// handleStudioStrategyFit exposes only aggregate compatibility evidence for a
+// model. It powers warning icons in Studio without exposing run content.
+func (s *Server) handleStudioStrategyFit(c *fiber.Ctx) error {
+	provider := strings.TrimSpace(c.Query("provider"))
+	model := strings.TrimSpace(c.Query("model"))
+	if model == "" {
+		provider, model = s.defaultAgentLLM()
+	}
+	rows := []studio.StrategyFit{}
+	if store := s.strategyFitStore(); store != nil {
+		rows = store.ForProviderModel(provider, model)
+	}
+	return c.JSON(fiber.Map{
+		"provider": provider, "model": model, "strategies": rows,
+		"min_runs": studio.StrategyFitMinRuns, "success_threshold": studio.StrategyFitSuccessThreshold,
+	})
 }
 
 // studioPreflightRequest is the POST /api/v1/studio/preflight body.
@@ -454,6 +522,8 @@ func (s *Server) handleStudioPreflight(c *fiber.Ctx) error {
 	// the real, live inventory rather than whatever the GUI happened to send.
 	cat := s.studioCatalogSnapshot()
 	s.groundCatalog(&cat)
+	learningOwner := studioLearningOwner(c)
+	s.groundPreferencesFor(&cat, learningOwner)
 
 	res := studio.Preflight(req.Workflow, s.preflightInput(c, cat))
 	return c.JSON(res)
@@ -618,7 +688,7 @@ func (s *Server) handleStudioAutowire(c *fiber.Ctx) error {
 	cat := s.studioCatalogSnapshot()
 	s.groundCatalog(&cat)
 	in := s.preflightInput(c, cat)
-	model := s.studioLLM()
+	model := s.studioLLM(c)
 
 	// 1) Contract-driven structural repair. Pre-save "Fix automatically" must
 	//    be able to fix architecture blockers (empty graph, invalid graph,
@@ -707,7 +777,7 @@ func (s *Server) handleStudioTroubleshoot(c *fiber.Ctx) error {
 	if strings.TrimSpace(req.Error) == "" {
 		return s.errMsg(c, fiber.StatusBadRequest, "error message is required")
 	}
-	model := s.studioLLM()
+	model := s.studioLLM(c)
 	if model == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "LLM router unavailable")
 	}
@@ -832,7 +902,7 @@ func (s *Server) handleStudioBuild(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return s.errMsg(c, fiber.StatusBadRequest, "invalid request body: "+err.Error())
 	}
-	model := s.studioLLM()
+	model := s.studioLLM(c)
 	if model == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "LLM router unavailable")
 	}
@@ -876,6 +946,8 @@ func (s *Server) handleStudioBuild(c *fiber.Ctx) error {
 		// "still making progress" loop would hold a live tool connection and an
 		// LLM budget open indefinitely.
 		MaxElapsed: studio.DefaultMaxElapsed,
+		MaxTokens:  s.cfg.LLM.Studio.MaxBuildTokens,
+		MaxCostUSD: s.cfg.LLM.Studio.MaxBuildCostUSD,
 	}
 
 	rep := studio.BuildUntilWorks(c.Context(), model, req.Workflow, cat, opts)
@@ -903,7 +975,7 @@ func (s *Server) handleStudioBuildStream(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return s.errMsg(c, fiber.StatusBadRequest, "invalid request body: "+err.Error())
 	}
-	model := s.studioLLM()
+	model := s.studioLLM(c)
 	if model == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "LLM router unavailable")
 	}
@@ -994,6 +1066,8 @@ func (s *Server) handleStudioBuildStream(c *fiber.Ctx) error {
 			SideEffects: policy,
 			Verifier:    studio.VerifierFor(policy, s.studioRealRunner()),
 			MaxElapsed:  studio.DefaultMaxElapsed,
+			MaxTokens:   s.cfg.LLM.Studio.MaxBuildTokens,
+			MaxCostUSD:  s.cfg.LLM.Studio.MaxBuildCostUSD,
 		}
 		opts.OnEvent = func(ev studio.BuildEvent) {
 			b, _ := json.Marshal(ev)
@@ -1064,12 +1138,14 @@ func (s *Server) handleStudioGenerateStream(c *fiber.Ctx) error {
 	if strings.TrimSpace(req.Intent) == "" {
 		return s.errMsg(c, fiber.StatusBadRequest, "intent is required")
 	}
-	model := s.studioLLM()
+	model := s.studioLLM(c)
 	if model == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "LLM router unavailable")
 	}
 	cat := s.studioCatalogSnapshot()
 	s.groundCatalog(&cat)
+	learningOwner := studioLearningOwner(c)
+	s.groundPreferencesFor(&cat, learningOwner)
 	in := s.preflightInput(c, cat)
 	// Detached from the request context — Fiber hands the connection to a stream
 	// writer, so c.Context() is done before the pipeline finishes — but STILL
@@ -1147,6 +1223,13 @@ func (s *Server) handleStudioGenerateStream(c *fiber.Ctx) error {
 		// Save refused it with "does not specify a model to run on" while Run Live
 		// (which resolves the default first) reported the same draft as fine.
 		s.stampDefaultLLM(&res.Compile.Workflow)
+		generatedStrategy := res.Compile.Workflow.Strategy
+		if !res.Compile.Workflow.IsAgent() {
+			generatedStrategy = "workflow"
+		}
+		if s.unreliableStrategy(res.Compile.Workflow.LLM.Provider, res.Compile.Workflow.LLM.Model, generatedStrategy) {
+			err = fmt.Errorf("the generated execution strategy is historically unreliable for the active provider/model")
+		}
 
 		// Route the streamed result through the SAME finalization the synchronous
 		// compile path uses. Without this, res.Compile.Contract stayed nil on the
@@ -1158,6 +1241,9 @@ func (s *Server) handleStudioGenerateStream(c *fiber.Ctx) error {
 		// broken agent at run time). Finalization runs even on the error path so a
 		// partial draft still carries an honest verdict rather than no verdict.
 		s.finalizeStudioResult(&res.Compile, cat, in)
+		if err == nil {
+			s.issueGenerationProof(learningOwner, &res.Compile.Workflow)
+		}
 
 		// `blocked` is the unambiguous "do not treat this as a good draft" signal.
 		// The partial draft is preserved in `result` either way (the story requires
@@ -1610,6 +1696,7 @@ func (s *Server) handleStudioTryAgent(c *fiber.Ctx) error {
 		CreatedAt: time.Now().UTC(),
 	}
 
+	ctx = withRequestPrincipal(c, ctx)
 	reply, runErr := s.engine.Handle(ctx, msg)
 	replyText := ""
 	for _, p := range reply.Parts {
@@ -2374,7 +2461,7 @@ func (s *Server) handleStudioDiagnoseRun(c *fiber.Ctx) error {
 	if s.dlqStore == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "no failed-run history available")
 	}
-	model := s.studioLLM()
+	model := s.studioLLM(c)
 	if model == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "LLM router unavailable")
 	}
@@ -2428,6 +2515,8 @@ func (s *Server) handleStudioDiagnoseRun(c *fiber.Ctx) error {
 		Verifier:      studio.VerifierFor(studio.SideEffectsReal, s.studioRealRunner()),
 		ExtraProblems: s.pythonBuildProblems,
 		MaxElapsed:    studio.DefaultMaxElapsed,
+		MaxTokens:     s.cfg.LLM.Studio.MaxBuildTokens,
+		MaxCostUSD:    s.cfg.LLM.Studio.MaxBuildCostUSD,
 	})
 
 	return c.JSON(fiber.Map{
@@ -2460,7 +2549,7 @@ func (s *Server) handleStudioDiagnoseSession(c *fiber.Ctx) error {
 	if s.actions == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "action logging disabled")
 	}
-	model := s.studioLLM()
+	model := s.studioLLM(c)
 	if model == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "LLM router unavailable")
 	}
@@ -2518,6 +2607,8 @@ func (s *Server) handleStudioDiagnoseSession(c *fiber.Ctx) error {
 		Verifier:      studio.VerifierFor(studio.SideEffectsReal, s.studioRealRunner()),
 		ExtraProblems: s.pythonBuildProblems,
 		MaxElapsed:    studio.DefaultMaxElapsed,
+		MaxTokens:     s.cfg.LLM.Studio.MaxBuildTokens,
+		MaxCostUSD:    s.cfg.LLM.Studio.MaxBuildCostUSD,
 	})
 
 	failingInput := studioSessionFailingInput(events, req.AgentID, req.SessionID)
@@ -2676,11 +2767,15 @@ func (s *Server) handleStudioCompileAgent(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusBadRequest, "intent is required")
 	}
 	s.groundCatalog(&req.Catalog)
+	s.groundPreferencesFor(&req.Catalog, studioLearningOwner(c))
 	s.groundGenerationProfile(&req.Catalog, req.Intent)
 	advice := studio.AdviseStrategy(req.Intent, req.Catalog, req.Strategy, false)
 	strategy := advice.RuntimeStrategy
 	if strategy == "" {
 		strategy = "auto"
+	}
+	if s.unreliableStrategy(req.Catalog.ActiveProvider, req.Catalog.ActiveModel, strategy) {
+		return s.errMsg(c, fiber.StatusUnprocessableEntity, "the selected execution strategy is historically unreliable for the active provider/model")
 	}
 	res, ok := studio.CompileDeterministicAgent(req.Intent, req.Catalog, strategy, req.Answers)
 	if !ok {
@@ -2689,6 +2784,7 @@ func (s *Server) handleStudioCompileAgent(c *fiber.Ctx) error {
 	s.stampDefaultLLM(&res.Workflow)         // make the runtime provider/model explicit in the YAML
 	studio.ApplyTemplateFixes(&res.Workflow) // deterministic self-heal (no-op when there's no flow graph)
 	s.finalizeStudioCompileResult(c, &res, req.Catalog)
+	s.issueGenerationProof(studioLearningOwner(c), &res.Workflow)
 	return c.JSON(studioCompileResponseFor(res, advice))
 }
 
@@ -2748,6 +2844,7 @@ func (s *Server) handleStudioCompile(c *fiber.Ctx) error {
 	// (authoritative, server-side) so it maps loose references to actual
 	// capabilities and wires real MCP tools instead of inventing names.
 	s.groundCatalog(&req.Catalog)
+	s.groundPreferencesFor(&req.Catalog, studioLearningOwner(c))
 	s.groundGenerationProfile(&req.Catalog, strings.TrimSpace(req.Intent+" "+req.RawIntent))
 
 	// SINGLE authoritative architecture decision, evaluated over the raw + refined
@@ -2762,6 +2859,26 @@ func (s *Server) handleStudioCompile(c *fiber.Ctx) error {
 	// explicit human choice overrides the reasoning-fit heuristic below —
 	// without this, RecommendAgentMode kept reverting their pick to an agent.
 	advice := studio.AdviseStrategy(req.Intent+" "+req.RawIntent, req.Catalog, "", req.ForceWorkflow)
+	chosen := advice.RuntimeStrategy
+	if advice.Mode == "workflow" {
+		chosen = "workflow"
+	}
+	if s.unreliableStrategy(req.Catalog.ActiveProvider, req.Catalog.ActiveModel, chosen) {
+		// Historical evidence is an authoritative backend guard, not merely UI
+		// decoration. Prefer Auto when it remains reliable; otherwise refuse to
+		// manufacture a draft with a strategy known to fail for this model.
+		if chosen != "auto" && !s.unreliableStrategy(req.Catalog.ActiveProvider, req.Catalog.ActiveModel, "auto") {
+			advice.Mode = "auto"
+			advice.RuntimeStrategy = "auto"
+			advice.Reason = "Studio selected Auto because local run history marks " + chosen + " unreliable for the active model."
+			advice.CapabilityWarning = advice.Reason
+		} else {
+			return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
+				"error":    "the selected execution strategy is historically unreliable for the active provider/model",
+				"provider": req.Catalog.ActiveProvider, "model": req.Catalog.ActiveModel, "strategy": chosen,
+			})
+		}
+	}
 
 	// The MODEL designs, grounded in the whole catalogue; the deterministic
 	// planner is the fallback.
@@ -2786,6 +2903,7 @@ func (s *Server) handleStudioCompile(c *fiber.Ctx) error {
 		}
 	}
 	s.finalizeStudioCompileResult(c, &res, req.Catalog)
+	s.issueGenerationProof(studioLearningOwner(c), &res.Workflow)
 	return c.JSON(studioCompileResponseFor(res, advice))
 }
 
@@ -2849,7 +2967,7 @@ func (s *Server) studioDesignGraph(
 	designCtx, cancelDesign := context.WithTimeout(context.WithoutCancel(c.Context()), 5*time.Minute)
 	defer cancelDesign()
 
-	if model := s.studioLLM(); model != nil {
+	if model := s.studioLLM(c); model != nil {
 		designCat := cat
 		if detOK && studio.EncodesProcedure(detRes) {
 			if ref, mErr := json.MarshalIndent(detRes.Workflow, "", "  "); mErr == nil {
@@ -3486,7 +3604,7 @@ func (s *Server) handleStudioFixYAML(c *fiber.Ctx) error {
 	if strings.TrimSpace(req.YAML) == "" {
 		return s.errMsg(c, fiber.StatusBadRequest, "YAML is empty")
 	}
-	model := s.studioLLM()
+	model := s.studioLLM(c)
 	if model == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "LLM router unavailable")
 	}
@@ -3584,7 +3702,7 @@ func (s *Server) handleStudioReviewYAML(c *fiber.Ctx) error {
 	if strings.TrimSpace(req.YAML) == "" {
 		return s.errMsg(c, fiber.StatusBadRequest, "YAML is empty")
 	}
-	model := s.studioLLM()
+	model := s.studioLLM(c)
 	if model == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "LLM router unavailable")
 	}
@@ -3613,8 +3731,9 @@ func (s *Server) handleStudioReviewYAML(c *fiber.Ctx) error {
 // is the operator's consent to expose a Privileged-tier workflow on a bound
 // channel; it is required (true) when studio.Plan reports requiresConsent.
 type studioSaveRequest struct {
-	Workflow                 studio.Draft `json:"workflow"`
-	AcceptPrivilegedExposure bool         `json:"acceptPrivilegedExposure"`
+	Workflow                 studio.Draft  `json:"workflow"`
+	InitialWorkflow          *studio.Draft `json:"initial_workflow,omitempty"`
+	AcceptPrivilegedExposure bool          `json:"acceptPrivilegedExposure"`
 	// Grants carries the per-node code consent collected by the Studio consent
 	// dialog (§13). One entry per beyond-guardrail Custom Python node.
 	Grants []studioGrant `json:"grants,omitempty"`
@@ -3659,6 +3778,16 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 	// Resolving here also means the saved YAML names its provider/model outright
 	// instead of depending on a workspace default that can change under it.
 	req.Workflow = s.studioDraftWithRuntimeLLM(req.Workflow)
+	saveStrategy := strings.TrimSpace(req.Workflow.Strategy)
+	if req.Workflow.Flow.Nodes != nil && !req.Workflow.IsAgent() {
+		saveStrategy = "workflow"
+	}
+	if s.unreliableStrategy(req.Workflow.LLM.Provider, req.Workflow.LLM.Model, saveStrategy) {
+		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
+			"error":    "this execution strategy is historically unreliable for the selected provider/model",
+			"provider": req.Workflow.LLM.Provider, "model": req.Workflow.LLM.Model, "strategy": saveStrategy,
+		})
+	}
 	// Save is the authoritative last boundary before a graph becomes runnable.
 	// Apply deterministic repairs here as well as during generation so imports,
 	// stale browser tabs, and direct API clients cannot persist a known-fixable
@@ -3780,6 +3909,9 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 	if err := s.loader.Upsert(dir, &def); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
+	if req.InitialWorkflow != nil && s.verifyGenerationProof(studioLearningOwner(c), *req.InitialWorkflow) {
+		s.minePreferences(studioLearningOwner(c), def.ID, *req.InitialWorkflow, req.Workflow)
+	}
 
 	// Tell the scheduler what just changed, exactly as the Code view's save does.
 	// Writing enabled: false is not on its own enough — the cron table keeps its
@@ -3894,7 +4026,7 @@ func (s *Server) handleStudioCodegen(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return s.errMsg(c, fiber.StatusBadRequest, "invalid request body: "+err.Error())
 	}
-	llm := s.studioLLM()
+	llm := s.studioLLM(c)
 	if llm == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "no LLM provider configured for code generation")
 	}
@@ -3954,7 +4086,7 @@ func (s *Server) handleStudioCompileGate(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return s.errMsg(c, fiber.StatusBadRequest, "invalid request body: "+err.Error())
 	}
-	pred, err := studio.CompileGate(c.Context(), s.studioLLM(), req.Phrase, req.Vars)
+	pred, err := studio.CompileGate(c.Context(), s.studioLLM(c), req.Phrase, req.Vars)
 	if err != nil {
 		return s.errMsg(c, fiber.StatusBadRequest, err.Error())
 	}
@@ -3972,7 +4104,7 @@ func (s *Server) handleStudioCompileNode(c *fiber.Ctx) error {
 	if len(req.Catalog.Tools) == 0 && len(req.Catalog.MCP) == 0 && len(req.Catalog.Agents) == 0 {
 		req.Catalog = s.studioCatalogSnapshot()
 	}
-	node, err := studio.CompileNode(c.Context(), s.studioLLM(), req)
+	node, err := studio.CompileNode(c.Context(), s.studioLLM(c), req)
 	if err != nil {
 		return s.errMsg(c, fiber.StatusBadRequest, err.Error())
 	}
@@ -4254,7 +4386,7 @@ func (s *Server) handleStudioRefine(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusBadRequest, "instruction is required")
 	}
 
-	model := s.studioLLM()
+	model := s.studioLLM(c)
 	if model == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "LLM router unavailable")
 	}

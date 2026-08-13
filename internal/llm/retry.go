@@ -19,14 +19,60 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
+	"sync"
 	"time"
 )
 
+type retryStatsKey struct{}
+
+// RetryStats is request-scoped and populated by DoWithRetry so the central
+// ledger can account for provider attempts without provider-specific plumbing.
+type RetryStats struct {
+	mu         sync.Mutex
+	attempts   int
+	requestIDs []string
+}
+
+func withRetryStats(ctx context.Context) (context.Context, *RetryStats) {
+	stats := &RetryStats{}
+	return context.WithValue(ctx, retryStatsKey{}, stats), stats
+}
+
+func retryStatsFromContext(ctx context.Context) *RetryStats {
+	stats, _ := ctx.Value(retryStatsKey{}).(*RetryStats)
+	return stats
+}
+
+func (s *RetryStats) record(resp *http.Response) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.attempts++
+	if resp != nil {
+		if id := strings.TrimSpace(resp.Header.Get("x-request-id")); id != "" {
+			s.requestIDs = append(s.requestIDs, id)
+		}
+	}
+}
+
+func (s *RetryStats) snapshot() (int, []string) {
+	if s == nil {
+		return 0, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.attempts, append([]string(nil), s.requestIDs...)
+}
+
 // RetryConfig parameters the helper. Defaults are conservative.
 type RetryConfig struct {
-	MaxAttempts  int           // total attempts including the first; 0 → 3
-	InitialDelay time.Duration // base delay before first retry; 0 → 250ms
-	MaxDelay     time.Duration // cap on exponential growth;       0 → 5s
+	MaxAttempts   int           // total attempts including the first; 0 → 3
+	InitialDelay  time.Duration // base delay before first retry; 0 → 250ms
+	MaxDelay      time.Duration // cap on exponential growth;       0 → 5s
+	MaxRetryAfter time.Duration // cap on provider Retry-After;      0 → 30s
 }
 
 func (c RetryConfig) normalize() RetryConfig {
@@ -38,6 +84,9 @@ func (c RetryConfig) normalize() RetryConfig {
 	}
 	if c.MaxDelay <= 0 {
 		c.MaxDelay = 5 * time.Second
+	}
+	if c.MaxRetryAfter <= 0 {
+		c.MaxRetryAfter = 30 * time.Second
 	}
 	return c
 }
@@ -67,6 +116,9 @@ func DoWithRetry(ctx context.Context, client *http.Client, req *http.Request, cf
 		}
 
 		resp, err := client.Do(req)
+		if stats := retryStatsFromContext(ctx); stats != nil {
+			stats.record(resp)
+		}
 		lastResp = resp
 		lastErr = err
 
@@ -93,6 +145,9 @@ func DoWithRetry(ctx context.Context, client *http.Client, req *http.Request, cf
 		if resp != nil {
 			if ra := parseRetryAfter(resp.Header.Get("Retry-After")); ra > 0 {
 				sleep = ra
+				if sleep > cfg.MaxRetryAfter {
+					sleep = cfg.MaxRetryAfter
+				}
 			}
 		}
 		select {

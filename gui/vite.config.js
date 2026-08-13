@@ -15,6 +15,9 @@ function manualChunks(id) {
 }
 
 export default defineConfig({
+  // Keep the Svelte 4 component constructor API while running the patched
+  // Svelte 5 compiler/runtime. The app and its test harness migrate to mount()
+  // separately; this compatibility mode does not re-enable the fixed SSR bugs.
   plugins: [svelte()],
 
   // During 'npm run dev', proxy API and WebSocket to the running gateway.

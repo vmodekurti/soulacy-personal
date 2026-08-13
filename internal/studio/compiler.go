@@ -82,6 +82,17 @@ type Catalog struct {
 	// the generation prompt so Studio learns to build flows that work the first
 	// time. Populated server-side from the lesson store; not user-authored.
 	Lessons []Lesson `json:"lessons,omitempty"`
+	// WorkflowPatterns are payload-free structural recipes distilled from
+	// successful multi-tool runs with semantically similar intents.
+	WorkflowPatterns []WorkflowPattern `json:"workflow_patterns,omitempty"`
+	// Aggregate local strategy-fit evidence for the model the generated agent
+	// will run on. No prompt, output, user, or session content is included.
+	ActiveProvider       string   `json:"active_provider,omitempty"`
+	ActiveModel          string   `json:"active_model,omitempty"`
+	UnreliableStrategies []string `json:"unreliable_strategies,omitempty"`
+	// GlobalPreferences are durable behavioral defaults mined from repeated
+	// manual edits across different agents.
+	GlobalPreferences []GlobalPreference `json:"global_preferences,omitempty"`
 	// Generation is the server-derived build profile for the Studio builder
 	// model. It lets the compiler tighten prompts for compact local models and
 	// report how much scaffolding was used, without relying on the GUI to infer
@@ -202,6 +213,10 @@ type Recommendation struct {
 
 // Draft is the workflow the compiler produces.
 type Draft struct {
+	// GenerationProof is an opaque, short-lived server-issued handle binding the
+	// generated baseline used for preference diff mining. It is never written to
+	// SOUL.yaml and grants no runtime capability.
+	GenerationProof string `json:"generation_proof,omitempty"`
 	// ID is the existing agent's id when a saved agent was opened for editing.
 	// Empty for a brand-new draft (the id is then derived from Name on save).
 	// Carrying it makes Save target the SAME agent instead of creating a new one
@@ -557,6 +572,13 @@ func BuildPrompt(intent string, catalog Catalog, answers map[string]string) stri
 	// Lessons distilled from accepted live-run repairs — real API shapes that
 	// broke a node before, so this generation avoids repeating the same mistake.
 	sb.WriteString(LessonsPromptBlock(catalog.Lessons))
+
+	// Procedural memory distilled from successful multi-tool runs. Unlike a
+	// reference graph this is payload-free and can represent several nearby
+	// intent families, giving the builder proven ordering without leaking data.
+	sb.WriteString(WorkflowPatternsPromptBlock(catalog.WorkflowPatterns))
+	sb.WriteString(UnreliableStrategiesPromptBlock(catalog.ActiveModel, catalog.UnreliableStrategies))
+	sb.WriteString(GlobalPreferencesPromptBlock(catalog.GlobalPreferences))
 
 	// Builder profile guidance is deliberately close to the top of the prompt:
 	// compact local models follow a short, explicit contract much better than

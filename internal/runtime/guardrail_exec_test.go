@@ -55,16 +55,22 @@ func TestGuardrail_RunScriptAndShellExecAgree(t *testing.T) {
 	}
 }
 
-// Writing to scratch space is still unremarkable — the fix must not have made
-// every file write a prompt.
-func TestGuardrail_WritingToTmpIsStillSafe(t *testing.T) {
+// /tmp is no longer an implicit capability. Only explicitly configured
+// workspace roots are safe, so a write there must be confirmed.
+func TestGuardrail_WritingToTmpRequiresConfirmationWhenOutsideRoots(t *testing.T) {
 	e := newMinimalEngine(t)
+	// newMinimalEngine allows os.TempDir for broad filesystem-tool coverage.
+	// On Linux that is /tmp itself, so replace it with an isolated root before
+	// asserting that a sibling /tmp path is outside the allowlist.
+	if err := e.SetFilesystemRoots([]string{t.TempDir()}); err != nil {
+		t.Fatalf("filesystem roots: %v", err)
+	}
 	action, _, err := e.deterministicGuardrail(context.Background(), &agent.Definition{ID: "a"}, "s",
 		message.ToolCall{Name: "write_file", Arguments: map[string]any{"path": "/tmp/notes.txt"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if action != GuardrailActionSafe {
-		t.Fatalf("writing to /tmp now returns %q — the fix over-corrected", action)
+	if action != GuardrailActionConfirm {
+		t.Fatalf("writing outside configured roots returned %q, want confirmation", action)
 	}
 }

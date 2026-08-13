@@ -17,6 +17,8 @@ import (
 	"regexp"
 	"sync"
 	"time"
+
+	"github.com/soulacy/soulacy/internal/redact"
 )
 
 // Entry is one line in the audit log.
@@ -99,15 +101,23 @@ func redactValue(v any, depth int) any {
 // Logger writes audit entries to a per-session JSONL file under dir.
 // It is safe for concurrent use; each Log call acquires a per-file mutex.
 type Logger struct {
-	dir string
-	mu  sync.Mutex
-	fmu sync.Map // path → *sync.Mutex
+	dir       string
+	mu        sync.Mutex
+	fmu       sync.Map // path → *sync.Mutex
+	retention time.Duration
+	lastPrune time.Time
 }
 
 // New creates a Logger that writes to dir (created if it doesn't exist).
 // Pass "" to disable audit logging (Log becomes a no-op).
 func New(dir string) *Logger {
-	return &Logger{dir: dir}
+	return &Logger{dir: dir, retention: 30 * 24 * time.Hour}
+}
+
+// NewWithRetention creates a logger with age-based deletion. A zero duration
+// keeps audit files indefinitely.
+func NewWithRetention(dir string, retention time.Duration) *Logger {
+	return &Logger{dir: dir, retention: retention}
 }
 
 // Log appends e to the audit file for e.SessionID.
@@ -116,12 +126,13 @@ func (l *Logger) Log(e Entry) {
 	if l == nil || l.dir == "" {
 		return
 	}
+	l.pruneExpired(e.Timestamp)
 
-	e.Args = redactArgs(e.Args)
+	e.Args = redact.Map(e.Args)
 
 	day := e.Timestamp.UTC().Format("2006-01-02")
 	dir := filepath.Join(l.dir, day)
-	if err := os.MkdirAll(dir, 0750); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return // best-effort; don't crash the agent run over audit I/O
 	}
 
@@ -146,6 +157,32 @@ func (l *Logger) Log(e Entry) {
 		return
 	}
 	_, _ = fmt.Fprintf(f, "%s\n", data)
+}
+
+func (l *Logger) pruneExpired(now time.Time) {
+	if l.retention <= 0 {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !l.lastPrune.IsZero() && now.Sub(l.lastPrune) < time.Hour {
+		return
+	}
+	l.lastPrune = now
+	entries, err := os.ReadDir(l.dir)
+	if err != nil {
+		return
+	}
+	cutoff := now.Add(-l.retention)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		day, err := time.Parse("2006-01-02", entry.Name())
+		if err == nil && day.Before(cutoff) {
+			_ = os.RemoveAll(filepath.Join(l.dir, entry.Name()))
+		}
+	}
 }
 
 // sessionSafe replaces any character that is not alphanumeric, dash, or

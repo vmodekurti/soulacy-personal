@@ -170,15 +170,19 @@ func (a *App) Run(parent context.Context) error {
 	// ── Knowledge (RAG) — SQLite + sqlite-vec + Ollama embeddings ─────────────
 	// Disabled silently when the DB path is empty. An unreachable embedder is
 	// not fatal — it surfaces at kb_search call time with a clear error.
-	knowledgeSvc := a.wireKnowledge(ollamaCfg.BaseURL, stack)
+	knowledgeSvc := a.wireKnowledge(ollamaCfg.BaseURL, llmRouter, stack)
 
 	// ── Vector Memory (optional semantic tier) ───────────────────────────────
 	//   vector.backend = "qdrant"     → Qdrant REST
 	//   vector.backend = "sqlite-vec" → built-in sqlite-vec
 	//   memory.vector_db (legacy key) → same
 	// When both are unset, vector memory is disabled.
-	vectorStore, vecBackend := a.wireVector(archive)
+	vectorStore, vecBackend := a.wireVector(archive, llmRouter)
 	_ = vecBackend // available for future memory-tool use; engine uses vectorStore directly
+	if brainStore != nil && vectorStore != nil {
+		brainStore.SetSemanticStore(&agentMemoryVectorAdapter{store: vectorStore})
+		log.Info("agent brain semantic memory enabled (sqlite-vec)")
+	}
 
 	// ── Python Executor Backend ───────────────────────────────────────────────
 	// "process" (default): one python3 subprocess per call, simple + compatible.
@@ -336,7 +340,7 @@ func (a *App) Run(parent context.Context) error {
 	rbacManager := a.wireRBAC(ws, stack)
 
 	// ── Engine-attached stores (checkpoint / telemetry / cost) ───────────────
-	openedCostStore := a.wireEngineExtras(ctx, ws, engine, stack)
+	openedCostStore := a.wireEngineExtras(ctx, ws, engine, llmRouter, stack)
 
 	// ── Gateway Server ────────────────────────────────────────────────────────
 	// Construction + every host-side capability (plugin GUI mounts, installer,

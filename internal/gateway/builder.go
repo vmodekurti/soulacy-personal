@@ -25,7 +25,9 @@ import (
 
 	"github.com/soulacy/soulacy/pkg/agent"
 
+	"github.com/soulacy/soulacy/internal/auth"
 	"github.com/soulacy/soulacy/internal/config"
+	"github.com/soulacy/soulacy/internal/llm"
 )
 
 // handleBuilderChat processes one conversational turn of the agent builder.
@@ -41,9 +43,10 @@ import (
 // Response: runtime.BuilderResponse (session_id, reply, understanding, ready).
 func (s *Server) handleBuilderChat(c *fiber.Ctx) error {
 	var body struct {
-		SessionID string `json:"session_id"`
-		Message   string `json:"message"`
-		Provider  string `json:"provider"`
+		SessionID   string `json:"session_id"`
+		Message     string `json:"message"`
+		Provider    string `json:"provider"`
+		ConfirmCost bool   `json:"confirm_cost"`
 	}
 	if err := c.BodyParser(&body); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -65,10 +68,22 @@ func (s *Server) handleBuilderChat(c *fiber.Ctx) error {
 	if provider == "" {
 		provider = s.cfg.LLM.DefaultProvider
 	}
+	claims := auth.ClaimsFromCtx(c)
+	if strings.TrimSpace(body.Provider) != "" && !canOverrideModel(claims) {
+		return s.errMsg(c, fiber.StatusForbidden, "provider overrides require the admin or operator role")
+	}
+	subject := ""
+	if claims != nil {
+		subject = claims.Subject
+	}
 
 	catalog := s.buildToolCatalogPrompt()
 
-	resp, err := s.engine.BuilderChat(c.Context(), body.SessionID, body.Message, provider, catalog)
+	ctx := llm.WithCallMetadata(c.Context(), llm.CallMetadata{
+		Subject: subject, SessionID: body.SessionID, RunID: uuid.New().String(),
+		Source: "builder", CostConfirmed: body.ConfirmCost || isTruthy(c.Get("X-Soulacy-Cost-Confirmed")), OverrideAuthorized: canOverrideModel(claims),
+	})
+	resp, err := s.engine.BuilderChat(ctx, body.SessionID, body.Message, provider, catalog)
 	if err != nil {
 		s.log.Error("builder chat failed",
 			zap.String("session", body.SessionID),

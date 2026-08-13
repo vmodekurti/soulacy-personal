@@ -29,14 +29,29 @@ type StrategyAdvice struct {
 // AdviseStrategy is the single rule-based Strategy Advisor for Studio. It is
 // deliberately deterministic: model capability can bias Auto vs Plan-Execute,
 // but it never lets an LLM choose the architecture or implicitly choose ReAct.
-func AdviseStrategy(intent string, cat Catalog, requested string, forceWorkflow bool) StrategyAdvice {
+func AdviseStrategy(intent string, cat Catalog, requested string, forceWorkflow bool) (advice StrategyAdvice) {
 	intent = strings.TrimSpace(intent)
 	req := normalizeMode(requested)
-	advice := StrategyAdvice{
+	advice = StrategyAdvice{
 		Mode:       "auto",
 		Confidence: "medium",
 		Reason:     "Defaulting to Auto for an interactive tool-capable agent.",
 	}
+	defer func() {
+		chosen := advice.RuntimeStrategy
+		if advice.Mode == "workflow" {
+			chosen = "workflow"
+		}
+		if !containsFold(cat.UnreliableStrategies, chosen) {
+			return
+		}
+		if chosen != "auto" && !containsFold(cat.UnreliableStrategies, "auto") {
+			advice.Mode, advice.RuntimeStrategy = "auto", "auto"
+			advice.Confidence = "high"
+			advice.Reason = "Studio selected Auto because local run history marks " + chosen + " unreliable for the active model."
+			advice.CapabilityWarning = advice.Reason
+		}
+	}()
 	if cat.Generation != nil {
 		advice.Provider = cat.Generation.Provider
 		advice.Model = cat.Generation.Model

@@ -18,6 +18,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/soulacy/soulacy/internal/config"
+	"github.com/soulacy/soulacy/internal/redact"
 )
 
 const DefaultLogTailBytes int64 = 256 * 1024
@@ -80,7 +81,7 @@ func Write(w io.Writer, opts Options) (Manifest, error) {
 		return nil
 	}
 
-	doctorJSON, _ := json.MarshalIndent(opts.Doctor, "", "  ")
+	doctorJSON, _ := json.MarshalIndent(redact.Value(opts.Doctor), "", "  ")
 	if len(bytes.TrimSpace(doctorJSON)) == 0 || string(doctorJSON) == "null" {
 		doctorJSON = []byte("{}")
 	}
@@ -130,12 +131,12 @@ func addExtraJSON(add func(string, []byte) error, extra map[string]any) error {
 	sort.Strings(names)
 	for _, name := range names {
 		value := extra[name]
-		data, _ := json.MarshalIndent(value, "", "  ")
+		data, _ := json.MarshalIndent(redact.Value(value), "", "  ")
 		if len(bytes.TrimSpace(data)) == 0 || string(data) == "null" {
 			data = []byte("{}")
 		}
 		archiveName := safeArchiveName(strings.TrimSuffix(name, ".json")) + ".json"
-		if err := add(archiveName, []byte(RedactText(string(data)))); err != nil {
+		if err := add(archiveName, data); err != nil {
 			return err
 		}
 	}
@@ -150,10 +151,10 @@ func WriteFile(out string, opts Options) (string, Manifest, error) {
 	if err != nil {
 		return "", Manifest{}, err
 	}
-	if err := os.MkdirAll(filepath.Dir(outAbs), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(outAbs), 0o700); err != nil {
 		return "", Manifest{}, err
 	}
-	f, err := os.Create(outAbs)
+	f, err := os.OpenFile(outAbs, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return "", Manifest{}, err
 	}
@@ -174,7 +175,7 @@ func RedactedYAMLFile(path string) ([]byte, error) {
 	if err := yaml.Unmarshal(raw, &doc); err != nil {
 		return []byte(RedactText(string(raw))), nil
 	}
-	redactYAMLNode(&doc, "")
+	redactYAMLNode(&doc, "", false)
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
@@ -251,30 +252,23 @@ func addRecentLogTails(add func(string, []byte) error, dirs []string, maxBytes i
 	return nil
 }
 
-func redactYAMLNode(n *yaml.Node, parentKey string) {
+func redactYAMLNode(n *yaml.Node, parentKey string, wholesale bool) {
 	if n == nil {
 		return
 	}
 	switch n.Kind {
 	case yaml.DocumentNode, yaml.SequenceNode:
 		for _, child := range n.Content {
-			redactYAMLNode(child, parentKey)
+			redactYAMLNode(child, parentKey, wholesale)
 		}
 	case yaml.MappingNode:
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			key := n.Content[i].Value
 			val := n.Content[i+1]
-			if isSecretKey(key) {
-				val.Kind = yaml.ScalarNode
-				val.Tag = "!!str"
-				val.Value = "***REDACTED***"
-				val.Content = nil
-				continue
-			}
-			redactYAMLNode(val, key)
+			redactYAMLNode(val, key, wholesale || isSecretKey(key) || isOpaqueConfigContainer(key))
 		}
 	case yaml.ScalarNode:
-		if isSecretKey(parentKey) {
+		if wholesale || isSecretKey(parentKey) {
 			n.Value = "***REDACTED***"
 			n.Tag = "!!str"
 			return
@@ -308,14 +302,7 @@ func tailRedactedTextFile(path string, maxBytes int64) ([]byte, error) {
 }
 
 func RedactText(s string) string {
-	fields := strings.Fields(s)
-	for _, field := range fields {
-		trimmed := strings.Trim(field, `"'(),[]{}<>`)
-		if looksLikeSecret(trimmed) {
-			s = strings.ReplaceAll(s, trimmed, redactedHash(trimmed))
-		}
-	}
-	return s
+	return redact.Text(s)
 }
 
 func redactScalar(s string) string {
@@ -330,13 +317,23 @@ func isSecretKey(key string) bool {
 	for _, needle := range []string{
 		"api_key", "apikey", "access_token", "refresh_token", "bot_token", "token",
 		"secret", "password", "passwd", "private_key", "client_secret", "app_secret",
-		"verify_token", "signing_secret", "webhook_secret",
+		"verify_token", "signing_secret", "signing_key", "webhook_secret", "authorization",
+		"credential", "postgres_dsn", "database_url", "connection_string", "cookie",
 	} {
 		if k == needle || strings.Contains(k, needle) {
 			return true
 		}
 	}
 	return false
+}
+
+func isOpaqueConfigContainer(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "env", "headers", "secrets", "credentials", "vault", "provider_config", "operator_config":
+		return true
+	default:
+		return false
+	}
 }
 
 func looksLikeSecret(s string) bool {

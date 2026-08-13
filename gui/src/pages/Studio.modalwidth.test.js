@@ -32,6 +32,11 @@ function stylesheet() {
   const i = src.lastIndexOf('<style')
   const start = src.indexOf('>', i) + 1
   const end = src.lastIndexOf('</style>')
+  const tag = src.slice(i, start)
+  const external = tag.match(/\bsrc=["']([^"']+)["']/)
+  if (external) {
+    return readFileSync(fileURLToPath(new URL(external[1], import.meta.url)), 'utf8')
+  }
   return src.slice(start, end)
 }
 

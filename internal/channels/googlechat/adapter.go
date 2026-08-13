@@ -56,7 +56,7 @@ func New(id, webhookURL, prefix string, timeout time.Duration) (*Adapter, error)
 		id:         id,
 		webhookURL: webhookURL,
 		prefix:     strings.TrimSpace(prefix),
-		client:     &http.Client{Timeout: timeout},
+		client:     netguard.NewHTTPClient(timeout, false, nil),
 	}, nil
 }
 

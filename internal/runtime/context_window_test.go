@@ -1,11 +1,13 @@
 package runtime
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
 
 	"github.com/soulacy/soulacy/internal/llm"
+	"github.com/soulacy/soulacy/pkg/agent"
 )
 
 func TestModelContextLimit(t *testing.T) {
@@ -85,6 +87,61 @@ func TestTrimDropsOrphanToolResultAtFront(t *testing.T) {
 	// No surviving non-system message at the front may be an orphan tool result.
 	if len(out) > 1 && out[1].Role == "tool" {
 		t.Fatalf("trimmed history must not start (after system) with a tool result: %+v", out)
+	}
+}
+
+func TestTrimAlwaysPreservesLatestUserInstruction(t *testing.T) {
+	big := strings.Repeat("old source code(); ", 1000)
+	msgs := []llm.ChatMessage{
+		{Role: "system", Content: "immutable system contract"},
+		{Role: "user", Content: big},
+		{Role: "assistant", Content: big},
+		{Role: "user", Content: "LATEST USER REQUIREMENT"},
+		{Role: "assistant", Content: big},
+	}
+	out, _ := trimMessagesToFit(msgs, nil, 100)
+	if !chatMessagesContain(out, "system", "immutable system contract") {
+		t.Fatal("system prompt was dropped")
+	}
+	if !chatMessagesContain(out, "user", "LATEST USER REQUIREMENT") {
+		t.Fatal("latest user instruction was dropped")
+	}
+}
+
+func TestContextExceededRetriesOnceThroughSameTrimFunnel(t *testing.T) {
+	e, provider := newHandleTestEngine(t, &agent.Definition{
+		ID: "retry-context", Name: "Retry Context", Enabled: true,
+		SystemPrompt: "Keep the user request.",
+		LLM:          agent.LLMConfig{Provider: "test", Model: "claude-test"},
+		MaxTurns:     2,
+		Builtins:     strListPtr(),
+	})
+	sess := e.getOrCreateSession("retry-session", "retry-context")
+	sess.mu.Lock()
+	e.appendHistoryLocked(sess,
+		llm.ChatMessage{Role: "user", Content: strings.Repeat("old context ", 2000)},
+		llm.ChatMessage{Role: "assistant", Content: strings.Repeat("old answer ", 2000)},
+	)
+	sess.mu.Unlock()
+	provider.errors = []error{errors.New("maximum context length exceeded"), nil}
+	provider.responses = []llm.CompletionResponse{{}, {Content: "recovered"}}
+
+	reply, err := e.Handle(context.Background(), testUserMessage("retry-context", "retry-session", "LATEST REQUEST"))
+	if err != nil {
+		t.Fatalf("reactive retry failed: %v", err)
+	}
+	if got := flattenParts(reply.Parts); !strings.Contains(got, "recovered") {
+		t.Fatalf("retry reply = %q", got)
+	}
+	requests := provider.requestsSnapshot()
+	if len(requests) != 2 {
+		t.Fatalf("provider calls = %d, want one failure plus one retry", len(requests))
+	}
+	if len(requests[1].Messages) >= len(requests[0].Messages) {
+		t.Fatalf("retry did not shrink context: %d >= %d", len(requests[1].Messages), len(requests[0].Messages))
+	}
+	if !chatMessagesContain(requests[1].Messages, "user", "LATEST REQUEST") {
+		t.Fatal("reactive trim dropped the latest user request")
 	}
 }
 

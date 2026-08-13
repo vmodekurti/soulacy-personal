@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 
 	_ "github.com/mattn/go-sqlite3"
 
@@ -61,10 +62,13 @@ func NewSQLiteVault(path string, kms KMSProvider) (*SQLiteVault, error) {
 	if err != nil {
 		return nil, fmt.Errorf("credentials: open sqlite %s: %w", path, err)
 	}
-
 	if _, err := db.Exec(credentialSchema); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("credentials: schema migration: %w", err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("credentials: secure vault permissions: %w", err)
 	}
 
 	return &SQLiteVault{db: db, kms: kms}, nil

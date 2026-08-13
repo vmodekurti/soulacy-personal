@@ -1,17 +1,24 @@
 import { writable } from 'svelte/store'
 
-// Persisted API key — stored in localStorage so users only type it once.
-function persistedWritable(key, initial) {
-  const stored = localStorage.getItem(key)
+// Authentication credentials live only for the current browser tab. Migrating
+// away from localStorage limits exposure after logout, browser restarts, or a
+// later origin-level script compromise.
+function sessionWritable(key, initial) {
+  const legacy = localStorage.getItem(key)
+  if (legacy !== null) {
+    sessionStorage.setItem(key, legacy)
+    localStorage.removeItem(key)
+  }
+  const stored = sessionStorage.getItem(key)
   const store = writable(stored !== null ? stored : initial)
   store.subscribe(val => {
-    if (val) localStorage.setItem(key, val)
-    else localStorage.removeItem(key)
+    if (val) sessionStorage.setItem(key, val)
+    else sessionStorage.removeItem(key)
   })
   return store
 }
 
-export const apiKey   = persistedWritable('soulacy_api_key', '')
+export const apiKey   = sessionWritable('soulacy_api_key', '')
 export const connected = writable(false)  // WebSocket event stream status
 
 // True when the gateway rejected our credentials (401/403). Distinct from

@@ -3,8 +3,59 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
+
+func TestShippedTimeoutHierarchyIsStrictlyOrdered(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg, _, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := []string{cfg.Runtime.Timeouts.Tool, cfg.Runtime.Timeouts.LLM, cfg.Runtime.Timeouts.Step, cfg.Runtime.Timeouts.Run, cfg.Runtime.Timeouts.HTTP}
+	var previous time.Duration
+	for i, value := range raw {
+		got, err := time.ParseDuration(value)
+		if err != nil {
+			t.Fatalf("timeout[%d] %q: %v", i, value, err)
+		}
+		if i > 0 && got <= previous {
+			t.Fatalf("timeout hierarchy is not strictly ordered: %v", raw)
+		}
+		previous = got
+	}
+}
+
+func TestLoadRejectsInvertedTimeoutHierarchy(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	data := []byte("runtime:\n  timeouts:\n    tool: 4m\n    llm: 3m\n")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "tool < llm") {
+		t.Fatalf("expected named hierarchy error, got %v", err)
+	}
+}
+
+func TestLegacyToolTimeoutPopulatesHierarchy(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("runtime:\n  tool_timeout: 90s\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Runtime.Timeouts.Tool != "90s" || cfg.Runtime.ToolTimeout != "90s" {
+		t.Fatalf("legacy alias was not reconciled: %+v", cfg.Runtime.Timeouts)
+	}
+}
 
 func TestLoadExplicitConfigKeepsHomeBackedDefaults(t *testing.T) {
 	home := t.TempDir()
@@ -99,6 +150,25 @@ deployment:
 	if cfg.Deployment.Profile != "production" || cfg.Deployment.Owner != "platform" || cfg.Deployment.Region != "us-central" || cfg.Deployment.Notes != "customer workspace" {
 		t.Fatalf("deployment config = %+v", cfg.Deployment)
 	}
+	if !cfg.Runtime.SSRFProtection {
+		t.Fatal("production profile should default runtime.ssrf_protection to true")
+	}
+}
+
+func TestProductionProfileCanExplicitlyDisableSSRFProtection(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("deployment:\n  profile: production\nruntime:\n  ssrf_protection: false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Runtime.SSRFProtection {
+		t.Fatal("explicit false was overridden by the production default")
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -149,11 +219,8 @@ func TestLoadNoConfigFileUsesDefaults(t *testing.T) {
 	if cfg.Runtime.ToolTimeout != "120s" {
 		t.Errorf("runtime.tool_timeout = %q, want 120s", cfg.Runtime.ToolTimeout)
 	}
-	// SEC-3: allow_system_agents now defaults to ["system"] (was true). Destructive
-	// system tools require BOTH the server permit and a per-agent `system`
-	// capability before they are offered.
-	if len(cfg.Runtime.AllowSystemAgents) != 1 || cfg.Runtime.AllowSystemAgents[0] != "*" {
-		t.Errorf("runtime.allow_system_agents should default to [\"*\"], got %v", cfg.Runtime.AllowSystemAgents)
+	if len(cfg.Runtime.AllowSystemAgents) != 0 {
+		t.Errorf("runtime.allow_system_agents should default empty, got %v", cfg.Runtime.AllowSystemAgents)
 	}
 	if cfg.Runtime.SSRFProtection {
 		t.Error("runtime.ssrf_protection should default to false")

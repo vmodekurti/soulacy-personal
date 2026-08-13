@@ -121,7 +121,7 @@ func TestOllamaCompleteStreamsTextWhenNoTools(t *testing.T) {
 		return textResponse(200,
 			`{"message":{"content":"hello"},"done":false}`+"\n"+
 				`{"message":{"content":" world"},"done":false}`+"\n"+
-				`{"done":true}`+"\n",
+				`{"done":true,"prompt_eval_count":9,"eval_count":2}`+"\n",
 		), nil
 	})
 
@@ -141,6 +141,9 @@ func TestOllamaCompleteStreamsTextWhenNoTools(t *testing.T) {
 	}
 	if out != "hello world" {
 		t.Fatalf("stream output = %q, want hello world", out)
+	}
+	if resp.InputTokens != 9 || resp.OutputTokens != 2 || resp.TotalTokens != 11 {
+		t.Fatalf("stream usage = %d/%d/%d, want 9/2/11", resp.InputTokens, resp.OutputTokens, resp.TotalTokens)
 	}
 }
 
@@ -256,6 +259,7 @@ func TestOpenAICompleteStreamsSSEWhenNoTools(t *testing.T) {
 		return textResponse(200,
 			`data: {"choices":[{"delta":{"content":"one"}}]}`+"\n\n"+
 				`data: {"choices":[{"delta":{"content":" two"}}]}`+"\n\n"+
+				`data: {"choices":[],"usage":{"prompt_tokens":8,"completion_tokens":2,"total_tokens":10,"completion_tokens_details":{"reasoning_tokens":1}}}`+"\n\n"+
 				`data: [DONE]`+"\n",
 		), nil
 	})
@@ -276,6 +280,9 @@ func TestOpenAICompleteStreamsSSEWhenNoTools(t *testing.T) {
 	}
 	if out != "one two" {
 		t.Fatalf("stream output = %q, want one two", out)
+	}
+	if resp.InputTokens != 8 || resp.OutputTokens != 2 || resp.TotalTokens != 10 || resp.ReasoningTokens != 1 {
+		t.Fatalf("stream usage = %+v", resp)
 	}
 }
 

@@ -101,15 +101,15 @@ func TestCheckSSRF_RFC1918AllowedWithoutProtection(t *testing.T) {
 }
 
 func TestCheckSSRF_AllowedHostsBypasses(t *testing.T) {
-	// If host is in allowedHosts, skip ALL checks (even link-local).
-	err := checkSSRF("http://internal-host.local/api", true, []string{"internal-host.local"})
+	// An explicit private host bypasses the RFC-1918 rule (but never metadata).
+	err := checkSSRF("http://192.168.1.1/api", true, []string{"192.168.1.1"})
 	if err != nil {
 		t.Errorf("allowedHosts bypass failed: %v", err)
 	}
 }
 
 func TestCheckSSRF_AllowedHostsCaseInsensitive(t *testing.T) {
-	err := checkSSRF("http://INTERNAL.local/api", true, []string{"internal.local"})
+	err := checkSSRF("http://LOCALHOST/api", true, []string{"localhost"})
 	if err != nil {
 		t.Errorf("allowedHosts case insensitive bypass failed: %v", err)
 	}
@@ -979,19 +979,18 @@ func TestAcceptedLearningSkillIsInjectedAndUnlocksReadSkill(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// engine.go — Handle: agent with both MCPServers and MCPTools nil (legacy mode)
+// engine.go — agent with both MCPServers and MCPTools nil (default deny)
 // ─────────────────────────────────────────────────────────────────────────────
 
-func TestMCPToolAllowed_LegacyModeBothNilPermitsAll(t *testing.T) {
+func TestMCPToolAllowed_BothNilDeniesAll(t *testing.T) {
 	def := &agent.Definition{
 		ID: "legacy",
-		// MCPServers and MCPTools are both nil → legacy mode
+		// MCPServers and MCPTools are both nil → no grant
 		MCPServers: nil,
 		MCPTools:   nil,
 	}
-	// Any MCP tool name should be allowed in legacy mode.
-	if !mcpToolAllowed(def, "mcp__any__tool") {
-		t.Error("legacy mode (both nil) should allow all MCP tools")
+	if mcpToolAllowed(def, "mcp__any__tool") {
+		t.Error("omitted MCP grants exposed a connected tool")
 	}
 }
 

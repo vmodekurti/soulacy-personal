@@ -86,13 +86,13 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25.12"
+          go-version: "1.26.5"
           cache: true
 
       - name: Set up Node.js (for GUI build)
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: gui/package-lock.json
 
@@ -225,13 +225,13 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25.12"
+          go-version: "1.26.5"
           cache: true
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: gui/package-lock.json
 
@@ -357,6 +357,15 @@ jobs:
               --bundle "${f}.cosign.bundle" \
               "${f}"
           done
+
+          # The updater trusts metadata only after the same workflow identity
+          # signs it. This prevents a validly signed archive from being relabelled
+          # as another product/version/platform by a substituted manifest.
+          cosign sign-blob \
+            --output-signature release-manifest.json.sig \
+            --output-certificate release-manifest.json.pem \
+            --bundle release-manifest.json.cosign.bundle \
+            release-manifest.json
           ls -la
 
       - name: Generate SBOM (SPDX)
@@ -439,6 +448,9 @@ jobs:
             artifacts/checksums.sha256.pem
             artifacts/checksums.sha256.cosign.bundle
             artifacts/release-manifest.json
+            artifacts/release-manifest.json.sig
+            artifacts/release-manifest.json.pem
+            artifacts/release-manifest.json.cosign.bundle
             artifacts/*.tar.gz.sig
             artifacts/*.tar.gz.pem
             artifacts/*.tar.gz.cosign.bundle

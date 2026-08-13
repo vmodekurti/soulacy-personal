@@ -34,6 +34,52 @@ type Embedder interface {
 	Dim(ctx context.Context, model string) (int, error)
 }
 
+// GovernedEmbedder routes embedding admission and accounting through the same
+// controller used by chat inference. It estimates input tokens because most
+// embedding endpoints do not return usage metadata.
+type GovernedEmbedder struct {
+	inner  Embedder
+	router *Router
+}
+
+func NewGovernedEmbedder(inner Embedder, router *Router) *GovernedEmbedder {
+	return &GovernedEmbedder{inner: inner, router: router}
+}
+
+func (e *GovernedEmbedder) ID() string { return e.inner.ID() }
+
+func (e *GovernedEmbedder) Embed(ctx context.Context, model string, texts []string) (vectors [][]float32, err error) {
+	if len(texts) == 0 {
+		return nil, nil
+	}
+	messages := make([]ChatMessage, 0, len(texts))
+	for _, text := range texts {
+		messages = append(messages, ChatMessage{Role: "user", Content: text})
+	}
+	req := CompletionRequest{Operation: "embedding", Model: model, Messages: messages}
+	governedCtx, reservation, beginErr := e.router.BeginGovernedCall(ctx, e.ID(), &req)
+	if beginErr != nil {
+		return nil, beginErr
+	}
+	resp := &CompletionResponse{InputTokens: EstimateRequestTokens(req)}
+	defer func() {
+		e.router.EndGovernedCall(governedCtx, reservation, e.ID(), req, resp, err)
+	}()
+	vectors, err = e.inner.Embed(governedCtx, model, texts)
+	return vectors, err
+}
+
+func (e *GovernedEmbedder) Dim(ctx context.Context, model string) (int, error) {
+	vectors, err := e.Embed(ctx, model, []string{"dimension probe"})
+	if err != nil {
+		return 0, err
+	}
+	if len(vectors) == 0 || len(vectors[0]) == 0 {
+		return 0, fmt.Errorf("%s embed: dimension probe returned no vector", e.ID())
+	}
+	return len(vectors[0]), nil
+}
+
 // OllamaEmbedder calls Ollama's /api/embed endpoint.
 type OllamaEmbedder struct {
 	baseURL string

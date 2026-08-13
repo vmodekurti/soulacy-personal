@@ -8,11 +8,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -37,7 +39,7 @@ func TestCompareSemver(t *testing.T) {
 }
 
 func TestCheckForUpdateCustomManifest(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		manifest := UpdateManifest{
 			Product: "soulacy",
@@ -55,6 +57,9 @@ func TestCheckForUpdateCustomManifest(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(manifest)
 	}))
 	defer ts.Close()
+	oldClient := HTTPClient
+	HTTPClient = ts.Client()
+	t.Cleanup(func() { HTTPClient = oldClient })
 
 	res, err := CheckForUpdate(context.Background(), ts.URL, "1.0.0")
 	if err != nil {
@@ -83,7 +88,7 @@ func TestInstallUpdateDryRun(t *testing.T) {
 		t.Fatalf("failed to create mock tar.gz: %v", err)
 	}
 
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/manifest.json" || r.URL.Path == "/" {
 			w.Header().Set("Content-Type", "application/json")
 			manifest := UpdateManifest{
@@ -109,10 +114,30 @@ func TestInstallUpdateDryRun(t *testing.T) {
 			_, _ = w.Write(tarGzData)
 			return
 		}
+		if strings.HasSuffix(r.URL.Path, ".cosign.bundle") {
+			_, _ = w.Write([]byte(`{"verificationMaterial":{}}`))
+			return
+		}
 
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer ts.Close()
+	oldClient := HTTPClient
+	HTTPClient = ts.Client()
+	t.Cleanup(func() { HTTPClient = oldClient })
+	oldVerify := VerifySigstore
+	var verified []string
+	VerifySigstore = func(_ context.Context, artifactPath, bundlePath, identity string) error {
+		if _, err := os.Stat(artifactPath); err != nil {
+			return err
+		}
+		if _, err := os.Stat(bundlePath); err != nil {
+			return err
+		}
+		verified = append(verified, identity)
+		return nil
+	}
+	t.Cleanup(func() { VerifySigstore = oldVerify })
 
 	opts := UpdateInstallOptions{
 		ManifestSource: ts.URL + "/manifest.json",
@@ -128,6 +153,57 @@ func TestInstallUpdateDryRun(t *testing.T) {
 	}
 	if !res.UpdateAvailable {
 		t.Errorf("expected update available")
+	}
+	if len(verified) != 2 {
+		t.Fatalf("Sigstore verifications = %d, want manifest + artifact", len(verified))
+	}
+}
+
+func TestVerifyUpdateArtifactRequiresWellFormedSHA256(t *testing.T) {
+	for _, checksum := range []string{"", "xyz", strings.Repeat("a", 63)} {
+		if err := verifyUpdateArtifact(UpdateArtifact{Name: "release.tar.gz", SHA256: checksum}, []byte("data")); err == nil {
+			t.Fatalf("checksum %q was accepted", checksum)
+		}
+	}
+}
+
+func TestRemoteUpdateSourcesRequireHTTPS(t *testing.T) {
+	if _, err := readUpdateManifest(context.Background(), "http://updates.example/manifest.json"); err == nil {
+		t.Fatal("HTTP manifest was accepted")
+	}
+	if _, _, _, err := downloadUpdateArtifact(context.Background(), "https://updates.example/manifest.json", UpdateArtifact{URL: "http://updates.example/release.tar.gz"}); err == nil {
+		t.Fatal("HTTP artifact was accepted")
+	}
+}
+
+func TestInstallUpdateFilesRollsBackBothBinaries(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"soulacy", "sy"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("old-"+name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldRename := renameUpdateFile
+	installRenames := 0
+	renameUpdateFile = func(old, new string) error {
+		if strings.Contains(filepath.Base(old), ".update-") {
+			installRenames++
+			if installRenames == 2 {
+				return errors.New("injected second replacement failure")
+			}
+		}
+		return os.Rename(old, new)
+	}
+	t.Cleanup(func() { renameUpdateFile = oldRename })
+	_, err := installUpdateFiles(dir, map[string][]byte{"soulacy": []byte("new-soulacy"), "sy": []byte("new-sy")})
+	if err == nil {
+		t.Fatal("injected replacement failure was ignored")
+	}
+	for _, name := range []string{"soulacy", "sy"} {
+		data, readErr := os.ReadFile(filepath.Join(dir, name))
+		if readErr != nil || string(data) != "old-"+name {
+			t.Fatalf("%s was not rolled back: %q err=%v", name, data, readErr)
+		}
 	}
 }
 

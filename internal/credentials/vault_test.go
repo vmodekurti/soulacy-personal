@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"testing"
@@ -41,6 +42,24 @@ func TestNewSQLiteVaultCreatesVault(t *testing.T) {
 	v := newTestVault(t)
 	if v == nil {
 		t.Fatal("expected non-nil vault")
+	}
+}
+
+func TestNewSQLiteVaultUsesOwnerOnlyPermissions(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/creds.db"
+	kms, _ := NewPassthroughKMS(bytes.Repeat([]byte{1}, 32))
+	v, err := NewSQLiteVault(path, kms)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = v.Close() })
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("vault mode = %o, want 600", got)
 	}
 }
 
@@ -309,9 +328,9 @@ func TestMultipleValuesForSameAgent(t *testing.T) {
 	v := newTestVault(t)
 
 	entries := map[string][]byte{
-		"db_pass":  []byte("pg-secret"),
-		"api_key":  []byte("sk-12345"),
-		"token":    []byte("bearer-abc"),
+		"db_pass": []byte("pg-secret"),
+		"api_key": []byte("sk-12345"),
+		"token":   []byte("bearer-abc"),
 	}
 
 	for k, val := range entries {

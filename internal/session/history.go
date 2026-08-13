@@ -103,14 +103,23 @@ CREATE INDEX IF NOT EXISTS idx_ch_content ON conversation_history(content);
 
 // SQLiteHistoryStore is the SQLite-backed implementation of HistoryStore.
 type SQLiteHistoryStore struct {
-	db     *sql.DB
-	stopCh chan struct{}
+	db        *sql.DB
+	stopCh    chan struct{}
+	retention time.Duration
+}
+
+type HistoryOption func(*SQLiteHistoryStore)
+
+// WithHistoryRetention configures automatic conversation deletion. Zero keeps
+// history indefinitely; callers that omit the option retain the 30-day default.
+func WithHistoryRetention(d time.Duration) HistoryOption {
+	return func(s *SQLiteHistoryStore) { s.retention = d }
 }
 
 // NewSQLiteHistoryStore opens (or creates) the SQLite database at path,
 // applies the conversation_history schema, and starts a background pruning
 // goroutine that removes entries older than 30 days every 6 hours.
-func NewSQLiteHistoryStore(path string) (*SQLiteHistoryStore, error) {
+func NewSQLiteHistoryStore(path string, opts ...HistoryOption) (*SQLiteHistoryStore, error) {
 	db, err := sqlitex.Open(path, sqlitex.DefaultOptions())
 	if err != nil {
 		return nil, fmt.Errorf("session/history: open sqlite %s: %w", path, err)
@@ -125,8 +134,12 @@ func NewSQLiteHistoryStore(path string) (*SQLiteHistoryStore, error) {
 	}
 
 	s := &SQLiteHistoryStore{
-		db:     db,
-		stopCh: make(chan struct{}),
+		db:        db,
+		stopCh:    make(chan struct{}),
+		retention: 30 * 24 * time.Hour,
+	}
+	for _, opt := range opts {
+		opt(s)
 	}
 
 	go s.pruneLoop()
@@ -144,8 +157,11 @@ func (s *SQLiteHistoryStore) pruneLoop() {
 		case <-s.stopCh:
 			return
 		case <-t.C:
+			if s.retention <= 0 {
+				continue
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			_, _ = s.Prune(ctx, 30*24*time.Hour)
+			_, _ = s.Prune(ctx, s.retention)
 			cancel()
 		}
 	}

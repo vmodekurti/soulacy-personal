@@ -248,7 +248,7 @@ func SecurityPreflight(draft Draft, def *agent.Definition, workspaceIntentGateDe
 				strings.Join(sum.PrivilegedTools, ", "),
 				strings.Join(sharedExposedChannels(channels), ", "),
 			),
-			Fix: "Two ways out. Studio can untick the shared channels for you and leave this agent on HTTP only — the button does exactly that. Or accept the exposure per binding on the Delivery page: open the channel, tick \"accept privileged exposure\". That half stays on Delivery on purpose — the operator putting an agent on a public channel is the one accepting the risk, not the person who wrote it.",
+			Fix:         "Two ways out. Studio can untick the shared channels for you and leave this agent on HTTP only — the button does exactly that. Or accept the exposure per binding on the Delivery page: open the channel, tick \"accept privileged exposure\". That half stays on Delivery on purpose — the operator putting an agent on a public channel is the one accepting the risk, not the person who wrote it.",
 			Action:      SecurityFixInternalChannelsOnly,
 			ActionLabel: "Use internal channels only",
 		})
@@ -268,7 +268,7 @@ func SecurityPreflight(draft Draft, def *agent.Definition, workspaceIntentGateDe
 				strings.Join(sum.UntrustedContentSources, ", "),
 				strings.Join(sum.PrivilegedTools, ", "),
 			),
-			Fix: "The button sets `security.intent_gate: deny` on this draft, so a tool call steered by injected content is refused outright instead of prompting someone to approve it. Worth pairing with the Recommendations below, which swap broad tools for scoped ones.",
+			Fix:         "The button sets `security.intent_gate: deny` on this draft, so a tool call steered by injected content is refused outright instead of prompting someone to approve it. Worth pairing with the Recommendations below, which swap broad tools for scoped ones.",
 			Action:      SecurityFixIntentGateDeny,
 			ActionLabel: "Set the intent gate to deny",
 		})

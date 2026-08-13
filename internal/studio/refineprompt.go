@@ -103,6 +103,9 @@ func BuildRefinePromptInstruction(intent string, catalog Catalog) string {
 
 	writeCatalogGrounding(&sb, catalog)
 	writePatternGrounding(&sb, intent, catalog)
+	sb.WriteString(WorkflowPatternsPromptBlock(catalog.WorkflowPatterns))
+	sb.WriteString(UnreliableStrategiesPromptBlock(catalog.ActiveModel, catalog.UnreliableStrategies))
+	sb.WriteString(GlobalPreferencesPromptBlock(catalog.GlobalPreferences))
 
 	sb.WriteString("\nUser's original intent:\n")
 	sb.WriteString(intent)

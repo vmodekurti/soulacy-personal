@@ -90,6 +90,9 @@ func (s *Server) handleChatAttachmentUpload(c *fiber.Ctx) error {
 	if agentID == "" || sessionID == "" {
 		return s.errMsg(c, fiber.StatusBadRequest, "agent_id and session_id are required")
 	}
+	if err := s.claimSession(c, agentID, sessionID); err != nil {
+		return err
+	}
 	fh, err := c.FormFile("file")
 	if err != nil {
 		return s.errMsg(c, fiber.StatusBadRequest, fmt.Sprintf("multipart upload missing 'file': %v", err))
@@ -150,6 +153,9 @@ func (s *Server) handleChatAttachments(c *fiber.Ctx) error {
 	if agentID == "" || sessionID == "" {
 		return s.errMsg(c, fiber.StatusBadRequest, "agent_id and session_id are required")
 	}
+	if err := s.requireSession(c, agentID, sessionID); err != nil {
+		return err
+	}
 	attachments, err := st.ListAttachments(c.UserContext(), agentID, sessionID)
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
@@ -174,6 +180,9 @@ func (s *Server) handleChatAttachmentDownload(c *fiber.Ctx) error {
 	sessionID := strings.TrimSpace(c.Query("session_id"))
 	if agentID == "" || sessionID == "" {
 		return s.errMsg(c, fiber.StatusBadRequest, "agent_id and session_id are required")
+	}
+	if err := s.requireSession(c, agentID, sessionID); err != nil {
+		return err
 	}
 	att, data, err := st.GetAttachment(c.UserContext(), c.Params("id"))
 	if err != nil {

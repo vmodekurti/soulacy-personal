@@ -52,21 +52,23 @@ func IsKnownRole(role string) bool {
 // ---------------------------------------------------------------------------
 
 const (
-	ResourceAgents    = "agents"
-	ResourceChat      = "chat"
-	ResourceMemory    = "memory"
-	ResourceChannels  = "channels"
-	ResourceProviders = "providers"
-	ResourceSkills    = "skills"
-	ResourceMCP       = "mcp"
-	ResourceKnowledge = "knowledge"
-	ResourceBuilder   = "builder"
-	ResourceTemplates = "templates"
-	ResourceConfig    = "config"
-	ResourceLogs      = "logs"
-	ResourceMetrics   = "metrics"
-	ResourceSchedule  = "schedule"
-	ResourceRBAC      = "rbac"
+	ResourceAgents      = "agents"
+	ResourceChat        = "chat"
+	ResourceMemory      = "memory"
+	ResourceChannels    = "channels"
+	ResourceProviders   = "providers"
+	ResourceSkills      = "skills"
+	ResourceMCP         = "mcp"
+	ResourceKnowledge   = "knowledge"
+	ResourceBuilder     = "builder"
+	ResourceTemplates   = "templates"
+	ResourceConfig      = "config"
+	ResourceLogs        = "logs"
+	ResourceMetrics     = "metrics"
+	ResourceSchedule    = "schedule"
+	ResourceRBAC        = "rbac"
+	ResourceSecrets     = "secrets"
+	ResourceCredentials = "credentials"
 )
 
 // ---------------------------------------------------------------------------
@@ -79,6 +81,10 @@ const (
 	ActionDelete = "delete"
 	ActionChat   = "chat"   // send a message / confirm a tool
 	ActionEnable = "enable" // enable or disable agents/channels
+	ActionList   = "list"
+	ActionSet    = "set"
+	ActionRotate = "rotate"
+	ActionReveal = "reveal"
 )
 
 // ---------------------------------------------------------------------------
@@ -89,55 +95,61 @@ const (
 
 var defaultPolicy = map[string]map[string]map[string]bool{
 	RoleAdmin: {
-		ResourceAgents:    {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionEnable: true},
-		ResourceChat:      {ActionChat: true},
-		ResourceMemory:    {ActionRead: true, ActionDelete: true},
-		ResourceChannels:  {ActionRead: true, ActionWrite: true, ActionEnable: true},
-		ResourceProviders: {ActionRead: true, ActionWrite: true},
-		ResourceSkills:    {ActionRead: true},
-		ResourceMCP:       {ActionRead: true, ActionWrite: true, ActionDelete: true},
-		ResourceKnowledge: {ActionRead: true, ActionWrite: true, ActionDelete: true},
-		ResourceBuilder:   {ActionWrite: true},
-		ResourceTemplates: {ActionRead: true, ActionWrite: true},
-		ResourceConfig:    {ActionRead: true, ActionWrite: true},
-		ResourceLogs:      {ActionRead: true},
-		ResourceMetrics:   {ActionRead: true},
-		ResourceSchedule:  {ActionRead: true, ActionWrite: true},
-		ResourceRBAC:      {ActionRead: true, ActionWrite: true, ActionDelete: true},
+		ResourceAgents:      {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionEnable: true},
+		ResourceChat:        {ActionChat: true},
+		ResourceMemory:      {ActionRead: true, ActionDelete: true},
+		ResourceChannels:    {ActionRead: true, ActionWrite: true, ActionEnable: true},
+		ResourceProviders:   {ActionRead: true, ActionWrite: true},
+		ResourceSkills:      {ActionRead: true},
+		ResourceMCP:         {ActionRead: true, ActionWrite: true, ActionDelete: true},
+		ResourceKnowledge:   {ActionRead: true, ActionWrite: true, ActionDelete: true},
+		ResourceBuilder:     {ActionWrite: true},
+		ResourceTemplates:   {ActionRead: true, ActionWrite: true},
+		ResourceConfig:      {ActionRead: true, ActionWrite: true},
+		ResourceLogs:        {ActionRead: true},
+		ResourceMetrics:     {ActionRead: true},
+		ResourceSchedule:    {ActionRead: true, ActionWrite: true},
+		ResourceRBAC:        {ActionRead: true, ActionWrite: true, ActionDelete: true},
+		ResourceSecrets:     {ActionList: true, ActionSet: true, ActionDelete: true},
+		ResourceCredentials: {ActionList: true, ActionSet: true, ActionDelete: true, ActionRotate: true, ActionReveal: true},
 	},
 	RoleOperator: {
-		ResourceAgents:    {ActionRead: true, ActionWrite: true, ActionEnable: true},
-		ResourceChat:      {ActionChat: true},
-		ResourceMemory:    {ActionRead: true, ActionDelete: true},
-		ResourceChannels:  {ActionRead: true, ActionEnable: true},
-		ResourceProviders: {ActionRead: true},
-		ResourceSkills:    {ActionRead: true},
-		ResourceMCP:       {ActionRead: true, ActionWrite: true},
-		ResourceKnowledge: {ActionRead: true, ActionWrite: true},
-		ResourceBuilder:   {ActionWrite: true},
-		ResourceTemplates: {ActionRead: true, ActionWrite: true},
-		ResourceConfig:    {ActionRead: true},
-		ResourceLogs:      {ActionRead: true},
-		ResourceMetrics:   {},
-		ResourceSchedule:  {ActionRead: true, ActionWrite: true},
-		ResourceRBAC:      {},
+		ResourceAgents:      {ActionRead: true, ActionWrite: true, ActionEnable: true},
+		ResourceChat:        {ActionChat: true},
+		ResourceMemory:      {ActionRead: true, ActionDelete: true},
+		ResourceChannels:    {ActionRead: true, ActionEnable: true},
+		ResourceProviders:   {ActionRead: true},
+		ResourceSkills:      {ActionRead: true},
+		ResourceMCP:         {ActionRead: true, ActionWrite: true},
+		ResourceKnowledge:   {ActionRead: true, ActionWrite: true},
+		ResourceBuilder:     {ActionWrite: true},
+		ResourceTemplates:   {ActionRead: true, ActionWrite: true},
+		ResourceConfig:      {ActionRead: true},
+		ResourceLogs:        {ActionRead: true},
+		ResourceMetrics:     {},
+		ResourceSchedule:    {ActionRead: true, ActionWrite: true},
+		ResourceRBAC:        {},
+		ResourceSecrets:     {},
+		ResourceCredentials: {ActionList: true, ActionSet: true, ActionDelete: true, ActionRotate: true},
 	},
 	RoleViewer: {
-		ResourceAgents:    {ActionRead: true},
-		ResourceChat:      {ActionChat: true},
-		ResourceMemory:    {ActionRead: true},
-		ResourceChannels:  {ActionRead: true},
-		ResourceProviders: {ActionRead: true},
-		ResourceSkills:    {ActionRead: true},
-		ResourceMCP:       {ActionRead: true},
-		ResourceKnowledge: {ActionRead: true},
-		ResourceBuilder:   {},
-		ResourceTemplates: {ActionRead: true},
-		ResourceConfig:    {},
-		ResourceLogs:      {ActionRead: true},
-		ResourceMetrics:   {},
-		ResourceSchedule:  {ActionRead: true},
-		ResourceRBAC:      {},
+		ResourceAgents:      {ActionRead: true},
+		ResourceChat:        {ActionChat: true},
+		ResourceMemory:      {ActionRead: true},
+		ResourceChannels:    {ActionRead: true},
+		ResourceProviders:   {ActionRead: true},
+		ResourceSkills:      {ActionRead: true},
+		ResourceMCP:         {ActionRead: true},
+		ResourceKnowledge:   {ActionRead: true},
+		ResourceBuilder:     {},
+		ResourceTemplates:   {ActionRead: true},
+		ResourceConfig:      {},
+		ResourceLogs:        {ActionRead: true},
+		ResourceMetrics:     {},
+		ResourceSchedule:    {ActionRead: true},
+		ResourceRBAC:        {},
+		ResourceSecrets:     {},
+		ResourceCredentials: {},
 	},
 }
 

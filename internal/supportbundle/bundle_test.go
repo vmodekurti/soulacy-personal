@@ -137,3 +137,77 @@ func TestWriteIncludesExtraJSONDiagnostics(t *testing.T) {
 		t.Fatalf("extra diagnostic leaked secret:\n%s", readiness)
 	}
 }
+
+func TestSupportBundleNeverExportsSeededCredentialsAtAnyDepth(t *testing.T) {
+	root := t.TempDir()
+	agents, logs, secretsDir := filepath.Join(root, "agents"), filepath.Join(root, "logs"), filepath.Join(root, "secrets")
+	for _, dir := range []string{filepath.Join(agents, "demo"), logs, secretsDir} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	values := map[string]string{
+		"provider":   "sk-provider-credential-abcdefghijklmnopqrstuvwxyz",
+		"mcp_env":    "mcp-env-value-that-looks-ordinary",
+		"mcp_header": "mcp-header-value-that-looks-ordinary",
+		"jwt":        "jwt-signing-key-abcdefghijklmnopqrstuvwxyz",
+		"whatsapp":   "whatsapp-verify-token-abcdefghijklmnopqrstuvwxyz",
+		"postgres":   "inline-postgres-password",
+		"vault":      "encrypted-vault-plaintext-sentinel",
+		"doctor":     "doctor-nested-secret-abcdefghijklmnopqrstuvwxyz",
+	}
+	cfg := filepath.Join(root, "config.yaml")
+	configBody := "llm:\n  providers:\n    openai:\n      api_key: " + values["provider"] +
+		"\nmcp:\n  servers:\n    weather:\n      env:\n        CUSTOM_NAME: " + values["mcp_env"] +
+		"\n      headers:\n        X-Custom: " + values["mcp_header"] +
+		"\nauth:\n  jwt_secret: " + values["jwt"] +
+		"\nchannels:\n  whatsapp:\n    verify_token: " + values["whatsapp"] +
+		"\nstorage:\n  postgres_dsn: postgres://user:" + values["postgres"] + "@db/soulacy\n"
+	if err := os.WriteFile(cfg, []byte(configBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(secretsDir, "credentials.db"), []byte(values["vault"]), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(logs, "soulacy.log"), []byte("Authorization: Bearer "+values["provider"]), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agents, "demo", "SOUL.yaml"), []byte("id: demo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	_, err := Write(&buf, Options{
+		ConfigPath: cfg, AgentDirs: []string{agents}, LogDirs: []string{logs},
+		Doctor:    map[string]any{"nested": map[string]any{"signing_key": values["doctor"]}},
+		ExtraJSON: map[string]any{"mcp-status": map[string]any{"headers": map[string]any{"X-Custom": values["mcp_header"]}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var all strings.Builder
+	for _, f := range zr.File {
+		rc, e := f.Open()
+		if e != nil {
+			t.Fatal(e)
+		}
+		b, _ := io.ReadAll(rc)
+		_ = rc.Close()
+		all.Write(b)
+	}
+	joined := all.String()
+	for name, value := range values {
+		if strings.Contains(joined, value) {
+			t.Fatalf("%s value leaked anywhere in bundle", name)
+		}
+	}
+	for _, key := range []string{"CUSTOM_NAME", "X-Custom", "postgres_dsn", "jwt_secret", "verify_token"} {
+		if !strings.Contains(joined, key) {
+			t.Errorf("redaction removed diagnostic key name %q", key)
+		}
+	}
+}

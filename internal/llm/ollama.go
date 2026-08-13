@@ -183,6 +183,7 @@ func (o *OllamaProvider) Complete(ctx context.Context, req CompletionRequest) (*
 			return nil, fmt.Errorf("ollama: stream unexpected status %d", streamResp.StatusCode)
 		}
 		ch := make(chan string, 64)
+		result := &CompletionResponse{}
 		go func() {
 			defer close(ch)
 			defer streamResp.Body.Close()
@@ -196,7 +197,9 @@ func (o *OllamaProvider) Complete(ctx context.Context, req CompletionRequest) (*
 					Message struct {
 						Content string `json:"content"`
 					} `json:"message"`
-					Done bool `json:"done"`
+					Done            bool `json:"done"`
+					EvalCount       int  `json:"eval_count"`
+					PromptEvalCount int  `json:"prompt_eval_count"`
 				}
 				if err := json.Unmarshal([]byte(line), &chunk); err != nil {
 					continue
@@ -205,11 +208,15 @@ func (o *OllamaProvider) Complete(ctx context.Context, req CompletionRequest) (*
 					ch <- chunk.Message.Content
 				}
 				if chunk.Done {
+					result.InputTokens = chunk.PromptEvalCount
+					result.OutputTokens = chunk.EvalCount
+					result.TotalTokens = chunk.PromptEvalCount + chunk.EvalCount
 					return
 				}
 			}
 		}()
-		return &CompletionResponse{Stream: ch}, nil
+		result.Stream = ch
+		return result, nil
 	}
 
 	payload, err := json.Marshal(body)
@@ -296,6 +303,7 @@ func (o *OllamaProvider) Complete(ctx context.Context, req CompletionRequest) (*
 		Content:      content,
 		InputTokens:  result.PromptEvalCount,
 		OutputTokens: result.EvalCount,
+		TotalTokens:  result.PromptEvalCount + result.EvalCount,
 	}
 
 	// Map tool calls

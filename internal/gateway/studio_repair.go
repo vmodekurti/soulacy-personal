@@ -115,7 +115,7 @@ func (s *Server) handleStudioRepairLive(c *fiber.Ctx) error {
 		})
 	}
 
-	proposals := studio.ProposeLiveRepairs(c.Context(), s.studioLLM(), req.Workflow, runs)
+	proposals := studio.ProposeLiveRepairs(c.Context(), s.studioLLM(c), req.Workflow, runs)
 	if proposals == nil {
 		proposals = []studio.RepairProposal{}
 	}

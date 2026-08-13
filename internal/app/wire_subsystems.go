@@ -53,6 +53,7 @@ import (
 	storagesqlite "github.com/soulacy/soulacy/internal/storage/sqlite"
 	"github.com/soulacy/soulacy/internal/telemetry"
 	"github.com/soulacy/soulacy/internal/vector"
+	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 	"github.com/soulacy/soulacy/sdk/queue"
 	"github.com/soulacy/soulacy/sdk/registry"
@@ -133,7 +134,7 @@ func (a *App) wireStorageBackend(parent context.Context, ws config.Paths, archiv
 		// Action log falls back to SQLite
 		logsDir := ws.Logs
 		actionsDB := ws.DB("actions")
-		sqAL, sqErr := actionlog.New(logsDir, actionsDB, log)
+		sqAL, sqErr := actionlog.New(logsDir, actionsDB, log, actionlog.WithRetention(config.RetentionDuration(cfg.Runtime.Retention.ActionEvents, 90*24*time.Hour)))
 		if sqErr != nil {
 			return nil, nil, fmt.Errorf("sqlite action log: %w", sqErr)
 		}
@@ -166,7 +167,7 @@ func (a *App) wireStorageBackend(parent context.Context, ws config.Paths, archiv
 	default: // "sqlite" or empty
 		logsDir := ws.Logs
 		actionsDB := ws.DB("actions")
-		sqAL, sqErr := actionlog.New(logsDir, actionsDB, log)
+		sqAL, sqErr := actionlog.New(logsDir, actionsDB, log, actionlog.WithRetention(config.RetentionDuration(cfg.Runtime.Retention.ActionEvents, 90*24*time.Hour)))
 		if sqErr != nil {
 			return nil, nil, fmt.Errorf("sqlite action log: %w", sqErr)
 		}
@@ -371,7 +372,7 @@ func (a *App) wireLLMRouter() *llm.Router {
 // wireKnowledge builds the optional RAG service (SQLite + sqlite-vec +
 // provider-backed embeddings). Disabled silently when DBPath is empty; an
 // unavailable store warns and returns nil.
-func (a *App) wireKnowledge(ollamaBaseURL string, stack *closerStack) *knowledge.Service {
+func (a *App) wireKnowledge(ollamaBaseURL string, llmRouter *llm.Router, stack *closerStack) *knowledge.Service {
 	cfg, log := a.cfg, a.log
 	if cfg.Knowledge.DBPath == "" {
 		return nil
@@ -391,6 +392,7 @@ func (a *App) wireKnowledge(ollamaBaseURL string, stack *closerStack) *knowledge
 	}
 	for id, pc := range cfg.LLM.Providers {
 		if emb := embedderForProvider(id, pc, ollamaBaseURL); emb != nil {
+			emb = llm.NewGovernedEmbedder(emb, llmRouter)
 			embedders.Register(emb)
 		}
 	}
@@ -439,7 +441,7 @@ func embedderForProvider(id string, pc config.ProviderConfig, ollamaBaseURL stri
 // *memory.VectorStore (consumed directly by the engine) and the new
 // vector.Backend interface (held for future memory tools). Disabled when no
 // backend key is set.
-func (a *App) wireVector(archive *memory.SQLiteArchive) (*memory.VectorStore, vector.Backend) {
+func (a *App) wireVector(archive *memory.SQLiteArchive, llmRouter *llm.Router) (*memory.VectorStore, vector.Backend) {
 	cfg, log := a.cfg, a.log
 	ollamaCfg := cfg.LLM.Providers["ollama"]
 
@@ -448,7 +450,9 @@ func (a *App) wireVector(archive *memory.SQLiteArchive) (*memory.VectorStore, ve
 		vectorBackendKey = cfg.Memory.VectorDB // backwards-compat
 	}
 	if vectorBackendKey == "" {
-		return nil, nil
+		// sqlite-vec is embedded in the monolithic binary and is the secure,
+		// zero-service default. Operators can still select qdrant/external.
+		vectorBackendKey = "sqlite-vec"
 	}
 
 	var vectorStore *memory.VectorStore // kept for engine (sqlite-vec path only)
@@ -462,6 +466,7 @@ func (a *App) wireVector(archive *memory.SQLiteArchive) (*memory.VectorStore, ve
 	if rawEmbedder == nil {
 		rawEmbedder = llm.NewOllamaEmbedder(ollamaCfg.BaseURL)
 	}
+	rawEmbedder = llm.NewGovernedEmbedder(rawEmbedder, llmRouter)
 	memEmbedder := &llmEmbedAdapter{inner: rawEmbedder, model: embedModel}
 
 	dims := cfg.Vector.Dims
@@ -852,7 +857,7 @@ func (a *App) wireRBAC(ws config.Paths, stack *closerStack) *rbac.Manager {
 // wireEngineExtras attaches the workflow-checkpoint store, telemetry tracer,
 // and cost store to the engine. Each owned resource registers its Close on the
 // stack. Returns the opened cost store (or nil) for the gateway's /costs routes.
-func (a *App) wireEngineExtras(ctx context.Context, ws config.Paths, engine *runtime.Engine, stack *closerStack) *costs.Store {
+func (a *App) wireEngineExtras(ctx context.Context, ws config.Paths, engine *runtime.Engine, llmRouter *llm.Router, stack *closerStack) *costs.Store {
 	cfg, log := a.cfg, a.log
 
 	// ── Workflow Checkpoint Store (E5) ────────────────────────────────────────
@@ -893,8 +898,75 @@ func (a *App) wireEngineExtras(ctx context.Context, ws config.Paths, engine *run
 		stack.pushClose("cost-store", costsStore)
 		openedCostStore = costsStore
 		prices := costPriceTableFromConfig(cfg.Costs.Pricing)
-		engine.SetCostStore(&engineCostStoreAdapter{s: costsStore, prices: prices})
-		log.Info("cost tracking ready", zap.String("path", costsPath), zap.Int("pricing_entries", len(prices)))
+		reservationTTL, err := time.ParseDuration(cfg.Costs.ReservationTTL)
+		if err != nil || reservationTTL <= 0 {
+			reservationTTL = 15 * time.Minute
+		}
+		circuitCooldown, err := time.ParseDuration(cfg.Costs.CircuitCooldown)
+		if err != nil || circuitCooldown <= 0 {
+			circuitCooldown = 30 * time.Second
+		}
+		providerPolicies := make(map[string]costs.ProviderPolicy, len(cfg.LLM.Providers))
+		for id, providerCfg := range cfg.LLM.Providers {
+			providerPolicies[id] = costs.ProviderPolicy{AllowedDataClasses: providerCfg.AllowedDataClasses,
+				CacheAllowedDataClasses: providerCfg.CacheAllowedDataClasses,
+				MaxTokensPerMinute:      providerCfg.MaxTokensPerMinute, Region: providerCfg.Region,
+				Retention: providerCfg.Retention, PromptCaching: providerCfg.PromptCaching}
+		}
+		llmRouter.SetController(costs.NewGovernor(costsStore, prices, costs.GovernanceConfig{
+			DailyBudgetUSD:           cfg.Costs.DailyBudgetUSD,
+			MonthlyBudgetUSD:         cfg.Costs.MonthlyBudgetUSD,
+			PerUserDailyBudgetUSD:    cfg.Costs.PerUserDailyBudgetUSD,
+			PerAgentDailyBudgetUSD:   cfg.Costs.PerAgentDailyBudgetUSD,
+			EnforcementMode:          cfg.Costs.EnforcementMode,
+			UnknownPricing:           cfg.Costs.UnknownPricing,
+			DefaultMaxOutput:         cfg.Costs.DefaultMaxOutputTokens,
+			MaxOutputCeiling:         cfg.Costs.MaxOutputTokensCeiling,
+			ConfirmationThresholdUSD: cfg.Costs.ConfirmationThresholdUSD,
+			ReservationTTL:           reservationTTL,
+			PerUserTokensDay:         cfg.RateLimit.PerUserTokensDay,
+			PerAgentTokensDay:        cfg.RateLimit.PerAgentTokensDay,
+			AllowedProviders:         cfg.LLM.AllowedProviders,
+			AllowedModels:            cfg.LLM.AllowedModels,
+			AllowedRegions:           cfg.LLM.AllowedRegions,
+			MaxConcurrentPerProvider: cfg.Costs.MaxConcurrentPerProvider,
+			CircuitFailureThreshold:  cfg.Costs.CircuitFailureThreshold,
+			CircuitCooldown:          circuitCooldown,
+			ProviderPolicies:         providerPolicies,
+		}))
+		log.Info("central LLM cost governance ready", zap.String("path", costsPath),
+			zap.String("mode", cfg.Costs.EnforcementMode), zap.Int("pricing_entries", len(prices)))
+		if cfg.Costs.Reconciliation.Enabled {
+			interval, err := time.ParseDuration(cfg.Costs.Reconciliation.Interval)
+			if err != nil || interval <= 0 {
+				interval = 24 * time.Hour
+			}
+			importers := make([]costs.BillingImporter, 0, len(cfg.Costs.Reconciliation.Providers))
+			for id, providerCfg := range cfg.Costs.Reconciliation.Providers {
+				if !strings.EqualFold(strings.TrimSpace(providerCfg.Type), "openai") {
+					log.Warn("unsupported cost reconciliation provider type", zap.String("provider", id), zap.String("type", providerCfg.Type))
+					continue
+				}
+				keyEnv := strings.TrimSpace(providerCfg.APIKeyEnv)
+				if keyEnv == "" {
+					keyEnv = "OPENAI_ADMIN_KEY"
+				}
+				importer, err := costs.NewOpenAICostImporter(id, providerCfg.BaseURL, os.Getenv(keyEnv), providerCfg.Organization, nil)
+				if err != nil {
+					log.Warn("cost reconciliation importer disabled", zap.String("provider", id), zap.String("api_key_env", keyEnv), zap.Error(err))
+					continue
+				}
+				importers = append(importers, importer)
+			}
+			if len(importers) > 0 {
+				reconciler := costs.NewReconciler(costsStore, importers, costs.ReconcilerConfig{
+					Interval: interval, VarianceAlertThreshold: cfg.Costs.Reconciliation.VarianceAlertThreshold,
+				}, log)
+				reconciler.Start(ctx)
+				stack.pushClose("cost-reconciler", reconciler)
+				log.Info("scheduled provider cost reconciliation ready", zap.Int("providers", len(importers)), zap.Duration("interval", interval))
+			}
+		}
 	}
 	return openedCostStore
 }
@@ -942,6 +1014,33 @@ func (a *App) wireEngine(d engineDeps) *runtime.Engine {
 		cfg.Runtime.PythonBin, d.toolTimeout, log, d.hub, d.skillLoader, d.ollamaAPIKey, d.mcpClient, d.knowledgeSvc,
 		cfg.Runtime.AllowSystemAgents, d.vectorStore, d.pluginProvider,
 	)
+	filesystemRoots := append([]string(nil), cfg.Runtime.FilesystemRoots...)
+	if len(filesystemRoots) == 0 {
+		if ws, err := config.ResolveWorkspace(); err == nil {
+			filesystemRoots = []string{ws.Root}
+		} else {
+			log.Error("filesystem tools disabled: workspace root cannot be resolved", zap.Error(err))
+		}
+	}
+	if err := engine.SetFilesystemRoots(filesystemRoots); err != nil {
+		log.Error("filesystem tools disabled: invalid filesystem roots", zap.Error(err))
+	} else {
+		log.Info("filesystem tool confinement active", zap.Strings("roots", engine.FilesystemRoots()))
+	}
+	for _, def := range d.loader.All() {
+		if d.mcpClient != nil && len(d.mcpClient.AllTools()) > 0 && def.MCPServers == nil && def.MCPTools == nil {
+			log.Warn("agent migration required: omitted MCP grants now mean none",
+				zap.String("agent", def.ID), zap.String("remediation", "set mcp_servers or mcp_tools explicitly"))
+		}
+		if d.pluginProvider != nil && len(d.pluginProvider.AllTools()) > 0 && def.PluginTools == nil {
+			log.Warn("agent migration required: omitted plugin_tools now means none",
+				zap.String("agent", def.ID), zap.String("remediation", "set plugin_tools explicitly"))
+		}
+		if def.Budget != nil && (def.Budget.MaxTokens == 0 || def.Budget.MaxLLMCalls == 0) {
+			log.Warn("agent explicitly disables a run-budget dimension",
+				zap.String("agent", def.ID), zap.Int("max_tokens", def.Budget.MaxTokens), zap.Int("max_llm_calls", def.Budget.MaxLLMCalls))
+		}
+	}
 	engine.SetSearchConfig(d.searchProvider, d.searchAPIKey)
 	// web_search HTTP ceiling. Unset (or unparseable) keeps the historical 30s.
 	// An unparseable value warns rather than silently applying the default, so
@@ -999,25 +1098,43 @@ func (a *App) wireEngine(d engineDeps) *runtime.Engine {
 		})
 	}
 
-	// PRODUCTION_AUDIT → F1 (2026-05-27): host-enforced rlimits on every
-	// Python tool subprocess via the soulacy __exec-sandbox wrapper.
-	if sbx := cfg.Runtime.Sandbox; sbx.Enabled {
+	// Privileged builtins use a mandatory, fail-closed isolation backend. The
+	// legacy rlimit wrapper remains for ordinary agent Python tools; it is not
+	// treated as a security boundary.
+	sbx := cfg.Runtime.Sandbox
+	limits := sandbox.Limits{Enabled: true, CPUSeconds: sbx.CPUSeconds, MemoryMB: sbx.MemoryMB, OpenFiles: sbx.OpenFiles, FileSizeMB: sbx.FileSizeMB}
+	if !sbx.Enabled || strings.EqualFold(strings.TrimSpace(sbx.Mode), "unsandboxed") {
+		engine.SetPrivilegedCommandRunner(runtime.HostPrivilegedRunner{})
+		if roots := engine.FilesystemRoots(); len(roots) > 0 {
+			engine.SetPrivilegedWorkDir(roots[0])
+		}
+		log.Error("UNSAFE privileged-tool mode active: commands run as the gateway user without isolation",
+			zap.String("mode", "unsandboxed"))
+	} else if roots := engine.FilesystemRoots(); len(roots) > 0 {
+		sandboxWorkDir := filepath.Join(roots[0], "data", "sandbox")
+		if err := os.MkdirAll(sandboxWorkDir, 0o700); err != nil {
+			log.Error("privileged tools disabled: cannot create isolated workspace", zap.Error(err))
+		} else {
+			_ = os.Chmod(sandboxWorkDir, 0o700)
+			engine.SetPrivilegedWorkDir(sandboxWorkDir)
+			engine.SetPrivilegedCommandRunner(runtime.DockerPrivilegedRunner{Workspace: sandboxWorkDir, Image: sbx.Image, Limits: limits, PIDs: sbx.PIDs})
+			log.Info("privileged tool isolation enabled", zap.String("mode", "docker"), zap.String("image", sbx.Image), zap.String("network", "none"), zap.String("workspace", sandboxWorkDir))
+		}
+	} else {
+		log.Error("privileged tools disabled: isolation has no workspace root")
+	}
+
+	if sbx.Enabled {
 		if selfPath, e := os.Executable(); e == nil {
-			engine.SetSandbox(selfPath, sandbox.Limits{
-				Enabled:    true,
-				CPUSeconds: sbx.CPUSeconds,
-				MemoryMB:   sbx.MemoryMB,
-				OpenFiles:  sbx.OpenFiles,
-				FileSizeMB: sbx.FileSizeMB,
-			})
-			log.Info("python sandbox enabled",
+			engine.SetSandbox(selfPath, limits)
+			log.Info("python resource limits enabled",
 				zap.Int("cpu_seconds", sbx.CPUSeconds),
 				zap.Int("memory_mb", sbx.MemoryMB),
 				zap.Int("open_files", sbx.OpenFiles),
 				zap.Int("file_size_mb", sbx.FileSizeMB),
 			)
 		} else {
-			log.Warn("python sandbox requested but os.Executable() failed; running unsandboxed", zap.Error(e))
+			log.Warn("python resource wrapper unavailable", zap.Error(e))
 		}
 	}
 
@@ -1033,7 +1150,7 @@ func (a *App) wireEngine(d engineDeps) *runtime.Engine {
 	// shape surprises); operators opt out with runtime.adaptive_nodes: false.
 	engine.SetAdaptiveNodes(cfg.Runtime.AdaptiveNodes == nil || *cfg.Runtime.AdaptiveNodes)
 
-	engine.SetAuditLog(audit.New(cfg.Runtime.AuditDir))
+	engine.SetAuditLog(audit.NewWithRetention(cfg.Runtime.AuditDir, config.RetentionDuration(cfg.Runtime.Retention.AuditLogs, 30*24*time.Hour)))
 	if cfg.Runtime.AuditDir != "" {
 		log.Info("audit logging enabled", zap.String("dir", cfg.Runtime.AuditDir))
 	}
@@ -1075,6 +1192,23 @@ func (a *App) wireEngine(d engineDeps) *runtime.Engine {
 
 	// S3.2: hard ceiling on any agent's effective max_turns.
 	engine.SetMaxTurnsCeiling(cfg.Runtime.MaxTurnsCeiling)
+	parseTimeout := func(raw string) time.Duration { d, _ := time.ParseDuration(raw); return d }
+	engine.SetTimeoutHierarchy(
+		parseTimeout(cfg.Runtime.Timeouts.Tool), parseTimeout(cfg.Runtime.Timeouts.LLM),
+		parseTimeout(cfg.Runtime.Timeouts.Step), parseTimeout(cfg.Runtime.Timeouts.Run),
+	)
+	engine.SetRunBudgets(
+		agent.BudgetConfig{MaxTokens: cfg.Runtime.DefaultBudget.MaxTokens, MaxLLMCalls: cfg.Runtime.DefaultBudget.MaxLLMCalls},
+		agent.BudgetConfig{MaxTokens: cfg.Runtime.MaxBudget.MaxTokens, MaxLLMCalls: cfg.Runtime.MaxBudget.MaxLLMCalls},
+	)
+	if cfg.Runtime.DefaultBudget.MaxTokens == 0 || cfg.Runtime.DefaultBudget.MaxLLMCalls == 0 {
+		log.Warn("runtime default run budget contains an unlimited dimension",
+			zap.Int("max_tokens", cfg.Runtime.DefaultBudget.MaxTokens), zap.Int("max_llm_calls", cfg.Runtime.DefaultBudget.MaxLLMCalls))
+	}
+	if cfg.Runtime.MaxBudget.MaxTokens == 0 || cfg.Runtime.MaxBudget.MaxLLMCalls == 0 {
+		log.Warn("runtime maximum run budget contains an unlimited ceiling",
+			zap.Int("max_tokens", cfg.Runtime.MaxBudget.MaxTokens), zap.Int("max_llm_calls", cfg.Runtime.MaxBudget.MaxLLMCalls))
+	}
 
 	// Bound recursive peer-agent delegation chains while allowing deeper
 	// coordinator hierarchies to opt in from config.

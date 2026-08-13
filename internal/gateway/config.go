@@ -39,11 +39,17 @@ func (s *Server) safeConfigView() fiber.Map {
 			apiKey = "***"
 		}
 		providers[name] = fiber.Map{
-			"base_url":   pc.BaseURL,
-			"api_key":    apiKey,
-			"model":      pc.Model,
-			"keep_alive": pc.KeepAlive,
-			"options":    pc.Options,
+			"base_url":                   pc.BaseURL,
+			"api_key":                    apiKey,
+			"model":                      pc.Model,
+			"keep_alive":                 pc.KeepAlive,
+			"options":                    pc.Options,
+			"region":                     pc.Region,
+			"retention":                  pc.Retention,
+			"local":                      pc.Local,
+			"allowed_data_classes":       pc.AllowedDataClasses,
+			"cache_allowed_data_classes": pc.CacheAllowedDataClasses,
+			"max_tokens_per_minute":      pc.MaxTokensPerMinute,
 		}
 	}
 
@@ -94,11 +100,15 @@ func (s *Server) safeConfigView() fiber.Map {
 			"max_history": cfg.Memory.MaxHistory,
 		},
 		"llm": fiber.Map{
-			"default_provider": cfg.LLM.DefaultProvider,
-			"providers":        providers,
+			"default_provider":  cfg.LLM.DefaultProvider,
+			"allowed_providers": cfg.LLM.AllowedProviders,
+			"allowed_models":    cfg.LLM.AllowedModels,
+			"providers":         providers,
 			"studio": fiber.Map{
-				"provider": cfg.LLM.Studio.Provider,
-				"model":    cfg.LLM.Studio.Model,
+				"provider":           cfg.LLM.Studio.Provider,
+				"model":              cfg.LLM.Studio.Model,
+				"max_build_tokens":   cfg.LLM.Studio.MaxBuildTokens,
+				"max_build_cost_usd": cfg.LLM.Studio.MaxBuildCostUSD,
 			},
 			"reasoner": fiber.Map{
 				"provider": cfg.LLM.Reasoner.Provider,
@@ -115,10 +125,20 @@ func (s *Server) safeConfigView() fiber.Map {
 			"api_key":  searchAPIKey,
 		},
 		"costs": fiber.Map{
-			"daily_budget_usd":   cfg.Costs.DailyBudgetUSD,
-			"monthly_budget_usd": cfg.Costs.MonthlyBudgetUSD,
-			"alert_threshold":    cfg.Costs.AlertThreshold,
-			"pricing":            cfg.Costs.Pricing,
+			"daily_budget_usd":            cfg.Costs.DailyBudgetUSD,
+			"monthly_budget_usd":          cfg.Costs.MonthlyBudgetUSD,
+			"per_user_daily_budget_usd":   cfg.Costs.PerUserDailyBudgetUSD,
+			"per_agent_daily_budget_usd":  cfg.Costs.PerAgentDailyBudgetUSD,
+			"alert_threshold":             cfg.Costs.AlertThreshold,
+			"enforcement_mode":            cfg.Costs.EnforcementMode,
+			"unknown_pricing":             cfg.Costs.UnknownPricing,
+			"default_max_output_tokens":   cfg.Costs.DefaultMaxOutputTokens,
+			"max_output_tokens_ceiling":   cfg.Costs.MaxOutputTokensCeiling,
+			"reservation_ttl":             cfg.Costs.ReservationTTL,
+			"max_concurrent_per_provider": cfg.Costs.MaxConcurrentPerProvider,
+			"circuit_failure_threshold":   cfg.Costs.CircuitFailureThreshold,
+			"circuit_cooldown":            cfg.Costs.CircuitCooldown,
+			"pricing":                     cfg.Costs.Pricing,
 		},
 		"ops": fiber.Map{
 			"slo_window":           cfg.Ops.SLOWindow,
@@ -142,8 +162,8 @@ func (s *Server) safeConfigView() fiber.Map {
 		"security": fiber.Map{
 			"intent_gate": cfg.Security.IntentGate,
 		},
-		"agent_dirs":     cfg.AgentDirs,
-		"skill_dirs":     cfg.SkillDirs,
+		"agent_dirs": cfg.AgentDirs,
+		"skill_dirs": cfg.SkillDirs,
 		// GUI preferences that belong to the install, not to one browser.
 		"ui": fiber.Map{
 			"walkthrough_seen":    cfg.UI.WalkthroughSeen,
@@ -265,13 +285,17 @@ type PatchableConfig struct {
 	} `json:"executor" yaml:"executor"`
 
 	LLM *struct {
-		DefaultProvider string `json:"default_provider" yaml:"default_provider"`
+		DefaultProvider  string   `json:"default_provider" yaml:"default_provider"`
+		AllowedProviders []string `json:"allowed_providers" yaml:"allowed_providers"`
+		AllowedModels    []string `json:"allowed_models" yaml:"allowed_models"`
 		// Studio overrides the provider/model used for Studio reasoning + code
 		// generation (llm.studio). Empty strings clear the override (fall back
 		// to the default provider/model).
 		Studio *struct {
-			Provider string `json:"provider" yaml:"provider"`
-			Model    string `json:"model" yaml:"model"`
+			Provider        string  `json:"provider" yaml:"provider"`
+			Model           string  `json:"model" yaml:"model"`
+			MaxBuildTokens  int     `json:"max_build_tokens" yaml:"max_build_tokens"`
+			MaxBuildCostUSD float64 `json:"max_build_cost_usd" yaml:"max_build_cost_usd"`
 		} `json:"studio" yaml:"studio"`
 		// Reasoner overrides the provider/model the ReAct/Plan-Execute loop uses
 		// (llm.reasoner). Empty strings fall back to each agent's own model.
@@ -296,12 +320,28 @@ type PatchableConfig struct {
 	} `json:"search" yaml:"search"`
 
 	Costs *struct {
-		DailyBudgetUSD   float64 `json:"daily_budget_usd" yaml:"daily_budget_usd"`
-		MonthlyBudgetUSD float64 `json:"monthly_budget_usd" yaml:"monthly_budget_usd"`
-		AlertThreshold   float64 `json:"alert_threshold" yaml:"alert_threshold"`
-		Pricing          map[string]struct {
-			InputPerMTok  float64 `json:"input_per_mtok" yaml:"input_per_mtok"`
-			OutputPerMTok float64 `json:"output_per_mtok" yaml:"output_per_mtok"`
+		DailyBudgetUSD           float64 `json:"daily_budget_usd" yaml:"daily_budget_usd"`
+		MonthlyBudgetUSD         float64 `json:"monthly_budget_usd" yaml:"monthly_budget_usd"`
+		PerUserDailyBudgetUSD    float64 `json:"per_user_daily_budget_usd" yaml:"per_user_daily_budget_usd"`
+		PerAgentDailyBudgetUSD   float64 `json:"per_agent_daily_budget_usd" yaml:"per_agent_daily_budget_usd"`
+		AlertThreshold           float64 `json:"alert_threshold" yaml:"alert_threshold"`
+		EnforcementMode          string  `json:"enforcement_mode" yaml:"enforcement_mode"`
+		UnknownPricing           string  `json:"unknown_pricing" yaml:"unknown_pricing"`
+		DefaultMaxOutputTokens   int     `json:"default_max_output_tokens" yaml:"default_max_output_tokens"`
+		MaxOutputTokensCeiling   int     `json:"max_output_tokens_ceiling" yaml:"max_output_tokens_ceiling"`
+		ReservationTTL           string  `json:"reservation_ttl" yaml:"reservation_ttl"`
+		MaxConcurrentPerProvider int     `json:"max_concurrent_per_provider" yaml:"max_concurrent_per_provider"`
+		CircuitFailureThreshold  int     `json:"circuit_failure_threshold" yaml:"circuit_failure_threshold"`
+		CircuitCooldown          string  `json:"circuit_cooldown" yaml:"circuit_cooldown"`
+		Pricing                  map[string]struct {
+			InputPerMTok       float64 `json:"input_per_mtok" yaml:"input_per_mtok"`
+			OutputPerMTok      float64 `json:"output_per_mtok" yaml:"output_per_mtok"`
+			CachedInputPerMTok float64 `json:"cached_input_per_mtok" yaml:"cached_input_per_mtok"`
+			CacheWritePerMTok  float64 `json:"cache_write_per_mtok" yaml:"cache_write_per_mtok"`
+			ReasoningPerMTok   float64 `json:"reasoning_per_mtok" yaml:"reasoning_per_mtok"`
+			Source             string  `json:"source" yaml:"source"`
+			EffectiveDate      string  `json:"effective_date" yaml:"effective_date"`
+			Version            string  `json:"version" yaml:"version"`
 		} `json:"pricing" yaml:"pricing"`
 	} `json:"costs" yaml:"costs"`
 
@@ -556,10 +596,18 @@ func applyPatch(dst map[string]any, patch PatchableConfig) {
 		if patch.LLM.DefaultProvider != "" {
 			llm["default_provider"] = patch.LLM.DefaultProvider
 		}
+		if patch.LLM.AllowedProviders != nil {
+			llm["allowed_providers"] = patch.LLM.AllowedProviders
+		}
+		if patch.LLM.AllowedModels != nil {
+			llm["allowed_models"] = patch.LLM.AllowedModels
+		}
 		if patch.LLM.Studio != nil {
 			st := getOrCreateMap(llm, "studio")
 			st["provider"] = patch.LLM.Studio.Provider
 			st["model"] = patch.LLM.Studio.Model
+			st["max_build_tokens"] = patch.LLM.Studio.MaxBuildTokens
+			st["max_build_cost_usd"] = patch.LLM.Studio.MaxBuildCostUSD
 		}
 		if patch.LLM.Reasoner != nil {
 			rs := getOrCreateMap(llm, "reasoner")
@@ -581,7 +629,17 @@ func applyPatch(dst map[string]any, patch PatchableConfig) {
 		cs := getOrCreateMap(dst, "costs")
 		cs["daily_budget_usd"] = patch.Costs.DailyBudgetUSD
 		cs["monthly_budget_usd"] = patch.Costs.MonthlyBudgetUSD
+		cs["per_user_daily_budget_usd"] = patch.Costs.PerUserDailyBudgetUSD
+		cs["per_agent_daily_budget_usd"] = patch.Costs.PerAgentDailyBudgetUSD
 		cs["alert_threshold"] = patch.Costs.AlertThreshold
+		cs["enforcement_mode"] = patch.Costs.EnforcementMode
+		cs["unknown_pricing"] = patch.Costs.UnknownPricing
+		cs["default_max_output_tokens"] = patch.Costs.DefaultMaxOutputTokens
+		cs["max_output_tokens_ceiling"] = patch.Costs.MaxOutputTokensCeiling
+		cs["reservation_ttl"] = patch.Costs.ReservationTTL
+		cs["max_concurrent_per_provider"] = patch.Costs.MaxConcurrentPerProvider
+		cs["circuit_failure_threshold"] = patch.Costs.CircuitFailureThreshold
+		cs["circuit_cooldown"] = patch.Costs.CircuitCooldown
 		pricing := map[string]any{}
 		for selector, price := range patch.Costs.Pricing {
 			key := strings.TrimSpace(selector)
@@ -589,8 +647,14 @@ func applyPatch(dst map[string]any, patch PatchableConfig) {
 				continue
 			}
 			pricing[key] = map[string]any{
-				"input_per_mtok":  price.InputPerMTok,
-				"output_per_mtok": price.OutputPerMTok,
+				"input_per_mtok":        price.InputPerMTok,
+				"output_per_mtok":       price.OutputPerMTok,
+				"cached_input_per_mtok": price.CachedInputPerMTok,
+				"cache_write_per_mtok":  price.CacheWritePerMTok,
+				"reasoning_per_mtok":    price.ReasoningPerMTok,
+				"source":                price.Source,
+				"effective_date":        price.EffectiveDate,
+				"version":               price.Version,
 			}
 		}
 		cs["pricing"] = pricing

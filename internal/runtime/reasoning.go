@@ -141,9 +141,9 @@ func (e *Engine) emptyReasoningMessage(def *agent.Definition, lastErr error) str
 }
 
 // reasoningBackendFor selects the LLM backend for an agent's reasoning loop:
-// a test/embedder override if set; the native hand-written backend when one
-// exists for the provider (anthropic/openai-family/ollama); otherwise the
-// router-backed backend, which covers every other provider the gateway serves.
+// a test override if set; otherwise the governed router-backed backend whenever
+// the provider is registered. Native backends are retained only as a fallback
+// for embedders that construct an Engine without a router.
 func (e *Engine) reasoningBackendFor(def *agent.Definition) reasoning.LLMBackend {
 	if e.reasoningBackendFactory != nil {
 		return e.reasoningBackendFactory(def)
@@ -153,14 +153,11 @@ func (e *Engine) reasoningBackendFor(def *agent.Definition) reasoning.LLMBackend
 	if prov == "" && e.llmRouter != nil {
 		prov = strings.ToLower(strings.TrimSpace(e.llmRouter.DefaultProvider()))
 	}
-	if reasoning.BackendAvailable(prov, e.reasoningKeys) {
-		return reasoning.ApplyTuning(reasoning.DefaultBackendFor(rdef, e.reasoningKeys), rdef)
-	}
 	if e.llmRouter != nil && e.llmRouter.Provider(prov) != nil {
 		return reasoning.ApplyTuning(reasoning.NewRouterBackend(routerCompleter{router: e.llmRouter, provider: prov}, rdef.LLM.Model), rdef)
 	}
-	// No native backend and the router doesn't know this provider — keep the
-	// historic local-Ollama fallback so behaviour is unchanged in that corner.
+	// No registered router provider — keep the historic native fallback for
+	// SDK embedders and narrowly constructed tests.
 	return reasoning.ApplyTuning(reasoning.DefaultBackendFor(rdef, e.reasoningKeys), rdef)
 }
 
@@ -320,7 +317,7 @@ func (e *Engine) handleWithReasoning(ctx context.Context, def *agent.Definition,
 	for _, n := range loopCfg.ToolNames {
 		have[n] = struct{}{}
 	}
-	toolSchemas := e.allToolSchemas(def, msg.Channel)
+	toolSchemas := e.allToolSchemasForContext(ctx, def, msg.Channel)
 	schemaByName := make(map[string]llm.ToolSchema, len(toolSchemas))
 	for _, s := range toolSchemas {
 		schemaByName[s.Name] = s

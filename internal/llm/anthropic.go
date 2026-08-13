@@ -77,6 +77,7 @@ func newAnthropicProvider(baseURL, apiKey, model string, promptCaching, extended
 func (p *AnthropicProvider) ID() string { return "anthropic" }
 
 func (p *AnthropicProvider) Complete(ctx context.Context, req CompletionRequest) (*CompletionResponse, error) {
+	cachePrompt := p.promptCaching && !req.DisablePromptCaching
 	model := req.Model
 	if model == "" {
 		model = p.model
@@ -177,7 +178,7 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req CompletionRequest)
 	// with cache_control on the last block so Anthropic caches it between turns
 	// (90% discount on cache hits, 1.25× cost on the first write).
 	if systemPrompt != "" {
-		if p.promptCaching {
+		if cachePrompt {
 			body["system"] = []map[string]any{
 				{
 					"type":          "text",
@@ -206,7 +207,7 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req CompletionRequest)
 				"input_schema": t.Parameters,
 			}
 		}
-		if p.promptCaching {
+		if cachePrompt {
 			tools[len(tools)-1]["cache_control"] = map[string]any{"type": "ephemeral"}
 		}
 		body["tools"] = tools
@@ -246,7 +247,7 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req CompletionRequest)
 
 	// Beta headers: combine as comma-separated list when multiple are needed.
 	var betas []string
-	if p.promptCaching {
+	if cachePrompt {
 		betas = append(betas, "prompt-caching-2024-07-31")
 	}
 	if p.extendedThinking {
@@ -300,6 +301,8 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req CompletionRequest)
 		OutputTokens:        result.Usage.OutputTokens,
 		CacheCreationTokens: result.Usage.CacheCreationInputTokens,
 		CacheReadTokens:     result.Usage.CacheReadInputTokens,
+		TotalTokens:         result.Usage.InputTokens + result.Usage.OutputTokens,
+		ProviderRequestID:   firstNonEmpty(resp.Header.Get("request-id"), resp.Header.Get("x-request-id")),
 	}
 	for _, block := range result.Content {
 		switch block.Type {
