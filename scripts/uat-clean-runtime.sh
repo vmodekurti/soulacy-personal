@@ -656,11 +656,38 @@ JSON
   UAT_BYTES="$(wc -c < "$RELDIR/soulacy-uat.tar.gz" | tr -d ' ')"
   UAT_GOOS="$(go env GOOS 2>/dev/null || uname | tr '[:upper:]' '[:lower:]')"
   UAT_GOARCH="$(go env GOARCH 2>/dev/null || uname -m)"
+  UAT_ARTIFACT="soulacy_99.0.0_${UAT_GOOS}_${UAT_GOARCH}.tar.gz"
+  mv "$RELDIR/soulacy-uat.tar.gz" "$RELDIR/$UAT_ARTIFACT"
+  printf '{"verificationMaterial":{}}\n' > "$WORKSPACE/release-manifest-real.json.cosign.bundle"
+  printf '{"verificationMaterial":{}}\n' > "$RELDIR/$UAT_ARTIFACT.cosign.bundle"
+  # Exercise the updater's Sigstore wiring without requiring network trust roots in UAT.
+  mkdir -p "$RELDIR/test-bin"
+  cat > "$RELDIR/test-bin/cosign" <<'SH'
+#!/usr/bin/env sh
+set -eu
+[ "$1" = "verify-blob" ]
+bundle=""
+identity=""
+artifact=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --bundle) bundle="$2"; shift 2 ;;
+    --certificate-identity) identity="$2"; shift 2 ;;
+    --certificate-oidc-issuer) [ "$2" = "https://token.actions.githubusercontent.com" ]; shift 2 ;;
+    verify-blob) shift ;;
+    *) artifact="$1"; shift ;;
+  esac
+done
+[ "$identity" = "https://github.com/vmodekurti/soulacy/.github/workflows/release.yml@refs/tags/v99.0.0" ]
+[ -s "$bundle" ]
+[ -s "$artifact" ]
+SH
+  chmod 0755 "$RELDIR/test-bin/cosign"
   cat > "$WORKSPACE/release-manifest-real.json" <<JSON
-{"product":"soulacy","version":"99.0.0","artifacts":[{"name":"$(basename "$RELDIR/soulacy-uat.tar.gz")","os":"$UAT_GOOS","arch":"$UAT_GOARCH","sha256":"$UAT_SHA","bytes":$UAT_BYTES,"url":"$RELDIR/soulacy-uat.tar.gz"}]}
+{"product":"soulacy","version":"99.0.0","artifacts":[{"name":"$UAT_ARTIFACT","os":"$UAT_GOOS","arch":"$UAT_GOARCH","sha256":"$UAT_SHA","bytes":$UAT_BYTES,"url":"$RELDIR/$UAT_ARTIFACT"}]}
 JSON
-  SOULACY_WORKSPACE="$WORKSPACE" "$CLI" --gateway "$URL" --api-key "$API_KEY" --json update install --manifest "$WORKSPACE/release-manifest-real.json" --current 1.0.0 --install-dir "$RELDIR/install" --dry-run \
-    | json_assert "doc.get('dry_run') is True and doc.get('installed') is False and doc.get('artifact', {}).get('name') == 'soulacy-uat.tar.gz'"
+  PATH="$RELDIR/test-bin:$PATH" SOULACY_WORKSPACE="$WORKSPACE" "$CLI" --gateway "$URL" --api-key "$API_KEY" --json update install --manifest "$WORKSPACE/release-manifest-real.json" --current 1.0.0 --install-dir "$RELDIR/install" --dry-run \
+    | json_assert "doc.get('dry_run') is True and doc.get('installed') is False and doc.get('artifact', {}).get('name') == '$UAT_ARTIFACT'"
 else
   api GET /doctor | json_assert "'providers' in doc and 'channels' in doc"
 fi
