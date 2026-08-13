@@ -59,6 +59,12 @@ func TestGuardrail_RunScriptAndShellExecAgree(t *testing.T) {
 // workspace roots are safe, so a write there must be confirmed.
 func TestGuardrail_WritingToTmpRequiresConfirmationWhenOutsideRoots(t *testing.T) {
 	e := newMinimalEngine(t)
+	// newMinimalEngine allows os.TempDir for broad filesystem-tool coverage.
+	// On Linux that is /tmp itself, so replace it with an isolated root before
+	// asserting that a sibling /tmp path is outside the allowlist.
+	if err := e.SetFilesystemRoots([]string{t.TempDir()}); err != nil {
+		t.Fatalf("filesystem roots: %v", err)
+	}
 	action, _, err := e.deterministicGuardrail(context.Background(), &agent.Definition{ID: "a"}, "s",
 		message.ToolCall{Name: "write_file", Arguments: map[string]any{"path": "/tmp/notes.txt"}})
 	if err != nil {

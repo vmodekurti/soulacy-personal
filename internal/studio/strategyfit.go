@@ -273,11 +273,6 @@ func (c *StrategyFitCollector) Observe(event message.Event) {
 func (c *StrategyFitCollector) Wait()  { c.wg.Wait() }
 func (c *StrategyFitCollector) Close() { c.Wait(); close(c.jobs) }
 
-func degradedMessage(payload any) bool {
-	msg, ok := payload.(message.Message)
-	return ok && strings.EqualFold(msg.Metadata[message.MetaReasoningDegraded], "true")
-}
-
 func UnreliableStrategiesPromptBlock(model string, strategies []string) string {
 	if strings.TrimSpace(model) == "" || len(strategies) == 0 {
 		return ""

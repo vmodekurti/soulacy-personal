@@ -196,6 +196,7 @@ func (w *worker) kill() {
 		// "file already closed" worker failure. Killing the process above
 		// unblocks Scan, and ioMu is the explicit reader-completion barrier.
 		w.ioMu.Lock()
+		_ = w.stdout.Err()
 		w.ioMu.Unlock()
 		_ = w.cmd.Wait()
 	})

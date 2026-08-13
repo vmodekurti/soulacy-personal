@@ -14,6 +14,15 @@ if (typeof globalThis.localStorage === 'undefined') {
     clear: () => backing.clear(),
   }
 }
+if (typeof globalThis.sessionStorage === 'undefined') {
+  const backing = new Map()
+  globalThis.sessionStorage = {
+    getItem: (k) => (backing.has(k) ? backing.get(k) : null),
+    setItem: (k, v) => backing.set(k, String(v)),
+    removeItem: (k) => backing.delete(k),
+    clear: () => backing.clear(),
+  }
+}
 if (typeof globalThis.location === 'undefined') {
   globalThis.location = { protocol: 'http:', host: 'localhost:8080' }
 }

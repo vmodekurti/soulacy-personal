@@ -23,17 +23,6 @@ func checkSSRF(rawURL string, ssrfProtection bool, allowedHosts []string) error 
 	return netguard.Check(rawURL, ssrfProtection, allowedHosts)
 }
 
-// ssrfRedirectHook re-runs the check on every redirect hop.
-//
-// checkSSRF on its own is a pre-flight check, and Go's default client follows up
-// to 10 redirects afterwards without telling anyone. A hostname that resolves to
-// a public IP therefore passed the check and then 302'd wherever it liked —
-// including to the metadata endpoint the check exists to protect. Every outbound
-// client built from model-supplied URLs must carry this.
-func (e *Engine) ssrfRedirectHook() func(*http.Request, []*http.Request) error {
-	return netguard.CheckRedirect(e.ssrfProtection, e.allowPrivateHosts)
-}
-
 func (e *Engine) ssrfHTTPClient(timeout time.Duration) *http.Client {
 	return netguard.NewHTTPClient(timeout, e.ssrfProtection, e.allowPrivateHosts)
 }

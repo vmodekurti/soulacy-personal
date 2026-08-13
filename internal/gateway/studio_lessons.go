@@ -239,12 +239,6 @@ func (s *Server) preferenceStore() *studio.PreferenceStore {
 	return s.preferenceStoreCached
 }
 
-func (s *Server) groundPreferences(cat *studio.Catalog) {
-	if store := s.preferenceStore(); store != nil {
-		cat.GlobalPreferences = store.RulesFor("")
-	}
-}
-
 func (s *Server) groundPreferencesFor(cat *studio.Catalog, owner string) {
 	if store := s.preferenceStore(); store != nil {
 		cat.GlobalPreferences = store.RulesFor(owner)

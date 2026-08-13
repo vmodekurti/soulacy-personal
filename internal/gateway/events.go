@@ -176,20 +176,6 @@ func (h *EventHub) broadcastEvent(data []byte, event message.Event) {
 	}
 }
 
-// broadcast enqueues data to every client's send buffer without blocking.
-func (h *EventHub) broadcast(data []byte) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	for c := range h.clients {
-		select {
-		case c.send <- data:
-		default:
-			// Client's queue is full — it's too slow / not reading. Drop this
-			// event for them rather than blocking the engine.
-		}
-	}
-}
-
 // Handler is the Fiber WebSocket handler. Each connecting client gets a buffered
 // send queue and a dedicated writer goroutine; the read loop detects disconnect.
 func (h *EventHub) Handler(conn *fws.Conn) {

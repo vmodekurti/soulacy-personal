@@ -65,15 +65,6 @@ type UpdateInstallResult struct {
 	Backups    []string `json:"backups,omitempty"`
 }
 
-type githubRelease struct {
-	TagName string `json:"tag_name"`
-	Assets  []struct {
-		Name               string `json:"name"`
-		BrowserDownloadURL string `json:"browser_download_url"`
-		Size               int64  `json:"size"`
-	} `json:"assets"`
-}
-
 const defaultGitHubRepo = "vmodekurti/soulacy"
 
 const (
@@ -195,121 +186,6 @@ func InstallUpdate(ctx context.Context, opts UpdateInstallOptions) (UpdateInstal
 	res.Installed = true
 	res.Message = fmt.Sprintf("Updated Soulacy %s -> %s in %s.", check.CurrentVersion, check.LatestVersion, installDir)
 	return res, nil
-}
-
-func fetchLatestGitHubReleaseManifest(ctx context.Context, repo string) (UpdateManifest, error) {
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-
-	urlStr := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", repo)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
-	if err != nil {
-		return UpdateManifest{}, err
-	}
-	// Add user-agent header as required by GitHub API
-	req.Header.Set("User-Agent", "soulacy-updater")
-
-	resp, err := HTTPClient.Do(req)
-	if err != nil {
-		return UpdateManifest{}, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
-		// No GitHub release has been published yet. Return a dummy manifest matching dev version.
-		return UpdateManifest{
-			Product: "soulacy",
-			Version: "dev",
-		}, nil
-	}
-	if resp.StatusCode != http.StatusOK {
-		return UpdateManifest{}, fmt.Errorf("github API: HTTP %d from %s", resp.StatusCode, urlStr)
-	}
-
-	var rel githubRelease
-	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
-		return UpdateManifest{}, err
-	}
-
-	version := strings.TrimPrefix(rel.TagName, "v")
-	manifest := UpdateManifest{
-		Product: "soulacy",
-		Version: version,
-	}
-
-	// Try to locate the checksums file first
-	var checksumsURL string
-	for _, asset := range rel.Assets {
-		if asset.Name == "checksums.sha256" {
-			checksumsURL = asset.BrowserDownloadURL
-			break
-		}
-	}
-
-	checksums := make(map[string]string)
-	if checksumsURL != "" {
-		if m, err := fetchAndParseChecksums(ctx, checksumsURL); err == nil {
-			checksums = m
-		}
-	}
-
-	for _, asset := range rel.Assets {
-		if strings.HasSuffix(asset.Name, ".tar.gz") {
-			// Extract OS/Arch from filename: soulacy_<version>_<os>_<arch>.tar.gz
-			parts := strings.Split(strings.TrimSuffix(asset.Name, ".tar.gz"), "_")
-			if len(parts) >= 4 {
-				osName := parts[len(parts)-2]
-				archName := parts[len(parts)-1]
-				sha := checksums[asset.Name]
-				manifest.Artifacts = append(manifest.Artifacts, UpdateArtifact{
-					Name:   asset.Name,
-					OS:     osName,
-					Arch:   archName,
-					Bytes:  asset.Size,
-					SHA256: sha,
-					URL:    asset.BrowserDownloadURL,
-				})
-			}
-		}
-	}
-
-	return manifest, nil
-}
-
-func fetchAndParseChecksums(ctx context.Context, urlStr string) (map[string]string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "soulacy-updater")
-	resp, err := HTTPClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	checksums := make(map[string]string)
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		parts := strings.Fields(line)
-		if len(parts) >= 2 {
-			checksums[parts[1]] = parts[0]
-		}
-	}
-	return checksums, nil
 }
 
 func readUpdateManifest(ctx context.Context, source string) (UpdateManifest, error) {
@@ -478,34 +354,6 @@ func downloadUpdateArtifact(ctx context.Context, manifestSource string, artifact
 	return path, source, cleanup, err
 }
 
-func readUpdateArtifact(ctx context.Context, manifestSource string, artifact UpdateArtifact) ([]byte, string, error) {
-	source, err := resolveUpdateArtifactSource(manifestSource, artifact)
-	if err != nil {
-		return nil, "", err
-	}
-	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
-		ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-		defer cancel()
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, source, nil)
-		if err != nil {
-			return nil, source, err
-		}
-		req.Header.Set("User-Agent", "soulacy-updater")
-		resp, err := HTTPClient.Do(req)
-		if err != nil {
-			return nil, source, err
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return nil, source, fmt.Errorf("update artifact: HTTP %d from %s", resp.StatusCode, source)
-		}
-		data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<30))
-		return data, source, err
-	}
-	data, err := os.ReadFile(source)
-	return data, source, err
-}
-
 func resolveUpdateArtifactSource(manifestSource string, artifact UpdateArtifact) (string, error) {
 	raw := strings.TrimSpace(artifact.URL)
 	if raw == "" {
@@ -591,10 +439,6 @@ func unpackUpdateArchiveFile(path string) (map[string][]byte, error) {
 	}
 	defer file.Close()
 	return unpackUpdateArchiveReader(file)
-}
-
-func unpackUpdateArchive(data []byte) (map[string][]byte, error) {
-	return unpackUpdateArchiveReader(bytes.NewReader(data))
 }
 
 func unpackUpdateArchiveReader(reader io.Reader) (map[string][]byte, error) {
