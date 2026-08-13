@@ -39,6 +39,23 @@ The panel stays attached to the reply afterwards — collapse or expand it any t
 !!! note
     Thinking events only appear for runs started from this page while the event stream is connected (the sidebar shows **● Live**).
 
+## Rate a response
+
+Completed assistant responses show **👍** and **👎** controls. A rating is tied
+to the server-issued run and response IDs, so feedback cannot be attached to an
+arbitrary or unfinished run. Selecting the other action changes the existing
+rating without double-counting it.
+
+Feedback helps Studio rank sanitized workflow patterns learned from successful
+runs. An unhelpful rating can suppress a pattern supported by only that run;
+helpful evidence raises its retrieval rank. Ratings do not rewrite the agent's
+prompt or procedural rulebook.
+
+The API also accepts an optional written comment. Comments are redacted and
+stored as pending learning proposals for operator review—they are never applied
+automatically. See [Studio learning & memory](../studio-learning-memory.md) and
+[Response feedback API](../api/agents.md#response-feedback).
+
 ## Per-reply token and cost deltas
 
 Each assistant reply carries a small delta label next to its timestamp, e.g.:

@@ -74,6 +74,46 @@ Do not mix a source checkout upgrade with `sy update install` unless you intend
 to replace the source-built binaries with release binaries. Stores upgrade
 their own schemas at boot; there is no separate migration command.
 
+Source builds now require **Go 1.26.5 or newer**. Binary release installs do
+not require a local Go toolchain.
+
+## Verify a systemd service uses the intended config
+
+An interactive `soulacy serve` runs as your shell user; a system service often
+runs as the dedicated `soulacy` user with home `/var/lib/soulacy`. Those two
+processes do not automatically read the same `config.yaml`.
+
+Inspect the service identity and environment:
+
+```bash
+sudo systemctl show soulacy -p User -p Group -p ExecStart --no-pager
+sudo systemctl show soulacy -p Environment --value \
+  | tr ' ' '\n' \
+  | grep -E '^(HOME|SOULACY_CONFIG_PATH|SOULACY_WORKSPACE)='
+```
+
+For a system service, keep configuration in a service-readable location and
+make the path explicit in a systemd override:
+
+```ini
+[Service]
+Environment=SOULACY_CONFIG_PATH=/etc/soulacy/config.yaml
+Environment=SOULACY_WORKSPACE=/var/lib/soulacy
+```
+
+Then reload and verify:
+
+```bash
+sudo install -d -o soulacy -g soulacy /etc/soulacy /var/lib/soulacy
+sudo chown root:soulacy /etc/soulacy/config.yaml
+sudo chmod 640 /etc/soulacy/config.yaml
+sudo systemctl daemon-reload
+sudo systemctl restart soulacy
+sudo journalctl -u soulacy -n 100 --no-pager
+```
+
+Do not solve this by making a credential-bearing configuration world-readable.
+
 !!! note "Agent packages: v1 deprecation timeline"
     If you install agent packages via `sy pull` / **Agents → Import**, note
     that the legacy v1 package schema is deprecated and refused after the

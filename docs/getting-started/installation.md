@@ -22,7 +22,7 @@ What it does:
 6. Offers to start the gateway and open the GUI at `http://localhost:18789`.
 
 !!! tip "Pin a version"
-    `SOULACY_VERSION=v0.1.8 curl -fsSL https://soulacy.io/install.sh | bash`
+    `SOULACY_VERSION=v0.1.10 curl -fsSL https://soulacy.io/install.sh | bash`
 
 ## Requirements
 
@@ -72,8 +72,8 @@ Tagged releases publish `soulacy_<version>_<os>_<arch>.tar.gz` bundles
 [GitHub Releases](https://github.com/vmodekurti/soulacy/releases):
 
 ```bash
-grep 'soulacy_v0.1.8_darwin_arm64.tar.gz' checksums.sha256 | shasum -a 256 -c -
-tar -xzf soulacy_v0.1.8_darwin_arm64.tar.gz
+grep 'soulacy_v0.1.10_darwin_arm64.tar.gz' checksums.sha256 | shasum -a 256 -c -
+tar -xzf soulacy_v0.1.10_darwin_arm64.tar.gz
 sudo install -m755 soulacy sy /usr/local/bin/
 ```
 

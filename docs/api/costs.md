@@ -1,121 +1,113 @@
 # Costs API
 
-Soulacy records LLM token usage for every agent invocation. Estimated `cost_usd` is populated when `costs.pricing` is configured for the provider/model; unknown prices remain `0` rather than guessed. Use this API to monitor spend by agent, user, or time period.
+The costs API exposes prompt-free accounting, admission readiness, estimates,
+chargeback, and provider reconciliation. All routes use the `/api/v1` base and
+require a principal with metrics permission.
 
-## Cost summary
+## Agent summaries
 
-```
-GET /v1/costs
+```http
+GET /api/v1/costs?since=30d&agent_id=researcher
 Authorization: Bearer <token>
 ```
 
-### Query parameters
+`since` accepts a duration such as `24h`, a supported period such as `30d`, or
+an accepted date. `agent_id` is optional. The response contains `by_agent`, the
+resolved period, and `generated_at`.
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `period` | `30d` | Time period: `1d`, `7d`, `30d`, `90d`, or `all` |
-| `agent_id` | — | Filter by agent ID |
-| `user_id` | — | Filter by user ID |
+For one object-authorized agent:
 
-### Response
-
-```json
-{
-  "period": "30d",
-  "total_cost_usd": 4.27,
-  "total_tokens": {
-    "input": 1240000,
-    "output": 320000
-  },
-  "by_provider": {
-    "openai": {
-      "cost_usd": 3.92,
-      "input_tokens": 1100000,
-      "output_tokens": 300000
-    },
-    "anthropic": {
-      "cost_usd": 0.35,
-      "input_tokens": 140000,
-      "output_tokens": 20000
-    }
-  }
-}
-```
-
----
-
-## Per-agent breakdown
-
-```
-GET /v1/costs/breakdown
+```http
+GET /api/v1/costs/researcher?since=7d
 Authorization: Bearer <token>
 ```
 
-### Query parameters
+## Cost readiness
 
-Same as summary (`period`, `agent_id`, `user_id`).
-
-### Response
-
-```json
-{
-  "period": "30d",
-  "agents": [
-    {
-      "agent_id": "researcher",
-      "model": "gpt-4o",
-      "invocations": 142,
-      "cost_usd": 3.15,
-      "input_tokens": 890000,
-      "output_tokens": 210000
-    },
-    {
-      "agent_id": "assistant",
-      "model": "gpt-4o-mini",
-      "invocations": 1203,
-      "cost_usd": 1.12,
-      "input_tokens": 350000,
-      "output_tokens": 110000
-    }
-  ]
-}
-```
-
----
-
-## Per-invocation log
-
-```
-GET /v1/costs/log
+```http
+GET /api/v1/costs/status
 Authorization: Bearer <token>
 ```
 
-### Query parameters
+The readiness response reports:
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `limit` | `50` | Records per page |
-| `offset` | `0` | Pagination offset |
-| `agent_id` | — | Filter by agent |
-| `since` | — | ISO 8601 timestamp |
+- pricing-rule coverage and unknown-priced calls;
+- daily/monthly budgets and the active enforcement mode;
+- recorded spend and in-flight reserved spend;
+- accounting attribution and rejected calls;
+- retry attempts and forecast monthly spend;
+- provider reconciliation variance;
+- actionable checks and next actions.
 
-### Response
+Treat less than 100% accounting attribution or unknown-priced calls under a
+strict policy as an operational defect.
 
-```json
+## Prompt-free estimate
+
+```http
+POST /api/v1/costs/estimate
+Authorization: Bearer <token>
+Content-Type: application/json
+
 {
-  "total": 1345,
-  "records": [
-    {
-      "id": "cost_xyz",
-      "agent_id": "researcher",
-      "session_id": "sess_abc",
-      "model": "gpt-4o",
-      "provider": "openai",
-      "input_tokens": 2100,
-      "output_tokens": 480,
-      "cost_usd": 0.0231,
-      "created_at": "2026-05-28T11:22:00Z"
-    }
-  ]
+  "provider": "openai",
+  "model": "gpt-4.1-mini",
+  "input_tokens": 12000,
+  "max_output_tokens": 2000
 }
 ```
+
+The response includes normalized provider/model, estimated tokens, USD and
+integer micro-dollars, pricing status/version, and whether the configured
+confirmation threshold applies. No prompt text is accepted or stored.
+
+## Per-call usage
+
+```http
+GET /api/v1/costs/usage?since=24h&limit=200
+Authorization: Bearer <token>
+```
+
+`limit` must be between 1 and 1000. Records are bounded and prompt-free. They
+can include subject, workspace, agent, run, inference-call ID, source, trigger,
+provider/model, provider request IDs, retry attempts, token dimensions,
+pricing status, outcome, and integer micro-dollar cost.
+
+## Chargeback
+
+```http
+GET /api/v1/costs/chargeback?since=30d&group_by=user,feature,provider,model
+Authorization: Bearer <token>
+```
+
+`group_by` is a comma-separated set of supported dimensions. The response
+returns grouped usage and cost without prompts or tool payloads.
+
+## Provider reconciliation
+
+List recent comparisons:
+
+```http
+GET /api/v1/costs/reconciliations?limit=100
+Authorization: Bearer <token>
+```
+
+Record a provider total for a completed period:
+
+```http
+POST /api/v1/costs/reconcile
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "provider": "openai",
+  "period_start": "2026-08-01T00:00:00Z",
+  "period_end": "2026-08-02T00:00:00Z",
+  "actual_usd": 12.34,
+  "source": "provider-export"
+}
+```
+
+The write route requires metrics-write permission. Periods accept RFC 3339 or
+`YYYY-MM-DD`, and the end must be after the start. Automated reconciliation can
+be configured instead; see [LLM usage and cost controls](../LLM_COST_CONTROLS.md).

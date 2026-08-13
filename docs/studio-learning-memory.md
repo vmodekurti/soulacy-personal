@@ -43,6 +43,11 @@ feedback becomes a pending procedural-learning proposal for review and never
 changes an agent's rulebook automatically. Operators can inspect recent signals
 with `GET /api/v1/learning/feedback`.
 
+The feedback store retains at most 10,000 recent entries. A rating is accepted
+only for an exact terminal `run.completed` event matching the submitted agent,
+session, and run when ActionLog validation is available. This prevents a client
+from manufacturing positive evidence for a run that never completed.
+
 ## Safety and control
 
 Learned text is credential-redacted, length-bounded, rejected when it contains
@@ -76,3 +81,7 @@ overridden with `SOULACY_STUDIO_MACROS`, `SOULACY_STUDIO_STRATEGY_FIT`,
 Changing the configured embedding provider or model automatically rebuilds the
 lesson vector index from its retained lesson text. Embedding calls use the
 configured LLM timeout hierarchy.
+
+Agent semantic memory and Studio lesson retrieval share Soulacy's native
+sqlite-vec infrastructure but remain separate datasets: agent memory is
+agent-scoped runtime context, while lessons are user-scoped authoring guidance.

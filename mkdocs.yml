@@ -1,5 +1,5 @@
 site_name: Soulacy
-site_description: Open-source multi-agent orchestration platform — deploy AI agents to Telegram, Slack, Discord, WhatsApp, and HTTP in minutes.
+site_description: Secure, self-hosted AI agent runtime with Studio, native MCP, persistent semantic memory, governed LLM spend, and multi-channel delivery.
 site_url: https://docs.soulacy.io
 repo_url: https://github.com/vmodekurti/soulacy
 repo_name: vmodekurti/soulacy
@@ -129,6 +129,7 @@ extra:
 
 nav:
   - Home: index.md
+  - Recent Updates: recent-updates.md
   - Getting Started:
     - Installation: getting-started/installation.md
     - Quick Start: getting-started/quickstart.md

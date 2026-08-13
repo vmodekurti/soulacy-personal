@@ -57,15 +57,28 @@ Content-Type: application/json
 
 Use the server-issued IDs to rate the response:
 
+## Response feedback
+
 ```http
 POST /api/v1/chat/feedback
+Authorization: Bearer <token>
 Content-Type: application/json
 
 {"agent_id":"assistant","session_id":"http-...","run_id":"0c5f...","response_id":"7e91...","rating":1}
 ```
 
 `rating` is `1` for helpful or `-1` for unhelpful. An optional `comment`
-creates a pending procedural-learning proposal for operator review.
+creates a pending procedural-learning proposal for operator review. Feedback
+is upserted per authenticated user and response; changing a rating does not
+create a second vote. The server validates the completed agent/session/run
+tuple against ActionLog when it is enabled.
+
+Operators with memory-read permission can review recent signals:
+
+```http
+GET /api/v1/learning/feedback?agent_id=assistant&limit=100
+Authorization: Bearer <token>
+```
 
 ### Streaming
 

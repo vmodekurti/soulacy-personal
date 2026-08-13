@@ -1,37 +1,33 @@
 # Admin API
 
-Admin endpoints require `admin` role (server API key or JWT with `admin` role).
+Administrative endpoints require the corresponding config-level RBAC action.
+Use an admin API key or JWT unless your policy grants a narrower role.
 
-## Health check
+## Health and readiness
 
-No authentication required.
-
-```
+```http
 GET /api/v1/health
+Authorization: Bearer <token>
 ```
 
-### Response
+The health response reports status, version, timestamp, dependency health, and
+the request ID. Use the deeper readiness views before exposing a deployment:
 
-```json
-{
-  "status": "ok",
-  "version": "0.1.0",
-  "uptime_seconds": 3600
-}
+```http
+GET /api/v1/readiness
+GET /api/v1/security/readiness
+Authorization: Bearer <token>
 ```
 
----
+## Restart the gateway
 
-## Restart gateway
-
-Requests an in-place gateway restart. Requires config write permission.
-
-```
+```http
 POST /api/v1/admin/restart
-Authorization: Bearer sy_your-server-key
+Authorization: Bearer <admin-token>
 ```
 
-### Response
+The gateway starts a replacement process with the same executable and
+arguments, returns `202 Accepted`, then exits:
 
 ```json
 {
@@ -40,123 +36,68 @@ Authorization: Bearer sy_your-server-key
 }
 ```
 
-The gateway starts a replacement process with the same executable and arguments, then exits. This is what the GUI **Restart Gateway** button uses after provider, channel, MCP, or config changes.
+For systemd deployments, verify that the service has an explicit config path
+and workspace before relying on an in-place restart. See
+[Upgrades](../deployment/upgrades.md).
 
----
+## Administrative audit log
 
-## Dead-letter queue (DLQ)
-
-Failed agent invocations are pushed to the DLQ for inspection and retry.
-
-### List DLQ items
-
-```
-GET /v1/admin/dlq
-Authorization: Bearer sy_your-server-key
+```http
+GET /api/v1/admin/audit?limit=100
+Authorization: Bearer <admin-token>
 ```
 
-### Query parameters
+`limit` defaults to 100 and is capped at 1,000. The response contains
+newest-first administrative events from the durable action log. If durable
+action logging is unavailable, the endpoint returns `503 Service Unavailable`.
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `queue` | — | Filter by agent ID |
-| `limit` | `50` | Items per page |
-| `offset` | `0` | Pagination offset |
+## Dead-letter queue
 
-### Response
+Failed executor jobs are retained for diagnosis when a DLQ store is configured.
 
-```json
-{
-  "total": 3,
-  "items": [
-    {
-      "id": "dlq_abc123",
-      "queue": "researcher",
-      "payload": { "session_id": "sess_xyz", "message": "..." },
-      "error_msg": "context deadline exceeded",
-      "attempts": 2,
-      "created_at": "2026-05-28T09:15:00Z",
-      "last_attempt_at": "2026-05-28T09:17:00Z"
-    }
-  ]
-}
+### List entries
+
+```http
+GET /api/v1/admin/dlq?queue={agent-or-queue-id}
+Authorization: Bearer <admin-token>
 ```
 
-### Retry a DLQ item
+The optional `queue` parameter filters results. The response contains `items`
+and `count`; each item includes its ID, queue, original payload bytes, error,
+attempt count, and timestamps.
 
-Re-dispatches the failed message through the engine.
+### Inspect one entry
 
-```
-POST /v1/admin/dlq/{id}/retry
-Authorization: Bearer sy_your-server-key
-```
-
-### Response
-
-```json
-{
-  "id": "dlq_abc123",
-  "status": "retried",
-  "reply": "Here is the research you requested..."
-}
+```http
+GET /api/v1/admin/dlq/{id}
+Authorization: Bearer <admin-token>
 ```
 
-### Delete a DLQ item
+### Delete one entry
 
-```
-DELETE /v1/admin/dlq/{id}
-Authorization: Bearer sy_your-server-key
-```
-
-```
-204 No Content
-```
-
----
-
-## Agent marketplace
-
-### List marketplace agents
-
-```
-GET /v1/admin/marketplace
-Authorization: Bearer sy_your-server-key
-```
-
-### Response
-
-```json
-{
-  "agents": [
-    {
-      "id": "community/web-researcher",
-      "name": "Web Researcher",
-      "description": "Deep research agent with web search",
-      "author": "Soulacy Community",
-      "tags": ["research", "web"],
-      "installs": 142
-    }
-  ]
-}
-```
-
-### Install a marketplace agent
-
-```
-POST /v1/admin/marketplace/install
-Authorization: Bearer sy_your-server-key
-Content-Type: application/json
+```http
+DELETE /api/v1/admin/dlq/{id}
+Authorization: Bearer <admin-token>
 ```
 
 ```json
 {
-  "agent_id": "community/web-researcher"
+  "status": "deleted",
+  "id": "<id>"
 }
 ```
 
-```json
-{
-  "status": "installed",
-  "path": "./agents/web-researcher/SOUL.yaml"
-}
-```
+Deletion is permanent. The gateway does not expose an automatic DLQ retry
+endpoint; diagnose the failure and replay the originating request explicitly.
+
+## Managed API keys
+
+Managed-key creation, listing, validation, and revocation are documented in
+the [Auth API](auth.md).
+
+## Registries and plugins
+
+Marketplace-style discovery is exposed through `/api/v1/registries/*` and
+plugin lifecycle operations through `/api/v1/plugins/*`; they are not admin
+marketplace endpoints. Use the [Registries API](registries.md) and
+[Plugins guide](../extend/plugins.md) for those surfaces.
