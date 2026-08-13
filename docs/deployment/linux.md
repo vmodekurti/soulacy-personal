@@ -1,6 +1,6 @@
 # Linux / VPS Deployment
 
-This guide installs Soulacy v0.1.10 as a system-wide systemd service behind
+This guide installs Soulacy v0.1.11 as a system-wide systemd service behind
 Caddy. It keeps configuration read-only under `/etc/soulacy` and runtime state
 under `/var/lib/soulacy`.
 
@@ -22,10 +22,10 @@ Examples below assume Linux AMD64. Replace `amd64` with `arm64` on an ARM VPS.
 
 ```bash
 cd /tmp
-curl -fLO https://github.com/vmodekurti/soulacy/releases/download/v0.1.10/soulacy_v0.1.10_linux_amd64.tar.gz
-curl -fLO https://github.com/vmodekurti/soulacy/releases/download/v0.1.10/checksums.sha256
-grep 'soulacy_v0.1.10_linux_amd64.tar.gz' checksums.sha256 | sha256sum -c -
-tar -xzf soulacy_v0.1.10_linux_amd64.tar.gz
+curl -fLO https://github.com/vmodekurti/soulacy/releases/download/v0.1.11/soulacy_v0.1.11_linux_amd64.tar.gz
+curl -fLO https://github.com/vmodekurti/soulacy/releases/download/v0.1.11/checksums.sha256
+grep 'soulacy_v0.1.11_linux_amd64.tar.gz' checksums.sha256 | sha256sum -c -
+tar -xzf soulacy_v0.1.11_linux_amd64.tar.gz
 sudo install -m 0755 soulacy sy /usr/local/bin/
 ```
 
