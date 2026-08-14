@@ -6,7 +6,7 @@ Thanks for your interest in improving Soulacy! This guide covers the basics.
 
 Requirements:
 
-- **Go 1.26.5+** (CGO enabled — SQLite is compiled in)
+- **Go 1.26.6+** (CGO enabled — SQLite is compiled in)
 - **Node 18+** (for the GUI under `gui/`)
 - **Python 3.10+** (for the executor and the experimental Python SDK)
 

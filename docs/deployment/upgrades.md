@@ -74,7 +74,7 @@ Do not mix a source checkout upgrade with `sy update install` unless you intend
 to replace the source-built binaries with release binaries. Stores upgrade
 their own schemas at boot; there is no separate migration command.
 
-Source builds now require **Go 1.26.5 or newer**. Binary release installs do
+Source builds now require **Go 1.26.6 or newer**. Binary release installs do
 not require a local Go toolchain.
 
 ## Verify a systemd service uses the intended config
