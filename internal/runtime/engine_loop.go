@@ -455,6 +455,9 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 	// Build tool schemas for this agent (Python tools + opt-in Go built-ins).
 	// Pass the inbound channel so system tools are gated to HTTP-only.
 	tools := e.allToolSchemasForContext(ctx, def, msg.Channel)
+	packageInstallReq, forcePackageInstall := parseURLPackageInstallRequest(flattenParts(msg.Parts))
+	forcePackageInstall = forcePackageInstall && def.ID == SystemAgentID &&
+		toolSchemaExists(tools, "package_install")
 
 	// Auto-delegate: when SOUL.yaml sets `llm.tool_choice: agent__<id>` and
 	// `<id>` is one of the declared peers, do the peer call HERE before the
@@ -658,6 +661,14 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 		if turn == 0 && !autoDelegated && def.LLM.ToolChoice != "" && len(tools) > 0 {
 			req.ToolChoice = def.LLM.ToolChoice
 		}
+		// The built-in System agent has a deterministic, typed URL installer.
+		// Constrain explicit install-from-URL requests to that tool so weaker
+		// OpenAI-compatible models cannot merely narrate "I should call
+		// shell_exec" and finish with zero tool calls. The tool still travels
+		// through the normal confirmation, intent, sandbox and audit pipeline.
+		if turn == 0 && !autoDelegated && forcePackageInstall {
+			req.ToolChoice = "package_install"
+		}
 
 		e.sink.Emit(message.Event{
 			Type: "llm.call", AgentID: msg.AgentID, SessionID: msg.SessionID,
@@ -741,6 +752,23 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 				sb.WriteString(token)
 			}
 			resp.Content = sb.String()
+		}
+		// Do not let provider quirks change the operator's install target or
+		// package type. Some OpenAI-compatible models ignore tool_choice, call
+		// fetch_url first, or send kind=auto even after the user explicitly says
+		// "MCP server". Replace the first-turn decision with the request parsed
+		// from the operator's own text. The ordinary dispatch path below still
+		// performs RBAC, intent checks, confirmation, safety inspection and audit.
+		if turn == 0 && !autoDelegated && forcePackageInstall {
+			resp.Content = ""
+			resp.ToolCalls = []message.ToolCall{{
+				ID:   "package-install-" + uuidShort(),
+				Name: "package_install",
+				Arguments: map[string]any{
+					"source_url": packageInstallReq.SourceURL,
+					"kind":       packageInstallReq.Kind,
+				},
+			}}
 		}
 		// Usage for streams is final only after the provider channel closes.
 		// Recording and run-budget accumulation therefore happen after draining.

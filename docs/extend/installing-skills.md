@@ -4,6 +4,22 @@ Install Agent Skills from a local directory, a registry slug, or a git source â€
 
 ## Quick start
 
+For a repository URL, you can use the unified installer and let Soulacy detect
+the package type:
+
+```bash
+sy package install https://github.com/user/my-skill --allow-unverified
+```
+
+The System agent uses the same path when asked to install a Skill from a URL.
+It presents Approve/Deny, runs the existing safety pipeline, hot-loads the
+Skill, and skips it when it is already installed.
+
+This does not require unrestricted system tools. Soulacy keeps `shell_exec`,
+script execution, and arbitrary file mutation disabled when
+`runtime.allow_system_agents` is empty while still exposing this narrowly
+scoped, approval-gated installer to the built-in System agent.
+
 ```bash
 # Local directory (copied into ~/.soulacy/skills/)
 sy skill install ./my-skill

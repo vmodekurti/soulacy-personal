@@ -384,6 +384,7 @@ var privilegedFlowTools = map[string]bool{
 	"shell_exec":      true,
 	"run_script":      true,
 	"install_library": true,
+	"package_install": true,
 	"write_file":      true,
 	"delete_file":     true,
 }

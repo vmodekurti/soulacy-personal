@@ -66,6 +66,7 @@ var toolCategories = map[string]Category{
 	"shell_exec":      CategoryShell,
 	"run_script":      CategoryShell,
 	"install_library": CategoryShell,
+	"package_install": CategoryShell,
 	"python_eval":     CategoryShell,
 	// filesystem writes / reads
 	"write_file":    CategoryFile,

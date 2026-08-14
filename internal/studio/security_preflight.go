@@ -129,6 +129,7 @@ var systemRequiringTools = map[string]bool{
 	"shell_exec":      true,
 	"run_script":      true,
 	"install_library": true,
+	"package_install": true,
 	"write_file":      true,
 	"download_file":   true,
 	"python_eval":     true,

@@ -20,6 +20,17 @@ var toolSecurityClasses = map[string]toolSecurityClass{
 	"run_script":      {Privileged: true, SideEffecting: true},
 	"python_eval":     {Privileged: true, SideEffecting: true},
 	"install_library": {Privileged: true, SideEffecting: true},
+	"package_install": {Privileged: true, SideEffecting: true},
 	"write_file":      {Privileged: true, SideEffecting: true},
 	"download_file":   {Privileged: true, SideEffecting: true},
+}
+
+// requiresPrivilegedIsolation distinguishes unrestricted host execution from
+// the managed URL installer. package_install remains privileged for RBAC,
+// intent checks, confirmation, audit, and policy classification, but its
+// implementation executes only a fixed argv through the hardened installer.
+// Running it in the ordinary no-network sandbox would make installation
+// impossible and would prevent it from updating the persistent workspace.
+func requiresPrivilegedIsolation(name string) bool {
+	return isPrivilegedSystemTool(name) && name != "package_install"
 }

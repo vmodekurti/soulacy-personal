@@ -146,11 +146,12 @@ func TestLoader_ProtectedSystemCannotBeModifiedOrDeleted(t *testing.T) {
 	// Upsert should succeed and allow modifying LLM settings / Prompt,
 	// but safety features (Channels = [http], Enabled = true, SystemTools = true) are enforced.
 	if err := l.Upsert(dir, &agent.Definition{
-		ID:          SystemAgentID,
-		Name:        "Modified System",
-		Channels:    []string{"telegram"}, // should be overridden to [http]
-		Enabled:     false,                // should be overridden to true
-		SystemTools: false,                // should be overridden to true
+		ID:           SystemAgentID,
+		Name:         "Modified System",
+		Channels:     []string{"telegram"}, // should be overridden to [http]
+		Enabled:      false,                // should be overridden to true
+		SystemTools:  false,                // should be overridden to true
+		ConfirmTools: []string{"shell_exec"},
 	}); err != nil {
 		t.Fatalf("Upsert system agent should succeed, got error: %v", err)
 	}
@@ -174,6 +175,9 @@ func TestLoader_ProtectedSystemCannotBeModifiedOrDeleted(t *testing.T) {
 	}
 	if len(sys.Channels) != 1 || sys.Channels[0] != "http" {
 		t.Fatalf("system channels = %v, want [http] enforced", sys.Channels)
+	}
+	if !containsExactString(sys.ConfirmTools, "package_install") {
+		t.Fatalf("system confirm_tools = %v, want package_install enforced", sys.ConfirmTools)
 	}
 }
 

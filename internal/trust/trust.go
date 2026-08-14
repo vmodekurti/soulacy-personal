@@ -320,7 +320,7 @@ func SourceCategory(toolName string) string {
 		return "history"
 	case "semantic_memory_search":
 		return "memory"
-	case "shell_exec", "run_script", "install_library", "python_eval":
+	case "shell_exec", "run_script", "install_library", "package_install", "python_eval":
 		return "system"
 	}
 	return "other"

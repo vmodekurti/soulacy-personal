@@ -1030,6 +1030,18 @@ func (e *Engine) Builtins() []BuiltinTool {
 	// Builder can display them — they are available to every http-channel
 	// agent regardless of capability (SEC-3).
 	out = append(out, e.safeSystemTools()...)
+	// The constrained URL package installer is always advertised for the
+	// built-in System agent. Unlike arbitrary system tools, it remains usable
+	// when allow_system_agents is empty because it has a fixed command shape
+	// and obtains explicit approval for every installation.
+	if len(e.allowSystemAgents) == 0 {
+		for _, b := range e.buildSystemTools() {
+			if b.Name == "package_install" {
+				out = append(out, b)
+				break
+			}
+		}
+	}
 	// The privileged SYSTEM partition (shell_exec, run_script, …) is only
 	// advertised when the server permits system tools at all. Whether a GIVEN
 	// agent may actually call them additionally requires the "system"

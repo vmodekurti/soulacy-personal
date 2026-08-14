@@ -345,6 +345,9 @@ func (e *Engine) deterministicGuardrail(ctx context.Context, def *agent.Definiti
 		// Installing global/environment packages always requires confirmation
 		return GuardrailActionConfirm, "Installing environment libraries requires confirmation.", nil
 
+	case "package_install":
+		return GuardrailActionConfirm, fmt.Sprintf("Installing a Skill or MCP server from %s requires confirmation.", argString(call.Arguments, "source_url")), nil
+
 	case "shell_exec":
 		// Arbitrary shell commands are too risky to blindly allow without a strict whitelist.
 		// Always prompt the user for confirmation.

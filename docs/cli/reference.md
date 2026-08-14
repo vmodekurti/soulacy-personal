@@ -127,6 +127,18 @@ sy channel whatsapp-web status                            # connection state + Q
 
 ## Skills & registries
 
+For a Git URL, the unified installer detects whether the repository contains a
+Skill or MCP server, shows the safety/approval step, installs it persistently,
+and registers MCP servers automatically:
+
+```bash
+sy package install https://github.com/owner/repository --allow-unverified
+```
+
+The built-in **System** agent uses this same installer when you say “Install
+the Skill/MCP server from this URL.” Existing installations are reported and
+left unchanged.
+
 ```bash
 sy skill list
 sy skill get pdf-tools
