@@ -270,7 +270,7 @@ func installMCPRuntime(ctx context.Context, dest, sourceDir string) (string, []s
 		}
 		scripts := sortedKeys(project.Project.Scripts)
 		if len(scripts) == 0 {
-			return "", nil, fmt.Errorf("Python MCP repository has no [project.scripts] entrypoint")
+			return "", nil, fmt.Errorf("python MCP repository has no [project.scripts] entrypoint")
 		}
 		venv := filepath.Join(dest, "venv")
 		if out, err := exec.CommandContext(ctx, "python3", "-m", "venv", venv).CombinedOutput(); err != nil {
@@ -302,7 +302,7 @@ func installMCPRuntime(ctx context.Context, dest, sourceDir string) (string, []s
 		if _, ok := project.Scripts["start"]; ok {
 			return "npm", []string{"--prefix", sourceDir, "start"}, nil
 		}
-		return "", nil, fmt.Errorf("Node MCP repository has neither a bin entry nor a start script")
+		return "", nil, fmt.Errorf("node MCP repository has neither a bin entry nor a start script")
 	}
 
 	// Some small MCP repositories predate packaging manifests and ship a

@@ -302,7 +302,7 @@ func (e *Engine) buildShellTools() []BuiltinTool {
 func (e *Engine) runManagedPackageInstaller(ctx context.Context, sourceURL, kind string) (string, error) {
 	syPath, err := exec.LookPath("sy")
 	if err != nil {
-		return "", fmt.Errorf("Soulacy CLI 'sy' was not found in PATH: %w", err)
+		return "", fmt.Errorf("soulacy CLI 'sy' was not found in PATH: %w", err)
 	}
 	cmd := exec.CommandContext(ctx, syPath,
 		"package", "install", sourceURL,
