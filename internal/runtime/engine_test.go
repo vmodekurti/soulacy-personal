@@ -479,6 +479,30 @@ func TestAllToolSchemasSystemToolsRequireDoubleOptInAndHTTP(t *testing.T) {
 	}
 }
 
+func TestSystemAgentGetsManagedPackageInstallerWithoutArbitrarySystemTools(t *testing.T) {
+	e := &Engine{allowSystemAgents: nil}
+	e.builtins = e.buildBuiltins()
+
+	names := toolSchemaNameSet(e.allToolSchemas(builtinSystemAgent(), "http"))
+	if !names["package_install"] {
+		t.Fatalf("built-in System agent should receive package_install; schemas=%v", sortedSchemaNames(names))
+	}
+	for _, forbidden := range []string{"shell_exec", "run_script", "write_file", "download_file", "install_library"} {
+		if names[forbidden] {
+			t.Fatalf("%s must remain disabled when allow_system_agents is empty", forbidden)
+		}
+	}
+
+	custom := &agent.Definition{ID: "custom-system-agent", SystemTools: true}
+	customNames := toolSchemaNameSet(e.allToolSchemas(custom, "http"))
+	if customNames["package_install"] {
+		t.Fatal("managed installer exception must be limited to the built-in System agent")
+	}
+	if toolSchemaNameSet(e.allToolSchemas(builtinSystemAgent(), "telegram"))["package_install"] {
+		t.Fatal("managed installer must remain unavailable outside the local HTTP channel")
+	}
+}
+
 // TestAllToolSchemasCapabilitiesGrantSystemTools verifies the new
 // `capabilities: [system]` declaration is honoured equivalently to the legacy
 // `system_tools: true` flag (SEC-3).

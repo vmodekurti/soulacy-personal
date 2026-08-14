@@ -346,7 +346,7 @@ func outputContractValidateIssues(draft Draft) ([]ValidateError, []ValidateWarni
 // privilegedSystemTools plus python_eval/shell_exec (the code-execution glue).
 var gatedSystemTools = map[string]bool{
 	"python_eval": true, "shell_exec": true, "shell": true, "run_script": true,
-	"install_library": true, "write_file": true, "download_file": true,
+	"install_library": true, "package_install": true, "write_file": true, "download_file": true,
 }
 
 // systemToolWarnings flags a workflow tool node that calls a gated system tool.

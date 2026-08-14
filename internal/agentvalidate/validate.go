@@ -282,7 +282,7 @@ func riskyExplicitBuiltins(def *agent.Definition) []string {
 		}
 	}
 	if def.HasCapability("system") {
-		for _, name := range []string{"shell_exec", "run_script", "install_library", "write_file", "download_file"} {
+		for _, name := range []string{"package_install", "shell_exec", "run_script", "install_library", "write_file", "download_file"} {
 			add(name)
 		}
 	}

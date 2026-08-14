@@ -101,6 +101,7 @@ var riskTiers = map[string]RiskTier{
 
 	// privileged — installs software / broad config
 	"install_library": RiskPrivileged,
+	"package_install": RiskPrivileged,
 
 	// shell/system — arbitrary execution
 	"shell_exec":  RiskShellSystem,

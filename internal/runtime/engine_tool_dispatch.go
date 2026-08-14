@@ -192,7 +192,7 @@ print(result if isinstance(result, str) else json.dumps(result))
 		defer cancel()
 		var result string
 		var err error
-		if isPrivilegedSystemTool(b.Name) {
+		if requiresPrivilegedIsolation(b.Name) {
 			result, err = e.executePrivilegedBuiltin(tctx, b.Name, func(runCtx context.Context) (string, error) {
 				return b.Handler(runCtx, call.Arguments)
 			})
@@ -254,7 +254,7 @@ print(result if isinstance(result, str) else json.dumps(result))
 		defer cancel()
 		var result string
 		var err error
-		if isPrivilegedSystemTool(b.Name) {
+		if requiresPrivilegedIsolation(b.Name) {
 			result, err = e.executePrivilegedBuiltin(tctx, b.Name, func(runCtx context.Context) (string, error) {
 				return b.Handler(runCtx, call.Arguments)
 			})

@@ -103,7 +103,7 @@ func builtinSystemAgent() *agent.Definition {
 		// Require user confirmation before running any potentially destructive
 		// or irreversible built-in tool. The SSE stream emits a tool_confirm
 		// event; the GUI shows an approve/deny dialog before proceeding.
-		ConfirmTools: []string{"shell_exec", "run_script", "write_file", "http_request", "download_file", "install_library"},
+		ConfirmTools: []string{"package_install", "shell_exec", "run_script", "write_file", "http_request", "download_file", "install_library"},
 		SystemTools:  true,
 		Memory: agent.MemoryPolicy{
 			ReadScopes:  []string{"session"},
@@ -134,6 +134,7 @@ Hard instructions are solved by decomposition and verification, not by guessing.
 - **download_file(url, dest_path)** — Download any URL (including binaries, archives, images) directly to disk. Parent directories are created automatically.
 
 ### Shell & Scripts
+- **package_install(source_url, kind?, allow_unverified?)** — Install a Soulacy Skill or MCP server from a URL through the hardened package installer. Always use this for URL-based Skill/MCP installs; do not construct shell commands.
 - **shell_exec(command, working_dir?, timeout_seconds?)** — Run any shell command. Returns stdout, stderr, and exit code. Default timeout 60s, max 600s.
 - **run_script(script_path, interpreter?, args?, working_dir?)** — Execute a script file. Interpreter inferred from extension: .py→python3, .sh→bash, .js→node, .rb→ruby.
 - **install_library(package_name, manager?, version?, global?)** — Install packages via pip, npm, brew, or apt.
@@ -150,12 +151,15 @@ Hard instructions are solved by decomposition and verification, not by guessing.
 
 ## How to approach tasks
 
-**"Install and configure X for me"**
+**"Install a Skill or MCP server from this URL"**
+1. Call package_install with the URL and kind="auto". Do not fetch, clone, edit config, or invent CLI commands first.
+2. The platform will ask the operator to approve or deny the exact installation.
+3. Report the installer's verified result and any missing environment variables.
+
+**"Install and configure other software for me"**
 1. fetch_url the project URL or docs link to read setup instructions.
 2. install_library or shell_exec to install.
-3. read_file ~/.soulacy/config.yaml to see the current config.
-4. write_file to add the new configuration block, preserving existing content.
-5. Tell the user exactly what changed and what (if anything) they need to do manually (e.g. browser OAuth, API key entry).
+3. Verify the installation and report remaining configuration.
 
 **"What's running / what's installed?"**
 Use sys_info for environment context, shell_exec for process/package listings (ps aux, brew list, pip list, npm list -g, etc.), find_files to locate config files.
@@ -234,7 +238,9 @@ func (l *Loader) LoadAll() []error {
 				def.SystemTools = true
 				def.Channels = []string{"http"}
 				if len(def.ConfirmTools) == 0 {
-					def.ConfirmTools = []string{"shell_exec", "run_script", "write_file", "http_request", "download_file", "install_library"}
+					def.ConfirmTools = []string{"package_install", "shell_exec", "run_script", "write_file", "http_request", "download_file", "install_library"}
+				} else if !containsExactString(def.ConfirmTools, "package_install") {
+					def.ConfirmTools = append(def.ConfirmTools, "package_install")
 				}
 				def.SourcePath = path
 				l.agents[SystemAgentID] = def
@@ -409,7 +415,9 @@ func (l *Loader) Upsert(dir string, def *agent.Definition) error {
 		def.SystemTools = true
 		def.Channels = []string{"http"}
 		if len(def.ConfirmTools) == 0 {
-			def.ConfirmTools = []string{"shell_exec", "run_script", "write_file", "http_request", "download_file", "install_library"}
+			def.ConfirmTools = []string{"package_install", "shell_exec", "run_script", "write_file", "http_request", "download_file", "install_library"}
+		} else if !containsExactString(def.ConfirmTools, "package_install") {
+			def.ConfirmTools = append(def.ConfirmTools, "package_install")
 		}
 	}
 
@@ -455,6 +463,15 @@ func (l *Loader) Upsert(dir string, def *agent.Definition) error {
 	l.agents[def.ID] = def
 	l.mu.Unlock()
 	return nil
+}
+
+func containsExactString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 // Register adds a definition to the in-memory registry WITHOUT touching disk, so

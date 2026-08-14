@@ -120,6 +120,7 @@ Quick start:
 		buildScheduleCmd(),
 		buildMemoryCmd(),
 		buildSkillCmd(),
+		buildPackageCmd(), // sy package install — install a Skill or MCP server from one URL
 		buildLogsCmd(),
 		buildServerCmd(),
 		buildDoctorCmd(),

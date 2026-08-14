@@ -9,7 +9,7 @@ import (
 )
 
 func TestIsSideEffectingTool(t *testing.T) {
-	sideEffecting := []string{"shell_exec", "run_script", "install_library", "write_file", "download_file", "http_request", "mcp__playwright__navigate", "plugin__x__do"}
+	sideEffecting := []string{"shell_exec", "run_script", "install_library", "package_install", "write_file", "download_file", "http_request", "mcp__playwright__navigate", "plugin__x__do"}
 	for _, n := range sideEffecting {
 		if !isSideEffectingTool(n) {
 			t.Fatalf("%q should be side-effecting", n)

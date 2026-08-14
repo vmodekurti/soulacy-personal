@@ -764,7 +764,7 @@ func slug(name string) string {
 // code/commands on the host (used to add a scope-of-action line to the prompt).
 var systemBuiltins = map[string]bool{
 	"shell_exec": true, "run_script": true, "write_file": true,
-	"download_file": true, "install_library": true,
+	"download_file": true, "install_library": true, "package_install": true,
 }
 
 func flowNeedsSystemCapability(f Flow) bool {
