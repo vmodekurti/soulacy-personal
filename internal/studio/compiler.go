@@ -233,7 +233,12 @@ type Draft struct {
 	// RawIntent is the user's ORIGINAL prompt before refinement (Intent holds the
 	// refined version). Persisted via Definition.StudioRawIntent so the prompt
 	// editor can show and re-refine the original.
-	RawIntent      string          `json:"raw_intent,omitempty"`
+	RawIntent string `json:"raw_intent,omitempty"`
+	// DeliveryMode records the operator's Studio delivery choice independently
+	// of fixed channel bindings. "reply" means return through the invocation
+	// route; "none" means return only to the direct caller; "outbound" uses the
+	// configured Output/Channels. It is Studio metadata, not a runtime route.
+	DeliveryMode   string          `json:"delivery_mode,omitempty"`
 	Trigger        Trigger         `json:"trigger"`
 	Channels       []string        `json:"channels,omitempty"`
 	Output         *ScheduleOutput `json:"output,omitempty"`
@@ -519,11 +524,11 @@ func BuildPrompt(intent string, catalog Catalog, answers map[string]string) stri
 	sb.WriteString(canonicalExample)
 	sb.WriteString("\n\n")
 	sb.WriteString("Schema notes:\n")
-	sb.WriteString("- trigger.type is one of: schedule, channel, webhook, manual.\n")
+	sb.WriteString("- trigger.type is one of: chat, schedule, channel, webhook, manual.\n")
 	sb.WriteString("- For schedule triggers, put a cron expression in trigger.config.cron.\n")
 	sb.WriteString("- channels is a list of output channel names (e.g. \"telegram\", \"slack\", \"email\").\n")
 	sb.WriteString("- THE OUTPUT NODE IS THE ANSWER, NOT A DELIVERY RECEIPT: the flow's output node (its result is the reply the user reads AND what is delivered) MUST be the node that produces the human-readable CONTENT — the agent/llm/python node that formats the final message, summary, chart URL, or answer. NEVER make a `channel.send` (or any pure delivery/notify) node the terminal/output node: `channel.send` returns a delivery receipt like {\"ok\":true,\"channel\":...}, which is a useless reply. Set the content node as the last node (or reference it via the flow-level output field). Deliver to channels via the `channels` list, not by ending the graph on channel.send.\n")
-	sb.WriteString("- channel.send IS FOR OUT-OF-BAND DELIVERY ONLY (e.g. pushing a scheduled result to Telegram/Slack). For channel/manual/webhook (interactive) triggers the reply is returned to the caller automatically — do NOT route the answer through channel.send. If a run must BOTH answer interactively AND push to a channel, produce the content in a node, make THAT node the output, and add channel.send as a SEPARATE branch — never as the output node.\n")
+	sb.WriteString("- channel.send IS FOR OUT-OF-BAND DELIVERY ONLY (e.g. pushing a scheduled result to Telegram/Slack). For chat/channel/manual/webhook (interactive) triggers the reply is returned to the caller automatically — do NOT route the answer through channel.send. If a run must BOTH answer interactively AND push to a channel, produce the content in a node, make THAT node the output, and add channel.send as a SEPARATE branch — never as the output node.\n")
 	// Parallel is taught here as well as allowed by the schema. The enum alone
 	// only stops the model being REJECTED for emitting one; it does not tell the
 	// model the kind exists, and a model that has never seen it will keep writing

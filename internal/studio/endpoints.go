@@ -105,6 +105,8 @@ func DeriveEndpoints(d *Draft) {
 			if ch := paramStr(cfg, "channel"); ch != "" {
 				addChannel(d, ch)
 			}
+		case "chat":
+			d.Trigger.Type = "chat"
 		case "manual":
 			d.Trigger.Type = "manual"
 		}

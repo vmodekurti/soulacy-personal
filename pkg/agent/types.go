@@ -696,6 +696,17 @@ type Definition struct {
 	// let the user edit the original and re-refine. Studio-only metadata.
 	StudioRawIntent string `yaml:"studio_raw_intent,omitempty" json:"studio_raw_intent,omitempty"`
 
+	// StudioDeliveryMode preserves Studio's explicit delivery semantics across
+	// edit/save cycles. In particular, "reply" is contextual delivery through
+	// the invocation route and therefore needs no fixed output channel.
+	// Studio-only metadata; the runtime does not use it for routing.
+	StudioDeliveryMode string `yaml:"studio_delivery_mode,omitempty" json:"studio_delivery_mode,omitempty"`
+
+	// StudioTriggerMode preserves author-facing trigger choices that share a
+	// runtime TriggerKind. "chat" and "manual" both execute as internal runs,
+	// but Studio presents different, explicit UX for them.
+	StudioTriggerMode string `yaml:"studio_trigger_mode,omitempty" json:"studio_trigger_mode,omitempty"`
+
 	// RunTimeout caps the total wall-clock duration of one full agent run
 	// (across all LLM turns and tool calls). Go duration syntax: "5m", "30m",
 	// "1h". Empty = use the gateway default (15m). Bump this for agents that

@@ -16,10 +16,12 @@
   export let loading = false
   export let error = ''
   export let busy = false
+  export let destinations = []       // configured outbound channels [{id,name}]
 
   export let onRecheck = () => {}
   export let onAction = () => {}   // (item) => void — deep-link to the fix
   export let onReveal = () => {}   // (nodeId) => void
+  export let onDestination = () => {} // (channelId, item) => void
 
   $: sections = (report && report.sections) || []
   $: blockers = (report && report.blockers) || []
@@ -53,6 +55,22 @@
   function fire(item) {
     if (item && item.action === 'reveal_node' && item.nodeId) onReveal(item.nodeId)
     else onAction(item)
+  }
+  // `open_delivery` is also used for an already-selected channel whose token
+  // needs configuration. Only turn the missing-output case into a picker; the
+  // former still belongs on the Delivery settings page.
+  function needsDestination(item) {
+    if (!item || item.action !== 'open_delivery') return false
+    const params = item.actionParams || item.action_params || {}
+    if (params.channel) return false
+    const text = `${item.message || ''} ${item.fix || ''}`
+    return /no\s+(routable\s+)?(outbound\s+)?(output\s+)?(channel|destination)|pick\s+(another\s+)?(one|destination)|choose\s+(a\s+)?destination/i.test(text)
+  }
+  function chooseDestination(item, event) {
+    const id = event.currentTarget.value
+    if (!id) return
+    onDestination(id, item)
+    event.currentTarget.value = ''
   }
 </script>
 
@@ -109,7 +127,17 @@
             <div class="rp-item block">
               <span class="rp-msg">{item.message || item.kind}</span>
               {#if item.fix}<span class="rp-fix">{item.fix}</span>{/if}
-              {#if actionable(item)}
+              {#if needsDestination(item) && destinations.length}
+                <label class="rp-destination">
+                  <span>Deliver results to</span>
+                  <select disabled={busy} on:change={(event) => chooseDestination(item, event)}>
+                    <option value="">Choose a configured destination…</option>
+                    {#each destinations as destination (destination.id)}
+                      <option value={destination.id}>{destination.name || destination.id}</option>
+                    {/each}
+                  </select>
+                </label>
+              {:else if actionable(item)}
                 <button class="btn btn-sm" type="button" disabled={busy} on:click={() => fire(item)}>{actionLabel(item)}</button>
               {:else}
                 <!-- No machine action, so say plainly that this one is on the
@@ -205,6 +233,25 @@
   .rp-msg { flex: 1; min-width: 160px; }
   .rp-fix { font-size: .78rem; color: var(--text-dim, #6b7294); width: 100%; }
   .rp-manual { font-size: .76rem; font-style: italic; color: var(--text-dim, #6b7294); }
+  .rp-destination {
+    width: min(360px, 100%);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+    color: var(--text-dim, #6b7294);
+    font-size: .76rem;
+  }
+  .rp-destination span { flex: 0 0 auto; }
+  .rp-destination select {
+    min-width: 190px;
+    flex: 1 1 auto;
+    padding: 6px 9px;
+    color: var(--text, inherit);
+    border: 1px solid color-mix(in srgb, var(--accent, #6d5efc) 45%, var(--border));
+    border-radius: 6px;
+    background: var(--bg-elev, #141b2d);
+  }
 
   .rp-passes { font-size: .8rem; }
   .rp-passes summary { cursor: pointer; color: var(--text-dim, #6b7294); }

@@ -23,11 +23,13 @@ import (
 	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -133,6 +135,7 @@ Quick start:
 		buildLaunchCmd(),       // sy launch — production readiness checks
 		buildUpdateCmd(),       // sy update — release update checks
 		buildUpgradeCmd(),      // sy upgrade — self-upgrade binaries
+		buildVoiceCmd(),        // sy voice — provider-neutral speech sidecars
 		buildVersionCmd(),
 	)
 	return root
@@ -1310,17 +1313,24 @@ func streamEvents() error {
 
 func buildServerCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "server", Short: "Control the Soulacy gateway server"}
-	cmd.AddCommand(&cobra.Command{
+	var binary string
+	start := &cobra.Command{
 		Use:   "start",
 		Short: "Start the gateway server in the foreground",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("Starting Soulacy gateway...")
-			fmt.Println("  Tip: run 'soulacy' directly for production use.")
-			fmt.Println("  This command is a convenience wrapper.")
-			// In a full implementation this would exec the soulacy binary
-			return nil
+			gatewayBinary, err := resolveGatewayBinary(binary)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Starting Soulacy gateway with %s...\n", gatewayBinary)
+			gateway := exec.Command(gatewayBinary, "serve")
+			gateway.Stdin, gateway.Stdout, gateway.Stderr = os.Stdin, os.Stdout, os.Stderr
+			gateway.Env = os.Environ()
+			return gateway.Run()
 		},
-	})
+	}
+	start.Flags().StringVar(&binary, "binary", "", "Path to the soulacy gateway binary")
+	cmd.AddCommand(start)
 	cmd.AddCommand(&cobra.Command{
 		Use:   "status",
 		Short: "Check gateway health",
@@ -1329,6 +1339,28 @@ func buildServerCmd() *cobra.Command {
 		},
 	})
 	return cmd
+}
+
+func resolveGatewayBinary(explicit string) (string, error) {
+	if explicit = strings.TrimSpace(explicit); explicit != "" {
+		if info, err := os.Stat(explicit); err != nil || info.IsDir() {
+			return "", fmt.Errorf("soulacy gateway binary not found: %s", explicit)
+		}
+		return explicit, nil
+	}
+	if configured := strings.TrimSpace(os.Getenv("SOULACY_GATEWAY_BINARY")); configured != "" {
+		return resolveGatewayBinary(configured)
+	}
+	if current, err := os.Executable(); err == nil {
+		sibling := filepath.Join(filepath.Dir(current), "soulacy")
+		if info, statErr := os.Stat(sibling); statErr == nil && !info.IsDir() {
+			return sibling, nil
+		}
+	}
+	if found, err := exec.LookPath("soulacy"); err == nil {
+		return found, nil
+	}
+	return "", errors.New("soulacy gateway binary was not found; install it, set SOULACY_GATEWAY_BINARY, or pass --binary")
 }
 
 // ── Version ───────────────────────────────────────────────────────────────────

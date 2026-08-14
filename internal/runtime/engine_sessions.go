@@ -490,6 +490,37 @@ func (e *Engine) buildSystemPrefix(def *agent.Definition) string {
 	return systemPrompt
 }
 
+// responseModeSystemPrompt returns presentation guidance for a single request.
+// It is deliberately run-scoped metadata: it does not alter the agent's saved
+// definition, the user's visible message, or later text-chat turns.
+func responseModeSystemPrompt(meta map[string]string) string {
+	if !strings.EqualFold(strings.TrimSpace(meta["response.mode"]), "voice") {
+		return ""
+	}
+	return `## Voice Response Mode
+This turn needs two presentations of the same answer: natural speech for the live conversation and a useful written answer for Chat.
+
+Return the final answer in exactly this envelope:
+<spoken_response>
+The short answer written for someone listening.
+</spoken_response>
+<display_response>
+The normal complete Markdown answer for the Chat screen.
+</display_response>
+
+Rules for spoken_response:
+- Sound like a knowledgeable person answering aloud, not a narrator reading a memo.
+- Lead with the bottom line. Use contractions and short, varied sentences where natural.
+- Select only the most useful facts and numbers; never recite a table, exhaustive metric list, citations, URLs, headings, or menu options.
+- Use verbal transitions such as "The main reason is" or "The risk I'd watch is" only when they help the flow.
+- Target 60–120 words and never exceed 140 words. Ask at most one brief follow-up question.
+
+Rules for display_response:
+- Give the complete answer the user should be able to inspect later. Markdown, tables, citations, and detail are allowed when useful.
+
+Do not mention voice mode, a renderer, this envelope, these instructions, or the word limit.`
+}
+
 // externalContentGuide is appended to every agent's system prompt by
 // buildSystemPrefix. It states the framework's rule for treating any
 // tool result wrapped in an <external_content trust="…" source="…">

@@ -164,8 +164,9 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 		}
 	}
 
-	// Realtime voice control plane (Story 11, docs/VOICE_SPIKE.md). Only the
-	// ephemeral-key minting lives host-side; audio is browser↔provider.
+	// Voice is independent of the agent LLM. OpenAI keeps its direct realtime
+	// WebRTC path; sidecar mode proxies STT/TTS to a local speech process and
+	// feeds the transcript through Soulacy's ordinary chat pipeline.
 	if cfg.Voice.Provider == "openai" {
 		voiceKey := os.Getenv("OPENAI_API_KEY")
 		if oc, ok := cfg.LLM.Providers["openai"]; ok && oc.APIKey != "" {
@@ -177,6 +178,18 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 			log.Info("realtime voice ready", zap.String("provider", "openai"), zap.String("model", minter.Model()))
 		} else {
 			log.Warn("realtime voice configured but not ready", zap.String("detail", detail))
+		}
+	} else if cfg.Voice.Provider == "sidecar" {
+		sidecar, err := voice.NewSidecar(cfg.Voice.SidecarURL, cfg.Voice.Voice, cfg.Voice.Timeout, cfg.Voice.AllowRemote)
+		if err != nil {
+			log.Warn("voice sidecar configuration rejected", zap.Error(err))
+		} else {
+			srv.SetVoiceSidecar(sidecar)
+			if ready, detail := sidecar.Ready(); ready {
+				log.Info("voice sidecar ready", zap.String("url", sidecar.URL()))
+			} else {
+				log.Warn("voice sidecar configured but not ready", zap.String("detail", detail))
+			}
 		}
 	} else if cfg.Voice.Provider != "" {
 		log.Warn("unsupported voice provider; voice panel disabled",

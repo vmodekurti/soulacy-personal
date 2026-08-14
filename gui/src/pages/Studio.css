@@ -154,7 +154,17 @@
      splitter, with the Inspector component filling it (overriding its fixed
      280px). */
   .insp-host { flex: 0 0 auto; display: flex; min-width: 0; overflow: hidden; }
-  .insp-host :global(.inspector) { flex: 1 1 auto; width: 100%; }
+  /* Studio.css is imported as a regular stylesheet, so selectors here are
+     already global. Svelte's :global(...) pseudo-syntax is invalid in an
+     imported CSS file and left the child Inspector at its fixed 280px width
+     while this host kept expanding around it. */
+  .insp-host .inspector {
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    box-sizing: border-box;
+  }
   .insp-splitter {
     flex: 0 0 6px;
     cursor: col-resize;
@@ -165,7 +175,7 @@
 
   /* ── Three resizable / maximizable frames: canvas · workbench · inspector ── */
   .insp-host { position: relative; }
-  .insp-host :global(.inspector) { padding-top: 0; }
+  .insp-host .inspector { padding-top: 0; }
 
   /* Bottom workbench: a scrollable, height-resizable frame holding the panels. */
   .workbench {
@@ -227,9 +237,7 @@
   .body.max-canvas .center .explain-panel,
   .body.max-canvas .center .needs-setup,
   .body.max-canvas .center .security-panel { display: none; }
-  /* Palette is a child component, so its root needs :global to match under the
-     scoped .body.max-canvas ancestor. */
-  .body.max-canvas :global(.palette) { display: none; }
+  .body.max-canvas .palette { display: none; }
   .body.max-bench .canvas, .body.max-bench .wb-splitter,
   .body.max-bench .insp-host, .body.max-bench .insp-splitter { display: none; }
   .body.max-bench .workbench { flex: 1 1 auto; max-height: none !important; }
@@ -1889,24 +1897,24 @@
      - .cond  : conditional branch (has an `if`) — accent stroke + readable label
      - .else  : fallback leg out of a branch — dashed, muted
      - .studio-invalid : an edge flagged by validation — red stroke */
-  :global(.svelte-flow__edge.studio-edge .svelte-flow__edge-path) {
+  .svelte-flow__edge.studio-edge .svelte-flow__edge-path {
     stroke: var(--text-muted, #8b93ab);
     stroke-width: 1.5;
   }
-  :global(.svelte-flow__edge.studio-edge.cond .svelte-flow__edge-path) {
+  .svelte-flow__edge.studio-edge.cond .svelte-flow__edge-path {
     stroke: var(--accent, #6c63ff);
     stroke-width: 2;
   }
-  :global(.svelte-flow__edge.studio-edge.else .svelte-flow__edge-path) {
+  .svelte-flow__edge.studio-edge.else .svelte-flow__edge-path {
     stroke: var(--text-muted, #8b93ab);
     stroke-dasharray: 5 4;
     opacity: 0.85;
   }
-  :global(.svelte-flow__edge.studio-edge.studio-invalid .svelte-flow__edge-path) {
+  .svelte-flow__edge.studio-edge.studio-invalid .svelte-flow__edge-path {
     stroke: var(--error, #ff6b81) !important;
     stroke-width: 2.5;
   }
-  :global(.svelte-flow__edge.studio-edge.selected .svelte-flow__edge-path) {
+  .svelte-flow__edge.studio-edge.selected .svelte-flow__edge-path {
     stroke: var(--accent, #6c63ff);
     stroke-width: 2.5;
   }
@@ -1914,7 +1922,7 @@
      into .svelte-flow__edgelabel-renderer, so it is NOT a descendant of the
      edge element — we style it uniformly here; the predicate text vs the
      literal "else" word, plus the stroke style above, carry the distinction). */
-  :global(.svelte-flow__edge-label) {
+  .svelte-flow__edge-label {
     background: var(--bg-elev-2, #1b2235);
     border: 1px solid var(--border, #262e44);
     border-radius: 6px;
@@ -1925,11 +1933,11 @@
   }
 
   /* ── Node validation rings (driven by the node-wrapper class) ─────────── */
-  :global(.svelte-flow__node.studio-invalid) {
+  .svelte-flow__node.studio-invalid {
     border-radius: 12px;
     box-shadow: 0 0 0 2px var(--error, #ff6b81);
   }
-  :global(.svelte-flow__node.studio-warn) {
+  .svelte-flow__node.studio-warn {
     border-radius: 12px;
     box-shadow: 0 0 0 2px var(--warn, #f5a742);
   }
@@ -2022,4 +2030,329 @@
     background: var(--bg-elev-2);
     border: 1px solid var(--border);
     color: var(--text-muted);
+  }
+
+  /* ── Studio home composition ──
+     The creation surface is intentionally calmer than the graph editor: one
+     masthead action, a visible four-step journey, two focused prompt cards,
+     and recent work in its own rail. Advanced authoring tools remain one click
+     away in the More menu. */
+  #studio-app {
+    background:
+      radial-gradient(circle at 48% -20%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 44%),
+      var(--bg, #0b1020);
+  }
+
+  .topbar {
+    justify-content: space-between;
+    gap: 24px;
+    padding: 24px clamp(18px, 3vw, 42px) 18px;
+    background: transparent;
+    border-bottom: 0;
+  }
+  .studio-heading { min-width: 0; }
+  .studio-kicker,
+  .studio-card-kicker {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--accent, #8b85ff);
+    font-size: 10px;
+    font-weight: 750;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+  }
+  .studio-card-kicker.ready { color: var(--ok, #4caf82); }
+  .studio-heading h1 {
+    margin: 0;
+    font-size: clamp(1.65rem, 3vw, 2.25rem);
+    line-height: 1.08;
+    letter-spacing: -.035em;
+  }
+  .studio-heading p {
+    margin: 7px 0 0;
+    color: var(--text-muted);
+    font-size: .88rem;
+  }
+  .studio-header-actions { display: flex; align-items: center; gap: 8px; }
+  .studio-model-select {
+    min-width: 190px;
+    max-width: 300px;
+    min-height: 40px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    column-gap: 10px;
+    padding: 6px 10px 6px 12px;
+    text-align: left;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius, 8px);
+    background: color-mix(in srgb, var(--bg-elev-2) 82%, transparent);
+    cursor: pointer;
+  }
+  .studio-model-select:hover { border-color: var(--accent); }
+  .studio-model-select > span:first-child {
+    grid-column: 1;
+    color: var(--text-muted);
+    font-size: 9px;
+    font-weight: 750;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .studio-model-select strong {
+    grid-column: 1;
+    max-width: 100%;
+    overflow: hidden;
+    color: var(--text);
+    font-size: .76rem;
+    font-weight: 650;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .studio-model-caret {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
+    color: var(--text-muted);
+    font-size: .9rem;
+  }
+  .studio-new { min-height: 40px; padding-inline: 18px; }
+  .studio-more { position: relative; }
+  .studio-more > summary { list-style: none; }
+  .studio-more > summary::-webkit-details-marker { display: none; }
+  .studio-more-trigger { min-height: 40px; }
+  .studio-more[open] .studio-more-trigger { border-color: var(--accent); }
+  .studio-more .toolbar {
+    position: absolute;
+    z-index: 40;
+    top: calc(100% + 8px);
+    right: 0;
+    width: min(360px, calc(100vw - 32px));
+    padding: 10px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 7px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg-elev, #141b2d);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, .36);
+  }
+  .studio-more .toolbar .btn { min-width: 0; text-align: left; }
+  .toolbar-once { margin-left: 4px; opacity: .6; }
+
+  .steprail {
+    width: calc(100% - clamp(36px, 6vw, 84px));
+    max-width: none;
+    box-sizing: border-box;
+    margin: 0 auto 14px;
+    padding: 12px 18px;
+    flex-wrap: nowrap;
+    border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--bg-elev, #141b2d) 92%, transparent);
+  }
+  .steprail .wr { flex: 1 1 auto; justify-content: space-between; }
+  .steprail .wr-step {
+    min-width: 104px;
+    justify-content: flex-start;
+    padding: 7px 10px;
+    border-radius: 8px;
+  }
+  .steprail .wr-sep { flex: 1 1 48px; height: 1px; overflow: hidden; background: var(--border); }
+  .steprail .wr-step.active { background: color-mix(in srgb, var(--accent) 13%, transparent); }
+  .prompt-return {
+    padding: 7px 11px;
+    white-space: nowrap;
+    color: var(--accent, #8b85ff);
+    border-color: color-mix(in srgb, var(--accent, #8b85ff) 48%, var(--border));
+    background: color-mix(in srgb, var(--accent, #8b85ff) 9%, transparent);
+  }
+  .prompt-return:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent, #8b85ff) 15%, transparent);
+  }
+
+  .body.full-width { background: transparent; }
+  .describe-step {
+    width: 100%;
+    max-width: none;
+    box-sizing: border-box;
+    margin: 0 auto;
+    padding: 0 clamp(18px, 3vw, 42px) 42px;
+  }
+  .describe-cols {
+    display: grid;
+    grid-template-columns:
+      minmax(400px, 1.35fr)
+      minmax(330px, 1fr)
+      minmax(260px, .78fr);
+    gap: 16px 20px;
+    align-items: start;
+  }
+  .describe-left { display: contents; }
+  .studio-card {
+    min-width: 0;
+    padding: clamp(16px, 2vw, 22px);
+    border: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--bg-elev, #141b2d) 94%, transparent);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .025) inset;
+  }
+  .prompt-card { grid-column: 1; grid-row: 1; }
+  .refined-card { grid-column: 1; grid-row: 2; }
+  .settings-card {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    position: sticky;
+    top: 10px;
+  }
+  .studio-card-head,
+  .studio-card-actions,
+  .d-existing-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+  }
+  .studio-card-head h2,
+  .d-existing-head h2 {
+    margin: 0;
+    color: var(--text);
+    font-size: 1rem;
+    letter-spacing: -.012em;
+    text-transform: none;
+  }
+  .studio-card-copy {
+    margin: 5px 0 14px;
+    color: var(--text-muted);
+    font-size: .8rem;
+    line-height: 1.45;
+  }
+  .studio-card .pe-area {
+    min-height: 116px;
+    background: color-mix(in srgb, var(--bg, #0b1020) 82%, transparent);
+    border-color: color-mix(in srgb, var(--border) 82%, transparent);
+  }
+  .refined-card .pe-area { border-left: 3px solid var(--accent); }
+  .studio-card-actions { margin-top: 12px; }
+  .text-btn,
+  .icon-btn {
+    border: 0;
+    background: transparent;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: .8rem;
+    cursor: pointer;
+  }
+  .text-btn:hover:not(:disabled), .icon-btn:hover { color: var(--text); }
+  .text-btn:disabled { opacity: .45; cursor: default; }
+  .icon-btn {
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    border: 1px solid transparent;
+    border-radius: 7px;
+  }
+  .icon-btn:hover { border-color: var(--border); background: var(--bg-elev-2); }
+  .action-hint { color: var(--text-muted); font-size: .76rem; }
+  .refined-status {
+    width: 26px;
+    height: 26px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    color: var(--text-muted);
+    font-size: .76rem;
+  }
+  .refined-status.active {
+    color: var(--ok, #4caf82);
+    border-color: color-mix(in srgb, var(--ok, #4caf82) 48%, transparent);
+    background: color-mix(in srgb, var(--ok, #4caf82) 10%, transparent);
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .describe-right {
+    min-width: 0;
+    padding-left: clamp(16px, 2vw, 22px);
+    border-left: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
+  }
+  .d-existing {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+    margin: 0;
+    padding-top: clamp(16px, 2vw, 22px);
+    border-top: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
+    position: sticky;
+    top: 10px;
+  }
+  .d-existing-head { margin-bottom: 14px; }
+  .d-existing-list { gap: 8px; }
+  .d-existing-item {
+    gap: 4px;
+    padding: 12px;
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--bg-elev-2) 76%, transparent);
+  }
+  .d-existing-name { font-weight: 650; }
+  .recent-empty {
+    min-height: 180px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 16px;
+    text-align: center;
+    color: var(--text-muted);
+    border: 1px dashed color-mix(in srgb, var(--border) 78%, transparent);
+    border-radius: 9px;
+  }
+  .recent-empty > span { color: var(--accent); font-size: 1.2rem; }
+  .recent-empty strong { color: var(--text); font-size: .84rem; }
+  .recent-empty p { max-width: 26ch; margin: 0; font-size: .76rem; line-height: 1.45; }
+
+  @media (max-width: 1240px) {
+    .describe-cols {
+      grid-template-columns: minmax(0, 1.2fr) minmax(310px, .8fr);
+    }
+    .prompt-card { grid-column: 1; grid-row: 1; }
+    .refined-card { grid-column: 1; grid-row: 2; }
+    .settings-card { grid-column: 2; grid-row: 1; }
+    .d-existing { grid-column: 2; grid-row: 2; position: static; }
+  }
+  @media (max-width: 900px) {
+    .topbar { align-items: flex-start; }
+    .steprail { flex-wrap: wrap; }
+    .steprail .wr-step { min-width: auto; }
+    .describe-cols { grid-template-columns: 1fr; }
+    .prompt-card, .refined-card, .settings-card, .d-existing { grid-column: 1; grid-row: auto; }
+    .settings-card, .d-existing { position: static; }
+    .describe-right { border-top: 0; padding-top: clamp(16px, 2vw, 22px); }
+    .steprail .wr { order: 2; width: 100%; }
+    .steprail-right { margin-left: auto; }
+  }
+  @media (max-width: 620px) {
+    .topbar { flex-direction: column; }
+    .studio-header-actions { width: 100%; }
+    .studio-model-select { min-width: 0; flex: 1 1 auto; }
+    .studio-header-actions .studio-model-select:nth-of-type(2) { display: none; }
+    .studio-new { flex: 1 1 auto; }
+    .steprail { width: calc(100% - 24px); }
+    .steprail-agent, .steprail-sep { display: none; }
+    .steprail-right { width: 100%; margin: 0; }
+    .prompt-return { width: 100%; }
+    .action-hint { display: none; }
+    .studio-card-actions { align-items: flex-end; }
+    .studio-card-actions .btn { margin-left: auto; }
   }

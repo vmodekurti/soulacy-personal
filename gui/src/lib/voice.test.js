@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   nextVoiceState, realtimeCallURL, classifyRealtimeEvent,
   addUsage, voiceUsageLabel, voiceHint,
+  updateVoiceActivity, speechText, speechChunks,
 } from './voice.js'
 
 describe('nextVoiceState', () => {
@@ -97,11 +98,85 @@ describe('usage accumulation', () => {
 describe('voiceHint', () => {
   it('uses the server detail when unavailable', () => {
     expect(voiceHint('unavailable', 'no API key configured')).toBe('no API key configured')
-    expect(voiceHint('unavailable')).toContain('config.yaml')
+	expect(voiceHint('unavailable')).toContain('sidecar')
   })
   it('covers every state', () => {
     for (const s of ['idle', 'connecting', 'live', 'error']) {
       expect(voiceHint(s)).not.toBe('')
     }
+  })
+})
+
+describe('updateVoiceActivity', () => {
+  it('completes a spoken turn after sustained silence', () => {
+    let result = updateVoiceActivity({ startedAt: 0 }, 0.04, 100)
+    expect(result.state.heardSpeech).toBe(true)
+    result = updateVoiceActivity(result.state, 0.002, 700)
+    expect(result.action).toBe('continue')
+    result = updateVoiceActivity(result.state, 0.002, 1700)
+    expect(result.action).toBe('complete')
+  })
+
+  it('does not submit ambient silence and periodically resets its buffer', () => {
+    const result = updateVoiceActivity({ startedAt: 10 }, 0.001, 30010)
+    expect(result.action).toBe('reset')
+    expect(result.state.heardSpeech).toBe(false)
+  })
+
+  it('keeps listening while the speaker is active', () => {
+    const result = updateVoiceActivity({ startedAt: 0, heardSpeech: true }, 0.05, 1500)
+    expect(result.action).toBe('continue')
+    expect(result.state.silenceSince).toBe(0)
+  })
+})
+
+describe('speechChunks', () => {
+  it('turns rich Markdown into natural speech without changing the Chat reply', () => {
+    const input = `## Result 🚀
+
+**Fast** and [documented](https://example.com) [1].
+
+\`\`\`js
+console.log('screen only')
+\`\`\`
+
+### Sources
+- https://example.com/source`
+
+    expect(speechText(input)).toBe(
+      'Result. Fast and documented. The code example is available in the text response.',
+    )
+    expect(input).toContain('console.log')
+  })
+
+  it('makes lists and tables speakable', () => {
+    const input = `- First item
+- Second item
+
+| Metric | Value |
+| --- | --- |
+| Latency | 10 ms |`
+    const spoken = speechText(input)
+    expect(spoken).toContain('First item Second item')
+    expect(spoken).toContain('Metric, Value')
+    expect(spoken).toContain('Latency, 10 ms')
+    expect(spoken).not.toContain('|')
+  })
+
+  it('sanitizes speech before splitting it into synthesis requests', () => {
+    expect(speechChunks('**Hello** [world](https://example.com).'))
+      .toEqual(['Hello world.'])
+  })
+
+  it('returns short sentence-oriented chunks for faster first audio', () => {
+    expect(speechChunks('First sentence. Second sentence! Third? ', 32))
+      .toEqual(['First sentence. Second sentence!', 'Third?'])
+  })
+
+  it('bounds long text without losing content', () => {
+    const input = 'A'.repeat(25)
+    const chunks = speechChunks(input, 10)
+    expect(chunks.every(chunk => chunk.length <= 10)).toBe(true)
+    expect(chunks.join('')).toBe(input)
   })
 })

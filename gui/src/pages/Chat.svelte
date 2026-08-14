@@ -17,7 +17,7 @@
   } from '../lib/chatactions.js'
   import {
     nextVoiceState, realtimeCallURL, classifyRealtimeEvent,
-    addUsage, voiceUsageLabel, voiceHint,
+    addUsage, voiceUsageLabel, voiceHint, updateVoiceActivity, speechChunks,
   } from '../lib/voice.js'
 
   let metricsRefresh = 0
@@ -34,6 +34,7 @@
   let renamingId = ''
   let renameText = ''
   let controlsOpen = false
+  let chatMoreOpen = false
   let chatListHidden = false   // collapse the chat sub-menu (thread list)
   function toggleChatList() {
     chatListHidden = !chatListHidden
@@ -419,6 +420,10 @@
     else if (e.key === 'Enter') { e.preventDefault(); runPaletteItem(paletteFiltered[paletteIndex]) }
   }
   function globalKeydown(e) {
+    if (e.key === 'Escape' && voiceSessionOpen) {
+      voiceSessionOpen = false
+      return
+    }
     if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
       e.preventDefault()
       paletteOpen ? (paletteOpen = false) : openPalette()
@@ -497,7 +502,7 @@
   // NOTE: this function intentionally uses store setters, not local vars.
   // If the component unmounts mid-request, the async continuation still
   // runs and updates the store; the component picks it up on remount.
-  async function send(textArg, overridesArg) {
+  async function send(textArg, overridesArg, responseMode = '') {
     const text = (textArg != null ? textArg : input).trim()
     if (!text || !activeThread?.agentId || isSending) return
     const overrides = overridesArg !== undefined ? overridesArg : buildOverrides(controls)
@@ -535,8 +540,12 @@
       preTurn = await api.runs.metrics(runSessionId, runAgentId).catch(() => null)
     }
 
+    let replyText = ''
+    let spokenReply = ''
     try {
-      const res = await api.chat(runAgentId, sendText, 'gui-user', overrides, runSessionId, attachmentIds)
+      const res = await api.chat(runAgentId, sendText, 'gui-user', overrides, runSessionId, attachmentIds, responseMode)
+	  replyText = res.reply || ''
+	  spokenReply = res.spoken_reply || ''
       const curr = await api.runs.metrics(runSessionId, runAgentId).catch(() => null)
       const delta = deltaMetrics(preTurn, curr)
       updateThread(threadId, t => ({
@@ -558,6 +567,7 @@
     activeRuns = rest
     metricsRefresh++   // re-fetch the session metrics strip (Story 7)
     await scrollBottom()
+	return responseMode === 'voice' ? (spokenReply || replyText) : replyText
   }
 
   // Cancel the active run (Story #22). The run is registered server-side under
@@ -1287,20 +1297,110 @@
   let voiceState  = 'unavailable'
   let voiceDetail = ''
   let voiceModel  = ''
+	let voiceProvider = ''
+	let voiceEndpoint = ''
+	let voiceAcceleration = ''
   let voiceUsage  = null
   let voicePC     = null   // RTCPeerConnection
   let voiceMic    = null   // MediaStream
   let voiceAudio  = null   // <audio> element for remote playback
   let voiceDraftIdx = -1   // index of the streaming assistant bubble
+	let voiceRecorder = null
+	let voiceChunks = []
+	let voiceAudioContext = null
+	let voiceAnalyser = null
+	let voiceVADFrame = 0
+	let voiceVADState = null
+	let voiceConversationActive = false
+	let voiceThinkingContext = null
+	let voiceThinkingTimer = 0
+	let sidecarProcessing = false
+	let voicePlaybackState = 'idle'
+	let voiceSynthesisAbort = null
+	let voiceObjectURL = ''
+	let voicePlaybackResolve = null
+	let voiceSessionOpen = false
+	let voiceMuted = false
+	let voiceUserTranscript = ''
+	let voiceSpokenText = ''
+	let voiceSetupOpen = false
+	let voiceSetupURL = 'http://127.0.0.1:8081'
+	let voiceSetupName = ''
+	let voiceSetupRecipe = 'mlx-kokoro'
+	let voiceSetupBusy = false
+	let voiceSetupError = ''
+	let voiceSetupSaved = false
+	const voiceRecipes = {
+	  'mlx-kokoro': {
+		url: 'http://127.0.0.1:8081', voice: 'af_heart',
+		detail: 'Apple Silicon native transcription with MLX Whisper and local Kokoro speech. No OpenAI key required.',
+		install: 'sy voice enable --recipe auto',
+		start: 'sy voice test',
+	  },
+	  'whisper-kokoro': {
+		url: 'http://127.0.0.1:8081', voice: 'af_heart',
+		detail: 'Portable transcription through an existing whisper-cli build and ggml model, with local Kokoro speech.',
+		install: 'sy voice enable --recipe whisper-kokoro',
+		start: 'sy voice test',
+	  },
+	  custom: {
+		url: '', voice: '',
+		detail: 'Enter the base URL for any service that implements Soulacy\'s four-endpoint voice contract.',
+		install: '', start: '',
+	  },
+	}
+	$: selectedVoiceRecipe = voiceRecipes[voiceSetupRecipe] || voiceRecipes.custom
+	$: voiceSessionStatus = voiceState === 'live'
+	  ? 'LISTENING'
+	  : voicePlaybackState === 'playing'
+		? 'SOULACY SPEAKING'
+		: voicePlaybackState === 'paused'
+		  ? 'VOICE PAUSED'
+		  : sidecarProcessing || voiceState === 'connecting'
+			? 'SOULACY THINKING'
+			: 'VOICE READY'
+	$: voiceSessionHeadline = voiceState === 'live'
+	  ? 'I\'m listening…'
+	  : voicePlaybackState === 'playing' || voicePlaybackState === 'paused'
+		? (voiceSpokenText || 'Speaking…')
+		: sidecarProcessing || voiceState === 'connecting'
+		  ? 'Working on your request…'
+		  : 'Start a conversation'
+
+	function selectVoiceRecipe(recipe) {
+	  const preset = voiceRecipes[recipe]
+	  if (!preset) return
+	  voiceSetupRecipe = recipe
+	  voiceSetupURL = preset.url
+	  voiceSetupName = preset.voice
+	  voiceSetupError = ''
+	  voiceSetupSaved = false
+	}
 
   async function loadVoiceStatus() {
     try {
       const st = await api.voice.status()
       voiceDetail = st.detail || ''
       voiceModel = st.model || ''
+	  voiceProvider = st.provider || ''
+	  voiceEndpoint = st.endpoint || ''
+	  if (voiceEndpoint) {
+		voiceSetupURL = voiceEndpoint
+		voiceSetupRecipe = 'custom'
+	  }
+	  if (st.voice) voiceSetupName = st.voice
       voiceState = nextVoiceState(voiceState, { type: 'status', available: !!st.available })
-    } catch {
-      voiceState = 'unavailable'
+	  if (st.available && st.provider === 'sidecar') {
+		const caps = await api.voice.capabilities().catch(() => null)
+		voiceAcceleration = caps
+		  ? [caps.stt_accelerator && `STT ${caps.stt_accelerator}`, caps.tts_device && `TTS ${caps.tts_device}`].filter(Boolean).join(' · ')
+		  : ''
+	  } else {
+		voiceAcceleration = ''
+	  }
+	} catch {
+	  voiceAcceleration = ''
+	  voiceState = 'unavailable'
     }
   }
 
@@ -1319,8 +1419,10 @@
     try { evt = JSON.parse(raw) } catch { return }
     const e = classifyRealtimeEvent(evt)
     if (e.kind === 'user_transcript' && e.text.trim()) {
+      voiceUserTranscript = e.text.trim()
       voicePush('user', e.text.trim())
     } else if (e.kind === 'assistant_delta' && e.text) {
+	  voiceSpokenText += e.text
       if (voiceDraftIdx < 0) {
         voiceDraftIdx = voicePush('assistant', e.text)
       } else {
@@ -1347,6 +1449,7 @@
 
   async function startVoice() {
     if (voiceState !== 'idle') return
+	if (voiceProvider === 'sidecar') return startSidecarVoice()
     voiceState = nextVoiceState(voiceState, { type: 'start' })
     error = null
     try {
@@ -1358,6 +1461,7 @@
       for (const track of voiceMic.getTracks()) pc.addTrack(track, voiceMic)
       pc.ontrack = (ev) => {
         if (!voiceAudio) voiceAudio = new Audio()
+        voiceAudio.muted = voiceMuted
         voiceAudio.srcObject = ev.streams[0]
         voiceAudio.play().catch(() => {})
       }
@@ -1388,14 +1492,278 @@
     }
   }
 
+	async function startSidecarVoice() {
+	  if (!voiceConversationActive || voiceRecorder?.state === 'recording' || sidecarProcessing) return
+	  error = null
+	  try {
+		voiceMic = await navigator.mediaDevices.getUserMedia({ audio: true })
+		voiceChunks = []
+		voiceRecorder = new MediaRecorder(voiceMic)
+		voiceRecorder.ondataavailable = (event) => { if (event.data?.size) voiceChunks.push(event.data) }
+		voiceRecorder.onstop = processSidecarTurn
+		voiceRecorder.start(250)
+		startVoiceActivityDetection(voiceMic)
+		voiceState = 'live'
+	  } catch (e) {
+		voiceConversationActive = false
+		voiceDetail = e.message || 'microphone capture failed'
+		voiceState = 'error'
+		teardownVoice()
+	  }
+	}
+
+	function startVoiceActivityDetection(stream) {
+	  stopVoiceActivityDetection()
+	  const AudioContextClass = window.AudioContext || window.webkitAudioContext
+	  if (!AudioContextClass) return
+	  voiceAudioContext = new AudioContextClass()
+	  voiceAudioContext.resume().catch(() => {})
+	  const source = voiceAudioContext.createMediaStreamSource(stream)
+	  voiceAnalyser = voiceAudioContext.createAnalyser()
+	  voiceAnalyser.fftSize = 1024
+	  source.connect(voiceAnalyser)
+	  voiceVADState = { startedAt: performance.now(), heardSpeech: false, silenceSince: 0 }
+	  const samples = new Uint8Array(voiceAnalyser.fftSize)
+	  const inspect = () => {
+		if (!voiceAnalyser || voiceRecorder?.state !== 'recording') return
+		voiceAnalyser.getByteTimeDomainData(samples)
+		let energy = 0
+		for (const sample of samples) {
+		  const normalized = (sample - 128) / 128
+		  energy += normalized * normalized
+		}
+		const rms = Math.sqrt(energy / samples.length)
+		const result = updateVoiceActivity(voiceVADState, rms, performance.now())
+		voiceVADState = result.state
+		if (result.action === 'complete') {
+		  finishSidecarTurn()
+		  return
+		}
+		if (result.action === 'reset') voiceChunks = []
+		voiceVADFrame = requestAnimationFrame(inspect)
+	  }
+	  voiceVADFrame = requestAnimationFrame(inspect)
+	}
+
+	function stopVoiceActivityDetection() {
+	  if (voiceVADFrame) cancelAnimationFrame(voiceVADFrame)
+	  voiceVADFrame = 0
+	  voiceAnalyser = null
+	  voiceVADState = null
+	  if (voiceAudioContext) voiceAudioContext.close().catch(() => {})
+	  voiceAudioContext = null
+	}
+
+	function finishSidecarTurn(force = false) {
+	  if (voiceRecorder?.state !== 'recording') return
+	  if (!force && !voiceVADState?.heardSpeech) return
+	  stopVoiceActivityDetection()
+	  voiceRecorder.stop()
+	}
+
+	function startVoiceThinkingSound() {
+	  stopVoiceThinkingSound()
+	  if (voiceMuted || !voiceConversationActive) return
+	  const AudioContextClass = window.AudioContext || window.webkitAudioContext
+	  if (!AudioContextClass) return
+	  try {
+		voiceThinkingContext = new AudioContextClass()
+		voiceThinkingContext.resume().catch(() => {})
+		const ping = () => {
+		  const context = voiceThinkingContext
+		  if (!context || context.state === 'closed') return
+		  const start = context.currentTime
+		  for (const [frequency, delay] of [[392, 0], [523.25, 0.12]]) {
+			const oscillator = context.createOscillator()
+			const gain = context.createGain()
+			oscillator.type = 'sine'
+			oscillator.frequency.value = frequency
+			gain.gain.setValueAtTime(0.0001, start + delay)
+			gain.gain.exponentialRampToValueAtTime(0.025, start + delay + 0.025)
+			gain.gain.exponentialRampToValueAtTime(0.0001, start + delay + 0.24)
+			oscillator.connect(gain)
+			gain.connect(context.destination)
+			oscillator.start(start + delay)
+			oscillator.stop(start + delay + 0.26)
+		  }
+		}
+		ping()
+		voiceThinkingTimer = window.setInterval(ping, 1450)
+	  } catch {
+		stopVoiceThinkingSound()
+	  }
+	}
+
+	function stopVoiceThinkingSound() {
+	  if (voiceThinkingTimer) window.clearInterval(voiceThinkingTimer)
+	  voiceThinkingTimer = 0
+	  const context = voiceThinkingContext
+	  voiceThinkingContext = null
+	  if (context) context.close().catch(() => {})
+	}
+
+	async function processSidecarTurn() {
+	  const mime = voiceRecorder?.mimeType || 'audio/webm'
+	  const audio = new Blob(voiceChunks, { type: mime })
+	  voiceRecorder = null
+	  voiceChunks = []
+	  if (voiceMic) { for (const track of voiceMic.getTracks()) track.stop(); voiceMic = null }
+	  voiceState = 'connecting'
+	  sidecarProcessing = true
+	  const synthesisAbort = new AbortController()
+	  voiceSynthesisAbort = synthesisAbort
+	  try {
+		const result = await api.voice.transcribe(audio)
+		const transcript = String(result?.text || '').trim()
+		if (!transcript) return
+		voiceUserTranscript = transcript
+		startVoiceThinkingSound()
+		const reply = await send(transcript, undefined, 'voice')
+		stopVoiceThinkingSound()
+		if (reply) {
+		  for (const chunk of speechChunks(reply)) {
+			if (synthesisAbort.signal.aborted) break
+			voiceSpokenText = chunk
+			voicePlaybackState = 'generating'
+			const speech = await api.voice.synthesize(chunk, voiceSetupName, synthesisAbort.signal)
+			if (synthesisAbort.signal.aborted) break
+			await playVoiceSpeech(speech, synthesisAbort.signal)
+		  }
+		}
+		voiceState = 'idle'
+	  } catch (e) {
+		if (synthesisAbort.signal.aborted || e?.name === 'AbortError') {
+		  voiceState = 'idle'
+		} else {
+		  voiceDetail = e.message || 'local voice turn failed'
+		  voiceState = 'error'
+		}
+	  } finally {
+		stopVoiceThinkingSound()
+		if (voiceSynthesisAbort === synthesisAbort) voiceSynthesisAbort = null
+		if (voicePlaybackState !== 'paused') voicePlaybackState = 'idle'
+		sidecarProcessing = false
+		if (voiceConversationActive && voiceState !== 'error') {
+		  voiceState = 'idle'
+		  setTimeout(() => startSidecarVoice(), 120)
+		}
+	  }
+	}
+
+	function releaseVoiceAudio(resolvePlayback = true) {
+	  if (voiceObjectURL) URL.revokeObjectURL(voiceObjectURL)
+	  voiceObjectURL = ''
+	  if (voiceAudio) {
+		voiceAudio.onended = null
+		voiceAudio.onerror = null
+		voiceAudio.src = ''
+	  }
+	  const resolve = resolvePlayback ? voicePlaybackResolve : null
+	  voicePlaybackResolve = null
+	  if (resolve) resolve()
+	}
+
+	function playVoiceSpeech(speech, signal) {
+	  if (!voiceAudio) voiceAudio = new Audio()
+	  releaseVoiceAudio()
+	  voiceObjectURL = URL.createObjectURL(speech)
+	  voiceAudio.src = voiceObjectURL
+	  voiceAudio.muted = voiceMuted
+	  voicePlaybackState = 'playing'
+	  return new Promise((resolve, reject) => {
+		voicePlaybackResolve = resolve
+		voiceAudio.onended = () => { releaseVoiceAudio(); voicePlaybackState = 'idle' }
+		voiceAudio.onerror = () => { releaseVoiceAudio(false); reject(new Error('Voice playback failed.')) }
+		if (signal.aborted) { releaseVoiceAudio(); return }
+		signal.addEventListener('abort', () => {
+		  voiceAudio?.pause()
+		  releaseVoiceAudio()
+		  voicePlaybackState = 'idle'
+		}, { once: true })
+		voiceAudio.play().catch((error) => { releaseVoiceAudio(false); reject(error) })
+	  })
+	}
+
+	function pauseVoiceResponse() {
+	  if (voicePlaybackState !== 'playing' || !voiceAudio) return
+	  voiceAudio.pause()
+	  voicePlaybackState = 'paused'
+	}
+
+	function resumeVoiceResponse() {
+	  if (voicePlaybackState !== 'paused' || !voiceAudio) return
+	  voiceAudio.play().then(() => voicePlaybackState = 'playing').catch((e) => {
+		voiceDetail = e.message || 'Voice playback failed.'
+		voiceState = 'error'
+	  })
+	}
+
+	function toggleVoiceMute() {
+	  voiceMuted = !voiceMuted
+	  if (voiceAudio) voiceAudio.muted = voiceMuted
+	  if (voiceMuted) stopVoiceThinkingSound()
+	  else if (sidecarProcessing && voicePlaybackState === 'idle') startVoiceThinkingSound()
+	}
+
+	function stopVoiceResponse() {
+	  voiceSynthesisAbort?.abort()
+	  if (voiceAudio) {
+		voiceAudio.pause()
+		voiceAudio.currentTime = 0
+	  }
+	  releaseVoiceAudio()
+	  voicePlaybackState = 'idle'
+	}
+
+	function endVoiceSession() {
+	  voiceConversationActive = false
+	  teardownVoice()
+	  voiceState = voiceState === 'unavailable' ? 'unavailable' : 'idle'
+	  voiceSessionOpen = false
+	  voiceUserTranscript = ''
+	  voiceSpokenText = ''
+	}
+
+	async function saveVoiceSidecar() {
+	  voiceSetupBusy = true
+	  voiceSetupError = ''
+	  voiceSetupSaved = false
+	  try {
+		await api.config.patch({ voice: {
+		  provider: 'sidecar', sidecar_url: voiceSetupURL.trim(), voice: voiceSetupName.trim(),
+		  timeout: '60s', allow_remote: false,
+		} })
+		voiceSetupSaved = true
+		voiceDetail = 'Sidecar saved. Restart the gateway, then test voice.'
+	  } catch (e) {
+		voiceSetupError = e.message || 'Could not save voice configuration.'
+	  } finally {
+		voiceSetupBusy = false
+	  }
+	}
+
   function teardownVoice() {
+	voiceConversationActive = false
+	stopVoiceResponse()
+	stopVoiceThinkingSound()
+	stopVoiceActivityDetection()
     if (voicePC) { try { voicePC.close() } catch {} voicePC = null }
+	if (voiceRecorder?.state === 'recording') {
+	  voiceRecorder.onstop = null
+	  try { voiceRecorder.stop() } catch {}
+	}
+	voiceRecorder = null
+	voiceChunks = []
     if (voiceMic) { for (const t of voiceMic.getTracks()) t.stop(); voiceMic = null }
-    if (voiceAudio) { voiceAudio.srcObject = null }
+	if (voiceAudio) { voiceAudio.srcObject = null }
     voiceDraftIdx = -1
   }
 
   function stopVoice() {
+	if (voiceProvider === 'sidecar' && voiceRecorder?.state === 'recording') {
+	  finishSidecarTurn(true)
+	  return
+	}
     teardownVoice()
     if (voiceState === 'live' || voiceState === 'connecting') {
       voicePush('system', '🎤 voice session ended')
@@ -1404,9 +1772,16 @@
   }
 
   function voiceClick() {
-    if (voiceState === 'idle') startVoice()
+	if (sidecarProcessing) return
+	if (voiceState === 'idle') {
+	  voiceSessionOpen = true
+	  voiceConversationActive = true
+	  voiceSpokenText = ''
+	  startVoice()
+	}
     else if (voiceState === 'live' || voiceState === 'connecting') stopVoice()
-    else if (voiceState === 'error') voiceState = nextVoiceState(voiceState, { type: 'retry' })
+	else if (voiceState === 'unavailable') voiceSetupOpen = true
+	else if (voiceState === 'error') voiceState = nextVoiceState(voiceState, { type: 'retry' })
   }
 
   onMount(async () => {
@@ -1443,6 +1818,72 @@
 </script>
 
 <svelte:window on:keydown={globalKeydown} />
+
+{#if voiceSetupOpen}
+  <div class="voice-setup-backdrop" role="presentation" on:click|self={() => voiceSetupOpen = false}>
+    <div class="voice-setup" role="dialog" aria-modal="true" aria-labelledby="voice-setup-title">
+      <div class="voice-setup-head">
+        <div>
+          <div class="eyebrow">OPTIONAL LOCAL CAPABILITY</div>
+          <h2 id="voice-setup-title">Connect a voice sidecar</h2>
+        </div>
+        <button class="voice-setup-close" on:click={() => voiceSetupOpen = false} aria-label="Close">×</button>
+      </div>
+      <p>Speech runs separately from your agent model, so this works with Ollama, Google, NVIDIA, Anthropic, OpenAI, and future providers.</p>
+
+	  <label>Local voice recipe
+		<select value={voiceSetupRecipe} on:change={(event) => selectVoiceRecipe(event.currentTarget.value)}>
+		  <option value="mlx-kokoro">MLX Whisper + Kokoro — Apple Silicon</option>
+		  <option value="whisper-kokoro">whisper.cpp + Kokoro — portable</option>
+		  <option value="custom">Custom HTTP sidecar — advanced</option>
+		</select>
+	  </label>
+
+      <div class="voice-recipes" role="radiogroup" aria-label="Voice sidecar recipe">
+		<button type="button" class="voice-recipe" class:selected={voiceSetupRecipe === 'mlx-kokoro'}
+				role="radio" aria-checked={voiceSetupRecipe === 'mlx-kokoro'} on:click={() => selectVoiceRecipe('mlx-kokoro')}>
+		  <strong>MLX Whisper + Kokoro</strong><span>Apple Silicon</span>
+		  <small>Native Metal transcription and natural local speech.</small>
+		</button>
+        <button type="button" class="voice-recipe" class:selected={voiceSetupRecipe === 'whisper-kokoro'}
+                role="radio" aria-checked={voiceSetupRecipe === 'whisper-kokoro'} on:click={() => selectVoiceRecipe('whisper-kokoro')}>
+		  <strong>whisper.cpp + Kokoro</strong><span>Portable</span>
+		  <small>Uses your whisper-cli binary and ggml model.</small>
+        </button>
+        <button type="button" class="voice-recipe" class:selected={voiceSetupRecipe === 'custom'}
+                role="radio" aria-checked={voiceSetupRecipe === 'custom'} on:click={() => selectVoiceRecipe('custom')}>
+          <strong>Custom HTTP sidecar</strong><span>Advanced</span>
+          <small>Implement the four-endpoint Soulacy voice contract.</small>
+        </button>
+      </div>
+	  <p class="voice-recipe-detail">{selectedVoiceRecipe.detail}</p>
+	  {#if selectedVoiceRecipe.install}
+		<div class="voice-install-steps">
+		  <strong>Enable local voice from Terminal</strong>
+		  <code>{selectedVoiceRecipe.install}</code>
+		  <code>{selectedVoiceRecipe.start}</code>
+		  <small>The first command installs only missing components, configures Soulacy, and starts a background user service. Restart Soulacy, then run the test command and refresh Chat.</small>
+		</div>
+	  {/if}
+
+      <label>Sidecar URL
+        <input bind:value={voiceSetupURL} placeholder="http://127.0.0.1:8081" />
+      </label>
+      <label>Default voice <small>(optional)</small>
+        <input bind:value={voiceSetupName} placeholder="af_heart" />
+      </label>
+      <div class="voice-contract"><code>GET /health</code><code>GET /capabilities</code><code>POST /transcribe</code><code>POST /synthesize</code></div>
+      <p class="voice-local-note">For safety, GUI setup accepts loopback sidecars. Remote endpoints require an explicit <code>allow_remote</code> setting in config.yaml.</p>
+      {#if voiceSetupError}<div class="voice-setup-message err">{voiceSetupError}</div>{/if}
+      {#if voiceSetupSaved}<div class="voice-setup-message ok">Saved. Restart the gateway, then return here and click the microphone to test.</div>{/if}
+      <div class="voice-setup-actions">
+        <span>CLI: <code>sy voice providers</code></span>
+        <button class="btn-secondary" on:click={() => voiceSetupOpen = false}>Cancel</button>
+        <button class="btn-primary" on:click={saveVoiceSidecar} disabled={voiceSetupBusy || !voiceSetupURL.trim()}>{voiceSetupBusy ? 'Saving…' : 'Save sidecar'}</button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 {#if paletteOpen}
   <div class="palette-backdrop" role="button" tabindex="0"
@@ -1533,53 +1974,78 @@
   </div>
 {/if}
 
-<div class="page">
-  <div class="page-header">
-    <h1>Chat Tester</h1>
-    <div class="controls">
-      {#if activeThread}
-        <RunMetrics sessionId={activeThread.sessionId} agentId={activeThread.agentId} refreshKey={metricsRefresh} />
+{#if voiceSessionOpen}
+  <div class="voice-session" role="dialog" aria-modal="true" aria-label="Voice conversation">
+    <header class="voice-session-head">
+      <div class="voice-session-brand"><span class="voice-brand-mark">S</span><strong>Soulacy Voice</strong></div>
+      <div class="voice-session-agent"><span class="agent-presence"></span>{activeThread?.agentId ? agentName(activeThread.agentId) : 'Agent'}</div>
+      <button class="voice-minimize" on:click={() => voiceSessionOpen = false} title="Return to text chat" aria-label="Minimize voice session">—</button>
+    </header>
+	  <div class="voice-session-stage">
+		<span class="voice-session-status">{voiceSessionStatus}</span>
+		{#if voiceAcceleration}<small class="voice-session-backend">{voiceAcceleration}</small>{/if}
+		<h2>{voiceSessionHeadline}</h2>
+      {#if voiceUserTranscript && voiceState !== 'live'}
+        <p class="voice-session-transcript">“{voiceUserTranscript}”</p>
+      {:else}
+        <p class="voice-session-transcript">Speak naturally. Your transcript and the answer will also appear in Chat.</p>
       {/if}
-      <select value={activeThread?.agentId || ''} on:change={(e) => setActiveAgent(e.currentTarget.value)} style="width:min(220px, 100%)" disabled={!agents.length}>
-        {#if !agents.length}
-          <option value="">No enabled agents</option>
+      <button class="voice-orb" class:active={voiceState === 'live' || voicePlaybackState === 'playing'} on:click={voiceClick} disabled={sidecarProcessing && voicePlaybackState === 'idle'} aria-label={voiceState === 'live' ? 'Finish speaking' : 'Start speaking'}>
+        <span></span><span></span><span></span><span></span><span></span>
+      </button>
+      <div class="voice-session-controls">
+        <button class="voice-round" class:on={voiceMuted} on:click={toggleVoiceMute} title={voiceMuted ? 'Unmute voice' : 'Mute voice'} aria-label={voiceMuted ? 'Unmute voice' : 'Mute voice'}>{voiceMuted ? '🔇' : '🔊'}</button>
+        <button class="voice-end" on:click={endVoiceSession}>☎ <span>END SESSION</span></button>
+        {#if voicePlaybackState === 'playing'}
+          <button class="voice-round" on:click={pauseVoiceResponse} title="Pause response" aria-label="Pause response">Ⅱ</button>
+        {:else if voicePlaybackState === 'paused'}
+          <button class="voice-round" on:click={resumeVoiceResponse} title="Resume response" aria-label="Resume response">▶</button>
+        {:else if voicePlaybackState === 'generating'}
+          <button class="voice-round" on:click={stopVoiceResponse} title="Stop preparing response" aria-label="Stop preparing response">■</button>
         {:else}
-          {#each agents as a}
-            <option value={a.id}>{a.name || a.id}</option>
-          {/each}
+          <button class="voice-round" disabled title="Voice controls" aria-label="Voice controls">≛</button>
         {/if}
-      </select>
-      <button class="btn-secondary" on:click={toggleChatList} title={chatListHidden ? 'Show chat list' : 'Hide chat list'} aria-pressed={chatListHidden}>{chatListHidden ? '☰' : '⟨'} Chats</button>
-      <button class="btn-secondary" on:click={() => startThread()} disabled={!agents.length} title="New chat (⌘J)">New chat</button>
-      {#if chatStatus}
-        <button class="btn-secondary chat-status-pill {chatStatus.status || 'warn'}" class:on={chatStatusOpen} on:click={() => chatStatusOpen = !chatStatusOpen} title={chatStatusTitle(chatStatus)}>
-          {chatStatus.score || 0}% Chat
-        </button>
-      {/if}
-      <button class="btn-secondary" class:on={controlsOpen} on:click={() => controlsOpen = !controlsOpen} title="Model & generation controls">⚙ Controls</button>
-      <button class="btn-secondary" class:on={artifactPanelOpen} on:click={() => { artifactPanelOpen = !artifactPanelOpen; if (artifactPanelOpen && activeThread) loadArtifacts(activeThread.id, activeThread.agentId, activeThread.sessionId) }} disabled={!activeThread?.agentId} title="Show files produced by this chat">
-        Artifacts {currentArtifacts.length ? `(${currentArtifacts.length})` : ''}
-      </button>
-      <button class="btn-secondary" class:on={historySearchOpen} on:click={() => historySearchOpen = !historySearchOpen} title="Search persisted chat history">Search</button>
-      <button class="btn-secondary" on:click={exportThreadMarkdown} disabled={!activeThread?.messages?.length} title="Download this chat as Markdown">Export</button>
-      <button class="btn-secondary" on:click={exportThreadJSON} disabled={!activeThread?.messages?.length} title="Download this chat as JSON (share/archive)">JSON</button>
-      <button class="btn-secondary" on:click={shareThread} disabled={!activeThread?.messages?.length || shareBusy} title="Create a read-only link to this conversation">{shareBusy ? 'Sharing…' : 'Share'}</button>
-      <button class="btn-secondary" on:click={clearChat}>Clear</button>
-      <button class="voice-btn {voiceState}"
-              on:click={voiceClick}
-              disabled={voiceState === 'unavailable'}
-              title={voiceHint(voiceState, voiceDetail)}
-              aria-label="Voice conversation: {voiceHint(voiceState, voiceDetail)}">
-        {#if voiceState === 'live'}⏹ 🎤{:else if voiceState === 'connecting'}⏳ 🎤{:else if voiceState === 'error'}⚠ 🎤{:else}🎤{/if}
-      </button>
-      {#if voiceUsageLabel(voiceUsage)}
-        <span class="voice-usage" title="Realtime voice tokens this session ({voiceModel})">
-          🎤 {voiceUsageLabel(voiceUsage)}
-        </span>
+      </div>
+      {#if voicePlaybackState === 'playing' || voicePlaybackState === 'paused'}
+        <button class="voice-stop-text" on:click={stopVoiceResponse}>Stop this response</button>
       {/if}
     </div>
-        <TourButton />
+  </div>
+{/if}
+
+<div class="page modern-chat">
+  <div class="page-header">
+    <div class="chat-brand">
+      <button class="chat-list-toggle" on:click={toggleChatList} title={chatListHidden ? 'Show conversations' : 'Hide conversations'} aria-pressed={chatListHidden}>{chatListHidden ? '☰' : '‹'}</button>
+      <div><h1>Soulacy Chat</h1><span>Work with your agents</span></div>
     </div>
+    <div class="controls primary-controls">
+      {#if activeThread}<RunMetrics sessionId={activeThread.sessionId} agentId={activeThread.agentId} refreshKey={metricsRefresh} />{/if}
+      <label class="agent-picker"><span class="agent-presence"></span>
+        <select value={activeThread?.agentId || ''} on:change={(e) => setActiveAgent(e.currentTarget.value)} disabled={!agents.length} aria-label="Active agent">
+          {#if !agents.length}<option value="">No enabled agents</option>{:else}{#each agents as a}<option value={a.id}>{a.name || a.id}</option>{/each}{/if}
+        </select>
+      </label>
+      <button class="top-icon top-search" class:active={historySearchOpen} on:click={() => historySearchOpen = !historySearchOpen} title="Search conversations" aria-label="Search conversations">⌘ K</button>
+      <button class="voice-btn {voiceState}" on:click={() => { if (voiceState === 'live' || sidecarProcessing || voicePlaybackState !== 'idle') voiceSessionOpen = true; else voiceClick() }} title={voiceHint(voiceState, voiceDetail)} aria-label="Open voice conversation">🎤</button>
+      <button class="new-chat-btn" on:click={() => startThread()} disabled={!agents.length}>＋ New chat</button>
+      <div class="header-tour"><TourButton /></div>
+      <div class="chat-more-wrap">
+        <button class="top-icon" class:active={chatMoreOpen} on:click={() => chatMoreOpen = !chatMoreOpen} title="More chat actions" aria-label="More chat actions">•••</button>
+        {#if chatMoreOpen}
+          <div class="chat-more-menu">
+            {#if chatStatus}<button on:click={() => { chatStatusOpen = !chatStatusOpen; chatMoreOpen = false }}>{chatStatus.score || 0}% Chat readiness</button>{/if}
+            <button on:click={() => { controlsOpen = !controlsOpen; chatMoreOpen = false }}>Model &amp; generation controls</button>
+            <button on:click={() => { artifactPanelOpen = !artifactPanelOpen; if (artifactPanelOpen && activeThread) loadArtifacts(activeThread.id, activeThread.agentId, activeThread.sessionId); chatMoreOpen = false }} disabled={!activeThread?.agentId}>Artifacts {currentArtifacts.length ? `(${currentArtifacts.length})` : ''}</button>
+            <button on:click={() => { exportThreadMarkdown(); chatMoreOpen = false }} disabled={!activeThread?.messages?.length}>Export Markdown</button>
+            <button on:click={() => { exportThreadJSON(); chatMoreOpen = false }} disabled={!activeThread?.messages?.length}>Export JSON</button>
+            <button on:click={() => { shareThread(); chatMoreOpen = false }} disabled={!activeThread?.messages?.length || shareBusy}>{shareBusy ? 'Sharing…' : 'Share conversation'}</button>
+            <button class="danger" on:click={() => { clearChat(); chatMoreOpen = false }}>Clear conversation</button>
+          </div>
+        {/if}
+      </div>
+    </div>
+  </div>
 
   {#if error}
     <div class="banner err">⚠ {error}</div>
@@ -1680,6 +2146,10 @@
   <div class="chat-body">
     {#if Object.keys($chatThreads).length > 0 && !chatListHidden}
     <aside class="chat-sidebar">
+    <div class="chat-sidebar-head">
+      <div><strong>Conversations</strong><span>Continue recent work</span></div>
+      <button class="sidebar-new" on:click={() => startThread()} title="New chat" aria-label="New chat">＋</button>
+    </div>
     <div class="thread-bar">
       <input class="thread-search" type="search" bind:this={searchEl}
              bind:value={threadSearch} placeholder="Search chats… (⌘K)" aria-label="Search chats" />
@@ -1920,7 +2390,7 @@
               {#if activeThread?.streamText}
                 <div class="btext markdown-body streaming" use:richRenderer={activeThread.streamText}>{@html parseMarkdown(activeThread.streamText)}</div>
               {:else}
-                <div class="typing"><span/><span/><span/></div>
+                <div class="typing"><span></span><span></span><span></span></div>
               {/if}
               {#if activeThread?.thinking}
                 <div class="thinking open live">
@@ -2028,6 +2498,7 @@
         rows="2"
         disabled={isSending || !activeThread?.agentId}
       ></textarea>
+      <button class="composer-voice" on:click={() => { if (voiceState === 'live' || sidecarProcessing || voicePlaybackState !== 'idle') voiceSessionOpen = true; else voiceClick() }} disabled={isSending} title="Start a voice conversation" aria-label="Start a voice conversation">🎤</button>
       {#if isSending}
         <button class="send-btn btn-danger" on:click={cancelSend} title="Stop this run">■</button>
       {:else}
@@ -2146,11 +2617,48 @@
   .voice-btn.live { border-color: #e05656; background: #2a1520; animation: voicepulse 1.6s infinite; }
   .voice-btn.connecting { border-color: #c9a227; }
   .voice-btn.error { border-color: #e05656; }
+	.voice-control { border: 1px solid #394164; border-radius: 7px; padding: .38rem .55rem; background: #161b30; color: #dce0f7; cursor: pointer; font-size: .72rem; }
+	.voice-control:hover { border-color: #6973b4; background: #1c2340; }
+	.voice-control.stop { border-color: rgba(224,86,86,.55); color: #ffaaaa; }
+	.voice-response-status { color: #aeb4d2; font-size: .72rem; }
   @keyframes voicepulse { 0%,100% { box-shadow: 0 0 0 0 rgba(224,86,86,.35); } 50% { box-shadow: 0 0 0 5px rgba(224,86,86,0); } }
   .voice-usage {
     font-family: ui-monospace, monospace; font-size: .75rem; color: #8a91b4;
     white-space: nowrap;
   }
+	.voice-setup-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center;
+	  padding: 1rem; background: rgba(4,6,14,.76); backdrop-filter: blur(4px); }
+	.voice-setup { width: min(720px, 96vw); max-height: 90vh; overflow: auto; padding: 1.25rem;
+	  border: 1px solid #353b68; border-radius: 14px; background: #111526; box-shadow: 0 24px 80px rgba(0,0,0,.55);
+	  display: flex; flex-direction: column; gap: .9rem; }
+	.voice-setup h2 { margin: .15rem 0 0; font-size: 1.2rem; }
+	.voice-setup p { margin: 0; color: #aeb4d2; font-size: .82rem; line-height: 1.5; }
+	.voice-setup-head, .voice-setup-actions { display: flex; align-items: center; gap: .7rem; justify-content: space-between; }
+	.voice-setup-close { border: 0; background: none; color: #9ca3c7; font-size: 1.5rem; cursor: pointer; }
+	.voice-setup .eyebrow { color: #7f86ff; font-size: .63rem; font-weight: 700; letter-spacing: .12em; }
+	.voice-recipes { display: grid; grid-template-columns: repeat(3, 1fr); gap: .65rem; }
+	.voice-recipe { display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: .35rem;
+	  min-height: 100px; padding: .75rem; color: #dfe2f4; cursor: pointer; font-family: inherit;
+	  border: 1px solid #292e50; border-radius: 9px; background: #171b30; }
+	.voice-recipe:hover { border-color: #4d5689; background: #1b2038; }
+	.voice-recipe:focus-visible { outline: 2px solid #8a90ff; outline-offset: 2px; }
+	.voice-recipe.selected { border-color: #777fff; background: #191c3a; box-shadow: inset 0 0 0 1px #777fff; }
+	.voice-recipe.selected::after { content: '✓ Selected'; margin-top: auto; color: #91e2c1; font-size: .66rem; font-weight: 700; }
+	.voice-recipe span { color: #8d94ff; font-size: .65rem; text-transform: uppercase; letter-spacing: .06em; }
+	.voice-recipe small, .voice-setup label small { color: #8f96b8; line-height: 1.35; }
+	.voice-setup .voice-recipe-detail { padding: .55rem .65rem; border-left: 2px solid #626ae0; background: #15192d; color: #bbc1df; }
+	.voice-setup label { display: flex; flex-direction: column; gap: .35rem; color: #d8dbef; font-size: .78rem; }
+	.voice-setup input, .voice-setup select { padding: .62rem .7rem; border: 1px solid #303656; border-radius: 7px; background: #0d1020; color: #f0f1fb; }
+	.voice-install-steps { display: grid; gap: .4rem; padding: .7rem; border: 1px solid #303656; border-radius: 8px; background: #101426; }
+	.voice-install-steps strong { color: #e8eaff; font-size: .76rem; }
+	.voice-install-steps code { display: block; overflow-x: auto; padding: .42rem .5rem; border-radius: 5px; background: #080b16; color: #91e2c1; user-select: all; }
+	.voice-install-steps small { color: #8f96b8; }
+	.voice-contract { display: flex; flex-wrap: wrap; gap: .45rem; }
+	.voice-contract code { padding: .25rem .4rem; border-radius: 5px; background: #0b0e1b; color: #87dcc1; }
+	.voice-setup-message { padding: .6rem .7rem; border-radius: 7px; font-size: .78rem; }
+	.voice-setup-message.ok { color: #8be2b7; background: rgba(60,190,130,.1); border: 1px solid rgba(60,190,130,.3); }
+	.voice-setup-actions { padding-top: .25rem; color: #8f96b8; font-size: .72rem; }
+	@media (max-width: 760px) { .voice-recipes { grid-template-columns: 1fr; } .voice-setup-actions { flex-wrap: wrap; } }
   .banner      { padding: .7rem 1rem; border-radius: 8px; font-size: .85rem; flex-shrink: 0; }
   .err         { background: rgba(240,96,96,.1); border: 1px solid rgba(240,96,96,.3); color: #f06060; }
 
@@ -3118,11 +3626,165 @@
   :global(pre:hover .code-copy-btn) { opacity: 1; }
   :global(.code-copy-btn:hover) { color: #fff; border-color: rgba(108,99,255,.5); }
 
+  /* ── 2026 focused chat shell ─────────────────────────────────────── */
+  .modern-chat {
+    padding: 0; gap: 0; overflow: hidden;
+    color: #eef0ff;
+    background:
+      radial-gradient(circle at 72% 12%, rgba(86, 78, 190, .07), transparent 32%),
+      #090f20;
+  }
+  .modern-chat .page-header {
+    min-height: 68px; padding: 0 1.1rem; gap: 1rem;
+    background: rgba(10, 16, 35, .96); border-bottom: 1px solid #202943;
+  }
+  .chat-brand { display: flex; align-items: center; gap: .75rem; min-width: max-content; }
+  .chat-brand h1 { margin: 0; font-size: 1rem; letter-spacing: -.01em; }
+  .chat-brand span { display: block; margin-top: .12rem; color: #77809f; font-size: .66rem; }
+  .chat-list-toggle, .top-icon, .sidebar-new, .voice-minimize {
+    display: grid; place-items: center; border: 1px solid transparent; color: #aab1ce;
+    background: transparent; cursor: pointer; font-family: inherit;
+  }
+  .chat-list-toggle { width: 30px; height: 30px; border-radius: 8px; font-size: 1.1rem; }
+  .chat-list-toggle:hover, .top-icon:hover, .top-icon.active { color: #fff; background: #19213a; border-color: #2b3657; }
+  .primary-controls { justify-content: flex-end; gap: .45rem; flex-wrap: nowrap; }
+  .agent-picker {
+    min-width: 160px; height: 36px; display: flex; align-items: center; gap: .4rem;
+    padding-left: .65rem; border: 1px solid #283250; border-radius: 9px; background: #111a30;
+  }
+  .agent-picker select { min-width: 0; width: 100%; border: 0; padding: 0 .6rem 0 0; background: transparent; color: #eef0ff; font-weight: 650; }
+  .agent-presence { display: inline-block; width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: #59d7b0; box-shadow: 0 0 0 3px rgba(89,215,176,.1); }
+  .top-icon, .modern-chat .voice-btn { width: 36px; height: 36px; padding: 0; border-radius: 9px; }
+  .top-icon.top-search { width: 48px; color: #8f98b8; font-family: ui-monospace, monospace; font-size: .68rem; }
+  .modern-chat .voice-btn { background: #151d34; border-color: #283250; }
+  .new-chat-btn {
+    height: 36px; padding: 0 .9rem; border: 1px solid #9d99ff; border-radius: 9px;
+    color: #10142a; background: #b7b5ff; font-size: .76rem; font-weight: 750; cursor: pointer;
+  }
+  .new-chat-btn:hover:not(:disabled) { background: #cbc9ff; }
+  .new-chat-btn:disabled { opacity: .45; }
+  .header-tour :global(button) { height: 36px; padding-inline: .65rem; }
+  .chat-more-wrap { position: relative; }
+  .chat-more-menu {
+    position: absolute; z-index: 45; top: calc(100% + .5rem); right: 0; width: 230px;
+    display: grid; gap: .2rem; padding: .4rem; border: 1px solid #2c3658; border-radius: 11px;
+    background: #121a2f; box-shadow: 0 18px 48px rgba(0,0,0,.45);
+  }
+  .chat-more-menu button { padding: .58rem .65rem; border: 0; border-radius: 7px; background: transparent; color: #cdd2e8; text-align: left; cursor: pointer; }
+  .chat-more-menu button:hover:not(:disabled) { color: #fff; background: #202943; }
+  .chat-more-menu button.danger { color: #ff9fa9; }
+  .chat-more-menu button:disabled { opacity: .38; cursor: default; }
+
+  .modern-chat > .banner, .modern-chat > .chat-status-panel, .modern-chat > .controls-panel { margin: .7rem 1rem 0; }
+  .modern-chat .chat-body { background: #090f20; }
+  .modern-chat .chat-sidebar {
+    flex-basis: 270px; margin: 0; padding: 1rem .85rem; gap: .85rem;
+    border-right: 1px solid #202943; background: #121a2f;
+  }
+  .chat-sidebar-head { display: flex; align-items: center; justify-content: space-between; }
+  .chat-sidebar-head div { display: grid; gap: .18rem; }
+  .chat-sidebar-head strong { font-size: .86rem; color: #eef0ff; }
+  .chat-sidebar-head span { color: #7d86a5; font-size: .66rem; }
+  .sidebar-new { width: 28px; height: 28px; border-radius: 7px; background: #1d2742; border-color: #303c60; }
+  .modern-chat .thread-search { max-width: none; border-color: #283250; background: #0c1428; }
+  .modern-chat .ghost-btn { padding-inline: .5rem; }
+  .modern-chat .threads { gap: .42rem; padding: 0; }
+  .modern-chat .thread-chip {
+    min-height: 58px; padding: .58rem .5rem .58rem .72rem; border-color: transparent;
+    border-radius: 10px; background: transparent;
+  }
+  .modern-chat .thread-chip:hover:not(.active) { background: #18223a; border-color: #263251; }
+  .modern-chat .thread-chip.active { background: #212b46; border-color: #3c4770; box-shadow: inset 3px 0 #8d88ff; }
+  .modern-chat .thread-title { font-size: .78rem; color: #eef0ff; }
+  .modern-chat .thread-agent { color: #8992b1; }
+  .modern-chat .chat-main { background: #090f20; }
+  .modern-chat .chat-workspace { gap: 0; }
+  .modern-chat .chat-wrap { border: 0; border-radius: 0; background: transparent; }
+  .modern-chat .messages { padding: 2.2rem 0 1rem; gap: 1.15rem; }
+  /* Use the desktop canvas. Rich answers need enough room for financial tables
+     and artifacts on ultrawide displays; prose keeps its own readable measure. */
+  .modern-chat .msg-row {
+    width: min(1800px, calc(100% - 4rem)); max-width: none; padding: 0;
+  }
+  .modern-chat .bubble { padding: .85rem 1rem; border-radius: 14px; background: #172139; border-color: #263250; box-shadow: 0 7px 24px rgba(0,0,0,.08); }
+  .modern-chat .msg-row:not(.user):not(.sys) .bubble {
+    width: 100%; max-width: 100%; padding: 1rem 1.15rem;
+    border: 1px solid #202b47; border-radius: 14px; background: #141d33;
+  }
+  .modern-chat .msg-row.user .bubble { max-width: min(70%, 880px); background: #3a435f; border-color: #47516f; border-bottom-right-radius: 4px; }
+  .modern-chat .btext { font-size: .9rem; line-height: 1.65; }
+  /* Prose keeps a comfortable measure, while tables, charts, code, thinking
+     traces, and other wide artifacts can occupy the full response card. */
+  .modern-chat :global(.markdown-body > p),
+  .modern-chat :global(.markdown-body > h1),
+  .modern-chat :global(.markdown-body > h2),
+  .modern-chat :global(.markdown-body > h3),
+  .modern-chat :global(.markdown-body > ul),
+  .modern-chat :global(.markdown-body > ol),
+  .modern-chat :global(.markdown-body > blockquote) { max-width: 92ch; }
+  .modern-chat :global(.markdown-body table) { display: table; width: 100%; }
+  .modern-chat .bmeta { margin-top: .25rem; color: #727c9c; }
+  .modern-chat .pending-attachments { width: min(1500px, calc(100% - 4rem)); margin: 0 auto; }
+  .modern-chat .input-row {
+    width: min(1500px, calc(100% - 4rem)); margin: .5rem auto 1rem; padding: .55rem;
+    align-items: center; border: 1px solid #2b3658; border-radius: 16px; background: #1a243b;
+    box-shadow: 0 18px 48px rgba(0,0,0,.25);
+  }
+  .modern-chat .input-row textarea { min-height: 48px; max-height: 160px; border: 0; background: transparent; box-shadow: none; line-height: 1.45; }
+  .modern-chat .input-row textarea:focus { outline: none; }
+  .composer-voice { width: 35px; height: 35px; flex: 0 0 35px; border: 0; border-radius: 50%; color: #cbd0e8; background: #28334f; cursor: pointer; }
+  .composer-voice:hover:not(:disabled) { color: #fff; background: #354261; }
+  .modern-chat .send-btn { width: 38px; height: 38px; padding: 0; border-radius: 50%; }
+
+  /* Immersive voice mode. It overlays Chat but can be minimized without ending the turn. */
+  .voice-session {
+    position: fixed; inset: 0; z-index: 90; display: flex; flex-direction: column; overflow: hidden;
+    color: #f0f2ff; background:
+      radial-gradient(circle at 52% 48%, rgba(89, 112, 193, .18), transparent 26%),
+      radial-gradient(circle at 52% 48%, rgba(103, 92, 226, .08), transparent 48%), #081022;
+  }
+  .voice-session::before { content: ''; position: absolute; inset: 64px 0 0; pointer-events: none; backdrop-filter: blur(1px); }
+  .voice-session-head { position: relative; z-index: 1; min-height: 64px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 0 1.2rem; border-bottom: 1px solid #1b2742; background: rgba(8,15,32,.78); }
+  .voice-session-brand, .voice-session-agent { display: flex; align-items: center; gap: .55rem; font-size: .8rem; }
+  .voice-brand-mark { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; color: #b9b6ff; background: #171b40; font-weight: 800; }
+  .voice-session-agent { color: #aeb5d1; }
+  .voice-minimize { justify-self: end; width: 34px; height: 34px; border-radius: 9px; border-color: #293553; background: #151e35; font-size: 1.2rem; }
+  .voice-session-stage { position: relative; z-index: 1; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; }
+  .voice-session-status { padding: .35rem 1.2rem; border-radius: 999px; color: #94ceff; background: rgba(105,145,205,.16); font-family: ui-monospace, monospace; font-size: .65rem; font-weight: 750; letter-spacing: .14em; }
+  .voice-session-backend { margin-top: .55rem; color: #697797; font-size: .68rem; letter-spacing: .04em; }
+  .voice-session-stage h2 { width: min(680px, 90vw); min-height: 2.8em; margin: 2.2rem 0 .45rem; color: #edf1ff; font-size: clamp(1.45rem, 3vw, 2.25rem); font-weight: 600; line-height: 1.35; text-shadow: 0 4px 28px rgba(0,0,0,.45); }
+  .voice-session-transcript { width: min(600px, 86vw); min-height: 2.8em; margin: 0; color: #9ca7c5; font-size: .9rem; line-height: 1.55; }
+  .voice-orb { position: relative; width: 78px; height: 78px; margin: 4rem 0 3.4rem; display: flex; align-items: center; justify-content: center; gap: 3px; border: 1px solid #5e65aa; border-radius: 50%; color: #fff; background: linear-gradient(145deg, #313466, #171b43); cursor: pointer; box-shadow: 0 0 0 16px rgba(109,124,230,.06), 0 0 52px 8px rgba(112,158,255,.3); }
+  .voice-orb::before, .voice-orb::after { content: ''; position: absolute; z-index: -1; width: min(38vw, 440px); height: 1px; background: linear-gradient(90deg, transparent, rgba(126,142,230,.55), transparent); }
+  .voice-orb::after { transform: scaleY(16); opacity: .12; filter: blur(2px); }
+  .voice-orb span { width: 3px; height: 16px; border-radius: 3px; background: #bec4ff; }
+  .voice-orb span:nth-child(2), .voice-orb span:nth-child(4) { height: 27px; }
+  .voice-orb span:nth-child(3) { height: 36px; }
+  .voice-orb.active span { animation: voiceBars .75s ease-in-out infinite alternate; }
+  .voice-orb.active span:nth-child(2) { animation-delay: -.3s; } .voice-orb.active span:nth-child(3) { animation-delay: -.55s; } .voice-orb.active span:nth-child(4) { animation-delay: -.15s; }
+  @keyframes voiceBars { to { transform: scaleY(.38); opacity: .65; } }
+  .voice-session-controls { display: flex; align-items: center; justify-content: center; gap: 1.2rem; }
+  .voice-round { width: 44px; height: 44px; border: 1px solid #2d3957; border-radius: 50%; color: #c8cee5; background: #1b263e; cursor: pointer; }
+  .voice-round:hover:not(:disabled), .voice-round.on { color: #fff; background: #293653; }
+  .voice-round:disabled { opacity: .5; }
+  .voice-end { min-width: 164px; height: 44px; display: flex; align-items: center; justify-content: center; gap: .55rem; border: 0; border-radius: 999px; color: #4c1d27; background: #ffaaa8; cursor: pointer; font-size: .72rem; font-weight: 800; letter-spacing: .08em; }
+  .voice-end:hover { background: #ffb9b7; }
+  .voice-stop-text { margin-top: 1.2rem; border: 0; color: #9ba5c4; background: transparent; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+
   /* Responsive — narrow / mobile */
   @media (max-width: 720px) {
-    .page { padding: .75rem; gap: .75rem; }
-    .page-header { flex-direction: column; align-items: stretch; gap: .5rem; }
-    .controls { justify-content: flex-start; }
+    .modern-chat { padding: 0; gap: 0; }
+    .modern-chat .page-header { min-height: 58px; padding: 0 .65rem; flex-direction: row; align-items: center; }
+    .chat-brand span, .primary-controls :global(.run-metrics), .new-chat-btn, .header-tour, .agent-picker .agent-presence { display: none; }
+    .agent-picker { min-width: 112px; }
+    .modern-chat .chat-sidebar { position: absolute; z-index: 30; top: 58px; bottom: 0; width: min(280px, 86vw); }
+    .modern-chat .msg-row { width: 100%; padding: 0 .75rem; }
+    .modern-chat .msg-row.user .bubble, .modern-chat .msg-row:not(.user):not(.sys) .bubble { max-width: 92%; }
+    .modern-chat .input-row { width: calc(100% - 1rem); margin-bottom: .5rem; }
+    .voice-session-head { grid-template-columns: 1fr auto; }
+    .voice-session-agent { display: none; }
+    .voice-session-stage { padding: 1rem; }
+    .voice-orb { margin: 2.6rem 0 2.4rem; }
     .msg-row, .msg-row.user .bubble { max-width: 100%; }
     .bubble { max-width: 100%; }
     .cp-field input, .cp-field select, .cp-field .model-custom, .cp-field input[type=number] { width: 100%; }

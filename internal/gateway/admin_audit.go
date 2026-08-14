@@ -202,6 +202,9 @@ func configPatchSections(p PatchableConfig) []string {
 	if p.Search != nil {
 		sections = append(sections, "search")
 	}
+	if p.Voice != nil {
+		sections = append(sections, "voice")
+	}
 	if p.Costs != nil {
 		sections = append(sections, "costs")
 	}

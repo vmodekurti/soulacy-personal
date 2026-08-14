@@ -251,7 +251,7 @@ export const api = {
     status: () => apiFetch('/onboarding/status'),
   },
 
-  chat: (agentId, text, userId = 'gui-user', overrides = null, sessionId = '', attachmentIds = []) =>
+  chat: (agentId, text, userId = 'gui-user', overrides = null, sessionId = '', attachmentIds = [], responseMode = '') =>
     apiFetch('/chat', {
       method: 'POST',
       body: JSON.stringify({
@@ -259,6 +259,7 @@ export const api = {
         user_id: userId,
         session_id: sessionId,
         text,
+        ...(responseMode ? { response_mode: responseMode } : {}),
         ...(attachmentIds?.length ? { attachment_ids: attachmentIds } : {}),
         ...(overrides ? { overrides } : {}),
       }),
@@ -606,6 +607,35 @@ export const api = {
   voice: {
     status:    () => apiFetch('/voice/status'),
     ephemeral: () => apiFetch('/voice/ephemeral', { method: 'POST' }),
+    capabilities: () => apiFetch('/voice/capabilities'),
+    transcribe: async (audio) => {
+      const form = new FormData()
+      form.append('audio', audio, 'speech.webm')
+      const key = get(apiKey)
+      const res = await fetch('/api/v1/voice/transcribe', {
+        method: 'POST', body: form,
+        headers: key ? { Authorization: `Bearer ${key}` } : {},
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error || res.statusText)
+      }
+      return res.json()
+    },
+    synthesize: async (text, voice = '', signal) => {
+      const key = get(apiKey)
+      const res = await fetch('/api/v1/voice/synthesize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(key ? { Authorization: `Bearer ${key}` } : {}) },
+        body: JSON.stringify({ text, voice }),
+		signal,
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error || res.statusText)
+      }
+      return res.blob()
+    },
   },
 
   // Studio visual builder (M1 Wave 2). Called by the host bridge in

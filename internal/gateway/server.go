@@ -73,6 +73,7 @@ import (
 	"github.com/soulacy/soulacy/internal/session"
 	"github.com/soulacy/soulacy/internal/storage"
 	"github.com/soulacy/soulacy/internal/studio"
+	"github.com/soulacy/soulacy/internal/voice"
 	"github.com/soulacy/soulacy/internal/webui"
 	"github.com/soulacy/soulacy/internal/workboard"
 
@@ -165,6 +166,7 @@ type Server struct {
 	// SetVoiceMinter; nil = voice unavailable (graceful fallback).
 	// Guarded by pluginMu (same wire-after-New lifecycle).
 	voiceMinter           VoiceMinter
+	voiceSidecar          *voice.Sidecar
 	workflowDistiller     *studio.WorkflowDistiller
 	strategyCollector     *studio.StrategyFitCollector
 	lessonStoreOnce       sync.Once
@@ -747,6 +749,9 @@ func (s *Server) buildApp() *fiber.App {
 	// surface as chat (the panel lives in Chat).
 	api.Get("/voice/status", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleVoiceStatus)
 	api.Post("/voice/ephemeral", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleVoiceEphemeral)
+	api.Get("/voice/capabilities", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleVoiceCapabilities)
+	api.Post("/voice/transcribe", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleVoiceTranscribe)
+	api.Post("/voice/synthesize", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleVoiceSynthesize)
 
 	// Chat — token-quota (user + agent) + per-agent RPM checks applied on top of user RPM.
 	api.Get("/chat/status", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.handleChatStatus)

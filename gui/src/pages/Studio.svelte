@@ -26,6 +26,7 @@
   import Palette from '../lib/studio/Palette.svelte'
   import Inspector from '../lib/studio/Inspector.svelte'
   import YamlView from '../lib/studio/YamlView.svelte'
+  import { normalizeYamlEditorText } from '../lib/studio/yamltext.js'
   import BuildInspector from '../lib/studio/BuildInspector.svelte'
   import Collapsible from '../lib/studio/Collapsible.svelte'
   import StudioNode from '../lib/studio/nodes/StudioNode.svelte'
@@ -48,7 +49,7 @@
   import StrategyPanel from '../lib/studio/StrategyPanel.svelte'
   import TriggerSettings from '../lib/studio/TriggerSettings.svelte'
   import {
-    applyGenerationTrigger, intentWithGenerationTrigger, toggleChannelPatch,
+    applyGenerationTrigger, deliveryModeOf, intentWithGenerationTrigger, toggleChannelPatch,
   } from '../lib/studio/triggersettings.js'
   import BuildSpecPanel from '../lib/studio/BuildSpecPanel.svelte'
   import ReadinessPanel from '../lib/studio/ReadinessPanel.svelte'
@@ -65,6 +66,7 @@
     stepStates, canEnter, saveBlockedReason, intentOf, generatedMode,
   } from '../lib/studio/wizard.js'
   import '../lib/studio/studio.css'
+  import './Studio.css'
 
   // (Removed) The old iframe build scrubbed the plugin token from the URL
   // fragment on mount. Embedded in the SPA we hold no token and must NOT touch
@@ -2104,7 +2106,7 @@ Use null for fields that are not present.`
         const r = await bridge.toYaml(workflow)
         yamlText = (r && r.yaml) || ''
       }
-      codeYaml = yamlText
+      codeYaml = normalizeYamlEditorText(yamlText)
       codeOrig = codeYaml
     } catch (e) {
       codeError = (e && e.message) || 'Could not generate YAML'
@@ -2292,7 +2294,7 @@ Use null for fields that are not present.`
     codeError = ''
     try {
       const r = await bridge.fixYaml(codeYaml)
-      if (r && r.yaml) codeYaml = r.yaml
+      if (r && r.yaml) codeYaml = normalizeYamlEditorText(r.yaml)
       await validateCode()
     } catch (e) {
       codeError = (e && e.message) || 'AI fix failed — try again or fix manually'
@@ -2847,6 +2849,19 @@ Use null for fields that are not present.`
     applyStepLayout(id)
   }
 
+  // A generated draft is not a one-way door. Return to the exact prompt pair
+  // that produced it, keep the current draft in place for comparison, and put
+  // the cursor where the user can revise it. Generate already owns the explicit
+  // replacement confirmation, so no work is discarded by this navigation.
+  function editPromptForRegeneration() {
+    goStep(STEP_DESCRIBE)
+    setTimeout(() => {
+      const id = String(rawPrompt || '').trim() ? 'd-raw' : 'd-refined'
+      const editor = document.getElementById(id)
+      if (editor) editor.focus()
+    }, 0)
+  }
+
   // Programmatic navigation, for MILESTONES only — a generate finishing, a draft
   // being opened, a new workflow being started.
   //
@@ -3021,6 +3036,29 @@ Use null for fields that are not present.`
     return gateDraft || workflow
   }
 
+  // Missing delivery is resolved where it is reported. Offer only configured
+  // channels that are not already on the draft; selecting one updates the
+  // exact document under review (canvas or authoritative YAML) and immediately
+  // re-runs readiness instead of navigating away from the unsaved agent.
+  $: readinessDestinationOptions = channelOptions.filter((ch) => {
+    const subject = gateDraft || workflow
+    const selected = (subject && Array.isArray(subject.channels)) ? subject.channels : []
+    return ch && ch.id && !selected.includes(ch.id)
+  })
+  function chooseReadinessDestination(channelId) {
+    const subject = gateSubject()
+    if (!subject || !channelId) return
+    const patch = toggleChannelPatch(subject, channelId, true)
+    if (gateDraft) {
+      gateDraft = { ...subject, ...patch }
+    } else {
+      applyFraming(patch)
+    }
+    const choice = channelOptions.find((ch) => ch.id === channelId)
+    toast(`Results will be delivered to ${(choice && choice.name) || channelId}. Re-checking readiness…`)
+    loadReadiness()
+  }
+
   // Single exit point, so a new dismissal path cannot forget to reset the
   // subject the way revealNode and readinessAction did.
   function closePreflight() {
@@ -3095,7 +3133,7 @@ Use null for fields that are not present.`
         gateDraft = res.workflow
         try {
           const y = await bridge.toYaml(res.workflow)
-          if (y && y.yaml) codeYaml = y.yaml
+          if (y && y.yaml) codeYaml = normalizeYamlEditorText(y.yaml)
         } catch (_) {
           // Leave the editor untouched rather than showing YAML that does not
           // match the draft now being gated.
@@ -4816,60 +4854,38 @@ Use null for fields that are not present.`
 <svelte:window on:keydown={(e) => { if (e.key === 'Escape' && promptViewer) promptViewer = false }} />
 
 <div id="studio-app">
-  <!-- Top bar -->
+  <!-- Studio masthead. Keep one obvious primary action and place infrequent
+       authoring utilities behind a compact menu so the creation path remains
+       readable even as Studio gains capabilities. -->
   <header class="topbar">
-    <div class="brand">
-      <span class="brand-mark" aria-hidden="true">🎬</span>
-      <span class="brand-name">Studio</span>
+    <div class="studio-heading">
+      <span class="studio-kicker">Agent builder</span>
+      <h1>Studio</h1>
+      <p>Design, refine, test, and deploy intelligent agents.</p>
     </div>
-    <div class="intent">
-      <input
-        type="text"
-        class="intent-trigger"
-        value={intent}
-        readonly
-        placeholder="Describe what you want…  (click to open the editor)"
-        aria-label="Open prompt editor"
-        data-tooltip="Click to view and edit the full prompt"
-        on:focus={() => (promptViewer = true)}
-        on:click={() => (promptViewer = true)}
-        on:keydown={(e) => { if (e.key === 'Enter') promptViewer = true }}
-      />
-      <button class="intent-expand" type="button" data-tooltip="Open the full prompt editor" on:click={() => (promptViewer = true)} aria-label="Open prompt editor">⤢ Editor</button>
-    </div>
-    <div class="generate-group" style="display:inline-flex;gap:.35rem;align-items:center;">
-      <!-- Same blocker gate as the panel's Generate button. Without it this one
-           built straight past the required answers, which made the panel's gate
-           look decorative. `title` carries the reason, since this button has no
-           room for the explanatory text the panel shows beneath its own. -->
-      <button class="btn primary" on:click={generateOrStream}
-              disabled={compiling || refining || pipelineRunning || !!refinement || !effectiveIntent || specUnresolved.length > 0 || !!generationTriggerError}
-              title={!effectiveIntent
-                ? 'Describe what you want built first'
-                : specUnresolved.length
-                  ? `Answer ${specUnresolved.length} required detail${specUnresolved.length === 1 ? '' : 's'} first`
-                  : generationTriggerError}>
-        {refining ? 'Refining…' : compiling ? 'Generating…' : pipelineRunning ? 'Running pipeline…' : 'Generate'}
+    <div class="studio-header-actions">
+      <button class="studio-model-select" type="button" on:click={openModelPicker}
+        aria-label={`Choose Studio builder LLM. Current model: ${studioModelLabel}`}
+        data-tooltip="Choose the registered provider and model Studio uses to refine and generate agents">
+        <span>Builder LLM</span>
+        <strong>{studioModelLabel}</strong>
+        <span class="studio-model-caret" aria-hidden="true">⌄</span>
       </button>
-      <!--
-        Story 9 M — per-generation UX toggle. Clicking "Wizard" for this
-        generation flips the effective mode without saving it; the split
-        button label reflects the current mode so operators know what will
-        happen when they click Generate.
-      -->
-      <button
-        class="btn"
-        type="button"
-        data-tooltip={effectiveBuildUX === 'streamed' ? 'Streamed: live-transcript panel while the pipeline runs. Click to switch to Wizard for this generation only.' : 'Wizard: stepped modal that pauses between phases. Click to switch to Streamed for this generation only.'}
-        on:click={() => (buildUXOverride = effectiveBuildUX === 'streamed' ? 'wizard' : 'streamed')}
-      >
-        {effectiveBuildUX === 'streamed' ? '⚡ Streamed' : '🪄 Wizard'}
-        {#if buildUXOverride}<span style="opacity:.6;">(once)</span>{/if}
-      </button>
-    </div>
-
-    <!-- M6: draft management toolbar -->
-    <div class="toolbar" role="group" aria-label="Draft management">
+      {#if workflow}
+        <button class="studio-model-select" type="button" on:click={openAgentModelPicker}
+          aria-label={`Choose agent runtime LLM. Current model: ${agentModelLabel}`}
+          data-tooltip="Choose the registered provider and model this agent uses when it runs">
+          <span>Agent LLM</span>
+          <strong>{agentModelLabel}</strong>
+          <span class="studio-model-caret" aria-hidden="true">⌄</span>
+        </button>
+      {/if}
+      <button class="btn primary studio-new" type="button" on:click={newWorkflow}>+ New workflow</button>
+      <details class="studio-more">
+        <summary class="btn studio-more-trigger" aria-label="More Studio actions">More</summary>
+        <!-- M6: draft management toolbar. These remain fully available without
+             competing with the two actions that advance the current task. -->
+        <div class="toolbar" role="group" aria-label="Draft management">
       <!-- "+ New agent" and "My Workflows" removed: starting something new IS
            the Describe step's prompt box, and continuing existing work is the
            list beside it. Two toolbar buttons doing what step 1 already does
@@ -4879,11 +4895,6 @@ Use null for fields that are not present.`
         Open workflows{#if libCount}<span class="toolbar-count">{libCount}</span>{/if}
       </button>
       <button class="btn" type="button" on:click={openRules} data-tooltip="Edit the SOUL.yaml authoring rules used when generating, validating, and fixing">📋 Rules</button>
-      <button class="btn" type="button" on:click={openModelPicker} data-tooltip="Choose which in-framework provider/model Studio uses to BUILD agents">⚙ Builds with: {studioModelLabel}</button>
-      {#if workflow}
-        <button class="btn" type="button" on:click={openAgentModelPicker}
-                data-tooltip="Choose the provider/model this agent RUNS on — written into its SOUL.yaml">🤖 Runs on: {agentModelLabel}</button>
-      {/if}
       <button class="btn" type="button" on:click={openTemplates} data-tooltip="Start from a template">Templates</button>
       <button class="btn" type="button" on:click={openYamlBrowser} data-tooltip="View the raw SOUL.yaml of any agent (read-only)">Browse SOUL.yaml</button>
       <button class="btn" type="button" on:click={saveDraft} disabled={!workflow || savingDraft} data-tooltip="Save the current draft to the library">
@@ -4891,6 +4902,15 @@ Use null for fields that are not present.`
       </button>
       <button class="btn" type="button" on:click={exportDraft} disabled={!workflow} data-tooltip="Download the current draft as a .studio.json file">Export</button>
       <button class="btn" type="button" on:click={triggerImport} data-tooltip="Load a .studio.json file from disk">Import</button>
+      <button
+        class="btn"
+        type="button"
+        data-tooltip={effectiveBuildUX === 'streamed' ? 'Streamed generation is active. Click to use the stepped Wizard once.' : 'The stepped Wizard is active. Click to use Streamed generation once.'}
+        on:click={() => (buildUXOverride = effectiveBuildUX === 'streamed' ? 'wizard' : 'streamed')}
+      >
+        {effectiveBuildUX === 'streamed' ? '⚡ Streamed build' : '🪄 Wizard build'}
+        {#if buildUXOverride}<span class="toolbar-once">(once)</span>{/if}
+      </button>
       <TourButton />
       <input
         bind:this={fileInputEl}
@@ -4901,6 +4921,8 @@ Use null for fields that are not present.`
         aria-hidden="true"
         tabindex="-1"
       />
+        </div>
+      </details>
     </div>
 
   </header>
@@ -4927,6 +4949,12 @@ Use null for fields that are not present.`
     {/if}
     <WizardRail steps={wizardSteps} onGo={goStep} />
     <div class="steprail-right">
+      {#if workflow && step !== STEP_DESCRIBE}
+        <button class="btn prompt-return" type="button" on:click={editPromptForRegeneration}
+          data-tooltip="Return to the original and refined prompts. Your current draft stays intact until you confirm regeneration.">
+          ← Edit prompt &amp; regenerate
+        </button>
+      {/if}
       {#if step === STEP_SAVE && saveBlocked}
         <span class="steprail-block" title={saveBlocked}>⚠ {saveBlocked}</span>
       {/if}
@@ -4975,18 +5003,52 @@ Use null for fields that are not present.`
         <div class="describe-step">
           <div class="describe-cols">
             <div class="describe-left">
-              <h3 class="step-h">Describe your workflow</h3>
-              <p class="step-sub">Describe what you want. Soulacy will create a workflow and show you what it understood before building anything.</p>
-              {#if promptError}<div class="strip strip-error">⚠ {promptError}</div>{/if}
+              <section class="studio-card prompt-card">
+                <div class="studio-card-head">
+                  <div>
+                    <span class="studio-card-kicker">Step 1</span>
+                    <h2>Your prompt</h2>
+                  </div>
+                  <button class="icon-btn" type="button" on:click={() => (promptViewer = true)} aria-label="Open full prompt editor" data-tooltip="Open full prompt editor">⤢</button>
+                </div>
+                <p class="studio-card-copy">Describe the outcome in plain language. Include timing and delivery only when they matter.</p>
+                {#if promptError}<div class="strip strip-error">⚠ {promptError}</div>{/if}
+                <label class="sr-only" for="d-raw">Your prompt</label>
+                <textarea id="d-raw" class="pe-area" bind:value={rawPrompt}
+                  placeholder="For example: Watch incoming support requests, summarize urgent issues, and notify the on-call Slack channel."></textarea>
+                <div class="studio-card-actions">
+                  <button class="text-btn" type="button" disabled={!rawPrompt} on:click={() => (rawPrompt = '')}>Clear</button>
+                  <button class="btn primary" type="button" disabled={modalRefining || refining || !effectiveIntent} on:click={refineFromModal}>
+                    {modalRefining || refining ? 'Refining…' : '✦ Refine prompt'}
+                  </button>
+                </div>
+              </section>
 
-              <label class="pe-label" for="d-raw">Your prompt</label>
-              <textarea id="d-raw" class="pe-area" bind:value={rawPrompt}
-                placeholder="e.g. Every weekday at 7:00am, build an “AI articles podcast” from HBR, MIT Technology Review and Gartner, and deliver it to Telegram."></textarea>
-
-              <label class="pe-label" for="d-refined">Refined prompt</label>
-              <p class="pe-hint">The detailed specification Studio builds from. Edit it directly if you like.</p>
-              <textarea id="d-refined" class="pe-area" bind:value={intent}
-                placeholder="Appears here after you Refine — or write a detailed prompt directly."></textarea>
+              <section class="studio-card refined-card">
+                <div class="studio-card-head">
+                  <div>
+                    <span class="studio-card-kicker ready">Build-ready</span>
+                    <h2>Refined prompt</h2>
+                  </div>
+                  <span class="refined-status" class:active={!!intent} aria-label={intent ? 'Refined prompt ready' : 'Waiting for refined prompt'}>{intent ? '✓' : '…'}</span>
+                </div>
+                <p class="studio-card-copy">Review the detailed specification Studio will use. You can edit it directly.</p>
+                <label class="sr-only" for="d-refined">Refined prompt</label>
+                <textarea id="d-refined" class="pe-area" bind:value={intent}
+                  placeholder="Your refined, build-ready prompt will appear here."></textarea>
+                <div class="studio-card-actions">
+                  <span class="action-hint">Trigger and delivery stay under your control below.</span>
+                  <button class="btn primary" type="button" on:click={generateOrStream}
+                    disabled={compiling || refining || pipelineRunning || !!refinement || !effectiveIntent || specUnresolved.length > 0 || !!generationTriggerError}
+                    title={!effectiveIntent
+                      ? 'Describe what you want built first'
+                      : specUnresolved.length
+                        ? `Answer ${specUnresolved.length} required detail${specUnresolved.length === 1 ? '' : 's'} first`
+                        : generationTriggerError}>
+                    {compiling ? 'Generating…' : pipelineRunning ? 'Running pipeline…' : 'Generate workflow →'}
+                  </button>
+                </div>
+              </section>
 
               <!-- Describing something new is one answer to "what do you want to
                    do"; continuing something you already built is the other, and
@@ -4994,9 +5056,12 @@ Use null for fields that are not present.`
                    the My Workflows dialog, because a user should not have to
                    open a dialog to discover their own agents exist. -->
               {#if carriedSession || libParts.deployed.length || libParts.saved.length || libParts.drafts.length}
-                <div class="d-existing">
+                <aside class="d-existing studio-card">
                   <div class="d-existing-head">
-                    <span>Or continue existing work</span>
+                    <div>
+                      <span class="studio-card-kicker">Your workspace</span>
+                      <h2>Recent work</h2>
+                    </div>
                     <button class="btn btn-sm" type="button" on:click={openLibrary}>See all</button>
                   </div>
                   <ul class="d-existing-list">
@@ -5048,10 +5113,24 @@ Use null for fields that are not present.`
                       </li>
                     {/each}
                   </ul>
-                </div>
+                </aside>
+              {:else}
+                <aside class="d-existing studio-card">
+                  <div class="d-existing-head">
+                    <div>
+                      <span class="studio-card-kicker">Your workspace</span>
+                      <h2>Recent work</h2>
+                    </div>
+                  </div>
+                  <div class="recent-empty">
+                    <span aria-hidden="true">✦</span>
+                    <strong>Your workflows will appear here</strong>
+                    <p>Start with a prompt, then save the result to pick it up later.</p>
+                  </div>
+                </aside>
               {/if}
             </div>
-            <div class="describe-right">
+            <div class="describe-right studio-card settings-card">
               <BuildSpecPanel
                 spec={effectiveBuildSpec}
                 recommendation={specRecommendation}
@@ -5067,6 +5146,7 @@ Use null for fields that are not present.`
                 onGenerate={generateOrStream}
                 refining={modalRefining || refining}
                 generating={compiling || pipelineRunning}
+                showActions={false}
               />
             </div>
           </div>
@@ -5091,9 +5171,11 @@ Use null for fields that are not present.`
                 loading={readinessLoading}
                 error={readinessError}
                 busy={saving}
+                destinations={readinessDestinationOptions}
                 onRecheck={loadReadiness}
                 onAction={readinessAction}
                 onReveal={(id) => { goStep(STEP_BUILD); revealNode(id) }}
+                onDestination={chooseReadinessDestination}
               />
             </div>
 
@@ -5110,7 +5192,17 @@ Use null for fields that are not present.`
                 <span>A new agent is staged so you review and deploy it explicitly — from My workflows. Editing an agent you have already enabled leaves it enabled, so a fix does not silently stop its schedule.</span>
               </div>
 
-              {#if (workflow.channels || []).length}
+              {#if deliveryModeOf(workflow) === 'reply'}
+                <div class="save-field">
+                  <span>Response delivery</span>
+                  <div class="save-chips"><span class="sp-chip">Invocation route</span></div>
+                </div>
+              {:else if deliveryModeOf(workflow) === 'none'}
+                <div class="save-field">
+                  <span>Response delivery</span>
+                  <div class="save-chips"><span class="sp-chip">Direct caller only</span></div>
+                </div>
+              {:else if (workflow.channels || []).length}
                 <div class="save-field">
                   <span>Output channels</span>
                   <div class="save-chips">
@@ -7588,9 +7680,11 @@ Use null for fields that are not present.`
           loading={readinessLoading}
           error={readinessError}
           busy={saving || fixing}
+          destinations={readinessDestinationOptions}
           onRecheck={loadReadiness}
           onAction={readinessAction}
           onReveal={revealNode}
+          onDestination={chooseReadinessDestination}
         />
 
         <!-- A reason is required only when there is something to justify.
@@ -7874,5 +7968,3 @@ Use null for fields that are not present.`
     on:close={() => { showBuildInspector = false; replayOverride = null }}
   />
 </div>
-
-<style src="./Studio.css"></style>

@@ -99,15 +99,17 @@ func ToAgentDefinition(draft Draft, acceptPrivilegedExposure bool) (agent.Defini
 	classifyFlowNodes(&draft.Flow)
 
 	def := agent.Definition{
-		ID:              id,
-		Name:            draft.Name,
-		Description:     describeWorkflowShort(draft),
-		Trigger:         mapTrigger(draft.Trigger.Type),
-		Channels:        append([]string(nil), draft.Channels...),
-		SystemPrompt:    buildSystemPrompt(draft),
-		StudioIntent:    strings.TrimSpace(draft.Intent),
-		StudioRefined:   draft.Refined,
-		StudioRawIntent: strings.TrimSpace(draft.RawIntent),
+		ID:                 id,
+		Name:               draft.Name,
+		Description:        describeWorkflowShort(draft),
+		Trigger:            mapTrigger(draft.Trigger.Type),
+		Channels:           append([]string(nil), draft.Channels...),
+		SystemPrompt:       buildSystemPrompt(draft),
+		StudioIntent:       strings.TrimSpace(draft.Intent),
+		StudioRefined:      draft.Refined,
+		StudioRawIntent:    strings.TrimSpace(draft.RawIntent),
+		StudioDeliveryMode: normalizeStudioDeliveryMode(draft.DeliveryMode),
+		StudioTriggerMode:  normalizeStudioTriggerMode(draft.Trigger.Type),
 		// Disabled by construction: a Studio save stages an agent for the
 		// operator to review and enable.
 		Enabled:      false,
@@ -186,6 +188,9 @@ func ToAgentDefinition(draft Draft, acceptPrivilegedExposure bool) (agent.Defini
 	// from the trigger + channels; a scheduled agent is schedule-only unless it
 	// also targets channels.
 	def.Surfaces = studioSurfaces(draft)
+	if strings.EqualFold(strings.TrimSpace(draft.Trigger.Type), "chat") {
+		def.Channels = nil
+	}
 
 	// Schedule triggers carry their cron into the agent Schedule block so
 	// the scheduler can register the (disabled) agent unchanged.
@@ -221,20 +226,22 @@ func toReActAgentDefinition(draft Draft, id string, acceptPrivilegedExposure boo
 	runTimeout := normalizedRunTimeout(draft.RunTimeout, reasoningCfg.TotalTimeout)
 
 	def := agent.Definition{
-		ID:              id,
-		Name:            draft.Name,
-		Description:     reactDescription(draft),
-		Trigger:         mapTrigger(draft.Trigger.Type),
-		Channels:        append([]string(nil), draft.Channels...),
-		SystemPrompt:    reactSystemPrompt(draft),
-		StudioIntent:    strings.TrimSpace(draft.Intent),
-		StudioRefined:   draft.Refined,
-		StudioRawIntent: strings.TrimSpace(draft.RawIntent),
-		Enabled:         false, // staged for review, like every Studio save
-		MaxTurns:        maxTurnsOr(draft.MaxTurns, 15),
-		Memory:          memoryOr(draft.Memory),
-		LLM:             llmConfigFor(draft),
-		RunTimeout:      runTimeout,
+		ID:                 id,
+		Name:               draft.Name,
+		Description:        reactDescription(draft),
+		Trigger:            mapTrigger(draft.Trigger.Type),
+		Channels:           append([]string(nil), draft.Channels...),
+		SystemPrompt:       reactSystemPrompt(draft),
+		StudioIntent:       strings.TrimSpace(draft.Intent),
+		StudioRefined:      draft.Refined,
+		StudioRawIntent:    strings.TrimSpace(draft.RawIntent),
+		StudioDeliveryMode: normalizeStudioDeliveryMode(draft.DeliveryMode),
+		StudioTriggerMode:  normalizeStudioTriggerMode(draft.Trigger.Type),
+		Enabled:            false, // staged for review, like every Studio save
+		MaxTurns:           maxTurnsOr(draft.MaxTurns, 15),
+		Memory:             memoryOr(draft.Memory),
+		LLM:                llmConfigFor(draft),
+		RunTimeout:         runTimeout,
 		// The reasoning loop — the whole point. No Workflow block. Studio sets
 		// sensible reasoning timeouts up front (the engine's bare defaults of
 		// 30s/step and 180s total are tuned for fast cloud calls and trip the
@@ -281,6 +288,9 @@ func toReActAgentDefinition(draft Draft, id string, acceptPrivilegedExposure boo
 	}
 
 	def.Surfaces = studioSurfaces(draft)
+	if strings.EqualFold(strings.TrimSpace(draft.Trigger.Type), "chat") {
+		def.Channels = nil
+	}
 	if def.Trigger == agent.TriggerCron {
 		if cron, ok := draft.Trigger.Config["cron"].(string); ok && strings.TrimSpace(cron) != "" {
 			def.Schedule = &agent.Schedule{Cron: cron}
@@ -674,8 +684,8 @@ func flowPeers(flow Flow) []string {
 	return out
 }
 
-// mapTrigger translates Studio's trigger.type vocabulary (schedule | channel
-// | webhook | manual) onto the agent's TriggerKind. "manual" has no direct
+// mapTrigger translates Studio's trigger.type vocabulary (chat | schedule |
+// channel | webhook | manual) onto the agent's TriggerKind. Chat and manual have no direct
 // agent equivalent; it maps to TriggerInternal (programmatic activation).
 // studioSurfaces derives the agent's interface surfaces from the draft's
 // trigger + channels (Stories #11/#12). Cron-only agents stay schedule-only,
@@ -698,6 +708,8 @@ func studioSurfaces(draft Draft) []string {
 		out = append(out, s)
 	}
 	switch strings.ToLower(strings.TrimSpace(draft.Trigger.Type)) {
+	case "chat":
+		add(agent.SurfaceChat)
 	case "schedule", "cron", "oneshot":
 		add(agent.SurfaceSchedule)
 		for _, ch := range draft.Channels {
@@ -730,7 +742,7 @@ func mapTrigger(t string) agent.TriggerKind {
 		return agent.TriggerChannel
 	case "webhook":
 		return agent.TriggerWebhook
-	case "manual", "internal":
+	case "chat", "manual", "internal":
 		return agent.TriggerInternal
 	default:
 		// An unspecified/unknown trigger type must NOT default into the most
@@ -884,6 +896,8 @@ func describeTrigger(t Trigger) string {
 		return "runs on a schedule."
 	case "channel":
 		return "runs when a message arrives on a connected channel."
+	case "chat":
+		return "runs when a user sends a message in Soulacy GUI Chat."
 	case "webhook":
 		return "runs when its webhook endpoint is called."
 	case "manual", "internal", "":

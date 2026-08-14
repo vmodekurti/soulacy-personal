@@ -26,7 +26,7 @@ import "context"
 var ValidNodeKinds = []string{"tool", "agent", "python", "llm", "branch", "parallel"}
 
 // ValidTriggerTypes is the closed set of trigger types a draft may declare.
-var ValidTriggerTypes = []string{"schedule", "channel", "webhook", "manual"}
+var ValidTriggerTypes = []string{"chat", "schedule", "channel", "webhook", "manual"}
 
 // SchemaLLM is an OPTIONAL extension of LLM: a client that can constrain its
 // completion to a JSON Schema. When the compiler's LLM implements it, generation

@@ -71,12 +71,24 @@ const (
 	maxUpdateManifestBytes  = 2 << 20
 	maxUpdateArtifactBytes  = 1 << 30
 	maxSigstoreBundleBytes  = 8 << 20
+	maxCosignBinaryBytes    = 256 << 20
 	githubActionsOIDCIssuer = "https://token.actions.githubusercontent.com"
+	cosignBootstrapVersion  = "v3.1.3"
 )
 
 var HTTPClient = http.DefaultClient
 var renameUpdateFile = os.Rename
 var VerifySigstore = verifySigstoreBundle
+var findCosign = exec.LookPath
+var cosignReleaseBaseURL = "https://github.com/sigstore/cosign/releases/download/" + cosignBootstrapVersion
+var cosignCacheRoot = defaultCosignCacheRoot
+
+var cosignBootstrapSHA256 = map[string]string{
+	"darwin/amd64": "2347488e5d5b25336644024dfeca5601b190e91197a71a917bda44744aff106c",
+	"darwin/arm64": "5cf948c2f4dfe59687bdd0b8523709067383e03982cc543475c8a7dc70e92a76",
+	"linux/amd64":  "4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71",
+	"linux/arm64":  "c5d324e091826b0d7a78eb16fef316450b4eb9aaec045611c08ba06f5e73220a",
+}
 
 func CheckForUpdate(ctx context.Context, manifestSource, currentVersion string) (UpdateCheckResult, error) {
 	currentVersion = strings.TrimSpace(currentVersion)
@@ -259,10 +271,11 @@ func expectedWorkflowIdentity(version string) string {
 }
 
 func verifySigstoreBundle(ctx context.Context, artifactPath, bundlePath, identity string) error {
-	cosign, err := exec.LookPath("cosign")
+	cosign, cleanup, err := resolveCosignVerifier(ctx)
 	if err != nil {
-		return fmt.Errorf("cosign is required for update verification: %w", err)
+		return err
 	}
+	defer cleanup()
 	cmd := exec.CommandContext(ctx, cosign, "verify-blob",
 		"--bundle", bundlePath,
 		"--certificate-identity", identity,
@@ -271,6 +284,115 @@ func verifySigstoreBundle(ctx context.Context, artifactPath, bundlePath, identit
 	)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("cosign verification failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func resolveCosignVerifier(ctx context.Context) (string, func(), error) {
+	if path, err := findCosign("cosign"); err == nil {
+		return path, func() {}, nil
+	}
+
+	platform := runtime.GOOS + "/" + runtime.GOARCH
+	want, ok := cosignBootstrapSHA256[platform]
+	if !ok {
+		return "", func() {}, fmt.Errorf(
+			"cosign is not installed and automatic verifier bootstrap is unsupported on %s; install cosign and retry",
+			platform,
+		)
+	}
+	name := "cosign-" + runtime.GOOS + "-" + runtime.GOARCH
+	cacheRoot, err := cosignCacheRoot()
+	if err == nil {
+		cached := filepath.Join(cacheRoot, cosignBootstrapVersion, name)
+		if verifyFileSHA256(cached, want) == nil {
+			if chmodErr := os.Chmod(cached, 0o700); chmodErr == nil {
+				return cached, func() {}, nil
+			}
+		}
+	}
+	source := strings.TrimRight(cosignReleaseBaseURL, "/") + "/" + name
+	path, cleanup, err := downloadUpdateSource(ctx, source, maxCosignBinaryBytes)
+	if err != nil {
+		return "", func() {}, fmt.Errorf("bootstrap cosign %s: %w", cosignBootstrapVersion, err)
+	}
+	if err := verifyFileSHA256(path, want); err != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("bootstrap cosign %s: %w", cosignBootstrapVersion, err)
+	}
+	if err := os.Chmod(path, 0o700); err != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("bootstrap cosign %s: make verifier executable: %w", cosignBootstrapVersion, err)
+	}
+	if cacheRoot != "" {
+		cached, cacheErr := cacheCosignVerifier(cacheRoot, name, path)
+		if cacheErr == nil {
+			cleanup()
+			return cached, func() {}, nil
+		}
+	}
+	return path, cleanup, nil
+}
+
+func defaultCosignCacheRoot() (string, error) {
+	root, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "soulacy", "verification"), nil
+}
+
+func cacheCosignVerifier(cacheRoot, name, source string) (string, error) {
+	dir := filepath.Join(cacheRoot, cosignBootstrapVersion)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	staged, err := os.CreateTemp(dir, ".cosign-*")
+	if err != nil {
+		return "", err
+	}
+	stagedPath := staged.Name()
+	defer func() { _ = os.Remove(stagedPath) }()
+	input, err := os.Open(source)
+	if err != nil {
+		_ = staged.Close()
+		return "", err
+	}
+	_, copyErr := io.Copy(staged, input)
+	closeInputErr := input.Close()
+	closeErr := staged.Close()
+	if copyErr != nil {
+		return "", copyErr
+	}
+	if closeInputErr != nil {
+		return "", closeInputErr
+	}
+	if closeErr != nil {
+		return "", closeErr
+	}
+	if err := os.Chmod(stagedPath, 0o700); err != nil {
+		return "", err
+	}
+	destination := filepath.Join(dir, name)
+	if err := os.Rename(stagedPath, destination); err != nil {
+		return "", err
+	}
+	return destination, nil
+}
+
+func verifyFileSHA256(path, want string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return err
+	}
+	got := hex.EncodeToString(hash.Sum(nil))
+	if !strings.EqualFold(got, strings.TrimSpace(want)) {
+		return fmt.Errorf("sha256 mismatch: got %s want %s", got, want)
 	}
 	return nil
 }

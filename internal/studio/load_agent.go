@@ -24,13 +24,14 @@ func HasWorkflow(def agent.Definition) bool {
 // edits the WORKFLOW, and a re-save regenerates those.
 func FromAgentDefinition(def agent.Definition) Draft {
 	d := Draft{
-		ID:        def.ID,
-		Name:      def.Name,
-		Intent:    def.StudioIntent,
-		Refined:   def.StudioRefined,
-		RawIntent: def.StudioRawIntent,
-		Trigger:   Trigger{Type: triggerTypeFromKind(def.Trigger)},
-		Channels:  append([]string(nil), def.Channels...),
+		ID:           def.ID,
+		Name:         def.Name,
+		Intent:       def.StudioIntent,
+		Refined:      def.StudioRefined,
+		RawIntent:    def.StudioRawIntent,
+		DeliveryMode: def.StudioDeliveryMode,
+		Trigger:      Trigger{Type: studioTriggerType(def)},
+		Channels:     append([]string(nil), def.Channels...),
 		// Preserve the agent's LLM config (provider/model/temperature/...) and the
 		// whole-run timeout so a Studio round-trip is lossless. Applies to BOTH the
 		// ReAct and workflow branches below since they share this construction.
@@ -156,4 +157,11 @@ func triggerTypeFromKind(k agent.TriggerKind) string {
 	default:
 		return "manual"
 	}
+}
+
+func studioTriggerType(def agent.Definition) string {
+	if mode := normalizeStudioTriggerMode(def.StudioTriggerMode); mode != "" {
+		return mode
+	}
+	return triggerTypeFromKind(def.Trigger)
 }

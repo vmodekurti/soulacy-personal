@@ -155,8 +155,9 @@ type Config struct {
 	// schema contract in docs/EVENTS.md).
 	Hooks []HookConfig `mapstructure:"hooks"`
 
-	// Voice configures the realtime voice control plane (Story 11,
-	// docs/VOICE_SPIKE.md). Empty provider = voice panel disabled.
+	// Voice configures either the provider-neutral STT/TTS sidecar or the
+	// optional realtime control plane. Empty provider = voice setup available
+	// from Chat, but no speech backend active.
 	Voice VoiceConfig `mapstructure:"voice"`
 
 	// Search configures the built-in web_search tool.
@@ -170,18 +171,25 @@ type Config struct {
 	Log LogConfig `mapstructure:"log"`
 }
 
-// VoiceConfig selects the realtime voice provider for the Chat panel.
+// VoiceConfig selects either a realtime provider or a provider-neutral speech
+// sidecar for the Chat panel.
 //
 //	voice:
-//	  provider: openai            # only "openai" is supported (v1)
-//	  model: gpt-realtime-mini    # default
-//	  base_url: ""                # override for Azure/compatible endpoints
+//	  provider: sidecar
+//	  sidecar_url: http://127.0.0.1:8081
+//	  voice: af_heart
+//	  timeout: 60s
 //
-// The API key comes from llm.providers.openai.api_key or OPENAI_API_KEY.
+// Set provider=openai to retain the direct WebRTC realtime integration. The
+// OpenAI API key comes from llm.providers.openai.api_key or OPENAI_API_KEY.
 type VoiceConfig struct {
-	Provider string `mapstructure:"provider"`
-	Model    string `mapstructure:"model"`
-	BaseURL  string `mapstructure:"base_url"`
+	Provider    string `mapstructure:"provider"`
+	Model       string `mapstructure:"model"`
+	BaseURL     string `mapstructure:"base_url"`
+	SidecarURL  string `mapstructure:"sidecar_url"`
+	Voice       string `mapstructure:"voice"`
+	Timeout     string `mapstructure:"timeout"`
+	AllowRemote bool   `mapstructure:"allow_remote"`
 }
 
 // HookConfig declares one outbound webhook endpoint.

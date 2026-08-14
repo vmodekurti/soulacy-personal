@@ -48,6 +48,7 @@ func (c *Config) Validate() error {
 	dur("auth.jwt_access_ttl", c.Auth.JWTAccessTTL)
 	dur("auth.jwt_refresh_ttl", c.Auth.JWTRefreshTTL)
 	dur("queue.nats_ack_wait", c.Queue.NATSAckWait)
+	dur("voice.timeout", c.Voice.Timeout)
 	if c.Runtime.ToolTimeout != "" && c.Runtime.Timeouts.Tool != "" && c.Runtime.ToolTimeout != c.Runtime.Timeouts.Tool {
 		errs = append(errs, fmt.Errorf("runtime.tool_timeout (%s) must match runtime.timeouts.tool (%s); prefer runtime.timeouts.tool", c.Runtime.ToolTimeout, c.Runtime.Timeouts.Tool))
 	}
@@ -63,6 +64,11 @@ func (c *Config) Validate() error {
 	// --- Server ---
 	if c.Server.Port < 1 || c.Server.Port > 65535 {
 		errs = append(errs, fmt.Errorf("server.port: %d is out of range (1–65535)", c.Server.Port))
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Voice.Provider)) {
+	case "", "openai", "sidecar":
+	default:
+		errs = append(errs, fmt.Errorf("voice.provider: unsupported value %q", c.Voice.Provider))
 	}
 
 	// --- Runtime numeric bounds ---

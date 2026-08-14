@@ -14,9 +14,10 @@ import (
 // canvas exactly as authored.
 func TestAgentDefinitionRoundTrip(t *testing.T) {
 	orig := Draft{
-		Name:     "My Flow",
-		Trigger:  Trigger{Type: "schedule", Config: map[string]any{"cron": "0 7 * * *"}},
-		Channels: []string{"slack", "email"},
+		Name:         "My Flow",
+		DeliveryMode: "outbound",
+		Trigger:      Trigger{Type: "schedule", Config: map[string]any{"cron": "0 7 * * *"}},
+		Channels:     []string{"slack", "email"},
 		Output: &ScheduleOutput{
 			Channel:  "slack",
 			To:       "C123",
@@ -50,6 +51,9 @@ func TestAgentDefinitionRoundTrip(t *testing.T) {
 	if !reflect.DeepEqual(back.Channels, orig.Channels) {
 		t.Fatalf("channels: %v != %v", back.Channels, orig.Channels)
 	}
+	if back.DeliveryMode != orig.DeliveryMode {
+		t.Fatalf("delivery mode: %q != %q", back.DeliveryMode, orig.DeliveryMode)
+	}
 	if back.Output == nil || back.Output.Channel != "slack" || back.Output.To != "C123" || back.Output.BotName != "Ops Bot" {
 		t.Fatalf("output not preserved: %+v", back.Output)
 	}
@@ -58,6 +62,35 @@ func TestAgentDefinitionRoundTrip(t *testing.T) {
 	}
 	if back.Flow.Nodes[1].Code != "def run(i):\n    return i" {
 		t.Fatalf("python code not preserved: %q", back.Flow.Nodes[1].Code)
+	}
+}
+
+func TestAgentDefinitionRoundTrip_PreservesGUIChatOnlyMode(t *testing.T) {
+	orig := Draft{
+		Name:         "GUI Chat Assistant",
+		Strategy:     "auto",
+		Intent:       "Answer questions only in Soulacy GUI Chat",
+		SystemPrompt: "Reply conversationally in GUI Chat.",
+		Trigger:      Trigger{Type: "chat"},
+		DeliveryMode: "reply",
+		Tools:        []string{"web_search"},
+	}
+	def, err := ToAgentDefinition(orig, false)
+	if err != nil {
+		t.Fatalf("ToAgentDefinition: %v", err)
+	}
+	if def.Trigger != agent.TriggerInternal {
+		t.Fatalf("GUI Chat must use the safe internal runtime trigger, got %q", def.Trigger)
+	}
+	if !reflect.DeepEqual(def.Surfaces, []string{agent.SurfaceChat}) {
+		t.Fatalf("GUI Chat-only surfaces = %#v", def.Surfaces)
+	}
+	if def.StudioTriggerMode != "chat" || def.StudioDeliveryMode != "reply" {
+		t.Fatalf("Studio modes were not persisted: trigger=%q delivery=%q", def.StudioTriggerMode, def.StudioDeliveryMode)
+	}
+	back := FromAgentDefinition(def)
+	if back.Trigger.Type != "chat" || back.DeliveryMode != "reply" {
+		t.Fatalf("Studio modes did not round-trip: %+v", back)
 	}
 }
 

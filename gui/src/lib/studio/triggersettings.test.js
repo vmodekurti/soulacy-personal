@@ -6,7 +6,10 @@ import TriggerSettings from './TriggerSettings.svelte'
 import GenerationTrigger from './GenerationTrigger.svelte'
 import {
   applyGenerationTrigger,
+  deliveryModePatch,
+  deliveryModeOf,
   intentWithGenerationTrigger,
+  routeSummary,
   toggleChannelPatch,
   triggerChannelPatch,
   triggerTypePatch,
@@ -30,7 +33,20 @@ function mount(props, Component = TriggerSettings) {
 }
 
 describe('GenerationTrigger', () => {
-  it('defaults a channel trigger to same-channel reply and drops it when leaving', async () => {
+  it('offers GUI Chat as an explicit inbound and outbound conversation', () => {
+    const changes = []
+    const root = mount({
+      selection: { type: 'auto', delivery: 'auto' },
+      channels: [],
+      onChange: (value) => changes.push(value),
+    }, GenerationTrigger)
+    const type = root.querySelector('#generation-trigger-type')
+    type.value = 'chat'
+    type.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(changes.at(-1)).toMatchObject({ type: 'chat', delivery: 'reply' })
+  })
+
+  it('keeps contextual reply for manual invocation and drops it for a schedule', async () => {
     const changes = []
     const root = mount({
       selection: { type: 'auto', delivery: 'auto' },
@@ -46,11 +62,28 @@ describe('GenerationTrigger', () => {
     await tick()
     type.value = 'manual'
     type.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(changes.at(-1).delivery).toBe('reply')
+
+    component.$set({ selection: changes.at(-1) })
+    await tick()
+    type.value = 'schedule'
+    type.dispatchEvent(new Event('change', { bubbles: true }))
     expect(changes.at(-1).delivery).toBe('auto')
   })
 })
 
 describe('TriggerSettings', () => {
+  it('makes GUI Chat-only conversation explicit', () => {
+    const root = mount({
+      workflow: { trigger: { type: 'chat' }, delivery_mode: 'reply' },
+      channels: [{ id: 'telegram', name: 'Telegram' }],
+    })
+    expect(root.querySelector('#studio-trigger-type').value).toBe('chat')
+    expect(root.querySelector('#studio-delivery-mode').value).toBe('reply')
+    expect(root.textContent).toContain('Inbound and outbound stay in the same Soulacy GUI Chat conversation')
+    expect(root.textContent).not.toContain('Output channels')
+  })
+
   it('changes a manual agent to cron and reveals only schedule settings', async () => {
     const patches = []
     const workflow = { trigger: { type: 'manual', config: {} }, unattended: true }
@@ -61,6 +94,8 @@ describe('TriggerSettings', () => {
     type.dispatchEvent(new Event('change', { bubbles: true }))
     expect(patches.at(-1)).toEqual({
       trigger: { type: 'schedule', config: {} },
+      delivery_mode: 'none',
+      channels: [],
       output: null,
       unattended: false,
     })
@@ -159,6 +194,17 @@ describe('trigger settings transitions', () => {
     expect(text).toContain('Do not convert this into a scheduled job')
   })
 
+  it('grounds GUI Chat-only generation without external delivery', () => {
+    const selection = { type: 'chat', delivery: 'reply' }
+    expect(intentWithGenerationTrigger('Build a flight assistant.', selection))
+      .toContain('same Soulacy GUI Chat conversation')
+    expect(applyGenerationTrigger({
+      trigger: { type: 'schedule' }, channels: ['telegram'], output: { channel: 'telegram' },
+    }, selection)).toMatchObject({
+      trigger: { type: 'chat', config: {} }, delivery_mode: 'reply', channels: [], output: null,
+    })
+  })
+
   it('does not alter the prompt while trigger inference is enabled', () => {
     expect(intentWithGenerationTrigger('Build a weather expert.', { type: 'auto' }))
       .toBe('Build a weather expert.')
@@ -173,7 +219,47 @@ describe('trigger settings transitions', () => {
       channels: ['telegram'], output: { channel: 'telegram', to: 'old' },
     }, selection)).toEqual({
       trigger: { type: 'schedule', config: { cron: '0 7 * * *' } },
+      delivery_mode: 'outbound',
       channels: ['telegram', 'slack'], output: { channel: 'slack', to: '#weather' },
     })
+  })
+
+  it('preserves same-channel reply as structured delivery intent', () => {
+    expect(applyGenerationTrigger({
+      trigger: { type: 'manual', config: {} },
+      channels: ['http'],
+      output: { channel: 'telegram', to: 'old' },
+    }, { type: 'manual', delivery: 'reply' })).toEqual({
+      trigger: { type: 'manual', config: {} },
+      channels: [],
+      delivery_mode: 'reply',
+      output: null,
+      unattended: false,
+    })
+  })
+
+  it('switches contextual delivery without requiring or retaining an output', () => {
+    expect(deliveryModePatch({ output: { channel: 'telegram' } }, 'reply')).toEqual({
+      delivery_mode: 'reply', output: null,
+    })
+    expect(deliveryModePatch({}, 'outbound')).toEqual({ delivery_mode: 'outbound' })
+  })
+
+  it('recognizes same-channel intent in drafts saved before delivery mode existed', () => {
+    expect(deliveryModeOf({
+      trigger: { type: 'manual' },
+      intent: 'Answer the question and reply directly in the same conversation.',
+    })).toBe('reply')
+    expect(deliveryModeOf({ trigger: { type: 'schedule' } })).toBe('none')
+  })
+
+  it('describes valid input/output routes in user-facing terms', () => {
+    expect(routeSummary('chat', 'reply')).toBe('Soulacy GUI Chat message → Same Soulacy GUI Chat conversation')
+    expect(routeSummary('channel', 'reply')).toBe('Connected channel message → Same inbound channel conversation')
+    expect(routeSummary('webhook', 'reply')).toBe('Inbound webhook request → HTTP response to the webhook caller')
+    expect(routeSummary('manual', 'reply')).toBe('Manual or programmatic invocation → Return to the manual/API caller')
+    expect(routeSummary('schedule', 'none')).toBe('Cron schedule → Runs / Activity only')
+    expect(routeSummary('schedule', 'telegram', 'Telegram')).toBe('Cron schedule → Send to fixed Telegram destination')
+    expect(routeSummary('chat', 'telegram', 'Telegram')).toBe('Soulacy GUI Chat message → Same Soulacy GUI Chat conversation + also send to fixed Telegram destination')
   })
 })

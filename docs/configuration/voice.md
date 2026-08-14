@@ -1,104 +1,172 @@
 # Voice
 
-Talk to your agents. The `voice:` block enables a push-to-talk voice panel
-in the Chat view: the browser connects to the provider **directly over
-WebRTC** using a short-lived key minted by the gateway — your real API key
-never reaches the browser, and audio never transits the gateway.
+Voice is an optional speech layer around Soulacy's normal text-chat pipeline.
+It does not need to use the same provider as the agent's LLM.
+
+## Local sidecar (recommended)
+
+Soulacy includes an HTTP adapter that can be installed into an isolated Python
+environment. On Apple Silicon, `auto` selects MLX Whisper so transcription uses
+Apple's MLX/Metal stack instead of requiring a separately compiled
+whisper.cpp binary:
+
+```bash
+sy voice providers
+brew install ffmpeg                         # macOS prerequisite
+brew install python@3.12                    # required if Python 3.10–3.12 is absent
+sy voice enable --recipe auto               # install, configure, and run in background
+# restart Soulacy
+sy voice test
+```
+
+Or click the microphone in **Chat** while voice is unavailable. The setup panel
+shows the same recommendations and writes the configuration for you.
 
 ```yaml
 voice:
-  provider: openai            # only "openai" is supported (v1)
-  model: gpt-realtime-mini    # default; gpt-realtime for higher quality
-  # base_url: ""              # override for Azure/compatible endpoints
+  provider: sidecar
+  sidecar_url: http://127.0.0.1:8081
+  voice: af_heart             # optional TTS voice
+  timeout: 60s
+  allow_remote: false         # loopback only by default
 ```
 
-## Reference
+Suggested local combinations:
 
-| Key | Default | Description |
-|-----|---------|-------------|
-| `provider` | `""` (disabled) | Realtime voice provider. Only `openai` is supported in v1. Empty = voice panel hidden |
-| `model` | `gpt-realtime-mini` | Realtime model. `gpt-realtime` for higher quality at higher cost |
-| `base_url` | `https://api.openai.com` | Override for Azure or OpenAI-compatible endpoints |
+| Recipe | STT | TTS | Notes |
+|---|---|---|---|
+| Apple Silicon (recommended on arm64 macOS) | [MLX Whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper) | [Kokoro](https://github.com/hexgrad/kokoro) | Native Apple MLX/Metal path; installed by `sy voice install --recipe mlx-kokoro` |
+| Portable | [whisper.cpp](https://github.com/ggml-org/whisper.cpp) | [Kokoro](https://github.com/hexgrad/kokoro) | Requires `whisper-cli` and a ggml model; pass the model to `sy voice start --recipe whisper-kokoro --whisper-model …` |
 
-## API key sourcing
+Hardware acceleration is automatic. MLX Whisper uses Metal on Apple Silicon;
+Kokoro selects CUDA on NVIDIA hosts or MPS/Metal on Apple Silicon; and a
+GPU-enabled whisper.cpp build uses its native GPU backend. CPU remains the safe
+fallback. Override detection for troubleshooting with `--accelerator cpu`,
+`--accelerator mps`, or `--accelerator cuda` on `sy voice start` or
+`sy voice enable`. The sidecar capabilities response reports the selected STT
+accelerator and TTS device.
+| Custom | Any | Any | Wrap existing speech services behind the four endpoints below |
 
-The OpenAI API key is **not** part of the `voice:` block. It comes from,
-in order:
+The models consume local CPU/GPU and disk space, but the selected Soulacy agent
+can continue using Ollama, Google, NVIDIA, Anthropic, OpenAI, or any other text
+provider.
 
-1. `llm.providers.openai.api_key` in `config.yaml`
-2. The `OPENAI_API_KEY` environment variable
+The adapter warms both models before opening its HTTP port, so the first Chat
+turn does not pay the model download/load cost. Initial `sy voice start` may
+therefore take several minutes on a fresh installation; wait for `Voice models
+ready.`. Set `SOULACY_VOICE_WARMUP=0` only when startup speed matters more than
+first-response latency. Browser WebM/Opus audio is converted to 16 kHz mono WAV
+with FFmpeg before invoking either STT backend.
+
+## Sidecar HTTP contract
+
+The configured base URL must expose:
+
+### `GET /health`
+
+Return any 2xx status when ready.
+
+### `GET /capabilities`
+
+```json
+{
+  "stt": true,
+  "tts": true,
+  "streaming": false,
+  "languages": ["en"],
+  "voices": ["af_heart"]
+}
+```
+
+This route is optional for minimal sidecars. A 404 means Soulacy assumes both
+STT and TTS and lets individual operations report errors.
+
+### `POST /transcribe`
+
+Accept `multipart/form-data` with an `audio` file and return:
+
+```json
+{"text":"What is the weather in Chicago?"}
+```
+
+### `POST /synthesize`
+
+Accept:
+
+```json
+{"text":"It is 72 degrees.","voice":"af_heart"}
+```
+
+Return audio bytes with an appropriate `Content-Type`, such as `audio/wav`.
+
+Soulacy limits recorded input to 16 MiB, synthesis text to 32 KiB, and returned
+audio to 32 MiB. Remote sidecars are rejected unless `allow_remote: true` is
+explicitly configured. Prefer loopback or HTTPS; sidecars never receive LLM
+credentials.
+
+## OpenAI realtime (optional)
+
+The original low-latency WebRTC path remains available:
 
 ```yaml
-llm:
-  providers:
-    openai:
-      api_key: "sk-..."
+voice:
+  provider: openai
+  model: gpt-realtime-mini
 ```
 
-If neither is set, `GET /api/v1/voice/status` reports
-`"no OpenAI API key configured (set llm.providers.openai.api_key or
-OPENAI_API_KEY)"` and the Chat panel hides the voice button.
+It reads the key from `llm.providers.openai.api_key` or `OPENAI_API_KEY`. The
+gateway only mints a short-lived browser credential; audio flows directly
+between the browser and OpenAI.
 
-## How it works
+## Browser behavior
 
-1. The Chat panel calls `GET /api/v1/voice/status` to check availability.
-2. On push-to-talk, the browser requests `POST /api/v1/voice/ephemeral`;
-   the gateway mints a short-lived client key from your real API key.
-3. The browser opens a WebRTC connection straight to the provider with
-   the ephemeral key. Mic audio and synthesized speech flow
-   browser ↔ provider — never through Soulacy.
+In sidecar mode Chat runs a continuous turn loop:
 
-Both routes sit behind the same auth and RBAC surface as chat.
+- Opening Voice starts microphone capture immediately.
+- A short silence ends the user turn and submits it for transcription.
+- Microphone capture pauses while the agent is thinking and while speech is
+  playing, then resumes automatically after the answer.
+- A subtle local tone plays while the LLM is working and stops before response
+  playback. Muting voice also silences the waiting tone.
+- The user can finish a turn manually, pause or stop playback, or end the voice
+  session to stop listening completely.
 
-## Costs (ballpark)
+Each detected turn is transcribed locally, sent through the selected agent's
+ordinary chat path, synthesized, and played without requiring another click.
 
-Realtime voice is billed by the provider per audio token, which works out
-to a per-minute rate well above text chat (list prices, June 2026):
+Long replies are synthesized in short sentence groups so playback starts as
+soon as the first group is ready. While a response is being prepared or played,
+Chat displays **Stop voice** and, during playback, **Pause/Resume** controls.
 
-| Model | Approximate cost |
-|-------|------------------|
-| `gpt-realtime-mini` (default) | ≈ $0.06–0.10 per minute of conversation |
-| `gpt-realtime` | ≈ $0.18–0.24 per minute of conversation |
+Microphone capture requires localhost or HTTPS. If voice is not configured,
+the microphone remains clickable and opens setup instead of failing silently.
 
-Underlying list rates for `gpt-realtime`: $32/$64 per 1M audio tokens
-in/out plus $4/$16 per 1M text tokens. Treat these as ballpark figures —
-check current provider pricing before enabling voice for a team.
+## CLI reference
 
-## Troubleshooting
+```bash
+sy voice providers
+sy voice enable --recipe auto [--no-wait]
+sy voice install --recipe auto [--dry-run]
+sy voice start --recipe auto
+sy voice configure --sidecar-url http://127.0.0.1:8081 [--voice NAME]
+sy voice status
+sy voice test
+sy voice disable
+```
 
-**Voice button missing or greyed out**
+Configuration changes require a gateway restart.
 
-- `voice.provider` is unset — add the `voice:` block and restart.
-- No OpenAI API key — check `GET /api/v1/voice/status` for the exact
-  reason in the `detail` field.
+`enable` is idempotent: it reuses a compatible managed environment, cached
+models, and the existing user service. Use `sy voice install --force` only to
+repair or deliberately refresh its Python dependencies. On macOS the background
+process is a per-user launch agent; on Linux it is a systemd user service.
 
-**Microphone permission denied**
+## API routes
 
-The browser must grant mic access to the GUI origin. If you previously
-denied it, reset the permission in the browser's site settings (the lock
-icon in the address bar) and reload.
+- `GET /api/v1/voice/status`
+- `GET /api/v1/voice/capabilities`
+- `POST /api/v1/voice/transcribe`
+- `POST /api/v1/voice/synthesize`
+- `POST /api/v1/voice/ephemeral` (realtime providers only)
 
-**"getUserMedia is not available" / mic never prompts**
-
-Browsers only expose microphone capture in a **secure context**:
-`https://` or `http://localhost`. If you access the GUI over plain HTTP
-on a LAN address (e.g. `http://192.168.1.10:18789`), voice cannot work.
-Options:
-
-- Access the GUI via `http://localhost:18789` (SSH port-forward from
-  remote hosts: `ssh -L 18789:localhost:18789 user@host`).
-- Terminate TLS — set `server.tls_cert` / `server.tls_key` (see
-  [Server](server.md)) or put a reverse proxy with HTTPS in front.
-
-**Ephemeral key request fails (503 / 502)**
-
-- `503 no realtime voice provider configured` — `voice:` block missing.
-- `503 voice provider not ready: …` — usually the missing API key.
-- `502` — the provider rejected the mint request; check the key's
-  validity and that your account has Realtime API access.
-
-## See also
-
-- [LLM providers](llm.md) — where the OpenAI key lives
-- [API overview](../api/index.md) — `/voice/status`, `/voice/ephemeral`
-- In-repo design notes: [`docs/VOICE_SPIKE.md`](../VOICE_SPIKE.md)
+All routes use the Chat RBAC surface.

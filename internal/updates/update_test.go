@@ -176,6 +176,96 @@ func TestRemoteUpdateSourcesRequireHTTPS(t *testing.T) {
 	}
 }
 
+func TestResolveCosignVerifierBootstrapsPinnedBinary(t *testing.T) {
+	binary := []byte("test cosign binary")
+	sum := sha256.Sum256(binary)
+	downloads := 0
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		downloads++
+		_, _ = w.Write(binary)
+	}))
+	defer ts.Close()
+
+	oldClient := HTTPClient
+	oldFind := findCosign
+	oldBaseURL := cosignReleaseBaseURL
+	oldCacheRoot := cosignCacheRoot
+	cacheRoot := t.TempDir()
+	platform := runtime.GOOS + "/" + runtime.GOARCH
+	oldSHA, hadSHA := cosignBootstrapSHA256[platform]
+	HTTPClient = ts.Client()
+	findCosign = func(string) (string, error) { return "", errors.New("not installed") }
+	cosignReleaseBaseURL = ts.URL
+	cosignCacheRoot = func() (string, error) { return cacheRoot, nil }
+	cosignBootstrapSHA256[platform] = hex.EncodeToString(sum[:])
+	t.Cleanup(func() {
+		HTTPClient = oldClient
+		findCosign = oldFind
+		cosignReleaseBaseURL = oldBaseURL
+		cosignCacheRoot = oldCacheRoot
+		if hadSHA {
+			cosignBootstrapSHA256[platform] = oldSHA
+		} else {
+			delete(cosignBootstrapSHA256, platform)
+		}
+	})
+
+	path, cleanup, err := resolveCosignVerifier(context.Background())
+	if err != nil {
+		t.Fatalf("resolveCosignVerifier: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat bootstrapped cosign: %v", err)
+	}
+	if info.Mode().Perm()&0o100 == 0 {
+		t.Fatalf("bootstrapped cosign is not executable: mode=%v", info.Mode())
+	}
+	cleanup()
+	secondPath, _, err := resolveCosignVerifier(context.Background())
+	if err != nil {
+		t.Fatalf("resolve cached cosign: %v", err)
+	}
+	if secondPath != path || downloads != 1 {
+		t.Fatalf("cosign cache was not reused: first=%q second=%q downloads=%d", path, secondPath, downloads)
+	}
+}
+
+func TestResolveCosignVerifierRejectsBootstrapHashMismatch(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("tampered"))
+	}))
+	defer ts.Close()
+
+	oldClient := HTTPClient
+	oldFind := findCosign
+	oldBaseURL := cosignReleaseBaseURL
+	oldCacheRoot := cosignCacheRoot
+	cacheRoot := t.TempDir()
+	platform := runtime.GOOS + "/" + runtime.GOARCH
+	oldSHA, hadSHA := cosignBootstrapSHA256[platform]
+	HTTPClient = ts.Client()
+	findCosign = func(string) (string, error) { return "", errors.New("not installed") }
+	cosignReleaseBaseURL = ts.URL
+	cosignCacheRoot = func() (string, error) { return cacheRoot, nil }
+	cosignBootstrapSHA256[platform] = strings.Repeat("0", sha256.Size*2)
+	t.Cleanup(func() {
+		HTTPClient = oldClient
+		findCosign = oldFind
+		cosignReleaseBaseURL = oldBaseURL
+		cosignCacheRoot = oldCacheRoot
+		if hadSHA {
+			cosignBootstrapSHA256[platform] = oldSHA
+		} else {
+			delete(cosignBootstrapSHA256, platform)
+		}
+	})
+
+	if _, _, err := resolveCosignVerifier(context.Background()); err == nil || !strings.Contains(err.Error(), "sha256 mismatch") {
+		t.Fatalf("expected pinned hash mismatch, got %v", err)
+	}
+}
+
 func TestInstallUpdateFilesRollsBackBothBinaries(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"soulacy", "sy"} {
