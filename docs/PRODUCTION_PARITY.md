@@ -69,7 +69,7 @@ SOULACY_PARITY_STUDIO_LIVE=1 make production-parity
 The vulnerability scan defaults to a patched Go toolchain:
 
 ```bash
-SOULACY_PARITY_GOTOOLCHAIN=go1.26.5 make production-parity
+SOULACY_PARITY_GOTOOLCHAIN=go1.26.6 make production-parity
 ```
 
 Use a newer patched Go version when available.

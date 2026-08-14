@@ -867,6 +867,7 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 		UserID        string   `json:"user_id"`
 		Username      string   `json:"username"`
 		Text          string   `json:"text"`
+		ResponseMode  string   `json:"response_mode"`
 		AttachmentIDs []string `json:"attachment_ids"`
 		ConfirmCost   bool     `json:"confirm_cost"`
 		Overrides     struct {
@@ -900,6 +901,10 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 	}
 	if req.AgentID == "" || req.Text == "" {
 		return s.errMsg(c, fiber.StatusBadRequest, "agent_id and text are required")
+	}
+	responseMode := strings.ToLower(strings.TrimSpace(req.ResponseMode))
+	if responseMode != "" && responseMode != "text" && responseMode != "voice" {
+		return s.errMsg(c, fiber.StatusBadRequest, "response_mode must be text or voice")
 	}
 	claims := auth.ClaimsFromCtx(c)
 	// Billing identity comes from authenticated claims. A body-supplied user_id
@@ -966,6 +971,14 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusForbidden, "provider/model overrides require the admin or operator role")
 	}
 
+	chatMeta := chatOverrideMetadata(ovProvider, ovModel, ovTemp, ovTopP, ovMaxTokens, req.Overrides.MaxTurns, ovToolChoice, ovResponseFormat, ovReasoningEffort, ovPresencePenalty, ovFrequencyPenalty)
+	if responseMode == "voice" {
+		if chatMeta == nil {
+			chatMeta = map[string]string{}
+		}
+		chatMeta["response.mode"] = "voice"
+	}
+
 	msg := message.Message{
 		ID:        uuid.New().String(),
 		SessionID: sessionID,
@@ -976,7 +989,7 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 		Username:  req.Username,
 		Role:      message.RoleUser,
 		Parts:     message.Text(text),
-		Metadata:  chatOverrideMetadata(ovProvider, ovModel, ovTemp, ovTopP, ovMaxTokens, req.Overrides.MaxTurns, ovToolChoice, ovResponseFormat, ovReasoningEffort, ovPresencePenalty, ovFrequencyPenalty),
+		Metadata:  chatMeta,
 		CreatedAt: time.Now().UTC(),
 	}
 
@@ -1045,7 +1058,11 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 	if responseID == "" {
 		responseID = uuid.NewString()
 	}
-	return c.JSON(fiber.Map{"reply": replyText, "parts": reply.Parts, "session_id": sessionID, "run_id": msg.ID, "response_id": responseID})
+	payload := fiber.Map{"reply": replyText, "parts": reply.Parts, "session_id": sessionID, "run_id": msg.ID, "response_id": responseID}
+	if spoken := strings.TrimSpace(reply.Metadata["response.spoken"]); spoken != "" {
+		payload["spoken_reply"] = spoken
+	}
+	return c.JSON(payload)
 }
 
 func canOverrideModel(claims *auth.Claims) bool {

@@ -125,6 +125,76 @@ func TestValidateScheduleDeliveryDoesNotAcceptHTTPOnly(t *testing.T) {
 	}
 }
 
+func TestValidateAcceptsExplicitSameChannelReplyWithoutOutboundChannel(t *testing.T) {
+	d := Draft{
+		Name:         "Flight Status Assistant",
+		Strategy:     "auto",
+		Intent:       "Answer flight status questions and reply on the same channel",
+		SystemPrompt: "Answer the caller directly.",
+		Trigger:      Trigger{Type: "manual"},
+		Channels:     []string{"http"},
+		DeliveryMode: "reply",
+		Tools:        []string{"mcp__travel__query"},
+	}
+	got := Validate(d)
+	if validateHasError(got, "routable output channel") {
+		t.Fatalf("same-channel reply must not require an outbound destination: %+v", got.Errors)
+	}
+}
+
+func TestValidateScheduleCannotUseSameChannelReply(t *testing.T) {
+	d := Draft{
+		Name:         "Scheduled Flight Status",
+		Strategy:     "auto",
+		Intent:       "Every morning send a flight status notification",
+		SystemPrompt: "Send the status.",
+		Trigger:      Trigger{Type: "schedule", Config: map[string]any{"cron": "0 7 * * *"}},
+		DeliveryMode: "reply",
+		Tools:        []string{"mcp__travel__query"},
+	}
+	got := Validate(d)
+	if !validateHasError(got, "routable output channel") {
+		t.Fatalf("scheduled work has no invocation route and must still require a destination: %+v", got.Errors)
+	}
+}
+
+func TestValidateAcceptsExplicitRunsOnlySchedule(t *testing.T) {
+	d := Draft{
+		Name:         "Private Morning Briefing",
+		Strategy:     "auto",
+		Intent:       "Every morning generate a briefing and keep the result in Runs / Activity only",
+		SystemPrompt: "Generate the briefing without sending a message.",
+		Trigger:      Trigger{Type: "schedule", Config: map[string]any{"cron": "0 7 * * *"}},
+		DeliveryMode: "none",
+		Tools:        []string{"web_search"},
+	}
+	got := Validate(d)
+	if validateHasError(got, "routable output channel") {
+		t.Fatalf("an explicit Runs-only schedule must not require a destination: %+v", got.Errors)
+	}
+	for _, warning := range got.Warnings {
+		if strings.Contains(warning.Message, "no explicit output channel") {
+			t.Fatalf("an explicit Runs-only schedule must not warn about its chosen lack of channel: %+v", got.Warnings)
+		}
+	}
+}
+
+func TestValidateRecognizesLegacySameChannelIntent(t *testing.T) {
+	d := Draft{
+		Name:         "Legacy Assistant",
+		Strategy:     "auto",
+		Intent:       "Answer the request and reply directly in the same conversation",
+		SystemPrompt: "Answer the caller.",
+		Trigger:      Trigger{Type: "manual"},
+		Channels:     []string{"http"},
+		Tools:        []string{"web_search"},
+	}
+	got := Validate(d)
+	if validateHasError(got, "routable output channel") {
+		t.Fatalf("legacy same-channel intent must not require an outbound destination: %+v", got.Errors)
+	}
+}
+
 func validateHasError(res ValidateResult, want string) bool {
 	for _, e := range res.Errors {
 		if strings.Contains(e.Message, want) {

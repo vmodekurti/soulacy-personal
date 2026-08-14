@@ -73,10 +73,10 @@ func completionContractValidateIssues(draft Draft) ([]ValidateError, []ValidateW
 		return nil, nil
 	}
 
-	if deliveryRequested(intent) && !hasDeliveryConfigured(draft) {
+	if deliveryRequested(intent) && !hasDeliveryConfigured(draft) && !hasContextualDelivery(draft) {
 		errs = append(errs, ValidateError{Source: ValidateSourceCompletion, Message: "The intent asks for delivery/notification, but no routable output channel or schedule output is configured. HTTP is an inbound trigger/testing surface, not a cron delivery destination."})
 	}
-	if strings.EqualFold(strings.TrimSpace(draft.Trigger.Type), "schedule") && !hasDeliveryConfigured(draft) {
+	if strings.EqualFold(strings.TrimSpace(draft.Trigger.Type), "schedule") && !hasDeliveryConfigured(draft) && normalizeStudioDeliveryMode(draft.DeliveryMode) != "none" {
 		warns = append(warns, ValidateWarning{Message: "This scheduled agent has no explicit output channel. If no global default output exists, completed runs will only appear in Runs/Activity."})
 	}
 
@@ -113,6 +113,51 @@ func hasDeliveryConfigured(draft Draft) bool {
 		}
 	}
 	return false
+}
+
+func hasContextualDelivery(draft Draft) bool {
+	// Scheduled work has no inbound request to reply to, so it always needs an
+	// actual destination when delivery is requested. Manual, channel, webhook,
+	// and other interactive invocation paths can return their normal result.
+	if strings.EqualFold(strings.TrimSpace(draft.Trigger.Type), "schedule") {
+		// "Runs / Activity only" is an explicit, valid output choice. It
+		// intentionally overrides delivery language inferred from the prompt.
+		return normalizeStudioDeliveryMode(draft.DeliveryMode) == "none"
+	}
+	switch normalizeStudioDeliveryMode(draft.DeliveryMode) {
+	case "reply", "none":
+		return true
+	case "outbound":
+		return false
+	default:
+		// Backward compatibility for drafts saved before DeliveryMode existed.
+		// A channel trigger naturally has an invocation route, and explicit
+		// same-channel wording is sufficiently unambiguous for manual/webhook
+		// agents. New saves persist the structured choice above.
+		if strings.EqualFold(strings.TrimSpace(draft.Trigger.Type), "channel") || strings.EqualFold(strings.TrimSpace(draft.Trigger.Type), "chat") {
+			return true
+		}
+		intent := strings.ToLower(draft.Intent + " " + draft.RawIntent)
+		return completionContainsAny(intent, "same channel", "same conversation", "reply directly", "return to the caller")
+	}
+}
+
+func normalizeStudioDeliveryMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "reply", "none", "outbound":
+		return strings.ToLower(strings.TrimSpace(mode))
+	default:
+		return ""
+	}
+}
+
+func normalizeStudioTriggerMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "chat", "manual", "internal", "schedule", "cron", "channel", "webhook":
+		return strings.ToLower(strings.TrimSpace(mode))
+	default:
+		return ""
+	}
 }
 
 func isRoutableOutputChannel(ch string) bool {

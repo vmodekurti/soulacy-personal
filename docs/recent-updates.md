@@ -95,7 +95,7 @@ Start with [Security overview](security/index.md), then configure the
 ## Toolchain and deployment
 
 Source builds, CI, release workflows, and container builds now use **Go
-1.26.5**. Existing binary installations do not need Go installed; source-based
+1.26.6**. Existing binary installations do not need Go installed; source-based
 installations and contributors do. The installer compares the full Go
 major/minor/patch version and will reject older source-build toolchains.
 

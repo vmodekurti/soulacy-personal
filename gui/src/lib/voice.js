@@ -80,7 +80,7 @@ export function voiceUsageLabel(total) {
 export function voiceHint(state, detail = '') {
   switch (state) {
     case 'unavailable':
-      return detail || 'Voice is not configured. Set voice.provider in config.yaml.'
+	  return detail || 'Voice is not configured. Click to connect a local speech sidecar.'
     case 'idle':
       return 'Start a voice conversation'
     case 'connecting':
@@ -92,4 +92,119 @@ export function voiceHint(state, detail = '') {
     default:
       return ''
   }
+}
+
+/**
+ * Advance the local sidecar's voice-activity detector.
+ * Keeping this decision pure makes silence handling deterministic and testable.
+ */
+export function updateVoiceActivity(state, rms, now, options = {}) {
+  const threshold = options.threshold ?? 0.018
+  const silenceMs = options.silenceMs ?? 900
+  const minTurnMs = options.minTurnMs ?? 450
+  const maxTurnMs = options.maxTurnMs ?? 60000
+  const maxIdleMs = options.maxIdleMs ?? 30000
+  const next = {
+    startedAt: state?.startedAt ?? now,
+    heardSpeech: !!state?.heardSpeech,
+    silenceSince: state?.silenceSince ?? 0,
+  }
+
+  if (rms >= threshold) {
+    next.heardSpeech = true
+    next.silenceSince = 0
+  } else if (next.heardSpeech) {
+    if (!next.silenceSince) next.silenceSince = now
+    if (now - next.startedAt >= minTurnMs && now - next.silenceSince >= silenceMs) {
+      return { state: next, action: 'complete' }
+    }
+  }
+
+  if (next.heardSpeech && now - next.startedAt >= maxTurnMs) {
+    return { state: next, action: 'complete' }
+  }
+  if (!next.heardSpeech && now - next.startedAt >= maxIdleMs) {
+    return { state: { startedAt: now, heardSpeech: false, silenceSince: 0 }, action: 'reset' }
+  }
+  return { state: next, action: 'continue' }
+}
+
+/**
+ * Turn the rich Chat response into text that sounds natural when spoken.
+ * The original response remains untouched in Chat; this removes visual-only
+ * Markdown, citations, source lists, URLs, code, and emoji before TTS.
+ */
+export function speechText(text) {
+  let clean = String(text || '').replace(/\r\n?/g, '\n')
+  if (!clean.trim()) return ''
+
+  // A sources appendix is useful on screen but painful when read aloud.
+  clean = clean.replace(/\n\s*#{0,6}\s*(?:sources?|references?)\s*:?\s*\n[\s\S]*$/i, '\n')
+
+  // Do not read code character-by-character. Preserve a useful spoken cue.
+  let omittedCode = false
+  clean = clean.replace(/```[\s\S]*?```/g, () => {
+    omittedCode = true
+    return '\n'
+  })
+
+  clean = clean
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/<https?:\/\/[^>]+>/gi, ' ')
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(/^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*$/gm, '')
+    .replace(/\|/g, ', ')
+    .replace(/^\s*#{1,6}\s*/gm, '')
+    .replace(/^\s*>\s?/gm, '')
+    .replace(/^\s*(?:[-+*]|\d+[.)])\s+/gm, '')
+    .replace(/\[(?:\d+(?:\s*[-,]\s*\d+)*)\]/g, '')
+    .replace(/[`*_~]/g, '')
+    .replace(/[\p{Extended_Pictographic}\uFE0F]/gu, '')
+    .replace(/^\s*(?:-{3,}|_{3,}|\*{3,})\s*$/gm, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{2,}/g, '. ')
+    .replace(/\n/g, ' ')
+    .replace(/\s+([,.;:!?])/g, '$1')
+    .replace(/([,.;:!?]){2,}/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  if (omittedCode) {
+    const cue = 'The code example is available in the text response.'
+    clean = clean ? `${clean} ${cue}` : cue
+  }
+  return clean
+}
+
+/** Split a completed, speech-safe reply into short TTS requests. */
+export function speechChunks(text, maxChars = 360) {
+  const clean = speechText(text)
+  if (!clean) return []
+  const sentences = clean.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [clean]
+  const chunks = []
+  let current = ''
+  const flush = () => {
+    if (current.trim()) chunks.push(current.trim())
+    current = ''
+  }
+  for (const sentence of sentences) {
+    let part = sentence.trim()
+    if (!part) continue
+    if (current && current.length + 1 + part.length <= maxChars) {
+      current += ` ${part}`
+      continue
+    }
+    flush()
+    while (part.length > maxChars) {
+      let cut = part.lastIndexOf(' ', maxChars)
+      if (cut < Math.floor(maxChars / 2)) cut = maxChars
+      chunks.push(part.slice(0, cut).trim())
+      part = part.slice(cut).trim()
+    }
+    current = part
+  }
+  flush()
+  return chunks
 }

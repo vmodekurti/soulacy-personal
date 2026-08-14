@@ -254,7 +254,7 @@ type ValidateResult struct {
 // knownTriggerTypes is the closed set the compiler/normalizer recognizes; any
 // other (non-empty) trigger.type earns a soft warning.
 var knownTriggerTypes = map[string]bool{
-	"schedule": true, "channel": true, "webhook": true, "manual": true,
+	"chat": true, "schedule": true, "channel": true, "webhook": true, "manual": true,
 }
 
 // Validate runs reasoning.CompileFlow on the draft's flow and collects the
@@ -542,7 +542,7 @@ func triggerWarnings(t Trigger) []ValidateWarning {
 		return nil
 	}
 	return []ValidateWarning{{
-		Message: fmt.Sprintf("unknown trigger type %q (expected one of: schedule, channel, webhook, manual)", t.Type),
+		Message: fmt.Sprintf("unknown trigger type %q (expected one of: chat, schedule, channel, webhook, manual)", t.Type),
 	}}
 }
 

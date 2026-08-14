@@ -48,7 +48,7 @@ curl -fsSL https://raw.githubusercontent.com/vmodekurti/soulacy/main/install.sh 
 
 What it does, with zero questions asked:
 
-1. Downloads the matching release tarball when one exists; otherwise builds from source (requires `git`, Go 1.26.5+, and `npm` for the GUI build).
+1. Downloads the matching release tarball when one exists; otherwise builds from source (requires `git`, Go 1.26.6+, and `npm` for the GUI build).
 2. Builds the Svelte GUI and compiles `soulacy` (the gateway) + `sy` (the CLI).
 3. Installs both binaries into `~/.local/bin` (no `sudo`).
 4. Prints clear next steps + offers to launch the gateway on the spot.

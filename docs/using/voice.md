@@ -1,82 +1,51 @@
-# Voice
+# Voice chat
 
-Realtime voice in Chat lets you talk to an agent out loud — your microphone streams to the provider, the agent answers with audio, and the full transcript lands in your chat session.
+Soulacy voice can use a free local speech sidecar while your agent continues to
+use any configured LLM provider.
 
-## Quick start
+## Connect local speech
 
-1. Add to `~/.soulacy/config.yaml`:
+1. Install, configure, and start the bundled adapter with
+   `sy voice enable --recipe auto`. Apple Silicon Macs use MLX Whisper.
+   The portable recipe requires an existing `whisper-cli` build and starts with
+   `sy voice start --recipe whisper-kokoro --whisper-model /path/to/model.bin`.
 
-    ```yaml
-    voice:
-      provider: openai            # only "openai" is supported (v1)
-      model: gpt-realtime-mini    # default; optional
-      # base_url: ""              # override for Azure/compatible endpoints
+GPU acceleration is selected automatically when available: Metal/MLX and MPS
+on Apple Silicon, CUDA on supported NVIDIA hosts, or the GPU backend compiled
+into whisper.cpp. Use `sy voice enable --recipe auto --accelerator cpu` only
+when you need to force the compatibility fallback.
+2. In Chat, click **🎤** and choose **Connect a voice sidecar**.
+3. Enter its URL (normally `http://127.0.0.1:8081`) and optional voice name.
+4. Save, restart the gateway, and return to Chat.
 
-    llm:
-      providers:
-        openai:
-          api_key: "sk-..."       # or set the OPENAI_API_KEY env var
-    ```
-
-2. Restart the gateway (Config page → **Restart Gateway**, or restart the service).
-3. Open **Chat**, click the **🎤** button, and allow microphone access when the browser asks.
-4. Talk. Click **⏹ 🎤** to end the session.
-
-## Requirements
-
-- `voice.provider: openai` in config — without it the voice button is disabled.
-- An OpenAI API key in `llm.providers.openai.api_key` or the `OPENAI_API_KEY` environment variable.
-- A browser context where `getUserMedia` works: **localhost or HTTPS**. The default local deployment (`http://localhost:18789`) qualifies; remote deployments need TLS.
-
-Check availability without the GUI:
+CLI users can do the same with:
 
 ```bash
-curl http://localhost:18789/api/v1/voice/status \
-  -H "Authorization: Bearer $SOULACY_API_KEY"
-# → {"available": true, "provider": "openai", "model": "gpt-realtime-mini"}
+sy voice providers
+sy voice configure --sidecar-url http://127.0.0.1:8081 --voice af_heart
+sy voice test
 ```
 
-## How a session works
+## Talk to an agent
 
-Clicking **🎤** walks through these steps:
+Click **🎤** to open a continuous voice session. Soulacy starts listening
+immediately, detects the end of your turn after a short silence, transcribes the
+recording, and sends that text through the current agent and LLM. When the LLM
+has completed its response, the sidecar speaks a short conversational version
+and Soulacy automatically resumes listening for the next turn. The same LLM
+call also returns the complete written answer for Chat, so tables, citations,
+and supporting detail remain available without being read aloud. Voice turns
+carry private request metadata; guidance is not appended to the visible user
+message and does not affect later typed turns.
 
-1. The gateway mints a short-lived **ephemeral client key** (`POST /api/v1/voice/ephemeral`). Your real API key never reaches the browser.
-2. The browser asks for **microphone permission** and opens a WebRTC connection **directly to the provider** — audio never transits the Soulacy gateway, so there is no added latency.
-3. The button shows ⏳ while connecting, then pulses red while **live**. A system line ("🎤 voice session started") marks the start in the chat.
-4. Speak naturally — the provider's server-side voice activity detection handles turn-taking and barge-in.
-5. Click the button again (⏹) to stop; the mic is released and "🎤 voice session ended" is appended.
+The microphone is paused while the agent is thinking or speaking so the agent
+does not transcribe its own answer. A quiet repeating tone confirms that the
+LLM is still working after transcription; the voice mute control also silences
+this cue. Use the center control to finish a turn manually, the playback
+controls to pause or stop an answer, and **End session** to stop continuous
+listening. The transcript and original answer remain in the same chat history
+as typed turns; audio is not persisted.
 
-### Transcripts attach to the session
-
-As you talk, transcripts render live in the chat:
-
-- your completed utterances appear as user messages,
-- the assistant's spoken reply streams in as a growing assistant bubble, finalized when the turn ends.
-
-They are part of the same chat session as your typed messages — text only, no audio blobs are stored.
-
-### Usage chip
-
-Once the session has consumed tokens, a usage chip appears in the header:
-
-```
-🎤 ↑1234 ↓567 tok
-```
-
-That is the running input/output token total for realtime voice in this session (hover it to see the model).
-
-## When voice is not configured
-
-The feature degrades gracefully:
-
-- No `voice.provider` set → the **🎤** button is disabled; its tooltip explains what to configure ("no realtime voice provider configured — set voice.provider and an OpenAI API key in config.yaml").
-- Provider set but no API key → `/api/v1/voice/status` reports unavailable with the reason, and the button stays disabled.
-- A failed session shows **⚠ 🎤**; click it once to reset to idle and try again.
-
-Everything else in Chat keeps working normally — voice is purely additive.
-
-!!! note
-    Voice minutes are billed by the provider per audio token and cost noticeably more than text chat. The usage chip exists so you always see what a session consumed.
-
-!!! tip
-    If the browser never asks for the microphone, check the site permission settings — a previously denied mic permission silently fails the session with **⚠ 🎤**.
+The realtime OpenAI mode remains available for users who explicitly configure
+it. See [Voice configuration](../configuration/voice.md) for both modes, the
+sidecar HTTP contract, security limits, and troubleshooting.

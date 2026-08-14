@@ -15,6 +15,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/mcp"
+	"github.com/soulacy/soulacy/internal/voice"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 )
@@ -123,6 +124,15 @@ func (s *Server) safeConfigView() fiber.Map {
 		"search": fiber.Map{
 			"provider": cfg.Search.Provider,
 			"api_key":  searchAPIKey,
+		},
+		"voice": fiber.Map{
+			"provider":     cfg.Voice.Provider,
+			"model":        cfg.Voice.Model,
+			"base_url":     cfg.Voice.BaseURL,
+			"sidecar_url":  cfg.Voice.SidecarURL,
+			"voice":        cfg.Voice.Voice,
+			"timeout":      cfg.Voice.Timeout,
+			"allow_remote": cfg.Voice.AllowRemote,
 		},
 		"costs": fiber.Map{
 			"daily_budget_usd":            cfg.Costs.DailyBudgetUSD,
@@ -319,6 +329,16 @@ type PatchableConfig struct {
 		APIKey   string `json:"api_key" yaml:"api_key"`
 	} `json:"search" yaml:"search"`
 
+	Voice *struct {
+		Provider    string `json:"provider" yaml:"provider"`
+		Model       string `json:"model" yaml:"model"`
+		BaseURL     string `json:"base_url" yaml:"base_url"`
+		SidecarURL  string `json:"sidecar_url" yaml:"sidecar_url"`
+		Voice       string `json:"voice" yaml:"voice"`
+		Timeout     string `json:"timeout" yaml:"timeout"`
+		AllowRemote *bool  `json:"allow_remote" yaml:"allow_remote"`
+	} `json:"voice" yaml:"voice"`
+
 	Costs *struct {
 		DailyBudgetUSD           float64 `json:"daily_budget_usd" yaml:"daily_budget_usd"`
 		MonthlyBudgetUSD         float64 `json:"monthly_budget_usd" yaml:"monthly_budget_usd"`
@@ -408,6 +428,12 @@ func (s *Server) handlePatchConfig(c *fiber.Ctx) error {
 			"error": "invalid request body: " + err.Error(),
 		})
 	}
+	if patch.Voice != nil && patch.Voice.Provider == "sidecar" {
+		allowRemote := patch.Voice.AllowRemote != nil && *patch.Voice.AllowRemote
+		if _, err := voice.NewSidecar(patch.Voice.SidecarURL, patch.Voice.Voice, patch.Voice.Timeout, allowRemote); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+		}
+	}
 
 	// Read current file
 	current, err := readRawConfig(s.cfgPath)
@@ -440,6 +466,19 @@ func (s *Server) handlePatchConfig(c *fiber.Ctx) error {
 		}
 		if patch.UI.WalkthroughVersion != nil {
 			s.cfg.UI.WalkthroughVersion = *patch.UI.WalkthroughVersion
+		}
+	}
+	if patch.Voice != nil && s.cfg != nil {
+		s.cfg.Voice.Provider = patch.Voice.Provider
+		s.cfg.Voice.Model = patch.Voice.Model
+		s.cfg.Voice.BaseURL = patch.Voice.BaseURL
+		s.cfg.Voice.SidecarURL = patch.Voice.SidecarURL
+		s.cfg.Voice.Voice = patch.Voice.Voice
+		if patch.Voice.Timeout != "" {
+			s.cfg.Voice.Timeout = patch.Voice.Timeout
+		}
+		if patch.Voice.AllowRemote != nil {
+			s.cfg.Voice.AllowRemote = *patch.Voice.AllowRemote
 		}
 	}
 
@@ -623,6 +662,20 @@ func applyPatch(dst map[string]any, patch PatchableConfig) {
 		// "***" is the redacted placeholder the GUI echoes back; never persist it.
 		if patch.Search.APIKey != "" && patch.Search.APIKey != "***" {
 			sr["api_key"] = patch.Search.APIKey
+		}
+	}
+	if patch.Voice != nil {
+		vc := getOrCreateMap(dst, "voice")
+		vc["provider"] = patch.Voice.Provider
+		vc["model"] = patch.Voice.Model
+		vc["base_url"] = patch.Voice.BaseURL
+		vc["sidecar_url"] = patch.Voice.SidecarURL
+		vc["voice"] = patch.Voice.Voice
+		if patch.Voice.Timeout != "" {
+			vc["timeout"] = patch.Voice.Timeout
+		}
+		if patch.Voice.AllowRemote != nil {
+			vc["allow_remote"] = *patch.Voice.AllowRemote
 		}
 	}
 	if patch.Costs != nil {

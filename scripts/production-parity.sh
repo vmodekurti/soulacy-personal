@@ -149,7 +149,7 @@ run_required_suite() {
 }
 
 run_toolchain_security() {
-  local toolchain="${SOULACY_PARITY_GOTOOLCHAIN:-go1.26.5}"
+  local toolchain="${SOULACY_PARITY_GOTOOLCHAIN:-go1.26.6}"
   run_check "govulncheck ($toolchain)" true "command -v govulncheck >/dev/null 2>&1 || go install golang.org/x/vuln/cmd/govulncheck@latest; GOTOOLCHAIN=$toolchain \$(go env GOPATH)/bin/govulncheck ./..."
 }
 

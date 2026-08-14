@@ -41,7 +41,7 @@ make all          # GUI + gateway + CLI → ./bin/soulacy and ./bin/sy
 sudo install -m755 bin/soulacy bin/sy /usr/local/bin/
 ```
 
-`make all` needs Go 1.26.5+ and Node 18+ on your PATH (`make build` alone skips
+`make all` needs Go 1.26.6+ and Node 18+ on your PATH (`make build` alone skips
 the GUI — the binary embeds the web UI at compile time, so use `make all`).
 
 ## Docker

@@ -27,8 +27,17 @@ import { fileURLToPath } from 'node:url'
 
 const src = readFileSync(fileURLToPath(new URL('./Studio.svelte', import.meta.url)), 'utf8')
 
-/** The <style> block, so component markup cannot be mistaken for CSS. */
+/** The component stylesheet, so component markup cannot be mistaken for CSS.
+ * Studio imports its large stylesheet as a module: Svelte does not reliably
+ * bundle `<style src="...">`, which is precisely how the whole page once fell
+ * back to browser-default styling. Keep supporting an inline/external style tag
+ * for smaller components, but prefer the explicit CSS import used in production.
+ */
 function stylesheet() {
+  const imported = src.match(/import\s+["'](\.\/Studio\.css)["']/)
+  if (imported) {
+    return readFileSync(fileURLToPath(new URL(imported[1], import.meta.url)), 'utf8')
+  }
   const i = src.lastIndexOf('<style')
   const start = src.indexOf('>', i) + 1
   const end = src.lastIndexOf('</style>')

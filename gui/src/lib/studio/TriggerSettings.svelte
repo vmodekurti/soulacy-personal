@@ -1,6 +1,11 @@
 <script>
   import {
     TRIGGER_OPTIONS,
+    deliveryModeOf,
+    deliveryModePatch,
+    contextualDeliveryLabel,
+    outboundDeliveryLabel,
+    routeSummary,
     scheduleOutputPatch,
     toggleChannelPatch,
     triggerChannelPatch,
@@ -32,9 +37,17 @@
   $: selectedChannels = new Set(boundChannels)
   $: output = (workflow && workflow.output) || {}
   $: outputChannel = output.channel || ''
+  $: deliveryMode = deliveryModeOf(workflow)
 
   function apply(patch) {
     onChange(patch)
+  }
+
+  function changeTrigger(nextType) {
+    const triggerPatch = triggerTypePatch(workflow, nextType)
+    const next = { ...workflow, ...triggerPatch }
+    const mode = nextType === 'schedule' ? deliveryModeOf(next) : 'reply'
+    apply({ ...triggerPatch, ...deliveryModePatch(next, mode) })
   }
 </script>
 
@@ -46,7 +59,7 @@
   <select
     id="studio-trigger-type"
     value={triggerType}
-    on:change={(e) => apply(triggerTypePatch(workflow, e.target.value))}
+    on:change={(e) => changeTrigger(e.target.value)}
   >
     {#each TRIGGER_OPTIONS as option}
       <option
@@ -92,11 +105,34 @@
     <p class="hint">The chosen channel is automatically added to this agent’s channel bindings.</p>
   {:else if triggerType === 'webhook'}
     <p class="mode-note">Runs when its inbound webhook endpoint receives a request.</p>
+  {:else if triggerType === 'chat'}
+    <p class="mode-note">Runs when a user sends a message to this agent in Soulacy GUI Chat.</p>
   {:else}
     <p class="mode-note">Runs only when started by hand or programmatically by another agent.</p>
   {/if}
 
   <div class="divider"></div>
+    <label for="studio-delivery-mode">Output</label>
+    <select
+      id="studio-delivery-mode"
+      value={deliveryMode}
+      on:change={(e) => apply(deliveryModePatch(workflow, e.target.value))}
+    >
+      {#if triggerType === 'schedule'}
+        <option value="none">Runs / Activity only (no message sent)</option>
+      {:else}
+        <option value="reply">{contextualDeliveryLabel(triggerType)}</option>
+      {/if}
+      <option value="outbound">{outboundDeliveryLabel(triggerType)}</option>
+    </select>
+    {#if deliveryMode === 'reply'}
+      <p class="mode-note">{triggerType === 'chat' ? 'Inbound and outbound stay in the same Soulacy GUI Chat conversation. No output channel is required.' : 'The result returns to the chat, channel, webhook, or caller that started this run. No separate output channel is required.'}</p>
+    {:else if deliveryMode === 'none'}
+      <p class="mode-note">The completed result remains available in Runs / Activity. No message is sent.</p>
+    {/if}
+    <p class="route-summary"><strong>Route:</strong> {routeSummary(triggerType, deliveryMode)}</p>
+
+  {#if deliveryMode === 'outbound'}
   <h4>{triggerType === 'channel' ? 'Channel bindings' : 'Output channels'}</h4>
   <p class="hint">
     {triggerType === 'schedule'
@@ -166,6 +202,7 @@
   {:else if triggerType === 'schedule'}
     <p class="mode-note">Choose an output channel if the scheduled result should be posted automatically.</p>
   {/if}
+  {/if}
 </section>
 
 <style>
@@ -182,6 +219,7 @@
   h3 { font-size: 14px; }
   h4 { font-size: 12px; }
   label { color: var(--text-muted, #8b93ab); font-size: 11px; font-weight: 600; }
+  .route-summary { margin: 2px 0; color: var(--text, #e6e9ef); font-size: 11px; }
   select, input[type='text'], textarea {
     width: 100%; box-sizing: border-box; padding: 7px 9px;
     color: var(--text, #e6e9ef); background: var(--bg, #0f1420);

@@ -1,5 +1,5 @@
 <script>
-  import { TRIGGER_OPTIONS } from './triggersettings.js'
+  import { TRIGGER_OPTIONS, contextualDeliveryLabel, outboundDeliveryLabel, routeSummary } from './triggersettings.js'
 
   export let selection = { type: 'auto', cron: '', channel: '', delivery: 'auto', destination: '' }
   export let channels = []
@@ -7,6 +7,7 @@
 
   $: channelList = Array.isArray(channels) ? channels : (channels && channels.channels) || []
   $: type = (selection && selection.type) || 'auto'
+  $: delivery = (selection && selection.delivery) || 'auto'
 
   function change(patch) {
     onChange({ type: 'auto', cron: '', channel: '', delivery: 'auto', destination: '', ...selection, ...patch })
@@ -15,10 +16,11 @@
   function changeType(nextType) {
     const patch = { type: nextType }
     // Same-channel reply is the coherent default for a conversational trigger.
-    // When leaving that trigger, stop carrying the dependent reply choice into
-    // a schedule/manual/webhook where there may be no inbound channel at all.
-    if (nextType === 'channel' && (selection.delivery || 'auto') === 'auto') patch.delivery = 'reply'
-    if (nextType !== 'channel' && selection.delivery === 'reply') patch.delivery = 'auto'
+    // Scheduled runs have no invocation route to reply through. Manual and
+    // webhook calls do, so keep an explicit contextual-reply choice for them.
+    if (!['auto', 'schedule'].includes(nextType) && (selection.delivery || 'auto') === 'auto') patch.delivery = 'reply'
+    if (nextType === 'schedule' && selection.delivery === 'reply') patch.delivery = 'auto'
+    if (nextType !== 'schedule' && selection.delivery === 'none') patch.delivery = 'reply'
     change(patch)
   }
 </script>
@@ -63,17 +65,21 @@
     </select>
   {/if}
 
-  <label for="generation-delivery">Delivery</label>
+  <label for="generation-delivery">Output</label>
   <select
     id="generation-delivery"
     value={selection.delivery || 'auto'}
     on:change={(e) => change({ delivery: e.target.value, destination: '' })}
   >
     <option value="auto">Use the prompt</option>
-    <option value="reply" disabled={type !== 'channel'}>Reply on inbound channel</option>
-    <option value="none">Return result only</option>
+    {#if !['auto', 'schedule'].includes(type)}
+      <option value="reply">{contextualDeliveryLabel(type)}</option>
+    {/if}
+    {#if ['auto', 'schedule'].includes(type)}
+      <option value="none">{type === 'schedule' ? 'Runs / Activity only (no message sent)' : 'Normal response only (no external push)'}</option>
+    {/if}
     {#each channelList as channel}
-      <option value={channel.id}>{channel.name || channel.id}</option>
+      <option value={channel.id}>{outboundDeliveryLabel(type, `fixed ${channel.name || channel.id} destination`)}</option>
     {/each}
   </select>
 
@@ -89,11 +95,8 @@
     />
   {/if}
 
-  <p>
-    {type === 'auto' && (selection.delivery || 'auto') === 'auto'
-      ? 'Studio will infer the trigger from your prompt.'
-      : 'Your choices are authoritative. Studio will update this plan and generate from them.'}
-  </p>
+  <p class="route-summary"><strong>Route:</strong> {routeSummary(type, delivery, delivery)}</p>
+  <p>{type === 'auto' && delivery === 'auto' ? 'Studio will infer both sides from your prompt.' : 'Only output choices compatible with this input are shown.'}</p>
 </div>
 
 <style>
@@ -118,6 +121,7 @@
     grid-column: 1 / -1; margin: 0; color: var(--text-muted, #8b93ab);
     font-size: 10.5px; line-height: 1.4;
   }
+  .route-summary { color: var(--text, #e6e9ef); }
   @media (max-width: 680px) {
     .generation-trigger { grid-template-columns: 1fr; }
     p { grid-column: auto; }

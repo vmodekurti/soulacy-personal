@@ -25,7 +25,7 @@ RUN npm run build
 # Output: /src/gui/dist  (copied to /src/internal/webui/dist in gobuild)
 
 # ── Stage 2: Go binary ───────────────────────────────────────────────────────
-FROM golang:1.26.5-bookworm AS gobuild
+FROM golang:1.26.6-bookworm AS gobuild
 ARG VERSION=dev
 WORKDIR /src
 

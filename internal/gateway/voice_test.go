@@ -3,11 +3,35 @@ package gateway
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/soulacy/soulacy/internal/voice"
 )
+
+func testVoiceSidecar(t *testing.T) *voice.Sidecar {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) })
+	mux.HandleFunc("/capabilities", func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, `{"stt":true,"tts":true}`) })
+	mux.HandleFunc("/transcribe", func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, `{"text":"spoken question"}`) })
+	mux.HandleFunc("/synthesize", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "audio/wav")
+		_, _ = w.Write([]byte("wav"))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	sidecar, err := voice.NewSidecar(srv.URL, "", "5s", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sidecar
+}
 
 type fakeMinter struct {
 	ready  bool
@@ -56,6 +80,61 @@ func TestVoiceStatus_Ready(t *testing.T) {
 	status, body := gatewayJSON(t, s, "GET", "/api/v1/voice/status", "", "")
 	if status != 200 || body["available"] != true || body["provider"] != "openai" {
 		t.Fatalf("status=%d body=%v", status, body)
+	}
+}
+
+func TestVoiceStatus_SidecarReady(t *testing.T) {
+	s := newTestGateway(t, "")
+	s.SetVoiceSidecar(testVoiceSidecar(t))
+	status, body := gatewayJSON(t, s, "GET", "/api/v1/voice/status", "", "")
+	if status != 200 || body["available"] != true || body["provider"] != "sidecar" || body["mode"] != "pipeline" {
+		t.Fatalf("status=%d body=%v", status, body)
+	}
+	status, body = gatewayJSON(t, s, "GET", "/api/v1/voice/capabilities", "", "")
+	if status != 200 || body["stt"] != true || body["tts"] != true {
+		t.Fatalf("status=%d body=%v", status, body)
+	}
+}
+
+func TestVoiceSynthesize_Sidecar(t *testing.T) {
+	s := newTestGateway(t, "")
+	s.SetVoiceSidecar(testVoiceSidecar(t))
+	status, _ := gatewayRaw(t, s, "POST", "/api/v1/voice/synthesize", "", `{"text":"hello"}`)
+	if status != 200 {
+		t.Fatalf("status=%d", status)
+	}
+}
+
+func TestVoiceConfigCanBeSavedFromGUI(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := newTestGatewayWithCfgPath(t, "", configPath)
+	status, body := gatewayJSON(t, s, http.MethodPatch, "/api/v1/config", "", `{
+		"voice":{"provider":"sidecar","sidecar_url":"http://127.0.0.1:8081","voice":"af_heart","timeout":"60s","allow_remote":false}
+	}`)
+	if status != http.StatusOK {
+		t.Fatalf("status=%d body=%v", status, body)
+	}
+	configView := body["config"].(map[string]any)
+	voiceView := configView["voice"].(map[string]any)
+	if voiceView["provider"] != "sidecar" || voiceView["sidecar_url"] != "http://127.0.0.1:8081" {
+		t.Fatalf("voice view=%v", voiceView)
+	}
+}
+
+func TestVoiceConfigRejectsImplicitRemoteSidecar(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := newTestGatewayWithCfgPath(t, "", configPath)
+	status, _ := gatewayJSON(t, s, http.MethodPatch, "/api/v1/config", "", `{
+		"voice":{"provider":"sidecar","sidecar_url":"https://voice.example.com","allow_remote":false}
+	}`)
+	if status != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400", status)
 	}
 }
 

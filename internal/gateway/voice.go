@@ -1,10 +1,11 @@
-// voice.go — realtime voice control-plane routes (Story 11, design in
-// docs/VOICE_SPIKE.md). The gateway only mints ephemeral client keys and
-// reports availability; audio flows browser↔provider directly.
+// voice.go — provider-neutral voice routes. Realtime providers use ephemeral
+// browser credentials; sidecars expose local STT/TTS over a small HTTP bridge.
 package gateway
 
 import (
 	"context"
+	"io"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -45,19 +46,50 @@ func (s *Server) voiceMinterRef() VoiceMinter {
 	return s.voiceMinter
 }
 
+// SetVoiceSidecar wires a speech sidecar. Sidecars never receive LLM provider
+// credentials and may be swapped independently of the selected agent model.
+func (s *Server) SetVoiceSidecar(sidecar *voice.Sidecar) {
+	s.pluginMu.Lock()
+	defer s.pluginMu.Unlock()
+	s.voiceSidecar = sidecar
+}
+
+func (s *Server) voiceSidecarRef() *voice.Sidecar {
+	s.pluginMu.RLock()
+	defer s.pluginMu.RUnlock()
+	return s.voiceSidecar
+}
+
 // handleVoiceStatus reports realtime-voice availability for the Chat panel.
 //
 //	GET /api/v1/voice/status
 func (s *Server) handleVoiceStatus(c *fiber.Ctx) error {
+	if sidecar := s.voiceSidecarRef(); sidecar != nil {
+		ready, detail := sidecar.Ready()
+		out := fiber.Map{
+			"available": ready,
+			"provider":  "sidecar",
+			"mode":      "pipeline",
+			"model":     sidecar.Model(),
+			"endpoint":  sidecar.URL(),
+			"voice":     sidecar.Voice(),
+		}
+		if detail != "" {
+			out["detail"] = detail
+		}
+		return c.JSON(out)
+	}
 	m := s.voiceMinterRef()
 	if m == nil {
 		return c.JSON(fiber.Map{
 			"available": false,
-			"detail":    "no realtime voice provider configured (set voice.provider and an OpenAI API key in config.yaml)",
+			"provider":  "",
+			"mode":      "disabled",
+			"detail":    "Voice is not configured. Connect a local sidecar or enable a realtime provider.",
 		})
 	}
 	ready, detail := m.Ready()
-	out := fiber.Map{"available": ready, "provider": m.Provider()}
+	out := fiber.Map{"available": ready, "provider": m.Provider(), "mode": "realtime"}
 	if detail != "" {
 		out["detail"] = detail
 	}
@@ -72,6 +104,18 @@ func (s *Server) voiceReadiness() voiceReadiness {
 	if s != nil && s.cfg != nil {
 		provider = s.cfg.Voice.Provider
 	}
+	if sidecar := s.voiceSidecarRef(); sidecar != nil {
+		ready, detail := sidecar.Ready()
+		out := voiceReadiness{Status: "warn", Score: 60, Enabled: true, Ready: ready, Provider: "sidecar", Model: sidecar.Model(), Detail: detail}
+		if ready {
+			out.Status, out.Score = "ok", 90
+			out.Detail = "Provider-neutral voice sidecar is ready; Chat uses local STT/TTS with the configured agent LLM."
+			out.Next = "Run a microphone and playback test before launch."
+		} else {
+			out.Next = "Start the configured sidecar, then verify /api/v1/voice/status."
+		}
+		return out
+	}
 	m := s.voiceMinterRef()
 	if m == nil {
 		if provider == "" {
@@ -80,8 +124,8 @@ func (s *Server) voiceReadiness() voiceReadiness {
 				Score:   55,
 				Enabled: false,
 				Ready:   false,
-				Detail:  "Realtime voice is disabled; text chat and channel agents still work.",
-				Next:    "Set voice.provider: openai and configure an OpenAI API key when voice is part of launch scope.",
+				Detail:  "Voice is disabled; text chat and channel agents still work.",
+				Next:    "Connect a local voice sidecar from Chat or run `sy voice configure`.",
 			}
 		}
 		return voiceReadiness{
@@ -116,6 +160,65 @@ func (s *Server) voiceReadiness() voiceReadiness {
 	out.Detail = detail
 	out.Next = "Fix the voice provider credential, then verify /api/v1/voice/status reports available."
 	return out
+}
+
+func (s *Server) handleVoiceCapabilities(c *fiber.Ctx) error {
+	sidecar := s.voiceSidecarRef()
+	if sidecar == nil {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "no voice sidecar configured"})
+	}
+	caps, err := sidecar.Capabilities(c.Context())
+	if err != nil {
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(caps)
+}
+
+// handleVoiceTranscribe accepts browser-recorded audio and forwards it to the
+// configured sidecar. The 16 MiB limit is enforced before proxying.
+func (s *Server) handleVoiceTranscribe(c *fiber.Ctx) error {
+	sidecar := s.voiceSidecarRef()
+	if sidecar == nil {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "no voice sidecar configured"})
+	}
+	fh, err := c.FormFile("audio")
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "multipart field 'audio' is required"})
+	}
+	if fh.Size > 16<<20 {
+		return c.Status(fiber.StatusRequestEntityTooLarge).JSON(fiber.Map{"error": "audio exceeds 16 MiB limit"})
+	}
+	f, err := fh.Open()
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "could not read audio"})
+	}
+	defer f.Close()
+	contentType := fh.Header.Get("Content-Type")
+	text, err := sidecar.Transcribe(c.Context(), contentType, io.LimitReader(f, 16<<20))
+	if err != nil {
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"text": text})
+}
+
+func (s *Server) handleVoiceSynthesize(c *fiber.Ctx) error {
+	sidecar := s.voiceSidecarRef()
+	if sidecar == nil {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "no voice sidecar configured"})
+	}
+	var in struct {
+		Text  string `json:"text"`
+		Voice string `json:"voice"`
+	}
+	if err := c.BodyParser(&in); err != nil || strings.TrimSpace(in.Text) == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "text is required"})
+	}
+	audio, contentType, err := sidecar.Synthesize(c.Context(), in.Text, in.Voice)
+	if err != nil {
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": err.Error()})
+	}
+	c.Set(fiber.HeaderContentType, contentType)
+	return c.Send(audio)
 }
 
 // handleVoiceEphemeral mints a short-lived client key for the browser's

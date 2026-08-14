@@ -37,6 +37,10 @@
   // it enabled and unchanged for the whole call — the click looked ignored.
   export let refining = false       // a refine-prompt pass is in flight
   export let generating = false     // a generate/compile pass is in flight
+  // The Studio home puts the primary Refine and Generate actions directly on
+  // their prompt cards. Modal/legacy callers can keep the panel actions, while
+  // the home screen avoids presenting the same primary action twice.
+  export let showActions = true
 
   $: rows = specRows(spec, recommendation)
   $: blockers = specBlockers(spec)
@@ -221,15 +225,17 @@
       </details>
     {/if}
 
-    <div class="bs-actions">
-      <button class="btn" type="button" disabled={busy} on:click={onRefine}>
-        {#if refining}<span class="bs-spin" aria-hidden="true"></span>Refining…{:else}Refine prompt{/if}
-      </button>
-      <button class="btn primary" type="button" disabled={!canGenerate} on:click={onGenerate}
-        data-tooltip={unresolved.length ? 'Answer the required questions first' : generationTriggerError}>
-        {#if generating}<span class="bs-spin" aria-hidden="true"></span>Generating…{:else}Generate workflow{/if}
-      </button>
-    </div>
+    {#if showActions}
+      <div class="bs-actions">
+        <button class="btn" type="button" disabled={busy} on:click={onRefine}>
+          {#if refining}<span class="bs-spin" aria-hidden="true"></span>Refining…{:else}Refine prompt{/if}
+        </button>
+        <button class="btn primary" type="button" disabled={!canGenerate} on:click={onGenerate}
+          data-tooltip={unresolved.length ? 'Answer the required questions first' : generationTriggerError}>
+          {#if generating}<span class="bs-spin" aria-hidden="true"></span>Generating…{:else}Generate workflow{/if}
+        </button>
+      </div>
+    {/if}
     {#if refining || generating}
       <p class="bs-working" role="status" aria-live="polite">
         {refining

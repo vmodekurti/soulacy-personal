@@ -388,6 +388,9 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 	// hot-reload between user messages picks up the new def's catalogs.
 	// (PRODUCTION_AUDIT → MED/Engine.)
 	sysPrefix := e.buildSystemPrefix(def)
+	if modePrompt := responseModeSystemPrompt(msg.Metadata); modePrompt != "" {
+		sysPrefix += "\n\n" + modePrompt
+	}
 	rawGoal := flattenParts(msg.Parts)
 	sess.mu.Lock()
 	// S1 (Cohort F) — annotate inbound text from shared external
@@ -1022,6 +1025,10 @@ func (e *Engine) finalizeReply(ctx context.Context, def *agent.Definition, sess 
 	} else {
 		finalContent = reasoning.SanitizeFinalOutput(finalContent, nil)
 	}
+	spokenContent := ""
+	if strings.EqualFold(strings.TrimSpace(msg.Metadata["response.mode"]), "voice") {
+		finalContent, spokenContent = splitVoiceResponse(finalContent)
+	}
 
 	// Append final assistant response to the in-memory session history
 	sess.mu.Lock()
@@ -1060,6 +1067,9 @@ func (e *Engine) finalizeReply(ctx context.Context, def *agent.Definition, sess 
 		Parts:     message.Text(finalContent),
 		CreatedAt: time.Now().UTC(),
 	}
+	if spokenContent != "" {
+		reply.Metadata = map[string]string{"response.spoken": spokenContent}
+	}
 
 	e.sink.Emit(message.Event{
 		Type: "message.out", AgentID: msg.AgentID, SessionID: msg.SessionID,
@@ -1084,6 +1094,49 @@ func (e *Engine) finalizeReply(ctx context.Context, def *agent.Definition, sess 
 	}
 
 	return reply
+}
+
+// splitVoiceResponse separates the model's one-call dual presentation. The
+// display answer is persisted as normal conversation history; the spoken
+// answer rides on reply metadata and is never added to the visible transcript.
+// If a model ignores the envelope, callers safely fall back to speaking the
+// ordinary answer through the existing Markdown sanitizer.
+func splitVoiceResponse(content string) (display, spoken string) {
+	const (
+		spokenOpen   = "<spoken_response>"
+		spokenClose  = "</spoken_response>"
+		displayOpen  = "<display_response>"
+		displayClose = "</display_response>"
+	)
+	raw := strings.TrimSpace(content)
+	lower := strings.ToLower(raw)
+	spokenStart := strings.Index(lower, spokenOpen)
+	if spokenStart < 0 {
+		return raw, ""
+	}
+	spokenStart += len(spokenOpen)
+	spokenEndRel := strings.Index(lower[spokenStart:], spokenClose)
+	if spokenEndRel < 0 {
+		return raw, ""
+	}
+	spokenEnd := spokenStart + spokenEndRel
+	spoken = strings.TrimSpace(raw[spokenStart:spokenEnd])
+
+	displayStart := strings.Index(lower, displayOpen)
+	if displayStart < 0 {
+		return spoken, spoken
+	}
+	displayStart += len(displayOpen)
+	displayEndRel := strings.Index(lower[displayStart:], displayClose)
+	if displayEndRel < 0 {
+		display = strings.TrimSpace(raw[displayStart:])
+	} else {
+		display = strings.TrimSpace(raw[displayStart : displayStart+displayEndRel])
+	}
+	if display == "" {
+		display = spoken
+	}
+	return display, spoken
 }
 
 // bestEffortFinal recovers a usable reply from the conversation context when
