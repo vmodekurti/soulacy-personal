@@ -145,7 +145,11 @@ describe('the overlay', () => {
     el.getBoundingClientRect = () => ({ top: 120, left: 8, width: 190, height: 34, right: 198, bottom: 154 })
     const idx = walkthroughSteps.findIndex((s) => s.nav === 'studio')
     startWalkthrough(idx)
-    await frames()
+    await tick()
+    // Measure explicitly after Svelte applies the new step. Waiting a fixed
+    // number of milliseconds for requestAnimationFrame is flaky under CI load.
+    cmp.measure()
+    await tick()
     const spot = document.querySelector('.wt-spot')
     expect(spot).toBeTruthy()
     expect(spot.getAttribute('style')).toContain('top: 116px')
