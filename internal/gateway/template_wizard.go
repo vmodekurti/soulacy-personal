@@ -52,7 +52,7 @@ func (s *Server) handleTemplateReadiness(c *fiber.Ctx) error {
 	}
 
 	// Secrets: live vault lookup.
-	mgr := secrets.New(s.CredentialVault())
+	mgr := secrets.NewInWorkspace(s.CredentialVault(), s.agents(c).WorkspaceID())
 	for _, rs := range entry.RequiredSecrets {
 		satisfied := false
 		if mgr.Enabled() {

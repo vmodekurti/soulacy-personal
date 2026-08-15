@@ -3,6 +3,7 @@ package gateway
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"net/http"
 	"strings"
 	"testing"
@@ -36,7 +37,7 @@ func TestRBACMiddlewareWiredAfterRouteConstructionStillEnforces(t *testing.T) {
 func TestCredentialRevealRequiresConfirmationAndIsAudited(t *testing.T) {
 	s := newTestGateway(t, "secret")
 	vault := newMemVault()
-	if err := vault.Set(t.Context(), "agent-a", "token", []byte("top-secret-value")); err != nil {
+	if err := vault.Set(t.Context(), wsroot.PersonalWorkspaceID, "agent-a", "token", []byte("top-secret-value")); err != nil {
 		t.Fatal(err)
 	}
 	s.SetCredentialVault(vault)

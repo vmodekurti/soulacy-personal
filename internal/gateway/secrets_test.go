@@ -15,35 +15,35 @@ type memVault struct {
 
 func newMemVault() *memVault { return &memVault{data: map[string]map[string][]byte{}} }
 
-func (m *memVault) Set(_ context.Context, agentID, key string, value []byte) error {
+func (m *memVault) Set(_ context.Context, workspaceID, agentID, key string, value []byte) error {
 	if m.data[agentID] == nil {
 		m.data[agentID] = map[string][]byte{}
 	}
 	m.data[agentID][key] = append([]byte(nil), value...)
 	return nil
 }
-func (m *memVault) Get(_ context.Context, agentID, key string) ([]byte, error) {
+func (m *memVault) Get(_ context.Context, workspaceID, agentID, key string) ([]byte, error) {
 	if v, ok := m.data[agentID][key]; ok {
 		return v, nil
 	}
 	return nil, os.ErrNotExist
 }
-func (m *memVault) Delete(_ context.Context, agentID, key string) error {
+func (m *memVault) Delete(_ context.Context, workspaceID, agentID, key string) error {
 	delete(m.data[agentID], key)
 	return nil
 }
-func (m *memVault) List(_ context.Context, agentID string) ([]string, error) {
+func (m *memVault) List(_ context.Context, workspaceID, agentID string) ([]string, error) {
 	var keys []string
 	for k := range m.data[agentID] {
 		keys = append(keys, k)
 	}
 	return keys, nil
 }
-func (m *memVault) WriteBlob(ctx context.Context, a, k string, d []byte) error {
-	return m.Set(ctx, a, k, d)
+func (m *memVault) WriteBlob(ctx context.Context, workspaceID, a, k string, d []byte) error {
+	return m.Set(ctx, workspaceID, a, k, d)
 }
-func (m *memVault) ReadBlob(ctx context.Context, a, k string) ([]byte, error) {
-	return m.Get(ctx, a, k)
+func (m *memVault) ReadBlob(ctx context.Context, workspaceID, a, k string) ([]byte, error) {
+	return m.Get(ctx, workspaceID, a, k)
 }
 func (m *memVault) Close() error { return nil }
 

@@ -22,6 +22,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"os"
 	"regexp"
 	"sort"
@@ -105,7 +106,7 @@ func (d *Delegator) Env(ctx context.Context, pluginID string, refs []plugin.Cred
 	ns := PluginVaultNamespace(pluginID)
 	for _, r := range refs {
 		_, key, _ := strings.Cut(r.From, "/")
-		val, err := d.vault.Get(ctx, ns, key)
+		val, err := d.vault.Get(ctx, wsroot.PersonalWorkspaceID, ns, key)
 		if err != nil {
 			// Deliberately omits the value (there is none) and never echoes
 			// stored secrets; only the path is named.
@@ -133,7 +134,7 @@ func (d *Delegator) fingerprint(ctx context.Context, pluginID string, refs []plu
 	sort.Strings(keys)
 	h := sha256.New()
 	for _, key := range keys {
-		val, err := d.vault.Get(ctx, ns, key)
+		val, err := d.vault.Get(ctx, wsroot.PersonalWorkspaceID, ns, key)
 		h.Write([]byte(key))
 		h.Write([]byte{0})
 		if err != nil {

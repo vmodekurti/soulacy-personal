@@ -5,21 +5,23 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"time"
 )
 
 const versionSchema = `
 CREATE TABLE IF NOT EXISTS credential_versions (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id TEXT NOT NULL DEFAULT 'ws_personal',
     agent_id   TEXT NOT NULL,
     key        TEXT NOT NULL,
     version    INTEGER NOT NULL,
     ciphertext BLOB NOT NULL,
     created_at DATETIME NOT NULL,
     is_active  INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(agent_id, key, version)
+    UNIQUE(workspace_id, agent_id, key, version)
 );
-CREATE INDEX IF NOT EXISTS idx_cv_lookup ON credential_versions(agent_id, key);
+CREATE INDEX IF NOT EXISTS idx_cv_lookup ON credential_versions(workspace_id, agent_id, key);
 `
 
 func ensureVersionSchema(ctx context.Context, db *sql.DB) error {
@@ -55,19 +57,20 @@ type VersionedVault interface {
 // Rotate re-encrypts the current active value for (agentID, key) and stores
 // it as the new active version in credential_versions. The previous version
 // is retained for audit. Returns the new version number.
-func (v *SQLiteVault) Rotate(ctx context.Context, agentID, key string) (int, error) {
+func (v *SQLiteVault) Rotate(ctx context.Context, workspaceID, agentID, key string) (int, error) {
+	workspaceID = wsroot.Normalize(workspaceID)
 	if err := ensureVersionSchema(ctx, v.db); err != nil {
 		return 0, fmt.Errorf("credentials: rotate: ensure schema: %w", err)
 	}
 
 	// Get current plaintext value.
-	plaintext, err := v.Get(ctx, agentID, key)
+	plaintext, err := v.Get(ctx, workspaceID, agentID, key)
 	if err != nil {
 		return 0, fmt.Errorf("credentials: rotate: get current value: %w", err)
 	}
 
 	// Re-encrypt to produce a fresh ciphertext.
-	encKey, err := v.kms.DeriveKey(ctx, agentID)
+	encKey, err := v.kms.DeriveKey(ctx, workspaceID, agentID)
 	if err != nil {
 		return 0, fmt.Errorf("credentials: rotate: derive key: %w", err)
 	}
@@ -79,8 +82,8 @@ func (v *SQLiteVault) Rotate(ctx context.Context, agentID, key string) (int, err
 	// Determine next version number.
 	var maxVersion sql.NullInt64
 	err = v.db.QueryRowContext(ctx,
-		`SELECT MAX(version) FROM credential_versions WHERE agent_id = ? AND key = ?`,
-		agentID, key,
+		`SELECT MAX(version) FROM credential_versions WHERE workspace_id = ? AND agent_id = ? AND key = ?`,
+		workspaceID, agentID, key,
 	).Scan(&maxVersion)
 	if err != nil {
 		return 0, fmt.Errorf("credentials: rotate: query max version: %w", err)
@@ -92,8 +95,8 @@ func (v *SQLiteVault) Rotate(ctx context.Context, agentID, key string) (int, err
 
 	// Mark all previous versions inactive.
 	_, err = v.db.ExecContext(ctx,
-		`UPDATE credential_versions SET is_active = 0 WHERE agent_id = ? AND key = ?`,
-		agentID, key,
+		`UPDATE credential_versions SET is_active = 0 WHERE workspace_id = ? AND agent_id = ? AND key = ?`,
+		workspaceID, agentID, key,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("credentials: rotate: deactivate old versions: %w", err)
@@ -101,16 +104,16 @@ func (v *SQLiteVault) Rotate(ctx context.Context, agentID, key string) (int, err
 
 	// Insert new active version.
 	_, err = v.db.ExecContext(ctx,
-		`INSERT INTO credential_versions (agent_id, key, version, ciphertext, created_at, is_active)
-		 VALUES (?, ?, ?, ?, ?, 1)`,
-		agentID, key, newVersion, ct, time.Now().UTC(),
+		`INSERT INTO credential_versions (workspace_id, agent_id, key, version, ciphertext, created_at, is_active)
+		 VALUES (?, ?, ?, ?, ?, ?, 1)`,
+		workspaceID, agentID, key, newVersion, ct, time.Now().UTC(),
 	)
 	if err != nil {
 		return 0, fmt.Errorf("credentials: rotate: insert version: %w", err)
 	}
 
 	// Update the main credentials table with the new ciphertext.
-	if err := v.Set(ctx, agentID, key, plaintext); err != nil {
+	if err := v.Set(ctx, workspaceID, agentID, key, plaintext); err != nil {
 		return 0, fmt.Errorf("credentials: rotate: update main store: %w", err)
 	}
 
@@ -118,7 +121,8 @@ func (v *SQLiteVault) Rotate(ctx context.Context, agentID, key string) (int, err
 }
 
 // ListVersions returns all stored versions for (agentID, key), newest first.
-func (v *SQLiteVault) ListVersions(ctx context.Context, agentID, key string) ([]CredentialVersion, error) {
+func (v *SQLiteVault) ListVersions(ctx context.Context, workspaceID, agentID, key string) ([]CredentialVersion, error) {
+	workspaceID = wsroot.Normalize(workspaceID)
 	if err := ensureVersionSchema(ctx, v.db); err != nil {
 		return nil, fmt.Errorf("credentials: list versions: ensure schema: %w", err)
 	}
@@ -126,9 +130,9 @@ func (v *SQLiteVault) ListVersions(ctx context.Context, agentID, key string) ([]
 	rows, err := v.db.QueryContext(ctx,
 		`SELECT version, created_at, is_active
 		 FROM credential_versions
-		 WHERE agent_id = ? AND key = ?
+		 WHERE workspace_id = ? AND agent_id = ? AND key = ?
 		 ORDER BY version DESC`,
-		agentID, key,
+		workspaceID, agentID, key,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("credentials: list versions: query: %w", err)
@@ -153,15 +157,16 @@ func (v *SQLiteVault) ListVersions(ctx context.Context, agentID, key string) ([]
 
 // DeleteVersion removes a specific historical version. Returns ErrNotFound if
 // the version does not exist. Returns an error if the version is still active.
-func (v *SQLiteVault) DeleteVersion(ctx context.Context, agentID, key string, version int) error {
+func (v *SQLiteVault) DeleteVersion(ctx context.Context, workspaceID, agentID, key string, version int) error {
+	workspaceID = wsroot.Normalize(workspaceID)
 	if err := ensureVersionSchema(ctx, v.db); err != nil {
 		return fmt.Errorf("credentials: delete version: ensure schema: %w", err)
 	}
 
 	var isActive int
 	err := v.db.QueryRowContext(ctx,
-		`SELECT is_active FROM credential_versions WHERE agent_id = ? AND key = ? AND version = ?`,
-		agentID, key, version,
+		`SELECT is_active FROM credential_versions WHERE workspace_id = ? AND agent_id = ? AND key = ? AND version = ?`,
+		workspaceID, agentID, key, version,
 	).Scan(&isActive)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
@@ -174,8 +179,8 @@ func (v *SQLiteVault) DeleteVersion(ctx context.Context, agentID, key string, ve
 	}
 
 	_, err = v.db.ExecContext(ctx,
-		`DELETE FROM credential_versions WHERE agent_id = ? AND key = ? AND version = ?`,
-		agentID, key, version,
+		`DELETE FROM credential_versions WHERE workspace_id = ? AND agent_id = ? AND key = ? AND version = ?`,
+		workspaceID, agentID, key, version,
 	)
 	if err != nil {
 		return fmt.Errorf("credentials: delete version: delete: %w", err)

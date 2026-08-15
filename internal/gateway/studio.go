@@ -584,7 +584,7 @@ func (s *Server) preflightInput(c *fiber.Ctx, cat studio.Catalog) studio.Preflig
 		ConnectedMCP:       s.connectedMCPSet(),
 		ChannelsConfigured: s.configuredChannelSet(),
 	}
-	if mgr := secrets.New(s.CredentialVault()); mgr.Enabled() {
+	if mgr := secrets.NewInWorkspace(s.CredentialVault(), s.agents(c).WorkspaceID()); mgr.Enabled() {
 		set := map[string]bool{}
 		for _, d := range mgr.Catalog(c.Context(), s.cfg) {
 			set[d.Name] = d.Set

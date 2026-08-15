@@ -3,6 +3,7 @@ package plugins
 import (
 	"context"
 	"fmt"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -31,7 +32,7 @@ func testVault(t *testing.T) *credentials.SQLiteVault {
 
 func setSecret(t *testing.T, v credentials.Vault, pluginID, key, val string) {
 	t.Helper()
-	if err := v.Set(context.Background(), PluginVaultNamespace(pluginID), key, []byte(val)); err != nil {
+	if err := v.Set(context.Background(), wsroot.PersonalWorkspaceID, PluginVaultNamespace(pluginID), key, []byte(val)); err != nil {
 		t.Fatal(err)
 	}
 }

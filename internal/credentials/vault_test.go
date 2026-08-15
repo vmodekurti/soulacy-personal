@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"net/http"
 	"os"
 	"sort"
@@ -81,11 +82,11 @@ func TestSetGetRoundTrip(t *testing.T) {
 	v := newTestVault(t)
 
 	want := []byte("super-secret-api-key")
-	if err := v.Set(ctx, "agent-a", "api_key", want); err != nil {
+	if err := v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-a", "api_key", want); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
 
-	got, err := v.Get(ctx, "agent-a", "api_key")
+	got, err := v.Get(ctx, wsroot.PersonalWorkspaceID, "agent-a", "api_key")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -98,10 +99,10 @@ func TestSetGetEmptyValue(t *testing.T) {
 	ctx := context.Background()
 	v := newTestVault(t)
 
-	if err := v.Set(ctx, "agent-a", "empty_key", []byte{}); err != nil {
+	if err := v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-a", "empty_key", []byte{}); err != nil {
 		t.Fatalf("Set empty value: %v", err)
 	}
-	got, err := v.Get(ctx, "agent-a", "empty_key")
+	got, err := v.Get(ctx, wsroot.PersonalWorkspaceID, "agent-a", "empty_key")
 	if err != nil {
 		t.Fatalf("Get empty value: %v", err)
 	}
@@ -115,10 +116,10 @@ func TestSetGetBinaryValue(t *testing.T) {
 	v := newTestVault(t)
 
 	want := []byte{0x00, 0xFF, 0xAB, 0xCD, 0x01, 0x02, 0x03}
-	if err := v.Set(ctx, "agent-b", "binary_key", want); err != nil {
+	if err := v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-b", "binary_key", want); err != nil {
 		t.Fatalf("Set binary: %v", err)
 	}
-	got, err := v.Get(ctx, "agent-b", "binary_key")
+	got, err := v.Get(ctx, wsroot.PersonalWorkspaceID, "agent-b", "binary_key")
 	if err != nil {
 		t.Fatalf("Get binary: %v", err)
 	}
@@ -135,7 +136,7 @@ func TestGetMissingKeyReturnsErrNotFound(t *testing.T) {
 	ctx := context.Background()
 	v := newTestVault(t)
 
-	_, err := v.Get(ctx, "no-such-agent", "no-such-key")
+	_, err := v.Get(ctx, wsroot.PersonalWorkspaceID, "no-such-agent", "no-such-key")
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("Get missing key: got %v, want ErrNotFound", err)
 	}
@@ -145,9 +146,9 @@ func TestGetMissingKeyForExistingAgent(t *testing.T) {
 	ctx := context.Background()
 	v := newTestVault(t)
 
-	_ = v.Set(ctx, "agent-x", "known_key", []byte("value"))
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-x", "known_key", []byte("value"))
 
-	_, err := v.Get(ctx, "agent-x", "unknown_key")
+	_, err := v.Get(ctx, wsroot.PersonalWorkspaceID, "agent-x", "unknown_key")
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("Get missing key on existing agent: got %v, want ErrNotFound", err)
 	}
@@ -161,13 +162,13 @@ func TestDeleteExistingKey(t *testing.T) {
 	ctx := context.Background()
 	v := newTestVault(t)
 
-	_ = v.Set(ctx, "agent-a", "key1", []byte("value1"))
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-a", "key1", []byte("value1"))
 
-	if err := v.Delete(ctx, "agent-a", "key1"); err != nil {
+	if err := v.Delete(ctx, wsroot.PersonalWorkspaceID, "agent-a", "key1"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	_, err := v.Get(ctx, "agent-a", "key1")
+	_, err := v.Get(ctx, wsroot.PersonalWorkspaceID, "agent-a", "key1")
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("after Delete, Get returned %v, want ErrNotFound", err)
 	}
@@ -178,7 +179,7 @@ func TestDeleteNonExistentKeyIsNoop(t *testing.T) {
 	v := newTestVault(t)
 
 	// Deleting a key that never existed must return nil (not an error).
-	if err := v.Delete(ctx, "ghost-agent", "ghost-key"); err != nil {
+	if err := v.Delete(ctx, wsroot.PersonalWorkspaceID, "ghost-agent", "ghost-key"); err != nil {
 		t.Errorf("Delete non-existent key: got %v, want nil", err)
 	}
 }
@@ -187,12 +188,12 @@ func TestDeleteDoesNotAffectOtherKeys(t *testing.T) {
 	ctx := context.Background()
 	v := newTestVault(t)
 
-	_ = v.Set(ctx, "agent-a", "key1", []byte("v1"))
-	_ = v.Set(ctx, "agent-a", "key2", []byte("v2"))
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-a", "key1", []byte("v1"))
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-a", "key2", []byte("v2"))
 
-	_ = v.Delete(ctx, "agent-a", "key1")
+	_ = v.Delete(ctx, wsroot.PersonalWorkspaceID, "agent-a", "key1")
 
-	got, err := v.Get(ctx, "agent-a", "key2")
+	got, err := v.Get(ctx, wsroot.PersonalWorkspaceID, "agent-a", "key2")
 	if err != nil {
 		t.Fatalf("Get key2 after deleting key1: %v", err)
 	}
@@ -211,10 +212,10 @@ func TestListReturnsAllKeysForAgent(t *testing.T) {
 
 	keys := []string{"alpha", "beta", "gamma"}
 	for _, k := range keys {
-		_ = v.Set(ctx, "agent-list", k, []byte("value-"+k))
+		_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-list", k, []byte("value-"+k))
 	}
 
-	got, err := v.List(ctx, "agent-list")
+	got, err := v.List(ctx, wsroot.PersonalWorkspaceID, "agent-list")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -238,7 +239,7 @@ func TestListReturnsEmptySliceForUnknownAgent(t *testing.T) {
 	ctx := context.Background()
 	v := newTestVault(t)
 
-	got, err := v.List(ctx, "totally-unknown-agent")
+	got, err := v.List(ctx, wsroot.PersonalWorkspaceID, "totally-unknown-agent")
 	if err != nil {
 		t.Fatalf("List unknown agent: %v", err)
 	}
@@ -251,11 +252,11 @@ func TestListAfterDeleteOmitsDeletedKey(t *testing.T) {
 	ctx := context.Background()
 	v := newTestVault(t)
 
-	_ = v.Set(ctx, "agent-del", "keep", []byte("v"))
-	_ = v.Set(ctx, "agent-del", "remove", []byte("v"))
-	_ = v.Delete(ctx, "agent-del", "remove")
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-del", "keep", []byte("v"))
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-del", "remove", []byte("v"))
+	_ = v.Delete(ctx, wsroot.PersonalWorkspaceID, "agent-del", "remove")
 
-	got, err := v.List(ctx, "agent-del")
+	got, err := v.List(ctx, wsroot.PersonalWorkspaceID, "agent-del")
 	if err != nil {
 		t.Fatalf("List after delete: %v", err)
 	}
@@ -272,11 +273,11 @@ func TestCrossAgentIsolation(t *testing.T) {
 	ctx := context.Background()
 	v := newTestVault(t)
 
-	_ = v.Set(ctx, "agent-a", "secret", []byte("value-for-a"))
-	_ = v.Set(ctx, "agent-b", "secret", []byte("value-for-b"))
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-a", "secret", []byte("value-for-a"))
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-b", "secret", []byte("value-for-b"))
 
 	// agent-a's value must not be readable as agent-b's.
-	gotA, err := v.Get(ctx, "agent-a", "secret")
+	gotA, err := v.Get(ctx, wsroot.PersonalWorkspaceID, "agent-a", "secret")
 	if err != nil {
 		t.Fatalf("Get agent-a: %v", err)
 	}
@@ -284,7 +285,7 @@ func TestCrossAgentIsolation(t *testing.T) {
 		t.Errorf("agent-a secret = %q, want value-for-a", gotA)
 	}
 
-	gotB, err := v.Get(ctx, "agent-b", "secret")
+	gotB, err := v.Get(ctx, wsroot.PersonalWorkspaceID, "agent-b", "secret")
 	if err != nil {
 		t.Fatalf("Get agent-b: %v", err)
 	}
@@ -297,12 +298,12 @@ func TestCrossAgentListIsolation(t *testing.T) {
 	ctx := context.Background()
 	v := newTestVault(t)
 
-	_ = v.Set(ctx, "agent-a", "key1", []byte("v"))
-	_ = v.Set(ctx, "agent-a", "key2", []byte("v"))
-	_ = v.Set(ctx, "agent-b", "keyX", []byte("v"))
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-a", "key1", []byte("v"))
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-a", "key2", []byte("v"))
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-b", "keyX", []byte("v"))
 
-	listA, _ := v.List(ctx, "agent-a")
-	listB, _ := v.List(ctx, "agent-b")
+	listA, _ := v.List(ctx, wsroot.PersonalWorkspaceID, "agent-a")
+	listB, _ := v.List(ctx, wsroot.PersonalWorkspaceID, "agent-b")
 
 	if len(listA) != 2 {
 		t.Errorf("agent-a list len = %d, want 2; got %v", len(listA), listA)
@@ -334,13 +335,13 @@ func TestMultipleValuesForSameAgent(t *testing.T) {
 	}
 
 	for k, val := range entries {
-		if err := v.Set(ctx, "multi-agent", k, val); err != nil {
+		if err := v.Set(ctx, wsroot.PersonalWorkspaceID, "multi-agent", k, val); err != nil {
 			t.Fatalf("Set %q: %v", k, err)
 		}
 	}
 
 	for k, want := range entries {
-		got, err := v.Get(ctx, "multi-agent", k)
+		got, err := v.Get(ctx, wsroot.PersonalWorkspaceID, "multi-agent", k)
 		if err != nil {
 			t.Fatalf("Get %q: %v", k, err)
 		}
@@ -358,10 +359,10 @@ func TestSetOverwriteReturnsLatestValue(t *testing.T) {
 	ctx := context.Background()
 	v := newTestVault(t)
 
-	_ = v.Set(ctx, "agent-a", "key", []byte("original"))
-	_ = v.Set(ctx, "agent-a", "key", []byte("updated"))
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-a", "key", []byte("original"))
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-a", "key", []byte("updated"))
 
-	got, err := v.Get(ctx, "agent-a", "key")
+	got, err := v.Get(ctx, wsroot.PersonalWorkspaceID, "agent-a", "key")
 	if err != nil {
 		t.Fatalf("Get after overwrite: %v", err)
 	}
@@ -374,10 +375,10 @@ func TestSetOverwriteDoesNotDuplicateInList(t *testing.T) {
 	ctx := context.Background()
 	v := newTestVault(t)
 
-	_ = v.Set(ctx, "agent-a", "key", []byte("v1"))
-	_ = v.Set(ctx, "agent-a", "key", []byte("v2"))
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-a", "key", []byte("v1"))
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-a", "key", []byte("v2"))
 
-	keys, err := v.List(ctx, "agent-a")
+	keys, err := v.List(ctx, wsroot.PersonalWorkspaceID, "agent-a")
 	if err != nil {
 		t.Fatalf("List after overwrite: %v", err)
 	}
@@ -395,11 +396,11 @@ func TestWriteBlobReadBlobRoundTrip(t *testing.T) {
 	v := newTestVault(t)
 
 	data := []byte{0xDE, 0xAD, 0xBE, 0xEF}
-	if err := v.WriteBlob(ctx, "agent-a", "blob_key", data); err != nil {
+	if err := v.WriteBlob(ctx, wsroot.PersonalWorkspaceID, "agent-a", "blob_key", data); err != nil {
 		t.Fatalf("WriteBlob: %v", err)
 	}
 
-	got, err := v.ReadBlob(ctx, "agent-a", "blob_key")
+	got, err := v.ReadBlob(ctx, wsroot.PersonalWorkspaceID, "agent-a", "blob_key")
 	if err != nil {
 		t.Fatalf("ReadBlob: %v", err)
 	}
@@ -412,7 +413,7 @@ func TestReadBlobMissingReturnsErrNotFound(t *testing.T) {
 	ctx := context.Background()
 	v := newTestVault(t)
 
-	_, err := v.ReadBlob(ctx, "agent-a", "missing_blob")
+	_, err := v.ReadBlob(ctx, wsroot.PersonalWorkspaceID, "agent-a", "missing_blob")
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("ReadBlob missing: got %v, want ErrNotFound", err)
 	}
@@ -441,13 +442,13 @@ func TestRotateIncreasesVersionNumber(t *testing.T) {
 	ctx := context.Background()
 	v := newTestVault(t)
 
-	_ = v.Set(ctx, "agent-r", "rotated_key", []byte("secret"))
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-r", "rotated_key", []byte("secret"))
 
-	v1, err := v.Rotate(ctx, "agent-r", "rotated_key")
+	v1, err := v.Rotate(ctx, wsroot.PersonalWorkspaceID, "agent-r", "rotated_key")
 	if err != nil {
 		t.Fatalf("Rotate v1: %v", err)
 	}
-	v2, err := v.Rotate(ctx, "agent-r", "rotated_key")
+	v2, err := v.Rotate(ctx, wsroot.PersonalWorkspaceID, "agent-r", "rotated_key")
 	if err != nil {
 		t.Fatalf("Rotate v2: %v", err)
 	}
@@ -461,10 +462,10 @@ func TestRotatePreservesPlaintext(t *testing.T) {
 	v := newTestVault(t)
 
 	want := []byte("preserved-value")
-	_ = v.Set(ctx, "agent-r", "my_key", want)
-	_, _ = v.Rotate(ctx, "agent-r", "my_key")
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-r", "my_key", want)
+	_, _ = v.Rotate(ctx, wsroot.PersonalWorkspaceID, "agent-r", "my_key")
 
-	got, err := v.Get(ctx, "agent-r", "my_key")
+	got, err := v.Get(ctx, wsroot.PersonalWorkspaceID, "agent-r", "my_key")
 	if err != nil {
 		t.Fatalf("Get after Rotate: %v", err)
 	}
@@ -477,7 +478,7 @@ func TestRotateMissingKeyReturnsError(t *testing.T) {
 	ctx := context.Background()
 	v := newTestVault(t)
 
-	_, err := v.Rotate(ctx, "agent-r", "no_such_key")
+	_, err := v.Rotate(ctx, wsroot.PersonalWorkspaceID, "agent-r", "no_such_key")
 	if err == nil {
 		t.Fatal("Rotate non-existent key: expected error, got nil")
 	}
@@ -487,11 +488,11 @@ func TestListVersionsReturnsVersions(t *testing.T) {
 	ctx := context.Background()
 	v := newTestVault(t)
 
-	_ = v.Set(ctx, "agent-r", "versioned", []byte("v"))
-	_, _ = v.Rotate(ctx, "agent-r", "versioned")
-	_, _ = v.Rotate(ctx, "agent-r", "versioned")
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-r", "versioned", []byte("v"))
+	_, _ = v.Rotate(ctx, wsroot.PersonalWorkspaceID, "agent-r", "versioned")
+	_, _ = v.Rotate(ctx, wsroot.PersonalWorkspaceID, "agent-r", "versioned")
 
-	versions, err := v.ListVersions(ctx, "agent-r", "versioned")
+	versions, err := v.ListVersions(ctx, wsroot.PersonalWorkspaceID, "agent-r", "versioned")
 	if err != nil {
 		t.Fatalf("ListVersions: %v", err)
 	}
@@ -504,7 +505,7 @@ func TestListVersionsEmptyForUnknownKey(t *testing.T) {
 	ctx := context.Background()
 	v := newTestVault(t)
 
-	versions, err := v.ListVersions(ctx, "agent-r", "no_such_key")
+	versions, err := v.ListVersions(ctx, wsroot.PersonalWorkspaceID, "agent-r", "no_such_key")
 	if err != nil {
 		t.Fatalf("ListVersions unknown key: %v", err)
 	}
@@ -517,11 +518,11 @@ func TestDeleteVersionRemovesInactiveVersion(t *testing.T) {
 	ctx := context.Background()
 	v := newTestVault(t)
 
-	_ = v.Set(ctx, "agent-r", "dv_key", []byte("data"))
-	v1, _ := v.Rotate(ctx, "agent-r", "dv_key")
-	_, _ = v.Rotate(ctx, "agent-r", "dv_key") // v1 is now inactive
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-r", "dv_key", []byte("data"))
+	v1, _ := v.Rotate(ctx, wsroot.PersonalWorkspaceID, "agent-r", "dv_key")
+	_, _ = v.Rotate(ctx, wsroot.PersonalWorkspaceID, "agent-r", "dv_key") // v1 is now inactive
 
-	err := v.DeleteVersion(ctx, "agent-r", "dv_key", v1)
+	err := v.DeleteVersion(ctx, wsroot.PersonalWorkspaceID, "agent-r", "dv_key", v1)
 	if err != nil {
 		t.Fatalf("DeleteVersion inactive: %v", err)
 	}
@@ -531,11 +532,11 @@ func TestDeleteVersionActiveReturnsError(t *testing.T) {
 	ctx := context.Background()
 	v := newTestVault(t)
 
-	_ = v.Set(ctx, "agent-r", "active_key", []byte("data"))
-	ver, _ := v.Rotate(ctx, "agent-r", "active_key")
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-r", "active_key", []byte("data"))
+	ver, _ := v.Rotate(ctx, wsroot.PersonalWorkspaceID, "agent-r", "active_key")
 
 	// ver is the current active version — deleting it must fail.
-	err := v.DeleteVersion(ctx, "agent-r", "active_key", ver)
+	err := v.DeleteVersion(ctx, wsroot.PersonalWorkspaceID, "agent-r", "active_key", ver)
 	if err == nil {
 		t.Fatal("DeleteVersion active: expected error, got nil")
 	}
@@ -545,10 +546,10 @@ func TestDeleteVersionNonExistentReturnsErrNotFound(t *testing.T) {
 	ctx := context.Background()
 	v := newTestVault(t)
 
-	_ = v.Set(ctx, "agent-r", "some_key", []byte("data"))
-	_, _ = v.Rotate(ctx, "agent-r", "some_key")
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-r", "some_key", []byte("data"))
+	_, _ = v.Rotate(ctx, wsroot.PersonalWorkspaceID, "agent-r", "some_key")
 
-	err := v.DeleteVersion(ctx, "agent-r", "some_key", 9999)
+	err := v.DeleteVersion(ctx, wsroot.PersonalWorkspaceID, "agent-r", "some_key", 9999)
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("DeleteVersion non-existent: got %v, want ErrNotFound", err)
 	}
@@ -658,8 +659,8 @@ func TestAPIHandleSetInvalidBody(t *testing.T) {
 func TestAPIHandleList(t *testing.T) {
 	app, v := newAPIApp(t)
 	ctx := context.Background()
-	_ = v.Set(ctx, "agent-l", "k1", []byte("v"))
-	_ = v.Set(ctx, "agent-l", "k2", []byte("v"))
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-l", "k1", []byte("v"))
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-l", "k2", []byte("v"))
 
 	req, _ := http.NewRequest(http.MethodGet, "/credentials/agent-l", nil)
 	resp, err := app.Test(req)
@@ -703,7 +704,7 @@ func TestAPIHandleGetNotFound(t *testing.T) {
 func TestAPIHandleDelete(t *testing.T) {
 	app, v := newAPIApp(t)
 	ctx := context.Background()
-	_ = v.Set(ctx, "agent-d", "del_key", []byte("value"))
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-d", "del_key", []byte("value"))
 
 	req, _ := http.NewRequest(http.MethodDelete, "/credentials/agent-d/del_key", nil)
 	resp, err := app.Test(req)
@@ -715,7 +716,7 @@ func TestAPIHandleDelete(t *testing.T) {
 	}
 
 	// Verify deleted.
-	_, err = v.Get(ctx, "agent-d", "del_key")
+	_, err = v.Get(ctx, wsroot.PersonalWorkspaceID, "agent-d", "del_key")
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("after DELETE, Get returned %v, want ErrNotFound", err)
 	}
@@ -769,7 +770,7 @@ func TestLazyAPIHandleListAndDelete(t *testing.T) {
 	v := newTestVault(t)
 	app := newLazyAPIApp(t, v)
 	ctx := context.Background()
-	_ = v.Set(ctx, "agent-lz", "k", []byte("v"))
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-lz", "k", []byte("v"))
 
 	req, _ := http.NewRequest(http.MethodGet, "/credentials/agent-lz", nil)
 	resp, _ := app.Test(req)

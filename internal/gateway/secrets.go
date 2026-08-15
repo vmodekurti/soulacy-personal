@@ -12,7 +12,7 @@ import (
 //
 // GET /api/v1/secrets → {"secrets":[{"name","category","env_var","description","set"}]}
 func (s *Server) handleListSecrets(c *fiber.Ctx) error {
-	mgr := secrets.New(s.CredentialVault())
+	mgr := secrets.NewInWorkspace(s.CredentialVault(), s.agents(c).WorkspaceID())
 	catalog := mgr.Catalog(c.Context(), s.cfg)
 	if catalog == nil {
 		catalog = []secrets.Descriptor{}
@@ -25,7 +25,7 @@ func (s *Server) handleListSecrets(c *fiber.Ctx) error {
 // PUT /api/v1/secrets/:name  body {"value":"..."} → 204 No Content.
 // Returns 503 when the vault is nil/disabled, 400 for an empty value.
 func (s *Server) handleSetSecret(c *fiber.Ctx) error {
-	mgr := secrets.New(s.CredentialVault())
+	mgr := secrets.NewInWorkspace(s.CredentialVault(), s.agents(c).WorkspaceID())
 	if !mgr.Enabled() {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "secrets vault not configured")
 	}
@@ -50,7 +50,7 @@ func (s *Server) handleSetSecret(c *fiber.Ctx) error {
 //
 // DELETE /api/v1/secrets/:name → 204 No Content.
 func (s *Server) handleDeleteSecret(c *fiber.Ctx) error {
-	mgr := secrets.New(s.CredentialVault())
+	mgr := secrets.NewInWorkspace(s.CredentialVault(), s.agents(c).WorkspaceID())
 	if !mgr.Enabled() {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "secrets vault not configured")
 	}

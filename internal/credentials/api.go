@@ -3,6 +3,8 @@ package credentials
 import (
 	"encoding/base64"
 	"errors"
+	"github.com/soulacy/soulacy/internal/requestctx"
+	"github.com/soulacy/soulacy/internal/wsroot"
 
 	"github.com/gofiber/fiber/v2"
 	"go.uber.org/zap"
@@ -106,7 +108,7 @@ func (a *API) HandleSet(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "value must be base64-encoded"})
 	}
 
-	if err := a.vault.Set(c.Context(), agentID, req.Key, value); err != nil {
+	if err := a.vault.Set(c.Context(), apiWorkspace(c), agentID, req.Key, value); err != nil {
 		a.log.Error("credential vault set failed",
 			zap.String("agent_id", agentID),
 			zap.String("key", req.Key),
@@ -126,7 +128,7 @@ func (a *API) HandleList(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "agentID is required"})
 	}
 
-	keys, err := a.vault.List(c.Context(), agentID)
+	keys, err := a.vault.List(c.Context(), apiWorkspace(c), agentID)
 	if err != nil {
 		a.log.Error("credential vault list failed",
 			zap.String("agent_id", agentID),
@@ -151,7 +153,7 @@ func (a *API) HandleGet(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "agentID and key are required"})
 	}
 
-	value, err := a.vault.Get(c.Context(), agentID, key)
+	value, err := a.vault.Get(c.Context(), apiWorkspace(c), agentID, key)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "credential not found"})
@@ -175,7 +177,7 @@ func (a *API) HandleDelete(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "agentID and key are required"})
 	}
 
-	if err := a.vault.Delete(c.Context(), agentID, key); err != nil {
+	if err := a.vault.Delete(c.Context(), apiWorkspace(c), agentID, key); err != nil {
 		a.log.Error("credential vault delete failed",
 			zap.String("agent_id", agentID),
 			zap.String("key", key),
@@ -185,4 +187,14 @@ func (a *API) HandleDelete(c *fiber.Ctx) error {
 	}
 
 	return c.Status(fiber.StatusNoContent).Send(nil)
+}
+
+// apiWorkspace resolves the workspace for a credential request from verified
+// request context. A credential API that read the workspace from the body
+// would let any caller name any tenant.
+func apiWorkspace(c *fiber.Ctx) string {
+	if identity, ok := requestctx.From(c.UserContext()); ok {
+		return wsroot.Normalize(identity.WorkspaceID())
+	}
+	return wsroot.PersonalWorkspaceID
 }

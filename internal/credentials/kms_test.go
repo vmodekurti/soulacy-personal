@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"testing"
 )
 
@@ -47,7 +48,7 @@ func TestNewPassthroughKMSCopiesKey(t *testing.T) {
 	// Mutate original key — stored key must be independent.
 	key[0] ^= 0xFF
 
-	derived, _ := kms.DeriveKey(context.Background(), "any-agent")
+	derived, _ := kms.DeriveKey(context.Background(), wsroot.PersonalWorkspaceID, "any-agent")
 	if !bytes.Equal(derived, original) {
 		t.Error("PassthroughKMS did not copy the key — mutation affected stored key")
 	}
@@ -62,7 +63,7 @@ func TestPassthroughKMSDeriveKeyReturnsCopyOfKey(t *testing.T) {
 	rand.Read(key)
 	kms, _ := NewPassthroughKMS(key)
 
-	d1, err := kms.DeriveKey(context.Background(), "agent-a")
+	d1, err := kms.DeriveKey(context.Background(), wsroot.PersonalWorkspaceID, "agent-a")
 	if err != nil {
 		t.Fatalf("DeriveKey: %v", err)
 	}
@@ -72,7 +73,7 @@ func TestPassthroughKMSDeriveKeyReturnsCopyOfKey(t *testing.T) {
 
 	// Returned slice must be a copy — mutating it must not affect future calls.
 	d1[0] ^= 0xFF
-	d2, _ := kms.DeriveKey(context.Background(), "agent-a")
+	d2, _ := kms.DeriveKey(context.Background(), wsroot.PersonalWorkspaceID, "agent-a")
 	if bytes.Equal(d1, d2) {
 		t.Error("DeriveKey returned aliased slice — mutation affected next call")
 	}
@@ -83,8 +84,8 @@ func TestPassthroughKMSDeriveKeySameForAnyAgentID(t *testing.T) {
 	rand.Read(key)
 	kms, _ := NewPassthroughKMS(key)
 
-	d1, _ := kms.DeriveKey(context.Background(), "agent-alpha")
-	d2, _ := kms.DeriveKey(context.Background(), "agent-beta")
+	d1, _ := kms.DeriveKey(context.Background(), wsroot.PersonalWorkspaceID, "agent-alpha")
+	d2, _ := kms.DeriveKey(context.Background(), wsroot.PersonalWorkspaceID, "agent-beta")
 	if !bytes.Equal(d1, d2) {
 		t.Error("PassthroughKMS should return the same key for any agentID")
 	}
@@ -102,11 +103,11 @@ func TestLocalKMSDeriveKeyDifferentAgentsProduceDifferentKeys(t *testing.T) {
 	rand.Read(master)
 	kms := &LocalKMS{masterSecret: master}
 
-	d1, err := kms.DeriveKey(context.Background(), "agent-one")
+	d1, err := kms.DeriveKey(context.Background(), wsroot.PersonalWorkspaceID, "agent-one")
 	if err != nil {
 		t.Fatalf("DeriveKey agent-one: %v", err)
 	}
-	d2, err := kms.DeriveKey(context.Background(), "agent-two")
+	d2, err := kms.DeriveKey(context.Background(), wsroot.PersonalWorkspaceID, "agent-two")
 	if err != nil {
 		t.Fatalf("DeriveKey agent-two: %v", err)
 	}
@@ -120,8 +121,8 @@ func TestLocalKMSDeriveKeySameAgentIsDeterministic(t *testing.T) {
 	rand.Read(master)
 	kms := &LocalKMS{masterSecret: master}
 
-	d1, _ := kms.DeriveKey(context.Background(), "stable-agent")
-	d2, _ := kms.DeriveKey(context.Background(), "stable-agent")
+	d1, _ := kms.DeriveKey(context.Background(), wsroot.PersonalWorkspaceID, "stable-agent")
+	d2, _ := kms.DeriveKey(context.Background(), wsroot.PersonalWorkspaceID, "stable-agent")
 	if !bytes.Equal(d1, d2) {
 		t.Error("same agentID must always produce the same derived key")
 	}
@@ -132,7 +133,7 @@ func TestLocalKMSDeriveKeyIs32Bytes(t *testing.T) {
 	rand.Read(master)
 	kms := &LocalKMS{masterSecret: master}
 
-	d, err := kms.DeriveKey(context.Background(), "any")
+	d, err := kms.DeriveKey(context.Background(), wsroot.PersonalWorkspaceID, "any")
 	if err != nil {
 		t.Fatalf("DeriveKey: %v", err)
 	}

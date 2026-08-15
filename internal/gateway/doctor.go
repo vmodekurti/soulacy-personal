@@ -52,7 +52,7 @@ type doctorVaultCheck struct {
 // vaultDoctorCheck verifies the encrypted credential vault is present and
 // actually decrypts (sy doctor v2 parity, surfaced in the GUI Doctor).
 func (s *Server) vaultDoctorCheck(c *fiber.Ctx) doctorVaultCheck {
-	mgr := secrets.New(s.CredentialVault())
+	mgr := secrets.NewInWorkspace(s.CredentialVault(), s.agents(c).WorkspaceID())
 	if !mgr.Enabled() {
 		return doctorVaultCheck{
 			Status: "warn",
@@ -99,7 +99,7 @@ func (s *Server) providerDoctorChecks(c *fiber.Ctx) []doctorProviderCheck {
 	// which would report a plaintext key as safely stored and silently drop the
 	// migration warning.
 	vaultSet := map[string]bool{}
-	mgr := secrets.New(s.CredentialVault())
+	mgr := secrets.NewInWorkspace(s.CredentialVault(), s.agents(c).WorkspaceID())
 	if mgr.Enabled() {
 		for _, d := range mgr.Catalog(c.Context(), s.cfg) {
 			if d.Category == secrets.CategoryLLM && d.Source == secrets.SourceVault {

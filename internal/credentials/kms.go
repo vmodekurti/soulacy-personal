@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"io"
 	"os"
 	"os/exec"
@@ -22,10 +23,16 @@ import (
 // next to the credential vault when no hardware machine id is available.
 const machineSecretFile = ".machine-secret"
 
-// KMSProvider derives or retrieves the AES-256 encryption key for a given agentID.
+// KMSProvider derives or retrieves the AES-256 encryption key for one
+// workspace's agent.
+//
+// The workspace is part of the derivation, not just the lookup, so two
+// tenants' credentials are encrypted under different keys. A database read
+// that somehow escaped the workspace predicate still yields ciphertext the
+// reader cannot open — the boundary survives a query bug.
 type KMSProvider interface {
-	// DeriveKey returns a 32-byte AES key for the given agentID.
-	DeriveKey(ctx context.Context, agentID string) ([]byte, error)
+	// DeriveKey returns a 32-byte AES key for (workspaceID, agentID).
+	DeriveKey(ctx context.Context, workspaceID, agentID string) ([]byte, error)
 }
 
 // ---------------------------------------------------------------------------
@@ -115,8 +122,8 @@ func loadOrCreatePersistedSecret(dir string) ([]byte, error) {
 }
 
 // DeriveKey returns a 32-byte AES-256 key for the given agentID via HKDF-SHA256.
-func (k *LocalKMS) DeriveKey(_ context.Context, agentID string) ([]byte, error) {
-	info := []byte("soulacy-credential-" + agentID)
+func (k *LocalKMS) DeriveKey(_ context.Context, workspaceID, agentID string) ([]byte, error) {
+	info := deriveInfo(workspaceID, agentID)
 	r := hkdf.New(sha256.New, k.masterSecret, nil, info)
 	key := make([]byte, 32)
 	if _, err := io.ReadFull(r, key); err != nil {
@@ -187,8 +194,22 @@ func NewPassthroughKMS(key []byte) (*PassthroughKMS, error) {
 }
 
 // DeriveKey returns the fixed key regardless of agentID.
-func (p *PassthroughKMS) DeriveKey(_ context.Context, _ string) ([]byte, error) {
+func (p *PassthroughKMS) DeriveKey(_ context.Context, _, _ string) ([]byte, error) {
 	out := make([]byte, 32)
 	copy(out, p.key)
 	return out, nil
+}
+
+// deriveInfo builds the HKDF info string for a workspace's agent key.
+//
+// The personal workspace deliberately keeps the original, workspace-free
+// string. Changing it would derive a different key, and every credential an
+// existing installation already stored would stop decrypting — silently, at
+// the moment an agent needed it. Tenants added later get their own derivation
+// because they have no existing ciphertext to preserve.
+func deriveInfo(workspaceID, agentID string) []byte {
+	if wsroot.Normalize(workspaceID) == wsroot.PersonalWorkspaceID {
+		return []byte("soulacy-credential-" + agentID)
+	}
+	return []byte("soulacy-credential-" + wsroot.Normalize(workspaceID) + "\x00" + agentID)
 }

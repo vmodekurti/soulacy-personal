@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"io"
 	"net"
 	"net/http"
@@ -213,7 +214,7 @@ func checkVaultConsistency() doctorCheck {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	keys, lerr := vault.List(ctx, secrets.GlobalScope)
+	keys, lerr := vault.List(ctx, wsroot.PersonalWorkspaceID, secrets.GlobalScope)
 	if lerr != nil {
 		return doctorCheck{
 			Name:   "vault",
@@ -224,7 +225,7 @@ func checkVaultConsistency() doctorCheck {
 	}
 	// Prove decryption end-to-end on the first key (List returns names only).
 	if len(keys) > 0 {
-		if _, gerr := vault.Get(ctx, secrets.GlobalScope, keys[0]); gerr != nil {
+		if _, gerr := vault.Get(ctx, wsroot.PersonalWorkspaceID, secrets.GlobalScope, keys[0]); gerr != nil {
 			return doctorCheck{
 				Name:   "vault",
 				Status: doctorFail,

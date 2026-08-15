@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"testing"
 )
 
@@ -143,17 +144,17 @@ func TestRotate_VersionsContinuous(t *testing.T) {
 	ctx := context.Background()
 	v := newTestVault(t)
 
-	_ = v.Set(ctx, "agent-c", "cont-key", []byte("value"))
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-c", "cont-key", []byte("value"))
 
-	v1, err := v.Rotate(ctx, "agent-c", "cont-key")
+	v1, err := v.Rotate(ctx, wsroot.PersonalWorkspaceID, "agent-c", "cont-key")
 	if err != nil {
 		t.Fatalf("Rotate 1: %v", err)
 	}
-	v2, err := v.Rotate(ctx, "agent-c", "cont-key")
+	v2, err := v.Rotate(ctx, wsroot.PersonalWorkspaceID, "agent-c", "cont-key")
 	if err != nil {
 		t.Fatalf("Rotate 2: %v", err)
 	}
-	v3, err := v.Rotate(ctx, "agent-c", "cont-key")
+	v3, err := v.Rotate(ctx, wsroot.PersonalWorkspaceID, "agent-c", "cont-key")
 	if err != nil {
 		t.Fatalf("Rotate 3: %v", err)
 	}
@@ -169,12 +170,12 @@ func TestListVersions_NewestFirst(t *testing.T) {
 	ctx := context.Background()
 	v := newTestVault(t)
 
-	_ = v.Set(ctx, "agent-lv", "ord-key", []byte("val"))
-	_, _ = v.Rotate(ctx, "agent-lv", "ord-key")
-	_, _ = v.Rotate(ctx, "agent-lv", "ord-key")
-	_, _ = v.Rotate(ctx, "agent-lv", "ord-key")
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-lv", "ord-key", []byte("val"))
+	_, _ = v.Rotate(ctx, wsroot.PersonalWorkspaceID, "agent-lv", "ord-key")
+	_, _ = v.Rotate(ctx, wsroot.PersonalWorkspaceID, "agent-lv", "ord-key")
+	_, _ = v.Rotate(ctx, wsroot.PersonalWorkspaceID, "agent-lv", "ord-key")
 
-	versions, err := v.ListVersions(ctx, "agent-lv", "ord-key")
+	versions, err := v.ListVersions(ctx, wsroot.PersonalWorkspaceID, "agent-lv", "ord-key")
 	if err != nil {
 		t.Fatalf("ListVersions: %v", err)
 	}
@@ -194,11 +195,11 @@ func TestListVersions_OnlyOneActive(t *testing.T) {
 	ctx := context.Background()
 	v := newTestVault(t)
 
-	_ = v.Set(ctx, "agent-act", "act-key", []byte("val"))
-	_, _ = v.Rotate(ctx, "agent-act", "act-key")
-	_, _ = v.Rotate(ctx, "agent-act", "act-key")
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-act", "act-key", []byte("val"))
+	_, _ = v.Rotate(ctx, wsroot.PersonalWorkspaceID, "agent-act", "act-key")
+	_, _ = v.Rotate(ctx, wsroot.PersonalWorkspaceID, "agent-act", "act-key")
 
-	versions, err := v.ListVersions(ctx, "agent-act", "act-key")
+	versions, err := v.ListVersions(ctx, wsroot.PersonalWorkspaceID, "agent-act", "act-key")
 	if err != nil {
 		t.Fatalf("ListVersions: %v", err)
 	}
@@ -218,17 +219,17 @@ func TestDeleteVersion_ThenListVersions(t *testing.T) {
 	ctx := context.Background()
 	v := newTestVault(t)
 
-	_ = v.Set(ctx, "agent-dv", "del-list-key", []byte("data"))
-	ver1, _ := v.Rotate(ctx, "agent-dv", "del-list-key")
-	ver2, _ := v.Rotate(ctx, "agent-dv", "del-list-key") // ver1 is now inactive
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-dv", "del-list-key", []byte("data"))
+	ver1, _ := v.Rotate(ctx, wsroot.PersonalWorkspaceID, "agent-dv", "del-list-key")
+	ver2, _ := v.Rotate(ctx, wsroot.PersonalWorkspaceID, "agent-dv", "del-list-key") // ver1 is now inactive
 	_ = ver2
 
 	// Delete the inactive ver1.
-	if err := v.DeleteVersion(ctx, "agent-dv", "del-list-key", ver1); err != nil {
+	if err := v.DeleteVersion(ctx, wsroot.PersonalWorkspaceID, "agent-dv", "del-list-key", ver1); err != nil {
 		t.Fatalf("DeleteVersion: %v", err)
 	}
 
-	versions, err := v.ListVersions(ctx, "agent-dv", "del-list-key")
+	versions, err := v.ListVersions(ctx, wsroot.PersonalWorkspaceID, "agent-dv", "del-list-key")
 	if err != nil {
 		t.Fatalf("ListVersions after delete: %v", err)
 	}
@@ -243,10 +244,10 @@ func TestDeleteVersion_NonExistentVersion(t *testing.T) {
 	ctx := context.Background()
 	v := newTestVault(t)
 
-	_ = v.Set(ctx, "agent-dne", "dne-key", []byte("data"))
-	_, _ = v.Rotate(ctx, "agent-dne", "dne-key")
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-dne", "dne-key", []byte("data"))
+	_, _ = v.Rotate(ctx, wsroot.PersonalWorkspaceID, "agent-dne", "dne-key")
 
-	err := v.DeleteVersion(ctx, "agent-dne", "dne-key", 99999)
+	err := v.DeleteVersion(ctx, wsroot.PersonalWorkspaceID, "agent-dne", "dne-key", 99999)
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("DeleteVersion non-existent: got %v, want ErrNotFound", err)
 	}
@@ -257,7 +258,7 @@ func TestDeleteVersion_UnknownAgent(t *testing.T) {
 	v := newTestVault(t)
 
 	// Agent never had any versions created.
-	err := v.DeleteVersion(ctx, "ghost-agent", "ghost-key", 1)
+	err := v.DeleteVersion(ctx, wsroot.PersonalWorkspaceID, "ghost-agent", "ghost-key", 1)
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("DeleteVersion unknown agent: got %v, want ErrNotFound", err)
 	}
@@ -272,11 +273,11 @@ func TestSet_MultipleAgentsSameKey(t *testing.T) {
 	v := newTestVault(t)
 
 	// Different agents with the same key name must be stored independently.
-	_ = v.Set(ctx, "agent-x", "shared-key", []byte("value-x"))
-	_ = v.Set(ctx, "agent-y", "shared-key", []byte("value-y"))
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-x", "shared-key", []byte("value-x"))
+	_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-y", "shared-key", []byte("value-y"))
 
-	gotX, _ := v.Get(ctx, "agent-x", "shared-key")
-	gotY, _ := v.Get(ctx, "agent-y", "shared-key")
+	gotX, _ := v.Get(ctx, wsroot.PersonalWorkspaceID, "agent-x", "shared-key")
+	gotY, _ := v.Get(ctx, wsroot.PersonalWorkspaceID, "agent-y", "shared-key")
 
 	if !bytes.Equal(gotX, []byte("value-x")) {
 		t.Errorf("agent-x: got %q, want value-x", gotX)
@@ -292,10 +293,10 @@ func TestList_OrderedAlphabetically(t *testing.T) {
 
 	keys := []string{"zebra", "apple", "mango", "banana"}
 	for _, k := range keys {
-		_ = v.Set(ctx, "ordered-agent", k, []byte(k))
+		_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "ordered-agent", k, []byte(k))
 	}
 
-	got, err := v.List(ctx, "ordered-agent")
+	got, err := v.List(ctx, wsroot.PersonalWorkspaceID, "ordered-agent")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -315,14 +316,14 @@ func TestDelete_MultipleDeletes(t *testing.T) {
 	v := newTestVault(t)
 
 	for _, k := range []string{"k1", "k2", "k3"} {
-		_ = v.Set(ctx, "agent-multi-del", k, []byte("v"))
+		_ = v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-multi-del", k, []byte("v"))
 	}
 
 	// Delete two of the three keys.
-	_ = v.Delete(ctx, "agent-multi-del", "k1")
-	_ = v.Delete(ctx, "agent-multi-del", "k3")
+	_ = v.Delete(ctx, wsroot.PersonalWorkspaceID, "agent-multi-del", "k1")
+	_ = v.Delete(ctx, wsroot.PersonalWorkspaceID, "agent-multi-del", "k3")
 
-	keys, err := v.List(ctx, "agent-multi-del")
+	keys, err := v.List(ctx, wsroot.PersonalWorkspaceID, "agent-multi-del")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -339,7 +340,7 @@ func TestErrNotFound_IsDistinct(t *testing.T) {
 	ctx := context.Background()
 	v := newTestVault(t)
 
-	_, err := v.Get(ctx, "nobody", "nothing")
+	_, err := v.Get(ctx, wsroot.PersonalWorkspaceID, "nobody", "nothing")
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("Get missing: got %v, want ErrNotFound", err)
 	}
@@ -390,7 +391,7 @@ func TestLocalKMSDeriveKey_Not_MasterSecret(t *testing.T) {
 	}
 	kms := &LocalKMS{masterSecret: master}
 
-	derived, err := kms.DeriveKey(context.Background(), "agent-z")
+	derived, err := kms.DeriveKey(context.Background(), wsroot.PersonalWorkspaceID, "agent-z")
 	if err != nil {
 		t.Fatalf("DeriveKey: %v", err)
 	}
@@ -415,10 +416,10 @@ func TestSetGet_LargeValue(t *testing.T) {
 		large[i] = byte(i % 256)
 	}
 
-	if err := v.Set(ctx, "agent-large", "big-secret", large); err != nil {
+	if err := v.Set(ctx, wsroot.PersonalWorkspaceID, "agent-large", "big-secret", large); err != nil {
 		t.Fatalf("Set large: %v", err)
 	}
-	got, err := v.Get(ctx, "agent-large", "big-secret")
+	got, err := v.Get(ctx, wsroot.PersonalWorkspaceID, "agent-large", "big-secret")
 	if err != nil {
 		t.Fatalf("Get large: %v", err)
 	}

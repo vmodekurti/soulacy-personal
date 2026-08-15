@@ -17,6 +17,7 @@ package secrets
 
 import (
 	"context"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"os"
 	"sort"
 	"strings"
@@ -74,11 +75,32 @@ const (
 // nil-safe: a Manager built from a nil vault degrades gracefully (Get returns
 // not-found, mutating ops return ErrNoVault) so the gateway still runs.
 type Manager struct {
-	vault credentials.Vault
+	vault       credentials.Vault
+	workspaceID string
 }
 
-// New returns a Manager over the given vault. vault may be nil.
-func New(vault credentials.Vault) *Manager { return &Manager{vault: vault} }
+// New returns a Manager over the given vault for the implicit personal
+// workspace. vault may be nil.
+//
+// A gateway-global secret is global *to a workspace*, not to the deployment:
+// "openai_api_key" is a name every tenant uses, and one tenant setting it must
+// not overwrite or expose another's.
+func New(vault credentials.Vault) *Manager {
+	return &Manager{vault: vault, workspaceID: wsroot.PersonalWorkspaceID}
+}
+
+// NewInWorkspace returns a Manager bound to one workspace.
+func NewInWorkspace(vault credentials.Vault, workspaceID string) *Manager {
+	return &Manager{vault: vault, workspaceID: wsroot.Normalize(workspaceID)}
+}
+
+// WorkspaceID reports the tenant this manager reads and writes.
+func (m *Manager) WorkspaceID() string {
+	if m == nil || m.workspaceID == "" {
+		return wsroot.PersonalWorkspaceID
+	}
+	return m.workspaceID
+}
 
 // Enabled reports whether a backing vault is available.
 func (m *Manager) Enabled() bool { return m != nil && m.vault != nil }
@@ -92,7 +114,7 @@ func (m *Manager) Set(ctx context.Context, name, value string) error {
 	if name == "" {
 		return ErrEmptyName
 	}
-	return m.vault.Set(ctx, GlobalScope, name, []byte(value))
+	return m.vault.Set(ctx, m.WorkspaceID(), GlobalScope, name, []byte(value))
 }
 
 // Get returns the secret value and whether it was present.
@@ -100,7 +122,7 @@ func (m *Manager) Get(ctx context.Context, name string) (string, bool) {
 	if !m.Enabled() {
 		return "", false
 	}
-	b, err := m.vault.Get(ctx, GlobalScope, name)
+	b, err := m.vault.Get(ctx, m.WorkspaceID(), GlobalScope, name)
 	if err != nil {
 		return "", false
 	}
@@ -112,7 +134,7 @@ func (m *Manager) Delete(ctx context.Context, name string) error {
 	if !m.Enabled() {
 		return ErrNoVault
 	}
-	return m.vault.Delete(ctx, GlobalScope, name)
+	return m.vault.Delete(ctx, m.WorkspaceID(), GlobalScope, name)
 }
 
 // List returns the names of all stored global secrets, sorted.
@@ -120,7 +142,7 @@ func (m *Manager) List(ctx context.Context) ([]string, error) {
 	if !m.Enabled() {
 		return nil, nil
 	}
-	names, err := m.vault.List(ctx, GlobalScope)
+	names, err := m.vault.List(ctx, m.WorkspaceID(), GlobalScope)
 	if err != nil {
 		return nil, err
 	}

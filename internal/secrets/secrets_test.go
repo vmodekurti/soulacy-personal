@@ -17,35 +17,35 @@ type fakeVault struct {
 
 func newFakeVault() *fakeVault { return &fakeVault{data: map[string]map[string][]byte{}} }
 
-func (f *fakeVault) Set(_ context.Context, agentID, key string, value []byte) error {
+func (f *fakeVault) Set(_ context.Context, workspaceID, agentID, key string, value []byte) error {
 	if f.data[agentID] == nil {
 		f.data[agentID] = map[string][]byte{}
 	}
 	f.data[agentID][key] = append([]byte(nil), value...)
 	return nil
 }
-func (f *fakeVault) Get(_ context.Context, agentID, key string) ([]byte, error) {
+func (f *fakeVault) Get(_ context.Context, workspaceID, agentID, key string) ([]byte, error) {
 	if v, ok := f.data[agentID][key]; ok {
 		return v, nil
 	}
 	return nil, os.ErrNotExist
 }
-func (f *fakeVault) Delete(_ context.Context, agentID, key string) error {
+func (f *fakeVault) Delete(_ context.Context, workspaceID, agentID, key string) error {
 	delete(f.data[agentID], key)
 	return nil
 }
-func (f *fakeVault) List(_ context.Context, agentID string) ([]string, error) {
+func (f *fakeVault) List(_ context.Context, workspaceID, agentID string) ([]string, error) {
 	var keys []string
 	for k := range f.data[agentID] {
 		keys = append(keys, k)
 	}
 	return keys, nil
 }
-func (f *fakeVault) WriteBlob(ctx context.Context, a, k string, d []byte) error {
-	return f.Set(ctx, a, k, d)
+func (f *fakeVault) WriteBlob(ctx context.Context, workspaceID, a, k string, d []byte) error {
+	return f.Set(ctx, workspaceID, a, k, d)
 }
-func (f *fakeVault) ReadBlob(ctx context.Context, a, k string) ([]byte, error) {
-	return f.Get(ctx, a, k)
+func (f *fakeVault) ReadBlob(ctx context.Context, workspaceID, a, k string) ([]byte, error) {
+	return f.Get(ctx, workspaceID, a, k)
 }
 func (f *fakeVault) Close() error { return nil }
 
