@@ -25,7 +25,7 @@ isolation state; this document explains it.
 declared workspace-owned but not yet isolated.
 
 - At the start of this work: **57 blockers**
-- Now: **21 blockers**
+- Now: **18 blockers**
 
 A store moves from `personal-only` to `scoped` only when it has a real
 cross-tenant isolation test. The catalog names that test, and a CI check fails
@@ -371,6 +371,37 @@ implied:
   lose the "we considered this and said no" signal that stops the same lesson
   being re-proposed.
 
+### An ID is not an authorization
+
+Session attachments were protected only indirectly: the store took an ID and
+returned the row, and the one thing between a caller and another tenant's
+upload was the gateway remembering to call `requireSession` first. Attachment
+IDs are server-generated UUIDs, so this was not trivially exploitable — but it
+is ownership by convention, which is what this branch keeps replacing.
+
+`session_resources` now carries `workspace_id`, and the predicate is in the
+query. A file another workspace owns reads as absent, the same answer an ID
+that never existed gives.
+
+Two details worth keeping:
+
+- **Expiry is a query predicate, not housekeeping.** MU-016 requires that an
+  expired artifact stop being downloadable *including through a previously
+  issued URL*. Filtering on `expires_at` in `GetAttachment` and
+  `ListAttachments` means that happens the moment it expires, rather than
+  whenever the 24-hour prune sweep next runs.
+- **`expandChatAttachments` takes IDs from the chat request body.** They are
+  client-supplied, so the workspace is applied as a store predicate: naming
+  another tenant's attachment ID now reaches nothing, instead of being fetched
+  and then rejected by a metadata comparison afterwards.
+
+The trap in this change was not the SQL. `attachmentStore` is matched by *type
+assertion* in the gateway, so when the store's signatures changed the assertion
+simply stopped matching — the build stayed green and attachments would have
+started returning 503 at runtime. The existing round-trip tests catch it
+because they drive the real store through the HTTP routes; a mock would not
+have. The interface now says so in a comment.
+
 ### The SDK is extended additively, never modified
 
 `sdk/storage.MemoryBackend` is documented as frozen per major version, so it
@@ -403,7 +434,24 @@ Highest-value first, with the reason each matters:
    including workspace and run, path containment after symlink resolution,
    archive extraction that rejects traversal, escaping links, and decompression
    bombs.
-3. **MU-025 cannot close yet, and the reason is not effort.** Three of its
+3. **MU-016 cannot close yet either, and the remaining gap is architectural.**
+   Four of its six criteria are met — server-generated object keys carrying the
+   workspace, authenticated streaming, path containment after `EvalSymlinks`
+   (`internal/runtime/filesystem_policy.go`, which fails closed with no roots),
+   and expired artifacts becoming undownloadable immediately. What is left:
+
+   - *"File tools operate only within **the run's** authorized mounts"* —
+     `SetFilesystemRoots` configures one process-global set. Every tenant's
+     runs share it, so a filesystem builtin in workspace A can read a file
+     written by workspace B. Fixing it means per-run mounts, which is the same
+     change MU-021 (execute tools in workspace-isolated workers) describes.
+     Doing it here would be building half of MU-021 in the wrong place.
+   - *Archives* — `internal/plugininstall/archive.go` has traversal refusal and
+     a decompression-bomb bound. Symlink and device entries, and the other two
+     extraction sites (`internal/updates`, `internal/knowledge/ingest.go`),
+     have not been audited against the criterion.
+
+4. **MU-025 cannot close yet, and the reason is not effort.** Three of its
    criteria presuppose infrastructure this branch has not built, and inventing
    it to tick the box would be worse than leaving it open:
 
@@ -425,9 +473,9 @@ Highest-value first, with the reason each matters:
    Preview at all. If it is not, MU-025's third criterion should be struck or
    deferred explicitly rather than left to look unfinished.
 
-4. **DLQ, checkpoints, session resources, `rbac_agent_grants`,
-   `studio/deployrecord.go`, `agentmemory`, `api_keys`** — all still
-   `personal-only`; each needs the same treatment as the stores above.
+5. **DLQ, checkpoints, `rbac_agent_grants`, `studio/deployrecord.go`,
+   `agentmemory`, `api_keys`** — all still `personal-only`; each needs the same
+   treatment as the stores above.
 
 ## Verification
 

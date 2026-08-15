@@ -391,11 +391,11 @@ func TestResourceStore_PutAndGet(t *testing.T) {
 	ctx := context.Background()
 	data := []byte("hello world")
 
-	if err := s.Put(ctx, "res-1", "text/plain", data, time.Hour); err != nil {
+	if err := s.Put(ctx, wsroot.PersonalWorkspaceID, "res-1", "text/plain", data, time.Hour); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
 
-	got, mimeType, err := s.Get(ctx, "res-1")
+	got, mimeType, err := s.Get(ctx, wsroot.PersonalWorkspaceID, "res-1")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -409,7 +409,7 @@ func TestResourceStore_PutAndGet(t *testing.T) {
 
 func TestResourceStore_Get_NotFound(t *testing.T) {
 	s := newResourceStore(t)
-	_, _, err := s.Get(context.Background(), "does-not-exist")
+	_, _, err := s.Get(context.Background(), wsroot.PersonalWorkspaceID, "does-not-exist")
 	if err == nil {
 		t.Error("expected error for nonexistent resource, got nil")
 	}
@@ -427,7 +427,7 @@ func TestResourceStore_Put_TooLarge(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 
 	bigData := make([]byte, 11)
-	if err := s.Put(context.Background(), "big", "text/plain", bigData, time.Hour); err == nil {
+	if err := s.Put(context.Background(), wsroot.PersonalWorkspaceID, "big", "text/plain", bigData, time.Hour); err == nil {
 		t.Error("expected error for oversized payload, got nil")
 	}
 }
@@ -435,11 +435,11 @@ func TestResourceStore_Put_TooLarge(t *testing.T) {
 func TestResourceStore_Put_ZeroTTLUsesDefault(t *testing.T) {
 	s := newResourceStore(t)
 	ctx := context.Background()
-	if err := s.Put(ctx, "ttl-default", "text/plain", []byte("data"), 0); err != nil {
+	if err := s.Put(ctx, wsroot.PersonalWorkspaceID, "ttl-default", "text/plain", []byte("data"), 0); err != nil {
 		t.Fatalf("Put with zero TTL: %v", err)
 	}
 	// Should be retrievable immediately.
-	got, _, err := s.Get(ctx, "ttl-default")
+	got, _, err := s.Get(ctx, wsroot.PersonalWorkspaceID, "ttl-default")
 	if err != nil || string(got) != "data" {
 		t.Errorf("Get after zero-TTL Put: got=%q err=%v", got, err)
 	}
@@ -449,13 +449,13 @@ func TestResourceStore_Delete(t *testing.T) {
 	s := newResourceStore(t)
 	ctx := context.Background()
 
-	_ = s.Put(ctx, "del-me", "text/plain", []byte("bye"), time.Hour)
+	_ = s.Put(ctx, wsroot.PersonalWorkspaceID, "del-me", "text/plain", []byte("bye"), time.Hour)
 
-	if err := s.Delete(ctx, "del-me"); err != nil {
+	if err := s.Delete(ctx, wsroot.PersonalWorkspaceID, "del-me"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	_, _, err := s.Get(ctx, "del-me")
+	_, _, err := s.Get(ctx, wsroot.PersonalWorkspaceID, "del-me")
 	if err == nil {
 		t.Error("expected error after Delete, got nil")
 	}
@@ -464,7 +464,7 @@ func TestResourceStore_Delete(t *testing.T) {
 func TestResourceStore_Delete_NonExistent(t *testing.T) {
 	s := newResourceStore(t)
 	// Safe to call Delete on non-existent id.
-	if err := s.Delete(context.Background(), "ghost"); err != nil {
+	if err := s.Delete(context.Background(), wsroot.PersonalWorkspaceID, "ghost"); err != nil {
 		t.Errorf("Delete nonexistent: unexpected error %v", err)
 	}
 }
@@ -476,7 +476,7 @@ func TestResourceStore_Prune_RemovesExpired(t *testing.T) {
 	// Insert a resource with a past expiry by using a negative TTL. But Put
 	// requires ttl > 0. Use SQL directly via the store's internal db to plant
 	// an expired row.
-	_ = s.Put(ctx, "expired-res", "text/plain", []byte("old"), time.Hour)
+	_ = s.Put(ctx, wsroot.PersonalWorkspaceID, "expired-res", "text/plain", []byte("old"), time.Hour)
 	// Overwrite the expires_at to the past directly.
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE session_resources SET expires_at = ? WHERE id = ?`,
@@ -487,7 +487,7 @@ func TestResourceStore_Prune_RemovesExpired(t *testing.T) {
 		t.Fatalf("manual expires_at update: %v", err)
 	}
 
-	_ = s.Put(ctx, "fresh-res", "text/plain", []byte("new"), time.Hour)
+	_ = s.Put(ctx, wsroot.PersonalWorkspaceID, "fresh-res", "text/plain", []byte("new"), time.Hour)
 
 	n, err := s.Prune(ctx)
 	if err != nil {
@@ -498,7 +498,7 @@ func TestResourceStore_Prune_RemovesExpired(t *testing.T) {
 	}
 
 	// fresh-res should still be retrievable.
-	if _, _, err := s.Get(ctx, "fresh-res"); err != nil {
+	if _, _, err := s.Get(ctx, wsroot.PersonalWorkspaceID, "fresh-res"); err != nil {
 		t.Errorf("fresh-res should survive Prune: %v", err)
 	}
 }
@@ -517,10 +517,10 @@ func TestResourceStore_Prune_EmptyDB(t *testing.T) {
 func TestResourceStore_Put_Replace(t *testing.T) {
 	s := newResourceStore(t)
 	ctx := context.Background()
-	_ = s.Put(ctx, "replace-me", "text/plain", []byte("v1"), time.Hour)
-	_ = s.Put(ctx, "replace-me", "image/png", []byte("v2"), time.Hour)
+	_ = s.Put(ctx, wsroot.PersonalWorkspaceID, "replace-me", "text/plain", []byte("v1"), time.Hour)
+	_ = s.Put(ctx, wsroot.PersonalWorkspaceID, "replace-me", "image/png", []byte("v2"), time.Hour)
 
-	got, mimeType, err := s.Get(ctx, "replace-me")
+	got, mimeType, err := s.Get(ctx, wsroot.PersonalWorkspaceID, "replace-me")
 	if err != nil {
 		t.Fatalf("Get after replace: %v", err)
 	}
@@ -535,7 +535,7 @@ func TestResourceStore_Put_Replace(t *testing.T) {
 func TestResourceStore_AttachmentMetadataRoundTrip(t *testing.T) {
 	s := newResourceStore(t)
 	ctx := context.Background()
-	att := Attachment{
+	att := Attachment{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID:        "att-1",
 		SessionID: "sess-1",
 		AgentID:   "agent-1",
@@ -546,14 +546,14 @@ func TestResourceStore_AttachmentMetadataRoundTrip(t *testing.T) {
 	if err := s.PutAttachment(ctx, att, []byte("# Notes"), time.Hour); err != nil {
 		t.Fatalf("PutAttachment: %v", err)
 	}
-	list, err := s.ListAttachments(ctx, "agent-1", "sess-1")
+	list, err := s.ListAttachments(ctx, wsroot.PersonalWorkspaceID, "agent-1", "sess-1")
 	if err != nil {
 		t.Fatalf("ListAttachments: %v", err)
 	}
 	if len(list) != 1 || list[0].Filename != "notes.md" || list[0].Text != "# Notes" {
 		t.Fatalf("ListAttachments = %+v", list)
 	}
-	got, data, err := s.GetAttachment(ctx, "att-1")
+	got, data, err := s.GetAttachment(ctx, wsroot.PersonalWorkspaceID, "att-1")
 	if err != nil {
 		t.Fatalf("GetAttachment: %v", err)
 	}
@@ -565,10 +565,10 @@ func TestResourceStore_AttachmentMetadataRoundTrip(t *testing.T) {
 func TestResourceStore_ListAttachmentsFiltersSession(t *testing.T) {
 	s := newResourceStore(t)
 	ctx := context.Background()
-	_ = s.PutAttachment(ctx, Attachment{ID: "a1", AgentID: "agent-1", SessionID: "s1", Filename: "a.txt"}, []byte("a"), time.Hour)
-	_ = s.PutAttachment(ctx, Attachment{ID: "a2", AgentID: "agent-1", SessionID: "s2", Filename: "b.txt"}, []byte("b"), time.Hour)
-	_ = s.PutAttachment(ctx, Attachment{ID: "a3", AgentID: "agent-2", SessionID: "s1", Filename: "c.txt"}, []byte("c"), time.Hour)
-	list, err := s.ListAttachments(ctx, "agent-1", "s1")
+	_ = s.PutAttachment(ctx, Attachment{WorkspaceID: wsroot.PersonalWorkspaceID, ID: "a1", AgentID: "agent-1", SessionID: "s1", Filename: "a.txt"}, []byte("a"), time.Hour)
+	_ = s.PutAttachment(ctx, Attachment{WorkspaceID: wsroot.PersonalWorkspaceID, ID: "a2", AgentID: "agent-1", SessionID: "s2", Filename: "b.txt"}, []byte("b"), time.Hour)
+	_ = s.PutAttachment(ctx, Attachment{WorkspaceID: wsroot.PersonalWorkspaceID, ID: "a3", AgentID: "agent-2", SessionID: "s1", Filename: "c.txt"}, []byte("c"), time.Hour)
+	list, err := s.ListAttachments(ctx, wsroot.PersonalWorkspaceID, "agent-1", "s1")
 	if err != nil {
 		t.Fatalf("ListAttachments: %v", err)
 	}

@@ -949,7 +949,7 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 	}
 	text := req.Text
 	if len(req.AttachmentIDs) > 0 {
-		expanded, err := s.expandChatAttachments(c.UserContext(), req.AgentID, sessionID, req.Text, req.AttachmentIDs)
+		expanded, err := s.expandChatAttachments(c.UserContext(), s.attachmentWorkspace(c), req.AgentID, sessionID, req.Text, req.AttachmentIDs)
 		if err != nil {
 			return s.errJSON(c, fiber.StatusBadRequest, err)
 		}

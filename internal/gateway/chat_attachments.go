@@ -16,6 +16,7 @@ import (
 
 	"github.com/soulacy/soulacy/internal/knowledge"
 	"github.com/soulacy/soulacy/internal/session"
+	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
 const (
@@ -26,11 +27,15 @@ const (
 	chatAttachmentExtractWarnMinRunes = 2_000
 )
 
+// attachmentStore is matched by type assertion, so its shape has to track
+// session.SQLiteStore exactly. If it drifts the assertion simply stops
+// matching and attachments start returning 503 at runtime with nothing failing
+// to compile — which is how a silent feature outage happens.
 type attachmentStore interface {
 	session.ResourceStore
 	PutAttachment(ctx context.Context, att session.Attachment, data []byte, ttl time.Duration) error
-	ListAttachments(ctx context.Context, agentID, sessionID string) ([]session.Attachment, error)
-	GetAttachment(ctx context.Context, id string) (session.Attachment, []byte, error)
+	ListAttachments(ctx context.Context, workspaceID, agentID, sessionID string) ([]session.Attachment, error)
+	GetAttachment(ctx context.Context, workspaceID, id string) (session.Attachment, []byte, error)
 }
 
 type chatAttachmentView struct {
@@ -116,13 +121,16 @@ func (s *Server) handleChatAttachmentUpload(c *fiber.Ctx) error {
 		text = ""
 	}
 	text, textTruncated := truncateRunes(strings.TrimSpace(text), chatAttachmentStoredTextMaxRunes)
+	// The object key is server-generated and the workspace is taken from the
+	// verified request, never from the upload: a client cannot choose either.
 	att := session.Attachment{
-		ID:        uuid.New().String(),
-		SessionID: sessionID,
-		AgentID:   agentID,
-		Filename:  filename,
-		MIMEType:  mimeType,
-		Text:      text,
+		ID:          uuid.New().String(),
+		WorkspaceID: s.attachmentWorkspace(c),
+		SessionID:   sessionID,
+		AgentID:     agentID,
+		Filename:    filename,
+		MIMEType:    mimeType,
+		Text:        text,
 	}
 	if err := st.PutAttachment(c.UserContext(), att, data, session.DefaultAttachmentTTL); err != nil {
 		return s.errJSON(c, fiber.StatusBadRequest, err)
@@ -130,7 +138,7 @@ func (s *Server) handleChatAttachmentUpload(c *fiber.Ctx) error {
 	s.log.Info("chat attachment uploaded",
 		zap.String("agent", agentID), zap.String("session", sessionID), zap.String("filename", filename),
 		zap.Bool("text_truncated", textTruncated))
-	created, _, err := st.GetAttachment(c.UserContext(), att.ID)
+	created, _, err := st.GetAttachment(c.UserContext(), att.WorkspaceID, att.ID)
 	if err != nil {
 		created = att
 		created.SizeBytes = int64(len(data))
@@ -156,7 +164,7 @@ func (s *Server) handleChatAttachments(c *fiber.Ctx) error {
 	if err := s.requireSession(c, agentID, sessionID); err != nil {
 		return err
 	}
-	attachments, err := st.ListAttachments(c.UserContext(), agentID, sessionID)
+	attachments, err := st.ListAttachments(c.UserContext(), s.attachmentWorkspace(c), agentID, sessionID)
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
@@ -184,7 +192,7 @@ func (s *Server) handleChatAttachmentDownload(c *fiber.Ctx) error {
 	if err := s.requireSession(c, agentID, sessionID); err != nil {
 		return err
 	}
-	att, data, err := st.GetAttachment(c.UserContext(), c.Params("id"))
+	att, data, err := st.GetAttachment(c.UserContext(), s.attachmentWorkspace(c), c.Params("id"))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) || strings.Contains(err.Error(), sql.ErrNoRows.Error()) {
 			return s.errMsg(c, fiber.StatusNotFound, "attachment not found")
@@ -199,7 +207,12 @@ func (s *Server) handleChatAttachmentDownload(c *fiber.Ctx) error {
 	return c.Send(data)
 }
 
-func (s *Server) expandChatAttachments(ctx context.Context, agentID, sessionID, text string, ids []string) (string, error) {
+// expandChatAttachments inlines attachment text into a prompt. The IDs come
+// from the chat request body — they are client-supplied — so the workspace is
+// taken from the verified request and applied as a store predicate. Naming
+// another tenant's attachment ID reaches nothing, rather than being fetched
+// and then rejected by a metadata comparison.
+func (s *Server) expandChatAttachments(ctx context.Context, workspaceID, agentID, sessionID, text string, ids []string) (string, error) {
 	st, ok := s.chatAttachmentStore()
 	if !ok {
 		return "", fmt.Errorf("session resource store not configured")
@@ -218,7 +231,7 @@ func (s *Server) expandChatAttachments(ctx context.Context, agentID, sessionID, 
 		if id == "" {
 			continue
 		}
-		att, _, err := st.GetAttachment(ctx, id)
+		att, _, err := st.GetAttachment(ctx, workspaceID, id)
 		if err != nil {
 			return "", fmt.Errorf("attachment %q not found", id)
 		}
@@ -274,4 +287,16 @@ func truncateRunes(s string, max int) (string, bool) {
 		return s, false
 	}
 	return strings.TrimSpace(string(r[:max])) + "...", true
+}
+
+// attachmentWorkspace is the tenant an attachment request acts in. With no
+// verified identity this is the personal workspace, which is what a
+// single-user installation's uploads are.
+func (s *Server) attachmentWorkspace(c *fiber.Ctx) string {
+	if c != nil {
+		if identity, ok := requestIdentity(c); ok {
+			return wsroot.Normalize(identity.WorkspaceID())
+		}
+	}
+	return wsroot.PersonalWorkspaceID
 }
