@@ -129,6 +129,10 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 			srv.SetPluginInstaller(pins)
 			log.Info("plugin installer ready", zap.String("dir", cfg.PluginDirs[0]))
 		}
+		// Per-workspace installers over the same root: personal resolves to it
+		// unchanged, every other tenant installs beneath its own namespace and
+		// the loader for that workspace is the one that picks the plugin up.
+		srv.SetPluginInstallers(plugininstall.NewInstallers(cfg.PluginDirs[0]))
 	}
 
 	// Pre-installation safety introspection (Story E20): static scan always

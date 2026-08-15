@@ -24,12 +24,30 @@ const restartNote = "Restart the gateway for plugin changes to take effect."
 // 503 until wired (same pattern as SetWorkboardStore).
 func (s *Server) SetPluginInstaller(ins *plugininstall.Installer) { s.pluginInstaller = ins }
 
+// SetPluginInstallers wires the per-workspace installers. When set it takes
+// precedence, so every install lands in the caller's own plugin directory
+// rather than in one shared root where a single tenant's approval would
+// activate a plugin for the whole deployment.
+func (s *Server) SetPluginInstallers(all *plugininstall.Installers) { s.pluginInstallers = all }
+
 // SetSafetyPipeline wires the E20 pre-installation introspection pipeline.
 // When set, every staged plugin's Preview carries a SecurityReport for the
 // approval dialog. nil (the default) leaves Preview.Security empty.
 func (s *Server) SetSafetyPipeline(p *introspect.Pipeline) { s.safetyPipeline = p }
 
 func (s *Server) requireInstaller(c *fiber.Ctx) (*plugininstall.Installer, bool) {
+	if s.pluginInstallers != nil {
+		if ins := s.pluginInstallers.For(s.requestWorkspace(c)); ins != nil {
+			return ins, true
+		}
+		// Deliberately not falling through to the shared installer: an install
+		// that cannot be placed in the caller's own directory must fail, not
+		// land in somebody else's.
+		_ = c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"error": "plugin installer unavailable for this workspace",
+		})
+		return nil, false
+	}
 	if s.pluginInstaller == nil {
 		_ = c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
 			"error": "plugin installer unavailable (no plugin_dirs configured)",
@@ -105,9 +123,13 @@ func (s *Server) handleApprovePlugin(c *fiber.Ctx) error {
 	var body struct {
 		Source   string `json:"source"`
 		Checksum string `json:"checksum"`
+		// Revision is the commit the staging step resolved to. The client
+		// echoes back what the preview showed, so the record names the exact
+		// code the operator was looking at when they approved.
+		Revision string `json:"revision"`
 	}
 	_ = c.BodyParser(&body) // optional; metadata enrichment only
-	id, err := ins.Approve(c.Params("staged"), body.Source, body.Checksum)
+	id, err := ins.Approve(c.Params("staged"), body.Source, body.Checksum, body.Revision)
 	if err != nil {
 		return s.errJSON(c, fiber.StatusBadRequest, err)
 	}

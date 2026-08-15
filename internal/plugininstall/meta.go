@@ -38,6 +38,14 @@ type Meta struct {
 	Source string `json:"source"`
 	// Checksum is the sha256 the operator supplied for archive installs.
 	Checksum string `json:"checksum,omitempty"`
+	// Revision is the immutable commit a git source resolved to at install
+	// time (MU-017 criterion 2).
+	//
+	// Without it the record says "installed from that URL", and a URL is a
+	// moving target: the branch tip advances, so the approval attests to code
+	// nobody can identify afterwards. With it, "what exactly did we approve"
+	// has an answer that cannot be edited by whoever controls the remote.
+	Revision string `json:"revision,omitempty"`
 	// ApprovedFingerprint is Fingerprint() of the permissions+credentials
 	// the operator explicitly approved.
 	ApprovedFingerprint string `json:"approved_fingerprint"`

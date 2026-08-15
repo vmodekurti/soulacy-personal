@@ -177,6 +177,9 @@ type Server struct {
 	// pluginInstaller manages installer-owned plugins (Story E13). Wired
 	// via SetPluginInstaller; install routes 503 until then.
 	pluginInstaller *plugininstall.Installer
+	// pluginInstallers, when set, gives each workspace its own installer and
+	// takes precedence over pluginInstaller.
+	pluginInstallers *plugininstall.Installers
 
 	// safetyPipeline runs E20 pre-installation introspection on staged
 	// plugins. Wired via SetSafetyPipeline; nil = Preview.Security omitted.

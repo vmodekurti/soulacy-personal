@@ -50,7 +50,12 @@ func (p *gitProvider) Fetch(ctx context.Context, pkg sdkpkg.Package, dstDir stri
 	if pkg.Source == "" {
 		return fmt.Errorf("pkgregistry: %s: package %q has no git source", p.id, pkg.Slug)
 	}
-	return plugininstall.GitClone(ctx, pkg.Source, dstDir)
+	// The resolved revision is discarded here: package fetches record their
+	// provenance in the registry entry rather than in install metadata. The
+	// pin still happens at the plugin-install layer, which is where an
+	// approval is attached to it.
+	_, err := plugininstall.GitClone(ctx, pkg.Source, dstDir)
+	return err
 }
 
 // gitSourceFor maps a slug to a cloneable URL. Accepted forms:

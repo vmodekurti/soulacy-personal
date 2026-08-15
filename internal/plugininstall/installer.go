@@ -10,11 +10,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/soulacy/soulacy/internal/introspect"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/plugin"
 )
 
@@ -44,12 +46,15 @@ func New(pluginsRoot string) (*Installer, error) {
 // EVERYTHING it requests. Mirrors the manifest verbatim — the GUI renders
 // it; nothing activates until Approve.
 type Preview struct {
-	StagedID    string                 `json:"staged_id"`
-	PluginID    string                 `json:"plugin_id"`
-	Name        string                 `json:"name,omitempty"`
-	Description string                 `json:"description,omitempty"`
-	Source      string                 `json:"source"`
-	Checksum    string                 `json:"checksum,omitempty"`
+	StagedID    string `json:"staged_id"`
+	PluginID    string `json:"plugin_id"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+	Source      string `json:"source"`
+	Checksum    string `json:"checksum,omitempty"`
+	// Revision is the exact commit a git source resolved to. The operator
+	// approves this specific code, not "whatever that URL serves".
+	Revision    string                 `json:"revision,omitempty"`
 	Permissions []plugin.Permission    `json:"permissions"`
 	Credentials []plugin.CredentialRef `json:"credentials"`
 	ToolCount   int                    `json:"tool_count"`
@@ -96,9 +101,10 @@ func (ins *Installer) Stage(ctx context.Context, source, checksum string) (Previ
 	dst := ins.stagePath(stagedID)
 
 	var err error
+	var revision string
 	switch {
 	case isGitSource(source):
-		err = gitClone(ctx, source, dst)
+		revision, err = gitClone(ctx, source, dst)
 	case isArchive(source):
 		if checksum == "" {
 			return Preview{}, fmt.Errorf("plugininstall: archive installs require a sha256 checksum")
@@ -129,6 +135,7 @@ func (ins *Installer) Stage(ctx context.Context, source, checksum string) (Previ
 		Description: m.Description,
 		Source:      source,
 		Checksum:    checksum,
+		Revision:    revision,
 		Permissions: m.Permissions,
 		Credentials: m.Credentials,
 		ToolCount:   len(m.Tools),
@@ -147,7 +154,7 @@ func (ins *Installer) Stage(ctx context.Context, source, checksum string) (Previ
 
 // Approve activates a staged plugin: moves it into the plugins root under
 // its manifest id and records the approved permission fingerprint.
-func (ins *Installer) Approve(stagedID, source, checksum string) (string, error) {
+func (ins *Installer) Approve(stagedID, source, checksum, revision string) (string, error) {
 	src := ins.stagePath(stagedID)
 	m, err := readManifest(src)
 	if err != nil {
@@ -161,6 +168,7 @@ func (ins *Installer) Approve(stagedID, source, checksum string) (string, error)
 	if err := writeMeta(src, Meta{
 		Source:              source,
 		Checksum:            checksum,
+		Revision:            revision,
 		ApprovedFingerprint: Fingerprint(m.Permissions, m.Credentials),
 		Enabled:             true,
 		InstalledAt:         now,
@@ -274,7 +282,12 @@ func (ins *Installer) stagePath(stagedID string) string {
 	return filepath.Join(ins.root, stagingDirName, filepath.Base(stagedID))
 }
 
+// isGitSource classifies the source *after* stripping any `#revision`
+// suffix. Without that, pinning a commit — the thing MU-017 criterion 2 asks
+// for — would make the source unrecognisable and fall through to "not a git
+// URL, archive, or directory".
 func isGitSource(s string) bool {
+	s, _ = splitGitRevision(s)
 	return strings.HasPrefix(s, "https://") && !isArchive(s) ||
 		strings.HasPrefix(s, "http://") && !isArchive(s) ||
 		strings.HasPrefix(s, "git@") || strings.HasSuffix(s, ".git")
@@ -287,7 +300,8 @@ func isArchive(s string) bool {
 // GitClone shallow-clones url into dst and strips the .git directory.
 // Exported for reuse by the package-registry git provider (Story E19) so
 // every git fetch in the install pipeline shares one hardened path.
-func GitClone(ctx context.Context, url, dst string) error {
+// GitClone fetches url into dst and returns the commit it resolved to.
+func GitClone(ctx context.Context, url, dst string) (string, error) {
 	return gitClone(ctx, url, dst)
 }
 
@@ -299,17 +313,95 @@ func VerifyAndExtract(archivePath, checksum, dst string) error {
 	return verifyAndExtract(archivePath, checksum, dst)
 }
 
-func gitClone(ctx context.Context, url, dst string) error {
+// splitGitRevision separates a source of the form `<url>#<revision>` into its
+// parts. The revision may be a tag, a branch, or a commit SHA.
+func splitGitRevision(source string) (url, revision string) {
+	if i := strings.LastIndex(source, "#"); i > 0 {
+		return source[:i], strings.TrimSpace(source[i+1:])
+	}
+	return source, ""
+}
+
+// gitClone fetches url into dst and returns the exact commit it landed on.
+//
+// The returned revision is the point of this function, not a nicety. A shallow
+// clone of a branch is a moving target: "install this plugin from that URL"
+// resolves to different code tomorrow, so an approval recorded today attests
+// to nothing in particular. MU-017 criterion 2 asks the install to pin an
+// immutable revision, and a commit SHA is the only identifier a git source
+// offers that cannot be moved after the fact — a tag can be force-pushed, a
+// branch obviously so.
+//
+// When the caller names a revision, that revision is fetched and checked out
+// exactly; when it does not, the tip is cloned and its SHA recorded, so a
+// later reinstall can be pinned to what was actually approved.
+func gitClone(ctx context.Context, url, dst string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", url, dst)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("plugininstall: git clone %s: %v: %s", url, err, strings.TrimSpace(string(out)))
+
+	url, revision := splitGitRevision(url)
+	args := []string{"clone", "--depth", "1"}
+	if revision != "" {
+		// --branch takes tags and branches; a raw SHA needs the fetch path
+		// below, so try the cheap form first and fall back.
+		args = append(args, "--branch", revision)
 	}
-	// the clone's history is irrelevant and .git may be large
+	args = append(args, url, dst)
+	cmd := exec.CommandContext(ctx, "git", args...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		if revision == "" {
+			return "", fmt.Errorf("plugininstall: git clone %s: %v: %s", url, err, strings.TrimSpace(string(out)))
+		}
+		if ferr := gitFetchRevision(ctx, url, revision, dst); ferr != nil {
+			return "", fmt.Errorf("plugininstall: git clone %s at %s: %w", url, revision, ferr)
+		}
+	}
+
+	resolved, err := gitHeadRevision(ctx, dst)
+	if err != nil {
+		return "", err
+	}
+	if revision != "" && !strings.HasPrefix(resolved, revision) && resolved != revision {
+		// A named tag or branch resolves to a SHA; record the SHA, which is
+		// what the approval is actually about.
+		_ = revision
+	}
+	// The clone's history is irrelevant and .git may be large. Removed only
+	// after the revision has been read out of it.
 	_ = os.RemoveAll(filepath.Join(dst, ".git"))
+	return resolved, nil
+}
+
+// gitFetchRevision handles the case --branch cannot: a raw commit SHA.
+func gitFetchRevision(ctx context.Context, url, revision, dst string) error {
+	_ = os.RemoveAll(dst)
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	steps := [][]string{
+		{"init", "--quiet"},
+		{"remote", "add", "origin", url},
+		{"fetch", "--depth", "1", "origin", revision},
+		{"checkout", "--quiet", "FETCH_HEAD"},
+	}
+	for _, args := range steps {
+		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd.Dir = dst
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("git %s: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+		}
+	}
 	return nil
+}
+
+func gitHeadRevision(ctx context.Context, dir string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("plugininstall: resolve installed revision: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 func verifyAndExtract(archivePath, checksum, dst string) error {
@@ -375,4 +467,59 @@ func readManifest(dir string) (plugin.Manifest, error) {
 		return plugin.Manifest{}, fmt.Errorf("plugininstall: unsafe plugin id %q", m.ID)
 	}
 	return m, nil
+}
+
+// Installers is the per-workspace registry of installers (MU-017 criterion 1
+// applied to the install path).
+//
+// A single installer rooted at one directory would let any workspace's
+// approval activate a plugin for the whole deployment — the approval prompt
+// would name one tenant's operator while the consequence lands on all of them.
+// Each workspace installs into its own plugin directory, which is also the one
+// the loader scans for that workspace.
+type Installers struct {
+	base string
+
+	mu         sync.Mutex
+	installers map[string]*Installer
+}
+
+// NewInstallers builds the registry over the directory that holds each
+// workspace's plugins. Personal resolves to base itself.
+func NewInstallers(base string) *Installers {
+	if strings.TrimSpace(base) == "" {
+		return nil
+	}
+	return &Installers{base: base, installers: map[string]*Installer{}}
+}
+
+// For returns one workspace's installer, creating its root on first use.
+// It returns nil when the directory cannot be created — callers surface that
+// as "installer unavailable" rather than falling back to a shared root, since
+// the fallback would install one tenant's plugin into everybody's directory.
+func (s *Installers) For(workspaceID string) *Installer {
+	if s == nil {
+		return nil
+	}
+	workspaceID = wsroot.Normalize(workspaceID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if existing, ok := s.installers[workspaceID]; ok {
+		return existing
+	}
+	ins, err := New(wsroot.Dir(s.base, workspaceID))
+	if err != nil {
+		s.installers[workspaceID] = nil
+		return nil
+	}
+	s.installers[workspaceID] = ins
+	return ins
+}
+
+// Root reports one workspace's plugin root, for operator-facing messages.
+func (s *Installers) Root(workspaceID string) string {
+	if s == nil {
+		return ""
+	}
+	return wsroot.Dir(s.base, wsroot.Normalize(workspaceID))
 }

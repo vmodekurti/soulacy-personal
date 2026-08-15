@@ -111,7 +111,7 @@ func installURLPackage(ctx context.Context, source string, kind urlPackageKind, 
 		return err
 	}
 	defer os.RemoveAll(probe)
-	if err := plugininstall.GitClone(ctx, source, probe); err != nil {
+	if _, err := plugininstall.GitClone(ctx, source, probe); err != nil {
 		return fmt.Errorf("inspect source: %w", err)
 	}
 

@@ -66,7 +66,7 @@ func TestStageApproveLifecycle_LocalDir(t *testing.T) {
 		t.Fatalf("preview caps = %+v", pv.Permissions)
 	}
 
-	id, err := ins.Approve(pv.StagedID, pv.Source, pv.Checksum)
+	id, err := ins.Approve(pv.StagedID, pv.Source, pv.Checksum, "")
 	if err != nil {
 		t.Fatalf("approve: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestStageApproveLifecycle_LocalDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("restage: %v", err)
 	}
-	if _, err := ins.Approve(pv2.StagedID, src, ""); err == nil {
+	if _, err := ins.Approve(pv2.StagedID, src, "", ""); err == nil {
 		t.Fatal("approving over an existing install must error")
 	}
 	_ = ins.Discard(pv2.StagedID)
@@ -111,7 +111,7 @@ func TestEnableDisableRemove(t *testing.T) {
 	src := writeFixturePlugin(t, demoManifest)
 	ins := newInstaller(t)
 	pv, _ := ins.Stage(context.Background(), src, "")
-	if _, err := ins.Approve(pv.StagedID, src, ""); err != nil {
+	if _, err := ins.Approve(pv.StagedID, src, "", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -146,7 +146,7 @@ func TestPermissionChangeRequiresReapproval(t *testing.T) {
 	src := writeFixturePlugin(t, demoManifest)
 	ins := newInstaller(t)
 	pv, _ := ins.Stage(context.Background(), src, "")
-	if _, err := ins.Approve(pv.StagedID, src, ""); err != nil {
+	if _, err := ins.Approve(pv.StagedID, src, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	dir := filepath.Join(ins.root, "demo-plug")

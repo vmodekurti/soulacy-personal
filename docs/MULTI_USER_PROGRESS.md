@@ -830,6 +830,38 @@ off the internet into everyone else's runtime — and before this both were
 developer keeps authoring and everyone keeps reading, which the test asserts
 explicitly so the split cannot quietly become a permission removal.
 
+### An approval has to be about identifiable code (MU-017 criterion 2)
+
+Most of criterion 2 already existed: `internal/plugininstall` stages into a
+directory the loader never scans, requires a sha256 for archive installs, runs
+the E20 safety pipeline over the staged tree, and activates nothing until
+`Approve`. `Gate` plus `Fingerprint` covers criterion 6 — a manifest whose
+permissions change stops loading until a human re-approves, and the
+fingerprint is order-insensitive so reordering grants is not treated as a
+change while widening one is.
+
+What was missing was the pin. A git install did `git clone --depth 1 <url>`,
+so the approval recorded "installed from that URL" — and a URL is a moving
+target. The branch tip advances and the approval now attests to code nobody
+can identify. `Meta.Revision` records the commit the clone actually landed on,
+read out of the working tree before `.git` is discarded, and a source may name
+a revision as `<url>#<rev>` to install a specific commit rather than whatever
+the tip happens to be. A raw SHA needs init/fetch/checkout rather than
+`--branch`, so both paths exist.
+
+`isGitSource` had to learn about the suffix too — without that, pinning a
+commit made the source unrecognisable and fell through to "not a git URL,
+archive, or directory". Cheap to miss, and it would have made the feature
+appear broken rather than unsafe.
+
+The installer also became per workspace. A single root meant one tenant's
+approval activated a plugin for the whole deployment: the prompt names one
+operator, the consequence lands on everyone. It also meant two tenants could
+not install a plugin with the same ID — the second got "already installed",
+which is a cross-tenant name conflict wearing an ordinary error message.
+`requireInstaller` refuses when a workspace's own root cannot be created
+rather than falling back to the shared one, since that fallback is the bug.
+
 ## Guards worth keeping
 
 - **`TestRequestScopeIsNeverReadFromADetachedGoroutine`** (AST-based) fails the
@@ -893,14 +925,15 @@ Highest-value first, with the reason each matters:
    Preview at all. If it is not, MU-025's third criterion should be struck or
    deferred explicitly rather than left to look unfinished.
 
-5. **MU-017 is partially done.** Criteria 1 and 3 are met: extension inventory
-   is per workspace with platform directories as read-only templates, and
-   `ActionInstall` separates installing third-party code from using it. What
-   remains is criterion 2 (staged URL installs, pinned revisions, checksum and
-   safety inspection, approval before activation), 4 (capability grants and
-   referenced secret handles), 5 (MCP processes under workspace isolation), 6
-   (renewed approval when an update widens capabilities) and 7 (revocation that
-   drains running processes).
+5. **MU-017 is partially done.** Criteria 1, 2, 3 and 6 are met. Inventory is
+   per workspace with platform directories as read-only templates;
+   `ActionInstall` separates installing third-party code from using it;
+   installs stage, verify a checksum, run the E20 safety pipeline, pin a
+   revision and require approval before activation; and a manifest whose
+   permissions change stops loading until a human re-approves. What remains is
+   criterion 4 (capability grants and referenced secret handles), 5 (MCP
+   processes under workspace isolation) and 7 (revocation that drains running
+   processes).
 
 6. **`BEGIN DEFERRED` on read-then-write transactions, elsewhere.** Two stores
    have been fixed (see below). The pattern to look for is a transaction that
