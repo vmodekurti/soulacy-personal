@@ -3,8 +3,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
@@ -52,6 +55,9 @@ func buildWorkspaceCmd() *cobra.Command {
 			return nil
 		},
 	})
+
+	cmd.AddCommand(buildWorkspaceListCmd())
+	cmd.AddCommand(buildWorkspaceUseCmd())
 
 	var assumeYes, dryRun, tenantPlan bool
 	migrateCmd := &cobra.Command{
@@ -133,4 +139,99 @@ STOP THE GATEWAY FIRST — databases move as files.`,
 	cmd.AddCommand(migrateCmd)
 
 	return cmd
+}
+
+// buildWorkspaceListCmd asks the server which workspaces this principal may
+// act in. The answer comes from stored memberships on every call, so a
+// suspended or removed member stops seeing a workspace immediately rather than
+// when a cached token happens to expire.
+func buildWorkspaceListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List the workspaces you can act in on the current server",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			data, err := apiCall("GET", "/workspace/workspaces", nil)
+			if err != nil {
+				return err
+			}
+			var result struct {
+				Workspaces        []workspaceView `json:"workspaces"`
+				ActiveWorkspaceID string          `json:"active_workspace_id"`
+			}
+			if err := json.Unmarshal(data, &result); err != nil {
+				return fmt.Errorf("decode workspaces: %w", err)
+			}
+			if outputJSON {
+				return emitJSON(result)
+			}
+			if len(result.Workspaces) == 0 {
+				fmt.Println("No workspaces available to this principal.")
+				return nil
+			}
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+			fmt.Fprintln(w, "\tWORKSPACE\tNAME\tORGANIZATION\tROLE\tPRINCIPAL")
+			for _, ws := range result.Workspaces {
+				marker := " "
+				if ws.WorkspaceID == result.ActiveWorkspaceID {
+					marker = "*"
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", marker, ws.WorkspaceID,
+					orNone(ws.WorkspaceName), orNone(ws.OrganizationName), orNone(ws.Role), orNone(ws.PrincipalKind))
+			}
+			return w.Flush()
+		},
+	}
+}
+
+// buildWorkspaceUseCmd asks the server to verify a workspace selection before
+// storing it. The CLI never assumes a workspace ID is usable just because the
+// user typed it: an unauthorized workspace is reported as not found.
+func buildWorkspaceUseCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "use <workspace-id>",
+		Short: "Target a workspace in the current context",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			requested := strings.TrimSpace(args[0])
+			body, err := json.Marshal(map[string]string{"workspace_id": requested})
+			if err != nil {
+				return err
+			}
+			data, err := apiCall("POST", "/workspace/select", body)
+			if err != nil {
+				return err
+			}
+			var verified workspaceView
+			if err := json.Unmarshal(data, &verified); err != nil {
+				return fmt.Errorf("decode workspace selection: %w", err)
+			}
+			file, err := loadContexts()
+			if err != nil {
+				return err
+			}
+			current := strings.TrimSpace(file.Current)
+			if current == "" {
+				// Nothing to persist into, but the selection is still valid for
+				// this process, and saying so beats a silent no-op.
+				activeWorkspaceID = verified.WorkspaceID
+				if outputJSON {
+					return emitJSON(map[string]any{"workspace": verified, "persisted": false})
+				}
+				fmt.Fprintln(os.Stderr, "No current context, so this selection applies to this command only.")
+				fmt.Fprintln(os.Stderr, "Create one with 'sy context add <name> --server "+gatewayURL+"'.")
+				return nil
+			}
+			ctx := file.Contexts[current]
+			ctx.WorkspaceID, ctx.OrganizationID, ctx.Role = verified.WorkspaceID, verified.OrganizationID, verified.Role
+			file.Contexts[current] = ctx
+			if err := saveContexts(file); err != nil {
+				return err
+			}
+			if outputJSON {
+				return emitJSON(map[string]any{"workspace": verified, "persisted": true, "context": ctx})
+			}
+			fmt.Printf("Context %s now targets workspace %s (%s) as %s.\n", current, verified.WorkspaceID, orNone(verified.WorkspaceName), orNone(verified.Role))
+			return nil
+		},
+	}
 }

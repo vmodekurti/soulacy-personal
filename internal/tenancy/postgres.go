@@ -467,3 +467,47 @@ var postgresSchema = []string{
 	`CREATE INDEX IF NOT EXISTS memberships_lookup_active ON memberships(workspace_id,user_id) WHERE status='active'`,
 	`CREATE INDEX IF NOT EXISTS identities_subject_active ON identities(external_subject,user_id) WHERE status='active'`,
 }
+
+// ListSubjectWorkspaces returns every active workspace the subject may select,
+// covering both human memberships (matched by user ID or by a verified
+// external identity subject) and service-account bindings. Suspended
+// memberships, suspended service accounts, and inactive identities are
+// excluded, so a context switcher never offers a workspace that the next
+// request would reject.
+func (s *PostgresStore) ListSubjectWorkspaces(ctx context.Context, subject string) ([]SubjectWorkspace, error) {
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		return nil, ErrMembershipNotFound
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT m.organization_id, o.name, m.workspace_id, w.name, m.id, m.role, 'user'
+		  FROM memberships m
+		  JOIN organizations o ON o.id=m.organization_id
+		  JOIN workspaces w ON w.id=m.workspace_id
+		  LEFT JOIN identities i ON i.user_id=m.user_id AND i.status='active'
+		 WHERE m.status='active' AND (m.user_id=$1 OR i.external_subject=$1)
+		UNION
+		SELECT b.organization_id, o.name, b.workspace_id, w.name, b.service_account_id, b.role, 'service_account'
+		  FROM service_account_workspaces b
+		  JOIN service_accounts sa ON sa.id=b.service_account_id AND sa.status='active'
+		  JOIN organizations o ON o.id=b.organization_id
+		  JOIN workspaces w ON w.id=b.workspace_id
+		 WHERE b.status='active' AND b.service_account_id=$1
+		 ORDER BY 2, 4`, subject)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []SubjectWorkspace{}
+	for rows.Next() {
+		var w SubjectWorkspace
+		if err := rows.Scan(&w.OrganizationID, &w.OrganizationName, &w.WorkspaceID, &w.WorkspaceName, &w.MembershipID, &w.Role, &w.PrincipalKind); err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}

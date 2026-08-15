@@ -46,3 +46,36 @@ func (r *PersonalResolver) ResolveMembership(_ context.Context, subject, request
 		Role:           "owner",
 	}, nil
 }
+
+// SubjectWorkspace is one workspace an authenticated subject may select, with
+// the display metadata a context switcher needs. The role is the stored
+// membership role, never a role asserted by the client.
+type SubjectWorkspace struct {
+	OrganizationID   string `json:"organization_id"`
+	OrganizationName string `json:"organization_name,omitempty"`
+	WorkspaceID      string `json:"workspace_id"`
+	WorkspaceName    string `json:"workspace_name,omitempty"`
+	MembershipID     string `json:"membership_id"`
+	Role             string `json:"role"`
+	PrincipalKind    string `json:"principal_kind"`
+}
+
+// WorkspaceLister enumerates the workspaces a subject may act in. It exists so
+// a CLI or GUI can offer a context switcher without inferring authority from a
+// token claim: the server answers from stored memberships every time.
+type WorkspaceLister interface {
+	ListSubjectWorkspaces(ctx context.Context, subject string) ([]SubjectWorkspace, error)
+}
+
+// ListSubjectWorkspaces returns the single implicit workspace. Personal mode
+// has exactly one, so the switcher degrades to a no-op rather than an error.
+func (r *PersonalResolver) ListSubjectWorkspaces(_ context.Context, subject string) ([]SubjectWorkspace, error) {
+	if r == nil || strings.TrimSpace(subject) == "" || strings.TrimSpace(r.tenant.WorkspaceID) == "" {
+		return nil, ErrMembershipNotFound
+	}
+	return []SubjectWorkspace{{
+		OrganizationID: r.tenant.OrganizationID, OrganizationName: "Personal",
+		WorkspaceID: r.tenant.WorkspaceID, WorkspaceName: "Personal",
+		MembershipID: r.tenant.MembershipID, Role: "owner", PrincipalKind: "user",
+	}}, nil
+}

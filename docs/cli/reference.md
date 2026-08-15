@@ -177,6 +177,54 @@ sy schedule list                       # scheduled agent entries
 sy logs --follow                       # stream live events
 ```
 
+## Contexts and identity
+
+A context names a server and a workspace so local, staging, and production are
+never ambiguous. Contexts hold **no credentials**: interactive sessions live in
+your operating system credential store, and CI passes a credential through the
+environment.
+
+```bash
+sy context add prod --server https://soulacy.example.com --use
+sy context add staging --server https://staging.example.com
+sy context list                 # * marks the current context
+sy context use staging
+sy context show                 # server, org, workspace, principal, role, scopes
+sy context delete staging       # confirmation names the server and workspace
+sy whoami                       # the identity the *server* resolves for you
+
+sy workspace list               # workspaces this principal may act in
+sy workspace use ws_production  # verified by the server, then stored
+```
+
+`sy whoami` and `sy context show` report the identity and role the gateway
+resolved from stored membership, not the role embedded in your token. If your
+membership was changed or suspended, these commands say so on the next call
+rather than after the token expires.
+
+`sy workspace use` asks the server to verify the selection first. A workspace
+you cannot act in is reported as not found, not as forbidden, so the command
+cannot be used to discover which workspace IDs exist.
+
+### Contexts in CI
+
+```bash
+export SOULACY_CONTEXT=prod        # select a target without writing shared state
+export SOULACY_API_KEY=sk_...      # never pass a credential as a flag
+sy agent list --json
+```
+
+`SOULACY_API_KEY` exists because `--api-key` puts the secret into shell history
+and into the process table, where any other user on the host can read it.
+`SOULACY_CONTEXT` selects a target without mutating `contexts.json`, so parallel
+jobs sharing a checkout cannot race each other.
+
+With `--json`, structured output is the only thing on stdout — progress notes,
+warnings, and confirmations go to stderr, so `sy ... --json | jq` is safe.
+
+Local Personal deployments need none of this: with no context configured, `sy`
+targets the loopback gateway exactly as before.
+
 ## Scoped credentials
 
 Automation should authenticate as a service account, not as a person and not

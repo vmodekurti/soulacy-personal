@@ -769,6 +769,13 @@ func (s *Server) buildApp() *fiber.App {
 	api.Post("/workspace/invitations", s.handleCreateWorkspaceInvitation)
 	api.Get("/workspace/membership-audit", s.handleWorkspaceMembershipAudit)
 
+	// Context resolution for the CLI and GUI. These report the identity and
+	// workspace set the server verified for this request, which is what a
+	// context switcher must display and act on.
+	api.Get("/workspace/identity", s.handleWorkspaceIdentity)
+	api.Get("/workspace/workspaces", s.handleListSelectableWorkspaces)
+	api.Post("/workspace/select", s.handleSelectWorkspace)
+
 	// Prometheus metrics. Wrapped in the API auth group so the same key
 	// gates scraping. Scrape via:
 	//   curl -H 'Authorization: Bearer <key>' http://gw/api/v1/metrics

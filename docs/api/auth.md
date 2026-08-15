@@ -101,6 +101,67 @@ Acceptance is idempotent for the same user. Unknown, expired, reused by a
 different user, and email-mismatched tokens all return the same error so the
 endpoint cannot be used to enumerate invitations.
 
+## Resolve the caller's workspace identity
+
+```http
+GET /api/v1/workspace/identity
+Authorization: Bearer <token>
+X-Soulacy-Workspace: ws_production
+```
+
+```json
+{
+  "subject": "usr_alice",
+  "principal_kind": "user",
+  "credential_id": "cred_abc123",
+  "organization_id": "org_acme",
+  "workspace_id": "ws_production",
+  "membership_id": "mem_a1",
+  "role": "developer",
+  "scopes": ["agents:read"],
+  "deployment_mode": "team"
+}
+```
+
+`role` is the role resolved from the active stored membership, not the role
+carried in the token. `scopes` is always an array. This is the schema behind
+`sy whoami` and `sy context show`.
+
+## List selectable workspaces
+
+```http
+GET /api/v1/workspace/workspaces
+Authorization: Bearer <token>
+```
+
+```json
+{
+  "workspaces": [
+    {"organization_id":"org_acme","organization_name":"Acme","workspace_id":"ws_production","workspace_name":"Production","membership_id":"mem_a1","role":"developer","principal_kind":"user"}
+  ],
+  "active_workspace_id": "ws_production"
+}
+```
+
+The list is computed from stored memberships and service-account bindings on
+every call, so a suspended or removed member stops seeing a workspace
+immediately. A deployment that cannot enumerate workspaces returns `503` rather
+than implying the active workspace is the only one.
+
+## Select a workspace
+
+```http
+POST /api/v1/workspace/select
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{"workspace_id": "ws_production"}
+```
+
+Returns the verified membership. A workspace the caller may not act in returns
+`404`, never `403`: confirming that a workspace exists but is closed to you is
+an enumeration oracle.
+
 ## Create a managed API key
 
 Managed keys use the `sk_` prefix. Creating and managing them requires

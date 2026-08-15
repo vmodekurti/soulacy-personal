@@ -49,6 +49,10 @@ var (
 	gatewayURL string
 	apiKey     string
 	outputJSON bool
+	// activeWorkspaceID is only ever a *selector*. The gateway independently
+	// verifies membership before establishing workspace context, so sending it
+	// grants nothing on its own.
+	activeWorkspaceID string
 )
 
 func main() {
@@ -89,6 +93,11 @@ Quick start:
 			viper.AutomaticEnv()
 			_ = viper.ReadInConfig()
 
+			// A named context is a stored default: an explicit --gateway or
+			// --workspace flag still wins, and the loopback fallback below
+			// still applies when neither is set.
+			applyActiveContext()
+
 			if gatewayURL == "" {
 				gatewayURL = viper.GetString("cli.gateway_url")
 			}
@@ -98,6 +107,12 @@ Quick start:
 					port = 18789
 				}
 				gatewayURL = fmt.Sprintf("http://localhost:%d", port)
+			}
+			if apiKey == "" {
+				// CI supplies a credential through the environment rather than
+				// a flag, so it never reaches shell history or the process
+				// table where any other user on the host could read it.
+				apiKey = strings.TrimSpace(os.Getenv(EnvAPIKey))
 			}
 			if apiKey == "" {
 				if session, err := loadCLISession(gatewayURL); err == nil {
@@ -116,6 +131,7 @@ Quick start:
 
 	root.PersistentFlags().StringVar(&gatewayURL, "gateway", "", "Gateway URL (default: http://localhost:18789)")
 	root.PersistentFlags().StringVar(&apiKey, "api-key", "", "API key for gateway authentication")
+	root.PersistentFlags().StringVar(&activeWorkspaceID, "workspace", "", "Workspace ID to target (default: the current context's workspace)")
 	root.PersistentFlags().BoolVar(&outputJSON, "json", false, "Output raw JSON")
 
 	// Sub-commands
@@ -141,6 +157,8 @@ Quick start:
 		buildRegistryCmd(),     // sy registry — review + manage skill sources (E26)
 		buildSecretsCmd(),      // sy secrets — manage the gateway-global secrets store
 		buildCredentialCmd(),   // sy credential — scoped personal/service credentials
+		buildContextCmd(),      // sy context — named server/workspace targets
+		buildWhoamiCmd(),       // sy whoami — the identity the server resolves
 		buildMCPCmd(),          // sy mcp — manage MCP servers
 		buildLaunchCmd(),       // sy launch — production readiness checks
 		buildUpdateCmd(),       // sy update — release update checks
@@ -1412,6 +1430,9 @@ func apiCallWithTimeoutRetry(method, path string, body []byte, timeout time.Dura
 	req.Header.Set("Content-Type", "application/json")
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	if workspace := strings.TrimSpace(activeWorkspaceID); workspace != "" {
+		req.Header.Set("X-Soulacy-Workspace", workspace)
 	}
 
 	client := &http.Client{Timeout: timeout}
