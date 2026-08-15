@@ -400,7 +400,7 @@ func TestBuildSystemPrefix_EmptyCatalogs(t *testing.T) {
 		// block is added when the agent declares none.
 		Builtins: &[]string{},
 	}
-	prefix := e.buildSystemPrefix(def)
+	prefix := e.buildSystemPrefix(context.Background(), def)
 	// After S1 (Cohort F), every prefix ends with the untrusted-content
 	// handling rule regardless of catalog contents. The base prompt is
 	// still preserved as the head.
@@ -424,7 +424,7 @@ func TestBuildSystemPrefix_IncludesExternalContentGuide(t *testing.T) {
 		{ID: "with-caps", SystemPrompt: "hi", Capabilities: []string{"system"}},
 	}
 	for _, def := range cases {
-		got := e.buildSystemPrefix(def)
+		got := e.buildSystemPrefix(context.Background(), def)
 		if !strings.Contains(got, "<external_content") {
 			t.Errorf("agent %q prefix missing external_content wrapper reference", def.ID)
 		}
@@ -439,11 +439,11 @@ func TestBuildSystemPrefix_IncludesExternalContentGuide(t *testing.T) {
 func TestBuildSystemPrefix_ChartGuideByDefault(t *testing.T) {
 	e := newMinimalEngine(t)
 	def := &agent.Definition{ID: "charty", SystemPrompt: "Hi."}
-	if got := e.buildSystemPrefix(def); !strings.Contains(got, chartToolGuide) {
+	if got := e.buildSystemPrefix(context.Background(), def); !strings.Contains(got, chartToolGuide) {
 		t.Errorf("default agent prefix should include the chart guide; got %q", got)
 	}
 	def.Builtins = &[]string{} // opt out of built-ins
-	if got := e.buildSystemPrefix(def); strings.Contains(got, chartToolGuide) {
+	if got := e.buildSystemPrefix(context.Background(), def); strings.Contains(got, chartToolGuide) {
 		t.Errorf("builtins-opted-out agent should NOT get the chart guide; got %q", got)
 	}
 }
@@ -461,7 +461,7 @@ func TestBuildSystemPrefix_WithSkills(t *testing.T) {
 		SystemPrompt: "You are helpful.",
 		Skills:       []string{"summarizer"},
 	}
-	prefix := e.buildSystemPrefix(def)
+	prefix := e.buildSystemPrefix(context.Background(), def)
 
 	if !strings.Contains(prefix, "Available Skills") {
 		t.Errorf("prefix should contain 'Available Skills', got:\n%s", prefix)
@@ -499,7 +499,7 @@ func TestBuildSystemPrefix_WithPeerAgents(t *testing.T) {
 		SystemPrompt: "You write articles.",
 		Agents:       []string{"researcher"},
 	}
-	prefix := e.buildSystemPrefix(def)
+	prefix := e.buildSystemPrefix(context.Background(), def)
 
 	if !strings.Contains(prefix, "Available Agents") {
 		t.Errorf("prefix should contain 'Available Agents', got:\n%s", prefix)
@@ -521,7 +521,7 @@ func TestBuildSystemPrefix_NoSkillsWhenEmpty(t *testing.T) {
 		SystemPrompt: "Plain prompt.",
 		Skills:       nil, // no skills
 	}
-	prefix := e.buildSystemPrefix(def)
+	prefix := e.buildSystemPrefix(context.Background(), def)
 
 	if strings.Contains(prefix, "Available Skills") {
 		t.Error("prefix should NOT contain 'Available Skills' when agent has no skills opt-in")
@@ -534,7 +534,7 @@ func TestBuildSystemPrefix_SystemPromptIsBaseForPrefix(t *testing.T) {
 		ID:           "base",
 		SystemPrompt: "My unique prompt text.",
 	}
-	prefix := e.buildSystemPrefix(def)
+	prefix := e.buildSystemPrefix(context.Background(), def)
 	if !strings.HasPrefix(prefix, "My unique prompt text.") {
 		t.Errorf("prefix should start with system prompt; got:\n%s", prefix)
 	}

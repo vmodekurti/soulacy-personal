@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -85,7 +86,7 @@ func newTestService(t *testing.T) (*Service, *Store, *fakeEmbedder) {
 // seedKB creates a KB and adds one document with a single chunk (dim=4).
 func seedKB(t *testing.T, store *Store, name string) *KB {
 	t.Helper()
-	kb, err := store.CreateKB(KB{
+	kb, err := store.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID,
 		Name: name, EmbeddingProvider: "test", EmbeddingModel: "fake",
 		Dim: 4, ChunkSize: 100, ChunkOverlap: 0,
 	})
@@ -125,7 +126,7 @@ func TestNewService_NotNil(t *testing.T) {
 
 func TestListAvailable_NilService(t *testing.T) {
 	var svc *Service
-	got := svc.ListAvailable([]string{"kb1"})
+	got := svc.ListAvailable(wsroot.PersonalWorkspaceID, []string{"kb1"})
 	if got != nil {
 		t.Errorf("nil service ListAvailable should return nil, got %v", got)
 	}
@@ -133,7 +134,7 @@ func TestListAvailable_NilService(t *testing.T) {
 
 func TestListAvailable_NilStore(t *testing.T) {
 	svc := &Service{Store: nil}
-	got := svc.ListAvailable([]string{"kb1"})
+	got := svc.ListAvailable(wsroot.PersonalWorkspaceID, []string{"kb1"})
 	if got != nil {
 		t.Errorf("nil store ListAvailable should return nil, got %v", got)
 	}
@@ -144,7 +145,7 @@ func TestListAvailable_WildcardStar(t *testing.T) {
 	seedKB(t, store, "kb-a")
 	seedKB(t, store, "kb-b")
 
-	got := svc.ListAvailable([]string{"*"})
+	got := svc.ListAvailable(wsroot.PersonalWorkspaceID, []string{"*"})
 	if len(got) < 2 {
 		t.Errorf("wildcard '*' should return all KBs; got %d", len(got))
 	}
@@ -154,7 +155,7 @@ func TestListAvailable_WildcardAll(t *testing.T) {
 	svc, store, _ := newTestService(t)
 	seedKB(t, store, "kb-all-1")
 
-	got := svc.ListAvailable([]string{"all"})
+	got := svc.ListAvailable(wsroot.PersonalWorkspaceID, []string{"all"})
 	if len(got) < 1 {
 		t.Errorf("wildcard 'all' should return all KBs; got %d", len(got))
 	}
@@ -164,7 +165,7 @@ func TestListAvailable_SpecificNames(t *testing.T) {
 	svc, store, _ := newTestService(t)
 	seedKB(t, store, "exist-kb")
 
-	got := svc.ListAvailable([]string{"exist-kb", "missing-kb"})
+	got := svc.ListAvailable(wsroot.PersonalWorkspaceID, []string{"exist-kb", "missing-kb"})
 	// "missing-kb" silently dropped; only "exist-kb" returned.
 	if len(got) != 1 {
 		t.Errorf("expected 1 result; got %d: %v", len(got), got)
@@ -176,7 +177,7 @@ func TestListAvailable_SpecificNames(t *testing.T) {
 
 func TestListAvailable_AllMissing(t *testing.T) {
 	svc, _, _ := newTestService(t)
-	got := svc.ListAvailable([]string{"missing-a", "missing-b"})
+	got := svc.ListAvailable(wsroot.PersonalWorkspaceID, []string{"missing-a", "missing-b"})
 	if len(got) != 0 {
 		t.Errorf("all-missing names: expected 0, got %d", len(got))
 	}
@@ -184,7 +185,7 @@ func TestListAvailable_AllMissing(t *testing.T) {
 
 func TestListAvailable_KBSummaryFields(t *testing.T) {
 	svc, store, _ := newTestService(t)
-	_, err := store.CreateKB(KB{
+	_, err := store.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID,
 		Name: "described-kb", Description: "my desc",
 		EmbeddingProvider: "test", EmbeddingModel: "fake",
 		Dim: 4, ChunkSize: 100, ChunkOverlap: 0,
@@ -192,7 +193,7 @@ func TestListAvailable_KBSummaryFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateKB: %v", err)
 	}
-	got := svc.ListAvailable([]string{"described-kb"})
+	got := svc.ListAvailable(wsroot.PersonalWorkspaceID, []string{"described-kb"})
 	if len(got) != 1 {
 		t.Fatalf("expected 1, got %d", len(got))
 	}
@@ -207,7 +208,7 @@ func TestListAvailable_KBSummaryFields(t *testing.T) {
 
 func TestServiceSearch_NilService(t *testing.T) {
 	var svc *Service
-	_, err := svc.Search(context.Background(), "kb", "query", 5)
+	_, err := svc.Search(context.Background(), wsroot.PersonalWorkspaceID, "kb", "query", 5)
 	if err == nil {
 		t.Error("nil service Search should return error")
 	}
@@ -215,7 +216,7 @@ func TestServiceSearch_NilService(t *testing.T) {
 
 func TestServiceSearch_EmptyQuery(t *testing.T) {
 	svc, _, _ := newTestService(t)
-	_, err := svc.Search(context.Background(), "any-kb", "   ", 5)
+	_, err := svc.Search(context.Background(), wsroot.PersonalWorkspaceID, "any-kb", "   ", 5)
 	if err == nil {
 		t.Error("empty/whitespace query should return error")
 	}
@@ -226,7 +227,7 @@ func TestServiceSearch_EmptyQuery(t *testing.T) {
 
 func TestServiceSearch_MissingKB(t *testing.T) {
 	svc, _, _ := newTestService(t)
-	_, err := svc.Search(context.Background(), "no-such-kb", "test query", 5)
+	_, err := svc.Search(context.Background(), wsroot.PersonalWorkspaceID, "no-such-kb", "test query", 5)
 	if err == nil {
 		t.Error("missing KB should return error")
 	}
@@ -238,7 +239,7 @@ func TestServiceSearch_MissingKB(t *testing.T) {
 func TestServiceSearch_MissingEmbedder(t *testing.T) {
 	svc, store, _ := newTestService(t)
 	// Create a KB with a provider not registered in the embedder registry.
-	_, err := store.CreateKB(KB{
+	_, err := store.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID,
 		Name: "unknown-provider-kb", EmbeddingProvider: "unknown-provider",
 		EmbeddingModel: "none", Dim: 4,
 	})
@@ -246,7 +247,7 @@ func TestServiceSearch_MissingEmbedder(t *testing.T) {
 		t.Fatalf("CreateKB: %v", err)
 	}
 
-	_, err = svc.Search(context.Background(), "unknown-provider-kb", "hello", 5)
+	_, err = svc.Search(context.Background(), wsroot.PersonalWorkspaceID, "unknown-provider-kb", "hello", 5)
 	if err == nil {
 		t.Error("missing embedder should return error")
 	}
@@ -260,7 +261,7 @@ func TestServiceSearch_EmbedError(t *testing.T) {
 	seedKB(t, store, "embed-err-kb")
 	fe.errOnNext = errors.New("embedding service down")
 
-	_, err := svc.Search(context.Background(), "embed-err-kb", "query", 5)
+	_, err := svc.Search(context.Background(), wsroot.PersonalWorkspaceID, "embed-err-kb", "query", 5)
 	if err == nil {
 		t.Error("embed error should propagate")
 	}
@@ -271,7 +272,7 @@ func TestServiceSearch_DefaultTopK(t *testing.T) {
 	svc, store, _ := newTestService(t)
 	seedKB(t, store, "topk-svc-kb")
 
-	result, err := svc.Search(context.Background(), "topk-svc-kb", "hello world", 0)
+	result, err := svc.Search(context.Background(), wsroot.PersonalWorkspaceID, "topk-svc-kb", "hello world", 0)
 	if err != nil {
 		t.Fatalf("Search topK=0: %v", err)
 	}
@@ -281,14 +282,14 @@ func TestServiceSearch_DefaultTopK(t *testing.T) {
 func TestServiceSearch_NoHitsMessage(t *testing.T) {
 	svc, store, _ := newTestService(t)
 	// Create an empty KB (no documents).
-	_, err := store.CreateKB(KB{
+	_, err := store.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID,
 		Name: "empty-kb-svc", EmbeddingProvider: "test", EmbeddingModel: "fake", Dim: 4,
 	})
 	if err != nil {
 		t.Fatalf("CreateKB: %v", err)
 	}
 
-	result, err := svc.Search(context.Background(), "empty-kb-svc", "query", 5)
+	result, err := svc.Search(context.Background(), wsroot.PersonalWorkspaceID, "empty-kb-svc", "query", 5)
 	if err != nil {
 		t.Fatalf("Search empty KB: %v", err)
 	}
@@ -302,7 +303,7 @@ func TestServiceSearch_HappyPath(t *testing.T) {
 	_ = seedKB(t, store, "happy-kb")
 	fe.vectors["hello world"] = []float32{1, 0, 0, 0}
 
-	result, err := svc.Search(context.Background(), "happy-kb", "hello world", 3)
+	result, err := svc.Search(context.Background(), wsroot.PersonalWorkspaceID, "happy-kb", "hello world", 3)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -323,13 +324,13 @@ func TestServiceSearch_EmbedCacheHit(t *testing.T) {
 	fe.vectors[query] = []float32{1, 0, 0, 0}
 
 	// First call — embeds the query.
-	if _, err := svc.Search(context.Background(), "cache-kb", query, 3); err != nil {
+	if _, err := svc.Search(context.Background(), wsroot.PersonalWorkspaceID, "cache-kb", query, 3); err != nil {
 		t.Fatalf("first Search: %v", err)
 	}
 	callsAfterFirst := fe.callCount
 
 	// Second call with the same query — should hit the cache, not call Embed again.
-	if _, err := svc.Search(context.Background(), "cache-kb", query, 3); err != nil {
+	if _, err := svc.Search(context.Background(), wsroot.PersonalWorkspaceID, "cache-kb", query, 3); err != nil {
 		t.Fatalf("second Search: %v", err)
 	}
 	if fe.callCount != callsAfterFirst {
@@ -403,7 +404,7 @@ func TestEmbedLRU_AccessMovesToFront(t *testing.T) {
 	lru := newEmbedLRU(2)
 	lru.put("a", []float32{1})
 	lru.put("b", []float32{2})
-	lru.get("a") // touch a → moves to front; b becomes LRU
+	lru.get("a")               // touch a → moves to front; b becomes LRU
 	lru.put("c", []float32{3}) // should evict b, not a
 
 	_, okA := lru.get("a")
@@ -498,7 +499,7 @@ func TestStore_SearchFTS_NoFTS5IsGraceful(t *testing.T) {
 	// In the test environment FTS5 may or may not be available. When it's not,
 	// SearchFTS must return (nil, nil) — not an error.
 	s := newTestStore2(t)
-	kb, err := s.CreateKB(KB{
+	kb, err := s.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID,
 		Name: "fts-graceful", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2,
 	})
 	if err != nil {
@@ -528,7 +529,7 @@ func TestStore_SearchHybrid_VecErrorWithFTSResults(t *testing.T) {
 	// SearchHybrid returns an error. We test the vec-error path without worrying
 	// about what fts returns by using a wrong-dim vector.
 	s := newTestStore2(t)
-	kb, err := s.CreateKB(KB{
+	kb, err := s.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID,
 		Name: "hybrid-err", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 4,
 	})
 	if err != nil {
@@ -550,17 +551,17 @@ func TestStore_SearchHybrid_VecErrorWithFTSResults(t *testing.T) {
 
 func TestStore_DeleteKB_EmptyVecTable(t *testing.T) {
 	s := newTestStore2(t)
-	kb, err := s.CreateKB(KB{
+	kb, err := s.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID,
 		Name: "delete-empty-vec", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 4,
 	})
 	if err != nil {
 		t.Fatalf("CreateKB: %v", err)
 	}
 	// No documents added — vec0 table is empty but exists.
-	if err := s.DeleteKB(kb.Name); err != nil {
+	if err := s.DeleteKB(wsroot.PersonalWorkspaceID, kb.Name); err != nil {
 		t.Fatalf("DeleteKB on empty-vec KB: %v", err)
 	}
-	got, err := s.GetKB(kb.Name)
+	got, err := s.GetKB(wsroot.PersonalWorkspaceID, kb.Name)
 	if err != nil || got != nil {
 		t.Errorf("KB should be gone; err=%v got=%v", err, got)
 	}
@@ -572,9 +573,9 @@ func TestStore_DeleteKB_EmptyVecTable(t *testing.T) {
 
 func TestStore_DeleteDocument_MissingDocIsNoOp(t *testing.T) {
 	s := newTestStore2(t)
-	kb, _ := s.CreateKB(KB{Name: "del-doc-noop", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2})
+	kb, _ := s.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID, Name: "del-doc-noop", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2})
 	// Deleting a non-existent doc ID should return nil (no rows deleted, no error).
-	err := s.DeleteDocument(kb.ID, "does-not-exist")
+	err := s.DeleteDocument(wsroot.PersonalWorkspaceID, kb.ID, "does-not-exist")
 	if err != nil {
 		t.Errorf("DeleteDocument non-existent: expected nil, got %v", err)
 	}
@@ -587,7 +588,7 @@ func TestStore_DeleteDocument_MissingDocIsNoOp(t *testing.T) {
 func TestStore_SearchHybrid_SmallTopK(t *testing.T) {
 	// topK=1 → fetchK=max(2,10)=10; should not panic or error on small KB.
 	s := newTestStore2(t)
-	kb, _ := s.CreateKB(KB{Name: "hybrid-small-topk", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2})
+	kb, _ := s.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID, Name: "hybrid-small-topk", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2})
 	_, _ = s.AddDocument(kb, Document{Title: "d"},
 		[]Chunk{{Content: "chunk content", Vector: []float32{1, 0}}})
 	hits, err := s.SearchHybrid(kb, []float32{1, 0}, "chunk", 1)
@@ -619,14 +620,14 @@ func TestServiceSearch_EmptyEmbedResult(t *testing.T) {
 	reg.Register(&emptyVecEmbedder{})
 	svc := NewService(store, reg)
 
-	_, err := store.CreateKB(KB{
+	_, err := store.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID,
 		Name: "empty-vec-kb", EmbeddingProvider: "empty-vec", EmbeddingModel: "none", Dim: 4,
 	})
 	if err != nil {
 		t.Fatalf("CreateKB: %v", err)
 	}
 
-	_, err = svc.Search(context.Background(), "empty-vec-kb", "query", 5)
+	_, err = svc.Search(context.Background(), wsroot.PersonalWorkspaceID, "empty-vec-kb", "query", 5)
 	if err == nil {
 		t.Error("empty embed result should return error")
 	}

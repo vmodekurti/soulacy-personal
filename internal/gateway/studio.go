@@ -363,7 +363,7 @@ func (s *Server) groundCatalog(scope studioScope, cat *studio.Catalog) {
 	cat.KnowledgeBases = nil
 	if s.engine != nil {
 		if ksvc := s.engine.Knowledge(); ksvc != nil && ksvc.Store != nil {
-			if kbs, err := ksvc.Store.ListKBs(); err == nil {
+			if kbs, err := ksvc.Store.ListKBs(scope.WorkspaceID()); err == nil {
 				for _, kb := range kbs {
 					cat.KnowledgeBases = append(cat.KnowledgeBases, studio.CatalogKB{
 						Name: kb.Name, Description: kb.Description,

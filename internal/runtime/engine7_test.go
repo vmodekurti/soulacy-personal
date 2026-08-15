@@ -206,7 +206,7 @@ func TestBuildSystemPrefix_NilSkillLoaderNoSkillBlock(t *testing.T) {
 		// appended; this test is about the absence of a SKILL block.
 		Builtins: &[]string{},
 	}
-	prefix := e.buildSystemPrefix(def)
+	prefix := e.buildSystemPrefix(context.Background(), def)
 	// After S1 (Cohort F) every prefix ends with the untrusted-content
 	// handling rule; the base system prompt is still the head, and no
 	// skill catalog block is added when the loader is nil.
@@ -245,7 +245,7 @@ func TestBuildSystemPrefix_AgentCatalogWhenPeersDeclared(t *testing.T) {
 		SystemPrompt: "I orchestrate.",
 		Agents:       []string{"peer-agent-e7"},
 	}
-	prefix := e.buildSystemPrefix(caller)
+	prefix := e.buildSystemPrefix(context.Background(), caller)
 	if !strings.Contains(prefix, "Available Agents") {
 		t.Errorf("prefix should contain 'Available Agents' block, got:\n%s", prefix)
 	}
@@ -264,7 +264,7 @@ func TestBuildSystemPrefix_SkillLoaderNilNoSkillsNoCatalog(t *testing.T) {
 		SystemPrompt: "Skill-hungry agent.",
 		Skills:       []string{"data-parser"},
 	}
-	prefix := e.buildSystemPrefix(def)
+	prefix := e.buildSystemPrefix(context.Background(), def)
 	if strings.Contains(prefix, "Available Skills") {
 		t.Error("prefix must not contain skill catalog when skill loader is nil")
 	}
@@ -280,7 +280,7 @@ func TestBuildSystemPrefix_SkillLoaderEmptySkillsNoBlock(t *testing.T) {
 		SystemPrompt: "No skills here.",
 		Skills:       []string{"nonexistent"},
 	}
-	prefix := e.buildSystemPrefix(def)
+	prefix := e.buildSystemPrefix(context.Background(), def)
 	// catalog should be empty since no skills found
 	if strings.Contains(prefix, "Available Skills") {
 		t.Error("prefix must not contain skill catalog when no matching skills exist")

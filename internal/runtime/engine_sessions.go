@@ -380,7 +380,10 @@ func trimHistory(history []llm.ChatMessage, cap int) []llm.ChatMessage {
 // buildContext on every turn of every agent loop. For agents with large
 // system prompts or many skills/KBs/peers, that was tens of KB of string
 // concatenation per turn × turns × agents.
-func (e *Engine) buildSystemPrefix(def *agent.Definition) string {
+// buildSystemPrefix takes a context so the knowledge catalog it injects names
+// this workspace's knowledge bases. Two tenants may both have one called
+// "docs", and the prompt must describe the caller's.
+func (e *Engine) buildSystemPrefix(ctx context.Context, def *agent.Definition) string {
 	// Phase 1 of the persona-blocks feature (docs/AGENT_DESIGN.md):
 	// identity / personality / non_negotiables get rendered BEFORE the
 	// operator's free-form system_prompt, with consistent framing across
@@ -448,7 +451,7 @@ func (e *Engine) buildSystemPrefix(def *agent.Definition) string {
 		}
 	}
 	if e.knowledge != nil && len(def.Knowledge) > 0 {
-		if catalog := e.knowledgeCatalogFor(def.Knowledge); catalog != "" {
+		if catalog := e.knowledgeCatalogFor(WorkspaceFromContext(ctx), def.Knowledge); catalog != "" {
 			systemPrompt += "\n\n" +
 				"## Available Knowledge Bases\n" +
 				"These knowledge bases hold indexed reference material you can search with the\n" +
@@ -613,7 +616,7 @@ func (e *Engine) buildContext(ctx context.Context, def *agent.Definition, sess *
 	prefix := sess.cachedPrefix
 	sess.mu.Unlock()
 	if prefix == "" {
-		prefix = e.buildSystemPrefix(def)
+		prefix = e.buildSystemPrefix(ctx, def)
 	}
 	msgs := []llm.ChatMessage{{Role: "system", Content: prefix}}
 

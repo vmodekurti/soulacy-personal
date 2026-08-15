@@ -1393,7 +1393,7 @@ func TestBuildSystemPrefix_KnowledgeServiceNilStoreNoAppend(t *testing.T) {
 		Knowledge:    []string{"my-kb"},
 	}
 	// Should not panic even with nil Store inside knowledge service.
-	prefix := e.buildSystemPrefix(def)
+	prefix := e.buildSystemPrefix(context.Background(), def)
 	if !strings.Contains(prefix, "You are a knowledgeable bot.") {
 		t.Errorf("prefix should contain system prompt, got:\n%s", prefix)
 	}
@@ -1411,7 +1411,7 @@ func TestBuildSystemPrefix_NilKnowledgeServiceNoKBBlock(t *testing.T) {
 		SystemPrompt: "Simple prompt.",
 		Knowledge:    []string{"some-kb"},
 	}
-	prefix := e.buildSystemPrefix(def)
+	prefix := e.buildSystemPrefix(context.Background(), def)
 	if strings.Contains(prefix, "Available Knowledge Bases") {
 		t.Error("prefix should NOT contain 'Available Knowledge Bases' when knowledge service is nil")
 	}
@@ -1949,7 +1949,7 @@ func TestBuildSystemPrefix_NilBrainStoreNoOp(t *testing.T) {
 		ID:           "no-brain",
 		SystemPrompt: "Simple prompt.",
 	}
-	prefix := e.buildSystemPrefix(def)
+	prefix := e.buildSystemPrefix(context.Background(), def)
 	if !strings.Contains(prefix, "Simple prompt.") {
 		t.Errorf("prefix should contain system prompt, got:\n%s", prefix)
 	}

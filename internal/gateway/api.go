@@ -80,8 +80,12 @@ func (s *Server) handleHealth(c *fiber.Ctx) error {
 		// "checking" instead of spawning another (PERF-5).
 		if s.healthProbeInFlight.CompareAndSwap(false, true) {
 			done := make(chan error, 1)
+			// Capture the workspace before the probe goroutine starts: this
+			// handler may return before the probe finishes, and Fiber recycles
+			// the request context the moment it does.
+			probeWorkspace := s.agents(c).WorkspaceID()
 			go func() {
-				_, err := knowledge.Store.ListKBs()
+				_, err := knowledge.Store.ListKBs(probeWorkspace)
 				s.healthProbeInFlight.Store(false)
 				done <- err
 			}()

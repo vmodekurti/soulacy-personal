@@ -54,7 +54,11 @@ func NewService(store *Store, embedders *llm.EmbedderRegistry) *Service {
 // don't resolve to an existing KB are silently dropped (they may have been
 // declared in SOUL.yaml before the KB was created). Supports the "*" / "all"
 // wildcards used by Skills for symmetry.
-func (s *Service) ListAvailable(names []string) []KBSummary {
+// ListAvailable takes the workspace explicitly. The agent definition names
+// which knowledge bases it may use, but which knowledge base a name refers to
+// is a tenant question, and the answer must not depend on which tenant asked
+// first.
+func (s *Service) ListAvailable(workspaceID string, names []string) []KBSummary {
 	if s == nil || s.Store == nil {
 		return nil
 	}
@@ -66,7 +70,7 @@ func (s *Service) ListAvailable(names []string) []KBSummary {
 		}
 	}
 	if wantAll {
-		kbs, err := s.Store.ListKBs()
+		kbs, err := s.Store.ListKBs(workspaceID)
 		if err != nil {
 			return nil
 		}
@@ -78,7 +82,7 @@ func (s *Service) ListAvailable(names []string) []KBSummary {
 	}
 	out := make([]KBSummary, 0, len(names))
 	for _, n := range names {
-		kb, err := s.Store.GetKB(n)
+		kb, err := s.Store.GetKB(workspaceID, n)
 		if err != nil || kb == nil {
 			continue
 		}
@@ -96,7 +100,7 @@ func (s *Service) ListAvailable(names []string) []KBSummary {
 // build (hasFTS5 == false in the Store), SearchHybrid degrades gracefully to
 // vector-only results with no error — callers of Service.Search never need to
 // handle the FTS5-absent case specially.
-func (s *Service) Search(ctx context.Context, kbName, query string, topK int) (string, error) {
+func (s *Service) Search(ctx context.Context, workspaceID, kbName, query string, topK int) (string, error) {
 	if s == nil || s.Store == nil {
 		return "", errors.New("knowledge: service not configured")
 	}
@@ -107,7 +111,7 @@ func (s *Service) Search(ctx context.Context, kbName, query string, topK int) (s
 		topK = 5
 	}
 
-	kb, err := s.Store.GetKB(kbName)
+	kb, err := s.Store.GetKB(workspaceID, kbName)
 	if err != nil {
 		return "", err
 	}
@@ -164,7 +168,7 @@ func (s *Service) Search(ctx context.Context, kbName, query string, topK int) (s
 // It is now a thin wrapper over ingestExtracted so the synchronous path (the
 // kb_write tool) and the async worker share ONE implementation — the gateway
 // used to carry a third, duplicated copy of this pipeline.
-func (s *Service) IngestText(ctx context.Context, kbName, title, source, mimeType, content string) (*Document, error) {
+func (s *Service) IngestText(ctx context.Context, workspaceID, kbName, title, source, mimeType, content string) (*Document, error) {
 	if s == nil || s.Store == nil {
 		return nil, errors.New("knowledge: service not configured")
 	}
@@ -175,7 +179,7 @@ func (s *Service) IngestText(ctx context.Context, kbName, title, source, mimeTyp
 	if err != nil {
 		return nil, fmt.Errorf("kb_write: extract text: %w", err)
 	}
-	return s.ingestExtracted(ctx, kbName, title, source, mimeType, text, nil)
+	return s.ingestExtracted(ctx, workspaceID, kbName, title, source, mimeType, text, nil)
 }
 
 // ingestExtracted is the single ingestion pipeline: chunk → embed (batched) →
@@ -183,7 +187,7 @@ func (s *Service) IngestText(ctx context.Context, kbName, title, source, mimeTyp
 // batch so a long document shows live progress instead of appearing hung.
 func (s *Service) ingestExtracted(
 	ctx context.Context,
-	kbName, title, source, mimeType, text string,
+	workspaceID, kbName, title, source, mimeType, text string,
 	report func(pct int),
 ) (*Document, error) {
 	if s == nil || s.Store == nil {
@@ -193,7 +197,10 @@ func (s *Service) ingestExtracted(
 	if kbName == "" {
 		return nil, errors.New("kb_write: kb is required")
 	}
-	kb, err := s.Store.GetKB(kbName)
+	// Re-resolve the knowledge base at commit time rather than trusting a
+	// handle captured when the job was queued. A workspace can be suspended,
+	// or the knowledge base deleted, between enqueue and ingest.
+	kb, err := s.Store.GetKB(workspaceID, kbName)
 	if err != nil {
 		return nil, err
 	}

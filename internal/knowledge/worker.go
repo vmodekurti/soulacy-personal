@@ -272,7 +272,7 @@ func (w *Worker) run(ctx context.Context, job IngestJob) (*Document, error) {
 			w.progress.IngestProgress(j)
 		}
 	}
-	return w.svc.ingestExtracted(ctx, job.KBName, job.Title, job.Source, job.MIMEType, text, report)
+	return w.svc.ingestExtracted(ctx, job.WorkspaceID, job.KBName, job.Title, job.Source, job.MIMEType, text, report)
 }
 
 func (w *Worker) backoff(attempt int) time.Duration {

@@ -2,6 +2,7 @@ package knowledge
 
 import (
 	"context"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"strings"
 	"testing"
 	"time"
@@ -41,7 +42,7 @@ func TestWorkerOptionDefaults(t *testing.T) {
 
 func TestWorkerRejectsOversizedJobBeforeReadingSpool(t *testing.T) {
 	w := NewWorker(nil, WorkerOptions{MaxDocumentBytes: 4}, nil)
-	_, err := w.run(context.Background(), IngestJob{
+	_, err := w.run(context.Background(), IngestJob{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID:        "j-big",
 		SpoolPath: "/does/not/matter",
 		ByteSize:  5,
@@ -86,7 +87,7 @@ func TestWorkerEmitsProgressToSink(t *testing.T) {
 	w := NewWorker(nil, WorkerOptions{}, nil)
 	sink := &fakeSink{}
 	w.SetProgressSink(sink)
-	w.emit(IngestJob{ID: "j1", Status: JobRunning, Progress: 50})
+	w.emit(IngestJob{WorkspaceID: wsroot.PersonalWorkspaceID, ID: "j1", Status: JobRunning, Progress: 50})
 	if len(sink.jobs) != 1 || sink.jobs[0].Progress != 50 {
 		t.Fatalf("progress sink did not receive the update: %+v", sink.jobs)
 	}

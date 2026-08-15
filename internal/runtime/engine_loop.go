@@ -388,7 +388,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 	// Prime the prefix cache for this Handle. Cleared on exit so a
 	// hot-reload between user messages picks up the new def's catalogs.
 	// (PRODUCTION_AUDIT → MED/Engine.)
-	sysPrefix := e.buildSystemPrefix(def)
+	sysPrefix := e.buildSystemPrefix(ctx, def)
 	if modePrompt := responseModeSystemPrompt(msg.Metadata); modePrompt != "" {
 		sysPrefix += "\n\n" + modePrompt
 	}

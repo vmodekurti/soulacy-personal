@@ -105,7 +105,7 @@ func (s *Server) handleListIngestJobs(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "knowledge store disabled")
 	}
 	limit, _ := strconv.Atoi(c.Query("limit", "50"))
-	jobs, err := svc.Store.ListIngests(knowledgeKBParam(c), limit)
+	jobs, err := svc.Store.ListIngests(s.agents(c).WorkspaceID(), knowledgeKBParam(c), limit)
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}

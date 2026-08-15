@@ -1,6 +1,7 @@
 package knowledge
 
 import (
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"path/filepath"
 	"testing"
 )
@@ -17,7 +18,7 @@ func testStore(t *testing.T) *Store {
 
 func enqueue(t *testing.T, st *Store, title string) IngestJob {
 	t.Helper()
-	j, err := st.EnqueueIngest(IngestJob{
+	j, err := st.EnqueueIngest(IngestJob{WorkspaceID: wsroot.PersonalWorkspaceID,
 		KBName: "docs", Title: title, MIMEType: "text/plain",
 		SpoolPath: "/tmp/spool-" + title, ByteSize: 42,
 	})
@@ -195,11 +196,11 @@ func TestListIngestsNewestFirstAndFilteredByKB(t *testing.T) {
 	st := testStore(t)
 	enqueue(t, st, "a")
 	enqueue(t, st, "b")
-	if _, err := st.EnqueueIngest(IngestJob{KBName: "other", Title: "c", SpoolPath: "/tmp/c"}); err != nil {
+	if _, err := st.EnqueueIngest(IngestJob{WorkspaceID: wsroot.PersonalWorkspaceID, KBName: "other", Title: "c", SpoolPath: "/tmp/c"}); err != nil {
 		t.Fatal(err)
 	}
 
-	all, err := st.ListIngests("", 10)
+	all, err := st.ListIngests(wsroot.PersonalWorkspaceID, "", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +208,7 @@ func TestListIngestsNewestFirstAndFilteredByKB(t *testing.T) {
 		t.Fatalf("expected 3 jobs, got %d", len(all))
 	}
 
-	docs, err := st.ListIngests("docs", 10)
+	docs, err := st.ListIngests(wsroot.PersonalWorkspaceID, "docs", 10)
 	if err != nil {
 		t.Fatal(err)
 	}

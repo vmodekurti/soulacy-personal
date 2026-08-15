@@ -34,7 +34,12 @@ import (
 
 // KB describes a single knowledge base.
 type KB struct {
-	ID                string    `json:"id"`
+	ID string `json:"id"`
+	// WorkspaceID is the tenant that owns this knowledge base. It is set by
+	// the server from verified request context and is never read from a
+	// request body: a client that could name its own namespace could read any
+	// tenant's documents.
+	WorkspaceID       string    `json:"workspace_id"`
 	Name              string    `json:"name"`
 	Description       string    `json:"description"`
 	EmbeddingProvider string    `json:"embedding_provider"`
@@ -92,6 +97,10 @@ type SearchHit struct {
 // table. When the SQLite build in use was compiled without the fts5 module
 // (common in CGO-free test environments), hasFTS5 is false and all FTS5-
 // guarded paths are skipped, degrading gracefully to vector-only search.
+// ErrWorkspaceRequired is returned when a knowledge operation arrives without
+// a workspace. Knowledge with no owner is knowledge every tenant can search.
+var ErrWorkspaceRequired = errors.New("knowledge: workspace is required")
+
 type Store struct {
 	db      *sql.DB
 	mu      sync.RWMutex // guards CREATE/DROP of per-KB vec0 tables
@@ -124,7 +133,8 @@ func Open(path string) (*Store, error) {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS knowledge_bases (
 			id TEXT PRIMARY KEY,
-			name TEXT NOT NULL UNIQUE,
+			workspace_id TEXT NOT NULL DEFAULT 'ws_personal',
+			name TEXT NOT NULL,
 			description TEXT,
 			embedding_provider TEXT NOT NULL,
 			embedding_model TEXT NOT NULL,
@@ -133,8 +143,14 @@ func Open(path string) (*Store, error) {
 			chunk_overlap INTEGER NOT NULL,
 			created_at DATETIME NOT NULL
 		)`,
+		// A knowledge-base name is human-chosen, so two teams both calling one
+		// "docs" is expected. Uniqueness is therefore composite; a global
+		// UNIQUE(name) would have made one tenant's create fail because
+		// another tenant already used the word.
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_workspace_name ON knowledge_bases(workspace_id, name)`,
 		`CREATE TABLE IF NOT EXISTS documents (
 			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL DEFAULT 'ws_personal',
 			kb_id TEXT NOT NULL,
 			title TEXT NOT NULL,
 			source TEXT,
@@ -146,6 +162,7 @@ func Open(path string) (*Store, error) {
 		)`,
 		`CREATE TABLE IF NOT EXISTS chunks (
 			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL DEFAULT 'ws_personal',
 			doc_id TEXT NOT NULL,
 			kb_id TEXT NOT NULL,
 			ordinal INTEGER NOT NULL,
@@ -153,9 +170,9 @@ func Open(path string) (*Store, error) {
 			parent_chunk_id TEXT DEFAULT NULL,
 			FOREIGN KEY(doc_id) REFERENCES documents(id) ON DELETE CASCADE
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_documents_kb ON documents(kb_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(doc_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_chunks_kb ON chunks(kb_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_documents_kb ON documents(workspace_id, kb_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(workspace_id, doc_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_chunks_kb ON chunks(workspace_id, kb_id)`,
 	}
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
@@ -172,7 +189,13 @@ func Open(path string) (*Store, error) {
 	// Schema versioning (E22 adoption): v1 = the bootstrap above INCLUDING
 	// the legacy parent_chunk_id backfill below (pre-versioning, stays
 	// best-effort); future changes go through sqlitex.MigrateSchema with v2+.
-	if err := sqlitex.RecordSchemaVersion(db, "knowledge", 1); err != nil {
+	// An existing knowledge.db has a global UNIQUE(name) and no tenant column.
+	// SQLite cannot drop a constraint in place, so the table is rebuilt.
+	if err := migrateKnowledgeWorkspaceSchema(db); err != nil {
+		return nil, err
+	}
+
+	if err := sqlitex.RecordSchemaVersion(db, "knowledge", 2); err != nil {
 		return nil, fmt.Errorf("knowledge: schema version: %w", err)
 	}
 
@@ -210,6 +233,13 @@ func (s *Store) CreateKB(kb KB) (*KB, error) {
 	if kb.Name == "" {
 		return nil, errors.New("knowledge: name is required")
 	}
+	// The workspace comes from verified request context. Refusing an empty one
+	// here means a knowledge base can never exist without an owner, which is
+	// the only state in which every tenant could read it.
+	kb.WorkspaceID = strings.TrimSpace(kb.WorkspaceID)
+	if kb.WorkspaceID == "" {
+		return nil, ErrWorkspaceRequired
+	}
 	if kb.Dim <= 0 {
 		return nil, errors.New("knowledge: dim must be positive")
 	}
@@ -236,9 +266,9 @@ func (s *Store) CreateKB(kb KB) (*KB, error) {
 	defer tx.Rollback() //nolint:errcheck
 
 	_, err = tx.Exec(`INSERT INTO knowledge_bases
-		(id, name, description, embedding_provider, embedding_model, dim, chunk_size, chunk_overlap, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		kb.ID, kb.Name, kb.Description, kb.EmbeddingProvider, kb.EmbeddingModel,
+		(id, workspace_id, name, description, embedding_provider, embedding_model, dim, chunk_size, chunk_overlap, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		kb.ID, kb.WorkspaceID, kb.Name, kb.Description, kb.EmbeddingProvider, kb.EmbeddingModel,
 		kb.Dim, kb.ChunkSize, kb.ChunkOverlap, kb.CreatedAt,
 	)
 	if err != nil {
@@ -261,14 +291,19 @@ func (s *Store) CreateKB(kb KB) (*KB, error) {
 }
 
 // ListKBs returns all knowledge bases with up-to-date doc/chunk counts.
-func (s *Store) ListKBs() ([]KB, error) {
+func (s *Store) ListKBs(workspaceID string) ([]KB, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return nil, ErrWorkspaceRequired
+	}
 	rows, err := s.db.Query(`
-		SELECT kb.id, kb.name, COALESCE(kb.description,''), kb.embedding_provider, kb.embedding_model,
+		SELECT kb.id, kb.workspace_id, kb.name, COALESCE(kb.description,''), kb.embedding_provider, kb.embedding_model,
 		       kb.dim, kb.chunk_size, kb.chunk_overlap, kb.created_at,
 		       (SELECT COUNT(*) FROM documents d WHERE d.kb_id = kb.id) AS doc_count,
 		       (SELECT COUNT(*) FROM chunks c WHERE c.kb_id = kb.id) AS chunk_count
 		FROM knowledge_bases kb
-		ORDER BY kb.name`)
+		WHERE kb.workspace_id = ?
+		ORDER BY kb.name`, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -278,7 +313,7 @@ func (s *Store) ListKBs() ([]KB, error) {
 	for rows.Next() {
 		var kb KB
 		if err := rows.Scan(
-			&kb.ID, &kb.Name, &kb.Description, &kb.EmbeddingProvider, &kb.EmbeddingModel,
+			&kb.ID, &kb.WorkspaceID, &kb.Name, &kb.Description, &kb.EmbeddingProvider, &kb.EmbeddingModel,
 			&kb.Dim, &kb.ChunkSize, &kb.ChunkOverlap, &kb.CreatedAt,
 			&kb.DocumentCount, &kb.ChunkCount,
 		); err != nil {
@@ -290,15 +325,19 @@ func (s *Store) ListKBs() ([]KB, error) {
 }
 
 // GetKB looks up a KB by name (case-sensitive). Returns nil if not found.
-func (s *Store) GetKB(name string) (*KB, error) {
+func (s *Store) GetKB(workspaceID, name string) (*KB, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return nil, ErrWorkspaceRequired
+	}
 	var kb KB
 	err := s.db.QueryRow(`
-		SELECT kb.id, kb.name, COALESCE(kb.description,''), kb.embedding_provider, kb.embedding_model,
+		SELECT kb.id, kb.workspace_id, kb.name, COALESCE(kb.description,''), kb.embedding_provider, kb.embedding_model,
 		       kb.dim, kb.chunk_size, kb.chunk_overlap, kb.created_at,
 		       (SELECT COUNT(*) FROM documents d WHERE d.kb_id = kb.id),
 		       (SELECT COUNT(*) FROM chunks c WHERE c.kb_id = kb.id)
-		FROM knowledge_bases kb WHERE kb.name = ?`, name).Scan(
-		&kb.ID, &kb.Name, &kb.Description, &kb.EmbeddingProvider, &kb.EmbeddingModel,
+		FROM knowledge_bases kb WHERE kb.workspace_id = ? AND kb.name = ?`, workspaceID, name).Scan(
+		&kb.ID, &kb.WorkspaceID, &kb.Name, &kb.Description, &kb.EmbeddingProvider, &kb.EmbeddingModel,
 		&kb.Dim, &kb.ChunkSize, &kb.ChunkOverlap, &kb.CreatedAt,
 		&kb.DocumentCount, &kb.ChunkCount,
 	)
@@ -312,8 +351,8 @@ func (s *Store) GetKB(name string) (*KB, error) {
 }
 
 // DeleteKB drops the KB row, all docs/chunks (via cascade), and the vec0 table.
-func (s *Store) DeleteKB(name string) error {
-	kb, err := s.GetKB(name)
+func (s *Store) DeleteKB(workspaceID, name string) error {
+	kb, err := s.GetKB(workspaceID, name)
 	if err != nil {
 		return err
 	}
@@ -360,6 +399,12 @@ func (s *Store) AddDocument(kb *KB, doc Document, chunks []Chunk) (*Document, er
 	if kb == nil {
 		return nil, errors.New("knowledge: kb is nil")
 	}
+	// Ownership is inherited from the knowledge base, which was resolved
+	// through a workspace-scoped lookup. It is never taken from the document,
+	// so an ingestion payload cannot file itself under another tenant.
+	if strings.TrimSpace(kb.WorkspaceID) == "" {
+		return nil, ErrWorkspaceRequired
+	}
 	if doc.ID == "" {
 		doc.ID = uuid.New().String()
 	}
@@ -392,14 +437,14 @@ func (s *Store) AddDocument(kb *KB, doc Document, chunks []Chunk) (*Document, er
 	defer tx.Rollback() //nolint:errcheck
 
 	if _, err := tx.Exec(`INSERT INTO documents
-		(id, kb_id, title, source, mime_type, byte_size, sha256, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		doc.ID, doc.KBID, doc.Title, doc.Source, doc.MIMEType, doc.ByteSize, doc.SHA256, doc.CreatedAt,
+		(id, workspace_id, kb_id, title, source, mime_type, byte_size, sha256, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		doc.ID, kb.WorkspaceID, doc.KBID, doc.Title, doc.Source, doc.MIMEType, doc.ByteSize, doc.SHA256, doc.CreatedAt,
 	); err != nil {
 		return nil, fmt.Errorf("knowledge: insert document: %w", err)
 	}
 
-	chunkStmt, err := tx.Prepare(`INSERT INTO chunks (id, doc_id, kb_id, ordinal, content, parent_chunk_id) VALUES (?, ?, ?, ?, ?, ?)`)
+	chunkStmt, err := tx.Prepare(`INSERT INTO chunks (id, workspace_id, doc_id, kb_id, ordinal, content, parent_chunk_id) VALUES (?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return nil, err
 	}
@@ -428,7 +473,7 @@ func (s *Store) AddDocument(kb *KB, doc Document, chunks []Chunk) (*Document, er
 		c.DocID = doc.ID
 		c.KBID = kb.ID
 		c.Ordinal = i
-		if _, err := chunkStmt.Exec(c.ID, c.DocID, c.KBID, c.Ordinal, c.Content, nullableString(c.ParentChunkID)); err != nil {
+		if _, err := chunkStmt.Exec(c.ID, kb.WorkspaceID, c.DocID, c.KBID, c.Ordinal, c.Content, nullableString(c.ParentChunkID)); err != nil {
 			return nil, fmt.Errorf("knowledge: insert chunk: %w", err)
 		}
 		if len(c.Vector) > 0 {
@@ -466,12 +511,16 @@ func nullableString(s string) interface{} {
 }
 
 // ListDocuments returns documents in a KB, newest first.
-func (s *Store) ListDocuments(kbID string) ([]Document, error) {
+func (s *Store) ListDocuments(workspaceID, kbID string) ([]Document, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return nil, ErrWorkspaceRequired
+	}
 	rows, err := s.db.Query(`
 		SELECT d.id, d.kb_id, d.title, COALESCE(d.source,''), COALESCE(d.mime_type,''),
 		       COALESCE(d.byte_size,0), COALESCE(d.sha256,''), d.created_at,
 		       (SELECT COUNT(*) FROM chunks c WHERE c.doc_id = d.id) AS chunk_count
-		FROM documents d WHERE d.kb_id = ? ORDER BY d.created_at DESC`, kbID)
+		FROM documents d WHERE d.workspace_id = ? AND d.kb_id = ? ORDER BY d.created_at DESC`, workspaceID, kbID)
 	if err != nil {
 		return nil, err
 	}
@@ -490,7 +539,11 @@ func (s *Store) ListDocuments(kbID string) ([]Document, error) {
 
 // DeleteDocument removes a document, cascading chunks, and clears the matching
 // rows from the KB's vec0 table.
-func (s *Store) DeleteDocument(kbID, docID string) error {
+func (s *Store) DeleteDocument(workspaceID, kbID, docID string) error {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return ErrWorkspaceRequired
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -502,17 +555,17 @@ func (s *Store) DeleteDocument(kbID, docID string) error {
 
 	// FTS and vec0 tables don't honour FK cascade, so wipe by id list first.
 	if s.hasFTS5 {
-		if _, err := tx.Exec(`DELETE FROM chunks_fts WHERE chunk_id IN (SELECT id FROM chunks WHERE doc_id = ?)`, docID); err != nil {
+		if _, err := tx.Exec(`DELETE FROM chunks_fts WHERE chunk_id IN (SELECT id FROM chunks WHERE workspace_id = ? AND doc_id = ?)`, workspaceID, docID); err != nil {
 			return fmt.Errorf("knowledge: delete fts rows: %w", err)
 		}
 	}
 	if _, err := tx.Exec(fmt.Sprintf(
-		`DELETE FROM %s WHERE chunk_id IN (SELECT id FROM chunks WHERE doc_id = ?)`,
+		`DELETE FROM %s WHERE chunk_id IN (SELECT id FROM chunks WHERE workspace_id = ? AND doc_id = ?)`,
 		vecTable(kbID),
-	), docID); err != nil {
+	), workspaceID, docID); err != nil {
 		return fmt.Errorf("knowledge: delete vec rows: %w", err)
 	}
-	if _, err := tx.Exec(`DELETE FROM documents WHERE id = ? AND kb_id = ?`, docID, kbID); err != nil {
+	if _, err := tx.Exec(`DELETE FROM documents WHERE workspace_id = ? AND id = ? AND kb_id = ?`, workspaceID, docID, kbID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -686,4 +739,104 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// migrateKnowledgeWorkspaceSchema brings a knowledge.db created before tenants
+// existed up to the current shape.
+//
+// The hard part is the old `name TEXT NOT NULL UNIQUE` on knowledge_bases:
+// SQLite cannot drop a column constraint in place, so the table is rebuilt and
+// its rows copied. Everything runs in one transaction — a half-migrated
+// knowledge base would be worse than an unmigrated one, because its documents
+// would still be reachable while its access rule was not.
+//
+// Existing rows are assigned to the personal workspace, which is exactly what
+// they were: a single-user installation's knowledge.
+func migrateKnowledgeWorkspaceSchema(db *sql.DB) error {
+	hasWorkspace, err := columnExists(db, "knowledge_bases", "workspace_id")
+	if err != nil {
+		return err
+	}
+	if hasWorkspace {
+		// Later opens still backfill: a row with an empty workspace matches no
+		// scoped query, so it would be knowledge that silently vanished.
+		return backfillKnowledgeWorkspaces(db)
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	stmts := []string{
+		`ALTER TABLE knowledge_bases RENAME TO knowledge_bases_legacy`,
+		`CREATE TABLE knowledge_bases (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL DEFAULT 'ws_personal',
+			name TEXT NOT NULL,
+			description TEXT,
+			embedding_provider TEXT NOT NULL,
+			embedding_model TEXT NOT NULL,
+			dim INTEGER NOT NULL,
+			chunk_size INTEGER NOT NULL,
+			chunk_overlap INTEGER NOT NULL,
+			created_at DATETIME NOT NULL
+		)`,
+		`INSERT INTO knowledge_bases
+			(id, workspace_id, name, description, embedding_provider, embedding_model, dim, chunk_size, chunk_overlap, created_at)
+		 SELECT id, 'ws_personal', name, description, embedding_provider, embedding_model, dim, chunk_size, chunk_overlap, created_at
+		   FROM knowledge_bases_legacy`,
+		`DROP TABLE knowledge_bases_legacy`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_workspace_name ON knowledge_bases(workspace_id, name)`,
+		`ALTER TABLE documents ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'ws_personal'`,
+		`ALTER TABLE chunks ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'ws_personal'`,
+	}
+	for _, statement := range stmts {
+		if _, err := tx.Exec(statement); err != nil {
+			lowered := strings.ToLower(err.Error())
+			// A concurrent opener may have won the race; duplicate column and
+			// duplicate table are both "already done".
+			if strings.Contains(lowered, "duplicate column") || strings.Contains(lowered, "already exists") {
+				continue
+			}
+			return fmt.Errorf("knowledge: workspace migration (%.60s): %w", statement, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return backfillKnowledgeWorkspaces(db)
+}
+
+func backfillKnowledgeWorkspaces(db *sql.DB) error {
+	for _, table := range []string{"knowledge_bases", "documents", "chunks"} {
+		if _, err := db.Exec(`UPDATE ` + table + ` SET workspace_id='ws_personal' WHERE workspace_id IS NULL OR workspace_id=''`); err != nil {
+			return fmt.Errorf("knowledge: backfill %s: %w", table, err)
+		}
+	}
+	return nil
+}
+
+func columnExists(db *sql.DB, table, column string) (bool, error) {
+	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return false, fmt.Errorf("knowledge: inspect %s: %w", table, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid              int
+			name, columnType string
+			notNull, pk      int
+			defaultValue     sql.NullString
+		)
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }

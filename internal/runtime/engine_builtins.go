@@ -256,7 +256,7 @@ func (e *Engine) buildKBSearchBuiltin() BuiltinTool {
 			if kbName == "" {
 				return "", fmt.Errorf("kb_search: kb is required")
 			}
-			return e.knowledge.Search(ctx, kbName, query, topK)
+			return e.knowledge.Search(ctx, WorkspaceFromContext(ctx), kbName, query, topK)
 		},
 	}
 }
@@ -320,7 +320,7 @@ func (e *Engine) buildKBWriteBuiltin() BuiltinTool {
 			if strings.TrimSpace(content) == "" {
 				return "", fmt.Errorf("kb_write: content is required")
 			}
-			doc, err := e.knowledge.IngestText(ctx, kbName, argString(args, "title"), argString(args, "source"), argString(args, "mime_type"), content)
+			doc, err := e.knowledge.IngestText(ctx, WorkspaceFromContext(ctx), kbName, argString(args, "title"), argString(args, "source"), argString(args, "mime_type"), content)
 			if err != nil {
 				return "", err
 			}

@@ -25,6 +25,7 @@ package knowledge
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -49,11 +50,15 @@ const DefaultMaxDocumentBytes int64 = 50 << 20
 
 // IngestJob is one queued document waiting to be (or being) ingested.
 type IngestJob struct {
-	ID       string `json:"id"`
-	KBName   string `json:"kb_name"`
-	Title    string `json:"title"`
-	Source   string `json:"source"`
-	MIMEType string `json:"mime_type"`
+	ID string `json:"id"`
+	// WorkspaceID is captured at enqueue from verified request context and
+	// re-checked at commit. A job outlives the request that created it, so the
+	// tenant must travel with the job rather than be inferred when it runs.
+	WorkspaceID string `json:"workspace_id"`
+	KBName      string `json:"kb_name"`
+	Title       string `json:"title"`
+	Source      string `json:"source"`
+	MIMEType    string `json:"mime_type"`
 	// SpoolPath is where the raw bytes live on disk. The content is NEVER held
 	// in this row (or in memory across the queue) so a 200 MB PDF costs a path,
 	// not a heap allocation.
@@ -80,6 +85,7 @@ func initJobSchema(db *sql.DB) error {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS ingest_jobs (
 			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL DEFAULT 'ws_personal',
 			kb_name TEXT NOT NULL,
 			title TEXT NOT NULL,
 			source TEXT,
@@ -96,9 +102,30 @@ func initJobSchema(db *sql.DB) error {
 			ended_at DATETIME
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_ingest_jobs_status ON ingest_jobs(status, created_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_ingest_jobs_kb ON ingest_jobs(kb_name, created_at)`,
 	}
 	for _, s := range stmts {
+		if _, err := db.Exec(s); err != nil {
+			return fmt.Errorf("knowledge: ingest job schema: %w", err)
+		}
+	}
+	// The table exists by here either way. An existing queue predates the
+	// tenant column; a fresh one was just created with it. SQLite has no
+	// ADD COLUMN IF NOT EXISTS, so the check is a table_info probe, and the
+	// index is created afterwards because it names the column.
+	if exists, err := columnExists(db, "ingest_jobs", "workspace_id"); err != nil {
+		return err
+	} else if !exists {
+		if _, err := db.Exec(`ALTER TABLE ingest_jobs ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'ws_personal'`); err != nil &&
+			!strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+			return fmt.Errorf("knowledge: ingest job workspace column: %w", err)
+		}
+	}
+	for _, s := range []string{
+		`CREATE INDEX IF NOT EXISTS idx_ingest_jobs_kb ON ingest_jobs(workspace_id, kb_name, created_at)`,
+		// A job with an empty workspace matches no scoped query, so it would
+		// be an ingestion that silently never runs.
+		`UPDATE ingest_jobs SET workspace_id='ws_personal' WHERE workspace_id IS NULL OR workspace_id=''`,
+	} {
 		if _, err := db.Exec(s); err != nil {
 			return fmt.Errorf("knowledge: ingest job schema: %w", err)
 		}
@@ -119,11 +146,15 @@ func (s *Store) EnqueueIngest(j IngestJob) (IngestJob, error) {
 	j.Attempt = 0
 	j.Progress = 0
 	j.CreatedAt = time.Now().UTC()
+	j.WorkspaceID = strings.TrimSpace(j.WorkspaceID)
+	if j.WorkspaceID == "" {
+		return IngestJob{}, ErrWorkspaceRequired
+	}
 
 	_, err := s.db.Exec(
-		`INSERT INTO ingest_jobs (id, kb_name, title, source, mime_type, spool_path, byte_size, status, attempt, progress, created_at)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-		j.ID, j.KBName, j.Title, j.Source, j.MIMEType, j.SpoolPath, j.ByteSize,
+		`INSERT INTO ingest_jobs (id, workspace_id, kb_name, title, source, mime_type, spool_path, byte_size, status, attempt, progress, created_at)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		j.ID, j.WorkspaceID, j.KBName, j.Title, j.Source, j.MIMEType, j.SpoolPath, j.ByteSize,
 		j.Status, j.Attempt, j.Progress, j.CreatedAt,
 	)
 	if err != nil {
@@ -252,20 +283,24 @@ func (s *Store) GetIngest(id string) (IngestJob, error) {
 }
 
 // ListIngests returns jobs for a KB (or all when kbName is ""), newest first.
-func (s *Store) ListIngests(kbName string, limit int) ([]IngestJob, error) {
+func (s *Store) ListIngests(workspaceID, kbName string, limit int) ([]IngestJob, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return nil, ErrWorkspaceRequired
+	}
 	if limit <= 0 {
 		limit = 100
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	q := `SELECT id, kb_name, title, source, mime_type, spool_path, byte_size,
+	q := `SELECT id, workspace_id, kb_name, title, source, mime_type, spool_path, byte_size,
 	             status, attempt, progress, COALESCE(error,''), COALESCE(doc_id,''),
 	             created_at, started_at, ended_at
-	        FROM ingest_jobs`
-	args := []any{}
+	        FROM ingest_jobs WHERE workspace_id = ?`
+	args := []any{workspaceID}
 	if kbName != "" {
-		q += ` WHERE kb_name = ?`
+		q += ` AND kb_name = ?`
 		args = append(args, kbName)
 	}
 	q += ` ORDER BY created_at DESC LIMIT ?`
@@ -290,7 +325,7 @@ func (s *Store) ListIngests(kbName string, limit int) ([]IngestJob, error) {
 
 func (s *Store) getIngestLocked(id string) (IngestJob, error) {
 	row := s.db.QueryRow(
-		`SELECT id, kb_name, title, source, mime_type, spool_path, byte_size,
+		`SELECT id, workspace_id, kb_name, title, source, mime_type, spool_path, byte_size,
 		        status, attempt, progress, COALESCE(error,''), COALESCE(doc_id,''),
 		        created_at, started_at, ended_at
 		   FROM ingest_jobs WHERE id = ?`, id)
@@ -304,7 +339,7 @@ func scanIngest(r rowScanner) (IngestJob, error) {
 	var j IngestJob
 	var started, ended sql.NullTime
 	if err := r.Scan(
-		&j.ID, &j.KBName, &j.Title, &j.Source, &j.MIMEType, &j.SpoolPath, &j.ByteSize,
+		&j.ID, &j.WorkspaceID, &j.KBName, &j.Title, &j.Source, &j.MIMEType, &j.SpoolPath, &j.ByteSize,
 		&j.Status, &j.Attempt, &j.Progress, &j.Error, &j.DocID,
 		&j.CreatedAt, &started, &ended,
 	); err != nil {

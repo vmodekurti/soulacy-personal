@@ -5,6 +5,7 @@
 package knowledge
 
 import (
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"path/filepath"
 	"testing"
 )
@@ -23,7 +24,7 @@ func newTestStore(t *testing.T) *Store {
 func TestStore_CreateAndListKB(t *testing.T) {
 	s := newTestStore(t)
 
-	kb, err := s.CreateKB(KB{
+	kb, err := s.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID,
 		Name: "test-kb", Description: "for tests",
 		EmbeddingProvider: "ollama", EmbeddingModel: "nomic-embed-text",
 		Dim: 768, ChunkSize: 500, ChunkOverlap: 100,
@@ -38,7 +39,7 @@ func TestStore_CreateAndListKB(t *testing.T) {
 		t.Errorf("dim: got %d, want 768", kb.Dim)
 	}
 
-	kbs, err := s.ListKBs()
+	kbs, err := s.ListKBs(wsroot.PersonalWorkspaceID)
 	if err != nil {
 		t.Fatalf("ListKBs: %v", err)
 	}
@@ -52,7 +53,7 @@ func TestStore_CreateAndListKB(t *testing.T) {
 
 func TestStore_DuplicateKBNameRejected(t *testing.T) {
 	s := newTestStore(t)
-	base := KB{Name: "dup", EmbeddingProvider: "ollama", EmbeddingModel: "nomic-embed-text", Dim: 4}
+	base := KB{WorkspaceID: wsroot.PersonalWorkspaceID, Name: "dup", EmbeddingProvider: "ollama", EmbeddingModel: "nomic-embed-text", Dim: 4}
 	if _, err := s.CreateKB(base); err != nil {
 		t.Fatalf("first CreateKB: %v", err)
 	}
@@ -63,8 +64,8 @@ func TestStore_DuplicateKBNameRejected(t *testing.T) {
 
 func TestStore_AddDocumentAndSearch(t *testing.T) {
 	s := newTestStore(t)
-	kb, err := s.CreateKB(KB{
-		Name: "search-kb",
+	kb, err := s.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID,
+		Name:              "search-kb",
 		EmbeddingProvider: "test", EmbeddingModel: "fake",
 		Dim: 4, ChunkSize: 100, ChunkOverlap: 0,
 	})
@@ -75,7 +76,7 @@ func TestStore_AddDocumentAndSearch(t *testing.T) {
 	// Three chunks with simple distinct vectors so KNN ordering is predictable.
 	chunks := []Chunk{
 		{Content: "alpha document", Vector: []float32{1, 0, 0, 0}},
-		{Content: "beta document",  Vector: []float32{0, 1, 0, 0}},
+		{Content: "beta document", Vector: []float32{0, 1, 0, 0}},
 		{Content: "gamma document", Vector: []float32{0, 0, 1, 0}},
 	}
 	doc, err := s.AddDocument(kb, Document{Title: "vectors", Source: "test.md", MIMEType: "text/markdown"}, chunks)
@@ -104,7 +105,7 @@ func TestStore_AddDocumentAndSearch(t *testing.T) {
 
 func TestStore_AddDocumentRejectsWrongDim(t *testing.T) {
 	s := newTestStore(t)
-	kb, _ := s.CreateKB(KB{Name: "dim-kb", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 4})
+	kb, _ := s.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID, Name: "dim-kb", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 4})
 	bad := []Chunk{{Content: "wrong size", Vector: []float32{1, 0, 0}}} // 3 dims, not 4
 	if _, err := s.AddDocument(kb, Document{Title: "bad"}, bad); err == nil {
 		t.Error("expected AddDocument to reject mismatched-dim chunk, got nil")
@@ -113,7 +114,7 @@ func TestStore_AddDocumentRejectsWrongDim(t *testing.T) {
 
 func TestStore_DeleteDocumentCascadesToChunks(t *testing.T) {
 	s := newTestStore(t)
-	kb, _ := s.CreateKB(KB{Name: "cascade", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2})
+	kb, _ := s.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID, Name: "cascade", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2})
 	chunks := []Chunk{
 		{Content: "a", Vector: []float32{1, 0}},
 		{Content: "b", Vector: []float32{0, 1}},
@@ -123,13 +124,13 @@ func TestStore_DeleteDocumentCascadesToChunks(t *testing.T) {
 		t.Fatalf("AddDocument: %v", err)
 	}
 
-	if err := s.DeleteDocument(kb.ID, doc.ID); err != nil {
+	if err := s.DeleteDocument(wsroot.PersonalWorkspaceID, kb.ID, doc.ID); err != nil {
 		t.Fatalf("DeleteDocument: %v", err)
 	}
 
 	// After delete, the KB's chunk count should be zero (vec0 rows + chunks
 	// table both purged).
-	got, err := s.GetKB("cascade")
+	got, err := s.GetKB(wsroot.PersonalWorkspaceID, "cascade")
 	if err != nil || got == nil {
 		t.Fatalf("GetKB after delete: %v / nil=%v", err, got == nil)
 	}
@@ -140,7 +141,7 @@ func TestStore_DeleteDocumentCascadesToChunks(t *testing.T) {
 
 func TestStore_DeleteKBIsIdempotent(t *testing.T) {
 	s := newTestStore(t)
-	if err := s.DeleteKB("never-existed"); err != nil {
+	if err := s.DeleteKB(wsroot.PersonalWorkspaceID, "never-existed"); err != nil {
 		t.Errorf("deleting nonexistent KB should be no-op, got %v", err)
 	}
 }
@@ -149,7 +150,7 @@ func TestStore_DeleteKBIsIdempotent(t *testing.T) {
 
 func TestStore_GetKB_NotFound(t *testing.T) {
 	s := newTestStore(t)
-	kb, err := s.GetKB("does-not-exist")
+	kb, err := s.GetKB(wsroot.PersonalWorkspaceID, "does-not-exist")
 	if err != nil {
 		t.Fatalf("GetKB nonexistent: unexpected error %v", err)
 	}
@@ -160,19 +161,19 @@ func TestStore_GetKB_NotFound(t *testing.T) {
 
 func TestStore_GetKB_CaseSensitive(t *testing.T) {
 	s := newTestStore(t)
-	_, err := s.CreateKB(KB{
+	_, err := s.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID,
 		Name: "MyKB", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2,
 	})
 	if err != nil {
 		t.Fatalf("CreateKB: %v", err)
 	}
 	// Exact name matches.
-	kb, err := s.GetKB("MyKB")
+	kb, err := s.GetKB(wsroot.PersonalWorkspaceID, "MyKB")
 	if err != nil || kb == nil {
 		t.Fatalf("GetKB exact: err=%v kb=%v", err, kb)
 	}
 	// Different case must not match.
-	kb2, err := s.GetKB("mykb")
+	kb2, err := s.GetKB(wsroot.PersonalWorkspaceID, "mykb")
 	if err != nil {
 		t.Fatalf("GetKB wrong case unexpected err: %v", err)
 	}
@@ -185,21 +186,21 @@ func TestStore_GetKB_CaseSensitive(t *testing.T) {
 
 func TestStore_CreateKB_MissingName(t *testing.T) {
 	s := newTestStore(t)
-	if _, err := s.CreateKB(KB{EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 4}); err == nil {
+	if _, err := s.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID, EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 4}); err == nil {
 		t.Error("expected error for missing name, got nil")
 	}
 }
 
 func TestStore_CreateKB_ZeroDim(t *testing.T) {
 	s := newTestStore(t)
-	if _, err := s.CreateKB(KB{Name: "nodim", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 0}); err == nil {
+	if _, err := s.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID, Name: "nodim", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 0}); err == nil {
 		t.Error("expected error for zero dim, got nil")
 	}
 }
 
 func TestStore_CreateKB_DefaultsApplied(t *testing.T) {
 	s := newTestStore(t)
-	kb, err := s.CreateKB(KB{
+	kb, err := s.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID,
 		Name: "defaults-kb", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 4,
 		// ChunkSize and ChunkOverlap intentionally zero — should default.
 	})
@@ -225,7 +226,7 @@ func TestStore_CreateKB_DefaultsApplied(t *testing.T) {
 
 func TestStore_DeleteKB_RemovesKBAndDocs(t *testing.T) {
 	s := newTestStore(t)
-	kb, err := s.CreateKB(KB{
+	kb, err := s.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID,
 		Name: "to-delete", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2,
 	})
 	if err != nil {
@@ -234,11 +235,11 @@ func TestStore_DeleteKB_RemovesKBAndDocs(t *testing.T) {
 	_, _ = s.AddDocument(kb, Document{Title: "doc"},
 		[]Chunk{{Content: "hello", Vector: []float32{1, 0}}})
 
-	if err := s.DeleteKB("to-delete"); err != nil {
+	if err := s.DeleteKB(wsroot.PersonalWorkspaceID, "to-delete"); err != nil {
 		t.Fatalf("DeleteKB: %v", err)
 	}
 
-	got, err := s.GetKB("to-delete")
+	got, err := s.GetKB(wsroot.PersonalWorkspaceID, "to-delete")
 	if err != nil {
 		t.Fatalf("GetKB after delete: %v", err)
 	}
@@ -251,8 +252,8 @@ func TestStore_DeleteKB_RemovesKBAndDocs(t *testing.T) {
 
 func TestStore_ListDocuments_Empty(t *testing.T) {
 	s := newTestStore(t)
-	kb, _ := s.CreateKB(KB{Name: "empty-kb", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2})
-	docs, err := s.ListDocuments(kb.ID)
+	kb, _ := s.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID, Name: "empty-kb", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2})
+	docs, err := s.ListDocuments(wsroot.PersonalWorkspaceID, kb.ID)
 	if err != nil {
 		t.Fatalf("ListDocuments empty: %v", err)
 	}
@@ -263,7 +264,7 @@ func TestStore_ListDocuments_Empty(t *testing.T) {
 
 func TestStore_ListDocuments_MultipleDocsNewestFirst(t *testing.T) {
 	s := newTestStore(t)
-	kb, _ := s.CreateKB(KB{Name: "list-kb", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2})
+	kb, _ := s.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID, Name: "list-kb", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2})
 
 	for _, title := range []string{"first", "second", "third"} {
 		_, err := s.AddDocument(kb, Document{Title: title},
@@ -273,7 +274,7 @@ func TestStore_ListDocuments_MultipleDocsNewestFirst(t *testing.T) {
 		}
 	}
 
-	docs, err := s.ListDocuments(kb.ID)
+	docs, err := s.ListDocuments(wsroot.PersonalWorkspaceID, kb.ID)
 	if err != nil {
 		t.Fatalf("ListDocuments: %v", err)
 	}
@@ -294,13 +295,13 @@ func TestStore_ListDocuments_MultipleDocsNewestFirst(t *testing.T) {
 
 func TestStore_ListDocuments_IsolatedByKB(t *testing.T) {
 	s := newTestStore(t)
-	kb1, _ := s.CreateKB(KB{Name: "kb1", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2})
-	kb2, _ := s.CreateKB(KB{Name: "kb2", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2})
+	kb1, _ := s.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID, Name: "kb1", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2})
+	kb2, _ := s.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID, Name: "kb2", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2})
 
 	_, _ = s.AddDocument(kb1, Document{Title: "in-kb1"},
 		[]Chunk{{Content: "data", Vector: []float32{1, 0}}})
 
-	docs, err := s.ListDocuments(kb2.ID)
+	docs, err := s.ListDocuments(wsroot.PersonalWorkspaceID, kb2.ID)
 	if err != nil {
 		t.Fatalf("ListDocuments kb2: %v", err)
 	}
@@ -320,7 +321,7 @@ func TestStore_AddDocument_NilKB(t *testing.T) {
 
 func TestStore_AddDocument_AutoSHA256(t *testing.T) {
 	s := newTestStore(t)
-	kb, _ := s.CreateKB(KB{Name: "sha-kb", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2})
+	kb, _ := s.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID, Name: "sha-kb", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2})
 	doc, err := s.AddDocument(kb, Document{Title: "auto-sha"},
 		[]Chunk{{Content: "chunk content", Vector: []float32{1, 0}}})
 	if err != nil {
@@ -334,7 +335,7 @@ func TestStore_AddDocument_AutoSHA256(t *testing.T) {
 func TestStore_AddDocument_ParentChildChunks(t *testing.T) {
 	// A parent chunk with no vector and a child chunk pointing to it.
 	s := newTestStore(t)
-	kb, _ := s.CreateKB(KB{Name: "parent-child-kb", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2})
+	kb, _ := s.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID, Name: "parent-child-kb", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2})
 
 	parentID := "parent-id-1"
 	chunks := []Chunk{
@@ -361,7 +362,7 @@ func TestStore_Search_NilKB(t *testing.T) {
 
 func TestStore_Search_WrongDim(t *testing.T) {
 	s := newTestStore(t)
-	kb, _ := s.CreateKB(KB{Name: "dim4", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 4})
+	kb, _ := s.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID, Name: "dim4", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 4})
 	if _, err := s.Search(kb, []float32{1, 0}, 3); err == nil {
 		t.Error("expected error for mismatched query dim, got nil")
 	}
@@ -369,7 +370,7 @@ func TestStore_Search_WrongDim(t *testing.T) {
 
 func TestStore_Search_EmptyKB(t *testing.T) {
 	s := newTestStore(t)
-	kb, _ := s.CreateKB(KB{Name: "empty-search", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2})
+	kb, _ := s.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID, Name: "empty-search", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2})
 	hits, err := s.Search(kb, []float32{1, 0}, 5)
 	if err != nil {
 		t.Fatalf("Search empty KB: %v", err)
@@ -382,7 +383,7 @@ func TestStore_Search_EmptyKB(t *testing.T) {
 func TestStore_Search_DefaultTopK(t *testing.T) {
 	// topK <= 0 should default to 5 internally (no error, just returns whatever's there).
 	s := newTestStore(t)
-	kb, _ := s.CreateKB(KB{Name: "topk-kb", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2})
+	kb, _ := s.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID, Name: "topk-kb", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2})
 	_, _ = s.AddDocument(kb, Document{Title: "d"},
 		[]Chunk{{Content: "c", Vector: []float32{1, 0}}})
 	hits, err := s.Search(kb, []float32{1, 0}, 0)
@@ -399,7 +400,7 @@ func TestStore_Search_DefaultTopK(t *testing.T) {
 
 func TestStore_SearchHybrid_ReturnsResults(t *testing.T) {
 	s := newTestStore(t)
-	kb, err := s.CreateKB(KB{
+	kb, err := s.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID,
 		Name: "hybrid-kb", EmbeddingProvider: "x", EmbeddingModel: "x",
 		Dim: 4, ChunkSize: 100, ChunkOverlap: 0,
 	})
@@ -409,8 +410,8 @@ func TestStore_SearchHybrid_ReturnsResults(t *testing.T) {
 
 	chunks := []Chunk{
 		{Content: "alpha retrieval", Vector: []float32{1, 0, 0, 0}},
-		{Content: "beta retrieval",  Vector: []float32{0, 1, 0, 0}},
-		{Content: "gamma topic",     Vector: []float32{0, 0, 1, 0}},
+		{Content: "beta retrieval", Vector: []float32{0, 1, 0, 0}},
+		{Content: "gamma topic", Vector: []float32{0, 0, 1, 0}},
 	}
 	if _, err := s.AddDocument(kb, Document{Title: "hybrid-doc", Source: "src.md"}, chunks); err != nil {
 		t.Fatalf("AddDocument: %v", err)
@@ -438,7 +439,7 @@ func TestStore_SearchHybrid_ReturnsResults(t *testing.T) {
 
 func TestStore_SearchHybrid_EmptyKB(t *testing.T) {
 	s := newTestStore(t)
-	kb, _ := s.CreateKB(KB{Name: "hybrid-empty", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2})
+	kb, _ := s.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID, Name: "hybrid-empty", EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2})
 	hits, err := s.SearchHybrid(kb, []float32{1, 0}, "anything", 5)
 	if err != nil {
 		t.Fatalf("SearchHybrid empty: %v", err)
@@ -475,11 +476,11 @@ func TestMinInt(t *testing.T) {
 func TestStore_ListKBs_AlphaOrder(t *testing.T) {
 	s := newTestStore(t)
 	for _, name := range []string{"zebra", "apple", "mango"} {
-		if _, err := s.CreateKB(KB{Name: name, EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2}); err != nil {
+		if _, err := s.CreateKB(KB{WorkspaceID: wsroot.PersonalWorkspaceID, Name: name, EmbeddingProvider: "x", EmbeddingModel: "x", Dim: 2}); err != nil {
 			t.Fatalf("CreateKB %q: %v", name, err)
 		}
 	}
-	kbs, err := s.ListKBs()
+	kbs, err := s.ListKBs(wsroot.PersonalWorkspaceID)
 	if err != nil {
 		t.Fatalf("ListKBs: %v", err)
 	}

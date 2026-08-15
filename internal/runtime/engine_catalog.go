@@ -104,11 +104,11 @@ func (e *Engine) effectiveSkillNames(def *agent.Definition) []string {
 // for injection into the system prompt. Unknown names are silently dropped —
 // the agent's SOUL.yaml may reference a KB that hasn't been created yet, and
 // we don't want that to brick the agent.
-func (e *Engine) knowledgeCatalogFor(names []string) string {
+func (e *Engine) knowledgeCatalogFor(workspaceID string, names []string) string {
 	if e.knowledge == nil {
 		return ""
 	}
-	summaries := e.knowledge.ListAvailable(names)
+	summaries := e.knowledge.ListAvailable(workspaceID, names)
 	if len(summaries) == 0 {
 		return ""
 	}

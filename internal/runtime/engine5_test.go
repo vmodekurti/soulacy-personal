@@ -713,7 +713,7 @@ func TestKnowledgeCatalogFor_NilStoreReturnsEmpty(t *testing.T) {
 	e.knowledge = nonNilKnowledgeServiceForSchemaGate() // Store == nil inside
 
 	// Should return empty string without panic.
-	catalog := e.knowledgeCatalogFor([]string{"kb1", "kb2"})
+	catalog := e.knowledgeCatalogFor(wsroot.PersonalWorkspaceID, []string{"kb1", "kb2"})
 	if catalog != "" {
 		t.Errorf("expected empty catalog for nil Store, got %q", catalog)
 	}
@@ -722,7 +722,7 @@ func TestKnowledgeCatalogFor_NilStoreReturnsEmpty(t *testing.T) {
 func TestKnowledgeCatalogFor_NilService(t *testing.T) {
 	e := newMinimalEngine(t)
 	// e.knowledge is nil by default.
-	catalog := e.knowledgeCatalogFor([]string{"any-kb"})
+	catalog := e.knowledgeCatalogFor(wsroot.PersonalWorkspaceID, []string{"any-kb"})
 	if catalog != "" {
 		t.Errorf("expected empty catalog for nil knowledge service, got %q", catalog)
 	}
@@ -960,7 +960,7 @@ func TestAcceptedLearningSkillIsInjectedAndUnlocksReadSkill(t *testing.T) {
 		SystemPrompt: "Help.",
 		Learning:     agent.LearningConfig{Enabled: true},
 	}
-	prefix := e.buildSystemPrefix(def)
+	prefix := e.buildSystemPrefix(context.Background(), def)
 	if !strings.Contains(prefix, "research-playbook") {
 		t.Fatalf("learned skill missing from prompt:\n%s", prefix)
 	}
@@ -970,7 +970,7 @@ func TestAcceptedLearningSkillIsInjectedAndUnlocksReadSkill(t *testing.T) {
 	}
 
 	def.Learning.Enabled = false
-	if strings.Contains(e.buildSystemPrefix(def), "research-playbook") {
+	if strings.Contains(e.buildSystemPrefix(context.Background(), def), "research-playbook") {
 		t.Fatalf("learned skill should not inject when learning is disabled")
 	}
 	names = toolSchemaNameSet(e.allToolSchemas(def, "http"))

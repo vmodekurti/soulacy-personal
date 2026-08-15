@@ -33,7 +33,7 @@ func (s *Server) handleListKnowledge(c *fiber.Ctx) error {
 	if svc == nil {
 		return c.JSON(fiber.Map{"knowledge_bases": []any{}, "enabled": false})
 	}
-	kbs, err := svc.Store.ListKBs()
+	kbs, err := svc.Store.ListKBs(s.agents(c).WorkspaceID())
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
@@ -217,7 +217,7 @@ func (s *Server) handleDeleteKnowledge(c *fiber.Ctx) error {
 		return c.SendStatus(fiber.StatusNoContent)
 	}
 	name := knowledgeKBParam(c)
-	if err := svc.Store.DeleteKB(name); err != nil {
+	if err := svc.Store.DeleteKB(s.agents(c).WorkspaceID(), name); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
 	s.log.Info("knowledge: kb deleted", zap.String("name", name))
@@ -230,14 +230,14 @@ func (s *Server) handleListKnowledgeDocuments(c *fiber.Ctx) error {
 	if svc == nil {
 		return c.JSON(fiber.Map{"documents": []any{}})
 	}
-	kb, err := svc.Store.GetKB(knowledgeKBParam(c))
+	kb, err := svc.Store.GetKB(s.agents(c).WorkspaceID(), knowledgeKBParam(c))
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
 	if kb == nil {
 		return s.errMsg(c, fiber.StatusNotFound, "kb not found")
 	}
-	docs, err := svc.Store.ListDocuments(kb.ID)
+	docs, err := svc.Store.ListDocuments(s.agents(c).WorkspaceID(), kb.ID)
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
@@ -279,7 +279,7 @@ func (s *Server) handleIngestDocument(c *fiber.Ctx) error {
 	if svc == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "knowledge store disabled")
 	}
-	kb, err := svc.Store.GetKB(knowledgeKBParam(c))
+	kb, err := svc.Store.GetKB(s.agents(c).WorkspaceID(), knowledgeKBParam(c))
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
@@ -390,14 +390,14 @@ func (s *Server) handleDeleteKnowledgeDocument(c *fiber.Ctx) error {
 	if svc == nil {
 		return c.SendStatus(fiber.StatusNoContent)
 	}
-	kb, err := svc.Store.GetKB(knowledgeKBParam(c))
+	kb, err := svc.Store.GetKB(s.agents(c).WorkspaceID(), knowledgeKBParam(c))
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
 	if kb == nil {
 		return s.errMsg(c, fiber.StatusNotFound, "kb not found")
 	}
-	if err := svc.Store.DeleteDocument(kb.ID, c.Params("doc")); err != nil {
+	if err := svc.Store.DeleteDocument(s.agents(c).WorkspaceID(), kb.ID, c.Params("doc")); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
 	return c.SendStatus(fiber.StatusNoContent)
@@ -420,7 +420,7 @@ func (s *Server) handleSearchKnowledge(c *fiber.Ctx) error {
 		body.TopK = 5
 	}
 	kbName := knowledgeKBParam(c)
-	kb, err := svc.Store.GetKB(kbName)
+	kb, err := svc.Store.GetKB(s.agents(c).WorkspaceID(), kbName)
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}

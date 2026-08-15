@@ -257,7 +257,7 @@ func TestBuildSystemPrefix_SkillCatalogBlock(t *testing.T) {
 		SystemPrompt: "You are an analyst.",
 		Skills:       []string{"data-analyst-e6"},
 	}
-	prefix := e.buildSystemPrefix(def)
+	prefix := e.buildSystemPrefix(context.Background(), def)
 	if !strings.Contains(prefix, "Available Skills") {
 		t.Errorf("prefix should contain 'Available Skills', got:\n%s", prefix)
 	}
@@ -753,7 +753,7 @@ func TestBuildSystemPrefix_KnowledgeNilService_NoBlock(t *testing.T) {
 		SystemPrompt: "Knowledge bot.",
 		Knowledge:    []string{"my-kb"},
 	}
-	prefix := e.buildSystemPrefix(def)
+	prefix := e.buildSystemPrefix(context.Background(), def)
 	if strings.Contains(prefix, "Available Knowledge Bases") {
 		t.Error("should not have KB block when knowledge service is nil")
 	}
