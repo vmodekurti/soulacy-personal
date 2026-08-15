@@ -14,6 +14,7 @@ isolation state; this document explains it.
 | M1 — Tenant kernel | MU-001–005 | Complete |
 | M2 — Team identity | MU-006–011 | Complete |
 | M3 — Data isolation | MU-012–019 | MU-012 ✓ MU-013 ✓ MU-014 ✓ MU-015 partial; MU-016–019 not started |
+| — event spine + stores | (cross-cutting) | Events, action log, learning, Studio traces, workboard, conversation history ✓ |
 | M4 — Execution plane | MU-020–025 | Not started |
 | M5 — Team Preview | MU-026–032 | Not started |
 | M6 — Scale | MU-033–037 | Not started |
@@ -279,13 +280,53 @@ Highest-value first, with the reason each matters:
    including workspace and run, path containment after symlink resolution,
    archive extraction that rejects traversal, escaping links, and decompression
    bombs.
-3. **Workboard, costs, action log, DLQ, checkpoints, conversation history** —
-   all still `personal-only`; each needs the same treatment as the stores
-   above.
-4. **Costs, DLQ, checkpoints, session resources** — all still
-   `personal-only`; each needs the same treatment as the stores above.
+3. **Costs** — the largest remaining group, and the one M4 needs. One tenant's
+   spend counting against another's budget is both a leak and a denial of
+   service, so this is a correctness issue as much as an isolation one.
+   Groundwork already done, to save the next pass rediscovering it:
+
+   - `token_usage` **already has a `workspace` column** (schema v2) and
+     `Record` already writes it. What is missing is the predicate on the ~10
+     aggregate reads, a workspace-first index, and the unconditional backfill
+     of pre-v2 rows from empty to `ws_personal`.
+   - `cost_reservations` has `subject` and `agent_id` but **no workspace**. It
+     needs one, plus the predicate on `Reserve`/`TryReserve`/`Release`/
+     `ReservedCostMicros*`/`ReservedTokens`. This is the budget-enforcement
+     path, so it is the half that matters most: without it one tenant's
+     in-flight reservations count against another's ceiling.
+   - `cost_reconciliations` should probably be **reclassified, not scoped**.
+     It records a comparison against the *provider's invoice*, and providers
+     bill the deployment rather than the tenant. The store cannot split one
+     invoice across workspaces, and pretending otherwise would invent numbers.
+     `PlatformGlobal` + `personal-only` is the honest classification, and the
+     catalog's own invariant already permits that pairing.
+   - ~20 consumer sites: `internal/gateway` (coststatus, server, runmetrics,
+     studio), `internal/runtime/engine.go`, `internal/costs/{governor,api}.go`,
+     and `internal/app/adapters.go`.
+
+4. **DLQ, checkpoints, session resources, vector stores, `rbac_agent_grants`,
+   `studio/deployrecord.go`, `agentmemory`** — all still `personal-only`; each
+   needs the same treatment as the stores above.
 
 ## Verification
 
 Every commit on this branch was verified with `go build ./...`, `go vet ./...`,
 `go test ./...`, and the GUI suite (782 tests across 71 files) before landing.
+
+Two flakes were found and fixed along the way rather than tolerated, because
+both failed under an unrelated test's name and would have cost someone an
+afternoon:
+
+- `TestChatStreamRunStaysCancellableWhileItIsStillRunning` returned while the
+  cancelled run was still writing memory files, so `t.TempDir`'s `RemoveAll`
+  raced them. It now drains the stream to EOF, which is the deterministic
+  signal the run is done.
+- `SQLiteHistoryStore.Close` was not idempotent. Closing an already-closed
+  channel panics, so a store reached through two shutdown paths took the
+  process down instead of returning an error.
+
+One process note for whoever picks this up: run `gofmt -w` on the files you
+touched, never on a whole tree. A repo-wide format pass in this branch's
+history produced churn in a dozen untouched files — including a comment-list
+reflow that degraded a doc comment in `internal/queue/memory` — and it had to
+be reverted by hand before each commit.
