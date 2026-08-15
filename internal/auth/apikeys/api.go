@@ -58,12 +58,35 @@ func recordCredentialAudit(c *fiber.Ctx, key APIKey) {
 type API struct {
 	store Store
 	log   *zap.Logger
+	// RequireIdentity makes an unverified request carry no authority at all.
+	//
+	// visibleKeys and mayManage scope to the caller's workspace when a
+	// verified identity is present, and fall back to "everything" when it is
+	// not. In Personal that fallback is correct: there is one tenant, and the
+	// deployment predates workspace identity entirely. In a multi-user
+	// deployment it is the opposite of correct — a request that arrived
+	// without a resolvable workspace would be handed management of every
+	// credential in the installation, including other tenants'.
+	//
+	// Credentials are the one store where a fail-open fallback is unarguable,
+	// so multi-user deployments set this and the fallback becomes a denial.
+	RequireIdentity bool
 }
 
 // NewAPI constructs a new API handler with the given store and logger.
 func NewAPI(store Store, log *zap.Logger) *API {
 	return &API{store: store, log: log}
 }
+
+// NewScopedAPI is NewAPI for deployments where an unverified request must have
+// no authority rather than total authority.
+func NewScopedAPI(store Store, log *zap.Logger, requireIdentity bool) *API {
+	return &API{store: store, log: log, RequireIdentity: requireIdentity}
+}
+
+// ErrIdentityRequired is returned when a multi-user deployment receives a
+// credential request that carries no resolvable workspace identity.
+var ErrIdentityRequired = errors.New("apikeys: a verified workspace identity is required")
 
 // HandleCreate creates a new API key.
 // POST body: {"name":"...","scopes":["read","write"]}
@@ -82,6 +105,15 @@ func (a *API) HandleCreate(c *fiber.Ctx) error {
 	}
 
 	identity, hasIdentity := requestctx.From(c.UserContext())
+	if !hasIdentity && a.RequireIdentity {
+		// The unverified path below takes OrganizationID and WorkspaceIDs
+		// straight from the request body, so leaving it open in a multi-user
+		// deployment would let an unattributed caller mint a credential bound
+		// into any tenant it cares to name. Issuance is the one operation
+		// where a fail-open fallback creates authority rather than exposing
+		// it.
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "a verified workspace identity is required to issue credentials"})
+	}
 	if body.Kind == "" {
 		body.Kind = KindPersonal
 	}
@@ -221,6 +253,12 @@ func (a *API) HandleList(c *fiber.Ctx) error {
 	includeRevoked := c.Query("include_revoked") == "true"
 
 	keys, err := a.visibleKeys(c, includeRevoked)
+	if errors.Is(err, ErrIdentityRequired) {
+		// Reported as a refusal rather than a 500: the request is well formed
+		// and the store is healthy, it simply carries no authority. A 500 here
+		// would send operators looking for an outage.
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "a verified workspace identity is required"})
+	}
 	if err != nil {
 		a.log.Error("apikeys: list failed", zap.Error(err))
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -295,7 +333,7 @@ func (a *API) HandleValidate(c *fiber.Ctx) error {
 			"error": "failed to validate API key",
 		})
 	}
-	if !credentialVisibleTo(c, key) {
+	if !a.credentialVisibleTo(c, key) {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "credential not found"})
 	}
 
@@ -311,10 +349,14 @@ func credentialHasWorkspace(key APIKey, workspaceID string) bool {
 	return false
 }
 
-func credentialVisibleTo(c *fiber.Ctx, key APIKey) bool {
+// credentialVisibleTo is a method rather than a free function because the
+// answer for an unverified request differs by deployment: in Personal there is
+// one tenant and every credential is the caller's own, while in a multi-user
+// deployment an unattributed caller is entitled to see nothing.
+func (a *API) credentialVisibleTo(c *fiber.Ctx, key APIKey) bool {
 	identity, ok := requestctx.From(c.UserContext())
 	if !ok {
-		return true
+		return !a.RequireIdentity
 	}
 	return key.OrganizationID == identity.OrganizationID() && credentialHasWorkspace(key, identity.WorkspaceID())
 }
@@ -326,6 +368,9 @@ func credentialVisibleTo(c *fiber.Ctx, key APIKey) bool {
 func (a *API) visibleKeys(c *fiber.Ctx, includeRevoked bool) ([]APIKey, error) {
 	identity, constrained := requestctx.From(c.UserContext())
 	if !constrained {
+		if a.RequireIdentity {
+			return nil, ErrIdentityRequired
+		}
 		keys, err := a.store.List(c.UserContext(), includeRevoked)
 		if err != nil {
 			return nil, err
@@ -356,7 +401,8 @@ func (a *API) visibleKeys(c *fiber.Ctx, includeRevoked bool) ([]APIKey, error) {
 
 func (a *API) mayManage(c *fiber.Ctx, id string) bool {
 	if _, constrained := requestctx.From(c.UserContext()); !constrained {
-		return true
+		// Unverified means no authority here, not total authority.
+		return !a.RequireIdentity
 	}
 	keys, err := a.visibleKeys(c, true)
 	if err != nil {

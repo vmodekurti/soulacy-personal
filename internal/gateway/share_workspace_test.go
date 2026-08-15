@@ -96,7 +96,7 @@ func TestOneWorkspacesSharesCannotEvictAnothers(t *testing.T) {
 	})
 	// The busy tenant blows past the cap on its own.
 	for i := 0; i < maxShares+10; i++ {
-		token := shareToken(byte(i%16)) // shape only; uniqueness comes from the suffix
+		token := shareToken(byte(i % 16)) // shape only; uniqueness comes from the suffix
 		token = token[:len(token)-4] + pad(i)
 		writeShare(t, dir, sharedSession{
 			Token: token, Version: 2, WorkspaceID: "ws_busy",

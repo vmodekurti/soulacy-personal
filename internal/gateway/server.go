@@ -1292,7 +1292,7 @@ func (s *Server) buildApp() *fiber.App {
 		if s.apiKeyStore == nil {
 			return s.errMsg(c, fiber.StatusServiceUnavailable, "api key store not configured")
 		}
-		err := apikeys.NewAPI(s.apiKeyStore, s.log).HandleCreate(c)
+		err := s.credentialAPI().HandleCreate(c)
 		target, details := apikeys.AuditSubject(c)
 		s.recordAdminAudit(c, "credential.create", "credential", target, responseAuditStatus(c, err), details)
 		return err
@@ -1301,13 +1301,13 @@ func (s *Server) buildApp() *fiber.App {
 		if s.apiKeyStore == nil {
 			return s.errMsg(c, fiber.StatusServiceUnavailable, "api key store not configured")
 		}
-		return apikeys.NewAPI(s.apiKeyStore, s.log).HandleList(c)
+		return s.credentialAPI().HandleList(c)
 	})
 	api.Delete("/admin/api-keys/:id", s.rbacMW(rbac.ResourceCredentials, rbac.ActionDelete), func(c *fiber.Ctx) error {
 		if s.apiKeyStore == nil {
 			return s.errMsg(c, fiber.StatusServiceUnavailable, "api key store not configured")
 		}
-		err := apikeys.NewAPI(s.apiKeyStore, s.log).HandleRevoke(c)
+		err := s.credentialAPI().HandleRevoke(c)
 		s.recordAdminAudit(c, "credential.revoke", "credential", c.Params("id"), responseAuditStatus(c, err), nil)
 		return err
 	})
@@ -1315,7 +1315,7 @@ func (s *Server) buildApp() *fiber.App {
 		if s.apiKeyStore == nil {
 			return s.errMsg(c, fiber.StatusServiceUnavailable, "api key store not configured")
 		}
-		err := apikeys.NewAPI(s.apiKeyStore, s.log).HandleRotate(c)
+		err := s.credentialAPI().HandleRotate(c)
 		_, details := apikeys.AuditSubject(c)
 		s.recordAdminAudit(c, "credential.rotate", "credential", c.Params("id"), responseAuditStatus(c, err), details)
 		return err
@@ -1324,7 +1324,7 @@ func (s *Server) buildApp() *fiber.App {
 		if s.apiKeyStore == nil {
 			return s.errMsg(c, fiber.StatusServiceUnavailable, "api key store not configured")
 		}
-		err := apikeys.NewAPI(s.apiKeyStore, s.log).HandleStatus(c)
+		err := s.credentialAPI().HandleStatus(c)
 		_, details := apikeys.AuditSubject(c)
 		s.recordAdminAudit(c, "credential.status", "credential", c.Params("id"), responseAuditStatus(c, err), details)
 		return err
@@ -1333,7 +1333,7 @@ func (s *Server) buildApp() *fiber.App {
 		if s.apiKeyStore == nil {
 			return s.errMsg(c, fiber.StatusServiceUnavailable, "api key store not configured")
 		}
-		return apikeys.NewAPI(s.apiKeyStore, s.log).HandleValidate(c)
+		return s.credentialAPI().HandleValidate(c)
 	})
 
 	// --- Dead-Letter Queue (admin) ---

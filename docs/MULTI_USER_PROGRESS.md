@@ -25,7 +25,7 @@ isolation state; this document explains it.
 declared workspace-owned but not yet isolated.
 
 - At the start of this work: **57 blockers**
-- Now: **16 blockers**
+- Now: **14 blockers**
 
 A store moves from `personal-only` to `scoped` only when it has a real
 cross-tenant isolation test. The catalog names that test, and a CI check fails
@@ -439,6 +439,47 @@ was not touched. `memory.Entry` gained `WorkspaceID` (append-only, omitempty)
 and a **new** `WorkspaceMemoryBackend` interface sits beside the frozen one. A
 backend that does not implement it keeps working; a caller needing isolation
 type-asserts and fails closed.
+
+### For credentials, an unverified request must carry no authority at all
+
+`internal/auth/apikeys` scoped correctly whenever `requestctx` yielded an
+identity. The interesting branch was the other one. `visibleKeys`, `mayManage`
+and `credentialVisibleTo` each ended with "no identity → allow everything",
+and `HandleCreate` fell through to a path that reads `organization_id` and
+`workspace_ids` **out of the request body**.
+
+In a personal deployment that fallback is not a bug, it is the deployment:
+there is one tenant, requests arrive with no workspace identity as a matter of
+course, and every credential really is the caller's own. In a multi-user
+deployment the same code hands an unattributed request management of every
+credential in the installation — and, through create, the ability to mint a new
+owner-role service account bound to a tenant it names itself. Reading someone
+else's credential metadata is a leak; issuing a credential into their tenant is
+an escalation that outlives the request.
+
+This is the same fail-open shape as the RBAC grant bug above, and the fix is
+the same in spirit: keep the behaviour that Personal depends on, and make the
+fallback a denial where a workspace identity is actually available to be
+required. `NewScopedAPI(store, log, requireIdentity)` sets the flag;
+`(*Server).credentialAPI()` derives it from
+`config.IsMultiUserMode(s.cfg.DeploymentMode())`, so Personal is byte-identical
+to before (invariant 7) and every one of the six credential routes goes through
+it rather than constructing its own `apikeys.NewAPI`.
+
+Two details worth keeping:
+
+- The list refusal is **403, not 500**. `visibleKeys` returns
+  `ErrIdentityRequired`, and reporting that as a server error would send
+  operators looking for an outage when the request was simply unauthorised.
+- The denial must not mutate. `TestUnverifiedRequestCarriesNoCredentialAuthority`
+  asserts revoke/rotate/status all return 404 *and then re-validates the
+  credential*, because a refusal that still withdrew the credential would be
+  worse than no refusal at all.
+
+Each guard was verified by removing it individually: without the `mayManage`
+guard the unverified caller revokes and suspends another tenant's credential;
+without the `HandleCreate` guard the forged request returns **201** with a live
+owner-role secret in `org_b`.
 
 ## Guards worth keeping
 

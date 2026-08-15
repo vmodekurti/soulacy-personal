@@ -6,6 +6,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 
 	"github.com/soulacy/soulacy/internal/actionlog"
+	"github.com/soulacy/soulacy/internal/auth/apikeys"
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/learning"
 	"github.com/soulacy/soulacy/internal/rbac"
@@ -288,3 +289,16 @@ func (a actionScope) OpsSummary(since time.Time, window string, limit int) (acti
 // ErrOpsSummaryUnsupported distinguishes "this backend cannot roll up runs"
 // from "the rollup failed", so a handler can say which.
 var ErrOpsSummaryUnsupported = errors.New("action log backend does not support ops summaries")
+
+// credentialAPI builds the credential handler for this deployment.
+//
+// In multi-user mode an unverified request must carry no authority: the
+// handler's own fallback for "no resolvable workspace identity" is otherwise
+// to show and manage every credential in the installation, which is the one
+// place a fail-open default is unarguable. Personal keeps the fallback,
+// because there is exactly one tenant and the deployment predates workspace
+// identity entirely.
+func (s *Server) credentialAPI() *apikeys.API {
+	requireIdentity := s.cfg != nil && config.IsMultiUserMode(s.cfg.DeploymentMode())
+	return apikeys.NewScopedAPI(s.apiKeyStore, s.log, requireIdentity)
+}
