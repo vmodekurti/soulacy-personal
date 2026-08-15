@@ -147,7 +147,12 @@ type Server struct {
 	// runReg tracks cancellable in-flight chat/stream runs (Story #22).
 	runReg         *runRegistry
 	sessionOwnerMu sync.RWMutex
-	sessionOwners  map[string]sessionOwner
+	// sessionOwners is a read-through cache in front of sessionOwnership. It is
+	// never the authority: a restart empties it and a second replica never had
+	// it, so every miss falls through to the durable store.
+	sessionOwners map[string]sessionOwner
+	// sessionOwnership is the durable record of who owns a conversation.
+	sessionOwnership session.OwnershipStore
 
 	// workboardStore is the optional Kanban task store (Story 5). Wired via
 	// SetWorkboardStore after construction. When nil, /api/v1/workboard
@@ -347,6 +352,15 @@ func (s *Server) SetAPIKeyStore(st apikeys.Store) {
 // When nil, /admin/dlq routes return 503.
 func (s *Server) SetDLQStore(st dlq.Store) {
 	s.dlqStore = st
+}
+
+// SetSessionOwnershipStore wires durable session ownership. Until it is set,
+// authorization falls back to the in-process map, which is correct for a
+// single Personal process and explicitly not enough for Team or Scale.
+func (s *Server) SetSessionOwnershipStore(store session.OwnershipStore) {
+	s.sessionOwnerMu.Lock()
+	defer s.sessionOwnerMu.Unlock()
+	s.sessionOwnership = store
 }
 
 // SetHistoryStore wires a conversation history store into the server.

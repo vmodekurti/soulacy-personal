@@ -2,12 +2,15 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/soulacy/soulacy/internal/auth"
 	"github.com/soulacy/soulacy/internal/rbac"
 	"github.com/soulacy/soulacy/internal/runtime"
+	"github.com/soulacy/soulacy/internal/session"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/message"
 )
 
@@ -15,6 +18,22 @@ type sessionOwner struct {
 	Principal   string
 	WorkspaceID string
 	AgentID     string
+	Visibility  string
+}
+
+// readableBy mirrors session.Ownership.Readable so the cache and the durable
+// store cannot answer the same question differently.
+//
+// Both workspaces are normalized first. session.Ownership.Readable refuses an
+// empty workspace outright, which is right for a durable store that should
+// never authorize without tenant context — but at this boundary an absent
+// workspace means Personal's implicit one, the same reading agentScope and
+// studioScope use. Without normalizing, an open Personal deployment would be
+// denied access to its own conversations.
+func (o sessionOwner) readableBy(workspaceID, principal string, admin bool) bool {
+	return session.Ownership{
+		WorkspaceID: wsroot.Normalize(o.WorkspaceID), Creator: o.Principal, Visibility: o.Visibility,
+	}.Readable(wsroot.Normalize(workspaceID), principal, admin)
 }
 
 func requestPrincipal(c *fiber.Ctx) (runtime.Principal, bool) {
@@ -98,14 +117,10 @@ func (s *Server) authorizeEvent(principal eventPrincipal, event message.Event) b
 		return false
 	}
 	if event.SessionID != "" {
-		s.sessionOwnerMu.RLock()
-		owner, ok := s.sessionOwners[event.SessionID]
-		s.sessionOwnerMu.RUnlock()
+		owner, ok := s.lookupOwner(context.Background(), event.SessionID)
 		if ok {
-			if owner.WorkspaceID != principal.WorkspaceID {
-				return false
-			}
-			return (principal.Admin || owner.Principal == principal.Principal) && (event.AgentID == "" || owner.AgentID == event.AgentID)
+			return owner.readableBy(principal.WorkspaceID, principal.Principal, principal.Admin) &&
+				(event.AgentID == "" || owner.AgentID == event.AgentID)
 		}
 		// Unknown session IDs are never broadcast to a non-admin subscriber.
 		return false
@@ -124,6 +139,44 @@ func (s *Server) authorizeEvent(principal eventPrincipal, event message.Event) b
 	return rbac.HasPermission(principal.Role, rbac.ResourceChat, rbac.ActionRead)
 }
 
+// ownershipStore returns the durable store, or nil when only the in-process
+// map is available.
+func (s *Server) ownershipStore() session.OwnershipStore {
+	s.sessionOwnerMu.RLock()
+	defer s.sessionOwnerMu.RUnlock()
+	return s.sessionOwnership
+}
+
+func (s *Server) cacheOwner(sessionID string, owner sessionOwner) {
+	s.sessionOwnerMu.Lock()
+	defer s.sessionOwnerMu.Unlock()
+	s.sessionOwners[strings.Clone(sessionID)] = owner
+}
+
+// lookupOwner resolves a session's owner, consulting the durable store on a
+// cache miss. A miss is not an answer: a restart empties the cache and a second
+// replica never filled it, so treating a miss as "no owner" would hand the
+// session to whoever asked next.
+func (s *Server) lookupOwner(ctx context.Context, sessionID string) (sessionOwner, bool) {
+	s.sessionOwnerMu.RLock()
+	cached, ok := s.sessionOwners[sessionID]
+	s.sessionOwnerMu.RUnlock()
+	if ok {
+		return cached, true
+	}
+	store := s.ownershipStore()
+	if store == nil {
+		return sessionOwner{}, false
+	}
+	record, err := store.Lookup(ctx, sessionID)
+	if err != nil {
+		return sessionOwner{}, false
+	}
+	owner := sessionOwner{Principal: record.Creator, WorkspaceID: record.WorkspaceID, AgentID: record.AgentID, Visibility: record.Visibility}
+	s.cacheOwner(sessionID, owner)
+	return owner, true
+}
+
 // claimSession atomically binds a session to the authenticated principal and
 // agent on first use. Reuse by another principal or for another agent is hidden
 // as not-found to avoid turning session IDs into an enumeration oracle.
@@ -139,11 +192,30 @@ func (s *Server) claimSession(c *fiber.Ctx, agentID, sessionID string) error {
 	if principal == "" || strings.TrimSpace(agentID) == "" || strings.TrimSpace(sessionID) == "" {
 		return fiber.NewError(fiber.StatusForbidden, "authenticated session identity is incomplete")
 	}
+
+	// The durable store decides. Its Claim is one transaction, so two
+	// concurrent first-uses cannot both win — which a check-then-insert
+	// against the cache would allow, landing the loser's messages in the
+	// winner's conversation.
+	if store := s.ownershipStore(); store != nil {
+		record, err := store.Claim(detachedRequestContext(c), session.Ownership{
+			SessionID: sessionID, WorkspaceID: workspaceID, AgentID: agentID, Creator: principal,
+		})
+		if err != nil {
+			if errors.Is(err, session.ErrSessionClaimed) {
+				return fiber.NewError(fiber.StatusNotFound, "session not found")
+			}
+			return fiber.NewError(fiber.StatusServiceUnavailable, "session ownership could not be recorded")
+		}
+		s.cacheOwner(sessionID, sessionOwner{Principal: record.Creator, WorkspaceID: record.WorkspaceID, AgentID: record.AgentID, Visibility: record.Visibility})
+		return nil
+	}
+
 	s.sessionOwnerMu.Lock()
 	defer s.sessionOwnerMu.Unlock()
 	owner, exists := s.sessionOwners[sessionID]
 	if !exists {
-		s.sessionOwners[strings.Clone(sessionID)] = sessionOwner{Principal: strings.Clone(principal), WorkspaceID: strings.Clone(workspaceID), AgentID: strings.Clone(agentID)}
+		s.sessionOwners[strings.Clone(sessionID)] = sessionOwner{Principal: strings.Clone(principal), WorkspaceID: strings.Clone(workspaceID), AgentID: strings.Clone(agentID), Visibility: session.VisibilityPrivate}
 		return nil
 	}
 	if owner.Principal != principal || owner.WorkspaceID != workspaceID || owner.AgentID != agentID {
@@ -161,10 +233,8 @@ func (s *Server) requireSession(c *fiber.Ctx, agentID, sessionID string) error {
 	if identity, ok := requestIdentity(c); ok {
 		workspaceID = identity.WorkspaceID()
 	}
-	s.sessionOwnerMu.RLock()
-	owner, exists := s.sessionOwners[sessionID]
-	s.sessionOwnerMu.RUnlock()
-	if !exists || owner.WorkspaceID != workspaceID || (!admin && owner.Principal != principal) || (agentID != "" && owner.AgentID != agentID) {
+	owner, exists := s.lookupOwner(detachedRequestContext(c), sessionID)
+	if !exists || !owner.readableBy(workspaceID, principal, admin) || (agentID != "" && owner.AgentID != agentID) {
 		return fiber.NewError(fiber.StatusNotFound, "session not found")
 	}
 	return nil

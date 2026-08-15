@@ -287,6 +287,18 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 		log.Info("conversation history ready", zap.String("path", historyPath))
 	}
 
+	// ── Session Ownership ─────────────────────────────────────────────────────
+	// Durable, because an in-process map forgets who owns every open
+	// conversation on restart and is never shared with a second replica.
+	ownershipPath := ws.DB("session_owners")
+	if ownerStore, ownerErr := session.NewSQLiteOwnershipStore(ownershipPath); ownerErr != nil {
+		log.Warn("session ownership store unavailable — conversation authorization will not survive a restart", zap.Error(ownerErr))
+	} else {
+		stack.pushClose("session-ownership-store", ownerStore)
+		srv.SetSessionOwnershipStore(ownerStore)
+		log.Info("session ownership ready", zap.String("path", ownershipPath))
+	}
+
 	// ── Chat/Session Resource Store ───────────────────────────────────────────
 	resourcePath := ws.DB("session_resources")
 	if resStore, resErr := session.NewSQLiteStore(resourcePath, session.DefaultConfig()); resErr != nil {
