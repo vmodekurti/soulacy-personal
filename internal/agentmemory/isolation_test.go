@@ -10,8 +10,10 @@
 package agentmemory
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/soulacy/soulacy/internal/wsroot"
@@ -218,5 +220,67 @@ func TestAnUncreatableWorkspaceDirectoryYieldsNoStoreRatherThanTheSharedRoot(t *
 	// Personal is unaffected: its directory is the base, which exists.
 	if store := stores.For(wsroot.PersonalWorkspaceID); store == nil {
 		t.Fatal("personal brain memory was disabled by another workspace's failure")
+	}
+}
+
+// Version assignment is a read-then-write transaction: Append reads
+// MAX(version) and inserts version+1. Under a deferred transaction two
+// concurrent writers for the same agent both take a read lock and then both
+// try to upgrade, and SQLite fails the loser with "database is locked" instead
+// of letting it wait — a spurious failure on a perfectly ordinary auto_update
+// racing a manual edit.
+//
+// Every write must therefore either succeed with its own version number or
+// fail for a real reason (a lock on the rulebook), never for a lock on the
+// database.
+func TestConcurrentRulebookWritesGetDistinctVersions(t *testing.T) {
+	// Deliberately against RuleLog.Append rather than through
+	// CompositeStore.UpdateProceduralVersioned. The composite writes
+	// procedural.md first, under the ProceduralStore mutex, which staggers the
+	// callers just enough to make the collision rare — a test driven through
+	// that path passes with the bug present, which is worse than no test. The
+	// contention belongs to Append, so that is what this exercises.
+	log, err := OpenRuleLog(filepath.Join(t.TempDir(), "rulebook.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = log.Close() })
+
+	const writers = 8
+	const rounds = 6
+	for round := 0; round < rounds; round++ {
+		agentID := fmt.Sprintf("researcher-%d", round)
+		var wg sync.WaitGroup
+		versions := make([]int, writers)
+		errs := make([]error, writers)
+		start := make(chan struct{})
+		for i := 0; i < writers; i++ {
+			wg.Add(1)
+			go func(index int) {
+				defer wg.Done()
+				<-start
+				versions[index], errs[index] = log.Append(agentID, fmt.Sprintf("# rules %d", index), "manual")
+			}(i)
+		}
+		close(start)
+		wg.Wait()
+
+		seen := map[int]bool{}
+		for index, err := range errs {
+			if err != nil {
+				t.Fatalf("round %d writer %d failed: %v", round, index, err)
+			}
+			if seen[versions[index]] {
+				t.Fatalf("round %d writer %d reused version %d", round, index, versions[index])
+			}
+			seen[versions[index]] = true
+		}
+		history, err := log.Versions(agentID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(history) != writers {
+			t.Fatalf("round %d history has %d versions, want %d", round, len(history), writers)
+		}
 	}
 }

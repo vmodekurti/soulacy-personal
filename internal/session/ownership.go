@@ -118,7 +118,17 @@ CREATE INDEX IF NOT EXISTS idx_session_owners_session ON session_owners(session_
 type SQLiteOwnershipStore struct{ db *sql.DB }
 
 func NewSQLiteOwnershipStore(path string) (*SQLiteOwnershipStore, error) {
-	db, err := sqlitex.Open(path, sqlitex.DefaultOptions())
+	// Claim reads a row and then inserts based on what it read, so its
+	// transactions must take the write lock up front. See Options.ImmediateTx:
+	// under a deferred transaction, concurrent first-uses of the same session
+	// ID all take read locks and then all try to upgrade, and SQLite fails the
+	// losers with "database is locked" instead of letting them wait. The caller
+	// would see a 500 where it should have seen ErrSessionClaimed — and, worse,
+	// a second request from the *rightful* owner could fail its idempotent
+	// re-claim.
+	opts := sqlitex.DefaultOptions()
+	opts.ImmediateTx = true
+	db, err := sqlitex.Open(path, opts)
 	if err != nil {
 		return nil, err
 	}

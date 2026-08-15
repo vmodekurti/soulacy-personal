@@ -41,7 +41,16 @@ type RuleLog struct {
 
 // OpenRuleLog opens (creating if needed) the rulebook database at path.
 func OpenRuleLog(path string) (*RuleLog, error) {
-	db, err := sqlitex.Open(path, sqlitex.DefaultOptions())
+	// Append reads MAX(version) and then inserts version+1, which is a
+	// read-then-write transaction: under BEGIN DEFERRED two concurrent writes
+	// for the same agent both take a read lock and then both try to upgrade,
+	// and SQLite fails the loser with "database is locked" rather than letting
+	// it wait. An auto_update racing a manual edit is exactly that case, and it
+	// would surface as a spurious rulebook write failure. See
+	// sqlitex.Options.ImmediateTx.
+	opts := sqlitex.DefaultOptions()
+	opts.ImmediateTx = true
+	db, err := sqlitex.Open(path, opts)
 	if err != nil {
 		return nil, fmt.Errorf("agentmemory: open rulebook db: %w", err)
 	}

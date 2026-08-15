@@ -60,6 +60,24 @@ type Options struct {
 	// ConnMaxLifetime forces stale connections to recycle. Mostly defensive
 	// against driver memory growth over long uptimes. Default: 30 minutes.
 	ConnMaxLifetime time.Duration
+
+	// ImmediateTx starts every transaction with BEGIN IMMEDIATE instead of the
+	// default BEGIN DEFERRED.
+	//
+	// Set it on any store whose transactions read a row and then write based on
+	// what they read. A deferred transaction takes a read lock at the SELECT
+	// and tries to upgrade to a write lock at the INSERT; when several do this
+	// at once SQLite cannot let them wait — waiting would deadlock — so it
+	// fails the upgraders immediately with SQLITE_BUSY, *bypassing the busy
+	// timeout entirely*. The symptom is "database is locked" under concurrency
+	// on a store that looks correctly transactional, and no amount of raising
+	// BusyTimeout helps.
+	//
+	// BEGIN IMMEDIATE takes the write lock up front, so contenders queue on the
+	// busy handler and each transaction sees a consistent database. The cost is
+	// that read-only transactions on the same handle serialise too, which is
+	// why this is opt-in rather than the default.
+	ImmediateTx bool
 }
 
 // DefaultOptions returns the conservative Soulacy defaults.
@@ -87,6 +105,7 @@ func DefaultOptions() Options {
 //
 //	_foreign_keys  = on        — when opts.ForeignKeys
 //	_mmap_size     = <bytes>   — when opts.MMapSize > 0
+//	_txlock        = immediate — when opts.ImmediateTx
 func DSN(path string, opts Options) string {
 	q := url.Values{}
 	q.Set("_journal_mode", "WAL")
@@ -110,6 +129,9 @@ func DSN(path string, opts Options) string {
 	}
 	if opts.MMapSize > 0 {
 		q.Set("_mmap_size", strconv.FormatInt(opts.MMapSize, 10))
+	}
+	if opts.ImmediateTx {
+		q.Set("_txlock", "immediate")
 	}
 
 	// mattn parses `?key=value&...` with `_` prefixes; url.Values encodes

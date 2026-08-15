@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -63,37 +64,50 @@ func TestASessionIDCannotBeClaimedTwice(t *testing.T) {
 // Two concurrent first-uses of the same ID must not both succeed: "look it up,
 // then insert if absent" is a race both callers win, and the loser's messages
 // would land in the winner's conversation.
+// The loser's error matters as much as the winner's success. A loser that gets
+// "database is locked" instead of ErrSessionClaimed is reported to the caller
+// as a server fault rather than as a taken ID — and a *co-owner* whose
+// idempotent re-claim hits the same lock is refused its own session. That is
+// what a deferred transaction produces here: every racer takes a read lock at
+// the SELECT and then tries to upgrade at the INSERT, and SQLite fails the
+// upgraders immediately rather than letting them wait. See
+// sqlitex.Options.ImmediateTx.
+//
+// Run over several rounds because a single round can pass by scheduling luck.
 func TestConcurrentClaimsElectExactlyOneOwner(t *testing.T) {
 	store, _ := newOwnershipStore(t)
 	const racers = 8
-	var wg sync.WaitGroup
-	results := make([]error, racers)
-	start := make(chan struct{})
-	for i := 0; i < racers; i++ {
-		wg.Add(1)
-		go func(index int) {
-			defer wg.Done()
-			<-start
-			_, results[index] = store.Claim(context.Background(), Ownership{
-				SessionID: "sess_race", WorkspaceID: "ws_a", AgentID: "bot",
-				Creator: []string{"usr_a", "usr_b"}[index%2],
-			})
-		}(i)
-	}
-	close(start)
-	wg.Wait()
-
-	owner, err := store.Lookup(context.Background(), "sess_race")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for index, result := range results {
-		creator := []string{"usr_a", "usr_b"}[index%2]
-		if creator == owner.Creator && result != nil {
-			t.Errorf("racer %d (the winner's principal) was refused: %v", index, result)
+	for round := 0; round < 12; round++ {
+		sessionID := fmt.Sprintf("sess_race_%d", round)
+		var wg sync.WaitGroup
+		results := make([]error, racers)
+		start := make(chan struct{})
+		for i := 0; i < racers; i++ {
+			wg.Add(1)
+			go func(index int) {
+				defer wg.Done()
+				<-start
+				_, results[index] = store.Claim(context.Background(), Ownership{
+					SessionID: sessionID, WorkspaceID: "ws_a", AgentID: "bot",
+					Creator: []string{"usr_a", "usr_b"}[index%2],
+				})
+			}(i)
 		}
-		if creator != owner.Creator && !errors.Is(result, ErrSessionClaimed) {
-			t.Errorf("racer %d (a loser) got %v, want ErrSessionClaimed", index, result)
+		close(start)
+		wg.Wait()
+
+		owner, err := store.Lookup(context.Background(), sessionID)
+		if err != nil {
+			t.Fatalf("round %d: %v", round, err)
+		}
+		for index, result := range results {
+			creator := []string{"usr_a", "usr_b"}[index%2]
+			if creator == owner.Creator && result != nil {
+				t.Fatalf("round %d: racer %d (the winner's principal) was refused: %v", round, index, result)
+			}
+			if creator != owner.Creator && !errors.Is(result, ErrSessionClaimed) {
+				t.Fatalf("round %d: racer %d (a loser) got %v, want ErrSessionClaimed", round, index, result)
+			}
 		}
 	}
 }
