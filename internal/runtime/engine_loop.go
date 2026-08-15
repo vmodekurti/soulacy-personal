@@ -101,7 +101,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 			if e.dlqStore != nil {
 				payload, _ := json.Marshal(msg)
 				dctx, dcancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-				if dlqErr := e.dlqStore.PushFailed(dctx, msg.AgentID, payload, err.Error()); dlqErr != nil {
+				if dlqErr := e.dlqStore.PushFailed(dctx, WorkspaceFromContext(ctx), msg.AgentID, payload, err.Error()); dlqErr != nil {
 					e.log.Warn("dlq push failed", zap.Error(dlqErr))
 				}
 				dcancel()

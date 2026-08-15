@@ -232,6 +232,27 @@ func (s *Server) costWorkspace(c *fiber.Ctx) string {
 	return wsroot.PersonalWorkspaceID
 }
 
+// dlqScope is the tenant a dead-letter request acts in.
+//
+// The dead-letter queue reads like operations data — it is served from
+// /admin/dlq behind a config-read grant — but each row carries the original
+// job payload, which for an agent run is the user's prompt. It is the failed
+// half of the same conversation the history store scopes, so it is scoped the
+// same way, and an admin grant in one workspace does not become a window into
+// another's failed prompts.
+//
+// Unlike history this needs no subject: a parked job belongs to the workspace
+// that has to decide whether to retry it, and the person who triggered it may
+// well have left the team by the time anyone looks.
+func (s *Server) dlqScope(c *fiber.Ctx) string {
+	if c != nil {
+		if identity, ok := requestIdentity(c); ok {
+			return wsroot.Normalize(identity.WorkspaceID())
+		}
+	}
+	return wsroot.PersonalWorkspaceID
+}
+
 // platformMetricsMW restricts the raw Prometheus endpoint in multi-user
 // deployments.
 //

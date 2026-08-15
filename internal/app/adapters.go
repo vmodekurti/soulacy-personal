@@ -126,13 +126,14 @@ func (a *engineTracerAdapter) Start(ctx context.Context, name string, kv ...stri
 // engineDLQAdapter bridges dlq.Store → runtime's dead-letter interface.
 type engineDLQAdapter struct{ s dlq.Store }
 
-func (a *engineDLQAdapter) PushFailed(ctx context.Context, queue string, payload []byte, errMsg string) error {
+func (a *engineDLQAdapter) PushFailed(ctx context.Context, workspaceID, queue string, payload []byte, errMsg string) error {
 	return a.s.Push(ctx, dlq.DeadLetter{
-		ID:       dlq.NewID(),
-		Queue:    queue,
-		Payload:  payload,
-		ErrorMsg: errMsg,
-		Attempts: 1,
+		ID:          dlq.NewID(),
+		WorkspaceID: workspaceID,
+		Queue:       queue,
+		Payload:     payload,
+		ErrorMsg:    errMsg,
+		Attempts:    1,
 	})
 }
 

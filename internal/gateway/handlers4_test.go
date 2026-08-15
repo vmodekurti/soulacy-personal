@@ -140,24 +140,37 @@ func (f *fakeMemDLQ) Push(_ context.Context, item dlq.DeadLetter) error {
 	f.items[item.ID] = item
 	return nil
 }
-func (f *fakeMemDLQ) List(_ context.Context, queue string) ([]dlq.DeadLetter, error) {
+
+// The fake enforces the workspace predicate exactly as the real store does.
+// A permissive double would let a handler that forgot to pass the tenant go on
+// passing its tests — which is how the attachment-store break got through once
+// already.
+func (f *fakeMemDLQ) owns(item dlq.DeadLetter, workspaceID string) bool {
+	return wsroot.Normalize(item.WorkspaceID) == wsroot.Normalize(workspaceID)
+}
+
+func (f *fakeMemDLQ) List(_ context.Context, workspaceID, queue string) ([]dlq.DeadLetter, error) {
 	var out []dlq.DeadLetter
 	for _, item := range f.items {
+		if !f.owns(item, workspaceID) {
+			continue
+		}
 		if queue == "" || item.Queue == queue {
 			out = append(out, item)
 		}
 	}
 	return out, nil
 }
-func (f *fakeMemDLQ) Get(_ context.Context, id string) (dlq.DeadLetter, error) {
+func (f *fakeMemDLQ) Get(_ context.Context, workspaceID, id string) (dlq.DeadLetter, error) {
 	item, ok := f.items[id]
-	if !ok {
+	if !ok || !f.owns(item, workspaceID) {
 		return dlq.DeadLetter{}, dlq.ErrNotFound
 	}
 	return item, nil
 }
-func (f *fakeMemDLQ) Delete(_ context.Context, id string) error {
-	if _, ok := f.items[id]; !ok {
+func (f *fakeMemDLQ) Delete(_ context.Context, workspaceID, id string) error {
+	item, ok := f.items[id]
+	if !ok || !f.owns(item, workspaceID) {
 		return dlq.ErrNotFound
 	}
 	delete(f.items, id)

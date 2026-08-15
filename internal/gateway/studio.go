@@ -1935,7 +1935,7 @@ func (s *Server) handleStudioFailedRuns(c *fiber.Ctx) error {
 	if s.dlqStore == nil {
 		return c.JSON(fiber.Map{"runs": []any{}})
 	}
-	items, err := s.dlqStore.List(c.Context(), "")
+	items, err := s.dlqStore.List(c.Context(), s.dlqScope(c), "")
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
@@ -2489,7 +2489,7 @@ func (s *Server) handleStudioDiagnoseRun(c *fiber.Ctx) error {
 	if model == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "LLM router unavailable")
 	}
-	entry, err := s.dlqStore.Get(c.Context(), req.ID)
+	entry, err := s.dlqStore.Get(c.Context(), s.dlqScope(c), req.ID)
 	if err != nil {
 		return s.errMsg(c, fiber.StatusNotFound, "failed run not found")
 	}

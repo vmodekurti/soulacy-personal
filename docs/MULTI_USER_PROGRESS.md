@@ -25,7 +25,7 @@ isolation state; this document explains it.
 declared workspace-owned but not yet isolated.
 
 - At the start of this work: **57 blockers**
-- Now: **14 blockers**
+- Now: **12 blockers**
 
 A store moves from `personal-only` to `scoped` only when it has a real
 cross-tenant isolation test. The catalog names that test, and a CI check fails
@@ -480,6 +480,66 @@ Each guard was verified by removing it individually: without the `mayManage`
 guard the unverified caller revokes and suspends another tenant's credential;
 without the `HandleCreate` guard the forged request returns **201** with a live
 owner-role secret in `org_b`.
+
+### The dead-letter queue is tenant content wearing an admin route's clothes
+
+`dead_letters` is served from `/admin/dlq` behind a config-read grant, which
+made it look like operations telemetry. It is not: every row carries the
+original job payload, and for an agent run that payload is the user's prompt.
+It is the failed half of the same conversation the history store already
+scopes, so it is now scoped the same way.
+
+Three things were needed, and only the first is the obvious one.
+
+**The reads.** `workspace_id` column, workspace-first indexes
+(`(workspace_id, created_at DESC)` and `(workspace_id, queue, created_at DESC)`
+— leading rather than trailing, so the busiest tenant's backlog does not
+lengthen anyone else's scan), and the tenant as a positional argument on
+`List`, `Get` and `Delete` rather than a value read from a context inside the
+store. `Delete` puts the workspace in the DELETE predicate rather than doing a
+read-then-delete, because the thing a read-then-delete races on here is the
+authority check itself.
+
+**The write.** The primary key is the ID alone, so `INSERT OR REPLACE` was a
+cross-tenant *write* path through a store whose every read is scoped: a push
+whose ID matched a neighbour's row would overwrite it. Server-generated IDs
+make that unreachable today, which is exactly the kind of reasoning that stops
+being true after one refactor. It is now
+`ON CONFLICT(id) DO UPDATE ... WHERE dead_letters.workspace_id =
+excluded.workspace_id`, with `RowsAffected() == 0` reported as an error —
+same-workspace re-pushes keep their overwrite semantics (the engine re-pushes
+as attempts accumulate), a colliding one across the boundary changes nothing
+and says so.
+
+**The push.** `deadLetterStore.PushFailed` gained the workspace as an argument
+instead of letting the store infer it. The push happens in a deferred block on
+a `context.WithoutCancel` copy after the run has already failed, so making the
+tenant explicit keeps the one value that decides who can ever see the entry
+visible at the call site rather than buried in whichever context survived.
+
+An unattributed push is normalised to personal, not rejected. Push is the
+failure path already — the job has exhausted its retries — so refusing the
+insert would turn "we could not attribute this" into "this never happened".
+Personal is nobody else's workspace, so a misattributed entry is visible to the
+operator rather than leaked to a stranger. The backfill on open follows the
+same reasoning: a row with an empty workspace matches no scoped read, so the
+operator sees an empty backlog and concludes nothing failed.
+
+### A second AST guard for stores that stay deployment-wide
+
+`TestTenantStoresAreReachedThroughAScopedAccessor` works because for the action
+log and the cost store the scoped accessor *is* the store — touching the field
+is the violation. The dead-letter queue is one database for the whole
+deployment; there is no per-workspace handle to hand back, so the field access
+is legitimate and the tenant travels as an argument.
+
+That makes "did you pass a workspace" the property to check, and
+`TestSharedStoreReadsNameATenant` checks it: a call to `s.dlqStore.List/Get/
+Delete` must pass a call to a recognised scope resolver. A literal `""` in the
+workspace position is the mistake it exists to catch — it compiles, it reads
+plausibly, and it turns a scoped listing straight back into a deployment-wide
+one. Verified by planting exactly that and watching the guard name the file,
+line and function.
 
 ## Guards worth keeping
 

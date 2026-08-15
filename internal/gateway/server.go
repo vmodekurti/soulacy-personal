@@ -1342,7 +1342,7 @@ func (s *Server) buildApp() *fiber.App {
 			return s.errMsg(c, fiber.StatusServiceUnavailable, "dlq not configured")
 		}
 		queue := c.Query("queue", "")
-		items, err := s.dlqStore.List(c.Context(), queue)
+		items, err := s.dlqStore.List(c.Context(), s.dlqScope(c), queue)
 		if err != nil {
 			return s.errJSON(c, fiber.StatusInternalServerError, err)
 		}
@@ -1355,7 +1355,7 @@ func (s *Server) buildApp() *fiber.App {
 		if s.dlqStore == nil {
 			return s.errMsg(c, fiber.StatusServiceUnavailable, "dlq not configured")
 		}
-		item, err := s.dlqStore.Get(c.Context(), c.Params("id"))
+		item, err := s.dlqStore.Get(c.Context(), s.dlqScope(c), c.Params("id"))
 		if err != nil {
 			if err == dlq.ErrNotFound {
 				return s.errMsg(c, fiber.StatusNotFound, "not found")
@@ -1368,7 +1368,7 @@ func (s *Server) buildApp() *fiber.App {
 		if s.dlqStore == nil {
 			return s.errMsg(c, fiber.StatusServiceUnavailable, "dlq not configured")
 		}
-		if err := s.dlqStore.Delete(c.Context(), c.Params("id")); err != nil {
+		if err := s.dlqStore.Delete(c.Context(), s.dlqScope(c), c.Params("id")); err != nil {
 			if err == dlq.ErrNotFound {
 				return s.errMsg(c, fiber.StatusNotFound, "not found")
 			}

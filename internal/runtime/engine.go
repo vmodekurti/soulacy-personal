@@ -720,7 +720,13 @@ type agentCostStore interface {
 // the dlq package and creating a cycle.
 type deadLetterStore interface {
 	// PushFailed records a failed message delivery in the dead-letter queue.
-	PushFailed(ctx context.Context, queue string, payload []byte, errMsg string) error
+	//
+	// workspaceID is passed rather than read from ctx by the implementation.
+	// The push happens in a deferred block on a context.WithoutCancel copy,
+	// after the run has already failed, so making the tenant an argument keeps
+	// the one value that decides who can ever see this entry visible at the
+	// call site instead of buried in whichever context survived.
+	PushFailed(ctx context.Context, workspaceID, queue string, payload []byte, errMsg string) error
 }
 
 // SetTracer installs a telemetry tracer. Safe to call once at startup.

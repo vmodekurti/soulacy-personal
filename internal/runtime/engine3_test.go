@@ -30,6 +30,7 @@ import (
 	"github.com/soulacy/soulacy/internal/llm"
 	"github.com/soulacy/soulacy/internal/memory"
 	"github.com/soulacy/soulacy/internal/session"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 	"github.com/soulacy/soulacy/pkg/skill"
@@ -437,13 +438,14 @@ type fakeDLQStore struct {
 }
 
 type fakeDLQPush struct {
-	queue   string
-	payload []byte
-	errMsg  string
+	workspaceID string
+	queue       string
+	payload     []byte
+	errMsg      string
 }
 
-func (f *fakeDLQStore) PushFailed(_ context.Context, queue string, payload []byte, errMsg string) error {
-	f.pushes = append(f.pushes, fakeDLQPush{queue: queue, payload: payload, errMsg: errMsg})
+func (f *fakeDLQStore) PushFailed(_ context.Context, workspaceID, queue string, payload []byte, errMsg string) error {
+	f.pushes = append(f.pushes, fakeDLQPush{workspaceID: workspaceID, queue: queue, payload: payload, errMsg: errMsg})
 	return nil
 }
 
@@ -470,6 +472,11 @@ func TestHandle_DLQPushOnError(t *testing.T) {
 	}
 	if dlq.pushes[0].queue != "dlq-agent" {
 		t.Errorf("DLQ queue = %q, want 'dlq-agent'", dlq.pushes[0].queue)
+	}
+	// No principal on the context, so the entry belongs to the personal
+	// workspace — the tenant a single-user installation's rows already carry.
+	if dlq.pushes[0].workspaceID != wsroot.PersonalWorkspaceID {
+		t.Errorf("DLQ workspace = %q, want %q", dlq.pushes[0].workspaceID, wsroot.PersonalWorkspaceID)
 	}
 	if !strings.Contains(dlq.pushes[0].errMsg, "disabled") {
 		t.Errorf("DLQ errMsg = %q, want 'disabled'", dlq.pushes[0].errMsg)

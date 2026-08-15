@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
 // ---------------------------------------------------------------------------
@@ -39,7 +41,7 @@ func TestNoopStorePushReturnsNil(t *testing.T) {
 
 func TestNoopStoreListReturnsEmpty(t *testing.T) {
 	var s NoopStore
-	entries, err := s.List(context.Background(), "")
+	entries, err := s.List(context.Background(), wsroot.PersonalWorkspaceID, "")
 	if err != nil || len(entries) != 0 {
 		t.Errorf("NoopStore List: entries=%v err=%v", entries, err)
 	}
@@ -47,7 +49,7 @@ func TestNoopStoreListReturnsEmpty(t *testing.T) {
 
 func TestNoopStoreGetReturnsErrNotFound(t *testing.T) {
 	var s NoopStore
-	_, err := s.Get(context.Background(), "any-id")
+	_, err := s.Get(context.Background(), wsroot.PersonalWorkspaceID, "any-id")
 	if err != ErrNotFound {
 		t.Errorf("NoopStore Get: err = %v, want ErrNotFound", err)
 	}
@@ -55,7 +57,7 @@ func TestNoopStoreGetReturnsErrNotFound(t *testing.T) {
 
 func TestNoopStoreDeleteReturnsNil(t *testing.T) {
 	var s NoopStore
-	if err := s.Delete(context.Background(), "any-id"); err != nil {
+	if err := s.Delete(context.Background(), wsroot.PersonalWorkspaceID, "any-id"); err != nil {
 		t.Errorf("NoopStore Delete: %v", err)
 	}
 }
@@ -118,7 +120,7 @@ func TestPushAndGetRoundTrip(t *testing.T) {
 		t.Fatalf("Push: %v", err)
 	}
 
-	got, err := s.Get(ctx, "entry-1")
+	got, err := s.Get(ctx, wsroot.PersonalWorkspaceID, "entry-1")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -142,7 +144,7 @@ func TestPushAutoFillsTimestamps(t *testing.T) {
 	// Zero CreatedAt/LastAttemptAt — should be auto-set.
 	_ = s.Push(ctx, entry)
 
-	got, _ := s.Get(ctx, "ts-check")
+	got, _ := s.Get(ctx, wsroot.PersonalWorkspaceID, "ts-check")
 	if got.CreatedAt.Before(before) {
 		t.Errorf("CreatedAt not auto-set: %v", got.CreatedAt)
 	}
@@ -158,7 +160,7 @@ func TestPushNormalisesAttemptsLessThanOne(t *testing.T) {
 	entry := DeadLetter{ID: "zero-attempts", Queue: "q", Payload: []byte("x"), ErrorMsg: "e", Attempts: 0}
 	_ = s.Push(ctx, entry)
 
-	got, _ := s.Get(ctx, "zero-attempts")
+	got, _ := s.Get(ctx, wsroot.PersonalWorkspaceID, "zero-attempts")
 	if got.Attempts != 1 {
 		t.Errorf("Attempts = %d, want 1", got.Attempts)
 	}
@@ -171,7 +173,7 @@ func TestPushUpsertOverwrites(t *testing.T) {
 	_ = s.Push(ctx, DeadLetter{ID: "dup", Queue: "q", Payload: []byte("v1"), ErrorMsg: "first", Attempts: 1})
 	_ = s.Push(ctx, DeadLetter{ID: "dup", Queue: "q", Payload: []byte("v2"), ErrorMsg: "second", Attempts: 2})
 
-	got, _ := s.Get(ctx, "dup")
+	got, _ := s.Get(ctx, wsroot.PersonalWorkspaceID, "dup")
 	if got.ErrorMsg != "second" || got.Attempts != 2 {
 		t.Errorf("upsert: %+v", got)
 	}
@@ -179,7 +181,7 @@ func TestPushUpsertOverwrites(t *testing.T) {
 
 func TestGetUnknownIDReturnsErrNotFound(t *testing.T) {
 	s := newDLQStore(t)
-	_, err := s.Get(context.Background(), "ghost")
+	_, err := s.Get(context.Background(), wsroot.PersonalWorkspaceID, "ghost")
 	if err != ErrNotFound {
 		t.Fatalf("Get unknown: err = %v, want ErrNotFound", err)
 	}
@@ -190,10 +192,10 @@ func TestDeleteThenGetReturnsNotFound(t *testing.T) {
 	s := newDLQStore(t)
 
 	_ = s.Push(ctx, DeadLetter{ID: "del-me", Queue: "q", Payload: []byte("x"), ErrorMsg: "e"})
-	if err := s.Delete(ctx, "del-me"); err != nil {
+	if err := s.Delete(ctx, wsroot.PersonalWorkspaceID, "del-me"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
-	_, err := s.Get(ctx, "del-me")
+	_, err := s.Get(ctx, wsroot.PersonalWorkspaceID, "del-me")
 	if err != ErrNotFound {
 		t.Fatalf("after delete Get: err = %v, want ErrNotFound", err)
 	}
@@ -201,7 +203,7 @@ func TestDeleteThenGetReturnsNotFound(t *testing.T) {
 
 func TestDeleteNonExistentReturnsErrNotFound(t *testing.T) {
 	s := newDLQStore(t)
-	if err := s.Delete(context.Background(), "ghost"); err != ErrNotFound {
+	if err := s.Delete(context.Background(), wsroot.PersonalWorkspaceID, "ghost"); err != ErrNotFound {
 		t.Errorf("Delete non-existent: err = %v, want ErrNotFound", err)
 	}
 }
@@ -217,7 +219,7 @@ func TestListAllEntries(t *testing.T) {
 		})
 	}
 
-	entries, err := s.List(ctx, "")
+	entries, err := s.List(ctx, wsroot.PersonalWorkspaceID, "")
 	if err != nil {
 		t.Fatalf("List all: %v", err)
 	}
@@ -233,7 +235,7 @@ func TestListFilteredByQueue(t *testing.T) {
 	_ = s.Push(ctx, DeadLetter{ID: "x1", Queue: "queue-a", Payload: []byte("x"), ErrorMsg: "e"})
 	_ = s.Push(ctx, DeadLetter{ID: "x2", Queue: "queue-b", Payload: []byte("x"), ErrorMsg: "e"})
 
-	entries, err := s.List(ctx, "queue-a")
+	entries, err := s.List(ctx, wsroot.PersonalWorkspaceID, "queue-a")
 	if err != nil {
 		t.Fatalf("List filtered: %v", err)
 	}
@@ -244,7 +246,7 @@ func TestListFilteredByQueue(t *testing.T) {
 
 func TestListEmptyReturnsNil(t *testing.T) {
 	s := newDLQStore(t)
-	entries, err := s.List(context.Background(), "")
+	entries, err := s.List(context.Background(), wsroot.PersonalWorkspaceID, "")
 	if err != nil {
 		t.Fatalf("List empty: %v", err)
 	}
