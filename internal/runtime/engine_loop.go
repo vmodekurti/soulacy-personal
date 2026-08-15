@@ -274,14 +274,15 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 			replyText = "(workflow completed)"
 		}
 		reply = message.Message{
-			ID:        msg.ID,
-			SessionID: msg.SessionID,
-			AgentID:   msg.AgentID,
-			Channel:   msg.Channel,
-			ThreadID:  msg.ThreadID,
-			Role:      message.RoleAssistant,
-			Parts:     message.Text(replyText),
-			CreatedAt: time.Now().UTC(),
+			ID:          msg.ID,
+			WorkspaceID: msg.WorkspaceID,
+			SessionID:   msg.SessionID,
+			AgentID:     msg.AgentID,
+			Channel:     msg.Channel,
+			ThreadID:    msg.ThreadID,
+			Role:        message.RoleAssistant,
+			Parts:       message.Text(replyText),
+			CreatedAt:   time.Now().UTC(),
 		}
 		// A run whose business-outcome contract went unmet is NOT a clean run,
 		// however cleanly its nodes executed. Marking it here means the
@@ -345,14 +346,15 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 				sess.PassphraseVerified = true
 				sess.mu.Unlock()
 				reply = message.Message{
-					ID:        msg.ID + "-auth",
-					SessionID: msg.SessionID,
-					AgentID:   msg.AgentID,
-					Channel:   msg.Channel,
-					ThreadID:  msg.ThreadID,
-					Role:      message.RoleAssistant,
-					Parts:     message.Text("✅ Access granted. How can I help you?"),
-					CreatedAt: time.Now().UTC(),
+					ID:          msg.ID + "-auth",
+					WorkspaceID: msg.WorkspaceID,
+					SessionID:   msg.SessionID,
+					AgentID:     msg.AgentID,
+					Channel:     msg.Channel,
+					ThreadID:    msg.ThreadID,
+					Role:        message.RoleAssistant,
+					Parts:       message.Text("✅ Access granted. How can I help you?"),
+					CreatedAt:   time.Now().UTC(),
 				}
 				return reply, nil
 			}
@@ -362,14 +364,15 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 				prompt = "🔒 Please provide your access passphrase to continue."
 			}
 			reply = message.Message{
-				ID:        msg.ID + "-auth",
-				SessionID: msg.SessionID,
-				AgentID:   msg.AgentID,
-				Channel:   msg.Channel,
-				ThreadID:  msg.ThreadID,
-				Role:      message.RoleAssistant,
-				Parts:     message.Text(prompt),
-				CreatedAt: time.Now().UTC(),
+				ID:          msg.ID + "-auth",
+				WorkspaceID: msg.WorkspaceID,
+				SessionID:   msg.SessionID,
+				AgentID:     msg.AgentID,
+				Channel:     msg.Channel,
+				ThreadID:    msg.ThreadID,
+				Role:        message.RoleAssistant,
+				Parts:       message.Text(prompt),
+				CreatedAt:   time.Now().UTC(),
 			}
 			return reply, nil
 		}
@@ -1095,14 +1098,15 @@ func (e *Engine) finalizeReply(ctx context.Context, def *agent.Definition, sess 
 	e.proposeLearning(ctx, def, msg, finalContent)
 
 	reply := message.Message{
-		ID:        msg.ID, // correlate reply to request
-		SessionID: msg.SessionID,
-		AgentID:   msg.AgentID,
-		Channel:   msg.Channel,
-		ThreadID:  msg.ThreadID,
-		Role:      message.RoleAssistant,
-		Parts:     message.Text(finalContent),
-		CreatedAt: time.Now().UTC(),
+		ID:          msg.ID, // correlate reply to request
+		WorkspaceID: msg.WorkspaceID,
+		SessionID:   msg.SessionID,
+		AgentID:     msg.AgentID,
+		Channel:     msg.Channel,
+		ThreadID:    msg.ThreadID,
+		Role:        message.RoleAssistant,
+		Parts:       message.Text(finalContent),
+		CreatedAt:   time.Now().UTC(),
 	}
 	if spokenContent != "" {
 		reply.Metadata = map[string]string{"response.spoken": spokenContent}

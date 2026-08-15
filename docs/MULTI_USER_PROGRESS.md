@@ -13,8 +13,9 @@ isolation state; this document explains it.
 |---|---|---|
 | M1 — Tenant kernel | MU-001–005 | Complete |
 | M2 — Team identity | MU-006–011 | Complete |
-| M3 — Data isolation | MU-012–019 | MU-012 ✓ MU-013 ✓ MU-014 ✓ MU-019 ✓; MU-015 partial; MU-016 partial; MU-017 partial; MU-018 not started |
+| M3 — Data isolation | MU-012–019 | MU-012 ✓ MU-013 ✓ MU-014 ✓ MU-018 ✓ MU-019 ✓; MU-015 partial; MU-016 partial; MU-017 partial |
 | — event spine + stores | (cross-cutting) | Events, action log, learning, Studio traces, workboard, conversation history ✓ |
+| — isolation floor | (cross-cutting) | 0 blockers: every declared store is scoped and names a real isolation test |
 | M4 — Execution plane | MU-020–025 | Not started |
 | M5 — Team Preview | MU-026–032 | Not started |
 | M6 — Scale | MU-033–037 | Not started |
@@ -940,6 +941,54 @@ the spawn env reads would mean a tenant's rotation is never noticed while an
 unrelated workspace's rotation restarts their sidecar for no reason — the test
 asserts both directions, because only checking that rotation is *detected*
 would pass with the bug.
+
+### A channel connection is somebody's, and the registry did not know whose (MU-018)
+
+A channel connection is a bot token, a webhook URL, or a signed-in account —
+one tenant's Slack app, their Telegram bot, their inbox. The registry keyed
+adapters by channel ID alone, so nothing in the process recorded whose
+connection it was: inbound messages arrived with no tenant, and an outbound
+send routed on the channel name for whoever asked.
+
+**Inbound identity is stamped after the adapter, not by it.** Adapters used to
+write straight into the shared inbox. An adapter receives whatever an external
+sender wrote — display name, user ID, body, and, for a hostile or merely buggy
+adapter, any field it chooses to fill in. Each adapter now gets its own channel
+whose messages are re-stamped with the *connection's* workspace before reaching
+the inbox. That is the difference between a rule saying content must not select
+a tenant and there being no code path in which it can. The test sends a message
+claiming `ws_victim` through a connection bound to `ws_a`, and with the stamp
+removed it arrives as `ws_victim`.
+
+**Ownership is verified at send time, not at admission.** A message can be
+minutes or days old by the time it goes out — scheduled deliveries, recovered
+runs, retries — and speaking through another tenant's bot is, to the recipient,
+indistinguishable from that tenant speaking. The refusal logs the channel, both
+workspaces and the agent, and never the body: a refused send is exactly the
+case where the content is most likely to be somebody else's.
+
+**Rebinding is refused rather than applied.** A channel changing hands
+mid-process would leave in-flight messages attributed to the previous owner and
+new ones to the next. A genuine hand-over is a disconnect and a reconnect,
+which is visible.
+
+Unbound channels are personal's. Every existing single-tenant deployment binds
+nothing and sends messages with no workspace set; both sides normalise to
+personal, so the check is invisible to them (invariant 7).
+
+The other side of the check was making replies carry their tenant. Those
+stamps are the fail-*closed* direction — a forgotten one is a refused send with
+a named reason, not cross-tenant speech — and `channel.send`, the tool an agent
+calls with model-chosen arguments, takes its workspace from the run's principal
+rather than from the call, because otherwise a prompt could select whose bot
+speaks.
+
+Criteria 3 and 5 were already met and are now pinned: sender IDs were never
+authority inputs (`internal/runtime/principal.go` says so, and the routing test
+shows two messages differing only by sender landing in the same workspace), and
+`internal/channels/webhook/sign.go` binds the timestamp *inside* the signed
+payload with a tolerance window, which is what makes a captured body
+unreplayable rather than merely signed.
 
 ## Guards worth keeping
 

@@ -1071,15 +1071,21 @@ func (s *Scheduler) singleDefaultOutput() (agent.ScheduleOutput, bool) {
 
 func (s *Scheduler) sendVia(ctx context.Context, reg *channels.Registry, def *agent.Definition, source message.Message, channelID, to, botName, triggerType, text string) error {
 	out := message.Message{
-		ID:        uuid.New().String(),
-		SessionID: source.SessionID,
-		AgentID:   def.ID,
-		Channel:   channelID,
-		ThreadID:  to,
-		UserID:    "scheduler",
-		Username:  "scheduler",
-		Role:      message.RoleAssistant,
-		Parts:     message.Text(text),
+		ID: uuid.New().String(),
+		// The scheduler acts as its own service principal, so the outbound
+		// message carries that principal's workspace rather than inheriting
+		// one from the source: a scheduled delivery has no request behind it,
+		// and the channel-ownership check at send time needs a tenant that is
+		// actually attributable.
+		WorkspaceID: s.principal.WorkspaceID,
+		SessionID:   source.SessionID,
+		AgentID:     def.ID,
+		Channel:     channelID,
+		ThreadID:    to,
+		UserID:      "scheduler",
+		Username:    "scheduler",
+		Role:        message.RoleAssistant,
+		Parts:       message.Text(text),
 		Metadata: map[string]string{
 			"trigger":  triggerType,
 			"bot_name": botName,

@@ -16,6 +16,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/metrics"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/message"
 	sdkchannel "github.com/soulacy/soulacy/sdk/channel"
 )
@@ -39,6 +40,10 @@ type Registry struct {
 	adapters map[string]Adapter
 	inbox    chan message.Message
 	log      *zap.Logger
+	// owners records which workspace each channel connection belongs to
+	// (MU-018). Empty means every channel is personal's, which is what a
+	// single-tenant deployment is.
+	owners ownership
 }
 
 // NewRegistry creates an empty channel registry with a shared inbox.
@@ -61,6 +66,42 @@ func (r *Registry) Register(a Adapter) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.adapters[a.ID()] = a
+}
+
+// BindWorkspace records that a channel connection belongs to one workspace
+// (MU-018 criterion 1). Call it alongside Register; an unbound channel is the
+// personal workspace's.
+func (r *Registry) BindWorkspace(channelID, workspaceID string) error {
+	return r.owners.Bind(channelID, workspaceID)
+}
+
+// WorkspaceOf reports which workspace owns a channel.
+func (r *Registry) WorkspaceOf(channelID string) string { return r.owners.WorkspaceOf(channelID) }
+
+// ChannelsOf lists the channels one workspace owns.
+func (r *Registry) ChannelsOf(workspaceID string) []string { return r.owners.ChannelsOf(workspaceID) }
+
+// stampedInbox returns a channel an adapter may write to, whose messages are
+// re-stamped with the connection's workspace before reaching the shared inbox.
+//
+// This is why adapters are not simply handed r.inbox any more. An adapter
+// receives whatever an external sender wrote — display name, user ID, body,
+// and any field a hostile or merely buggy adapter chooses to fill in. If the
+// workspace could survive that journey, the tenant boundary would be an input
+// field. Stamping *after* the adapter is done means there is no code path in
+// which content selects a tenant, rather than a rule saying it must not.
+func (r *Registry) stampedInbox(channelID string) chan message.Message {
+	staged := make(chan message.Message, 16)
+	go func() {
+		for msg := range staged {
+			msg.WorkspaceID = r.owners.WorkspaceOf(channelID)
+			if msg.Channel == "" {
+				msg.Channel = channelID
+			}
+			r.Enqueue(msg)
+		}
+	}()
+	return staged
 }
 
 // Inbox returns the shared inbound message channel (read by the gateway router).
@@ -115,7 +156,7 @@ func (r *Registry) StartAll(ctx context.Context) []error {
 
 	var errs []error
 	for _, a := range snapshot {
-		if err := a.Start(ctx, r.inbox); err != nil {
+		if err := a.Start(ctx, r.stampedInbox(a.ID())); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -134,7 +175,7 @@ func (r *Registry) StartAdapter(ctx context.Context, a Adapter) error {
 		_ = old.Stop()
 	}
 
-	if err := a.Start(ctx, r.inbox); err != nil {
+	if err := a.Start(ctx, r.stampedInbox(a.ID())); err != nil {
 		r.mu.Lock()
 		if r.adapters[a.ID()] == a {
 			delete(r.adapters, a.ID())
@@ -173,6 +214,25 @@ func (r *Registry) Send(ctx context.Context, msg message.Message) error {
 	if !ok {
 		metrics.ChannelOutboundTotal.WithLabelValues(ch, agentID, "unregistered").Inc()
 		return fmt.Errorf("channel adapter %q is not registered", msg.Channel)
+	}
+	// Ownership is checked here, at execution time, rather than when the run
+	// was admitted (MU-018 criterion 4). A message can be minutes or days old
+	// by the time it is sent — scheduled deliveries, recovered runs, retries —
+	// and speaking through another tenant's bot is indistinguishable, to the
+	// recipient, from that tenant speaking.
+	if owner := r.owners.WorkspaceOf(msg.Channel); owner != wsroot.Normalize(msg.WorkspaceID) {
+		metrics.ChannelOutboundTotal.WithLabelValues(ch, agentID, "not_owned").Inc()
+		// Redacted diagnostic (criterion 6): the channel, the two workspaces
+		// and the agent, never the message body — a refused send is exactly
+		// the case where the content is most likely to be somebody else's.
+		r.log.Error("outbound send refused: channel is not owned by the sending workspace",
+			zap.String("channel", msg.Channel),
+			zap.String("channel_workspace", owner),
+			zap.String("message_workspace", wsroot.Normalize(msg.WorkspaceID)),
+			zap.String("agent_id", msg.AgentID),
+			zap.String("msg_id", msg.ID),
+		)
+		return fmt.Errorf("%w: channel %q belongs to another workspace", ErrChannelNotOwned, msg.Channel)
 	}
 	if err := a.Send(ctx, msg); err != nil {
 		metrics.ChannelOutboundTotal.WithLabelValues(ch, agentID, "error").Inc()

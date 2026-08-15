@@ -88,16 +88,20 @@ func (f *failureNotifier) NotifyFailure(ctx context.Context, def *agent.Definiti
 	}
 
 	out := message.Message{
-		ID:        uuid.New().String(),
-		SessionID: fmt.Sprintf("failure-%s", inbound.SessionID),
-		AgentID:   def.ID,
-		Channel:   channelID,
-		ThreadID:  to,
-		UserID:    to,
-		Username:  to,
-		Role:      message.RoleAssistant,
-		Parts:     message.Text(body),
-		CreatedAt: time.Now().UTC(),
+		ID: uuid.New().String(),
+		// The notice goes back to the tenant whose run failed, on their own
+		// channel. Without this the send is refused at the ownership check,
+		// which is the right failure but a silent one for the person waiting.
+		WorkspaceID: inbound.WorkspaceID,
+		SessionID:   fmt.Sprintf("failure-%s", inbound.SessionID),
+		AgentID:     def.ID,
+		Channel:     channelID,
+		ThreadID:    to,
+		UserID:      to,
+		Username:    to,
+		Role:        message.RoleAssistant,
+		Parts:       message.Text(body),
+		CreatedAt:   time.Now().UTC(),
 	}
 	if err := f.chanReg.Send(ctx, out); err != nil {
 		f.log.Warn("failure notifier: chanReg.Send failed",

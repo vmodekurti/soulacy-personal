@@ -154,17 +154,24 @@ func (e *Engine) buildChannelSendBuiltin() BuiltinTool {
 			}
 
 			out := message.Message{
-				ID:        uuid.New().String(),
-				SessionID: "channel-send-" + uuid.New().String(),
-				AgentID:   "channel.send",
-				Channel:   channelID,
-				ThreadID:  to,
-				UserID:    "agent",
-				Username:  "agent",
-				Role:      message.RoleAssistant,
-				Parts:     message.Text(text),
-				Metadata:  meta,
-				CreatedAt: time.Now().UTC(),
+				ID: uuid.New().String(),
+				// The run's own tenant, taken from its principal rather than
+				// from any tool argument. channel.send is a tool an agent
+				// calls with model-chosen arguments, so letting the workspace
+				// come from the call would let a prompt select whose bot
+				// speaks — which is precisely the input-derived routing
+				// MU-018 criterion 2 exists to prevent.
+				WorkspaceID: WorkspaceFromContext(ctx),
+				SessionID:   "channel-send-" + uuid.New().String(),
+				AgentID:     "channel.send",
+				Channel:     channelID,
+				ThreadID:    to,
+				UserID:      "agent",
+				Username:    "agent",
+				Role:        message.RoleAssistant,
+				Parts:       message.Text(text),
+				Metadata:    meta,
+				CreatedAt:   time.Now().UTC(),
 			}
 			if err := e.channelRegistry.Send(ctx, out); err != nil {
 				status := e.channelRegistry.Statuses()[channelID]

@@ -1313,14 +1313,15 @@ func (a *App) startMessageRouter(ctx context.Context, chanReg *channels.Registry
 					// error back to the originating chat so a failed run
 					// (e.g. LLM unreachable / model not pulled) is visible.
 					errReply := message.Message{
-						SessionID: msg.SessionID,
-						AgentID:   msg.AgentID,
-						Channel:   msg.Channel,
-						ThreadID:  msg.ThreadID,
-						UserID:    msg.UserID,
-						Role:      message.RoleAssistant,
-						Parts:     message.Text("⚠ Sorry — I couldn't complete that. (" + concise(err) + ") Check the agent's LLM provider is reachable; see the gateway Logs."),
-						CreatedAt: time.Now().UTC(),
+						WorkspaceID: msg.WorkspaceID,
+						SessionID:   msg.SessionID,
+						AgentID:     msg.AgentID,
+						Channel:     msg.Channel,
+						ThreadID:    msg.ThreadID,
+						UserID:      msg.UserID,
+						Role:        message.RoleAssistant,
+						Parts:       message.Text("⚠ Sorry — I couldn't complete that. (" + concise(err) + ") Check the agent's LLM provider is reachable; see the gateway Logs."),
+						CreatedAt:   time.Now().UTC(),
 					}
 					if serr := chanReg.Send(mCtx, errReply); serr != nil {
 						log.Error("channel send error (error-reply)",
