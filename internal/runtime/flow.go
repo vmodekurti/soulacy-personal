@@ -131,7 +131,7 @@ func (w *WorkflowExecutor) runFlow(ctx context.Context, msg message.Message, run
 	}
 	if w.store != nil {
 		hooks.Restore = func(visitKey string) (json.RawMessage, bool) {
-			cp, gerr := w.store.Get(ctx, agentID, runID, visitKey)
+			cp, gerr := w.loadCheckpoint(ctx, agentID, runID, visitKey)
 			if gerr != nil || cp.Status != CheckpointCompleted {
 				return nil, false
 			}
@@ -140,7 +140,7 @@ func (w *WorkflowExecutor) runFlow(ctx context.Context, msg message.Message, run
 			return cp.State, true
 		}
 		hooks.Started = func(visitKey string, node sdkr.FlowNode) {
-			_ = w.store.Upsert(ctx, Checkpoint{
+			_ = w.saveCheckpoint(ctx, Checkpoint{
 				AgentID: agentID, RunID: runID, StepID: visitKey,
 				Status: CheckpointInProgress, UpdatedAt: time.Now().UTC(),
 			})
@@ -161,13 +161,13 @@ func (w *WorkflowExecutor) runFlow(ctx context.Context, msg message.Message, run
 			}
 		}
 		hooks.Completed = func(visitKey string, state json.RawMessage) {
-			_ = w.store.Upsert(ctx, Checkpoint{
+			_ = w.saveCheckpoint(ctx, Checkpoint{
 				AgentID: agentID, RunID: runID, StepID: visitKey,
 				Status: CheckpointCompleted, State: state, UpdatedAt: time.Now().UTC(),
 			})
 		}
 		hooks.Failed = func(visitKey string, ferr error) {
-			_ = w.store.Upsert(ctx, Checkpoint{
+			_ = w.saveCheckpoint(ctx, Checkpoint{
 				AgentID: agentID, RunID: runID, StepID: visitKey,
 				Status: CheckpointFailed, UpdatedAt: time.Now().UTC(),
 			})

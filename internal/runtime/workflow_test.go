@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 	"go.uber.org/zap"
@@ -204,7 +205,9 @@ func rawJSONString(t *testing.T, raw json.RawMessage) string {
 
 func assertCheckpointStatus(t *testing.T, store *CheckpointStore, agentID, runID, stepID, want string) {
 	t.Helper()
-	cp, err := store.Get(context.Background(), agentID, runID, stepID)
+	// The executor stamps the tenant from the run's principal; these runs have
+	// none, so their checkpoints are the personal workspace's.
+	cp, err := store.Get(context.Background(), wsroot.PersonalWorkspaceID, agentID, runID, stepID)
 	if err != nil {
 		t.Fatalf("checkpoint %s/%s/%s: %v", agentID, runID, stepID, err)
 	}

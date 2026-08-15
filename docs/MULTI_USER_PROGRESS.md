@@ -25,7 +25,7 @@ isolation state; this document explains it.
 declared workspace-owned but not yet isolated.
 
 - At the start of this work: **57 blockers**
-- Now: **12 blockers**
+- Now: **10 blockers**
 
 A store moves from `personal-only` to `scoped` only when it has a real
 cross-tenant isolation test. The catalog names that test, and a CI check fails
@@ -540,6 +540,52 @@ workspace position is the mistake it exists to catch — it compiles, it reads
 plausibly, and it turns a scoped listing straight back into a deployment-wide
 one. Verified by planting exactly that and watching the guard name the file,
 line and function.
+
+### Workflow checkpoints are replayed, so a key collision is an injection
+
+`workflow_checkpoints` was keyed on `(agent_id, run_id, step_id)`. Agent IDs
+are unique *within* a workspace, not across the deployment — two tenants can
+each have an agent called "researcher" — so that triple was not a key, and the
+`ON CONFLICT` clause meant a second tenant writing it did not get its own row:
+it took over the first tenant's.
+
+What makes this worse than the usual leak is what checkpoints are *for*. The
+Restore hook feeds a completed checkpoint's `State` into a resuming run as that
+step's own output. A cross-tenant match does not merely show another
+workspace's data — it injects it as this run's computation, and whatever the
+run does next treats it as its own.
+
+**The key had to widen, which meant a rebuild.** SQLite cannot alter a primary
+key in place, and simply adding a column would have left the old three-column
+key still enforcing global uniqueness. So v2 is the one `Destructive` migration
+in the series. It is safe to be: `MigrateSchema` runs each step in a
+transaction, so an interrupted upgrade rolls back to the v1 table with its rows
+intact rather than leaving a half-copied one.
+
+The migration renames the old table aside and creates the new one *under the
+real name*, rather than building `workflow_checkpoints_v2` and renaming it into
+place. Either order works; this one keeps `workflow_checkpoints` the only name
+the package ever `CREATE`s, so the ownership catalog's discovery scan does not
+see a second durable table and demand a classification and isolation test for a
+scratch name that exists only between the ALTER and the DROP. (It did exactly
+that on the first attempt — the guard works.)
+
+**One choke point instead of seven literals.** The executor built `Checkpoint`
+literals in seven places across `workflow.go` and `flow.go`. A literal that
+omits `WorkspaceID` compiles, writes a row, and lands it in the personal
+workspace where it can collide with a genuinely personal run — silent in every
+way that matters. All seven now go through `w.saveCheckpoint` /
+`w.loadCheckpoint`, which stamp the tenant from the run's principal, and
+`TestExecutorCheckpointsGoThroughTheStampingHelpers` fails the build if a new
+one reaches `w.store` directly.
+
+**The recovery sweep stayed deployment-wide, and says so.** A process-restart
+resume has no request and therefore no tenant, so it genuinely has to see every
+workspace. `ListInProgress(ctx, workspaceID)` is the scoped read;
+`ListInProgressAcrossWorkspaces(ctx)` is the sweep, named so it cannot be
+reached by accident, and every row it returns carries its own `WorkspaceID` so
+the resumer decides per row instead of inheriting one workspace's context for
+all of them.
 
 ## Guards worth keeping
 

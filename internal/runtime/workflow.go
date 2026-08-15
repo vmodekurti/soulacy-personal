@@ -64,7 +64,7 @@ func (w *WorkflowExecutor) Run(ctx context.Context, msg message.Message, resumeR
 	for _, step := range w.spec.Steps {
 		// 3a. Load checkpoint; if completed, load state into vars and skip.
 		if w.store != nil {
-			existing, err := w.store.Get(ctx, agentID, runID, step.ID)
+			existing, err := w.loadCheckpoint(ctx, agentID, runID, step.ID)
 			if err == nil && existing.Status == CheckpointCompleted {
 				w.log.Debug("workflow step already completed, skipping",
 					zap.String("run_id", runID),
@@ -85,7 +85,7 @@ func (w *WorkflowExecutor) Run(ctx context.Context, msg message.Message, resumeR
 
 		// 3b. Upsert checkpoint with status = in_progress.
 		if w.store != nil {
-			if err := w.store.Upsert(ctx, Checkpoint{
+			if err := w.saveCheckpoint(ctx, Checkpoint{
 				AgentID:   agentID,
 				RunID:     runID,
 				StepID:    step.ID,
@@ -109,7 +109,7 @@ func (w *WorkflowExecutor) Run(ctx context.Context, msg message.Message, resumeR
 				w.log.Debug("workflow step skipped (If condition)",
 					zap.String("step_id", step.ID), zap.String("condition_result", condResult))
 				if w.store != nil {
-					_ = w.store.Upsert(ctx, Checkpoint{
+					_ = w.saveCheckpoint(ctx, Checkpoint{
 						AgentID:   agentID,
 						RunID:     runID,
 						StepID:    step.ID,
@@ -142,7 +142,7 @@ func (w *WorkflowExecutor) Run(ctx context.Context, msg message.Message, resumeR
 				w.log.Warn("workflow step error, skipping",
 					zap.String("step_id", step.ID), zap.Error(toolErr))
 				if w.store != nil {
-					_ = w.store.Upsert(ctx, Checkpoint{
+					_ = w.saveCheckpoint(ctx, Checkpoint{
 						AgentID:   agentID,
 						RunID:     runID,
 						StepID:    step.ID,
@@ -177,7 +177,7 @@ func (w *WorkflowExecutor) Run(ctx context.Context, msg message.Message, resumeR
 
 		// 3g. Upsert checkpoint with status = completed.
 		if w.store != nil {
-			_ = w.store.Upsert(ctx, Checkpoint{
+			_ = w.saveCheckpoint(ctx, Checkpoint{
 				AgentID:   agentID,
 				RunID:     runID,
 				StepID:    step.ID,
@@ -192,6 +192,25 @@ func (w *WorkflowExecutor) Run(ctx context.Context, msg message.Message, resumeR
 	return lastResult, nil
 }
 
+// saveCheckpoint and loadCheckpoint are the only two places in the executor
+// that touch the checkpoint store.
+//
+// The tenant is stamped here rather than at each call site because the failure
+// mode is silent: a Checkpoint literal that omits WorkspaceID still compiles,
+// still writes a row, and lands it in the personal workspace — where it can
+// collide with a genuinely personal run under the same agent and step ID.
+// Routing every write through one function makes "did you set the workspace"
+// a property of the executor rather than of each of the seven literals that
+// used to construct these rows.
+func (w *WorkflowExecutor) saveCheckpoint(ctx context.Context, cp Checkpoint) error {
+	cp.WorkspaceID = WorkspaceFromContext(ctx)
+	return w.store.Upsert(ctx, cp)
+}
+
+func (w *WorkflowExecutor) loadCheckpoint(ctx context.Context, agentID, runID, stepID string) (Checkpoint, error) {
+	return w.store.Get(ctx, WorkspaceFromContext(ctx), agentID, runID, stepID)
+}
+
 // handleStepError marks the checkpoint as failed and returns the error.
 func (w *WorkflowExecutor) handleStepError(ctx context.Context, agentID, runID string, step agent.StepSpec, state json.RawMessage, err error) (json.RawMessage, error) {
 	w.log.Error("workflow step failed",
@@ -200,7 +219,7 @@ func (w *WorkflowExecutor) handleStepError(ctx context.Context, agentID, runID s
 		zap.Error(err),
 	)
 	if w.store != nil {
-		_ = w.store.Upsert(ctx, Checkpoint{
+		_ = w.saveCheckpoint(ctx, Checkpoint{
 			AgentID:   agentID,
 			RunID:     runID,
 			StepID:    step.ID,

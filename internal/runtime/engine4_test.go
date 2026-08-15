@@ -31,6 +31,7 @@ import (
 
 	"github.com/soulacy/soulacy/internal/llm"
 	"github.com/soulacy/soulacy/internal/memory"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 	"github.com/soulacy/soulacy/pkg/skill"
@@ -1817,7 +1818,7 @@ func TestCheckpointStoreListInProgress(t *testing.T) {
 		t.Fatalf("Upsert completed: %v", err)
 	}
 
-	cps, err := store.ListInProgress(ctx)
+	cps, err := store.ListInProgress(ctx, wsroot.PersonalWorkspaceID)
 	if err != nil {
 		t.Fatalf("ListInProgress: %v", err)
 	}
@@ -1831,7 +1832,7 @@ func TestCheckpointStoreListInProgress(t *testing.T) {
 
 func TestCheckpointStoreGetMissing(t *testing.T) {
 	store := newTestCheckpointStore(t)
-	_, err := store.Get(context.Background(), "no-agent", "no-run", "no-step")
+	_, err := store.Get(context.Background(), wsroot.PersonalWorkspaceID, "no-agent", "no-run", "no-step")
 	if err == nil {
 		t.Fatal("expected error for absent checkpoint, got nil")
 	}
@@ -1858,7 +1859,7 @@ func TestCheckpointStoreUpsertUpdatesStatus(t *testing.T) {
 		t.Fatalf("second Upsert: %v", err)
 	}
 
-	got, err := store.Get(ctx, "a", "r", "s")
+	got, err := store.Get(ctx, wsroot.PersonalWorkspaceID, "a", "r", "s")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
