@@ -9,6 +9,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 
 	"github.com/soulacy/soulacy/internal/auth"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/message"
 )
 
@@ -86,12 +87,18 @@ func (s *Server) recordAdminAudit(c *fiber.Ctx, action, resource, target, status
 		}
 	}
 	rec.Actor = s.auditActor(c)
+	// The event carries the workspace, not just the record payload. Reads of
+	// the audit trail are workspace-scoped, so an event appended without one
+	// lands in the personal workspace and becomes invisible to the tenant
+	// whose action produced it — an audit record that silently disappears is
+	// worse than one that leaks, because nothing surfaces the loss.
 	s.actions.Append(message.Event{
-		Type:      "admin.audit",
-		AgentID:   adminAuditAgentID,
-		SessionID: rec.RequestID,
-		Timestamp: rec.Timestamp,
-		Payload:   rec,
+		Type:        "admin.audit",
+		WorkspaceID: wsroot.Normalize(rec.WorkspaceID),
+		AgentID:     adminAuditAgentID,
+		SessionID:   rec.RequestID,
+		Timestamp:   rec.Timestamp,
+		Payload:     rec,
 	})
 }
 

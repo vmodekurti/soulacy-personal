@@ -13,7 +13,7 @@ isolation state; this document explains it.
 |---|---|---|
 | M1 — Tenant kernel | MU-001–005 | Complete |
 | M2 — Team identity | MU-006–011 | Complete |
-| M3 — Data isolation | MU-012–019 | MU-012 ✓ MU-013 ✓ MU-014 ✓ MU-015 partial; MU-016–019 not started |
+| M3 — Data isolation | MU-012–019 | MU-012 ✓ MU-013 ✓ MU-014 ✓ MU-019 ✓; MU-015 partial; MU-016–018 not started |
 | — event spine + stores | (cross-cutting) | Events, action log, learning, Studio traces, workboard, conversation history ✓ |
 | M4 — Execution plane | MU-020–025 | Not started |
 | M5 — Team Preview | MU-026–032 | Not started |
@@ -284,6 +284,50 @@ One catalog wrinkle worth knowing: the costs column is named `workspace`, not
 `workspace_id`, and `ValidateCatalog` requires the literal `workspace_id` in a
 tenant table's `ScopeKey`. Rather than weaken that guard, the entries record
 both — `workspace_id (column: workspace)`.
+
+### MU-019: the indirect surfaces
+
+The stores were the easy half. The rest of MU-019 is the surfaces that carry
+tenant data without looking like storage.
+
+- **Audit records had stopped reaching their own tenant.** `recordAdminAudit`
+  appended events with no workspace, so once audit *reads* became scoped, a
+  tenant's own records landed in the personal workspace and vanished from their
+  trail. Introduced by the action-log commit and caught while auditing MU-019 —
+  the same disappearing-data failure mode, this time self-inflicted.
+- **Shares gained the half that was missing.** A published conversation was
+  permanent: no listing, no revocation, no audit, and creating one needs only
+  `chat:READ`. Now it carries its workspace and creator, expires on read as
+  well as by sweep, can be listed and revoked by its owning workspace only, and
+  both create and revoke are audited. The count cap became per-workspace —
+  a global cap let one tenant's burst evict another's live links, which is a
+  lever one tenant could pull against another.
+- **`OpsSummary` was aggregating every tenant's runs** behind a tenant-facing
+  endpoint. Run counts, failure rates and per-agent failure leaders are exactly
+  the operational signal one team should not read about another.
+- **Support bundles omit log bodies unless explicitly confirmed**, and now
+  redact personal data as well as credentials. Those are different sets, so
+  `redact.ValueForExport` is a separate opt-in: losing a password from a
+  diagnostic is free, losing a `user_id` would make a bundle useless for
+  tracing a run. The persistence path is unchanged.
+- **Raw Prometheus is gated in multi-user deployments.** The families carry an
+  `agent` label; the registry is process-wide and rendered in one pass, so
+  there is no per-caller view and *who may read it* is the only control.
+  Personal is untouched — with one workspace the labels identify nobody.
+
+### "Cannot omit" is a guard, not a promise
+
+MU-019 asks that aggregate queries *cannot* omit the workspace predicate.
+Per-store tests prove the queries that exist today are scoped; they cannot
+prove the next one will be. `TestTenantStoresAreReachedThroughAScopedAccessor`
+fails the build when a handler calls `s.actions.X` or `s.costStore.X` directly
+instead of through `actionLog(c)` / `costs(c)`, which is the only way a new
+read gets written without a tenant. Writes (`Append`) are exempt because the
+event carries the workspace itself.
+
+That is why `costScope` exists at all: costs were correctly scoped by passing
+`s.costWorkspace(c)` at each call site, and correct-by-convention is exactly
+what the guard is there to replace.
 
 ### The SDK is extended additively, never modified
 

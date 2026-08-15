@@ -6,6 +6,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
+	"errors"
 	"github.com/soulacy/soulacy/internal/actionlog"
 	"github.com/soulacy/soulacy/internal/costs"
 )
@@ -43,7 +44,7 @@ func (s *Server) handleRunMetrics(c *fiber.Ctx) error {
 		haveTrail bool
 	)
 	if s.costStore != nil {
-		m, found, err := s.costStore.SessionMetrics(c.Context(), sessionID)
+		m, found, err := s.costs(c).SessionMetrics(c.Context(), sessionID)
 		if err != nil {
 			s.log.Warn("run metrics: costs query failed")
 		} else if found {
@@ -108,19 +109,18 @@ func (s *Server) handleOpsSummary(c *fiber.Ctx) error {
 			"error": "ops summary not available (action log disabled)",
 		})
 	}
-	sp, ok := s.actions.(opsSummarizer)
-	if !ok {
-		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
-			"error": "ops summary requires a durable action log backend",
-		})
-	}
 	window := c.Query("window", "24h")
 	since, label, err := parseCostSince(window)
 	if err != nil {
 		return s.errJSON(c, fiber.StatusBadRequest, err)
 	}
 	limit := c.QueryInt("limit", 8)
-	summary, err := sp.OpsSummary(since, label, limit)
+	summary, err := s.actionLog(c).OpsSummary(since, label, limit)
+	if errors.Is(err, ErrOpsSummaryUnsupported) {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"error": "ops summary requires a durable action log backend",
+		})
+	}
 	if err != nil {
 		s.log.Warn("ops summary: actionlog query failed")
 		return s.errMsg(c, fiber.StatusInternalServerError, "internal error")
@@ -145,7 +145,7 @@ func (s *Server) handleOpsSummary(c *fiber.Ctx) error {
 		"recent_failures":    summary.RecentFailures,
 	}
 	if s.costStore != nil {
-		rows, err := s.costStore.SumByAgent(c.Context(), s.costWorkspace(c), since)
+		rows, err := s.costs(c).SumByAgent(c.Context(), since)
 		if err != nil {
 			s.log.Warn("ops summary: cost query failed")
 		} else {

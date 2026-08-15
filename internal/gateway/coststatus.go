@@ -144,10 +144,10 @@ func (s *Server) costReadiness(c *fiber.Ctx) costReadiness {
 		}
 		daysInMonth := float64(time.Date(now.Year(), now.Month()+1, 0, 0, 0, 0, 0, time.UTC).Day())
 		forecastMonthlyUSD = last30d / elapsedDays * daysInMonth
-		if reserved, err := s.costStore.ReservedCostMicros(c.Context(), s.costWorkspace(c), now); err == nil {
+		if reserved, err := s.costs(c).ReservedCostMicros(c.Context(), now); err == nil {
 			reservedUSD = float64(reserved) / 1_000_000
 		}
-		if stats, err := s.costStore.StatsSince(c.Context(), s.costWorkspace(c), monthStart); err == nil {
+		if stats, err := s.costs(c).StatsSince(c.Context(), monthStart); err == nil {
 			unknownPricedCalls = stats.UnknownPriced
 			rejectedCalls = stats.RejectedCalls
 			if stats.Calls > 0 {
@@ -157,7 +157,7 @@ func (s *Server) costReadiness(c *fiber.Ctx) costReadiness {
 				retryAttempts = stats.Attempts - int64(admitted)
 			}
 		}
-		if items, err := s.costStore.ListReconciliations(c.Context(), 20); err == nil && len(items) > 0 {
+		if items, err := s.costs(c).ListReconciliations(c.Context(), 20); err == nil && len(items) > 0 {
 			reconciliationHealthy = true
 			for _, item := range items {
 				if ratio := item.VarianceRatio(); ratio > reconciliationVariance {
@@ -288,7 +288,7 @@ func (s *Server) sumCostSince(c *fiber.Ctx, since time.Time) float64 {
 		return 0
 	}
 	ctx := c.Context()
-	rows, err := s.costStore.SumByAgent(ctx, s.costWorkspace(c), since)
+	rows, err := s.costs(c).SumByAgent(ctx, since)
 	if err != nil {
 		return 0
 	}

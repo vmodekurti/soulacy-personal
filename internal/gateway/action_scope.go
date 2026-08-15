@@ -5,10 +5,15 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
+	"github.com/soulacy/soulacy/internal/actionlog"
+	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/learning"
+	"github.com/soulacy/soulacy/internal/rbac"
 	"github.com/soulacy/soulacy/internal/storage"
 	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/message"
+	"strings"
+	"time"
 )
 
 // actionScope binds the action log to one workspace.
@@ -225,3 +230,61 @@ func (s *Server) costWorkspace(c *fiber.Ctx) string {
 	}
 	return wsroot.PersonalWorkspaceID
 }
+
+// platformMetricsMW restricts the raw Prometheus endpoint in multi-user
+// deployments.
+//
+// The metric families carry an `agent` label, and an agent ID is tenant data:
+// it names what another team is building, and its rate reveals how much they
+// are using it. The registry is process-wide and rendered in one pass, so
+// there is no per-caller view of it — which leaves who may read it as the
+// control. `metrics:read` is held by owner, admin, and developer, and
+// developer is a *workspace* role; the raw endpoint is a deployment-operations
+// surface.
+//
+// Personal is deliberately untouched: with one workspace the labels identify
+// nobody, and product invariant 7 says a single-user install must not notice
+// the storage layer became tenant-aware. Per-tenant numbers are served by the
+// cost and run endpoints, which are workspace-scoped.
+func (s *Server) platformMetricsMW() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		if s.cfg == nil || !config.IsMultiUserMode(s.cfg.DeploymentMode()) {
+			return c.Next()
+		}
+		role := ""
+		if identity, ok := requestIdentity(c); ok {
+			role = strings.ToLower(strings.TrimSpace(identity.Role()))
+		}
+		if role != rbac.RoleOwner && role != rbac.RoleAdmin {
+			return s.errMsg(c, fiber.StatusForbidden,
+				"raw platform metrics are restricted to workspace owners and admins; use the cost and run endpoints for this workspace's figures")
+		}
+		return c.Next()
+	}
+}
+
+// OpsSummary returns this workspace's run-reliability rollup. Backends without
+// a tenant-aware surface are single-tenant, so the unscoped call is correct
+// there and only there.
+func (a actionScope) OpsSummary(since time.Time, window string, limit int) (actionlog.OpsSummary, error) {
+	if a.actions == nil {
+		return actionlog.OpsSummary{}, nil
+	}
+	if scoped, ok := a.actions.(interface {
+		OpsSummaryInWorkspace(string, time.Time, string, int) (actionlog.OpsSummary, error)
+	}); ok {
+		return scoped.OpsSummaryInWorkspace(a.workspaceID, since, window, limit)
+	}
+	legacy, ok := a.actions.(opsSummarizer)
+	if !ok {
+		return actionlog.OpsSummary{}, ErrOpsSummaryUnsupported
+	}
+	if !a.personal() {
+		return actionlog.OpsSummary{}, ErrActionLogNotTenantAware
+	}
+	return legacy.OpsSummary(since, window, limit)
+}
+
+// ErrOpsSummaryUnsupported distinguishes "this backend cannot roll up runs"
+// from "the rollup failed", so a handler can say which.
+var ErrOpsSummaryUnsupported = errors.New("action log backend does not support ops summaries")

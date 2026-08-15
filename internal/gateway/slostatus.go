@@ -79,8 +79,8 @@ func (s *Server) sloReadiness(c *fiber.Ctx) sloReadiness {
 	}}
 	var summary actionlog.OpsSummary
 	if s.actions != nil {
-		if sp, ok := s.actions.(opsSummarizer); ok {
-			if got, err := sp.OpsSummary(since, label, 8); err == nil {
+		{
+			if got, err := s.actionLog(c).OpsSummary(since, label, 8); err == nil {
 				summary = got
 				checks[0].Status = "ok"
 				checks[0].Detail = "Recent run outcomes are available from the durable action log."

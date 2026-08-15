@@ -159,3 +159,56 @@ func hashMarker(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return "[REDACTED:" + hex.EncodeToString(sum[:])[:12] + "]"
 }
+
+// ── personal data ────────────────────────────────────────────────────────────
+
+var (
+	// personalKey names fields that carry personal data rather than
+	// credentials. It is deliberately separate from secretKey: losing a
+	// password from a diagnostic is free, whereas losing a user_id would make
+	// a bundle useless for tracing a run, so the two sets are not interchange-
+	// able and callers opt into this one.
+	personalKey = regexp.MustCompile(`(?i)^(e[-_]?mail|email[-_]?address|phone|phone[-_]?number|mobile|msisdn|full[-_]?name|first[-_]?name|last[-_]?name|given[-_]?name|family[-_]?name|display[-_]?name|street|postal[-_]?code|zip|ssn|tax[-_]?id|date[-_]?of[-_]?birth|dob)$`)
+	emailText   = regexp.MustCompile(`(?i)\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b`)
+)
+
+// PersonalText removes personal data from free text. It is applied on export
+// paths — support bundles — on top of Text, never on the persistence path,
+// because an operator debugging their own deployment needs their own logs
+// intact.
+func PersonalText(s string) string {
+	return emailText.ReplaceAllString(Text(s), "***REDACTED-EMAIL***")
+}
+
+// ValueForExport is Value plus personal-data removal. Support bundles leave
+// the deployment and are routinely handed to a vendor, so they get the
+// stricter treatment: MU-019 requires them to redact secrets *and* personal
+// data, and those are different sets.
+func ValueForExport(v any) any {
+	return scrubPersonal(Value(v))
+}
+
+func scrubPersonal(v any) any {
+	switch typed := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, value := range typed {
+			if personalKey.MatchString(strings.TrimSpace(key)) {
+				out[key] = "***REDACTED***"
+				continue
+			}
+			out[key] = scrubPersonal(value)
+		}
+		return out
+	case []any:
+		out := make([]any, len(typed))
+		for i, item := range typed {
+			out[i] = scrubPersonal(item)
+		}
+		return out
+	case string:
+		return emailText.ReplaceAllString(typed, "***REDACTED-EMAIL***")
+	default:
+		return v
+	}
+}

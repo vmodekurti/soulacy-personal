@@ -815,7 +815,7 @@ func (s *Server) buildApp() *fiber.App {
 	// Prometheus metrics. Wrapped in the API auth group so the same key
 	// gates scraping. Scrape via:
 	//   curl -H 'Authorization: Bearer <key>' http://gw/api/v1/metrics
-	api.Get("/metrics", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), adaptor.HTTPHandler(metrics.Handler()))
+	api.Get("/metrics", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.platformMetricsMW(), adaptor.HTTPHandler(metrics.Handler()))
 	api.Post("/admin/restart", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleRestart)
 	api.Get("/admin/audit", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleAdminAudit)
 	api.Get("/onboarding/status", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleOnboardingStatus)
@@ -872,6 +872,11 @@ func (s *Server) buildApp() *fiber.App {
 	// Cancel an in-flight run (Story #22): stop a slow local-model run.
 	api.Post("/chat/cancel", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleChatCancel)
 	api.Post("/chat/share", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.handleCreateShare)
+	// Listing and revocation are the other half of a shareable link: a
+	// published conversation that cannot be found or withdrawn is permanent.
+	// Both are scoped to the caller's workspace inside the handlers.
+	api.Get("/chat/shares", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.handleListShares)
+	api.Delete("/chat/share/:token", s.rbacMW(rbac.ResourceChat, rbac.ActionWrite), s.handleRevokeShare)
 	api.Get("/chat/artifacts", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{QueryParam: "agent_id"}), s.handleChatArtifacts)
 	api.Get("/chat/artifacts/download", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{QueryParam: "agent_id"}), s.handleChatArtifactDownload)
 	api.Post("/chat/attachments", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{FormField: "agent_id"}), s.handleChatAttachmentUpload)
@@ -1520,7 +1525,7 @@ func (s *Server) handleGetCosts(c *fiber.Ctx) error {
 	if err != nil {
 		return s.errJSON(c, fiber.StatusBadRequest, err)
 	}
-	rows, err := s.costStore.SumByAgent(c.Context(), s.costWorkspace(c), since)
+	rows, err := s.costs(c).SumByAgent(c.Context(), since)
 	if err != nil {
 		s.log.Error("costs: SumByAgent failed", zap.Error(err))
 		return s.errMsg(c, fiber.StatusInternalServerError, "internal error")
@@ -1559,7 +1564,7 @@ func (s *Server) handleGetCostUsage(c *fiber.Ctx) error {
 	if err != nil || limit <= 0 || limit > 1000 {
 		return s.errMsg(c, fiber.StatusBadRequest, "limit must be between 1 and 1000")
 	}
-	records, err := s.costStore.ListUsage(c.Context(), s.costWorkspace(c), since, limit)
+	records, err := s.costs(c).ListUsage(c.Context(), since, limit)
 	if err != nil {
 		s.log.Error("costs: ListUsage failed", zap.Error(err))
 		return s.errMsg(c, fiber.StatusInternalServerError, "internal error")
@@ -1582,7 +1587,7 @@ func (s *Server) handleGetCostChargeback(c *fiber.Ctx) error {
 	if raw := strings.TrimSpace(c.Query("group_by")); raw != "" {
 		dimensions = strings.Split(raw, ",")
 	}
-	rows, err := s.costStore.Chargeback(c.Context(), s.costWorkspace(c), since, dimensions)
+	rows, err := s.costs(c).Chargeback(c.Context(), since, dimensions)
 	if err != nil {
 		return s.errJSON(c, fiber.StatusBadRequest, err)
 	}
@@ -1598,7 +1603,7 @@ func (s *Server) handleGetCostReconciliations(c *fiber.Ctx) error {
 	if err != nil || limit <= 0 || limit > 1000 {
 		return s.errMsg(c, fiber.StatusBadRequest, "limit must be between 1 and 1000")
 	}
-	items, err := s.costStore.ListReconciliations(c.Context(), limit)
+	items, err := s.costs(c).ListReconciliations(c.Context(), limit)
 	if err != nil {
 		return s.errMsg(c, fiber.StatusInternalServerError, "internal error")
 	}
@@ -1633,7 +1638,7 @@ func (s *Server) handlePostCostReconciliation(c *fiber.Ctx) error {
 	if !end.After(start) {
 		return s.errMsg(c, fiber.StatusBadRequest, "period_end must be after period_start")
 	}
-	item, err := s.costStore.ReconcileProvider(c.Context(), strings.TrimSpace(req.Provider), start, end,
+	item, err := s.costs(c).ReconcileProvider(c.Context(), strings.TrimSpace(req.Provider), start, end,
 		int64(req.ActualUSD*1_000_000+0.5), strings.TrimSpace(req.Source))
 	if err != nil {
 		return s.errMsg(c, fiber.StatusInternalServerError, "internal error")
@@ -1667,7 +1672,7 @@ func (s *Server) handleGetAgentCosts(c *fiber.Ctx) error {
 	if err != nil {
 		return s.errJSON(c, fiber.StatusBadRequest, err)
 	}
-	sessions, err := s.costStore.SumBySession(c.Context(), s.costWorkspace(c), agentID, since)
+	sessions, err := s.costs(c).SumBySession(c.Context(), agentID, since)
 	if err != nil {
 		s.log.Error("costs: SumBySession failed", zap.String("agent_id", agentID), zap.Error(err))
 		return s.errMsg(c, fiber.StatusInternalServerError, "internal error")

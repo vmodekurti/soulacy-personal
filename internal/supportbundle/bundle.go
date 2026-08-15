@@ -32,7 +32,14 @@ type Options struct {
 	Doctor       any
 	ExtraJSON    map[string]any
 	LogTailBytes int64
-	Now          time.Time
+	// IncludeContent opts the bundle into raw log tails. Config and diagnostic
+	// JSON are always redacted, but log bodies are the agent's actual work —
+	// prompts, tool output, message text — so they are omitted unless the
+	// caller asks for them explicitly. Defaulting to "include" would mean an
+	// operator could hand a vendor a tenant's conversations without ever
+	// deciding to.
+	IncludeContent bool
+	Now            time.Time
 }
 
 type Manifest struct {
@@ -46,6 +53,9 @@ type Manifest struct {
 	Included     []string          `json:"included"`
 	Redaction    string            `json:"redaction"`
 	LogTailBytes int64             `json:"log_tail_bytes"`
+	// ContentIncluded records the choice in the bundle itself, so whoever
+	// receives it can tell whether they are holding log bodies.
+	ContentIncluded bool `json:"content_included"`
 }
 
 func Write(w io.Writer, opts Options) (Manifest, error) {
@@ -56,15 +66,16 @@ func Write(w io.Writer, opts Options) (Manifest, error) {
 		opts.Now = time.Now()
 	}
 	manifest := Manifest{
-		CreatedAt:    opts.Now.UTC().Format(time.RFC3339),
-		Version:      config.Version,
-		OS:           runtime.GOOS,
-		Arch:         runtime.GOARCH,
-		GatewayURL:   opts.GatewayURL,
-		ConfigPath:   opts.ConfigPath,
-		Workspace:    opts.Workspace,
-		Redaction:    "secret-like fields are replaced with ***REDACTED***; long opaque scalars are hashed",
-		LogTailBytes: opts.LogTailBytes,
+		CreatedAt:       opts.Now.UTC().Format(time.RFC3339),
+		Version:         config.Version,
+		OS:              runtime.GOOS,
+		Arch:            runtime.GOARCH,
+		GatewayURL:      opts.GatewayURL,
+		ConfigPath:      opts.ConfigPath,
+		Workspace:       opts.Workspace,
+		Redaction:       "secret-like fields are replaced with ***REDACTED***; long opaque scalars are hashed",
+		LogTailBytes:    opts.LogTailBytes,
+		ContentIncluded: opts.IncludeContent,
 	}
 
 	zw := zip.NewWriter(w)
@@ -81,7 +92,7 @@ func Write(w io.Writer, opts Options) (Manifest, error) {
 		return nil
 	}
 
-	doctorJSON, _ := json.MarshalIndent(redact.Value(opts.Doctor), "", "  ")
+	doctorJSON, _ := json.MarshalIndent(redact.ValueForExport(opts.Doctor), "", "  ")
 	if len(bytes.TrimSpace(doctorJSON)) == 0 || string(doctorJSON) == "null" {
 		doctorJSON = []byte("{}")
 	}
@@ -106,9 +117,14 @@ func Write(w io.Writer, opts Options) (Manifest, error) {
 		_ = zw.Close()
 		return manifest, err
 	}
-	if err := addRecentLogTails(add, opts.LogDirs, opts.LogTailBytes); err != nil {
-		_ = zw.Close()
-		return manifest, err
+	if opts.IncludeContent {
+		if err := addRecentLogTails(add, opts.LogDirs, opts.LogTailBytes); err != nil {
+			_ = zw.Close()
+			return manifest, err
+		}
+	} else {
+		manifest.Included = append(manifest.Included,
+			"(log bodies omitted — re-request with explicit content confirmation)")
 	}
 
 	sort.Strings(manifest.Included)
@@ -131,7 +147,7 @@ func addExtraJSON(add func(string, []byte) error, extra map[string]any) error {
 	sort.Strings(names)
 	for _, name := range names {
 		value := extra[name]
-		data, _ := json.MarshalIndent(redact.Value(value), "", "  ")
+		data, _ := json.MarshalIndent(redact.ValueForExport(value), "", "  ")
 		if len(bytes.TrimSpace(data)) == 0 || string(data) == "null" {
 			data = []byte("{}")
 		}
@@ -301,8 +317,11 @@ func tailRedactedTextFile(path string, maxBytes int64) ([]byte, error) {
 	return []byte(RedactText(string(data))), nil
 }
 
+// RedactText scrubs a support bundle's free text. Bundles leave the deployment
+// and are routinely handed to a vendor, so they get personal-data removal on
+// top of the credential scrub the rest of the codebase uses.
 func RedactText(s string) string {
-	return redact.Text(s)
+	return redact.PersonalText(s)
 }
 
 func redactScalar(s string) string {

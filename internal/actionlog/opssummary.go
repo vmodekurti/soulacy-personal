@@ -1,6 +1,7 @@
 package actionlog
 
 import (
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"sort"
 	"strings"
 	"time"
@@ -61,9 +62,20 @@ type runRollup struct {
 	LastEventAt  time.Time
 }
 
-// OpsSummary aggregates recent run reliability from the durable SQLite event
-// table. Since zero means all known history.
+// OpsSummary aggregates the personal workspace's run reliability. Since zero
+// means all known history.
 func (l *Logger) OpsSummary(since time.Time, window string, limit int) (OpsSummary, error) {
+	return l.OpsSummaryInWorkspace(wsroot.PersonalWorkspaceID, since, window, limit)
+}
+
+// OpsSummaryInWorkspace is OpsSummary scoped to one tenant.
+//
+// This is a run-reliability rollup — run counts, failure counts, per-agent
+// failure leaders — and it was aggregating every tenant's runs while being
+// served from a tenant-facing endpoint. Failure rates and agent names are
+// exactly the operational signal one team should not be able to read about
+// another.
+func (l *Logger) OpsSummaryInWorkspace(workspaceID string, since time.Time, window string, limit int) (OpsSummary, error) {
 	if limit <= 0 {
 		limit = 8
 	}
@@ -75,7 +87,7 @@ func (l *Logger) OpsSummary(since time.Time, window string, limit int) (OpsSumma
 		Since:       since,
 		Window:      strings.TrimSpace(window),
 	}
-	runs, err := l.runRollups(since)
+	runs, err := l.runRollups(workspaceOrPersonal(workspaceID), since)
 	if err != nil {
 		return summary, err
 	}
@@ -157,9 +169,9 @@ func (l *Logger) OpsSummary(since time.Time, window string, limit int) (OpsSumma
 	return summary, nil
 }
 
-func (l *Logger) runRollups(since time.Time) ([]runRollup, error) {
-	where := "session_id <> ''"
-	args := []any{}
+func (l *Logger) runRollups(workspaceID string, since time.Time) ([]runRollup, error) {
+	where := "workspace_id = ? AND session_id <> ''"
+	args := []any{workspaceID}
 	if !since.IsZero() {
 		where += " AND created_at >= ?"
 		args = append(args, since.UTC())

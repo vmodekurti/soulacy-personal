@@ -17,11 +17,21 @@ import (
 )
 
 func (s *Server) handleSupportBundle(c *fiber.Ctx) error {
+	opts := s.supportBundleOptions(c)
+	// Log bodies are the agent's actual work — prompts, tool output, message
+	// text. Including them is a decision, so it takes an explicit parameter
+	// rather than a default, and it is audited: handing a vendor a tenant's
+	// conversations should leave a trace in that tenant's own audit trail.
+	opts.IncludeContent = isTruthy(c.Query("include_content"))
 	var buf bytes.Buffer
-	_, err := supportbundle.Write(&buf, s.supportBundleOptions(c))
+	manifest, err := supportbundle.Write(&buf, opts)
 	if err != nil {
 		return s.errMsg(c, fiber.StatusInternalServerError, "support bundle: "+err.Error())
 	}
+	s.recordAdminAudit(c, "support.bundle", "support", "bundle", "ok", map[string]any{
+		"content_included": manifest.ContentIncluded,
+		"workspace":        s.agents(c).workspaceID,
+	})
 	filename := fmt.Sprintf("soulacy-support-%s.zip", time.Now().Format("20060102-150405"))
 	c.Set(fiber.HeaderContentType, "application/zip")
 	c.Set(fiber.HeaderContentDisposition, fmt.Sprintf(`attachment; filename="%s"`, filename))

@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -27,7 +28,7 @@ func TestPruneShares_DropsExpiredSnapshots(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pruneShares(dir)
+	pruneShares(dir, wsroot.PersonalWorkspaceID)
 
 	if _, err := os.Stat(stale); err == nil {
 		t.Error("an expired share survived the prune")
@@ -52,7 +53,7 @@ func TestPruneShares_EnforcesTheCountCapByAge(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	pruneShares(dir)
+	pruneShares(dir, wsroot.PersonalWorkspaceID)
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -69,8 +70,8 @@ func TestPruneShares_EnforcesTheCountCapByAge(t *testing.T) {
 // And the prune has to actually be wired into the write path, not merely exist.
 func TestCreateShare_PrunesBeforeWriting(t *testing.T) {
 	src := readGatewaySource(t, "share.go")
-	line := findLine(t, src, "pruneShares(dir)")
-	if strings.TrimSpace(line) != "pruneShares(dir)" {
+	line := findLine(t, src, "pruneShares(dir, workspaceID)")
+	if strings.TrimSpace(line) != "pruneShares(dir, workspaceID)" {
 		t.Fatalf("unexpected prune call site: %s", line)
 	}
 }
