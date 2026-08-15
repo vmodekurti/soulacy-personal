@@ -383,3 +383,28 @@ func errorsAs(err error, target *(*sdkext.Error)) bool {
 	}
 	return false
 }
+
+// TestAnswerFromAnExitingSidecarIsNotDiscarded pins the ordering between the
+// stdout drain and cmd.Wait.
+//
+// A sidecar that replies and then exits — a one-shot helper, or a crash
+// immediately after answering — writes a complete, valid response. Waiting on
+// the process before draining stdout let os/exec close the pipe under the
+// reader, and made c.exited and the pending response channel ready in the same
+// instant, which Go's select resolves by coin flip. The answer was already in
+// hand and was thrown away roughly half the time.
+//
+// One iteration would pass by luck, so this runs the handshake repeatedly: the
+// probability of a broken build surviving is (1/2)^N.
+func TestAnswerFromAnExitingSidecarIsNotDiscarded(t *testing.T) {
+	for i := 0; i < 24; i++ {
+		c := NewClient(helperConfig(t, "crashafterhello"))
+		if err := c.Start(context.Background()); err != nil {
+			t.Fatalf("attempt %d: the sidecar answered and then exited, and its answer was discarded: %v", i, err)
+		}
+		if c.Negotiated().Name != "go-helper" {
+			t.Fatalf("attempt %d: negotiation result lost: %+v", i, c.Negotiated())
+		}
+		_ = c.Close()
+	}
+}
