@@ -1273,7 +1273,7 @@ func TestProviderIsOllama_NotOllama(t *testing.T) {
 func TestMemoryList_NilArchiveReturnsEmpty(t *testing.T) {
 	e := newMinimalEngine(t)
 	// archive is nil by default in newMinimalEngine
-	entries, err := e.MemoryList("agent-1", 10)
+	entries, err := e.MemoryList(wsroot.PersonalWorkspaceID, "agent-1", 10)
 	if err != nil {
 		t.Fatalf("MemoryList: %v", err)
 	}
@@ -1284,7 +1284,7 @@ func TestMemoryList_NilArchiveReturnsEmpty(t *testing.T) {
 
 func TestMemorySearch_NilArchiveReturnsEmpty(t *testing.T) {
 	e := newMinimalEngine(t)
-	entries, err := e.MemorySearch("agent-1", "some query", 10)
+	entries, err := e.MemorySearch(wsroot.PersonalWorkspaceID, "agent-1", "some query", 10)
 	if err != nil {
 		t.Fatalf("MemorySearch: %v", err)
 	}
@@ -1296,7 +1296,7 @@ func TestMemorySearch_NilArchiveReturnsEmpty(t *testing.T) {
 func TestMemorySearch_EmptyQueryCallsMemoryList(t *testing.T) {
 	e := newMinimalEngine(t)
 	// With nil archive, both code paths return empty non-nil slice.
-	entries, err := e.MemorySearch("agent-1", "", 10)
+	entries, err := e.MemorySearch(wsroot.PersonalWorkspaceID, "agent-1", "", 10)
 	if err != nil {
 		t.Fatalf("MemorySearch empty query: %v", err)
 	}

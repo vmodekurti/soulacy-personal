@@ -8,11 +8,14 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/soulacy/soulacy/internal/learning"
 	"github.com/soulacy/soulacy/internal/memory"
+	"github.com/soulacy/soulacy/internal/storage"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 	"github.com/soulacy/soulacy/pkg/skill"
@@ -178,15 +181,65 @@ func (e *Engine) skillNamesCSV() string {
 
 // ── Memory accessors (called by the gateway API handlers) ────────────────────
 
-// MemoryList returns up to limit archived entries for an agent, newest first.
-func (e *Engine) MemoryList(agentID string, limit int) ([]memory.Entry, error) {
+// ErrMemoryArchiveNotTenantAware is returned when a non-personal workspace asks
+// an archive backend that has no tenant-aware read surface.
+//
+// storage.MemoryBackend is frozen for this SDK major version, so its read
+// methods take no workspace and the shipped shims resolve them to the personal
+// workspace. That is correct for a single-tenant caller and wrong in both
+// directions for a tenant: it would return the personal workspace's archived
+// memories — a cross-tenant read — while hiding the caller's own. Backends
+// that cannot answer per tenant (an external sidecar, for instance) therefore
+// refuse rather than answer with somebody else's memories.
+var ErrMemoryArchiveNotTenantAware = errors.New("runtime: memory archive backend is not tenant-aware")
+
+// memoryArchiveFor returns the read surface to use for one workspace.
+//
+// Personal is allowed to use the frozen methods because personal is what they
+// mean. Anything else requires the optional interface.
+func (e *Engine) memoryArchiveFor(workspaceID string) (storage.WorkspaceMemoryBackend, bool, error) {
+	if e.archive == nil {
+		return nil, false, nil
+	}
+	scoped, ok := e.archive.(storage.WorkspaceMemoryBackend)
+	if ok {
+		return scoped, true, nil
+	}
+	if NormalizeWorkspace(workspaceID) == wsroot.PersonalWorkspaceID {
+		return nil, true, nil
+	}
+	return nil, false, ErrMemoryArchiveNotTenantAware
+}
+
+// MemoryList returns up to limit archived entries for an agent in one
+// workspace, newest first.
+//
+// There is deliberately no unscoped variant. The previous MemoryList(agentID,
+// limit) called the frozen interface directly, so every tenant reading its
+// agent's memory through the API was served the personal workspace's archive
+// instead — while the delete handler one function below had been scoped all
+// along. An accessor that cannot name a tenant is the shape that produced that
+// asymmetry, so it is gone rather than deprecated.
+func (e *Engine) MemoryList(workspaceID, agentID string, limit int) ([]memory.Entry, error) {
 	if e.archive == nil {
 		return []memory.Entry{}, nil
 	}
 	if limit <= 0 {
 		limit = 200
 	}
-	entries, err := e.archive.ReadGlobal(agentID, limit)
+	scoped, ok, err := e.memoryArchiveFor(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return []memory.Entry{}, nil
+	}
+	var entries []memory.Entry
+	if scoped != nil {
+		entries, err = scoped.ReadGlobalInWorkspace(NormalizeWorkspace(workspaceID), agentID, limit)
+	} else {
+		entries, err = e.archive.ReadGlobal(agentID, limit)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -196,9 +249,9 @@ func (e *Engine) MemoryList(agentID string, limit int) ([]memory.Entry, error) {
 	return entries, nil
 }
 
-// MemorySearch performs a substring search over an agent's archived memories.
-// If query is empty it falls back to MemoryList.
-func (e *Engine) MemorySearch(agentID, query string, limit int) ([]memory.Entry, error) {
+// MemorySearch performs a substring search over an agent's archived memories
+// within one workspace. If query is empty it falls back to MemoryList.
+func (e *Engine) MemorySearch(workspaceID, agentID, query string, limit int) ([]memory.Entry, error) {
 	if e.archive == nil {
 		return []memory.Entry{}, nil
 	}
@@ -206,9 +259,21 @@ func (e *Engine) MemorySearch(agentID, query string, limit int) ([]memory.Entry,
 		limit = 200
 	}
 	if query == "" {
-		return e.MemoryList(agentID, limit)
+		return e.MemoryList(workspaceID, agentID, limit)
 	}
-	entries, err := e.archive.Search(agentID, query, limit)
+	scoped, ok, err := e.memoryArchiveFor(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return []memory.Entry{}, nil
+	}
+	var entries []memory.Entry
+	if scoped != nil {
+		entries, err = scoped.SearchInWorkspace(NormalizeWorkspace(workspaceID), agentID, query, limit)
+	} else {
+		entries, err = e.archive.Search(agentID, query, limit)
+	}
 	if err != nil {
 		return nil, err
 	}

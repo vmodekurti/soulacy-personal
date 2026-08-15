@@ -3800,12 +3800,17 @@ func (s *Server) handleListMemory(c *fiber.Ctx) error {
 	agentID := c.Params("agent_id")
 	query := c.Query("q", "")
 
+	// The same workspace the delete handler below uses. Reading and erasing the
+	// same records through two different scopes is how one of them ends up
+	// wrong.
+	workspaceID := s.agents(c).WorkspaceID()
+
 	var entries interface{}
 	var err error
 	if query != "" {
-		entries, err = s.engine.MemorySearch(agentID, query, 200)
+		entries, err = s.engine.MemorySearch(workspaceID, agentID, query, 200)
 	} else {
-		entries, err = s.engine.MemoryList(agentID, 200)
+		entries, err = s.engine.MemoryList(workspaceID, agentID, 200)
 	}
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)

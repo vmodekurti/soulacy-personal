@@ -25,7 +25,7 @@ isolation state; this document explains it.
 declared workspace-owned but not yet isolated.
 
 - At the start of this work: **57 blockers**
-- Now: **6 blockers**
+- Now: **4 blockers**
 
 A store moves from `personal-only` to `scoped` only when it has a real
 cross-tenant isolation test. The catalog names that test, and a CI check fails
@@ -674,6 +674,60 @@ shared vector store that already scopes internally. That resolves a TODO left
 in `adapters.go` when the vector store was scoped — it had been pinned to
 personal precisely because `agentmemory` could not yet name a tenant.
 
+### The memory archive's frozen read surface meant "personal", and a tenant was getting it
+
+`sdk/storage.MemoryBackend` is frozen for this SDK major version, so its
+`Search`/`ReadGlobal`/`ReadByScope` take no workspace and the shipped shims
+resolve them to personal. `WorkspaceMemoryBackend` was added alongside for
+tenant-aware callers — and then nothing asserted for it.
+
+`Engine.MemoryList(agentID, limit)` and `MemorySearch(...)`, described in their
+own comment as "called by the gateway API handlers", called the frozen methods
+directly. So `GET /memory/:agent_id` served every tenant the **personal**
+workspace's archived memories while hiding the caller's own — wrong in both
+directions. The delete handler immediately below it,
+`handleDeleteMemorySession`, had been workspace-scoped the whole time. Reading
+and erasing the same records through two different scopes is how one of them
+ends up wrong, and it was the read.
+
+Both accessors now take a workspace, and there is no unscoped variant left —
+the same choice as `Engine.BrainStore()`. Backends that cannot answer per
+tenant (the external sidecar in `internal/extstorage` implements only the
+frozen interface) return `ErrMemoryArchiveNotTenantAware` for a tenant rather
+than substituting personal, while personal itself keeps working, because
+personal is exactly what the frozen methods mean.
+
+### `BEGIN DEFERRED` fails the loser instead of making it wait
+
+Two stores read a row and then wrote based on it inside one transaction:
+`session_owners` (claim a session ID) and `rulebook_versions` (assign the next
+version number). Both used `BeginTx(ctx, nil)`, which is `BEGIN DEFERRED`.
+
+A deferred transaction takes a read lock at the `SELECT` and tries to upgrade
+at the `INSERT`. When several do this at once SQLite **cannot** let them wait —
+waiting would deadlock — so it fails the upgraders immediately with
+`SQLITE_BUSY`, bypassing the busy timeout entirely. Raising `BusyTimeout` does
+nothing; the symptom is "database is locked" on a store that looks correctly
+transactional.
+
+For session ownership the consequence was not merely a confusing error. The
+mutation test shows it plainly: *the rightful owner's own idempotent re-claim*
+gets refused with "database is locked", and a genuine loser gets a 500 instead
+of the `ErrSessionClaimed` the caller is meant to translate into "that ID is
+taken". Session ownership is the store that stops one tenant occupying
+another's session ID, so a spurious failure there is not cosmetic.
+
+`sqlitex.Options.ImmediateTx` adds `_txlock=immediate`, and both stores set it.
+Opt-in rather than default because it serialises read-only transactions on the
+same handle too — a real cost for read-heavy stores and no benefit to ones
+whose transactions open with a write.
+
+One test-quality note, again. The first version of the rulebook test drove
+`CompositeStore.UpdateProceduralVersioned`, which writes `procedural.md` first
+under a mutex — enough stagger that the test passed *with the bug present*. It
+now drives `RuleLog.Append`, where the contention actually is, and fails
+reliably when the fix is reverted.
+
 ## Guards worth keeping
 
 - **`TestRequestScopeIsNeverReadFromADetachedGoroutine`** (AST-based) fails the
@@ -737,18 +791,21 @@ Highest-value first, with the reason each matters:
    Preview at all. If it is not, MU-025's third criterion should be struck or
    deferred explicitly rather than left to look unfinished.
 
-5. **The six stores still `personal-only`**, in three kinds of work:
+5. **The four stores still `personal-only`:**
 
    - `internal/plugins/loader.go` and `internal/skills/loader.go` are extension
      inventory, which is MU-017's first acceptance criterion. Flipping them
      without the rest of that story would classify the storage while leaving
      installation, approval and revocation unscoped.
-   - `internal/storage/sqlite/sqlite.go` and
-     `internal/storage/postgres/postgres.go` sit behind `sdk/storage`'s frozen
-     `MemoryBackend`, so they need the `*InWorkspace` optional-interface
-     treatment rather than a signature change.
    - `internal/auth/jwt.go` and `internal/tenancy/postgres.go:credentials` are
      ordinary scoping work.
+
+6. **`BEGIN DEFERRED` on read-then-write transactions, elsewhere.** Two stores
+   have been fixed (see below). The pattern to look for is a transaction that
+   `SELECT`s and then `INSERT`s based on what it read; the safe ones open with
+   a write (`costs.TryReserve` starts with a `DELETE`, which is why its
+   concurrency test always passed). `internal/workboard`, `internal/knowledge`
+   and `internal/studio/lessons.go` have not been audited.
 
 ## Verification
 
