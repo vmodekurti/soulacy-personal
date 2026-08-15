@@ -8,6 +8,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/soulacy/soulacy/internal/sqlitex"
+	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
 // Store persists per-agent grants and provides permission queries.
@@ -53,7 +54,7 @@ type resourceAgentStore interface {
 
 const grantSchema = `
 CREATE TABLE IF NOT EXISTS rbac_agent_grants (
-    workspace_id TEXT NOT NULL DEFAULT 'personal',
+    workspace_id TEXT NOT NULL DEFAULT 'ws_personal',
     role       TEXT NOT NULL,
     agent_id   TEXT NOT NULL,
     actions    TEXT NOT NULL,
@@ -63,7 +64,14 @@ CREATE TABLE IF NOT EXISTS rbac_agent_grants (
 );
 `
 
-const personalWorkspace = "personal"
+// personalWorkspace must be the same string every other store uses. It was
+// "personal" while the rest of the codebase used wsroot.PersonalWorkspaceID
+// ("ws_personal"), which meant a grant written by a request carrying a
+// workspace identity landed under one key and a lookup from a claims-only
+// request went to the other. A missed grant is not a denial here —
+// CanAccessAgentInWorkspace falls through to the static role baseline, which
+// is broader — so the divergence silently *widened* access.
+const personalWorkspace = wsroot.PersonalWorkspaceID
 
 // SQLiteStore is the default Store backed by a single SQLite file.
 type SQLiteStore struct {
@@ -81,6 +89,10 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("rbac: schema: %w", err)
 	}
 	if err := migrateWorkspaceGrantSchema(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := migrateLegacyPersonalGrants(db); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -342,3 +354,28 @@ func (s ErrorStore) ListAgentGrantsForRole(string) ([]AgentGrant, error) {
 	return nil, s.failure()
 }
 func (s ErrorStore) Close() error { return nil }
+
+// migrateLegacyPersonalGrants moves grants written under the old "personal"
+// key onto wsroot.PersonalWorkspaceID.
+//
+// It runs on every open, not only once. A grant left under the old key is not
+// merely unreachable: because a missed lookup falls through to the static role
+// baseline, the restriction it encodes stops being applied at all. Silently
+// widening access is the worst failure this package has, so the sweep is
+// unconditional.
+//
+// A row that would collide with an already-migrated one is dropped rather than
+// overwriting it: the row under the current key is the one the live code path
+// has been reading and writing, so it is the authoritative one.
+func migrateLegacyPersonalGrants(db *sql.DB) error {
+	if _, err := db.Exec(
+		`UPDATE OR IGNORE rbac_agent_grants SET workspace_id = ? WHERE workspace_id = 'personal'`,
+		wsroot.PersonalWorkspaceID,
+	); err != nil {
+		return fmt.Errorf("rbac: migrate legacy personal grants: %w", err)
+	}
+	if _, err := db.Exec(`DELETE FROM rbac_agent_grants WHERE workspace_id = 'personal'`); err != nil {
+		return fmt.Errorf("rbac: drop legacy personal grants: %w", err)
+	}
+	return nil
+}

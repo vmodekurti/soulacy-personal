@@ -25,7 +25,7 @@ isolation state; this document explains it.
 declared workspace-owned but not yet isolated.
 
 - At the start of this work: **57 blockers**
-- Now: **18 blockers**
+- Now: **16 blockers**
 
 A store moves from `personal-only` to `scoped` only when it has a real
 cross-tenant isolation test. The catalog names that test, and a CI check fails
@@ -402,6 +402,36 @@ started returning 503 at runtime. The existing round-trip tests catch it
 because they drive the real store through the HTTP routes; a mock would not
 have. The interface now says so in a comment.
 
+### A missed RBAC grant widens access, so key consistency is a security property
+
+This one was a live bug, not a missing boundary.
+
+`rbac_agent_grants` already had `workspace_id` in its primary key — but the
+package's own personal constant was `"personal"` while every other store used
+`wsroot.PersonalWorkspaceID` (`"ws_personal"`). Separately,
+`requestAuthority` had two branches: with a workspace identity it yielded the
+identity's workspace, and falling back to JWT claims it dropped the workspace
+entirely, normalising to the legacy key.
+
+Both branches are live in one deployment. So a grant written through one
+request path was invisible to the other.
+
+What makes that serious rather than merely inconsistent is
+`CanAccessAgentInWorkspace`'s fallthrough: a grant is an allow-list that
+*narrows* a role, and when the lookup misses the function returns the static
+role baseline — which is **broader**. A restrictive grant that stops matching
+does not fail closed; it silently restores the permission it was written to
+remove.
+
+Fixed on both sides: the claims branch carries `claims.WorkspaceID`, and the
+constant is now `wsroot.PersonalWorkspaceID`, with an unconditional migration
+that moves legacy `"personal"` rows and drops any that would collide with an
+already-migrated row (the row under the current key is the one the live path
+has been reading and writing, so it wins).
+
+`TestAMissedGrantWidensAccessRatherThanDenying` states the fallthrough
+property directly, so anyone changing the key scheme sees what it costs.
+
 ### The SDK is extended additively, never modified
 
 `sdk/storage.MemoryBackend` is documented as frozen per major version, so it
@@ -473,9 +503,10 @@ Highest-value first, with the reason each matters:
    Preview at all. If it is not, MU-025's third criterion should be struck or
    deferred explicitly rather than left to look unfinished.
 
-5. **DLQ, checkpoints, `rbac_agent_grants`, `studio/deployrecord.go`,
-   `agentmemory`, `api_keys`** — all still `personal-only`; each needs the same
-   treatment as the stores above.
+5. **DLQ, checkpoints, `studio/deployrecord.go`, `agentmemory`, `api_keys`** —
+   all still `personal-only`; each needs the same treatment as the stores
+   above. `api_keys` is the one with security weight left: it holds
+   credentials, and its `ScopeKey` is `workspace_id,user_id`.
 
 ## Verification
 

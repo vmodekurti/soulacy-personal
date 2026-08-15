@@ -48,7 +48,15 @@ func requestAuthority(c *fiber.Ctx) authority {
 		return authority{role: identity.Role(), workspaceID: identity.WorkspaceID(), subject: identity.Subject(), scopes: identity.Scopes(), present: true}
 	}
 	if claims := auth.ClaimsFromCtx(c); claims != nil {
-		return authority{role: claims.Role, subject: claims.Subject, scopes: append([]string(nil), claims.Scopes...), present: true}
+		// The workspace has to come along. Dropping it here sent this branch's
+		// grant lookups to a different workspace key than the branch above,
+		// and a missed grant does not deny — CanAccessAgentInWorkspace falls
+		// through to the static role baseline, which is *broader*. A
+		// restrictive grant would silently stop applying.
+		return authority{
+			role: claims.Role, workspaceID: claims.WorkspaceID, subject: claims.Subject,
+			scopes: append([]string(nil), claims.Scopes...), present: true,
+		}
 	}
 	return authority{}
 }
