@@ -14,7 +14,7 @@ func TestStoreRecordsSchemaVersion(t *testing.T) {
 	}
 	defer s.db.Close()
 	v, err := sqlitex.SchemaVersion(s.db, "costs")
-	if err != nil || v != 4 {
-		t.Errorf("costs schema version = %d err=%v, want 4", v, err)
+	if err != nil || v != 5 {
+		t.Errorf("costs schema version = %d err=%v, want 5", v, err)
 	}
 }

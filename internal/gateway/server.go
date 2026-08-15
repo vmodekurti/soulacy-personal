@@ -1520,7 +1520,7 @@ func (s *Server) handleGetCosts(c *fiber.Ctx) error {
 	if err != nil {
 		return s.errJSON(c, fiber.StatusBadRequest, err)
 	}
-	rows, err := s.costStore.SumByAgent(c.Context(), since)
+	rows, err := s.costStore.SumByAgent(c.Context(), s.costWorkspace(c), since)
 	if err != nil {
 		s.log.Error("costs: SumByAgent failed", zap.Error(err))
 		return s.errMsg(c, fiber.StatusInternalServerError, "internal error")
@@ -1559,7 +1559,7 @@ func (s *Server) handleGetCostUsage(c *fiber.Ctx) error {
 	if err != nil || limit <= 0 || limit > 1000 {
 		return s.errMsg(c, fiber.StatusBadRequest, "limit must be between 1 and 1000")
 	}
-	records, err := s.costStore.ListUsage(c.Context(), since, limit)
+	records, err := s.costStore.ListUsage(c.Context(), s.costWorkspace(c), since, limit)
 	if err != nil {
 		s.log.Error("costs: ListUsage failed", zap.Error(err))
 		return s.errMsg(c, fiber.StatusInternalServerError, "internal error")
@@ -1582,7 +1582,7 @@ func (s *Server) handleGetCostChargeback(c *fiber.Ctx) error {
 	if raw := strings.TrimSpace(c.Query("group_by")); raw != "" {
 		dimensions = strings.Split(raw, ",")
 	}
-	rows, err := s.costStore.Chargeback(c.Context(), since, dimensions)
+	rows, err := s.costStore.Chargeback(c.Context(), s.costWorkspace(c), since, dimensions)
 	if err != nil {
 		return s.errJSON(c, fiber.StatusBadRequest, err)
 	}
@@ -1667,7 +1667,7 @@ func (s *Server) handleGetAgentCosts(c *fiber.Ctx) error {
 	if err != nil {
 		return s.errJSON(c, fiber.StatusBadRequest, err)
 	}
-	sessions, err := s.costStore.SumBySession(c.Context(), agentID, since)
+	sessions, err := s.costStore.SumBySession(c.Context(), s.costWorkspace(c), agentID, since)
 	if err != nil {
 		s.log.Error("costs: SumBySession failed", zap.String("agent_id", agentID), zap.Error(err))
 		return s.errMsg(c, fiber.StatusInternalServerError, "internal error")

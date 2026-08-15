@@ -2,6 +2,7 @@ package costs
 
 import (
 	"context"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -61,7 +62,7 @@ func TestReconcilerImportsPreviousCompletedUTCDayIdempotently(t *testing.T) {
 	}
 	defer store.Close()
 	now := time.Date(2026, 8, 12, 15, 30, 0, 0, time.UTC)
-	if err := store.Record(context.Background(), UsageRecord{Provider: "openai", CostMicros: 800_000, CostUSD: 0.8, CreatedAt: time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)}); err != nil {
+	if err := store.Record(context.Background(), UsageRecord{Workspace: wsroot.PersonalWorkspaceID, Provider: "openai", CostMicros: 800_000, CostUSD: 0.8, CreatedAt: time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)}); err != nil {
 		t.Fatal(err)
 	}
 	r := NewReconciler(store, []BillingImporter{fixedBillingImporter{"openai", 1_000_000}}, ReconcilerConfig{Now: func() time.Time { return now }}, nil)

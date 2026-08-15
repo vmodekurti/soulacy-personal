@@ -3,6 +3,7 @@ package costs
 import (
 	"context"
 	"errors"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -116,7 +117,7 @@ func TestInteractiveHighCostCallRequiresExplicitConfirmation(t *testing.T) {
 	if provider.calls != 1 {
 		t.Fatalf("provider_calls=%d, want 1", provider.calls)
 	}
-	stats, err := store.StatsSince(context.Background(), time.Time{})
+	stats, err := store.StatsSince(context.Background(), wsroot.PersonalWorkspaceID, time.Time{})
 	if err != nil || stats.Calls != 2 || stats.AttributedCalls != 2 || stats.RejectedCalls != 1 {
 		t.Fatalf("stats=%+v err=%v", stats, err)
 	}
@@ -186,11 +187,11 @@ func TestRunTotalsRemainIsolatedAcrossConcurrentStudioBuilds(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	a, err := store.TotalsByRun(context.Background(), "build-a")
+	a, err := store.TotalsByRun(context.Background(), wsroot.PersonalWorkspaceID, "build-a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := store.TotalsByRun(context.Background(), "build-b")
+	b, err := store.TotalsByRun(context.Background(), wsroot.PersonalWorkspaceID, "build-b")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,7 +356,7 @@ func TestHierarchicalRejectionNamesScopeAndReset(t *testing.T) {
 	}
 	defer store.Close()
 	now := time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC)
-	err = store.TryReserve(context.Background(), "too-large", "user-1", "agent-1", "paid", 101, 1, now.Add(time.Minute), ReservationPolicy{
+	err = store.TryReserve(context.Background(), wsroot.PersonalWorkspaceID, "too-large", "user-1", "agent-1", "paid", 101, 1, now.Add(time.Minute), ReservationPolicy{
 		Now: now, DailyStart: time.Date(2026, 8, 12, 0, 0, 0, 0, time.UTC),
 		MonthlyStart: time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC), TokenWindowStart: now.Add(-24 * time.Hour),
 		UserDailyMicros: 100,
@@ -414,7 +415,7 @@ func TestProviderReconciliationCalculatesVariance(t *testing.T) {
 	}
 	defer store.Close()
 	start := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
-	if err := store.Record(context.Background(), UsageRecord{
+	if err := store.Record(context.Background(), UsageRecord{Workspace: wsroot.PersonalWorkspaceID,
 		Provider: "paid", Model: "model", CostUSD: 1.25, CostMicros: 1_250_000,
 		PricingStatus: "priced", Status: "success", CreatedAt: start.Add(time.Hour),
 	}); err != nil {
@@ -439,7 +440,7 @@ func TestUsageCallIDIsIdempotentAndChargebackIsGrouped(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	record := UsageRecord{CallID: "same-call", Subject: "user-1", Source: "studio", Provider: "paid", Model: "model",
+	record := UsageRecord{Workspace: wsroot.PersonalWorkspaceID, CallID: "same-call", Subject: "user-1", Source: "studio", Provider: "paid", Model: "model",
 		TotalTokens: 100, CostMicros: 500, CostUSD: 0.0005, AttemptCount: 2, ProviderRequestIDs: []string{"a", "b"}}
 	if err := store.Record(context.Background(), record); err != nil {
 		t.Fatal(err)
@@ -447,14 +448,14 @@ func TestUsageCallIDIsIdempotentAndChargebackIsGrouped(t *testing.T) {
 	if err := store.Record(context.Background(), record); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := store.Chargeback(context.Background(), time.Time{}, []string{"user", "feature", "provider", "model"})
+	rows, err := store.Chargeback(context.Background(), wsroot.PersonalWorkspaceID, time.Time{}, []string{"user", "feature", "provider", "model"})
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("rows=%+v err=%v", rows, err)
 	}
 	if rows[0].Calls != 1 || rows[0].Attempts != 2 || rows[0].CostMicros != 500 {
 		t.Fatalf("chargeback=%+v", rows[0])
 	}
-	usage, err := store.ListUsage(context.Background(), time.Time{}, 10)
+	usage, err := store.ListUsage(context.Background(), wsroot.PersonalWorkspaceID, time.Time{}, 10)
 	if err != nil || len(usage) != 1 || strings.Join(usage[0].ProviderRequestIDs, ",") != "a,b" {
 		t.Fatalf("usage=%+v err=%v", usage, err)
 	}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/soulacy/soulacy/internal/llm"
+	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
 // GovernanceConfig controls process-wide inference admission. Budget periods
@@ -162,8 +163,15 @@ func (g *Governor) Before(ctx context.Context, provider string, req *llm.Complet
 	now := time.Now().UTC()
 	hard := strings.EqualFold(g.cfg.EnforcementMode, "hard")
 	id := newReservationID()
+	// A call arriving without a workspace is a single-tenant call — the
+	// scheduler, a channel, or Personal itself — so it resolves to the
+	// personal workspace, the same rule every other store applies. Failing
+	// closed here would block every LLM call on any path that has not yet
+	// established a principal, which is a much worse outcome than charging
+	// single-tenant spend to the single tenant that exists.
+	workspace := wsroot.Normalize(metadata.Workspace)
 	if !hard && providerTokenLimit <= 0 {
-		if err := g.store.Reserve(ctx, id, metadata.Subject, metadata.AgentID, provider, estimatedMicros, estimatedTokens, now.Add(g.cfg.ReservationTTL)); err != nil {
+		if err := g.store.Reserve(ctx, workspace, id, metadata.Subject, metadata.AgentID, provider, estimatedMicros, estimatedTokens, now.Add(g.cfg.ReservationTTL)); err != nil {
 			return ctx, llm.Reservation{}, fmt.Errorf("llm cost control: reserve: %w", err)
 		}
 	} else {
@@ -183,7 +191,7 @@ func (g *Governor) Before(ctx context.Context, provider string, req *llm.Complet
 			policy.AgentTokenLimit = int64(g.cfg.PerAgentTokensDay)
 		}
 		for attempt := 0; attempt < 2; attempt++ {
-			err := g.store.TryReserve(ctx, id, metadata.Subject, metadata.AgentID, provider, estimatedMicros, estimatedTokens, now.Add(g.cfg.ReservationTTL), policy)
+			err := g.store.TryReserve(ctx, workspace, id, metadata.Subject, metadata.AgentID, provider, estimatedMicros, estimatedTokens, now.Add(g.cfg.ReservationTTL), policy)
 			if err == nil {
 				break
 			}
@@ -247,12 +255,14 @@ func (g *Governor) After(ctx context.Context, reservation llm.Reservation, provi
 			g.circuitUntil[provider] = time.Now().UTC().Add(g.cfg.CircuitCooldown)
 		}
 	}
-	if reservation.ID != "" {
-		_ = g.store.Release(ctx, reservation.ID)
-	}
 	metadata := llm.CallMetadataFromContext(ctx)
+	// Released in the same workspace it was reserved in — read from the call's
+	// own metadata, so a release cannot free another tenant's headroom.
+	if reservation.ID != "" {
+		_ = g.store.Release(ctx, wsroot.Normalize(metadata.Workspace), reservation.ID)
+	}
 	record := UsageRecord{
-		Subject: metadata.Subject, Workspace: metadata.Workspace,
+		Subject: metadata.Subject, Workspace: wsroot.Normalize(metadata.Workspace),
 		AgentID: metadata.AgentID, SessionID: metadata.SessionID,
 		RunID: metadata.RunID, CallID: metadata.CallID,
 		Source: metadata.Source, Trigger: metadata.Trigger,
@@ -301,7 +311,7 @@ func (g *Governor) Rejected(ctx context.Context, provider string, req llm.Comple
 	}
 	_, _, pricingStatus := EstimateDetailed(g.prices, provider, req.Model, UsageDimensions{})
 	_ = g.store.Record(ctx, UsageRecord{
-		Subject: metadata.Subject, Workspace: metadata.Workspace, AgentID: metadata.AgentID,
+		Subject: metadata.Subject, Workspace: wsroot.Normalize(metadata.Workspace), AgentID: metadata.AgentID,
 		SessionID: metadata.SessionID, RunID: metadata.RunID, CallID: callID,
 		Source: metadata.Source, Trigger: metadata.Trigger, Provider: provider, Model: req.Model,
 		PricingStatus: pricingStatus, PricingVersion: PricingVersion(g.prices, provider, req.Model),

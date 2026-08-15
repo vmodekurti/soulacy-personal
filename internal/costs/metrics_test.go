@@ -2,6 +2,7 @@ package costs
 
 import (
 	"context"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"path/filepath"
 	"testing"
 	"time"
@@ -23,12 +24,12 @@ func TestSessionMetrics_AggregatesOneSession(t *testing.T) {
 	base := time.Date(2026, 6, 6, 10, 0, 0, 0, time.UTC)
 
 	records := []UsageRecord{
-		{AgentID: "bot", SessionID: "sess-1", Provider: "openai", Model: "gpt-4o-mini",
+		{Workspace: wsroot.PersonalWorkspaceID, AgentID: "bot", SessionID: "sess-1", Provider: "openai", Model: "gpt-4o-mini",
 			PromptTokens: 100, CompTokens: 50, TotalTokens: 150, CostUSD: 0.001, CreatedAt: base},
-		{AgentID: "bot", SessionID: "sess-1", Provider: "openai", Model: "gpt-4o",
+		{Workspace: wsroot.PersonalWorkspaceID, AgentID: "bot", SessionID: "sess-1", Provider: "openai", Model: "gpt-4o",
 			PromptTokens: 200, CompTokens: 80, TotalTokens: 280, CostUSD: 0.004, CreatedAt: base.Add(30 * time.Second)},
 		// Different session — must be excluded.
-		{AgentID: "bot", SessionID: "sess-2", Provider: "anthropic", Model: "claude",
+		{Workspace: wsroot.PersonalWorkspaceID, AgentID: "bot", SessionID: "sess-2", Provider: "anthropic", Model: "claude",
 			PromptTokens: 999, CompTokens: 999, TotalTokens: 1998, CostUSD: 9.99, CreatedAt: base},
 	}
 	for _, r := range records {

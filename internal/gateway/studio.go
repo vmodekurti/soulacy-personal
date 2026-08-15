@@ -49,6 +49,7 @@ import (
 	"github.com/soulacy/soulacy/internal/secrets"
 	"github.com/soulacy/soulacy/internal/studio"
 	"github.com/soulacy/soulacy/internal/studio/consent"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/agent"
 )
 
@@ -56,10 +57,14 @@ import (
 // the configured default provider and resolves that provider's model from
 // config, mirroring how the gateway otherwise reaches the LLM layer.
 type routerLLM struct {
-	router    *llm.Router
-	provider  string
-	model     string
-	store     *costs.Store
+	router   *llm.Router
+	provider string
+	model    string
+	store    *costs.Store
+	// workspace is captured when the adapter is built, while the request is
+	// still alive. Usage() is called from the build loop, which outlives the
+	// handler, so it cannot read the Ctx.
+	workspace string
 	runID     string
 	confirmed bool
 }
@@ -68,7 +73,7 @@ func (a routerLLM) Usage() costs.UsageRecord {
 	if a.store == nil {
 		return costs.UsageRecord{}
 	}
-	usage, _ := a.store.TotalsByRun(context.Background(), a.runID)
+	usage, _ := a.store.TotalsByRun(context.Background(), a.workspace, a.runID)
 	return usage
 }
 
@@ -125,11 +130,13 @@ func (s *Server) studioLLM(request ...*fiber.Ctx) studio.LLM {
 	}
 	provider, model := s.studioProviderModel()
 	confirmed := false
+	workspace := wsroot.PersonalWorkspaceID
 	if len(request) > 0 && request[0] != nil {
 		confirmed = isTruthy(request[0].Get("X-Soulacy-Cost-Confirmed"))
+		workspace = s.costWorkspace(request[0])
 	}
 	return routerLLM{router: s.llmRouter, provider: provider, model: model, store: s.costStore,
-		runID: uuid.New().String(), confirmed: confirmed}
+		workspace: workspace, runID: uuid.New().String(), confirmed: confirmed}
 }
 
 // studioProviderModel resolves the builder (llm.studio) provider + model the

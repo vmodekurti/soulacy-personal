@@ -210,3 +210,18 @@ func (s *Server) historyScope(c *fiber.Ctx) (workspaceID, subject string) {
 	}
 	return wsroot.PersonalWorkspaceID, ""
 }
+
+// costWorkspace is the tenant an accounting request acts in.
+//
+// Every cost read is workspace-scoped now, including the ones that look
+// deployment-wide: spend is both confidential (it reveals another team's
+// activity and model choices) and rivalrous (a shared ceiling means the
+// busiest tenant starves the rest).
+func (s *Server) costWorkspace(c *fiber.Ctx) string {
+	if c != nil {
+		if identity, ok := requestIdentity(c); ok {
+			return wsroot.Normalize(identity.WorkspaceID())
+		}
+	}
+	return wsroot.PersonalWorkspaceID
+}

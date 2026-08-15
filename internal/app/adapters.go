@@ -146,6 +146,10 @@ func (a *engineCostStoreAdapter) Record(ctx context.Context,
 		costUSD = costs.EstimateUSD(a.prices, provider, model, promptTokens, compTokens)
 	}
 	return a.s.Record(ctx, costs.UsageRecord{
+		// The run's own tenant. Without it the store refuses the record and
+		// the spend stops counting against any budget — worse than a leak,
+		// because the ceiling would quietly stop being enforced.
+		Workspace:    runtime.WorkspaceFromContext(ctx),
 		AgentID:      agentID,
 		SessionID:    sessionID,
 		Provider:     provider,

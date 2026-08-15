@@ -5,12 +5,14 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/soulacy/soulacy/internal/sqlitex"
+	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
 // UsageRecord records one LLM call's token consumption.
@@ -225,6 +227,22 @@ ALTER TABLE cost_reservations ADD COLUMN provider TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS idx_cost_reservation_provider ON cost_reservations(provider);
 `
 
+// usageSchemaV5 brings the tenant boundary to accounting.
+//
+// token_usage already had a `workspace` column and Record already wrote it —
+// it was simply never used as a predicate. cost_reservations had no workspace
+// at all, which is the half that matters: a reservation is in-flight spend
+// counted against a ceiling, so without it one tenant's outstanding
+// reservations reduce another tenant's available budget. That is a denial of
+// service as well as a leak.
+const usageSchemaV5 = `
+ALTER TABLE cost_reservations ADD COLUMN workspace TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_usage_workspace ON token_usage(workspace, created_at);
+CREATE INDEX IF NOT EXISTS idx_usage_workspace_agent ON token_usage(workspace, agent_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_usage_workspace_subject ON token_usage(workspace, subject, created_at);
+CREATE INDEX IF NOT EXISTS idx_cost_reservation_workspace ON cost_reservations(workspace);
+`
+
 // NewStore opens (or creates) the costs SQLite database at path.
 func NewStore(path string) (*Store, error) {
 	db, err := sqlitex.Open(path, sqlitex.DefaultOptions())
@@ -244,15 +262,59 @@ func NewStore(path string) (*Store, error) {
 	}
 	if _, err := sqlitex.MigrateSchema(db, "costs", []sqlitex.SchemaMigration{
 		{Version: 2, SQL: usageSchemaV2}, {Version: 3, SQL: usageSchemaV3}, {Version: 4, SQL: usageSchemaV4},
+		{Version: 5, SQL: usageSchemaV5},
 	}); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := backfillWorkspace(db); err != nil {
 		db.Close()
 		return nil, err
 	}
 	return &Store{db: db}, nil
 }
 
+// backfillWorkspace assigns pre-tenant accounting rows to the personal
+// workspace, which is what a single-user installation's spend was.
+//
+// It runs on every open rather than only inside the versioned migration. A row
+// with an empty workspace matches no scoped query, so it is not a leak — it is
+// spend that silently stopped counting against any budget, which is worse:
+// the ceiling would quietly stop being enforced. Reachable by an interrupted
+// migration or a direct write.
+func backfillWorkspace(db *sql.DB) error {
+	for _, table := range []string{"token_usage", "cost_reservations"} {
+		if _, err := db.Exec(
+			`UPDATE `+table+` SET workspace = ? WHERE workspace IS NULL OR workspace = ''`,
+			wsroot.PersonalWorkspaceID); err != nil {
+			return fmt.Errorf("costs: backfill %s workspace: %w", table, err)
+		}
+	}
+	return nil
+}
+
+// ErrWorkspaceRequired is returned when accounting is attempted with no
+// tenant. Spend with no owner is spend charged to everyone's budget.
+var ErrWorkspaceRequired = errors.New("costs: workspace is required")
+
+// requireWorkspace normalizes a tenant and refuses an absent one.
+func requireWorkspace(workspaceID string) (string, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return "", ErrWorkspaceRequired
+	}
+	return wsroot.Normalize(workspaceID), nil
+}
+
 // Record appends a usage record.
 func (s *Store) Record(ctx context.Context, r UsageRecord) error {
+	// Spend with no owner is spend that counts against no budget, so a record
+	// without a workspace is refused rather than filed under the empty one.
+	workspace, err := requireWorkspace(r.Workspace)
+	if err != nil {
+		return err
+	}
+	r.Workspace = workspace
 	createdAt := r.CreatedAt
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
@@ -261,7 +323,7 @@ func (s *Store) Record(ctx context.Context, r UsageRecord) error {
 	if r.AttemptCount <= 0 && r.Status != "rejected" {
 		r.AttemptCount = 1
 	}
-	_, err := s.db.ExecContext(ctx,
+	_, err = s.db.ExecContext(ctx,
 		`INSERT OR IGNORE INTO token_usage
 		    (subject, workspace, agent_id, session_id, run_id, call_id, source, trigger_name,
 		     provider, model, prompt_tokens, comp_tokens, total_tokens,
@@ -280,17 +342,25 @@ func (s *Store) Record(ctx context.Context, r UsageRecord) error {
 }
 
 // SumCostMicrosSince returns durable recorded spend since the supplied time.
-func (s *Store) SumCostMicrosSince(ctx context.Context, since time.Time) (int64, error) {
+func (s *Store) SumCostMicrosSince(ctx context.Context, workspaceID string, since time.Time) (int64, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return 0, err
+	}
 	var total int64
-	err := s.db.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(cost_micros), 0) FROM token_usage WHERE created_at >= ?`,
-		since.UTC().Format("2006-01-02 15:04:05")).Scan(&total)
+	err = s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(cost_micros), 0) FROM token_usage WHERE workspace = ? AND created_at >= ?`,
+		workspaceID, since.UTC().Format("2006-01-02 15:04:05")).Scan(&total)
 	return total, err
 }
 
-func (s *Store) SumCostMicrosScope(ctx context.Context, since time.Time, subject, agentID string) (int64, error) {
-	query := `SELECT COALESCE(SUM(cost_micros), 0) FROM token_usage WHERE created_at >= ?`
-	args := []any{since.UTC().Format("2006-01-02 15:04:05")}
+func (s *Store) SumCostMicrosScope(ctx context.Context, workspaceID string, since time.Time, subject, agentID string) (int64, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	query := `SELECT COALESCE(SUM(cost_micros), 0) FROM token_usage WHERE workspace = ? AND created_at >= ?`
+	args := []any{workspaceID, since.UTC().Format("2006-01-02 15:04:05")}
 	if subject != "" {
 		query += ` AND subject = ?`
 		args = append(args, subject)
@@ -300,21 +370,26 @@ func (s *Store) SumCostMicrosScope(ctx context.Context, since time.Time, subject
 		args = append(args, agentID)
 	}
 	var total int64
-	err := s.db.QueryRowContext(ctx, query, args...).Scan(&total)
+	err = s.db.QueryRowContext(ctx, query, args...).Scan(&total)
 	return total, err
 }
 
 // StatsSince reports accounting coverage and outcomes since a boundary.
-func (s *Store) StatsSince(ctx context.Context, since time.Time) (UsageStats, error) {
+func (s *Store) StatsSince(ctx context.Context, workspaceID string, since time.Time) (UsageStats, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return UsageStats{}, err
+	}
 	var stats UsageStats
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*),
+	err = s.db.QueryRowContext(ctx, `SELECT COUNT(*),
 		COALESCE(SUM(CASE WHEN call_id <> '' THEN 1 ELSE 0 END), 0),
 		COALESCE(SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END), 0),
 		COALESCE(SUM(attempt_count), 0),
 		COALESCE(SUM(CASE WHEN pricing_status = 'unknown' THEN 1 ELSE 0 END), 0),
 		COALESCE(SUM(CASE WHEN status <> 'success' THEN 1 ELSE 0 END), 0),
 		COALESCE(SUM(total_tokens), 0), COALESCE(SUM(cost_micros), 0)
-		FROM token_usage WHERE created_at >= ?`, since.UTC().Format("2006-01-02 15:04:05")).
+		FROM token_usage WHERE workspace = ? AND created_at >= ?`,
+		workspaceID, since.UTC().Format("2006-01-02 15:04:05")).
 		Scan(&stats.Calls, &stats.AttributedCalls, &stats.RejectedCalls, &stats.Attempts,
 			&stats.UnknownPriced, &stats.FailedCalls, &stats.TotalTokens, &stats.CostMicros)
 	return stats, err
@@ -322,31 +397,43 @@ func (s *Store) StatsSince(ctx context.Context, since time.Time) (UsageStats, er
 
 // TotalsBySource returns cumulative usage for a feature surface. It is used by
 // bounded multi-call operations such as Studio's repair loop.
-func (s *Store) TotalsBySource(ctx context.Context, source string) (UsageRecord, error) {
+func (s *Store) TotalsBySource(ctx context.Context, workspaceID, source string) (UsageRecord, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return UsageRecord{}, err
+	}
 	var out UsageRecord
-	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(prompt_tokens), 0),
+	err = s.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(prompt_tokens), 0),
 		COALESCE(SUM(comp_tokens), 0), COALESCE(SUM(total_tokens), 0),
 		COALESCE(SUM(cost_usd), 0), COALESCE(SUM(cost_micros), 0)
-		FROM token_usage WHERE source = ?`, source).
+		FROM token_usage WHERE workspace = ? AND source = ?`, workspaceID, source).
 		Scan(&out.PromptTokens, &out.CompTokens, &out.TotalTokens, &out.CostUSD, &out.CostMicros)
 	return out, err
 }
 
 // TotalsByRun isolates bounded multi-call operations from concurrent work on
 // the same feature surface.
-func (s *Store) TotalsByRun(ctx context.Context, runID string) (UsageRecord, error) {
+func (s *Store) TotalsByRun(ctx context.Context, workspaceID, runID string) (UsageRecord, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return UsageRecord{}, err
+	}
 	var out UsageRecord
-	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(prompt_tokens), 0),
+	err = s.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(prompt_tokens), 0),
 		COALESCE(SUM(comp_tokens), 0), COALESCE(SUM(total_tokens), 0),
 		COALESCE(SUM(cost_usd), 0), COALESCE(SUM(cost_micros), 0)
-		FROM token_usage WHERE run_id = ?`, runID).
+		FROM token_usage WHERE workspace = ? AND run_id = ?`, workspaceID, runID).
 		Scan(&out.PromptTokens, &out.CompTokens, &out.TotalTokens, &out.CostUSD, &out.CostMicros)
 	return out, err
 }
 
 // ListUsage returns recent prompt-free accounting records for operations and
 // reconciliation. The bounded limit prevents accidental unbounded exports.
-func (s *Store) ListUsage(ctx context.Context, since time.Time, limit int) ([]UsageRecord, error) {
+func (s *Store) ListUsage(ctx context.Context, workspaceID string, since time.Time, limit int) ([]UsageRecord, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
 	if limit <= 0 || limit > 1000 {
 		limit = 200
 	}
@@ -356,8 +443,8 @@ func (s *Store) ListUsage(ctx context.Context, since time.Time, limit int) ([]Us
 		reasoning_tokens, tool_use_prompt_tokens, cost_usd, cost_micros,
 		pricing_status, pricing_version, provider_request_id, provider_request_ids_json,
 		attempt_count, status, error_code, created_at
-		FROM token_usage WHERE created_at >= ? ORDER BY created_at DESC, id DESC LIMIT ?`,
-		since.UTC().Format("2006-01-02 15:04:05"), limit)
+		FROM token_usage WHERE workspace = ? AND created_at >= ? ORDER BY created_at DESC, id DESC LIMIT ?`,
+		workspaceID, since.UTC().Format("2006-01-02 15:04:05"), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -383,6 +470,15 @@ func (s *Store) ListUsage(ctx context.Context, since time.Time, limit int) ([]Us
 
 // ReconcileProvider upserts one provider billing period and calculates the
 // variance from the detailed local ledger.
+// ReconcileProvider is deliberately deployment-wide, and cost_reconciliations
+// is classified PlatformGlobal rather than workspace-owned.
+//
+// A reconciliation compares our estimate against the *provider's invoice*, and
+// providers bill the deployment, not the tenant. There is no honest way to
+// split one invoice across workspaces here: any split would be a number this
+// store invented. Scoping it would therefore not add isolation, it would add
+// fiction. Per-tenant attribution is what Chargeback is for, and that one is
+// workspace-scoped.
 func (s *Store) ReconcileProvider(ctx context.Context, provider string, start, end time.Time, actualMicros int64, source string) (Reconciliation, error) {
 	var estimated int64
 	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(cost_micros), 0) FROM token_usage
@@ -435,10 +531,14 @@ func (s *Store) ListReconciliations(ctx context.Context, limit int) ([]Reconcili
 // Reserve records in-flight worst-case spend. The caller serializes the
 // check-and-reserve decision; the durable row prevents a restart from losing
 // visibility into outstanding reservations.
-func (s *Store) Reserve(ctx context.Context, id, subject, agentID, provider string, costMicros int64, tokens int, expiresAt time.Time) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO cost_reservations
-		(id, subject, agent_id, provider, estimated_micros, estimated_tokens, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, subject, agentID, provider, costMicros, tokens, time.Now().UTC().Format("2006-01-02 15:04:05"),
+func (s *Store) Reserve(ctx context.Context, workspaceID, id, subject, agentID, provider string, costMicros int64, tokens int, expiresAt time.Time) error {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO cost_reservations
+		(id, workspace, subject, agent_id, provider, estimated_micros, estimated_tokens, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, workspaceID, subject, agentID, provider, costMicros, tokens, time.Now().UTC().Format("2006-01-02 15:04:05"),
 		expiresAt.UTC().Format("2006-01-02 15:04:05"))
 	return err
 }
@@ -446,7 +546,11 @@ func (s *Store) Reserve(ctx context.Context, id, subject, agentID, provider stri
 // TryReserve atomically checks every configured scope and inserts an in-flight
 // reservation. A write is performed first so SQLite serializes competing
 // admissions before any capacity reads occur.
-func (s *Store) TryReserve(ctx context.Context, id, subject, agentID, provider string, costMicros int64, tokens int, expiresAt time.Time, policy ReservationPolicy) error {
+func (s *Store) TryReserve(ctx context.Context, workspaceID, id, subject, agentID, provider string, costMicros int64, tokens int, expiresAt time.Time, policy ReservationPolicy) error {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -467,6 +571,13 @@ func (s *Store) TryReserve(ctx context.Context, id, subject, agentID, provider s
 		label    string
 		resetAt  time.Time
 	}{
+		// The "global" scopes are global *within one workspace*. Every scope
+		// query below carries the tenant predicate, so a configured ceiling
+		// applies per tenant rather than to the deployment as a whole. That is
+		// the point: a shared ceiling means the busiest tenant starves the
+		// rest, and one tenant's spend becomes an observable signal to another.
+		// In Personal there is exactly one workspace, so the numbers are
+		// identical to what they were.
 		{policy.GlobalDailyMicros, policy.DailyStart, "", "", false, "global_daily", policy.DailyStart.AddDate(0, 0, 1)},
 		{policy.GlobalMonthlyMicros, policy.MonthlyStart, "", "", false, "global_monthly", policy.MonthlyStart.AddDate(0, 1, 0)},
 		{policy.UserDailyMicros, policy.DailyStart, subject, "", true, "user_daily", policy.DailyStart.AddDate(0, 0, 1)},
@@ -478,7 +589,7 @@ func (s *Store) TryReserve(ctx context.Context, id, subject, agentID, provider s
 		if scope.limit <= 0 || (scope.required && scope.subject == "" && scope.agentID == "") {
 			continue
 		}
-		used, reserved, err := txCostScope(ctx, tx, scope.since, scope.subject, scope.agentID)
+		used, reserved, err := txCostScope(ctx, tx, workspaceID, scope.since, scope.subject, scope.agentID)
 		if err != nil {
 			return err
 		}
@@ -508,7 +619,7 @@ func (s *Store) TryReserve(ctx context.Context, id, subject, agentID, provider s
 		if scope.limit <= 0 || (scope.subject == "" && scope.agentID == "" && scope.provider == "") {
 			continue
 		}
-		used, reserved, err := txTokenScope(ctx, tx, scope.since, scope.subject, scope.agentID, scope.provider)
+		used, reserved, err := txTokenScope(ctx, tx, workspaceID, scope.since, scope.subject, scope.agentID, scope.provider)
 		if err != nil {
 			return err
 		}
@@ -528,20 +639,29 @@ func (s *Store) TryReserve(ctx context.Context, id, subject, agentID, provider s
 		return &ReservationRejectedError{Capacity: capacity, Scope: tightTokenScope, ResetAt: tightTokenReset,
 			Reason: fmt.Sprintf("%s budget exhausted: %d tokens available; rolling window frees capacity by %s", tightTokenScope, capacity.AvailableTokens, tightTokenReset.Format(time.RFC3339))}
 	}
+	// The workspace is written here as well as in Reserve. A reservation row
+	// with an empty workspace matches no scoped capacity read, so it would be
+	// invisible to the very ceiling it is supposed to consume — the budget
+	// would silently stop being enforced rather than visibly fail.
 	if _, err := tx.ExecContext(ctx, `INSERT INTO cost_reservations
-		(id, subject, agent_id, provider, estimated_micros, estimated_tokens, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, subject, agentID, provider, costMicros, tokens, now.Format("2006-01-02 15:04:05"),
+		(id, workspace, subject, agent_id, provider, estimated_micros, estimated_tokens, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, workspaceID, subject, agentID, provider, costMicros, tokens, now.Format("2006-01-02 15:04:05"),
 		expiresAt.UTC().Format("2006-01-02 15:04:05")); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func txCostScope(ctx context.Context, tx *sql.Tx, since time.Time, subject, agentID string) (int64, int64, error) {
-	usageQuery := `SELECT COALESCE(SUM(cost_micros), 0) FROM token_usage WHERE created_at >= ?`
-	reserveQuery := `SELECT COALESCE(SUM(estimated_micros), 0) FROM cost_reservations WHERE 1=1`
-	usageArgs := []any{since.UTC().Format("2006-01-02 15:04:05")}
-	reserveArgs := []any{}
+// txCostScope and txTokenScope sum recorded spend and in-flight reservations
+// for one budget scope. The workspace predicate is not optional the way
+// subject and agent are: those narrow a ceiling within a tenant, while the
+// workspace *is* the tenant boundary, and omitting it would let one tenant's
+// reservations consume another's headroom.
+func txCostScope(ctx context.Context, tx *sql.Tx, workspaceID string, since time.Time, subject, agentID string) (int64, int64, error) {
+	usageQuery := `SELECT COALESCE(SUM(cost_micros), 0) FROM token_usage WHERE workspace = ? AND created_at >= ?`
+	reserveQuery := `SELECT COALESCE(SUM(estimated_micros), 0) FROM cost_reservations WHERE workspace = ?`
+	usageArgs := []any{workspaceID, since.UTC().Format("2006-01-02 15:04:05")}
+	reserveArgs := []any{workspaceID}
 	if subject != "" {
 		usageQuery += ` AND subject = ?`
 		reserveQuery += ` AND subject = ?`
@@ -562,11 +682,11 @@ func txCostScope(ctx context.Context, tx *sql.Tx, since time.Time, subject, agen
 	return used, reserved, nil
 }
 
-func txTokenScope(ctx context.Context, tx *sql.Tx, since time.Time, subject, agentID, provider string) (int64, int64, error) {
-	usageQuery := `SELECT COALESCE(SUM(total_tokens), 0) FROM token_usage WHERE created_at >= ?`
-	reserveQuery := `SELECT COALESCE(SUM(estimated_tokens), 0) FROM cost_reservations WHERE 1=1`
-	usageArgs := []any{since.UTC().Format("2006-01-02 15:04:05")}
-	reserveArgs := []any{}
+func txTokenScope(ctx context.Context, tx *sql.Tx, workspaceID string, since time.Time, subject, agentID, provider string) (int64, int64, error) {
+	usageQuery := `SELECT COALESCE(SUM(total_tokens), 0) FROM token_usage WHERE workspace = ? AND created_at >= ?`
+	reserveQuery := `SELECT COALESCE(SUM(estimated_tokens), 0) FROM cost_reservations WHERE workspace = ?`
+	usageArgs := []any{workspaceID, since.UTC().Format("2006-01-02 15:04:05")}
+	reserveArgs := []any{workspaceID}
 	if subject != "" {
 		usageQuery += ` AND subject = ?`
 		reserveQuery += ` AND subject = ?`
@@ -593,29 +713,46 @@ func txTokenScope(ctx context.Context, tx *sql.Tx, since time.Time, subject, age
 }
 
 // Release removes an in-flight reservation after completion or failure.
-func (s *Store) Release(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM cost_reservations WHERE id = ?`, id)
+func (s *Store) Release(ctx context.Context, workspaceID, id string) error {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx,
+		`DELETE FROM cost_reservations WHERE workspace = ? AND id = ?`, workspaceID, id)
 	return err
 }
 
 // ReservedCostMicros returns live reservations and removes expired entries.
-func (s *Store) ReservedCostMicros(ctx context.Context, now time.Time) (int64, error) {
+func (s *Store) ReservedCostMicros(ctx context.Context, workspaceID string, now time.Time) (int64, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	// Expiry sweeps stay deployment-wide: an expired reservation is garbage in
+	// every tenant, and leaving another tenant's stale rows behind would keep
+	// consuming a ceiling nobody is spending against.
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM cost_reservations WHERE expires_at <= ?`,
 		now.UTC().Format("2006-01-02 15:04:05")); err != nil {
 		return 0, err
 	}
 	var total int64
-	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(estimated_micros), 0) FROM cost_reservations`).Scan(&total)
+	err = s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(estimated_micros), 0) FROM cost_reservations WHERE workspace = ?`, workspaceID).Scan(&total)
 	return total, err
 }
 
-func (s *Store) ReservedCostMicrosScope(ctx context.Context, now time.Time, subject, agentID string) (int64, error) {
+func (s *Store) ReservedCostMicrosScope(ctx context.Context, workspaceID string, now time.Time, subject, agentID string) (int64, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return 0, err
+	}
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM cost_reservations WHERE expires_at <= ?`,
 		now.UTC().Format("2006-01-02 15:04:05")); err != nil {
 		return 0, err
 	}
-	query := `SELECT COALESCE(SUM(estimated_micros), 0) FROM cost_reservations WHERE 1=1`
-	args := []any{}
+	query := `SELECT COALESCE(SUM(estimated_micros), 0) FROM cost_reservations WHERE workspace = ?`
+	args := []any{workspaceID}
 	if subject != "" {
 		query += ` AND subject = ?`
 		args = append(args, subject)
@@ -625,14 +762,18 @@ func (s *Store) ReservedCostMicrosScope(ctx context.Context, now time.Time, subj
 		args = append(args, agentID)
 	}
 	var total int64
-	err := s.db.QueryRowContext(ctx, query, args...).Scan(&total)
+	err = s.db.QueryRowContext(ctx, query, args...).Scan(&total)
 	return total, err
 }
 
 // SumTokensSince returns recorded tokens for an optional subject and/or agent.
-func (s *Store) SumTokensSince(ctx context.Context, since time.Time, subject, agentID string) (int64, error) {
-	query := `SELECT COALESCE(SUM(total_tokens), 0) FROM token_usage WHERE created_at >= ?`
-	args := []any{since.UTC().Format("2006-01-02 15:04:05")}
+func (s *Store) SumTokensSince(ctx context.Context, workspaceID string, since time.Time, subject, agentID string) (int64, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	query := `SELECT COALESCE(SUM(total_tokens), 0) FROM token_usage WHERE workspace = ? AND created_at >= ?`
+	args := []any{workspaceID, since.UTC().Format("2006-01-02 15:04:05")}
 	if subject != "" {
 		query += ` AND subject = ?`
 		args = append(args, subject)
@@ -642,18 +783,22 @@ func (s *Store) SumTokensSince(ctx context.Context, since time.Time, subject, ag
 		args = append(args, agentID)
 	}
 	var total int64
-	err := s.db.QueryRowContext(ctx, query, args...).Scan(&total)
+	err = s.db.QueryRowContext(ctx, query, args...).Scan(&total)
 	return total, err
 }
 
 // ReservedTokens returns in-flight token reservations for an optional scope.
-func (s *Store) ReservedTokens(ctx context.Context, now time.Time, subject, agentID string) (int64, error) {
+func (s *Store) ReservedTokens(ctx context.Context, workspaceID string, now time.Time, subject, agentID string) (int64, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return 0, err
+	}
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM cost_reservations WHERE expires_at <= ?`,
 		now.UTC().Format("2006-01-02 15:04:05")); err != nil {
 		return 0, err
 	}
-	query := `SELECT COALESCE(SUM(estimated_tokens), 0) FROM cost_reservations WHERE 1=1`
-	args := []any{}
+	query := `SELECT COALESCE(SUM(estimated_tokens), 0) FROM cost_reservations WHERE workspace = ?`
+	args := []any{workspaceID}
 	if subject != "" {
 		query += ` AND subject = ?`
 		args = append(args, subject)
@@ -663,17 +808,18 @@ func (s *Store) ReservedTokens(ctx context.Context, now time.Time, subject, agen
 		args = append(args, agentID)
 	}
 	var total int64
-	err := s.db.QueryRowContext(ctx, query, args...).Scan(&total)
+	err = s.db.QueryRowContext(ctx, query, args...).Scan(&total)
 	return total, err
 }
 
 // SumByAgent returns total tokens and estimated cost grouped by agent_id.
 // If since is non-zero, only rows after that time are included.
-func (s *Store) SumByAgent(ctx context.Context, since time.Time) ([]AgentCost, error) {
-	var (
-		rows *sql.Rows
-		err  error
-	)
+func (s *Store) SumByAgent(ctx context.Context, workspaceID string, since time.Time) ([]AgentCost, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	var rows *sql.Rows
 	if since.IsZero() {
 		rows, err = s.db.QueryContext(ctx, `
 			SELECT agent_id,
@@ -682,8 +828,9 @@ func (s *Store) SumByAgent(ctx context.Context, since time.Time) ([]AgentCost, e
 			       SUM(comp_tokens)   AS comp_tokens,
 			       SUM(cost_usd)      AS cost_usd
 			FROM token_usage
+			WHERE workspace = ?
 			GROUP BY agent_id
-			ORDER BY agent_id`)
+			ORDER BY agent_id`, workspaceID)
 	} else {
 		rows, err = s.db.QueryContext(ctx, `
 			SELECT agent_id,
@@ -692,10 +839,10 @@ func (s *Store) SumByAgent(ctx context.Context, since time.Time) ([]AgentCost, e
 			       SUM(comp_tokens)   AS comp_tokens,
 			       SUM(cost_usd)      AS cost_usd
 			FROM token_usage
-			WHERE created_at > ?
+			WHERE workspace = ? AND created_at > ?
 			GROUP BY agent_id
 			ORDER BY agent_id`,
-			since.UTC().Format("2006-01-02 15:04:05"))
+			workspaceID, since.UTC().Format("2006-01-02 15:04:05"))
 	}
 	if err != nil {
 		return nil, err
@@ -715,21 +862,22 @@ func (s *Store) SumByAgent(ctx context.Context, since time.Time) ([]AgentCost, e
 
 // SumBySession returns total tokens for one agent's sessions.
 // If since is non-zero, only rows after that time are included.
-func (s *Store) SumBySession(ctx context.Context, agentID string, since time.Time) ([]SessionCost, error) {
-	var (
-		rows *sql.Rows
-		err  error
-	)
+func (s *Store) SumBySession(ctx context.Context, workspaceID, agentID string, since time.Time) ([]SessionCost, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	var rows *sql.Rows
 	if since.IsZero() {
 		rows, err = s.db.QueryContext(ctx, `
 			SELECT session_id,
 			       SUM(total_tokens) AS total_tokens,
 			       SUM(cost_usd)     AS cost_usd
 			FROM token_usage
-			WHERE agent_id = ?
+			WHERE workspace = ? AND agent_id = ?
 			GROUP BY session_id
 			ORDER BY session_id`,
-			agentID)
+			workspaceID, agentID)
 	} else {
 		rows, err = s.db.QueryContext(ctx, `
 			SELECT session_id,
@@ -760,7 +908,11 @@ func (s *Store) SumBySession(ctx context.Context, agentID string, since time.Tim
 
 // Chargeback groups prompt-free usage by an explicit allowlisted dimension
 // set. Supported names are user, feature, provider, and model.
-func (s *Store) Chargeback(ctx context.Context, since time.Time, groupBy []string) ([]ChargebackRow, error) {
+func (s *Store) Chargeback(ctx context.Context, workspaceID string, since time.Time, groupBy []string) ([]ChargebackRow, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
 	selected := map[string]bool{}
 	for _, dimension := range groupBy {
 		switch strings.ToLower(strings.TrimSpace(dimension)) {
@@ -793,9 +945,9 @@ func (s *Store) Chargeback(ctx context.Context, since time.Time, groupBy []strin
 		COUNT(*) AS calls, COALESCE(SUM(attempt_count), 0) AS attempts,
 		COALESCE(SUM(total_tokens), 0) AS total_tokens,
 		COALESCE(SUM(cost_micros), 0) AS cost_micros, COALESCE(SUM(cost_usd), 0) AS cost_usd
-		FROM token_usage WHERE created_at >= ? GROUP BY ` + strings.Join(groups, ", ") +
+		FROM token_usage WHERE workspace = ? AND created_at >= ? GROUP BY ` + strings.Join(groups, ", ") +
 		` ORDER BY cost_micros DESC, total_tokens DESC`
-	rows, err := s.db.QueryContext(ctx, query, since.UTC().Format("2006-01-02 15:04:05"))
+	rows, err := s.db.QueryContext(ctx, query, workspaceID, since.UTC().Format("2006-01-02 15:04:05"))
 	if err != nil {
 		return nil, err
 	}

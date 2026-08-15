@@ -25,7 +25,7 @@ isolation state; this document explains it.
 declared workspace-owned but not yet isolated.
 
 - At the start of this work: **57 blockers**
-- Now: **29 blockers**
+- Now: **25 blockers**
 
 A store moves from `personal-only` to `scoped` only when it has a real
 cross-tenant isolation test. The catalog names that test, and a CI check fails
@@ -248,6 +248,43 @@ would quietly move someone else's turns into another person's private history.
 implicit local user a single-tenant installation has always had, and the value
 those rows already carry.
 
+### Spend is rivalrous, so an unscoped budget is a denial of service
+
+Costs are unusual among these stores. Spend is confidential — it reveals
+another team's activity, model choices, and volume — but it is also
+*rivalrous*: a shared ceiling means the busiest tenant starves the rest, and
+one tenant's spend becomes observable to another as rejections.
+
+So the "global" budget scopes are now global *within one workspace*. A
+configured daily or monthly ceiling applies per tenant rather than to the
+deployment as a whole. In Personal there is exactly one workspace, so the
+numbers are identical to what they were.
+
+`token_usage` already had a `workspace` column that `Record` wrote; it was
+simply never used as a predicate. `cost_reservations` had none, and that was
+the half that mattered.
+
+**The bug this work surfaced is the one worth remembering.** `TryReserve` has
+its own INSERT, separate from `Reserve`, and it was still writing reservation
+rows without a workspace. A reservation with an empty workspace matches no
+scoped capacity read — so it was invisible to the very ceiling it was supposed
+to consume, and the budget silently stopped being enforced. That is worse than
+a leak: nothing surfaces. An existing concurrency test caught it, and
+`TestInFlightReservationsConsumeTheirOwnWorkspacesCeiling` now pins it
+directly (verified by reverting the fix and watching it fail).
+
+`cost_reconciliations` is **reclassified, not scoped**. It records a comparison
+against the *provider's invoice*, and providers bill the deployment rather than
+the tenant. There is no honest way to split one invoice across workspaces, so
+scoping it would add fiction rather than isolation. It is now `PlatformGlobal`,
+which the catalog's own invariant already permits to stay `personal-only`.
+Per-tenant attribution is what `Chargeback` is for, and that one is scoped.
+
+One catalog wrinkle worth knowing: the costs column is named `workspace`, not
+`workspace_id`, and `ValidateCatalog` requires the literal `workspace_id` in a
+tenant table's `ScopeKey`. Rather than weaken that guard, the entries record
+both — `workspace_id (column: workspace)`.
+
 ### The SDK is extended additively, never modified
 
 `sdk/storage.MemoryBackend` is documented as frozen per major version, so it
@@ -280,33 +317,9 @@ Highest-value first, with the reason each matters:
    including workspace and run, path containment after symlink resolution,
    archive extraction that rejects traversal, escaping links, and decompression
    bombs.
-3. **Costs** — the largest remaining group, and the one M4 needs. One tenant's
-   spend counting against another's budget is both a leak and a denial of
-   service, so this is a correctness issue as much as an isolation one.
-   Groundwork already done, to save the next pass rediscovering it:
-
-   - `token_usage` **already has a `workspace` column** (schema v2) and
-     `Record` already writes it. What is missing is the predicate on the ~10
-     aggregate reads, a workspace-first index, and the unconditional backfill
-     of pre-v2 rows from empty to `ws_personal`.
-   - `cost_reservations` has `subject` and `agent_id` but **no workspace**. It
-     needs one, plus the predicate on `Reserve`/`TryReserve`/`Release`/
-     `ReservedCostMicros*`/`ReservedTokens`. This is the budget-enforcement
-     path, so it is the half that matters most: without it one tenant's
-     in-flight reservations count against another's ceiling.
-   - `cost_reconciliations` should probably be **reclassified, not scoped**.
-     It records a comparison against the *provider's invoice*, and providers
-     bill the deployment rather than the tenant. The store cannot split one
-     invoice across workspaces, and pretending otherwise would invent numbers.
-     `PlatformGlobal` + `personal-only` is the honest classification, and the
-     catalog's own invariant already permits that pairing.
-   - ~20 consumer sites: `internal/gateway` (coststatus, server, runmetrics,
-     studio), `internal/runtime/engine.go`, `internal/costs/{governor,api}.go`,
-     and `internal/app/adapters.go`.
-
-4. **DLQ, checkpoints, session resources, vector stores, `rbac_agent_grants`,
-   `studio/deployrecord.go`, `agentmemory`** — all still `personal-only`; each
-   needs the same treatment as the stores above.
+3. **DLQ, checkpoints, session resources, vector stores, `rbac_agent_grants`,
+   `studio/deployrecord.go`, `agentmemory`, `api_keys`** — all still
+   `personal-only`; each needs the same treatment as the stores above.
 
 ## Verification
 

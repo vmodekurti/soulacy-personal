@@ -145,7 +145,7 @@ func (s *Server) handleOpsSummary(c *fiber.Ctx) error {
 		"recent_failures":    summary.RecentFailures,
 	}
 	if s.costStore != nil {
-		rows, err := s.costStore.SumByAgent(c.Context(), since)
+		rows, err := s.costStore.SumByAgent(c.Context(), s.costWorkspace(c), since)
 		if err != nil {
 			s.log.Warn("ops summary: cost query failed")
 		} else {

@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"net/http"
 	"path/filepath"
 	"testing"
@@ -24,7 +25,7 @@ func TestCostStatusReportsBudgetsAndUsage(t *testing.T) {
 		t.Fatalf("cost store: %v", err)
 	}
 	s.SetCostStore(store)
-	if err := store.Record(context.Background(), costs.UsageRecord{
+	if err := store.Record(context.Background(), costs.UsageRecord{Workspace: wsroot.PersonalWorkspaceID,
 		AgentID:      "agent",
 		SessionID:    "session",
 		Provider:     "openai",

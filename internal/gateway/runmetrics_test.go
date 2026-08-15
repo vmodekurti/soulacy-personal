@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"net/http"
 	"path/filepath"
 	"testing"
@@ -40,13 +41,13 @@ func newTestGatewayWithMetrics(t *testing.T) *Server {
 	ctx := context.Background()
 
 	// Two LLM calls for the session.
-	if err := cs.Record(ctx, costs.UsageRecord{
+	if err := cs.Record(ctx, costs.UsageRecord{Workspace: wsroot.PersonalWorkspaceID,
 		AgentID: "bot", SessionID: "sess-run-1", Provider: "openai", Model: "gpt-4o-mini",
 		PromptTokens: 100, CompTokens: 40, TotalTokens: 140, CostUSD: 0.002, CreatedAt: base,
 	}); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
-	if err := cs.Record(ctx, costs.UsageRecord{
+	if err := cs.Record(ctx, costs.UsageRecord{Workspace: wsroot.PersonalWorkspaceID,
 		AgentID: "bot", SessionID: "sess-run-1", Provider: "openai", Model: "gpt-4o-mini",
 		PromptTokens: 200, CompTokens: 60, TotalTokens: 260, CostUSD: 0.003, CreatedAt: base.Add(8 * time.Second),
 	}); err != nil {
@@ -123,7 +124,7 @@ func TestRunMetrics_CombinedSources(t *testing.T) {
 func TestRunMetrics_CostsOnlySession(t *testing.T) {
 	s := newTestGatewayWithMetrics(t)
 	// Session present in costs but with no action events.
-	if err := s.costStore.Record(context.Background(), costs.UsageRecord{
+	if err := s.costStore.Record(context.Background(), costs.UsageRecord{Workspace: wsroot.PersonalWorkspaceID,
 		AgentID: "bot", SessionID: "costs-only", Provider: "ollama", Model: "llama3",
 		PromptTokens: 10, CompTokens: 5, TotalTokens: 15, CostUSD: 0,
 	}); err != nil {

@@ -6,17 +6,36 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"go.uber.org/zap"
+
+	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
 // API exposes cost-tracking data over HTTP.
+//
+// Note for whoever wires this: nothing routes these handlers today — the
+// gateway serves cost endpoints from its own package. They are kept because
+// they are a reasonable embedding surface, but they must not be mounted
+// without setting Workspace, or every tenant would read the personal
+// workspace's spend.
 type API struct {
 	store *Store
 	log   *zap.Logger
+	// Workspace resolves the tenant a request acts in. A nil resolver means
+	// the personal workspace, which is the correct answer for a single-tenant
+	// embedding and the wrong one for anything else.
+	Workspace func(*fiber.Ctx) string
 }
 
 // NewAPI creates an API backed by the given Store.
 func NewAPI(s *Store, log *zap.Logger) *API {
 	return &API{store: s, log: log}
+}
+
+func (a *API) workspace(c *fiber.Ctx) string {
+	if a.Workspace == nil {
+		return wsroot.PersonalWorkspaceID
+	}
+	return wsroot.Normalize(a.Workspace(c))
 }
 
 // HandleGetCosts handles GET /api/v1/costs
@@ -37,7 +56,7 @@ func (a *API) HandleGetCosts(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": fmt.Sprintf("invalid since param: %v", err)})
 	}
 
-	rows, err := a.store.SumByAgent(c.Context(), since)
+	rows, err := a.store.SumByAgent(c.Context(), a.workspace(c), since)
 	if err != nil {
 		a.log.Error("costs: SumByAgent failed", zap.Error(err))
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
@@ -88,7 +107,7 @@ func (a *API) HandleGetAgentCosts(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": fmt.Sprintf("invalid since param: %v", err)})
 	}
 
-	sessions, err := a.store.SumBySession(c.Context(), agentID, since)
+	sessions, err := a.store.SumBySession(c.Context(), a.workspace(c), agentID, since)
 	if err != nil {
 		a.log.Error("costs: SumBySession failed", zap.String("agent_id", agentID), zap.Error(err))
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})

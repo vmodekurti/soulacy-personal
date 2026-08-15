@@ -102,9 +102,15 @@ var Tables = []Table{
 	{Source: "internal/agentmemory/rulelog.go", Name: "rulebook_versions", Resource: "studio-learning", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
 	{Source: "internal/auth/apikeys/postgres.go", Name: "access_credentials", Resource: "api-keys", Class: UserPrivate, ScopeKey: "organization_id,workspace_ids,subject_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/auth/apikeys/postgres_test.go"},
 	{Source: "internal/auth/apikeys/store.go", Name: "api_keys", Resource: "api-keys", Class: UserPrivate, ScopeKey: "workspace_id,user_id", CompositeUniqueness: true, Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
-	{Source: "internal/costs/store.go", Name: "cost_reconciliations", Resource: "costs", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
-	{Source: "internal/costs/store.go", Name: "cost_reservations", Resource: "costs", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
-	{Source: "internal/costs/store.go", Name: "token_usage", Resource: "costs", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
+	// cost_reconciliations is reclassified, not scoped. It records a comparison
+	// against the *provider's invoice*, and providers bill the deployment
+	// rather than the tenant. There is no honest way to split one invoice
+	// across workspaces here, so scoping it would add fiction rather than
+	// isolation. Per-tenant attribution is what the chargeback query is for,
+	// and that one is workspace-scoped.
+	{Source: "internal/costs/store.go", Name: "cost_reconciliations", Resource: "costs", Class: PlatformGlobal, ScopeKey: "provider invoice period", CompositeUniqueness: true, Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
+	{Source: "internal/costs/store.go", Name: "cost_reservations", Resource: "costs", Class: WorkspaceOwned, ScopeKey: "workspace_id (column: workspace)", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/costs/workspace_test.go"},
+	{Source: "internal/costs/store.go", Name: "token_usage", Resource: "costs", Class: WorkspaceOwned, ScopeKey: "workspace_id (column: workspace)", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/costs/workspace_test.go"},
 	{Source: "internal/credentials/rotation.go", Name: "credential_versions", Resource: "secrets", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/credentials/workspace_test.go"},
 	{Source: "internal/credentials/vault.go", Name: "credentials", Resource: "secrets", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/credentials/workspace_test.go"},
 	{Source: "internal/knowledge/jobs.go", Name: "ingest_jobs", Resource: "knowledge", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/knowledge/workspace_test.go"},
@@ -154,7 +160,7 @@ var Repositories = []Repository{
 	{Source: "internal/auth/apikeys/store.go", Resource: "api-keys", Class: UserPrivate, ScopeKey: "workspace_id,user_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
 	{Source: "internal/auth/jwt.go", Resource: "credentials", Class: UserPrivate, ScopeKey: "workspace_id,user_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
 	{Source: "internal/auth/oidc_flow.go", Resource: "credentials", Class: Ephemeral, ScopeKey: "verified provider subject", Isolation: Scoped, IsolationTest: "internal/auth/oidc_flow_test.go"},
-	{Source: "internal/costs/store.go", Resource: "costs", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
+	{Source: "internal/costs/store.go", Resource: "costs", Class: WorkspaceOwned, ScopeKey: "workspace_id (column: workspace)", Isolation: Scoped, IsolationTest: "internal/costs/workspace_test.go"},
 	{Source: "internal/credentials/rotation.go", Resource: "secrets", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/credentials/workspace_test.go"},
 	{Source: "internal/credentials/vault.go", Resource: "secrets", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/credentials/workspace_test.go"},
 	{Source: "internal/gateway/idempotency.go", Resource: "idempotency", Class: Ephemeral, ScopeKey: "workspace_id,method,route", Isolation: Scoped, IsolationTest: "internal/gateway/idempotency_test.go"},

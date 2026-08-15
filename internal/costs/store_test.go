@@ -3,6 +3,7 @@ package costs
 
 import (
 	"context"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"path/filepath"
 	"testing"
 	"time"
@@ -40,7 +41,7 @@ func TestRecordAndSumByAgent(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t)
 
-	rec := UsageRecord{
+	rec := UsageRecord{Workspace: wsroot.PersonalWorkspaceID,
 		AgentID: "research", SessionID: "s1",
 		Provider: "anthropic", Model: "claude-3-haiku",
 		PromptTokens: 100, CompTokens: 50, TotalTokens: 150, CostUSD: 0.01,
@@ -49,7 +50,7 @@ func TestRecordAndSumByAgent(t *testing.T) {
 		t.Fatalf("Record: %v", err)
 	}
 
-	costs, err := s.SumByAgent(ctx, time.Time{})
+	costs, err := s.SumByAgent(ctx, wsroot.PersonalWorkspaceID, time.Time{})
 	if err != nil {
 		t.Fatalf("SumByAgent: %v", err)
 	}
@@ -69,7 +70,7 @@ func TestRecordAutoFillsCreatedAt(t *testing.T) {
 	s := newStore(t)
 
 	before := time.Now().UTC().Add(-time.Second)
-	rec := UsageRecord{AgentID: "ag", SessionID: "s1", Provider: "ollama", Model: "llama3",
+	rec := UsageRecord{Workspace: wsroot.PersonalWorkspaceID, AgentID: "ag", SessionID: "s1", Provider: "ollama", Model: "llama3",
 		PromptTokens: 10, CompTokens: 5, TotalTokens: 15}
 	// CreatedAt is zero — should be auto-filled.
 	if err := s.Record(ctx, rec); err != nil {
@@ -77,7 +78,7 @@ func TestRecordAutoFillsCreatedAt(t *testing.T) {
 	}
 
 	// Record with explicit CreatedAt.
-	rec2 := UsageRecord{AgentID: "ag2", SessionID: "s2", Provider: "ollama", Model: "llama3",
+	rec2 := UsageRecord{Workspace: wsroot.PersonalWorkspaceID, AgentID: "ag2", SessionID: "s2", Provider: "ollama", Model: "llama3",
 		PromptTokens: 20, CompTokens: 10, TotalTokens: 30,
 		CreatedAt: time.Now().UTC()}
 	if err := s.Record(ctx, rec2); err != nil {
@@ -85,7 +86,7 @@ func TestRecordAutoFillsCreatedAt(t *testing.T) {
 	}
 
 	// Both should appear with since=before.
-	costs, err := s.SumByAgent(ctx, before)
+	costs, err := s.SumByAgent(ctx, wsroot.PersonalWorkspaceID, before)
 	if err != nil {
 		t.Fatalf("SumByAgent filtered: %v", err)
 	}
@@ -96,7 +97,7 @@ func TestRecordAutoFillsCreatedAt(t *testing.T) {
 
 func TestSumByAgentEmptyDB(t *testing.T) {
 	s := newStore(t)
-	costs, err := s.SumByAgent(context.Background(), time.Time{})
+	costs, err := s.SumByAgent(context.Background(), wsroot.PersonalWorkspaceID, time.Time{})
 	if err != nil {
 		t.Fatalf("SumByAgent empty: %v", err)
 	}
@@ -111,14 +112,14 @@ func TestSumByAgentMultipleAgents(t *testing.T) {
 
 	for i, agentID := range []string{"alpha", "beta", "alpha"} {
 		pt := 10 * (i + 1)
-		_ = s.Record(ctx, UsageRecord{
+		_ = s.Record(ctx, UsageRecord{Workspace: wsroot.PersonalWorkspaceID,
 			AgentID: agentID, SessionID: "s1",
 			Provider: "test", Model: "m", PromptTokens: pt,
 			CompTokens: 5, TotalTokens: pt + 5,
 		})
 	}
 
-	costs, err := s.SumByAgent(ctx, time.Time{})
+	costs, err := s.SumByAgent(ctx, wsroot.PersonalWorkspaceID, time.Time{})
 	if err != nil {
 		t.Fatalf("SumByAgent: %v", err)
 	}
@@ -136,14 +137,14 @@ func TestSumBySession(t *testing.T) {
 	s := newStore(t)
 
 	for _, sess := range []string{"s1", "s2", "s1"} {
-		_ = s.Record(ctx, UsageRecord{
+		_ = s.Record(ctx, UsageRecord{Workspace: wsroot.PersonalWorkspaceID,
 			AgentID: "ag", SessionID: sess,
 			Provider: "test", Model: "m",
 			PromptTokens: 100, CompTokens: 50, TotalTokens: 150,
 		})
 	}
 
-	sessions, err := s.SumBySession(ctx, "ag", time.Time{})
+	sessions, err := s.SumBySession(ctx, wsroot.PersonalWorkspaceID, "ag", time.Time{})
 	if err != nil {
 		t.Fatalf("SumBySession: %v", err)
 	}
@@ -157,14 +158,14 @@ func TestSumBySessionFiltered(t *testing.T) {
 	s := newStore(t)
 
 	cutoff := time.Now().UTC()
-	_ = s.Record(ctx, UsageRecord{
+	_ = s.Record(ctx, UsageRecord{Workspace: wsroot.PersonalWorkspaceID,
 		AgentID: "ag", SessionID: "new-sess",
 		Provider: "test", Model: "m", PromptTokens: 10,
 		CompTokens: 5, TotalTokens: 15,
 		CreatedAt: time.Now().UTC(),
 	})
 
-	sessions, err := s.SumBySession(ctx, "ag", cutoff)
+	sessions, err := s.SumBySession(ctx, wsroot.PersonalWorkspaceID, "ag", cutoff)
 	if err != nil {
 		t.Fatalf("SumBySession filtered: %v", err)
 	}
@@ -174,10 +175,10 @@ func TestSumBySessionFiltered(t *testing.T) {
 func TestSumBySessionUnknownAgent(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t)
-	_ = s.Record(ctx, UsageRecord{AgentID: "other", SessionID: "s1",
+	_ = s.Record(ctx, UsageRecord{Workspace: wsroot.PersonalWorkspaceID, AgentID: "other", SessionID: "s1",
 		Provider: "test", Model: "m", TotalTokens: 10})
 
-	sessions, err := s.SumBySession(ctx, "nobody", time.Time{})
+	sessions, err := s.SumBySession(ctx, wsroot.PersonalWorkspaceID, "nobody", time.Time{})
 	if err != nil {
 		t.Fatalf("SumBySession unknown: %v", err)
 	}

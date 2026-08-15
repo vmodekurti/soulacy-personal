@@ -11,6 +11,7 @@ package costs
 import (
 	"context"
 	"encoding/json"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"io"
 	"net/http"
 	"strings"
@@ -183,11 +184,11 @@ func TestHandleGetCosts_WithData_Returns200WithTotals(t *testing.T) {
 
 	ctx := context.Background()
 	records := []UsageRecord{
-		{AgentID: "alpha", SessionID: "s1", Provider: "test", Model: "m",
+		{Workspace: wsroot.PersonalWorkspaceID, AgentID: "alpha", SessionID: "s1", Provider: "test", Model: "m",
 			PromptTokens: 100, CompTokens: 50, TotalTokens: 150, CostUSD: 0.01},
-		{AgentID: "beta", SessionID: "s2", Provider: "test", Model: "m",
+		{Workspace: wsroot.PersonalWorkspaceID, AgentID: "beta", SessionID: "s2", Provider: "test", Model: "m",
 			PromptTokens: 200, CompTokens: 100, TotalTokens: 300, CostUSD: 0.02},
-		{AgentID: "alpha", SessionID: "s3", Provider: "test", Model: "m",
+		{Workspace: wsroot.PersonalWorkspaceID, AgentID: "alpha", SessionID: "s3", Provider: "test", Model: "m",
 			PromptTokens: 50, CompTokens: 25, TotalTokens: 75, CostUSD: 0.005},
 	}
 	for _, r := range records {
@@ -234,8 +235,8 @@ func TestHandleGetCosts_AgentIDFilter_Returns200Filtered(t *testing.T) {
 	app := newApp(t, api, "")
 
 	ctx := context.Background()
-	_ = store.Record(ctx, UsageRecord{AgentID: "alpha", SessionID: "s1", Provider: "test", Model: "m", TotalTokens: 100})
-	_ = store.Record(ctx, UsageRecord{AgentID: "beta", SessionID: "s2", Provider: "test", Model: "m", TotalTokens: 200})
+	_ = store.Record(ctx, UsageRecord{Workspace: wsroot.PersonalWorkspaceID, AgentID: "alpha", SessionID: "s1", Provider: "test", Model: "m", TotalTokens: 100})
+	_ = store.Record(ctx, UsageRecord{Workspace: wsroot.PersonalWorkspaceID, AgentID: "beta", SessionID: "s2", Provider: "test", Model: "m", TotalTokens: 200})
 
 	status, body := doJSON(t, app, http.MethodGet, "/costs?agent_id=alpha", "")
 	if status != http.StatusOK {
@@ -259,7 +260,7 @@ func TestHandleGetCosts_UnknownAgentFilter_Returns200EmptyArray(t *testing.T) {
 	app := newApp(t, api, "")
 
 	ctx := context.Background()
-	_ = store.Record(ctx, UsageRecord{AgentID: "alpha", SessionID: "s1", Provider: "test", Model: "m", TotalTokens: 100})
+	_ = store.Record(ctx, UsageRecord{Workspace: wsroot.PersonalWorkspaceID, AgentID: "alpha", SessionID: "s1", Provider: "test", Model: "m", TotalTokens: 100})
 
 	status, body := doJSON(t, app, http.MethodGet, "/costs?agent_id=nobody", "")
 	if status != http.StatusOK {
@@ -279,7 +280,7 @@ func TestHandleGetCosts_SinceDuration_Returns200(t *testing.T) {
 	app := newApp(t, api, "")
 
 	ctx := context.Background()
-	_ = store.Record(ctx, UsageRecord{
+	_ = store.Record(ctx, UsageRecord{Workspace: wsroot.PersonalWorkspaceID,
 		AgentID: "alpha", SessionID: "s1", Provider: "test", Model: "m",
 		TotalTokens: 100, CreatedAt: time.Now().UTC(),
 	})
@@ -306,7 +307,7 @@ func TestHandleGetCosts_SinceDateString_Returns200(t *testing.T) {
 	app := newApp(t, api, "")
 
 	ctx := context.Background()
-	_ = store.Record(ctx, UsageRecord{
+	_ = store.Record(ctx, UsageRecord{Workspace: wsroot.PersonalWorkspaceID,
 		AgentID: "alpha", SessionID: "s1", Provider: "test", Model: "m",
 		TotalTokens: 100, CreatedAt: time.Now().UTC(),
 	})
@@ -381,7 +382,7 @@ func TestHandleGetAgentCosts_ValidAgent_Returns200WithSessions(t *testing.T) {
 
 	ctx := context.Background()
 	for _, sess := range []string{"s1", "s2", "s1"} {
-		_ = store.Record(ctx, UsageRecord{
+		_ = store.Record(ctx, UsageRecord{Workspace: wsroot.PersonalWorkspaceID,
 			AgentID: "research", SessionID: sess,
 			Provider: "test", Model: "m",
 			TotalTokens: 100, CostUSD: 0.01,
@@ -424,7 +425,7 @@ func TestHandleGetAgentCosts_UnknownAgent_Returns200ZeroTotals(t *testing.T) {
 	app := newApp(t, api, "")
 
 	ctx := context.Background()
-	_ = store.Record(ctx, UsageRecord{
+	_ = store.Record(ctx, UsageRecord{Workspace: wsroot.PersonalWorkspaceID,
 		AgentID: "other", SessionID: "s1",
 		Provider: "test", Model: "m", TotalTokens: 50,
 	})
@@ -459,7 +460,7 @@ func TestHandleGetAgentCosts_SinceParam_Returns200(t *testing.T) {
 	app := newApp(t, api, "")
 
 	ctx := context.Background()
-	_ = store.Record(ctx, UsageRecord{
+	_ = store.Record(ctx, UsageRecord{Workspace: wsroot.PersonalWorkspaceID,
 		AgentID: "research", SessionID: "s1",
 		Provider: "test", Model: "m",
 		TotalTokens: 100, CreatedAt: time.Now().UTC(),
@@ -638,7 +639,7 @@ func TestHandleGetCosts_AuthWithValidKey_Returns200(t *testing.T) {
 	app := newApp(t, api, "my-secret")
 
 	ctx := context.Background()
-	_ = store.Record(ctx, UsageRecord{
+	_ = store.Record(ctx, UsageRecord{Workspace: wsroot.PersonalWorkspaceID,
 		AgentID: "agent1", SessionID: "s1",
 		Provider: "test", Model: "m", TotalTokens: 50,
 	})
@@ -658,7 +659,7 @@ func TestHandleGetAgentCosts_AuthWithValidKey_Returns200(t *testing.T) {
 	app := newApp(t, api, "my-secret")
 
 	ctx := context.Background()
-	_ = store.Record(ctx, UsageRecord{
+	_ = store.Record(ctx, UsageRecord{Workspace: wsroot.PersonalWorkspaceID,
 		AgentID: "agent1", SessionID: "s1",
 		Provider: "test", Model: "m", TotalTokens: 50,
 	})
