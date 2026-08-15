@@ -185,7 +185,7 @@ var Repositories = []Repository{
 	{Source: "internal/skills/loader.go", Resource: "skills", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
 	{Source: "internal/storage/postgres/postgres.go", Resource: "memory", Class: UserPrivate, ScopeKey: "workspace_id,user_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
 	{Source: "internal/storage/sqlite/sqlite.go", Resource: "memory", Class: UserPrivate, ScopeKey: "workspace_id,user_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
-	{Source: "internal/studio/deployrecord.go", Resource: "definitions", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
+	{Source: "internal/studio/deployrecord.go", Resource: "definitions", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/studio/deployrecord_workspace_test.go"},
 	{Source: "internal/studio/lessons.go", Resource: "studio-learning", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/gateway/studio_scope_test.go"},
 	{Source: "internal/studio/library.go", Resource: "studio-drafts", Class: UserPrivate, ScopeKey: "workspace_id,user_id", Isolation: Scoped, IsolationTest: "internal/gateway/studio_scope_test.go"},
 	{Source: "internal/studio/macros.go", Resource: "studio-learning", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/studio/observers_workspace_test.go"},

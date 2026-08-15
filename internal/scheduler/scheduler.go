@@ -254,6 +254,15 @@ func (s *Scheduler) SetPrincipal(principal runtime.Principal) {
 // Scale enable this until their durable schedule records supply a workspace.
 func (s *Scheduler) RequirePrincipal(required bool) { s.requirePrincipal = required }
 
+// PrincipalWorkspace is the workspace every scheduled run acts in, or "" when
+// no principal has been set (personal, where "" normalises to personal).
+//
+// It exists so a readiness gate can read its verdict from the same workspace
+// the run will execute under. Reading them from different workspaces would let
+// one tenant's certification clear another tenant's run — the two values must
+// come from one source, and this is it.
+func (s *Scheduler) PrincipalWorkspace() string { return s.principal.WorkspaceID }
+
 // maxRunDuration is the safety cap on the run-lock staleness check. It needs
 // to be at least as long as the slowest agent's run_timeout, otherwise a
 // legitimately long run would be treated as "stale" and a concurrent run

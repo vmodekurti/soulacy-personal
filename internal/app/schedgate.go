@@ -21,12 +21,17 @@ import (
 // must have no opinion. Returning "blocked" for those agents would silently
 // stop every hand-written YAML cron agent in the workspace — a far worse
 // failure than the one the gate exists to prevent.
-func deploymentReadinessGate(store *studio.DeploymentStore) scheduler.ReadinessGate {
-	if store == nil {
+// workspaceID is supplied as a function rather than a value so the verdict is
+// always read from the workspace the scheduler is *currently* running as. A
+// value captured at wiring time would silently go stale if the principal were
+// ever set afterwards, and a stale workspace here means consulting one
+// tenant's deployment history to clear another tenant's run.
+func deploymentReadinessGate(store *studio.DeploymentStore, workspaceID func() string) scheduler.ReadinessGate {
+	if store == nil || workspaceID == nil {
 		return nil
 	}
 	return scheduler.ReadinessGateFunc(func(agentID string) (scheduler.ReadinessVerdict, bool) {
-		r := store.ScheduleReadiness(agentID)
+		r := store.ScheduleReadiness(workspaceID(), agentID)
 		if !r.Deployed {
 			return scheduler.ReadinessVerdict{}, false
 		}

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/agent"
 	sdkr "github.com/soulacy/soulacy/sdk/reasoning"
 )
@@ -87,7 +88,7 @@ func TestDeploymentVersionsAreMonotonicAndHistoryIsAppendOnly(t *testing.T) {
 		}
 		// A caller-supplied version must be ignored — only the store may assign.
 		rec.Version = 99
-		stored, err := store.Record(rec)
+		stored, err := store.Record(wsroot.PersonalWorkspaceID, rec)
 		if err != nil {
 			t.Fatalf("record %d: %v", i, err)
 		}
@@ -100,7 +101,7 @@ func TestDeploymentVersionsAreMonotonicAndHistoryIsAppendOnly(t *testing.T) {
 		hashes = append(hashes, stored.WorkflowHash)
 	}
 
-	hist, err := store.History(def.ID)
+	hist, err := store.History(wsroot.PersonalWorkspaceID, def.ID)
 	if err != nil {
 		t.Fatalf("History: %v", err)
 	}
@@ -116,11 +117,11 @@ func TestDeploymentVersionsAreMonotonicAndHistoryIsAppendOnly(t *testing.T) {
 		}
 	}
 
-	latest, err := store.Latest(def.ID)
+	latest, err := store.Latest(wsroot.PersonalWorkspaceID, def.ID)
 	if err != nil || latest.Version != 3 {
 		t.Errorf("Latest = v%d (%v), want v3", latest.Version, err)
 	}
-	prev, err := store.Previous(def.ID)
+	prev, err := store.Previous(wsroot.PersonalWorkspaceID, def.ID)
 	if err != nil || prev.Version != 2 {
 		t.Errorf("Previous = v%d (%v), want v2", prev.Version, err)
 	}
@@ -137,18 +138,18 @@ func TestRollbackRestoresPreviousDefinitionAsANewVersion(t *testing.T) {
 	good.SystemPrompt = "the version that worked"
 	goodCert := Certify(certifiableInput(), certAt)
 	rec, _ := NewDeploymentRecord(good, DefaultSOULRules, &goodCert, "alice", "good")
-	if _, err := store.Record(rec); err != nil {
+	if _, err := store.Record(wsroot.PersonalWorkspaceID, rec); err != nil {
 		t.Fatalf("record good: %v", err)
 	}
 
 	bad := def
 	bad.SystemPrompt = "the version that broke production"
 	rec, _ = NewDeploymentRecord(bad, DefaultSOULRules, nil, "bob", "bad")
-	if _, err := store.Record(rec); err != nil {
+	if _, err := store.Record(wsroot.PersonalWorkspaceID, rec); err != nil {
 		t.Fatalf("record bad: %v", err)
 	}
 
-	rolled, err := store.Rollback(def.ID, "carol")
+	rolled, err := store.Rollback(wsroot.PersonalWorkspaceID, def.ID, "carol")
 	if err != nil {
 		t.Fatalf("Rollback: %v", err)
 	}
@@ -176,7 +177,7 @@ func TestRollbackRestoresPreviousDefinitionAsANewVersion(t *testing.T) {
 		t.Error("rolling back to a certified version must restore a certified deployment")
 	}
 
-	hist, err := store.History(def.ID)
+	hist, err := store.History(wsroot.PersonalWorkspaceID, def.ID)
 	if err != nil {
 		t.Fatalf("History: %v", err)
 	}
@@ -193,10 +194,10 @@ func TestRollbackWithNoPreviousVersionErrorsCleanly(t *testing.T) {
 	store := newTestDeploymentStore(t)
 
 	// Never deployed.
-	if _, err := store.Rollback("ghost", "alice"); !errors.Is(err, ErrNoDeployment) {
+	if _, err := store.Rollback(wsroot.PersonalWorkspaceID, "ghost", "alice"); !errors.Is(err, ErrNoDeployment) {
 		t.Errorf("rollback of an undeployed agent = %v, want ErrNoDeployment", err)
 	}
-	if _, err := store.Latest("ghost"); !errors.Is(err, ErrNoDeployment) {
+	if _, err := store.Latest(wsroot.PersonalWorkspaceID, "ghost"); !errors.Is(err, ErrNoDeployment) {
 		t.Errorf("Latest of an undeployed agent = %v, want ErrNoDeployment", err)
 	}
 
@@ -204,14 +205,14 @@ func TestRollbackWithNoPreviousVersionErrorsCleanly(t *testing.T) {
 	// "rolling back to nothing" would leave the agent with no definition at all.
 	def := deployableAgent()
 	rec, _ := NewDeploymentRecord(def, DefaultSOULRules, nil, "alice", "")
-	if _, err := store.Record(rec); err != nil {
+	if _, err := store.Record(wsroot.PersonalWorkspaceID, rec); err != nil {
 		t.Fatalf("record: %v", err)
 	}
-	_, err := store.Rollback(def.ID, "alice")
+	_, err := store.Rollback(wsroot.PersonalWorkspaceID, def.ID, "alice")
 	if !errors.Is(err, ErrNoPreviousDeployment) {
 		t.Errorf("rollback of a first deployment = %v, want ErrNoPreviousDeployment", err)
 	}
-	hist, _ := store.History(def.ID)
+	hist, _ := store.History(wsroot.PersonalWorkspaceID, def.ID)
 	if len(hist) != 1 {
 		t.Errorf("a failed rollback must not touch history, got %d records", len(hist))
 	}
@@ -244,7 +245,7 @@ func TestNoSecretsArePersistedInProviderConfig(t *testing.T) {
 	rec.ProviderConfig["opaque"] = hexToken
 	rec.ProviderConfig["endpoint"] = urlWithCreds
 
-	if _, err := store.Record(rec); err != nil {
+	if _, err := store.Record(wsroot.PersonalWorkspaceID, rec); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
 
@@ -259,7 +260,7 @@ func TestNoSecretsArePersistedInProviderConfig(t *testing.T) {
 		}
 	}
 
-	stored, err := store.Latest(def.ID)
+	stored, err := store.Latest(wsroot.PersonalWorkspaceID, def.ID)
 	if err != nil {
 		t.Fatalf("Latest: %v", err)
 	}
@@ -317,7 +318,7 @@ func TestProviderConfigCoversPeerAgentRoles(t *testing.T) {
 // block hand-written YAML agents that never passed through Studio.
 func TestScheduleReadinessHasNoOpinionAboutUndeployedAgents(t *testing.T) {
 	store := newTestDeploymentStore(t)
-	r := store.ScheduleReadiness("hand-written")
+	r := store.ScheduleReadiness(wsroot.PersonalWorkspaceID, "hand-written")
 	if r.Deployed || r.Blocked {
 		t.Errorf("an undeployed agent must yield no opinion, got %+v", r)
 	}
@@ -329,10 +330,10 @@ func TestScheduleReadinessBlocksUncertifiedDeployments(t *testing.T) {
 
 	// Deployed with NO evidence at all.
 	rec, _ := NewDeploymentRecord(def, DefaultSOULRules, nil, "alice", "")
-	if _, err := store.Record(rec); err != nil {
+	if _, err := store.Record(wsroot.PersonalWorkspaceID, rec); err != nil {
 		t.Fatalf("record: %v", err)
 	}
-	r := store.ScheduleReadiness(def.ID)
+	r := store.ScheduleReadiness(wsroot.PersonalWorkspaceID, def.ID)
 	if !r.Deployed || !r.Blocked {
 		t.Fatalf("a deployment with no certification must block, got %+v", r)
 	}
@@ -345,10 +346,10 @@ func TestScheduleReadinessBlocksUncertifiedDeployments(t *testing.T) {
 	in.LastRealRun = &RealRunEvidence{RunID: "dry-1", Dry: true, Succeeded: true, OutcomeMet: true}
 	failing := Certify(in, certAt)
 	rec, _ = NewDeploymentRecord(def, DefaultSOULRules, &failing, "alice", "")
-	if _, err := store.Record(rec); err != nil {
+	if _, err := store.Record(wsroot.PersonalWorkspaceID, rec); err != nil {
 		t.Fatalf("record: %v", err)
 	}
-	r = store.ScheduleReadiness(def.ID)
+	r = store.ScheduleReadiness(wsroot.PersonalWorkspaceID, def.ID)
 	if !r.Blocked {
 		t.Fatal("a failing certification must block scheduling")
 	}
@@ -366,10 +367,10 @@ func TestScheduleReadinessBlocksUncertifiedDeployments(t *testing.T) {
 	// restart and no cache to invalidate — the store is re-read every call.
 	passing := Certify(certifiableInput(), certAt)
 	rec, _ = NewDeploymentRecord(def, DefaultSOULRules, &passing, "alice", "")
-	if _, err := store.Record(rec); err != nil {
+	if _, err := store.Record(wsroot.PersonalWorkspaceID, rec); err != nil {
 		t.Fatalf("record: %v", err)
 	}
-	if r = store.ScheduleReadiness(def.ID); r.Blocked {
+	if r = store.ScheduleReadiness(wsroot.PersonalWorkspaceID, def.ID); r.Blocked {
 		t.Errorf("a certified deployment must not block: %+v", r)
 	}
 	if r.Version != 3 {
@@ -389,11 +390,11 @@ func TestScheduleReadinessFailsClosedOnCorruptHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := NewDeploymentStore(dir)
-	r := store.ScheduleReadiness("broken")
+	r := store.ScheduleReadiness(wsroot.PersonalWorkspaceID, "broken")
 	if !r.Deployed || !r.Blocked {
 		t.Fatalf("a corrupt deployment history must fail closed, got %+v", r)
 	}
-	if _, err := store.History("broken"); err == nil {
+	if _, err := store.History(wsroot.PersonalWorkspaceID, "broken"); err == nil {
 		t.Error("History must surface the parse failure, not swallow it")
 	}
 }
@@ -401,7 +402,7 @@ func TestScheduleReadinessFailsClosedOnCorruptHistory(t *testing.T) {
 func TestDeploymentStoreRejectsTraversalAgentIDs(t *testing.T) {
 	store := newTestDeploymentStore(t)
 	for _, id := range []string{"../escape", "a/b", ".", "..", ""} {
-		if _, err := store.Record(DeploymentRecord{AgentID: id}); err == nil {
+		if _, err := store.Record(wsroot.PersonalWorkspaceID, DeploymentRecord{AgentID: id}); err == nil {
 			t.Errorf("agent id %q should have been rejected", id)
 		}
 	}

@@ -25,7 +25,7 @@ isolation state; this document explains it.
 declared workspace-owned but not yet isolated.
 
 - At the start of this work: **57 blockers**
-- Now: **10 blockers**
+- Now: **9 blockers**
 
 A store moves from `personal-only` to `scoped` only when it has a real
 cross-tenant isolation test. The catalog names that test, and a CI check fails
@@ -587,6 +587,47 @@ reached by accident, and every row it returns carries its own `WorkspaceID` so
 the resumer decides per row instead of inheriting one workspace's context for
 all of them.
 
+### Deployment history is isolated by directory, so nothing can forget to filter
+
+`internal/studio/deployrecord.go` was already rooted at a caller-supplied
+directory — but the caller was `wire.go`, once, at startup, with the
+deployment's own root. Every workspace's histories would have landed in one
+directory keyed only by agent ID.
+
+Agent IDs are unique within a workspace, not across the deployment, so that is
+not a near miss. Two tenants deploying an agent with the same ID would have
+appended to *one history file*: each tenant's version numbers would count the
+other's deploys, and `Latest` would return whichever tenant deployed most
+recently. The isolation test catches exactly this — with the tenant removed
+from the path, the two workspaces' first deployments come back as v1 and v2.
+
+Rollback is the sharp edge. It reads the previous record and re-applies its
+`Definition`, which is the full agent including its system prompt. Under a
+shared history a rollback would not leak another tenant's prompt, it would
+*install* it.
+
+Scoping is by path (`wsroot.Dir`), like `library.go` and `rulesstore.go` before
+it: a tenant asking for a neighbour's agent does not get a filtered-out result,
+it gets "no such file". Personal resolves to the root itself, so a single-user
+installation's files are exactly where they were (invariant 7), and the test
+asserts both that and the absence of a namespace directory.
+
+The readiness gate needed the same treatment from the other side. The
+scheduler's verdict must be read from the workspace the run will *execute* in,
+or one tenant's certification could clear another tenant's identically-named
+agent to fire on a schedule. `deploymentReadinessGate` now takes
+`sched.PrincipalWorkspace` as a function rather than a captured value, so the
+verdict and the run can never be read from different workspaces.
+
+### A note on an assertion that was theatre
+
+The first version of the directory test asserted "no `.tmp` files left in the
+shared root". It passes whether or not the write is namespaced — the temp file
+is renamed away on success and removed on every error path — so it proved
+nothing. It now asserts the shared root contains the namespace directory *and
+nothing else*, which is actually observable. Worth recording because a test
+that cannot fail is worse than no test: it reads like coverage.
+
 ## Guards worth keeping
 
 - **`TestRequestScopeIsNeverReadFromADetachedGoroutine`** (AST-based) fails the
@@ -650,10 +691,24 @@ Highest-value first, with the reason each matters:
    Preview at all. If it is not, MU-025's third criterion should be struck or
    deferred explicitly rather than left to look unfinished.
 
-5. **DLQ, checkpoints, `studio/deployrecord.go`, `agentmemory`, `api_keys`** —
-   all still `personal-only`; each needs the same treatment as the stores
-   above. `api_keys` is the one with security weight left: it holds
-   credentials, and its `ScopeKey` is `workspace_id,user_id`.
+5. **The nine stores still `personal-only`.** `api_keys`, the DLQ,
+   `workflow_checkpoints` and `studio/deployrecord.go` are now scoped; what
+   remains splits into three kinds of work, not one:
+
+   - `internal/plugins/loader.go` and `internal/skills/loader.go` are extension
+     inventory, which is MU-017's first acceptance criterion. Flipping them
+     without the rest of that story would classify the storage while leaving
+     installation, approval and revocation unscoped.
+   - `internal/storage/sqlite/sqlite.go` and
+     `internal/storage/postgres/postgres.go` sit behind `sdk/storage`'s frozen
+     `MemoryBackend`, so they need the `*InWorkspace` optional-interface
+     treatment rather than a signature change.
+   - `internal/agentmemory` (`store.go`, `rulebook_locks`,
+     `rulebook_versions`), `internal/auth/jwt.go` and
+     `internal/tenancy/postgres.go:credentials` are ordinary scoping work.
+     `agentmemory` carries a concurrency dimension the others do not: the locks
+     are a coordination primitive, so their key is also their mutual-exclusion
+     domain.
 
 ## Verification
 

@@ -45,6 +45,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/agent"
 )
 
@@ -368,6 +369,16 @@ type deploymentHistory struct {
 
 // DeploymentStore is a file-backed, append-only deployment history rooted at a
 // caller-supplied directory.
+//
+// One store serves every workspace, and the tenant is a path segment rather
+// than a field inside the file: `wsroot.Dir` puts each workspace's histories in
+// its own directory, so a tenant cannot read another's history even by naming
+// its agent — there is no file there to open. Filtering would have been the
+// wrong tool here twice over. Agent IDs are unique within a workspace, not
+// across the deployment, so a shared directory keyed by agent ID would have
+// two tenants appending to one history file; and a rollback reads the previous
+// record and re-applies its Definition, so a mixed history does not merely
+// leak, it hands one tenant's system prompt to another tenant's agent.
 type DeploymentStore struct {
 	root string
 	// mu serialises read-modify-write cycles so two concurrent deploys cannot
@@ -393,7 +404,7 @@ func DeploymentsDir(workspaceRoot string) string {
 // Version and DeployedAt filled in. The caller's Version is ignored: the store
 // owns version assignment, because it is the only place that can see the
 // current head under a lock.
-func (s *DeploymentStore) Record(rec DeploymentRecord) (DeploymentRecord, error) {
+func (s *DeploymentStore) Record(workspaceID string, rec DeploymentRecord) (DeploymentRecord, error) {
 	if s == nil || strings.TrimSpace(s.root) == "" {
 		return DeploymentRecord{}, fmt.Errorf("studio: deployments root is required")
 	}
@@ -409,7 +420,7 @@ func (s *DeploymentStore) Record(rec DeploymentRecord) (DeploymentRecord, error)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	hist, err := s.loadLocked(agentID)
+	hist, err := s.loadLocked(workspaceID, agentID)
 	if err != nil {
 		return DeploymentRecord{}, err
 	}
@@ -424,7 +435,7 @@ func (s *DeploymentStore) Record(rec DeploymentRecord) (DeploymentRecord, error)
 	}
 	hist.AgentID = agentID
 	hist.Records = append(hist.Records, rec)
-	if err := s.saveLocked(agentID, hist); err != nil {
+	if err := s.saveLocked(workspaceID, agentID, hist); err != nil {
 		return DeploymentRecord{}, err
 	}
 	return rec, nil
@@ -433,13 +444,13 @@ func (s *DeploymentStore) Record(rec DeploymentRecord) (DeploymentRecord, error)
 // History returns every recorded deployment for agentID, oldest first. An agent
 // that was never deployed returns an empty slice and no error — "not a Studio
 // deployment" is a normal state, not a failure.
-func (s *DeploymentStore) History(agentID string) ([]DeploymentRecord, error) {
+func (s *DeploymentStore) History(workspaceID, agentID string) ([]DeploymentRecord, error) {
 	if s == nil || strings.TrimSpace(s.root) == "" {
 		return nil, fmt.Errorf("studio: deployments root is required")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	hist, err := s.loadLocked(strings.TrimSpace(agentID))
+	hist, err := s.loadLocked(workspaceID, strings.TrimSpace(agentID))
 	if err != nil {
 		return nil, err
 	}
@@ -448,8 +459,8 @@ func (s *DeploymentStore) History(agentID string) ([]DeploymentRecord, error) {
 
 // Latest returns the currently deployed version. ErrNoDeployment when the agent
 // has never been deployed.
-func (s *DeploymentStore) Latest(agentID string) (DeploymentRecord, error) {
-	recs, err := s.History(agentID)
+func (s *DeploymentStore) Latest(workspaceID, agentID string) (DeploymentRecord, error) {
+	recs, err := s.History(workspaceID, agentID)
 	if err != nil {
 		return DeploymentRecord{}, err
 	}
@@ -461,8 +472,8 @@ func (s *DeploymentStore) Latest(agentID string) (DeploymentRecord, error) {
 
 // Previous returns the deployment immediately before the current one — the
 // thing Rollback restores. ErrNoPreviousDeployment when there is only one.
-func (s *DeploymentStore) Previous(agentID string) (DeploymentRecord, error) {
-	recs, err := s.History(agentID)
+func (s *DeploymentStore) Previous(workspaceID, agentID string) (DeploymentRecord, error) {
+	recs, err := s.History(workspaceID, agentID)
 	if err != nil {
 		return DeploymentRecord{}, err
 	}
@@ -483,12 +494,12 @@ func (s *DeploymentStore) Previous(agentID string) (DeploymentRecord, error) {
 // History is never rewritten. Deleting the bad version would erase the evidence
 // an incident review needs, and would make the same rollback ambiguous if it
 // happened twice.
-func (s *DeploymentStore) Rollback(agentID, deployedBy string) (DeploymentRecord, error) {
-	prev, err := s.Previous(agentID)
+func (s *DeploymentStore) Rollback(workspaceID, agentID, deployedBy string) (DeploymentRecord, error) {
+	prev, err := s.Previous(workspaceID, agentID)
 	if err != nil {
 		return DeploymentRecord{}, err
 	}
-	current, err := s.Latest(agentID)
+	current, err := s.Latest(workspaceID, agentID)
 	if err != nil {
 		return DeploymentRecord{}, err
 	}
@@ -509,7 +520,7 @@ func (s *DeploymentStore) Rollback(agentID, deployedBy string) (DeploymentRecord
 		RolledBackFrom: current.Version,
 		RolledBackTo:   prev.Version,
 	}
-	return s.Record(restored)
+	return s.Record(workspaceID, restored)
 }
 
 // ── readiness (consumed by the scheduler gate) ──────────────────────────────
@@ -542,8 +553,8 @@ type ScheduleReadiness struct {
 //   - history unreadable    → Blocked, because we cannot prove certification and
 //     failing open here would defeat the entire gate
 //   - deployed, no evidence → Blocked for scheduled agents, with a runnable fix
-func (s *DeploymentStore) ScheduleReadiness(agentID string) ScheduleReadiness {
-	rec, err := s.Latest(agentID)
+func (s *DeploymentStore) ScheduleReadiness(workspaceID, agentID string) ScheduleReadiness {
+	rec, err := s.Latest(workspaceID, agentID)
 	switch {
 	case errors.Is(err, ErrNoDeployment):
 		return ScheduleReadiness{}
@@ -580,9 +591,9 @@ func (s *DeploymentStore) ScheduleReadiness(agentID string) ScheduleReadiness {
 
 // ── on-disk plumbing ────────────────────────────────────────────────────────
 
-func (s *DeploymentStore) loadLocked(agentID string) (deploymentHistory, error) {
+func (s *DeploymentStore) loadLocked(workspaceID, agentID string) (deploymentHistory, error) {
 	hist := deploymentHistory{AgentID: agentID}
-	path, err := s.pathFor(agentID)
+	path, err := s.pathFor(workspaceID, agentID)
 	if err != nil {
 		return hist, err
 	}
@@ -605,12 +616,13 @@ func (s *DeploymentStore) loadLocked(agentID string) (deploymentHistory, error) 
 	return hist, nil
 }
 
-func (s *DeploymentStore) saveLocked(agentID string, hist deploymentHistory) error {
-	path, err := s.pathFor(agentID)
+func (s *DeploymentStore) saveLocked(workspaceID, agentID string, hist deploymentHistory) error {
+	path, err := s.pathFor(workspaceID, agentID)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(s.root, 0o755); err != nil {
+	dir := s.workspaceDir(workspaceID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("studio: create deployments dir: %w", err)
 	}
 	data, err := json.MarshalIndent(hist, "", "  ")
@@ -619,7 +631,11 @@ func (s *DeploymentStore) saveLocked(agentID string, hist deploymentHistory) err
 	}
 	// Atomic-ish write: temp file in the same dir, then rename over the target,
 	// so a crash mid-write cannot truncate an agent's entire deployment history.
-	tmp, err := os.CreateTemp(s.root, "deploy-*.tmp")
+	// The temp file is created in the workspace's own directory, not the shared
+	// root. Both work — the rename stays within one filesystem either way — but
+	// a scratch file belonging to one tenant has no business appearing, however
+	// briefly, in a directory other tenants enumerate.
+	tmp, err := os.CreateTemp(dir, "deploy-*.tmp")
 	if err != nil {
 		return fmt.Errorf("studio: temp deployment history: %w", err)
 	}
@@ -647,12 +663,19 @@ func (s *DeploymentStore) saveLocked(agentID string, hist deploymentHistory) err
 
 // pathFor is the single chokepoint guarding every filesystem touch against
 // traversal via a hostile agent id.
-func (s *DeploymentStore) pathFor(agentID string) (string, error) {
+func (s *DeploymentStore) pathFor(workspaceID, agentID string) (string, error) {
 	if strings.TrimSpace(s.root) == "" {
 		return "", fmt.Errorf("studio: deployments root is required")
 	}
 	if !validDraftID(agentID) {
 		return "", fmt.Errorf("studio: invalid agent id %q for deployment history", agentID)
 	}
-	return filepath.Join(s.root, agentID+deploymentFileExt), nil
+	return filepath.Join(s.workspaceDir(workspaceID), agentID+deploymentFileExt), nil
+}
+
+// workspaceDir is the one place the tenant becomes a path. Personal resolves to
+// the root itself, so a single-user installation's files stay exactly where
+// they have always been (product invariant 7).
+func (s *DeploymentStore) workspaceDir(workspaceID string) string {
+	return wsroot.Dir(s.root, wsroot.Normalize(workspaceID))
 }

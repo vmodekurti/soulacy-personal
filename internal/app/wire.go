@@ -345,7 +345,7 @@ func (a *App) Run(parent context.Context) error {
 	// schedule once its deployment carries passing certification. The store is
 	// re-read on every tick, so re-certifying unblocks the schedule without a
 	// restart; agents with no deployment record are unaffected.
-	sched.SetReadinessGate(deploymentReadinessGate(studio.NewDeploymentStore(studio.DeploymentsDir(ws.Root))))
+	sched.SetReadinessGate(deploymentReadinessGate(studio.NewDeploymentStore(studio.DeploymentsDir(ws.Root)), sched.PrincipalWorkspace))
 	for _, def := range loader.All() {
 		if err := sched.RegisterAgent(def); err != nil {
 			log.Warn("scheduler register failed", zap.String("agent", def.ID), zap.Error(err))
