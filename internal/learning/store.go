@@ -508,3 +508,87 @@ func (s *Stores) For(workspaceID string) *Store {
 	s.stores[workspaceID] = store
 	return store
 }
+
+// ── evidence lineage ─────────────────────────────────────────────────────────
+
+// InvalidationResult reports what a lineage sweep touched, so a caller can log
+// or surface it rather than deleting silently.
+type InvalidationResult struct {
+	// Deleted counts pending proposals removed outright. A pending proposal is
+	// a claim nobody has acted on, and its only justification was evidence
+	// that no longer exists.
+	Deleted int
+	// Disabled counts accepted proposals switched off but retained. An
+	// accepted proposal is a decision a person made, and deleting it would
+	// erase the review history that explains why the agent behaved as it did.
+	// Disabling stops it affecting agents while keeping that record.
+	Disabled int
+}
+
+// InvalidateBySession removes or disables the learning derived from one
+// session's evidence.
+//
+// The lineage rule, stated plainly because it is a policy choice and not an
+// obvious one:
+//
+//   - A *pending* proposal is deleted. It is an unreviewed claim whose only
+//     support was a conversation the user has now erased; keeping it would let
+//     deleted evidence still be accepted into an agent's behaviour later.
+//   - An *accepted* proposal is disabled, not deleted. Someone decided it, and
+//     that decision plus its rationale is the audit trail for why the agent
+//     acts the way it does. Disabling stops the effect and preserves the
+//     record; a note is written into the proposal's metadata so the reason is
+//     legible without cross-referencing anything.
+//   - A *rejected* proposal is left alone. It already affects nothing, and
+//     removing it would lose the "we considered this and said no" signal that
+//     stops the same lesson being re-proposed.
+//
+// Deleting evidence in one workspace never touches another's: the store is
+// per workspace, so this can only reach the caller's own file.
+func (s *Store) InvalidateBySession(sessionID string) (InvalidationResult, error) {
+	var result InvalidationResult
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return result, fmt.Errorf("learning: session id is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	all, err := s.loadLocked()
+	if err != nil {
+		return result, err
+	}
+	kept := make([]Proposal, 0, len(all))
+	now := time.Now().UTC()
+	for _, p := range all {
+		if p.SessionID != sessionID {
+			kept = append(kept, p)
+			continue
+		}
+		switch p.Status {
+		case StatusPending:
+			result.Deleted++
+			continue
+		case StatusAccepted:
+			if !p.Disabled {
+				p.Disabled = true
+				result.Disabled++
+			}
+			if p.Meta == nil {
+				p.Meta = map[string]string{}
+			}
+			p.Meta["invalidated_reason"] = "source conversation was deleted"
+			p.Meta["invalidated_at"] = now.Format(time.RFC3339)
+			p.UpdatedAt = now
+		}
+		kept = append(kept, p)
+	}
+	if result.Deleted == 0 && result.Disabled == 0 {
+		// Nothing changed; skip the rewrite so a purge of an unrelated session
+		// does not churn the file.
+		return result, nil
+	}
+	if err := s.rewriteLocked(kept); err != nil {
+		return result, err
+	}
+	return result, nil
+}

@@ -25,7 +25,7 @@ isolation state; this document explains it.
 declared workspace-owned but not yet isolated.
 
 - At the start of this work: **57 blockers**
-- Now: **25 blockers**
+- Now: **21 blockers**
 
 A store moves from `personal-only` to `scoped` only when it has a real
 cross-tenant isolation test. The catalog names that test, and a CI check fails
@@ -329,6 +329,48 @@ That is why `costScope` exists at all: costs were correctly scoped by passing
 `s.costWorkspace(c)` at each call site, and correct-by-convention is exactly
 what the guard is there to replace.
 
+### Vector search: isolation and fairness are the same fix
+
+MU-025 says cross-workspace learning must not occur "through aggregate caches
+or vector similarity queries". Vector search is the sharpest version of that,
+because the wrong fix looks like it works.
+
+A post-filter returns only the caller's rows, so a naive test passes — but the
+topK budget was already spent on the neighbour's vectors. A tenant sharing an
+index with a busier one then gets few results or none, *and* the neighbour's
+memories were read out of the store in order to decide that. The workspace
+therefore goes into the pre-filter, beside `agent_id`, which this file already
+documented as necessary for the analogous reason.
+
+Qdrant needed one extra wrinkle: points written before tenancy carry no
+`workspace_id`, and they belong to personal. A personal search matches the
+value *or* an absent field via a `should` OR; no other tenant can reach either
+branch.
+
+**The first version of the KNN test did not actually work.** Every vector was
+identical, so sqlite-vec returned an arbitrary k and a simulated post-filter
+passed by luck. The embedder now places content at controlled distances, and
+the test was re-verified by reintroducing a post-filter and watching it fail.
+A test that cannot fail is worse than no test, because it manufactures
+confidence.
+
+### Deleting evidence reaches what was derived from it
+
+Erasing a conversation has to invalidate the learning that cited it —
+otherwise the evidence is gone and the conclusion remains, and a *pending*
+proposal could still be accepted into an agent's behaviour afterwards.
+
+The lineage rule is a policy choice, so it is written down rather than
+implied:
+
+- **Pending → deleted.** An unreviewed claim whose only support was erased.
+- **Accepted → disabled, not deleted.** Someone decided it, and that decision
+  is the audit trail for why the agent behaves as it does. Disabling stops the
+  effect and keeps the record, with the reason written into the proposal.
+- **Rejected → untouched.** It already affects nothing, and removing it would
+  lose the "we considered this and said no" signal that stops the same lesson
+  being re-proposed.
+
 ### The SDK is extended additively, never modified
 
 `sdk/storage.MemoryBackend` is documented as frozen per major version, so it
@@ -361,7 +403,29 @@ Highest-value first, with the reason each matters:
    including workspace and run, path containment after symlink resolution,
    archive extraction that rejects traversal, escaping links, and decompression
    bombs.
-3. **DLQ, checkpoints, session resources, vector stores, `rbac_agent_grants`,
+3. **MU-025 cannot close yet, and the reason is not effort.** Three of its
+   criteria presuppose infrastructure this branch has not built, and inventing
+   it to tick the box would be worse than leaving it open:
+
+   - *"Background jobs revalidate workspace status and policy before
+     committing"* — **workspaces have no status.** `memberships` has
+     active/suspended/deleted; `workspaces` has no lifecycle column at all.
+     There is nothing to revalidate against until a workspace lifecycle exists,
+     which belongs with MU-032 (export and delete workspace data).
+   - *"Organization-wide sharing requires an explicit policy, source
+     attribution, redaction, and opt-in destination"* — **there is no sharing
+     surface.** Cross-workspace learning is disabled by default and structurally
+     impossible today, so the criterion is currently vacuous. Building a policy
+     framework for a feature nobody has specified would be speculative design.
+   - Criteria 1 (workspace context on every learning job) and 2 (no crossing
+     via caches or vector similarity) **are** met, and criterion 4 (deletion
+     lineage) is met for conversation evidence.
+
+   The honest next step is to decide whether org-sharing is in scope for Team
+   Preview at all. If it is not, MU-025's third criterion should be struck or
+   deferred explicitly rather than left to look unfinished.
+
+4. **DLQ, checkpoints, session resources, `rbac_agent_grants`,
    `studio/deployrecord.go`, `agentmemory`, `api_keys`** — all still
    `personal-only`; each needs the same treatment as the stores above.
 

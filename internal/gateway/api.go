@@ -36,6 +36,7 @@ import (
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/costs"
 	"github.com/soulacy/soulacy/internal/introspect"
+	"github.com/soulacy/soulacy/internal/learning"
 	"github.com/soulacy/soulacy/internal/llm"
 	"github.com/soulacy/soulacy/internal/mcp"
 	"github.com/soulacy/soulacy/internal/pkgregistry"
@@ -3817,7 +3818,26 @@ func (s *Server) handleDeleteMemorySession(c *fiber.Ctx) error {
 	if err := s.engine.MemoryPurgeSession(s.agents(c).WorkspaceID(), sessionID); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
-	return c.JSON(fiber.Map{"message": "session memory purged", "session_id": sessionID})
+	// Erasing a conversation has to reach what was derived from it. Otherwise
+	// deleting the evidence leaves the conclusion in place — and a pending
+	// proposal could still be accepted into the agent's behaviour afterwards,
+	// citing a conversation that no longer exists.
+	invalidated := learning.InvalidationResult{}
+	if store := s.learningStore(c); store != nil {
+		got, err := store.InvalidateBySession(sessionID)
+		if err != nil {
+			s.log.Warn("learning: invalidate by session failed",
+				zap.String("session", sessionID), zap.Error(err))
+		}
+		invalidated = got
+	}
+	s.recordAdminAudit(c, "memory.purge_session", "session", sessionID, "ok", map[string]any{
+		"learning_deleted": invalidated.Deleted, "learning_disabled": invalidated.Disabled,
+	})
+	return c.JSON(fiber.Map{
+		"message": "session memory purged", "session_id": sessionID,
+		"learning_deleted": invalidated.Deleted, "learning_disabled": invalidated.Disabled,
+	})
 }
 
 // --- Providers ---

@@ -282,3 +282,135 @@ func indexOf(haystack, needle string) int {
 	}
 	return -1
 }
+
+// ── evidence lineage (MU-025) ────────────────────────────────────────────────
+
+// Deleting a conversation has to reach what was derived from it. Otherwise
+// erasing the evidence leaves the conclusion in place, and a pending proposal
+// could still be accepted into an agent's behaviour afterwards, citing a
+// conversation that no longer exists.
+func TestDeletingEvidenceInvalidatesDerivedLearning(t *testing.T) {
+	stores, _ := newStores(t)
+	store := stores.For("ws_a")
+
+	pending, err := store.Add(Proposal{
+		AgentID: "assistant", SessionID: "doomed", Kind: "procedure",
+		Content: "an unreviewed claim from the deleted conversation",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := store.Add(Proposal{
+		AgentID: "assistant", SessionID: "doomed", Kind: "procedure",
+		Content: "a rule someone reviewed and accepted",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpdateStatus(accepted.ID, StatusAccepted); err != nil {
+		t.Fatal(err)
+	}
+	survivor, err := store.Add(Proposal{
+		AgentID: "assistant", SessionID: "unrelated", Kind: "procedure",
+		Content: "learning from a conversation that still exists",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := store.InvalidateBySession("doomed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Deleted != 1 || result.Disabled != 1 {
+		t.Fatalf("invalidation = %+v, want 1 deleted and 1 disabled", result)
+	}
+
+	all, err := store.List("assistant", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]Proposal{}
+	for _, p := range all {
+		byID[p.ID] = p
+	}
+	// The unreviewed claim is gone: its only support was erased.
+	if _, still := byID[pending.ID]; still {
+		t.Error("a pending proposal survived deletion of its source conversation")
+	}
+	// The accepted rule is retained but switched off — someone decided it, and
+	// that decision is the audit trail for why the agent behaved as it did.
+	kept, ok := byID[accepted.ID]
+	if !ok {
+		t.Fatal("an accepted proposal was deleted rather than disabled — its review history is the audit trail")
+	}
+	if !kept.Disabled {
+		t.Error("an accepted proposal derived from deleted evidence still affects agents")
+	}
+	if kept.Meta["invalidated_reason"] == "" {
+		t.Error("the invalidation reason was not recorded on the proposal")
+	}
+	// Unrelated learning is untouched.
+	other, ok := byID[survivor.ID]
+	if !ok || other.Disabled {
+		t.Fatalf("learning from an unrelated conversation was invalidated: %+v", other)
+	}
+}
+
+// A rejected proposal already affects nothing, and removing it would lose the
+// "we considered this and said no" signal that stops the lesson being
+// re-proposed from fresh evidence.
+func TestInvalidationLeavesRejectedProposalsAlone(t *testing.T) {
+	stores, _ := newStores(t)
+	store := stores.For("ws_a")
+	rejected, err := store.Add(Proposal{
+		AgentID: "assistant", SessionID: "doomed", Kind: "procedure",
+		Content: "a claim someone already said no to",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpdateStatus(rejected.ID, StatusRejected); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := store.InvalidateBySession("doomed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Deleted != 0 || result.Disabled != 0 {
+		t.Fatalf("a rejected proposal was touched: %+v", result)
+	}
+	all, err := store.List("assistant", StatusRejected, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 1 {
+		t.Fatal("the rejection record was lost")
+	}
+}
+
+// Invalidation is per workspace, like every other operation on this store: one
+// tenant deleting a conversation cannot reach another tenant's learning, even
+// when the session IDs collide.
+func TestInvalidationCannotReachAnotherWorkspace(t *testing.T) {
+	stores, _ := newStores(t)
+	mine, theirs := stores.For("ws_a"), stores.For("ws_b")
+	if _, err := mine.Add(Proposal{AgentID: "assistant", SessionID: "shared", Kind: "procedure", Content: "mine from the shared session id"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := theirs.Add(Proposal{AgentID: "assistant", SessionID: "shared", Kind: "procedure", Content: "theirs from the shared session id"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := mine.InvalidateBySession("shared"); err != nil {
+		t.Fatal(err)
+	}
+	remaining, err := theirs.List("assistant", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remaining) != 1 {
+		t.Fatalf("another workspace's deletion removed this one's learning: %+v", remaining)
+	}
+}
