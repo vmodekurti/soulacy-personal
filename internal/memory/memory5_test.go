@@ -492,7 +492,7 @@ func TestVectorStoreSearchTopKClampNegative(t *testing.T) {
 	}
 	// topK <= 0 should be clamped to 5 before embed is called.
 	// Embed will error, but we get past the topK clamping branch.
-	_, err := vs.Search(context.Background(), "anything", -1)
+	_, err := vs.Search(context.Background(), wsroot.PersonalWorkspaceID, "anything", -1)
 	if err == nil {
 		t.Fatal("Search should return error from errorEmbedder")
 	}
@@ -509,7 +509,7 @@ func TestVectorStoreSearchTopKClampOverMax(t *testing.T) {
 		embedder: &errorEmbedder{},
 		dims:     4,
 	}
-	_, err := vs.Search(context.Background(), "anything", 99)
+	_, err := vs.Search(context.Background(), wsroot.PersonalWorkspaceID, "anything", 99)
 	if err == nil {
 		t.Fatal("Search should return error from errorEmbedder")
 	}
@@ -530,7 +530,7 @@ func TestVectorStoreSearchFilteredTopKClampNegative(t *testing.T) {
 		embedder: &errorEmbedder{},
 		dims:     4,
 	}
-	_, err := vs.SearchFiltered(context.Background(), "query", 0, "ag")
+	_, err := vs.SearchFiltered(context.Background(), wsroot.PersonalWorkspaceID, "query", 0, "ag")
 	if err == nil {
 		t.Fatal("SearchFiltered should return error from errorEmbedder")
 	}
@@ -547,7 +547,7 @@ func TestVectorStoreSearchFilteredTopKClampOverMax(t *testing.T) {
 		embedder: &errorEmbedder{},
 		dims:     4,
 	}
-	_, err := vs.SearchFiltered(context.Background(), "query", 100, "ag")
+	_, err := vs.SearchFiltered(context.Background(), wsroot.PersonalWorkspaceID, "query", 100, "ag")
 	if err == nil {
 		t.Fatal("SearchFiltered should return error from errorEmbedder")
 	}
@@ -565,7 +565,7 @@ func TestVectorStoreSearchFilteredEmptyAgentID(t *testing.T) {
 		embedder: &errorEmbedder{},
 		dims:     4,
 	}
-	_, err := vs.SearchFiltered(context.Background(), "query", 5, "")
+	_, err := vs.SearchFiltered(context.Background(), wsroot.PersonalWorkspaceID, "query", 5, "")
 	if err == nil {
 		t.Fatal("SearchFiltered(agentID='') should return error from errorEmbedder")
 	}

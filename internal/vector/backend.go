@@ -24,4 +24,8 @@ type (
 	Result = sdkvector.Result
 	// Backend is the interface satisfied by every vector-store implementation.
 	Backend = sdkvector.Backend
+	// WorkspaceBackend is the optional tenant-aware surface. Callers needing
+	// isolation type-assert for it and fail closed when the assertion does not
+	// hold, rather than searching across tenants.
+	WorkspaceBackend = sdkvector.WorkspaceBackend
 )

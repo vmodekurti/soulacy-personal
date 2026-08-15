@@ -31,10 +31,12 @@ import (
 
 	"github.com/soulacy/soulacy/internal/memory"
 	"github.com/soulacy/soulacy/internal/vector"
+	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
 // compile-time interface check
 var _ vector.Backend = (*Store)(nil)
+var _ vector.WorkspaceBackend = (*Store)(nil)
 
 // Store implements vector.Backend using Qdrant's REST API.
 type Store struct {
@@ -101,13 +103,17 @@ func (s *Store) Write(ctx context.Context, entry memory.Entry) error {
 	}
 
 	payload := map[string]any{
-		"agent_id":   entry.AgentID,
-		"session_id": entry.SessionID,
-		"scope":      string(entry.Scope),
-		"provenance": "", // retained for payload schema compat, no longer used
-		"key":        entry.Key,
-		"content":    entry.Content,
-		"created_at": entry.CreatedAt.UTC().Format(time.RFC3339),
+		// The workspace is a payload field so it can be a Qdrant pre-filter,
+		// for the same reason agent_id is: a post-filter would spend the topK
+		// budget on another tenant's points before discarding them.
+		"workspace_id": wsroot.Normalize(entry.WorkspaceID),
+		"agent_id":     entry.AgentID,
+		"session_id":   entry.SessionID,
+		"scope":        string(entry.Scope),
+		"provenance":   "", // retained for payload schema compat, no longer used
+		"key":          entry.Key,
+		"content":      entry.Content,
+		"created_at":   entry.CreatedAt.UTC().Format(time.RFC3339),
 	}
 	if entry.ExpiresAt != nil {
 		payload["expires_at"] = entry.ExpiresAt.UTC().Format(time.RFC3339)
@@ -134,6 +140,20 @@ func (s *Store) Write(ctx context.Context, entry memory.Entry) error {
 // When agentID is non-empty a payload filter is applied so only that agent's
 // memories are returned.
 func (s *Store) Search(ctx context.Context, agentID, query string, topK int) ([]vector.Result, error) {
+	return s.SearchInWorkspace(ctx, wsroot.PersonalWorkspaceID, agentID, query, topK)
+}
+
+// SearchInWorkspace pre-filters on the workspace as well as the agent.
+//
+// A collection written before tenancy has no workspace_id on its points. Those
+// points are the personal workspace's — what a single-user installation's
+// memories were — so a personal search matches either the personal value or a
+// missing field, and no other tenant can match them at all.
+func (s *Store) SearchInWorkspace(ctx context.Context, workspaceID, agentID, query string, topK int) ([]vector.Result, error) {
+	if strings.TrimSpace(workspaceID) == "" {
+		return nil, fmt.Errorf("qdrant: workspace is required")
+	}
+	workspaceID = wsroot.Normalize(workspaceID)
 	if topK <= 0 {
 		topK = 5
 	}
@@ -148,17 +168,34 @@ func (s *Store) Search(ctx context.Context, agentID, query string, topK int) ([]
 		"limit":        topK,
 		"with_payload": true,
 	}
-	if agentID != "" {
+	must := []map[string]any{}
+	if workspaceID == wsroot.PersonalWorkspaceID {
+		// Pre-tenant points carry no workspace_id at all, and they belong to
+		// personal. `should` is Qdrant's OR: the field matches, or it is
+		// absent. No other tenant's search can reach either branch.
 		req["filter"] = map[string]any{
-			"must": []map[string]any{
-				{
-					"key": "agent_id",
-					"match": map[string]any{
-						"value": agentID,
-					},
-				},
+			"should": []map[string]any{
+				{"key": "workspace_id", "match": map[string]any{"value": workspaceID}},
+				{"is_empty": map[string]any{"key": "workspace_id"}},
 			},
 		}
+	} else {
+		must = append(must, map[string]any{
+			"key": "workspace_id", "match": map[string]any{"value": workspaceID},
+		})
+	}
+	if agentID != "" {
+		must = append(must, map[string]any{
+			"key": "agent_id", "match": map[string]any{"value": agentID},
+		})
+	}
+	if len(must) > 0 {
+		filter, _ := req["filter"].(map[string]any)
+		if filter == nil {
+			filter = map[string]any{}
+		}
+		filter["must"] = must
+		req["filter"] = filter
 	}
 
 	body, _ := json.Marshal(req)
@@ -209,11 +246,16 @@ func (s *Store) Close() error { return nil }
 // older Qdrant builds that don't support the index endpoint).
 func (s *Store) ensureAgentIDIndex(ctx context.Context) {
 	url := fmt.Sprintf("%s/collections/%s/index", s.baseURL, s.collection)
-	body, _ := json.Marshal(map[string]any{
-		"field_name":   "agent_id",
-		"field_schema": map[string]any{"type": "keyword"},
-	})
-	_ = s.do(ctx, http.MethodPut, url, body, nil)
+	// workspace_id is indexed for the same reason and more urgently: it is the
+	// leading predicate on every tenant-scoped search, so without an index the
+	// isolation would be correct but linear.
+	for _, field := range []string{"workspace_id", "agent_id"} {
+		body, _ := json.Marshal(map[string]any{
+			"field_name":   field,
+			"field_schema": map[string]any{"type": "keyword"},
+		})
+		_ = s.do(ctx, http.MethodPut, url, body, nil)
+	}
 }
 
 // ensureCollection creates the Qdrant collection if it doesn't already exist.
@@ -279,11 +321,12 @@ func payloadToEntry(p map[string]any) memory.Entry {
 		return v
 	}
 	e := memory.Entry{
-		AgentID:   str("agent_id"),
-		SessionID: str("session_id"),
-		Scope:     memory.Scope(str("scope")),
-		Key:       str("key"),
-		Content:   str("content"),
+		WorkspaceID: wsroot.Normalize(str("workspace_id")),
+		AgentID:     str("agent_id"),
+		SessionID:   str("session_id"),
+		Scope:       memory.Scope(str("scope")),
+		Key:         str("key"),
+		Content:     str("content"),
 	}
 	if ts := str("created_at"); ts != "" {
 		t, _ := time.Parse(time.RFC3339, ts)

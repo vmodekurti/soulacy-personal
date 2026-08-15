@@ -364,7 +364,10 @@ func (e *Engine) buildSemanticMemoryBuiltin() BuiltinTool {
 			if topK <= 0 {
 				topK = 5
 			}
-			results, err := e.vectorStore.Search(ctx, query, topK)
+			// semantic_memory_search is a model-facing tool: the query is
+			// whatever the model asks for, so the run's own workspace is the
+			// only thing standing between it and another tenant's memories.
+			results, err := e.vectorStore.Search(ctx, WorkspaceFromContext(ctx), query, topK)
 			if err != nil {
 				return "", fmt.Errorf("semantic_memory_search: %w", err)
 			}

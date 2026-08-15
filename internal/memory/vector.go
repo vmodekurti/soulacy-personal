@@ -24,6 +24,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"strings"
 	"time"
 )
@@ -55,7 +56,8 @@ func (vs *VectorStore) ensureSchema() error {
 	stmts := []string{
 		fmt.Sprintf(`CREATE VIRTUAL TABLE IF NOT EXISTS memory_vectors USING vec0(embedding float[%d])`, vs.dims),
 		`CREATE TABLE IF NOT EXISTS memory_vector_meta (
-			rowid      INTEGER PRIMARY KEY,
+			rowid        INTEGER PRIMARY KEY,
+			workspace_id TEXT    NOT NULL DEFAULT 'ws_personal',
 			agent_id   TEXT    NOT NULL,
 			session_id TEXT    NOT NULL,
 			scope      TEXT    NOT NULL,
@@ -64,7 +66,14 @@ func (vs *VectorStore) ensureSchema() error {
 			provenance TEXT,
 			created_at DATETIME NOT NULL
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_mvmeta_agent ON memory_vector_meta(agent_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_mvmeta_agent ON memory_vector_meta(workspace_id, agent_id)`,
+	}
+	// An index built before tenancy had agent_id as its leading column, which
+	// no longer serves a workspace-first lookup. Dropping it lets the CREATE
+	// above rebuild it; CREATE INDEX IF NOT EXISTS would otherwise keep the
+	// old shape forever.
+	if _, err := vs.db.Exec(`DROP INDEX IF EXISTS idx_mvmeta_agent`); err != nil {
+		return fmt.Errorf("vector memory: drop legacy index: %w", err)
 	}
 	for _, s := range stmts {
 		if _, err := vs.db.Exec(s); err != nil {
@@ -80,11 +89,30 @@ func (vs *VectorStore) ensureSchema() error {
 			return fmt.Errorf("exec %q: %w", preview, err)
 		}
 	}
+	// A database created before tenancy has no workspace column. Add it in
+	// place and assign its rows to the personal workspace, which is what a
+	// single-user installation's memories were. The backfill re-runs on every
+	// open: a row with an empty workspace matches no scoped KNN pre-filter, so
+	// it would not leak — it would silently stop being recallable.
+	if _, err := vs.db.Exec(
+		`ALTER TABLE memory_vector_meta ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'ws_personal'`,
+	); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("vector memory: add workspace column: %w", err)
+	}
+	if _, err := vs.db.Exec(
+		`UPDATE memory_vector_meta SET workspace_id = ? WHERE workspace_id IS NULL OR workspace_id = ''`,
+		wsroot.PersonalWorkspaceID,
+	); err != nil {
+		return fmt.Errorf("vector memory: backfill workspace: %w", err)
+	}
 	return nil
 }
 
 // Write embeds the entry's content and inserts a new vector memory row.
 func (vs *VectorStore) Write(ctx context.Context, e Entry) error {
+	if strings.TrimSpace(e.WorkspaceID) == "" {
+		return ErrWorkspaceRequired
+	}
 	vec, err := vs.embedder.Embed(ctx, e.Content)
 	if err != nil {
 		return fmt.Errorf("vector memory: embed: %w", err)
@@ -105,9 +133,9 @@ func (vs *VectorStore) Write(ctx context.Context, e Entry) error {
 	defer tx.Rollback() //nolint:errcheck
 
 	res, err := tx.ExecContext(ctx, `
-		INSERT INTO memory_vector_meta (agent_id, session_id, scope, content, key, provenance, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		e.AgentID, e.SessionID, string(e.Scope), e.Content, e.Key, "", e.CreatedAt, // provenance col kept for schema compat
+		INSERT INTO memory_vector_meta (workspace_id, agent_id, session_id, scope, content, key, provenance, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		wsroot.Normalize(e.WorkspaceID), e.AgentID, e.SessionID, string(e.Scope), e.Content, e.Key, "", e.CreatedAt, // provenance col kept for schema compat
 	)
 	if err != nil {
 		return fmt.Errorf("vector memory: insert meta: %w", err)
@@ -129,54 +157,10 @@ type SearchResult struct {
 	Distance float64 // cosine distance (lower = more similar; 0 = identical)
 }
 
-// Search embeds the query and returns the top-K most similar memory entries
-// for the given agentID. Pass "" for agentID to search across all agents.
-func (vs *VectorStore) Search(ctx context.Context, query string, topK int) ([]SearchResult, error) {
-	if topK <= 0 {
-		topK = 5
-	}
-	if topK > 50 {
-		topK = 50
-	}
-	vec, err := vs.embedder.Embed(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("vector memory: embed query: %w", err)
-	}
-	vecJSON, _ := json.Marshal(vec)
-
-	rows, err := vs.db.QueryContext(ctx, `
-		SELECT mv.rowid, mv.distance,
-		       m.agent_id, m.session_id, m.scope, m.content, m.key, m.provenance, m.created_at
-		FROM memory_vectors mv
-		JOIN memory_vector_meta m ON mv.rowid = m.rowid
-		WHERE mv.embedding MATCH ?
-		  AND k = ?
-		ORDER BY mv.distance
-	`, string(vecJSON), topK)
-	if err != nil {
-		return nil, fmt.Errorf("vector memory: knn search: %w", err)
-	}
-	defer rows.Close()
-
-	var results []SearchResult
-	for rows.Next() {
-		var rowID int64
-		var dist float64
-		var sr SearchResult
-		var scope, ignoredProvenance string // provenance col retained in schema, discarded on read
-		if err := rows.Scan(
-			&rowID, &dist,
-			&sr.Entry.AgentID, &sr.Entry.SessionID,
-			&scope, &sr.Entry.Content,
-			&sr.Entry.Key, &ignoredProvenance, &sr.Entry.CreatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("vector memory: scan: %w", err)
-		}
-		sr.Entry.Scope = Scope(scope)
-		sr.Distance = dist
-		results = append(results, sr)
-	}
-	return results, rows.Err()
+// Search embeds the query and returns the top-K most similar memory entries in
+// one workspace, across every agent in it.
+func (vs *VectorStore) Search(ctx context.Context, workspaceID, query string, topK int) ([]SearchResult, error) {
+	return vs.SearchFiltered(ctx, workspaceID, query, topK, "")
 }
 
 // SearchFiltered embeds the query and returns the top-K most similar memory
@@ -198,7 +182,18 @@ func (vs *VectorStore) Search(ctx context.Context, query string, topK int) ([]Se
 // matching rows against the K budget, so agents with sparser memories still
 // get their fair share. There is a marginal overhead for the subquery but it
 // is dominated by the embedding I/O, making the trade-off strongly positive.
-func (vs *VectorStore) SearchFiltered(ctx context.Context, query string, topK int, agentID string) ([]SearchResult, error) {
+//
+// The workspace goes in that same pre-filter, and for a sharper version of the
+// same reason. A post-filter would not merely return another tenant's rows to
+// be discarded in Go — it would spend the K budget on them, so a tenant
+// sharing a database with a busier one would get few results or none, while
+// the busier tenant's memories were read out of the store to decide that.
+// Pre-filtering means the neighbour's vectors are never candidates at all.
+func (vs *VectorStore) SearchFiltered(ctx context.Context, workspaceID, query string, topK int, agentID string) ([]SearchResult, error) {
+	if strings.TrimSpace(workspaceID) == "" {
+		return nil, ErrWorkspaceRequired
+	}
+	workspaceID = wsroot.Normalize(workspaceID)
 	if topK <= 0 {
 		topK = 5
 	}
@@ -211,29 +206,22 @@ func (vs *VectorStore) SearchFiltered(ctx context.Context, query string, topK in
 	}
 	vecJSON, _ := json.Marshal(vec)
 
-	var rows *sql.Rows
+	filter := `SELECT rowid FROM memory_vector_meta WHERE workspace_id = ?`
+	args := []any{string(vecJSON), topK, workspaceID}
 	if agentID != "" {
-		rows, err = vs.db.QueryContext(ctx, `
-			SELECT mv.rowid, mv.distance,
-			       m.agent_id, m.session_id, m.scope, m.content, m.key, m.provenance, m.created_at
-			FROM memory_vectors mv
-			JOIN memory_vector_meta m ON mv.rowid = m.rowid
-			WHERE mv.embedding MATCH ?
-			  AND k = ?
-			  AND mv.rowid IN (SELECT rowid FROM memory_vector_meta WHERE agent_id = ?)
-			ORDER BY mv.distance
-		`, string(vecJSON), topK, agentID)
-	} else {
-		rows, err = vs.db.QueryContext(ctx, `
-			SELECT mv.rowid, mv.distance,
-			       m.agent_id, m.session_id, m.scope, m.content, m.key, m.provenance, m.created_at
-			FROM memory_vectors mv
-			JOIN memory_vector_meta m ON mv.rowid = m.rowid
-			WHERE mv.embedding MATCH ?
-			  AND k = ?
-			ORDER BY mv.distance
-		`, string(vecJSON), topK)
+		filter += ` AND agent_id = ?`
+		args = append(args, agentID)
 	}
+	rows, err := vs.db.QueryContext(ctx, `
+			SELECT mv.rowid, mv.distance,
+			       m.agent_id, m.session_id, m.scope, m.content, m.key, m.provenance, m.created_at
+			FROM memory_vectors mv
+			JOIN memory_vector_meta m ON mv.rowid = m.rowid
+			WHERE mv.embedding MATCH ?
+			  AND k = ?
+			  AND mv.rowid IN (`+filter+`)
+			ORDER BY mv.distance
+		`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("vector memory: knn search filtered: %w", err)
 	}
@@ -260,11 +248,16 @@ func (vs *VectorStore) SearchFiltered(ctx context.Context, query string, topK in
 	return results, rows.Err()
 }
 
-// Prune removes vector memory entries older than before for the given agentID.
-func (vs *VectorStore) Prune(ctx context.Context, agentID string, before time.Time) error {
+// Prune removes one workspace's vector memories older than before for an
+// agent. It is scoped so a retention sweep in one tenant cannot delete
+// another's recall.
+func (vs *VectorStore) Prune(ctx context.Context, workspaceID, agentID string, before time.Time) error {
+	if strings.TrimSpace(workspaceID) == "" {
+		return ErrWorkspaceRequired
+	}
 	rows, err := vs.db.QueryContext(ctx,
-		`SELECT rowid FROM memory_vector_meta WHERE agent_id = ? AND created_at < ?`,
-		agentID, before,
+		`SELECT rowid FROM memory_vector_meta WHERE workspace_id = ? AND agent_id = ? AND created_at < ?`,
+		wsroot.Normalize(workspaceID), agentID, before,
 	)
 	if err != nil {
 		return err

@@ -118,7 +118,7 @@ var Tables = []Table{
 	{Source: "internal/knowledge/store.go", Name: "documents", Resource: "knowledge", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/knowledge/workspace_test.go"},
 	{Source: "internal/knowledge/store.go", Name: "knowledge_bases", Resource: "knowledge", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/knowledge/workspace_test.go"},
 	{Source: "internal/memory/sqlite.go", Name: "memories", Resource: "memory", Class: UserPrivate, ScopeKey: "workspace_id,user_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/memory/workspace_test.go"},
-	{Source: "internal/memory/vector.go", Name: "memory_vector_meta", Resource: "vectors", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
+	{Source: "internal/memory/vector.go", Name: "memory_vector_meta", Resource: "vectors", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/memory/vector_workspace_test.go"},
 	{Source: "internal/pluginmigrate/runner.go", Name: "plugin_schema_migrations", Resource: "schema-metadata", Class: PlatformGlobal, ScopeKey: "none", Isolation: Scoped, IsolationTest: "internal/pluginmigrate/runner_test.go"},
 	{Source: "internal/queue/dlq/dlq.go", Name: "dead_letters", Resource: "queue-dlq", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
 	{Source: "internal/rbac/store.go", Name: "rbac_agent_grants", Resource: "agents", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
@@ -169,7 +169,7 @@ var Repositories = []Repository{
 	{Source: "internal/learning/store.go", Resource: "studio-learning", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/learning/workspace_test.go"},
 	{Source: "internal/memory/sqlite.go", Resource: "memory", Class: UserPrivate, ScopeKey: "workspace_id,user_id", Isolation: Scoped, IsolationTest: "internal/memory/workspace_test.go"},
 	{Source: "internal/memory/store.go", Resource: "memory", Class: UserPrivate, ScopeKey: "workspace_id,user_id", Isolation: Scoped, IsolationTest: "internal/memory/workspace_test.go"},
-	{Source: "internal/memory/vector.go", Resource: "vectors", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
+	{Source: "internal/memory/vector.go", Resource: "vectors", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/memory/vector_workspace_test.go"},
 	{Source: "internal/plugins/loader.go", Resource: "plugins", Class: OrganizationOwned, ScopeKey: "organization_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
 	{Source: "internal/pairing/pairing.go", Resource: "credentials", Class: Ephemeral, ScopeKey: "request principal", Isolation: Scoped, IsolationTest: "internal/pairing/pairing_test.go"},
 	{Source: "internal/queue/dlq/dlq.go", Resource: "queue-dlq", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
@@ -194,8 +194,8 @@ var Repositories = []Repository{
 	{Source: "internal/studio/strategyfit.go", Resource: "studio-learning", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/studio/observers_workspace_test.go"},
 	{Source: "internal/studio/trace.go", Resource: "studio-traces", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/studio/trace_workspace_test.go"},
 	{Source: "internal/tenancy/postgres.go", Resource: "tenancy", Class: PlatformGlobal, ScopeKey: "tenant foreign keys", Isolation: Scoped, IsolationTest: "internal/tenancy/postgres_test.go"},
-	{Source: "internal/vector/qdrant/qdrant.go", Resource: "vectors", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
-	{Source: "internal/vector/sqlitevec/sqlitevec.go", Resource: "vectors", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
+	{Source: "internal/vector/qdrant/qdrant.go", Resource: "vectors", Class: WorkspaceOwned, ScopeKey: "workspace_id payload pre-filter", Isolation: Scoped, IsolationTest: "internal/vector/qdrant/workspace_test.go"},
+	{Source: "internal/vector/sqlitevec/sqlitevec.go", Resource: "vectors", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/memory/vector_workspace_test.go"},
 	{Source: "internal/workboard/store.go", Resource: "workboard", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/workboard/workspace_test.go"},
 }
 

@@ -19,6 +19,7 @@ import (
 	"github.com/soulacy/soulacy/internal/queue/dlq"
 	"github.com/soulacy/soulacy/internal/runtime"
 	"github.com/soulacy/soulacy/internal/telemetry"
+	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
 // agentMemoryVectorAdapter makes the native sqlite-vec store the semantic
@@ -39,8 +40,13 @@ func (a *agentMemoryVectorAdapter) Write(r agentmemory.Record) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	// Personal-only, and deliberately so on both ends: agentmemory's own
+	// interface carries no workspace and no context, so scoping only this
+	// adapter would file one tenant's brain memories under a workspace the
+	// reader never names. This becomes per-workspace when agentmemory does.
 	return a.store.Write(ctx, memory.Entry{
-		ID: r.ID, AgentID: r.AgentID, Scope: memory.ScopeAgent, Key: r.ID,
+		WorkspaceID: wsroot.PersonalWorkspaceID,
+		ID:          r.ID, AgentID: r.AgentID, Scope: memory.ScopeAgent, Key: r.ID,
 		Content: r.Content, Metadata: map[string]string{"tags": strings.Join(r.Tags, ",")}, CreatedAt: created,
 	})
 }
@@ -51,7 +57,7 @@ func (a *agentMemoryVectorAdapter) Search(agentID, query string, max int) ([]age
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	hits, err := a.store.SearchFiltered(ctx, query, max, agentID)
+	hits, err := a.store.SearchFiltered(ctx, wsroot.PersonalWorkspaceID, query, max, agentID)
 	if err != nil {
 		return nil, err
 	}
