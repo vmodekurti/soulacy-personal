@@ -59,6 +59,16 @@ type WireDeps struct {
 	// (E13 install UX) can read it; the shape is owned by the plugin.
 	PluginsConfig map[string]map[string]any
 
+	// WorkspaceID is the tenant these contributions are wired for. Its vault
+	// is where declared plugin secrets are read from (MU-017 criterion 4).
+	//
+	// Empty means the personal workspace, which is what a single-tenant
+	// deployment wires and what this package did unconditionally before.
+	// Wiring a *tenant's* contributions is deferred with MU-021: channel and
+	// provider sidecars are supervised at process level, so one workspace per
+	// process is the honest granularity until runs are isolated.
+	WorkspaceID string
+
 	// ScratchRoot, when set, provisions a per-channel shared scratch
 	// directory (Story E24 shared mounts) advertised to the sidecar in
 	// hello_ack. Typically <workspace data>/scratch; the host sweeps it
@@ -155,7 +165,7 @@ func buildSupervisor(ctx context.Context, lp *LoadedPlugin, ch plugin.ChannelEnt
 		}
 	}
 	if len(lp.Manifest.Credentials) > 0 && deps.Vault != nil {
-		delegator := NewDelegator(deps.Vault, deps.Log)
+		delegator := NewDelegatorInWorkspace(deps.Vault, deps.WorkspaceID, deps.Log)
 		refs := lp.Manifest.Credentials
 		cfg.Env = func() ([]string, error) {
 			return delegator.Env(ctx, id, refs)
@@ -165,7 +175,7 @@ func buildSupervisor(ctx context.Context, lp *LoadedPlugin, ch plugin.ChannelEnt
 		ch.AgentID, channels.ActivationPolicy{}, deps.Log, cfg)
 
 	if len(lp.Manifest.Credentials) > 0 && deps.Vault != nil {
-		WatchCredentials(ctx, deps.Vault, id, lp.Manifest.Credentials,
+		WatchCredentialsInWorkspace(ctx, deps.Vault, deps.WorkspaceID, id, lp.Manifest.Credentials,
 			deps.WatchInterval, deps.Log, func() {
 				sup.Restart("credential rotated")
 			})

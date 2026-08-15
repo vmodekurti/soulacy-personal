@@ -915,6 +915,32 @@ only checked that revocation *completed*, which an unbounded wait also does —
 as soon as the stuck call hits its own context deadline. It now fails if
 revocation waits on the extension rather than on its own budget.
 
+### The plugin credential delegator was already careful, and still wrong
+
+`internal/plugins/delegation.go` does most of MU-017 criterion 4 well and has
+for a while: a sidecar receives a minimal allow-listed base environment plus
+*exactly* the credentials its manifest declared, references outside the
+plugin's own vault namespace are refused at validation before any read
+happens, and rotation is detected by hashing rather than by holding values.
+
+And it read `wsroot.PersonalWorkspaceID` unconditionally. The vault takes a
+workspace and has for some time; this resolver passed the same constant every
+time. So a plugin wired for any tenant was handed the personal workspace's
+secrets — the same substitution the memory archive was making, with the same
+shape: the call succeeds, the sidecar starts, and it is holding the wrong
+tenant's credential.
+
+Worth recording because the surrounding code is *good*. Namespace validation,
+value-free logging, hash-based rotation detection — all correct, all pointed at
+the wrong tenant. Care about one axis is not care about another, and a review
+that reads this file admiringly can still miss the constant.
+
+The rotation watch had to move with it. Watching a different workspace than
+the spawn env reads would mean a tenant's rotation is never noticed while an
+unrelated workspace's rotation restarts their sidecar for no reason — the test
+asserts both directions, because only checking that rotation is *detected*
+would pass with the bug.
+
 ## Guards worth keeping
 
 - **`TestRequestScopeIsNeverReadFromADetachedGoroutine`** (AST-based) fails the
@@ -985,11 +1011,13 @@ Highest-value first, with the reason each matters:
    revision and require approval before activation; and a manifest whose
    permissions change stops loading until a human re-approves. Criterion 5 is
    met for the credential half — an MCP subprocess no longer inherits the
-   gateway environment — and criterion 7 for MCP servers. What remains is
-   criterion 4 (capability grants and referenced secret handles), the
-   filesystem/network half of criterion 5 (which is MU-021's per-run isolation,
-   not a second implementation here), and criterion 7 for plugin tool
-   subprocesses.
+   gateway environment — criterion 7 for MCP servers, and criterion 4. What
+   remains is the filesystem/network half of criterion 5, which is MU-021's
+   per-run isolation rather than a second implementation here, criterion 7 for
+   plugin tool subprocesses, and per-workspace wiring of plugin *contributions*
+   (channels and providers), which is deferred with MU-021 because sidecar
+   supervision is process-level: one workspace per process is the honest
+   granularity until runs are isolated.
 
 6. **`BEGIN DEFERRED` on read-then-write transactions, elsewhere.** Two stores
    have been fixed (see below). The pattern to look for is a transaction that

@@ -82,12 +82,33 @@ var baseEnvAllowlist = []string{
 type Delegator struct {
 	vault credentials.Vault
 	log   *zap.Logger
+	// workspaceID is the tenant whose vault the declared secrets are read
+	// from (MU-017 criterion 4: "only referenced secret handles *for its
+	// workspace*").
+	//
+	// The vault has been workspace-aware for a while; this resolver was
+	// passing wsroot.PersonalWorkspaceID unconditionally. So a plugin wired
+	// for any tenant read the personal workspace's secrets — the same
+	// substitution the memory archive was making, and with the same shape:
+	// the call succeeds, the sidecar starts, and it is holding the wrong
+	// tenant's credential.
+	workspaceID string
 }
 
-// NewDelegator builds a Delegator. log must not be nil (zap.NewNop in tests).
+// NewDelegator builds a Delegator for the personal workspace. log must not be
+// nil (zap.NewNop in tests).
 func NewDelegator(vault credentials.Vault, log *zap.Logger) *Delegator {
-	return &Delegator{vault: vault, log: log}
+	return NewDelegatorInWorkspace(vault, wsroot.PersonalWorkspaceID, log)
 }
+
+// NewDelegatorInWorkspace builds a Delegator that reads one workspace's vault.
+func NewDelegatorInWorkspace(vault credentials.Vault, workspaceID string, log *zap.Logger) *Delegator {
+	return &Delegator{vault: vault, log: log, workspaceID: wsroot.Normalize(workspaceID)}
+}
+
+// workspace is the tenant this delegator reads for, normalising a zero value
+// so a Delegator built by struct literal in a test still behaves.
+func (d *Delegator) workspace() string { return wsroot.Normalize(d.workspaceID) }
 
 // Env builds the complete sidecar environment for a plugin: the whitelisted
 // base env plus exactly the declared secrets. A missing secret is an error —
@@ -106,7 +127,7 @@ func (d *Delegator) Env(ctx context.Context, pluginID string, refs []plugin.Cred
 	ns := PluginVaultNamespace(pluginID)
 	for _, r := range refs {
 		_, key, _ := strings.Cut(r.From, "/")
-		val, err := d.vault.Get(ctx, wsroot.PersonalWorkspaceID, ns, key)
+		val, err := d.vault.Get(ctx, d.workspace(), ns, key)
 		if err != nil {
 			// Deliberately omits the value (there is none) and never echoes
 			// stored secrets; only the path is named.
@@ -116,6 +137,7 @@ func (d *Delegator) Env(ctx context.Context, pluginID string, refs []plugin.Cred
 	}
 	d.log.Debug("plugins: sidecar env resolved",
 		zap.String("plugin", pluginID),
+		zap.String("workspace", d.workspace()),
 		zap.Int("credentials", len(refs)),
 	)
 	return env, nil
@@ -134,7 +156,7 @@ func (d *Delegator) fingerprint(ctx context.Context, pluginID string, refs []plu
 	sort.Strings(keys)
 	h := sha256.New()
 	for _, key := range keys {
-		val, err := d.vault.Get(ctx, wsroot.PersonalWorkspaceID, ns, key)
+		val, err := d.vault.Get(ctx, d.workspace(), ns, key)
 		h.Write([]byte(key))
 		h.Write([]byte{0})
 		if err != nil {
@@ -156,13 +178,22 @@ func (d *Delegator) fingerprint(ctx context.Context, pluginID string, refs []plu
 // values are never logged.
 func WatchCredentials(ctx context.Context, vault credentials.Vault, pluginID string,
 	refs []plugin.CredentialRef, interval time.Duration, log *zap.Logger, onChange func()) {
+	WatchCredentialsInWorkspace(ctx, vault, wsroot.PersonalWorkspaceID, pluginID, refs, interval, log, onChange)
+}
+
+// WatchCredentialsInWorkspace is WatchCredentials for one tenant's vault. The
+// watch has to read the same workspace the spawn env does, or a rotation in
+// the tenant's vault would never be noticed while a rotation in personal's
+// would restart a sidecar for no reason.
+func WatchCredentialsInWorkspace(ctx context.Context, vault credentials.Vault, workspaceID, pluginID string,
+	refs []plugin.CredentialRef, interval time.Duration, log *zap.Logger, onChange func()) {
 	if len(refs) == 0 || onChange == nil {
 		return
 	}
 	if interval <= 0 {
 		interval = 30 * time.Second
 	}
-	d := NewDelegator(vault, log)
+	d := NewDelegatorInWorkspace(vault, workspaceID, log)
 	baseline := d.fingerprint(ctx, pluginID, refs)
 	go func() {
 		t := time.NewTicker(interval)
