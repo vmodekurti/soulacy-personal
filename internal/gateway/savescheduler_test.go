@@ -42,7 +42,10 @@ func TestBothStudioSavePathsSyncTheScheduler(t *testing.T) {
 			t.Errorf("%s no longer exists in studio.go — if it was renamed, rename it here too", name)
 			continue
 		}
-		if !strings.Contains(body, "loader.Upsert(") {
+		// The write goes through the request's workspace scope now
+		// (s.agents(c).Upsert) rather than the bare loader, so match the
+		// method rather than the receiver.
+		if !strings.Contains(body, ".Upsert(") {
 			t.Errorf("%s no longer writes the agent — this test is guarding the wrong function", name)
 			continue
 		}

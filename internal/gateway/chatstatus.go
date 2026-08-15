@@ -38,7 +38,7 @@ func (s *Server) handleChatStatus(c *fiber.Ctx) error {
 }
 
 func (s *Server) chatExperienceReadiness(c *fiber.Ctx) chatExperienceReadiness {
-	_, _, chatAgents, _, _ := s.agentReadinessCounts()
+	_, _, chatAgents, _, _ := s.agentReadinessCounts(s.agents(c))
 	providersReady := countDoctorProviders(s.providerDoctorChecks(c), "ok", "warn")
 	historySearch := false
 	if s != nil && s.historyStore != nil {

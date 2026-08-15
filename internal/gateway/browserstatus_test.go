@@ -70,7 +70,7 @@ func TestBrowserPolicyPostureWarnsForUnmanagedBrowserAgents(t *testing.T) {
 	tools := []string{"mcp__browser__navigate"}
 	s.loader.Register(&agent.Definition{ID: "browser-bot", Name: "Browser Bot", MCPTools: &tools})
 
-	posture := s.browserPolicyPosture(nil)
+	posture := s.browserPolicyPosture(s.agents(nil), nil)
 	if posture.Status != "warn" || posture.UnmanagedAgents != 1 {
 		t.Fatalf("policy posture = %#v, want warn with one unmanaged agent", posture)
 	}
@@ -93,7 +93,7 @@ func TestBrowserPolicyPostureAcceptsExplicitDomainPolicy(t *testing.T) {
 		},
 	})
 
-	posture := s.browserPolicyPosture(nil)
+	posture := s.browserPolicyPosture(s.agents(nil), nil)
 	if posture.Status != "ok" || posture.ManagedAgents != 1 || posture.UnmanagedAgents != 0 {
 		t.Fatalf("policy posture = %#v, want ok with one managed agent", posture)
 	}

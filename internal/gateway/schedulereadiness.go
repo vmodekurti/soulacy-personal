@@ -22,7 +22,8 @@ type scheduleReadiness struct {
 	NextActions []string `json:"next_actions,omitempty"`
 }
 
-func (s *Server) scheduleReadiness() scheduleReadiness {
+// scheduleReadiness reports on the scope's own schedules.
+func (s *Server) scheduleReadiness(scope agentScope) scheduleReadiness {
 	out := scheduleReadiness{Status: "warn"}
 	if s == nil || s.loader == nil {
 		out.Status = "fail"
@@ -30,8 +31,8 @@ func (s *Server) scheduleReadiness() scheduleReadiness {
 		out.NextActions = []string{"Restart the gateway and re-open the Dashboard."}
 		return out
 	}
-	for _, def := range s.loader.All() {
-		if def == nil || s.loader.IsBuiltin(def.ID) {
+	for _, def := range scope.All() {
+		if def == nil || scope.IsBuiltin(def.ID) {
 			continue
 		}
 		if !isScheduledAgentDef(def) {

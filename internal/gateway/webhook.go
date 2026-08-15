@@ -34,7 +34,7 @@ func (s *Server) handleGenericWebhook(c *fiber.Ctx) error {
 	if agentID == "" {
 		return s.errMsg(c, fiber.StatusBadRequest, "agent_id is required")
 	}
-	def := s.loader.Get(agentID)
+	def := s.agents(c).Get(agentID)
 	if def == nil {
 		return s.errMsg(c, fiber.StatusNotFound, "agent not found")
 	}

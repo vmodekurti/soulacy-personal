@@ -49,7 +49,7 @@ func (s *Server) handleStudioReadiness(c *fiber.Ctx) error {
 	if req.Catalog != nil {
 		cat = *req.Catalog
 	} else {
-		cat = s.studioCatalogSnapshot()
+		cat = s.studioCatalogSnapshot(s.agents(c))
 	}
 	s.groundCatalog(&cat)
 
@@ -66,7 +66,7 @@ func (s *Server) handleStudioReadiness(c *fiber.Ctx) error {
 
 	var def *agent.Definition
 	if id := strings.TrimSpace(req.Workflow.ID); id != "" && s.loader != nil {
-		def = s.loader.Get(id)
+		def = s.agents(c).Get(id)
 	}
 
 	rep := studio.Readiness(studio.ReadinessInput{

@@ -13,7 +13,7 @@ import (
 // gateway with no agents / no shared-channel bindings reports ok.
 func TestSecurityReadiness_CleanWorkspaceOK(t *testing.T) {
 	s := newTestGateway(t, "secret")
-	rep := s.evaluateSecurityReadiness()
+	rep := s.evaluateSecurityReadiness(s.agents(nil))
 	if rep.Status != "ok" {
 		t.Errorf("clean workspace status = %q, want ok (reasons=%v)", rep.Status, rep.Reasons)
 	}
@@ -64,7 +64,7 @@ func TestSecurityReadiness_PrivilegedAgentOnTelegramFailsProduction(t *testing.T
 
 	// Advisory mode (non-production): warn, but still ready.
 	s.cfg.Deployment.Profile = "local"
-	rep := s.evaluateSecurityReadiness()
+	rep := s.evaluateSecurityReadiness(s.agents(nil))
 	if rep.Status != "warn" {
 		t.Errorf("local profile: status = %q, want warn", rep.Status)
 	}
@@ -80,7 +80,7 @@ func TestSecurityReadiness_PrivilegedAgentOnTelegramFailsProduction(t *testing.T
 
 	// Production: must fail launch.
 	s.cfg.Deployment.Profile = "production"
-	rep = s.evaluateSecurityReadiness()
+	rep = s.evaluateSecurityReadiness(s.agents(nil))
 	if rep.Status != "fail" {
 		t.Errorf("production profile: status = %q, want fail", rep.Status)
 	}
@@ -122,7 +122,7 @@ func TestSecurityReadiness_AcceptedExposurePassesProduction(t *testing.T) {
 		},
 	}
 	s.cfg.Deployment.Profile = "production"
-	rep := s.evaluateSecurityReadiness()
+	rep := s.evaluateSecurityReadiness(s.agents(nil))
 	if rep.Status != "ok" {
 		t.Errorf("accepted exposure should be ok in production; got status=%q reasons=%v", rep.Status, rep.Reasons)
 	}

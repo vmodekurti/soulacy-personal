@@ -47,11 +47,11 @@ func (s *Server) supportBundleOptions(c *fiber.Ctx) supportbundle.Options {
 		},
 		ExtraJSON: map[string]any{
 			"readiness":      s.readinessPayload(c),
-			"browser_status": s.browserAutomationReadiness(),
-			"mobile_status":  s.mobileCompanionReadiness(),
+			"browser_status": s.browserAutomationReadiness(s.agents(c)),
+			"mobile_status":  s.mobileCompanionReadiness(s.agents(c)),
 			"chat_status":    s.chatExperienceReadiness(c),
 			"docs_status":    s.publicDocsReadiness(),
-			"run_ledger":     s.supportRunLedger(),
+			"run_ledger":     s.supportRunLedger(s.agents(c)),
 			"admin_audit":    s.supportAdminAudit(),
 			"release": fiber.Map{
 				"version":         config.Version,
@@ -104,7 +104,10 @@ func (s *Server) supportAdminAudit() fiber.Map {
 	}
 }
 
-func (s *Server) supportRunLedger() fiber.Map {
+// supportRunLedger collects run rows for the requesting workspace. A support
+// bundle defaults to one workspace so an operator cannot hand a vendor another
+// tenant's run history by accident.
+func (s *Server) supportRunLedger(scope agentScope) fiber.Map {
 	if s == nil {
 		return fiber.Map{
 			"available": false,
@@ -134,14 +137,14 @@ func (s *Server) supportRunLedger() fiber.Map {
 				}
 			}
 			events = got
-			rows = append(rows, s.buildRunLedger(events, 0)...)
+			rows = append(rows, s.buildRunLedger(scope, events, 0)...)
 			sources = append(sources, "action-log")
 		}
 	} else {
 		queryNote = "action log disabled"
 	}
 
-	flowRows := s.supportFlowRunLedgerRows(events)
+	flowRows := s.supportFlowRunLedgerRows(scope, events)
 	if len(flowRows) > 0 {
 		rows = append(rows, flowRows...)
 		sources = append(sources, "flow")
@@ -171,12 +174,12 @@ func (s *Server) supportRunLedger() fiber.Map {
 	}
 }
 
-func (s *Server) supportFlowRunLedgerRows(events []message.Event) []runLedgerRow {
+func (s *Server) supportFlowRunLedgerRows(scope agentScope, events []message.Event) []runLedgerRow {
 	if s == nil || s.engine == nil {
 		return nil
 	}
 	agentIDs := map[string]bool{}
-	for id := range s.runLedgerAgentNames() {
+	for id := range s.runLedgerAgentNames(scope) {
 		if strings.TrimSpace(id) != "" {
 			agentIDs[id] = true
 		}
@@ -193,7 +196,7 @@ func (s *Server) supportFlowRunLedgerRows(events []message.Event) []runLedgerRow
 	sort.Strings(ids)
 	rows := []runLedgerRow{}
 	for _, id := range ids {
-		rows = append(rows, s.flowRunLedgerRows(id)...)
+		rows = append(rows, s.flowRunLedgerRows(scope, id)...)
 	}
 	return rows
 }

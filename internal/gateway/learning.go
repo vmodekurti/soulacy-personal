@@ -347,7 +347,7 @@ func (s *Server) handleProposeLearningFromRun(c *fiber.Ctx) error {
 	if body.AgentID == "" || body.SessionID == "" {
 		return s.errMsg(c, fiber.StatusBadRequest, "agent_id and session_id are required")
 	}
-	def := s.loader.Get(body.AgentID)
+	def := s.agents(c).Get(body.AgentID)
 	agentName := body.AgentID
 	minChars := 80
 	maxProposals := body.MaxProposals
@@ -427,7 +427,7 @@ func (s *Server) handleReflectLearningFromRecentRuns(c *fiber.Ctx) error {
 		body.MaxRuns = 20
 	}
 
-	def := s.loader.Get(body.AgentID)
+	def := s.agents(c).Get(body.AgentID)
 	agentName := body.AgentID
 	minChars := 80
 	maxProposals := body.MaxProposals

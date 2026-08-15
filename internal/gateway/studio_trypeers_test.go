@@ -47,7 +47,7 @@ func TestRegisterEphemeralPeers_StubsMissingPeer(t *testing.T) {
 		SystemPrompt: "You are Notifier. You deliver concise, reliable notifications.",
 	}}
 
-	cleanup := s.registerEphemeralPeers(def, newAgents)
+	cleanup := s.registerEphemeralPeers(s.agents(nil), def, newAgents)
 
 	got := s.loader.Get("notifier")
 	if got == nil {
@@ -75,7 +75,7 @@ func TestRegisterEphemeralPeers_SynthesizesWhenProfileMissing(t *testing.T) {
 	s := newTestGateway(t, "k")
 	def := agentNodeWorkflow("summarizer")
 
-	cleanup := s.registerEphemeralPeers(def, nil)
+	cleanup := s.registerEphemeralPeers(s.agents(nil), def, nil)
 	defer cleanup()
 
 	got := s.loader.Get("summarizer")
@@ -101,7 +101,7 @@ func TestRegisterEphemeralPeers_LeavesExistingAgentAlone(t *testing.T) {
 	defer s.loader.Unregister("helper")
 
 	def := agentNodeWorkflow("helper")
-	cleanup := s.registerEphemeralPeers(def, []studio.NewAgent{{ID: "helper", Name: "Stub"}})
+	cleanup := s.registerEphemeralPeers(s.agents(nil), def, []studio.NewAgent{{ID: "helper", Name: "Stub"}})
 	defer cleanup()
 
 	got := s.loader.Get("helper")
@@ -119,7 +119,7 @@ func TestRegisterEphemeralPeers_CleanupPreservesRealPeer(t *testing.T) {
 	defer s.loader.Unregister("helper")
 
 	def := agentNodeWorkflow("helper")
-	cleanup := s.registerEphemeralPeers(def, nil)
+	cleanup := s.registerEphemeralPeers(s.agents(nil), def, nil)
 	cleanup()
 
 	if s.loader.Get("helper") == nil {
@@ -132,6 +132,6 @@ func TestRegisterEphemeralPeers_CleanupPreservesRealPeer(t *testing.T) {
 func TestRegisterEphemeralPeers_NoWorkflowIsNoop(t *testing.T) {
 	s := newTestGateway(t, "k")
 	def := &agent.Definition{ID: "react-agent", Name: "ReAct"}
-	cleanup := s.registerEphemeralPeers(def, nil)
+	cleanup := s.registerEphemeralPeers(s.agents(nil), def, nil)
 	cleanup() // must not panic
 }

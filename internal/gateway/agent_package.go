@@ -232,7 +232,7 @@ func validatePackageNamespace(id string) error {
 
 func (s *Server) handleGetAgentPackage(c *fiber.Ctx) error {
 	id := c.Params("id")
-	def := s.loader.Get(id)
+	def := s.agents(c).Get(id)
 	if def == nil {
 		return s.errMsg(c, fiber.StatusNotFound, "agent not found")
 	}
@@ -251,7 +251,7 @@ func (s *Server) handleInspectAgentPackage(c *fiber.Ctx) error {
 	if err != nil {
 		return s.errJSON(c, fiber.StatusBadRequest, err)
 	}
-	inspected, err := s.inspectAgentPackage(pkg)
+	inspected, err := s.inspectAgentPackage(s.agents(c), pkg)
 	if err != nil {
 		return s.errJSON(c, fiber.StatusBadRequest, err)
 	}
@@ -292,7 +292,7 @@ func (s *Server) handleImportAgentPackage(c *fiber.Ctx) error {
 		}
 		pkg.Integrity = agentPackageIntegrity{Algorithm: "sha256", SHA256: sum}
 	}
-	inspected, err := s.inspectAgentPackage(pkg)
+	inspected, err := s.inspectAgentPackage(s.agents(c), pkg)
 	if err != nil {
 		return s.errJSON(c, fiber.StatusBadRequest, err)
 	}
@@ -326,7 +326,7 @@ func (s *Server) handleImportAgentPackage(c *fiber.Ctx) error {
 			})
 		}
 	}
-	if s.loader.Get(inspected.Agent.ID) != nil && !req.Overwrite {
+	if s.agents(c).Get(inspected.Agent.ID) != nil && !req.Overwrite {
 		return s.errMsg(c, fiber.StatusConflict, "agent already exists; set overwrite=true or choose a different id")
 	}
 
@@ -360,7 +360,7 @@ func (s *Server) handleImportAgentPackage(c *fiber.Ctx) error {
 		// persisted. Log at Warn so ops can spot filesystem issues.
 		s.log.Warn("package sidecar write failed", zap.String("agent", def.ID), zap.Error(err))
 	}
-	if err := s.loader.Upsert(dir, def); err != nil {
+	if err := s.agents(c).Upsert(dir, def); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
 	if err := s.scheduler.RegisterAgent(def); err != nil {
@@ -463,7 +463,7 @@ func parseAgentPackageBody(body []byte) (*agentPackageResponse, error) {
 	return &pkg, nil
 }
 
-func (s *Server) inspectAgentPackage(pkg *agentPackageResponse) (*agentPackageInspectResponse, error) {
+func (s *Server) inspectAgentPackage(scope agentScope, pkg *agentPackageResponse) (*agentPackageInspectResponse, error) {
 	if pkg == nil {
 		return nil, errors.New("package is required")
 	}
@@ -496,7 +496,7 @@ func (s *Server) inspectAgentPackage(pkg *agentPackageResponse) (*agentPackageIn
 		return nil, fmt.Errorf("SOUL.yaml parse failed: %w", err)
 	}
 	report := agentvalidate.Bytes([]byte(pkg.SOULYAML), "package:SOUL.yaml", s.agentValidationOptions(context.TODO()))
-	requirements := s.agentPackageRequirements(pkg, &def)
+	requirements := s.agentPackageRequirements(scope, pkg, &def)
 	warnings := append([]string(nil), pkg.Manifest.Warnings...)
 	if v1Warning != "" {
 		warnings = append(warnings, v1Warning)
@@ -545,7 +545,11 @@ func (s *Server) inspectAgentPackage(pkg *agentPackageResponse) (*agentPackageIn
 	}, nil
 }
 
-func (s *Server) agentPackageRequirements(pkg *agentPackageResponse, def *agent.Definition) []agentPackageRequirement {
+// agentPackageRequirements reports what a package needs that the *importing
+// workspace* does not already have. It takes the scope rather than reading the
+// registry directly, so "this peer already exists" is answered about the
+// caller's own workspace and not the deployment.
+func (s *Server) agentPackageRequirements(scope agentScope, pkg *agentPackageResponse, def *agent.Definition) []agentPackageRequirement {
 	var reqs []agentPackageRequirement
 	addReq := func(kind, name, status, desc string) {
 		name = strings.TrimSpace(name)
@@ -593,7 +597,7 @@ func (s *Server) agentPackageRequirements(pkg *agentPackageResponse, def *agent.
 	}
 	for _, peer := range sortedUnique(pkg.Manifest.PeerAgents) {
 		status := "missing"
-		if s.loader.Get(peer) != nil {
+		if scope.Get(peer) != nil {
 			status = "available"
 		}
 		addReq("peer_agent", peer, status, "Import or create this peer agent if the package invokes it.")
@@ -661,7 +665,7 @@ func (s *Server) agentPackageRequirements(pkg *agentPackageResponse, def *agent.
 		}
 		for _, p := range req.PeerAgents {
 			status := "missing"
-			if s.loader != nil && s.loader.Get(p.ID) != nil {
+			if s.loader != nil && scope.Get(p.ID) != nil {
 				status = "available"
 			}
 			addReq("required_peer_agent", p.ID, status, p.Reason)
@@ -677,7 +681,7 @@ func (s *Server) agentPackageRequirements(pkg *agentPackageResponse, def *agent.
 		}
 		addReq("file", file, status, "Portable file bundled with this package, such as a tool, eval suite, or sample prompt.")
 	}
-	if def != nil && s.loader.Get(def.ID) != nil {
+	if def != nil && scope.Get(def.ID) != nil {
 		addReq("agent_id", def.ID, "conflict", "An agent with this ID already exists.")
 	}
 	sort.Slice(reqs, func(i, j int) bool {

@@ -35,7 +35,7 @@ func (s *Server) handleStudioAddStep(c *fiber.Ctx) error {
 	compileReq := studio.CompileNodeRequest{
 		Intent:   req.Instruction,
 		Kind:     req.Kind,
-		Catalog:  s.studioCatalogSnapshot(),
+		Catalog:  s.studioCatalogSnapshot(s.agents(c)),
 		Upstream: upstreamVarsFor(req.Workflow),
 	}
 	node, err := studio.CompileNode(c.Context(), s.studioLLM(c), compileReq)

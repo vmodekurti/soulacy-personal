@@ -92,15 +92,15 @@ func (s *Server) readinessPayload(c *fiber.Ctx) fiber.Map {
 	templates, _ := s.templatesCatalog().List()
 	s.applyTemplateRuntimeDefaults(templates)
 
-	agents, enabledAgents, chatAgents, scheduledAgents, learningAgents := s.agentReadinessCounts()
+	agents, enabledAgents, chatAgents, scheduledAgents, learningAgents := s.agentReadinessCounts(s.agents(c))
 	providersReady := countDoctorProviders(providers, "ok", "warn")
 	channelsReady := countDoctorChannels(channels, "ok", "warn")
 	usableOutbound := countUsableOutboundChannels(channels)
 	updateManifest := s.updateManifestSource()
 	executors := s.executorReadiness()
-	browser := s.browserAutomationReadiness()
+	browser := s.browserAutomationReadiness(s.agents(c))
 	marketplace := s.marketplaceReadiness()
-	mobile := s.mobileCompanionReadiness()
+	mobile := s.mobileCompanionReadiness(s.agents(c))
 	chat := s.chatExperienceReadiness(c)
 	voice := s.voiceReadiness()
 	costs := s.costReadiness(c)
@@ -108,8 +108,8 @@ func (s *Server) readinessPayload(c *fiber.Ctx) fiber.Map {
 	opsAlerts := s.opsAlertReadiness()
 	studioContracts := s.studioContractReadiness(c)
 	docs := s.publicDocsReadiness()
-	schedules := s.scheduleReadiness()
-	deployment := s.deploymentReadiness(providersReady, usableOutbound, enabledAgents, updateManifest, costs, slo)
+	schedules := s.scheduleReadiness(s.agents(c))
+	deployment := s.deploymentReadiness(s.agents(c), providersReady, usableOutbound, enabledAgents, updateManifest, costs, slo)
 
 	journey := []readinessItem{
 		providerReadinessItem(providers, providersReady),
@@ -139,7 +139,7 @@ func (s *Server) readinessPayload(c *fiber.Ctx) fiber.Map {
 			Detail: deploymentReadinessDetail(deployment),
 			Href:   "#config",
 		},
-		securityReadinessJourneyItem(s.evaluateSecurityReadiness()),
+		securityReadinessJourneyItem(s.evaluateSecurityReadiness(s.agents(c))),
 	}
 
 	next := make([]readinessItem, 0)
@@ -595,12 +595,14 @@ func checklistRank(status string) int {
 	}
 }
 
-func (s *Server) agentReadinessCounts() (agents, enabled, chat, scheduled, learning int) {
+// agentReadinessCounts counts one scope's agents. Dashboards pass the
+// caller's workspace; deployment diagnostics pass agentsAcrossWorkspaces.
+func (s *Server) agentReadinessCounts(scope agentScope) (agents, enabled, chat, scheduled, learning int) {
 	if s.loader == nil {
 		return
 	}
-	for _, def := range s.loader.All() {
-		if def == nil || s.loader.IsBuiltin(def.ID) {
+	for _, def := range scope.All() {
+		if def == nil || scope.IsBuiltin(def.ID) {
 			continue
 		}
 		agents++
@@ -626,14 +628,14 @@ func (s *Server) studioContractReadiness(c *fiber.Ctx) studioContractReadiness {
 		out.WorstSummary = "Agent loader is not available, so saved workflows could not be contract-scanned."
 		return out
 	}
-	cat := s.studioCatalogSnapshot()
+	cat := s.studioCatalogSnapshot(s.agents(c))
 	s.groundCatalog(&cat)
 	in := s.preflightInput(c, cat)
 
 	totalScore := 0
 	worstScore := 101
-	for _, def := range s.loader.All() {
-		if def == nil || s.loader.IsBuiltin(def.ID) {
+	for _, def := range s.agents(c).All() {
+		if def == nil || s.agents(c).IsBuiltin(def.ID) {
 			continue
 		}
 		out.Agents++

@@ -7,21 +7,25 @@ func (s *Server) replayStudioLearning() {
 	if s == nil || s.actions == nil || s.loader == nil {
 		return
 	}
-	for _, def := range s.loader.All() {
-		if def == nil || def.ID == "" {
-			continue
-		}
-		events, err := s.actions.Tail(def.ID, 1000)
-		if err != nil {
-			continue
-		}
-		for _, event := range events {
-			if s.workflowDistiller != nil {
-				s.workflowDistiller.Observe(event)
+	// Replay covers every tenant. The action log is keyed by agent ID, so this
+	// sweeps workspace by workspace rather than reading a flattened registry.
+	s.eachWorkspace(func(scope agentScope) {
+		for _, def := range scope.All() {
+			if def == nil || def.ID == "" {
+				continue
 			}
-			if s.strategyCollector != nil {
-				s.strategyCollector.Observe(event)
+			events, err := s.actions.Tail(def.ID, 1000)
+			if err != nil {
+				continue
+			}
+			for _, event := range events {
+				if s.workflowDistiller != nil {
+					s.workflowDistiller.Observe(event)
+				}
+				if s.strategyCollector != nil {
+					s.strategyCollector.Observe(event)
+				}
 			}
 		}
-	}
+	})
 }

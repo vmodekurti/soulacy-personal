@@ -512,6 +512,23 @@ func (l *Loader) AllInWorkspace(workspaceID string) []*agent.Definition {
 	return defs
 }
 
+// AllAcrossWorkspaces returns every agent in every workspace.
+//
+// This deliberately crosses the tenant boundary and exists only for
+// deployment-level aggregates — boot validation and readiness counters — where
+// the question really is "what does this installation contain". It must never
+// back a response that a tenant reads, because the result set is the whole
+// deployment. Anything user-facing uses AllInWorkspace.
+func (l *Loader) AllAcrossWorkspaces() []*agent.Definition {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	defs := make([]*agent.Definition, 0, len(l.agents))
+	for _, d := range l.agents {
+		defs = append(defs, d.Clone())
+	}
+	return defs
+}
+
 // AllWorkspaces lists every workspace that currently owns at least one agent.
 // Background work that must sweep all tenants (schedulers, boot validation)
 // uses this instead of reaching into the map.

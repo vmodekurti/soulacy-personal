@@ -1838,36 +1838,40 @@ func (s *Server) validateAgentsAtBoot(ctx context.Context) {
 	}
 
 	var disabled, warned int
-	for _, def := range s.loader.All() {
-		if def == nil || !def.Enabled {
-			continue
-		}
-		report := agentvalidate.Definition(def, def.SourcePath, opts, agentvalidate.Report{})
-		if report.Errors > 0 {
+	// Boot validation covers every tenant, one workspace at a time, so a bad
+	// definition is disabled in the workspace that owns it and nowhere else.
+	s.eachWorkspace(func(scope agentScope) {
+		for _, def := range scope.All() {
+			if def == nil || !def.Enabled {
+				continue
+			}
+			report := agentvalidate.Definition(def, def.SourcePath, opts, agentvalidate.Report{})
+			if report.Errors > 0 {
+				for _, f := range report.Findings {
+					if f.Severity == agentvalidate.Error {
+						s.log.Error("agent disabled at boot: invalid LLM configuration",
+							zap.String("agent", def.ID),
+							zap.String("field", f.Field),
+							zap.String("problem", f.Message),
+							zap.String("fix", f.Suggestion))
+					}
+				}
+				if scope.SetEnabledInMemory(def.ID, false) {
+					disabled++
+				}
+				continue
+			}
 			for _, f := range report.Findings {
-				if f.Severity == agentvalidate.Error {
-					s.log.Error("agent disabled at boot: invalid LLM configuration",
+				if f.Severity == agentvalidate.Warn {
+					s.log.Warn("agent config warning",
 						zap.String("agent", def.ID),
 						zap.String("field", f.Field),
-						zap.String("problem", f.Message),
-						zap.String("fix", f.Suggestion))
+						zap.String("problem", f.Message))
+					warned++
 				}
 			}
-			if s.loader.SetEnabledInMemory(def.ID, false) {
-				disabled++
-			}
-			continue
 		}
-		for _, f := range report.Findings {
-			if f.Severity == agentvalidate.Warn {
-				s.log.Warn("agent config warning",
-					zap.String("agent", def.ID),
-					zap.String("field", f.Field),
-					zap.String("problem", f.Message))
-				warned++
-			}
-		}
-	}
+	})
 	if disabled > 0 || warned > 0 {
 		s.log.Info("boot agent validation complete",
 			zap.Int("disabled", disabled), zap.Int("warnings", warned))

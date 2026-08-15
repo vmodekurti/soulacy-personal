@@ -720,7 +720,7 @@ func TestUniqueAgentID_ThreeCollisions(t *testing.T) {
 		}
 	}
 
-	got := s.uniqueAgentID("collide")
+	got := s.uniqueAgentID(s.agents(nil), "collide")
 	// Should be collide-2 since collide is taken and collide-2 doesn't exist yet.
 	if got == "collide" {
 		t.Fatalf("uniqueAgentID returned taken ID 'collide'")

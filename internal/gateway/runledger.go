@@ -76,12 +76,12 @@ func (s *Server) handleRunLedger(c *fiber.Ctx) error {
 				return s.errJSON(c, fiber.StatusInternalServerError, err)
 			}
 			events = got
-			rows = append(rows, s.buildRunLedger(events, 0)...)
+			rows = append(rows, s.buildRunLedger(s.agents(c), events, 0)...)
 			sources = append(sources, "action-log")
 		}
 	}
 	if sessionID == "" {
-		flowRows := s.flowRunLedgerRows(agentID)
+		flowRows := s.flowRunLedgerRows(s.agents(c), agentID)
 		if len(flowRows) > 0 {
 			rows = append(rows, flowRows...)
 			sources = append(sources, "flow")
@@ -122,13 +122,13 @@ func runLedgerEventTypes() map[string]bool {
 	}
 }
 
-func (s *Server) buildRunLedger(events []message.Event, limit int) []runLedgerRow {
+func (s *Server) buildRunLedger(scope agentScope, events []message.Event, limit int) []runLedgerRow {
 	if len(events) == 0 {
 		return nil
 	}
 	sort.Slice(events, func(i, j int) bool { return events[i].Timestamp.Before(events[j].Timestamp) })
 
-	agentNames := s.runLedgerAgentNames()
+	agentNames := s.runLedgerAgentNames(scope)
 	byRun := map[string][]message.Event{}
 	runAgent := map[string]string{}
 	runSession := map[string]string{}
@@ -220,12 +220,15 @@ func (s *Server) buildRunLedger(events []message.Event, limit int) []runLedgerRo
 	return rows
 }
 
-func (s *Server) runLedgerAgentNames() map[string]string {
+// runLedgerAgentNames maps agent IDs to display names for one scope. It takes
+// the scope because two workspaces may use the same agent ID, and a flattened
+// map would label one tenant's run with another tenant's agent name.
+func (s *Server) runLedgerAgentNames(scope agentScope) map[string]string {
 	out := map[string]string{}
 	if s == nil || s.loader == nil {
 		return out
 	}
-	for _, def := range s.loader.All() {
+	for _, def := range scope.All() {
 		if def != nil {
 			out[def.ID] = def.Name
 		}
@@ -233,11 +236,11 @@ func (s *Server) runLedgerAgentNames() map[string]string {
 	return out
 }
 
-func (s *Server) flowRunLedgerRows(agentID string) []runLedgerRow {
+func (s *Server) flowRunLedgerRows(scope agentScope, agentID string) []runLedgerRow {
 	if s == nil || s.engine == nil {
 		return nil
 	}
-	agentNames := s.runLedgerAgentNames()
+	agentNames := s.runLedgerAgentNames(scope)
 	ids := []string{}
 	if strings.TrimSpace(agentID) != "" {
 		ids = append(ids, strings.TrimSpace(agentID))

@@ -1330,7 +1330,7 @@ func TestFirstLine_Empty(t *testing.T) {
 
 func TestUniqueAgentID_FreeBase(t *testing.T) {
 	s := newTestGateway(t, "secret")
-	got := s.uniqueAgentID("brand-new-agent")
+	got := s.uniqueAgentID(s.agents(nil), "brand-new-agent")
 	if got != "brand-new-agent" {
 		t.Fatalf("uniqueAgentID = %q, want brand-new-agent", got)
 	}
@@ -1345,7 +1345,7 @@ func TestUniqueAgentID_CollisionAppendsSuffix(t *testing.T) {
 		t.Fatalf("create: %d", st)
 	}
 
-	got := s.uniqueAgentID("collide")
+	got := s.uniqueAgentID(s.agents(nil), "collide")
 	// Should be "collide-2" since "collide" is taken.
 	if got == "collide" {
 		t.Fatalf("uniqueAgentID should not return 'collide' when already taken, got %q", got)

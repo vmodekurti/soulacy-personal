@@ -24,14 +24,14 @@ func (s *Server) handleSecurityDoctor(c *fiber.Ctx) error {
 	if s.loader == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "loader not initialised")
 	}
-	def := s.loader.Get(agentID)
+	def := s.agents(c).Get(agentID)
 	if def == nil {
 		return s.errMsg(c, fiber.StatusNotFound, "agent not found")
 	}
 
 	rep := securitydoctor.Build(securitydoctor.Input{
 		Definition:                 def,
-		Loader:                     s.loader.Get,
+		Loader:                     s.agents(c).Get,
 		ChannelBindings:            s.channelBindingsForAgent(agentID),
 		SandboxBackend:             s.sandboxBackendLabel(),
 		WorkspaceIntentGateDefault: s.workspaceIntentGateDefault(),
@@ -65,7 +65,7 @@ func (s *Server) handleSecurityDoctorDryRun(c *fiber.Ctx) error {
 	}
 	var def *agent.Definition
 	if s.loader != nil {
-		def = s.loader.Get(agentID)
+		def = s.agents(c).Get(agentID)
 	}
 	// F-Bridge — thread the workspace default through so simulations use the
 	// same effective mode as the runtime would when the per-agent value is

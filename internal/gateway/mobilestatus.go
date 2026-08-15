@@ -32,10 +32,10 @@ type mobileCompanionReadiness struct {
 }
 
 func (s *Server) handleMobileStatus(c *fiber.Ctx) error {
-	return c.JSON(s.mobileCompanionReadiness())
+	return c.JSON(s.mobileCompanionReadiness(s.agents(c)))
 }
 
-func (s *Server) mobileCompanionReadiness() mobileCompanionReadiness {
+func (s *Server) mobileCompanionReadiness(scope agentScope) mobileCompanionReadiness {
 	var pendingApprovals int
 	if s != nil && s.engine != nil && s.engine.Broker() != nil {
 		pendingApprovals = len(s.engine.Broker().List())
@@ -57,10 +57,10 @@ func (s *Server) mobileCompanionReadiness() mobileCompanionReadiness {
 		pushDetail = "Push service failed to initialize: " + err.Error()
 	}
 
-	_, _, chatAgents, scheduledAgents, _ := s.agentReadinessCounts()
+	_, _, chatAgents, scheduledAgents, _ := s.agentReadinessCounts(scope)
 	deliveryChannels := countUsableOutboundChannels(s.channelDoctorChecks())
 	managedCredential := s != nil && s.apiKeyStore != nil
-	recentRuns, durableRunLedger := s.mobileRecentRuns()
+	recentRuns, durableRunLedger := s.mobileRecentRuns(scope)
 	installable := true
 
 	checks := []mobileCompanionCheck{
@@ -229,7 +229,7 @@ func mobileCompanionNextAction(key string) string {
 	}
 }
 
-func (s *Server) mobileRecentRuns() (int, bool) {
+func (s *Server) mobileRecentRuns(scope agentScope) (int, bool) {
 	if s == nil {
 		return 0, false
 	}
@@ -238,12 +238,12 @@ func (s *Server) mobileRecentRuns() (int, bool) {
 	if s.actions != nil {
 		if q, ok := s.actions.(eventQuerier); ok {
 			if events, err := q.QueryEvents("", "", 500, runLedgerEventTypes()); err == nil {
-				rows = append(rows, s.buildRunLedger(events, 25)...)
+				rows = append(rows, s.buildRunLedger(scope, events, 25)...)
 				durable = true
 			}
 		}
 	}
-	rows = append(rows, s.flowRunLedgerRows("")...)
+	rows = append(rows, s.flowRunLedgerRows(scope, "")...)
 	rows = mergeRunLedgerRows(rows, 25)
 	return len(rows), durable
 }

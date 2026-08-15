@@ -35,7 +35,7 @@ func (s *Server) handleBrowserTrace(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
 			"enabled": false,
 			"trace":   browsertrace.Trace{Steps: []browsertrace.Step{}},
-			"policy":  s.browserTracePolicy(strings.TrimSpace(c.Query("agent_id"))),
+			"policy":  s.browserTracePolicy(s.agents(c), strings.TrimSpace(c.Query("agent_id"))),
 		})
 	}
 	agentID := strings.TrimSpace(c.Query("agent_id"))
@@ -53,7 +53,7 @@ func (s *Server) handleBrowserTrace(c *fiber.Ctx) error {
 	}
 	trace := browsertrace.Build(agentID, sessionID, events)
 	s.enrichBrowserTraceScreenshots(&trace)
-	return c.JSON(fiber.Map{"enabled": true, "trace": trace, "policy": s.browserTracePolicy(agentID)})
+	return c.JSON(fiber.Map{"enabled": true, "trace": trace, "policy": s.browserTracePolicy(s.agents(c), agentID)})
 }
 
 func (s *Server) handleBrowserArtifact(c *fiber.Ctx) error {
@@ -151,10 +151,13 @@ func (s *Server) resolveBrowserArtifactPath(ref string) string {
 	return ""
 }
 
-func (s *Server) browserTracePolicy(agentID string) browserPolicySummary {
+// browserTracePolicy summarizes one agent's browser policy. It takes the
+// caller's scope so a trace request cannot describe an agent the caller's
+// workspace does not own.
+func (s *Server) browserTracePolicy(scope agentScope, agentID string) browserPolicySummary {
 	var def *agent.Definition
-	if s != nil && s.loader != nil && strings.TrimSpace(agentID) != "" {
-		def = s.loader.Get(strings.TrimSpace(agentID))
+	if strings.TrimSpace(agentID) != "" {
+		def = scope.Get(strings.TrimSpace(agentID))
 	}
 	if def == nil || !def.Policy.Enabled {
 		return browserPolicySummary{

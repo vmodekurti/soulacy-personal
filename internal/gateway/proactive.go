@@ -25,7 +25,7 @@ func (s *Server) handleProactiveSuggestions(c *fiber.Ctx) error {
 		perAgent = 500
 	}
 
-	defs := s.loader.All()
+	defs := s.agents(c).All()
 	snapshots := make(map[string]proactive.AgentSnapshot, len(defs))
 	var events []message.Event
 	for _, def := range defs {

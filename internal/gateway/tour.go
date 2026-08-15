@@ -16,14 +16,16 @@ import (
 // installSnapshot counts what exists. Every lookup is defensive: a subsystem
 // that is disabled or failed to start reports zero rather than breaking the
 // tour, because a tour that 500s is worse than one that assumes less.
-func (s *Server) installSnapshot() tour.InstallState {
+// installSnapshot describes what the caller has set up in their own
+// workspace, which is what the tour is guiding them through.
+func (s *Server) installSnapshot(scope agentScope) tour.InstallState {
 	var st tour.InstallState
 
 	if s.llmRouter != nil {
 		st.Providers = len(s.llmRouter.ProviderIDs())
 	}
 	if s.loader != nil {
-		for _, a := range s.loader.All() {
+		for _, a := range scope.All() {
 			if a == nil || isProtectedSystemAgent(a.ID) {
 				continue // the built-in system agent is not the user's work
 			}
@@ -60,7 +62,7 @@ func (s *Server) installSnapshot() tour.InstallState {
 // handleTour implements GET /api/v1/tour/:page.
 func (s *Server) handleTour(c *fiber.Ctx) error {
 	page := strings.TrimSpace(c.Params("page"))
-	story, ok := tour.Narrate(page, s.installSnapshot())
+	story, ok := tour.Narrate(page, s.installSnapshot(s.agents(c)))
 	if !ok {
 		return s.errMsg(c, fiber.StatusNotFound, "no tour for \""+page+"\"")
 	}

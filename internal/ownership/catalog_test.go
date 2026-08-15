@@ -152,10 +152,22 @@ func discoverRepositoryDeclarations(root, repoRoot string) ([]string, error) {
 					continue
 				}
 				name := strings.ToLower(typeSpec.Name.Name)
-				if strings.HasSuffix(name, "store") || strings.HasSuffix(name, "archive") || strings.HasSuffix(name, "history") || strings.HasSuffix(name, "vault") || strings.HasSuffix(name, "checkpoint") {
+				// "loader" is included because a loader that owns a durable
+				// registry is a repository by any other name — internal/runtime
+				// and internal/plugins both hold tenant-visible state that the
+				// original suffix list walked straight past.
+				if strings.HasSuffix(name, "store") || strings.HasSuffix(name, "archive") || strings.HasSuffix(name, "history") || strings.HasSuffix(name, "vault") || strings.HasSuffix(name, "checkpoint") || strings.HasSuffix(name, "loader") {
 					seen[filepath.ToSlash(relative)] = true
 				}
 			}
+		}
+		// Not every store is a type. internal/studio persists drafts and rules
+		// through package-level functions that take a root directory, so the
+		// type-name scan never saw them even though they hold workspace data.
+		// A mutating exported function whose first parameter is a root or dir
+		// path is persistence, whatever it is spelled.
+		if declaresRootDirPersistence(file) {
+			seen[filepath.ToSlash(relative)] = true
 		}
 		return nil
 	})
@@ -168,4 +180,41 @@ func discoverRepositoryDeclarations(root, repoRoot string) ([]string, error) {
 	}
 	sort.Strings(result)
 	return result, nil
+}
+
+// declaresRootDirPersistence reports whether a file exposes package-level
+// mutating persistence keyed by a caller-supplied root directory.
+//
+// Read-only accessors are deliberately excluded: reading a manifest out of a
+// directory is not a store, and including them would bury the real ones.
+func declaresRootDirPersistence(file *ast.File) bool {
+	mutating := []string{"Save", "Write", "Delete", "Store", "Put", "Remove"}
+	for _, declaration := range file.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Recv != nil || !function.Name.IsExported() {
+			continue
+		}
+		if function.Type.Params == nil || len(function.Type.Params.List) == 0 {
+			continue
+		}
+		first := function.Type.Params.List[0]
+		if len(first.Names) == 0 {
+			continue
+		}
+		identifier, ok := first.Type.(*ast.Ident)
+		if !ok || identifier.Name != "string" {
+			continue
+		}
+		switch strings.ToLower(first.Names[0].Name) {
+		case "root", "dir":
+		default:
+			continue
+		}
+		for _, verb := range mutating {
+			if strings.HasPrefix(function.Name.Name, verb) {
+				return true
+			}
+		}
+	}
+	return false
 }

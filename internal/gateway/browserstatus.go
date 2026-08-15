@@ -47,12 +47,12 @@ type browserPolicyPosture struct {
 }
 
 func (s *Server) handleBrowserStatus(c *fiber.Ctx) error {
-	return c.JSON(s.browserAutomationReadiness())
+	return c.JSON(s.browserAutomationReadiness(s.agents(c)))
 }
 
-func (s *Server) browserAutomationReadiness() browserAutomationReadiness {
+func (s *Server) browserAutomationReadiness(scope agentScope) browserAutomationReadiness {
 	servers := s.browserAutomationServers()
-	policyPosture := s.browserPolicyPosture(servers)
+	policyPosture := s.browserPolicyPosture(scope, servers)
 	hasSidecar, connectedSidecar, hasHeadless, hasTools := false, false, false, false
 	for _, srv := range servers {
 		hasSidecar = true
@@ -136,13 +136,14 @@ func (s *Server) browserAutomationReadiness() browserAutomationReadiness {
 	}
 }
 
-func (s *Server) browserPolicyPosture(servers []browserAutomationServer) browserPolicyPosture {
+// browserPolicyPosture reports browser-policy coverage for one scope's agents.
+func (s *Server) browserPolicyPosture(scope agentScope, servers []browserAutomationServer) browserPolicyPosture {
 	if s == nil || s.loader == nil {
 		return browserPolicyPosture{Status: "warn", Detail: "Agent loader is unavailable, so browser policy coverage could not be verified."}
 	}
 	hasBrowserSidecar := len(servers) > 0
 	managed, unmanaged := 0, make([]string, 0)
-	for _, def := range s.loader.All() {
+	for _, def := range scope.All() {
 		if def == nil || !agentUsesBrowserAutomation(def, hasBrowserSidecar) {
 			continue
 		}

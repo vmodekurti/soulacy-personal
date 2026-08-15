@@ -29,7 +29,7 @@ import (
 // the Studio preflight (S6), the Security Doctor (S7), and the launch
 // dashboard.
 func (s *Server) handleSecurityReadiness(c *fiber.Ctx) error {
-	return c.JSON(s.evaluateSecurityReadiness())
+	return c.JSON(s.evaluateSecurityReadiness(s.agents(c)))
 }
 
 // securityReadinessJourneyItem renders the S4 verdict as a readiness
@@ -104,7 +104,10 @@ func sharedExternalChannels() map[string]bool {
 // channels, computes the S4 verdict, and returns it. Deterministic —
 // no I/O beyond the loader lookup — so it's safe to call on every
 // /readiness request.
-func (s *Server) evaluateSecurityReadiness() securityReadiness {
+// evaluateSecurityReadiness classifies the scope's agents. Peer resolution
+// during tier explanation stays inside the scope, so a privileged peer in
+// another workspace cannot change this workspace's verdict.
+func (s *Server) evaluateSecurityReadiness(scope agentScope) securityReadiness {
 	profile := normalizeDeploymentProfile(s.cfg.Deployment.Profile)
 	rep := securityReadiness{Profile: profile}
 
@@ -117,14 +120,14 @@ func (s *Server) evaluateSecurityReadiness() securityReadiness {
 	// Walk every loaded agent, classify tier, and collect Privileged
 	// agents. Use loader.All so cycle detection + peer walk work with
 	// the full agent set.
-	all := s.loader.All()
+	all := scope.All()
 	privileged := make(map[string]*agent.Definition)
 	var wildcardMCP []string
 	for _, def := range all {
 		if def == nil {
 			continue
 		}
-		expl := tier.Explain(def, s.loader.Get)
+		expl := tier.Explain(def, scope.Get)
 		if expl.Tier == tier.Privileged {
 			privileged[def.ID] = def
 		}

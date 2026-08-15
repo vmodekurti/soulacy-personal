@@ -520,7 +520,7 @@ func (s *Server) handleStudioPreflight(c *fiber.Ctx) error {
 
 	// Ground a fresh catalog so tool/MCP/channel references are checked against
 	// the real, live inventory rather than whatever the GUI happened to send.
-	cat := s.studioCatalogSnapshot()
+	cat := s.studioCatalogSnapshot(s.agents(c))
 	s.groundCatalog(&cat)
 	learningOwner := studioLearningOwner(c)
 	s.groundPreferencesFor(&cat, learningOwner)
@@ -538,7 +538,7 @@ func (s *Server) handleStudioContract(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusBadRequest, "invalid request body: "+err.Error())
 	}
 
-	cat := s.studioCatalogSnapshot()
+	cat := s.studioCatalogSnapshot(s.agents(c))
 	s.groundCatalog(&cat)
 
 	// Story 2b (Cohort C): when the draft carries an existing agent id, look
@@ -547,7 +547,7 @@ func (s *Server) handleStudioContract(c *fiber.Ctx) error {
 	// doesn't round-trip) can run. Unsaved / new drafts skip them cleanly.
 	opts := []studio.ContractOption{}
 	if id := strings.TrimSpace(req.Workflow.ID); id != "" && s.loader != nil {
-		if def := s.loader.Get(id); def != nil {
+		if def := s.agents(c).Get(id); def != nil {
 			opts = append(opts, studio.WithAgentDefinition(def))
 		}
 	}
@@ -567,7 +567,7 @@ func (s *Server) handleStudioSecurityReview(c *fiber.Ctx) error {
 	}
 	var def *agent.Definition
 	if id := strings.TrimSpace(req.Workflow.ID); id != "" && s.loader != nil {
-		def = s.loader.Get(id)
+		def = s.agents(c).Get(id)
 	}
 	// F-Bridge — thread the workspace-scoped intent-gate default through so
 	// the review summary matches the effective runtime mode.
@@ -624,10 +624,12 @@ func (s *Server) preflightInput(c *fiber.Ctx, cat studio.Catalog) studio.Preflig
 // catalog from authoritative live state (the agent loader, the unified tool
 // catalog, and the LLM router). groundCatalog then fills Skills/MCP/Channels/
 // KBs. Used by preflight (no GUI-supplied catalog) and reusable elsewhere.
-func (s *Server) studioCatalogSnapshot() studio.Catalog {
+// studioCatalogSnapshot lists the agents Studio may wire together. It is
+// scoped so a draft can only reference peers the caller's workspace owns.
+func (s *Server) studioCatalogSnapshot(scope agentScope) studio.Catalog {
 	var cat studio.Catalog
 	if s.loader != nil {
-		for _, d := range s.loader.All() {
+		for _, d := range scope.All() {
 			if d == nil || strings.TrimSpace(d.ID) == "" {
 				continue
 			}
@@ -685,7 +687,7 @@ func (s *Server) handleStudioAutowire(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return s.errMsg(c, fiber.StatusBadRequest, "invalid request body: "+err.Error())
 	}
-	cat := s.studioCatalogSnapshot()
+	cat := s.studioCatalogSnapshot(s.agents(c))
 	s.groundCatalog(&cat)
 	in := s.preflightInput(c, cat)
 	model := s.studioLLM(c)
@@ -781,7 +783,7 @@ func (s *Server) handleStudioTroubleshoot(c *fiber.Ctx) error {
 	if model == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "LLM router unavailable")
 	}
-	cat := s.studioCatalogSnapshot()
+	cat := s.studioCatalogSnapshot(s.agents(c))
 	s.groundCatalog(&cat)
 	problem := "At RUN TIME the agent failed with this error — change the workflow so it cannot happen again: " + strings.TrimSpace(req.Error)
 	if strings.TrimSpace(req.Input) != "" {
@@ -906,7 +908,7 @@ func (s *Server) handleStudioBuild(c *fiber.Ctx) error {
 	if model == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "LLM router unavailable")
 	}
-	cat := s.studioCatalogSnapshot()
+	cat := s.studioCatalogSnapshot(s.agents(c))
 	s.groundCatalog(&cat)
 	in := s.preflightInput(c, cat)
 
@@ -979,7 +981,7 @@ func (s *Server) handleStudioBuildStream(c *fiber.Ctx) error {
 	if model == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "LLM router unavailable")
 	}
-	cat := s.studioCatalogSnapshot()
+	cat := s.studioCatalogSnapshot(s.agents(c))
 	s.groundCatalog(&cat)
 	in := s.preflightInput(c, cat)
 	// Detach from the request context so the loop isn't cancelled when the
@@ -1142,7 +1144,7 @@ func (s *Server) handleStudioGenerateStream(c *fiber.Ctx) error {
 	if model == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "LLM router unavailable")
 	}
-	cat := s.studioCatalogSnapshot()
+	cat := s.studioCatalogSnapshot(s.agents(c))
 	s.groundCatalog(&cat)
 	learningOwner := studioLearningOwner(c)
 	s.groundPreferencesFor(&cat, learningOwner)
@@ -1394,13 +1396,13 @@ type studioRunPreview struct {
 // live catalog + preflight state: it never runs anything.
 func (s *Server) studioRunPreviewFor(c *fiber.Ctx, draft studio.Draft) studioRunPreview {
 	draft = s.studioDraftWithRuntimeLLM(draft)
-	cat := s.studioCatalogSnapshot()
+	cat := s.studioCatalogSnapshot(s.agents(c))
 	s.groundCatalog(&cat)
 	in := s.preflightInput(c, cat)
 
 	var def *agent.Definition
 	if id := strings.TrimSpace(draft.ID); id != "" && s.loader != nil {
-		def = s.loader.Get(id)
+		def = s.agents(c).Get(id)
 	}
 	rev := studio.SecurityPreflight(draft, def, s.workspaceIntentGateDefault())
 	contract := studio.AssessContract(draft, cat, in)
@@ -1581,8 +1583,8 @@ func (s *Server) handleStudioTryAgent(c *fiber.Ctx) error {
 	// carried through by ToAgentDefinition and left alone.
 	def.SourcePath = "" // never persisted
 
-	s.loader.Register(def)
-	defer s.loader.Unregister(def.ID)
+	s.agents(c).Register(def)
+	defer s.agents(c).Unregister(def.ID)
 
 	// Register ephemeral stubs for every helper agent the workflow references but
 	// that isn't persisted yet. A Studio-generated workflow can contain `agent`
@@ -1591,7 +1593,7 @@ func (s *Server) handleStudioTryAgent(c *fiber.Ctx) error {
 	// UNSAVED draft, so those peers are not in the loader. Without this, an agent
 	// node dispatches `agent__<peer>` and runAgentCall fails with "not loaded".
 	// Registered non-persisted (SourcePath="") and Unregistered after the run.
-	cleanupPeers := s.registerEphemeralPeers(def, req.Workflow.NewAgents)
+	cleanupPeers := s.registerEphemeralPeers(s.agents(c), def, req.Workflow.NewAgents)
 	defer cleanupPeers()
 
 	ctx, cancel := context.WithTimeout(detachedRequestContext(c), 120*time.Second)
@@ -1763,7 +1765,11 @@ func (s *Server) handleStudioTryAgent(c *fiber.Ctx) error {
 // Errors are returned, not swallowed. A peer that fails to persist leaves the
 // caller with exactly the broken agent this function exists to prevent, so the
 // save should fail loudly rather than report success.
-func (s *Server) ensurePeerAgents(dir string, def *agent.Definition, newAgents []studio.NewAgent) ([]string, error) {
+// ensurePeerAgents materializes helper agents a draft references. It writes
+// into the caller's workspace and treats "already exists" as a question about
+// that workspace only, so a draft cannot be satisfied by — or overwrite —
+// another tenant's agent of the same name.
+func (s *Server) ensurePeerAgents(scope agentScope, dir string, def *agent.Definition, newAgents []studio.NewAgent) ([]string, error) {
 	if def == nil || def.Workflow == nil {
 		return nil, nil
 	}
@@ -1787,7 +1793,7 @@ func (s *Server) ensurePeerAgents(dir string, def *agent.Definition, newAgents [
 			def.Agents = append(def.Agents, node.Agent)
 			declared[node.Agent] = true
 		}
-		if existing := s.loader.Get(node.Agent); existing != nil {
+		if existing := scope.Get(node.Agent); existing != nil {
 			continue // a real agent already answers to this name
 		}
 		// Prefer the profile the draft carries; if it is missing or thin,
@@ -1817,7 +1823,7 @@ func (s *Server) ensurePeerAgents(dir string, def *agent.Definition, newAgents [
 				Temperature: 0.7,
 			},
 		}
-		if err := s.loader.Upsert(dir, &peer); err != nil {
+		if err := scope.Upsert(dir, &peer); err != nil {
 			return created, fmt.Errorf("could not create helper agent %q that this workflow delegates to: %w", node.Agent, err)
 		}
 		s.log.Info("studio: created helper agent referenced by workflow",
@@ -1835,7 +1841,10 @@ func (s *Server) ensurePeerAgents(dir string, def *agent.Definition, newAgents [
 // "agent call: <id> not loaded". The returned cleanup func Unregisters every
 // stub it added and must be deferred by the caller. It is safe to call with a
 // nil/agent (no workflow) def — it simply registers nothing.
-func (s *Server) registerEphemeralPeers(def *agent.Definition, newAgents []studio.NewAgent) func() {
+// registerEphemeralPeers adds throwaway peers for a Studio try-run. They are
+// registered inside the caller's workspace so a "try this" in one tenant is
+// never runnable from another that guesses the id.
+func (s *Server) registerEphemeralPeers(scope agentScope, def *agent.Definition, newAgents []studio.NewAgent) func() {
 	if def == nil || def.Workflow == nil {
 		return func() {}
 	}
@@ -1849,7 +1858,7 @@ func (s *Server) registerEphemeralPeers(def *agent.Definition, newAgents []studi
 		if node.Kind != "agent" || node.Agent == "" || stubbed[node.Agent] {
 			continue
 		}
-		if existing := s.loader.Get(node.Agent); existing != nil {
+		if existing := scope.Get(node.Agent); existing != nil {
 			continue // real (or already-registered) agent — leave it be
 		}
 		na, ok := byID[node.Agent]
@@ -1865,7 +1874,7 @@ func (s *Server) registerEphemeralPeers(def *agent.Definition, newAgents []studi
 				na.SystemPrompt = synth.SystemPrompt
 			}
 		}
-		s.loader.Register(&agent.Definition{
+		scope.Register(&agent.Definition{
 			ID:           node.Agent,
 			Name:         na.Name,
 			Description:  na.Description,
@@ -1890,7 +1899,7 @@ func (s *Server) registerEphemeralPeers(def *agent.Definition, newAgents []studi
 	}
 	return func() {
 		for _, id := range registered {
-			s.loader.Unregister(id)
+			scope.Unregister(id)
 		}
 	}
 }
@@ -1925,7 +1934,7 @@ func (s *Server) handleStudioFailedRuns(c *fiber.Ctx) error {
 			Attempts: it.Attempts, FailedAt: it.LastAttemptAt.UTC().Format("2006-01-02T15:04:05Z"),
 		}
 		if s.loader != nil {
-			if def := s.loader.Get(it.Queue); def != nil {
+			if def := s.agents(c).Get(it.Queue); def != nil {
 				fr.AgentName = def.Name
 				fr.Healable = true // the saved agent still exists, so we can repair it
 			}
@@ -2469,13 +2478,13 @@ func (s *Server) handleStudioDiagnoseRun(c *fiber.Ctx) error {
 	if err != nil {
 		return s.errMsg(c, fiber.StatusNotFound, "failed run not found")
 	}
-	def := s.loader.Get(entry.Queue)
+	def := s.agents(c).Get(entry.Queue)
 	if def == nil {
 		return s.errMsg(c, fiber.StatusNotFound, "the agent for this run no longer exists")
 	}
 	draft := studio.FromAgentDefinition(*def)
 
-	cat := s.studioCatalogSnapshot()
+	cat := s.studioCatalogSnapshot(s.agents(c))
 	s.groundCatalog(&cat)
 	in := s.preflightInput(c, cat)
 
@@ -2553,7 +2562,7 @@ func (s *Server) handleStudioDiagnoseSession(c *fiber.Ctx) error {
 	if model == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "LLM router unavailable")
 	}
-	def := s.loader.Get(req.AgentID)
+	def := s.agents(c).Get(req.AgentID)
 	if def == nil {
 		return s.errMsg(c, fiber.StatusNotFound, "the agent for this run no longer exists")
 	}
@@ -2570,7 +2579,7 @@ func (s *Server) handleStudioDiagnoseSession(c *fiber.Ctx) error {
 	}
 
 	draft := studio.FromAgentDefinition(*def)
-	cat := s.studioCatalogSnapshot()
+	cat := s.studioCatalogSnapshot(s.agents(c))
 	s.groundCatalog(&cat)
 	in := s.preflightInput(c, cat)
 
@@ -3288,7 +3297,7 @@ func (s *Server) handleStudioValidate(c *fiber.Ctx) error {
 	// Argument-schema check against the live catalog: flag a tool node passing an
 	// argument the tool doesn't accept (the "unexpected keyword argument" class),
 	// before it fails at run time.
-	res.Warnings = append(res.Warnings, studio.ValidateToolArgs(req.Workflow, s.studioCatalogSnapshot())...)
+	res.Warnings = append(res.Warnings, studio.ValidateToolArgs(req.Workflow, s.studioCatalogSnapshot(s.agents(c)))...)
 	// Python validity: syntax-check every inline python node and require the
 	// run(inputs) entrypoint — catches broken generated code at build time
 	// instead of at run time. Parse-only; never executes the code.
@@ -3442,7 +3451,7 @@ func (s *Server) handleStudioSaveYAML(c *fiber.Ctx) error {
 	// its source path, so Save updates the agent in place instead of dropping a
 	// duplicate copy under the first configured agent dir. SourcePath is
 	// <baseDir>/<id>/SOUL.yaml, so the base dir is the parent of the agent dir.
-	if existing := s.loader.Get(def.ID); existing != nil && existing.SourcePath != "" {
+	if existing := s.agents(c).Get(def.ID); existing != nil && existing.SourcePath != "" {
 		def.SourcePath = existing.SourcePath
 		dir = filepath.Dir(filepath.Dir(existing.SourcePath))
 	}
@@ -3454,11 +3463,11 @@ func (s *Server) handleStudioSaveYAML(c *fiber.Ctx) error {
 	// The code view saves the SAME workflow as the wizard, so it owes the same
 	// guarantee. There is no draft on this path, so every missing profile is
 	// synthesized from the node itself.
-	createdPeers, perr := s.ensurePeerAgents(dir, &def, nil)
+	createdPeers, perr := s.ensurePeerAgents(s.agents(c), dir, &def, nil)
 	if perr != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, perr)
 	}
-	if err := s.loader.Upsert(dir, &def); err != nil {
+	if err := s.agents(c).Upsert(dir, &def); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
 	s.scheduler.DeregisterAgent(def.ID)
@@ -3544,7 +3553,7 @@ func (s *Server) handleStudioValidateYAML(c *fiber.Ctx) error {
 			add("warning", "graph", w.NodeID, w.Message, "")
 		}
 	}
-	cat := s.studioCatalogSnapshot()
+	cat := s.studioCatalogSnapshot(s.agents(c))
 	s.groundCatalog(&cat)
 	pf := studio.Preflight(draft, s.preflightInput(c, cat))
 	for _, b := range pf.Blockers {
@@ -3631,7 +3640,7 @@ func (s *Server) handleStudioFixYAML(c *fiber.Ctx) error {
 			add("WARNING", w.NodeID, w.Message)
 		}
 	}
-	cat := s.studioCatalogSnapshot()
+	cat := s.studioCatalogSnapshot(s.agents(c))
 	s.groundCatalog(&cat)
 	pf := studio.Preflight(draft, s.preflightInput(c, cat))
 	for _, b := range pf.Blockers {
@@ -3674,7 +3683,7 @@ func (s *Server) handleStudioFixYAML(c *fiber.Ctx) error {
 			Entry:  check.Workflow.Entry,
 			Output: check.Workflow.Output,
 		}}
-		cat := s.studioCatalogSnapshot()
+		cat := s.studioCatalogSnapshot(s.agents(c))
 		s.groundCatalog(&cat)
 		studio.RepairWiring(&d, cat)
 		studio.ApplyTemplateFixes(&d)
@@ -3768,7 +3777,7 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 	// same generation contract shown on the canvas. The GUI runs this before
 	// Save, but enforcing it here protects imports, stale tabs, and alternate API
 	// clients from creating an agent that is born broken and only fails later.
-	cat := s.studioCatalogSnapshot()
+	cat := s.studioCatalogSnapshot(s.agents(c))
 	s.groundCatalog(&cat)
 	in := s.preflightInput(c, cat)
 	// Judge the draft the RUNTIME will see, not the one the client sent. A draft
@@ -3831,7 +3840,7 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 	// reaching for connected-server state. A later schema change then reads as
 	// drift with a named node, instead of a validation error indistinguishable
 	// from a workflow that was always wrong.
-	saveCatalog := s.studioCatalogSnapshot()
+	saveCatalog := s.studioCatalogSnapshot(s.agents(c))
 	s.groundCatalog(&saveCatalog)
 	if snap := studio.CaptureToolSchemas(req.Workflow.Flow, saveCatalog, time.Now()); snap != nil {
 		def.ToolSchemas = snap
@@ -3888,7 +3897,7 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 	// This makes them agree; the privileged-exposure consent gate above still
 	// runs on every save, so an edit cannot quietly widen what the agent reaches.
 	wasEnabled := false
-	if existing := s.loader.Get(def.ID); existing != nil {
+	if existing := s.agents(c).Get(def.ID); existing != nil {
 		wasEnabled = existing.Enabled
 	}
 	def.Enabled = wasEnabled
@@ -3901,12 +3910,12 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 	// yet, and make sure the caller declares the ones it calls. A dangling peer
 	// is not cosmetic: the run dies at the delegating node. Runs before Upsert
 	// because it can add to def.Agents, and Upsert is the write.
-	createdPeers, perr := s.ensurePeerAgents(dir, &def, req.Workflow.NewAgents)
+	createdPeers, perr := s.ensurePeerAgents(s.agents(c), dir, &def, req.Workflow.NewAgents)
 	if perr != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, perr)
 	}
 
-	if err := s.loader.Upsert(dir, &def); err != nil {
+	if err := s.agents(c).Upsert(dir, &def); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
 	if req.InitialWorkflow != nil && s.verifyGenerationProof(studioLearningOwner(c), *req.InitialWorkflow) {
@@ -3977,7 +3986,7 @@ func (s *Server) handleStudioListAgents(c *fiber.Ctx) error {
 		Strategy string `json:"strategy,omitempty"`
 	}
 	out := []agentSummary{}
-	for _, d := range s.loader.All() {
+	for _, d := range s.agents(c).All() {
 		if d == nil {
 			continue
 		}
@@ -4038,7 +4047,7 @@ func (s *Server) handleStudioCodegen(c *fiber.Ctx) error {
 }
 
 func (s *Server) handleStudioLoadAgent(c *fiber.Ctx) error {
-	def := s.loader.Get(c.Params("id"))
+	def := s.agents(c).Get(c.Params("id"))
 	if def == nil {
 		return s.errMsg(c, fiber.StatusNotFound, "agent not found")
 	}
@@ -4102,7 +4111,7 @@ func (s *Server) handleStudioCompileNode(c *fiber.Ctx) error {
 	}
 	// Ground in the live catalog when the caller didn't supply one.
 	if len(req.Catalog.Tools) == 0 && len(req.Catalog.MCP) == 0 && len(req.Catalog.Agents) == 0 {
-		req.Catalog = s.studioCatalogSnapshot()
+		req.Catalog = s.studioCatalogSnapshot(s.agents(c))
 	}
 	node, err := studio.CompileNode(c.Context(), s.studioLLM(c), req)
 	if err != nil {

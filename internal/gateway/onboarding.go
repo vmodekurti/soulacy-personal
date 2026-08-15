@@ -25,7 +25,7 @@ func (s *Server) handleOnboardingStatus(c *fiber.Ctx) error {
 
 	steps := []onboardingStep{
 		s.onboardingProviderStep(providers),
-		s.onboardingAgentStep(),
+		s.onboardingAgentStep(s.agents(c)),
 		s.onboardingChannelStep(channels),
 		s.onboardingTemplateStep(len(templates)),
 	}
@@ -65,12 +65,15 @@ func (s *Server) onboardingProviderStep(checks []doctorProviderCheck) onboarding
 	return onboardingStep{Key: "provider", Label: "Connect a model", Status: "todo", Detail: checks[0].ID + ": " + checks[0].Detail, Href: "providers", Priority: 10}
 }
 
-func (s *Server) onboardingAgentStep() onboardingStep {
+// onboardingAgentStep reports progress for the caller's own workspace. A
+// count that included other tenants would tell a new member their setup is
+// already done.
+func (s *Server) onboardingAgentStep(scope agentScope) onboardingStep {
 	total := 0
 	enabled := 0
 	if s.loader != nil {
-		for _, def := range s.loader.All() {
-			if s.loader.IsBuiltin(def.ID) {
+		for _, def := range scope.All() {
+			if scope.IsBuiltin(def.ID) {
 				continue
 			}
 			total++

@@ -33,16 +33,16 @@ type deploymentReadiness struct {
 func (s *Server) handleDeploymentStatus(c *fiber.Ctx) error {
 	providers := s.providerDoctorChecks(c)
 	channels := s.channelDoctorChecks()
-	_, enabledAgents, _, _, _ := s.agentReadinessCounts()
+	_, enabledAgents, _, _, _ := s.agentReadinessCounts(s.agents(c))
 	providersReady := countDoctorProviders(providers, "ok", "warn")
 	usableOutbound := countUsableOutboundChannels(channels)
 	updateManifest := s.updateManifestSource()
 	costs := s.costReadiness(c)
 	slo := s.sloReadiness(c)
-	return c.JSON(s.deploymentReadiness(providersReady, usableOutbound, enabledAgents, updateManifest, costs, slo))
+	return c.JSON(s.deploymentReadiness(s.agents(c), providersReady, usableOutbound, enabledAgents, updateManifest, costs, slo))
 }
 
-func (s *Server) deploymentReadiness(providersReady, usableOutbound, enabledAgents int, updateManifest string, costs costReadiness, slo sloReadiness) deploymentReadiness {
+func (s *Server) deploymentReadiness(scope agentScope, providersReady, usableOutbound, enabledAgents int, updateManifest string, costs costReadiness, slo sloReadiness) deploymentReadiness {
 	// H1 — nil-safe front: s / s.cfg are optional in some test call sites,
 	// so guard the deref before reading Deployment. Matches the same defensive
 	// pattern used below for s.authEngine / s.cfg.Server.
@@ -137,7 +137,7 @@ func (s *Server) deploymentReadiness(providersReady, usableOutbound, enabledAgen
 	// outside production so operators see the finding when they
 	// eventually flip the profile. Non-destructive migration by
 	// design: we never rewrite the config, only surface the risk.
-	sec := s.evaluateSecurityReadiness()
+	sec := s.evaluateSecurityReadiness(scope)
 	secDetail := "No privileged agent is exposed through a shared external channel."
 	if len(sec.PrivilegedExposures) > 0 {
 		secDetail = fmt.Sprintf("%d privileged agent exposure(s) on shared channels; %d without acceptance.",

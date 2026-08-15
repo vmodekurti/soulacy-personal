@@ -236,7 +236,7 @@ func channelMapReferencesProtectedSystem(id string, chMap map[string]any) bool {
 }
 
 func (s *Server) handleListAgents(c *fiber.Ctx) error {
-	defs := s.loader.All()
+	defs := s.agents(c).All()
 	// Interface-aware design (Stories #11/#12): surface where each agent should
 	// appear so clients (the Chat picker, channel routers) can filter — e.g.
 	// hide cron-only agents from Chat. Computed, not stored, so it stays correct
@@ -265,7 +265,7 @@ func (s *Server) handleListAgents(c *fiber.Ctx) error {
 }
 
 func (s *Server) handleGetAgent(c *fiber.Ctx) error {
-	def := s.loader.Get(c.Params("id"))
+	def := s.agents(c).Get(c.Params("id"))
 	if def == nil {
 		return s.errMsg(c, fiber.StatusNotFound, "agent not found")
 	}
@@ -285,7 +285,7 @@ func (s *Server) handleGetAgent(c *fiber.Ctx) error {
 // no source file) so the endpoint always returns something editable.
 func (s *Server) handleGetAgentYAML(c *fiber.Ctx) error {
 	id := c.Params("id")
-	def := s.loader.Get(id)
+	def := s.agents(c).Get(id)
 	if def == nil {
 		return s.errMsg(c, fiber.StatusNotFound, "agent not found")
 	}
@@ -314,7 +314,7 @@ func (s *Server) handleGetAgentYAML(c *fiber.Ctx) error {
 // them in the editor — nothing is written to disk unless the YAML is valid.
 func (s *Server) handleUpdateAgentYAML(c *fiber.Ctx) error {
 	id := c.Params("id")
-	existing := s.loader.Get(id)
+	existing := s.agents(c).Get(id)
 	if existing == nil {
 		return s.errMsg(c, fiber.StatusNotFound, "agent not found")
 	}
@@ -366,14 +366,14 @@ func (s *Server) handleUpdateAgentYAML(c *fiber.Ctx) error {
 	}
 	// See handleUpdateAgent for the ack-gate rationale — raw YAML saves take
 	// the same audit path so a text edit can't sneak past the modal.
-	peek := s.computeAgentCapabilityAudit(existing, &def)
+	peek := s.computeAgentCapabilityAudit(s.agents(c), existing, &def)
 	if peek.RequiresAck && !hasCapabilityAck(c) {
 		return s.respondCapabilityAckRequired(c, peek)
 	}
-	if err := s.loader.Upsert(dir, &def); err != nil {
+	if err := s.agents(c).Upsert(dir, &def); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
-	audit := s.auditAgentCapabilityChange(existing, &def)
+	audit := s.auditAgentCapabilityChange(s.agents(c), existing, &def)
 
 	// Re-register schedule, mirroring handleUpdateAgent.
 	s.scheduler.DeregisterAgent(id)
@@ -390,10 +390,10 @@ func (s *Server) handleUpdateAgentYAML(c *fiber.Ctx) error {
 
 func (s *Server) handleListAgentVersions(c *fiber.Ctx) error {
 	id := c.Params("id")
-	if s.loader.Get(id) == nil {
+	if s.agents(c).Get(id) == nil {
 		return s.errMsg(c, fiber.StatusNotFound, "agent not found")
 	}
-	versions, err := s.loader.AgentVersions(id)
+	versions, err := s.agents(c).AgentVersions(id)
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
@@ -402,10 +402,10 @@ func (s *Server) handleListAgentVersions(c *fiber.Ctx) error {
 
 func (s *Server) handleGetAgentVersion(c *fiber.Ctx) error {
 	id := c.Params("id")
-	if s.loader.Get(id) == nil {
+	if s.agents(c).Get(id) == nil {
 		return s.errMsg(c, fiber.StatusNotFound, "agent not found")
 	}
-	data, version, err := s.loader.ReadAgentVersion(id, c.Params("version"))
+	data, version, err := s.agents(c).ReadAgentVersion(id, c.Params("version"))
 	if err != nil {
 		return s.errJSON(c, fiber.StatusNotFound, err)
 	}
@@ -417,7 +417,7 @@ func (s *Server) handleRollbackAgent(c *fiber.Ctx) error {
 	if isProtectedSystemAgent(id) {
 		return protectedSystemAgentResponse(c)
 	}
-	if s.loader.Get(id) == nil {
+	if s.agents(c).Get(id) == nil {
 		return s.errMsg(c, fiber.StatusNotFound, "agent not found")
 	}
 	var req struct {
@@ -433,7 +433,7 @@ func (s *Server) handleRollbackAgent(c *fiber.Ctx) error {
 	if len(s.cfg.AgentDirs) > 0 {
 		dir = s.cfg.AgentDirs[0]
 	}
-	def, version, err := s.loader.RestoreAgentVersion(dir, id, req.Version)
+	def, version, err := s.agents(c).RestoreAgentVersion(dir, id, req.Version)
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
@@ -456,11 +456,11 @@ func (s *Server) handleRollbackAgent(c *fiber.Ctx) error {
 //	  "reasons": ["system_tools: true (OS-level shell access)", ...] }
 func (s *Server) handleGetAgentTier(c *fiber.Ctx) error {
 	id := c.Params("id")
-	def := s.loader.Get(id)
+	def := s.agents(c).Get(id)
 	if def == nil {
 		return s.errMsg(c, fiber.StatusNotFound, "agent not found")
 	}
-	exp := tier.Explain(def, s.loader.Get)
+	exp := tier.Explain(def, s.agents(c).Get)
 	return c.JSON(fiber.Map{
 		"agent_id": def.ID,
 		"tier":     exp.Tier.String(),
@@ -504,14 +504,14 @@ func (s *Server) handleCreateAgent(c *fiber.Ctx) error {
 	// is usually a no-op. When it isn't (an operator re-creates an agent ID
 	// that channel mappings already point at), we still refuse to write
 	// without X-Acknowledge-Audit — mirroring the update path.
-	peek := s.computeAgentCapabilityAudit(nil, &def)
+	peek := s.computeAgentCapabilityAudit(s.agents(c), nil, &def)
 	if peek.RequiresAck && !hasCapabilityAck(c) {
 		return s.respondCapabilityAckRequired(c, peek)
 	}
-	if err := s.loader.Upsert(dir, &def); err != nil {
+	if err := s.agents(c).Upsert(dir, &def); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
-	audit := s.auditAgentCapabilityChange(nil, &def)
+	audit := s.auditAgentCapabilityChange(s.agents(c), nil, &def)
 
 	// Register with scheduler if applicable
 	if err := s.scheduler.RegisterAgent(&def); err != nil {
@@ -527,7 +527,7 @@ func (s *Server) handleCreateAgent(c *fiber.Ctx) error {
 
 func (s *Server) handleUpdateAgent(c *fiber.Ctx) error {
 	id := c.Params("id")
-	existing := s.loader.Get(id)
+	existing := s.agents(c).Get(id)
 	if existing == nil {
 		return s.errMsg(c, fiber.StatusNotFound, "agent not found")
 	}
@@ -566,14 +566,14 @@ func (s *Server) handleUpdateAgent(c *fiber.Ctx) error {
 	// explicit ack (privileged tier + exposed via interactive channels) and
 	// the client hasn't set X-Acknowledge-Audit, refuse the write and let the
 	// GUI show a blocking modal. No side effect is recorded here.
-	peek := s.computeAgentCapabilityAudit(existing, &updates)
+	peek := s.computeAgentCapabilityAudit(s.agents(c), existing, &updates)
 	if peek.RequiresAck && !hasCapabilityAck(c) {
 		return s.respondCapabilityAckRequired(c, peek)
 	}
-	if err := s.loader.Upsert(dir, &updates); err != nil {
+	if err := s.agents(c).Upsert(dir, &updates); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
-	audit := s.auditAgentCapabilityChange(existing, &updates)
+	audit := s.auditAgentCapabilityChange(s.agents(c), existing, &updates)
 
 	// Re-register schedule
 	s.scheduler.DeregisterAgent(id)
@@ -630,9 +630,12 @@ func (s *Server) respondCapabilityAckRequired(c *fiber.Ctx, audit agentCapabilit
 // actionlog append). Callers use this to PEEK at what a save would do — the
 // save-blocking modal path relies on this: check RequiresAck first, and only
 // call recordAgentCapabilityAudit after the confirmed write actually happens.
-func (s *Server) computeAgentCapabilityAudit(oldDef, newDef *agent.Definition) agentCapabilityAudit {
-	oldExp := tier.Explain(oldDef, s.loader.Get)
-	newExp := tier.Explain(newDef, s.loader.Get)
+// computeAgentCapabilityAudit resolves peer agents while explaining a tier, so
+// it takes the caller's scope: a peer that exists in another workspace must not
+// make this workspace's change look less privileged than it is.
+func (s *Server) computeAgentCapabilityAudit(scope agentScope, oldDef, newDef *agent.Definition) agentCapabilityAudit {
+	oldExp := tier.Explain(oldDef, scope.Get)
+	newExp := tier.Explain(newDef, scope.Get)
 	audit := agentCapabilityAudit{
 		Changed:   oldExp.Tier != newExp.Tier,
 		Escalated: newExp.Tier > oldExp.Tier,
@@ -657,8 +660,8 @@ func (s *Server) computeAgentCapabilityAudit(oldDef, newDef *agent.Definition) a
 // full "compute + record" side-effect (e.g. imports/rollbacks that don't run
 // through the ack modal). Save handlers now compute the peek first, gate on
 // RequiresAck, and record only after the write succeeds.
-func (s *Server) auditAgentCapabilityChange(oldDef, newDef *agent.Definition) agentCapabilityAudit {
-	audit := s.computeAgentCapabilityAudit(oldDef, newDef)
+func (s *Server) auditAgentCapabilityChange(scope agentScope, oldDef, newDef *agent.Definition) agentCapabilityAudit {
+	audit := s.computeAgentCapabilityAudit(scope, oldDef, newDef)
 	if audit.Changed {
 		s.recordAgentCapabilityAudit(newDef, audit)
 	}
@@ -778,7 +781,7 @@ func (s *Server) handleDeleteAgent(c *fiber.Ctx) error {
 		return protectedSystemAgentResponse(c)
 	}
 	s.scheduler.DeregisterAgent(id)
-	if err := s.loader.Delete(id); err != nil {
+	if err := s.agents(c).Delete(id); err != nil {
 		return s.errJSON(c, fiber.StatusNotFound, err)
 	}
 	return c.SendStatus(fiber.StatusNoContent)
@@ -797,7 +800,7 @@ func (s *Server) setAgentEnabled(c *fiber.Ctx, enabled bool) error {
 	if isProtectedSystemAgent(id) {
 		return protectedSystemAgentResponse(c)
 	}
-	def := s.loader.Get(id)
+	def := s.agents(c).Get(id)
 	if def == nil {
 		return s.errMsg(c, fiber.StatusNotFound, "agent not found")
 	}
@@ -806,7 +809,7 @@ func (s *Server) setAgentEnabled(c *fiber.Ctx, enabled bool) error {
 	if len(s.cfg.AgentDirs) > 0 {
 		dir = s.cfg.AgentDirs[0]
 	}
-	if err := s.loader.Upsert(dir, def); err != nil {
+	if err := s.agents(c).Upsert(dir, def); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
 	if enabled {
@@ -826,7 +829,7 @@ func (s *Server) handleCloneAgent(c *fiber.Ctx) error {
 	if isProtectedSystemAgent(id) {
 		return protectedSystemAgentResponse(c)
 	}
-	src := s.loader.Get(id)
+	src := s.agents(c).Get(id)
 	if src == nil {
 		return s.errMsg(c, fiber.StatusNotFound, "agent not found")
 	}
@@ -838,7 +841,7 @@ func (s *Server) handleCloneAgent(c *fiber.Ctx) error {
 		sc := *src.Schedule
 		clone.Schedule = &sc
 	}
-	clone.ID = s.uniqueAgentID(id + "-copy")
+	clone.ID = s.uniqueAgentID(s.agents(c), id+"-copy")
 	if clone.Name != "" {
 		clone.Name = clone.Name + " (copy)"
 	}
@@ -849,20 +852,22 @@ func (s *Server) handleCloneAgent(c *fiber.Ctx) error {
 	if len(s.cfg.AgentDirs) > 0 {
 		dir = s.cfg.AgentDirs[0]
 	}
-	if err := s.loader.Upsert(dir, &clone); err != nil {
+	if err := s.agents(c).Upsert(dir, &clone); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
 	return c.Status(fiber.StatusCreated).JSON(clone)
 }
 
 // uniqueAgentID returns base if free, otherwise base-2, base-3, …
-func (s *Server) uniqueAgentID(base string) string {
-	if s.loader.Get(base) == nil {
+// uniqueAgentID picks a free ID inside one workspace. Collision is scoped:
+// an ID another tenant uses is not taken from this tenant's point of view.
+func (s *Server) uniqueAgentID(scope agentScope, base string) string {
+	if scope.Get(base) == nil {
 		return base
 	}
 	for i := 2; ; i++ {
 		candidate := fmt.Sprintf("%s-%d", base, i)
-		if s.loader.Get(candidate) == nil {
+		if scope.Get(candidate) == nil {
 			return candidate
 		}
 	}
@@ -945,7 +950,7 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 		}
 		text = expanded
 	}
-	def := s.loader.Get(req.AgentID)
+	def := s.agents(c).Get(req.AgentID)
 
 	ovProvider, ovModel, ovTemp, ovTopP, ovMaxTokens := req.Overrides.Provider, req.Overrides.Model, req.Overrides.Temperature, req.Overrides.TopP, req.Overrides.MaxTokens
 	ovResponseFormat, ovReasoningEffort := req.Overrides.ResponseFormat, req.Overrides.ReasoningEffort
@@ -1175,7 +1180,7 @@ func (s *Server) handleChatStream(c *fiber.Ctx) error {
 	if err := s.claimSession(c, req.AgentID, sessionID); err != nil {
 		return err
 	}
-	def := s.loader.Get(req.AgentID)
+	def := s.agents(c).Get(req.AgentID)
 
 	msg := message.Message{
 		ID:        uuid.New().String(),
@@ -2183,7 +2188,7 @@ func (s *Server) handleStartWhatsAppWebPairing(c *fiber.Ctx) error {
 			"error": "system agent is web-only and cannot be assigned to WhatsApp Web",
 		})
 	}
-	if s.loader.Get(agentID) == nil {
+	if s.agents(c).Get(agentID) == nil {
 		return s.errMsg(c, fiber.StatusBadRequest, "unknown agent: "+agentID)
 	}
 
@@ -2416,7 +2421,7 @@ func (s *Server) handleManualTrigger(c *fiber.Ctx) error {
 	if isProtectedSystemAgent(id) {
 		return protectedSystemAgentResponse(c)
 	}
-	def := s.loader.Get(id)
+	def := s.agents(c).Get(id)
 	if def == nil {
 		return s.errMsg(c, fiber.StatusNotFound, "agent not found")
 	}
@@ -2508,7 +2513,7 @@ func (s *Server) handleReplayAgentRun(c *fiber.Ctx) error {
 	if isProtectedSystemAgent(id) {
 		return protectedSystemAgentResponse(c)
 	}
-	def := s.loader.Get(id)
+	def := s.agents(c).Get(id)
 	if def == nil {
 		return s.errMsg(c, fiber.StatusNotFound, "agent not found")
 	}
@@ -2621,7 +2626,7 @@ func (s *Server) handleTestScheduledOutput(c *fiber.Ctx) error {
 	if isProtectedSystemAgent(id) {
 		return protectedSystemAgentResponse(c)
 	}
-	def := s.loader.Get(id)
+	def := s.agents(c).Get(id)
 	if def == nil {
 		return s.errMsg(c, fiber.StatusNotFound, "agent not found")
 	}
@@ -4783,7 +4788,7 @@ func (s *Server) handleInstantiateTemplate(c *fiber.Ctx) error {
 	}
 
 	def, err := s.templatesCatalog().Instantiate(name, req.ID, func(candidate string) bool {
-		return s.loader.Get(candidate) == nil
+		return s.agents(c).Get(candidate) == nil
 	})
 	if err != nil {
 		return s.errJSON(c, fiber.StatusNotFound, err)
@@ -4818,7 +4823,7 @@ func (s *Server) handleInstantiateTemplate(c *fiber.Ctx) error {
 	if len(s.cfg.AgentDirs) > 0 {
 		dir = s.cfg.AgentDirs[0]
 	}
-	if err := s.loader.Upsert(dir, def); err != nil {
+	if err := s.agents(c).Upsert(dir, def); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
 
@@ -4829,7 +4834,7 @@ func (s *Server) handleInstantiateTemplate(c *fiber.Ctx) error {
 	if err := s.scheduler.RegisterAgent(def); err != nil {
 		if def.Trigger == agent.TriggerCron {
 			s.scheduler.DeregisterAgent(def.ID)
-			if delErr := s.loader.Delete(def.ID); delErr != nil {
+			if delErr := s.agents(c).Delete(def.ID); delErr != nil {
 				s.log.Warn("template install rollback: delete failed", zap.String("agent", def.ID), zap.Error(delErr))
 			}
 			return s.errMsg(c, fiber.StatusBadGateway,

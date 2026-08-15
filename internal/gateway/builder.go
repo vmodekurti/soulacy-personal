@@ -298,7 +298,7 @@ func (s *Server) handleBuilderDeploy(c *fiber.Ctx) error {
 	if len(s.cfg.AgentDirs) > 0 {
 		dir = s.cfg.AgentDirs[0]
 	}
-	if err := s.loader.Upsert(dir, &def); err != nil {
+	if err := s.agents(c).Upsert(dir, &def); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "deploy failed: " + err.Error(),
 		})

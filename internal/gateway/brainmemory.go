@@ -35,7 +35,7 @@ func (s *Server) handleBrainMemoryStats(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"enabled": false, "agents": []any{}})
 	}
 
-	agents := s.loader.All()
+	agents := s.agents(c).All()
 	var out []fiber.Map
 	for _, def := range agents {
 		records, _ := store.EpisodicRecords(def.ID, 0) // 0 = all
