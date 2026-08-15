@@ -19,6 +19,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/workboard"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/message"
 )
 
@@ -102,7 +103,10 @@ func (s *Server) recordRunArtifacts(run workboard.Run, task workboard.Task) {
 	if store == nil || s.actions == nil {
 		return
 	}
-	events, err := s.actions.Tail(task.AgentID, 2000)
+	// The workboard is still single-tenant (workboard.Task carries no
+	// workspace), so its runs are the personal workspace's by definition.
+	// This moves to the task's own workspace when the workboard is scoped.
+	events, err := s.actionLogForWorkspace(wsroot.PersonalWorkspaceID).Tail(task.AgentID, 2000)
 	if err != nil {
 		s.log.Warn("workboard: artifact detection tail failed",
 			zap.Int64("run", run.ID), zap.Error(err))
@@ -217,11 +221,11 @@ type chatArtifact struct {
 	DownloadURL string    `json:"download_url"`
 }
 
-func (s *Server) listChatArtifacts(agentID, sessionID string) ([]chatArtifact, error) {
-	if s.actions == nil {
+func (s *Server) listChatArtifacts(actions actionScope, agentID, sessionID string) ([]chatArtifact, error) {
+	if !actions.Available() {
 		return nil, errChatArtifactsUnavailable
 	}
-	events, err := s.actions.Tail(agentID, 2000)
+	events, err := actions.Tail(agentID, 2000)
 	if err != nil {
 		return nil, err
 	}
@@ -259,7 +263,7 @@ func (s *Server) handleChatArtifacts(c *fiber.Ctx) error {
 	if err := s.requireSession(c, agentID, sessionID); err != nil {
 		return err
 	}
-	arts, err := s.listChatArtifacts(agentID, sessionID)
+	arts, err := s.listChatArtifacts(s.actionLog(c), agentID, sessionID)
 	if err != nil {
 		if fe, ok := err.(*fiber.Error); ok {
 			return s.errMsg(c, fe.Code, fe.Message)
@@ -284,7 +288,7 @@ func (s *Server) handleChatArtifactDownload(c *fiber.Ctx) error {
 	if err := s.requireSession(c, agentID, sessionID); err != nil {
 		return err
 	}
-	arts, err := s.listChatArtifacts(agentID, sessionID)
+	arts, err := s.listChatArtifacts(s.actionLog(c), agentID, sessionID)
 	if err != nil {
 		if fe, ok := err.(*fiber.Error); ok {
 			return s.errMsg(c, fe.Code, fe.Message)

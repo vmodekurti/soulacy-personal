@@ -21,6 +21,7 @@ import (
 // the concrete type or the shim.
 
 var _ storage.ActionLogBackend = (*ActionLog)(nil)
+var _ sdkstorage.WorkspaceActionLogBackend = (*ActionLog)(nil)
 var _ storage.MemoryBackend = (*MemoryArchive)(nil)
 var _ sdkstorage.WorkspaceMemoryBackend = (*MemoryArchive)(nil)
 
@@ -38,6 +39,13 @@ type ActionLog struct {
 // exposes as Path().
 func (a *ActionLog) EventFilePath(agentID string) string {
 	return a.Logger.Path(agentID)
+}
+
+// EventFilePathInWorkspace returns the on-disk log file path for agentID
+// inside one workspace. A tenant's events are a different file, so this is the
+// only way to reach them.
+func (a *ActionLog) EventFilePathInWorkspace(workspaceID, agentID string) string {
+	return a.Logger.PathInWorkspace(workspaceID, agentID)
 }
 
 // NewActionLog wraps an existing *actionlog.Logger in the storage interface.

@@ -25,6 +25,7 @@ func (s *Server) handleProactiveSuggestions(c *fiber.Ctx) error {
 		perAgent = 500
 	}
 
+	actions := s.actionLog(c)
 	defs := s.agents(c).All()
 	snapshots := make(map[string]proactive.AgentSnapshot, len(defs))
 	var events []message.Event
@@ -40,7 +41,7 @@ func (s *Server) handleProactiveSuggestions(c *fiber.Ctx) error {
 			HasSchedule:     hasSchedule,
 			LearningEnabled: def.Learning.Enabled,
 		}
-		evs, err := s.actions.Tail(def.ID, perAgent)
+		evs, err := actions.Tail(def.ID, perAgent)
 		if err != nil {
 			continue
 		}

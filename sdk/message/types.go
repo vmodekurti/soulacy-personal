@@ -36,17 +36,25 @@ type Part struct {
 
 // Message is the canonical inbound/outbound message shared across all subsystems.
 type Message struct {
-	ID        string            `json:"id"`
-	SessionID string            `json:"session_id"`
-	AgentID   string            `json:"agent_id"`
-	Channel   string            `json:"channel"`   // e.g. "telegram", "discord", "http"
-	ThreadID  string            `json:"thread_id"` // channel-native thread/conversation id
-	UserID    string            `json:"user_id"`
-	Username  string            `json:"username"`
-	Role      Role              `json:"role"`
-	Parts     []Part            `json:"parts"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
-	CreatedAt time.Time         `json:"created_at"`
+	ID        string `json:"id"`
+	SessionID string `json:"session_id"`
+	// WorkspaceID is the tenant this message belongs to. Append-only and
+	// omitempty, so an older consumer keeps decoding these messages unchanged.
+	//
+	// A message outlives the request that created it: it is persisted in the
+	// action log and re-enqueued by the boot recovery pass. Without the field
+	// a recovered run cannot be returned to its own tenant, because agent and
+	// session IDs are only unique within one.
+	WorkspaceID string            `json:"workspace_id,omitempty"`
+	AgentID     string            `json:"agent_id"`
+	Channel     string            `json:"channel"`   // e.g. "telegram", "discord", "http"
+	ThreadID    string            `json:"thread_id"` // channel-native thread/conversation id
+	UserID      string            `json:"user_id"`
+	Username    string            `json:"username"`
+	Role        Role              `json:"role"`
+	Parts       []Part            `json:"parts"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+	CreatedAt   time.Time         `json:"created_at"`
 }
 
 // Reserved Message.Metadata keys.

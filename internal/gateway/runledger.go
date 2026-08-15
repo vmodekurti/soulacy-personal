@@ -67,14 +67,13 @@ func (s *Server) handleRunLedger(c *fiber.Ctx) error {
 		queryNote string
 	)
 	if s.actions != nil {
-		q, ok := s.actions.(eventQuerier)
-		if !ok {
+		got, durable, err := s.actionLog(c).QueryEvents(agentID, sessionID, eventLimit, runLedgerEventTypes())
+		switch {
+		case !durable:
 			queryNote = "action log backend does not support durable event queries"
-		} else {
-			got, err := q.QueryEvents(agentID, sessionID, eventLimit, runLedgerEventTypes())
-			if err != nil {
-				return s.errJSON(c, fiber.StatusInternalServerError, err)
-			}
+		case err != nil:
+			return s.errJSON(c, fiber.StatusInternalServerError, err)
+		default:
 			events = got
 			rows = append(rows, s.buildRunLedger(s.agents(c), events, 0)...)
 			sources = append(sources, "action-log")

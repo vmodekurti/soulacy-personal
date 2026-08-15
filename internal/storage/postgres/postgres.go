@@ -38,24 +38,35 @@ import (
 
 // compile-time interface checks
 var _ storage.ActionLogBackend = (*ActionLog)(nil)
+var _ storage.WorkspaceActionLogBackend = (*ActionLog)(nil)
 var _ storage.MemoryBackend = (*MemoryStore)(nil)
 
 // ddlStatements are executed once at Open() to ensure the schema exists.
 var ddlStatements = []string{
 	`CREATE TABLE IF NOT EXISTS agent_events (
-		id         BIGSERIAL    PRIMARY KEY,
-		agent_id   TEXT         NOT NULL,
-		session_id TEXT         NOT NULL DEFAULT '',
-		type       TEXT         NOT NULL,
-		payload    JSONB,
-		created_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+		id           BIGSERIAL    PRIMARY KEY,
+		workspace_id TEXT         NOT NULL DEFAULT 'ws_personal',
+		agent_id     TEXT         NOT NULL,
+		session_id   TEXT         NOT NULL DEFAULT '',
+		type         TEXT         NOT NULL,
+		payload      JSONB,
+		created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 	)`,
+	`ALTER TABLE agent_events ADD COLUMN IF NOT EXISTS workspace_id TEXT NOT NULL DEFAULT 'ws_personal'`,
+	// Backfilled unconditionally, not only when the column is added. A row
+	// with an empty workspace matches no scoped query, so it is not a leak —
+	// it is audit history that silently disappeared, which is worse and
+	// harder to notice. Reachable by an interrupted migration or a direct
+	// write, so the sweep runs on every open.
+	`UPDATE agent_events SET workspace_id = 'ws_personal' WHERE workspace_id IS NULL OR workspace_id = ''`,
+	// Workspace-first, so the tenant predicate is the leading column of every
+	// index a scoped query can use.
 	`CREATE INDEX IF NOT EXISTS idx_events_agent_created
-		ON agent_events (agent_id, created_at DESC)`,
+		ON agent_events (workspace_id, agent_id, created_at DESC)`,
 	`CREATE INDEX IF NOT EXISTS idx_events_session
-		ON agent_events (agent_id, session_id, created_at)`,
+		ON agent_events (workspace_id, agent_id, session_id, created_at)`,
 	`CREATE INDEX IF NOT EXISTS idx_events_type
-		ON agent_events (type, created_at DESC)`,
+		ON agent_events (workspace_id, type, created_at DESC)`,
 	`CREATE TABLE IF NOT EXISTS memories (
 		id           TEXT       PRIMARY KEY,
 		workspace_id TEXT       NOT NULL DEFAULT 'ws_personal',
@@ -199,9 +210,9 @@ func (a *ActionLog) flush(batch []message.Event) {
 	for _, ev := range batch {
 		payload, _ := json.Marshal(ev.Payload)
 		_, err := conn.Exec(ctx,
-			`INSERT INTO agent_events (agent_id, session_id, type, payload, created_at)
-			 VALUES ($1, $2, $3, $4, $5)`,
-			ev.AgentID, ev.SessionID, ev.Type, string(payload), ev.Timestamp,
+			`INSERT INTO agent_events (workspace_id, agent_id, session_id, type, payload, created_at)
+			 VALUES ($1, $2, $3, $4, $5, $6)`,
+			workspaceOrPersonal(ev.WorkspaceID), ev.AgentID, ev.SessionID, ev.Type, string(payload), ev.Timestamp,
 		)
 		if err != nil {
 			a.log.Warn("postgres actionlog: insert event",
@@ -209,18 +220,28 @@ func (a *ActionLog) flush(batch []message.Event) {
 		}
 	}
 
-	// Mirror to per-agent log files.
-	byAgent := make(map[string][]message.Event, len(batch))
+	// Mirror to per-agent log files, one file per (workspace, agent). The
+	// workspace is part of the key because it is part of the path: agent IDs
+	// are only unique within a tenant, so grouping by agent alone would send
+	// two tenants' events to one file.
+	type fileKey struct{ workspaceID, agentID string }
+	byFile := make(map[fileKey][]message.Event, len(batch))
 	for _, ev := range batch {
-		byAgent[ev.AgentID] = append(byAgent[ev.AgentID], ev)
+		key := fileKey{workspaceOrPersonal(ev.WorkspaceID), ev.AgentID}
+		byFile[key] = append(byFile[key], ev)
 	}
-	for agentID, events := range byAgent {
-		a.writeFile(agentID, events)
+	for key, events := range byFile {
+		a.writeFile(key.workspaceID, key.agentID, events)
 	}
 }
 
-func (a *ActionLog) writeFile(agentID string, events []message.Event) {
-	path := a.EventFilePath(agentID)
+func (a *ActionLog) writeFile(workspaceID, agentID string, events []message.Event) {
+	path := a.EventFilePathInWorkspace(workspaceID, agentID)
+	if dir := filepath.Dir(path); dir != a.logDir {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return
+		}
+	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return
@@ -237,17 +258,32 @@ func (a *ActionLog) writeFile(agentID string, events []message.Event) {
 	_ = w.Flush()
 }
 
-// EventFilePath returns the on-disk mirror path for agentID.
+// EventFilePath returns the on-disk mirror path for agentID in the personal
+// workspace. Product invariant 7: a single-user installation's mirror stays
+// where it has always been.
 func (a *ActionLog) EventFilePath(agentID string) string {
-	return filepath.Join(a.logDir, sanitize(agentID)+".log")
+	return a.EventFilePathInWorkspace(wsroot.PersonalWorkspaceID, agentID)
 }
 
-// Tail reads up to limit recent events from the per-agent log file.
+// EventFilePathInWorkspace returns the mirror path for agentID inside one
+// workspace. A tenant's mirror is a different file, so a tail cannot reach
+// another tenant's events however the agent ID is chosen.
+func (a *ActionLog) EventFilePathInWorkspace(workspaceID, agentID string) string {
+	return filepath.Join(wsroot.Dir(a.logDir, workspaceID), sanitize(agentID)+".log")
+}
+
+// Tail reads up to limit recent events from the personal workspace's log file.
 func (a *ActionLog) Tail(agentID string, limit int) ([]message.Event, error) {
+	return a.TailInWorkspace(wsroot.PersonalWorkspaceID, agentID, limit)
+}
+
+// TailInWorkspace reads up to limit recent events from one workspace's
+// per-agent log file.
+func (a *ActionLog) TailInWorkspace(workspaceID, agentID string, limit int) ([]message.Event, error) {
 	if limit <= 0 || limit > 5000 {
 		limit = 500
 	}
-	path := a.EventFilePath(agentID)
+	path := a.EventFilePathInWorkspace(workspaceID, agentID)
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -286,8 +322,12 @@ func (a *ActionLog) IncompleteMessageIns(since time.Time) ([][]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	// Deployment-wide on purpose: this is the boot recovery pass, and every
+	// tenant's interrupted run has to be recovered. Isolation is preserved by
+	// stamping each returned payload with its own workspace, so a replayed run
+	// re-enters the engine under its own tenant rather than as personal.
 	rows, err := a.pool.Query(ctx, `
-		SELECT agent_id, session_id, payload::text, created_at
+		SELECT workspace_id, agent_id, session_id, payload::text, created_at
 		  FROM agent_events
 		 WHERE type = 'message.in'
 		   AND created_at >= $1
@@ -299,13 +339,14 @@ func (a *ActionLog) IncompleteMessageIns(since time.Time) ([][]byte, error) {
 	defer rows.Close()
 
 	type candidate struct {
+		workspaceID                 string
 		agentID, sessionID, payload string
 		createdAt                   time.Time
 	}
 	var candidates []candidate
 	for rows.Next() {
 		var c candidate
-		if err := rows.Scan(&c.agentID, &c.sessionID, &c.payload, &c.createdAt); err != nil {
+		if err := rows.Scan(&c.workspaceID, &c.agentID, &c.sessionID, &c.payload, &c.createdAt); err != nil {
 			return nil, fmt.Errorf("postgres actionlog: scan: %w", err)
 		}
 		candidates = append(candidates, c)
@@ -323,9 +364,9 @@ func (a *ActionLog) IncompleteMessageIns(since time.Time) ([][]byte, error) {
 		var deadLetter int
 		_ = a.pool.QueryRow(ctx, `
 			SELECT 1 FROM agent_events
-			 WHERE agent_id = $1 AND session_id = $2 AND type = 'message.dead_letter'
+			 WHERE workspace_id = $1 AND agent_id = $2 AND session_id = $3 AND type = 'message.dead_letter'
 			 LIMIT 1
-		`, c.agentID, c.sessionID).Scan(&deadLetter)
+		`, workspaceOrPersonal(c.workspaceID), c.agentID, c.sessionID).Scan(&deadLetter)
 		if deadLetter == 1 {
 			continue
 		}
@@ -333,37 +374,55 @@ func (a *ActionLog) IncompleteMessageIns(since time.Time) ([][]byte, error) {
 		var hasOutcome int
 		err := a.pool.QueryRow(ctx, `
 			SELECT 1 FROM agent_events
-			 WHERE agent_id   = $1
-			   AND session_id = $2
-			   AND created_at > $3
+			 WHERE workspace_id = $1
+			   AND agent_id     = $2
+			   AND session_id   = $3
+			   AND created_at   > $4
 			   AND type IN ('message.out', 'error')
 			 LIMIT 1
-		`, c.agentID, c.sessionID, c.createdAt).Scan(&hasOutcome)
+		`, workspaceOrPersonal(c.workspaceID), c.agentID, c.sessionID, c.createdAt).Scan(&hasOutcome)
 		if err != nil {
 			// Any scan error on LIMIT 1 means no row → incomplete.
-			out = append(out, []byte(c.payload))
+			out = append(out, stampWorkspace([]byte(c.payload), c.workspaceID))
 		}
 	}
 	return out, nil
 }
 
-// CountMessageInAttempts counts message.in events for (agentID, sessionID) since `since`.
+// CountMessageInAttempts counts message.in events for (agentID, sessionID)
+// since `since`, in the personal workspace.
 func (a *ActionLog) CountMessageInAttempts(agentID, sessionID string, since time.Time) (int, error) {
+	return a.CountMessageInAttemptsInWorkspace(wsroot.PersonalWorkspaceID, agentID, sessionID, since)
+}
+
+// CountMessageInAttemptsInWorkspace is CountMessageInAttempts scoped to one
+// workspace. Without the predicate, two tenants replaying sessions that share
+// an ID sum into one count and quarantine each other's healthy run.
+func (a *ActionLog) CountMessageInAttemptsInWorkspace(workspaceID, agentID, sessionID string, since time.Time) (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	var count int
 	err := a.pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM agent_events
-		 WHERE agent_id   = $1
-		   AND session_id = $2
-		   AND type       = 'message.in'
-		   AND created_at >= $3
-	`, agentID, sessionID, since).Scan(&count)
+		 WHERE workspace_id = $1
+		   AND agent_id     = $2
+		   AND session_id   = $3
+		   AND type         = 'message.in'
+		   AND created_at  >= $4
+	`, workspaceOrPersonal(workspaceID), agentID, sessionID, since).Scan(&count)
 	return count, err
 }
 
-// MarkDeadLetter synchronously inserts a message.dead_letter event.
+// MarkDeadLetter synchronously inserts a message.dead_letter event in the
+// personal workspace.
 func (a *ActionLog) MarkDeadLetter(agentID, sessionID, reason string) error {
+	return a.MarkDeadLetterInWorkspace(wsroot.PersonalWorkspaceID, agentID, sessionID, reason)
+}
+
+// MarkDeadLetterInWorkspace quarantines a session inside its own workspace, so
+// one tenant's poisoned session cannot suppress another tenant's recovery of a
+// session that happens to share the ID.
+func (a *ActionLog) MarkDeadLetterInWorkspace(workspaceID, agentID, sessionID, reason string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	payload, _ := json.Marshal(map[string]string{
@@ -371,11 +430,32 @@ func (a *ActionLog) MarkDeadLetter(agentID, sessionID, reason string) error {
 		"quarantine": "poison-pill guard (too many crash-recovery attempts)",
 	})
 	_, err := a.pool.Exec(ctx,
-		`INSERT INTO agent_events (agent_id, session_id, type, payload, created_at)
-		 VALUES ($1, $2, 'message.dead_letter', $3, $4)`,
-		agentID, sessionID, string(payload), time.Now().UTC(),
+		`INSERT INTO agent_events (workspace_id, agent_id, session_id, type, payload, created_at)
+		 VALUES ($1, $2, $3, 'message.dead_letter', $4, $5)`,
+		workspaceOrPersonal(workspaceID), agentID, sessionID, string(payload), time.Now().UTC(),
 	)
 	return err
+}
+
+// stampWorkspace injects the owning workspace into a stored message payload so
+// the boot recovery pass re-enqueues a run under its own tenant. The merge is
+// done on the decoded object rather than by re-marshalling a typed Message, so
+// that fields this build does not know about survive the round trip.
+func stampWorkspace(payload []byte, workspaceID string) []byte {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &object); err != nil || object == nil {
+		return payload
+	}
+	stamped, err := json.Marshal(workspaceOrPersonal(workspaceID))
+	if err != nil {
+		return payload
+	}
+	object["workspace_id"] = stamped
+	merged, err := json.Marshal(object)
+	if err != nil {
+		return payload
+	}
+	return merged
 }
 
 // Close flushes pending events and closes the pool.

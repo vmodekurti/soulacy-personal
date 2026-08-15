@@ -97,7 +97,7 @@ var Resources = []Resource{
 // Tables is deliberately explicit. PersonalOnly entries remain valid for
 // backwards-compatible Personal deployments but cannot serve Team/Scale data.
 var Tables = []Table{
-	{Source: "internal/actionlog/actionlog.go", Name: "agent_events", Resource: "events", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
+	{Source: "internal/actionlog/actionlog.go", Name: "agent_events", Resource: "events", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/actionlog/workspace_test.go"},
 	{Source: "internal/agentmemory/rulelog.go", Name: "rulebook_locks", Resource: "studio-learning", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
 	{Source: "internal/agentmemory/rulelog.go", Name: "rulebook_versions", Resource: "studio-learning", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
 	{Source: "internal/auth/apikeys/postgres.go", Name: "access_credentials", Resource: "api-keys", Class: UserPrivate, ScopeKey: "organization_id,workspace_ids,subject_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/auth/apikeys/postgres_test.go"},
@@ -121,7 +121,7 @@ var Tables = []Table{
 	{Source: "internal/session/ownership.go", Name: "session_owners", Resource: "sessions", Class: UserPrivate, ScopeKey: "workspace_id,creator", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/session/ownership_test.go"},
 	{Source: "internal/session/store.go", Name: "session_resources", Resource: "sessions", Class: UserPrivate, ScopeKey: "workspace_id,user_id", CompositeUniqueness: true, Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
 	{Source: "internal/sqlitex/schemaversion.go", Name: "soulacy_schema_version", Resource: "schema-metadata", Class: PlatformGlobal, ScopeKey: "none", Isolation: Scoped, IsolationTest: "internal/sqlitex/schemaversion_test.go"},
-	{Source: "internal/storage/postgres/postgres.go", Name: "agent_events", Resource: "events", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
+	{Source: "internal/storage/postgres/postgres.go", Name: "agent_events", Resource: "events", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/storage/postgres/workspace_test.go"},
 	{Source: "internal/storage/postgres/postgres.go", Name: "memories", Resource: "memory", Class: UserPrivate, ScopeKey: "workspace_id,user_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/memory/workspace_test.go"},
 	{Source: "internal/studio/lessons.go", Name: "lesson_meta", Resource: "studio-learning", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/gateway/studio_scope_test.go"},
 	{Source: "internal/studio/lessons.go", Name: "lessons", Resource: "studio-learning", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/gateway/studio_scope_test.go"},

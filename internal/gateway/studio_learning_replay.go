@@ -16,7 +16,7 @@ func (s *Server) replayStudioLearning() {
 			if def == nil || def.ID == "" {
 				continue
 			}
-			events, err := s.actions.Tail(def.ID, 1000)
+			events, err := s.actionLogForWorkspace(scope.workspaceID).Tail(def.ID, 1000)
 			if err != nil {
 				continue
 			}

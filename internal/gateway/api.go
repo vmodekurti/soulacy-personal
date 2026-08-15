@@ -2535,7 +2535,7 @@ func (s *Server) handleReplayAgentRun(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusBadRequest, "session_id is required")
 	}
 
-	events, err := s.actions.Tail(id, 5000)
+	events, err := s.actionLog(c).Tail(id, 5000)
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
@@ -3718,23 +3718,14 @@ func (s *Server) handleAgentActions(c *fiber.Ctx) error {
 		}
 	}
 
+	actions := s.actionLog(c)
 	var events []message.Event
 	var err error
 	if c.QueryBool("durable", false) {
-		if qf, ok := s.actions.(interface {
-			QueryFiltered(string, int, map[string]bool) ([]message.Event, error)
-		}); ok {
-			events, err = qf.QueryFiltered(id, limit, allowed)
-		}
+		events, _, err = actions.QueryFiltered(id, limit, allowed)
 	}
 	if events == nil && err == nil {
-		if tf, ok := s.actions.(interface {
-			TailFiltered(string, int, map[string]bool) ([]message.Event, error)
-		}); ok && len(allowed) > 0 {
-			events, err = tf.TailFiltered(id, limit, allowed)
-		} else {
-			events, err = s.actions.Tail(id, limit)
-		}
+		events, err = actions.TailFiltered(id, limit, allowed)
 	}
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)

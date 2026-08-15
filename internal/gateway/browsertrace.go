@@ -47,7 +47,7 @@ func (s *Server) handleBrowserTrace(c *fiber.Ctx) error {
 	if limit <= 0 || limit > 5000 {
 		limit = 2000
 	}
-	events, err := s.actions.Tail(agentID, limit)
+	events, err := s.actionLog(c).Tail(agentID, limit)
 	if err != nil {
 		return s.errMsg(c, fiber.StatusInternalServerError, err.Error())
 	}
@@ -66,7 +66,7 @@ func (s *Server) handleBrowserArtifact(c *fiber.Ctx) error {
 	if agentID == "" || ref == "" {
 		return s.errMsg(c, fiber.StatusBadRequest, "agent_id and path are required")
 	}
-	events, err := s.actions.Tail(agentID, 5000)
+	events, err := s.actionLog(c).Tail(agentID, 5000)
 	if err != nil {
 		return s.errMsg(c, fiber.StatusInternalServerError, err.Error())
 	}

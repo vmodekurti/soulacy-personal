@@ -65,6 +65,11 @@ func replayIncompleteRuns(actions storage.ActionLogBackend, chanReg *channels.Re
 		log.Warn("crash recovery: query failed; skipping replay", zap.Error(err))
 		return 0, 0
 	}
+	// The poison-pill guard must count and quarantine inside the run's own
+	// workspace. A backend without the scoped surface is single-tenant by
+	// definition, so falling back to the unscoped calls is correct there and
+	// only there.
+	scoped, _ := actions.(storage.WorkspaceActionLogBackend)
 	var poisoned int
 	for _, raw := range payloads {
 		var msg message.Message
@@ -83,13 +88,13 @@ func replayIncompleteRuns(actions storage.ActionLogBackend, chanReg *channels.Re
 		// Poison-pill guard: count how many times this (agent, session) has
 		// already been attempted within the recovery window. If it has hit
 		// the max, it's crashing the engine on every boot — quarantine it.
-		attempts, cerr := actions.CountMessageInAttempts(msg.AgentID, msg.SessionID, since)
+		attempts, cerr := countAttempts(actions, scoped, msg, since)
 		if cerr != nil {
 			log.Warn("crash recovery: attempt count query failed; allowing replay",
 				zap.String("session", msg.SessionID), zap.Error(cerr))
 		} else if attempts >= maxReplayAttempts {
 			reason := fmt.Sprintf("reached %d crash-recovery attempts without completing", attempts)
-			if dlErr := actions.MarkDeadLetter(msg.AgentID, msg.SessionID, reason); dlErr != nil {
+			if dlErr := markDeadLetter(actions, scoped, msg, reason); dlErr != nil {
 				log.Error("crash recovery: failed to mark dead letter",
 					zap.String("session", msg.SessionID), zap.Error(dlErr))
 			} else {
@@ -119,4 +124,22 @@ func replayIncompleteRuns(actions storage.ActionLogBackend, chanReg *channels.Re
 		)
 	}
 	return replayed, dropped
+}
+
+// countAttempts and markDeadLetter route through the tenant-aware surface when
+// the backend has one. They are separate functions rather than inline
+// type-switches so the two call sites cannot drift apart: quarantining in one
+// workspace while counting in another would silently strand a run.
+func countAttempts(actions storage.ActionLogBackend, scoped storage.WorkspaceActionLogBackend, msg message.Message, since time.Time) (int, error) {
+	if scoped != nil {
+		return scoped.CountMessageInAttemptsInWorkspace(msg.WorkspaceID, msg.AgentID, msg.SessionID, since)
+	}
+	return actions.CountMessageInAttempts(msg.AgentID, msg.SessionID, since)
+}
+
+func markDeadLetter(actions storage.ActionLogBackend, scoped storage.WorkspaceActionLogBackend, msg message.Message, reason string) error {
+	if scoped != nil {
+		return scoped.MarkDeadLetterInWorkspace(msg.WorkspaceID, msg.AgentID, msg.SessionID, reason)
+	}
+	return actions.MarkDeadLetter(msg.AgentID, msg.SessionID, reason)
 }

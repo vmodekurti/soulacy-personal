@@ -236,11 +236,13 @@ func (s *Server) mobileRecentRuns(scope agentScope) (int, bool) {
 	rows := []runLedgerRow{}
 	durable := false
 	if s.actions != nil {
-		if q, ok := s.actions.(eventQuerier); ok {
-			if events, err := q.QueryEvents("", "", 500, runLedgerEventTypes()); err == nil {
-				rows = append(rows, s.buildRunLedger(scope, events, 25)...)
-				durable = true
-			}
+		// The agent scope already names the tenant this status is for, so the
+		// action log is read through the same workspace rather than whichever
+		// one the request happened to resolve to.
+		events, supported, err := s.actionLogForWorkspace(scope.workspaceID).QueryEvents("", "", 500, runLedgerEventTypes())
+		if supported && err == nil {
+			rows = append(rows, s.buildRunLedger(scope, events, 25)...)
+			durable = true
 		}
 	}
 	rows = append(rows, s.flowRunLedgerRows(scope, "")...)

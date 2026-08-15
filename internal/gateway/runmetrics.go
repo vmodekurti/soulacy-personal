@@ -8,7 +8,6 @@ import (
 
 	"github.com/soulacy/soulacy/internal/actionlog"
 	"github.com/soulacy/soulacy/internal/costs"
-	"github.com/soulacy/soulacy/pkg/message"
 )
 
 // Run-level observability (Story 7, milestone M1). Combines the costs store
@@ -25,10 +24,6 @@ type sessionStatser interface {
 
 type opsSummarizer interface {
 	OpsSummary(since time.Time, window string, limit int) (actionlog.OpsSummary, error)
-}
-
-type eventQuerier interface {
-	QueryEvents(agentID, sessionID string, limit int, allowed map[string]bool) ([]message.Event, error)
 }
 
 // handleRunMetrics handles GET /api/v1/runs/:session_id/metrics?agent_id=
@@ -177,12 +172,6 @@ func (s *Server) handleRunEvents(c *fiber.Ctx) error {
 			"error": "run events not available (action log disabled)",
 		})
 	}
-	q, ok := s.actions.(eventQuerier)
-	if !ok {
-		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
-			"error": "run events require a durable action log backend",
-		})
-	}
 	limit := c.QueryInt("limit", 500)
 	if limit <= 0 {
 		limit = 500
@@ -198,7 +187,12 @@ func (s *Server) handleRunEvents(c *fiber.Ctx) error {
 			}
 		}
 	}
-	events, err := q.QueryEvents(c.Query("agent_id"), c.Query("session_id"), limit, allowed)
+	events, durable, err := s.actionLog(c).QueryEvents(c.Query("agent_id"), c.Query("session_id"), limit, allowed)
+	if !durable {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"error": "run events require a durable action log backend",
+		})
+	}
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}

@@ -51,7 +51,7 @@ func (s *Server) handleChatFeedback(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "learning feedback store not configured")
 	}
 	if s.actions != nil {
-		events, err := s.actions.Tail(body.AgentID, 5000)
+		events, err := s.actionLog(c).Tail(body.AgentID, 5000)
 		if err != nil {
 			return s.errJSON(c, fiber.StatusInternalServerError, err)
 		}

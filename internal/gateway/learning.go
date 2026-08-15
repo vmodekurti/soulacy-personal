@@ -308,7 +308,7 @@ func (s *Server) handleLearningEvidence(c *fiber.Ctx) error {
 		}
 		// Tail scoped to the agent when one is given; otherwise pull a broad
 		// recent slice and let BuildEvidence filter.
-		events, err = s.actions.Tail(agentID, limit)
+		events, err = s.actionLog(c).Tail(agentID, limit)
 		if err != nil {
 			return s.errMsg(c, fiber.StatusInternalServerError, err.Error())
 		}
@@ -364,7 +364,7 @@ func (s *Server) handleProposeLearningFromRun(c *fiber.Ctx) error {
 		maxProposals = 3
 	}
 
-	events, err := s.actions.Tail(body.AgentID, 5000)
+	events, err := s.actionLog(c).Tail(body.AgentID, 5000)
 	if err != nil {
 		return s.errMsg(c, fiber.StatusInternalServerError, err.Error())
 	}
@@ -444,7 +444,7 @@ func (s *Server) handleReflectLearningFromRecentRuns(c *fiber.Ctx) error {
 		maxProposals = 3
 	}
 
-	events, err := s.actions.Tail(body.AgentID, body.Limit)
+	events, err := s.actionLog(c).Tail(body.AgentID, body.Limit)
 	if err != nil {
 		return s.errMsg(c, fiber.StatusInternalServerError, err.Error())
 	}

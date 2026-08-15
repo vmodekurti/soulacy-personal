@@ -24,7 +24,7 @@ isolation state; this document explains it.
 declared workspace-owned but not yet isolated.
 
 - At the start of this work: **57 blockers**
-- Now: **40 blockers** (30 of 49 tables and 21 of 42 repositories are `scoped`)
+- Now: **38 blockers** (53 catalog entries `scoped`, 38 still `personal-only`)
 
 A store moves from `personal-only` to `scoped` only when it has a real
 cross-tenant isolation test. The catalog names that test, and a CI check fails
@@ -81,6 +81,13 @@ become a back door into one workspace from another, and every use is greppable.
 
 These are gaps, not oversights, and they fail closed rather than guessing:
 
+- **The learning reflection sweeper** is personal-only on both ends: its agent
+  source is the loader's personal listing and its tail is the personal
+  workspace's history. `learning.Store` carries no workspace, so scoping only
+  the reads would gather one tenant's runs into a store every tenant shares —
+  worse than staying single-tenant.
+- **The workboard's artifact detection** reads the personal workspace, because
+  `workboard.Task` carries no workspace. It moves when the workboard is scoped.
 - **Scheduler and channel invocations** reach the engine without a request
   principal and resolve to the personal workspace. That is the single-tenant
   answer, not a bypass: a multi-user deployment establishes a service principal
@@ -105,6 +112,44 @@ route each observation by the workspace the event itself declares. A workspace
 whose store cannot be built drops the observation rather than falling back —
 `TestAnUnresolvableWorkspaceDropsRatherThanFallsBack` pins that, because a
 fallback would silently teach one tenant from another's runs.
+
+### The action log is isolated by file *and* by predicate
+
+The log was keyed by agent ID alone — both its per-agent JSONL files and every
+SQL predicate — and agent IDs are only unique within a workspace. Two tenants
+each running an agent called "assistant" appended to one file, and each tail
+returned the other's runs.
+
+Now a tenant's events are a *different file* (`.workspaces/<id>/<agent>.log`;
+personal stays at `<agent>.log`), and every durable query carries
+`workspace_id` as the leading predicate, matched by workspace-first indexes.
+Both backends — SQLite and Postgres — got the same treatment, including the
+mirror files Postgres writes.
+
+Three parts are worth not undoing:
+
+1. **`sdk/storage.WorkspaceActionLogBackend`** sits beside the frozen
+   `ActionLogBackend`. Callers type-assert; when the assertion fails and the
+   workspace is not personal, they return `ErrActionLogNotTenantAware` rather
+   than falling back to the unscoped call, which would answer with the personal
+   workspace's events.
+2. **`internal/gateway/action_scope.go`** is the single place a handler reaches
+   history through, mirroring `agentScope` and `studioScope`. Eighteen call
+   sites previously took `s.actions` directly; a read can no longer be written
+   without naming the tenant.
+3. **Boot recovery stays deployment-wide, and stamps instead.**
+   `IncompleteMessageIns` must recover every tenant's interrupted runs, so it
+   has no scoped twin. Isolation comes from `message.Message` gaining
+   `WorkspaceID` and each payload being stamped with the workspace of the row
+   it came from, so a replayed run re-enters the engine under its own tenant.
+   The stamp merges into the decoded object rather than re-marshalling a typed
+   `Message`, so a payload written by a newer binary does not lose fields
+   passing through an older one's recovery pass.
+
+`session_search` deserves separate mention: its `agent_id` is model-supplied,
+making it the one place a run can name an agent it was not started for. Scoped
+to the run's own workspace, naming another tenant's agent now reaches a file
+that does not exist.
 
 ### The SDK is extended additively, never modified
 
@@ -141,12 +186,14 @@ Highest-value first, with the reason each matters:
 3. **Workboard, costs, action log, DLQ, checkpoints, conversation history** —
    all still `personal-only`; each needs the same treatment as the stores
    above.
-4. **The action log's per-agent JSONL files** — `Path(agentID)` is keyed by
-   agent alone, so two workspaces running an agent with the same ID append to
-   one file and `Tail` returns both tenants' events. The SQLite side already
-   carries `workspace_id`; the file side and the query predicates do not.
+4. **`internal/learning/store.go`** — reflection proposals carry no workspace,
+   which is why the learning sweeper is still deliberately personal-only on
+   both ends (see below). Scoping its reads before the store would gather one
+   tenant's runs into a store every tenant shares.
 5. **`internal/studio/trace.go`** — build traces are an in-memory ring with no
    ownership check on `Get(id)`; any caller holding an id reads any trace.
+6. **Workboard, costs, DLQ, checkpoints, conversation history** — all still
+   `personal-only`; each needs the same treatment as the stores above.
 
 ## Verification
 

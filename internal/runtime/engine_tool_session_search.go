@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/soulacy/soulacy/internal/learning"
+	"github.com/soulacy/soulacy/internal/storage"
 	"github.com/soulacy/soulacy/pkg/message"
 )
 
@@ -64,7 +65,22 @@ func (e *Engine) sessionSearch(ctx context.Context, args map[string]any) (string
 		limit = 20
 	}
 
-	events, err := e.actionLog.Tail(agentID, 5000)
+	// agent_id is model-supplied, so this is the one place a run can name an
+	// agent it was not started for. Scoping the read to the run's own
+	// workspace means naming another tenant's agent reaches a different file
+	// that does not exist, rather than that tenant's sessions. A backend with
+	// no tenant-aware surface is single-tenant, so the unscoped call is
+	// correct there and only there.
+	workspaceID := WorkspaceFromContext(ctx)
+	var events []message.Event
+	var err error
+	if scoped, ok := e.actionLog.(storage.WorkspaceActionLogBackend); ok {
+		events, err = scoped.TailInWorkspace(workspaceID, agentID, 5000)
+	} else if workspaceID == PersonalWorkspaceID {
+		events, err = e.actionLog.Tail(agentID, 5000)
+	} else {
+		return "", fmt.Errorf("session_search: action log backend is not tenant-aware")
+	}
 	if err != nil {
 		return "", fmt.Errorf("session_search: %w", err)
 	}

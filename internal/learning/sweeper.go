@@ -136,6 +136,12 @@ func (s *Sweeper) SweepOnce(ctx context.Context) (SweepResult, error) {
 			continue
 		}
 		result.AgentsReviewed++
+		// Personal-only, and deliberately so on both ends: AgentSource is the
+		// loader's personal listing, and Tail is documented as the personal
+		// workspace's history. The reflection store itself carries no
+		// workspace yet, so scoping only the reads would gather one tenant's
+		// runs into a store every tenant shares — worse than staying
+		// single-tenant. This becomes per-workspace when learning.Store does.
 		events, err := s.actions.Tail(def.ID, s.limit)
 		if err != nil {
 			s.log.Warn("learning reflection tail failed", zap.String("agent", def.ID), zap.Error(err))

@@ -2024,7 +2024,7 @@ func (s *Server) handleStudioRunHistory(c *fiber.Ctx) error {
 	if agentID == "" {
 		return s.errMsg(c, fiber.StatusBadRequest, "agentId is required")
 	}
-	return c.JSON(fiber.Map{"agentId": agentID, "runs": s.completeRunHistory(agentID)})
+	return c.JSON(fiber.Map{"agentId": agentID, "runs": s.completeRunHistory(s.actionLog(c), agentID)})
 }
 
 type studioRunHistoryRow struct {
@@ -2045,7 +2045,10 @@ type studioRunHistoryRow struct {
 	DeliveryError   string    `json:"deliveryError,omitempty"`
 }
 
-func (s *Server) completeRunHistory(agentID string) []studioRunHistoryRow {
+// completeRunHistory takes the action-log scope rather than reaching for
+// s.actions itself, so run history cannot be assembled without naming the
+// tenant it belongs to.
+func (s *Server) completeRunHistory(actions actionScope, agentID string) []studioRunHistoryRow {
 	byID := map[string]studioRunHistoryRow{}
 	for _, r := range s.engine.FlowRunHistory(agentID) {
 		status := "success"
@@ -2067,7 +2070,7 @@ func (s *Server) completeRunHistory(agentID string) []studioRunHistoryRow {
 		}
 	}
 
-	for _, r := range s.durableRunHistory(agentID) {
+	for _, r := range s.durableRunHistory(actions, agentID) {
 		if cur, ok := byID[r.RunID]; ok {
 			cur.SessionID = studioFirstNonEmpty(cur.SessionID, r.SessionID)
 			cur.Trigger = studioFirstNonEmpty(cur.Trigger, r.Trigger)
@@ -2108,8 +2111,8 @@ func (s *Server) completeRunHistory(agentID string) []studioRunHistoryRow {
 	return rows
 }
 
-func (s *Server) durableRunHistory(agentID string) []studioRunHistoryRow {
-	if s.actions == nil {
+func (s *Server) durableRunHistory(actions actionScope, agentID string) []studioRunHistoryRow {
+	if !actions.Available() {
 		return nil
 	}
 	allowed := map[string]bool{
@@ -2119,18 +2122,9 @@ func (s *Server) durableRunHistory(agentID string) []studioRunHistoryRow {
 		"tool.result":     true,
 		"schedule.output": true,
 	}
-	var events []message.Event
-	var err error
-	if qf, ok := s.actions.(interface {
-		QueryFiltered(string, int, map[string]bool) ([]message.Event, error)
-	}); ok {
-		events, err = qf.QueryFiltered(agentID, 10000, allowed)
-	} else if tf, ok := s.actions.(interface {
-		TailFiltered(string, int, map[string]bool) ([]message.Event, error)
-	}); ok {
-		events, err = tf.TailFiltered(agentID, 5000, allowed)
-	} else {
-		events, err = s.actions.Tail(agentID, 5000)
+	events, durable, err := actions.QueryFiltered(agentID, 10000, allowed)
+	if !durable && err == nil {
+		events, err = actions.TailFiltered(agentID, 5000, allowed)
 	}
 	if err != nil {
 		return []studioRunHistoryRow{{
@@ -2571,7 +2565,7 @@ func (s *Server) handleStudioDiagnoseSession(c *fiber.Ctx) error {
 	if def == nil {
 		return s.errMsg(c, fiber.StatusNotFound, "the agent for this run no longer exists")
 	}
-	events, err := s.actions.Tail(req.AgentID, 5000)
+	events, err := s.actionLog(c).Tail(req.AgentID, 5000)
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}

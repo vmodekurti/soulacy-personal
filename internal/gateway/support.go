@@ -52,7 +52,7 @@ func (s *Server) supportBundleOptions(c *fiber.Ctx) supportbundle.Options {
 			"chat_status":    s.chatExperienceReadiness(c),
 			"docs_status":    s.publicDocsReadiness(),
 			"run_ledger":     s.supportRunLedger(s.agents(c)),
-			"admin_audit":    s.supportAdminAudit(),
+			"admin_audit":    s.supportAdminAudit(s.actionLog(c)),
 			"release": fiber.Map{
 				"version":         config.Version,
 				"update_manifest": s.updateManifestSource(),
@@ -64,21 +64,22 @@ func (s *Server) supportBundleOptions(c *fiber.Ctx) supportbundle.Options {
 	}
 }
 
-func (s *Server) supportAdminAudit() fiber.Map {
-	if s == nil || s.actions == nil {
+// supportAdminAudit takes the action-log scope so a support bundle carries the
+// requesting workspace's audit trail and no other tenant's.
+func (s *Server) supportAdminAudit(actions actionScope) fiber.Map {
+	if s == nil || !actions.Available() {
 		return fiber.Map{
 			"available": false,
 			"reason":    "action log disabled",
 		}
 	}
-	q, ok := s.actions.(eventQuerier)
-	if !ok {
+	events, durable, err := actions.QueryEvents(adminAuditAgentID, "", 1000, adminAuditEventTypes())
+	if !durable {
 		return fiber.Map{
 			"available": false,
 			"reason":    "durable action log backend does not support event queries",
 		}
 	}
-	events, err := q.QueryEvents(adminAuditAgentID, "", 1000, adminAuditEventTypes())
 	if err != nil {
 		return fiber.Map{
 			"available": false,
@@ -125,17 +126,16 @@ func (s *Server) supportRunLedger(scope agentScope) fiber.Map {
 		queryNote string
 	)
 	if s.actions != nil {
-		q, ok := s.actions.(eventQuerier)
-		if !ok {
+		got, durable, err := s.actionLogForWorkspace(scope.workspaceID).QueryEvents("", "", eventLimit, runLedgerEventTypes())
+		switch {
+		case !durable:
 			queryNote = "durable action log backend does not support event queries"
-		} else {
-			got, err := q.QueryEvents("", "", eventLimit, runLedgerEventTypes())
-			if err != nil {
-				return fiber.Map{
-					"available": false,
-					"reason":    err.Error(),
-				}
+		case err != nil:
+			return fiber.Map{
+				"available": false,
+				"reason":    err.Error(),
 			}
+		default:
 			events = got
 			rows = append(rows, s.buildRunLedger(scope, events, 0)...)
 			sources = append(sources, "action-log")

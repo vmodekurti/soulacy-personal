@@ -41,6 +41,37 @@ type ActionLogBackend interface {
 	Close() error
 }
 
+// WorkspaceActionLogBackend is the tenant-aware surface for an action log.
+//
+// It is a separate interface rather than new methods on ActionLogBackend
+// because ActionLogBackend is frozen for this SDK major version. A backend
+// that does not implement this one keeps working exactly as before; a caller
+// that needs tenant isolation type-asserts for it and refuses to serve
+// multi-tenant traffic when the assertion fails, rather than silently reading
+// across tenants.
+//
+// Append needs no counterpart: message.Event carries WorkspaceID, so a write
+// is already tenant-aware for any backend that persists the field.
+//
+// IncompleteMessageIns has no scoped twin either, and deliberately so. It is
+// the boot recovery pass, which must recover every tenant's interrupted runs;
+// isolation is preserved by each returned payload carrying the workspace of
+// the run it belongs to, so the replay re-enters under its own tenant.
+type WorkspaceActionLogBackend interface {
+	ActionLogBackend
+
+	// TailInWorkspace returns the most recent limit events for agentID within
+	// one workspace, oldest-first.
+	TailInWorkspace(workspaceID, agentID string, limit int) ([]message.Event, error)
+
+	// CountMessageInAttemptsInWorkspace counts message.in events for
+	// (workspace, agent, session) since `since`.
+	CountMessageInAttemptsInWorkspace(workspaceID, agentID, sessionID string, since time.Time) (int, error)
+
+	// MarkDeadLetterInWorkspace quarantines a session inside its own workspace.
+	MarkDeadLetterInWorkspace(workspaceID, agentID, sessionID, reason string) error
+}
+
 // MemoryBackend is the interface satisfied by every memory-archive implementation.
 type MemoryBackend interface {
 	// Archive persists a memory entry. Duplicate IDs are silently ignored.

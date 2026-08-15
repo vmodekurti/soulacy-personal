@@ -193,9 +193,23 @@ func New(dir, dbPath string, log *zap.Logger, opts ...Option) (*Logger, error) {
 	return l, nil
 }
 
-// Path returns the known on-disk log location for an agent.
+// Path returns the known on-disk log location for an agent in the personal
+// workspace. Product invariant 7: a single-user installation's logs stay
+// exactly where they have always been, so this is deliberately unchanged.
 func (l *Logger) Path(agentID string) string {
-	return filepath.Join(l.dir, sanitize(agentID)+".log")
+	return l.PathInWorkspace(wsroot.PersonalWorkspaceID, agentID)
+}
+
+// PathInWorkspace returns the on-disk log location for an agent in one
+// workspace.
+//
+// Isolation here is structural: a tenant's events live in a different file, so
+// a tail cannot read another tenant's history however the agent ID is chosen.
+// That matters because the file was previously keyed by agent alone, and agent
+// IDs are only unique within a workspace — two tenants each running an agent
+// called "assistant" appended to one file and each read the other's runs.
+func (l *Logger) PathInWorkspace(workspaceID, agentID string) string {
+	return filepath.Join(wsroot.Dir(l.dir, workspaceID), sanitize(agentID)+".log")
 }
 
 // Append enqueues one event for the writer goroutine. Never blocks the
@@ -293,20 +307,32 @@ func (l *Logger) run() {
 // per file across the batch) and bulk-inserts to SQLite in one transaction.
 // Errors are logged per-event; we never block the engine.
 func (l *Logger) flush(batch []message.Event) {
-	// Group by agent so each file is opened/closed once per batch instead of
-	// once per event.
-	byAgent := make(map[string][]message.Event, len(batch))
+	// Group by (workspace, agent) so each file is opened/closed once per batch
+	// instead of once per event. The workspace is part of the key because it is
+	// part of the path: grouping by agent alone would send two tenants' events
+	// to one file handle.
+	type fileKey struct{ workspaceID, agentID string }
+	byFile := make(map[fileKey][]message.Event, len(batch))
 	for _, ev := range batch {
-		byAgent[ev.AgentID] = append(byAgent[ev.AgentID], ev)
+		key := fileKey{workspaceOrPersonal(ev.WorkspaceID), ev.AgentID}
+		byFile[key] = append(byFile[key], ev)
 	}
-	for agentID, events := range byAgent {
-		l.writeFileBatch(agentID, events)
+	for key, events := range byFile {
+		l.writeFileBatch(key.workspaceID, key.agentID, events)
 	}
 	l.writeDBBatch(batch)
 }
 
-func (l *Logger) writeFileBatch(agentID string, events []message.Event) {
-	path := l.Path(agentID)
+func (l *Logger) writeFileBatch(workspaceID, agentID string, events []message.Event) {
+	path := l.PathInWorkspace(workspaceID, agentID)
+	// The personal directory was created at construction; a workspace's
+	// namespace directory does not exist until its first event.
+	if dir := filepath.Dir(path); dir != l.dir {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			l.log.Warn("actionlog: create workspace dir", zap.String("path", dir), zap.Error(err))
+			return
+		}
+	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		l.log.Warn("actionlog: open file", zap.String("path", path), zap.Error(err))
@@ -382,7 +408,15 @@ const tailBlockSize = 64 * 1024
 // into compressed backups would defeat the O(limit) goal. Callers needing full
 // history should query SQLite (agent_events) instead.
 func (l *Logger) Tail(agentID string, limit int) ([]message.Event, error) {
-	return l.tailFilter(agentID, limit, nil)
+	return l.tailFilter(wsroot.PersonalWorkspaceID, agentID, limit, nil)
+}
+
+// TailInWorkspace is Tail scoped to one workspace. The frozen
+// storage.ActionLogBackend interface cannot grow a method, so this and its
+// siblings live on the optional storage.WorkspaceActionLogBackend interface
+// that callers needing isolation type-assert for.
+func (l *Logger) TailInWorkspace(workspaceID, agentID string, limit int) ([]message.Event, error) {
+	return l.tailFilter(workspaceID, agentID, limit, nil)
 }
 
 // TailFiltered is Tail, but only events whose Type is in `allowed` count toward
@@ -392,10 +426,15 @@ func (l *Logger) Tail(agentID string, limit int) ([]message.Event, error) {
 // Filtering DURING the backward scan makes `limit` count run-boundary events,
 // so all of a job's runs show. `allowed` empty/nil ⇒ unfiltered (same as Tail).
 func (l *Logger) TailFiltered(agentID string, limit int, allowed map[string]bool) ([]message.Event, error) {
+	return l.TailFilteredInWorkspace(wsroot.PersonalWorkspaceID, agentID, limit, allowed)
+}
+
+// TailFilteredInWorkspace is TailFiltered scoped to one workspace.
+func (l *Logger) TailFilteredInWorkspace(workspaceID, agentID string, limit int, allowed map[string]bool) ([]message.Event, error) {
 	if len(allowed) == 0 {
-		return l.tailFilter(agentID, limit, nil)
+		return l.tailFilter(workspaceID, agentID, limit, nil)
 	}
-	return l.tailFilter(agentID, limit, allowed)
+	return l.tailFilter(workspaceID, agentID, limit, allowed)
 }
 
 // QueryFiltered returns recent events for an agent from the durable SQLite
@@ -406,11 +445,25 @@ func (l *Logger) QueryFiltered(agentID string, limit int, allowed map[string]boo
 	return l.QueryEvents(agentID, "", limit, allowed)
 }
 
+// QueryFilteredInWorkspace is QueryFiltered scoped to one workspace.
+func (l *Logger) QueryFilteredInWorkspace(workspaceID, agentID string, limit int, allowed map[string]bool) ([]message.Event, error) {
+	return l.QueryEventsInWorkspace(workspaceID, agentID, "", limit, allowed)
+}
+
 // QueryEvents returns durable SQLite-backed events, oldest-first, from the
 // newest `limit` events matching optional filters. Empty agentID/sessionID mean
 // "all". This powers cross-agent Activity/history views that should not depend
 // on per-agent JSONL tails or log rotation.
 func (l *Logger) QueryEvents(agentID, sessionID string, limit int, allowed map[string]bool) ([]message.Event, error) {
+	return l.QueryEventsInWorkspace(wsroot.PersonalWorkspaceID, agentID, sessionID, limit, allowed)
+}
+
+// QueryEventsInWorkspace is QueryEvents with the tenant predicate inside the
+// query rather than applied to its results. An empty agentID/sessionID still
+// mean "all", but only within the named workspace: this is the one read path
+// where a caller can legitimately ask for every agent, and it must not become
+// a way to ask for every tenant.
+func (l *Logger) QueryEventsInWorkspace(workspaceID, agentID, sessionID string, limit int, allowed map[string]bool) ([]message.Event, error) {
 	agentID = strings.TrimSpace(agentID)
 	sessionID = strings.TrimSpace(sessionID)
 	if limit <= 0 {
@@ -418,8 +471,8 @@ func (l *Logger) QueryEvents(agentID, sessionID string, limit int, allowed map[s
 	} else if limit > 50000 {
 		limit = 50000
 	}
-	args := []any{}
-	where := "1 = 1"
+	args := []any{workspaceOrPersonal(workspaceID)}
+	where := "workspace_id = ?"
 	if agentID != "" {
 		where += " AND agent_id = ?"
 		args = append(args, agentID)
@@ -443,10 +496,14 @@ func (l *Logger) QueryEvents(agentID, sessionID string, limit int, allowed map[s
 		}
 	}
 	args = append(args, limit)
+	// workspace_id is selected, not assumed from the argument: a consumer of a
+	// durable query sees the same tenant stamp the JSONL tail carries, so
+	// anything downstream that re-files these events by workspace behaves
+	// identically whichever read path produced them.
 	rows, err := l.db.Query(`
-		SELECT agent_id, session_id, type, COALESCE(payload, ''), created_at
+		SELECT workspace_id, agent_id, session_id, type, COALESCE(payload, ''), created_at
 		FROM (
-			SELECT agent_id, session_id, type, payload, created_at, id
+			SELECT workspace_id, agent_id, session_id, type, payload, created_at, id
 			FROM agent_events
 			WHERE `+where+`
 			ORDER BY created_at DESC, id DESC
@@ -463,7 +520,7 @@ func (l *Logger) QueryEvents(agentID, sessionID string, limit int, allowed map[s
 		var ev message.Event
 		var payload string
 		var atRaw any
-		if err := rows.Scan(&ev.AgentID, &ev.SessionID, &ev.Type, &payload, &atRaw); err != nil {
+		if err := rows.Scan(&ev.WorkspaceID, &ev.AgentID, &ev.SessionID, &ev.Type, &payload, &atRaw); err != nil {
 			return nil, err
 		}
 		ev.Timestamp = parseSQLiteTime(atRaw)
@@ -483,11 +540,11 @@ func (l *Logger) QueryEvents(agentID, sessionID string, limit int, allowed map[s
 	return events, nil
 }
 
-func (l *Logger) tailFilter(agentID string, limit int, allowed map[string]bool) ([]message.Event, error) {
+func (l *Logger) tailFilter(workspaceID, agentID string, limit int, allowed map[string]bool) ([]message.Event, error) {
 	if limit <= 0 || limit > 5000 {
 		limit = 500
 	}
-	path := l.Path(agentID)
+	path := l.PathInWorkspace(workspaceID, agentID)
 
 	f, err := os.Open(path)
 	if err != nil {
@@ -642,12 +699,25 @@ func reverseStrings(s []string) {
 // the actionlog package doesn't import pkg/message's full schema layer;
 // callers unmarshal into whichever type matches their dispatch path.
 func (l *Logger) IncompleteMessageIns(since time.Time) ([][]byte, error) {
+	return l.incompleteMessageIns(since)
+}
+
+// incompleteMessageIns is deliberately deployment-wide: it is the boot
+// recovery pass, and every tenant's interrupted run has to be recovered, not
+// only the personal workspace's. Isolation is preserved differently here —
+// each returned payload is stamped with the workspace of the row it came
+// from, so the replayed run re-enters the engine under its own tenant. The
+// completion and dead-letter checks carry the workspace predicate, because
+// agent and session IDs are only unique within one: without it, one tenant
+// completing a session would suppress another tenant's recovery of a session
+// that happens to share the ID.
+func (l *Logger) incompleteMessageIns(since time.Time) ([][]byte, error) {
 	// Pull message.in candidates first, then prove each one DIDN'T complete.
 	// A single SQL with NOT EXISTS would be denser but harder to reason
 	// about; this two-step keeps the matching logic in Go where it's easy
 	// to evolve as we add new event types (e.g. a future message.cancelled).
 	rows, err := l.db.Query(`
-		SELECT agent_id, session_id, payload, created_at
+		SELECT workspace_id, agent_id, session_id, payload, created_at
 		  FROM agent_events
 		 WHERE type = 'message.in'
 		   AND created_at >= ?
@@ -659,13 +729,14 @@ func (l *Logger) IncompleteMessageIns(since time.Time) ([][]byte, error) {
 	defer rows.Close()
 
 	type candidate struct {
+		workspaceID                 string
 		agentID, sessionID, payload string
 		createdAt                   time.Time
 	}
 	var candidates []candidate
 	for rows.Next() {
 		var c candidate
-		if err := rows.Scan(&c.agentID, &c.sessionID, &c.payload, &c.createdAt); err != nil {
+		if err := rows.Scan(&c.workspaceID, &c.agentID, &c.sessionID, &c.payload, &c.createdAt); err != nil {
 			return nil, fmt.Errorf("actionlog: scan: %w", err)
 		}
 		candidates = append(candidates, c)
@@ -692,9 +763,9 @@ func (l *Logger) IncompleteMessageIns(since time.Time) ([][]byte, error) {
 		var deadLetter int
 		_ = l.db.QueryRow(`
 			SELECT 1 FROM agent_events
-			 WHERE agent_id = ? AND session_id = ? AND type = 'message.dead_letter'
+			 WHERE workspace_id = ? AND agent_id = ? AND session_id = ? AND type = 'message.dead_letter'
 			 LIMIT 1
-		`, c.agentID, c.sessionID).Scan(&deadLetter)
+		`, workspaceOrPersonal(c.workspaceID), c.agentID, c.sessionID).Scan(&deadLetter)
 		if deadLetter == 1 {
 			continue
 		}
@@ -702,14 +773,15 @@ func (l *Logger) IncompleteMessageIns(since time.Time) ([][]byte, error) {
 		var hasOutcome int
 		err := l.db.QueryRow(`
 			SELECT 1 FROM agent_events
-			 WHERE agent_id = ?
+			 WHERE workspace_id = ?
+			   AND agent_id = ?
 			   AND session_id = ?
 			   AND created_at > ?
 			   AND type IN ('message.out', 'error')
 			 LIMIT 1
-		`, c.agentID, c.sessionID, c.createdAt).Scan(&hasOutcome)
+		`, workspaceOrPersonal(c.workspaceID), c.agentID, c.sessionID, c.createdAt).Scan(&hasOutcome)
 		if err == sql.ErrNoRows {
-			out = append(out, []byte(c.payload))
+			out = append(out, stampWorkspace([]byte(c.payload), c.workspaceID))
 		} else if err != nil {
 			// Tolerate per-row failures: log and keep scanning. We'd
 			// rather recover 9/10 in-flight runs than abort the recovery
@@ -729,14 +801,22 @@ func (l *Logger) IncompleteMessageIns(since time.Time) ([][]byte, error) {
 // original run and any crash-recovery replays. Used by the poison-pill
 // guard in recover.go.
 func (l *Logger) CountMessageInAttempts(agentID, sessionID string, since time.Time) (int, error) {
+	return l.CountMessageInAttemptsInWorkspace(wsroot.PersonalWorkspaceID, agentID, sessionID, since)
+}
+
+// CountMessageInAttemptsInWorkspace is CountMessageInAttempts scoped to one
+// workspace. Without the predicate, two tenants replaying sessions that share
+// an ID would sum into one count and quarantine each other's healthy run.
+func (l *Logger) CountMessageInAttemptsInWorkspace(workspaceID, agentID, sessionID string, since time.Time) (int, error) {
 	var count int
 	err := l.db.QueryRow(`
 		SELECT COUNT(*) FROM agent_events
-		 WHERE agent_id = ?
+		 WHERE workspace_id = ?
+		   AND agent_id = ?
 		   AND session_id = ?
 		   AND type = 'message.in'
 		   AND created_at >= ?
-	`, agentID, sessionID, since).Scan(&count)
+	`, workspaceOrPersonal(workspaceID), agentID, sessionID, since).Scan(&count)
 	return count, err
 }
 
@@ -746,13 +826,20 @@ func (l *Logger) CountMessageInAttempts(agentID, sessionID string, since time.Ti
 // after. This is only called by the startup poison-pill guard and should
 // NOT be called on the hot path.
 func (l *Logger) MarkDeadLetter(agentID, sessionID, reason string) error {
+	return l.MarkDeadLetterInWorkspace(wsroot.PersonalWorkspaceID, agentID, sessionID, reason)
+}
+
+// MarkDeadLetterInWorkspace quarantines a session inside its own workspace, so
+// one tenant's poisoned session cannot suppress another tenant's recovery of a
+// session that happens to share the ID.
+func (l *Logger) MarkDeadLetterInWorkspace(workspaceID, agentID, sessionID, reason string) error {
 	payload, _ := json.Marshal(map[string]string{
 		"reason":     reason,
 		"quarantine": "poison-pill guard (too many crash-recovery attempts)",
 	})
 	_, err := l.db.Exec(
 		`INSERT INTO agent_events (workspace_id, agent_id, session_id, type, payload, created_at) VALUES (?, ?, ?, 'message.dead_letter', ?, ?)`,
-		wsroot.PersonalWorkspaceID, agentID, sessionID, string(payload), time.Now().UTC(),
+		workspaceOrPersonal(workspaceID), agentID, sessionID, string(payload), time.Now().UTC(),
 	)
 	return err
 }
@@ -816,17 +903,31 @@ func (l *Logger) DeleteBefore(cutoff time.Time) error {
 	if _, err := l.db.Exec(`DELETE FROM agent_events WHERE created_at < ?`, cutoff.UTC()); err != nil {
 		return err
 	}
-	entries, err := os.ReadDir(l.dir)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.Contains(entry.Name(), ".log.") {
-			continue
+	// Sweep the personal directory and every workspace namespace under it.
+	// A retention policy that only reached the personal directory would leave
+	// every tenant's rotated logs on disk forever — a deletion guarantee that
+	// silently applies to one tenant is worse than none.
+	dirs := []string{l.dir}
+	if namespaces, err := os.ReadDir(filepath.Join(l.dir, wsroot.NamespaceDir)); err == nil {
+		for _, namespace := range namespaces {
+			if namespace.IsDir() {
+				dirs = append(dirs, filepath.Join(l.dir, wsroot.NamespaceDir, namespace.Name()))
+			}
 		}
-		info, err := entry.Info()
-		if err == nil && info.ModTime().Before(cutoff) {
-			_ = os.Remove(filepath.Join(l.dir, entry.Name()))
+	}
+	for _, dir := range dirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.Contains(entry.Name(), ".log.") {
+				continue
+			}
+			info, err := entry.Info()
+			if err == nil && info.ModTime().Before(cutoff) {
+				_ = os.Remove(filepath.Join(dir, entry.Name()))
+			}
 		}
 	}
 	return nil
@@ -979,6 +1080,35 @@ func sanitize(id string) string {
 			return '_'
 		}
 	}, id)
+}
+
+// stampWorkspace injects the owning workspace into a stored message payload.
+//
+// A message.in payload predates tenants and has no workspace of its own, but
+// the row it was read from does. The boot recovery pass re-enqueues that
+// payload, so without the stamp every recovered run would re-enter the engine
+// as personal — silently moving another tenant's interrupted conversation into
+// the personal workspace.
+//
+// The merge is done on the decoded object rather than by re-marshalling a
+// typed Message so that fields this build does not know about survive: a
+// payload written by a newer binary must not lose data by passing through an
+// older one's recovery pass.
+func stampWorkspace(payload []byte, workspaceID string) []byte {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &object); err != nil || object == nil {
+		return payload
+	}
+	stamped, err := json.Marshal(workspaceOrPersonal(workspaceID))
+	if err != nil {
+		return payload
+	}
+	object["workspace_id"] = stamped
+	merged, err := json.Marshal(object)
+	if err != nil {
+		return payload
+	}
+	return merged
 }
 
 // workspaceOrPersonal keeps an event written by a single-tenant path in the

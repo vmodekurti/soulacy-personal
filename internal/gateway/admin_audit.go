@@ -103,10 +103,6 @@ func (s *Server) handleAdminAudit(c *fiber.Ctx) error {
 	if s.actions == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "admin audit not available (action log disabled)")
 	}
-	q, ok := s.actions.(eventQuerier)
-	if !ok {
-		return s.errMsg(c, fiber.StatusServiceUnavailable, "admin audit requires a durable action log backend")
-	}
 	limit := c.QueryInt("limit", 100)
 	if limit <= 0 {
 		limit = 100
@@ -114,7 +110,10 @@ func (s *Server) handleAdminAudit(c *fiber.Ctx) error {
 	if limit > 1000 {
 		limit = 1000
 	}
-	events, err := q.QueryEvents(adminAuditAgentID, "", limit, adminAuditEventTypes())
+	events, durable, err := s.actionLog(c).QueryEvents(adminAuditAgentID, "", limit, adminAuditEventTypes())
+	if !durable {
+		return s.errMsg(c, fiber.StatusServiceUnavailable, "admin audit requires a durable action log backend")
+	}
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
