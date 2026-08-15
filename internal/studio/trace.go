@@ -31,6 +31,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
 // TraceEvent is one structured, timestamped record of something the build
@@ -136,9 +138,13 @@ func (m multiRecorder) Close() error {
 // not usable; construct via NewMemoryTrace or BuildTraceStore.New. A nil
 // *BuildTrace is valid and makes every method a no-op.
 type BuildTrace struct {
-	ID     string
-	Intent string
-	Start  time.Time
+	ID string
+	// WorkspaceID is the tenant that started the build. It is recorded on the
+	// trace as well as in the store's key so a JSONL file read back off disk
+	// still says whose build it was.
+	WorkspaceID string
+	Intent      string
+	Start       time.Time
 
 	mu   sync.Mutex
 	seq  int
@@ -263,10 +269,11 @@ func (t *BuildTrace) Close() error {
 
 // TraceDump is the serializable form of a trace returned by the gateway.
 type TraceDump struct {
-	ID     string       `json:"id"`
-	Intent string       `json:"intent,omitempty"`
-	Start  time.Time    `json:"start"`
-	Events []TraceEvent `json:"events"`
+	ID          string       `json:"id"`
+	WorkspaceID string       `json:"workspace_id,omitempty"`
+	Intent      string       `json:"intent,omitempty"`
+	Start       time.Time    `json:"start"`
+	Events      []TraceEvent `json:"events"`
 }
 
 // Dump returns the trace header plus its full event list.
@@ -274,7 +281,7 @@ func (t *BuildTrace) Dump() TraceDump {
 	if t == nil {
 		return TraceDump{Events: []TraceEvent{}}
 	}
-	return TraceDump{ID: t.ID, Intent: t.Intent, Start: t.Start, Events: t.Events()}
+	return TraceDump{ID: t.ID, WorkspaceID: t.WorkspaceID, Intent: t.Intent, Start: t.Start, Events: t.Events()}
 }
 
 // draftSnapshot summarizes a draft for a trace event.
@@ -312,17 +319,41 @@ func newTraceID() string {
 
 // ── store ────────────────────────────────────────────────────────────────────
 
+// traceKey identifies a trace by tenant *and* id.
+//
+// A build trace carries the originating intent — the user's own words — and a
+// full snapshot of every draft the loop produced. It is one of the most
+// revealing objects in the system, and it used to be reachable by id alone
+// from any request. Making the workspace part of the map key means a foreign
+// id is a map miss rather than a check someone can forget to write.
+type traceKey struct {
+	workspaceID string
+	id          string
+}
+
 // BuildTraceStore keeps the most recent build traces in a bounded, in-memory
 // ring (so the GUI can fetch the latest without unbounded growth) and, when a
 // directory is configured, also writes each as a JSONL file so a build is fully
 // inspectable after the gateway forgets it. Mirrors the proven shape of the
 // runtime's flowTraceStore.
+//
+// The retention cap stays global rather than per workspace, so the memory a
+// deployment spends on traces does not grow with the number of tenants. The
+// consequence is honest and worth stating: a busy tenant can evict a quiet
+// tenant's traces early. That costs a debugging aid, never confidentiality —
+// eviction drops traces, it never exposes them.
 type BuildTraceStore struct {
-	mu    sync.Mutex
-	max   int
-	dir   string // "" disables disk persistence
-	byID  map[string]*BuildTrace
-	order []string // ids, oldest first
+	mu  sync.Mutex
+	max int
+	dir string // "" disables disk persistence
+	// byKey is the only lookup path, so a trace cannot be resolved without
+	// naming its owner.
+	byKey map[traceKey]*BuildTrace
+	// perWorkspace holds each tenant's ids oldest-first, so Latest and List
+	// read one workspace's traces rather than filtering a shared list.
+	perWorkspace map[string][]string
+	// eviction is the global retention order, oldest first.
+	eviction []traceKey
 }
 
 // NewBuildTraceStore returns a store retaining up to max traces (default 50).
@@ -337,36 +368,57 @@ func NewBuildTraceStore(max int, dir string) *BuildTraceStore {
 			dir = ""
 		}
 	}
-	return &BuildTraceStore{max: max, dir: dir, byID: map[string]*BuildTrace{}}
+	return &BuildTraceStore{
+		max: max, dir: dir,
+		byKey:        map[traceKey]*BuildTrace{},
+		perWorkspace: map[string][]string{},
+	}
 }
 
-// Dir reports the on-disk persistence directory, or "" when memory-only.
-func (s *BuildTraceStore) Dir() string { return s.dir }
+// Dir reports one workspace's on-disk persistence directory, or "" when
+// memory-only. It is surfaced to operators in the traces listing, so it names
+// the caller's own directory rather than the shared root.
+func (s *BuildTraceStore) Dir(workspaceID string) string {
+	if s.dir == "" {
+		return ""
+	}
+	return wsroot.Dir(s.dir, wsroot.Normalize(workspaceID))
+}
 
 // New starts and registers a new build trace, opening its JSONL file
 // best-effort, evicting the oldest trace past the cap, and recording a start
 // event carrying the originating intent.
-func (s *BuildTraceStore) New(intent string) *BuildTrace {
+func (s *BuildTraceStore) New(workspaceID, intent string) *BuildTrace {
+	workspaceID = wsroot.Normalize(workspaceID)
 	id := newTraceID()
 	var extra Recorder
-	if s.dir != "" {
-		if r, err := newJSONLRecorder(filepath.Join(s.dir, id+".jsonl")); err == nil {
+	// The JSONL file is namespaced too: a trace that outlives the ring must
+	// not be readable from another tenant's directory either.
+	if dir := s.workspaceDir(workspaceID); dir != "" {
+		if r, err := newJSONLRecorder(filepath.Join(dir, id+".jsonl")); err == nil {
 			extra = r
 		}
 	}
 	t := newBuildTrace(id, extra)
 	t.Intent = intent
+	t.WorkspaceID = workspaceID
 
+	key := traceKey{workspaceID, id}
 	s.mu.Lock()
-	s.byID[id] = t
-	s.order = append(s.order, id)
-	for len(s.order) > s.max {
-		old := s.order[0]
-		s.order = s.order[1:]
-		if ot := s.byID[old]; ot != nil {
+	s.byKey[key] = t
+	s.perWorkspace[workspaceID] = append(s.perWorkspace[workspaceID], id)
+	s.eviction = append(s.eviction, key)
+	for len(s.eviction) > s.max {
+		old := s.eviction[0]
+		s.eviction = s.eviction[1:]
+		if ot := s.byKey[old]; ot != nil {
 			_ = ot.Close()
 		}
-		delete(s.byID, old)
+		delete(s.byKey, old)
+		s.perWorkspace[old.workspaceID] = removeID(s.perWorkspace[old.workspaceID], old.id)
+		if len(s.perWorkspace[old.workspaceID]) == 0 {
+			delete(s.perWorkspace, old.workspaceID)
+		}
 	}
 	s.mu.Unlock()
 
@@ -374,22 +426,56 @@ func (s *BuildTraceStore) New(intent string) *BuildTrace {
 	return t
 }
 
-// Get returns the trace for id.
-func (s *BuildTraceStore) Get(id string) (*BuildTrace, bool) {
+// workspaceDir returns the JSONL directory for one workspace, creating it
+// best-effort. Disk persistence degrades to memory-only rather than failing a
+// build, exactly as it did before.
+func (s *BuildTraceStore) workspaceDir(workspaceID string) string {
+	if s.dir == "" {
+		return ""
+	}
+	dir := wsroot.Dir(s.dir, workspaceID)
+	if dir == s.dir {
+		return dir // personal: created at construction
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return ""
+	}
+	return dir
+}
+
+func removeID(ids []string, id string) []string {
+	for i, candidate := range ids {
+		if candidate == id {
+			return append(ids[:i], ids[i+1:]...)
+		}
+	}
+	return ids
+}
+
+// Get returns the trace for id within one workspace. A trace another workspace
+// owns is a map miss, indistinguishable from an id that never existed, so
+// trace ids cannot be probed.
+func (s *BuildTraceStore) Get(workspaceID, id string) (*BuildTrace, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	t, ok := s.byID[id]
+	t, ok := s.byKey[traceKey{wsroot.Normalize(workspaceID), id}]
 	return t, ok
 }
 
-// Latest returns the most recently started trace.
-func (s *BuildTraceStore) Latest() (*BuildTrace, bool) {
+// Latest returns the workspace's most recently started trace.
+//
+// This is the read that mattered most: with no argument it returned whichever
+// build was newest across the whole deployment, so a request from one tenant
+// could read another tenant's in-flight build intent and drafts.
+func (s *BuildTraceStore) Latest(workspaceID string) (*BuildTrace, bool) {
+	workspaceID = wsroot.Normalize(workspaceID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(s.order) == 0 {
+	ids := s.perWorkspace[workspaceID]
+	if len(ids) == 0 {
 		return nil, false
 	}
-	t, ok := s.byID[s.order[len(s.order)-1]]
+	t, ok := s.byKey[traceKey{workspaceID, ids[len(ids)-1]}]
 	return t, ok
 }
 
@@ -402,13 +488,15 @@ type TraceSummary struct {
 	Last   string    `json:"last,omitempty"` // last event's message
 }
 
-// List returns summaries of retained traces, newest first.
-func (s *BuildTraceStore) List() []TraceSummary {
+// List returns summaries of one workspace's retained traces, newest first.
+func (s *BuildTraceStore) List(workspaceID string) []TraceSummary {
+	workspaceID = wsroot.Normalize(workspaceID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]TraceSummary, 0, len(s.order))
-	for i := len(s.order) - 1; i >= 0; i-- {
-		t := s.byID[s.order[i]]
+	ids := s.perWorkspace[workspaceID]
+	out := make([]TraceSummary, 0, len(ids))
+	for i := len(ids) - 1; i >= 0; i-- {
+		t := s.byKey[traceKey{workspaceID, ids[i]}]
 		if t == nil {
 			continue
 		}

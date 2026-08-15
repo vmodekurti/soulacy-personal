@@ -817,15 +817,16 @@ func (s *Server) studioTraceStore() *studio.BuildTraceStore {
 // build that failed (or a 6am scheduled one) is debuggable without server logs.
 func (s *Server) handleStudioBuildTrace(c *fiber.Ctx) error {
 	st := s.studioTraceStore()
+	workspaceID := s.studio(c).WorkspaceID()
 	id := strings.TrimSpace(c.Query("id"))
 	var (
 		tr *studio.BuildTrace
 		ok bool
 	)
 	if id != "" {
-		tr, ok = st.Get(id)
+		tr, ok = st.Get(workspaceID, id)
 	} else {
-		tr, ok = st.Latest()
+		tr, ok = st.Latest(workspaceID)
 	}
 	if !ok {
 		return c.JSON(studio.TraceDump{ID: id, Events: []studio.TraceEvent{}})
@@ -836,7 +837,11 @@ func (s *Server) handleStudioBuildTrace(c *fiber.Ctx) error {
 // handleStudioBuildTraces implements GET /api/v1/studio/build-traces — compact
 // summaries of retained builds (newest first) for a "recent builds" picker.
 func (s *Server) handleStudioBuildTraces(c *fiber.Ctx) error {
-	return c.JSON(fiber.Map{"traces": s.studioTraceStore().List(), "dir": s.studioTraceStore().Dir()})
+	workspaceID := s.studio(c).WorkspaceID()
+	return c.JSON(fiber.Map{
+		"traces": s.studioTraceStore().List(workspaceID),
+		"dir":    s.studioTraceStore().Dir(workspaceID),
+	})
 }
 
 // studioBuildRequest is the POST /api/v1/studio/build body: the current draft to
@@ -919,7 +924,7 @@ func (s *Server) handleStudioBuild(c *fiber.Ctx) error {
 
 	// Open a durable build trace covering the WHOLE flow — glue, self-tests, and
 	// the loop — so every build is debuggable end to end.
-	tr := s.studioTraceStore().New(intent)
+	tr := s.studioTraceStore().New(s.studio(c).WorkspaceID(), intent)
 	defer func() { _ = tr.Close() }()
 
 	// (1) Fill capability holes with generated glue code before the loop.
@@ -985,7 +990,11 @@ func (s *Server) handleStudioBuildStream(c *fiber.Ctx) error {
 	s.groundCatalog(s.studio(c), &cat)
 	in := s.preflightInput(c, cat)
 	// Detach from the request context so the loop isn't cancelled when the
-	// handler returns to take over the connection as a stream writer.
+	// handler returns to take over the connection as a stream writer. The
+	// owning workspace is read here, while the request is still alive: Fiber
+	// recycles the Ctx when the handler returns, so anything the detached work
+	// needs has to be captured now.
+	buildWorkspace := s.studio(c).WorkspaceID()
 	ctx := detachedRequestContext(c)
 
 	// Events are produced by the loop (in a goroutine) and drained by the SSE
@@ -998,7 +1007,7 @@ func (s *Server) handleStudioBuildStream(c *fiber.Ctx) error {
 		intent = req.Workflow.Intent
 	}
 	// Durable trace for the whole streamed build (glue → tests → loop).
-	tr := s.studioTraceStore().New(intent)
+	tr := s.studioTraceStore().New(buildWorkspace, intent)
 
 	// Heartbeat: during a long verify step the build can legitimately produce no
 	// events for minutes (it's running the agent against a real model + tools).

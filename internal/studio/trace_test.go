@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"os"
 	"path/filepath"
 	"testing"
@@ -84,10 +85,10 @@ func TestBuildTrace_Step(t *testing.T) {
 func TestBuildTraceStore_JSONLRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	st := NewBuildTraceStore(10, dir)
-	if st.Dir() != dir {
-		t.Fatalf("store dir = %q, want %q", st.Dir(), dir)
+	if st.Dir(wsroot.PersonalWorkspaceID) != dir {
+		t.Fatalf("store dir = %q, want %q", st.Dir(wsroot.PersonalWorkspaceID), dir)
 	}
-	tr := st.New("make me a podcast agent")
+	tr := st.New(wsroot.PersonalWorkspaceID, "make me a podcast agent")
 	tr.Logd("repair", "repair", 1, "fixed a dangling reference", map[string]any{"changed": true})
 	tr.Step("verify", "verify", 1, "running")(nil, map[string]any{"ok": true})
 	if err := tr.Close(); err != nil {
@@ -123,21 +124,21 @@ func TestBuildTraceStore_JSONLRoundTrip(t *testing.T) {
 // Get/Latest/List consistent.
 func TestBuildTraceStore_Bounding(t *testing.T) {
 	st := NewBuildTraceStore(2, "") // memory only
-	a := st.New("a")
-	b := st.New("b")
-	c := st.New("c") // evicts a
+	a := st.New(wsroot.PersonalWorkspaceID, "a")
+	b := st.New(wsroot.PersonalWorkspaceID, "b")
+	c := st.New(wsroot.PersonalWorkspaceID, "c") // evicts a
 
-	if _, ok := st.Get(a.ID); ok {
+	if _, ok := st.Get(wsroot.PersonalWorkspaceID, a.ID); ok {
 		t.Errorf("oldest trace should have been evicted")
 	}
-	if _, ok := st.Get(b.ID); !ok {
+	if _, ok := st.Get(wsroot.PersonalWorkspaceID, b.ID); !ok {
 		t.Errorf("trace b should be retained")
 	}
-	latest, ok := st.Latest()
+	latest, ok := st.Latest(wsroot.PersonalWorkspaceID)
 	if !ok || latest.ID != c.ID {
 		t.Errorf("latest should be c, got %+v ok=%v", latest, ok)
 	}
-	list := st.List()
+	list := st.List(wsroot.PersonalWorkspaceID)
 	if len(list) != 2 {
 		t.Fatalf("want 2 summaries, got %d", len(list))
 	}

@@ -186,7 +186,7 @@ var Repositories = []Repository{
 	{Source: "internal/studio/preferences.go", Resource: "studio-learning", Class: UserPrivate, ScopeKey: "workspace_id,user_id", Isolation: Scoped, IsolationTest: "internal/gateway/studio_scope_test.go"},
 	{Source: "internal/studio/rulesstore.go", Resource: "studio-learning", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/gateway/studio_scope_test.go"},
 	{Source: "internal/studio/strategyfit.go", Resource: "studio-learning", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/studio/observers_workspace_test.go"},
-	{Source: "internal/studio/trace.go", Resource: "studio-traces", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
+	{Source: "internal/studio/trace.go", Resource: "studio-traces", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/studio/trace_workspace_test.go"},
 	{Source: "internal/tenancy/postgres.go", Resource: "tenancy", Class: PlatformGlobal, ScopeKey: "tenant foreign keys", Isolation: Scoped, IsolationTest: "internal/tenancy/postgres_test.go"},
 	{Source: "internal/vector/qdrant/qdrant.go", Resource: "vectors", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
 	{Source: "internal/vector/sqlitevec/sqlitevec.go", Resource: "vectors", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},

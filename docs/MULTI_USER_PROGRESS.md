@@ -24,7 +24,7 @@ isolation state; this document explains it.
 declared workspace-owned but not yet isolated.
 
 - At the start of this work: **57 blockers**
-- Now: **37 blockers**
+- Now: **36 blockers**
 
 A store moves from `personal-only` to `scoped` only when it has a real
 cross-tenant isolation test. The catalog names that test, and a CI check fails
@@ -169,6 +169,25 @@ gets nothing rather than the personal workspace's runs —
 `TestASingleTenantTailerDoesNotFeedOtherWorkspaces` pins that, because the
 fallback would propose one tenant's lessons into another's queue.
 
+### A shared ring can still be structural: put the tenant in the key
+
+Studio build traces are a bounded in-memory ring, and a trace carries the
+originating intent — the user's own words — plus a full snapshot of every draft
+the loop produced. `Get(id)` had no ownership check, and `Latest()` returned
+whichever build was newest across the whole deployment, so one tenant could
+read another's in-flight build.
+
+Rather than adding a check to each accessor, the map key became
+`{workspaceID, id}`: a foreign id is a *map miss*, indistinguishable from an id
+that never existed. `Latest` and `List` read a per-workspace index rather than
+filtering a shared list, and the JSONL directory is namespaced too.
+
+The retention cap stays global on purpose, so trace memory does not grow with
+the number of tenants. The consequence is stated rather than hidden: a busy
+tenant can evict a quiet one's traces early. That costs a debugging aid, never
+confidentiality — eviction drops traces, it never exposes them. A test pins
+that eviction leaves no per-workspace index pointing at a trace that is gone.
+
 ### The SDK is extended additively, never modified
 
 `sdk/storage.MemoryBackend` is documented as frozen per major version, so it
@@ -204,9 +223,7 @@ Highest-value first, with the reason each matters:
 3. **Workboard, costs, action log, DLQ, checkpoints, conversation history** —
    all still `personal-only`; each needs the same treatment as the stores
    above.
-4. **`internal/studio/trace.go`** — build traces are an in-memory ring with no
-   ownership check on `Get(id)`; any caller holding an id reads any trace.
-5. **Workboard, costs, DLQ, checkpoints, conversation history** — all still
+4. **Workboard, costs, DLQ, checkpoints, conversation history** — all still
    `personal-only`; each needs the same treatment as the stores above.
 
 ## Verification
