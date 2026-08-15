@@ -56,7 +56,7 @@ func TestSavedRulesBecomeTheEffectiveRules(t *testing.T) {
 	if status, res := gatewayJSON(t, s, http.MethodPut, "/api/v1/studio/rules", "secret", string(body)); status != http.StatusOK {
 		t.Fatalf("save status = %d body=%v", status, res)
 	}
-	if got := s.soulRules(); got != rules {
+	if got := s.soulRules(s.studio(nil)); got != rules {
 		t.Errorf("soulRules() = %q, want the saved text", got)
 	}
 
@@ -88,11 +88,11 @@ func TestResetKeepsThePreviousVersionRecoverable(t *testing.T) {
 		t.Fatal("reset failed")
 	}
 
-	if got := s.soulRules(); got != studio.DefaultSOULRules {
+	if got := s.soulRules(s.studio(nil)); got != studio.DefaultSOULRules {
 		t.Error("reset did not restore the built-in default")
 	}
 
-	dir, err := s.soulRulesDir()
+	dir, err := s.studioRulesRoot()
 	if err != nil {
 		t.Fatalf("rules dir: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestResavingIdenticalRulesDoesNotAddAVersion(t *testing.T) {
 			t.Fatalf("save %d failed", i)
 		}
 	}
-	dir, _ := s.soulRulesDir()
+	dir, _ := s.studioRulesRoot()
 	versions, err := studio.RulesHistory(dir)
 	if err != nil {
 		t.Fatalf("history: %v", err)

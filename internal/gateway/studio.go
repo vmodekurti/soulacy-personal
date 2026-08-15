@@ -311,16 +311,16 @@ func (s *Server) firstConfiguredCloudProvider() string {
 // refine pass call this so they see the same world the engine will, and so loose
 // references map to actual capabilities instead of being invented. It mutates
 // the passed catalog in place.
-func (s *Server) groundCatalog(cat *studio.Catalog) {
+func (s *Server) groundCatalog(scope studioScope, cat *studio.Catalog) {
 	// Inject the authoring rulebook so the builder follows the same rules the
 	// validator and AI fixer enforce.
-	cat.Rules = s.soulRules()
-	s.groundStrategyFit(cat)
+	cat.Rules = s.soulRules(scope)
+	s.groundStrategyFit(scope, cat)
 	// Successful multi-tool runs are distilled into payload-free procedural
 	// patterns. RawIntent is authoritative here; refine callers also ground with
 	// their request intent because older clients may omit RawIntent.
 	if strings.TrimSpace(cat.RawIntent) != "" {
-		s.groundWorkflowPatterns(cat, cat.RawIntent)
+		s.groundWorkflowPatterns(scope, cat, cat.RawIntent)
 	}
 	// Installed skills (so "yahoo finance" maps to the real "yfinance").
 	if s.skillLoader != nil {
@@ -374,7 +374,7 @@ func (s *Server) groundCatalog(cat *studio.Catalog) {
 	}
 	// Run semantic retrieval only after the authoritative tool inventory and its
 	// descriptions have been assembled.
-	s.groundLessons(cat, cat.RawIntent)
+	s.groundLessons(scope, cat, cat.RawIntent)
 }
 
 func studioLearningOwner(c *fiber.Ctx) string {
@@ -468,10 +468,10 @@ func (s *Server) handleStudioRefinePrompt(c *fiber.Ctx) error {
 	if model == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "LLM router unavailable")
 	}
-	s.groundCatalog(&req.Catalog)
-	s.groundPreferencesFor(&req.Catalog, studioLearningOwner(c))
-	s.groundLessons(&req.Catalog, req.Intent)
-	s.groundWorkflowPatterns(&req.Catalog, req.Intent)
+	s.groundCatalog(s.studio(c), &req.Catalog)
+	s.groundPreferencesFor(s.studio(c), &req.Catalog, studioLearningOwner(c))
+	s.groundLessons(s.studio(c), &req.Catalog, req.Intent)
+	s.groundWorkflowPatterns(s.studio(c), &req.Catalog, req.Intent)
 
 	refine := studio.RefinePrompt
 	if req.Light {
@@ -493,7 +493,7 @@ func (s *Server) handleStudioStrategyFit(c *fiber.Ctx) error {
 		provider, model = s.defaultAgentLLM()
 	}
 	rows := []studio.StrategyFit{}
-	if store := s.strategyFitStore(); store != nil {
+	if store := s.studio(c).strategyFit(); store != nil {
 		rows = store.ForProviderModel(provider, model)
 	}
 	return c.JSON(fiber.Map{
@@ -521,9 +521,9 @@ func (s *Server) handleStudioPreflight(c *fiber.Ctx) error {
 	// Ground a fresh catalog so tool/MCP/channel references are checked against
 	// the real, live inventory rather than whatever the GUI happened to send.
 	cat := s.studioCatalogSnapshot(s.agents(c))
-	s.groundCatalog(&cat)
+	s.groundCatalog(s.studio(c), &cat)
 	learningOwner := studioLearningOwner(c)
-	s.groundPreferencesFor(&cat, learningOwner)
+	s.groundPreferencesFor(s.studio(c), &cat, learningOwner)
 
 	res := studio.Preflight(req.Workflow, s.preflightInput(c, cat))
 	return c.JSON(res)
@@ -539,7 +539,7 @@ func (s *Server) handleStudioContract(c *fiber.Ctx) error {
 	}
 
 	cat := s.studioCatalogSnapshot(s.agents(c))
-	s.groundCatalog(&cat)
+	s.groundCatalog(s.studio(c), &cat)
 
 	// Story 2b (Cohort C): when the draft carries an existing agent id, look
 	// up the saved Definition and pass it to AssessContract so the
@@ -688,7 +688,7 @@ func (s *Server) handleStudioAutowire(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusBadRequest, "invalid request body: "+err.Error())
 	}
 	cat := s.studioCatalogSnapshot(s.agents(c))
-	s.groundCatalog(&cat)
+	s.groundCatalog(s.studio(c), &cat)
 	in := s.preflightInput(c, cat)
 	model := s.studioLLM(c)
 
@@ -784,7 +784,7 @@ func (s *Server) handleStudioTroubleshoot(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "LLM router unavailable")
 	}
 	cat := s.studioCatalogSnapshot(s.agents(c))
-	s.groundCatalog(&cat)
+	s.groundCatalog(s.studio(c), &cat)
 	problem := "At RUN TIME the agent failed with this error — change the workflow so it cannot happen again: " + strings.TrimSpace(req.Error)
 	if strings.TrimSpace(req.Input) != "" {
 		problem += "\nSample input that triggered it: " + strings.TrimSpace(req.Input)
@@ -909,7 +909,7 @@ func (s *Server) handleStudioBuild(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "LLM router unavailable")
 	}
 	cat := s.studioCatalogSnapshot(s.agents(c))
-	s.groundCatalog(&cat)
+	s.groundCatalog(s.studio(c), &cat)
 	in := s.preflightInput(c, cat)
 
 	intent := strings.TrimSpace(req.Intent)
@@ -982,7 +982,7 @@ func (s *Server) handleStudioBuildStream(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "LLM router unavailable")
 	}
 	cat := s.studioCatalogSnapshot(s.agents(c))
-	s.groundCatalog(&cat)
+	s.groundCatalog(s.studio(c), &cat)
 	in := s.preflightInput(c, cat)
 	// Detach from the request context so the loop isn't cancelled when the
 	// handler returns to take over the connection as a stream writer.
@@ -1145,9 +1145,9 @@ func (s *Server) handleStudioGenerateStream(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "LLM router unavailable")
 	}
 	cat := s.studioCatalogSnapshot(s.agents(c))
-	s.groundCatalog(&cat)
+	s.groundCatalog(s.studio(c), &cat)
 	learningOwner := studioLearningOwner(c)
-	s.groundPreferencesFor(&cat, learningOwner)
+	s.groundPreferencesFor(s.studio(c), &cat, learningOwner)
 	in := s.preflightInput(c, cat)
 	// Detached from the request context — Fiber hands the connection to a stream
 	// writer, so c.Context() is done before the pipeline finishes — but STILL
@@ -1164,6 +1164,11 @@ func (s *Server) handleStudioGenerateStream(c *fiber.Ctx) error {
 	// run is over: the producer goroutine (work finished) and the stream writer
 	// (client went away).
 	ctx, cancelRun := context.WithCancel(detachedRequestContext(c))
+	// Capture the workspace scope before any goroutine starts. Fiber recycles
+	// the Ctx once this handler returns, so reading it from a goroutine that
+	// outlives the request is a use-after-free — the same reason the run
+	// context above is detached.
+	scope := s.studio(c)
 
 	type sse struct{ event, data string }
 	events := make(chan sse, 32)
@@ -1229,7 +1234,7 @@ func (s *Server) handleStudioGenerateStream(c *fiber.Ctx) error {
 		if !res.Compile.Workflow.IsAgent() {
 			generatedStrategy = "workflow"
 		}
-		if s.unreliableStrategy(res.Compile.Workflow.LLM.Provider, res.Compile.Workflow.LLM.Model, generatedStrategy) {
+		if s.unreliableStrategy(scope, res.Compile.Workflow.LLM.Provider, res.Compile.Workflow.LLM.Model, generatedStrategy) {
 			err = fmt.Errorf("the generated execution strategy is historically unreliable for the active provider/model")
 		}
 
@@ -1397,7 +1402,7 @@ type studioRunPreview struct {
 func (s *Server) studioRunPreviewFor(c *fiber.Ctx, draft studio.Draft) studioRunPreview {
 	draft = s.studioDraftWithRuntimeLLM(draft)
 	cat := s.studioCatalogSnapshot(s.agents(c))
-	s.groundCatalog(&cat)
+	s.groundCatalog(s.studio(c), &cat)
 	in := s.preflightInput(c, cat)
 
 	var def *agent.Definition
@@ -2485,7 +2490,7 @@ func (s *Server) handleStudioDiagnoseRun(c *fiber.Ctx) error {
 	draft := studio.FromAgentDefinition(*def)
 
 	cat := s.studioCatalogSnapshot(s.agents(c))
-	s.groundCatalog(&cat)
+	s.groundCatalog(s.studio(c), &cat)
 	in := s.preflightInput(c, cat)
 
 	// (1) Repair from the concrete per-node trace first. This gives the bounded
@@ -2580,7 +2585,7 @@ func (s *Server) handleStudioDiagnoseSession(c *fiber.Ctx) error {
 
 	draft := studio.FromAgentDefinition(*def)
 	cat := s.studioCatalogSnapshot(s.agents(c))
-	s.groundCatalog(&cat)
+	s.groundCatalog(s.studio(c), &cat)
 	in := s.preflightInput(c, cat)
 
 	var traceRepairs []studio.RepairProposal
@@ -2775,15 +2780,15 @@ func (s *Server) handleStudioCompileAgent(c *fiber.Ctx) error {
 	if strings.TrimSpace(req.Intent) == "" {
 		return s.errMsg(c, fiber.StatusBadRequest, "intent is required")
 	}
-	s.groundCatalog(&req.Catalog)
-	s.groundPreferencesFor(&req.Catalog, studioLearningOwner(c))
+	s.groundCatalog(s.studio(c), &req.Catalog)
+	s.groundPreferencesFor(s.studio(c), &req.Catalog, studioLearningOwner(c))
 	s.groundGenerationProfile(&req.Catalog, req.Intent)
 	advice := studio.AdviseStrategy(req.Intent, req.Catalog, req.Strategy, false)
 	strategy := advice.RuntimeStrategy
 	if strategy == "" {
 		strategy = "auto"
 	}
-	if s.unreliableStrategy(req.Catalog.ActiveProvider, req.Catalog.ActiveModel, strategy) {
+	if s.unreliableStrategy(s.studio(c), req.Catalog.ActiveProvider, req.Catalog.ActiveModel, strategy) {
 		return s.errMsg(c, fiber.StatusUnprocessableEntity, "the selected execution strategy is historically unreliable for the active provider/model")
 	}
 	res, ok := studio.CompileDeterministicAgent(req.Intent, req.Catalog, strategy, req.Answers)
@@ -2852,8 +2857,8 @@ func (s *Server) handleStudioCompile(c *fiber.Ctx) error {
 	// Ground the compiler in the REAL installed skills + connected MCP tools
 	// (authoritative, server-side) so it maps loose references to actual
 	// capabilities and wires real MCP tools instead of inventing names.
-	s.groundCatalog(&req.Catalog)
-	s.groundPreferencesFor(&req.Catalog, studioLearningOwner(c))
+	s.groundCatalog(s.studio(c), &req.Catalog)
+	s.groundPreferencesFor(s.studio(c), &req.Catalog, studioLearningOwner(c))
 	s.groundGenerationProfile(&req.Catalog, strings.TrimSpace(req.Intent+" "+req.RawIntent))
 
 	// SINGLE authoritative architecture decision, evaluated over the raw + refined
@@ -2872,11 +2877,11 @@ func (s *Server) handleStudioCompile(c *fiber.Ctx) error {
 	if advice.Mode == "workflow" {
 		chosen = "workflow"
 	}
-	if s.unreliableStrategy(req.Catalog.ActiveProvider, req.Catalog.ActiveModel, chosen) {
+	if s.unreliableStrategy(s.studio(c), req.Catalog.ActiveProvider, req.Catalog.ActiveModel, chosen) {
 		// Historical evidence is an authoritative backend guard, not merely UI
 		// decoration. Prefer Auto when it remains reliable; otherwise refuse to
 		// manufacture a draft with a strategy known to fail for this model.
-		if chosen != "auto" && !s.unreliableStrategy(req.Catalog.ActiveProvider, req.Catalog.ActiveModel, "auto") {
+		if chosen != "auto" && !s.unreliableStrategy(s.studio(c), req.Catalog.ActiveProvider, req.Catalog.ActiveModel, "auto") {
 			advice.Mode = "auto"
 			advice.RuntimeStrategy = "auto"
 			advice.Reason = "Studio selected Auto because local run history marks " + chosen + " unreliable for the active model."
@@ -3554,7 +3559,7 @@ func (s *Server) handleStudioValidateYAML(c *fiber.Ctx) error {
 		}
 	}
 	cat := s.studioCatalogSnapshot(s.agents(c))
-	s.groundCatalog(&cat)
+	s.groundCatalog(s.studio(c), &cat)
 	pf := studio.Preflight(draft, s.preflightInput(c, cat))
 	for _, b := range pf.Blockers {
 		add("error", "runtime", b.NodeID, b.Message, b.Fix)
@@ -3641,7 +3646,7 @@ func (s *Server) handleStudioFixYAML(c *fiber.Ctx) error {
 		}
 	}
 	cat := s.studioCatalogSnapshot(s.agents(c))
-	s.groundCatalog(&cat)
+	s.groundCatalog(s.studio(c), &cat)
 	pf := studio.Preflight(draft, s.preflightInput(c, cat))
 	for _, b := range pf.Blockers {
 		add("ERROR", b.NodeID, b.Message)
@@ -3657,7 +3662,7 @@ func (s *Server) handleStudioFixYAML(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"yaml": req.YAML, "changed": false})
 	}
 
-	prompt := studio.BuildYAMLFixInstruction(req.YAML, issues, s.soulRules())
+	prompt := studio.BuildYAMLFixInstruction(req.YAML, issues, s.soulRules(s.studio(c)))
 	raw, err := model.Complete(c.Context(), prompt)
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
@@ -3684,7 +3689,7 @@ func (s *Server) handleStudioFixYAML(c *fiber.Ctx) error {
 			Output: check.Workflow.Output,
 		}}
 		cat := s.studioCatalogSnapshot(s.agents(c))
-		s.groundCatalog(&cat)
+		s.groundCatalog(s.studio(c), &cat)
 		studio.RepairWiring(&d, cat)
 		studio.ApplyTemplateFixes(&d)
 		check.Workflow.Nodes = d.Flow.Nodes
@@ -3721,7 +3726,7 @@ func (s *Server) handleStudioReviewYAML(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusBadRequest, "YAML error: "+err.Error())
 	}
 
-	prompt := studio.BuildYAMLReviewInstruction(req.YAML, s.soulRules())
+	prompt := studio.BuildYAMLReviewInstruction(req.YAML, s.soulRules(s.studio(c)))
 	raw, err := model.Complete(c.Context(), prompt)
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
@@ -3778,7 +3783,7 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 	// Save, but enforcing it here protects imports, stale tabs, and alternate API
 	// clients from creating an agent that is born broken and only fails later.
 	cat := s.studioCatalogSnapshot(s.agents(c))
-	s.groundCatalog(&cat)
+	s.groundCatalog(s.studio(c), &cat)
 	in := s.preflightInput(c, cat)
 	// Judge the draft the RUNTIME will see, not the one the client sent. A draft
 	// is allowed to omit provider/model and inherit the workspace default — Run
@@ -3791,7 +3796,7 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 	if req.Workflow.Flow.Nodes != nil && !req.Workflow.IsAgent() {
 		saveStrategy = "workflow"
 	}
-	if s.unreliableStrategy(req.Workflow.LLM.Provider, req.Workflow.LLM.Model, saveStrategy) {
+	if s.unreliableStrategy(s.studio(c), req.Workflow.LLM.Provider, req.Workflow.LLM.Model, saveStrategy) {
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
 			"error":    "this execution strategy is historically unreliable for the selected provider/model",
 			"provider": req.Workflow.LLM.Provider, "model": req.Workflow.LLM.Model, "strategy": saveStrategy,
@@ -3841,7 +3846,7 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 	// drift with a named node, instead of a validation error indistinguishable
 	// from a workflow that was always wrong.
 	saveCatalog := s.studioCatalogSnapshot(s.agents(c))
-	s.groundCatalog(&saveCatalog)
+	s.groundCatalog(s.studio(c), &saveCatalog)
 	if snap := studio.CaptureToolSchemas(req.Workflow.Flow, saveCatalog, time.Now()); snap != nil {
 		def.ToolSchemas = snap
 	}
@@ -3919,7 +3924,7 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
 	if req.InitialWorkflow != nil && s.verifyGenerationProof(studioLearningOwner(c), *req.InitialWorkflow) {
-		s.minePreferences(studioLearningOwner(c), def.ID, *req.InitialWorkflow, req.Workflow)
+		s.minePreferences(s.studio(c), studioLearningOwner(c), def.ID, *req.InitialWorkflow, req.Workflow)
 	}
 
 	// Tell the scheduler what just changed, exactly as the Code view's save does.
@@ -4159,7 +4164,7 @@ func (s *Server) soulRulesPath() (string, error) {
 // soulRulesDir is the versioned rules store: <workspace>/studio/rules. The
 // store is append-only, so this is a directory of records rather than the
 // single flat file soulRulesPath describes.
-func (s *Server) soulRulesDir() (string, error) {
+func (s *Server) studioRulesRoot() (string, error) {
 	ws, err := config.ResolveWorkspace()
 	if err != nil {
 		return "", err
@@ -4175,8 +4180,8 @@ func (s *Server) soulRulesDir() (string, error) {
 // Reading the store rather than the flat file is what makes a deployment
 // record's RulesVersion hash resolvable: the hash pinned at deploy time now
 // names a version whose full text is actually retrievable.
-func (s *Server) soulRules() string {
-	if dir, err := s.soulRulesDir(); err == nil {
+func (s *Server) soulRules(scope studioScope) string {
+	if dir, err := scope.rulesDir(); err == nil {
 		if rec, found, rerr := studio.LatestRules(dir); rerr == nil && found &&
 			strings.TrimSpace(rec.Rules) != "" {
 			return rec.Rules
@@ -4196,7 +4201,7 @@ func (s *Server) soulRules() string {
 // effective rulebook, whether it's the built-in default, and the default text
 // (so the GUI can offer a "reset to default").
 func (s *Server) handleStudioGetRules(c *fiber.Ctx) error {
-	rules := s.soulRules()
+	rules := s.soulRules(s.studio(c))
 	return c.JSON(fiber.Map{
 		"rules":     rules,
 		"isDefault": rules == studio.DefaultSOULRules,
@@ -4227,7 +4232,7 @@ func (s *Server) handleStudioSaveRules(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return s.errMsg(c, fiber.StatusBadRequest, "invalid request body: "+err.Error())
 	}
-	dir, err := s.soulRulesDir()
+	dir, err := s.studio(c).rulesDir()
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
@@ -4270,7 +4275,7 @@ func (s *Server) handleStudioSaveRules(c *fiber.Ctx) error {
 // stored versions, newest first. Without this the store's audit trail exists on
 // disk but is unreachable from the product.
 func (s *Server) handleStudioRulesHistory(c *fiber.Ctx) error {
-	dir, err := s.soulRulesDir()
+	dir, err := s.studio(c).rulesDir()
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
@@ -4290,7 +4295,7 @@ func (s *Server) handleStudioRulesHistory(c *fiber.Ctx) error {
 // workspace: <workspace>/studio/drafts. The store (internal/studio) creates the
 // directory on first save, so this only needs to return the path. It is kept on
 // Server so every draft handler reaches the same location.
-func (s *Server) studioDraftsDir() (string, error) {
+func (s *Server) studioDraftsRoot() (string, error) {
 	ws, err := config.ResolveWorkspace()
 	if err != nil {
 		return "", err
@@ -4315,7 +4320,7 @@ func (s *Server) handleStudioSaveDraft(c *fiber.Ctx) error {
 	if req.Name == "" {
 		return s.errMsg(c, fiber.StatusBadRequest, "name is required")
 	}
-	dir, err := s.studioDraftsDir()
+	dir, err := s.studio(c).draftsDir()
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
@@ -4329,7 +4334,7 @@ func (s *Server) handleStudioSaveDraft(c *fiber.Ctx) error {
 // handleStudioListDrafts implements GET /api/v1/studio/drafts. It returns the
 // metadata (id, name, updated) of every saved draft, most recent first.
 func (s *Server) handleStudioListDrafts(c *fiber.Ctx) error {
-	dir, err := s.studioDraftsDir()
+	dir, err := s.studio(c).draftsDir()
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
@@ -4344,7 +4349,7 @@ func (s *Server) handleStudioListDrafts(c *fiber.Ctx) error {
 // the full stored draft (id, name, workflow). The :id is validated against
 // path traversal inside studio.LoadDraft.
 func (s *Server) handleStudioLoadDraft(c *fiber.Ctx) error {
-	dir, err := s.studioDraftsDir()
+	dir, err := s.studio(c).draftsDir()
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
@@ -4358,7 +4363,7 @@ func (s *Server) handleStudioLoadDraft(c *fiber.Ctx) error {
 // handleStudioDeleteDraft implements DELETE /api/v1/studio/drafts/:id. The :id
 // is validated against path traversal inside studio.DeleteDraft.
 func (s *Server) handleStudioDeleteDraft(c *fiber.Ctx) error {
-	dir, err := s.studioDraftsDir()
+	dir, err := s.studio(c).draftsDir()
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}

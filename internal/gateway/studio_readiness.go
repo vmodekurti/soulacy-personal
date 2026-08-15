@@ -51,7 +51,7 @@ func (s *Server) handleStudioReadiness(c *fiber.Ctx) error {
 	} else {
 		cat = s.studioCatalogSnapshot(s.agents(c))
 	}
-	s.groundCatalog(&cat)
+	s.groundCatalog(s.studio(c), &cat)
 
 	// A catalog with no tools AND no MCP servers is not a workspace with nothing
 	// installed — every workspace has builtins — so it means the snapshot did not

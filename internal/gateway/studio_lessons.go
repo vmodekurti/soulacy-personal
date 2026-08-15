@@ -15,6 +15,10 @@ import (
 )
 
 type preferenceMineJob struct {
+	// scope travels with the job: mining runs on a worker goroutine after the
+	// request is gone, and writing one workspace's inferred preferences into
+	// another's file would be silent and permanent.
+	scope          studioScope
 	owner, agentID string
 	initial, final studio.Draft
 }
@@ -59,36 +63,6 @@ func lessonsPath() string {
 	return dbPath
 }
 
-// lessonStore returns the cached sqlite-vec lesson store, or nil when learning
-// is disabled/no path is resolvable. Caching keeps one SQLite pool per process.
-func (s *Server) lessonStore() *studio.LessonStore {
-	if !s.studioLearningEnabled() {
-		return nil
-	}
-	s.lessonStoreOnce.Do(func() {
-		p := lessonsPath()
-		if p == "" {
-			return
-		}
-		var embedder studio.LessonEmbedder
-		if s.engine != nil {
-			if svc := s.engine.Knowledge(); svc != nil && svc.Embedders != nil {
-				if configured := svc.Embedders.Get(s.cfg.Knowledge.EmbeddingProvider); configured != nil {
-					embedder = lessonEmbedAdapter{embedder: configured, provider: s.cfg.Knowledge.EmbeddingProvider, model: s.cfg.Knowledge.EmbeddingModel}
-				}
-			}
-		}
-		// A configured default embedding provider is authoritative. If it is
-		// unavailable, fail closed instead of creating a local index with a
-		// different dimension that the real provider cannot query later.
-		if strings.TrimSpace(s.cfg.Knowledge.EmbeddingProvider) != "" && embedder == nil {
-			return
-		}
-		s.lessonStoreCached = studio.NewSemanticLessonStore(p, embedder)
-	})
-	return s.lessonStoreCached
-}
-
 type lessonEmbedAdapter struct {
 	embedder llm.Embedder
 	provider string
@@ -124,19 +98,11 @@ func macrosPath() string {
 	return filepath.Join(ws, "studio-macros.json")
 }
 
-func (s *Server) macroStore() *studio.MacroStore {
-	path := macrosPath()
-	if path == "" {
-		return nil
-	}
-	return studio.NewMacroStore(path)
-}
-
-func (s *Server) groundWorkflowPatterns(cat *studio.Catalog, intent string) {
+func (s *Server) groundWorkflowPatterns(scope studioScope, cat *studio.Catalog, intent string) {
 	if !s.studioLearningEnabled() {
 		return
 	}
-	if store := s.macroStore(); store != nil {
+	if store := scope.macros(); store != nil {
 		cat.WorkflowPatterns = store.Similar(intent, 3)
 	}
 }
@@ -155,14 +121,6 @@ func strategyFitPath() string {
 		return ""
 	}
 	return filepath.Join(ws, "studio-strategy-fit.json")
-}
-
-func (s *Server) strategyFitStore() *studio.StrategyFitStore {
-	path := strategyFitPath()
-	if path == "" {
-		return nil
-	}
-	return studio.NewStrategyFitStore(path)
 }
 
 // resolveAgentStrategy backs the strategy-fit collector, which observes the
@@ -188,7 +146,7 @@ func (s *Server) resolveAgentStrategy(agentID string) (model, strategy string, o
 	return model, strings.TrimSpace(def.Reasoning.Strategy), model != ""
 }
 
-func (s *Server) groundStrategyFit(cat *studio.Catalog) {
+func (s *Server) groundStrategyFit(scope studioScope, cat *studio.Catalog) {
 	provider, model := s.defaultAgentLLM()
 	if strings.TrimSpace(cat.ActiveProvider) != "" {
 		provider = cat.ActiveProvider
@@ -198,17 +156,17 @@ func (s *Server) groundStrategyFit(cat *studio.Catalog) {
 	}
 	cat.ActiveProvider = provider
 	cat.ActiveModel = model
-	if store := s.strategyFitStore(); store != nil {
+	if store := scope.strategyFit(); store != nil {
 		cat.UnreliableStrategies = store.UnreliableProvider(provider, model)
 	}
 }
 
-func (s *Server) unreliableStrategy(provider, model, strategy string) bool {
+func (s *Server) unreliableStrategy(scope studioScope, provider, model, strategy string) bool {
 	strategy = strings.ToLower(strings.TrimSpace(strategy))
 	if strategy == "" {
 		strategy = "auto"
 	}
-	store := s.strategyFitStore()
+	store := scope.strategyFit()
 	if store == nil {
 		return false
 	}
@@ -236,29 +194,17 @@ func preferencesPath() string {
 	return filepath.Join(ws, "studio-preferences.json")
 }
 
-func (s *Server) preferenceStore() *studio.PreferenceStore {
-	if !s.studioLearningEnabled() {
-		return nil
-	}
-	s.preferenceStoreOnce.Do(func() {
-		if path := preferencesPath(); path != "" {
-			s.preferenceStoreCached = studio.NewPreferenceStore(path)
-		}
-	})
-	return s.preferenceStoreCached
-}
-
-func (s *Server) groundPreferencesFor(cat *studio.Catalog, owner string) {
-	if store := s.preferenceStore(); store != nil {
+func (s *Server) groundPreferencesFor(scope studioScope, cat *studio.Catalog, owner string) {
+	if store := scope.preferences(); store != nil {
 		cat.GlobalPreferences = store.RulesFor(owner)
 	}
 }
 
-func (s *Server) minePreferences(owner, agentID string, initial, final studio.Draft) {
-	if s.preferenceStore() == nil {
+func (s *Server) minePreferences(scope studioScope, owner, agentID string, initial, final studio.Draft) {
+	if scope.preferences() == nil {
 		return
 	}
-	job := preferenceMineJob{owner: owner, agentID: agentID, initial: initial, final: final}
+	job := preferenceMineJob{scope: scope, owner: owner, agentID: agentID, initial: initial, final: final}
 	s.preferenceJobsWG.Add(1)
 	select {
 	case s.preferenceJobs <- job:
@@ -276,9 +222,13 @@ func (s *Server) runPreferenceMiner() {
 }
 
 func (s *Server) processPreferenceJob(job preferenceMineJob) {
+	store := job.scope.preferences()
+	if store == nil {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), s.studioLearningTimeout())
 	defer cancel()
-	_ = studio.NewPreferenceMiner(s.preferenceStore(), s.studioLLM()).MineFor(ctx, job.owner, job.agentID, job.initial, job.final)
+	_ = studio.NewPreferenceMiner(store, s.studioLLM()).MineFor(ctx, job.owner, job.agentID, job.initial, job.final)
 }
 
 func (s *Server) studioLearningTimeout() time.Duration {
@@ -294,8 +244,8 @@ func (s *Server) studioLearningTimeout() time.Duration {
 // future generations avoid the same shape mistake. Best-effort: any failure
 // (learning off, no path, write error) is swallowed — learning must never break
 // the apply flow.
-func (s *Server) recordLessonFromRepair(wf studio.Draft, p studio.RepairProposal) {
-	store := s.lessonStore()
+func (s *Server) recordLessonFromRepair(scope studioScope, wf studio.Draft, p studio.RepairProposal) {
+	store := scope.lessons()
 	if store == nil {
 		return
 	}
@@ -359,8 +309,8 @@ func (s *Server) recordCorpusCase(fixed studio.Draft, nodeID string) {
 
 // groundLessons populates the catalog with lessons relevant to the tools it can
 // use (builtin tools + connected MCP tools), so BuildPrompt can inject them.
-func (s *Server) groundLessons(cat *studio.Catalog, intent string) {
-	store := s.lessonStore()
+func (s *Server) groundLessons(scope studioScope, cat *studio.Catalog, intent string) {
+	store := scope.lessons()
 	if store == nil {
 		return
 	}

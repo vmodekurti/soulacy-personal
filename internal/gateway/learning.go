@@ -520,7 +520,7 @@ func (s *Server) handleAcceptLearningProposal(c *fiber.Ctx) error {
 	// lessons feed. Best-effort — a lesson-write failure never blocks the
 	// accept side-effect that already ran.
 	if pending.EffectivePromoteToStudioLessons() {
-		s.promoteAcceptedToStudioLesson(pending)
+		s.promoteAcceptedToStudioLesson(s.studio(c), pending)
 	}
 	if meta == nil {
 		meta = map[string]string{}
@@ -544,8 +544,8 @@ func (s *Server) handleAcceptLearningProposal(c *fiber.Ctx) error {
 // lessons (Studio-repair-accepted + Brain-Memory-accepted+opted-in). Uses the
 // same keying rules as studio.LessonFromProposal — an operator who accepts
 // the same guidance twice gets Count++ rather than a duplicate.
-func (s *Server) promoteAcceptedToStudioLesson(p learning.Proposal) {
-	store := s.lessonStore()
+func (s *Server) promoteAcceptedToStudioLesson(scope studioScope, p learning.Proposal) {
+	store := scope.lessons()
 	if store == nil {
 		return
 	}

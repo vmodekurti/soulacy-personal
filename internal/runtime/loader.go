@@ -18,6 +18,7 @@ import (
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/agent"
 )
 
@@ -30,10 +31,8 @@ const SystemAgentID = "system"
 const builtinSourcePath = "__builtin__"
 
 // PersonalWorkspaceID is the implicit workspace every Personal deployment
-// runs in. It matches the tenancy bootstrap ID so a Personal installation's
-// agents keep their existing on-disk location after this package became
-// workspace-aware.
-const PersonalWorkspaceID = "ws_personal"
+// runs in.
+const PersonalWorkspaceID = wsroot.PersonalWorkspaceID
 
 // workspaceRootDir namespaces non-personal workspaces on disk. Personal
 // agents stay at <dir>/<id>/SOUL.yaml exactly as before; every other
@@ -44,7 +43,10 @@ const PersonalWorkspaceID = "ws_personal"
 // from anything inside the file. A SOUL.yaml cannot declare itself into
 // another tenant, so no hot-reload or watcher event can move it across the
 // boundary.
-const workspaceRootDir = ".workspaces"
+//
+// The rule itself lives in internal/wsroot so every file-backed store places
+// tenants identically; duplicating it is how boundaries drift apart.
+const workspaceRootDir = wsroot.NamespaceDir
 
 // agentKey makes (workspace, agent) the identity. Agent IDs are human-chosen
 // slugs and collide across tenants by design; keying on the ID alone let the
@@ -90,63 +92,20 @@ type versionMetadata struct {
 
 // NormalizeWorkspace maps an absent workspace to the implicit personal one so
 // every legacy call site keeps working unchanged.
-func NormalizeWorkspace(workspaceID string) string {
-	workspaceID = strings.TrimSpace(workspaceID)
-	if workspaceID == "" {
-		return PersonalWorkspaceID
-	}
-	return workspaceID
-}
+func NormalizeWorkspace(workspaceID string) string { return wsroot.Normalize(workspaceID) }
 
 // ValidateWorkspaceID rejects IDs that cannot safely become a path segment,
 // for the same reason ValidateAgentID exists: the ID is about to be joined
 // into a filesystem path.
-func ValidateWorkspaceID(workspaceID string) error {
-	if workspaceID == "." || workspaceID == ".." {
-		return fmt.Errorf("workspace ID %q is not a usable directory name", workspaceID)
-	}
-	if !agentIDRe.MatchString(workspaceID) {
-		return fmt.Errorf("workspace ID %q is not allowed: use 1-64 characters of a-z, 0-9, '.', '_' or '-'", workspaceID)
-	}
-	return nil
-}
+func ValidateWorkspaceID(workspaceID string) error { return wsroot.Validate(workspaceID) }
 
 // workspaceAgentRoot returns the directory that holds one workspace's agents.
-func workspaceAgentRoot(dir, workspaceID string) string {
-	if NormalizeWorkspace(workspaceID) == PersonalWorkspaceID {
-		return dir
-	}
-	return filepath.Join(dir, workspaceRootDir, workspaceID)
-}
+func workspaceAgentRoot(dir, workspaceID string) string { return wsroot.Dir(dir, workspaceID) }
 
 // workspaceForPath derives the owning workspace from a file's location under
 // a configured agent directory. Returning ok=false means the path is not a
 // legitimate agent location and must be ignored rather than guessed at.
-func workspaceForPath(dir, path string) (string, bool) {
-	relative, err := filepath.Rel(dir, path)
-	if err != nil {
-		return "", false
-	}
-	parts := strings.Split(filepath.ToSlash(relative), "/")
-	if len(parts) == 0 || parts[0] == ".." {
-		// The path escapes the configured agent directory. Walk never produces
-		// one, but classifying an outside path as "personal" would be a quiet
-		// way for a symlinked or misconfigured root to inject an agent.
-		return "", false
-	}
-	if parts[0] == workspaceRootDir {
-		// .workspaces/<id>/... — a file directly in the namespace root belongs
-		// to no workspace and must not be guessed into one.
-		if len(parts) < 3 {
-			return "", false
-		}
-		if ValidateWorkspaceID(parts[1]) != nil {
-			return "", false
-		}
-		return parts[1], true
-	}
-	return PersonalWorkspaceID, true
-}
+func workspaceForPath(dir, path string) (string, bool) { return wsroot.Of(dir, path) }
 
 // NewLoader creates a Loader that watches the given directories.
 func NewLoader(dirs []string) *Loader {

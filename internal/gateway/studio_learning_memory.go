@@ -11,13 +11,13 @@ import (
 func (s *Server) handleStudioLearningMemory(c *fiber.Ctx) error {
 	owner := studioLearningOwner(c)
 	var macros, lessons, preferences any = []any{}, []any{}, []any{}
-	if store := s.macroStore(); store != nil {
+	if store := s.studio(c).macros(); store != nil {
 		macros = store.All()
 	}
-	if store := s.lessonStore(); store != nil {
+	if store := s.studio(c).lessons(); store != nil {
 		lessons = store.All()
 	}
-	if store := s.preferenceStore(); store != nil {
+	if store := s.studio(c).preferences(); store != nil {
 		preferences = store.RulesFor(owner)
 	}
 	return c.JSON(fiber.Map{"workflow_patterns": macros, "lessons": lessons, "preferences": preferences, "owner_scope": owner})
@@ -28,17 +28,17 @@ func (s *Server) handleStudioDeleteLearningMemory(c *fiber.Ctx) error {
 	var err error
 	switch kind {
 	case "workflow-pattern":
-		if store := s.macroStore(); store != nil {
+		if store := s.studio(c).macros(); store != nil {
 			err = store.Delete(id)
 		}
 	case "lesson":
-		if store := s.lessonStore(); store != nil {
+		if store := s.studio(c).lessons(); store != nil {
 			ctx, cancel := context.WithTimeout(c.Context(), s.studioLearningTimeout())
 			defer cancel()
 			err = store.Delete(ctx, id)
 		}
 	case "preference":
-		if store := s.preferenceStore(); store != nil {
+		if store := s.studio(c).preferences(); store != nil {
 			err = store.DeleteRule(studioLearningOwner(c), id)
 		}
 	default:

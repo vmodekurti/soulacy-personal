@@ -79,7 +79,7 @@ func (s *Server) handleStudioBuildSpec(c *fiber.Ctx) error {
 	// populated only here. Without it the spec panel would go on reporting
 	// "not specified" for every MCP server the user named.
 	cat := s.studioCatalogSnapshot(s.agents(c))
-	s.groundCatalog(&cat)
+	s.groundCatalog(s.studio(c), &cat)
 
 	// An empty intent is NOT a 400: ExtractBuildSpec answers it with the blocking
 	// question "What should this agent do?", which is the useful response for a

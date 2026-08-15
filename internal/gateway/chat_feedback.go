@@ -70,7 +70,7 @@ func (s *Server) handleChatFeedback(c *fiber.Ctx) error {
 	if err != nil {
 		return s.errJSON(c, fiber.StatusBadRequest, err)
 	}
-	if macros := s.macroStore(); macros != nil {
+	if macros := s.studio(c).macros(); macros != nil {
 		if err := macros.RecordFeedback(body.RunID, body.Rating); err != nil {
 			return s.errJSON(c, fiber.StatusInternalServerError, err)
 		}

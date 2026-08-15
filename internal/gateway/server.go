@@ -78,6 +78,7 @@ import (
 	"github.com/soulacy/soulacy/internal/voice"
 	"github.com/soulacy/soulacy/internal/webui"
 	"github.com/soulacy/soulacy/internal/workboard"
+	"github.com/soulacy/soulacy/internal/wsroot"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/gofiber/fiber/v2/middleware/adaptor"
@@ -113,7 +114,11 @@ type Server struct {
 	tenantMembers   tenancy.MemberManager
 	// idempotency replays completed mutations for a repeated Idempotency-Key
 	// so a retry through a network partition cannot create a duplicate.
-	idempotency  *idempotencyStore
+	idempotency *idempotencyStore
+	// studioStores holds one set of Studio learning stores per workspace, so a
+	// tenant's lessons and preferences are a different file rather than a
+	// filtered view of a shared one.
+	studioStores studioStores
 	agentWatcher healthReporter // nil until SetAgentWatcher() is called (S2.13)
 	log          *zap.Logger
 
@@ -234,9 +239,15 @@ func New(
 	if s.hub != nil {
 		s.hub.SetEventAuthorizer(s.authorizeEvent)
 		if s.studioLearningEnabled() {
-			s.workflowDistiller = studio.NewWorkflowDistiller(s.macroStore())
+			// These observe the process-wide event hub, whose events carry no
+			// workspace. They are bound to the personal workspace rather than
+			// guessing: distilling one tenant's runs into another's macros
+			// would be silent and permanent. Carrying workspace on runtime
+			// events is the fix, tracked with the rest of Studio isolation.
+			personalStudio := s.studioForWorkspace(wsroot.PersonalWorkspaceID, "")
+			s.workflowDistiller = studio.NewWorkflowDistiller(personalStudio.macros())
 			s.hub.AddObserver(s.workflowDistiller.Observe)
-			s.strategyCollector = studio.NewStrategyFitCollector(s.strategyFitStore(), s.resolveAgentStrategy)
+			s.strategyCollector = studio.NewStrategyFitCollector(personalStudio.strategyFit(), s.resolveAgentStrategy)
 			s.hub.AddObserver(s.strategyCollector.Observe)
 			s.learningReplayWG.Add(1)
 			go func() { defer s.learningReplayWG.Done(); s.replayStudioLearning() }()

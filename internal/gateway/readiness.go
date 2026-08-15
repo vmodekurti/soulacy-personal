@@ -629,7 +629,7 @@ func (s *Server) studioContractReadiness(c *fiber.Ctx) studioContractReadiness {
 		return out
 	}
 	cat := s.studioCatalogSnapshot(s.agents(c))
-	s.groundCatalog(&cat)
+	s.groundCatalog(s.studio(c), &cat)
 	in := s.preflightInput(c, cat)
 
 	totalScore := 0

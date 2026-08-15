@@ -252,7 +252,7 @@ func (s *Server) handleStudioApplyRepair(c *fiber.Ctx) error {
 	// example to generate from. That one asserts the patch works, so it requires
 	// the replay to have actually proved it.
 	if adopted && !req.Preview {
-		s.recordLessonFromRepair(req.Workflow, req.Proposal)
+		s.recordLessonFromRepair(s.studio(c), req.Workflow, req.Proposal)
 	}
 	if attempt.Promoted && check.Valid && !req.Preview {
 		s.recordCorpusCase(candidate, req.Proposal.NodeID)
