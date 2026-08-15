@@ -74,3 +74,18 @@ func WorkspaceFromContext(ctx context.Context) string {
 	}
 	return wsroot.PersonalWorkspaceID
 }
+
+// SubjectFromContext returns the principal a run is acting for, or "" when
+// there is none.
+//
+// The empty string is the correct answer, not a placeholder: user-private
+// stores treat it as its own owner — the implicit local user a single-tenant
+// installation has always had — and it is the value those installations' rows
+// already carry. Substituting anything else would make one user's history
+// invisible or, worse, merge two users' into one.
+func SubjectFromContext(ctx context.Context) string {
+	if p, ok := PrincipalFromContext(ctx); ok {
+		return strings.TrimSpace(p.Subject)
+	}
+	return ""
+}

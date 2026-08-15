@@ -193,3 +193,20 @@ func (s *Server) learningStore(c *fiber.Ctx) *learning.Store {
 	}
 	return s.engine.LearningStoreInWorkspace(workspaceID)
 }
+
+// historyScope is the tenant and person a conversation-history request acts
+// for. Conversation history is user-private and holds message content itself,
+// so cross-session reads need both halves of its scope key.
+//
+// With no verified identity this is the personal workspace and the empty
+// subject — which is precisely what a single-user installation's rows carry,
+// so those deployments read back exactly what they always did.
+func (s *Server) historyScope(c *fiber.Ctx) (workspaceID, subject string) {
+	if c == nil {
+		return wsroot.PersonalWorkspaceID, ""
+	}
+	if identity, ok := requestIdentity(c); ok {
+		return wsroot.Normalize(identity.WorkspaceID()), identity.Subject()
+	}
+	return wsroot.PersonalWorkspaceID, ""
+}

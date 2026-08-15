@@ -631,7 +631,7 @@ func (e *Engine) buildContext(ctx context.Context, def *agent.Definition, sess *
 		}
 		msgs = append(msgs, llm.ChatMessage{Role: "system", Content: sb.String()})
 	}
-	if recall := e.pastConversationRecall(def, sess.ID, incoming); recall != "" {
+	if recall := e.pastConversationRecall(ctx, def, sess.ID, incoming); recall != "" {
 		msgs = append(msgs, llm.ChatMessage{Role: "system", Content: recall})
 	}
 
@@ -644,10 +644,14 @@ func (e *Engine) buildContext(ctx context.Context, def *agent.Definition, sess *
 }
 
 type historySearcher interface {
-	Search(context.Context, string, string, int) ([]session.SearchHit, error)
+	Search(ctx context.Context, workspaceID, subject, agentID, query string, limit int) ([]session.SearchHit, error)
 }
 
-func (e *Engine) pastConversationRecall(def *agent.Definition, sessionID string, incoming message.Message) string {
+// pastConversationRecall injects prior turns into the prompt, so it is a read
+// that ends up inside another run's context window. It takes the run's context
+// to carry the tenant and the requester: recall must not surface a colleague's
+// conversation, let alone another tenant's.
+func (e *Engine) pastConversationRecall(ctx context.Context, def *agent.Definition, sessionID string, incoming message.Message) string {
 	if def == nil || !def.Learning.Enabled || e.historyStore == nil {
 		return ""
 	}
@@ -659,9 +663,11 @@ func (e *Engine) pastConversationRecall(def *agent.Definition, sessionID string,
 	if !ok {
 		return ""
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	// The timeout is derived from the run's context, not from Background: a
+	// fresh context would drop the principal and with it the tenant.
+	searchCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 	defer cancel()
-	hits, err := searcher.Search(ctx, def.ID, query, 5)
+	hits, err := searcher.Search(searchCtx, WorkspaceFromContext(ctx), SubjectFromContext(ctx), def.ID, query, 5)
 	if err != nil || len(hits) == 0 {
 		return ""
 	}

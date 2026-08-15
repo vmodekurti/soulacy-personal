@@ -24,7 +24,7 @@ isolation state; this document explains it.
 declared workspace-owned but not yet isolated.
 
 - At the start of this work: **57 blockers**
-- Now: **31 blockers**
+- Now: **29 blockers**
 
 A store moves from `personal-only` to `scoped` only when it has a real
 cross-tenant isolation test. The catalog names that test, and a CI check fails
@@ -217,6 +217,36 @@ tenant can read and edit. That is the opposite of the read paths on stores
 whose rows predate tenancy, where an absent workspace legitimately means "the
 single-user installation".
 
+### The personal workspace is not partitioned by user
+
+Conversation history is user-private, so it has two boundaries: the tenant and
+the person inside it. `Search` was the sharpest edge in the whole store —
+`agent_id` is optional, so a blank one meant "every agent", and without a tenant
+predicate a single query returned matching *message content* from every
+conversation in the deployment.
+
+Both predicates are now mandatory on the cross-session reads (`Search`,
+`LoadForAgent`). `Load` takes only the workspace: a session is addressed by an
+ID the caller already had to be authorized for, and the gateway gates that with
+`session.Ownership`. A second, weaker check in the store would invite callers
+to rely on it instead.
+
+**`subjectPredicate` deliberately returns nothing in the personal workspace.**
+That workspace has exactly one user — that is what "personal" means — so
+partitioning it by subject buys no isolation and actively loses data: rows
+written before tenancy carry an empty subject, while a reader today resolves to
+whatever local owner ID the deployment assigned. A Personal user would upgrade
+and find their own history had vanished from search.
+`TestThePersonalWorkspaceIsNotPartitionedBySubject` pins it.
+
+A fork keeps each copied turn's **original** subject rather than re-owning it
+to the forker. A fork is a branch of the same conversation; rewriting the owner
+would quietly move someone else's turns into another person's private history.
+
+`SubjectFromContext` returning `""` is an answer, not a placeholder: it is the
+implicit local user a single-tenant installation has always had, and the value
+those rows already carry.
+
 ### The SDK is extended additively, never modified
 
 `sdk/storage.MemoryBackend` is documented as frozen per major version, so it
@@ -252,7 +282,7 @@ Highest-value first, with the reason each matters:
 3. **Workboard, costs, action log, DLQ, checkpoints, conversation history** —
    all still `personal-only`; each needs the same treatment as the stores
    above.
-4. **Costs, DLQ, checkpoints, conversation history** — all still
+4. **Costs, DLQ, checkpoints, session resources** — all still
    `personal-only`; each needs the same treatment as the stores above.
 
 ## Verification

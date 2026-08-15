@@ -1378,7 +1378,7 @@ func (s *Server) buildApp() *fiber.App {
 			return s.errMsg(c, fiber.StatusServiceUnavailable, "history store not configured")
 		}
 		searcher, ok := s.historyStore.(interface {
-			Search(context.Context, string, string, int) ([]session.SearchHit, error)
+			Search(ctx context.Context, workspaceID, subject, agentID, query string, limit int) ([]session.SearchHit, error)
 		})
 		if !ok {
 			return s.errMsg(c, fiber.StatusNotImplemented, "history store does not support search")
@@ -1388,7 +1388,8 @@ func (s *Server) buildApp() *fiber.App {
 			return s.errMsg(c, fiber.StatusBadRequest, "q is required")
 		}
 		limit := c.QueryInt("limit", 50)
-		hits, err := searcher.Search(c.Context(), c.Query("agent_id"), query, limit)
+		historyWorkspace, historySubject := s.historyScope(c)
+		hits, err := searcher.Search(c.Context(), historyWorkspace, historySubject, c.Query("agent_id"), query, limit)
 		if err != nil {
 			return s.errJSON(c, fiber.StatusInternalServerError, err)
 		}
@@ -1402,7 +1403,8 @@ func (s *Server) buildApp() *fiber.App {
 			return s.errMsg(c, fiber.StatusServiceUnavailable, "history store not configured")
 		}
 		limit := c.QueryInt("limit", 100)
-		entries, err := s.historyStore.Load(c.Context(), c.Params("session_id"), limit)
+		historyWorkspace, _ := s.historyScope(c)
+		entries, err := s.historyStore.Load(c.Context(), historyWorkspace, c.Params("session_id"), limit)
 		if err != nil {
 			return s.errJSON(c, fiber.StatusInternalServerError, err)
 		}
@@ -1416,7 +1418,8 @@ func (s *Server) buildApp() *fiber.App {
 			return s.errMsg(c, fiber.StatusServiceUnavailable, "history store not configured")
 		}
 		limit := c.QueryInt("limit", 200)
-		entries, err := s.historyStore.LoadForAgent(c.Context(), c.Params("agent_id"), limit)
+		historyWorkspace, historySubject := s.historyScope(c)
+		entries, err := s.historyStore.LoadForAgent(c.Context(), historyWorkspace, historySubject, c.Params("agent_id"), limit)
 		if err != nil {
 			return s.errJSON(c, fiber.StatusInternalServerError, err)
 		}

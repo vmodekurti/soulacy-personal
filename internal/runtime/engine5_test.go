@@ -880,7 +880,7 @@ func TestBuildContextInjectsPastConversationRecallForLearningAgent(t *testing.T)
 		t.Fatalf("history store: %v", err)
 	}
 	t.Cleanup(func() { _ = hs.Close() })
-	if err := hs.Append(context.Background(), session.ConversationEntry{
+	if err := hs.Append(context.Background(), session.ConversationEntry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		SessionID: "older-session",
 		AgentID:   "learner",
 		Role:      "assistant",
@@ -888,7 +888,7 @@ func TestBuildContextInjectsPastConversationRecallForLearningAgent(t *testing.T)
 	}); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
-	if err := hs.Append(context.Background(), session.ConversationEntry{
+	if err := hs.Append(context.Background(), session.ConversationEntry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		SessionID: "current-session",
 		AgentID:   "learner",
 		Role:      "assistant",

@@ -3,6 +3,7 @@ package session
 
 import (
 	"context"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"path/filepath"
 	"testing"
 	"time"
@@ -16,14 +17,14 @@ func TestNoopHistoryStoreAllMethodsReturnNil(t *testing.T) {
 	var s NoopHistoryStore
 	ctx := context.Background()
 
-	if err := s.Append(ctx, ConversationEntry{SessionID: "s1", Role: "user", Content: "hi"}); err != nil {
+	if err := s.Append(ctx, ConversationEntry{WorkspaceID: wsroot.PersonalWorkspaceID, SessionID: "s1", Role: "user", Content: "hi"}); err != nil {
 		t.Errorf("Append: %v", err)
 	}
-	entries, err := s.Load(ctx, "s1", 10)
+	entries, err := s.Load(ctx, wsroot.PersonalWorkspaceID, "s1", 10)
 	if err != nil || entries != nil {
 		t.Errorf("Load: entries=%v err=%v", entries, err)
 	}
-	entries, err = s.LoadForAgent(ctx, "ag", 10)
+	entries, err = s.LoadForAgent(ctx, wsroot.PersonalWorkspaceID, "", "ag", 10)
 	if err != nil || entries != nil {
 		t.Errorf("LoadForAgent: entries=%v err=%v", entries, err)
 	}
@@ -52,7 +53,7 @@ func newHistoryStore(t *testing.T) *SQLiteHistoryStore {
 
 func appendEntry(t *testing.T, s *SQLiteHistoryStore, sessionID, agentID, role, content string) {
 	t.Helper()
-	if err := s.Append(context.Background(), ConversationEntry{
+	if err := s.Append(context.Background(), ConversationEntry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		SessionID: sessionID, AgentID: agentID, Role: role, Content: content,
 	}); err != nil {
 		t.Fatalf("Append: %v", err)
@@ -86,7 +87,7 @@ func TestAppendAndLoadAllEntries(t *testing.T) {
 	appendEntry(t, s, "sess-1", "ag", "user", "hello")
 	appendEntry(t, s, "sess-1", "ag", "assistant", "hi there")
 
-	entries, err := s.Load(context.Background(), "sess-1", 0)
+	entries, err := s.Load(context.Background(), wsroot.PersonalWorkspaceID, "sess-1", 0)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -107,7 +108,7 @@ func TestLoadWithLimit(t *testing.T) {
 		appendEntry(t, s, "sess-2", "ag", "user", "msg")
 	}
 
-	entries, err := s.Load(context.Background(), "sess-2", 3)
+	entries, err := s.Load(context.Background(), wsroot.PersonalWorkspaceID, "sess-2", 3)
 	if err != nil {
 		t.Fatalf("Load limit: %v", err)
 	}
@@ -118,7 +119,7 @@ func TestLoadWithLimit(t *testing.T) {
 
 func TestLoadEmptySession(t *testing.T) {
 	s := newHistoryStore(t)
-	entries, err := s.Load(context.Background(), "no-such-session", 10)
+	entries, err := s.Load(context.Background(), wsroot.PersonalWorkspaceID, "no-such-session", 10)
 	if err != nil {
 		t.Fatalf("Load empty: %v", err)
 	}
@@ -132,7 +133,7 @@ func TestLoadDifferentSessionsIsolated(t *testing.T) {
 	appendEntry(t, s, "sess-a", "ag", "user", "session a")
 	appendEntry(t, s, "sess-b", "ag", "user", "session b")
 
-	entriesA, _ := s.Load(context.Background(), "sess-a", 0)
+	entriesA, _ := s.Load(context.Background(), wsroot.PersonalWorkspaceID, "sess-a", 0)
 	if len(entriesA) != 1 || entriesA[0].Content != "session a" {
 		t.Errorf("sess-a entries: %+v", entriesA)
 	}
@@ -148,7 +149,7 @@ func TestLoadForAgentReturnsAllSessions(t *testing.T) {
 	appendEntry(t, s, "s2", "my-agent", "user", "second session")
 	appendEntry(t, s, "s3", "other-agent", "user", "different agent")
 
-	entries, err := s.LoadForAgent(context.Background(), "my-agent", 0)
+	entries, err := s.LoadForAgent(context.Background(), wsroot.PersonalWorkspaceID, "", "my-agent", 0)
 	if err != nil {
 		t.Fatalf("LoadForAgent: %v", err)
 	}
@@ -162,7 +163,7 @@ func TestLoadForAgentWithLimit(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		appendEntry(t, s, "s1", "heavy-agent", "user", "msg")
 	}
-	entries, err := s.LoadForAgent(context.Background(), "heavy-agent", 3)
+	entries, err := s.LoadForAgent(context.Background(), wsroot.PersonalWorkspaceID, "", "heavy-agent", 3)
 	if err != nil {
 		t.Fatalf("LoadForAgent limit: %v", err)
 	}
@@ -175,7 +176,7 @@ func TestLoadForAgentZeroLimitCapAt1000(t *testing.T) {
 	// Just verify it doesn't error with limit=0 (capped to 1000 internally).
 	s := newHistoryStore(t)
 	appendEntry(t, s, "s1", "ag", "user", "msg")
-	entries, err := s.LoadForAgent(context.Background(), "ag", 0)
+	entries, err := s.LoadForAgent(context.Background(), wsroot.PersonalWorkspaceID, "", "ag", 0)
 	if err != nil {
 		t.Fatalf("LoadForAgent zero limit: %v", err)
 	}
@@ -191,7 +192,7 @@ func TestSQLiteHistoryStoreSearch(t *testing.T) {
 	appendEntry(t, s, "sess-a", "agent-a", "assistant", "I found a momentum screen with AAPL and MSFT.")
 	appendEntry(t, s, "sess-b", "agent-b", "user", "Summarize weather in Chicago")
 
-	hits, err := s.Search(ctx, "agent-a", "momentum screen", 10)
+	hits, err := s.Search(ctx, wsroot.PersonalWorkspaceID, "", "agent-a", "momentum screen", 10)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -202,7 +203,7 @@ func TestSQLiteHistoryStoreSearch(t *testing.T) {
 		t.Fatalf("hit = %#v, want sess-a with snippet", hits[0])
 	}
 
-	hits, err = s.Search(ctx, "", "Chicago", 10)
+	hits, err = s.Search(ctx, wsroot.PersonalWorkspaceID, "", "", "Chicago", 10)
 	if err != nil {
 		t.Fatalf("Search all: %v", err)
 	}
@@ -256,13 +257,13 @@ func TestPruneEmptyDB(t *testing.T) {
 
 func TestAppend_WithTokens(t *testing.T) {
 	s := newHistoryStore(t)
-	if err := s.Append(context.Background(), ConversationEntry{
+	if err := s.Append(context.Background(), ConversationEntry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		SessionID: "s1", AgentID: "ag", Role: "assistant",
 		Content: "response", Tokens: 42,
 	}); err != nil {
 		t.Fatalf("Append with tokens: %v", err)
 	}
-	entries, err := s.Load(context.Background(), "s1", 0)
+	entries, err := s.Load(context.Background(), wsroot.PersonalWorkspaceID, "s1", 0)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -281,7 +282,7 @@ func TestLoad_OldestFirstWithLimit(t *testing.T) {
 		appendEntry(t, s, "ordered-sess", "ag", "user", string(rune('a'+i)))
 	}
 	// Limit=3 should return the LAST 3 in chronological (oldest-first) order.
-	entries, err := s.Load(context.Background(), "ordered-sess", 3)
+	entries, err := s.Load(context.Background(), wsroot.PersonalWorkspaceID, "ordered-sess", 3)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -301,7 +302,7 @@ func TestLoadForAgent_NewestFirst(t *testing.T) {
 	appendEntry(t, s, "s2", "ord-agent", "user", "second")
 	appendEntry(t, s, "s3", "ord-agent", "user", "third")
 
-	entries, err := s.LoadForAgent(context.Background(), "ord-agent", 0)
+	entries, err := s.LoadForAgent(context.Background(), wsroot.PersonalWorkspaceID, "", "ord-agent", 0)
 	if err != nil {
 		t.Fatalf("LoadForAgent: %v", err)
 	}
@@ -316,7 +317,7 @@ func TestLoadForAgent_NewestFirst(t *testing.T) {
 
 func TestLoadForAgent_EmptyAgent(t *testing.T) {
 	s := newHistoryStore(t)
-	entries, err := s.LoadForAgent(context.Background(), "no-such-agent", 10)
+	entries, err := s.LoadForAgent(context.Background(), wsroot.PersonalWorkspaceID, "", "no-such-agent", 10)
 	if err != nil {
 		t.Fatalf("LoadForAgent empty: %v", err)
 	}
@@ -339,7 +340,7 @@ func TestPrune_KeepsRecentEntries(t *testing.T) {
 		t.Errorf("Prune should keep recent entries, deleted %d", n)
 	}
 
-	remaining, err := s.Load(context.Background(), "keep", 0)
+	remaining, err := s.Load(context.Background(), wsroot.PersonalWorkspaceID, "keep", 0)
 	if err != nil {
 		t.Fatalf("Load after prune: %v", err)
 	}
@@ -352,7 +353,7 @@ func TestEntry_IDAndCreatedAtSetOnLoad(t *testing.T) {
 	s := newHistoryStore(t)
 	appendEntry(t, s, "meta-sess", "ag", "user", "hello")
 
-	entries, err := s.Load(context.Background(), "meta-sess", 0)
+	entries, err := s.Load(context.Background(), wsroot.PersonalWorkspaceID, "meta-sess", 0)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}

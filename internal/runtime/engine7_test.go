@@ -627,13 +627,13 @@ func (f *fakeHistoryStore7) Append(_ context.Context, entry session.Conversation
 	return nil
 }
 
-func (f *fakeHistoryStore7) Load(_ context.Context, _ string, _ int) ([]session.ConversationEntry, error) {
+func (f *fakeHistoryStore7) Load(_ context.Context, _, _ string, _ int) ([]session.ConversationEntry, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.entries, nil
 }
 
-func (f *fakeHistoryStore7) LoadForAgent(_ context.Context, _ string, _ int) ([]session.ConversationEntry, error) {
+func (f *fakeHistoryStore7) LoadForAgent(_ context.Context, _, _, _ string, _ int) ([]session.ConversationEntry, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.entries, nil

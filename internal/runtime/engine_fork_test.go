@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"strings"
 	"testing"
 
@@ -25,8 +26,8 @@ func TestSeedSessionHistory_FeedsLLMContext(t *testing.T) {
 	provider.responses = []llm.CompletionResponse{{Content: "continuing from the fork"}}
 
 	e.SeedSessionHistory("fork-bot", "branch-1", []session.ConversationEntry{
-		{Role: "user", Content: "what is the capital of France?"},
-		{Role: "assistant", Content: "Paris, of course."},
+		{WorkspaceID: wsroot.PersonalWorkspaceID, Role: "user", Content: "what is the capital of France?"},
+		{WorkspaceID: wsroot.PersonalWorkspaceID, Role: "assistant", Content: "Paris, of course."},
 	})
 
 	_, err := e.Handle(context.Background(), testUserMessage("fork-bot", "branch-1", "and of Germany?"))
@@ -88,7 +89,7 @@ func TestSeedSessionHistory_DoesNotClobberLiveSession(t *testing.T) {
 
 	// Attempt to seed the now-live session — must not erase its history.
 	e.SeedSessionHistory("fork-bot-2", "live", []session.ConversationEntry{
-		{Role: "user", Content: "INJECTED"},
+		{WorkspaceID: wsroot.PersonalWorkspaceID, Role: "user", Content: "INJECTED"},
 	})
 
 	if _, err := e.Handle(context.Background(), testUserMessage("fork-bot-2", "live", "second turn")); err != nil {

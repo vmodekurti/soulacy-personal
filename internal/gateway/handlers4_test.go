@@ -37,6 +37,7 @@ package gateway
 
 import (
 	"context"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -270,7 +271,7 @@ func (f *fakeHistoryStore) Append(_ context.Context, e session.ConversationEntry
 	f.entries = append(f.entries, e)
 	return nil
 }
-func (f *fakeHistoryStore) Load(_ context.Context, sessionID string, limit int) ([]session.ConversationEntry, error) {
+func (f *fakeHistoryStore) Load(_ context.Context, _, sessionID string, limit int) ([]session.ConversationEntry, error) {
 	var out []session.ConversationEntry
 	for _, e := range f.entries {
 		if e.SessionID == sessionID {
@@ -282,7 +283,7 @@ func (f *fakeHistoryStore) Load(_ context.Context, sessionID string, limit int) 
 	}
 	return out, nil
 }
-func (f *fakeHistoryStore) LoadForAgent(_ context.Context, agentID string, limit int) ([]session.ConversationEntry, error) {
+func (f *fakeHistoryStore) LoadForAgent(_ context.Context, _, _, agentID string, limit int) ([]session.ConversationEntry, error) {
 	var out []session.ConversationEntry
 	for _, e := range f.entries {
 		if e.AgentID == agentID {
@@ -300,7 +301,7 @@ func (f *fakeHistoryStore) Close() error                                        
 func TestGatewayHandleHistory_Happy(t *testing.T) {
 	s := newTestGateway(t, "secret")
 	hs := &fakeHistoryStore{}
-	_ = hs.Append(context.Background(), session.ConversationEntry{
+	_ = hs.Append(context.Background(), session.ConversationEntry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		SessionID: "sess-1",
 		AgentID:   "bot",
 		Role:      "user",
@@ -345,14 +346,14 @@ func TestGatewayHandleHistory_Empty(t *testing.T) {
 func TestGatewayHandleHistoryByAgent_Happy(t *testing.T) {
 	s := newTestGateway(t, "secret")
 	hs := &fakeHistoryStore{}
-	_ = hs.Append(context.Background(), session.ConversationEntry{
+	_ = hs.Append(context.Background(), session.ConversationEntry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		SessionID: "s1",
 		AgentID:   "my-agent",
 		Role:      "assistant",
 		Content:   "Hi",
 		CreatedAt: time.Now(),
 	})
-	_ = hs.Append(context.Background(), session.ConversationEntry{
+	_ = hs.Append(context.Background(), session.ConversationEntry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		SessionID: "s2",
 		AgentID:   "my-agent",
 		Role:      "user",
@@ -381,7 +382,7 @@ func TestGatewayHandleHistory_WithLimitParam(t *testing.T) {
 	s := newTestGateway(t, "secret")
 	hs := &fakeHistoryStore{}
 	for i := 0; i < 5; i++ {
-		_ = hs.Append(context.Background(), session.ConversationEntry{
+		_ = hs.Append(context.Background(), session.ConversationEntry{WorkspaceID: wsroot.PersonalWorkspaceID,
 			SessionID: "sess-lim",
 			AgentID:   "bot",
 			Role:      "user",

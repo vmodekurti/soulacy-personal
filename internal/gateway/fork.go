@@ -54,7 +54,8 @@ func (s *Server) handleForkSession(c *fiber.Ctx) error {
 		newSession = fmt.Sprintf("fork-%d", time.Now().UnixNano())
 	}
 
-	copied, err := forker.Fork(c.Context(), srcSession, newSession, body.UptoEntryID)
+	historyWorkspace, _ := s.historyScope(c)
+	copied, err := forker.Fork(c.Context(), historyWorkspace, srcSession, newSession, body.UptoEntryID)
 	if err != nil {
 		// Target-collision and self-fork are caller errors → 409.
 		return s.errJSON(c, fiber.StatusConflict, err)
@@ -65,7 +66,7 @@ func (s *Server) handleForkSession(c *fiber.Ctx) error {
 		})
 	}
 
-	entries, err := s.historyStore.Load(c.Context(), newSession, 0)
+	entries, err := s.historyStore.Load(c.Context(), historyWorkspace, newSession, 0)
 	if err != nil {
 		s.log.Error("fork: load new branch failed", zap.Error(err))
 		return s.errMsg(c, fiber.StatusInternalServerError, "fork created but could not be read back")

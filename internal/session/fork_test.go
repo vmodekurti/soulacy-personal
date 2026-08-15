@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"path/filepath"
 	"testing"
 )
@@ -20,17 +21,17 @@ func seedConversation(t *testing.T, s *SQLiteHistoryStore, sessionID string) []C
 	t.Helper()
 	ctx := context.Background()
 	turns := []ConversationEntry{
-		{SessionID: sessionID, AgentID: "bot", Role: "user", Content: "first question"},
-		{SessionID: sessionID, AgentID: "bot", Role: "assistant", Content: "first answer"},
-		{SessionID: sessionID, AgentID: "bot", Role: "user", Content: "second question"},
-		{SessionID: sessionID, AgentID: "bot", Role: "assistant", Content: "second answer"},
+		{WorkspaceID: wsroot.PersonalWorkspaceID, SessionID: sessionID, AgentID: "bot", Role: "user", Content: "first question"},
+		{WorkspaceID: wsroot.PersonalWorkspaceID, SessionID: sessionID, AgentID: "bot", Role: "assistant", Content: "first answer"},
+		{WorkspaceID: wsroot.PersonalWorkspaceID, SessionID: sessionID, AgentID: "bot", Role: "user", Content: "second question"},
+		{WorkspaceID: wsroot.PersonalWorkspaceID, SessionID: sessionID, AgentID: "bot", Role: "assistant", Content: "second answer"},
 	}
 	for _, e := range turns {
 		if err := s.Append(ctx, e); err != nil {
 			t.Fatalf("Append: %v", err)
 		}
 	}
-	entries, err := s.Load(ctx, sessionID, 0)
+	entries, err := s.Load(ctx, wsroot.PersonalWorkspaceID, sessionID, 0)
 	if err != nil || len(entries) != 4 {
 		t.Fatalf("Load = %d entries, err=%v; want 4", len(entries), err)
 	}
@@ -43,7 +44,7 @@ func TestFork_CopiesUpToCheckpoint(t *testing.T) {
 	entries := seedConversation(t, s, "main")
 
 	// Fork after the first exchange (entry index 1 = "first answer").
-	copied, err := s.Fork(ctx, "main", "branch-1", entries[1].ID)
+	copied, err := s.Fork(ctx, wsroot.PersonalWorkspaceID, "main", "branch-1", entries[1].ID)
 	if err != nil {
 		t.Fatalf("Fork: %v", err)
 	}
@@ -51,7 +52,7 @@ func TestFork_CopiesUpToCheckpoint(t *testing.T) {
 		t.Errorf("copied = %d, want 2", copied)
 	}
 
-	forked, err := s.Load(ctx, "branch-1", 0)
+	forked, err := s.Load(ctx, wsroot.PersonalWorkspaceID, "branch-1", 0)
 	if err != nil {
 		t.Fatalf("Load fork: %v", err)
 	}
@@ -69,7 +70,7 @@ func TestFork_CopiesUpToCheckpoint(t *testing.T) {
 	}
 
 	// Source must be untouched.
-	src, _ := s.Load(ctx, "main", 0)
+	src, _ := s.Load(ctx, wsroot.PersonalWorkspaceID, "main", 0)
 	if len(src) != 4 {
 		t.Errorf("source mutated: %d entries, want 4", len(src))
 	}
@@ -80,16 +81,16 @@ func TestFork_BranchesStayIsolated(t *testing.T) {
 	ctx := context.Background()
 	entries := seedConversation(t, s, "main")
 
-	if _, err := s.Fork(ctx, "main", "branch-1", entries[1].ID); err != nil {
+	if _, err := s.Fork(ctx, wsroot.PersonalWorkspaceID, "main", "branch-1", entries[1].ID); err != nil {
 		t.Fatalf("Fork: %v", err)
 	}
 
 	// New turns on the branch must not appear in main, and vice versa.
-	_ = s.Append(ctx, ConversationEntry{SessionID: "branch-1", AgentID: "bot", Role: "user", Content: "branch question"})
-	_ = s.Append(ctx, ConversationEntry{SessionID: "main", AgentID: "bot", Role: "user", Content: "main question"})
+	_ = s.Append(ctx, ConversationEntry{WorkspaceID: wsroot.PersonalWorkspaceID, SessionID: "branch-1", AgentID: "bot", Role: "user", Content: "branch question"})
+	_ = s.Append(ctx, ConversationEntry{WorkspaceID: wsroot.PersonalWorkspaceID, SessionID: "main", AgentID: "bot", Role: "user", Content: "main question"})
 
-	branch, _ := s.Load(ctx, "branch-1", 0)
-	main, _ := s.Load(ctx, "main", 0)
+	branch, _ := s.Load(ctx, wsroot.PersonalWorkspaceID, "branch-1", 0)
+	main, _ := s.Load(ctx, wsroot.PersonalWorkspaceID, "main", 0)
 	for _, e := range branch {
 		if e.Content == "main question" {
 			t.Error("main entry leaked into branch")
@@ -110,7 +111,7 @@ func TestFork_CheckpointBeyondEndCopiesAll(t *testing.T) {
 	ctx := context.Background()
 	entries := seedConversation(t, s, "main")
 
-	copied, err := s.Fork(ctx, "main", "branch-all", entries[3].ID+1000)
+	copied, err := s.Fork(ctx, wsroot.PersonalWorkspaceID, "main", "branch-all", entries[3].ID+1000)
 	if err != nil {
 		t.Fatalf("Fork: %v", err)
 	}
@@ -121,7 +122,7 @@ func TestFork_CheckpointBeyondEndCopiesAll(t *testing.T) {
 
 func TestFork_UnknownSourceCopiesNothing(t *testing.T) {
 	s := newForkTestStore(t)
-	copied, err := s.Fork(context.Background(), "never-existed", "branch-x", 999)
+	copied, err := s.Fork(context.Background(), wsroot.PersonalWorkspaceID, "never-existed", "branch-x", 999)
 	if err != nil {
 		t.Fatalf("Fork: %v", err)
 	}
@@ -134,9 +135,9 @@ func TestFork_RefusesNonEmptyTarget(t *testing.T) {
 	s := newForkTestStore(t)
 	ctx := context.Background()
 	entries := seedConversation(t, s, "main")
-	_ = s.Append(ctx, ConversationEntry{SessionID: "busy", AgentID: "bot", Role: "user", Content: "existing"})
+	_ = s.Append(ctx, ConversationEntry{WorkspaceID: wsroot.PersonalWorkspaceID, SessionID: "busy", AgentID: "bot", Role: "user", Content: "existing"})
 
-	if _, err := s.Fork(ctx, "main", "busy", entries[3].ID); err == nil {
+	if _, err := s.Fork(ctx, wsroot.PersonalWorkspaceID, "main", "busy", entries[3].ID); err == nil {
 		t.Fatal("Fork into non-empty target should error (branch mixing)")
 	}
 }
@@ -144,7 +145,7 @@ func TestFork_RefusesNonEmptyTarget(t *testing.T) {
 func TestFork_RefusesSameSession(t *testing.T) {
 	s := newForkTestStore(t)
 	entries := seedConversation(t, s, "main")
-	if _, err := s.Fork(context.Background(), "main", "main", entries[0].ID); err == nil {
+	if _, err := s.Fork(context.Background(), wsroot.PersonalWorkspaceID, "main", "main", entries[0].ID); err == nil {
 		t.Fatal("Fork onto itself should error")
 	}
 }

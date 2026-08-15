@@ -490,11 +490,11 @@ func (f *fakeHistoryStore) Append(_ context.Context, entry session.ConversationE
 	return nil
 }
 
-func (f *fakeHistoryStore) Load(_ context.Context, _ string, _ int) ([]session.ConversationEntry, error) {
+func (f *fakeHistoryStore) Load(_ context.Context, _, _ string, _ int) ([]session.ConversationEntry, error) {
 	return nil, nil
 }
 
-func (f *fakeHistoryStore) LoadForAgent(_ context.Context, _ string, _ int) ([]session.ConversationEntry, error) {
+func (f *fakeHistoryStore) LoadForAgent(_ context.Context, _, _, _ string, _ int) ([]session.ConversationEntry, error) {
 	return nil, nil
 }
 
@@ -690,8 +690,8 @@ type fakeFailureNotifier struct {
 }
 
 type fakeFailureCall struct {
-	def   *agent.Definition
-	msg   message.Message
+	def    *agent.Definition
+	msg    message.Message
 	errMsg string
 }
 
@@ -746,10 +746,10 @@ func TestHandle_LLMErrorPropagated(t *testing.T) {
 	agentDir := t.TempDir()
 	loader := NewLoader([]string{agentDir})
 	def := &agent.Definition{
-		ID:      "err-llm-agent",
-		Name:    "LLM Error Agent",
-		Enabled: true,
-		LLM:     agent.LLMConfig{Provider: "error-provider", Model: "fail-model"},
+		ID:       "err-llm-agent",
+		Name:     "LLM Error Agent",
+		Enabled:  true,
+		LLM:      agent.LLMConfig{Provider: "error-provider", Model: "fail-model"},
 		MaxTurns: 2,
 		Builtins: strListPtr(),
 	}

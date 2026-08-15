@@ -14,18 +14,27 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
+	"errors"
 	"github.com/soulacy/soulacy/internal/sqlitex"
+	"github.com/soulacy/soulacy/internal/wsroot"
+	"sync"
 )
 
 // ConversationEntry is one turn in a conversation.
 type ConversationEntry struct {
-	ID        int64     `json:"id"`
-	SessionID string    `json:"session_id"`
-	AgentID   string    `json:"agent_id"`
-	Role      string    `json:"role"` // "user" | "assistant" | "system"
-	Content   string    `json:"content"`
-	Tokens    int       `json:"tokens"` // 0 if unknown
-	CreatedAt time.Time `json:"created_at"`
+	ID int64 `json:"id"`
+	// WorkspaceID and Subject are the tenant and the person the conversation
+	// belongs to. Conversation history is the most revealing store in the
+	// system — it is the message content itself — and its ownership class is
+	// user-private, so both are required to read across sessions.
+	WorkspaceID string    `json:"workspace_id,omitempty"`
+	Subject     string    `json:"subject,omitempty"`
+	SessionID   string    `json:"session_id"`
+	AgentID     string    `json:"agent_id"`
+	Role        string    `json:"role"` // "user" | "assistant" | "system"
+	Content     string    `json:"content"`
+	Tokens      int       `json:"tokens"` // 0 if unknown
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // SearchHit is one matched conversation-history entry with a compact snippet
@@ -38,16 +47,23 @@ type SearchHit struct {
 // HistoryStore is the interface for persisting and retrieving conversation
 // history entries.
 type HistoryStore interface {
-	// Append adds a conversation turn.
+	// Append adds a conversation turn. The entry must carry a workspace.
 	Append(ctx context.Context, e ConversationEntry) error
 
-	// Load returns the last `limit` entries for sessionID, oldest first.
-	// If limit <= 0, returns all entries.
-	Load(ctx context.Context, sessionID string, limit int) ([]ConversationEntry, error)
+	// Load returns the last `limit` entries for one workspace's sessionID,
+	// oldest first. If limit <= 0, returns all entries.
+	//
+	// It takes no subject: a session is addressed by an ID the caller already
+	// had to be authorized for, and the gateway gates that with
+	// session.Ownership (private by default, widened only inside a workspace).
+	// A second, weaker check here would invite callers to rely on it instead.
+	Load(ctx context.Context, workspaceID, sessionID string, limit int) ([]ConversationEntry, error)
 
 	// LoadForAgent returns the last `limit` entries across all sessions for
-	// agentID, newest first (useful for admin inspection).
-	LoadForAgent(ctx context.Context, agentID string, limit int) ([]ConversationEntry, error)
+	// agentID, newest first. It reads across sessions, so unlike Load it
+	// carries the subject: this is where one workspace member would otherwise
+	// read a colleague's conversations.
+	LoadForAgent(ctx context.Context, workspaceID, subject, agentID string, limit int) ([]ConversationEntry, error)
 
 	// Prune deletes entries older than the given duration. Returns count deleted.
 	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
@@ -67,12 +83,12 @@ type NoopHistoryStore struct{}
 func (NoopHistoryStore) Append(_ context.Context, _ ConversationEntry) error { return nil }
 
 // Load returns nil, nil.
-func (NoopHistoryStore) Load(_ context.Context, _ string, _ int) ([]ConversationEntry, error) {
+func (NoopHistoryStore) Load(_ context.Context, _, _ string, _ int) ([]ConversationEntry, error) {
 	return nil, nil
 }
 
 // LoadForAgent returns nil, nil.
-func (NoopHistoryStore) LoadForAgent(_ context.Context, _ string, _ int) ([]ConversationEntry, error) {
+func (NoopHistoryStore) LoadForAgent(_ context.Context, _, _, _ string, _ int) ([]ConversationEntry, error) {
 	return nil, nil
 }
 
@@ -89,6 +105,8 @@ func (NoopHistoryStore) Close() error { return nil }
 const historySchema = `
 CREATE TABLE IF NOT EXISTS conversation_history (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id TEXT NOT NULL DEFAULT 'ws_personal',
+    subject     TEXT NOT NULL DEFAULT '',
     session_id  TEXT NOT NULL,
     agent_id    TEXT NOT NULL,
     role        TEXT NOT NULL,
@@ -96,15 +114,23 @@ CREATE TABLE IF NOT EXISTS conversation_history (
     tokens      INTEGER NOT NULL DEFAULT 0,
     created_at  DATETIME NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_ch_session ON conversation_history(session_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_ch_agent   ON conversation_history(agent_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ch_session ON conversation_history(workspace_id, session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_ch_agent   ON conversation_history(workspace_id, subject, agent_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ch_content ON conversation_history(content);
 `
+
+// ErrWorkspaceRequired is returned by an operation with no tenant. A
+// conversation turn with no owner is one every tenant can search.
+var ErrWorkspaceRequired = errors.New("session/history: workspace_id is required")
+
+// historyColumns is the canonical SELECT list matching scanEntries.
+const historyColumns = `id, workspace_id, subject, session_id, agent_id, role, content, tokens, created_at`
 
 // SQLiteHistoryStore is the SQLite-backed implementation of HistoryStore.
 type SQLiteHistoryStore struct {
 	db        *sql.DB
 	stopCh    chan struct{}
+	closeOnce sync.Once
 	retention time.Duration
 }
 
@@ -131,6 +157,11 @@ func NewSQLiteHistoryStore(path string, opts ...HistoryOption) (*SQLiteHistorySt
 			return nil, fmt.Errorf("session/history: schema migration (%q): %w",
 				truncate(stmt, 60), err)
 		}
+	}
+
+	if err := addHistoryWorkspaceColumns(db); err != nil {
+		_ = db.Close()
+		return nil, err
 	}
 
 	s := &SQLiteHistoryStore{
@@ -169,11 +200,16 @@ func (s *SQLiteHistoryStore) pruneLoop() {
 
 // Append inserts a new conversation entry with created_at set to now (UTC).
 func (s *SQLiteHistoryStore) Append(ctx context.Context, e ConversationEntry) error {
+	workspaceID, err := requireWorkspace(e.WorkspaceID)
+	if err != nil {
+		return err
+	}
 	createdAt := time.Now().UTC().Format("2006-01-02 15:04:05")
-	_, err := s.db.ExecContext(ctx,
+	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO conversation_history
-		    (session_id, agent_id, role, content, tokens, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
+		    (workspace_id, subject, session_id, agent_id, role, content, tokens, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		workspaceID, strings.TrimSpace(e.Subject),
 		e.SessionID, e.AgentID, e.Role, e.Content, e.Tokens, createdAt,
 	)
 	if err != nil {
@@ -185,31 +221,32 @@ func (s *SQLiteHistoryStore) Append(ctx context.Context, e ConversationEntry) er
 // Load returns conversation entries for sessionID, oldest first.
 // If limit <= 0, all entries are returned.
 // If limit > 0, the last `limit` entries are returned in chronological order.
-func (s *SQLiteHistoryStore) Load(ctx context.Context, sessionID string, limit int) ([]ConversationEntry, error) {
-	var (
-		rows *sql.Rows
-		err  error
-	)
+func (s *SQLiteHistoryStore) Load(ctx context.Context, workspaceID, sessionID string, limit int) ([]ConversationEntry, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	var rows *sql.Rows
 	if limit <= 0 {
 		rows, err = s.db.QueryContext(ctx,
-			`SELECT id, session_id, agent_id, role, content, tokens, created_at
+			`SELECT `+historyColumns+`
 			 FROM conversation_history
-			 WHERE session_id = ?
+			 WHERE workspace_id = ? AND session_id = ?
 			 ORDER BY id ASC`,
-			sessionID,
+			workspaceID, sessionID,
 		)
 	} else {
 		rows, err = s.db.QueryContext(ctx,
-			`SELECT id, session_id, agent_id, role, content, tokens, created_at
+			`SELECT `+historyColumns+`
 			 FROM (
-			     SELECT id, session_id, agent_id, role, content, tokens, created_at
+			     SELECT `+historyColumns+`
 			     FROM conversation_history
-			     WHERE session_id = ?
+			     WHERE workspace_id = ? AND session_id = ?
 			     ORDER BY id DESC
 			     LIMIT ?
 			 )
 			 ORDER BY id ASC`,
-			sessionID, limit,
+			workspaceID, sessionID, limit,
 		)
 	}
 	if err != nil {
@@ -222,18 +259,27 @@ func (s *SQLiteHistoryStore) Load(ctx context.Context, sessionID string, limit i
 
 // LoadForAgent returns the last `limit` entries for agentID across all
 // sessions, newest first.  If limit <= 0, it is capped at 1000.
-func (s *SQLiteHistoryStore) LoadForAgent(ctx context.Context, agentID string, limit int) ([]ConversationEntry, error) {
+func (s *SQLiteHistoryStore) LoadForAgent(ctx context.Context, workspaceID, subject, agentID string, limit int) ([]ConversationEntry, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
 	if limit <= 0 {
 		limit = 1000
 	}
+	where := []string{"workspace_id = ?", "agent_id = ?"}
+	args := []any{workspaceID, agentID}
+	if clause, extra := subjectPredicate(workspaceID, subject); clause != "" {
+		where = append(where, clause)
+		args = append(args, extra...)
+	}
+	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, session_id, agent_id, role, content, tokens, created_at
+		`SELECT `+historyColumns+`
 		 FROM conversation_history
-		 WHERE agent_id = ?
+		 WHERE `+strings.Join(where, " AND ")+`
 		 ORDER BY id DESC
-		 LIMIT ?`,
-		agentID, limit,
-	)
+		 LIMIT ?`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("session/history: load agent %q: %w", agentID, err)
 	}
@@ -245,7 +291,15 @@ func (s *SQLiteHistoryStore) LoadForAgent(ctx context.Context, agentID string, l
 // Search returns recent entries whose content contains all query terms. It is a
 // bounded plain-SQL search intended for chat recall; semantic search can layer
 // on top later without changing the API shape.
-func (s *SQLiteHistoryStore) Search(ctx context.Context, agentID, query string, limit int) ([]SearchHit, error) {
+// Search is the read that mattered most here. agentID is optional — blank
+// means "every agent" — so without the workspace and subject predicates a
+// single query returned matching message content from every conversation in
+// the deployment. Both are mandatory and applied before the optional filters.
+func (s *SQLiteHistoryStore) Search(ctx context.Context, workspaceID, subject, agentID, query string, limit int) ([]SearchHit, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
 	terms := searchTerms(query, 5)
 	if len(terms) == 0 {
 		return []SearchHit{}, nil
@@ -253,8 +307,12 @@ func (s *SQLiteHistoryStore) Search(ctx context.Context, agentID, query string, 
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
-	where := []string{}
-	args := []any{}
+	where := []string{"workspace_id = ?"}
+	args := []any{workspaceID}
+	if clause, extra := subjectPredicate(workspaceID, subject); clause != "" {
+		where = append(where, clause)
+		args = append(args, extra...)
+	}
 	if strings.TrimSpace(agentID) != "" {
 		where = append(where, "agent_id = ?")
 		args = append(args, strings.TrimSpace(agentID))
@@ -265,7 +323,7 @@ func (s *SQLiteHistoryStore) Search(ctx context.Context, agentID, query string, 
 	}
 	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, session_id, agent_id, role, content, tokens, created_at
+		`SELECT `+historyColumns+`
 		 FROM conversation_history
 		 WHERE `+strings.Join(where, " AND ")+`
 		 ORDER BY id DESC
@@ -286,7 +344,64 @@ func (s *SQLiteHistoryStore) Search(ctx context.Context, agentID, query string, 
 	return out, nil
 }
 
-// Prune deletes entries older than olderThan. Returns the number of rows deleted.
+// subjectPredicate returns the SQL fragment and argument that restrict a
+// cross-session read to one person — and deliberately returns nothing at all
+// in the personal workspace.
+//
+// The personal workspace has exactly one user; that is what "personal" means.
+// Partitioning it by subject buys no isolation, and it would actively lose
+// data: every row written before tenancy carries an empty subject, while a
+// reader today resolves to whatever local owner ID the deployment assigned. A
+// Personal user would upgrade and find their own history had vanished from
+// search. Product invariant 7 says they must not notice the storage layer
+// became tenant-aware, so here they do not.
+//
+// In every other workspace the predicate applies in full: that is where one
+// member reading a colleague's conversations is a real boundary.
+func subjectPredicate(workspaceID, subject string) (string, []any) {
+	if workspaceID == wsroot.PersonalWorkspaceID {
+		return "", nil
+	}
+	return "subject = ?", []any{strings.TrimSpace(subject)}
+}
+
+// requireWorkspace normalizes a tenant and refuses an absent one.
+func requireWorkspace(workspaceID string) (string, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return "", ErrWorkspaceRequired
+	}
+	return wsroot.Normalize(workspaceID), nil
+}
+
+// addHistoryWorkspaceColumns brings a pre-tenant history database up to the
+// current schema and assigns its turns to the personal workspace, which is
+// what a single-user installation's conversations were.
+//
+// The backfill runs on every open, not only when the columns are added. A row
+// with an empty workspace matches no scoped query, so it is not a leak — it is
+// a conversation that silently vanished, which is worse and harder to notice.
+func addHistoryWorkspaceColumns(db *sql.DB) error {
+	for _, stmt := range []string{
+		`ALTER TABLE conversation_history ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'ws_personal'`,
+		`ALTER TABLE conversation_history ADD COLUMN subject TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, err := db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("session/history: migrate: %w", err)
+		}
+	}
+	if _, err := db.Exec(
+		`UPDATE conversation_history SET workspace_id = ? WHERE workspace_id IS NULL OR workspace_id = ''`,
+		wsroot.PersonalWorkspaceID); err != nil {
+		return fmt.Errorf("session/history: backfill workspace: %w", err)
+	}
+	return nil
+}
+
+// Prune deletes entries older than olderThan across every tenant. Retention is
+// a deployment-wide guarantee: a policy that silently applied to one workspace
+// only would be worse than none, so this is deliberately unscoped.
+
 func (s *SQLiteHistoryStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format("2006-01-02 15:04:05")
 	res, err := s.db.ExecContext(ctx,
@@ -303,8 +418,12 @@ func (s *SQLiteHistoryStore) Prune(ctx context.Context, olderThan time.Duration)
 }
 
 // Close stops the background pruner and closes the database connection.
+//
+// Safe to call more than once: closing an already-closed channel panics, and a
+// store reached through two shutdown paths — an explicit Close and a deferred
+// one — would take the process down rather than return an error.
 func (s *SQLiteHistoryStore) Close() error {
-	close(s.stopCh)
+	s.closeOnce.Do(func() { close(s.stopCh) })
 	return s.db.Close()
 }
 
@@ -323,7 +442,7 @@ func scanEntries(rows *sql.Rows) ([]ConversationEntry, error) {
 		// the driver reformats DATETIME columns as RFC3339 when the scan target
 		// is a string.
 		if err := rows.Scan(
-			&e.ID, &e.SessionID, &e.AgentID, &e.Role, &e.Content, &e.Tokens, &e.CreatedAt,
+			&e.ID, &e.WorkspaceID, &e.Subject, &e.SessionID, &e.AgentID, &e.Role, &e.Content, &e.Tokens, &e.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("session/history: scan row: %w", err)
 		}

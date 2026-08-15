@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"fmt"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"net/http"
 	"path/filepath"
 	"testing"
@@ -25,16 +26,16 @@ func newTestGatewayWithHistory(t *testing.T) (*Server, []session.ConversationEnt
 
 	ctx := context.Background()
 	for _, e := range []session.ConversationEntry{
-		{SessionID: "gui-main", AgentID: "bot", Role: "user", Content: "q1"},
-		{SessionID: "gui-main", AgentID: "bot", Role: "assistant", Content: "a1"},
-		{SessionID: "gui-main", AgentID: "bot", Role: "user", Content: "q2"},
-		{SessionID: "gui-main", AgentID: "bot", Role: "assistant", Content: "a2"},
+		{WorkspaceID: wsroot.PersonalWorkspaceID, SessionID: "gui-main", AgentID: "bot", Role: "user", Content: "q1"},
+		{WorkspaceID: wsroot.PersonalWorkspaceID, SessionID: "gui-main", AgentID: "bot", Role: "assistant", Content: "a1"},
+		{WorkspaceID: wsroot.PersonalWorkspaceID, SessionID: "gui-main", AgentID: "bot", Role: "user", Content: "q2"},
+		{WorkspaceID: wsroot.PersonalWorkspaceID, SessionID: "gui-main", AgentID: "bot", Role: "assistant", Content: "a2"},
 	} {
 		if err := hs.Append(ctx, e); err != nil {
 			t.Fatalf("Append: %v", err)
 		}
 	}
-	entries, err := hs.Load(ctx, "gui-main", 0)
+	entries, err := hs.Load(ctx, wsroot.PersonalWorkspaceID, "gui-main", 0)
 	if err != nil || len(entries) != 4 {
 		t.Fatalf("seed Load = %d, err=%v", len(entries), err)
 	}

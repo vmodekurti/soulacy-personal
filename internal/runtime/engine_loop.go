@@ -1004,12 +1004,18 @@ func (e *Engine) recordWorkflowTurn(ctx context.Context, msg message.Message, re
 	sess.mu.Unlock()
 
 	if e.historyStore != nil {
+		// The run's own tenant and requester. Conversation history is
+		// user-private, so both travel with every turn: a turn stored without
+		// them is one no scoped read will ever return.
+		workspaceID, subject := WorkspaceFromContext(ctx), SubjectFromContext(ctx)
 		if err := e.historyStore.Append(ctx, session.ConversationEntry{
+			WorkspaceID: workspaceID, Subject: subject,
 			SessionID: msg.SessionID, AgentID: msg.AgentID, Role: "user", Content: userText,
 		}); err != nil {
 			e.log.Warn("history store: append workflow user turn failed", zap.Error(err))
 		}
 		if err := e.historyStore.Append(ctx, session.ConversationEntry{
+			WorkspaceID: workspaceID, Subject: subject,
 			SessionID: msg.SessionID, AgentID: msg.AgentID, Role: "assistant", Content: replyText,
 		}); err != nil {
 			e.log.Warn("history store: append workflow assistant turn failed", zap.Error(err))
@@ -1108,14 +1114,17 @@ func (e *Engine) finalizeReply(ctx context.Context, def *agent.Definition, sess 
 
 	// Persist user + assistant turns to the conversation history store.
 	if e.historyStore != nil {
+		workspaceID, subject := WorkspaceFromContext(ctx), SubjectFromContext(ctx)
 		userContent := flattenParts(msg.Parts)
 		if err := e.historyStore.Append(ctx, session.ConversationEntry{
+			WorkspaceID: workspaceID, Subject: subject,
 			SessionID: msg.SessionID, AgentID: msg.AgentID,
 			Role: "user", Content: userContent,
 		}); err != nil {
 			e.log.Warn("history store: append user turn failed", zap.Error(err))
 		}
 		if err := e.historyStore.Append(ctx, session.ConversationEntry{
+			WorkspaceID: workspaceID, Subject: subject,
 			SessionID: msg.SessionID, AgentID: msg.AgentID,
 			Role: "assistant", Content: finalContent,
 		}); err != nil {
