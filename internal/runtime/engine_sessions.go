@@ -441,7 +441,7 @@ func (e *Engine) buildSystemPrefix(ctx context.Context, def *agent.Definition) s
 		}
 	}
 	if e.skillLoader != nil {
-		if catalog := e.skillCatalogFor(e.effectiveSkillNames(ctx, def)); catalog != "" {
+		if catalog := e.skillCatalogFor(ctx, e.effectiveSkillNames(ctx, def)); catalog != "" {
 			systemPrompt += "\n\n" +
 				"## Available Skills\n" +
 				"The following skills provide specialized instructions for specific tasks.\n" +

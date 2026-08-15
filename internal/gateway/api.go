@@ -4327,10 +4327,10 @@ func (s *Server) handleDeleteProvider(c *fiber.Ctx) error {
 
 // handleListSkills returns the catalog of all loaded Agent Skills.
 func (s *Server) handleListSkills(c *fiber.Ctx) error {
-	if s.skillLoader == nil {
+	if s.skillCatalog(c) == nil {
 		return c.JSON(fiber.Map{"skills": []struct{}{}, "count": 0})
 	}
-	all := s.skillLoader.All()
+	all := s.skillCatalog(c).All()
 
 	type skillSummary struct {
 		Name          string            `json:"name"`
@@ -4358,11 +4358,11 @@ func (s *Server) handleListSkills(c *fiber.Ctx) error {
 
 // handleGetSkill returns the full content (instructions) of a single skill.
 func (s *Server) handleGetSkill(c *fiber.Ctx) error {
-	if s.skillLoader == nil {
+	if s.skillCatalog(c) == nil {
 		return s.errMsg(c, fiber.StatusNotFound, "skills not enabled")
 	}
 	name := c.Params("name")
-	sk := s.skillLoader.Get(name)
+	sk := s.skillCatalog(c).Get(name)
 	if sk == nil {
 		return s.errMsg(c, fiber.StatusNotFound, "skill not found")
 	}
@@ -4405,12 +4405,12 @@ var githubBlobRe = regexp.MustCompile(`href="(https://github\.com/[^/]+/[^/]+/bl
 //
 // POST /api/v1/skills/rescan → { "ok": true, "count": <loaded skills> }
 func (s *Server) handleRescanSkills(c *fiber.Ctx) error {
-	if s.skillLoader == nil {
+	if s.skillCatalog(c) == nil {
 		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
 			"ok": false, "error": "skill loader unavailable",
 		})
 	}
-	scanner, ok := s.skillLoader.(interface{ Scan() []error })
+	scanner, ok := s.skillCatalog(c).(interface{ Scan() []error })
 	if !ok {
 		return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{
 			"ok": false, "error": "skill loader does not support rescanning",
@@ -4421,13 +4421,13 @@ func (s *Server) handleRescanSkills(c *fiber.Ctx) error {
 		for i, e := range errs {
 			msgs[i] = e.Error()
 		}
-		return c.JSON(fiber.Map{"ok": true, "count": len(s.skillLoader.All()), "warnings": msgs})
+		return c.JSON(fiber.Map{"ok": true, "count": len(s.skillCatalog(c).All()), "warnings": msgs})
 	}
-	return c.JSON(fiber.Map{"ok": true, "count": len(s.skillLoader.All())})
+	return c.JSON(fiber.Map{"ok": true, "count": len(s.skillCatalog(c).All())})
 }
 
 func (s *Server) handleInstallRegistrySkill(c *fiber.Ctx) error {
-	if s.skillLoader == nil {
+	if s.skillCatalog(c) == nil {
 		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
 			"ok": false, "error": "skill loader unavailable",
 		})
@@ -4518,7 +4518,7 @@ func (s *Server) handleInstallRegistrySkill(c *fiber.Ctx) error {
 	}
 
 	rescanWarnings := []string{}
-	if scanner, ok := s.skillLoader.(interface{ Scan() []error }); ok {
+	if scanner, ok := s.skillCatalog(c).(interface{ Scan() []error }); ok {
 		for _, e := range scanner.Scan() {
 			if e != nil {
 				rescanWarnings = append(rescanWarnings, e.Error())
@@ -4561,7 +4561,7 @@ func registrySkillDirName(slug string) string {
 }
 
 func (s *Server) handleProvisionAgenticSkill(c *fiber.Ctx) error {
-	if s.skillLoader == nil {
+	if s.skillCatalog(c) == nil {
 		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
 			"ok": false, "error": "skill loader not initialised",
 		})
@@ -4691,7 +4691,7 @@ func (s *Server) handleProvisionAgenticSkill(c *fiber.Ctx) error {
 
 	// 5. Hot-rescan (skills.Loader implements Scan(); use type assertion to
 	//    avoid adding the method to the runtime.SkillLoader interface).
-	if scanner, ok := s.skillLoader.(interface{ Scan() []error }); ok {
+	if scanner, ok := s.skillCatalog(c).(interface{ Scan() []error }); ok {
 		_ = scanner.Scan()
 	}
 

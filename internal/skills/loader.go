@@ -68,11 +68,42 @@ func New(workDir string, extraDirs []string, log *zap.Logger) *Loader {
 	// Extra dirs from config (highest priority — explicitly configured)
 	dirs = append(dirs, extraDirs...)
 
+	return NewWithDirs(dirs, log)
+}
+
+// PlatformDirs is the scan list New would use, without constructing a loader.
+// Stores needs it to layer a workspace's own directory on top.
+func PlatformDirs(workDir string, extraDirs []string) []string {
+	home, _ := os.UserHomeDir()
+	dirs := []string{}
+	if home != "" {
+		dirs = append(dirs, filepath.Join(home, ".agents", "skills"), workspaceSkillsDir(home))
+	}
+	if workDir != "" {
+		dirs = append(dirs,
+			filepath.Join(workDir, ".agents", "skills"),
+			filepath.Join(workDir, ".soulacy", "skills"))
+	}
+	return append(dirs, extraDirs...)
+}
+
+// NewWithDirs creates a loader over an explicit, already-ordered scan list.
+// Later directories override earlier ones on a name collision.
+func NewWithDirs(dirs []string, log *zap.Logger) *Loader {
 	return &Loader{
-		scanDirs: dirs,
+		scanDirs: append([]string(nil), dirs...),
 		skills:   make(map[string]*skill.Skill),
 		log:      log,
 	}
+}
+
+// ScanDirs reports the ordered scan list, so a caller can tell an operator
+// where a skill came from without guessing.
+func (l *Loader) ScanDirs() []string {
+	if l == nil {
+		return nil
+	}
+	return append([]string(nil), l.scanDirs...)
 }
 
 // Scan discovers all skills across all configured directories.

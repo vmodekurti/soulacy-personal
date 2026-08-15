@@ -99,7 +99,7 @@ func (s *Server) readinessPayload(c *fiber.Ctx) fiber.Map {
 	updateManifest := s.updateManifestSource()
 	executors := s.executorReadiness()
 	browser := s.browserAutomationReadiness(s.agents(c))
-	marketplace := s.marketplaceReadiness()
+	marketplace := s.marketplaceReadiness(s.requestWorkspace(c))
 	mobile := s.mobileCompanionReadiness(s.agents(c))
 	chat := s.chatExperienceReadiness(c)
 	voice := s.voiceReadiness()

@@ -80,7 +80,10 @@ func (e *Engine) buildBuiltins() []BuiltinTool {
 
 	// Skill built-ins are only added when a skill loader is configured;
 	// other built-ins (kb_search, …) are appended below regardless.
-	if e.skillLoader != nil {
+	// Gated on skills being configured at all, not on a particular workspace's
+	// catalog: the tool list is built once at startup, and which skills a run
+	// can actually see is resolved per request inside the handlers.
+	if e.skillLoader != nil || e.skillLoaders != nil {
 		tools = e.appendSkillBuiltins(tools)
 	}
 
@@ -134,9 +137,13 @@ func (e *Engine) appendSkillBuiltins(tools []BuiltinTool) []BuiltinTool {
 			if name == "" {
 				return "", fmt.Errorf("read_skill: skill_name is required")
 			}
-			s := e.skillLoader.Get(name)
+			loader := e.skills(ctx)
+			if loader == nil {
+				return "", fmt.Errorf("read_skill: no skills are available in this workspace")
+			}
+			s := loader.Get(name)
 			if s == nil {
-				return "", fmt.Errorf("read_skill: skill %q not found. Available skills: %s", name, e.skillNamesCSV())
+				return "", fmt.Errorf("read_skill: skill %q not found. Available skills: %s", name, e.skillNamesCSV(ctx))
 			}
 			var sb strings.Builder
 			sb.WriteString(fmt.Sprintf("<skill_content name=%q>\n", s.Name))
@@ -182,7 +189,11 @@ func (e *Engine) appendSkillBuiltins(tools []BuiltinTool) []BuiltinTool {
 				return "", fmt.Errorf("read_skill_file: skill_name and path are required")
 			}
 
-			s := e.skillLoader.Get(skillName)
+			loader := e.skills(ctx)
+			if loader == nil {
+				return "", fmt.Errorf("read_skill_file: no skills are available in this workspace")
+			}
+			s := loader.Get(skillName)
 			if s == nil {
 				return "", fmt.Errorf("read_skill_file: skill %q not found", skillName)
 			}

@@ -966,7 +966,7 @@ func TestHandle_KnowledgeServiceNilDoesNotPanic(t *testing.T) {
 func TestSkillCatalogFor_NilLoaderReturnsEmpty(t *testing.T) {
 	e := newMinimalEngine(t)
 	// skillLoader is nil
-	result := e.skillCatalogFor([]string{"some-skill"})
+	result := e.skillCatalogFor(context.Background(), []string{"some-skill"})
 	if result != "" {
 		t.Errorf("skillCatalogFor(nil loader) = %q, want empty string", result)
 	}
@@ -976,7 +976,7 @@ func TestSkillCatalogFor_NilLoaderReturnsEmpty(t *testing.T) {
 // empty string for wildcard when loader is nil.
 func TestSkillCatalogFor_WildcardWithNilLoader(t *testing.T) {
 	e := newMinimalEngine(t)
-	result := e.skillCatalogFor([]string{"*"})
+	result := e.skillCatalogFor(context.Background(), []string{"*"})
 	if result != "" {
 		t.Errorf("skillCatalogFor(*, nil loader) = %q, want empty string", result)
 	}
@@ -990,7 +990,7 @@ func TestSkillCatalogFor_NamedSkillFound(t *testing.T) {
 		{Name: "my-skill-e7", Description: "Does stuff.", Body: "body", Dir: t.TempDir()},
 	}}
 
-	result := e.skillCatalogFor([]string{"my-skill-e7"})
+	result := e.skillCatalogFor(context.Background(), []string{"my-skill-e7"})
 	if result == "" {
 		t.Fatal("expected non-empty catalog for known skill")
 	}

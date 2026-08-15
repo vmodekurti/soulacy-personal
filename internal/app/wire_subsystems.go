@@ -54,6 +54,7 @@ import (
 	"github.com/soulacy/soulacy/internal/telemetry"
 	"github.com/soulacy/soulacy/internal/tenancy"
 	"github.com/soulacy/soulacy/internal/vector"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 	"github.com/soulacy/soulacy/sdk/queue"
@@ -228,7 +229,7 @@ func (a *App) applyManifestPluginMigrations(ws config.Paths, pluginLoader *plugi
 // pre-flight ($PATH resolution of runtime.python_bin), and applies
 // manifest-declared plugin migrations. Returns the three loaders in
 // construction order.
-func (a *App) wireLoaders(ws config.Paths) (*runtime.Loader, *plugins.Loader, *skills.Loader) {
+func (a *App) wireLoaders(ws config.Paths) (*runtime.Loader, *plugins.Loader, *skills.Loader, *skills.Stores) {
 	cfg, log := a.cfg, a.log
 
 	// ── Agent Loader ─────────────────────────────────────────────────────────
@@ -310,7 +311,13 @@ func (a *App) wireLoaders(ws config.Paths) (*runtime.Loader, *plugins.Loader, *s
 	for _, lp := range pluginLoader.All() {
 		skillDirs = append(skillDirs, lp.SkillDirs()...)
 	}
-	skillLoader := skills.New(workDir, skillDirs, log)
+	// Platform scan list: the operator's directories and the cross-client
+	// conventions. Every workspace sees these as read-only templates; each also
+	// gets its own directory, scanned last so it can shadow a platform skill by
+	// name without modifying the platform copy (MU-017 criterion 1).
+	platformSkillDirs := skills.PlatformDirs(workDir, skillDirs)
+	skillStores := skills.NewStores(platformSkillDirs, ws.Skills, log)
+	skillLoader := skills.NewWithDirs(skillStores.ScanDirs(wsroot.PersonalWorkspaceID), log)
 	if errs := skillLoader.Scan(); len(errs) > 0 {
 		for _, e := range errs {
 			log.Warn("skill load warning", zap.Error(e))
@@ -320,7 +327,7 @@ func (a *App) wireLoaders(ws config.Paths) (*runtime.Loader, *plugins.Loader, *s
 		log.Info("agent skills loaded", zap.Int("count", skillLoader.Count()))
 	}
 
-	return loader, pluginLoader, skillLoader
+	return loader, pluginLoader, skillLoader, skillStores
 }
 
 // wireLLMRouter builds the LLM router, registers the unconditional Ollama
@@ -999,6 +1006,7 @@ type engineDeps struct {
 	memBackend     storage.MemoryBackend
 	hub            *gateway.EventHub
 	skillLoader    *skills.Loader
+	skillStores    *skills.Stores
 	mcpClient      *mcp.Client
 	knowledgeSvc   *knowledge.Service
 	vectorStore    *memory.VectorStore
@@ -1149,6 +1157,17 @@ func (a *App) wireEngine(d engineDeps) *runtime.Engine {
 	}
 
 	// MEM-03: pass the brain memory store into the engine.
+	// Per-workspace skill catalogs. A skill is executable instruction text an
+	// agent follows, so a shared catalog changes what another tenant's agents
+	// do rather than merely exposing metadata.
+	if d.skillStores != nil {
+		engine.SetSkillLoaders(func(workspaceID string) runtime.SkillLoader {
+			if loader := d.skillStores.For(workspaceID); loader != nil {
+				return loader
+			}
+			return nil
+		})
+	}
 	if d.brainStores != nil {
 		engine.SetBrainMemory(d.brainStores)
 	}

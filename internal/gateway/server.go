@@ -72,6 +72,7 @@ import (
 	"github.com/soulacy/soulacy/internal/runtime"
 	"github.com/soulacy/soulacy/internal/scheduler"
 	"github.com/soulacy/soulacy/internal/session"
+	"github.com/soulacy/soulacy/internal/skills"
 	"github.com/soulacy/soulacy/internal/storage"
 	"github.com/soulacy/soulacy/internal/studio"
 	"github.com/soulacy/soulacy/internal/tenancy"
@@ -86,17 +87,20 @@ import (
 
 // Server is the Soulacy gateway server.
 type Server struct {
-	cfg             *config.Config
-	cfgPath         string // path to config file on disk; empty = unknown
-	app             *fiber.App
-	engine          *runtime.Engine
-	loader          *runtime.Loader
-	llmRouter       *llm.Router
-	channels        *channels.Registry
-	scheduler       *scheduler.Scheduler
-	httpChan        *httpchan.Adapter
-	waChan          *wachan.Adapter          // nil if WhatsApp not configured
-	skillLoader     runtime.SkillLoader      // nil if no skills installed
+	cfg         *config.Config
+	cfgPath     string // path to config file on disk; empty = unknown
+	app         *fiber.App
+	engine      *runtime.Engine
+	loader      *runtime.Loader
+	llmRouter   *llm.Router
+	channels    *channels.Registry
+	scheduler   *scheduler.Scheduler
+	httpChan    *httpchan.Adapter
+	waChan      *wachan.Adapter     // nil if WhatsApp not configured
+	skillLoader runtime.SkillLoader // nil if no skills installed
+	// skillStores, when set, resolves one workspace's skill inventory and takes
+	// precedence over skillLoader. Handlers reach it through s.skillCatalog(c).
+	skillStores     *skills.Stores
 	actions         storage.ActionLogBackend // nil if action logging disabled
 	mcp             *mcp.Client              // nil if no MCP servers configured
 	hub             *EventHub
@@ -349,6 +353,10 @@ func (s *Server) SetAPIKeyStore(st apikeys.Store) {
 
 // SetDLQStore wires a dead-letter queue store into the server.
 // When nil, /admin/dlq routes return 503.
+// SetSkillStores wires the per-workspace skill inventory (MU-017). Safe to
+// call once at startup, before traffic.
+func (s *Server) SetSkillStores(stores *skills.Stores) { s.skillStores = stores }
+
 func (s *Server) SetDLQStore(st dlq.Store) {
 	s.dlqStore = st
 }
@@ -967,8 +975,8 @@ func (s *Server) buildApp() *fiber.App {
 	// Skills (Agent Skills format — agentskills.io)
 	api.Get("/skills", s.rbacMW(rbac.ResourceSkills, rbac.ActionRead), s.handleListSkills)
 	api.Get("/skills/:name", s.rbacMW(rbac.ResourceSkills, rbac.ActionRead), s.handleGetSkill)
-	api.Post("/skills/install", s.rbacMW(rbac.ResourceSkills, rbac.ActionWrite), s.handleInstallRegistrySkill)
-	api.Post("/skills/provision-agenticskills", s.rbacMW(rbac.ResourceSkills, rbac.ActionWrite), s.handleProvisionAgenticSkill)
+	api.Post("/skills/install", s.rbacMW(rbac.ResourceSkills, rbac.ActionInstall), s.handleInstallRegistrySkill)
+	api.Post("/skills/provision-agenticskills", s.rbacMW(rbac.ResourceSkills, rbac.ActionInstall), s.handleProvisionAgenticSkill)
 	api.Post("/skills/rescan", s.rbacMW(rbac.ResourceSkills, rbac.ActionWrite), s.handleRescanSkills)
 	api.Get("/marketplace/status", s.rbacMW(rbac.ResourceSkills, rbac.ActionRead), s.handleMarketplaceStatus)
 
@@ -978,9 +986,9 @@ func (s *Server) buildApp() *fiber.App {
 	api.Patch("/mcp/:id", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleUpdateMCPServer)
 	api.Delete("/mcp/:id", s.rbacMW(rbac.ResourceMCP, rbac.ActionDelete), s.handleDeleteMCPServer)
 	api.Post("/mcp/test", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleTestMCPServer)
-	api.Post("/mcp/provision-glama", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleProvisionGlama)
+	api.Post("/mcp/provision-glama", s.rbacMW(rbac.ResourceMCP, rbac.ActionInstall), s.handleProvisionGlama)
 	api.Get("/mcp/registry/search", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleMCPRegistrySearch)
-	api.Post("/mcp/provision-registry", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleProvisionMCPRegistry)
+	api.Post("/mcp/provision-registry", s.rbacMW(rbac.ResourceMCP, rbac.ActionInstall), s.handleProvisionMCPRegistry)
 
 	// Knowledge (RAG) — KBs, documents, search
 	api.Get("/knowledge", s.rbacMW(rbac.ResourceKnowledge, rbac.ActionRead), s.handleListKnowledge)

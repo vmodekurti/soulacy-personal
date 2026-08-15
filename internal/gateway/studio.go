@@ -330,9 +330,9 @@ func (s *Server) groundCatalog(scope studioScope, cat *studio.Catalog) {
 		s.groundWorkflowPatterns(scope, cat, cat.RawIntent)
 	}
 	// Installed skills (so "yahoo finance" maps to the real "yfinance").
-	if s.skillLoader != nil {
+	if loader := s.skillCatalogForWorkspace(scope.workspaceID); loader != nil {
 		cat.Skills = cat.Skills[:0]
-		for _, sk := range s.skillLoader.All() {
+		for _, sk := range loader.All() {
 			if sk == nil || strings.TrimSpace(sk.Name) == "" {
 				continue
 			}

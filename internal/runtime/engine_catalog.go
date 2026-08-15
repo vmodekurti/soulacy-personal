@@ -22,8 +22,9 @@ import (
 )
 
 // EventSink receives structured events as they happen during agent execution.
-func (e *Engine) skillCatalogFor(names []string) string {
-	if e.skillLoader == nil {
+func (e *Engine) skillCatalogFor(ctx context.Context, names []string) string {
+	loader := e.skills(ctx)
+	if loader == nil {
 		return ""
 	}
 	var skills []*skill.Skill
@@ -35,10 +36,10 @@ func (e *Engine) skillCatalogFor(names []string) string {
 		}
 	}
 	if all {
-		skills = e.skillLoader.All()
+		skills = loader.All()
 	} else {
 		for _, n := range names {
-			if s := e.skillLoader.Get(n); s != nil {
+			if s := loader.Get(n); s != nil {
 				skills = append(skills, s)
 			}
 		}
@@ -100,7 +101,7 @@ func (e *Engine) effectiveSkillNames(ctx context.Context, def *agent.Definition)
 		if name == "" || seen[name] {
 			continue
 		}
-		if e.skillLoader != nil && e.skillLoader.Get(name) == nil {
+		if loader := e.skills(ctx); loader != nil && loader.Get(name) == nil {
 			continue
 		}
 		seen[name] = true
@@ -164,11 +165,12 @@ func (e *Engine) agentCatalogFor(def *agent.Definition) string {
 
 // skillNamesCSV returns a comma-separated list of all installed skill names,
 // used to help the model self-correct when it calls read_skill with a bad name.
-func (e *Engine) skillNamesCSV() string {
-	if e.skillLoader == nil {
+func (e *Engine) skillNamesCSV(ctx context.Context) string {
+	loader := e.skills(ctx)
+	if loader == nil {
 		return "(none)"
 	}
-	all := e.skillLoader.All()
+	all := loader.All()
 	if len(all) == 0 {
 		return "(none)"
 	}

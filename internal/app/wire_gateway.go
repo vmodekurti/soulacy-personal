@@ -59,6 +59,7 @@ type gatewayDeps struct {
 	httpAdapter     *httpchan.Adapter
 	waAdapter       *wachan.Adapter
 	skillLoader     *skills.Loader
+	skillStores     *skills.Stores
 	actionBackend   storage.ActionLogBackend
 	mcpClient       *mcp.Client
 	hub             *gateway.EventHub
@@ -81,6 +82,9 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 	// Created BEFORE the watcher so the watcher can wire its OnPyChange hook
 	// to the server's tool-catalog cache.
 	srv := gateway.New(cfg, cfgPath, d.engine, d.loader, d.llmRouter, d.chanReg, d.sched, d.httpAdapter, d.waAdapter, d.skillLoader, d.actionBackend, d.mcpClient, d.hub, log)
+	// Per-workspace skill inventory. Without it the gateway falls back to the
+	// single loader, which is what a personal deployment wants.
+	srv.SetSkillStores(d.skillStores)
 	srv.SetAuth(d.authEngine)
 	if d.tenantResolver != nil {
 		srv.SetTenantResolver(d.tenantResolver)

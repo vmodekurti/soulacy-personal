@@ -13,7 +13,7 @@ isolation state; this document explains it.
 |---|---|---|
 | M1 — Tenant kernel | MU-001–005 | Complete |
 | M2 — Team identity | MU-006–011 | Complete |
-| M3 — Data isolation | MU-012–019 | MU-012 ✓ MU-013 ✓ MU-014 ✓ MU-019 ✓; MU-015 partial; MU-016–018 not started |
+| M3 — Data isolation | MU-012–019 | MU-012 ✓ MU-013 ✓ MU-014 ✓ MU-019 ✓; MU-015 partial; MU-016 partial; MU-017 partial; MU-018 not started |
 | — event spine + stores | (cross-cutting) | Events, action log, learning, Studio traces, workboard, conversation history ✓ |
 | M4 — Execution plane | MU-020–025 | Not started |
 | M5 — Team Preview | MU-026–032 | Not started |
@@ -25,7 +25,16 @@ isolation state; this document explains it.
 declared workspace-owned but not yet isolated.
 
 - At the start of this work: **57 blockers**
-- Now: **2 blockers**
+- Now: **0 blockers**
+
+Every store the discovery scan finds is workspace-scoped and names a real
+isolation test. `TestLegacyTenantStoresAreExplicitlyBlockedFromMultiUserUse`
+used to require blockers to exist — a guard against declaring the work done
+early — and is now inverted into
+`TestNoStoreRemainsUnscopedForMultiUserUse`, which fails and names any store
+that regresses. `TestEveryScopedStoreNamesATestThatExists` checks the other
+half: a `Scoped` entry pointing at a file that is not there is a claim with
+nothing behind it.
 
 A store moves from `personal-only` to `scoped` only when it has a real
 cross-tenant isolation test. The catalog names that test, and a CI check fails
@@ -786,6 +795,41 @@ tenant's. The join covers both principal kinds and requires the membership or
 service-account binding to be **active**, so revocation takes effect through
 the join rather than through a sweep somebody has to remember to run.
 
+### Extension inventory is layered, not replaced (MU-017 criteria 1 and 3)
+
+A skill is executable instruction text an agent follows; a plugin contributes
+tools an agent can call. Both loaders were process-wide, so installing either
+in one workspace added it to every agent in the deployment, and two tenants'
+same-named extensions were resolved by scan order rather than by ownership.
+That is not a disclosure bug — it changes what another tenant's agents *do*,
+which is exactly what MU-017's user story is written against.
+
+The scan list is **layered**. Platform directories — the operator's configured
+dirs and the cross-client `~/.agents` and project-level conventions — stay
+visible to every workspace as read-only templates. Each workspace's own
+directory is scanned **last**, so it can shadow a platform extension by name
+without modifying the shared copy, and installs land only in its own directory.
+`TestTheWorkspaceDirectoryIsScannedLast` pins the ordering, because reversing
+it is a one-character mistake that silently inverts the override rule.
+
+Personal resolves to the base directory itself, so a single-user installation's
+skills and plugins do not move and keep their scan position (invariant 7).
+
+`Engine.SkillLoaders` and `Server.skillCatalog(c)` are the read paths; there is
+no unscoped accessor left in either. Three call sites had no request in scope
+and were threaded rather than defaulted — `agentPackageRequirements` already
+carried an `agentScope`, `groundCatalog` a `studioScope`, and
+`installLearningSkill` needed the request for the same reason
+`applyLearningProposal` did: it *writes* a skill into a workspace.
+
+**Criterion 3** is `rbac.ActionInstall`. Using an extension runs code somebody
+already vetted; installing one chooses whose code runs. A developer who may
+author a local skill has not thereby been trusted to pull an arbitrary package
+off the internet into everyone else's runtime — and before this both were
+`ActionWrite`, so they were the same permission. Owner and admin may install;
+developer keeps authoring and everyone keeps reading, which the test asserts
+explicitly so the split cannot quietly become a permission removal.
+
 ## Guards worth keeping
 
 - **`TestRequestScopeIsNeverReadFromADetachedGoroutine`** (AST-based) fails the
@@ -849,11 +893,14 @@ Highest-value first, with the reason each matters:
    Preview at all. If it is not, MU-025's third criterion should be struck or
    deferred explicitly rather than left to look unfinished.
 
-5. **The two stores still `personal-only`** are `internal/plugins/loader.go`
-   and `internal/skills/loader.go`. Both are extension inventory, which is
-   MU-017's first acceptance criterion. Flipping them without the rest of that
-   story would classify the storage while leaving installation, approval and
-   revocation unscoped, so they close with MU-017 rather than before it.
+5. **MU-017 is partially done.** Criteria 1 and 3 are met: extension inventory
+   is per workspace with platform directories as read-only templates, and
+   `ActionInstall` separates installing third-party code from using it. What
+   remains is criterion 2 (staged URL installs, pinned revisions, checksum and
+   safety inspection, approval before activation), 4 (capability grants and
+   referenced secret handles), 5 (MCP processes under workspace isolation), 6
+   (renewed approval when an update widens capabilities) and 7 (revocation that
+   drains running processes).
 
 6. **`BEGIN DEFERRED` on read-then-write transactions, elsewhere.** Two stores
    have been fixed (see below). The pattern to look for is a transaction that

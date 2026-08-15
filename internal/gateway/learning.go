@@ -627,7 +627,7 @@ func findLearningProposal(store *learning.Store, id string) (learning.Proposal, 
 func (s *Server) applyLearningProposal(c *fiber.Ctx, p learning.Proposal) (map[string]string, error) {
 	switch strings.ToLower(p.Kind) {
 	case "skill":
-		return s.installLearningSkill(p)
+		return s.installLearningSkill(c, p)
 	case "procedure":
 		brain := s.brainMemory(c)
 		if brain == nil {
@@ -670,8 +670,8 @@ func (s *Server) applyLearningProposal(c *fiber.Ctx, p learning.Proposal) (map[s
 	return nil, nil
 }
 
-func (s *Server) installLearningSkill(p learning.Proposal) (map[string]string, error) {
-	if s.skillLoader == nil {
+func (s *Server) installLearningSkill(c *fiber.Ctx, p learning.Proposal) (map[string]string, error) {
+	if s.skillCatalog(c) == nil {
 		return nil, errors.New("skill loader not configured")
 	}
 	content := strings.TrimSpace(p.Content)
@@ -703,7 +703,7 @@ func (s *Server) installLearningSkill(p learning.Proposal) (map[string]string, e
 	} else if len(warnings) > 0 {
 		s.log.Debug("learning skill installed with warnings", zap.Strings("warnings", warnings))
 	}
-	if scanner, ok := s.skillLoader.(interface{ Scan() []error }); ok {
+	if scanner, ok := s.skillCatalog(c).(interface{ Scan() []error }); ok {
 		_ = scanner.Scan()
 	}
 	s.log.Info("learning skill installed",

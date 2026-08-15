@@ -72,9 +72,50 @@ func TestEveryDurableTableDeclarationIsClassified(t *testing.T) {
 	}
 }
 
-func TestLegacyTenantStoresAreExplicitlyBlockedFromMultiUserUse(t *testing.T) {
-	if len(MultiUserBlockers()) == 0 {
-		t.Fatal("expected legacy personal-only stores until resource isolation stories are complete")
+// Every declared store is now workspace-scoped and names a real isolation
+// test. This assertion used to run the other way — it required blockers to
+// exist, as a guard against declaring the work finished early — and it is
+// inverted rather than deleted so the property stays machine-checked in the
+// direction that now matters.
+//
+// A new personal-only store is not forbidden: some genuinely are
+// single-tenant, and the classification is the point. But it must be a
+// deliberate entry in the catalog with a reason, not something that arrives by
+// forgetting, so this fails and names it.
+func TestNoStoreRemainsUnscopedForMultiUserUse(t *testing.T) {
+	blockers := MultiUserBlockers()
+	if len(blockers) != 0 {
+		t.Fatalf("%d store(s) are still personal-only and would leak or disappear data in a multi-user deployment:\n  %s",
+			len(blockers), strings.Join(blockers, "\n  "))
+	}
+}
+
+// The catalog is only as good as the tests it names. A Scoped entry pointing
+// at a file that does not exist is a claim with nothing behind it.
+func TestEveryScopedStoreNamesATestThatExists(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", ".."))
+	seen := map[string]bool{}
+	check := func(kind, source string, isolation Isolation, test string) {
+		if isolation != Scoped {
+			return
+		}
+		if strings.TrimSpace(test) == "" {
+			t.Errorf("%s %s is scoped but names no isolation test", kind, source)
+			return
+		}
+		if seen[test] {
+			return
+		}
+		seen[test] = true
+		if _, err := os.Stat(filepath.Join(repoRoot, test)); err != nil {
+			t.Errorf("%s %s names isolation test %q, which does not exist", kind, source, test)
+		}
+	}
+	for _, table := range Tables {
+		check("table", table.Source+":"+table.Name, table.Isolation, table.IsolationTest)
+	}
+	for _, repository := range Repositories {
+		check("repository", repository.Source, repository.Isolation, repository.IsolationTest)
 	}
 }
 

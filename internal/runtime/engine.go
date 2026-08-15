@@ -56,6 +56,28 @@ type SkillLoader interface {
 	All() []*skill.Skill
 }
 
+// SkillLoaders resolves one workspace's skill catalog.
+type SkillLoaders func(workspaceID string) SkillLoader
+
+// SetSkillLoaders installs the per-workspace skill resolver. Safe to call once
+// at startup.
+func (e *Engine) SetSkillLoaders(resolve SkillLoaders) { e.skillLoaders = resolve }
+
+// skills resolves the skill catalog of the workspace a run is acting in.
+//
+// It is a method rather than a field read because every caller in the engine
+// used to touch e.skillLoader directly, and there is no way to look at such a
+// call and tell whether it should have been scoped.
+func (e *Engine) skills(ctx context.Context) SkillLoader {
+	if e.skillLoaders != nil {
+		if loader := e.skillLoaders(WorkspaceFromContext(ctx)); loader != nil {
+			return loader
+		}
+		return nil
+	}
+	return e.skillLoader
+}
+
 // BuiltinTool is a Go-native tool that runs inside the engine process rather
 // than delegating to a Python subprocess. Built-ins are added alongside the
 // agent's Python tool definitions when building the LLM tool schema.
@@ -93,7 +115,15 @@ type Engine struct {
 	flowTraces    *flowTraceStore
 
 	// Skills support
-	skillLoader      SkillLoader
+	skillLoader SkillLoader
+	// skillLoaders, when set, resolves one workspace's skill catalog. It takes
+	// precedence over skillLoader.
+	//
+	// A skill is executable instruction text an agent follows, so a shared
+	// catalog is not a metadata leak — it changes what another tenant's agents
+	// do. The resolver is optional so a personal deployment keeps the single
+	// loader it has always had.
+	skillLoaders     SkillLoaders
 	builtins         []BuiltinTool
 	channelRegistry  *channels.Registry
 	channelDefaultMu sync.RWMutex

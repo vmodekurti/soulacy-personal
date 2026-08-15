@@ -44,10 +44,10 @@ type marketplaceReadinessSource struct {
 }
 
 func (s *Server) handleMarketplaceStatus(c *fiber.Ctx) error {
-	return c.JSON(s.marketplaceReadiness())
+	return c.JSON(s.marketplaceReadiness(s.requestWorkspace(c)))
 }
 
-func (s *Server) marketplaceReadiness() marketplaceReadiness {
+func (s *Server) marketplaceReadiness(workspaceID string) marketplaceReadiness {
 	// H1 — nil-safe front. The readiness surface is exercised by tests that
 	// construct a zero-value *Server; guarding here means the empty-config
 	// path returns a valid empty readiness rather than panicking on s.cfg
@@ -108,12 +108,13 @@ func (s *Server) marketplaceReadiness() marketplaceReadiness {
 	// and inferred earlier deref sites might be reading a nil). Simplified
 	// to skillLoader-only checks now that the invariant holds.
 	installed := 0
-	if s.skillLoader != nil {
-		installed = len(s.skillLoader.All())
+	catalog := s.skillCatalogForWorkspace(workspaceID)
+	if catalog != nil {
+		installed = len(catalog.All())
 	}
 
 	checks := []marketplaceReadinessCheck{
-		marketplaceCheck("loader", "Skill loader", s.skillLoader != nil,
+		marketplaceCheck("loader", "Skill loader", catalog != nil,
 			"Skill loader is available for installed and newly added skills.",
 			"Skill loader is unavailable; install/rescan flows cannot hot-load skills."),
 		marketplaceCheck("installed_skills", "Installed skills", installed > 0,

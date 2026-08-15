@@ -1222,7 +1222,7 @@ func TestSkillNamesCSV_WithSkills(t *testing.T) {
 	e := newMinimalEngine(t)
 	e.skillLoader = populatedSkillLoader{skills: skills}
 
-	csv := e.skillNamesCSV()
+	csv := e.skillNamesCSV(context.Background())
 	if !strings.Contains(csv, "alpha") || !strings.Contains(csv, "beta") {
 		t.Errorf("skillNamesCSV = %q, want to contain alpha and beta", csv)
 	}
@@ -1231,7 +1231,7 @@ func TestSkillNamesCSV_WithSkills(t *testing.T) {
 func TestSkillNamesCSV_NoSkillLoader(t *testing.T) {
 	e := newMinimalEngine(t)
 	// skillLoader is nil by default
-	csv := e.skillNamesCSV()
+	csv := e.skillNamesCSV(context.Background())
 	if csv != "(none)" {
 		t.Errorf("skillNamesCSV with nil loader = %q, want (none)", csv)
 	}
@@ -1240,7 +1240,7 @@ func TestSkillNamesCSV_NoSkillLoader(t *testing.T) {
 func TestSkillNamesCSV_EmptySkills(t *testing.T) {
 	e := newMinimalEngine(t)
 	e.skillLoader = populatedSkillLoader{skills: nil}
-	csv := e.skillNamesCSV()
+	csv := e.skillNamesCSV(context.Background())
 	if csv != "(none)" {
 		t.Errorf("skillNamesCSV with no skills = %q, want (none)", csv)
 	}

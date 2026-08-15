@@ -110,7 +110,7 @@ func (s *Server) handleSearchRegistries(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(c.Context(), 20*time.Second)
 	defer cancel()
 	pkgs, warnings := eng.SearchDetailed(ctx, query)
-	pkgs = appendLocalSkillMatches(pkgs, s.localSkillMatches(query))
+	pkgs = appendLocalSkillMatches(pkgs, s.localSkillMatches(c, query))
 	warnText := make([]string, 0, len(warnings))
 	authRequired := false
 	for _, w := range warnings {
@@ -145,8 +145,8 @@ func (s *Server) handleSearchRegistries(c *fiber.Ctx) error {
 	})
 }
 
-func (s *Server) localSkillMatches(query string) []sdkpkg.Package {
-	if s.skillLoader == nil {
+func (s *Server) localSkillMatches(c *fiber.Ctx, query string) []sdkpkg.Package {
+	if s.skillCatalog(c) == nil {
 		return nil
 	}
 	q := strings.ToLower(strings.TrimSpace(query))
@@ -154,7 +154,7 @@ func (s *Server) localSkillMatches(query string) []sdkpkg.Package {
 		return nil
 	}
 	var skills []*skill.Skill
-	if l, ok := s.skillLoader.(interface{ All() []*skill.Skill }); ok {
+	if l, ok := s.skillCatalog(c).(interface{ All() []*skill.Skill }); ok {
 		skills = l.All()
 	}
 	out := make([]sdkpkg.Package, 0)

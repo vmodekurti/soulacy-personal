@@ -587,7 +587,7 @@ func (s *Server) agentPackageRequirements(scope agentScope, pkg *agentPackageRes
 	}
 	for _, skill := range sortedUnique(pkg.Manifest.Skills) {
 		status := "declared"
-		if hasSkill(s.skillLoader, skill) {
+		if hasSkill(s.skillCatalogForWorkspace(scope.WorkspaceID()), skill) {
 			status = "available"
 		}
 		addReq("skill", skill, status, "Install this skill if the agent depends on its instructions.")

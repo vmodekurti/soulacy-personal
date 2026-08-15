@@ -1053,3 +1053,42 @@ func TestKnownRolesContainsEveryWorkspaceRole(t *testing.T) {
 		}
 	}
 }
+
+// MU-017 criterion 3: installation permission is separate from extension-use
+// permission.
+//
+// Using an extension runs code somebody already vetted. Installing one chooses
+// whose code runs — and a developer who may author a local skill has not
+// thereby been trusted to pull an arbitrary package off the internet into
+// everyone else's runtime. Before ActionInstall existed, both were
+// ActionWrite, so the two were the same permission.
+func TestInstallingAnExtensionIsASeparatePermissionFromUsingOne(t *testing.T) {
+	for _, resource := range []string{ResourceSkills, ResourceMCP} {
+		for _, role := range []string{RoleOwner, RoleAdmin} {
+			if !HasPermission(role, resource, ActionInstall) {
+				t.Errorf("%s cannot install %s", role, resource)
+			}
+		}
+		for _, role := range []string{RoleDeveloper, RoleOperator, RoleViewer} {
+			if HasPermission(role, resource, ActionInstall) {
+				t.Errorf("%s may install %s — installation must not follow from write or read", role, resource)
+			}
+		}
+		// The separation is only meaningful if the lesser roles still have the
+		// permissions they had. A developer keeps authoring; everyone keeps
+		// reading. Otherwise this is a permission removal wearing a split's
+		// clothes.
+		if !HasPermission(RoleDeveloper, resource, ActionRead) {
+			t.Errorf("developer lost read on %s", resource)
+		}
+		if !HasPermission(RoleViewer, resource, ActionRead) {
+			t.Errorf("viewer lost read on %s", resource)
+		}
+	}
+	if !HasPermission(RoleDeveloper, ResourceSkills, ActionWrite) {
+		t.Error("developer lost the ability to author a local skill")
+	}
+	if !HasPermission(RoleDeveloper, ResourceMCP, ActionWrite) {
+		t.Error("developer lost the ability to configure an MCP server")
+	}
+}

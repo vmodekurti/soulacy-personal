@@ -159,7 +159,7 @@ func (a *App) Run(parent context.Context) error {
 	ollamaCfg := cfg.LLM.Providers["ollama"]
 
 	// ── Loaders (agent / plugin / skill) + python pre-flight ─────────────────
-	loader, pluginLoader, skillLoader := a.wireLoaders(ws)
+	loader, pluginLoader, skillLoader, skillStores := a.wireLoaders(ws)
 
 	// ── Event Hub (GUI real-time stream + action-log persistence) ─────────────
 	hub := gateway.NewEventHub(log, actionBackend)
@@ -309,6 +309,7 @@ func (a *App) Run(parent context.Context) error {
 		memBackend:     memBackend,
 		hub:            hub,
 		skillLoader:    skillLoader,
+		skillStores:    skillStores,
 		mcpClient:      mcpClient,
 		knowledgeSvc:   knowledgeSvc,
 		vectorStore:    vectorStore,
@@ -460,6 +461,7 @@ func (a *App) Run(parent context.Context) error {
 		httpAdapter:     httpAdapter,
 		waAdapter:       waAdapter,
 		skillLoader:     skillLoader,
+		skillStores:     skillStores,
 		actionBackend:   actionBackend,
 		mcpClient:       mcpClient,
 		hub:             hub,

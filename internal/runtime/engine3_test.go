@@ -368,7 +368,7 @@ func TestSkillCatalogFor_NamedSkills(t *testing.T) {
 	e.skillLoader = populatedSkillLoader{skills: skills}
 	e.builtins = e.buildBuiltins()
 
-	catalog := e.skillCatalogFor([]string{"writer"})
+	catalog := e.skillCatalogFor(context.Background(), []string{"writer"})
 	if !strings.Contains(catalog, "writer") {
 		t.Errorf("catalog should contain 'writer', got:\n%s", catalog)
 	}
@@ -386,7 +386,7 @@ func TestSkillCatalogFor_Wildcard(t *testing.T) {
 	e.skillLoader = populatedSkillLoader{skills: skills}
 	e.builtins = e.buildBuiltins()
 
-	catalog := e.skillCatalogFor([]string{"*"})
+	catalog := e.skillCatalogFor(context.Background(), []string{"*"})
 	if !strings.Contains(catalog, "alpha") || !strings.Contains(catalog, "beta") {
 		t.Errorf("wildcard catalog should contain both skills, got:\n%s", catalog)
 	}
@@ -395,7 +395,7 @@ func TestSkillCatalogFor_Wildcard(t *testing.T) {
 func TestSkillCatalogFor_NilLoader(t *testing.T) {
 	e := newMinimalEngine(t)
 	// skillLoader is nil — should return empty without panic.
-	catalog := e.skillCatalogFor([]string{"anything"})
+	catalog := e.skillCatalogFor(context.Background(), []string{"anything"})
 	if catalog != "" {
 		t.Errorf("expected empty catalog when skillLoader is nil, got %q", catalog)
 	}

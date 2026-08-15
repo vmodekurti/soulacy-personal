@@ -89,6 +89,19 @@ const (
 	ActionSet    = "set"
 	ActionRotate = "rotate"
 	ActionReveal = "reveal"
+
+	// ActionInstall is the authority to bring third-party code into a
+	// workspace: a skill from a registry, an MCP server from a marketplace, a
+	// plugin from a URL.
+	//
+	// MU-017 criterion 3 asks for installation permission to be separate from
+	// extension-use permission, and the reason is that they are not the same
+	// risk at all. Using an extension runs code somebody already vetted.
+	// Installing one *chooses* whose code runs, and a developer who may author
+	// a local skill has not thereby been trusted to pull an arbitrary package
+	// off the internet into everyone else's runtime. Before this, both were
+	// ActionWrite.
+	ActionInstall = "install"
 )
 
 // ---------------------------------------------------------------------------
@@ -104,8 +117,8 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 		ResourceMemory:      {ActionRead: true, ActionWrite: true, ActionDelete: true},
 		ResourceChannels:    {ActionRead: true, ActionWrite: true, ActionEnable: true},
 		ResourceProviders:   {ActionRead: true, ActionWrite: true},
-		ResourceSkills:      {ActionRead: true, ActionWrite: true, ActionDelete: true},
-		ResourceMCP:         {ActionRead: true, ActionWrite: true, ActionDelete: true},
+		ResourceSkills:      {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionInstall: true},
+		ResourceMCP:         {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionInstall: true},
 		ResourceKnowledge:   {ActionRead: true, ActionWrite: true, ActionDelete: true},
 		ResourceBuilder:     {ActionRead: true, ActionWrite: true},
 		ResourceTemplates:   {ActionRead: true, ActionWrite: true, ActionDelete: true},
@@ -123,8 +136,8 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 		ResourceMemory:      {ActionRead: true, ActionDelete: true},
 		ResourceChannels:    {ActionRead: true, ActionWrite: true, ActionEnable: true},
 		ResourceProviders:   {ActionRead: true, ActionWrite: true},
-		ResourceSkills:      {ActionRead: true},
-		ResourceMCP:         {ActionRead: true, ActionWrite: true, ActionDelete: true},
+		ResourceSkills:      {ActionRead: true, ActionInstall: true},
+		ResourceMCP:         {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionInstall: true},
 		ResourceKnowledge:   {ActionRead: true, ActionWrite: true, ActionDelete: true},
 		ResourceBuilder:     {ActionWrite: true},
 		ResourceTemplates:   {ActionRead: true, ActionWrite: true},

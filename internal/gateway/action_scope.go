@@ -11,6 +11,7 @@ import (
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/learning"
 	"github.com/soulacy/soulacy/internal/rbac"
+	"github.com/soulacy/soulacy/internal/runtime"
 	"github.com/soulacy/soulacy/internal/storage"
 	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/message"
@@ -274,6 +275,51 @@ func (s *Server) brainMemory(c *fiber.Ctx) *agentmemory.CompositeStore {
 		}
 	}
 	return s.engine.BrainStoreInWorkspace(wsroot.PersonalWorkspaceID)
+}
+
+// skillCatalog is the skill inventory of the tenant a request acts for
+// (MU-017 criterion 1).
+//
+// Skills are executable instructions an agent follows, not metadata about one,
+// so a shared inventory is not a disclosure problem — installing a skill in
+// one workspace would add it to every agent in the deployment, and two
+// tenants' same-named skills would be resolved by scan order rather than by
+// ownership.
+//
+// Platform directories stay visible to every workspace as read-only templates.
+// A workspace's own directory is scanned last, so it may shadow a platform
+// skill by name without being able to modify the platform copy.
+func (s *Server) skillCatalog(c *fiber.Ctx) runtime.SkillLoader {
+	if s == nil {
+		return nil
+	}
+	return s.skillCatalogForWorkspace(s.requestWorkspace(c))
+}
+
+// skillCatalogForWorkspace is the same view without a request, for code paths
+// that already know the tenant — a package import running under an agentScope,
+// or a background install acting for one workspace.
+func (s *Server) skillCatalogForWorkspace(workspaceID string) runtime.SkillLoader {
+	if s == nil {
+		return nil
+	}
+	if s.skillStores != nil {
+		if loader := s.skillStores.For(workspaceID); loader != nil {
+			return loader
+		}
+		return nil
+	}
+	return s.skillLoader
+}
+
+// requestWorkspace is the tenant a request acts in, defaulting to personal.
+func (s *Server) requestWorkspace(c *fiber.Ctx) string {
+	if c != nil {
+		if identity, ok := requestIdentity(c); ok {
+			return wsroot.Normalize(identity.WorkspaceID())
+		}
+	}
+	return wsroot.PersonalWorkspaceID
 }
 
 // platformMetricsMW restricts the raw Prometheus endpoint in multi-user
