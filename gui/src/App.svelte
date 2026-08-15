@@ -68,6 +68,7 @@
     config: () => import('./pages/Config.svelte'),
     mobile: () => import('./pages/Mobile.svelte'),
     logs: () => import('./pages/Logs.svelte'),
+    members: () => import('./pages/Members.svelte'),
   }
 
   // Keep the browser tab title in sync with the active page (Story 15).
@@ -148,6 +149,7 @@
   }
 
   onMount(() => {
+		discoverLogin()
     const applyHash = () => {
       const h = location.hash.slice(1)
       const route = h.split('?')[0]
@@ -249,6 +251,19 @@
   let loginKey = ''
   let loginError = ''
   let loginChecking = false
+	let oidcEnabled = false
+
+	async function discoverLogin() {
+		try {
+			const res = await fetch('/api/v1/auth/oidc/config')
+			const cfg = res.ok ? await res.json() : null
+			oidcEnabled = !!cfg?.enabled
+		} catch (_) { oidcEnabled = false }
+	}
+
+	function startOIDCLogin() {
+		location.assign('/api/v1/auth/oidc/start?client=gui&navigate=true')
+	}
 
   async function submitLogin() {
     const key = loginKey.trim()
@@ -281,6 +296,13 @@
     keyInput = $apiKey
     showKeyModal = true
   }
+
+	async function logoutSession() {
+		try { await fetch('/api/v1/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }) } catch (_) {}
+		$apiKey = ''
+		$authRequired = true
+		showKeyModal = false
+	}
 </script>
 
 <!-- Public read-only shared conversation — rendered before (and instead of) the
@@ -313,6 +335,10 @@
       <button class="login-submit" type="submit" disabled={loginChecking || !loginKey.trim()}>
         {loginChecking ? 'Verifying…' : 'Unlock'}
       </button>
+		{#if oidcEnabled}
+			<div class="login-divider"><span>or</span></div>
+			<button class="login-submit login-sso" type="button" on:click={startOIDCLogin}>Continue with your organization</button>
+		{/if}
 
       <p class="login-hint">
         Find your key in <code>~/.soulacy/soulspace/config.yaml</code> (under
@@ -385,6 +411,7 @@
              placeholder="claw_..."
              on:keydown={(e) => e.key === 'Enter' && saveKey()} />
       <div class="modal-row">
+		<button class="btn-danger" on:click={logoutSession}>Sign out</button>
         <button class="btn-secondary" on:click={() => showKeyModal = false}>Cancel</button>
         <button class="btn-primary"   on:click={saveKey}>Save &amp; Reload</button>
       </div>
@@ -877,6 +904,9 @@
   }
   .login-submit:hover:not(:disabled) { filter: brightness(1.08); }
   .login-submit:disabled { opacity: 0.55; cursor: not-allowed; }
+	.login-sso { background: hsl(240, 20%, 20%); border: 1px solid hsla(252, 80%, 72%, 0.45); }
+	.login-divider { display: flex; align-items: center; gap: 0.6rem; color: hsl(240, 10%, 55%); font-size: 0.7rem; }
+	.login-divider::before, .login-divider::after { content: ''; height: 1px; flex: 1; background: hsla(240, 20%, 60%, 0.2); }
   .login-hint { margin-top: 0.8rem; font-size: 0.72rem; line-height: 1.5; color: hsl(240, 12%, 60%); text-align: center; }
   .login-hint code { background: hsla(240, 30%, 12%, 0.7); padding: 0.05rem 0.3rem; border-radius: 4px; font-size: 0.7rem; }
 

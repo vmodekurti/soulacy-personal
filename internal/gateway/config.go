@@ -161,10 +161,13 @@ func (s *Server) safeConfigView() fiber.Map {
 			"alert_min_status":     cfg.Ops.AlertMinStatus,
 		},
 		"deployment": fiber.Map{
-			"profile": cfg.Deployment.Profile,
-			"owner":   cfg.Deployment.Owner,
-			"region":  cfg.Deployment.Region,
-			"notes":   cfg.Deployment.Notes,
+			"mode":                  cfg.DeploymentMode(),
+			"shared_artifact_store": cfg.Deployment.SharedArtifactStore,
+			"acknowledgements":      cfg.Deployment.Acknowledgements,
+			"profile":               cfg.Deployment.Profile,
+			"owner":                 cfg.Deployment.Owner,
+			"region":                cfg.Deployment.Region,
+			"notes":                 cfg.Deployment.Notes,
 		},
 		// F-Bridge — surface the workspace security defaults so the GUI's
 		// F-GUI-6 radio actually seeds from a saved value. IntentGate is not
@@ -377,10 +380,13 @@ type PatchableConfig struct {
 	} `json:"ops" yaml:"ops"`
 
 	Deployment *struct {
-		Profile string `json:"profile" yaml:"profile"`
-		Owner   string `json:"owner" yaml:"owner"`
-		Region  string `json:"region" yaml:"region"`
-		Notes   string `json:"notes" yaml:"notes"`
+		Mode                *string   `json:"mode" yaml:"mode"`
+		SharedArtifactStore *string   `json:"shared_artifact_store" yaml:"shared_artifact_store"`
+		Acknowledgements    *[]string `json:"acknowledgements" yaml:"acknowledgements"`
+		Profile             string    `json:"profile" yaml:"profile"`
+		Owner               string    `json:"owner" yaml:"owner"`
+		Region              string    `json:"region" yaml:"region"`
+		Notes               string    `json:"notes" yaml:"notes"`
 	} `json:"deployment" yaml:"deployment"`
 
 	// Security is the workspace-scoped security defaults section (Cohort
@@ -725,6 +731,15 @@ func applyPatch(dst map[string]any, patch PatchableConfig) {
 	}
 	if patch.Deployment != nil {
 		dep := getOrCreateMap(dst, "deployment")
+		if patch.Deployment.Mode != nil {
+			dep["mode"] = *patch.Deployment.Mode
+		}
+		if patch.Deployment.SharedArtifactStore != nil {
+			dep["shared_artifact_store"] = *patch.Deployment.SharedArtifactStore
+		}
+		if patch.Deployment.Acknowledgements != nil {
+			dep["acknowledgements"] = *patch.Deployment.Acknowledgements
+		}
 		dep["profile"] = patch.Deployment.Profile
 		dep["owner"] = patch.Deployment.Owner
 		dep["region"] = patch.Deployment.Region

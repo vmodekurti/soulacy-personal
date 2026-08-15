@@ -38,6 +38,11 @@ type Claims struct {
 	// Only "access" tokens are accepted by the auth middleware.
 	Kind string `json:"kind"`
 
+	// PrincipalKind identifies the actor behind this access token (user,
+	// personal_access_token, service_account, or static_api_key). Kind remains
+	// the JWT token type and is always "access" for request authentication.
+	PrincipalKind string `json:"principal_kind,omitempty"`
+
 	// Scopes narrows what this credential may reach, by RBAC resource name
 	// ("chat", "memory", "config", …). Empty means unrestricted — the role
 	// alone decides, which is how every JWT and the static key behave.
@@ -51,17 +56,35 @@ type Claims struct {
 	// enforced is worse than none, because the operator is told the credential
 	// is limited and reasonably believes it.
 	Scopes []string `json:"scopes,omitempty"`
+
+	// Tenant IDs are authority only after the gateway resolves the subject's
+	// membership. WorkspaceID may select a workspace, but is never trusted by
+	// itself. CredentialID identifies the authenticating key independently of
+	// the human/service subject.
+	OrganizationID string   `json:"organization_id,omitempty"`
+	WorkspaceID    string   `json:"workspace_id,omitempty"`
+	WorkspaceIDs   []string `json:"workspace_ids,omitempty"`
+	MembershipID   string   `json:"membership_id,omitempty"`
+	CredentialID   string   `json:"credential_id,omitempty"`
 }
 
 // AllowsResource reports whether these claims may touch the named RBAC
 // resource. Scopes only ever NARROW: a credential with none is unrestricted,
 // and one with scopes must still satisfy its role on top of this.
 func (c *Claims) AllowsResource(resource string) bool {
+	return c.Allows(resource, "")
+}
+
+// Allows evaluates action-aware scopes. A legacy bare resource scope remains
+// valid for all actions on that resource; new credentials should use
+// resource:action or resource:* so least privilege is visible and enforceable.
+func (c *Claims) Allows(resource, action string) bool {
 	if c == nil || len(c.Scopes) == 0 {
 		return true
 	}
 	for _, s := range c.Scopes {
-		if strings.EqualFold(strings.TrimSpace(s), resource) {
+		s = strings.TrimSpace(s)
+		if strings.EqualFold(s, resource) || strings.EqualFold(s, resource+":*") || (action != "" && strings.EqualFold(s, resource+":"+action)) {
 			return true
 		}
 	}

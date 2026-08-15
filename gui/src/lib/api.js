@@ -9,11 +9,17 @@ function authHeaders() {
 }
 
 export async function apiFetch(path, opts = {}) {
-	const { _costConfirmed, ...requestOpts } = opts
+	const { _costConfirmed, _authRetried, ...requestOpts } = opts
   const res = await fetch('/api/v1' + path, {
 	...requestOpts,
 	headers: { ...authHeaders(), ...(requestOpts.headers || {}) },
   })
+	if (res.status === 401 && !_authRetried && path !== '/auth/refresh') {
+	  const refreshed = await fetch('/api/v1/auth/refresh', {
+	    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+	  }).then(r => r.ok).catch(() => false)
+	  if (refreshed) return apiFetch(path, { ...opts, _authRetried: true })
+	}
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
 	// Cost confirmation is deliberately user-driven. Retry the identical
@@ -340,6 +346,23 @@ export const api = {
   admin: {
     restart: () => apiFetch('/admin/restart', { method: 'POST' }),
     audit: (limit = 50) => apiFetch('/admin/audit?limit=' + encodeURIComponent(limit)),
+  },
+
+  workspaceMembers: {
+    list: () => apiFetch('/workspace/members'),
+    invite: (email, role, expiresIn = '168h') => apiFetch('/workspace/invitations', {
+      method: 'POST', body: JSON.stringify({ email, role, expires_in: expiresIn }),
+    }),
+    invitations: () => apiFetch('/workspace/invitations'),
+    setRole: (id, role) => apiFetch(`/workspace/members/${encodeURIComponent(id)}/role`, {
+      method: 'PATCH', body: JSON.stringify({ role }),
+    }),
+    setStatus: (id, status) => apiFetch(`/workspace/members/${encodeURIComponent(id)}/status`, {
+      method: 'PATCH', body: JSON.stringify({ status }),
+    }),
+    remove: (id) => apiFetch(`/workspace/members/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    audit: (limit = 100) => apiFetch('/workspace/membership-audit?limit=' + encodeURIComponent(limit)),
+    accept: (token) => apiFetch('/invitations/accept', { method: 'POST', body: JSON.stringify({ token }) }),
   },
 
   memory: {

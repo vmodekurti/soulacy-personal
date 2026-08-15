@@ -40,6 +40,7 @@ const loaders = {
   config: () => import('./Config.svelte'),
   mobile: () => import('./Mobile.svelte'),
   logs: () => import('./Logs.svelte'),
+  members: () => import('./Members.svelte'),
 }
 
 // The freeze this file exists to catch does NOT arrive as a thrown exception

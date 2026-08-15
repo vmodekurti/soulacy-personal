@@ -62,12 +62,13 @@ func buildOnboardCmd() *cobra.Command {
 		Long: `Walk through the choices most operators want to make right after install:
 
   1. Confirm the workspace path (~/.soulacy/soulspace by default).
-  2. Choose loopback or expose (loopback = local-only; expose = LAN/remote).
-  3. Pick an LLM provider (Ollama auto-detect / OpenAI / Anthropic / skip).
-  4. Set up web search (Ollama / Tavily / Serper) for the web_search tool.
-  5. Optionally adopt a starter agent so the GUI isn't empty on first open.
-  6. Optionally configure the release manifest used by update checks.
-  7. Optionally install a daemon so soulacy starts on login.
+  2. Choose Personal, Team, or Scale deployment mode.
+  3. Choose loopback or expose (loopback = local-only; expose = LAN/remote).
+  4. Pick an LLM provider (Ollama auto-detect / OpenAI / Anthropic / skip).
+  5. Set up web search (Ollama / Tavily / Serper) for the web_search tool.
+  6. Optionally adopt a starter agent so the GUI isn't empty on first open.
+  7. Optionally configure the release manifest used by update checks.
+  8. Optionally install a daemon so soulacy starts on login.
 
 Re-running ` + "`sy onboard`" + ` is safe: each step shows the current value and lets
 you skip without changing anything. The wizard never deletes data.`,
@@ -119,8 +120,46 @@ func runOnboardWizard() error {
 	}
 	fmt.Println()
 
-	// ── Step 2: Loopback vs expose ─────────────────────────────────────────
-	printStep(2, "Bind address")
+	// ── Step 2: Deployment mode ────────────────────────────────────────────
+	printStep(2, "Deployment mode")
+	currentMode := cfg.DeploymentMode()
+	fmt.Printf("  %s %s\n", dim("Current:"), cyan(currentMode))
+	fmt.Printf("  %s Personal keeps the zero-dependency local setup. Team and Scale require JWT, PostgreSQL, and Docker isolation.\n", gray("→"))
+	if confirm("  Change deployment mode?", false) {
+		choices := []string{
+			"Personal (single operator, local stores)",
+			"Team (multi-user, PostgreSQL, Docker isolation)",
+			"Scale (multi-instance, distributed queue and shared artifacts)",
+		}
+		mode := []string{config.DeploymentModePersonal, config.DeploymentModeTeam, config.DeploymentModeScale}[promptChoices("Deployment mode:", choices)]
+		settings := deploymentSettings{Mode: mode}
+		if config.IsMultiUserMode(mode) {
+			settings.PostgresDSN = prompt("  PostgreSQL DSN", cfg.Storage.PostgresDSN)
+			settings.JWTSecret = strings.TrimSpace(cfg.Auth.JWTSecret)
+			if len(settings.JWTSecret) < 32 {
+				settings.JWTSecret = generateJWTSecret()
+				fmt.Printf("  %s Generated a stable JWT signing secret.\n", green("✓"))
+			}
+			settings.APIKey = strings.TrimSpace(cfg.Server.APIKey)
+			if settings.APIKey == "" {
+				settings.APIKey = generateAPIKey()
+				fmt.Printf("  %s Generated bootstrap administration key: %s\n", green("✓"), bold(settings.APIKey))
+			}
+		}
+		if mode == config.DeploymentModeScale {
+			settings.NATSURL = prompt("  NATS URL", defaultString(cfg.Queue.NATSUrl, "nats://127.0.0.1:4222"))
+			settings.SharedArtifactStore = prompt("  Shared artifact store URL", cfg.Deployment.SharedArtifactStore)
+		}
+		if err := patchDeploymentSettings(cfgPath, settings); err != nil {
+			fmt.Printf("  %s Couldn't patch deployment settings: %v\n", red("✗"), err)
+		} else {
+			fmt.Printf("  %s Deployment mode set to %s. Run %s to verify prerequisites.\n", green("✓"), cyan(mode), bold("sy doctor"))
+		}
+	}
+	fmt.Println()
+
+	// ── Step 3: Loopback vs expose ─────────────────────────────────────────
+	printStep(3, "Bind address")
 	currentHost := cfg.Server.Host
 	if currentHost == "" {
 		currentHost = "127.0.0.1"
@@ -152,8 +191,8 @@ func runOnboardWizard() error {
 	}
 	fmt.Println()
 
-	// ── Step 3: LLM provider ───────────────────────────────────────────────
-	printStep(3, "LLM provider")
+	// ── Step 4: LLM provider ───────────────────────────────────────────────
+	printStep(4, "LLM provider")
 	fmt.Printf("  %s %s\n", dim("Current default:"), cyan(cfg.LLM.DefaultProvider))
 	fmt.Printf("  %s Detecting Ollama on localhost:11434...\n", gray("→"))
 	if ollamaUp() {
@@ -195,8 +234,8 @@ func runOnboardWizard() error {
 	}
 	fmt.Println()
 
-	// ── Step 4: Web search ─────────────────────────────────────────────────
-	printStep(4, "Web search")
+	// ── Step 5: Web search ─────────────────────────────────────────────────
+	printStep(5, "Web search")
 	currentSearch := cfg.Search.Provider
 	if currentSearch == "" {
 		currentSearch = "ollama"
@@ -222,8 +261,8 @@ func runOnboardWizard() error {
 	}
 	fmt.Println()
 
-	// ── Step 5: Starter agent ──────────────────────────────────────────────
-	printStep(5, "Starter agent")
+	// ── Step 6: Starter agent ──────────────────────────────────────────────
+	printStep(6, "Starter agent")
 	agentCount := countAgentsOnDisk(ws)
 	if agentCount > 0 {
 		fmt.Printf("  %s %d agent(s) on disk. Skipping.\n", green("✓"), agentCount)
@@ -240,8 +279,8 @@ func runOnboardWizard() error {
 	}
 	fmt.Println()
 
-	// ── Step 6: Production updates ─────────────────────────────────────────
-	printStep(6, "Production updates")
+	// ── Step 7: Production updates ─────────────────────────────────────────
+	printStep(7, "Production updates")
 	currentManifest := strings.TrimSpace(cfg.Updates.ManifestURL)
 	if currentManifest == "" {
 		fmt.Printf("  %s No update manifest configured yet.\n", yellow("⚠"))
@@ -267,8 +306,8 @@ func runOnboardWizard() error {
 	}
 	fmt.Println()
 
-	// ── Step 7: Daemon install ─────────────────────────────────────────────
-	printStep(7, "Auto-start on login")
+	// ── Step 8: Daemon install ─────────────────────────────────────────────
+	printStep(8, "Auto-start on login")
 	switch runtime.GOOS {
 	case "darwin":
 		fmt.Printf("  %s On macOS this installs a LaunchAgent.\n", gray("→"))
@@ -640,6 +679,24 @@ func setScalar(m *yaml.Node, key, value string, style yaml.Style) {
 	)
 }
 
+func setBool(m *yaml.Node, key string, value bool) {
+	text := "false"
+	if value {
+		text = "true"
+	}
+	if v := yamlMapValue(m, key); v != nil {
+		v.Kind = yaml.ScalarNode
+		v.Tag = "!!bool"
+		v.Value = text
+		v.Style = 0
+		return
+	}
+	m.Content = append(m.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key},
+		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: text},
+	)
+}
+
 // ensureMapping returns m[key] as a mapping node, creating it if absent.
 func ensureMapping(m *yaml.Node, key string) *yaml.Node {
 	if v := yamlMapValue(m, key); v != nil {
@@ -657,6 +714,54 @@ func ensureMapping(m *yaml.Node, key string) *yaml.Node {
 		child,
 	)
 	return child
+}
+
+type deploymentSettings struct {
+	Mode                string
+	PostgresDSN         string
+	JWTSecret           string
+	APIKey              string
+	NATSURL             string
+	SharedArtifactStore string
+}
+
+func defaultString(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
+}
+
+// patchDeploymentSettings changes only the operating-mode fields. It is safe
+// to run repeatedly and deliberately preserves unrelated operator settings.
+func patchDeploymentSettings(path string, settings deploymentSettings) error {
+	doc, root, err := loadConfigDoc(path)
+	if err != nil {
+		return err
+	}
+	deployment := ensureMapping(root, "deployment")
+	setScalar(deployment, "mode", settings.Mode, 0)
+
+	if config.IsMultiUserMode(settings.Mode) {
+		setScalar(ensureMapping(root, "auth"), "mode", "jwt", 0)
+		setScalar(ensureMapping(root, "auth"), "jwt_secret", settings.JWTSecret, yaml.DoubleQuotedStyle)
+		setScalar(ensureMapping(root, "storage"), "backend", "postgres", 0)
+		setScalar(ensureMapping(root, "storage"), "postgres_dsn", settings.PostgresDSN, yaml.DoubleQuotedStyle)
+		setScalar(ensureMapping(root, "executor"), "backend", "docker", 0)
+		sandbox := ensureMapping(ensureMapping(root, "runtime"), "sandbox")
+		setBool(sandbox, "enabled", true)
+		setScalar(sandbox, "mode", "docker", 0)
+		server := ensureMapping(root, "server")
+		setBool(server, "allow_unauthenticated", false)
+		setScalar(server, "api_key", settings.APIKey, yaml.DoubleQuotedStyle)
+	}
+	if settings.Mode == config.DeploymentModeScale {
+		queue := ensureMapping(root, "queue")
+		setScalar(queue, "backend", "nats", 0)
+		setScalar(queue, "nats_url", settings.NATSURL, yaml.DoubleQuotedStyle)
+		setScalar(deployment, "shared_artifact_store", settings.SharedArtifactStore, yaml.DoubleQuotedStyle)
+	}
+	return saveConfigDoc(path, doc)
 }
 
 func patchServerHost(path, host string) error {

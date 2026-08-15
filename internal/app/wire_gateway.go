@@ -8,9 +8,11 @@ package app
 // Behavior is preserved verbatim from the original inline block.
 
 import (
+	"context"
 	"os"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/audit"
@@ -40,6 +42,7 @@ import (
 	"github.com/soulacy/soulacy/internal/session"
 	"github.com/soulacy/soulacy/internal/skills"
 	"github.com/soulacy/soulacy/internal/storage"
+	"github.com/soulacy/soulacy/internal/tenancy"
 	"github.com/soulacy/soulacy/internal/voice"
 	"github.com/soulacy/soulacy/internal/workboard"
 )
@@ -64,6 +67,8 @@ type gatewayDeps struct {
 	credVault       credentials.Vault
 	pluginLoader    *plugins.Loader
 	openedCostStore *costs.Store
+	tenantResolver  tenancy.Resolver
+	tenantPool      *pgxpool.Pool
 }
 
 // wireGateway builds the gateway server and attaches every host capability.
@@ -77,6 +82,9 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 	// to the server's tool-catalog cache.
 	srv := gateway.New(cfg, cfgPath, d.engine, d.loader, d.llmRouter, d.chanReg, d.sched, d.httpAdapter, d.waAdapter, d.skillLoader, d.actionBackend, d.mcpClient, d.hub, log)
 	srv.SetAuth(d.authEngine)
+	if d.tenantResolver != nil {
+		srv.SetTenantResolver(d.tenantResolver)
+	}
 	logEffectiveSecuritySummary(log, cfg, d.authEngine != nil && d.authEngine.Effective())
 	srv.SetRBAC(d.rbacManager)
 	if d.credVault != nil {
@@ -239,14 +247,22 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 	}
 
 	// ── API Key Store ─────────────────────────────────────────────────────────
-	apiKeyPath := ws.DB("apikeys")
-	if akStore, akErr := apikeys.NewSQLiteStore(apiKeyPath); akErr != nil {
+	var akStore apikeys.Store
+	var akErr error
+	apiKeyLocation := ws.DB("apikeys")
+	if d.tenantPool != nil {
+		akStore, akErr = apikeys.NewPostgresStore(context.Background(), d.tenantPool)
+		apiKeyLocation = "postgres"
+	} else {
+		akStore, akErr = apikeys.NewSQLiteStore(apiKeyLocation)
+	}
+	if akErr != nil {
 		log.Warn("api key store unavailable", zap.Error(akErr))
 	} else {
 		stack.pushClose("apikey-store", akStore)
 		srv.SetAPIKeyStore(akStore)
 		d.authEngine.SetAPIKeyStore(akStore) // wire into auth middleware (sk_ prefix validation)
-		log.Info("api key store ready", zap.String("path", apiKeyPath))
+		log.Info("api key store ready", zap.String("backend", apiKeyLocation))
 	}
 
 	// ── Dead-Letter Queue ─────────────────────────────────────────────────────

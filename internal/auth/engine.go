@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"fmt"
@@ -46,6 +47,18 @@ type Config struct {
 	// OIDCClientID identifies this application to the OIDC provider.
 	// Used as the audience claim fallback when OIDCAudience is empty.
 	OIDCClientID string
+
+	// OIDCClientSecret is optional for providers that support public PKCE
+	// clients. Prefer injecting it from the process environment or a secret
+	// manager instead of writing it to config.yaml.
+	OIDCClientSecret string
+
+	// OIDCRedirectURL is the registered browser callback for the GUI, for
+	// example https://soulacy.example.com/api/v1/auth/oidc/callback.
+	OIDCRedirectURL string
+
+	// OIDCScopes defaults to openid, profile, email.
+	OIDCScopes []string
 }
 
 func (c *Config) applyDefaults() {
@@ -61,6 +74,16 @@ func (c *Config) applyDefaults() {
 	if c.OIDCAudience == "" {
 		c.OIDCAudience = c.OIDCClientID
 	}
+	if len(c.OIDCScopes) == 0 {
+		c.OIDCScopes = []string{"openid", "profile", "email"}
+	}
+}
+
+// IdentityLinker maps a verified provider subject to a local user. The
+// provider subject is always authoritative; email may only assist linking when
+// the provider explicitly marked it verified.
+type IdentityLinker interface {
+	LinkOIDCIdentity(context.Context, string, string, string, bool, string) (string, error)
 }
 
 // Engine is the Soulacy auth subsystem.
@@ -73,12 +96,15 @@ func (c *Config) applyDefaults() {
 //	                       (3) validates OIDC-provider JWTs when oidc_issuer is set.
 //	                       Tokens carry Claims (sub, email, role) for downstream RBAC.
 type Engine struct {
-	cfg         Config
-	staticKey   string         // server.api_key; always checked, any mode
-	issuer      *Issuer        // non-nil when cfg.Mode == "jwt"
-	oidc        *OIDCValidator // non-nil when cfg.OIDCIssuer != ""
-	log         *zap.Logger
-	apiKeyStore apikeys.Store // non-nil when managed API keys are enabled
+	cfg            Config
+	staticKey      string         // server.api_key; always checked, any mode
+	issuer         *Issuer        // non-nil when cfg.Mode == "jwt"
+	oidc           *OIDCValidator // non-nil when cfg.OIDCIssuer != ""
+	log            *zap.Logger
+	apiKeyStore    apikeys.Store // non-nil when managed API keys are enabled
+	flows          *oidcFlowStore
+	identityLinker IdentityLinker
+	refreshAllowed func(context.Context, string) bool
 }
 
 // SetAPIKeyStore wires the managed API key store. When set, tokens with the
@@ -86,6 +112,15 @@ type Engine struct {
 // validation. Safe to call once at startup before any traffic.
 func (e *Engine) SetAPIKeyStore(s apikeys.Store) {
 	e.apiKeyStore = s
+}
+
+func (e *Engine) SetIdentityLinker(linker IdentityLinker) { e.identityLinker = linker }
+
+// SetRefreshAuthorizer installs the live account/membership eligibility check
+// used before a refresh token is rotated. The callback receives the locally
+// linked user subject, never an unverified external claim.
+func (e *Engine) SetRefreshAuthorizer(authorizer func(context.Context, string) bool) {
+	e.refreshAllowed = authorizer
 }
 
 // New constructs an Engine and performs OIDC discovery synchronously (if
@@ -129,6 +164,7 @@ func New(cfg Config, staticKey string, log *zap.Logger) (*Engine, error) {
 			)
 		} else {
 			e.oidc = oidcVal
+			e.flows = newOIDCFlowStore()
 			log.Info("auth: OIDC validator ready", zap.String("issuer", cfg.OIDCIssuer))
 		}
 	}
@@ -148,6 +184,9 @@ func New(cfg Config, staticKey string, log *zap.Logger) (*Engine, error) {
 func (e *Engine) Middleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		token := strings.TrimPrefix(c.Get("Authorization"), "Bearer ")
+		if token == "" {
+			token = c.Cookies("soulacy_access")
+		}
 		// WebSocket connections cannot set headers; accept ?api_key= as fallback.
 		if token == "" {
 			token = c.Query("api_key")
@@ -155,7 +194,10 @@ func (e *Engine) Middleware() fiber.Handler {
 
 		// 1. Static API key
 		if e.staticKey != "" && secretEqual(token, e.staticKey) {
-			SetClaims(c, &Claims{Email: "admin", Role: "admin", Kind: "access"})
+			SetClaims(c, &Claims{
+				RegisteredClaims: jwt.RegisteredClaims{Subject: "api-key"},
+				Email:            "admin", Role: "admin", Kind: "access", PrincipalKind: "static_api_key", CredentialID: "static-api-key",
+			})
 			return c.Next()
 		}
 
@@ -163,16 +205,27 @@ func (e *Engine) Middleware() fiber.Handler {
 		// Role defaults to "operator" (same as a regular authenticated user).
 		if e.apiKeyStore != nil && strings.HasPrefix(token, "sk_") {
 			if ak, err := e.apiKeyStore.Validate(c.Context(), token); err == nil {
+				workspaceID := ""
+				if len(ak.WorkspaceIDs) == 1 {
+					workspaceID = ak.WorkspaceIDs[0]
+				}
+				var expiresAt *jwt.NumericDate
+				if ak.ExpiresAt != nil {
+					expiresAt = jwt.NewNumericDate(*ak.ExpiresAt)
+				}
 				SetClaims(c, &Claims{
-					RegisteredClaims: jwt.RegisteredClaims{Subject: ak.ID},
+					RegisteredClaims: jwt.RegisteredClaims{Subject: ak.SubjectID, Issuer: ak.Issuer, ExpiresAt: expiresAt},
 					Email:            ak.Name,
-					Role:             "operator",
+					Role:             ak.Role,
 					Kind:             "access",
+					PrincipalKind:    ak.Kind,
 					// Carry the key's stored scopes so RBAC can honour them.
 					// They were persisted and echoed back but never enforced, so
 					// every sk_ key was a full operator whatever it was minted
 					// with.
-					Scopes: ak.Scopes,
+					Scopes: ak.Scopes, OrganizationID: ak.OrganizationID,
+					WorkspaceID: workspaceID, WorkspaceIDs: append([]string(nil), ak.WorkspaceIDs...),
+					CredentialID: ak.ID,
 				})
 				return c.Next()
 			}
@@ -226,14 +279,14 @@ func (e *Engine) HandleTokenRequest(c *fiber.Ctx) error {
 		APIKey string `json:"api_key"`
 	}
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request"})
 	}
 	if !secretEqual(req.APIKey, e.staticKey) {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid api_key"})
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication failed"})
 	}
 	access, refresh, expiresIn, err := e.issuer.Issue("admin", "", "admin")
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "authentication failed"})
 	}
 	return c.JSON(fiber.Map{
 		"access_token":  access,
@@ -262,21 +315,51 @@ func (e *Engine) HandleRefresh(c *fiber.Ctx) error {
 		RefreshToken string `json:"refresh_token"`
 	}
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+		if len(c.Body()) > 0 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request"})
+		}
+	}
+	if req.RefreshToken == "" {
+		req.RefreshToken = c.Cookies("soulacy_refresh")
 	}
 	if req.RefreshToken == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "refresh_token is required"})
 	}
-	access, newRefresh, expiresIn, err := e.issuer.Refresh(req.RefreshToken)
+	access, newRefresh, expiresIn, err := e.issuer.RefreshAuthorized(req.RefreshToken, func(subject string) bool {
+		return e.refreshAllowed == nil || e.refreshAllowed(c.UserContext(), subject)
+	})
 	if err != nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": err.Error()})
+		e.clearAuthCookies(c)
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication failed"})
 	}
+	e.setAuthCookies(c, access, newRefresh, expiresIn)
 	return c.JSON(fiber.Map{
 		"access_token":  access,
 		"refresh_token": newRefresh,
 		"expires_in":    expiresIn,
 		"token_type":    "Bearer",
 	})
+}
+
+// HandleLogout revokes both the presented access token and refresh-token
+// family. It always returns 204 so callers cannot use it as an account oracle.
+func (e *Engine) HandleLogout(c *fiber.Ctx) error {
+	if e.issuer != nil {
+		access := strings.TrimPrefix(c.Get("Authorization"), "Bearer ")
+		if access == "" {
+			access = c.Cookies("soulacy_access")
+		}
+		var req struct {
+			RefreshToken string `json:"refresh_token"`
+		}
+		_ = c.BodyParser(&req)
+		if req.RefreshToken == "" {
+			req.RefreshToken = c.Cookies("soulacy_refresh")
+		}
+		e.issuer.Revoke(access, req.RefreshToken)
+	}
+	e.clearAuthCookies(c)
+	return c.SendStatus(fiber.StatusNoContent)
 }
 
 // HandleMe handles GET /api/v1/auth/me.
@@ -287,6 +370,13 @@ func (e *Engine) HandleMe(c *fiber.Ctx) error {
 		out["sub"] = cl.Subject
 		out["email"] = cl.Email
 		out["role"] = cl.Role
+		out["principal_kind"] = principalKindOrTokenKind(cl)
+		out["organization_id"] = cl.OrganizationID
+		out["workspace_id"] = cl.WorkspaceID
+		out["workspace_ids"] = cl.WorkspaceIDs
+		out["credential_id"] = cl.CredentialID
+		out["issuer"] = cl.Issuer
+		out["scopes"] = cl.Scopes
 		if cl.ExpiresAt != nil {
 			out["exp"] = cl.ExpiresAt.Time.Unix()
 		}
@@ -301,6 +391,16 @@ func (e *Engine) HandleMe(c *fiber.Ctx) error {
 	return c.JSON(out)
 }
 
+func principalKindOrTokenKind(cl *Claims) string {
+	if cl == nil {
+		return ""
+	}
+	if strings.TrimSpace(cl.PrincipalKind) != "" {
+		return cl.PrincipalKind
+	}
+	return cl.Kind
+}
+
 // Mode returns the configured auth mode ("apikey" or "jwt").
 func (e *Engine) Mode() string { return e.cfg.Mode }
 
@@ -313,6 +413,27 @@ func (e *Engine) Close() {
 	if e.oidc != nil {
 		e.oidc.close()
 	}
+	if e.flows != nil {
+		e.flows.close()
+	}
+}
+
+func (e *Engine) setAuthCookies(c *fiber.Ctx, access, refresh string, expiresIn int) {
+	secure := e.secureCookies(c)
+	c.Cookie(&fiber.Cookie{Name: "soulacy_access", Value: access, HTTPOnly: true, Secure: secure, SameSite: "Lax", MaxAge: expiresIn, Path: "/"})
+	c.Cookie(&fiber.Cookie{Name: "soulacy_refresh", Value: refresh, HTTPOnly: true, Secure: secure, SameSite: "Strict", MaxAge: int(e.cfg.JWTRefreshTTL.Seconds()), Path: "/api/v1/auth"})
+}
+
+func (e *Engine) clearAuthCookies(c *fiber.Ctx) {
+	for _, item := range []struct{ name, path string }{{"soulacy_access", "/"}, {"soulacy_refresh", "/api/v1/auth"}} {
+		c.Cookie(&fiber.Cookie{Name: item.name, Value: "", HTTPOnly: true, Secure: e.secureCookies(c), SameSite: "Strict", MaxAge: -1, Path: item.path})
+	}
+}
+
+func (e *Engine) secureCookies(c *fiber.Ctx) bool {
+	// Fiber may observe HTTP when TLS terminates at a trusted reverse proxy.
+	// The registered public callback is authoritative for hosted deployments.
+	return strings.EqualFold(c.Protocol(), "https") || strings.HasPrefix(strings.ToLower(e.cfg.OIDCRedirectURL), "https://")
 }
 
 // ---------------------------------------------------------------------------

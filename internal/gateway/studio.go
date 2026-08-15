@@ -984,7 +984,7 @@ func (s *Server) handleStudioBuildStream(c *fiber.Ctx) error {
 	in := s.preflightInput(c, cat)
 	// Detach from the request context so the loop isn't cancelled when the
 	// handler returns to take over the connection as a stream writer.
-	ctx := context.WithoutCancel(c.Context())
+	ctx := detachedRequestContext(c)
 
 	// Events are produced by the loop (in a goroutine) and drained by the SSE
 	// writer. Buffered so the loop never blocks on a slow client.
@@ -1161,7 +1161,7 @@ func (s *Server) handleStudioGenerateStream(c *fiber.Ctx) error {
 	// milliseconds. Cancellation belongs to the two places that actually know the
 	// run is over: the producer goroutine (work finished) and the stream writer
 	// (client went away).
-	ctx, cancelRun := context.WithCancel(context.WithoutCancel(c.Context()))
+	ctx, cancelRun := context.WithCancel(detachedRequestContext(c))
 
 	type sse struct{ event, data string }
 	events := make(chan sse, 32)
@@ -1594,7 +1594,7 @@ func (s *Server) handleStudioTryAgent(c *fiber.Ctx) error {
 	cleanupPeers := s.registerEphemeralPeers(def, req.Workflow.NewAgents)
 	defer cleanupPeers()
 
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Context()), 120*time.Second)
+	ctx, cancel := context.WithTimeout(detachedRequestContext(c), 120*time.Second)
 	defer cancel()
 
 	// Capture the exact sequence of skills/tools the agent invokes, so the author
@@ -2964,7 +2964,7 @@ func (s *Server) studioDesignGraph(
 	// single most expensive call in Studio was the one still passing c.Context()
 	// straight to the model. The timeout keeps a genuinely stuck call bounded —
 	// generously, since the slowest honest generation observed was 96s.
-	designCtx, cancelDesign := context.WithTimeout(context.WithoutCancel(c.Context()), 5*time.Minute)
+	designCtx, cancelDesign := context.WithTimeout(detachedRequestContext(c), 5*time.Minute)
 	defer cancelDesign()
 
 	if model := s.studioLLM(c); model != nil {

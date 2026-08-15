@@ -11,9 +11,37 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestIsKnownRoleKnown(t *testing.T) {
-	for _, r := range []string{RoleAdmin, RoleOperator, RoleViewer} {
+	for _, r := range KnownRoles {
 		if !IsKnownRole(r) {
 			t.Errorf("IsKnownRole(%q) = false, want true", r)
+		}
+	}
+}
+
+func TestDefaultPolicyMatrix(t *testing.T) {
+	resources := []string{
+		ResourceAgents, ResourceChat, ResourceMemory, ResourceChannels, ResourceProviders,
+		ResourceSkills, ResourceMCP, ResourceKnowledge, ResourceBuilder, ResourceTemplates,
+		ResourceConfig, ResourceLogs, ResourceMetrics, ResourceSchedule, ResourceRBAC,
+		ResourceSecrets, ResourceCredentials,
+	}
+	actions := []string{ActionRead, ActionWrite, ActionDelete, ActionChat, ActionEnable, ActionList, ActionSet, ActionRotate, ActionReveal}
+	for _, role := range KnownRoles {
+		rolePolicy, ok := defaultPolicy[role]
+		if !ok {
+			t.Fatalf("role %q has no policy", role)
+		}
+		for _, resource := range resources {
+			resourcePolicy, ok := rolePolicy[resource]
+			if !ok {
+				t.Errorf("role %q does not explicitly define resource %q", role, resource)
+				continue
+			}
+			for _, action := range actions {
+				if got, want := HasPermission(role, resource, action), resourcePolicy[action]; got != want {
+					t.Errorf("%s %s:%s = %v, want %v", role, resource, action, got, want)
+				}
+			}
 		}
 	}
 }
@@ -219,18 +247,53 @@ func TestSetAgentGrantUnknownRoleErrors(t *testing.T) {
 	}
 }
 
+func TestWorkspaceGrantIsolationAndElevation(t *testing.T) {
+	s := newRBACStore(t)
+	if err := s.SetAgentGrantInWorkspace(AgentGrant{
+		WorkspaceID: "workspace-a", Role: RoleViewer, AgentID: "agent-1",
+		Actions: []string{ActionDelete}, Elevated: true, GrantedByRole: RoleOwner,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	allowed, err := s.CanAccessAgentInWorkspace("workspace-a", RoleViewer, "agent-1", ResourceAgents, ActionDelete)
+	if err != nil || !allowed {
+		t.Fatalf("owner elevation in workspace-a: allowed=%v err=%v", allowed, err)
+	}
+	allowed, err = s.CanAccessAgentInWorkspace("workspace-b", RoleViewer, "agent-1", ResourceAgents, ActionDelete)
+	if err != nil || allowed {
+		t.Fatalf("grant leaked into workspace-b: allowed=%v err=%v", allowed, err)
+	}
+	if err := s.SetAgentGrantInWorkspace(AgentGrant{
+		WorkspaceID: "workspace-a", Role: RoleViewer, AgentID: "agent-2",
+		Actions: []string{ActionDelete}, GrantedByRole: RoleAdmin,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	allowed, err = s.CanAccessAgentInWorkspace("workspace-a", RoleViewer, "agent-2", ResourceAgents, ActionDelete)
+	if err != nil || allowed {
+		t.Fatalf("ordinary grant widened membership role: allowed=%v err=%v", allowed, err)
+	}
+	if err := s.SetAgentGrantInWorkspace(AgentGrant{
+		WorkspaceID: "workspace-a", Role: RoleViewer, AgentID: "agent-3",
+		Actions: []string{ActionDelete}, Elevated: true, GrantedByRole: RoleAdmin,
+	}); err == nil {
+		t.Fatal("non-owner elevation was accepted")
+	}
+}
+
 func TestSetAgentGrantUpserts(t *testing.T) {
 	s := newRBACStore(t)
-	g := AgentGrant{Role: RoleViewer, AgentID: "bot", Actions: []string{ActionRead}}
+	g := AgentGrant{Role: RoleDeveloper, AgentID: "bot", Actions: []string{ActionRead}}
 	_ = s.SetAgentGrant(g)
-	// Update to also allow chat.
-	g.Actions = []string{ActionRead, ActionChat}
+	// Update to also allow writes already permitted by the role. Object rules
+	// narrow unless an owner explicitly marks an elevation.
+	g.Actions = []string{ActionRead, ActionWrite}
 	if err := s.SetAgentGrant(g); err != nil {
 		t.Fatalf("second SetAgentGrant: %v", err)
 	}
-	allowed, _ := s.CanAccessAgent(RoleViewer, "bot", ActionChat)
+	allowed, _ := s.CanAccessAgent(RoleDeveloper, "bot", ActionWrite)
 	if !allowed {
-		t.Error("after upsert, chat should be allowed")
+		t.Error("after upsert, role-permitted write should be allowed")
 	}
 }
 
@@ -862,8 +925,8 @@ func TestCanAccessAgentExactGrantOverridesWildcard(t *testing.T) {
 
 	// Wildcard grants read to all agents.
 	_ = s.SetAgentGrant(AgentGrant{Role: RoleOperator, AgentID: "*", Actions: []string{ActionRead}})
-	// Exact row for "restricted-agent" grants only chat — no read.
-	_ = s.SetAgentGrant(AgentGrant{Role: RoleOperator, AgentID: "restricted-agent", Actions: []string{ActionChat}})
+	// Exact row for "restricted-agent" grants only enable — no read.
+	_ = s.SetAgentGrant(AgentGrant{Role: RoleOperator, AgentID: "restricted-agent", Actions: []string{ActionEnable}})
 
 	// Exact row found first → read is denied because it is not in the row.
 	allowed, err := s.CanAccessAgent(RoleOperator, "restricted-agent", ActionRead)
@@ -874,13 +937,13 @@ func TestCanAccessAgentExactGrantOverridesWildcard(t *testing.T) {
 		t.Error("exact deny should override wildcard allow")
 	}
 
-	// Chat is in the exact row → allowed.
-	allowed, err = s.CanAccessAgent(RoleOperator, "restricted-agent", ActionChat)
+	// Enable is in the exact row and in the role policy → allowed.
+	allowed, err = s.CanAccessAgent(RoleOperator, "restricted-agent", ActionEnable)
 	if err != nil {
-		t.Fatalf("CanAccessAgent chat: %v", err)
+		t.Fatalf("CanAccessAgent enable: %v", err)
 	}
 	if !allowed {
-		t.Error("chat should be allowed via exact grant")
+		t.Error("enable should be allowed via exact grant")
 	}
 }
 
@@ -976,8 +1039,8 @@ func TestIsKnownRoleViewer(t *testing.T) {
 // KnownRoles slice correctness
 // ---------------------------------------------------------------------------
 
-func TestKnownRolesContainsAllThree(t *testing.T) {
-	want := map[string]bool{RoleAdmin: false, RoleOperator: false, RoleViewer: false}
+func TestKnownRolesContainsEveryWorkspaceRole(t *testing.T) {
+	want := map[string]bool{RoleOwner: false, RoleAdmin: false, RoleDeveloper: false, RoleOperator: false, RoleViewer: false}
 	for _, r := range KnownRoles {
 		if _, ok := want[r]; !ok {
 			t.Errorf("unexpected role in KnownRoles: %q", r)

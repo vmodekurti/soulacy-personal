@@ -995,8 +995,9 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 
 	// Decouple client connection drop from background execution. Use the
 	// agent's declared run_timeout if set, otherwise the gateway default.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Context()), s.resolveRunTimeout(def))
+	ctx, cancel := context.WithTimeout(detachedRequestContext(c), s.resolveRunTimeout(def))
 	defer cancel()
+	ctx = withWorkspaceIdentity(c, ctx)
 	if principal, ok := requestPrincipal(c); ok {
 		ctx = runtime.WithPrincipal(ctx, principal)
 	}
@@ -1190,7 +1191,8 @@ func (s *Server) handleChatStream(c *fiber.Ctx) error {
 	// stream (see studio.go). Ownership belongs to the two places that actually
 	// know the run is over: the producer goroutine (work finished) and the stream
 	// writer (client went away).
-	runCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Context()), s.resolveRunTimeout(def))
+	runCtx, cancel := context.WithTimeout(detachedRequestContext(c), s.resolveRunTimeout(def))
+	runCtx = withWorkspaceIdentity(c, runCtx)
 	if principal, ok := requestPrincipal(c); ok {
 		runCtx = runtime.WithPrincipal(runCtx, principal)
 	}
@@ -2438,7 +2440,7 @@ func (s *Server) handleManualTrigger(c *fiber.Ctx) error {
 	// Decouple client connection drop from background execution. Use the
 	// agent's run_timeout — long-running tools (e.g. NotebookLM audio gen)
 	// would blow the old 120s ceiling.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Context()), s.resolveRunTimeout(def))
+	ctx, cancel := context.WithTimeout(detachedRequestContext(c), s.resolveRunTimeout(def))
 	defer cancel()
 	ctx = withRequestPrincipal(c, ctx)
 
@@ -2550,7 +2552,7 @@ func (s *Server) handleReplayAgentRun(c *fiber.Ctx) error {
 	msg.Metadata["replay_from_session"] = req.SessionID
 	msg.Metadata["replay_from_channel"] = orig.Channel
 
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Context()), s.resolveRunTimeout(def))
+	ctx, cancel := context.WithTimeout(detachedRequestContext(c), s.resolveRunTimeout(def))
 	defer cancel()
 	ctx = withRequestPrincipal(c, ctx)
 

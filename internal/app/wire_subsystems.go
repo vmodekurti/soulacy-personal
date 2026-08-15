@@ -52,6 +52,7 @@ import (
 	storagepg "github.com/soulacy/soulacy/internal/storage/postgres"
 	storagesqlite "github.com/soulacy/soulacy/internal/storage/sqlite"
 	"github.com/soulacy/soulacy/internal/telemetry"
+	"github.com/soulacy/soulacy/internal/tenancy"
 	"github.com/soulacy/soulacy/internal/vector"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
@@ -819,13 +820,16 @@ func (a *App) wireAuth(stack *closerStack) (*auth.Engine, error) {
 	accessTTL, _ := time.ParseDuration(cfg.Auth.JWTAccessTTL)
 	refreshTTL, _ := time.ParseDuration(cfg.Auth.JWTRefreshTTL)
 	authEngine, authErr := auth.New(auth.Config{
-		Mode:          cfg.Auth.Mode,
-		JWTSecret:     cfg.Auth.JWTSecret,
-		JWTAccessTTL:  accessTTL,
-		JWTRefreshTTL: refreshTTL,
-		OIDCIssuer:    cfg.Auth.OIDCIssuer,
-		OIDCAudience:  cfg.Auth.OIDCAudience,
-		OIDCClientID:  cfg.Auth.OIDCClientID,
+		Mode:             cfg.Auth.Mode,
+		JWTSecret:        cfg.Auth.JWTSecret,
+		JWTAccessTTL:     accessTTL,
+		JWTRefreshTTL:    refreshTTL,
+		OIDCIssuer:       cfg.Auth.OIDCIssuer,
+		OIDCAudience:     cfg.Auth.OIDCAudience,
+		OIDCClientID:     cfg.Auth.OIDCClientID,
+		OIDCClientSecret: cfg.Auth.OIDCClientSecret,
+		OIDCRedirectURL:  cfg.Auth.OIDCRedirectURL,
+		OIDCScopes:       cfg.Auth.OIDCScopes,
 	}, cfg.Server.APIKey, log)
 	if authErr != nil {
 		return nil, fmt.Errorf("auth engine: %w", authErr)
@@ -843,9 +847,15 @@ func (a *App) wireRBAC(ws config.Paths, stack *closerStack) *rbac.Manager {
 	rbacDBPath := ws.DB("rbac")
 	var rbacStore rbac.Store
 	if rs, rerr := rbac.NewSQLiteStore(rbacDBPath); rerr != nil {
-		log.Warn("RBAC SQLite store unavailable, falling back to static policy only",
-			zap.String("path", rbacDBPath), zap.Error(rerr))
-		rbacStore = rbac.NoopStore{}
+		if config.IsMultiUserMode(a.cfg.DeploymentMode()) {
+			log.Error("RBAC store unavailable; multi-user authorization will fail closed",
+				zap.String("path", rbacDBPath), zap.Error(rerr))
+			rbacStore = rbac.ErrorStore{Err: rerr}
+		} else {
+			log.Warn("RBAC SQLite store unavailable, falling back to static policy only",
+				zap.String("path", rbacDBPath), zap.Error(rerr))
+			rbacStore = rbac.NoopStore{}
+		}
 	} else {
 		stack.pushClose("rbac-store", rs)
 		rbacStore = rs
@@ -1223,7 +1233,7 @@ func (a *App) wireEngine(d engineDeps) *runtime.Engine {
 // chanReg.Send(). Concurrency is bounded by runtime.max_concurrent_sessions
 // (default 100); per-run timeout uses each agent's declared run_timeout.
 // (PRODUCTION_AUDIT → CRITICAL/Concurrency)
-func (a *App) startMessageRouter(ctx context.Context, chanReg *channels.Registry, loader *runtime.Loader, engine *runtime.Engine) {
+func (a *App) startMessageRouter(ctx context.Context, chanReg *channels.Registry, loader *runtime.Loader, engine *runtime.Engine, personalTenant *tenancy.PersonalTenant) {
 	cfg, log := a.cfg, a.log
 	workerCount := cfg.Runtime.MaxConcurrentSessions
 	if workerCount <= 0 {
@@ -1251,12 +1261,29 @@ func (a *App) startMessageRouter(ctx context.Context, chanReg *channels.Registry
 				if msg.Channel == "http" {
 					continue // synchronous path
 				}
+				if config.IsMultiUserMode(cfg.DeploymentMode()) && personalTenant == nil {
+					log.Error("channel message blocked: verified workspace routing is unavailable",
+						zap.String("channel", msg.Channel), zap.String("agent", msg.AgentID))
+					continue
+				}
 				def := loader.Get(msg.AgentID)
 				timeout := 5 * time.Minute
 				if def != nil {
 					timeout = def.ResolvedRunTimeout(timeout)
 				}
 				mCtx, mCancel := context.WithTimeout(ctx, timeout)
+				if personalTenant != nil {
+					subject := strings.TrimSpace(msg.UserID)
+					if subject == "" {
+						subject = "channel:" + strings.TrimSpace(msg.Channel)
+					}
+					mCtx = runtime.WithPrincipal(mCtx, runtime.Principal{
+						Subject: subject, OrganizationID: personalTenant.OrganizationID,
+						WorkspaceID: personalTenant.WorkspaceID, MembershipID: personalTenant.MembershipID,
+						Role: "admin", CredentialID: "channel:" + strings.TrimSpace(msg.Channel),
+						RequestID: msg.ID, Kind: "channel-user",
+					})
+				}
 				// Worker-pool saturation gauge. (PRODUCTION_AUDIT → MED/Observability)
 				metrics.WorkerPoolActiveRuns.Inc()
 				reply, err := engine.Handle(mCtx, msg)

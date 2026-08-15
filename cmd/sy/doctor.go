@@ -22,7 +22,6 @@ import (
 	"github.com/soulacy/soulacy/internal/credentials"
 	"github.com/soulacy/soulacy/internal/secrets"
 	"github.com/soulacy/soulacy/internal/updates"
-
 )
 
 type doctorStatus string
@@ -108,6 +107,7 @@ func collectDoctorReport() doctorReport {
 	}
 
 	add(checkConfig())
+	add(checkDeploymentMode())
 	add(checkRuntimeDir(runtimeDir))
 	add(checkInstallLayout())
 	add(checkAgentDirs())
@@ -159,7 +159,6 @@ func checkUpdateManifest() doctorCheck {
 		Remedy: remedy,
 	}
 }
-
 
 // loadDoctorConfig unmarshals the viper-loaded configuration into a typed
 // config.Config for local (non-gateway) inspection. Returns nil on failure.
@@ -283,6 +282,48 @@ func checkConfig() doctorCheck {
 		return doctorCheck{Name: "config", Status: doctorFail, Detail: err.Error()}
 	}
 	return doctorCheck{Name: "config", Status: doctorOK, Detail: path}
+}
+
+func checkDeploymentMode() doctorCheck {
+	cfg, err := loadDoctorConfig()
+	if err != nil {
+		return doctorCheck{
+			Name:   "deployment mode",
+			Status: doctorFail,
+			Detail: "cannot inspect deployment settings: " + err.Error(),
+			Remedy: "fix config.yaml parsing errors, then run `sy doctor` again",
+		}
+	}
+	mode := cfg.DeploymentMode()
+	issues := cfg.DeploymentReadinessIssues()
+	if len(issues) > 0 {
+		return doctorCheck{
+			Name:   "deployment mode",
+			Status: doctorFail,
+			Detail: mode + " mode is not ready: " + strings.Join(issues, "; "),
+			Remedy: "run `sy onboard` and complete the " + mode + " prerequisites, or set deployment.mode to personal",
+		}
+	}
+	if cfg.HasUnsafeDeploymentAcknowledgement() {
+		waived := cfg.AcknowledgedDeploymentIssues()
+		detail := mode + " mode starts with the unsafe multi-user prerequisite override acknowledged"
+		if len(waived) > 0 {
+			detail += ": " + strings.Join(waived, "; ")
+		}
+		return doctorCheck{
+			Name:   "deployment mode",
+			Status: doctorWarn,
+			Detail: detail,
+			Remedy: "remove deployment.acknowledgements entry `unsafe_multi_user_prerequisites` after satisfying every reported prerequisite",
+		}
+	}
+	detail := mode + " mode"
+	if mode == config.DeploymentModePersonal {
+		detail += " — local single-user defaults"
+	} else {
+		detail += " — required authentication, storage, and isolation settings are configured"
+	}
+	return doctorCheck{Name: "deployment mode", Status: doctorOK, Detail: detail}
 }
 
 func checkRuntimeDir(runtimeDir string) doctorCheck {

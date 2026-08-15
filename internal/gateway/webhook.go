@@ -103,7 +103,7 @@ func (s *Server) handleGenericWebhook(c *fiber.Ctx) error {
 		CreatedAt: time.Now().UTC(),
 	}
 
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Context()), s.resolveRunTimeout(def))
+	ctx, cancel := context.WithTimeout(detachedRequestContext(c), s.resolveRunTimeout(def))
 	defer cancel()
 	ctx = withRequestPrincipal(c, ctx)
 	if s.runReg != nil {

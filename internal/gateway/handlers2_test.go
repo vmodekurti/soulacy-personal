@@ -349,6 +349,41 @@ func TestGatewayHandlePatchConfig_DeploymentProfile(t *testing.T) {
 	}
 }
 
+func TestApplyPatchDeploymentDoesNotEraseOmittedMode(t *testing.T) {
+	dst := map[string]any{
+		"deployment": map[string]any{
+			"mode":                  "scale",
+			"shared_artifact_store": "s3://artifacts/prod",
+			"acknowledgements":      []any{"unsafe_multi_user_prerequisites"},
+		},
+	}
+	var patch PatchableConfig
+	if err := json.Unmarshal([]byte(`{"deployment":{"profile":"production"}}`), &patch); err != nil {
+		t.Fatal(err)
+	}
+	applyPatch(dst, patch)
+	deployment := dst["deployment"].(map[string]any)
+	if deployment["mode"] != "scale" || deployment["shared_artifact_store"] != "s3://artifacts/prod" {
+		t.Fatalf("partial patch erased mode settings: %#v", deployment)
+	}
+}
+
+func TestApplyPatchDeploymentCanExplicitlyChangeMode(t *testing.T) {
+	dst := map[string]any{"deployment": map[string]any{"mode": "personal"}}
+	var patch PatchableConfig
+	if err := json.Unmarshal([]byte(`{"deployment":{"mode":"team","shared_artifact_store":""}}`), &patch); err != nil {
+		t.Fatal(err)
+	}
+	applyPatch(dst, patch)
+	deployment := dst["deployment"].(map[string]any)
+	if deployment["mode"] != "team" {
+		t.Fatalf("explicit mode patch ignored: %#v", deployment)
+	}
+	if value, ok := deployment["shared_artifact_store"]; !ok || value != "" {
+		t.Fatalf("explicit shared artifact clear ignored: %#v", deployment)
+	}
+}
+
 func TestGatewayHandlePatchConfig_InvalidJSON(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	s := newTestGatewayWithCfgPath(t, "secret", cfgPath)

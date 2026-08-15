@@ -15,15 +15,26 @@ import (
 const adminAuditAgentID = "_system"
 
 type adminAuditRecord struct {
-	Timestamp time.Time      `json:"timestamp"`
-	Action    string         `json:"action"`
-	Resource  string         `json:"resource"`
-	Target    string         `json:"target,omitempty"`
-	Actor     string         `json:"actor,omitempty"`
-	Role      string         `json:"role,omitempty"`
-	RequestID string         `json:"request_id,omitempty"`
-	Status    string         `json:"status"`
-	Details   map[string]any `json:"details,omitempty"`
+	Timestamp      time.Time      `json:"timestamp"`
+	Action         string         `json:"action"`
+	Resource       string         `json:"resource"`
+	Target         string         `json:"target,omitempty"`
+	Actor          string         `json:"actor,omitempty"`
+	Role           string         `json:"role,omitempty"`
+	PrincipalKind  string         `json:"principal_kind,omitempty"`
+	CredentialID   string         `json:"credential_id,omitempty"`
+	OrganizationID string         `json:"organization_id,omitempty"`
+	WorkspaceID    string         `json:"workspace_id,omitempty"`
+	RequestID      string         `json:"request_id,omitempty"`
+	Status         string         `json:"status"`
+	Details        map[string]any `json:"details,omitempty"`
+}
+
+func responseAuditStatus(c *fiber.Ctx, err error) string {
+	if err != nil || c == nil || c.Response().StatusCode() >= fiber.StatusBadRequest {
+		return "failed"
+	}
+	return "ok"
 }
 
 // auditActor identifies who is making a request, for any record that needs to
@@ -65,8 +76,13 @@ func (s *Server) recordAdminAudit(c *fiber.Ctx, action, resource, target, status
 		if requestID, ok := c.Locals("request_id").(string); ok {
 			rec.RequestID = requestID
 		}
-		if claims := auth.ClaimsFromCtx(c); claims != nil {
+		if identity, ok := requestIdentity(c); ok {
+			rec.Role, rec.PrincipalKind, rec.CredentialID = identity.Role(), identity.PrincipalKind(), identity.CredentialID()
+			rec.OrganizationID, rec.WorkspaceID = identity.OrganizationID(), identity.WorkspaceID()
+		} else if claims := auth.ClaimsFromCtx(c); claims != nil {
 			rec.Role = strings.TrimSpace(claims.Role)
+			rec.PrincipalKind, rec.CredentialID = principalKind(claims), credentialID(claims)
+			rec.OrganizationID, rec.WorkspaceID = claims.OrganizationID, claims.WorkspaceID
 		}
 	}
 	rec.Actor = s.auditActor(c)

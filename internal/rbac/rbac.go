@@ -2,9 +2,11 @@
 //
 // # Roles
 //
-//	admin    — full access to every resource and action
-//	operator — read + write most resources; cannot delete agents, write providers/config
-//	viewer   — read-only; can chat with agents but cannot mutate anything
+//	owner     — workspace ownership, policy, and full workspace access
+//	admin     — full operational access without ownership transfer authority
+//	developer — build and maintain agents and their dependencies
+//	operator  — run and operate agents; cannot administer the workspace
+//	viewer    — read-only; can chat with agents but cannot mutate anything
 //
 // # Resources and Actions
 //
@@ -29,13 +31,15 @@ package rbac
 // ---------------------------------------------------------------------------
 
 const (
-	RoleAdmin    = "admin"
-	RoleOperator = "operator"
-	RoleViewer   = "viewer"
+	RoleOwner     = "owner"
+	RoleAdmin     = "admin"
+	RoleDeveloper = "developer"
+	RoleOperator  = "operator"
+	RoleViewer    = "viewer"
 )
 
 // KnownRoles lists every role the system recognises.
-var KnownRoles = []string{RoleAdmin, RoleOperator, RoleViewer}
+var KnownRoles = []string{RoleOwner, RoleAdmin, RoleDeveloper, RoleOperator, RoleViewer}
 
 // IsKnownRole returns true if role is one of the three system roles.
 func IsKnownRole(role string) bool {
@@ -94,6 +98,25 @@ const (
 // This is the static fallback used when no per-agent grant row exists.
 
 var defaultPolicy = map[string]map[string]map[string]bool{
+	RoleOwner: {
+		ResourceAgents:      {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionEnable: true},
+		ResourceChat:        {ActionRead: true, ActionWrite: true, ActionChat: true},
+		ResourceMemory:      {ActionRead: true, ActionWrite: true, ActionDelete: true},
+		ResourceChannels:    {ActionRead: true, ActionWrite: true, ActionEnable: true},
+		ResourceProviders:   {ActionRead: true, ActionWrite: true},
+		ResourceSkills:      {ActionRead: true, ActionWrite: true, ActionDelete: true},
+		ResourceMCP:         {ActionRead: true, ActionWrite: true, ActionDelete: true},
+		ResourceKnowledge:   {ActionRead: true, ActionWrite: true, ActionDelete: true},
+		ResourceBuilder:     {ActionRead: true, ActionWrite: true},
+		ResourceTemplates:   {ActionRead: true, ActionWrite: true, ActionDelete: true},
+		ResourceConfig:      {ActionRead: true, ActionWrite: true},
+		ResourceLogs:        {ActionRead: true},
+		ResourceMetrics:     {ActionRead: true, ActionWrite: true},
+		ResourceSchedule:    {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionEnable: true},
+		ResourceRBAC:        {ActionRead: true, ActionWrite: true, ActionDelete: true},
+		ResourceSecrets:     {ActionList: true, ActionSet: true, ActionDelete: true},
+		ResourceCredentials: {ActionList: true, ActionSet: true, ActionDelete: true, ActionRotate: true, ActionReveal: true},
+	},
 	RoleAdmin: {
 		ResourceAgents:      {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionEnable: true},
 		ResourceChat:        {ActionRead: true, ActionChat: true},
@@ -112,6 +135,25 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 		ResourceRBAC:        {ActionRead: true, ActionWrite: true, ActionDelete: true},
 		ResourceSecrets:     {ActionList: true, ActionSet: true, ActionDelete: true},
 		ResourceCredentials: {ActionList: true, ActionSet: true, ActionDelete: true, ActionRotate: true, ActionReveal: true},
+	},
+	RoleDeveloper: {
+		ResourceAgents:      {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionEnable: true},
+		ResourceChat:        {ActionRead: true, ActionWrite: true, ActionChat: true},
+		ResourceMemory:      {ActionRead: true, ActionWrite: true, ActionDelete: true},
+		ResourceChannels:    {ActionRead: true},
+		ResourceProviders:   {ActionRead: true},
+		ResourceSkills:      {ActionRead: true, ActionWrite: true},
+		ResourceMCP:         {ActionRead: true, ActionWrite: true, ActionDelete: true},
+		ResourceKnowledge:   {ActionRead: true, ActionWrite: true, ActionDelete: true},
+		ResourceBuilder:     {ActionRead: true, ActionWrite: true},
+		ResourceTemplates:   {ActionRead: true, ActionWrite: true},
+		ResourceConfig:      {},
+		ResourceLogs:        {ActionRead: true},
+		ResourceMetrics:     {ActionRead: true},
+		ResourceSchedule:    {ActionRead: true, ActionWrite: true},
+		ResourceRBAC:        {},
+		ResourceSecrets:     {},
+		ResourceCredentials: {ActionList: true, ActionSet: true, ActionDelete: true, ActionRotate: true},
 	},
 	RoleOperator: {
 		ResourceAgents:      {ActionRead: true, ActionWrite: true, ActionEnable: true},
@@ -174,7 +216,10 @@ func HasPermission(role, resource, action string) bool {
 // AgentGrant records role-specific access to a single agent (or all agents
 // when AgentID == "*").
 type AgentGrant struct {
-	Role    string   `json:"role"`
-	AgentID string   `json:"agent_id"` // "*" = all agents
-	Actions []string `json:"actions"`  // subset of ActionRead, ActionChat, ActionEnable, ActionWrite, ActionDelete
+	WorkspaceID   string   `json:"workspace_id,omitempty"`
+	Role          string   `json:"role"`
+	AgentID       string   `json:"agent_id"` // "*" = all agents
+	Actions       []string `json:"actions"`  // subset of ActionRead, ActionChat, ActionEnable, ActionWrite, ActionDelete
+	Elevated      bool     `json:"elevated,omitempty"`
+	GrantedByRole string   `json:"granted_by_role,omitempty"`
 }

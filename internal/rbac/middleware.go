@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/auth"
+	"github.com/soulacy/soulacy/internal/requestctx"
 )
 
 // AgentIDSource describes where a route carries its object identifier. Sources
@@ -28,6 +29,34 @@ type Manager struct {
 	log   *zap.Logger
 }
 
+type workspaceAgentGrants interface {
+	CanAccessAgentInWorkspace(workspaceID, role, agentID, resource, action string) (bool, error)
+	SetAgentGrantInWorkspace(AgentGrant) error
+	DeleteAgentGrantInWorkspace(workspaceID, role, agentID string) error
+	ListAgentGrantsInWorkspace(workspaceID string) ([]AgentGrant, error)
+	ListAgentGrantsForRoleInWorkspace(workspaceID, role string) ([]AgentGrant, error)
+}
+
+type authority struct {
+	role, workspaceID, subject string
+	scopes                     []string
+	present                    bool
+}
+
+func requestAuthority(c *fiber.Ctx) authority {
+	if identity, ok := requestctx.From(c.UserContext()); ok {
+		return authority{role: identity.Role(), workspaceID: identity.WorkspaceID(), subject: identity.Subject(), scopes: identity.Scopes(), present: true}
+	}
+	if claims := auth.ClaimsFromCtx(c); claims != nil {
+		return authority{role: claims.Role, subject: claims.Subject, scopes: append([]string(nil), claims.Scopes...), present: true}
+	}
+	return authority{}
+}
+
+func (a authority) allows(resource, action string) bool {
+	return (&auth.Claims{Scopes: a.scopes}).Allows(resource, action)
+}
+
 // NewManager creates a Manager. store may be NoopStore{} for deployments that
 // don't need per-agent overrides (apikey-only, single-user).
 func NewManager(store Store, log *zap.Logger) *Manager {
@@ -37,8 +66,18 @@ func NewManager(store Store, log *zap.Logger) *Manager {
 // CanAccessAgentResource exposes the same object decision used by HTTP
 // middleware to non-HTTP transports such as the WebSocket event stream.
 func (m *Manager) CanAccessAgentResource(role, agentID, resource, action string) (bool, error) {
+	return m.CanAccessAgentResourceInWorkspace(personalWorkspace, role, agentID, resource, action)
+}
+
+func (m *Manager) CanAccessAgentResourceInWorkspace(workspaceID, role, agentID, resource, action string) (bool, error) {
 	if m == nil || m.store == nil {
 		return false, nil
+	}
+	if ws, ok := m.store.(workspaceAgentGrants); ok {
+		return ws.CanAccessAgentInWorkspace(workspaceID, role, agentID, resource, action)
+	}
+	if resource == ResourceAgents {
+		return m.store.CanAccessAgent(role, agentID, action)
 	}
 	if rs, ok := m.store.(resourceAgentStore); ok {
 		return rs.CanAccessAgentResource(role, agentID, resource, action)
@@ -58,24 +97,24 @@ func (m *Manager) CanAccessAgentResource(role, agentID, resource, action string)
 //  3. Access denied → 403 with JSON error body.
 func (m *Manager) Require(resource, action string) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		cl := auth.ClaimsFromCtx(c)
-		if cl == nil {
+		authz := requestAuthority(c)
+		if !authz.present {
 			// Open mode or auth bypass (health endpoint etc.) — allow.
 			return c.Next()
 		}
-		if HasPermission(cl.Role, resource, action) && cl.AllowsResource(resource) {
+		if HasPermission(authz.role, resource, action) && authz.allows(resource, action) {
 			return c.Next()
 		}
 		m.log.Info("rbac: access denied",
-			zap.Strings("scopes", cl.Scopes),
-			zap.String("role", cl.Role),
+			zap.Strings("scopes", authz.scopes),
+			zap.String("role", authz.role),
 			zap.String("resource", resource),
 			zap.String("action", action),
-			zap.String("sub", cl.Subject),
+			zap.String("sub", authz.subject),
 		)
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
 			"error":    "insufficient permissions",
-			"role":     cl.Role,
+			"role":     authz.role,
 			"required": resource + ":" + action,
 		})
 	}
@@ -90,8 +129,8 @@ func (m *Manager) Require(resource, action string) fiber.Handler {
 // the check degrades to a plain resource:action check.
 func (m *Manager) RequireAgent(agentParam, action string) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		cl := auth.ClaimsFromCtx(c)
-		if cl == nil {
+		authz := requestAuthority(c)
+		if !authz.present {
 			return c.Next()
 		}
 		// A scoped credential is narrowed here too, before either the
@@ -99,19 +138,19 @@ func (m *Manager) RequireAgent(agentParam, action string) fiber.Handler {
 		// key scoped to [chat] would still reach every /agents/:id route,
 		// because the per-agent store consults the ROLE and knows nothing about
 		// the credential the request arrived on.
-		if !cl.AllowsResource(ResourceAgents) {
-			return m.deny(c, cl.Role, ResourceAgents+":"+action)
+		if !authz.allows(ResourceAgents, action) {
+			return m.deny(c, authz.role, ResourceAgents+":"+action)
 		}
 		agentID := c.Params(agentParam)
 		if agentID == "" {
 			// No agent ID in path — fall back to resource-level check.
-			if HasPermission(cl.Role, ResourceAgents, action) {
+			if HasPermission(authz.role, ResourceAgents, action) {
 				return c.Next()
 			}
-			return m.deny(c, cl.Role, ResourceAgents+":"+action)
+			return m.deny(c, authz.role, ResourceAgents+":"+action)
 		}
 
-		allowed, err := m.store.CanAccessAgent(cl.Role, agentID, action)
+		allowed, err := m.CanAccessAgentResourceInWorkspace(authz.workspaceID, authz.role, agentID, ResourceAgents, action)
 		if err != nil {
 			m.log.Error("rbac: store error", zap.Error(err))
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -122,11 +161,11 @@ func (m *Manager) RequireAgent(agentParam, action string) fiber.Handler {
 			return c.Next()
 		}
 		m.log.Info("rbac: agent access denied",
-			zap.String("role", cl.Role),
+			zap.String("role", authz.role),
 			zap.String("agent_id", agentID),
 			zap.String("action", action),
 		)
-		return m.deny(c, cl.Role, ResourceAgents+":"+action+" agent="+agentID)
+		return m.deny(c, authz.role, ResourceAgents+":"+action+" agent="+agentID)
 	}
 }
 
@@ -134,12 +173,12 @@ func (m *Manager) RequireAgent(agentParam, action string) fiber.Handler {
 // not necessarily a path parameter (chat JSON, query APIs, multipart uploads).
 func (m *Manager) RequireAgentFrom(resource, action string, sources ...AgentIDSource) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		cl := auth.ClaimsFromCtx(c)
-		if cl == nil {
+		authz := requestAuthority(c)
+		if !authz.present {
 			return c.Next()
 		}
-		if !cl.AllowsResource(resource) {
-			return m.deny(c, cl.Role, resource+":"+action)
+		if !authz.allows(resource, action) {
+			return m.deny(c, authz.role, resource+":"+action)
 		}
 		agentID := resolveAgentID(c, sources)
 		if agentID == "" {
@@ -147,17 +186,22 @@ func (m *Manager) RequireAgentFrom(resource, action string, sources ...AgentIDSo
 		}
 		var allowed bool
 		var err error
-		if rs, ok := m.store.(resourceAgentStore); ok {
-			allowed, err = rs.CanAccessAgentResource(cl.Role, agentID, resource, action)
+		if m == nil || m.store == nil {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "authorization service unavailable"})
+		}
+		if ws, ok := m.store.(workspaceAgentGrants); ok {
+			allowed, err = ws.CanAccessAgentInWorkspace(authz.workspaceID, authz.role, agentID, resource, action)
+		} else if rs, ok := m.store.(resourceAgentStore); ok {
+			allowed, err = rs.CanAccessAgentResource(authz.role, agentID, resource, action)
 		} else {
-			allowed, err = m.store.CanAccessAgent(cl.Role, agentID, action)
+			allowed, err = m.store.CanAccessAgent(authz.role, agentID, action)
 		}
 		if err != nil {
 			m.log.Error("rbac: store error", zap.Error(err))
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "rbac store error"})
 		}
 		if !allowed {
-			return m.deny(c, cl.Role, resource+":"+action+" agent="+agentID)
+			return m.deny(c, authz.role, resource+":"+action+" agent="+agentID)
 		}
 		c.Locals("authorized_agent_id", agentID)
 		return c.Next()
@@ -210,7 +254,14 @@ func (m *Manager) deny(c *fiber.Ctx, role, required string) error {
 //
 //	GET /api/v1/rbac/grants
 func (m *Manager) HandleListGrants(c *fiber.Ctx) error {
-	grants, err := m.store.ListAgentGrants()
+	authz := requestAuthority(c)
+	var grants []AgentGrant
+	var err error
+	if ws, ok := m.store.(workspaceAgentGrants); ok {
+		grants, err = ws.ListAgentGrantsInWorkspace(authz.workspaceID)
+	} else {
+		grants, err = m.store.ListAgentGrants()
+	}
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -227,10 +278,17 @@ func (m *Manager) HandleListGrantsForRole(c *fiber.Ctx) error {
 	role := c.Params("role")
 	if !IsKnownRole(role) {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "unknown role; must be one of: admin, operator, viewer",
+			"error": "unknown role; must be one of: owner, admin, developer, operator, viewer",
 		})
 	}
-	grants, err := m.store.ListAgentGrantsForRole(role)
+	authz := requestAuthority(c)
+	var grants []AgentGrant
+	var err error
+	if ws, ok := m.store.(workspaceAgentGrants); ok {
+		grants, err = ws.ListAgentGrantsForRoleInWorkspace(authz.workspaceID, role)
+	} else {
+		grants, err = m.store.ListAgentGrantsForRole(role)
+	}
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -250,11 +308,12 @@ func (m *Manager) HandleSetAgentGrant(c *fiber.Ctx) error {
 	agentID := c.Params("agent_id")
 	if !IsKnownRole(role) {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "unknown role; must be one of: admin, operator, viewer",
+			"error": "unknown role; must be one of: owner, admin, developer, operator, viewer",
 		})
 	}
 	var body struct {
-		Actions []string `json:"actions"`
+		Actions  []string `json:"actions"`
+		Elevated bool     `json:"elevated"`
 	}
 	if err := c.BodyParser(&body); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
@@ -262,8 +321,18 @@ func (m *Manager) HandleSetAgentGrant(c *fiber.Ctx) error {
 	if len(body.Actions) == 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "actions must not be empty"})
 	}
-	g := AgentGrant{Role: role, AgentID: agentID, Actions: body.Actions}
-	if err := m.store.SetAgentGrant(g); err != nil {
+	authz := requestAuthority(c)
+	if body.Elevated && authz.role != RoleOwner {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "workspace owner role is required for an elevated object grant"})
+	}
+	g := AgentGrant{WorkspaceID: authz.workspaceID, Role: role, AgentID: agentID, Actions: body.Actions, Elevated: body.Elevated, GrantedByRole: authz.role}
+	var err error
+	if ws, ok := m.store.(workspaceAgentGrants); ok {
+		err = ws.SetAgentGrantInWorkspace(g)
+	} else {
+		err = m.store.SetAgentGrant(g)
+	}
+	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.Status(fiber.StatusOK).JSON(g)
@@ -275,7 +344,14 @@ func (m *Manager) HandleSetAgentGrant(c *fiber.Ctx) error {
 func (m *Manager) HandleDeleteAgentGrant(c *fiber.Ctx) error {
 	role := c.Params("role")
 	agentID := c.Params("agent_id")
-	if err := m.store.DeleteAgentGrant(role, agentID); err != nil {
+	authz := requestAuthority(c)
+	var err error
+	if ws, ok := m.store.(workspaceAgentGrants); ok {
+		err = ws.DeleteAgentGrantInWorkspace(authz.workspaceID, role, agentID)
+	} else {
+		err = m.store.DeleteAgentGrant(role, agentID)
+	}
+	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.SendStatus(fiber.StatusNoContent)

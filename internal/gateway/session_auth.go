@@ -12,11 +12,20 @@ import (
 )
 
 type sessionOwner struct {
-	Principal string
-	AgentID   string
+	Principal   string
+	WorkspaceID string
+	AgentID     string
 }
 
 func requestPrincipal(c *fiber.Ctx) (runtime.Principal, bool) {
+	if identity, ok := requestIdentity(c); ok {
+		return runtime.Principal{
+			Subject: identity.Subject(), OrganizationID: identity.OrganizationID(),
+			WorkspaceID: identity.WorkspaceID(), MembershipID: identity.MembershipID(),
+			Role: identity.Role(), Scopes: identity.Scopes(), CredentialID: identity.CredentialID(),
+			RequestID: identity.RequestID(), Kind: identity.PrincipalKind(),
+		}, true
+	}
 	cl := auth.ClaimsFromCtx(c)
 	if cl == nil {
 		return runtime.Principal{}, false
@@ -29,6 +38,7 @@ func requestPrincipal(c *fiber.Ctx) (runtime.Principal, bool) {
 }
 
 func withRequestPrincipal(c *fiber.Ctx, ctx context.Context) context.Context {
+	ctx = withWorkspaceIdentity(c, ctx)
 	if principal, ok := requestPrincipal(c); ok {
 		return runtime.WithPrincipal(ctx, principal)
 	}
@@ -36,12 +46,18 @@ func withRequestPrincipal(c *fiber.Ctx, ctx context.Context) context.Context {
 }
 
 func authenticatedPrincipal(c *fiber.Ctx) (string, bool, bool) {
+	if identity, ok := requestIdentity(c); ok {
+		role := strings.TrimSpace(identity.Role())
+		subject := strings.TrimSpace(identity.Subject())
+		principal := role + ":" + subject
+		if subject == "" {
+			principal = ""
+		}
+		return principal, true, role == rbac.RoleOwner || role == rbac.RoleAdmin
+	}
 	cl := auth.ClaimsFromCtx(c)
 	if cl == nil {
 		return "", false, false
-	}
-	if strings.EqualFold(cl.Role, "admin") {
-		return "admin", true, true
 	}
 	principal := strings.TrimSpace(cl.Subject)
 	if principal == "" {
@@ -50,11 +66,18 @@ func authenticatedPrincipal(c *fiber.Ctx) (string, bool, bool) {
 	if principal == "" {
 		return "", true, false
 	}
-	return cl.Role + ":" + principal, true, false
+	role := strings.TrimSpace(cl.Role)
+	return role + ":" + principal, true, role == rbac.RoleOwner || role == rbac.RoleAdmin
 }
 
 func websocketPrincipalFromCtx(c *fiber.Ctx) eventPrincipal {
 	principal, authenticated, admin := authenticatedPrincipal(c)
+	if identity, ok := requestIdentity(c); ok {
+		return eventPrincipal{
+			Principal: principal, WorkspaceID: identity.WorkspaceID(), Role: identity.Role(),
+			Scopes: identity.Scopes(), Admin: admin, Authenticated: authenticated,
+		}
+	}
 	cl := auth.ClaimsFromCtx(c)
 	if cl == nil {
 		return eventPrincipal{}
@@ -68,7 +91,7 @@ func websocketPrincipalFromCtx(c *fiber.Ctx) eventPrincipal {
 // authorizeEvent prevents a WebSocket subscriber from observing another
 // principal's prompts, tool arguments, results, or run progress.
 func (s *Server) authorizeEvent(principal eventPrincipal, event message.Event) bool {
-	if principal.Admin {
+	if principal.Admin && !s.authorizationRequired() {
 		return true
 	}
 	if !principal.Authenticated || principal.Principal == "" {
@@ -79,7 +102,10 @@ func (s *Server) authorizeEvent(principal eventPrincipal, event message.Event) b
 		owner, ok := s.sessionOwners[event.SessionID]
 		s.sessionOwnerMu.RUnlock()
 		if ok {
-			return owner.Principal == principal.Principal && (event.AgentID == "" || owner.AgentID == event.AgentID)
+			if owner.WorkspaceID != principal.WorkspaceID {
+				return false
+			}
+			return (principal.Admin || owner.Principal == principal.Principal) && (event.AgentID == "" || owner.AgentID == event.AgentID)
 		}
 		// Unknown session IDs are never broadcast to a non-admin subscriber.
 		return false
@@ -92,7 +118,7 @@ func (s *Server) authorizeEvent(principal eventPrincipal, event message.Event) b
 		return false
 	}
 	if s.rbacManager != nil {
-		allowed, err := s.rbacManager.CanAccessAgentResource(principal.Role, event.AgentID, rbac.ResourceChat, rbac.ActionRead)
+		allowed, err := s.rbacManager.CanAccessAgentResourceInWorkspace(principal.WorkspaceID, principal.Role, event.AgentID, rbac.ResourceChat, rbac.ActionRead)
 		return err == nil && allowed
 	}
 	return rbac.HasPermission(principal.Role, rbac.ResourceChat, rbac.ActionRead)
@@ -103,8 +129,12 @@ func (s *Server) authorizeEvent(principal eventPrincipal, event message.Event) b
 // as not-found to avoid turning session IDs into an enumeration oracle.
 func (s *Server) claimSession(c *fiber.Ctx, agentID, sessionID string) error {
 	principal, authenticated, admin := authenticatedPrincipal(c)
-	if !authenticated || admin {
+	if !authenticated || (admin && !s.authorizationRequired()) {
 		return nil
+	}
+	workspaceID := ""
+	if identity, ok := requestIdentity(c); ok {
+		workspaceID = identity.WorkspaceID()
 	}
 	if principal == "" || strings.TrimSpace(agentID) == "" || strings.TrimSpace(sessionID) == "" {
 		return fiber.NewError(fiber.StatusForbidden, "authenticated session identity is incomplete")
@@ -113,10 +143,10 @@ func (s *Server) claimSession(c *fiber.Ctx, agentID, sessionID string) error {
 	defer s.sessionOwnerMu.Unlock()
 	owner, exists := s.sessionOwners[sessionID]
 	if !exists {
-		s.sessionOwners[strings.Clone(sessionID)] = sessionOwner{Principal: strings.Clone(principal), AgentID: strings.Clone(agentID)}
+		s.sessionOwners[strings.Clone(sessionID)] = sessionOwner{Principal: strings.Clone(principal), WorkspaceID: strings.Clone(workspaceID), AgentID: strings.Clone(agentID)}
 		return nil
 	}
-	if owner.Principal != principal || owner.AgentID != agentID {
+	if owner.Principal != principal || owner.WorkspaceID != workspaceID || owner.AgentID != agentID {
 		return fiber.NewError(fiber.StatusNotFound, "session not found")
 	}
 	return nil
@@ -124,13 +154,17 @@ func (s *Server) claimSession(c *fiber.Ctx, agentID, sessionID string) error {
 
 func (s *Server) requireSession(c *fiber.Ctx, agentID, sessionID string) error {
 	principal, authenticated, admin := authenticatedPrincipal(c)
-	if !authenticated || admin {
+	if !authenticated || (admin && !s.authorizationRequired()) {
 		return nil
+	}
+	workspaceID := ""
+	if identity, ok := requestIdentity(c); ok {
+		workspaceID = identity.WorkspaceID()
 	}
 	s.sessionOwnerMu.RLock()
 	owner, exists := s.sessionOwners[sessionID]
 	s.sessionOwnerMu.RUnlock()
-	if !exists || owner.Principal != principal || (agentID != "" && owner.AgentID != agentID) {
+	if !exists || owner.WorkspaceID != workspaceID || (!admin && owner.Principal != principal) || (agentID != "" && owner.AgentID != agentID) {
 		return fiber.NewError(fiber.StatusNotFound, "session not found")
 	}
 	return nil

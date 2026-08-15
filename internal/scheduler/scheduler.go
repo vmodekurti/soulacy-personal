@@ -86,6 +86,11 @@ type Scheduler struct {
 	gateMu sync.RWMutex
 	gate   ReadinessGate
 	blocks map[string]ScheduleBlock
+
+	// principal is the verified service identity for scheduled work. It is set
+	// once during startup; a zero value preserves embedded/test compatibility.
+	principal        runtime.Principal
+	requirePrincipal bool
 }
 
 // EventSink is the minimal event surface the scheduler needs to record delivery
@@ -238,6 +243,16 @@ func (s *Scheduler) SetChannelRegistry(reg *channels.Registry) {
 	defer s.mu.Unlock()
 	s.channels = reg
 }
+
+// SetPrincipal assigns the service/workspace identity inherited by every
+// scheduled run. Multi-user hosts must call this before Start.
+func (s *Scheduler) SetPrincipal(principal runtime.Principal) {
+	s.principal = principal
+}
+
+// RequirePrincipal makes unscoped scheduled execution fail closed. Team and
+// Scale enable this until their durable schedule records supply a workspace.
+func (s *Scheduler) RequirePrincipal(required bool) { s.requirePrincipal = required }
 
 // maxRunDuration is the safety cap on the run-lock staleness check. It needs
 // to be at least as long as the slowest agent's run_timeout, otherwise a
@@ -486,6 +501,11 @@ func (s *Scheduler) fireAt(agentID, triggerType string, scheduledAt time.Time) {
 		zap.String("agent", agentID),
 		zap.String("trigger", triggerType),
 	)
+	if s.requirePrincipal && s.principal.Subject == "" {
+		s.log.Error("scheduled run blocked: verified workspace service principal is missing",
+			zap.String("agent", agentID), zap.String("trigger", triggerType))
+		return
+	}
 
 	msg := message.Message{
 		ID:        uuid.New().String(),
@@ -514,6 +534,11 @@ func (s *Scheduler) fireAt(agentID, triggerType string, scheduledAt time.Time) {
 	timeout := def.ResolvedRunTimeout(15 * time.Minute)
 	ctx, cancel := context.WithTimeout(s.appCtx, timeout)
 	defer cancel()
+	if s.principal.Subject != "" {
+		principal := s.principal
+		principal.RequestID = msg.ID
+		ctx = runtime.WithPrincipal(ctx, principal)
+	}
 
 	runStart := time.Now()
 	reply, err := s.engine.Handle(ctx, msg)

@@ -44,6 +44,7 @@ import (
 	// expression", which is what tripped the audit-pass build.
 	fibrecover "github.com/gofiber/fiber/v2/middleware/recover"
 	fws "github.com/gofiber/websocket/v2"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
@@ -73,6 +74,7 @@ import (
 	"github.com/soulacy/soulacy/internal/session"
 	"github.com/soulacy/soulacy/internal/storage"
 	"github.com/soulacy/soulacy/internal/studio"
+	"github.com/soulacy/soulacy/internal/tenancy"
 	"github.com/soulacy/soulacy/internal/voice"
 	"github.com/soulacy/soulacy/internal/webui"
 	"github.com/soulacy/soulacy/internal/workboard"
@@ -107,6 +109,8 @@ type Server struct {
 	dlqStore        dlq.Store            // nil until SetDLQStore() is called
 	historyStore    session.HistoryStore // nil until SetHistoryStore() is called
 	resourceStore   session.ResourceStore
+	tenantResolver  tenancy.Resolver
+	tenantMembers   tenancy.MemberManager
 	agentWatcher    healthReporter // nil until SetAgentWatcher() is called (S2.13)
 	log             *zap.Logger
 
@@ -218,6 +222,9 @@ func New(
 		sessionOwners:    make(map[string]sessionOwner),
 		generationProofs: make(map[string]generationProofRecord),
 		preferenceJobs:   make(chan preferenceMineJob, 128),
+	}
+	if shouldUseDefaultPersonalResolver(cfg) {
+		s.tenantResolver = defaultPersonalResolver()
 	}
 	go s.runPreferenceMiner()
 	if s.hub != nil {
@@ -382,12 +389,36 @@ func (s *Server) rlAgentTokenMW() fiber.Handler {
 	return s.rateLimiter.AgentTokenQuotaMiddleware()
 }
 
-// rbacMW returns an RBAC middleware for (resource, action). Returns a no-op
-// handler when no RBAC manager is configured, preserving backwards compatibility.
+func (s *Server) authorizationRequired() bool {
+	return s.cfg != nil && config.IsMultiUserMode(s.cfg.DeploymentMode())
+}
+
+func (s *Server) authorizationUnavailable(c *fiber.Ctx) error {
+	return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "authorization service unavailable"})
+}
+
+func (s *Server) requireVerifiedWorkspaceIdentity(c *fiber.Ctx) error {
+	if !s.authorizationRequired() {
+		return nil
+	}
+	if _, ok := requestIdentity(c); !ok {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "verified workspace membership is required"})
+	}
+	return nil
+}
+
+// rbacMW returns an RBAC middleware for (resource, action). Personal mode
+// preserves the legacy no-op fallback; Team and Scale fail closed.
 func (s *Server) rbacMW(resource, action string) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		if s.rbacManager == nil {
+			if s.authorizationRequired() {
+				return s.authorizationUnavailable(c)
+			}
 			return c.Next()
+		}
+		if err := s.requireVerifiedWorkspaceIdentity(c); err != nil {
+			return err
 		}
 		return s.rbacManager.Require(resource, action)(c)
 	}
@@ -397,7 +428,13 @@ func (s *Server) rbacMW(resource, action string) fiber.Handler {
 func (s *Server) rbacAgentMW(action string) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		if s.rbacManager == nil {
+			if s.authorizationRequired() {
+				return s.authorizationUnavailable(c)
+			}
 			return c.Next()
+		}
+		if err := s.requireVerifiedWorkspaceIdentity(c); err != nil {
+			return err
 		}
 		return s.rbacManager.RequireAgent("id", action)(c)
 	}
@@ -406,7 +443,13 @@ func (s *Server) rbacAgentMW(action string) fiber.Handler {
 func (s *Server) rbacAgentFromMW(resource, action string, sources ...rbac.AgentIDSource) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		if s.rbacManager == nil {
+			if s.authorizationRequired() {
+				return s.authorizationUnavailable(c)
+			}
 			return c.Next()
+		}
+		if err := s.requireVerifiedWorkspaceIdentity(c); err != nil {
+			return err
 		}
 		return s.rbacManager.RequireAgentFrom(resource, action, sources...)(c)
 	}
@@ -531,7 +574,7 @@ func (s *Server) buildApp() *fiber.App {
 	}
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:     strings.Join(origins, ","),
-		AllowHeaders:     "Origin, Content-Type, Authorization",
+		AllowHeaders:     "Origin, Content-Type, Authorization, X-Request-ID, X-Soulacy-Workspace",
 		AllowMethods:     "GET, POST, PUT, PATCH, DELETE, OPTIONS",
 		AllowCredentials: false,
 	}))
@@ -660,7 +703,18 @@ func (s *Server) buildApp() *fiber.App {
 	if s.authEngine != nil {
 		app.Post("/api/v1/auth/token", s.authEngine.HandleTokenRequest)
 		app.Post("/api/v1/auth/refresh", s.authEngine.HandleRefresh)
+		app.Post("/api/v1/auth/logout", s.authEngine.HandleLogout)
+		app.Get("/api/v1/auth/oidc/config", s.authEngine.HandleOIDCConfig)
+		app.Get("/api/v1/auth/oidc/start", s.authEngine.HandleOIDCStart)
+		app.Post("/api/v1/auth/oidc/start", s.authEngine.HandleOIDCStart)
+		app.Get("/api/v1/auth/oidc/callback", s.authEngine.HandleOIDCCallback)
+		app.Post("/api/v1/auth/oidc/complete", s.authEngine.HandleOIDCComplete)
+		app.Post("/api/v1/auth/oidc/device/start", s.authEngine.HandleOIDCDeviceStart)
+		app.Post("/api/v1/auth/oidc/device/poll", s.authEngine.HandleOIDCDevicePoll)
 	}
+	// Invitation acceptance requires an authenticated identity but deliberately
+	// runs before workspace resolution: a new user has no membership yet.
+	app.Post("/api/v1/invitations/accept", s.authWithPluginTokens(), s.rlUserMW(), s.handleAcceptInvitation)
 
 	// --- Shared read-only chat sessions (public — no auth) ---
 	// A share token is an unguessable capability, so the read view bypasses the
@@ -677,7 +731,7 @@ func (s *Server) buildApp() *fiber.App {
 	// Auth middleware runs first (recognising scoped plugin tokens, E8),
 	// then the plugin default-deny gate, then per-user rate limiting (after
 	// claims are populated). RBAC and per-agent limits are applied per-route.
-	api := app.Group("/api/v1", s.authWithPluginTokens(), s.pluginGateMW(), s.rlUserMW())
+	api := app.Group("/api/v1", s.authWithPluginTokens(), s.workspaceContextMW(), s.pluginGateMW(), s.rlUserMW())
 
 	// Health
 	api.Get("/health", s.handleHealth)
@@ -704,6 +758,16 @@ func (s *Server) buildApp() *fiber.App {
 	if s.authEngine != nil {
 		api.Get("/auth/me", s.authEngine.HandleMe)
 	}
+
+	// Workspace membership administration uses the freshly resolved role on
+	// every request rather than a role embedded in an older access token.
+	api.Get("/workspace/members", s.handleListWorkspaceMembers)
+	api.Patch("/workspace/members/:id/role", s.handleSetWorkspaceMemberRole)
+	api.Patch("/workspace/members/:id/status", s.handleSetWorkspaceMemberStatus)
+	api.Delete("/workspace/members/:id", s.handleRemoveWorkspaceMember)
+	api.Get("/workspace/invitations", s.handleListWorkspaceInvitations)
+	api.Post("/workspace/invitations", s.handleCreateWorkspaceInvitation)
+	api.Get("/workspace/membership-audit", s.handleWorkspaceMembershipAudit)
 
 	// Prometheus metrics. Wrapped in the API auth group so the same key
 	// gates scraping. Scrape via:
@@ -1176,25 +1240,48 @@ func (s *Server) buildApp() *fiber.App {
 	api.Delete("/secrets/:name", s.rbacMW(rbac.ResourceSecrets, rbac.ActionDelete), s.handleDeleteSecret)
 
 	// --- API Key Management (admin) ---
-	api.Post("/admin/api-keys", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite), func(c *fiber.Ctx) error {
+	api.Post("/admin/api-keys", s.rbacMW(rbac.ResourceCredentials, rbac.ActionSet), func(c *fiber.Ctx) error {
 		if s.apiKeyStore == nil {
 			return s.errMsg(c, fiber.StatusServiceUnavailable, "api key store not configured")
 		}
-		return apikeys.NewAPI(s.apiKeyStore, s.log).HandleCreate(c)
+		err := apikeys.NewAPI(s.apiKeyStore, s.log).HandleCreate(c)
+		target, details := apikeys.AuditSubject(c)
+		s.recordAdminAudit(c, "credential.create", "credential", target, responseAuditStatus(c, err), details)
+		return err
 	})
-	api.Get("/admin/api-keys", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), func(c *fiber.Ctx) error {
+	api.Get("/admin/api-keys", s.rbacMW(rbac.ResourceCredentials, rbac.ActionList), func(c *fiber.Ctx) error {
 		if s.apiKeyStore == nil {
 			return s.errMsg(c, fiber.StatusServiceUnavailable, "api key store not configured")
 		}
 		return apikeys.NewAPI(s.apiKeyStore, s.log).HandleList(c)
 	})
-	api.Delete("/admin/api-keys/:id", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite), func(c *fiber.Ctx) error {
+	api.Delete("/admin/api-keys/:id", s.rbacMW(rbac.ResourceCredentials, rbac.ActionDelete), func(c *fiber.Ctx) error {
 		if s.apiKeyStore == nil {
 			return s.errMsg(c, fiber.StatusServiceUnavailable, "api key store not configured")
 		}
-		return apikeys.NewAPI(s.apiKeyStore, s.log).HandleRevoke(c)
+		err := apikeys.NewAPI(s.apiKeyStore, s.log).HandleRevoke(c)
+		s.recordAdminAudit(c, "credential.revoke", "credential", c.Params("id"), responseAuditStatus(c, err), nil)
+		return err
 	})
-	api.Post("/admin/api-keys/validate", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), func(c *fiber.Ctx) error {
+	api.Post("/admin/api-keys/:id/rotate", s.rbacMW(rbac.ResourceCredentials, rbac.ActionRotate), func(c *fiber.Ctx) error {
+		if s.apiKeyStore == nil {
+			return s.errMsg(c, fiber.StatusServiceUnavailable, "api key store not configured")
+		}
+		err := apikeys.NewAPI(s.apiKeyStore, s.log).HandleRotate(c)
+		_, details := apikeys.AuditSubject(c)
+		s.recordAdminAudit(c, "credential.rotate", "credential", c.Params("id"), responseAuditStatus(c, err), details)
+		return err
+	})
+	api.Patch("/admin/api-keys/:id/status", s.rbacMW(rbac.ResourceCredentials, rbac.ActionSet), func(c *fiber.Ctx) error {
+		if s.apiKeyStore == nil {
+			return s.errMsg(c, fiber.StatusServiceUnavailable, "api key store not configured")
+		}
+		err := apikeys.NewAPI(s.apiKeyStore, s.log).HandleStatus(c)
+		_, details := apikeys.AuditSubject(c)
+		s.recordAdminAudit(c, "credential.status", "credential", c.Params("id"), responseAuditStatus(c, err), details)
+		return err
+	})
+	api.Post("/admin/api-keys/validate", s.rbacMW(rbac.ResourceCredentials, rbac.ActionReveal), func(c *fiber.Ctx) error {
 		if s.apiKeyStore == nil {
 			return s.errMsg(c, fiber.StatusServiceUnavailable, "api key store not configured")
 		}
@@ -1608,7 +1695,10 @@ func (s *Server) legacyAuthMiddleware() fiber.Handler {
 		// Their static key has the same authority as the production auth engine's
 		// static key, so attach the same claims rather than creating an
 		// authenticated-but-anonymous request that bypasses ownership semantics.
-		auth.SetClaims(c, &auth.Claims{Role: "admin", Kind: "access"})
+		auth.SetClaims(c, &auth.Claims{
+			RegisteredClaims: jwt.RegisteredClaims{Subject: "api-key"},
+			Role:             "admin", Kind: "access", PrincipalKind: "static_api_key", CredentialID: "static-api-key",
+		})
 		return c.Next()
 	}
 }

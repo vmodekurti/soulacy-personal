@@ -100,6 +100,14 @@ Quick start:
 				gatewayURL = fmt.Sprintf("http://localhost:%d", port)
 			}
 			if apiKey == "" {
+				if session, err := loadCLISession(gatewayURL); err == nil {
+					apiKey = session.AccessToken
+				}
+			}
+			if apiKey == "" {
+				// The local server key remains a backwards-compatible fallback for
+				// Personal deployments. A stored interactive identity takes
+				// precedence for Team/Scale so CLI requests remain attributable.
 				apiKey = viper.GetString("server.api_key")
 			}
 			return nil
@@ -132,11 +140,14 @@ Quick start:
 		buildEvalCmd(),         // sy eval — evaluation framework
 		buildRegistryCmd(),     // sy registry — review + manage skill sources (E26)
 		buildSecretsCmd(),      // sy secrets — manage the gateway-global secrets store
+		buildCredentialCmd(),   // sy credential — scoped personal/service credentials
 		buildMCPCmd(),          // sy mcp — manage MCP servers
 		buildLaunchCmd(),       // sy launch — production readiness checks
 		buildUpdateCmd(),       // sy update — release update checks
 		buildUpgradeCmd(),      // sy upgrade — self-upgrade binaries
 		buildVoiceCmd(),        // sy voice — provider-neutral speech sidecars
+		buildLoginCmd(),        // sy login — browser-assisted OIDC with PKCE
+		buildLogoutCmd(),       // sy logout — revoke and remove local session
 		buildVersionCmd(),
 	)
 	return root
@@ -1384,6 +1395,10 @@ func apiCall(method, path string, body []byte) ([]byte, error) {
 }
 
 func apiCallWithTimeout(method, path string, body []byte, timeout time.Duration) ([]byte, error) {
+	return apiCallWithTimeoutRetry(method, path, body, timeout, true)
+}
+
+func apiCallWithTimeoutRetry(method, path string, body []byte, timeout time.Duration, allowRefresh bool) ([]byte, error) {
 	url := gatewayURL + "/api/v1" + path
 	var bodyReader io.Reader
 	if body != nil {
@@ -1407,9 +1422,11 @@ func apiCallWithTimeout(method, path string, body []byte, timeout time.Duration)
 		}
 		return nil, fmt.Errorf("cannot reach gateway at %s — is it running?\n  hint: run 'sy server start'", gatewayURL)
 	}
-	defer resp.Body.Close()
-
 	data, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized && allowRefresh && refreshCLISession() {
+		return apiCallWithTimeoutRetry(method, path, body, timeout, false)
+	}
 
 	if warning := resp.Header.Get("X-Soulacy-Warning"); warning != "" {
 		fmt.Fprintf(os.Stderr, "\n\033[1;33m%s\033[0m\n\n", warning)

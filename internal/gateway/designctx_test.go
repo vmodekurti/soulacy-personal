@@ -69,10 +69,10 @@ func TestStudioDesignGraph_NeverPassesTheRequestContextToTheModel(t *testing.T) 
 func TestStudioDesignGraph_BoundsTheDetachedContext(t *testing.T) {
 	body := designGraphSource(t)
 
-	if !strings.Contains(body, "context.WithoutCancel(c.Context())") {
-		t.Fatal("the design context is not detached from the request")
+	if !strings.Contains(body, "detachedRequestContext(c)") {
+		t.Fatal("the design context is not detached while preserving verified request authority")
 	}
-	if !strings.Contains(body, "context.WithTimeout(context.WithoutCancel(c.Context())") {
+	if !strings.Contains(body, "context.WithTimeout(detachedRequestContext(c)") {
 		t.Error("the detached context has no deadline — a stuck provider would hang the design forever")
 	}
 	if !strings.Contains(body, "defer cancelDesign()") {

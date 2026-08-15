@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/soulacy/soulacy/internal/config"
+	"github.com/soulacy/soulacy/internal/tenancy"
 	"github.com/soulacy/soulacy/internal/wsmigrate"
 )
 
@@ -52,7 +53,7 @@ func buildWorkspaceCmd() *cobra.Command {
 		},
 	})
 
-	var assumeYes, dryRun bool
+	var assumeYes, dryRun, tenantPlan bool
 	migrateCmd := &cobra.Command{
 		Use:   "migrate",
 		Short: "Move a legacy flat ~/.soulacy installation into the organized soulspace layout",
@@ -65,6 +66,28 @@ configured locations follow their files.
 
 STOP THE GATEWAY FIRST — databases move as files.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if tenantPlan {
+				ws, err := config.ResolveWorkspace()
+				if err != nil {
+					return err
+				}
+				plan, err := tenancy.PlanPersonalMigration(ws)
+				if err != nil {
+					return err
+				}
+				fmt.Printf("Personal tenant migration plan\nCatalog: %s\nSchema version: %d\n", plan.DatabasePath, plan.Version)
+				if plan.AlreadyDone {
+					fmt.Println("Status: already applied (re-running is idempotent)")
+				} else {
+					fmt.Println("Status: pending; the gateway applies this additive migration on startup")
+				}
+				fmt.Printf("\nExisting stores to assign (%d):\n", len(plan.Resources))
+				for _, resource := range plan.Resources {
+					fmt.Printf("  %-18s %s\n", resource.Kind, resource.Path)
+				}
+				fmt.Println("\n--plan: read-only; no files or databases were changed.")
+				return nil
+			}
 			plan, err := wsmigrate.Plan()
 			if err != nil {
 				return err
@@ -106,6 +129,7 @@ STOP THE GATEWAY FIRST — databases move as files.`,
 	}
 	migrateCmd.Flags().BoolVarP(&assumeYes, "yes", "y", false, "Skip the confirmation prompt")
 	migrateCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print the plan without moving anything")
+	migrateCmd.Flags().BoolVar(&tenantPlan, "plan", false, "Show the read-only implicit tenant migration plan")
 	cmd.AddCommand(migrateCmd)
 
 	return cmd

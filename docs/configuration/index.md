@@ -16,6 +16,7 @@ Start from the annotated example at the repo root:
 
 | Key | What it controls | Details |
 |-----|------------------|---------|
+| `deployment` | Operating mode (`personal`, `team`, `scale`) and shared artifact settings | [Deployment Modes](deployment-modes.md) |
 | `server` | Host, port, API key, TLS, CORS allow-list, GUI toggle | [Server](server.md) |
 | `runtime` | Max sessions/turns, Python interpreter, tool timeout, sandbox caps, system tools, SSRF protection, audit log | [Security Posture](security.md) |
 | `llm` | Default provider + provider registry (Anthropic, OpenAI-compatible, Ollama, Groq, Google, …) | [LLM Providers](llm.md) |

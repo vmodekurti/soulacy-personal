@@ -8,6 +8,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/soulacy/soulacy/internal/auth"
+	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/pkg/message"
 )
 
@@ -72,5 +73,21 @@ func TestEventAuthorizationUsesSessionOwner(t *testing.T) {
 	}
 	if !s.authorizeEvent(eventPrincipal{Principal: "admin", Role: "admin", Authenticated: true, Admin: true}, event) {
 		t.Fatal("admin audit access was denied")
+	}
+}
+
+func TestTeamEventAuthorizationIsWorkspaceScopedForAdmins(t *testing.T) {
+	s := &Server{
+		cfg: &config.Config{Deployment: config.DeploymentConfig{Mode: config.DeploymentModeTeam}},
+		sessionOwners: map[string]sessionOwner{
+			"run-1": {Principal: "viewer:alice", WorkspaceID: "workspace-a", AgentID: "weather"},
+		},
+	}
+	event := message.Event{Type: "tool.result", AgentID: "weather", SessionID: "run-1"}
+	if !s.authorizeEvent(eventPrincipal{Principal: "admin:auditor", WorkspaceID: "workspace-a", Role: "admin", Authenticated: true, Admin: true}, event) {
+		t.Fatal("same-workspace admin audit access was denied")
+	}
+	if s.authorizeEvent(eventPrincipal{Principal: "admin:auditor", WorkspaceID: "workspace-b", Role: "admin", Authenticated: true, Admin: true}, event) {
+		t.Fatal("admin observed another workspace event")
 	}
 }

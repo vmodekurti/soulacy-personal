@@ -4,6 +4,8 @@ package apikeys
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,6 +67,138 @@ func TestCreateAndValidate(t *testing.T) {
 	}
 	if got.Name != "CI Bot" {
 		t.Errorf("Name after validate = %q", got.Name)
+	}
+}
+
+func TestScopedCredentialRoundTripAndHashOnlyPersistence(t *testing.T) {
+	s := newStore(t)
+	expires := time.Now().UTC().Add(time.Hour)
+	plaintext, key, err := s.CreateScoped(context.Background(), CreateRequest{
+		Name: "deploy bot", Kind: KindService, SubjectID: "svc_deploy",
+		OrganizationID: "org_acme", WorkspaceIDs: []string{"ws_prod", "ws_stage"},
+		Role: "operator", Scopes: []string{"agents:read", "agents:write"},
+		Issuer: "soulacy-team", ExpiresAt: &expires,
+	})
+	if err != nil {
+		t.Fatalf("CreateScoped: %v", err)
+	}
+	if key.Kind != KindService || key.SubjectID != "svc_deploy" || len(key.WorkspaceIDs) != 2 {
+		t.Fatalf("unexpected credential: %+v", key)
+	}
+	var storedHash string
+	if err := s.db.QueryRow(`SELECT key_hash FROM api_keys WHERE id=?`, key.ID).Scan(&storedHash); err != nil {
+		t.Fatal(err)
+	}
+	if storedHash == plaintext || strings.Contains(storedHash, plaintext) {
+		t.Fatal("plaintext credential was persisted")
+	}
+	got, err := s.Validate(context.Background(), plaintext)
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if got.Issuer != "soulacy-team" || got.OrganizationID != "org_acme" || got.ExpiresAt == nil {
+		t.Fatalf("authority did not round trip: %+v", got)
+	}
+}
+
+func TestSQLiteMigrationPreservesLegacyCredential(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := "b337123f8eb1c7ac7563bdc553015bc2226cd19ee323e1b4d75bbf1f0a1916d5" // sha256("sk_legacy")
+	if _, err = db.Exec(schema); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`INSERT INTO api_keys(id,name,key_hash,prefix,scopes,created_at) VALUES('legacy','old key',?,'sk_legac','chat','2026-01-01 00:00:00')`, digest); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	s, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	got, err := s.Validate(context.Background(), "sk_legacy")
+	if err != nil {
+		t.Fatalf("legacy credential was invalidated: %v", err)
+	}
+	if got.SubjectID != "local-owner" || got.OrganizationID != "org_personal" || len(got.WorkspaceIDs) != 1 || got.WorkspaceIDs[0] != "ws_personal" {
+		t.Fatalf("legacy authority not backfilled: %+v", got)
+	}
+}
+
+func TestScopedCredentialRejectsExpiredSuspendedDeletedAndRevoked(t *testing.T) {
+	statuses := []string{StatusSuspended, StatusDeleted, StatusRevoked}
+	for _, status := range statuses {
+		t.Run(status, func(t *testing.T) {
+			s := newStore(t)
+			plaintext, key, err := s.CreateScoped(context.Background(), CreateRequest{Name: "bot", Kind: KindService, SubjectID: "svc_bot", OrganizationID: "org_a", WorkspaceIDs: []string{"ws_a"}, Role: "operator", Scopes: []string{"chat:chat"}, Issuer: "soulacy"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.SetStatus(context.Background(), key.ID, status); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.Validate(context.Background(), plaintext); !errors.Is(err, ErrInvalidKey) {
+				t.Fatalf("Validate status %s: %v", status, err)
+			}
+		})
+	}
+	s := newStore(t)
+	past := time.Now().UTC().Add(-time.Minute)
+	if _, _, err := s.CreateScoped(context.Background(), CreateRequest{Name: "expired", Kind: KindPersonal, SubjectID: "usr_a", OrganizationID: "org_a", WorkspaceIDs: []string{"ws_a"}, Role: "developer", Issuer: "soulacy", ExpiresAt: &past}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("past expiry accepted: %v", err)
+	}
+}
+
+func TestCredentialLifecycleOnlyAllowsSuspensionToReactivate(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	_, suspended, err := s.CreateScoped(ctx, CreateRequest{Name: "paused", Kind: KindService, SubjectID: "svc_paused", OrganizationID: "org_a", WorkspaceIDs: []string{"ws_a"}, Role: "operator", Issuer: "soulacy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetStatus(ctx, suspended.ID, StatusSuspended); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetStatus(ctx, suspended.ID, StatusActive); err != nil {
+		t.Fatalf("reactivate suspended credential: %v", err)
+	}
+	for _, terminal := range []string{StatusRevoked, StatusDeleted} {
+		_, key, err := s.CreateScoped(ctx, CreateRequest{Name: terminal, Kind: KindService, SubjectID: "svc_terminal", OrganizationID: "org_a", WorkspaceIDs: []string{"ws_a"}, Role: "operator", Issuer: "soulacy"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SetStatus(ctx, key.ID, terminal); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SetStatus(ctx, key.ID, StatusActive); !errors.Is(err, ErrInvalidRequest) {
+			t.Fatalf("%s credential reactivated: %v", terminal, err)
+		}
+	}
+}
+
+func TestRotateRevokesOldSecretAndPreservesAuthority(t *testing.T) {
+	s := newStore(t)
+	oldSecret, oldKey, err := s.CreateScoped(context.Background(), CreateRequest{Name: "ci", Kind: KindService, SubjectID: "svc_ci", OrganizationID: "org_a", WorkspaceIDs: []string{"ws_a"}, Role: "developer", Scopes: []string{"agents:write"}, Issuer: "soulacy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newSecret, newKey, err := s.Rotate(context.Background(), oldKey.ID)
+	if err != nil {
+		t.Fatalf("Rotate: %v", err)
+	}
+	if newSecret == oldSecret || newKey.RotatedFromID != oldKey.ID {
+		t.Fatalf("bad replacement: %+v", newKey)
+	}
+	if _, err := s.Validate(context.Background(), oldSecret); !errors.Is(err, ErrInvalidKey) {
+		t.Fatalf("old secret remained active: %v", err)
+	}
+	got, err := s.Validate(context.Background(), newSecret)
+	if err != nil || got.SubjectID != oldKey.SubjectID || got.Role != oldKey.Role {
+		t.Fatalf("replacement authority changed: %+v err=%v", got, err)
 	}
 }
 

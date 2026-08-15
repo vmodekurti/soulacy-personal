@@ -50,6 +50,15 @@ func gray(s string) string   { return clrGray + s + clrReset }
 // ── Wizard state ─────────────────────────────────────────────────────────────
 
 type setupConfig struct {
+	// Deployment posture
+	DeploymentMode      string
+	PostgresDSN         string
+	JWTSecret           string
+	QueueBackend        string
+	NATSURL             string
+	SharedArtifactStore string
+	ExecutorBackend     string
+
 	// Server
 	Host   string
 	Port   int
@@ -113,14 +122,18 @@ func runSetupWizard() error {
 
 	home, _ := os.UserHomeDir()
 	cfg := &setupConfig{
-		Host:        "127.0.0.1",
-		Port:        18789,
-		LLMProvider: "ollama",
-		LLMModel:    "llama3",
-		OllamaURL:   "http://localhost:11434",
-		PythonBin:   "python3",
-		LogLevel:    "info",
-		DataDir:     setupDataDir(home),
+		DeploymentMode:  config.DeploymentModePersonal,
+		QueueBackend:    "memory",
+		NATSURL:         "nats://localhost:4222",
+		ExecutorBackend: "process",
+		Host:            "127.0.0.1",
+		Port:            18789,
+		LLMProvider:     "ollama",
+		LLMModel:        "llama3",
+		OllamaURL:       "http://localhost:11434",
+		PythonBin:       "python3",
+		LogLevel:        "info",
+		DataDir:         setupDataDir(home),
 	}
 
 	// ── Workspace location (default: ~/.soulacy/soulspace) ─────────────────
@@ -148,15 +161,19 @@ func runSetupWizard() error {
 	setupGateway(cfg)
 
 	// ── Step 3: LLM provider ──────────────────────────────────────────────
-	printStep(3, "LLM provider")
+	printStep(3, "Deployment mode")
+	setupDeployment(cfg)
+
+	// ── Step 4: LLM provider ──────────────────────────────────────────────
+	printStep(4, "LLM provider")
 	setupLLM(cfg)
 
-	// ── Step 4: Channels ──────────────────────────────────────────────────
-	printStep(4, "Messaging channels")
+	// ── Step 5: Channels ──────────────────────────────────────────────────
+	printStep(5, "Messaging channels")
 	setupChannels(cfg)
 
-	// ── Step 5: Runtime ───────────────────────────────────────────────────
-	printStep(5, "Runtime & logging")
+	// ── Step 6: Runtime ───────────────────────────────────────────────────
+	printStep(6, "Runtime & logging")
 	setupRuntime(cfg)
 
 	// ── Summary ───────────────────────────────────────────────────────────
@@ -189,6 +206,55 @@ func runSetupWizard() error {
 
 	printSuccess(cfg)
 	return nil
+}
+
+func setupDeployment(cfg *setupConfig) {
+	fmt.Printf("  %s Personal keeps today's zero-dependency single-user setup.\n", dim("Personal"))
+	fmt.Printf("  %s Team uses PostgreSQL, JWT identity, and isolated Docker tools.\n", dim("Team"))
+	fmt.Printf("  %s Scale additionally requires a distributed queue and shared artifacts.\n", dim("Scale"))
+	choice := promptChoices("  Operating mode", []string{
+		"Personal (recommended for one user)",
+		"Team (shared single-node deployment)",
+		"Scale (multiple gateways and workers)",
+	})
+	switch choice {
+	case 1:
+		cfg.DeploymentMode = config.DeploymentModeTeam
+	case 2:
+		cfg.DeploymentMode = config.DeploymentModeScale
+	default:
+		cfg.DeploymentMode = config.DeploymentModePersonal
+	}
+	if cfg.DeploymentMode == config.DeploymentModePersonal {
+		cfg.ExecutorBackend = "process"
+		cfg.QueueBackend = "memory"
+		fmt.Printf("  %s Personal mode selected; SQLite and local execution remain available.\n", green("✓"))
+		return
+	}
+
+	if cfg.APIKey == "" {
+		cfg.APIKey = generateAPIKey()
+		fmt.Printf("  %s Generated the bootstrap administration key required by %s mode.\n", green("✓"), cfg.DeploymentMode)
+	}
+	cfg.PostgresDSN = prompt("  PostgreSQL DSN", "postgres://soulacy@localhost:5432/soulacy?sslmode=require")
+	cfg.JWTSecret = generateJWTSecret()
+	cfg.ExecutorBackend = "docker"
+	fmt.Printf("  %s Generated a stable JWT signing secret and selected isolated Docker execution.\n", green("✓"))
+	if cfg.DeploymentMode == config.DeploymentModeScale {
+		cfg.QueueBackend = "nats"
+		cfg.NATSURL = prompt("  NATS URL", cfg.NATSURL)
+		cfg.SharedArtifactStore = prompt("  Shared artifact store (for example s3://bucket/prefix)", "")
+	}
+}
+
+func generateJWTSecret() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		// crypto/rand failure is exceptionally rare. Reuse the API-key generator
+		// as a second crypto/rand attempt rather than emitting a weak secret.
+		return generateAPIKey()
+	}
+	return hex.EncodeToString(b)
 }
 
 // ── Step implementations ──────────────────────────────────────────────────────
@@ -459,9 +525,26 @@ func writeConfig(cfg *setupConfig) error {
 		}
 	}
 
+	deploymentSection := fmt.Sprintf("deployment:\n  mode: %s", cfg.DeploymentMode)
+	if cfg.SharedArtifactStore != "" {
+		deploymentSection += fmt.Sprintf("\n  shared_artifact_store: %q", cfg.SharedArtifactStore)
+	}
+	authSection := "auth:\n  mode: apikey"
+	storageSection := "storage:\n  backend: sqlite"
+	if cfg.DeploymentMode != config.DeploymentModePersonal {
+		authSection = fmt.Sprintf("auth:\n  mode: jwt\n  jwt_secret: %q\n  jwt_access_ttl: 15m\n  jwt_refresh_ttl: 168h", cfg.JWTSecret)
+		storageSection = fmt.Sprintf("storage:\n  backend: postgres\n  postgres_dsn: %q", cfg.PostgresDSN)
+	}
+	queueSection := fmt.Sprintf("queue:\n  backend: %s", cfg.QueueBackend)
+	if cfg.QueueBackend == "nats" {
+		queueSection += fmt.Sprintf("\n  nats_url: %q", cfg.NATSURL)
+	}
+
 	content := fmt.Sprintf(`# Soulacy configuration
 # Generated by 'sy setup' on %s
 # Docs: https://docs.soulacy.dev/configuration
+
+%s
 
 server:
   host: "%s"
@@ -474,6 +557,20 @@ runtime:
   default_max_turns: 20
   python_bin: "%s"
   tool_timeout: "30s"
+  sandbox:
+    enabled: true
+    mode: docker
+
+%s
+
+%s
+
+executor:
+  backend: %s
+  docker_image: "python:3.12-slim"
+  docker_network: none
+
+%s
 
 memory:
   max_history: 50
@@ -494,8 +591,13 @@ log:
   format: console
 `,
 		time.Now().Format("2006-01-02 15:04:05"),
+		deploymentSection,
 		cfg.Host, cfg.Port, apiKeyLine,
 		cfg.PythonBin,
+		authSection,
+		storageSection,
+		cfg.ExecutorBackend,
+		queueSection,
 		cfg.LLMProvider,
 		ollamaSection, openaiSection, anthropicSection,
 		searchSection,
@@ -545,6 +647,11 @@ func printSummary(cfg *setupConfig) {
 	fmt.Printf("\n%s\n", strings.Repeat("─", 56))
 	fmt.Printf("%s\n\n", bold("  Configuration summary"))
 	fmt.Printf("  %-20s %s\n", "Gateway", fmt.Sprintf("%s:%d", cfg.Host, cfg.Port))
+	fmt.Printf("  %-20s %s\n", "Deployment mode", bold(cfg.DeploymentMode))
+	if cfg.DeploymentMode != config.DeploymentModePersonal {
+		fmt.Printf("  %-20s %s\n", "Storage", "PostgreSQL")
+		fmt.Printf("  %-20s %s\n", "Executor", "Docker (isolated)")
+	}
 	if cfg.APIKey != "" {
 		fmt.Printf("  %-20s %s\n", "API key", bold(cfg.APIKey))
 	} else {

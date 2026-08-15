@@ -38,6 +38,7 @@ export const navPages = [
   { id: 'config',    icon: '≡', label: 'Config',      group: 'system'       },
   { id: 'mobile',    icon: '▣', label: 'Mobile',      group: 'system'       },
   { id: 'logs',      icon: '📋', label: 'Logs',        group: 'system'       },
+  { id: 'members',   icon: '👥', label: 'Members',     group: 'system'       },
 ]
 
 /** Nav ids in render order. */

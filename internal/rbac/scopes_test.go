@@ -79,6 +79,22 @@ func TestScopeMatchingIgnoresCaseAndPadding(t *testing.T) {
 	}
 }
 
+func TestResourceActionScopesNarrowMutations(t *testing.T) {
+	claims := &auth.Claims{Scopes: []string{"agents:read", "chat:*"}}
+	if !claims.Allows(ResourceAgents, ActionRead) {
+		t.Fatal("agents:read did not allow read")
+	}
+	if claims.Allows(ResourceAgents, ActionWrite) {
+		t.Fatal("agents:read allowed write")
+	}
+	if !claims.Allows(ResourceChat, ActionChat) || !claims.Allows(ResourceChat, ActionRead) {
+		t.Fatal("chat:* did not allow chat actions")
+	}
+	if !(&auth.Claims{Scopes: []string{"agents"}}).Allows(ResourceAgents, ActionDelete) {
+		t.Fatal("legacy resource scope compatibility broke")
+	}
+}
+
 // The helper being correct proves nothing if the middleware never calls it.
 // Mutation testing caught exactly that: removing AllowsResource from Require
 // left every test above still passing.

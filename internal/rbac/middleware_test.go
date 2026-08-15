@@ -4,6 +4,7 @@ package rbac
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/auth"
+	"github.com/soulacy/soulacy/internal/requestctx"
 )
 
 // ---------------------------------------------------------------------------
@@ -25,6 +27,21 @@ import (
 func newManager(t *testing.T) *Manager {
 	t.Helper()
 	return NewManager(NoopStore{}, zap.NewNop())
+}
+
+func identityMiddleware(t *testing.T, role string, scopes []string) fiber.Handler {
+	t.Helper()
+	identity, err := requestctx.New(requestctx.Input{
+		Subject: "member-user", OrganizationID: "org-1", WorkspaceID: "workspace-1",
+		MembershipID: "membership-1", Role: role, Scopes: scopes, RequestID: "request-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return func(c *fiber.Ctx) error {
+		c.SetUserContext(requestctx.With(context.Background(), identity))
+		return c.Next()
+	}
 }
 
 // newManagerWithStore builds a Manager backed by the provided store.
@@ -200,6 +217,31 @@ func TestRequireClaimsDenied_Returns403(t *testing.T) {
 	body := decodeJSON(t, resp)
 	if body["error"] != "insufficient permissions" {
 		t.Errorf("error field = %q, want 'insufficient permissions'", body["error"])
+	}
+}
+
+func TestRequireUsesVerifiedMembershipRoleInsteadOfJWTClaim(t *testing.T) {
+	m := newManager(t)
+	app := fiber.New(fiber.Config{DisableStartupMessage: true})
+	app.Use(claimsMiddleware(&auth.Claims{Role: RoleAdmin, Kind: "access"}))
+	app.Use(identityMiddleware(t, RoleViewer, nil))
+	app.Use(m.Require(ResourceConfig, ActionWrite))
+	app.Get("/test", func(c *fiber.Ctx) error { return c.SendStatus(fiber.StatusOK) })
+	resp := doRequest(t, app, http.MethodGet, "/test", "")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("JWT admin role overrode viewer membership: status=%d", resp.StatusCode)
+	}
+}
+
+func TestRequireTokenScopeNarrowsMembershipRole(t *testing.T) {
+	m := newManager(t)
+	app := fiber.New(fiber.Config{DisableStartupMessage: true})
+	app.Use(identityMiddleware(t, RoleOwner, []string{ResourceChat}))
+	app.Use(m.Require(ResourceConfig, ActionWrite))
+	app.Get("/test", func(c *fiber.Ctx) error { return c.SendStatus(fiber.StatusOK) })
+	resp := doRequest(t, app, http.MethodGet, "/test", "")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("token scope did not narrow owner membership: status=%d", resp.StatusCode)
 	}
 }
 

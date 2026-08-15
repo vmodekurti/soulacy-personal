@@ -8,9 +8,15 @@ import (
 // Principal is the immutable authentication identity supplied by the gateway.
 // Message.UserID/Username are user content and are never authority inputs.
 type Principal struct {
-	Subject string
-	Role    string
-	Scopes  []string
+	Subject        string
+	OrganizationID string
+	WorkspaceID    string
+	MembershipID   string
+	Role           string
+	Scopes         []string
+	CredentialID   string
+	RequestID      string
+	Kind           string
 }
 
 type principalContextKey struct{}
@@ -19,6 +25,12 @@ func WithPrincipal(ctx context.Context, p Principal) context.Context {
 	p.Subject = strings.Clone(strings.TrimSpace(p.Subject))
 	p.Role = strings.Clone(strings.ToLower(strings.TrimSpace(p.Role)))
 	p.Scopes = append([]string(nil), p.Scopes...)
+	p.OrganizationID = strings.Clone(strings.TrimSpace(p.OrganizationID))
+	p.WorkspaceID = strings.Clone(strings.TrimSpace(p.WorkspaceID))
+	p.MembershipID = strings.Clone(strings.TrimSpace(p.MembershipID))
+	p.CredentialID = strings.Clone(strings.TrimSpace(p.CredentialID))
+	p.RequestID = strings.Clone(strings.TrimSpace(p.RequestID))
+	p.Kind = strings.Clone(strings.TrimSpace(p.Kind))
 	return context.WithValue(ctx, principalContextKey{}, p)
 }
 

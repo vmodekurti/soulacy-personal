@@ -187,6 +187,7 @@ nav:
     - Custom Sidecar Channels: channels/sidecars.md
   - Configuration:
     - Overview: configuration/index.md
+    - Deployment Modes: configuration/deployment-modes.md
     - Workspace Layout: configuration/workspace.md
     - Web GUI: configuration/gui.md
     - Server: configuration/server.md
@@ -197,6 +198,8 @@ nav:
     - Events & Webhooks: configuration/events.md
     - Voice: configuration/voice.md
     - Auth: configuration/auth.md
+    - Workspace Members: configuration/workspace-members.md
+    - Authorization Policy: configuration/authorization.md
     - Security Posture: configuration/security.md
     - Rate Limiting: configuration/rate-limiting.md
     - Telemetry: configuration/telemetry.md
@@ -225,4 +228,5 @@ nav:
     - Common Failures → Fixes: troubleshooting/common-failures.md
   - Architecture:
     - Overview: architecture/overview.md
+    - Resource Ownership: architecture/resource-ownership.md
     - Specs & Deep Dives: architecture/specs.md

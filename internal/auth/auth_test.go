@@ -25,6 +25,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -482,16 +483,19 @@ func TestMiddlewareManagedAPIKey(t *testing.T) {
 	fakeKey := "sk_test0001"
 	store := &fakeAPIKeyStore{
 		keys: map[string]apikeys.APIKey{
-			fakeKey: {ID: "key-id-1", Name: "CI Bot"},
+			fakeKey: {ID: "key-id-1", Name: "CI Bot", Kind: apikeys.KindService, SubjectID: "svc_ci", OrganizationID: "org_acme", WorkspaceIDs: []string{"ws_prod", "ws_stage"}, Role: "developer", Scopes: []string{"agents:read"}, Issuer: "soulacy-team", Status: apikeys.StatusActive},
 		},
 	}
 	e.SetAPIKeyStore(store)
 	app := newAuthApp(e)
 
 	// Known managed key.
-	status, _ := fiberJSON(t, app, http.MethodGet, "/me", fakeKey, "")
+	status, body := fiberJSON(t, app, http.MethodGet, "/me", fakeKey, "")
 	if status != http.StatusOK {
 		t.Fatalf("managed key valid: status = %d, want 200", status)
+	}
+	if body["sub"] != "svc_ci" || body["principal_kind"] != apikeys.KindService || body["credential_id"] != "key-id-1" || body["issuer"] != "soulacy-team" {
+		t.Fatalf("managed key identity not preserved: %#v", body)
 	}
 
 	// Unknown managed key (not in the store).
@@ -915,7 +919,7 @@ func (f *fakeRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 func buildOIDCValidator(t *testing.T, issuer, audience, jwksURL, jwksJSON string) (*OIDCValidator, error) {
 	t.Helper()
 	discoveryURL := strings.TrimRight(issuer, "/") + "/.well-known/openid-configuration"
-	discoveryBody := fmt.Sprintf(`{"jwks_uri":%q}`, jwksURL)
+	discoveryBody := fmt.Sprintf(`{"issuer":%q,"jwks_uri":%q,"authorization_endpoint":%q,"token_endpoint":%q,"id_token_signing_alg_values_supported":["RS256","ES256","ES384","ES512"]}`, issuer, jwksURL, issuer+"/authorize", issuer+"/token")
 
 	transport := &fakeRoundTripper{
 		responses: map[string]fakeResponse{
@@ -925,11 +929,12 @@ func buildOIDCValidator(t *testing.T, issuer, audience, jwksURL, jwksJSON string
 	}
 
 	v := &OIDCValidator{
-		issuer:   issuer,
-		audience: audience,
-		client:   &http.Client{Transport: transport},
-		keys:     make(map[string]any),
-		quit:     make(chan struct{}),
+		issuer:            issuer,
+		audience:          audience,
+		client:            &http.Client{Transport: transport},
+		keys:              make(map[string]any),
+		allowedAlgorithms: make(map[string]struct{}),
+		quit:              make(chan struct{}),
 	}
 	if err := v.discover(); err != nil {
 		return nil, err
@@ -1227,7 +1232,7 @@ func TestRefreshStoreExpiredToken(t *testing.T) {
 	// Manually insert an already-expired entry.
 	tok := "expiredtoken"
 	s.mu.Lock()
-	s.tokens[tok] = refreshEntry{
+	s.tokens[sha256.Sum256([]byte(tok))] = refreshEntry{
 		subject:   "ghost",
 		email:     "",
 		role:      "viewer",
@@ -1235,8 +1240,8 @@ func TestRefreshStoreExpiredToken(t *testing.T) {
 	}
 	s.mu.Unlock()
 
-	_, _, _, ok := s.get(tok)
-	if ok {
+	_, status := s.consume(tok)
+	if status != refreshInvalid {
 		t.Error("expected expired token to be rejected, got ok=true")
 	}
 }
@@ -1246,19 +1251,19 @@ func TestRefreshStoreSingleUse(t *testing.T) {
 	s := newRefreshStore()
 	defer s.close()
 
-	tok := s.put("alice", "alice@example.com", "admin", time.Now().Add(time.Hour))
-	sub, email, role, ok := s.get(tok)
-	if !ok {
+	tok := s.put("alice", "alice@example.com", "admin", "", time.Now().Add(time.Hour))
+	entry, status := s.consume(tok)
+	if status != refreshValid {
 		t.Fatal("first get should succeed")
 	}
-	if sub != "alice" || email != "alice@example.com" || role != "admin" {
-		t.Errorf("unexpected values: sub=%q email=%q role=%q", sub, email, role)
+	if entry.subject != "alice" || entry.email != "alice@example.com" || entry.role != "admin" {
+		t.Errorf("unexpected values: sub=%q email=%q role=%q", entry.subject, entry.email, entry.role)
 	}
 
 	// Second get must fail — token was rotated on first use.
-	_, _, _, ok = s.get(tok)
-	if ok {
-		t.Error("second get should fail (single-use rotation)")
+	_, status = s.consume(tok)
+	if status != refreshReused {
+		t.Error("second get should be detected as replay")
 	}
 }
 

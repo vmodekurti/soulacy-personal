@@ -105,30 +105,30 @@ func adapterIDForLog(channel string, index int, agentID string) string {
 //
 // Policy:
 //
-//   • channelKind == "http"          — always allowed. The HTTP channel is
-//                                      gated by the gateway's API-key auth,
-//                                      so binding doesn't escalate exposure
-//                                      beyond what's already authenticated.
+//   - channelKind == "http"          — always allowed. The HTTP channel is
+//     gated by the gateway's API-key auth,
+//     so binding doesn't escalate exposure
+//     beyond what's already authenticated.
 //
-//   • tier == ReadOnly               — allowed on any channel, silently.
+//   - tier == ReadOnly               — allowed on any channel, silently.
 //
-//   • tier == Active                 — allowed with an INFO log noting the
-//                                      tier. This is the backward-compat
-//                                      path: pre-existing single-agent
-//                                      bindings (web_search, kb_search,
-//                                      etc.) keep working.
+//   - tier == Active                 — allowed with an INFO log noting the
+//     tier. This is the backward-compat
+//     path: pre-existing single-agent
+//     bindings (web_search, kb_search,
+//     etc.) keep working.
 //
-//   • tier == Privileged             — requires `accept_privileged_exposure:
-//                                      true` on the binding map. Allowed
-//                                      with a stark WARN when accepted;
-//                                      blocked with a stark WARN otherwise.
-//                                      Catches shell_exec, write_file,
-//                                      system_tools, wildcard builtins/MCP,
-//                                      and any transitive peer that has
-//                                      those capabilities.
+//   - tier == Privileged             — requires `accept_privileged_exposure:
+//     true` on the binding map. Allowed
+//     with a stark WARN when accepted;
+//     blocked with a stark WARN otherwise.
+//     Catches shell_exec, write_file,
+//     system_tools, wildcard builtins/MCP,
+//     and any transitive peer that has
+//     those capabilities.
 //
-//   • tier == Unknown                — agent isn't loaded; allow with a
-//                                      WARN (engine errors at first run).
+//   - tier == Unknown                — agent isn't loaded; allow with a
+//     WARN (engine errors at first run).
 //
 // `bindingCfg` is the raw channel-binding map from config.yaml; we read
 // `accept_privileged_exposure` (bool) from it. The flag MUST live on the
@@ -238,7 +238,6 @@ func bindingDecision(adapterID, agentID, channelKind string, bindingCfg map[stri
 		return false
 	}
 }
-
 
 // sanitizeID replaces characters that are not safe for adapter IDs or log
 // fields with hyphens. Keeps letters, digits, hyphens, and underscores.

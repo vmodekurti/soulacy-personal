@@ -34,8 +34,8 @@ func TestCloserStackLIFO(t *testing.T) {
 // some fail, and that all failures are aggregated into the returned error.
 func TestCloserStackAggregatesErrors(t *testing.T) {
 	s := newCloserStack(nil)
-	errFirst := errors.New("boom-first")  // registered first → runs last
-	errThird := errors.New("boom-third")  // registered third → runs first
+	errFirst := errors.New("boom-first") // registered first → runs last
+	errThird := errors.New("boom-third") // registered third → runs first
 
 	ran := 0
 	s.push("first", func() error { ran++; return errFirst })

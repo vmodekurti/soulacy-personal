@@ -177,6 +177,40 @@ sy schedule list                       # scheduled agent entries
 sy logs --follow                       # stream live events
 ```
 
+## Scoped credentials
+
+Automation should authenticate as a service account, not as a person and not
+with the static server key. `sy credential` issues, lists, rotates, and revokes
+the scoped credentials described in [Auth](../configuration/auth.md).
+
+```bash
+# Issue a 30-day service-account credential for CI. The service account and its
+# workspace binding must already exist; --subject names the service account.
+sy credential create ci-bot \
+  --kind service --subject svc_ci \
+  --workspace ws_production \
+  --role operator \
+  --scope agents:read,agents:run \
+  --expires-in 30d
+
+sy credential list                       # credentials visible in the active workspace
+sy credential list --include-revoked     # include revoked and suspended entries
+sy credential rotate cred_abc123         # atomic: old secret stops working immediately
+sy credential status cred_abc123 suspended   # suspend without deleting
+sy credential revoke cred_abc123         # permanent, effective on the next request
+```
+
+The plaintext secret is printed exactly once, by `create` and `rotate`. Soulacy
+stores only its digest and cannot show it again — capture it into your CI secret
+store in the same step that creates it. `--json` emits the raw API response for
+scripting.
+
+Listings identify the acting principal explicitly (`service-account svc_ci`
+rather than a generic API user), which is the same identity that appears in
+admin audit records. A credential is only visible and manageable inside a
+workspace it is bound to; a credential in another workspace reports as not
+found rather than as forbidden.
+
 ## Workspace
 
 ```bash

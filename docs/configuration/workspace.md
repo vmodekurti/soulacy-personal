@@ -16,7 +16,8 @@ separation between data, logs, and secrets.
 ├── memory/            # brain memory (episodic / semantic / procedural)
 ├── data/              # ALL databases: actions.db, archive.db, knowledge.db,
 │                      #   plugins.db, rbac.db, costs.db, workboard.db,
-│                      #   apikeys.db, dlq.db, history.db, checkpoints.db
+│                      #   apikeys.db, dlq.db, history.db, checkpoints.db,
+│                      #   tenants.db
 ├── logs/              # log files
 ├── audit/             # tool-call audit JSONL
 ├── secrets/           # credential vault + signing keys (0700)
@@ -106,6 +107,26 @@ the gateway and verify with `sy workspace info`.
     `sy workspace migrate` moves SQLite databases as files. Running it
     against a live gateway risks corruption. Stop the gateway, migrate,
     then restart.
+
+## Personal tenant bootstrap
+
+Personal mode uses the same tenant-aware identity kernel as Team mode without
+changing the single-user experience. On first startup Soulacy atomically
+creates `data/tenants.db` containing one stable organization, workspace, local
+owner, and owner membership. It also records the existing agents, memory,
+conversations, schedules, credentials, knowledge, costs, Studio data, and other
+stores as belonging to that workspace.
+
+Preview this additive migration without changing any file:
+
+```bash
+sy workspace migrate --plan
+```
+
+The tenant catalog is published only after its transaction commits. A failed
+fresh migration removes its temporary database and leaves every existing store
+untouched. A later startup safely resumes; successful re-runs reuse the same
+IDs and cannot duplicate memberships or resource assignments.
 
 ## Where config.yaml is found
 

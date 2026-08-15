@@ -140,6 +140,63 @@ func TestPatchServerHost(t *testing.T) {
 	}
 }
 
+func TestPatchDeploymentSettingsTeam(t *testing.T) {
+	p := writeTemp(t, baseConfig)
+	err := patchDeploymentSettings(p, deploymentSettings{
+		Mode:        "team",
+		PostgresDSN: "postgres://db/soulacy",
+		JWTSecret:   strings.Repeat("j", 32),
+		APIKey:      "sy_admin",
+	})
+	if err != nil {
+		t.Fatalf("patch deployment: %v", err)
+	}
+	m := parseConfig(t, p)
+	if got := m["deployment"].(map[string]any)["mode"]; got != "team" {
+		t.Fatalf("deployment.mode = %v", got)
+	}
+	if got := m["auth"].(map[string]any)["mode"]; got != "jwt" {
+		t.Fatalf("auth.mode = %v", got)
+	}
+	if got := m["storage"].(map[string]any)["backend"]; got != "postgres" {
+		t.Fatalf("storage.backend = %v", got)
+	}
+	if got := m["executor"].(map[string]any)["backend"]; got != "docker" {
+		t.Fatalf("executor.backend = %v", got)
+	}
+	sandbox := m["runtime"].(map[string]any)["sandbox"].(map[string]any)
+	if sandbox["enabled"] != true || sandbox["mode"] != "docker" {
+		t.Fatalf("unexpected sandbox: %#v", sandbox)
+	}
+	if got := m["llm"].(map[string]any)["default_provider"]; got != "ollama" {
+		t.Fatalf("unrelated LLM setting changed: %v", got)
+	}
+}
+
+func TestPatchDeploymentSettingsScaleIsIdempotent(t *testing.T) {
+	p := writeTemp(t, baseConfig)
+	settings := deploymentSettings{
+		Mode:                "scale",
+		PostgresDSN:         "postgres://db/soulacy",
+		JWTSecret:           strings.Repeat("j", 32),
+		APIKey:              "sy_admin",
+		NATSURL:             "nats://queue:4222",
+		SharedArtifactStore: "s3://soulacy-artifacts/prod",
+	}
+	for i := 0; i < 2; i++ {
+		if err := patchDeploymentSettings(p, settings); err != nil {
+			t.Fatalf("patch deployment #%d: %v", i, err)
+		}
+	}
+	m := parseConfig(t, p)
+	if got := m["queue"].(map[string]any)["backend"]; got != "nats" {
+		t.Fatalf("queue.backend = %v", got)
+	}
+	if got := m["deployment"].(map[string]any)["shared_artifact_store"]; got != settings.SharedArtifactStore {
+		t.Fatalf("shared artifact store = %v", got)
+	}
+}
+
 // Re-running the search patchers with the same value must not duplicate keys
 // (the bug that produced "mapping key already defined").
 func TestPatchSearch_NoDuplicateOnRepeat(t *testing.T) {

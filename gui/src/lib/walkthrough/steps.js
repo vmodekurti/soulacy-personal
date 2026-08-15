@@ -104,6 +104,11 @@ export const navTourCopy = {
     what: 'Raw gateway logs, live-tailing.',
     when: 'The last resort when a failure has no diagnosis anywhere else.',
   },
+  members: {
+    what: 'Invite people and manage workspace membership.',
+    why: 'Owners can control roles, suspend access, remove members, and review membership audit history.',
+    action: 'Invite a teammate with the smallest role they need, then copy the one-time invitation token securely.',
+  },
 }
 
 /** The intro card — shown centred, before the tour touches the sidebar. */

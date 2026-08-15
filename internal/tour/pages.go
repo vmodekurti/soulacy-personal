@@ -273,6 +273,18 @@ var pages = map[string]page{
 		},
 	},
 
+	"members": {
+		stage: StageKeeping, nextAction: "", nextLabel: "",
+		role:         "This is where workspace access becomes explicit and reviewable.",
+		contribution: "Invitations, roles, suspensions, and removals take effect without sharing passwords or restarting the gateway.",
+		whenEmpty: func(InstallState) string {
+			return "No teammates are visible yet. Create a short-lived invitation with the smallest useful role, then send its one-time link through a trusted channel."
+		},
+		whenUsed: func(InstallState) string {
+			return "Review who can enter this workspace and what each person can do. Membership changes apply to their next request, and owners can inspect the audit history here."
+		},
+	},
+
 	"pluginmgr": {
 		stage: StageKeeping, nextAction: "", nextLabel: "",
 		role:         "Bundles that add capabilities the core does not have.",

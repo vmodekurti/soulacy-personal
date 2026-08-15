@@ -11,11 +11,14 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 
+	"github.com/soulacy/soulacy/internal/auth"
 	"github.com/soulacy/soulacy/internal/channels"
 	httpchan "github.com/soulacy/soulacy/internal/channels/http"
 	"github.com/soulacy/soulacy/internal/config"
@@ -25,9 +28,11 @@ import (
 	"github.com/soulacy/soulacy/internal/knowledge"
 	"github.com/soulacy/soulacy/internal/learning"
 	"github.com/soulacy/soulacy/internal/mcp"
+	"github.com/soulacy/soulacy/internal/ownership"
 	"github.com/soulacy/soulacy/internal/runtime"
 	"github.com/soulacy/soulacy/internal/scheduler"
 	"github.com/soulacy/soulacy/internal/studio"
+	"github.com/soulacy/soulacy/internal/tenancy"
 	"github.com/soulacy/soulacy/pkg/message"
 )
 
@@ -38,6 +43,18 @@ func (a *App) Run(parent context.Context) error {
 	defer log.Sync() //nolint:errcheck
 
 	log.Info("Soulacy starting", zap.String("version", config.Version))
+	if err := ownership.ValidateCatalog(); err != nil {
+		return fmt.Errorf("resource ownership catalog: %w", err)
+	}
+	if config.IsMultiUserMode(cfg.DeploymentMode()) {
+		if blockers := ownership.MultiUserBlockers(); len(blockers) > 0 {
+			preview := blockers
+			if len(preview) > 5 {
+				preview = preview[:5]
+			}
+			return fmt.Errorf("multi-user storage isolation is incomplete (%d personal-only tables, first: %s)", len(blockers), strings.Join(preview, ", "))
+		}
+	}
 
 	// ── Ordered shutdown stack (Story ARCH-4) ────────────────────────────────
 	// Subsystems register their resource closers here as they come up; the
@@ -54,6 +71,28 @@ func (a *App) Run(parent context.Context) error {
 		return fmt.Errorf("resolve workspace: %w", err)
 	}
 	log.Info("workspace", zap.String("root", ws.Root), zap.Bool("legacy", ws.Legacy))
+	var personalTenant *tenancy.PersonalTenant
+	var tenantResolver tenancy.Resolver
+	var tenantIdentityLinker auth.IdentityLinker
+	var tenantPool *pgxpool.Pool
+	if cfg.DeploymentMode() == config.DeploymentModePersonal {
+		tenant, plan, tenantErr := tenancy.EnsurePersonalTenant(parent, ws)
+		if tenantErr != nil {
+			// The migration is additive and its fresh-file path is atomic. Keep
+			// Personal installations usable while making the recovery action loud.
+			log.Error("implicit personal tenant bootstrap failed; continuing in legacy-compatible mode",
+				zap.Error(tenantErr),
+				zap.String("catalog", plan.DatabasePath),
+				zap.String("recovery", "run `sy workspace migrate --plan`, fix the reported filesystem/database error, then restart"))
+		} else {
+			personalTenant = &tenant
+			tenantResolver = tenancy.NewPersonalResolver(tenant)
+			log.Info("implicit personal tenant ready",
+				zap.String("organization_id", tenant.OrganizationID),
+				zap.String("workspace_id", tenant.WorkspaceID),
+				zap.Int("migration_version", plan.Version))
+		}
+	}
 
 	// Sweep stale per-run scratch dirs (Story E24 shared mounts) left by a
 	// crashed previous run; live ones are recreated by their owners below.
@@ -81,6 +120,33 @@ func (a *App) Run(parent context.Context) error {
 	actionBackend, memBackend, err := a.wireStorageBackend(parent, ws, archive, stack)
 	if err != nil {
 		return err
+	}
+	if config.IsMultiUserMode(cfg.DeploymentMode()) {
+		poolConfig, parseErr := pgxpool.ParseConfig(cfg.Storage.PostgresDSN)
+		if parseErr != nil {
+			return fmt.Errorf("tenancy postgres configuration: %w", parseErr)
+		}
+		poolConfig.MaxConns = 20
+		poolConfig.MinConns = 2
+		var poolErr error
+		tenantPool, poolErr = pgxpool.NewWithConfig(parent, poolConfig)
+		if poolErr != nil {
+			return fmt.Errorf("tenancy postgres pool: %w", poolErr)
+		}
+		stack.push("tenancy-postgres", func() error { tenantPool.Close(); return nil })
+		pingCtx, pingCancel := context.WithTimeout(parent, 15*time.Second)
+		poolErr = tenantPool.Ping(pingCtx)
+		pingCancel()
+		if poolErr != nil {
+			return fmt.Errorf("tenancy postgres ping: %w", poolErr)
+		}
+		store, storeErr := tenancy.OpenPostgres(parent, tenantPool)
+		if storeErr != nil {
+			return fmt.Errorf("tenancy postgres store: %w", storeErr)
+		}
+		tenantResolver = store
+		tenantIdentityLinker = store
+		log.Info("multi-user tenancy catalog ready", zap.String("mode", cfg.DeploymentMode()))
 	}
 
 	// ── Plugin database migrations (Story E16) ───────────────────────────────
@@ -265,6 +331,14 @@ func (a *App) Run(parent context.Context) error {
 
 	// ── Scheduler ────────────────────────────────────────────────────────────
 	sched := scheduler.New(engine, loader, log, ctx)
+	sched.RequirePrincipal(config.IsMultiUserMode(cfg.DeploymentMode()))
+	if personalTenant != nil {
+		sched.SetPrincipal(runtime.Principal{
+			Subject: "scheduler", OrganizationID: personalTenant.OrganizationID,
+			WorkspaceID: personalTenant.WorkspaceID, MembershipID: personalTenant.MembershipID,
+			Role: "admin", CredentialID: "service:scheduler", Kind: "service",
+		})
+	}
 	sched.SetStatePath(filepath.Join(cfg.Memory.Dir, "scheduler-state.json"))
 	sched.SetEventSink(hub) // record scheduled-delivery outcomes in Activity
 	// Readiness gate (ST-16): a Studio-deployed agent may only fire on a
@@ -328,12 +402,18 @@ func (a *App) Run(parent context.Context) error {
 	stack.push("session-eviction", func() error { engine.StopSessionEviction(); return nil })
 
 	// ── Message Router — bounded worker pool draining the shared inbox ──────
-	a.startMessageRouter(ctx, chanReg, loader, engine)
+	a.startMessageRouter(ctx, chanReg, loader, engine, personalTenant)
 
 	// ── Auth Engine ───────────────────────────────────────────────────────────
 	authEngine, err := a.wireAuth(stack)
 	if err != nil {
 		return err
+	}
+	if tenantIdentityLinker != nil {
+		authEngine.SetIdentityLinker(tenantIdentityLinker)
+	}
+	if members, ok := tenantResolver.(tenancy.MemberManager); ok {
+		authEngine.SetRefreshAuthorizer(members.CanRefreshUser)
 	}
 
 	// ── RBAC Manager ──────────────────────────────────────────────────────────
@@ -364,6 +444,8 @@ func (a *App) Run(parent context.Context) error {
 		credVault:       credVault,
 		pluginLoader:    pluginLoader,
 		openedCostStore: openedCostStore,
+		tenantResolver:  tenantResolver,
+		tenantPool:      tenantPool,
 	}, stack)
 
 	// ── KB ingestion worker ───────────────────────────────────────────────────

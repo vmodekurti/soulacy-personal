@@ -315,15 +315,27 @@ type OpsConfig struct {
 // DeploymentConfig identifies the intended operating posture for a workspace.
 //
 //	deployment:
+//	  mode: personal       # personal, team, scale
 //	  profile: production   # local, development, staging, production
 //	  owner: platform-team
 //	  region: us-central
 //	  notes: "Customer-facing workspace"
 type DeploymentConfig struct {
-	Profile string `mapstructure:"profile"`
-	Owner   string `mapstructure:"owner"`
-	Region  string `mapstructure:"region"`
-	Notes   string `mapstructure:"notes"`
+	// Mode selects the tenancy and infrastructure posture. Empty is treated as
+	// personal for backwards compatibility with every pre-multi-user config.
+	Mode string `mapstructure:"mode"`
+	// SharedArtifactStore is required by scale deployments. It is the durable
+	// shared artifact root (for example s3://bucket/prefix). The artifact layer
+	// consumes this value as it is migrated off node-local paths.
+	SharedArtifactStore string `mapstructure:"shared_artifact_store"`
+	// Acknowledgements records explicit named acknowledgements for deployment
+	// compromises that have a supported degraded mode. Authentication and
+	// tenant isolation are never acknowledgement-overridable.
+	Acknowledgements []string `mapstructure:"acknowledgements"`
+	Profile          string   `mapstructure:"profile"`
+	Owner            string   `mapstructure:"owner"`
+	Region           string   `mapstructure:"region"`
+	Notes            string   `mapstructure:"notes"`
 }
 
 // UpdateConfig points Soulacy at a signed or checksum-backed release manifest.
@@ -662,13 +674,16 @@ type ExecutorConfig struct {
 //	oidc_audience:   ""       — expected `aud` claim; defaults to oidc_client_id
 //	oidc_client_id:  ""       — used as audience fallback when oidc_audience is empty
 type AuthConfig struct {
-	Mode          string `mapstructure:"mode"`            // "apikey" or "jwt"
-	JWTSecret     string `mapstructure:"jwt_secret"`      // HMAC signing key
-	JWTAccessTTL  string `mapstructure:"jwt_access_ttl"`  // e.g. "15m"
-	JWTRefreshTTL string `mapstructure:"jwt_refresh_ttl"` // e.g. "168h"
-	OIDCIssuer    string `mapstructure:"oidc_issuer"`     // provider discovery URL
-	OIDCAudience  string `mapstructure:"oidc_audience"`   // aud claim value
-	OIDCClientID  string `mapstructure:"oidc_client_id"`  // audience fallback
+	Mode             string   `mapstructure:"mode"`               // "apikey" or "jwt"
+	JWTSecret        string   `mapstructure:"jwt_secret"`         // HMAC signing key
+	JWTAccessTTL     string   `mapstructure:"jwt_access_ttl"`     // e.g. "15m"
+	JWTRefreshTTL    string   `mapstructure:"jwt_refresh_ttl"`    // e.g. "168h"
+	OIDCIssuer       string   `mapstructure:"oidc_issuer"`        // provider discovery URL
+	OIDCAudience     string   `mapstructure:"oidc_audience"`      // aud claim value
+	OIDCClientID     string   `mapstructure:"oidc_client_id"`     // audience fallback
+	OIDCClientSecret string   `mapstructure:"oidc_client_secret"` // prefer SOULACY_AUTH_OIDC_CLIENT_SECRET
+	OIDCRedirectURL  string   `mapstructure:"oidc_redirect_url"`  // registered GUI callback
+	OIDCScopes       []string `mapstructure:"oidc_scopes"`        // defaults to openid/profile/email
 }
 
 // QueueConfig selects the durable message queue backend.
@@ -927,6 +942,7 @@ func Load(cfgPath string) (*Config, string, error) {
 	v.SetDefault("server.host", "127.0.0.1")
 	v.SetDefault("server.port", 18789)
 	v.SetDefault("server.gui_enabled", true)
+	v.SetDefault("deployment.mode", DeploymentModePersonal)
 	v.SetDefault("runtime.max_concurrent_sessions", 100)
 	v.SetDefault("runtime.default_max_turns", 20)
 	v.SetDefault("runtime.max_turns_ceiling", 50)

@@ -9,6 +9,7 @@ import (
 // defaults set in Load().
 func validConfig() *Config {
 	c := &Config{}
+	c.Deployment.Mode = DeploymentModePersonal
 	c.Server.Port = 18789
 	c.Runtime.MaxConcurrentSessions = 100
 	c.Runtime.DefaultMaxTurns = 20
@@ -28,9 +29,95 @@ func validConfig() *Config {
 	return c
 }
 
+func validTeamConfig() *Config {
+	c := validConfig()
+	c.Deployment.Mode = DeploymentModeTeam
+	c.Auth.Mode = "jwt"
+	c.Auth.JWTSecret = strings.Repeat("a", 32)
+	c.Server.APIKey = "sy_bootstrap"
+	c.Storage.Backend = "postgres"
+	c.Storage.PostgresDSN = "postgres://localhost/soulacy"
+	c.Executor.Backend = "docker"
+	c.Runtime.Sandbox.Enabled = true
+	c.Runtime.Sandbox.Mode = "docker"
+	return c
+}
+
 func TestValidate_DefaultsPass(t *testing.T) {
 	if err := validConfig().Validate(); err != nil {
 		t.Fatalf("default-shaped config should validate, got: %v", err)
+	}
+}
+
+func TestDeploymentMode_DefaultsToPersonal(t *testing.T) {
+	c := validConfig()
+	c.Deployment.Mode = ""
+	if got := c.DeploymentMode(); got != DeploymentModePersonal {
+		t.Fatalf("DeploymentMode() = %q, want personal", got)
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("legacy empty mode should validate as personal: %v", err)
+	}
+}
+
+func TestValidate_TeamRequirements(t *testing.T) {
+	if err := validTeamConfig().Validate(); err != nil {
+		t.Fatalf("valid team config rejected: %v", err)
+	}
+	c := validConfig()
+	c.Deployment.Mode = DeploymentModeTeam
+	err := c.Validate()
+	if err == nil {
+		t.Fatal("unsafe team config unexpectedly passed")
+	}
+	for _, field := range []string{"auth.mode", "auth.jwt_secret", "server.api_key", "storage", "executor.backend", "runtime.sandbox"} {
+		if !strings.Contains(err.Error(), field) {
+			t.Errorf("team validation error missing %q: %v", field, err)
+		}
+	}
+}
+
+func TestValidate_ScaleRequirements(t *testing.T) {
+	c := validTeamConfig()
+	c.Deployment.Mode = DeploymentModeScale
+	err := c.Validate()
+	if err == nil || !strings.Contains(err.Error(), "queue.backend") || !strings.Contains(err.Error(), "shared_artifact_store") {
+		t.Fatalf("scale requirements not enforced: %v", err)
+	}
+	c.Queue.Backend = "nats"
+	c.Deployment.SharedArtifactStore = "s3://soulacy-artifacts/prod"
+	if err := c.Validate(); err != nil {
+		t.Fatalf("valid scale config rejected: %v", err)
+	}
+}
+
+func TestValidate_UnsafeDeploymentAcknowledgementAllowsStartup(t *testing.T) {
+	c := validTeamConfig()
+	c.Storage.Backend = "sqlite"
+	c.Storage.PostgresDSN = ""
+	c.Executor.Backend = "process"
+	c.Runtime.Sandbox.Enabled = false
+	c.Deployment.Acknowledgements = []string{UnsafeDeploymentPrerequisitesAcknowledgement}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("explicit unsafe acknowledgement should permit startup: %v", err)
+	}
+}
+
+func TestValidate_UnsafeAcknowledgementCannotBypassAuthentication(t *testing.T) {
+	c := validConfig()
+	c.Deployment.Mode = DeploymentModeTeam
+	c.Deployment.Acknowledgements = []string{UnsafeDeploymentPrerequisitesAcknowledgement}
+	err := c.Validate()
+	if err == nil || !strings.Contains(err.Error(), "auth.mode") || !strings.Contains(err.Error(), "auth.jwt_secret") {
+		t.Fatalf("unsafe acknowledgement bypassed authentication: %v", err)
+	}
+}
+
+func TestValidate_UnknownDeploymentMode(t *testing.T) {
+	c := validConfig()
+	c.Deployment.Mode = "communal"
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "deployment.mode") {
+		t.Fatalf("expected deployment.mode error, got %v", err)
 	}
 }
 
@@ -81,5 +168,34 @@ func TestValidate_AccumulatesAllErrors(t *testing.T) {
 	// Both problems should be reported in one pass.
 	if !strings.Contains(err.Error(), "tool_timeout") || !strings.Contains(err.Error(), "server.port") {
 		t.Fatalf("expected both problems reported, got: %v", err)
+	}
+}
+
+func TestValidateOIDCInteractiveRequirements(t *testing.T) {
+	c := validConfig()
+	c.Auth.OIDCIssuer = "https://issuer.example"
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "oidc_client_id") || !strings.Contains(err.Error(), "oidc_redirect_url") || !strings.Contains(err.Error(), "auth.mode=jwt") {
+		t.Fatalf("missing OIDC requirements: %v", err)
+	}
+	c.Auth.Mode = "jwt"
+	c.Auth.JWTSecret = strings.Repeat("a", 32)
+	c.Auth.OIDCClientID = "soulacy"
+	c.Auth.OIDCRedirectURL = "http://127.0.0.1:18789/api/v1/auth/oidc/callback"
+	if err := c.Validate(); err != nil {
+		t.Fatalf("loopback development callback should be valid: %v", err)
+	}
+	c.Auth.OIDCRedirectURL = "http://agents.example/api/v1/auth/oidc/callback"
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "HTTPS") {
+		t.Fatalf("public HTTP callback accepted: %v", err)
+	}
+}
+
+func TestValidateJWTSessionTTLBounds(t *testing.T) {
+	c := validConfig()
+	c.Auth.JWTAccessTTL = "2h"
+	c.Auth.JWTRefreshTTL = "1h"
+	err := c.Validate()
+	if err == nil || !strings.Contains(err.Error(), "1h interactive-session maximum") || !strings.Contains(err.Error(), "must be greater") {
+		t.Fatalf("unsafe TTLs accepted: %v", err)
 	}
 }

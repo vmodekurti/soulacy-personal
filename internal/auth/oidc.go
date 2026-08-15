@@ -33,24 +33,36 @@ type OIDCValidator struct {
 	audience string
 	client   *http.Client
 
-	mu        sync.RWMutex
-	keys      map[string]any // kid → *rsa.PublicKey or *ecdsa.PublicKey
-	fetchedAt time.Time
-	jwksURI   string
+	mu                sync.RWMutex
+	keys              map[string]any // kid → *rsa.PublicKey or *ecdsa.PublicKey
+	fetchedAt         time.Time
+	jwksURI           string
+	discovery         oidcDiscovery
+	allowedAlgorithms map[string]struct{}
 
 	quit chan struct{}
 	once sync.Once
+}
+
+type oidcDiscovery struct {
+	Issuer                      string   `json:"issuer"`
+	AuthorizationEndpoint       string   `json:"authorization_endpoint"`
+	TokenEndpoint               string   `json:"token_endpoint"`
+	DeviceAuthorizationEndpoint string   `json:"device_authorization_endpoint"`
+	JWKsURI                     string   `json:"jwks_uri"`
+	IDTokenSigningAlgorithms    []string `json:"id_token_signing_alg_values_supported"`
 }
 
 const jwksTTL = time.Hour
 
 func newOIDCValidator(issuer, audience string) (*OIDCValidator, error) {
 	v := &OIDCValidator{
-		issuer:   issuer,
-		audience: audience,
-		client:   &http.Client{Timeout: 10 * time.Second},
-		keys:     make(map[string]any),
-		quit:     make(chan struct{}),
+		issuer:            issuer,
+		audience:          audience,
+		client:            &http.Client{Timeout: 10 * time.Second},
+		keys:              make(map[string]any),
+		allowedAlgorithms: make(map[string]struct{}),
+		quit:              make(chan struct{}),
 	}
 	// Fetch discovery doc synchronously — we want to fail fast at startup if
 	// the issuer URL is misconfigured.
@@ -74,16 +86,27 @@ func (v *OIDCValidator) discover() error {
 		return fmt.Errorf("oidc discovery %s: HTTP %d", url, resp.StatusCode)
 	}
 
-	var doc struct {
-		JWKsURI string `json:"jwks_uri"`
-	}
+	var doc oidcDiscovery
 	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
 		return fmt.Errorf("oidc discovery decode: %w", err)
 	}
 	if doc.JWKsURI == "" {
 		return fmt.Errorf("oidc discovery: missing jwks_uri in %s", url)
 	}
+	if doc.Issuer == "" || doc.Issuer != v.issuer {
+		return fmt.Errorf("oidc discovery issuer mismatch")
+	}
+	if doc.AuthorizationEndpoint == "" || doc.TokenEndpoint == "" {
+		return fmt.Errorf("oidc discovery: authorization_endpoint and token_endpoint are required")
+	}
 	v.jwksURI = doc.JWKsURI
+	v.discovery = doc
+	for _, alg := range doc.IDTokenSigningAlgorithms {
+		v.allowedAlgorithms[alg] = struct{}{}
+	}
+	if len(v.allowedAlgorithms) == 0 {
+		return fmt.Errorf("oidc discovery: no ID token signing algorithms advertised")
+	}
 	return v.fetchJWKS()
 }
 
@@ -149,6 +172,10 @@ func (v *OIDCValidator) fetchJWKS() error {
 // Validate parses and validates a JWT against the cached JWKS.
 // It checks the issuer, audience, and expiry claims in addition to the signature.
 func (v *OIDCValidator) Validate(tokenStr string) (*Claims, error) {
+	return v.validate(tokenStr, "")
+}
+
+func (v *OIDCValidator) validate(tokenStr, nonce string) (*Claims, error) {
 	cl := &Claims{}
 	opts := []jwt.ParserOption{
 		jwt.WithIssuer(v.issuer),
@@ -162,11 +189,29 @@ func (v *OIDCValidator) Validate(tokenStr string) (*Claims, error) {
 	if err != nil {
 		return nil, err
 	}
+	if nonce != "" {
+		parsed, _, err := jwt.NewParser().ParseUnverified(tokenStr, jwt.MapClaims{})
+		if err != nil {
+			return nil, err
+		}
+		got, _ := parsed.Claims.(jwt.MapClaims)["nonce"].(string)
+		if !secretEqual(got, nonce) {
+			return nil, fmt.Errorf("oidc: nonce mismatch")
+		}
+	}
+	// Provider-owned custom role claims are not Soulacy authorization. Workspace
+	// middleware resolves the subject's current membership on every request.
+	cl.Role = "viewer"
+	cl.Kind = "access"
 	return cl, nil
 }
 
 // keyFunc is the jwt.Keyfunc that resolves the signing key from the JWKS cache.
 func (v *OIDCValidator) keyFunc(t *jwt.Token) (any, error) {
+	alg, _ := t.Header["alg"].(string)
+	if _, ok := v.allowedAlgorithms[alg]; !ok {
+		return nil, fmt.Errorf("oidc: signing algorithm %q is not allowed", alg)
+	}
 	kid, _ := t.Header["kid"].(string)
 
 	v.mu.RLock()

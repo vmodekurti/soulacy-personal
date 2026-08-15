@@ -163,6 +163,11 @@ server:
   #   sed -i '' 's/api_key:.*/api_key: "sy_NEWKEY"/' %s
   api_key: "%s"
 
+# Personal is the backwards-compatible, zero-dependency single-user mode.
+# Use sy onboard to configure Team or Scale mode and their prerequisites.
+deployment:
+  mode: personal
+
 runtime:
   max_concurrent_sessions: 100
   default_max_turns: 20

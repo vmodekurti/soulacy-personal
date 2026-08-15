@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -23,6 +25,11 @@ import (
 // them in one pass rather than one-error-per-restart.
 func (c *Config) Validate() error {
 	var errs []error
+
+	// --- Deployment operating mode ---
+	for _, issue := range c.DeploymentReadinessIssues() {
+		errs = append(errs, fmt.Errorf("%s", issue))
+	}
 
 	// --- Durations: every string duration field must parse. ---
 	dur := func(field, val string) {
@@ -47,6 +54,27 @@ func (c *Config) Validate() error {
 	dur("runtime.retention.audit_logs", c.Runtime.Retention.AuditLogs)
 	dur("auth.jwt_access_ttl", c.Auth.JWTAccessTTL)
 	dur("auth.jwt_refresh_ttl", c.Auth.JWTRefreshTTL)
+	if access, accessErr := time.ParseDuration(c.Auth.JWTAccessTTL); accessErr == nil && access > time.Hour {
+		errs = append(errs, fmt.Errorf("auth.jwt_access_ttl: %s exceeds the 1h interactive-session maximum", access))
+	}
+	if access, accessErr := time.ParseDuration(c.Auth.JWTAccessTTL); accessErr == nil {
+		if refresh, refreshErr := time.ParseDuration(c.Auth.JWTRefreshTTL); refreshErr == nil && refresh <= access {
+			errs = append(errs, fmt.Errorf("auth.jwt_refresh_ttl must be greater than auth.jwt_access_ttl"))
+		}
+	}
+	if strings.TrimSpace(c.Auth.OIDCIssuer) != "" {
+		if c.Auth.Mode != "jwt" {
+			errs = append(errs, fmt.Errorf("auth.oidc_issuer requires auth.mode=jwt"))
+		}
+		if strings.TrimSpace(c.Auth.OIDCClientID) == "" {
+			errs = append(errs, fmt.Errorf("auth.oidc_client_id is required when auth.oidc_issuer is set"))
+		}
+		if strings.TrimSpace(c.Auth.OIDCRedirectURL) == "" {
+			errs = append(errs, fmt.Errorf("auth.oidc_redirect_url is required for GUI login"))
+		} else if parsed, err := url.Parse(c.Auth.OIDCRedirectURL); err != nil || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" || (parsed.Scheme != "https" && !(parsed.Scheme == "http" && (parsed.Hostname() == "localhost" || (net.ParseIP(parsed.Hostname()) != nil && net.ParseIP(parsed.Hostname()).IsLoopback())))) {
+			errs = append(errs, fmt.Errorf("auth.oidc_redirect_url must use HTTPS (HTTP is allowed only for loopback development)"))
+		}
+	}
 	dur("queue.nats_ack_wait", c.Queue.NATSAckWait)
 	dur("voice.timeout", c.Voice.Timeout)
 	if c.Runtime.ToolTimeout != "" && c.Runtime.Timeouts.Tool != "" && c.Runtime.ToolTimeout != c.Runtime.Timeouts.Tool {

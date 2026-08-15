@@ -29,6 +29,7 @@ const wsPrincipalKey = "ws_event_principal"
 // no credential material and is immutable for the connection lifetime.
 type eventPrincipal struct {
 	Principal     string
+	WorkspaceID   string
 	Role          string
 	Scopes        []string
 	Admin         bool

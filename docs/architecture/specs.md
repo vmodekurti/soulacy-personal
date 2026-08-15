@@ -45,6 +45,7 @@ subsystem.
 
 | Spec | One-liner |
 |------|-----------|
+| [MULTI_USER_BACKLOG.md](../MULTI_USER_BACKLOG.md) | Ordered user stories, acceptance criteria, security invariants, and release gates for Personal, Team, and Scale deployments |
 | [UPGRADE_STABILITY.md](../UPGRADE_STABILITY.md) | The three upgrade guard layers: additive-only schema versioning, pinned API contracts, chaos-tested plugin fallbacks |
 | [WORKSPACE.md](../WORKSPACE.md) | The soulspace workspace layout, legacy auto-detection, and the `sy workspace migrate` plan/apply flow |
 

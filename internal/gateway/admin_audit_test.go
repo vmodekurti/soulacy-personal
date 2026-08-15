@@ -5,6 +5,12 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/golang-jwt/jwt/v5"
+
+	"github.com/soulacy/soulacy/internal/auth"
+	"github.com/soulacy/soulacy/internal/requestctx"
 )
 
 func TestAdminAuditRecordsConfigPatchWithoutSecrets(t *testing.T) {
@@ -87,6 +93,39 @@ func TestAdminAuditRecordsChannelMutations(t *testing.T) {
 	}
 	if strings.Contains(fmt.Sprint(rec), "real-token") || strings.Contains(fmt.Sprint(rec), "bot-token") {
 		t.Fatalf("channel audit leaked token: %#v", rec)
+	}
+}
+
+func TestAdminAuditAttributesServiceCredentialIdentity(t *testing.T) {
+	backend := &fakeTailBackend{}
+	s := &Server{actions: backend}
+	identity, err := requestctx.New(requestctx.Input{
+		Subject: "svc_ci", OrganizationID: "org_acme", WorkspaceID: "ws_prod",
+		MembershipID: "svc-ci-binding", Role: "operator", Scopes: []string{"agents:write"},
+		CredentialID: "cred_123", RequestID: "req_123", PrincipalKind: "service_account",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := fiber.New()
+	app.Post("/audit", func(c *fiber.Ctx) error {
+		c.Locals(workspaceIdentityLocal, identity)
+		c.Locals("request_id", identity.RequestID())
+		auth.SetClaims(c, &auth.Claims{RegisteredClaims: jwt.RegisteredClaims{Subject: identity.Subject()}, Role: identity.Role(), PrincipalKind: identity.PrincipalKind(), CredentialID: identity.CredentialID(), OrganizationID: identity.OrganizationID(), WorkspaceID: identity.WorkspaceID()})
+		s.recordAdminAudit(c, "credential.rotate", "credentials", identity.CredentialID(), "ok", nil)
+		return c.SendStatus(fiber.StatusNoContent)
+	})
+	req, _ := http.NewRequest(http.MethodPost, "/audit", nil)
+	if resp, err := app.Test(req); err != nil || resp.StatusCode != fiber.StatusNoContent {
+		t.Fatalf("record audit response=%v err=%v", resp, err)
+	}
+	events, err := backend.QueryEvents(adminAuditAgentID, "", 10, adminAuditEventTypes())
+	if err != nil || len(events) != 1 {
+		t.Fatalf("events=%d err=%v", len(events), err)
+	}
+	rec, ok := adminAuditRecordFromPayload(events[0].Payload)
+	if !ok || rec.Actor != "svc_ci" || rec.PrincipalKind != "service_account" || rec.CredentialID != "cred_123" || rec.OrganizationID != "org_acme" || rec.WorkspaceID != "ws_prod" {
+		t.Fatalf("service credential attribution lost: %#v", rec)
 	}
 }
 

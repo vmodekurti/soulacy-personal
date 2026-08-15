@@ -202,6 +202,9 @@ func TestLoadNoConfigFileUsesDefaults(t *testing.T) {
 	if !cfg.Server.GUIEnabled {
 		t.Error("server.gui_enabled should default to true")
 	}
+	if got := cfg.DeploymentMode(); got != DeploymentModePersonal {
+		t.Errorf("deployment.mode = %q, want personal", got)
+	}
 
 	// Runtime defaults.
 	if cfg.Runtime.MaxConcurrentSessions != 100 {
