@@ -34,6 +34,7 @@ type MemberManager interface {
 	SetMembershipStatusInWorkspace(context.Context, Mutation, string, string, string, string) (StoredMembership, error)
 	ListMembershipAudit(context.Context, string, int) ([]MembershipAudit, error)
 	CanRefreshUser(context.Context, string) bool
+	PrimaryMembership(context.Context, string) (StoredMembership, bool)
 }
 
 type MembershipAudit struct {
@@ -243,6 +244,31 @@ func (s *PostgresStore) ListMembershipAudit(ctx context.Context, workspaceID str
 		out = append(out, entry)
 	}
 	return out, rows.Err()
+}
+
+// PrimaryMembership returns the active membership a newly-issued token should
+// act under, or ok=false when the user has none.
+//
+// A user can belong to several workspaces. Until MU-029 (switch workspaces in
+// the GUI) gives them a way to choose, the token has to name one, and the
+// oldest active membership is the stable answer: it does not change when
+// someone is added to a second workspace, so a member's tokens do not silently
+// start acting somewhere else because an admin invited them elsewhere.
+//
+// Suspended and deleted memberships are excluded. A user with only those has
+// authenticated but has nowhere to act, and the caller must refuse rather than
+// fall back — falling back means the personal workspace, which is the
+// deployment's own.
+func (s *PostgresStore) PrimaryMembership(ctx context.Context, userID string) (StoredMembership, bool) {
+	var m StoredMembership
+	err := s.pool.QueryRow(ctx, `SELECT id, organization_id, workspace_id, user_id, role, status
+		FROM memberships WHERE user_id=$1 AND status='active'
+		ORDER BY created_at ASC, id ASC LIMIT 1`, strings.TrimSpace(userID)).
+		Scan(&m.ID, &m.OrganizationID, &m.WorkspaceID, &m.UserID, &m.Role, &m.Status)
+	if err != nil {
+		return StoredMembership{}, false
+	}
+	return m, true
 }
 
 // CanRefreshUser permits a global identity session while the user has an

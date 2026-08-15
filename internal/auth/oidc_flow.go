@@ -242,7 +242,16 @@ func (e *Engine) issueOIDCSession(ctx context.Context, idToken, nonce string) (s
 			return "", "", 0, errors.New("identity linking failed")
 		}
 	}
-	return e.issuer.Issue(localSubject, claims.Email, "viewer")
+	// A signed-in person acts as a workspace member, so the token carries the
+	// membership the resolver reports. With no resolver (personal deployments)
+	// this is the un-tenanted token those installations have always issued.
+	id, ok := e.tokenIdentityFor(ctx, TokenIdentity{
+		Subject: localSubject, Email: claims.Email, Role: "viewer",
+	})
+	if !ok {
+		return "", "", 0, errors.New("no active workspace membership")
+	}
+	return e.issuer.IssueFor(id)
 }
 
 func (e *Engine) HandleOIDCDeviceStart(c *fiber.Ctx) error {

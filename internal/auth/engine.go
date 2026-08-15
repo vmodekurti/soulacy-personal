@@ -96,15 +96,16 @@ type IdentityLinker interface {
 //	                       (3) validates OIDC-provider JWTs when oidc_issuer is set.
 //	                       Tokens carry Claims (sub, email, role) for downstream RBAC.
 type Engine struct {
-	cfg            Config
-	staticKey      string         // server.api_key; always checked, any mode
-	issuer         *Issuer        // non-nil when cfg.Mode == "jwt"
-	oidc           *OIDCValidator // non-nil when cfg.OIDCIssuer != ""
-	log            *zap.Logger
-	apiKeyStore    apikeys.Store // non-nil when managed API keys are enabled
-	flows          *oidcFlowStore
-	identityLinker IdentityLinker
-	refreshAllowed func(context.Context, string) bool
+	cfg              Config
+	staticKey        string         // server.api_key; always checked, any mode
+	issuer           *Issuer        // non-nil when cfg.Mode == "jwt"
+	oidc             *OIDCValidator // non-nil when cfg.OIDCIssuer != ""
+	log              *zap.Logger
+	apiKeyStore      apikeys.Store // non-nil when managed API keys are enabled
+	flows            *oidcFlowStore
+	identityLinker   IdentityLinker
+	refreshAllowed   func(context.Context, string) bool
+	identityResolver TokenIdentityResolver
 }
 
 // SetAPIKeyStore wires the managed API key store. When set, tokens with the
@@ -115,6 +116,49 @@ func (e *Engine) SetAPIKeyStore(s apikeys.Store) {
 }
 
 func (e *Engine) SetIdentityLinker(linker IdentityLinker) { e.identityLinker = linker }
+
+// TokenIdentityResolver reads a subject's current tenancy — the workspace the
+// access token should act in, and the membership that grants it.
+//
+// Optional: a personal deployment has no membership source and issues tokens
+// with no tenancy, which resolves to the personal workspace everywhere
+// downstream and is exactly the behaviour those deployments have always had.
+type TokenIdentityResolver func(ctx context.Context, subject string) (TokenIdentity, bool)
+
+// SetTokenIdentityResolver wires the live membership lookup used when minting
+// and refreshing tokens.
+//
+// Without it, a signed-in member of a workspace receives an access token with
+// no WorkspaceID, which authenticates fine and then acts with the personal
+// workspace's authority — a valid token for the wrong tenant.
+func (e *Engine) SetTokenIdentityResolver(resolve TokenIdentityResolver) {
+	e.identityResolver = resolve
+}
+
+// tokenIdentityFor resolves the tenancy a new token should carry, falling back
+// to the un-tenanted identity when no resolver is wired.
+//
+// A resolver that is present and says "no" is a refusal, not a fallback: the
+// subject authenticated, but has no active membership to act under, and
+// issuing a personal-workspace token for them would hand an outsider the
+// deployment's own workspace.
+func (e *Engine) tokenIdentityFor(ctx context.Context, base TokenIdentity) (TokenIdentity, bool) {
+	if e.identityResolver == nil {
+		return base, true
+	}
+	resolved, ok := e.identityResolver(ctx, base.Subject)
+	if !ok {
+		return TokenIdentity{}, false
+	}
+	resolved.Subject = base.Subject
+	if strings.TrimSpace(resolved.Email) == "" {
+		resolved.Email = base.Email
+	}
+	if strings.TrimSpace(resolved.Role) == "" {
+		resolved.Role = base.Role
+	}
+	return resolved, true
+}
 
 // SetRefreshAuthorizer installs the live account/membership eligibility check
 // used before a refresh token is rotated. The callback receives the locally
@@ -284,7 +328,13 @@ func (e *Engine) HandleTokenRequest(c *fiber.Ctx) error {
 	if !secretEqual(req.APIKey, e.staticKey) {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication failed"})
 	}
-	access, refresh, expiresIn, err := e.issuer.Issue("admin", "", "admin")
+	// The static API key is a *platform* credential, not a workspace member's
+	// (invariant 10): it is the deployment operator's key from config.yaml, and
+	// there is no membership behind it to resolve. It therefore issues with no
+	// tenancy, which resolves to the personal workspace — the deployment's own.
+	access, refresh, expiresIn, err := e.issuer.IssueFor(TokenIdentity{
+		Subject: "admin", Role: "admin",
+	})
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "authentication failed"})
 	}
@@ -325,8 +375,14 @@ func (e *Engine) HandleRefresh(c *fiber.Ctx) error {
 	if req.RefreshToken == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "refresh_token is required"})
 	}
-	access, newRefresh, expiresIn, err := e.issuer.RefreshAuthorized(req.RefreshToken, func(subject string) bool {
-		return e.refreshAllowed == nil || e.refreshAllowed(c.UserContext(), subject)
+	access, newRefresh, expiresIn, err := e.issuer.RefreshAuthorized(req.RefreshToken, func(subject string) (TokenIdentity, bool) {
+		if e.refreshAllowed != nil && !e.refreshAllowed(c.UserContext(), subject) {
+			return TokenIdentity{}, false
+		}
+		// Re-read the membership rather than replaying the tenancy minted days
+		// ago: a member moved to another workspace, or demoted, must not keep
+		// acting under the authority they had when they signed in.
+		return e.tokenIdentityFor(c.UserContext(), TokenIdentity{Subject: subject})
 	})
 	if err != nil {
 		e.clearAuthCookies(c)

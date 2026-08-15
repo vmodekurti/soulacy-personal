@@ -316,6 +316,68 @@ func (s *PostgresStore) CreateCredential(ctx context.Context, mutation Mutation,
 	return credential, err
 }
 
+// credentialsForWorkspaceQuery is kept next to the table it reads so the join
+// that carries the tenant is visible with the schema rather than three files
+// away.
+//
+// `credentials` has no workspace column, and correctly so: a credential belongs
+// to a principal — exactly one user or one service account, enforced by
+// CHECK(NUM_NONNULLS(user_id,service_account_id)=1) — and the principal belongs
+// to workspaces. Copying a workspace_id onto the row would create a second
+// source of truth that could disagree with the membership, and the row would
+// win over the membership that was actually revoked. The tenant is therefore
+// derived by joining, every time.
+//
+// Only active memberships and active service-account bindings count. A
+// suspended member's credential must stop appearing in their workspace's
+// inventory the moment the membership is suspended, not when someone
+// remembers to revoke the credential too.
+const credentialsForWorkspaceQuery = `
+SELECT c.id, COALESCE(c.user_id,''), COALESCE(c.service_account_id,''), c.scopes, c.status, c.expires_at
+FROM credentials c
+WHERE (c.user_id IS NOT NULL AND EXISTS (
+        SELECT 1 FROM memberships m
+        WHERE m.user_id = c.user_id AND m.workspace_id = $1 AND m.status = 'active'))
+   OR (c.service_account_id IS NOT NULL AND EXISTS (
+        SELECT 1 FROM service_account_workspaces saw
+        WHERE saw.service_account_id = c.service_account_id AND saw.workspace_id = $1 AND saw.status = 'active'))
+ORDER BY c.created_at DESC, c.id`
+
+// CredentialsForWorkspace lists the credentials whose principal belongs to
+// workspaceID.
+//
+// It exists before any caller does, deliberately. `credentials` is currently
+// write-only, and the first read someone adds is the one that will decide
+// whether this table is tenant-scoped — a plain `SELECT * FROM credentials`
+// would compile, look complete, and return every tenant's. Shipping the scoped
+// read with the schema means the boundary is inherited rather than invented.
+func (s *PostgresStore) CredentialsForWorkspace(ctx context.Context, workspaceID string) ([]Credential, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return nil, errors.New("tenancy: a workspace is required to list credentials")
+	}
+	rows, err := s.pool.Query(ctx, credentialsForWorkspaceQuery, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Credential
+	for rows.Next() {
+		var c Credential
+		var scopesJSON []byte
+		if err := rows.Scan(&c.ID, &c.UserID, &c.ServiceAccountID, &scopesJSON, &c.Status, &c.ExpiresAt); err != nil {
+			return nil, err
+		}
+		if len(scopesJSON) > 0 {
+			if err := json.Unmarshal(scopesJSON, &c.Scopes); err != nil {
+				return nil, err
+			}
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 func (s *PostgresStore) CreateMembership(ctx context.Context, mutation Mutation, organizationID, workspaceID, userID, role string) (StoredMembership, error) {
 	m := StoredMembership{
 		ID: newID("mem"), OrganizationID: strings.TrimSpace(organizationID), WorkspaceID: strings.TrimSpace(workspaceID),

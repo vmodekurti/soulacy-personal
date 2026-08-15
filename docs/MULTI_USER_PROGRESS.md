@@ -25,7 +25,7 @@ isolation state; this document explains it.
 declared workspace-owned but not yet isolated.
 
 - At the start of this work: **57 blockers**
-- Now: **4 blockers**
+- Now: **2 blockers**
 
 A store moves from `personal-only` to `scoped` only when it has a real
 cross-tenant isolation test. The catalog names that test, and a CI check fails
@@ -728,6 +728,64 @@ under a mutex — enough stagger that the test passed *with the bug present*. It
 now drives `RuleLog.Append`, where the contention actually is, and fails
 reliably when the fix is reverted.
 
+### A locally-issued token said who, never where
+
+`Issuer.Issue(subject, email, role)` was the only constructor, and the Claims
+it built carried no tenancy at all. So every token minted by `/auth/token` and
+by the OIDC sign-in flow had an empty `WorkspaceID`, authenticated perfectly,
+and then resolved to the personal workspace everywhere downstream.
+
+That is not an authentication failure, which is what makes it dangerous: a
+signed-in member of `ws_a` acting with personal's authority is a *valid*
+credential for the wrong tenant. Nothing in the request looks wrong. It also
+completed the fail-open shape found earlier in `rbac/middleware.go` — that fix
+made the claims branch read `claims.WorkspaceID`, and this is why the field was
+always empty when it did.
+
+`TokenIdentity` groups the tenancy so it is written down at the call site
+rather than being the shape of an omission, and `IssueFor` replaced `Issue`
+outright rather than sitting beside it.
+
+Two decisions inside the fix:
+
+- **A refresh re-reads the membership.** A refresh family lives for days, so
+  replaying the tenancy minted at sign-in would let a member who moved
+  workspaces, or was demoted, keep acting under the authority they had then.
+  `Reauthorizer` returns the *current* identity. The subject is the one field
+  the resolver may not change — it identifies the family, and letting it be
+  swapped would turn refresh into an impersonation primitive.
+- **An unresolvable subject is refused, not defaulted.** A resolver that is
+  wired and says "no" means the subject authenticated but has no active
+  membership. Issuing an un-tenanted token there would hand an outsider the
+  personal workspace, which is the deployment's own.
+
+`PrimaryMembership` picks the oldest active membership, because a user can
+belong to several and nothing yet lets them choose (MU-029). Oldest is the
+stable answer: a member's tokens do not start acting somewhere else because an
+admin invited them to a second workspace.
+
+The static API key keeps issuing without tenancy, deliberately — it is a
+platform credential from `config.yaml` with no membership behind it, which is
+invariant 10's distinction between platform administration and workspace
+ownership.
+
+### The tenant of a credential is its principal's, so it is joined, not copied
+
+`tenancy.credentials` has no `workspace_id` column and should not gain one. A
+credential belongs to exactly one principal — a user or a service account,
+enforced by `CHECK(NUM_NONNULLS(user_id, service_account_id)=1)` — and the
+principal belongs to workspaces. A copied `workspace_id` would be a second
+source of truth that could disagree with the membership, and the row would win
+over the membership that was actually revoked.
+
+The table is write-only today, which is exactly why `CredentialsForWorkspace`
+ships now rather than with its first caller. The first read someone adds is the
+one that decides whether this table is tenant-scoped, and a plain
+`SELECT * FROM credentials` would compile, look complete, and return every
+tenant's. The join covers both principal kinds and requires the membership or
+service-account binding to be **active**, so revocation takes effect through
+the join rather than through a sweep somebody has to remember to run.
+
 ## Guards worth keeping
 
 - **`TestRequestScopeIsNeverReadFromADetachedGoroutine`** (AST-based) fails the
@@ -791,14 +849,11 @@ Highest-value first, with the reason each matters:
    Preview at all. If it is not, MU-025's third criterion should be struck or
    deferred explicitly rather than left to look unfinished.
 
-5. **The four stores still `personal-only`:**
-
-   - `internal/plugins/loader.go` and `internal/skills/loader.go` are extension
-     inventory, which is MU-017's first acceptance criterion. Flipping them
-     without the rest of that story would classify the storage while leaving
-     installation, approval and revocation unscoped.
-   - `internal/auth/jwt.go` and `internal/tenancy/postgres.go:credentials` are
-     ordinary scoping work.
+5. **The two stores still `personal-only`** are `internal/plugins/loader.go`
+   and `internal/skills/loader.go`. Both are extension inventory, which is
+   MU-017's first acceptance criterion. Flipping them without the rest of that
+   story would classify the storage while leaving installation, approval and
+   revocation unscoped, so they close with MU-017 rather than before it.
 
 6. **`BEGIN DEFERRED` on read-then-write transactions, elsewhere.** Two stores
    have been fixed (see below). The pattern to look for is a transaction that

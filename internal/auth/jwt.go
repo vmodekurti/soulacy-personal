@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -47,11 +48,34 @@ func newIssuer(secret string, accessTTL, refreshTTL time.Duration) (*Issuer, err
 	}, nil
 }
 
-// Issue creates a new access + refresh token pair for the given identity.
-// subject is the user identifier (e.g. "admin" or an OIDC sub).
-// Returns the signed access token, opaque refresh token, and access TTL in seconds.
-func (iss *Issuer) Issue(subject, email, role string) (accessToken, refreshToken string, expiresIn int, err error) {
-	return iss.issueInFamily(subject, email, role, "")
+// TokenIdentity is everything a token asserts about who is calling.
+//
+// The tenancy fields are grouped into a struct rather than passed as three
+// more positional strings because the failure mode of forgetting them is
+// silent: an access token with no WorkspaceID authenticates fine and then
+// resolves to the personal workspace everywhere downstream. In a multi-user
+// deployment that means a signed-in member of ws_a acting with personal's
+// authority — the token is valid, the request succeeds, and it is the wrong
+// tenant. A zero-valued TokenIdentity is still personal, but now it is written
+// down at the call site instead of being the shape of an omission.
+type TokenIdentity struct {
+	Subject string
+	Email   string
+	Role    string
+
+	OrganizationID string
+	WorkspaceID    string
+	MembershipID   string
+}
+
+// IssueFor creates a new access + refresh token pair for one identity.
+// Returns the signed access token, opaque refresh token, and access TTL in
+// seconds.
+//
+// There is deliberately no Issue(subject, email, role) convenience: it was the
+// only constructor for years, and every token it minted carried no tenant.
+func (iss *Issuer) IssueFor(id TokenIdentity) (accessToken, refreshToken string, expiresIn int, err error) {
+	return iss.issueInFamily(id, "")
 }
 
 // VerifyAccess validates an access token and returns its claims.
@@ -85,30 +109,59 @@ func (iss *Issuer) Refresh(refreshToken string) (newAccess, newRefresh string, e
 	return iss.RefreshAuthorized(refreshToken, nil)
 }
 
+// Reauthorizer re-reads a subject's live identity during a refresh. It returns
+// the tenancy the *new* token should carry, or false to deny the refresh.
+//
+// Re-reading matters because a refresh family lives for days. A membership
+// moved to a different workspace, or narrowed to a lesser role, would otherwise
+// keep being replayed from the token minted when the member first signed in —
+// the credential would outlive the authority it was granted under.
+type Reauthorizer func(subject string) (TokenIdentity, bool)
+
 // RefreshAuthorized consumes a token before consulting the live identity
 // authorizer. A denied refresh revokes the complete family, preventing a
 // suspended member from retrying with an older rotated token.
-func (iss *Issuer) RefreshAuthorized(refreshToken string, allowed func(string) bool) (newAccess, newRefresh string, expiresIn int, err error) {
+func (iss *Issuer) RefreshAuthorized(refreshToken string, reauthorize Reauthorizer) (newAccess, newRefresh string, expiresIn int, err error) {
 	entry, status := iss.store.consume(refreshToken)
 	if status != refreshValid {
 		return "", "", 0, errors.New("invalid or expired refresh token")
 	}
-	if allowed != nil && !allowed(entry.subject) {
-		iss.store.revokeFamily(entry.familyID, entry.expiresAt)
-		return "", "", 0, errors.New("invalid or expired refresh token")
+	id := entry.identity
+	if reauthorize != nil {
+		current, ok := reauthorize(entry.subject)
+		if !ok {
+			iss.store.revokeFamily(entry.familyID, entry.expiresAt)
+			return "", "", 0, errors.New("invalid or expired refresh token")
+		}
+		// The subject is the one thing the caller does not get to change: it
+		// identifies the family, and letting a resolver swap it would turn a
+		// refresh into an impersonation primitive.
+		current.Subject = entry.subject
+		if strings.TrimSpace(current.Email) == "" {
+			current.Email = entry.identity.Email
+		}
+		id = current
 	}
-	return iss.issueInFamily(entry.subject, entry.email, entry.role, entry.familyID)
+	return iss.issueInFamily(id, entry.familyID)
 }
 
-func (iss *Issuer) issueInFamily(subject, email, role, familyID string) (accessToken, refreshToken string, expiresIn int, err error) {
+func (iss *Issuer) issueInFamily(id TokenIdentity, familyID string) (accessToken, refreshToken string, expiresIn int, err error) {
 	now := time.Now()
-	cl := Claims{RegisteredClaims: jwt.RegisteredClaims{ID: randomHex(16), Subject: subject, IssuedAt: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(now.Add(iss.accessTTL)), Issuer: "soulacy"}, Email: email, Role: role, Kind: "access"}
+	cl := Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			ID: randomHex(16), Subject: id.Subject,
+			IssuedAt: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(now.Add(iss.accessTTL)),
+			Issuer: "soulacy",
+		},
+		Email: id.Email, Role: id.Role, Kind: "access",
+		OrganizationID: id.OrganizationID, WorkspaceID: id.WorkspaceID, MembershipID: id.MembershipID,
+	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, cl)
 	accessToken, err = tok.SignedString(iss.secret)
 	if err != nil {
 		return "", "", 0, fmt.Errorf("sign access token: %w", err)
 	}
-	refreshToken = iss.store.put(subject, email, role, familyID, now.Add(iss.refreshTTL))
+	refreshToken = iss.store.put(id, familyID, now.Add(iss.refreshTTL))
 	return accessToken, refreshToken, int(iss.accessTTL.Seconds()), nil
 }
 
@@ -143,9 +196,14 @@ func (iss *Issuer) Close() {
 // ---------------------------------------------------------------------------
 
 type refreshEntry struct {
-	subject, email, role string
-	familyID             string
-	expiresAt            time.Time
+	// identity is what the next access token in this family will assert,
+	// including its tenancy. Stored rather than re-derived so a deployment with
+	// no live membership source still refreshes into the same workspace it
+	// signed in to; a deployment that has one overrides it on every refresh.
+	identity  TokenIdentity
+	subject   string
+	familyID  string
+	expiresAt time.Time
 }
 
 type consumedEntry struct {
@@ -183,7 +241,7 @@ func newRefreshStore() *refreshStore {
 }
 
 // put stores a new refresh token and returns the opaque token string.
-func (s *refreshStore) put(subject, email, role, familyID string, exp time.Time) string {
+func (s *refreshStore) put(id TokenIdentity, familyID string, exp time.Time) string {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		// Unreachable on any supported OS — but the failure mode if it ever were
@@ -199,7 +257,7 @@ func (s *refreshStore) put(subject, email, role, familyID string, exp time.Time)
 		familyID = randomHex(16)
 	}
 	s.mu.Lock()
-	s.tokens[sha256.Sum256([]byte(tok))] = refreshEntry{subject: subject, email: email, role: role, familyID: familyID, expiresAt: exp}
+	s.tokens[sha256.Sum256([]byte(tok))] = refreshEntry{identity: id, subject: id.Subject, familyID: familyID, expiresAt: exp}
 	s.mu.Unlock()
 	return tok
 }

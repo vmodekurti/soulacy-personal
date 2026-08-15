@@ -422,6 +422,22 @@ func (a *App) Run(parent context.Context) error {
 	}
 	if members, ok := tenantResolver.(tenancy.MemberManager); ok {
 		authEngine.SetRefreshAuthorizer(members.CanRefreshUser)
+		// Without this, a signed-in member receives a token with no workspace,
+		// which authenticates fine and then acts with the personal workspace's
+		// authority — valid credential, wrong tenant.
+		authEngine.SetTokenIdentityResolver(func(ctx context.Context, subject string) (auth.TokenIdentity, bool) {
+			membership, ok := members.PrimaryMembership(ctx, subject)
+			if !ok {
+				return auth.TokenIdentity{}, false
+			}
+			return auth.TokenIdentity{
+				Subject:        subject,
+				Role:           membership.Role,
+				OrganizationID: membership.OrganizationID,
+				WorkspaceID:    membership.WorkspaceID,
+				MembershipID:   membership.ID,
+			}, true
+		})
 	}
 
 	// ── RBAC Manager ──────────────────────────────────────────────────────────

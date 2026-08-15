@@ -123,7 +123,7 @@ func TestRefreshReplayRevokesRotatedFamilyAndLogoutRevokesAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer issuer.Close()
-	access, refresh, _, _ := issuer.Issue("user", "", "viewer")
+	access, refresh, _, _ := issuer.IssueFor(TokenIdentity{Subject: "user", Email: "", Role: "viewer"})
 	_, rotated, _, err := issuer.Refresh(refresh)
 	if err != nil {
 		t.Fatal(err)
@@ -149,11 +149,13 @@ func TestRefreshAuthorizationDenialRevokesFamily(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer issuer.Close()
-	_, refresh, _, err := issuer.Issue("suspended-user", "", "viewer")
+	_, refresh, _, err := issuer.IssueFor(TokenIdentity{Subject: "suspended-user", Email: "", Role: "viewer"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := issuer.RefreshAuthorized(refresh, func(subject string) bool { return subject != "suspended-user" }); err == nil {
+	if _, _, _, err := issuer.RefreshAuthorized(refresh, func(subject string) (TokenIdentity, bool) {
+		return TokenIdentity{Subject: subject}, subject != "suspended-user"
+	}); err == nil {
 		t.Fatal("suspended user refresh succeeded")
 	}
 	if _, _, _, err := issuer.Refresh(refresh); err == nil {

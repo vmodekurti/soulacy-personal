@@ -160,3 +160,44 @@ func TestPostgresTenantLifecycleIntegration(t *testing.T) {
 		t.Fatalf("audit rows = %d, want at least 8", auditCount)
 	}
 }
+
+// The credentials table has no workspace column, and the catalog records its
+// scope as "workspace_id via principal memberships". These cases hold that
+// claim to account without needing a live database: the join is the boundary,
+// so the join is what is asserted.
+func TestCredentialScopeIsDerivedFromThePrincipalNotStoredOnTheRow(t *testing.T) {
+	// A credential belongs to exactly one principal. Without this, a row could
+	// name both a user and a service account and inherit two different
+	// workspaces at once — the join would return it for both.
+	if !strings.Contains(strings.Join(postgresSchema, "\n"), "CHECK(NUM_NONNULLS(user_id,service_account_id)=1)") {
+		t.Fatal("a credential must have exactly one principal for the tenant join to be single-valued")
+	}
+	if strings.Contains(strings.Join(postgresSchema, "\n"), "credentials(\n\t\tid TEXT PRIMARY KEY CHECK (id ~ '^cred_[a-f0-9]{32}$'), workspace_id") {
+		t.Fatal("credentials must not carry their own workspace_id: it would be a second source of truth that outlives a revoked membership")
+	}
+
+	for _, required := range []string{
+		// Both principal kinds are covered. A query that joined only
+		// memberships would silently omit every service-account credential,
+		// and one that joined only service accounts would omit every human's.
+		"m.user_id = c.user_id AND m.workspace_id = $1",
+		"saw.service_account_id = c.service_account_id AND saw.workspace_id = $1",
+		// Revocation has to take effect through the join, not by a separate
+		// sweep somebody has to remember to run.
+		"m.status = 'active'",
+		"saw.status = 'active'",
+	} {
+		if !strings.Contains(credentialsForWorkspaceQuery, required) {
+			t.Errorf("the workspace credential query is missing %q", required)
+		}
+	}
+}
+
+func TestCredentialListingRequiresAWorkspace(t *testing.T) {
+	s := &PostgresStore{}
+	for _, workspaceID := range []string{"", "   "} {
+		if _, err := s.CredentialsForWorkspace(context.Background(), workspaceID); err == nil {
+			t.Fatalf("listing credentials with workspace %q was allowed", workspaceID)
+		}
+	}
+}

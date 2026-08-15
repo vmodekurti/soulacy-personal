@@ -168,7 +168,7 @@ func (f *fakeAPIKeyStore) Close() error { return nil }
 func TestIssuerIssueAndVerify(t *testing.T) {
 	iss := newTestIssuer(t, 15*time.Minute, 7*24*time.Hour)
 
-	access, refresh, expiresIn, err := iss.Issue("alice", "alice@example.com", "admin")
+	access, refresh, expiresIn, err := iss.IssueFor(TokenIdentity{Subject: "alice", Email: "alice@example.com", Role: "admin"})
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestIssuerVerifyRejectsExpiredToken(t *testing.T) {
 	// Negative TTL → ExpiresAt is in the past at issue time.
 	iss := newTestIssuer(t, -time.Second, time.Hour)
 
-	access, _, _, err := iss.Issue("bob", "", "viewer")
+	access, _, _, err := iss.IssueFor(TokenIdentity{Subject: "bob", Email: "", Role: "viewer"})
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestIssuerVerifyRejectsWrongSecret(t *testing.T) {
 	}
 	defer issuerBDifferent.Close()
 
-	access, _, _, err := issuerA.Issue("charlie", "", "operator")
+	access, _, _, err := issuerA.IssueFor(TokenIdentity{Subject: "charlie", Email: "", Role: "operator"})
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestIssuerVerifyRejectsWrongSecret(t *testing.T) {
 	}
 
 	// Sanity check: B can verify its own token.
-	accessB, _, _, err := issuerB.Issue("dave", "", "operator")
+	accessB, _, _, err := issuerB.IssueFor(TokenIdentity{Subject: "dave", Email: "", Role: "operator"})
 	if err != nil {
 		t.Fatalf("Issue B: %v", err)
 	}
@@ -254,7 +254,7 @@ func TestIssuerVerifyRejectsWrongSecret(t *testing.T) {
 // a refresh token (opaque string, not a JWT) is rejected by VerifyAccess.
 func TestIssuerVerifyRejectsRefreshTokenAsAccess(t *testing.T) {
 	iss := newTestIssuer(t, 15*time.Minute, time.Hour)
-	_, refresh, _, err := iss.Issue("eve", "", "admin")
+	_, refresh, _, err := iss.IssueFor(TokenIdentity{Subject: "eve", Email: "", Role: "admin"})
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -271,7 +271,7 @@ func TestIssuerVerifyRejectsRefreshTokenAsAccess(t *testing.T) {
 // old token (single-use rotation) and issues a fresh pair.
 func TestIssuerRefreshRotates(t *testing.T) {
 	iss := newTestIssuer(t, 15*time.Minute, time.Hour)
-	_, refresh, _, err := iss.Issue("frank", "frank@example.com", "admin")
+	_, refresh, _, err := iss.IssueFor(TokenIdentity{Subject: "frank", Email: "frank@example.com", Role: "admin"})
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -841,7 +841,7 @@ func TestNewIssuerEphemeralSecret(t *testing.T) {
 	}
 	defer iss.Close()
 
-	access, _, _, err := iss.Issue("zoe", "zoe@example.com", "viewer")
+	access, _, _, err := iss.IssueFor(TokenIdentity{Subject: "zoe", Email: "zoe@example.com", Role: "viewer"})
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -1233,9 +1233,8 @@ func TestRefreshStoreExpiredToken(t *testing.T) {
 	tok := "expiredtoken"
 	s.mu.Lock()
 	s.tokens[sha256.Sum256([]byte(tok))] = refreshEntry{
+		identity:  TokenIdentity{Subject: "ghost", Role: "viewer"},
 		subject:   "ghost",
-		email:     "",
-		role:      "viewer",
 		expiresAt: time.Now().Add(-time.Hour),
 	}
 	s.mu.Unlock()
@@ -1251,13 +1250,21 @@ func TestRefreshStoreSingleUse(t *testing.T) {
 	s := newRefreshStore()
 	defer s.close()
 
-	tok := s.put("alice", "alice@example.com", "admin", "", time.Now().Add(time.Hour))
+	tok := s.put(TokenIdentity{
+		Subject: "alice", Email: "alice@example.com", Role: "admin",
+		OrganizationID: "org_a", WorkspaceID: "ws_a", MembershipID: "mem_a",
+	}, "", time.Now().Add(time.Hour))
 	entry, status := s.consume(tok)
 	if status != refreshValid {
 		t.Fatal("first get should succeed")
 	}
-	if entry.subject != "alice" || entry.email != "alice@example.com" || entry.role != "admin" {
-		t.Errorf("unexpected values: sub=%q email=%q role=%q", entry.subject, entry.email, entry.role)
+	if entry.subject != "alice" || entry.identity.Email != "alice@example.com" || entry.identity.Role != "admin" {
+		t.Errorf("unexpected values: sub=%q email=%q role=%q", entry.subject, entry.identity.Email, entry.identity.Role)
+	}
+	// The tenancy survives the round-trip: a refresh must mint a token for the
+	// same workspace, not for personal.
+	if entry.identity.WorkspaceID != "ws_a" || entry.identity.OrganizationID != "org_a" || entry.identity.MembershipID != "mem_a" {
+		t.Errorf("tenancy lost in the refresh store: %+v", entry.identity)
 	}
 
 	// Second get must fail — token was rotated on first use.
