@@ -53,6 +53,9 @@ var (
 	// verifies membership before establishing workspace context, so sending it
 	// grants nothing on its own.
 	activeWorkspaceID string
+	// idempotencyKey makes a mutation safe to retry: the gateway replays the
+	// original response instead of performing the change twice.
+	idempotencyKey string
 )
 
 func main() {
@@ -132,6 +135,7 @@ Quick start:
 	root.PersistentFlags().StringVar(&gatewayURL, "gateway", "", "Gateway URL (default: http://localhost:18789)")
 	root.PersistentFlags().StringVar(&apiKey, "api-key", "", "API key for gateway authentication")
 	root.PersistentFlags().StringVar(&activeWorkspaceID, "workspace", "", "Workspace ID to target (default: the current context's workspace)")
+	root.PersistentFlags().StringVar(&idempotencyKey, "idempotency-key", "", "Make this mutation safe to retry; a repeat replays the original response")
 	root.PersistentFlags().BoolVar(&outputJSON, "json", false, "Output raw JSON")
 
 	// Sub-commands
@@ -166,7 +170,7 @@ Quick start:
 		buildVoiceCmd(),        // sy voice — provider-neutral speech sidecars
 		buildLoginCmd(),        // sy login — browser-assisted OIDC with PKCE
 		buildLogoutCmd(),       // sy logout — revoke and remove local session
-		buildVersionCmd(),
+		buildCompatVersionCmd(),
 	)
 	return root
 }
@@ -1395,17 +1399,6 @@ func resolveGatewayBinary(explicit string) (string, error) {
 
 // ── Version ───────────────────────────────────────────────────────────────────
 
-func buildVersionCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "version",
-		Short: "Print version information",
-		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("Soulacy CLI — dev build")
-			fmt.Printf("Gateway: %s\n", gatewayURL)
-		},
-	}
-}
-
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
 
 func apiCall(method, path string, body []byte) ([]byte, error) {
@@ -1433,6 +1426,9 @@ func apiCallWithTimeoutRetry(method, path string, body []byte, timeout time.Dura
 	}
 	if workspace := strings.TrimSpace(activeWorkspaceID); workspace != "" {
 		req.Header.Set("X-Soulacy-Workspace", workspace)
+	}
+	if key := strings.TrimSpace(idempotencyKey); key != "" && method != http.MethodGet {
+		req.Header.Set("Idempotency-Key", key)
 	}
 
 	client := &http.Client{Timeout: timeout}

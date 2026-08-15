@@ -269,6 +269,12 @@ func (s *Server) handleGetAgent(c *fiber.Ctx) error {
 	if def == nil {
 		return s.errMsg(c, fiber.StatusNotFound, "agent not found")
 	}
+	// Hand the caller the validator it needs to make its next write
+	// conditional. Without this, "read, edit, write" silently discards a
+	// concurrent editor's change.
+	if etag := resourceETag(def); etag != "" {
+		c.Set(fiber.HeaderETag, etag)
+	}
 	return c.JSON(def)
 }
 
@@ -524,6 +530,13 @@ func (s *Server) handleUpdateAgent(c *fiber.Ctx) error {
 	existing := s.loader.Get(id)
 	if existing == nil {
 		return s.errMsg(c, fiber.StatusNotFound, "agent not found")
+	}
+
+	// Optimistic concurrency: a caller that read this agent and sends the
+	// ETag back gets a 409 instead of silently overwriting someone else's
+	// edit. A caller that sends no If-Match behaves exactly as before.
+	if rejected, err := s.checkIfMatch(c, existing); rejected {
+		return err
 	}
 
 	var updates agent.Definition

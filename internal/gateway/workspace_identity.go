@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/soulacy/soulacy/internal/apiversion"
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/tenancy"
 )
@@ -123,4 +124,11 @@ func (s *Server) handleSelectWorkspace(c *fiber.Ctx) error {
 		Role:           membership.Role,
 		PrincipalKind:  identity.PrincipalKind(),
 	})
+}
+
+// handleCapabilities publishes what this build can do and which CLI versions
+// it works with. It is reachable wherever /health is, because a client must be
+// able to tell "your CLI is too old" apart from "your credentials are wrong".
+func (s *Server) handleCapabilities(c *fiber.Ctx) error {
+	return c.JSON(apiversion.Describe(config.Version, s.deploymentMode()))
 }

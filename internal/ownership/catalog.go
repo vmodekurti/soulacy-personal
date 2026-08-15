@@ -90,6 +90,7 @@ var Resources = []Resource{
 	{Name: "audit", Class: OrganizationOwned, ScopeKey: "organization_id", Retention: "audit retention/legal policy", Export: "signed audit export", Deletion: "policy-controlled purge", Backup: "append-only database/archive"},
 	{Name: "tenancy", Class: PlatformGlobal, ScopeKey: "tenant foreign keys", Retention: "account lifecycle", Export: "administrative export", Deletion: "ordered tenant deletion", Backup: "platform database"},
 	{Name: "queue-dlq", Class: WorkspaceOwned, ScopeKey: "workspace_id", Retention: "DLQ retention policy", Export: "diagnostic export", Deletion: "acknowledge/purge", Backup: "workspace database or durable queue"},
+	{Name: "idempotency", Class: Ephemeral, ScopeKey: "workspace_id", Retention: "24h replay window, bounded by eviction", Export: "not applicable", Deletion: "TTL expiry, eviction, or process restart", Backup: "none; a lost record only means a retry re-executes"},
 	{Name: "schema-metadata", Class: PlatformGlobal, ScopeKey: "none", Retention: "permanent", Export: "not applicable", Deletion: "never during normal operation", Backup: "with containing database"},
 }
 
@@ -155,6 +156,7 @@ var Repositories = []Repository{
 	{Source: "internal/costs/store.go", Resource: "costs", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
 	{Source: "internal/credentials/rotation.go", Resource: "secrets", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
 	{Source: "internal/credentials/vault.go", Resource: "secrets", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
+	{Source: "internal/gateway/idempotency.go", Resource: "idempotency", Class: Ephemeral, ScopeKey: "workspace_id,method,route", Isolation: Scoped, IsolationTest: "internal/gateway/idempotency_test.go"},
 	{Source: "internal/gateway/chat_attachments.go", Resource: "artifacts", Class: UserPrivate, ScopeKey: "workspace_id,user_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
 	{Source: "internal/knowledge/store.go", Resource: "knowledge", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
 	{Source: "internal/learning/store.go", Resource: "studio-learning", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},

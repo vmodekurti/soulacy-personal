@@ -111,8 +111,11 @@ type Server struct {
 	resourceStore   session.ResourceStore
 	tenantResolver  tenancy.Resolver
 	tenantMembers   tenancy.MemberManager
-	agentWatcher    healthReporter // nil until SetAgentWatcher() is called (S2.13)
-	log             *zap.Logger
+	// idempotency replays completed mutations for a repeated Idempotency-Key
+	// so a retry through a network partition cannot create a duplicate.
+	idempotency  *idempotencyStore
+	agentWatcher healthReporter // nil until SetAgentWatcher() is called (S2.13)
+	log          *zap.Logger
 
 	// buildTraces retains recent Studio build traces in a bounded in-memory ring
 	// and, when SOULACY_STUDIO_TRACE_DIR is set, also persists each as a JSONL
@@ -222,6 +225,7 @@ func New(
 		sessionOwners:    make(map[string]sessionOwner),
 		generationProofs: make(map[string]generationProofRecord),
 		preferenceJobs:   make(chan preferenceMineJob, 128),
+		idempotency:      newIdempotencyStore(),
 	}
 	if shouldUseDefaultPersonalResolver(cfg) {
 		s.tenantResolver = defaultPersonalResolver()
@@ -731,10 +735,18 @@ func (s *Server) buildApp() *fiber.App {
 	// Auth middleware runs first (recognising scoped plugin tokens, E8),
 	// then the plugin default-deny gate, then per-user rate limiting (after
 	// claims are populated). RBAC and per-agent limits are applied per-route.
-	api := app.Group("/api/v1", s.authWithPluginTokens(), s.workspaceContextMW(), s.pluginGateMW(), s.rlUserMW())
+	// idempotencyMW runs after workspace context is established so replay keys
+	// are namespaced by the verified workspace, and before handlers so a
+	// duplicate never reaches one.
+	api := app.Group("/api/v1", s.authWithPluginTokens(), s.workspaceContextMW(), s.pluginGateMW(), s.rlUserMW(), s.idempotencyMW())
 
 	// Health
 	api.Get("/health", s.handleHealth)
+	// Capability negotiation. Deliberately alongside health: a client must be
+	// able to discover compatibility before it knows whether it can
+	// authenticate, otherwise an auth failure and a version failure are
+	// indistinguishable.
+	api.Get("/capabilities", s.handleCapabilities)
 
 	// Plugin UI discovery + scoped token issuance (Story E8). User-facing:
 	// the Svelte shell lists mounts for its nav and fetches a per-plugin

@@ -101,6 +101,74 @@ Acceptance is idempotent for the same user. Unknown, expired, reused by a
 different user, and email-mismatched tokens all return the same error so the
 endpoint cannot be used to enumerate invitations.
 
+## Capability negotiation
+
+```http
+GET /api/v1/capabilities
+```
+
+```json
+{
+  "api_version": "v1",
+  "server_version": "0.1.11",
+  "deployment_mode": "team",
+  "features": ["concurrency-control","idempotent-mutation","member-management","oidc-login","scoped-credentials","service-accounts","workspace-contexts"],
+  "min_cli_version": "0.1.0"
+}
+```
+
+Reachable alongside `/health`, because a client must be able to tell "your CLI
+is too old" apart from "your credentials are wrong". `api_version` changes only
+on a breaking change to an existing route; adding a field or a route is
+additive and does not bump it. `max_cli_version` is absent when unbounded — a
+newer CLI negotiates features rather than assuming them.
+
+An incompatibility is a typed error carrying `code`, `message`, and `remedy`.
+Codes: `client_too_old`, `client_too_new`, `api_version_mismatch`,
+`feature_not_supported`, `stale_resource_version`, `idempotency_key_in_flight`,
+`idempotency_key_reused`.
+
+## Idempotent mutations
+
+Send `Idempotency-Key` on any `POST`, `PUT`, `PATCH`, or `DELETE`:
+
+```http
+POST /api/v1/admin/api-keys
+Idempotency-Key: ci-run-8842
+```
+
+A repeat of the same request replays the original response with
+`Idempotency-Replayed: true` and `X-Soulacy-Original-Request-Id`, so a retry
+through a network partition cannot create a duplicate. Keys are namespaced by
+workspace, method, and route.
+
+- The same key with a **different body** returns `409 idempotency_key_reused`.
+  Replaying would hide the second request; executing would break the key's
+  promise.
+- The same key while the original is **still running** returns
+  `409 idempotency_key_in_flight`.
+- **Failed** responses are not cached, so one transient `500` does not become
+  permanent for the key's lifetime.
+- Omitting the header preserves today's behaviour exactly.
+
+Every response carries `X-Request-ID`, echoed from the request when supplied.
+
+## Optimistic concurrency
+
+Reads return an `ETag`. Send it back as `If-Match` to make a write conditional:
+
+```http
+GET /api/v1/agents/support-bot        →  ETag: "9f2b…"
+PUT /api/v1/agents/support-bot
+If-Match: "9f2b…"
+```
+
+If the resource changed in between, the write is rejected with
+`409 stale_resource_version` and the response carries the current `etag` plus a
+remedy, rather than silently overwriting the other editor's change. `If-Match:
+*` and weak (`W/"…"`) validators are accepted. Omitting `If-Match` behaves as
+before.
+
 ## Resolve the caller's workspace identity
 
 ```http

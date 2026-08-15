@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/soulacy/soulacy/internal/apiversion"
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/tenancy"
 	"github.com/soulacy/soulacy/internal/wsmigrate"
@@ -150,6 +151,9 @@ func buildWorkspaceListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List the workspaces you can act in on the current server",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireServerFeature(apiversion.FeatureWorkspaceContexts, "listing workspaces"); err != nil {
+				return err
+			}
 			data, err := apiCall("GET", "/workspace/workspaces", nil)
 			if err != nil {
 				return err

@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/soulacy/soulacy/internal/apiversion"
 )
 
 // credential mirrors the gateway's apikeys.APIKey JSON shape. The plaintext
@@ -78,6 +80,9 @@ func buildCredentialCreateCmd() *cobra.Command {
 		Short: "Issue a credential and print its secret once",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireServerFeature(apiversion.FeatureScopedCredentials, "issuing a scoped credential"); err != nil {
+				return err
+			}
 			normalizedKind, err := normalizeCredentialKind(kind)
 			if err != nil {
 				return err

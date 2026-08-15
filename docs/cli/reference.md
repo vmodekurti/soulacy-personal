@@ -177,6 +177,29 @@ sy schedule list                       # scheduled agent entries
 sy logs --follow                       # stream live events
 ```
 
+## Version and compatibility
+
+```bash
+sy version           # client version, gateway version, features, compatibility
+sy version --json    # stable schema for CI gating
+```
+
+`sy` performs a capability handshake before an operation the gateway may not
+implement, so an upgrade mismatch fails with a typed error and a concrete fix
+instead of a request the server silently reinterprets. A gateway too old to
+publish capabilities is not blocked — the operation itself still fails safely.
+
+Make any mutation safe to retry:
+
+```bash
+sy credential create ci-bot --kind service --subject svc_ci \
+  --idempotency-key "$CI_RUN_ID"
+```
+
+A repeat with the same key replays the original response instead of performing
+the change twice. Reusing a key with a different request is refused rather than
+silently resolved either way.
+
 ## Contexts and identity
 
 A context names a server and a workspace so local, staging, and production are
