@@ -55,16 +55,23 @@ CREATE INDEX IF NOT EXISTS idx_wbr_task ON workboard_runs(task_id, attempt);
 // StartRun records a new attempt for the task and returns it. Fails with
 // ErrNotFound if the task does not exist and ErrRunActive if another run
 // for the task has not finished yet.
-func (s *Store) StartRun(ctx context.Context, taskID int64, agentID, sessionID, actionLogPath string) (Run, error) {
+func (s *Store) StartRun(ctx context.Context, workspaceID string, taskID int64, agentID, sessionID, actionLogPath string) (Run, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return Run{}, err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Run{}, err
 	}
 	defer tx.Rollback() //nolint:errcheck
 
+	// The existence check carries the tenant, and it is the gate for
+	// everything below: starting a run against another workspace's task is
+	// ErrNotFound, the same answer a task that never existed gives.
 	var exists int
 	if err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM workboard_tasks WHERE id = ?`, taskID).Scan(&exists); err != nil {
+		`SELECT COUNT(*) FROM workboard_tasks WHERE id = ? AND workspace_id = ?`, taskID, workspaceID).Scan(&exists); err != nil {
 		return Run{}, err
 	}
 	if exists == 0 {
@@ -117,7 +124,11 @@ func (s *Store) StartRun(ctx context.Context, taskID int64, agentID, sessionID, 
 
 // FinishRun marks a running run as done or failed, recording the result
 // summary or failure reason. Finishing a run twice is rejected.
-func (s *Store) FinishRun(ctx context.Context, runID int64, status, result, failureReason string) (Run, error) {
+func (s *Store) FinishRun(ctx context.Context, workspaceID string, runID int64, status, result, failureReason string) (Run, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return Run{}, err
+	}
 	if status != RunStatusDone && status != RunStatusFailed {
 		return Run{}, fmt.Errorf("%w: run must finish as %q or %q, got %q",
 			ErrInvalid, RunStatusDone, RunStatusFailed, status)
@@ -126,8 +137,9 @@ func (s *Store) FinishRun(ctx context.Context, runID int64, status, result, fail
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE workboard_runs
 		 SET status = ?, result = ?, failure_reason = ?, ended_at = ?
-		 WHERE id = ? AND ended_at IS NULL`,
-		status, result, failureReason, now.Format(timeLayout), runID,
+		 WHERE id = ? AND ended_at IS NULL
+		   AND task_id IN (SELECT id FROM workboard_tasks WHERE workspace_id = ?)`,
+		status, result, failureReason, now.Format(timeLayout), runID, workspaceID,
 	)
 	if err != nil {
 		return Run{}, err
@@ -138,9 +150,15 @@ func (s *Store) FinishRun(ctx context.Context, runID int64, status, result, fail
 	}
 	if n == 0 {
 		// Distinguish missing from already-finished.
+		// The existence probe is scoped too. Without it, "already finished"
+		// versus "not found" would tell a caller whether another tenant's run
+		// ID is real.
 		var exists int
 		if err := s.db.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM workboard_runs WHERE id = ?`, runID).Scan(&exists); err != nil {
+			`SELECT COUNT(*) FROM workboard_runs
+			  WHERE id = ?
+			    AND task_id IN (SELECT id FROM workboard_tasks WHERE workspace_id = ?)`,
+			runID, workspaceID).Scan(&exists); err != nil {
 			return Run{}, err
 		}
 		if exists == 0 {
@@ -148,25 +166,41 @@ func (s *Store) FinishRun(ctx context.Context, runID int64, status, result, fail
 		}
 		return Run{}, fmt.Errorf("%w: run %d has already finished", ErrInvalid, runID)
 	}
-	return s.GetRun(ctx, runID)
+	return s.GetRun(ctx, workspaceID, runID)
 }
 
-// GetRun returns one run by ID.
-func (s *Store) GetRun(ctx context.Context, runID int64) (Run, error) {
+// GetRun returns one run by ID within one workspace.
+//
+// A run record names the agent, the session, and the action-log path — enough
+// to follow the read straight into another tenant's history — so the tenant
+// predicate is a join to the owning task rather than a check on the caller.
+func (s *Store) GetRun(ctx context.Context, workspaceID string, runID int64) (Run, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return Run{}, err
+	}
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, task_id, attempt, agent_id, session_id, action_log_path,
-		        status, result, failure_reason, started_at, ended_at
-		 FROM workboard_runs WHERE id = ?`, runID)
+		`SELECT r.id, r.task_id, r.attempt, r.agent_id, r.session_id, r.action_log_path,
+		        r.status, r.result, r.failure_reason, r.started_at, r.ended_at
+		 FROM workboard_runs r
+		 JOIN workboard_tasks t ON t.id = r.task_id
+		 WHERE r.id = ? AND t.workspace_id = ?`, runID, workspaceID)
 	return scanRun(row)
 }
 
 // ListRuns returns all attempts for a task, newest first.
-func (s *Store) ListRuns(ctx context.Context, taskID int64) ([]Run, error) {
+func (s *Store) ListRuns(ctx context.Context, workspaceID string, taskID int64) ([]Run, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, task_id, attempt, agent_id, session_id, action_log_path,
-		        status, result, failure_reason, started_at, ended_at
-		 FROM workboard_runs WHERE task_id = ?
-		 ORDER BY attempt DESC, id DESC`, taskID)
+		`SELECT r.id, r.task_id, r.attempt, r.agent_id, r.session_id, r.action_log_path,
+		        r.status, r.result, r.failure_reason, r.started_at, r.ended_at
+		 FROM workboard_runs r
+		 JOIN workboard_tasks t ON t.id = r.task_id
+		 WHERE r.task_id = ? AND t.workspace_id = ?
+		 ORDER BY r.attempt DESC, r.id DESC`, taskID, workspaceID)
 	if err != nil {
 		return nil, err
 	}

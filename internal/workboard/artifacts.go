@@ -40,7 +40,11 @@ CREATE INDEX IF NOT EXISTS idx_wba_task ON workboard_artifacts(task_id);
 // AddArtifacts upserts artifacts for one run. The (run, path) pair is
 // unique: re-writing the same file later in a run updates size/tool rather
 // than duplicating the row. Empty input is a no-op.
-func (s *Store) AddArtifacts(ctx context.Context, taskID, runID int64, arts []Artifact) error {
+func (s *Store) AddArtifacts(ctx context.Context, workspaceID string, taskID, runID int64, arts []Artifact) error {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
 	if len(arts) == 0 {
 		return nil
 	}
@@ -49,6 +53,18 @@ func (s *Store) AddArtifacts(ctx context.Context, taskID, runID int64, arts []Ar
 		return err
 	}
 	defer tx.Rollback() //nolint:errcheck
+
+	// Attaching to a task this workspace does not own is ErrNotFound, checked
+	// inside the transaction so the ownership answer cannot change between the
+	// check and the writes.
+	var owned int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM workboard_tasks WHERE id = ? AND workspace_id = ?`, taskID, workspaceID).Scan(&owned); err != nil {
+		return err
+	}
+	if owned == 0 {
+		return ErrNotFound
+	}
 
 	now := time.Now().UTC().Truncate(time.Second)
 	for _, a := range arts {
@@ -74,24 +90,49 @@ func (s *Store) AddArtifacts(ctx context.Context, taskID, runID int64, arts []Ar
 }
 
 // ListArtifacts returns all artifacts attached to a task, newest first.
-func (s *Store) ListArtifacts(ctx context.Context, taskID int64) ([]Artifact, error) {
+func (s *Store) ListArtifacts(ctx context.Context, workspaceID string, taskID int64) ([]Artifact, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
 	return s.queryArtifacts(ctx,
-		`SELECT id, task_id, run_id, path, size_bytes, tool, created_at
-		 FROM workboard_artifacts WHERE task_id = ? ORDER BY created_at DESC, id DESC`, taskID)
+		`SELECT a.id, a.task_id, a.run_id, a.path, a.size_bytes, a.tool, a.created_at
+		 FROM workboard_artifacts a
+		 JOIN workboard_tasks t ON t.id = a.task_id
+		 WHERE a.task_id = ? AND t.workspace_id = ?
+		 ORDER BY a.created_at DESC, a.id DESC`, taskID, workspaceID)
 }
 
 // ListRunArtifacts returns the artifacts of one run, newest first.
-func (s *Store) ListRunArtifacts(ctx context.Context, runID int64) ([]Artifact, error) {
+func (s *Store) ListRunArtifacts(ctx context.Context, workspaceID string, runID int64) ([]Artifact, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
 	return s.queryArtifacts(ctx,
-		`SELECT id, task_id, run_id, path, size_bytes, tool, created_at
-		 FROM workboard_artifacts WHERE run_id = ? ORDER BY created_at DESC, id DESC`, runID)
+		`SELECT a.id, a.task_id, a.run_id, a.path, a.size_bytes, a.tool, a.created_at
+		 FROM workboard_artifacts a
+		 JOIN workboard_tasks t ON t.id = a.task_id
+		 WHERE a.run_id = ? AND t.workspace_id = ?
+		 ORDER BY a.created_at DESC, a.id DESC`, runID, workspaceID)
 }
 
-// GetArtifact fetches one artifact by ID (ErrNotFound when absent).
-func (s *Store) GetArtifact(ctx context.Context, id int64) (Artifact, error) {
+// GetArtifact fetches one artifact by ID (ErrNotFound when absent or owned by
+// another workspace).
+//
+// This is the read the gateway turns into a file download, so an unscoped
+// lookup handed one tenant both the existence and the on-disk path of
+// another's output — and then streamed it.
+func (s *Store) GetArtifact(ctx context.Context, workspaceID string, id int64) (Artifact, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return Artifact{}, err
+	}
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, task_id, run_id, path, size_bytes, tool, created_at
-		 FROM workboard_artifacts WHERE id = ?`, id)
+		`SELECT a.id, a.task_id, a.run_id, a.path, a.size_bytes, a.tool, a.created_at
+		 FROM workboard_artifacts a
+		 JOIN workboard_tasks t ON t.id = a.task_id
+		 WHERE a.id = ? AND t.workspace_id = ?`, id, workspaceID)
 	var a Artifact
 	if err := row.Scan(&a.ID, &a.TaskID, &a.RunID, &a.Path, &a.SizeBytes, &a.Tool, &a.CreatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -103,8 +144,8 @@ func (s *Store) GetArtifact(ctx context.Context, id int64) (Artifact, error) {
 	return a, nil
 }
 
-func (s *Store) queryArtifacts(ctx context.Context, q string, arg any) ([]Artifact, error) {
-	rows, err := s.db.QueryContext(ctx, q, arg)
+func (s *Store) queryArtifacts(ctx context.Context, q string, args ...any) ([]Artifact, error) {
+	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}

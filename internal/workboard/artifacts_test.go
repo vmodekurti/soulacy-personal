@@ -2,6 +2,7 @@ package workboard
 
 import (
 	"context"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"path/filepath"
 	"testing"
 	"time"
@@ -19,11 +20,11 @@ func artifactStore(t *testing.T) *Store {
 
 func startedRun(t *testing.T, s *Store) (Task, Run) {
 	t.Helper()
-	task, err := s.Create(context.Background(), Task{Title: "build report", AgentID: "agent-1"})
+	task, err := s.Create(context.Background(), Task{WorkspaceID: wsroot.PersonalWorkspaceID, Title: "build report", AgentID: "agent-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := s.StartRun(context.Background(), task.ID, "agent-1", "wb-sess-1", "")
+	run, err := s.StartRun(context.Background(), wsroot.PersonalWorkspaceID, task.ID, "agent-1", "wb-sess-1", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,11 +39,11 @@ func TestAddArtifacts_AndListByTask(t *testing.T) {
 		{Path: "/tmp/report.pdf", SizeBytes: 1234, Tool: "write_file"},
 		{Path: "/tmp/data.csv", SizeBytes: 99, Tool: "write_file"},
 	}
-	if err := s.AddArtifacts(context.Background(), task.ID, run.ID, arts); err != nil {
+	if err := s.AddArtifacts(context.Background(), wsroot.PersonalWorkspaceID, task.ID, run.ID, arts); err != nil {
 		t.Fatalf("AddArtifacts: %v", err)
 	}
 
-	got, err := s.ListArtifacts(context.Background(), task.ID)
+	got, err := s.ListArtifacts(context.Background(), wsroot.PersonalWorkspaceID, task.ID)
 	if err != nil {
 		t.Fatalf("ListArtifacts: %v", err)
 	}
@@ -63,17 +64,17 @@ func TestAddArtifacts_DuplicatePathSameRun_Upserts(t *testing.T) {
 	s := artifactStore(t)
 	task, run := startedRun(t, s)
 
-	if err := s.AddArtifacts(context.Background(), task.ID, run.ID,
+	if err := s.AddArtifacts(context.Background(), wsroot.PersonalWorkspaceID, task.ID, run.ID,
 		[]Artifact{{Path: "/tmp/x.txt", SizeBytes: 10, Tool: "write_file"}}); err != nil {
 		t.Fatal(err)
 	}
 	// Same path written again later in the run (append) — keep ONE row with
 	// the latest size.
-	if err := s.AddArtifacts(context.Background(), task.ID, run.ID,
+	if err := s.AddArtifacts(context.Background(), wsroot.PersonalWorkspaceID, task.ID, run.ID,
 		[]Artifact{{Path: "/tmp/x.txt", SizeBytes: 25, Tool: "write_file"}}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.ListArtifacts(context.Background(), task.ID)
+	got, err := s.ListArtifacts(context.Background(), wsroot.PersonalWorkspaceID, task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,19 +89,19 @@ func TestAddArtifacts_DuplicatePathSameRun_Upserts(t *testing.T) {
 func TestGetArtifact(t *testing.T) {
 	s := artifactStore(t)
 	task, run := startedRun(t, s)
-	if err := s.AddArtifacts(context.Background(), task.ID, run.ID,
+	if err := s.AddArtifacts(context.Background(), wsroot.PersonalWorkspaceID, task.ID, run.ID,
 		[]Artifact{{Path: "/tmp/a.txt", SizeBytes: 5, Tool: "write_file"}}); err != nil {
 		t.Fatal(err)
 	}
-	list, _ := s.ListArtifacts(context.Background(), task.ID)
-	got, err := s.GetArtifact(context.Background(), list[0].ID)
+	list, _ := s.ListArtifacts(context.Background(), wsroot.PersonalWorkspaceID, task.ID)
+	got, err := s.GetArtifact(context.Background(), wsroot.PersonalWorkspaceID, list[0].ID)
 	if err != nil {
 		t.Fatalf("GetArtifact: %v", err)
 	}
 	if got.Path != "/tmp/a.txt" {
 		t.Fatalf("artifact = %+v", got)
 	}
-	if _, err := s.GetArtifact(context.Background(), 99999); err != ErrNotFound {
+	if _, err := s.GetArtifact(context.Background(), wsroot.PersonalWorkspaceID, 99999); err != ErrNotFound {
 		t.Fatalf("missing artifact err = %v, want ErrNotFound", err)
 	}
 }
@@ -108,17 +109,17 @@ func TestGetArtifact(t *testing.T) {
 func TestListRunArtifacts(t *testing.T) {
 	s := artifactStore(t)
 	task, run1 := startedRun(t, s)
-	if _, err := s.FinishRun(context.Background(), run1.ID, RunStatusDone, "ok", ""); err != nil {
+	if _, err := s.FinishRun(context.Background(), wsroot.PersonalWorkspaceID, run1.ID, RunStatusDone, "ok", ""); err != nil {
 		t.Fatal(err)
 	}
-	run2, err := s.StartRun(context.Background(), task.ID, "agent-1", "wb-sess-2", "")
+	run2, err := s.StartRun(context.Background(), wsroot.PersonalWorkspaceID, task.ID, "agent-1", "wb-sess-2", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = s.AddArtifacts(context.Background(), task.ID, run1.ID, []Artifact{{Path: "/tmp/r1.txt", Tool: "write_file"}})
-	_ = s.AddArtifacts(context.Background(), task.ID, run2.ID, []Artifact{{Path: "/tmp/r2.txt", Tool: "write_file"}})
+	_ = s.AddArtifacts(context.Background(), wsroot.PersonalWorkspaceID, task.ID, run1.ID, []Artifact{{Path: "/tmp/r1.txt", Tool: "write_file"}})
+	_ = s.AddArtifacts(context.Background(), wsroot.PersonalWorkspaceID, task.ID, run2.ID, []Artifact{{Path: "/tmp/r2.txt", Tool: "write_file"}})
 
-	got, err := s.ListRunArtifacts(context.Background(), run2.ID)
+	got, err := s.ListRunArtifacts(context.Background(), wsroot.PersonalWorkspaceID, run2.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,14 +131,14 @@ func TestListRunArtifacts(t *testing.T) {
 func TestDeleteTask_CascadesArtifacts(t *testing.T) {
 	s := artifactStore(t)
 	task, run := startedRun(t, s)
-	_ = s.AddArtifacts(context.Background(), task.ID, run.ID, []Artifact{{Path: "/tmp/z.txt", Tool: "write_file"}})
-	if _, err := s.FinishRun(context.Background(), run.ID, RunStatusDone, "ok", ""); err != nil {
+	_ = s.AddArtifacts(context.Background(), wsroot.PersonalWorkspaceID, task.ID, run.ID, []Artifact{{Path: "/tmp/z.txt", Tool: "write_file"}})
+	if _, err := s.FinishRun(context.Background(), wsroot.PersonalWorkspaceID, run.ID, RunStatusDone, "ok", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Delete(context.Background(), task.ID); err != nil {
+	if err := s.Delete(context.Background(), wsroot.PersonalWorkspaceID, task.ID); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.ListArtifacts(context.Background(), task.ID)
+	got, err := s.ListArtifacts(context.Background(), wsroot.PersonalWorkspaceID, task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +150,7 @@ func TestDeleteTask_CascadesArtifacts(t *testing.T) {
 func TestAddArtifacts_EmptyListNoop(t *testing.T) {
 	s := artifactStore(t)
 	task, run := startedRun(t, s)
-	if err := s.AddArtifacts(context.Background(), task.ID, run.ID, nil); err != nil {
+	if err := s.AddArtifacts(context.Background(), wsroot.PersonalWorkspaceID, task.ID, run.ID, nil); err != nil {
 		t.Fatalf("empty AddArtifacts should be a no-op, got %v", err)
 	}
 }
@@ -159,9 +160,9 @@ func TestArtifactTimesSecondPrecision(t *testing.T) {
 	// round-trips (see store.go).
 	s := artifactStore(t)
 	task, run := startedRun(t, s)
-	_ = s.AddArtifacts(context.Background(), task.ID, run.ID,
+	_ = s.AddArtifacts(context.Background(), wsroot.PersonalWorkspaceID, task.ID, run.ID,
 		[]Artifact{{Path: "/tmp/t.txt", Tool: "write_file"}})
-	list, _ := s.ListArtifacts(context.Background(), task.ID)
+	list, _ := s.ListArtifacts(context.Background(), wsroot.PersonalWorkspaceID, task.ID)
 	if !list[0].CreatedAt.Equal(list[0].CreatedAt.Truncate(time.Second)) {
 		t.Fatalf("CreatedAt not second-truncated: %v", list[0].CreatedAt)
 	}

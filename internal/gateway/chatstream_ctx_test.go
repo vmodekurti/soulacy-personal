@@ -144,6 +144,14 @@ func TestChatStreamRunStaysCancellableWhileItIsStillRunning(t *testing.T) {
 	if !s.runReg.Cancel(strings.TrimSuffix(strings.TrimPrefix(runID, `data: {"run_id":"`), `"}`)) {
 		t.Fatal("the run was already deregistered while it was still running — POST /chat/cancel cannot stop it")
 	}
+
+	// Drain the stream to EOF before returning. The cancelled run keeps
+	// running for a moment and writes memory files under the temp workspace;
+	// t.TempDir's RemoveAll races those writes and fails the test with
+	// "directory not empty" under an unrelated name. The stream closes when
+	// the run is actually done, so this is the deterministic wait.
+	for sc.Scan() { //revive:disable-line:empty-block
+	}
 }
 
 // readSSEOverRealSocket serves the app on a real TCP listener and drains one SSE

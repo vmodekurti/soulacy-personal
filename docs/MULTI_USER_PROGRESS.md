@@ -24,7 +24,7 @@ isolation state; this document explains it.
 declared workspace-owned but not yet isolated.
 
 - At the start of this work: **57 blockers**
-- Now: **36 blockers**
+- Now: **31 blockers**
 
 A store moves from `personal-only` to `scoped` only when it has a real
 cross-tenant isolation test. The catalog names that test, and a CI check fails
@@ -81,8 +81,6 @@ become a back door into one workspace from another, and every use is greppable.
 
 These are gaps, not oversights, and they fail closed rather than guessing:
 
-- **The workboard's artifact detection** reads the personal workspace, because
-  `workboard.Task` carries no workspace. It moves when the workboard is scoped.
 - **Scheduler and channel invocations** reach the engine without a request
   principal and resolve to the personal workspace. That is the single-tenant
   answer, not a bypass: a multi-user deployment establishes a service principal
@@ -188,6 +186,37 @@ tenant can evict a quiet one's traces early. That costs a debugging aid, never
 confidentiality — eviction drops traces, it never exposes them. A test pins
 that eviction leaves no per-workspace index pointing at a trace that is gone.
 
+### Children derive ownership from their parent, never declare it
+
+The workboard is four tables — tasks, runs, comments, artifacts — and every ID
+in it is a global SQLite autoincrement, so another tenant's ID is always a
+plausible one. `GetArtifact(id)` was the sharpest edge: the gateway turns that
+row into a file download, so an unscoped lookup handed one tenant both the
+existence and the on-disk path of another's output, and then streamed it.
+
+Only `workboard_tasks` gained `workspace_id`. Runs, comments, and artifacts
+carry none: every query reaches them through a join to the owning task, so the
+child's tenant and the parent's cannot drift apart. A missing row and someone
+else's row are the same `ErrNotFound`, so IDs cannot be probed — including the
+"already finished" probe in `FinishRun`, which would otherwise confirm whether
+a foreign run ID is real.
+
+Two details worth keeping:
+
+- `Delete` deletes the parent **first**, with the tenant predicate. A refused
+  delete therefore never reaches the child cascade, so naming another
+  workspace's task affects nothing at all.
+- `executeWorkboardRun` writes its result from a goroutine that outlives the
+  request. It takes the workspace from the captured `Task`, not from the Ctx —
+  Fiber recycles that, and this is exactly the use-after-free the AST guard
+  exists to catch.
+
+The store refuses an absent workspace outright (`ErrWorkspaceRequired`) rather
+than defaulting to personal, because a task with no owner is a task every
+tenant can read and edit. That is the opposite of the read paths on stores
+whose rows predate tenancy, where an absent workspace legitimately means "the
+single-user installation".
+
 ### The SDK is extended additively, never modified
 
 `sdk/storage.MemoryBackend` is documented as frozen per major version, so it
@@ -223,7 +252,7 @@ Highest-value first, with the reason each matters:
 3. **Workboard, costs, action log, DLQ, checkpoints, conversation history** —
    all still `personal-only`; each needs the same treatment as the stores
    above.
-4. **Workboard, costs, DLQ, checkpoints, conversation history** — all still
+4. **Costs, DLQ, checkpoints, conversation history** — all still
    `personal-only`; each needs the same treatment as the stores above.
 
 ## Verification

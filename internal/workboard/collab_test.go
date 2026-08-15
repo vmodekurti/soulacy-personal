@@ -5,6 +5,7 @@ package workboard
 
 import (
 	"context"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"path/filepath"
 	"testing"
 	"time"
@@ -27,7 +28,7 @@ func collabStore(t *testing.T) *Store {
 func TestCreate_CollabFields(t *testing.T) {
 	s := collabStore(t)
 	due := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
-	created, err := s.Create(context.Background(), Task{
+	created, err := s.Create(context.Background(), Task{WorkspaceID: wsroot.PersonalWorkspaceID,
 		Title:    "review report",
 		Owner:    "vasu",
 		Priority: PriorityHigh,
@@ -37,7 +38,7 @@ func TestCreate_CollabFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	got, err := s.Get(context.Background(), created.ID)
+	got, err := s.Get(context.Background(), wsroot.PersonalWorkspaceID, created.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +55,7 @@ func TestCreate_CollabFields(t *testing.T) {
 
 func TestCreate_DefaultPriorityNormal(t *testing.T) {
 	s := collabStore(t)
-	created, err := s.Create(context.Background(), Task{Title: "t"})
+	created, err := s.Create(context.Background(), Task{WorkspaceID: wsroot.PersonalWorkspaceID, Title: "t"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,19 +66,19 @@ func TestCreate_DefaultPriorityNormal(t *testing.T) {
 
 func TestCreate_InvalidPriorityRejected(t *testing.T) {
 	s := collabStore(t)
-	if _, err := s.Create(context.Background(), Task{Title: "t", Priority: "ludicrous"}); err == nil {
+	if _, err := s.Create(context.Background(), Task{WorkspaceID: wsroot.PersonalWorkspaceID, Title: "t", Priority: "ludicrous"}); err == nil {
 		t.Fatal("invalid priority accepted")
 	}
 }
 
 func TestUpdate_CollabFields(t *testing.T) {
 	s := collabStore(t)
-	created, _ := s.Create(context.Background(), Task{Title: "t"})
+	created, _ := s.Create(context.Background(), Task{WorkspaceID: wsroot.PersonalWorkspaceID, Title: "t"})
 	owner := "reviewer-1"
 	prio := PriorityUrgent
 	tags := []string{"ops"}
 	due := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
-	got, err := s.Update(context.Background(), created.ID, Update{
+	got, err := s.Update(context.Background(), wsroot.PersonalWorkspaceID, created.ID, Update{
 		Owner: &owner, Priority: &prio, Tags: &tags, DueAt: &due,
 	})
 	if err != nil {
@@ -91,8 +92,8 @@ func TestUpdate_CollabFields(t *testing.T) {
 func TestUpdate_ClearDueDate(t *testing.T) {
 	s := collabStore(t)
 	due := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
-	created, _ := s.Create(context.Background(), Task{Title: "t", DueAt: &due})
-	got, err := s.Update(context.Background(), created.ID, Update{ClearDueAt: true})
+	created, _ := s.Create(context.Background(), Task{WorkspaceID: wsroot.PersonalWorkspaceID, Title: "t", DueAt: &due})
+	got, err := s.Update(context.Background(), wsroot.PersonalWorkspaceID, created.ID, Update{ClearDueAt: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,16 +104,16 @@ func TestUpdate_ClearDueDate(t *testing.T) {
 
 func TestUpdate_InvalidPriorityRejected(t *testing.T) {
 	s := collabStore(t)
-	created, _ := s.Create(context.Background(), Task{Title: "t"})
+	created, _ := s.Create(context.Background(), Task{WorkspaceID: wsroot.PersonalWorkspaceID, Title: "t"})
 	bad := "asap"
-	if _, err := s.Update(context.Background(), created.ID, Update{Priority: &bad}); err == nil {
+	if _, err := s.Update(context.Background(), wsroot.PersonalWorkspaceID, created.ID, Update{Priority: &bad}); err == nil {
 		t.Fatal("invalid priority accepted on update")
 	}
 }
 
 func TestTags_NormalisedOnSave(t *testing.T) {
 	s := collabStore(t)
-	created, err := s.Create(context.Background(), Task{
+	created, err := s.Create(context.Background(), Task{WorkspaceID: wsroot.PersonalWorkspaceID,
 		Title: "t", Tags: []string{"  Q4 ", "", "finance", "q4"},
 	})
 	if err != nil {
@@ -130,22 +131,22 @@ func TestTags_NormalisedOnSave(t *testing.T) {
 
 func TestComments_AddListDelete(t *testing.T) {
 	s := collabStore(t)
-	task, _ := s.Create(context.Background(), Task{Title: "t"})
+	task, _ := s.Create(context.Background(), Task{WorkspaceID: wsroot.PersonalWorkspaceID, Title: "t"})
 
-	c1, err := s.AddComment(context.Background(), task.ID, Comment{
+	c1, err := s.AddComment(context.Background(), wsroot.PersonalWorkspaceID, task.ID, Comment{
 		Author: "vasu", Body: "looks good", Kind: CommentKindComment,
 	})
 	if err != nil {
 		t.Fatalf("AddComment: %v", err)
 	}
-	c2, err := s.AddComment(context.Background(), task.ID, Comment{
+	c2, err := s.AddComment(context.Background(), wsroot.PersonalWorkspaceID, task.ID, Comment{
 		Author: "reviewer", Body: "needs a chart", Kind: CommentKindReview,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	got, err := s.ListComments(context.Background(), task.ID)
+	got, err := s.ListComments(context.Background(), wsroot.PersonalWorkspaceID, task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,36 +161,36 @@ func TestComments_AddListDelete(t *testing.T) {
 		t.Fatalf("kind = %q", got[1].Kind)
 	}
 
-	if err := s.DeleteComment(context.Background(), c1.ID); err != nil {
+	if err := s.DeleteComment(context.Background(), wsroot.PersonalWorkspaceID, c1.ID); err != nil {
 		t.Fatal(err)
 	}
-	got, _ = s.ListComments(context.Background(), task.ID)
+	got, _ = s.ListComments(context.Background(), wsroot.PersonalWorkspaceID, task.ID)
 	if len(got) != 1 {
 		t.Fatalf("after delete = %+v", got)
 	}
-	if err := s.DeleteComment(context.Background(), 99999); err != ErrNotFound {
+	if err := s.DeleteComment(context.Background(), wsroot.PersonalWorkspaceID, 99999); err != ErrNotFound {
 		t.Fatalf("delete missing = %v, want ErrNotFound", err)
 	}
 }
 
 func TestComments_Validation(t *testing.T) {
 	s := collabStore(t)
-	task, _ := s.Create(context.Background(), Task{Title: "t"})
-	if _, err := s.AddComment(context.Background(), task.ID, Comment{Body: "   "}); err == nil {
+	task, _ := s.Create(context.Background(), Task{WorkspaceID: wsroot.PersonalWorkspaceID, Title: "t"})
+	if _, err := s.AddComment(context.Background(), wsroot.PersonalWorkspaceID, task.ID, Comment{Body: "   "}); err == nil {
 		t.Fatal("blank comment accepted")
 	}
-	if _, err := s.AddComment(context.Background(), task.ID, Comment{Body: "x", Kind: "shout"}); err == nil {
+	if _, err := s.AddComment(context.Background(), wsroot.PersonalWorkspaceID, task.ID, Comment{Body: "x", Kind: "shout"}); err == nil {
 		t.Fatal("unknown kind accepted")
 	}
-	if _, err := s.AddComment(context.Background(), 99999, Comment{Body: "x"}); err == nil {
+	if _, err := s.AddComment(context.Background(), wsroot.PersonalWorkspaceID, 99999, Comment{Body: "x"}); err == nil {
 		t.Fatal("comment on missing task accepted")
 	}
 }
 
 func TestComments_DefaultsKindComment(t *testing.T) {
 	s := collabStore(t)
-	task, _ := s.Create(context.Background(), Task{Title: "t"})
-	c, err := s.AddComment(context.Background(), task.ID, Comment{Body: "hello"})
+	task, _ := s.Create(context.Background(), Task{WorkspaceID: wsroot.PersonalWorkspaceID, Title: "t"})
+	c, err := s.AddComment(context.Background(), wsroot.PersonalWorkspaceID, task.ID, Comment{Body: "hello"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,12 +201,12 @@ func TestComments_DefaultsKindComment(t *testing.T) {
 
 func TestDeleteTask_CascadesComments(t *testing.T) {
 	s := collabStore(t)
-	task, _ := s.Create(context.Background(), Task{Title: "t"})
-	_, _ = s.AddComment(context.Background(), task.ID, Comment{Body: "x"})
-	if err := s.Delete(context.Background(), task.ID); err != nil {
+	task, _ := s.Create(context.Background(), Task{WorkspaceID: wsroot.PersonalWorkspaceID, Title: "t"})
+	_, _ = s.AddComment(context.Background(), wsroot.PersonalWorkspaceID, task.ID, Comment{Body: "x"})
+	if err := s.Delete(context.Background(), wsroot.PersonalWorkspaceID, task.ID); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.ListComments(context.Background(), task.ID)
+	got, err := s.ListComments(context.Background(), wsroot.PersonalWorkspaceID, task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +228,7 @@ func TestMigration_OldDatabaseStillOpens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s1.Create(context.Background(), Task{Title: "pre"}); err != nil {
+	if _, err := s1.Create(context.Background(), Task{WorkspaceID: wsroot.PersonalWorkspaceID, Title: "pre"}); err != nil {
 		t.Fatal(err)
 	}
 	_ = s1.Close()
@@ -237,7 +238,7 @@ func TestMigration_OldDatabaseStillOpens(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer s2.Close()
-	tasks, err := s2.List(context.Background(), Filter{})
+	tasks, err := s2.List(context.Background(), wsroot.PersonalWorkspaceID, Filter{})
 	if err != nil || len(tasks) != 1 {
 		t.Fatalf("tasks = %+v err=%v", tasks, err)
 	}

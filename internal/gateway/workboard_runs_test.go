@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"fmt"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"net/http"
 	"strings"
 	"testing"
@@ -180,7 +181,7 @@ func TestWorkboardRun_DuplicateConcurrent409(t *testing.T) {
 	// deterministic regardless of executor speed.
 	var taskID int64
 	fmt.Sscanf(id, "%d", &taskID)
-	if _, err := s.workboardStore.StartRun(t.Context(), taskID, "bot-1", "wb-stuck", ""); err != nil {
+	if _, err := s.workboardStore.StartRun(t.Context(), wsroot.PersonalWorkspaceID, taskID, "bot-1", "wb-stuck", ""); err != nil {
 		t.Fatalf("seed active run: %v", err)
 	}
 

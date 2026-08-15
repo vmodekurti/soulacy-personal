@@ -13,6 +13,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/soulacy/soulacy/internal/sqlitex"
+	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
 // Task statuses (Kanban columns).
@@ -44,7 +45,11 @@ var (
 
 // Task is one work item on the board.
 type Task struct {
-	ID          int64      `json:"id"`
+	ID int64 `json:"id"`
+	// WorkspaceID is the tenant that owns the task. Runs, artifacts, and
+	// comments deliberately do not carry it: they derive ownership from the
+	// task they belong to, so the two can never disagree.
+	WorkspaceID string     `json:"workspace_id,omitempty"`
 	Title       string     `json:"title"`
 	Description string     `json:"description"`
 	AgentID     string     `json:"agent_id"`
@@ -85,6 +90,7 @@ type Store struct {
 const schema = `
 CREATE TABLE IF NOT EXISTS workboard_tasks (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id TEXT NOT NULL DEFAULT 'ws_personal',
     title       TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     agent_id    TEXT NOT NULL DEFAULT '',
@@ -96,10 +102,15 @@ CREATE TABLE IF NOT EXISTS workboard_tasks (
     created_at  DATETIME NOT NULL,
     updated_at  DATETIME NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_wb_status  ON workboard_tasks(status);
-CREATE INDEX IF NOT EXISTS idx_wb_agent   ON workboard_tasks(agent_id);
-CREATE INDEX IF NOT EXISTS idx_wb_updated ON workboard_tasks(updated_at);
+CREATE INDEX IF NOT EXISTS idx_wb_status  ON workboard_tasks(workspace_id, status);
+CREATE INDEX IF NOT EXISTS idx_wb_agent   ON workboard_tasks(workspace_id, agent_id);
+CREATE INDEX IF NOT EXISTS idx_wb_updated ON workboard_tasks(workspace_id, updated_at);
 `
+
+// ErrWorkspaceRequired is returned when an operation is attempted without a
+// tenant. A task with no owner is a task every tenant can see and edit, so the
+// absence is refused rather than defaulted.
+var ErrWorkspaceRequired = errors.New("workboard: workspace_id is required")
 
 // NewStore opens (or creates) the workboard SQLite database at path.
 func NewStore(path string) (*Store, error) {
@@ -134,6 +145,10 @@ func NewStore(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := addTaskWorkspaceColumn(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &Store{db: db}, nil
 }
 
@@ -141,6 +156,11 @@ const timeLayout = "2006-01-02 15:04:05"
 
 // Create inserts a new task. Status defaults to todo; title must be non-blank.
 func (s *Store) Create(ctx context.Context, t Task) (Task, error) {
+	workspaceID, err := requireWorkspace(t.WorkspaceID)
+	if err != nil {
+		return Task{}, err
+	}
+	t.WorkspaceID = workspaceID
 	t.Title = strings.TrimSpace(t.Title)
 	if t.Title == "" {
 		return Task{}, fmt.Errorf("%w: title is required", ErrInvalid)
@@ -170,9 +190,9 @@ func (s *Store) Create(ctx context.Context, t Task) (Task, error) {
 		due = d.Format(timeLayout)
 	}
 	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO workboard_tasks (title, description, agent_id, status, owner, priority, tags, due_at, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.Title, t.Description, t.AgentID, t.Status,
+		`INSERT INTO workboard_tasks (workspace_id, title, description, agent_id, status, owner, priority, tags, due_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.WorkspaceID, t.Title, t.Description, t.AgentID, t.Status,
 		strings.TrimSpace(t.Owner), t.Priority, tagsToCSV(t.Tags), due,
 		now.Format(timeLayout), now.Format(timeLayout),
 	)
@@ -188,22 +208,34 @@ func (s *Store) Create(ctx context.Context, t Task) (Task, error) {
 }
 
 // taskColumns is the canonical SELECT list matching scanTask.
-const taskColumns = `id, title, description, agent_id, status, owner, priority, tags, due_at, created_at, updated_at`
+const taskColumns = `id, workspace_id, title, description, agent_id, status, owner, priority, tags, due_at, created_at, updated_at`
 
-// Get returns one task by ID, or ErrNotFound.
-func (s *Store) Get(ctx context.Context, id int64) (Task, error) {
+// Get returns one task by ID within one workspace, or ErrNotFound.
+//
+// Task IDs are a global autoincrement, so a task another tenant owns is a
+// perfectly plausible ID. The workspace predicate makes that read
+// indistinguishable from an ID that never existed, so IDs cannot be probed.
+func (s *Store) Get(ctx context.Context, workspaceID string, id int64) (Task, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return Task{}, err
+	}
 	row := s.db.QueryRowContext(ctx,
-		`SELECT `+taskColumns+` FROM workboard_tasks WHERE id = ?`, id)
+		`SELECT `+taskColumns+` FROM workboard_tasks WHERE workspace_id = ? AND id = ?`, workspaceID, id)
 	return scanTask(row)
 }
 
 // List returns tasks matching f, newest first.
-func (s *Store) List(ctx context.Context, f Filter) ([]Task, error) {
+func (s *Store) List(ctx context.Context, workspaceID string, f Filter) ([]Task, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
 	if f.Status != "" && !ValidStatus(f.Status) {
 		return nil, fmt.Errorf("%w: unknown status %q", ErrInvalid, f.Status)
 	}
-	q := `SELECT ` + taskColumns + ` FROM workboard_tasks WHERE 1=1`
-	args := []any{}
+	q := `SELECT ` + taskColumns + ` FROM workboard_tasks WHERE workspace_id = ?`
+	args := []any{workspaceID}
 	if f.Status != "" {
 		q += ` AND status = ?`
 		args = append(args, f.Status)
@@ -232,7 +264,11 @@ func (s *Store) List(ctx context.Context, f Filter) ([]Task, error) {
 }
 
 // Update applies a partial update and returns the resulting task.
-func (s *Store) Update(ctx context.Context, id int64, u Update) (Task, error) {
+func (s *Store) Update(ctx context.Context, workspaceID string, id int64, u Update) (Task, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return Task{}, err
+	}
 	if u.Status != nil && !ValidStatus(*u.Status) {
 		return Task{}, fmt.Errorf("%w: unknown status %q", ErrInvalid, *u.Status)
 	}
@@ -280,10 +316,10 @@ func (s *Store) Update(ctx context.Context, id int64, u Update) (Task, error) {
 		sets = append(sets, "due_at = ?")
 		args = append(args, u.DueAt.UTC().Truncate(time.Second).Format(timeLayout))
 	}
-	args = append(args, id)
+	args = append(args, workspaceID, id)
 
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE workboard_tasks SET `+strings.Join(sets, ", ")+` WHERE id = ?`, args...)
+		`UPDATE workboard_tasks SET `+strings.Join(sets, ", ")+` WHERE workspace_id = ? AND id = ?`, args...)
 	if err != nil {
 		return Task{}, err
 	}
@@ -294,7 +330,7 @@ func (s *Store) Update(ctx context.Context, id int64, u Update) (Task, error) {
 	if n == 0 {
 		return Task{}, ErrNotFound
 	}
-	return s.Get(ctx, id)
+	return s.Get(ctx, workspaceID, id)
 }
 
 // Delete removes a task and its run history, or returns ErrNotFound.
@@ -304,14 +340,22 @@ func (s *Store) Update(ctx context.Context, id int64, u Update) (Task, error) {
 // comments pointing at a task id that no longer existed — invisible rows that
 // nothing lists and nothing cleans up. Every other multi-statement write in this
 // package is already transactional.
-func (s *Store) Delete(ctx context.Context, id int64) error {
+func (s *Store) Delete(ctx context.Context, workspaceID string, id int64) error {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }() // no-op once Commit has succeeded
 
-	res, err := tx.ExecContext(ctx, `DELETE FROM workboard_tasks WHERE id = ?`, id)
+	// The parent delete carries the workspace predicate and runs first, so a
+	// caller naming another tenant's task affects nothing at all: the delete
+	// matches no row, ErrNotFound is returned, and the child deletes below are
+	// never reached.
+	res, err := tx.ExecContext(ctx, `DELETE FROM workboard_tasks WHERE workspace_id = ? AND id = ?`, workspaceID, id)
 	if err != nil {
 		return err
 	}
@@ -348,7 +392,7 @@ func scanTask(row scanner) (Task, error) {
 	var t Task
 	var tagsCSV string
 	var due sql.NullTime
-	err := row.Scan(&t.ID, &t.Title, &t.Description, &t.AgentID, &t.Status,
+	err := row.Scan(&t.ID, &t.WorkspaceID, &t.Title, &t.Description, &t.AgentID, &t.Status,
 		&t.Owner, &t.Priority, &tagsCSV, &due, &t.CreatedAt, &t.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Task{}, ErrNotFound
@@ -362,4 +406,39 @@ func scanTask(row scanner) (Task, error) {
 		t.DueAt = &d
 	}
 	return t, nil
+}
+
+// requireWorkspace normalizes a tenant and refuses an absent one. A task with
+// no owner is a task every tenant can see and edit, so this fails rather than
+// defaulting — unlike the read paths of stores whose rows predate tenancy,
+// where an absent workspace means "the single-user installation".
+func requireWorkspace(workspaceID string) (string, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return "", ErrWorkspaceRequired
+	}
+	normalized := wsroot.Normalize(workspaceID)
+	if err := wsroot.Validate(normalized); err != nil {
+		return "", fmt.Errorf("%w: %s", ErrInvalid, err)
+	}
+	return normalized, nil
+}
+
+// addTaskWorkspaceColumn brings a pre-tenant workboard up to the current
+// schema and assigns its tasks to the personal workspace, which is what a
+// single-user installation's board was.
+//
+// The backfill runs on every open, not only when the column is added. A task
+// with an empty workspace matches no scoped query, so it is not a leak — it is
+// a board that silently emptied, which is worse and harder to notice.
+// Reachable by an interrupted migration or a direct write.
+func addTaskWorkspaceColumn(db *sql.DB) error {
+	if _, err := db.Exec(`ALTER TABLE workboard_tasks ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'ws_personal'`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("workboard: add workspace column: %w", err)
+	}
+	if _, err := db.Exec(`UPDATE workboard_tasks SET workspace_id = ? WHERE workspace_id IS NULL OR workspace_id = ''`, wsroot.PersonalWorkspaceID); err != nil {
+		return fmt.Errorf("workboard: backfill workspace: %w", err)
+	}
+	return nil
 }

@@ -142,10 +142,10 @@ var Tables = []Table{
 	{Source: "internal/tenancy/postgres.go", Name: "tenant_mutation_audit", Resource: "audit", Class: PlatformGlobal, ScopeKey: "resource reference", Isolation: Scoped, IsolationTest: "internal/tenancy/postgres_test.go"},
 	{Source: "internal/tenancy/postgres.go", Name: "users", Resource: "tenancy", Class: PlatformGlobal, ScopeKey: "tenant primary key", Isolation: Scoped, IsolationTest: "internal/tenancy/postgres_test.go"},
 	{Source: "internal/tenancy/postgres.go", Name: "workspaces", Resource: "tenancy", Class: OrganizationOwned, ScopeKey: "organization_id", Isolation: Scoped, IsolationTest: "internal/tenancy/postgres_test.go"},
-	{Source: "internal/workboard/artifacts.go", Name: "workboard_artifacts", Resource: "artifacts", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
-	{Source: "internal/workboard/collab.go", Name: "workboard_comments", Resource: "workboard", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
-	{Source: "internal/workboard/runs.go", Name: "workboard_runs", Resource: "workboard", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
-	{Source: "internal/workboard/store.go", Name: "workboard_tasks", Resource: "workboard", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
+	{Source: "internal/workboard/artifacts.go", Name: "workboard_artifacts", Resource: "artifacts", Class: WorkspaceOwned, ScopeKey: "workspace_id via workboard_tasks", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/workboard/workspace_test.go"},
+	{Source: "internal/workboard/collab.go", Name: "workboard_comments", Resource: "workboard", Class: WorkspaceOwned, ScopeKey: "workspace_id via workboard_tasks", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/workboard/workspace_test.go"},
+	{Source: "internal/workboard/runs.go", Name: "workboard_runs", Resource: "workboard", Class: WorkspaceOwned, ScopeKey: "workspace_id via workboard_tasks", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/workboard/workspace_test.go"},
+	{Source: "internal/workboard/store.go", Name: "workboard_tasks", Resource: "workboard", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/workboard/workspace_test.go"},
 }
 
 var Repositories = []Repository{
@@ -190,7 +190,7 @@ var Repositories = []Repository{
 	{Source: "internal/tenancy/postgres.go", Resource: "tenancy", Class: PlatformGlobal, ScopeKey: "tenant foreign keys", Isolation: Scoped, IsolationTest: "internal/tenancy/postgres_test.go"},
 	{Source: "internal/vector/qdrant/qdrant.go", Resource: "vectors", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
 	{Source: "internal/vector/sqlitevec/sqlitevec.go", Resource: "vectors", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
-	{Source: "internal/workboard/store.go", Resource: "workboard", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
+	{Source: "internal/workboard/store.go", Resource: "workboard", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/workboard/workspace_test.go"},
 }
 
 func ValidateCatalog() error {

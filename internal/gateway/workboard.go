@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/workboard"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/message"
 )
 
@@ -50,6 +51,23 @@ func parseDueAt(raw *string) (*time.Time, bool, error) {
 	}
 	u := ts.UTC()
 	return &u, false, nil
+}
+
+// wbWorkspace is the tenant a workboard request acts in. With no verified
+// identity this is the implicit personal workspace, which is the board those
+// deployments have always had.
+//
+// Task, run, comment, and artifact IDs are all global autoincrements, so every
+// one of them is a plausible ID belonging to someone else. The store refuses an
+// absent workspace outright rather than defaulting, so a handler that forgot to
+// pass one fails loudly instead of reading across tenants.
+func (s *Server) wbWorkspace(c *fiber.Ctx) string {
+	if c != nil {
+		if identity, ok := requestIdentity(c); ok {
+			return wsroot.Normalize(identity.WorkspaceID())
+		}
+	}
+	return wsroot.PersonalWorkspaceID
 }
 
 // wbStoreOr503 returns the store or writes a 503 and returns nil.
@@ -95,7 +113,7 @@ func (s *Server) handleWorkboardList(c *fiber.Ctx) error {
 	if store == nil {
 		return nil
 	}
-	tasks, err := store.List(c.Context(), workboard.Filter{
+	tasks, err := store.List(c.Context(), s.wbWorkspace(c), workboard.Filter{
 		Status:  c.Query("status"),
 		AgentID: c.Query("agent_id"),
 	})
@@ -142,6 +160,7 @@ func (s *Server) handleWorkboardCreate(c *fiber.Ctx) error {
 		return s.errJSON(c, fiber.StatusBadRequest, err)
 	}
 	t.DueAt = due
+	t.WorkspaceID = s.wbWorkspace(c)
 	created, err := store.Create(c.Context(), t)
 	if err != nil {
 		return s.wbError(c, err)
@@ -159,7 +178,7 @@ func (s *Server) handleWorkboardGet(c *fiber.Ctx) error {
 	if !ok {
 		return nil
 	}
-	task, err := store.Get(c.Context(), id)
+	task, err := store.Get(c.Context(), s.wbWorkspace(c), id)
 	if err != nil {
 		return s.wbError(c, err)
 	}
@@ -184,7 +203,7 @@ func (s *Server) handleWorkboardUpdate(c *fiber.Ctx) error {
 	if err != nil {
 		return s.errJSON(c, fiber.StatusBadRequest, err)
 	}
-	updated, err := store.Update(c.Context(), id, workboard.Update{
+	updated, err := store.Update(c.Context(), s.wbWorkspace(c), id, workboard.Update{
 		Title:       body.Title,
 		Description: body.Description,
 		AgentID:     body.AgentID,
@@ -215,7 +234,7 @@ func (s *Server) handleWorkboardComments(c *fiber.Ctx) error {
 	if !ok {
 		return nil
 	}
-	comments, err := store.ListComments(c.Context(), id)
+	comments, err := store.ListComments(c.Context(), s.wbWorkspace(c), id)
 	if err != nil {
 		return s.wbError(c, err)
 	}
@@ -240,7 +259,7 @@ func (s *Server) handleWorkboardAddComment(c *fiber.Ctx) error {
 	if err := c.BodyParser(&body); err != nil {
 		return s.errMsg(c, fiber.StatusBadRequest, "invalid JSON body")
 	}
-	comment, err := store.AddComment(c.Context(), id, workboard.Comment{
+	comment, err := store.AddComment(c.Context(), s.wbWorkspace(c), id, workboard.Comment{
 		Author: body.Author, Body: body.Body, Kind: body.Kind,
 	})
 	if err != nil {
@@ -259,7 +278,7 @@ func (s *Server) handleWorkboardDeleteComment(c *fiber.Ctx) error {
 	if err != nil {
 		return s.errMsg(c, fiber.StatusBadRequest, "comment id must be an integer")
 	}
-	if err := store.DeleteComment(c.Context(), id); err != nil {
+	if err := store.DeleteComment(c.Context(), s.wbWorkspace(c), id); err != nil {
 		return s.wbError(c, err)
 	}
 	return c.SendStatus(fiber.StatusNoContent)
@@ -277,7 +296,7 @@ func (s *Server) handleWorkboardRun(c *fiber.Ctx) error {
 	if !ok {
 		return nil
 	}
-	task, err := store.Get(c.Context(), id)
+	task, err := store.Get(c.Context(), s.wbWorkspace(c), id)
 	if err != nil {
 		return s.wbError(c, err)
 	}
@@ -295,7 +314,7 @@ func (s *Server) handleWorkboardRun(c *fiber.Ctx) error {
 		}
 	}
 
-	run, err := store.StartRun(c.Context(), task.ID, task.AgentID, sessionID, logPath)
+	run, err := store.StartRun(c.Context(), task.WorkspaceID, task.ID, task.AgentID, sessionID, logPath)
 	if err != nil {
 		if errors.Is(err, workboard.ErrRunActive) {
 			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
@@ -306,7 +325,7 @@ func (s *Server) handleWorkboardRun(c *fiber.Ctx) error {
 	}
 
 	running := workboard.StatusRunning
-	if _, err := store.Update(c.Context(), task.ID, workboard.Update{Status: &running}); err != nil {
+	if _, err := store.Update(c.Context(), task.WorkspaceID, task.ID, workboard.Update{Status: &running}); err != nil {
 		s.log.Warn("workboard: failed to mark task running", zap.Int64("task", task.ID), zap.Error(err))
 	}
 
@@ -322,10 +341,13 @@ func (s *Server) executeWorkboardRun(run workboard.Run, task workboard.Task) {
 	finish := func(runStatus, result, reason, taskStatus string) {
 		fctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if _, err := s.workboardStore.FinishRun(fctx, run.ID, runStatus, result, reason); err != nil {
+		// The workspace travels on the task, which was captured before this
+		// goroutine started. Reading it from the request would be a
+		// use-after-free: Fiber recycles the Ctx when the handler returns.
+		if _, err := s.workboardStore.FinishRun(fctx, task.WorkspaceID, run.ID, runStatus, result, reason); err != nil {
 			s.log.Error("workboard: finish run failed", zap.Int64("run", run.ID), zap.Error(err))
 		}
-		if _, err := s.workboardStore.Update(fctx, task.ID, workboard.Update{Status: &taskStatus}); err != nil {
+		if _, err := s.workboardStore.Update(fctx, task.WorkspaceID, task.ID, workboard.Update{Status: &taskStatus}); err != nil {
 			s.log.Error("workboard: task status update failed", zap.Int64("task", task.ID), zap.Error(err))
 		}
 	}
@@ -430,10 +452,10 @@ func (s *Server) handleWorkboardListRuns(c *fiber.Ctx) error {
 	if !ok {
 		return nil
 	}
-	if _, err := store.Get(c.Context(), id); err != nil {
+	if _, err := store.Get(c.Context(), s.wbWorkspace(c), id); err != nil {
 		return s.wbError(c, err)
 	}
-	runs, err := store.ListRuns(c.Context(), id)
+	runs, err := store.ListRuns(c.Context(), s.wbWorkspace(c), id)
 	if err != nil {
 		return s.wbError(c, err)
 	}
@@ -450,7 +472,7 @@ func (s *Server) handleWorkboardDelete(c *fiber.Ctx) error {
 	if !ok {
 		return nil
 	}
-	if err := store.Delete(c.Context(), id); err != nil {
+	if err := store.Delete(c.Context(), s.wbWorkspace(c), id); err != nil {
 		return s.wbError(c, err)
 	}
 	return c.SendStatus(fiber.StatusNoContent)

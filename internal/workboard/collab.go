@@ -107,7 +107,11 @@ func csvToTags(csv string) []string {
 }
 
 // AddComment appends a comment (or reviewer note) to a task.
-func (s *Store) AddComment(ctx context.Context, taskID int64, c Comment) (Comment, error) {
+//
+// Comments carry no workspace of their own: the task lookup below is
+// workspace-scoped, so ownership is derived from the parent and the two can
+// never disagree. Commenting on another tenant's task is ErrNotFound.
+func (s *Store) AddComment(ctx context.Context, workspaceID string, taskID int64, c Comment) (Comment, error) {
 	c.Body = strings.TrimSpace(c.Body)
 	if c.Body == "" {
 		return Comment{}, fmt.Errorf("%w: comment body is required", ErrInvalid)
@@ -121,8 +125,8 @@ func (s *Store) AddComment(ctx context.Context, taskID int64, c Comment) (Commen
 	if strings.TrimSpace(c.Author) == "" {
 		c.Author = "user"
 	}
-	if _, err := s.Get(ctx, taskID); err != nil {
-		return Comment{}, err // ErrNotFound for missing task
+	if _, err := s.Get(ctx, workspaceID, taskID); err != nil {
+		return Comment{}, err // ErrNotFound for a missing or unowned task
 	}
 	c.TaskID = taskID
 	c.CreatedAt = time.Now().UTC().Truncate(time.Second)
@@ -141,10 +145,21 @@ func (s *Store) AddComment(ctx context.Context, taskID int64, c Comment) (Commen
 }
 
 // ListComments returns a task's comments oldest-first (conversation order).
-func (s *Store) ListComments(ctx context.Context, taskID int64) ([]Comment, error) {
+//
+// The tenant predicate is a join to the owning task rather than a column on
+// the comment, so a comment cannot end up owned by a different workspace from
+// the task it is attached to.
+func (s *Store) ListComments(ctx context.Context, workspaceID string, taskID int64) ([]Comment, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, task_id, author, body, kind, created_at
-		 FROM workboard_comments WHERE task_id = ? ORDER BY created_at ASC, id ASC`, taskID)
+		`SELECT c.id, c.task_id, c.author, c.body, c.kind, c.created_at
+		 FROM workboard_comments c
+		 JOIN workboard_tasks t ON t.id = c.task_id
+		 WHERE c.task_id = ? AND t.workspace_id = ?
+		 ORDER BY c.created_at ASC, c.id ASC`, taskID, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -162,8 +177,19 @@ func (s *Store) ListComments(ctx context.Context, taskID int64) ([]Comment, erro
 }
 
 // DeleteComment removes one comment, or returns ErrNotFound.
-func (s *Store) DeleteComment(ctx context.Context, id int64) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM workboard_comments WHERE id = ?`, id)
+//
+// Comment IDs are a global autoincrement, so another tenant's comment ID is a
+// plausible one. The delete is constrained to comments whose task this
+// workspace owns, making a foreign ID indistinguishable from a missing one.
+func (s *Store) DeleteComment(ctx context.Context, workspaceID string, id int64) error {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM workboard_comments
+		  WHERE id = ?
+		    AND task_id IN (SELECT id FROM workboard_tasks WHERE workspace_id = ?)`, id, workspaceID)
 	if err != nil {
 		return err
 	}

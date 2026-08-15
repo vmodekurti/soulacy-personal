@@ -19,7 +19,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/workboard"
-	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/message"
 )
 
@@ -103,10 +102,7 @@ func (s *Server) recordRunArtifacts(run workboard.Run, task workboard.Task) {
 	if store == nil || s.actions == nil {
 		return
 	}
-	// The workboard is still single-tenant (workboard.Task carries no
-	// workspace), so its runs are the personal workspace's by definition.
-	// This moves to the task's own workspace when the workboard is scoped.
-	events, err := s.actionLogForWorkspace(wsroot.PersonalWorkspaceID).Tail(task.AgentID, 2000)
+	events, err := s.actionLogForWorkspace(task.WorkspaceID).Tail(task.AgentID, 2000)
 	if err != nil {
 		s.log.Warn("workboard: artifact detection tail failed",
 			zap.Int64("run", run.ID), zap.Error(err))
@@ -130,7 +126,7 @@ func (s *Server) recordRunArtifacts(run workboard.Run, task workboard.Task) {
 	}
 	fctx, cancel := wbStoreCtx()
 	defer cancel()
-	if err := store.AddArtifacts(fctx, task.ID, run.ID, arts); err != nil {
+	if err := store.AddArtifacts(fctx, task.WorkspaceID, task.ID, run.ID, arts); err != nil {
 		s.log.Warn("workboard: artifact persist failed",
 			zap.Int64("run", run.ID), zap.Error(err))
 		return
@@ -177,7 +173,7 @@ func (s *Server) handleWorkboardArtifacts(c *fiber.Ctx) error {
 	if err != nil {
 		return s.errMsg(c, fiber.StatusBadRequest, "invalid task id")
 	}
-	arts, err := store.ListArtifacts(c.Context(), id)
+	arts, err := store.ListArtifacts(c.Context(), s.wbWorkspace(c), id)
 	if err != nil {
 		return s.wbError(c, err)
 	}
@@ -198,7 +194,7 @@ func (s *Server) handleWorkboardArtifactDownload(c *fiber.Ctx) error {
 	if err != nil {
 		return s.errMsg(c, fiber.StatusBadRequest, "invalid artifact id")
 	}
-	a, err := store.GetArtifact(c.Context(), id)
+	a, err := store.GetArtifact(c.Context(), s.wbWorkspace(c), id)
 	if err != nil {
 		return s.wbError(c, err)
 	}

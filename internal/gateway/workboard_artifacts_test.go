@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"fmt"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -167,11 +168,11 @@ func wbArtifactGateway(t *testing.T, events []message.Event) (*Server, *workboar
 	s.SetWorkboardStore(store)
 	s.actions = &fakeTailBackend{events: events}
 
-	task, err := store.Create(t.Context(), workboard.Task{Title: "t", AgentID: "agent-1"})
+	task, err := store.Create(t.Context(), workboard.Task{WorkspaceID: wsroot.PersonalWorkspaceID, Title: "t", AgentID: "agent-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := store.StartRun(t.Context(), task.ID, "agent-1", "wb-art-1", "")
+	run, err := store.StartRun(t.Context(), wsroot.PersonalWorkspaceID, task.ID, "agent-1", "wb-art-1", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +193,7 @@ func TestRecordRunArtifacts_PersistsWithMetadata(t *testing.T) {
 
 	s.recordRunArtifacts(run, task)
 
-	got, err := store.ListArtifacts(t.Context(), task.ID)
+	got, err := store.ListArtifacts(t.Context(), wsroot.PersonalWorkspaceID, task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +260,7 @@ func TestChatArtifactDownload_RejectsPathOutsideSession(t *testing.T) {
 func TestRecordRunArtifacts_NoEventsNoRows(t *testing.T) {
 	s, store, task, run := wbArtifactGateway(t, nil)
 	s.recordRunArtifacts(run, task)
-	got, _ := store.ListArtifacts(t.Context(), task.ID)
+	got, _ := store.ListArtifacts(t.Context(), wsroot.PersonalWorkspaceID, task.ID)
 	if len(got) != 0 {
 		t.Fatalf("artifacts = %+v", got)
 	}
@@ -323,7 +324,7 @@ func TestWorkboardArtifactsAPI_DownloadFileGone410(t *testing.T) {
 	events := []message.Event{toolCallEvent("wb-art-1", "write_file", map[string]any{"path": f1})}
 	s, store, task, run := wbArtifactGateway(t, events)
 	s.recordRunArtifacts(run, task)
-	list, _ := store.ListArtifacts(t.Context(), task.ID)
+	list, _ := store.ListArtifacts(t.Context(), wsroot.PersonalWorkspaceID, task.ID)
 	if err := os.Remove(f1); err != nil {
 		t.Fatal(err)
 	}

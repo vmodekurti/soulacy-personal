@@ -3,6 +3,7 @@ package workboard
 import (
 	"context"
 	"errors"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"path/filepath"
 	"testing"
 )
@@ -34,7 +35,7 @@ func TestValidStatus(t *testing.T) {
 
 func TestCreate_DefaultsToTodo(t *testing.T) {
 	s := newTestStore(t)
-	task, err := s.Create(context.Background(), Task{Title: "write tests"})
+	task, err := s.Create(context.Background(), Task{WorkspaceID: wsroot.PersonalWorkspaceID, Title: "write tests"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -51,7 +52,7 @@ func TestCreate_DefaultsToTodo(t *testing.T) {
 
 func TestCreate_EmptyTitleRejected(t *testing.T) {
 	s := newTestStore(t)
-	_, err := s.Create(context.Background(), Task{Title: "  "})
+	_, err := s.Create(context.Background(), Task{WorkspaceID: wsroot.PersonalWorkspaceID, Title: "  "})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Create(empty title) err = %v, want ErrInvalid", err)
 	}
@@ -59,7 +60,7 @@ func TestCreate_EmptyTitleRejected(t *testing.T) {
 
 func TestCreate_InvalidStatusRejected(t *testing.T) {
 	s := newTestStore(t)
-	_, err := s.Create(context.Background(), Task{Title: "x", Status: "bogus"})
+	_, err := s.Create(context.Background(), Task{WorkspaceID: wsroot.PersonalWorkspaceID, Title: "x", Status: "bogus"})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Create(bogus status) err = %v, want ErrInvalid", err)
 	}
@@ -67,7 +68,7 @@ func TestCreate_InvalidStatusRejected(t *testing.T) {
 
 func TestCreate_ExplicitStatusKept(t *testing.T) {
 	s := newTestStore(t)
-	task, err := s.Create(context.Background(), Task{Title: "x", Status: StatusRunning})
+	task, err := s.Create(context.Background(), Task{WorkspaceID: wsroot.PersonalWorkspaceID, Title: "x", Status: StatusRunning})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -78,7 +79,7 @@ func TestCreate_ExplicitStatusKept(t *testing.T) {
 
 func TestGet_RoundTrip(t *testing.T) {
 	s := newTestStore(t)
-	created, err := s.Create(context.Background(), Task{
+	created, err := s.Create(context.Background(), Task{WorkspaceID: wsroot.PersonalWorkspaceID,
 		Title:       "review PR",
 		Description: "look at the diff",
 		AgentID:     "agent-1",
@@ -86,7 +87,7 @@ func TestGet_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	got, err := s.Get(context.Background(), created.ID)
+	got, err := s.Get(context.Background(), wsroot.PersonalWorkspaceID, created.ID)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -100,7 +101,7 @@ func TestGet_RoundTrip(t *testing.T) {
 
 func TestGet_NotFound(t *testing.T) {
 	s := newTestStore(t)
-	_, err := s.Get(context.Background(), 9999)
+	_, err := s.Get(context.Background(), wsroot.PersonalWorkspaceID, 9999)
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Get(missing) err = %v, want ErrNotFound", err)
 	}
@@ -108,7 +109,7 @@ func TestGet_NotFound(t *testing.T) {
 
 func TestList_EmptyReturnsEmptySlice(t *testing.T) {
 	s := newTestStore(t)
-	tasks, err := s.List(context.Background(), Filter{})
+	tasks, err := s.List(context.Background(), wsroot.PersonalWorkspaceID, Filter{})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -125,7 +126,7 @@ func TestList_FilterByStatusAndAgent(t *testing.T) {
 	ctx := context.Background()
 	mustCreate := func(title, agent, status string) {
 		t.Helper()
-		if _, err := s.Create(ctx, Task{Title: title, AgentID: agent, Status: status}); err != nil {
+		if _, err := s.Create(ctx, Task{WorkspaceID: wsroot.PersonalWorkspaceID, Title: title, AgentID: agent, Status: status}); err != nil {
 			t.Fatalf("Create(%s): %v", title, err)
 		}
 	}
@@ -133,15 +134,15 @@ func TestList_FilterByStatusAndAgent(t *testing.T) {
 	mustCreate("b", "bot-1", StatusDone)
 	mustCreate("c", "bot-2", StatusTodo)
 
-	all, err := s.List(ctx, Filter{})
+	all, err := s.List(ctx, wsroot.PersonalWorkspaceID, Filter{})
 	if err != nil || len(all) != 3 {
 		t.Fatalf("List(all) = %d tasks, err=%v; want 3", len(all), err)
 	}
-	todos, err := s.List(ctx, Filter{Status: StatusTodo})
+	todos, err := s.List(ctx, wsroot.PersonalWorkspaceID, Filter{Status: StatusTodo})
 	if err != nil || len(todos) != 2 {
 		t.Fatalf("List(todo) = %d tasks, err=%v; want 2", len(todos), err)
 	}
-	bot1Todo, err := s.List(ctx, Filter{Status: StatusTodo, AgentID: "bot-1"})
+	bot1Todo, err := s.List(ctx, wsroot.PersonalWorkspaceID, Filter{Status: StatusTodo, AgentID: "bot-1"})
 	if err != nil || len(bot1Todo) != 1 || bot1Todo[0].Title != "a" {
 		t.Fatalf("List(todo,bot-1) = %+v, err=%v; want [a]", bot1Todo, err)
 	}
@@ -149,7 +150,7 @@ func TestList_FilterByStatusAndAgent(t *testing.T) {
 
 func TestList_InvalidStatusFilterRejected(t *testing.T) {
 	s := newTestStore(t)
-	_, err := s.List(context.Background(), Filter{Status: "bogus"})
+	_, err := s.List(context.Background(), wsroot.PersonalWorkspaceID, Filter{Status: "bogus"})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("List(bogus) err = %v, want ErrInvalid", err)
 	}
@@ -158,9 +159,9 @@ func TestList_InvalidStatusFilterRejected(t *testing.T) {
 func TestUpdate_Status(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	created, _ := s.Create(ctx, Task{Title: "x"})
+	created, _ := s.Create(ctx, Task{WorkspaceID: wsroot.PersonalWorkspaceID, Title: "x"})
 
-	updated, err := s.Update(ctx, created.ID, Update{Status: strPtr(StatusRunning)})
+	updated, err := s.Update(ctx, wsroot.PersonalWorkspaceID, created.ID, Update{Status: strPtr(StatusRunning)})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -178,9 +179,9 @@ func TestUpdate_Status(t *testing.T) {
 func TestUpdate_TitleAndDescription(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	created, _ := s.Create(ctx, Task{Title: "old", Description: "d1"})
+	created, _ := s.Create(ctx, Task{WorkspaceID: wsroot.PersonalWorkspaceID, Title: "old", Description: "d1"})
 
-	updated, err := s.Update(ctx, created.ID, Update{
+	updated, err := s.Update(ctx, wsroot.PersonalWorkspaceID, created.ID, Update{
 		Title:       strPtr("new"),
 		Description: strPtr("d2"),
 		AgentID:     strPtr("bot-9"),
@@ -199,8 +200,8 @@ func TestUpdate_TitleAndDescription(t *testing.T) {
 func TestUpdate_InvalidStatusRejected(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	created, _ := s.Create(ctx, Task{Title: "x"})
-	_, err := s.Update(ctx, created.ID, Update{Status: strPtr("bogus")})
+	created, _ := s.Create(ctx, Task{WorkspaceID: wsroot.PersonalWorkspaceID, Title: "x"})
+	_, err := s.Update(ctx, wsroot.PersonalWorkspaceID, created.ID, Update{Status: strPtr("bogus")})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Update(bogus) err = %v, want ErrInvalid", err)
 	}
@@ -209,8 +210,8 @@ func TestUpdate_InvalidStatusRejected(t *testing.T) {
 func TestUpdate_EmptyTitleRejected(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	created, _ := s.Create(ctx, Task{Title: "x"})
-	_, err := s.Update(ctx, created.ID, Update{Title: strPtr("")})
+	created, _ := s.Create(ctx, Task{WorkspaceID: wsroot.PersonalWorkspaceID, Title: "x"})
+	_, err := s.Update(ctx, wsroot.PersonalWorkspaceID, created.ID, Update{Title: strPtr("")})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Update(empty title) err = %v, want ErrInvalid", err)
 	}
@@ -218,7 +219,7 @@ func TestUpdate_EmptyTitleRejected(t *testing.T) {
 
 func TestUpdate_NotFound(t *testing.T) {
 	s := newTestStore(t)
-	_, err := s.Update(context.Background(), 9999, Update{Status: strPtr(StatusDone)})
+	_, err := s.Update(context.Background(), wsroot.PersonalWorkspaceID, 9999, Update{Status: strPtr(StatusDone)})
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Update(missing) err = %v, want ErrNotFound", err)
 	}
@@ -227,15 +228,15 @@ func TestUpdate_NotFound(t *testing.T) {
 func TestDelete(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	created, _ := s.Create(ctx, Task{Title: "x"})
+	created, _ := s.Create(ctx, Task{WorkspaceID: wsroot.PersonalWorkspaceID, Title: "x"})
 
-	if err := s.Delete(ctx, created.ID); err != nil {
+	if err := s.Delete(ctx, wsroot.PersonalWorkspaceID, created.ID); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
-	if _, err := s.Get(ctx, created.ID); !errors.Is(err, ErrNotFound) {
+	if _, err := s.Get(ctx, wsroot.PersonalWorkspaceID, created.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Get after Delete err = %v, want ErrNotFound", err)
 	}
-	if err := s.Delete(ctx, created.ID); !errors.Is(err, ErrNotFound) {
+	if err := s.Delete(ctx, wsroot.PersonalWorkspaceID, created.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Delete(missing) err = %v, want ErrNotFound", err)
 	}
 }
