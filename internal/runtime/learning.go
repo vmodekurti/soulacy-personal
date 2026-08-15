@@ -12,7 +12,13 @@ import (
 )
 
 func (e *Engine) proposeLearning(ctx context.Context, def *agent.Definition, msg message.Message, finalContent string) {
-	if e.learningStore == nil || def == nil || !def.Learning.Enabled {
+	if def == nil || !def.Learning.Enabled {
+		return
+	}
+	// The run's own workspace, not a default: a proposal written into the
+	// wrong tenant's queue is a rule someone else can accept.
+	store := e.learningStores.For(WorkspaceFromContext(ctx))
+	if store == nil {
 		return
 	}
 	proposals := learning.BuildProposals(learning.BuildInput{
@@ -33,7 +39,7 @@ func (e *Engine) proposeLearning(ctx context.Context, def *agent.Definition, msg
 		default:
 		}
 		p.CreatedAt = time.Now().UTC()
-		if _, err := e.learningStore.Add(p); err != nil {
+		if _, err := store.Add(p); err != nil {
 			e.log.Warn("learning proposal failed", zap.String("agent", msg.AgentID), zap.Error(err))
 			continue
 		}

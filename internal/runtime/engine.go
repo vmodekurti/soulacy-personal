@@ -166,9 +166,12 @@ type Engine struct {
 	// in their SOUL.yaml. Set via SetBrainMemory after construction.
 	brainStore *agentmemory.CompositeStore
 
-	// learningStore, when non-nil, stores reviewable post-run learning
-	// proposals for agents that declare learning.enabled in SOUL.yaml.
-	learningStore *learning.Store
+	// learningStores, when non-nil, resolves the reviewable post-run learning
+	// proposal store for one workspace. It is a resolver rather than a store
+	// because a proposal is a candidate rule that changes agent behaviour once
+	// accepted: one tenant's review queue must not be readable, let alone
+	// acceptable, from another.
+	learningStores *learning.Stores
 
 	// actionLog, when non-nil, backs the session_search built-in so agents can
 	// retrieve useful past run context without direct filesystem access.
@@ -588,15 +591,26 @@ func (e *Engine) SetBrainMemory(store *agentmemory.CompositeStore) {
 // BrainStore returns the CompositeStore, or nil if not configured.
 func (e *Engine) BrainStore() *agentmemory.CompositeStore { return e.brainStore }
 
-// SetLearningStore wires the reviewable post-run learning proposal store.
-func (e *Engine) SetLearningStore(store *learning.Store) { e.learningStore = store }
+// SetLearningStores wires the per-workspace reviewable learning proposal
+// stores. There is deliberately no setter taking a single store: nothing
+// should be able to hold "the" proposal store without naming a tenant.
+func (e *Engine) SetLearningStores(stores *learning.Stores) { e.learningStores = stores }
 
 // SetAdaptiveNodes sets the global default for runtime LLM salvage of flow nodes
 // that hit an unexpected data shape (FlowNode.Adaptive forces it per-node too).
 func (e *Engine) SetAdaptiveNodes(on bool) { e.adaptiveNodes = on }
 
-// LearningStore returns the proposal store, or nil when learning is disabled.
-func (e *Engine) LearningStore() *learning.Store { return e.learningStore }
+// LearningStores returns the per-workspace proposal stores, or nil when
+// learning is disabled.
+func (e *Engine) LearningStores() *learning.Stores { return e.learningStores }
+
+// LearningStoreInWorkspace returns one workspace's proposal store, or nil when
+// learning is disabled or the store could not be created. A nil result is
+// treated the same way as learning being off: skip, never write somewhere
+// shared.
+func (e *Engine) LearningStoreInWorkspace(workspaceID string) *learning.Store {
+	return e.learningStores.For(workspaceID)
+}
 
 // SetActionLogBackend wires recent run history for safe session_search.
 func (e *Engine) SetActionLogBackend(store storage.ActionLogBackend) {

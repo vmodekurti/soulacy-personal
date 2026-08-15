@@ -931,10 +931,12 @@ func TestAcceptedLearningSkillIsInjectedAndUnlocksReadSkill(t *testing.T) {
 	e.skillLoader = populatedSkillLoader{skills: []*skill.Skill{
 		{Name: "research-playbook", Description: "Reusable research workflow.", Body: "Use citations.", Dir: t.TempDir()},
 	}}
-	store, err := learning.NewStore(t.TempDir() + "/learning.jsonl")
+	stores, err := learning.NewStores(t.TempDir() + "/learning.jsonl")
 	if err != nil {
 		t.Fatalf("learning store: %v", err)
 	}
+	// The personal workspace is what a directly constructed test gateway is.
+	store := stores.For(wsroot.PersonalWorkspaceID)
 	p, err := store.Add(learning.Proposal{
 		AgentID: "learner",
 		Kind:    "skill",
@@ -952,7 +954,7 @@ func TestAcceptedLearningSkillIsInjectedAndUnlocksReadSkill(t *testing.T) {
 	if _, err := store.UpdateStatusMeta(p.ID, learning.StatusAccepted, nil); err != nil {
 		t.Fatalf("accept proposal: %v", err)
 	}
-	e.SetLearningStore(store)
+	e.SetLearningStores(stores)
 	e.builtins = e.buildBuiltins()
 
 	def := &agent.Definition{

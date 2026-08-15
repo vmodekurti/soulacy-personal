@@ -59,7 +59,9 @@ func (e *Engine) skillCatalogFor(names []string) string {
 // learning-generated skills that were installed for this agent. This closes the
 // learning loop without mutating SOUL.yaml: accepted skills become available in
 // future planning with normal read_skill/read_skill_file attribution.
-func (e *Engine) effectiveSkillNames(def *agent.Definition) []string {
+// effectiveSkillNames takes a context because accepted learning contributes
+// skills, and which learnings are accepted is per workspace.
+func (e *Engine) effectiveSkillNames(ctx context.Context, def *agent.Definition) []string {
 	if def == nil {
 		return nil
 	}
@@ -73,10 +75,14 @@ func (e *Engine) effectiveSkillNames(def *agent.Definition) []string {
 		seen[name] = true
 		out = append(out, name)
 	}
-	if e.learningStore == nil || !def.Learning.Enabled {
+	if !def.Learning.Enabled {
 		return out
 	}
-	props, err := e.learningStore.List(def.ID, learning.StatusAccepted, 50)
+	store := e.learningStores.For(WorkspaceFromContext(ctx))
+	if store == nil {
+		return out
+	}
+	props, err := store.List(def.ID, learning.StatusAccepted, 50)
 	if err != nil {
 		return out
 	}

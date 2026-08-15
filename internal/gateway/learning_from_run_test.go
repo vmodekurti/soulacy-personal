@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -17,11 +18,13 @@ func TestProposeLearningFromRunCreatesReviewableProposals(t *testing.T) {
 	t.Setenv("SOULACY_WORKSPACE", workspace)
 
 	srv := newTestGateway(t, "secret")
-	store, err := learning.NewStore(filepath.Join(workspace, "data", "learning.db"))
+	stores, err := learning.NewStores(filepath.Join(workspace, "data", "learning.db"))
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	srv.engine.SetLearningStore(store)
+	// The personal workspace is what a directly constructed test gateway is.
+	store := stores.For(wsroot.PersonalWorkspaceID)
+	srv.engine.SetLearningStores(stores)
 	srv.loader.Register(&agent.Definition{
 		ID:      "learn-agent",
 		Name:    "Learning Agent",
@@ -90,11 +93,13 @@ func TestLearningSummaryEndpoint(t *testing.T) {
 	t.Setenv("SOULACY_WORKSPACE", workspace)
 
 	srv := newTestGateway(t, "secret")
-	store, err := learning.NewStore(filepath.Join(workspace, "data", "learning.db"))
+	stores, err := learning.NewStores(filepath.Join(workspace, "data", "learning.db"))
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	srv.engine.SetLearningStore(store)
+	// The personal workspace is what a directly constructed test gateway is.
+	store := stores.For(wsroot.PersonalWorkspaceID)
+	srv.engine.SetLearningStores(stores)
 	pending, err := store.Add(learning.Proposal{AgentID: "agent-a", Kind: "memory", Content: "draft", Source: "manual_run_review"})
 	if err != nil {
 		t.Fatalf("Add pending: %v", err)
@@ -140,11 +145,13 @@ func TestReflectLearningFromRecentRunsCreatesReviewableProposals(t *testing.T) {
 	t.Setenv("SOULACY_WORKSPACE", workspace)
 
 	srv := newTestGateway(t, "secret")
-	store, err := learning.NewStore(filepath.Join(workspace, "data", "learning.db"))
+	stores, err := learning.NewStores(filepath.Join(workspace, "data", "learning.db"))
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	srv.engine.SetLearningStore(store)
+	// The personal workspace is what a directly constructed test gateway is.
+	store := stores.For(wsroot.PersonalWorkspaceID)
+	srv.engine.SetLearningStores(stores)
 	srv.loader.Register(&agent.Definition{
 		ID:      "reflect-agent",
 		Name:    "Reflect Agent",

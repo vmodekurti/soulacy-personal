@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"net/http"
 	"path/filepath"
 	"testing"
@@ -15,11 +16,13 @@ func TestLearningEvidenceEndpoint(t *testing.T) {
 	t.Setenv("SOULACY_WORKSPACE", workspace)
 
 	srv := newTestGateway(t, "secret")
-	store, err := learning.NewStore(filepath.Join(workspace, "data", "learning.db"))
+	stores, err := learning.NewStores(filepath.Join(workspace, "data", "learning.db"))
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	srv.engine.SetLearningStore(store)
+	// The personal workspace is what a directly constructed test gateway is.
+	store := stores.For(wsroot.PersonalWorkspaceID)
+	srv.engine.SetLearningStores(stores)
 
 	// An accepted learned skill for agent-a. The store stamps the acceptance
 	// time as time.Now(), so anchor the synthetic events around now: reuses

@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
 const (
@@ -449,4 +451,60 @@ func dedupeKey(p Proposal) string {
 		strings.ToLower(strings.TrimSpace(p.Content)),
 	}, "\x00")))
 	return hex.EncodeToString(h[:])
+}
+
+// Stores resolves the proposal store owning one workspace's learning.
+//
+// A proposal is a candidate rule that will change how an agent behaves once
+// accepted, so one tenant's pending review queue must not be visible — let
+// alone acceptable — from another. Isolation is by file rather than by filter:
+// each workspace gets its own JSONL, so a proposal ID belonging to another
+// tenant is simply not in the file this caller reads, and UpdateStatus returns
+// os.ErrNotExist. A missing proposal and someone else's proposal are the same
+// answer, so IDs cannot be probed.
+//
+// The personal workspace keeps the original path byte-for-byte (product
+// invariant 7): an existing single-user installation's review queue does not
+// move.
+type Stores struct {
+	base   string
+	mu     sync.Mutex
+	stores map[string]*Store
+}
+
+// NewStores takes the path a single-tenant installation already uses. Other
+// workspaces are namespaced beneath it by wsroot.File.
+func NewStores(base string) (*Stores, error) {
+	if strings.TrimSpace(base) == "" {
+		return nil, fmt.Errorf("learning: path is required")
+	}
+	// Fail here rather than on first write, so a misconfigured path is a
+	// startup error instead of learning that silently never persists.
+	if _, err := NewStore(base); err != nil {
+		return nil, err
+	}
+	return &Stores{base: base, stores: map[string]*Store{}}, nil
+}
+
+// For returns one workspace's store, creating and caching it on first use.
+// It returns nil when the store cannot be created, and callers treat that the
+// same way they treat learning being disabled: they skip, rather than writing
+// somewhere shared.
+func (s *Stores) For(workspaceID string) *Store {
+	if s == nil {
+		return nil
+	}
+	workspaceID = wsroot.Normalize(workspaceID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if existing, ok := s.stores[workspaceID]; ok {
+		return existing
+	}
+	store, err := NewStore(wsroot.File(s.base, workspaceID))
+	if err != nil {
+		s.stores[workspaceID] = nil
+		return nil
+	}
+	s.stores[workspaceID] = store
+	return store
 }

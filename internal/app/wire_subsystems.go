@@ -81,14 +81,14 @@ func (a *App) wireBrainMemory(ws config.Paths, stack *closerStack) *agentmemory.
 	return brainStore
 }
 
-func (a *App) wireLearning(ws config.Paths) *learning.Store {
-	store, err := learning.NewStore(ws.DB("learning"))
+func (a *App) wireLearning(ws config.Paths) *learning.Stores {
+	stores, err := learning.NewStores(ws.DB("learning"))
 	if err != nil {
 		a.log.Warn("learning proposal store unavailable", zap.Error(err))
 		return nil
 	}
 	a.log.Info("learning proposal store ready", zap.String("path", ws.DB("learning")))
-	return store
+	return stores
 }
 
 // wireMemory builds the file store and the SQLite archive. Both failures are
@@ -1006,7 +1006,7 @@ type engineDeps struct {
 	pyExecutor     executor.Backend
 	namedExecutors map[string]executor.Backend
 	brainStore     *agentmemory.CompositeStore
-	learningStore  *learning.Store
+	learningStore  *learning.Stores
 	ollamaAPIKey   string
 	searchProvider string
 	searchAPIKey   string
@@ -1153,7 +1153,7 @@ func (a *App) wireEngine(d engineDeps) *runtime.Engine {
 		engine.SetBrainMemory(d.brainStore)
 	}
 	if d.learningStore != nil {
-		engine.SetLearningStore(d.learningStore)
+		engine.SetLearningStores(d.learningStore)
 	}
 
 	// Runtime adaptive-node salvage: on by default (keep flows running through

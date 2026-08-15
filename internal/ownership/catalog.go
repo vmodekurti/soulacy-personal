@@ -160,7 +160,7 @@ var Repositories = []Repository{
 	{Source: "internal/gateway/idempotency.go", Resource: "idempotency", Class: Ephemeral, ScopeKey: "workspace_id,method,route", Isolation: Scoped, IsolationTest: "internal/gateway/idempotency_test.go"},
 	{Source: "internal/gateway/chat_attachments.go", Resource: "artifacts", Class: UserPrivate, ScopeKey: "workspace_id,user_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
 	{Source: "internal/knowledge/store.go", Resource: "knowledge", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/knowledge/workspace_test.go"},
-	{Source: "internal/learning/store.go", Resource: "studio-learning", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
+	{Source: "internal/learning/store.go", Resource: "studio-learning", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/learning/workspace_test.go"},
 	{Source: "internal/memory/sqlite.go", Resource: "memory", Class: UserPrivate, ScopeKey: "workspace_id,user_id", Isolation: Scoped, IsolationTest: "internal/memory/workspace_test.go"},
 	{Source: "internal/memory/store.go", Resource: "memory", Class: UserPrivate, ScopeKey: "workspace_id,user_id", Isolation: Scoped, IsolationTest: "internal/memory/workspace_test.go"},
 	{Source: "internal/memory/vector.go", Resource: "vectors", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},

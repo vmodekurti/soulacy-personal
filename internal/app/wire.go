@@ -322,7 +322,7 @@ func (a *App) Run(parent context.Context) error {
 	stack.push("app-context-cancel", func() error { cancel(); return nil })
 
 	learningSweeper := learning.NewSweeper(learning.SweeperConfig{
-		Store:   learningStore,
+		Stores:  learningStore,
 		Actions: actionBackend,
 		Agents:  loader,
 		Logger:  log.Named("learning-sweeper"),

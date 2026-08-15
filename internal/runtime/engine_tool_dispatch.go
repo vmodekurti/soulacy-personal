@@ -575,7 +575,7 @@ func (e *Engine) allToolSchemasForContext(ctx context.Context, def *agent.Defini
 		}
 		switch b.Gate {
 		case "skills":
-			if len(e.effectiveSkillNames(def)) == 0 {
+			if len(e.effectiveSkillNames(ctx, def)) == 0 {
 				continue
 			}
 		case "knowledge":

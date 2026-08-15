@@ -5,6 +5,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
+	"github.com/soulacy/soulacy/internal/learning"
 	"github.com/soulacy/soulacy/internal/storage"
 	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/message"
@@ -170,4 +171,25 @@ func (a actionScope) QueryFiltered(agentID string, limit int, allowed map[string
 	}
 	events, err := legacy.QueryFiltered(agentID, limit, allowed)
 	return events, true, err
+}
+
+// learningStore returns the request workspace's reviewable proposal store, or
+// nil when learning is disabled or the store could not be created.
+//
+// Proposals are candidate rules that change agent behaviour once accepted, so
+// one tenant's review queue must not be readable — let alone acceptable — from
+// another. Isolation is by file: a proposal ID belonging to another tenant is
+// not in the file this caller reads, so an update returns "not found", which
+// is the same answer a genuinely missing ID gives. IDs cannot be probed.
+func (s *Server) learningStore(c *fiber.Ctx) *learning.Store {
+	if s == nil || s.engine == nil {
+		return nil
+	}
+	workspaceID := wsroot.PersonalWorkspaceID
+	if c != nil {
+		if identity, ok := requestIdentity(c); ok {
+			workspaceID = wsroot.Normalize(identity.WorkspaceID())
+		}
+	}
+	return s.engine.LearningStoreInWorkspace(workspaceID)
 }

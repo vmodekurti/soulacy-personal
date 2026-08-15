@@ -24,7 +24,7 @@ isolation state; this document explains it.
 declared workspace-owned but not yet isolated.
 
 - At the start of this work: **57 blockers**
-- Now: **38 blockers** (53 catalog entries `scoped`, 38 still `personal-only`)
+- Now: **37 blockers**
 
 A store moves from `personal-only` to `scoped` only when it has a real
 cross-tenant isolation test. The catalog names that test, and a CI check fails
@@ -81,11 +81,6 @@ become a back door into one workspace from another, and every use is greppable.
 
 These are gaps, not oversights, and they fail closed rather than guessing:
 
-- **The learning reflection sweeper** is personal-only on both ends: its agent
-  source is the loader's personal listing and its tail is the personal
-  workspace's history. `learning.Store` carries no workspace, so scoping only
-  the reads would gather one tenant's runs into a store every tenant shares —
-  worse than staying single-tenant.
 - **The workboard's artifact detection** reads the personal workspace, because
   `workboard.Task` carries no workspace. It moves when the workboard is scoped.
 - **Scheduler and channel invocations** reach the engine without a request
@@ -151,6 +146,29 @@ making it the one place a run can name an agent it was not started for. Scoped
 to the run's own workspace, naming another tenant's agent now reaches a file
 that does not exist.
 
+### Accepting is the dangerous operation, so proposals are isolated by file
+
+A learning proposal is a candidate rule that changes how an agent behaves once
+accepted. Reading another tenant's queue would be a leak; *accepting* from it
+would be a rule someone else installed. `learning.Stores` gives each workspace
+its own JSONL, so a proposal ID belonging to another tenant is simply not in
+the file the caller reads and `UpdateStatus` returns `os.ErrNotExist` — the
+same answer a genuinely missing ID gives, so IDs cannot be probed.
+
+Nothing can hold "the" proposal store any more: `Engine.SetLearningStore` was
+replaced by `SetLearningStores`, and the gateway reaches one through
+`s.learningStore(c)`. Deduplication is per workspace too, so two tenants
+independently learning the same lesson get two proposals rather than one
+suppressing the other's review.
+
+With the store scoped, the **background reflection sweeper** became
+multi-tenant: it covers every workspace but touches one at a time, listing,
+tailing, and proposing within each. An agent source or tailer without a
+tenant-aware surface is treated as single-tenant, and a non-personal workspace
+gets nothing rather than the personal workspace's runs —
+`TestASingleTenantTailerDoesNotFeedOtherWorkspaces` pins that, because the
+fallback would propose one tenant's lessons into another's queue.
+
 ### The SDK is extended additively, never modified
 
 `sdk/storage.MemoryBackend` is documented as frozen per major version, so it
@@ -186,13 +204,9 @@ Highest-value first, with the reason each matters:
 3. **Workboard, costs, action log, DLQ, checkpoints, conversation history** —
    all still `personal-only`; each needs the same treatment as the stores
    above.
-4. **`internal/learning/store.go`** — reflection proposals carry no workspace,
-   which is why the learning sweeper is still deliberately personal-only on
-   both ends (see below). Scoping its reads before the store would gather one
-   tenant's runs into a store every tenant shares.
-5. **`internal/studio/trace.go`** — build traces are an in-memory ring with no
+4. **`internal/studio/trace.go`** — build traces are an in-memory ring with no
    ownership check on `Get(id)`; any caller holding an id reads any trace.
-6. **Workboard, costs, DLQ, checkpoints, conversation history** — all still
+5. **Workboard, costs, DLQ, checkpoints, conversation history** — all still
    `personal-only`; each needs the same treatment as the stores above.
 
 ## Verification

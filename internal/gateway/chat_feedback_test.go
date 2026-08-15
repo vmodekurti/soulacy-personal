@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"net/http"
 	"path/filepath"
 	"testing"
@@ -26,11 +27,13 @@ func TestChatFeedbackEndpointPersistsRatingAndReviewableCorrection(t *testing.T)
 	workspace := t.TempDir()
 	t.Setenv("SOULACY_WORKSPACE", workspace)
 	srv := newTestGateway(t, "secret")
-	store, err := learning.NewStore(filepath.Join(workspace, "learning.jsonl"))
+	stores, err := learning.NewStores(filepath.Join(workspace, "learning.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv.engine.SetLearningStore(store)
+	// The personal workspace is what a directly constructed test gateway is.
+	store := stores.For(wsroot.PersonalWorkspaceID)
+	srv.engine.SetLearningStores(stores)
 	srv.actions = &fakeTailBackend{events: []message.Event{{
 		Type: "run.completed", AgentID: "agent-a", SessionID: "session-a", Payload: map[string]any{"run_id": "run-a"},
 	}}}

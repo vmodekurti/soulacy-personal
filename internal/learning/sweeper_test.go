@@ -2,6 +2,7 @@ package learning
 
 import (
 	"context"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"path/filepath"
 	"testing"
 	"time"
@@ -25,10 +26,12 @@ func (f fakeTailer) Tail(agentID string, n int) ([]message.Event, error) {
 }
 
 func TestSweeperCreatesReviewableProposalsForAutoProposeAgents(t *testing.T) {
-	store, err := NewStore(filepath.Join(t.TempDir(), "learning.jsonl"))
+	stores, err := NewStores(filepath.Join(t.TempDir(), "learning.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A single-tenant sweep is the personal workspace's.
+	store := stores.For(wsroot.PersonalWorkspaceID)
 	agentID := "researcher"
 	defs := fakeAgents{defs: []*agent.Definition{{
 		ID:   agentID,
@@ -46,7 +49,7 @@ func TestSweeperCreatesReviewableProposalsForAutoProposeAgents(t *testing.T) {
 		{AgentID: agentID, SessionID: "s1", Type: "message.out", Payload: map[string]any{"text": "Use these steps:\n1. Search official release.\n2. Compare estimates.\n3. Summarize risks."}, Timestamp: time.Now()},
 	}
 	sweeper := NewSweeper(SweeperConfig{
-		Store:   store,
+		Stores:  stores,
 		Actions: fakeTailer{events: map[string][]message.Event{agentID: events}},
 		Agents:  defs,
 	})
@@ -84,13 +87,13 @@ func TestSweeperCreatesReviewableProposalsForAutoProposeAgents(t *testing.T) {
 }
 
 func TestSweeperSkipsAgentsWithoutAutoPropose(t *testing.T) {
-	store, err := NewStore(filepath.Join(t.TempDir(), "learning.jsonl"))
+	stores, err := NewStores(filepath.Join(t.TempDir(), "learning.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	agentID := "quiet"
 	sweeper := NewSweeper(SweeperConfig{
-		Store: store,
+		Stores: stores,
 		Actions: fakeTailer{events: map[string][]message.Event{agentID: {
 			{AgentID: agentID, SessionID: "s1", Type: "message.in", Payload: map[string]any{"text": "hello"}},
 			{AgentID: agentID, SessionID: "s1", Type: "message.out", Payload: map[string]any{"text": "hello back with enough detail"}},

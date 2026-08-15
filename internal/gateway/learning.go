@@ -22,7 +22,7 @@ import (
 )
 
 func (s *Server) handleListLearningProposals(c *fiber.Ctx) error {
-	store := s.engine.LearningStore()
+	store := s.learningStore(c)
 	if store == nil {
 		return c.JSON(fiber.Map{"enabled": false, "proposals": []learning.Proposal{}})
 	}
@@ -129,7 +129,7 @@ func learningProposalView(p learning.Proposal) map[string]any {
 // handleDisableLearningProposal toggles an accepted learning on/off without
 // deleting it. Body: {"disabled": true|false} (defaults to true).
 func (s *Server) handleDisableLearningProposal(c *fiber.Ctx) error {
-	store := s.engine.LearningStore()
+	store := s.learningStore(c)
 	if store == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "learning is not enabled")
 	}
@@ -158,7 +158,7 @@ func (s *Server) handleDisableLearningProposal(c *fiber.Ctx) error {
 }
 
 func (s *Server) handleLearningSummary(c *fiber.Ctx) error {
-	store := s.engine.LearningStore()
+	store := s.learningStore(c)
 	if store == nil {
 		return c.JSON(fiber.Map{
 			"enabled": false,
@@ -272,7 +272,7 @@ func scopedLearningSummary(store *learning.Store, agentID string, since time.Tim
 // pure aggregation over the action log plus accepted proposals, so it is safe to
 // call on demand from the Brain Memory UI.
 func (s *Server) handleLearningEvidence(c *fiber.Ctx) error {
-	store := s.engine.LearningStore()
+	store := s.learningStore(c)
 	if store == nil {
 		return c.JSON(fiber.Map{
 			"enabled":  false,
@@ -327,7 +327,7 @@ func (s *Server) handleLearningEvidence(c *fiber.Ctx) error {
 }
 
 func (s *Server) handleProposeLearningFromRun(c *fiber.Ctx) error {
-	store := s.engine.LearningStore()
+	store := s.learningStore(c)
 	if store == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "learning proposal store not configured")
 	}
@@ -400,7 +400,7 @@ func (s *Server) handleProposeLearningFromRun(c *fiber.Ctx) error {
 }
 
 func (s *Server) handleReflectLearningFromRecentRuns(c *fiber.Ctx) error {
-	store := s.engine.LearningStore()
+	store := s.learningStore(c)
 	if store == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "learning proposal store not configured")
 	}
@@ -487,7 +487,7 @@ func (s *Server) handleReflectLearningFromRecentRuns(c *fiber.Ctx) error {
 }
 
 func (s *Server) handleAcceptLearningProposal(c *fiber.Ctx) error {
-	store := s.engine.LearningStore()
+	store := s.learningStore(c)
 	if store == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "learning proposal store not configured")
 	}
@@ -569,7 +569,7 @@ func (s *Server) promoteAcceptedToStudioLesson(scope studioScope, p learning.Pro
 }
 
 func (s *Server) handleUpdateLearningProposal(c *fiber.Ctx) error {
-	store := s.engine.LearningStore()
+	store := s.learningStore(c)
 	if store == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "learning proposal store not configured")
 	}
@@ -592,7 +592,7 @@ func (s *Server) handleUpdateLearningProposal(c *fiber.Ctx) error {
 }
 
 func (s *Server) handleRejectLearningProposal(c *fiber.Ctx) error {
-	store := s.engine.LearningStore()
+	store := s.learningStore(c)
 	if store == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "learning proposal store not configured")
 	}

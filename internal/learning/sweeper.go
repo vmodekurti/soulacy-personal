@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 )
@@ -23,12 +24,28 @@ type AgentSource interface {
 	All() []*agent.Definition
 }
 
+// WorkspaceAgentSource is the tenant-aware agent listing. A source that does
+// not implement it is single-tenant, and the sweep stays in the personal
+// workspace rather than guessing.
+type WorkspaceAgentSource interface {
+	AgentSource
+	AllWorkspaces() []string
+	AllInWorkspace(workspaceID string) []*agent.Definition
+}
+
 type EventTailer interface {
 	Tail(agentID string, n int) ([]message.Event, error)
 }
 
+// WorkspaceEventTailer is the tenant-aware history read. Same rule: a tailer
+// without it is single-tenant.
+type WorkspaceEventTailer interface {
+	EventTailer
+	TailInWorkspace(workspaceID, agentID string, n int) ([]message.Event, error)
+}
+
 type Sweeper struct {
-	store    *Store
+	stores   *Stores
 	actions  EventTailer
 	agents   AgentSource
 	log      *zap.Logger
@@ -38,7 +55,7 @@ type Sweeper struct {
 }
 
 type SweeperConfig struct {
-	Store    *Store
+	Stores   *Stores
 	Actions  EventTailer
 	Agents   AgentSource
 	Logger   *zap.Logger
@@ -74,7 +91,7 @@ func NewSweeper(cfg SweeperConfig) *Sweeper {
 		log = zap.NewNop()
 	}
 	return &Sweeper{
-		store:    cfg.Store,
+		stores:   cfg.Stores,
 		actions:  cfg.Actions,
 		agents:   cfg.Agents,
 		log:      log,
@@ -102,7 +119,7 @@ func IntervalFromEnv() time.Duration {
 }
 
 func (s *Sweeper) Start(ctx context.Context) {
-	if s == nil || s.store == nil || s.actions == nil || s.agents == nil || s.interval < 0 {
+	if s == nil || s.stores == nil || s.actions == nil || s.agents == nil || s.interval < 0 {
 		return
 	}
 	go func() {
@@ -125,10 +142,61 @@ func (s *Sweeper) Start(ctx context.Context) {
 
 func (s *Sweeper) SweepOnce(ctx context.Context) (SweepResult, error) {
 	var result SweepResult
-	if s == nil || s.store == nil || s.actions == nil || s.agents == nil {
+	if s == nil || s.stores == nil || s.actions == nil || s.agents == nil {
 		return result, nil
 	}
-	for _, def := range s.agents.All() {
+	// The sweep covers every tenant, but touches one at a time: each
+	// workspace's agents are listed, tailed, and written back within that
+	// workspace. Reading one tenant's runs and proposing into another's queue
+	// would be a rule someone else could accept.
+	for _, workspaceID := range s.workspaces() {
+		swept, err := s.sweepWorkspace(ctx, workspaceID)
+		result.AgentsReviewed += swept.AgentsReviewed
+		result.RunsReviewed += swept.RunsReviewed
+		result.Created += swept.Created
+		if err != nil {
+			return result, err
+		}
+	}
+	return result, nil
+}
+
+// workspaces lists the tenants to sweep. A single-tenant agent source yields
+// just the personal workspace, which is what its agents are.
+func (s *Sweeper) workspaces() []string {
+	scoped, ok := s.agents.(WorkspaceAgentSource)
+	if !ok {
+		return []string{wsroot.PersonalWorkspaceID}
+	}
+	return scoped.AllWorkspaces()
+}
+
+func (s *Sweeper) agentsIn(workspaceID string) []*agent.Definition {
+	if scoped, ok := s.agents.(WorkspaceAgentSource); ok {
+		return scoped.AllInWorkspace(workspaceID)
+	}
+	return s.agents.All()
+}
+
+func (s *Sweeper) tailIn(workspaceID, agentID string) ([]message.Event, error) {
+	if scoped, ok := s.actions.(WorkspaceEventTailer); ok {
+		return scoped.TailInWorkspace(workspaceID, agentID, s.limit)
+	}
+	if workspaceID != wsroot.PersonalWorkspaceID {
+		// Falling back to the unscoped tail would read the personal
+		// workspace's runs and propose them into this tenant's queue.
+		return nil, nil
+	}
+	return s.actions.Tail(agentID, s.limit)
+}
+
+func (s *Sweeper) sweepWorkspace(ctx context.Context, workspaceID string) (SweepResult, error) {
+	var result SweepResult
+	store := s.stores.For(workspaceID)
+	if store == nil {
+		return result, nil
+	}
+	for _, def := range s.agentsIn(workspaceID) {
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
@@ -136,13 +204,7 @@ func (s *Sweeper) SweepOnce(ctx context.Context) (SweepResult, error) {
 			continue
 		}
 		result.AgentsReviewed++
-		// Personal-only, and deliberately so on both ends: AgentSource is the
-		// loader's personal listing, and Tail is documented as the personal
-		// workspace's history. The reflection store itself carries no
-		// workspace yet, so scoping only the reads would gather one tenant's
-		// runs into a store every tenant shares — worse than staying
-		// single-tenant. This becomes per-workspace when learning.Store does.
-		events, err := s.actions.Tail(def.ID, s.limit)
+		events, err := s.tailIn(workspaceID, def.ID)
 		if err != nil {
 			s.log.Warn("learning reflection tail failed", zap.String("agent", def.ID), zap.Error(err))
 			continue
@@ -156,7 +218,7 @@ func (s *Sweeper) SweepOnce(ctx context.Context) (SweepResult, error) {
 				continue
 			}
 			result.RunsReviewed++
-			created, err := s.reflectRun(def, run)
+			created, err := s.reflectRun(store, def, run)
 			if err != nil {
 				s.log.Warn("learning reflection proposal failed",
 					zap.String("agent", def.ID),
@@ -171,7 +233,10 @@ func (s *Sweeper) SweepOnce(ctx context.Context) (SweepResult, error) {
 	return result, nil
 }
 
-func (s *Sweeper) reflectRun(def *agent.Definition, run RunEvidence) (int, error) {
+// reflectRun takes the store explicitly rather than reading a field, so a
+// proposal cannot be written into a workspace other than the one whose runs
+// produced it.
+func (s *Sweeper) reflectRun(store *Store, def *agent.Definition, run RunEvidence) (int, error) {
 	minChars := def.Learning.MinChars
 	if minChars <= 0 {
 		minChars = 80
@@ -200,11 +265,11 @@ func (s *Sweeper) reflectRun(def *agent.Definition, run RunEvidence) (int, error
 		p.Meta["background_reflection"] = "true"
 		p.Meta["reflection_sweep"] = "true"
 		key := dedupeKey(p)
-		alreadyPending, err := s.pendingDedupeExists(def.ID, key)
+		alreadyPending, err := pendingDedupeExists(store, def.ID, key)
 		if err != nil {
 			return created, err
 		}
-		added, err := s.store.Add(p)
+		added, err := store.Add(p)
 		if err != nil {
 			return created, err
 		}
@@ -215,8 +280,8 @@ func (s *Sweeper) reflectRun(def *agent.Definition, run RunEvidence) (int, error
 	return created, nil
 }
 
-func (s *Sweeper) pendingDedupeExists(agentID, key string) (bool, error) {
-	existing, err := s.store.List(agentID, StatusPending, 0)
+func pendingDedupeExists(store *Store, agentID, key string) (bool, error) {
+	existing, err := store.List(agentID, StatusPending, 0)
 	if err != nil {
 		return false, err
 	}

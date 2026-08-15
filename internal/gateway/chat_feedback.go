@@ -46,7 +46,7 @@ func (s *Server) handleChatFeedback(c *fiber.Ctx) error {
 	if err := s.claimSession(c, body.AgentID, body.SessionID); err != nil {
 		return err
 	}
-	store := s.engine.LearningStore()
+	store := s.learningStore(c)
 	if store == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "learning feedback store not configured")
 	}
@@ -103,7 +103,7 @@ func (s *Server) handleChatFeedback(c *fiber.Ctx) error {
 }
 
 func (s *Server) handleListChatFeedback(c *fiber.Ctx) error {
-	store := s.engine.LearningStore()
+	store := s.learningStore(c)
 	if store == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "learning feedback store not configured")
 	}

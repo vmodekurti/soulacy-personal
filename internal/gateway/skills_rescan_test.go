@@ -3,6 +3,7 @@ package gateway
 // Story E18: POST /api/v1/skills/rescan hot-loads freshly installed skills.
 
 import (
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -58,11 +59,13 @@ func TestAcceptLearningSkillInstallsAndRescans(t *testing.T) {
 	loader := &rescanSkillLoader{}
 	srv.skillLoader = loader
 
-	store, err := learning.NewStore(filepath.Join(workspace, "data", "learning.db"))
+	stores, err := learning.NewStores(filepath.Join(workspace, "data", "learning.db"))
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	srv.engine.SetLearningStore(store)
+	// The personal workspace is what a directly constructed test gateway is.
+	store := stores.For(wsroot.PersonalWorkspaceID)
+	srv.engine.SetLearningStores(stores)
 	p, err := store.Add(learning.Proposal{
 		AgentID: "agent-a",
 		Kind:    "skill",
@@ -108,11 +111,13 @@ func TestUpdateLearningSkillProposalBeforeAccept(t *testing.T) {
 
 	srv := newTestGateway(t, "secret")
 	srv.skillLoader = &rescanSkillLoader{}
-	store, err := learning.NewStore(filepath.Join(workspace, "data", "learning.db"))
+	stores, err := learning.NewStores(filepath.Join(workspace, "data", "learning.db"))
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	srv.engine.SetLearningStore(store)
+	// The personal workspace is what a directly constructed test gateway is.
+	store := stores.For(wsroot.PersonalWorkspaceID)
+	srv.engine.SetLearningStores(stores)
 	p, err := store.Add(learning.Proposal{
 		AgentID: "agent-a",
 		Kind:    "skill",
