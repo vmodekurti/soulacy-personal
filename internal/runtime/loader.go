@@ -5,6 +5,7 @@ package runtime
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,10 +29,35 @@ const SystemAgentID = "system"
 // definitions so LoadAll's stale-file cleanup never removes them.
 const builtinSourcePath = "__builtin__"
 
+// PersonalWorkspaceID is the implicit workspace every Personal deployment
+// runs in. It matches the tenancy bootstrap ID so a Personal installation's
+// agents keep their existing on-disk location after this package became
+// workspace-aware.
+const PersonalWorkspaceID = "ws_personal"
+
+// workspaceRootDir namespaces non-personal workspaces on disk. Personal
+// agents stay at <dir>/<id>/SOUL.yaml exactly as before; every other
+// workspace lives under <dir>/.workspaces/<workspace-id>/<id>/SOUL.yaml.
+//
+// The layout is what makes workspace ownership structural rather than
+// advisory: an agent's workspace is derived from where its file sits, never
+// from anything inside the file. A SOUL.yaml cannot declare itself into
+// another tenant, so no hot-reload or watcher event can move it across the
+// boundary.
+const workspaceRootDir = ".workspaces"
+
+// agentKey makes (workspace, agent) the identity. Agent IDs are human-chosen
+// slugs and collide across tenants by design; keying on the ID alone let the
+// last directory walked silently win.
+type agentKey struct {
+	workspace string
+	id        string
+}
+
 // Loader discovers and hot-reloads agent definitions from disk.
 type Loader struct {
 	dirs   []string
-	agents map[string]*agent.Definition
+	agents map[agentKey]*agent.Definition
 	mu     sync.RWMutex
 	log    *zap.Logger
 }
@@ -39,18 +65,94 @@ type Loader struct {
 // AgentVersion is one immutable SOUL.yaml snapshot captured before an agent is
 // overwritten or deleted.
 type AgentVersion struct {
-	ID        string    `json:"id"`
-	AgentID   string    `json:"agent_id"`
-	Path      string    `json:"path"`
-	CreatedAt time.Time `json:"created_at"`
-	Bytes     int       `json:"bytes"`
+	ID          string    `json:"id"`
+	AgentID     string    `json:"agent_id"`
+	WorkspaceID string    `json:"workspace_id"`
+	Path        string    `json:"path"`
+	CreatedAt   time.Time `json:"created_at"`
+	Bytes       int       `json:"bytes"`
+	// Actor is the principal that caused this snapshot. It is empty for
+	// snapshots captured before version metadata was recorded, and for writes
+	// that reached the loader without a request identity (a filesystem edit,
+	// for instance).
+	Actor string `json:"actor,omitempty"`
+}
+
+// versionMetadata is the sidecar written next to each snapshot. Snapshot
+// timestamps used to come from the file's mtime, which a backup restore or a
+// `cp -p` silently rewrites; recording creation explicitly keeps the history
+// honest, and carries the actor the filesystem never knew.
+type versionMetadata struct {
+	Actor       string    `json:"actor,omitempty"`
+	WorkspaceID string    `json:"workspace_id"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// NormalizeWorkspace maps an absent workspace to the implicit personal one so
+// every legacy call site keeps working unchanged.
+func NormalizeWorkspace(workspaceID string) string {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return PersonalWorkspaceID
+	}
+	return workspaceID
+}
+
+// ValidateWorkspaceID rejects IDs that cannot safely become a path segment,
+// for the same reason ValidateAgentID exists: the ID is about to be joined
+// into a filesystem path.
+func ValidateWorkspaceID(workspaceID string) error {
+	if workspaceID == "." || workspaceID == ".." {
+		return fmt.Errorf("workspace ID %q is not a usable directory name", workspaceID)
+	}
+	if !agentIDRe.MatchString(workspaceID) {
+		return fmt.Errorf("workspace ID %q is not allowed: use 1-64 characters of a-z, 0-9, '.', '_' or '-'", workspaceID)
+	}
+	return nil
+}
+
+// workspaceAgentRoot returns the directory that holds one workspace's agents.
+func workspaceAgentRoot(dir, workspaceID string) string {
+	if NormalizeWorkspace(workspaceID) == PersonalWorkspaceID {
+		return dir
+	}
+	return filepath.Join(dir, workspaceRootDir, workspaceID)
+}
+
+// workspaceForPath derives the owning workspace from a file's location under
+// a configured agent directory. Returning ok=false means the path is not a
+// legitimate agent location and must be ignored rather than guessed at.
+func workspaceForPath(dir, path string) (string, bool) {
+	relative, err := filepath.Rel(dir, path)
+	if err != nil {
+		return "", false
+	}
+	parts := strings.Split(filepath.ToSlash(relative), "/")
+	if len(parts) == 0 || parts[0] == ".." {
+		// The path escapes the configured agent directory. Walk never produces
+		// one, but classifying an outside path as "personal" would be a quiet
+		// way for a symlinked or misconfigured root to inject an agent.
+		return "", false
+	}
+	if parts[0] == workspaceRootDir {
+		// .workspaces/<id>/... — a file directly in the namespace root belongs
+		// to no workspace and must not be guessed into one.
+		if len(parts) < 3 {
+			return "", false
+		}
+		if ValidateWorkspaceID(parts[1]) != nil {
+			return "", false
+		}
+		return parts[1], true
+	}
+	return PersonalWorkspaceID, true
 }
 
 // NewLoader creates a Loader that watches the given directories.
 func NewLoader(dirs []string) *Loader {
 	l := &Loader{
 		dirs:   dirs,
-		agents: make(map[string]*agent.Definition),
+		agents: make(map[agentKey]*agent.Definition),
 		log:    zap.NewNop(),
 	}
 	l.seedBuiltins()
@@ -71,7 +173,7 @@ func (l *Loader) SetLogger(log *zap.Logger) {
 //   - "system" — master chat agent with full OS-level tool access.
 func (l *Loader) seedBuiltins() {
 	system := builtinSystemAgent()
-	l.agents[system.ID] = system
+	l.agents[agentKey{PersonalWorkspaceID, system.ID}] = system
 }
 
 // builtinSystemAgent returns the Definition for the always-on system agent.
@@ -208,7 +310,7 @@ func (l *Loader) LoadAll() []error {
 	defer l.mu.Unlock()
 
 	var errs []error
-	found := map[string]bool{}
+	found := map[agentKey]bool{}
 
 	for _, dir := range l.dirs {
 		// Walk the directory looking for *.yaml and *.yml files
@@ -224,6 +326,16 @@ func (l *Loader) LoadAll() []error {
 			}
 			ext := filepath.Ext(path)
 			if ext != ".yaml" && ext != ".yml" {
+				return nil
+			}
+
+			// The owning workspace comes from the path and only from the path.
+			// This is the whole defence against a hot-reload loading an agent
+			// into another tenant: a SOUL.yaml has no say in where it belongs,
+			// so dropping a file into one workspace's directory cannot reach
+			// another, however the file is authored.
+			workspaceID, ok := workspaceForPath(dir, path)
+			if !ok {
 				return nil
 			}
 
@@ -243,13 +355,15 @@ func (l *Loader) LoadAll() []error {
 					def.ConfirmTools = append(def.ConfirmTools, "package_install")
 				}
 				def.SourcePath = path
-				l.agents[SystemAgentID] = def
-				found[SystemAgentID] = true
+				key := agentKey{workspaceID, SystemAgentID}
+				l.agents[key] = def
+				found[key] = true
 				return nil
 			}
 
-			l.agents[def.ID] = def
-			found[def.ID] = true
+			key := agentKey{workspaceID, def.ID}
+			l.agents[key] = def
+			found[key] = true
 			return nil
 		})
 		if err != nil {
@@ -260,15 +374,15 @@ func (l *Loader) LoadAll() []error {
 	// Remove agents whose files have been deleted.
 	// Built-in agents (SourcePath == builtinSourcePath) are permanent — they
 	// live only in memory and are never written to disk, so we skip them here.
-	for id, def := range l.agents {
+	for key, def := range l.agents {
 		if def.SourcePath == builtinSourcePath {
 			continue // never prune built-ins
 		}
-		if !found[id] {
-			if id == SystemAgentID {
-				l.agents[SystemAgentID] = builtinSystemAgent()
+		if !found[key] {
+			if key.id == SystemAgentID && key.workspace == PersonalWorkspaceID {
+				l.agents[key] = builtinSystemAgent()
 			} else {
-				delete(l.agents, id)
+				delete(l.agents, key)
 			}
 		}
 	}
@@ -318,12 +432,22 @@ func (l *Loader) parseFile(path string) (*agent.Definition, error) {
 // excluded from wildcard peer expansion so they don't appear as callable tools
 // unless an agent explicitly names them by ID.
 func (l *Loader) IsBuiltin(id string) bool {
+	return l.IsBuiltinInWorkspace(PersonalWorkspaceID, id)
+}
+
+// IsBuiltinInWorkspace reports whether the agent is a built-in. Built-ins are
+// platform-provided and visible in every workspace, so this consults the
+// workspace's own entry first and falls back to the seeded platform copy.
+func (l *Loader) IsBuiltinInWorkspace(workspaceID, id string) bool {
 	if id == SystemAgentID {
 		return true
 	}
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-	d, ok := l.agents[id]
+	if d, ok := l.agents[agentKey{NormalizeWorkspace(workspaceID), id}]; ok {
+		return d.SourcePath == builtinSourcePath
+	}
+	d, ok := l.agents[agentKey{PersonalWorkspaceID, id}]
 	return ok && d.SourcePath == builtinSourcePath
 }
 
@@ -333,25 +457,78 @@ func (l *Loader) IsBuiltin(id string) bool {
 // cannot mutate the pointer the engine is holding. Slice and map fields
 // each get their own backing storage. See agent.Definition.Clone().
 func (l *Loader) Get(id string) *agent.Definition {
+	return l.GetInWorkspace(PersonalWorkspaceID, id)
+}
+
+// GetInWorkspace resolves an agent inside one workspace. A workspace that does
+// not own the agent gets nil — not another workspace's definition — so a
+// guessed ID reveals nothing about whether it exists elsewhere.
+//
+// Platform built-ins are the deliberate exception: they are provided by the
+// installation rather than by a tenant, so every workspace sees them.
+func (l *Loader) GetInWorkspace(workspaceID, id string) *agent.Definition {
+	workspaceID = NormalizeWorkspace(workspaceID)
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-	d, ok := l.agents[id]
-	if !ok {
-		return nil
+	if d, ok := l.agents[agentKey{workspaceID, id}]; ok {
+		return d.Clone()
 	}
-	return d.Clone()
+	if d, ok := l.agents[agentKey{PersonalWorkspaceID, id}]; ok && d.SourcePath == builtinSourcePath {
+		return d.Clone()
+	}
+	return nil
 }
 
 // All returns a snapshot of all loaded agent definitions. Each definition is
 // a deep clone (same rationale as Get — see agent.Definition.Clone()).
 func (l *Loader) All() []*agent.Definition {
+	return l.AllInWorkspace(PersonalWorkspaceID)
+}
+
+// AllInWorkspace returns the agents visible in one workspace: its own, plus
+// the platform built-ins. It never returns another workspace's agents, so a
+// listing cannot be used to enumerate the deployment.
+func (l *Loader) AllInWorkspace(workspaceID string) []*agent.Definition {
+	workspaceID = NormalizeWorkspace(workspaceID)
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	defs := make([]*agent.Definition, 0, len(l.agents))
-	for _, d := range l.agents {
+	seen := map[string]bool{}
+	for key, d := range l.agents {
+		if key.workspace != workspaceID {
+			continue
+		}
+		seen[key.id] = true
 		defs = append(defs, d.Clone())
 	}
+	if workspaceID != PersonalWorkspaceID {
+		for key, d := range l.agents {
+			if key.workspace != PersonalWorkspaceID || d.SourcePath != builtinSourcePath || seen[key.id] {
+				continue
+			}
+			defs = append(defs, d.Clone())
+		}
+	}
 	return defs
+}
+
+// AllWorkspaces lists every workspace that currently owns at least one agent.
+// Background work that must sweep all tenants (schedulers, boot validation)
+// uses this instead of reaching into the map.
+func (l *Loader) AllWorkspaces() []string {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	seen := map[string]bool{}
+	out := make([]string, 0, 4)
+	for key := range l.agents {
+		if seen[key.workspace] {
+			continue
+		}
+		seen[key.workspace] = true
+		out = append(out, key.workspace)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // SetEnabledInMemory flips the Enabled flag on the in-memory definition WITHOUT
@@ -360,9 +537,14 @@ func (l *Loader) All() []*agent.Definition {
 // restore whatever the file says, which is the intended behaviour (fix the file,
 // save, and it comes back). Returns false if the agent ID is unknown.
 func (l *Loader) SetEnabledInMemory(id string, enabled bool) bool {
+	return l.SetEnabledInMemoryInWorkspace(PersonalWorkspaceID, id, enabled)
+}
+
+// SetEnabledInMemoryInWorkspace flips Enabled for one workspace's agent only.
+func (l *Loader) SetEnabledInMemoryInWorkspace(workspaceID, id string, enabled bool) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	d, ok := l.agents[id]
+	d, ok := l.agents[agentKey{NormalizeWorkspace(workspaceID), id}]
 	if !ok {
 		return false
 	}
@@ -396,8 +578,21 @@ func ValidateAgentID(id string) error {
 // Each agent lives in its own folder: <dir>/<id>/SOUL.yaml. Legacy flat-file
 // agents (<dir>/<id>.yaml) are migrated to the folder layout on the next write.
 func (l *Loader) Upsert(dir string, def *agent.Definition) error {
+	return l.UpsertInWorkspace(PersonalWorkspaceID, dir, def, "")
+}
+
+// UpsertInWorkspace writes an agent into one workspace's own directory and
+// records the acting principal in the version history.
+//
+// The workspace is resolved into a path here rather than accepted as data, so
+// a caller cannot write into another tenant by supplying a crafted directory.
+func (l *Loader) UpsertInWorkspace(workspaceID, dir string, def *agent.Definition, actor string) error {
 	if def.ID == "" {
 		return fmt.Errorf("agent ID is required")
+	}
+	workspaceID = NormalizeWorkspace(workspaceID)
+	if err := ValidateWorkspaceID(workspaceID); err != nil {
+		return err
 	}
 	// The ID becomes a path segment on the very next line, and the ways an ID
 	// gets here are not all typed by a person: the package importer takes it from
@@ -424,18 +619,19 @@ func (l *Loader) Upsert(dir string, def *agent.Definition) error {
 	oldPath := def.SourcePath // where this agent currently lives (empty for new agents/imports)
 	if oldPath == "" {
 		l.mu.RLock()
-		if existing := l.agents[def.ID]; existing != nil {
+		if existing := l.agents[agentKey{workspaceID, def.ID}]; existing != nil {
 			oldPath = existing.SourcePath
 		}
 		l.mu.RUnlock()
 	}
 	if oldPath != "" && oldPath != builtinSourcePath {
-		if err := l.snapshotPath(dir, def.ID, oldPath); err != nil {
+		if err := l.snapshotPath(workspaceID, dir, def.ID, oldPath, actor); err != nil {
 			l.log.Warn("agent history snapshot failed", zap.String("agent", def.ID), zap.Error(err))
 		}
 	}
 
-	agentDir := filepath.Join(dir, def.ID)
+	root := workspaceAgentRoot(dir, workspaceID)
+	agentDir := filepath.Join(root, def.ID)
 	if err := os.MkdirAll(agentDir, 0755); err != nil {
 		return err
 	}
@@ -460,7 +656,7 @@ func (l *Loader) Upsert(dir string, def *agent.Definition) error {
 
 	def.SourcePath = path
 	l.mu.Lock()
-	l.agents[def.ID] = def
+	l.agents[agentKey{workspaceID, def.ID}] = def
 	l.mu.Unlock()
 	return nil
 }
@@ -478,11 +674,18 @@ func containsExactString(values []string, want string) bool {
 // the engine can run it but it is never persisted. Used for ephemeral agents like
 // a Studio "try this" run. Pair every Register with an Unregister (defer).
 func (l *Loader) Register(def *agent.Definition) {
+	l.RegisterInWorkspace(PersonalWorkspaceID, def)
+}
+
+// RegisterInWorkspace adds an ephemeral definition visible only to one
+// workspace, so a Studio "try this" run in one tenant is not runnable from
+// another that happens to guess the id.
+func (l *Loader) RegisterInWorkspace(workspaceID string, def *agent.Definition) {
 	if def == nil || def.ID == "" {
 		return
 	}
 	l.mu.Lock()
-	l.agents[def.ID] = def
+	l.agents[agentKey{NormalizeWorkspace(workspaceID), def.ID}] = def
 	l.mu.Unlock()
 }
 
@@ -490,13 +693,26 @@ func (l *Loader) Register(def *agent.Definition) {
 // touches disk, so it is safe even if a same-id persisted agent exists (callers
 // must use a unique ephemeral id to avoid evicting a real agent).
 func (l *Loader) Unregister(id string) {
+	l.UnregisterInWorkspace(PersonalWorkspaceID, id)
+}
+
+// UnregisterInWorkspace drops an ephemeral definition from one workspace.
+func (l *Loader) UnregisterInWorkspace(workspaceID, id string) {
 	l.mu.Lock()
-	delete(l.agents, id)
+	delete(l.agents, agentKey{NormalizeWorkspace(workspaceID), id})
 	l.mu.Unlock()
 }
 
 // Delete removes an agent definition from disk and memory.
 func (l *Loader) Delete(id string) error {
+	return l.DeleteInWorkspace(PersonalWorkspaceID, id, "")
+}
+
+// DeleteInWorkspace removes an agent from one workspace only. Deleting an ID
+// the workspace does not own is a no-op rather than an error, which is both
+// idempotent and silent about whether that ID exists somewhere else.
+func (l *Loader) DeleteInWorkspace(workspaceID, id, actor string) error {
+	workspaceID = NormalizeWorkspace(workspaceID)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -504,7 +720,7 @@ func (l *Loader) Delete(id string) error {
 		return fmt.Errorf("agent %q is a protected built-in and cannot be deleted", id)
 	}
 
-	def, ok := l.agents[id]
+	def, ok := l.agents[agentKey{workspaceID, id}]
 	if !ok {
 		// Already absent (e.g. a stale GUI row or a phantom left by an id rename).
 		// Delete is idempotent — deleting something that's gone is success.
@@ -513,7 +729,7 @@ func (l *Loader) Delete(id string) error {
 	if def.SourcePath == builtinSourcePath {
 		return fmt.Errorf("agent %q is a built-in and cannot be deleted", id)
 	}
-	if err := l.snapshotPath("", id, def.SourcePath); err != nil {
+	if err := l.snapshotPath(workspaceID, "", id, def.SourcePath, actor); err != nil {
 		l.log.Warn("agent history snapshot failed", zap.String("agent", id), zap.Error(err))
 	}
 	if err := os.Remove(def.SourcePath); err != nil && !os.IsNotExist(err) {
@@ -526,14 +742,22 @@ func (l *Loader) Delete(id string) error {
 	if filepath.Base(parent) == id {
 		_ = os.Remove(parent)
 	}
-	delete(l.agents, id)
+	delete(l.agents, agentKey{workspaceID, id})
 	return nil
 }
 
 // AgentVersions returns snapshots for an agent, newest first.
 func (l *Loader) AgentVersions(id string) ([]AgentVersion, error) {
+	return l.AgentVersionsInWorkspace(PersonalWorkspaceID, id)
+}
+
+// AgentVersionsInWorkspace returns one workspace's snapshots for an agent.
+// History roots are per workspace, so a caller cannot read another tenant's
+// definitions by asking for an agent ID it does not own.
+func (l *Loader) AgentVersionsInWorkspace(workspaceID, id string) ([]AgentVersion, error) {
+	workspaceID = NormalizeWorkspace(workspaceID)
 	var out []AgentVersion
-	for _, root := range l.historyRoots("") {
+	for _, root := range l.historyRoots(workspaceID, "") {
 		dir := filepath.Join(root, id)
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -551,13 +775,16 @@ func (l *Loader) AgentVersions(id string) ([]AgentVersion, error) {
 			if err != nil {
 				continue
 			}
-			out = append(out, AgentVersion{
-				ID:        strings.TrimSuffix(entry.Name(), ".yaml"),
-				AgentID:   id,
-				Path:      path,
-				CreatedAt: info.ModTime().UTC(),
-				Bytes:     int(info.Size()),
-			})
+			version := AgentVersion{
+				ID:          strings.TrimSuffix(entry.Name(), ".yaml"),
+				AgentID:     id,
+				WorkspaceID: workspaceID,
+				Path:        path,
+				CreatedAt:   info.ModTime().UTC(),
+				Bytes:       int(info.Size()),
+			}
+			applyVersionMetadata(&version, path)
+			out = append(out, version)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -568,6 +795,12 @@ func (l *Loader) AgentVersions(id string) ([]AgentVersion, error) {
 
 // ReadAgentVersion returns the raw SOUL.yaml captured in a version snapshot.
 func (l *Loader) ReadAgentVersion(id, version string) ([]byte, AgentVersion, error) {
+	return l.ReadAgentVersionInWorkspace(PersonalWorkspaceID, id, version)
+}
+
+// ReadAgentVersionInWorkspace reads a snapshot from one workspace's history.
+func (l *Loader) ReadAgentVersionInWorkspace(workspaceID, id, version string) ([]byte, AgentVersion, error) {
+	workspaceID = NormalizeWorkspace(workspaceID)
 	version = filepath.Base(strings.TrimSpace(version))
 	if version == "." || version == "" || strings.Contains(version, string(filepath.Separator)) {
 		return nil, AgentVersion{}, fmt.Errorf("invalid version id")
@@ -575,16 +808,17 @@ func (l *Loader) ReadAgentVersion(id, version string) ([]byte, AgentVersion, err
 	if !strings.HasSuffix(version, ".yaml") {
 		version += ".yaml"
 	}
-	for _, root := range l.historyRoots("") {
+	for _, root := range l.historyRoots(workspaceID, "") {
 		path := filepath.Join(root, id, version)
 		data, err := os.ReadFile(path)
 		if err == nil {
 			info, _ := os.Stat(path)
-			v := AgentVersion{ID: strings.TrimSuffix(filepath.Base(path), ".yaml"), AgentID: id, Path: path, Bytes: len(data)}
+			v := AgentVersion{ID: strings.TrimSuffix(filepath.Base(path), ".yaml"), AgentID: id, WorkspaceID: workspaceID, Path: path, Bytes: len(data)}
 			if info != nil {
 				v.CreatedAt = info.ModTime().UTC()
 				v.Bytes = int(info.Size())
 			}
+			applyVersionMetadata(&v, path)
 			return data, v, nil
 		}
 		if !os.IsNotExist(err) {
@@ -596,7 +830,14 @@ func (l *Loader) ReadAgentVersion(id, version string) ([]byte, AgentVersion, err
 
 // RestoreAgentVersion rolls an agent back to a previous SOUL.yaml snapshot.
 func (l *Loader) RestoreAgentVersion(dir, id, version string) (*agent.Definition, AgentVersion, error) {
-	data, v, err := l.ReadAgentVersion(id, version)
+	return l.RestoreAgentVersionInWorkspace(PersonalWorkspaceID, dir, id, version, "")
+}
+
+// RestoreAgentVersionInWorkspace rolls one workspace's agent back to one of
+// its own snapshots, recording the actor who did it.
+func (l *Loader) RestoreAgentVersionInWorkspace(workspaceID, dir, id, version, actor string) (*agent.Definition, AgentVersion, error) {
+	workspaceID = NormalizeWorkspace(workspaceID)
+	data, v, err := l.ReadAgentVersionInWorkspace(workspaceID, id, version)
 	if err != nil {
 		return nil, AgentVersion{}, err
 	}
@@ -605,20 +846,20 @@ func (l *Loader) RestoreAgentVersion(dir, id, version string) (*agent.Definition
 		return nil, AgentVersion{}, fmt.Errorf("parse version YAML: %w", err)
 	}
 	def.ID = id
-	if existing := l.Get(id); existing != nil {
+	if existing := l.GetInWorkspace(workspaceID, id); existing != nil {
 		def.SourcePath = existing.SourcePath
 		def.LoadedAt = existing.LoadedAt
 	}
 	if dir == "" && len(l.dirs) > 0 {
 		dir = l.dirs[0]
 	}
-	if err := l.Upsert(dir, &def); err != nil {
+	if err := l.UpsertInWorkspace(workspaceID, dir, &def, actor); err != nil {
 		return nil, AgentVersion{}, err
 	}
 	return &def, v, nil
 }
 
-func (l *Loader) snapshotPath(dir, id, sourcePath string) error {
+func (l *Loader) snapshotPath(workspaceID, dir, id, sourcePath, actor string) error {
 	if sourcePath == "" || sourcePath == builtinSourcePath {
 		return nil
 	}
@@ -629,7 +870,7 @@ func (l *Loader) snapshotPath(dir, id, sourcePath string) error {
 		}
 		return err
 	}
-	roots := l.historyRoots(dir)
+	roots := l.historyRoots(workspaceID, dir)
 	if len(roots) == 0 {
 		return nil
 	}
@@ -637,17 +878,56 @@ func (l *Loader) snapshotPath(dir, id, sourcePath string) error {
 	if err := os.MkdirAll(hdir, 0755); err != nil {
 		return err
 	}
-	name := time.Now().UTC().Format("20060102T150405.000000000Z") + ".yaml"
-	return os.WriteFile(filepath.Join(hdir, name), data, 0644)
+	createdAt := time.Now().UTC()
+	name := createdAt.Format("20060102T150405.000000000Z")
+	if err := os.WriteFile(filepath.Join(hdir, name+".yaml"), data, 0644); err != nil {
+		return err
+	}
+	// The snapshot itself stays a plain YAML file so it remains readable and
+	// restorable by hand. Provenance goes in a sidecar rather than inside the
+	// YAML, so a restored definition is byte-identical to what was deployed.
+	metadata, err := json.Marshal(versionMetadata{Actor: actor, WorkspaceID: NormalizeWorkspace(workspaceID), CreatedAt: createdAt})
+	if err != nil {
+		return nil
+	}
+	if err := os.WriteFile(filepath.Join(hdir, name+".meta.json"), metadata, 0600); err != nil {
+		l.log.Warn("agent version metadata not recorded", zap.String("agent", id), zap.Error(err))
+	}
+	return nil
 }
 
-func (l *Loader) historyRoots(preferredDir string) []string {
+// applyVersionMetadata overlays the recorded actor and creation time when a
+// sidecar exists. Snapshots taken before provenance was recorded keep their
+// mtime-derived timestamp and an empty actor rather than a fabricated one.
+func applyVersionMetadata(version *AgentVersion, snapshotPath string) {
+	raw, err := os.ReadFile(strings.TrimSuffix(snapshotPath, ".yaml") + ".meta.json")
+	if err != nil {
+		return
+	}
+	var metadata versionMetadata
+	if err := json.Unmarshal(raw, &metadata); err != nil {
+		return
+	}
+	version.Actor = metadata.Actor
+	if metadata.WorkspaceID != "" {
+		version.WorkspaceID = metadata.WorkspaceID
+	}
+	if !metadata.CreatedAt.IsZero() {
+		version.CreatedAt = metadata.CreatedAt.UTC()
+	}
+}
+
+// historyRoots returns the snapshot directories for one workspace, preferred
+// directory first. Each workspace's history lives under its own agent root, so
+// listing versions can only ever surface that workspace's definitions.
+func (l *Loader) historyRoots(workspaceID, preferredDir string) []string {
+	workspaceID = NormalizeWorkspace(workspaceID)
 	var roots []string
 	add := func(dir string) {
 		if dir == "" {
 			return
 		}
-		root := filepath.Join(dir, ".agent-history")
+		root := filepath.Join(workspaceAgentRoot(dir, workspaceID), ".agent-history")
 		for _, existing := range roots {
 			if existing == root {
 				return
