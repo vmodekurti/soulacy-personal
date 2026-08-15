@@ -37,7 +37,7 @@ func (e *Engine) proposeLearning(ctx context.Context, def *agent.Definition, msg
 			e.log.Warn("learning proposal failed", zap.String("agent", msg.AgentID), zap.Error(err))
 			continue
 		}
-		e.sink.Emit(message.Event{
+		e.emit(ctx, message.Event{
 			Type:      "learning.proposal",
 			AgentID:   msg.AgentID,
 			SessionID: msg.SessionID,

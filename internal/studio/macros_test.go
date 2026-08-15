@@ -12,7 +12,7 @@ import (
 func TestWorkflowDistillerPersistsOnlySuccessfulStructure(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "macros.json")
 	store := NewMacroStore(path)
-	d := NewWorkflowDistiller(store)
+	d := NewWorkflowDistiller(SingleMacroStore(store))
 	event := func(kind string, payload any) {
 		d.Observe(message.Event{Type: kind, AgentID: "weather", SessionID: "s1", Payload: payload})
 	}
@@ -45,7 +45,7 @@ func TestWorkflowDistillerPersistsOnlySuccessfulStructure(t *testing.T) {
 
 func TestWorkflowDistillerRejectsFailedAndSingleToolRuns(t *testing.T) {
 	store := NewMacroStore(filepath.Join(t.TempDir(), "macros.json"))
-	d := NewWorkflowDistiller(store)
+	d := NewWorkflowDistiller(SingleMacroStore(store))
 	for _, tc := range []struct {
 		session string
 		failed  bool
@@ -92,7 +92,7 @@ func TestMacroStoreSimilarAndPromptGrounding(t *testing.T) {
 
 func TestWorkflowDistillerUsesTerminalOutcomeAndKeepsBranchStructure(t *testing.T) {
 	store := NewMacroStore(filepath.Join(t.TempDir(), "macros.json"))
-	d := NewWorkflowDistiller(store)
+	d := NewWorkflowDistiller(SingleMacroStore(store))
 	emit := func(kind string, payload any) {
 		d.Observe(message.Event{Type: kind, AgentID: "a", SessionID: "shared", Payload: payload})
 	}

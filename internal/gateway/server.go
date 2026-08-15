@@ -78,7 +78,6 @@ import (
 	"github.com/soulacy/soulacy/internal/voice"
 	"github.com/soulacy/soulacy/internal/webui"
 	"github.com/soulacy/soulacy/internal/workboard"
-	"github.com/soulacy/soulacy/internal/wsroot"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/gofiber/fiber/v2/middleware/adaptor"
@@ -244,15 +243,15 @@ func New(
 	if s.hub != nil {
 		s.hub.SetEventAuthorizer(s.authorizeEvent)
 		if s.studioLearningEnabled() {
-			// These observe the process-wide event hub, whose events carry no
-			// workspace. They are bound to the personal workspace rather than
-			// guessing: distilling one tenant's runs into another's macros
-			// would be silent and permanent. Carrying workspace on runtime
-			// events is the fix, tracked with the rest of Studio isolation.
-			personalStudio := s.studioForWorkspace(wsroot.PersonalWorkspaceID, "")
-			s.workflowDistiller = studio.NewWorkflowDistiller(personalStudio.macros())
+			// These observe the process-wide event hub, which carries every
+			// tenant's runs. They are given a per-workspace store resolver
+			// rather than one store, so each observation lands in the file
+			// owned by the workspace the event itself declares. Distilling one
+			// tenant's runs into another's macros would be silent and
+			// permanent, so the routing is by the event, never by a default.
+			s.workflowDistiller = studio.NewWorkflowDistiller(s.macroStoreFor)
 			s.hub.AddObserver(s.workflowDistiller.Observe)
-			s.strategyCollector = studio.NewStrategyFitCollector(personalStudio.strategyFit(), s.resolveAgentStrategy)
+			s.strategyCollector = studio.NewStrategyFitCollector(s.strategyFitStoreFor, s.resolveAgentStrategy)
 			s.hub.AddObserver(s.strategyCollector.Observe)
 			s.learningReplayWG.Add(1)
 			go func() { defer s.learningReplayWG.Done(); s.replayStudioLearning() }()

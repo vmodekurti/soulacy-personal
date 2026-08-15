@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/message"
 )
 
@@ -190,12 +191,27 @@ func (s *StrategyFitStore) writeLocked(rows []StrategyFit) error {
 	return os.Rename(name, s.path)
 }
 
-type StrategyResolver func(agentID string) (model, strategy string, ok bool)
+// StrategyResolver resolves an agent's configured model and strategy. It takes
+// the workspace because agent IDs are only unique within one: resolving by ID
+// alone would read another tenant's agent definition.
+type StrategyResolver func(workspaceID, agentID string) (model, strategy string, ok bool)
+
+// StrategyFitStores resolves the strategy-fit store owning one workspace's
+// observations, for the same reason MacroStores exists: the collector observes
+// a hub carrying every tenant's runs.
+type StrategyFitStores func(workspaceID string) *StrategyFitStore
+
+// SingleStrategyFitStore adapts one store to the resolver shape, for
+// single-tenant callers and tests.
+func SingleStrategyFitStore(store *StrategyFitStore) StrategyFitStores {
+	return func(string) *StrategyFitStore { return store }
+}
 
 // StrategyFitCollector records exactly one terminal outcome per run. Record is
 // dispatched asynchronously so action-log emission is never coupled to disk IO.
 type StrategyFitCollector struct {
 	store    *StrategyFitStore
+	stores   StrategyFitStores
 	resolve  StrategyResolver
 	mu       sync.Mutex
 	terminal map[string]struct{}
@@ -204,25 +220,42 @@ type StrategyFitCollector struct {
 }
 
 type strategyFitJob struct {
+	// workspaceID travels with the job because the background worker drains it
+	// long after the observing call returned; the owning tenant cannot be
+	// recovered from the provider, model, or run ID.
+	workspaceID                      string
 	provider, model, strategy, runID string
 	success                          bool
 }
 
-func NewStrategyFitCollector(store *StrategyFitStore, resolve StrategyResolver) *StrategyFitCollector {
-	c := &StrategyFitCollector{store: store, resolve: resolve, terminal: make(map[string]struct{}), jobs: make(chan strategyFitJob, 256)}
+func NewStrategyFitCollector(stores StrategyFitStores, resolve StrategyResolver) *StrategyFitCollector {
+	c := &StrategyFitCollector{stores: stores, resolve: resolve, terminal: make(map[string]struct{}), jobs: make(chan strategyFitJob, 256)}
 	go func() {
 		for job := range c.jobs {
-			_ = c.store.RecordProviderRun(job.provider, job.model, job.strategy, job.runID, job.success)
+			c.record(job)
 			c.wg.Done()
 		}
 	}()
 	return c
 }
 
-func (c *StrategyFitCollector) Observe(event message.Event) {
-	if c == nil || c.store == nil || event.AgentID == "" {
+// record resolves the owning workspace's store at write time. A workspace with
+// no store drops the observation rather than recording it against another
+// tenant's reliability history.
+func (c *StrategyFitCollector) record(job strategyFitJob) {
+	if c.stores == nil {
 		return
 	}
+	if store := c.stores(job.workspaceID); store != nil {
+		_ = store.RecordProviderRun(job.provider, job.model, job.strategy, job.runID, job.success)
+	}
+}
+
+func (c *StrategyFitCollector) Observe(event message.Event) {
+	if c == nil || c.stores == nil || event.AgentID == "" {
+		return
+	}
+	workspaceID := wsroot.Normalize(event.WorkspaceID)
 	if event.Type != "run.completed" {
 		return
 	}
@@ -240,7 +273,9 @@ func (c *StrategyFitCollector) Observe(event message.Event) {
 	if strings.TrimSpace(terminal.RunID) == "" {
 		return
 	}
-	key := event.AgentID + "\x00" + terminal.RunID
+	// Run IDs are unique per tenant, not globally, so the dedup key carries the
+	// workspace: without it one tenant's run could suppress another's.
+	key := workspaceID + "\x00" + event.AgentID + "\x00" + terminal.RunID
 	c.mu.Lock()
 	if len(c.terminal) >= 10000 {
 		clear(c.terminal)
@@ -252,7 +287,7 @@ func (c *StrategyFitCollector) Observe(event message.Event) {
 	c.terminal[key] = struct{}{}
 	c.mu.Unlock()
 	if strings.TrimSpace(terminal.Model) == "" && c.resolve != nil {
-		model, strategy, ok := c.resolve(event.AgentID)
+		model, strategy, ok := c.resolve(workspaceID, event.AgentID)
 		if ok {
 			terminal.Model, terminal.Strategy = model, strategy
 		}
@@ -261,11 +296,11 @@ func (c *StrategyFitCollector) Observe(event message.Event) {
 		return
 	}
 	c.wg.Add(1)
-	job := strategyFitJob{terminal.Provider, terminal.Model, terminal.Strategy, terminal.RunID, terminal.Success}
+	job := strategyFitJob{workspaceID, terminal.Provider, terminal.Model, terminal.Strategy, terminal.RunID, terminal.Success}
 	select {
 	case c.jobs <- job:
 	default:
-		_ = c.store.RecordProviderRun(job.provider, job.model, job.strategy, job.runID, job.success)
+		c.record(job)
 		c.wg.Done()
 	}
 }

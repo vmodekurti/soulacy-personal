@@ -211,7 +211,7 @@ func (x reasoningToolExecutor) Execute(ctx context.Context, call reasoning.ToolC
 		Arguments: args,
 	})
 
-	x.e.sink.Emit(message.Event{
+	x.e.emit(ctx, message.Event{
 		Type: "tool.call", AgentID: x.def.ID, SessionID: x.sessionID,
 		Payload: tc, Timestamp: time.Now().UTC(),
 	})
@@ -227,7 +227,7 @@ func (x reasoningToolExecutor) Execute(ctx context.Context, call reasoning.ToolC
 		metrics.ToolCallsTotal.WithLabelValues(tc.Name, "success").Inc()
 	}
 
-	x.e.sink.Emit(message.Event{
+	x.e.emit(ctx, message.Event{
 		Type: "tool.result", AgentID: x.def.ID, SessionID: x.sessionID,
 		Payload:   message.ToolResult{CallID: tc.ID, Name: tc.Name, Content: result, IsError: isErr},
 		Timestamp: time.Now().UTC(),
@@ -331,7 +331,7 @@ func (e *Engine) handleWithReasoning(ctx context.Context, def *agent.Definition,
 	executor := reasoningToolExecutor{e: e, def: def, sessionID: msg.SessionID, schemas: schemaByName}
 	loop := reasoning.New(loopCfg, backend, executor)
 
-	e.sink.Emit(message.Event{
+	e.emit(ctx, message.Event{
 		Type: "reasoning.start", AgentID: msg.AgentID, SessionID: msg.SessionID,
 		Payload: map[string]any{
 			"strategy":  string(loopCfg.Strategy),
@@ -350,7 +350,7 @@ func (e *Engine) handleWithReasoning(ctx context.Context, def *agent.Definition,
 		if len(obs) > 400 {
 			obs = obs[:400] + "…"
 		}
-		e.sink.Emit(message.Event{
+		e.emit(ctx, message.Event{
 			Type: "reasoning.step", AgentID: msg.AgentID, SessionID: msg.SessionID,
 			Payload: map[string]any{
 				"index":       i + 1,
@@ -365,7 +365,7 @@ func (e *Engine) handleWithReasoning(ctx context.Context, def *agent.Definition,
 		})
 	}
 
-	e.sink.Emit(message.Event{
+	e.emit(ctx, message.Event{
 		Type: "reasoning.result", AgentID: msg.AgentID, SessionID: msg.SessionID,
 		Payload: map[string]any{
 			"steps":       len(result.Steps),
@@ -382,13 +382,13 @@ func (e *Engine) handleWithReasoning(ctx context.Context, def *agent.Definition,
 	// continues) — drift control beats self-tuning.
 	if result.UpdatedRules != "" && def.BrainMemory.Procedural.AutoUpdate && e.brainStore != nil {
 		if v, uerr := e.brainStore.UpdateProceduralVersioned(def.ID, result.UpdatedRules, "auto_update"); uerr != nil {
-			e.sink.Emit(message.Event{
+			e.emit(ctx, message.Event{
 				Type: "warn", AgentID: msg.AgentID, SessionID: msg.SessionID,
 				Payload:   map[string]any{"stage": "rulebook", "error": uerr.Error()},
 				Timestamp: time.Now().UTC(),
 			})
 		} else {
-			e.sink.Emit(message.Event{
+			e.emit(ctx, message.Event{
 				Type: "rulebook.updated", AgentID: msg.AgentID, SessionID: msg.SessionID,
 				Payload:   map[string]any{"version": v, "source": "auto_update", "bytes": len(result.UpdatedRules)},
 				Timestamp: time.Now().UTC(),
@@ -406,7 +406,7 @@ func (e *Engine) handleWithReasoning(ctx context.Context, def *agent.Definition,
 		if backend.lastErr != nil {
 			errText = backend.lastErr.Error()
 		}
-		e.sink.Emit(message.Event{
+		e.emit(ctx, message.Event{
 			Type: "error", AgentID: msg.AgentID, SessionID: msg.SessionID,
 			Payload:   map[string]any{"stage": "reasoning", "error": errText, "detail": diag},
 			Timestamp: time.Now().UTC(),

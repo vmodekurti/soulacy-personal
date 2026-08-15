@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/message"
 )
 
@@ -298,32 +299,70 @@ type distillationRun struct {
 	runID     string
 }
 
+// MacroStores resolves the macro store that owns one workspace's learning.
+//
+// The distiller observes the process-wide event hub, which carries every
+// tenant's runs. It therefore cannot hold a single store: it must look one up
+// per event, from the workspace the event itself declares.
+type MacroStores func(workspaceID string) *MacroStore
+
+// SingleMacroStore adapts one store to the resolver shape, for single-tenant
+// callers and tests.
+func SingleMacroStore(store *MacroStore) MacroStores {
+	return func(string) *MacroStore { return store }
+}
+
+// distillJob is a pattern together with the workspace that produced it. The
+// workspace has to travel with the job: the background worker runs long after
+// the event that queued it, and resolving the store at drain time from
+// anything else would attribute one tenant's workflow to another.
+type distillJob struct {
+	workspaceID string
+	pattern     WorkflowPattern
+}
+
 // WorkflowDistiller observes the action stream and dispatches persistence in a
 // background worker only after a successful multi-tool terminal event.
 type WorkflowDistiller struct {
-	store *MacroStore
-	mu    sync.Mutex
-	runs  map[string]*distillationRun
-	wg    sync.WaitGroup
-	jobs  chan WorkflowPattern
+	stores MacroStores
+	mu     sync.Mutex
+	runs   map[string]*distillationRun
+	wg     sync.WaitGroup
+	jobs   chan distillJob
 }
 
-func NewWorkflowDistiller(store *MacroStore) *WorkflowDistiller {
-	d := &WorkflowDistiller{store: store, runs: make(map[string]*distillationRun), jobs: make(chan WorkflowPattern, 256)}
+func NewWorkflowDistiller(stores MacroStores) *WorkflowDistiller {
+	d := &WorkflowDistiller{stores: stores, runs: make(map[string]*distillationRun), jobs: make(chan distillJob, 256)}
 	go func() {
-		for pattern := range d.jobs {
-			_ = d.store.Add(pattern)
+		for job := range d.jobs {
+			d.add(job)
 			d.wg.Done()
 		}
 	}()
 	return d
 }
 
-func (d *WorkflowDistiller) Observe(event message.Event) {
-	if d == nil || d.store == nil || event.AgentID == "" || event.SessionID == "" {
+// add resolves the owning workspace's store at write time and persists there.
+// A workspace with no store — Studio learning disabled, or an unwritable path
+// — drops the pattern rather than falling back to another tenant's file.
+func (d *WorkflowDistiller) add(job distillJob) {
+	if d.stores == nil {
 		return
 	}
-	key := event.AgentID + "\x00" + event.SessionID
+	if store := d.stores(job.workspaceID); store != nil {
+		_ = store.Add(job.pattern)
+	}
+}
+
+func (d *WorkflowDistiller) Observe(event message.Event) {
+	if d == nil || d.stores == nil || event.AgentID == "" || event.SessionID == "" {
+		return
+	}
+	// Two workspaces may run agents with the same ID, and a session ID is only
+	// unique within its tenant. The workspace therefore belongs in the key, or
+	// one tenant's tool calls would accumulate into another's run.
+	workspaceID := wsroot.Normalize(event.WorkspaceID)
+	key := workspaceID + "\x00" + event.AgentID + "\x00" + event.SessionID
 	d.mu.Lock()
 	run := d.runs[key]
 	if run == nil {
@@ -361,14 +400,17 @@ func (d *WorkflowDistiller) Observe(event message.Event) {
 	if !success || len(snapshot.tools) < 2 || strings.TrimSpace(snapshot.intent) == "" {
 		return
 	}
-	pattern := WorkflowPattern{Intent: sanitizeIntent(snapshot.intent), Tools: snapshot.tools, Branches: snapshot.branches, Structure: snapshot.structure, RunIDs: []string{snapshot.runID}}
+	job := distillJob{workspaceID: workspaceID, pattern: WorkflowPattern{
+		Intent: sanitizeIntent(snapshot.intent), Tools: snapshot.tools,
+		Branches: snapshot.branches, Structure: snapshot.structure, RunIDs: []string{snapshot.runID},
+	}}
 	d.wg.Add(1)
 	select {
-	case d.jobs <- pattern:
+	case d.jobs <- job:
 	default:
 		// Preserve learning without spawning unbounded goroutines. Backpressure is
 		// only possible after 256 completed runs are already queued.
-		_ = d.store.Add(pattern)
+		d.add(job)
 		d.wg.Done()
 	}
 }

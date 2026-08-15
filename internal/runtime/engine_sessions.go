@@ -426,7 +426,7 @@ func (e *Engine) buildSystemPrefix(ctx context.Context, def *agent.Definition) s
 					// operating rules, so Activity/evidence surfaces when a
 					// learned procedure was actually used.
 					if e.sink != nil {
-						e.sink.Emit(message.Event{
+						e.emit(ctx, message.Event{
 							Type:      "learning.applied",
 							AgentID:   def.ID,
 							Timestamp: time.Now().UTC(),

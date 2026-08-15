@@ -1061,3 +1061,20 @@ func (e *Engine) Builtins() []BuiltinTool {
 // every agent. Currently includes:
 //   - read_skill: load the full instructions for an Agent Skill by name
 //   - read_skill_file: read a resource file (script/reference/asset) from a skill
+
+// emit stamps the run's workspace onto an event before publishing it.
+//
+// Every consumer downstream of the event stream — the action log, cost
+// accounting, dead letters, the Studio learning collectors — needs to know
+// whose run produced the event. Stamping here, at the one place events leave
+// the engine, means no individual emission site has to remember: a new event
+// type added later is tenant-correct by construction.
+//
+// An event that already carries a workspace keeps it, so a caller that knows
+// better than the ambient context (a replay, say) is not overwritten.
+func (e *Engine) emit(ctx context.Context, ev message.Event) {
+	if ev.WorkspaceID == "" {
+		ev.WorkspaceID = WorkspaceFromContext(ctx)
+	}
+	e.sink.Emit(ev)
+}

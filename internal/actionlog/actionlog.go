@@ -25,6 +25,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"io"
 	"os"
 	"path/filepath"
@@ -77,14 +78,15 @@ const (
 const eventsSchema = `
 CREATE TABLE IF NOT EXISTS agent_events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id TEXT NOT NULL DEFAULT 'ws_personal',
     agent_id    TEXT NOT NULL,
     session_id  TEXT,
     type        TEXT NOT NULL,
     payload     TEXT,
     created_at  DATETIME NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_events_agent ON agent_events(agent_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_events_session ON agent_events(session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_events_agent ON agent_events(workspace_id, agent_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_events_session ON agent_events(workspace_id, session_id, created_at);
 `
 
 // Logger writes agent action events to per-agent files and SQLite.
@@ -159,9 +161,16 @@ func New(dir, dbPath string, log *zap.Logger, opts ...Option) (*Logger, error) {
 		}
 	}
 
+	// An existing log predates the tenant column. Add it in place and backfill
+	// to the personal workspace, which is what those events were: a
+	// single-user installation's history.
+	if err := addEventWorkspaceColumn(db); err != nil {
+		return nil, err
+	}
+
 	// Schema versioning (E22 adoption): v1 = the idempotent bootstrap above;
-	// future changes go through sqlitex.MigrateSchema with v2+.
-	if err := sqlitex.RecordSchemaVersion(db, "actionlog", 1); err != nil {
+	// v2 adds the workspace boundary.
+	if err := sqlitex.RecordSchemaVersion(db, "actionlog", 2); err != nil {
 		return nil, fmt.Errorf("actionlog: schema version: %w", err)
 	}
 	l := &Logger{
@@ -336,7 +345,7 @@ func (l *Logger) writeDBBatch(events []message.Event) {
 		l.log.Warn("actionlog: begin tx", zap.Error(err))
 		return
 	}
-	stmt, err := tx.Prepare(`INSERT INTO agent_events (agent_id, session_id, type, payload, created_at) VALUES (?, ?, ?, ?, ?)`)
+	stmt, err := tx.Prepare(`INSERT INTO agent_events (workspace_id, agent_id, session_id, type, payload, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		_ = tx.Rollback()
 		l.log.Warn("actionlog: prepare insert", zap.Error(err))
@@ -345,7 +354,7 @@ func (l *Logger) writeDBBatch(events []message.Event) {
 	defer stmt.Close()
 	for _, ev := range events {
 		payload, _ := json.Marshal(ev.Payload)
-		if _, err := stmt.Exec(ev.AgentID, ev.SessionID, ev.Type, string(payload), ev.Timestamp); err != nil {
+		if _, err := stmt.Exec(workspaceOrPersonal(ev.WorkspaceID), ev.AgentID, ev.SessionID, ev.Type, string(payload), ev.Timestamp); err != nil {
 			l.log.Warn("actionlog: sqlite insert", zap.Error(err))
 		}
 	}
@@ -742,8 +751,8 @@ func (l *Logger) MarkDeadLetter(agentID, sessionID, reason string) error {
 		"quarantine": "poison-pill guard (too many crash-recovery attempts)",
 	})
 	_, err := l.db.Exec(
-		`INSERT INTO agent_events (agent_id, session_id, type, payload, created_at) VALUES (?, ?, 'message.dead_letter', ?, ?)`,
-		agentID, sessionID, string(payload), time.Now().UTC(),
+		`INSERT INTO agent_events (workspace_id, agent_id, session_id, type, payload, created_at) VALUES (?, ?, ?, 'message.dead_letter', ?, ?)`,
+		wsroot.PersonalWorkspaceID, agentID, sessionID, string(payload), time.Now().UTC(),
 	)
 	return err
 }
@@ -970,4 +979,55 @@ func sanitize(id string) string {
 			return '_'
 		}
 	}, id)
+}
+
+// workspaceOrPersonal keeps an event written by a single-tenant path in the
+// implicit personal workspace rather than in an unowned one. An event with no
+// workspace matches no scoped query, which would make it an audit record that
+// silently disappeared — worse than one that leaked, and harder to notice.
+func workspaceOrPersonal(workspaceID string) string {
+	return wsroot.Normalize(workspaceID)
+}
+
+// addEventWorkspaceColumn migrates an action log created before tenants
+// existed. Idempotent: table_info is the probe, and a duplicate-column error
+// from a concurrent opener is treated as success.
+func addEventWorkspaceColumn(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(agent_events)`)
+	if err != nil {
+		return fmt.Errorf("actionlog: inspect schema: %w", err)
+	}
+	present := false
+	for rows.Next() {
+		var (
+			cid              int
+			name, columnType string
+			notNull, pk      int
+			defaultValue     sql.NullString
+		)
+		if scanErr := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); scanErr != nil {
+			rows.Close()
+			return scanErr
+		}
+		if name == "workspace_id" {
+			present = true
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if !present {
+		if _, err := db.Exec(`ALTER TABLE agent_events ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'ws_personal'`); err != nil &&
+			!strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+			return fmt.Errorf("actionlog: add workspace column: %w", err)
+		}
+	}
+	// Unconditional, for the same reason as every other backfill in this
+	// codebase: an event with an empty workspace matches no scoped query, so
+	// it is an audit record that silently vanished.
+	if _, err := db.Exec(`UPDATE agent_events SET workspace_id='ws_personal' WHERE workspace_id IS NULL OR workspace_id=''`); err != nil {
+		return fmt.Errorf("actionlog: backfill workspace: %w", err)
+	}
+	return nil
 }

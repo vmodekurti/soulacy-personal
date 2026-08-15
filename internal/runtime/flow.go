@@ -108,7 +108,7 @@ func (w *WorkflowExecutor) runFlow(ctx context.Context, msg message.Message, run
 		if w.engine.sink == nil {
 			return
 		}
-		w.engine.sink.Emit(message.Event{
+		w.engine.emit(ctx, message.Event{
 			Type:      "flow.node",
 			AgentID:   agentID,
 			SessionID: msg.SessionID,
@@ -145,7 +145,7 @@ func (w *WorkflowExecutor) runFlow(ctx context.Context, msg message.Message, run
 				Status: CheckpointInProgress, UpdatedAt: time.Now().UTC(),
 			})
 			if w.engine.sink != nil {
-				w.engine.sink.Emit(message.Event{
+				w.engine.emit(ctx, message.Event{
 					Type:      "flow.node.started",
 					AgentID:   agentID,
 					SessionID: msg.SessionID,
@@ -388,7 +388,7 @@ func (w *WorkflowExecutor) runFlow(ctx context.Context, msg message.Message, run
 		// flow.portdrift event is emitted, preserving today's forgiving behavior.
 		if err == nil {
 			if drift := flowPortTypeMismatch(node, out); drift != "" {
-				w.engine.emitFlowPortDrift(msg, node, drift)
+				w.engine.emitFlowPortDrift(ctx, msg, node, drift)
 				if adaptive && !adaptBudget[node.ID] {
 					adaptBudget[node.ID] = true
 					if reshaped, ok := w.engine.adaptFlowNode(ctx, msg, node, renderedInput, out, fmt.Errorf("output shape drift: %s", drift)); ok {
@@ -438,7 +438,7 @@ func (w *WorkflowExecutor) runFlow(ctx context.Context, msg message.Message, run
 	// enforcement — fail the run so an empty result cannot present as success.
 	if def := w.engine.loaderDefinition(msg.AgentID); def != nil && def.Outcome.HasAssertions() {
 		report := EvaluateOutcome(def.Outcome, final, outcomeTrace)
-		w.engine.emitOutcomeReport(msg, runID, report)
+		w.engine.emitOutcomeReport(ctx, msg, runID, report)
 		// Hand the verdict to the caller building the reply, so an unmet
 		// contract makes the run not-confident (P0-6) and the existing
 		// degraded-delivery marking applies — a scheduled empty brief then
@@ -481,11 +481,11 @@ func (e *Engine) loaderDefinition(agentID string) *agent.Definition {
 // emitOutcomeReport surfaces the contract verdict as a flow.outcome event, so
 // Activity and the run trace can show WHY a run that looks clean is marked
 // unsuccessful.
-func (e *Engine) emitOutcomeReport(msg message.Message, runID string, report OutcomeReport) {
+func (e *Engine) emitOutcomeReport(ctx context.Context, msg message.Message, runID string, report OutcomeReport) {
 	if e.sink == nil {
 		return
 	}
-	e.sink.Emit(message.Event{
+	e.emit(ctx, message.Event{
 		Type:      "flow.outcome",
 		AgentID:   msg.AgentID,
 		SessionID: msg.SessionID,
@@ -628,7 +628,7 @@ func (e *Engine) runFlowLLMNode(ctx context.Context, def *agent.Definition, msg 
 		provider = e.llmRouter.DefaultProvider()
 	}
 	if e.sink != nil {
-		e.sink.Emit(message.Event{
+		e.emit(ctx, message.Event{
 			Type: "llm.call", AgentID: msg.AgentID, SessionID: msg.SessionID,
 			Payload:   map[string]any{"provider": provider, "model": model, "node": node.ID},
 			Timestamp: time.Now().UTC(),
@@ -650,7 +650,7 @@ func (e *Engine) runFlowLLMNode(ctx context.Context, def *agent.Definition, msg 
 		if err != nil {
 			payload["error"] = err.Error()
 		}
-		e.sink.Emit(message.Event{
+		e.emit(ctx, message.Event{
 			Type: "llm.result", AgentID: msg.AgentID, SessionID: msg.SessionID,
 			Payload: payload, Timestamp: time.Now().UTC(),
 		})

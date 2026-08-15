@@ -112,7 +112,17 @@ type ToolResult struct {
 
 // Event is a structured log event streamed over WebSocket to the GUI.
 type Event struct {
-	Type      string    `json:"type"` // message.in, message.out, tool.call, tool.result, error
+	Type string `json:"type"` // message.in, message.out, tool.call, tool.result, error
+	// WorkspaceID is the tenant the run belongs to. Append-only and omitempty,
+	// so an older consumer keeps decoding these events unchanged.
+	//
+	// Without it, everything downstream of the event stream — the action log,
+	// cost accounting, dead letters, and the learning collectors — has an agent
+	// ID but no way to know whose agent it is. Two tenants may use the same
+	// agent ID, so those consumers could only either mix tenants or refuse to
+	// act. This field is what lets them do neither.
+	WorkspaceID string `json:"workspace_id,omitempty"`
+
 	AgentID   string    `json:"agent_id"`
 	SessionID string    `json:"session_id"`
 	Payload   any       `json:"payload"`

@@ -86,7 +86,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 		// authoritative run boundary. Session IDs are conversational and may span
 		// hundreds of turns; error events may be recovered. Neither is a run ID.
 		if e.sink != nil {
-			e.sink.Emit(message.Event{
+			e.emit(ctx, message.Event{
 				Type: "run.completed", AgentID: msg.AgentID, SessionID: msg.SessionID,
 				Payload: map[string]any{
 					"run_id": runID, "provider": runProvider, "model": runModel,
@@ -213,7 +213,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 				"llm.provider to one already on the list)",
 			def.LLM.Provider, def.LLM.AllowedProviders, msg.AgentID,
 		)
-		e.sink.Emit(message.Event{
+		e.emit(ctx, message.Event{
 			Type: "error", AgentID: msg.AgentID, SessionID: msg.SessionID,
 			Payload: map[string]any{
 				"message":           errMsg,
@@ -229,7 +229,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 		errMsg := fmt.Sprintf(
 			"engine: llm model %q not in allowed_models %v for agent %q",
 			def.LLM.Model, def.LLM.AllowedModels, msg.AgentID)
-		e.sink.Emit(message.Event{
+		e.emit(ctx, message.Event{
 			Type: "error", AgentID: msg.AgentID, SessionID: msg.SessionID,
 			Payload: map[string]any{
 				"message": errMsg, "reason": "model_not_allowed",
@@ -240,7 +240,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 		return message.Message{}, fmt.Errorf("%s", errMsg)
 	}
 
-	e.sink.Emit(message.Event{
+	e.emit(ctx, message.Event{
 		Type: "message.in", AgentID: msg.AgentID, SessionID: msg.SessionID,
 		Payload: trimMessageForEvent(msg), Timestamp: time.Now().UTC(),
 	})
@@ -256,7 +256,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 		wfCtx := WithOutcomeCollector(ctx, &outcomeReport)
 		wfResult, wfErr := we.Run(wfCtx, msg, "")
 		if wfErr != nil {
-			e.sink.Emit(message.Event{
+			e.emit(ctx, message.Event{
 				Type: "error", AgentID: msg.AgentID, SessionID: msg.SessionID,
 				Payload:   map[string]any{"stage": "workflow", "error": wfErr.Error()},
 				Timestamp: time.Now().UTC(),
@@ -298,7 +298,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 				reply.Metadata[message.MetaOutcomeSummary] = outcomeReport.Summary
 			}
 		}
-		e.sink.Emit(message.Event{
+		e.emit(ctx, message.Event{
 			Type: "message.out", AgentID: msg.AgentID, SessionID: msg.SessionID,
 			Payload: trimMessageForEvent(reply), Timestamp: time.Now().UTC(),
 		})
@@ -481,7 +481,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 		if isPeer {
 			userText := flattenParts(msg.Parts)
 			peerArgs := map[string]any{"message": userText}
-			e.sink.Emit(message.Event{
+			e.emit(ctx, message.Event{
 				Type: "tool.call", AgentID: msg.AgentID, SessionID: msg.SessionID,
 				Payload: message.ToolCall{
 					ID: "auto-" + uuidShort(), Name: tc, Arguments: peerArgs,
@@ -507,7 +507,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 						Role: "tool", Content: peerResp, ToolCallID: peerCallID, Name: tc,
 					},
 				)
-				e.sink.Emit(message.Event{
+				e.emit(ctx, message.Event{
 					Type: "tool.result", AgentID: msg.AgentID, SessionID: msg.SessionID,
 					Payload:   message.ToolResult{CallID: peerCallID, Name: tc, Content: peerResp},
 					Timestamp: time.Now().UTC(),
@@ -573,7 +573,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 				zap.Int("used_calls", usedCalls),
 				zap.Int("budget_calls", budgetCalls))
 			metrics.AgentBudgetHaltsTotal.WithLabelValues(msg.AgentID).Inc()
-			e.sink.Emit(message.Event{
+			e.emit(ctx, message.Event{
 				Type: "warn", AgentID: msg.AgentID, SessionID: msg.SessionID,
 				Payload:   map[string]any{"stage": "budget", "reason": reason},
 				Timestamp: time.Now().UTC(),
@@ -671,7 +671,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 			req.ToolChoice = "package_install"
 		}
 
-		e.sink.Emit(message.Event{
+		e.emit(ctx, message.Event{
 			Type: "llm.call", AgentID: msg.AgentID, SessionID: msg.SessionID,
 			Payload:   map[string]any{"provider": def.LLM.Provider, "model": model, "turn": turn + 1},
 			Timestamp: time.Now().UTC(),
@@ -722,7 +722,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 			} else if errors.Is(err, context.DeadlineExceeded) {
 				outErr = fmt.Errorf("engine: llm timeout for provider %q model %q after %s: %w", llmProviderLabel, model, e.effectiveLLMTimeout(), err)
 			}
-			e.sink.Emit(message.Event{
+			e.emit(ctx, message.Event{
 				Type: "error", AgentID: msg.AgentID, SessionID: msg.SessionID,
 				Payload:   map[string]any{"stage": "llm", "error": outErr.Error()},
 				Timestamp: time.Now().UTC(),
@@ -745,7 +745,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 				// slow clients, and the authoritative full reply is returned by
 				// Handle regardless, so a dropped delta only affects the live
 				// preview, never the final message.
-				e.sink.Emit(message.Event{
+				e.emit(ctx, message.Event{
 					Type: "assistant.delta", AgentID: msg.AgentID, SessionID: msg.SessionID,
 					Payload:   map[string]any{"text": token},
 					Timestamp: time.Now().UTC(),
@@ -783,7 +783,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 			resp.InputTokens, resp.OutputTokens)
 		usedTokens += resp.InputTokens + resp.OutputTokens + resp.ReasoningTokens + resp.ToolUsePromptTokens
 
-		e.sink.Emit(message.Event{
+		e.emit(ctx, message.Event{
 			Type: "llm.result", AgentID: msg.AgentID, SessionID: msg.SessionID,
 			Payload: map[string]any{
 				"model":         model,
@@ -907,7 +907,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 	// that still fails, we surface whatever we have — the caller can inspect.
 	if def.LLM.OutputSchema != nil && strings.TrimSpace(finalContent) != "" {
 		if _, perr := parseJSONLoose(finalContent); perr != nil {
-			e.sink.Emit(message.Event{
+			e.emit(ctx, message.Event{
 				Type: "warn", AgentID: msg.AgentID, SessionID: msg.SessionID,
 				Payload:   map[string]any{"stage": "output-schema", "error": perr.Error(), "retry": true},
 				Timestamp: time.Now().UTC(),
@@ -934,7 +934,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 			level = "error"
 			errText = "no final response produced after synthesis"
 		}
-		e.sink.Emit(message.Event{
+		e.emit(ctx, message.Event{
 			Type: level, AgentID: msg.AgentID, SessionID: msg.SessionID,
 			Payload:   map[string]any{"stage": stage, "error": errText},
 			Timestamp: time.Now().UTC(),
@@ -1101,7 +1101,7 @@ func (e *Engine) finalizeReply(ctx context.Context, def *agent.Definition, sess 
 		reply.Metadata = map[string]string{"response.spoken": spokenContent}
 	}
 
-	e.sink.Emit(message.Event{
+	e.emit(ctx, message.Event{
 		Type: "message.out", AgentID: msg.AgentID, SessionID: msg.SessionID,
 		Payload: trimMessageForEvent(reply), Timestamp: time.Now().UTC(),
 	})
@@ -1239,7 +1239,7 @@ func (e *Engine) finalSynthesis(ctx context.Context, def *agent.Definition, agen
 		Content: "Now write your final response for the user using the information already gathered above. Do NOT call any tools — reply with plain text only.",
 	})
 
-	e.sink.Emit(message.Event{
+	e.emit(ctx, message.Event{
 		Type: "llm.call", AgentID: agentID, SessionID: sessionID,
 		Payload:   map[string]any{"provider": def.LLM.Provider, "model": model, "turn": "final-synthesis"},
 		Timestamp: time.Now().UTC(),
@@ -1257,14 +1257,14 @@ func (e *Engine) finalSynthesis(ctx context.Context, def *agent.Definition, agen
 		// Tools intentionally omitted so the model must answer in text.
 	})
 	if err != nil {
-		e.sink.Emit(message.Event{
+		e.emit(ctx, message.Event{
 			Type: "error", AgentID: agentID, SessionID: sessionID,
 			Payload:   map[string]any{"stage": "final-synthesis", "error": err.Error()},
 			Timestamp: time.Now().UTC(),
 		})
 		return ""
 	}
-	e.sink.Emit(message.Event{
+	e.emit(ctx, message.Event{
 		Type: "llm.result", AgentID: agentID, SessionID: sessionID,
 		Payload: map[string]any{
 			"model": model, "input_tokens": resp.InputTokens, "output_tokens": resp.OutputTokens,
@@ -1279,7 +1279,7 @@ func (e *Engine) finalSynthesis(ctx context.Context, def *agent.Definition, agen
 	// text, but if content is STILL empty do ONE retry with an explicit,
 	// think-discouraging instruction so a completed run is never discarded.
 	if strings.TrimSpace(resp.Content) == "" {
-		e.sink.Emit(message.Event{
+		e.emit(ctx, message.Event{
 			Type: "warn", AgentID: agentID, SessionID: sessionID,
 			Payload:   map[string]any{"stage": "final-synthesis", "error": "empty content", "retry": true},
 			Timestamp: time.Now().UTC(),
@@ -1328,7 +1328,7 @@ func (e *Engine) finalSynthesisStructured(ctx context.Context, def *agent.Defini
 	msgs = append(msgs, chatMsgs...)
 	msgs = append(msgs, llm.ChatMessage{Role: "system", Content: corrective})
 
-	e.sink.Emit(message.Event{
+	e.emit(ctx, message.Event{
 		Type: "llm.call", AgentID: agentID, SessionID: sessionID,
 		Payload:   map[string]any{"provider": def.LLM.Provider, "model": model, "turn": "structured-retry"},
 		Timestamp: time.Now().UTC(),
@@ -1346,7 +1346,7 @@ func (e *Engine) finalSynthesisStructured(ctx context.Context, def *agent.Defini
 		FrequencyPenalty: def.LLM.FrequencyPenalty,
 	})
 	if err != nil {
-		e.sink.Emit(message.Event{
+		e.emit(ctx, message.Event{
 			Type: "error", AgentID: agentID, SessionID: sessionID,
 			Payload:   map[string]any{"stage": "structured-retry", "error": err.Error()},
 			Timestamp: time.Now().UTC(),

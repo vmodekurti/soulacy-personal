@@ -73,7 +73,7 @@ func (e *Engine) adaptFlowNode(ctx context.Context, msg message.Message, node sd
 		},
 	}
 	if e.sink != nil {
-		e.sink.Emit(message.Event{
+		e.emit(ctx, message.Event{
 			Type: "flow.adapt", AgentID: msg.AgentID, SessionID: msg.SessionID,
 			Payload:   map[string]any{"node": node.ID, "reason": truncateReason(reason)},
 			Timestamp: time.Now().UTC(),
@@ -181,18 +181,18 @@ func (e *Engine) repairFlowEdgePredicate(ctx context.Context, msg message.Messag
 		},
 	}
 	healNode := sdkr.FlowNode{ID: edge.From}
-	e.emitFlowHeal(msg, healNode, "edge_predicate", "attempted")
+	e.emitFlowHeal(ctx, msg, healNode, "edge_predicate", "attempted")
 	resp, err := e.llmRouter.Complete(repairCtx, def.LLM.Provider, req)
 	if err != nil || resp == nil {
-		e.emitFlowHeal(msg, healNode, "edge_predicate", "declined")
+		e.emitFlowHeal(ctx, msg, healNode, "edge_predicate", "declined")
 		return false, false
 	}
 	take, ok = parseFlowPredicateVerdict(resp.Content)
 	if !ok {
-		e.emitFlowHeal(msg, healNode, "edge_predicate", "invalid")
+		e.emitFlowHeal(ctx, msg, healNode, "edge_predicate", "invalid")
 		return false, false
 	}
-	e.emitFlowHeal(msg, healNode, "edge_predicate", "recovered")
+	e.emitFlowHeal(ctx, msg, healNode, "edge_predicate", "recovered")
 	return take, true
 }
 
@@ -289,18 +289,18 @@ func (e *Engine) completeFlowInputRepair(ctx context.Context, msg message.Messag
 			{Role: "user", Content: prompt},
 		},
 	}
-	e.emitFlowHeal(msg, node, repairKind, "attempted")
+	e.emitFlowHeal(ctx, msg, node, repairKind, "attempted")
 	resp, err := e.llmRouter.Complete(repairCtx, def.LLM.Provider, req)
 	if err != nil || resp == nil {
-		e.emitFlowHeal(msg, node, repairKind, "declined")
+		e.emitFlowHeal(ctx, msg, node, repairKind, "declined")
 		return "", false
 	}
 	repaired, ok := parseFlowRepairResponse(node, resp.Content)
 	if !ok {
-		e.emitFlowHeal(msg, node, repairKind, "invalid")
+		e.emitFlowHeal(ctx, msg, node, repairKind, "invalid")
 		return "", false
 	}
-	e.emitFlowHeal(msg, node, repairKind, "recovered")
+	e.emitFlowHeal(ctx, msg, node, repairKind, "recovered")
 	return repaired, true
 }
 
@@ -357,11 +357,11 @@ func (e *Engine) flowNodeToolSchema(def *agent.Definition, channel string, node 
 	return nil
 }
 
-func (e *Engine) emitFlowHeal(msg message.Message, node sdkr.FlowNode, kind, status string) {
+func (e *Engine) emitFlowHeal(ctx context.Context, msg message.Message, node sdkr.FlowNode, kind, status string) {
 	if e.sink == nil {
 		return
 	}
-	e.sink.Emit(message.Event{
+	e.emit(ctx, message.Event{
 		Type:      "flow.heal",
 		AgentID:   msg.AgentID,
 		SessionID: msg.SessionID,

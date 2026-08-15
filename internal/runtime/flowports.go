@@ -12,6 +12,7 @@ package runtime
 // itself keeps today's forgiving behavior and never fails on a hint.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -117,11 +118,11 @@ func flowJSONTypeName(v any) string {
 // emitFlowPortDrift surfaces a detected output-port type mismatch as a
 // flow.portdrift event, so Studio's trace and the action log can show WHERE a
 // shape drifted even when the run keeps going.
-func (e *Engine) emitFlowPortDrift(msg message.Message, node sdkr.FlowNode, drift string) {
+func (e *Engine) emitFlowPortDrift(ctx context.Context, msg message.Message, node sdkr.FlowNode, drift string) {
 	if e.sink == nil {
 		return
 	}
-	e.sink.Emit(message.Event{
+	e.emit(ctx, message.Event{
 		Type:      "flow.portdrift",
 		AgentID:   msg.AgentID,
 		SessionID: msg.SessionID,

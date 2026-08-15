@@ -81,15 +81,30 @@ become a back door into one workspace from another, and every use is greppable.
 
 These are gaps, not oversights, and they fail closed rather than guessing:
 
-- **`resolveAgentStrategy`** and the **workflow distiller / strategy-fit
-  collector** observe the process-wide event hub, whose events carry no
-  workspace. They resolve only in the personal workspace. Attributing one
-  tenant's runs to another's macros would be silent and permanent. The real fix
-  is carrying workspace on runtime events.
 - **Scheduler and channel invocations** reach the engine without a request
   principal and resolve to the personal workspace. That is the single-tenant
   answer, not a bypass: a multi-user deployment establishes a service principal
   before the engine is reached.
+
+### Events carry their tenant, and the engine stamps it in one place
+
+`message.Event` gained `WorkspaceID` (append-only, `omitempty`, so an older
+consumer keeps decoding unchanged). Everything downstream of the event stream —
+the action log, cost accounting, dead letters, the learning collectors — had an
+agent ID but no way to know whose agent it was.
+
+`Engine.emit(ctx, ev)` is the single point where events leave the engine, and it
+stamps the run's workspace if the event does not already carry one. Every
+`sink.Emit` site now routes through it. A new event type added later is
+tenant-correct by construction rather than by the author remembering.
+
+This is what let the workflow distiller and strategy-fit collector stop being
+pinned to the personal workspace: they observe a hub carrying every tenant's
+runs, so they hold a *per-workspace store resolver* rather than a store, and
+route each observation by the workspace the event itself declares. A workspace
+whose store cannot be built drops the observation rather than falling back —
+`TestAnUnresolvableWorkspaceDropsRatherThanFallsBack` pins that, because a
+fallback would silently teach one tenant from another's runs.
 
 ### The SDK is extended additively, never modified
 
@@ -126,8 +141,10 @@ Highest-value first, with the reason each matters:
 3. **Workboard, costs, action log, DLQ, checkpoints, conversation history** —
    all still `personal-only`; each needs the same treatment as the stores
    above.
-4. **Workspace on runtime events** — would close the distiller, strategy-fit,
-   and collector gaps listed under fail-closed, all at once.
+4. **The action log's per-agent JSONL files** — `Path(agentID)` is keyed by
+   agent alone, so two workspaces running an agent with the same ID append to
+   one file and `Tail` returns both tenants' events. The SQLite side already
+   carries `workspace_id`; the file side and the query predicates do not.
 5. **`internal/studio/trace.go`** — build traces are an in-memory ring with no
    ownership check on `Get(id)`; any caller holding an id reads any trace.
 

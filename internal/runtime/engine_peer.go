@@ -161,7 +161,7 @@ func (e *Engine) dispatchRouter(ctx context.Context, def *agent.Definition, msg 
 	matchIdx, matched := pickRouterRoute(def.Routes, text)
 	if !matched {
 		errMsg := fmt.Sprintf("engine: router %q has no matching route for inbound text and no fallback configured", def.ID)
-		e.sink.Emit(message.Event{
+		e.emit(ctx, message.Event{
 			Type: "error", AgentID: msg.AgentID, SessionID: msg.SessionID,
 			Payload: map[string]any{
 				"message":     errMsg,
@@ -174,7 +174,7 @@ func (e *Engine) dispatchRouter(ctx context.Context, def *agent.Definition, msg 
 	}
 	route := def.Routes[matchIdx]
 
-	e.sink.Emit(message.Event{
+	e.emit(ctx, message.Event{
 		Type: "router.match", AgentID: msg.AgentID, SessionID: msg.SessionID,
 		Payload: map[string]any{
 			"router":      def.ID,

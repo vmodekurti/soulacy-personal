@@ -10,8 +10,8 @@ import (
 
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/llm"
-	"github.com/soulacy/soulacy/internal/runtime"
 	"github.com/soulacy/soulacy/internal/studio"
+	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
 type preferenceMineJob struct {
@@ -124,18 +124,15 @@ func strategyFitPath() string {
 }
 
 // resolveAgentStrategy backs the strategy-fit collector, which observes the
-// process-wide event stream. Those events carry an agent ID but no workspace,
-// and two workspaces may use the same ID, so this resolves only within the
-// personal workspace and reports "unknown" otherwise. Guessing across tenants
-// would attribute one workspace's model choice to another's runs.
-//
-// Carrying workspace on runtime events is tracked with the rest of the Studio
-// isolation work; until then this fails closed rather than silently mixing.
-func (s *Server) resolveAgentStrategy(agentID string) (model, strategy string, ok bool) {
+// process-wide event stream. Two workspaces may run agents with the same ID,
+// so the lookup is scoped to the workspace the observed event declared;
+// resolving by ID alone would read another tenant's agent definition and
+// attribute its model choice to this run.
+func (s *Server) resolveAgentStrategy(workspaceID, agentID string) (model, strategy string, ok bool) {
 	if s.loader == nil {
 		return "", "", false
 	}
-	def := s.loader.GetInWorkspace(runtime.PersonalWorkspaceID, agentID)
+	def := s.loader.GetInWorkspace(wsroot.Normalize(workspaceID), agentID)
 	if def == nil {
 		return "", "", false
 	}

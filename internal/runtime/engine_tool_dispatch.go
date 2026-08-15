@@ -76,10 +76,10 @@ func (e *Engine) runToolDispatch(ctx context.Context, def *agent.Definition, ses
 				zap.String("reason", decision.Reason),
 				zap.Bool("injection_influenced", decision.InjectionInfluenced))
 			e.logAudit(ctx, def, call, "", time.Now(), true, nil)
-			e.emitIntentDecision(agentIDOf(def), sessionID, call, decision)
+			e.emitIntentDecision(ctx, agentIDOf(def), sessionID, call, decision)
 			return "", fmt.Errorf("intent gate denied execution: %s", decision.Reason)
 		case intent.Prompt:
-			e.emitIntentDecision(agentIDOf(def), sessionID, call, decision)
+			e.emitIntentDecision(ctx, agentIDOf(def), sessionID, call, decision)
 			if err := e.dynamicConfirm(ctx, def, call, decision.Reason); err != nil {
 				return "", err
 			}
@@ -88,7 +88,7 @@ func (e *Engine) runToolDispatch(ctx context.Context, def *agent.Definition, ses
 			// influential, so the trace shows the gate ran and let it
 			// through. Everyday allows stay silent to keep the log lean.
 			if decision.InjectionInfluenced {
-				e.emitIntentDecision(agentIDOf(def), sessionID, call, decision)
+				e.emitIntentDecision(ctx, agentIDOf(def), sessionID, call, decision)
 			}
 		}
 	}
@@ -370,7 +370,7 @@ print(result if isinstance(result, str) else json.dumps(result))
 				return "", ctx.Err()
 			case <-timer.C:
 			}
-			e.sink.Emit(message.Event{
+			e.emit(ctx, message.Event{
 				Type:      "tool.log",
 				AgentID:   def.ID,
 				SessionID: sessionID,
@@ -476,7 +476,7 @@ func (e *Engine) runPythonToolOnce(tctx, auditCtx context.Context, def *agent.De
 				tailLines = tailLines[len(tailLines)-tailKeepLines:]
 			}
 			tailMu.Unlock()
-			e.sink.Emit(message.Event{
+			e.emit(auditCtx, message.Event{
 				Type: "tool.log", AgentID: def.ID, SessionID: sessionID,
 				Payload: map[string]any{
 					"call_id": call.ID,

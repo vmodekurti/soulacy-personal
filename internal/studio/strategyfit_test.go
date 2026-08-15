@@ -49,7 +49,7 @@ func TestStrategyFitNeedsMinimumEvidence(t *testing.T) {
 
 func TestStrategyFitCollectorRecordsOneTerminalOutcome(t *testing.T) {
 	store := NewStrategyFitStore(filepath.Join(t.TempDir(), "fit.json"))
-	collector := NewStrategyFitCollector(store, func(agentID string) (string, string, bool) {
+	collector := NewStrategyFitCollector(SingleStrategyFitStore(store), func(_, agentID string) (string, string, bool) {
 		return "model-y", "react", agentID == "agent"
 	})
 	completed := func(run string, success bool) message.Event {

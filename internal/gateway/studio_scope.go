@@ -203,3 +203,18 @@ func (s *Server) requiresConfiguredEmbedder() bool {
 func ensureParentDir(path string) error {
 	return os.MkdirAll(filepath.Dir(path), 0o700)
 }
+
+// macroStoreFor and strategyFitStoreFor are the per-workspace store resolvers
+// handed to the hub observers. The observers see every tenant's events, so
+// they resolve a store per event rather than holding one.
+//
+// They are methods on the server rather than closures over a scope so that the
+// workspace argument is unmistakably the caller's, not one captured at wiring
+// time — the bug this replaced was exactly a captured personal scope.
+func (s *Server) macroStoreFor(workspaceID string) *studio.MacroStore {
+	return s.studioForWorkspace(workspaceID, "").macros()
+}
+
+func (s *Server) strategyFitStoreFor(workspaceID string) *studio.StrategyFitStore {
+	return s.studioForWorkspace(workspaceID, "").strategyFit()
+}

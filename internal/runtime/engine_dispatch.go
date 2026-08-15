@@ -62,7 +62,7 @@ func (e *Engine) executeToolCallsWithParallelPeers(ctx context.Context, def *age
 }
 
 func (e *Engine) executeOneToolCall(ctx context.Context, def *agent.Definition, sessionID string, tc message.ToolCall, seen map[string]string, seenMu *sync.Mutex) message.ToolResult {
-	e.sink.Emit(message.Event{
+	e.emit(ctx, message.Event{
 		Type: "tool.call", AgentID: def.ID, SessionID: sessionID,
 		Payload: tc, Timestamp: time.Now().UTC(),
 	})
@@ -155,7 +155,7 @@ func (e *Engine) executeOneToolCall(ctx context.Context, def *agent.Definition, 
 			if def != nil {
 				agentID = def.ID
 			}
-			e.recordInjectionFinding(agentID, sessionID, tc.Name, scanReport)
+			e.recordInjectionFinding(ctx, agentID, sessionID, tc.Name, scanReport)
 		}
 	}
 
@@ -205,7 +205,7 @@ func (e *Engine) executeOneToolCall(ctx context.Context, def *agent.Definition, 
 			},
 		}
 	}
-	e.sink.Emit(message.Event{
+	e.emit(ctx, message.Event{
 		Type: "tool.result", AgentID: def.ID, SessionID: sessionID,
 		Payload: eventPayload, Timestamp: time.Now().UTC(),
 	})
@@ -237,7 +237,7 @@ func awaitToolCallResult(ctx context.Context, key string, seen map[string]string
 // on the same turn. Also emits a structured `injection.finding` event
 // so Activity + Studio render the warning next to the run trace. Safe
 // to call from concurrent goroutines (session mutex).
-func (e *Engine) recordInjectionFinding(agentID, sessionID, source string, r injection.Report) {
+func (e *Engine) recordInjectionFinding(ctx context.Context, agentID, sessionID, source string, r injection.Report) {
 	if sess := e.lookupSession(agentID, sessionID); sess != nil {
 		sess.mu.Lock()
 		if r.MaxSeverity > sess.injectionMax {
@@ -249,7 +249,7 @@ func (e *Engine) recordInjectionFinding(agentID, sessionID, source string, r inj
 		sess.mu.Unlock()
 	}
 	if e.sink != nil {
-		e.sink.Emit(message.Event{
+		e.emit(ctx, message.Event{
 			Type: "injection.finding", AgentID: agentID, SessionID: sessionID,
 			Payload: map[string]any{
 				"source":       source,
@@ -327,11 +327,11 @@ func (e *Engine) evaluateIntent(def *agent.Definition, sessionID string, call me
 // Fires on Deny and Prompt unconditionally, and on Allow only when
 // the decision was influenced by an injection signal so the trace
 // documents the near-miss.
-func (e *Engine) emitIntentDecision(agentID, sessionID string, call message.ToolCall, ev intent.Evaluation) {
+func (e *Engine) emitIntentDecision(ctx context.Context, agentID, sessionID string, call message.ToolCall, ev intent.Evaluation) {
 	if e == nil || e.sink == nil {
 		return
 	}
-	e.sink.Emit(message.Event{
+	e.emit(ctx, message.Event{
 		Type: "intent.decision", AgentID: agentID, SessionID: sessionID,
 		Payload: map[string]any{
 			"tool":                 call.Name,
