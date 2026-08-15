@@ -40,9 +40,18 @@ type ServerConfig struct {
 	Transport string            // "stdio" (default) or "http"
 	Command   string            // stdio: executable
 	Args      []string          // stdio: arguments
-	Env       map[string]string // stdio: extra env vars (merged onto os.Environ)
-	URL       string            // http: server URL
-	Headers   map[string]string // http: extra headers (auth, etc.)
+	Env       map[string]string // stdio: extra env vars, and the highest-priority source
+	// InheritEnv names gateway environment variables this server may see in
+	// addition to the base allow-list. Named one at a time on purpose: an
+	// operator granting a variable should be choosing it.
+	InheritEnv []string
+	// InheritAll restores the pre-MU-017 behaviour of passing the gateway's
+	// entire environment to the child. It exists so a deployment that depended
+	// on inheritance has a documented way back, not because it is safe: it
+	// hands third-party code every credential this process holds.
+	InheritAll bool
+	URL        string            // http: server URL
+	Headers    map[string]string // http: extra headers (auth, etc.)
 }
 
 // Tool is one tool exposed by an MCP server.
@@ -391,20 +400,60 @@ func (c *Client) AddServer(id string, cfg ServerConfig) error {
 	return nil
 }
 
+// drainGrace bounds how long RemoveServer waits for an in-flight tool call to
+// finish before shutting the subprocess down underneath it.
+//
+// A variable rather than a constant so the revocation tests can exercise the
+// timeout path in milliseconds instead of parking the suite for ten seconds.
+// Production never writes it.
+var drainGrace = 10 * time.Second
+
 // RemoveServer stops and removes a server by id. Returns nil if not found.
+//
+// MU-017 criterion 7 in two distinct steps, and the order matters:
+//
+//   - The server leaves the registry FIRST, under c.mu, so no new invocation
+//     can find it. Revocation has to take effect immediately; a caller that
+//     resolved the server a moment earlier is already inside its call.
+//   - Only then does it drain and close, OUTSIDE c.mu. Holding the client
+//     lock across a shutdown would block every other MCP operation for the
+//     length of a stranger's tool call — one revoked extension freezing the
+//     rest is a worse failure than the one being fixed.
+//
+// The drain waits for the in-flight call to release callMu, bounded: a tool
+// that never returns must not make revocation unavailable.
 func (c *Client) RemoveServer(id string) error {
+	var target *server
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	for i, s := range c.servers {
 		if s.id == id {
-			if s.tx != nil {
-				_ = s.tx.close()
-			}
+			target = s
 			c.servers = append(c.servers[:i], c.servers[i+1:]...)
-			c.log.Info("mcp: server removed", zap.String("server", id))
-			return nil
+			break
 		}
 	}
+	c.mu.Unlock()
+	if target == nil {
+		return nil
+	}
+
+	drained := make(chan struct{})
+	go func() {
+		target.callMu.Lock()
+		target.callMu.Unlock()
+		close(drained)
+	}()
+	select {
+	case <-drained:
+	case <-time.After(drainGrace):
+		c.log.Warn("mcp: server removed with a call still in flight",
+			zap.String("server", id), zap.Duration("waited", drainGrace))
+	}
+
+	if target.tx != nil {
+		_ = target.tx.close()
+	}
+	c.log.Info("mcp: server removed", zap.String("server", id))
 	return nil
 }
 

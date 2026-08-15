@@ -224,12 +224,14 @@ func (a *App) Run(parent context.Context) error {
 	mcpServers := make(map[string]mcp.ServerConfig, len(cfg.MCP.Servers))
 	for id, sc := range cfg.MCP.Servers {
 		mcpServers[id] = mcp.ServerConfig{
-			Transport: sc.Transport,
-			Command:   sc.Command,
-			Args:      sc.Args,
-			Env:       sc.Env,
-			URL:       sc.URL,
-			Headers:   sc.Headers,
+			Transport:  sc.Transport,
+			Command:    sc.Command,
+			Args:       sc.Args,
+			Env:        sc.Env,
+			InheritEnv: sc.InheritEnv,
+			InheritAll: sc.InheritAll,
+			URL:        sc.URL,
+			Headers:    sc.Headers,
 		}
 	}
 	mcpClient := mcp.New(mcp.Config{Servers: mcpServers}, log)

@@ -25,6 +25,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"go.uber.org/zap"
@@ -92,11 +93,17 @@ func newStdio(cfg ServerConfig, log *zap.Logger) (*stdioTx, error) {
 		return nil, fmt.Errorf("stdio: command is required")
 	}
 	cmd := exec.Command(cfg.Command, cfg.Args...)
-	env := os.Environ()
-	for k, v := range cfg.Env {
-		env = append(env, k+"="+v)
-	}
+	env, withheld := ProcessEnv(cfg, os.Environ())
 	cmd.Env = env
+	if withheld > 0 {
+		// Counted, not named: a variable name is itself a hint about what this
+		// deployment holds. The number is enough for an operator to recognise
+		// this as the cause when a server complains about a missing setting,
+		// and the fix is mcp.servers.<id>.inherit_env.
+		log.Info("mcp: gateway environment withheld from server subprocess",
+			zap.Int("withheld", withheld), zap.Int("passed", len(env)),
+			zap.String("hint", "add the variable to mcp.servers.<id>.env or .inherit_env if the server needs it"))
+	}
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -234,11 +241,62 @@ func (t *stdioTx) notify(method string, params any) error {
 	return err
 }
 
+// shutdownGrace is how long a server subprocess is given to exit on its own
+// after its stdin is closed, before it is signalled.
+const shutdownGrace = 3 * time.Second
+
+// close shuts the server subprocess down and reaps it (MU-017 criterion 7).
+//
+// The documented policy, in order:
+//
+//  1. Close stdin. An MCP server reads requests from stdin, so EOF is the
+//     protocol's own "no more work" and a well-behaved server exits on it.
+//  2. Wait up to shutdownGrace for that to happen.
+//  3. SIGTERM, then a short grace, then SIGKILL. Terminate before kill so a
+//     server that holds a lock, a partial file, or an upstream session gets
+//     the chance to release it — a revoked extension should stop running, not
+//     be made to corrupt something on the way out.
+//  4. Wait in every path.
+//
+// Step 4 is the one that was missing. The old close() called Kill and
+// returned, so every removed or hot-replaced server left a zombie until the
+// gateway itself exited. Nothing visibly broke, which is why it survived: the
+// process table just kept growing on a deployment that reconfigures servers.
 func (t *stdioTx) close() error {
 	t.closed.Store(true)
 	_ = t.stdin.Close()
-	if t.cmd.Process != nil {
-		_ = t.cmd.Process.Kill()
+	if t.cmd == nil || t.cmd.Process == nil {
+		return nil
+	}
+
+	exited := make(chan struct{})
+	go func() {
+		_ = t.cmd.Wait()
+		close(exited)
+	}()
+
+	select {
+	case <-exited:
+		return nil
+	case <-time.After(shutdownGrace):
+	}
+
+	_ = t.cmd.Process.Signal(syscall.SIGTERM)
+	select {
+	case <-exited:
+		return nil
+	case <-time.After(shutdownGrace):
+	}
+
+	_ = t.cmd.Process.Kill()
+	select {
+	case <-exited:
+	case <-time.After(shutdownGrace):
+		// Unreapable after SIGKILL means the process is stuck in uninterruptible
+		// sleep. Returning is right: blocking the caller forever would turn one
+		// wedged extension into a wedged gateway.
+		t.log.Warn("mcp: server subprocess did not exit after SIGKILL",
+			zap.Int("pid", t.cmd.Process.Pid))
 	}
 	return nil
 }

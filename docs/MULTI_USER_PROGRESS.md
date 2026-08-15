@@ -862,6 +862,59 @@ which is a cross-tenant name conflict wearing an ordinary error message.
 `requireInstaller` refuses when a workspace's own root cannot be created
 rather than falling back to the shared one, since that fallback is the bug.
 
+### An MCP server was inheriting every credential the gateway holds
+
+`newStdio` built its child environment from `os.Environ()`. So every MCP
+server — third-party code, installed by whoever — received the gateway's
+entire environment: provider API keys, the static server key, database DSNs,
+whatever cloud credentials the host had. An MCP server is precisely the
+component you install *because* you did not want to write it yourself, so
+"inherits everything we hold" is the wrong default with one tenant, and with
+several it is one tenant's extension holding another tenant's keys.
+
+The child environment is now an allow-list: what a process needs to run at all
+(`PATH`, `HOME`, locale, `TMPDIR`), the TLS trust store and proxy settings
+(without which every HTTPS call fails in a way that looks like a network
+fault), interpreter search paths, and whatever the operator named in
+`inherit_env`. Everything else is withheld and **counted** in a log line —
+counted rather than named, because a variable name is itself a hint about what
+a deployment holds.
+
+Membership, not pattern-matching. A deny-list of `*_KEY`, `*_TOKEN`, `*_SECRET`
+is a guess about naming conventions, and the one credential whose variable is
+called something else is the one that leaks.
+
+`inherit_all_env` restores the old behaviour. It exists so a deployment that
+depended on inheritance has a documented way back, not because it is safe.
+
+### Revocation, in two steps whose order is the point (MU-017 criterion 7)
+
+`RemoveServer` used to close the transport while holding the client lock, and
+`close()` called `Kill` and returned. Two problems, one visible and one not.
+
+The invisible one: no `Wait`. Every removed or hot-replaced server left a
+zombie until the gateway itself exited. Nothing broke, which is why it
+survived — the process table simply grew on any deployment that reconfigures
+MCP servers.
+
+The visible one is the ordering. The server now leaves the registry **first**,
+under the lock, so no new invocation can find it — revocation has to take
+effect immediately. Draining and shutdown happen **outside** the lock, because
+holding the client lock across a stranger's tool call would freeze every other
+MCP operation: one revoked extension wedging the rest is a worse failure than
+the one being fixed.
+
+The drain is bounded. An extension that never returns must not make revoking
+it impossible, which is the opposite of what revocation is for. Shutdown then
+escalates stdin-EOF → SIGTERM → SIGKILL, terminating before killing so a
+server holding a lock or a partial file can release it: a revoked extension
+should stop running, not be made to corrupt something on the way out.
+
+The bound needed a clock assertion to be real. The first version of the test
+only checked that revocation *completed*, which an unbounded wait also does —
+as soon as the stuck call hits its own context deadline. It now fails if
+revocation waits on the extension rather than on its own budget.
+
 ## Guards worth keeping
 
 - **`TestRequestScopeIsNeverReadFromADetachedGoroutine`** (AST-based) fails the
@@ -930,10 +983,13 @@ Highest-value first, with the reason each matters:
    `ActionInstall` separates installing third-party code from using it;
    installs stage, verify a checksum, run the E20 safety pipeline, pin a
    revision and require approval before activation; and a manifest whose
-   permissions change stops loading until a human re-approves. What remains is
-   criterion 4 (capability grants and referenced secret handles), 5 (MCP
-   processes under workspace isolation) and 7 (revocation that drains running
-   processes).
+   permissions change stops loading until a human re-approves. Criterion 5 is
+   met for the credential half — an MCP subprocess no longer inherits the
+   gateway environment — and criterion 7 for MCP servers. What remains is
+   criterion 4 (capability grants and referenced secret handles), the
+   filesystem/network half of criterion 5 (which is MU-021's per-run isolation,
+   not a second implementation here), and criterion 7 for plugin tool
+   subprocesses.
 
 6. **`BEGIN DEFERRED` on read-then-write transactions, elsewhere.** Two stores
    have been fixed (see below). The pattern to look for is a transaction that

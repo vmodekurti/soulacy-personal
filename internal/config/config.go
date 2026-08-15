@@ -902,6 +902,15 @@ type MCPServerConfig struct {
 	Env       map[string]string `mapstructure:"env"`       // stdio: extra env
 	URL       string            `mapstructure:"url"`       // http: server URL
 	Headers   map[string]string `mapstructure:"headers"`   // http: extra headers
+	// InheritEnv names gateway environment variables this server may read, in
+	// addition to the base allow-list (PATH, HOME, locale, TMPDIR, TLS trust
+	// store, proxies, interpreter search paths). MU-017 criterion 5: an MCP
+	// server is third-party code and does not inherit the gateway's
+	// credentials by default.
+	InheritEnv []string `mapstructure:"inherit_env"`
+	// InheritAll restores the old behaviour of passing the whole environment.
+	// Documented escape hatch, not a recommendation.
+	InheritAll bool `mapstructure:"inherit_all_env"`
 }
 
 // RegistryConfig describes one package registry for skill/plugin installs
