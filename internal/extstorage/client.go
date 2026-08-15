@@ -63,7 +63,11 @@ type Client struct {
 	notifyFn func(method string, params json.RawMessage)
 	closed   bool
 
-	exited   chan struct{}
+	exited chan struct{}
+	// drained is closed when readLoop returns, which happens only at stdout
+	// EOF — i.e. after every byte the sidecar ever wrote has been parsed and
+	// delivered. See the Start goroutine for why Wait must not precede it.
+	drained  chan struct{}
 	exitOnce sync.Once
 }
 
@@ -82,6 +86,7 @@ func NewClient(cfg ClientConfig) *Client {
 		cfg:     cfg,
 		pending: map[int64]chan sdkext.Message{},
 		exited:  make(chan struct{}),
+		drained: make(chan struct{}),
 	}
 }
 
@@ -133,6 +138,20 @@ func (c *Client) Start(ctx context.Context) error {
 
 	go c.readLoop(stdout)
 	go func() {
+		// Wait deliberately runs after readLoop has drained stdout to EOF.
+		//
+		// os/exec closes the stdout pipe when Wait sees the process exit, so
+		// calling Wait first can discard output the sidecar had already
+		// written. It also creates a race in Call's select: c.exited and the
+		// pending response channel become ready at the same instant, and Go
+		// picks between ready cases at random — so a sidecar that answers and
+		// then exits, which is exactly what a one-shot helper or a crash-after
+		// -reply looks like, had its valid answer thrown away about half the
+		// time and was reported as "exited during <method>".
+		//
+		// Draining first makes the ordering total: if a response exists, it is
+		// already in its channel before c.exited can close.
+		<-c.drained
 		_ = cmd.Wait()
 		c.exitOnce.Do(func() { close(c.exited) })
 		c.failAllPending("sidecar exited")
@@ -171,6 +190,7 @@ func (c *Client) Start(ctx context.Context) error {
 }
 
 func (c *Client) readLoop(stdout io.Reader) {
+	defer close(c.drained)
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 0, 4096), 8*1024*1024)
 	for sc.Scan() {
