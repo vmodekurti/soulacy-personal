@@ -4,6 +4,7 @@ package memory
 
 import (
 	"fmt"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -32,7 +33,7 @@ func newTestArchive(t *testing.T) *SQLiteArchive {
 func archiveEntry(t *testing.T, a *SQLiteArchive, agentID, sessionID string, scope Scope, content string) Entry {
 	t.Helper()
 	seq := atomic.AddInt64(&archiveSeq, 1)
-	e := Entry{
+	e := Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID:        fmt.Sprintf("test-%d", seq),
 		AgentID:   agentID,
 		SessionID: sessionID,
@@ -56,7 +57,7 @@ func TestSQLiteArchiveWriteAndSearch(t *testing.T) {
 	archiveEntry(t, a, "ag", "s1", ScopeSession, "the cat sat on the mat")
 	archiveEntry(t, a, "ag", "s2", ScopeSession, "the dog barked")
 
-	results, err := a.Search("ag", "cat", 10)
+	results, err := a.Search(wsroot.PersonalWorkspaceID, "ag", "cat", 10)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -75,7 +76,7 @@ func TestSQLiteArchiveSearchMultipleHits(t *testing.T) {
 	archiveEntry(t, a, "ag", "s2", ScopeSession, "python cookbook")
 	archiveEntry(t, a, "ag", "s3", ScopeSession, "go programming")
 
-	results, err := a.Search("ag", "python", 10)
+	results, err := a.Search(wsroot.PersonalWorkspaceID, "ag", "python", 10)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -91,7 +92,7 @@ func TestSQLiteArchiveSearchRespectsLimit(t *testing.T) {
 		archiveEntry(t, a, "ag", "s1", ScopeSession, "match keyword here")
 	}
 
-	results, err := a.Search("ag", "match", 3)
+	results, err := a.Search(wsroot.PersonalWorkspaceID, "ag", "match", 3)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -106,7 +107,7 @@ func TestSQLiteArchiveSearchWrongAgent(t *testing.T) {
 	a := newTestArchive(t)
 	archiveEntry(t, a, "agent-a", "s1", ScopeSession, "secret data")
 
-	results, err := a.Search("agent-b", "secret", 10)
+	results, err := a.Search(wsroot.PersonalWorkspaceID, "agent-b", "secret", 10)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -127,7 +128,7 @@ func TestSQLiteArchiveReadByScope(t *testing.T) {
 	archiveEntry(t, a, "ag", "s1", ScopeGlobal, "global content")
 	archiveEntry(t, a, "ag", "s2", ScopeSession, "other session")
 
-	results, err := a.ReadByScope("ag", "s1", ScopeSession, 10)
+	results, err := a.ReadByScope(wsroot.PersonalWorkspaceID, "ag", "s1", ScopeSession, 10)
 	if err != nil {
 		t.Fatalf("ReadByScope: %v", err)
 	}
@@ -152,7 +153,7 @@ func TestSQLiteArchiveReadGlobal(t *testing.T) {
 	archiveEntry(t, a, "ag", "s3", ScopeGlobal, "global one")
 	archiveEntry(t, a, "other", "s1", ScopeSession, "different agent")
 
-	results, err := a.ReadGlobal("ag", 10)
+	results, err := a.ReadGlobal(wsroot.PersonalWorkspaceID, "ag", 10)
 	if err != nil {
 		t.Fatalf("ReadGlobal: %v", err)
 	}
@@ -182,7 +183,7 @@ func TestSQLiteArchiveDuplicateIDIsIgnored(t *testing.T) {
 		t.Fatalf("second Archive: %v", err)
 	}
 
-	results, err := a.Search("ag", "content", 10)
+	results, err := a.Search(wsroot.PersonalWorkspaceID, "ag", "content", 10)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -204,7 +205,7 @@ func TestSQLiteArchiveDuplicateIDIsIgnored(t *testing.T) {
 func TestSQLiteArchivePrune(t *testing.T) {
 	a := newTestArchive(t)
 
-	old := Entry{
+	old := Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID:        "old-1",
 		AgentID:   "ag",
 		SessionID: "s1",
@@ -227,7 +228,7 @@ func TestSQLiteArchivePrune(t *testing.T) {
 	}
 
 	// Only the recent entry should survive.
-	remaining, err := a.ReadGlobal("ag", 10)
+	remaining, err := a.ReadGlobal(wsroot.PersonalWorkspaceID, "ag", 10)
 	if err != nil {
 		t.Fatalf("ReadGlobal after prune: %v", err)
 	}
@@ -242,7 +243,7 @@ func TestSQLiteArchivePrune(t *testing.T) {
 // TestSQLiteArchivePruneWrongAgent confirms Prune only touches the specified agent.
 func TestSQLiteArchivePruneWrongAgent(t *testing.T) {
 	a := newTestArchive(t)
-	old := Entry{
+	old := Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID:        "other-old",
 		AgentID:   "other-ag",
 		SessionID: "s1",
@@ -261,7 +262,7 @@ func TestSQLiteArchivePruneWrongAgent(t *testing.T) {
 	}
 
 	// other-ag entry should still exist.
-	results, err := a.ReadGlobal("other-ag", 10)
+	results, err := a.ReadGlobal(wsroot.PersonalWorkspaceID, "other-ag", 10)
 	if err != nil {
 		t.Fatalf("ReadGlobal: %v", err)
 	}

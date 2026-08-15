@@ -16,8 +16,16 @@ const (
 )
 
 // Entry is one stored memory record.
+//
+// WorkspaceID is the tenant boundary. It is append-only and omitempty, so an
+// older client keeps decoding these records unchanged and an older server
+// ignores the field — but a multi-tenant deployment refuses an entry that does
+// not carry one, because a memory with no owner is a memory every tenant can
+// read.
 type Entry struct {
-	ID        string            `json:"id"`
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+
 	AgentID   string            `json:"agent_id"`
 	SessionID string            `json:"session_id"`
 	Scope     Scope             `json:"scope"`

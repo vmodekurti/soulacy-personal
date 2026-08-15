@@ -6,6 +6,7 @@ package memory
 
 import (
 	"context"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"os"
 	"path/filepath"
 	"strings"
@@ -191,13 +192,13 @@ func TestFileStorePurgeSessionAcrossMultipleAgents(t *testing.T) {
 	writeEntry(t, s, "agent-a", "shared-session", ScopeSession, "a's memory")
 	writeEntry(t, s, "agent-b", "shared-session", ScopeSession, "b's memory")
 
-	if err := s.PurgeSession("shared-session"); err != nil {
+	if err := s.PurgeSession(wsroot.PersonalWorkspaceID, "shared-session"); err != nil {
 		t.Fatalf("PurgeSession: %v", err)
 	}
 
 	// Both agent dirs should now return nil for the purged session.
 	for _, ag := range []string{"agent-a", "agent-b"} {
-		entries, err := s.Read(ag, "shared-session", ScopeSession, 10)
+		entries, err := s.Read(wsroot.PersonalWorkspaceID, ag, "shared-session", ScopeSession, 10)
 		if err != nil {
 			t.Fatalf("Read %s after PurgeSession: %v", ag, err)
 		}
@@ -226,7 +227,7 @@ func TestFileStoreSearchAgentDirWithNoJSONLFiles(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	results, err := s.Search("ag-nofiles", "anything", 10)
+	results, err := s.Search(wsroot.PersonalWorkspaceID, "ag-nofiles", "anything", 10)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -244,7 +245,7 @@ func TestFileStoreSearchAgentDirWithNoJSONLFiles(t *testing.T) {
 // read back.
 func TestSQLiteArchiveArchiveNilMetadata(t *testing.T) {
 	a := newTestArchive(t)
-	e := Entry{
+	e := Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID:        "nil-meta-1",
 		AgentID:   "ag",
 		SessionID: "s1",
@@ -257,7 +258,7 @@ func TestSQLiteArchiveArchiveNilMetadata(t *testing.T) {
 		t.Fatalf("Archive with nil Metadata: %v", err)
 	}
 
-	results, err := a.Search("ag", "no metadata", 10)
+	results, err := a.Search(wsroot.PersonalWorkspaceID, "ag", "no metadata", 10)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -321,7 +322,7 @@ func TestSQLiteArchiveReadByScopeWrongSession(t *testing.T) {
 	a := newTestArchive(t)
 	archiveEntry(t, a, "ag", "s2", ScopeSession, "belongs to s2")
 
-	results, err := a.ReadByScope("ag", "s1", ScopeSession, 10)
+	results, err := a.ReadByScope(wsroot.PersonalWorkspaceID, "ag", "s1", ScopeSession, 10)
 	if err != nil {
 		t.Fatalf("ReadByScope: %v", err)
 	}

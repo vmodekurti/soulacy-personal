@@ -4,6 +4,7 @@ package memory
 
 import (
 	"fmt"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"sync"
 	"testing"
 	"time"
@@ -15,7 +16,7 @@ import (
 
 func writeEntry(t *testing.T, s *FileStore, agentID, sessionID string, scope Scope, content string) Entry {
 	t.Helper()
-	e := Entry{
+	e := Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		AgentID:   agentID,
 		SessionID: sessionID,
 		Scope:     scope,
@@ -46,7 +47,7 @@ func TestFileStoreWriteAndRead(t *testing.T) {
 	s := newFileStore(t)
 	writeEntry(t, s, "agent-a", "sess-1", ScopeSession, "hello world")
 
-	entries, err := s.Read("agent-a", "sess-1", ScopeSession, 10)
+	entries, err := s.Read(wsroot.PersonalWorkspaceID, "agent-a", "sess-1", ScopeSession, 10)
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
@@ -72,7 +73,7 @@ func TestFileStoreReadRespectsScopeFilter(t *testing.T) {
 	writeEntry(t, s, "ag", "s1", ScopeSession, "session content")
 	writeEntry(t, s, "ag", "s1", ScopeGlobal, "global content")
 
-	sessionEntries, err := s.Read("ag", "s1", ScopeSession, 10)
+	sessionEntries, err := s.Read(wsroot.PersonalWorkspaceID, "ag", "s1", ScopeSession, 10)
 	if err != nil {
 		t.Fatalf("Read session: %v", err)
 	}
@@ -80,7 +81,7 @@ func TestFileStoreReadRespectsScopeFilter(t *testing.T) {
 		t.Errorf("session-scoped read returned: %+v", sessionEntries)
 	}
 
-	globalEntries, err := s.Read("ag", "s1", ScopeGlobal, 10)
+	globalEntries, err := s.Read(wsroot.PersonalWorkspaceID, "ag", "s1", ScopeGlobal, 10)
 	if err != nil {
 		t.Fatalf("Read global: %v", err)
 	}
@@ -89,7 +90,7 @@ func TestFileStoreReadRespectsScopeFilter(t *testing.T) {
 	}
 
 	// Empty scope returns all entries.
-	all, err := s.Read("ag", "s1", "", 10)
+	all, err := s.Read(wsroot.PersonalWorkspaceID, "ag", "s1", "", 10)
 	if err != nil {
 		t.Fatalf("Read all: %v", err)
 	}
@@ -109,7 +110,7 @@ func TestFileStoreReadNewestFirst(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 
-	entries, err := s.Read("ag", "s1", ScopeSession, 10)
+	entries, err := s.Read(wsroot.PersonalWorkspaceID, "ag", "s1", ScopeSession, 10)
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
@@ -132,7 +133,7 @@ func TestFileStoreReadRespectsLimit(t *testing.T) {
 		writeEntry(t, s, "ag", "s1", ScopeSession, fmt.Sprintf("entry-%d", i))
 	}
 
-	entries, err := s.Read("ag", "s1", ScopeSession, 3)
+	entries, err := s.Read(wsroot.PersonalWorkspaceID, "ag", "s1", ScopeSession, 3)
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
@@ -145,7 +146,7 @@ func TestFileStoreReadRespectsLimit(t *testing.T) {
 // session that has never been written returns nil without error.
 func TestFileStoreReadNonExistentSessionReturnsNil(t *testing.T) {
 	s := newFileStore(t)
-	entries, err := s.Read("nobody", "ghost-session", ScopeSession, 10)
+	entries, err := s.Read(wsroot.PersonalWorkspaceID, "nobody", "ghost-session", ScopeSession, 10)
 	if err != nil {
 		t.Fatalf("Read non-existent: %v", err)
 	}
@@ -161,8 +162,8 @@ func TestFileStoreDifferentAgentsDontInterfere(t *testing.T) {
 	writeEntry(t, s, "agent-a", "s1", ScopeSession, "alpha data")
 	writeEntry(t, s, "agent-b", "s1", ScopeSession, "beta data")
 
-	entriesA, _ := s.Read("agent-a", "s1", ScopeSession, 10)
-	entriesB, _ := s.Read("agent-b", "s1", ScopeSession, 10)
+	entriesA, _ := s.Read(wsroot.PersonalWorkspaceID, "agent-a", "s1", ScopeSession, 10)
+	entriesB, _ := s.Read(wsroot.PersonalWorkspaceID, "agent-b", "s1", ScopeSession, 10)
 
 	if len(entriesA) != 1 || entriesA[0].Content != "alpha data" {
 		t.Errorf("agent-a entries = %+v", entriesA)
@@ -184,7 +185,7 @@ func TestFileStoreSearch(t *testing.T) {
 	writeEntry(t, s, "ag", "s2", ScopeSession, "the dog barked loudly")
 	writeEntry(t, s, "ag", "s3", ScopeSession, "another cat entry")
 
-	results, err := s.Search("ag", "cat", 10)
+	results, err := s.Search(wsroot.PersonalWorkspaceID, "ag", "cat", 10)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -204,7 +205,7 @@ func TestFileStoreSearchCaseInsensitive(t *testing.T) {
 	s := newFileStore(t)
 	writeEntry(t, s, "ag", "s1", ScopeSession, "the cat sat")
 
-	results, err := s.Search("ag", "CAT", 10)
+	results, err := s.Search(wsroot.PersonalWorkspaceID, "ag", "CAT", 10)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -218,7 +219,7 @@ func TestFileStoreSearchNoMatch(t *testing.T) {
 	s := newFileStore(t)
 	writeEntry(t, s, "ag", "s1", ScopeSession, "nothing here")
 
-	results, err := s.Search("ag", "xyzzy", 10)
+	results, err := s.Search(wsroot.PersonalWorkspaceID, "ag", "xyzzy", 10)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -238,11 +239,11 @@ func TestFileStorePurgeSessionRemovesOnlyTarget(t *testing.T) {
 	writeEntry(t, s, "ag", "sess-keep", ScopeSession, "keep me")
 	writeEntry(t, s, "ag", "sess-gone", ScopeSession, "delete me")
 
-	if err := s.PurgeSession("sess-gone"); err != nil {
+	if err := s.PurgeSession(wsroot.PersonalWorkspaceID, "sess-gone"); err != nil {
 		t.Fatalf("PurgeSession: %v", err)
 	}
 
-	kept, err := s.Read("ag", "sess-keep", ScopeSession, 10)
+	kept, err := s.Read(wsroot.PersonalWorkspaceID, "ag", "sess-keep", ScopeSession, 10)
 	if err != nil {
 		t.Fatalf("Read kept session: %v", err)
 	}
@@ -250,7 +251,7 @@ func TestFileStorePurgeSessionRemovesOnlyTarget(t *testing.T) {
 		t.Fatalf("kept session entry count = %d, want 1", len(kept))
 	}
 
-	purged, err := s.Read("ag", "sess-gone", ScopeSession, 10)
+	purged, err := s.Read(wsroot.PersonalWorkspaceID, "ag", "sess-gone", ScopeSession, 10)
 	if err != nil {
 		t.Fatalf("Read purged session: %v", err)
 	}
@@ -263,7 +264,7 @@ func TestFileStorePurgeSessionRemovesOnlyTarget(t *testing.T) {
 // (not an error) when the session never existed.
 func TestFileStorePurgeSessionNonExistent(t *testing.T) {
 	s := newFileStore(t)
-	if err := s.PurgeSession("no-such-session"); err != nil {
+	if err := s.PurgeSession(wsroot.PersonalWorkspaceID, "no-such-session"); err != nil {
 		t.Fatalf("PurgeSession missing session: %v", err)
 	}
 }
@@ -294,7 +295,7 @@ func TestFileStoreShardIsolation(t *testing.T) {
 
 	for i := 0; i < sessions; i++ {
 		sid := fmt.Sprintf("session-%d", i)
-		entries, err := s.Read("ag", sid, ScopeSession, msgsPerSession+1)
+		entries, err := s.Read(wsroot.PersonalWorkspaceID, "ag", sid, ScopeSession, msgsPerSession+1)
 		if err != nil {
 			t.Errorf("Read session %s: %v", sid, err)
 			continue
@@ -349,7 +350,7 @@ func TestContainsCI(t *testing.T) {
 		{"hello world", "WORLD", true},
 		{"hello world", "xyz", false},
 		{"", "x", false},
-		{"hello", "", true},  // empty substr always matches
+		{"hello", "", true}, // empty substr always matches
 		{"HELLO", "hello", true},
 		{"abc", "abcd", false}, // substr longer than string
 	}
@@ -368,7 +369,7 @@ func TestReadTailSmallFile(t *testing.T) {
 	s, _ := NewFileStore(dir)
 	writeEntry(t, s, "ag", "s1", ScopeSession, "tiny")
 
-	path := s.sessionPath("ag", "s1")
+	path := s.sessionPath(wsroot.PersonalWorkspaceID, "ag", "s1")
 	data, err := readTail(path, readTailBytes)
 	if err != nil {
 		t.Fatalf("readTail: %v", err)

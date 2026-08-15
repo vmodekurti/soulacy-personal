@@ -8,6 +8,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -41,7 +42,7 @@ func TestFileStoreShardSerializationSameSession(t *testing.T) {
 	}
 	wg.Wait()
 
-	entries, err := s.Read("agent", "shared-session", ScopeSession, goroutines*msgs+1)
+	entries, err := s.Read(wsroot.PersonalWorkspaceID, "agent", "shared-session", ScopeSession, goroutines*msgs+1)
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
@@ -65,13 +66,13 @@ func TestFileStoreShardSerializationSameSession(t *testing.T) {
 func TestFileStoreShardForReusesMutex(t *testing.T) {
 	s := newFileStore(t)
 
-	m1 := s.shardFor("ag", "s1")
-	m2 := s.shardFor("ag", "s1")
+	m1 := s.shardFor(wsroot.PersonalWorkspaceID+"\x00"+"ag", "s1")
+	m2 := s.shardFor(wsroot.PersonalWorkspaceID+"\x00"+"ag", "s1")
 	if m1 != m2 {
 		t.Error("shardFor with the same key should return the same mutex")
 	}
 
-	m3 := s.shardFor("ag", "s2")
+	m3 := s.shardFor(wsroot.PersonalWorkspaceID+"\x00"+"ag", "s2")
 	if m1 == m3 {
 		t.Error("shardFor with a different session should return a different mutex")
 	}
@@ -85,7 +86,7 @@ func TestFileStoreShardForReusesMutex(t *testing.T) {
 // the expected directory structure: <dir>/<agentID>/<sessionID>.jsonl.
 func TestFileStoreSessionPathReturnsExpectedPath(t *testing.T) {
 	s := newFileStore(t)
-	got := s.sessionPath("agent-x", "sess-y")
+	got := s.sessionPath(wsroot.PersonalWorkspaceID, "agent-x", "sess-y")
 	want := filepath.Join(s.dir, "agent-x", "sess-y.jsonl")
 	if got != want {
 		t.Errorf("sessionPath = %q, want %q", got, want)
@@ -104,7 +105,7 @@ func TestFileStoreReadEmptyScopeReturnsAll(t *testing.T) {
 	writeEntry(t, s, "ag", "s1", ScopeAgent, "agent msg")
 	writeEntry(t, s, "ag", "s1", ScopeGlobal, "global msg")
 
-	all, err := s.Read("ag", "s1", "", 10)
+	all, err := s.Read(wsroot.PersonalWorkspaceID, "ag", "s1", "", 10)
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
@@ -129,7 +130,7 @@ func TestFileStoreSearchLimitBoundary(t *testing.T) {
 	// One extra non-matching entry to make sure it's genuinely capped.
 	writeEntry(t, s, "ag", "extra", ScopeSession, "no match here")
 
-	results, err := s.Search("ag", "boundary match", limit)
+	results, err := s.Search(wsroot.PersonalWorkspaceID, "ag", "boundary match", limit)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -148,11 +149,11 @@ func TestFileStorePurgeSessionNoMatchSessionDoesNothing(t *testing.T) {
 	s := newFileStore(t)
 	writeEntry(t, s, "ag", "real-session", ScopeSession, "keep")
 
-	if err := s.PurgeSession("nonexistent-session"); err != nil {
+	if err := s.PurgeSession(wsroot.PersonalWorkspaceID, "nonexistent-session"); err != nil {
 		t.Fatalf("PurgeSession non-existent: %v", err)
 	}
 
-	entries, err := s.Read("ag", "real-session", ScopeSession, 10)
+	entries, err := s.Read(wsroot.PersonalWorkspaceID, "ag", "real-session", ScopeSession, 10)
 	if err != nil {
 		t.Fatalf("Read after PurgeSession: %v", err)
 	}
@@ -171,7 +172,7 @@ func TestFileStoreWriteAndReadScopeAgent(t *testing.T) {
 	s := newFileStore(t)
 	writeEntry(t, s, "ag", "s1", ScopeAgent, "agent-scoped content")
 
-	entries, err := s.Read("ag", "s1", ScopeAgent, 10)
+	entries, err := s.Read(wsroot.PersonalWorkspaceID, "ag", "s1", ScopeAgent, 10)
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
@@ -210,7 +211,7 @@ func TestSQLiteArchivePruneDeletesMultipleEntries(t *testing.T) {
 	// Insert 3 old entries.
 	for i := 0; i < 3; i++ {
 		seq := atomic.AddInt64(&archiveSeq, 1)
-		e := Entry{
+		e := Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 			ID:        fmt.Sprintf("old-multi-%d", seq),
 			AgentID:   "ag",
 			SessionID: "s1",
@@ -254,7 +255,7 @@ func TestSQLiteArchiveReadGlobalOrderedNewestFirst(t *testing.T) {
 	seq1 := atomic.AddInt64(&archiveSeq, 1)
 	seq2 := atomic.AddInt64(&archiveSeq, 1)
 
-	old := Entry{
+	old := Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID:        fmt.Sprintf("test-%d", seq1),
 		AgentID:   "ag",
 		SessionID: "s1",
@@ -262,7 +263,7 @@ func TestSQLiteArchiveReadGlobalOrderedNewestFirst(t *testing.T) {
 		Content:   "older entry",
 		CreatedAt: time.Now().Add(-time.Minute).UTC(),
 	}
-	newer := Entry{
+	newer := Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID:        fmt.Sprintf("test-%d", seq2),
 		AgentID:   "ag",
 		SessionID: "s1",
@@ -273,7 +274,7 @@ func TestSQLiteArchiveReadGlobalOrderedNewestFirst(t *testing.T) {
 	_ = a.Archive(old)
 	_ = a.Archive(newer)
 
-	results, err := a.ReadGlobal("ag", 10)
+	results, err := a.ReadGlobal(wsroot.PersonalWorkspaceID, "ag", 10)
 	if err != nil {
 		t.Fatalf("ReadGlobal: %v", err)
 	}
@@ -296,7 +297,7 @@ func TestSQLiteArchiveReadByScopeOrderedNewestFirst(t *testing.T) {
 	seq1 := atomic.AddInt64(&archiveSeq, 1)
 	seq2 := atomic.AddInt64(&archiveSeq, 1)
 
-	old := Entry{
+	old := Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID:        fmt.Sprintf("test-%d", seq1),
 		AgentID:   "ag",
 		SessionID: "s1",
@@ -304,7 +305,7 @@ func TestSQLiteArchiveReadByScopeOrderedNewestFirst(t *testing.T) {
 		Content:   "old-scope",
 		CreatedAt: time.Now().Add(-time.Minute).UTC(),
 	}
-	newer := Entry{
+	newer := Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID:        fmt.Sprintf("test-%d", seq2),
 		AgentID:   "ag",
 		SessionID: "s1",
@@ -315,7 +316,7 @@ func TestSQLiteArchiveReadByScopeOrderedNewestFirst(t *testing.T) {
 	_ = a.Archive(old)
 	_ = a.Archive(newer)
 
-	results, err := a.ReadByScope("ag", "s1", ScopeSession, 10)
+	results, err := a.ReadByScope(wsroot.PersonalWorkspaceID, "ag", "s1", ScopeSession, 10)
 	if err != nil {
 		t.Fatalf("ReadByScope: %v", err)
 	}
@@ -336,7 +337,7 @@ func TestSQLiteArchiveReadByScopeOrderedNewestFirst(t *testing.T) {
 func TestSQLiteArchiveArchiveWithKey(t *testing.T) {
 	a := newTestArchive(t)
 	seq := atomic.AddInt64(&archiveSeq, 1)
-	e := Entry{
+	e := Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID:        fmt.Sprintf("test-%d", seq),
 		AgentID:   "ag",
 		SessionID: "s1",
@@ -348,7 +349,7 @@ func TestSQLiteArchiveArchiveWithKey(t *testing.T) {
 	if err := a.Archive(e); err != nil {
 		t.Fatalf("Archive: %v", err)
 	}
-	results, err := a.Search("ag", "dark mode", 10)
+	results, err := a.Search(wsroot.PersonalWorkspaceID, "ag", "dark mode", 10)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -426,11 +427,11 @@ func TestVectorStoreWriteDimMismatch(t *testing.T) {
 	// directVS bypasses ensureSchema (which requires sqlite-vec) to let us test
 	// the Write-level dim check without needing the full extension.
 	vs := &VectorStore{
-		db:       nil,      // not needed — error is surfaced before any DB call
+		db:       nil, // not needed — error is surfaced before any DB call
 		embedder: &stubEmbedder{dims: 2, vec: []float32{0.1, 0.2}},
 		dims:     4, // mismatch: embedder produces 2, VectorStore expects 4
 	}
-	err := vs.Write(context.Background(), Entry{
+	err := vs.Write(context.Background(), Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID:        "x",
 		AgentID:   "ag",
 		SessionID: "s1",
@@ -455,7 +456,7 @@ func TestVectorStoreWriteEmbedderError(t *testing.T) {
 		embedder: &errorEmbedder{},
 		dims:     4,
 	}
-	err := vs.Write(context.Background(), Entry{
+	err := vs.Write(context.Background(), Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID:      "e1",
 		AgentID: "ag",
 		Content: "embed error",
@@ -510,7 +511,7 @@ func TestContainsCISubstrLongerThanString(t *testing.T) {
 // the empty-scope Read (which should return all entries regardless of scope).
 func TestFileStoreReadZeroScopeEntry(t *testing.T) {
 	s := newFileStore(t)
-	e := Entry{
+	e := Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		AgentID:   "ag",
 		SessionID: "s1",
 		Scope:     "", // explicitly empty / zero-value
@@ -521,7 +522,7 @@ func TestFileStoreReadZeroScopeEntry(t *testing.T) {
 		t.Fatalf("Write: %v", err)
 	}
 	// Read with scope="" returns everything.
-	all, err := s.Read("ag", "s1", "", 10)
+	all, err := s.Read(wsroot.PersonalWorkspaceID, "ag", "s1", "", 10)
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}

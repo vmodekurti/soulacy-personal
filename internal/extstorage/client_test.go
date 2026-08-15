@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"os"
 	"path/filepath"
 	"strings"
@@ -181,7 +182,7 @@ func runHelperSidecar(mode string) {
 					continue
 				}
 				if strings.Contains(e.Content, p.Query) {
-					entries = append(entries, memory.Entry{
+					entries = append(entries, memory.Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 						ID:        e.ID,
 						AgentID:   e.AgentID,
 						SessionID: e.SessionID,
@@ -199,7 +200,7 @@ func runHelperSidecar(mode string) {
 			var entries []memory.Entry
 			for _, e := range storageStore {
 				if e.AgentID == p.AgentID && e.SessionID == p.SessionID && e.Scope == string(p.Scope) {
-					entries = append(entries, memory.Entry{
+					entries = append(entries, memory.Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 						ID:        e.ID,
 						AgentID:   e.AgentID,
 						SessionID: e.SessionID,
@@ -217,7 +218,7 @@ func runHelperSidecar(mode string) {
 			var entries []memory.Entry
 			for _, e := range storageStore {
 				if e.AgentID == p.AgentID {
-					entries = append(entries, memory.Entry{
+					entries = append(entries, memory.Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 						ID:        e.ID,
 						AgentID:   e.AgentID,
 						SessionID: e.SessionID,

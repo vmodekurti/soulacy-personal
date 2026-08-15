@@ -23,6 +23,7 @@ package runtime
 
 import (
 	"context"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"strings"
 	"sync"
 	"testing"
@@ -473,7 +474,7 @@ func TestBuildContext_LongHistoryDoesNotPanic(t *testing.T) {
 	}
 
 	// Must not panic.
-	msgs := e.buildContext(def, sess, testUserMessage("long-hist-bot", "long-sess", "hi"))
+	msgs := e.buildContext(context.Background(), def, sess, testUserMessage("long-hist-bot", "long-sess", "hi"))
 	if len(msgs) == 0 {
 		t.Fatal("buildContext should return at least the system message")
 	}
@@ -734,7 +735,7 @@ func TestKnowledgeCatalogFor_NilService(t *testing.T) {
 func TestMemoryPurgeSession_ExistingSession(t *testing.T) {
 	e := newMinimalEngine(t)
 	// PurgeSession on an empty store should not error.
-	if err := e.MemoryPurgeSession("session-to-purge"); err != nil {
+	if err := e.MemoryPurgeSession(wsroot.PersonalWorkspaceID, "session-to-purge"); err != nil {
 		t.Fatalf("MemoryPurgeSession: %v", err)
 	}
 }
@@ -904,7 +905,7 @@ func TestBuildContextInjectsPastConversationRecallForLearningAgent(t *testing.T)
 		Memory:       agent.MemoryPolicy{MaxTokens: 1000},
 	}
 	sess := e.getOrCreateSession("current-session", "learner")
-	msgs := e.buildContext(def, sess, testUserMessage("learner", "current-session", "stock momentum checklist"))
+	msgs := e.buildContext(context.Background(), def, sess, testUserMessage("learner", "current-session", "stock momentum checklist"))
 	joined := ""
 	for _, msg := range msgs {
 		joined += msg.Content + "\n"
@@ -917,7 +918,7 @@ func TestBuildContextInjectsPastConversationRecallForLearningAgent(t *testing.T)
 	}
 
 	def.Learning.Enabled = false
-	msgs = e.buildContext(def, sess, testUserMessage("learner", "current-session", "stock momentum checklist"))
+	msgs = e.buildContext(context.Background(), def, sess, testUserMessage("learner", "current-session", "stock momentum checklist"))
 	for _, msg := range msgs {
 		if strings.Contains(msg.Content, "Relevant Past Conversations") {
 			t.Fatalf("learning-disabled agent should not receive recall: %+v", msgs)

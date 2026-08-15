@@ -111,7 +111,7 @@ func TestBuildContext_EmptyHistorySystemPrompt(t *testing.T) {
 		SessionID: "sess-ctx",
 		Parts:     message.Text("Hello"),
 	}
-	msgs := e.buildContext(def, sess, incoming)
+	msgs := e.buildContext(context.Background(), def, sess, incoming)
 	if len(msgs) == 0 {
 		t.Fatal("buildContext returned empty messages for empty history")
 	}
@@ -144,7 +144,7 @@ func TestBuildContext_WithHistory(t *testing.T) {
 		SessionID: "sess-hist",
 		Parts:     message.Text("Second message"),
 	}
-	msgs := e.buildContext(def, sess, incoming)
+	msgs := e.buildContext(context.Background(), def, sess, incoming)
 
 	// Should have at least: system + 2 history messages
 	if len(msgs) < 3 {
@@ -181,7 +181,7 @@ func TestBuildContext_CachedPrefixUsed(t *testing.T) {
 		SessionID: "sess-cached",
 		Parts:     message.Text("test"),
 	}
-	msgs := e.buildContext(def, sess, incoming)
+	msgs := e.buildContext(context.Background(), def, sess, incoming)
 	if len(msgs) == 0 {
 		t.Fatal("buildContext returned empty messages")
 	}

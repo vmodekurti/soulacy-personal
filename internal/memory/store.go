@@ -8,14 +8,17 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/soulacy/soulacy/internal/wsroot"
 	sdkmemory "github.com/soulacy/soulacy/sdk/memory"
 )
 
@@ -39,25 +42,36 @@ type Embedder interface {
 }
 
 // Store is the central interface for all memory operations.
+//
+// Every method names its workspace explicitly rather than reading it from
+// ambient state. That is the point of MU-003's rule for repositories: a filter
+// that a caller can forget to apply is not a boundary, and a memory read is
+// the single easiest place to leak another tenant's conversation.
 type Store interface {
-	// Write persists a new memory entry.
+	// Write persists a new memory entry. The entry's WorkspaceID is required.
 	Write(e Entry) error
 
-	// Read retrieves recent entries for a session/agent.
-	Read(agentID, sessionID string, scope Scope, limit int) ([]Entry, error)
+	// Read retrieves recent entries for a session/agent in one workspace.
+	Read(workspaceID, agentID, sessionID string, scope Scope, limit int) ([]Entry, error)
 
-	// Search performs a simple substring search across memory content.
-	Search(agentID, query string, limit int) ([]Entry, error)
+	// Search performs a substring search across one workspace's memory.
+	Search(workspaceID, agentID, query string, limit int) ([]Entry, error)
 
-	// Delete removes a specific memory entry.
-	Delete(id string) error
+	// Delete removes a specific memory entry owned by the workspace.
+	Delete(workspaceID, id string) error
 
-	// PurgeSession removes all ephemeral memories for a session.
-	PurgeSession(sessionID string) error
+	// PurgeSession removes all ephemeral memories for a session in one
+	// workspace.
+	PurgeSession(workspaceID, sessionID string) error
 
 	// Close releases any held resources.
 	Close() error
 }
+
+// ErrWorkspaceRequired is returned when a memory operation arrives without a
+// workspace. Memory with no owner is memory every tenant can read, so this
+// fails closed rather than defaulting.
+var ErrWorkspaceRequired = errors.New("memory: workspace is required")
 
 // FileStore is the primary hot-memory backend. Entries are appended to per-session
 // JSONL files under <dir>/<agentID>/<sessionID>.jsonl. Reads scan from the end of
@@ -93,8 +107,16 @@ func NewFileStore(dir string) (*FileStore, error) {
 	return &FileStore{dir: dir, shards: make(map[string]*sync.Mutex)}, nil
 }
 
-func (s *FileStore) sessionPath(agentID, sessionID string) string {
-	return filepath.Join(s.dir, agentID, sessionID+".jsonl")
+// sessionPath places a session's memory inside its workspace. The personal
+// workspace keeps <dir>/<agent>/<session>.jsonl exactly as before; every other
+// workspace is namespaced, so one tenant's memory file is not merely filtered
+// out of another's reads — it is not in the directory they read at all.
+func (s *FileStore) sessionPath(workspaceID, agentID, sessionID string) string {
+	return filepath.Join(s.workspaceDir(workspaceID), agentID, sessionID+".jsonl")
+}
+
+func (s *FileStore) workspaceDir(workspaceID string) string {
+	return wsroot.Dir(s.dir, workspaceID)
 }
 
 // shardFor returns the mutex for (agentID, sessionID). Lazily creates it
@@ -113,6 +135,12 @@ func (s *FileStore) shardFor(agentID, sessionID string) *sync.Mutex {
 }
 
 func (s *FileStore) Write(e Entry) error {
+	if strings.TrimSpace(e.WorkspaceID) == "" {
+		return ErrWorkspaceRequired
+	}
+	if err := wsroot.Validate(e.WorkspaceID); err != nil {
+		return err
+	}
 	if e.ID == "" {
 		e.ID = uuid.New().String()
 	}
@@ -120,7 +148,7 @@ func (s *FileStore) Write(e Entry) error {
 		e.CreatedAt = time.Now().UTC()
 	}
 
-	path := s.sessionPath(e.AgentID, e.SessionID)
+	path := s.sessionPath(e.WorkspaceID, e.AgentID, e.SessionID)
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return fmt.Errorf("memory: mkdir: %w", err)
 	}
@@ -131,7 +159,7 @@ func (s *FileStore) Write(e Entry) error {
 	}
 
 	// Per-session lock — disjoint (agent, session) writes proceed in parallel.
-	m := s.shardFor(e.AgentID, e.SessionID)
+	m := s.shardFor(e.WorkspaceID+"\x00"+e.AgentID, e.SessionID)
 	m.Lock()
 	defer m.Unlock()
 
@@ -145,10 +173,13 @@ func (s *FileStore) Write(e Entry) error {
 	return err
 }
 
-func (s *FileStore) Read(agentID, sessionID string, scope Scope, limit int) ([]Entry, error) {
-	path := s.sessionPath(agentID, sessionID)
+func (s *FileStore) Read(workspaceID, agentID, sessionID string, scope Scope, limit int) ([]Entry, error) {
+	if strings.TrimSpace(workspaceID) == "" {
+		return nil, ErrWorkspaceRequired
+	}
+	path := s.sessionPath(workspaceID, agentID, sessionID)
 
-	m := s.shardFor(agentID, sessionID)
+	m := s.shardFor(workspaceID+"\x00"+agentID, sessionID)
 	m.Lock()
 	data, err := readTail(path, readTailBytes)
 	m.Unlock()
@@ -220,8 +251,11 @@ func readTail(path string, tailBytes int64) ([]byte, error) {
 	return nil, nil
 }
 
-func (s *FileStore) Search(agentID, query string, limit int) ([]Entry, error) {
-	agentDir := filepath.Join(s.dir, agentID)
+func (s *FileStore) Search(workspaceID, agentID, query string, limit int) ([]Entry, error) {
+	if strings.TrimSpace(workspaceID) == "" {
+		return nil, ErrWorkspaceRequired
+	}
+	agentDir := filepath.Join(s.workspaceDir(workspaceID), agentID)
 	files, err := filepath.Glob(filepath.Join(agentDir, "*.jsonl"))
 	if err != nil {
 		return nil, err
@@ -252,7 +286,10 @@ func (s *FileStore) Search(agentID, query string, limit int) ([]Entry, error) {
 	return results, nil
 }
 
-func (s *FileStore) Delete(id string) error {
+func (s *FileStore) Delete(workspaceID, id string) error {
+	if strings.TrimSpace(workspaceID) == "" {
+		return ErrWorkspaceRequired
+	}
 	// File-based delete is expensive; mark as deleted in metadata instead.
 	// A compaction job (run on startup or via CLI) rewrites files without deleted entries.
 	// For now, this is a no-op placeholder — full implementation uses SQLite as the
@@ -260,13 +297,28 @@ func (s *FileStore) Delete(id string) error {
 	return nil
 }
 
-func (s *FileStore) PurgeSession(sessionID string) error {
-	// Walk all agent dirs and remove matching session files.
-	return filepath.Walk(s.dir, func(path string, info os.FileInfo, err error) error {
+func (s *FileStore) PurgeSession(workspaceID, sessionID string) error {
+	if strings.TrimSpace(workspaceID) == "" {
+		return ErrWorkspaceRequired
+	}
+	// Walk only this workspace's agent dirs. Walking the shared root would
+	// delete a same-named session belonging to another tenant, which is the
+	// worst possible failure for a purge: silent, immediate, irreversible.
+	root := s.workspaceDir(workspaceID)
+	personal := wsroot.Normalize(workspaceID) == wsroot.PersonalWorkspaceID
+	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
-		if !info.IsDir() && filepath.Base(path) == sessionID+".jsonl" {
+		if info.IsDir() {
+			// The personal root contains every other workspace's namespace;
+			// a personal purge must not descend into it.
+			if personal && info.Name() == wsroot.NamespaceDir {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if filepath.Base(path) == sessionID+".jsonl" {
 			return os.Remove(path)
 		}
 		return nil

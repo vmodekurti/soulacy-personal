@@ -556,7 +556,7 @@ func TestBuildContext_EmptyHistory(t *testing.T) {
 	}
 	msg := testUserMessage("ctx-test", "test-session", "hello")
 
-	msgs := e.buildContext(def, sess, msg)
+	msgs := e.buildContext(context.Background(), def, sess, msg)
 
 	if len(msgs) == 0 {
 		t.Fatal("expected at least 1 message (system prompt), got 0")
@@ -585,7 +585,7 @@ func TestBuildContext_IncludesSessionHistory(t *testing.T) {
 	}
 	msg := testUserMessage("history-bot", "sess-hist", "second question")
 
-	msgs := e.buildContext(def, sess, msg)
+	msgs := e.buildContext(context.Background(), def, sess, msg)
 
 	// Find user and assistant turns in context
 	found := map[string]bool{}
@@ -618,7 +618,7 @@ func TestBuildContext_UsesCachedPrefix(t *testing.T) {
 	}
 	msg := testUserMessage("cache-test", "sess-cache", "hi")
 
-	msgs := e.buildContext(def, sess, msg)
+	msgs := e.buildContext(context.Background(), def, sess, msg)
 
 	if len(msgs) == 0 {
 		t.Fatal("expected at least one message")
@@ -642,7 +642,7 @@ func TestBuildContext_FallsBackToFreshPrefixWhenCacheEmpty(t *testing.T) {
 	}
 	msg := testUserMessage("nocache-test", "sess-nocache", "hi")
 
-	msgs := e.buildContext(def, sess, msg)
+	msgs := e.buildContext(context.Background(), def, sess, msg)
 
 	if len(msgs) == 0 {
 		t.Fatal("expected at least one message")

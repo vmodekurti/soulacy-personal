@@ -601,7 +601,10 @@ the ` + "`sy`" + ` command for that artifact type.`
 // Trade-off: agents that mutate their KB / skills mid-run won't see the new
 // catalog until the next Handle call. That's the right trade — agents
 // orchestrate their own tools; they don't reconfigure themselves mid-turn.
-func (e *Engine) buildContext(def *agent.Definition, sess *Session, incoming message.Message) []llm.ChatMessage {
+// buildContext takes a context so the memory it injects is read from the
+// workspace the run belongs to. Without it, a session's recalled memory would
+// come from whatever the process default happened to be.
+func (e *Engine) buildContext(ctx context.Context, def *agent.Definition, sess *Session, incoming message.Message) []llm.ChatMessage {
 	// Resolve prefix from the session cache (set up at Handle entry below).
 	// Falls back to a fresh computation for direct callers that haven't
 	// primed the cache — keeps the function safe to call independently in
@@ -615,7 +618,7 @@ func (e *Engine) buildContext(def *agent.Definition, sess *Session, incoming mes
 	msgs := []llm.ChatMessage{{Role: "system", Content: prefix}}
 
 	// Inject recent memory
-	entries, _ := e.memory.Read(def.ID, sess.ID, memory.ScopeSession, def.Memory.MaxTokens)
+	entries, _ := e.memory.Read(WorkspaceFromContext(ctx), def.ID, sess.ID, memory.ScopeSession, def.Memory.MaxTokens)
 	if len(entries) > 0 {
 		var sb strings.Builder
 		sb.WriteString("## Memory\n")

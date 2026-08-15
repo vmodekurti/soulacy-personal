@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"strings"
+
+	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
 // Principal is the immutable authentication identity supplied by the gateway.
@@ -54,4 +56,21 @@ func callerAllowsTool(ctx context.Context, toolName string) bool {
 		return p.Role == "operator"
 	}
 	return p.Role == "operator" || p.Role == "viewer"
+}
+
+// WorkspaceFromContext returns the workspace a run is acting in, falling back
+// to the implicit personal workspace when no principal is present.
+//
+// Scheduler, channel, and internal invocations reach the engine without a
+// request principal. Those are Personal-mode paths today; a multi-user
+// deployment establishes a service principal before the engine is reached, so
+// this fallback is the single-tenant answer rather than a way to bypass the
+// boundary.
+func WorkspaceFromContext(ctx context.Context) string {
+	if p, ok := PrincipalFromContext(ctx); ok {
+		if workspace := strings.TrimSpace(p.WorkspaceID); workspace != "" {
+			return workspace
+		}
+	}
+	return wsroot.PersonalWorkspaceID
 }

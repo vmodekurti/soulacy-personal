@@ -5,6 +5,7 @@
 package memory
 
 import (
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,12 +76,12 @@ func TestFileStoreDeleteIsNoOp(t *testing.T) {
 	s := newFileStore(t)
 	writeEntry(t, s, "ag", "s1", ScopeSession, "keep me")
 
-	if err := s.Delete("any-id"); err != nil {
+	if err := s.Delete(wsroot.PersonalWorkspaceID, "any-id"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
 	// Entry must still be readable — Delete is a documented no-op.
-	entries, err := s.Read("ag", "s1", ScopeSession, 10)
+	entries, err := s.Read(wsroot.PersonalWorkspaceID, "ag", "s1", ScopeSession, 10)
 	if err != nil {
 		t.Fatalf("Read after Delete: %v", err)
 	}
@@ -103,7 +104,7 @@ func TestFileStoreCloseIsNoOp(t *testing.T) {
 func TestFileStoreWriteAndReadOptionalFields(t *testing.T) {
 	s := newFileStore(t)
 	exp := time.Now().Add(time.Hour).UTC()
-	e := Entry{
+	e := Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		AgentID:   "ag",
 		SessionID: "s1",
 		Scope:     ScopeAgent,
@@ -117,7 +118,7 @@ func TestFileStoreWriteAndReadOptionalFields(t *testing.T) {
 		t.Fatalf("Write: %v", err)
 	}
 
-	entries, err := s.Read("ag", "s1", ScopeAgent, 10)
+	entries, err := s.Read(wsroot.PersonalWorkspaceID, "ag", "s1", ScopeAgent, 10)
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
@@ -145,11 +146,11 @@ func TestFileStoreWriteAndReadOptionalFields(t *testing.T) {
 
 func TestFileStoreWriteAutoAssignsIDAndCreatedAt(t *testing.T) {
 	s := newFileStore(t)
-	e := Entry{AgentID: "ag", SessionID: "s1", Scope: ScopeSession, Content: "bare"}
+	e := Entry{WorkspaceID: wsroot.PersonalWorkspaceID, AgentID: "ag", SessionID: "s1", Scope: ScopeSession, Content: "bare"}
 	if err := s.Write(e); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
-	entries, err := s.Read("ag", "s1", ScopeSession, 1)
+	entries, err := s.Read(wsroot.PersonalWorkspaceID, "ag", "s1", ScopeSession, 1)
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
@@ -173,7 +174,7 @@ func TestFileStoreSearchEmptyQueryMatchesAll(t *testing.T) {
 	writeEntry(t, s, "ag", "s1", ScopeSession, "alpha")
 	writeEntry(t, s, "ag", "s2", ScopeSession, "beta")
 
-	results, err := s.Search("ag", "", 10)
+	results, err := s.Search(wsroot.PersonalWorkspaceID, "ag", "", 10)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -191,7 +192,7 @@ func TestFileStoreSearchRespectsLimit(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		writeEntry(t, s, "ag", "s1", ScopeSession, "match me")
 	}
-	results, err := s.Search("ag", "match", 2)
+	results, err := s.Search(wsroot.PersonalWorkspaceID, "ag", "match", 2)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -206,7 +207,7 @@ func TestFileStoreSearchRespectsLimit(t *testing.T) {
 
 func TestFileStoreSearchUnknownAgentReturnsEmpty(t *testing.T) {
 	s := newFileStore(t)
-	results, err := s.Search("nobody", "anything", 10)
+	results, err := s.Search(wsroot.PersonalWorkspaceID, "nobody", "anything", 10)
 	if err != nil {
 		t.Fatalf("Search unknown agent: %v", err)
 	}
@@ -224,7 +225,7 @@ func TestSQLiteArchiveSearchEmptyQueryMatchesAll(t *testing.T) {
 	archiveEntry(t, a, "ag", "s1", ScopeSession, "alpha")
 	archiveEntry(t, a, "ag", "s2", ScopeSession, "beta")
 
-	results, err := a.Search("ag", "", 10)
+	results, err := a.Search(wsroot.PersonalWorkspaceID, "ag", "", 10)
 	if err != nil {
 		t.Fatalf("Search empty query: %v", err)
 	}
@@ -242,7 +243,7 @@ func TestSQLiteArchiveReadGlobalRespectsLimit(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		archiveEntry(t, a, "ag", "s1", ScopeSession, "entry")
 	}
-	results, err := a.ReadGlobal("ag", 3)
+	results, err := a.ReadGlobal(wsroot.PersonalWorkspaceID, "ag", 3)
 	if err != nil {
 		t.Fatalf("ReadGlobal: %v", err)
 	}
@@ -259,7 +260,7 @@ func TestSQLiteArchiveReadGlobalUnknownAgentReturnsEmpty(t *testing.T) {
 	a := newTestArchive(t)
 	archiveEntry(t, a, "ag", "s1", ScopeSession, "exists")
 
-	results, err := a.ReadGlobal("nobody", 10)
+	results, err := a.ReadGlobal(wsroot.PersonalWorkspaceID, "nobody", 10)
 	if err != nil {
 		t.Fatalf("ReadGlobal unknown agent: %v", err)
 	}
@@ -290,7 +291,7 @@ func TestSQLiteArchiveStatsUnknownAgentReturnsZero(t *testing.T) {
 func TestSQLiteArchiveArchiveWithExpiresAt(t *testing.T) {
 	a := newTestArchive(t)
 	exp := time.Now().Add(24 * time.Hour).UTC()
-	e := Entry{
+	e := Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID:        "expires-1",
 		AgentID:   "ag",
 		SessionID: "s1",
@@ -303,7 +304,7 @@ func TestSQLiteArchiveArchiveWithExpiresAt(t *testing.T) {
 		t.Fatalf("Archive: %v", err)
 	}
 
-	results, err := a.Search("ag", "expiring", 10)
+	results, err := a.Search(wsroot.PersonalWorkspaceID, "ag", "expiring", 10)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -324,7 +325,7 @@ func TestSQLiteArchiveArchiveWithExpiresAt(t *testing.T) {
 
 func TestSQLiteArchiveArchiveWithMetadata(t *testing.T) {
 	a := newTestArchive(t)
-	e := Entry{
+	e := Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID:        "meta-1",
 		AgentID:   "ag",
 		SessionID: "s1",
@@ -336,7 +337,7 @@ func TestSQLiteArchiveArchiveWithMetadata(t *testing.T) {
 	if err := a.Archive(e); err != nil {
 		t.Fatalf("Archive: %v", err)
 	}
-	results, err := a.Search("ag", "has metadata", 10)
+	results, err := a.Search(wsroot.PersonalWorkspaceID, "ag", "has metadata", 10)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -394,7 +395,7 @@ func TestSQLiteArchiveReadByScopeNoMatch(t *testing.T) {
 	archiveEntry(t, a, "ag", "s1", ScopeSession, "session only")
 
 	// Ask for global scope; nothing was archived with ScopeGlobal.
-	results, err := a.ReadByScope("ag", "s1", ScopeGlobal, 10)
+	results, err := a.ReadByScope(wsroot.PersonalWorkspaceID, "ag", "s1", ScopeGlobal, 10)
 	if err != nil {
 		t.Fatalf("ReadByScope: %v", err)
 	}
@@ -412,7 +413,7 @@ func TestSQLiteArchiveReadByScopeRespectsLimit(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		archiveEntry(t, a, "ag", "s1", ScopeSession, "entry")
 	}
-	results, err := a.ReadByScope("ag", "s1", ScopeSession, 2)
+	results, err := a.ReadByScope(wsroot.PersonalWorkspaceID, "ag", "s1", ScopeSession, 2)
 	if err != nil {
 		t.Fatalf("ReadByScope: %v", err)
 	}

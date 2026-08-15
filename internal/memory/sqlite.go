@@ -22,7 +22,8 @@ var archiveSQLiteVecAuto sync.Once
 
 const schema = `
 CREATE TABLE IF NOT EXISTS memories (
-    id          TEXT PRIMARY KEY,
+    id           TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL DEFAULT 'ws_personal',
     agent_id    TEXT NOT NULL,
     session_id  TEXT NOT NULL,
     scope       TEXT NOT NULL,
@@ -34,8 +35,8 @@ CREATE TABLE IF NOT EXISTS memories (
     expires_at  DATETIME
 );
 
-CREATE INDEX IF NOT EXISTS idx_memories_agent   ON memories(agent_id);
-CREATE INDEX IF NOT EXISTS idx_memories_session ON memories(session_id);
+CREATE INDEX IF NOT EXISTS idx_memories_agent   ON memories(workspace_id, agent_id);
+CREATE INDEX IF NOT EXISTS idx_memories_session ON memories(workspace_id, session_id);
 CREATE INDEX IF NOT EXISTS idx_memories_scope   ON memories(scope);
 CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at DESC);
 `
@@ -70,9 +71,17 @@ func NewSQLiteArchive(path string) (*SQLiteArchive, error) {
 		}
 	}
 
+	// An existing archive predates the tenant column. Add it in place and
+	// backfill to the personal workspace, which is what those rows were: a
+	// single-user installation's memory. Doing this rather than defaulting the
+	// column at read time means the predicate below is never optional.
+	if err := addWorkspaceColumn(db); err != nil {
+		return nil, err
+	}
+
 	// Schema versioning (E22 adoption): v1 = the idempotent bootstrap above;
-	// future changes go through sqlitex.MigrateSchema with v2+.
-	if err := sqlitex.RecordSchemaVersion(db, "memory_archive", 1); err != nil {
+	// v2 adds the workspace boundary.
+	if err := sqlitex.RecordSchemaVersion(db, "memory_archive", 2); err != nil {
 		return nil, err
 	}
 
@@ -81,12 +90,15 @@ func NewSQLiteArchive(path string) (*SQLiteArchive, error) {
 
 // Archive writes an entry to the SQLite archive. Duplicate IDs are silently ignored.
 func (a *SQLiteArchive) Archive(e Entry) error {
+	if strings.TrimSpace(e.WorkspaceID) == "" {
+		return ErrWorkspaceRequired
+	}
 	meta, _ := json.Marshal(e.Metadata)
 	_, err := a.db.Exec(`
 		INSERT OR IGNORE INTO memories
-			(id, agent_id, session_id, scope, provenance, key, content, metadata, created_at, expires_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		e.ID, e.AgentID, e.SessionID, e.Scope, "", // provenance column kept for schema compat, no longer used
+			(id, workspace_id, agent_id, session_id, scope, provenance, key, content, metadata, created_at, expires_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		e.ID, e.WorkspaceID, e.AgentID, e.SessionID, e.Scope, "", // provenance column kept for schema compat, no longer used
 		e.Key, e.Content, string(meta), e.CreatedAt, e.ExpiresAt,
 	)
 	if err != nil {
@@ -98,15 +110,18 @@ func (a *SQLiteArchive) Archive(e Entry) error {
 // Search performs a LIKE-based substring search across memory content for an agent.
 // Results are ordered newest-first. For large datasets consider adding a vector
 // DB backend (set memory.vector_db in config.yaml).
-func (a *SQLiteArchive) Search(agentID, query string, limit int) ([]Entry, error) {
+func (a *SQLiteArchive) Search(workspaceID, agentID, query string, limit int) ([]Entry, error) {
+	if strings.TrimSpace(workspaceID) == "" {
+		return nil, ErrWorkspaceRequired
+	}
 	rows, err := a.db.Query(`
-		SELECT id, agent_id, session_id, scope, provenance, key,
+		SELECT id, workspace_id, agent_id, session_id, scope, provenance, key,
 		       content, metadata, created_at, expires_at
 		FROM memories
-		WHERE agent_id = ? AND content LIKE ?
+		WHERE workspace_id = ? AND agent_id = ? AND content LIKE ?
 		ORDER BY created_at DESC
 		LIMIT ?`,
-		agentID, "%"+query+"%", limit,
+		workspaceID, agentID, "%"+query+"%", limit,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("memory: search query: %w", err)
@@ -116,15 +131,18 @@ func (a *SQLiteArchive) Search(agentID, query string, limit int) ([]Entry, error
 }
 
 // ReadByScope returns archived entries filtered by scope and session, newest first.
-func (a *SQLiteArchive) ReadByScope(agentID, sessionID string, scope Scope, limit int) ([]Entry, error) {
+func (a *SQLiteArchive) ReadByScope(workspaceID, agentID, sessionID string, scope Scope, limit int) ([]Entry, error) {
+	if strings.TrimSpace(workspaceID) == "" {
+		return nil, ErrWorkspaceRequired
+	}
 	rows, err := a.db.Query(`
-		SELECT id, agent_id, session_id, scope, provenance, key,
+		SELECT id, workspace_id, agent_id, session_id, scope, provenance, key,
 		       content, metadata, created_at, expires_at
 		FROM memories
-		WHERE agent_id = ? AND session_id = ? AND scope = ?
+		WHERE workspace_id = ? AND agent_id = ? AND session_id = ? AND scope = ?
 		ORDER BY created_at DESC
 		LIMIT ?`,
-		agentID, sessionID, scope, limit,
+		workspaceID, agentID, sessionID, scope, limit,
 	)
 	if err != nil {
 		return nil, err
@@ -134,15 +152,18 @@ func (a *SQLiteArchive) ReadByScope(agentID, sessionID string, scope Scope, limi
 }
 
 // ReadGlobal returns the most recent entries across all sessions for an agent.
-func (a *SQLiteArchive) ReadGlobal(agentID string, limit int) ([]Entry, error) {
+func (a *SQLiteArchive) ReadGlobal(workspaceID, agentID string, limit int) ([]Entry, error) {
+	if strings.TrimSpace(workspaceID) == "" {
+		return nil, ErrWorkspaceRequired
+	}
 	rows, err := a.db.Query(`
-		SELECT id, agent_id, session_id, scope, provenance, key,
+		SELECT id, workspace_id, agent_id, session_id, scope, provenance, key,
 		       content, metadata, created_at, expires_at
 		FROM memories
-		WHERE agent_id = ?
+		WHERE workspace_id = ? AND agent_id = ?
 		ORDER BY created_at DESC
 		LIMIT ?`,
-		agentID, limit,
+		workspaceID, agentID, limit,
 	)
 	if err != nil {
 		return nil, err
@@ -188,7 +209,7 @@ func scanEntries(rows *sql.Rows) ([]Entry, error) {
 		var expiresAt sql.NullTime
 		var ignoredProvenance string // retained in schema for compat, discarded on read
 		if err := rows.Scan(
-			&e.ID, &e.AgentID, &e.SessionID, &e.Scope, &ignoredProvenance,
+			&e.ID, &e.WorkspaceID, &e.AgentID, &e.SessionID, &e.Scope, &ignoredProvenance,
 			&e.Key, &e.Content, &meta, &e.CreatedAt, &expiresAt,
 		); err != nil {
 			return nil, err
@@ -224,4 +245,50 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// addWorkspaceColumn brings an archive created before tenants existed up to
+// the current schema. It is idempotent: PRAGMA table_info is the check, and a
+// duplicate-column error from a concurrent process is treated as success.
+func addWorkspaceColumn(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(memories)`)
+	if err != nil {
+		return fmt.Errorf("memory: inspect schema: %w", err)
+	}
+	present := false
+	for rows.Next() {
+		var (
+			cid                 int
+			name, columnType    string
+			notNull, primaryKey int
+			defaultValue        sql.NullString
+		)
+		if scanErr := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); scanErr != nil {
+			rows.Close()
+			return scanErr
+		}
+		if name == "workspace_id" {
+			present = true
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if !present {
+		if _, err := db.Exec(`ALTER TABLE memories ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'ws_personal'`); err != nil {
+			if !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+				return fmt.Errorf("memory: add workspace column: %w", err)
+			}
+		}
+	}
+	// Backfill unconditionally, not only when the column was just added. A row
+	// with an empty workspace matches no scoped query, so it is not a leak —
+	// it is memory that has silently disappeared, which is worse. This can
+	// happen to a database whose migration was interrupted, or one written to
+	// directly. The statement is cheap and idempotent.
+	if _, err := db.Exec(`UPDATE memories SET workspace_id='ws_personal' WHERE workspace_id IS NULL OR workspace_id=''`); err != nil {
+		return fmt.Errorf("memory: backfill workspace: %w", err)
+	}
+	return nil
 }

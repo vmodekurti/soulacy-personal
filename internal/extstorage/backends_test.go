@@ -2,6 +2,7 @@ package extstorage
 
 import (
 	"context"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,7 +20,7 @@ func TestVectorBackend_WriteSearchRoundTrip(t *testing.T) {
 	}
 	defer b.Close()
 
-	err = b.Write(context.Background(), memory.Entry{
+	err = b.Write(context.Background(), memory.Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID: "e1", AgentID: "a1", Scope: memory.ScopeAgent,
 		Content: "the quick brown fox", CreatedAt: time.Now(),
 	})
@@ -55,7 +56,7 @@ func TestStorageBackend_ArchiveSearchPruneRoundTrip(t *testing.T) {
 	defer b.Close()
 
 	now := time.Now().Truncate(time.Second)
-	err = b.Archive(memory.Entry{
+	err = b.Archive(memory.Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID: "m1", AgentID: "a1", SessionID: "s1", Scope: memory.ScopeAgent,
 		Content: "archived memory content", CreatedAt: now,
 	})
@@ -215,7 +216,7 @@ func TestBackends_FileSpilling(t *testing.T) {
 
 	// Content >= 1024 bytes
 	largeContent := strings.Repeat("a", 1500)
-	err = vBack.Write(context.Background(), memory.Entry{
+	err = vBack.Write(context.Background(), memory.Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID: "e-large", AgentID: "a1", Scope: memory.ScopeAgent,
 		Content: largeContent, CreatedAt: time.Now(),
 	})
@@ -262,7 +263,7 @@ func TestBackends_FileSpilling(t *testing.T) {
 	defer sBack.Close()
 
 	largeStorageContent := strings.Repeat("b", 2000)
-	err = sBack.Archive(memory.Entry{
+	err = sBack.Archive(memory.Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID: "m-large", AgentID: "a1", Scope: memory.ScopeAgent,
 		Content: largeStorageContent, CreatedAt: time.Now(),
 	})

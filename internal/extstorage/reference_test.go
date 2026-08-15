@@ -2,6 +2,7 @@ package extstorage
 
 import (
 	"context"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -56,7 +57,7 @@ func TestReferenceSidecarEndToEnd(t *testing.T) {
 		t.Fatalf("NewVectorBackend: %v", err)
 	}
 	defer vb.Close()
-	err = vb.Write(context.Background(), memory.Entry{
+	err = vb.Write(context.Background(), memory.Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID: "p1", AgentID: "a1", Content: "soulacy external storage protocol",
 		CreatedAt: time.Now(),
 	})
@@ -115,7 +116,7 @@ func TestReferenceSidecarLargeContentSpillsToSharedDir(t *testing.T) {
 	defer vb.Close()
 
 	big := "soulacy spill marker " + strings.Repeat("x", 2048)
-	err = vb.Write(context.Background(), memory.Entry{
+	err = vb.Write(context.Background(), memory.Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID: "big1", AgentID: "a1", Content: big, CreatedAt: time.Now(),
 	})
 	if err != nil {
@@ -149,11 +150,11 @@ func TestReferenceSidecarStorageBackend(t *testing.T) {
 	}
 	defer sb.Close()
 
-	old := memory.Entry{
+	old := memory.Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID: "s1", AgentID: "a1", SessionID: "sess-1", Scope: memory.ScopeSession,
 		Content: "remember the milk", CreatedAt: time.Now().Add(-48 * time.Hour),
 	}
-	fresh := memory.Entry{
+	fresh := memory.Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID: "s2", AgentID: "a1", SessionID: "sess-1", Scope: memory.ScopeSession,
 		Content: "soulacy protocol notes", CreatedAt: time.Now(),
 	}

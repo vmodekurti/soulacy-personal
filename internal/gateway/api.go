@@ -3819,7 +3819,7 @@ func (s *Server) handleListMemory(c *fiber.Ctx) error {
 
 func (s *Server) handleDeleteMemorySession(c *fiber.Ctx) error {
 	sessionID := c.Params("session_id")
-	if err := s.engine.MemoryPurgeSession(sessionID); err != nil {
+	if err := s.engine.MemoryPurgeSession(s.agents(c).WorkspaceID(), sessionID); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
 	return c.JSON(fiber.Map{"message": "session memory purged", "session_id": sessionID})

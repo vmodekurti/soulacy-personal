@@ -377,7 +377,8 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 
 	// Persist inbound message to memory
 	if err := e.memory.Write(memory.Entry{
-		AgentID: msg.AgentID, SessionID: msg.SessionID,
+		WorkspaceID: WorkspaceFromContext(ctx),
+		AgentID:     msg.AgentID, SessionID: msg.SessionID,
 		Scope:   memory.ScopeSession,
 		Content: fmt.Sprintf("[%s] %s", msg.Username, flattenParts(msg.Parts)),
 	}); err != nil {
@@ -450,7 +451,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 	}
 
 	// Build context messages
-	chatMsgs := e.buildContext(def, sess, msg)
+	chatMsgs := e.buildContext(ctx, def, sess, msg)
 
 	// Build tool schemas for this agent (Python tools + opt-in Go built-ins).
 	// Pass the inbound channel so system tools are gated to HTTP-only.
@@ -875,7 +876,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 		e.appendHistoryLocked(sess, turns...)
 		sess.mu.Unlock()
 
-		chatMsgs = e.buildContext(def, sess, msg) // rebuild with tool results
+		chatMsgs = e.buildContext(ctx, def, sess, msg) // rebuild with tool results
 	}
 
 	if strings.TrimSpace(finalContent) == "" {
@@ -1073,7 +1074,8 @@ func (e *Engine) finalizeReply(ctx context.Context, def *agent.Definition, sess 
 
 	// Persist reply to session memory
 	if err := e.memory.Write(memory.Entry{
-		AgentID: msg.AgentID, SessionID: msg.SessionID,
+		WorkspaceID: WorkspaceFromContext(ctx),
+		AgentID:     msg.AgentID, SessionID: msg.SessionID,
 		Scope:   memory.ScopeSession,
 		Content: fmt.Sprintf("[%s] %s", def.Name, finalContent),
 	}); err != nil {

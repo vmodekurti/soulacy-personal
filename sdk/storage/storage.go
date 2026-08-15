@@ -61,3 +61,29 @@ type MemoryBackend interface {
 	// Close releases all held resources.
 	Close() error
 }
+
+// WorkspaceMemoryBackend is the tenant-aware read surface for a memory
+// archive.
+//
+// It is a separate interface rather than new methods on MemoryBackend because
+// MemoryBackend is frozen for this SDK major version. A backend that does not
+// implement this one keeps working exactly as before; a caller that needs
+// tenant isolation type-asserts for it and refuses to serve multi-tenant
+// traffic when the assertion fails, rather than silently reading across
+// tenants.
+//
+// Writes need no counterpart: memory.Entry carries WorkspaceID, so Archive is
+// already tenant-aware for any backend that persists the field.
+type WorkspaceMemoryBackend interface {
+	MemoryBackend
+
+	// SearchInWorkspace searches one workspace's memory for agentID.
+	SearchInWorkspace(workspaceID, agentID, query string, limit int) ([]memory.Entry, error)
+
+	// ReadByScopeInWorkspace returns entries for (workspace, agent, session, scope).
+	ReadByScopeInWorkspace(workspaceID, agentID, sessionID string, scope memory.Scope, limit int) ([]memory.Entry, error)
+
+	// ReadGlobalInWorkspace returns the most recent entries across one
+	// workspace's sessions for agentID.
+	ReadGlobalInWorkspace(workspaceID, agentID string, limit int) ([]memory.Entry, error)
+}

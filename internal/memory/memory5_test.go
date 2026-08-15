@@ -9,6 +9,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -28,7 +29,7 @@ func TestSQLiteArchiveReadGlobalLimitZeroReturnsNothing(t *testing.T) {
 	archiveEntry(t, a, "ag", "s1", ScopeSession, "some content")
 	archiveEntry(t, a, "ag", "s2", ScopeSession, "more content")
 
-	results, err := a.ReadGlobal("ag", 0)
+	results, err := a.ReadGlobal(wsroot.PersonalWorkspaceID, "ag", 0)
 	if err != nil {
 		t.Fatalf("ReadGlobal(limit=0): %v", err)
 	}
@@ -49,7 +50,7 @@ func TestSQLiteArchiveReadGlobalLimitExceedsResults(t *testing.T) {
 	archiveEntry(t, a, "ag-excess", "s1", ScopeSession, "entry-a")
 	archiveEntry(t, a, "ag-excess", "s2", ScopeSession, "entry-b")
 
-	results, err := a.ReadGlobal("ag-excess", 1000)
+	results, err := a.ReadGlobal(wsroot.PersonalWorkspaceID, "ag-excess", 1000)
 	if err != nil {
 		t.Fatalf("ReadGlobal(limit=1000): %v", err)
 	}
@@ -72,7 +73,7 @@ func TestSQLiteArchiveReadGlobalFiltersToRequestedAgent(t *testing.T) {
 	archiveEntry(t, a, "bob", "s1", ScopeSession, "bob memory 2")
 	archiveEntry(t, a, "bob", "s1", ScopeSession, "bob memory 3")
 
-	aliceResults, err := a.ReadGlobal("alice", 10)
+	aliceResults, err := a.ReadGlobal(wsroot.PersonalWorkspaceID, "alice", 10)
 	if err != nil {
 		t.Fatalf("ReadGlobal(alice): %v", err)
 	}
@@ -85,7 +86,7 @@ func TestSQLiteArchiveReadGlobalFiltersToRequestedAgent(t *testing.T) {
 		}
 	}
 
-	bobResults, err := a.ReadGlobal("bob", 10)
+	bobResults, err := a.ReadGlobal(wsroot.PersonalWorkspaceID, "bob", 10)
 	if err != nil {
 		t.Fatalf("ReadGlobal(bob): %v", err)
 	}
@@ -106,7 +107,7 @@ func TestSQLiteArchiveSearchLimitOne(t *testing.T) {
 		archiveEntry(t, a, "ag-lim1", "s1", ScopeSession, fmt.Sprintf("needle %d", i))
 	}
 
-	results, err := a.Search("ag-lim1", "needle", 1)
+	results, err := a.Search(wsroot.PersonalWorkspaceID, "ag-lim1", "needle", 1)
 	if err != nil {
 		t.Fatalf("Search(limit=1): %v", err)
 	}
@@ -125,7 +126,7 @@ func TestSQLiteArchiveSearchLimitZeroReturnsNothing(t *testing.T) {
 	a := newTestArchive(t)
 	archiveEntry(t, a, "ag-lim0", "s1", ScopeSession, "findme")
 
-	results, err := a.Search("ag-lim0", "findme", 0)
+	results, err := a.Search(wsroot.PersonalWorkspaceID, "ag-lim0", "findme", 0)
 	if err != nil {
 		t.Fatalf("Search(limit=0): %v", err)
 	}
@@ -179,7 +180,7 @@ func TestSQLiteArchivePruneAgentIsolation(t *testing.T) {
 	// Old entries for "prune-me" and "keep-me".
 	for _, ag := range []string{"prune-me", "keep-me"} {
 		seq := atomic.AddInt64(&archiveSeq, 1)
-		e := Entry{
+		e := Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 			ID:        fmt.Sprintf("old-%s-%d", ag, seq),
 			AgentID:   ag,
 			SessionID: "s1",
@@ -227,7 +228,7 @@ func TestSQLiteArchiveConcurrentArchive(t *testing.T) {
 			defer wg.Done()
 			for i := 0; i < perGoroutine; i++ {
 				seq := atomic.AddInt64(&archiveSeq, 1)
-				e := Entry{
+				e := Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 					ID:        fmt.Sprintf("conc-%d-%d-%d", g, i, seq),
 					AgentID:   "concurrent-ag",
 					SessionID: fmt.Sprintf("s%d", g),
@@ -264,7 +265,7 @@ func TestSQLiteArchiveRoundTripAllFields(t *testing.T) {
 	a := newTestArchive(t)
 	exp := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
 	created := time.Now().UTC().Truncate(time.Second)
-	e := Entry{
+	e := Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID:        "full-fields-1",
 		AgentID:   "ag-full",
 		SessionID: "sess-full",
@@ -279,7 +280,7 @@ func TestSQLiteArchiveRoundTripAllFields(t *testing.T) {
 		t.Fatalf("Archive: %v", err)
 	}
 
-	results, err := a.ReadGlobal("ag-full", 10)
+	results, err := a.ReadGlobal(wsroot.PersonalWorkspaceID, "ag-full", 10)
 	if err != nil {
 		t.Fatalf("ReadGlobal: %v", err)
 	}
@@ -321,12 +322,12 @@ func TestSQLiteArchiveSearchOrderedNewestFirst(t *testing.T) {
 	seq1 := atomic.AddInt64(&archiveSeq, 1)
 	seq2 := atomic.AddInt64(&archiveSeq, 1)
 
-	old := Entry{
+	old := Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID: fmt.Sprintf("ord-%d", seq1), AgentID: "ag-ord",
 		SessionID: "s1", Scope: ScopeSession, Content: "needle old",
 		CreatedAt: time.Now().Add(-2 * time.Minute).UTC(),
 	}
-	newer := Entry{
+	newer := Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID: fmt.Sprintf("ord-%d", seq2), AgentID: "ag-ord",
 		SessionID: "s1", Scope: ScopeSession, Content: "needle new",
 		CreatedAt: time.Now().UTC(),
@@ -334,7 +335,7 @@ func TestSQLiteArchiveSearchOrderedNewestFirst(t *testing.T) {
 	_ = a.Archive(old)
 	_ = a.Archive(newer)
 
-	results, err := a.Search("ag-ord", "needle", 10)
+	results, err := a.Search(wsroot.PersonalWorkspaceID, "ag-ord", "needle", 10)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -357,7 +358,7 @@ func TestSQLiteArchiveReadByScopeScopeAgent(t *testing.T) {
 	archiveEntry(t, a, "ag-rbs", "s1", ScopeAgent, "agent-scoped memory")
 	archiveEntry(t, a, "ag-rbs", "s1", ScopeSession, "session-scoped memory")
 
-	results, err := a.ReadByScope("ag-rbs", "s1", ScopeAgent, 10)
+	results, err := a.ReadByScope(wsroot.PersonalWorkspaceID, "ag-rbs", "s1", ScopeAgent, 10)
 	if err != nil {
 		t.Fatalf("ReadByScope(ScopeAgent): %v", err)
 	}
@@ -398,7 +399,7 @@ func TestFileStoreConcurrentWriteThenRead(t *testing.T) {
 	wg.Wait()
 
 	total := goroutines * msgsEach
-	entries, err := s.Read("agent-conc", "session-conc", ScopeSession, total+1)
+	entries, err := s.Read(wsroot.PersonalWorkspaceID, "agent-conc", "session-conc", ScopeSession, total+1)
 	if err != nil {
 		t.Fatalf("Read after concurrent writes: %v", err)
 	}
@@ -440,7 +441,7 @@ func TestFileStoreConcurrentWriteAndReadInterleaved(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for writerDone.Load() == 0 {
-			_, err := s.Read("ag-race", "sess-race", ScopeSession, writes)
+			_, err := s.Read(wsroot.PersonalWorkspaceID, "ag-race", "sess-race", ScopeSession, writes)
 			if err != nil {
 				t.Errorf("Read during concurrent writes: %v", err)
 				return
@@ -467,7 +468,7 @@ func TestFileStoreSearchCollectsAcrossMultipleSessions(t *testing.T) {
 	// Write a non-matching entry in a fifth session.
 	writeEntry(t, s, "ag-multi", "sess-4", ScopeSession, "no match here")
 
-	results, err := s.Search("ag-multi", "unique-keyword", 10)
+	results, err := s.Search(wsroot.PersonalWorkspaceID, "ag-multi", "unique-keyword", 10)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -599,7 +600,7 @@ func TestVectorStoreWriteCorrectDimsNilDBErrors(t *testing.T) {
 			}
 		}()
 		// Either panics (nil DB dereference) or returns an error.
-		err := vs.Write(context.Background(), Entry{
+		err := vs.Write(context.Background(), Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 			ID: "nil-db-1", AgentID: "ag", SessionID: "s1",
 			Scope: ScopeSession, Content: "test", CreatedAt: time.Now().UTC(),
 		})
@@ -649,7 +650,7 @@ func TestFileStoreWriteDistinctIDs(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			// Pass an entry with no ID so Write auto-assigns one.
-			e := Entry{
+			e := Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 				AgentID:   "ag-ids",
 				SessionID: "s1",
 				Scope:     ScopeSession,
@@ -663,7 +664,7 @@ func TestFileStoreWriteDistinctIDs(t *testing.T) {
 	}
 	wg.Wait()
 
-	entries, err := s.Read("ag-ids", "s1", ScopeSession, n+1)
+	entries, err := s.Read(wsroot.PersonalWorkspaceID, "ag-ids", "s1", ScopeSession, n+1)
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
@@ -690,7 +691,7 @@ func TestFileStoreWriteDistinctIDs(t *testing.T) {
 // special characters (dashes, slashes) is stored and retrieved correctly.
 func TestSQLiteArchiveIDWithSpecialChars(t *testing.T) {
 	a := newTestArchive(t)
-	e := Entry{
+	e := Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID:        "agent/session-2026-06-06T00:00:00Z",
 		AgentID:   "ag-special",
 		SessionID: "sess-1",
@@ -702,7 +703,7 @@ func TestSQLiteArchiveIDWithSpecialChars(t *testing.T) {
 		t.Fatalf("Archive with special-char ID: %v", err)
 	}
 
-	results, err := a.Search("ag-special", "special id", 10)
+	results, err := a.Search(wsroot.PersonalWorkspaceID, "ag-special", "special id", 10)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -751,7 +752,7 @@ func TestFileStoreReadPreservesAgentAndSession(t *testing.T) {
 	s := newFileStore(t)
 	writeEntry(t, s, "agent-preserve", "session-preserve", ScopeSession, "hello")
 
-	entries, err := s.Read("agent-preserve", "session-preserve", ScopeSession, 10)
+	entries, err := s.Read(wsroot.PersonalWorkspaceID, "agent-preserve", "session-preserve", ScopeSession, 10)
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}

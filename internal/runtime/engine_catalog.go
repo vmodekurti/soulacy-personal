@@ -212,9 +212,11 @@ func (e *Engine) MemorySearch(agentID, query string, limit int) ([]memory.Entry,
 	return entries, nil
 }
 
-// MemoryPurgeSession removes hot-memory entries for a specific session.
-func (e *Engine) MemoryPurgeSession(sessionID string) error {
-	return e.memory.PurgeSession(sessionID)
+// MemoryPurgeSession removes hot-memory entries for a specific session inside
+// one workspace. Purging without a workspace would delete a same-named session
+// belonging to another tenant — silent, immediate, and irreversible.
+func (e *Engine) MemoryPurgeSession(workspaceID, sessionID string) error {
+	return e.memory.PurgeSession(workspaceID, sessionID)
 }
 
 func flattenParts(parts []message.Part) string {

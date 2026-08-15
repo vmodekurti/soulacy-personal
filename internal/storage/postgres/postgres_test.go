@@ -17,6 +17,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -139,7 +140,7 @@ func truncate(t *testing.T, pool *pgxpool.Pool) {
 func archive(t *testing.T, m *MemoryStore, agentID, sessionID string, scope memory.Scope, content string) memory.Entry {
 	t.Helper()
 	seq := atomic.AddInt64(&pgSeq, 1)
-	e := memory.Entry{
+	e := memory.Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID:        fmt.Sprintf("pg-test-%d", seq),
 		AgentID:   agentID,
 		SessionID: sessionID,
@@ -298,7 +299,7 @@ func TestPostgresDuplicateIDIsIgnored(t *testing.T) {
 func TestPostgresMetadataRoundTrip(t *testing.T) {
 	_, m, _ := testStores(t)
 	seq := atomic.AddInt64(&pgSeq, 1)
-	want := memory.Entry{
+	want := memory.Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID:        fmt.Sprintf("pg-meta-%d", seq),
 		AgentID:   "ag",
 		SessionID: "s1",
@@ -336,7 +337,7 @@ func TestPostgresPrune(t *testing.T) {
 	_, m, _ := testStores(t)
 
 	seq := atomic.AddInt64(&pgSeq, 1)
-	old := memory.Entry{
+	old := memory.Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID:        fmt.Sprintf("pg-old-%d", seq),
 		AgentID:   "ag",
 		SessionID: "s1",
@@ -373,7 +374,7 @@ func TestPostgresPrune(t *testing.T) {
 func TestPostgresPruneWrongAgent(t *testing.T) {
 	_, m, _ := testStores(t)
 	seq := atomic.AddInt64(&pgSeq, 1)
-	old := memory.Entry{
+	old := memory.Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
 		ID:        fmt.Sprintf("pg-other-old-%d", seq),
 		AgentID:   "other-ag",
 		SessionID: "s1",

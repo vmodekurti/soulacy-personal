@@ -11,6 +11,8 @@ import (
 	"github.com/soulacy/soulacy/internal/actionlog"
 	"github.com/soulacy/soulacy/internal/memory"
 	"github.com/soulacy/soulacy/internal/storage"
+	"github.com/soulacy/soulacy/internal/wsroot"
+	sdkstorage "github.com/soulacy/soulacy/sdk/storage"
 )
 
 // ---- compile-time interface checks ----------------------------------------
@@ -20,6 +22,7 @@ import (
 
 var _ storage.ActionLogBackend = (*ActionLog)(nil)
 var _ storage.MemoryBackend = (*MemoryArchive)(nil)
+var _ sdkstorage.WorkspaceMemoryBackend = (*MemoryArchive)(nil)
 
 // ---------------------------------------------------------------------------
 
@@ -54,4 +57,33 @@ type MemoryArchive struct {
 // NewMemoryArchive wraps an existing *memory.SQLiteArchive in the storage interface.
 func NewMemoryArchive(a *memory.SQLiteArchive) *MemoryArchive {
 	return &MemoryArchive{SQLiteArchive: a}
+}
+
+// The frozen storage.MemoryBackend methods have no workspace parameter, so
+// they resolve to the implicit personal workspace — which is exactly what a
+// caller using the un-scoped interface is: a single-tenant one. Multi-tenant
+// callers use the *InWorkspace methods below, and fail closed if a backend
+// does not offer them.
+func (m *MemoryArchive) Search(agentID, query string, limit int) ([]memory.Entry, error) {
+	return m.SQLiteArchive.Search(wsroot.PersonalWorkspaceID, agentID, query, limit)
+}
+
+func (m *MemoryArchive) ReadByScope(agentID, sessionID string, scope memory.Scope, limit int) ([]memory.Entry, error) {
+	return m.SQLiteArchive.ReadByScope(wsroot.PersonalWorkspaceID, agentID, sessionID, scope, limit)
+}
+
+func (m *MemoryArchive) ReadGlobal(agentID string, limit int) ([]memory.Entry, error) {
+	return m.SQLiteArchive.ReadGlobal(wsroot.PersonalWorkspaceID, agentID, limit)
+}
+
+func (m *MemoryArchive) SearchInWorkspace(workspaceID, agentID, query string, limit int) ([]memory.Entry, error) {
+	return m.SQLiteArchive.Search(workspaceID, agentID, query, limit)
+}
+
+func (m *MemoryArchive) ReadByScopeInWorkspace(workspaceID, agentID, sessionID string, scope memory.Scope, limit int) ([]memory.Entry, error) {
+	return m.SQLiteArchive.ReadByScope(workspaceID, agentID, sessionID, scope, limit)
+}
+
+func (m *MemoryArchive) ReadGlobalInWorkspace(workspaceID, agentID string, limit int) ([]memory.Entry, error) {
+	return m.SQLiteArchive.ReadGlobal(workspaceID, agentID, limit)
 }

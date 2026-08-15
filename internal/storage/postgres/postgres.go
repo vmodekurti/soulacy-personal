@@ -29,6 +29,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 
+	"github.com/soulacy/soulacy/internal/wsroot"
+
 	"github.com/soulacy/soulacy/internal/memory"
 	"github.com/soulacy/soulacy/internal/storage"
 	"github.com/soulacy/soulacy/pkg/message"
@@ -55,7 +57,8 @@ var ddlStatements = []string{
 	`CREATE INDEX IF NOT EXISTS idx_events_type
 		ON agent_events (type, created_at DESC)`,
 	`CREATE TABLE IF NOT EXISTS memories (
-		id         TEXT         PRIMARY KEY,
+		id           TEXT       PRIMARY KEY,
+		workspace_id TEXT       NOT NULL DEFAULT 'ws_personal',
 		agent_id   TEXT         NOT NULL,
 		session_id TEXT         NOT NULL DEFAULT '',
 		scope      TEXT         NOT NULL,
@@ -66,10 +69,11 @@ var ddlStatements = []string{
 		created_at TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
 		expires_at TIMESTAMPTZ
 	)`,
+	`ALTER TABLE memories ADD COLUMN IF NOT EXISTS workspace_id TEXT NOT NULL DEFAULT 'ws_personal'`,
 	`CREATE INDEX IF NOT EXISTS idx_memories_agent
-		ON memories (agent_id, created_at DESC)`,
+		ON memories (workspace_id, agent_id, created_at DESC)`,
 	`CREATE INDEX IF NOT EXISTS idx_memories_session
-		ON memories (agent_id, session_id)`,
+		ON memories (workspace_id, agent_id, session_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_memories_scope
 		ON memories (scope)`,
 }
@@ -421,10 +425,10 @@ func (m *MemoryStore) Archive(entry memory.Entry) error {
 	meta, _ := json.Marshal(entry.Metadata)
 	_, err := m.pool.Exec(ctx, `
 		INSERT INTO memories
-			(id, agent_id, session_id, scope, provenance, key, content, metadata, created_at, expires_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+			(id, workspace_id, agent_id, session_id, scope, provenance, key, content, metadata, created_at, expires_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 		ON CONFLICT (id) DO NOTHING`,
-		entry.ID, entry.AgentID, entry.SessionID, string(entry.Scope),
+		entry.ID, workspaceOrPersonal(entry.WorkspaceID), entry.AgentID, entry.SessionID, string(entry.Scope),
 		"", entry.Key, entry.Content, // provenance col retained for schema compat, always empty
 		string(meta), entry.CreatedAt, entry.ExpiresAt,
 	)
@@ -432,17 +436,25 @@ func (m *MemoryStore) Archive(entry memory.Entry) error {
 }
 
 // Search performs case-insensitive substring search for agentID.
+//
+// The frozen storage.MemoryBackend signature has no workspace, so it resolves
+// to the implicit personal one — a caller using the un-scoped interface is a
+// single-tenant caller. Multi-tenant callers use SearchInWorkspace.
 func (m *MemoryStore) Search(agentID, query string, limit int) ([]memory.Entry, error) {
+	return m.SearchInWorkspace(wsroot.PersonalWorkspaceID, agentID, query, limit)
+}
+
+func (m *MemoryStore) SearchInWorkspace(workspaceID, agentID, query string, limit int) ([]memory.Entry, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	rows, err := m.pool.Query(ctx, `
-		SELECT id, agent_id, session_id, scope, provenance, key,
+		SELECT id, workspace_id, agent_id, session_id, scope, provenance, key,
 		       content, metadata::text, created_at, expires_at
 		  FROM memories
-		 WHERE agent_id = $1 AND content ILIKE $2
+		 WHERE workspace_id = $1 AND agent_id = $2 AND content ILIKE $3
 		 ORDER BY created_at DESC
-		 LIMIT $3`,
-		agentID, "%"+query+"%", limit,
+		 LIMIT $4`,
+		workspaceOrPersonal(workspaceID), agentID, "%"+query+"%", limit,
 	)
 	if err != nil {
 		return nil, err
@@ -452,16 +464,20 @@ func (m *MemoryStore) Search(agentID, query string, limit int) ([]memory.Entry, 
 
 // ReadByScope returns entries for (agentID, sessionID, scope), newest-first.
 func (m *MemoryStore) ReadByScope(agentID, sessionID string, scope memory.Scope, limit int) ([]memory.Entry, error) {
+	return m.ReadByScopeInWorkspace(wsroot.PersonalWorkspaceID, agentID, sessionID, scope, limit)
+}
+
+func (m *MemoryStore) ReadByScopeInWorkspace(workspaceID, agentID, sessionID string, scope memory.Scope, limit int) ([]memory.Entry, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	rows, err := m.pool.Query(ctx, `
-		SELECT id, agent_id, session_id, scope, provenance, key,
+		SELECT id, workspace_id, agent_id, session_id, scope, provenance, key,
 		       content, metadata::text, created_at, expires_at
 		  FROM memories
-		 WHERE agent_id = $1 AND session_id = $2 AND scope = $3
+		 WHERE workspace_id = $1 AND agent_id = $2 AND session_id = $3 AND scope = $4
 		 ORDER BY created_at DESC
-		 LIMIT $4`,
-		agentID, sessionID, string(scope), limit,
+		 LIMIT $5`,
+		workspaceOrPersonal(workspaceID), agentID, sessionID, string(scope), limit,
 	)
 	if err != nil {
 		return nil, err
@@ -471,16 +487,20 @@ func (m *MemoryStore) ReadByScope(agentID, sessionID string, scope memory.Scope,
 
 // ReadGlobal returns the most recent entries for agentID across all sessions.
 func (m *MemoryStore) ReadGlobal(agentID string, limit int) ([]memory.Entry, error) {
+	return m.ReadGlobalInWorkspace(wsroot.PersonalWorkspaceID, agentID, limit)
+}
+
+func (m *MemoryStore) ReadGlobalInWorkspace(workspaceID, agentID string, limit int) ([]memory.Entry, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	rows, err := m.pool.Query(ctx, `
-		SELECT id, agent_id, session_id, scope, provenance, key,
+		SELECT id, workspace_id, agent_id, session_id, scope, provenance, key,
 		       content, metadata::text, created_at, expires_at
 		  FROM memories
-		 WHERE agent_id = $1
+		 WHERE workspace_id = $1 AND agent_id = $2
 		 ORDER BY created_at DESC
-		 LIMIT $2`,
-		agentID, limit,
+		 LIMIT $3`,
+		workspaceOrPersonal(workspaceID), agentID, limit,
 	)
 	if err != nil {
 		return nil, err
@@ -526,7 +546,7 @@ func scanPgEntries(rows pgRows) ([]memory.Entry, error) {
 		var scope, ignoredProvenance, meta string // provenance col retained in schema, discarded on read
 		var expiresAt sql.NullTime
 		if err := rows.Scan(
-			&e.ID, &e.AgentID, &e.SessionID, &scope, &ignoredProvenance,
+			&e.ID, &e.WorkspaceID, &e.AgentID, &e.SessionID, &scope, &ignoredProvenance,
 			&e.Key, &e.Content, &meta, &e.CreatedAt, &expiresAt,
 		); err != nil {
 			return nil, err
@@ -603,4 +623,11 @@ func Open(dsn, logDir string, log *zap.Logger) (*ActionLog, *MemoryStore, *pgxpo
 
 	ms := OpenMemoryStore(pool, log)
 	return al, ms, pool, nil
+}
+
+// workspaceOrPersonal keeps rows written by a single-tenant caller in the
+// implicit personal workspace rather than in an unowned one, which is what
+// every pre-existing row already is.
+func workspaceOrPersonal(workspaceID string) string {
+	return wsroot.Normalize(workspaceID)
 }
