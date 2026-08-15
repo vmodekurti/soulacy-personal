@@ -8,14 +8,21 @@ import (
 	"testing"
 
 	"github.com/soulacy/soulacy/internal/agentmemory"
+	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
 func rulebookGateway(t *testing.T) (*Server, *agentmemory.CompositeStore) {
 	t.Helper()
 	srv := newTestGateway(t, "secret")
-	brain := agentmemory.NewCompositeStore(t.TempDir(), nil)
-	t.Cleanup(func() { _ = brain.Close() })
-	srv.engine.SetBrainMemory(brain)
+	stores := agentmemory.NewStores(t.TempDir())
+	t.Cleanup(func() { _ = stores.Close() })
+	srv.engine.SetBrainMemory(stores)
+	// The handlers under test carry no verified identity, so they resolve to
+	// the personal workspace — which is the store the assertions must use.
+	brain := stores.For(wsroot.PersonalWorkspaceID)
+	if brain == nil {
+		t.Fatal("personal brain store was not created")
+	}
 	return srv, brain
 }
 

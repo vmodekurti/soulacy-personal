@@ -161,10 +161,16 @@ type Engine struct {
 	// Powered by sqlite-vec in the same archive DB as the long-term memory.
 	vectorStore *memory.VectorStore
 
-	// brainStore, when non-nil, enables three-layer long-term memory
-	// (episodic / semantic / procedural) for agents that declare brain_memory
-	// in their SOUL.yaml. Set via SetBrainMemory after construction.
-	brainStore *agentmemory.CompositeStore
+	// brainStores, when non-nil, resolves three-layer long-term memory
+	// (episodic / semantic / procedural) for one workspace. Set via
+	// SetBrainMemory after construction.
+	//
+	// A resolver rather than a store, for the same reason learningStores is:
+	// brain memory is keyed by agent ID, agent IDs are unique per workspace
+	// rather than per deployment, and the procedural tier carries a *lock*
+	// that refuses writes — so a shared store would let one tenant freeze
+	// another tenant's agent, not merely read it.
+	brainStores *agentmemory.Stores
 
 	// learningStores, when non-nil, resolves the reviewable post-run learning
 	// proposal store for one workspace. It is a resolver rather than a store
@@ -581,15 +587,28 @@ func (e *Engine) SetAllowedToolDirs(dirs []string) {
 	e.allowedToolDirs = dirs
 }
 
-// SetBrainMemory wires the three-layer agent memory store (MEM-03).
-// When non-nil, agents with brain_memory.episodic.enabled=true will have their
-// task history injected before each run (RL-10) and persisted after (RL-09).
-func (e *Engine) SetBrainMemory(store *agentmemory.CompositeStore) {
-	e.brainStore = store
+// SetBrainMemory wires the per-workspace three-layer agent memory stores
+// (MEM-03). When non-nil, agents with brain_memory.episodic.enabled=true will
+// have their task history injected before each run (RL-10) and persisted after
+// (RL-09), in their own workspace's store.
+func (e *Engine) SetBrainMemory(stores *agentmemory.Stores) {
+	e.brainStores = stores
 }
 
-// BrainStore returns the CompositeStore, or nil if not configured.
-func (e *Engine) BrainStore() *agentmemory.CompositeStore { return e.brainStore }
+// BrainStoreInWorkspace returns one workspace's CompositeStore, or nil when
+// brain memory is not configured.
+//
+// There is deliberately no accessor that returns "the" brain store: every read
+// and write names a tenant, and a caller that could not supply one would be
+// reaching for the shared root.
+func (e *Engine) BrainStoreInWorkspace(workspaceID string) *agentmemory.CompositeStore {
+	return e.brainStores.For(workspaceID)
+}
+
+// brainStore resolves the brain memory of the workspace a run is acting in.
+func (e *Engine) brainStore(ctx context.Context) *agentmemory.CompositeStore {
+	return e.brainStores.For(WorkspaceFromContext(ctx))
+}
 
 // SetLearningStores wires the per-workspace reviewable learning proposal
 // stores. There is deliberately no setter taking a single store: nothing

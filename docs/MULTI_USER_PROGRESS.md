@@ -25,7 +25,7 @@ isolation state; this document explains it.
 declared workspace-owned but not yet isolated.
 
 - At the start of this work: **57 blockers**
-- Now: **9 blockers**
+- Now: **6 blockers**
 
 A store moves from `personal-only` to `scoped` only when it has a real
 cross-tenant isolation test. The catalog names that test, and a CI check fails
@@ -628,6 +628,52 @@ nothing. It now asserts the shared root contains the namespace directory *and
 nothing else*, which is actually observable. Worth recording because a test
 that cannot fail is worse than no test: it reads like coverage.
 
+### A rulebook lock is a control, so its key is a mutual-exclusion domain
+
+`internal/agentmemory` keeps everything under `<baseDir>/<agentID>/`, plus a
+single `rulebook.db` holding `rulebook_versions` keyed `(agent_id, version)`
+and `rulebook_locks` keyed on `agent_id` alone. Agent IDs are unique within a
+workspace, not across the deployment, so a shared base directory meant two
+tenants with an agent called "researcher" appended to one episodic log,
+overwrote one `procedural.md`, and continued each other's version numbering —
+the isolation test shows the second workspace's *first* rulebook version being
+numbered 3.
+
+The lock is the part that is not an information-disclosure bug at all. A lock
+refuses every write to an agent's rules, automatic and manual. Under one shared
+table, freezing an agent in one workspace freezes the identically-named agent
+in every other workspace, and a stranger's unlock silently thaws yours. The key
+of a lock is also its mutual-exclusion domain, so getting the key wrong is a
+control-plane failure, not a privacy one: it hands one tenant a switch on
+another tenant's agent behaviour.
+
+There was no predicate to add — every method here is keyed by agent ID and has
+nowhere to put a tenant — so isolation is by root directory: one
+`CompositeStore` per workspace, each with **its own `rulebook.db`**, which puts
+the lock domain inside the tenant boundary by construction. Personal resolves
+to the original base, so a single-user installation's files do not move.
+
+Three details worth keeping:
+
+- **A workspace whose directory cannot be created gets `nil`, not the shared
+  base.** Callers already treat nil as "brain memory is off" and skip. Falling
+  back would file one tenant's task history under another's, which is worse
+  than the feature being unavailable.
+- **`Engine.BrainStore()` was deleted rather than kept alongside a scoped
+  variant.** `BrainStoreInWorkspace(workspaceID)` is the only accessor, so
+  there is no unscoped call for a new handler to reach for — a stronger
+  guarantee than a test that notices afterwards.
+- **`applyLearningProposal` gained the request.** Accepting a proposal
+  *writes*: a procedure proposal appends to the agent's rulebook, a semantic
+  one writes a memory record. The target has to be the workspace of the person
+  accepting it, not whatever the process last had lying around.
+
+The semantic tier is bound per workspace at composition instead: one
+`agentMemoryVectorAdapter` per workspace, each carrying its tenant, over the
+shared vector store that already scopes internally. That resolves a TODO left
+in `adapters.go` when the vector store was scoped — it had been pinned to
+personal precisely because `agentmemory` could not yet name a tenant.
+
 ## Guards worth keeping
 
 - **`TestRequestScopeIsNeverReadFromADetachedGoroutine`** (AST-based) fails the
@@ -691,9 +737,7 @@ Highest-value first, with the reason each matters:
    Preview at all. If it is not, MU-025's third criterion should be struck or
    deferred explicitly rather than left to look unfinished.
 
-5. **The nine stores still `personal-only`.** `api_keys`, the DLQ,
-   `workflow_checkpoints` and `studio/deployrecord.go` are now scoped; what
-   remains splits into three kinds of work, not one:
+5. **The six stores still `personal-only`**, in three kinds of work:
 
    - `internal/plugins/loader.go` and `internal/skills/loader.go` are extension
      inventory, which is MU-017's first acceptance criterion. Flipping them
@@ -703,12 +747,8 @@ Highest-value first, with the reason each matters:
      `internal/storage/postgres/postgres.go` sit behind `sdk/storage`'s frozen
      `MemoryBackend`, so they need the `*InWorkspace` optional-interface
      treatment rather than a signature change.
-   - `internal/agentmemory` (`store.go`, `rulebook_locks`,
-     `rulebook_versions`), `internal/auth/jwt.go` and
-     `internal/tenancy/postgres.go:credentials` are ordinary scoping work.
-     `agentmemory` carries a concurrency dimension the others do not: the locks
-     are a coordination primitive, so their key is also their mutual-exclusion
-     domain.
+   - `internal/auth/jwt.go` and `internal/tenancy/postgres.go:credentials` are
+     ordinary scoping work.
 
 ## Verification
 

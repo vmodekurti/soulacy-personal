@@ -6,6 +6,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 
 	"github.com/soulacy/soulacy/internal/actionlog"
+	"github.com/soulacy/soulacy/internal/agentmemory"
 	"github.com/soulacy/soulacy/internal/auth/apikeys"
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/learning"
@@ -251,6 +252,28 @@ func (s *Server) dlqScope(c *fiber.Ctx) string {
 		}
 	}
 	return wsroot.PersonalWorkspaceID
+}
+
+// brainMemory is the three-layer long-term memory of the tenant a request acts
+// for.
+//
+// Its contents are as private as anything in the product: episodic records are
+// verbatim task inputs and replies, procedural rules are the operating
+// instructions a team wrote for its own agents, and the rulebook lock is a
+// control that refuses writes rather than a fact that can be read. Scoping is
+// by store instance, not by an argument, because every method on
+// CompositeStore is keyed by agent ID alone — there is no place to put a
+// predicate even if a caller remembered to.
+func (s *Server) brainMemory(c *fiber.Ctx) *agentmemory.CompositeStore {
+	if s == nil || s.engine == nil {
+		return nil
+	}
+	if c != nil {
+		if identity, ok := requestIdentity(c); ok {
+			return s.engine.BrainStoreInWorkspace(wsroot.Normalize(identity.WorkspaceID()))
+		}
+	}
+	return s.engine.BrainStoreInWorkspace(wsroot.PersonalWorkspaceID)
 }
 
 // platformMetricsMW restricts the raw Prometheus endpoint in multi-user

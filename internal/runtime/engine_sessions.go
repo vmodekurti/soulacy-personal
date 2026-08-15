@@ -396,7 +396,7 @@ func (e *Engine) buildSystemPrefix(ctx context.Context, def *agent.Definition) s
 	// has a reasoning strategy configured — no explicit brain_memory: block
 	// needed in SOUL.yaml. Defaults: episodic max_inject=5, semantic max_inject=8.
 	// Explicit brain_memory: settings always take precedence when present.
-	if e.brainStore != nil {
+	if brain := e.brainStore(ctx); brain != nil {
 		bm := def.BrainMemory
 		reasoningEnabled := def.Reasoning.Strategy != ""
 		// Apply defaults when reasoning is on but brain_memory wasn't configured.
@@ -414,7 +414,7 @@ func (e *Engine) buildSystemPrefix(ctx context.Context, def *agent.Definition) s
 			if maxSem <= 0 {
 				maxSem = 8
 			}
-			result, err := e.brainStore.Retrieve(agentmemory.RetrieveQuery{
+			result, err := brain.Retrieve(agentmemory.RetrieveQuery{
 				AgentID:     def.ID,
 				MaxEpisodic: maxEp,
 				MaxSemantic: maxSem,

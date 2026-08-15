@@ -894,6 +894,24 @@ func TestBrainMemoryDir_UsesEnvVar(t *testing.T) {
 	}
 }
 
+// The path a tenant is shown is its own, and personal's is unchanged.
+func TestFormatMemoryPathNamesTheCallersWorkspace(t *testing.T) {
+	t.Setenv("SOULACY_MEMORY_DIR", "/tmp/test-memory")
+	if got := formatMemoryPath("", "bot"); got != "/tmp/test-memory/bot/episodic.jsonl" {
+		t.Fatalf("personal path changed: %q", got)
+	}
+	if got := formatMemoryPath(wsroot.PersonalWorkspaceID, "bot"); got != "/tmp/test-memory/bot/episodic.jsonl" {
+		t.Fatalf("explicit personal path changed: %q", got)
+	}
+	tenant := formatMemoryPath("ws_a", "bot")
+	if !strings.Contains(tenant, filepath.Join(wsroot.NamespaceDir, "ws_a")) {
+		t.Fatalf("a tenant was shown a path outside its namespace: %q", tenant)
+	}
+	if tenant == formatMemoryPath("ws_b", "bot") {
+		t.Fatal("two workspaces were shown the same episodic path")
+	}
+}
+
 func TestBrainMemoryDir_FallsBackToHome(t *testing.T) {
 	t.Setenv("SOULACY_MEMORY_DIR", "")
 	got := brainMemoryDir()
@@ -907,7 +925,7 @@ func TestBrainMemoryDir_FallsBackToHome(t *testing.T) {
 
 func TestFormatMemoryPath(t *testing.T) {
 	t.Setenv("SOULACY_MEMORY_DIR", "/tmp/mem")
-	got := formatMemoryPath("my-bot")
+	got := formatMemoryPath(wsroot.PersonalWorkspaceID, "my-bot")
 	if !strings.Contains(got, "my-bot") {
 		t.Fatalf("formatMemoryPath = %q, want to contain 'my-bot'", got)
 	}

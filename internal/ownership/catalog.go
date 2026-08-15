@@ -98,8 +98,8 @@ var Resources = []Resource{
 // backwards-compatible Personal deployments but cannot serve Team/Scale data.
 var Tables = []Table{
 	{Source: "internal/actionlog/actionlog.go", Name: "agent_events", Resource: "events", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/actionlog/workspace_test.go"},
-	{Source: "internal/agentmemory/rulelog.go", Name: "rulebook_locks", Resource: "studio-learning", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
-	{Source: "internal/agentmemory/rulelog.go", Name: "rulebook_versions", Resource: "studio-learning", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
+	{Source: "internal/agentmemory/rulelog.go", Name: "rulebook_locks", Resource: "studio-learning", Class: WorkspaceOwned, ScopeKey: "workspace_id,agent_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/agentmemory/isolation_test.go"},
+	{Source: "internal/agentmemory/rulelog.go", Name: "rulebook_versions", Resource: "studio-learning", Class: WorkspaceOwned, ScopeKey: "workspace_id,agent_id,version", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/agentmemory/isolation_test.go"},
 	{Source: "internal/auth/apikeys/postgres.go", Name: "access_credentials", Resource: "api-keys", Class: UserPrivate, ScopeKey: "organization_id,workspace_ids,subject_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/auth/apikeys/postgres_test.go"},
 	{Source: "internal/auth/apikeys/store.go", Name: "api_keys", Resource: "api-keys", Class: UserPrivate, ScopeKey: "organization_id,workspace_ids,subject_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/auth/apikeys/isolation_test.go"},
 	// cost_reconciliations is reclassified, not scoped. It records a comparison
@@ -155,7 +155,7 @@ var Tables = []Table{
 }
 
 var Repositories = []Repository{
-	{Source: "internal/agentmemory/store.go", Resource: "memory", Class: UserPrivate, ScopeKey: "workspace_id,user_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
+	{Source: "internal/agentmemory/store.go", Resource: "memory", Class: UserPrivate, ScopeKey: "workspace_id,agent_id", Isolation: Scoped, IsolationTest: "internal/agentmemory/isolation_test.go"},
 	{Source: "internal/auth/apikeys/postgres.go", Resource: "api-keys", Class: UserPrivate, ScopeKey: "workspace_id,subject_id", Isolation: Scoped, IsolationTest: "internal/auth/apikeys/postgres_test.go"},
 	{Source: "internal/auth/apikeys/store.go", Resource: "api-keys", Class: UserPrivate, ScopeKey: "workspace_id,subject_id", Isolation: Scoped, IsolationTest: "internal/auth/apikeys/isolation_test.go"},
 	{Source: "internal/auth/jwt.go", Resource: "credentials", Class: UserPrivate, ScopeKey: "workspace_id,user_id", Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},

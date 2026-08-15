@@ -511,7 +511,7 @@ func (s *Server) handleAcceptLearningProposal(c *fiber.Ctx) error {
 	if body.PromoteToStudioLessons != nil {
 		pending.PromoteToStudioLessons = body.PromoteToStudioLessons
 	}
-	meta, err := s.applyLearningProposal(pending)
+	meta, err := s.applyLearningProposal(c, pending)
 	if err != nil {
 		return s.errMsg(c, fiber.StatusBadRequest, err.Error())
 	}
@@ -619,12 +619,17 @@ func findLearningProposal(store *learning.Store, id string) (learning.Proposal, 
 	return learning.Proposal{}, os.ErrNotExist
 }
 
-func (s *Server) applyLearningProposal(p learning.Proposal) (map[string]string, error) {
+// The request is threaded in rather than the proposal carrying its own
+// workspace: accepting a proposal *writes* — a procedure proposal appends to
+// the agent's rulebook and a semantic one writes a memory record — so the
+// target must be the workspace of the person accepting it, resolved the same
+// way every other write in this file resolves it.
+func (s *Server) applyLearningProposal(c *fiber.Ctx, p learning.Proposal) (map[string]string, error) {
 	switch strings.ToLower(p.Kind) {
 	case "skill":
 		return s.installLearningSkill(p)
 	case "procedure":
-		brain := s.engine.BrainStore()
+		brain := s.brainMemory(c)
 		if brain == nil {
 			return nil, errors.New("brain memory not configured")
 		}
@@ -640,7 +645,7 @@ func (s *Server) applyLearningProposal(p learning.Proposal) (map[string]string, 
 			return nil, err
 		}
 	default:
-		brain := s.engine.BrainStore()
+		brain := s.brainMemory(c)
 		if brain == nil {
 			return nil, errors.New("brain memory not configured")
 		}

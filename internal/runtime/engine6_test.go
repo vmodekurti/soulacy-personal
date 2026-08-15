@@ -43,6 +43,7 @@ import (
 	"github.com/soulacy/soulacy/internal/mcp"
 	"github.com/soulacy/soulacy/internal/memory"
 	"github.com/soulacy/soulacy/internal/sandbox"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 	"github.com/soulacy/soulacy/pkg/skill"
@@ -539,12 +540,18 @@ func TestEngine_SetAllowedToolDirs_SetsField(t *testing.T) {
 
 func TestEngine_BrainStore_NilBeforeSet(t *testing.T) {
 	e := newMinimalEngine(t)
-	if e.BrainStore() != nil {
-		t.Error("BrainStore should be nil before SetBrainMemory")
+	if e.BrainStoreInWorkspace(wsroot.PersonalWorkspaceID) != nil {
+		t.Error("brain store should be nil before SetBrainMemory")
 	}
 	e.SetBrainMemory(nil)
-	if e.BrainStore() != nil {
-		t.Error("BrainStore should be nil after SetBrainMemory(nil)")
+	if e.BrainStoreInWorkspace(wsroot.PersonalWorkspaceID) != nil {
+		t.Error("brain store should be nil after SetBrainMemory(nil)")
+	}
+	// And an unconfigured engine must stay nil for every workspace, not just
+	// the personal one — a nil registry that answered for ws_a would be a
+	// store nobody wired.
+	if e.BrainStoreInWorkspace("ws_a") != nil {
+		t.Error("brain store should be nil for any workspace before SetBrainMemory")
 	}
 }
 

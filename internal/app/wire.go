@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 
+	"github.com/soulacy/soulacy/internal/agentmemory"
 	"github.com/soulacy/soulacy/internal/auth"
 	"github.com/soulacy/soulacy/internal/channels"
 	httpchan "github.com/soulacy/soulacy/internal/channels/http"
@@ -33,6 +34,7 @@ import (
 	"github.com/soulacy/soulacy/internal/scheduler"
 	"github.com/soulacy/soulacy/internal/studio"
 	"github.com/soulacy/soulacy/internal/tenancy"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/message"
 )
 
@@ -107,7 +109,7 @@ func (a *App) Run(parent context.Context) error {
 	a.wireSecrets(credVault)
 
 	// ── Agent brain memory (episodic / semantic / procedural) ────────────────
-	brainStore := a.wireBrainMemory(ws, stack)
+	brainStores := a.wireBrainMemory(ws, stack)
 	learningStore := a.wireLearning(ws)
 
 	// ── Memory ───────────────────────────────────────────────────────────────
@@ -245,8 +247,14 @@ func (a *App) Run(parent context.Context) error {
 	// When both are unset, vector memory is disabled.
 	vectorStore, vecBackend := a.wireVector(archive, llmRouter)
 	_ = vecBackend // available for future memory-tool use; engine uses vectorStore directly
-	if brainStore != nil && vectorStore != nil {
-		brainStore.SetSemanticStore(&agentMemoryVectorAdapter{store: vectorStore})
+	if brainStores != nil && vectorStore != nil {
+		// One adapter per workspace, each binding the tenant once. The vector
+		// store itself is shared and scopes internally; binding here means the
+		// agentmemory side never has to carry a workspace through an interface
+		// that has nowhere to put one.
+		brainStores.SetSemanticStores(func(workspaceID string) agentmemory.SemanticStore {
+			return &agentMemoryVectorAdapter{store: vectorStore, workspaceID: wsroot.Normalize(workspaceID)}
+		})
 		log.Info("agent brain semantic memory enabled (sqlite-vec)")
 	}
 
@@ -307,7 +315,7 @@ func (a *App) Run(parent context.Context) error {
 		pluginProvider: pluginProvider,
 		pyExecutor:     pyExecutor,
 		namedExecutors: namedExecutors,
-		brainStore:     brainStore,
+		brainStores:    brainStores,
 		learningStore:  learningStore,
 		ollamaAPIKey:   ollamaAPIKey,
 		searchProvider: searchProvider,

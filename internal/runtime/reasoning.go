@@ -380,8 +380,8 @@ func (e *Engine) handleWithReasoning(ctx context.Context, def *agent.Definition,
 	// brain_memory.procedural.auto_update, always as a new immutable
 	// version. A locked rulebook refuses the write (warn event, run
 	// continues) — drift control beats self-tuning.
-	if result.UpdatedRules != "" && def.BrainMemory.Procedural.AutoUpdate && e.brainStore != nil {
-		if v, uerr := e.brainStore.UpdateProceduralVersioned(def.ID, result.UpdatedRules, "auto_update"); uerr != nil {
+	if brain := e.brainStore(ctx); result.UpdatedRules != "" && def.BrainMemory.Procedural.AutoUpdate && brain != nil {
+		if v, uerr := brain.UpdateProceduralVersioned(def.ID, result.UpdatedRules, "auto_update"); uerr != nil {
 			e.emit(ctx, message.Event{
 				Type: "warn", AgentID: msg.AgentID, SessionID: msg.SessionID,
 				Payload:   map[string]any{"stage": "rulebook", "error": uerr.Error()},

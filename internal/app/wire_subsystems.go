@@ -64,7 +64,7 @@ import (
 // wireBrainMemory builds the agent-brain CompositeStore (episodic/semantic/
 // procedural). A missing/uncreatable dir disables long-term memory (warn, not
 // fatal) and returns a nil store.
-func (a *App) wireBrainMemory(ws config.Paths, stack *closerStack) *agentmemory.CompositeStore {
+func (a *App) wireBrainMemory(ws config.Paths, stack *closerStack) *agentmemory.Stores {
 	log := a.log
 	brainMemDir := os.Getenv("SOULACY_MEMORY_DIR")
 	if brainMemDir == "" {
@@ -75,10 +75,10 @@ func (a *App) wireBrainMemory(ws config.Paths, stack *closerStack) *agentmemory.
 			zap.String("dir", brainMemDir), zap.Error(err))
 		return nil
 	}
-	brainStore := agentmemory.NewCompositeStore(brainMemDir, nil)
-	stack.push("brain-memory", func() error { brainStore.Close(); return nil }) // releases the E23 rulebook db
+	brainStores := agentmemory.NewStores(brainMemDir)
+	stack.push("brain-memory", func() error { return brainStores.Close() }) // releases every workspace's E23 rulebook db
 	log.Info("agent brain memory enabled", zap.String("dir", brainMemDir))
-	return brainStore
+	return brainStores
 }
 
 func (a *App) wireLearning(ws config.Paths) *learning.Stores {
@@ -1005,7 +1005,7 @@ type engineDeps struct {
 	pluginProvider runtime.PluginToolProvider
 	pyExecutor     executor.Backend
 	namedExecutors map[string]executor.Backend
-	brainStore     *agentmemory.CompositeStore
+	brainStores    *agentmemory.Stores
 	learningStore  *learning.Stores
 	ollamaAPIKey   string
 	searchProvider string
@@ -1149,8 +1149,8 @@ func (a *App) wireEngine(d engineDeps) *runtime.Engine {
 	}
 
 	// MEM-03: pass the brain memory store into the engine.
-	if d.brainStore != nil {
-		engine.SetBrainMemory(d.brainStore)
+	if d.brainStores != nil {
+		engine.SetBrainMemory(d.brainStores)
 	}
 	if d.learningStore != nil {
 		engine.SetLearningStores(d.learningStore)

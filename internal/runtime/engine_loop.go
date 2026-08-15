@@ -305,7 +305,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 		// Workflow agents bypass finalizeReply, so persist the episodic record
 		// here too. The workflow IS the active feature, so it qualifies for the
 		// auto-default (saves unless a brain_memory block opts out).
-		e.writeEpisodic(def, msg.AgentID, flattenParts(msg.Parts), replyText, true)
+		e.writeEpisodic(ctx, def, msg.AgentID, flattenParts(msg.Parts), replyText, true)
 		// Record the turn so follow-ups in this session carry conversation
 		// context (flowHistoryTranscript reads it on the next run).
 		e.recordWorkflowTurn(ctx, msg, replyText)
@@ -1029,8 +1029,9 @@ func (e *Engine) recordWorkflowTurn(ctx context.Context, msg message.Message, re
 // configured and the calling subsystem is active (featureActive) — the
 // auto-default shared by reasoning loops (strategy set) and workflows (always
 // active in the workflow branch). A no-op otherwise.
-func (e *Engine) writeEpisodic(def *agent.Definition, agentID, taskInput, finalContent string, featureActive bool) {
-	if e.brainStore == nil || def == nil {
+func (e *Engine) writeEpisodic(ctx context.Context, def *agent.Definition, agentID, taskInput, finalContent string, featureActive bool) {
+	brain := e.brainStore(ctx)
+	if brain == nil || def == nil {
 		return
 	}
 	bm := def.BrainMemory
@@ -1040,7 +1041,7 @@ func (e *Engine) writeEpisodic(def *agent.Definition, agentID, taskInput, finalC
 		return
 	}
 	rec := agentmemory.ResultToEpisodicRecord(agentID, taskInput, finalContent, nil)
-	if err := e.brainStore.Write(rec); err != nil {
+	if err := brain.Write(rec); err != nil {
 		e.log.Warn("brain memory write failed", zap.String("agent", agentID), zap.Error(err))
 	}
 }
@@ -1090,7 +1091,7 @@ func (e *Engine) finalizeReply(ctx context.Context, def *agent.Definition, sess 
 
 	// RL-09: persist task + reply as an episodic brain memory record. The
 	// reasoning loop's "feature active" signal is a configured strategy.
-	e.writeEpisodic(def, msg.AgentID, flattenParts(msg.Parts), finalContent, def.Reasoning.Strategy != "")
+	e.writeEpisodic(ctx, def, msg.AgentID, flattenParts(msg.Parts), finalContent, def.Reasoning.Strategy != "")
 	e.proposeLearning(ctx, def, msg, finalContent)
 
 	reply := message.Message{

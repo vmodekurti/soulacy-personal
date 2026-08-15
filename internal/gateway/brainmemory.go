@@ -25,12 +25,13 @@ import (
 	"github.com/soulacy/soulacy/internal/agentmemory"
 
 	"github.com/soulacy/soulacy/internal/config"
+	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
 // handleBrainMemoryStats returns per-agent brain memory statistics for all
 // loaded agents. Used by the GUI's Brain Memory overview page.
 func (s *Server) handleBrainMemoryStats(c *fiber.Ctx) error {
-	store := s.engine.BrainStore()
+	store := s.brainMemory(c)
 	if store == nil {
 		return c.JSON(fiber.Map{"enabled": false, "agents": []any{}})
 	}
@@ -59,7 +60,7 @@ func (s *Server) handleBrainMemoryStats(c *fiber.Ctx) error {
 // handleGetEpisodic returns episodic records for one agent (newest first).
 // Query params: limit (default 100)
 func (s *Server) handleGetEpisodic(c *fiber.Ctx) error {
-	store := s.engine.BrainStore()
+	store := s.brainMemory(c)
 	if store == nil {
 		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
 			"error": "brain memory not configured (set SOULACY_MEMORY_DIR)",
@@ -80,7 +81,7 @@ func (s *Server) handleGetEpisodic(c *fiber.Ctx) error {
 
 // handleClearEpisodic deletes all episodic records for an agent.
 func (s *Server) handleClearEpisodic(c *fiber.Ctx) error {
-	store := s.engine.BrainStore()
+	store := s.brainMemory(c)
 	if store == nil {
 		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
 			"error": "brain memory not configured",
@@ -95,7 +96,7 @@ func (s *Server) handleClearEpisodic(c *fiber.Ctx) error {
 
 // handleWriteEpisodic writes a manual episodic record.
 func (s *Server) handleWriteEpisodic(c *fiber.Ctx) error {
-	store := s.engine.BrainStore()
+	store := s.brainMemory(c)
 	if store == nil {
 		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
 			"error": "brain memory not configured",
@@ -129,7 +130,7 @@ func (s *Server) handleWriteEpisodic(c *fiber.Ctx) error {
 
 // handleGetProcedural returns the procedural rules markdown for an agent.
 func (s *Server) handleGetProcedural(c *fiber.Ctx) error {
-	store := s.engine.BrainStore()
+	store := s.brainMemory(c)
 	if store == nil {
 		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
 			"error": "brain memory not configured",
@@ -142,7 +143,7 @@ func (s *Server) handleGetProcedural(c *fiber.Ctx) error {
 
 // handleUpdateProcedural overwrites the procedural rules for an agent.
 func (s *Server) handleUpdateProcedural(c *fiber.Ctx) error {
-	store := s.engine.BrainStore()
+	store := s.brainMemory(c)
 	if store == nil {
 		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
 			"error": "brain memory not configured",
@@ -167,7 +168,7 @@ func (s *Server) handleUpdateProcedural(c *fiber.Ctx) error {
 
 // handleClearProcedural deletes the procedural rules file for an agent.
 func (s *Server) handleClearProcedural(c *fiber.Ctx) error {
-	store := s.engine.BrainStore()
+	store := s.brainMemory(c)
 	if store == nil {
 		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
 			"error": "brain memory not configured",
@@ -187,7 +188,7 @@ func (s *Server) handleClearProcedural(c *fiber.Ctx) error {
 // task query. Used by the GUI's "Context Preview" tab to show operators exactly
 // what the agent will see before executing a task.
 func (s *Server) handleContextPreview(c *fiber.Ctx) error {
-	store := s.engine.BrainStore()
+	store := s.brainMemory(c)
 	if store == nil {
 		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
 			"error": "brain memory not configured",
@@ -250,9 +251,16 @@ func brainMemoryDir() string {
 	return dir
 }
 
-// formatMemoryPath returns the on-disk path display for an agent's episodic store.
-func formatMemoryPath(agentID string) string {
-	return fmt.Sprintf("%s/%s/episodic.jsonl", brainMemoryDir(), agentID)
+// formatMemoryPath returns the on-disk path display for an agent's episodic
+// store within one workspace.
+//
+// The workspace is a required argument rather than something this helper looks
+// up. It is a display helper with no current caller, and a display helper that
+// silently names the shared root is exactly how a tenant ends up being shown —
+// or worse, handed — a path belonging to somebody else. Making the tenant
+// unavoidable means the next caller cannot get it wrong by omission.
+func formatMemoryPath(workspaceID, agentID string) string {
+	return fmt.Sprintf("%s/%s/episodic.jsonl", wsroot.Dir(brainMemoryDir(), wsroot.Normalize(workspaceID)), agentID)
 }
 
 // ── Versioned rulebooks (Story E23) ─────────────────────────────────────────
@@ -262,7 +270,7 @@ func formatMemoryPath(agentID string) string {
 //
 //	GET /api/v1/brain-memory/:agentID/rulebook
 func (s *Server) handleRulebookHistory(c *fiber.Ctx) error {
-	store := s.engine.BrainStore()
+	store := s.brainMemory(c)
 	if store == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "brain memory not configured")
 	}
@@ -286,7 +294,7 @@ func (s *Server) handleRulebookHistory(c *fiber.Ctx) error {
 //
 //	GET /api/v1/brain-memory/:agentID/rulebook/:version
 func (s *Server) handleRulebookVersion(c *fiber.Ctx) error {
-	store := s.engine.BrainStore()
+	store := s.brainMemory(c)
 	if store == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "brain memory not configured")
 	}
@@ -306,7 +314,7 @@ func (s *Server) handleRulebookVersion(c *fiber.Ctx) error {
 //
 //	POST /api/v1/brain-memory/:agentID/rulebook/rollback  {"version": 3}
 func (s *Server) handleRulebookRollback(c *fiber.Ctx) error {
-	store := s.engine.BrainStore()
+	store := s.brainMemory(c)
 	if store == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "brain memory not configured")
 	}
@@ -332,7 +340,7 @@ func (s *Server) handleRulebookRollback(c *fiber.Ctx) error {
 //
 //	POST /api/v1/brain-memory/:agentID/rulebook/lock  {"locked": true}
 func (s *Server) handleRulebookLock(c *fiber.Ctx) error {
-	store := s.engine.BrainStore()
+	store := s.brainMemory(c)
 	if store == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "brain memory not configured")
 	}

@@ -15,6 +15,7 @@ import (
 	"github.com/soulacy/soulacy/internal/llm"
 	"github.com/soulacy/soulacy/internal/memory"
 	"github.com/soulacy/soulacy/internal/reasoning"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 	"go.uber.org/zap"
@@ -395,9 +396,10 @@ func TestHandle_ReasoningAutoUpdatePersistsVersionedRules(t *testing.T) {
 		reflectRules: "# Learned\n- always cite sources",
 	}
 	e, sink := newReasoningEngine(t, def, backend)
-	brain := agentmemory.NewCompositeStore(t.TempDir(), nil)
-	defer brain.Close()
-	e.SetBrainMemory(brain)
+	brainStores := agentmemory.NewStores(t.TempDir())
+	defer brainStores.Close()
+	e.SetBrainMemory(brainStores)
+	brain := brainStores.For(wsroot.PersonalWorkspaceID)
 
 	if _, err := e.Handle(context.Background(), inboundMsg("learner", "teach me")); err != nil {
 		t.Fatal(err)
@@ -431,15 +433,16 @@ func TestHandle_ReasoningAutoUpdateRespectsLock(t *testing.T) {
 		reflectRules: "# drift attempt",
 	}
 	e, sink := newReasoningEngine(t, def, backend)
-	brain := agentmemory.NewCompositeStore(t.TempDir(), nil)
-	defer brain.Close()
+	brainStores := agentmemory.NewStores(t.TempDir())
+	defer brainStores.Close()
+	e.SetBrainMemory(brainStores)
+	brain := brainStores.For(wsroot.PersonalWorkspaceID)
 	if _, err := brain.UpdateProceduralVersioned("locked-agent", "# golden rules", "manual"); err != nil {
 		t.Fatal(err)
 	}
 	if err := brain.SetRulebookLocked("locked-agent", true); err != nil {
 		t.Fatal(err)
 	}
-	e.SetBrainMemory(brain)
 
 	reply, err := e.Handle(context.Background(), inboundMsg("locked-agent", "go"))
 	if err != nil {
@@ -472,9 +475,10 @@ func TestHandle_ReasoningNoOptInDiscardsRules(t *testing.T) {
 		reflectRules: "# should never persist",
 	}
 	e, sink := newReasoningEngine(t, def, backend)
-	brain := agentmemory.NewCompositeStore(t.TempDir(), nil)
-	defer brain.Close()
-	e.SetBrainMemory(brain)
+	brainStores := agentmemory.NewStores(t.TempDir())
+	defer brainStores.Close()
+	e.SetBrainMemory(brainStores)
+	brain := brainStores.For(wsroot.PersonalWorkspaceID)
 
 	if _, err := e.Handle(context.Background(), inboundMsg("no-optin", "go")); err != nil {
 		t.Fatal(err)
