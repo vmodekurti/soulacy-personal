@@ -37,7 +37,7 @@ func TestMissedCronFire_MultipleMissed_OnlyLatest(t *testing.T) {
 	// Hourly cron, 4 fires missed since lastCompleted — catch-up must run
 	// exactly one (the latest), not replay the backlog.
 	s := New(nil, nil, zap.NewNop(), context.Background())
-	s.state.LastCompleted["hourly"] = time.Date(2026, 6, 6, 6, 0, 0, 0, time.UTC)
+	s.state.LastCompleted[keyFor("", "hourly").String()] = time.Date(2026, 6, 6, 6, 0, 0, 0, time.UTC)
 	now := time.Date(2026, 6, 6, 10, 30, 0, 0, time.UTC)
 	def := &agent.Definition{
 		ID: "hourly", Enabled: true, Trigger: agent.TriggerCron,
@@ -48,7 +48,7 @@ func TestMissedCronFire_MultipleMissed_OnlyLatest(t *testing.T) {
 		},
 	}
 
-	got, ok := s.missedCronFire(def, now)
+	got, ok := s.missedCronFire(keyFor("", def.ID), def, now)
 	if !ok {
 		t.Fatal("expected a missed fire")
 	}
@@ -69,7 +69,7 @@ func TestMissedCronFire_InvalidWindow_DefaultsTo24h(t *testing.T) {
 			MissedStartupWindow: "not-a-duration",
 		},
 	}
-	got, ok := s.missedCronFire(def, now)
+	got, ok := s.missedCronFire(keyFor("", def.ID), def, now)
 	if !ok {
 		t.Fatal("invalid window must fall back to the 24h default, not disable catch-up")
 	}
@@ -89,7 +89,7 @@ func TestMissedCronFire_NegativeWindow_DefaultsTo24h(t *testing.T) {
 			MissedStartupWindow: "-3h",
 		},
 	}
-	if _, ok := s.missedCronFire(def, now); !ok {
+	if _, ok := s.missedCronFire(keyFor("", def.ID), def, now); !ok {
 		t.Fatal("negative window must fall back to the 24h default")
 	}
 }
@@ -101,7 +101,7 @@ func TestMissedCronFire_DisabledAgent_NoCatchUp(t *testing.T) {
 		ID: "daily", Enabled: false, Trigger: agent.TriggerCron,
 		Schedule: &agent.Schedule{Cron: "0 10 * * *", RunMissedOnStartup: true},
 	}
-	if _, ok := s.missedCronFire(def, now); ok {
+	if _, ok := s.missedCronFire(keyFor("", def.ID), def, now); ok {
 		t.Fatal("disabled agents must never catch up")
 	}
 }
@@ -123,7 +123,7 @@ func TestMissedCronFire_CorruptStateFile_StillCatchesUp(t *testing.T) {
 			Cron: "0 10 * * *", RunMissedOnStartup: true, MissedStartupWindow: "24h",
 		},
 	}
-	if _, ok := s.missedCronFire(def, now); !ok {
+	if _, ok := s.missedCronFire(keyFor("", def.ID), def, now); !ok {
 		t.Fatal("corrupt state must not disable catch-up")
 	}
 }
@@ -136,11 +136,11 @@ func TestMarkScheduleCompleted_NeverRegresses(t *testing.T) {
 
 	newer := time.Date(2026, 6, 6, 10, 0, 0, 0, time.UTC)
 	older := time.Date(2026, 6, 5, 10, 0, 0, 0, time.UTC)
-	s.markScheduleCompleted("daily", newer)
-	s.markScheduleCompleted("daily", older) // out-of-order completion (catch-up race)
+	s.markScheduleCompleted(keyFor("", "daily"), newer)
+	s.markScheduleCompleted(keyFor("", "daily"), older) // out-of-order completion (catch-up race)
 
 	s.stateMu.Lock()
-	got := s.state.LastCompleted["daily"]
+	got := s.state.LastCompleted[keyFor("", "daily").String()]
 	s.stateMu.Unlock()
 	if !got.Equal(newer) {
 		t.Fatalf("LastCompleted regressed to %s, want %s", got, newer)
@@ -149,9 +149,9 @@ func TestMarkScheduleCompleted_NeverRegresses(t *testing.T) {
 
 func TestMarkScheduleCompleted_ZeroTimeUsesNow(t *testing.T) {
 	s := New(nil, nil, zap.NewNop(), context.Background())
-	s.markScheduleCompleted("daily", time.Time{})
+	s.markScheduleCompleted(keyFor("", "daily"), time.Time{})
 	s.stateMu.Lock()
-	got := s.state.LastCompleted["daily"]
+	got := s.state.LastCompleted[keyFor("", "daily").String()]
 	s.stateMu.Unlock()
 	if got.IsZero() || time.Since(got) > time.Minute {
 		t.Fatalf("zero completedAt should record ~now, got %s", got)
@@ -174,17 +174,17 @@ func TestRestartSequence_CatchUpRunsExactlyOnce(t *testing.T) {
 	// Boot 1: detects the missed 10:00 fire.
 	boot1 := New(nil, nil, zap.NewNop(), context.Background())
 	boot1.SetStatePath(path)
-	missed, ok := boot1.missedCronFire(def, now)
+	missed, ok := boot1.missedCronFire(keyFor("", def.ID), def, now)
 	if !ok {
 		t.Fatal("boot 1 should detect the missed fire")
 	}
 	// The run completes (what fireAt does on success for cron_missed_startup).
-	boot1.markScheduleCompleted(def.ID, missed)
+	boot1.markScheduleCompleted(keyFor("", def.ID), missed)
 
 	// Boot 2 (same day, later): nothing to catch up.
 	boot2 := New(nil, nil, zap.NewNop(), context.Background())
 	boot2.SetStatePath(path)
-	if _, ok := boot2.missedCronFire(def, now.Add(10*time.Minute)); ok {
+	if _, ok := boot2.missedCronFire(keyFor("", def.ID), def, now.Add(10*time.Minute)); ok {
 		t.Fatal("boot 2 re-detected an already-completed fire — duplicate run")
 	}
 
@@ -192,7 +192,7 @@ func TestRestartSequence_CatchUpRunsExactlyOnce(t *testing.T) {
 	nextDay := now.Add(24 * time.Hour)
 	boot3 := New(nil, nil, zap.NewNop(), context.Background())
 	boot3.SetStatePath(path)
-	missed3, ok := boot3.missedCronFire(def, nextDay)
+	missed3, ok := boot3.missedCronFire(keyFor("", def.ID), def, nextDay)
 	if !ok {
 		t.Fatal("boot 3 should detect the next day's missed fire")
 	}

@@ -62,7 +62,7 @@ func schedulerWithAgent(t *testing.T, def *agent.Definition) (*Scheduler, *runti
 func (s *Scheduler) hasEntry(agentID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, ok := s.entries[agentID]
+	_, ok := s.entries[keyFor("", agentID)]
 	return ok
 }
 
@@ -93,7 +93,7 @@ func TestFire_RefusesAnAgentThatWasDisabledAfterRegistration(t *testing.T) {
 		t.Fatalf("upsert: %v", err)
 	}
 
-	s.fireAt("weekday-digest", "cron", time.Now().UTC())
+	s.fireAt(keyFor("", "weekday-digest"), "cron", time.Now().UTC())
 
 	if gate.count() != 0 {
 		t.Fatal("a disabled agent was carried into the run path — it would have executed on schedule")
@@ -119,7 +119,7 @@ func TestFire_DropsTheStaleCronEntryOnTheWayOut(t *testing.T) {
 	if err := loader.Upsert(t.TempDir(), def); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	s.fireAt("weekday-digest", "cron", time.Now().UTC())
+	s.fireAt(keyFor("", "weekday-digest"), "cron", time.Now().UTC())
 
 	if s.hasEntry("weekday-digest") {
 		t.Error("the cron entry survived, so the disabled agent keeps costing a tick on every match")
@@ -136,7 +136,7 @@ func TestFire_StillRunsAnEnabledAgent(t *testing.T) {
 	if err := s.RegisterAgent(loader.Get("weekday-digest")); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	s.fireAt("weekday-digest", "cron", time.Now().UTC())
+	s.fireAt(keyFor("", "weekday-digest"), "cron", time.Now().UTC())
 
 	if gate.count() != 1 {
 		t.Fatalf("an enabled agent did not reach the readiness gate (called %d times)", gate.count())
@@ -151,7 +151,7 @@ func TestFire_DoesNotTreatAnUnknownAgentAsDisabled(t *testing.T) {
 	gate := &countingGate{}
 	s.SetReadinessGate(gate)
 
-	s.fireAt("no-such-agent", "cron", time.Now().UTC())
+	s.fireAt(keyFor("", "no-such-agent"), "cron", time.Now().UTC())
 
 	if gate.count() != 1 {
 		t.Fatal("an unknown agent was reported as disabled instead of missing")

@@ -16,7 +16,7 @@ isolation state; this document explains it.
 | M3 — Data isolation | MU-012–019 | MU-012 ✓ MU-013 ✓ MU-014 ✓ MU-018 ✓ MU-019 ✓; MU-015 partial; MU-016 partial; MU-017 partial |
 | — event spine + stores | (cross-cutting) | Events, action log, learning, Studio traces, workboard, conversation history ✓ |
 | — isolation floor | (cross-cutting) | 0 blockers: every declared store is scoped and names a real isolation test |
-| M4 — Execution plane | MU-020–025 | MU-020 ✓; MU-021 ✓ (6/7; scalable workers → M6); MU-022 ✓; MU-023–025 not started |
+| M4 — Execution plane | MU-020–025 | MU-020 ✓; MU-021 ✓ (6/7; scalable workers → M6); MU-022 ✓; MU-023 ✓; MU-024–025 not started |
 | M5 — Team Preview | MU-026–032 | Not started |
 | M6 — Scale | MU-033–037 | Not started |
 
@@ -1352,6 +1352,73 @@ this actor decide" question about a map entry. The first version answered it
 inline and *omitted the workspace comparison*, reintroducing the exact bug the
 record was built to fix; a test caught it. Both paths now call
 `approvals.Authorize`.
+
+### The key was the bug (MU-023)
+
+Every map in the scheduler was keyed by agent ID: cron entries, the run lock,
+the consecutive-failure counter, the readiness blocks, and the completed-fire
+state file. Agent IDs are unique per **workspace**, not per deployment — the
+loader has said so since MU-012 — so two tenants with a `daily-report` agent
+shared one cron entry. Registering the second silently replaced the first, and
+whichever survived ran under a principal belonging to neither. The run lock
+made one tenant's long-running agent suppress every other tenant's, and the log
+line said "already running" about an agent that was not theirs.
+
+`scheduleKey` is a struct, not a joined string, precisely so the compiler
+refuses a bare agent ID where a key is wanted. The old code's bug was passing
+exactly that. Legacy single-argument methods remain and resolve to the
+scheduler's own workspace, so a personal deployment is unchanged.
+
+**Exactly-once is a claim, not a lock.** An occurrence is identified by the
+instant it was scheduled for, so two instances evaluating the same cron
+expression compute the same key *without talking to each other*, collide on the
+same primary key, and exactly one INSERT wins. Deriving the key from
+`time.Now()` or a UUID breaks this silently — every instance would always win.
+And there is no lock to acquire, release or leak: an instance that dies
+mid-run leaves a row whose lease expires, and the row is the audit trail either
+way. A lock would have to be released by the holder, which is the thing that
+just crashed.
+
+Three directions the claim has to get right, each with its own test:
+
+- A **live** lease is not stealable. A slow run must not be executed twice
+  because the process holding it stopped answering for a while.
+- An **expired** lease is. Otherwise an instance that died orphans the work
+  permanently.
+- A **completed** occurrence is completed forever, however long the lease has
+  been gone.
+
+**An unreachable store refuses rather than fires.** Two instances that both
+fail to claim would both fire — the exact duplicate execution the mechanism
+exists to prevent — and a missed occurrence is recoverable where a duplicated
+side effect is not.
+
+**The principal is derived per fire, not read from one field.** The single
+`scheduler.principal` was why a multi-user deployment could only be correct by
+refusing to fire at all (`RequirePrincipal`): fail-closed, and also
+feature-absent. A workspace other than the configured one gets a service
+principal scoped to itself, carrying neither the configured tenant's
+organization nor its membership — a membership ID is a grant.
+
+**Catch-up is capped, keeps the newest, and reports what it dropped.** Both
+extremes are wrong: replaying a week of `*/5` misses is a self-inflicted denial
+of service arriving exactly when the system has least capacity; replaying
+nothing loses the daily invoice run a deploy overlapped. The detail worth
+keeping is that a *silent* cap is the worst of the three — it reads as "we
+caught up" when it means "we caught up a bit", so `Missed.Dropped` exists to
+make that impossible to report as success. The enumeration walk is bounded
+separately from the cap, because "how many we fire" and "how many we look at"
+are different failures.
+
+**Timezone is stored and an unresolvable zone is refused.** "07:00" without a
+zone is not a time; coercing to UTC fires at a different hour with no error
+anywhere.
+
+**One near-miss.** After keying the state file by `(workspace, agent)`, the
+missed-cron check still *read* it by agent ID. Every tenant would have looked
+like it had never run, and every restart would have replayed everyone's
+catch-up. Three existing tests caught it — which is the argument for keeping
+catch-up tests that assert suppression, not just replay.
 
 ## Guards worth keeping
 

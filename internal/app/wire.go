@@ -34,6 +34,7 @@ import (
 	"github.com/soulacy/soulacy/internal/runs"
 	"github.com/soulacy/soulacy/internal/runtime"
 	"github.com/soulacy/soulacy/internal/scheduler"
+	"github.com/soulacy/soulacy/internal/schedules"
 	"github.com/soulacy/soulacy/internal/studio"
 	"github.com/soulacy/soulacy/internal/tenancy"
 	"github.com/soulacy/soulacy/internal/wsroot"
@@ -351,6 +352,26 @@ func (a *App) Run(parent context.Context) error {
 			WorkspaceID: personalTenant.WorkspaceID, MembershipID: personalTenant.MembershipID,
 			Role: "admin", CredentialID: "service:scheduler", Kind: "service",
 		})
+	}
+	// ── Durable, workspace-scoped schedules (MU-023) ────────────────────────
+	// The claim is what makes an occurrence fire once across instances. Team
+	// and Scale refuse to start without it: two gateways sharing an in-memory
+	// cron table fire every schedule twice, and "run two for availability" and
+	// "send the customer one email" are then incompatible.
+	if store, serr := schedules.Open(ws.DB("schedules")); serr != nil {
+		if config.IsMultiUserMode(cfg.DeploymentMode()) {
+			return fmt.Errorf("durable schedules are required outside personal mode: %w", serr)
+		}
+		log.Warn("durable schedules unavailable; scheduling stays single-process", zap.Error(serr))
+	} else {
+		stack.pushClose("schedules", store)
+		// The instance id must differ between processes, or two of them are
+		// indistinguishable to the claim. The hostname plus this process's PID
+		// is the strongest identity available without asking an operator to
+		// configure one, and it is stable for the life of the process — which
+		// is exactly the lifetime a lease is about.
+		sched.SetScheduleStore(store, schedulerInstanceID())
+		log.Info("durable schedules enabled", zap.String("instance", schedulerInstanceID()))
 	}
 	sched.SetStatePath(filepath.Join(cfg.Memory.Dir, "scheduler-state.json"))
 	sched.SetEventSink(hub) // record scheduled-delivery outcomes in Activity

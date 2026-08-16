@@ -30,8 +30,8 @@ func TestCronAutoDisableAfterConsecutiveFailures(t *testing.T) {
 	s.SetConsecutiveFailLimit(3)
 
 	// Two failures: not yet at the limit, still enabled.
-	s.recordFireResult("flaky", false)
-	if disabled, count := s.recordFireResult("flaky", false); disabled || count != 2 {
+	s.recordFireResult(keyFor("", "flaky"), false)
+	if disabled, count := s.recordFireResult(keyFor("", "flaky"), false); disabled || count != 2 {
 		t.Fatal("agent disabled too early (before limit)")
 	}
 	if d := loader.Get("flaky"); d == nil || !d.Enabled {
@@ -39,12 +39,12 @@ func TestCronAutoDisableAfterConsecutiveFailures(t *testing.T) {
 	}
 
 	// A success resets the streak.
-	s.recordFireResult("flaky", true)
+	s.recordFireResult(keyFor("", "flaky"), true)
 
 	// Now three fresh consecutive failures should trip the limit.
-	s.recordFireResult("flaky", false)
-	s.recordFireResult("flaky", false)
-	if disabled, count := s.recordFireResult("flaky", false); !disabled || count != 3 {
+	s.recordFireResult(keyFor("", "flaky"), false)
+	s.recordFireResult(keyFor("", "flaky"), false)
+	if disabled, count := s.recordFireResult(keyFor("", "flaky"), false); !disabled || count != 3 {
 		t.Fatal("agent should be auto-disabled at the 3rd consecutive failure")
 	}
 	if d := loader.Get("flaky"); d == nil || d.Enabled {
@@ -63,7 +63,7 @@ func TestCronAutoDisableOff(t *testing.T) {
 	s := New(nil, loader, zap.NewNop(), context.Background())
 	s.SetConsecutiveFailLimit(0) // off
 	for i := 0; i < 50; i++ {
-		if disabled, count := s.recordFireResult("noisy", false); disabled || count != i+1 {
+		if disabled, count := s.recordFireResult(keyFor("", "noisy"), false); disabled || count != i+1 {
 			t.Fatal("auto-disable should be off when limit <= 0")
 		}
 	}

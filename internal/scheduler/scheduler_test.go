@@ -208,7 +208,7 @@ func TestRunningLockPreventsOverlapAndAllowsStaleReplacement(t *testing.T) {
 		t.Fatal("agent should be running")
 	}
 
-	s.running["agent"] = time.Now().Add(-(maxRunDuration + time.Minute))
+	s.running[keyFor("", "agent")] = time.Now().Add(-(maxRunDuration + time.Minute))
 	if !s.TryStartRun("agent") {
 		t.Fatal("stale running marker should be replaced")
 	}
@@ -282,7 +282,7 @@ func TestRegisterAgentNoopWhenDisabled(t *testing.T) {
 		t.Fatalf("disabled: %v", err)
 	}
 	s.mu.Lock()
-	_, registered := s.entries["disabled-cron"]
+	_, registered := s.entries[keyFor("", "disabled-cron")]
 	s.mu.Unlock()
 	if registered {
 		t.Error("disabled agent should not be registered")
@@ -301,7 +301,7 @@ func TestAddCronRegistersEntry(t *testing.T) {
 		t.Fatalf("RegisterAgent cron: %v", err)
 	}
 	s.mu.Lock()
-	_, registered := s.entries["daily-brief"]
+	_, registered := s.entries[keyFor("", "daily-brief")]
 	s.mu.Unlock()
 	if !registered {
 		t.Error("expected cron entry to be registered")
@@ -321,7 +321,7 @@ func TestRegisterAgentSchedulesExplicitScheduleSurface(t *testing.T) {
 		t.Fatalf("RegisterAgent multi-surface cron: %v", err)
 	}
 	s.mu.Lock()
-	_, registered := s.entries["multi-surface-digest"]
+	_, registered := s.entries[keyFor("", "multi-surface-digest")]
 	s.mu.Unlock()
 	if !registered {
 		t.Error("explicit schedule surface with cron should register a cron entry")
@@ -341,7 +341,7 @@ func TestAddCronRejectsInvalidExpression(t *testing.T) {
 		t.Fatal("expected error for invalid cron, got nil")
 	}
 	s.mu.Lock()
-	_, registered := s.entries["bad-cron"]
+	_, registered := s.entries[keyFor("", "bad-cron")]
 	s.mu.Unlock()
 	if registered {
 		t.Error("invalid cron should not create an entry")
@@ -391,7 +391,7 @@ func TestAddOneShotRegistersGoroutine(t *testing.T) {
 		t.Fatalf("RegisterAgent oneshot: %v", err)
 	}
 	s.mu.Lock()
-	_, registered := s.oneshot["future-shot"]
+	_, registered := s.oneshot[keyFor("", "future-shot")]
 	s.mu.Unlock()
 	if !registered {
 		t.Error("expected oneshot goroutine to be registered")
@@ -411,7 +411,7 @@ func TestRegisterAgentSchedulesExplicitOneShotSurface(t *testing.T) {
 		t.Fatalf("RegisterAgent multi-surface oneshot: %v", err)
 	}
 	s.mu.Lock()
-	_, registered := s.oneshot["multi-surface-shot"]
+	_, registered := s.oneshot[keyFor("", "multi-surface-shot")]
 	s.mu.Unlock()
 	if !registered {
 		t.Error("explicit schedule surface with schedule.at should register a one-shot")
@@ -462,7 +462,7 @@ func TestDeregisterAgentRemovesCronEntry(t *testing.T) {
 	s.DeregisterAgent("to-remove")
 
 	s.mu.Lock()
-	_, stillThere := s.entries["to-remove"]
+	_, stillThere := s.entries[keyFor("", "to-remove")]
 	s.mu.Unlock()
 	if stillThere {
 		t.Error("expected entry to be removed after DeregisterAgent")
@@ -481,7 +481,7 @@ func TestDeregisterAgentCancelsOneShot(t *testing.T) {
 	s.DeregisterAgent("cancel-shot")
 
 	s.mu.Lock()
-	_, stillThere := s.oneshot["cancel-shot"]
+	_, stillThere := s.oneshot[keyFor("", "cancel-shot")]
 	s.mu.Unlock()
 	if stillThere {
 		t.Error("expected oneshot to be removed after DeregisterAgent")
@@ -534,7 +534,7 @@ func TestRunningSnapshot(t *testing.T) {
 	s.TryStartRun("active-agent")
 	// Insert a stale entry directly.
 	s.runMu.Lock()
-	s.running["stale-agent"] = time.Now().Add(-2 * maxRunDuration)
+	s.running[keyFor("", "stale-agent")] = time.Now().Add(-2 * maxRunDuration)
 	s.runMu.Unlock()
 
 	snap := s.RunningSnapshot()
@@ -554,7 +554,7 @@ func TestMissedCronFireRequiresOptIn(t *testing.T) {
 		Schedule: &agent.Schedule{Cron: "0 10 * * *"},
 	}
 
-	if _, ok := s.missedCronFire(def, now); ok {
+	if _, ok := s.missedCronFire(keyFor("", def.ID), def, now); ok {
 		t.Fatal("missed cron should not run without run_missed_on_startup")
 	}
 }
@@ -571,7 +571,7 @@ func TestMissedCronFireFindsLatestMissedWithinWindow(t *testing.T) {
 		},
 	}
 
-	got, ok := s.missedCronFire(def, now)
+	got, ok := s.missedCronFire(keyFor("", def.ID), def, now)
 	if !ok {
 		t.Fatal("expected missed cron")
 	}
@@ -584,7 +584,7 @@ func TestMissedCronFireFindsLatestMissedWithinWindow(t *testing.T) {
 func TestMissedCronFireSkipsAlreadyCompletedFire(t *testing.T) {
 	s := New(nil, nil, zap.NewNop(), context.Background())
 	now := time.Date(2026, 6, 6, 10, 30, 0, 0, time.UTC)
-	s.state.LastCompleted["daily"] = time.Date(2026, 6, 6, 10, 0, 0, 0, time.UTC)
+	s.state.LastCompleted[keyFor("", "daily").String()] = time.Date(2026, 6, 6, 10, 0, 0, 0, time.UTC)
 	def := &agent.Definition{
 		ID: "daily", Enabled: true, Trigger: agent.TriggerCron,
 		Schedule: &agent.Schedule{
@@ -594,7 +594,7 @@ func TestMissedCronFireSkipsAlreadyCompletedFire(t *testing.T) {
 		},
 	}
 
-	if _, ok := s.missedCronFire(def, now); ok {
+	if _, ok := s.missedCronFire(keyFor("", def.ID), def, now); ok {
 		t.Fatal("already completed scheduled fire should not catch up")
 	}
 }
@@ -611,7 +611,7 @@ func TestMissedCronFireHonorsWindow(t *testing.T) {
 		},
 	}
 
-	if _, ok := s.missedCronFire(def, now); ok {
+	if _, ok := s.missedCronFire(keyFor("", def.ID), def, now); ok {
 		t.Fatal("missed cron outside catch-up window should not run")
 	}
 }
@@ -623,7 +623,7 @@ func TestScheduleStatePersistsCompletedCron(t *testing.T) {
 	s.SetStatePath(path)
 	completedAt := time.Date(2026, 6, 6, 10, 0, 0, 0, time.UTC)
 
-	s.markScheduleCompleted("daily", completedAt)
+	s.markScheduleCompleted(keyFor("", "daily"), completedAt)
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -644,7 +644,7 @@ func TestScheduleStatePersistsCompletedCron(t *testing.T) {
 		},
 	}
 	now := time.Date(2026, 6, 6, 10, 30, 0, 0, time.UTC)
-	if _, ok := reloaded.missedCronFire(def, now); ok {
+	if _, ok := reloaded.missedCronFire(keyFor("", def.ID), def, now); ok {
 		t.Fatal("persisted completed run should suppress startup catch-up")
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1413,4 +1414,21 @@ func (a *App) startMessageRouter(ctx context.Context, chanReg *channels.Registry
 			}
 		}()
 	}
+}
+
+// schedulerInstanceID identifies this gateway process to the schedule claim
+// (MU-023).
+//
+// Two instances sharing an identity are indistinguishable to the claim: each
+// looks like the other re-entering, so a lease steal cannot be told from a
+// retry and exactly-once quietly becomes at-least-once. Hostname plus PID is
+// the strongest identity available without asking an operator to configure
+// one — distinct across containers, distinct across processes on one host, and
+// stable for the life of the process, which is the lifetime a lease is about.
+func schedulerInstanceID() string {
+	host, err := os.Hostname()
+	if err != nil || strings.TrimSpace(host) == "" {
+		host = "unknown-host"
+	}
+	return host + ":" + strconv.Itoa(os.Getpid())
 }

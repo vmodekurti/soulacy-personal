@@ -24,6 +24,7 @@ import (
 
 	"github.com/soulacy/soulacy/internal/channels"
 	"github.com/soulacy/soulacy/internal/runtime"
+	"github.com/soulacy/soulacy/internal/schedules"
 	"github.com/soulacy/soulacy/internal/webpush"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
@@ -37,8 +38,8 @@ type Scheduler struct {
 	channels *channels.Registry
 	log      *zap.Logger
 	mu       sync.Mutex
-	entries  map[string]cron.EntryID // agentID → cron entry
-	oneshot  map[string]context.CancelFunc
+	entries  map[scheduleKey]cron.EntryID // (workspace, agent) → cron entry
+	oneshot  map[scheduleKey]context.CancelFunc
 
 	// appCtx is the gateway's app-wide context. Every fired run derives its
 	// own context from this one so SIGTERM cancellation propagates through
@@ -47,7 +48,7 @@ type Scheduler struct {
 	appCtx context.Context
 
 	runMu   sync.Mutex
-	running map[string]time.Time // agentID → run start time (currently executing)
+	running map[scheduleKey]time.Time // (workspace, agent) → run start time (currently executing)
 
 	stateMu   sync.Mutex
 	statePath string
@@ -59,7 +60,7 @@ type Scheduler struct {
 	// nobody is watching. A successful run resets the counter. <=0 disables the
 	// feature.
 	failMu               sync.Mutex
-	failCounts           map[string]int
+	failCounts           map[scheduleKey]int
 	consecutiveFailLimit int
 
 	defaultMu      sync.RWMutex
@@ -91,6 +92,12 @@ type Scheduler struct {
 	// once during startup; a zero value preserves embedded/test compatibility.
 	principal        runtime.Principal
 	requirePrincipal bool
+
+	// store, when set, is the durable workspace-scoped schedule record and the
+	// claim that makes an occurrence fire exactly once across instances.
+	// instanceID identifies this process to that claim. See tenancy.go.
+	store      *schedules.Store
+	instanceID string
 }
 
 // EventSink is the minimal event surface the scheduler needs to record delivery
@@ -149,11 +156,11 @@ func New(engine *runtime.Engine, loader *runtime.Loader, log *zap.Logger, appCtx
 		loader:               loader,
 		log:                  log,
 		appCtx:               appCtx,
-		entries:              make(map[string]cron.EntryID),
-		oneshot:              make(map[string]context.CancelFunc),
-		running:              make(map[string]time.Time),
+		entries:              make(map[scheduleKey]cron.EntryID),
+		oneshot:              make(map[scheduleKey]context.CancelFunc),
+		running:              make(map[scheduleKey]time.Time),
 		state:                scheduleState{LastCompleted: make(map[string]time.Time)},
-		failCounts:           make(map[string]int),
+		failCounts:           make(map[scheduleKey]int),
 		defaultOutputs:       make(map[string]agent.ScheduleOutput),
 		lastBackfills:        make(map[string]MissedBackfill),
 		blocks:               make(map[string]ScheduleBlock),
@@ -194,16 +201,16 @@ func (s *Scheduler) SetConsecutiveFailLimit(n int) {
 // auto-disables it once the limit is reached. It returns whether the agent was
 // just disabled and the current consecutive failure count. A successful run
 // (ok=true) resets the counter.
-func (s *Scheduler) recordFireResult(agentID string, ok bool) (bool, int) {
+func (s *Scheduler) recordFireResult(key scheduleKey, ok bool) (bool, int) {
 	s.failMu.Lock()
 	limit := s.consecutiveFailLimit
 	if ok {
-		delete(s.failCounts, agentID)
+		delete(s.failCounts, key)
 		s.failMu.Unlock()
 		return false, 0
 	}
-	s.failCounts[agentID]++
-	count := s.failCounts[agentID]
+	s.failCounts[key]++
+	count := s.failCounts[key]
 	s.failMu.Unlock()
 
 	if limit <= 0 || count < limit {
@@ -211,16 +218,24 @@ func (s *Scheduler) recordFireResult(agentID string, ok bool) (bool, int) {
 	}
 	// Quarantine the agent: stop it firing and disable it in memory so a fixed
 	// SOUL.yaml (saved later) re-enables it via the normal reload path.
-	s.DeregisterAgent(agentID)
+	s.deregister(key)
 	disabled := false
 	if s.loader != nil {
-		disabled = s.loader.SetEnabledInMemory(agentID, false)
+		disabled = s.loader.SetEnabledInMemoryInWorkspace(key.workspaceID, key.agentID, false)
 	}
 	s.failMu.Lock()
-	delete(s.failCounts, agentID)
+	delete(s.failCounts, key)
 	s.failMu.Unlock()
+	// MU-023 criterion 5: a schedule the system switched off must say why, or
+	// "it stopped running and nobody knows" is the operator's whole picture.
+	if store, _ := s.scheduleStore(); store != nil {
+		ctx, cancel := context.WithTimeout(s.appCtx, 10*time.Second)
+		_ = store.Disable(ctx, key.workspaceID, key.agentID,
+			fmt.Sprintf("auto-disabled after %d consecutive failed runs", count))
+		cancel()
+	}
 	s.log.Error("cron agent auto-disabled after consecutive failures — fix its config and re-enable",
-		zap.String("agent", agentID),
+		zap.String("schedule", key.String()),
 		zap.Int("consecutive_failures", count),
 		zap.Bool("disabled", disabled))
 	return true, count
@@ -274,27 +289,40 @@ const maxRunDuration = 1 * time.Hour
 // (within maxRunDuration), so callers can prevent overlapping/duplicate executions.
 // A stale run past maxRunDuration is overwritten so the agent isn't locked forever.
 func (s *Scheduler) TryStartRun(agentID string) bool {
+	return s.tryStartRun(keyFor(s.defaultWorkspace(), agentID))
+}
+
+// tryStartRun is the workspace-aware core. The run lock is per (workspace,
+// agent): keyed by agent alone, one tenant's long-running "daily-report"
+// silently suppressed every other tenant's, and the log line said "already
+// running" about an agent that was not theirs.
+func (s *Scheduler) tryStartRun(key scheduleKey) bool {
 	s.runMu.Lock()
 	defer s.runMu.Unlock()
-	if started, ok := s.running[agentID]; ok && time.Since(started) < maxRunDuration {
+	if started, ok := s.running[key]; ok && time.Since(started) < maxRunDuration {
 		return false
 	}
-	s.running[agentID] = time.Now()
+	s.running[key] = time.Now()
 	return true
 }
 
 // FinishRun clears an agent's running state.
 func (s *Scheduler) FinishRun(agentID string) {
+	s.finishRun(keyFor(s.defaultWorkspace(), agentID))
+}
+
+func (s *Scheduler) finishRun(key scheduleKey) {
 	s.runMu.Lock()
 	defer s.runMu.Unlock()
-	delete(s.running, agentID)
+	delete(s.running, key)
 }
 
 // IsRunning reports whether an agent is currently executing (and not stale).
 func (s *Scheduler) IsRunning(agentID string) bool {
+	key := keyFor(s.defaultWorkspace(), agentID)
 	s.runMu.Lock()
 	defer s.runMu.Unlock()
-	started, ok := s.running[agentID]
+	started, ok := s.running[key]
 	return ok && time.Since(started) < maxRunDuration
 }
 
@@ -306,7 +334,7 @@ func (s *Scheduler) RunningSnapshot() map[string]time.Time {
 	out := make(map[string]time.Time, len(s.running))
 	for k, v := range s.running {
 		if time.Since(v) < maxRunDuration {
-			out[k] = v
+			out[k.agentID] = v
 		}
 	}
 	return out
@@ -334,14 +362,24 @@ func (s *Scheduler) Stop() {
 // RegisterAgent adds the agent's schedule to the scheduler.
 // Call this after LoadAll() and whenever an agent definition is upserted.
 func (s *Scheduler) RegisterAgent(def *agent.Definition) error {
-	if def.Schedule == nil || !def.Enabled {
+	return s.RegisterAgentInWorkspace(s.defaultWorkspace(), def)
+}
+
+// RegisterAgentInWorkspace registers one workspace's scheduled agent.
+//
+// The workspace is a parameter rather than a field because two tenants may
+// legitimately schedule agents with the same ID — that collision is what the
+// agent-ID-keyed cron table got wrong, silently, by replacement.
+func (s *Scheduler) RegisterAgentInWorkspace(workspaceID string, def *agent.Definition) error {
+	if def == nil || def.Schedule == nil || !def.Enabled {
 		return nil
 	}
+	key := keyFor(workspaceID, def.ID)
 	switch scheduledKind(def) {
 	case agent.TriggerCron:
-		return s.addCron(def)
+		return s.addCron(key, def)
 	case agent.TriggerOneShot:
-		return s.addOneShot(def)
+		return s.addOneShot(key, def)
 	}
 	return nil
 }
@@ -372,26 +410,38 @@ func scheduledKind(def *agent.Definition) agent.TriggerKind {
 
 // DeregisterAgent removes a scheduled agent. Safe to call if not registered.
 func (s *Scheduler) DeregisterAgent(agentID string) {
+	s.deregister(keyFor(s.defaultWorkspace(), agentID))
+}
+
+// DeregisterAgentInWorkspace removes one workspace's scheduled agent.
+func (s *Scheduler) DeregisterAgentInWorkspace(workspaceID, agentID string) {
+	s.deregister(keyFor(workspaceID, agentID))
+}
+
+func (s *Scheduler) deregister(key scheduleKey) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if id, ok := s.entries[agentID]; ok {
+	if id, ok := s.entries[key]; ok {
 		s.cron.Remove(id)
-		delete(s.entries, agentID)
+		delete(s.entries, key)
 	}
-	if cancel, ok := s.oneshot[agentID]; ok {
+	if cancel, ok := s.oneshot[key]; ok {
 		cancel()
-		delete(s.oneshot, agentID)
+		delete(s.oneshot, key)
 	}
 }
 
-func (s *Scheduler) addCron(def *agent.Definition) error {
+func (s *Scheduler) addCron(key scheduleKey, def *agent.Definition) error {
 	if def.Schedule.Cron == "" {
 		return fmt.Errorf("scheduler: cron expression is empty for agent %s", def.ID)
 	}
 
-	agentID := def.ID
 	entryID, err := s.cron.AddFunc(def.Schedule.Cron, func() {
-		s.fireAt(agentID, "cron", time.Now().UTC())
+		// Truncated so the stored scheduled_at matches the occurrence key
+		// derived from it. The key itself truncates too — that is where the
+		// cross-instance agreement actually lives (schedules.OccurrenceKey);
+		// this keeps the row and its key describing the same instant.
+		s.fireAt(key, "cron", time.Now().UTC().Truncate(time.Second))
 	})
 	if err != nil {
 		return fmt.Errorf("scheduler: invalid cron expression %q: %w", def.Schedule.Cron, err)
@@ -399,20 +449,20 @@ func (s *Scheduler) addCron(def *agent.Definition) error {
 
 	s.mu.Lock()
 	// Remove previous entry if re-registering
-	if old, ok := s.entries[agentID]; ok {
+	if old, ok := s.entries[key]; ok {
 		s.cron.Remove(old)
 	}
-	s.entries[agentID] = entryID
+	s.entries[key] = entryID
 	s.mu.Unlock()
 
 	s.log.Info("cron agent registered",
-		zap.String("agent", agentID),
+		zap.String("schedule", key.String()),
 		zap.String("expr", def.Schedule.Cron),
 	)
 	return nil
 }
 
-func (s *Scheduler) addOneShot(def *agent.Definition) error {
+func (s *Scheduler) addOneShot(key scheduleKey, def *agent.Definition) error {
 	if def.Schedule.At.IsZero() {
 		return fmt.Errorf("scheduler: one-shot time is zero for agent %s", def.ID)
 	}
@@ -428,19 +478,22 @@ func (s *Scheduler) addOneShot(def *agent.Definition) error {
 	// (PRODUCTION_AUDIT → HIGH/Concurrency)
 	ctx, cancel := context.WithCancel(s.appCtx)
 	s.mu.Lock()
-	if oldCancel, ok := s.oneshot[def.ID]; ok {
+	if oldCancel, ok := s.oneshot[key]; ok {
 		oldCancel()
 	}
-	s.oneshot[def.ID] = cancel
+	s.oneshot[key] = cancel
 	s.mu.Unlock()
 
-	agentID := def.ID
+	// The one-shot's occurrence is its DECLARED time, not the moment the timer
+	// happens to fire: two instances whose timers drift by milliseconds must
+	// still agree on which occurrence this is.
+	scheduledAt := def.Schedule.At.UTC().Truncate(time.Second)
 	go func() {
 		select {
 		case <-time.After(delay):
-			s.fire(agentID, "oneshot")
+			s.fireAt(key, "oneshot", scheduledAt)
 			s.mu.Lock()
-			delete(s.oneshot, agentID)
+			delete(s.oneshot, key)
 			s.mu.Unlock()
 		case <-ctx.Done():
 		}
@@ -455,20 +508,41 @@ func (s *Scheduler) addOneShot(def *agent.Definition) error {
 
 // fire synthesises a trigger message and dispatches it to the engine.
 func (s *Scheduler) fire(agentID, triggerType string) {
-	s.fireAt(agentID, triggerType, time.Now().UTC())
+	s.fireAt(keyFor(s.defaultWorkspace(), agentID), triggerType, time.Now().UTC().Truncate(time.Second))
 }
 
 // definition looks the agent up, tolerating a scheduler built without a loader
 // (embedded uses and some tests) — "no opinion" rather than a panic.
 func (s *Scheduler) definition(agentID string) *agent.Definition {
+	return s.definitionIn(keyFor(s.defaultWorkspace(), agentID))
+}
+
+// definitionIn resolves an agent within its own workspace. Resolving by ID
+// alone returned whichever tenant's agent happened to be registered under that
+// ID — the collision this story is about, in the one place where getting it
+// wrong means running somebody else's prompt.
+func (s *Scheduler) definitionIn(key scheduleKey) *agent.Definition {
 	if s.loader == nil {
 		return nil
 	}
-	return s.loader.Get(agentID)
+	return s.loader.GetInWorkspace(key.workspaceID, key.agentID)
 }
 
 // fire synthesises a trigger message and dispatches it to the engine.
-func (s *Scheduler) fireAt(agentID, triggerType string, scheduledAt time.Time) {
+func (s *Scheduler) fireAt(key scheduleKey, triggerType string, scheduledAt time.Time) {
+	agentID := key.agentID
+	// MU-023 criterion 2. The claim comes FIRST — before the run lock, the
+	// definition lookup and the readiness gate — for the same reason the gate
+	// comes before the provider is dialled: an instance that is not going to
+	// run this occurrence must not spend anything discovering that. With no
+	// store this always wins, so a single personal gateway is unchanged.
+	claim, mine := s.claimOccurrence(key, scheduledAt)
+	if !mine {
+		return
+	}
+	var runErr error
+	defer func() { s.completeOccurrence(claim, runErr) }()
+
 	// "Disabled" has to mean disabled AT FIRE TIME, not only at registration
 	// time. RegisterAgent refuses a disabled agent, and DeregisterAgent drops
 	// its cron entry — but that only holds while every writer of Enabled
@@ -481,10 +555,18 @@ func (s *Scheduler) fireAt(agentID, triggerType string, scheduledAt time.Time) {
 	// spread across every call site. Re-read each tick, so re-enabling still
 	// takes effect without a restart, and the stale entry is dropped on the way
 	// out so this costs one wasted tick, not one per tick forever.
-	if def := s.definition(agentID); def != nil && !def.Enabled {
+	if def := s.definitionIn(key); def != nil && !def.Enabled {
 		s.log.Warn("skipping scheduled run — agent is disabled",
-			zap.String("agent", agentID), zap.String("trigger", triggerType))
-		s.DeregisterAgent(agentID)
+			zap.String("schedule", key.String()), zap.String("trigger", triggerType))
+		s.deregister(key)
+		// Criterion 5: the schedule record says why it stopped, so an
+		// operator does not have to correlate logs to find out.
+		if store, _ := s.scheduleStore(); store != nil {
+			ctx, cancel := context.WithTimeout(s.appCtx, 10*time.Second)
+			_ = store.Disable(ctx, key.workspaceID, agentID, "the agent was disabled")
+			cancel()
+		}
+		runErr = fmt.Errorf("agent is disabled")
 		return
 	}
 
@@ -499,20 +581,23 @@ func (s *Scheduler) fireAt(agentID, triggerType string, scheduledAt time.Time) {
 
 	// Prevent overlapping runs: if a manual or previous scheduled run is still
 	// executing, skip this fire rather than running the agent twice concurrently.
-	if !s.TryStartRun(agentID) {
+	if !s.tryStartRun(key) {
 		s.log.Warn("skipping scheduled run — agent already running",
-			zap.String("agent", agentID), zap.String("trigger", triggerType))
+			zap.String("schedule", key.String()), zap.String("trigger", triggerType))
+		runErr = fmt.Errorf("a previous run of this agent is still executing")
 		return
 	}
-	defer s.FinishRun(agentID)
+	defer s.finishRun(key)
 
 	s.log.Info("firing scheduled agent",
 		zap.String("agent", agentID),
 		zap.String("trigger", triggerType),
 	)
-	if s.requirePrincipal && s.principal.Subject == "" {
+	principal := s.principalFor(key.workspaceID)
+	if s.requirePrincipal && principal.Subject == "" {
 		s.log.Error("scheduled run blocked: verified workspace service principal is missing",
-			zap.String("agent", agentID), zap.String("trigger", triggerType))
+			zap.String("schedule", key.String()), zap.String("trigger", triggerType))
+		runErr = fmt.Errorf("no verified service principal for this workspace")
 		return
 	}
 
@@ -535,22 +620,23 @@ func (s *Scheduler) fireAt(agentID, triggerType string, scheduledAt time.Time) {
 	// override it. Derived from s.appCtx so SIGTERM cancels in-flight runs
 	// (PRODUCTION_AUDIT → HIGH/Concurrency: previously context.Background()
 	// here meant graceful shutdown could hang for the full run_timeout).
-	def := s.definition(agentID)
+	def := s.definitionIn(key)
 	if def == nil {
-		s.log.Error("scheduled agent definition missing", zap.String("agent", agentID))
+		s.log.Error("scheduled agent definition missing", zap.String("schedule", key.String()))
+		runErr = fmt.Errorf("agent definition missing")
 		return
 	}
 	timeout := def.ResolvedRunTimeout(15 * time.Minute)
 	ctx, cancel := context.WithTimeout(s.appCtx, timeout)
 	defer cancel()
-	if s.principal.Subject != "" {
-		principal := s.principal
+	if principal.Subject != "" {
 		principal.RequestID = msg.ID
 		ctx = runtime.WithPrincipal(ctx, principal)
 	}
 
 	runStart := time.Now()
 	reply, err := s.engine.Handle(ctx, msg)
+	runErr = err
 	elapsed := time.Since(runStart).Round(time.Millisecond)
 	isCron := triggerType == "cron" || triggerType == "cron_missed_startup"
 	if err != nil {
@@ -563,14 +649,14 @@ func (s *Scheduler) fireAt(agentID, triggerType string, scheduledAt time.Time) {
 		if isCron {
 			// Track consecutive failures; auto-disable a chronically-failing
 			// cron agent so it stops firing on a loop nobody is watching.
-			disabled, failures := s.recordFireResult(agentID, false)
+			disabled, failures := s.recordFireResult(key, false)
 			s.reportRunFailure(def, msg, triggerType, err, elapsed, failures, disabled)
 		}
 		return
 	}
 	if isCron {
-		s.recordFireResult(agentID, true) // success resets the failure streak
-		s.markScheduleCompleted(agentID, scheduledAt)
+		s.recordFireResult(key, true) // success resets the failure streak
+		s.markScheduleCompleted(key, scheduledAt)
 		// Push a heads-up that the scheduled run completed (Epic 8). Best-effort,
 		// no-op when push isn't configured.
 		schedAgentName := agentID
@@ -652,13 +738,33 @@ func (s *Scheduler) runMissedOnStartup() {
 		return
 	}
 	now := time.Now().UTC()
-	for _, def := range s.loader.All() {
-		missedAt, ok := s.missedCronFire(def, now)
+	// Across every workspace, and the workspace travels with each definition.
+	// loader.All() returns the default workspace's agents only, so a
+	// multi-tenant deployment silently skipped every other tenant's catch-up.
+	for _, workspaceID := range s.loaderWorkspaces() {
+		for _, def := range s.loader.AllInWorkspace(workspaceID) {
+			s.backfillOne(keyFor(workspaceID, def.ID), def, now)
+		}
+	}
+}
+
+// loaderWorkspaces lists every workspace with agents, falling back to the
+// scheduler's own when the loader predates workspace awareness.
+func (s *Scheduler) loaderWorkspaces() []string {
+	if workspaces := s.loader.AllWorkspaces(); len(workspaces) > 0 {
+		return workspaces
+	}
+	return []string{s.defaultWorkspace()}
+}
+
+func (s *Scheduler) backfillOne(key scheduleKey, def *agent.Definition, now time.Time) {
+	{
+		missedAt, ok := s.missedCronFire(key, def, now)
 		if !ok {
-			continue
+			return
 		}
 		s.log.Warn("running missed cron from startup catch-up",
-			zap.String("agent", def.ID),
+			zap.String("schedule", key.String()),
 			zap.Time("missed_at", missedAt))
 		// E4b (Cohort E — Schedule failure handling): missed-run backfill used
 		// to run silently — only a Warn log entry. Now we emit a discoverable
@@ -667,7 +773,10 @@ func (s *Scheduler) runMissedOnStartup() {
 		// replayed at startup" instead of the operator having to spelunk the
 		// server logs.
 		s.emitMissedRunBackfilled(def, missedAt, now)
-		go s.fireAt(def.ID, "cron_missed_startup", missedAt)
+		// The occurrence key is the MISSED instant, so a second instance
+		// performing the same startup catch-up collides on the claim instead
+		// of replaying the same missed run alongside us.
+		go s.fireAt(key, "cron_missed_startup", missedAt.UTC().Truncate(time.Second))
 	}
 }
 
@@ -759,7 +868,7 @@ func (s *Scheduler) emitMissedRunBackfilled(def *agent.Definition, missedAt, now
 	})
 }
 
-func (s *Scheduler) missedCronFire(def *agent.Definition, now time.Time) (time.Time, bool) {
+func (s *Scheduler) missedCronFire(key scheduleKey, def *agent.Definition, now time.Time) (time.Time, bool) {
 	if def == nil || !def.Enabled || scheduledKind(def) != agent.TriggerCron || def.Schedule == nil {
 		return time.Time{}, false
 	}
@@ -790,7 +899,11 @@ func (s *Scheduler) missedCronFire(def *agent.Definition, now time.Time) (time.T
 	if err := s.loadStateLocked(); err != nil {
 		s.log.Warn("scheduler state load failed; missed cron check will use empty state", zap.Error(err))
 	}
-	lastCompleted := s.state.LastCompleted[def.ID]
+	// Read under the SAME composite key the write uses. Reading by agent ID
+	// while writing by (workspace, agent) is the version of this bug that
+	// survives a refactor: every tenant would look like it had never run, and
+	// every restart would replay everyone's catch-up.
+	lastCompleted := s.state.LastCompleted[key.String()]
 	s.stateMu.Unlock()
 
 	from := now.Add(-window)
@@ -812,7 +925,7 @@ func (s *Scheduler) missedCronFire(def *agent.Definition, now time.Time) (time.T
 	return latest, true
 }
 
-func (s *Scheduler) markScheduleCompleted(agentID string, completedAt time.Time) {
+func (s *Scheduler) markScheduleCompleted(key scheduleKey, completedAt time.Time) {
 	completedAt = completedAt.UTC()
 	if completedAt.IsZero() {
 		completedAt = time.Now().UTC()
@@ -825,12 +938,16 @@ func (s *Scheduler) markScheduleCompleted(agentID string, completedAt time.Time)
 	if s.state.LastCompleted == nil {
 		s.state.LastCompleted = make(map[string]time.Time)
 	}
-	if prev := s.state.LastCompleted[agentID]; prev.After(completedAt) {
+	// Keyed by workspace AND agent: two tenants' "daily-report" sharing one
+	// last-completed timestamp made each look like it had just run when the
+	// other did, which is precisely what the startup catch-up reads.
+	stateKey := key.String()
+	if prev := s.state.LastCompleted[stateKey]; prev.After(completedAt) {
 		return
 	}
-	s.state.LastCompleted[agentID] = completedAt
+	s.state.LastCompleted[stateKey] = completedAt
 	if err := s.saveStateLocked(); err != nil {
-		s.log.Warn("scheduler state save failed", zap.String("agent", agentID), zap.Error(err))
+		s.log.Warn("scheduler state save failed", zap.String("schedule", stateKey), zap.Error(err))
 	}
 }
 
@@ -1310,7 +1427,8 @@ func (s *Scheduler) Entries() []ScheduleEntry {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var entries []ScheduleEntry
-	for agentID, entryID := range s.entries {
+	for key, entryID := range s.entries {
+		agentID := key.agentID
 		e := s.cron.Entry(entryID)
 		se := ScheduleEntry{
 			AgentID: agentID,
@@ -1327,7 +1445,7 @@ func (s *Scheduler) Entries() []ScheduleEntry {
 		// Surface missed-run catch-up settings (Story 12) so the Schedule
 		// GUI can explain restart behaviour per agent.
 		if s.loader != nil {
-			if def := s.loader.Get(agentID); def != nil && def.Schedule != nil && def.Schedule.RunMissedOnStartup {
+			if def := s.loader.GetInWorkspace(key.workspaceID, agentID); def != nil && def.Schedule != nil && def.Schedule.RunMissedOnStartup {
 				se.CatchUp = true
 				se.CatchUpWindow = strings.TrimSpace(def.Schedule.MissedStartupWindow)
 				if se.CatchUpWindow == "" {
@@ -1337,9 +1455,9 @@ func (s *Scheduler) Entries() []ScheduleEntry {
 		}
 		entries = append(entries, se)
 	}
-	for agentID := range s.oneshot {
+	for key := range s.oneshot {
 		entries = append(entries, ScheduleEntry{
-			AgentID: agentID,
+			AgentID: key.agentID,
 			Type:    "oneshot",
 		})
 	}
