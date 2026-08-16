@@ -16,7 +16,7 @@ isolation state; this document explains it.
 | M3 — Data isolation | MU-012–019 | MU-012 ✓ MU-013 ✓ MU-014 ✓ MU-018 ✓ MU-019 ✓; MU-015 partial; MU-016 partial; MU-017 partial |
 | — event spine + stores | (cross-cutting) | Events, action log, learning, Studio traces, workboard, conversation history ✓ |
 | — isolation floor | (cross-cutting) | 0 blockers: every declared store is scoped and names a real isolation test |
-| M4 — Execution plane | MU-020–025 | MU-020 ✓; MU-021 ✓ (6/7; scalable workers → M6); MU-022 ✓; MU-023 ✓; MU-024 ✓; MU-025 not started |
+| M4 — Execution plane | MU-020–025 | MU-020 ✓; MU-021 ✓ (6/7; scalable workers → M6); MU-022 ✓; MU-023 ✓; MU-024 ✓; MU-025 ✓ (4/5; org sharing deferred with a guard, workspace-status half awaits MU-032) |
 | M5 — Team Preview | MU-026–032 | Not started |
 | M6 — Scale | MU-033–037 | Not started |
 
@@ -1488,6 +1488,62 @@ the contention test asserted only that everyone eventually completed, not the
 order; fixing that surfaced a real race in the test itself, where three
 goroutines competing to enqueue made arrival order nondeterministic.
 
+### Revalidation is not admission (MU-025)
+
+Criteria 1 and 2 were already met, and checking that rather than assuming it
+was the first useful thing this story produced: the sweep lists agents, tails
+events and writes proposals entirely per workspace, with an explicit
+fail-closed fallback — a single-tenant tailer returns nothing for a named
+workspace rather than serving the personal workspace's runs into that tenant's
+queue.
+
+**What was missing is that nothing was rechecked before committing.** A sweep
+runs every six hours and takes as long as the evidence is wide. It reads an
+agent definition, tails thousands of events, builds proposals, and only then
+writes. An operator who turns learning off in that window is enforcing a policy
+the job never looks at again.
+
+Two checks now run immediately before anything is written, and the second one
+has a subtlety that cost me a test:
+
+- **Workspace status** is a hook rather than a column, because workspaces have
+  no lifecycle on this branch. Inventing one to check against would be
+  box-ticking; taking a function an operator or MU-032 supplies is the accurate
+  answer. An *unreachable* status source is an error, not a pass — a skipped
+  sweep is recoverable, a write into a suspended tenant is not. And one
+  uncommittable workspace skips that workspace, never the sweep: a bare
+  `return err` in a loop over tenants lets one suspended customer stop learning
+  for everybody.
+- **Agent policy is re-READ, not re-checked.** The loop's `def` is a pointer
+  captured before the tail; testing `def.Learning.Enabled` again proves nothing
+  that was not already true. Two mutations survived my first pass here and both
+  pointed at the same flaw in the *test*: I was mutating the world from inside
+  the workspace-status hook, which fires before the agent list is even read. So
+  the loop simply never saw the agent, and what I had proved was "the loop
+  skips absent agents" — not "the commit re-reads them". Moving the mutation
+  into the tailer put it in the window that actually matters.
+
+**Cross-workspace learning is not merely disabled by default; it is
+inexpressible.** Every read and write goes through `Stores.For(workspaceID)`.
+There is no aggregate cache and no shared vector index for learning to leak
+through, because there is no API taking two workspaces —
+`TestNoCrossWorkspaceSharingSurfaceExists` fails the build on an exported
+function with two workspace parameters.
+
+**Criterion 3 is deferred, not satisfied, and that is a decision rather than an
+omission.** "Organization-wide sharing requires an explicit policy, source
+attribution, redaction, and opt-in destination" describes governance for a
+feature that does not exist and has not been specified. Building it now would
+be four abstractions guarding nothing, rewritten the moment somebody designed
+the actual feature. The guard above is what makes the deferral enforceable:
+anyone adding a sharing surface has to delete a failing test, and the test
+tells them what the criterion requires before they do.
+
+Criterion 4's lineage rules were already implemented and are now written down
+in `docs/LEARNING_LINEAGE.md` — including the limit that lineage is tracked by
+session ID, so a hand-authored proposal with no session has no link to
+invalidate through.
+
 ## Guards worth keeping
 
 - **`TestRequestScopeIsNeverReadFromADetachedGoroutine`** (AST-based) fails the
@@ -1551,9 +1607,11 @@ Highest-value first, with the reason each matters:
      extraction sites (`internal/updates`, `internal/knowledge/ingest.go`),
      have not been audited against the criterion.
 
-5. **MU-025 cannot close yet, and the reason is not effort.** Three of its
-   criteria presuppose infrastructure this branch has not built, and inventing
-   it to tick the box would be worse than leaving it open:
+5. **MU-025 is closed at 4 of 5 criteria.** Criterion 5's workspace-status
+   half is a hook awaiting MU-032's workspace lifecycle, and criterion 3 is
+   deferred by an explicit decision recorded in `docs/LEARNING_LINEAGE.md` and
+   enforced by a failing-build guard. The original analysis, kept because the
+   reasoning still holds:
 
    - *"Background jobs revalidate workspace status and policy before
      committing"* — **workspaces have no status.** `memberships` has

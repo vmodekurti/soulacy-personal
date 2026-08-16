@@ -52,6 +52,10 @@ type Sweeper struct {
 	interval time.Duration
 	limit    int
 	maxRuns  int
+
+	// workspaceStatus, when set, is consulted immediately before a workspace's
+	// proposals are written (MU-025 criterion 5). See revalidate.go.
+	workspaceStatus WorkspaceStatusFunc
 }
 
 type SweeperConfig struct {
@@ -196,6 +200,16 @@ func (s *Sweeper) sweepWorkspace(ctx context.Context, workspaceID string) (Sweep
 	if store == nil {
 		return result, nil
 	}
+	// MU-025 criterion 5. Checked here rather than at Start: a sweep runs
+	// every six hours and takes as long as the evidence is wide, so a status
+	// read at startup is a policy nobody is looking at by the time anything
+	// commits. One workspace being uncommittable skips that workspace, not
+	// the sweep — a bare return would let one suspended tenant stop learning
+	// for every other.
+	if err := s.revalidateWorkspace(ctx, workspaceID); err != nil {
+		s.logSkip(workspaceID, err)
+		return result, nil
+	}
 	for _, def := range s.agentsIn(workspaceID) {
 		if err := ctx.Err(); err != nil {
 			return result, err
@@ -218,7 +232,16 @@ func (s *Sweeper) sweepWorkspace(ctx context.Context, workspaceID string) (Sweep
 				continue
 			}
 			result.RunsReviewed++
-			created, err := s.reflectRun(store, def, run)
+			// Re-read the agent from its own workspace immediately before
+			// writing. The loop's def was captured before the tail, and a
+			// definition that has since had learning turned off must not
+			// still produce a rule somebody can accept.
+			current, err := s.revalidateAgent(workspaceID, def)
+			if err != nil {
+				s.logSkip(workspaceID, err)
+				break
+			}
+			created, err := s.reflectRun(store, current, run)
 			if err != nil {
 				s.log.Warn("learning reflection proposal failed",
 					zap.String("agent", def.ID),
