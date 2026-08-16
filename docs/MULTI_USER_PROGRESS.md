@@ -16,7 +16,7 @@ isolation state; this document explains it.
 | M3 — Data isolation | MU-012–019 | MU-012 ✓ MU-013 ✓ MU-014 ✓ MU-018 ✓ MU-019 ✓; MU-015 partial; MU-016 partial; MU-017 partial |
 | — event spine + stores | (cross-cutting) | Events, action log, learning, Studio traces, workboard, conversation history ✓ |
 | — isolation floor | (cross-cutting) | 0 blockers: every declared store is scoped and names a real isolation test |
-| M4 — Execution plane | MU-020–025 | MU-020 ✓ (record, API, idempotency, execution, recovery sweep); MU-021 partial (filesystem + mount confinement done); MU-022–025 not started |
+| M4 — Execution plane | MU-020–025 | MU-020 ✓; MU-021 ✓ (6 of 7 criteria; independently scalable workers deferred to M6); MU-022–025 not started |
 | M5 — Team Preview | MU-026–032 | Not started |
 | M6 — Scale | MU-033–037 | Not started |
 
@@ -1151,6 +1151,127 @@ flag — and, so the flag is not a way to delete any store from the inventory
 check by adding one field, `TestUndiscoverableRepositoriesAreTrulyUndiscoverable`
 fails if a store the scan *can* see is marked with it.
 
+### Two ways to be wrong about a run whose worker died (MU-021 criterion 6)
+
+The restart sweep counted unfinished runs and left them. Making it act meant
+choosing between two failures that point in opposite directions:
+
+- **Re-queue everything.** One crash becomes two payments, two emails, two
+  deletions. The run had already called out to the world, and "retry" repeats
+  the call.
+- **Re-queue nothing.** A run that had not yet done anything is retry-safe by
+  construction. Failing it loses work for no safety gain, and an operator who
+  restarts learns to expect losses.
+
+Neither is decidable from the status. `running` says a worker *claimed* the
+run, not that the run *acted*. So the engine now reports the first
+outside-visible call a run makes — at the single tool-dispatch choke point,
+**before** the call rather than after, because a tool that starts a transfer
+and then times out has still made it — and the record remembers the timestamp
+and the tool.
+
+The sweep then has a fact instead of a guess. No marker → re-queued and
+re-enqueued. Marker → failed, with the tool named in the reason and the
+payload, principal and policy snapshot all intact, because **this is approval,
+not prohibition**: an operator who confirms the effect did not land resubmits
+it. Attempts exhausted → stops being handed to workers. Paused → left alone,
+because that is somebody's decision, not wreckage.
+
+Three details that are easy to get backwards:
+
+- The marker is written through `context.WithoutCancel`. A run killed by its
+  own deadline mid-call is precisely the case it exists for, and writing it
+  through the dying context would lose the fact that makes the run unsafe.
+- `requeue`'s `WHERE` re-checks `side_effect_at IS NULL`. The sweep reads, then
+  writes; a worker less dead than the sweep assumed can act in between, and its
+  marker has to win. `TestARunThatActsWhileTheSweepIsDecidingIsStillNotRequeued`
+  is the guard.
+- `attempt` counts **claims**, not re-queues. Incrementing in both places would
+  burn two per crash and silently halve the bound.
+
+`running → queued` is deliberately NOT in the state-machine table. Adding it
+would make demotion reachable from anywhere, including a live worker's own
+code path, and "a run went backwards" would stop being a contradiction the
+machine can catch. The sweep owns that SQL, alone.
+
+### A default is only worth what happens when you override it (MU-021 criterion 1)
+
+`runtime.sandbox.mode` already defaulted to `docker`. The override was a
+warning line — so one config key would run every tenant's `shell_exec` as the
+gateway user, on one shared filesystem, with the gateway's ambient
+credentials. That is not weaker isolation; it is its exact negation, reachable
+without touching code.
+
+It is now refused in Team and Scale, and **refused rather than silently
+upgraded to sandboxing**. An operator who wrote `unsandboxed` and got
+isolation anyway would debug the wrong thing for as long as it took them to
+find this file; one who gets "privileged tools disabled, here is why, here is
+the fix" reads the log line once. Fail closed *and* fail loudly. Personal mode
+keeps the hatch — with one tenant there is nobody to isolate from.
+
+The decision is extracted as a pure function (`privilegedIsolationFor`) so the
+policy is testable without booting a gateway, and so an unrecognised mode
+string falls through to container isolation rather than to the host.
+
+### Scratch space needs a location and a lifetime (MU-021 criteria 2 and 5)
+
+Per-workspace confinement stops one tenant reaching another's files. It says
+nothing about one *run* reaching another's, and within a workspace that still
+matters: a run writes a decrypted secret, an intermediate result, a downloaded
+artifact, and leaves it where the next run — possibly a different member's —
+finds it.
+
+A run now gets its own directory and something deletes it when the run ends.
+Neither half works alone: a per-run directory nobody cleans up is the same leak
+with more instances of it.
+
+Scratch lives *inside* the workspace tree rather than beside it, for the same
+reason the mount does — the working directory has to be inside the mount. The
+nesting is what lets a run's default working directory be both private to the
+run and reachable from the tools that write to it.
+
+Cleanup resolves symlinks before removing, and refuses a path that resolves
+outside the workspace. Without that, a run that replaces its own scratch
+directory with a symlink turns the cleanup into the escape.
+
+This is **not** a boundary between runs of one workspace — a run that names
+another run's scratch path by hand still resolves it, because they are the
+same tenant. It is a default location and a lifetime: enough that a run has to
+go out of its way to leave something behind, and that what it leaves is
+deleted.
+
+### The suite that asks the attacker's question (MU-021 criterion 7)
+
+`internal/runtime/security_isolation_test.go` is the dedicated isolation
+suite, run by `make security` and by `go test ./...`. It is deliberately **not**
+behind a build tag: a security suite nobody runs by default is a security suite
+that is broken and nobody knows.
+
+Every property in it already has a unit test beside the code that enforces it,
+and those fail faster. The suite exists because the two fail *differently*. A
+unit test fails when an implementation changes; these fail when a
+**composition** changes — a new builtin that resolves paths its own way, a
+runner that stops honouring the mount bound, a limit that stops being applied.
+None of those need to touch the code the unit tests cover.
+
+Each test is named for the escape it attempts, so a failure reads as "this
+attack now works": absolute path, traversal in three spellings, the
+no-principal fallback, a symlink planted inside the attacker's own workspace,
+writing into a neighbour, widening the container mount, a privileged working
+directory, and inheriting the gateway's credentials. The noisy-neighbour half
+covers relative-path collision, concurrent writers under `-race`, and inheriting
+a finished run's scratch.
+
+Criterion 3's seven resource dimensions are asserted **together** in one test,
+because a limit that silently stops being applied looks exactly like one that
+is — and a partial regression is the common kind, which would otherwise hide
+behind the six that still work.
+
+It lives in `package runtime` rather than its own package because driving
+privileged builtins from outside would mean exporting a policy-bypassing entry
+point from the shipped API. A dedicated package is not worth a permanent hole
+in the surface it exists to protect.
+
 ## Guards worth keeping
 
 - **`TestRequestScopeIsNeverReadFromADetachedGoroutine`** (AST-based) fails the
@@ -1159,6 +1280,19 @@ fails if a store the scan *can* see is marked with it.
   use-after-free that surfaces as a nil dereference deep in fasthttp, far from
   the cause. **This guard has already caught two real defects** that no test of
   the feature itself would have found.
+- **`make security`** runs the isolation-escape and noisy-neighbour suite
+  alone, under the race detector. The same tests run in ordinary CI; the target
+  is for when you are changing something that touches a tenant boundary and
+  want the attacker's tests to fail first.
+- **`TestDispatchStillReportsSideEffects`** (AST-based) fails the build if tool
+  dispatch stops reporting side effects. Deleting those two lines compiles,
+  runs every tool exactly as before, and silently makes every lost run look
+  retry-safe — the whole failure is an absence, so there is no output to
+  assert on.
+- **`TestUndiscoverableRepositoriesAreTrulyUndiscoverable`** keeps the
+  ownership catalog's `Undiscoverable` flag honest: marking a store the AST
+  scan *can* see is itself a failure, so the flag cannot become a way to delete
+  any store from the inventory check by adding one field.
 - **The ownership catalog discovery scan** now also finds loaders and
   package-level persistence keyed by a `root`/`dir` parameter. That closed a
   blind spot where `internal/studio/library.go` and `rulesstore.go` held
@@ -1168,14 +1302,24 @@ fails if a store the scan *can* see is marked with it.
 
 Highest-value first, with the reason each matters:
 
-1. **MU-015 part 2** — envelope encryption with a versioned per-workspace data
+1. **MU-021's one open criterion.** Six of seven are closed. What is left is
+   *"Scale mode supports independently scalable workers"* — the worker pool is
+   in-process, so scaling it means scaling the gateway. That is not a gap in
+   isolation but a deployment topology, and it belongs with M6's Scale stories
+   (MU-033–037) where the queue and the worker fleet are separated. Building a
+   half version here would put a distributed worker protocol in the wrong
+   milestone. Criterion 2's *"explicit read-only inputs"* is also partial: the
+   mount is read-write because a run's tree is where it writes. A read-only
+   input set distinct from the writable scratch is a per-run mount manifest,
+   which needs MU-024's quota work to know what a run is entitled to.
+2. **MU-015 part 2** — envelope encryption with a versioned per-workspace data
    key under a production KMS wrapping key; per-run secret version references;
    redaction sweep across events, traces, prompts, and subprocess environments.
-2. **MU-016** — artifacts and filesystem tools: server-generated object keys
+3. **MU-016** — artifacts and filesystem tools: server-generated object keys
    including workspace and run, path containment after symlink resolution,
    archive extraction that rejects traversal, escaping links, and decompression
    bombs.
-3. **MU-016 cannot close yet either, and the remaining gap is architectural.**
+4. **MU-016 cannot close yet either, and the remaining gap is architectural.**
    Four of its six criteria are met — server-generated object keys carrying the
    workspace, authenticated streaming, path containment after `EvalSymlinks`
    (`internal/runtime/filesystem_policy.go`, which fails closed with no roots),
@@ -1191,7 +1335,7 @@ Highest-value first, with the reason each matters:
      extraction sites (`internal/updates`, `internal/knowledge/ingest.go`),
      have not been audited against the criterion.
 
-4. **MU-025 cannot close yet, and the reason is not effort.** Three of its
+5. **MU-025 cannot close yet, and the reason is not effort.** Three of its
    criteria presuppose infrastructure this branch has not built, and inventing
    it to tick the box would be worse than leaving it open:
 

@@ -326,12 +326,13 @@ func (e *Engine) runManagedPackageInstaller(ctx context.Context, sourceURL, kind
 }
 
 // defaultPrivilegedWorkDir returns the scratch directory a privileged
-// subprocess starts in, namespaced to the workspace the run is acting in.
+// subprocess starts in: the run's own directory when there is a run, otherwise
+// the workspace tree (MU-021 criteria 2 and 5, see runscratch.go).
 //
 // MU-021: this used to return one process-global directory, which is also the
 // only host tree the container runner mounts. Two tenants sharing it share a
 // writable filesystem: a file shell_exec leaves behind in workspace A is
 // readable — and overwritable — by the next command in workspace B.
 func (e *Engine) defaultPrivilegedWorkDir(ctx context.Context) string {
-	return e.workspaceScratchDir(WorkspaceFromContext(ctx))
+	return e.runScratchDir(ctx)
 }

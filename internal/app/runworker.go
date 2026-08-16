@@ -125,28 +125,31 @@ func replyText(reply message.Message) string {
 
 // ── Side-effect marking (MU-021 criterion 6) ────────────────────────────────
 
-type runContextKey struct{}
-
-// withRunID puts the durable run's identity on the context so the engine's
-// side-effect recorder can find it.
+// withRunID puts the durable run's identity on the context.
 //
-// Carried on the context rather than passed as an argument because the
-// reporting point is deep inside tool dispatch, several layers below anything
-// that knows a run exists — and everything in between (chat, schedules,
-// channels) legitimately has no run at all.
+// The run ID goes on through runtime.WithRunID rather than a key of this
+// package's own, because the engine needs the same fact for the run's scratch
+// directory (runtime/runscratch.go). Two keys carrying one identity is how a
+// run ends up marked for side effects but writing to the shared tree, or the
+// reverse. The workspace comes back off the principal, which is already there.
 func withRunID(ctx context.Context, workspaceID, runID string) context.Context {
 	if strings.TrimSpace(runID) == "" {
 		return ctx
 	}
-	return context.WithValue(ctx, runContextKey{}, [2]string{workspaceID, runID})
+	if strings.TrimSpace(workspaceID) != "" && runtime.WorkspaceFromContext(ctx) != workspaceID {
+		p, _ := runtime.PrincipalFromContext(ctx)
+		p.WorkspaceID = workspaceID
+		ctx = runtime.WithPrincipal(ctx, p)
+	}
+	return runtime.WithRunID(ctx, runID)
 }
 
 func runFromContext(ctx context.Context) (workspaceID, runID string, ok bool) {
-	pair, ok := ctx.Value(runContextKey{}).([2]string)
-	if !ok {
+	runID = runtime.RunIDFromContext(ctx)
+	if runID == "" {
 		return "", "", false
 	}
-	return pair[0], pair[1], true
+	return runtime.WorkspaceFromContext(ctx), runID, true
 }
 
 // runSideEffectRecorder implements runtime.SideEffectRecorder against the run

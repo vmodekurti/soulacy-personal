@@ -1302,7 +1302,18 @@ func (a *App) executeDurableRun(ctx context.Context, engine *runtime.Engine, loa
 	// timed out. Writing it through the cancelled context would leave the
 	// record stuck in "running" forever, which is the one state a reader
 	// cannot distinguish from "still working".
-	finishRun(context.WithoutCancel(ctx), runStore, run, replyText(reply), err, log)
+	outcomeCtx := context.WithoutCancel(ctx)
+	finishRun(outcomeCtx, runStore, run, replyText(reply), err, log)
+
+	// MU-021 criteria 2 and 5: the run's scratch directory goes away when the
+	// run does, whatever the outcome. A failed or timed-out run is exactly as
+	// likely to have written a decrypted secret to disk as a successful one —
+	// more likely, if it died holding one — so cleanup cannot be conditional
+	// on success, and it cannot run through the cancelled context either.
+	if scratchErr := engine.RemoveRunScratch(outcomeCtx, run.WorkspaceID, run.ID); scratchErr != nil {
+		log.Warn("run scratch space could not be removed",
+			zap.String("run_id", run.ID), zap.String("workspace_id", run.WorkspaceID), zap.Error(scratchErr))
+	}
 }
 
 // chanReg.Send(). Concurrency is bounded by runtime.max_concurrent_sessions

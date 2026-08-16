@@ -4,7 +4,7 @@ VERSION        ?= $(shell git describe --tags --always --dirty 2>/dev/null || ec
 LDFLAGS        := -ldflags "-X github.com/soulacy/soulacy/internal/config.Version=$(VERSION)"
 PLAYWRIGHT_RUNNER ?= $(shell if [ -e .cache ] && [ ! -d .cache ]; then echo tmp/playwright-runner; else echo .cache/playwright-runner; fi)
 
-.PHONY: all build build-gateway build-cli gui up install which test regression uat uat-public uat-full uat-credential docs-build docs-screenshots release-smoke production-parity channel-golden-smoke browser-mcp-smoke lint dev run-dev sdk-install tidy \
+.PHONY: all build build-gateway build-cli gui up install which test security regression uat uat-public uat-full uat-credential docs-build docs-screenshots release-smoke production-parity channel-golden-smoke browser-mcp-smoke lint dev run-dev sdk-install tidy \
         docker-up docker-down docker-up-lite docker-build docker-push \
         release release-linux release-linux-amd64 release-linux-arm64 \
         release-darwin release-darwin-arm64 release-darwin-amd64 release-package release-create release-create-github \
@@ -180,6 +180,13 @@ run-dev: all
 ## Run tests
 test:
 	go test ./... -v -timeout 30s
+
+## Dedicated isolation suite (MU-021 criterion 7). These tests also run as
+## part of `make test`; this target is for running them alone, under the race
+## detector, when changing anything that touches tenant boundaries.
+security:
+	go test ./internal/runtime/ -run 'TestIsolationEscape|TestNoisyNeighbour' -race -count=1 -v
+	go test ./internal/ownership/ ./internal/runs/ -count=1
 
 ## Focused production smoke regression: core Go paths, GUI tests, GUI build.
 regression:
