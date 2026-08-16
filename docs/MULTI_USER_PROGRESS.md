@@ -17,7 +17,7 @@ isolation state; this document explains it.
 | — event spine + stores | (cross-cutting) | Events, action log, learning, Studio traces, workboard, conversation history ✓ |
 | — isolation floor | (cross-cutting) | 0 blockers: every declared store is scoped and names a real isolation test |
 | M4 — Execution plane | MU-020–025 | MU-020 ✓; MU-021 ✓ (6/7; scalable workers → M6); MU-022 ✓; MU-023 ✓; MU-024 ✓; MU-025 ✓ (4/5; org sharing deferred with a guard, workspace-status half awaits MU-032) |
-| M5 — Team Preview | MU-026–032 | MU-026 ✓; MU-027 partial (criteria 3, 5, 6 closed; p95 targets need a load harness; `sy run follow` outstanding); MU-028–032 not started |
+| M5 — Team Preview | MU-026–032 | MU-026 ✓; MU-027 partial (criteria 3, 4, 5, 6 closed; p95 targets need a load harness and a documented load profile); MU-028–032 not started |
 | M6 — Scale | MU-033–037 | Not started |
 
 ## Isolation progress
@@ -1764,6 +1764,43 @@ name, so `agent_runs` stays the only name ever `CREATE`d — the catalog's
 discovery scan treats every `CREATE TABLE` as a durable store to classify, and
 a scratch table would show up as one. That is the same trap the
 `workflow_checkpoints` migration hit in M4.
+
+### The reconnection policy is the feature (MU-027 criterion 4)
+
+There is no `sy run` command yet — MU-020 built the durable run API and nothing
+drives it from a terminal. Rather than start with the cobra surface, the piece
+worth building first is the part that is hard to get right and easy to get
+wrong silently: what a follower does when the connection drops.
+
+`internal/runfollow` is a plain value with no I/O, because a policy entangled
+with a WebSocket can only be tested by running one.
+
+Four decisions, each of which fails quietly if made the other way:
+
+- **Backoff resets on a successful CONNECTION, not per attempt.** Resetting per
+  attempt makes the schedule constant, so a server that accepts a connection
+  and drops it immediately gets retried at the floor forever — which is the
+  thundering herd the backoff exists to prevent.
+- **Jitter goes downward only.** Adding above the ceiling would let the delay
+  exceed a bound the operator set, and a ceiling that is sometimes exceeded is
+  not a ceiling. Without jitter at all, every follower disconnected by one
+  gateway restart retries at the same instant, and synchronised retries are
+  indistinguishable from an attack.
+- **The cursor only moves forward, ordered NUMERICALLY.** A reconnect replays
+  from the last position the server was told about, so stale frames arrive by
+  design and rewinding on one means asking for them all again. And string
+  comparison puts `ws:10` before `ws:9` — a follower using it would rewind nine
+  events on every reconnect after the tenth.
+- **A gap drops to the live edge and says so.** Three tempting alternatives are
+  each worse: carrying on silently makes a stream that skipped
+  indistinguishable from one that was quiet; starting from the beginning
+  reprints a long run's whole history at the moment the user is watching for its
+  last line; giving up abandons the events they are actually waiting for.
+
+A foreign cursor is refused rather than adopted, for a reason specific to
+MU-026's server side: the gateway refuses a cursor from another workspace, so a
+follower that adopted one would be stranded at the live edge on every
+subsequent reconnect.
 
 ## Guards worth keeping
 
