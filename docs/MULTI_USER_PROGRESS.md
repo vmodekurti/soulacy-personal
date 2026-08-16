@@ -17,7 +17,7 @@ isolation state; this document explains it.
 | — event spine + stores | (cross-cutting) | Events, action log, learning, Studio traces, workboard, conversation history ✓ |
 | — isolation floor | (cross-cutting) | 0 blockers: every declared store is scoped and names a real isolation test |
 | M4 — Execution plane | MU-020–025 | MU-020 ✓; MU-021 ✓ (6/7; scalable workers → M6); MU-022 ✓; MU-023 ✓; MU-024 ✓; MU-025 ✓ (4/5; org sharing deferred with a guard, workspace-status half awaits MU-032) |
-| M5 — Team Preview | MU-026–032 | MU-026 ✓; MU-027 partial (criteria 3, 4, 5, 6 closed; p95 targets need a load harness and a documented load profile); MU-028–032 not started |
+| M5 — Team Preview | MU-026–032 | MU-026 ✓; MU-027 partial (criteria 3, 4, 5, 6 closed; p95 targets need a load harness and a documented load profile); MU-028 partial (versioning primitives; handler wiring outstanding); MU-028–032 not started |
 | M6 — Scale | MU-033–037 | Not started |
 
 ## Isolation progress
@@ -1801,6 +1801,47 @@ A foreign cursor is refused rather than adopted, for a reason specific to
 MU-026's server side: the gateway refuses a cursor from another workspace, so a
 follower that adopted one would be stranded at the live edge on every
 subsequent reconnect.
+
+### The write that disappears without an error (MU-028)
+
+The failure optimistic concurrency prevents is undramatic, which is exactly why
+it needs a mechanism rather than care. Two members open the same agent. One
+saves. The other saves thirty seconds later from a form rendered before that,
+and the first member's change is gone — no error, no conflict, nothing in the
+UI that looks wrong. The only evidence is that work vanished, usually noticed
+days later by whoever did it.
+
+**The token is content-derived, not a counter.** A counter is the obvious
+design and it needs coordination: two gateway replicas both incrementing
+"version 4" produce two different "version 5"s for different content, and a
+client that read one happily overwrites the other. That is the same
+coordination problem MU-023 solved with claims, and it has the same answer —
+derive rather than allocate. A hash of the stored bytes needs no agreement at
+all. It also makes a no-op save detectable: saving an unedited form produces
+the same token, so it is not a conflict for anyone to resolve.
+
+**The decision that makes the mechanism worth having** is what happens when a
+client sends no version at all. Allowing it through makes concurrency control
+opt-in — and the client that forgets is precisely the one that overwrites
+silently, every time, which is the bug. So it is refused where it matters, with
+a *distinct* error from "stale": the remedies differ, and "reload and
+reconcile" is useless advice to a client that is not participating in
+versioning at all. A single-tenant install has nobody to conflict with and
+keeps working unchanged (invariant 7).
+
+**Matching is exact.** A truncated, extended or case-shifted token that
+"nearly matches" is precisely the stale write being caught — though the
+quoting and `W/` prefixes clients and proxies add are normalised away, because
+those name the same content.
+
+**The 409 carries the current version and the other actor.** A bare 409 forces
+a refetch and races: between the conflict and the refetch the resource can
+change again. And "somebody else changed this" without saying *who* is
+unactionable in a team, where the remedy is usually a conversation the person
+cannot have.
+
+Wiring this into the agent and Studio handlers is the remaining work; the
+primitives and their tests are the part where getting it wrong is silent.
 
 ## Guards worth keeping
 
