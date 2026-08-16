@@ -48,11 +48,46 @@ func TestEveryStoreArchiveAndVaultRepositoryIsClassified(t *testing.T) {
 	}
 	classified := make([]string, 0, len(Repositories))
 	for _, repository := range Repositories {
+		if repository.Undiscoverable {
+			continue
+		}
 		classified = append(classified, repository.Source)
 	}
 	sort.Strings(classified)
 	if strings.Join(discovered, "\n") != strings.Join(classified, "\n") {
 		t.Fatalf("durable repository inventory mismatch\n\ndiscovered:\n%s\n\nclassified:\n%s\n\nClassify new Store/Archive/Vault persistence in internal/ownership/catalog.go and add its isolation test.", strings.Join(discovered, "\n"), strings.Join(classified, "\n"))
+	}
+}
+
+// TestUndiscoverableRepositoriesAreTrulyUndiscoverable keeps the Undiscoverable
+// flag honest. Without it the flag would be a way to delete any store from the
+// inventory check by adding one field; with it, marking a store the scan CAN
+// see is itself a failure.
+func TestUndiscoverableRepositoriesAreTrulyUndiscoverable(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", ".."))
+	discovered, err := discoverRepositoryDeclarations(filepath.Join(repoRoot, "internal"), repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	visible := map[string]bool{}
+	for _, source := range discovered {
+		visible[source] = true
+	}
+	found := 0
+	for _, repository := range Repositories {
+		if !repository.Undiscoverable {
+			continue
+		}
+		found++
+		if visible[repository.Source] {
+			t.Errorf("repository %q is marked Undiscoverable but the inventory scan finds it; remove the flag", repository.Source)
+		}
+		if _, err := os.Stat(filepath.Join(repoRoot, repository.Source)); err != nil {
+			t.Errorf("repository %q is declared but its source does not exist: %v", repository.Source, err)
+		}
+	}
+	if found == 0 {
+		t.Skip("no undiscoverable repositories declared")
 	}
 }
 

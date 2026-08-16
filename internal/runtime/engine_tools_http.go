@@ -265,7 +265,7 @@ func (e *Engine) buildHTTPTools() []BuiltinTool {
 					return "", err
 				}
 
-				destPath, err := e.resolveFilesystemPath(argString(args, "dest_path"), true)
+				destPath, err := e.resolveFilesystemPath(ctx, argString(args, "dest_path"), true)
 				if err != nil {
 					return "", fmt.Errorf("download_file: %w", err)
 				}

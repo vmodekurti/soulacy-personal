@@ -58,6 +58,17 @@ type Repository struct {
 	ScopeKey      string
 	Isolation     Isolation
 	IsolationTest string
+
+	// Undiscoverable marks a durable store the AST inventory scan structurally
+	// cannot see — one that persists tenant data without declaring a SQL table
+	// or a Store/Archive/Vault type. The host filesystem tree is the motivating
+	// case: agents address it by raw path string, so there is no type to find.
+	//
+	// This is a narrow admission, not an escape hatch. Every other rule in
+	// ValidateCatalog still applies, and TestUndiscoverableRepositoriesAreTruly
+	// Undiscoverable asserts each entry is in fact invisible to the scan — so a
+	// store the scan CAN see cannot be quietly moved here to silence it.
+	Undiscoverable bool
 }
 
 var Resources = []Resource{
@@ -93,6 +104,13 @@ var Resources = []Resource{
 	{Name: "queue-dlq", Class: WorkspaceOwned, ScopeKey: "workspace_id", Retention: "DLQ retention policy", Export: "diagnostic export", Deletion: "acknowledge/purge", Backup: "workspace database or durable queue"},
 	{Name: "idempotency", Class: Ephemeral, ScopeKey: "workspace_id", Retention: "24h replay window, bounded by eviction", Export: "not applicable", Deletion: "TTL expiry, eviction, or process restart", Backup: "none; a lost record only means a retry re-executes"},
 	{Name: "schema-metadata", Class: PlatformGlobal, ScopeKey: "none", Retention: "permanent", Export: "not applicable", Deletion: "never during normal operation", Backup: "with containing database"},
+	// MU-021. The host filesystem tree agent tools read, write and execute in.
+	// It is the one durable store an agent addresses by raw string rather than
+	// through a typed repository, which is exactly why it went unclassified
+	// while every SQL store was scoped: the discovery scan looks for CREATE
+	// TABLE and Store/Archive/Vault types and finds neither here. Declared
+	// explicitly so the same rule that governs a table governs it.
+	{Name: "workspace-files", Class: WorkspaceOwned, ScopeKey: "workspace_id (directory namespace)", Retention: "until deleted by the workspace", Export: "file download and archive", Deletion: "workspace tree removal", Backup: "filesystem or volume backup"},
 }
 
 // Tables is deliberately explicit. PersonalOnly entries remain valid for
@@ -178,6 +196,7 @@ var Repositories = []Repository{
 	{Source: "internal/queue/dlq/dlq.go", Resource: "queue-dlq", Class: WorkspaceOwned, ScopeKey: "workspace_id,id", Isolation: Scoped, IsolationTest: "internal/queue/dlq/isolation_test.go"},
 	{Source: "internal/rbac/store.go", Resource: "agents", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/rbac/workspace_test.go"},
 	{Source: "internal/runtime/loader.go", Resource: "agents", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/runtime/loader_workspace_test.go"},
+	{Source: "internal/runtime/workspace_roots.go", Resource: "workspace-files", Class: WorkspaceOwned, ScopeKey: "workspace_id (directory namespace)", Isolation: Scoped, IsolationTest: "internal/runtime/workspace_roots_isolation_test.go", Undiscoverable: true},
 	{Source: "internal/runtime/checkpoint.go", Resource: "sessions", Class: UserPrivate, ScopeKey: "workspace_id,agent_id,run_id,step_id", Isolation: Scoped, IsolationTest: "internal/runtime/checkpoint_isolation_test.go"},
 	{Source: "internal/runtime/engine.go", Resource: "sessions", Class: Ephemeral, ScopeKey: "verified principal", Isolation: Scoped, IsolationTest: "internal/runtime/principal_test.go"},
 	{Source: "internal/runtime/engine_tool_queue.go", Resource: "queue-dlq", Class: Ephemeral, ScopeKey: "verified principal", Isolation: Scoped, IsolationTest: "internal/runtime/principal_test.go"},

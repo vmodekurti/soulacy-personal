@@ -395,7 +395,7 @@ func (e *Engine) deterministicGuardrail(ctx context.Context, def *agent.Definiti
 		}
 
 		if targetPath != "" {
-			if _, pathErr := e.resolveFilesystemPath(targetPath, true); pathErr == nil {
+			if _, pathErr := e.resolveFilesystemPath(ctx, targetPath, true); pathErr == nil {
 				return GuardrailActionSafe, "", nil
 			}
 		}

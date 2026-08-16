@@ -118,10 +118,10 @@ func (e *Engine) buildShellTools() []BuiltinTool {
 				if command == "" {
 					return "", fmt.Errorf("shell_exec: command is required")
 				}
-				workDir := e.defaultPrivilegedWorkDir()
+				workDir := e.defaultPrivilegedWorkDir(ctx)
 				if requested := argString(args, "working_dir"); requested != "" {
 					var err error
-					workDir, err = e.resolveFilesystemPath(requested, false)
+					workDir, err = e.resolveFilesystemPath(ctx, requested, false)
 					if err != nil {
 						return "", fmt.Errorf("shell_exec: working_dir: %w", err)
 					}
@@ -166,7 +166,7 @@ func (e *Engine) buildShellTools() []BuiltinTool {
 				"required": []string{"path"},
 			},
 			Handler: func(ctx context.Context, args map[string]any) (string, error) {
-				path, err := e.resolveFilesystemPath(argString(args, "path"), false)
+				path, err := e.resolveFilesystemPath(ctx, argString(args, "path"), false)
 				if err != nil {
 					return "", fmt.Errorf("run_script: %w", err)
 				}
@@ -191,7 +191,7 @@ func (e *Engine) buildShellTools() []BuiltinTool {
 				}
 				workDir := filepath.Dir(path)
 				if requested := argString(args, "working_dir"); requested != "" {
-					workDir, err = e.resolveFilesystemPath(requested, false)
+					workDir, err = e.resolveFilesystemPath(ctx, requested, false)
 					if err != nil {
 						return "", fmt.Errorf("run_script: working_dir: %w", err)
 					}
@@ -219,7 +219,7 @@ func (e *Engine) buildShellTools() []BuiltinTool {
 				code := argString(args, "code")
 				tctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 				defer cancel()
-				return e.runPrivilegedCommand(tctx, PrivilegedCommand{Argv: []string{"python3", "-c", code}, WorkingDir: e.defaultPrivilegedWorkDir(), Env: e.shellEnviron()}, 8000)
+				return e.runPrivilegedCommand(tctx, PrivilegedCommand{Argv: []string{"python3", "-c", code}, WorkingDir: e.defaultPrivilegedWorkDir(ctx), Env: e.shellEnviron()}, 8000)
 			},
 		},
 		{
@@ -279,7 +279,7 @@ func (e *Engine) buildShellTools() []BuiltinTool {
 				}
 				tctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 				defer cancel()
-				result, err := e.runPrivilegedCommand(tctx, PrivilegedCommand{Argv: argv, WorkingDir: e.defaultPrivilegedWorkDir(), Env: e.shellEnviron()}, 4000)
+				result, err := e.runPrivilegedCommand(tctx, PrivilegedCommand{Argv: argv, WorkingDir: e.defaultPrivilegedWorkDir(ctx), Env: e.shellEnviron()}, 4000)
 				if strings.Contains(result, "exit_code: non-zero") {
 					return "Installation failed:\n" + result, nil
 				}
@@ -325,12 +325,13 @@ func (e *Engine) runManagedPackageInstaller(ctx context.Context, sourceURL, kind
 	return result, nil
 }
 
-func (e *Engine) defaultPrivilegedWorkDir() string {
-	if strings.TrimSpace(e.privilegedWorkDir) != "" {
-		return e.privilegedWorkDir
-	}
-	if len(e.filesystemRoots) > 0 {
-		return e.filesystemRoots[0]
-	}
-	return ""
+// defaultPrivilegedWorkDir returns the scratch directory a privileged
+// subprocess starts in, namespaced to the workspace the run is acting in.
+//
+// MU-021: this used to return one process-global directory, which is also the
+// only host tree the container runner mounts. Two tenants sharing it share a
+// writable filesystem: a file shell_exec leaves behind in workspace A is
+// readable — and overwritable — by the next command in workspace B.
+func (e *Engine) defaultPrivilegedWorkDir(ctx context.Context) string {
+	return e.workspaceScratchDir(WorkspaceFromContext(ctx))
 }

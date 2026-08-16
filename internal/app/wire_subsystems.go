@@ -1136,7 +1136,11 @@ func (a *App) wireEngine(d engineDeps) *runtime.Engine {
 		} else {
 			_ = os.Chmod(sandboxWorkDir, 0o700)
 			engine.SetPrivilegedWorkDir(sandboxWorkDir)
-			engine.SetPrivilegedCommandRunner(runtime.DockerPrivilegedRunner{Workspace: sandboxWorkDir, Image: sbx.Image, Limits: limits, PIDs: sbx.PIDs})
+			// MU-021: Root is the outer bound, Workspace the personal default.
+			// The engine narrows the mount to the running workspace's own tree
+			// (see workspaceScratchDir); roots[0] is what makes that legal
+			// without letting any caller name an arbitrary host path.
+			engine.SetPrivilegedCommandRunner(runtime.DockerPrivilegedRunner{Workspace: sandboxWorkDir, Root: roots[0], Image: sbx.Image, Limits: limits, PIDs: sbx.PIDs})
 			log.Info("privileged tool isolation enabled", zap.String("mode", "docker"), zap.String("image", sbx.Image), zap.String("network", "none"), zap.String("workspace", sandboxWorkDir))
 		}
 	} else {

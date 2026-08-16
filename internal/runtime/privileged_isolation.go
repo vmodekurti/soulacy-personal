@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/soulacy/soulacy/internal/sandbox"
+	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
 // PrivilegedCommand is the only process-execution request shape available to
@@ -20,6 +21,16 @@ type PrivilegedCommand struct {
 	Argv       []string
 	WorkingDir string
 	Env        []string
+
+	// Workspace is the ONLY host tree the runner may expose to the command.
+	// MU-021: it is stamped by runPrivilegedCommand from the run's workspace,
+	// never by the individual builtins — a per-call-site field is a scoping
+	// step a future builtin can forget, and forgetting it here means mounting
+	// every tenant's scratch space into one container.
+	//
+	// A runner treats it as a NARROWING of its own configured workspace, never
+	// a replacement: a value outside that is refused.
+	Workspace string
 }
 
 type PrivilegedCommandRunner interface {
@@ -59,11 +70,21 @@ func (HostPrivilegedRunner) Run(ctx context.Context, req PrivilegedCommand) (str
 // per command. The workspace is the only host mount; gateway config, process
 // environment, credentials and the metadata network are absent.
 type DockerPrivilegedRunner struct {
+	// Workspace is the DEFAULT host tree to mount, used when a request names
+	// none. In a personal deployment it is the only tree ever mounted.
 	Workspace string
-	Image     string
-	Limits    sandbox.Limits
-	PIDs      int
-	Binary    string
+
+	// Root is the outer containment bound for per-request mounts (MU-021).
+	// A PrivilegedCommand.Workspace outside it is refused, so a request can
+	// only ever select a subtree the operator already exposed — never widen
+	// the mount to an arbitrary host path. Empty means "bound by Workspace",
+	// which is the correct single-tenant reading.
+	Root string
+
+	Image  string
+	Limits sandbox.Limits
+	PIDs   int
+	Binary string
 }
 
 func (DockerPrivilegedRunner) Mode() string { return "docker" }
@@ -93,11 +114,34 @@ func (r DockerPrivilegedRunner) Run(ctx context.Context, req PrivilegedCommand) 
 	if len(req.Argv) == 0 {
 		return "", fmt.Errorf("docker isolation: empty command")
 	}
+	// MU-021: mount the RUN'S tree, not the deployment's. req.Workspace may
+	// only narrow r.Workspace — a request naming a tree outside it is refused
+	// rather than honoured, so a caller can never widen the mount.
+	mount := r.Workspace
+	if requested := strings.TrimSpace(req.Workspace); requested != "" {
+		bound := strings.TrimSpace(r.Root)
+		if bound == "" {
+			bound = r.Workspace
+		}
+		outer, err := filepath.Abs(bound)
+		if err != nil {
+			return "", err
+		}
+		inner, err := filepath.Abs(requested)
+		if err != nil {
+			return "", err
+		}
+		rel, err := filepath.Rel(outer, inner)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return "", fmt.Errorf("docker isolation: requested workspace is outside the configured workspace")
+		}
+		mount = inner
+	}
 	image := strings.TrimSpace(r.Image)
 	if image == "" {
 		image = "python:3.12-slim"
 	}
-	root, err := filepath.Abs(r.Workspace)
+	root, err := filepath.Abs(mount)
 	if err != nil {
 		return "", err
 	}
@@ -202,9 +246,23 @@ func (e *Engine) executePrivilegedBuiltin(ctx context.Context, tool string, hand
 	return handler(ctx)
 }
 
+// runPrivilegedCommand is the single choke point every privileged builtin
+// reaches the host through. It stamps the run's workspace onto the request so
+// no builtin has to remember to, and refuses when the workspace has no scratch
+// directory rather than falling back to the shared one.
 func (e *Engine) runPrivilegedCommand(ctx context.Context, req PrivilegedCommand, outputLimit int) (string, error) {
 	if e.privilegedRunner == nil {
 		e.privilegedRunner = denyPrivilegedRunner{}
+	}
+	workspaceID := WorkspaceFromContext(ctx)
+	req.Workspace = e.workspaceScratchDir(workspaceID)
+	// Empty is the correct answer for the personal workspace and only for it:
+	// a single-tenant install may have configured no scratch root at all, and
+	// the runner's own workspace is then the right — and only — mount. For a
+	// NAMED workspace, empty means the namespaced directory could not be
+	// created, and falling through would mount the shared tree. Refuse.
+	if req.Workspace == "" && wsroot.Normalize(workspaceID) != wsroot.PersonalWorkspaceID {
+		return "", fmt.Errorf("privileged execution refused: workspace %q has no isolated scratch directory", workspaceID)
 	}
 	out, runErr := e.privilegedRunner.Run(ctx, req)
 	result := strings.TrimSpace(out)

@@ -16,7 +16,7 @@ isolation state; this document explains it.
 | M3 — Data isolation | MU-012–019 | MU-012 ✓ MU-013 ✓ MU-014 ✓ MU-018 ✓ MU-019 ✓; MU-015 partial; MU-016 partial; MU-017 partial |
 | — event spine + stores | (cross-cutting) | Events, action log, learning, Studio traces, workboard, conversation history ✓ |
 | — isolation floor | (cross-cutting) | 0 blockers: every declared store is scoped and names a real isolation test |
-| M4 — Execution plane | MU-020–025 | MU-020 ✓ (record, API, idempotency, execution, recovery sweep); MU-021–025 not started |
+| M4 — Execution plane | MU-020–025 | MU-020 ✓ (record, API, idempotency, execution, recovery sweep); MU-021 partial (filesystem + mount confinement done); MU-022–025 not started |
 | M5 — Team Preview | MU-026–032 | Not started |
 | M6 — Scale | MU-033–037 | Not started |
 
@@ -1079,6 +1079,78 @@ lives, so a mutation of the real guard fails it. The general shape is worth
 remembering: a test can be correct about the outcome and wrong about the
 mechanism, and the mutation is what tells the two apart.
 
+### The filesystem was the one store an agent could address by raw string (MU-021)
+
+Every SQL store on this branch became workspace-scoped, and the discovery scan
+in `internal/ownership/catalog.go` is what forced each one. It finds `CREATE
+TABLE` statements and `Store`/`Archive`/`Vault` types. The host filesystem is
+neither. It has no table and no repository type — an agent reaches it by
+handing `read_file` a string — so it was never in the inventory, and it stayed
+process-global while everything around it was scoped.
+
+`Engine.SetFilesystemRoots` configured **one** allowlist for the whole process,
+and `defaultPrivilegedWorkDir` returned **one** scratch directory, which is also
+the only host tree the container runner bind-mounts. Two consequences, both
+plain cross-tenant access:
+
+- `read_file` in workspace A could read a file `write_file` created in
+  workspace B by naming its absolute path. Nothing rejected it, because the
+  path was inside the configured root — the root was simply everyone's.
+- `shell_exec` in A and `shell_exec` in B ran in the same mounted directory.
+  Anything one left behind, the other could read and overwrite.
+
+**The fix is a different root, not another check.** A run resolves paths
+against roots derived from the workspace on its context, so a cross-tenant path
+fails the containment test that was already there. There is no scoping
+predicate a future builtin can forget, because there is no unscoped root left
+to pass. `resolveFilesystemPath` now takes a `context.Context`: a caller who
+cannot supply one has no business resolving a tenant path, and the compiler
+says so.
+
+**Invariant 7 survives because `wsroot.Dir` maps personal to the base itself.**
+A single-tenant install's roots are byte-identical to what it configured, its
+files do not move, and resolving a path does not even bring a namespace
+directory into existence — `TestPersonalWorkspaceRootsAreByteIdenticalTo
+Configuration` asserts all three.
+
+**And invariant 7 is exactly what opens the next hole.** Because personal
+resolves to the base root, and every named workspace lives *under* it at
+`<base>/.workspaces/<id>`, the personal workspace structurally contains every
+tenant's tree. The scheduler and channel paths reach the engine with no
+principal and fall back to personal — so left alone, containment would have
+handed those paths every tenant's files. `denyNamespaceEscape` rejects any
+resolved path whose first element below the matched root is the namespace
+directory. In a real personal deployment that directory does not exist and the
+rule never fires; in a multi-tenant one it is the difference between the
+service paths being confined and being universal.
+
+**Mounts narrow, they never widen.** `PrivilegedCommand` gained a `Workspace`
+field, but no builtin sets it — `runPrivilegedCommand` stamps it from the run's
+context, the same choke-point idiom the checkpoint writer uses, so a builtin
+added tomorrow is scoped without its author knowing the rule exists. The Docker
+runner treats the field as a *narrowing* of the operator-configured `Root`: a
+request naming a tree outside it is refused rather than honoured. A named
+workspace whose tree cannot be created gets a refusal, never the shared mount.
+
+**One design choice worth stating, because the obvious alternative is wrong.**
+The first version gave each workspace a scratch namespace *beside* its file
+tree — `<root>/data/sandbox/.workspaces/<ws>` next to `<root>/.workspaces/<ws>`.
+It isolates correctly and it is unusable: `run_script` resolves a script
+through the filesystem policy and then runs it with the script's directory as
+the working directory, so every script a tenant wrote would resolve fine and
+then fail to execute, because the working directory sat outside the mount. A
+workspace's mount is therefore its own file tree. It costs nothing in
+isolation — that tree is already disjoint from every other tenant's — and
+`TestAWorkspaceCanRunTheScriptItJustWrote` pins the property so the sibling
+layout cannot come back.
+
+**The catalog now knows about it.** `workspace-files` is a declared resource
+and `internal/runtime/workspace_roots.go` a declared repository. Because the
+AST scan structurally cannot see it, `Repository` gained an `Undiscoverable`
+flag — and, so the flag is not a way to delete any store from the inventory
+check by adding one field, `TestUndiscoverableRepositoriesAreTrulyUndiscoverable`
+fails if a store the scan *can* see is marked with it.
+
 ## Guards worth keeping
 
 - **`TestRequestScopeIsNeverReadFromADetachedGoroutine`** (AST-based) fails the
@@ -1110,11 +1182,10 @@ Highest-value first, with the reason each matters:
    and expired artifacts becoming undownloadable immediately. What is left:
 
    - *"File tools operate only within **the run's** authorized mounts"* —
-     `SetFilesystemRoots` configures one process-global set. Every tenant's
-     runs share it, so a filesystem builtin in workspace A can read a file
-     written by workspace B. Fixing it means per-run mounts, which is the same
-     change MU-021 (execute tools in workspace-isolated workers) describes.
-     Doing it here would be building half of MU-021 in the wrong place.
+     **closed** by MU-021's per-workspace roots (see the write-up above). File
+     tools resolve against the run's own tree, and the container mount is that
+     same tree. What remains under this bullet is per-*run* scratch below the
+     per-workspace root, which is tracked with the rest of MU-021.
    - *Archives* — `internal/plugininstall/archive.go` has traversal refusal and
      a decompression-bomb bound. Symlink and device entries, and the other two
      extraction sites (`internal/updates`, `internal/knowledge/ingest.go`),

@@ -43,7 +43,7 @@ func (e *Engine) buildFileTools() []BuiltinTool {
 				"required": []string{"path"},
 			},
 			Handler: func(ctx context.Context, args map[string]any) (string, error) {
-				path, err := e.resolveFilesystemPath(argString(args, "path"), false)
+				path, err := e.resolveFilesystemPath(ctx, argString(args, "path"), false)
 				if err != nil {
 					return "", fmt.Errorf("read_file: %w", err)
 				}
@@ -90,7 +90,7 @@ func (e *Engine) buildFileTools() []BuiltinTool {
 				"required": []string{"path", "content"},
 			},
 			Handler: func(ctx context.Context, args map[string]any) (string, error) {
-				path, err := e.resolveFilesystemPath(argString(args, "path"), true)
+				path, err := e.resolveFilesystemPath(ctx, argString(args, "path"), true)
 				if err != nil {
 					return "", fmt.Errorf("write_file: %w", err)
 				}
@@ -134,7 +134,7 @@ func (e *Engine) buildFileTools() []BuiltinTool {
 				"required": []string{"path"},
 			},
 			Handler: func(ctx context.Context, args map[string]any) (string, error) {
-				path, err := e.resolveFilesystemPath(argString(args, "path"), false)
+				path, err := e.resolveFilesystemPath(ctx, argString(args, "path"), false)
 				if err != nil {
 					return "", fmt.Errorf("list_dir: %w", err)
 				}
@@ -189,7 +189,7 @@ func (e *Engine) buildFileTools() []BuiltinTool {
 				"required": []string{"path"},
 			},
 			Handler: func(ctx context.Context, args map[string]any) (string, error) {
-				searchPath, err := e.resolveFilesystemPath(argString(args, "path"), false)
+				searchPath, err := e.resolveFilesystemPath(ctx, argString(args, "path"), false)
 				if err != nil {
 					return "", fmt.Errorf("find_files: %w", err)
 				}
@@ -236,7 +236,7 @@ func (e *Engine) buildFileTools() []BuiltinTool {
 						// immediate OOM. read_file, in this same file, has always capped
 						// at 1 MB; this path just never did. A content match beyond the
 						// first megabyte is not worth an unbounded allocation.
-						safePath, policyErr := e.resolveFilesystemPath(p, false)
+						safePath, policyErr := e.resolveFilesystemPath(ctx, p, false)
 						if policyErr != nil {
 							return nil
 						}

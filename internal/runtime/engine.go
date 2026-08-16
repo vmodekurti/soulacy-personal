@@ -235,7 +235,18 @@ type Engine struct {
 	allowedToolDirs []string
 	// filesystemRoots is the canonical, symlink-resolved allowlist used by all
 	// host filesystem builtins. Empty fails closed.
+	//
+	// MU-021: these are the PLATFORM roots, not the roots any given run may
+	// touch. A run resolves paths against workspaceRoots(ws), which derives a
+	// namespaced subtree from these. Reach for filesystemRoots directly only
+	// when the question is genuinely deployment-wide.
 	filesystemRoots []string
+
+	// workspaceRootsCache memoizes the derived per-workspace confinement sets
+	// built by workspaceRoots. Deriving one creates directories and resolves
+	// symlinks, which every filesystem builtin call would otherwise repeat.
+	workspaceRootsMu    sync.Mutex
+	workspaceRootsCache map[string][]string
 
 	// pyExecutor is the optional pre-forked Python worker pool. When nil,
 	// the engine falls back to the original exec-per-call subprocess path.
