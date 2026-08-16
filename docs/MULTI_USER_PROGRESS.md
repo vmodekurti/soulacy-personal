@@ -17,7 +17,7 @@ isolation state; this document explains it.
 | — event spine + stores | (cross-cutting) | Events, action log, learning, Studio traces, workboard, conversation history ✓ |
 | — isolation floor | (cross-cutting) | 0 blockers: every declared store is scoped and names a real isolation test |
 | M4 — Execution plane | MU-020–025 | MU-020 ✓; MU-021 ✓ (6/7; scalable workers → M6); MU-022 ✓; MU-023 ✓; MU-024 ✓; MU-025 ✓ (4/5; org sharing deferred with a guard, workspace-status half awaits MU-032) |
-| M5 — Team Preview | MU-026–032 | MU-026 6/7 (resume cursor + leakage closed; per-recipient payload redaction outstanding) |
+| M5 — Team Preview | MU-026–032 | MU-026 ✓; MU-027–032 not started |
 | M6 — Scale | MU-033–037 | Not started |
 
 ## Isolation progress
@@ -1625,6 +1625,41 @@ its client think it missed events.
 Retention happens **before** broadcast: buffering afterwards leaves a window
 where an event was delivered live and is not yet resumable.
 
+### One serialization is still correct (MU-026 criterion 2)
+
+I recorded this criterion as blocked on a performance tradeoff: `EventHub.Emit`
+does one `json.Marshal` shared by every client, so a single payload "cannot" be
+redacted per recipient, and fixing it meant either serializing per authorized
+recipient — on the agent execution path, which `Emit` must never block — or
+restructuring the event.
+
+That framing was wrong, and noticing why was the whole story. **Authorization
+here is a boolean gate.** A subscriber either receives an event or does not;
+nothing about the payload varies by *who* receives it, only *whether* they do.
+So one public projection, serialized once, satisfies the criterion and costs
+nothing.
+
+**And the honest version of what this buys.** No field on `message.Event` today
+is something a permitted recipient must not see — a subscriber only ever
+receives its own workspace's events, so its own workspace ID is not a
+disclosure. This is a **boundary, not a fix**. Its value is entirely in the
+future: the next field added for the authorizer's benefit — a principal, a
+credential ID, a policy snapshot — cannot reach the wire by default.
+
+Three things make the boundary hold rather than document itself:
+
+- `publicEvent` is field-for-field explicit and **does not embed**
+  `message.Event`. An embedded struct silently gains whatever is added to its
+  parent, which is exactly the failure being prevented.
+- `TestEveryEventFieldIsClassified` fails the build on an unclassified field,
+  and also on a *stale* entry naming a field that no longer exists — a stale
+  `false` is a rule silently protecting nothing.
+- `TestTheHubNeverMarshalsAnEventDirectly` reads the source, because today
+  `project(event)` produces byte-identical JSON to marshalling the event and a
+  bypass would behave identically. Asserting on output could not tell; the call
+  site is load-bearing now rather than once somebody classifies a field
+  internal and an unrelated change quietly leaks it.
+
 ## Guards worth keeping
 
 - **`TestRequestScopeIsNeverReadFromADetachedGoroutine`** (AST-based) fails the
@@ -1633,6 +1668,9 @@ where an event was delivered live and is not yet resumable.
   use-after-free that surfaces as a nil dereference deep in fasthttp, far from
   the cause. **This guard has already caught two real defects** that no test of
   the feature itself would have found.
+- **`TestEveryEventFieldIsClassified`** (reflection-based) fails the build when
+  a field is added to `message.Event` without a decision about whether it
+  crosses the wire, and when a classification entry outlives its field.
 - **`make security`** runs the isolation-escape and noisy-neighbour suite
   alone, under the race detector. The same tests run in ordinary CI; the target
   is for when you are changing something that touches a tenant boundary and

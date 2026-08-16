@@ -161,7 +161,12 @@ func (h *EventHub) Emit(event message.Event) {
 	for _, observe := range observers {
 		observe(event)
 	}
-	data, err := json.Marshal(event)
+	// Serialized through the public projection, so a field added to
+	// message.Event for the authorizer's benefit cannot reach the wire by
+	// default (MU-026 criterion 2). One serialization is still correct:
+	// authorization is a boolean gate, so nothing about the payload varies by
+	// WHO receives it — only whether they do.
+	data, err := json.Marshal(project(event))
 	if err != nil {
 		h.log.Error("event marshal failed", zap.Error(err))
 		return
