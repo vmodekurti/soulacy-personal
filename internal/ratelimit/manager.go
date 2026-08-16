@@ -7,8 +7,6 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"go.uber.org/zap"
-
-	"github.com/soulacy/soulacy/internal/auth"
 )
 
 // ---------------------------------------------------------------------------
@@ -107,30 +105,60 @@ func New(cfg Config, log *zap.Logger) (*Manager, error) {
 
 // RecordTokens adds n tokens to the 24h bucket for userID.
 // userID should be the JWT subject; pass "anon" for unauthenticated requests.
+// RecordTokens adds n tokens to a credential's 24h bucket in the personal
+// workspace. Retained for single-tenant callers; prefer
+// RecordTokensInWorkspace.
 func (m *Manager) RecordTokens(userID string, n int) {
+	m.RecordTokensInWorkspace("", userID, n)
+}
+
+// RecordTokensInWorkspace adds n tokens to one workspace's bucket for a
+// credential.
+//
+// The key is built by the SAME helper the middleware and the status endpoint
+// read through. Three places computing a key by hand is how a limiter ends up
+// checking a bucket nothing fills — which is what these buckets were doing
+// even before this change: nothing in the gateway calls the recorders at all,
+// so both token quotas are currently inert. Fixing that is a separate concern
+// from making the key correct, but the key has to be correct first.
+func (m *Manager) RecordTokensInWorkspace(workspaceID, credentialID string, n int) {
 	if m.cfg.PerUserTokensDay == 0 || n <= 0 {
 		return
 	}
+	key := bucketUserKey(workspaceID, credentialID)
 	m.tokenMu.Lock()
-	b, ok := m.tokenBuckets[userID]
+	b, ok := m.tokenBuckets[key]
 	if !ok {
 		b = &tokenBucket{windowStart: time.Now()}
-		m.tokenBuckets[userID] = b
+		m.tokenBuckets[key] = b
 	}
 	m.tokenMu.Unlock()
 	b.add(int64(n))
 }
 
-// RecordAgentTokens adds n tokens to the 24h bucket for agentID.
+// RecordAgentTokens adds n tokens to the 24h bucket for agentID in the
+// personal workspace. Retained for single-tenant callers; prefer
+// RecordAgentTokensInWorkspace.
 func (m *Manager) RecordAgentTokens(agentID string, n int) {
+	m.RecordAgentTokensInWorkspace("", agentID, n)
+}
+
+// RecordAgentTokensInWorkspace adds n tokens to one workspace's bucket for an
+// agent.
+//
+// Agent IDs are unique per workspace, not per deployment, so a bucket keyed by
+// agent alone charged two tenants' "support-bot" to one quota — and whichever
+// tenant was busier exhausted the other's.
+func (m *Manager) RecordAgentTokensInWorkspace(workspaceID, agentID string, n int) {
 	if m.cfg.PerAgentTokensDay == 0 || n <= 0 {
 		return
 	}
+	key := bucketKey(workspaceID, agentID)
 	m.agentTokenMu.Lock()
-	b, ok := m.agentTokenBuckets[agentID]
+	b, ok := m.agentTokenBuckets[key]
 	if !ok {
 		b = &tokenBucket{windowStart: time.Now()}
-		m.agentTokenBuckets[agentID] = b
+		m.agentTokenBuckets[key] = b
 	}
 	m.agentTokenMu.Unlock()
 	b.add(int64(n))
@@ -195,10 +223,7 @@ func (m *Manager) UserRPMMiddleware() fiber.Handler {
 	}
 	limit := int64(m.cfg.PerUserRPM)
 	return func(c *fiber.Ctx) error {
-		key := "user:anon"
-		if cl := auth.ClaimsFromCtx(c); cl != nil && cl.Subject != "" {
-			key = "user:" + cl.Subject
-		}
+		key := userKey(c)
 		count, err := m.counter.Increment(c.Context(), key, time.Minute)
 		if err != nil {
 			m.log.Warn("ratelimit: counter error", zap.Error(err))
@@ -242,7 +267,7 @@ func (m *Manager) AgentRPMMiddleware() fiber.Handler {
 			return c.Next()
 		}
 
-		key := "agent:" + agentID
+		key := agentKey(c, agentID)
 		count, err := m.counter.Increment(c.Context(), key, time.Minute)
 		if err != nil {
 			m.log.Warn("ratelimit: counter error", zap.Error(err))
@@ -284,7 +309,7 @@ func (m *Manager) AgentTokenQuotaMiddleware() fiber.Handler {
 		}
 
 		m.agentTokenMu.RLock()
-		b := m.agentTokenBuckets[agentID]
+		b := m.agentTokenBuckets[bucketKey(workspaceOf(c), agentID)]
 		m.agentTokenMu.RUnlock()
 
 		if b != nil && b.get() >= limit {
@@ -310,10 +335,7 @@ func (m *Manager) TokenQuotaMiddleware() fiber.Handler {
 	}
 	limit := int64(m.cfg.PerUserTokensDay)
 	return func(c *fiber.Ctx) error {
-		userID := "anon"
-		if cl := auth.ClaimsFromCtx(c); cl != nil && cl.Subject != "" {
-			userID = cl.Subject
-		}
+		userID := userKey(c)
 
 		m.tokenMu.RLock()
 		b := m.tokenBuckets[userID]
@@ -348,25 +370,26 @@ func (m *Manager) Close() error {
 // Returns the current limits config and, for the calling user, current RPM
 // count and token usage. Useful for GUI dashboards.
 func (m *Manager) HandleStatus(c *fiber.Ctx) error {
-	userID := "anon"
-	if cl := auth.ClaimsFromCtx(c); cl != nil && cl.Subject != "" {
-		userID = cl.Subject
-	}
+	// The same key the middleware enforces on. Reading a different one would
+	// report a usage figure unrelated to the limit that will actually refuse
+	// the next call — a status endpoint that lies is worse than none.
+	key := userKey(c)
+	userID := credentialOf(c)
 
 	var tokenUsed int64
 	m.tokenMu.RLock()
-	if b := m.tokenBuckets[userID]; b != nil {
+	if b := m.tokenBuckets[key]; b != nil {
 		tokenUsed = b.get()
 	}
 	m.tokenMu.RUnlock()
 
 	return c.JSON(fiber.Map{
-		"enabled":               m.cfg.Enabled,
-		"per_user_rpm":          m.cfg.PerUserRPM,
-		"per_agent_rpm":         m.cfg.PerAgentRPM,
-		"per_user_tokens_day":   m.cfg.PerUserTokensDay,
-		"per_agent_tokens_day":  m.cfg.PerAgentTokensDay,
-		"backend":               m.cfg.Backend,
+		"enabled":              m.cfg.Enabled,
+		"per_user_rpm":         m.cfg.PerUserRPM,
+		"per_agent_rpm":        m.cfg.PerAgentRPM,
+		"per_user_tokens_day":  m.cfg.PerUserTokensDay,
+		"per_agent_tokens_day": m.cfg.PerAgentTokensDay,
+		"backend":              m.cfg.Backend,
 		"user": fiber.Map{
 			"id":          userID,
 			"tokens_used": tokenUsed,

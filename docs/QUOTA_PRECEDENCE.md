@@ -78,3 +78,37 @@ tenants queue for it, and fairness that wastes capacity is not the goal.
 The unit of fairness is the **workspace**, not the principal: per-principal
 would let a workspace with fifty members take fifty shares from a workspace
 with two — the same starvation, one level down.
+
+## Rate limits are keyed by credential and workspace
+
+The agent bucket was keyed `"agent:" + agentID`, and the agent ID is read from
+the **request body**. Two consequences, and the second is worse than the first:
+
+- Agent IDs are unique per workspace, not per deployment, so two tenants with a
+  `support-bot` already shared one bucket by accident.
+- Because the ID came from the body rather than from anything verified, a
+  member of one workspace could name **another tenant's** agent and burn its
+  rate-limit budget on purpose — a cross-tenant denial of service needing no
+  credential beyond a valid session of one's own.
+
+The fix is not to validate the body value. It is to prefix every key with a
+workspace nobody can assert: the one on the verified identity. A body field
+then selects a bucket *within the caller's own tenant*, where naming your own
+agents is exactly what the limiter is for.
+
+Keys are also scoped to the **credential**, not only the subject. A person with
+a long-lived API key and the same person in a browser session are two things an
+operator may legitimately want bounded separately, and revoking one must not
+hand the other a fresh budget.
+
+`bucketUserKey` and `bucketKey` are the only two places a key is constructed.
+The recorder, the middleware and the status endpoint all read through them —
+four hand-rolled key expressions is how a limiter ends up checking a bucket
+nothing fills.
+
+## Known gap
+
+Nothing in the gateway currently calls `RecordTokens*`, so both token quotas
+are inert: the middleware checks a bucket no production code fills. That
+predates this work and is tracked separately — but the key had to be correct
+before wiring the recorder would mean anything.

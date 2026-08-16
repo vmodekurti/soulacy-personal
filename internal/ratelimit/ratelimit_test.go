@@ -15,6 +15,8 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"go.uber.org/zap"
+
+	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
 // ---------------------------------------------------------------------------
@@ -210,7 +212,7 @@ func TestRecordTokensAccumulates(t *testing.T) {
 	m.RecordTokens("alice", 300)
 
 	m.tokenMu.RLock()
-	b := m.tokenBuckets["alice"]
+	b := m.tokenBuckets[bucketUserKey("", "alice")]
 	m.tokenMu.RUnlock()
 	if b == nil {
 		t.Fatal("no bucket for alice")
@@ -244,7 +246,7 @@ func TestRecordAgentTokensAccumulates(t *testing.T) {
 	m.RecordAgentTokens("research-agent", 2000)
 
 	m.agentTokenMu.RLock()
-	b := m.agentTokenBuckets["research-agent"]
+	b := m.agentTokenBuckets[bucketKey("", "research-agent")]
 	m.agentTokenMu.RUnlock()
 	if b == nil {
 		t.Fatal("no bucket for research-agent")
@@ -381,7 +383,7 @@ func TestTokenQuotaMiddlewareBlocksWhenQuotaExceeded(t *testing.T) {
 
 	// Manually pre-fill the "anon" bucket to the limit.
 	m.tokenMu.Lock()
-	m.tokenBuckets["anon"] = &tokenBucket{
+	m.tokenBuckets["ws:"+wsroot.PersonalWorkspaceID+"|user:anon"] = &tokenBucket{
 		total:       1000,
 		windowStart: time.Now(),
 	}
@@ -401,7 +403,7 @@ func TestAgentTokenQuotaMiddlewareBlocksWhenQuotaExceeded(t *testing.T) {
 	m := newManager(t, cfg)
 
 	m.agentTokenMu.Lock()
-	m.agentTokenBuckets["heavy-agent"] = &tokenBucket{
+	m.agentTokenBuckets[bucketKey("", "heavy-agent")] = &tokenBucket{
 		total:       5000,
 		windowStart: time.Now(),
 	}
@@ -594,7 +596,7 @@ func TestAgentTokenQuotaMiddlewareBlocksByBodyAgentID(t *testing.T) {
 	m := newManager(t, cfg)
 
 	m.agentTokenMu.Lock()
-	m.agentTokenBuckets["body-agent"] = &tokenBucket{
+	m.agentTokenBuckets[bucketKey("", "body-agent")] = &tokenBucket{
 		total:       5000,
 		windowStart: time.Now(),
 	}
@@ -653,7 +655,7 @@ func TestHandleStatusReflectsTokenUsage(t *testing.T) {
 
 	// Pre-fill the anon bucket.
 	m.tokenMu.Lock()
-	m.tokenBuckets["anon"] = &tokenBucket{total: 750, windowStart: time.Now()}
+	m.tokenBuckets["ws:"+wsroot.PersonalWorkspaceID+"|user:anon"] = &tokenBucket{total: 750, windowStart: time.Now()}
 	m.tokenMu.Unlock()
 
 	app := fiber.New(fiber.Config{DisableStartupMessage: true})
@@ -680,4 +682,3 @@ func newGETRequest(t *testing.T, path string) *http.Request {
 	}
 	return req
 }
-

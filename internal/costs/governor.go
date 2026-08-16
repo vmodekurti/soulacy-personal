@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/soulacy/soulacy/internal/llm"
+	"github.com/soulacy/soulacy/internal/quota"
 	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
@@ -65,11 +66,16 @@ func (e *ConfirmationRequiredError) Error() string {
 // reservations. Its mutex makes check+reserve atomic in this process; the
 // durable reservation rows retain in-flight visibility across restarts.
 type Governor struct {
-	store            *Store
-	prices           PriceTable
-	cfg              GovernanceConfig
-	mu               sync.Mutex
-	providerSlots    map[string]chan struct{}
+	store  *Store
+	prices PriceTable
+	cfg    GovernanceConfig
+	mu     sync.Mutex
+	// providerShares admits in-flight calls per provider under max-min
+	// fairness by workspace (MU-024 criterion 4); providerReleases holds the
+	// release functions handed back, so releaseProvider returns exactly as
+	// many slots as acquireProvider took.
+	providerShares   map[string]*quota.FairShare
+	providerReleases map[string][]func()
 	providerFailures map[string]int
 	circuitUntil     map[string]time.Time
 }
@@ -97,7 +103,8 @@ func NewGovernor(store *Store, prices PriceTable, cfg GovernanceConfig) *Governo
 		cfg.CircuitCooldown = 30 * time.Second
 	}
 	return &Governor{store: store, prices: prices, cfg: cfg,
-		providerSlots:    make(map[string]chan struct{}),
+		providerShares:   make(map[string]*quota.FairShare),
+		providerReleases: make(map[string][]func()),
 		providerFailures: make(map[string]int), circuitUntil: make(map[string]time.Time)}
 }
 
@@ -150,7 +157,7 @@ func (g *Governor) Before(ctx context.Context, provider string, req *llm.Complet
 			EstimatedTokens: estimatedTokens, ThresholdUSD: g.cfg.ConfirmationThresholdUSD,
 		}
 	}
-	if err := g.acquireProvider(ctx, provider); err != nil {
+	if err := g.acquireProvider(ctx, provider, wsroot.Normalize(metadata.Workspace)); err != nil {
 		return ctx, llm.Reservation{}, err
 	}
 	admitted := false
@@ -374,7 +381,16 @@ func allowedValueNonNil(allowlist []string, value string) bool {
 	return allowlist != nil && allowedValue(allowlist, value)
 }
 
-func (g *Governor) acquireProvider(ctx context.Context, provider string) error {
+// acquireProvider admits one in-flight call to a provider.
+//
+// MU-024 criterion 4: the slot is taken through a fair-share scheduler keyed
+// by workspace, not a plain semaphore. A semaphore is first-come, and
+// first-come is not a scheduling policy so much as the absence of one: a
+// tenant with a hundred queued runs takes every slot and holds it while
+// everyone behind waits — without exceeding a single budget, because it is not
+// spending faster than allowed, only first. Budgets bound how much; they say
+// nothing about who goes next.
+func (g *Governor) acquireProvider(ctx context.Context, provider, workspaceID string) error {
 	if g.cfg.MaxConcurrentPerProvider <= 0 {
 		g.mu.Lock()
 		until := g.circuitUntil[provider]
@@ -390,32 +406,41 @@ func (g *Governor) acquireProvider(ctx context.Context, provider string) error {
 		g.mu.Unlock()
 		return fmt.Errorf("llm cost control: provider %q circuit is open until %s", provider, until.Format(time.RFC3339))
 	}
-	slot := g.providerSlots[provider]
-	if slot == nil {
-		slot = make(chan struct{}, g.cfg.MaxConcurrentPerProvider)
-		g.providerSlots[provider] = slot
+	share := g.providerShares[provider]
+	if share == nil {
+		share = quota.NewFairShare(g.cfg.MaxConcurrentPerProvider)
+		g.providerShares[provider] = share
 	}
 	g.mu.Unlock()
-	select {
-	case slot <- struct{}{}:
-		return nil
-	case <-ctx.Done():
-		return fmt.Errorf("llm cost control: waiting for provider %q capacity: %w", provider, ctx.Err())
+
+	release, err := share.Acquire(ctx, wsroot.Normalize(workspaceID))
+	if err != nil {
+		return fmt.Errorf("llm cost control: waiting for provider %q capacity: %w", provider, err)
 	}
+	g.mu.Lock()
+	g.providerReleases[provider] = append(g.providerReleases[provider], release)
+	g.mu.Unlock()
+	return nil
 }
 
 func (g *Governor) releaseProvider(provider string) {
 	if g.cfg.MaxConcurrentPerProvider <= 0 {
 		return
 	}
+	// LIFO over the pending releases for this provider. Which specific release
+	// runs does not matter — every holder of a slot released one — but the
+	// count must match exactly, or the scheduler either leaks capacity or
+	// hands out more than it has.
 	g.mu.Lock()
-	slot := g.providerSlots[provider]
+	pending := g.providerReleases[provider]
+	var release func()
+	if n := len(pending); n > 0 {
+		release = pending[n-1]
+		g.providerReleases[provider] = pending[:n-1]
+	}
 	g.mu.Unlock()
-	if slot != nil {
-		select {
-		case <-slot:
-		default:
-		}
+	if release != nil {
+		release()
 	}
 }
 
