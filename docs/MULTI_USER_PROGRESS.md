@@ -17,7 +17,7 @@ isolation state; this document explains it.
 | — event spine + stores | (cross-cutting) | Events, action log, learning, Studio traces, workboard, conversation history ✓ |
 | — isolation floor | (cross-cutting) | 0 blockers: every declared store is scoped and names a real isolation test |
 | M4 — Execution plane | MU-020–025 | MU-020 ✓; MU-021 ✓ (6/7; scalable workers → M6); MU-022 ✓; MU-023 ✓; MU-024 ✓; MU-025 ✓ (4/5; org sharing deferred with a guard, workspace-status half awaits MU-032) |
-| M5 — Team Preview | MU-026–032 | MU-026 partial (criterion 7 closed: sessionless + administrative leakage); resume cursor and per-recipient payloads outstanding |
+| M5 — Team Preview | MU-026–032 | MU-026 6/7 (resume cursor + leakage closed; per-recipient payload redaction outstanding) |
 | M6 — Scale | MU-033–037 | Not started |
 
 ## Isolation progress
@@ -1579,6 +1579,51 @@ unstamped event *with* a session, where the durable owner record — not the
 absent stamp — is the verified fact. Treating "no stamp" as "personal
 workspace" there would deny a tenant their own sessions. The scope of a
 fail-closed check matters as much as its presence.
+
+### A replay buffer is a second delivery path (MU-026 criterion 4)
+
+A dropped WebSocket is the ordinary case, not the exceptional one: a laptop
+sleeps, a phone changes network, a proxy times out an idle connection. On
+reconnect the client has a gap it cannot see, and the events it missed are
+exactly the ones it was watching for.
+
+The buffer is easy; the three things around it are where this goes wrong, and
+two of them fail in a way that *looks like success*.
+
+**Replay is not a bypass.** The obvious implementation — remember what we sent
+this client, resend it — does not apply here, because a reconnecting client is
+a NEW connection with a new principal. What it was allowed to see before is not
+the question. Buffered events are re-authorized on the way out through the same
+authorizer the live broadcast uses, so a replay feature cannot become the leak
+the live path was careful to prevent.
+
+**A cursor is workspace-bound, and the subscription is the authority.** The
+workspace is encoded in the cursor so a foreign one can be *detected*, but
+`Since` compares it to the subscription's workspace and refuses a mismatch
+rather than reading the workspace out of the cursor. Trusting the cursor would
+make a client-supplied string the authority on whose history it gets.
+
+**Falling off the window is an answer.** A bounded buffer necessarily forgets.
+Silently starting from the oldest retained event looks exactly like a successful
+resume and loses everything in between — the worst outcome available, because
+the client believes it is caught up. `ErrCursorGap` says what is still retained
+so the client refetches from the durable action log.
+
+A fourth case emerged while testing: a cursor *ahead* of anything the workspace
+ever issued. Reporting that as a gap would send a client after history it
+already has; returning nothing would read as a successful catch-up. It is
+`ErrCursorUnknown` — a third distinct answer, because collapsing it into either
+of the other two is wrong in a different direction.
+
+**Bounded per workspace, not globally.** A global ring lets one busy tenant
+evict every other tenant's replay window, turning "resume works" into "resume
+works unless somebody else is busy" — availability coupled across tenants,
+which is the thing this milestone keeps taking apart. Sequences are per
+workspace too, so one tenant's traffic cannot advance another's cursor and make
+its client think it missed events.
+
+Retention happens **before** broadcast: buffering afterwards leaves a window
+where an event was delivered live and is not yet resumable.
 
 ## Guards worth keeping
 

@@ -12,6 +12,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -72,6 +73,10 @@ type EventHub struct {
 	observersMu sync.RWMutex
 	observers   []eventObserver
 
+	// replay retains recent events per workspace so a reconnecting client can
+	// resume from a bounded cursor (MU-026 criterion 4). See eventcursor.go.
+	replay *replayBuffer
+
 	// activity is the E4c hung-session tracker. Every event that passes through
 	// Emit() is noted so /activity/running can render "session hung" callouts
 	// for runs that stopped emitting for longer than the tracker's threshold.
@@ -120,6 +125,7 @@ func NewEventHub(log *zap.Logger, actions storage.ActionLogBackend) *EventHub {
 		clients:  make(map[*wsClient]struct{}),
 		log:      log,
 		actions:  actions,
+		replay:   newReplayBuffer(defaultReplayPerWorkspace),
 		activity: newSessionActivityTracker(),
 	}
 }
@@ -160,7 +166,40 @@ func (h *EventHub) Emit(event message.Event) {
 		h.log.Error("event marshal failed", zap.Error(err))
 		return
 	}
+	// Retained BEFORE broadcast so a client that reconnects between the two
+	// can still resume across the event: buffering afterwards leaves a window
+	// where an event was delivered live and is not yet resumable.
+	if h.replay != nil {
+		h.replay.Append(event, data)
+	}
 	h.broadcastEvent(data, event)
+}
+
+// ResumeSince replays the events a subscriber missed, re-authorizing each one.
+//
+// Re-authorized rather than replayed as stored: a reconnecting client is a NEW
+// connection with a new principal, and what it was allowed to see before is not
+// the question. A buffer that replayed its contents would be a second delivery
+// path with no permission check — which is how a replay feature becomes the
+// leak the live path was careful to prevent.
+func (h *EventHub) ResumeSince(principal eventPrincipal, cursor string) ([][]byte, string, error) {
+	if h == nil || h.replay == nil {
+		return nil, "", nil
+	}
+	buffered, err := h.replay.Since(principal.WorkspaceID, cursor)
+	if err != nil {
+		return nil, "", err
+	}
+	out := make([][]byte, 0, len(buffered))
+	latest := cursor
+	for _, entry := range buffered {
+		latest = formatCursor(principal.WorkspaceID, entry.seq)
+		if h.authorize != nil && !h.authorize(principal, entry.event) {
+			continue
+		}
+		out = append(out, entry.data)
+	}
+	return out, latest, nil
 }
 
 func (h *EventHub) broadcastEvent(data []byte, event message.Event) {
@@ -202,9 +241,45 @@ func (h *EventHub) Handler(conn *fws.Conn) {
 		}
 	}()
 
+	// MU-026 criterion 4: replay what this subscriber missed, if it presented a
+	// cursor. Before the welcome frame, so a client processing frames in order
+	// sees its gap filled and then "you are live" — the other order would have
+	// it treat replayed events as new ones arriving after it caught up.
+	resumeCursor := strings.TrimSpace(conn.Query("cursor"))
+	latestCursor := resumeCursor
+	var resumeGap error
+	if resumeCursor != "" {
+		replayed, latest, err := h.ResumeSince(principal, resumeCursor)
+		if err != nil {
+			resumeGap = err
+		} else {
+			latestCursor = latest
+			for _, data := range replayed {
+				select {
+				case c.send <- data:
+				default:
+				}
+			}
+		}
+	}
+
 	// Welcome event (non-blocking).
+	//
+	// Carries the resume state: the cursor the client should present next, and
+	// whether its previous cursor fell outside the retained window. A gap is
+	// reported rather than silently partially replayed — "here are some events"
+	// is indistinguishable from "here are all of them" once delivered, and a
+	// client that believes it is caught up when it is not is the worst outcome
+	// available.
+	welcomePayload := map[string]any{
+		"message": "Soulacy event stream active",
+		"cursor":  latestCursor,
+	}
+	if resumeGap != nil {
+		welcomePayload["resume_gap"] = resumeGap.Error()
+	}
 	if welcome, err := json.Marshal(message.Event{
-		Type: "connected", Payload: "Soulacy event stream active", Timestamp: time.Now().UTC(),
+		Type: "connected", Payload: welcomePayload, Timestamp: time.Now().UTC(),
 	}); err == nil {
 		select {
 		case c.send <- welcome:
