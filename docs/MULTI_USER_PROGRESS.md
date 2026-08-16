@@ -16,7 +16,7 @@ isolation state; this document explains it.
 | M3 — Data isolation | MU-012–019 | MU-012 ✓ MU-013 ✓ MU-014 ✓ MU-018 ✓ MU-019 ✓; MU-015 partial; MU-016 partial; MU-017 partial |
 | — event spine + stores | (cross-cutting) | Events, action log, learning, Studio traces, workboard, conversation history ✓ |
 | — isolation floor | (cross-cutting) | 0 blockers: every declared store is scoped and names a real isolation test |
-| M4 — Execution plane | MU-020–025 | MU-020 ✓; MU-021 ✓ (6/7; scalable workers → M6); MU-022 ✓; MU-023 ✓; MU-024–025 not started |
+| M4 — Execution plane | MU-020–025 | MU-020 ✓; MU-021 ✓ (6/7; scalable workers → M6); MU-022 ✓; MU-023 ✓; MU-024 ✓; MU-025 not started |
 | M5 — Team Preview | MU-026–032 | Not started |
 | M6 — Scale | MU-033–037 | Not started |
 
@@ -1419,6 +1419,74 @@ missed-cron check still *read* it by agent ID. Every tenant would have looked
 like it had never run, and every restart would have replayed everyone's
 catch-up. Three existing tests caught it — which is the argument for keeping
 catch-up tests that assert suppression, not just replay.
+
+### A limiter keyed by a value the caller supplies (MU-024)
+
+Most of this story already existed. `internal/costs` reserved budget atomically
+in the same transaction that read capacity, reconciled actual usage across
+cached/reasoning/input/output tokens, and returned a typed rejection carrying
+remaining capacity and a reset time. Three of the seven criteria were met
+before this work started, and saying so is more useful than re-deriving them.
+
+What was missing came in three pieces, and the middle one is a vulnerability
+rather than a gap.
+
+**Budgets had no workspace dimension.** `TryReserve` had always carried the
+tenant predicate, so a ceiling was *enforced* per workspace — but its VALUE
+came from one flat process-wide config applied identically to every tenant. An
+operator could not give one customer a larger budget than another, could not
+express an organization ceiling above its workspaces, and could not cap a
+single expensive model. `internal/quota` resolves limits across six levels;
+`applyQuotaPolicy` tightens the flat config with them and **never loosens it**,
+because a per-workspace entry that raised the deployment ceiling would be the
+"narrower scope licenses more" inversion the precedence design exists to
+reject.
+
+**The rate limiter's agent bucket was keyed `"agent:" + agentID`, and the agent
+ID is read from the request body.** Two consequences, the second worse than the
+first. Agent IDs are unique per workspace, so two tenants' `support-bot`
+already shared a bucket by accident. And because the ID came from the body
+rather than from anything verified, a member of one workspace could name
+**another tenant's** agent and burn its rate-limit budget deliberately — a
+cross-tenant denial of service needing no credential beyond a valid session of
+one's own.
+
+The fix is not to validate the body value. It is to prefix every key with a
+workspace nobody can assert. A body field then selects a bucket *within the
+caller's own tenant*, where naming your own agents is exactly what the limiter
+is for.
+
+**Provider concurrency was a plain semaphore, and first-come is not a
+scheduling policy so much as the absence of one.** A tenant with a hundred
+queued runs took every slot and held it while everyone waited — without
+exceeding any budget, because it was not spending faster than allowed, only
+first. Budgets bound how much; they say nothing about who goes next.
+`quota.FairShare` applies max-min fairness by workspace, sharing `ceil(C/N)`
+because `floor(4/3)` leaves a slot permanently idle while three tenants queue
+for it. The unit is the workspace, not the principal: per-principal would let a
+workspace with fifty members take fifty shares from one with two.
+
+Two things found while in there, both worth recording:
+
+- **`HandleStatus` read a different key than the middleware enforced on**, so
+  the status endpoint reported a usage figure unrelated to the limit that would
+  refuse the next call. A status endpoint that lies is worse than none. Key
+  construction now lives in two functions everything reads through — four
+  hand-rolled key expressions is how a limiter ends up checking a bucket
+  nothing fills.
+- **Nothing in the gateway calls `RecordTokens*` at all**, so both token quotas
+  are inert: the middleware checks a bucket no production code fills. That
+  predates this work and is recorded in `docs/QUOTA_PRECEDENCE.md` rather than
+  fixed blind — but the key had to be correct before wiring a recorder would
+  mean anything.
+
+Two mutations survived the first pass and each taught something. "Zero treated
+as a ceiling" was invisible because with *every* level unconfigured for a
+dimension the answer is zero either way — it only shows once some level limits
+a *different* dimension. And "promotion drains one workspace" survived because
+the contention test asserted only that everyone eventually completed, not the
+order; fixing that surfaced a real race in the test itself, where three
+goroutines competing to enqueue made arrival order nondeterministic.
 
 ## Guards worth keeping
 

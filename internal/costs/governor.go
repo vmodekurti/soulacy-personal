@@ -74,6 +74,11 @@ type Governor struct {
 	// fairness by workspace (MU-024 criterion 4); providerReleases holds the
 	// release functions handed back, so releaseProvider returns exactly as
 	// many slots as acquireProvider took.
+	// quotaPolicy, when set, supplies per-subject limit VALUES resolved across
+	// six levels (MU-024 criterion 1). nil keeps the flat-config behaviour.
+	quotaMu     sync.RWMutex
+	quotaPolicy *quota.Policy
+
 	providerShares   map[string]*quota.FairShare
 	providerReleases map[string][]func()
 	providerFailures map[string]int
@@ -197,6 +202,13 @@ func (g *Governor) Before(ctx context.Context, provider string, req *llm.Complet
 			policy.UserTokenLimit = int64(g.cfg.PerUserTokensDay)
 			policy.AgentTokenLimit = int64(g.cfg.PerAgentTokensDay)
 		}
+		// Multi-level limits tighten the flat config; they never loosen it.
+		// See quotapolicy.go for why replacing would invert the precedence.
+		policy = g.applyQuotaPolicy(policy, quotaSubject{
+			OrganizationID: metadata.Organization, WorkspaceID: workspace,
+			Subject: metadata.Subject, AgentID: metadata.AgentID,
+			Provider: provider, Model: req.Model,
+		})
 		for attempt := 0; attempt < 2; attempt++ {
 			err := g.store.TryReserve(ctx, workspace, id, metadata.Subject, metadata.AgentID, provider, estimatedMicros, estimatedTokens, now.Add(g.cfg.ReservationTTL), policy)
 			if err == nil {

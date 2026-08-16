@@ -43,6 +43,7 @@ import (
 	"github.com/soulacy/soulacy/internal/metrics"
 	"github.com/soulacy/soulacy/internal/pluginmigrate"
 	"github.com/soulacy/soulacy/internal/plugins"
+	"github.com/soulacy/soulacy/internal/quota"
 	"github.com/soulacy/soulacy/internal/rbac"
 	"github.com/soulacy/soulacy/internal/reasoning"
 	"github.com/soulacy/soulacy/internal/runs"
@@ -932,7 +933,7 @@ func (a *App) wireEngineExtras(ctx context.Context, ws config.Paths, engine *run
 				MaxTokensPerMinute:      providerCfg.MaxTokensPerMinute, Region: providerCfg.Region,
 				Retention: providerCfg.Retention, PromptCaching: providerCfg.PromptCaching}
 		}
-		llmRouter.SetController(costs.NewGovernor(costsStore, prices, costs.GovernanceConfig{
+		governor := costs.NewGovernor(costsStore, prices, costs.GovernanceConfig{
 			DailyBudgetUSD:           cfg.Costs.DailyBudgetUSD,
 			MonthlyBudgetUSD:         cfg.Costs.MonthlyBudgetUSD,
 			PerUserDailyBudgetUSD:    cfg.Costs.PerUserDailyBudgetUSD,
@@ -952,7 +953,15 @@ func (a *App) wireEngineExtras(ctx context.Context, ws config.Paths, engine *run
 			CircuitFailureThreshold:  cfg.Costs.CircuitFailureThreshold,
 			CircuitCooldown:          circuitCooldown,
 			ProviderPolicies:         providerPolicies,
-		}))
+		})
+		llmRouter.SetController(governor)
+		if policy := quotaPolicyFrom(cfg.Costs.Quotas); policy != nil {
+			governor.SetQuotaPolicy(policy)
+			log.Info("multi-level quota policy active",
+				zap.Int("organizations", len(cfg.Costs.Quotas.Organizations)),
+				zap.Int("workspaces", len(cfg.Costs.Quotas.Workspaces)),
+				zap.Int("agents", len(cfg.Costs.Quotas.Agents)))
+		}
 		log.Info("central LLM cost governance ready", zap.String("path", costsPath),
 			zap.String("mode", cfg.Costs.EnforcementMode), zap.Int("pricing_entries", len(prices)))
 		if cfg.Costs.Reconciliation.Enabled {
@@ -1431,4 +1440,24 @@ func schedulerInstanceID() string {
 		host = "unknown-host"
 	}
 	return host + ":" + strconv.Itoa(os.Getpid())
+}
+
+// quotaPolicyFrom converts the configured multi-level limits into a resolved
+// policy, or nil when nothing is configured (MU-024).
+func quotaPolicyFrom(cfg config.QuotaConfig) *quota.Policy {
+	convert := func(in map[string]config.QuotaLimit) costs.LevelLimits {
+		if len(in) == 0 {
+			return nil
+		}
+		out := make(costs.LevelLimits, len(in))
+		for id, limit := range in {
+			out[id] = costs.DollarsToLimit(limit.DailyUSD, limit.MonthlyUSD, limit.DailyTokens, limit.Concurrency)
+		}
+		return out
+	}
+	return costs.BuildPolicy(
+		costs.DollarsToLimit(cfg.Deployment.DailyUSD, cfg.Deployment.MonthlyUSD, cfg.Deployment.DailyTokens, cfg.Deployment.Concurrency),
+		convert(cfg.Organizations), convert(cfg.Workspaces),
+		convert(cfg.Principals), convert(cfg.Agents), convert(cfg.Models),
+	)
 }

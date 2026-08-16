@@ -261,16 +261,19 @@ type CostConfig struct {
 	EnforcementMode string `mapstructure:"enforcement_mode"`
 	// UnknownPricing controls models without a matching pricing rule: "allow"
 	// or "block". Hard production deployments should use block.
-	UnknownPricing           string                   `mapstructure:"unknown_pricing"`
-	DefaultMaxOutputTokens   int                      `mapstructure:"default_max_output_tokens"`
-	MaxOutputTokensCeiling   int                      `mapstructure:"max_output_tokens_ceiling"`
-	ConfirmationThresholdUSD float64                  `mapstructure:"confirmation_threshold_usd"`
-	ReservationTTL           string                   `mapstructure:"reservation_ttl"`
-	MaxConcurrentPerProvider int                      `mapstructure:"max_concurrent_per_provider"`
-	CircuitFailureThreshold  int                      `mapstructure:"circuit_failure_threshold"`
-	CircuitCooldown          string                   `mapstructure:"circuit_cooldown"`
-	Reconciliation           CostReconciliationConfig `mapstructure:"reconciliation"`
-	Pricing                  map[string]CostPricing   `mapstructure:"pricing"`
+	UnknownPricing           string  `mapstructure:"unknown_pricing"`
+	DefaultMaxOutputTokens   int     `mapstructure:"default_max_output_tokens"`
+	MaxOutputTokensCeiling   int     `mapstructure:"max_output_tokens_ceiling"`
+	ConfirmationThresholdUSD float64 `mapstructure:"confirmation_threshold_usd"`
+	ReservationTTL           string  `mapstructure:"reservation_ttl"`
+	MaxConcurrentPerProvider int     `mapstructure:"max_concurrent_per_provider"`
+	// Quotas are the multi-level limits (MU-024). Empty keeps the flat keys
+	// above as the only ceilings, which is what every existing deployment has.
+	Quotas                  QuotaConfig              `mapstructure:"quotas"`
+	CircuitFailureThreshold int                      `mapstructure:"circuit_failure_threshold"`
+	CircuitCooldown         string                   `mapstructure:"circuit_cooldown"`
+	Reconciliation          CostReconciliationConfig `mapstructure:"reconciliation"`
+	Pricing                 map[string]CostPricing   `mapstructure:"pricing"`
 }
 
 // CostReconciliationConfig controls prompt-free imports from provider billing

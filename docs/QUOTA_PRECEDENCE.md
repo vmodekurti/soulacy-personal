@@ -106,6 +106,37 @@ The recorder, the middleware and the status endpoint all read through them —
 four hand-rolled key expressions is how a limiter ends up checking a bucket
 nothing fills.
 
+## Configuring it
+
+```yaml
+costs:
+  # The flat keys still work and are still enforced. Everything below
+  # TIGHTENS them; nothing here can raise a ceiling the operator set.
+  daily_budget_usd: 100
+  quotas:
+    deployment:
+      daily_usd: 100
+    organizations:
+      org_acme: { daily_usd: 40 }
+    workspaces:
+      "": { daily_usd: 5 }          # every workspace, unless overridden
+      ws_platform: { daily_usd: 25 }
+    principals:
+      usr_batch: { daily_tokens: 2000000 }
+    agents:
+      nightly-crawler: { daily_usd: 2 }
+    models:
+      "anthropic/expensive-model": { daily_usd: 10 }
+```
+
+The empty key at a level is that level's **default**, so "every workspace gets
+$5" is expressible alongside per-workspace overrides. An entity present with
+all-zero values is dropped rather than becoming a ceiling of zero — leaving a
+key in place must not forbid everything for that entity.
+
+A deployment that configures no `quotas` block builds no policy at all, so it
+pays for no lookup and behaves byte-identically to before.
+
 ## Known gap
 
 Nothing in the gateway currently calls `RecordTokens*`, so both token quotas

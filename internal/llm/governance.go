@@ -11,8 +11,13 @@ import (
 // Empty fields are allowed so internal and plugin calls remain metered even
 // before their caller has been upgraded to provide richer attribution.
 type CallMetadata struct {
-	Subject            string
-	Workspace          string
+	Subject   string
+	Workspace string
+	// Organization is the tenant above the workspace. Carried because MU-024
+	// lets a limit be set at the organization level, and an organization
+	// ceiling that could not be resolved from a call's attribution would be a
+	// setting with no effect.
+	Organization       string
 	AgentID            string
 	SessionID          string
 	RunID              string
