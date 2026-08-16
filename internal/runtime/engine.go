@@ -217,6 +217,11 @@ type Engine struct {
 	// Satisfied by *plugins.Loader via an adapter in main.go.
 	pluginProvider PluginToolProvider
 
+	// sideEffects, when non-nil, records the first outside-visible call a
+	// durable run makes, so a lost worker can tell a retry-safe run from one
+	// that has already acted. See side_effects.go.
+	sideEffects SideEffectRecorder
+
 	// broker handles pending tool-confirmation requests from the UI.
 	// Allocated once in NewEngine; the gateway calls Broker() to resolve decisions.
 	broker *ConfirmBroker

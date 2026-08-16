@@ -17,14 +17,12 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/requestctx"
 	"github.com/soulacy/soulacy/internal/runs"
-	"github.com/soulacy/soulacy/pkg/message"
 )
 
 // SetRunStore wires the durable run record. Routes 503 until it is set.
@@ -151,53 +149,12 @@ func (s *Server) enqueueRun(run runs.Run, payload json.RawMessage) bool {
 	if s.channels == nil {
 		return false
 	}
-	text := promptFromPayload(payload)
-	return s.channels.Enqueue(message.Message{
-		ID:          run.ID,
-		WorkspaceID: run.WorkspaceID,
-		SessionID:   runSessionID(run),
-		AgentID:     run.AgentID,
-		Channel:     "run",
-		UserID:      run.Subject,
-		Role:        message.RoleUser,
-		Parts:       message.Text(text),
-		Metadata:    map[string]string{"run_id": run.ID},
-		CreatedAt:   time.Now().UTC(),
-	})
-}
-
-// runSessionID keeps a run's conversation separable. A caller that supplied a
-// session joins it; one that did not gets a session of its own rather than
-// sharing a default with every other run of the same agent.
-func runSessionID(run runs.Run) string {
-	if strings.TrimSpace(run.SessionID) != "" {
-		return run.SessionID
-	}
-	return "run-" + run.ID
-}
-
-// promptFromPayload extracts the prompt a run should execute.
-//
-// `{"prompt": "..."}` is the documented shape; anything else is passed through
-// as JSON so an agent that expects structured input still receives exactly what
-// the caller sent, rather than an empty message and a silent no-op.
-func promptFromPayload(payload json.RawMessage) string {
-	if len(payload) == 0 {
-		return ""
-	}
-	var shaped struct {
-		Prompt string `json:"prompt"`
-		Text   string `json:"text"`
-	}
-	if err := json.Unmarshal(payload, &shaped); err == nil {
-		if strings.TrimSpace(shaped.Prompt) != "" {
-			return shaped.Prompt
-		}
-		if strings.TrimSpace(shaped.Text) != "" {
-			return shaped.Text
-		}
-	}
-	return string(payload)
+	// The message shape lives with the record (internal/runs/message.go)
+	// because the recovery sweep builds the same message for a run whose
+	// worker died. Two copies would drift, and a drifted run_id key produces
+	// a message that executes fine and records nothing.
+	run.Payload = payload
+	return s.channels.Enqueue(runs.InboundMessage(run))
 }
 
 // policySnapshot records the authorization state at admission.

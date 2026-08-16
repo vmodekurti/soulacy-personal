@@ -104,6 +104,19 @@ func (e *Engine) runToolDispatch(ctx context.Context, def *agent.Definition, ses
 		}
 	}
 
+	// MU-021 criterion 6. A worker that dies mid-run leaves a record in
+	// `running`, and whether that run may be retried depends on one fact: did
+	// it already do something the outside world can see? Recorded HERE, at the
+	// single dispatch point, and BEFORE the call rather than after — a tool
+	// that starts a transfer and then times out has still made the call.
+	//
+	// After the dry-run branch above on purpose: a dry run returns the
+	// simulation without executing, so it is not a side effect and must not
+	// make an otherwise-retryable run unretryable.
+	if isSideEffectingTool(call.Name) {
+		e.recordSideEffect(ctx, call.Name)
+	}
+
 	// MCP tools — namespaced as mcp__<server>__<tool>. Route to the MCP client.
 	if e.mcpClient != nil && strings.HasPrefix(call.Name, mcp.FullNamePrefix) {
 		if !mcpToolAllowed(def, call.Name) {

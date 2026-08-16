@@ -418,23 +418,64 @@ func (a *App) Run(parent context.Context) error {
 	// same handle: a run submitted through the API is executed by the pool,
 	// and its record is how the two agree on what happened.
 	var runStore *runs.Store
+	var recovered []runs.RecoveryOutcome
 	if store, rerr := runs.Open(ws.DB("runs")); rerr != nil {
 		log.Warn("durable runs unavailable", zap.Error(rerr))
 	} else {
 		runStore = store
 		stack.pushClose("runs", runStore)
-		if pending, perr := runStore.RecoverAcrossWorkspaces(ctx); perr == nil && len(pending) > 0 {
-			// Reported rather than silently resumed. Resuming a run whose
-			// worker died halfway is MU-021's job and needs isolation to be
-			// safe; a count an operator can see beats a number nobody knows to
-			// look for.
-			log.Info("durable runs left unfinished by a previous process",
-				zap.Int("pending", len(pending)))
+		// MU-021 criterion 6. The sweep no longer just counts: a run that
+		// never acted is re-queued, a run that already called out to the
+		// world is failed with the tool named so a human decides, and a run
+		// that has burnt its attempts stops being handed to workers. See
+		// internal/runs/recovery.go for why each direction is wrong alone.
+		engine.SetSideEffectRecorder(runSideEffectRecorder{store: runStore})
+		if outcomes, perr := runStore.RecoverPending(ctx); perr != nil {
+			log.Error("durable run recovery sweep failed", zap.Error(perr))
+		} else if len(outcomes) > 0 {
+			counts := map[string]int{}
+			for _, outcome := range outcomes {
+				counts[outcome.Action]++
+				if outcome.Action == runs.RecoveryFailedSideEffects {
+					// Named individually, not just counted: this is the case
+					// where somebody has to check whether the effect landed,
+					// and a bare number tells them nothing about where to look.
+					log.Warn("durable run needs review after worker loss",
+						zap.String("run_id", outcome.Run.ID),
+						zap.String("workspace_id", outcome.Run.WorkspaceID),
+						zap.String("agent_id", outcome.Run.AgentID),
+						zap.String("reason", outcome.Reason))
+				}
+			}
+			log.Info("durable runs recovered from a previous process",
+				zap.Int("requeued", counts[runs.RecoveryRequeued]),
+				zap.Int("needs_review", counts[runs.RecoveryFailedSideEffects]),
+				zap.Int("attempts_exhausted", counts[runs.RecoveryFailedExhausted]),
+				zap.Int("skipped", counts[runs.RecoverySkipped]))
+			recovered = outcomes
 		}
 	}
 
 	// ── Message Router — bounded worker pool draining the shared inbox ──────
 	a.startMessageRouter(ctx, chanReg, loader, engine, personalTenant, runStore)
+
+	// Re-queued runs need a message, not just a record. Setting the record
+	// back to `queued` without re-enqueueing would leave it queued forever —
+	// a state that reads like "waiting its turn" and means "abandoned". Done
+	// after the router starts so the messages have somewhere to land.
+	for _, outcome := range recovered {
+		if outcome.Action != runs.RecoveryRequeued {
+			continue
+		}
+		if !chanReg.Enqueue(runs.InboundMessage(outcome.Run)) {
+			// The inbox is bounded and may be full. The record stays queued
+			// and the next restart's sweep will try again, spending one more
+			// of the run's attempts rather than silently dropping it.
+			log.Warn("recovered run could not be re-queued; it remains pending",
+				zap.String("run_id", outcome.Run.ID),
+				zap.String("workspace_id", outcome.Run.WorkspaceID))
+		}
+	}
 
 	// ── Auth Engine ───────────────────────────────────────────────────────────
 	authEngine, err := a.wireAuth(stack)

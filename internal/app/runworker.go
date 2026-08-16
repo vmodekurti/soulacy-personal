@@ -23,11 +23,14 @@ import (
 	"github.com/soulacy/soulacy/pkg/message"
 )
 
-// RunChannel is the pseudo-channel a durable run travels on.
-const RunChannel = "run"
-
-// RunIDMetadataKey carries the run id on the inbound message.
-const RunIDMetadataKey = "run_id"
+// RunChannel and RunIDMetadataKey are aliases of the definitions that live
+// with the record (internal/runs/message.go). Two spellings of "run_id" — one
+// where the message is built, one where it is read — is a drift that produces
+// a message which executes fine and updates nothing.
+const (
+	RunChannel       = runs.Channel
+	RunIDMetadataKey = runs.IDMetadataKey
+)
 
 // RunIDOf returns the run id a message belongs to, if any.
 func RunIDOf(msg message.Message) string {
@@ -118,4 +121,54 @@ func replyText(reply message.Message) string {
 		sb.WriteString(part.Text)
 	}
 	return sb.String()
+}
+
+// ── Side-effect marking (MU-021 criterion 6) ────────────────────────────────
+
+type runContextKey struct{}
+
+// withRunID puts the durable run's identity on the context so the engine's
+// side-effect recorder can find it.
+//
+// Carried on the context rather than passed as an argument because the
+// reporting point is deep inside tool dispatch, several layers below anything
+// that knows a run exists — and everything in between (chat, schedules,
+// channels) legitimately has no run at all.
+func withRunID(ctx context.Context, workspaceID, runID string) context.Context {
+	if strings.TrimSpace(runID) == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, runContextKey{}, [2]string{workspaceID, runID})
+}
+
+func runFromContext(ctx context.Context) (workspaceID, runID string, ok bool) {
+	pair, ok := ctx.Value(runContextKey{}).([2]string)
+	if !ok {
+		return "", "", false
+	}
+	return pair[0], pair[1], true
+}
+
+// runSideEffectRecorder implements runtime.SideEffectRecorder against the run
+// store. It is installed once, for the whole process.
+//
+// A call with no run on its context is not an error and not a miss: chat
+// requests, scheduled invocations and channel messages all reach the same tool
+// dispatch, and none of them has a durable record whose retry safety could be
+// affected. Returning nil for them keeps the ordinary case silent.
+type runSideEffectRecorder struct{ store *runs.Store }
+
+func (r runSideEffectRecorder) RecordSideEffect(ctx context.Context, tool string) error {
+	if r.store == nil {
+		return nil
+	}
+	workspaceID, runID, ok := runFromContext(ctx)
+	if !ok {
+		return nil
+	}
+	// context.WithoutCancel: the marker must survive the run's own timeout.
+	// A run killed by its deadline mid-tool-call is exactly the case the
+	// marker exists for, and writing it through the dying context would lose
+	// the fact that makes the run unsafe to retry.
+	return r.store.MarkSideEffect(context.WithoutCancel(ctx), workspaceID, runID, tool)
 }

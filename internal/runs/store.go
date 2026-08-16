@@ -116,6 +116,16 @@ type Run struct {
 	// can find the reservation from the run and vice versa.
 	ReservationID string `json:"reservation_id,omitempty"`
 
+	// Attempt counts worker claims, MaxAttempts bounds them, and SideEffectAt
+	// records the first outside-visible call the run made (MU-021 criterion
+	// 6). SideEffectAt is the fact that decides retry safety: a run that has
+	// not yet acted can be re-queued after a worker dies, and one that has
+	// cannot be, because "retry" would mean sending the second email.
+	Attempt        int        `json:"attempt"`
+	MaxAttempts    int        `json:"max_attempts"`
+	SideEffectAt   *time.Time `json:"side_effect_at,omitempty"`
+	SideEffectTool string     `json:"side_effect_tool,omitempty"`
+
 	Status string `json:"status"`
 	// Cursor is the event-stream position a client resumes from. Returned at
 	// submission so a caller that disconnects immediately still knows where
@@ -152,7 +162,15 @@ CREATE TABLE IF NOT EXISTS agent_runs (
     created_at       DATETIME NOT NULL,
     updated_at       DATETIME NOT NULL,
     started_at       DATETIME,
-    ended_at         DATETIME
+    ended_at         DATETIME,
+    -- MU-021 criterion 6. attempt counts how many times a worker has claimed
+    -- this run; max_attempts bounds it. side_effect_at is set the first time
+    -- the run makes an outside-visible call, and is what separates a run a
+    -- lost worker may safely re-queue from one that has already acted.
+    attempt          INTEGER NOT NULL DEFAULT 0,
+    max_attempts     INTEGER NOT NULL DEFAULT 3,
+    side_effect_at   DATETIME,
+    side_effect_tool TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_runs_ws_created ON agent_runs(workspace_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_ws_status  ON agent_runs(workspace_id, status, created_at DESC);
@@ -182,11 +200,44 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("runs: schema: %w", err)
 	}
-	if err := sqlitex.RecordSchemaVersion(db, "runs", 1); err != nil {
+	if err := migrateRetryColumns(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := sqlitex.RecordSchemaVersion(db, "runs", 2); err != nil {
 		db.Close()
 		return nil, err
 	}
 	return &Store{db: db}, nil
+}
+
+// DefaultMaxAttempts bounds how many workers may claim one run. Three is not a
+// tuning choice so much as a shape: one original attempt plus two recoveries
+// covers a rolling restart and a single crash, and anything unbounded turns a
+// run that reliably kills its worker into a machine for killing workers.
+const DefaultMaxAttempts = 3
+
+// migrateRetryColumns adds the MU-021 retry-safety columns to a store created
+// before them. CREATE TABLE IF NOT EXISTS silently does nothing for an
+// existing table, so a v1 database would otherwise keep running against a
+// schema that has no idea whether a run has acted — and the recovery sweep
+// would read that absence as "safe to retry".
+//
+// Each ALTER is attempted independently and a duplicate-column error is the
+// success case, so the migration is idempotent without needing to read
+// PRAGMA table_info and reason about it.
+func migrateRetryColumns(db *sql.DB) error {
+	for _, stmt := range []string{
+		`ALTER TABLE agent_runs ADD COLUMN attempt INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE agent_runs ADD COLUMN max_attempts INTEGER NOT NULL DEFAULT 3`,
+		`ALTER TABLE agent_runs ADD COLUMN side_effect_at DATETIME`,
+		`ALTER TABLE agent_runs ADD COLUMN side_effect_tool TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, err := db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("runs: migrate: %w", err)
+		}
+	}
+	return nil
 }
 
 // Close releases the database.
@@ -212,6 +263,9 @@ func (s *Store) Submit(ctx context.Context, run Run) (stored Run, replayed bool,
 	}
 	if run.Status == "" {
 		run.Status = StatusQueued
+	}
+	if run.MaxAttempts <= 0 {
+		run.MaxAttempts = DefaultMaxAttempts
 	}
 	if _, known := transitions[run.Status]; !known {
 		return Run{}, false, fmt.Errorf("runs: unknown status %q", run.Status)
@@ -246,12 +300,13 @@ func (s *Store) Submit(ctx context.Context, run Run) (stored Run, replayed bool,
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO agent_runs (id, workspace_id, agent_id, agent_version, session_id, subject,
     principal_kind, credential_id, idempotency_key, policy_snapshot, reservation_id,
-    status, cursor, payload, result, failure_reason, created_at, updated_at, started_at, ended_at)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    status, cursor, payload, result, failure_reason, created_at, updated_at, started_at, ended_at,
+    max_attempts)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		run.ID, run.WorkspaceID, run.AgentID, run.AgentVersion, run.SessionID, run.Subject,
 		run.PrincipalKind, run.CredentialID, run.IdempotencyKey, string(run.PolicySnapshot), run.ReservationID,
 		run.Status, run.Cursor, string(run.Payload), run.Result, run.FailureReason,
-		run.CreatedAt, run.UpdatedAt, run.StartedAt, run.EndedAt,
+		run.CreatedAt, run.UpdatedAt, run.StartedAt, run.EndedAt, run.MaxAttempts,
 	); err != nil {
 		return Run{}, false, fmt.Errorf("runs: insert: %w", err)
 	}
@@ -263,7 +318,8 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 
 const selectColumns = `SELECT id, workspace_id, agent_id, agent_version, session_id, subject,
     principal_kind, credential_id, idempotency_key, policy_snapshot, reservation_id,
-    status, cursor, payload, result, failure_reason, created_at, updated_at, started_at, ended_at`
+    status, cursor, payload, result, failure_reason, created_at, updated_at, started_at, ended_at,
+    attempt, max_attempts, side_effect_at, side_effect_tool`
 
 // Get returns one run within a workspace.
 func (s *Store) Get(ctx context.Context, workspaceID, id string) (Run, error) {
@@ -333,9 +389,17 @@ func (s *Store) Transition(ctx context.Context, workspaceID, id, to string, opts
 	now := time.Now().UTC()
 	sets := []string{"status = ?", "updated_at = ?"}
 	args := []any{to, now}
-	if to == StatusRunning && current.StartedAt == nil {
-		sets = append(sets, "started_at = ?")
-		args = append(args, now)
+	if to == StatusRunning {
+		// MU-021 criterion 6: attempt counts worker CLAIMS, so it is
+		// incremented where the claim happens rather than where a recovery
+		// re-queues. A run that dies before any worker claims it has used
+		// nothing, and a run that kills three workers has used three — which
+		// is the number the bound is about.
+		sets = append(sets, "attempt = attempt + 1")
+		if current.StartedAt == nil {
+			sets = append(sets, "started_at = ?")
+			args = append(args, now)
+		}
 	}
 	if Terminal(to) {
 		sets = append(sets, "ended_at = ?")
@@ -409,11 +473,16 @@ func scanRun(row scanner) (Run, error) {
 	var run Run
 	var policy, payload string
 	var started, ended sql.NullTime
+	var sideEffect sql.NullTime
 	if err := row.Scan(&run.ID, &run.WorkspaceID, &run.AgentID, &run.AgentVersion, &run.SessionID,
 		&run.Subject, &run.PrincipalKind, &run.CredentialID, &run.IdempotencyKey, &policy,
 		&run.ReservationID, &run.Status, &run.Cursor, &payload, &run.Result, &run.FailureReason,
-		&run.CreatedAt, &run.UpdatedAt, &started, &ended); err != nil {
+		&run.CreatedAt, &run.UpdatedAt, &started, &ended,
+		&run.Attempt, &run.MaxAttempts, &sideEffect, &run.SideEffectTool); err != nil {
 		return Run{}, err
+	}
+	if sideEffect.Valid {
+		run.SideEffectAt = &sideEffect.Time
 	}
 	if policy != "" {
 		run.PolicySnapshot = json.RawMessage(policy)

@@ -1122,13 +1122,23 @@ func (a *App) wireEngine(d engineDeps) *runtime.Engine {
 	// treated as a security boundary.
 	sbx := cfg.Runtime.Sandbox
 	limits := sandbox.Limits{Enabled: true, CPUSeconds: sbx.CPUSeconds, MemoryMB: sbx.MemoryMB, OpenFiles: sbx.OpenFiles, FileSizeMB: sbx.FileSizeMB}
-	if !sbx.Enabled || strings.EqualFold(strings.TrimSpace(sbx.Mode), "unsandboxed") {
+	isolation, isolationReason := privilegedIsolationFor(sbx.Enabled, sbx.Mode, cfg.DeploymentMode())
+	if isolation == IsolationRefused {
+		// MU-021 criterion 1. SetPrivilegedCommandRunner(nil) installs the
+		// deny runner, so every privileged builtin refuses rather than
+		// silently running somewhere the operator did not intend.
+		engine.SetPrivilegedCommandRunner(nil)
+		log.Error("privileged tools disabled: unsandboxed execution is refused outside personal mode",
+			zap.String("deployment_mode", cfg.DeploymentMode()),
+			zap.String("reason", isolationReason),
+			zap.String("remediation", "set runtime.sandbox.mode=docker, or run in personal mode"))
+	} else if isolation == IsolationHost {
 		engine.SetPrivilegedCommandRunner(runtime.HostPrivilegedRunner{})
 		if roots := engine.FilesystemRoots(); len(roots) > 0 {
 			engine.SetPrivilegedWorkDir(roots[0])
 		}
-		log.Error("UNSAFE privileged-tool mode active: commands run as the gateway user without isolation",
-			zap.String("mode", "unsandboxed"))
+		log.Error("UNSAFE privileged-tool mode active",
+			zap.String("mode", "unsandboxed"), zap.String("reason", isolationReason))
 	} else if roots := engine.FilesystemRoots(); len(roots) > 0 {
 		sandboxWorkDir := filepath.Join(roots[0], "data", "sandbox")
 		if err := os.MkdirAll(sandboxWorkDir, 0o700); err != nil {
@@ -1278,6 +1288,11 @@ func (a *App) executeDurableRun(ctx context.Context, engine *runtime.Engine, loa
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	runCtx = runtime.WithPrincipal(runCtx, runPrincipal(run, msg.ID))
+	// The run's identity travels with the context so the engine can mark the
+	// first outside-visible call it makes (MU-021 criterion 6). Without this
+	// the marker is never set and the recovery sweep reads every lost run as
+	// retry-safe — the exact double-execution the criterion forbids.
+	runCtx = withRunID(runCtx, run.WorkspaceID, run.ID)
 
 	metrics.WorkerPoolActiveRuns.Inc()
 	reply, err := engine.Handle(runCtx, msg)
