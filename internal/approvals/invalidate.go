@@ -124,3 +124,18 @@ func (s *Store) SweepExpired(ctx context.Context) (int, error) {
 	affected, _ := res.RowsAffected()
 	return int(affected), nil
 }
+
+// InvalidateApproval closes one pending approval by id.
+//
+// The by-run variant covers a durable run ending. A chat confirmation has no
+// durable run behind it — which is the common case, not an exception — so
+// closing it needs its own key, or every interactive confirmation that timed
+// out would stay "pending" forever in the record.
+func (s *Store) InvalidateApproval(ctx context.Context, workspaceID, id, reason string) (int, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return 0, nil
+	}
+	return s.invalidate(ctx, `workspace_id = ? AND id = ? AND status = ?`,
+		reason, wsroot.Normalize(workspaceID), id)
+}

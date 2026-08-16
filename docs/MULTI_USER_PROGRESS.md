@@ -16,7 +16,7 @@ isolation state; this document explains it.
 | M3 — Data isolation | MU-012–019 | MU-012 ✓ MU-013 ✓ MU-014 ✓ MU-018 ✓ MU-019 ✓; MU-015 partial; MU-016 partial; MU-017 partial |
 | — event spine + stores | (cross-cutting) | Events, action log, learning, Studio traces, workboard, conversation history ✓ |
 | — isolation floor | (cross-cutting) | 0 blockers: every declared store is scoped and names a real isolation test |
-| M4 — Execution plane | MU-020–025 | MU-020 ✓; MU-021 ✓ (6 of 7 criteria; independently scalable workers deferred to M6); MU-022–025 not started |
+| M4 — Execution plane | MU-020–025 | MU-020 ✓; MU-021 ✓ (6/7; scalable workers → M6); MU-022 ✓; MU-023–025 not started |
 | M5 — Team Preview | MU-026–032 | Not started |
 | M6 — Scale | MU-033–037 | Not started |
 
@@ -1271,6 +1271,87 @@ It lives in `package runtime` rather than its own package because driving
 privileged builtins from outside would mean exporting a policy-bypassing entry
 point from the shipped API. A dedicated package is not worth a permanent hole
 in the surface it exists to protect.
+
+### An approval had no workspace, so every admin was an approver (MU-022)
+
+The broker was a map from call ID to channel. That is enough for "the browser
+tab that started the run answers a dialog", and it fails in two specific ways
+as soon as more than one person is involved.
+
+**A restart lost every pending approval and told nobody.** The record vanished
+with the process, and the approvals page simply stopped listing something a
+person had been asked to decide.
+
+**And listing and deciding were gated on an `admin` bool computed as "the role
+is owner or admin", with no tenant in it.** Passed to the broker as authority,
+that made any workspace's admin an approver for every other workspace — and a
+reader of their paused calls' *arguments*. Those arguments are the most
+sensitive payload the system holds by construction: they are the things
+something decided were dangerous enough to stop, and they routinely carry the
+exact material MU-015 encrypts at rest.
+
+The record now carries workspace, run, tool, redacted arguments, requester,
+required permission, expiry and decision actor. The broker keeps only the
+channel; where the two could disagree — has this been decided, may this actor
+decide it — the store wins, because it is the one that survives.
+
+**Eligibility is resolved from CURRENT state, at decision time.** A member
+removed from the workspace this morning must not release something that paused
+last night. The store does not resolve it: `Eligibility.Permits` is a function
+the caller supplies from the live RBAC matrix, so there is one definition of
+who may do what rather than a second, divergent copy inside an approval store.
+
+**A decider in the wrong workspace gets `ErrNotFound`, not `ErrNotEligible`.**
+Distinguishing them would turn approval IDs into an enumeration oracle over
+other tenants' paused actions (invariant 8) — for a resource that, until this
+story, had no tenant at all.
+
+**Approving is its own permission.** `ResourceApprovals` is a new RBAC resource
+rather than a facet of `ResourceChat`, whose `ActionChat` was documented as
+"send a message / confirm a tool". Those are not the same authority: releasing
+a paused call authorizes an action the requester could not take alone, and a
+viewer who may chat has not thereby been trusted to release a privileged shell
+command somebody else's agent composed. Owner, admin and operator may decide;
+developer may look; viewer gets neither.
+
+**Redaction is deny-by-default on shape, not a blocklist of key names.** A list
+of "password, token, secret" fails on the first argument called
+`authorization`, `pat`, `bearer` or `x-api-key`, and it fails *silently*. Short
+scalars are shown, because an approver has to read the command to judge it;
+long ones are summarised; credential-shaped keys are elided at any nesting
+depth. The fingerprint is taken over the FULL arguments, so redacting the
+durable record does not weaken the binding — `TestTheStoredCopyIsRedactedEven
+WhenTheCallerPassesEverything` fails if someone reorders those two lines.
+
+**The channel says a human clicked approve; it does not say what they
+approved.** Criterion 5 is `verifyApproved`, which re-checks the fingerprint of
+the call actually in hand before executing. Between the request being recorded
+and the answer arriving, the call can have changed — a retry that rebuilt the
+arguments, a model that re-emitted the call differently, or someone who
+arranged for both. It is silent when no store is configured: a personal
+deployment has no durable record to check against and the person who clicked
+approve is the person watching the run, so failing closed there would break
+every personal install to guard against a substitution only a second actor
+could perform.
+
+**Resolve records before it wakes.** A broker that woke the run first and wrote
+afterwards would let two approvers both release the action: the store's
+single-use guard would refuse the second write, but the second wake-up would
+already have happened.
+
+**One semantic change worth naming.** The old broker scoped approvals by
+*subject* — only the requester could answer their own. That is not routing; it
+is a confirmation dialog with extra steps. The boundary is now the workspace
+plus the permission, so an eligible colleague can answer, which is what MU-022
+asks for. `TestBrokerIsolatesApprovalsByWorkspaceNotByIndividual` states both
+halves.
+
+**And one place two implementations nearly diverged.** The store-less path —
+a personal deployment with no durable record — has to answer the same "may
+this actor decide" question about a map entry. The first version answered it
+inline and *omitted the workspace comparison*, reintroducing the exact bug the
+record was built to fix; a test caught it. Both paths now call
+`approvals.Authorize`.
 
 ## Guards worth keeping
 

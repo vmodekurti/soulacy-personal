@@ -992,7 +992,7 @@ func (e *Engine) maybeConfirm(ctx context.Context, def *agent.Definition, call m
 	})
 	// Resolve deletes the pending entry; a run that ends without an answer must
 	// clean up after itself, or the approval sits in the broker forever.
-	defer e.Broker().Forget(callID)
+	defer e.Broker().Forget(ctx, callID)
 
 	select {
 	case approved := <-resultCh:
@@ -1000,7 +1000,7 @@ func (e *Engine) maybeConfirm(ctx context.Context, def *agent.Definition, call m
 			e.logAudit(ctx, def, call, "", time.Now(), true, nil)
 			return fmt.Errorf("tool %q was denied by the user", call.Name)
 		}
-		return nil
+		return e.verifyApproved(ctx, callID, call)
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -1031,7 +1031,7 @@ func (e *Engine) dynamicConfirm(ctx context.Context, def *agent.Definition, call
 		Args:   call.Arguments,
 		Reason: reason,
 	})
-	defer e.Broker().Forget(callID)
+	defer e.Broker().Forget(ctx, callID)
 
 	select {
 	case approved := <-resultCh:
@@ -1039,10 +1039,38 @@ func (e *Engine) dynamicConfirm(ctx context.Context, def *agent.Definition, call
 			e.logAudit(ctx, def, call, "", time.Now(), true, nil)
 			return fmt.Errorf("tool %q was denied by the user (guardrail flag: %s)", call.Name, reason)
 		}
-		return nil
+		return e.verifyApproved(ctx, callID, call)
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// verifyApproved is MU-022 criterion 5: "approved execution verifies the exact
+// tool and argument fingerprint."
+//
+// The channel says a human clicked approve. It does not say WHAT they
+// approved. Between the request being recorded and the answer arriving, the
+// call in hand can have changed — a retry that rebuilt the arguments, a model
+// that re-emitted the call differently, or an attacker who arranged for both.
+// An approval that only names a tool authorizes every future use of it; this
+// authorizes the one that was shown to the person.
+//
+// Silent when no store is configured: a personal deployment has no durable
+// record to check against, and the person who clicked approve is the person
+// watching the run. Fail-closed here would break every personal install to
+// guard against a substitution only a second actor could perform.
+func (e *Engine) verifyApproved(ctx context.Context, callID string, call message.ToolCall) error {
+	approval, ok := e.Broker().Decision(ctx, WorkspaceFromContext(ctx), callID)
+	if !ok {
+		return nil
+	}
+	if err := approval.VerifyFingerprint(call.Name, call.Arguments); err != nil {
+		e.log.Error("approved call does not match the call being executed; refusing",
+			zap.String("call_id", callID), zap.String("tool", call.Name),
+			zap.String("approved_tool", approval.Tool), zap.Error(err))
+		return fmt.Errorf("tool %q: %w", call.Name, err)
+	}
+	return nil
 }
 
 func isSideEffectingTool(name string) bool {

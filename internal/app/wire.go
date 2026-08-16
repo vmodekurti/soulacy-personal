@@ -19,6 +19,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/agentmemory"
+	"github.com/soulacy/soulacy/internal/approvals"
 	"github.com/soulacy/soulacy/internal/auth"
 	"github.com/soulacy/soulacy/internal/channels"
 	httpchan "github.com/soulacy/soulacy/internal/channels/http"
@@ -453,6 +454,30 @@ func (a *App) Run(parent context.Context) error {
 				zap.Int("attempts_exhausted", counts[runs.RecoveryFailedExhausted]),
 				zap.Int("skipped", counts[runs.RecoverySkipped]))
 			recovered = outcomes
+		}
+	}
+
+	// ── Durable approval records (MU-022) ───────────────────────────────────
+	if store, aerr := approvals.Open(ws.DB("approvals")); aerr != nil {
+		if config.IsMultiUserMode(cfg.DeploymentMode()) {
+			// In Team/Scale the in-memory fallback is not a lesser option, it
+			// is the wrong one: without a workspace on the record, listing and
+			// deciding fall back to a tenant-free map. Refuse rather than
+			// serve every workspace's paused calls to every admin.
+			return fmt.Errorf("durable approvals are required outside personal mode: %w", aerr)
+		}
+		log.Warn("durable approvals unavailable; approvals will not survive a restart", zap.Error(aerr))
+	} else {
+		stack.pushClose("approvals", store)
+		engine.Broker().SetStore(store, log)
+		// A restart severs every channel a paused run was waiting on, so a
+		// record still saying "pending" describes a question nobody is
+		// listening for the answer to. Closing them is what stops the
+		// approvals page from offering decisions that would release nothing.
+		if n, ierr := store.InvalidateAllPending(ctx, approvals.ReasonWorkspaceRestarting); ierr != nil {
+			log.Warn("stale approvals could not be closed", zap.Error(ierr))
+		} else if n > 0 {
+			log.Info("approvals left unanswered by a previous process were closed", zap.Int("closed", n))
 		}
 	}
 

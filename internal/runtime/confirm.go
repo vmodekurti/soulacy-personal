@@ -3,8 +3,15 @@ package runtime
 import (
 	"context"
 	"sort"
+	"strings"
 	"sync"
 	"time"
+
+	"go.uber.org/zap"
+
+	"github.com/soulacy/soulacy/internal/approvals"
+	"github.com/soulacy/soulacy/internal/rbac"
+	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
 // ConfirmRequest is the payload emitted as an SSE "tool_confirm" event.
@@ -50,39 +57,83 @@ func dryRunFrom(ctx context.Context) bool {
 	return v
 }
 
+// ── The approval broker (MU-022) ────────────────────────────────────────────
+//
+// The broker is the in-process RENDEZVOUS: the engine blocks on a channel and
+// somebody, eventually, sends a bool down it. That part cannot be persisted —
+// a channel is a live goroutine's ear, and when the process dies so does the
+// thing that was listening.
+//
+// What CAN be persisted is the question. Before MU-022 the broker was the only
+// record: a map from call ID to channel plus metadata, with no workspace on it
+// at all. Two consequences followed directly.
+//
+// A restart lost every pending approval and told nobody — the approvals page
+// simply stopped listing something a person had been asked to decide.
+//
+// And listing and deciding were gated on an `admin` bool computed as "the
+// role is owner or admin", with no tenant in it. In a multi-user deployment
+// that made any workspace's admin an approver for every other workspace, with
+// read access to their paused calls' arguments. Those arguments are the most
+// sensitive payload the system holds by construction: they are the things
+// something decided were dangerous enough to stop.
+//
+// So the broker is now a facade. The durable record lives in
+// internal/approvals and is the authority for what exists, who may see it, and
+// what was decided; the map holds only the channel to wake. Where the two
+// could disagree — has this been decided, may this actor decide it — the store
+// wins, because it is the one that survives.
+
 // PendingApproval is the device-agnostic view of a tool call awaiting a human
-// decision. It is what the /approvals API and the mobile companion render so any
-// paired device — not just the one that started the run — can approve or deny.
+// decision, as the /approvals API and the mobile companion render it.
+//
+// Args are the REDACTED form. The full arguments never leave the process that
+// is blocked on the answer; see approvals.Redact for why.
 type PendingApproval struct {
-	CallID    string         `json:"call_id"`
-	Tool      string         `json:"tool"`
-	Args      map[string]any `json:"args,omitempty"`
-	Reason    string         `json:"reason,omitempty"`
-	AgentID   string         `json:"agent_id,omitempty"`
-	SessionID string         `json:"session_id,omitempty"`
-	Principal string         `json:"-"`
-	CreatedAt time.Time      `json:"created_at"`
+	ID          string         `json:"id"`
+	CallID      string         `json:"call_id"`
+	WorkspaceID string         `json:"workspace_id"`
+	Tool        string         `json:"tool"`
+	Args        map[string]any `json:"args,omitempty"`
+	Reason      string         `json:"reason,omitempty"`
+	AgentID     string         `json:"agent_id,omitempty"`
+	SessionID   string         `json:"session_id,omitempty"`
+	RunID       string         `json:"run_id,omitempty"`
+	Requester   string         `json:"requester,omitempty"`
+	CreatedAt   time.Time      `json:"created_at"`
+	ExpiresAt   time.Time      `json:"expires_at"`
 }
 
 type pendingEntry struct {
-	ch   chan bool
-	meta PendingApproval
+	ch          chan bool
+	workspaceID string
+	meta        PendingApproval
 }
 
-// ConfirmBroker maps call IDs to pending approval channels and their metadata.
-// The gateway registers a result channel when it emits the SSE event; the
-// confirm/approvals endpoints resolve it when a user approves or denies from any
-// device. onRegister, when set, is called for each newly pending approval (used
-// to fan out a web-push notification).
+// ConfirmBroker maps call IDs to the channels blocked runs are waiting on, and
+// records each paused call durably when a store is configured.
 type ConfirmBroker struct {
 	mu         sync.Mutex
 	pending    map[string]*pendingEntry
 	onRegister func(PendingApproval)
+	store      *approvals.Store
+	log        *zap.Logger
 }
 
-// newConfirmBroker allocates a ConfirmBroker.
 func newConfirmBroker() *ConfirmBroker {
 	return &ConfirmBroker{pending: make(map[string]*pendingEntry)}
+}
+
+// SetStore installs the durable approval record.
+//
+// Optional: a deployment without one keeps the old in-memory behaviour, which
+// is correct for a personal install where the only approver is the person
+// watching. It is NOT correct for Team or Scale, so wiring checks that — see
+// internal/app.
+func (b *ConfirmBroker) SetStore(store *approvals.Store, log *zap.Logger) {
+	b.mu.Lock()
+	b.store, b.log = store, log
+	b.mu.Unlock()
 }
 
 // SetOnRegister installs a callback fired whenever a new approval becomes
@@ -93,95 +144,221 @@ func (b *ConfirmBroker) SetOnRegister(fn func(PendingApproval)) {
 	b.mu.Unlock()
 }
 
-// Register stores a result channel for callID and returns it. Retained for
-// backward compatibility; prefer RegisterRequest so the approval carries
-// metadata visible to other devices.
-func (b *ConfirmBroker) Register(callID string) chan bool {
-	return b.RegisterRequest(ConfirmRequest{CallID: callID}, "", "")
+// ApprovalRequest is everything the broker needs to record and route one
+// paused call.
+type ApprovalRequest struct {
+	CallID    string
+	Tool      string
+	Args      map[string]any
+	Reason    string
+	AgentID   string
+	SessionID string
 }
 
-// RegisterRequest stores a result channel plus the request metadata and returns
-// the channel. The engine blocks on it until Resolve is called.
-func (b *ConfirmBroker) RegisterRequest(req ConfirmRequest, agentID, sessionID string) chan bool {
-	return b.RegisterRequestForPrincipal(req, agentID, sessionID, "")
-}
-
-func (b *ConfirmBroker) RegisterRequestForPrincipal(req ConfirmRequest, agentID, sessionID, principal string) chan bool {
+// Register records a paused tool call and returns the channel its run blocks
+// on.
+//
+// The workspace, the run and the requester come from ctx rather than from the
+// caller. A gateway handler that had to pass them could pass the wrong ones,
+// and the one it would most plausibly pass wrong is the workspace.
+func (b *ConfirmBroker) Register(ctx context.Context, req ApprovalRequest) chan bool {
+	workspaceID := WorkspaceFromContext(ctx)
 	ch := make(chan bool, 1)
 	meta := PendingApproval{
-		CallID:    req.CallID,
-		Tool:      req.Tool,
-		Args:      req.Args,
-		Reason:    req.Reason,
-		AgentID:   agentID,
-		SessionID: sessionID,
-		Principal: principal,
-		CreatedAt: time.Now().UTC(),
+		ID:          req.CallID,
+		CallID:      req.CallID,
+		WorkspaceID: workspaceID,
+		Tool:        req.Tool,
+		Args:        approvals.Redact(req.Args),
+		Reason:      req.Reason,
+		AgentID:     req.AgentID,
+		SessionID:   req.SessionID,
+		RunID:       RunIDFromContext(ctx),
+		Requester:   SubjectFromContext(ctx),
+		CreatedAt:   time.Now().UTC(),
+		ExpiresAt:   time.Now().UTC().Add(approvals.DefaultTTL),
 	}
+
 	b.mu.Lock()
-	b.pending[req.CallID] = &pendingEntry{ch: ch, meta: meta}
+	store, log := b.store, b.log
+	b.pending[req.CallID] = &pendingEntry{ch: ch, workspaceID: workspaceID, meta: meta}
 	fn := b.onRegister
 	b.mu.Unlock()
+
+	if store != nil {
+		stored, err := store.Request(ctx, approvals.Approval{
+			ID: req.CallID, WorkspaceID: workspaceID, RunID: meta.RunID,
+			SessionID: req.SessionID, AgentID: req.AgentID,
+			Tool: req.Tool, Reason: req.Reason,
+			RequesterSubject: meta.Requester,
+			RequiredResource: rbac.ResourceApprovals, RequiredAction: rbac.ActionWrite,
+			ExpiresAt: meta.ExpiresAt,
+		}, req.Args)
+		if err != nil && log != nil {
+			// The run still blocks and the in-memory route still works, so a
+			// storage failure degrades durability rather than stopping the
+			// action. What it must not do is degrade SILENTLY.
+			log.Error("approval could not be recorded durably; it will not survive a restart",
+				zap.String("call_id", req.CallID), zap.String("tool", req.Tool), zap.Error(err))
+		} else if err == nil {
+			b.mu.Lock()
+			if entry, ok := b.pending[req.CallID]; ok {
+				// Take the stored redaction and expiry rather than keeping the
+				// broker's own, so every reader — API, event stream, this map —
+				// is looking at one answer.
+				entry.meta.Args, entry.meta.ExpiresAt = stored.Args, stored.ExpiresAt
+				meta = entry.meta
+			}
+			b.mu.Unlock()
+		}
+	}
+
 	if fn != nil {
 		go fn(meta)
 	}
 	return ch
 }
 
-// Forget drops a pending approval that nobody will ever answer.
+// Forget drops a pending approval nobody will ever answer, and closes its
+// durable record.
 //
-// Resolve was the ONLY deletion, so every run that timed out or was cancelled
-// with a confirmation outstanding left a permanent map entry — holding the full
-// tool-call arguments, and still listed by GET /api/v1/approvals as though a
-// human could still act on it. On a long-lived gateway that is unbounded growth
-// plus a steadily more misleading approvals page.
-//
-// Returns whether an entry was actually removed.
-func (b *ConfirmBroker) Forget(callID string) bool {
+// Called on every exit path of a blocked run. Resolve used to be the only
+// deletion, so a run that timed out or was cancelled with a confirmation
+// outstanding left a permanent map entry holding the full tool-call arguments,
+// still listed as though a human could act on it. With a store the same
+// omission would be worse: the record would outlive the process AND the run.
+func (b *ConfirmBroker) Forget(ctx context.Context, callID string) bool {
 	b.mu.Lock()
-	_, ok := b.pending[callID]
+	entry, ok := b.pending[callID]
 	delete(b.pending, callID)
+	store, log := b.store, b.log
 	b.mu.Unlock()
+	if ok && store != nil {
+		if _, err := store.InvalidateRun(context.WithoutCancel(ctx), entry.workspaceID, entry.meta.RunID, approvals.ReasonRunEnded); err != nil && log != nil {
+			log.Warn("approval record could not be closed", zap.String("call_id", callID), zap.Error(err))
+		}
+		// A call with no run id is not covered by InvalidateRun, so close it
+		// by id. Chat confirmations have no durable run behind them and are
+		// the common case, not an exception.
+		if strings.TrimSpace(entry.meta.RunID) == "" {
+			_, _ = store.InvalidateApproval(context.WithoutCancel(ctx), entry.workspaceID, callID, approvals.ReasonRunEnded)
+		}
+	}
 	return ok
 }
 
-// List returns all currently pending approvals, newest first.
-func (b *ConfirmBroker) List() []PendingApproval {
-	return b.ListForPrincipal("", true)
-}
+// List returns the approvals a workspace is currently waiting on.
+//
+// Reads the store when there is one, because the store is what survives a
+// restart and what a second gateway process can see. The map is the fallback
+// for a personal deployment with no store, and it is filtered by workspace
+// there too — the boundary does not depend on which backing is in use.
+func (b *ConfirmBroker) List(ctx context.Context, workspaceID string) []PendingApproval {
+	workspaceID = wsroot.Normalize(workspaceID)
+	b.mu.Lock()
+	store := b.store
+	b.mu.Unlock()
 
-func (b *ConfirmBroker) ListForPrincipal(principal string, admin bool) []PendingApproval {
+	if store != nil {
+		stored, err := store.ListPending(ctx, workspaceID)
+		if err == nil {
+			out := make([]PendingApproval, 0, len(stored))
+			for _, approval := range stored {
+				out = append(out, fromRecord(approval))
+			}
+			return out
+		}
+		if b.log != nil {
+			b.log.Warn("approval list fell back to in-process state", zap.Error(err))
+		}
+	}
+
 	b.mu.Lock()
 	out := make([]PendingApproval, 0, len(b.pending))
-	for _, e := range b.pending {
-		if !admin && (principal == "" || e.meta.Principal != principal) {
+	for _, entry := range b.pending {
+		if entry.workspaceID != workspaceID {
 			continue
 		}
-		out = append(out, e.meta)
+		out = append(out, entry.meta)
 	}
 	b.mu.Unlock()
 	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	return out
 }
 
-// Resolve delivers the user's decision (approved) for callID.
-// Returns true if callID was found and the decision was delivered.
-func (b *ConfirmBroker) Resolve(callID string, approved bool) bool {
-	return b.ResolveForPrincipal(callID, approved, "", true)
-}
-
-func (b *ConfirmBroker) ResolveForPrincipal(callID string, approved bool, principal string, admin bool) bool {
+// Resolve delivers a human's decision.
+//
+// Order matters and is the point: the durable decision is recorded FIRST, and
+// only a recorded decision wakes the run. A broker that woke the run first and
+// wrote afterwards would let two approvers both release the action — the
+// store's single-use guard would refuse the second write, but the second
+// wake-up would already have happened.
+func (b *ConfirmBroker) Resolve(ctx context.Context, workspaceID, callID string, approved bool, by approvals.Eligibility, reason string) error {
+	workspaceID = wsroot.Normalize(workspaceID)
 	b.mu.Lock()
-	e, ok := b.pending[callID]
-	if ok && !admin && (principal == "" || e.meta.Principal != principal) {
-		ok = false
+	store := b.store
+	entry, present := b.pending[callID]
+	b.mu.Unlock()
+
+	if store != nil {
+		if _, err := store.Decide(ctx, workspaceID, callID, approved, by, reason); err != nil {
+			return err
+		}
+	} else {
+		// No store: the map is the only record, so eligibility is checked
+		// against it — through approvals.Authorize, the SAME function the
+		// store uses. A second implementation here is how this path ends up
+		// missing the workspace comparison, which is precisely the bug the
+		// durable record was introduced to fix.
+		if !present || entry.workspaceID != workspaceID {
+			return approvals.ErrNotFound
+		}
+		if err := approvals.Authorize(approvals.Approval{
+			WorkspaceID:      entry.workspaceID,
+			RequiredResource: rbac.ResourceApprovals,
+			RequiredAction:   rbac.ActionWrite,
+		}, by); err != nil {
+			return err
+		}
 	}
-	if ok {
+
+	b.mu.Lock()
+	entry, present = b.pending[callID]
+	if present {
 		delete(b.pending, callID)
 	}
 	b.mu.Unlock()
-	if ok {
-		e.ch <- approved
+	if present {
+		entry.ch <- approved
 	}
-	return ok
+	// A decision with nothing listening is recorded, not an error: the run may
+	// have moved to another process, or ended between the decision and here.
+	// The record is what the approver was promised.
+	return nil
+}
+
+// Decision returns the durable outcome of one approval, for the fingerprint
+// check the engine makes before executing an approved call.
+func (b *ConfirmBroker) Decision(ctx context.Context, workspaceID, callID string) (approvals.Approval, bool) {
+	b.mu.Lock()
+	store := b.store
+	b.mu.Unlock()
+	if store == nil {
+		return approvals.Approval{}, false
+	}
+	approval, err := store.Get(ctx, workspaceID, callID)
+	if err != nil {
+		return approvals.Approval{}, false
+	}
+	return approval, true
+}
+
+func fromRecord(a approvals.Approval) PendingApproval {
+	return PendingApproval{
+		ID: a.ID, CallID: a.ID, WorkspaceID: a.WorkspaceID,
+		Tool: a.Tool, Args: a.Args, Reason: a.Reason,
+		AgentID: a.AgentID, SessionID: a.SessionID, RunID: a.RunID,
+		Requester: a.RequesterSubject,
+		CreatedAt: a.CreatedAt, ExpiresAt: a.ExpiresAt,
+	}
 }

@@ -1045,9 +1045,13 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 
 	// Inject confirm sender so synchronous GUI chats can still receive tool confirmation
 	// requests over the global WebSocket event stream.
-	approvalPrincipal, _, _ := authenticatedPrincipal(c)
 	ctx = runtime.WithConfirmSender(ctx, func(req runtime.ConfirmRequest) <-chan bool {
-		resultCh := s.engine.Broker().RegisterRequestForPrincipal(req, msg.AgentID, msg.SessionID, approvalPrincipal)
+		// The workspace and requester come off the context the engine is
+		// running under, not off this handler's closure — see Broker.Register.
+		resultCh := s.engine.Broker().Register(ctx, runtime.ApprovalRequest{
+			CallID: req.CallID, Tool: req.Tool, Args: req.Args, Reason: req.Reason,
+			AgentID: msg.AgentID, SessionID: msg.SessionID,
+		})
 		s.hub.Emit(message.Event{
 			Type:      "tool_confirm",
 			AgentID:   msg.AgentID,
@@ -1258,9 +1262,11 @@ func (s *Server) handleChatStream(c *fiber.Ctx) error {
 	// Confirm sender emits a tool_confirm event and registers a result channel
 	// in the broker. The engine blocks on the result channel until the user
 	// approves or denies via POST /api/v1/chat/confirm.
-	approvalPrincipal, _, _ := authenticatedPrincipal(c)
 	streamCtx = runtime.WithConfirmSender(streamCtx, func(req runtime.ConfirmRequest) <-chan bool {
-		resultCh := s.engine.Broker().RegisterRequestForPrincipal(req, msg.AgentID, msg.SessionID, approvalPrincipal)
+		resultCh := s.engine.Broker().Register(streamCtx, runtime.ApprovalRequest{
+			CallID: req.CallID, Tool: req.Tool, Args: req.Args, Reason: req.Reason,
+			AgentID: msg.AgentID, SessionID: msg.SessionID,
+		})
 		data, _ := json.Marshal(req)
 		select {
 		case events <- sseEvent{Event: "tool_confirm", Data: string(data)}:
@@ -1374,17 +1380,15 @@ func (s *Server) handleToolConfirm(c *fiber.Ctx) error {
 	// Capture the pending request's context (tool/agent/session) before it is
 	// resolved and removed, so we can record who approved what.
 	var tool, agentID, sessionID string
-	principal, _, admin := authenticatedPrincipal(c)
-	for _, p := range s.engine.Broker().ListForPrincipal(principal, admin) {
+	by := s.approver(c)
+	for _, p := range s.engine.Broker().List(c.UserContext(), by.WorkspaceID) {
 		if p.CallID == req.CallID {
 			tool, agentID, sessionID = p.Tool, p.AgentID, p.SessionID
 			break
 		}
 	}
-	if !s.engine.Broker().ResolveForPrincipal(req.CallID, req.Approved, principal, admin) {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "call_id not found — it may have already timed out or been resolved",
-		})
+	if err := s.engine.Broker().Resolve(c.UserContext(), by.WorkspaceID, req.CallID, req.Approved, by, ""); err != nil {
+		return s.approvalError(c, err)
 	}
 	s.recordApproval(agentID, sessionID, tool, req.CallID, req.Approved, approverIdentity(c))
 	return c.JSON(fiber.Map{"ok": true})

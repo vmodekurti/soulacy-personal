@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/gofiber/fiber/v2"
@@ -38,7 +39,10 @@ func (s *Server) handleMobileStatus(c *fiber.Ctx) error {
 func (s *Server) mobileCompanionReadiness(scope agentScope) mobileCompanionReadiness {
 	var pendingApprovals int
 	if s != nil && s.engine != nil && s.engine.Broker() != nil {
-		pendingApprovals = len(s.engine.Broker().List())
+		// Scoped to the caller's workspace: a readiness count is a small leak
+		// but it is still one — "another tenant has 3 things paused" is
+		// information about them.
+		pendingApprovals = len(s.engine.Broker().List(context.Background(), scope.workspaceID))
 	}
 
 	pushSubscriptions := 0

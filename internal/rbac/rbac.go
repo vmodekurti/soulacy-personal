@@ -73,6 +73,19 @@ const (
 	ResourceRBAC        = "rbac"
 	ResourceSecrets     = "secrets"
 	ResourceCredentials = "credentials"
+
+	// ResourceApprovals is the authority to see and decide paused tool calls
+	// (MU-022).
+	//
+	// A separate resource rather than a facet of ResourceChat, because
+	// approving is not a stronger form of chatting. The arguments of a paused
+	// call are, by construction, the details of something that was stopped for
+	// being dangerous, and releasing one authorizes an action the requester
+	// could not take alone. A viewer who may chat has not thereby been
+	// trusted to release a privileged shell command somebody else's agent
+	// composed — which is exactly what "confirm a tool" under ActionChat
+	// meant before this.
+	ResourceApprovals = "approvals"
 )
 
 // ---------------------------------------------------------------------------
@@ -114,6 +127,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 	RoleOwner: {
 		ResourceAgents:      {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionEnable: true},
 		ResourceChat:        {ActionRead: true, ActionWrite: true, ActionChat: true},
+		ResourceApprovals:   {ActionRead: true, ActionWrite: true},
 		ResourceMemory:      {ActionRead: true, ActionWrite: true, ActionDelete: true},
 		ResourceChannels:    {ActionRead: true, ActionWrite: true, ActionEnable: true},
 		ResourceProviders:   {ActionRead: true, ActionWrite: true},
@@ -133,6 +147,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 	RoleAdmin: {
 		ResourceAgents:      {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionEnable: true},
 		ResourceChat:        {ActionRead: true, ActionChat: true},
+		ResourceApprovals:   {ActionRead: true, ActionWrite: true},
 		ResourceMemory:      {ActionRead: true, ActionDelete: true},
 		ResourceChannels:    {ActionRead: true, ActionWrite: true, ActionEnable: true},
 		ResourceProviders:   {ActionRead: true, ActionWrite: true},
@@ -152,6 +167,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 	RoleDeveloper: {
 		ResourceAgents:      {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionEnable: true},
 		ResourceChat:        {ActionRead: true, ActionWrite: true, ActionChat: true},
+		ResourceApprovals:   {ActionRead: true},
 		ResourceMemory:      {ActionRead: true, ActionWrite: true, ActionDelete: true},
 		ResourceChannels:    {ActionRead: true},
 		ResourceProviders:   {ActionRead: true},
@@ -171,6 +187,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 	RoleOperator: {
 		ResourceAgents:      {ActionRead: true, ActionWrite: true, ActionEnable: true},
 		ResourceChat:        {ActionRead: true, ActionChat: true},
+		ResourceApprovals:   {ActionRead: true, ActionWrite: true},
 		ResourceMemory:      {ActionRead: true, ActionDelete: true},
 		ResourceChannels:    {ActionRead: true, ActionEnable: true},
 		ResourceProviders:   {ActionRead: true},
@@ -190,6 +207,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 	RoleViewer: {
 		ResourceAgents:      {ActionRead: true},
 		ResourceChat:        {ActionRead: true, ActionChat: true},
+		ResourceApprovals:   {},
 		ResourceMemory:      {ActionRead: true},
 		ResourceChannels:    {ActionRead: true},
 		ResourceProviders:   {ActionRead: true},

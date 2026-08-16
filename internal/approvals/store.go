@@ -372,6 +372,15 @@ UPDATE tool_approvals
 	return nil
 }
 
+// Authorize answers "may this actor see or decide this approval, right now".
+//
+// Exported because the broker's store-less path — a personal deployment with
+// no durable record — has to answer the same question about a map entry. Two
+// implementations of "may this actor decide" is how one of them ends up
+// missing the workspace comparison, which is exactly the bug this package
+// exists to fix.
+func Authorize(approval Approval, by Eligibility) error { return check(approval, by) }
+
 // check answers "may this actor decide this approval, right now".
 func check(approval Approval, by Eligibility) error {
 	if strings.TrimSpace(by.Subject) == "" {
