@@ -1326,6 +1326,18 @@ func (a *App) executeDurableRun(ctx context.Context, engine *runtime.Engine, loa
 	if !finishCancelled(outcomeCtx, runStore, run, log) {
 		finishRun(outcomeCtx, runStore, run, replyText(reply), err, log)
 	}
+	// MU-027 criterion 6: record the decomposition from the finished record
+	// rather than from timers held in this function. The record is the one
+	// place queue latency exists at all — this worker never saw the
+	// submission — and re-reading it keeps the metric and the API reporting
+	// the same numbers.
+	if finished, ferr := runStore.Get(outcomeCtx, run.WorkspaceID, run.ID); ferr == nil {
+		metrics.ObserveRunLatency(
+			finished.QueueLatency(),
+			time.Duration(finished.ExternalMicros)*time.Microsecond,
+			finished.ProcessingLatency(),
+		)
+	}
 
 	// MU-021 criteria 2 and 5: the run's scratch directory goes away when the
 	// run does, whatever the outcome. A failed or timed-out run is exactly as

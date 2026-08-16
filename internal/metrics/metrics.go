@@ -29,6 +29,8 @@
 package metrics
 
 import (
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"net/http"
@@ -237,6 +239,7 @@ func init() {
 		WorkerPoolActiveRuns,
 		ChannelInboxDropsTotal, ChannelInboundTotal, ChannelOutboundTotal,
 		ApprovalsResolvedTotal, PairingTokensTotal, PushSubscriptions, PushSentTotal,
+		RunQueueDuration, RunProcessingDuration, RunExternalDuration, RunSubmitDuration,
 		// Process + Go runtime collectors give us memory / CPU / GC for free.
 		prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}),
 		prometheus.NewGoCollector(),
@@ -250,4 +253,65 @@ func Handler() http.Handler {
 	return promhttp.HandlerFor(Registry, promhttp.HandlerOpts{
 		EnableOpenMetrics: true,
 	})
+}
+
+// ── Run latency decomposition (MU-027 criterion 6) ─────────────────────────
+//
+// Deliberately UNLABELLED by workspace. A histogram labelled by tenant grows
+// its cardinality with the product's success, and a metric that degrades the
+// monitoring system as customers are added is worse than no metric. The
+// per-tenant view comes from the run record, which is per-workspace by
+// construction and carries the same timestamps — see internal/runs/latency.go.
+var (
+	// RunQueueDuration is submission → a worker claiming the run: the number
+	// that answers "should I add workers", and the one nobody was measuring.
+	RunQueueDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "soulacy_run_queue_duration_seconds",
+			Help:    "Time a durable run waited between submission and a worker claiming it.",
+			Buckets: []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 300},
+		},
+	)
+	// RunProcessingDuration is execution time MINUS provider and tool time:
+	// what Soulacy itself spent. AgentRunDuration conflates the two and is
+	// dominated by provider latency, so it reports mostly on somebody else's
+	// system.
+	RunProcessingDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "soulacy_run_processing_duration_seconds",
+			Help:    "Time a durable run spent inside Soulacy, excluding LLM provider and tool calls.",
+			Buckets: []float64{0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30},
+		},
+	)
+	// RunExternalDuration is the provider and tool time the run waited on,
+	// recorded beside processing so the two are comparable at a glance.
+	RunExternalDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "soulacy_run_external_duration_seconds",
+			Help:    "Time a durable run spent waiting on LLM providers and tool subprocesses.",
+			Buckets: []float64{0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300},
+		},
+	)
+	// RunSubmitDuration is the acknowledgement latency criterion 1 sets a p95
+	// target on. Nothing measured it, so the target could not be evaluated.
+	RunSubmitDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "soulacy_run_submit_duration_seconds",
+			Help:    "Time to acknowledge a run submission, excluding identity-provider latency.",
+			Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5},
+		},
+	)
+)
+
+// ObserveRunLatency records one finished run's decomposition.
+func ObserveRunLatency(queue, external, processing time.Duration) {
+	if queue >= 0 {
+		RunQueueDuration.Observe(queue.Seconds())
+	}
+	if external >= 0 {
+		RunExternalDuration.Observe(external.Seconds())
+	}
+	if processing >= 0 {
+		RunProcessingDuration.Observe(processing.Seconds())
+	}
 }

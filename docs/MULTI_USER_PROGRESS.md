@@ -17,7 +17,7 @@ isolation state; this document explains it.
 | — event spine + stores | (cross-cutting) | Events, action log, learning, Studio traces, workboard, conversation history ✓ |
 | — isolation floor | (cross-cutting) | 0 blockers: every declared store is scoped and names a real isolation test |
 | M4 — Execution plane | MU-020–025 | MU-020 ✓; MU-021 ✓ (6/7; scalable workers → M6); MU-022 ✓; MU-023 ✓; MU-024 ✓; MU-025 ✓ (4/5; org sharing deferred with a guard, workspace-status half awaits MU-032) |
-| M5 — Team Preview | MU-026–032 | MU-026 ✓; MU-027 partial (cancellation criteria 3 and 5 closed); MU-028–032 not started |
+| M5 — Team Preview | MU-026–032 | MU-026 ✓; MU-027 partial (criteria 3, 5, 6 closed; p95 targets need a load harness; `sy run follow` outstanding); MU-028–032 not started |
 | M6 — Scale | MU-033–037 | Not started |
 
 ## Isolation progress
@@ -1707,6 +1707,63 @@ thing:
   is illegal, so the write simply fails and the run sits in `cancelling`
   **forever**, reading to a client as "still stopping". An AST guard now fails
   the build if the call site goes.
+
+### One number fits every explanation (MU-027 criterion 6)
+
+`AgentRunDuration` measured a run end to end. That single number is compatible
+with every diagnosis — the provider is slow, the queue is deep, the engine is
+doing too much — and those have opposite remediations: switch model, add
+workers, profile the code. An operator with one number is guessing, and
+criteria 1 and 2's p95 targets could not be *evaluated*, let alone met.
+
+Three quantities were missing and are now separable:
+
+- **Queue latency** (submission → a worker claiming it) — the number that
+  answers "should I add workers", and the only one of the three that is
+  entirely Soulacy's own responsibility.
+- **External time** — provider and tool calls, accumulated per run.
+- **Processing latency** — execution minus external: what Soulacy itself spent.
+  A run that took 40 seconds because a provider took 39 needs a different
+  response from one that took 40 because the engine did.
+
+**Why the per-tenant view is derived from the record, not a labelled metric.**
+The obvious move is a histogram labelled by workspace, and it is the classic
+Prometheus footgun: cardinality grows with the number of tenants, so the metric
+degrades the monitoring system exactly as the product succeeds. The run record
+is already per-workspace and already carries the timestamps, so the per-tenant
+view costs nothing and the process-wide histograms stay unlabelled.
+
+Two details that would each be a bug alone: `RecordExternal` accumulates **in
+SQL** rather than read-modify-write, because provider and tool calls happen
+concurrently from different goroutines and a read-then-write loses increments
+under exactly the concurrency being measured; and it stores **microseconds**,
+because a fast tool call rounds to zero milliseconds and a run of a hundred
+400µs calls would report nothing.
+
+Processing latency is clamped at zero. External time sums concurrent calls, so
+parallel tool execution can legitimately exceed the wall clock — a negative
+"processing time" is arithmetically explicable and operationally meaningless,
+and a histogram that accepts it produces percentiles nobody can act on.
+
+### A catalog claim the schema did not back
+
+Writing a test for the above surfaced something else: `agent_runs` had
+`id TEXT PRIMARY KEY`, while `internal/ownership/catalog.go` has declared it
+`CompositeUniqueness: true` with `ScopeKey: "workspace_id,id"` since MU-020.
+
+Reads were correctly scoped, so nothing leaked. But run IDs were **globally**
+unique, which means submitting an ID another workspace already used returned a
+constraint violation — a weak enumeration oracle over other tenants' run IDs
+(product invariant 8). And more to the point, the machine-checked source of
+truth was asserting something the storage did not do, which is worse than a
+missing feature: it is a guard reporting success.
+
+The key is now composite, with a rebuild migration for existing databases. The
+OLD table is renamed aside rather than the new one being given a temporary
+name, so `agent_runs` stays the only name ever `CREATE`d — the catalog's
+discovery scan treats every `CREATE TABLE` as a durable store to classify, and
+a scratch table would show up as one. That is the same trap the
+`workflow_checkpoints` migration hit in M4.
 
 ## Guards worth keeping
 

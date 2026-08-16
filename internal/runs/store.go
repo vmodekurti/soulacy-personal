@@ -180,6 +180,12 @@ type Run struct {
 	// 6). SideEffectAt is the fact that decides retry safety: a run that has
 	// not yet acted can be re-queued after a worker dies, and one that has
 	// cannot be, because "retry" would mean sending the second email.
+	// ExternalMicros accumulates time spent waiting on somebody else's system
+	// — LLM providers and tool subprocesses — so processing latency can be
+	// reported without it (MU-027 criterion 6). Microseconds because a fast
+	// tool call rounds to zero milliseconds and a run makes many of them.
+	ExternalMicros int64 `json:"external_micros,omitempty"`
+
 	Attempt        int        `json:"attempt"`
 	MaxAttempts    int        `json:"max_attempts"`
 	SideEffectAt   *time.Time `json:"side_effect_at,omitempty"`
@@ -202,7 +208,7 @@ type Run struct {
 
 const schema = `
 CREATE TABLE IF NOT EXISTS agent_runs (
-    id               TEXT PRIMARY KEY,
+    id               TEXT NOT NULL,
     workspace_id     TEXT NOT NULL,
     agent_id         TEXT NOT NULL,
     agent_version    TEXT NOT NULL DEFAULT '',
@@ -226,10 +232,19 @@ CREATE TABLE IF NOT EXISTS agent_runs (
     -- this run; max_attempts bounds it. side_effect_at is set the first time
     -- the run makes an outside-visible call, and is what separates a run a
     -- lost worker may safely re-queue from one that has already acted.
+    external_micros  INTEGER NOT NULL DEFAULT 0,
     attempt          INTEGER NOT NULL DEFAULT 0,
     max_attempts     INTEGER NOT NULL DEFAULT 3,
     side_effect_at   DATETIME,
-    side_effect_tool TEXT NOT NULL DEFAULT ''
+    side_effect_tool TEXT NOT NULL DEFAULT '',
+    -- Composite, not a bare id primary key. internal/ownership/catalog.go has
+    -- declared this table CompositeUniqueness since MU-020, and the schema did
+    -- not implement it: a bare id primary key made run IDs globally unique, so
+    -- one workspace submitting an ID another workspace already used got a
+    -- constraint violation — a weak enumeration oracle over other tenants' run
+    -- IDs (product invariant 8), and a claim in the machine-checked source of
+    -- truth that the storage did not back.
+    PRIMARY KEY (workspace_id, id)
 );
 CREATE INDEX IF NOT EXISTS idx_runs_ws_created ON agent_runs(workspace_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_ws_status  ON agent_runs(workspace_id, status, created_at DESC);
@@ -259,6 +274,10 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("runs: schema: %w", err)
 	}
+	if err := migrateRunPrimaryKey(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err := migrateRetryColumns(db); err != nil {
 		db.Close()
 		return nil, err
@@ -285,8 +304,43 @@ const DefaultMaxAttempts = 3
 // Each ALTER is attempted independently and a duplicate-column error is the
 // success case, so the migration is idempotent without needing to read
 // PRAGMA table_info and reason about it.
+// migrateRunPrimaryKey rebuilds agent_runs when it still carries the bare
+// `id TEXT PRIMARY KEY` from before MU-027.
+//
+// SQLite cannot alter a primary key, so this is the copy-and-rename dance. The
+// OLD table is renamed aside rather than the new one being given a temporary
+// name, so `agent_runs` stays the only name ever CREATEd — the ownership
+// catalog's discovery scan treats every CREATE TABLE as a durable store to
+// classify, and a scratch table would show up as one.
+func migrateRunPrimaryKey(db *sql.DB) error {
+	var ddl string
+	err := db.QueryRow(
+		`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_runs'`).Scan(&ddl)
+	if err != nil || !strings.Contains(ddl, "id               TEXT PRIMARY KEY") {
+		// Absent, already migrated, or created fresh from the current schema.
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, stmt := range []string{
+		`ALTER TABLE agent_runs RENAME TO agent_runs_pre_composite`,
+		strings.Replace(schema, "IF NOT EXISTS agent_runs", "agent_runs", 1),
+		`INSERT INTO agent_runs SELECT * FROM agent_runs_pre_composite`,
+		`DROP TABLE agent_runs_pre_composite`,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("runs: migrate primary key: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
 func migrateRetryColumns(db *sql.DB) error {
 	for _, stmt := range []string{
+		`ALTER TABLE agent_runs ADD COLUMN external_micros INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE agent_runs ADD COLUMN attempt INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE agent_runs ADD COLUMN max_attempts INTEGER NOT NULL DEFAULT 3`,
 		`ALTER TABLE agent_runs ADD COLUMN side_effect_at DATETIME`,
@@ -378,7 +432,7 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 const selectColumns = `SELECT id, workspace_id, agent_id, agent_version, session_id, subject,
     principal_kind, credential_id, idempotency_key, policy_snapshot, reservation_id,
     status, cursor, payload, result, failure_reason, created_at, updated_at, started_at, ended_at,
-    attempt, max_attempts, side_effect_at, side_effect_tool`
+    attempt, max_attempts, side_effect_at, side_effect_tool, external_micros`
 
 // Get returns one run within a workspace.
 func (s *Store) Get(ctx context.Context, workspaceID, id string) (Run, error) {
@@ -537,7 +591,7 @@ func scanRun(row scanner) (Run, error) {
 		&run.Subject, &run.PrincipalKind, &run.CredentialID, &run.IdempotencyKey, &policy,
 		&run.ReservationID, &run.Status, &run.Cursor, &payload, &run.Result, &run.FailureReason,
 		&run.CreatedAt, &run.UpdatedAt, &started, &ended,
-		&run.Attempt, &run.MaxAttempts, &sideEffect, &run.SideEffectTool); err != nil {
+		&run.Attempt, &run.MaxAttempts, &sideEffect, &run.SideEffectTool, &run.ExternalMicros); err != nil {
 		return Run{}, err
 	}
 	if sideEffect.Valid {
