@@ -32,12 +32,26 @@ import (
 // Status values. The set is closed: a status outside it is a bug, not a new
 // feature, and the transition table below is the only place it may change.
 const (
-	StatusQueued    = "queued"
-	StatusRunning   = "running"
-	StatusPaused    = "paused"
-	StatusSucceeded = "succeeded"
-	StatusFailed    = "failed"
-	StatusCancelled = "cancelled"
+	StatusQueued  = "queued"
+	StatusRunning = "running"
+	StatusPaused  = "paused"
+	// StatusCancelling is "somebody asked, the worker has not stopped yet"
+	// (MU-027 criteria 3 and 5).
+	//
+	// Cancelling a RUNNING run used to write "cancelled" directly, which is a
+	// terminal state — so the API answered "cancelled" while the work was
+	// still executing and its side effects were still landing. The handler's
+	// own comment warned about exactly this: "cancelled" and "asked to cancel"
+	// are different promises, and a caller told the wrong one stops watching
+	// too early. Nothing made the worker observe the flag either, so the run
+	// ran to completion and only its OUTCOME was discarded.
+	//
+	// Non-terminal on purpose: it is a request, and the run has not stopped
+	// until the worker says so.
+	StatusCancelling = "cancelling"
+	StatusSucceeded  = "succeeded"
+	StatusFailed     = "failed"
+	StatusCancelled  = "cancelled"
 )
 
 var (
@@ -63,10 +77,21 @@ var transitions = map[string]map[string]bool{
 		StatusRunning: true, StatusCancelled: true, StatusFailed: true,
 	},
 	StatusRunning: {
-		StatusPaused: true, StatusSucceeded: true, StatusFailed: true, StatusCancelled: true,
+		StatusPaused: true, StatusSucceeded: true, StatusFailed: true,
+		StatusCancelling: true,
+		// StatusCancelled is deliberately NOT reachable directly from running.
+		// A running run has a worker mid-operation; declaring it finished
+		// before that worker has stopped is the lie this state machine exists
+		// to prevent.
 	},
 	StatusPaused: {
-		StatusRunning: true, StatusCancelled: true, StatusFailed: true,
+		StatusRunning: true, StatusCancelling: true, StatusFailed: true,
+	},
+	StatusCancelling: {
+		// Only the worker closes this out. Succeeded is absent: a run that was
+		// asked to stop and then finished its work anyway did not succeed in
+		// any sense the person who cancelled it would accept.
+		StatusCancelled: true, StatusFailed: true,
 	},
 	// Terminal. Empty maps rather than absent keys, so "unknown status" and
 	// "finished" are distinguishable when something goes wrong.
@@ -83,6 +108,40 @@ func Terminal(status string) bool {
 
 // CanTransition reports whether from → to is allowed.
 func CanTransition(from, to string) bool { return transitions[from][to] }
+
+// CancelRequested reports whether a worker has been asked to stop.
+//
+// The signal a running worker polls between bounded operations. Terminal
+// states count: a run cancelled while queued, or failed by a recovery sweep
+// under it, is equally a reason to stop — the worker's job is to notice that
+// finishing is pointless, not to distinguish why.
+func CancelRequested(status string) bool {
+	return status == StatusCancelling || status == StatusCancelled || Terminal(status)
+}
+
+// RequestCancel asks a run to stop, choosing the right target for its state.
+//
+// A QUEUED run has no worker, so it is cancelled outright — there is nothing
+// to wait for. A RUNNING or PAUSED one goes to `cancelling`, because saying
+// "cancelled" while a worker is mid-operation is a promise the system has not
+// kept. The caller is told which happened, so a client knows whether to stop
+// watching or keep following.
+func (s *Store) RequestCancel(ctx context.Context, workspaceID, id, reason string) (Run, error) {
+	current, err := s.Get(ctx, wsroot.Normalize(workspaceID), id)
+	if err != nil {
+		return Run{}, err
+	}
+	target := StatusCancelling
+	if current.Status == StatusQueued {
+		target = StatusCancelled
+	}
+	if current.Status == StatusCancelling {
+		// Already asked. Idempotent rather than an error: a client retrying a
+		// cancel it did not see acknowledged should not be told it failed.
+		return current, nil
+	}
+	return s.Transition(ctx, workspaceID, id, target, TransitionOptions{FailureReason: reason})
+}
 
 // Run is one durable agent run.
 type Run struct {

@@ -17,7 +17,7 @@ isolation state; this document explains it.
 | — event spine + stores | (cross-cutting) | Events, action log, learning, Studio traces, workboard, conversation history ✓ |
 | — isolation floor | (cross-cutting) | 0 blockers: every declared store is scoped and names a real isolation test |
 | M4 — Execution plane | MU-020–025 | MU-020 ✓; MU-021 ✓ (6/7; scalable workers → M6); MU-022 ✓; MU-023 ✓; MU-024 ✓; MU-025 ✓ (4/5; org sharing deferred with a guard, workspace-status half awaits MU-032) |
-| M5 — Team Preview | MU-026–032 | MU-026 ✓; MU-027–032 not started |
+| M5 — Team Preview | MU-026–032 | MU-026 ✓; MU-027 partial (cancellation criteria 3 and 5 closed); MU-028–032 not started |
 | M6 — Scale | MU-033–037 | Not started |
 
 ## Isolation progress
@@ -1659,6 +1659,54 @@ Three things make the boundary hold rather than document itself:
   bypass would behave identically. Asserting on output could not tell; the call
   site is load-bearing now rather than once somebody classifies a field
   internal and an unrelated change quietly leaks it.
+
+### The cancel endpoint said "cancelled" and meant "still running" (MU-027)
+
+`handleCancelRun` transitioned a RUNNING run straight to `cancelled` — a
+terminal state — and its own comment warned against exactly that:
+
+> "cancelled" and "asked to cancel" are different promises, and a caller told
+> the wrong one stops watching too early.
+
+The code did the thing the comment forbade. Two consequences, and the second is
+worse than the first:
+
+- The API answered "cancelled" while the work was still executing and its side
+  effects were still landing.
+- **Nothing made the worker observe it.** `executeDurableRun` ran
+  `engine.Handle` on a timeout context that no cancellation touched, so the run
+  completed in full and only its *outcome* was discarded — `finishRun` found
+  the record terminal and logged "the cancellation stands". The person who
+  cancelled got a confirmation, and the shell command, the HTTP call and the
+  file write all happened anyway.
+
+`cancelling` is now a non-terminal state, and `running → cancelled` is
+**removed from the transition table** rather than merely unused: a running run
+has a worker mid-operation, and declaring it finished is a promise only that
+worker can keep. `cancelling → succeeded` is absent for the same kind of
+reason — work that finished after somebody asked it to stop did not succeed in
+any sense they would accept.
+
+The worker polls its own record between bounded operations. Polling rather than
+a channel because **the cancel may arrive at a different gateway process**: an
+in-memory signal only reaches a worker in the same process, which is the
+arrangement MU-023 spent a story removing from the scheduler. Two details that
+would each be a bug on their own: the poll reads through `context.WithoutCancel`
+so a run near its deadline can still observe its own cancellation, and a read
+*failure* is not a cancellation — cancelling on an unreachable store would turn
+a database hiccup into every in-flight run in the deployment dying at once.
+
+Two mutations survived the first pass, and both were tests proving the wrong
+thing:
+
+- Nothing asserted that `running → cancelled` is *refused*, because
+  `RequestCancel` never attempts it. The table needed a direct assertion.
+- `finishCancelled` could be deleted from `executeDurableRun` entirely and every
+  behavioural test still passed, because the test called it directly. Worse,
+  the real consequence is not "recorded as failed" — `cancelling → succeeded`
+  is illegal, so the write simply fails and the run sits in `cancelling`
+  **forever**, reading to a client as "still stopping". An AST guard now fails
+  the build if the call site goes.
 
 ## Guards worth keeping
 

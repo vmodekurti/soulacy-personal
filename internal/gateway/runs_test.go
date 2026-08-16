@@ -177,10 +177,58 @@ func TestCancellingAFinishedRunIsAConflict(t *testing.T) {
 		}
 		return resp.StatusCode
 	}
+	// A running run is ASKED to stop, so the first cancel answers 200 with
+	// `cancelling` — not `cancelled`, which would tell the caller the work had
+	// stopped while a worker was still mid-operation.
 	if code := cancel(); code != http.StatusOK {
 		t.Fatalf("first cancel returned %d, want 200", code)
 	}
+	current, err := store.Get(ctx, "ws_personal", "run_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Status != runs.StatusCancelling {
+		t.Fatalf("status = %q, want cancelling — a running run was declared finished", current.Status)
+	}
+	// Asking again is idempotent, not a conflict: a client retrying a cancel
+	// it never saw acknowledged must not be told it failed. Nothing conflicts
+	// — the request is already in flight.
+	if code := cancel(); code != http.StatusOK {
+		t.Fatalf("re-cancelling a cancelling run returned %d, want an idempotent 200", code)
+	}
+
+	// Once the worker has actually closed it out, cancelling IS a conflict.
+	if _, err := store.Transition(ctx, "ws_personal", "run_1", runs.StatusCancelled, runs.TransitionOptions{}); err != nil {
+		t.Fatal(err)
+	}
 	if code := cancel(); code != http.StatusConflict {
-		t.Fatalf("cancelling an already-finished run returned %d, want 409", code)
+		t.Fatalf("cancelling a finished run returned %d, want 409", code)
+	}
+}
+
+// A queued run has no worker to wait for, so it is cancelled outright rather
+// than left in `cancelling` for a worker that will never pick it up.
+func TestCancellingAQueuedRunIsImmediate(t *testing.T) {
+	srv, store := runsGateway(t)
+	ctx := context.Background()
+	if _, _, err := store.Submit(ctx, runs.Run{ID: "run_q", WorkspaceID: "ws_personal", AgentID: "bot"}); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/runs/run_q/cancel", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	resp, err := srv.app.Test(req, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	current, err := store.Get(ctx, "ws_personal", "run_q")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Status != runs.StatusCancelled {
+		t.Fatalf("status = %q, want cancelled — nothing was running to wait for", current.Status)
 	}
 }

@@ -170,7 +170,13 @@ func TestAFinishedRunNeverRunsAgain(t *testing.T) {
 	if _, err := store.Transition(ctx, "ws_a", "run_1", StatusRunning, TransitionOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Transition(ctx, "ws_a", "run_1", StatusCancelled, TransitionOptions{FailureReason: "user cancelled"}); err != nil {
+	// Running → cancelled is no longer direct: a running run is ASKED to stop
+	// and its worker closes it out. Declaring it finished while a worker is
+	// mid-operation is the promise this machine refuses to make.
+	if _, err := store.Transition(ctx, "ws_a", "run_1", StatusCancelling, TransitionOptions{FailureReason: "user cancelled"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Transition(ctx, "ws_a", "run_1", StatusCancelled, TransitionOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	for _, to := range []string{StatusRunning, StatusQueued, StatusSucceeded, StatusPaused} {
@@ -333,5 +339,33 @@ func TestRunsSurviveAReopen(t *testing.T) {
 	}
 	if !replayed {
 		t.Fatal("idempotency did not survive the restart")
+	}
+}
+
+// A running run must not be declarable finished. Cancelling one is a REQUEST;
+// only its worker knows when the work actually stopped, and a table that
+// allowed the shortcut would let the API answer "cancelled" while side effects
+// were still landing.
+func TestARunningRunCannotBeDeclaredCancelledDirectly(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	submit(t, store, "run_1", "ws_a", "bot")
+	if _, err := store.Transition(ctx, "ws_a", "run_1", StatusRunning, TransitionOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Transition(ctx, "ws_a", "run_1", StatusCancelled, TransitionOptions{}); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("running → cancelled returned %v, want ErrInvalidTransition", err)
+	}
+	// And a cancelling run cannot be declared successful: work that finished
+	// after somebody asked it to stop did not succeed in any sense they would
+	// accept.
+	if _, err := store.Transition(ctx, "ws_a", "run_1", StatusCancelling, TransitionOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Transition(ctx, "ws_a", "run_1", StatusSucceeded, TransitionOptions{}); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("cancelling → succeeded returned %v, want ErrInvalidTransition", err)
+	}
+	if !CancelRequested(StatusCancelling) {
+		t.Fatal("cancelling does not read as a cancellation request")
 	}
 }

@@ -1304,16 +1304,28 @@ func (a *App) executeDurableRun(ctx context.Context, engine *runtime.Engine, loa
 	// retry-safe — the exact double-execution the criterion forbids.
 	runCtx = withRunID(runCtx, run.WorkspaceID, run.ID)
 
+	// MU-027 criterion 5. The record is the cancellation signal, because the
+	// request may arrive at a different gateway process than the one running
+	// the work — an in-memory channel would only reach a worker in the same
+	// process. Stopped before the outcome is recorded, or the poller outlives
+	// the run.
+	stopWatching := watchForCancellation(runCtx, cancel, runStore, run, log)
+
 	metrics.WorkerPoolActiveRuns.Inc()
 	reply, err := engine.Handle(runCtx, msg)
 	metrics.WorkerPoolActiveRuns.Dec()
+	stopWatching()
 
 	// context.WithoutCancel: the outcome must be recorded even when the run
 	// timed out. Writing it through the cancelled context would leave the
 	// record stuck in "running" forever, which is the one state a reader
 	// cannot distinguish from "still working".
 	outcomeCtx := context.WithoutCancel(ctx)
-	finishRun(outcomeCtx, runStore, run, replyText(reply), err, log)
+	// A run that stopped because it was asked to did not fail, and recording it
+	// as failed would put a cancellation in whatever dashboard counts failures.
+	if !finishCancelled(outcomeCtx, runStore, run, log) {
+		finishRun(outcomeCtx, runStore, run, replyText(reply), err, log)
+	}
 
 	// MU-021 criteria 2 and 5: the run's scratch directory goes away when the
 	// run does, whatever the outcome. A failed or timed-out run is exactly as

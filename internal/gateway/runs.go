@@ -210,10 +210,12 @@ func (s *Server) handleGetRun(c *fiber.Ctx) error {
 
 // handleCancelRun asks for cancellation.
 //
-// A queued run is cancelled outright; a running one is asked to stop and its
-// worker observes the state change. Reporting the resulting status rather than
-// a bare "ok" matters: "cancelled" and "asked to cancel" are different
-// promises, and a caller told the wrong one stops watching too early.
+// A queued run is cancelled outright; a running one goes to `cancelling` and
+// its worker observes the state change between bounded operations (MU-027
+// criterion 5). Reporting the resulting status rather than a bare "ok" matters:
+// "cancelled" and "asked to cancel" are different promises, and a caller told
+// the wrong one stops watching too early — which is what this handler used to
+// do, writing the terminal status directly while the work carried on.
 func (s *Server) handleCancelRun(c *fiber.Ctx) error {
 	store, ok := s.requireRunStore(c)
 	if !ok {
@@ -224,8 +226,7 @@ func (s *Server) handleCancelRun(c *fiber.Ctx) error {
 	if reason == "" {
 		reason = "cancelled by request"
 	}
-	run, err := store.Transition(c.UserContext(), workspaceID, c.Params("id"),
-		runs.StatusCancelled, runs.TransitionOptions{FailureReason: reason})
+	run, err := store.RequestCancel(c.UserContext(), workspaceID, c.Params("id"), reason)
 	switch {
 	case errors.Is(err, runs.ErrNotFound):
 		return s.errMsg(c, fiber.StatusNotFound, "run not found")

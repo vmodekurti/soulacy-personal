@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -174,4 +175,89 @@ func (r runSideEffectRecorder) RecordSideEffect(ctx context.Context, tool string
 	// marker exists for, and writing it through the dying context would lose
 	// the fact that makes the run unsafe to retry.
 	return r.store.MarkSideEffect(context.WithoutCancel(ctx), workspaceID, runID, tool)
+}
+
+// ── Cancellation observation (MU-027 criterion 5) ───────────────────────────
+
+// cancelPollInterval is how often a running worker re-reads its own record.
+//
+// Two seconds is a compromise with a reason on each side. Shorter turns a
+// long-running tenant into a steady read load on the run store for a signal
+// that is almost never set. Longer makes "cancellation is acknowledged
+// promptly" untrue in the only sense the person cancelling cares about —
+// they are watching a spinner, and the gap between clicking and the work
+// actually stopping is what they experience.
+var cancelPollInterval = 2 * time.Second
+
+// watchForCancellation cancels ctx when the run's record says to stop.
+//
+// Polling rather than a notification, because the cancel may be issued by a
+// DIFFERENT gateway process: an in-memory channel would only reach a worker in
+// the same process as the request, which is the arrangement MU-023 spent a
+// story removing from the scheduler. The record is the one thing both
+// processes can see.
+//
+// Returns a stop function; the caller must call it, or the poller outlives the
+// run and holds a database handle for a record nobody is watching.
+func watchForCancellation(ctx context.Context, cancel context.CancelFunc,
+	store *runs.Store, run runs.Run, log *zap.Logger) func() {
+	if store == nil {
+		return func() {}
+	}
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(cancelPollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				// The run ended on its own. Nothing to cancel, and continuing
+				// to poll a finished run is pure load.
+				return
+			case <-ticker.C:
+				// context.WithoutCancel: this read must not inherit the run's
+				// deadline, or a run near its timeout stops being able to
+				// observe its own cancellation.
+				current, err := store.Get(context.WithoutCancel(ctx), run.WorkspaceID, run.ID)
+				if err != nil {
+					// A read failure is not a cancellation. Cancelling on an
+					// unreachable store would make a database hiccup kill
+					// every in-flight run in the deployment.
+					continue
+				}
+				if runs.CancelRequested(current.Status) {
+					log.Info("durable run cancelled while executing",
+						zap.String("run_id", run.ID), zap.String("status", current.Status))
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return func() { close(done) }
+}
+
+// finishCancelled closes out a run whose worker stopped because it was asked
+// to.
+//
+// Separate from finishRun because the outcome is different in kind: the run did
+// not fail, and recording it as failed would put a cancelled run in whatever
+// dashboard counts failures. A run already marked `cancelled` — because it was
+// queued when the request arrived — is left alone.
+func finishCancelled(ctx context.Context, store *runs.Store, run runs.Run, log *zap.Logger) bool {
+	current, err := store.Get(ctx, run.WorkspaceID, run.ID)
+	if err != nil || !runs.CancelRequested(current.Status) {
+		return false
+	}
+	if runs.Terminal(current.Status) {
+		return true
+	}
+	if _, err := store.Transition(ctx, run.WorkspaceID, run.ID, runs.StatusCancelled,
+		runs.TransitionOptions{FailureReason: "stopped after a cancellation request"}); err != nil {
+		log.Warn("cancelled run could not be closed out",
+			zap.String("run_id", run.ID), zap.Error(err))
+	}
+	return true
 }

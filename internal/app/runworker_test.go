@@ -6,9 +6,13 @@ package app
 import (
 	"context"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -116,11 +120,16 @@ func TestACancellationDuringExecutionIsNotOverwritten(t *testing.T) {
 	if !ok {
 		t.Fatal("could not start the run")
 	}
-	if _, err := store.Transition(ctx, "ws_a", "run_1", runs.StatusCancelled,
+	if _, err := store.Transition(ctx, "ws_a", "run_1", runs.StatusCancelling,
 		runs.TransitionOptions{FailureReason: "operator cancelled"}); err != nil {
 		t.Fatal(err)
 	}
 
+	// The worker finished its work anyway — the record must still say the
+	// operator's decision, not "succeeded".
+	if !finishCancelled(ctx, store, started, zap.NewNop()) {
+		t.Fatal("a cancelled run was not recognised as cancelled")
+	}
 	finishRun(ctx, store, started, "the work completed anyway", nil, zap.NewNop())
 
 	got, err := store.Get(ctx, "ws_a", "run_1")
@@ -197,5 +206,152 @@ func TestARunExecutesAsThePrincipalItWasAdmittedUnder(t *testing.T) {
 	}
 	if bare.WorkspaceID != "ws_b" {
 		t.Fatalf("workspace = %q, want ws_b", bare.WorkspaceID)
+	}
+}
+
+// MU-027 criterion 5: a worker must observe a cancellation issued by another
+// process. An in-memory channel would only reach a worker in the same process
+// as the request, which is the arrangement MU-023 removed from the scheduler.
+func TestAWorkerStopsWhenItsRecordSaysCancelling(t *testing.T) {
+	previous := cancelPollInterval
+	cancelPollInterval = 5 * time.Millisecond
+	t.Cleanup(func() { cancelPollInterval = previous })
+
+	store := newRunStore(t)
+	ctx := context.Background()
+	run := submitRun(t, store, "run_watch", "ws_a")
+	started, ok := beginRun(ctx, store, "ws_a", "run_watch", zap.NewNop())
+	if !ok {
+		t.Fatal("could not start the run")
+	}
+
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stop := watchForCancellation(runCtx, cancel, store, started, zap.NewNop())
+	defer stop()
+
+	// The request arrives — as it would from another gateway process, with no
+	// channel back to this worker.
+	if _, err := store.RequestCancel(ctx, "ws_a", "run_watch", "operator cancelled"); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-runCtx.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("the worker never observed the cancellation")
+	}
+	_ = run
+}
+
+// A store that cannot be read is not a cancellation. Cancelling on an
+// unreachable store would make a database hiccup kill every in-flight run in
+// the deployment.
+func TestAnUnreadableStoreDoesNotCancelRunningWork(t *testing.T) {
+	previous := cancelPollInterval
+	cancelPollInterval = 5 * time.Millisecond
+	t.Cleanup(func() { cancelPollInterval = previous })
+
+	store := newRunStore(t)
+	ctx := context.Background()
+	run := submitRun(t, store, "run_hiccup", "ws_a")
+	started, _ := beginRun(ctx, store, "ws_a", "run_hiccup", zap.NewNop())
+	_ = run
+	_ = store.Close() // the database is gone under the poller
+
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stop := watchForCancellation(runCtx, cancel, store, started, zap.NewNop())
+	defer stop()
+
+	select {
+	case <-runCtx.Done():
+		t.Fatal("an unreachable store cancelled running work")
+	case <-time.After(120 * time.Millisecond):
+	}
+}
+
+// The poller must not outlive the run: a stopped watcher holds a database
+// handle for a record nobody is watching.
+func TestTheCancellationWatcherStopsWithTheRun(t *testing.T) {
+	previous := cancelPollInterval
+	cancelPollInterval = 5 * time.Millisecond
+	t.Cleanup(func() { cancelPollInterval = previous })
+
+	store := newRunStore(t)
+	ctx := context.Background()
+	submitRun(t, store, "run_done", "ws_a")
+	started, _ := beginRun(ctx, store, "ws_a", "run_done", zap.NewNop())
+
+	runCtx, cancel := context.WithCancel(ctx)
+	stop := watchForCancellation(runCtx, cancel, store, started, zap.NewNop())
+	stop()
+	cancel()
+
+	// Requesting a cancel after the watcher stopped must not panic on a closed
+	// channel, and there is nothing left polling to observe it.
+	if _, err := store.RequestCancel(ctx, "ws_a", "run_done", "late"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A cancelled run must reach a TERMINAL state. Skipping finishCancelled leaves
+// it stuck in `cancelling` forever, because cancelling → succeeded is not a
+// legal transition and finishRun's write simply fails — a run that never
+// finishes reads to a client as "still stopping", indefinitely.
+func TestACancelledRunReachesATerminalState(t *testing.T) {
+	store := newRunStore(t)
+	ctx := context.Background()
+	submitRun(t, store, "run_term", "ws_a")
+	started, _ := beginRun(ctx, store, "ws_a", "run_term", zap.NewNop())
+	if _, err := store.RequestCancel(ctx, "ws_a", "run_term", "operator cancelled"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The worker's outcome path, in the order wire_subsystems runs it.
+	if !finishCancelled(ctx, store, started, zap.NewNop()) {
+		finishRun(ctx, store, started, "the work completed anyway", nil, zap.NewNop())
+	}
+
+	final, err := store.Get(ctx, "ws_a", "run_term")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !runs.Terminal(final.Status) {
+		t.Fatalf("status = %q, which is not terminal — the run is stuck stopping", final.Status)
+	}
+	if final.Status != runs.StatusCancelled {
+		t.Fatalf("status = %q, want cancelled — a cancellation is not a failure", final.Status)
+	}
+}
+
+// TestTheOutcomePathChecksForCancellationFirst is the structural half.
+//
+// The test above exercises finishCancelled directly, which proves the function
+// works and nothing about whether executeDurableRun calls it. Deleting that
+// call compiles and passes every behavioural test, and leaves cancelled runs
+// stuck in `cancelling` forever in production. There is no output to assert on
+// — the failure is an absence — so the guard reads the source.
+func TestTheOutcomePathChecksForCancellationFirst(t *testing.T) {
+	fileSet := token.NewFileSet()
+	parsed, err := parser.ParseFile(fileSet, "wire_subsystems.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	found := false
+	ast.Inspect(parsed, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if ident, ok := call.Fun.(*ast.Ident); ok && ident.Name == "finishCancelled" {
+			found = true
+			return false
+		}
+		return true
+	})
+	if !found {
+		t.Fatal("executeDurableRun no longer checks for cancellation before recording an outcome; " +
+			"cancelled runs will stay in `cancelling` forever")
 	}
 }
