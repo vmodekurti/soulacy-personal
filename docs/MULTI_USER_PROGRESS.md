@@ -16,7 +16,7 @@ isolation state; this document explains it.
 | M3 — Data isolation | MU-012–019 | MU-012 ✓ MU-013 ✓ MU-014 ✓ MU-018 ✓ MU-019 ✓; MU-015 partial; MU-016 partial; MU-017 partial |
 | — event spine + stores | (cross-cutting) | Events, action log, learning, Studio traces, workboard, conversation history ✓ |
 | — isolation floor | (cross-cutting) | 0 blockers: every declared store is scoped and names a real isolation test |
-| M4 — Execution plane | MU-020–025 | Not started |
+| M4 — Execution plane | MU-020–025 | MU-020 partial (durable record, API, idempotency, recovery sweep); MU-021–025 not started |
 | M5 — Team Preview | MU-026–032 | Not started |
 | M6 — Scale | MU-033–037 | Not started |
 
@@ -989,6 +989,54 @@ shows two messages differing only by sender landing in the same workspace), and
 `internal/channels/webhook/sign.go` binds the timestamp *inside* the signed
 payload with a tolerance window, which is what makes a captured body
 unreplayable rather than merely signed.
+
+### A run is now a record, not a goroutine (MU-020)
+
+Before this a run existed only as a message in an in-memory inbox and a
+goroutine processing it. That is enough for a chat request whose caller waits
+on the response and nothing else: a restart lost every queued and running job,
+a client that disconnected had no way back to its own run, and a retried
+submission started the work twice.
+
+`internal/runs` records the facts of *admission* — tenant, exact agent version,
+principal and credential, the policy snapshot, the budget reservation — because
+each is a fact about that moment which cannot be reconstructed afterwards. An
+agent edited an hour later must not change what a finished run is understood to
+have done, and an audit asking "was this allowed?" means allowed *then*, not
+allowed by the membership that exists at audit time.
+
+Three properties carry their own reasoning:
+
+- **The state machine is one table.** `transitions` is data rather than
+  scattered conditionals, so "a finished run never runs again" is checkable by
+  reading one map. A cancelled run resurrected into running would execute work
+  a person explicitly stopped.
+- **The transition's WHERE clause repeats the status it read.** Two workers
+  racing to finish the same run would otherwise both read `running` and both
+  write a terminal state, and the second would overwrite the first's result.
+  The loser is told instead.
+- **Idempotency is unique per workspace, not globally.** Keys are
+  client-chosen, and two tenants picking `daily-report` is ordinary. A global
+  constraint would hand the second one the first one's run — both a leak and a
+  lost submission.
+
+### Two idempotency layers, and why the test had to change
+
+The gateway already had an `Idempotency-Key` middleware that replays the
+original response verbatim. My first API test asserted the store's semantics
+(200 + `replayed: true`) and failed with a byte-identical 202 — because the
+middleware served the retry and the handler never ran.
+
+The middleware's guarantee is the stronger one: the client gets exactly the
+bytes it would have got the first time. But it is in-memory, capped at 4096
+records and TTL'd at 24h, so it does not survive a restart. The store's dedup
+is durable and catches the retry that arrives after an eviction or a restart —
+precisely when a duplicated run is most expensive and least visible.
+
+The test now asserts both, and exercises the durable half on its own by putting
+the key in the body where the response cache cannot see it. Worth recording
+because the first version would have "passed" against a system with no durable
+dedup at all, as long as the in-memory cache happened to be warm.
 
 ## Guards worth keeping
 

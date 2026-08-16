@@ -36,6 +36,7 @@ import (
 	"github.com/soulacy/soulacy/internal/queue/dlq"
 	"github.com/soulacy/soulacy/internal/ratelimit"
 	"github.com/soulacy/soulacy/internal/rbac"
+	"github.com/soulacy/soulacy/internal/runs"
 	"github.com/soulacy/soulacy/internal/runtime"
 	"github.com/soulacy/soulacy/internal/sandbox"
 	"github.com/soulacy/soulacy/internal/scheduler"
@@ -116,6 +117,23 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 		if len(uiMounts) > 0 {
 			srv.SetPluginUI(uiMounts)
 			log.Info("plugin GUI mounts ready", zap.Int("count", len(uiMounts)))
+		}
+	}
+
+	// Durable run records (MU-020). A run submitted through /api/v1/runs
+	// outlives its request and the process: without this store a restart
+	// loses every queued and running job.
+	if runStore, rerr := runs.Open(ws.DB("runs")); rerr != nil {
+		log.Warn("durable runs unavailable", zap.Error(rerr))
+	} else {
+		stack.pushClose("runs", runStore)
+		srv.SetRunStore(runStore)
+		if pending, perr := runStore.RecoverAcrossWorkspaces(context.Background()); perr == nil && len(pending) > 0 {
+			// Reported rather than silently resumed: resuming is MU-021's
+			// worker, and a count an operator can see beats a number nobody
+			// knows to look for.
+			log.Info("durable runs recovered from a previous process",
+				zap.Int("pending", len(pending)))
 		}
 	}
 

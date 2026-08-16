@@ -69,6 +69,7 @@ import (
 	"github.com/soulacy/soulacy/internal/queue/dlq"
 	"github.com/soulacy/soulacy/internal/ratelimit"
 	"github.com/soulacy/soulacy/internal/rbac"
+	"github.com/soulacy/soulacy/internal/runs"
 	"github.com/soulacy/soulacy/internal/runtime"
 	"github.com/soulacy/soulacy/internal/scheduler"
 	"github.com/soulacy/soulacy/internal/session"
@@ -176,6 +177,10 @@ type Server struct {
 
 	// pluginInstaller manages installer-owned plugins (Story E13). Wired
 	// via SetPluginInstaller; install routes 503 until then.
+	// runStore is the durable record of agent runs (MU-020). Nil until
+	// SetRunStore; the run routes 503 until then.
+	runStore *runs.Store
+
 	pluginInstaller *plugininstall.Installer
 	// pluginInstallers, when set, gives each workspace its own installer and
 	// takes precedence over pluginInstaller.
@@ -1346,6 +1351,14 @@ func (s *Server) buildApp() *fiber.App {
 		}
 		return s.credentialAPI().HandleValidate(c)
 	})
+
+	// --- Durable runs (MU-020) ---
+	// Submission is gated on the same permission as chat: a run is a chat
+	// turn that outlives its request, not a new authority.
+	api.Post("/runs", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{BodyField: "agent_id"}), s.rlTokenMW(), s.rlAgentMW(), s.handleSubmitRun)
+	api.Get("/runs", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.handleListRuns)
+	api.Get("/runs/:id", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.handleGetRun)
+	api.Post("/runs/:id/cancel", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleCancelRun)
 
 	// --- Dead-Letter Queue (admin) ---
 	api.Get("/admin/dlq", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), func(c *fiber.Ctx) error {
