@@ -61,6 +61,7 @@ type gatewayDeps struct {
 	waAdapter       *wachan.Adapter
 	skillLoader     *skills.Loader
 	skillStores     *skills.Stores
+	runStore        *runs.Store
 	actionBackend   storage.ActionLogBackend
 	mcpClient       *mcp.Client
 	hub             *gateway.EventHub
@@ -120,22 +121,9 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 		}
 	}
 
-	// Durable run records (MU-020). A run submitted through /api/v1/runs
-	// outlives its request and the process: without this store a restart
-	// loses every queued and running job.
-	if runStore, rerr := runs.Open(ws.DB("runs")); rerr != nil {
-		log.Warn("durable runs unavailable", zap.Error(rerr))
-	} else {
-		stack.pushClose("runs", runStore)
-		srv.SetRunStore(runStore)
-		if pending, perr := runStore.RecoverAcrossWorkspaces(context.Background()); perr == nil && len(pending) > 0 {
-			// Reported rather than silently resumed: resuming is MU-021's
-			// worker, and a count an operator can see beats a number nobody
-			// knows to look for.
-			log.Info("durable runs recovered from a previous process",
-				zap.Int("pending", len(pending)))
-		}
-	}
+	// The durable run store is opened in wire.go, before the worker pool, so
+	// the router and the API share one handle.
+	srv.SetRunStore(d.runStore)
 
 	// Plugin install & management (Story E13): installer rooted at the first
 	// plugin_dirs entry. Staged plugins live under <root>/.staging and never

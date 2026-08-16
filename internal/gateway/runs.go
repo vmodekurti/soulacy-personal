@@ -17,12 +17,14 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/requestctx"
 	"github.com/soulacy/soulacy/internal/runs"
+	"github.com/soulacy/soulacy/pkg/message"
 )
 
 // SetRunStore wires the durable run record. Routes 503 until it is set.
@@ -105,6 +107,26 @@ func (s *Server) handleSubmitRun(c *fiber.Ctx) error {
 		s.log.Error("runs: submit failed", zap.String("agent", body.AgentID), zap.Error(err))
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
+	if !replayed {
+		// Enqueued only for a genuinely new run. A replay must not start the
+		// work a second time — that is the entire promise of the key, and
+		// enqueueing here rather than inside Submit keeps the store free of
+		// any opinion about how a run is executed.
+		if !s.enqueueRun(stored, body.Payload) {
+			// The inbox is full. Marking the run failed rather than leaving it
+			// queued is the honest outcome: nothing is going to pick it up,
+			// and a run that sits in "queued" forever is indistinguishable
+			// from one that is merely waiting its turn.
+			if _, terr := store.Transition(c.UserContext(), stored.WorkspaceID, stored.ID,
+				runs.StatusFailed, runs.TransitionOptions{
+					FailureReason: "the run queue is full; retry when the gateway has drained",
+				}); terr != nil {
+				s.log.Error("runs: could not fail an unqueueable run", zap.String("run_id", stored.ID), zap.Error(terr))
+			}
+			return s.errMsg(c, fiber.StatusServiceUnavailable, "the run queue is full")
+		}
+	}
+
 	status := fiber.StatusAccepted
 	if replayed {
 		// 200, not 202: nothing was accepted this time. The distinction lets a
@@ -118,6 +140,64 @@ func (s *Server) handleSubmitRun(c *fiber.Ctx) error {
 		"cursor":   stored.Cursor,
 		"replayed": replayed,
 	})
+}
+
+// enqueueRun hands a submitted run to the worker pool.
+//
+// The message carries the run id in metadata and travels on the "run"
+// pseudo-channel, which has no adapter: its reply is stored on the record
+// rather than sent anywhere, because the caller has already left.
+func (s *Server) enqueueRun(run runs.Run, payload json.RawMessage) bool {
+	if s.channels == nil {
+		return false
+	}
+	text := promptFromPayload(payload)
+	return s.channels.Enqueue(message.Message{
+		ID:          run.ID,
+		WorkspaceID: run.WorkspaceID,
+		SessionID:   runSessionID(run),
+		AgentID:     run.AgentID,
+		Channel:     "run",
+		UserID:      run.Subject,
+		Role:        message.RoleUser,
+		Parts:       message.Text(text),
+		Metadata:    map[string]string{"run_id": run.ID},
+		CreatedAt:   time.Now().UTC(),
+	})
+}
+
+// runSessionID keeps a run's conversation separable. A caller that supplied a
+// session joins it; one that did not gets a session of its own rather than
+// sharing a default with every other run of the same agent.
+func runSessionID(run runs.Run) string {
+	if strings.TrimSpace(run.SessionID) != "" {
+		return run.SessionID
+	}
+	return "run-" + run.ID
+}
+
+// promptFromPayload extracts the prompt a run should execute.
+//
+// `{"prompt": "..."}` is the documented shape; anything else is passed through
+// as JSON so an agent that expects structured input still receives exactly what
+// the caller sent, rather than an empty message and a silent no-op.
+func promptFromPayload(payload json.RawMessage) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	var shaped struct {
+		Prompt string `json:"prompt"`
+		Text   string `json:"text"`
+	}
+	if err := json.Unmarshal(payload, &shaped); err == nil {
+		if strings.TrimSpace(shaped.Prompt) != "" {
+			return shaped.Prompt
+		}
+		if strings.TrimSpace(shaped.Text) != "" {
+			return shaped.Text
+		}
+	}
+	return string(payload)
 }
 
 // policySnapshot records the authorization state at admission.

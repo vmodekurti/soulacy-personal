@@ -30,6 +30,7 @@ import (
 	"github.com/soulacy/soulacy/internal/learning"
 	"github.com/soulacy/soulacy/internal/mcp"
 	"github.com/soulacy/soulacy/internal/ownership"
+	"github.com/soulacy/soulacy/internal/runs"
 	"github.com/soulacy/soulacy/internal/runtime"
 	"github.com/soulacy/soulacy/internal/scheduler"
 	"github.com/soulacy/soulacy/internal/studio"
@@ -412,8 +413,28 @@ func (a *App) Run(parent context.Context) error {
 	// doesn't leak across restarts.
 	stack.push("session-eviction", func() error { engine.StopSessionEviction(); return nil })
 
+	// ── Durable run records (MU-020) ────────────────────────────────────────
+	// Opened before the worker pool because both the pool and the API need the
+	// same handle: a run submitted through the API is executed by the pool,
+	// and its record is how the two agree on what happened.
+	var runStore *runs.Store
+	if store, rerr := runs.Open(ws.DB("runs")); rerr != nil {
+		log.Warn("durable runs unavailable", zap.Error(rerr))
+	} else {
+		runStore = store
+		stack.pushClose("runs", runStore)
+		if pending, perr := runStore.RecoverAcrossWorkspaces(ctx); perr == nil && len(pending) > 0 {
+			// Reported rather than silently resumed. Resuming a run whose
+			// worker died halfway is MU-021's job and needs isolation to be
+			// safe; a count an operator can see beats a number nobody knows to
+			// look for.
+			log.Info("durable runs left unfinished by a previous process",
+				zap.Int("pending", len(pending)))
+		}
+	}
+
 	// ── Message Router — bounded worker pool draining the shared inbox ──────
-	a.startMessageRouter(ctx, chanReg, loader, engine, personalTenant)
+	a.startMessageRouter(ctx, chanReg, loader, engine, personalTenant, runStore)
 
 	// ── Auth Engine ───────────────────────────────────────────────────────────
 	authEngine, err := a.wireAuth(stack)
@@ -464,6 +485,7 @@ func (a *App) Run(parent context.Context) error {
 		waAdapter:       waAdapter,
 		skillLoader:     skillLoader,
 		skillStores:     skillStores,
+		runStore:        runStore,
 		actionBackend:   actionBackend,
 		mcpClient:       mcpClient,
 		hub:             hub,

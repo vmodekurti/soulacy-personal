@@ -44,6 +44,7 @@ import (
 	"github.com/soulacy/soulacy/internal/plugins"
 	"github.com/soulacy/soulacy/internal/rbac"
 	"github.com/soulacy/soulacy/internal/reasoning"
+	"github.com/soulacy/soulacy/internal/runs"
 	"github.com/soulacy/soulacy/internal/runtime"
 	"github.com/soulacy/soulacy/internal/sandbox"
 	"github.com/soulacy/soulacy/internal/secrets"
@@ -1249,10 +1250,46 @@ func (a *App) wireEngine(d engineDeps) *runtime.Engine {
 // startMessageRouter launches the bounded worker pool draining the shared
 // inbox. HTTP channel messages are handled synchronously elsewhere; all other
 // channel messages flow through the engine and are replied to via
+// executeDurableRun claims, runs and records one durable run.
+//
+// Every step goes through the run record rather than through worker-local
+// state, so a second process picking the same message up cannot double-execute
+// it and a cancellation issued mid-flight is not overwritten by the outcome.
+func (a *App) executeDurableRun(ctx context.Context, engine *runtime.Engine, loader *runtime.Loader,
+	runStore *runs.Store, msg message.Message, runID string) {
+	log := a.log
+	if runStore == nil {
+		log.Error("a durable run arrived but no run store is configured", zap.String("run_id", runID))
+		return
+	}
+	run, ok := beginRun(ctx, runStore, msg.WorkspaceID, runID, log)
+	if !ok {
+		return
+	}
+
+	timeout := 5 * time.Minute
+	if def := loader.Get(msg.AgentID); def != nil {
+		timeout = def.ResolvedRunTimeout(timeout)
+	}
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	runCtx = runtime.WithPrincipal(runCtx, runPrincipal(run, msg.ID))
+
+	metrics.WorkerPoolActiveRuns.Inc()
+	reply, err := engine.Handle(runCtx, msg)
+	metrics.WorkerPoolActiveRuns.Dec()
+
+	// context.WithoutCancel: the outcome must be recorded even when the run
+	// timed out. Writing it through the cancelled context would leave the
+	// record stuck in "running" forever, which is the one state a reader
+	// cannot distinguish from "still working".
+	finishRun(context.WithoutCancel(ctx), runStore, run, replyText(reply), err, log)
+}
+
 // chanReg.Send(). Concurrency is bounded by runtime.max_concurrent_sessions
 // (default 100); per-run timeout uses each agent's declared run_timeout.
 // (PRODUCTION_AUDIT → CRITICAL/Concurrency)
-func (a *App) startMessageRouter(ctx context.Context, chanReg *channels.Registry, loader *runtime.Loader, engine *runtime.Engine, personalTenant *tenancy.PersonalTenant) {
+func (a *App) startMessageRouter(ctx context.Context, chanReg *channels.Registry, loader *runtime.Loader, engine *runtime.Engine, personalTenant *tenancy.PersonalTenant, runStore *runs.Store) {
 	cfg, log := a.cfg, a.log
 	workerCount := cfg.Runtime.MaxConcurrentSessions
 	if workerCount <= 0 {
@@ -1279,6 +1316,14 @@ func (a *App) startMessageRouter(ctx context.Context, chanReg *channels.Registry
 				}
 				if msg.Channel == "http" {
 					continue // synchronous path
+				}
+				// A durable run carries its own record. It executes here like
+				// any other message, but its outcome is stored rather than
+				// sent: the caller has already gone, and comes back for the
+				// result by run id.
+				if runID := RunIDOf(msg); runID != "" {
+					a.executeDurableRun(ctx, engine, loader, runStore, msg, runID)
+					continue
 				}
 				if config.IsMultiUserMode(cfg.DeploymentMode()) && personalTenant == nil {
 					log.Error("channel message blocked: verified workspace routing is unavailable",

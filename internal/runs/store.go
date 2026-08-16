@@ -429,3 +429,34 @@ func scanRun(row scanner) (Run, error) {
 	}
 	return run, nil
 }
+
+// Principal reconstructs the identity a run was admitted under.
+//
+// Execution uses the *recorded* principal rather than whatever context the
+// worker happens to hold. A durable run may start minutes after it was
+// submitted, in a different process, picked up by a worker that has no request
+// behind it — so "who is this running as" has exactly one answer that is not a
+// guess: the one written down at admission.
+func (r Run) Principal() (subject, workspaceID, membershipID, organizationID, role string) {
+	workspaceID = wsroot.Normalize(r.WorkspaceID)
+	subject = r.Subject
+	if len(r.PolicySnapshot) > 0 {
+		var snapshot struct {
+			Role           string `json:"role"`
+			OrganizationID string `json:"organization_id"`
+			MembershipID   string `json:"membership_id"`
+			WorkspaceID    string `json:"workspace_id"`
+		}
+		if err := json.Unmarshal(r.PolicySnapshot, &snapshot); err == nil {
+			role, organizationID, membershipID = snapshot.Role, snapshot.OrganizationID, snapshot.MembershipID
+			// The row's workspace wins over the snapshot's if they disagree.
+			// The column is what every scoped query uses; a snapshot that
+			// drifted from it would let a run act somewhere its own record
+			// says it does not belong.
+			if snapshot.WorkspaceID != "" && snapshot.WorkspaceID != workspaceID {
+				_ = snapshot.WorkspaceID
+			}
+		}
+	}
+	return subject, workspaceID, membershipID, organizationID, role
+}

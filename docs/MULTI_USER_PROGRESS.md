@@ -16,7 +16,7 @@ isolation state; this document explains it.
 | M3 — Data isolation | MU-012–019 | MU-012 ✓ MU-013 ✓ MU-014 ✓ MU-018 ✓ MU-019 ✓; MU-015 partial; MU-016 partial; MU-017 partial |
 | — event spine + stores | (cross-cutting) | Events, action log, learning, Studio traces, workboard, conversation history ✓ |
 | — isolation floor | (cross-cutting) | 0 blockers: every declared store is scoped and names a real isolation test |
-| M4 — Execution plane | MU-020–025 | MU-020 partial (durable record, API, idempotency, recovery sweep); MU-021–025 not started |
+| M4 — Execution plane | MU-020–025 | MU-020 ✓ (record, API, idempotency, execution, recovery sweep); MU-021–025 not started |
 | M5 — Team Preview | MU-026–032 | Not started |
 | M6 — Scale | MU-033–037 | Not started |
 
@@ -1037,6 +1037,47 @@ The test now asserts both, and exercises the durable half on its own by putting
 the key in the body where the response cache cannot see it. Worth recording
 because the first version would have "passed" against a system with no durable
 dedup at all, as long as the in-memory cache happened to be warm.
+
+### Executing a durable run: claim, run, record — each through the record
+
+A submitted run travels on a `run` pseudo-channel with its id in metadata. It
+reaches the same worker pool as everything else, and then behaves differently
+in three ways that all come back to the record being the source of truth:
+
+- **The claim is a state transition, not a worker-local flag.** Two workers —
+  in the same process or in two — cannot both execute a run, because the loser's
+  `queued → running` finds the status already changed. A flag would only have
+  been true within one process.
+- **The principal comes from the record.** A durable run may start minutes
+  later, in a different process, picked up by a worker with no request behind
+  it. The recorded principal is the only answer to "who is this running as"
+  that is not a guess. A run with no recorded role gets one, because a
+  principal with an empty role is denied everything and the run would fail for
+  a reason unrelated to what it was asked to do.
+- **The outcome is written through `context.WithoutCancel`.** A run that timed
+  out still has to record that it timed out; writing through the cancelled
+  context would leave it stuck at `running`, which is the one state a reader
+  cannot distinguish from "still working".
+
+An unqueueable run is failed rather than left queued. Nothing is going to pick
+it up, and a run sitting in `queued` forever is indistinguishable from one
+waiting its turn.
+
+### A test that credited the wrong layer
+
+`TestACancellationDuringExecutionIsNotOverwritten` asserts that a run cancelled
+mid-flight keeps its cancellation. It passed — and it also passed when I
+mutated `finishRun` to *force* the outcome over the cancellation.
+
+The reason is that the guarantee lives in the store's terminal check, not in
+the worker: forcing `cancelled → running` on the way back is itself refused. So
+the test was crediting `finishRun` for a protection it does not provide, and
+would have gone on passing if that branch were deleted.
+
+It now asserts the store transitions directly and says where the property
+lives, so a mutation of the real guard fails it. The general shape is worth
+remembering: a test can be correct about the outcome and wrong about the
+mechanism, and the mutation is what tells the two apart.
 
 ## Guards worth keeping
 
