@@ -82,7 +82,13 @@ var Resources = []Resource{
 	{Name: "credentials", Class: UserPrivate, ScopeKey: "principal -> memberships", Retention: "until revoked/expired", Export: "metadata only; never secrets", Deletion: "revoke then purge hash", Backup: "encrypted database; restore requires KMS"},
 	{Name: "secrets", Class: WorkspaceOwned, ScopeKey: "workspace_id", Retention: "until deleted", Export: "names only; values excluded", Deletion: "cryptographic erasure and purge", Backup: "encrypted vault; restore requires KMS"},
 	{Name: "schedules", Class: WorkspaceOwned, ScopeKey: "workspace_id", Retention: "until deleted", Export: "agent/package export", Deletion: "disable then purge", Backup: "workspace database"},
-	{Name: "approvals", Class: UserPrivate, ScopeKey: "workspace_id,user_id", Retention: "audit retention policy", Export: "audit export", Deletion: "retention purge", Backup: "workspace database"},
+	// MU-022 reclassified this from UserPrivate. An approval is not the
+	// requester's private record: routing it to *eligible approvers* is the
+	// entire point of the story, and those are other people. It is
+	// workspace-owned with a permission gate — visible to members who hold
+	// the permission the paused call requires, and to nobody else, in this or
+	// any other workspace.
+	{Name: "approvals", Class: WorkspaceOwned, ScopeKey: "workspace_id + required permission", Retention: "audit retention policy", Export: "audit export", Deletion: "retention purge", Backup: "workspace database"},
 	{Name: "knowledge", Class: WorkspaceOwned, ScopeKey: "workspace_id", Retention: "until KB/document deletion", Export: "source documents and manifest", Deletion: "document, chunks, embeddings, jobs", Backup: "workspace database and objects"},
 	{Name: "vectors", Class: WorkspaceOwned, ScopeKey: "workspace_id", Retention: "follows source resource", Export: "regenerable metadata", Deletion: "with source resource", Backup: "optional; rebuild from sources"},
 	{Name: "artifacts", Class: WorkspaceOwned, ScopeKey: "workspace_id", Retention: "artifact retention policy", Export: "artifact download", Deletion: "metadata and object purge", Backup: "object store and manifest"},
@@ -117,6 +123,7 @@ var Resources = []Resource{
 // backwards-compatible Personal deployments but cannot serve Team/Scale data.
 var Tables = []Table{
 	{Source: "internal/actionlog/actionlog.go", Name: "agent_events", Resource: "events", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/actionlog/workspace_test.go"},
+	{Source: "internal/approvals/store.go", Name: "tool_approvals", Resource: "approvals", Class: WorkspaceOwned, ScopeKey: "workspace_id,id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/approvals/store_test.go"},
 	{Source: "internal/agentmemory/rulelog.go", Name: "rulebook_locks", Resource: "studio-learning", Class: WorkspaceOwned, ScopeKey: "workspace_id,agent_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/agentmemory/isolation_test.go"},
 	{Source: "internal/agentmemory/rulelog.go", Name: "rulebook_versions", Resource: "studio-learning", Class: WorkspaceOwned, ScopeKey: "workspace_id,agent_id,version", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/agentmemory/isolation_test.go"},
 	{Source: "internal/auth/apikeys/postgres.go", Name: "access_credentials", Resource: "api-keys", Class: UserPrivate, ScopeKey: "organization_id,workspace_ids,subject_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/auth/apikeys/postgres_test.go"},
@@ -176,6 +183,7 @@ var Tables = []Table{
 
 var Repositories = []Repository{
 	{Source: "internal/agentmemory/store.go", Resource: "memory", Class: UserPrivate, ScopeKey: "workspace_id,agent_id", Isolation: Scoped, IsolationTest: "internal/agentmemory/isolation_test.go"},
+	{Source: "internal/approvals/store.go", Resource: "approvals", Class: WorkspaceOwned, ScopeKey: "workspace_id + required permission", Isolation: Scoped, IsolationTest: "internal/approvals/store_test.go"},
 	{Source: "internal/auth/apikeys/postgres.go", Resource: "api-keys", Class: UserPrivate, ScopeKey: "workspace_id,subject_id", Isolation: Scoped, IsolationTest: "internal/auth/apikeys/postgres_test.go"},
 	{Source: "internal/auth/apikeys/store.go", Resource: "api-keys", Class: UserPrivate, ScopeKey: "workspace_id,subject_id", Isolation: Scoped, IsolationTest: "internal/auth/apikeys/isolation_test.go"},
 	{Source: "internal/auth/jwt.go", Resource: "credentials", Class: UserPrivate, ScopeKey: "workspace_id,user_id", Isolation: Scoped, IsolationTest: "internal/auth/token_tenancy_test.go"},
