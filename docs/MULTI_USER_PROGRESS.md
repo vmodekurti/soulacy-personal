@@ -17,7 +17,7 @@ isolation state; this document explains it.
 | — event spine + stores | (cross-cutting) | Events, action log, learning, Studio traces, workboard, conversation history ✓ |
 | — isolation floor | (cross-cutting) | 0 blockers: every declared store is scoped and names a real isolation test |
 | M4 — Execution plane | MU-020–025 | MU-020 ✓; MU-021 ✓ (6/7; scalable workers → M6); MU-022 ✓; MU-023 ✓; MU-024 ✓; MU-025 ✓ (4/5; org sharing deferred with a guard, workspace-status half awaits MU-032) |
-| M5 — Team Preview | MU-026–032 | Not started |
+| M5 — Team Preview | MU-026–032 | MU-026 partial (criterion 7 closed: sessionless + administrative leakage); resume cursor and per-recipient payloads outstanding |
 | M6 — Scale | MU-033–037 | Not started |
 
 ## Isolation progress
@@ -1543,6 +1543,42 @@ Criterion 4's lineage rules were already implemented and are now written down
 in `docs/LEARNING_LINEAGE.md` — including the limit that lineage is tracked by
 session ID, so a hand-authored proposal with no session has no link to
 invalidate through.
+
+### Two tenants' "support-bot" both passed the same check (MU-026 criterion 7)
+
+The event authorizer was careful about *principals* and silent about
+*tenants* on one path. An event with a session consults the durable owner
+record, which carries a workspace. An event WITHOUT one — tool progress, run
+status, errors — had no owner record, so tenancy rested entirely on:
+
+```go
+s.rbacManager.CanAccessAgentResourceInWorkspace(
+    principal.WorkspaceID, principal.Role, event.AgentID, ...)
+```
+
+That asks whether the **subscriber's** workspace lets their role read an agent
+with that ID. It never asks whether the **event** belonged to that workspace.
+Agent IDs are unique per workspace, not per deployment — the same collision
+that broke the scheduler and the rate limiter — so two tenants with a
+`support-bot` both satisfied it, and each received the other's sessionless
+events.
+
+The fix has two halves because the two cases are genuinely different:
+
+- **A stamped event may never cross**, whatever the owner record says.
+  `Engine.emit` stamps the run's workspace, so this covers every event a run
+  produces and is strictly stronger than owner-based authorization — it also
+  catches a stale or wrong owner record.
+- **An unstamped sessionless event has nothing establishing its tenant at
+  all**, so it is refused for any named workspace. Personal keeps receiving it,
+  which is what a single-tenant deployment has always seen.
+
+**The first version of this fix was too strong and a test caught it.** I made
+the workspace comparison unconditional, which broke a legitimate case: an
+unstamped event *with* a session, where the durable owner record — not the
+absent stamp — is the verified fact. Treating "no stamp" as "personal
+workspace" there would deny a tenant their own sessions. The scope of a
+fail-closed check matters as much as its presence.
 
 ## Guards worth keeping
 

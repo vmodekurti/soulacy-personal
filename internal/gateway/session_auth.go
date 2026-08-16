@@ -109,11 +109,37 @@ func websocketPrincipalFromCtx(c *fiber.Ctx) eventPrincipal {
 
 // authorizeEvent prevents a WebSocket subscriber from observing another
 // principal's prompts, tool arguments, results, or run progress.
+//
+// MU-026 criterion 7 names "sessionless events and administrative events"
+// specifically, and the sessionless path is where this was wrong. An event with
+// no session was authorized by asking whether the SUBSCRIBER's workspace lets
+// their role read an agent with that ID — never whether the EVENT belonged to
+// that workspace. Agent IDs are unique per workspace, not per deployment, so
+// two tenants with a "support-bot" both satisfied the check and each received
+// the other's sessionless events: tool progress, run status, errors.
+//
+// The workspace comparison below is therefore first and unconditional. It is
+// not a refinement of the checks that follow; it is the boundary they were all
+// implicitly assuming.
 func (s *Server) authorizeEvent(principal eventPrincipal, event message.Event) bool {
 	if principal.Admin && !s.authorizationRequired() {
 		return true
 	}
 	if !principal.Authenticated || principal.Principal == "" {
+		return false
+	}
+	// A STAMPED event may never cross a workspace boundary, whatever the
+	// checks below would say. Engine.emit stamps the run's workspace, so this
+	// covers every event produced by a run and is strictly stronger than what
+	// was here before.
+	//
+	// Only applied when the event actually carries a workspace. An unstamped
+	// event is not evidence of belonging to the personal workspace — it is
+	// evidence that whoever emitted it predates the stamping, and for those the
+	// session owner below is the durable, verified fact. Treating unstamped as
+	// personal here would deny a workspace's own users their own sessions.
+	if stamped := strings.TrimSpace(event.WorkspaceID); stamped != "" &&
+		wsroot.Normalize(stamped) != wsroot.Normalize(principal.WorkspaceID) {
 		return false
 	}
 	if event.SessionID != "" {
@@ -126,6 +152,21 @@ func (s *Server) authorizeEvent(principal eventPrincipal, event message.Event) b
 		return false
 	}
 	if event.AgentID == "" {
+		return false
+	}
+	// The sessionless path is where the gap was. With no session there is no
+	// owner record to consult, so tenancy rested entirely on the RBAC call
+	// below — which asks whether the SUBSCRIBER's workspace lets their role
+	// read an agent with that ID, never whether the EVENT belonged to that
+	// workspace. Agent IDs are unique per workspace, so two tenants with a
+	// "support-bot" both satisfied it and each received the other's tool
+	// progress, run status and errors.
+	//
+	// An unstamped sessionless event therefore has nothing establishing its
+	// tenant at all, and is refused for any named workspace. Personal keeps
+	// receiving it, which is what a single-tenant deployment has always seen.
+	if strings.TrimSpace(event.WorkspaceID) == "" &&
+		wsroot.Normalize(principal.WorkspaceID) != wsroot.PersonalWorkspaceID {
 		return false
 	}
 	claims := &auth.Claims{Role: principal.Role, Scopes: principal.Scopes}
