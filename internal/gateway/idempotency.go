@@ -4,12 +4,15 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/soulacy/soulacy/internal/apiversion"
+	"github.com/soulacy/soulacy/internal/concurrency"
+	"github.com/soulacy/soulacy/pkg/agent"
 )
 
 // idempotencyTTL bounds how long a replay stays available. Long enough to
@@ -200,9 +203,12 @@ func resourceETag(value any) string {
 	return `"` + hex.EncodeToString(sum[:16]) + `"`
 }
 
-// checkIfMatch enforces optimistic concurrency. A caller that supplies no
-// If-Match is unchanged from today; a caller that supplies a stale one is
-// rejected with 409 rather than silently overwriting a concurrent edit.
+// checkIfMatch enforces optimistic concurrency (MU-028).
+//
+// The decision lives in internal/concurrency; this function is the HTTP shell
+// around it. Two implementations of "is this write stale" is how one of them
+// ends up missing a case — the same reasoning that collapsed the approval
+// eligibility check in MU-022 into one function.
 //
 // It returns rejected=true when it has already written the 409 response, so
 // the caller must return immediately. The boolean is not redundant with the
@@ -210,21 +216,97 @@ func resourceETag(value any) string {
 // only checked the error would sail straight past a rejected write and apply
 // the change anyway.
 func (s *Server) checkIfMatch(c *fiber.Ctx, current any) (rejected bool, err error) {
-	supplied := strings.TrimSpace(c.Get(fiber.HeaderIfMatch))
-	if supplied == "" {
-		return false, nil
-	}
 	etag := resourceETag(current)
 	c.Set(fiber.HeaderETag, etag)
-	if supplied == "*" || matchesETag(supplied, etag) {
-		return false, nil
+
+	// A comma-separated If-Match list is legal HTTP; any member matching is a
+	// match. Resolved here rather than inside the policy, which reasons about
+	// one token.
+	supplied := strings.TrimSpace(c.Get(fiber.HeaderIfMatch))
+	precondition := concurrency.Precondition{
+		Value: firstMatching(supplied, etag),
+		// Required in Team and Scale. Letting a missing precondition through
+		// makes concurrency control opt-in, and the client that forgets is
+		// exactly the one that overwrites silently every time — which is the
+		// bug. A personal deployment has nobody to conflict with and is
+		// unchanged (product invariant 7).
+		RequireMatch: s.authorizationRequired(),
 	}
-	return true, c.Status(fiber.StatusConflict).JSON(fiber.Map{
-		"error":  "the resource changed since you read it; re-read it and reapply your change",
-		"code":   apiversion.CodeStaleWrite,
-		"remedy": "GET the resource to obtain its current ETag, then retry with that value in If-Match",
-		"etag":   etag,
-	})
+
+	switch checkErr := precondition.Check(etag); {
+	case checkErr == nil:
+		return false, nil
+	case errors.Is(checkErr, concurrency.ErrPreconditionRequired):
+		// 428, not 409. "You did not send a version" and "your version is
+		// stale" have different remedies, and a client told 409 will re-read
+		// and retry — succeeding, and still not sending a precondition.
+		return true, c.Status(fiber.StatusPreconditionRequired).JSON(fiber.Map{
+			"error":  "this update requires the current version",
+			"code":   apiversion.CodeStaleWrite,
+			"remedy": "GET the resource to obtain its ETag, then send it in If-Match",
+			"etag":   etag,
+		})
+	default:
+		conflict := concurrency.NewConflict(
+			resourceLabel(c), supplied, etag, lastModifiedBy(current), lastModifiedAt(current))
+		return true, c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"error":            conflict.Message,
+			"code":             apiversion.CodeStaleWrite,
+			"remedy":           "GET the resource to obtain its current ETag, then retry with that value in If-Match",
+			"etag":             etag,
+			"current_version":  conflict.CurrentVersion,
+			"supplied_version": conflict.SuppliedVersion,
+			"last_modified_by": conflict.LastModifiedBy,
+			"last_modified_at": conflict.LastModifiedAt,
+		})
+	}
+}
+
+// firstMatching reduces an If-Match list to the member that matches, or the
+// first member when none does — so a rejection echoes something the client
+// recognises rather than the whole header.
+func firstMatching(supplied, current string) string {
+	if strings.TrimSpace(supplied) == "" {
+		return ""
+	}
+	candidates := strings.Split(supplied, ",")
+	for _, candidate := range candidates {
+		if concurrency.Match(candidate, current) {
+			return strings.TrimSpace(candidate)
+		}
+	}
+	if strings.TrimSpace(candidates[0]) == concurrency.Wildcard {
+		return concurrency.Wildcard
+	}
+	return strings.TrimSpace(candidates[0])
+}
+
+// resourceLabel names what conflicted, for a message a person can act on.
+func resourceLabel(c *fiber.Ctx) string {
+	if id := strings.TrimSpace(c.Params("id")); id != "" {
+		return id
+	}
+	return "this resource"
+}
+
+// lastModifiedBy names the other actor, so the loser of a conflict learns who
+// to talk to (MU-028 criterion 5).
+//
+// Empty today, and deliberately not faked. agent.Definition carries no
+// last-editor field: the actor is passed to Loader.UpsertInWorkspace and
+// recorded in the audit trail, which is a separate lookup this synchronous
+// path should not take on every conflict. Conflict handles the unattributed
+// case — the message reads "changed since you loaded it" rather than naming
+// nobody — so the gap degrades the message rather than producing a wrong one.
+// Closing it means reading the agent audit history here, which belongs with
+// the rest of criterion 5.
+func lastModifiedBy(current any) string { return "" }
+
+func lastModifiedAt(current any) string {
+	if def, ok := current.(*agent.Definition); ok && def != nil && !def.LoadedAt.IsZero() {
+		return def.LoadedAt.UTC().Format(time.RFC3339)
+	}
+	return ""
 }
 
 // matchesETag accepts a comma-separated If-Match list and tolerates the weak

@@ -17,7 +17,7 @@ isolation state; this document explains it.
 | — event spine + stores | (cross-cutting) | Events, action log, learning, Studio traces, workboard, conversation history ✓ |
 | — isolation floor | (cross-cutting) | 0 blockers: every declared store is scoped and names a real isolation test |
 | M4 — Execution plane | MU-020–025 | MU-020 ✓; MU-021 ✓ (6/7; scalable workers → M6); MU-022 ✓; MU-023 ✓; MU-024 ✓; MU-025 ✓ (4/5; org sharing deferred with a guard, workspace-status half awaits MU-032) |
-| M5 — Team Preview | MU-026–032 | MU-026 ✓; MU-027 partial (criteria 3, 4, 5, 6 closed; p95 targets need a load harness and a documented load profile); MU-028 partial (versioning primitives; handler wiring outstanding); MU-028–032 not started |
+| M5 — Team Preview | MU-026–032 | MU-026 ✓; MU-027 partial (criteria 3, 4, 5, 6 closed; p95 targets need a load harness and a documented load profile); MU-028 partial (criteria 1, 2 closed; GUI choices and audit attribution outstanding); MU-028–032 not started |
 | M6 — Scale | MU-033–037 | Not started |
 
 ## Isolation progress
@@ -1842,6 +1842,52 @@ cannot have.
 
 Wiring this into the agent and Studio handlers is the remaining work; the
 primitives and their tests are the part where getting it wrong is silent.
+
+### A survey I should have done first (MU-028 wiring)
+
+I built `internal/concurrency` before checking whether the gateway already had
+an ETag mechanism. It did — `resourceETag` and `checkIfMatch` in
+`internal/gateway/idempotency.go`, already wired to `handleGetAgent` and
+`handleUpdateAgent`. That is the survey-first rule this branch has relied on
+repeatedly, violated by me, and it cost a package that mostly restated
+something present.
+
+What the survey would have found is that the mechanism was **real but
+narrow**, and the gaps were the interesting part:
+
+- Its own comment recorded the hole: *"A caller that supplies no If-Match is
+  unchanged from today."* So concurrency control was **opt-in**, and the client
+  that forgets is exactly the one that overwrites silently, every time.
+- Of nine agent-mutating call sites, **one** checked. The uncovered one that
+  matters most is the raw YAML editor: a whole-file replace, so a stale save
+  discards every change made since the editor was opened, not just the
+  overlapping field. Its GET did not even return a validator, so a client that
+  wanted to be careful had nothing to send.
+- The 409 carried the ETag and nothing else — no echo of what was sent, so a
+  client with several edits in flight cannot tell which one lost.
+
+The primitives were not wasted, but their value is narrower than I thought when
+writing them: `checkIfMatch` mixed the decision with writing the HTTP response,
+which is why it needed the awkward `rejected bool` its comment has to explain.
+The policy now lives in one testable place and the handler is the shell around
+it — the same collapse MU-022 made for approval eligibility, for the same
+reason.
+
+**428, not 409, for a missing precondition.** "You sent no version" and "your
+version is stale" have different remedies, and a client told 409 will re-read
+and retry — succeeding, and still not sending a precondition. The distinction
+only matters because the two errors are otherwise easy to conflate, which is
+how a mechanism stays opt-in while appearing enforced.
+
+**Not done, and not faked:** criterion 5 asks the conflict to identify both
+actors. `agent.Definition` carries no last-editor field — the actor goes to
+`Loader.UpsertInWorkspace` and into the audit trail, a separate lookup this
+synchronous path should not take on every conflict. `Conflict` handles the
+unattributed case, so the message degrades to "changed since you loaded it"
+rather than naming nobody. Closing it means reading the agent audit history
+here. The remaining seven mutating call sites also still need covering; they
+were not touched because verifying which are creates and which are updates
+needs more care than a blanket edit.
 
 ## Guards worth keeping
 

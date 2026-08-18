@@ -310,7 +310,13 @@ func (s *Server) handleGetAgentYAML(c *fiber.Ctx) error {
 		}
 		path = ""
 	}
-	return c.JSON(fiber.Map{"id": def.ID, "path": path, "yaml": string(raw)})
+	// The same validator handleUpdateAgentYAML will check, so "open the editor,
+	// save" can be conditional. An editor that cannot obtain a version cannot
+	// send one, and the requirement below would reject every save.
+	if etag := resourceETag(def); etag != "" {
+		c.Set(fiber.HeaderETag, etag)
+	}
+	return c.JSON(fiber.Map{"id": def.ID, "path": path, "yaml": string(raw), "version": resourceETag(def)})
 }
 
 // handleUpdateAgentYAML accepts edited SOUL.yaml text, parses + validates it, and
@@ -322,6 +328,14 @@ func (s *Server) handleUpdateAgentYAML(c *fiber.Ctx) error {
 	existing := s.agents(c).Get(id)
 	if existing == nil {
 		return s.errMsg(c, fiber.StatusNotFound, "agent not found")
+	}
+
+	// MU-028. The raw YAML editor is the most collaborative surface there is —
+	// a whole-file replace, so a stale save discards every change made since
+	// the editor was opened, not just the overlapping field. It was the one
+	// agent-mutating handler with no concurrency check at all.
+	if rejected, err := s.checkIfMatch(c, existing); rejected {
+		return err
 	}
 
 	body := c.Body()
