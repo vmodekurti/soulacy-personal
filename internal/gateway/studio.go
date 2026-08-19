@@ -3445,6 +3445,15 @@ func (s *Server) handleStudioSaveYAML(c *fiber.Ctx) error {
 		return protectedSystemAgentResponse(c)
 	}
 
+	// Optimistic concurrency: if the agent already exists, the caller must send
+	// the current ETag or the write is refused. Mirrors handleUpdateAgentYAML.
+	existing := s.agents(c).Get(def.ID)
+	if existing != nil {
+		if rejected, err := s.checkIfMatch(c, existing); rejected {
+			return err
+		}
+	}
+
 	report := agentvalidate.Definition(&def, "", s.agentValidationOptions(c.Context()), agentvalidate.Report{})
 	if report.Errors > 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -3466,7 +3475,7 @@ func (s *Server) handleStudioSaveYAML(c *fiber.Ctx) error {
 	// its source path, so Save updates the agent in place instead of dropping a
 	// duplicate copy under the first configured agent dir. SourcePath is
 	// <baseDir>/<id>/SOUL.yaml, so the base dir is the parent of the agent dir.
-	if existing := s.agents(c).Get(def.ID); existing != nil && existing.SourcePath != "" {
+	if existing != nil && existing.SourcePath != "" {
 		def.SourcePath = existing.SourcePath
 		dir = filepath.Dir(filepath.Dir(existing.SourcePath))
 	}
@@ -3847,6 +3856,15 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 	}
 	if isProtectedSystemAgent(def.ID) {
 		return protectedSystemAgentResponse(c)
+	}
+
+	// Optimistic concurrency: if the agent already exists, the caller must send
+	// the current ETag or the write is refused. Mirrors handleUpdateAgent.
+	existing := s.agents(c).Get(def.ID)
+	if existing != nil {
+		if rejected, err := s.checkIfMatch(c, existing); rejected {
+			return err
+		}
 	}
 
 	// Record the tool contracts this workflow was built against (P0-3). Captured
@@ -4246,6 +4264,14 @@ func (s *Server) handleStudioSaveRules(c *fiber.Ctx) error {
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
+
+	// Optimistic concurrency: the current rules text is the resource state.
+	// We need to check If-Match against it before allowing a save.
+	currentRules := s.soulRules(s.studio(c))
+	if rejected, err := s.checkIfMatch(c, currentRules); rejected {
+		return err
+	}
+
 	author := s.auditActor(c)
 
 	// Reset is a version too. Recording the default as the new head keeps the
@@ -4334,6 +4360,27 @@ func (s *Server) handleStudioSaveDraft(c *fiber.Ctx) error {
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
+
+	// Optimistic concurrency: check if a draft with the same name already exists
+	// and require If-Match on its current version. The id is derived from name
+	// + workflow hash, so we check by loading drafts with that name prefix.
+	existingDrafts, _ := studio.ListDrafts(dir)
+	var currentDraft *studio.StoredDraft
+	for i := range existingDrafts {
+		if existingDrafts[i].Name == req.Name {
+			d, err := studio.LoadDraft(dir, existingDrafts[i].ID)
+			if err == nil {
+				currentDraft = &d
+				break
+			}
+		}
+	}
+	if currentDraft != nil {
+		if rejected, err := s.checkIfMatch(c, currentDraft); rejected {
+			return err
+		}
+	}
+
 	id, err := studio.SaveDraft(dir, req.Name, req.Workflow)
 	if err != nil {
 		return s.errJSON(c, fiber.StatusBadRequest, err)
