@@ -282,6 +282,120 @@ func TestIsolationEscapeByInheritingGatewayCredentials(t *testing.T) {
 	}
 }
 
+// An MCP server is a subprocess an operator installed and a tenant's agents
+// call. Before MU-017 criterion 5 there was ONE set of them for the whole
+// deployment, started in the gateway's own working directory — so a
+// filesystem MCP server resolved every tenant's relative path against the same
+// tree. Confinement had nothing to confine to, because a server had no
+// workspace.
+//
+// Asserted through WorkspaceConfinement, the function mcp.Pool actually calls,
+// rather than through the pool: this is the engine's half of the contract, and
+// it is the half that can regress silently — a confinement that resolved to
+// one shared directory would still satisfy every interface and start every
+// server successfully.
+func TestIsolationEscapeByASharedMCPWorkingDirectory(t *testing.T) {
+	e, _ := attackEngine(t)
+
+	dirA, _, _, err := e.WorkspaceConfinement("ws-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dirB, _, _, err := e.WorkspaceConfinement("ws-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dirA == dirB {
+		t.Fatalf("both workspaces' MCP servers would start in %s", dirA)
+	}
+	// And each must be the workspace's OWN tree — the same one read_file and
+	// write_file resolve against. A separate scratch namespace beside it would
+	// be disjoint and still wrong: a server that writes a file the tenant then
+	// cannot read is a feature that appears broken.
+	if !pathWithinRoot(dirA, tenantTree(t, e, "ws-a")) {
+		t.Errorf("ws-a's MCP working directory %s is outside its own tree", dirA)
+	}
+	if !pathWithinRoot(dirB, tenantTree(t, e, "ws-b")) {
+		t.Errorf("ws-b's MCP working directory %s is outside its own tree", dirB)
+	}
+}
+
+// A Python tool is the largest filesystem consumer in the deployment and the
+// one the filesystem story missed. read_file and write_file resolve through
+// MU-021's per-workspace roots and have tests above proving it; a tool calling
+// open() is a different PROCESS using the OS's own path resolution, so none of
+// that applies to it. It was spawned with no cmd.Dir, inheriting whatever
+// directory the gateway was started in — one directory for every tenant.
+//
+// Asserted on the spawned command's working directory rather than by running a
+// tool that writes a file: the property is a property of the exec call, and a
+// file-writing test would pass on a build that set cmd.Dir to the right place
+// for the wrong reason (the test's own temp dir being the gateway's CWD).
+func TestNoisyNeighbourCannotCollideInAToolSubprocess(t *testing.T) {
+	e, root := attackEngine(t)
+
+	dirA, err := e.toolWorkDir(inWorkspace(context.Background(), "ws-a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dirB, err := e.toolWorkDir(inWorkspace(context.Background(), "ws-b"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dirA == dirB {
+		t.Fatalf("both tenants' tool subprocesses start in %s, so one relative path is one file", dirA)
+	}
+	// Each must be the tenant's own tree — the SAME one read_file resolves
+	// against. A tool that writes a file the agent cannot then read is a tool
+	// that looks broken, and the next person fixes it by removing the
+	// confinement.
+	for ws, dir := range map[string]string{"ws-a": dirA, "ws-b": dirB} {
+		if !pathWithinRoot(dir, tenantTree(t, e, ws)) {
+			t.Errorf("%s's tool subprocess starts in %s, outside its own tree", ws, dir)
+		}
+	}
+	// Invariant 7: personal gets the configured root, unchanged and not
+	// namespaced under it.
+	personal, err := e.toolWorkDir(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if personal != root {
+		t.Errorf("a single-tenant install's tools start in %s, want the configured root %s", personal, root)
+	}
+
+	// MU-016 criterion 5 is about the RUN's mounts, not the workspace's. Two
+	// concurrent runs of the SAME tenant both writing `out.csv` are one file
+	// otherwise, and the second silently overwrites the first — a data-loss
+	// bug that no tenancy boundary catches because there is no tenancy
+	// violation in it.
+	ctxA := WithRunID(inWorkspace(context.Background(), "ws-a"), "run_one")
+	ctxB := WithRunID(inWorkspace(context.Background(), "ws-a"), "run_two")
+	runA, err := e.toolWorkDir(ctxA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runB, err := e.toolWorkDir(ctxB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runA == runB {
+		t.Errorf("two runs of one workspace share the tool directory %s", runA)
+	}
+	// Both must still sit inside the tenant's tree, or the run boundary has
+	// been bought by breaking the tenant one.
+	for name, dir := range map[string]string{"run_one": runA, "run_two": runB} {
+		if !pathWithinRoot(dir, tenantTree(t, e, "ws-a")) {
+			t.Errorf("%s's directory %s escaped the workspace tree", name, dir)
+		}
+	}
+	// And the shell path must agree, or a script written by one tool is
+	// looked for in the wrong place by the next.
+	if shell := e.defaultPrivilegedWorkDir(ctxA); shell != runA {
+		t.Errorf("shell_exec starts in %s but tool subprocesses in %s — the run's own tools disagree about where \"here\" is", shell, runA)
+	}
+}
+
 // ── Resource bounds (criterion 3) ──────────────────────────────────────────
 
 // "CPU, memory, PIDs, open files, disk, wall time, and output size are
