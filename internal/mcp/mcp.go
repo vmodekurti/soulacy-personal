@@ -22,6 +22,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/soulacy/soulacy/internal/sandbox"
 )
 
 // ProtocolVersion is the MCP protocol version this client advertises.
@@ -52,6 +54,35 @@ type ServerConfig struct {
 	InheritAll bool
 	URL        string            // http: server URL
 	Headers    map[string]string // http: extra headers (auth, etc.)
+
+	// WorkDir is the directory the stdio child starts in. Empty inherits the
+	// gateway's own working directory, which is what every MCP server did
+	// before MU-017 criterion 5 — so a server that resolved a relative path
+	// resolved it against the gateway's tree, shared by every tenant. A
+	// caller that knows the workspace supplies its confinement root here.
+	WorkDir string
+
+	// Limits are the rlimits applied to the stdio child through the sandbox
+	// re-exec wrapper. Disabled Limits leave the command unwrapped, which is
+	// the behaviour every deployment had until now; SelfPath must also be set
+	// for wrapping to happen at all.
+	Limits sandbox.Limits
+
+	// SelfPath is the soulacy binary used for the sandbox re-exec. Passed
+	// explicitly rather than read from os.Executable() inside the transport so
+	// the wrapping decision stays testable without a real binary on disk.
+	SelfPath string
+
+	// SharedCredentials lets the operator's own Env and Headers travel into
+	// EVERY workspace's copy of this server.
+	//
+	// Off by default, and the default is the security control: see
+	// tenantcreds.go. On means every tenant acts as one identity upstream —
+	// which is right for a server with no credentials at all, or one whose
+	// credential is genuinely deployment-wide (a site licence key), and wrong
+	// for anything that can read or write a tenant's data. It is spelled out
+	// in config.yaml so that turning it on is a sentence somebody wrote.
+	SharedCredentials bool
 }
 
 // Tool is one tool exposed by an MCP server.

@@ -29,6 +29,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/soulacy/soulacy/internal/sandbox"
 )
 
 // transport is the minimal contract every MCP transport satisfies.
@@ -92,7 +94,26 @@ func newStdio(cfg ServerConfig, log *zap.Logger) (*stdioTx, error) {
 	if cfg.Command == "" {
 		return nil, fmt.Errorf("stdio: command is required")
 	}
-	cmd := exec.Command(cfg.Command, cfg.Args...)
+	// CONFINEMENT, MU-017 criterion 5. Three separate things an MCP server
+	// used to have and should not: the gateway's whole environment (closed
+	// earlier by ProcessEnv), the gateway's working directory, and no
+	// resource ceiling at all.
+	//
+	// The working directory is the one that crosses tenants. An MCP server is
+	// a general-purpose subprocess — a filesystem server, a git server, a
+	// shell — and every relative path it resolves resolved against wherever
+	// the gateway happened to be started. That is one directory for the whole
+	// deployment, so two workspaces' servers wrote into the same tree and
+	// could read each other's files by naming an ordinary relative path. The
+	// caller that knows the workspace passes its confinement root; the
+	// transport does not guess one, because a guessed default here would be
+	// the shared directory again under a different name.
+	argv := append([]string{cfg.Command}, cfg.Args...)
+	argv = sandbox.Wrap(cfg.SelfPath, cfg.Limits, argv)
+	cmd := exec.Command(argv[0], argv[1:]...)
+	if dir := strings.TrimSpace(cfg.WorkDir); dir != "" {
+		cmd.Dir = dir
+	}
 	env, withheld := ProcessEnv(cfg, os.Environ())
 	cmd.Env = env
 	if withheld > 0 {
