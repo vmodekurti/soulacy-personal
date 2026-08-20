@@ -32,6 +32,7 @@ import (
 	"github.com/soulacy/soulacy/internal/wsroot"
 
 	"github.com/soulacy/soulacy/internal/memory"
+	"github.com/soulacy/soulacy/internal/redact"
 	"github.com/soulacy/soulacy/internal/storage"
 	"github.com/soulacy/soulacy/pkg/message"
 )
@@ -128,6 +129,20 @@ func OpenActionLog(pool *pgxpool.Pool, logDir string, log *zap.Logger) (*ActionL
 }
 
 // Append enqueues ev for async write. Never blocks.
+//
+// THE REDACTION HERE IS THE SAME ONE internal/actionlog HAS DONE ALL ALONG,
+// and its absence was the single-user/multi-user inversion in miniature: this
+// is the SAME store with the SAME contract, and the backend a Team deployment
+// selects was the one without the protection. The JSONL backend redacted, so
+// a solo operator's tool arguments were masked on disk; switching to Postgres
+// to add colleagues wrote them in clear into a shared `agent_events` table
+// that every workspace's rows live in and any operator with database access
+// can read across.
+//
+// It is done at Append rather than at the INSERT because this Append also
+// mirrors to per-agent files further down — redacting at one of the two write
+// sites would leave the other clear, which is how there came to be two
+// answers here in the first place.
 func (a *ActionLog) Append(ev message.Event) {
 	if ev.AgentID == "" {
 		return
@@ -135,6 +150,7 @@ func (a *ActionLog) Append(ev message.Event) {
 	if ev.Timestamp.IsZero() {
 		ev.Timestamp = time.Now().UTC()
 	}
+	ev.Payload = redact.Value(ev.Payload)
 	select {
 	case a.queue <- ev:
 	default:
