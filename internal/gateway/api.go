@@ -153,7 +153,70 @@ func (s *Server) handleHealth(c *fiber.Ctx) error {
 	})
 }
 
+// restartRefusal returns why the API may not restart this process, or "" when
+// it may.
+//
+// A separate function so BOTH answers are testable. The allowed path ends in
+// os.Exit(0), so a test that drives the handler to completion takes the test
+// binary with it — which is how "personal installations can still restart"
+// ends up asserted by reading the source instead of by running it.
+func (s *Server) restartRefusal(c *fiber.Ctx) string {
+	if !config.IsMultiUserMode(s.config().DeploymentMode()) {
+		return ""
+	}
+	if platformPrincipal(c) {
+		// The operator restarting their own deployment. platformMW already
+		// admits only this principal; the check is repeated here because the
+		// consequence of the route being re-registered with ordinary RBAC
+		// middleware some day is every tenant's work stopped by a customer,
+		// and that is worth two lines.
+		return ""
+	}
+	// WHO CAN REACH IT is the problem, not what it does.
+	//
+	// This endpoint is gated on config:write, which the workspace `owner` and
+	// `admin` roles hold. Those are TENANT roles: the person who runs a
+	// workspace, not the person who runs the machine. So any customer could
+	// call os.Exit(0) on every other customer's runs, streams and scheduled
+	// work.
+	//
+	// There is no role to move it to. No platform-administrator principal
+	// exists in these modes: workspaceContextMW requires a verified membership
+	// for every /api/v1 request and refuses the bootstrap server key outright.
+	// Until one exists, this endpoint has no legitimate caller here — a
+	// multi-user deployment is restarted by whatever supervises the process,
+	// which is where its operator already is.
+	return "restarting the gateway is not available to workspace roles in " + s.config().DeploymentMode() +
+		" mode: it would stop every workspace's runs, and a workspace role is a tenant role. " +
+		"The deployment's bootstrap server.api_key opens it, or restart the process from the host."
+}
+
 func (s *Server) handleRestart(c *fiber.Ctx) error {
+	if refusal := s.restartRefusal(c); refusal != "" {
+		return s.errMsg(c, fiber.StatusForbidden, refusal)
+	}
+	// A DELIBERATE ACT, not a reachable one.
+	//
+	// This stops every workspace's runs, streams and scheduled work, and it is
+	// a bare POST with no body — so anything that walks the route table and
+	// sends a request to each protected endpoint restarts the deployment. Our
+	// own route-architecture prober did exactly that the moment the operator
+	// credential was allowed through, and took the test binary with it. A
+	// monitoring probe or a security scanner would do the same to production.
+	//
+	// The confirmation is required only in multi-user mode: in personal mode
+	// the blast radius is the one person pressing the button, and adding a
+	// step there is friction with nothing behind it.
+	if config.IsMultiUserMode(s.config().DeploymentMode()) {
+		var body struct {
+			Confirm string `json:"confirm"`
+		}
+		_ = c.BodyParser(&body)
+		if strings.TrimSpace(body.Confirm) != "restart" {
+			return s.errMsg(c, fiber.StatusBadRequest,
+				`restarting stops every workspace's work; send {"confirm":"restart"} to mean it`)
+		}
+	}
 	s.log.Warn("gateway restart requested via API", zap.Any("request_id", c.Locals("request_id")))
 	if err := startRestartChild(); err != nil {
 		s.log.Error("gateway restart failed to spawn child", zap.Error(err))
@@ -247,6 +310,17 @@ func (s *Server) handleListAgents(c *fiber.Ctx) error {
 	// hide cron-only agents from Chat. Computed, not stored, so it stays correct
 	// for older agents that predate the Surfaces field.
 	meta := make(map[string]fiber.Map, len(defs))
+	// versions is what makes conditional saves possible at all (MU-028
+	// criterion 3). Nothing in the GUI ever fetches a single agent — every
+	// edit screen works out of this list — so without a validator here there
+	// is no token any client could put in If-Match, and criterion 2's
+	// precondition would refuse every save in a Team deployment.
+	//
+	// The same derivation as the single-resource ETag, not a parallel one: a
+	// token from the list that a save does not accept is worse than no token,
+	// because the client sends it and is refused with a conflict that is not
+	// a conflict.
+	versions := make(map[string]string, len(defs))
 	for _, d := range defs {
 		if d == nil {
 			continue
@@ -255,6 +329,7 @@ func (s *Server) handleListAgents(c *fiber.Ctx) error {
 			"surfaces":      d.EffectiveSurfaces(),
 			"chat_eligible": d.AppearsOnChat(),
 		}
+		versions[d.ID] = resourceETag(d)
 	}
 	// Optional ?surface=chat filter returns only agents that appear there.
 	if surface := strings.TrimSpace(c.Query("surface")); surface != "" {
@@ -266,7 +341,7 @@ func (s *Server) handleListAgents(c *fiber.Ctx) error {
 		}
 		defs = filtered
 	}
-	return c.JSON(fiber.Map{"agents": defs, "count": len(defs), "interfaces": meta})
+	return c.JSON(fiber.Map{"agents": defs, "count": len(defs), "interfaces": meta, "versions": versions})
 }
 
 func (s *Server) handleGetAgent(c *fiber.Ctx) error {
@@ -380,8 +455,8 @@ func (s *Server) handleUpdateAgentYAML(c *fiber.Ctx) error {
 	}
 
 	dir := ""
-	if len(s.cfg.AgentDirs) > 0 {
-		dir = s.cfg.AgentDirs[0]
+	if len(s.config().AgentDirs) > 0 {
+		dir = s.config().AgentDirs[0]
 	}
 	// See handleUpdateAgent for the ack-gate rationale — raw YAML saves take
 	// the same audit path so a text edit can't sneak past the modal.
@@ -394,9 +469,11 @@ func (s *Server) handleUpdateAgentYAML(c *fiber.Ctx) error {
 	}
 	audit := s.auditAgentCapabilityChange(s.agents(c), existing, &def)
 
-	// Re-register schedule, mirroring handleUpdateAgent.
-	s.scheduler.DeregisterAgent(id)
-	if err := s.scheduler.RegisterAgent(&def); err != nil {
+	// Re-register schedule, mirroring handleUpdateAgent. Through the scoped
+	// accessor: the schedule belongs to the workspace that owns the agent, not
+	// to whichever workspace the scheduler process was configured with.
+	s.schedules(c).Deregister(id)
+	if err := s.schedules(c).Register(&def); err != nil {
 		s.log.Warn("scheduler re-registration failed", zap.String("agent", id), zap.Error(err))
 	}
 
@@ -436,8 +513,18 @@ func (s *Server) handleRollbackAgent(c *fiber.Ctx) error {
 	if isProtectedSystemAgent(id) {
 		return protectedSystemAgentResponse(c)
 	}
-	if s.agents(c).Get(id) == nil {
+	existing := s.agents(c).Get(id)
+	if existing == nil {
 		return s.errMsg(c, fiber.StatusNotFound, "agent not found")
+	}
+	// A rollback is the most destructive agent write there is: it replaces the
+	// live definition wholesale with an older one. Guarded against the version
+	// the caller was LOOKING at, because the failure this prevents is somebody
+	// opening the history page, a colleague saving in the meantime, and the
+	// rollback silently discarding that save along with the change it was
+	// meant to undo.
+	if rejected, err := s.guardAgentUpdate(c, existing); rejected {
+		return err
 	}
 	var req struct {
 		Version string `json:"version"`
@@ -449,15 +536,15 @@ func (s *Server) handleRollbackAgent(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusBadRequest, "version is required")
 	}
 	dir := ""
-	if len(s.cfg.AgentDirs) > 0 {
-		dir = s.cfg.AgentDirs[0]
+	if len(s.config().AgentDirs) > 0 {
+		dir = s.config().AgentDirs[0]
 	}
 	def, version, err := s.agents(c).RestoreAgentVersion(dir, id, req.Version)
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
-	s.scheduler.DeregisterAgent(id)
-	if err := s.scheduler.RegisterAgent(def); err != nil {
+	s.schedules(c).Deregister(id)
+	if err := s.schedules(c).Register(def); err != nil {
 		s.log.Warn("scheduler re-registration failed", zap.String("agent", id), zap.Error(err))
 	}
 	return c.JSON(fiber.Map{"agent": def, "restored_version": version})
@@ -510,14 +597,14 @@ func (s *Server) handleCreateAgent(c *fiber.Ctx) error {
 
 	// Default LLM to configured provider
 	if def.LLM.Provider == "" {
-		def.LLM.Provider = s.cfg.LLM.DefaultProvider
+		def.LLM.Provider = s.config().LLM.DefaultProvider
 	}
 	def.Enabled = true
 
 	// Write to first agent dir
 	dir := ""
-	if len(s.cfg.AgentDirs) > 0 {
-		dir = s.cfg.AgentDirs[0]
+	if len(s.config().AgentDirs) > 0 {
+		dir = s.config().AgentDirs[0]
 	}
 	// New agents rarely have pre-existing interactive bindings, so this peek
 	// is usually a no-op. When it isn't (an operator re-creates an agent ID
@@ -527,13 +614,21 @@ func (s *Server) handleCreateAgent(c *fiber.Ctx) error {
 	if peek.RequiresAck && !hasCapabilityAck(c) {
 		return s.respondCapabilityAckRequired(c, peek)
 	}
+	// POST /agents writes through Upsert, so before this an ID that already
+	// existed was REPLACED and the response said 201 Created. Two members both
+	// naming an agent "support-bot" is not an exotic race — it is the ordinary
+	// way two people name the same thing — and the loser was told they had
+	// created something.
+	if rejected, err := s.guardAgentCreate(c, s.agents(c).Get(def.ID)); rejected {
+		return err
+	}
 	if err := s.agents(c).Upsert(dir, &def); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
 	audit := s.auditAgentCapabilityChange(s.agents(c), nil, &def)
 
 	// Register with scheduler if applicable
-	if err := s.scheduler.RegisterAgent(&def); err != nil {
+	if err := s.schedules(c).Register(&def); err != nil {
 		s.log.Warn("scheduler registration failed", zap.String("agent", def.ID), zap.Error(err))
 	}
 
@@ -578,8 +673,8 @@ func (s *Server) handleUpdateAgent(c *fiber.Ctx) error {
 	}
 
 	dir := ""
-	if len(s.cfg.AgentDirs) > 0 {
-		dir = s.cfg.AgentDirs[0]
+	if len(s.config().AgentDirs) > 0 {
+		dir = s.config().AgentDirs[0]
 	}
 	// Peek at the capability audit BEFORE writing. If the change requires
 	// explicit ack (privileged tier + exposed via interactive channels) and
@@ -595,8 +690,8 @@ func (s *Server) handleUpdateAgent(c *fiber.Ctx) error {
 	audit := s.auditAgentCapabilityChange(s.agents(c), existing, &updates)
 
 	// Re-register schedule
-	s.scheduler.DeregisterAgent(id)
-	if err := s.scheduler.RegisterAgent(&updates); err != nil {
+	s.schedules(c).Deregister(id)
+	if err := s.schedules(c).Register(&updates); err != nil {
 		s.log.Warn("scheduler re-registration failed", zap.String("agent", id), zap.Error(err))
 	}
 
@@ -714,7 +809,7 @@ func (s *Server) interactiveChannelBindingsForAgent(agentID string) []string {
 		return nil
 	}
 	var out []string
-	for channelID, cfg := range s.cfg.Channels {
+	for channelID, cfg := range s.config().Channels {
 		if channelID == "http" || cfg == nil {
 			continue
 		}
@@ -799,7 +894,18 @@ func (s *Server) handleDeleteAgent(c *fiber.Ctx) error {
 	if isProtectedSystemAgent(id) {
 		return protectedSystemAgentResponse(c)
 	}
-	s.scheduler.DeregisterAgent(id)
+	// A delete is a write and needs the same precondition, for a sharper
+	// reason than an update does: the work it destroys is not merged, it is
+	// gone. Deleting on a stale view is deleting an agent somebody edited
+	// after you last looked at it.
+	//
+	// Checked BEFORE the deregistration, so a refused delete does not leave
+	// the agent alive with its schedule silently removed — which is the worst
+	// of both outcomes and the one nobody notices until 03:00.
+	if rejected, err := s.guardAgentUpdate(c, s.agents(c).Get(id)); rejected {
+		return err
+	}
+	s.schedules(c).Deregister(id)
 	if err := s.agents(c).Delete(id); err != nil {
 		return s.errJSON(c, fiber.StatusNotFound, err)
 	}
@@ -825,18 +931,18 @@ func (s *Server) setAgentEnabled(c *fiber.Ctx, enabled bool) error {
 	}
 	def.Enabled = enabled
 	dir := ""
-	if len(s.cfg.AgentDirs) > 0 {
-		dir = s.cfg.AgentDirs[0]
+	if len(s.config().AgentDirs) > 0 {
+		dir = s.config().AgentDirs[0]
 	}
 	if err := s.agents(c).Upsert(dir, def); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
 	if enabled {
-		if err := s.scheduler.RegisterAgent(def); err != nil {
+		if err := s.schedules(c).Register(def); err != nil {
 			s.log.Warn("scheduler registration failed", zap.String("agent", id), zap.Error(err))
 		}
 	} else {
-		s.scheduler.DeregisterAgent(id)
+		s.schedules(c).Deregister(id)
 	}
 	return c.JSON(fiber.Map{"id": id, "enabled": enabled})
 }
@@ -868,8 +974,8 @@ func (s *Server) handleCloneAgent(c *fiber.Ctx) error {
 	clone.SourcePath = "" // force a fresh file in its own folder
 
 	dir := ""
-	if len(s.cfg.AgentDirs) > 0 {
-		dir = s.cfg.AgentDirs[0]
+	if len(s.config().AgentDirs) > 0 {
+		dir = s.config().AgentDirs[0]
 	}
 	if err := s.agents(c).Upsert(dir, &clone); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
@@ -1755,7 +1861,7 @@ func channelDiagnostics(spec channelSpec, cfg map[string]any, enabled, registere
 		}
 	}
 	if !registered {
-		add("warn", "Adapter is not registered in the live gateway.", "Restart the gateway after saving channel settings.")
+		add("warn", "Adapter is not registered in the live gateway.", "Save the channel again — saving connects the adapter immediately; if it stays unregistered the settings are incomplete or the credentials are rejected.")
 	} else if !st.Connected {
 		detail := strings.TrimSpace(st.Detail)
 		if detail == "" {
@@ -1840,7 +1946,7 @@ func (s *Server) handleListChannels(c *fiber.Ctx) error {
 
 	out := make([]fiber.Map, 0, len(channelSpecs))
 	for _, spec := range channelSpecs {
-		cfg := s.cfg.Channels[spec.ID] // may be nil
+		cfg := s.config().Channels[spec.ID] // may be nil
 
 		enabled := spec.Always
 		if v, ok := cfg["enabled"].(bool); ok {
@@ -1923,7 +2029,7 @@ func (s *Server) handleTestChannelDelivery(c *fiber.Ctx) error {
 	if adapterID == "" {
 		adapterID = id
 	}
-	cfg := s.cfg.Channels[id]
+	cfg := s.config().Channels[id]
 	to := firstNonBlank(req.To, req.Destination, req.ChatID, req.ChannelID)
 	if to == "" {
 		to = channelDefaultDestination(cfg, id, adapterID)
@@ -2001,7 +2107,7 @@ func (s *Server) handleDiagnoseChannelDelivery(c *fiber.Ctx) error {
 	if adapterID == "" {
 		adapterID = id
 	}
-	cfg := s.cfg.Channels[id]
+	cfg := s.config().Channels[id]
 	to := firstNonBlank(req.To, req.Destination, req.ChatID, req.ChannelID)
 	if to == "" {
 		to = channelDefaultDestination(cfg, id, adapterID)
@@ -2112,7 +2218,7 @@ func (s *Server) handleUpdateChannel(c *fiber.Ctx) error {
 	}
 
 	// Existing in-memory settings for this channel (source of truth for secrets we keep).
-	existing := s.cfg.Channels[id]
+	existing := s.config().Channels[id]
 
 	// Apply to on-disk config.
 	raw, err := readRawConfig(s.cfgPath)
@@ -2170,7 +2276,14 @@ func (s *Server) handleUpdateChannel(c *fiber.Ctx) error {
 	}
 
 	// Mirror into the live in-memory config so the list reflects changes pre-restart.
+	// The PREVIOUS config is captured before the in-memory copy is replaced,
+	// because it is what says which adapters are running right now and
+	// therefore which have to be stopped. Reading it after the overwrite would
+	// stop the adapters the NEW config describes — which, for an unchanged
+	// channel, is the same set, and for a changed one is the wrong set.
+	previous := s.channelConfigSnapshot(id)
 	s.applyChannelToMemory(id, chMap)
+	applied := s.applyChannelLive(c, id, previous, chMap)
 
 	s.log.Info("channel settings updated via API", zap.String("channel", id))
 	details := map[string]any{
@@ -2184,7 +2297,7 @@ func (s *Server) handleUpdateChannel(c *fiber.Ctx) error {
 	s.recordAdminAudit(c, "channel.update", "channel", id, "ok", details)
 	return c.JSON(fiber.Map{
 		"ok":      true,
-		"message": "Channel saved. Restart the gateway to connect/disconnect adapters.",
+		"message": "Channel saved. " + applied,
 	})
 }
 
@@ -2229,7 +2342,7 @@ func (s *Server) handleStartWhatsAppWebPairing(c *fiber.Ctx) error {
 		chMap["command"] = "node"
 	}
 	if cfgMapStr(chMap, "session_dir") == "" {
-		base := filepath.Dir(s.cfg.Memory.Dir)
+		base := filepath.Dir(s.config().Memory.Dir)
 		if base == "." || base == "" {
 			base = filepath.Dir(s.cfgPath)
 		}
@@ -2382,17 +2495,35 @@ func parseBoolValue(raw any, fallback bool) bool {
 	return fallback
 }
 
+// channelConfigSnapshot copies a channel's live configuration.
+//
+// A copy rather than the map itself: applyChannelToMemory replaces the entry,
+// and a caller holding the old map would otherwise be holding whatever the
+// replacement left behind. The snapshot is what the hot-apply path uses to work
+// out which adapters are currently running.
+func (s *Server) channelConfigSnapshot(id string) map[string]any {
+	if s == nil || s.config() == nil || s.config().Channels == nil {
+		return nil
+	}
+	current, ok := s.config().Channels[id]
+	if !ok {
+		return nil
+	}
+	out := make(map[string]any, len(current))
+	for key, value := range current {
+		out[key] = value
+	}
+	return out
+}
+
 // applyChannelToMemory copies a freshly-written channel config block into the
 // live config so GET /channels reflects it without a restart.
 func (s *Server) applyChannelToMemory(id string, chMap map[string]any) {
-	if s.cfg.Channels == nil {
-		s.cfg.Channels = map[string]map[string]any{}
-	}
 	merged := map[string]any{}
 	for k, v := range chMap {
 		merged[k] = v
 	}
-	s.cfg.Channels[id] = merged
+	s.setChannelConfig(id, merged)
 }
 
 func (s *Server) setChannelEnabled(c *fiber.Ctx, enabled bool) error {
@@ -2416,7 +2547,9 @@ func (s *Server) setChannelEnabled(c *fiber.Ctx, enabled bool) error {
 	if err := writeRawConfig(s.cfgPath, raw); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
+	previous := s.channelConfigSnapshot(id)
 	s.applyChannelToMemory(id, chMap)
+	applied := s.applyChannelLive(c, id, previous, chMap)
 	action := "channel.disable"
 	if enabled {
 		action = "channel.enable"
@@ -2426,7 +2559,7 @@ func (s *Server) setChannelEnabled(c *fiber.Ctx, enabled bool) error {
 		"ok":      true,
 		"id":      id,
 		"enabled": enabled,
-		"message": "Saved. Restart the gateway to apply.",
+		"message": applied,
 	})
 }
 
@@ -2436,7 +2569,7 @@ func (s *Server) handleDisableChannel(c *fiber.Ctx) error { return s.setChannelE
 // --- Schedule ---
 
 func (s *Server) handleListSchedule(c *fiber.Ctx) error {
-	return c.JSON(fiber.Map{"schedule": s.scheduler.Entries()})
+	return c.JSON(fiber.Map{"schedule": s.schedules(c).Entries()})
 }
 
 func (s *Server) handleManualTrigger(c *fiber.Ctx) error {
@@ -2451,10 +2584,13 @@ func (s *Server) handleManualTrigger(c *fiber.Ctx) error {
 
 	// Block concurrent runs: if this agent is already executing (manual or
 	// scheduled), refuse rather than running it twice.
-	if !s.scheduler.TryStartRun(id) {
+	// Scoped to the request's workspace. The run lock is per (workspace,
+	// agent): unscoped, one tenant's manual run of "daily-report" refused
+	// every other tenant's, and the 409 named an agent that was not theirs.
+	if !s.schedules(c).TryStartRun(id) {
 		return s.errMsg(c, fiber.StatusConflict, "agent is already running")
 	}
-	defer s.scheduler.FinishRun(id)
+	defer s.schedules(c).FinishRun(id)
 
 	sessionID := fmt.Sprintf("manual-%s-%d", id, time.Now().UnixNano())
 	msg := message.Message{
@@ -2566,10 +2702,10 @@ func (s *Server) handleReplayAgentRun(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusNotFound, "message.in event not found for session")
 	}
 
-	if !s.scheduler.TryStartRun(id) {
+	if !s.schedules(c).TryStartRun(id) {
 		return s.errMsg(c, fiber.StatusConflict, "agent is already running")
 	}
-	defer s.scheduler.FinishRun(id)
+	defer s.schedules(c).FinishRun(id)
 
 	replaySession := fmt.Sprintf("replay-%s-%s", req.SessionID, uuid.NewString()[:8])
 	msg := orig
@@ -2731,8 +2867,8 @@ func resolveRunTimeout(def *agent.Definition) time.Duration {
 
 func (s *Server) resolveRunTimeout(def *agent.Definition) time.Duration {
 	fallback := 15 * time.Minute
-	if s != nil && s.cfg != nil {
-		if d, err := time.ParseDuration(s.cfg.Runtime.Timeouts.Run); err == nil && d > 0 {
+	if s != nil && s.config() != nil {
+		if d, err := time.ParseDuration(s.config().Runtime.Timeouts.Run); err == nil && d > 0 {
 			fallback = d
 		}
 	}
@@ -2750,21 +2886,22 @@ func (s *Server) resolveRunTimeout(def *agent.Definition) time.Duration {
 // otherwise a boot-time backfill is invisible to the operator, which is
 // exactly the E4 (Cohort E — Schedule failure handling) gap.
 func (s *Server) handleScheduleStatus(c *fiber.Ctx) error {
-	running := s.scheduler.RunningSnapshot()
+	schedules := s.schedules(c)
+	running := schedules.RunningSnapshot()
 	runningOut := make(fiber.Map, len(running))
 	for id, t := range running {
 		runningOut[id] = t.UTC()
 	}
 
 	next := fiber.Map{}
-	for _, e := range s.scheduler.Entries() {
+	for _, e := range schedules.Entries() {
 		if !e.Next.IsZero() {
 			next[e.AgentID] = e.Next.UTC()
 		}
 	}
 
 	backfillsOut := fiber.Map{}
-	for id, b := range s.scheduler.LastBackfillsSnapshot() {
+	for id, b := range schedules.LastBackfills() {
 		backfillsOut[id] = fiber.Map{
 			"missed_at":   b.MissedAt,
 			"replayed_at": b.ReplayedAt,
@@ -2795,7 +2932,7 @@ func (s *Server) handleScheduleStatus(c *fiber.Ctx) error {
 // up to 30s. MCP tools refresh on every call because the MCP client tracks
 // connection state separately and we want that to be live.
 func (s *Server) handleToolCatalog(c *fiber.Ctx) error {
-	catalog := s.toolCatalog()
+	catalog := s.toolCatalog(mcpWorkspace(c))
 	return c.JSON(catalog)
 }
 
@@ -2837,7 +2974,7 @@ const toolCatalogTTL = 30 * time.Second
 // toolCatalog returns a fresh-enough catalog. The Python-tools portion is
 // memoised behind a TTL; MCP and built-ins are recomputed because they're
 // cheap (in-memory snapshots) and we want them live.
-func (s *Server) toolCatalog() toolCatalogPayload {
+func (s *Server) toolCatalog(workspaceID string) toolCatalogPayload {
 	// Hot-path: serve the cached Python list if still fresh.
 	s.toolCatalogMu.Lock()
 	cached := s.toolCatalogCache
@@ -2855,7 +2992,7 @@ func (s *Server) toolCatalog() toolCatalogPayload {
 		s.toolCatalogMu.Unlock()
 	}
 
-	mcps := s.snapshotMCPTools()
+	mcps := s.snapshotMCPTools(workspaceID)
 	builtins := s.snapshotBuiltins()
 	return toolCatalogPayload{PythonTools: pys, MCPTools: mcps, Builtins: builtins}
 }
@@ -2879,7 +3016,7 @@ func (s *Server) PythonToolDirs() []string {
 			dirs = append(dirs, filepath.Join(home, ".soulacy", "tools"))
 		}
 	}
-	for _, ad := range s.cfg.AgentDirs {
+	for _, ad := range s.config().AgentDirs {
 		dirs = append(dirs, filepath.Join(ad, "tools"))
 	}
 	return dirs
@@ -2915,12 +3052,13 @@ func (s *Server) scanPythonTools() []pyToolView {
 	return pys
 }
 
-func (s *Server) snapshotMCPTools() []mcpToolView {
+func (s *Server) snapshotMCPTools(workspaceID string) []mcpToolView {
 	var mcps []mcpToolView
-	if s.mcp == nil {
+	client := s.mcpForWorkspace(workspaceID)
+	if client == nil {
 		return mcps
 	}
-	for _, srv := range s.mcp.ServersSnapshot() {
+	for _, srv := range client.ServersSnapshot() {
 		if !srv.Connected {
 			continue
 		}
@@ -3024,10 +3162,11 @@ func extractPythonDocstringUncached(path string) string {
 // handleListMCP returns the configured MCP servers with connection status and
 // each server's tool list. Used by the MCP page in the GUI.
 func (s *Server) handleListMCP(c *fiber.Ctx) error {
-	if s.mcp == nil {
+	client := s.mcpFor(c)
+	if client == nil {
 		return c.JSON(fiber.Map{"servers": []any{}, "note": "MCP not initialised"})
 	}
-	return c.JSON(fiber.Map{"servers": redactMCPServers(s.mcp.ServersSnapshot())})
+	return c.JSON(fiber.Map{"servers": redactMCPServers(client.ServersSnapshot())})
 }
 
 // redactMCPServers masks the credential-bearing fields of an MCP server before
@@ -3154,10 +3293,8 @@ func (s *Server) handleCreateMCPServer(c *fiber.Ctx) error {
 
 	// Hot-connect: start the server live without a restart.
 	connectErr := ""
-	if s.mcp != nil {
-		if err := s.mcp.AddServer(id, mcpBodyToServerConfig(body)); err != nil {
-			connectErr = err.Error()
-		}
+	if err := s.mcpAddServer(c, id, mcpBodyToServerConfig(body)); err != nil {
+		connectErr = err.Error()
 	}
 
 	resp := fiber.Map{"ok": true, "id": id, "restart_needed": false, "message": "Connected."}
@@ -3205,10 +3342,8 @@ func (s *Server) handleUpdateMCPServer(c *fiber.Ctx) error {
 
 	// Hot-reconnect: remove old process, start updated one.
 	connectErr := ""
-	if s.mcp != nil {
-		if err := s.mcp.AddServer(id, mcpBodyToServerConfig(body)); err != nil {
-			connectErr = err.Error()
-		}
+	if err := s.mcpAddServer(c, id, mcpBodyToServerConfig(body)); err != nil {
+		connectErr = err.Error()
 	}
 
 	resp := fiber.Map{"ok": true, "id": id, "restart_needed": false, "message": "Updated and reconnected."}
@@ -3244,9 +3379,7 @@ func (s *Server) handleDeleteMCPServer(c *fiber.Ctx) error {
 	s.log.Info("mcp server deleted", zap.String("server", id))
 
 	// Hot-disconnect: stop the process immediately.
-	if s.mcp != nil {
-		_ = s.mcp.RemoveServer(id)
-	}
+	_ = s.mcpRemoveServer(c, id)
 
 	return c.JSON(fiber.Map{
 		"ok":             true,
@@ -3442,16 +3575,14 @@ func (s *Server) handleProvisionGlama(c *fiber.Ctx) error {
 
 	// Hot-connect immediately.
 	connectErr := ""
-	if s.mcp != nil {
-		hotCfg := mcp.ServerConfig{
-			Transport: "stdio",
-			Command:   spec.Command,
-			Args:      spec.Args,
-			Env:       body.Env,
-		}
-		if err := s.mcp.AddServer(id, hotCfg); err != nil {
-			connectErr = err.Error()
-		}
+	hotCfg := mcp.ServerConfig{
+		Transport: "stdio",
+		Command:   spec.Command,
+		Args:      spec.Args,
+		Env:       body.Env,
+	}
+	if err := s.mcpAddServer(c, id, hotCfg); err != nil {
+		connectErr = err.Error()
 	}
 
 	resp := fiber.Map{
@@ -3607,17 +3738,15 @@ func (s *Server) handleProvisionMCPRegistry(c *fiber.Ctx) error {
 
 	// Hot-connect immediately.
 	connectErr := ""
-	if s.mcp != nil {
-		if err := s.mcp.AddServer(id, mcp.ServerConfig{
-			Transport: serverBody.Transport,
-			Command:   serverBody.Command,
-			Args:      serverBody.Args,
-			Env:       serverBody.Env,
-			URL:       serverBody.URL,
-			Headers:   serverBody.Headers,
-		}); err != nil {
-			connectErr = err.Error()
-		}
+	if err := s.mcpAddServer(c, id, mcp.ServerConfig{
+		Transport: serverBody.Transport,
+		Command:   serverBody.Command,
+		Args:      serverBody.Args,
+		Env:       serverBody.Env,
+		URL:       serverBody.URL,
+		Headers:   serverBody.Headers,
+	}); err != nil {
+		connectErr = err.Error()
 	}
 
 	resp := fiber.Map{
@@ -3875,8 +4004,8 @@ func (s *Server) handleListProviders(c *fiber.Ctx) error {
 			registered[id] = true
 		}
 	}
-	providers := make(fiber.Map, len(s.cfg.LLM.Providers))
-	for name, pc := range s.cfg.LLM.Providers {
+	providers := make(fiber.Map, len(s.config().LLM.Providers))
+	for name, pc := range s.config().LLM.Providers {
 		apiKey := ""
 		if pc.APIKey != "" {
 			apiKey = "***"
@@ -3907,7 +4036,7 @@ func (s *Server) handleListProviders(c *fiber.Ctx) error {
 	known := []string{"ollama", "openai", "anthropic", "google", "groq", "mistral", "openrouter", "deepseek", "together"}
 	return c.JSON(fiber.Map{
 		"providers":        providers,
-		"default_provider": s.cfg.LLM.DefaultProvider,
+		"default_provider": s.config().LLM.DefaultProvider,
 		"known":            known,
 		"registered":       s.llmRouter.ProviderIDs(),
 	})
@@ -3943,7 +4072,7 @@ func (s *Server) handleListModels(c *fiber.Ctx) error {
 	}
 
 	selected := ""
-	if pc, ok := s.cfg.LLM.Providers[id]; ok {
+	if pc, ok := s.config().LLM.Providers[id]; ok {
 		selected = pc.Model
 	}
 	return c.JSON(fiber.Map{"models": models, "selected": selected})
@@ -3974,7 +4103,7 @@ func (s *Server) providerErrJSON(c *fiber.Ctx, status int, providerID string, er
 }
 
 func (s *Server) agentValidationOptions(ctx context.Context) agentvalidate.Options {
-	opts := agentvalidate.Options{Config: s.cfg, ProviderModels: map[string][]string{}}
+	opts := agentvalidate.Options{Config: s.config(), ProviderModels: map[string][]string{}}
 	if s.llmRouter == nil {
 		return opts
 	}
@@ -4028,12 +4157,9 @@ func (s *Server) handleSetProviderModel(c *fiber.Ctx) error {
 	}
 
 	// Mirror into live config.
-	if s.cfg.LLM.Providers == nil {
-		s.cfg.LLM.Providers = map[string]config.ProviderConfig{}
-	}
-	pc := s.cfg.LLM.Providers[id]
+	pc := s.providerConfig(id)
 	pc.Model = req.Model
-	s.cfg.LLM.Providers[id] = pc
+	s.setProviderConfig(id, pc)
 
 	// Re-register the provider in s.llmRouter so it updates without a gateway restart
 	if s.llmRouter != nil {
@@ -4217,10 +4343,7 @@ func (s *Server) handleSetProviderCredentials(c *fiber.Ctx) error {
 	}
 
 	// Mirror to live config.
-	if s.cfg.LLM.Providers == nil {
-		s.cfg.LLM.Providers = map[string]config.ProviderConfig{}
-	}
-	pc := s.cfg.LLM.Providers[id]
+	pc := s.providerConfig(id)
 	if req.BaseURL != "" {
 		pc.BaseURL = req.BaseURL
 	}
@@ -4272,7 +4395,7 @@ func (s *Server) handleSetProviderCredentials(c *fiber.Ctx) error {
 	if req.Options != nil {
 		pc.Options = req.Options
 	}
-	s.cfg.LLM.Providers[id] = pc
+	s.setProviderConfig(id, pc)
 
 	if s.llmRouter != nil {
 		m := providerCfgMap(pc)
@@ -4333,12 +4456,17 @@ func (s *Server) handleDeleteProvider(c *fiber.Ctx) error {
 	}
 
 	// Mirror to live config
-	if s.cfg.LLM.Providers != nil {
-		delete(s.cfg.LLM.Providers, id)
+	if s.config().LLM.Providers != nil {
+		delete(s.config().LLM.Providers, id)
 	}
+	// And to the live ROUTER, which is the half that was missing. Removing it
+	// from the config only stopped the settings page listing it; the
+	// constructed client stayed callable by every agent until the process
+	// restarted. See llmhot.go.
+	s.applyLLMLive(s.config().LLM)
 	s.recordAdminAudit(c, "provider.delete", "provider", id, "ok", nil)
 
-	return c.JSON(fiber.Map{"message": "Provider deleted."})
+	return c.JSON(fiber.Map{"message": "Provider deleted. No restart needed."})
 }
 
 // --- Skills ---
@@ -4784,11 +4912,11 @@ func (s *Server) applyTemplateRuntimeDefaults(entries []templates.Entry) {
 }
 
 func (s *Server) applyTemplateDefinitionDefaults(def *agent.Definition) {
-	if def == nil || s.cfg.LLM.DefaultProvider == "" {
+	if def == nil || s.config().LLM.DefaultProvider == "" {
 		return
 	}
-	def.LLM.Provider = s.cfg.LLM.DefaultProvider
-	if pc, ok := s.cfg.LLM.Providers[def.LLM.Provider]; ok && strings.TrimSpace(pc.Model) != "" {
+	def.LLM.Provider = s.config().LLM.DefaultProvider
+	if pc, ok := s.config().LLM.Providers[def.LLM.Provider]; ok && strings.TrimSpace(pc.Model) != "" {
 		def.LLM.Model = strings.TrimSpace(pc.Model)
 	}
 }
@@ -4858,8 +4986,8 @@ func (s *Server) handleInstantiateTemplate(c *fiber.Ctx) error {
 	def.Enabled = true
 
 	dir := ""
-	if len(s.cfg.AgentDirs) > 0 {
-		dir = s.cfg.AgentDirs[0]
+	if len(s.config().AgentDirs) > 0 {
+		dir = s.config().AgentDirs[0]
 	}
 	if err := s.agents(c).Upsert(dir, def); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
@@ -4869,9 +4997,9 @@ func (s *Server) handleInstantiateTemplate(c *fiber.Ctx) error {
 	// fails for a scheduled template, roll back the just-created agent so the
 	// install doesn't leave a half-broken agent that never fires — the wizard
 	// then reports a clean, recoverable failure.
-	if err := s.scheduler.RegisterAgent(def); err != nil {
+	if err := s.schedules(c).Register(def); err != nil {
 		if def.Trigger == agent.TriggerCron {
-			s.scheduler.DeregisterAgent(def.ID)
+			s.schedules(c).Deregister(def.ID)
 			if delErr := s.agents(c).Delete(def.ID); delErr != nil {
 				s.log.Warn("template install rollback: delete failed", zap.String("agent", def.ID), zap.Error(delErr))
 			}
