@@ -41,7 +41,7 @@ func (s *Server) installSnapshot(scope agentScope) tour.InstallState {
 	// Delivery channels: configured, and able to carry a result OUT. HTTP is
 	// an inbound surface, so counting it here would tell someone they had a
 	// destination when they do not — the exact confusion the Save step throws.
-	for id, cfg := range s.cfg.Channels {
+	for id, cfg := range s.config().Channels {
 		if len(cfg) == 0 {
 			continue
 		}
@@ -51,10 +51,10 @@ func (s *Server) installSnapshot(scope agentScope) tour.InstallState {
 		}
 		st.DeliveryChannels++
 	}
-	if s.mcp != nil {
-		st.MCPServers = len(s.mcp.ServersSnapshot())
+	if client := s.mcpForWorkspace(scope.workspaceID); client != nil {
+		st.MCPServers = len(client.ServersSnapshot())
 	}
-	st.Plugins = len(s.cfg.PluginDirs)
+	st.Plugins = len(s.config().PluginDirs)
 
 	return st
 }

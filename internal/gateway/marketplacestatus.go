@@ -50,7 +50,7 @@ func (s *Server) handleMarketplaceStatus(c *fiber.Ctx) error {
 func (s *Server) marketplaceReadiness(workspaceID string) marketplaceReadiness {
 	// H1 — nil-safe front. The readiness surface is exercised by tests that
 	// construct a zero-value *Server; guarding here means the empty-config
-	// path returns a valid empty readiness rather than panicking on s.cfg
+	// path returns a valid empty readiness rather than panicking on s.config()
 	// or s.log deref inside configuredOrDefaultRegistries / FromConfig.
 	if s == nil {
 		return marketplaceReadiness{

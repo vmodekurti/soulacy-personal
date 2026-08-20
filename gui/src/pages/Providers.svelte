@@ -1,5 +1,6 @@
 <script>
   import TourButton from '../lib/TourButton.svelte'
+  import { confirmDestructive } from '../lib/destructive.js'
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
 
@@ -322,7 +323,7 @@
   }
 
   async function deleteProvider(providerId) {
-    if (!confirm(`Are you sure you want to delete ${providerId}?`)) return
+    if (!confirmDestructive(`Are you sure you want to delete ${providerId}?`)) return
     error = ''; notice = ''
     try {
       const res = await api.providers.delete(providerId)

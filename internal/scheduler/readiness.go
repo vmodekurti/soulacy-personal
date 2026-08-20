@@ -29,6 +29,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/message"
 )
 
@@ -58,21 +59,31 @@ type ReadinessVerdict struct {
 
 // ReadinessGate decides whether a scheduled agent is cleared to run.
 type ReadinessGate interface {
-	// ScheduleReadiness returns the verdict for agentID. ok=false means the
-	// gate has NO OPINION about this agent (it was not deployed through Studio,
-	// so there is nothing to certify) and the fire proceeds unchanged.
-	ScheduleReadiness(agentID string) (verdict ReadinessVerdict, ok bool)
+	// ScheduleReadiness returns the verdict for one workspace's agent.
+	// ok=false means the gate has NO OPINION about this agent (it was not
+	// deployed through Studio, so there is nothing to certify) and the fire
+	// proceeds unchanged.
+	//
+	// THE WORKSPACE IS A PARAMETER, and it was not before. The adapter that
+	// implements this reads a Studio deployment record, which is stored per
+	// workspace; with only an agent ID to go on it had to resolve the
+	// workspace itself, and the only one it could see was the SCHEDULER's
+	// process-wide principal. So in a Team deployment every tenant's fire was
+	// certified against one tenant's deployment history: an agent certified in
+	// workspace A cleared a same-named agent in workspace B, and an
+	// uncertified one in A blocked B's.
+	ScheduleReadiness(workspaceID, agentID string) (verdict ReadinessVerdict, ok bool)
 }
 
 // ReadinessGateFunc adapts a plain function to ReadinessGate.
-type ReadinessGateFunc func(agentID string) (ReadinessVerdict, bool)
+type ReadinessGateFunc func(workspaceID, agentID string) (ReadinessVerdict, bool)
 
 // ScheduleReadiness implements ReadinessGate.
-func (f ReadinessGateFunc) ScheduleReadiness(agentID string) (ReadinessVerdict, bool) {
+func (f ReadinessGateFunc) ScheduleReadiness(workspaceID, agentID string) (ReadinessVerdict, bool) {
 	if f == nil {
 		return ReadinessVerdict{}, false
 	}
-	return f(agentID)
+	return f(workspaceID, agentID)
 }
 
 // ScheduleBlock is the retained record of the most recent refusal to fire, so
@@ -101,20 +112,37 @@ func (s *Scheduler) SetReadinessGate(g ReadinessGate) {
 // LastBlock returns the most recent refusal to fire for agentID, if the agent
 // is currently blocked.
 func (s *Scheduler) LastBlock(agentID string) (ScheduleBlock, bool) {
+	return s.LastBlockInWorkspace(s.defaultWorkspace(), agentID)
+}
+
+// LastBlockInWorkspace answers for a named tenant's agent.
+func (s *Scheduler) LastBlockInWorkspace(workspaceID, agentID string) (ScheduleBlock, bool) {
 	s.gateMu.RLock()
 	defer s.gateMu.RUnlock()
-	b, ok := s.blocks[agentID]
+	b, ok := s.blocks[keyFor(workspaceID, agentID)]
 	return b, ok
 }
 
 // BlocksSnapshot returns a copy of every currently-blocked agent, so the
 // Schedule page can render all of them in one round trip.
 func (s *Scheduler) BlocksSnapshot() map[string]ScheduleBlock {
+	return s.blocksSnapshot(crossWorkspaceSnapshot)
+}
+
+// BlocksSnapshotInWorkspace returns only the named tenant's blocked agents.
+func (s *Scheduler) BlocksSnapshotInWorkspace(workspaceID string) map[string]ScheduleBlock {
+	return s.blocksSnapshot(wsroot.Normalize(workspaceID))
+}
+
+func (s *Scheduler) blocksSnapshot(workspaceID string) map[string]ScheduleBlock {
 	s.gateMu.RLock()
 	defer s.gateMu.RUnlock()
 	out := make(map[string]ScheduleBlock, len(s.blocks))
 	for k, v := range s.blocks {
-		out[k] = v
+		if workspaceID != crossWorkspaceSnapshot && k.workspaceID != workspaceID {
+			continue
+		}
+		out[k.agentID] = v
 	}
 	return out
 }
@@ -125,7 +153,7 @@ func (s *Scheduler) BlocksSnapshot() map[string]ScheduleBlock {
 //
 // Ordering matters: this runs BEFORE the run lock is taken, so a blocked agent
 // never occupies the single-run slot and a concurrent manual run is unaffected.
-func (s *Scheduler) blockedByReadiness(agentID, triggerType string) bool {
+func (s *Scheduler) blockedByReadiness(key scheduleKey, triggerType string) bool {
 	s.gateMu.RLock()
 	gate := s.gate
 	s.gateMu.RUnlock()
@@ -133,12 +161,13 @@ func (s *Scheduler) blockedByReadiness(agentID, triggerType string) bool {
 		return false
 	}
 
-	verdict, ok := gate.ScheduleReadiness(agentID)
+	agentID := key.agentID
+	verdict, ok := gate.ScheduleReadiness(key.workspaceID, agentID)
 	if !ok || !verdict.Blocked {
 		// Cleared (or not our business). Clearing here — rather than only on a
 		// successful run — is what lets a fixed agent stop advertising a stale
 		// blocker on the very next tick.
-		s.clearBlock(agentID, triggerType, ok)
+		s.clearBlock(key, triggerType, ok)
 		return false
 	}
 
@@ -153,9 +182,9 @@ func (s *Scheduler) blockedByReadiness(agentID, triggerType string) bool {
 	}
 	s.gateMu.Lock()
 	if s.blocks == nil {
-		s.blocks = make(map[string]ScheduleBlock)
+		s.blocks = make(map[scheduleKey]ScheduleBlock)
 	}
-	s.blocks[agentID] = block
+	s.blocks[key] = block
 	s.gateMu.Unlock()
 
 	s.log.Warn("scheduled run BLOCKED — the agent is not certified for scheduled execution",
@@ -180,11 +209,19 @@ func (s *Scheduler) blockedByReadiness(agentID, triggerType string) bool {
 // clearBlock drops a recorded block and, if there was one, announces the
 // recovery. Silence on recovery would leave the GUI showing a permanent red
 // state for a schedule that is running fine again.
-func (s *Scheduler) clearBlock(agentID, triggerType string, gateHadOpinion bool) {
+// clearBlock takes a KEY, not an agent ID.
+//
+// This is the mutation that made the shared map dangerous rather than merely
+// wrong: it deletes on every cleared tick. With an agent-ID key, tenant A's
+// passing "daily-report" deleted tenant B's recorded refusal on A's next tick,
+// so B's Schedule page showed a healthy schedule that was still not firing —
+// and the "unblocked" event it emitted named B's agent on A's behalf.
+func (s *Scheduler) clearBlock(key scheduleKey, triggerType string, gateHadOpinion bool) {
+	agentID := key.agentID
 	s.gateMu.Lock()
-	prev, had := s.blocks[agentID]
+	prev, had := s.blocks[key]
 	if had {
-		delete(s.blocks, agentID)
+		delete(s.blocks, key)
 	}
 	s.gateMu.Unlock()
 	if !had {

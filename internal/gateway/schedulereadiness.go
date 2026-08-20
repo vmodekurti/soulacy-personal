@@ -51,7 +51,10 @@ func (s *Server) scheduleReadiness(scope agentScope) scheduleReadiness {
 	// slot has not been populated indicates the cron runtime is not scheduling
 	// that agent. Kept as a soft signal — the scheduler itself decides Next.
 	if s.scheduler != nil {
-		for _, e := range s.scheduler.Entries() {
+		// The scope already names a workspace; reading the deployment-wide
+		// entry list here would count another tenant's stalled cron as this
+		// one's overdue schedule and turn its dashboard red.
+		for _, e := range s.schedulesForWorkspace(scope.WorkspaceID()).Entries() {
 			if strings.EqualFold(e.Type, "oneshot") {
 				continue
 			}

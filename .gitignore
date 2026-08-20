@@ -127,3 +127,7 @@ workspace/
 
 # Scratch space used by agent sessions (build/verify artifacts, never source).
 _to_delete/
+
+# Delivery staging and the lock files this mount cannot unlink.
+_incoming/
+_to_delete/

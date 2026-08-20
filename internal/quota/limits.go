@@ -106,6 +106,24 @@ type Policy struct {
 	limits map[Scope]Limit
 }
 
+// Entries returns a copy of the policy's scoped limits.
+//
+// A COPY, not the map. A caller composing a new policy on top of this one —
+// per-workspace limits stored at runtime, say — must not be able to mutate the
+// operator's configured policy by holding a reference to its internals, which
+// is what returning the map itself would permit. The one legitimate use is
+// building a derived policy, and that only needs to read.
+func (p *Policy) Entries() map[Scope]Limit {
+	if p == nil {
+		return nil
+	}
+	out := make(map[Scope]Limit, len(p.limits))
+	for scope, limit := range p.limits {
+		out[scope] = limit
+	}
+	return out
+}
+
 // NewPolicy builds a policy from configured limits.
 func NewPolicy(limits map[Scope]Limit) *Policy {
 	out := &Policy{limits: make(map[Scope]Limit, len(limits))}

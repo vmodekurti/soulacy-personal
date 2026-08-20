@@ -21,17 +21,21 @@ import (
 // must have no opinion. Returning "blocked" for those agents would silently
 // stop every hand-written YAML cron agent in the workspace — a far worse
 // failure than the one the gate exists to prevent.
-// workspaceID is supplied as a function rather than a value so the verdict is
-// always read from the workspace the scheduler is *currently* running as. A
-// value captured at wiring time would silently go stale if the principal were
-// ever set afterwards, and a stale workspace here means consulting one
-// tenant's deployment history to clear another tenant's run.
-func deploymentReadinessGate(store *studio.DeploymentStore, workspaceID func() string) scheduler.ReadinessGate {
-	if store == nil || workspaceID == nil {
+//
+// THE WORKSPACE NOW ARRIVES WITH THE FIRE, and previously it did not.
+// This adapter used to resolve it itself, from a function returning the
+// scheduler's process-wide principal workspace — the only workspace a single
+// value can name. In a Team deployment that meant every tenant's scheduled fire
+// was certified against ONE tenant's Studio deployment history: workspace A's
+// certified "daily-report" cleared workspace B's uncertified one, and A's
+// uncertified one blocked B's. The gate was reading the right record for the
+// wrong workspace, which is worse than not reading one, because it answers.
+func deploymentReadinessGate(store *studio.DeploymentStore) scheduler.ReadinessGate {
+	if store == nil {
 		return nil
 	}
-	return scheduler.ReadinessGateFunc(func(agentID string) (scheduler.ReadinessVerdict, bool) {
-		r := store.ScheduleReadiness(workspaceID(), agentID)
+	return scheduler.ReadinessGateFunc(func(workspaceID, agentID string) (scheduler.ReadinessVerdict, bool) {
+		r := store.ScheduleReadiness(workspaceID, agentID)
 		if !r.Deployed {
 			return scheduler.ReadinessVerdict{}, false
 		}

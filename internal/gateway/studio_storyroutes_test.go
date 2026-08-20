@@ -308,7 +308,7 @@ func TestStudioCompile_CarriesCapabilityWarning(t *testing.T) {
 	// The builder model is authoritative server-side (the catalog's generation
 	// profile is re-grounded from config), so the weak model has to be configured
 	// rather than asserted by the client.
-	s.cfg.LLM.Studio.Model = "mistral"
+	s.config().LLM.Studio.Model = "mistral"
 	body := `{
 	  "intent":"Use a ReAct loop to answer questions about my stock portfolio interactively",
 	  "catalog":{"tools":["web_search"]}

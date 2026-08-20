@@ -82,7 +82,7 @@ func compileIncidentFanOut(t *testing.T) (int, map[string]any) {
 	t.Helper()
 	s, _ := newTestGatewayWithLLM(t, "k")
 	s.llmRouter.Register(&blockedGraphProvider{})
-	s.cfg.LLM.DefaultProvider = "openai"
+	s.config().LLM.DefaultProvider = "openai"
 
 	body := `{"intent":` + jsonString(incidentFanOutIntent) + `,"force_workflow":true,"catalog":{}}`
 	return gatewayJSON(t, s, http.MethodPost, "/api/v1/studio/compile", "k", body)
@@ -142,7 +142,7 @@ func TestStudioCompile_SaysWhyTheBlockedGraphWasKept(t *testing.T) {
 func TestStudioCompile_FallsBackToATemplateWhenTheModelReturnsNothing(t *testing.T) {
 	s, _ := newTestGatewayWithLLM(t, "k")
 	s.llmRouter.Register(&failingProvider{})
-	s.cfg.LLM.DefaultProvider = "openai"
+	s.config().LLM.DefaultProvider = "openai"
 
 	body := `{"intent":` + jsonString(incidentFanOutIntent) + `,"force_workflow":true,"catalog":{}}`
 	status, out := gatewayJSON(t, s, http.MethodPost, "/api/v1/studio/compile", "k", body)

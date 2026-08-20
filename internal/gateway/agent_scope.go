@@ -1,6 +1,8 @@
 package gateway
 
 import (
+	"strings"
+
 	"github.com/gofiber/fiber/v2"
 
 	"github.com/soulacy/soulacy/internal/runtime"
@@ -136,6 +138,41 @@ func (a agentScope) ReadAgentVersion(id, version string) ([]byte, runtime.AgentV
 
 func (a agentScope) RestoreAgentVersion(dir, id, version string) (*agent.Definition, runtime.AgentVersion, error) {
 	return a.loader.RestoreAgentVersionInWorkspace(a.workspaceID, dir, id, version, a.actor)
+}
+
+// LastEditor names the principal that produced the definition currently on
+// disk, for the conflict message a losing writer receives (MU-028 criterion 5).
+//
+// Read from the VERSION HISTORY rather than from the definition, because the
+// definition is a document the user edits: a last-editor field inside SOUL.yaml
+// is one a raw-YAML save can set to anybody, which is the one thing an
+// attribution must not permit. Every overwrite snapshots the outgoing bytes
+// with the principal that overwrote them, so the newest snapshot names the
+// author of what is live now.
+//
+// Empty is a legitimate answer and must stay one: snapshots predating version
+// metadata carry no actor, and a filesystem edit reaches the loader with no
+// request identity at all. Naming somebody there would be a guess, and a
+// confident wrong name in a conflict message sends a person to argue with a
+// colleague who did nothing.
+func (a agentScope) LastEditor(id string) string {
+	if a.loader == nil || a.workspaceID == crossWorkspace {
+		return ""
+	}
+	versions, err := a.AgentVersions(id)
+	if err != nil || len(versions) == 0 {
+		return ""
+	}
+	// AgentVersionsInWorkspace returns newest first; assert rather than assume,
+	// because reading the OLDEST snapshot's actor would name whoever created
+	// the agent months ago and be wrong in a way that still looks plausible.
+	newest := versions[0]
+	for _, version := range versions[1:] {
+		if version.CreatedAt.After(newest.CreatedAt) {
+			newest = version
+		}
+	}
+	return strings.TrimSpace(newest.Actor)
 }
 
 // WorkspaceID exposes the bound workspace for callers that must record or

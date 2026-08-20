@@ -101,22 +101,22 @@ func (s *Server) providerDoctorChecks(c *fiber.Ctx) []doctorProviderCheck {
 	vaultSet := map[string]bool{}
 	mgr := secrets.NewInWorkspace(s.CredentialVault(), s.agents(c).WorkspaceID())
 	if mgr.Enabled() {
-		for _, d := range mgr.Catalog(c.Context(), s.cfg) {
+		for _, d := range mgr.Catalog(c.Context(), s.config()) {
 			if d.Category == secrets.CategoryLLM && d.Source == secrets.SourceVault {
 				vaultSet[d.Name] = true
 			}
 		}
 	}
 
-	ids := make([]string, 0, len(s.cfg.LLM.Providers))
-	for id := range s.cfg.LLM.Providers {
+	ids := make([]string, 0, len(s.config().LLM.Providers))
+	for id := range s.config().LLM.Providers {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
 
 	var out []doctorProviderCheck
 	for _, id := range ids {
-		pc := s.cfg.LLM.Providers[id]
+		pc := s.config().LLM.Providers[id]
 		keyName := "llm.providers." + id + ".api_key"
 		envName := strings.ToUpper(id) + "_API_KEY"
 		envSet := os.Getenv(envName) != ""
@@ -141,7 +141,10 @@ func (s *Server) providerDoctorChecks(c *fiber.Ctx) []doctorProviderCheck {
 		if !check.Registered {
 			check.Status = "fail"
 			check.Detail = "provider is configured but not registered in the live router"
-			check.Remedy = "restart the gateway so the provider is registered"
+			// Saving a provider's credentials re-registers it live, so a
+			// provider that is configured and not registered means the
+			// save did not complete — not that a restart is owed.
+			check.Remedy = "re-save the provider on the Providers page; saving registers it immediately"
 		} else if strings.TrimSpace(pc.Model) == "" {
 			check.Status = "warn"
 			check.Detail = "provider has no default model"
@@ -171,7 +174,7 @@ func (s *Server) channelDoctorChecks() []doctorChannelCheck {
 	}
 	out := make([]doctorChannelCheck, 0, len(channelSpecs))
 	for _, spec := range channelSpecs {
-		cfg := s.cfg.Channels[spec.ID]
+		cfg := s.config().Channels[spec.ID]
 		enabled := spec.Always
 		if v, ok := cfg["enabled"].(bool); ok {
 			enabled = v

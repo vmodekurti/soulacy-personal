@@ -1,11 +1,22 @@
 package gateway
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
+	"github.com/soulacy/soulacy/internal/rbac"
 	"github.com/soulacy/soulacy/internal/runtime"
+	"github.com/soulacy/soulacy/internal/wsroot"
 )
+
+// personalRunContext is the identity a run carries in a single-tenant
+// deployment, which is what these tests exercise through the static API key.
+func personalRunContext() context.Context {
+	return runtime.WithPrincipal(context.Background(), runtime.Principal{
+		Subject: "local-owner", Role: rbac.RoleOwner, WorkspaceID: wsroot.PersonalWorkspaceID,
+	})
+}
 
 // TestApprovalsEndpoints exercises the full approve-from-anywhere path: a
 // pending approval registered on the broker is listed via GET /approvals and
@@ -13,11 +24,13 @@ import (
 func TestApprovalsEndpoints(t *testing.T) {
 	srv := newTestGateway(t, "secret")
 
-	// Register a pending approval as the engine would during a run.
-	ch := srv.engine.Broker().RegisterRequest(
-		runtime.ConfirmRequest{CallID: "call-1", Tool: "shell_exec", Reason: "risky"},
-		"agent-a", "sess-1",
-	)
+	// Register a pending approval as the engine would during a run. The
+	// workspace rides on the context rather than being an argument, so a
+	// caller cannot register into a workspace it did not verify.
+	ch := srv.engine.Broker().Register(personalRunContext(), runtime.ApprovalRequest{
+		CallID: "call-1", Tool: "shell_exec", Reason: "risky",
+		AgentID: "agent-a", SessionID: "sess-1",
+	})
 
 	status, body := gatewayJSON(t, srv, http.MethodGet, "/api/v1/approvals", "secret", "")
 	if status != http.StatusOK {
@@ -55,7 +68,9 @@ func TestApprovalsEndpoints(t *testing.T) {
 // TestApprovalsDenyDelivers verifies deny is delivered as false.
 func TestApprovalsDenyDelivers(t *testing.T) {
 	srv := newTestGateway(t, "secret")
-	ch := srv.engine.Broker().RegisterRequest(runtime.ConfirmRequest{CallID: "c2", Tool: "write_file"}, "a", "s")
+	ch := srv.engine.Broker().Register(personalRunContext(), runtime.ApprovalRequest{
+		CallID: "c2", Tool: "write_file", AgentID: "a", SessionID: "s",
+	})
 	status, _ := gatewayJSON(t, srv, http.MethodPost, "/api/v1/approvals/c2/deny", "secret", "")
 	if status != http.StatusOK {
 		t.Fatalf("deny status = %d", status)

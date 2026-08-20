@@ -7,7 +7,7 @@ import (
 
 func TestChannelDeliveryReadinessListsDefaultAndBotTargets(t *testing.T) {
 	s := newTestGateway(t, "secret")
-	s.cfg.Channels = map[string]map[string]any{
+	s.config().Channels = map[string]map[string]any{
 		"telegram": {
 			"enabled":           true,
 			"token":             "tok",
@@ -40,7 +40,7 @@ func TestChannelDeliveryReadinessListsDefaultAndBotTargets(t *testing.T) {
 
 func TestChannelDeliveryReadinessFlagsMissingDestination(t *testing.T) {
 	s := newTestGateway(t, "secret")
-	s.cfg.Channels = map[string]map[string]any{
+	s.config().Channels = map[string]map[string]any{
 		"slack": {
 			"enabled": true,
 			"token":   "tok",
@@ -59,7 +59,7 @@ func TestChannelDeliveryReadinessFlagsMissingDestination(t *testing.T) {
 
 func TestChannelDeliveryReadinessTreatsWebhookURLAsDefaultTarget(t *testing.T) {
 	s := newTestGateway(t, "secret")
-	s.cfg.Channels = map[string]map[string]any{
+	s.config().Channels = map[string]map[string]any{
 		"webhook": {
 			"enabled": true,
 			"url":     "https://hooks.example.test/soulacy",

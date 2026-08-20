@@ -41,6 +41,32 @@ type ActionLogBackend interface {
 	Close() error
 }
 
+// DurableActionLogBackend is the surface for writes that must not be dropped.
+//
+// A separate interface for the same reason WorkspaceActionLogBackend is one:
+// ActionLogBackend is frozen for this SDK major version, and Append's contract
+// — "must never block the caller" — is deliberate and correct for run
+// telemetry. It is wrong for an audit record.
+//
+// An audit trail with holes under load is not a slightly worse audit trail. It
+// is one that cannot be used to say an action did NOT happen, which is most of
+// what an audit trail is for, and the holes appear exactly when the system is
+// busiest. AppendDurable therefore waits briefly and, if it still cannot
+// enqueue, REPORTS the loss — because the alternative failure is an absence,
+// and an absence is undetectable by construction.
+//
+// A backend that does not implement this keeps working; a caller that needs
+// the guarantee type-asserts and says so loudly when the assertion fails,
+// rather than quietly writing an audit record it cannot promise to keep.
+type DurableActionLogBackend interface {
+	ActionLogBackend
+
+	// AppendDurable enqueues an event, waiting briefly for room, and reports
+	// whether it was accepted. False means the record is LOST and the caller
+	// must surface that.
+	AppendDurable(ev message.Event) bool
+}
+
 // WorkspaceActionLogBackend is the tenant-aware surface for an action log.
 //
 // It is a separate interface rather than new methods on ActionLogBackend

@@ -62,14 +62,31 @@ const StudioPrivilegeAckLabel = "studio.privilege_acknowledged"
 // grant the channel binding — the operator must still set
 // accept_privileged_exposure on the config.yaml binding at deploy time
 // (internal/app/channels.go). The agent is saved disabled regardless.
-func ToAgentDefinition(draft Draft, acceptPrivilegedExposure bool) (agent.Definition, error) {
-	// Prefer the existing agent id (set when an saved agent was opened for
-	// editing) so a re-save UPDATES that agent rather than creating a new one
-	// under a freshly slugged name. Fall back to the name slug for new drafts.
+// DraftAgentID is the agent id a draft will be saved under.
+//
+// Exported so a caller can find out WHICH agent a save is about before doing
+// the expensive work of compiling the draft into one. The gateway needs that
+// to check a concurrency precondition first: refusing a stale save only helps
+// if the refusal comes before the contract and consent gates, because a caller
+// told 422 goes away, fixes their graph, retries — and the retry succeeds,
+// silently discarding the edit the 409 existed to protect.
+//
+// It calls the same derivation ToAgentDefinition does rather than repeating
+// it. A second copy of this rule would be checked against one agent and write
+// another the day somebody changes how names are slugged.
+func DraftAgentID(draft Draft) string {
 	id := strings.TrimSpace(draft.ID)
 	if id == "" {
 		id = slug(draft.Name)
 	}
+	return id
+}
+
+func ToAgentDefinition(draft Draft, acceptPrivilegedExposure bool) (agent.Definition, error) {
+	// Prefer the existing agent id (set when an saved agent was opened for
+	// editing) so a re-save UPDATES that agent rather than creating a new one
+	// under a freshly slugged name. Fall back to the name slug for new drafts.
+	id := DraftAgentID(draft)
 	if id == "" {
 		return agent.Definition{}, fmt.Errorf("studio: cannot derive an agent id from an empty workflow name")
 	}

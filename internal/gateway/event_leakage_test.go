@@ -12,10 +12,9 @@ import (
 )
 
 func teamServer(owners map[string]sessionOwner) *Server {
-	return &Server{
-		cfg:           &config.Config{Deployment: config.DeploymentConfig{Mode: config.DeploymentModeTeam}},
+	return withCfg(&Server{
 		sessionOwners: owners,
-	}
+	}, &config.Config{Deployment: config.DeploymentConfig{Mode: config.DeploymentModeTeam}})
 }
 
 func subscriber(workspaceID, principal, role string, admin bool) eventPrincipal {
@@ -115,7 +114,7 @@ func TestAnUnauthenticatedSubscriberReceivesNothing(t *testing.T) {
 // The personal-mode admin shortcut must stay shut in Team and Scale, or every
 // other check in this function is decoration.
 func TestThePersonalAdminShortcutIsClosedInMultiUserMode(t *testing.T) {
-	personal := &Server{cfg: &config.Config{Deployment: config.DeploymentConfig{Mode: config.DeploymentModePersonal}}}
+	personal := withCfg(&Server{}, &config.Config{Deployment: config.DeploymentConfig{Mode: config.DeploymentModePersonal}})
 	team := teamServer(nil)
 	event := message.Event{Type: "tool.call", AgentID: "bot", WorkspaceID: "ws_victim"}
 	admin := subscriber("ws_attacker", "admin:mallory", "admin", true)

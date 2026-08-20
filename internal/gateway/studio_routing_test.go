@@ -51,8 +51,8 @@ func TestStudioCompile_RoutesReasoningTaskToAgent(t *testing.T) {
 func TestStampDefaultLLM_DoesNotLeakRegisteredBuilderModelIntoGeneratedAgent(t *testing.T) {
 	s, _ := studioFake(t)
 	s.llmRouter.Register(&fakeLLMProvider{id: "ollama_cloud"})
-	s.cfg.LLM.Studio.Provider = "ollama_cloud"
-	s.cfg.LLM.Studio.Model = "glm-5.2"
+	s.config().LLM.Studio.Provider = "ollama_cloud"
+	s.config().LLM.Studio.Model = "glm-5.2"
 
 	draft := studio.Draft{}
 	// Reproduce a builder-authored pair. Registration alone does not make it an

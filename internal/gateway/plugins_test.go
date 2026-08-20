@@ -10,6 +10,8 @@ import (
 
 	"github.com/soulacy/soulacy/internal/caps"
 	"github.com/soulacy/soulacy/pkg/plugin"
+
+	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
 const testKey = "test-api-key"
@@ -35,7 +37,7 @@ func pluginGateway(t *testing.T, perms []plugin.Permission) (*Server, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	enf.SetPluginSet(set)
+	enf.SetPluginSet(wsroot.PersonalWorkspaceID, set)
 	s.SetCapEnforcer(enf)
 	s.SetPluginUI([]PluginUIMount{{
 		ID: "matrix-suite", StaticDir: staticDir,

@@ -189,13 +189,13 @@ func TestSSRF_AllowListDoesNotUnblockMetadata(t *testing.T) {
 // call ID overwrites the channel (the new one wins).
 func TestConfirmBroker_RegisterSameIDTwice(t *testing.T) {
 	b := newConfirmBroker()
-	ch1 := b.Register("dup-call")
-	ch2 := b.Register("dup-call")
+	ctx := inWorkspace(context.Background(), "ws-a")
+	ch1 := b.Register(ctx, ApprovalRequest{CallID: "dup-call", Tool: "shell_exec"})
+	ch2 := b.Register(ctx, ApprovalRequest{CallID: "dup-call", Tool: "shell_exec"})
 	// ch1 and ch2 may be the same or different; what matters is Resolve delivers
 	// to the currently registered channel and no panic occurs.
-	ok := b.Resolve("dup-call", true)
-	if !ok {
-		t.Fatal("Resolve should return true even after double Register")
+	if err := b.Resolve(ctx, "ws-a", "dup-call", true, approverIn("ws-a"), ""); err != nil {
+		t.Fatalf("Resolve should succeed even after a double Register: %v", err)
 	}
 	// Drain whichever channel received the value.
 	select {
@@ -210,7 +210,7 @@ func TestConfirmBroker_RegisterSameIDTwice(t *testing.T) {
 // the channel blocks and a select with a timeout exits via the timeout arm.
 func TestConfirmBroker_TimeoutPath(t *testing.T) {
 	b := newConfirmBroker()
-	ch := b.Register("timeout-call")
+	ch := b.Register(inWorkspace(context.Background(), "ws-a"), ApprovalRequest{CallID: "timeout-call", Tool: "shell_exec"})
 
 	// Don't call Resolve — verify we can time out without deadlock.
 	select {
@@ -225,6 +225,7 @@ func TestConfirmBroker_TimeoutPath(t *testing.T) {
 // to Register and Resolve do not race or panic.
 func TestConfirmBroker_ConcurrentRegisterResolve(t *testing.T) {
 	b := newConfirmBroker()
+	ctx := inWorkspace(context.Background(), "ws-a")
 	const n = 20
 	var wg sync.WaitGroup
 	for i := 0; i < n; i++ {
@@ -232,13 +233,13 @@ func TestConfirmBroker_ConcurrentRegisterResolve(t *testing.T) {
 		wg.Add(2)
 		go func(id string) {
 			defer wg.Done()
-			ch := b.Register(id)
+			ch := b.Register(ctx, ApprovalRequest{CallID: id, Tool: "shell_exec"})
 			// Drain or ignore the channel.
 			go func() { <-ch }()
 		}(id)
 		go func(id string) {
 			defer wg.Done()
-			b.Resolve(id, true)
+			_ = b.Resolve(ctx, "ws-a", id, true, approverIn("ws-a"), "")
 		}(id)
 	}
 	wg.Wait()
@@ -754,10 +755,10 @@ func TestEngine_BrokerNotNil(t *testing.T) {
 func TestEngine_BrokerRegisterAndResolve(t *testing.T) {
 	e := newMinimalEngine(t)
 	broker := e.Broker()
-	ch := broker.Register("engine-broker-test")
-	ok := broker.Resolve("engine-broker-test", true)
-	if !ok {
-		t.Fatal("Resolve via Engine.Broker() should return true")
+	ctx := inWorkspace(context.Background(), "ws-a")
+	ch := broker.Register(ctx, ApprovalRequest{CallID: "engine-broker-test", Tool: "shell_exec"})
+	if err := broker.Resolve(ctx, "ws-a", "engine-broker-test", true, approverIn("ws-a"), ""); err != nil {
+		t.Fatalf("Resolve via Engine.Broker() should succeed: %v", err)
 	}
 	select {
 	case v := <-ch:
@@ -1043,13 +1044,15 @@ func TestGetBuilderUnderstanding_AfterSessionCreated(t *testing.T) {
 
 func TestConfirmBroker_PendingCleanedUpAfterResolve(t *testing.T) {
 	b := newConfirmBroker()
-	b.Register("cleanup-call")
-	b.Resolve("cleanup-call", false)
+	ctx := inWorkspace(context.Background(), "ws-a")
+	b.Register(ctx, ApprovalRequest{CallID: "cleanup-call", Tool: "shell_exec"})
+	if err := b.Resolve(ctx, "ws-a", "cleanup-call", false, approverIn("ws-a"), ""); err != nil {
+		t.Fatalf("first resolve: %v", err)
+	}
 
-	// After resolve, the entry should be removed (second resolve returns false).
-	ok := b.Resolve("cleanup-call", true)
-	if ok {
-		t.Error("Resolve after cleanup should return false (entry removed)")
+	// After resolve, the entry should be removed (a second resolve fails).
+	if err := b.Resolve(ctx, "ws-a", "cleanup-call", true, approverIn("ws-a"), ""); err == nil {
+		t.Error("Resolve after cleanup should fail (entry removed)")
 	}
 }
 

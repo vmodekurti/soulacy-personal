@@ -87,7 +87,15 @@ func (s *Server) handleSubmitRun(c *fiber.Ctx) error {
 		// Pinned at admission: the agent may be edited while this run is still
 		// going, and "which version produced this result" has to stay
 		// answerable afterwards.
-		AgentVersion:   strings.TrimSpace(def.Version),
+		//
+		// def.Version is NOT that. It is a string the author types into
+		// SOUL.yaml — usually empty, never updated by an edit, and entirely
+		// under the control of whoever wrote the file. Pinning to it recorded
+		// a value that does not change when the definition does, so every run
+		// of an agent that never set `version:` was pinned to "" and the field
+		// answered its own question with nothing. The content version changes
+		// exactly when the definition changes, which is the whole job.
+		AgentVersion:   def.ContentVersion(),
 		SessionID:      strings.TrimSpace(body.SessionID),
 		IdempotencyKey: body.IdempotencyKey,
 		Payload:        body.Payload,

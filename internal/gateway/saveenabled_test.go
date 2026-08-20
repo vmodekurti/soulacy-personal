@@ -31,7 +31,7 @@ const saveWorkflowBody = `{"workflow":{
 func saveGateway(t *testing.T) *Server {
 	t.Helper()
 	s, _ := studioFake(t)
-	s.cfg.LLM.DefaultProvider = "openai"
+	s.config().LLM.DefaultProvider = "openai"
 	return s
 }
 
@@ -56,8 +56,8 @@ func seedDeployedAgent(t *testing.T, s *Server, id string, enabled bool) {
 		},
 	}
 	dir := ""
-	if len(s.cfg.AgentDirs) > 0 {
-		dir = s.cfg.AgentDirs[0]
+	if len(s.config().AgentDirs) > 0 {
+		dir = s.config().AgentDirs[0]
 	}
 	if err := s.loader.Upsert(dir, def); err != nil {
 		t.Fatalf("seed: %v", err)

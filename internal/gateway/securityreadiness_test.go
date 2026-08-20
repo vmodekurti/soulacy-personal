@@ -48,7 +48,7 @@ func TestSecurityReadiness_PrivilegedAgentOnTelegramFailsProduction(t *testing.T
 	}
 
 	// Bind priv-agent to a Telegram bot without acceptance.
-	s.cfg.Channels = map[string]map[string]any{
+	s.config().Channels = map[string]map[string]any{
 		"telegram": {
 			"enabled": true,
 			"bots": []any{
@@ -63,7 +63,7 @@ func TestSecurityReadiness_PrivilegedAgentOnTelegramFailsProduction(t *testing.T
 	}
 
 	// Advisory mode (non-production): warn, but still ready.
-	s.cfg.Deployment.Profile = "local"
+	s.config().Deployment.Profile = "local"
 	rep := s.evaluateSecurityReadiness(s.agents(nil))
 	if rep.Status != "warn" {
 		t.Errorf("local profile: status = %q, want warn", rep.Status)
@@ -79,7 +79,7 @@ func TestSecurityReadiness_PrivilegedAgentOnTelegramFailsProduction(t *testing.T
 	}
 
 	// Production: must fail launch.
-	s.cfg.Deployment.Profile = "production"
+	s.config().Deployment.Profile = "production"
 	rep = s.evaluateSecurityReadiness(s.agents(nil))
 	if rep.Status != "fail" {
 		t.Errorf("production profile: status = %q, want fail", rep.Status)
@@ -108,7 +108,7 @@ func TestSecurityReadiness_AcceptedExposurePassesProduction(t *testing.T) {
 	if err := s.loader.Upsert(dir, def); err != nil {
 		t.Fatalf("upsert priv-agent: %v", err)
 	}
-	s.cfg.Channels = map[string]map[string]any{
+	s.config().Channels = map[string]map[string]any{
 		"telegram": {
 			"enabled": true,
 			"bots": []any{
@@ -121,7 +121,7 @@ func TestSecurityReadiness_AcceptedExposurePassesProduction(t *testing.T) {
 			},
 		},
 	}
-	s.cfg.Deployment.Profile = "production"
+	s.config().Deployment.Profile = "production"
 	rep := s.evaluateSecurityReadiness(s.agents(nil))
 	if rep.Status != "ok" {
 		t.Errorf("accepted exposure should be ok in production; got status=%q reasons=%v", rep.Status, rep.Reasons)

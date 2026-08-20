@@ -89,7 +89,7 @@ func TestSecurityDoctorEndpoint_DryRunDeniesInjectedShell(t *testing.T) {
 
 func TestChannelBindingsForAgent_CollectsSharedFlag(t *testing.T) {
 	s := newTestGateway(t, "secret")
-	s.cfg.Channels = map[string]map[string]any{
+	s.config().Channels = map[string]map[string]any{
 		"telegram": {
 			"enabled": true,
 			"bots": []any{

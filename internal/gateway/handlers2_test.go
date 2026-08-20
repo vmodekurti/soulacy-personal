@@ -441,7 +441,7 @@ func TestGatewayHandleGetAgentPackage(t *testing.T) {
 	if status != http.StatusCreated {
 		t.Fatalf("create status = %d body=%v", status, body)
 	}
-	agentDir := filepath.Join(s.cfg.AgentDirs[0], "pkg-agent")
+	agentDir := filepath.Join(s.config().AgentDirs[0], "pkg-agent")
 	if err := os.MkdirAll(filepath.Join(agentDir, "evals"), 0755); err != nil {
 		t.Fatalf("mkdir evals: %v", err)
 	}
@@ -573,21 +573,21 @@ tools:
 	if def.Enabled {
 		t.Fatal("imported agent should be disabled when disabled=true")
 	}
-	data, err := os.ReadFile(filepath.Join(s.cfg.AgentDirs[0], "portable-agent", "helper.py"))
+	data, err := os.ReadFile(filepath.Join(s.config().AgentDirs[0], "portable-agent", "helper.py"))
 	if err != nil {
 		t.Fatalf("packaged tool file not restored: %v", err)
 	}
 	if string(data) != "print('hello')\n" {
 		t.Fatalf("restored helper.py = %q", string(data))
 	}
-	evalData, err := os.ReadFile(filepath.Join(s.cfg.AgentDirs[0], "portable-agent", "evals", "smoke.yaml"))
+	evalData, err := os.ReadFile(filepath.Join(s.config().AgentDirs[0], "portable-agent", "evals", "smoke.yaml"))
 	if err != nil {
 		t.Fatalf("packaged eval file not restored: %v", err)
 	}
 	if !strings.Contains(string(evalData), "portable") {
 		t.Fatalf("restored eval = %q", string(evalData))
 	}
-	promptData, err := os.ReadFile(filepath.Join(s.cfg.AgentDirs[0], "portable-agent", "prompts", "example.md"))
+	promptData, err := os.ReadFile(filepath.Join(s.config().AgentDirs[0], "portable-agent", "prompts", "example.md"))
 	if err != nil {
 		t.Fatalf("packaged prompt file not restored: %v", err)
 	}
@@ -1245,7 +1245,7 @@ func TestGatewayHandleGetLogs_WithLogFile(t *testing.T) {
 
 	cfgPath := filepath.Join(dir, "config.yaml")
 	s := newTestGatewayWithCfgPath(t, "secret", cfgPath)
-	s.cfg.Log.File = logPath
+	s.config().Log.File = logPath
 
 	status, body := gatewayJSON(t, s, http.MethodGet, "/api/v1/logs", "secret", "")
 	if status != http.StatusOK {

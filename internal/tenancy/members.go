@@ -33,6 +33,11 @@ type MemberManager interface {
 	SetMembershipRole(context.Context, Mutation, string, string, string, string) (StoredMembership, error)
 	SetMembershipStatusInWorkspace(context.Context, Mutation, string, string, string, string) (StoredMembership, error)
 	ListMembershipAudit(context.Context, string, int) ([]MembershipAudit, error)
+	// ListMembershipAuditPage is the keyset-paginated read (MU-031 criterion
+	// 4). The unpaginated one is retained because it is a different question —
+	// "the most recent N" — and a caller who wants that should not have to
+	// carry a cursor to express it.
+	ListMembershipAuditPage(context.Context, string, int, string) (AuditPage, error)
 	CanRefreshUser(context.Context, string) bool
 	PrimaryMembership(context.Context, string) (StoredMembership, bool)
 }
@@ -222,15 +227,33 @@ func (s *PostgresStore) changeMembership(ctx context.Context, mutation Mutation,
 	return after, tx.Commit(ctx)
 }
 
+// ListMembershipAudit returns one workspace's membership and invitation
+// mutations, newest first.
+//
+// The limit is CLAMPED rather than reset. It used to fall back to 100 whenever
+// the caller asked for more than 500, so asking for 600 returned fewer records
+// than asking for 500 — and silently, which for an audit read means an
+// investigator concludes there were only 100 and stops looking.
+//
+// Pagination here is still a limit rather than a cursor. The admin trail is
+// keyset-paginated (internal/actionlog.QueryEventsPageInWorkspace); doing the
+// same for this table needs an (created_at, id) cursor through pgx and cannot
+// be exercised without a Postgres instance, so it is recorded as outstanding
+// rather than written blind.
+// maxMembershipAuditPage bounds one membership-audit read.
+const maxMembershipAuditPage = 500
+
 func (s *PostgresStore) ListMembershipAudit(ctx context.Context, workspaceID string, limit int) ([]MembershipAudit, error) {
-	if limit <= 0 || limit > 500 {
+	if limit <= 0 {
 		limit = 100
+	} else if limit > maxMembershipAuditPage {
+		limit = maxMembershipAuditPage
 	}
 	rows, err := s.pool.Query(ctx, `SELECT a.id,a.actor_subject,a.request_id,a.action,a.resource_type,a.resource_id,a.before_data,a.after_data,a.created_at
 		FROM tenant_mutation_audit a WHERE
 		(a.resource_type='membership' AND a.resource_id IN (SELECT id FROM memberships WHERE workspace_id=$1)) OR
 		(a.resource_type='invitation' AND a.resource_id IN (SELECT id FROM invitations WHERE workspace_id=$1))
-		ORDER BY a.created_at DESC LIMIT $2`, workspaceID, limit)
+		ORDER BY a.created_at DESC, a.id DESC LIMIT $2`, workspaceID, limit)
 	if err != nil {
 		return nil, err
 	}

@@ -1,5 +1,6 @@
 <script>
   import TourButton from '../lib/TourButton.svelte'
+  import { confirmDestructive } from '../lib/destructive.js'
   import { onMount, onDestroy } from 'svelte'
   import { api } from '../lib/api.js'
   import { STATUSES, STATUS_LABELS, adjacentStatus, groupByStatus, canRun, runLabel, artifactName, formatBytes, artifactDownloadUrl, PRIORITIES, priorityBadge, parseTags, formatTags, dueInfo } from '../lib/workboard.js'
@@ -230,7 +231,7 @@
   }
 
   async function removeTask(t) {
-    if (!confirm(`Delete task "${t.title}"?`)) return
+    if (!confirmDestructive(`Delete task "${t.title}"?`)) return
     error = ''
     try {
       await api.workboard.delete(t.id)

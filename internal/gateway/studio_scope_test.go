@@ -28,7 +28,7 @@ func studioScopeServer(t *testing.T) *Server {
 	t.Setenv("SOULACY_STUDIO_MACROS", filepath.Join(root, "studio-macros.json"))
 	t.Setenv("SOULACY_STUDIO_PREFERENCES", filepath.Join(root, "studio-preferences.json"))
 	t.Setenv("SOULACY_STUDIO_STRATEGY_FIT", filepath.Join(root, "studio-strategy-fit.json"))
-	return &Server{log: zap.NewNop(), cfg: &config.Config{}}
+	return withCfg(&Server{log: zap.NewNop()}, &config.Config{})
 }
 
 func scopeFor(t *testing.T, s *Server, workspaceID, subject string) studioScope {
@@ -156,7 +156,7 @@ func TestStudioScopeWithoutIdentityIsPersonal(t *testing.T) {
 		t.Fatalf("scope without a request = %q", got)
 	}
 
-	app := fiber.New(fiber.Config{DisableStartupMessage: true})
+	app := fiber.New(fiber.Config{DisableStartupMessage: true, Immutable: true})
 	var resolved studioScope
 	app.Get("/x", func(c *fiber.Ctx) error {
 		identity, err := requestctx.New(requestctx.Input{

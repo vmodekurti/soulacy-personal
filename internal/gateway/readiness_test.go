@@ -107,7 +107,7 @@ func TestReadinessEndpointReturnsProductJourney(t *testing.T) {
 
 func TestDeploymentStatusProductionIsStrict(t *testing.T) {
 	s, _ := newTestGatewayWithLLM(t, "secret")
-	s.cfg.Deployment.Profile = "production"
+	s.config().Deployment.Profile = "production"
 
 	status, body := gatewayJSON(t, s, http.MethodGet, "/api/v1/deployment/status", "secret", "")
 	if status != http.StatusOK {
@@ -127,7 +127,7 @@ func TestDeploymentStatusProductionIsStrict(t *testing.T) {
 
 func TestReadinessUsesConfiguredUpdateManifest(t *testing.T) {
 	s, _ := newTestGatewayWithLLM(t, "secret")
-	s.cfg.Updates.ManifestURL = "https://releases.example.test/soulacy/manifest.json"
+	s.config().Updates.ManifestURL = "https://releases.example.test/soulacy/manifest.json"
 
 	status, body := gatewayJSON(t, s, http.MethodGet, "/api/v1/readiness", "secret", "")
 	if status != http.StatusOK {

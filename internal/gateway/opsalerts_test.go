@@ -36,7 +36,7 @@ func (a *fakeOpsAlertAdapter) Status() channels.AdapterStatus {
 
 func TestOpsAlertStatusUsesConfiguredChannel(t *testing.T) {
 	s := newTestGateway(t, "secret")
-	s.cfg.Ops = config.OpsConfig{AlertChannel: "telegram", AlertTo: "-10042", AlertMinStatus: "warn"}
+	s.config().Ops = config.OpsConfig{AlertChannel: "telegram", AlertTo: "-10042", AlertMinStatus: "warn"}
 	adapter := &fakeOpsAlertAdapter{id: "telegram", live: true}
 	s.channels.Register(adapter)
 
@@ -51,7 +51,7 @@ func TestOpsAlertStatusUsesConfiguredChannel(t *testing.T) {
 
 func TestOpsAlertTestSendsThroughRegistry(t *testing.T) {
 	s := newTestGateway(t, "secret")
-	s.cfg.Ops = config.OpsConfig{AlertChannel: "telegram", AlertTo: "-10042", AlertMinStatus: "fail"}
+	s.config().Ops = config.OpsConfig{AlertChannel: "telegram", AlertTo: "-10042", AlertMinStatus: "fail"}
 	adapter := &fakeOpsAlertAdapter{id: "telegram", live: true}
 	s.channels.Register(adapter)
 

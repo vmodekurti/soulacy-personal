@@ -104,11 +104,17 @@ func (e *IncompatibleError) Error() string { return e.Message }
 
 // Error codes are part of the contract; clients match on these, not on prose.
 const (
-	CodeClientTooOld    = "client_too_old"
-	CodeClientTooNew    = "client_too_new"
-	CodeAPIMismatch     = "api_version_mismatch"
-	CodeFeatureMissing  = "feature_not_supported"
-	CodeStaleWrite      = "stale_resource_version"
+	CodeClientTooOld   = "client_too_old"
+	CodeClientTooNew   = "client_too_new"
+	CodeAPIMismatch    = "api_version_mismatch"
+	CodeFeatureMissing = "feature_not_supported"
+	CodeStaleWrite     = "stale_resource_version"
+	// CodeReauthRequired reports an action the caller MAY perform but whose
+	// proof of identity is stale (MU-030 criterion 5). Distinct from a
+	// permission failure on purpose: the remedy is to re-present a credential,
+	// and a client told 403 will report "you do not have access" to somebody
+	// who does.
+	CodeReauthRequired  = "reauthentication_required"
 	CodeIdempotencyBusy = "idempotency_key_in_flight"
 	CodeIdempotencyReus = "idempotency_key_reused"
 )

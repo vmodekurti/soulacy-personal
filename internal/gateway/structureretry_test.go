@@ -94,7 +94,7 @@ func compileWithProvider(t *testing.T, p *collapsingProvider) map[string]any {
 	s.llmRouter.Register(p)
 	// Without a resolvable provider the runtime.model/runtime.provider checks
 	// block every draft, and /compile then errors before the graph is judged.
-	s.cfg.LLM.DefaultProvider = "openai"
+	s.config().LLM.DefaultProvider = "openai"
 
 	body := `{"intent":` + jsonString(fanOutIntent) + `,"force_workflow":true,"catalog":{}}`
 	status, out := gatewayJSON(t, s, http.MethodPost, "/api/v1/studio/compile", "k", body)
@@ -194,7 +194,7 @@ func TestStudioCompile_DoesNotRetryAGraphThatAlreadyFansOut(t *testing.T) {
 	s, _ := newTestGatewayWithLLM(t, "k")
 	p := &fanningProvider{}
 	s.llmRouter.Register(p)
-	s.cfg.LLM.DefaultProvider = "openai"
+	s.config().LLM.DefaultProvider = "openai"
 
 	body := `{"intent":` + jsonString(fanOutIntent) + `,"force_workflow":true,"catalog":{}}`
 	if status, out := gatewayJSON(t, s, http.MethodPost, "/api/v1/studio/compile", "k", body); status != http.StatusOK {

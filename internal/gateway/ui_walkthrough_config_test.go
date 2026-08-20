@@ -8,7 +8,7 @@ package gateway
 //
 //  1. the patch actually lands in config.yaml on disk;
 //  2. a GET in the SAME process reflects it — handlePatchConfig writes the file
-//     but does not reload s.cfg, so without the in-memory update the very next
+//     but does not reload s.config(), so without the in-memory update the very next
 //     page load would read walkthrough_seen=false and re-open the tour the user
 //     just dismissed;
 //  3. an explicit `false` survives the round trip — pointer fields exist

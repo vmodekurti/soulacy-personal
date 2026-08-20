@@ -46,9 +46,9 @@ func (r *listingResolver) ListSubjectWorkspaces(_ context.Context, subject strin
 
 func identityApp(t *testing.T, resolver tenancy.Resolver, mode string) *fiber.App {
 	t.Helper()
-	s := &Server{cfg: &config.Config{Deployment: config.DeploymentConfig{Mode: mode}}, log: zap.NewNop()}
+	s := withCfg(&Server{log: zap.NewNop()}, &config.Config{Deployment: config.DeploymentConfig{Mode: mode}})
 	s.SetTenantResolver(resolver)
-	app := fiber.New(fiber.Config{DisableStartupMessage: true})
+	app := fiber.New(fiber.Config{DisableStartupMessage: true, Immutable: true})
 	app.Use(func(c *fiber.Ctx) error {
 		auth.SetClaims(c, &auth.Claims{
 			RegisteredClaims: jwt.RegisteredClaims{Subject: "usr_alice"},

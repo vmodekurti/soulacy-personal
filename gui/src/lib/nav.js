@@ -14,6 +14,19 @@ export const navGroups = [
   { key: 'system',       label: 'System'       },
 ]
 
+// MU-030 criterion 2. `requires` names the permission a destination is useless
+// without — read access to the thing the page is about. A viewer offered a
+// Secrets tab that answers 403 on open has been told they can do something
+// they cannot, and learns to distrust the rest of the navigation.
+//
+// A page with no `requires` is reachable by anyone who is signed in. That is
+// the honest default: most screens are read-mostly, the gate that matters is
+// on the route, and hiding a page nobody is forbidden from is worse than
+// showing it.
+//
+// This is CHROME, not a boundary. Every route authorizes itself; a user who
+// types the fragment reaches the page and the page's calls still fail.
+
 /** Every built-in destination in the sidebar, in render order. */
 export const navPages = [
   { id: 'dashboard', icon: '◈', label: 'Dashboard',   group: 'main'         },
@@ -22,27 +35,38 @@ export const navPages = [
   { id: 'agents',    icon: '⊕', label: 'Deployed',    group: 'main'         },
   { id: 'templates', icon: '📋', label: 'Templates',   group: 'main'         },
   { id: 'chat',      icon: '◎', label: 'Chat',        group: 'main'         },
-  { id: 'memory',    icon: '🧠', label: 'Learning',    group: 'capabilities' },
-  { id: 'knowledge', icon: '📚', label: 'Knowledge',   group: 'capabilities' },
+  { id: 'memory',    icon: '🧠', label: 'Learning',    group: 'capabilities', requires: ['memory', 'read'] },
+  { id: 'knowledge', icon: '📚', label: 'Knowledge',   group: 'capabilities', requires: ['knowledge', 'read'] },
   { id: 'queues',    icon: '☷', label: 'Queues',      group: 'capabilities' },
   { id: 'workboard', icon: '▦', label: 'Workboard',   group: 'capabilities' },
-  { id: 'channels',  icon: '📡', label: 'Delivery',    group: 'integrations' },
-  { id: 'schedule',  icon: '⏱', label: 'Automations', group: 'integrations' },
-  { id: 'skills',    icon: '🧩', label: 'Skills',      group: 'integrations' },
-  { id: 'mcp',       icon: '🔌', label: 'MCP',         group: 'integrations' },
+  { id: 'channels',  icon: '📡', label: 'Delivery',    group: 'integrations', requires: ['channels', 'read'] },
+  { id: 'schedule',  icon: '⏱', label: 'Automations', group: 'integrations', requires: ['schedule', 'read'] },
+  { id: 'skills',    icon: '🧩', label: 'Skills',      group: 'integrations', requires: ['skills', 'read'] },
+  { id: 'mcp',       icon: '🔌', label: 'MCP',         group: 'integrations', requires: ['mcp', 'read'] },
   { id: 'pluginmgr', icon: '🧱', label: 'Plugins',     group: 'integrations' },
-  { id: 'providers', icon: '⚙', label: 'Providers',   group: 'integrations' },
-  { id: 'secrets',   icon: '🔑', label: 'Secrets',     group: 'integrations' },
+  { id: 'providers', icon: '⚙', label: 'Providers',   group: 'integrations', requires: ['providers', 'read'] },
+  { id: 'secrets',   icon: '🔑', label: 'Secrets',     group: 'integrations', requires: ['secrets', 'list'] },
   { id: 'activity',  icon: '📈', label: 'Runs',        group: 'system'       },
   { id: 'browser',   icon: '🕸', label: 'Browser',     group: 'system'       },
-  { id: 'config',    icon: '≡', label: 'Config',      group: 'system'       },
+  { id: 'config',    icon: '≡', label: 'Config',      group: 'system',       requires: ['config', 'read'] },
   { id: 'mobile',    icon: '▣', label: 'Mobile',      group: 'system'       },
-  { id: 'logs',      icon: '📋', label: 'Logs',        group: 'system'       },
+  { id: 'logs',      icon: '📋', label: 'Logs',        group: 'system',       requires: ['logs', 'read'] },
   { id: 'members',   icon: '👥', label: 'Members',     group: 'system'       },
 ]
 
 /** Nav ids in render order. */
 export const navIds = navPages.map((p) => p.id)
+
+/**
+ * visibleNavPages filters the sidebar to what this caller can use.
+ *
+ * `allow` is injected rather than imported so this stays a pure function the
+ * walkthrough's own tests can drive without standing up a permission store.
+ */
+export function visibleNavPages(allow, pages = navPages) {
+  if (typeof allow !== 'function') return pages
+  return pages.filter((p) => !p.requires || allow(p.requires[0], p.requires[1]))
+}
 
 /**
  * The `data-tour` value stamped on a nav button. The walkthrough overlay looks

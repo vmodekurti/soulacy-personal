@@ -184,7 +184,7 @@ func TestIsSecretChannelKey_GenericFallback(t *testing.T) {
 
 func TestGetConfig_ChannelSecretsRedactedEndToEnd(t *testing.T) {
 	s := newTestGateway(t, "secret")
-	s.cfg.Channels = map[string]map[string]any{
+	s.config().Channels = map[string]map[string]any{
 		"telegram": {
 			"token":    "123456:REAL-LEAKED-TOKEN",
 			"agent_id": "helper",
@@ -243,7 +243,7 @@ func TestGetConfig_ChannelSecretsRedactedEndToEnd(t *testing.T) {
 func TestPatchConfig_ResponseChannelSecretsRedacted(t *testing.T) {
 	cfgPath := t.TempDir() + "/config.yaml"
 	s := newTestGatewayWithCfgPath(t, "secret", cfgPath)
-	s.cfg.Channels = map[string]map[string]any{
+	s.config().Channels = map[string]map[string]any{
 		"discord": {"token": "REAL-DISCORD-TOKEN", "agent_id": "a"},
 	}
 

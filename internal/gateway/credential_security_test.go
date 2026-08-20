@@ -19,7 +19,7 @@ func TestRBACMiddlewareWiredAfterRouteConstructionStillEnforces(t *testing.T) {
 	s := &Server{}
 	middleware := s.rbacMW(rbac.ResourceSecrets, rbac.ActionList)
 	s.rbacManager = rbac.NewManager(rbac.NoopStore{}, zap.NewNop())
-	app := fiber.New()
+	app := fiber.New(fiber.Config{Immutable: true})
 	app.Use(func(c *fiber.Ctx) error {
 		auth.SetClaims(c, &auth.Claims{Role: rbac.RoleOperator, Kind: "access"})
 		return c.Next()

@@ -11,7 +11,7 @@ import (
 
 func TestGatewayDoctorProviderVaultBackedOK(t *testing.T) {
 	s, _ := newTestGatewayWithLLM(t, "secret")
-	s.cfg.LLM.Providers = map[string]config.ProviderConfig{
+	s.config().LLM.Providers = map[string]config.ProviderConfig{
 		"test": {BaseURL: "https://api.example.com/v1", Model: "fake-model"},
 	}
 	v := newMemVault()
@@ -35,7 +35,7 @@ func TestGatewayDoctorProviderVaultBackedOK(t *testing.T) {
 
 func TestGatewayDoctorProviderRuntimeKeyWarns(t *testing.T) {
 	s, _ := newTestGatewayWithLLM(t, "secret")
-	s.cfg.LLM.Providers = map[string]config.ProviderConfig{
+	s.config().LLM.Providers = map[string]config.ProviderConfig{
 		"test": {BaseURL: "https://api.example.com/v1", Model: "fake-model", APIKey: "sk-runtime"},
 	}
 	s.SetCredentialVault(newMemVault())
@@ -55,7 +55,7 @@ func TestGatewayDoctorProviderRuntimeKeyWarns(t *testing.T) {
 
 func TestGatewayDoctorProviderMissingKeyFails(t *testing.T) {
 	s, _ := newTestGatewayWithLLM(t, "secret")
-	s.cfg.LLM.Providers = map[string]config.ProviderConfig{
+	s.config().LLM.Providers = map[string]config.ProviderConfig{
 		"test": {BaseURL: "https://api.example.com/v1", Model: "fake-model"},
 	}
 	s.SetCredentialVault(newMemVault())
@@ -75,7 +75,7 @@ func TestGatewayDoctorProviderMissingKeyFails(t *testing.T) {
 
 func TestGatewayDoctorLocalProviderDoesNotRequireKey(t *testing.T) {
 	s := newTestGateway(t, "secret")
-	s.cfg.LLM.Providers = map[string]config.ProviderConfig{
+	s.config().LLM.Providers = map[string]config.ProviderConfig{
 		"ollama": {BaseURL: "http://localhost:11434", Model: "llama3"},
 	}
 	s.SetCredentialVault(newMemVault())
@@ -92,7 +92,7 @@ func TestGatewayDoctorLocalProviderDoesNotRequireKey(t *testing.T) {
 
 func TestGatewayDoctorIncludesChannelDiagnostics(t *testing.T) {
 	s := newTestGateway(t, "secret")
-	s.cfg.Channels = map[string]map[string]any{
+	s.config().Channels = map[string]map[string]any{
 		"telegram": {
 			"enabled":       true,
 			"outbound_only": true,

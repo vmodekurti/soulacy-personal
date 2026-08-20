@@ -66,6 +66,25 @@ type TokenIdentity struct {
 	OrganizationID string
 	WorkspaceID    string
 	MembershipID   string
+
+	// AuthTime is when the human last proved who they are — a password, an
+	// OIDC round trip, a key presented interactively — NOT when this token was
+	// minted (MU-030 criterion 5).
+	//
+	// THE DISTINCTION IS THE WHOLE FEATURE. `iat` is the obvious field to
+	// reach for and it is wrong here: an access token is silently rotated
+	// every fifteen minutes for as long as the browser is open, so an
+	// iat-freshness check is satisfied forever by a session nobody has touched
+	// — which is precisely the hijacked session step-up exists to stop.
+	// AuthTime is therefore carried UNCHANGED through every rotation, and only
+	// an explicit re-authentication moves it.
+	//
+	// Zero means "this credential never involved an interactive
+	// authentication" — a service account, or the deployment's static key.
+	// That is an answer rather than a missing value, and it is why the
+	// recent-auth check has to decide what to do about principals that cannot
+	// be prompted rather than treating zero as "very stale".
+	AuthTime time.Time
 }
 
 // IssueFor creates a new access + refresh token pair for one identity.
@@ -137,15 +156,36 @@ func (iss *Issuer) RefreshAuthorized(refreshToken string, reauthorize Reauthoriz
 		// identifies the family, and letting a resolver swap it would turn a
 		// refresh into an impersonation primitive.
 		current.Subject = entry.subject
+		// AuthTime is deliberately NOT taken from the resolver either, and it
+		// is not re-asserted here: issueInFamilyAt below takes it as an
+		// explicit argument from the consumed entry, which is one mechanism
+		// rather than two. A resolver re-reads MEMBERSHIP and has no idea when
+		// the human last authenticated, so whatever it returns is zero —
+		// taking it would reset the step-up clock on every silent rotation,
+		// which is the one thing this field must not do.
+		//
+		// An assignment here as well was the first version, and mutation
+		// testing showed deleting it changed nothing: it was defensive
+		// redundancy whose comment claimed to be the mechanism, which is worse
+		// than absent because the real one then goes unexamined.
 		if strings.TrimSpace(current.Email) == "" {
 			current.Email = entry.identity.Email
 		}
 		id = current
 	}
-	return iss.issueInFamily(id, entry.familyID)
+	return iss.issueInFamilyAt(id, entry.familyID, entry.authTime)
 }
 
 func (iss *Issuer) issueInFamily(id TokenIdentity, familyID string) (accessToken, refreshToken string, expiresIn int, err error) {
+	return iss.issueInFamilyAt(id, familyID, id.AuthTime)
+}
+
+// issueInFamilyAt is where auth_time survives rotation. It takes the value as
+// an argument rather than reading id.AuthTime, so a caller that hands it a
+// freshly resolved identity — which is every refresh — cannot lose it by
+// omission. See MU-030 criterion 5.
+func (iss *Issuer) issueInFamilyAt(id TokenIdentity, familyID string, authTime time.Time) (accessToken, refreshToken string, expiresIn int, err error) {
+	id.AuthTime = authTime
 	now := time.Now()
 	cl := Claims{
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -156,6 +196,9 @@ func (iss *Issuer) issueInFamily(id TokenIdentity, familyID string) (accessToken
 		Email: id.Email, Role: id.Role, Kind: "access",
 		OrganizationID: id.OrganizationID, WorkspaceID: id.WorkspaceID, MembershipID: id.MembershipID,
 	}
+	if !id.AuthTime.IsZero() {
+		cl.AuthTime = id.AuthTime.UTC().Unix()
+	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, cl)
 	accessToken, err = tok.SignedString(iss.secret)
 	if err != nil {
@@ -163,6 +206,19 @@ func (iss *Issuer) issueInFamily(id TokenIdentity, familyID string) (accessToken
 	}
 	refreshToken = iss.store.put(id, familyID, now.Add(iss.refreshTTL))
 	return accessToken, refreshToken, int(iss.accessTTL.Seconds()), nil
+}
+
+// Reauthenticate mints a fresh pair for an identity that has just proved
+// itself again, stamping AuthTime with now (MU-030 criterion 5).
+//
+// It starts a NEW family rather than continuing the old one. Step-up is
+// meaningful only if the elevated authority is bound to the credential the
+// human just proved: continuing the family would let a refresh token stolen
+// before the step-up inherit the elevation on its next rotation, which is
+// exactly the attacker step-up is meant to exclude.
+func (iss *Issuer) Reauthenticate(id TokenIdentity) (accessToken, refreshToken string, expiresIn int, err error) {
+	id.AuthTime = time.Now().UTC()
+	return iss.issueInFamilyAt(id, "", id.AuthTime)
 }
 
 // Revoke invalidates the current access token and the complete refresh-token
@@ -204,6 +260,12 @@ type refreshEntry struct {
 	subject   string
 	familyID  string
 	expiresAt time.Time
+	// authTime survives rotation. It lives on the ENTRY rather than being
+	// re-derived from the identity, because RefreshAuthorized replaces the
+	// identity wholesale with a freshly resolved one — and a resolver that
+	// returns a zero AuthTime would otherwise silently reset the clock on
+	// every refresh, turning the check back into an iat check.
+	authTime time.Time
 }
 
 type consumedEntry struct {
@@ -257,7 +319,7 @@ func (s *refreshStore) put(id TokenIdentity, familyID string, exp time.Time) str
 		familyID = randomHex(16)
 	}
 	s.mu.Lock()
-	s.tokens[sha256.Sum256([]byte(tok))] = refreshEntry{identity: id, subject: id.Subject, familyID: familyID, expiresAt: exp}
+	s.tokens[sha256.Sum256([]byte(tok))] = refreshEntry{identity: id, subject: id.Subject, familyID: familyID, expiresAt: exp, authTime: id.AuthTime}
 	s.mu.Unlock()
 	return tok
 }

@@ -1,7 +1,11 @@
 <script>
   import TourButton from '../lib/TourButton.svelte'
+  import { confirmDestructive, confirmLocal } from '../lib/destructive.js'
   import { onMount, tick } from 'svelte'
   import { api } from '../lib/api.js'
+  import {
+    conflictFrom, conflictHeadline, overwriteOptions, diffLines, conflictSummary,
+  } from '../lib/agentconflict.js'
   import { modelAvailability } from '../lib/agentmodel.js'
   import { parseMarkdown, richRenderer } from '../lib/markdown.js'
   import { apiKey, editAgent, studioSession } from '../lib/stores.js'
@@ -31,6 +35,19 @@
   // not after. See internal/gateway/api.go respondCapabilityAckRequired.
   let ackModal = null      // { audit, retry: () => Promise<void>, from: 'save'|'saveYaml' }
   let ackConfirming = false
+
+  // MU-028 criterion 3. A save refused as stale opens this instead of printing
+  // "✗ …" beside the button. The distinction matters: a save error is
+  // something the user did wrong, and this is something a colleague did right
+  // — the user's work is still valid and the question is what to do with two
+  // valid versions. Three answers, safe one first.
+  //
+  // `retry` is a closure over the original save so Overwrite re-runs exactly
+  // the write that lost, with the version the server named. Nothing is
+  // reconstructed from component state, which could have moved on.
+  let conflictModal = null // { conflict, retry(opts), reloadInto(), busy }
+  let conflictBusy = false
+  let conflictView = 'choices' // 'choices' | 'compare'
 
   // ── Raw SOUL.yaml view/edit modal ─────────────────────────────────────────
   let showYaml    = false   // modal open
@@ -220,7 +237,7 @@
 
   function closeYaml() {
     if (yamlSaving) return
-    if (yamlText !== yamlOrig && !window.confirm('Discard your unsaved YAML edits?')) return
+    if (yamlText !== yamlOrig && !confirmLocal('Discard your unsaved YAML edits?')) return
     showYaml = false
   }
 
@@ -245,6 +262,21 @@
           from: 'saveYaml',
           retry: () => saveYaml({ acknowledgeAudit: true }),
         }
+      } else if (openConflict(e, {
+        agentId: selected?.id || '',
+        mine: yamlText,
+        loadTheirs: async () => {
+          const fresh = await api.agents.getYaml(selected.id)
+          return (fresh && fresh.yaml) || ''
+        },
+        reload: async () => {
+          const fresh = await api.agents.getYaml(selected.id)
+          yamlText = (fresh && fresh.yaml) || ''
+          yamlOrig = yamlText
+        },
+        retry: (extra) => saveYaml({ ...opts, ...extra }),
+      })) {
+        yamlError = ''
       } else {
         // The server returns structured validation findings on a 400; surface the
         // first concrete message so the user can fix syntax/fields in place.
@@ -302,7 +334,7 @@
 
   async function rollbackVersion() {
     if (!selected || !historySelected || historySaving) return
-    const ok = window.confirm(`Restore "${selected.id}" to version ${formatVersionTime(historySelected.created_at)}? The current definition will be snapshotted first.`)
+    const ok = confirmDestructive(`Restore "${selected.id}" to version ${formatVersionTime(historySelected.created_at)}? The current definition will be snapshotted first.`)
     if (!ok) return
     historySaving = true
     historyError = ''
@@ -1048,6 +1080,22 @@
           retry: () => save({ acknowledgeAudit: true }),
         }
         saveMsg = ''
+      } else if (openConflict(e, {
+        agentId: selected?.id || editing?.id || '',
+        mine: JSON.stringify(editing, null, 2),
+        loadTheirs: async () => {
+          await load()
+          const found = agents.find(a => a.id === (selected?.id || editing?.id))
+          return found ? JSON.stringify(found, null, 2) : ''
+        },
+        reload: async () => {
+          await load()
+          const found = agents.find(a => a.id === (selected?.id || editing?.id))
+          if (found) select(found)
+        },
+        retry: (extra) => save({ ...opts, ...extra }),
+      })) {
+        saveMsg = ''
       } else {
         saveMsg = '✗ ' + e.message
       }
@@ -1071,6 +1119,70 @@
     ackModal = null
   }
 
+  // ── MU-028 conflict resolution ────────────────────────────────────────────
+
+  // openConflict returns true when it took ownership of the error, so the
+  // caller keeps its existing handling for everything else.
+  function openConflict(err, handlers) {
+    const conflict = conflictFrom(err, { agentId: handlers.agentId, mine: handlers.mine })
+    if (!conflict) return false
+    conflictView = 'choices'
+    conflictModal = { conflict, ...handlers }
+    return true
+  }
+
+  async function conflictReload() {
+    if (!conflictModal || conflictBusy) return
+    conflictBusy = true
+    try {
+      await conflictModal.reload()
+      conflictModal = null
+    } catch (e) {
+      error = e.message
+    }
+    conflictBusy = false
+  }
+
+  async function conflictCompare() {
+    if (!conflictModal || conflictBusy) return
+    conflictBusy = true
+    try {
+      // Fetched now rather than taken from the 409: the body carries a version
+      // token, not the content, and showing the user a diff against something
+      // they cannot see is the "trust me, it conflicts" dialog that makes
+      // everyone press Overwrite.
+      const theirs = await conflictModal.loadTheirs()
+      conflictModal = { ...conflictModal, conflict: { ...conflictModal.conflict, theirs } }
+      conflictView = 'compare'
+    } catch (e) {
+      error = e.message
+    }
+    conflictBusy = false
+  }
+
+  async function conflictOverwrite() {
+    if (!conflictModal || conflictBusy) return
+    const opts = overwriteOptions(conflictModal.conflict)
+    if (!opts) {
+      // No version to name means we would have to drop the precondition, which
+      // is the silent overwrite this whole mechanism exists to stop. Reload is
+      // the only honest route back.
+      error = 'This conflict did not carry a current version, so it cannot be overwritten safely — reload and re-apply your change.'
+      return
+    }
+    conflictBusy = true
+    const retry = conflictModal.retry
+    conflictModal = null
+    try { await retry(opts) }
+    finally { conflictBusy = false }
+  }
+
+  function conflictCancel() {
+    if (conflictBusy) return
+    conflictModal = null
+    conflictView = 'choices'
+  }
+
   async function toggleEnabled(agent, e) {
     e.stopPropagation()
     if (isSystemAgent(agent)) return
@@ -1091,7 +1203,7 @@
       error = 'System agent is protected'
       return
     }
-    if (!confirm(`Delete agent "${selected.id}"? This cannot be undone.`)) return
+    if (!confirmDestructive(`Delete agent "${selected.id}"? This cannot be undone.`)) return
     deleting = true
     try {
       await api.agents.delete(selected.id)
@@ -2728,6 +2840,64 @@ console.log(reply);` : ''
   </div>
 {/if}
 
+{#if conflictModal}
+  <!--
+    MU-028 criterion 3. A save that lost a race is not a validation error and
+    must not look like one: the user's work is still valid, and so is the work
+    it would replace. Three answers, safe one first — a dialog whose default
+    action discards somebody's work is a dialog people learn to click through.
+  -->
+  <div
+    class="modal-bg"
+    role="button"
+    tabindex="0"
+    aria-label="Close conflict modal"
+    on:click|self={conflictCancel}
+    on:keydown={(e) => e.key === 'Escape' && conflictCancel()}
+  >
+    <div class="modal wide">
+      <h2>{conflictModal.conflict.kind === 'precondition' ? 'This page is out of date' : 'Someone else saved first'}</h2>
+      <div class="modal-sub">{conflictHeadline(conflictModal.conflict)}</div>
+
+      {#if conflictView === 'compare'}
+        {@const summary = conflictSummary(conflictModal.conflict.mine, conflictModal.conflict.theirs || '')}
+        <div class="modal-sub" style="margin-top:.5rem;">
+          {#if summary.identical}
+            Your version and theirs are identical — saving now changes nothing.
+          {:else}
+            {summary.yours} line{summary.yours === 1 ? '' : 's'} only in yours,
+            {summary.theirs} line{summary.theirs === 1 ? '' : 's'} only in theirs.
+          {/if}
+        </div>
+        <pre class="conflict-diff">{#each diffLines(conflictModal.conflict.mine, conflictModal.conflict.theirs || '') as line}<span class="diff-{line.kind}">{line.kind === 'mine' ? '- ' : line.kind === 'theirs' ? '+ ' : '  '}{line.text}
+</span>{/each}</pre>
+        <div class="modal-sub" style="margin-top:.35rem;">
+          <code>-</code> yours &nbsp; <code>+</code> theirs
+        </div>
+      {:else}
+        <ul style="margin:.75rem 0 0 1rem;padding:0;">
+          <li><strong>Reload</strong> — discard your edits and load the current version.</li>
+          <li><strong>Compare</strong> — see exactly which lines differ before deciding.</li>
+          <li><strong>Overwrite</strong> — replace the version you were just shown with yours.</li>
+        </ul>
+      {/if}
+
+      <div class="modal-row" style="display:flex;justify-content:flex-end;gap:.5rem;margin-top:1rem;">
+        <button class="btn-secondary" on:click={conflictCancel} disabled={conflictBusy}>Keep editing</button>
+        <button class="btn-secondary" on:click={conflictReload} disabled={conflictBusy}>
+          {conflictBusy ? 'Working…' : 'Reload'}
+        </button>
+        {#if conflictModal.conflict.kind !== 'precondition'}
+          {#if conflictView !== 'compare'}
+            <button class="btn-secondary" on:click={conflictCompare} disabled={conflictBusy}>Compare</button>
+          {/if}
+          <button class="btn-primary" on:click={conflictOverwrite} disabled={conflictBusy}>Overwrite</button>
+        {/if}
+      </div>
+    </div>
+  </div>
+{/if}
+
 {#if showExport && selected}
   <div
     class="modal-bg"
@@ -4166,4 +4336,23 @@ console.log(reply);` : ''
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: .68rem; white-space: pre-wrap; word-break: break-word;
   }
+
+  /* MU-028 conflict compare. Monospace and scrollable: a SOUL.yaml is long,
+     and a diff that clips is a diff that hides the line the user cares about. */
+  .conflict-diff {
+    margin-top: .5rem;
+    max-height: 40vh;
+    overflow: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .8rem;
+    line-height: 1.45;
+    white-space: pre;
+    background: var(--bg-elev, #11151c);
+    border: 1px solid var(--border, #2a3140);
+    border-radius: 6px;
+    padding: .6rem .75rem;
+  }
+  .diff-mine   { color: #ff9a9a; }
+  .diff-theirs { color: #8ee08e; }
+  .diff-same   { opacity: .65; }
 </style>

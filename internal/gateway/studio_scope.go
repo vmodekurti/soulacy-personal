@@ -186,15 +186,15 @@ func (s *Server) lessonEmbedder() studio.LessonEmbedder {
 	if svc == nil || svc.Embedders == nil {
 		return nil
 	}
-	configured := svc.Embedders.Get(s.cfg.Knowledge.EmbeddingProvider)
+	configured := svc.Embedders.Get(s.config().Knowledge.EmbeddingProvider)
 	if configured == nil {
 		return nil
 	}
-	return lessonEmbedAdapter{embedder: configured, provider: s.cfg.Knowledge.EmbeddingProvider, model: s.cfg.Knowledge.EmbeddingModel}
+	return lessonEmbedAdapter{embedder: configured, provider: s.config().Knowledge.EmbeddingProvider, model: s.config().Knowledge.EmbeddingModel}
 }
 
 func (s *Server) requiresConfiguredEmbedder() bool {
-	return s != nil && s.cfg != nil && strings.TrimSpace(s.cfg.Knowledge.EmbeddingProvider) != ""
+	return s != nil && s.config() != nil && strings.TrimSpace(s.config().Knowledge.EmbeddingProvider) != ""
 }
 
 // ensureParentDir creates the directory a namespaced store file will live in.

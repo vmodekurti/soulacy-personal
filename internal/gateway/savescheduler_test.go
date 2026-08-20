@@ -49,11 +49,17 @@ func TestBothStudioSavePathsSyncTheScheduler(t *testing.T) {
 			t.Errorf("%s no longer writes the agent — this test is guarding the wrong function", name)
 			continue
 		}
-		if !strings.Contains(body, "scheduler.DeregisterAgent(") {
+		// The scheduler is reached through the request's workspace scope now
+		// (s.schedules(c)), so match the scoped call. Matching the old bare
+		// s.scheduler.DeregisterAgent would pass on a handler that dropped a
+		// cron entry in the SCHEDULER's workspace rather than the caller's,
+		// which is the bug scheduler_scope_test.go exists to prevent — this
+		// test must not describe the shape that one forbids.
+		if !strings.Contains(body, "schedules(c).Deregister(") {
 			t.Errorf("%s writes the agent file but never drops its cron entry — "+
 				"a schedule edited here keeps firing on the old expression", name)
 		}
-		if !strings.Contains(body, "scheduler.RegisterAgent(") {
+		if !strings.Contains(body, "schedules(c).Register(") {
 			t.Errorf("%s writes the agent file but never re-registers it — "+
 				"a schedule saved here will not run until the gateway restarts", name)
 		}

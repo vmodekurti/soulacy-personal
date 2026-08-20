@@ -22,7 +22,7 @@ func conflictServer(t *testing.T, teamMode bool) (*Server, *fiber.App, func() an
 	if teamMode {
 		srv = teamServer(nil)
 	}
-	app := fiber.New(fiber.Config{DisableStartupMessage: true})
+	app := fiber.New(fiber.Config{DisableStartupMessage: true, Immutable: true})
 	app.Get("/thing/:id", func(c *fiber.Ctx) error {
 		c.Set(fiber.HeaderETag, resourceETag(state))
 		return c.JSON(state)

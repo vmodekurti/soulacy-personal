@@ -67,20 +67,6 @@ func TestABodyAgentIDCannotReachAnotherWorkspacesBudget(t *testing.T) {
 	}
 }
 
-// Two tenants with an agent of the same ID do not share a token bucket.
-// Agent IDs are unique per workspace, not per deployment.
-func TestTwoWorkspacesDoNotShareAnAgentTokenBucket(t *testing.T) {
-	m := newManager(t, Config{Enabled: true, PerAgentTokensDay: 100, Backend: "memory"})
-	m.RecordAgentTokensInWorkspace("ws_a", "support-bot", 100)
-
-	if status := post(t, asWorkspace(t, "ws_a", "usr_a", m.AgentTokenQuotaMiddleware()), `{"agent_id":"support-bot"}`); status != http.StatusTooManyRequests {
-		t.Fatalf("ws_a status = %d, want 429 — its own quota is spent", status)
-	}
-	if status := post(t, asWorkspace(t, "ws_b", "usr_b", m.AgentTokenQuotaMiddleware()), `{"agent_id":"support-bot"}`); status != http.StatusOK {
-		t.Fatalf("ws_b status = %d — another tenant's usage exhausted its quota", status)
-	}
-}
-
 // The same subject acting in two workspaces has two budgets: a limit that is
 // "per user" across tenants would let a member of many workspaces starve
 // themselves in one by working in another.
@@ -91,18 +77,6 @@ func TestOneSubjectInTwoWorkspacesHasTwoBudgets(t *testing.T) {
 	}
 	if status := post(t, asWorkspace(t, "ws_b", "usr_shared", m.UserRPMMiddleware()), `{}`); status != http.StatusOK {
 		t.Fatalf("status = %d — the same person's work in another workspace spent this budget", status)
-	}
-}
-
-// The recorder, the middleware and the status endpoint must all name the same
-// bucket. Three hand-rolled key expressions is how a limiter ends up checking
-// a bucket nothing fills.
-func TestTheRecorderAndTheMiddlewareAgreeOnTheKey(t *testing.T) {
-	m := newManager(t, Config{Enabled: true, PerUserTokensDay: 100, Backend: "memory"})
-	m.RecordTokensInWorkspace("ws_a", "cred_usr_a", 100)
-
-	if status := post(t, asWorkspace(t, "ws_a", "usr_a", m.TokenQuotaMiddleware()), `{}`); status != http.StatusTooManyRequests {
-		t.Fatalf("status = %d, want 429 — the middleware read a bucket the recorder did not fill", status)
 	}
 }
 

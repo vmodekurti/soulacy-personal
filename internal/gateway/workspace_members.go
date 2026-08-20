@@ -63,6 +63,13 @@ func (s *Server) handleCreateWorkspaceInvitation(c *fiber.Ctx) error {
 		}
 	}
 	invitation, err := s.tenantMembers.CreateInvitation(c.UserContext(), membershipMutation(identity), identity.OrganizationID(), identity.WorkspaceID(), identity.Role(), req.Email, req.Role, time.Now().UTC().Add(ttl))
+	// The invited ROLE and the expiry are recorded; the email is not, and the
+	// token certainly is not. An invitation is a durable way into the
+	// workspace, so what matters in the trail is what authority it grants and
+	// for how long — and an audit record is read by more people than the
+	// invitation was addressed to.
+	s.recordAdminAudit(c, "invitation.created", "invitation", "", auditOutcome(err),
+		map[string]any{"role": req.Role, "expires_in": ttl.String()})
 	if err != nil {
 		return s.errMsg(c, fiber.StatusConflict, "invitation could not be created")
 	}
@@ -120,6 +127,18 @@ func (s *Server) handleSetWorkspaceMemberRole(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusBadRequest, "invalid role")
 	}
 	membership, err := s.tenantMembers.SetMembershipRole(c.UserContext(), membershipMutation(identity), identity.WorkspaceID(), c.Params("id"), identity.Role(), req.Role)
+	// MU-031 criterion 2. Membership changes already reach the tenancy store's
+	// own trail; they were absent from the WORKSPACE audit trail, which is the
+	// one an owner reads. Two trails that each hold half the story is worse
+	// than one that holds all of it: the investigation that matters is "what
+	// happened in this workspace", and it was answerable only by knowing to
+	// look somewhere else.
+	//
+	// The requested role is recorded, not the granted one — they differ
+	// exactly when the store refused an escalation, and that difference is the
+	// interesting record.
+	s.recordAdminAudit(c, "membership.role_changed", "membership", c.Params("id"), auditOutcome(err),
+		map[string]any{"requested_role": req.Role})
 	return s.membershipMutationResponse(c, membership, err)
 }
 
@@ -135,6 +154,8 @@ func (s *Server) handleSetWorkspaceMemberStatus(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusBadRequest, "invalid request")
 	}
 	membership, err := s.tenantMembers.SetMembershipStatusInWorkspace(c.UserContext(), membershipMutation(identity), identity.WorkspaceID(), c.Params("id"), identity.Role(), req.Status)
+	s.recordAdminAudit(c, "membership.status_changed", "membership", c.Params("id"), auditOutcome(err),
+		map[string]any{"requested_status": req.Status})
 	return s.membershipMutationResponse(c, membership, err)
 }
 
@@ -144,6 +165,7 @@ func (s *Server) handleRemoveWorkspaceMember(c *fiber.Ctx) error {
 		return err
 	}
 	membership, err := s.tenantMembers.SetMembershipStatusInWorkspace(c.UserContext(), membershipMutation(identity), identity.WorkspaceID(), c.Params("id"), identity.Role(), tenancy.MembershipDeleted)
+	s.recordAdminAudit(c, "membership.removed", "membership", c.Params("id"), auditOutcome(err), nil)
 	return s.membershipMutationResponse(c, membership, err)
 }
 
@@ -169,9 +191,46 @@ func (s *Server) handleWorkspaceMembershipAudit(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusForbidden, "workspace owner role is required")
 	}
 	limit, _ := strconv.Atoi(c.Query("limit", "100"))
-	entries, err := s.tenantMembers.ListMembershipAudit(c.UserContext(), identity.WorkspaceID(), limit)
+	// Keyset-paginated (MU-031 criterion 4). An offset cursor skips or repeats
+	// rows whenever a write lands between two pages, and this trail is
+	// append-only under exactly the conditions somebody reads it — during an
+	// investigation, while access is being changed.
+	page, err := s.tenantMembers.ListMembershipAuditPage(c.UserContext(), identity.WorkspaceID(), limit, c.Query("cursor"))
 	if err != nil {
+		if errors.Is(err, tenancy.ErrInvalidAuditCursor) {
+			// 400, not an empty page. A malformed cursor answered with no
+			// results makes a client bug and a tampering attempt both look
+			// like the end of the trail, and an investigator would conclude it
+			// stopped there.
+			return s.errMsg(c, fiber.StatusBadRequest, "the page cursor is not one this server issued")
+		}
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "membership audit could not be loaded")
 	}
-	return c.JSON(fiber.Map{"events": entries})
+	entries := page.Entries
+	// MU-031 criterion 4. Reading who has been added, removed or re-roled is
+	// how somebody learns the shape of a workspace's access, and it left no
+	// trace. Recorded after a successful read so a refusal does not produce a
+	// record implying the data was served, and carrying the size rather than
+	// the contents — a copy of the trail inside itself helps nobody.
+	s.recordAdminAudit(c, "audit.read", "membership_audit", identity.WorkspaceID(), "ok", map[string]any{
+		"limit":    limit,
+		"returned": len(entries),
+	})
+	// next_cursor is always present, empty on the last page. Omitting it there
+	// would make an exhausted trail indistinguishable from a server too old to
+	// paginate, so a client would have to guess which it was looking at.
+	return c.JSON(fiber.Map{"events": entries, "next_cursor": page.NextCursor})
+}
+
+// auditOutcome turns an operation's error into the audit trail's status.
+//
+// A FAILED attempt is recorded, not skipped. "Somebody tried to make
+// themselves an owner and the store refused" is one of the more interesting
+// lines an audit trail can carry, and a trail that records only successes
+// cannot show an attack that did not work.
+func auditOutcome(err error) string {
+	if err != nil {
+		return "failed"
+	}
+	return "ok"
 }

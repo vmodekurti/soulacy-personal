@@ -1,5 +1,6 @@
 <script>
   import TourButton from '../lib/TourButton.svelte'
+  import { confirmDestructive } from '../lib/destructive.js'
   import { onMount, onDestroy } from 'svelte'
   import { api } from '../lib/api.js'
   import { activityAgent } from '../lib/stores.js'
@@ -435,7 +436,7 @@
 
   async function remove(agentId) {
     if (isRunning(agentId)) { error = `"${agentId}" is currently running — wait for it to finish before deleting.`; return }
-    if (!confirm(`Delete agent "${agentId}"? This removes its SOUL.yaml from disk.`)) return
+    if (!confirmDestructive(`Delete agent "${agentId}"? This removes its SOUL.yaml from disk.`)) return
     setBusy(agentId, true); error = ''; notice = ''
     try {
       await api.agents.delete(agentId)

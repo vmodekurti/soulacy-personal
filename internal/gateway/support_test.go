@@ -37,8 +37,8 @@ func TestGatewaySupportBundleDownloadsRedactedZip(t *testing.T) {
 	}
 
 	s := newTestGatewayWithCfgPath(t, "secret", cfgPath)
-	s.cfg.AgentDirs = []string{agentDir}
-	s.cfg.Log.File = filepath.Join(logDir, "soulacy.log")
+	s.config().AgentDirs = []string{agentDir}
+	s.config().Log.File = filepath.Join(logDir, "soulacy.log")
 	s.engine.TagFlowRun("demo", "flow-only", "http")
 	base := time.Date(2026, 7, 13, 7, 0, 0, 0, time.UTC)
 	s.actions = &fakeTailBackend{events: []message.Event{

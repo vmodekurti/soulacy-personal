@@ -31,7 +31,7 @@ type preferenceMineJob struct {
 // studioLearningEnabled reports whether Studio should record + inject lessons.
 // nil (unset) means enabled; operators opt out with `llm.studio.learning: false`.
 func (s *Server) studioLearningEnabled() bool {
-	l := s.cfg.LLM.Studio.Learning
+	l := s.config().LLM.Studio.Learning
 	return l == nil || *l
 }
 
@@ -223,14 +223,28 @@ func (s *Server) processPreferenceJob(job preferenceMineJob) {
 	if store == nil {
 		return
 	}
+	// MU-025 criterion 5. This runs on a worker goroutine after the request
+	// that queued it has returned, so the workspace's status is re-read HERE
+	// rather than inherited from the moment the save happened. A save made a
+	// second before an owner requested deletion would otherwise mine a
+	// preference into that workspace minutes later — which is not a leak (the
+	// data lands in the right tenant) and is exactly why it went unnoticed.
+	// What it defeats is the recovery window: an owner who cancels on day six
+	// should get back the workspace they had on day one.
+	admission, cancelAdmission := backgroundAdmissionContext(context.Background())
+	admitted := s.backgroundWriteAdmitted(admission, job.scope.workspaceID)
+	cancelAdmission()
+	if !admitted {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), s.studioLearningTimeout())
 	defer cancel()
 	_ = studio.NewPreferenceMiner(store, s.studioLLM()).MineFor(ctx, job.owner, job.agentID, job.initial, job.final)
 }
 
 func (s *Server) studioLearningTimeout() time.Duration {
-	if s != nil && s.cfg != nil {
-		if duration, err := time.ParseDuration(s.cfg.Runtime.Timeouts.LLM); err == nil && duration > 0 {
+	if s != nil && s.config() != nil {
+		if duration, err := time.ParseDuration(s.config().Runtime.Timeouts.LLM); err == nil && duration > 0 {
 			return duration
 		}
 	}

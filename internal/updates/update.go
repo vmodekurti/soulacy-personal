@@ -1,9 +1,7 @@
 package updates
 
 import (
-	"archive/tar"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -21,6 +19,7 @@ import (
 	"time"
 
 	"github.com/soulacy/soulacy/internal/config"
+	"github.com/soulacy/soulacy/internal/safearchive"
 )
 
 type UpdateManifest struct {
@@ -563,41 +562,32 @@ func unpackUpdateArchiveFile(path string) (map[string][]byte, error) {
 	return unpackUpdateArchiveReader(file)
 }
 
+// unpackUpdateArchiveReader pulls the two release binaries out of an update
+// tarball.
+//
+// The selection and the bounds moved to internal/safearchive, which is now the
+// only place in this repo that opens somebody else's archive. What this file
+// had was a per-entry cap of 512 MiB and nothing else: no cumulative bound, so
+// an archive of ten thousand entries all named `soulacy` allocated half a
+// gigabyte ten thousand times in sequence, and no entry-count bound at all.
+//
+// The archive's checksum is verified against the signed manifest BEFORE this
+// runs, so an attacker who reaches here has already replaced the release. That
+// is exactly the case worth bounding: the guard that only matters when
+// something upstream has already failed is the one nobody notices is missing.
 func unpackUpdateArchiveReader(reader io.Reader) (map[string][]byte, error) {
-	gz, err := gzip.NewReader(reader)
+	files, err := safearchive.SelectTarGz(reader,
+		map[string]bool{"soulacy": true, "sy": true},
+		safearchive.Limits{
+			// A release binary is tens of megabytes; 512 MiB is the historic
+			// ceiling, kept so a legitimately large future build is not
+			// refused by a number nobody revisited.
+			MaxEntryBytes: 512 << 20,
+			MaxTotalBytes: 1 << 30,
+			MaxEntries:    10_000,
+		})
 	if err != nil {
-		return nil, fmt.Errorf("update archive: open gzip: %w", err)
-	}
-	defer gz.Close()
-	tr := tar.NewReader(gz)
-	files := map[string][]byte{}
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("update archive: read tar: %w", err)
-		}
-		if hdr.Typeflag != tar.TypeReg {
-			continue
-		}
-		if hdr.Size < 0 || hdr.Size > 512<<20 {
-			return nil, fmt.Errorf("update archive: %s exceeds binary size limit", hdr.Name)
-		}
-		name := strings.TrimPrefix(filepath.Clean(hdr.Name), string(filepath.Separator))
-		base := filepath.Base(name)
-		if name == "." || strings.Contains(name, "..") || (base != "soulacy" && base != "sy") {
-			continue
-		}
-		body, err := io.ReadAll(io.LimitReader(tr, hdr.Size+1))
-		if err != nil {
-			return nil, fmt.Errorf("update archive: read %s: %w", hdr.Name, err)
-		}
-		if int64(len(body)) != hdr.Size {
-			return nil, fmt.Errorf("update archive: size mismatch for %s", hdr.Name)
-		}
-		files[base] = body
+		return nil, fmt.Errorf("update archive: %w", err)
 	}
 	return files, nil
 }

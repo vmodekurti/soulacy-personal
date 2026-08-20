@@ -1,5 +1,6 @@
 <script>
   import TourButton from '../lib/TourButton.svelte'
+  import { confirmDestructive } from '../lib/destructive.js'
   import { onMount, onDestroy } from 'svelte'
   import { api, createEventSocket } from '../lib/api.js'
 
@@ -189,7 +190,7 @@
   }
 
   async function deleteKB(kb) {
-    if (!confirm(`Delete knowledge base "${kb.name}" and all its documents? This cannot be undone.`)) return
+    if (!confirmDestructive(`Delete knowledge base "${kb.name}" and all its documents? This cannot be undone.`)) return
     try {
       await api.knowledge.delete(kb.name)
       if (selected?.name === kb.name) selected = null
@@ -256,7 +257,7 @@
   }
 
   async function deleteDoc(doc) {
-    if (!confirm(`Delete "${doc.title}"?`)) return
+    if (!confirmDestructive(`Delete "${doc.title}"?`)) return
     try {
       await api.knowledge.deleteDocument(selected.name, doc.id)
       await selectKB(selected)
@@ -269,7 +270,7 @@
   async function deleteSelectedDocs() {
     if (selectedDocs.size === 0) return
     const ids = [...selectedDocs]
-    if (!confirm(`Delete ${ids.length} document${ids.length === 1 ? '' : 's'}? This cannot be undone.`)) return
+    if (!confirmDestructive(`Delete ${ids.length} document${ids.length === 1 ? '' : 's'}? This cannot be undone.`)) return
     bulkDeleting = true
     error = ''; info = ''
     const failed = []

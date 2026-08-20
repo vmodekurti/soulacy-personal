@@ -144,15 +144,15 @@ func (s *Server) studioLLM(request ...*fiber.Ctx) studio.LLM {
 // default provider when it's unset or unregistered, and fill the model from the
 // provider config when unset. Shared by studioLLM and the model-advice endpoint.
 func (s *Server) studioProviderModel() (provider, model string) {
-	provider = strings.TrimSpace(s.cfg.LLM.Studio.Provider)
+	provider = strings.TrimSpace(s.config().LLM.Studio.Provider)
 	if provider == "" {
-		provider = s.cfg.LLM.DefaultProvider
-	} else if _, ok := s.cfg.LLM.Providers[provider]; !ok {
-		provider = s.cfg.LLM.DefaultProvider
+		provider = s.config().LLM.DefaultProvider
+	} else if _, ok := s.config().LLM.Providers[provider]; !ok {
+		provider = s.config().LLM.DefaultProvider
 	}
-	model = strings.TrimSpace(s.cfg.LLM.Studio.Model)
+	model = strings.TrimSpace(s.config().LLM.Studio.Model)
 	if model == "" {
-		if pc, ok := s.cfg.LLM.Providers[provider]; ok {
+		if pc, ok := s.config().LLM.Providers[provider]; ok {
 			model = pc.Model
 		}
 	}
@@ -164,8 +164,8 @@ func (s *Server) studioProviderModel() (provider, model string) {
 // model used to GENERATE the agent): the agent runs on the gateway's default
 // provider, not necessarily the (possibly cloud) builder model.
 func (s *Server) defaultAgentLLM() (provider, model string) {
-	provider = strings.TrimSpace(s.cfg.LLM.DefaultProvider)
-	if pc, ok := s.cfg.LLM.Providers[provider]; ok {
+	provider = strings.TrimSpace(s.config().LLM.DefaultProvider)
+	if pc, ok := s.config().LLM.Providers[provider]; ok {
 		model = strings.TrimSpace(pc.Model)
 	}
 	return provider, model
@@ -179,10 +179,10 @@ func (s *Server) defaultAgentLLM() (provider, model string) {
 // had a usable default.
 func (s *Server) studioDraftWithRuntimeLLM(draft studio.Draft) studio.Draft {
 	if strings.TrimSpace(draft.LLM.Provider) == "" {
-		draft.LLM.Provider = strings.TrimSpace(s.cfg.LLM.DefaultProvider)
+		draft.LLM.Provider = strings.TrimSpace(s.config().LLM.DefaultProvider)
 	}
 	if strings.TrimSpace(draft.LLM.Model) == "" {
-		if pc, ok := s.cfg.LLM.Providers[draft.LLM.Provider]; ok {
+		if pc, ok := s.config().LLM.Providers[draft.LLM.Provider]; ok {
 			draft.LLM.Model = strings.TrimSpace(pc.Model)
 		}
 	}
@@ -253,7 +253,7 @@ func (s *Server) stampDefaultLLM(d *studio.Draft) {
 	if len(ids) > 0 {
 		fallback := ids[0]
 		d.LLM.Provider = fallback
-		if pc, ok := s.cfg.LLM.Providers[fallback]; ok {
+		if pc, ok := s.config().LLM.Providers[fallback]; ok {
 			d.LLM.Model = strings.TrimSpace(pc.Model)
 		} else {
 			d.LLM.Model = ""
@@ -276,7 +276,7 @@ func (s *Server) handleStudioModelAdvice(c *fiber.Ctx) error {
 		return c.JSON(studio.AssessModel("", "", ""))
 	}
 	baseURL := ""
-	if pc, ok := s.cfg.LLM.Providers[provider]; ok {
+	if pc, ok := s.config().LLM.Providers[provider]; ok {
 		baseURL = pc.BaseURL
 	}
 	adv := studio.AssessModel(provider, model, baseURL)
@@ -301,7 +301,7 @@ func (s *Server) firstConfiguredCloudProvider() string {
 		return ""
 	}
 	for _, id := range s.llmRouter.ProviderIDs() {
-		pc, ok := s.cfg.LLM.Providers[id]
+		pc, ok := s.config().LLM.Providers[id]
 		if !ok {
 			continue
 		}
@@ -348,7 +348,7 @@ func (s *Server) groundCatalog(scope studioScope, cat *studio.Catalog) {
 	// MCP rather than a builtin.
 	mcpBySrv := map[string]int{}
 	cat.MCP = nil
-	for _, mt := range s.snapshotMCPTools() {
+	for _, mt := range s.snapshotMCPTools(scope.workspaceID) {
 		idx, ok := mcpBySrv[mt.Server]
 		if !ok {
 			idx = len(cat.MCP)
@@ -407,7 +407,7 @@ func (s *Server) groundGenerationProfile(cat *studio.Catalog, intent string) {
 	}
 	provider, model := s.studioProviderModel()
 	baseURL := ""
-	if pc, ok := s.cfg.LLM.Providers[provider]; ok {
+	if pc, ok := s.config().LLM.Providers[provider]; ok {
 		baseURL = pc.BaseURL
 	}
 	gp := studio.BuildGenerationProfile(provider, model, baseURL, intent, *cat)
@@ -422,7 +422,7 @@ func (s *Server) groundedChannels() []string {
 	statuses := s.channels.Statuses()
 	var out []string
 	for _, spec := range channelSpecs {
-		cfg := s.cfg.Channels[spec.ID]
+		cfg := s.config().Channels[spec.ID]
 		enabled := spec.Always
 		if v, ok := cfg["enabled"].(bool); ok {
 			enabled = v
@@ -588,12 +588,12 @@ func (s *Server) handleStudioSecurityReview(c *fiber.Ctx) error {
 func (s *Server) preflightInput(c *fiber.Ctx, cat studio.Catalog) studio.PreflightInput {
 	in := studio.PreflightInput{
 		Catalog:            cat,
-		ConnectedMCP:       s.connectedMCPSet(),
+		ConnectedMCP:       s.connectedMCPSet(mcpWorkspace(c)),
 		ChannelsConfigured: s.configuredChannelSet(),
 	}
 	if mgr := secrets.NewInWorkspace(s.CredentialVault(), s.agents(c).WorkspaceID()); mgr.Enabled() {
 		set := map[string]bool{}
-		for _, d := range mgr.Catalog(c.Context(), s.cfg) {
+		for _, d := range mgr.Catalog(c.Context(), s.config()) {
 			set[d.Name] = d.Set
 		}
 		in.SecretsSet = set
@@ -611,12 +611,12 @@ func (s *Server) preflightInput(c *fiber.Ctx, cat studio.Catalog) studio.Preflig
 		models := map[string]bool{}
 		// Everything the config names starts as unavailable, so a configured but
 		// unregistered provider is reported rather than simply absent from the map.
-		for id := range s.cfg.LLM.Providers {
+		for id := range s.config().LLM.Providers {
 			providers[id] = false
 		}
 		for _, id := range s.llmRouter.ProviderIDs() {
 			providers[id] = true
-			if pc, ok := s.cfg.LLM.Providers[id]; ok && strings.TrimSpace(pc.Model) != "" {
+			if pc, ok := s.config().LLM.Providers[id]; ok && strings.TrimSpace(pc.Model) != "" {
 				models[pc.Model] = true
 				models[id+"/"+pc.Model] = true
 			}
@@ -643,7 +643,7 @@ func (s *Server) studioCatalogSnapshot(scope agentScope) studio.Catalog {
 			cat.Agents = append(cat.Agents, d.ID)
 		}
 	}
-	tc := s.toolCatalog()
+	tc := s.toolCatalog(scope.workspaceID)
 	for _, b := range tc.Builtins {
 		if strings.TrimSpace(b.Name) != "" {
 			cat.Tools = append(cat.Tools, b.Name)
@@ -661,9 +661,9 @@ func (s *Server) studioCatalogSnapshot(scope agentScope) studio.Catalog {
 }
 
 // connectedMCPSet returns the set of currently connected MCP server names.
-func (s *Server) connectedMCPSet() map[string]bool {
+func (s *Server) connectedMCPSet(workspaceID string) map[string]bool {
 	set := map[string]bool{}
-	for _, mt := range s.snapshotMCPTools() {
+	for _, mt := range s.snapshotMCPTools(workspaceID) {
 		set[mt.Server] = true
 	}
 	return set
@@ -960,8 +960,8 @@ func (s *Server) handleStudioBuild(c *fiber.Ctx) error {
 		// "still making progress" loop would hold a live tool connection and an
 		// LLM budget open indefinitely.
 		MaxElapsed: studio.DefaultMaxElapsed,
-		MaxTokens:  s.cfg.LLM.Studio.MaxBuildTokens,
-		MaxCostUSD: s.cfg.LLM.Studio.MaxBuildCostUSD,
+		MaxTokens:  s.config().LLM.Studio.MaxBuildTokens,
+		MaxCostUSD: s.config().LLM.Studio.MaxBuildCostUSD,
 	}
 
 	rep := studio.BuildUntilWorks(c.Context(), model, req.Workflow, cat, opts)
@@ -1084,8 +1084,8 @@ func (s *Server) handleStudioBuildStream(c *fiber.Ctx) error {
 			SideEffects: policy,
 			Verifier:    studio.VerifierFor(policy, s.studioRealRunner()),
 			MaxElapsed:  studio.DefaultMaxElapsed,
-			MaxTokens:   s.cfg.LLM.Studio.MaxBuildTokens,
-			MaxCostUSD:  s.cfg.LLM.Studio.MaxBuildCostUSD,
+			MaxTokens:   s.config().LLM.Studio.MaxBuildTokens,
+			MaxCostUSD:  s.config().LLM.Studio.MaxBuildCostUSD,
 		}
 		opts.OnEvent = func(ev studio.BuildEvent) {
 			b, _ := json.Marshal(ev)
@@ -1840,7 +1840,7 @@ func (s *Server) ensurePeerAgents(scope agentScope, dir string, def *agent.Defin
 			MaxTurns:     15,
 			Memory:       agent.MemoryPolicy{MaxTokens: 8000},
 			LLM: agent.LLMConfig{
-				Provider:    s.cfg.LLM.DefaultProvider,
+				Provider:    s.config().LLM.DefaultProvider,
 				Temperature: 0.7,
 			},
 		}
@@ -1910,7 +1910,7 @@ func (s *Server) registerEphemeralPeers(scope agentScope, def *agent.Definition,
 			MaxTurns:   15,
 			Memory:     agent.MemoryPolicy{MaxTokens: 8000},
 			LLM: agent.LLMConfig{
-				Provider:    s.cfg.LLM.DefaultProvider,
+				Provider:    s.config().LLM.DefaultProvider,
 				Temperature: 0.7,
 			},
 			SourcePath: "", // in-memory only, never persisted
@@ -2539,8 +2539,8 @@ func (s *Server) handleStudioDiagnoseRun(c *fiber.Ctx) error {
 		Verifier:      studio.VerifierFor(studio.SideEffectsReal, s.studioRealRunner()),
 		ExtraProblems: s.pythonBuildProblems,
 		MaxElapsed:    studio.DefaultMaxElapsed,
-		MaxTokens:     s.cfg.LLM.Studio.MaxBuildTokens,
-		MaxCostUSD:    s.cfg.LLM.Studio.MaxBuildCostUSD,
+		MaxTokens:     s.config().LLM.Studio.MaxBuildTokens,
+		MaxCostUSD:    s.config().LLM.Studio.MaxBuildCostUSD,
 	})
 
 	return c.JSON(fiber.Map{
@@ -2631,8 +2631,8 @@ func (s *Server) handleStudioDiagnoseSession(c *fiber.Ctx) error {
 		Verifier:      studio.VerifierFor(studio.SideEffectsReal, s.studioRealRunner()),
 		ExtraProblems: s.pythonBuildProblems,
 		MaxElapsed:    studio.DefaultMaxElapsed,
-		MaxTokens:     s.cfg.LLM.Studio.MaxBuildTokens,
-		MaxCostUSD:    s.cfg.LLM.Studio.MaxBuildCostUSD,
+		MaxTokens:     s.config().LLM.Studio.MaxBuildTokens,
+		MaxCostUSD:    s.config().LLM.Studio.MaxBuildCostUSD,
 	})
 
 	failingInput := studioSessionFailingInput(events, req.AgentID, req.SessionID)
@@ -3173,13 +3173,13 @@ func (s *Server) finalizeStudioResult(res *studio.Result, cat studio.Catalog, in
 func (s *Server) applyLocalPreset(def *agent.Definition) {
 	provider := def.LLM.Provider
 	if provider == "" {
-		provider = s.cfg.LLM.DefaultProvider
+		provider = s.config().LLM.DefaultProvider
 	}
 	baseURL := ""
-	if pc, ok := s.cfg.LLM.Providers[provider]; ok {
+	if pc, ok := s.config().LLM.Providers[provider]; ok {
 		baseURL = pc.BaseURL
 	}
-	intent := strings.TrimSpace(s.cfg.LLM.Studio.Preset)
+	intent := strings.TrimSpace(s.config().LLM.Studio.Preset)
 	// Cloud-quality is a deliberate choice for cloud runs; other intents keep
 	// the local-only gate to avoid mistakenly applying local-tuned generous
 	// timeouts to a cloud model where it's usually money-per-token.
@@ -3217,7 +3217,7 @@ func (s *Server) applyLocalPreset(def *agent.Definition) {
 // pick a runtime intent — "fast local", "reliable local", "cloud quality" —
 // without editing YAML or knowing the model tier heuristics.
 func (s *Server) handleStudioPresets(c *fiber.Ctx) error {
-	current := strings.TrimSpace(s.cfg.LLM.Studio.Preset)
+	current := strings.TrimSpace(s.config().LLM.Studio.Preset)
 	return c.JSON(fiber.Map{
 		"presets": studio.ListIntentPresets(),
 		"current": current,
@@ -3445,13 +3445,18 @@ func (s *Server) handleStudioSaveYAML(c *fiber.Ctx) error {
 		return protectedSystemAgentResponse(c)
 	}
 
-	// Optimistic concurrency: if the agent already exists, the caller must send
-	// the current ETag or the write is refused. Mirrors handleUpdateAgentYAML.
+	// BEFORE validation, deliberately. A stale save of INVALID yaml is still a
+	// stale save, and answering 400 sends the author off to fix their YAML —
+	// after which the retry succeeds and silently discards the colleague's
+	// edit anyway. The 409 has to be the first thing they see, because it is
+	// the only one that changes what they do next.
+	//
+	// The Code view creates as well as updates, so an absent agent is not an
+	// error here; guardAgentUpdate passes a nil `existing` straight through,
+	// and the create half is what refuses to land on somebody else's agent.
 	existing := s.agents(c).Get(def.ID)
-	if existing != nil {
-		if rejected, err := s.checkIfMatch(c, existing); rejected {
-			return err
-		}
+	if rejected, err := s.guardAgentUpdate(c, existing); rejected {
+		return err
 	}
 
 	report := agentvalidate.Definition(&def, "", s.agentValidationOptions(c.Context()), agentvalidate.Report{})
@@ -3463,13 +3468,13 @@ func (s *Server) handleStudioSaveYAML(c *fiber.Ctx) error {
 	}
 
 	if def.LLM.Provider == "" {
-		def.LLM.Provider = s.cfg.LLM.DefaultProvider
+		def.LLM.Provider = s.config().LLM.DefaultProvider
 	}
 	s.applyLocalPreset(&def)
 
 	dir := ""
-	if len(s.cfg.AgentDirs) > 0 {
-		dir = s.cfg.AgentDirs[0]
+	if len(s.config().AgentDirs) > 0 {
+		dir = s.config().AgentDirs[0]
 	}
 	// If this agent already exists, write back into its OWN directory and carry
 	// its source path, so Save updates the agent in place instead of dropping a
@@ -3494,8 +3499,8 @@ func (s *Server) handleStudioSaveYAML(c *fiber.Ctx) error {
 	if err := s.agents(c).Upsert(dir, &def); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
-	s.scheduler.DeregisterAgent(def.ID)
-	if err := s.scheduler.RegisterAgent(&def); err != nil {
+	s.schedules(c).Deregister(def.ID)
+	if err := s.schedules(c).Register(&def); err != nil {
 		s.log.Warn("scheduler registration failed", zap.String("agent", def.ID), zap.Error(err))
 	}
 	return c.JSON(fiber.Map{"id": def.ID, "agent": &def, "validation": report, "peerAgents": createdPeers})
@@ -3797,6 +3802,27 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusBadRequest, "invalid request body: "+err.Error())
 	}
 
+	// FIRST, before the contract, consent and preflight gates below.
+	//
+	// The canvas save is the write most likely to lose somebody's work: a
+	// Studio tab holds a whole graph in memory for as long as it stays open,
+	// so the copy it writes back is routinely hours old. And the ORDER is the
+	// part that matters. Placed after the contract gate, a stale save of an
+	// imperfect graph answers 422; the author fixes the graph, retries, and
+	// the retry lands — silently discarding the colleague's edit the 409
+	// existed to protect. The stale answer has to be the first one they see,
+	// because it is the only one that changes what they do next.
+	//
+	// The id comes from studio.DraftAgentID, which is the same derivation
+	// ToAgentDefinition uses further down. Re-deriving it here would be a
+	// second copy of that rule, and the two would check one agent and write
+	// another the day slugging changes.
+	if draftID := studio.DraftAgentID(req.Workflow); draftID != "" {
+		if rejected, err := s.guardAgentUpdate(c, s.agents(c).Get(draftID)); rejected {
+			return err
+		}
+	}
+
 	// Authoritative pre-create gate: never persist a Studio draft that fails the
 	// same generation contract shown on the canvas. The GUI runs this before
 	// Save, but enforcing it here protects imports, stale tabs, and alternate API
@@ -3858,15 +3884,6 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 		return protectedSystemAgentResponse(c)
 	}
 
-	// Optimistic concurrency: if the agent already exists, the caller must send
-	// the current ETag or the write is refused. Mirrors handleUpdateAgent.
-	existing := s.agents(c).Get(def.ID)
-	if existing != nil {
-		if rejected, err := s.checkIfMatch(c, existing); rejected {
-			return err
-		}
-	}
-
 	// Record the tool contracts this workflow was built against (P0-3). Captured
 	// HERE rather than in ToAgentDefinition because the live catalog is the
 	// gateway's to know — the pure Draft→Definition mapping has no business
@@ -3881,7 +3898,7 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 
 	// Default LLM to the configured provider, mirroring handleCreateAgent.
 	if def.LLM.Provider == "" {
-		def.LLM.Provider = s.cfg.LLM.DefaultProvider
+		def.LLM.Provider = s.config().LLM.DefaultProvider
 	}
 	// Timeout-aware defaults for local-model agents (Stories #23/#24): if this
 	// agent will run on a LOCAL model, apply patient timeout/turn presets where
@@ -3936,8 +3953,8 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 	def.Enabled = wasEnabled
 
 	dir := ""
-	if len(s.cfg.AgentDirs) > 0 {
-		dir = s.cfg.AgentDirs[0]
+	if len(s.config().AgentDirs) > 0 {
+		dir = s.config().AgentDirs[0]
 	}
 	// Materialise any peer agent the workflow delegates to that does not exist
 	// yet, and make sure the caller declares the ones it calls. A dangling peer
@@ -3961,8 +3978,8 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 	// the operator could see was off. (The engine now also refuses a disabled
 	// agent at fire time; this keeps the table itself honest, and picks up an
 	// edited cron expression rather than leaving the old one to tick.)
-	s.scheduler.DeregisterAgent(def.ID)
-	if err := s.scheduler.RegisterAgent(&def); err != nil {
+	s.schedules(c).Deregister(def.ID)
+	if err := s.schedules(c).Register(&def); err != nil {
 		s.log.Warn("scheduler registration failed", zap.String("agent", def.ID), zap.Error(err))
 	}
 
@@ -4264,14 +4281,6 @@ func (s *Server) handleStudioSaveRules(c *fiber.Ctx) error {
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
-
-	// Optimistic concurrency: the current rules text is the resource state.
-	// We need to check If-Match against it before allowing a save.
-	currentRules := s.soulRules(s.studio(c))
-	if rejected, err := s.checkIfMatch(c, currentRules); rejected {
-		return err
-	}
-
 	author := s.auditActor(c)
 
 	// Reset is a version too. Recording the default as the new head keeps the
@@ -4360,27 +4369,6 @@ func (s *Server) handleStudioSaveDraft(c *fiber.Ctx) error {
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
-
-	// Optimistic concurrency: check if a draft with the same name already exists
-	// and require If-Match on its current version. The id is derived from name
-	// + workflow hash, so we check by loading drafts with that name prefix.
-	existingDrafts, _ := studio.ListDrafts(dir)
-	var currentDraft *studio.StoredDraft
-	for i := range existingDrafts {
-		if existingDrafts[i].Name == req.Name {
-			d, err := studio.LoadDraft(dir, existingDrafts[i].ID)
-			if err == nil {
-				currentDraft = &d
-				break
-			}
-		}
-	}
-	if currentDraft != nil {
-		if rejected, err := s.checkIfMatch(c, currentDraft); rejected {
-			return err
-		}
-	}
-
 	id, err := studio.SaveDraft(dir, req.Name, req.Workflow)
 	if err != nil {
 		return s.errJSON(c, fiber.StatusBadRequest, err)

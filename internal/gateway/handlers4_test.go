@@ -526,7 +526,7 @@ func TestGatewayHandleGetLogs_FilterParam(t *testing.T) {
 	}
 	cfgPath := filepath.Join(dir, "config.yaml")
 	s := newTestGatewayWithCfgPath(t, "secret", cfgPath)
-	s.cfg.Log.File = logPath
+	s.config().Log.File = logPath
 
 	status, body := gatewayJSON(t, s, http.MethodGet, "/api/v1/logs?filter=error", "secret", "")
 	if status != http.StatusOK {
@@ -554,7 +554,7 @@ func TestGatewayHandleGetLogs_LinesParamClamp(t *testing.T) {
 	}
 	cfgPath := filepath.Join(dir, "config.yaml")
 	s := newTestGatewayWithCfgPath(t, "secret", cfgPath)
-	s.cfg.Log.File = logPath
+	s.config().Log.File = logPath
 
 	status, body := gatewayJSON(t, s, http.MethodGet, "/api/v1/logs?lines=0", "secret", "")
 	if status != http.StatusOK {
@@ -569,7 +569,7 @@ func TestGatewayHandleGetLogs_NonexistentFile(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")
 	s := newTestGatewayWithCfgPath(t, "secret", cfgPath)
-	s.cfg.Log.File = filepath.Join(dir, "nonexistent.log")
+	s.config().Log.File = filepath.Join(dir, "nonexistent.log")
 
 	status, body := gatewayJSON(t, s, http.MethodGet, "/api/v1/logs", "secret", "")
 	if status != http.StatusOK {
@@ -986,15 +986,15 @@ func TestServerPythonToolDirs_IncludesHomeAndAgentDirs(t *testing.T) {
 func TestServerApplyChannelToMemory_InitialisesNilMap(t *testing.T) {
 	s := newTestGateway(t, "secret")
 	// Wipe channels map to simulate nil.
-	s.cfg.Channels = nil
+	s.config().Channels = nil
 
 	chMap := map[string]any{"token": "tok", "agent_id": "bot"}
 	s.applyChannelToMemory("telegram", chMap)
 
-	if s.cfg.Channels == nil {
+	if s.config().Channels == nil {
 		t.Fatal("applyChannelToMemory should initialise Channels map")
 	}
-	if s.cfg.Channels["telegram"] == nil {
+	if s.config().Channels["telegram"] == nil {
 		t.Fatalf("telegram entry should exist in Channels map")
 	}
 }
@@ -1004,7 +1004,7 @@ func TestServerApplyChannelToMemory_MergesValues(t *testing.T) {
 	chMap := map[string]any{"token": "new-token", "enabled": true}
 	s.applyChannelToMemory("slack", chMap)
 
-	if v := s.cfg.Channels["slack"]["token"]; v != "new-token" {
+	if v := s.config().Channels["slack"]["token"]; v != "new-token" {
 		t.Fatalf("token = %v, want new-token", v)
 	}
 }

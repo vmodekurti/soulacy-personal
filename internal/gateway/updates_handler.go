@@ -32,7 +32,7 @@ func (s *Server) startUpdatesChecker() {
 			globalUpdates.checking = true
 			globalUpdates.Unlock()
 
-			res, err := updates.CheckForUpdate(context.Background(), s.cfg.Updates.ManifestURL, "")
+			res, err := updates.CheckForUpdate(context.Background(), s.config().Updates.ManifestURL, "")
 
 			globalUpdates.Lock()
 			globalUpdates.checking = false
@@ -72,7 +72,7 @@ func (s *Server) handleTriggerUpdatesCheck(c *fiber.Ctx) error {
 	globalUpdates.checking = true
 	globalUpdates.Unlock()
 
-	res, err := updates.CheckForUpdate(c.Context(), s.cfg.Updates.ManifestURL, "")
+	res, err := updates.CheckForUpdate(c.Context(), s.config().Updates.ManifestURL, "")
 
 	globalUpdates.Lock()
 	globalUpdates.checking = false
@@ -92,7 +92,7 @@ func (s *Server) handleTriggerUpgrade(c *fiber.Ctx) error {
 	s.log.Warn("gateway self-upgrade requested via API", zap.Any("request_id", c.Locals("request_id")))
 
 	opts := updates.UpdateInstallOptions{
-		ManifestSource: s.cfg.Updates.ManifestURL,
+		ManifestSource: s.config().Updates.ManifestURL,
 		Yes:            true,
 	}
 

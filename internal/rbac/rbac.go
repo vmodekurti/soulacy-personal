@@ -26,6 +26,8 @@
 // Config (no new config keys required — RBAC is always on when auth is active).
 package rbac
 
+import "sort"
+
 // ---------------------------------------------------------------------------
 // Roles
 // ---------------------------------------------------------------------------
@@ -253,4 +255,71 @@ type AgentGrant struct {
 	Actions       []string `json:"actions"`  // subset of ActionRead, ActionChat, ActionEnable, ActionWrite, ActionDelete
 	Elevated      bool     `json:"elevated,omitempty"`
 	GrantedByRole string   `json:"granted_by_role,omitempty"`
+}
+
+// Resources and Actions enumerate the policy's own vocabulary, so a caller can
+// project the matrix without restating it.
+//
+// They read the policy rather than being a hand-written list beside it: a
+// resource added to defaultPolicy and forgotten here would be a permission the
+// server enforces and never tells a client about, and the client would then
+// hide a control the caller is in fact allowed to use.
+func Resources() []string {
+	seen := map[string]bool{}
+	for _, resources := range defaultPolicy {
+		for resource := range resources {
+			seen[resource] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for resource := range seen {
+		out = append(out, resource)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Actions returns every action any role holds on any resource.
+func Actions() []string {
+	seen := map[string]bool{}
+	for _, resources := range defaultPolicy {
+		for _, actions := range resources {
+			for action := range actions {
+				seen[action] = true
+			}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for action := range seen {
+		out = append(out, action)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// PermissionsFor projects the static policy for one role into
+// resource -> allowed actions (MU-030 criterion 2).
+//
+// It exists so a client does not have to carry a second copy of the matrix.
+// The GUI's job is to hide controls the caller cannot use; deciding that from
+// a duplicated table is how two answers drift, and the drift is worst in the
+// direction that looks like a server bug — a control offered for a permission
+// the server refuses.
+//
+// The projection is ADVISORY. Every route still authorizes itself; this says
+// what the caller would be allowed and grants nothing.
+func PermissionsFor(role string) map[string][]string {
+	out := map[string][]string{}
+	for _, resource := range Resources() {
+		var allowed []string
+		for _, action := range Actions() {
+			if HasPermission(role, resource, action) {
+				allowed = append(allowed, action)
+			}
+		}
+		if len(allowed) > 0 {
+			out[resource] = allowed
+		}
+	}
+	return out
 }

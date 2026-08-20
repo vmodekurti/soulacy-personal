@@ -18,7 +18,7 @@ func guiApp() *fiber.App {
 		"index.html":             {Data: []byte(`<!doctype html><script src="/assets/index-abc123.js"></script>`)},
 		"assets/index-abc123.js": {Data: []byte("console.log(1)")},
 	}
-	app := fiber.New()
+	app := fiber.New(fiber.Config{Immutable: true})
 	mountStaticGUI(app, http.FS(fsys))
 	return app
 }
@@ -73,7 +73,7 @@ func TestChangedIndexHTMLGetsANewETag(t *testing.T) {
 	oldETag := res.Header.Get("ETag")
 
 	// A rebuilt GUI: same path, different bundle hash inside.
-	rebuilt := fiber.New()
+	rebuilt := fiber.New(fiber.Config{Immutable: true})
 	mountStaticGUI(rebuilt, http.FS(fstest.MapFS{
 		"index.html": {Data: []byte(`<!doctype html><script src="/assets/index-NEWHASH.js"></script>`)},
 	}))

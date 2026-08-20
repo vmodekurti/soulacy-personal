@@ -101,8 +101,8 @@ func (s *Server) handleVoiceStatus(c *fiber.Ctx) error {
 
 func (s *Server) voiceReadiness() voiceReadiness {
 	provider := ""
-	if s != nil && s.cfg != nil {
-		provider = s.cfg.Voice.Provider
+	if s != nil && s.config() != nil {
+		provider = s.config().Voice.Provider
 	}
 	if sidecar := s.voiceSidecarRef(); sidecar != nil {
 		ready, detail := sidecar.Ready()

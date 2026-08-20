@@ -27,6 +27,8 @@ import (
 	"time"
 
 	"github.com/soulacy/soulacy/pkg/agent"
+
+	"github.com/soulacy/soulacy/internal/runtime"
 )
 
 // ── handleListMemory ──────────────────────────────────────────────────────────
@@ -647,7 +649,7 @@ func TestGatewayInvalidateToolCatalog(t *testing.T) {
 	s, _ := newTestGatewayWithLLM(t, "secret")
 
 	// Prime the cache.
-	s.toolCatalog()
+	s.toolCatalog(runtime.PersonalWorkspaceID)
 
 	// Invalidate.
 	s.InvalidateToolCatalog()
@@ -660,7 +662,7 @@ func TestGatewayInvalidateToolCatalog(t *testing.T) {
 		t.Fatal("cache should be nil after InvalidateToolCatalog")
 	}
 
-	catalog := s.toolCatalog()
+	catalog := s.toolCatalog(runtime.PersonalWorkspaceID)
 	// After rescan, toolCatalogAt is updated (cache was refreshed regardless of python tool count).
 	s.toolCatalogMu.Lock()
 	refreshed := !s.toolCatalogAt.IsZero()

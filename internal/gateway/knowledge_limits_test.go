@@ -7,7 +7,7 @@ import (
 )
 
 func TestRequestBodyLimitTracksKnowledgeDocumentLimit(t *testing.T) {
-	s := &Server{cfg: &config.Config{Knowledge: config.KnowledgeConfig{MaxDocumentBytes: 1234}}}
+	s := withCfg(&Server{}, &config.Config{Knowledge: config.KnowledgeConfig{MaxDocumentBytes: 1234}})
 	if got, want := s.requestBodyLimit(), 1234+(1<<20); got != want {
 		t.Fatalf("requestBodyLimit = %d, want %d", got, want)
 	}

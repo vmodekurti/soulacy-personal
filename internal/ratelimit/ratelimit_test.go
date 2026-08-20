@@ -1,4 +1,4 @@
-// ratelimit_test.go — unit tests for the MemoryCounter, tokenBucket,
+// ratelimit_test.go — unit tests for the MemoryCounter,
 // Manager token recording, and all four Fiber middleware functions.
 // Pure Go — no network or external process dependencies.
 package ratelimit
@@ -15,8 +15,6 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"go.uber.org/zap"
-
-	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
 // ---------------------------------------------------------------------------
@@ -176,86 +174,16 @@ func TestMemoryCounterClose(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestTokenBucketAddAndGet verifies add accumulates and get returns current total.
-func TestTokenBucketAddAndGet(t *testing.T) {
-	b := &tokenBucket{windowStart: time.Now()}
-	b.add(100)
-	b.add(50)
-	got := b.get()
-	if got != 150 {
-		t.Errorf("get = %d, want 150", got)
-	}
-}
-
 // TestTokenBucketGetReturnsZeroForExpiredWindow verifies that get() returns 0
 // when the 24h window has expired, without needing an add() call first.
 // (add() resets and then appends; get() only checks without mutating.)
-func TestTokenBucketGetReturnsZeroForExpiredWindow(t *testing.T) {
-	b := &tokenBucket{
-		total:       500,
-		windowStart: time.Now().Add(-25 * time.Hour),
-	}
-	if got := b.get(); got != 0 {
-		t.Errorf("get after expired window = %d, want 0", got)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Manager — token recording
 // ---------------------------------------------------------------------------
 
 // TestRecordTokensAccumulates verifies RecordTokens sums tokens per user.
-func TestRecordTokensAccumulates(t *testing.T) {
-	cfg := Config{Enabled: true, PerUserTokensDay: 10000, Backend: "memory"}
-	m := newManager(t, cfg)
-
-	m.RecordTokens("alice", 500)
-	m.RecordTokens("alice", 300)
-
-	m.tokenMu.RLock()
-	b := m.tokenBuckets[bucketUserKey("", "alice")]
-	m.tokenMu.RUnlock()
-	if b == nil {
-		t.Fatal("no bucket for alice")
-	}
-	if got := b.get(); got != 800 {
-		t.Errorf("alice tokens = %d, want 800", got)
-	}
-}
-
 // TestRecordTokensNoopWhenDisabled verifies RecordTokens is a no-op when limit is 0.
-func TestRecordTokensNoopWhenDisabled(t *testing.T) {
-	cfg := Config{Enabled: true, PerUserTokensDay: 0, Backend: "memory"}
-	m := newManager(t, cfg)
-
-	m.RecordTokens("bob", 9999)
-
-	m.tokenMu.RLock()
-	b := m.tokenBuckets["bob"]
-	m.tokenMu.RUnlock()
-	if b != nil {
-		t.Error("expected no bucket when PerUserTokensDay=0")
-	}
-}
-
 // TestRecordAgentTokensAccumulates verifies per-agent token accumulation.
-func TestRecordAgentTokensAccumulates(t *testing.T) {
-	cfg := Config{Enabled: true, PerAgentTokensDay: 50000, Backend: "memory"}
-	m := newManager(t, cfg)
-
-	m.RecordAgentTokens("research-agent", 1000)
-	m.RecordAgentTokens("research-agent", 2000)
-
-	m.agentTokenMu.RLock()
-	b := m.agentTokenBuckets[bucketKey("", "research-agent")]
-	m.agentTokenMu.RUnlock()
-	if b == nil {
-		t.Fatal("no bucket for research-agent")
-	}
-	if got := b.get(); got != 3000 {
-		t.Errorf("agent tokens = %d, want 3000", got)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Manager — middleware (via Fiber app.Test)
 // ---------------------------------------------------------------------------
@@ -364,60 +292,10 @@ func TestAgentRPMMiddlewarePassesWithoutAgentID(t *testing.T) {
 }
 
 // TestTokenQuotaMiddlewareNoopWhenLimitZero verifies PerUserTokensDay=0 is a pass-through.
-func TestTokenQuotaMiddlewareNoopWhenLimitZero(t *testing.T) {
-	cfg := Config{Enabled: true, PerUserTokensDay: 0, Backend: "memory"}
-	m := newManager(t, cfg)
-	app := newRPMApp(m.TokenQuotaMiddleware())
-
-	status := fiberReq(t, app, http.MethodGet, "/ping", "")
-	if status != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (limit disabled)", status)
-	}
-}
-
 // TestTokenQuotaMiddlewareBlocksWhenQuotaExceeded verifies the middleware returns 429
 // once the user's 24h token bucket is full.
-func TestTokenQuotaMiddlewareBlocksWhenQuotaExceeded(t *testing.T) {
-	cfg := Config{Enabled: true, PerUserTokensDay: 1000, Backend: "memory"}
-	m := newManager(t, cfg)
-
-	// Manually pre-fill the "anon" bucket to the limit.
-	m.tokenMu.Lock()
-	m.tokenBuckets["ws:"+wsroot.PersonalWorkspaceID+"|user:anon"] = &tokenBucket{
-		total:       1000,
-		windowStart: time.Now(),
-	}
-	m.tokenMu.Unlock()
-
-	app := newRPMApp(m.TokenQuotaMiddleware())
-	status := fiberReq(t, app, http.MethodGet, "/ping", "")
-	if status != http.StatusTooManyRequests {
-		t.Fatalf("status = %d, want 429 (quota exhausted)", status)
-	}
-}
-
 // TestAgentTokenQuotaMiddlewareBlocksWhenQuotaExceeded verifies per-agent token quota.
 // Chained at the route level for the same reason as the RPM test above.
-func TestAgentTokenQuotaMiddlewareBlocksWhenQuotaExceeded(t *testing.T) {
-	cfg := Config{Enabled: true, PerAgentTokensDay: 5000, Backend: "memory"}
-	m := newManager(t, cfg)
-
-	m.agentTokenMu.Lock()
-	m.agentTokenBuckets[bucketKey("", "heavy-agent")] = &tokenBucket{
-		total:       5000,
-		windowStart: time.Now(),
-	}
-	m.agentTokenMu.Unlock()
-
-	app := fiber.New(fiber.Config{DisableStartupMessage: true})
-	app.Get("/agents/:id/chat", m.AgentTokenQuotaMiddleware(), func(c *fiber.Ctx) error { return c.SendStatus(200) })
-
-	status := fiberReq(t, app, http.MethodGet, "/agents/heavy-agent/chat", "")
-	if status != http.StatusTooManyRequests {
-		t.Fatalf("status = %d, want 429 (agent quota exhausted)", status)
-	}
-}
-
 // TestManagerClose verifies Close does not panic and stops goroutines cleanly.
 func TestManagerClose(t *testing.T) {
 	cfg := Config{Enabled: true, PerUserRPM: 60, Backend: "memory"}
@@ -492,37 +370,12 @@ func TestNewManagerRedisBackendEmptyURLErrors(t *testing.T) {
 
 // TestTokenBucketAddResetsExpiredWindow verifies that add() resets the window
 // when it has expired and starts the new total from the added value.
-func TestTokenBucketAddResetsExpiredWindow(t *testing.T) {
-	b := &tokenBucket{
-		total:       999,
-		windowStart: time.Now().Add(-25 * time.Hour),
-	}
-	got := b.add(42)
-	if got != 42 {
-		t.Errorf("add after expired window = %d, want 42", got)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // RecordAgentTokens — disabled quota
 // ---------------------------------------------------------------------------
 
 // TestRecordAgentTokensNoopWhenDisabled verifies RecordAgentTokens is a no-op
 // when PerAgentTokensDay == 0.
-func TestRecordAgentTokensNoopWhenDisabled(t *testing.T) {
-	cfg := Config{Enabled: true, PerAgentTokensDay: 0, Backend: "memory"}
-	m := newManager(t, cfg)
-
-	m.RecordAgentTokens("my-agent", 5000)
-
-	m.agentTokenMu.RLock()
-	b := m.agentTokenBuckets["my-agent"]
-	m.agentTokenMu.RUnlock()
-	if b != nil {
-		t.Error("expected no bucket when PerAgentTokensDay=0")
-	}
-}
-
 // ---------------------------------------------------------------------------
 // AgentRPMMiddleware — body agent_id path
 // ---------------------------------------------------------------------------
@@ -564,51 +417,11 @@ func TestAgentRPMMiddlewareDisabledWhenLimitZero(t *testing.T) {
 
 // TestAgentTokenQuotaMiddlewareNoopWhenLimitZero verifies PerAgentTokensDay=0 is
 // a pass-through.
-func TestAgentTokenQuotaMiddlewareNoopWhenLimitZero(t *testing.T) {
-	cfg := Config{Enabled: true, PerAgentTokensDay: 0, Backend: "memory"}
-	m := newManager(t, cfg)
-	app := newRPMApp(m.AgentTokenQuotaMiddleware())
-
-	status := fiberReq(t, app, http.MethodGet, "/ping", "")
-	if status != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (limit disabled)", status)
-	}
-}
-
 // TestAgentTokenQuotaMiddlewarePassesWithNoAgentID verifies that requests
 // without an agent ID (no path param, no body field) pass through even when
 // the middleware is active.
-func TestAgentTokenQuotaMiddlewarePassesWithNoAgentID(t *testing.T) {
-	cfg := Config{Enabled: true, PerAgentTokensDay: 1, Backend: "memory"}
-	m := newManager(t, cfg)
-	app := newRPMApp(m.AgentTokenQuotaMiddleware())
-
-	status := fiberReq(t, app, http.MethodGet, "/ping", "")
-	if status != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (no agent id)", status)
-	}
-}
-
 // TestAgentTokenQuotaMiddlewareBlocksByBodyAgentID verifies that the middleware
 // reads agent_id from the JSON body when there is no path param.
-func TestAgentTokenQuotaMiddlewareBlocksByBodyAgentID(t *testing.T) {
-	cfg := Config{Enabled: true, PerAgentTokensDay: 5000, Backend: "memory"}
-	m := newManager(t, cfg)
-
-	m.agentTokenMu.Lock()
-	m.agentTokenBuckets[bucketKey("", "body-agent")] = &tokenBucket{
-		total:       5000,
-		windowStart: time.Now(),
-	}
-	m.agentTokenMu.Unlock()
-
-	app := newRPMApp(m.AgentTokenQuotaMiddleware())
-	status := fiberReq(t, app, http.MethodPost, "/chat", `{"agent_id":"body-agent"}`)
-	if status != http.StatusTooManyRequests {
-		t.Fatalf("status = %d, want 429 (agent quota exhausted via body)", status)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // HandleStatus
 // ---------------------------------------------------------------------------
@@ -649,30 +462,6 @@ func TestHandleStatusReturnsOK(t *testing.T) {
 
 // TestHandleStatusReflectsTokenUsage verifies that HandleStatus returns the
 // calling user's current token usage (keyed as "anon" for unauthenticated).
-func TestHandleStatusReflectsTokenUsage(t *testing.T) {
-	cfg := Config{Enabled: true, PerUserTokensDay: 10000, Backend: "memory"}
-	m := newManager(t, cfg)
-
-	// Pre-fill the anon bucket.
-	m.tokenMu.Lock()
-	m.tokenBuckets["ws:"+wsroot.PersonalWorkspaceID+"|user:anon"] = &tokenBucket{total: 750, windowStart: time.Now()}
-	m.tokenMu.Unlock()
-
-	app := fiber.New(fiber.Config{DisableStartupMessage: true})
-	app.Get("/status", m.HandleStatus)
-
-	resp, err := app.Test(newGETRequest(t, "/status"), 5000)
-	if err != nil {
-		t.Fatalf("app.Test: %v", err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	s := string(body)
-	if !strings.Contains(s, "750") {
-		t.Errorf("HandleStatus: expected token usage 750 in body; got: %s", s)
-	}
-}
-
 // newGETRequest is a small helper to build a plain GET request for app.Test.
 func newGETRequest(t *testing.T, path string) *http.Request {
 	t.Helper()

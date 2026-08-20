@@ -44,10 +44,10 @@ func (s *Server) handleSecurityDoctor(c *fiber.Ctx) error {
 // case the per-agent SOUL.yaml value is authoritative (and both empty falls
 // through to intent.ModePrompt at runtime).
 func (s *Server) workspaceIntentGateDefault() string {
-	if s == nil || s.cfg == nil {
+	if s == nil || s.config() == nil {
 		return ""
 	}
-	return strings.TrimSpace(s.cfg.Security.IntentGate)
+	return strings.TrimSpace(s.config().Security.IntentGate)
 }
 
 // handleSecurityDoctorDryRun implements POST /api/v1/agents/:id/security_doctor/dry_run.
@@ -83,11 +83,11 @@ func (s *Server) handleSecurityDoctorDryRun(c *fiber.Ctx) error {
 // binding's accept_privileged_exposure key.
 func (s *Server) channelBindingsForAgent(agentID string) []securitydoctor.ChannelEntry {
 	var out []securitydoctor.ChannelEntry
-	if s == nil || s.cfg == nil {
+	if s == nil || s.config() == nil {
 		return out
 	}
 	shared := sharedExternalChannels()
-	for kind, raw := range s.cfg.Channels {
+	for kind, raw := range s.config().Channels {
 		if raw == nil {
 			continue
 		}
@@ -131,13 +131,13 @@ func entryFromBinding(name string, shared bool, bindingCfg map[string]any) secur
 // process-sandbox backend. Reads from the config the runtime layer
 // already consumes.
 func (s *Server) sandboxBackendLabel() string {
-	if s == nil || s.cfg == nil {
+	if s == nil || s.config() == nil {
 		return "unknown"
 	}
-	if !s.cfg.Runtime.Sandbox.Enabled {
+	if !s.config().Runtime.Sandbox.Enabled {
 		return "disabled"
 	}
-	if s.cfg.Runtime.Sandbox.MemoryMB > 0 || s.cfg.Runtime.Sandbox.CPUSeconds > 0 {
+	if s.config().Runtime.Sandbox.MemoryMB > 0 || s.config().Runtime.Sandbox.CPUSeconds > 0 {
 		return "linux-rlimits"
 	}
 	return "advisory"

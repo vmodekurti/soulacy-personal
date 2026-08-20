@@ -205,11 +205,11 @@ func TestOpsSummary_CombinedActionLogAndCosts(t *testing.T) {
 
 func TestSLOStatusReportsRunHealth(t *testing.T) {
 	s := newTestGatewayWithMetrics(t)
-	s.cfg.Ops.SLOWindow = "2026-01-01"
-	s.cfg.Ops.MaxFailureRate = 0.25
-	s.cfg.Ops.MaxIncompleteRate = 0.1
-	s.cfg.Ops.MaxP95RunDuration = "1s"
-	s.cfg.Ops.MinRunsForSignal = 1
+	s.config().Ops.SLOWindow = "2026-01-01"
+	s.config().Ops.MaxFailureRate = 0.25
+	s.config().Ops.MaxIncompleteRate = 0.1
+	s.config().Ops.MaxP95RunDuration = "1s"
+	s.config().Ops.MinRunsForSignal = 1
 
 	status, body := gatewayJSON(t, s, http.MethodGet,
 		"/api/v1/runs/slo-status?window=2026-01-01", "secret", "")

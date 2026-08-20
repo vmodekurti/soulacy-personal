@@ -22,7 +22,7 @@ import (
 // one role — the two facts the old `admin` bool threw away.
 func appAsMember(t *testing.T, workspaceID, role string, register func(*fiber.App)) *fiber.App {
 	t.Helper()
-	app := fiber.New(fiber.Config{DisableStartupMessage: true})
+	app := fiber.New(fiber.Config{DisableStartupMessage: true, Immutable: true})
 	app.Use(func(c *fiber.Ctx) error {
 		identity, err := requestctx.New(requestctx.Input{
 			Subject: "usr_" + workspaceID, OrganizationID: "org_a", WorkspaceID: workspaceID,

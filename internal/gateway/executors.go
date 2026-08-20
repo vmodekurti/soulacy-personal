@@ -47,10 +47,10 @@ func (s *Server) handleExecutors(c *fiber.Ctx) error {
 func (s *Server) executorReadiness() executorReadiness {
 	cfg := config.ExecutorConfig{Backend: "process", Workers: 1, DockerImage: "python:3.12-slim", DockerNetwork: "none", SSHPythonBin: "python3"}
 	pythonBin := "python3"
-	if s != nil && s.cfg != nil {
-		cfg = s.cfg.Executor
-		if strings.TrimSpace(s.cfg.Runtime.PythonBin) != "" {
-			pythonBin = strings.TrimSpace(s.cfg.Runtime.PythonBin)
+	if s != nil && s.config() != nil {
+		cfg = s.config().Executor
+		if strings.TrimSpace(s.config().Runtime.PythonBin) != "" {
+			pythonBin = strings.TrimSpace(s.config().Runtime.PythonBin)
 		}
 	}
 	backend := normalizeExecutorBackend(cfg.Backend)

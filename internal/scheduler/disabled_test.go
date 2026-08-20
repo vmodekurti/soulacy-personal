@@ -35,7 +35,7 @@ type countingGate struct {
 	called int
 }
 
-func (g *countingGate) ScheduleReadiness(agentID string) (ReadinessVerdict, bool) {
+func (g *countingGate) ScheduleReadiness(workspaceID, agentID string) (ReadinessVerdict, bool) {
 	g.mu.Lock()
 	g.called++
 	g.mu.Unlock()

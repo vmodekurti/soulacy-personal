@@ -82,12 +82,50 @@ func (r *Router) Register(p Provider) {
 	r.providers[p.ID()] = p
 }
 
+// Unregister removes a provider, reporting whether one was there.
+//
+// ITS ABSENCE WAS A LEAK, not a gap. Saving a provider's credentials already
+// re-registered it live, so the add direction was hot — but deleting a provider
+// only removed it from the config file and the config copy the API reads. The
+// constructed client stayed in this map for the life of the process, so a
+// provider an operator had deliberately removed remained callable by every
+// agent, and the providers page reported it as registered with no configuration
+// behind it. Half a hot path is worse than none: it makes the deletion look
+// like it worked.
+func (r *Router) Unregister(providerID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, present := r.providers[providerID]; !present {
+		return false
+	}
+	delete(r.providers, providerID)
+	return true
+}
+
+// SetDefaultProvider changes which provider an empty provider ID resolves to.
+//
+// The default was fixed at construction and only ever read, so editing
+// llm.default_provider updated everything that consults the config and nothing
+// that consults the router. That split is the worst kind: the settings page
+// agrees with the operator, the agents keep using the old provider, and the
+// two disagree silently and indefinitely.
+func (r *Router) SetDefaultProvider(providerID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.defaultID = providerID
+}
+
 // Complete routes a request to the named provider (or the default if providerID is "").
 func (r *Router) Complete(ctx context.Context, providerID string, req CompletionRequest) (*CompletionResponse, error) {
+	// The default is read UNDER the lock now that SetDefaultProvider exists.
+	// It was safe to read unguarded while it was immutable after construction;
+	// the moment it became writable, reading it outside the lock became a data
+	// race on every completion in the process — the highest-traffic path there
+	// is, and one where a race detector run is least likely to be looking.
+	r.mu.RLock()
 	if providerID == "" {
 		providerID = r.defaultID
 	}
-	r.mu.RLock()
 	p, ok := r.providers[providerID]
 	controller := r.controller
 	r.mu.RUnlock()
@@ -184,7 +222,11 @@ func (r *Router) Complete(ctx context.Context, providerID string, req Completion
 // If id is empty, the default provider is returned.
 func (r *Router) Provider(id string) Provider {
 	if id == "" {
+		// Resolved under the lock with the lookup, for the same reason
+		// Complete does: defaultID is mutable now.
+		r.mu.RLock()
 		id = r.defaultID
+		r.mu.RUnlock()
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -193,6 +235,8 @@ func (r *Router) Provider(id string) Provider {
 
 // DefaultProvider returns the configured default provider ID.
 func (r *Router) DefaultProvider() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.defaultID
 }
 

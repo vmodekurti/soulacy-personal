@@ -760,6 +760,6 @@ func TestGatewayHandleCreateAgent_YAMLFilePresent(t *testing.T) {
 func newTestGatewayWithLLMAndDir(t *testing.T, apiKey, agentDir string) (*Server, *fakeLLMProvider) {
 	t.Helper()
 	s, provider := newTestGatewayWithLLM(t, apiKey)
-	s.cfg.AgentDirs = []string{agentDir}
+	s.config().AgentDirs = []string{agentDir}
 	return s, provider
 }

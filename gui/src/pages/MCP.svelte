@@ -1,5 +1,6 @@
 <script>
   import TourButton from '../lib/TourButton.svelte'
+  import { confirmDestructive } from '../lib/destructive.js'
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
   import KeyValueEditor from '../lib/KeyValueEditor.svelte'
@@ -124,7 +125,7 @@
   }
 
   async function remove(s) {
-    if (!confirm(`Remove MCP server "${s.id}"? It will stop accepting tool calls after the next gateway restart.`)) return
+    if (!confirmDestructive(`Remove MCP server "${s.id}"? It will stop accepting tool calls after the next gateway restart.`)) return
     error = ''; info = ''
     try {
       const res = await api.mcp.delete(s.id)

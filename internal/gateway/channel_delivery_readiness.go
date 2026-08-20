@@ -48,8 +48,8 @@ func (s *Server) channelDeliveryReadiness() channelDeliveryReadiness {
 			continue
 		}
 		cfg := map[string]any{}
-		if s != nil && s.cfg != nil && s.cfg.Channels != nil {
-			cfg = s.cfg.Channels[spec.ID]
+		if s != nil && s.config() != nil && s.config().Channels != nil {
+			cfg = s.config().Channels[spec.ID]
 		}
 		if cfg == nil {
 			cfg = map[string]any{}
@@ -157,7 +157,7 @@ func (s *Server) channelDeliveryTarget(spec channelSpec, adapterID, label, mode,
 	if !registered {
 		target.Status = "fail"
 		target.Issue = "Adapter is not registered in the live gateway."
-		target.Next = "Restart the gateway after saving channel settings."
+		target.Next = "Save the channel again — saving connects the adapter immediately. If it stays disconnected the credentials are being rejected."
 		return target
 	}
 	if !st.Connected {

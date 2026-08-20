@@ -102,13 +102,14 @@ func (e *Engine) executeOneToolCall(ctx context.Context, def *agent.Definition, 
 		toolStart := time.Now()
 		var err error
 		result, err = e.runTool(ctx, def, sessionID, tc)
-		metrics.ToolCallDuration.WithLabelValues(tc.Name).Observe(time.Since(toolStart).Seconds())
+		toolLabel := e.toolMetricLabel(tc.Name)
+		metrics.ToolCallDuration.WithLabelValues(toolLabel).Observe(time.Since(toolStart).Seconds())
 		if err != nil {
 			result = fmt.Sprintf("error: %v", err)
 			isErr = true
-			metrics.ToolCallsTotal.WithLabelValues(tc.Name, "error").Inc()
+			metrics.ToolCallsTotal.WithLabelValues(toolLabel, "error").Inc()
 		} else {
-			metrics.ToolCallsTotal.WithLabelValues(tc.Name, "success").Inc()
+			metrics.ToolCallsTotal.WithLabelValues(toolLabel, "success").Inc()
 		}
 		seenMu.Lock()
 		seen[key] = result

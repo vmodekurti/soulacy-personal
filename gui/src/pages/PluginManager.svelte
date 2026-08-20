@@ -1,5 +1,6 @@
 <script>
   import TourButton from '../lib/TourButton.svelte'
+  import { confirmDestructive } from '../lib/destructive.js'
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
   import { sourceKind, needsChecksum, permissionLines, credentialLines, statusInfo, riskSummary, securityVerdict, securityFindingLines, migrationLines } from '../lib/pluginmanage.js'
@@ -81,7 +82,7 @@
   }
 
   function removePlugin(id) {
-    if (!confirm(`Remove plugin "${id}" from disk? This cannot be undone.`)) return
+    if (!confirmDestructive(`Remove plugin "${id}" from disk? This cannot be undone.`)) return
     act(api.plugins.remove, id)
   }
 

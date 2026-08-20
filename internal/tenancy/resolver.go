@@ -14,6 +14,69 @@ type Membership struct {
 	MembershipID   string
 	UserID         string
 	Role           string
+
+	// WorkspaceStatus is the LIFECYCLE of the workspace itself, distinct from
+	// the status of this member's membership in it (MU-032, and the hook
+	// MU-025 criterion 5 has been waiting on).
+	//
+	// The two are genuinely different questions and conflating them is the
+	// mistake to avoid: a fully active member of a workspace that is being
+	// deleted must not be able to write to it, and a suspended member of a
+	// healthy workspace is a different refusal with a different remedy.
+	//
+	// Resolved on every request alongside the membership rather than looked up
+	// separately, because a status read at a different moment from the
+	// membership read is a window in which a deletion begins and a write still
+	// lands. Empty means WorkspaceActive: the column postdates existing rows,
+	// and treating an unset value as "being deleted" would take a deployment
+	// offline on upgrade.
+	WorkspaceStatus string
+}
+
+// Workspace lifecycle states.
+//
+// Deliberately few. Each one has to answer "what may happen now" differently,
+// and a state that answers the same as another is a state nobody can act on.
+const (
+	// WorkspaceActive is the normal state: everything is permitted.
+	WorkspaceActive = "active"
+	// WorkspaceSuspended is an administrative hold. Reads are permitted and
+	// writes are not — a member has to be able to SEE that the workspace is
+	// suspended, and a suspension that hid the workspace would be
+	// indistinguishable from having been removed from it.
+	WorkspaceSuspended = "suspended"
+	// WorkspaceDeleting means deletion has begun and the recovery window has
+	// not elapsed (MU-032 criterion 4: "new runs and writes stop when deletion
+	// begins"). Reads stay open for the same reason as suspension, and more
+	// so: the recovery window is worthless if nobody can look at what is about
+	// to be destroyed.
+	WorkspaceDeleting = "deleting"
+	// WorkspaceDeleted is past the recovery window. Nothing is reachable.
+	WorkspaceDeleted = "deleted"
+)
+
+// WorkspaceAcceptsWrites reports whether a workspace in this state may be
+// changed.
+//
+// An unknown status is treated as NOT accepting writes. This is the one place
+// in the tenancy package that fails closed on an unrecognised value, and the
+// reason is asymmetric cost: a status this build does not know about is
+// overwhelmingly likely to be one a NEWER build introduced to stop writes, and
+// guessing "active" would have an old replica happily writing into a workspace
+// a new one is deleting.
+func WorkspaceAcceptsWrites(status string) bool {
+	switch strings.TrimSpace(strings.ToLower(status)) {
+	case "", WorkspaceActive:
+		return true
+	default:
+		return false
+	}
+}
+
+// WorkspaceIsReadable reports whether a workspace in this state may be looked
+// at. Only a fully deleted workspace is not.
+func WorkspaceIsReadable(status string) bool {
+	return strings.TrimSpace(strings.ToLower(status)) != WorkspaceDeleted
 }
 
 // Resolver verifies that an authenticated subject belongs to the requested

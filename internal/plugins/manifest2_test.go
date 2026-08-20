@@ -12,6 +12,8 @@ import (
 	"github.com/soulacy/soulacy/internal/caps"
 	"github.com/soulacy/soulacy/internal/channels"
 	"github.com/soulacy/soulacy/internal/llm"
+
+	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
 // ---------------------------------------------------------------------------
@@ -257,7 +259,7 @@ func TestWire_SidecarChannelRegistered(t *testing.T) {
 		t.Fatalf("providers = %+v", pr.providers)
 	}
 	// Capability set registered with the enforcer under the plugin principal.
-	d := enf.Check(caps.PluginPrincipal("matrix-suite"), caps.CapChannelSend, "matrix")
+	d := enf.Check(wsroot.PersonalWorkspaceID, caps.PluginPrincipal("matrix-suite"), caps.CapChannelSend, "matrix")
 	if !d.Allowed {
 		t.Fatalf("enforcer did not receive the plugin's capability set: %s", d.Reason)
 	}

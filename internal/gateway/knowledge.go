@@ -40,8 +40,8 @@ func (s *Server) handleListKnowledge(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"knowledge_bases":            kbs,
 		"enabled":                    true,
-		"default_embedding_provider": s.cfg.Knowledge.EmbeddingProvider,
-		"default_embedding_model":    s.cfg.Knowledge.EmbeddingModel,
+		"default_embedding_provider": s.config().Knowledge.EmbeddingProvider,
+		"default_embedding_model":    s.config().Knowledge.EmbeddingModel,
 		"embedding_providers":        s.embeddingProviderCatalog(),
 	})
 }
@@ -56,12 +56,12 @@ func (s *Server) embeddingProviderCatalog() []fiber.Map {
 	out := make([]fiber.Map, 0, len(ids))
 	for _, id := range ids {
 		models := embeddingModelOptions(id)
-		if id == s.cfg.Knowledge.EmbeddingProvider && s.cfg.Knowledge.EmbeddingModel != "" {
-			models = prependUnique(models, s.cfg.Knowledge.EmbeddingModel)
+		if id == s.config().Knowledge.EmbeddingProvider && s.config().Knowledge.EmbeddingModel != "" {
+			models = prependUnique(models, s.config().Knowledge.EmbeddingModel)
 		}
 		out = append(out, fiber.Map{
 			"id":            id,
-			"default_model": firstNonEmpty(providerDefaultEmbeddingModel(id), s.cfg.Knowledge.EmbeddingModel),
+			"default_model": firstNonEmpty(providerDefaultEmbeddingModel(id), s.config().Knowledge.EmbeddingModel),
 			"models":        models,
 		})
 	}
@@ -165,19 +165,19 @@ func (s *Server) handleCreateKnowledge(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusBadRequest, "name is required")
 	}
 	if body.EmbeddingProvider == "" {
-		body.EmbeddingProvider = s.cfg.Knowledge.EmbeddingProvider
+		body.EmbeddingProvider = s.config().Knowledge.EmbeddingProvider
 	}
 	if body.EmbeddingModel == "" {
-		body.EmbeddingModel = s.cfg.Knowledge.EmbeddingModel
+		body.EmbeddingModel = s.config().Knowledge.EmbeddingModel
 	}
 	if body.ChunkSize == 0 {
-		body.ChunkSize = s.cfg.Knowledge.ChunkSize
+		body.ChunkSize = s.config().Knowledge.ChunkSize
 		if body.ChunkSize == 0 {
 			body.ChunkSize = 1000
 		}
 	}
 	if body.ChunkOverlap == 0 {
-		body.ChunkOverlap = s.cfg.Knowledge.ChunkOverlap
+		body.ChunkOverlap = s.config().Knowledge.ChunkOverlap
 	}
 
 	embedder := svc.Embedders.Get(body.EmbeddingProvider)
@@ -368,8 +368,8 @@ func (s *Server) handleIngestDocument(c *fiber.Ctx) error {
 }
 
 func (s *Server) knowledgeMaxDocumentBytes() int64 {
-	if s != nil && s.cfg != nil && s.cfg.Knowledge.MaxDocumentBytes > 0 {
-		return s.cfg.Knowledge.MaxDocumentBytes
+	if s != nil && s.config() != nil && s.config().Knowledge.MaxDocumentBytes > 0 {
+		return s.config().Knowledge.MaxDocumentBytes
 	}
 	return knowledge.DefaultMaxDocumentBytes
 }

@@ -34,7 +34,7 @@ print(json.dumps({"has_run":has_run}))`
 // when the interpreter is unavailable, so validation never breaks on a missing
 // python3.
 func (s *Server) validatePythonNodes(draft studio.Draft) []studio.ValidateError {
-	pythonBin := strings.TrimSpace(s.cfg.Runtime.PythonBin)
+	pythonBin := strings.TrimSpace(s.config().Runtime.PythonBin)
 	if pythonBin == "" {
 		pythonBin = "python3"
 	}

@@ -10,7 +10,7 @@ import (
 )
 
 func TestKnowledgeKBParamDecodesEscapedName(t *testing.T) {
-	app := fiber.New()
+	app := fiber.New(fiber.Config{Immutable: true})
 	app.Get("/api/v1/knowledge/:kb/documents", func(c *fiber.Ctx) error {
 		return c.SendString(knowledgeKBParam(c))
 	})

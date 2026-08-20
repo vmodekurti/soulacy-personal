@@ -11,9 +11,18 @@ import (
 
 // wbWaitTerminalRun polls the runs endpoint until the latest run reaches a
 // terminal status (done/failed) or the deadline expires. Returns the run map.
+// wbWaitTerminalRun polls until the task's newest run is done or failed.
+//
+// The deadline is deliberately generous. This waits on a real engine run
+// started in its own goroutine, so it is bounded by how much CPU the machine
+// has left — and `go test ./...` runs every package concurrently. At 5s it
+// failed roughly once in ten full-suite runs, always under load, and always
+// reporting "run did not reach a terminal status", which reads as a product
+// hang rather than as a busy CI box. A longer bound costs nothing when things
+// work and stops the suite lying about which thing is broken.
 func wbWaitTerminalRun(t *testing.T, s *Server, taskID string) map[string]any {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		status, body := gatewayJSON(t, s, http.MethodGet, "/api/v1/workboard/tasks/"+taskID+"/runs", "secret", "")
 		if status != http.StatusOK {
@@ -28,7 +37,7 @@ func wbWaitTerminalRun(t *testing.T, s *Server, taskID string) map[string]any {
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	t.Fatal("run did not reach a terminal status within 5s")
+	t.Fatal("run did not reach a terminal status within 30s")
 	return nil
 }
 

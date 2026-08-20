@@ -14,10 +14,10 @@ import (
 
 func TestCostStatusReportsBudgetsAndUsage(t *testing.T) {
 	s := newTestGateway(t, "secret")
-	s.cfg.Costs.DailyBudgetUSD = 10
-	s.cfg.Costs.MonthlyBudgetUSD = 100
-	s.cfg.Costs.AlertThreshold = 0.8
-	s.cfg.Costs.Pricing = map[string]config.CostPricing{
+	s.config().Costs.DailyBudgetUSD = 10
+	s.config().Costs.MonthlyBudgetUSD = 100
+	s.config().Costs.AlertThreshold = 0.8
+	s.config().Costs.Pricing = map[string]config.CostPricing{
 		"openai/*": {InputPerMTok: 1, OutputPerMTok: 2},
 	}
 	store, err := costs.NewStore(filepath.Join(t.TempDir(), "costs.db"))
@@ -56,8 +56,8 @@ func TestCostStatusReportsBudgetsAndUsage(t *testing.T) {
 
 func TestReadinessIncludesCostPosture(t *testing.T) {
 	s := newTestGateway(t, "secret")
-	s.cfg.Costs.DailyBudgetUSD = 1
-	s.cfg.Costs.MonthlyBudgetUSD = 10
+	s.config().Costs.DailyBudgetUSD = 1
+	s.config().Costs.MonthlyBudgetUSD = 10
 
 	status, resp := gatewayJSON(t, s, http.MethodGet, "/api/v1/readiness", "secret", "")
 	if status != http.StatusOK {

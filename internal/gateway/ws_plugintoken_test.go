@@ -14,7 +14,7 @@ import (
 )
 
 func wsProbeApp(s *Server) *fiber.App {
-	app := fiber.New()
+	app := fiber.New(fiber.Config{Immutable: true})
 	app.Use("/probe", func(c *fiber.Ctx) error {
 		if handled, err := s.wsPluginTokenAuth(c); handled {
 			return err

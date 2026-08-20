@@ -24,7 +24,7 @@ import (
 // default. The save gate must resolve it the same way instead of blocking.
 func TestStudioSave_InheritsWorkspaceModelInsteadOfBlocking(t *testing.T) {
 	s, _ := studioFake(t)
-	s.cfg.LLM.DefaultProvider = "openai"
+	s.config().LLM.DefaultProvider = "openai"
 
 	// No "llm" key at all — exactly what a generated draft carries today.
 	body := `{"workflow":{"name":"Inheritor","trigger":{"type":"manual"},
@@ -56,7 +56,7 @@ func TestStudioSave_InheritsWorkspaceModelInsteadOfBlocking(t *testing.T) {
 // the default must not turn the gate off.
 func TestStudioSave_StillBlocksAnUnservableModel(t *testing.T) {
 	s, _ := studioFake(t)
-	s.cfg.LLM.DefaultProvider = "openai"
+	s.config().LLM.DefaultProvider = "openai"
 
 	body := `{"workflow":{"name":"Ghost Model","trigger":{"type":"manual"},
 	  "llm":{"provider":"openai","model":"definitely-not-a-real-model"},
@@ -82,9 +82,9 @@ func TestStudioGenerateStream_StampsRuntimeProviderNotBuilder(t *testing.T) {
 	s, fake := studioFake(t)
 	// The builder runs on a DIFFERENT provider/model than the workspace default.
 	// If the builder's choice leaks, this is where it shows up.
-	s.cfg.LLM.DefaultProvider = "openai"
-	s.cfg.LLM.Studio.Provider = "ollama-cloud"
-	s.cfg.LLM.Studio.Model = "glm-5.2"
+	s.config().LLM.DefaultProvider = "openai"
+	s.config().LLM.Studio.Provider = "ollama-cloud"
+	s.config().LLM.Studio.Model = "glm-5.2"
 	fake.content = `{"refined_intent":"Summarise the daily sales file","summary":"daily sales digest","assumptions":[],"questions":[]}`
 
 	done := sseDoneFrame(t, s, "/api/v1/studio/generate/stream",

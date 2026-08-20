@@ -52,6 +52,46 @@ func (c *Config) Validate() error {
 	dur("runtime.retention.conversation_history", c.Runtime.Retention.ConversationHistory)
 	dur("runtime.retention.action_events", c.Runtime.Retention.ActionEvents)
 	dur("runtime.retention.audit_logs", c.Runtime.Retention.AuditLogs)
+	// Retention is bounded, not merely parseable. Two failures were reachable
+	// before: a NEGATIVE duration parses fine, and downstream `retention > 0`
+	// guards then read it as "disabled" — so `-1h` silently turned pruning
+	// off rather than erroring, and an operator reading the config saw a
+	// retention policy that was not in force. And an absurdly short one (say
+	// `1m`) is a way to make the audit trail unable to answer anything, set
+	// through a route that is itself audited but whose effect nobody sees.
+	retentionFloor := func(field, val string) {
+		raw := strings.TrimSpace(val)
+		if raw == "" || raw == "0" {
+			// Empty is "use the default" and "0" is "keep forever". A floor
+			// bounds how short retention may be; forever is not short.
+			return
+		}
+		parsed, err := time.ParseDuration(raw)
+		if err != nil {
+			return // already reported by dur()
+		}
+		if parsed < 0 {
+			errs = append(errs, fmt.Errorf(
+				"%s: %s is negative, which silently disables pruning rather than shortening it", field, raw))
+			return
+		}
+		if parsed < MinAuditRetention {
+			errs = append(errs, fmt.Errorf(
+				"%s: %s is below the %s platform minimum for records that answer \"who changed this\"",
+				field, raw, MinAuditRetention))
+		}
+	}
+	retentionFloor("runtime.retention.action_events", c.Runtime.Retention.ActionEvents)
+	retentionFloor("runtime.retention.audit_logs", c.Runtime.Retention.AuditLogs)
+	// Conversation history is user content rather than an audit record, so it
+	// gets the negative check but no floor: a deployment that wants to keep
+	// less of what people said is making a privacy choice, not evading one.
+	if raw := strings.TrimSpace(c.Runtime.Retention.ConversationHistory); raw != "" && raw != "0" {
+		if parsed, err := time.ParseDuration(raw); err == nil && parsed < 0 {
+			errs = append(errs, fmt.Errorf(
+				"runtime.retention.conversation_history: %s is negative, which silently disables pruning", raw))
+		}
+	}
 	dur("auth.jwt_access_ttl", c.Auth.JWTAccessTTL)
 	dur("auth.jwt_refresh_ttl", c.Auth.JWTRefreshTTL)
 	if access, accessErr := time.ParseDuration(c.Auth.JWTAccessTTL); accessErr == nil && access > time.Hour {
@@ -190,11 +230,53 @@ func (c *Config) Validate() error {
 		errs = append(errs, fmt.Errorf("knowledge.max_document_bytes: %d must not be negative", c.Knowledge.MaxDocumentBytes))
 	}
 
+	// --- Daily token quotas are enforced by the cost governor, in hard mode ---
+	//
+	// `ratelimit.per_user_tokens_day` and `per_agent_tokens_day` live in the
+	// ratelimit section and are read by internal/costs, which is the only
+	// thing that enforces them — and only when costs.enforcement_mode is
+	// "hard". In soft or off mode the limit is carried all the way into a
+	// ReservationPolicy and then not applied.
+	//
+	// This is an ERROR rather than a warning because of what the previous
+	// behaviour was. internal/ratelimit used to carry a second implementation:
+	// in-memory buckets that nothing ever filled, mounted on every chat route,
+	// comparing zero against the limit and allowing every request. An operator
+	// setting a daily token quota got a config line, a middleware visible in
+	// the route table, a status endpoint reporting usage, and no quota. That
+	// mechanism is gone; refusing to start is what makes sure its replacement
+	// cannot fail the same silent way.
+	//
+	// The remedy is one line either way — set enforcement_mode, or remove the
+	// quota — and both are better than believing in a limit that does not
+	// exist.
+	if quota := maxInt(c.RateLimit.PerUserTokensDay, c.RateLimit.PerAgentTokensDay); quota > 0 {
+		mode := strings.ToLower(strings.TrimSpace(c.Costs.EnforcementMode))
+		if mode != "hard" {
+			named := "ratelimit.per_user_tokens_day"
+			if c.RateLimit.PerUserTokensDay <= 0 {
+				named = "ratelimit.per_agent_tokens_day"
+			}
+			errs = append(errs, fmt.Errorf(
+				"%s is set to %d but costs.enforcement_mode is %q — daily token quotas are "+
+					"enforced by the cost governor, which only rejects in \"hard\" mode, so this "+
+					"limit would never fire. Set costs.enforcement_mode: hard, or remove the quota",
+				named, quota, c.Costs.EnforcementMode))
+		}
+	}
+
 	if len(errs) > 0 {
 		return fmt.Errorf("invalid configuration:\n  - %s",
 			strings.Join(errStrings(errs), "\n  - "))
 	}
 	return nil
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func errStrings(errs []error) []string {

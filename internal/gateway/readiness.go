@@ -268,8 +268,8 @@ func (s *Server) enterpriseParityPosture() enterpriseParityPosture {
 	missing := make([]string, 0, 5)
 
 	authReady := s != nil && s.authEngine != nil && s.authEngine.Effective()
-	if !authReady && s != nil && s.cfg != nil {
-		authReady = strings.TrimSpace(s.cfg.Server.APIKey) != ""
+	if !authReady && s != nil && s.config() != nil {
+		authReady = strings.TrimSpace(s.config().Server.APIKey) != ""
 	}
 	if authReady {
 		controls = append(controls, "authenticated API")
@@ -296,8 +296,8 @@ func (s *Server) enterpriseParityPosture() enterpriseParityPosture {
 	}
 
 	auditReady := false
-	if s != nil && s.cfg != nil {
-		auditReady = strings.TrimSpace(s.cfg.Runtime.AuditDir) != ""
+	if s != nil && s.config() != nil {
+		auditReady = strings.TrimSpace(s.config().Runtime.AuditDir) != ""
 	}
 	if auditReady {
 		controls = append(controls, "audit log directory")
@@ -453,8 +453,8 @@ func topParityGaps(areas []parityArea, limit int) []parityArea {
 }
 
 func (s *Server) updateManifestSource() string {
-	if s != nil && s.cfg != nil {
-		if src := strings.TrimSpace(s.cfg.Updates.ManifestURL); src != "" {
+	if s != nil && s.config() != nil {
+		if src := strings.TrimSpace(s.config().Updates.ManifestURL); src != "" {
 			return src
 		}
 	}

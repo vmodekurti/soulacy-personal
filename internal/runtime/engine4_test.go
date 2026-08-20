@@ -452,10 +452,10 @@ func TestTrimSpace_Tabs(t *testing.T) {
 
 func TestConfirmBroker_RegisterAndResolveApproved(t *testing.T) {
 	b := newConfirmBroker()
-	ch := b.Register("call-1")
-	ok := b.Resolve("call-1", true)
-	if !ok {
-		t.Fatal("Resolve should return true for known call ID")
+	ctx := inWorkspace(context.Background(), "ws-a")
+	ch := b.Register(ctx, ApprovalRequest{CallID: "call-1", Tool: "shell_exec"})
+	if err := b.Resolve(ctx, "ws-a", "call-1", true, approverIn("ws-a"), ""); err != nil {
+		t.Fatalf("Resolve should succeed for a known call ID: %v", err)
 	}
 	select {
 	case decision := <-ch:
@@ -469,8 +469,11 @@ func TestConfirmBroker_RegisterAndResolveApproved(t *testing.T) {
 
 func TestConfirmBroker_RegisterAndResolveDenied(t *testing.T) {
 	b := newConfirmBroker()
-	ch := b.Register("call-2")
-	b.Resolve("call-2", false)
+	ctx := inWorkspace(context.Background(), "ws-a")
+	ch := b.Register(ctx, ApprovalRequest{CallID: "call-2", Tool: "shell_exec"})
+	if err := b.Resolve(ctx, "ws-a", "call-2", false, approverIn("ws-a"), ""); err != nil {
+		t.Fatalf("deny should succeed: %v", err)
+	}
 	select {
 	case decision := <-ch:
 		if decision {
@@ -483,20 +486,22 @@ func TestConfirmBroker_RegisterAndResolveDenied(t *testing.T) {
 
 func TestConfirmBroker_ResolveUnknownCallID(t *testing.T) {
 	b := newConfirmBroker()
-	ok := b.Resolve("nonexistent-call", true)
-	if ok {
-		t.Error("Resolve should return false for unknown call ID")
+	ctx := inWorkspace(context.Background(), "ws-a")
+	if err := b.Resolve(ctx, "ws-a", "nonexistent-call", true, approverIn("ws-a"), ""); err == nil {
+		t.Error("Resolve should fail for an unknown call ID")
 	}
 }
 
 func TestConfirmBroker_DoubleResolvePanic(t *testing.T) {
 	// Resolving twice should not panic — second call gets ok=false.
 	b := newConfirmBroker()
-	b.Register("call-3")
-	b.Resolve("call-3", true)
-	ok := b.Resolve("call-3", true) // second resolve, call already removed
-	if ok {
-		t.Error("second Resolve on same call ID should return false")
+	ctx := inWorkspace(context.Background(), "ws-a")
+	b.Register(ctx, ApprovalRequest{CallID: "call-3", Tool: "shell_exec"})
+	if err := b.Resolve(ctx, "ws-a", "call-3", true, approverIn("ws-a"), ""); err != nil {
+		t.Fatalf("first resolve: %v", err)
+	}
+	if err := b.Resolve(ctx, "ws-a", "call-3", true, approverIn("ws-a"), ""); err == nil {
+		t.Error("second Resolve on the same call ID should fail")
 	}
 }
 

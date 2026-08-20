@@ -81,12 +81,11 @@ func TestEventAuthorizationUsesSessionOwner(t *testing.T) {
 }
 
 func TestTeamEventAuthorizationIsWorkspaceScopedForAdmins(t *testing.T) {
-	s := &Server{
-		cfg: &config.Config{Deployment: config.DeploymentConfig{Mode: config.DeploymentModeTeam}},
+	s := withCfg(&Server{
 		sessionOwners: map[string]sessionOwner{
 			"run-1": {Principal: "viewer:alice", WorkspaceID: "workspace-a", AgentID: "weather"},
 		},
-	}
+	}, &config.Config{Deployment: config.DeploymentConfig{Mode: config.DeploymentModeTeam}})
 	event := message.Event{Type: "tool.result", AgentID: "weather", SessionID: "run-1"}
 	if !s.authorizeEvent(eventPrincipal{Principal: "admin:auditor", WorkspaceID: "workspace-a", Role: "admin", Authenticated: true, Admin: true}, event) {
 		t.Fatal("same-workspace admin audit access was denied")

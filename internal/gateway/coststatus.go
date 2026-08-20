@@ -61,20 +61,20 @@ func (s *Server) handleCostEstimate(c *fiber.Ctx) error {
 	}
 	provider := strings.TrimSpace(req.Provider)
 	if provider == "" {
-		provider = s.cfg.LLM.DefaultProvider
+		provider = s.config().LLM.DefaultProvider
 	}
 	model := strings.TrimSpace(req.Model)
 	if model == "" {
-		model = s.cfg.LLM.Providers[provider].Model
+		model = s.config().LLM.Providers[provider].Model
 	}
 	if req.MaxOutputTokens == 0 {
-		req.MaxOutputTokens = s.cfg.Costs.DefaultMaxOutputTokens
+		req.MaxOutputTokens = s.config().Costs.DefaultMaxOutputTokens
 	}
-	if ceiling := s.cfg.Costs.MaxOutputTokensCeiling; ceiling > 0 && req.MaxOutputTokens > ceiling {
+	if ceiling := s.config().Costs.MaxOutputTokensCeiling; ceiling > 0 && req.MaxOutputTokens > ceiling {
 		req.MaxOutputTokens = ceiling
 	}
-	table := make(costs.PriceTable, len(s.cfg.Costs.Pricing))
-	for key, price := range s.cfg.Costs.Pricing {
+	table := make(costs.PriceTable, len(s.config().Costs.Pricing))
+	for key, price := range s.config().Costs.Pricing {
 		table[costs.NormalizePriceKey(key)] = costs.Pricing{
 			InputPerMTok: price.InputPerMTok, OutputPerMTok: price.OutputPerMTok,
 			CachedInputPerMTok: price.CachedInputPerMTok, CacheWritePerMTok: price.CacheWritePerMTok,
@@ -85,7 +85,7 @@ func (s *Server) handleCostEstimate(c *fiber.Ctx) error {
 	usd, micros, status := costs.EstimateDetailed(table, provider, model, costs.UsageDimensions{
 		InputTokens: req.InputTokens, OutputTokens: req.MaxOutputTokens,
 	})
-	threshold := s.cfg.Costs.ConfirmationThresholdUSD
+	threshold := s.config().Costs.ConfirmationThresholdUSD
 	return c.JSON(fiber.Map{
 		"provider": provider, "model": model, "input_tokens": req.InputTokens,
 		"max_output_tokens": req.MaxOutputTokens, "estimated_tokens": req.InputTokens + req.MaxOutputTokens,
@@ -102,15 +102,15 @@ func (s *Server) costReadiness(c *fiber.Ctx) costReadiness {
 	threshold := 0.8
 	enforcementMode := "off"
 	unknownPricing := "allow"
-	if s != nil && s.cfg != nil {
-		pricingRules = len(s.cfg.Costs.Pricing)
-		dailyBudget = s.cfg.Costs.DailyBudgetUSD
-		monthlyBudget = s.cfg.Costs.MonthlyBudgetUSD
-		if s.cfg.Costs.AlertThreshold > 0 {
-			threshold = s.cfg.Costs.AlertThreshold
+	if s != nil && s.config() != nil {
+		pricingRules = len(s.config().Costs.Pricing)
+		dailyBudget = s.config().Costs.DailyBudgetUSD
+		monthlyBudget = s.config().Costs.MonthlyBudgetUSD
+		if s.config().Costs.AlertThreshold > 0 {
+			threshold = s.config().Costs.AlertThreshold
 		}
-		enforcementMode = s.cfg.Costs.EnforcementMode
-		unknownPricing = s.cfg.Costs.UnknownPricing
+		enforcementMode = s.config().Costs.EnforcementMode
+		unknownPricing = s.config().Costs.UnknownPricing
 	}
 
 	last24h := 0.0
@@ -126,10 +126,10 @@ func (s *Server) costReadiness(c *fiber.Ctx) costReadiness {
 	reconciliationHealthy := false
 	reconciliationThreshold := 0.1
 	tracking := s != nil && s.costStore != nil
-	if s != nil && s.cfg != nil {
-		reconciliationConfigured = s.cfg.Costs.Reconciliation.Enabled && len(s.cfg.Costs.Reconciliation.Providers) > 0
-		if s.cfg.Costs.Reconciliation.VarianceAlertThreshold > 0 {
-			reconciliationThreshold = s.cfg.Costs.Reconciliation.VarianceAlertThreshold
+	if s != nil && s.config() != nil {
+		reconciliationConfigured = s.config().Costs.Reconciliation.Enabled && len(s.config().Costs.Reconciliation.Providers) > 0
+		if s.config().Costs.Reconciliation.VarianceAlertThreshold > 0 {
+			reconciliationThreshold = s.config().Costs.Reconciliation.VarianceAlertThreshold
 		}
 	}
 	if tracking {

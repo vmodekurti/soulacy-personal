@@ -1,5 +1,6 @@
 <script>
   import TourButton from '../lib/TourButton.svelte'
+  import { confirmDestructive, confirmLocal } from '../lib/destructive.js'
   import { onMount, onDestroy } from 'svelte'
   import {
     SvelteFlow, Background, Controls, MiniMap, Position,
@@ -902,7 +903,7 @@ Use null for fields that are not present.`
     // front, before spending a refine round-trip.
     if (workflow && workflow.flow && (workflow.flow.nodes || []).length) {
       let ok = true
-      try { ok = window.confirm('Regenerate from this prompt? It replaces the current workflow on the canvas.') } catch (_) { ok = true }
+      try { ok = confirmLocal('Regenerate from this prompt? It replaces the current workflow on the canvas.') } catch (_) { ok = true }
       if (!ok) return
     }
     pipelineModalHidden = false
@@ -1432,7 +1433,7 @@ Use null for fields that are not present.`
     if (workflow && !skipReplaceConfirm) {
       let ok = true
       try {
-        ok = window.confirm(`Switch to ${recoLabel(mode)}? This regenerates from your prompt and discards any manual edits to the current ${currentMode === 'workflow' ? 'workflow' : 'agent'}.`)
+        ok = confirmLocal(`Switch to ${recoLabel(mode)}? This regenerates from your prompt and discards any manual edits to the current ${currentMode === 'workflow' ? 'workflow' : 'agent'}.`)
       } catch (_) { ok = true }
       if (!ok) return
     }
@@ -1515,7 +1516,7 @@ Use null for fields that are not present.`
     if (!ensureCloudOk(generateFromModal)) return
     if (workflow && workflow.flow && (workflow.flow.nodes || []).length) {
       let ok = true
-      try { ok = window.confirm('Generate from this prompt? It replaces the current workflow on the canvas.') } catch (_) { ok = true }
+      try { ok = confirmLocal('Generate from this prompt? It replaces the current workflow on the canvas.') } catch (_) { ok = true }
       if (!ok) return
     }
     promptViewer = false
@@ -3893,7 +3894,7 @@ Use null for fields that are not present.`
   // Delete a draft from the palette, then refresh the list.
   async function deleteDraftFromPalette(id, name) {
     let ok = true
-    try { ok = window.confirm(`Delete draft “${name || id}”?`) } catch (_) { ok = true }
+    try { ok = confirmDestructive(`Delete draft “${name || id}”?`) } catch (_) { ok = true }
     if (!ok) return
     try { await bridge.draftDelete(id) } catch (_) { /* best-effort */ }
     await refreshPaletteDrafts()
@@ -4056,7 +4057,7 @@ Use null for fields that are not present.`
     if (enabled) {
       let ok = true
       try {
-        ok = window.confirm(`Deploy “${item.name || item.id}”? It will start running on its trigger.`)
+        ok = confirmDestructive(`Deploy “${item.name || item.id}”? It will start running on its trigger.`)
       } catch (_) { ok = true }
       if (!ok) return
     }
@@ -4144,7 +4145,7 @@ Use null for fields that are not present.`
   async function deleteAgentFromPalette(id, name) {
     if (!id) return
     let ok = true
-    try { ok = window.confirm(`Delete agent “${name || id}”? This cannot be undone.`) } catch (_) { ok = true }
+    try { ok = confirmDestructive(`Delete agent “${name || id}”? This cannot be undone.`) } catch (_) { ok = true }
     if (!ok) return
     try {
       await bridge.deleteAgent(id)
@@ -4181,7 +4182,7 @@ Use null for fields that are not present.`
   async function deleteAgentWorkflow(a) {
     if (!a || !a.id || library.busyId) return
     let ok = true
-    try { ok = window.confirm(`Delete agent “${a.name || a.id}”? This cannot be undone.`) } catch (_) { ok = true }
+    try { ok = confirmDestructive(`Delete agent “${a.name || a.id}”? This cannot be undone.`) } catch (_) { ok = true }
     if (!ok) return
     library = { ...library, busyId: a.id, error: '' }
     try {
@@ -4486,7 +4487,7 @@ Use null for fields that are not present.`
     if (!ensureCloudOk(generateStreamed)) return
     if (workflow && workflow.flow && (workflow.flow.nodes || []).length) {
       let ok = true
-      try { ok = window.confirm('Regenerate from this prompt? It replaces the current workflow on the canvas.') } catch (_) { ok = true }
+      try { ok = confirmLocal('Regenerate from this prompt? It replaces the current workflow on the canvas.') } catch (_) { ok = true }
       if (!ok) return
     }
     pipelineRunning = true

@@ -39,6 +39,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/soulacy/soulacy/internal/sqlitex"
+	"github.com/soulacy/soulacy/internal/workspacepurge"
 	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
@@ -467,4 +468,16 @@ func scan(row interface{ Scan(...any) error }) (Approval, error) {
 		a.DecidedAt = &decidedAt.Time
 	}
 	return a, nil
+}
+
+// PurgeWorkspace removes every row this store holds for one workspace.
+//
+// MU-032 criterion 4. The TABLE LIST comes from the ownership catalog rather
+// than from a literal here, so a table added to the "approvals" resource is
+// purged the day it is classified — one edit, not two. A hand-written list is
+// the same second-inventory mistake the exporter avoids, and here the
+// consequence of drift is data outliving a deletion somebody was told
+// completed.
+func (s *Store) PurgeWorkspace(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+	return workspacepurge.PurgeCatalogTables(ctx, s.db, "approvals", workspaceID)
 }

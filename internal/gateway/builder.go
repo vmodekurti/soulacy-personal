@@ -66,7 +66,7 @@ func (s *Server) handleBuilderChat(c *fiber.Ctx) error {
 
 	provider := body.Provider
 	if provider == "" {
-		provider = s.cfg.LLM.DefaultProvider
+		provider = s.config().LLM.DefaultProvider
 	}
 	claims := auth.ClaimsFromCtx(c)
 	if strings.TrimSpace(body.Provider) != "" && !canOverrideModel(claims) {
@@ -77,7 +77,7 @@ func (s *Server) handleBuilderChat(c *fiber.Ctx) error {
 		subject = claims.Subject
 	}
 
-	catalog := s.buildToolCatalogPrompt()
+	catalog := s.buildToolCatalogPrompt(mcpWorkspace(c))
 
 	ctx := llm.WithCallMetadata(c.Context(), llm.CallMetadata{
 		Subject: subject, SessionID: body.SessionID, RunID: uuid.New().String(),
@@ -100,7 +100,7 @@ func (s *Server) handleBuilderChat(c *fiber.Ctx) error {
 // buildToolCatalogPrompt returns a system-message-friendly summary of every
 // tool an agent could be wired to. Injected into BuilderChat so the LLM picks
 // real names + real file paths instead of inventing them.
-func (s *Server) buildToolCatalogPrompt() string {
+func (s *Server) buildToolCatalogPrompt(workspaceID string) string {
 	var sb strings.Builder
 	sb.WriteString("## Available tools\n")
 	sb.WriteString("Pick from these EXACT names + python_file paths when populating `tools[]`. ")
@@ -138,7 +138,7 @@ func (s *Server) buildToolCatalogPrompt() string {
 			scan(filepath.Join(home, ".soulacy", "tools"))
 		}
 	}
-	for _, ad := range s.cfg.AgentDirs {
+	for _, ad := range s.config().AgentDirs {
 		scan(filepath.Join(ad, "tools"))
 	}
 	if len(pys) > 0 {
@@ -150,9 +150,9 @@ func (s *Server) buildToolCatalogPrompt() string {
 	}
 
 	// MCP tools — currently-connected servers
-	if s.mcp != nil {
+	if client := s.mcpForWorkspace(workspaceID); client != nil {
 		hadAny := false
-		for _, srv := range s.mcp.ServersSnapshot() {
+		for _, srv := range client.ServersSnapshot() {
 			if !srv.Connected || len(srv.Tools) == 0 {
 				continue
 			}
@@ -295,8 +295,15 @@ func (s *Server) handleBuilderDeploy(c *fiber.Ctx) error {
 	def.Enabled = true
 
 	dir := ""
-	if len(s.cfg.AgentDirs) > 0 {
-		dir = s.cfg.AgentDirs[0]
+	if len(s.config().AgentDirs) > 0 {
+		dir = s.config().AgentDirs[0]
+	}
+	// The Builder picks the ID from a natural-language description, so
+	// collision is MORE likely here than on a hand-typed create, not less:
+	// two people describing the same job get the same name. Before this, a
+	// deploy replaced whatever was already under that ID and reported success.
+	if rejected, err := s.guardAgentCreate(c, s.agents(c).Get(def.ID)); rejected {
+		return err
 	}
 	if err := s.agents(c).Upsert(dir, &def); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -305,7 +312,7 @@ func (s *Server) handleBuilderDeploy(c *fiber.Ctx) error {
 	}
 
 	// Register with scheduler if it has a cron trigger
-	_ = s.scheduler.RegisterAgent(&def)
+	_ = s.schedules(c).Register(&def)
 
 	s.log.Info("builder deployed agent",
 		zap.String("agent_id", def.ID),
@@ -338,10 +345,10 @@ func (s *Server) handleBuilderDeleteSession(c *fiber.Ctx) error {
 // The model is looked up from the provider's config entry when not supplied explicitly.
 func (s *Server) resolveProviderModel(provider, model string) (string, string) {
 	if provider == "" {
-		provider = s.cfg.LLM.DefaultProvider
+		provider = s.config().LLM.DefaultProvider
 	}
 	if model == "" {
-		if pc, ok := s.cfg.LLM.Providers[provider]; ok && pc.Model != "" {
+		if pc, ok := s.config().LLM.Providers[provider]; ok && pc.Model != "" {
 			model = pc.Model
 		} else {
 			model = "llama3"

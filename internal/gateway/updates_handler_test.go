@@ -50,7 +50,7 @@ func TestTriggerUpdatesCheckMocked(t *testing.T) {
 	updates.HTTPClient = ts.Client()
 	t.Cleanup(func() { updates.HTTPClient = oldClient })
 
-	s.cfg.Updates.ManifestURL = ts.URL
+	s.config().Updates.ManifestURL = ts.URL
 
 	status, body := gatewayJSON(t, s, http.MethodPost, "/api/v1/system/updates/check", "secret", "")
 	if status != http.StatusOK {

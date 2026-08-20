@@ -19,7 +19,13 @@ func TestConfirm_CancelledRunDoesNotLeaveAPendingApproval(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = WithConfirmSender(ctx, func(req ConfirmRequest) <-chan bool {
 		// Register exactly as the gateway's SSE handler does, then never answer.
-		return e.Broker().RegisterRequest(req, "a", "s")
+		// The workspace, run and requester come off the context rather than
+		// from arguments here, which is the point of the signature: a handler
+		// cannot pass a workspace that is not the one it verified.
+		return e.Broker().Register(ctx, ApprovalRequest{
+			CallID: req.CallID, Tool: req.Tool, Args: req.Args,
+			Reason: req.Reason, AgentID: "a", SessionID: "s",
+		})
 	})
 
 	def := &agent.Definition{ID: "a", ConfirmTools: []string{"*"}}
@@ -31,7 +37,7 @@ func TestConfirm_CancelledRunDoesNotLeaveAPendingApproval(t *testing.T) {
 
 	// Wait until the approval is actually pending, then abandon the run.
 	deadline := time.After(2 * time.Second)
-	for len(e.Broker().List()) == 0 {
+	for len(e.Broker().List(ctx, WorkspaceFromContext(ctx))) == 0 {
 		select {
 		case <-deadline:
 			t.Fatal("the confirmation was never registered; this test would prove nothing")
@@ -47,7 +53,7 @@ func TestConfirm_CancelledRunDoesNotLeaveAPendingApproval(t *testing.T) {
 		t.Fatal("maybeConfirm did not return after the context was cancelled")
 	}
 
-	if got := e.Broker().List(); len(got) != 0 {
+	if got := e.Broker().List(context.Background(), WorkspaceFromContext(ctx)); len(got) != 0 {
 		t.Fatalf("the abandoned approval is still pending after the run was cancelled: %+v", got)
 	}
 }

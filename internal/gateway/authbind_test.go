@@ -58,7 +58,7 @@ func TestCheckAuthBindSafety(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(authEngine.Close)
-			s := &Server{cfg: tt.cfg, authEngine: authEngine, log: zap.NewNop()}
+			s := withCfg(&Server{authEngine: authEngine, log: zap.NewNop()}, tt.cfg)
 			err = s.checkAuthBindSafety()
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("Server.checkAuthBindSafety() err = %v, effective=%v, wantErr=%v", err, authEngine.Effective(), tt.wantErr)
@@ -77,7 +77,7 @@ func TestAllowUnauthenticatedLogsErrorAtStartup(t *testing.T) {
 		t.Fatal(err)
 	}
 	core, logs := observer.New(zap.ErrorLevel)
-	s := &Server{cfg: cfg, authEngine: engine, log: zap.New(core)}
+	s := withCfg(&Server{authEngine: engine, log: zap.New(core)}, cfg)
 	if err := s.checkAuthBindSafety(); err != nil {
 		t.Fatal(err)
 	}

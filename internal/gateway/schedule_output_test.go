@@ -159,8 +159,8 @@ func TestGatewayHandleTestChannelDelivery_UsesConfiguredDefaultDestination(t *te
 	s := newTestGateway(t, "secret")
 	adp := &channelDeliveryTestAdapter{id: "telegram"}
 	s.channels.Register(adp)
-	s.cfg.Channels = map[string]map[string]any{}
-	s.cfg.Channels["telegram"] = map[string]any{
+	s.config().Channels = map[string]map[string]any{}
+	s.config().Channels["telegram"] = map[string]any{
 		"enabled":           true,
 		"token":             "test-token",
 		"default_output_to": "chat-123",
@@ -186,8 +186,8 @@ func TestGatewayHandleTestChannelDelivery_UsesBotMappingAdapterAndDefaultDestina
 	s := newTestGateway(t, "secret")
 	adp := &channelDeliveryTestAdapter{id: "slack-research-librarian"}
 	s.channels.Register(adp)
-	s.cfg.Channels = map[string]map[string]any{}
-	s.cfg.Channels["slack"] = map[string]any{
+	s.config().Channels = map[string]map[string]any{}
+	s.config().Channels["slack"] = map[string]any{
 		"enabled":   true,
 		"bot_token": "xoxb-default",
 		"app_token": "xapp-default",
@@ -223,8 +223,8 @@ func TestGatewayHandleTestChannelDelivery_UsesBotMappingAdapterAndDefaultDestina
 func TestGatewayHandleTestChannelDelivery_RejectsMissingDestination(t *testing.T) {
 	s := newTestGateway(t, "secret")
 	s.channels.Register(&channelDeliveryTestAdapter{id: "telegram"})
-	s.cfg.Channels = map[string]map[string]any{}
-	s.cfg.Channels["telegram"] = map[string]any{"enabled": true, "token": "test-token"}
+	s.config().Channels = map[string]map[string]any{}
+	s.config().Channels["telegram"] = map[string]any{"enabled": true, "token": "test-token"}
 
 	status, res := gatewayJSON(t, s, http.MethodPost, "/api/v1/channels/telegram/test", "secret", `{}`)
 	if status != http.StatusBadRequest {
@@ -241,8 +241,8 @@ func TestGatewayHandleTestChannelDelivery_ReturnsDiagnosisOnSendFailure(t *testi
 		id:      "telegram",
 		sendErr: errors.New("telegram: send: API returned status 400: Bad Request: chat not found"),
 	})
-	s.cfg.Channels = map[string]map[string]any{}
-	s.cfg.Channels["telegram"] = map[string]any{
+	s.config().Channels = map[string]map[string]any{}
+	s.config().Channels["telegram"] = map[string]any{
 		"enabled":           true,
 		"token":             "test-token",
 		"default_output_to": "8546291328",

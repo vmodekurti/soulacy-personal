@@ -2,7 +2,6 @@ package ratelimit
 
 import (
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -13,52 +12,22 @@ import (
 // Token quota — 24h sliding window, in-memory
 // ---------------------------------------------------------------------------
 
-// tokenBucket tracks a user's token consumption within a 24h sliding window.
-type tokenBucket struct {
-	mu          sync.Mutex
-	total       int64
-	windowStart time.Time
-}
-
-func (b *tokenBucket) add(n int64) int64 {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if time.Since(b.windowStart) >= 24*time.Hour {
-		b.total = 0
-		b.windowStart = time.Now()
-	}
-	b.total += n
-	return b.total
-}
-
-func (b *tokenBucket) get() int64 {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if time.Since(b.windowStart) >= 24*time.Hour {
-		return 0
-	}
-	return b.total
-}
-
 // ---------------------------------------------------------------------------
 // Manager
 // ---------------------------------------------------------------------------
 
 // Manager holds the rate-limit state and produces Fiber middleware.
 type Manager struct {
+	// cfgGuard makes cfg swappable at runtime — see reload.go. Embedded rather
+	// than a bare mutex field so every reader is pushed through config().
+	cfgGuard
 	cfg     Config
 	counter Counter
 	log     *zap.Logger
 
 	// Per-user 24h token buckets. Key: JWT subject (or "anon" for open mode).
-	tokenMu      sync.RWMutex
-	tokenBuckets map[string]*tokenBucket
-	tokenStop    chan struct{}
 
 	// Per-agent 24h token buckets. Key: agentID.
-	agentTokenMu      sync.RWMutex
-	agentTokenBuckets map[string]*tokenBucket
-	agentTokenStop    chan struct{}
 }
 
 // New creates a Manager from cfg. The Counter backend is selected from
@@ -86,129 +55,48 @@ func New(cfg Config, log *zap.Logger) (*Manager, error) {
 	}
 
 	m := &Manager{
-		cfg:               cfg,
-		counter:           counter,
-		log:               log,
-		tokenBuckets:      make(map[string]*tokenBucket),
-		tokenStop:         make(chan struct{}),
-		agentTokenBuckets: make(map[string]*tokenBucket),
-		agentTokenStop:    make(chan struct{}),
+		cfg:     cfg,
+		counter: counter,
+		log:     log,
 	}
-	go m.sweepTokenBuckets()
-	go m.sweepAgentTokenBuckets()
 	return m, nil
 }
 
 // ---------------------------------------------------------------------------
-// Token recording (called by engine after each LLM response)
+// Daily token quotas live in internal/costs, not here
 // ---------------------------------------------------------------------------
-
-// RecordTokens adds n tokens to the 24h bucket for userID.
-// userID should be the JWT subject; pass "anon" for unauthenticated requests.
-// RecordTokens adds n tokens to a credential's 24h bucket in the personal
-// workspace. Retained for single-tenant callers; prefer
-// RecordTokensInWorkspace.
-func (m *Manager) RecordTokens(userID string, n int) {
-	m.RecordTokensInWorkspace("", userID, n)
-}
-
-// RecordTokensInWorkspace adds n tokens to one workspace's bucket for a
-// credential.
 //
-// The key is built by the SAME helper the middleware and the status endpoint
-// read through. Three places computing a key by hand is how a limiter ends up
-// checking a bucket nothing fills — which is what these buckets were doing
-// even before this change: nothing in the gateway calls the recorders at all,
-// so both token quotas are currently inert. Fixing that is a separate concern
-// from making the key correct, but the key has to be correct first.
-func (m *Manager) RecordTokensInWorkspace(workspaceID, credentialID string, n int) {
-	if m.cfg.PerUserTokensDay == 0 || n <= 0 {
-		return
-	}
-	key := bucketUserKey(workspaceID, credentialID)
-	m.tokenMu.Lock()
-	b, ok := m.tokenBuckets[key]
-	if !ok {
-		b = &tokenBucket{windowStart: time.Now()}
-		m.tokenBuckets[key] = b
-	}
-	m.tokenMu.Unlock()
-	b.add(int64(n))
-}
-
-// RecordAgentTokens adds n tokens to the 24h bucket for agentID in the
-// personal workspace. Retained for single-tenant callers; prefer
-// RecordAgentTokensInWorkspace.
-func (m *Manager) RecordAgentTokens(agentID string, n int) {
-	m.RecordAgentTokensInWorkspace("", agentID, n)
-}
-
-// RecordAgentTokensInWorkspace adds n tokens to one workspace's bucket for an
-// agent.
+// This package used to carry a second implementation of `per_user_tokens_day`
+// and `per_agent_tokens_day`: in-memory 24h buckets, a recorder, two hourly
+// sweepers, and two middlewares. It has been removed, and the removal is the
+// point of this comment, because the shape it left behind is easy to
+// reintroduce.
 //
-// Agent IDs are unique per workspace, not per deployment, so a bucket keyed by
-// agent alone charged two tenants' "support-bot" to one quota — and whichever
-// tenant was busier exhausted the other's.
-func (m *Manager) RecordAgentTokensInWorkspace(workspaceID, agentID string, n int) {
-	if m.cfg.PerAgentTokensDay == 0 || n <= 0 {
-		return
-	}
-	key := bucketKey(workspaceID, agentID)
-	m.agentTokenMu.Lock()
-	b, ok := m.agentTokenBuckets[key]
-	if !ok {
-		b = &tokenBucket{windowStart: time.Now()}
-		m.agentTokenBuckets[key] = b
-	}
-	m.agentTokenMu.Unlock()
-	b.add(int64(n))
-}
-
-// sweepTokenBuckets removes expired token buckets hourly.
-func (m *Manager) sweepTokenBuckets() {
-	ticker := time.NewTicker(time.Hour)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-m.tokenStop:
-			return
-		case <-ticker.C:
-			m.tokenMu.Lock()
-			for id, b := range m.tokenBuckets {
-				b.mu.Lock()
-				stale := time.Since(b.windowStart) > 25*time.Hour
-				b.mu.Unlock()
-				if stale {
-					delete(m.tokenBuckets, id)
-				}
-			}
-			m.tokenMu.Unlock()
-		}
-	}
-}
-
-// sweepAgentTokenBuckets removes expired agent token buckets hourly.
-func (m *Manager) sweepAgentTokenBuckets() {
-	ticker := time.NewTicker(time.Hour)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-m.agentTokenStop:
-			return
-		case <-ticker.C:
-			m.agentTokenMu.Lock()
-			for id, b := range m.agentTokenBuckets {
-				b.mu.Lock()
-				stale := time.Since(b.windowStart) > 25*time.Hour
-				b.mu.Unlock()
-				if stale {
-					delete(m.agentTokenBuckets, id)
-				}
-			}
-			m.agentTokenMu.Unlock()
-		}
-	}
-}
+// The buckets were INERT. Nothing anywhere called the recorders — not the
+// engine, not the gateway — so every bucket was permanently zero and both
+// middlewares compared zero against the limit and allowed the request. The
+// gateway's own `rlTokenMW`/`rlAgentTokenMW` helpers had no callers either, so
+// the middlewares were never even mounted. An operator setting a daily token
+// quota got a configuration line, a status endpoint reporting `tokens_used: 0`
+// forever, and no quota.
+//
+// Meanwhile the SAME two config keys are read by internal/costs, which
+// enforces them properly: durably in SQLite so a restart does not hand
+// everyone a fresh budget, scoped by workspace, and — decisively — through
+// `TryReserve` rather than a read-then-allow. The difference matters at the
+// only moment a quota is tested: N concurrent requests all read the same
+// under-limit bucket value and all proceed, which is exactly what a
+// reservation exists to prevent.
+//
+// So there is one mechanism now. What this package still owns is REQUEST-RATE
+// limiting (per_user_rpm, per_agent_rpm), where an in-memory counter is the
+// right tool because the window is a minute and losing it on restart costs
+// nothing.
+//
+// The one hole that removal does not close is that a token quota is only
+// enforced when `costs.enforcement_mode` is "hard". Config validation now
+// refuses a quota set without it, rather than leaving an operator with the
+// same silent nothing in a different package — see config.Validate.
 
 // ---------------------------------------------------------------------------
 // Middleware
@@ -218,10 +106,11 @@ func (m *Manager) sweepAgentTokenBuckets() {
 // If claims are absent (open mode), the key "anon" is used so open-mode
 // deployments still get a single shared bucket.
 func (m *Manager) UserRPMMiddleware() fiber.Handler {
-	if !m.cfg.Enabled || m.cfg.PerUserRPM <= 0 {
+	cfg := m.config()
+	if !cfg.Enabled || cfg.PerUserRPM <= 0 {
 		return func(c *fiber.Ctx) error { return c.Next() }
 	}
-	limit := int64(m.cfg.PerUserRPM)
+	limit := int64(cfg.PerUserRPM)
 	return func(c *fiber.Ctx) error {
 		key := userKey(c)
 		count, err := m.counter.Increment(c.Context(), key, time.Minute)
@@ -247,10 +136,11 @@ func (m *Manager) UserRPMMiddleware() fiber.Handler {
 // request body field "agent_id" (for /chat) or from the ":id" path param
 // (for agent-specific routes). Routes without an agent ID are skipped.
 func (m *Manager) AgentRPMMiddleware() fiber.Handler {
-	if !m.cfg.Enabled || m.cfg.PerAgentRPM <= 0 {
+	cfg := m.config()
+	if !cfg.Enabled || cfg.PerAgentRPM <= 0 {
 		return func(c *fiber.Ctx) error { return c.Next() }
 	}
-	limit := int64(m.cfg.PerAgentRPM)
+	limit := int64(cfg.PerAgentRPM)
 	return func(c *fiber.Ctx) error {
 		agentID := c.Params("id")
 		if agentID == "" {
@@ -288,77 +178,8 @@ func (m *Manager) AgentRPMMiddleware() fiber.Handler {
 	}
 }
 
-// AgentTokenQuotaMiddleware enforces PerAgentTokensDay. Apply only to /chat routes.
-// Reads agent ID from the ":id" path param or the "agent_id" body field.
-func (m *Manager) AgentTokenQuotaMiddleware() fiber.Handler {
-	if !m.cfg.Enabled || m.cfg.PerAgentTokensDay <= 0 {
-		return func(c *fiber.Ctx) error { return c.Next() }
-	}
-	limit := int64(m.cfg.PerAgentTokensDay)
-	return func(c *fiber.Ctx) error {
-		agentID := c.Params("id")
-		if agentID == "" {
-			var body struct {
-				AgentID string `json:"agent_id"`
-			}
-			_ = c.BodyParser(&body)
-			agentID = body.AgentID
-		}
-		if agentID == "" {
-			return c.Next()
-		}
-
-		m.agentTokenMu.RLock()
-		b := m.agentTokenBuckets[bucketKey(workspaceOf(c), agentID)]
-		m.agentTokenMu.RUnlock()
-
-		if b != nil && b.get() >= limit {
-			m.log.Info("ratelimit: agent token quota exceeded",
-				zap.String("agent_id", agentID), zap.Int64("limit", limit))
-			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
-				"error":       "agent daily token quota exceeded",
-				"agent_id":    agentID,
-				"limit":       limit,
-				"window":      "24h",
-				"retry_after": "3600",
-			})
-		}
-		return c.Next()
-	}
-}
-
-// TokenQuotaMiddleware enforces PerUserTokensDay. Apply only to /chat routes.
-// Reads JWT subject from claims for the key; "anon" for open-mode.
-func (m *Manager) TokenQuotaMiddleware() fiber.Handler {
-	if !m.cfg.Enabled || m.cfg.PerUserTokensDay <= 0 {
-		return func(c *fiber.Ctx) error { return c.Next() }
-	}
-	limit := int64(m.cfg.PerUserTokensDay)
-	return func(c *fiber.Ctx) error {
-		userID := userKey(c)
-
-		m.tokenMu.RLock()
-		b := m.tokenBuckets[userID]
-		m.tokenMu.RUnlock()
-
-		if b != nil && b.get() >= limit {
-			m.log.Info("ratelimit: user token quota exceeded",
-				zap.String("user_id", userID), zap.Int64("limit", limit))
-			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
-				"error":       "daily token quota exceeded",
-				"limit":       limit,
-				"window":      "24h",
-				"retry_after": "3600",
-			})
-		}
-		return c.Next()
-	}
-}
-
 // Close shuts down background goroutines and the counter.
 func (m *Manager) Close() error {
-	close(m.tokenStop)
-	close(m.agentTokenStop)
 	return m.counter.Close()
 }
 
@@ -370,29 +191,37 @@ func (m *Manager) Close() error {
 // Returns the current limits config and, for the calling user, current RPM
 // count and token usage. Useful for GUI dashboards.
 func (m *Manager) HandleStatus(c *fiber.Ctx) error {
-	// The same key the middleware enforces on. Reading a different one would
-	// report a usage figure unrelated to the limit that will actually refuse
-	// the next call — a status endpoint that lies is worse than none.
-	key := userKey(c)
 	userID := credentialOf(c)
 
-	var tokenUsed int64
-	m.tokenMu.RLock()
-	if b := m.tokenBuckets[key]; b != nil {
-		tokenUsed = b.get()
-	}
-	m.tokenMu.RUnlock()
-
+	// `tokens_used` is GONE from this response, not zeroed.
+	//
+	// It reported the in-memory bucket this package used to keep, which
+	// nothing ever filled — so it was `0` on every request forever, on a
+	// deployment burning millions of tokens a day. A field that always reads
+	// zero is worse than an absent one: it answers the question, and the
+	// answer is wrong in the reassuring direction. Token consumption against
+	// a daily quota is now reported by GET /api/v1/costs/status, which reads
+	// the durable ledger the quota is actually enforced against.
+	//
+	// The two limits are still echoed here, because they ARE this section of
+	// the config and an operator checking what is configured should see them.
+	// `tokens_enforced_by` says where to look for the usage figure.
+	// One snapshot for the whole response. Reading m.cfg field by field would
+	// race a concurrent SetConfig and could report a mixture of the old and
+	// new limits — which is the one answer an operator checking whether their
+	// change took effect must not be given.
+	snapshot := m.config()
 	return c.JSON(fiber.Map{
-		"enabled":              m.cfg.Enabled,
-		"per_user_rpm":         m.cfg.PerUserRPM,
-		"per_agent_rpm":        m.cfg.PerAgentRPM,
-		"per_user_tokens_day":  m.cfg.PerUserTokensDay,
-		"per_agent_tokens_day": m.cfg.PerAgentTokensDay,
-		"backend":              m.cfg.Backend,
+		"enabled":              snapshot.Enabled,
+		"per_user_rpm":         snapshot.PerUserRPM,
+		"per_agent_rpm":        snapshot.PerAgentRPM,
+		"per_user_tokens_day":  snapshot.PerUserTokensDay,
+		"per_agent_tokens_day": snapshot.PerAgentTokensDay,
+		"tokens_enforced_by":   "costs",
+		"tokens_usage_url":     "/api/v1/costs/status",
+		"backend":              snapshot.Backend,
 		"user": fiber.Map{
-			"id":          userID,
-			"tokens_used": tokenUsed,
+			"id": userID,
 		},
 	})
 }

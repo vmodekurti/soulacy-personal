@@ -6,6 +6,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/soulacy/soulacy/internal/apiversion"
 	"github.com/soulacy/soulacy/internal/config"
+	"github.com/soulacy/soulacy/internal/rbac"
 	"github.com/soulacy/soulacy/internal/tenancy"
 )
 
@@ -24,6 +25,17 @@ type identityResponse struct {
 	Scopes         []string `json:"scopes"`
 	DeploymentMode string   `json:"deployment_mode"`
 	RequestID      string   `json:"request_id,omitempty"`
+
+	// Permissions is what the VERIFIED role may do, projected from the RBAC
+	// matrix (MU-030 criterion 2). It is served rather than duplicated in the
+	// client because two copies of a permission table drift, and the drift is
+	// worst in the direction that reads as a server bug: a control the GUI
+	// offers for something the server refuses.
+	//
+	// Advisory only. Every route still authorizes itself; this tells a client
+	// what to render and grants nothing. A client that ignored it entirely
+	// would see exactly the same refusals.
+	Permissions map[string][]string `json:"permissions,omitempty"`
 }
 
 type workspacesResponse struct {
@@ -32,10 +44,10 @@ type workspacesResponse struct {
 }
 
 func (s *Server) deploymentMode() string {
-	if s == nil || s.cfg == nil {
+	if s == nil || s.config() == nil {
 		return config.DeploymentModePersonal
 	}
-	return s.cfg.DeploymentMode()
+	return s.config().DeploymentMode()
 }
 
 // handleWorkspaceIdentity answers "who am I, here?" — the question a CLI must
@@ -61,6 +73,12 @@ func (s *Server) handleWorkspaceIdentity(c *fiber.Ctx) error {
 		Scopes:         scopes,
 		DeploymentMode: s.deploymentMode(),
 		RequestID:      identity.RequestID(),
+		// The role the SERVER resolved from stored membership, not the
+		// broader one the caller's token may assert — the same distinction
+		// the Role field above already makes, and for the same reason: a GUI
+		// rendered from the token's role shows an operator every owner
+		// control and then fails each one.
+		Permissions: rbac.PermissionsFor(identity.Role()),
 	})
 }
 

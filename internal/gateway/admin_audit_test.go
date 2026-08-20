@@ -107,7 +107,7 @@ func TestAdminAuditAttributesServiceCredentialIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	app := fiber.New()
+	app := fiber.New(fiber.Config{Immutable: true})
 	app.Post("/audit", func(c *fiber.Ctx) error {
 		c.Locals(workspaceIdentityLocal, identity)
 		c.Locals("request_id", identity.RequestID())

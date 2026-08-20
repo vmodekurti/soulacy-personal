@@ -296,11 +296,35 @@ func (s *Server) handleImportAgentPackage(c *fiber.Ctx) error {
 	if err != nil {
 		return s.errJSON(c, fiber.StatusBadRequest, err)
 	}
-	if !inspected.Validation.Valid {
-		return c.Status(fiber.StatusBadRequest).JSON(inspected)
-	}
 	if isProtectedSystemAgent(inspected.Agent.ID) {
 		return protectedSystemAgentResponse(c)
+	}
+	// The precondition, as early as it can possibly go.
+	//
+	// Inspection has to come first because the REQUEST does not name the
+	// agent — the package does — so there is no earlier point at which this
+	// handler knows which agent it is about. That is a real asymmetry with
+	// the Studio saves, where the id arrives in the body, and it means a
+	// stale import of a structurally malformed package still answers 400.
+	//
+	// Everything below this line, though, is a FIXABLE refusal: invalid
+	// SOUL.yaml, a v1 schema, unmet requirements. Placed after any of them, a
+	// stale import would be told to fix that instead — and the retry, with
+	// the same stale view, would land.
+	//
+	// `overwrite: true` answers "may this import replace an agent", which is
+	// not the same question as "replace the agent I looked at". A flag set
+	// when the import was composed cannot know somebody edited the agent
+	// since, so on its own it turns a deliberate replace into a blind one.
+	replacing := s.agents(c).Get(inspected.Agent.ID)
+	if replacing != nil && !req.Overwrite {
+		return s.errMsg(c, fiber.StatusConflict, "agent already exists; set overwrite=true or choose a different id")
+	}
+	if rejected, err := s.guardAgentUpdate(c, replacing); rejected {
+		return err
+	}
+	if !inspected.Validation.Valid {
+		return c.Status(fiber.StatusBadRequest).JSON(inspected)
 	}
 	// Story 7 Bucket 7A — v1 cutoff. Past PackageV1CutoffDate, v1 imports
 	// are refused unconditionally; before then, they only warn (the warning
@@ -326,13 +350,9 @@ func (s *Server) handleImportAgentPackage(c *fiber.Ctx) error {
 			})
 		}
 	}
-	if s.agents(c).Get(inspected.Agent.ID) != nil && !req.Overwrite {
-		return s.errMsg(c, fiber.StatusConflict, "agent already exists; set overwrite=true or choose a different id")
-	}
-
 	def := inspected.Agent.Clone()
 	if def.LLM.Provider == "" {
-		def.LLM.Provider = s.cfg.LLM.DefaultProvider
+		def.LLM.Provider = s.config().LLM.DefaultProvider
 	}
 	if req.Disabled {
 		def.Enabled = false
@@ -341,8 +361,8 @@ func (s *Server) handleImportAgentPackage(c *fiber.Ctx) error {
 	}
 
 	dir := ""
-	if len(s.cfg.AgentDirs) > 0 {
-		dir = s.cfg.AgentDirs[0]
+	if len(s.config().AgentDirs) > 0 {
+		dir = s.config().AgentDirs[0]
 	}
 	if dir == "" {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "no agent directory configured")
@@ -363,7 +383,7 @@ func (s *Server) handleImportAgentPackage(c *fiber.Ctx) error {
 	if err := s.agents(c).Upsert(dir, def); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
-	if err := s.scheduler.RegisterAgent(def); err != nil {
+	if err := s.schedules(c).Register(def); err != nil {
 		s.log.Warn("scheduler registration failed", zap.String("agent", def.ID), zap.Error(err))
 	}
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
@@ -560,8 +580,8 @@ func (s *Server) agentPackageRequirements(scope agentScope, pkg *agentPackageRes
 	}
 	for _, provider := range sortedUnique(pkg.Manifest.Providers) {
 		status := "missing"
-		if s.cfg != nil {
-			if _, ok := s.cfg.LLM.Providers[provider]; ok {
+		if s.config() != nil {
+			if _, ok := s.config().LLM.Providers[provider]; ok {
 				status = "configured"
 			}
 		}
@@ -578,8 +598,8 @@ func (s *Server) agentPackageRequirements(scope agentScope, pkg *agentPackageRes
 			if statuses := s.channels.Statuses(); statuses[ch].Connected || statuses[ch].Detail != "" {
 				status = "available"
 			}
-		} else if s.cfg != nil {
-			if _, ok := s.cfg.Channels[ch]; ok {
+		} else if s.config() != nil {
+			if _, ok := s.config().Channels[ch]; ok {
 				status = "configured"
 			}
 		}
@@ -632,8 +652,8 @@ func (s *Server) agentPackageRequirements(scope agentScope, pkg *agentPackageRes
 		}
 		for _, p := range req.Providers {
 			status := "missing"
-			if s.cfg != nil {
-				if _, ok := s.cfg.LLM.Providers[p.ID]; ok {
+			if s.config() != nil {
+				if _, ok := s.config().LLM.Providers[p.ID]; ok {
 					status = "configured"
 				}
 			}
@@ -650,8 +670,8 @@ func (s *Server) agentPackageRequirements(scope agentScope, pkg *agentPackageRes
 				if statuses := s.channels.Statuses(); statuses[ch.ID].Connected || statuses[ch.ID].Detail != "" {
 					status = "available"
 				}
-			} else if s.cfg != nil {
-				if _, ok := s.cfg.Channels[ch.ID]; ok {
+			} else if s.config() != nil {
+				if _, ok := s.config().Channels[ch.ID]; ok {
 					status = "configured"
 				}
 			}

@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/runtime"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 )
@@ -131,7 +132,7 @@ func TestEmitMissedRunBackfilled(t *testing.T) {
 	}
 	missedAt := time.Now().Add(-3 * time.Hour).UTC()
 	now := time.Now().UTC()
-	s.emitMissedRunBackfilled(def, missedAt, now)
+	s.emitMissedRunBackfilled(keyFor(wsroot.PersonalWorkspaceID, def.ID), def, missedAt, now)
 
 	if len(sink.events) != 1 {
 		t.Fatalf("expected one backfill event, got %d", len(sink.events))

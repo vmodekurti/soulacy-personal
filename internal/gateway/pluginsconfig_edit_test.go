@@ -36,9 +36,9 @@ plugins_config:
 	}
 	s := newTestGatewayWithCfgPath(t, "secret", cfgPath)
 	// Mirror the on-disk plugins_config into the in-memory config so the
-	// GET view (which renders s.cfg, like a freshly booted gateway) shows
+	// GET view (which renders s.config(), like a freshly booted gateway) shows
 	// the same data the file holds.
-	s.cfg.PluginsConfig = map[string]map[string]any{
+	s.config().PluginsConfig = map[string]map[string]any{
 		"weather-bot": {
 			"units":   "metric",
 			"api_key": "sk-real-secret",

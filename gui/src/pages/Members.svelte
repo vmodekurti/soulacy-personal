@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte'
+  import { confirmDestructive } from '../lib/destructive.js'
   import TourButton from '../lib/TourButton.svelte'
   import { api } from '../lib/api.js'
 
@@ -80,7 +81,7 @@
   }
 
   async function removeMember(member) {
-    if (!confirm(`Remove ${member.display_name || member.email || 'this member'} from the workspace?`)) return
+    if (!confirmDestructive(`Remove ${member.display_name || member.email || 'this member'} from the workspace?`)) return
     error = ''; notice = ''
     try {
       await api.workspaceMembers.remove(member.id)

@@ -55,6 +55,8 @@ import (
 	"github.com/soulacy/soulacy/internal/channels"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
+
+	"github.com/soulacy/soulacy/internal/runtime"
 )
 
 // ── handleHealth degraded / provider list ────────────────────────────────────
@@ -522,7 +524,7 @@ func TestGatewayHandleUpdateMCPServer_NoCfgPath(t *testing.T) {
 func TestGatewayHandleCreateAgent_NoAgentDirs(t *testing.T) {
 	s, _ := newTestGatewayWithLLM(t, "secret")
 	// Wipe agent dirs so dir="" path is exercised.
-	s.cfg.AgentDirs = nil
+	s.config().AgentDirs = nil
 	// TEST-4: the create handler falls back to a RELATIVE path ("<id>/SOUL.yaml")
 	// when no agent dir is configured. Chdir into a temp dir so that write lands
 	// in (and is cleaned up with) the temp dir instead of leaving a stray
@@ -613,7 +615,7 @@ func TestServerSnapshotBuiltins_NilEngine(t *testing.T) {
 func TestServerSnapshotMCPTools_NilMCP(t *testing.T) {
 	s := newTestGateway(t, "secret")
 	// mcp is nil in test gateway — verify no panic and zero tools returned.
-	mcps := s.snapshotMCPTools()
+	mcps := s.snapshotMCPTools(runtime.PersonalWorkspaceID)
 	if len(mcps) != 0 {
 		t.Fatalf("expected 0 MCP tools when mcp is nil, got %d", len(mcps))
 	}
@@ -832,7 +834,7 @@ func TestNormalizeChannelBots_EmptyBots(t *testing.T) {
 
 func TestServerPythonToolDirs_HomeIncludedWithNoAgentDirs(t *testing.T) {
 	s := newTestGateway(t, "secret")
-	s.cfg.AgentDirs = nil // clear agent dirs
+	s.config().AgentDirs = nil // clear agent dirs
 
 	dirs := s.PythonToolDirs()
 	found := false
@@ -908,9 +910,9 @@ func TestGatewayToolCatalog_ServesCachedResult(t *testing.T) {
 	s, _ := newTestGatewayWithLLM(t, "secret")
 
 	// Force cache primed.
-	c1 := s.toolCatalog()
+	c1 := s.toolCatalog(runtime.PersonalWorkspaceID)
 	// Immediately re-call — should return same python tool list (cache hit).
-	c2 := s.toolCatalog()
+	c2 := s.toolCatalog(runtime.PersonalWorkspaceID)
 
 	if len(c1.PythonTools) != len(c2.PythonTools) {
 		t.Fatalf("cached call mismatch: %d vs %d python tools", len(c1.PythonTools), len(c2.PythonTools))
@@ -1053,7 +1055,7 @@ func TestGatewayHandleUpdateAgent_CapabilityAuditForChannelExposure(t *testing.T
 	s := newTestGateway(t, "secret")
 	log := &captureActionLog{}
 	s.actions = log
-	s.cfg.Channels = map[string]map[string]any{
+	s.config().Channels = map[string]map[string]any{
 		"telegram": {
 			"enabled": true,
 			"bots": []any{
@@ -1145,7 +1147,7 @@ func TestGatewayHandleSetProviderModel_BadJSON(t *testing.T) {
 func TestGatewayToolCatalog_ExpiredTTLRescans(t *testing.T) {
 	s, _ := newTestGatewayWithLLM(t, "secret")
 	// Prime cache.
-	s.toolCatalog()
+	s.toolCatalog(runtime.PersonalWorkspaceID)
 
 	// Manually force cache to look stale by backdating toolCatalogAt.
 	s.toolCatalogMu.Lock()
@@ -1154,7 +1156,7 @@ func TestGatewayToolCatalog_ExpiredTTLRescans(t *testing.T) {
 
 	// Next call should rescan and update toolCatalogAt.
 	before := s.toolCatalogAt
-	s.toolCatalog()
+	s.toolCatalog(runtime.PersonalWorkspaceID)
 	s.toolCatalogMu.Lock()
 	after := s.toolCatalogAt
 	s.toolCatalogMu.Unlock()

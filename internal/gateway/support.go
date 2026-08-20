@@ -40,11 +40,11 @@ func (s *Server) handleSupportBundle(c *fiber.Ctx) error {
 
 func (s *Server) supportBundleOptions(c *fiber.Ctx) supportbundle.Options {
 	ws, _ := config.ResolveWorkspace()
-	agentDirs := append([]string(nil), s.cfg.AgentDirs...)
+	agentDirs := append([]string(nil), s.config().AgentDirs...)
 	if len(agentDirs) == 0 && ws.Agents != "" {
 		agentDirs = []string{ws.Agents}
 	}
-	logDirs := supportLogDirs(s.cfg, ws)
+	logDirs := supportLogDirs(s.config(), ws)
 	return supportbundle.Options{
 		GatewayURL: gatewayRequestURL(c),
 		ConfigPath: supportConfigPath(s.cfgPath, ws),

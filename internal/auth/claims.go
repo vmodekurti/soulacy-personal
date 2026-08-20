@@ -61,6 +61,19 @@ type Claims struct {
 	// membership. WorkspaceID may select a workspace, but is never trusted by
 	// itself. CredentialID identifies the authenticating key independently of
 	// the human/service subject.
+	// AuthTime is the Unix second at which the human last proved who they are.
+	// Named after the OIDC claim of the same meaning so an external identity
+	// provider can supply it directly.
+	//
+	// NOT `iat`. An access token rotates silently every fifteen minutes, so an
+	// iat-freshness check is satisfied forever by a session nobody has
+	// touched — the hijacked session step-up exists to stop. This value is
+	// carried unchanged through rotation and moved only by an explicit
+	// re-authentication. Zero means the credential never involved an
+	// interactive authentication at all (a service account, or the
+	// deployment's static key), which is an answer rather than a gap.
+	AuthTime int64 `json:"auth_time,omitempty"`
+
 	OrganizationID string   `json:"organization_id,omitempty"`
 	WorkspaceID    string   `json:"workspace_id,omitempty"`
 	WorkspaceIDs   []string `json:"workspace_ids,omitempty"`

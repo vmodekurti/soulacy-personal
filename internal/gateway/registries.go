@@ -334,7 +334,7 @@ func (s *Server) handleAddRegistry(c *fiber.Ctx) error {
 		zap.String("id", body.ID), zap.String("type", body.Type), zap.String("base_url", body.BaseURL))
 	return c.JSON(fiber.Map{
 		"ok":      true,
-		"message": "Source \"" + body.ID + "\" saved. `sy skill install` picks it up immediately; restart the gateway for GUI installs.",
+		"message": "Source \"" + body.ID + "\" saved and in use. Registry sources are read from the config file on every search and install, so nothing is cached and no restart is needed.",
 	})
 }
 

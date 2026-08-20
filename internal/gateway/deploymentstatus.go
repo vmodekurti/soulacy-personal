@@ -43,12 +43,12 @@ func (s *Server) handleDeploymentStatus(c *fiber.Ctx) error {
 }
 
 func (s *Server) deploymentReadiness(scope agentScope, providersReady, usableOutbound, enabledAgents int, updateManifest string, costs costReadiness, slo sloReadiness) deploymentReadiness {
-	// H1 — nil-safe front: s / s.cfg are optional in some test call sites,
+	// H1 — nil-safe front: s / s.config() are optional in some test call sites,
 	// so guard the deref before reading Deployment. Matches the same defensive
-	// pattern used below for s.authEngine / s.cfg.Server.
+	// pattern used below for s.authEngine / s.config().Server.
 	profile := ""
-	if s != nil && s.cfg != nil {
-		profile = normalizeDeploymentProfile(s.cfg.Deployment.Profile)
+	if s != nil && s.config() != nil {
+		profile = normalizeDeploymentProfile(s.config().Deployment.Profile)
 	} else {
 		profile = normalizeDeploymentProfile("")
 	}
@@ -63,8 +63,8 @@ func (s *Server) deploymentReadiness(scope agentScope, providersReady, usableOut
 		return "warn"
 	}
 	authReady := s != nil && s.authEngine != nil && s.authEngine.Effective()
-	if !authReady && s != nil && s.cfg != nil {
-		authReady = strings.TrimSpace(s.cfg.Server.APIKey) != ""
+	if !authReady && s != nil && s.config() != nil {
+		authReady = strings.TrimSpace(s.config().Server.APIKey) != ""
 	}
 	// True for BOTH supported configurations: a custom manifest URL, or the
 	// built-in GitHub releases source that `sy update` uses when none is set.
@@ -178,9 +178,9 @@ func (s *Server) deploymentReadiness(scope agentScope, providersReady, usableOut
 		Score:       score,
 		Ready:       ready,
 		Total:       len(checks),
-		Owner:       strings.TrimSpace(s.cfg.Deployment.Owner),
-		Region:      strings.TrimSpace(s.cfg.Deployment.Region),
-		Notes:       strings.TrimSpace(s.cfg.Deployment.Notes),
+		Owner:       strings.TrimSpace(s.config().Deployment.Owner),
+		Region:      strings.TrimSpace(s.config().Deployment.Region),
+		Notes:       strings.TrimSpace(s.config().Deployment.Notes),
 		Strict:      strict,
 		Checks:      checks,
 		NextActions: uniqueStrings(next),

@@ -1,5 +1,6 @@
 <script>
   import TourButton from '../lib/TourButton.svelte'
+  import { confirmDestructive } from '../lib/destructive.js'
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
   import { diffLines, diffStats, sourceBadge } from '../lib/rulediff.js'
@@ -52,7 +53,7 @@
   }
 
   async function rollbackTo(v) {
-    if (!confirm(`Roll back ${selectedID} to rulebook v${v.version}? This creates a new version.`)) return
+    if (!confirmDestructive(`Roll back ${selectedID} to rulebook v${v.version}? This creates a new version.`)) return
     rbBusy = true
     try {
       await api.brainMemory.rulebookRollback(selectedID, v.version)
@@ -183,7 +184,7 @@
   }
 
   async function clearProcedural() {
-    if (!confirm('Clear procedural rules for ' + selectedID + '?')) return
+    if (!confirmDestructive('Clear procedural rules for ' + selectedID + '?')) return
     await api.brainMemory.clearProcedural(selectedID).catch(e => error = e.message)
     procRules = ''; procDraft = ''
     await loadOverview()

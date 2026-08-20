@@ -26,14 +26,13 @@ func scopedAgentServer(t *testing.T) (*Server, string) {
 	t.Helper()
 	dir := t.TempDir()
 	loader := runtime.NewLoader([]string{dir})
-	s := &Server{
+	s := withCfg(&Server{
 		loader: loader,
 		log:    zap.NewNop(),
-		cfg:    &config.Config{AgentDirs: []string{dir}},
 		// The update path keeps the cron table in step with the file, so the
 		// handler needs a real scheduler even when nothing is scheduled.
 		scheduler: scheduler.New(nil, loader, zap.NewNop(), nil),
-	}
+	}, &config.Config{AgentDirs: []string{dir}})
 	for _, ws := range []string{"ws_a", "ws_b"} {
 		def := &agent.Definition{ID: "shared-bot", Name: ws + " bot", Enabled: true}
 		if err := loader.UpsertInWorkspace(ws, dir, def, "usr_"+ws); err != nil {
@@ -45,7 +44,7 @@ func scopedAgentServer(t *testing.T) (*Server, string) {
 
 func appAsWorkspace(t *testing.T, s *Server, workspaceID string, register func(*fiber.App)) *fiber.App {
 	t.Helper()
-	app := fiber.New(fiber.Config{DisableStartupMessage: true})
+	app := fiber.New(fiber.Config{DisableStartupMessage: true, Immutable: true})
 	app.Use(func(c *fiber.Ctx) error {
 		identity, err := requestctx.New(requestctx.Input{
 			Subject: "usr_" + workspaceID, OrganizationID: "org_a", WorkspaceID: workspaceID,

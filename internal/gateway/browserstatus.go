@@ -51,7 +51,7 @@ func (s *Server) handleBrowserStatus(c *fiber.Ctx) error {
 }
 
 func (s *Server) browserAutomationReadiness(scope agentScope) browserAutomationReadiness {
-	servers := s.browserAutomationServers()
+	servers := s.browserAutomationServers(scope.workspaceID)
 	policyPosture := s.browserPolicyPosture(scope, servers)
 	hasSidecar, connectedSidecar, hasHeadless, hasTools := false, false, false, false
 	for _, srv := range servers {
@@ -179,11 +179,12 @@ func (s *Server) browserPolicyPosture(scope agentScope, servers []browserAutomat
 	}
 }
 
-func (s *Server) browserAutomationServers() []browserAutomationServer {
-	if s == nil || s.mcp == nil {
+func (s *Server) browserAutomationServers(workspaceID string) []browserAutomationServer {
+	client := s.mcpForWorkspace(workspaceID)
+	if s == nil || client == nil {
 		return nil
 	}
-	snap := s.mcp.ServersSnapshot()
+	snap := client.ServersSnapshot()
 	out := make([]browserAutomationServer, 0, len(snap))
 	for _, srv := range snap {
 		if !looksLikeBrowserServer(srv) {

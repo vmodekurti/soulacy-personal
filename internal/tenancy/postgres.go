@@ -160,9 +160,22 @@ func (s *PostgresStore) LinkOIDCIdentity(ctx context.Context, provider, external
 	if _, err = tx.Exec(ctx, `INSERT INTO identities(id,user_id,provider,external_subject,status) VALUES($1,$2,$3,$4,'active')`, identityID, userID, provider, externalSubject); err != nil {
 		return "", err
 	}
-	before, _ := json.Marshal(nil)
-	after, _ := json.Marshal(Identity{ID: identityID, UserID: userID, Provider: provider, ExternalSubject: externalSubject, Status: "active"})
-	if _, err = tx.Exec(ctx, `INSERT INTO tenant_mutation_audit(actor_subject,request_id,action,resource_type,resource_id,before_state,after_state,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, "oidc:"+externalSubject, "oidc-login", "identity.link", "identity", identityID, before, after, time.Now().UTC()); err != nil {
+	// Through insertAudit, like every other mutation in this file.
+	//
+	// The hand-written INSERT this replaces named columns that do not exist —
+	// `before_state`/`after_state` against a table that defines
+	// `before_data`/`after_data` — and omitted `id`, which is a NOT NULL
+	// primary key with a format CHECK. It could never have succeeded, and it
+	// runs INSIDE the linking transaction with its error returned, so
+	// first-time OIDC sign-in failed on the audit write. One writer rather
+	// than two is the fix that keeps it fixed: a second INSERT against the
+	// same table is a second chance to disagree with the schema, and this one
+	// disagreed in three ways at once.
+	if err = insertAudit(ctx, tx,
+		Mutation{ActorSubject: "oidc:" + externalSubject, RequestID: "oidc-login"},
+		"identity.link", "identity", identityID,
+		nil, Identity{ID: identityID, UserID: userID, Provider: provider, ExternalSubject: externalSubject, Status: "active"},
+	); err != nil {
 		return "", err
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -399,16 +412,23 @@ func (s *PostgresStore) ResolveMembership(ctx context.Context, subject, requeste
 	if subject == "" || requestedWorkspaceID == "" {
 		return Membership{}, ErrMembershipNotFound
 	}
-	row := s.pool.QueryRow(ctx, `SELECT m.organization_id, m.workspace_id, m.id, m.user_id, m.role
+	// The workspace's lifecycle is read in the SAME query as the membership.
+	// A separate lookup is a window: deletion begins between the two reads and
+	// the write it was meant to stop lands anyway.
+	row := s.pool.QueryRow(ctx, `SELECT m.organization_id, m.workspace_id, m.id, m.user_id, m.role, COALESCE(w.status,'active')
 		FROM memberships m
+		JOIN workspaces w ON w.id=m.workspace_id
 		LEFT JOIN identities i ON i.user_id=m.user_id AND i.status='active'
 		WHERE m.workspace_id=$1 AND m.status='active' AND (m.user_id=$2 OR i.external_subject=$2)
 		LIMIT 1`, requestedWorkspaceID, subject)
 	var m Membership
-	if err := row.Scan(&m.OrganizationID, &m.WorkspaceID, &m.MembershipID, &m.UserID, &m.Role); err != nil {
+	if err := row.Scan(&m.OrganizationID, &m.WorkspaceID, &m.MembershipID, &m.UserID, &m.Role, &m.WorkspaceStatus); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			serviceRow := s.pool.QueryRow(ctx, `SELECT b.organization_id,b.workspace_id,b.service_account_id,b.service_account_id,b.role FROM service_account_workspaces b JOIN service_accounts s ON s.id=b.service_account_id WHERE b.workspace_id=$1 AND b.service_account_id=$2 AND b.status='active' AND s.status='active'`, requestedWorkspaceID, subject)
-			if serviceErr := serviceRow.Scan(&m.OrganizationID, &m.WorkspaceID, &m.MembershipID, &m.UserID, &m.Role); serviceErr != nil {
+			// The service-account path carries the workspace status too. A
+			// machine credential is exactly the caller that keeps writing into
+			// a workspace nobody is watching being deleted.
+			serviceRow := s.pool.QueryRow(ctx, `SELECT b.organization_id,b.workspace_id,b.service_account_id,b.service_account_id,b.role,COALESCE(w.status,'active') FROM service_account_workspaces b JOIN service_accounts s ON s.id=b.service_account_id JOIN workspaces w ON w.id=b.workspace_id WHERE b.workspace_id=$1 AND b.service_account_id=$2 AND b.status='active' AND s.status='active'`, requestedWorkspaceID, subject)
+			if serviceErr := serviceRow.Scan(&m.OrganizationID, &m.WorkspaceID, &m.MembershipID, &m.UserID, &m.Role, &m.WorkspaceStatus); serviceErr != nil {
 				if errors.Is(serviceErr, pgx.ErrNoRows) {
 					return Membership{}, ErrMembershipNotFound
 				}
@@ -481,6 +501,25 @@ var postgresSchema = []string{
 	`CREATE TABLE IF NOT EXISTS workspaces(
 		id TEXT NOT NULL CHECK (id ~ '^ws_[a-f0-9]{32}$'), organization_id TEXT NOT NULL REFERENCES organizations(id),
 		name TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(id), UNIQUE(id, organization_id))`,
+	// MU-032. The workspace lifecycle, added separately so an existing
+	// deployment upgrades without a table rewrite.
+	//
+	// DEFAULT 'active' and a backfill, not just a default: a default applies
+	// to new rows only, so every workspace that predates this column would
+	// read NULL — and a NULL status compared against 'active' is false, which
+	// would take an entire deployment's writes offline on upgrade. The
+	// backfill runs unconditionally for the reason MU-012 established: a row
+	// with an empty scope value is data that has silently stopped matching,
+	// which is harder to notice than a leak.
+	`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'`,
+	`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS deletion_requested_at TIMESTAMPTZ`,
+	`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS recoverable_until TIMESTAMPTZ`,
+	// The purge lease. Expiring rather than held, so an instance that dies
+	// mid-purge does not leave a workspace unpurgeable forever with its
+	// customer having been told it was deleted.
+	`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS purge_claimed_by TEXT`,
+	`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS purge_claimed_until TIMESTAMPTZ`,
+	`UPDATE workspaces SET status='active' WHERE status IS NULL OR BTRIM(status)=''`,
 	`CREATE TABLE IF NOT EXISTS users(
 		id TEXT PRIMARY KEY CHECK (id ~ '^usr_[a-f0-9]{32}$'), normalized_email TEXT,
 		display_name TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

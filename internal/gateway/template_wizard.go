@@ -39,10 +39,10 @@ func (s *Server) handleTemplateReadiness(c *fiber.Ctx) error {
 	// Provider: configured (registered) in the LLM config, or local (ollama).
 	provider := strings.TrimSpace(def.LLM.Provider)
 	if provider == "" {
-		provider = strings.TrimSpace(s.cfg.LLM.DefaultProvider)
+		provider = strings.TrimSpace(s.config().LLM.DefaultProvider)
 	}
 	if provider != "" {
-		_, configured := s.cfg.LLM.Providers[provider]
+		_, configured := s.config().LLM.Providers[provider]
 		local := provider == "ollama"
 		checks = append(checks, readinessCheck{
 			Key: "provider:" + provider, Label: "LLM provider: " + provider, Category: "provider",
@@ -72,7 +72,7 @@ func (s *Server) handleTemplateReadiness(c *fiber.Ctx) error {
 
 	// Channels the template delivers to: configured in the channels block?
 	for _, ch := range declaredChannels(def) {
-		_, configured := s.cfg.Channels[ch]
+		_, configured := s.config().Channels[ch]
 		checks = append(checks, readinessCheck{
 			Key: "channel:" + ch, Label: "Output channel: " + ch, Category: "channel",
 			Satisfied: configured, Optional: true,
@@ -87,7 +87,7 @@ func (s *Server) handleTemplateReadiness(c *fiber.Ctx) error {
 			if srv == "" {
 				continue
 			}
-			_, configured := s.cfg.MCP.Servers[srv]
+			_, configured := s.config().MCP.Servers[srv]
 			checks = append(checks, readinessCheck{
 				Key: "mcp:" + srv, Label: "MCP server: " + srv, Category: "mcp",
 				Satisfied: configured,

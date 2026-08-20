@@ -13,7 +13,7 @@ import (
 // GET /api/v1/secrets → {"secrets":[{"name","category","env_var","description","set"}]}
 func (s *Server) handleListSecrets(c *fiber.Ctx) error {
 	mgr := secrets.NewInWorkspace(s.CredentialVault(), s.agents(c).WorkspaceID())
-	catalog := mgr.Catalog(c.Context(), s.cfg)
+	catalog := mgr.Catalog(c.Context(), s.config())
 	if catalog == nil {
 		catalog = []secrets.Descriptor{}
 	}

@@ -1,6 +1,10 @@
 package gateway
 
-import "github.com/soulacy/soulacy/internal/wsroot"
+import (
+	"context"
+
+	"github.com/soulacy/soulacy/internal/wsroot"
+)
 
 // replayStudioLearning rebuilds any macro/strategy updates that were durably
 // appended to the ActionLog but not flushed before a prior process exit.
@@ -12,6 +16,19 @@ func (s *Server) replayStudioLearning() {
 	// Replay covers every tenant. The action log is keyed by agent ID, so this
 	// sweeps workspace by workspace rather than reading a flattened registry.
 	s.eachWorkspace(func(scope agentScope) {
+		// MU-025 criterion 5, checked ONCE per workspace rather than per
+		// event: replay is a startup sweep over whatever the loader holds, and
+		// a workspace whose recovery window closed while this process was down
+		// must not be taught anything on the way back up. Per workspace
+		// because the status cannot change mid-sweep in a way that matters —
+		// and a status read per event would be thousands of queries to answer
+		// a question whose answer is the same every time.
+		admission, cancelAdmission := backgroundAdmissionContext(context.Background())
+		admitted := s.backgroundWriteAdmitted(admission, scope.workspaceID)
+		cancelAdmission()
+		if !admitted {
+			return
+		}
 		for _, def := range scope.All() {
 			if def == nil || def.ID == "" {
 				continue

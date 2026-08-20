@@ -116,6 +116,17 @@ type workspaceEventQuerier interface {
 	QueryFilteredInWorkspace(string, string, int, map[string]bool) ([]message.Event, error)
 }
 
+// workspacePageQuerier is the paginated surface (MU-031 criterion 4).
+//
+// Separate from workspaceEventQuerier rather than added to it, so a backend
+// that cannot paginate keeps satisfying the interface it already did. The
+// caller type-asserts and says so, rather than silently falling back to an
+// unpaginated read that would answer the first page and never mention the
+// rest.
+type workspacePageQuerier interface {
+	QueryEventsPageInWorkspace(workspaceID, agentID, sessionID string, limit int, allowed map[string]bool, cursor string) ([]message.Event, string, error)
+}
+
 // TailFiltered is Tail, but only events whose type is in `allowed` count toward
 // the limit, so a chatty run cannot crowd run-boundary events out of the
 // window. Backends without the filtered surface fall back to a plain tail; the
@@ -159,6 +170,28 @@ func (a actionScope) QueryEvents(agentID, sessionID string, limit int, allowed m
 	}
 	events, err := legacy.QueryEvents(agentID, sessionID, limit, allowed)
 	return events, true, err
+}
+
+// QueryEventsPage is QueryEvents, walked backwards a page at a time.
+//
+// Returns supported=false when the backend has no paginated surface, which the
+// caller must report rather than paper over: answering an unpaginated first
+// page to a request that asked for a cursor tells an investigator they have
+// seen the whole trail.
+//
+// There is deliberately NO legacy fallback. The unscoped querier cannot
+// paginate, and a personal-only path that silently returned everything would
+// be a different contract wearing the same signature.
+func (a actionScope) QueryEventsPage(agentID, sessionID string, limit int, allowed map[string]bool, cursor string) (events []message.Event, next string, supported bool, err error) {
+	if a.actions == nil {
+		return nil, "", false, nil
+	}
+	pager, ok := a.actions.(workspacePageQuerier)
+	if !ok {
+		return nil, "", false, nil
+	}
+	events, next, err = pager.QueryEventsPageInWorkspace(a.workspaceID, agentID, sessionID, limit, allowed, cursor)
+	return events, next, true, err
 }
 
 // QueryFiltered is QueryEvents for one agent across every session.
@@ -339,7 +372,7 @@ func (s *Server) requestWorkspace(c *fiber.Ctx) string {
 // cost and run endpoints, which are workspace-scoped.
 func (s *Server) platformMetricsMW() fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		if s.cfg == nil || !config.IsMultiUserMode(s.cfg.DeploymentMode()) {
+		if s.config() == nil || !config.IsMultiUserMode(s.config().DeploymentMode()) {
 			return c.Next()
 		}
 		role := ""
@@ -389,6 +422,6 @@ var ErrOpsSummaryUnsupported = errors.New("action log backend does not support o
 // because there is exactly one tenant and the deployment predates workspace
 // identity entirely.
 func (s *Server) credentialAPI() *apikeys.API {
-	requireIdentity := s.cfg != nil && config.IsMultiUserMode(s.cfg.DeploymentMode())
+	requireIdentity := s.config() != nil && config.IsMultiUserMode(s.config().DeploymentMode())
 	return apikeys.NewScopedAPI(s.apiKeyStore, s.log, requireIdentity)
 }

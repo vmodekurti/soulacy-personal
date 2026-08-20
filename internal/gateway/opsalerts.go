@@ -72,10 +72,10 @@ func (s *Server) opsAlertReadiness() opsAlertReadiness {
 	channel := ""
 	to := ""
 	minStatus := "fail"
-	if s != nil && s.cfg != nil {
-		channel = strings.TrimSpace(s.cfg.Ops.AlertChannel)
-		to = strings.TrimSpace(s.cfg.Ops.AlertTo)
-		if raw := strings.TrimSpace(s.cfg.Ops.AlertMinStatus); raw != "" {
+	if s != nil && s.config() != nil {
+		channel = strings.TrimSpace(s.config().Ops.AlertChannel)
+		to = strings.TrimSpace(s.config().Ops.AlertTo)
+		if raw := strings.TrimSpace(s.config().Ops.AlertMinStatus); raw != "" {
 			minStatus = normalizeAlertStatus(raw)
 		}
 	}
@@ -93,8 +93,8 @@ func (s *Server) opsAlertReadiness() opsAlertReadiness {
 			Detail: statusDetail(s != nil && s.channels != nil, "Channel adapters are loaded.", "Channel registry is unavailable."),
 		},
 	}
-	if channel != "" && to == "" && s != nil && s.cfg != nil {
-		to = channelDefaultDestination(s.cfg.Channels[channel], channel, channel)
+	if channel != "" && to == "" && s != nil && s.config() != nil {
+		to = channelDefaultDestination(s.config().Channels[channel], channel, channel)
 		if to != "" {
 			checks[0].Status = "ok"
 			checks[0].Detail = "Uses the default outbound destination for " + channel + "."
@@ -213,7 +213,7 @@ func opsAlertNextAction(key string) string {
 	case "destination":
 		return "Configure ops.alert_channel and ops.alert_to in Config, or set a default outbound destination for the channel."
 	case "registry":
-		return "Restart the gateway so channel adapters are loaded before testing alerts."
+		return "Save the channel on the Channels page; saving connects the adapter immediately."
 	case "adapter":
 		return "Enable the selected channel and restart the gateway."
 	case "connected":

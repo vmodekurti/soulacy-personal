@@ -108,7 +108,7 @@ func sharedExternalChannels() map[string]bool {
 // during tier explanation stays inside the scope, so a privileged peer in
 // another workspace cannot change this workspace's verdict.
 func (s *Server) evaluateSecurityReadiness(scope agentScope) securityReadiness {
-	profile := normalizeDeploymentProfile(s.cfg.Deployment.Profile)
+	profile := normalizeDeploymentProfile(s.config().Deployment.Profile)
 	rep := securityReadiness{Profile: profile}
 
 	if s.loader == nil {
@@ -144,7 +144,7 @@ func (s *Server) evaluateSecurityReadiness(scope agentScope) securityReadiness {
 	// privileged agents they expose.
 	sharedKinds := sharedExternalChannels()
 	exposures := map[string]*privilegedExposureReport{}
-	for kind, raw := range s.cfg.Channels {
+	for kind, raw := range s.config().Channels {
 		if !sharedKinds[strings.ToLower(strings.TrimSpace(kind))] {
 			continue
 		}

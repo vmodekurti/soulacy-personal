@@ -7,8 +7,10 @@
   import { pluginNavEntries, isPluginPage, pluginIdFromPage } from './lib/pluginui.js'
   import { waitForGateway, waitingMessage, timeoutMessage, RESTART_BUDGET } from './lib/gatewaywait.js'
   import { looksLikeStaleAssetError, recoverFromStaleAssets } from './lib/stalerecovery.js'
-  import { navPages, navGroups, navAnchor } from './lib/nav.js'
+  import { navPages, navGroups, navAnchor, visibleNavPages } from './lib/nav.js'
+  import { can, permissions } from './lib/workspace.js'
   import Walkthrough from './lib/walkthrough/Walkthrough.svelte'
+  import WorkspaceSwitcher from './lib/WorkspaceSwitcher.svelte'
   import {
     loadWalkthroughState, startWalkthrough, shouldAutoStart,
   } from './lib/walkthrough/store.js'
@@ -38,7 +40,11 @@
   let restartError = ''
   let restartMessage = ''
 
-  const pages = navPages
+  // MU-030 criterion 2. Recomputed from the permissions store so the sidebar
+  // settles as soon as identity resolves rather than after a navigation. In a
+  // personal deployment the store is empty and can() allows everything, so the
+  // list is exactly what it has always been (product invariant 7).
+  $: pages = ($permissions, visibleNavPages(can))
 
   const retiredPages = {
     builder: 'studio',
@@ -467,6 +473,14 @@
         {navCollapsed ? '»' : '«'}
       </button>
     </div>
+
+    <!--
+      MU-029 criterion 1: the active organization and workspace stay visible in
+      the global shell. Placed in the sidebar rather than behind a menu because
+      the question it answers — "where will this action happen" — is asked at
+      the moment of acting. It renders nothing in a personal deployment.
+    -->
+    {#if !navCollapsed}<WorkspaceSwitcher />{/if}
 
 
     <nav>

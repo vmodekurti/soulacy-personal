@@ -215,6 +215,9 @@ func (l *Logger) PathInWorkspace(workspaceID, agentID string) string {
 // Append enqueues one event for the writer goroutine. Never blocks the
 // caller; if the queue is full, the event is dropped and a warn is logged
 // (preserving the engine's progress is more important than complete logs).
+//
+// That trade is right for run telemetry and wrong for an audit record — see
+// AppendDurable, which is what the audit path uses.
 func (l *Logger) Append(ev message.Event) {
 	if ev.AgentID == "" {
 		return
@@ -238,6 +241,59 @@ func (l *Logger) Append(ev message.Event) {
 		)
 	}
 }
+
+// AppendDurable enqueues an event that must not be dropped, and reports
+// whether it made it onto the queue.
+//
+// THE DIFFERENCE FROM Append IS THE WHOLE POINT. Append's contract — drop
+// rather than block, because the engine making progress matters more than
+// complete telemetry — is exactly backwards for an audit record. An audit
+// trail with holes in it under load is not a slightly worse audit trail; it is
+// one that cannot be relied on to say an action did NOT happen, which is most
+// of what an audit trail is for. And the holes appear precisely when the
+// system is busiest, which is when the interesting actions happen.
+//
+// It waits briefly rather than blocking forever: a permanently wedged writer
+// must not be able to hang every administrative request in the deployment. If
+// the wait expires the caller is TOLD, so the loss is reportable at the point
+// it happens rather than discovered later as an absence — which is
+// undetectable by construction.
+func (l *Logger) AppendDurable(ev message.Event) bool {
+	if ev.AgentID == "" {
+		return false
+	}
+	if ev.Timestamp.IsZero() {
+		ev.Timestamp = time.Now().UTC()
+	}
+	ev.Payload = redact.Value(ev.Payload)
+	select {
+	case l.queue <- ev:
+		metrics.ActionlogQueueDepth.Set(float64(len(l.queue)))
+		return true
+	default:
+	}
+	timer := time.NewTimer(durableAppendWait)
+	defer timer.Stop()
+	select {
+	case l.queue <- ev:
+		metrics.ActionlogQueueDepth.Set(float64(len(l.queue)))
+		return true
+	case <-timer.C:
+		metrics.ActionlogDropsTotal.Inc()
+		l.log.Error("actionlog: an audit record could not be queued and has been LOST",
+			zap.String("agent", ev.AgentID),
+			zap.String("type", ev.Type),
+			zap.String("workspace", ev.WorkspaceID),
+			zap.Int("queue_size", writerQueueSize),
+		)
+		return false
+	}
+}
+
+// durableAppendWait bounds how long an administrative request will wait for
+// room in the queue. Long enough to ride out a batch flush, short enough that a
+// wedged writer degrades one request rather than the deployment.
+const durableAppendWait = 2 * time.Second
 
 // run is the single writer goroutine. Reads events off the queue, batches
 // up to batchMaxSize OR batchFlushInterval, then writes them all at once.

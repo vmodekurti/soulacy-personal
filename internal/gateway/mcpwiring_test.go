@@ -35,7 +35,7 @@ func TestHandleListMCP_ResponseCarriesNoCredentials(t *testing.T) {
 	}}, zap.NewNop())
 
 	s := &Server{mcp: client}
-	app := fiber.New()
+	app := fiber.New(fiber.Config{Immutable: true})
 	app.Get("/api/v1/mcp", s.handleListMCP)
 
 	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/api/v1/mcp", nil))

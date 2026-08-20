@@ -1,5 +1,6 @@
 <script>
   import TourButton from '../lib/TourButton.svelte'
+  import { confirmLocal } from '../lib/destructive.js'
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
   import { rowsFromSettings, settingsPatchFromRows } from '../lib/pluginsettings.js'
@@ -331,7 +332,10 @@
   }
 
   async function startUpgrade() {
-    if (!confirm(`Are you sure you want to upgrade to ${updateInfo.latest_version}? The gateway will restart automatically.`)) {
+    // confirmLocal, not confirmDestructive: upgrading restarts the whole
+    // gateway, which is deployment-wide. Naming a workspace here would imply
+    // the action is scoped to it, which is worse than saying nothing.
+    if (!confirmLocal(`Are you sure you want to upgrade to ${updateInfo.latest_version}? The gateway will restart automatically.`)) {
       return
     }
     upgrading = true

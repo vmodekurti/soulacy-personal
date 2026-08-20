@@ -214,7 +214,7 @@ func TestAMalformedCursorIsRefused(t *testing.T) {
 
 // Replay still respects the real authorizer, including its workspace rules.
 func TestReplayHonoursTheRealEventAuthorizer(t *testing.T) {
-	server := &Server{cfg: &config.Config{Deployment: config.DeploymentConfig{Mode: config.DeploymentModeTeam}}}
+	server := withCfg(&Server{}, &config.Config{Deployment: config.DeploymentConfig{Mode: config.DeploymentModeTeam}})
 	h := hubWithReplay(t, 16)
 	h.SetEventAuthorizer(server.authorizeEvent)
 

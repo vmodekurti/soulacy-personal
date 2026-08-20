@@ -114,3 +114,11 @@ func tighten(current, candidate int64) int64 {
 	}
 	return current
 }
+
+// QuotaPolicy returns the policy currently installed.
+//
+// Exported for the gateway's per-workspace limits (MU-030 criterion 1), which
+// has to be able to assert that an edit reached the reservation path — a limit
+// that is stored and not installed is one a customer believes in and nothing
+// enforces.
+func (g *Governor) QuotaPolicy() *quota.Policy { return g.quota() }

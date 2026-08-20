@@ -51,7 +51,7 @@ func (s *Server) handleSLOStatus(c *fiber.Ctx) error {
 }
 
 func (s *Server) sloReadiness(c *fiber.Ctx) sloReadiness {
-	window := strings.TrimSpace(s.cfg.Ops.SLOWindow)
+	window := strings.TrimSpace(s.config().Ops.SLOWindow)
 	if window == "" {
 		window = "24h"
 	}
@@ -63,10 +63,10 @@ func (s *Server) sloReadiness(c *fiber.Ctx) sloReadiness {
 		label = "24h"
 		since = time.Now().Add(-24 * time.Hour)
 	}
-	maxFailureRate := positiveOrDefault(s.cfg.Ops.MaxFailureRate, 0.10)
-	maxIncompleteRate := positiveOrDefault(s.cfg.Ops.MaxIncompleteRate, 0.05)
-	maxP95 := parseDurationOrDefault(s.cfg.Ops.MaxP95RunDuration, 5*time.Minute)
-	minRuns := s.cfg.Ops.MinRunsForSignal
+	maxFailureRate := positiveOrDefault(s.config().Ops.MaxFailureRate, 0.10)
+	maxIncompleteRate := positiveOrDefault(s.config().Ops.MaxIncompleteRate, 0.05)
+	maxP95 := parseDurationOrDefault(s.config().Ops.MaxP95RunDuration, 5*time.Minute)
+	minRuns := s.config().Ops.MinRunsForSignal
 	if minRuns <= 0 {
 		minRuns = 3
 	}
