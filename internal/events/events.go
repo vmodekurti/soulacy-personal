@@ -20,6 +20,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/queue"
+	"github.com/soulacy/soulacy/internal/redact"
 	"github.com/soulacy/soulacy/pkg/message"
 )
 
@@ -43,6 +44,18 @@ type Envelope struct {
 }
 
 // NewEnvelope wraps a message.Event in the schema-v1 envelope.
+//
+// Data is REDACTED here rather than by callers. This constructor is the only
+// way an envelope is built, so putting it here makes "nothing unredacted
+// reaches the broker" a property of the type rather than a rule every
+// publisher has to remember — and the broker is the widest audience an event
+// has: NATS subscribers are outside the process, outside the gateway's
+// authorization, and frequently a different team's log pipeline.
+//
+// It is NOT a schema bump. The field is the same field with the same type;
+// what changes is that credential values inside it are replaced. A subscriber
+// that was reading secrets out of `data` was reading something it should never
+// have received.
 func NewEnvelope(ev message.Event) Envelope {
 	ts := ev.Timestamp
 	if ts.IsZero() {
@@ -55,7 +68,7 @@ func NewEnvelope(ev message.Event) Envelope {
 		AgentID:   ev.AgentID,
 		SessionID: ev.SessionID,
 		TS:        ts,
-		Data:      ev.Payload,
+		Data:      redact.Value(ev.Payload),
 	}
 }
 

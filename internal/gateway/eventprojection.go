@@ -3,6 +3,7 @@ package gateway
 import (
 	"time"
 
+	"github.com/soulacy/soulacy/internal/redact"
 	"github.com/soulacy/soulacy/pkg/message"
 )
 
@@ -72,13 +73,37 @@ var publicFields = map[string]bool{
 }
 
 // project returns the wire form of an event.
+//
+// THE PAYLOAD IS REDACTED HERE, and the reason it was not before is worth
+// recording because it is the shape of the bug rather than the bug itself.
+// Emit fans one event out to four places: the action log, the queue publisher,
+// in-process observers, and this projection. The action log — a file on the
+// operator's own disk, the NARROWEST of the four — redacted. The two that
+// leave the process did not. `tool.call` carries message.ToolCall.Arguments
+// verbatim, so an agent calling an http tool with an Authorization header put
+// that header on every subscriber's WebSocket, and the same operator reading
+// the same call back from history saw it masked. The protection was applied
+// where it was cheapest to think of, not where the data went.
+//
+// Redaction happens at the EGRESS boundaries (here and events.NewEnvelope)
+// rather than in Emit, deliberately: redact.Value normalises through JSON, so
+// redacting in Emit would hand in-process observers a map[string]any where
+// they receive a typed message.ToolCall today. Changing what leaves the
+// process is the security fix; changing what in-process consumers see is a
+// different change that would ride along unannounced.
+//
+// PARTS ARE NOT REDACTED. They are the conversation itself — the operator's
+// own typed words, echoed back to the client that is displaying them. Running
+// the value-shape regexes over them would rewrite a user's message in their
+// own transcript, which reads as corruption rather than protection. A secret
+// a user types into chat is a secret they already have.
 func project(event message.Event) publicEvent {
 	return publicEvent{
 		Type:        event.Type,
 		WorkspaceID: event.WorkspaceID,
 		AgentID:     event.AgentID,
 		SessionID:   event.SessionID,
-		Payload:     event.Payload,
+		Payload:     redact.Value(event.Payload),
 		Timestamp:   event.Timestamp,
 		Parts:       event.Parts,
 	}
