@@ -30,14 +30,29 @@ func (s *Server) workspaceContextMW() fiber.Handler {
 		if claims == nil {
 			// Personal's explicit open development mode remains backwards
 			// compatible. Multi-user modes never synthesize an identity.
-			if s.cfg != nil && s.cfg.DeploymentMode() != config.DeploymentModePersonal {
+			if s.config() != nil && s.config().DeploymentMode() != config.DeploymentModePersonal {
 				return s.errMsg(c, fiber.StatusUnauthorized, "authenticated identity is required")
 			}
 			claims = &auth.Claims{Role: "admin", Kind: "local", CredentialID: "open-personal"}
 			claims.Subject = "local-owner"
 		}
-		if s.cfg != nil && config.IsMultiUserMode(s.cfg.DeploymentMode()) && claims.CredentialID == "static-api-key" {
-			return s.errMsg(c, fiber.StatusForbidden, "the static server key cannot access workspace APIs in multi-user mode")
+		multiUser := s.config() != nil && config.IsMultiUserMode(s.config().DeploymentMode())
+		if multiUser && isPlatformRoute(c.Method(), c.Path()) {
+			// Deployment-wide state, so there is no workspace to resolve and
+			// no membership to verify. Handled HERE rather than by giving the
+			// platform principal a synthetic workspace: a fake membership
+			// would flow into every workspace-scoped store below it and start
+			// writing the operator's actions into some tenant's rows.
+			//
+			// Nothing else changes for these routes — the RBAC middleware they
+			// carry still runs, and it refuses a caller that is not the
+			// platform principal. See platformMW.
+			return c.Next()
+		}
+		if multiUser && claims.CredentialID == staticAPIKeyCredentialID {
+			return s.errMsg(c, fiber.StatusForbidden,
+				"the static server key cannot access workspace APIs in multi-user mode; it "+
+					"administers the deployment, and deployment endpoints are the only ones it opens")
 		}
 		subject := strings.TrimSpace(claims.Subject)
 		if subject == "" {
@@ -57,7 +72,7 @@ func (s *Server) workspaceContextMW() fiber.Handler {
 		if requestedWorkspace == "" {
 			requestedWorkspace = strings.TrimSpace(c.Get("X-Soulacy-Workspace"))
 		}
-		personalMode := s.cfg == nil || s.cfg.DeploymentMode() == config.DeploymentModePersonal
+		personalMode := s.config() == nil || s.config().DeploymentMode() == config.DeploymentModePersonal
 		// Credentials created before Personal tenancy existed carry stable
 		// aliases. They remain valid only in Personal mode and are resolved to
 		// that installation's single implicit workspace.
@@ -97,9 +112,73 @@ func (s *Server) workspaceContextMW() fiber.Handler {
 		if err != nil {
 			return s.errMsg(c, fiber.StatusForbidden, "verified workspace context is incomplete")
 		}
+		// MU-032 criterion 4: "new runs and writes stop when deletion begins."
+		//
+		// HERE, not in each handler. This is the one place every workspace
+		// request passes through and the only place that already holds the
+		// verified membership, so it is the only place a new handler cannot
+		// forget. A per-handler check is a rule, and the handlers that forget
+		// a rule are the ones that write into a workspace somebody is in the
+		// middle of deleting.
+		//
+		// Checked against the status resolved in the SAME query as the
+		// membership, so there is no window between "you are a member" and
+		// "the workspace is still accepting writes".
+		if refusal := workspaceAdmission(c, membership.WorkspaceStatus); refusal != nil {
+			return s.errMsg(c, refusal.status, refusal.message)
+		}
 		c.Locals(workspaceIdentityLocal, identity)
 		c.SetUserContext(requestctx.With(c.UserContext(), identity))
 		return c.Next()
+	}
+}
+
+type admissionRefusal struct {
+	status  int
+	message string
+}
+
+// workspaceAdmission decides whether a request may proceed given the
+// workspace's lifecycle state.
+//
+// READS STAY OPEN except on a fully deleted workspace, and that is deliberate
+// rather than lenient. A member has to be able to SEE that their workspace is
+// suspended or being deleted: a state that hides the workspace is
+// indistinguishable from having been removed from it, and the recovery window
+// MU-032 requires is worthless if nobody can look at what is about to be
+// destroyed.
+//
+// Safe methods are the honest proxy for "read". It is a proxy — a GET can have
+// side effects if somebody writes one — but the alternative is an allow-list
+// of read handlers, which is a list a new read gets left off, and being left
+// off there means a legitimate read is refused during a deletion window rather
+// than a write being allowed. Wrong in the safer direction, and still wrong.
+func workspaceAdmission(c *fiber.Ctx, status string) *admissionRefusal {
+	if !tenancy.WorkspaceIsReadable(status) {
+		return &admissionRefusal{
+			status:  fiber.StatusGone,
+			message: "this workspace has been deleted",
+		}
+	}
+	switch c.Method() {
+	case fiber.MethodGet, fiber.MethodHead, fiber.MethodOptions:
+		return nil
+	}
+	if tenancy.WorkspaceAcceptsWrites(status) {
+		return nil
+	}
+	if strings.EqualFold(strings.TrimSpace(status), tenancy.WorkspaceDeleting) {
+		return &admissionRefusal{
+			status:  fiber.StatusConflict,
+			message: "this workspace is being deleted; no new changes or runs are accepted. An owner can cancel the deletion during the recovery window.",
+		}
+	}
+	// Suspended, or a status this build does not recognise. The generic
+	// message is deliberate for the unknown case: guessing at a newer build's
+	// state and describing it wrongly is worse than saying writes are paused.
+	return &admissionRefusal{
+		status:  fiber.StatusConflict,
+		message: "this workspace is not accepting changes right now",
 	}
 }
 
