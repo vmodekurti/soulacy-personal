@@ -186,9 +186,19 @@ func TestAPreCompositeDatabaseMigrates(t *testing.T) {
 	if from := strings.Index(legacySchema, "    -- Composite, not a bare id"); from >= 0 {
 		to := strings.Index(legacySchema, clause) + len(clause)
 		legacySchema = legacySchema[:from] + legacySchema[to:]
-		legacySchema = strings.Replace(legacySchema,
-			"    side_effect_tool TEXT NOT NULL DEFAULT '',", "    side_effect_tool TEXT NOT NULL DEFAULT ''", 1)
 	}
+	// The legacy table also predates the MU-034 lease columns, so strip them:
+	// the point of this fixture is a database written before the migrations
+	// existed, and leaving a column in that migrateRetryColumns is meant to
+	// ADD would test the migration against a database that did not need it.
+	if from := strings.Index(legacySchema, "    -- MU-034 criterion 1."); from >= 0 {
+		marker := "    lease_expires_at DATETIME,\n"
+		to := strings.Index(legacySchema, marker) + len(marker)
+		legacySchema = legacySchema[:from] + legacySchema[to:]
+	}
+	// Whatever is now last must not carry a trailing comma.
+	legacySchema = strings.Replace(legacySchema,
+		"    side_effect_tool TEXT NOT NULL DEFAULT '',", "    side_effect_tool TEXT NOT NULL DEFAULT ''", 1)
 	if _, err := legacy.Exec(legacySchema); err != nil {
 		t.Fatal(err)
 	}

@@ -14,9 +14,13 @@ package app
 import (
 	"context"
 	"errors"
+	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/runs"
@@ -66,8 +70,9 @@ func runPrincipal(run runs.Run, requestID string) runtime.Principal {
 // queue with any depth. Claiming through the state machine rather than a
 // separate flag means two workers cannot both claim it: the loser's transition
 // finds the status already changed.
-func beginRun(ctx context.Context, store *runs.Store, workspaceID, runID string, log *zap.Logger) (runs.Run, bool) {
-	run, err := store.Transition(ctx, workspaceID, runID, runs.StatusRunning, runs.TransitionOptions{})
+func beginRun(ctx context.Context, store *runs.Store, workspaceID, runID, owner string, log *zap.Logger) (runs.Run, bool) {
+	run, err := store.Transition(ctx, workspaceID, runID, runs.StatusRunning,
+		runs.TransitionOptions{Owner: owner, Lease: runs.DefaultRunLease})
 	switch {
 	case err == nil:
 		return run, true
@@ -205,7 +210,19 @@ func watchForCancellation(ctx context.Context, cancel context.CancelFunc,
 		return func() {}
 	}
 	done := make(chan struct{})
+	// stopped is closed when the goroutine has actually exited, and the
+	// returned function waits for it.
+	//
+	// It used to return the moment `done` was closed, which made the guarantee
+	// weaker than this function's own doc comment claims: a "stopped" watcher
+	// could still be mid-poll, holding a database handle for a record nobody is
+	// watching — the exact thing stopping it is for. Under -race the gap shows
+	// up as the goroutine reading cancelPollInterval while the caller has moved
+	// on, which is how it was found: internal/app had never been run under
+	// -race, because the release gate did not include it.
+	stopped := make(chan struct{})
 	go func() {
+		defer close(stopped)
 		ticker := time.NewTicker(cancelPollInterval)
 		defer ticker.Stop()
 		for {
@@ -236,7 +253,14 @@ func watchForCancellation(ctx context.Context, cancel context.CancelFunc,
 			}
 		}
 	}()
-	return func() { close(done) }
+	// Idempotent: executeDurableRun calls this on every path, and a second
+	// close of `done` would panic. sync.Once rather than a boolean because the
+	// cancellation path and the normal path can reach it concurrently.
+	var once sync.Once
+	return func() {
+		once.Do(func() { close(done) })
+		<-stopped
+	}
 }
 
 // finishCancelled closes out a run whose worker stopped because it was asked
@@ -260,4 +284,107 @@ func finishCancelled(ctx context.Context, store *runs.Store, run runs.Run, log *
 			zap.String("run_id", run.ID), zap.Error(err))
 	}
 	return true
+}
+
+// holdRunLease renews this worker's claim for as long as the run executes, and
+// returns a function that stops renewing and releases it.
+//
+// WHY RENEWAL RATHER THAN A LONG LEASE. The lease has to outlive any pause a
+// live worker can take — a slow provider call, a stop-the-world GC, a machine
+// that swaps — or a healthy run gets stolen and executed twice, which is the
+// failure the lease exists to prevent, arriving from the other direction. A
+// lease long enough to cover the worst pause is also long enough that a real
+// crash strands the run for that long. Renewal decouples the two: the lease
+// stays short, and a live worker keeps saying so.
+//
+// A LOST LEASE CANCELS THE RUN. If renewal fails because somebody else now
+// holds the claim, this worker is executing a run another worker also has, and
+// continuing means two engines writing one outcome. Cancelling is the safe
+// side: the record already belongs to the other holder, and finishRun's
+// status-conditioned UPDATE will refuse this one's outcome anyway — but
+// stopping means it also stops making tool calls.
+// runLeaseRenewInterval is how often holdRunLease renews.
+//
+// A variable rather than a constant so the lease tests can exercise the
+// lost-lease path in milliseconds instead of parking the suite for twenty
+// seconds. Production never writes it — the same shape internal/mcp uses for
+// its drain grace.
+var runLeaseRenewInterval = runs.RenewInterval
+
+func holdRunLease(ctx context.Context, store *runs.Store, run runs.Run, owner string,
+	onLost context.CancelFunc, log *zap.Logger) func() {
+	if store == nil || owner == "" {
+		return func() {}
+	}
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		ticker := time.NewTicker(runLeaseRenewInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				// Renewed through a context that outlives the run's own
+				// deadline is NOT wanted here: if the run's context is done
+				// the run is over, and renewing a lease on a finished run
+				// would hold it past the outcome.
+				if err := store.RenewLease(ctx, run.WorkspaceID, run.ID, owner, runs.DefaultRunLease); err != nil {
+					if errors.Is(err, runs.ErrLeaseLost) {
+						log.Warn("this worker lost the lease on a run it is executing; stopping to avoid a second execution",
+							zap.String("run_id", run.ID), zap.String("workspace_id", run.WorkspaceID))
+						if onLost != nil {
+							onLost()
+						}
+						return
+					}
+					// A transient failure is not a lost lease. Logged and
+					// retried on the next tick: RenewInterval is a third of
+					// the lease precisely so two of these can pass.
+					log.Debug("run lease renewal failed; will retry",
+						zap.String("run_id", run.ID), zap.Error(err))
+				}
+			}
+		}
+	}()
+	return func() {
+		close(done)
+		<-stopped
+		// Released through a context that is NOT the run's: the run's context
+		// is cancelled by the time this runs on the timeout path, and a
+		// release that silently no-ops leaves the run looking held for a full
+		// lease period after it finished — which delays recovery of the next
+		// crash by exactly that long.
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := store.ReleaseLease(releaseCtx, run.WorkspaceID, run.ID, owner); err != nil {
+			log.Debug("run lease release failed", zap.String("run_id", run.ID), zap.Error(err))
+		}
+	}
+}
+
+// workerID identifies this process as a lease holder.
+//
+// STABLE FOR THE LIFETIME OF THE PROCESS AND UNIQUE ACROSS PROCESSES, which is
+// exactly what a lease owner has to be: stable so a renewal is recognised as
+// coming from the holder, unique so a restarted process is not mistaken for
+// the one that died. A hostname alone fails the second test — a container
+// restarting keeps its hostname, and its runs would look renewable by the new
+// process while the old one's work was actually gone.
+//
+// Computed once, lazily, rather than at construction, because the App is built
+// in tests that never run a worker and a UUID per test is noise in nothing.
+func (a *App) workerID() string {
+	a.workerIDOnce.Do(func() {
+		host, err := os.Hostname()
+		if err != nil || strings.TrimSpace(host) == "" {
+			host = "unknown-host"
+		}
+		a.workerIDValue = host + "/" + strconv.Itoa(os.Getpid()) + "/" + uuid.NewString()[:8]
+	})
+	return a.workerIDValue
 }

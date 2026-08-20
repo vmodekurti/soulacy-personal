@@ -26,6 +26,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/soulacy/soulacy/internal/sqlitex"
+	"github.com/soulacy/soulacy/internal/workspacepurge"
 	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
@@ -186,9 +187,14 @@ type Run struct {
 	// tool call rounds to zero milliseconds and a run makes many of them.
 	ExternalMicros int64 `json:"external_micros,omitempty"`
 
-	Attempt        int        `json:"attempt"`
-	MaxAttempts    int        `json:"max_attempts"`
-	SideEffectAt   *time.Time `json:"side_effect_at,omitempty"`
+	Attempt      int        `json:"attempt"`
+	MaxAttempts  int        `json:"max_attempts"`
+	SideEffectAt *time.Time `json:"side_effect_at,omitempty"`
+	// ClaimedBy and LeaseExpiresAt are the run's lease (MU-034). A nil
+	// expiry means unheld — a pre-lease row, or one whose holder released it
+	// on a clean shutdown — and both are recoverable.
+	ClaimedBy      string     `json:"claimed_by,omitempty"`
+	LeaseExpiresAt *time.Time `json:"lease_expires_at,omitempty"`
 	SideEffectTool string     `json:"side_effect_tool,omitempty"`
 
 	Status string `json:"status"`
@@ -237,6 +243,13 @@ CREATE TABLE IF NOT EXISTS agent_runs (
     max_attempts     INTEGER NOT NULL DEFAULT 3,
     side_effect_at   DATETIME,
     side_effect_tool TEXT NOT NULL DEFAULT '',
+    -- MU-034 criterion 1. claimed_by names the worker holding this run and
+    -- lease_expires_at says until when. Together they are what lets recovery
+    -- tell a worker that DIED from one that is BUSY: without them the startup
+    -- sweep re-queued every unfinished run in the deployment, including the
+    -- ones another live replica was executing at that moment.
+    claimed_by       TEXT NOT NULL DEFAULT '',
+    lease_expires_at DATETIME,
     -- Composite, not a bare id primary key. internal/ownership/catalog.go has
     -- declared this table CompositeUniqueness since MU-020, and the schema did
     -- not implement it: a bare id primary key made run IDs globally unique, so
@@ -325,10 +338,24 @@ func migrateRunPrimaryKey(db *sql.DB) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	// The copy NAMES its columns instead of using SELECT *.
+	//
+	// SELECT * requires the old table and the new one to have identical
+	// column counts, which makes this migration break every time a column is
+	// added to `schema` — the failure being "table agent_runs has N columns
+	// but M values were supplied", raised at Open, on exactly the old
+	// databases this function exists to rescue and never on a fresh one. It
+	// bit when the MU-034 lease columns were added, and would have bitten
+	// again on the next column. The named list is the pre-composite shape and
+	// does not change; new columns are added by migrateRetryColumns, which
+	// runs afterwards and is additive by design.
+	const preCompositeColumns = `id, workspace_id, agent_id, agent_version, session_id, subject,
+		principal_kind, credential_id, idempotency_key, policy_snapshot, reservation_id,
+		status, cursor, payload, result, failure_reason, created_at, updated_at, started_at, ended_at`
 	for _, stmt := range []string{
 		`ALTER TABLE agent_runs RENAME TO agent_runs_pre_composite`,
 		strings.Replace(schema, "IF NOT EXISTS agent_runs", "agent_runs", 1),
-		`INSERT INTO agent_runs SELECT * FROM agent_runs_pre_composite`,
+		`INSERT INTO agent_runs (` + preCompositeColumns + `) SELECT ` + preCompositeColumns + ` FROM agent_runs_pre_composite`,
 		`DROP TABLE agent_runs_pre_composite`,
 	} {
 		if _, err := tx.Exec(stmt); err != nil {
@@ -345,6 +372,8 @@ func migrateRetryColumns(db *sql.DB) error {
 		`ALTER TABLE agent_runs ADD COLUMN max_attempts INTEGER NOT NULL DEFAULT 3`,
 		`ALTER TABLE agent_runs ADD COLUMN side_effect_at DATETIME`,
 		`ALTER TABLE agent_runs ADD COLUMN side_effect_tool TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE agent_runs ADD COLUMN claimed_by TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE agent_runs ADD COLUMN lease_expires_at DATETIME`,
 	} {
 		if _, err := db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 			return fmt.Errorf("runs: migrate: %w", err)
@@ -432,7 +461,8 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 const selectColumns = `SELECT id, workspace_id, agent_id, agent_version, session_id, subject,
     principal_kind, credential_id, idempotency_key, policy_snapshot, reservation_id,
     status, cursor, payload, result, failure_reason, created_at, updated_at, started_at, ended_at,
-    attempt, max_attempts, side_effect_at, side_effect_tool, external_micros`
+    attempt, max_attempts, side_effect_at, side_effect_tool, external_micros,
+    claimed_by, lease_expires_at`
 
 // Get returns one run within a workspace.
 func (s *Store) Get(ctx context.Context, workspaceID, id string) (Run, error) {
@@ -509,6 +539,17 @@ func (s *Store) Transition(ctx context.Context, workspaceID, id, to string, opts
 		// nothing, and a run that kills three workers has used three — which
 		// is the number the bound is about.
 		sets = append(sets, "attempt = attempt + 1")
+		// The claim takes the lease in the SAME statement as the status
+		// change. Two statements would leave a window in which a run is
+		// `running` with no holder — which is precisely the state recovery
+		// reads as abandoned, so a crash there would hand the run to a second
+		// worker while the first was still starting it.
+		lease := opts.Lease
+		if lease <= 0 {
+			lease = DefaultRunLease
+		}
+		sets = append(sets, "claimed_by = ?", "lease_expires_at = ?")
+		args = append(args, opts.Owner, now.Add(lease))
 		if current.StartedAt == nil {
 			sets = append(sets, "started_at = ?")
 			args = append(args, now)
@@ -517,6 +558,11 @@ func (s *Store) Transition(ctx context.Context, workspaceID, id, to string, opts
 	if Terminal(to) {
 		sets = append(sets, "ended_at = ?")
 		args = append(args, now)
+		// A finished run holds nothing. Leaving the expiry set would make a
+		// completed run look held until it lapsed, which is harmless for
+		// recovery (terminal runs are not swept) and misleading in the record
+		// an operator reads when asking who ran what.
+		sets = append(sets, "lease_expires_at = NULL")
 	}
 	if opts.Result != "" {
 		sets = append(sets, "result = ?")
@@ -552,6 +598,12 @@ type TransitionOptions struct {
 	Result        string
 	FailureReason string
 	Cursor        string
+	// Owner and Lease apply only to a claim (→ running). An empty Owner
+	// records an unowned claim, which recovery treats as abandoned as soon as
+	// the lease lapses — the safe reading for a caller that did not identify
+	// itself.
+	Owner string
+	Lease time.Duration
 }
 
 // Recover returns runs left mid-flight by a previous process, across every
@@ -562,9 +614,21 @@ type TransitionOptions struct {
 // carries its own WorkspaceID, so the resumer acts per run rather than
 // inheriting one workspace's context for all of them.
 func (s *Store) RecoverAcrossWorkspaces(ctx context.Context) ([]Run, error) {
+	// A RUNNING run whose lease is still live belongs to a worker that is
+	// alive right now, and must not be swept. This predicate is the whole
+	// difference between a recovery sweep and a duplicate-execution bug: with
+	// one gateway every unfinished run really was interrupted, and with two a
+	// booting replica was re-queuing work the other one was doing.
+	//
+	// Queued and paused runs are returned regardless — neither is held by
+	// anybody — and a running run with NO lease is a pre-migration row or one
+	// released on a clean shutdown, both of which are genuinely recoverable.
 	rows, err := s.db.QueryContext(ctx,
-		selectColumns+` FROM agent_runs WHERE status IN (?, ?, ?) ORDER BY created_at ASC`,
-		StatusQueued, StatusRunning, StatusPaused)
+		selectColumns+` FROM agent_runs
+		  WHERE status IN (?, ?)
+		     OR (status = ? AND (lease_expires_at IS NULL OR lease_expires_at <= ?))
+		  ORDER BY created_at ASC`,
+		StatusQueued, StatusPaused, StatusRunning, time.Now().UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -586,16 +650,20 @@ func scanRun(row scanner) (Run, error) {
 	var run Run
 	var policy, payload string
 	var started, ended sql.NullTime
-	var sideEffect sql.NullTime
+	var sideEffect, leaseExpires sql.NullTime
 	if err := row.Scan(&run.ID, &run.WorkspaceID, &run.AgentID, &run.AgentVersion, &run.SessionID,
 		&run.Subject, &run.PrincipalKind, &run.CredentialID, &run.IdempotencyKey, &policy,
 		&run.ReservationID, &run.Status, &run.Cursor, &payload, &run.Result, &run.FailureReason,
 		&run.CreatedAt, &run.UpdatedAt, &started, &ended,
-		&run.Attempt, &run.MaxAttempts, &sideEffect, &run.SideEffectTool, &run.ExternalMicros); err != nil {
+		&run.Attempt, &run.MaxAttempts, &sideEffect, &run.SideEffectTool, &run.ExternalMicros,
+		&run.ClaimedBy, &leaseExpires); err != nil {
 		return Run{}, err
 	}
 	if sideEffect.Valid {
 		run.SideEffectAt = &sideEffect.Time
+	}
+	if leaseExpires.Valid {
+		run.LeaseExpiresAt = &leaseExpires.Time
 	}
 	if policy != "" {
 		run.PolicySnapshot = json.RawMessage(policy)
@@ -641,4 +709,16 @@ func (r Run) Principal() (subject, workspaceID, membershipID, organizationID, ro
 		}
 	}
 	return subject, workspaceID, membershipID, organizationID, role
+}
+
+// PurgeWorkspace removes every row this store holds for one workspace.
+//
+// MU-032 criterion 4. The TABLE LIST comes from the ownership catalog rather
+// than from a literal here, so a table added to the "runs" resource is
+// purged the day it is classified — one edit, not two. A hand-written list is
+// the same second-inventory mistake the exporter avoids, and here the
+// consequence of drift is data outliving a deletion somebody was told
+// completed.
+func (s *Store) PurgeWorkspace(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+	return workspacepurge.PurgeCatalogTables(ctx, s.db, "runs", workspaceID)
 }

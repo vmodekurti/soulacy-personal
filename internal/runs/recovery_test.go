@@ -7,15 +7,46 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 func claim(t *testing.T, store *Store, run Run) Run {
 	t.Helper()
-	claimed, err := store.Transition(context.Background(), run.WorkspaceID, run.ID, StatusRunning, TransitionOptions{})
+	claimed, err := store.Transition(context.Background(), run.WorkspaceID, run.ID, StatusRunning,
+		TransitionOptions{Owner: "worker-1"})
 	if err != nil {
 		t.Fatalf("claim %s: %v", run.ID, err)
 	}
 	return claimed
+}
+
+// abandon expires a claim's lease, which is what a worker DYING looks like
+// from the outside.
+//
+// Every recovery test below used to reach this state by simply claiming a run,
+// because "running" and "abandoned" were the same thing: nothing recorded who
+// held a run or for how long, so the sweep treated every running row as
+// interrupted. That is exactly the bug MU-034 fixes — with two replicas it
+// re-queued work a live worker was doing — and it means these tests have to
+// say which of the two states they mean now.
+func abandon(t *testing.T, store *Store, run Run) Run {
+	t.Helper()
+	if _, err := store.db.ExecContext(context.Background(),
+		`UPDATE agent_runs SET lease_expires_at = ? WHERE workspace_id = ? AND id = ?`,
+		time.Now().UTC().Add(-time.Minute), run.WorkspaceID, run.ID); err != nil {
+		t.Fatalf("abandon %s: %v", run.ID, err)
+	}
+	updated, err := store.Get(context.Background(), run.WorkspaceID, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return updated
+}
+
+// claimAndAbandon is the old claim(): a run whose worker is gone.
+func claimAndAbandon(t *testing.T, store *Store, run Run) Run {
+	t.Helper()
+	return abandon(t, store, claim(t, store, run))
 }
 
 func outcomeFor(t *testing.T, outcomes []RecoveryOutcome, id string) RecoveryOutcome {
@@ -34,7 +65,7 @@ func outcomeFor(t *testing.T, outcomes []RecoveryOutcome, id string) RecoveryOut
 func TestARunThatNeverActedIsRequeuedAfterWorkerLoss(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()
-	run := claim(t, store, submit(t, store, "run_clean", "ws-a", "agent"))
+	run := claimAndAbandon(t, store, submit(t, store, "run_clean", "ws-a", "agent"))
 	if run.Attempt != 1 {
 		t.Fatalf("claiming a run should count as an attempt, got %d", run.Attempt)
 	}
@@ -65,7 +96,7 @@ func TestARunThatNeverActedIsRequeuedAfterWorkerLoss(t *testing.T) {
 func TestARunThatAlreadyActedIsNotRetried(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()
-	run := claim(t, store, submit(t, store, "run_dirty", "ws-a", "agent"))
+	run := claimAndAbandon(t, store, submit(t, store, "run_dirty", "ws-a", "agent"))
 	if err := store.MarkSideEffect(ctx, run.WorkspaceID, run.ID, "http_request"); err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +130,7 @@ func TestARunThatAlreadyActedIsNotRetried(t *testing.T) {
 func TestTheSideEffectMarkerKeepsTheFirstCall(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()
-	run := claim(t, store, submit(t, store, "run_many", "ws-a", "agent"))
+	run := claimAndAbandon(t, store, submit(t, store, "run_many", "ws-a", "agent"))
 	for _, tool := range []string{"http_request", "write_file", "shell_exec"} {
 		if err := store.MarkSideEffect(ctx, run.WorkspaceID, run.ID, tool); err != nil {
 			t.Fatal(err)
@@ -123,7 +154,7 @@ func TestARunOutOfAttemptsIsNotRequeuedAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 2; i++ {
-		run = claim(t, store, run)
+		run = claimAndAbandon(t, store, run)
 		outcomes, err := store.RecoverPending(ctx)
 		if err != nil {
 			t.Fatal(err)
@@ -147,7 +178,7 @@ func TestARunOutOfAttemptsIsNotRequeuedAgain(t *testing.T) {
 func TestAPausedRunIsLeftAlone(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()
-	run := claim(t, store, submit(t, store, "run_paused", "ws-a", "agent"))
+	run := claimAndAbandon(t, store, submit(t, store, "run_paused", "ws-a", "agent"))
 	if _, err := store.Transition(ctx, run.WorkspaceID, run.ID, StatusPaused, TransitionOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -169,8 +200,8 @@ func TestAPausedRunIsLeftAlone(t *testing.T) {
 func TestTheSweepDecidesPerRunAcrossWorkspaces(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()
-	clean := claim(t, store, submit(t, store, "run_a", "ws-a", "agent"))
-	dirty := claim(t, store, submit(t, store, "run_b", "ws-b", "agent"))
+	clean := claimAndAbandon(t, store, submit(t, store, "run_a", "ws-a", "agent"))
+	dirty := claimAndAbandon(t, store, submit(t, store, "run_b", "ws-b", "agent"))
 	if err := store.MarkSideEffect(ctx, dirty.WorkspaceID, dirty.ID, "shell_exec"); err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +231,7 @@ func TestTheSweepDecidesPerRunAcrossWorkspaces(t *testing.T) {
 func TestASideEffectMarkerIsScopedToItsWorkspace(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()
-	run := claim(t, store, submit(t, store, "run_scoped", "ws-a", "agent"))
+	run := claimAndAbandon(t, store, submit(t, store, "run_scoped", "ws-a", "agent"))
 	if err := store.MarkSideEffect(ctx, "ws-attacker", run.ID, "shell_exec"); err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +250,7 @@ func TestASideEffectMarkerIsScopedToItsWorkspace(t *testing.T) {
 func TestARunThatActsWhileTheSweepIsDecidingIsStillNotRequeued(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()
-	run := claim(t, store, submit(t, store, "run_race", "ws-a", "agent"))
+	run := claimAndAbandon(t, store, submit(t, store, "run_race", "ws-a", "agent"))
 
 	// `run` is the sweep's stale read: taken before the side effect happened.
 	if err := store.MarkSideEffect(ctx, run.WorkspaceID, run.ID, "http_request"); err != nil {

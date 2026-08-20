@@ -20,11 +20,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
 	"github.com/soulacy/soulacy/internal/config"
+	"github.com/soulacy/soulacy/internal/costs"
+	"github.com/soulacy/soulacy/internal/mcp"
+	"github.com/soulacy/soulacy/internal/secrets"
 )
 
 // App owns the fully-wired Soulacy gateway process.
@@ -32,6 +36,22 @@ type App struct {
 	cfg     *config.Config
 	cfgPath string
 	log     *zap.Logger
+	// costGovernor is retained from subsystem wiring so the gateway can
+	// reinstall a recomposed quota policy when a workspace changes its own
+	// limits — without it, a per-workspace budget would take effect only on
+	// the next restart, which is not a limit anybody can rely on.
+	costGovernor *costs.Governor
+	// mcpPool is retained so the gateway can route MCP reads and mutations to
+	// the requesting workspace's own servers rather than a deployment-wide
+	// client.
+	mcpPool *mcp.Pool
+	// workerIDValue identifies this process when it claims a durable run's
+	// lease. See workerID.
+	workerIDOnce  sync.Once
+	workerIDValue string
+	// secretsManager re-overlays vault-backed config values after a reload.
+	// See wireSecrets.
+	secretsManager *secrets.Manager
 }
 
 // Option customises App construction.

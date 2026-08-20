@@ -60,7 +60,7 @@ func TestOnlyOneWorkerClaimsARun(t *testing.T) {
 			go func(index int) {
 				defer wg.Done()
 				<-start
-				_, ok := beginRun(context.Background(), store, "ws_a", id, log)
+				_, ok := beginRun(context.Background(), store, "ws_a", id, "worker-test", log)
 				claimed[index] = ok
 			}(i)
 		}
@@ -89,7 +89,7 @@ func TestACancelledRunIsNeverStarted(t *testing.T) {
 		runs.TransitionOptions{FailureReason: "changed my mind"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := beginRun(ctx, store, "ws_a", "run_1", zap.NewNop()); ok {
+	if _, ok := beginRun(ctx, store, "ws_a", "run_1", "worker-test", zap.NewNop()); ok {
 		t.Fatal("a cancelled run was started")
 	}
 	got, err := store.Get(ctx, "ws_a", "run_1")
@@ -116,7 +116,7 @@ func TestACancellationDuringExecutionIsNotOverwritten(t *testing.T) {
 	store := newRunStore(t)
 	ctx := context.Background()
 	run := submitRun(t, store, "run_1", "ws_a")
-	started, ok := beginRun(ctx, store, "ws_a", "run_1", zap.NewNop())
+	started, ok := beginRun(ctx, store, "ws_a", "run_1", "worker-test", zap.NewNop())
 	if !ok {
 		t.Fatal("could not start the run")
 	}
@@ -161,7 +161,7 @@ func TestAFailedRunRecordsItsReason(t *testing.T) {
 	store := newRunStore(t)
 	ctx := context.Background()
 	submitRun(t, store, "run_1", "ws_a")
-	started, _ := beginRun(ctx, store, "ws_a", "run_1", zap.NewNop())
+	started, _ := beginRun(ctx, store, "ws_a", "run_1", "worker-test", zap.NewNop())
 
 	finishRun(ctx, store, started, "", errors.New("provider unreachable"), zap.NewNop())
 
@@ -220,7 +220,7 @@ func TestAWorkerStopsWhenItsRecordSaysCancelling(t *testing.T) {
 	store := newRunStore(t)
 	ctx := context.Background()
 	run := submitRun(t, store, "run_watch", "ws_a")
-	started, ok := beginRun(ctx, store, "ws_a", "run_watch", zap.NewNop())
+	started, ok := beginRun(ctx, store, "ws_a", "run_watch", "worker-test", zap.NewNop())
 	if !ok {
 		t.Fatal("could not start the run")
 	}
@@ -255,7 +255,7 @@ func TestAnUnreadableStoreDoesNotCancelRunningWork(t *testing.T) {
 	store := newRunStore(t)
 	ctx := context.Background()
 	run := submitRun(t, store, "run_hiccup", "ws_a")
-	started, _ := beginRun(ctx, store, "ws_a", "run_hiccup", zap.NewNop())
+	started, _ := beginRun(ctx, store, "ws_a", "run_hiccup", "worker-test", zap.NewNop())
 	_ = run
 	_ = store.Close() // the database is gone under the poller
 
@@ -281,7 +281,7 @@ func TestTheCancellationWatcherStopsWithTheRun(t *testing.T) {
 	store := newRunStore(t)
 	ctx := context.Background()
 	submitRun(t, store, "run_done", "ws_a")
-	started, _ := beginRun(ctx, store, "ws_a", "run_done", zap.NewNop())
+	started, _ := beginRun(ctx, store, "ws_a", "run_done", "worker-test", zap.NewNop())
 
 	runCtx, cancel := context.WithCancel(ctx)
 	stop := watchForCancellation(runCtx, cancel, store, started, zap.NewNop())
@@ -303,7 +303,7 @@ func TestACancelledRunReachesATerminalState(t *testing.T) {
 	store := newRunStore(t)
 	ctx := context.Background()
 	submitRun(t, store, "run_term", "ws_a")
-	started, _ := beginRun(ctx, store, "ws_a", "run_term", zap.NewNop())
+	started, _ := beginRun(ctx, store, "ws_a", "run_term", "worker-test", zap.NewNop())
 	if _, err := store.RequestCancel(ctx, "ws_a", "run_term", "operator cancelled"); err != nil {
 		t.Fatal(err)
 	}
