@@ -62,6 +62,18 @@ type Loader struct {
 	agents map[agentKey]*agent.Definition
 	mu     sync.RWMutex
 	log    *zap.Logger
+	// platformAgents controls whether the built-in System agent exists at all.
+	//
+	// A BOOLEAN, not a deployment mode, on purpose. Nothing else in
+	// internal/runtime knows what mode the process is in, and that is a
+	// property worth keeping: the tenancy story here is structural — a path,
+	// a map key, a parent join — and code that branches on the mode is code
+	// that behaves differently in a way tests in one mode cannot see. The
+	// gateway knows the mode; the loader takes the decision.
+	//
+	// Default true so every existing caller, including every test that builds
+	// a Loader directly, keeps the behaviour it had.
+	platformAgents bool
 }
 
 // AgentVersion is one immutable SOUL.yaml snapshot captured before an agent is
@@ -78,6 +90,20 @@ type AgentVersion struct {
 	// that reached the loader without a request identity (a filesystem edit,
 	// for instance).
 	Actor string `json:"actor,omitempty"`
+	// ContentVersion is the immutable identity of the bytes in this snapshot,
+	// derived the same way a run's pin and the HTTP ETag are.
+	//
+	// It is what makes the history *joinable*. A run records the content
+	// version it executed; the definition that produced it is only retrievable
+	// once it has been replaced, at which point it is exactly one of these
+	// snapshots. Without a shared token, "show me the definition this run
+	// used" is a guess based on timestamps — and timestamps are the thing a
+	// backup restore rewrites, which is why the sidecar exists at all.
+	//
+	// Empty for snapshots taken before this was recorded, and for bytes that
+	// no longer parse. Not fabricated: a wrong join is worse than an absent
+	// one, because it answers.
+	ContentVersion string `json:"content_version,omitempty"`
 }
 
 // versionMetadata is the sidecar written next to each snapshot. Snapshot
@@ -85,9 +111,10 @@ type AgentVersion struct {
 // `cp -p` silently rewrites; recording creation explicitly keeps the history
 // honest, and carries the actor the filesystem never knew.
 type versionMetadata struct {
-	Actor       string    `json:"actor,omitempty"`
-	WorkspaceID string    `json:"workspace_id"`
-	CreatedAt   time.Time `json:"created_at"`
+	Actor          string    `json:"actor,omitempty"`
+	WorkspaceID    string    `json:"workspace_id"`
+	CreatedAt      time.Time `json:"created_at"`
+	ContentVersion string    `json:"content_version,omitempty"`
 }
 
 // NormalizeWorkspace maps an absent workspace to the implicit personal one so
@@ -110,9 +137,10 @@ func workspaceForPath(dir, path string) (string, bool) { return wsroot.Of(dir, p
 // NewLoader creates a Loader that watches the given directories.
 func NewLoader(dirs []string) *Loader {
 	l := &Loader{
-		dirs:   dirs,
-		agents: make(map[agentKey]*agent.Definition),
-		log:    zap.NewNop(),
+		dirs:           dirs,
+		agents:         make(map[agentKey]*agent.Definition),
+		log:            zap.NewNop(),
+		platformAgents: true,
 	}
 	l.seedBuiltins()
 	return l
@@ -131,8 +159,61 @@ func (l *Loader) SetLogger(log *zap.Logger) {
 // Currently seeded:
 //   - "system" — master chat agent with full OS-level tool access.
 func (l *Loader) seedBuiltins() {
+	if !l.platformAgents {
+		return
+	}
 	system := builtinSystemAgent()
 	l.agents[agentKey{PersonalWorkspaceID, system.ID}] = system
+}
+
+// SetPlatformAgentsEnabled turns the built-in System agent on or off for the
+// life of the process. Call once at boot, before the first LoadAll.
+//
+// WHY THIS EXISTS. The System agent runs shell commands, writes files,
+// installs packages and edits the deployment's config file. Those actions have
+// no tenant: there is no path to derive, no map key to scope them by, nothing
+// to join them to a workspace. Every other capability in this codebase is
+// isolated structurally; this one cannot be, because "run an arbitrary
+// command" is not a thing that can belong to a workspace.
+//
+// So in a multi-user deployment it was reachable by the wrong people and by
+// nobody right. It is a platform built-in, and GetInWorkspace falls back to
+// the platform copy, so any member of any workspace could chat with it — while
+// the actual operator could not, because the static server key is refused by
+// the workspace APIs in multi-user mode by design. Deployment administration
+// and tenant activity are different jobs, and multi-user mode had already
+// separated them everywhere except here.
+//
+// Turning it off REMOVES the agent rather than filtering it at the entry
+// points. Chat, streaming, manual trigger, replay, schedules, channel
+// delivery and peer expansion all resolve through this map; a filter would
+// have to be repeated in each of them and would be missing from the next one
+// somebody adds.
+func (l *Loader) SetPlatformAgentsEnabled(enabled bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.platformAgents = enabled
+	if enabled {
+		l.seedBuiltins()
+		return
+	}
+	// EVERY entry with the reserved ID, not just the seeded one. A deployment
+	// that had a system/SOUL.yaml on disk holds a FILE-backed definition here,
+	// promoted with SystemTools at load time — filtering on the builtin
+	// sentinel would leave exactly that one alive, which is the case an
+	// upgrading Team install is most likely to be in.
+	for key := range l.agents {
+		if key.id == SystemAgentID {
+			delete(l.agents, key)
+		}
+	}
+}
+
+// PlatformAgentsEnabled reports whether built-in platform agents exist.
+func (l *Loader) PlatformAgentsEnabled() bool {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.platformAgents
 }
 
 // builtinSystemAgent returns the Definition for the always-on system agent.
@@ -304,6 +385,20 @@ func (l *Loader) LoadAll() []error {
 				return nil
 			}
 			if def.ID == SystemAgentID {
+				if !l.platformAgents {
+					// A file named the reserved ID would otherwise be PROMOTED
+					// below — enabled, given SystemTools, handed the full
+					// privileged confirm list. That turns "can write an agent
+					// file" into "has host shell", which is escalation by
+					// filename. Refused rather than downgraded to a normal
+					// agent, because a definition that silently loses its
+					// tools is a support case; a refusal with the path in it
+					// is an answer.
+					l.log.Warn("ignoring an agent that claims the reserved platform ID; "+
+						"platform agents are disabled in this deployment",
+						zap.String("path", path), zap.String("id", SystemAgentID))
+					return nil
+				}
 				def.ID = SystemAgentID
 				def.Enabled = true
 				def.SystemTools = true
@@ -338,7 +433,14 @@ func (l *Loader) LoadAll() []error {
 			continue // never prune built-ins
 		}
 		if !found[key] {
-			if key.id == SystemAgentID && key.workspace == PersonalWorkspaceID {
+			// The platformAgents clause is unreachable while the disable
+			// above removes every entry with this ID, and it stays because
+			// the invariant it states — never restore a built-in the
+			// deployment switched off — must not depend on the ORDER of two
+			// calls in the wiring code. Reordering them is a refactor
+			// somebody will make; silently resurrecting a host-level agent is
+			// not a cost that refactor should carry.
+			if key.id == SystemAgentID && key.workspace == PersonalWorkspaceID && l.platformAgents {
 				l.agents[key] = builtinSystemAgent()
 			} else {
 				delete(l.agents, key)
@@ -398,11 +500,14 @@ func (l *Loader) IsBuiltin(id string) bool {
 // platform-provided and visible in every workspace, so this consults the
 // workspace's own entry first and falls back to the seeded platform copy.
 func (l *Loader) IsBuiltinInWorkspace(workspaceID, id string) bool {
-	if id == SystemAgentID {
-		return true
-	}
 	l.mu.RLock()
 	defer l.mu.RUnlock()
+	if id == SystemAgentID {
+		// Only while it exists. Answering yes for an agent the loader will not
+		// return makes every caller that asks first — peer expansion, the
+		// delete guard, the GUI's badge — describe a thing that is not there.
+		return l.platformAgents
+	}
 	if d, ok := l.agents[agentKey{NormalizeWorkspace(workspaceID), id}]; ok {
 		return d.SourcePath == builtinSourcePath
 	}
@@ -580,6 +685,13 @@ func (l *Loader) UpsertInWorkspace(workspaceID, dir string, def *agent.Definitio
 	// actually becomes a path — the one place every caller goes through.
 	if err := ValidateAgentID(def.ID); err != nil {
 		return err
+	}
+	if def.ID == SystemAgentID && !l.PlatformAgentsEnabled() {
+		// Same escalation, through the API rather than the filesystem. The
+		// package importer and Studio both reach this function with an ID they
+		// did not type, so refusing here — where the ID is about to become a
+		// path — covers every route into it.
+		return fmt.Errorf("agent ID %q is reserved by the platform and cannot be created in this deployment", SystemAgentID)
 	}
 	if def.ID == SystemAgentID {
 		def.Enabled = true
@@ -862,7 +974,14 @@ func (l *Loader) snapshotPath(workspaceID, dir, id, sourcePath, actor string) er
 	// The snapshot itself stays a plain YAML file so it remains readable and
 	// restorable by hand. Provenance goes in a sidecar rather than inside the
 	// YAML, so a restored definition is byte-identical to what was deployed.
-	metadata, err := json.Marshal(versionMetadata{Actor: actor, WorkspaceID: NormalizeWorkspace(workspaceID), CreatedAt: createdAt})
+	// Derived from the bytes being stored rather than from the in-memory
+	// definition they came from. Those should agree, and when they do not it
+	// is because someone edited the file underneath us — in which case the
+	// snapshot's identity must describe what is IN the snapshot.
+	metadata, err := json.Marshal(versionMetadata{
+		Actor: actor, WorkspaceID: NormalizeWorkspace(workspaceID), CreatedAt: createdAt,
+		ContentVersion: contentVersionOfYAML(data),
+	})
 	if err != nil {
 		return nil
 	}
@@ -885,6 +1004,7 @@ func applyVersionMetadata(version *AgentVersion, snapshotPath string) {
 		return
 	}
 	version.Actor = metadata.Actor
+	version.ContentVersion = metadata.ContentVersion
 	if metadata.WorkspaceID != "" {
 		version.WorkspaceID = metadata.WorkspaceID
 	}
@@ -916,4 +1036,75 @@ func (l *Loader) historyRoots(workspaceID, preferredDir string) []string {
 		add(dir)
 	}
 	return roots
+}
+
+// LatestAgentVersionInWorkspace returns the newest snapshot in one workspace's
+// history for an agent, and whether there was one.
+//
+// **The actor on that snapshot is the author of the agent's *current* content,
+// not of the snapshot's.** UpsertInWorkspace captures the outgoing bytes and
+// stamps them with the principal doing the overwrite, so the newest snapshot
+// reads "this is what was there before <actor> wrote what is there now". Get
+// that inversion backwards and a conflict names the wrong person — worse than
+// naming nobody, because it sends someone to the wrong conversation.
+//
+// It exists rather than callers taking AgentVersionsInWorkspace()[0] because
+// that reads and JSON-decodes a sidecar per snapshot, and this is called on a
+// 409 — a path a client can drive by retrying. Snapshot filenames are
+// UTC timestamps in a zero-padded layout, so lexical order is chronological
+// and only the winner's sidecar has to be read.
+func (l *Loader) LatestAgentVersionInWorkspace(workspaceID, id string) (AgentVersion, bool) {
+	workspaceID = NormalizeWorkspace(workspaceID)
+	if err := ValidateAgentID(id); err != nil {
+		return AgentVersion{}, false
+	}
+	best := AgentVersion{}
+	found := false
+	for _, root := range l.historyRoots(workspaceID, "") {
+		dir := filepath.Join(root, id)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		newest := ""
+		for _, entry := range entries {
+			if entry.IsDir() || filepath.Ext(entry.Name()) != ".yaml" {
+				continue
+			}
+			if entry.Name() > newest {
+				newest = entry.Name()
+			}
+		}
+		if newest == "" {
+			continue
+		}
+		path := filepath.Join(dir, newest)
+		candidate := AgentVersion{
+			ID:          strings.TrimSuffix(newest, ".yaml"),
+			AgentID:     id,
+			WorkspaceID: workspaceID,
+			Path:        path,
+		}
+		if info, err := os.Stat(path); err == nil {
+			candidate.CreatedAt = info.ModTime().UTC()
+			candidate.Bytes = int(info.Size())
+		}
+		applyVersionMetadata(&candidate, path)
+		if !found || candidate.CreatedAt.After(best.CreatedAt) {
+			best, found = candidate, true
+		}
+	}
+	return best, found
+}
+
+// contentVersionOfYAML derives a snapshot's content identity from the stored
+// SOUL.yaml. Returns "" when the bytes do not parse: a snapshot that cannot be
+// identified is better than one identified wrongly, because a wrong token
+// joins a run to a definition it never executed.
+func contentVersionOfYAML(data []byte) string {
+	var def agent.Definition
+	if err := yaml.Unmarshal(data, &def); err != nil {
+		return ""
+	}
+	return def.ContentVersion()
 }
