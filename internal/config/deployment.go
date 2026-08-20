@@ -13,6 +13,24 @@ const (
 	// UnsafeDeploymentPrerequisitesAcknowledgement is intentionally verbose:
 	// operators must opt in explicitly and `sy doctor` keeps the risk visible.
 	UnsafeDeploymentPrerequisitesAcknowledgement = "unsafe_multi_user_prerequisites"
+
+	// UnsafeTenantSystemAgentAcknowledgement restores the built-in System
+	// agent in a multi-user deployment.
+	//
+	// It is off by default there because the System agent's tools have no
+	// tenant: shell, file writes, package installation and edits to the
+	// deployment's own config file cannot be scoped to a workspace, so a
+	// member of any workspace who could reach it held the host. Meanwhile the
+	// operator could NOT reach it — the static server key is refused by the
+	// workspace APIs in multi-user mode — so it was available to exactly the
+	// wrong people.
+	//
+	// A named waiver rather than a silent refusal, because a single-tenant
+	// Team install run by the same person who owns the machine is a real
+	// configuration, and an operator with no path forward edits the binary.
+	// Writing this down is the whole point: `sy doctor` reports it, and
+	// somebody had to decide.
+	UnsafeTenantSystemAgentAcknowledgement = "unsafe_tenant_system_agent"
 )
 
 // DeploymentMode returns the normalized configured operating mode. Empty is
@@ -39,15 +57,42 @@ func IsMultiUserMode(mode string) bool {
 }
 
 func (c *Config) HasUnsafeDeploymentAcknowledgement() bool {
+	return c.hasAcknowledgement(UnsafeDeploymentPrerequisitesAcknowledgement)
+}
+
+// HasTenantSystemAgentAcknowledgement reports whether the operator has
+// explicitly restored the built-in System agent in a multi-user deployment.
+func (c *Config) HasTenantSystemAgentAcknowledgement() bool {
+	return c.hasAcknowledgement(UnsafeTenantSystemAgentAcknowledgement)
+}
+
+func (c *Config) hasAcknowledgement(name string) bool {
 	if c == nil {
 		return false
 	}
 	for _, acknowledgement := range c.Deployment.Acknowledgements {
-		if strings.EqualFold(strings.TrimSpace(acknowledgement), UnsafeDeploymentPrerequisitesAcknowledgement) {
+		if strings.EqualFold(strings.TrimSpace(acknowledgement), name) {
 			return true
 		}
 	}
 	return false
+}
+
+// PlatformAgentsEnabled reports whether the built-in System agent exists in
+// this deployment.
+//
+// Personal is unconditionally yes: there is one tenant and they own the
+// machine, so "the agent can reach the host" and "the user can reach the host"
+// are the same sentence. Team and Scale are no unless explicitly waived — see
+// UnsafeTenantSystemAgentAcknowledgement.
+func (c *Config) PlatformAgentsEnabled() bool {
+	if c == nil {
+		return true
+	}
+	if !IsMultiUserMode(c.DeploymentMode()) {
+		return true
+	}
+	return c.HasTenantSystemAgentAcknowledgement()
 }
 
 // DeploymentReadinessIssues returns only operating-mode safety failures. It is
@@ -113,7 +158,15 @@ func (c *Config) deploymentIssueGroups() ([]string, []string) {
 			infrastructureIssues = append(infrastructureIssues, "queue.backend: scale deployments require \"nats\" or \"external\" durable distributed jobs")
 		}
 		if strings.TrimSpace(c.Deployment.SharedArtifactStore) == "" {
-			infrastructureIssues = append(infrastructureIssues, "deployment.shared_artifact_store: required for scale deployments")
+			// Still required, and the message now says what setting it does
+			// and does not buy. No runtime code reads this value yet — it is
+			// recorded intent, not a wired dependency — and an operator who
+			// configured it had every reason to believe artifacts had become
+			// shared. See ScaleReplicationBlockers.
+			infrastructureIssues = append(infrastructureIssues,
+				"deployment.shared_artifact_store: required for scale deployments. Note that it is "+
+					"currently RECORDED and not yet used: artifacts still live on each replica's own "+
+					"disk. See the startup report of scale replication blockers")
 		}
 	}
 	return hardIssues, infrastructureIssues

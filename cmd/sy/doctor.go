@@ -109,6 +109,8 @@ func collectDoctorReport() doctorReport {
 
 	add(checkConfig())
 	add(checkDeploymentMode())
+	add(checkScaleReplication())
+	add(checkPlatformAgents())
 	add(checkRuntimeDir(runtimeDir))
 	add(checkInstallLayout())
 	add(checkAgentDirs())
@@ -325,6 +327,72 @@ func checkDeploymentMode() doctorCheck {
 		detail += " — required authentication, storage, and isolation settings are configured"
 	}
 	return doctorCheck{Name: "deployment mode", Status: doctorOK, Detail: detail}
+}
+
+// checkPlatformAgents reports whether the built-in System agent exists, and
+// says which way the operator is exposed.
+//
+// Both directions are worth a line. An operator upgrading a Team install loses
+// a feature their users were using and needs to be told where it went; an
+// operator who waived the default is holding a host-level chat agent open to
+// every workspace member and should see that on every doctor run, not once in
+// a boot log they have scrolled past.
+func checkPlatformAgents() doctorCheck {
+	cfg, err := loadDoctorConfig()
+	if err != nil {
+		return doctorCheck{Name: "system agent", Status: doctorOK, Detail: "not applicable (configuration unreadable)"}
+	}
+	mode := cfg.DeploymentMode()
+	enabled := cfg.PlatformAgentsEnabled()
+	if !config.IsMultiUserMode(mode) {
+		return doctorCheck{Name: "system agent", Status: doctorOK,
+			Detail: "available (" + mode + " mode: one tenant, who owns the machine)"}
+	}
+	if !enabled {
+		return doctorCheck{Name: "system agent", Status: doctorOK,
+			Detail: "withdrawn in " + mode + " mode; its tools act on the host and the deployment " +
+				"config, which belong to no workspace",
+			Remedy: "install MCP servers and skills from the GUI or the `sy` CLI on the host"}
+	}
+	return doctorCheck{
+		Name:   "system agent",
+		Status: doctorWarn,
+		Detail: "enabled in " + mode + " mode by explicit acknowledgement: any member of any " +
+			"workspace who can chat with it can install packages and, if runtime.allow_system_agents " +
+			"permits, run shell commands on the host",
+		Remedy: "remove deployment.acknowledgements entry `" + config.UnsafeTenantSystemAgentAcknowledgement +
+			"` unless every workspace member is trusted with the host",
+	}
+}
+
+// checkScaleReplication reports the known multi-replica hazards. It is a
+// separate check from `deployment mode` on purpose: that check answers "is the
+// configuration valid", and the answer for a well-formed scale install is yes.
+// This one answers the different question the operator is actually asking when
+// they choose scale mode — "can I now run two of these" — and folding it into
+// the first would let a green "deployment mode: ok" stand for both.
+func checkScaleReplication() doctorCheck {
+	cfg, err := loadDoctorConfig()
+	if err != nil {
+		// The deployment mode check already reports the parse failure with a
+		// remedy. Repeating it here would be noise, and guessing the mode
+		// would be worse.
+		return doctorCheck{Name: "scale replication", Status: doctorOK, Detail: "not applicable (configuration unreadable)"}
+	}
+	if cfg.DeploymentMode() != config.DeploymentModeScale {
+		return doctorCheck{Name: "scale replication", Status: doctorOK, Detail: "not applicable outside scale mode"}
+	}
+	blockers := config.ScaleReplicationBlockers()
+	if len(blockers) == 0 {
+		return doctorCheck{Name: "scale replication", Status: doctorOK, Detail: "no known multi-replica blockers"}
+	}
+	return doctorCheck{
+		Name:   "scale replication",
+		Status: doctorWarn,
+		Detail: fmt.Sprintf("running more than one gateway replica is not yet safe (%d known blockers): %s",
+			len(blockers), strings.Join(blockers, "; ")),
+		Remedy: "run exactly one gateway replica until these are resolved; scale mode's infrastructure requirements are satisfied but the process is not yet replica-safe",
+	}
 }
 
 func checkRuntimeDir(runtimeDir string) doctorCheck {
