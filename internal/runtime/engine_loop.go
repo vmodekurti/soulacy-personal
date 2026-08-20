@@ -80,8 +80,8 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 	defer func() {
 		degraded := reply.Metadata != nil && strings.EqualFold(reply.Metadata[message.MetaReasoningDegraded], "true")
 		success := err == nil && runOutcome == "success" && !degraded
-		metrics.AgentRunDuration.WithLabelValues(msg.AgentID).Observe(time.Since(runStart).Seconds())
-		metrics.AgentRunsTotal.WithLabelValues(msg.AgentID, runOutcome).Inc()
+		metrics.AgentRunDuration.Observe(time.Since(runStart).Seconds())
+		metrics.AgentRunsTotal.WithLabelValues(runOutcome).Inc()
 		// A single explicit terminal event gives learning/telemetry consumers an
 		// authoritative run boundary. Session IDs are conversational and may span
 		// hundreds of turns; error events may be recovered. Neither is a run ID.
@@ -139,7 +139,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 				zap.String("session", msg.SessionID),
 				zap.Any("panic", r),
 				zap.ByteString("stack", stack))
-			metrics.AgentPanicsTotal.WithLabelValues(msg.AgentID).Inc()
+			metrics.AgentPanicsTotal.Inc()
 			err = fmt.Errorf("engine: recovered panic: %v", r)
 		}
 	}()
@@ -575,7 +575,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 				zap.Int("budget_tokens", budgetTokens),
 				zap.Int("used_calls", usedCalls),
 				zap.Int("budget_calls", budgetCalls))
-			metrics.AgentBudgetHaltsTotal.WithLabelValues(msg.AgentID).Inc()
+			metrics.AgentBudgetHaltsTotal.Inc()
 			e.emit(ctx, message.Event{
 				Type: "warn", AgentID: msg.AgentID, SessionID: msg.SessionID,
 				Payload:   map[string]any{"stage": "budget", "reason": reason},
@@ -627,7 +627,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 					finalContent += "\n\n"
 				}
 				finalContent += "⚠ Run halted before the next model call because the token budget cannot fit its prompt."
-				metrics.AgentBudgetHaltsTotal.WithLabelValues(msg.AgentID).Inc()
+				metrics.AgentBudgetHaltsTotal.Inc()
 				break
 			}
 			if reserveOut > remainingOutput {

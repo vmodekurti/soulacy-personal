@@ -2,9 +2,19 @@ package metrics
 
 import dto "github.com/prometheus/client_model/go"
 
+// ChannelCounterRow no longer carries an agent.
+//
+// It used to, read straight off the `agent` metric label, and this endpoint
+// therefore served every workspace's agent names to any caller who could read
+// channel config in ANY workspace. The label is gone (see metrics.go), and the
+// field goes with it rather than being kept and left empty: an omitempty field
+// that is always empty is a slot somebody refills.
+//
+// The GUI's delivery panels sum these rows by channel ID and never read the
+// agent, so the totals are unchanged — there are simply fewer series carrying
+// them.
 type ChannelCounterRow struct {
 	Channel string  `json:"channel"`
-	Agent   string  `json:"agent,omitempty"`
 	Outcome string  `json:"outcome,omitempty"`
 	Count   float64 `json:"count"`
 }
@@ -27,17 +37,17 @@ func ChannelStats() (ChannelStatsSnapshot, error) {
 	for _, fam := range families {
 		switch fam.GetName() {
 		case "soulacy_channel_inbound_total":
-			out.Inbound = append(out.Inbound, counterRows(fam.GetMetric(), "channel", "agent", "")...)
+			out.Inbound = append(out.Inbound, counterRows(fam.GetMetric(), "channel", "")...)
 		case "soulacy_channel_outbound_total":
-			out.Outbound = append(out.Outbound, counterRows(fam.GetMetric(), "channel", "agent", "outcome")...)
+			out.Outbound = append(out.Outbound, counterRows(fam.GetMetric(), "channel", "outcome")...)
 		case "soulacy_channel_inbox_drops_total":
-			out.InboxDrop = append(out.InboxDrop, counterRows(fam.GetMetric(), "channel", "", "")...)
+			out.InboxDrop = append(out.InboxDrop, counterRows(fam.GetMetric(), "channel", "")...)
 		}
 	}
 	return out, nil
 }
 
-func counterRows(metrics []*dto.Metric, channelKey, agentKey, outcomeKey string) []ChannelCounterRow {
+func counterRows(metrics []*dto.Metric, channelKey, outcomeKey string) []ChannelCounterRow {
 	rows := make([]ChannelCounterRow, 0, len(metrics))
 	for _, m := range metrics {
 		if m == nil || m.GetCounter() == nil {
@@ -46,7 +56,6 @@ func counterRows(metrics []*dto.Metric, channelKey, agentKey, outcomeKey string)
 		labels := metricLabels(m)
 		rows = append(rows, ChannelCounterRow{
 			Channel: labels[channelKey],
-			Agent:   labels[agentKey],
 			Outcome: labels[outcomeKey],
 			Count:   m.GetCounter().GetValue(),
 		})

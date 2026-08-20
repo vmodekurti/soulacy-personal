@@ -111,41 +111,65 @@ var (
 	)
 
 	// Agent runs (one inbound user message → one engine.Handle() call)
+	//
+	// UNLABELLED BY AGENT, and that is a deliberate removal rather than an
+	// omission. These four carried an `agent` label whose value is a raw,
+	// user-authored agent ID. Two things follow from that in a multi-tenant
+	// deployment, and the second is the serious one:
+	//
+	//  1. Cardinality grows with tenants × agents, unbounded, on a metric
+	//     nobody can garbage-collect. That is the argument the run-latency
+	//     histograms below already make about workspace labels.
+	//  2. AGENT IDS ARE TENANT-IDENTIFYING. They are names people choose —
+	//     `acme-invoice-reconciliation`, `project-titan-briefing`. The
+	//     Prometheus exposition is ONE global text blob: it cannot be scoped
+	//     per request, so every workspace owner or admin scraping
+	//     /api/v1/metrics read every other workspace's agent names. The role
+	//     gate on that route restricts WHO may scrape; it cannot restrict
+	//     WHAT a scrape contains.
+	//
+	// The workspace label was excluded here from the start, with the
+	// cardinality reasoning written down beside it. The agent label — same
+	// endpoint, same blob, same problem, worse because the values are prose —
+	// was left alone. That is what a rule looks like when it is applied where
+	// somebody last thought about it rather than everywhere it holds.
+	//
+	// The per-agent view has not disappeared; it moved to where it can be
+	// authorized. internal/runs and the action log are workspace-scoped by
+	// construction and carry the same runs with the same outcomes and
+	// timestamps, behind an API that resolves the caller's workspace.
 
-	AgentRunDuration = prometheus.NewHistogramVec(
+	AgentRunDuration = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Name:    "soulacy_agent_run_duration_seconds",
 			Help:    "End-to-end wall-clock for one engine.Handle() call.",
 			Buckets: []float64{0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600, 1800},
 		},
-		[]string{"agent"},
 	)
 	AgentRunsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "soulacy_agent_runs_total",
 			Help: "Total engine.Handle() invocations.",
 		},
-		[]string{"agent", "outcome"},
+		[]string{"outcome"},
 	)
 	// AgentPanicsTotal counts panics recovered inside engine.Handle (S2.1).
 	// A non-zero value means a run hit a bug that would previously have
 	// crashed the whole process; alert on any increase.
-	AgentPanicsTotal = prometheus.NewCounterVec(
+	AgentPanicsTotal = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Name: "soulacy_agent_panics_total",
 			Help: "Panics recovered inside engine.Handle (would otherwise crash the process).",
 		},
-		[]string{"agent"},
 	)
 	// AgentBudgetHaltsTotal counts runs halted by the per-run token/call
 	// budget gate (S3.1). A rising value points at a runaway agent, a prompt
 	// injection, or a budget set too low for the task.
-	AgentBudgetHaltsTotal = prometheus.NewCounterVec(
+	AgentBudgetHaltsTotal = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Name: "soulacy_agent_budget_halts_total",
 			Help: "Runs halted because they hit their per-run token or LLM-call budget.",
 		},
-		[]string{"agent"},
 	)
 
 	// Actionlog + worker pool gauges
@@ -183,14 +207,14 @@ var (
 			Name: "soulacy_channel_inbound_total",
 			Help: "Inbound channel messages accepted by the shared channel inbox.",
 		},
-		[]string{"channel", "agent"},
+		[]string{"channel"},
 	)
 	ChannelOutboundTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "soulacy_channel_outbound_total",
-			Help: "Outbound channel send attempts, by channel adapter, agent, and outcome.",
+			Help: "Outbound channel send attempts, by channel adapter and outcome.",
 		},
-		[]string{"channel", "agent", "outcome"}, // outcome: success|error|unregistered
+		[]string{"channel", "outcome"}, // outcome: success|error|unregistered
 	)
 
 	// --- Mobile companion: approvals, pairing, push ---

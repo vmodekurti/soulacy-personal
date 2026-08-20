@@ -90,13 +90,13 @@ func TestRegistryEnqueueIsNonBlocking(t *testing.T) {
 
 func TestRegistryEnqueueRecordsInboundMetric(t *testing.T) {
 	reg := NewRegistry(1)
-	before := testutil.ToFloat64(metrics.ChannelInboundTotal.WithLabelValues("slack", "agent-a"))
+	before := testutil.ToFloat64(metrics.ChannelInboundTotal.WithLabelValues("slack"))
 
 	if !reg.Enqueue(message.Message{Channel: "slack", AgentID: "agent-a", Parts: message.Text("one")}) {
 		t.Fatal("enqueue should succeed")
 	}
 
-	after := testutil.ToFloat64(metrics.ChannelInboundTotal.WithLabelValues("slack", "agent-a"))
+	after := testutil.ToFloat64(metrics.ChannelInboundTotal.WithLabelValues("slack"))
 	if after != before+1 {
 		t.Fatalf("inbound metric delta = %v, want 1", after-before)
 	}
@@ -108,29 +108,29 @@ func TestRegistrySendRecordsOutboundMetrics(t *testing.T) {
 	reg.Register(&registryTestAdapter{id: "slack"})
 	reg.Register(&registryTestAdapter{id: "telegram", sendErr: wantErr})
 
-	successBefore := testutil.ToFloat64(metrics.ChannelOutboundTotal.WithLabelValues("slack", "agent-a", "success"))
+	successBefore := testutil.ToFloat64(metrics.ChannelOutboundTotal.WithLabelValues("slack", "success"))
 	if err := reg.Send(context.Background(), message.Message{Channel: "slack", AgentID: "agent-a"}); err != nil {
 		t.Fatalf("Send success case: %v", err)
 	}
-	successAfter := testutil.ToFloat64(metrics.ChannelOutboundTotal.WithLabelValues("slack", "agent-a", "success"))
+	successAfter := testutil.ToFloat64(metrics.ChannelOutboundTotal.WithLabelValues("slack", "success"))
 	if successAfter != successBefore+1 {
 		t.Fatalf("success metric delta = %v, want 1", successAfter-successBefore)
 	}
 
-	errorBefore := testutil.ToFloat64(metrics.ChannelOutboundTotal.WithLabelValues("telegram", "agent-a", "error"))
+	errorBefore := testutil.ToFloat64(metrics.ChannelOutboundTotal.WithLabelValues("telegram", "error"))
 	if err := reg.Send(context.Background(), message.Message{Channel: "telegram", AgentID: "agent-a"}); !errors.Is(err, wantErr) {
 		t.Fatalf("Send error case = %v, want %v", err, wantErr)
 	}
-	errorAfter := testutil.ToFloat64(metrics.ChannelOutboundTotal.WithLabelValues("telegram", "agent-a", "error"))
+	errorAfter := testutil.ToFloat64(metrics.ChannelOutboundTotal.WithLabelValues("telegram", "error"))
 	if errorAfter != errorBefore+1 {
 		t.Fatalf("error metric delta = %v, want 1", errorAfter-errorBefore)
 	}
 
-	missingBefore := testutil.ToFloat64(metrics.ChannelOutboundTotal.WithLabelValues("discord", "agent-a", "unregistered"))
+	missingBefore := testutil.ToFloat64(metrics.ChannelOutboundTotal.WithLabelValues("discord", "unregistered"))
 	if err := reg.Send(context.Background(), message.Message{Channel: "discord", AgentID: "agent-a"}); err == nil {
 		t.Fatal("Send missing adapter should fail")
 	}
-	missingAfter := testutil.ToFloat64(metrics.ChannelOutboundTotal.WithLabelValues("discord", "agent-a", "unregistered"))
+	missingAfter := testutil.ToFloat64(metrics.ChannelOutboundTotal.WithLabelValues("discord", "unregistered"))
 	if missingAfter != missingBefore+1 {
 		t.Fatalf("unregistered metric delta = %v, want 1", missingAfter-missingBefore)
 	}

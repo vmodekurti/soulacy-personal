@@ -218,13 +218,14 @@ func (x reasoningToolExecutor) Execute(ctx context.Context, call reasoning.ToolC
 
 	toolStart := time.Now()
 	result, err := x.e.runTool(ctx, x.def, x.sessionID, tc)
-	metrics.ToolCallDuration.WithLabelValues(tc.Name).Observe(time.Since(toolStart).Seconds())
+	toolLabel := x.e.toolMetricLabel(tc.Name)
+	metrics.ToolCallDuration.WithLabelValues(toolLabel).Observe(time.Since(toolStart).Seconds())
 	isErr := err != nil
 	if isErr {
 		result = "error: " + err.Error()
-		metrics.ToolCallsTotal.WithLabelValues(tc.Name, "error").Inc()
+		metrics.ToolCallsTotal.WithLabelValues(toolLabel, "error").Inc()
 	} else {
-		metrics.ToolCallsTotal.WithLabelValues(tc.Name, "success").Inc()
+		metrics.ToolCallsTotal.WithLabelValues(toolLabel, "success").Inc()
 	}
 
 	x.e.emit(ctx, message.Event{

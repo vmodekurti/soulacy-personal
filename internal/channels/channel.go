@@ -19,6 +19,7 @@ import (
 	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/message"
 	sdkchannel "github.com/soulacy/soulacy/sdk/channel"
+	"strings"
 )
 
 // Adapter is the interface every channel must implement. Canonical
@@ -119,7 +120,7 @@ func (r *Registry) Inbox() <-chan message.Message { return r.inbox }
 func (r *Registry) Enqueue(msg message.Message) bool {
 	select {
 	case r.inbox <- msg:
-		metrics.ChannelInboundTotal.WithLabelValues(channelMetricLabel(msg.Channel), channelMetricLabel(msg.AgentID)).Inc()
+		metrics.ChannelInboundTotal.WithLabelValues(channelMetricLabel(msg.Channel)).Inc()
 		return true
 	default:
 		// Inbox is full — increment the Prometheus drop counter and log at
@@ -186,6 +187,68 @@ func (r *Registry) StartAdapter(ctx context.Context, a Adapter) error {
 	return nil
 }
 
+// StopAdapter removes one adapter and stops it, so a channel can be disabled
+// without restarting the gateway.
+//
+// ITS ABSENCE WAS THE ASYMMETRY THAT KEPT CHANNELS BOOT-ONLY. StartAdapter has
+// existed for a while and is used live by the WhatsApp pairing flow, so
+// connecting a channel without a restart was already possible. Disconnecting
+// one was not, and a save path can only be hot if BOTH directions are — an
+// operator who can enable a channel live but must restart to disable it has a
+// restart in their workflow either way, which is why the handlers went on
+// telling them to restart for both.
+//
+// REMOVED FROM THE REGISTRY FIRST, under the lock, and stopped afterwards.
+// Same ordering as MCP's RemoveServer and for the same reason: disabling a
+// channel has to take effect immediately, so no new send may resolve it, and
+// holding the registry lock across a stranger's network shutdown would block
+// every other channel operation for the length of it.
+//
+// Returns false when there was no such adapter. Not an error: disabling a
+// channel that was never started is the ordinary case for a config edit made
+// before the adapter could connect, and reporting it as a failure would make
+// the GUI show a red state for a successful change.
+func (r *Registry) StopAdapter(channelID string) (bool, error) {
+	channelID = strings.TrimSpace(channelID)
+	r.mu.Lock()
+	adapter, present := r.adapters[channelID]
+	if present {
+		delete(r.adapters, channelID)
+	}
+	r.mu.Unlock()
+
+	if !present {
+		return false, nil
+	}
+	if err := adapter.Stop(); err != nil {
+		// Already out of the registry, so the disable HAS taken effect even
+		// though the adapter complained on the way down. Reported so an
+		// operator sees a lingering connection in the provider's dashboard and
+		// knows why, rather than concluding the disable did not work.
+		return true, err
+	}
+	return true, nil
+}
+
+// Adapters returns a snapshot of the registered adapters.
+//
+// Exists so a caller can BUILD a channel's adapters without starting them and
+// then ask what it got — which is how a hot channel reload learns the adapter
+// IDs a config produces, without a naming convention. Adapter IDs are derived
+// from the config (a `bots:` list becomes several adapters with suffixed IDs),
+// so "which adapters belong to channel X" is a question only the construction
+// path can answer; inferring it from an ID prefix would be a rule every future
+// channel type has to remember to obey.
+func (r *Registry) Adapters() []Adapter {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]Adapter, 0, len(r.adapters))
+	for _, adapter := range r.adapters {
+		out = append(out, adapter)
+	}
+	return out
+}
+
 // StopAll gracefully stops all adapters.
 func (r *Registry) StopAll() []error {
 	r.mu.RLock()
@@ -207,12 +270,11 @@ func (r *Registry) StopAll() []error {
 // Send routes an outbound message to the correct channel adapter.
 func (r *Registry) Send(ctx context.Context, msg message.Message) error {
 	ch := channelMetricLabel(msg.Channel)
-	agentID := channelMetricLabel(msg.AgentID)
 	r.mu.RLock()
 	a, ok := r.adapters[msg.Channel]
 	r.mu.RUnlock()
 	if !ok {
-		metrics.ChannelOutboundTotal.WithLabelValues(ch, agentID, "unregistered").Inc()
+		metrics.ChannelOutboundTotal.WithLabelValues(ch, "unregistered").Inc()
 		return fmt.Errorf("channel adapter %q is not registered", msg.Channel)
 	}
 	// Ownership is checked here, at execution time, rather than when the run
@@ -221,7 +283,7 @@ func (r *Registry) Send(ctx context.Context, msg message.Message) error {
 	// and speaking through another tenant's bot is indistinguishable, to the
 	// recipient, from that tenant speaking.
 	if owner := r.owners.WorkspaceOf(msg.Channel); owner != wsroot.Normalize(msg.WorkspaceID) {
-		metrics.ChannelOutboundTotal.WithLabelValues(ch, agentID, "not_owned").Inc()
+		metrics.ChannelOutboundTotal.WithLabelValues(ch, "not_owned").Inc()
 		// Redacted diagnostic (criterion 6): the channel, the two workspaces
 		// and the agent, never the message body — a refused send is exactly
 		// the case where the content is most likely to be somebody else's.
@@ -235,10 +297,10 @@ func (r *Registry) Send(ctx context.Context, msg message.Message) error {
 		return fmt.Errorf("%w: channel %q belongs to another workspace", ErrChannelNotOwned, msg.Channel)
 	}
 	if err := a.Send(ctx, msg); err != nil {
-		metrics.ChannelOutboundTotal.WithLabelValues(ch, agentID, "error").Inc()
+		metrics.ChannelOutboundTotal.WithLabelValues(ch, "error").Inc()
 		return err
 	}
-	metrics.ChannelOutboundTotal.WithLabelValues(ch, agentID, "success").Inc()
+	metrics.ChannelOutboundTotal.WithLabelValues(ch, "success").Inc()
 	return nil
 }
 
