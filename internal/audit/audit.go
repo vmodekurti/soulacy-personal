@@ -43,7 +43,10 @@ type Entry struct {
 
 // secretPattern matches common secret field names so their values can be
 // redacted before they are written to disk.
-var secretPattern = regexp.MustCompile(`(?i)(api[_-]?key|password|secret|token|credential|auth)`)
+// The key-name test lives in internal/redact, shared with every other
+// redactor. The list this file used to carry knew nothing about `bearer`,
+// `cookie`, `passphrase` or `private_key` — in the file an operator SHIPS TO
+// SOMEBODY ELSE when asking for help.
 
 // maxRedactDepth bounds the walk below. Tool arguments are JSON the model
 // produced, so a pathological nesting depth is possible; 12 is far past anything
@@ -69,7 +72,7 @@ func redactArgs(args map[string]any) map[string]any {
 func redactMap(in map[string]any, depth int) map[string]any {
 	out := make(map[string]any, len(in))
 	for k, v := range in {
-		if secretPattern.MatchString(k) {
+		if redact.SecretKeyName(k) {
 			out[k] = "[REDACTED]"
 			continue
 		}

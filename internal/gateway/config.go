@@ -7,6 +7,7 @@ package gateway
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,10 +15,16 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/soulacy/soulacy/internal/config"
+	"github.com/soulacy/soulacy/internal/confighot"
+	"github.com/soulacy/soulacy/internal/costs"
 	"github.com/soulacy/soulacy/internal/mcp"
+	"github.com/soulacy/soulacy/internal/ratelimit"
+	"github.com/soulacy/soulacy/internal/redact"
+	"github.com/soulacy/soulacy/internal/runtime"
 	"github.com/soulacy/soulacy/internal/voice"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
+	"sort"
 )
 
 // ── GET /api/v1/config ────────────────────────────────────────────────────────
@@ -30,7 +37,7 @@ func (s *Server) handleGetConfig(c *fiber.Ctx) error {
 
 // safeConfigView builds a sanitised map from the live config.
 func (s *Server) safeConfigView() fiber.Map {
-	cfg := s.cfg
+	cfg := s.config()
 
 	// Build providers map with redacted keys
 	providers := make(map[string]fiber.Map, len(cfg.LLM.Providers))
@@ -228,13 +235,13 @@ func isSecretChannelKey(spec *channelSpec, key string) bool {
 			}
 		}
 	}
-	lk := strings.ToLower(key)
-	for _, marker := range []string{"token", "secret", "password", "api_key", "apikey", "credential"} {
-		if strings.Contains(lk, marker) {
-			return true
-		}
-	}
-	return false
+	// The fallback is the shared predicate, not a local list. The local one
+	// was the narrowest of the four in the repo: six markers, so a channel
+	// setting named `bot_passphrase`, `signing_key` or `session` on any
+	// channel type without a spec was rendered into GET /config verbatim.
+	// Unknown channel types are precisely the ones with no spec to be
+	// authoritative, so the fallback is what protects them.
+	return redact.SecretKeyName(key)
 }
 
 // redactBotList redacts secret fields in a channel's bots list.
@@ -463,29 +470,36 @@ func (s *Server) handlePatchConfig(c *fiber.Ctx) error {
 	// reads back without a restart. The walkthrough asks for its own state on
 	// every page load, and a stale `false` here would re-open a tour the user
 	// just dismissed — inside the same gateway process, no restart involved.
-	if patch.UI != nil && s.cfg != nil {
-		if patch.UI.WalkthroughSeen != nil {
-			s.cfg.UI.WalkthroughSeen = *patch.UI.WalkthroughSeen
-		}
-		if patch.UI.WalkthroughStep != nil {
-			s.cfg.UI.WalkthroughStep = *patch.UI.WalkthroughStep
-		}
-		if patch.UI.WalkthroughVersion != nil {
-			s.cfg.UI.WalkthroughVersion = *patch.UI.WalkthroughVersion
-		}
-	}
-	if patch.Voice != nil && s.cfg != nil {
-		s.cfg.Voice.Provider = patch.Voice.Provider
-		s.cfg.Voice.Model = patch.Voice.Model
-		s.cfg.Voice.BaseURL = patch.Voice.BaseURL
-		s.cfg.Voice.SidecarURL = patch.Voice.SidecarURL
-		s.cfg.Voice.Voice = patch.Voice.Voice
-		if patch.Voice.Timeout != "" {
-			s.cfg.Voice.Timeout = patch.Voice.Timeout
-		}
-		if patch.Voice.AllowRemote != nil {
-			s.cfg.Voice.AllowRemote = *patch.Voice.AllowRemote
-		}
+	// One mutation for both sections: mutateConfig publishes a new snapshot, so
+	// doing it twice would let a request land between the UI change and the
+	// voice change and see a configuration that was never written.
+	if patch.UI != nil || patch.Voice != nil {
+		s.mutateConfig(func(live *config.Config) {
+			if patch.UI != nil {
+				if patch.UI.WalkthroughSeen != nil {
+					live.UI.WalkthroughSeen = *patch.UI.WalkthroughSeen
+				}
+				if patch.UI.WalkthroughStep != nil {
+					live.UI.WalkthroughStep = *patch.UI.WalkthroughStep
+				}
+				if patch.UI.WalkthroughVersion != nil {
+					live.UI.WalkthroughVersion = *patch.UI.WalkthroughVersion
+				}
+			}
+			if patch.Voice != nil {
+				live.Voice.Provider = patch.Voice.Provider
+				live.Voice.Model = patch.Voice.Model
+				live.Voice.BaseURL = patch.Voice.BaseURL
+				live.Voice.SidecarURL = patch.Voice.SidecarURL
+				live.Voice.Voice = patch.Voice.Voice
+				if patch.Voice.Timeout != "" {
+					live.Voice.Timeout = patch.Voice.Timeout
+				}
+				if patch.Voice.AllowRemote != nil {
+					live.Voice.AllowRemote = *patch.Voice.AllowRemote
+				}
+			}
+		})
 	}
 
 	s.log.Info("config updated via API", zap.String("path", s.cfgPath))
@@ -493,11 +507,43 @@ func (s *Server) handlePatchConfig(c *fiber.Ctx) error {
 		"sections": configPatchSections(patch),
 	})
 
+	// The answer is COMPUTED from what was actually edited, not asserted.
+	//
+	// This used to say "restart the gateway for changes to take full effect"
+	// for every patch, which was simultaneously too strong and too weak: too
+	// strong because most sections apply immediately, and too weak because it
+	// gave an operator no way to know whether THEIR change was one of the few
+	// that does not. Both failures push in the same direction — the operator
+	// stops reading the message.
+	restartFor := restartRequiredSections(patch)
+	message := "Config saved and applied. No restart needed."
+	if len(restartFor) > 0 {
+		message = "Config saved. These sections take effect on the next restart: " +
+			strings.Join(restartFor, ", ") + ". Everything else is already live."
+	}
 	return c.JSON(fiber.Map{
-		"ok":      true,
-		"message": "Config saved. Restart the gateway for changes to take full effect.",
-		"config":  s.safeConfigView(),
+		"ok":               true,
+		"message":          message,
+		"restart_required": restartFor,
+		"config":           s.safeConfigView(),
 	})
+}
+
+// restartRequiredSections returns the edited sections that internal/confighot
+// classifies as boot-only.
+//
+// Driven by the same helper the audit record uses, so the two cannot disagree
+// about which sections a patch touched — an audit trail saying one thing and a
+// response saying another is worse than either being wrong alone.
+func restartRequiredSections(patch PatchableConfig) []string {
+	var out []string
+	for _, section := range configPatchSections(patch) {
+		if confighot.RequiresRestart(section) {
+			out = append(out, section)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // readRawConfig parses a YAML file into a generic map.
@@ -530,32 +576,202 @@ func (s *Server) ReloadConfig() error {
 		return err
 	}
 
-	s.cfg = newCfg
+	// THE SECRETS OVERLAY HAS TO BE RE-RUN, and its absence here was a real
+	// bug with a confusing shape.
+	//
+	// secrets.Migrate moves provider keys and channel tokens into the vault and
+	// BLANKS them both on disk and in memory, expecting Overlay to put the live
+	// values back. Overlay ran exactly once, at boot. So after any config write
+	// — and every config write triggers this reload through the file watcher —
+	// every vault-backed secret went empty in the in-memory config.
+	//
+	// Nothing broke functionally: the router and the started adapters hold
+	// constructed clients, not config strings. What broke was the truth of
+	// every surface that reads the config. GET /config rendered an empty
+	// api_key instead of a mask, the doctor started telling operators to
+	// re-save keys that were safely in the vault, and the channel handler's
+	// "keep the existing value when the browser sends the mask" branch read
+	// the blanked map and silently discarded the token.
+	if s.secrets != nil {
+		s.secrets.Overlay(context.Background(), newCfg)
+	}
 
-	// Hot-reload MCP servers
-	if s.mcp != nil {
-		current := s.mcp.ServersSnapshot()
-		// Remove deleted servers
-		for _, cur := range current {
-			if _, exists := newCfg.MCP.Servers[cur.ID]; !exists {
-				_ = s.mcp.RemoveServer(cur.ID)
-			}
-		}
-		// Add/Update existing servers
-		for id, srvCfg := range newCfg.MCP.Servers {
-			_ = s.mcp.AddServer(id, mcp.ServerConfig{
-				Transport: srvCfg.Transport,
-				Command:   srvCfg.Command,
-				Args:      srvCfg.Args,
-				Env:       srvCfg.Env,
-				URL:       srvCfg.URL,
-				Headers:   srvCfg.Headers,
-			})
+	// The snapshot swap. s.config() hands every handler an immutable pointer,
+	// and this is the only place in a reload that replaces it — so a request in
+	// flight finishes against the configuration it started with rather than
+	// reading half of each. See configsnapshot.go for why this is copy-on-write
+	// rather than a lock.
+	previousChannels := s.config().Channels
+	s.setConfig(newCfg)
+
+	// Hot-reload MCP servers.
+	//
+	// config.yaml names the operator's servers, which are a TEMPLATE every
+	// workspace instantiates rather than a live server set — so a reload
+	// replaces the template and lets each workspace rebuild. Diffing the live
+	// servers against the new config, as this did, was correct while one
+	// client served the whole deployment and becomes wrong the moment it does
+	// not: it would re-add servers a workspace had revoked, because the
+	// revocation is recorded per workspace and a config-shaped diff cannot
+	// see it.
+	servers := make(map[string]mcp.ServerConfig, len(newCfg.MCP.Servers))
+	for id, srvCfg := range newCfg.MCP.Servers {
+		servers[id] = mcp.ServerConfig{
+			Transport:  srvCfg.Transport,
+			Command:    srvCfg.Command,
+			Args:       srvCfg.Args,
+			Env:        srvCfg.Env,
+			InheritEnv: srvCfg.InheritEnv,
+			InheritAll: srvCfg.InheritAll,
+			URL:        srvCfg.URL,
+			Headers:    srvCfg.Headers,
 		}
 	}
+	s.mcpReplaceTemplate(servers)
+
+	// Every OTHER section internal/confighot classifies as live is applied
+	// here, and the set is checked against that catalog by
+	// TestReloadConfigAppliesEveryLiveSection.
+	//
+	// This used to re-apply MCP servers and nothing else — one subsystem out
+	// of thirty — while the config API happily accepted edits to all of them.
+	// An operator raising a rate limit, changing the search provider or
+	// tightening a quota watched the settings page agree with them and the
+	// behaviour not change, with no message saying so. That is worse than an
+	// honest "restart required": a restart note is a small cost the operator
+	// can pay, and a silent no-op is a cost they do not know they are paying.
+	s.applyLLMLive(newCfg.LLM)
+	s.applySearchLive(newCfg.Search)
+	s.applySecurityLive(newCfg.Security)
+	s.applyRateLimitLive(newCfg.RateLimit)
+	s.applyGovernanceLive(newCfg)
+	// Quotas last: reloadQuotaPolicy composes the flat config ceilings with
+	// each workspace's own limits, so it has to run after s.config() carries the
+	// new ceilings.
+	s.reloadQuotaPolicy(context.Background())
+	s.applyPluginsConfigLive(newCfg.PluginsConfig)
+	s.applyChannelsLive(previousChannels, newCfg.Channels)
 
 	s.log.Info("config.yaml reloaded")
 	return nil
+}
+
+// applyGovernanceLive republishes the cost governor's admission settings.
+//
+// The costs and llm sections were both classified live, and both were only
+// HALF live. reloadQuotaPolicy below recomposes the per-subject budgets, which
+// is what "quota" means — but allowed_providers, allowed_models,
+// allowed_regions and every per-provider data-class, region, retention and
+// tokens-per-minute policy were snapshotted into the governor at boot and
+// never looked at again. Removing a provider from the allow-list, or narrowing
+// a data class, saved to disk, showed up in the settings page, and changed
+// nothing about what the process would actually call. Those are access
+// controls; a silently unapplied access control is the worst kind of
+// unapplied setting.
+//
+// Passed the whole config rather than one section because a single admission
+// decision reads costs, llm and rate_limit together — see costs.GovernanceFrom.
+func (s *Server) applyGovernanceLive(next *config.Config) {
+	if s == nil || s.costGovernor == nil || next == nil {
+		return
+	}
+	s.costGovernor.SetGovernance(costs.GovernanceFrom(next))
+}
+
+// applySearchLive pushes the web_search settings into the engine.
+//
+// The setter has existed since the engine was wired and had exactly one
+// caller, at boot. Editing search.provider or search.api_key through the API
+// wrote the file, updated the config the settings page reads, and left the
+// engine running the old provider.
+func (s *Server) applySearchLive(next config.SearchConfig) {
+	if s == nil || s.engine == nil {
+		return
+	}
+	s.engine.SetSearchConfig(next.Provider, next.APIKey)
+	if raw := strings.TrimSpace(next.Timeout); raw != "" {
+		if timeout, ok := runtime.ParseSearchTimeout(raw); ok {
+			s.engine.SetSearchTimeout(timeout)
+		}
+	}
+}
+
+// applySecurityLive pushes the workspace intent-gate default into the engine.
+func (s *Server) applySecurityLive(next config.SecurityConfig) {
+	if s == nil || s.engine == nil {
+		return
+	}
+	s.engine.SetIntentGateDefault(next.IntentGate)
+}
+
+// applyRateLimitLive swaps the live limits.
+//
+// The counter BACKEND is deliberately not swapped — see
+// ratelimit.Manager.SetConfig. Changing memory↔redis live would discard every
+// in-flight window, which hands out a free burst at exactly the moment
+// somebody is trying to tighten a limit.
+func (s *Server) applyRateLimitLive(next config.RateLimitConfig) {
+	if s == nil || s.rateLimiter == nil {
+		return
+	}
+	s.rateLimiter.SetConfig(ratelimit.Config{
+		Enabled:           next.Enabled,
+		PerUserRPM:        next.PerUserRPM,
+		PerAgentRPM:       next.PerAgentRPM,
+		PerUserTokensDay:  next.PerUserTokensDay,
+		PerAgentTokensDay: next.PerAgentTokensDay,
+	})
+}
+
+// applyChannelsLive reconciles every channel whose configuration changed.
+//
+// Driven from the union of the two configs so a channel REMOVED from the file
+// is stopped, not just one that changed. A reload that only walked the new
+// config would leave a deleted channel connected — which is the same
+// half-a-hot-path failure the provider deletion had, and it looks identical
+// from the outside: the operator removes it, the UI stops showing it, and the
+// bot keeps answering.
+func (s *Server) applyChannelsLive(previous, next map[string]map[string]any) {
+	if s == nil || s.applyChannel == nil {
+		return
+	}
+	ids := map[string]bool{}
+	for id := range previous {
+		ids[id] = true
+	}
+	for id := range next {
+		ids[id] = true
+	}
+	for id := range ids {
+		if sameChannelConfig(previous[id], next[id]) {
+			// Skipped because applying is not free: it stops and restarts a
+			// live connection. A file watcher fires on every write, and
+			// bouncing every channel because somebody edited a log level
+			// would make config edits an outage of their own.
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), channelApplyTimeout)
+		if err := s.applyChannel(ctx, id, previous[id], next[id]); err != nil {
+			s.log.Warn("channel could not be fully applied after a config reload",
+				zap.String("channel", id), zap.Error(err))
+		}
+		cancel()
+	}
+}
+
+// sameChannelConfig reports whether two channel blocks are equivalent.
+//
+// Compared by their YAML rendering rather than with reflect.DeepEqual: the
+// blocks are map[string]any decoded from YAML, so two equal configs can hold
+// different concrete numeric types depending on how they were written, and
+// DeepEqual would report a change on every reload for a file nobody touched.
+func sameChannelConfig(a, b map[string]any) bool {
+	left, lerr := yaml.Marshal(a)
+	right, rerr := yaml.Marshal(b)
+	if lerr != nil || rerr != nil {
+		return false
+	}
+	return string(left) == string(right)
 }
 
 // writeRawConfig safely writes a map back to a YAML file.
@@ -835,7 +1051,7 @@ func getOrCreateMap(parent map[string]any, key string) map[string]any {
 // handleGetLogs returns the last N lines from the configured log file.
 // Query params: lines=500, filter=<substring>
 func (s *Server) handleGetLogs(c *fiber.Ctx) error {
-	logPath := s.cfg.Log.File
+	logPath := s.config().Log.File
 	if logPath == "" {
 		return c.JSON(fiber.Map{
 			"lines":  []string{},
@@ -896,4 +1112,21 @@ func tailFile(path string, maxLines int, filter string) ([]string, error) {
 		return all, nil
 	}
 	return all[len(all)-maxLines:], nil
+}
+
+// secretsOverlayer restores vault-backed values into a freshly loaded config.
+//
+// An interface rather than *secrets.Manager so the gateway does not gain a
+// dependency on the vault package for one call, and so a deployment with no
+// vault is a nil field rather than a special case inside ReloadConfig.
+type secretsOverlayer interface {
+	Overlay(ctx context.Context, cfg *config.Config) int
+}
+
+// SetSecretsOverlay installs the vault overlay used after a config reload.
+func (s *Server) SetSecretsOverlay(overlay secretsOverlayer) {
+	if s == nil {
+		return
+	}
+	s.secrets = overlay
 }

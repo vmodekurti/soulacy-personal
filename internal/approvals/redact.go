@@ -2,7 +2,8 @@ package approvals
 
 import (
 	"fmt"
-	"strings"
+
+	"github.com/soulacy/soulacy/internal/redact"
 )
 
 // redact.go — what an approver is shown.
@@ -39,7 +40,7 @@ func Redact(args map[string]any) map[string]any {
 	}
 	out := make(map[string]any, len(args))
 	for key, value := range args {
-		if looksCredentialish(key) {
+		if redact.SecretKeyName(key) {
 			out[key] = "[redacted]"
 			continue
 		}
@@ -83,34 +84,7 @@ func truncate(s string) string {
 	return string(runes[:maxShownRunes]) + fmt.Sprintf("… [%d more characters]", len(runes)-maxShownRunes)
 }
 
-// credentialish are substrings that make a key name suspicious. Matching is on
-// the NORMALISED key (lowercased, separators stripped) so `X-Api-Key`,
-// `x_api_key` and `apiKey` are one case rather than three.
-//
-// This list makes the redactor stricter, never more permissive: a key it does
-// not recognise is still length-limited. It exists so that a short credential
-// — and most are short — is elided rather than shown in full.
-var credentialish = []string{
-	"password", "passwd", "secret", "token", "apikey", "accesskey", "privatekey",
-	"credential", "authorization", "auth", "bearer", "cookie", "session",
-	"signature", "certificate", "passphrase", "pin", "otp", "seed", "mnemonic",
-}
-
-func looksCredentialish(key string) bool {
-	normalised := strings.Map(func(r rune) rune {
-		switch {
-		case r >= 'A' && r <= 'Z':
-			return r + ('a' - 'A')
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			return r
-		default:
-			return -1
-		}
-	}, key)
-	for _, needle := range credentialish {
-		if strings.Contains(normalised, needle) {
-			return true
-		}
-	}
-	return false
-}
+// The key-name test lives in internal/redact, shared with every other
+// redactor in the repo. What stays here is the SHAPE rule — short scalars
+// shown, long ones summarised — which is specific to what an approver reads
+// and is not a credential test at all.

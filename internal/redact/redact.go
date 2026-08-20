@@ -17,7 +17,10 @@ const Marker = "[REDACTED]"
 const maxDepth = 16
 
 var (
-	secretKey  = regexp.MustCompile(`(?i)(api[_-]?key|password|passwd|secret|token|credential|authorization|private[_-]?key|signing[_-]?key|dsn|database[_-]?url|connection[_-]?string|cookie)`)
+	// The key-name test now lives in keyname.go, shared by every redactor in
+	// the repo. The regexes below still handle VALUE shapes — an assignment or
+	// a bearer header inside free text — which is a different question from
+	// what a key is called.
 	assignment = regexp.MustCompile(`(?i)\b(api[_-]?key|password|passwd|secret|token|authorization|credential)=([^\s&;,]+)`)
 	bearer     = regexp.MustCompile(`(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]+`)
 )
@@ -53,7 +56,7 @@ func walk(v any, key string, wholesale bool, depth int) any {
 	if depth >= maxDepth {
 		return Marker
 	}
-	if wholesale || secretKey.MatchString(key) {
+	if wholesale || SecretKeyName(key) {
 		return redactLeaves(v, depth+1)
 	}
 	switch x := v.(type) {

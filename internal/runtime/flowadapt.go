@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/soulacy/soulacy/internal/llm"
+	"github.com/soulacy/soulacy/internal/redact"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 	sdkr "github.com/soulacy/soulacy/sdk/reasoning"
@@ -474,14 +475,16 @@ func summarizeFlowRepairValue(key string, value any, depth int) any {
 	}
 }
 
+// isSensitiveFlowRepairKey reports whether a flow-repair argument name holds
+// credential material, and so must not reach the repair prompt.
+//
+// THIS IS THE MOST EXPOSED OF THE FOUR CALL SITES that used to keep their own
+// list: everything it lets through is sent to a model, i.e. off the machine.
+// Its private list knew about `cookie` and `private_key` but not `passphrase`,
+// `bearer`, `accesskey` or `signing_key` — a node argument named
+// `bearer_header` was rendered verbatim into an outbound prompt.
 func isSensitiveFlowRepairKey(key string) bool {
-	k := strings.ToLower(strings.TrimSpace(key))
-	for _, marker := range []string{"password", "passwd", "secret", "token", "api_key", "apikey", "authorization", "cookie", "credential", "private_key"} {
-		if strings.Contains(k, marker) {
-			return true
-		}
-	}
-	return false
+	return redact.SecretKeyName(key)
 }
 
 // buildAdaptPrompt describes the node's job and hands the model the real input.
