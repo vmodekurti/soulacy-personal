@@ -20,7 +20,7 @@ import (
 func idempotentApp(t *testing.T, workspaceID string, handler fiber.Handler) (*fiber.App, *Server) {
 	t.Helper()
 	s := &Server{log: zap.NewNop(), idempotency: newIdempotencyStore()}
-	app := fiber.New(fiber.Config{DisableStartupMessage: true})
+	app := fiber.New(fiber.Config{DisableStartupMessage: true, Immutable: true})
 	app.Use(func(c *fiber.Ctx) error {
 		identity, err := requestctx.New(requestctx.Input{
 			Subject: "usr_a", OrganizationID: "org_a", WorkspaceID: workspaceID,
@@ -196,15 +196,15 @@ func TestExpiredRecordsAreReexecuted(t *testing.T) {
 	store.now = func() time.Time { return now }
 	key := store.key("ws_a", http.MethodPost, "/things", "key-1")
 
-	if _, found, err := store.begin(key, "hash", "req-1"); err != nil || found {
+	if _, found, err := store.begin(key, "ws_test", "hash", "req-1"); err != nil || found {
 		t.Fatalf("first begin: found=%v err=%v", found, err)
 	}
 	store.complete(key, http.StatusCreated, fiber.MIMEApplicationJSON, []byte(`{"ok":true}`))
-	if _, found, err := store.begin(key, "hash", "req-2"); err != nil || !found {
+	if _, found, err := store.begin(key, "ws_test", "hash", "req-2"); err != nil || !found {
 		t.Fatalf("a completed record should replay: found=%v err=%v", found, err)
 	}
 	now = now.Add(idempotencyTTL + time.Minute)
-	if _, found, err := store.begin(key, "hash", "req-3"); err != nil || found {
+	if _, found, err := store.begin(key, "ws_test", "hash", "req-3"); err != nil || found {
 		t.Fatalf("an expired record should not replay: found=%v err=%v", found, err)
 	}
 }
@@ -212,10 +212,10 @@ func TestExpiredRecordsAreReexecuted(t *testing.T) {
 func TestConcurrentDuplicateIsRefusedWhileInFlight(t *testing.T) {
 	store := newIdempotencyStore()
 	key := store.key("ws_a", http.MethodPost, "/things", "key-1")
-	if _, _, err := store.begin(key, "hash", "req-1"); err != nil {
+	if _, _, err := store.begin(key, "ws_test", "hash", "req-1"); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := store.begin(key, "hash", "req-2")
+	_, _, err := store.begin(key, "ws_test", "hash", "req-2")
 	var typed *apiversion.IncompatibleError
 	if !asIncompatible(err, &typed) || typed.Code != apiversion.CodeIdempotencyBusy {
 		t.Fatalf("expected idempotency_key_in_flight, got %v", err)
@@ -227,11 +227,11 @@ func TestConcurrentDuplicateIsRefusedWhileInFlight(t *testing.T) {
 func TestAbandonedReservationsAreReleased(t *testing.T) {
 	store := newIdempotencyStore()
 	key := store.key("ws_a", http.MethodPost, "/things", "key-1")
-	if _, _, err := store.begin(key, "hash", "req-1"); err != nil {
+	if _, _, err := store.begin(key, "ws_test", "hash", "req-1"); err != nil {
 		t.Fatal(err)
 	}
 	store.abandon(key)
-	if _, found, err := store.begin(key, "hash", "req-2"); err != nil || found {
+	if _, found, err := store.begin(key, "ws_test", "hash", "req-2"); err != nil || found {
 		t.Fatalf("key stayed locked after abandonment: found=%v err=%v", found, err)
 	}
 }
@@ -243,7 +243,7 @@ func TestAbandonedReservationsAreReleased(t *testing.T) {
 func etagApp(t *testing.T, current func() any) *fiber.App {
 	t.Helper()
 	s := &Server{log: zap.NewNop()}
-	app := fiber.New(fiber.Config{DisableStartupMessage: true})
+	app := fiber.New(fiber.Config{DisableStartupMessage: true, Immutable: true})
 	app.Get("/thing", func(c *fiber.Ctx) error {
 		value := current()
 		c.Set(fiber.HeaderETag, resourceETag(value))

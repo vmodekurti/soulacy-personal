@@ -43,6 +43,12 @@ type idempotencyStore struct {
 	mu      sync.Mutex
 	records map[string]*idempotencyRecord
 	now     func() time.Time
+	// durable, when set, replaces the map entirely rather than layering over
+	// it. Two sources of truth for "has this key been used" is the one thing
+	// this must not have: a key reserved in memory and absent from the table
+	// (or the reverse) is a mutation that either runs twice or never runs, and
+	// which one you get depends on process lifetime.
+	durable *IdempotencyCache
 }
 
 func newIdempotencyStore() *idempotencyStore {
@@ -72,7 +78,10 @@ func (s *idempotencyStore) evictLocked() {
 // begin reserves a key. It returns a replayable record when the same request
 // already completed, and reports inFlight when an identical request is still
 // running — a concurrent duplicate must not be executed twice.
-func (s *idempotencyStore) begin(key, requestHash, requestID string) (*idempotencyRecord, bool, error) {
+func (s *idempotencyStore) begin(key, workspaceID, requestHash, requestID string) (*idempotencyRecord, bool, error) {
+	if s.durable != nil {
+		return s.durable.begin(key, workspaceID, requestHash, requestID)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if existing, ok := s.records[key]; ok {
@@ -103,6 +112,10 @@ func (s *idempotencyStore) begin(key, requestHash, requestID string) (*idempoten
 }
 
 func (s *idempotencyStore) complete(key string, status int, contentType string, body []byte) {
+	if s.durable != nil {
+		s.durable.complete(key, status, contentType, body)
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	record, ok := s.records[key]
@@ -123,6 +136,10 @@ func (s *idempotencyStore) complete(key string, status int, contentType string, 
 
 // abandon releases a reservation whose handler never produced a response.
 func (s *idempotencyStore) abandon(key string) {
+	if s.durable != nil {
+		s.durable.abandon(key)
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if record, ok := s.records[key]; ok && record.inFlight {
@@ -156,7 +173,7 @@ func (s *Server) idempotencyMW() fiber.Handler {
 		key := s.idempotency.key(workspaceID, c.Method(), route, clientKey)
 		requestID := localString(c.Locals("request_id"))
 
-		replay, found, err := s.idempotency.begin(key, hex.EncodeToString(bodySum[:]), requestID)
+		replay, found, err := s.idempotency.begin(key, workspaceID, hex.EncodeToString(bodySum[:]), requestID)
 		if err != nil {
 			var typed *apiversion.IncompatibleError
 			if ok := asIncompatible(err, &typed); ok {
@@ -194,7 +211,20 @@ func asIncompatible(err error, target **apiversion.IncompatibleError) bool {
 // resourceETag derives a strong validator from a resource's current state.
 // Hashing the representation means callers do not have to thread a version
 // column through every store before optimistic concurrency works.
+//
+// An agent definition delegates to agent.Definition.ContentVersion rather than
+// re-deriving the same hash here. The two derivations were byte-identical by
+// coincidence, and a definition with two identities that happen to agree is
+// one refactor away from a run record and an ETag disagreeing about which
+// version something is — the failure being that "the version I edited" and
+// "the version that ran" stop being comparable, silently.
 func resourceETag(value any) string {
+	if def, ok := value.(*agent.Definition); ok {
+		if version := def.ContentVersion(); version != "" {
+			return `"` + version + `"`
+		}
+		return ""
+	}
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return ""
@@ -248,7 +278,7 @@ func (s *Server) checkIfMatch(c *fiber.Ctx, current any) (rejected bool, err err
 		})
 	default:
 		conflict := concurrency.NewConflict(
-			resourceLabel(c), supplied, etag, lastModifiedBy(current), lastModifiedAt(current))
+			resourceLabel(c), supplied, etag, s.lastEditorOf(c, current), lastModifiedAt(current))
 		return true, c.Status(fiber.StatusConflict).JSON(fiber.Map{
 			"error":            conflict.Message,
 			"code":             apiversion.CodeStaleWrite,
@@ -289,18 +319,33 @@ func resourceLabel(c *fiber.Ctx) string {
 	return "this resource"
 }
 
-// lastModifiedBy names the other actor, so the loser of a conflict learns who
-// to talk to (MU-028 criterion 5).
+// lastEditorOf names the other actor, so the loser of a conflict learns who to
+// talk to (MU-028 criterion 5).
 //
-// Empty today, and deliberately not faked. agent.Definition carries no
-// last-editor field: the actor is passed to Loader.UpsertInWorkspace and
-// recorded in the audit trail, which is a separate lookup this synchronous
-// path should not take on every conflict. Conflict handles the unattributed
-// case — the message reads "changed since you loaded it" rather than naming
-// nobody — so the gap degrades the message rather than producing a wrong one.
-// Closing it means reading the agent audit history here, which belongs with
-// the rest of criterion 5.
-func lastModifiedBy(current any) string { return "" }
+// agent.Definition still carries no last-editor field, and adding one would
+// put provenance inside the document a user edits — where a raw YAML save can
+// rewrite it, which is the one thing an attribution must not allow. The answer
+// already existed beside the definition instead of inside it: every overwrite
+// snapshots the outgoing bytes into the agent's version history stamped with
+// the principal doing the overwriting, so the newest snapshot names the author
+// of what is live now.
+//
+// This is only reached on the conflict branch. A 409 is rare by construction —
+// it means two people were editing the same agent — so a directory read there
+// buys an actionable message for a cost nobody pays on the success path. Doing
+// it on every write, which is what the earlier note assumed, would have been
+// the wrong trade.
+//
+// Resolved through s.agents(c) so the workspace comes from the verified
+// request rather than from the agent ID, which is unique only within a
+// workspace.
+func (s *Server) lastEditorOf(c *fiber.Ctx, current any) string {
+	def, ok := current.(*agent.Definition)
+	if !ok || def == nil || def.ID == "" || c == nil {
+		return ""
+	}
+	return s.agents(c).LastEditor(def.ID)
+}
 
 func lastModifiedAt(current any) string {
 	if def, ok := current.(*agent.Definition); ok && def != nil && !def.LoadedAt.IsZero() {
