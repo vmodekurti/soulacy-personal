@@ -446,6 +446,26 @@ func (e *Engine) IsSystemAgentAllowed(def *agent.Definition) bool {
 	return false
 }
 
+// SetManagedInstallExempt controls whether package_install stays available to
+// the built-in System agent when arbitrary shell access is disabled.
+//
+// The exemption exists so a single-user operator has a safe install path
+// without enabling shell_exec, and in that setting it is right. In a
+// multi-user deployment it is not: package_install runs the installer OUTSIDE
+// the privileged-command sandbox (it needs network and must persist), and it
+// writes the deployment-wide config and a process-global install directory.
+// Those are operator actions, and the System agent is only present in
+// multi-user at all under an explicit acknowledgement — which restores a chat
+// agent, not the right to rewrite the deployment.
+//
+// Withdrawing the exemption does not remove the tool. It puts it back behind
+// runtime.allow_system_agents, so an operator who genuinely wants it there
+// says so a second time, deliberately.
+//
+// A boolean, not a deployment mode: internal/runtime knows nothing about
+// modes and is better for it.
+func (e *Engine) SetManagedInstallExempt(exempt bool) { e.managedInstallExempt = exempt }
+
 // systemToolsFor returns the OS-level built-ins this agent may use. The SAFE
 // partition is always included; the privileged SYSTEM partition is added only
 // when the server permits system tools for this agent AND the agent has the "system"
@@ -463,7 +483,7 @@ func (e *Engine) systemToolsFor(def *agent.Definition) []BuiltinTool {
 		// agent even when arbitrary shell access is disabled server-wide. This
 		// gives operators a safe install path without requiring them to enable
 		// shell_exec, write_file, or other unrestricted host capabilities.
-		managedInstall := b.Name == "package_install" && def != nil &&
+		managedInstall := e.managedInstallExempt && b.Name == "package_install" && def != nil &&
 			def.ID == SystemAgentID && def.HasCapability("system")
 		if isPrivilegedSystemTool(b.Name) && !allowPrivileged && !managedInstall {
 			continue

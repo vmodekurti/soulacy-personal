@@ -480,7 +480,12 @@ func TestAllToolSchemasSystemToolsRequireDoubleOptInAndHTTP(t *testing.T) {
 }
 
 func TestSystemAgentGetsManagedPackageInstallerWithoutArbitrarySystemTools(t *testing.T) {
-	e := &Engine{allowSystemAgents: nil}
+	// managedInstallExempt is stated rather than assumed: it defaults to false
+	// on a zero-valued Engine because it GRANTS a tool, and a grant that
+	// switches itself on when somebody forgets to configure it is the wrong
+	// default. NewEngine sets it true for real installations; the multi-user
+	// wiring sets it back to false.
+	e := &Engine{allowSystemAgents: nil, managedInstallExempt: true}
 	e.builtins = e.buildBuiltins()
 
 	names := toolSchemaNameSet(e.allToolSchemas(builtinSystemAgent(), "http"))
