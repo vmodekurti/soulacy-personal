@@ -119,6 +119,16 @@ func MigrateSchema(db *sql.DB, component string, migrations []SchemaMigration) (
 				"sqlitex: %s v%d is destructive (DROP/RENAME) — additive-only by default; set Destructive for a deliberate deprecation cycle",
 				component, m.Version)
 		}
+		if m.Destructive {
+			// MU-035 criterion 4. The backup happens OUTSIDE the migration's
+			// transaction, and before it: VACUUM INTO cannot run inside one,
+			// and a snapshot taken after the DROP would be a snapshot of the
+			// damage. A failure here aborts the migration — see
+			// backupBeforeDestructive for why there is no best-effort path.
+			if _, err := backupBeforeDestructive(db, component, m.Version); err != nil {
+				return applied, err
+			}
+		}
 		tx, err := db.Begin()
 		if err != nil {
 			return applied, fmt.Errorf("sqlitex: begin %s v%d: %w", component, m.Version, err)

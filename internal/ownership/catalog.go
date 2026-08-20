@@ -89,7 +89,7 @@ var Resources = []Resource{
 	// the permission the paused call requires, and to nobody else, in this or
 	// any other workspace.
 	{Name: "approvals", Class: WorkspaceOwned, ScopeKey: "workspace_id + required permission", Retention: "audit retention policy", Export: "audit export", Deletion: "retention purge", Backup: "workspace database"},
-	{Name: "knowledge", Class: WorkspaceOwned, ScopeKey: "workspace_id", Retention: "until KB/document deletion", Export: "source documents and manifest", Deletion: "document, chunks, embeddings, jobs", Backup: "workspace database and objects"},
+	{Name: "knowledge", Class: WorkspaceOwned, ScopeKey: "workspace_id", Retention: "until KB/document deletion", Export: "source documents and manifest", Deletion: "purge document, chunks, embeddings, and ingest jobs", Backup: "workspace database and objects"},
 	{Name: "vectors", Class: WorkspaceOwned, ScopeKey: "workspace_id", Retention: "follows source resource", Export: "regenerable metadata", Deletion: "with source resource", Backup: "optional; rebuild from sources"},
 	{Name: "artifacts", Class: WorkspaceOwned, ScopeKey: "workspace_id", Retention: "artifact retention policy", Export: "artifact download", Deletion: "metadata and object purge", Backup: "object store and manifest"},
 	{Name: "workboard", Class: WorkspaceOwned, ScopeKey: "workspace_id", Retention: "until project deletion", Export: "JSON/CSV and artifacts", Deletion: "cascade task data", Backup: "workspace database and objects"},
@@ -116,6 +116,19 @@ var Resources = []Resource{
 	// while every SQL store was scoped: the discovery scan looks for CREATE
 	// TABLE and Store/Archive/Vault types and finds neither here. Declared
 	// explicitly so the same rule that governs a table governs it.
+	// A finished export is a complete copy of the workspace in one file,
+	// downloadable with nothing but its opaque id — which makes it the
+	// highest-value object this system produces, and the one most likely to
+	// outlive the data it copied. Classified WorkspaceOwned rather than
+	// Ephemeral despite its TTL: ephemeral would leave it out of the DELETION
+	// plan, and an archive surviving a workspace deletion is exactly the
+	// leftover full copy that matters most.
+	// The limits a workspace has set on ITSELF (MU-030 criterion 1). Workspace
+	// data rather than deployment configuration, because a workspace owner
+	// writes it and it goes with the workspace — the operator's YAML ceilings
+	// live in config.yaml and outlive every tenant.
+	{Name: "workspace-policy", Class: WorkspaceOwned, ScopeKey: "workspace_id (primary key)", Retention: "until changed or the workspace is deleted", Export: "the workspace's own limits; no deployment configuration", Deletion: "purge the workspace's policy row", Backup: "workspace database"},
+	{Name: "workspace-exports", Class: WorkspaceOwned, ScopeKey: "workspace_id (directory namespace)", Retention: "72h download window then purge", Export: "not re-exported; an archive is never nested inside a later one, and the manifest says so by name", Deletion: "purge archives and job records with the workspace", Backup: "none; an export is regenerable from the workspace it copied"},
 	{Name: "workspace-files", Class: WorkspaceOwned, ScopeKey: "workspace_id (directory namespace)", Retention: "until deleted by the workspace", Export: "file download and archive", Deletion: "workspace tree removal", Backup: "filesystem or volume backup"},
 }
 
@@ -137,6 +150,7 @@ var Tables = []Table{
 	{Source: "internal/costs/store.go", Name: "cost_reconciliations", Resource: "costs", Class: PlatformGlobal, ScopeKey: "provider invoice period", CompositeUniqueness: true, Isolation: PersonalOnly, IsolationTest: "internal/ownership/catalog_test.go"},
 	{Source: "internal/costs/store.go", Name: "cost_reservations", Resource: "costs", Class: WorkspaceOwned, ScopeKey: "workspace_id (column: workspace)", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/costs/workspace_test.go"},
 	{Source: "internal/costs/store.go", Name: "token_usage", Resource: "costs", Class: WorkspaceOwned, ScopeKey: "workspace_id (column: workspace)", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/costs/workspace_test.go"},
+	{Source: "internal/credentials/envelope.go", Name: "workspace_data_keys", Resource: "secrets", Class: WorkspaceOwned, ScopeKey: "workspace_id,version", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/credentials/envelope_test.go"},
 	{Source: "internal/credentials/rotation.go", Name: "credential_versions", Resource: "secrets", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/credentials/workspace_test.go"},
 	{Source: "internal/credentials/vault.go", Name: "credentials", Resource: "secrets", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/credentials/workspace_test.go"},
 	{Source: "internal/knowledge/jobs.go", Name: "ingest_jobs", Resource: "knowledge", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/knowledge/workspace_test.go"},
@@ -148,6 +162,9 @@ var Tables = []Table{
 	{Source: "internal/pluginmigrate/runner.go", Name: "plugin_schema_migrations", Resource: "schema-metadata", Class: PlatformGlobal, ScopeKey: "none", Isolation: Scoped, IsolationTest: "internal/pluginmigrate/runner_test.go"},
 	{Source: "internal/schedules/store.go", Name: "agent_schedules", Resource: "schedules", Class: WorkspaceOwned, ScopeKey: "workspace_id,id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/schedules/store_test.go"},
 	{Source: "internal/schedules/store.go", Name: "schedule_occurrences", Resource: "schedules", Class: WorkspaceOwned, ScopeKey: "workspace_id,schedule_id,occurrence_key", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/schedules/store_test.go"},
+	{Source: "internal/workspacepolicy/store.go", Name: "workspace_policies", Resource: "workspace-policy", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/workspacepolicy/store_test.go"},
+	{Source: "internal/mcpstore/store.go", Name: "workspace_mcp_servers", Resource: "mcp", Class: WorkspaceOwned, ScopeKey: "workspace_id,id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/mcpstore/store_test.go"},
+	{Source: "internal/gateway/idempotency_durable.go", Name: "idempotency_records", Resource: "idempotency", Class: WorkspaceOwned, ScopeKey: "key (sha256 of workspace_id,method,route,client key)", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/gateway/idempotency_durable_test.go"},
 	{Source: "internal/runs/store.go", Name: "agent_runs", Resource: "runs", Class: WorkspaceOwned, ScopeKey: "workspace_id,id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/runs/store_test.go"},
 	{Source: "internal/queue/dlq/dlq.go", Name: "dead_letters", Resource: "queue-dlq", Class: WorkspaceOwned, ScopeKey: "workspace_id,id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/queue/dlq/isolation_test.go"},
 	{Source: "internal/rbac/store.go", Name: "rbac_agent_grants", Resource: "agents", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/rbac/workspace_test.go"},
@@ -156,6 +173,13 @@ var Tables = []Table{
 	{Source: "internal/session/ownership.go", Name: "session_owners", Resource: "sessions", Class: UserPrivate, ScopeKey: "workspace_id,creator", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/session/ownership_test.go"},
 	{Source: "internal/session/store.go", Name: "session_resources", Resource: "sessions", Class: UserPrivate, ScopeKey: "workspace_id,user_id via session ownership", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/session/resources_workspace_test.go"},
 	{Source: "internal/sqlitex/schemaversion.go", Name: "soulacy_schema_version", Resource: "schema-metadata", Class: PlatformGlobal, ScopeKey: "none", Isolation: Scoped, IsolationTest: "internal/sqlitex/schemaversion_test.go"},
+	// Platform-global for the same reason as the version table: a schema
+	// migration is a property of the installation, not of a tenant. The rows
+	// name a component, a version and a file path — no workspace appears in
+	// them, and the snapshot itself is a copy of a whole database file that
+	// spans every tenant in it. Which is exactly why the endpoint that reads
+	// it is gated to owners and admins rather than scoped per workspace.
+	{Source: "internal/sqlitex/backupgate.go", Name: "soulacy_schema_backups", Resource: "schema-metadata", Class: PlatformGlobal, ScopeKey: "none", Isolation: Scoped, IsolationTest: "internal/sqlitex/backupgate_test.go"},
 	{Source: "internal/storage/postgres/postgres.go", Name: "agent_events", Resource: "events", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/storage/postgres/workspace_test.go"},
 	{Source: "internal/storage/postgres/postgres.go", Name: "memories", Resource: "memory", Class: UserPrivate, ScopeKey: "workspace_id,user_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/memory/workspace_test.go"},
 	{Source: "internal/studio/lessons.go", Name: "lesson_meta", Resource: "studio-learning", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/gateway/studio_scope_test.go"},
@@ -193,8 +217,21 @@ var Repositories = []Repository{
 	{Source: "internal/costs/store.go", Resource: "costs", Class: WorkspaceOwned, ScopeKey: "workspace_id (column: workspace)", Isolation: Scoped, IsolationTest: "internal/costs/workspace_test.go"},
 	{Source: "internal/credentials/rotation.go", Resource: "secrets", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/credentials/workspace_test.go"},
 	{Source: "internal/credentials/vault.go", Resource: "secrets", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/credentials/workspace_test.go"},
-	{Source: "internal/gateway/idempotency.go", Resource: "idempotency", Class: Ephemeral, ScopeKey: "workspace_id,method,route", Isolation: Scoped, IsolationTest: "internal/gateway/idempotency_test.go"},
+	// Durable now (idempotency_durable.go). The key is a hash of
+	// (workspace, method, route, client key), so a tenant's key cannot collide
+	// with another's by construction; workspace_id is stored alongside it,
+	// redundantly, because a deleted workspace's records must be removable and
+	// a hash cannot be searched by tenant.
+	{Source: "internal/gateway/idempotency.go", Resource: "idempotency", Class: WorkspaceOwned, ScopeKey: "workspace_id (key is a hash including it)", Isolation: Scoped, IsolationTest: "internal/gateway/idempotency_durable_test.go"},
 	{Source: "internal/gateway/chat_attachments.go", Resource: "artifacts", Class: UserPrivate, ScopeKey: "workspace_id,user_id via session ownership", Isolation: Scoped, IsolationTest: "internal/session/resources_workspace_test.go"},
+	{Source: "internal/workspacepolicy/store.go", Resource: "workspace-policy", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/workspacepolicy/store_test.go"},
+	{Source: "internal/mcpstore/store.go", Resource: "mcp", Class: WorkspaceOwned, ScopeKey: "workspace_id,id", Isolation: Scoped, IsolationTest: "internal/mcpstore/store_test.go"},
+	// The pool is not persistence. It holds live subprocesses and an interface
+	// to the durable store above; the discovery scan matches it on the
+	// ServerStore name, and classifying it honestly is better than renaming
+	// the type to slip past the scan.
+	{Source: "internal/mcp/pool.go", Resource: "mcp", Class: Ephemeral, ScopeKey: "workspace_id (map key)", Isolation: Scoped, IsolationTest: "internal/mcp/tenantcreds_test.go"},
+	{Source: "internal/workspaceexport/job.go", Resource: "workspace-exports", Class: WorkspaceOwned, ScopeKey: "workspace_id (directory namespace)", Isolation: Scoped, IsolationTest: "internal/workspaceexport/export_test.go"},
 	{Source: "internal/knowledge/store.go", Resource: "knowledge", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/knowledge/workspace_test.go"},
 	{Source: "internal/learning/store.go", Resource: "studio-learning", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/learning/workspace_test.go"},
 	{Source: "internal/memory/sqlite.go", Resource: "memory", Class: UserPrivate, ScopeKey: "workspace_id,user_id", Isolation: Scoped, IsolationTest: "internal/memory/workspace_test.go"},
