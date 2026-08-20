@@ -177,8 +177,12 @@ func (s *Server) lookupPluginToken(bearer string) (string, bool) {
 // plugin principal (Subject "plugin:<id>"); everything else flows through
 // the user auth middleware unchanged.
 func (s *Server) authWithPluginTokens() fiber.Handler {
-	inner := s.authHandler()
 	return func(c *fiber.Ctx) error {
+		// Resolved per request via authStack, NOT captured here. This function
+		// is called from buildApp, which runs inside New() — before SetAuth.
+		// Capturing bound every authenticated route to the legacy static-key
+		// fallback for the life of the process. See authStack in latewiring.go.
+		inner := s.authStack()
 		bearer := strings.TrimPrefix(c.Get("Authorization"), "Bearer ")
 		if id, ok := s.lookupPluginToken(bearer); ok {
 			auth.SetClaims(c, &auth.Claims{

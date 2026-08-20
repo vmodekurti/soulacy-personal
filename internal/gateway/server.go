@@ -161,9 +161,14 @@ type Server struct {
 	// secrets re-overlays vault-backed values after a config reload. Without
 	// it every reload blanks the provider keys and channel tokens in the
 	// in-memory config — see ReloadConfig.
-	secrets         secretsOverlayer
-	hub             *EventHub
-	authEngine      *auth.Engine       // nil until SetAuth() is called
+	secrets    secretsOverlayer
+	hub        *EventHub
+	authEngine *auth.Engine // nil until SetAuth() is called
+	// authStackCache memoises the resolved request-authentication middleware.
+	// See authStack in latewiring.go: it cannot be resolved at buildApp time
+	// because SetAuth runs afterwards, and it must not be resolved per
+	// request because the legacy fallback logs a warning when it resolves.
+	authStackCache  atomic.Pointer[fiber.Handler]
 	rbacManager     *rbac.Manager      // nil until SetRBAC() is called
 	credVault       credentials.Vault  // nil until SetCredentialVault() is called
 	builderRegistry *builder.Registry  // nil until SetBuilderRegistry() is called
@@ -377,6 +382,11 @@ func (s *Server) errMsg(c *fiber.Ctx, status int, msg string) error {
 // static-key check using s.config().Server.APIKey (identical to Phase 2 behaviour).
 func (s *Server) SetAuth(e *auth.Engine) {
 	s.authEngine = e
+	// Drop the memoised auth stack. Not a sync.Once: the wiring may install
+	// the engine after the first request has already been served (embedders
+	// and newTestGateway both do), and a Once would pin the legacy
+	// static-key fallback for the life of the process.
+	s.authStackCache.Store(nil)
 	if e == nil {
 		return
 	}

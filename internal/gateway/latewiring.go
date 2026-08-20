@@ -59,3 +59,44 @@ func (s *Server) requireRBACManager(pick func(*Server) fiber.Handler) fiber.Hand
 		return pick(s)(c)
 	}
 }
+
+// authStack resolves the request-authentication middleware LAZILY, on the
+// first request, instead of when buildApp assembles the router.
+//
+// THE SECOND HALF OF THE SAME BUG. Registering the auth routes
+// unconditionally (above) fixed obtaining a credential. It did not fix using
+// one. `api := app.Group("/api/v1", s.authWithPluginTokens(), …)` runs inside
+// buildApp, and authWithPluginTokens captured `inner := s.authHandler()` —
+// which reads s.authEngine, still nil at that instant. So every authenticated
+// route in the deployment was guarded by legacyAuthMiddleware forever, and the
+// engine's JWT, OIDC and managed sk_ key verification never ran on any
+// request. A team-mode user could complete the token exchange and then be
+// refused by every call they made with the token they had just been issued.
+//
+// Worse where server.api_key is unset, which is the normal shape of an
+// SSO-only team deployment: legacyAuthMiddleware then returns a pass-through
+// that calls c.Next() with NO claims at all. The request is not rejected — it
+// arrives at workspaceContextMW unauthenticated, and what the operator sees is
+// an unexplained failure rather than a login failure.
+//
+// Memoised rather than resolved per request because the nil-engine branch of
+// legacyAuthMiddleware logs a warning as it resolves; per-request resolution
+// would turn that one honest warning into a line per request. Memoised in an
+// atomic.Pointer rather than a sync.Once because SetAuth must be able to
+// invalidate it — see SetAuth, which stores nil.
+func (s *Server) authStack() fiber.Handler {
+	if h := s.authStackCache.Load(); h != nil {
+		return *h
+	}
+	h := s.authHandler()
+	// CompareAndSwap, not Store: a concurrent first request may already have
+	// resolved and published one, and two live copies of the legacy fallback
+	// would mean two warnings. Losing the race is fine — reload and use the
+	// winner's, which is resolved from the same state.
+	if !s.authStackCache.CompareAndSwap(nil, &h) {
+		if won := s.authStackCache.Load(); won != nil {
+			return *won
+		}
+	}
+	return h
+}

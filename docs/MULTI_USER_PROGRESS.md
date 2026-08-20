@@ -5630,3 +5630,79 @@ Replaced with the same resolve-then-compare-exactly approach.
 
 The whole suite now runs green under both a real temp root and a symlinked
 one, which is the closest this container can get to proving the macOS path.
+
+---
+
+## Every authentication route was unregistered, in every deployment
+
+`buildApp` runs once, inside `New`. `SetAuth` and `SetRBAC` are called by the
+wiring afterwards and neither rebuilds the router. So everything inside
+`if s.authEngine != nil { … }` was registered against a nil engine — the token
+exchange, the refresh, the logout, all seven OIDC routes, `/auth/me`,
+`/auth/reauthenticate`, and the five RBAC management routes.
+
+An unregistered `/api/v1` path does not 404. It falls through to the
+authenticated group and answers `401 invalid or missing API key`. So the one
+thing you need in order to obtain a credential required a credential, and the
+error blamed the credential you did not have. That is why this survived: every
+symptom looked like a bad key.
+
+The fix is not to rebuild the router on each setter — that makes the route
+table a function of call order, the same class of bug with a longer fuse.
+Routes are registered unconditionally and refuse at request time when their
+dependency is absent, which is what every other conditional handler already
+does. `latewiring_test.go` asserts on `app.GetRoutes()` rather than on status
+codes, because a status-code assertion passes on the broken build: unregistered
+means 401, not 404.
+
+### The second half of it: obtaining a credential is not using one
+
+Registering the routes fixed sign-in and nothing after sign-in.
+`api := app.Group("/api/v1", s.authWithPluginTokens(), …)` also runs inside
+`buildApp`, and `authWithPluginTokens` captured `inner := s.authHandler()` —
+reading `s.authEngine`, still nil at that instant. Every authenticated route in
+every deployment was therefore guarded by `legacyAuthMiddleware` for the life
+of the process, and the engine's JWT, OIDC and managed `sk_` key verification
+never ran on any request. A team-mode user could complete the token exchange
+and then be refused by every call made with the token just issued.
+
+Worse where `server.api_key` is unset, which is the normal shape of an SSO-only
+team deployment: `legacyAuthMiddleware` then returns a pass-through that calls
+`c.Next()` with no claims at all. The request is not rejected — it arrives at
+`workspaceContextMW` unauthenticated, and the operator sees an unexplained
+failure rather than a login failure.
+
+Resolved lazily now, on the first request, and memoised — in an
+`atomic.Pointer` rather than a `sync.Once`, because `SetAuth` has to be able to
+invalidate it. Serving a single request during the window `New()` opens and
+`SetAuth` closes (a health probe, the GUI's `/ping` poll) would otherwise pin
+the legacy fallback permanently. Memoised rather than resolved per request
+because the nil-engine branch logs a warning as it resolves, and per-request
+resolution turns one honest warning into a line per request.
+
+The tests give the engine and the config **different** static keys. Handing
+both paths the same key is exactly how this hid: both accept it, so a passing
+test proves nothing about which one ran. Three guards, each mutation-verified —
+restoring the build-time capture fails two, dropping the `SetAuth`
+invalidation fails the third.
+
+---
+
+## Reconciling two bootstrap implementations
+
+Two agents built first-owner bootstrap independently. Theirs won on the
+property mine compromised on: one transaction, held by
+`pg_advisory_xact_lock`, with the audit record written inside it — which
+disproves the justification I had recorded for splitting mine into four writes.
+It also separates `Blocked` from `AlreadyBootstrapped`, exposes a state
+endpoint that drives `AdminSetup.svelte`, and reuses an existing user by
+normalised email.
+
+Mine's only advantage was issuing an `sk_` credential at the end, so a
+deployment without SSO can still finish setup. Theirs has no `apikeys`
+reference at all and requires SSO to complete. That is worth porting into their
+transaction later; it is not worth keeping a second implementation for.
+
+So: theirs as the base, my bootstrap commits dropped, my auth-route fix kept.
+Without the auth-route fix their bootstrap cannot function — the sign-in step
+it hands off to was one of the unregistered routes.

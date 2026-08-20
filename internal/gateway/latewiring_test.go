@@ -147,3 +147,104 @@ func TestTheRouteTableDoesNotDependOnSetterOrder(t *testing.T) {
 		}
 	}
 }
+
+// THE SECOND HALF OF THE BUG. Registering the auth routes unconditionally
+// fixed OBTAINING a credential. It did not fix USING one: the authenticated
+// group captured `inner := s.authHandler()` at buildApp time, when the engine
+// is still nil, so every authenticated route was guarded by the legacy
+// static-key middleware for the life of the process and the engine never saw a
+// request.
+//
+// The two keys are deliberately DIFFERENT. Giving the engine the same key the
+// config carries is exactly how this hid for so long: both paths accept it, so
+// a passing test proves nothing about which one ran. Here only the engine
+// knows "engine-key", so a 401 means the legacy middleware answered.
+func TestTheAuthEngineActuallyGuardsTheAuthenticatedRoutes(t *testing.T) {
+	s := newTestGateway(t, "config-key")
+	engine, err := auth.New(auth.Config{Mode: "jwt", JWTSecret: "0123456789abcdef0123456789abcdef"},
+		"engine-key", zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(engine.Close)
+	// Set AFTER construction, exactly as the wiring does.
+	s.SetAuth(engine)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents", http.NoBody)
+	req.Header.Set("Authorization", "Bearer engine-key")
+	resp, err := s.app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusUnauthorized {
+		t.Fatalf("GET /api/v1/agents with the ENGINE's key = 401; the legacy static-key "+
+			"middleware answered, so the engine — and with it every JWT, OIDC and sk_ "+
+			"credential this deployment issues — guards nothing (status %d)", resp.StatusCode)
+	}
+}
+
+// The converse, so the test above cannot pass by the route simply being open:
+// the config's key is not a credential once an engine is installed.
+func TestTheConfigKeyIsNotAnAuthorityOnceTheEngineIsWired(t *testing.T) {
+	s := newTestGateway(t, "config-key")
+	engine, err := auth.New(auth.Config{Mode: "jwt", JWTSecret: "0123456789abcdef0123456789abcdef"},
+		"engine-key", zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(engine.Close)
+	s.SetAuth(engine)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents", http.NoBody)
+	req.Header.Set("Authorization", "Bearer config-key")
+	resp, err := s.app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("GET /api/v1/agents with the CONFIG's key = %d, want 401. The engine is the "+
+			"authority; if config.Server.APIKey still admits requests, the legacy middleware "+
+			"is still in the chain", resp.StatusCode)
+	}
+}
+
+// The memoisation must be invalidated by SetAuth, which is why authStackCache
+// is an atomic.Pointer and not a sync.Once. Serving one request before the
+// engine arrives is enough to pin the legacy fallback forever otherwise — and
+// health probes, the GUI's own /ping poll and any warm-up traffic all reach
+// the gateway during the window New() opens and SetAuth closes.
+func TestWiringTheEngineLateStillTakesEffect(t *testing.T) {
+	s := newTestGateway(t, "config-key")
+
+	// A request BEFORE the engine exists — this is what populates the cache.
+	warm := httptest.NewRequest(http.MethodGet, "/api/v1/agents", http.NoBody)
+	warm.Header.Set("Authorization", "Bearer config-key")
+	resp, err := s.app.Test(warm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+
+	engine, err := auth.New(auth.Config{Mode: "jwt", JWTSecret: "0123456789abcdef0123456789abcdef"},
+		"engine-key", zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(engine.Close)
+	s.SetAuth(engine)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents", http.NoBody)
+	req.Header.Set("Authorization", "Bearer engine-key")
+	after, err := s.app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = after.Body.Close() }()
+	if after.StatusCode == http.StatusUnauthorized {
+		t.Fatalf("the engine's key = 401 after SetAuth, because one earlier request had already "+
+			"memoised the legacy middleware. SetAuth must invalidate authStackCache (status %d)",
+			after.StatusCode)
+	}
+}
