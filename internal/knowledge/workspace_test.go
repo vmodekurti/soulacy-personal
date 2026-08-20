@@ -3,8 +3,13 @@
 package knowledge
 
 import (
+	"bytes"
+	"context"
+	"database/sql"
 	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/soulacy/soulacy/internal/wsroot"
@@ -232,6 +237,102 @@ func TestIngestionJobsAreScoped(t *testing.T) {
 	}
 	if len(theirs) != 0 {
 		t.Fatalf("another workspace saw the job: %+v", theirs)
+	}
+	if _, err := store.GetIngestForWorkspace("ws_b", job.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("another workspace read a job by id: %v", err)
+	}
+	got, err := store.GetIngestForWorkspace("ws_a", job.ID)
+	if err != nil || got.ID != job.ID {
+		t.Fatalf("owner could not read its job: %+v %v", got, err)
+	}
+}
+
+func TestWorkspaceKnowledgeExportAndPurgeAreCompleteAndIsolated(t *testing.T) {
+	store, _ := newWorkspaceStore(t)
+	a := makeKB(t, store, "ws_a", "docs")
+	b := makeKB(t, store, "ws_b", "docs")
+	if _, err := store.AddDocument(a, Document{Title: "A plans"}, []Chunk{{Content: "alpha private", Vector: []float32{1, 0, 0}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AddDocument(b, Document{Title: "B plans"}, []Chunk{{Content: "bravo private", Vector: []float32{0, 1, 0}}}); err != nil {
+		t.Fatal(err)
+	}
+
+	spoolRoot := t.TempDir()
+	spoolA, spoolB := filepath.Join(spoolRoot, "a.bin"), filepath.Join(spoolRoot, "b.bin")
+	if err := os.WriteFile(spoolA, []byte("a upload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(spoolB, []byte("b upload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, job := range []IngestJob{
+		{ID: "job-a", WorkspaceID: "ws_a", KBName: "docs", Title: "a", SpoolPath: spoolA},
+		{ID: "job-b", WorkspaceID: "ws_b", KBName: "docs", Title: "b", SpoolPath: spoolB},
+	} {
+		if _, err := store.EnqueueIngest(job); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var exported bytes.Buffer
+	count, err := store.ExportWorkspaceJSONL(context.Background(), "ws_a", &exported)
+	if err != nil || count == 0 {
+		t.Fatalf("export count=%d err=%v", count, err)
+	}
+	if !strings.Contains(exported.String(), "alpha private") || strings.Contains(exported.String(), "bravo private") {
+		t.Fatalf("knowledge export crossed its workspace boundary: %s", exported.String())
+	}
+	if strings.Contains(exported.String(), spoolA) {
+		t.Fatal("knowledge export disclosed an internal spool path")
+	}
+	var vectors bytes.Buffer
+	vectorCount, err := store.ExportVectorMetadataJSONL(context.Background(), "ws_a", &vectors)
+	if err != nil || vectorCount != 1 {
+		t.Fatalf("vector metadata count=%d err=%v", vectorCount, err)
+	}
+	if !strings.Contains(vectors.String(), a.ID) || strings.Contains(vectors.String(), b.ID) {
+		t.Fatalf("vector metadata crossed its workspace boundary: %s", vectors.String())
+	}
+
+	removed, err := store.PurgeWorkspace(context.Background(), "ws_a", spoolRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed.Rows == 0 || removed.Bytes != int64(len("a upload")) {
+		t.Fatalf("unexpected purge report: %+v", removed)
+	}
+	if got, err := store.GetKB("ws_a", "docs"); err != nil || got != nil {
+		t.Fatalf("deleted workspace knowledge survived: %+v %v", got, err)
+	}
+	if got, err := store.GetKB("ws_b", "docs"); err != nil || got == nil {
+		t.Fatalf("other workspace knowledge was removed: %+v %v", got, err)
+	}
+	if _, err := os.Stat(spoolA); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("deleted workspace spool survived: %v", err)
+	}
+	if _, err := os.Stat(spoolB); err != nil {
+		t.Fatalf("other workspace spool was removed: %v", err)
+	}
+}
+
+func TestKnowledgePurgeRefusesASpoolPathOutsideItsRoot(t *testing.T) {
+	store, _ := newWorkspaceStore(t)
+	outside := filepath.Join(t.TempDir(), "outside.bin")
+	if err := os.WriteFile(outside, []byte("do not remove"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.EnqueueIngest(IngestJob{
+		ID: "job-outside", WorkspaceID: "ws_a", KBName: "docs", Title: "x", SpoolPath: outside,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := store.PurgeWorkspace(context.Background(), "ws_a", t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "outside ingest root") {
+		t.Fatalf("unsafe spool path was accepted: %v", err)
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Fatalf("unsafe path was removed: %v", err)
 	}
 }
 

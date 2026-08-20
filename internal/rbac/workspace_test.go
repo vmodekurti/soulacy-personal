@@ -4,6 +4,7 @@
 package rbac
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 
@@ -19,6 +20,27 @@ func newGrantStore(t *testing.T) (*SQLiteStore, string) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	return store, path
+}
+
+func TestPurgeWorkspaceRemovesOnlyThatWorkspacesAgentGrants(t *testing.T) {
+	store, _ := newGrantStore(t)
+	for _, workspaceID := range []string{"ws_a", "ws_b"} {
+		if err := store.SetAgentGrantInWorkspace(AgentGrant{
+			WorkspaceID: workspaceID, Role: RoleDeveloper, AgentID: "support",
+			Actions: []string{ActionRead}, GrantedByRole: RoleOwner,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	removed, err := store.PurgeWorkspace(context.Background(), "ws_a")
+	if err != nil || removed.Rows != 1 {
+		t.Fatalf("purge=%+v err=%v", removed, err)
+	}
+	a, _ := store.ListAgentGrantsInWorkspace("ws_a")
+	b, _ := store.ListAgentGrantsInWorkspace("ws_b")
+	if len(a) != 0 || len(b) != 1 {
+		t.Fatalf("after purge: ws_a=%+v ws_b=%+v", a, b)
+	}
 }
 
 // The failure mode that makes this package's key consistency load-bearing.

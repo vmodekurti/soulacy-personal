@@ -2,7 +2,9 @@
 package costs
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"github.com/soulacy/soulacy/internal/wsroot"
 	"path/filepath"
 	"testing"
@@ -191,5 +193,33 @@ func TestStoreClose(t *testing.T) {
 	s := newStore(t)
 	if err := s.Close(); err != nil {
 		t.Errorf("Close: %v", err)
+	}
+}
+
+func TestExportWorkspaceJSONIsCompleteAndWorkspaceScoped(t *testing.T) {
+	ctx := context.Background()
+	store := newStore(t)
+	for _, record := range []UsageRecord{
+		{Workspace: "ws_a", AgentID: "agent-a", SessionID: "session-a", CallID: "call-a", Provider: "test", Model: "m", TotalTokens: 10},
+		{Workspace: "ws_b", AgentID: "agent-b", SessionID: "session-b", CallID: "call-b", Provider: "test", Model: "m", TotalTokens: 20},
+	} {
+		if err := store.Record(ctx, record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var out bytes.Buffer
+	count, err := store.ExportWorkspaceJSON(ctx, "ws_a", &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("exported %d records, want 1", count)
+	}
+	var records []UsageRecord
+	if err := json.Unmarshal(out.Bytes(), &records); err != nil {
+		t.Fatalf("export is not valid JSON: %v", err)
+	}
+	if len(records) != 1 || records[0].Workspace != "ws_a" || records[0].AgentID != "agent-a" {
+		t.Fatalf("workspace export crossed its boundary: %+v", records)
 	}
 }

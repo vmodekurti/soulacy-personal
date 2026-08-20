@@ -20,6 +20,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,11 +30,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 
-	"github.com/soulacy/soulacy/internal/wsroot"
-
 	"github.com/soulacy/soulacy/internal/memory"
 	"github.com/soulacy/soulacy/internal/redact"
 	"github.com/soulacy/soulacy/internal/storage"
+	"github.com/soulacy/soulacy/internal/workspacepurge"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/message"
 )
 
@@ -109,6 +110,59 @@ type ActionLog struct {
 	queue chan message.Event
 	stop  chan struct{}
 	wg    sync.WaitGroup
+}
+
+// ExportWorkspaceJSONL streams the complete retention-controlled event record
+// for one workspace. The query is scoped before rows enter application memory.
+func (a *ActionLog) ExportWorkspaceJSONL(ctx context.Context, workspaceID string, w io.Writer) (int64, error) {
+	if err := wsroot.Validate(strings.TrimSpace(workspaceID)); err != nil {
+		return 0, err
+	}
+	rows, err := a.pool.Query(ctx, `
+		SELECT workspace_id, agent_id, session_id, type, payload, created_at
+		FROM agent_events
+		WHERE workspace_id = $1
+		ORDER BY created_at ASC, id ASC`, workspaceOrPersonal(workspaceID))
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	encoder := json.NewEncoder(w)
+	var count int64
+	for rows.Next() {
+		var ev message.Event
+		var payload []byte
+		if err := rows.Scan(&ev.WorkspaceID, &ev.AgentID, &ev.SessionID, &ev.Type, &payload, &ev.Timestamp); err != nil {
+			return count, err
+		}
+		if len(payload) > 0 && string(payload) != "null" {
+			if err := json.Unmarshal(payload, &ev.Payload); err != nil {
+				ev.Payload = string(payload)
+			}
+		}
+		if err := encoder.Encode(ev); err != nil {
+			return count, err
+		}
+		count++
+	}
+	return count, rows.Err()
+}
+
+// PurgeWorkspace removes the per-workspace mirror tree and its PostgreSQL
+// rows. The tree helper rejects the personal/shared root before SQL runs.
+func (a *ActionLog) PurgeWorkspace(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+	removed, err := workspacepurge.PurgeTree(ctx, a.logDir, workspaceID)
+	if err != nil {
+		return removed, err
+	}
+	result, err := a.pool.Exec(ctx, `DELETE FROM agent_events WHERE workspace_id = $1`, workspaceOrPersonal(workspaceID))
+	if err != nil {
+		return removed, err
+	}
+	removed.Rows += result.RowsAffected()
+	removed.Note = "action-event rows and workspace mirror files"
+	return removed, nil
 }
 
 // OpenActionLog creates an ActionLog and starts its background writer goroutine.
@@ -619,6 +673,44 @@ func (m *MemoryStore) Prune(agentID string, before time.Time) (int64, error) {
 
 // Close is a no-op; the pool is owned by the factory (Open) and closed via ActionLog.Close().
 func (m *MemoryStore) Close() error { return nil }
+
+func (m *MemoryStore) ExportWorkspaceJSONL(ctx context.Context, workspaceID string, w io.Writer) (int64, error) {
+	if err := wsroot.Validate(strings.TrimSpace(workspaceID)); err != nil {
+		return 0, err
+	}
+	rows, err := m.pool.Query(ctx, `
+		SELECT id, workspace_id, agent_id, session_id, scope, provenance, key,
+		       content, metadata::text, created_at, expires_at
+		FROM memories WHERE workspace_id = $1 ORDER BY created_at ASC, id ASC`, workspaceOrPersonal(workspaceID))
+	if err != nil {
+		return 0, err
+	}
+	entries, err := scanPgEntries(rows)
+	if err != nil {
+		return 0, err
+	}
+	encoder := json.NewEncoder(w)
+	for i, entry := range entries {
+		if err := encoder.Encode(struct {
+			Tier  string       `json:"tier"`
+			Entry memory.Entry `json:"entry"`
+		}{Tier: "archive", Entry: entry}); err != nil {
+			return int64(i), err
+		}
+	}
+	return int64(len(entries)), nil
+}
+
+func (m *MemoryStore) PurgeWorkspace(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+	if err := wsroot.Validate(strings.TrimSpace(workspaceID)); err != nil {
+		return workspacepurge.Removed{}, err
+	}
+	result, err := m.pool.Exec(ctx, `DELETE FROM memories WHERE workspace_id = $1`, workspaceOrPersonal(workspaceID))
+	if err != nil {
+		return workspacepurge.Removed{}, err
+	}
+	return workspacepurge.Removed{Rows: result.RowsAffected(), Note: "durable memory archive rows"}, nil
+}
 
 // ---------------------------------------------------------------------------
 // pgRows scanner

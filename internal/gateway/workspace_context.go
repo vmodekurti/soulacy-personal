@@ -22,6 +22,9 @@ func (s *Server) SetTenantResolver(resolver tenancy.Resolver) {
 	if members, ok := resolver.(tenancy.MemberManager); ok {
 		s.tenantMembers = members
 	}
+	if bootstrap, ok := resolver.(tenancy.BootstrapManager); ok {
+		s.tenantBootstrap = bootstrap
+	}
 }
 
 func (s *Server) workspaceContextMW() fiber.Handler {

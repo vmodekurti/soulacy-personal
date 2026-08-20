@@ -1,7 +1,9 @@
 package rbac
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -9,6 +11,7 @@ import (
 
 	"github.com/soulacy/soulacy/internal/auth"
 	"github.com/soulacy/soulacy/internal/requestctx"
+	"github.com/soulacy/soulacy/internal/workspacepurge"
 )
 
 // AgentIDSource describes where a route carries its object identifier. Sources
@@ -27,6 +30,18 @@ type AgentIDSource struct {
 type Manager struct {
 	store Store
 	log   *zap.Logger
+}
+
+// PurgeWorkspace exposes the durable object-grant half of agent deletion to
+// the workspace lifecycle without exposing the manager's store to callers.
+func (m *Manager) PurgeWorkspace(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+	store, ok := m.store.(interface {
+		PurgeWorkspace(context.Context, string) (workspacepurge.Removed, error)
+	})
+	if !ok {
+		return workspacepurge.Removed{}, fmt.Errorf("rbac: store does not support workspace purge")
+	}
+	return store.PurgeWorkspace(ctx, workspaceID)
 }
 
 type workspaceAgentGrants interface {

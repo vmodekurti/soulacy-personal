@@ -6,10 +6,12 @@
 package memory
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +20,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/soulacy/soulacy/internal/workspacepurge"
 	"github.com/soulacy/soulacy/internal/wsroot"
 	sdkmemory "github.com/soulacy/soulacy/sdk/memory"
 )
@@ -117,6 +120,70 @@ func (s *FileStore) sessionPath(workspaceID, agentID, sessionID string) string {
 
 func (s *FileStore) workspaceDir(workspaceID string) string {
 	return wsroot.Dir(s.dir, workspaceID)
+}
+
+// ExportWorkspaceJSONL streams the hot-memory files for one workspace. Each
+// record names its tier so callers can concatenate it with archive records
+// without making duplicates ambiguous.
+func (s *FileStore) ExportWorkspaceJSONL(ctx context.Context, workspaceID string, w io.Writer) (int64, error) {
+	if err := wsroot.Validate(workspaceID); err != nil {
+		return 0, err
+	}
+	root := s.workspaceDir(workspaceID)
+	encoder := json.NewEncoder(w)
+	var count int64
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if workspaceID == wsroot.PersonalWorkspaceID && path == filepath.Join(root, wsroot.NamespaceDir) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if filepath.Ext(path) != ".jsonl" {
+			return nil
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		scanner := bufio.NewScanner(file)
+		scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+		for scanner.Scan() {
+			var item Entry
+			if err := json.Unmarshal(scanner.Bytes(), &item); err != nil {
+				return fmt.Errorf("memory: decode %s: %w", path, err)
+			}
+			if wsroot.Normalize(item.WorkspaceID) != wsroot.Normalize(workspaceID) {
+				return fmt.Errorf("memory: %s contains entry for workspace %q", path, item.WorkspaceID)
+			}
+			if err := encoder.Encode(struct {
+				Tier  string `json:"tier"`
+				Entry Entry  `json:"entry"`
+			}{Tier: "hot", Entry: item}); err != nil {
+				return err
+			}
+			count++
+		}
+		return scanner.Err()
+	})
+	if os.IsNotExist(err) {
+		err = nil
+	}
+	return count, err
+}
+
+func (s *FileStore) PurgeWorkspace(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+	return workspacepurge.PurgeTree(ctx, s.dir, workspaceID)
 }
 
 // shardFor returns the mutex for (agentID, sessionID). Lazily creates it

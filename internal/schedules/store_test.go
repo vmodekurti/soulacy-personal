@@ -75,6 +75,33 @@ func TestTwoWorkspacesMayScheduleTheSameAgentID(t *testing.T) {
 	}
 }
 
+func TestWorkspaceExportListingIncludesDisabledSchedules(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	upsert(t, store, "ws-a", "active", nil)
+	upsert(t, store, "ws-a", "disabled", func(s *Schedule) {
+		s.Enabled = false
+		s.DisabledReason = "membership removed"
+	})
+	upsert(t, store, "ws-b", "other", nil)
+
+	records, err := store.ListWorkspace(ctx, "ws-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("export listing returned %d records, want 2: %+v", len(records), records)
+	}
+	for _, record := range records {
+		if record.WorkspaceID != "ws-a" {
+			t.Fatalf("export listing crossed workspace boundary: %+v", record)
+		}
+	}
+	if records[1].AgentID != "disabled" || records[1].Enabled || records[1].DisabledReason == "" {
+		t.Fatalf("disabled schedule history was lost: %+v", records)
+	}
+}
+
 // Criterion 1's other half: everything a fire needs to be reproducible later.
 func TestAScheduleRecordsWhatAFireNeedsToBeExplainable(t *testing.T) {
 	store := newStore(t)

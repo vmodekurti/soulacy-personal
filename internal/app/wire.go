@@ -411,12 +411,14 @@ func (a *App) Run(parent context.Context) error {
 	// and Scale refuse to start without it: two gateways sharing an in-memory
 	// cron table fire every schedule twice, and "run two for availability" and
 	// "send the customer one email" are then incompatible.
+	var scheduleStore *schedules.Store
 	if store, serr := schedules.Open(ws.DB("schedules")); serr != nil {
 		if config.IsMultiUserMode(cfg.DeploymentMode()) {
 			return fmt.Errorf("durable schedules are required outside personal mode: %w", serr)
 		}
 		log.Warn("durable schedules unavailable; scheduling stays single-process", zap.Error(serr))
 	} else {
+		scheduleStore = store
 		stack.pushClose("schedules", store)
 		// The instance id must differ between processes, or two of them are
 		// indistinguishable to the claim. The hostname plus this process's PID
@@ -532,6 +534,7 @@ func (a *App) Run(parent context.Context) error {
 	}
 
 	// ── Durable approval records (MU-022) ───────────────────────────────────
+	var approvalStore *approvals.Store
 	if store, aerr := approvals.Open(ws.DB("approvals")); aerr != nil {
 		if config.IsMultiUserMode(cfg.DeploymentMode()) {
 			// In Team/Scale the in-memory fallback is not a lesser option, it
@@ -542,6 +545,7 @@ func (a *App) Run(parent context.Context) error {
 		}
 		log.Warn("durable approvals unavailable; approvals will not survive a restart", zap.Error(aerr))
 	} else {
+		approvalStore = store
 		stack.pushClose("approvals", store)
 		engine.Broker().SetStore(store, log)
 		// A restart severs every channel a paused run was waiting on, so a
@@ -682,6 +686,8 @@ func (a *App) Run(parent context.Context) error {
 		pluginStores:        pluginStores,
 		queueBackend:        queueBackend,
 		openedCostStore:     openedCostStore,
+		approvalStore:       approvalStore,
+		scheduleStore:       scheduleStore,
 		tenantResolver:      tenantResolver,
 		workspaceLifecycle:  workspaceLifecycle,
 		workspacePolicies:   workspacePolicies,

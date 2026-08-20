@@ -13,6 +13,7 @@
 package memory
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"testing"
@@ -20,6 +21,42 @@ import (
 
 	"github.com/soulacy/soulacy/internal/wsroot"
 )
+
+func TestVectorExportAndPurgeAreWorkspaceScoped(t *testing.T) {
+	vs := newVectorStoreForTest(t)
+	ctx := context.Background()
+	writeVector(t, vs, "ws_delete", "assistant", "near delete vector")
+	writeVector(t, vs, "ws_keep", "assistant", "near keep vector")
+
+	var exported bytes.Buffer
+	count, err := vs.ExportWorkspaceMetadataJSONL(ctx, "ws_delete", &exported)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || !strings.Contains(exported.String(), "ws_delete") || strings.Contains(exported.String(), "ws_keep") {
+		t.Fatalf("scoped vector metadata export count=%d body=%s", count, exported.String())
+	}
+	if strings.Contains(exported.String(), "embedding") {
+		t.Fatalf("vector export included embedding floats: %s", exported.String())
+	}
+	removed, err := vs.PurgeWorkspace(ctx, "ws_delete")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed.Rows != 2 {
+		t.Fatalf("removed %+v, want vector plus metadata rows", removed)
+	}
+	var deleted, kept int
+	if err := vs.db.QueryRow(`SELECT COUNT(*) FROM memory_vector_meta WHERE workspace_id = ?`, "ws_delete").Scan(&deleted); err != nil {
+		t.Fatal(err)
+	}
+	if err := vs.db.QueryRow(`SELECT COUNT(*) FROM memory_vector_meta WHERE workspace_id = ?`, "ws_keep").Scan(&kept); err != nil {
+		t.Fatal(err)
+	}
+	if deleted != 0 || kept != 1 {
+		t.Fatalf("after purge deleted=%d kept=%d", deleted, kept)
+	}
+}
 
 // axisEmbedder places content at a controlled distance from the query so the
 // KNN ordering in these tests is deterministic rather than incidental.

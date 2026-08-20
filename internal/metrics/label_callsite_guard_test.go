@@ -69,7 +69,7 @@ func TestNoIdentifierIsPassedStraightToAMetricLabel(t *testing.T) {
 		}
 		if entry.IsDir() {
 			switch entry.Name() {
-			case ".git", "gui", "node_modules", "vendor":
+			case ".git", ".gomodcache", "gui", "node_modules", "vendor":
 				return fs.SkipDir
 			}
 			return nil

@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 
+	"github.com/soulacy/soulacy/internal/approvals"
 	"github.com/soulacy/soulacy/internal/audit"
 	"github.com/soulacy/soulacy/internal/auth"
 	"github.com/soulacy/soulacy/internal/auth/apikeys"
@@ -42,6 +43,7 @@ import (
 	"github.com/soulacy/soulacy/internal/runtime"
 	"github.com/soulacy/soulacy/internal/sandbox"
 	"github.com/soulacy/soulacy/internal/scheduler"
+	"github.com/soulacy/soulacy/internal/schedules"
 	"github.com/soulacy/soulacy/internal/session"
 	"github.com/soulacy/soulacy/internal/skills"
 	"github.com/soulacy/soulacy/internal/storage"
@@ -76,6 +78,8 @@ type gatewayDeps struct {
 	pluginStores    *plugins.Stores
 	queueBackend    queue.Backend
 	openedCostStore *costs.Store
+	approvalStore   *approvals.Store
+	scheduleStore   *schedules.Store
 	tenantResolver  tenancy.Resolver
 	// workspaceLifecycle is nil on deployments with no workspace lifecycle to
 	// manage, which is what makes the deletion routes answer 503 there rather
@@ -162,6 +166,20 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 	if d.workspacePolicies != nil {
 		srv.SetWorkspacePolicyStore(d.workspacePolicies)
 	}
+	if d.approvalStore != nil {
+		srv.SetApprovalStore(d.approvalStore)
+	}
+	if d.scheduleStore != nil {
+		srv.SetScheduleStore(d.scheduleStore)
+	}
+	if knowledge := d.engine.Knowledge(); knowledge != nil && knowledge.Store != nil {
+		srv.SetKnowledgeStore(knowledge.Store)
+	}
+	if checkpoints := d.engine.CheckpointStore(); checkpoints != nil {
+		srv.SetCheckpointStore(checkpoints)
+	}
+	hotMemory, archiveMemory, vectorMemory := d.engine.MemoryStores()
+	srv.SetMemoryStores(hotMemory, archiveMemory, vectorMemory)
 	if d.costGovernor != nil {
 		srv.SetCostGovernor(d.costGovernor)
 	}

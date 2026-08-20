@@ -85,6 +85,11 @@ type Attachment struct {
 	ExpiresAt   time.Time `json:"expires_at"`
 }
 
+type ExportedAttachment struct {
+	Attachment
+	Data []byte `json:"data"`
+}
+
 // SQLiteStore is the SQLite-backed implementation of ResourceStore.
 type SQLiteStore struct {
 	db     *sql.DB
@@ -234,6 +239,42 @@ func (s *SQLiteStore) ListAttachments(ctx context.Context, workspaceID, agentID,
 		return nil, fmt.Errorf("session: list attachment rows: %w", err)
 	}
 	return out, nil
+}
+
+func (s *SQLiteStore) ListWorkspaceAttachments(ctx context.Context, workspaceID string) ([]ExportedAttachment, error) {
+	workspaceID, err := requireResourceWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id, workspace_id, session_id, agent_id, filename,
+		mime_type, size_bytes, text, data, created_at, expires_at FROM session_resources
+		WHERE workspace_id=? AND expires_at > ? ORDER BY created_at, id`, workspaceID, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ExportedAttachment
+	for rows.Next() {
+		var item ExportedAttachment
+		if err := rows.Scan(&item.ID, &item.WorkspaceID, &item.SessionID, &item.AgentID, &item.Filename,
+			&item.MIMEType, &item.SizeBytes, &item.Text, &item.Data, &item.CreatedAt, &item.ExpiresAt); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteStore) PurgeWorkspace(ctx context.Context, workspaceID string) (int64, error) {
+	workspaceID, err := requireResourceWorkspace(workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	result, err := s.db.ExecContext(ctx, `DELETE FROM session_resources WHERE workspace_id=?`, workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 // GetAttachment returns metadata and blob for one attachment id.

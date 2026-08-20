@@ -8,6 +8,20 @@ You get more than a runtime: Studio for authoring and healing agents, Channels f
 
 Think of it as Ollama — but for agents.
 
+### Team/Scale administrator sign-in
+
+Open `https://your-soulacy-host/admin/setup` (or `/admin/login`). On a new
+deployment, enter the `server.api_key` held by the host operator, choose an OIDC
+provider, and create the first organization, workspace, and owner. Soulacy
+restarts and sends that owner through the normal organization sign-in flow.
+
+The first-owner operation is atomic and can run only once. The deployment key
+does not become a hidden workspace administrator: after setup, workspace owners
+sign in with OIDC and the key remains limited to deployment-wide operations.
+Google Workspace, Microsoft Entra ID, Okta, Auth0, Keycloak, and standards-based
+OIDC issuers are supported by the wizard. GitHub OAuth and Sign in with Apple
+require provider-specific flows and are not advertised as generic OIDC.
+
 **Build it. Run it. Fix and learn.**
 
 - **Build it** — describe the automation in plain English in Studio, or start from

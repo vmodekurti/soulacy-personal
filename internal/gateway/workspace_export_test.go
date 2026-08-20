@@ -7,6 +7,7 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -20,9 +21,13 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/soulacy/soulacy/internal/auth"
+	"github.com/soulacy/soulacy/internal/auth/apikeys"
 	"github.com/soulacy/soulacy/internal/config"
+	"github.com/soulacy/soulacy/internal/mcpstore"
+	"github.com/soulacy/soulacy/internal/queue/dlq"
 	"github.com/soulacy/soulacy/internal/tenancy"
 	"github.com/soulacy/soulacy/internal/workspaceexport"
+	"github.com/soulacy/soulacy/internal/workspacepolicy"
 )
 
 // exportApp mounts the export routes behind the real workspace middleware.
@@ -228,7 +233,7 @@ func TestTheDownloadDeliversTheWholeArchive(t *testing.T) {
 // returns, so a closure holding one would read another tenant's request.
 func TestTheExportSourcesDoNotHoldTheRequestContext(t *testing.T) {
 	srv := newTestGateway(t, "secret")
-	sources := srv.exportSources("ws_team", nil)
+	sources := srv.exportSources("org_team", "ws_team", nil)
 	if len(sources) == 0 {
 		t.Fatal("no sources registered; this test would prove nothing")
 	}
@@ -240,6 +245,81 @@ func TestTheExportSourcesDoNotHoldTheRequestContext(t *testing.T) {
 	for _, source := range sources {
 		if _, err := source.Emit(context.Background(), io.Discard); err != nil {
 			t.Errorf("source %q cannot run without a request: %v", source.Resource, err)
+		}
+	}
+}
+
+func TestExportIncludesScopedOperationalMetadataWithoutCredentialSecrets(t *testing.T) {
+	ctx := context.Background()
+	srv := newTestGateway(t, "secret")
+
+	mcpServers, err := mcpstore.Open(t.TempDir() + "/mcp.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = mcpServers.Close() })
+	if err := mcpServers.Put(ctx, mcpstore.Server{
+		WorkspaceID: "ws_team", ID: "github", Transport: "stdio", Command: "github-mcp",
+		Env: map[string]string{"GITHUB_TOKEN": "vault:mcp/github/GITHUB_TOKEN"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	srv.SetMCPServerStore(mcpServers)
+
+	policies, err := workspacepolicy.NewStore(t.TempDir() + "/policies.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = policies.Close() })
+	if _, err := policies.Set(ctx, "ws_team", "usr_alice", workspacepolicy.Policy{DailyUSD: 12}); err != nil {
+		t.Fatal(err)
+	}
+	srv.SetWorkspacePolicyStore(policies)
+
+	deadLetters, err := dlq.NewSQLiteStore(t.TempDir() + "/dlq.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = deadLetters.Close() })
+	if err := deadLetters.Push(ctx, dlq.DeadLetter{
+		ID: dlq.NewID(), WorkspaceID: "ws_team", Queue: "runs", Payload: []byte(`{"task":"recover"}`), ErrorMsg: "worker lost",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	srv.SetDLQStore(deadLetters)
+
+	keys, err := apikeys.NewSQLiteStore(t.TempDir() + "/keys.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = keys.Close() })
+	plaintext, _, err := keys.CreateScoped(ctx, apikeys.CreateRequest{
+		Name: "ci", Kind: apikeys.KindService, SubjectID: "svc_ci", OrganizationID: "org_team",
+		WorkspaceIDs: []string{"ws_team"}, Role: "operator", Scopes: []string{"runs:write"}, Issuer: "test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.SetAPIKeyStore(keys)
+
+	sources := srv.exportSources("org_team", "ws_team", nil)
+	byResource := make(map[string]workspaceexport.Source, len(sources))
+	for _, source := range sources {
+		byResource[source.Resource] = source
+	}
+	for _, resource := range []string{"mcp", "workspace-policy", "queue-dlq", "api-keys"} {
+		source, ok := byResource[resource]
+		if !ok {
+			t.Errorf("%s has no export source", resource)
+			continue
+		}
+		var out bytes.Buffer
+		wrote, err := source.Emit(ctx, &out)
+		if err != nil || !wrote {
+			t.Errorf("%s export wrote=%v err=%v", resource, wrote, err)
+		}
+		if strings.Contains(out.String(), plaintext) {
+			t.Errorf("%s export contains API-key plaintext", resource)
 		}
 	}
 }

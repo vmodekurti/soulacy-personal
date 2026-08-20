@@ -45,7 +45,7 @@ func ingestSpoolDir() (string, error) {
 }
 
 // enqueueIngest spools the upload and records a durable job.
-func (s *Server) enqueueIngest(kbName, title, source, mimeType string, r io.Reader, size int64) (knowledge.IngestJob, error) {
+func (s *Server) enqueueIngest(workspaceID, kbName, title, source, mimeType string, r io.Reader, size int64) (knowledge.IngestJob, error) {
 	svc := s.engine.Knowledge()
 	dir, err := ingestSpoolDir()
 	if err != nil {
@@ -77,13 +77,8 @@ func (s *Server) enqueueIngest(kbName, title, source, mimeType string, r io.Read
 	}
 
 	job, err := svc.Store.EnqueueIngest(knowledge.IngestJob{
-		ID:        id,
-		KBName:    kbName,
-		Title:     title,
-		Source:    source,
-		MIMEType:  mimeType,
-		SpoolPath: spool,
-		ByteSize:  size,
+		ID: id, WorkspaceID: workspaceID, KBName: kbName, Title: title,
+		Source: source, MIMEType: mimeType, SpoolPath: spool, ByteSize: size,
 	})
 	if err != nil {
 		_ = os.Remove(spool) // don't leave an orphaned spool file behind
@@ -121,7 +116,7 @@ func (s *Server) handleGetIngestJob(c *fiber.Ctx) error {
 	if svc == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "knowledge store disabled")
 	}
-	job, err := svc.Store.GetIngest(strings.TrimSpace(c.Params("job")))
+	job, err := svc.Store.GetIngestForWorkspace(s.agents(c).WorkspaceID(), strings.TrimSpace(c.Params("job")))
 	if err != nil {
 		return s.errMsg(c, fiber.StatusNotFound, "ingest job not found")
 	}
@@ -135,7 +130,7 @@ func (s *Server) handleRetryIngestJob(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "knowledge store disabled")
 	}
 	id := strings.TrimSpace(c.Params("job"))
-	job, err := svc.Store.GetIngest(id)
+	job, err := svc.Store.GetIngestForWorkspace(s.agents(c).WorkspaceID(), id)
 	if err != nil {
 		return s.errMsg(c, fiber.StatusNotFound, "ingest job not found")
 	}

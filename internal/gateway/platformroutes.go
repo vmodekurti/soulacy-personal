@@ -54,6 +54,10 @@ type platformRoute struct {
 // a tenant that cannot read the settings page it is shown gets a broken UI
 // rather than a safer one.
 var platformRoutes = []platformRoute{
+	{"GET", "/api/v1/admin/bootstrap",
+		"reports whether the deployment-wide tenant catalog needs its first owner"},
+	{"POST", "/api/v1/admin/bootstrap",
+		"creates the deployment's first organization, workspace, and owner exactly once"},
 	{"POST", "/api/v1/admin/restart",
 		"calls os.Exit(0) on the process shared by every workspace"},
 

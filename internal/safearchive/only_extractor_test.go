@@ -54,7 +54,7 @@ func TestArchivesAreOnlyOpenedThroughTheSafeExtractor(t *testing.T) {
 		}
 		if entry.IsDir() {
 			switch entry.Name() {
-			case ".git", "node_modules", "vendor", "site", "gui", "website":
+			case ".git", ".gomodcache", "node_modules", "vendor", "site", "gui", "website":
 				return filepath.SkipDir
 			}
 			return nil

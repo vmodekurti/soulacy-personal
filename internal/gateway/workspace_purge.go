@@ -29,6 +29,71 @@ import (
 func (s *Server) workspacePurgers() []workspacepurge.Purger {
 	var purgers []workspacepurge.Purger
 
+	if store, ok := s.actions.(interface {
+		PurgeWorkspace(context.Context, string) (workspacepurge.Removed, error)
+	}); ok {
+		purgers = append(purgers, workspacepurge.Purger{
+			Resource: "events",
+			Purge:    store.PurgeWorkspace,
+		})
+	}
+	hotMemory, hotOK := s.memoryStore.(interface {
+		PurgeWorkspace(context.Context, string) (workspacepurge.Removed, error)
+	})
+	archiveMemory, archiveOK := s.memoryArchive.(interface {
+		PurgeWorkspace(context.Context, string) (workspacepurge.Removed, error)
+	})
+	if hotOK && archiveOK {
+		purgers = append(purgers, workspacepurge.Purger{
+			Resource: "memory",
+			Purge: func(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+				removed, err := hotMemory.PurgeWorkspace(ctx, workspaceID)
+				if err != nil {
+					return removed, err
+				}
+				archiveRemoved, err := archiveMemory.PurgeWorkspace(ctx, workspaceID)
+				removed.Rows += archiveRemoved.Rows
+				removed.Bytes += archiveRemoved.Bytes
+				removed.Note = "hot memory files and durable archive rows"
+				return removed, err
+			},
+		})
+	}
+	if s.vectorMemory != nil {
+		purgers = append(purgers, workspacepurge.Purger{
+			Resource: "vectors",
+			Purge:    s.vectorMemory.PurgeWorkspace,
+		})
+	}
+
+	if s.loader != nil && s.rbacManager != nil {
+		loader, grants := s.loader, s.rbacManager
+		purgers = append(purgers, workspacepurge.Purger{
+			Resource: "agents",
+			Purge: func(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+				files, err := loader.PurgeWorkspace(ctx, workspaceID)
+				if err != nil {
+					return files, err
+				}
+				rows, err := grants.PurgeWorkspace(ctx, workspaceID)
+				files.Rows += rows.Rows
+				if err != nil {
+					return files, err
+				}
+				files.Note = "agent definitions, version snapshots, and object grants"
+				return files, nil
+			},
+		})
+		// Definitions and their immutable snapshots occupy the same scoped
+		// loader trees as agents. Register the class independently so the
+		// deletion report verifies the catalog entry instead of making an
+		// implicit multi-class claim; the operation is idempotent after agents.
+		purgers = append(purgers, workspacepurge.Purger{
+			Resource: "definitions",
+			Purge:    loader.PurgeWorkspace,
+		})
+	}
+
 	if s.runStore != nil {
 		store := s.runStore
 		purgers = append(purgers, workspacepurge.Purger{
@@ -76,6 +141,78 @@ func (s *Server) workspacePurgers() []workspacepurge.Purger {
 			Purge: func(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
 				rows, err := store.PurgeWorkspace(ctx, workspaceID)
 				return workspacepurge.Removed{Rows: rows}, err
+			},
+		})
+	}
+
+	// PurgeWorkspace is deliberately optional on the operational DLQ
+	// interface: third-party/no-op implementations can still receive failed
+	// jobs, while durable stores advertise whether they can satisfy workspace
+	// deletion. The production SQLite store does.
+	if store, ok := s.dlqStore.(interface {
+		PurgeWorkspace(context.Context, string) (workspacepurge.Removed, error)
+	}); ok {
+		purgers = append(purgers, workspacepurge.Purger{
+			Resource: "queue-dlq",
+			Purge:    store.PurgeWorkspace,
+		})
+	}
+	if s.approvalStore != nil {
+		purgers = append(purgers, workspacepurge.Purger{
+			Resource: "approvals",
+			Purge:    s.approvalStore.PurgeWorkspace,
+		})
+	}
+	if s.scheduleStore != nil {
+		purgers = append(purgers, workspacepurge.Purger{
+			Resource: "schedules",
+			Purge:    s.scheduleStore.PurgeWorkspace,
+		})
+	}
+	if s.knowledgeStore != nil {
+		store := s.knowledgeStore
+		purgers = append(purgers, workspacepurge.Purger{
+			Resource: "knowledge",
+			Purge: func(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+				spoolRoot, err := ingestSpoolDir()
+				if err != nil {
+					return workspacepurge.Removed{}, err
+				}
+				return store.PurgeWorkspace(ctx, workspaceID, spoolRoot)
+			},
+		})
+	}
+	if store, ok := s.historyStore.(interface {
+		PurgeWorkspace(context.Context, string) (workspacepurge.Removed, error)
+	}); ok {
+		purgers = append(purgers, workspacepurge.Purger{
+			Resource: "messages",
+			Purge:    store.PurgeWorkspace,
+		})
+	}
+	owners, ownersOK := s.sessionOwnership.(interface {
+		PurgeWorkspace(context.Context, string) (int64, error)
+	})
+	resources, resourcesOK := s.resourceStore.(interface {
+		PurgeWorkspace(context.Context, string) (int64, error)
+	})
+	if ownersOK && resourcesOK && s.checkpointStore != nil {
+		checkpoints := s.checkpointStore
+		purgers = append(purgers, workspacepurge.Purger{
+			Resource: "sessions",
+			Purge: func(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+				var removed workspacepurge.Removed
+				for _, purge := range []func(context.Context, string) (int64, error){
+					owners.PurgeWorkspace, resources.PurgeWorkspace, checkpoints.PurgeWorkspace,
+				} {
+					rows, err := purge(ctx, workspaceID)
+					removed.Rows += rows
+					if err != nil {
+						return removed, err
+					}
+				}
+				removed.Note = "session ownership, attachments, and workflow checkpoints"
+				return removed, nil
 			},
 		})
 	}

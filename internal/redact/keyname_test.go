@@ -132,7 +132,7 @@ func TestOnlyOnePackageDecidesWhatLooksSecret(t *testing.T) {
 		}
 		if entry.IsDir() {
 			switch entry.Name() {
-			case ".git", "node_modules", "vendor", "site", "gui", "website", "sdk", "examples", "docs":
+			case ".git", ".gomodcache", "node_modules", "vendor", "site", "gui", "website", "sdk", "examples", "docs":
 				return filepath.SkipDir
 			}
 			return nil

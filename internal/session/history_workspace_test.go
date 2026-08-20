@@ -7,9 +7,11 @@
 package session
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/soulacy/soulacy/internal/wsroot"
@@ -24,6 +26,32 @@ func newHistory(t *testing.T) (*SQLiteHistoryStore, string) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	return store, path
+}
+
+func TestWorkspaceHistoryExportAndPurgeIncludeAllUsersButNoOtherTenant(t *testing.T) {
+	store, _ := newHistory(t)
+	turn(t, store, "ws_a", "usr_alice", "one", "alice private")
+	turn(t, store, "ws_a", "usr_amy", "two", "amy private")
+	turn(t, store, "ws_b", "usr_bob", "three", "bob private")
+
+	var out bytes.Buffer
+	count, err := store.ExportWorkspaceJSONL(context.Background(), "ws_a", &out)
+	if err != nil || count != 2 {
+		t.Fatalf("export count=%d err=%v", count, err)
+	}
+	if !strings.Contains(out.String(), "alice private") || !strings.Contains(out.String(), "amy private") || strings.Contains(out.String(), "bob private") {
+		t.Fatalf("workspace history export crossed a boundary: %s", out.String())
+	}
+	removed, err := store.PurgeWorkspace(context.Background(), "ws_a")
+	if err != nil || removed.Rows != 2 {
+		t.Fatalf("purge=%+v err=%v", removed, err)
+	}
+	if got, _ := store.Load(context.Background(), "ws_a", "one", 0); len(got) != 0 {
+		t.Fatalf("deleted workspace history survived: %+v", got)
+	}
+	if got, _ := store.Load(context.Background(), "ws_b", "three", 0); len(got) != 1 {
+		t.Fatalf("other workspace history was removed: %+v", got)
+	}
 }
 
 func turn(t *testing.T, s *SQLiteHistoryStore, workspaceID, subject, sessionID, content string) {

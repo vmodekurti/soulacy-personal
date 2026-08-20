@@ -3,6 +3,8 @@
 package runtime
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -16,6 +18,40 @@ func newTestLoader(t *testing.T) (*Loader, string) {
 	t.Helper()
 	dir := t.TempDir()
 	return NewLoader([]string{dir}), dir
+}
+
+func TestPurgeWorkspaceRemovesDefinitionsVersionsAndInMemoryState(t *testing.T) {
+	loader, dir := newTestLoader(t)
+	writeAgent(t, loader, "ws_a", dir, "support", "A v1", "alice")
+	writeAgent(t, loader, "ws_a", dir, "support", "A v2", "alice")
+	writeAgent(t, loader, "ws_b", dir, "support", "B", "bob")
+	if versions, err := loader.AgentVersionsInWorkspace("ws_a", "support"); err != nil || len(versions) == 0 {
+		t.Fatalf("test did not create version history: %+v %v", versions, err)
+	}
+	var exported bytes.Buffer
+	if count, err := loader.ExportWorkspaceVersionsJSONL(context.Background(), "ws_a", &exported); err != nil || count == 0 {
+		t.Fatalf("version export count=%d err=%v", count, err)
+	}
+	if !strings.Contains(exported.String(), "A v1") || strings.Contains(exported.String(), `name: B`) {
+		t.Fatalf("version export crossed a workspace boundary: %s", exported.String())
+	}
+
+	removed, err := loader.PurgeWorkspace(context.Background(), "ws_a")
+	if err != nil || removed.Bytes == 0 {
+		t.Fatalf("purge=%+v err=%v", removed, err)
+	}
+	if got := loader.GetInWorkspace("ws_a", "support"); got != nil {
+		t.Fatalf("deleted workspace remained in memory: %+v", got)
+	}
+	if got := loader.GetInWorkspace("ws_b", "support"); got == nil || got.Name != "B" {
+		t.Fatalf("other workspace was removed: %+v", got)
+	}
+	if _, err := os.Stat(workspaceAgentRoot(dir, "ws_a")); !os.IsNotExist(err) {
+		t.Fatalf("deleted workspace tree survived: %v", err)
+	}
+	if _, err := os.Stat(workspaceAgentRoot(dir, "ws_b")); err != nil {
+		t.Fatalf("other workspace tree was removed: %v", err)
+	}
 }
 
 func writeAgent(t *testing.T, loader *Loader, workspaceID, dir, id, name, actor string) {

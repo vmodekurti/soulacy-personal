@@ -5,8 +5,10 @@ package runtime
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -18,6 +20,7 @@ import (
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 
+	"github.com/soulacy/soulacy/internal/workspacepurge"
 	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/agent"
 )
@@ -832,6 +835,65 @@ func (l *Loader) DeleteInWorkspace(workspaceID, id, actor string) error {
 	}
 	delete(l.agents, agentKey{workspaceID, id})
 	return nil
+}
+
+// PurgeWorkspace removes every agent definition and version snapshot beneath
+// one non-personal workspace namespace, then forgets the matching in-memory
+// definitions. PurgeTree refuses the implicit personal tenant because its
+// resolved directory is the shared root.
+func (l *Loader) PurgeWorkspace(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+	workspaceID = NormalizeWorkspace(workspaceID)
+	var removed workspacepurge.Removed
+	for _, dir := range l.dirs {
+		part, err := workspacepurge.PurgeTree(ctx, dir, workspaceID)
+		if err != nil {
+			return removed, err
+		}
+		removed.Rows += part.Rows
+		removed.Bytes += part.Bytes
+	}
+	l.mu.Lock()
+	for key := range l.agents {
+		if key.workspace == workspaceID {
+			delete(l.agents, key)
+		}
+	}
+	l.mu.Unlock()
+	removed.Note = "agent definitions and version snapshots"
+	return removed, nil
+}
+
+// ExportWorkspaceVersionsJSONL streams immutable definition snapshots for one
+// workspace. Current definitions are exported by the gateway's agents source;
+// this is the version history required to reconstruct what durable runs used.
+func (l *Loader) ExportWorkspaceVersionsJSONL(ctx context.Context, workspaceID string, w io.Writer) (int64, error) {
+	workspaceID = NormalizeWorkspace(workspaceID)
+	encoder := json.NewEncoder(w)
+	var count int64
+	for _, def := range l.AllInWorkspace(workspaceID) {
+		if err := ctx.Err(); err != nil {
+			return count, err
+		}
+		versions, err := l.AgentVersionsInWorkspace(workspaceID, def.ID)
+		if err != nil {
+			return count, err
+		}
+		for _, version := range versions {
+			body, resolved, err := l.ReadAgentVersionInWorkspace(workspaceID, def.ID, version.ID)
+			if err != nil {
+				return count, err
+			}
+			if err := encoder.Encode(struct {
+				AgentID string       `json:"agent_id"`
+				Version AgentVersion `json:"version"`
+				Content string       `json:"content"`
+			}{AgentID: def.ID, Version: resolved, Content: string(body)}); err != nil {
+				return count, err
+			}
+			count++
+		}
+	}
+	return count, nil
 }
 
 // AgentVersions returns snapshots for an agent, newest first.

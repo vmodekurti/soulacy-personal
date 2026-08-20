@@ -10,11 +10,25 @@
 package gateway
 
 import (
+	"context"
 	"sort"
 	"strings"
 	"testing"
 
+	"go.uber.org/zap"
+
+	"github.com/soulacy/soulacy/internal/actionlog"
+	"github.com/soulacy/soulacy/internal/approvals"
+	"github.com/soulacy/soulacy/internal/knowledge"
+	"github.com/soulacy/soulacy/internal/mcpstore"
+	"github.com/soulacy/soulacy/internal/memory"
+	"github.com/soulacy/soulacy/internal/queue/dlq"
+	"github.com/soulacy/soulacy/internal/rbac"
 	"github.com/soulacy/soulacy/internal/runs"
+	"github.com/soulacy/soulacy/internal/runtime"
+	"github.com/soulacy/soulacy/internal/schedules"
+	"github.com/soulacy/soulacy/internal/session"
+	storagesqlite "github.com/soulacy/soulacy/internal/storage/sqlite"
 	"github.com/soulacy/soulacy/internal/workboard"
 	"github.com/soulacy/soulacy/internal/workspacepolicy"
 	"github.com/soulacy/soulacy/internal/workspacepurge"
@@ -24,22 +38,10 @@ import (
 // missing. An entry is a claim a reviewer can check; the absence of one is the
 // build failing.
 var notYetPurged = map[string]string{
-	"agents":          "the agent file tree plus rbac_agent_grants; needs the loader's per-workspace dirs and the RBAC database handle together, since a tree removal alone would leave the grants",
-	"definitions":     "version snapshots live beside each agent, so this is settled by the agents purger once that exists",
-	"approvals":       "internal/approvals has PurgeWorkspace; the gateway does not hold the store",
-	"schedules":       "internal/schedules has PurgeWorkspace; the gateway reaches the scheduler, not its store",
-	"queue-dlq":       "internal/queue/dlq SQLiteStore has PurgeWorkspace; s.dlqStore is the interface, which does not declare it",
-	"knowledge":       "needs the knowledge store's database handle, which the engine owns",
-	"events":          "the action log is a file archive plus agent_events rows; both halves need doing together",
-	"memory":          "file-backed and SQLite variants, with different roots",
-	"vectors":         "follows the source resource; purged with memory and knowledge",
-	"messages":        "conversation history database handle is held by the session store",
-	"sessions":        "session ownership and resources span three tables in a store the gateway holds as an interface",
 	"studio-drafts":   "per-workspace, per-user directory under <root>/studio/drafts",
 	"studio-traces":   "trace directory, which is env-configurable",
 	"studio-learning": "four tables plus the lesson files",
 	"skills":          "per-workspace skill inventory under its own base",
-	"mcp":             "redacted configuration lives in config.yaml, not in a workspace store; deleting a workspace's MCP entries means editing config, which needs a decision about who may",
 	"channels":        "same as mcp: configuration, not a store",
 	"webhooks":        "same as mcp: configuration, not a store",
 	"shares":          "share records are file-backed under their own root",
@@ -51,14 +53,47 @@ var notYetPurged = map[string]string{
 }
 
 func TestTheWorkspacePurgeCoverageGapIsAKnownList(t *testing.T) {
+	actions, err := actionlog.New(t.TempDir()+"/events", t.TempDir()+"/events.db", zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = actions.Close() })
+	hotMemory, err := memory.NewFileStore(t.TempDir() + "/memory")
+	if err != nil {
+		t.Fatal(err)
+	}
+	archiveMemory, err := memory.NewSQLiteArchive(t.TempDir() + "/memory.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = archiveMemory.Close() })
+	vectorMemory, err := memory.NewVectorStore(archiveMemory.DB(), nil, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
 	// A server with the stores PRESENT, because this guard is about what the
 	// build can purge, not about what one instance happens to have wired. A
 	// zero-valued store is enough: the coverage question is which resources
 	// are registered, and no purger runs here.
 	server := &Server{
+		actions:           storagesqlite.NewActionLog(actions),
+		memoryStore:       hotMemory,
+		memoryArchive:     storagesqlite.NewMemoryArchive(archiveMemory),
+		vectorMemory:      vectorMemory,
+		loader:            &runtime.Loader{},
+		rbacManager:       rbac.NewManager(rbac.NoopStore{}, zap.NewNop()),
 		runStore:          &runs.Store{},
 		workboardStore:    &workboard.Store{},
 		workspacePolicies: &workspacepolicy.Store{},
+		mcpServers:        &mcpstore.Store{},
+		dlqStore:          &dlq.SQLiteStore{},
+		approvalStore:     &approvals.Store{},
+		scheduleStore:     &schedules.Store{},
+		knowledgeStore:    &knowledge.Store{},
+		historyStore:      &session.SQLiteHistoryStore{},
+		sessionOwnership:  &session.SQLiteOwnershipStore{},
+		resourceStore:     &session.SQLiteStore{},
+		checkpointStore:   &runtime.CheckpointStore{},
 	}
 	purgers := server.workspacePurgers()
 	if err := workspacepurge.ValidatePurgers(purgers); err != nil {
@@ -94,6 +129,52 @@ func TestTheWorkspacePurgeCoverageGapIsAKnownList(t *testing.T) {
 		if !covered[resource] {
 			t.Errorf("%q is listed as not-yet-purged but is now covered — remove the entry", resource)
 		}
+	}
+}
+
+func TestWorkspacePurgeRemovesOnlyTheDeletingWorkspacesDeadLetters(t *testing.T) {
+	store, err := dlq.NewSQLiteStore(t.TempDir() + "/dlq.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	ctx := context.Background()
+	for _, workspaceID := range []string{"ws_delete", "ws_keep"} {
+		if err := store.Push(ctx, dlq.DeadLetter{
+			ID: dlq.NewID(), WorkspaceID: workspaceID, Queue: "runs", Payload: []byte(`{"run":"one"}`), ErrorMsg: "failed",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	server := &Server{dlqStore: store}
+	var purge workspacepurge.Purger
+	for _, candidate := range server.workspacePurgers() {
+		if candidate.Resource == "queue-dlq" {
+			purge = candidate
+			break
+		}
+	}
+	if purge.Purge == nil {
+		t.Fatal("the durable DLQ registered no workspace purger")
+	}
+	removed, err := purge.Purge(ctx, "ws_delete")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed.Rows != 1 {
+		t.Fatalf("removed %d rows, want 1", removed.Rows)
+	}
+	deleted, err := store.List(ctx, "ws_delete", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept, err := store.List(ctx, "ws_keep", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(deleted) != 0 || len(kept) != 1 {
+		t.Fatalf("after purge: deleting workspace=%d, other workspace=%d", len(deleted), len(kept))
 	}
 }
 

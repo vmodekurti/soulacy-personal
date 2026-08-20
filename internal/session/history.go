@@ -8,7 +8,9 @@ package session
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 
 	"errors"
 	"github.com/soulacy/soulacy/internal/sqlitex"
+	"github.com/soulacy/soulacy/internal/workspacepurge"
 	"github.com/soulacy/soulacy/internal/wsroot"
 	"sync"
 )
@@ -286,6 +289,41 @@ func (s *SQLiteHistoryStore) LoadForAgent(ctx context.Context, workspaceID, subj
 	defer rows.Close()
 
 	return scanEntries(rows)
+}
+
+// ExportWorkspaceJSONL streams every user's conversation turns for a complete
+// owner-authorized workspace export. Ordinary history APIs remain user-private;
+// this deliberately broader surface is only wired into the workspace lifecycle
+// job and still predicates in SQL on the verified workspace.
+func (s *SQLiteHistoryStore) ExportWorkspaceJSONL(ctx context.Context, workspaceID string, w io.Writer) (int64, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT `+historyColumns+`
+		FROM conversation_history WHERE workspace_id = ? ORDER BY id ASC`, workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	encoder := json.NewEncoder(w)
+	var count int64
+	for rows.Next() {
+		var entry ConversationEntry
+		if err := rows.Scan(&entry.ID, &entry.WorkspaceID, &entry.Subject, &entry.SessionID,
+			&entry.AgentID, &entry.Role, &entry.Content, &entry.Tokens, &entry.CreatedAt); err != nil {
+			return count, err
+		}
+		if err := encoder.Encode(entry); err != nil {
+			return count, err
+		}
+		count++
+	}
+	return count, rows.Err()
+}
+
+func (s *SQLiteHistoryStore) PurgeWorkspace(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+	return workspacepurge.PurgeCatalogTables(ctx, s.db, "messages", workspaceID)
 }
 
 // Search returns recent entries whose content contains all query terms. It is a

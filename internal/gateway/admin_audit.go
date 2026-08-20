@@ -344,6 +344,9 @@ func configPatchSections(p PatchableConfig) []string {
 	if p.Server != nil {
 		sections = append(sections, "server")
 	}
+	if p.Auth != nil {
+		sections = append(sections, "auth")
+	}
 	if p.Runtime != nil {
 		sections = append(sections, "runtime")
 	}

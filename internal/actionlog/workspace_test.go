@@ -5,9 +5,12 @@
 package actionlog
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +19,69 @@ import (
 	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/message"
 )
+
+func TestWorkspaceExportAndPurgeAreCompleteAndScoped(t *testing.T) {
+	logger, dir := newWorkspaceLogger(t)
+	logger = appendAndFlush(t, logger, dir,
+		event("ws_delete", "assistant", "s1", "message.in", map[string]any{"text": "delete-only"}),
+		event("ws_delete", "assistant", "s1", "message.out", map[string]any{"text": "delete-reply"}),
+		event("ws_keep", "assistant", "s1", "message.in", map[string]any{"text": "keep-only"}),
+	)
+
+	var archive bytes.Buffer
+	count, err := logger.ExportWorkspaceJSONL(context.Background(), "ws_delete", &archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("exported %d events, want 2", count)
+	}
+	if got := archive.String(); !strings.Contains(got, "delete-only") || !strings.Contains(got, "delete-reply") || strings.Contains(got, "keep-only") {
+		t.Fatalf("workspace export crossed its boundary: %s", got)
+	}
+
+	removed, err := logger.PurgeWorkspace(context.Background(), "ws_delete")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed.Rows < 3 { // two SQL rows plus at least one mirror file
+		t.Fatalf("purge reported %+v, want two rows and a mirror file", removed)
+	}
+	deleted, err := logger.QueryEventsInWorkspace("ws_delete", "", "", 100, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept, err := logger.QueryEventsInWorkspace("ws_keep", "", "", 100, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(deleted) != 0 || len(kept) != 1 {
+		t.Fatalf("after purge: deleted=%d kept=%d", len(deleted), len(kept))
+	}
+	if _, err := os.Stat(filepath.Join(dir, wsroot.NamespaceDir, "ws_delete")); !os.IsNotExist(err) {
+		t.Fatalf("workspace mirror tree survived purge: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, wsroot.NamespaceDir, "ws_keep", "assistant.log")); err != nil {
+		t.Fatalf("other workspace mirror was removed: %v", err)
+	}
+}
+
+func TestWorkspacePurgeRefusesThePersonalActionLogRoot(t *testing.T) {
+	logger, dir := newWorkspaceLogger(t)
+	logger = appendAndFlush(t, logger, dir,
+		event(wsroot.PersonalWorkspaceID, "assistant", "s1", "message.in", map[string]any{"text": "personal"}),
+	)
+	if _, err := logger.PurgeWorkspace(context.Background(), wsroot.PersonalWorkspaceID); err == nil {
+		t.Fatal("personal workspace purge was not refused")
+	}
+	events, err := logger.QueryEventsInWorkspace(wsroot.PersonalWorkspaceID, "", "", 100, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("refused purge still deleted %d personal events", 1-len(events))
+	}
+}
 
 func newWorkspaceLogger(t *testing.T) (*Logger, string) {
 	t.Helper()

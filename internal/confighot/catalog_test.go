@@ -123,7 +123,7 @@ func symbolExists(t *testing.T, root, symbol string) bool {
 		}
 		if entry.IsDir() {
 			switch entry.Name() {
-			case ".git", "gui", "node_modules", "vendor":
+			case ".git", ".gomodcache", "gui", "node_modules", "vendor":
 				return filepath.SkipDir
 			}
 			return nil

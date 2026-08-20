@@ -114,7 +114,7 @@ func TestEveryConsumerOfAnEventIsClassified(t *testing.T) {
 			return walkErr
 		}
 		if entry.IsDir() {
-			if name := entry.Name(); name == ".git" || name == "gui" || name == "node_modules" || name == "vendor" {
+			if name := entry.Name(); name == ".git" || name == ".gomodcache" || name == "gui" || name == "node_modules" || name == "vendor" {
 				return fs.SkipDir
 			}
 			return nil

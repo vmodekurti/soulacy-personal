@@ -318,6 +318,12 @@ func (s *Store) ListEnabled(ctx context.Context, workspaceID string) ([]Schedule
 	return s.list(ctx, `WHERE workspace_id = ? AND enabled = 1 ORDER BY agent_id`, wsroot.Normalize(workspaceID))
 }
 
+// ListWorkspace returns active and disabled schedules for workspace export.
+// A disabled schedule and its reason are operational history, not absence.
+func (s *Store) ListWorkspace(ctx context.Context, workspaceID string) ([]Schedule, error) {
+	return s.list(ctx, `WHERE workspace_id = ? ORDER BY agent_id`, wsroot.Normalize(workspaceID))
+}
+
 // ListAllEnabledAcrossWorkspaces returns every workspace's active schedules.
 //
 // Deployment-wide and named so it cannot be reached by accident: a scheduler

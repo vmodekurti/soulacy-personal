@@ -976,10 +976,11 @@ func (a *App) wireEngineExtras(ctx context.Context, ws config.Paths, engine *run
 
 	// ── Telemetry (OTEL) ─────────────────────────────────────────────────────
 	telCfg := telemetry.Config{
-		Enabled:      cfg.Telemetry.Enabled,
-		Exporter:     cfg.Telemetry.Exporter,
-		OTLPEndpoint: cfg.Telemetry.OTLPEndpoint,
-		ServiceName:  cfg.Telemetry.ServiceName,
+		Enabled:        cfg.Telemetry.Enabled,
+		Exporter:       cfg.Telemetry.Exporter,
+		OTLPEndpoint:   cfg.Telemetry.OTLPEndpoint,
+		ServiceName:    cfg.Telemetry.ServiceName,
+		ServiceVersion: config.Version,
 	}
 	if telCfg.ServiceName == "" {
 		telCfg.ServiceName = "soulacy"

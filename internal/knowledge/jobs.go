@@ -282,6 +282,25 @@ func (s *Store) GetIngest(id string) (IngestJob, error) {
 	return s.getIngestLocked(id)
 }
 
+// GetIngestForWorkspace returns one job only within the caller's verified
+// workspace. Job IDs are opaque but they are not authority; using an ID alone
+// at an HTTP boundary would turn possession or guessing into cross-tenant
+// read/retry access.
+func (s *Store) GetIngestForWorkspace(workspaceID, id string) (IngestJob, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return IngestJob{}, ErrWorkspaceRequired
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	row := s.db.QueryRow(
+		`SELECT id, workspace_id, kb_name, title, source, mime_type, spool_path, byte_size,
+		        status, attempt, progress, COALESCE(error,''), COALESCE(doc_id,''),
+		        created_at, started_at, ended_at
+		   FROM ingest_jobs WHERE workspace_id = ? AND id = ?`, workspaceID, strings.TrimSpace(id))
+	return scanIngest(row)
+}
+
 // ListIngests returns jobs for a KB (or all when kbName is ""), newest first.
 func (s *Store) ListIngests(workspaceID, kbName string, limit int) ([]IngestJob, error) {
 	workspaceID = strings.TrimSpace(workspaceID)

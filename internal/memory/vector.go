@@ -24,9 +24,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/soulacy/soulacy/internal/wsroot"
+	"io"
 	"strings"
 	"time"
+
+	"github.com/soulacy/soulacy/internal/workspacepurge"
+	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
 // VectorStore adds semantic search to the SQLiteArchive.
@@ -37,6 +40,76 @@ type VectorStore struct {
 	db       *sql.DB
 	embedder Embedder
 	dims     int // embedding dimensions; must match the embedder's output
+}
+
+// ExportWorkspaceMetadataJSONL exports rebuild metadata, not embedding
+// floats. The source text remains in the memory export and can be re-embedded
+// by the destination deployment's configured model.
+func (vs *VectorStore) ExportWorkspaceMetadataJSONL(ctx context.Context, workspaceID string, w io.Writer) (int64, error) {
+	if err := wsroot.Validate(strings.TrimSpace(workspaceID)); err != nil {
+		return 0, err
+	}
+	rows, err := vs.db.QueryContext(ctx, `
+		SELECT rowid, workspace_id, agent_id, session_id, scope, key, provenance, created_at
+		FROM memory_vector_meta WHERE workspace_id = ? ORDER BY rowid ASC`, wsroot.Normalize(workspaceID))
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	encoder := json.NewEncoder(w)
+	var count int64
+	for rows.Next() {
+		var record struct {
+			RowID       int64     `json:"row_id"`
+			WorkspaceID string    `json:"workspace_id"`
+			AgentID     string    `json:"agent_id"`
+			SessionID   string    `json:"session_id"`
+			Scope       string    `json:"scope"`
+			Key         *string   `json:"key,omitempty"`
+			Provenance  *string   `json:"provenance,omitempty"`
+			CreatedAt   time.Time `json:"created_at"`
+		}
+		if err := rows.Scan(&record.RowID, &record.WorkspaceID, &record.AgentID, &record.SessionID, &record.Scope, &record.Key, &record.Provenance, &record.CreatedAt); err != nil {
+			return count, err
+		}
+		if err := encoder.Encode(record); err != nil {
+			return count, err
+		}
+		count++
+	}
+	return count, rows.Err()
+}
+
+func (vs *VectorStore) PurgeWorkspace(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+	if err := wsroot.Validate(strings.TrimSpace(workspaceID)); err != nil {
+		return workspacepurge.Removed{}, err
+	}
+	tx, err := vs.db.BeginTx(ctx, nil)
+	if err != nil {
+		return workspacepurge.Removed{}, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	workspaceID = wsroot.Normalize(workspaceID)
+	result, err := tx.ExecContext(ctx, `DELETE FROM memory_vectors WHERE rowid IN (SELECT rowid FROM memory_vector_meta WHERE workspace_id = ?)`, workspaceID)
+	if err != nil {
+		return workspacepurge.Removed{}, err
+	}
+	vectorRows, err := result.RowsAffected()
+	if err != nil {
+		return workspacepurge.Removed{}, err
+	}
+	result, err = tx.ExecContext(ctx, `DELETE FROM memory_vector_meta WHERE workspace_id = ?`, workspaceID)
+	if err != nil {
+		return workspacepurge.Removed{}, err
+	}
+	metadataRows, err := result.RowsAffected()
+	if err != nil {
+		return workspacepurge.Removed{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return workspacepurge.Removed{}, err
+	}
+	return workspacepurge.Removed{Rows: vectorRows + metadataRows, Note: "vector rows and rebuild metadata"}, nil
 }
 
 // NewVectorStore creates the schema (if missing) and returns a VectorStore.

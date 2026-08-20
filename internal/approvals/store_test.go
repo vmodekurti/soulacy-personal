@@ -115,6 +115,35 @@ func TestAnotherWorkspacesAdminCanNeitherSeeNorDecide(t *testing.T) {
 	}
 }
 
+func TestWorkspaceExportListingIncludesDecisionsAndExcludesOtherTenants(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	request(t, store, "apr_pending", "ws-a", map[string]any{"path": "one"})
+	request(t, store, "apr_decided", "ws-a", map[string]any{"path": "two"})
+	request(t, store, "apr_other", "ws-b", map[string]any{"path": "secret"})
+	if _, err := store.Decide(ctx, "ws-a", "apr_decided", true,
+		member("usr_admin", "ws-a", "chat:chat"), "approved"); err != nil {
+		t.Fatal(err)
+	}
+	records, err := store.ListWorkspace(ctx, "ws-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("export listing returned %d records, want 2: %+v", len(records), records)
+	}
+	statuses := map[string]string{}
+	for _, record := range records {
+		if record.WorkspaceID != "ws-a" {
+			t.Fatalf("export listing crossed workspace boundary: %+v", record)
+		}
+		statuses[record.ID] = record.Status
+	}
+	if statuses["apr_pending"] != StatusPending || statuses["apr_decided"] != StatusApproved {
+		t.Fatalf("export listing lost approval history: %+v", statuses)
+	}
+}
+
 // Criterion 2, the other half: a member of the right workspace who lacks the
 // permission the request names is not an approver either.
 func TestAMemberWithoutTheRequiredPermissionCannotDecide(t *testing.T) {

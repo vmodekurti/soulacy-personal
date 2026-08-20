@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -466,6 +467,67 @@ func (s *Store) ListUsage(ctx context.Context, workspaceID string, since time.Ti
 		out = append(out, record)
 	}
 	return out, rows.Err()
+}
+
+// ExportWorkspaceJSON streams the complete prompt-free usage ledger for one
+// workspace as a JSON array. It deliberately has no page-size cap: the normal
+// UI list is bounded to protect request latency, while a workspace export is a
+// detached, bounded background job whose contract is completeness. Streaming
+// keeps that distinction from turning a large workspace into an equally large
+// in-memory slice.
+func (s *Store) ExportWorkspaceJSON(ctx context.Context, workspaceID string, w io.Writer) (int64, error) {
+	workspaceID, err := requireWorkspace(workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT subject, workspace, agent_id, session_id,
+		run_id, call_id, source, trigger_name, provider, model, prompt_tokens,
+		comp_tokens, total_tokens, cache_creation_tokens, cache_read_tokens,
+		reasoning_tokens, tool_use_prompt_tokens, cost_usd, cost_micros,
+		pricing_status, pricing_version, provider_request_id, provider_request_ids_json,
+		attempt_count, status, error_code, created_at
+		FROM token_usage WHERE workspace = ? ORDER BY created_at DESC, id DESC`, workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	var count int64
+	for rows.Next() {
+		var record UsageRecord
+		var requestIDs string
+		if err := rows.Scan(&record.Subject, &record.Workspace, &record.AgentID, &record.SessionID,
+			&record.RunID, &record.CallID, &record.Source, &record.Trigger, &record.Provider, &record.Model,
+			&record.PromptTokens, &record.CompTokens, &record.TotalTokens, &record.CacheCreationTokens,
+			&record.CacheReadTokens, &record.ReasoningTokens, &record.ToolUsePromptTokens, &record.CostUSD,
+			&record.CostMicros, &record.PricingStatus, &record.PricingVersion, &record.ProviderRequestID,
+			&requestIDs, &record.AttemptCount, &record.Status, &record.ErrorCode, &record.CreatedAt); err != nil {
+			return count, err
+		}
+		_ = json.Unmarshal([]byte(requestIDs), &record.ProviderRequestIDs)
+		body, err := json.Marshal(record)
+		if err != nil {
+			return count, err
+		}
+		if count == 0 {
+			if _, err := io.WriteString(w, "[\n"); err != nil {
+				return count, err
+			}
+		} else if _, err := io.WriteString(w, ",\n"); err != nil {
+			return count, err
+		}
+		if _, err := w.Write(body); err != nil {
+			return count, err
+		}
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		return count, err
+	}
+	if count > 0 {
+		_, err = io.WriteString(w, "\n]\n")
+	}
+	return count, err
 }
 
 // ReconcileProvider upserts one provider billing period and calculates the

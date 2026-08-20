@@ -50,6 +50,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/agentvalidate"
+	"github.com/soulacy/soulacy/internal/approvals"
 	"github.com/soulacy/soulacy/internal/auth"
 	"github.com/soulacy/soulacy/internal/auth/apikeys"
 	"github.com/soulacy/soulacy/internal/builder"
@@ -65,6 +66,7 @@ import (
 	"github.com/soulacy/soulacy/internal/llm"
 	"github.com/soulacy/soulacy/internal/mcp"
 	"github.com/soulacy/soulacy/internal/mcpstore"
+	"github.com/soulacy/soulacy/internal/memory"
 	"github.com/soulacy/soulacy/internal/metrics"
 	"github.com/soulacy/soulacy/internal/plugininstall"
 	"github.com/soulacy/soulacy/internal/plugins"
@@ -74,6 +76,7 @@ import (
 	"github.com/soulacy/soulacy/internal/runs"
 	"github.com/soulacy/soulacy/internal/runtime"
 	"github.com/soulacy/soulacy/internal/scheduler"
+	"github.com/soulacy/soulacy/internal/schedules"
 	"github.com/soulacy/soulacy/internal/session"
 	"github.com/soulacy/soulacy/internal/skills"
 	"github.com/soulacy/soulacy/internal/storage"
@@ -119,9 +122,12 @@ type Server struct {
 	skillLoader runtime.SkillLoader // nil if no skills installed
 	// skillStores, when set, resolves one workspace's skill inventory and takes
 	// precedence over skillLoader. Handlers reach it through s.skillCatalog(c).
-	skillStores *skills.Stores
-	actions     storage.ActionLogBackend // nil if action logging disabled
-	mcp         *mcp.Client              // nil if no MCP servers configured; the UNSCOPED client, see mcp_scope.go
+	skillStores   *skills.Stores
+	actions       storage.ActionLogBackend // nil if action logging disabled
+	memoryStore   memory.Store
+	memoryArchive storage.MemoryBackend
+	vectorMemory  *memory.VectorStore
+	mcp           *mcp.Client // nil if no MCP servers configured; the UNSCOPED client, see mcp_scope.go
 	// mcpPool gives each workspace its own MCP subprocesses. When it is set,
 	// no handler may use s.mcp — a guard test enforces that, because the two
 	// fields differ only in which tenant's servers they reach.
@@ -157,16 +163,21 @@ type Server struct {
 	// in-memory config — see ReloadConfig.
 	secrets         secretsOverlayer
 	hub             *EventHub
-	authEngine      *auth.Engine         // nil until SetAuth() is called
-	rbacManager     *rbac.Manager        // nil until SetRBAC() is called
-	credVault       credentials.Vault    // nil until SetCredentialVault() is called
-	builderRegistry *builder.Registry    // nil until SetBuilderRegistry() is called
-	rateLimiter     *ratelimit.Manager   // nil until SetRateLimiter() is called
-	apiKeyStore     apikeys.Store        // nil until SetAPIKeyStore() is called
-	dlqStore        dlq.Store            // nil until SetDLQStore() is called
+	authEngine      *auth.Engine       // nil until SetAuth() is called
+	rbacManager     *rbac.Manager      // nil until SetRBAC() is called
+	credVault       credentials.Vault  // nil until SetCredentialVault() is called
+	builderRegistry *builder.Registry  // nil until SetBuilderRegistry() is called
+	rateLimiter     *ratelimit.Manager // nil until SetRateLimiter() is called
+	apiKeyStore     apikeys.Store      // nil until SetAPIKeyStore() is called
+	dlqStore        dlq.Store          // nil until SetDLQStore() is called
+	approvalStore   *approvals.Store
+	scheduleStore   *schedules.Store
+	knowledgeStore  *knowledge.Store
+	checkpointStore *runtime.CheckpointStore
 	historyStore    session.HistoryStore // nil until SetHistoryStore() is called
 	resourceStore   session.ResourceStore
 	tenantResolver  tenancy.Resolver
+	tenantBootstrap tenancy.BootstrapManager
 	// workspaceLifecycle transitions a workspace between active, deleting and
 	// deleted. Separate from tenantMembers because beginning a deletion is the
 	// one irreversible action in the product, and folding it into the interface
@@ -480,6 +491,17 @@ func (s *Server) SetSkillStores(stores *skills.Stores) { s.skillStores = stores 
 
 func (s *Server) SetDLQStore(st dlq.Store) {
 	s.dlqStore = st
+}
+
+// SetApprovalStore and SetScheduleStore expose the durable stores to delayed
+// workspace export/deletion jobs. The scheduler and confirmation broker still
+// own live behaviour; the gateway only performs lifecycle operations.
+func (s *Server) SetApprovalStore(st *approvals.Store)           { s.approvalStore = st }
+func (s *Server) SetScheduleStore(st *schedules.Store)           { s.scheduleStore = st }
+func (s *Server) SetKnowledgeStore(st *knowledge.Store)          { s.knowledgeStore = st }
+func (s *Server) SetCheckpointStore(st *runtime.CheckpointStore) { s.checkpointStore = st }
+func (s *Server) SetMemoryStores(hot memory.Store, archive storage.MemoryBackend, vectors *memory.VectorStore) {
+	s.memoryStore, s.memoryArchive, s.vectorMemory = hot, archive, vectors
 }
 
 // SetSessionOwnershipStore wires durable session ownership. Until it is set,
@@ -965,6 +987,8 @@ func (s *Server) buildApp() *fiber.App {
 	// gates scraping. Scrape via:
 	//   curl -H 'Authorization: Bearer <key>' http://gw/api/v1/metrics
 	api.Get("/metrics", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.platformMetricsMW(), adaptor.HTTPHandler(metrics.Handler()))
+	api.Get("/admin/bootstrap", s.platformMW(rbac.ResourceConfig, rbac.ActionRead), s.handleAdminBootstrapState)
+	api.Post("/admin/bootstrap", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleAdminBootstrap)
 	api.Post("/admin/restart", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleRestart)
 	api.Get("/admin/audit", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleAdminAudit)
 	api.Get("/onboarding/status", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleOnboardingStatus)

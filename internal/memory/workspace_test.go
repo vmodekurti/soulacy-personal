@@ -5,6 +5,8 @@
 package memory
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -13,6 +15,76 @@ import (
 
 	"github.com/soulacy/soulacy/internal/wsroot"
 )
+
+func TestHotAndArchiveLifecycleOperationsAreWorkspaceScoped(t *testing.T) {
+	ctx := context.Background()
+	hotRoot := t.TempDir()
+	hot, err := NewFileStore(hotRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive, err := NewSQLiteArchive(filepath.Join(t.TempDir(), "mem.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer archive.Close()
+
+	for _, workspaceID := range []string{"ws_delete", "ws_keep"} {
+		record := entry(workspaceID, "bot", "shared", workspaceID+" content")
+		record.ID = workspaceID + "-1"
+		if err := hot.Write(record); err != nil {
+			t.Fatal(err)
+		}
+		if err := archive.Archive(record); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var exported bytes.Buffer
+	hotCount, err := hot.ExportWorkspaceJSONL(ctx, "ws_delete", &exported)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archiveCount, err := archive.ExportWorkspaceJSONL(ctx, "ws_delete", &exported)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hotCount != 1 || archiveCount != 1 || !strings.Contains(exported.String(), "ws_delete content") || strings.Contains(exported.String(), "ws_keep content") {
+		t.Fatalf("scoped memory export counts=%d/%d body=%s", hotCount, archiveCount, exported.String())
+	}
+	if !strings.Contains(exported.String(), `"tier":"hot"`) || !strings.Contains(exported.String(), `"tier":"archive"`) {
+		t.Fatalf("memory tiers are not identifiable: %s", exported.String())
+	}
+
+	if _, err := hot.PurgeWorkspace(ctx, "ws_delete"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := archive.PurgeWorkspace(ctx, "ws_delete"); err != nil {
+		t.Fatal(err)
+	}
+	deletedHot, err := hot.Read("ws_delete", "bot", "shared", ScopeSession, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keptHot, err := hot.Read("ws_keep", "bot", "shared", ScopeSession, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deletedArchive, err := archive.ReadGlobal("ws_delete", "bot", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keptArchive, err := archive.ReadGlobal("ws_keep", "bot", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(deletedHot) != 0 || len(deletedArchive) != 0 || len(keptHot) != 1 || len(keptArchive) != 1 {
+		t.Fatalf("after purge hot=%d/%d archive=%d/%d", len(deletedHot), len(keptHot), len(deletedArchive), len(keptArchive))
+	}
+	if _, err := hot.PurgeWorkspace(ctx, wsroot.PersonalWorkspaceID); err == nil {
+		t.Fatal("hot-memory purge accepted the personal/shared root")
+	}
+}
 
 func entry(workspaceID, agentID, sessionID, content string) Entry {
 	return Entry{

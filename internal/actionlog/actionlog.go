@@ -22,10 +22,10 @@ package actionlog
 import (
 	"bufio"
 	"compress/gzip"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/soulacy/soulacy/internal/wsroot"
 	"io"
 	"os"
 	"path/filepath"
@@ -39,8 +39,69 @@ import (
 	"github.com/soulacy/soulacy/internal/metrics"
 	"github.com/soulacy/soulacy/internal/redact"
 	"github.com/soulacy/soulacy/internal/sqlitex"
+	"github.com/soulacy/soulacy/internal/workspacepurge"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/message"
 )
+
+// ExportWorkspaceJSONL streams every durable event owned by workspaceID in
+// stable insertion order. It deliberately reads the database rather than the
+// rolling mirror files: rotated files are an operational tail, while
+// agent_events is the complete retention-controlled record.
+func (l *Logger) ExportWorkspaceJSONL(ctx context.Context, workspaceID string, w io.Writer) (int64, error) {
+	if err := wsroot.Validate(strings.TrimSpace(workspaceID)); err != nil {
+		return 0, err
+	}
+	rows, err := l.db.QueryContext(ctx, `
+		SELECT workspace_id, agent_id, session_id, type, COALESCE(payload, ''), created_at
+		FROM agent_events
+		WHERE workspace_id = ?
+		ORDER BY created_at ASC, id ASC`, workspaceOrPersonal(workspaceID))
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	encoder := json.NewEncoder(w)
+	var count int64
+	for rows.Next() {
+		var ev message.Event
+		var payload string
+		var atRaw any
+		if err := rows.Scan(&ev.WorkspaceID, &ev.AgentID, &ev.SessionID, &ev.Type, &payload, &atRaw); err != nil {
+			return count, err
+		}
+		ev.Timestamp = parseSQLiteTime(atRaw)
+		if payload != "" {
+			if err := json.Unmarshal([]byte(payload), &ev.Payload); err != nil {
+				ev.Payload = payload
+			}
+		}
+		if err := encoder.Encode(ev); err != nil {
+			return count, err
+		}
+		count++
+	}
+	return count, rows.Err()
+}
+
+// PurgeWorkspace removes both representations of a workspace's action log.
+// PurgeTree performs the safety check before any database mutation, so an
+// invalid or personal workspace ID cannot turn this into a broad delete.
+func (l *Logger) PurgeWorkspace(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+	removed, err := workspacepurge.PurgeTree(ctx, l.dir, workspaceID)
+	if err != nil {
+		return removed, err
+	}
+	result, err := l.db.ExecContext(ctx, `DELETE FROM agent_events WHERE workspace_id = ?`, workspaceOrPersonal(workspaceID))
+	if err != nil {
+		return removed, err
+	}
+	rows, err := result.RowsAffected()
+	removed.Rows += rows
+	removed.Note = "action-event rows and workspace mirror files"
+	return removed, err
+}
 
 const (
 	// maxFileBytes triggers pruning of a per-agent log file once exceeded.

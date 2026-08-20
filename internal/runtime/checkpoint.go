@@ -180,6 +180,38 @@ func (s *CheckpointStore) ListInProgressAcrossWorkspaces(ctx context.Context) ([
 	return s.listInProgress(ctx, "")
 }
 
+func (s *CheckpointStore) ListWorkspace(ctx context.Context, workspaceID string) ([]Checkpoint, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT workspace_id, agent_id, run_id, step_id, state, status, updated_at
+		FROM workflow_checkpoints WHERE workspace_id=? ORDER BY updated_at, agent_id, run_id, step_id`, wsroot.Normalize(workspaceID))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Checkpoint
+	for rows.Next() {
+		var cp Checkpoint
+		var state sql.NullString
+		var updated string
+		if err := rows.Scan(&cp.WorkspaceID, &cp.AgentID, &cp.RunID, &cp.StepID, &state, &cp.Status, &updated); err != nil {
+			return nil, err
+		}
+		if state.Valid {
+			cp.State = json.RawMessage(state.String)
+		}
+		cp.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
+		out = append(out, cp)
+	}
+	return out, rows.Err()
+}
+
+func (s *CheckpointStore) PurgeWorkspace(ctx context.Context, workspaceID string) (int64, error) {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM workflow_checkpoints WHERE workspace_id=?`, wsroot.Normalize(workspaceID))
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 func (s *CheckpointStore) listInProgress(ctx context.Context, workspaceID string) ([]Checkpoint, error) {
 	query := `
 SELECT workspace_id, agent_id, run_id, step_id, state, status, updated_at

@@ -289,6 +289,28 @@ func (s *Store) ListPending(ctx context.Context, workspaceID string) ([]Approval
 	return out, nil
 }
 
+// ListWorkspace returns the complete approval history for an export. Unlike
+// ListPending it intentionally includes decided and expired records: those are
+// the audit evidence a workspace export is expected to preserve.
+func (s *Store) ListWorkspace(ctx context.Context, workspaceID string) ([]Approval, error) {
+	rows, err := s.db.QueryContext(ctx,
+		selectColumns+` FROM tool_approvals WHERE workspace_id = ? ORDER BY created_at DESC, id DESC`,
+		wsroot.Normalize(workspaceID))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Approval{}
+	for rows.Next() {
+		approval, err := scan(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, approval)
+	}
+	return out, rows.Err()
+}
+
 // Eligibility is the authority a decider brings, resolved from CURRENT state
 // by the caller. The store does not resolve it, because membership and roles
 // live in the tenancy and RBAC packages and an approval store that reached

@@ -15,11 +15,16 @@
 package knowledge
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -30,6 +35,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/soulacy/soulacy/internal/sqlitex"
+	"github.com/soulacy/soulacy/internal/workspacepurge"
 )
 
 // KB describes a single knowledge base.
@@ -535,6 +541,255 @@ func (s *Store) ListDocuments(workspaceID, kbID string) ([]Document, error) {
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+// ExportWorkspaceJSONL streams every reconstructable knowledge record for one
+// workspace. Embedding vectors are deliberately excluded: the ownership
+// catalog classifies them as regenerable metadata, while source chunks are the
+// durable content needed to rebuild them.
+func (s *Store) ExportWorkspaceJSONL(ctx context.Context, workspaceID string, w io.Writer) (int64, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return 0, ErrWorkspaceRequired
+	}
+	encoder := json.NewEncoder(w)
+	var count int64
+	emit := func(kind string, value any) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		count++
+		return encoder.Encode(struct {
+			Kind  string `json:"kind"`
+			Value any    `json:"value"`
+		}{Kind: kind, Value: value})
+	}
+
+	kbs, err := s.ListKBs(workspaceID)
+	if err != nil {
+		return count, err
+	}
+	for _, kb := range kbs {
+		if err := emit("knowledge_base", kb); err != nil {
+			return count, err
+		}
+		documents, err := s.ListDocuments(workspaceID, kb.ID)
+		if err != nil {
+			return count, err
+		}
+		for _, document := range documents {
+			if err := emit("document", document); err != nil {
+				return count, err
+			}
+		}
+		rows, err := s.db.QueryContext(ctx, `SELECT id, doc_id, kb_id, ordinal, content,
+			COALESCE(parent_chunk_id, '') FROM chunks WHERE workspace_id = ? AND kb_id = ? ORDER BY doc_id, ordinal, id`,
+			workspaceID, kb.ID)
+		if err != nil {
+			return count, err
+		}
+		for rows.Next() {
+			var chunk Chunk
+			if err := rows.Scan(&chunk.ID, &chunk.DocID, &chunk.KBID, &chunk.Ordinal, &chunk.Content, &chunk.ParentChunkID); err != nil {
+				rows.Close()
+				return count, err
+			}
+			if err := emit("chunk", chunk); err != nil {
+				rows.Close()
+				return count, err
+			}
+		}
+		if err := rows.Close(); err != nil {
+			return count, err
+		}
+	}
+
+	jobs, err := s.listWorkspaceIngests(workspaceID)
+	if err != nil {
+		return count, err
+	}
+	for _, job := range jobs {
+		if err := emit("ingest_job", job); err != nil {
+			return count, err
+		}
+	}
+	return count, nil
+}
+
+// ExportVectorMetadataJSONL records enough lineage to verify and rebuild the
+// workspace's embeddings without exporting the large regenerable float arrays.
+func (s *Store) ExportVectorMetadataJSONL(ctx context.Context, workspaceID string, w io.Writer) (int64, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return 0, ErrWorkspaceRequired
+	}
+	kbs, err := s.ListKBs(workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	encoder := json.NewEncoder(w)
+	var count int64
+	for _, kb := range kbs {
+		rows, err := s.db.QueryContext(ctx, `SELECT chunk_id FROM `+vecTable(kb.ID)+` ORDER BY chunk_id`)
+		if err != nil {
+			return count, err
+		}
+		for rows.Next() {
+			var chunkID string
+			if err := rows.Scan(&chunkID); err != nil {
+				rows.Close()
+				return count, err
+			}
+			if err := encoder.Encode(struct {
+				KBID       string `json:"kb_id"`
+				KBName     string `json:"kb_name"`
+				Provider   string `json:"embedding_provider"`
+				Model      string `json:"embedding_model"`
+				Dimensions int    `json:"dimensions"`
+				ChunkID    string `json:"chunk_id"`
+			}{kb.ID, kb.Name, kb.EmbeddingProvider, kb.EmbeddingModel, kb.Dim, chunkID}); err != nil {
+				rows.Close()
+				return count, err
+			}
+			count++
+		}
+		if err := rows.Close(); err != nil {
+			return count, err
+		}
+	}
+	return count, nil
+}
+
+func (s *Store) listWorkspaceIngests(workspaceID string) ([]IngestJob, error) {
+	rows, err := s.db.Query(`SELECT id, workspace_id, kb_name, title, source, mime_type, spool_path, byte_size,
+		status, attempt, progress, COALESCE(error,''), COALESCE(doc_id,''), created_at, started_at, ended_at
+		FROM ingest_jobs WHERE workspace_id = ? ORDER BY created_at DESC, id DESC`, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var jobs []IngestJob
+	for rows.Next() {
+		job, err := scanIngest(rows)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs, rows.Err()
+}
+
+// PurgeWorkspace removes a workspace's dynamic vector/FTS state, relational
+// records, ingest jobs, and any still-spooled uploads. Every spool path is
+// proven inside spoolRoot before the first mutation; a corrupted database row
+// can therefore stop deletion, but cannot turn deletion into an arbitrary
+// filesystem remove.
+func (s *Store) PurgeWorkspace(ctx context.Context, workspaceID, spoolRoot string) (workspacepurge.Removed, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return workspacepurge.Removed{}, ErrWorkspaceRequired
+	}
+	jobs, err := s.listWorkspaceIngests(workspaceID)
+	if err != nil {
+		return workspacepurge.Removed{}, err
+	}
+	root, err := filepath.EvalSymlinks(spoolRoot)
+	if err != nil {
+		return workspacepurge.Removed{}, fmt.Errorf("knowledge: resolve ingest spool root: %w", err)
+	}
+	root, err = filepath.Abs(root)
+	if err != nil {
+		return workspacepurge.Removed{}, err
+	}
+	paths := make([]string, 0, len(jobs))
+	for _, job := range jobs {
+		path, err := confinedSpoolPath(root, job.SpoolPath)
+		if err != nil {
+			return workspacepurge.Removed{}, err
+		}
+		paths = append(paths, path)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rows, err := s.db.QueryContext(ctx, `SELECT id FROM knowledge_bases WHERE workspace_id = ?`, workspaceID)
+	if err != nil {
+		return workspacepurge.Removed{}, err
+	}
+	var kbIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return workspacepurge.Removed{}, err
+		}
+		kbIDs = append(kbIDs, id)
+	}
+	if err := rows.Close(); err != nil {
+		return workspacepurge.Removed{}, err
+	}
+
+	var removedBytes int64
+	for _, path := range paths {
+		if info, err := os.Stat(path); err == nil {
+			removedBytes += info.Size()
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return workspacepurge.Removed{}, fmt.Errorf("knowledge: remove spooled upload: %w", err)
+		}
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return workspacepurge.Removed{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if s.hasFTS5 {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM chunks_fts WHERE chunk_id IN
+			(SELECT id FROM chunks WHERE workspace_id = ?)`, workspaceID); err != nil {
+			return workspacepurge.Removed{}, err
+		}
+	}
+	for _, id := range kbIDs {
+		if _, err := tx.ExecContext(ctx, `DROP TABLE IF EXISTS `+vecTable(id)); err != nil {
+			return workspacepurge.Removed{}, err
+		}
+	}
+	var removedRows int64
+	for _, statement := range []string{
+		`DELETE FROM knowledge_bases WHERE workspace_id = ?`,
+		`DELETE FROM ingest_jobs WHERE workspace_id = ?`,
+	} {
+		result, err := tx.ExecContext(ctx, statement, workspaceID)
+		if err != nil {
+			return workspacepurge.Removed{}, err
+		}
+		n, _ := result.RowsAffected()
+		removedRows += n
+	}
+	if err := tx.Commit(); err != nil {
+		return workspacepurge.Removed{}, err
+	}
+	return workspacepurge.Removed{Rows: removedRows, Bytes: removedBytes, Note: "knowledge bases, documents, chunks, vectors, ingest jobs, and spool files"}, nil
+}
+
+func confinedSpoolPath(root, candidate string) (string, error) {
+	candidate, err := filepath.Abs(strings.TrimSpace(candidate))
+	if err != nil {
+		return "", err
+	}
+	// Resolve the parent even when the file no longer exists. This catches a
+	// symlink planted between the spool directory and a named upload.
+	parent, err := filepath.EvalSymlinks(filepath.Dir(candidate))
+	if err != nil {
+		return "", fmt.Errorf("knowledge: resolve spool parent: %w", err)
+	}
+	candidate = filepath.Join(parent, filepath.Base(candidate))
+	rel, err := filepath.Rel(root, candidate)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("knowledge: refusing spool path outside ingest root: %q", candidate)
+	}
+	return candidate, nil
 }
 
 // DeleteDocument removes a document, cascading chunks, and clears the matching

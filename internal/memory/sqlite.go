@@ -5,9 +5,11 @@
 package memory
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +18,8 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/soulacy/soulacy/internal/sqlitex"
+	"github.com/soulacy/soulacy/internal/workspacepurge"
+	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
 var archiveSQLiteVecAuto sync.Once
@@ -193,6 +197,46 @@ func (a *SQLiteArchive) Stats(agentID string) (count int64, err error) {
 }
 
 func (a *SQLiteArchive) Close() error { return a.db.Close() }
+
+func (a *SQLiteArchive) ExportWorkspaceJSONL(ctx context.Context, workspaceID string, w io.Writer) (int64, error) {
+	if err := wsroot.Validate(strings.TrimSpace(workspaceID)); err != nil {
+		return 0, err
+	}
+	rows, err := a.db.QueryContext(ctx, `
+		SELECT id, workspace_id, agent_id, session_id, scope, provenance, key,
+		       content, metadata, created_at, expires_at
+		FROM memories WHERE workspace_id = ? ORDER BY created_at ASC, id ASC`, wsroot.Normalize(workspaceID))
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	entries, err := scanEntries(rows)
+	if err != nil {
+		return 0, err
+	}
+	encoder := json.NewEncoder(w)
+	for i, entry := range entries {
+		if err := encoder.Encode(struct {
+			Tier  string `json:"tier"`
+			Entry Entry  `json:"entry"`
+		}{Tier: "archive", Entry: entry}); err != nil {
+			return int64(i), err
+		}
+	}
+	return int64(len(entries)), nil
+}
+
+func (a *SQLiteArchive) PurgeWorkspace(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+	if err := wsroot.Validate(strings.TrimSpace(workspaceID)); err != nil {
+		return workspacepurge.Removed{}, err
+	}
+	result, err := a.db.ExecContext(ctx, `DELETE FROM memories WHERE workspace_id = ?`, wsroot.Normalize(workspaceID))
+	if err != nil {
+		return workspacepurge.Removed{}, err
+	}
+	rows, err := result.RowsAffected()
+	return workspacepurge.Removed{Rows: rows, Note: "durable memory archive rows"}, err
+}
 
 // DB returns the underlying *sql.DB for callers (e.g. VectorStore) that need
 // to share the same connection pool. Only use for tables NOT managed by

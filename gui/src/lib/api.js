@@ -463,6 +463,8 @@ export const api = {
     // been enough to do it. Personal ignores it.
     restart: () => apiFetch('/admin/restart', { method: 'POST', body: JSON.stringify({ confirm: 'restart' }) }),
     audit: (limit = 50) => apiFetch('/admin/audit?limit=' + encodeURIComponent(limit)),
+    bootstrapStatus: () => apiFetch('/admin/bootstrap'),
+    bootstrap: (body) => apiFetch('/admin/bootstrap', { method: 'POST', body: JSON.stringify(body) }),
   },
 
   // MU-029. The three endpoints a client needs to know where it is, where it

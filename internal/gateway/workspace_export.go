@@ -13,8 +13,10 @@ import (
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 
+	"github.com/soulacy/soulacy/internal/auth/apikeys"
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/requestctx"
+	"github.com/soulacy/soulacy/internal/session"
 	"github.com/soulacy/soulacy/internal/tenancy"
 	"github.com/soulacy/soulacy/internal/workboard"
 	"github.com/soulacy/soulacy/internal/workspaceexport"
@@ -102,7 +104,7 @@ func newExportID() (string, error) {
 // reason, because workspaceexport seeds the manifest from the ownership
 // catalog rather than from this list. That is the property worth having: this
 // function can be incomplete, and cannot be quietly incomplete.
-func (s *Server) exportSources(workspaceID string, definitions []*agent.Definition) []workspaceexport.Source {
+func (s *Server) exportSources(organizationID, workspaceID string, definitions []*agent.Definition) []workspaceexport.Source {
 	var sources []workspaceexport.Source
 
 	// agents — emitted as a YAML stream because the catalog's export promise
@@ -128,6 +130,17 @@ func (s *Server) exportSources(workspaceID string, definitions []*agent.Definiti
 			return true, encoder.Close()
 		},
 	})
+	if s.loader != nil {
+		loader := s.loader
+		sources = append(sources, workspaceexport.Source{
+			Resource: "definitions",
+			Filename: "definition-versions.jsonl",
+			Emit: func(ctx context.Context, w io.Writer) (bool, error) {
+				count, err := loader.ExportWorkspaceVersionsJSONL(ctx, workspaceID, w)
+				return count > 0, err
+			},
+		})
+	}
 
 	if s.runStore != nil {
 		store := s.runStore
@@ -147,6 +160,19 @@ func (s *Server) exportSources(workspaceID string, definitions []*agent.Definiti
 		})
 	}
 
+	if store, ok := s.actions.(interface {
+		ExportWorkspaceJSONL(context.Context, string, io.Writer) (int64, error)
+	}); ok {
+		sources = append(sources, workspaceexport.Source{
+			Resource: "events",
+			Filename: "events.jsonl",
+			Emit: func(ctx context.Context, w io.Writer) (bool, error) {
+				count, err := store.ExportWorkspaceJSONL(ctx, workspaceID, w)
+				return count > 0, err
+			},
+		})
+	}
+
 	if s.workboardStore != nil {
 		store := s.workboardStore
 		sources = append(sources, workspaceexport.Source{
@@ -158,6 +184,226 @@ func (s *Server) exportSources(workspaceID string, definitions []*agent.Definiti
 					return false, err
 				}
 				return encodeJSONList(w, tasks)
+			},
+		})
+	}
+
+	if s.costStore != nil {
+		store := s.costStore
+		sources = append(sources, workspaceexport.Source{
+			Resource: "costs",
+			Filename: "costs.json",
+			Emit: func(ctx context.Context, w io.Writer) (bool, error) {
+				count, err := store.ExportWorkspaceJSON(ctx, workspaceID, w)
+				return count > 0, err
+			},
+		})
+	}
+
+	if s.mcpServers != nil {
+		store := s.mcpServers
+		sources = append(sources, workspaceexport.Source{
+			Resource: "mcp",
+			Filename: "mcp-servers.json",
+			Emit: func(ctx context.Context, w io.Writer) (bool, error) {
+				servers, err := store.List(ctx, workspaceID)
+				if err != nil {
+					return false, err
+				}
+				// The store contains references and non-secret configuration;
+				// credential values live in the vault and cannot enter this file.
+				return encodeJSONList(w, servers)
+			},
+		})
+	}
+
+	if s.workspacePolicies != nil {
+		store := s.workspacePolicies
+		sources = append(sources, workspaceexport.Source{
+			Resource: "workspace-policy",
+			Filename: "workspace-policy.json",
+			Emit: func(ctx context.Context, w io.Writer) (bool, error) {
+				policy, err := store.Get(ctx, workspaceID)
+				if err != nil {
+					return false, err
+				}
+				if policy.UpdatedAt.IsZero() {
+					return false, nil
+				}
+				return encodeJSONValue(w, policy)
+			},
+		})
+	}
+
+	if s.dlqStore != nil {
+		store := s.dlqStore
+		sources = append(sources, workspaceexport.Source{
+			Resource: "queue-dlq",
+			Filename: "dead-letters.json",
+			Emit: func(ctx context.Context, w io.Writer) (bool, error) {
+				letters, err := store.List(ctx, workspaceID, "")
+				if err != nil {
+					return false, err
+				}
+				return encodeJSONList(w, letters)
+			},
+		})
+	}
+
+	if s.approvalStore != nil {
+		store := s.approvalStore
+		sources = append(sources, workspaceexport.Source{
+			Resource: "approvals",
+			Filename: "approvals.json",
+			Emit: func(ctx context.Context, w io.Writer) (bool, error) {
+				records, err := store.ListWorkspace(ctx, workspaceID)
+				if err != nil {
+					return false, err
+				}
+				return encodeJSONList(w, records)
+			},
+		})
+	}
+
+	if s.scheduleStore != nil {
+		store := s.scheduleStore
+		sources = append(sources, workspaceexport.Source{
+			Resource: "schedules",
+			Filename: "schedules.json",
+			Emit: func(ctx context.Context, w io.Writer) (bool, error) {
+				records, err := store.ListWorkspace(ctx, workspaceID)
+				if err != nil {
+					return false, err
+				}
+				return encodeJSONList(w, records)
+			},
+		})
+	}
+
+	if s.knowledgeStore != nil {
+		store := s.knowledgeStore
+		sources = append(sources, workspaceexport.Source{
+			Resource: "knowledge",
+			Filename: "knowledge.jsonl",
+			Emit: func(ctx context.Context, w io.Writer) (bool, error) {
+				count, err := store.ExportWorkspaceJSONL(ctx, workspaceID, w)
+				return count > 0, err
+			},
+		})
+	}
+
+	hotMemory, hotOK := s.memoryStore.(interface {
+		ExportWorkspaceJSONL(context.Context, string, io.Writer) (int64, error)
+	})
+	archiveMemory, archiveOK := s.memoryArchive.(interface {
+		ExportWorkspaceJSONL(context.Context, string, io.Writer) (int64, error)
+	})
+	if hotOK && archiveOK {
+		sources = append(sources, workspaceexport.Source{
+			Resource: "memory",
+			Filename: "memory.jsonl",
+			Emit: func(ctx context.Context, w io.Writer) (bool, error) {
+				hotCount, err := hotMemory.ExportWorkspaceJSONL(ctx, workspaceID, w)
+				if err != nil {
+					return hotCount > 0, err
+				}
+				archiveCount, err := archiveMemory.ExportWorkspaceJSONL(ctx, workspaceID, w)
+				return hotCount+archiveCount > 0, err
+			},
+		})
+	}
+	if s.knowledgeStore != nil || s.vectorMemory != nil {
+		knowledgeVectors, memoryVectors := s.knowledgeStore, s.vectorMemory
+		sources = append(sources, workspaceexport.Source{
+			Resource: "vectors",
+			Filename: "vector-metadata.jsonl",
+			Emit: func(ctx context.Context, w io.Writer) (bool, error) {
+				var total int64
+				if knowledgeVectors != nil {
+					count, err := knowledgeVectors.ExportVectorMetadataJSONL(ctx, workspaceID, w)
+					total += count
+					if err != nil {
+						return total > 0, err
+					}
+				}
+				if memoryVectors != nil {
+					count, err := memoryVectors.ExportWorkspaceMetadataJSONL(ctx, workspaceID, w)
+					total += count
+					if err != nil {
+						return total > 0, err
+					}
+				}
+				return total > 0, nil
+			},
+		})
+	}
+
+	if store, ok := s.historyStore.(interface {
+		ExportWorkspaceJSONL(context.Context, string, io.Writer) (int64, error)
+	}); ok {
+		sources = append(sources, workspaceexport.Source{
+			Resource: "messages",
+			Filename: "messages.jsonl",
+			Emit: func(ctx context.Context, w io.Writer) (bool, error) {
+				count, err := store.ExportWorkspaceJSONL(ctx, workspaceID, w)
+				return count > 0, err
+			},
+		})
+	}
+
+	owners, ownersOK := s.sessionOwnership.(interface {
+		ListWorkspace(context.Context, string) ([]session.Ownership, error)
+	})
+	attachments, attachmentsOK := s.resourceStore.(interface {
+		ListWorkspaceAttachments(context.Context, string) ([]session.ExportedAttachment, error)
+	})
+	if ownersOK && attachmentsOK && s.checkpointStore != nil {
+		checkpoints := s.checkpointStore
+		sources = append(sources, workspaceexport.Source{
+			Resource: "sessions",
+			Filename: "sessions.json",
+			Emit: func(ctx context.Context, w io.Writer) (bool, error) {
+				ownership, err := owners.ListWorkspace(ctx, workspaceID)
+				if err != nil {
+					return false, err
+				}
+				files, err := attachments.ListWorkspaceAttachments(ctx, workspaceID)
+				if err != nil {
+					return false, err
+				}
+				steps, err := checkpoints.ListWorkspace(ctx, workspaceID)
+				if err != nil {
+					return false, err
+				}
+				if len(ownership) == 0 && len(files) == 0 && len(steps) == 0 {
+					return false, nil
+				}
+				return encodeJSONValue(w, struct {
+					Ownership   []session.Ownership          `json:"ownership"`
+					Attachments []session.ExportedAttachment `json:"attachments"`
+					Checkpoints any                          `json:"checkpoints"`
+				}{
+					Ownership:   ownership,
+					Attachments: files,
+					Checkpoints: steps,
+				})
+			},
+		})
+	}
+
+	// Credential exports contain metadata only. Requiring ScopedLister keeps
+	// another tenant's metadata out of memory as well as out of the archive;
+	// a legacy unscoped store is reported as not-exported by the manifest.
+	if store, ok := s.apiKeyStore.(apikeys.ScopedLister); ok {
+		sources = append(sources, workspaceexport.Source{
+			Resource: "api-keys",
+			Filename: "api-keys.json",
+			Emit: func(ctx context.Context, w io.Writer) (bool, error) {
+				keys, err := store.ListForWorkspace(ctx, organizationID, workspaceID, true)
+				if err != nil {
+					return false, err
+				}
+				return encodeJSONList(w, keys)
 			},
 		})
 	}
@@ -180,6 +426,15 @@ func encodeJSONList[T any](w io.Writer, list []T) (bool, error) {
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(list); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func encodeJSONValue(w io.Writer, value any) (bool, error) {
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(value); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -224,7 +479,7 @@ func (s *Server) handleRequestWorkspaceExport(c *fiber.Ctx) error {
 	// reads locals off the Fiber context, which is recycled the instant this
 	// handler returns.
 	definitions := s.agents(c).All()
-	sources := s.exportSources(workspaceID, definitions)
+	sources := s.exportSources(identity.OrganizationID(), workspaceID, definitions)
 	if err := workspaceexport.ValidateSources(sources); err != nil {
 		// Fail loudly rather than producing an archive whose manifest silently
 		// under-reports. A Source naming a class the catalog does not carry is

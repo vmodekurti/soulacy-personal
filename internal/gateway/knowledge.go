@@ -354,7 +354,7 @@ func (s *Server) handleIngestDocument(c *fiber.Ctx) error {
 	// progress, and the work lost on a restart or a transient embedder error.
 	// Now the request only records the job durably and returns 202 Accepted; the
 	// background worker performs the ingestion and reports live progress.
-	job, err := s.enqueueIngest(kb.Name, title, source, mimeType, reader, size)
+	job, err := s.enqueueIngest(s.agents(c).WorkspaceID(), kb.Name, title, source, mimeType, reader, size)
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}

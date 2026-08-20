@@ -812,6 +812,14 @@ func (e *Engine) SetResourceStore(s session.ResourceStore) { e.resources = &s }
 // SetCheckpointStore wires the workflow checkpoint store (E5 — Structured
 // Workflow Scaffolding). Safe to call once at startup before any traffic.
 func (e *Engine) SetCheckpointStore(s *CheckpointStore) { e.checkpoints = s }
+func (e *Engine) CheckpointStore() *CheckpointStore     { return e.checkpoints }
+
+// MemoryStores exposes the already-wired lifecycle-capable stores to the
+// gateway. The interfaces remain read/write runtime dependencies; export and
+// purge support is discovered there through optional interfaces.
+func (e *Engine) MemoryStores() (memory.Store, storage.MemoryBackend, *memory.VectorStore) {
+	return e.memory, e.archive, e.vectorStore
+}
 
 // ---------------------------------------------------------------------------
 // Task #32 — telemetry + cost tracking interfaces and setters

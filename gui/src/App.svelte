@@ -11,11 +11,13 @@
   import { can, permissions } from './lib/workspace.js'
   import Walkthrough from './lib/walkthrough/Walkthrough.svelte'
   import WorkspaceSwitcher from './lib/WorkspaceSwitcher.svelte'
+  import AdminSetup from './pages/AdminSetup.svelte'
   import {
     loadWalkthroughState, startWalkthrough, shouldAutoStart,
   } from './lib/walkthrough/store.js'
 
   let page = 'dashboard'
+  const adminSetupPath = ['/admin/setup', '/admin/login'].includes(location.pathname.replace(/\/+$/, '') || '/')
   let shareToken = ''   // set from #share/<token> — renders the public read-only view
   let pluginPages = []   // nav entries for mounted plugin UIs (E8)
   let showKeyModal = false
@@ -155,6 +157,7 @@
   }
 
   onMount(() => {
+		if (adminSetupPath) { discoverLogin(); return }
 		discoverLogin()
     const applyHash = () => {
       const h = location.hash.slice(1)
@@ -313,7 +316,9 @@
 
 <!-- Public read-only shared conversation — rendered before (and instead of) the
      login gate and the app shell, so it needs no API key. -->
-{#if shareToken}
+{#if adminSetupPath}
+  <AdminSetup />
+{:else if shareToken}
   <ShareView token={shareToken} />
 {:else if $authRequired}
   <div class="login-screen">
@@ -350,6 +355,7 @@
         Find your key in <code>~/.soulacy/soulspace/config.yaml</code> (under
         <code>server.api_key</code>) or the <code>SOULACY_API_KEY</code> env var.
       </p>
+      <p class="login-hint"><a href="/admin/setup">Administrator setup or sign-in</a></p>
     </form>
   </div>
 {/if}
@@ -425,7 +431,7 @@
   </div>
 {/if}
 
-{#if !shareToken}
+{#if !shareToken && !adminSetupPath}
 <div class="layout">
   <!-- Mobile top bar (hidden on desktop) -->
   <header class="topbar">

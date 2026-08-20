@@ -1,6 +1,7 @@
 package rbac
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/soulacy/soulacy/internal/sqlitex"
+	"github.com/soulacy/soulacy/internal/workspacepurge"
 	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
@@ -224,6 +226,10 @@ func (s *SQLiteStore) ListAgentGrantsForRoleInWorkspace(workspaceID, role string
 		`SELECT workspace_id,role,agent_id,actions,elevated,granted_by_role FROM rbac_agent_grants WHERE workspace_id=? AND role=? ORDER BY agent_id`,
 		normalizeWorkspace(workspaceID), role,
 	)
+}
+
+func (s *SQLiteStore) PurgeWorkspace(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+	return workspacepurge.PurgeCatalogTables(ctx, s.db, "agents", workspaceID)
 }
 
 func (s *SQLiteStore) listGrants(query string, args ...any) ([]AgentGrant, error) {

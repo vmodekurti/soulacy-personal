@@ -281,6 +281,37 @@ func (s *SQLiteOwnershipStore) ListForPrincipal(ctx context.Context, workspaceID
 	return out, rows.Err()
 }
 
+func (s *SQLiteOwnershipStore) ListWorkspace(ctx context.Context, workspaceID string) ([]Ownership, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return nil, ErrSessionNotFound
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT session_id, workspace_id, agent_id, creator, visibility, created_at, updated_at
+		FROM session_owners WHERE workspace_id=? ORDER BY updated_at DESC, session_id`, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Ownership
+	for rows.Next() {
+		var owner Ownership
+		if err := rows.Scan(&owner.SessionID, &owner.WorkspaceID, &owner.AgentID, &owner.Creator,
+			&owner.Visibility, &owner.CreatedAt, &owner.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, owner)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteOwnershipStore) PurgeWorkspace(ctx context.Context, workspaceID string) (int64, error) {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM session_owners WHERE workspace_id=?`, strings.TrimSpace(workspaceID))
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 func (s *SQLiteOwnershipStore) Delete(ctx context.Context, sessionID string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM session_owners WHERE session_id=?`, strings.TrimSpace(sessionID))
 	return err
