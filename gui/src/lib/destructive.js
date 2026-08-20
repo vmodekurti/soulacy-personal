@@ -75,3 +75,15 @@ export function confirmLocal(message) {
     return true
   }
 }
+
+// confirmPlatform classifies a deployment-wide operation. It deliberately
+// does not name a workspace: the whole point of the platform control plane is
+// that its principal has no workspace context and the blast radius is every
+// tenant. Callers must state that blast radius in the message.
+export function confirmPlatform(message) {
+  try {
+    return window.confirm(message)
+  } catch (_) {
+    return true
+  }
+}

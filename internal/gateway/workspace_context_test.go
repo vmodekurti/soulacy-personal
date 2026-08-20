@@ -128,6 +128,46 @@ func TestWorkspaceContextUsesWorkspaceRoleInMultiUserMode(t *testing.T) {
 	}
 }
 
+func TestHumanSessionWorkspaceSelectorOverridesItsMintedWorkspace(t *testing.T) {
+	s := withCfg(&Server{log: zap.NewNop()}, &config.Config{Deployment: config.DeploymentConfig{Mode: config.DeploymentModeTeam}})
+	r := &recordingMembershipResolver{membership: tenancy.Membership{
+		OrganizationID: "org_verified", WorkspaceID: "ws_new", MembershipID: "mem_new", Role: "owner",
+	}}
+	s.SetTenantResolver(r)
+	app := fiber.New(fiber.Config{Immutable: true})
+	app.Use(func(c *fiber.Ctx) error {
+		auth.SetClaims(c, &auth.Claims{
+			RegisteredClaims: jwt.RegisteredClaims{Subject: "usr_owner"},
+			Kind:             "access", PrincipalKind: "user", OrganizationID: "org_minted", WorkspaceID: "ws_minted",
+		})
+		c.Locals("request_id", "req-switch")
+		return c.Next()
+	})
+	app.Use(s.workspaceContextMW())
+	app.Get("/protected", func(c *fiber.Ctx) error {
+		identity, _ := requestctx.From(c.UserContext())
+		return c.SendString(identity.WorkspaceID())
+	})
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req.Header.Set("X-Soulacy-Workspace", "ws_new")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || string(body) != "ws_new" || r.requested != "ws_new" {
+		t.Fatalf("status=%d body=%q selector=%q", resp.StatusCode, body, r.requested)
+	}
+}
+
+func TestLegacyOIDCAccessTokenDefaultsToHumanPrincipal(t *testing.T) {
+	claims := &auth.Claims{Kind: "access"}
+	if got := principalKind(claims); got != "user" {
+		t.Fatalf("legacy OIDC principal kind = %q, want user", got)
+	}
+}
+
 func TestWorkspaceContextRejectsStaticServerKeyInTeamMode(t *testing.T) {
 	s := withCfg(&Server{log: zap.NewNop()}, &config.Config{Deployment: config.DeploymentConfig{Mode: config.DeploymentModeTeam}})
 	s.SetTenantResolver(&recordingMembershipResolver{membership: tenancy.Membership{OrganizationID: "org_a", WorkspaceID: "ws_a", MembershipID: "mem_a", Role: "owner"}})
@@ -261,6 +301,10 @@ func TestProtectedRouteArchitectureIncludesAuthWorkspaceAndAuthorizationGates(t 
 		"/api/v1/auth/token": true, "/api/v1/auth/refresh": true, "/api/v1/auth/logout": true,
 		"/api/v1/auth/oidc/config": true, "/api/v1/auth/oidc/start": true, "/api/v1/auth/oidc/callback": true, "/api/v1/auth/oidc/complete": true,
 		"/api/v1/auth/oidc/device/start": true, "/api/v1/auth/oidc/device/poll": true,
+		// Workspace discovery and one-time identity activation happen before a
+		// workspace can authenticate. The setup mutation is authorized by its
+		// expiring, single-use high-entropy token.
+		"/api/v1/auth/workspaces/:id/config": true, "/api/v1/auth/workspaces/:id/setup": true,
 		// Authenticated but intentionally pre-workspace: invitees do not have a
 		// membership until this endpoint succeeds.
 		"/api/v1/invitations/accept": true,

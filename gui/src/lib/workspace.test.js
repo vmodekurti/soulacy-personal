@@ -158,4 +158,14 @@ describe('the workspace label', () => {
     // not look the same.
     expect(workspaceLabel(null)).toBe('')
   })
+
+  it('retains organization and workspace logos from the verified server response', () => {
+    expect(normalizeWorkspace({
+      organization_logo: 'data:image/png;base64,b3Jn',
+      workspace_logo: 'data:image/png;base64,d3M=',
+    })).toMatchObject({
+      organizationLogo: 'data:image/png;base64,b3Jn',
+      workspaceLogo: 'data:image/png;base64,d3M=',
+    })
+  })
 })

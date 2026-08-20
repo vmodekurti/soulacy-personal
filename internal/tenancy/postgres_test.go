@@ -18,6 +18,8 @@ func TestPostgresSchemaContainsTenantIntegrityAndAuditConstraints(t *testing.T) 
 		"CREATE TABLE IF NOT EXISTS memberships", "CREATE TABLE IF NOT EXISTS invitations",
 		"CREATE TABLE IF NOT EXISTS service_accounts", "CREATE TABLE IF NOT EXISTS credentials",
 		"CREATE TABLE IF NOT EXISTS service_account_workspaces",
+		"CREATE TABLE IF NOT EXISTS workspace_identity_providers",
+		"CREATE TABLE IF NOT EXISTS workspace_setup_tokens",
 		"CREATE TABLE IF NOT EXISTS tenant_mutation_audit",
 		"FOREIGN KEY(workspace_id,organization_id) REFERENCES workspaces(id,organization_id)",
 		"UNIQUE(provider, external_subject)", "users_normalized_email_unique",
@@ -27,6 +29,59 @@ func TestPostgresSchemaContainsTenantIntegrityAndAuditConstraints(t *testing.T) 
 		if !strings.Contains(joined, required) {
 			t.Errorf("schema missing %q", required)
 		}
+	}
+}
+
+func TestWorkspaceProviderSecretEncryptionAndSetupToken(t *testing.T) {
+	store := &PostgresStore{}
+	store.ConfigureProviderEncryptionSecret("deployment-secret")
+	ciphertext, err := store.encryptProviderSecret("provider-client-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(ciphertext), "provider-client-secret") {
+		t.Fatal("provider secret was stored in plaintext")
+	}
+	plaintext, err := store.decryptProviderSecret(ciphertext)
+	if err != nil || plaintext != "provider-client-secret" {
+		t.Fatalf("decrypted secret = %q, %v", plaintext, err)
+	}
+
+	token, err := newWorkspaceSetupToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(token) != 64 {
+		t.Fatalf("setup token length = %d, want 64 hex characters", len(token))
+	}
+	if tokenAgain, _ := newWorkspaceSetupToken(); tokenAgain == token {
+		t.Fatal("two setup tokens were identical")
+	}
+}
+
+func TestWorkspaceLogoValidation(t *testing.T) {
+	for _, valid := range []string{"", "data:image/png;base64,aGVsbG8=", "data:image/jpeg;base64,aGVsbG8=", "data:image/webp;base64,aGVsbG8="} {
+		if err := validateLogoDataURL(valid); err != nil {
+			t.Errorf("valid logo %q rejected: %v", valid, err)
+		}
+	}
+	for _, invalid := range []string{"https://example.test/logo.png", "data:image/svg+xml;base64,PHN2Zz4="} {
+		if err := validateLogoDataURL(invalid); err == nil {
+			t.Errorf("unsafe logo %q accepted", invalid)
+		}
+	}
+}
+
+func TestOIDCSubjectLockKeyIsPostgresTextSafeAndTupleBound(t *testing.T) {
+	key := oidcSubjectLockKey("https://accounts.google.com", "google-subject")
+	if strings.ContainsRune(key, '\x00') {
+		t.Fatal("advisory lock key contains a PostgreSQL-invalid NUL byte")
+	}
+	if len(key) != 64 {
+		t.Fatalf("lock key length = %d, want 64", len(key))
+	}
+	if oidcSubjectLockKey("ab", "c") == oidcSubjectLockKey("a", "bc") {
+		t.Fatal("different provider/subject tuples produced the same lock key")
 	}
 }
 
@@ -64,7 +119,7 @@ func TestPostgresTenantLifecycleIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, table := range []string{"tenant_mutation_audit", "credentials", "service_account_workspaces", "service_accounts", "invitations", "memberships", "identities", "users", "workspaces", "organizations"} {
+	for _, table := range []string{"tenant_mutation_audit", "workspace_setup_tokens", "workspace_identity_providers", "credentials", "service_account_workspaces", "service_accounts", "invitations", "memberships", "identities", "users", "workspaces", "organizations"} {
 		if _, err := pool.Exec(ctx, "DELETE FROM "+table); err != nil {
 			t.Fatal(err)
 		}

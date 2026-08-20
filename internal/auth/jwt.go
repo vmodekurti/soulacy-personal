@@ -59,9 +59,10 @@ func newIssuer(secret string, accessTTL, refreshTTL time.Duration) (*Issuer, err
 // tenant. A zero-valued TokenIdentity is still personal, but now it is written
 // down at the call site instead of being the shape of an omission.
 type TokenIdentity struct {
-	Subject string
-	Email   string
-	Role    string
+	Subject       string
+	Email         string
+	Role          string
+	PrincipalKind string
 
 	OrganizationID string
 	WorkspaceID    string
@@ -171,6 +172,9 @@ func (iss *Issuer) RefreshAuthorized(refreshToken string, reauthorize Reauthoriz
 		if strings.TrimSpace(current.Email) == "" {
 			current.Email = entry.identity.Email
 		}
+		if strings.TrimSpace(current.PrincipalKind) == "" {
+			current.PrincipalKind = entry.identity.PrincipalKind
+		}
 		id = current
 	}
 	return iss.issueInFamilyAt(id, entry.familyID, entry.authTime)
@@ -193,7 +197,7 @@ func (iss *Issuer) issueInFamilyAt(id TokenIdentity, familyID string, authTime t
 			IssuedAt: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(now.Add(iss.accessTTL)),
 			Issuer: "soulacy",
 		},
-		Email: id.Email, Role: id.Role, Kind: "access",
+		Email: id.Email, Role: id.Role, Kind: "access", PrincipalKind: id.PrincipalKind,
 		OrganizationID: id.OrganizationID, WorkspaceID: id.WorkspaceID, MembershipID: id.MembershipID,
 	}
 	if !id.AuthTime.IsZero() {

@@ -38,7 +38,7 @@ function authHeaders() {
 }
 
 export async function apiFetch(path, opts = {}) {
-	const { _costConfirmed, _authRetried, _reauthRetried, ...requestOpts } = opts
+	const { _costConfirmed, _authRetried, _reauthRetried, _oidcReauthReturnTo, ...requestOpts } = opts
   const res = await fetch('/api/v1' + path, {
 	...requestOpts,
 	headers: { ...authHeaders(), ...withPrecondition(path, requestOpts) },
@@ -78,6 +78,11 @@ export async function apiFetch(path, opts = {}) {
     // most once — a loop here would turn a persistent refusal into a prompt
     // the user cannot escape, and the second failure is a real one.
     if (res.status === 401 && body.code === 'reauthentication_required' && !_reauthRetried) {
+	  if (_oidcReauthReturnTo && await beginOIDCReauthentication(_oidcReauthReturnTo)) {
+		throw Object.assign(new Error('Redirecting to your identity provider…'), {
+		  status: res.status, body, redirecting: true,
+		})
+	  }
       if (await reauthenticate(body)) {
         return apiFetch(path, { ...opts, _reauthRetried: true })
       }
@@ -118,6 +123,26 @@ export async function apiFetch(path, opts = {}) {
   return parsed
 }
 
+// Administrators authenticated through OIDC should step up through that same
+// identity provider. Falling back to an API-key prompt is both confusing and
+// unsupported in embedded browsers. The server allowlists the return path too,
+// so this client hint cannot become an open redirect.
+async function beginOIDCReauthentication(returnTo) {
+  if (typeof window === 'undefined' || !window.location?.assign) return false
+  try {
+    const res = await fetch('/api/v1/auth/oidc/config', { cache: 'no-store' })
+    const cfg = res.ok ? await res.json() : {}
+    if (!cfg.enabled) return false
+    const query = new URLSearchParams({
+      client: 'gui', navigate: 'true', reauthenticate: 'true', return_to: returnTo,
+    })
+    window.location.assign('/api/v1/auth/oidc/start?' + query.toString())
+    return true
+  } catch (_) {
+    return false
+  }
+}
+
 // reauthenticate re-presents the caller's credential to move `auth_time`.
 //
 // It asks for the key rather than replaying the stored one on purpose: the
@@ -127,9 +152,15 @@ export async function apiFetch(path, opts = {}) {
 async function reauthenticate(detail = {}) {
   if (typeof window === 'undefined' || !window.prompt) return false
   const minutes = Math.max(1, Math.round((Number(detail.max_age_seconds) || 600) / 60))
-  const key = window.prompt(
-    `For your security, confirm it is still you before this change.\n\n` +
-    `Re-enter your API key (you were last asked more than ${minutes} minutes ago):`)
+  let key
+  try {
+    key = window.prompt(
+      `For your security, confirm it is still you before this change.\n\n` +
+      `Re-enter your API key (you were last asked more than ${minutes} minutes ago):`)
+  } catch (_) {
+    // Embedded browsers may expose prompt() but throw when it is called.
+    return false
+  }
   if (!key) return false
   try {
     const res = await fetch('/api/v1/auth/reauthenticate', {
@@ -465,6 +496,10 @@ export const api = {
     audit: (limit = 50) => apiFetch('/admin/audit?limit=' + encodeURIComponent(limit)),
     bootstrapStatus: () => apiFetch('/admin/bootstrap'),
     bootstrap: (body) => apiFetch('/admin/bootstrap', { method: 'POST', body: JSON.stringify(body) }),
+    platformOverview: () => apiFetch('/admin/platform/overview'),
+    platformOrganizations: () => apiFetch('/admin/platform/organizations'),
+    provisionOrganization: (body) => apiFetch('/admin/platform/organizations', { method:'POST', body:JSON.stringify(body) }),
+    provisionWorkspace: (organizationId, body) => apiFetch(`/admin/platform/organizations/${encodeURIComponent(organizationId)}/workspaces`, { method:'POST', body:JSON.stringify(body) }),
   },
 
   // MU-029. The three endpoints a client needs to know where it is, where it
@@ -479,6 +514,10 @@ export const api = {
       method: 'POST', body: JSON.stringify({ api_key: apiKeyValue }),
     }),
     list: () => apiFetch('/workspace/workspaces'),
+    create: (name, options = {}) => apiFetch('/workspace/workspaces', {
+	  method: 'POST', body: JSON.stringify({ name }),
+	  _oidcReauthReturnTo: options.oidcReauthReturnTo,
+	}),
     select: (workspaceId) => apiFetch('/workspace/select', {
       method: 'POST', body: JSON.stringify({ workspace_id: workspaceId }),
     }),

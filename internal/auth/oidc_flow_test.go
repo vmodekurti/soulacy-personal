@@ -100,6 +100,22 @@ func TestOIDCPKCEFlowValidatesStateNonceAndVerifiedSubject(t *testing.T) {
 		raw, _ := io.ReadAll(completeResp.Body)
 		t.Fatalf("complete status=%d body=%s", completeResp.StatusCode, raw)
 	}
+	var issuedSession struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.NewDecoder(completeResp.Body).Decode(&issuedSession); err != nil || issuedSession.AccessToken == "" {
+		t.Fatalf("OIDC completion returned no access token: %v", err)
+	}
+	issuedClaims, err := issuer.VerifyAccess(issuedSession.AccessToken)
+	if err != nil {
+		t.Fatalf("issued OIDC access token was invalid: %v", err)
+	}
+	if issuedClaims.AuthTime < time.Now().Add(-time.Minute).Unix() {
+		t.Fatalf("OIDC authentication did not refresh auth_time: %d", issuedClaims.AuthTime)
+	}
+	if issuedClaims.PrincipalKind != "user" {
+		t.Fatalf("OIDC session principal kind = %q, want user", issuedClaims.PrincipalKind)
+	}
 	if linker.issuer != issuerURL || linker.subject != "provider-subject" || !linker.verified {
 		t.Fatalf("identity was not linked from verified provider claims: %+v", linker)
 	}
@@ -175,6 +191,122 @@ func TestSafeLoopbackRedirectRejectsRemoteAndConfusedURLs(t *testing.T) {
 		if safeLoopbackRedirect(candidate) {
 			t.Errorf("accepted %s", candidate)
 		}
+	}
+}
+
+func TestGUIReturnDestinationIsAllowlisted(t *testing.T) {
+	if got := safeGUIReturnTo("/admin/setup"); got != "/admin/setup" {
+		t.Fatalf("admin return = %q", got)
+	}
+	if got := safeGUIReturnTo("/admin/setup?resume=workspace-create"); got != "/admin/setup?resume=workspace-create" {
+		t.Fatalf("workspace-create return = %q", got)
+	}
+	for _, candidate := range []string{"https://evil.example", "//evil.example", "/admin/setup?next=https://evil.example", "/"} {
+		if got := safeGUIReturnTo(candidate); got != "/#auth=success" {
+			t.Errorf("unsafe return %q became %q", candidate, got)
+		}
+	}
+}
+
+func TestOIDCReauthenticationForcesProviderInteraction(t *testing.T) {
+	issuer, err := newIssuer("01234567890123456789012345678901", time.Minute, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer issuer.Close()
+	validator := &OIDCValidator{
+		discovery: oidcDiscovery{AuthorizationEndpoint: "https://issuer.example/authorize"},
+		quit:      make(chan struct{}),
+	}
+	engine := &Engine{
+		cfg: Config{
+			Mode: "jwt", OIDCClientID: "client", OIDCScopes: []string{"openid"},
+			OIDCRedirectURL: "http://localhost:18789/api/v1/auth/oidc/callback",
+		},
+		issuer: issuer, oidc: validator, flows: newOIDCFlowStore(), log: zap.NewNop(),
+	}
+	defer engine.flows.close()
+	app := fiber.New()
+	app.Get("/start", engine.HandleOIDCStart)
+	access, _, _, err := issuer.IssueFor(TokenIdentity{Subject: "usr_owner", Email: "owner@example.test", Role: "owner", AuthTime: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := newFiberRequest(http.MethodGet, "/start?client=gui&reauthenticate=true&return_to=%2Fadmin%2Fsetup%3Fresume%3Dworkspace-create", nil)
+	req.AddCookie(&http.Cookie{Name: "soulacy_access", Value: access})
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("start status=%d", resp.StatusCode)
+	}
+	var body struct {
+		AuthorizationURL string `json:"authorization_url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	authURL, err := url.Parse(body.AuthorizationURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if authURL.Query().Get("prompt") != "login" || authURL.Query().Get("max_age") != "0" {
+		t.Fatalf("step-up parameters missing from %s", body.AuthorizationURL)
+	}
+	if authURL.Query().Get("login_hint") != "owner@example.test" {
+		t.Fatalf("step-up was not bound to the current owner's email: %s", body.AuthorizationURL)
+	}
+}
+
+func TestOIDCStartUsesWorkspaceProvider(t *testing.T) {
+	issuer, err := newIssuer("01234567890123456789012345678901", time.Minute, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer issuer.Close()
+	provider := WorkspaceOIDCProvider{
+		ProviderType: "okta", Issuer: "https://tenant.okta.example",
+		ClientID: "workspace-client", Audience: "workspace-client",
+		Scopes: []string{"openid", "email"},
+	}
+	validator := &OIDCValidator{
+		discovery: oidcDiscovery{AuthorizationEndpoint: "https://tenant.okta.example/authorize"},
+		quit:      make(chan struct{}),
+	}
+	engine := &Engine{
+		cfg:    Config{Mode: "jwt", OIDCRedirectURL: "http://localhost:18789/api/v1/auth/oidc/callback"},
+		issuer: issuer, flows: newOIDCFlowStore(), log: zap.NewNop(),
+		providerValidators: map[string]*OIDCValidator{provider.Issuer + "\x00" + provider.Audience: validator},
+	}
+	defer engine.flows.close()
+	engine.SetWorkspaceOIDCProviderResolver(func(_ context.Context, workspaceID string) (WorkspaceOIDCProvider, bool) {
+		return provider, workspaceID == "ws_customer"
+	})
+	app := fiber.New()
+	app.Get("/start", engine.HandleOIDCStart)
+	resp, err := app.Test(newFiberRequest(http.MethodGet, "/start?client=gui&workspace_id=ws_customer", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("start status=%d body=%s", resp.StatusCode, raw)
+	}
+	var body struct {
+		AuthorizationURL string `json:"authorization_url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(body.AuthorizationURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Host != "tenant.okta.example" || parsed.Query().Get("client_id") != "workspace-client" || parsed.Query().Get("scope") != "openid email" {
+		t.Fatalf("workspace provider was not used: %s", body.AuthorizationURL)
 	}
 }
 

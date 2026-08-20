@@ -103,6 +103,32 @@ describe('a stale session is re-proved without losing the request', () => {
     expect(get(authRequired)).toBe(false)
   })
 
+	 it('uses OIDC step-up instead of an API-key prompt when requested', async () => {
+	  window.prompt = vi.fn(() => { throw new Error('prompt() is not supported') })
+	  window.location = { assign: vi.fn() }
+	  fetch
+		.mockResolvedValueOnce(response(401, stale))
+		.mockResolvedValueOnce(response(200, { enabled: true }))
+
+	  await expect(apiFetch('/workspace/workspaces', {
+		method: 'POST', body: JSON.stringify({ name: 'Operations' }),
+		_oidcReauthReturnTo: '/admin/setup?resume=workspace-create',
+	  })).rejects.toMatchObject({ redirecting: true })
+	  expect(window.prompt).not.toHaveBeenCalled()
+	  const destination = window.location.assign.mock.calls[0][0]
+	  expect(destination).toContain('/api/v1/auth/oidc/start?')
+	  expect(destination).toContain('reauthenticate=true')
+	  expect(destination).toContain('return_to=%2Fadmin%2Fsetup%3Fresume%3Dworkspace-create')
+	})
+
+	it('handles embedded browsers that expose but reject prompt()', async () => {
+	  window.prompt = vi.fn(() => { throw new Error('prompt() is not supported') })
+	  fetch.mockResolvedValueOnce(response(401, stale))
+
+	  await expect(apiFetch('/workspace/members/m1', { method: 'DELETE' }))
+		.rejects.toMatchObject({ status: 401 })
+	})
+
   it('leaves an ordinary 401 alone', async () => {
     const { authRequired } = await import('./stores.js')
     authRequired.set(false)

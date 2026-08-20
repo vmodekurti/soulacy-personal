@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -86,6 +87,14 @@ type IdentityLinker interface {
 	LinkOIDCIdentity(context.Context, string, string, string, bool, string) (string, error)
 }
 
+type WorkspaceOIDCProvider struct {
+	WorkspaceID, ProviderType, Issuer, ClientID, ClientSecret, Audience string
+	Scopes                                                              []string
+}
+
+type WorkspaceOIDCProviderResolver func(context.Context, string) (WorkspaceOIDCProvider, bool)
+type WorkspaceTokenIdentityResolver func(context.Context, string, string) (TokenIdentity, bool)
+
 // Engine is the Soulacy auth subsystem.
 //
 //	apikey mode (default): validates requests against the static server.api_key.
@@ -96,17 +105,21 @@ type IdentityLinker interface {
 //	                       (3) validates OIDC-provider JWTs when oidc_issuer is set.
 //	                       Tokens carry Claims (sub, email, role) for downstream RBAC.
 type Engine struct {
-	cfg              Config
-	staticKey        string         // server.api_key; always checked, any mode
-	issuer           *Issuer        // non-nil when cfg.Mode == "jwt"
-	oidc             *OIDCValidator // non-nil when cfg.OIDCIssuer != ""
-	log              *zap.Logger
-	apiKeyStore      apikeys.Store // non-nil when managed API keys are enabled
-	flows            *oidcFlowStore
-	identityLinker   IdentityLinker
-	refreshAllowed   func(context.Context, string) bool
-	identityResolver TokenIdentityResolver
-	auditSink        func(*fiber.Ctx, AuthEvent)
+	cfg                       Config
+	staticKey                 string         // server.api_key; always checked, any mode
+	issuer                    *Issuer        // non-nil when cfg.Mode == "jwt"
+	oidc                      *OIDCValidator // non-nil when cfg.OIDCIssuer != ""
+	log                       *zap.Logger
+	apiKeyStore               apikeys.Store // non-nil when managed API keys are enabled
+	flows                     *oidcFlowStore
+	identityLinker            IdentityLinker
+	refreshAllowed            func(context.Context, string) bool
+	identityResolver          TokenIdentityResolver
+	workspaceIdentityResolver WorkspaceTokenIdentityResolver
+	workspaceProviderResolver WorkspaceOIDCProviderResolver
+	providerMu                sync.Mutex
+	providerValidators        map[string]*OIDCValidator
+	auditSink                 func(*fiber.Ctx, AuthEvent)
 }
 
 // AuthEvent is one authentication-lifecycle occurrence, for the workspace
@@ -156,6 +169,41 @@ func (e *Engine) SetAPIKeyStore(s apikeys.Store) {
 }
 
 func (e *Engine) SetIdentityLinker(linker IdentityLinker) { e.identityLinker = linker }
+func (e *Engine) SetWorkspaceOIDCProviderResolver(resolve WorkspaceOIDCProviderResolver) {
+	e.workspaceProviderResolver = resolve
+	if resolve != nil && e.flows == nil {
+		e.flows = newOIDCFlowStore()
+	}
+}
+func (e *Engine) SetWorkspaceTokenIdentityResolver(resolve WorkspaceTokenIdentityResolver) {
+	e.workspaceIdentityResolver = resolve
+}
+
+func (e *Engine) workspaceValidator(provider WorkspaceOIDCProvider) (*OIDCValidator, error) {
+	key := provider.Issuer + "\x00" + provider.Audience
+	e.providerMu.Lock()
+	defer e.providerMu.Unlock()
+	if current := e.providerValidators[key]; current != nil {
+		return current, nil
+	}
+	validator, err := newOIDCValidator(provider.Issuer, provider.Audience)
+	if err != nil {
+		return nil, err
+	}
+	if e.providerValidators == nil {
+		e.providerValidators = map[string]*OIDCValidator{}
+	}
+	e.providerValidators[key] = validator
+	return validator, nil
+}
+
+func ValidateOIDCProvider(issuer, audience string) error {
+	validator, err := newOIDCValidator(strings.TrimRight(strings.TrimSpace(issuer), "/"), strings.TrimSpace(audience))
+	if validator != nil {
+		validator.close()
+	}
+	return err
+}
 
 // TokenIdentityResolver reads a subject's current tenancy — the workspace the
 // access token should act in, and the membership that grants it.
@@ -196,6 +244,9 @@ func (e *Engine) tokenIdentityFor(ctx context.Context, base TokenIdentity) (Toke
 	}
 	if strings.TrimSpace(resolved.Role) == "" {
 		resolved.Role = base.Role
+	}
+	if strings.TrimSpace(resolved.PrincipalKind) == "" {
+		resolved.PrincipalKind = base.PrincipalKind
 	}
 	return resolved, true
 }
@@ -613,6 +664,12 @@ func (e *Engine) Close() {
 	if e.flows != nil {
 		e.flows.close()
 	}
+	e.providerMu.Lock()
+	for _, validator := range e.providerValidators {
+		validator.close()
+	}
+	e.providerValidators = nil
+	e.providerMu.Unlock()
 }
 
 func (e *Engine) setAuthCookies(c *fiber.Ctx, access, refresh string, expiresIn int) {

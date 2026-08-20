@@ -22,14 +22,26 @@ import (
 // is the pairing a real Team deployment provides.
 type listingResolver struct {
 	recordingMembershipResolver
-	workspaces []tenancy.SubjectWorkspace
-	listErr    error
-	askedFor   string
+	workspaces                                                 []tenancy.SubjectWorkspace
+	listErr                                                    error
+	askedFor                                                   string
+	createdName, createOrganization, createSource, createOwner string
+	createErr                                                  error
 	// denyRequested names a workspace the subject may not select, so a test
 	// can establish a valid active context and still be refused a different
 	// workspace — which is the only shape in which the selection endpoint is
 	// ever reached.
 	denyRequested string
+}
+
+func (r *listingResolver) CreateWorkspaceForOwner(_ context.Context, _ tenancy.Mutation, organizationID, sourceWorkspaceID, name, ownerUserID string) (tenancy.Workspace, tenancy.StoredMembership, error) {
+	r.createdName, r.createOrganization, r.createSource, r.createOwner = name, organizationID, sourceWorkspaceID, ownerUserID
+	if r.createErr != nil {
+		return tenancy.Workspace{}, tenancy.StoredMembership{}, r.createErr
+	}
+	workspace := tenancy.Workspace{ID: "ws_created", OrganizationID: organizationID, Name: name}
+	membership := tenancy.StoredMembership{ID: "mem_created", OrganizationID: organizationID, WorkspaceID: workspace.ID, UserID: ownerUserID, Role: tenancy.RoleOwner, Status: tenancy.MembershipActive}
+	return workspace, membership, nil
 }
 
 func (r *listingResolver) ResolveMembership(ctx context.Context, subject, requested string) (tenancy.Membership, error) {
@@ -61,8 +73,49 @@ func identityApp(t *testing.T, resolver tenancy.Resolver, mode string) *fiber.Ap
 	app.Use(s.workspaceContextMW())
 	app.Get("/identity", s.handleWorkspaceIdentity)
 	app.Get("/workspaces", s.handleListSelectableWorkspaces)
+	app.Post("/workspaces", s.handleCreateWorkspace)
 	app.Post("/select", s.handleSelectWorkspace)
 	return app
+}
+
+func TestWorkspaceOwnerCanCreateAnotherWorkspace(t *testing.T) {
+	resolver := &listingResolver{recordingMembershipResolver: recordingMembershipResolver{
+		membership: tenancy.Membership{OrganizationID: "org_a", WorkspaceID: "ws_a", MembershipID: "mem_a", UserID: "usr_alice", Role: tenancy.RoleOwner},
+	}}
+	app := identityApp(t, resolver, config.DeploymentModeTeam)
+	req := httptest.NewRequest(http.MethodPost, "/workspaces", strings.NewReader(`{"name":"Operations"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status=%d, want 201", resp.StatusCode)
+	}
+	if resolver.createdName != "Operations" || resolver.createOrganization != "org_a" || resolver.createSource != "ws_a" || resolver.createOwner != "usr_alice" {
+		t.Fatalf("creator received wrong verified context: %+v", resolver)
+	}
+}
+
+func TestWorkspaceAdminCannotCreateAnOwnerWorkspace(t *testing.T) {
+	resolver := &listingResolver{recordingMembershipResolver: recordingMembershipResolver{
+		membership: tenancy.Membership{OrganizationID: "org_a", WorkspaceID: "ws_a", MembershipID: "mem_a", UserID: "usr_alice", Role: tenancy.RoleAdmin},
+	}}
+	app := identityApp(t, resolver, config.DeploymentModeTeam)
+	req := httptest.NewRequest(http.MethodPost, "/workspaces", strings.NewReader(`{"name":"Escalation"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status=%d, want 403", resp.StatusCode)
+	}
+	if resolver.createdName != "" {
+		t.Fatal("admin reached the workspace creator")
+	}
 }
 
 // The identity endpoint must report the role the server resolved from stored

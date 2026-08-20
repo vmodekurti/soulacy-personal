@@ -8,16 +8,21 @@
   import { waitForGateway, waitingMessage, timeoutMessage, RESTART_BUDGET } from './lib/gatewaywait.js'
   import { looksLikeStaleAssetError, recoverFromStaleAssets } from './lib/stalerecovery.js'
   import { navPages, navGroups, navAnchor, visibleNavPages } from './lib/nav.js'
-  import { can, permissions } from './lib/workspace.js'
+  import { activeWorkspace, can, permissions } from './lib/workspace.js'
   import Walkthrough from './lib/walkthrough/Walkthrough.svelte'
   import WorkspaceSwitcher from './lib/WorkspaceSwitcher.svelte'
   import AdminSetup from './pages/AdminSetup.svelte'
+  import PlatformAdmin from './pages/PlatformAdmin.svelte'
+  import WorkspaceAccess from './pages/WorkspaceAccess.svelte'
   import {
     loadWalkthroughState, startWalkthrough, shouldAutoStart,
   } from './lib/walkthrough/store.js'
 
   let page = 'dashboard'
   const adminSetupPath = ['/admin/setup', '/admin/login'].includes(location.pathname.replace(/\/+$/, '') || '/')
+  const platformAdminPath = ['/admin', '/admin/platform'].includes(location.pathname.replace(/\/+$/, '') || '/')
+	const workspacePathMatch = location.pathname.match(/^\/w\/([^/]+)(?:\/setup)?\/?$/)
+  const standaloneAdminPath = adminSetupPath || platformAdminPath || !!workspacePathMatch
   let shareToken = ''   // set from #share/<token> — renders the public read-only view
   let pluginPages = []   // nav entries for mounted plugin UIs (E8)
   let showKeyModal = false
@@ -157,7 +162,7 @@
   }
 
   onMount(() => {
-		if (adminSetupPath) { discoverLogin(); return }
+		if (standaloneAdminPath) { discoverLogin(); return }
 		discoverLogin()
     const applyHash = () => {
       const h = location.hash.slice(1)
@@ -261,16 +266,21 @@
   let loginError = ''
   let loginChecking = false
 	let oidcEnabled = false
+	let multiUserLogin = false
 
 	async function discoverLogin() {
 		try {
-			const res = await fetch('/api/v1/auth/oidc/config')
+			const [res, pingRes] = await Promise.all([fetch('/api/v1/auth/oidc/config'), fetch('/ping')])
 			const cfg = res.ok ? await res.json() : null
+			const ping = pingRes.ok ? await pingRes.json() : null
 			oidcEnabled = !!cfg?.enabled
+			multiUserLogin = ['team','scale'].includes(ping?.deployment_mode)
 		} catch (_) { oidcEnabled = false }
 	}
 
 	function startOIDCLogin() {
+		$apiKey = ''
+		$authRequired = false
 		location.assign('/api/v1/auth/oidc/start?client=gui&navigate=true')
 	}
 
@@ -307,10 +317,13 @@
   }
 
 	async function logoutSession() {
-		try { await fetch('/api/v1/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }) } catch (_) {}
+		const headers = { 'Content-Type': 'application/json' }
+		if ($apiKey) headers.Authorization = `Bearer ${$apiKey}`
+		try { await fetch('/api/v1/auth/logout', { method: 'POST', headers, body: '{}' }) } catch (_) {}
 		$apiKey = ''
 		$authRequired = true
 		showKeyModal = false
+		sidebarOpen = false
 	}
 </script>
 
@@ -318,6 +331,10 @@
      login gate and the app shell, so it needs no API key. -->
 {#if adminSetupPath}
   <AdminSetup />
+{:else if platformAdminPath}
+  <PlatformAdmin />
+{:else if workspacePathMatch}
+  <WorkspaceAccess workspaceID={decodeURIComponent(workspacePathMatch[1])} />
 {:else if shareToken}
   <ShareView token={shareToken} />
 {:else if $authRequired}
@@ -328,8 +345,9 @@
         <span class="login-glyph" aria-hidden="true">⬡</span>
       </div>
       <h1 class="login-title">Soulacy</h1>
-      <p class="login-sub">Enter your API key to continue.</p>
+      <p class="login-sub">{multiUserLogin ? 'Sign in with your organization to continue.' : 'Enter your API key to continue.'}</p>
 
+      {#if !multiUserLogin}
       <input
         class="login-input"
         type="password"
@@ -346,15 +364,18 @@
       <button class="login-submit" type="submit" disabled={loginChecking || !loginKey.trim()}>
         {loginChecking ? 'Verifying…' : 'Unlock'}
       </button>
+	  {/if}
 		{#if oidcEnabled}
-			<div class="login-divider"><span>or</span></div>
+			{#if !multiUserLogin}<div class="login-divider"><span>or</span></div>{/if}
 			<button class="login-submit login-sso" type="button" on:click={startOIDCLogin}>Continue with your organization</button>
 		{/if}
 
+      {#if !multiUserLogin}
       <p class="login-hint">
         Find your key in <code>~/.soulacy/soulspace/config.yaml</code> (under
         <code>server.api_key</code>) or the <code>SOULACY_API_KEY</code> env var.
       </p>
+	  {/if}
       <p class="login-hint"><a href="/admin/setup">Administrator setup or sign-in</a></p>
     </form>
   </div>
@@ -431,7 +452,7 @@
   </div>
 {/if}
 
-{#if !shareToken && !adminSetupPath}
+{#if !shareToken && !standaloneAdminPath && !$authRequired}
 <div class="layout">
   <!-- Mobile top bar (hidden on desktop) -->
   <header class="topbar">
@@ -461,6 +482,9 @@
   <aside class="sidebar" class:open={sidebarOpen} class:collapsed={navCollapsed}>
     <div class="brand">
       <span class="brand-logo" aria-hidden="true">
+        {#if $activeWorkspace?.workspaceLogo || $activeWorkspace?.organizationLogo}
+          <img class="tenant-brand-logo" src={$activeWorkspace.workspaceLogo || $activeWorkspace.organizationLogo} alt="" />
+        {:else}
         <svg class="brand-svg" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
           <defs>
             <linearGradient id="sidebar-logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -471,6 +495,7 @@
           <path d="M32 6 L54 14 V32 C54 45.5 44.5 55 32 58 C19.5 55 10 45.5 10 32 V14 L32 6 Z" fill="#0b0d1a" stroke="url(#sidebar-logo-grad)" stroke-width="3" />
           <path d="M42 20 L24 20 C20 20 18 22 18 26 C18 30 22 32 32 34 C42 36 46 38 46 42 C46 46 44 48 40 48 L22 48" stroke="url(#sidebar-logo-grad)" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
+        {/if}
       </span>
       <span class="brand-name">Soulacy</span>
       <button class="nav-toggle" on:click={toggleNav}
@@ -532,6 +557,9 @@
         </span>
       {/if}
       <button class="icon-btn" on:click={openKeyModal} title="Set API key">🔑</button>
+      <button class="logout-btn" on:click={logoutSession} title="Sign out of Soulacy" aria-label="Sign out">
+        <span aria-hidden="true">↪</span><span class="logout-label">Sign out</span>
+      </button>
     </div>
   </aside>
 
@@ -691,6 +719,7 @@
   .sidebar.collapsed .brand-name,
   .sidebar.collapsed .nav-label,
   .sidebar.collapsed .conn-dot,
+  .sidebar.collapsed .logout-label,
   .sidebar.collapsed .nav-section { display: none; }
   .sidebar.collapsed .brand { justify-content: center; padding: 1.1rem 0; gap: 0; position: relative; }
   .sidebar.collapsed .nav-item { justify-content: center; padding: 0.6rem 0; gap: 0; }
@@ -766,6 +795,7 @@
     width: 28px; height: 28px;
     filter: drop-shadow(0 0 6px rgba(126, 92, 255, 0.45));
   }
+  .tenant-brand-logo { width: 30px; height: 30px; object-fit: contain; border-radius: 7px; background: rgba(255,255,255,.08); }
   .brand-name { font-weight: 700; font-size: 1.02rem; letter-spacing: 0.01em; color: #f2f3fb; }
 
 
@@ -828,6 +858,8 @@
   .conn-dot.auth-required:hover { color: #ffc08a; text-decoration: underline; }
   .icon-btn { background: none; color: #6b7294; font-size: 0.85rem; padding: 0.15rem; }
   .icon-btn:hover { color: #e8eaf6; }
+  .logout-btn { display:flex;align-items:center;gap:.3rem;background:none;color:#8f96bd;font-size:.72rem;padding:.2rem .25rem;border-radius:5px;white-space:nowrap; }
+  .logout-btn:hover { background:rgba(127,32,32,.18);color:#ff9d9d; }
 
   /* ── Main content ────────────────────────────────────────────────── */
   .content { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }

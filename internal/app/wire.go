@@ -197,6 +197,7 @@ func (a *App) Run(parent context.Context) error {
 		if storeErr != nil {
 			return fmt.Errorf("tenancy postgres store: %w", storeErr)
 		}
+		store.ConfigureProviderEncryptionSecret(cfg.Server.APIKey)
 		tenantResolver = store
 		workspaceLifecycle = store
 		tenantIdentityLinker = store
@@ -603,6 +604,15 @@ func (a *App) Run(parent context.Context) error {
 	if tenantIdentityLinker != nil {
 		authEngine.SetIdentityLinker(tenantIdentityLinker)
 	}
+	if providers, ok := tenantResolver.(tenancy.WorkspaceIdentityStore); ok {
+		authEngine.SetWorkspaceOIDCProviderResolver(func(ctx context.Context, workspaceID string) (auth.WorkspaceOIDCProvider, bool) {
+			provider, err := providers.ResolveWorkspaceIdentityProvider(ctx, workspaceID)
+			if err != nil {
+				return auth.WorkspaceOIDCProvider{}, false
+			}
+			return auth.WorkspaceOIDCProvider{WorkspaceID: provider.WorkspaceID, ProviderType: provider.ProviderType, Issuer: provider.Issuer, ClientID: provider.ClientID, ClientSecret: provider.ClientSecret, Audience: provider.Audience, Scopes: provider.Scopes}, true
+		})
+	}
 	if members, ok := tenantResolver.(tenancy.MemberManager); ok {
 		authEngine.SetRefreshAuthorizer(members.CanRefreshUser)
 		// Without this, a signed-in member receives a token with no workspace,
@@ -620,6 +630,13 @@ func (a *App) Run(parent context.Context) error {
 				WorkspaceID:    membership.WorkspaceID,
 				MembershipID:   membership.ID,
 			}, true
+		})
+		authEngine.SetWorkspaceTokenIdentityResolver(func(ctx context.Context, subject, workspaceID string) (auth.TokenIdentity, bool) {
+			membership, err := tenantResolver.ResolveMembership(ctx, subject, workspaceID)
+			if err != nil {
+				return auth.TokenIdentity{}, false
+			}
+			return auth.TokenIdentity{Subject: subject, Role: membership.Role, OrganizationID: membership.OrganizationID, WorkspaceID: membership.WorkspaceID, MembershipID: membership.MembershipID}, true
 		})
 	}
 

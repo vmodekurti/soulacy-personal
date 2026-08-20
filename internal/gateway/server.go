@@ -877,10 +877,8 @@ func (s *Server) buildApp() *fiber.App {
 	app.Get("/ping", func(c *fiber.Ctx) error {
 		authStatus, authMode, detail := s.authPosture()
 		return c.JSON(fiber.Map{
-			"auth":   authStatus,
-			"mode":   authMode,
-			"detail": detail,
-			"status": "ok",
+			"auth": authStatus, "mode": authMode, "detail": detail,
+			"deployment_mode": s.config().DeploymentMode(), "status": "ok",
 		})
 	})
 
@@ -900,6 +898,8 @@ func (s *Server) buildApp() *fiber.App {
 	app.Get("/api/v1/auth/oidc/start", s.requireAuthEngine(func(s *Server) fiber.Handler { return s.authEngine.HandleOIDCStart }))
 	app.Post("/api/v1/auth/oidc/start", s.requireAuthEngine(func(s *Server) fiber.Handler { return s.authEngine.HandleOIDCStart }))
 	app.Get("/api/v1/auth/oidc/callback", s.requireAuthEngine(func(s *Server) fiber.Handler { return s.authEngine.HandleOIDCCallback }))
+	app.Get("/api/v1/auth/workspaces/:id/config", s.handleWorkspaceLoginConfig)
+	app.Post("/api/v1/auth/workspaces/:id/setup", s.handleWorkspaceIdentitySetup)
 	app.Post("/api/v1/auth/oidc/complete", s.requireAuthEngine(func(s *Server) fiber.Handler { return s.authEngine.HandleOIDCComplete }))
 	app.Post("/api/v1/auth/oidc/device/start", s.requireAuthEngine(func(s *Server) fiber.Handler { return s.authEngine.HandleOIDCDeviceStart }))
 	app.Post("/api/v1/auth/oidc/device/poll", s.requireAuthEngine(func(s *Server) fiber.Handler { return s.authEngine.HandleOIDCDevicePoll }))
@@ -994,6 +994,7 @@ func (s *Server) buildApp() *fiber.App {
 	// context switcher must display and act on.
 	api.Get("/workspace/identity", s.handleWorkspaceIdentity)
 	api.Get("/workspace/workspaces", s.handleListSelectableWorkspaces)
+	api.Post("/workspace/workspaces", s.requireRecentAuth(), s.handleCreateWorkspace)
 	api.Post("/workspace/select", s.handleSelectWorkspace)
 
 	// Prometheus metrics. Wrapped in the API auth group so the same key
@@ -1002,6 +1003,10 @@ func (s *Server) buildApp() *fiber.App {
 	api.Get("/metrics", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.platformMetricsMW(), adaptor.HTTPHandler(metrics.Handler()))
 	api.Get("/admin/bootstrap", s.platformMW(rbac.ResourceConfig, rbac.ActionRead), s.handleAdminBootstrapState)
 	api.Post("/admin/bootstrap", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleAdminBootstrap)
+	api.Get("/admin/platform/overview", s.platformMW(rbac.ResourceConfig, rbac.ActionRead), s.handlePlatformOverview)
+	api.Get("/admin/platform/organizations", s.platformMW(rbac.ResourceConfig, rbac.ActionRead), s.handlePlatformOrganizations)
+	api.Post("/admin/platform/organizations", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.handlePlatformProvisionOrganization)
+	api.Post("/admin/platform/organizations/:id/workspaces", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.handlePlatformProvisionWorkspace)
 	api.Post("/admin/restart", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleRestart)
 	api.Get("/admin/audit", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleAdminAudit)
 	api.Get("/onboarding/status", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleOnboardingStatus)

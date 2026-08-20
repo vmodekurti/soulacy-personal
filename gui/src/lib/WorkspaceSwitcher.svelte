@@ -121,6 +121,9 @@
       aria-expanded={open}
       title={label ? `Actions happen in ${label}` : 'Workspace'}
     >
+      {#if $activeWorkspace.workspaceLogo || $activeWorkspace.organizationLogo}
+        <img class="ws-logo" src={$activeWorkspace.workspaceLogo || $activeWorkspace.organizationLogo} alt="" />
+      {/if}
       <span class="ws-label">{label || 'No workspace'}</span>
       {#if $selectableWorkspaces.length > 1}<span class="ws-caret">▾</span>{/if}
     </button>
@@ -128,6 +131,7 @@
     {#if open && $selectableWorkspaces.length}
       <ul class="ws-menu" role="listbox">
         {#each $selectableWorkspaces as ws (ws.workspace_id)}
+          {@const normalized = normalizeWorkspace(ws)}
           <li>
             <button
               role="option"
@@ -136,7 +140,12 @@
               on:click={() => select(ws.workspace_id)}
               disabled={!!switching}
             >
-              <span class="ws-menu-name">{workspaceLabel(normalizeWorkspace(ws)) || ws.workspace_id}</span>
+              <span class="ws-menu-main">
+                {#if normalized.workspaceLogo || normalized.organizationLogo}
+                  <img class="ws-logo" src={normalized.workspaceLogo || normalized.organizationLogo} alt="" />
+                {/if}
+                <span class="ws-menu-name">{workspaceLabel(normalized) || ws.workspace_id}</span>
+              </span>
               {#if ws.role}<span class="ws-menu-role">{ws.role}</span>{/if}
             </button>
           </li>
@@ -176,6 +185,9 @@
   }
   .ws-current:disabled { opacity: .6; cursor: progress; }
   .ws-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ws-logo { width: 1.45rem; height: 1.45rem; flex: 0 0 auto; border-radius: 5px; object-fit: contain; background: rgba(255,255,255,.08); }
+  .ws-menu-main { min-width: 0; display: flex; align-items: center; gap: .45rem; }
+  .ws-menu-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ws-caret { opacity: .7; }
   .ws-menu {
     position: absolute; left: .75rem; right: .75rem; z-index: 40; margin: .25rem 0 0;

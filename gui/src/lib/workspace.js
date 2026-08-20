@@ -256,8 +256,10 @@ export function normalizeWorkspace(raw) {
   return {
     organizationId: raw.organization_id || raw.organizationId || '',
     organizationName: raw.organization_name || raw.organizationName || '',
+    organizationLogo: raw.organization_logo || raw.organizationLogo || '',
     workspaceId: raw.workspace_id || raw.workspaceId || '',
     workspaceName: raw.workspace_name || raw.workspaceName || '',
+    workspaceLogo: raw.workspace_logo || raw.workspaceLogo || '',
     membershipId: raw.membership_id || raw.membershipId || '',
     role: raw.role || '',
     deploymentMode: raw.deployment_mode || raw.deploymentMode || '',

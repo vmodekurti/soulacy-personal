@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 )
 
 var ErrMembershipNotFound = errors.New("workspace membership not found")
@@ -121,6 +122,8 @@ type SubjectWorkspace struct {
 	MembershipID     string `json:"membership_id"`
 	Role             string `json:"role"`
 	PrincipalKind    string `json:"principal_kind"`
+	OrganizationLogo string `json:"organization_logo,omitempty"`
+	WorkspaceLogo    string `json:"workspace_logo,omitempty"`
 }
 
 // WorkspaceLister enumerates the workspaces a subject may act in. It exists so
@@ -128,6 +131,68 @@ type SubjectWorkspace struct {
 // token claim: the server answers from stored memberships every time.
 type WorkspaceLister interface {
 	ListSubjectWorkspaces(ctx context.Context, subject string) ([]SubjectWorkspace, error)
+}
+
+// WorkspaceCreator creates a workspace and its initial owner membership in
+// one transaction. The source workspace is supplied so the store can verify
+// that the actor is still an active owner in this organization at commit time;
+// a handler check alone would leave a demotion race between authorization and
+// the insert.
+type WorkspaceCreator interface {
+	CreateWorkspaceForOwner(ctx context.Context, mutation Mutation, organizationID, sourceWorkspaceID, name, ownerUserID string) (Workspace, StoredMembership, error)
+}
+
+// PlatformCatalog exposes deployment-level tenant metadata to the control
+// plane. It intentionally contains counts and lifecycle state only: a host
+// operator can diagnose the service without becoming a member of, or reading
+// data from, any workspace.
+type PlatformCatalog interface {
+	PlatformOverview(ctx context.Context) (PlatformOverview, error)
+	ListPlatformOrganizations(ctx context.Context) ([]PlatformOrganization, error)
+}
+
+// PlatformProvisioner creates tenant boundaries and assigns their initial
+// owner. The deployment operator is the actor, never the resulting member.
+type PlatformProvisioner interface {
+	ProvisionOrganization(ctx context.Context, mutation Mutation, request BootstrapRequest) (BootstrapResult, error)
+	ProvisionWorkspace(ctx context.Context, mutation Mutation, organizationID string, request WorkspaceProvisionRequest) (BootstrapResult, error)
+}
+
+type WorkspaceProvisionRequest struct {
+	WorkspaceName    string `json:"workspace_name"`
+	OwnerEmail       string `json:"owner_email"`
+	OwnerDisplayName string `json:"owner_display_name"`
+	WorkspaceLogo    string `json:"workspace_logo,omitempty"`
+}
+
+type PlatformOverview struct {
+	Organizations      int `json:"organizations"`
+	Workspaces         int `json:"workspaces"`
+	ActiveWorkspaces   int `json:"active_workspaces"`
+	DeletingWorkspaces int `json:"deleting_workspaces"`
+	Users              int `json:"users"`
+	ActiveMemberships  int `json:"active_memberships"`
+	PendingInvitations int `json:"pending_invitations"`
+}
+
+type PlatformWorkspace struct {
+	ID                 string    `json:"id"`
+	Name               string    `json:"name"`
+	Status             string    `json:"status"`
+	CreatedAt          time.Time `json:"created_at"`
+	ActiveMembers      int       `json:"active_members"`
+	PendingInvitations int       `json:"pending_invitations"`
+	LogoDataURL        string    `json:"logo_data_url,omitempty"`
+	IdentityStatus     string    `json:"identity_status"`
+	ProviderType       string    `json:"provider_type,omitempty"`
+}
+
+type PlatformOrganization struct {
+	ID          string              `json:"id"`
+	Name        string              `json:"name"`
+	CreatedAt   time.Time           `json:"created_at"`
+	Workspaces  []PlatformWorkspace `json:"workspaces"`
+	LogoDataURL string              `json:"logo_data_url,omitempty"`
 }
 
 // ListSubjectWorkspaces returns the single implicit workspace. Personal mode

@@ -30,14 +30,17 @@ type Mutation struct {
 }
 
 type Organization struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	LogoDataURL string `json:"logo_data_url,omitempty"`
 }
 
 type Workspace struct {
 	ID             string `json:"id"`
 	OrganizationID string `json:"organization_id"`
 	Name           string `json:"name"`
+	LogoDataURL    string `json:"logo_data_url,omitempty"`
+	IdentityStatus string `json:"identity_status,omitempty"`
 }
 
 type User struct {
@@ -98,7 +101,22 @@ type StoredMembership struct {
 
 // PostgresStore is the durable Team/Scale identity catalog and implements the
 // request-time membership Resolver used by the gateway.
-type PostgresStore struct{ pool *pgxpool.Pool }
+type PostgresStore struct {
+	pool        *pgxpool.Pool
+	providerKey []byte
+}
+
+type identityLinkError struct {
+	stage string
+	err   error
+}
+
+func (e *identityLinkError) Error() string     { return "identity link failed at " + e.stage }
+func (e *identityLinkError) Unwrap() error     { return e.err }
+func (e *identityLinkError) SafeStage() string { return e.stage }
+func identityLinkFailed(stage string, err error) error {
+	return &identityLinkError{stage: stage, err: err}
+}
 
 // LinkOIDCIdentity resolves or creates a local user from a cryptographically
 // verified issuer/subject pair. An unverified email is never persisted or used
@@ -115,32 +133,32 @@ func (s *PostgresStore) LinkOIDCIdentity(ctx context.Context, provider, external
 		return existing, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return "", err
+		return "", identityLinkFailed("existing_identity_lookup", err)
 	}
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return "", err
+		return "", identityLinkFailed("transaction_begin", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	// A SELECT FOR UPDATE cannot lock an absent identity row. Take a
 	// transaction-scoped advisory lock so concurrent first logins for the same
 	// verified provider subject cannot create duplicate local users.
-	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, provider+"\x00"+externalSubject); err != nil {
-		return "", err
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, oidcSubjectLockKey(provider, externalSubject)); err != nil {
+		return "", identityLinkFailed("subject_lock", err)
 	}
 	if err = tx.QueryRow(ctx, `SELECT user_id FROM identities WHERE provider=$1 AND external_subject=$2 AND status='active' FOR UPDATE`, provider, externalSubject).Scan(&existing); err == nil {
 		_ = tx.Commit(ctx)
 		return existing, nil
 	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return "", err
+		return "", identityLinkFailed("locked_identity_lookup", err)
 	}
 	userID := ""
 	normalized := normalizeEmail(email)
 	if emailVerified && normalized != "" {
 		err = tx.QueryRow(ctx, `SELECT id FROM users WHERE normalized_email=$1 FOR UPDATE`, normalized).Scan(&userID)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return "", err
+			return "", identityLinkFailed("verified_email_lookup", err)
 		}
 	}
 	if userID == "" {
@@ -153,12 +171,12 @@ func (s *PostgresStore) LinkOIDCIdentity(ctx context.Context, provider, external
 			storedEmail = normalized
 		}
 		if _, err = tx.Exec(ctx, `INSERT INTO users(id,normalized_email,display_name) VALUES($1,$2,$3)`, userID, storedEmail, strings.TrimSpace(displayName)); err != nil {
-			return "", err
+			return "", identityLinkFailed("user_insert", err)
 		}
 	}
 	identityID := newID("idn")
 	if _, err = tx.Exec(ctx, `INSERT INTO identities(id,user_id,provider,external_subject,status) VALUES($1,$2,$3,$4,'active')`, identityID, userID, provider, externalSubject); err != nil {
-		return "", err
+		return "", identityLinkFailed("identity_insert", err)
 	}
 	// Through insertAudit, like every other mutation in this file.
 	//
@@ -176,12 +194,20 @@ func (s *PostgresStore) LinkOIDCIdentity(ctx context.Context, provider, external
 		"identity.link", "identity", identityID,
 		nil, Identity{ID: identityID, UserID: userID, Provider: provider, ExternalSubject: externalSubject, Status: "active"},
 	); err != nil {
-		return "", err
+		return "", identityLinkFailed("audit_insert", err)
 	}
 	if err = tx.Commit(ctx); err != nil {
-		return "", err
+		return "", identityLinkFailed("transaction_commit", err)
 	}
 	return userID, nil
+}
+
+// oidcSubjectLockKey encodes the tuple without sending its NUL separator to
+// PostgreSQL. PostgreSQL text rejects 0x00, so passing provider+"\x00"+subject
+// made every first-time OIDC login fail before the identity row was created.
+func oidcSubjectLockKey(provider, externalSubject string) string {
+	sum := sha256.Sum256([]byte(provider + "\x00" + externalSubject))
+	return hex.EncodeToString(sum[:])
 }
 
 func OpenPostgres(ctx context.Context, pool *pgxpool.Pool) (*PostgresStore, error) {
@@ -218,6 +244,54 @@ func (s *PostgresStore) CreateWorkspace(ctx context.Context, mutation Mutation, 
 		return err
 	})
 	return ws, err
+}
+
+// CreateWorkspaceForOwner atomically creates another workspace in an
+// existing organization and makes the creating user its first owner.
+func (s *PostgresStore) CreateWorkspaceForOwner(ctx context.Context, mutation Mutation, organizationID, sourceWorkspaceID, name, ownerUserID string) (Workspace, StoredMembership, error) {
+	organizationID = strings.TrimSpace(organizationID)
+	sourceWorkspaceID = strings.TrimSpace(sourceWorkspaceID)
+	ownerUserID = strings.TrimSpace(ownerUserID)
+	workspace := Workspace{ID: newID("ws"), OrganizationID: organizationID, Name: strings.TrimSpace(name)}
+	membership := StoredMembership{ID: newID("mem"), OrganizationID: organizationID, WorkspaceID: workspace.ID, UserID: ownerUserID, Role: RoleOwner, Status: MembershipActive}
+	if organizationID == "" || sourceWorkspaceID == "" || workspace.Name == "" || ownerUserID == "" {
+		return Workspace{}, StoredMembership{}, errors.New("organization, source workspace, workspace name, and owner are required")
+	}
+	tx, err := s.beginMutation(ctx, mutation)
+	if err != nil {
+		return Workspace{}, StoredMembership{}, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "workspace-create:"+organizationID); err != nil {
+		return Workspace{}, StoredMembership{}, err
+	}
+	var authorized bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(
+		SELECT 1 FROM memberships
+		 WHERE organization_id=$1 AND workspace_id=$2 AND user_id=$3 AND role='owner' AND status='active'
+	)`, organizationID, sourceWorkspaceID, ownerUserID).Scan(&authorized); err != nil {
+		return Workspace{}, StoredMembership{}, err
+	}
+	if !authorized {
+		return Workspace{}, StoredMembership{}, ErrRoleEscalation
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO workspaces(id,organization_id,name) VALUES($1,$2,$3)`, workspace.ID, workspace.OrganizationID, workspace.Name); err != nil {
+		return Workspace{}, StoredMembership{}, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO memberships(id,organization_id,workspace_id,user_id,role,status) VALUES($1,$2,$3,$4,'owner','active')`, membership.ID, membership.OrganizationID, membership.WorkspaceID, membership.UserID); err != nil {
+		return Workspace{}, StoredMembership{}, err
+	}
+	after := struct {
+		Workspace  Workspace        `json:"workspace"`
+		Membership StoredMembership `json:"membership"`
+	}{Workspace: workspace, Membership: membership}
+	if err = insertAudit(ctx, tx, mutation, "workspace.create", "workspace", workspace.ID, nil, after); err != nil {
+		return Workspace{}, StoredMembership{}, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return Workspace{}, StoredMembership{}, err
+	}
+	return workspace, membership, nil
 }
 
 func (s *PostgresStore) CreateUser(ctx context.Context, mutation Mutation, email, displayName string) (User, error) {
@@ -498,6 +572,7 @@ func scanMembership(row rowScanner, target *StoredMembership) error {
 var postgresSchema = []string{
 	`CREATE TABLE IF NOT EXISTS organizations(
 		id TEXT PRIMARY KEY CHECK (id ~ '^org_[a-f0-9]{32}$'), name TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`,
+	`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS logo_data_url TEXT`,
 	`CREATE TABLE IF NOT EXISTS workspaces(
 		id TEXT NOT NULL CHECK (id ~ '^ws_[a-f0-9]{32}$'), organization_id TEXT NOT NULL REFERENCES organizations(id),
 		name TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(id), UNIQUE(id, organization_id))`,
@@ -512,6 +587,8 @@ var postgresSchema = []string{
 	// with an empty scope value is data that has silently stopped matching,
 	// which is harder to notice than a leak.
 	`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'`,
+	`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS logo_data_url TEXT`,
+	`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS identity_status TEXT NOT NULL DEFAULT 'active' CHECK(identity_status IN ('pending','active'))`,
 	`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS deletion_requested_at TIMESTAMPTZ`,
 	`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS recoverable_until TIMESTAMPTZ`,
 	// The purge lease. Expiring rather than held, so an instance that dies
@@ -529,6 +606,15 @@ var postgresSchema = []string{
 		id TEXT PRIMARY KEY CHECK (id ~ '^idn_[a-f0-9]{32}$'), user_id TEXT NOT NULL REFERENCES users(id),
 		provider TEXT NOT NULL CHECK(provider=LOWER(BTRIM(provider))), external_subject TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','disabled')),
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE(provider, external_subject))`,
+	`CREATE TABLE IF NOT EXISTS workspace_identity_providers(
+		workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id), organization_id TEXT NOT NULL,
+		provider_type TEXT NOT NULL, issuer TEXT NOT NULL, client_id TEXT NOT NULL, audience TEXT NOT NULL,
+		client_secret_ciphertext BYTEA, scopes JSONB NOT NULL DEFAULT '["openid","profile","email"]'::jsonb,
+		status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active')), locked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		FOREIGN KEY(workspace_id,organization_id) REFERENCES workspaces(id,organization_id))`,
+	`CREATE TABLE IF NOT EXISTS workspace_setup_tokens(
+		workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id), token_hash BYTEA NOT NULL UNIQUE,
+		expires_at TIMESTAMPTZ NOT NULL, consumed_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`,
 	`CREATE TABLE IF NOT EXISTS memberships(
 		id TEXT PRIMARY KEY CHECK (id ~ '^mem_[a-f0-9]{32}$'), organization_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
 		user_id TEXT NOT NULL REFERENCES users(id), role TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','suspended','deleted')),
@@ -581,14 +667,14 @@ func (s *PostgresStore) ListSubjectWorkspaces(ctx context.Context, subject strin
 		return nil, ErrMembershipNotFound
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT m.organization_id, o.name, m.workspace_id, w.name, m.id, m.role, 'user'
+		SELECT m.organization_id, o.name, m.workspace_id, w.name, m.id, m.role, 'user',COALESCE(o.logo_data_url,''),COALESCE(w.logo_data_url,'')
 		  FROM memberships m
 		  JOIN organizations o ON o.id=m.organization_id
 		  JOIN workspaces w ON w.id=m.workspace_id
 		  LEFT JOIN identities i ON i.user_id=m.user_id AND i.status='active'
 		 WHERE m.status='active' AND (m.user_id=$1 OR i.external_subject=$1)
 		UNION
-		SELECT b.organization_id, o.name, b.workspace_id, w.name, b.service_account_id, b.role, 'service_account'
+		SELECT b.organization_id, o.name, b.workspace_id, w.name, b.service_account_id, b.role, 'service_account',COALESCE(o.logo_data_url,''),COALESCE(w.logo_data_url,'')
 		  FROM service_account_workspaces b
 		  JOIN service_accounts sa ON sa.id=b.service_account_id AND sa.status='active'
 		  JOIN organizations o ON o.id=b.organization_id
@@ -602,7 +688,7 @@ func (s *PostgresStore) ListSubjectWorkspaces(ctx context.Context, subject strin
 	out := []SubjectWorkspace{}
 	for rows.Next() {
 		var w SubjectWorkspace
-		if err := rows.Scan(&w.OrganizationID, &w.OrganizationName, &w.WorkspaceID, &w.WorkspaceName, &w.MembershipID, &w.Role, &w.PrincipalKind); err != nil {
+		if err := rows.Scan(&w.OrganizationID, &w.OrganizationName, &w.WorkspaceID, &w.WorkspaceName, &w.MembershipID, &w.Role, &w.PrincipalKind, &w.OrganizationLogo, &w.WorkspaceLogo); err != nil {
 			return nil, err
 		}
 		out = append(out, w)
@@ -611,4 +697,88 @@ func (s *PostgresStore) ListSubjectWorkspaces(ctx context.Context, subject strin
 		return nil, err
 	}
 	return out, nil
+}
+
+// PlatformOverview returns aggregate catalog health without returning tenant
+// content or user identities. It is used only by deployment-operator routes.
+func (s *PostgresStore) PlatformOverview(ctx context.Context) (PlatformOverview, error) {
+	var out PlatformOverview
+	err := s.pool.QueryRow(ctx, `SELECT
+		(SELECT COUNT(*) FROM organizations),
+		(SELECT COUNT(*) FROM workspaces),
+		(SELECT COUNT(*) FROM workspaces WHERE status='active'),
+		(SELECT COUNT(*) FROM workspaces WHERE status='deleting'),
+		(SELECT COUNT(*) FROM users),
+		(SELECT COUNT(*) FROM memberships WHERE status='active'),
+		(SELECT COUNT(*) FROM invitations WHERE status='pending' AND expires_at > NOW())`).Scan(
+		&out.Organizations, &out.Workspaces, &out.ActiveWorkspaces,
+		&out.DeletingWorkspaces, &out.Users, &out.ActiveMemberships,
+		&out.PendingInvitations)
+	return out, err
+}
+
+// ListPlatformOrganizations lists control-plane metadata. Email addresses,
+// identities, roles, secrets, agents, runs, and all other tenant content are
+// deliberately absent.
+func (s *PostgresStore) ListPlatformOrganizations(ctx context.Context) ([]PlatformOrganization, error) {
+	rows, err := s.pool.Query(ctx, `SELECT o.id,o.name,o.created_at,COALESCE(o.logo_data_url,''),
+		w.id,w.name,w.status,w.created_at,COALESCE(w.logo_data_url,''),COALESCE(w.identity_status,'active'),COALESCE(p.provider_type,''),
+		(SELECT COUNT(*) FROM memberships m WHERE m.workspace_id=w.id AND m.status='active'),
+		(SELECT COUNT(*) FROM invitations i WHERE i.workspace_id=w.id AND i.status='pending' AND i.expires_at > NOW())
+		FROM organizations o
+		LEFT JOIN workspaces w ON w.organization_id=o.id
+		LEFT JOIN workspace_identity_providers p ON p.workspace_id=w.id
+		ORDER BY o.created_at DESC,w.created_at ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []PlatformOrganization{}
+	index := map[string]int{}
+	for rows.Next() {
+		var org PlatformOrganization
+		var workspaceID, workspaceName, workspaceStatus *string
+		var workspaceCreated *time.Time
+		var workspaceLogo, identityStatus, providerType *string
+		var members, invitations *int
+		if err := rows.Scan(&org.ID, &org.Name, &org.CreatedAt, &org.LogoDataURL, &workspaceID,
+			&workspaceName, &workspaceStatus, &workspaceCreated, &workspaceLogo, &identityStatus, &providerType, &members, &invitations); err != nil {
+			return nil, err
+		}
+		pos, exists := index[org.ID]
+		if !exists {
+			pos = len(out)
+			index[org.ID] = pos
+			org.Workspaces = []PlatformWorkspace{}
+			out = append(out, org)
+		}
+		if workspaceID != nil {
+			out[pos].Workspaces = append(out[pos].Workspaces, PlatformWorkspace{
+				ID: *workspaceID, Name: derefString(workspaceName), Status: derefString(workspaceStatus),
+				CreatedAt: derefTime(workspaceCreated), ActiveMembers: derefInt(members),
+				PendingInvitations: derefInt(invitations),
+				LogoDataURL:        derefString(workspaceLogo), IdentityStatus: derefString(identityStatus), ProviderType: derefString(providerType),
+			})
+		}
+	}
+	return out, rows.Err()
+}
+
+func derefString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+func derefTime(value *time.Time) time.Time {
+	if value == nil {
+		return time.Time{}
+	}
+	return *value
+}
+func derefInt(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
 }

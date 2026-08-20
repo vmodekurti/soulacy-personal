@@ -69,11 +69,15 @@ func (s *Server) workspaceContextMW() fiber.Handler {
 			return s.errMsg(c, fiber.StatusServiceUnavailable, "workspace membership resolver is unavailable")
 		}
 
-		// A signed workspace claim has precedence. The header is only a selector
-		// and gains no authority: ResolveMembership must independently verify it.
-		requestedWorkspace := strings.TrimSpace(claims.WorkspaceID)
+		// The header selects the workspace for this request; it grants no
+		// authority because ResolveMembership independently verifies it below.
+		// Falling back to the token's workspace preserves clients that do not
+		// select explicitly. Giving the signed value precedence made the GUI's
+		// workspace switcher cosmetic: every request kept resolving the workspace
+		// chosen when the OIDC session was first minted.
+		requestedWorkspace := strings.TrimSpace(c.Get("X-Soulacy-Workspace"))
 		if requestedWorkspace == "" {
-			requestedWorkspace = strings.TrimSpace(c.Get("X-Soulacy-Workspace"))
+			requestedWorkspace = strings.TrimSpace(claims.WorkspaceID)
 		}
 		personalMode := s.config() == nil || s.config().DeploymentMode() == config.DeploymentModePersonal
 		// Credentials created before Personal tenancy existed carry stable
@@ -94,7 +98,13 @@ func (s *Server) workspaceContextMW() fiber.Handler {
 			}
 			return s.errMsg(c, fiber.StatusServiceUnavailable, "workspace membership could not be verified")
 		}
-		if claimedOrg := strings.TrimSpace(claims.OrganizationID); claimedOrg != "" && claimedOrg != membership.OrganizationID && !(personalMode && claimedOrg == "org_personal") {
+		// Human sessions may acquire membership in another organization while
+		// they are signed in. Their live membership is authoritative. Managed
+		// credentials remain organization-bound and cannot use the selector to
+		// escape the organization encoded at issuance.
+		claimedOrg := strings.TrimSpace(claims.OrganizationID)
+		humanSession := strings.TrimSpace(claims.PrincipalKind) == "user"
+		if claimedOrg != "" && claimedOrg != membership.OrganizationID && !humanSession && !(personalMode && claimedOrg == "org_personal") {
 			return s.errMsg(c, fiber.StatusForbidden, "credential organization does not match the workspace")
 		}
 		// The verified membership is authoritative in Team/Scale mode. A
@@ -201,6 +211,9 @@ func principalKind(claims *auth.Claims) string {
 	}
 	if kind := strings.TrimSpace(claims.PrincipalKind); kind != "" {
 		return kind
+	}
+	if strings.TrimSpace(claims.Kind) == "access" {
+		return "user"
 	}
 	return strings.TrimSpace(claims.Kind)
 }

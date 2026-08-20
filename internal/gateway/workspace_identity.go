@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -15,16 +16,20 @@ import (
 // request — not the claims the client presented — so a stale or over-broad
 // token cannot make the CLI misreport who you are or what you may do.
 type identityResponse struct {
-	Subject        string   `json:"subject"`
-	PrincipalKind  string   `json:"principal_kind"`
-	CredentialID   string   `json:"credential_id,omitempty"`
-	OrganizationID string   `json:"organization_id"`
-	WorkspaceID    string   `json:"workspace_id"`
-	MembershipID   string   `json:"membership_id"`
-	Role           string   `json:"role"`
-	Scopes         []string `json:"scopes"`
-	DeploymentMode string   `json:"deployment_mode"`
-	RequestID      string   `json:"request_id,omitempty"`
+	Subject          string   `json:"subject"`
+	PrincipalKind    string   `json:"principal_kind"`
+	CredentialID     string   `json:"credential_id,omitempty"`
+	OrganizationID   string   `json:"organization_id"`
+	OrganizationName string   `json:"organization_name,omitempty"`
+	OrganizationLogo string   `json:"organization_logo,omitempty"`
+	WorkspaceID      string   `json:"workspace_id"`
+	WorkspaceName    string   `json:"workspace_name,omitempty"`
+	WorkspaceLogo    string   `json:"workspace_logo,omitempty"`
+	MembershipID     string   `json:"membership_id"`
+	Role             string   `json:"role"`
+	Scopes           []string `json:"scopes"`
+	DeploymentMode   string   `json:"deployment_mode"`
+	RequestID        string   `json:"request_id,omitempty"`
 
 	// Permissions is what the VERIFIED role may do, projected from the RBAC
 	// matrix (MU-030 criterion 2). It is served rather than duplicated in the
@@ -62,17 +67,33 @@ func (s *Server) handleWorkspaceIdentity(c *fiber.Ctx) error {
 	if scopes == nil {
 		scopes = []string{}
 	}
+	var organizationName, organizationLogo, workspaceName, workspaceLogo string
+	if lister, supported := s.tenantResolver.(tenancy.WorkspaceLister); supported {
+		if workspaces, err := lister.ListSubjectWorkspaces(c.UserContext(), identity.Subject()); err == nil {
+			for _, workspace := range workspaces {
+				if workspace.WorkspaceID == identity.WorkspaceID() {
+					organizationName, organizationLogo = workspace.OrganizationName, workspace.OrganizationLogo
+					workspaceName, workspaceLogo = workspace.WorkspaceName, workspace.WorkspaceLogo
+					break
+				}
+			}
+		}
+	}
 	return c.JSON(identityResponse{
-		Subject:        identity.Subject(),
-		PrincipalKind:  identity.PrincipalKind(),
-		CredentialID:   identity.CredentialID(),
-		OrganizationID: identity.OrganizationID(),
-		WorkspaceID:    identity.WorkspaceID(),
-		MembershipID:   identity.MembershipID(),
-		Role:           identity.Role(),
-		Scopes:         scopes,
-		DeploymentMode: s.deploymentMode(),
-		RequestID:      identity.RequestID(),
+		Subject:          identity.Subject(),
+		PrincipalKind:    identity.PrincipalKind(),
+		CredentialID:     identity.CredentialID(),
+		OrganizationID:   identity.OrganizationID(),
+		OrganizationName: organizationName,
+		OrganizationLogo: organizationLogo,
+		WorkspaceID:      identity.WorkspaceID(),
+		WorkspaceName:    workspaceName,
+		WorkspaceLogo:    workspaceLogo,
+		MembershipID:     identity.MembershipID(),
+		Role:             identity.Role(),
+		Scopes:           scopes,
+		DeploymentMode:   s.deploymentMode(),
+		RequestID:        identity.RequestID(),
 		// The role the SERVER resolved from stored membership, not the
 		// broader one the caller's token may assert — the same distinction
 		// the Role field above already makes, and for the same reason: a GUI
@@ -105,6 +126,40 @@ func (s *Server) handleListSelectableWorkspaces(c *fiber.Ctx) error {
 		workspaces = []tenancy.SubjectWorkspace{}
 	}
 	return c.JSON(workspacesResponse{Workspaces: workspaces, ActiveWorkspaceID: identity.WorkspaceID()})
+}
+
+// handleCreateWorkspace lets an active workspace owner create another
+// workspace inside the same organization. It deliberately grants the creator
+// owner in the new workspace; creating an ownerless tenant would leave a row
+// nobody can administer, while letting an admin mint themselves owner would be
+// a cross-role elevation.
+func (s *Server) handleCreateWorkspace(c *fiber.Ctx) error {
+	identity, ok := requestIdentity(c)
+	if !ok || identity.Role() != tenancy.RoleOwner || identity.PrincipalKind() != "user" {
+		return s.errMsg(c, fiber.StatusForbidden, "workspace creation requires a workspace owner")
+	}
+	creator, supported := s.tenantResolver.(tenancy.WorkspaceCreator)
+	if !supported {
+		return s.errMsg(c, fiber.StatusServiceUnavailable, "this deployment cannot create workspaces")
+	}
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := c.BodyParser(&body); err != nil || strings.TrimSpace(body.Name) == "" {
+		return s.errMsg(c, fiber.StatusBadRequest, "workspace name is required")
+	}
+	workspace, membership, err := creator.CreateWorkspaceForOwner(
+		c.UserContext(), membershipMutation(identity), identity.OrganizationID(),
+		identity.WorkspaceID(), body.Name, identity.Subject(),
+	)
+	s.recordAdminAudit(c, "workspace.created", "workspace", workspace.ID, auditOutcome(err), nil)
+	if errors.Is(err, tenancy.ErrRoleEscalation) {
+		return s.errMsg(c, fiber.StatusForbidden, "workspace creation requires a workspace owner")
+	}
+	if err != nil {
+		return s.errMsg(c, fiber.StatusConflict, "workspace could not be created")
+	}
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"workspace": workspace, "membership": membership})
 }
 
 // handleSelectWorkspace verifies that a requested workspace is one the subject
