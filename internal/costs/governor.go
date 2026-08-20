@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/soulacy/soulacy/internal/llm"
@@ -68,8 +69,13 @@ func (e *ConfirmationRequiredError) Error() string {
 type Governor struct {
 	store  *Store
 	prices PriceTable
-	cfg    GovernanceConfig
-	mu     sync.Mutex
+	// cfg is an atomic snapshot, not a plain struct, because config reload
+	// republishes it while calls are in flight (SetGovernance). Every method
+	// takes ONE snapshot and uses it throughout: reading g.cfg twice inside
+	// Before could otherwise apply the old ceiling and the new allow-list to
+	// the same request, which is a decision that was never configured.
+	cfg atomic.Pointer[GovernanceConfig]
+	mu  sync.Mutex
 	// providerShares admits in-flight calls per provider under max-min
 	// fairness by workspace (MU-024 criterion 4); providerReleases holds the
 	// release functions handed back, so releaseProvider returns exactly as
@@ -85,7 +91,10 @@ type Governor struct {
 	circuitUntil     map[string]time.Time
 }
 
-func NewGovernor(store *Store, prices PriceTable, cfg GovernanceConfig) *Governor {
+// normalizeGovernance fills in the defaults a zero-valued section implies.
+// Shared by construction and by reload, so a hot-applied config cannot end up
+// with a zero output ceiling that boot would have filled in.
+func normalizeGovernance(cfg GovernanceConfig) GovernanceConfig {
 	if cfg.DefaultMaxOutput <= 0 {
 		cfg.DefaultMaxOutput = 4096
 	}
@@ -107,26 +116,79 @@ func NewGovernor(store *Store, prices PriceTable, cfg GovernanceConfig) *Governo
 	if cfg.CircuitCooldown <= 0 {
 		cfg.CircuitCooldown = 30 * time.Second
 	}
-	return &Governor{store: store, prices: prices, cfg: cfg,
+	return cfg
+}
+
+func NewGovernor(store *Store, prices PriceTable, cfg GovernanceConfig) *Governor {
+	g := &Governor{store: store, prices: prices,
 		providerShares:   make(map[string]*quota.FairShare),
 		providerReleases: make(map[string][]func()),
 		providerFailures: make(map[string]int), circuitUntil: make(map[string]time.Time)}
+	g.SetGovernance(cfg)
+	return g
+}
+
+// governance returns the current admission settings. Callers take one snapshot
+// and use it for the whole operation.
+func (g *Governor) governance() GovernanceConfig {
+	if g == nil {
+		return GovernanceConfig{}
+	}
+	if c := g.cfg.Load(); c != nil {
+		return *c
+	}
+	return GovernanceConfig{}
+}
+
+// SetGovernance republishes the admission settings from a config reload.
+//
+// WHY THIS EXISTS. costs and llm are both classified hot-reloadable, and the
+// budgets, the enforcement mode and the quota policy genuinely were. The
+// PROVIDER-level half was not: allowed_providers, allowed_models,
+// allowed_regions and every per-provider data-class, retention and rate policy
+// were copied into this struct once at boot and never read again. An operator
+// who removed a provider from allowed_providers, or tightened a data class,
+// watched the file save and the setting take no effect — with no restart
+// notice, because the section was advertised as live. A half-applied security
+// control is worse than one that says it needs a restart.
+func (g *Governor) SetGovernance(next GovernanceConfig) {
+	if g == nil {
+		return
+	}
+	next = normalizeGovernance(next)
+	previous := g.governance()
+	g.cfg.Store(&next)
+	if previous.MaxConcurrentPerProvider == next.MaxConcurrentPerProvider {
+		return
+	}
+	// A changed concurrency ceiling needs new schedulers: quota.FairShare
+	// fixes its limit at construction. Calls already holding a slot keep the
+	// release closure for the OLD scheduler, so they release correctly and
+	// simply stop counting against the new one — a brief over-admission
+	// bounded by the number of calls in flight at the moment of the change.
+	// The alternative, blocking the reload until every in-flight call drains,
+	// makes a config save hang for as long as the slowest model takes.
+	g.mu.Lock()
+	g.providerShares = make(map[string]*quota.FairShare, len(g.providerShares))
+	g.mu.Unlock()
 }
 
 func (g *Governor) Before(ctx context.Context, provider string, req *llm.CompletionRequest) (context.Context, llm.Reservation, error) {
 	if g == nil || g.store == nil {
 		return ctx, llm.Reservation{}, nil
 	}
+	// One snapshot for the whole admission decision.
+	gcfg := g.governance()
 	if req.MaxTokens <= 0 && req.Operation != "embedding" {
-		req.MaxTokens = g.cfg.DefaultMaxOutput
+		req.MaxTokens = gcfg.DefaultMaxOutput
 	}
-	if req.MaxTokens > g.cfg.MaxOutputCeiling {
-		req.MaxTokens = g.cfg.MaxOutputCeiling
+	if req.MaxTokens > gcfg.MaxOutputCeiling {
+		req.MaxTokens = gcfg.MaxOutputCeiling
 	}
-	if !allowedValue(g.cfg.AllowedProviders, provider) {
+	if !allowedValue(gcfg.AllowedProviders, provider) {
 		return ctx, llm.Reservation{}, fmt.Errorf("llm cost control: provider %q is not globally allowed", provider)
 	}
-	if !allowedValue(g.cfg.AllowedModels, req.Model) {
+	if !allowedValue(gcfg.AllowedModels, req.Model) {
 		return ctx, llm.Reservation{}, fmt.Errorf("llm cost control: model %q is not globally allowed", req.Model)
 	}
 	metadata := llm.CallMetadataFromContext(ctx)
@@ -135,12 +197,12 @@ func (g *Governor) Before(ctx context.Context, provider string, req *llm.Complet
 		classification = "unclassified"
 	}
 	providerTokenLimit := 0
-	if policy, ok := g.cfg.ProviderPolicies[provider]; ok {
+	if policy, ok := gcfg.ProviderPolicies[provider]; ok {
 		providerTokenLimit = policy.MaxTokensPerMinute
 		if policy.AllowedDataClasses != nil && !allowedValue(policy.AllowedDataClasses, classification) {
 			return ctx, llm.Reservation{}, fmt.Errorf("llm data policy: provider %q does not allow %q data", provider, classification)
 		}
-		if g.cfg.AllowedRegions != nil && !allowedValue(g.cfg.AllowedRegions, policy.Region) {
+		if gcfg.AllowedRegions != nil && !allowedValue(gcfg.AllowedRegions, policy.Region) {
 			return ctx, llm.Reservation{}, fmt.Errorf("llm data policy: provider %q region %q is not allowed", provider, policy.Region)
 		}
 		if policy.PromptCaching && !allowedValueNonNil(policy.CacheAllowedDataClasses, classification) {
@@ -152,14 +214,14 @@ func (g *Governor) Before(ctx context.Context, provider string, req *llm.Complet
 	estimatedUSD, estimatedMicros, pricingStatus := EstimateDetailed(g.prices, provider, req.Model, UsageDimensions{
 		InputTokens: inputTokens, OutputTokens: req.MaxTokens,
 	})
-	if pricingStatus == "unknown" && strings.EqualFold(g.cfg.UnknownPricing, "block") {
+	if pricingStatus == "unknown" && strings.EqualFold(gcfg.UnknownPricing, "block") {
 		return ctx, llm.Reservation{}, fmt.Errorf("llm cost control: pricing is unknown for %s/%s", provider, req.Model)
 	}
-	if g.cfg.ConfirmationThresholdUSD > 0 && estimatedUSD > g.cfg.ConfirmationThresholdUSD &&
+	if gcfg.ConfirmationThresholdUSD > 0 && estimatedUSD > gcfg.ConfirmationThresholdUSD &&
 		isInteractiveSource(metadata.Source) && !metadata.CostConfirmed {
 		return ctx, llm.Reservation{}, &ConfirmationRequiredError{
 			Provider: provider, Model: req.Model, EstimatedUSD: estimatedUSD,
-			EstimatedTokens: estimatedTokens, ThresholdUSD: g.cfg.ConfirmationThresholdUSD,
+			EstimatedTokens: estimatedTokens, ThresholdUSD: gcfg.ConfirmationThresholdUSD,
 		}
 	}
 	if err := g.acquireProvider(ctx, provider, wsroot.Normalize(metadata.Workspace)); err != nil {
@@ -173,7 +235,7 @@ func (g *Governor) Before(ctx context.Context, provider string, req *llm.Complet
 	}()
 
 	now := time.Now().UTC()
-	hard := strings.EqualFold(g.cfg.EnforcementMode, "hard")
+	hard := strings.EqualFold(gcfg.EnforcementMode, "hard")
 	id := newReservationID()
 	// A call arriving without a workspace is a single-tenant call — the
 	// scheduler, a channel, or Personal itself — so it resolves to the
@@ -183,7 +245,7 @@ func (g *Governor) Before(ctx context.Context, provider string, req *llm.Complet
 	// single-tenant spend to the single tenant that exists.
 	workspace := wsroot.Normalize(metadata.Workspace)
 	if !hard && providerTokenLimit <= 0 {
-		if err := g.store.Reserve(ctx, workspace, id, metadata.Subject, metadata.AgentID, provider, estimatedMicros, estimatedTokens, now.Add(g.cfg.ReservationTTL)); err != nil {
+		if err := g.store.Reserve(ctx, workspace, id, metadata.Subject, metadata.AgentID, provider, estimatedMicros, estimatedTokens, now.Add(gcfg.ReservationTTL)); err != nil {
 			return ctx, llm.Reservation{}, fmt.Errorf("llm cost control: reserve: %w", err)
 		}
 	} else {
@@ -195,12 +257,12 @@ func (g *Governor) Before(ctx context.Context, provider string, req *llm.Complet
 			ProviderTokenLimit:       int64(providerTokenLimit),
 		}
 		if hard {
-			policy.GlobalDailyMicros = dollarsToMicros(g.cfg.DailyBudgetUSD)
-			policy.GlobalMonthlyMicros = dollarsToMicros(g.cfg.MonthlyBudgetUSD)
-			policy.UserDailyMicros = dollarsToMicros(g.cfg.PerUserDailyBudgetUSD)
-			policy.AgentDailyMicros = dollarsToMicros(g.cfg.PerAgentDailyBudgetUSD)
-			policy.UserTokenLimit = int64(g.cfg.PerUserTokensDay)
-			policy.AgentTokenLimit = int64(g.cfg.PerAgentTokensDay)
+			policy.GlobalDailyMicros = dollarsToMicros(gcfg.DailyBudgetUSD)
+			policy.GlobalMonthlyMicros = dollarsToMicros(gcfg.MonthlyBudgetUSD)
+			policy.UserDailyMicros = dollarsToMicros(gcfg.PerUserDailyBudgetUSD)
+			policy.AgentDailyMicros = dollarsToMicros(gcfg.PerAgentDailyBudgetUSD)
+			policy.UserTokenLimit = int64(gcfg.PerUserTokensDay)
+			policy.AgentTokenLimit = int64(gcfg.PerAgentTokensDay)
 		}
 		// Multi-level limits tighten the flat config; they never loosen it.
 		// See quotapolicy.go for why replacing would invert the precedence.
@@ -210,7 +272,7 @@ func (g *Governor) Before(ctx context.Context, provider string, req *llm.Complet
 			Provider: provider, Model: req.Model,
 		})
 		for attempt := 0; attempt < 2; attempt++ {
-			err := g.store.TryReserve(ctx, workspace, id, metadata.Subject, metadata.AgentID, provider, estimatedMicros, estimatedTokens, now.Add(g.cfg.ReservationTTL), policy)
+			err := g.store.TryReserve(ctx, workspace, id, metadata.Subject, metadata.AgentID, provider, estimatedMicros, estimatedTokens, now.Add(gcfg.ReservationTTL), policy)
 			if err == nil {
 				break
 			}
@@ -263,6 +325,7 @@ func (g *Governor) After(ctx context.Context, reservation llm.Reservation, provi
 		return
 	}
 	defer g.releaseProvider(provider)
+	gcfg := g.governance()
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if callErr == nil {
@@ -270,8 +333,8 @@ func (g *Governor) After(ctx context.Context, reservation llm.Reservation, provi
 		delete(g.circuitUntil, provider)
 	} else {
 		g.providerFailures[provider]++
-		if g.providerFailures[provider] >= g.cfg.CircuitFailureThreshold {
-			g.circuitUntil[provider] = time.Now().UTC().Add(g.cfg.CircuitCooldown)
+		if g.providerFailures[provider] >= gcfg.CircuitFailureThreshold {
+			g.circuitUntil[provider] = time.Now().UTC().Add(gcfg.CircuitCooldown)
 		}
 	}
 	metadata := llm.CallMetadataFromContext(ctx)
@@ -403,7 +466,8 @@ func allowedValueNonNil(allowlist []string, value string) bool {
 // spending faster than allowed, only first. Budgets bound how much; they say
 // nothing about who goes next.
 func (g *Governor) acquireProvider(ctx context.Context, provider, workspaceID string) error {
-	if g.cfg.MaxConcurrentPerProvider <= 0 {
+	maxConcurrent := g.governance().MaxConcurrentPerProvider
+	if maxConcurrent <= 0 {
 		g.mu.Lock()
 		until := g.circuitUntil[provider]
 		g.mu.Unlock()
@@ -420,7 +484,7 @@ func (g *Governor) acquireProvider(ctx context.Context, provider, workspaceID st
 	}
 	share := g.providerShares[provider]
 	if share == nil {
-		share = quota.NewFairShare(g.cfg.MaxConcurrentPerProvider)
+		share = quota.NewFairShare(maxConcurrent)
 		g.providerShares[provider] = share
 	}
 	g.mu.Unlock()
@@ -436,9 +500,12 @@ func (g *Governor) acquireProvider(ctx context.Context, provider, workspaceID st
 }
 
 func (g *Governor) releaseProvider(provider string) {
-	if g.cfg.MaxConcurrentPerProvider <= 0 {
-		return
-	}
+	// Deliberately NOT gated on MaxConcurrentPerProvider. It used to be, and
+	// that read the CURRENT setting to decide whether a slot taken under the
+	// OLD one should be given back: turning concurrency limiting off while
+	// calls were in flight leaked every outstanding slot, and turning it on
+	// tried to release slots that were never taken. The pending-release list
+	// is the only thing that knows, so it is the only thing consulted.
 	// LIFO over the pending releases for this provider. Which specific release
 	// runs does not matter — every holder of a slot released one — but the
 	// count must match exactly, or the scheduler either leaks capacity or
