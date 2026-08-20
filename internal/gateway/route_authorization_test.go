@@ -150,11 +150,36 @@ func handlerName(expr ast.Expr) string {
 	case *ast.SelectorExpr:
 		return typed.Sel.Name
 	case *ast.CallExpr:
+		// A late-wiring wrapper resolves its dependency at request time and
+		// returns the REAL handler from a closure — see latewiring.go. Naming
+		// the wrapper would collapse every wrapped route onto one identity, so
+		// one exemption would silently cover all of them. Look inside for the
+		// handler actually being served.
+		if inner := wrappedHandlerName(typed); inner != "" {
+			return inner
+		}
 		return handlerName(typed.Fun)
 	case *ast.Ident:
 		return typed.Name
 	}
 	return ""
+}
+
+// wrappedHandlerName pulls HandleX out of
+// requireAuthEngine(func(s *Server) fiber.Handler { return s.authEngine.HandleX }).
+func wrappedHandlerName(call *ast.CallExpr) string {
+	if len(call.Args) != 1 {
+		return ""
+	}
+	lit, ok := call.Args[0].(*ast.FuncLit)
+	if !ok || lit.Body == nil || len(lit.Body.List) != 1 {
+		return ""
+	}
+	ret, ok := lit.Body.List[0].(*ast.ReturnStmt)
+	if !ok || len(ret.Results) != 1 {
+		return ""
+	}
+	return handlerName(ret.Results[0])
 }
 
 func handlerOrUnknown(name string) string {

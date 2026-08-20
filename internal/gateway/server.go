@@ -878,18 +878,21 @@ func (s *Server) buildApp() *fiber.App {
 	// POST /api/v1/auth/token   — exchange static API key for JWT pair (jwt mode)
 	// POST /api/v1/auth/refresh — rotate refresh token → new access token (jwt mode)
 	// GET  /api/v1/auth/me      — return identity from current token (protected below)
-	if s.authEngine != nil {
-		app.Post("/api/v1/auth/token", s.authEngine.HandleTokenRequest)
-		app.Post("/api/v1/auth/refresh", s.authEngine.HandleRefresh)
-		app.Post("/api/v1/auth/logout", s.authEngine.HandleLogout)
-		app.Get("/api/v1/auth/oidc/config", s.authEngine.HandleOIDCConfig)
-		app.Get("/api/v1/auth/oidc/start", s.authEngine.HandleOIDCStart)
-		app.Post("/api/v1/auth/oidc/start", s.authEngine.HandleOIDCStart)
-		app.Get("/api/v1/auth/oidc/callback", s.authEngine.HandleOIDCCallback)
-		app.Post("/api/v1/auth/oidc/complete", s.authEngine.HandleOIDCComplete)
-		app.Post("/api/v1/auth/oidc/device/start", s.authEngine.HandleOIDCDeviceStart)
-		app.Post("/api/v1/auth/oidc/device/poll", s.authEngine.HandleOIDCDevicePoll)
-	}
+	//
+	// Registered UNCONDITIONALLY. They used to sit behind `if s.authEngine !=
+	// nil`, and SetAuth runs after buildApp, so none of them were ever
+	// registered — every one fell through to the authenticated group and
+	// answered 401. See latewiring.go.
+	app.Post("/api/v1/auth/token", s.requireAuthEngine(func(s *Server) fiber.Handler { return s.authEngine.HandleTokenRequest }))
+	app.Post("/api/v1/auth/refresh", s.requireAuthEngine(func(s *Server) fiber.Handler { return s.authEngine.HandleRefresh }))
+	app.Post("/api/v1/auth/logout", s.requireAuthEngine(func(s *Server) fiber.Handler { return s.authEngine.HandleLogout }))
+	app.Get("/api/v1/auth/oidc/config", s.requireAuthEngine(func(s *Server) fiber.Handler { return s.authEngine.HandleOIDCConfig }))
+	app.Get("/api/v1/auth/oidc/start", s.requireAuthEngine(func(s *Server) fiber.Handler { return s.authEngine.HandleOIDCStart }))
+	app.Post("/api/v1/auth/oidc/start", s.requireAuthEngine(func(s *Server) fiber.Handler { return s.authEngine.HandleOIDCStart }))
+	app.Get("/api/v1/auth/oidc/callback", s.requireAuthEngine(func(s *Server) fiber.Handler { return s.authEngine.HandleOIDCCallback }))
+	app.Post("/api/v1/auth/oidc/complete", s.requireAuthEngine(func(s *Server) fiber.Handler { return s.authEngine.HandleOIDCComplete }))
+	app.Post("/api/v1/auth/oidc/device/start", s.requireAuthEngine(func(s *Server) fiber.Handler { return s.authEngine.HandleOIDCDeviceStart }))
+	app.Post("/api/v1/auth/oidc/device/poll", s.requireAuthEngine(func(s *Server) fiber.Handler { return s.authEngine.HandleOIDCDevicePoll }))
 	// Invitation acceptance requires an authenticated identity but deliberately
 	// runs before workspace resolution: a new user has no membership yet.
 	app.Post("/api/v1/invitations/accept", s.authWithPluginTokens(), s.rlUserMW(), s.handleAcceptInvitation)
@@ -945,12 +948,12 @@ func (s *Server) buildApp() *fiber.App {
 	api.Delete("/plugins/:id", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.auditing("plugin.remove", "plugin", "id", s.handleRemovePlugin))
 
 	// Auth identity — returns claims from the current token; useful for GUI.
-	if s.authEngine != nil {
-		api.Get("/auth/me", s.authEngine.HandleMe)
+	{
+		api.Get("/auth/me", s.requireAuthEngine(func(s *Server) fiber.Handler { return s.authEngine.HandleMe }))
 		// Inside the authenticated group on purpose (MU-030 criterion 5).
 		// Step-up elevates a session that already exists; registering it beside
 		// /auth/token would make it a second, less-examined way in.
-		api.Post("/auth/reauthenticate", s.authEngine.HandleReauthenticate)
+		api.Post("/auth/reauthenticate", s.requireAuthEngine(func(s *Server) fiber.Handler { return s.authEngine.HandleReauthenticate }))
 	}
 
 	// Workspace membership administration uses the freshly resolved role on
@@ -1355,13 +1358,14 @@ func (s *Server) buildApp() *fiber.App {
 	api.Get("/support/bundle", s.rbacMW(rbac.ResourceLogs, rbac.ActionRead), s.handleSupportBundle)
 
 	// RBAC management (admin only — enforced by static policy)
-	if s.rbacManager != nil {
-		api.Get("/rbac/policy", s.rbacMW(rbac.ResourceRBAC, rbac.ActionRead), s.rbacManager.HandleListPolicy)
-		api.Get("/rbac/grants", s.rbacMW(rbac.ResourceRBAC, rbac.ActionRead), s.rbacManager.HandleListGrants)
-		api.Get("/rbac/grants/:role", s.rbacMW(rbac.ResourceRBAC, rbac.ActionRead), s.rbacManager.HandleListGrantsForRole)
-		api.Put("/rbac/grants/:role/:agent_id", s.rbacMW(rbac.ResourceRBAC, rbac.ActionWrite), s.rbacManager.HandleSetAgentGrant)
-		api.Delete("/rbac/grants/:role/:agent_id", s.rbacMW(rbac.ResourceRBAC, rbac.ActionDelete), s.rbacManager.HandleDeleteAgentGrant)
-	}
+	// Unconditional for the same reason the auth routes are: SetRBAC runs
+	// after buildApp. newTestGatewayWithRBAC rebuilds the app by hand to work
+	// around exactly this, and that workaround never reached production.
+	api.Get("/rbac/policy", s.rbacMW(rbac.ResourceRBAC, rbac.ActionRead), s.requireRBACManager(func(s *Server) fiber.Handler { return s.rbacManager.HandleListPolicy }))
+	api.Get("/rbac/grants", s.rbacMW(rbac.ResourceRBAC, rbac.ActionRead), s.requireRBACManager(func(s *Server) fiber.Handler { return s.rbacManager.HandleListGrants }))
+	api.Get("/rbac/grants/:role", s.rbacMW(rbac.ResourceRBAC, rbac.ActionRead), s.requireRBACManager(func(s *Server) fiber.Handler { return s.rbacManager.HandleListGrantsForRole }))
+	api.Put("/rbac/grants/:role/:agent_id", s.rbacMW(rbac.ResourceRBAC, rbac.ActionWrite), s.requireRBACManager(func(s *Server) fiber.Handler { return s.rbacManager.HandleSetAgentGrant }))
+	api.Delete("/rbac/grants/:role/:agent_id", s.rbacMW(rbac.ResourceRBAC, rbac.ActionDelete), s.requireRBACManager(func(s *Server) fiber.Handler { return s.rbacManager.HandleDeleteAgentGrant }))
 
 	// --- Rate Limit status (Task #33) ---
 	// Always registered; returns 503 when no limiter is configured.
