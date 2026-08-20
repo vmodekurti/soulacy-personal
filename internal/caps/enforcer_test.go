@@ -12,6 +12,8 @@ import (
 	"github.com/soulacy/soulacy/internal/audit"
 	"github.com/soulacy/soulacy/internal/auth"
 	"github.com/soulacy/soulacy/pkg/plugin"
+
+	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
 // fakeSink records audit entries in memory.
@@ -49,9 +51,9 @@ func TestEnforcer_Check_AllowAndAudit(t *testing.T) {
 	set := mustSet(t, "matrix", []plugin.Permission{
 		{Cap: CapChannelSend, Channels: []string{"matrix"}},
 	})
-	e.SetPluginSet(set)
+	e.SetPluginSet(wsroot.PersonalWorkspaceID, set)
 
-	d := e.Check(PluginPrincipal("matrix"), CapChannelSend, "matrix")
+	d := e.Check(wsroot.PersonalWorkspaceID, PluginPrincipal("matrix"), CapChannelSend, "matrix")
 	if !d.Allowed {
 		t.Fatalf("Check denied: %s", d.Reason)
 	}
@@ -84,9 +86,9 @@ func TestEnforcer_Check_DenyAudited(t *testing.T) {
 	set := mustSet(t, "matrix", []plugin.Permission{
 		{Cap: CapChannelSend, Channels: []string{"matrix"}},
 	})
-	e.SetPluginSet(set)
+	e.SetPluginSet(wsroot.PersonalWorkspaceID, set)
 
-	d := e.Check(PluginPrincipal("matrix"), CapChannelSend, "slack")
+	d := e.Check(wsroot.PersonalWorkspaceID, PluginPrincipal("matrix"), CapChannelSend, "slack")
 	if d.Allowed {
 		t.Fatal("Check allowed unlisted scope, want deny")
 	}
@@ -102,7 +104,7 @@ func TestEnforcer_Check_DenyAudited(t *testing.T) {
 func TestEnforcer_Check_UnknownPluginDenied(t *testing.T) {
 	sink := &fakeSink{}
 	e := newEnforcer(t, sink)
-	d := e.Check(PluginPrincipal("ghost"), CapVectorSearch, "any")
+	d := e.Check(wsroot.PersonalWorkspaceID, PluginPrincipal("ghost"), CapVectorSearch, "any")
 	if d.Allowed {
 		t.Fatal("unknown plugin allowed, want deny")
 	}
@@ -114,7 +116,7 @@ func TestEnforcer_Check_UnknownPluginDenied(t *testing.T) {
 
 func TestEnforcer_Check_NonPluginPrincipalDenied(t *testing.T) {
 	e := newEnforcer(t, &fakeSink{})
-	d := e.Check(Principal("admin"), CapVectorSearch, "x")
+	d := e.Check(wsroot.PersonalWorkspaceID, Principal("admin"), CapVectorSearch, "x")
 	if d.Allowed {
 		t.Fatal("non-plugin principal allowed via capability path, want deny")
 	}
@@ -122,7 +124,7 @@ func TestEnforcer_Check_NonPluginPrincipalDenied(t *testing.T) {
 
 func TestEnforcer_NilSink_NoPanic(t *testing.T) {
 	e := NewEnforcer(nil, zap.NewNop())
-	d := e.Check(PluginPrincipal("p"), CapVectorSearch, "x")
+	d := e.Check(wsroot.PersonalWorkspaceID, PluginPrincipal("p"), CapVectorSearch, "x")
 	if d.Allowed {
 		t.Fatal("want deny")
 	}
@@ -130,12 +132,12 @@ func TestEnforcer_NilSink_NoPanic(t *testing.T) {
 
 func TestEnforcer_RemovePluginSet(t *testing.T) {
 	e := newEnforcer(t, &fakeSink{})
-	e.SetPluginSet(mustSet(t, "p1", []plugin.Permission{{Cap: CapChannelSend}}))
-	if !e.Check(PluginPrincipal("p1"), CapChannelSend, "x").Allowed {
+	e.SetPluginSet(wsroot.PersonalWorkspaceID, mustSet(t, "p1", []plugin.Permission{{Cap: CapChannelSend}}))
+	if !e.Check(wsroot.PersonalWorkspaceID, PluginPrincipal("p1"), CapChannelSend, "x").Allowed {
 		t.Fatal("setup: expected allow")
 	}
-	e.RemovePluginSet("p1")
-	if e.Check(PluginPrincipal("p1"), CapChannelSend, "x").Allowed {
+	e.RemovePluginSet(wsroot.PersonalWorkspaceID, "p1")
+	if e.Check(wsroot.PersonalWorkspaceID, PluginPrincipal("p1"), CapChannelSend, "x").Allowed {
 		t.Fatal("removed plugin still allowed")
 	}
 }
@@ -200,7 +202,7 @@ func TestRequireCapability_UserClaims_PassesThrough(t *testing.T) {
 func TestRequireCapability_PluginAllowed(t *testing.T) {
 	sink := &fakeSink{}
 	e := newEnforcer(t, sink)
-	e.SetPluginSet(mustSet(t, "matrix", []plugin.Permission{
+	e.SetPluginSet(wsroot.PersonalWorkspaceID, mustSet(t, "matrix", []plugin.Permission{
 		{Cap: CapChannelSend, Channels: []string{"matrix"}},
 	}))
 	scopeFn := func(c *fiber.Ctx) string { return "matrix" }
@@ -217,7 +219,7 @@ func TestRequireCapability_PluginAllowed(t *testing.T) {
 func TestRequireCapability_PluginDenied403(t *testing.T) {
 	sink := &fakeSink{}
 	e := newEnforcer(t, sink)
-	e.SetPluginSet(mustSet(t, "matrix", []plugin.Permission{
+	e.SetPluginSet(wsroot.PersonalWorkspaceID, mustSet(t, "matrix", []plugin.Permission{
 		{Cap: CapChannelSend, Channels: []string{"matrix"}},
 	}))
 	scopeFn := func(c *fiber.Ctx) string { return "slack" }
@@ -243,7 +245,7 @@ func TestRequireCapability_NilScopeFn_UnscopedCheck(t *testing.T) {
 	// nil scope extractor = unscoped check; allowed only when the declared
 	// permission carries no scope restriction.
 	e := newEnforcer(t, &fakeSink{})
-	e.SetPluginSet(mustSet(t, "p1", []plugin.Permission{{Cap: CapChannelSend}}))
+	e.SetPluginSet(wsroot.PersonalWorkspaceID, mustSet(t, "p1", []plugin.Permission{{Cap: CapChannelSend}}))
 	resp := get(t, testApp(e, pluginClaims("p1"), nil))
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)

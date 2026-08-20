@@ -104,7 +104,7 @@ func wirePlugin(ctx context.Context, lp *LoadedPlugin, reg *hostRegistry, deps W
 
 	// Capability set → enforcer (E5). The set was validated at load time.
 	if deps.Enforcer != nil && lp.Caps != nil {
-		deps.Enforcer.SetPluginSet(lp.Caps)
+		deps.Enforcer.SetPluginSet(deps.WorkspaceID, lp.Caps)
 	}
 
 	// Sidecar channels (E3/E4 runtime + E6 credentials).

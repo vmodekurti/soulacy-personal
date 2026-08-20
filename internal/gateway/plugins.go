@@ -263,7 +263,9 @@ func (s *Server) pluginGateMW() fiber.Handler {
 		if route.scopeFn != nil {
 			scope = route.scopeFn(c)
 		}
-		if d := enf.Check(principal, route.cap, scope); !d.Allowed {
+		// The workspace decides which grant applies, so it comes from the
+		// request's verified identity — never from anything the caller sent.
+		if d := enf.Check(mcpWorkspace(c), principal, route.cap, scope); !d.Allowed {
 			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
 				"error":     "capability denied",
 				"principal": string(principal),
@@ -298,7 +300,7 @@ func (s *Server) wsPluginTokenAuth(c *fiber.Ctx) (bool, error) {
 			"error": "plugin capabilities unavailable; event stream denied",
 		})
 	}
-	if d := enforcer.Check(caps.PluginPrincipal(id), caps.CapEventsSubscribe, ""); !d.Allowed {
+	if d := enforcer.Check(mcpWorkspace(c), caps.PluginPrincipal(id), caps.CapEventsSubscribe, ""); !d.Allowed {
 		return true, c.Status(fiber.StatusForbidden).JSON(fiber.Map{
 			"error": "plugin lacks the events.subscribe capability: " + d.Reason,
 		})
