@@ -546,9 +546,30 @@ type RunBudgetConfig struct {
 
 type RetentionConfig struct {
 	ConversationHistory string `mapstructure:"conversation_history"`
-	ActionEvents        string `mapstructure:"action_events"`
-	AuditLogs           string `mapstructure:"audit_logs"`
+	// ActionEvents governs the durable event store — and therefore, today,
+	// the ADMIN AUDIT TRAIL, which is stored as `admin.audit` events in that
+	// same table. AuditLogs below governs only the optional JSONL tool-call
+	// audit under runtime.audit_dir, which is disabled by default.
+	//
+	// The naming is a trap worth stating rather than fixing by rename: an
+	// operator lengthening `audit_logs` to satisfy a retention requirement
+	// changes nothing about the trail they meant, and nothing tells them.
+	ActionEvents string `mapstructure:"action_events"`
+	AuditLogs    string `mapstructure:"audit_logs"`
 }
+
+// MinAuditRetention is the platform floor for anything that holds audit
+// records (MU-031 criterion 5: "retention is configurable within platform
+// minimums").
+//
+// A floor exists because retention here is not only a storage-cost dial: it is
+// how long the deployment can answer "who changed this". Thirty days is short
+// enough to be an honest minimum and long enough to survive the gap between an
+// incident and somebody noticing it.
+//
+// "0" — keep forever — is deliberately still allowed. The floor bounds how
+// SHORT retention may be, and forever is not short.
+const MinAuditRetention = 720 * time.Hour
 
 // RetentionDuration parses a validated retention setting. The literal "0"
 // means keep indefinitely; empty uses fallback.
@@ -914,6 +935,16 @@ type MCPServerConfig struct {
 	// InheritAll restores the old behaviour of passing the whole environment.
 	// Documented escape hatch, not a recommendation.
 	InheritAll bool `mapstructure:"inherit_all_env"`
+	// SharedCredentials lets this server's env and headers travel unchanged
+	// into every workspace in a multi-user deployment.
+	//
+	// Off by default. On, every tenant's agents act as ONE identity to
+	// whatever the server talks to: one audit trail, one rate limit, and no
+	// way to cut off a single tenant. Correct for a server with no secrets, or
+	// one whose credential is genuinely deployment-wide; wrong for anything
+	// that can reach a tenant's data. Otherwise each workspace supplies its
+	// own values and the server does not start until it has.
+	SharedCredentials bool `mapstructure:"shared_credentials"`
 }
 
 // RegistryConfig describes one package registry for skill/plugin installs
