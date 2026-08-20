@@ -1,27 +1,66 @@
 import { get } from 'svelte/store'
 import { apiKey, authRequired } from './stores.js'
+import { rememberVersion, rememberVersions, versionFor, forgetVersion } from './resourceversions.js'
+import { activeWorkspaceId } from './workspace.js'
+
+// MU-028. Optimistic concurrency is applied by the transport rather than by
+// each page, because a caller that forgets to send a precondition is exactly
+// the caller that overwrites a colleague's edit silently. Fifteen call sites
+// each remembering to thread a version is fourteen chances to reintroduce the
+// bug; here there is one.
+const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+
+function withPrecondition(path, requestOpts) {
+  const method = (requestOpts.method || 'GET').toUpperCase()
+  if (!MUTATING.has(method)) return requestOpts.headers || {}
+  const headers = { ...(requestOpts.headers || {}) }
+  // A caller that supplies its own If-Match has decided something the registry
+  // cannot know — an explicit overwrite of the version the server just named
+  // in a 409 — so it wins.
+  if (headers['If-Match']) return headers
+  const known = versionFor(path)
+  if (known) headers['If-Match'] = known
+  return headers
+}
 
 function authHeaders() {
   const key = get(apiKey)
   const h = { 'Content-Type': 'application/json' }
   if (key) h['Authorization'] = `Bearer ${key}`
+  // MU-029. The workspace selector travels on every request rather than being
+  // remembered server-side per session, so two tabs can sit in two workspaces
+  // without one silently moving the other. The server treats it as a REQUEST:
+  // workspaceContextMW resolves it against stored membership and ignores it if
+  // that fails, so naming a workspace here grants nothing.
+  const workspace = activeWorkspaceId()
+  if (workspace) h['X-Soulacy-Workspace'] = workspace
   return h
 }
 
 export async function apiFetch(path, opts = {}) {
-	const { _costConfirmed, _authRetried, ...requestOpts } = opts
+	const { _costConfirmed, _authRetried, _reauthRetried, ...requestOpts } = opts
   const res = await fetch('/api/v1' + path, {
 	...requestOpts,
-	headers: { ...authHeaders(), ...(requestOpts.headers || {}) },
+	headers: { ...authHeaders(), ...withPrecondition(path, requestOpts) },
   })
-	if (res.status === 401 && !_authRetried && path !== '/auth/refresh') {
+  // A 401 body has to be read BEFORE deciding what to do about it, because
+  // two different failures wear that status and they have opposite remedies
+  // (MU-030 criterion 5). An expired access token is fixed by refreshing;
+  // a stale step-up is not — refreshing rotates the token and deliberately
+  // does NOT move auth_time, so the retry is refused for the same reason and
+  // the user watches a silent round trip achieve nothing. Reading first is
+  // also why the body is threaded into the !res.ok branch rather than parsed
+  // twice: a Response body can only be consumed once.
+  const errorBody = res.ok ? null : await res.json().catch(() => ({}))
+	if (res.status === 401 && !_authRetried && path !== '/auth/refresh' &&
+	    errorBody?.code !== 'reauthentication_required') {
 	  const refreshed = await fetch('/api/v1/auth/refresh', {
 	    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
 	  }).then(r => r.ok).catch(() => false)
 	  if (refreshed) return apiFetch(path, { ...opts, _authRetried: true })
 	}
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}))
+    const body = errorBody || {}
 	// Cost confirmation is deliberately user-driven. Retry the identical
 	// request only after the user accepts the server's concrete estimate.
 	if (res.status === 409 && body.confirmation_required && !_costConfirmed &&
@@ -33,7 +72,27 @@ export async function apiFetch(path, opts = {}) {
 	    body: withCostConfirmation(opts.body),
 	  })
 	}
+    // MU-030 criterion 5. A high-impact action refused because the human has
+    // not proved themselves recently is recoverable without losing the work:
+    // re-present the credential, retry the identical request once. Retried at
+    // most once — a loop here would turn a persistent refusal into a prompt
+    // the user cannot escape, and the second failure is a real one.
+    if (res.status === 401 && body.code === 'reauthentication_required' && !_reauthRetried) {
+      if (await reauthenticate(body)) {
+        return apiFetch(path, { ...opts, _reauthRetried: true })
+      }
+      // Declining is a decision, not a failure to authenticate. Setting
+      // authRequired here would log the user out of a session that is still
+      // perfectly valid for everything else.
+      throw Object.assign(new Error(body.error || 'This action needs you to confirm it is still you.'),
+        { status: res.status, body })
+    }
     if (res.status === 401 || res.status === 403) authRequired.set(true)
+    // A refused conditional write leaves us holding a version the server has
+    // just told us is wrong. Keeping it would make the next save fail
+    // identically, so the page's only route back is an explicit reload — which
+    // is what the conflict dialog offers.
+    if (res.status === 409 || res.status === 428) forgetVersion(path)
     // Preserve the full error body alongside the status so callers can read
     // structured fields (e.g. Studio's 409 consent fallback carries
     // requiresConsent + consentItems beyond the human `error` string).
@@ -44,9 +103,50 @@ export async function apiFetch(path, opts = {}) {
   if (path !== '/health') authRequired.set(false)
   // Some endpoints (e.g. DELETE) return 204 No Content with an empty body —
   // calling res.json() on that throws "Unexpected end of JSON input".
+  // Record the validator the server handed back. Both the read (GET
+  // /agents/:id, /agents/:id/yaml) and the write (which re-derives it from
+  // what it just stored) set it, so a save followed by another save works
+  // without an intervening reload.
+  rememberVersion(path, res.headers?.get?.('ETag') || '')
   if (res.status === 204) return null
   const text = await res.text()
-  return text ? JSON.parse(text) : null
+  const parsed = text ? JSON.parse(text) : null
+  // GET /agents carries a version per agent. The GUI edits agents out of this
+  // list and never fetched a single one, so this is where almost every
+  // precondition it will ever send comes from.
+  if (parsed && parsed.versions) rememberVersions(parsed.versions)
+  return parsed
+}
+
+// reauthenticate re-presents the caller's credential to move `auth_time`.
+//
+// It asks for the key rather than replaying the stored one on purpose: the
+// point of step-up is that a HUMAN acts, and a client that silently re-proves
+// itself from a value it already holds satisfies the letter of the check while
+// removing the only thing it was measuring.
+async function reauthenticate(detail = {}) {
+  if (typeof window === 'undefined' || !window.prompt) return false
+  const minutes = Math.max(1, Math.round((Number(detail.max_age_seconds) || 600) / 60))
+  const key = window.prompt(
+    `For your security, confirm it is still you before this change.\n\n` +
+    `Re-enter your API key (you were last asked more than ${minutes} minutes ago):`)
+  if (!key) return false
+  try {
+    const res = await fetch('/api/v1/auth/reauthenticate', {
+      method: 'POST',
+      headers: { ...authHeaders() },
+      body: JSON.stringify({ api_key: key }),
+    })
+    if (!res.ok) return false
+    const issued = await res.json().catch(() => ({}))
+    // The elevated session replaces the current one. Keeping the old token
+    // would leave the tab holding a credential that is still stale, so the
+    // retry would be refused for the same reason and look like a loop.
+    if (issued.access_token) apiKey.set(issued.access_token)
+    return true
+  } catch (_) {
+    return false
+  }
 }
 
 function withCostConfirmation(body) {
@@ -165,8 +265,16 @@ export async function streamSSE(path, body, onEvent, signal) {
 // caller explicitly acknowledges a capability escalation, so the server will
 // permit a save that would otherwise 409. See Server.respondCapabilityAckRequired
 // in internal/gateway/api.go for the paired backend behaviour.
+// writeHeaders carries both per-save opt-ins an agent write can need: the
+// capability acknowledgement, and an explicit If-Match chosen by the MU-028
+// conflict dialog. They travel together because they arrive the same way — a
+// server refusal the user answered — and a caller that could pass one but not
+// the other would make "Overwrite" impossible to express.
 function capabilityAckHeaders(opts = {}) {
-  return opts && opts.acknowledgeAudit ? { 'X-Acknowledge-Audit': '1' } : {}
+  const headers = {}
+  if (opts && opts.acknowledgeAudit) headers['X-Acknowledge-Audit'] = '1'
+  if (opts && opts.headers) Object.assign(headers, opts.headers)
+  return headers
 }
 
 export const api = {
@@ -211,8 +319,14 @@ export const api = {
     updateYaml:(id, yaml, opts = {})  => apiFetch(`/agents/${id}/yaml`, { method: 'PUT', body: yaml, headers: capabilityAckHeaders(opts) }),
     versions: (id)         => apiFetch(`/agents/${id}/versions`),
     version:  (id, version) => apiFetch(`/agents/${id}/versions/${encodeURIComponent(version)}`),
-    rollback: (id, version) => apiFetch(`/agents/${id}/rollback`, { method: 'POST', body: JSON.stringify({ version }) }),
-    delete:  (id)      => apiFetch(`/agents/${id}`, { method: 'DELETE' }),
+    // rollback and delete take opts for the same reason update does: both are
+    // conditional writes now (MU-028), so both need a route for the conflict
+    // dialog's explicit-overwrite choice. The ordinary call sends nothing and
+    // the transport supplies the remembered version.
+    rollback: (id, version, opts = {}) => apiFetch(`/agents/${id}/rollback`, {
+      method: 'POST', body: JSON.stringify({ version }), headers: capabilityAckHeaders(opts),
+    }),
+    delete:  (id, opts = {}) => apiFetch(`/agents/${id}`, { method: 'DELETE', headers: capabilityAckHeaders(opts) }),
     enable:  (id)      => apiFetch(`/agents/${id}/enable`,  { method: 'POST' }),
     disable: (id)      => apiFetch(`/agents/${id}/disable`, { method: 'POST' }),
     trigger: (id)      => apiFetch(`/agents/${id}/trigger`, { method: 'POST' }),
@@ -344,8 +458,28 @@ export const api = {
     apiFetch('/chat/cancel', { method: 'POST', body: JSON.stringify({ run_id: runId }) }),
 
   admin: {
-    restart: () => apiFetch('/admin/restart', { method: 'POST' }),
+    // The body is required in team/scale, where a restart stops every
+    // workspace's work and a bare POST from a prober or scanner would have
+    // been enough to do it. Personal ignores it.
+    restart: () => apiFetch('/admin/restart', { method: 'POST', body: JSON.stringify({ confirm: 'restart' }) }),
     audit: (limit = 50) => apiFetch('/admin/audit?limit=' + encodeURIComponent(limit)),
+  },
+
+  // MU-029. The three endpoints a client needs to know where it is, where it
+  // may go, and to be told by the server which of those it actually got.
+  //
+  // `select` returns the VERIFIED membership rather than echoing the request,
+  // and the client stores the answer. A client may ask for a workspace; only
+  // stored membership grants one.
+  workspace: {
+    identity: () => apiFetch('/workspace/identity'),
+    reauthenticate: (apiKeyValue) => apiFetch('/auth/reauthenticate', {
+      method: 'POST', body: JSON.stringify({ api_key: apiKeyValue }),
+    }),
+    list: () => apiFetch('/workspace/workspaces'),
+    select: (workspaceId) => apiFetch('/workspace/select', {
+      method: 'POST', body: JSON.stringify({ workspace_id: workspaceId }),
+    }),
   },
 
   workspaceMembers: {
