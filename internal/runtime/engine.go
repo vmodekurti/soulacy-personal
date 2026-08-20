@@ -35,6 +35,8 @@ import (
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 	"github.com/soulacy/soulacy/pkg/skill"
+
+	"github.com/soulacy/soulacy/internal/metrics"
 )
 
 // EventSink receives structured events as they happen during agent execution.
@@ -157,6 +159,10 @@ type Engine struct {
 	// All tools from connected servers are offered to every agent, namespaced
 	// as mcp__<server>__<tool>. May be nil if no servers are configured.
 	mcpClient *mcp.Client
+	// mcpPool supersedes mcpClient when set: one client per workspace, each
+	// with its own subprocesses rooted in that workspace's tree. mcpClient is
+	// the single-tenant path and stays for deployments that never wire a pool.
+	mcpPool *mcp.Pool
 
 	// knowledge is the RAG facade — used by the kb_search built-in tool and
 	// by buildContext to inject the per-agent KB catalog. nil = RAG disabled.
@@ -216,6 +222,15 @@ type Engine struct {
 	// pluginProvider, when non-nil, provides plugin-contributed tools.
 	// Satisfied by *plugins.Loader via an adapter in main.go.
 	pluginProvider PluginToolProvider
+	// pluginProviders supersedes pluginProvider when set: one provider per
+	// workspace, so a plugin installed in one tenant contributes tools only
+	// to that tenant's agents.
+	pluginProviders PluginToolProviders
+	// managedInstallExempt keeps package_install available to the built-in
+	// System agent even when allow_system_agents is empty. Default true so
+	// every existing installation, and every Engine built directly in a test,
+	// behaves as it did. See SetManagedInstallExempt.
+	managedInstallExempt bool
 
 	// sideEffects, when non-nil, records the first outside-visible call a
 	// durable run makes, so a lost worker can tell a retry-safe run from one
@@ -371,6 +386,44 @@ type PluginToolProvider interface {
 	AllTools() []PluginTool
 }
 
+// PluginToolProviders resolves one workspace's plugin contributions.
+//
+// THE GAP THIS CLOSES was not that plugins had no per-workspace registry —
+// internal/plugins.Stores has had one since MU-017 criterion 1 — but that
+// nothing was wired to it. The engine, which is the only component that
+// decides which plugin tools an agent may CALL and then executes them, held a
+// single process-wide provider. So the inventory was scoped and the execution
+// path was not: workspace A's agent could invoke a tool contributed by a
+// plugin only workspace B had installed, and A's operator had never seen the
+// code that ran.
+//
+// A scoped store nobody reads is the most expensive kind of unfinished work,
+// because the shape of the fix is present and the fix is not.
+type PluginToolProviders func(workspaceID string) PluginToolProvider
+
+// SetPluginProviders installs the per-workspace plugin resolver.
+func (e *Engine) SetPluginProviders(resolve PluginToolProviders) { e.pluginProviders = resolve }
+
+// plugins resolves the plugin tools of the workspace a run is acting in.
+//
+// nil from the resolver means "this workspace has no plugin tools" and is
+// returned as such. Falling through to the process-wide provider on a nil
+// would reintroduce the bug for exactly the workspaces the resolver could not
+// answer for — the ones least likely to be entitled to somebody else's
+// plugins.
+func (e *Engine) plugins(ctx context.Context) PluginToolProvider {
+	if e == nil {
+		return nil
+	}
+	if e.pluginProviders != nil {
+		if provider := e.pluginProviders(WorkspaceFromContext(ctx)); provider != nil {
+			return provider
+		}
+		return nil
+	}
+	return e.pluginProvider
+}
+
 // PluginTool is a callable tool contributed by a Soulacy plugin.
 type PluginTool struct {
 	Name        string
@@ -509,23 +562,27 @@ func NewEngine(
 		sink = noopSink{}
 	}
 	e := &Engine{
-		loader:            loader,
-		llmRouter:         router,
-		memory:            mem,
-		archive:           archive,
-		pythonBin:         pythonBin,
-		toolTimeout:       toolTimeout,
-		log:               log,
-		sink:              sink,
-		skillLoader:       skillLoader,
-		ollamaAPIKey:      ollamaAPIKey,
-		mcpClient:         mcpClient,
-		knowledge:         knowledgeSvc,
-		allowSystemAgents: allowSystemAgents,
-		vectorStore:       vectorStore,
-		pluginProvider:    pluginProvider,
-		queueStore:        newAgentQueueStore(),
-		privilegedRunner:  denyPrivilegedRunner{},
+		// Default ON so every existing installation and every directly-built
+		// Engine keeps the behaviour it had; the wiring turns it off in
+		// multi-user mode.
+		managedInstallExempt: true,
+		loader:               loader,
+		llmRouter:            router,
+		memory:               mem,
+		archive:              archive,
+		pythonBin:            pythonBin,
+		toolTimeout:          toolTimeout,
+		log:                  log,
+		sink:                 sink,
+		skillLoader:          skillLoader,
+		ollamaAPIKey:         ollamaAPIKey,
+		mcpClient:            mcpClient,
+		knowledge:            knowledgeSvc,
+		allowSystemAgents:    allowSystemAgents,
+		vectorStore:          vectorStore,
+		pluginProvider:       pluginProvider,
+		queueStore:           newAgentQueueStore(),
+		privilegedRunner:     denyPrivilegedRunner{},
 	}
 	e.broker = newConfirmBroker()
 	e.builtins = e.buildBuiltins()
@@ -878,7 +935,7 @@ func (e *Engine) RunTool(ctx context.Context, toolName string, argsJSON string) 
 	// verifier, via studioRealRunner) would get "tool not found" for every MCP tool
 	// and could never verify an MCP-based flow. Honors the per-node timeout override
 	// carried on ctx and returns the same actionable deadline message.
-	if e.mcpClient != nil && strings.HasPrefix(toolName, mcp.FullNamePrefix) {
+	if client := e.mcpFor(ctx); client != nil && strings.HasPrefix(toolName, mcp.FullNamePrefix) {
 		args := map[string]any{}
 		if strings.TrimSpace(argsJSON) != "" {
 			if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
@@ -888,7 +945,7 @@ func (e *Engine) RunTool(ctx context.Context, toolName string, argsJSON string) 
 		to := e.effectiveToolTimeout(ctx)
 		tctx, cancel := context.WithTimeout(ctx, to)
 		defer cancel()
-		out, callErr := e.mcpClient.Call(tctx, toolName, args)
+		out, callErr := client.Call(tctx, toolName, args)
 		if callErr != nil {
 			return nil, toolTimeoutError(toolName, to, ctx.Err(), callErr)
 		}
@@ -1136,6 +1193,28 @@ func (e *Engine) Knowledge() *knowledge.Service { return e.knowledge }
 // to the Builder and the Agents Edit UI.
 // System tools are listed in the catalog regardless of channel; they are only
 // actually offered at runtime when the three-way guard in allToolSchemas passes.
+// IsBuiltinTool reports whether a tool name is one this binary defines.
+//
+// Exists for the metrics label: everything that is NOT a builtin is a name
+// somebody outside this repository chose, and those must not reach the shared
+// Prometheus exposition. See internal/metrics/toollabel.go.
+func (e *Engine) IsBuiltinTool(name string) bool {
+	if e == nil {
+		return false
+	}
+	for _, b := range e.builtins {
+		if b.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// toolMetricLabel is the bounded label for one tool call.
+func (e *Engine) toolMetricLabel(name string) string {
+	return metrics.ToolLabel(name, e.IsBuiltinTool(name))
+}
+
 func (e *Engine) Builtins() []BuiltinTool {
 	out := make([]BuiltinTool, len(e.builtins))
 	copy(out, e.builtins)

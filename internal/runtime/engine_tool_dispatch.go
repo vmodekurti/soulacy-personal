@@ -118,23 +118,23 @@ func (e *Engine) runToolDispatch(ctx context.Context, def *agent.Definition, ses
 	}
 
 	// MCP tools — namespaced as mcp__<server>__<tool>. Route to the MCP client.
-	if e.mcpClient != nil && strings.HasPrefix(call.Name, mcp.FullNamePrefix) {
+	if client := e.mcpFor(ctx); client != nil && strings.HasPrefix(call.Name, mcp.FullNamePrefix) {
 		if !mcpToolAllowed(def, call.Name) {
 			return "", fmt.Errorf("MCP tool %q is not allowed for agent %q", call.Name, def.ID)
 		}
 		tctx, cancel := context.WithTimeout(ctx, e.effectiveToolTimeout(ctx))
 		defer cancel()
-		out, callErr := e.mcpClient.Call(tctx, call.Name, call.Arguments)
+		out, callErr := client.Call(tctx, call.Name, call.Arguments)
 		return out, toolTimeoutError(call.Name, e.toolTimeout, ctx.Err(), callErr)
 	}
 
 	// Plugin tools — namespaced as plugin__<pluginID>__<tool>. Execute as a
 	// Python subprocess using the handler path from the plugin manifest.
-	if strings.HasPrefix(call.Name, "plugin__") && e.pluginProvider != nil {
+	if provider := e.plugins(ctx); strings.HasPrefix(call.Name, "plugin__") && provider != nil {
 		if !pluginToolAllowed(def, call.Name) {
 			return "", fmt.Errorf("plugin tool %q is not explicitly granted to agent %q", call.Name, def.ID)
 		}
-		for _, pt := range e.pluginProvider.AllTools() {
+		for _, pt := range provider.AllTools() {
 			if pt.Name != call.Name {
 				continue
 			}
@@ -168,7 +168,12 @@ print(result if isinstance(result, str) else json.dumps(result))
 			argv := sandbox.Wrap(e.selfPath, limits, []string{e.pythonBin, "-c", script})
 			tctx, cancel := context.WithTimeout(ctx, e.effectiveToolTimeout(ctx))
 			defer cancel()
+			workDir, wdErr := e.toolWorkDir(ctx)
+			if wdErr != nil {
+				return "", fmt.Errorf("plugin tool %q: %w", call.Name, wdErr)
+			}
 			cmd := exec.CommandContext(tctx, argv[0], argv[1:]...)
+			cmd.Dir = workDir
 			cmd.Stdin = bytes.NewReader(argsJSON)
 			cmd.Env = sandbox.FilteredEnv(os.Environ(), def.Env)
 			out, err := cmd.Output()
@@ -438,7 +443,12 @@ func (e *Engine) runPythonToolOnce(tctx, auditCtx context.Context, def *agent.De
 	limits := e.sandboxLimits
 	limits.EnvAllow = def.Env
 	argv := sandbox.Wrap(e.selfPath, limits, []string{e.pythonBin, "-c", script})
+	workDir, wdErr := e.toolWorkDir(tctx)
+	if wdErr != nil {
+		return "", wdErr
+	}
 	cmd := exec.CommandContext(tctx, argv[0], argv[1:]...)
+	cmd.Dir = workDir
 	cmd.Stdin = bytes.NewReader(argsJSON)
 	cmd.Env = sandbox.FilteredEnv(os.Environ(), def.Env)
 
@@ -604,8 +614,8 @@ func (e *Engine) allToolSchemasForContext(ctx context.Context, def *agent.Defini
 	// MCP tools from connected servers are offered according to the agent's
 	// mcp_servers / mcp_tools allowlists. For backwards compatibility, agents
 	// that omit both fields still see every connected MCP tool.
-	if e.mcpClient != nil {
-		for _, t := range e.mcpClient.AllTools() {
+	if client := e.mcpFor(ctx); client != nil {
+		for _, t := range client.AllTools() {
 			if !mcpToolAllowed(def, t.FullName()) || !callerAllowsTool(ctx, t.FullName()) {
 				continue
 			}
@@ -618,8 +628,8 @@ func (e *Engine) allToolSchemasForContext(ctx context.Context, def *agent.Defini
 	}
 
 	// Plugin tools from installed plugins (namespaced as plugin__<id>__<tool>).
-	if e.pluginProvider != nil {
-		for _, pt := range e.pluginProvider.AllTools() {
+	if provider := e.plugins(ctx); provider != nil {
+		for _, pt := range provider.AllTools() {
 			if !pluginToolAllowed(def, pt.Name) || !callerAllowsTool(ctx, pt.Name) {
 				continue
 			}
