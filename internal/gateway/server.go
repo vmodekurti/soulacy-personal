@@ -64,8 +64,10 @@ import (
 	"github.com/soulacy/soulacy/internal/knowledge"
 	"github.com/soulacy/soulacy/internal/llm"
 	"github.com/soulacy/soulacy/internal/mcp"
+	"github.com/soulacy/soulacy/internal/mcpstore"
 	"github.com/soulacy/soulacy/internal/metrics"
 	"github.com/soulacy/soulacy/internal/plugininstall"
+	"github.com/soulacy/soulacy/internal/plugins"
 	"github.com/soulacy/soulacy/internal/queue/dlq"
 	"github.com/soulacy/soulacy/internal/ratelimit"
 	"github.com/soulacy/soulacy/internal/rbac"
@@ -80,6 +82,7 @@ import (
 	"github.com/soulacy/soulacy/internal/voice"
 	"github.com/soulacy/soulacy/internal/webui"
 	"github.com/soulacy/soulacy/internal/workboard"
+	"github.com/soulacy/soulacy/internal/workspacepolicy"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/gofiber/fiber/v2/middleware/adaptor"
@@ -88,7 +91,22 @@ import (
 
 // Server is the Soulacy gateway server.
 type Server struct {
-	cfg         *config.Config
+	// cfg is an atomic POINTER, not a struct, and every read goes through
+	// s.config(). It was a plain *config.Config read by all ~340 handler call
+	// sites and written by the config file watcher's goroutine on every reload
+	// — a data race with no synchronisation at all, and one whose symptom is a
+	// torn read rather than a crash.
+	//
+	// Copy-on-write rather than a mutex: reads outnumber writes by many orders
+	// of magnitude and happen on the request path, and a snapshot pointer also
+	// gives a handler a CONSISTENT view for the length of one request. Under a
+	// mutex, a handler that reads s.cfg twice could straddle a reload and see
+	// two different configurations, which is exactly the class of bug this is
+	// meant to close.
+	//
+	// The consequence, which callers must respect: never write through a
+	// pointer returned by config(). Use mutateConfig, which clones first.
+	cfg         atomic.Pointer[config.Config]
 	cfgPath     string // path to config file on disk; empty = unknown
 	app         *fiber.App
 	engine      *runtime.Engine
@@ -101,9 +119,43 @@ type Server struct {
 	skillLoader runtime.SkillLoader // nil if no skills installed
 	// skillStores, when set, resolves one workspace's skill inventory and takes
 	// precedence over skillLoader. Handlers reach it through s.skillCatalog(c).
-	skillStores     *skills.Stores
-	actions         storage.ActionLogBackend // nil if action logging disabled
-	mcp             *mcp.Client              // nil if no MCP servers configured
+	skillStores *skills.Stores
+	actions     storage.ActionLogBackend // nil if action logging disabled
+	mcp         *mcp.Client              // nil if no MCP servers configured; the UNSCOPED client, see mcp_scope.go
+	// mcpPool gives each workspace its own MCP subprocesses. When it is set,
+	// no handler may use s.mcp — a guard test enforces that, because the two
+	// fields differ only in which tenant's servers they reach.
+	mcpPool *mcp.Pool
+	// mcpServers is the durable registry of servers a WORKSPACE defined for
+	// itself, as opposed to s.mcp/mcpPool which instantiate the operator's
+	// template. Both feed the same pool; only this one is the tenant's.
+	mcpServers *mcpstore.Store
+	// pluginStores is the per-workspace plugin registry. A lifecycle change
+	// invalidates that workspace's cached loader through it, so a revoked
+	// plugin stops being callable without waiting for a restart.
+	pluginStores *plugins.Stores
+
+	// readinessProbes and draining back GET /api/v1/ready (MU-033). draining
+	// is atomic rather than mutex-guarded because it is read on every probe
+	// and written exactly once, at shutdown.
+	readinessMu     sync.RWMutex
+	readinessProbes []ReadinessProbe
+	draining        atomic.Bool
+
+	// schemaDir is where this installation's SQLite databases live, for
+	// GET /admin/schema. Empty makes that route answer 503 rather than
+	// reporting an empty deployment.
+	schemaDir string
+
+	// applyChannel makes a saved channel configuration live. Supplied by the
+	// app, because building an adapter needs the agent loader and the
+	// capability-tier gate. See channelhot.go.
+	applyChannel channelApplier
+
+	// secrets re-overlays vault-backed values after a config reload. Without
+	// it every reload blanks the provider keys and channel tokens in the
+	// in-memory config — see ReloadConfig.
+	secrets         secretsOverlayer
 	hub             *EventHub
 	authEngine      *auth.Engine         // nil until SetAuth() is called
 	rbacManager     *rbac.Manager        // nil until SetRBAC() is called
@@ -115,7 +167,19 @@ type Server struct {
 	historyStore    session.HistoryStore // nil until SetHistoryStore() is called
 	resourceStore   session.ResourceStore
 	tenantResolver  tenancy.Resolver
-	tenantMembers   tenancy.MemberManager
+	// workspaceLifecycle transitions a workspace between active, deleting and
+	// deleted. Separate from tenantMembers because beginning a deletion is the
+	// one irreversible action in the product, and folding it into the interface
+	// every membership handler already holds would put it one typo away.
+	workspaceLifecycle tenancy.WorkspaceLifecycle
+	// workspacePolicies holds the limits each workspace has set on ITSELF.
+	// Nil on deployments that do not offer per-workspace policy, which is what
+	// makes those routes 503 rather than pretending.
+	workspacePolicies *workspacepolicy.Store
+	// costGovernor is the reservation path the composed quota policy is
+	// installed into. Held so a policy change takes effect without a restart.
+	costGovernor  *costs.Governor
+	tenantMembers tenancy.MemberManager
 	// idempotency replays completed mutations for a repeated Idempotency-Key
 	// so a retry through a network partition cannot create a duplicate.
 	idempotency *idempotencyStore
@@ -228,7 +292,6 @@ func New(
 	log *zap.Logger,
 ) *Server {
 	s := &Server{
-		cfg:              cfg,
 		cfgPath:          cfgPath,
 		engine:           engine,
 		loader:           loader,
@@ -248,6 +311,11 @@ func New(
 		preferenceJobs:   make(chan preferenceMineJob, 128),
 		idempotency:      newIdempotencyStore(),
 	}
+	// Published before anything else touches s: buildApp, the preference
+	// miner and the studio observers all read the configuration, and an
+	// unpublished snapshot would hand them an empty Config rather than the
+	// operator's.
+	s.setConfig(cfg)
 	if shouldUseDefaultPersonalResolver(cfg) {
 		s.tenantResolver = defaultPersonalResolver()
 	}
@@ -295,9 +363,34 @@ func (s *Server) errMsg(c *fiber.Ctx, status int, msg string) error {
 
 // SetAuth wires an auth.Engine into the server. Must be called before the
 // first request is served. If not called, the server falls back to the legacy
-// static-key check using s.cfg.Server.APIKey (identical to Phase 2 behaviour).
+// static-key check using s.config().Server.APIKey (identical to Phase 2 behaviour).
 func (s *Server) SetAuth(e *auth.Engine) {
 	s.authEngine = e
+	if e == nil {
+		return
+	}
+	// MU-031 criterion 2. Authentication is the first category the criterion
+	// names and nothing was recording it: no login, logout, re-authentication
+	// or failed attempt reached the trail. That is the class of record an
+	// intrusion investigation starts from, and the trail could not answer
+	// "when did this credential first appear" at all.
+	//
+	// Wired here rather than inside internal/auth because the trail's actor,
+	// workspace and request id come from the request, and internal/auth must
+	// stay usable without a gateway.
+	e.SetAuditSink(func(c *fiber.Ctx, event auth.AuthEvent) {
+		details := map[string]any{}
+		if event.Subject != "" {
+			details["subject"] = event.Subject
+		}
+		if event.Reason != "" {
+			// A short, non-identifying cause. Never the credential, never a
+			// hash of it: an audit record is read by more people than the
+			// credential was issued to, and a hash confirms a guess.
+			details["reason"] = event.Reason
+		}
+		s.recordAdminAudit(c, event.Action, "session", event.Subject, event.Outcome, details)
+	})
 }
 
 // SetRBAC wires an RBAC Manager into the server. Must be called before the
@@ -305,6 +398,26 @@ func (s *Server) SetAuth(e *auth.Engine) {
 // authenticated requests are allowed — equivalent to pre-Task-#31 behaviour).
 func (s *Server) SetRBAC(m *rbac.Manager) {
 	s.rbacManager = m
+}
+
+// SetIdempotencyStore makes the replay cache durable.
+//
+// Called by the wiring in multi-user mode. Without it the cache is a map in
+// this process, which keeps the Idempotency-Key promise for exactly as long as
+// one process lives — and a retry most often arrives precisely because the
+// process just restarted.
+func (s *Server) SetIdempotencyStore(db *IdempotencyCache) {
+	if s == nil || s.idempotency == nil || db == nil {
+		return
+	}
+	s.idempotency.mu.Lock()
+	defer s.idempotency.mu.Unlock()
+	s.idempotency.durable = db
+	// The in-memory records are dropped rather than migrated. Anything in
+	// there is a reservation from the seconds before the durable store was
+	// installed; carrying them over would give two sources of truth for
+	// whether a key is held, which is the one thing this must not have.
+	s.idempotency.records = map[string]*idempotencyRecord{}
 }
 
 // SetCredentialVault wires a Vault into the server. Must be called before the
@@ -417,24 +530,8 @@ func (s *Server) rlAgentMW() fiber.Handler {
 	return s.rateLimiter.AgentRPMMiddleware()
 }
 
-// rlTokenMW returns the per-user token-quota middleware, or a no-op.
-func (s *Server) rlTokenMW() fiber.Handler {
-	if s.rateLimiter == nil {
-		return func(c *fiber.Ctx) error { return c.Next() }
-	}
-	return s.rateLimiter.TokenQuotaMiddleware()
-}
-
-// rlAgentTokenMW returns the per-agent daily token-quota middleware, or a no-op.
-func (s *Server) rlAgentTokenMW() fiber.Handler {
-	if s.rateLimiter == nil {
-		return func(c *fiber.Ctx) error { return c.Next() }
-	}
-	return s.rateLimiter.AgentTokenQuotaMiddleware()
-}
-
 func (s *Server) authorizationRequired() bool {
-	return s.cfg != nil && config.IsMultiUserMode(s.cfg.DeploymentMode())
+	return s.config() != nil && config.IsMultiUserMode(s.config().DeploymentMode())
 }
 
 func (s *Server) authorizationUnavailable(c *fiber.Ctx) error {
@@ -609,10 +706,10 @@ func (s *Server) buildApp() *fiber.App {
 	// server.allowed_origins is honoured when set (production); otherwise we
 	// fall back to the legacy localhost dev-server origins (3000/5173) for
 	// local development. (PRODUCTION_AUDIT → LOW/Config)
-	guiOrigin := fmt.Sprintf("http://%s:%d", s.cfg.Server.Host, s.cfg.Server.Port)
+	guiOrigin := fmt.Sprintf("http://%s:%d", s.config().Server.Host, s.config().Server.Port)
 	origins := []string{guiOrigin}
-	if len(s.cfg.Server.AllowedOrigins) > 0 {
-		origins = append(origins, s.cfg.Server.AllowedOrigins...)
+	if len(s.config().Server.AllowedOrigins) > 0 {
+		origins = append(origins, s.config().Server.AllowedOrigins...)
 	} else {
 		origins = append(origins, "http://localhost:3000", "http://localhost:5173")
 	}
@@ -639,7 +736,7 @@ func (s *Server) buildApp() *fiber.App {
 			if strings.HasPrefix(p, "/assets/") ||
 				strings.HasPrefix(p, "/ws") ||
 				p == "/" || p == "/favicon.ico" || p == "/sw.js" ||
-				p == "/api/v1/health" {
+				p == "/api/v1/health" || p == "/ready" {
 				return true
 			}
 			return false
@@ -665,6 +762,21 @@ func (s *Server) buildApp() *fiber.App {
 	app.Use("/ws", func(c *fiber.Ctx) error {
 		if !fws.IsWebSocketUpgrade(c) {
 			return fiber.ErrUpgradeRequired
+		}
+		// MU-033 criterion 4: a draining replica accepts no NEW long-lived
+		// connections. Refused BEFORE authentication so the refusal is cheap
+		// and cannot depend on an auth backend that may be going away with
+		// the replica.
+		//
+		// Existing sockets are left alone deliberately. The client's own
+		// reconnect will land on a replica that is still in the pool, and the
+		// event hub's resume cursor covers the gap; hanging up on everyone at
+		// the start of the drain would turn a rolling restart into a
+		// simultaneous reconnect storm from every connected client.
+		if s.Draining() {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+				"error": "this gateway replica is draining; reconnect to obtain another",
+			})
 		}
 		if handled, err := s.wsPluginTokenAuth(c); handled {
 			return err
@@ -719,23 +831,23 @@ func (s *Server) buildApp() *fiber.App {
 		})
 	}
 
+	// --- Readiness probe (unauthenticated, code-only) ---
+	// Registered outside the /api/v1 group on purpose: a kubelet or load
+	// balancer cannot present a credential, and a readiness probe that needs
+	// the auth backend answers "not ready" exactly when auth is what broke.
+	// It returns the status code and one word — the dependency detail lives
+	// on the authenticated /api/v1/ready, because driver errors are a
+	// plausible carrier for a DSN. See readycheck.go.
+	app.Get("/ready", s.handleLivePublic)
+
 	// --- Debug endpoint (unauthenticated) — strictly no key material. ---
 	// Reports auth posture + mode so the GUI knows which flow to present.
 	app.Get("/ping", func(c *fiber.Ctx) error {
-		authStatus := "required"
-		authMode := "apikey"
-		if s.cfg.Server.APIKey == "" && s.authEngine == nil {
-			authStatus = "open"
-			authMode = "none"
-		} else if s.authEngine != nil {
-			authMode = s.authEngine.Mode()
-			if s.cfg.Server.APIKey == "" && authMode == "apikey" {
-				authStatus = "open"
-			}
-		}
+		authStatus, authMode, detail := s.authPosture()
 		return c.JSON(fiber.Map{
 			"auth":   authStatus,
 			"mode":   authMode,
+			"detail": detail,
 			"status": "ok",
 		})
 	})
@@ -782,6 +894,10 @@ func (s *Server) buildApp() *fiber.App {
 
 	// Health
 	api.Get("/health", s.handleHealth)
+	// Readiness with dependency detail. Separate from /health because
+	// /health's contract is "200 plus a status field a human reads" and a
+	// load balancer reads neither. See readycheck.go.
+	api.Get("/ready", s.handleReadinessProbe)
 	// Capability negotiation. Deliberately alongside health: a client must be
 	// able to discover compatibility before it knows whether it can
 	// authenticate, otherwise an auth failure and a version failure are
@@ -798,28 +914,45 @@ func (s *Server) buildApp() *fiber.App {
 	// Plugin install & management (Story E13) — admin surface, config-level
 	// rbac. Plugin principals are default-denied by pluginGateMW (E8).
 	api.Get("/plugins/installed", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleListInstalledPlugins)
-	api.Post("/plugins/install", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleStagePlugin)
-	api.Post("/plugins/install/:staged/approve", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleApprovePlugin)
-	api.Delete("/plugins/install/:staged", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleDiscardStagedPlugin)
-	api.Post("/plugins/:id/enable", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleSetPluginEnabled(true))
-	api.Post("/plugins/:id/disable", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleSetPluginEnabled(false))
-	api.Post("/plugins/:id/reapprove", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleReapprovePlugin)
-	api.Delete("/plugins/:id", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleRemovePlugin)
+	api.Post("/plugins/install", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.auditing("plugin.stage", "plugin", "", s.handleStagePlugin))
+	api.Post("/plugins/install/:staged/approve", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.auditing("plugin.approve", "plugin", "staged", s.handleApprovePlugin))
+	api.Delete("/plugins/install/:staged", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.auditing("plugin.discard", "plugin", "staged", s.handleDiscardStagedPlugin))
+	api.Post("/plugins/:id/enable", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.auditing("plugin.enable", "plugin", "id", s.handleSetPluginEnabled(true)))
+	api.Post("/plugins/:id/disable", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.auditing("plugin.disable", "plugin", "id", s.handleSetPluginEnabled(false)))
+	api.Post("/plugins/:id/reapprove", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.auditing("plugin.reapprove", "plugin", "id", s.handleReapprovePlugin))
+	api.Delete("/plugins/:id", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.auditing("plugin.remove", "plugin", "id", s.handleRemovePlugin))
 
 	// Auth identity — returns claims from the current token; useful for GUI.
 	if s.authEngine != nil {
 		api.Get("/auth/me", s.authEngine.HandleMe)
+		// Inside the authenticated group on purpose (MU-030 criterion 5).
+		// Step-up elevates a session that already exists; registering it beside
+		// /auth/token would make it a second, less-examined way in.
+		api.Post("/auth/reauthenticate", s.authEngine.HandleReauthenticate)
 	}
 
 	// Workspace membership administration uses the freshly resolved role on
 	// every request rather than a role embedded in an older access token.
+	//
+	// The four mutating routes also carry requireRecentAuth (MU-030 criterion
+	// 5). Changing who is in a workspace and what they may do is the action an
+	// unattended session is most valuable for: it is quiet, it persists after
+	// the session ends, and granting yourself an owner role is the one change
+	// that makes every subsequent change possible. Reads are not gated —
+	// re-prompting to look at a member list is friction with no property
+	// behind it, and friction is what teaches people to keep a step-up window
+	// open.
 	api.Get("/workspace/members", s.handleListWorkspaceMembers)
-	api.Patch("/workspace/members/:id/role", s.handleSetWorkspaceMemberRole)
-	api.Patch("/workspace/members/:id/status", s.handleSetWorkspaceMemberStatus)
-	api.Delete("/workspace/members/:id", s.handleRemoveWorkspaceMember)
+	api.Patch("/workspace/members/:id/role", s.requireRecentAuth(), s.handleSetWorkspaceMemberRole)
+	api.Patch("/workspace/members/:id/status", s.requireRecentAuth(), s.handleSetWorkspaceMemberStatus)
+	api.Delete("/workspace/members/:id", s.requireRecentAuth(), s.handleRemoveWorkspaceMember)
 	api.Get("/workspace/invitations", s.handleListWorkspaceInvitations)
-	api.Post("/workspace/invitations", s.handleCreateWorkspaceInvitation)
+	api.Post("/workspace/invitations", s.requireRecentAuth(), s.handleCreateWorkspaceInvitation)
 	api.Get("/workspace/membership-audit", s.handleWorkspaceMembershipAudit)
+	s.registerWorkspaceExportRoutes(api)
+	s.registerWorkspaceDeletionRoutes(api)
+	s.registerWorkspacePolicyRoutes(api)
+	s.registerWorkspaceKeyRoutes(api)
 
 	// Context resolution for the CLI and GUI. These report the identity and
 	// workspace set the server verified for this request, which is what a
@@ -832,7 +965,7 @@ func (s *Server) buildApp() *fiber.App {
 	// gates scraping. Scrape via:
 	//   curl -H 'Authorization: Bearer <key>' http://gw/api/v1/metrics
 	api.Get("/metrics", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.platformMetricsMW(), adaptor.HTTPHandler(metrics.Handler()))
-	api.Post("/admin/restart", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleRestart)
+	api.Post("/admin/restart", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleRestart)
 	api.Get("/admin/audit", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleAdminAudit)
 	api.Get("/onboarding/status", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleOnboardingStatus)
 	// Per-page walkthrough: the same outcome told from whichever screen you are on.
@@ -859,13 +992,13 @@ func (s *Server) buildApp() *fiber.App {
 	api.Put("/agents/:id/yaml", s.rbacAgentMW(rbac.ActionWrite), s.handleUpdateAgentYAML)
 	api.Get("/agents/:id/versions", s.rbacAgentMW(rbac.ActionRead), s.handleListAgentVersions)
 	api.Get("/agents/:id/versions/:version", s.rbacAgentMW(rbac.ActionRead), s.handleGetAgentVersion)
-	api.Post("/agents/:id/rollback", s.rbacAgentMW(rbac.ActionWrite), s.handleRollbackAgent)
+	api.Post("/agents/:id/rollback", s.rbacAgentMW(rbac.ActionWrite), s.auditing("agent.rollback", "agent", "id", s.handleRollbackAgent))
 	api.Get("/agents/:id/tier", s.rbacAgentMW(rbac.ActionRead), s.handleGetAgentTier)
 	api.Post("/agents", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleCreateAgent)
 	api.Put("/agents/:id", s.rbacAgentMW(rbac.ActionWrite), s.handleUpdateAgent)
-	api.Delete("/agents/:id", s.rbacAgentMW(rbac.ActionDelete), s.handleDeleteAgent)
-	api.Post("/agents/:id/enable", s.rbacAgentMW(rbac.ActionEnable), s.handleEnableAgent)
-	api.Post("/agents/:id/disable", s.rbacAgentMW(rbac.ActionEnable), s.handleDisableAgent)
+	api.Delete("/agents/:id", s.rbacAgentMW(rbac.ActionDelete), s.auditing("agent.delete", "agent", "id", s.handleDeleteAgent))
+	api.Post("/agents/:id/enable", s.rbacAgentMW(rbac.ActionEnable), s.auditing("schedule.enable", "agent", "id", s.handleEnableAgent))
+	api.Post("/agents/:id/disable", s.rbacAgentMW(rbac.ActionEnable), s.auditing("schedule.disable", "agent", "id", s.handleDisableAgent))
 
 	// Realtime voice control plane (Story 11): availability + ephemeral
 	// client keys for the browser's direct provider connection. Same RBAC
@@ -876,14 +1009,21 @@ func (s *Server) buildApp() *fiber.App {
 	api.Post("/voice/transcribe", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleVoiceTranscribe)
 	api.Post("/voice/synthesize", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleVoiceSynthesize)
 
-	// Chat — token-quota (user + agent) + per-agent RPM checks applied on top of user RPM.
+	// Chat — per-agent RPM applied on top of the user RPM limit.
+	//
+	// The two daily TOKEN quota middlewares that used to sit here are gone.
+	// They read an in-memory bucket nothing ever filled, so both compared zero
+	// against the limit and allowed every request — a quota that looked
+	// enforced in this very line and was not. The same config keys are honoured
+	// by internal/costs, durably and through a reservation; see the comment at
+	// the head of internal/ratelimit/manager.go.
 	api.Get("/chat/status", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.handleChatStatus)
-	api.Post("/chat", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{BodyField: "agent_id"}), s.rlTokenMW(), s.rlAgentTokenMW(), s.rlAgentMW(), s.handleChat)
+	api.Post("/chat", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{BodyField: "agent_id"}), s.rlAgentMW(), s.handleChat)
 	api.Post("/chat/feedback", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{BodyField: "agent_id"}), s.handleChatFeedback)
 	api.Get("/learning/feedback", s.rbacMW(rbac.ResourceMemory, rbac.ActionRead), s.handleListChatFeedback)
-	api.Post("/chat/stream", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{BodyField: "agent_id"}), s.rlTokenMW(), s.rlAgentTokenMW(), s.rlAgentMW(), s.handleChatStream)
-	api.Get("/chat/stream", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{QueryParam: "agent_id"}), s.rlTokenMW(), s.rlAgentTokenMW(), s.rlAgentMW(), s.handleChatStream)
-	api.Post("/webhooks/:agent_id", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{PathParam: "agent_id"}), s.rlTokenMW(), s.rlAgentTokenMW(), s.rlAgentMW(), s.handleGenericWebhook)
+	api.Post("/chat/stream", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{BodyField: "agent_id"}), s.rlAgentMW(), s.handleChatStream)
+	api.Get("/chat/stream", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{QueryParam: "agent_id"}), s.rlAgentMW(), s.handleChatStream)
+	api.Post("/webhooks/:agent_id", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{PathParam: "agent_id"}), s.rlAgentMW(), s.handleGenericWebhook)
 	api.Post("/chat/confirm", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleToolConfirm)
 	// Cancel an in-flight run (Story #22): stop a slow local-model run.
 	api.Post("/chat/cancel", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleChatCancel)
@@ -947,8 +1087,8 @@ func (s *Server) buildApp() *fiber.App {
 	api.Post("/pairing/tokens", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleCreatePairingToken)
 	api.Post("/pairing/redeem", s.handleRedeemPairingToken)
 	api.Get("/approvals", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleListApprovals)
-	api.Post("/approvals/:id/approve", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleResolveApproval(true))
-	api.Post("/approvals/:id/deny", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleResolveApproval(false))
+	api.Post("/approvals/:id/approve", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.auditing("approval.approve", "approval", "id", s.handleResolveApproval(true)))
+	api.Post("/approvals/:id/deny", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.auditing("approval.deny", "approval", "id", s.handleResolveApproval(false)))
 	api.Get("/push/public-key", s.handlePushPublicKey)
 	api.Post("/push/subscribe", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handlePushSubscribe)
 	api.Post("/push/unsubscribe", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handlePushUnsubscribe)
@@ -990,21 +1130,33 @@ func (s *Server) buildApp() *fiber.App {
 
 	// MCP (Model Context Protocol) — configured external servers + their tools
 	api.Get("/mcp", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleListMCP)
-	api.Post("/mcp", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleCreateMCPServer)
-	api.Patch("/mcp/:id", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleUpdateMCPServer)
-	api.Delete("/mcp/:id", s.rbacMW(rbac.ResourceMCP, rbac.ActionDelete), s.handleDeleteMCPServer)
+	api.Post("/mcp", s.platformMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleCreateMCPServer)
+	api.Patch("/mcp/:id", s.platformMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleUpdateMCPServer)
+	api.Delete("/mcp/:id", s.platformMW(rbac.ResourceMCP, rbac.ActionDelete), s.handleDeleteMCPServer)
 	api.Post("/mcp/test", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleTestMCPServer)
-	api.Post("/mcp/provision-glama", s.rbacMW(rbac.ResourceMCP, rbac.ActionInstall), s.handleProvisionGlama)
+	// The workspace half of MCP: the operator publishes the catalog behind
+	// platformMW above, each workspace supplies its OWN identity for the
+	// servers in it. Deliberately not platform routes — a tenant's token is
+	// the one thing about an MCP server that must never be the operator's.
+	api.Get("/mcp/pending", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleMCPPending)
+	api.Get("/mcp/own", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleListOwnMCPServers)
+	api.Put("/mcp/own/:id", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handlePutOwnMCPServer)
+	api.Delete("/mcp/own/:id", s.rbacMW(rbac.ResourceMCP, rbac.ActionDelete), s.handleDeleteOwnMCPServer)
+	api.Get("/plugins/settings/pending", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handlePluginSettingsPending)
+	api.Get("/mcp/:id/credentials", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleListMCPCredentials)
+	api.Put("/mcp/:id/credentials", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleSetMCPCredential)
+	api.Delete("/mcp/:id/credentials/:key", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleDeleteMCPCredential)
+	api.Post("/mcp/provision-glama", s.platformMW(rbac.ResourceMCP, rbac.ActionInstall), s.handleProvisionGlama)
 	api.Get("/mcp/registry/search", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleMCPRegistrySearch)
-	api.Post("/mcp/provision-registry", s.rbacMW(rbac.ResourceMCP, rbac.ActionInstall), s.handleProvisionMCPRegistry)
+	api.Post("/mcp/provision-registry", s.platformMW(rbac.ResourceMCP, rbac.ActionInstall), s.handleProvisionMCPRegistry)
 
 	// Knowledge (RAG) — KBs, documents, search
 	api.Get("/knowledge", s.rbacMW(rbac.ResourceKnowledge, rbac.ActionRead), s.handleListKnowledge)
 	api.Post("/knowledge", s.rbacMW(rbac.ResourceKnowledge, rbac.ActionWrite), s.handleCreateKnowledge)
-	api.Delete("/knowledge/:kb", s.rbacMW(rbac.ResourceKnowledge, rbac.ActionDelete), s.handleDeleteKnowledge)
+	api.Delete("/knowledge/:kb", s.rbacMW(rbac.ResourceKnowledge, rbac.ActionDelete), s.auditing("knowledge.delete", "knowledge_base", "kb", s.handleDeleteKnowledge))
 	api.Get("/knowledge/:kb/documents", s.rbacMW(rbac.ResourceKnowledge, rbac.ActionRead), s.handleListKnowledgeDocuments)
 	api.Post("/knowledge/:kb/documents", s.rbacMW(rbac.ResourceKnowledge, rbac.ActionWrite), s.handleIngestDocument)
-	api.Delete("/knowledge/:kb/documents/:doc", s.rbacMW(rbac.ResourceKnowledge, rbac.ActionDelete), s.handleDeleteKnowledgeDocument)
+	api.Delete("/knowledge/:kb/documents/:doc", s.rbacMW(rbac.ResourceKnowledge, rbac.ActionDelete), s.auditing("knowledge.document_delete", "knowledge_document", "doc", s.handleDeleteKnowledgeDocument))
 	// Async ingestion: upload returns 202 + a job; these track and retry it.
 	// The per-job routes deliberately live OUTSIDE /knowledge/... — a path like
 	// /knowledge/jobs/:job collides with the /knowledge/:kb/... family (a KB
@@ -1165,14 +1317,14 @@ func (s *Server) buildApp() *fiber.App {
 	api.Post("/templates/:name/mock-test", s.rbacMW(rbac.ResourceTemplates, rbac.ActionRead), s.handleTemplateMockTest)
 
 	// Config (read / write config.yaml via API)
-	api.Get("/config", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleGetConfig)
-	api.Patch("/config", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite), s.handlePatchConfig)
+	api.Get("/config", s.platformMW(rbac.ResourceConfig, rbac.ActionRead), s.handleGetConfig)
+	api.Patch("/config", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.handlePatchConfig)
 
 	// Skill sources / package registries (Story E26: review URL → add source)
-	api.Get("/registries", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleListRegistries)
-	api.Get("/registries/search", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleSearchRegistries)
-	api.Post("/registries/probe", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleProbeRegistry)
-	api.Post("/registries", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleAddRegistry)
+	api.Get("/registries", s.platformMW(rbac.ResourceConfig, rbac.ActionRead), s.handleListRegistries)
+	api.Get("/registries/search", s.platformMW(rbac.ResourceConfig, rbac.ActionRead), s.handleSearchRegistries)
+	api.Post("/registries/probe", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleProbeRegistry)
+	api.Post("/registries", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleAddRegistry)
 
 	// Logs (tail gateway log file)
 	api.Get("/logs", s.rbacMW(rbac.ResourceLogs, rbac.ActionRead), s.handleGetLogs)
@@ -1189,7 +1341,12 @@ func (s *Server) buildApp() *fiber.App {
 
 	// --- Rate Limit status (Task #33) ---
 	// Always registered; returns 503 when no limiter is configured.
-	api.Get("/rate-limit/status", func(c *fiber.Ctx) error {
+	// rate-limit status had no rbacMW at all — the only guard was the group
+	// middleware, so any authenticated principal including a viewer could read
+	// the deployment's limiter configuration and current pressure. That is
+	// operational signal about how much other tenants are using, which MU-019
+	// established one team must not read about another.
+	api.Get("/rate-limit/status", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), func(c *fiber.Ctx) error {
 		if s.rateLimiter == nil {
 			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
 				"error": "rate limiting not configured",
@@ -1304,7 +1461,15 @@ func (s *Server) buildApp() *fiber.App {
 	api.Delete("/secrets/:name", s.rbacMW(rbac.ResourceSecrets, rbac.ActionDelete), s.handleDeleteSecret)
 
 	// --- API Key Management (admin) ---
-	api.Post("/admin/api-keys", s.rbacMW(rbac.ResourceCredentials, rbac.ActionSet), func(c *fiber.Ctx) error {
+	//
+	// Every mutating route carries requireRecentAuth (MU-030 criterion 5).
+	// Minting a credential is the sharpest of the high-impact actions on this
+	// server: it produces an authority that OUTLIVES the session that created
+	// it, so an attacker with a live session and nothing else walks away with
+	// a durable one. `validate` is included because it is behind ActionReveal
+	// and its whole purpose is to confirm a secret. Listing is not: it returns
+	// no plaintext by construction (the APIKey struct has no field for one).
+	api.Post("/admin/api-keys", s.rbacMW(rbac.ResourceCredentials, rbac.ActionSet), s.requireRecentAuth(), func(c *fiber.Ctx) error {
 		if s.apiKeyStore == nil {
 			return s.errMsg(c, fiber.StatusServiceUnavailable, "api key store not configured")
 		}
@@ -1319,7 +1484,7 @@ func (s *Server) buildApp() *fiber.App {
 		}
 		return s.credentialAPI().HandleList(c)
 	})
-	api.Delete("/admin/api-keys/:id", s.rbacMW(rbac.ResourceCredentials, rbac.ActionDelete), func(c *fiber.Ctx) error {
+	api.Delete("/admin/api-keys/:id", s.rbacMW(rbac.ResourceCredentials, rbac.ActionDelete), s.requireRecentAuth(), func(c *fiber.Ctx) error {
 		if s.apiKeyStore == nil {
 			return s.errMsg(c, fiber.StatusServiceUnavailable, "api key store not configured")
 		}
@@ -1327,7 +1492,7 @@ func (s *Server) buildApp() *fiber.App {
 		s.recordAdminAudit(c, "credential.revoke", "credential", c.Params("id"), responseAuditStatus(c, err), nil)
 		return err
 	})
-	api.Post("/admin/api-keys/:id/rotate", s.rbacMW(rbac.ResourceCredentials, rbac.ActionRotate), func(c *fiber.Ctx) error {
+	api.Post("/admin/api-keys/:id/rotate", s.rbacMW(rbac.ResourceCredentials, rbac.ActionRotate), s.requireRecentAuth(), func(c *fiber.Ctx) error {
 		if s.apiKeyStore == nil {
 			return s.errMsg(c, fiber.StatusServiceUnavailable, "api key store not configured")
 		}
@@ -1336,7 +1501,7 @@ func (s *Server) buildApp() *fiber.App {
 		s.recordAdminAudit(c, "credential.rotate", "credential", c.Params("id"), responseAuditStatus(c, err), details)
 		return err
 	})
-	api.Patch("/admin/api-keys/:id/status", s.rbacMW(rbac.ResourceCredentials, rbac.ActionSet), func(c *fiber.Ctx) error {
+	api.Patch("/admin/api-keys/:id/status", s.rbacMW(rbac.ResourceCredentials, rbac.ActionSet), s.requireRecentAuth(), func(c *fiber.Ctx) error {
 		if s.apiKeyStore == nil {
 			return s.errMsg(c, fiber.StatusServiceUnavailable, "api key store not configured")
 		}
@@ -1345,7 +1510,7 @@ func (s *Server) buildApp() *fiber.App {
 		s.recordAdminAudit(c, "credential.status", "credential", c.Params("id"), responseAuditStatus(c, err), details)
 		return err
 	})
-	api.Post("/admin/api-keys/validate", s.rbacMW(rbac.ResourceCredentials, rbac.ActionReveal), func(c *fiber.Ctx) error {
+	api.Post("/admin/api-keys/validate", s.rbacMW(rbac.ResourceCredentials, rbac.ActionReveal), s.requireRecentAuth(), func(c *fiber.Ctx) error {
 		if s.apiKeyStore == nil {
 			return s.errMsg(c, fiber.StatusServiceUnavailable, "api key store not configured")
 		}
@@ -1355,10 +1520,17 @@ func (s *Server) buildApp() *fiber.App {
 	// --- Durable runs (MU-020) ---
 	// Submission is gated on the same permission as chat: a run is a chat
 	// turn that outlives its request, not a new authority.
-	api.Post("/runs", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{BodyField: "agent_id"}), s.rlTokenMW(), s.rlAgentMW(), s.handleSubmitRun)
+	api.Post("/runs", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{BodyField: "agent_id"}), s.rlAgentMW(), s.handleSubmitRun)
 	api.Get("/runs", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.handleListRuns)
 	api.Get("/runs/:id", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.handleGetRun)
 	api.Post("/runs/:id/cancel", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleCancelRun)
+
+	// --- Schema state (admin) ---
+	// Behind the same owner/admin gate as the raw metrics endpoint: a schema
+	// version describes the deployment rather than a tenant, so the answer
+	// does not vary by who asks and the gate is about who may ask at all.
+	api.Get("/admin/schema", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead),
+		s.platformMetricsMW(), s.handleSchemaStatus)
 
 	// --- Dead-Letter Queue (admin) ---
 	api.Get("/admin/dlq", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), func(c *fiber.Ctx) error {
@@ -1388,6 +1560,11 @@ func (s *Server) buildApp() *fiber.App {
 		}
 		return c.JSON(item)
 	})
+	// Retry is ActionWrite like Delete, not ActionRead. Re-running somebody
+	// else's parked job is an action with side effects — it makes the agent's
+	// tool calls happen — and reading a dead letter is not.
+	api.Post("/admin/dlq/:id/retry", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite),
+		s.auditing("dlq.retry", "dlq", "id", s.handleRetryDeadLetter))
 	api.Delete("/admin/dlq/:id", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite), func(c *fiber.Ctx) error {
 		if s.dlqStore == nil {
 			return s.errMsg(c, fiber.StatusServiceUnavailable, "dlq not configured")
@@ -1469,7 +1646,7 @@ func (s *Server) buildApp() *fiber.App {
 	// can be exercised over an in-memory FS. Testing it through the real gateway
 	// meant testing nothing: GUIEnabled is false in the test config, so any such
 	// test silently skips forever.
-	if s.cfg.Server.GUIEnabled {
+	if s.config().Server.GUIEnabled {
 		sub, err := fs.Sub(webui.FS, "dist")
 		if err == nil {
 			mountStaticGUI(app, http.FS(sub))
@@ -1482,8 +1659,8 @@ func (s *Server) buildApp() *fiber.App {
 }
 
 func (s *Server) httpRequestTimeout() time.Duration {
-	if s != nil && s.cfg != nil {
-		if d, err := time.ParseDuration(s.cfg.Runtime.Timeouts.HTTP); err == nil && d > 0 {
+	if s != nil && s.config() != nil {
+		if d, err := time.ParseDuration(s.config().Runtime.Timeouts.HTTP); err == nil && d > 0 {
 			return d
 		}
 	}
@@ -1525,8 +1702,8 @@ func mountStaticGUI(app *fiber.App, root http.FileSystem) {
 
 func (s *Server) requestBodyLimit() int {
 	limit := int64(50 << 20)
-	if s != nil && s.cfg != nil && s.cfg.Knowledge.MaxDocumentBytes > 0 {
-		limit = s.cfg.Knowledge.MaxDocumentBytes
+	if s != nil && s.config() != nil && s.config().Knowledge.MaxDocumentBytes > 0 {
+		limit = s.config().Knowledge.MaxDocumentBytes
 	}
 	// Keep a little room for JSON/form overhead while the handler enforces the
 	// exact document payload limit.
@@ -1752,7 +1929,7 @@ func parseCostSince(s string) (time.Time, string, error) {
 // when SetAuth() was not called (e.g. unit tests that construct Server directly).
 // Production startup always calls SetAuth() with an auth.Engine.
 func (s *Server) legacyAuthMiddleware() fiber.Handler {
-	if s.cfg.Server.APIKey == "" {
+	if s.config().Server.APIKey == "" {
 		// Test/embedding compatibility only: production always wires auth.Engine,
 		// whose middleware fails closed when no verifier is effective.
 		s.log.Warn("legacy gateway constructed without auth engine; authentication is bypassed")
@@ -1763,7 +1940,7 @@ func (s *Server) legacyAuthMiddleware() fiber.Handler {
 		if got == "" {
 			got = c.Query("api_key")
 		}
-		if !gwSecretEqual(got, s.cfg.Server.APIKey) {
+		if !gwSecretEqual(got, s.config().Server.APIKey) {
 			return s.errMsg(c, fiber.StatusUnauthorized, "invalid or missing API key")
 		}
 		// Directly-constructed gateways are retained for tests and embedding.
@@ -1806,7 +1983,7 @@ func isLoopbackHost(host string) bool {
 // checkAuthBindSafety enforces SEC-4 using the auth engine's effective
 // verifier state rather than its mere allocation.
 func (s *Server) checkAuthBindSafety() error {
-	cfg := s.cfg
+	cfg := s.config()
 	if cfg.Server.AllowUnauthenticated {
 		s.log.Error("SECURITY WARNING: unauthenticated startup override is enabled",
 			zap.String("host", cfg.Server.Host),
@@ -1842,7 +2019,7 @@ func (s *Server) Listen(ctx context.Context) error {
 	// message (or, worse, silently on every cron fire).
 	s.validateAgentsAtBoot(ctx)
 
-	addr := fmt.Sprintf("%s:%d", s.cfg.Server.Host, s.cfg.Server.Port)
+	addr := fmt.Sprintf("%s:%d", s.config().Server.Host, s.config().Server.Port)
 
 	// Start config watcher
 	if s.cfgPath != "" {
@@ -1853,21 +2030,72 @@ func (s *Server) Listen(ctx context.Context) error {
 	s.startUpdatesChecker()
 
 	// Start TLS if configured
-	if s.cfg.Server.TLSCert != "" && s.cfg.Server.TLSKey != "" {
+	if s.config().Server.TLSCert != "" && s.config().Server.TLSKey != "" {
 		s.log.Info("gateway listening with TLS", zap.String("addr", addr))
-		go func() {
-			<-ctx.Done()
-			_ = s.app.Shutdown()
-		}()
-		return s.app.ListenTLS(addr, s.cfg.Server.TLSCert, s.cfg.Server.TLSKey)
+		go s.drainAndShutdown(ctx)
+		return s.app.ListenTLS(addr, s.config().Server.TLSCert, s.config().Server.TLSKey)
 	}
 
 	s.log.Info("gateway listening", zap.String("addr", addr))
-	go func() {
-		<-ctx.Done()
-		_ = s.app.Shutdown()
-	}()
+	go s.drainAndShutdown(ctx)
 	return s.app.Listen(addr)
+}
+
+// drainGracePeriod is how long a replica keeps serving after it starts failing
+// readiness, before it stops accepting connections.
+//
+// It has to exceed a load balancer's detection interval, or the drain
+// accomplishes nothing: the point is that the balancer sees the 503s and stops
+// routing BEFORE the listener closes. Five seconds covers the common
+// configurations (Kubernetes readiness probes default to a 10s period, so this
+// is a floor rather than a guarantee — operators running a slower probe should
+// raise it).
+var drainGracePeriod = 5 * time.Second
+
+// shutdownTimeout bounds waiting for in-flight requests.
+//
+// Fiber's Shutdown waits FOREVER for in-flight requests to finish. One agent
+// run holding a streaming response — the normal case here, not a pathological
+// one — therefore blocks process exit indefinitely, and the operator or
+// orchestrator resorts to SIGKILL, which is the ungraceful shutdown the
+// graceful path existed to avoid.
+var shutdownTimeout = 25 * time.Second
+
+// drainAndShutdown takes this replica out of the pool, then stops it.
+//
+// THE ORDER IS THE MECHANISM. Readiness fails first and the listener closes
+// later, so a load balancer has a window to notice and stop routing. Closing
+// first and de-registering afterwards — the shape this had — means every
+// request the balancer sends in that window is accepted by a socket that is
+// already going away.
+func (s *Server) drainAndShutdown(ctx context.Context) {
+	<-ctx.Done()
+	s.drainThenStop(time.Sleep, func() error { return s.app.ShutdownWithTimeout(shutdownTimeout) })
+}
+
+// drainThenStop is the ordering, separated from the signal wait and the Fiber
+// call so a test can observe it.
+//
+// Splitting it out is not ceremony: the property under test is "was this
+// replica already failing readiness when the listener closed", and that is
+// invisible from outside — both orders shut down successfully, and the
+// difference only appears as requests a load balancer sent into a closing
+// socket. Reproducing it end-to-end needs a load balancer; reproducing it here
+// needs two function arguments.
+func (s *Server) drainThenStop(sleep func(time.Duration), stop func() error) {
+	s.BeginDraining()
+	// Not interruptible: the grace period exists for an observer that is not
+	// watching this process, so shortening it on a second signal would defeat
+	// it. An operator in a hurry still has SIGKILL.
+	sleep(drainGracePeriod)
+
+	if err := stop(); err != nil {
+		// Logged rather than swallowed: reaching the timeout means requests
+		// were cut off, and an operator debugging a truncated response needs
+		// to know the shutdown did that rather than the network.
+		s.log.Warn("gateway shutdown timed out with requests still in flight",
+			zap.Duration("waited", shutdownTimeout), zap.Error(err))
+	}
 }
 
 // validateAgentsAtBoot probes each registered provider for its model list and

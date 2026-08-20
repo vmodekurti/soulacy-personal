@@ -232,12 +232,37 @@ func (a *App) applyManifestPluginMigrations(ws config.Paths, pluginLoader *plugi
 // pre-flight ($PATH resolution of runtime.python_bin), and applies
 // manifest-declared plugin migrations. Returns the three loaders in
 // construction order.
-func (a *App) wireLoaders(ws config.Paths) (*runtime.Loader, *plugins.Loader, *skills.Loader, *skills.Stores) {
+func (a *App) wireLoaders(ws config.Paths, credVault credentials.Vault) (*runtime.Loader, *plugins.Loader, *plugins.Stores, *skills.Loader, *skills.Stores) {
 	cfg, log := a.cfg, a.log
 
 	// ── Agent Loader ─────────────────────────────────────────────────────────
 	loader := runtime.NewLoader(cfg.AgentDirs)
 	loader.SetLogger(log)
+	// Decided here, applied BEFORE LoadAll, because LoadAll is where a
+	// SOUL.yaml claiming the reserved ID would otherwise be promoted to a
+	// system-tools agent.
+	//
+	// The loader takes a boolean, not the mode: internal/runtime knows nothing
+	// about deployment modes and is better for it, so the policy lives in
+	// config.Config.PlatformAgentsEnabled and the decision is made once, here.
+	platformAgents := cfg.PlatformAgentsEnabled()
+	loader.SetPlatformAgentsEnabled(platformAgents)
+	switch {
+	case platformAgents && config.IsMultiUserMode(cfg.DeploymentMode()):
+		log.Warn("the built-in System agent is ENABLED in a multi-user deployment by explicit "+
+			"acknowledgement; it can run shell commands, write files and edit this deployment's "+
+			"configuration, and those actions belong to no workspace",
+			zap.String("acknowledgement", config.UnsafeTenantSystemAgentAcknowledgement))
+	case !platformAgents:
+		// Named as a withdrawal rather than logged as a fact, because a Team
+		// install upgrading into this loses a feature its users were using,
+		// and the first thing they will do is look in the log.
+		log.Info("the built-in System agent is not available in this deployment mode: its tools "+
+			"act on the host and the deployment config, which cannot be scoped to a workspace. "+
+			"Install MCP servers and skills from the GUI or the `sy` CLI on the host instead",
+			zap.String("mode", cfg.DeploymentMode()),
+			zap.String("restore_with_acknowledgement", config.UnsafeTenantSystemAgentAcknowledgement))
+	}
 	if errs := loader.LoadAll(); len(errs) > 0 {
 		for _, e := range errs {
 			log.Warn("agent load error", zap.Error(e))
@@ -294,7 +319,29 @@ func (a *App) wireLoaders(ws config.Paths) (*runtime.Loader, *plugins.Loader, *s
 	// ── Plugin Loader ─────────────────────────────────────────────────────────
 	// Scans plugin_dirs for plugin.yaml manifests; loads Python tool libraries
 	// and (manifest_schema 2, E7) sidecar channels, providers, skills, GUI mounts.
-	pluginLoader := plugins.New(cfg.PluginDirs, log)
+	// Platform scan list, layered exactly like skills: the operator's
+	// configured directories stay read-only templates every workspace sees,
+	// and each workspace's own directory is scanned LAST so it can shadow a
+	// platform plugin by name without modifying the shared copy.
+	pluginStores := plugins.NewStores(cfg.PluginDirs, ws.Plugins, log)
+	// BEFORE SetSettings and before the first For, so no workspace's loader is
+	// ever built holding the operator's credential.
+	//
+	// A plugin's DECLARED credentials were already per-workspace; its
+	// plugins_config settings were one shared map. Settings are meant to be
+	// configuration, but nothing stopped an author putting an API key there,
+	// and when they did every tenant ran on the operator's key. See
+	// internal/plugins/tenantsettings.go.
+	if config.IsMultiUserMode(cfg.DeploymentMode()) {
+		pluginStores.RequireTenantSettings(vaultPluginSettings(credVault))
+		log.Info("credential-looking plugins_config values are per-workspace; a value a workspace " +
+			"has not supplied is withheld rather than inherited from the operator")
+	}
+	// plugins_config is attached through the registry rather than only by
+	// plugins.Wire, so a loader rebuilt after an invalidation keeps its
+	// settings. See Stores.SetSettings.
+	pluginStores.SetSettings(cfg.PluginsConfig)
+	pluginLoader := pluginStores.For(wsroot.PersonalWorkspaceID)
 	if pluginLoader.Count() > 0 {
 		log.Info("plugins loaded", zap.Int("count", pluginLoader.Count()))
 	}
@@ -330,7 +377,7 @@ func (a *App) wireLoaders(ws config.Paths) (*runtime.Loader, *plugins.Loader, *s
 		log.Info("agent skills loaded", zap.Int("count", skillLoader.Count()))
 	}
 
-	return loader, pluginLoader, skillLoader, skillStores
+	return loader, pluginLoader, pluginStores, skillLoader, skillStores
 }
 
 // wireLLMRouter builds the LLM router, registers the unconditional Ollama
@@ -710,9 +757,26 @@ func (a *App) wireQueue(stack *closerStack) (queue.Backend, error) {
 	}
 	if queueName == "nats" {
 		// DOC-2: the NATS queue backend has no automated tests and no known
-		// production users. Warn loudly so operators know they are on an
-		// unvetted code path.
-		log.Warn("nats queue backend is EXPERIMENTAL and untested — no automated tests, no known production users; the default in-memory queue is the supported path")
+		// production users.
+		//
+		// WHY TWO MESSAGES. The old single warning told every NATS operator to
+		// "use the default in-memory queue instead", which is advice scale mode
+		// forbids — its own validation REQUIRES nats or external. An operator
+		// following the warning would be told by the next boot to undo it. The
+		// remedy depends entirely on why they are here, so the message does
+		// too: a personal or team install genuinely can go back to the default;
+		// a scale install cannot, and needs to know the requirement it
+		// satisfied is itself unvetted rather than being sent in a circle.
+		if cfg.DeploymentMode() == config.DeploymentModeScale {
+			log.Warn("nats queue backend is EXPERIMENTAL and untested — no automated tests, no known " +
+				"production users. Scale mode REQUIRES a distributed queue, so this is not a setting to " +
+				"revert: treat the queue as an unvetted dependency, exercise failover before relying on " +
+				"it, or supply your own with queue.backend \"external\"")
+		} else {
+			log.Warn("nats queue backend is EXPERIMENTAL and untested — no automated tests, no known " +
+				"production users. Nothing in this deployment mode requires it; the default in-memory " +
+				"queue is the supported path")
+		}
 	}
 	queueBackend, qok, qerr := registry.NewQueue(queueName, map[string]any{
 		"url":            cfg.Queue.NATSUrl,
@@ -771,6 +835,13 @@ func (a *App) wireSecrets(vault credentials.Vault) {
 		return
 	}
 	mgr := secrets.New(vault)
+	// Retained so the gateway can re-overlay after a config reload. Migrate
+	// blanks vault-backed values in memory as well as on disk, expecting
+	// Overlay to restore them — and every reload calls config.Load, which
+	// re-reads the blanked file. Running Overlay only here meant the first
+	// config write of a process's life emptied every provider key and channel
+	// token in the in-memory config.
+	a.secretsManager = mgr
 	ctx := context.Background()
 	if a.cfgPath != "" {
 		if n, err := mgr.Migrate(ctx, a.cfg, a.cfgPath); err != nil {
@@ -890,6 +961,19 @@ func (a *App) wireEngineExtras(ctx context.Context, ws config.Paths, engine *run
 		log.Info("workflow checkpoints ready", zap.String("path", checkpointPath))
 	}
 
+	// package_install's exemption from allow_system_agents is a single-user
+	// convenience: it gives an operator a safe install path without enabling
+	// shell_exec. In multi-user it is withdrawn, because the installer runs
+	// outside the sandbox and writes the deployment-wide config, and the
+	// System agent is only present there under an acknowledgement that
+	// restores a chat agent rather than the right to rewrite the deployment.
+	//
+	// The tool is not removed; it goes back behind runtime.allow_system_agents,
+	// so an operator who wants it says so a second time.
+	if config.IsMultiUserMode(cfg.DeploymentMode()) {
+		engine.SetManagedInstallExempt(false)
+	}
+
 	// ── Telemetry (OTEL) ─────────────────────────────────────────────────────
 	telCfg := telemetry.Config{
 		Enabled:      cfg.Telemetry.Enabled,
@@ -918,43 +1002,12 @@ func (a *App) wireEngineExtras(ctx context.Context, ws config.Paths, engine *run
 		stack.pushClose("cost-store", costsStore)
 		openedCostStore = costsStore
 		prices := costPriceTableFromConfig(cfg.Costs.Pricing)
-		reservationTTL, err := time.ParseDuration(cfg.Costs.ReservationTTL)
-		if err != nil || reservationTTL <= 0 {
-			reservationTTL = 15 * time.Minute
-		}
-		circuitCooldown, err := time.ParseDuration(cfg.Costs.CircuitCooldown)
-		if err != nil || circuitCooldown <= 0 {
-			circuitCooldown = 30 * time.Second
-		}
-		providerPolicies := make(map[string]costs.ProviderPolicy, len(cfg.LLM.Providers))
-		for id, providerCfg := range cfg.LLM.Providers {
-			providerPolicies[id] = costs.ProviderPolicy{AllowedDataClasses: providerCfg.AllowedDataClasses,
-				CacheAllowedDataClasses: providerCfg.CacheAllowedDataClasses,
-				MaxTokensPerMinute:      providerCfg.MaxTokensPerMinute, Region: providerCfg.Region,
-				Retention: providerCfg.Retention, PromptCaching: providerCfg.PromptCaching}
-		}
-		governor := costs.NewGovernor(costsStore, prices, costs.GovernanceConfig{
-			DailyBudgetUSD:           cfg.Costs.DailyBudgetUSD,
-			MonthlyBudgetUSD:         cfg.Costs.MonthlyBudgetUSD,
-			PerUserDailyBudgetUSD:    cfg.Costs.PerUserDailyBudgetUSD,
-			PerAgentDailyBudgetUSD:   cfg.Costs.PerAgentDailyBudgetUSD,
-			EnforcementMode:          cfg.Costs.EnforcementMode,
-			UnknownPricing:           cfg.Costs.UnknownPricing,
-			DefaultMaxOutput:         cfg.Costs.DefaultMaxOutputTokens,
-			MaxOutputCeiling:         cfg.Costs.MaxOutputTokensCeiling,
-			ConfirmationThresholdUSD: cfg.Costs.ConfirmationThresholdUSD,
-			ReservationTTL:           reservationTTL,
-			PerUserTokensDay:         cfg.RateLimit.PerUserTokensDay,
-			PerAgentTokensDay:        cfg.RateLimit.PerAgentTokensDay,
-			AllowedProviders:         cfg.LLM.AllowedProviders,
-			AllowedModels:            cfg.LLM.AllowedModels,
-			AllowedRegions:           cfg.LLM.AllowedRegions,
-			MaxConcurrentPerProvider: cfg.Costs.MaxConcurrentPerProvider,
-			CircuitFailureThreshold:  cfg.Costs.CircuitFailureThreshold,
-			CircuitCooldown:          circuitCooldown,
-			ProviderPolicies:         providerPolicies,
-		})
+		// One builder, shared with the reload path — see costs.GovernanceFrom.
+		governor := costs.NewGovernor(costsStore, prices, costs.GovernanceFrom(cfg))
 		llmRouter.SetController(governor)
+		// Retained so the gateway can reinstall a recomposed policy when a
+		// workspace changes its own limits (MU-030 criterion 1).
+		a.costGovernor = governor
 		if policy := quotaPolicyFrom(cfg.Costs.Quotas); policy != nil {
 			governor.SetQuotaPolicy(policy)
 			log.Info("multi-level quota policy active",
@@ -1010,18 +1063,27 @@ func (a *App) sweepScratch(ws config.Paths) {
 // engineDeps bundles the already-constructed subsystems the engine needs. It
 // keeps wireEngine's signature readable given the large dependency set.
 type engineDeps struct {
-	loader         *runtime.Loader
-	llmRouter      *llm.Router
-	fileStore      *memory.FileStore
-	actionBackend  storage.ActionLogBackend
-	memBackend     storage.MemoryBackend
-	hub            *gateway.EventHub
-	skillLoader    *skills.Loader
-	skillStores    *skills.Stores
-	mcpClient      *mcp.Client
+	loader        *runtime.Loader
+	llmRouter     *llm.Router
+	fileStore     *memory.FileStore
+	actionBackend storage.ActionLogBackend
+	memBackend    storage.MemoryBackend
+	hub           *gateway.EventHub
+	skillLoader   *skills.Loader
+	skillStores   *skills.Stores
+	mcpClient     *mcp.Client
+	// mcpServers is the operator's configured template, kept alongside the
+	// client because the pool instantiates it per workspace rather than
+	// reusing the client's already-started servers.
+	mcpServers map[string]mcp.ServerConfig
+	// credVault resolves each workspace's OWN MCP credentials. Carried here
+	// rather than looked up later because the pool must be told about it
+	// before any workspace asks for its first client.
+	credVault      credentials.Vault
 	knowledgeSvc   *knowledge.Service
 	vectorStore    *memory.VectorStore
 	pluginProvider runtime.PluginToolProvider
+	pluginStores   *plugins.Stores
 	pyExecutor     executor.Backend
 	namedExecutors map[string]executor.Backend
 	brainStores    *agentmemory.Stores
@@ -1030,6 +1092,9 @@ type engineDeps struct {
 	searchProvider string
 	searchAPIKey   string
 	toolTimeout    time.Duration
+	// stack registers the MCP pool for shutdown; it owns processes the
+	// boot-time client does not.
+	stack *closerStack
 }
 
 // wireEngine constructs the runtime engine and applies all host-side
@@ -1181,10 +1246,69 @@ func (a *App) wireEngine(d engineDeps) *runtime.Engine {
 		}
 	}
 
+	// Per-workspace MCP servers (MU-017 criterion 5). Installed AFTER
+	// SetFilesystemRoots and SetSandbox, because the pool asks the engine
+	// where each workspace's tree is and what limits to apply — installing it
+	// earlier would give every workspace the pre-configuration answer, which
+	// for the roots is "none" and therefore no servers at all.
+	//
+	// The engine is both the pool's confinement source and its consumer. That
+	// cycle is real and is resolved by ordering rather than by an interface
+	// dance: the pool holds the engine, the engine holds the pool, and the
+	// pool only calls back lazily on a workspace's first MCP use — long after
+	// this function returns.
+	if d.mcpClient != nil {
+		pool := mcp.NewPool(mcp.Config{Servers: d.mcpServers}, engine, log)
+		// BEFORE any workspace can ask for a client, and before the engine
+		// holds the pool. The operator's config carries the operator's tokens;
+		// in a multi-user deployment those must not travel into a tenant's
+		// subprocess, because a tenant running as the operator sees whatever
+		// the operator's token sees — including other tenants' data. See
+		// internal/mcp/tenantcreds.go.
+		//
+		// Personal is untouched: one tenant, whose credentials genuinely are
+		// the operator's.
+		if config.IsMultiUserMode(cfg.DeploymentMode()) {
+			pool.RequireTenantCredentials(vaultMCPCredentials(d.credVault))
+			log.Info("mcp servers use each workspace's own credentials; a server whose secrets a " +
+				"workspace has not supplied is not started for it")
+		}
+		engine.SetMCPPool(pool)
+		a.mcpPool = pool
+		// Registered for shutdown separately from mcp-client: the pool owns a
+		// different set of processes (one per active workspace), and closing
+		// only the boot-time client would leave every workspace's servers
+		// running after the gateway exits — the zombie problem MU-017
+		// criterion 7 fixed for RemoveServer, reappearing at shutdown.
+		if d.stack != nil {
+			d.stack.pushClose("mcp-pool", pool)
+		}
+		log.Info("mcp servers are per-workspace", zap.Int("configured", len(d.mcpServers)))
+	}
+
 	// MEM-03: pass the brain memory store into the engine.
 	// Per-workspace skill catalogs. A skill is executable instruction text an
 	// agent follows, so a shared catalog changes what another tenant's agents
 	// do rather than merely exposing metadata.
+	// Per-workspace plugin contributions. A plugin contributes tools an agent
+	// can CALL, so a shared provider does not merely expose another tenant's
+	// inventory — it runs their code on this tenant's behalf.
+	//
+	// The adapter is rebuilt per workspace rather than cached because
+	// Stores.For already caches the loader; wrapping it is a struct literal.
+	// An empty loader returns a provider with no tools rather than nil, so
+	// "this workspace has none" and "no resolver is installed" stay distinct —
+	// conflating them is what would send the second case to the shared
+	// provider.
+	if d.pluginStores != nil {
+		engine.SetPluginProviders(func(workspaceID string) runtime.PluginToolProvider {
+			loader := d.pluginStores.For(workspaceID)
+			if loader == nil {
+				return nil
+			}
+			return &pluginToolAdapter{loader: loader}
+		})
+	}
 	if d.skillStores != nil {
 		engine.SetSkillLoaders(func(workspaceID string) runtime.SkillLoader {
 			if loader := d.skillStores.For(workspaceID); loader != nil {
@@ -1286,7 +1410,7 @@ func (a *App) executeDurableRun(ctx context.Context, engine *runtime.Engine, loa
 		log.Error("a durable run arrived but no run store is configured", zap.String("run_id", runID))
 		return
 	}
-	run, ok := beginRun(ctx, runStore, msg.WorkspaceID, runID, log)
+	run, ok := beginRun(ctx, runStore, msg.WorkspaceID, runID, a.workerID(), log)
 	if !ok {
 		return
 	}
@@ -1295,7 +1419,13 @@ func (a *App) executeDurableRun(ctx context.Context, engine *runtime.Engine, loa
 	if def := loader.Get(msg.AgentID); def != nil {
 		timeout = def.ResolvedRunTimeout(timeout)
 	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	// The run gets a DRAIN context, not a child of the app context. A child
+	// would be cancelled the instant SIGTERM arrives, so an executing agent
+	// would be cut off mid-tool-call while the HTTP layer was still politely
+	// finishing its requests. See rundrain.go.
+	drainCtx, draining, stopDrain := runDrainContext(ctx)
+	defer stopDrain()
+	runCtx, cancel := context.WithTimeout(drainCtx, timeout)
 	defer cancel()
 	runCtx = runtime.WithPrincipal(runCtx, runPrincipal(run, msg.ID))
 	// The run's identity travels with the context so the engine can mark the
@@ -1311,19 +1441,45 @@ func (a *App) executeDurableRun(ctx context.Context, engine *runtime.Engine, loa
 	// the run.
 	stopWatching := watchForCancellation(runCtx, cancel, runStore, run, log)
 
+	// MU-034 criterion 1: hold the claim for as long as the work takes. Only
+	// now, with the run context built — a lease renewed past the run's own
+	// deadline would keep a finished run looking held.
+	releaseLease := holdRunLease(runCtx, runStore, run, a.workerID(), cancel, log)
+
 	metrics.WorkerPoolActiveRuns.Inc()
 	reply, err := engine.Handle(runCtx, msg)
 	metrics.WorkerPoolActiveRuns.Dec()
 	stopWatching()
+	// Released BEFORE the outcome is recorded. finishRun's terminal
+	// transition clears the expiry anyway, but a run that ends by timeout may
+	// never reach a terminal state, and leaving that one held would delay
+	// recovery of a genuinely crashed worker by a full lease period.
+	releaseLease()
 
 	// context.WithoutCancel: the outcome must be recorded even when the run
 	// timed out. Writing it through the cancelled context would leave the
 	// record stuck in "running" forever, which is the one state a reader
 	// cannot distinguish from "still working".
 	outcomeCtx := context.WithoutCancel(ctx)
-	// A run that stopped because it was asked to did not fail, and recording it
-	// as failed would put a cancellation in whatever dashboard counts failures.
-	if !finishCancelled(outcomeCtx, runStore, run, log) {
+
+	// A run interrupted by SHUTDOWN is left exactly as a crashed one: still
+	// `running`, with no holder. Writing `failed` here — which is what
+	// finishRun would do with a cancelled context — makes it terminal, and the
+	// recovery sweep skips terminal runs by design. So a clean shutdown
+	// destroyed work that a crash would have recovered.
+	//
+	// Doing nothing is the fix. The lease was released above, so the next
+	// boot's sweep sees an unheld running run and applies the real policy:
+	// re-queue what never touched the outside world, fail what did with the
+	// tool named. That decision belongs to recovery, which knows whether a
+	// retry is safe; this function does not.
+	if draining() && err != nil {
+		log.Info("durable run interrupted by shutdown; left for recovery to decide",
+			zap.String("run_id", run.ID), zap.String("workspace_id", run.WorkspaceID))
+	} else if !finishCancelled(outcomeCtx, runStore, run, log) {
+		// A run that stopped because it was asked to did not fail, and
+		// recording it as failed would put a cancellation in whatever
+		// dashboard counts failures.
 		finishRun(outcomeCtx, runStore, run, replyText(reply), err, log)
 	}
 	// MU-027 criterion 6: record the decomposition from the finished record

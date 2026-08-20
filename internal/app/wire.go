@@ -30,13 +30,16 @@ import (
 	"github.com/soulacy/soulacy/internal/knowledge"
 	"github.com/soulacy/soulacy/internal/learning"
 	"github.com/soulacy/soulacy/internal/mcp"
+	"github.com/soulacy/soulacy/internal/mcpstore"
 	"github.com/soulacy/soulacy/internal/ownership"
+	"github.com/soulacy/soulacy/internal/releasegate"
 	"github.com/soulacy/soulacy/internal/runs"
 	"github.com/soulacy/soulacy/internal/runtime"
 	"github.com/soulacy/soulacy/internal/scheduler"
 	"github.com/soulacy/soulacy/internal/schedules"
 	"github.com/soulacy/soulacy/internal/studio"
 	"github.com/soulacy/soulacy/internal/tenancy"
+	"github.com/soulacy/soulacy/internal/workspacepolicy"
 	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/message"
 )
@@ -51,7 +54,24 @@ func (a *App) Run(parent context.Context) error {
 	if err := ownership.ValidateCatalog(); err != nil {
 		return fmt.Errorf("resource ownership catalog: %w", err)
 	}
+	// MU-037 criterion 6: the release gate's own state is validated at boot and
+	// its open items are LOGGED rather than fatal.
+	//
+	// Fatal would be wrong, and the distinction matters. An unclassified store
+	// (below) is a hole somebody has not looked at. A recorded release-gate gap
+	// is a hole somebody HAS looked at and written down — the Qdrant tests
+	// needing a live instance, the load figures coming from a measurement
+	// rather than a test. Refusing to boot on those would teach whoever is
+	// blocked to delete the record instead of the gap, and the record is the
+	// only reason anybody knows.
+	if err := releasegate.Validate(); err != nil {
+		return fmt.Errorf("release gate inventory: %w", err)
+	}
+	reportScaleReadiness(log, cfg)
 	if config.IsMultiUserMode(cfg.DeploymentMode()) {
+		for _, blocker := range releasegate.Blockers() {
+			log.Warn("multi-tenant release gate: recorded gap", zap.String("gap", blocker))
+		}
 		if blockers := ownership.MultiUserBlockers(); len(blockers) > 0 {
 			preview := blockers
 			if len(preview) > 5 {
@@ -78,6 +98,7 @@ func (a *App) Run(parent context.Context) error {
 	log.Info("workspace", zap.String("root", ws.Root), zap.Bool("legacy", ws.Legacy))
 	var personalTenant *tenancy.PersonalTenant
 	var tenantResolver tenancy.Resolver
+	var workspaceLifecycle tenancy.WorkspaceLifecycle
 	var tenantIdentityLinker auth.IdentityLinker
 	var tenantPool *pgxpool.Pool
 	if cfg.DeploymentMode() == config.DeploymentModePersonal {
@@ -92,6 +113,12 @@ func (a *App) Run(parent context.Context) error {
 		} else {
 			personalTenant = &tenant
 			tenantResolver = tenancy.NewPersonalResolver(tenant)
+			// A personal installation's only workspace is the installation
+			// itself. The lifecycle is wired so the routes exist and REFUSE
+			// with a remedy, rather than 503ing as if the feature were
+			// misconfigured — the answer there is "remove the data directory",
+			// and only a wired lifecycle can say so.
+			workspaceLifecycle = tenancy.NewPersonalWorkspaceLifecycle(tenant)
 			log.Info("implicit personal tenant ready",
 				zap.String("organization_id", tenant.OrganizationID),
 				zap.String("workspace_id", tenant.WorkspaceID),
@@ -127,6 +154,27 @@ func (a *App) Run(parent context.Context) error {
 		return err
 	}
 	if config.IsMultiUserMode(cfg.DeploymentMode()) {
+		// THE WAIVER DOES NOT WAIVE THIS, and saying so here is the fix.
+		//
+		// `unsafe_multi_user_prerequisites` removes the CONFIG check that a
+		// team deployment names a Postgres DSN. It cannot remove the RUNTIME
+		// need for one: the tenancy catalog — workspaces, memberships, roles,
+		// invitations, the deletion lifecycle — exists only in Postgres. So a
+		// team install with the waiver and no DSN used to pass validation,
+		// start, reach this line, and die at the ping below with a connection
+		// error that reads like a network problem.
+		//
+		// There is no such thing as a SQLite-backed team deployment, and the
+		// acknowledgement implied there was. Refused here, by name, with the
+		// two real options.
+		if strings.TrimSpace(cfg.Storage.PostgresDSN) == "" {
+			return fmt.Errorf(
+				"%s mode requires PostgreSQL for the workspace and membership catalog, and "+
+					"storage.postgres_dsn is empty. The %q acknowledgement waives the configuration "+
+					"check, not the dependency — there is no SQLite-backed multi-user deployment. "+
+					"Set storage.postgres_dsn, or run in personal mode",
+				cfg.DeploymentMode(), config.UnsafeDeploymentPrerequisitesAcknowledgement)
+		}
 		poolConfig, parseErr := pgxpool.ParseConfig(cfg.Storage.PostgresDSN)
 		if parseErr != nil {
 			return fmt.Errorf("tenancy postgres configuration: %w", parseErr)
@@ -150,6 +198,7 @@ func (a *App) Run(parent context.Context) error {
 			return fmt.Errorf("tenancy postgres store: %w", storeErr)
 		}
 		tenantResolver = store
+		workspaceLifecycle = store
 		tenantIdentityLinker = store
 		log.Info("multi-user tenancy catalog ready", zap.String("mode", cfg.DeploymentMode()))
 	}
@@ -162,7 +211,7 @@ func (a *App) Run(parent context.Context) error {
 	ollamaCfg := cfg.LLM.Providers["ollama"]
 
 	// ── Loaders (agent / plugin / skill) + python pre-flight ─────────────────
-	loader, pluginLoader, skillLoader, skillStores := a.wireLoaders(ws)
+	loader, pluginLoader, pluginStores, skillLoader, skillStores := a.wireLoaders(ws, credVault)
 
 	// ── Event Hub (GUI real-time stream + action-log persistence) ─────────────
 	hub := gateway.NewEventHub(log, actionBackend)
@@ -316,9 +365,13 @@ func (a *App) Run(parent context.Context) error {
 		skillLoader:    skillLoader,
 		skillStores:    skillStores,
 		mcpClient:      mcpClient,
+		mcpServers:     mcpServers,
+		credVault:      credVault,
+		stack:          stack,
 		knowledgeSvc:   knowledgeSvc,
 		vectorStore:    vectorStore,
 		pluginProvider: pluginProvider,
+		pluginStores:   pluginStores,
 		pyExecutor:     pyExecutor,
 		namedExecutors: namedExecutors,
 		brainStores:    brainStores,
@@ -379,7 +432,7 @@ func (a *App) Run(parent context.Context) error {
 	// schedule once its deployment carries passing certification. The store is
 	// re-read on every tick, so re-certifying unblocks the schedule without a
 	// restart; agents with no deployment record are unaffected.
-	sched.SetReadinessGate(deploymentReadinessGate(studio.NewDeploymentStore(studio.DeploymentsDir(ws.Root)), sched.PrincipalWorkspace))
+	sched.SetReadinessGate(deploymentReadinessGate(studio.NewDeploymentStore(studio.DeploymentsDir(ws.Root))))
 	for _, def := range loader.All() {
 		if err := sched.RegisterAgent(def); err != nil {
 			log.Warn("scheduler register failed", zap.String("agent", def.ID), zap.Error(err))
@@ -495,10 +548,25 @@ func (a *App) Run(parent context.Context) error {
 		// record still saying "pending" describes a question nobody is
 		// listening for the answer to. Closing them is what stops the
 		// approvals page from offering decisions that would release nothing.
+		//
+		// The runs those approvals were blocking are read FIRST, because
+		// closing the approval is what strands them and afterwards there is
+		// nothing left to say which runs those were. The run sweep above
+		// deliberately skips `paused` runs as somebody's chosen state — a
+		// premise that stops holding the instant the approval is invalidated,
+		// leaving a run nobody and nothing can move. See
+		// runs.Store.ResolveOrphanedPause.
+		blocked, berr := store.PendingRunRefs(ctx)
+		if berr != nil {
+			log.Warn("runs blocked on stale approvals could not be listed", zap.Error(berr))
+		}
 		if n, ierr := store.InvalidateAllPending(ctx, approvals.ReasonWorkspaceRestarting); ierr != nil {
 			log.Warn("stale approvals could not be closed", zap.Error(ierr))
 		} else if n > 0 {
 			log.Info("approvals left unanswered by a previous process were closed", zap.Int("closed", n))
+		}
+		if runStore != nil {
+			recovered = append(recovered, a.resolveOrphanedPauses(ctx, runStore, blocked)...)
 		}
 	}
 
@@ -557,33 +625,89 @@ func (a *App) Run(parent context.Context) error {
 	// ── Engine-attached stores (checkpoint / telemetry / cost) ───────────────
 	openedCostStore := a.wireEngineExtras(ctx, ws, engine, llmRouter, stack)
 
+	// ── Per-workspace limits (MU-030 criterion 1) ─────────────────────────────
+	// The store holds what each workspace has set on ITSELF; the effective
+	// ceiling is that value tightened against the operator's YAML, never
+	// replacing it. Opened for every deployment, including Personal — a
+	// personal install with no entries composes to exactly the flat config it
+	// has always had (invariant 7).
+	var workspacePolicies *workspacepolicy.Store
+	if store, err := workspacepolicy.NewStore(ws.DB("workspace-policies")); err != nil {
+		log.Warn("per-workspace limits unavailable; the deployment-wide config remains the only ceiling", zap.Error(err))
+	} else {
+		workspacePolicies = store
+		stack.pushClose("workspace-policies", store)
+	}
+
+	// The servers a WORKSPACE defined for itself, as opposed to the operator's
+	// template in config.yaml. Opened in every mode, including Personal, for
+	// the same reason the policy store is: a personal install with no rows
+	// behaves exactly as it always has.
+	//
+	// Unavailable means "no workspace has servers of its own", never "fall
+	// back to the shared ones" — a store that cannot be read costs a tenant a
+	// tool, where the alternative hands them somebody else's.
+	var workspaceMCPServers *mcpstore.Store
+	if store, err := mcpstore.Open(ws.DB("workspace-mcp-servers")); err != nil {
+		log.Warn("workspace-defined MCP servers unavailable; only the operator's configured servers will run",
+			zap.Error(err))
+	} else {
+		workspaceMCPServers = store
+		stack.pushClose("workspace-mcp-servers", store)
+	}
+
 	// ── Gateway Server ────────────────────────────────────────────────────────
 	// Construction + every host-side capability (plugin GUI mounts, installer,
 	// safety pipeline, registries, voice, workboard/ratelimit/apikey/dlq/history
 	// stores, file watcher) is delegated to wireGateway.
 	srv := a.wireGateway(gatewayDeps{
-		ws:              ws,
-		engine:          engine,
-		loader:          loader,
-		llmRouter:       llmRouter,
-		chanReg:         chanReg,
-		sched:           sched,
-		httpAdapter:     httpAdapter,
-		waAdapter:       waAdapter,
-		skillLoader:     skillLoader,
-		skillStores:     skillStores,
-		runStore:        runStore,
-		actionBackend:   actionBackend,
-		mcpClient:       mcpClient,
-		hub:             hub,
-		authEngine:      authEngine,
-		rbacManager:     rbacManager,
-		credVault:       credVault,
-		pluginLoader:    pluginLoader,
-		openedCostStore: openedCostStore,
-		tenantResolver:  tenantResolver,
-		tenantPool:      tenantPool,
+		ws:                  ws,
+		engine:              engine,
+		loader:              loader,
+		llmRouter:           llmRouter,
+		chanReg:             chanReg,
+		sched:               sched,
+		httpAdapter:         httpAdapter,
+		waAdapter:           waAdapter,
+		skillLoader:         skillLoader,
+		skillStores:         skillStores,
+		runStore:            runStore,
+		actionBackend:       actionBackend,
+		mcpClient:           mcpClient,
+		hub:                 hub,
+		authEngine:          authEngine,
+		rbacManager:         rbacManager,
+		credVault:           credVault,
+		pluginLoader:        pluginLoader,
+		pluginStores:        pluginStores,
+		queueBackend:        queueBackend,
+		openedCostStore:     openedCostStore,
+		tenantResolver:      tenantResolver,
+		workspaceLifecycle:  workspaceLifecycle,
+		workspacePolicies:   workspacePolicies,
+		workspaceMCPServers: workspaceMCPServers,
+		costGovernor:        a.costGovernor,
+		tenantPool:          tenantPool,
 	}, stack)
+
+	// ── Workspace deletion sweep ──────────────────────────────────────────────
+	// The thing that makes a requested deletion actually happen. Without it the
+	// product has a deletion API that records an intention and never acts on
+	// it: the workspace sits at `deleting`, refusing writes, data intact,
+	// forever — with the customer having been told it would be gone on a date,
+	// and nothing but a database query able to reveal otherwise.
+	//
+	// Started here rather than in gateway.New, so a directly constructed or
+	// embedded gateway — which is what every test builds — never acquires a
+	// goroutine that deletes workspaces.
+	srv.StartWorkspacePurgeSweep(ctx)
+
+	// Compose the stored per-workspace limits onto the operator's YAML at
+	// startup, not only when one is edited. Without this a deployment that
+	// restarts loses every workspace's self-imposed ceiling until somebody
+	// happens to save one — a limit that quietly stops applying is worse than
+	// one that was never set, because nobody is watching for its absence.
+	srv.ReloadWorkspaceQuotaPolicy(ctx)
 
 	// ── KB ingestion worker ───────────────────────────────────────────────────
 	// Document ingestion runs OUT of the HTTP request: uploads are spooled to

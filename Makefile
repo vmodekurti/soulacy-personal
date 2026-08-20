@@ -4,7 +4,7 @@ VERSION        ?= $(shell git describe --tags --always --dirty 2>/dev/null || ec
 LDFLAGS        := -ldflags "-X github.com/soulacy/soulacy/internal/config.Version=$(VERSION)"
 PLAYWRIGHT_RUNNER ?= $(shell if [ -e .cache ] && [ ! -d .cache ]; then echo tmp/playwright-runner; else echo .cache/playwright-runner; fi)
 
-.PHONY: all build build-gateway build-cli gui up install which test security regression uat uat-public uat-full uat-credential docs-build docs-screenshots release-smoke production-parity channel-golden-smoke browser-mcp-smoke lint dev run-dev sdk-install tidy \
+.PHONY: all build build-gateway build-cli gui up install which test security release-gate loadtest regression uat uat-public uat-full uat-credential docs-build docs-screenshots release-smoke production-parity channel-golden-smoke browser-mcp-smoke lint dev run-dev sdk-install tidy \
         docker-up docker-down docker-up-lite docker-build docker-push \
         release release-linux release-linux-amd64 release-linux-arm64 \
         release-darwin release-darwin-arm64 release-darwin-amd64 release-package release-create release-create-github \
@@ -181,12 +181,58 @@ run-dev: all
 test:
 	go test ./... -v -timeout 30s
 
+## Team Preview latency profile (MU-027). Behind a build tag and NOT part of
+## `make test`: it drives thousands of requests for ten seconds, and a latency
+## gate whose pass/fail depends on how busy the machine is teaches people to
+## ignore failures. The profile and its targets are data in
+## internal/loadprofile, with each number's reasoning recorded beside it.
+loadtest:
+	go test -tags loadtest ./internal/gateway/ -run TestTeamPreviewMeetsItsLatencyTargets -v -count=1
+	go test ./internal/loadprofile/ -count=1
+
 ## Dedicated isolation suite (MU-021 criterion 7). These tests also run as
 ## part of `make test`; this target is for running them alone, under the race
 ## detector, when changing anything that touches tenant boundaries.
+## The package list is NOT maintained here. internal/releasegate holds the
+## inventory of surfaces MU-037 criterion 1 names and which tests cover each,
+## and TestTheReleaseGateRunsEverySurfaceItClaims fails when a package listed
+## there is missing from this target.
+##
+## That check exists because this target used to run three things while thirty
+## packages of cross-tenant tests sat outside it. Coverage the release gate
+## does not execute is documentation: any of those suites could rot, or start
+## passing for the wrong reason, and the gate would stay green.
 security:
 	go test ./internal/runtime/ -run 'TestIsolationEscape|TestNoisyNeighbour' -race -count=1 -v
-	go test ./internal/ownership/ ./internal/runs/ -count=1
+	go test ./internal/releasegate/ -count=1
+	go test -race -count=1 \
+		./internal/app/ \
+		./internal/approvals/ \
+		./internal/auth/ \
+		./internal/auth/apikeys/ \
+		./internal/caps/ \
+		./internal/channels/ \
+		./internal/confighot/ \
+		./internal/costs/ \
+		./internal/credentials/ \
+		./internal/knowledge/ \
+		./internal/mcpstore/ \
+		./internal/memory/ \
+		./internal/metrics/ \
+		./internal/ownership/ \
+		./internal/plugins/ \
+		./internal/queue/dlq/ \
+		./internal/quota/ \
+		./internal/ratelimit/ \
+		./internal/redact/ \
+		./internal/runs/ \
+		./internal/schedules/ \
+		./internal/skills/ \
+		./internal/sqlitex/ \
+		./internal/vector/qdrant/ \
+		./internal/workspaceexport/ \
+		./internal/workspacepurge/
+	go test -race -count=1 ./internal/gateway/
 
 ## Focused production smoke regression: core Go paths, GUI tests, GUI build.
 regression:

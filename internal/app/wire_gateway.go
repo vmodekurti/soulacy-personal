@@ -30,9 +30,11 @@ import (
 	"github.com/soulacy/soulacy/internal/introspect"
 	"github.com/soulacy/soulacy/internal/llm"
 	"github.com/soulacy/soulacy/internal/mcp"
+	"github.com/soulacy/soulacy/internal/mcpstore"
 	"github.com/soulacy/soulacy/internal/pkgregistry"
 	"github.com/soulacy/soulacy/internal/plugininstall"
 	"github.com/soulacy/soulacy/internal/plugins"
+	"github.com/soulacy/soulacy/internal/queue"
 	"github.com/soulacy/soulacy/internal/queue/dlq"
 	"github.com/soulacy/soulacy/internal/ratelimit"
 	"github.com/soulacy/soulacy/internal/rbac"
@@ -46,6 +48,8 @@ import (
 	"github.com/soulacy/soulacy/internal/tenancy"
 	"github.com/soulacy/soulacy/internal/voice"
 	"github.com/soulacy/soulacy/internal/workboard"
+	"github.com/soulacy/soulacy/internal/workspacepolicy"
+	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
 // gatewayDeps bundles the already-constructed subsystems the gateway server
@@ -69,9 +73,23 @@ type gatewayDeps struct {
 	rbacManager     *rbac.Manager
 	credVault       credentials.Vault
 	pluginLoader    *plugins.Loader
+	pluginStores    *plugins.Stores
+	queueBackend    queue.Backend
 	openedCostStore *costs.Store
 	tenantResolver  tenancy.Resolver
-	tenantPool      *pgxpool.Pool
+	// workspaceLifecycle is nil on deployments with no workspace lifecycle to
+	// manage, which is what makes the deletion routes answer 503 there rather
+	// than reporting a deletion nothing recorded.
+	workspaceLifecycle tenancy.WorkspaceLifecycle
+	// workspacePolicies holds the limits each workspace has set on itself
+	// (MU-030 criterion 1). Nil keeps the flat YAML ceilings as the only
+	// limits, which is what every existing deployment has.
+	workspacePolicies *workspacepolicy.Store
+	// workspaceMCPServers is the durable registry of servers a workspace
+	// defined for itself, as opposed to the operator's config.yaml template.
+	workspaceMCPServers *mcpstore.Store
+	costGovernor        *costs.Governor
+	tenantPool          *pgxpool.Pool
 }
 
 // wireGateway builds the gateway server and attaches every host capability.
@@ -86,10 +104,66 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 	srv := gateway.New(cfg, cfgPath, d.engine, d.loader, d.llmRouter, d.chanReg, d.sched, d.httpAdapter, d.waAdapter, d.skillLoader, d.actionBackend, d.mcpClient, d.hub, log)
 	// Per-workspace skill inventory. Without it the gateway falls back to the
 	// single loader, which is what a personal deployment wants.
+	// Per-workspace MCP servers. Set before any request can arrive; after this
+	// no gateway handler reaches the deployment-wide client, which a guard
+	// test in the gateway package enforces.
+	if a.mcpPool != nil {
+		srv.SetMCPPool(a.mcpPool)
+	}
+	// AFTER SetMCPPool: the store is handed to the pool through the server, so
+	// installing it first would attach nothing.
+	if d.workspaceMCPServers != nil {
+		srv.SetMCPServerStore(d.workspaceMCPServers)
+	}
+	// A durable replay cache, in every mode.
+	//
+	// Not gated on multi-user, unlike the credential rules: the in-memory
+	// cache broke a personal installation too. A restart between a client's
+	// original request and its retry emptied the map, and the retry then
+	// executed the mutation a second time — and the restart is usually WHY the
+	// client retried. Multi-user adds the second replica to the same bug; it
+	// did not create it.
+	if store, err := gateway.OpenIdempotencyCache(d.ws.DB("idempotency")); err != nil {
+		log.Warn("durable idempotency cache unavailable; a retry after a restart may run twice",
+			zap.Error(err))
+	} else {
+		stack.pushClose("idempotency", store)
+		srv.SetIdempotencyStore(store)
+	}
+	// Per-workspace plugin inventory, and the invalidation that makes a
+	// revocation take effect on the next tool call rather than the next
+	// restart.
+	if d.pluginStores != nil {
+		srv.SetPluginStores(d.pluginStores)
+	}
+	srv.SetReadinessProbes(a.readinessProbes(d))
+	// Channels apply live (confighot: tenant-scoped, so a restart is not an
+	// option). The gateway knows WHEN a channel changed; only the app can
+	// build an adapter, because that needs the agent loader and the
+	// capability-tier binding gate.
+	if a.secretsManager != nil {
+		srv.SetSecretsOverlay(a.secretsManager)
+	}
+	srv.SetChannelApplier(func(ctx context.Context, channelID string, previous, next map[string]any) error {
+		return a.applyChannelLive(ctx, d.chanReg, d.loader, ws, channelID, previous, next)
+	})
+	// MU-035 criterion 3: the directory, not a list of databases. ReportDir
+	// discovers what is actually there, so a store added without versioning
+	// shows up as a database with no components rather than not at all.
+	srv.SetSchemaDir(ws.Data)
 	srv.SetSkillStores(d.skillStores)
 	srv.SetAuth(d.authEngine)
 	if d.tenantResolver != nil {
 		srv.SetTenantResolver(d.tenantResolver)
+	}
+	if d.workspaceLifecycle != nil {
+		srv.SetWorkspaceLifecycle(d.workspaceLifecycle)
+	}
+	if d.workspacePolicies != nil {
+		srv.SetWorkspacePolicyStore(d.workspacePolicies)
+	}
+	if d.costGovernor != nil {
+		srv.SetCostGovernor(d.costGovernor)
 	}
 	logEffectiveSecuritySummary(log, cfg, d.authEngine != nil && d.authEngine.Effective())
 	srv.SetRBAC(d.rbacManager)
@@ -105,7 +179,12 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 		var uiMounts []gateway.PluginUIMount
 		for _, lp := range d.pluginLoader.All() {
 			if lp.Caps != nil {
-				capsEnforcer.SetPluginSet(lp.Caps)
+				// d.pluginLoader is the PERSONAL workspace's loader (see
+				// wireLoaders), so these are personal's grants. Other
+				// workspaces get theirs when their plugins are first
+				// resolved, and lose them when a plugin is revoked — see
+				// Server.pluginsChanged.
+				capsEnforcer.SetPluginSet(wsroot.PersonalWorkspaceID, lp.Caps)
 			}
 			if staticDir, nav, ok := lp.GUIMount(); ok {
 				uiMounts = append(uiMounts, gateway.PluginUIMount{
@@ -343,4 +422,59 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 
 	stack.pushClose("gateway-learning", srv)
 	return srv
+}
+
+// readinessProbes builds the dependency checks for GET /ready.
+//
+// REQUIREDNESS COMES FROM THE DEPLOYMENT MODE, and deliberately from the same
+// place startup validation gets it: internal/config already refuses to boot a
+// team deployment without Postgres, or a scale one without a durable queue.
+// Readiness asks that same question at RUNTIME. A second list here would
+// eventually disagree with the one that gates startup, and the disagreement
+// would surface as a replica that booted and then never became ready, or —
+// worse — one that stayed ready without the dependency it was told it needed.
+//
+// A personal deployment requires nothing shared, so its probes are all
+// optional and its readiness reduces to its liveness. That is invariant 7 for
+// this endpoint: a single-user install is always ready, exactly as it was
+// before there was a readiness endpoint at all.
+func (a *App) readinessProbes(d gatewayDeps) []gateway.ReadinessProbe {
+	multiUser := config.IsMultiUserMode(a.cfg.DeploymentMode())
+	scale := a.cfg.DeploymentMode() == config.DeploymentModeScale
+
+	var probes []gateway.ReadinessProbe
+	if d.tenantPool != nil {
+		probes = append(probes, gateway.ReadinessProbe{
+			Name:     "postgres",
+			Required: multiUser,
+			Check:    func(ctx context.Context) error { return d.tenantPool.Ping(ctx) },
+		})
+	} else if multiUser {
+		// Required and ABSENT. Reported with a nil Check, which readiness
+		// treats as "unprobeable" and therefore not ready — rather than
+		// omitting the probe, which would make a deployment missing its
+		// required database indistinguishable from one whose database is
+		// fine. Silence is the failure mode this endpoint exists to remove.
+		probes = append(probes, gateway.ReadinessProbe{Name: "postgres", Required: true})
+	}
+
+	if d.queueBackend != nil {
+		// Probed through the interface the rest of the code uses, when the
+		// backend offers a health check. The in-memory backend does not need
+		// one — it cannot be unreachable — and scale mode refuses to start on
+		// it, so an unprobeable queue in scale mode means a backend that
+		// should have been rejected at boot.
+		if pinger, ok := d.queueBackend.(interface{ Ping(context.Context) error }); ok {
+			probes = append(probes, gateway.ReadinessProbe{
+				Name:     "queue",
+				Required: scale,
+				Check:    func(ctx context.Context) error { return pinger.Ping(ctx) },
+			})
+		} else if scale {
+			probes = append(probes, gateway.ReadinessProbe{Name: "queue", Required: true})
+		}
+	} else if scale {
+		probes = append(probes, gateway.ReadinessProbe{Name: "queue", Required: true})
+	}
+	return probes
 }
