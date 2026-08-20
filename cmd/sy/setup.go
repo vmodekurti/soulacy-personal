@@ -336,7 +336,14 @@ func setupGateway(cfg *setupConfig) {
 		cfg.APIKey = prompt("  API key", "")
 	case 2:
 		cfg.APIKey = ""
-		fmt.Printf("  %s %s\n", yellow("⚠"), yellow("No API key — gateway will be open to anyone who can reach it."))
+		// NOT "open to anyone". With apikey mode and an empty key the auth
+		// engine has nothing to verify against, so every API request is
+		// refused. Saying the opposite sent operators hunting for an exposure
+		// that did not exist, and taught them the tool's security messages are
+		// not to be trusted.
+		fmt.Printf("  %s %s\n", yellow("⚠"),
+			yellow("No API key — the API will refuse every request until you set one or switch to JWT auth."))
+		fmt.Printf("     %s\n", dim("The GUI and CLI will not be able to connect."))
 	}
 	fmt.Println()
 }

@@ -106,6 +106,46 @@ type Engine struct {
 	identityLinker   IdentityLinker
 	refreshAllowed   func(context.Context, string) bool
 	identityResolver TokenIdentityResolver
+	auditSink        func(*fiber.Ctx, AuthEvent)
+}
+
+// AuthEvent is one authentication-lifecycle occurrence, for the workspace
+// audit trail (MU-031 criterion 2, which names authentication first and which
+// nothing was recording).
+//
+// The category was entirely absent: no login, logout, re-authentication or
+// failed-attempt record existed anywhere. That is the one class of audit
+// record an intrusion investigation starts from, and the trail could not
+// answer "when did this credential first appear" at all.
+type AuthEvent struct {
+	// Action is "auth.login", "auth.logout", "auth.reauthenticate".
+	Action string
+	// Subject is who, when the attempt got far enough to know. An empty
+	// subject on a failure is an answer: the credential did not identify
+	// anybody, which is different from a known subject being refused.
+	Subject string
+	// Outcome is "ok" or "failed". FAILURES ARE RECORDED. A trail of
+	// successes cannot show a credential being guessed at, and the pattern of
+	// failures is usually the first thing an investigation looks for.
+	Outcome string
+	// Reason is a short, non-identifying cause on failure — never the
+	// credential, never a hash of it, never enough to confirm a guess.
+	Reason string
+}
+
+// SetAuditSink installs the callback that records authentication events.
+//
+// Optional and nil-safe: internal/auth must stay usable without a gateway, and
+// a deployment with no action log still authenticates. It takes the Fiber
+// context because the trail's actor, workspace and request id are resolved
+// from the request, not from this package.
+func (e *Engine) SetAuditSink(sink func(*fiber.Ctx, AuthEvent)) { e.auditSink = sink }
+
+func (e *Engine) recordAuth(c *fiber.Ctx, event AuthEvent) {
+	if e == nil || e.auditSink == nil {
+		return
+	}
+	e.auditSink(c, event)
 }
 
 // SetAPIKeyStore wires the managed API key store. When set, tokens with the
@@ -304,6 +344,23 @@ func (e *Engine) Effective() bool {
 	return e != nil && (e.staticKey != "" || e.issuer != nil || e.oidc != nil || e.apiKeyStore != nil)
 }
 
+// Reachable reports whether a caller can actually OBTAIN a credential this
+// engine will accept.
+//
+// It differs from Effective in exactly one case, and that case is a real
+// configuration: jwt mode with no jwt_secret, no OIDC issuer and no static API
+// key. Effective is true there because an ephemeral issuer exists, so the
+// middleware is armed — but the only way to mint one of its tokens is the
+// token exchange, which authenticates with the static key, and secretEqual
+// refuses an empty expected secret. The engine will therefore reject every
+// request forever while reporting itself as effective.
+//
+// A local JWT issuer is deliberately NOT counted as a credential source for
+// that reason: it can verify a token, it cannot let anybody get one.
+func (e *Engine) Reachable() bool {
+	return e != nil && (e.staticKey != "" || e.oidc != nil || e.apiKeyStore != nil)
+}
+
 // HandleTokenRequest handles POST /api/v1/auth/token.
 //
 // Request body:
@@ -326,18 +383,24 @@ func (e *Engine) HandleTokenRequest(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request"})
 	}
 	if !secretEqual(req.APIKey, e.staticKey) {
+		// Recorded before the refusal is returned. A failed sign-in that
+		// leaves no trace is the one an attacker most wants.
+		e.recordAuth(c, AuthEvent{Action: "auth.login", Outcome: "failed", Reason: "credential rejected"})
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication failed"})
 	}
 	// The static API key is a *platform* credential, not a workspace member's
 	// (invariant 10): it is the deployment operator's key from config.yaml, and
 	// there is no membership behind it to resolve. It therefore issues with no
 	// tenancy, which resolves to the personal workspace — the deployment's own.
+	// A successful key exchange IS the interactive authentication, so this is
+	// where the step-up clock starts. Refreshes carry it forward unchanged.
 	access, refresh, expiresIn, err := e.issuer.IssueFor(TokenIdentity{
-		Subject: "admin", Role: "admin",
+		Subject: "admin", Role: "admin", AuthTime: time.Now().UTC(),
 	})
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "authentication failed"})
 	}
+	e.recordAuth(c, AuthEvent{Action: "auth.login", Subject: "admin", Outcome: "ok"})
 	return c.JSON(fiber.Map{
 		"access_token":  access,
 		"refresh_token": refresh,
@@ -397,6 +460,76 @@ func (e *Engine) HandleRefresh(c *fiber.Ctx) error {
 	})
 }
 
+// HandleReauthenticate handles POST /api/v1/auth/reauthenticate (MU-030
+// criterion 5).
+//
+// It is the ONLY thing that moves `auth_time`. A caller re-presents the
+// credential they signed in with; on success they get a fresh token pair in a
+// NEW refresh family, stamped with the moment they proved themselves.
+//
+// Three properties are load-bearing:
+//
+//   - It requires an already-authenticated request. Step-up elevates an
+//     existing session; treating it as a login path would make it a second,
+//     less-examined way in.
+//   - The re-presented credential must belong to the SAME subject. Otherwise
+//     "re-authenticate" is an account-switch that keeps the previous session's
+//     workspace context — a confused-deputy shape rather than an elevation.
+//   - It answers the same 401 for a wrong credential as for a subject
+//     mismatch, so it cannot be used to test whether a given key belongs to
+//     somebody else.
+func (e *Engine) HandleReauthenticate(c *fiber.Ctx) error {
+	if e.issuer == nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "JWT auth mode is not enabled",
+		})
+	}
+	current := ClaimsFromCtx(c)
+	if current == nil || strings.TrimSpace(current.Subject) == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication is required"})
+	}
+	var req struct {
+		APIKey string `json:"api_key"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request"})
+	}
+	if !secretEqual(req.APIKey, e.staticKey) {
+		e.recordAuth(c, AuthEvent{Action: "auth.reauthenticate", Subject: current.Subject, Outcome: "failed", Reason: "credential rejected"})
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication failed"})
+	}
+	// The static key's subject is "admin" — see HandleTokenRequest. Re-proving
+	// it only elevates the session that key signed in.
+	if current.Subject != "admin" {
+		// A correct credential presented by the wrong session. Recorded with
+		// its own reason because it is a different event from a bad
+		// credential — somebody proving a key that is not theirs to elevate a
+		// session that is.
+		e.recordAuth(c, AuthEvent{Action: "auth.reauthenticate", Subject: current.Subject, Outcome: "failed", Reason: "subject mismatch"})
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication failed"})
+	}
+	identity, ok := e.tokenIdentityFor(c.UserContext(), TokenIdentity{
+		Subject: current.Subject, Email: current.Email, Role: current.Role,
+		OrganizationID: current.OrganizationID, WorkspaceID: current.WorkspaceID,
+		MembershipID: current.MembershipID,
+	})
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication failed"})
+	}
+	access, refresh, expiresIn, err := e.issuer.Reauthenticate(identity)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "authentication failed"})
+	}
+	e.recordAuth(c, AuthEvent{Action: "auth.reauthenticate", Subject: current.Subject, Outcome: "ok"})
+	e.setAuthCookies(c, access, refresh, expiresIn)
+	return c.JSON(fiber.Map{
+		"access_token":  access,
+		"refresh_token": refresh,
+		"expires_in":    expiresIn,
+		"token_type":    "Bearer",
+	})
+}
+
 // HandleLogout revokes both the presented access token and refresh-token
 // family. It always returns 204 so callers cannot use it as an account oracle.
 func (e *Engine) HandleLogout(c *fiber.Ctx) error {
@@ -414,6 +547,14 @@ func (e *Engine) HandleLogout(c *fiber.Ctx) error {
 		}
 		e.issuer.Revoke(access, req.RefreshToken)
 	}
+	subject := ""
+	if claims := ClaimsFromCtx(c); claims != nil {
+		subject = claims.Subject
+	}
+	// Always "ok": logout answers 204 unconditionally so it cannot be used as
+	// an account oracle, and the audit record must not become the oracle the
+	// status code refuses to be.
+	e.recordAuth(c, AuthEvent{Action: "auth.logout", Subject: subject, Outcome: "ok"})
 	e.clearAuthCookies(c)
 	return c.SendStatus(fiber.StatusNoContent)
 }
