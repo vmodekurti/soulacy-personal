@@ -5594,3 +5594,39 @@ replicas. Chat and stream cancellation.
 Each of those is a feature — shared object storage, externalised session state,
 a durable approval-release path, a resumable event cursor, a cross-replica
 cancellation signal — not a defect with a fix.
+
+---
+
+## Two tests that only failed on macOS
+
+Reported from a real Mac after the commits landed. `go test ./...` failed twice
+in `internal/runtime` — and `make security`, which runs the SAME package's
+isolation suite, passed. That combination is the tell: not a product defect, an
+environment one.
+
+macOS hands `t.TempDir()` a path under `/var`, which is a symlink to
+`/private/var`. The filesystem policy resolves symlinks before deciding whether
+a path is inside a workspace — it has to, or planting a symlink IS the escape —
+so every root the engine derives comes back resolved. The tests then compared
+the engine's `/private/var/...` against their own unresolved `/var/...`, and
+failed for a reason with nothing to do with what they were testing.
+
+Reproduced on Linux by pointing `TMPDIR` at a symlink, which produces both
+failures with identical messages. Fixed by resolving the temp dir in the tests,
+not by loosening the comparison: `pathWithinRoot` is the production containment
+check, and a test that compares with something weaker than production stops
+proving anything about production. Confirmed by mutation — making the
+containment check return true still fails the suite.
+
+### And one workaround that was hiding the same thing
+
+`internal/mcp`'s `TestTwoWorkspacesGetTwoProcessesInTwoDirectories` already had
+a suffix comparison with a comment about macOS `/private`. It passed on the
+Mac, and it passed only because `/private/var/…` happens to END with
+`/var/…`. It failed under a differently-shaped symlink, and it would have
+passed on the WRONG tree with a coincidental tail.
+
+Replaced with the same resolve-then-compare-exactly approach.
+
+The whole suite now runs green under both a real temp root and a symlinked
+one, which is the closest this container can get to proving the macOS path.

@@ -22,7 +22,7 @@ func inWorkspace(ctx context.Context, workspaceID string) context.Context {
 }
 
 func TestFilesystemRootsAreDisjointAcrossWorkspaces(t *testing.T) {
-	root := t.TempDir()
+	root := isolationRoot(t)
 	e := newMinimalEngine(t)
 	if err := e.SetFilesystemRoots([]string{root}); err != nil {
 		t.Fatal(err)
@@ -49,12 +49,35 @@ func TestFilesystemRootsAreDisjointAcrossWorkspaces(t *testing.T) {
 	}
 }
 
-func TestPersonalWorkspaceRootsAreByteIdenticalToConfiguration(t *testing.T) {
-	root := t.TempDir()
-	resolvedRoot, err := filepath.EvalSymlinks(root)
+// isolationRoot is isolationRoot(t) with symlinks resolved.
+//
+// WHY EVERY TEST IN THIS FILE NEEDS IT. The filesystem policy resolves
+// symlinks before deciding whether a path is inside a workspace — it has to,
+// or planting a symlink is the escape. So every root the engine derives comes
+// back already resolved.
+//
+// On macOS isolationRoot(t) hands out a path under /var, which is a symlink to
+// /private/var. The test then compares the engine's resolved /private/var/...
+// against its own unresolved /var/..., they do not match, and the test fails
+// for a reason that has nothing to do with what it is testing. On Linux
+// /tmp is usually real, so it passes there and fails only on the machine
+// somebody is developing on — the worst place for a test to be wrong.
+//
+// Resolving here rather than loosening the comparison: pathWithinRoot is the
+// production containment check, and a test that compares with something weaker
+// than production stops proving anything about production.
+func isolationRoot(t *testing.T) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolve temp dir: %v", err)
 	}
+	return resolved
+}
+
+func TestPersonalWorkspaceRootsAreByteIdenticalToConfiguration(t *testing.T) {
+	root := isolationRoot(t)
+	resolvedRoot := root
 	e := newMinimalEngine(t)
 	if err := e.SetFilesystemRoots([]string{root}); err != nil {
 		t.Fatal(err)
@@ -94,7 +117,7 @@ func TestPersonalWorkspaceRootsAreByteIdenticalToConfiguration(t *testing.T) {
 }
 
 func TestOneWorkspaceCannotReadAnothersFileByAbsolutePath(t *testing.T) {
-	root := t.TempDir()
+	root := isolationRoot(t)
 	e := newMinimalEngine(t)
 	if err := e.SetFilesystemRoots([]string{root}); err != nil {
 		t.Fatal(err)
@@ -141,7 +164,7 @@ func TestPersonalWorkspaceCannotReachNamespacedTenantTrees(t *testing.T) {
 	// plain containment would let the no-principal fallback — the scheduler
 	// and channel paths — read all of them. denyNamespaceEscape is what stops
 	// it; delete that call and this test fails.
-	root := t.TempDir()
+	root := isolationRoot(t)
 	e := newMinimalEngine(t)
 	if err := e.SetFilesystemRoots([]string{root}); err != nil {
 		t.Fatal(err)
@@ -170,7 +193,7 @@ func TestPersonalWorkspaceCannotReachNamespacedTenantTrees(t *testing.T) {
 func TestRelativePathsLandInTheCallersOwnWorkspace(t *testing.T) {
 	// A relative path is joined to roots[0]. When that was the platform root,
 	// every tenant's "notes.txt" was the SAME file.
-	root := t.TempDir()
+	root := isolationRoot(t)
 	e := newMinimalEngine(t)
 	if err := e.SetFilesystemRoots([]string{root}); err != nil {
 		t.Fatal(err)
@@ -189,7 +212,7 @@ func TestRelativePathsLandInTheCallersOwnWorkspace(t *testing.T) {
 }
 
 func TestPrivilegedScratchDirectoriesAreDisjointAcrossWorkspaces(t *testing.T) {
-	base := t.TempDir()
+	base := isolationRoot(t)
 	e := newMinimalEngine(t)
 	if err := e.SetFilesystemRoots([]string{base}); err != nil {
 		t.Fatal(err)
@@ -222,8 +245,8 @@ func TestPrivilegedScratchDirectoriesAreDisjointAcrossWorkspaces(t *testing.T) {
 func TestDockerRunnerRefusesAWorkspaceOutsideItsConfiguredTree(t *testing.T) {
 	// req.Workspace may only NARROW the runner's mount. Without the check a
 	// caller could name any host path and have it bind-mounted rw.
-	outer := t.TempDir()
-	elsewhere := t.TempDir()
+	outer := isolationRoot(t)
+	elsewhere := isolationRoot(t)
 	r := DockerPrivilegedRunner{Workspace: outer, Binary: "/nonexistent-docker"}
 	ctx := context.WithValue(context.Background(), isolationReadyKey{}, true)
 	_, err := r.Run(ctx, PrivilegedCommand{Argv: []string{"true"}, Workspace: elsewhere})
@@ -235,7 +258,7 @@ func TestDockerRunnerRefusesAWorkspaceOutsideItsConfiguredTree(t *testing.T) {
 func TestPrivilegedCommandsCarryTheRunsWorkspaceWithoutTheBuiltinSayingSo(t *testing.T) {
 	// The stamping lives in runPrivilegedCommand, so a builtin that forgets
 	// the field still gets scoped. Assert the choke point, not the call sites.
-	base := t.TempDir()
+	base := isolationRoot(t)
 	e := newMinimalEngine(t)
 	if err := e.SetFilesystemRoots([]string{base}); err != nil {
 		t.Fatal(err)
@@ -268,7 +291,7 @@ func TestNamedWorkspaceWithNoScratchDirectoryRefusesRatherThanSharing(t *testing
 	// A scratch root that cannot hold a namespaced subdirectory (here: a
 	// regular file where the directory must go) must produce a refusal, not a
 	// silent fall-through to the shared tree the runner is configured with.
-	base := t.TempDir()
+	base := isolationRoot(t)
 	if err := os.WriteFile(filepath.Join(base, wsroot.NamespaceDir), []byte("not a directory"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +323,7 @@ func TestAWorkspaceCanRunTheScriptItJustWrote(t *testing.T) {
 	// When scratch space was a namespace BESIDE the workspace root, every
 	// script a tenant wrote resolved fine and then failed to execute, because
 	// the container runner refuses a working directory outside its mount.
-	root := t.TempDir()
+	root := isolationRoot(t)
 	e := newMinimalEngine(t)
 	if err := e.SetFilesystemRoots([]string{root}); err != nil {
 		t.Fatal(err)

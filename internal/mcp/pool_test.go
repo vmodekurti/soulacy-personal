@@ -47,11 +47,30 @@ func (f fixedConfinement) WorkspaceConfinement(workspaceID string) (string, sand
 	return dir, sandbox.Limits{}, "", nil
 }
 
+// resolvedTempDir is t.TempDir() with symlinks resolved.
+//
+// A subprocess reports the directory it is really in, so a test comparing that
+// against an unresolved temp path fails wherever the temp root is a link:
+// /var on macOS, or any TMPDIR pointed at one. Resolving here keeps the
+// comparison exact instead of loosening it to a suffix.
+func resolvedTempDir(t *testing.T) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve temp dir: %v", err)
+	}
+	return resolved
+}
+
 func TestTwoWorkspacesGetTwoProcessesInTwoDirectories(t *testing.T) {
 	if _, err := os.Stat("/bin/sh"); err != nil {
 		t.Skip("sh-based test")
 	}
-	dirA, dirB := t.TempDir(), t.TempDir()
+	// Resolved, because the subprocess reports the directory it is ACTUALLY
+	// in and the kernel gives it the real path. Comparing an unresolved temp
+	// dir against that fails wherever the temp root is a symlink — /var on
+	// macOS, and any TMPDIR pointed at a link.
+	dirA, dirB := resolvedTempDir(t), resolvedTempDir(t)
 	pool := NewPool(
 		Config{Servers: map[string]ServerConfig{"echo": echoServer("marker.txt")}},
 		fixedConfinement{dirs: map[string]string{"ws-a": dirA, "ws-b": dirB}},
@@ -74,9 +93,11 @@ func TestTwoWorkspacesGetTwoProcessesInTwoDirectories(t *testing.T) {
 			t.Fatalf("no marker in %s — the server did not start there: %v", dir, err)
 		}
 		got := strings.TrimSpace(string(raw))
-		// macOS resolves TempDir through /private; compare by suffix so the
-		// test is about which tree, not about symlink spelling.
-		if !strings.HasSuffix(got, strings.TrimPrefix(want, "/private")) {
+		// An exact comparison now that both sides are resolved. The suffix
+		// match this replaces was tuned to macOS's /private prefix and passed
+		// on any path that merely ENDED the right way — including, in
+		// principle, the wrong tree with a coincidental tail.
+		if got != want {
 			t.Errorf("server for %s started in %q, want %q", dir, got, want)
 		}
 	}
