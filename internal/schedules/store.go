@@ -40,6 +40,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/soulacy/soulacy/internal/sqlitex"
+	"github.com/soulacy/soulacy/internal/workspacepurge"
 	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
@@ -222,6 +223,10 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("schedules: schema: %w", err)
 	}
+	if err := ensureConsecutiveFailuresColumn(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err := sqlitex.RecordSchemaVersion(db, "schedules", 1); err != nil {
 		db.Close()
 		return nil, err
@@ -376,4 +381,16 @@ func scanSchedule(row interface{ Scan(...any) error }) (Schedule, error) {
 		sched.LastFireAt = &last.Time
 	}
 	return sched, nil
+}
+
+// PurgeWorkspace removes every row this store holds for one workspace.
+//
+// MU-032 criterion 4. The TABLE LIST comes from the ownership catalog rather
+// than from a literal here, so a table added to the "schedules" resource is
+// purged the day it is classified — one edit, not two. A hand-written list is
+// the same second-inventory mistake the exporter avoids, and here the
+// consequence of drift is data outliving a deletion somebody was told
+// completed.
+func (s *Store) PurgeWorkspace(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+	return workspacepurge.PurgeCatalogTables(ctx, s.db, "schedules", workspaceID)
 }

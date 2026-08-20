@@ -26,6 +26,7 @@ import (
 	"github.com/soulacy/soulacy/internal/runtime"
 	"github.com/soulacy/soulacy/internal/schedules"
 	"github.com/soulacy/soulacy/internal/webpush"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 )
@@ -71,8 +72,13 @@ type Scheduler struct {
 	// Schedule page renders it as an "Auto-replayed on Jul 15 03:04" chip so
 	// operators aren't blindsided by an out-of-schedule run after a restart.
 	// (E4b — Cohort E Schedule failure handling.)
-	backfillMu    sync.RWMutex
-	lastBackfills map[string]MissedBackfill
+	backfillMu sync.RWMutex
+	// Keyed by (workspace, agent), like every other map here. Keyed by agent
+	// alone, one tenant's startup catch-up was reported to every tenant that
+	// happened to own an agent of the same name — and the GUI chip that says
+	// "auto-replayed at 03:04" would have named a run that never happened in
+	// the workspace looking at it.
+	lastBackfills map[scheduleKey]MissedBackfill
 
 	// sink, when set, receives schedule telemetry events for delivery, failures,
 	// and auto-disable decisions so scheduled work is visible in Activity and
@@ -86,7 +92,11 @@ type Scheduler struct {
 	// ungated behaviour exactly — see readiness.go.
 	gateMu sync.RWMutex
 	gate   ReadinessGate
-	blocks map[string]ScheduleBlock
+	// Keyed by (workspace, agent). This one was the sharpest of the agent-ID
+	// keys: clearBlock deletes on every cleared tick, so tenant A's passing
+	// agent silently cleared tenant B's recorded refusal, and B's Schedule page
+	// then showed a healthy schedule that was still not firing.
+	blocks map[scheduleKey]ScheduleBlock
 
 	// principal is the verified service identity for scheduled work. It is set
 	// once during startup; a zero value preserves embedded/test compatibility.
@@ -162,8 +172,8 @@ func New(engine *runtime.Engine, loader *runtime.Loader, log *zap.Logger, appCtx
 		state:                scheduleState{LastCompleted: make(map[string]time.Time)},
 		failCounts:           make(map[scheduleKey]int),
 		defaultOutputs:       make(map[string]agent.ScheduleOutput),
-		lastBackfills:        make(map[string]MissedBackfill),
-		blocks:               make(map[string]ScheduleBlock),
+		lastBackfills:        make(map[scheduleKey]MissedBackfill),
+		blocks:               make(map[scheduleKey]ScheduleBlock),
 		consecutiveFailLimit: 10, // default; override with SetConsecutiveFailLimit
 	}
 }
@@ -204,6 +214,45 @@ func (s *Scheduler) SetConsecutiveFailLimit(n int) {
 func (s *Scheduler) recordFireResult(key scheduleKey, ok bool) (bool, int) {
 	s.failMu.Lock()
 	limit := s.consecutiveFailLimit
+	s.failMu.Unlock()
+
+	// DURABLE FIRST, in-memory only as the fallback.
+	//
+	// Schedules are claimed durably, so each occurrence fires on exactly one
+	// replica — but not the same one each time. A per-process counter
+	// therefore advances by one per REPLICA per failure round, so with two
+	// replicas the limit is reached at best half as often and with three,
+	// never. The agent keeps firing on a loop nobody is watching, which is the
+	// exact thing the limit exists to stop. A restart does the same to a
+	// single process.
+	//
+	// The in-memory map stays for schedules with no durable row — an agent
+	// fired from a SOUL.yaml without one — where it is still better than no
+	// counter at all.
+	if store, _ := s.scheduleStore(); store != nil {
+		ctx, cancel := context.WithTimeout(s.appCtx, 10*time.Second)
+		if ok {
+			err := store.ClearFailures(ctx, key.workspaceID, key.agentID)
+			cancel()
+			if err == nil {
+				s.failMu.Lock()
+				delete(s.failCounts, key)
+				s.failMu.Unlock()
+				return false, 0
+			}
+		} else {
+			count, err := store.RecordFailure(ctx, key.workspaceID, key.agentID)
+			cancel()
+			// count == 0 with no error means the schedule has no durable row.
+			// Falling through to the map is right there; treating it as "zero
+			// failures" would reset the counter on every fire.
+			if err == nil && count > 0 {
+				return s.applyFailureCount(key, count, limit)
+			}
+		}
+	}
+
+	s.failMu.Lock()
 	if ok {
 		delete(s.failCounts, key)
 		s.failMu.Unlock()
@@ -212,7 +261,16 @@ func (s *Scheduler) recordFireResult(key scheduleKey, ok bool) (bool, int) {
 	s.failCounts[key]++
 	count := s.failCounts[key]
 	s.failMu.Unlock()
+	return s.applyFailureCount(key, count, limit)
+}
 
+// applyFailureCount decides what a failure count means and acts on it.
+//
+// Split out so the durable and in-memory paths cannot drift: the quarantine,
+// the deregistration and the recorded reason are one piece of behaviour, and
+// two copies of it would be two answers to "when does an agent get switched
+// off".
+func (s *Scheduler) applyFailureCount(key scheduleKey, count, limit int) (bool, int) {
 	if limit <= 0 || count < limit {
 		return false, count
 	}
@@ -226,6 +284,13 @@ func (s *Scheduler) recordFireResult(key scheduleKey, ok bool) (bool, int) {
 	s.failMu.Lock()
 	delete(s.failCounts, key)
 	s.failMu.Unlock()
+	// Cleared durably too, or the agent re-enabled by an operator would be
+	// disabled again on its very next failure rather than after the limit.
+	if store, _ := s.scheduleStore(); store != nil {
+		ctx, cancel := context.WithTimeout(s.appCtx, 10*time.Second)
+		_ = store.ClearFailures(ctx, key.workspaceID, key.agentID)
+		cancel()
+	}
 	// MU-023 criterion 5: a schedule the system switched off must say why, or
 	// "it stopped running and nobody knows" is the operator's whole picture.
 	if store, _ := s.scheduleStore(); store != nil {
@@ -292,6 +357,11 @@ func (s *Scheduler) TryStartRun(agentID string) bool {
 	return s.tryStartRun(keyFor(s.defaultWorkspace(), agentID))
 }
 
+// TryStartRunInWorkspace is the same lock, taken in a named workspace.
+func (s *Scheduler) TryStartRunInWorkspace(workspaceID, agentID string) bool {
+	return s.tryStartRun(keyFor(workspaceID, agentID))
+}
+
 // tryStartRun is the workspace-aware core. The run lock is per (workspace,
 // agent): keyed by agent alone, one tenant's long-running "daily-report"
 // silently suppressed every other tenant's, and the log line said "already
@@ -311,6 +381,11 @@ func (s *Scheduler) FinishRun(agentID string) {
 	s.finishRun(keyFor(s.defaultWorkspace(), agentID))
 }
 
+// FinishRunInWorkspace releases the lock TryStartRunInWorkspace took.
+func (s *Scheduler) FinishRunInWorkspace(workspaceID, agentID string) {
+	s.finishRun(keyFor(workspaceID, agentID))
+}
+
 func (s *Scheduler) finishRun(key scheduleKey) {
 	s.runMu.Lock()
 	defer s.runMu.Unlock()
@@ -319,7 +394,15 @@ func (s *Scheduler) finishRun(key scheduleKey) {
 
 // IsRunning reports whether an agent is currently executing (and not stale).
 func (s *Scheduler) IsRunning(agentID string) bool {
-	key := keyFor(s.defaultWorkspace(), agentID)
+	return s.isRunning(keyFor(s.defaultWorkspace(), agentID))
+}
+
+// IsRunningInWorkspace answers for a named tenant's agent.
+func (s *Scheduler) IsRunningInWorkspace(workspaceID, agentID string) bool {
+	return s.isRunning(keyFor(workspaceID, agentID))
+}
+
+func (s *Scheduler) isRunning(key scheduleKey) bool {
 	s.runMu.Lock()
 	defer s.runMu.Unlock()
 	started, ok := s.running[key]
@@ -329,10 +412,32 @@ func (s *Scheduler) IsRunning(agentID string) bool {
 // RunningSnapshot returns a copy of currently-running agents and their start
 // times, excluding stale entries past maxRunDuration.
 func (s *Scheduler) RunningSnapshot() map[string]time.Time {
+	return s.runningSnapshot(crossWorkspaceSnapshot)
+}
+
+// RunningSnapshotInWorkspace returns only the named tenant's running agents.
+//
+// The unscoped RunningSnapshot flattens every workspace into one agent-ID map,
+// so two tenants running "daily-report" produce one entry and the GUI shows
+// one of them a start time from the other. Returning agent IDs (rather than
+// keys) is still right HERE because the caller has already named the
+// workspace, so the ID is unambiguous within the answer.
+func (s *Scheduler) RunningSnapshotInWorkspace(workspaceID string) map[string]time.Time {
+	return s.runningSnapshot(wsroot.Normalize(workspaceID))
+}
+
+// crossWorkspaceSnapshot is not a workspace ID and can never equal one:
+// wsroot.Validate rejects every ID containing a space.
+const crossWorkspaceSnapshot = "* all workspaces *"
+
+func (s *Scheduler) runningSnapshot(workspaceID string) map[string]time.Time {
 	s.runMu.Lock()
 	defer s.runMu.Unlock()
 	out := make(map[string]time.Time, len(s.running))
 	for k, v := range s.running {
+		if workspaceID != crossWorkspaceSnapshot && k.workspaceID != workspaceID {
+			continue
+		}
 		if time.Since(v) < maxRunDuration {
 			out[k.agentID] = v
 		}
@@ -575,7 +680,7 @@ func (s *Scheduler) fireAt(key scheduleKey, triggerType string, scheduledAt time
 	// run must not consume anything either. A nil gate is a no-op, so non-Studio
 	// agents behave exactly as before. Re-checked on every tick, so fixing the
 	// blocker unblocks the schedule without a restart.
-	if s.blockedByReadiness(agentID, triggerType) {
+	if s.blockedByReadiness(key, triggerType) {
 		return
 	}
 
@@ -772,7 +877,7 @@ func (s *Scheduler) backfillOne(key scheduleKey, def *agent.Definition, now time
 		// pages can show "the gateway was down at 03:00 UTC — the run was
 		// replayed at startup" instead of the operator having to spelunk the
 		// server logs.
-		s.emitMissedRunBackfilled(def, missedAt, now)
+		s.emitMissedRunBackfilled(key, def, missedAt, now)
 		// The occurrence key is the MISSED instant, so a second instance
 		// performing the same startup catch-up collides on the claim instead
 		// of replaying the same missed run alongside us.
@@ -794,20 +899,37 @@ type MissedBackfill struct {
 // any occurred since this process started. Callers use this to render the
 // "auto-replayed" chip on the GUI Schedule page.
 func (s *Scheduler) LastBackfill(agentID string) (MissedBackfill, bool) {
+	return s.LastBackfillInWorkspace(s.defaultWorkspace(), agentID)
+}
+
+// LastBackfillInWorkspace answers for a named tenant's agent.
+func (s *Scheduler) LastBackfillInWorkspace(workspaceID, agentID string) (MissedBackfill, bool) {
 	s.backfillMu.RLock()
 	defer s.backfillMu.RUnlock()
-	b, ok := s.lastBackfills[agentID]
+	b, ok := s.lastBackfills[keyFor(workspaceID, agentID)]
 	return b, ok
 }
 
 // LastBackfillsSnapshot returns a copy of the in-process backfill map so
 // handleScheduleStatus can render every agent's catch-up state in one round trip.
 func (s *Scheduler) LastBackfillsSnapshot() map[string]MissedBackfill {
+	return s.lastBackfillsSnapshot(crossWorkspaceSnapshot)
+}
+
+// LastBackfillsInWorkspace returns only the named tenant's catch-up records.
+func (s *Scheduler) LastBackfillsInWorkspace(workspaceID string) map[string]MissedBackfill {
+	return s.lastBackfillsSnapshot(wsroot.Normalize(workspaceID))
+}
+
+func (s *Scheduler) lastBackfillsSnapshot(workspaceID string) map[string]MissedBackfill {
 	s.backfillMu.RLock()
 	defer s.backfillMu.RUnlock()
 	out := make(map[string]MissedBackfill, len(s.lastBackfills))
 	for k, v := range s.lastBackfills {
-		out[k] = v
+		if workspaceID != crossWorkspaceSnapshot && k.workspaceID != workspaceID {
+			continue
+		}
+		out[k.agentID] = v
 	}
 	return out
 }
@@ -816,7 +938,7 @@ func (s *Scheduler) LastBackfillsSnapshot() map[string]MissedBackfill {
 // startup catch-up fires. The window field is the effective (parsed) window
 // the missed-run check honored, so operators can tell whether an older missed
 // fire was intentionally dropped.
-func (s *Scheduler) emitMissedRunBackfilled(def *agent.Definition, missedAt, now time.Time) {
+func (s *Scheduler) emitMissedRunBackfilled(key scheduleKey, def *agent.Definition, missedAt, now time.Time) {
 	if def == nil {
 		return
 	}
@@ -836,7 +958,7 @@ func (s *Scheduler) emitMissedRunBackfilled(def *agent.Definition, missedAt, now
 	// Record the snapshot BEFORE emitting so a fast poller can observe the
 	// backfill regardless of event-sink presence.
 	s.backfillMu.Lock()
-	s.lastBackfills[def.ID] = MissedBackfill{
+	s.lastBackfills[key] = MissedBackfill{
 		MissedAt:   missedAt.UTC(),
 		ReplayedAt: now.UTC(),
 		Cron:       cronExpr,
@@ -1423,11 +1545,27 @@ func RenderScheduledOutput(tpl string, def *agent.Definition, replyText, trigger
 
 // Entries returns a snapshot of all active cron schedules.
 func (s *Scheduler) Entries() []ScheduleEntry {
-	blocked := s.BlocksSnapshot()
+	return s.entriesIn(crossWorkspaceSnapshot)
+}
+
+// EntriesInWorkspace lists only the named tenant's schedules.
+//
+// The unscoped Entries flattens every workspace into one list keyed by agent
+// ID, which is what let a Team deployment's Schedule page show another
+// tenant's cron times beside its own agent of the same name.
+func (s *Scheduler) EntriesInWorkspace(workspaceID string) []ScheduleEntry {
+	return s.entriesIn(wsroot.Normalize(workspaceID))
+}
+
+func (s *Scheduler) entriesIn(workspaceID string) []ScheduleEntry {
+	blocked := s.blocksSnapshot(workspaceID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var entries []ScheduleEntry
 	for key, entryID := range s.entries {
+		if workspaceID != crossWorkspaceSnapshot && key.workspaceID != workspaceID {
+			continue
+		}
 		agentID := key.agentID
 		e := s.cron.Entry(entryID)
 		se := ScheduleEntry{
@@ -1456,6 +1594,9 @@ func (s *Scheduler) Entries() []ScheduleEntry {
 		entries = append(entries, se)
 	}
 	for key := range s.oneshot {
+		if workspaceID != crossWorkspaceSnapshot && key.workspaceID != workspaceID {
+			continue
+		}
 		entries = append(entries, ScheduleEntry{
 			AgentID: key.agentID,
 			Type:    "oneshot",
