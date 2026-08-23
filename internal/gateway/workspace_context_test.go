@@ -71,6 +71,44 @@ func TestWorkspaceContextUsesOnlyVerifiedMembershipAuthority(t *testing.T) {
 	}
 }
 
+func TestWebSocketWorkspaceSelectorUsesVerifiedMembership(t *testing.T) {
+	s := withCfg(&Server{log: zap.NewNop()}, &config.Config{Deployment: config.DeploymentConfig{Mode: config.DeploymentModeTeam}})
+	r := &recordingMembershipResolver{membership: tenancy.Membership{
+		OrganizationID: "org_verified", WorkspaceID: "ws_verified", MembershipID: "mem_verified", Role: "owner",
+	}}
+	s.SetTenantResolver(r)
+	app := fiber.New(fiber.Config{Immutable: true})
+	app.Use(func(c *fiber.Ctx) error {
+		auth.SetClaims(c, &auth.Claims{
+			RegisteredClaims: jwt.RegisteredClaims{Subject: "user-1"},
+			Role:             "owner", Kind: "access", PrincipalKind: "user", WorkspaceID: "ws_login",
+		})
+		c.Locals("request_id", "req-ws-events")
+		return c.Next()
+	})
+	app.Use(s.websocketWorkspaceContextMW())
+	app.Get("/ws/events", func(c *fiber.Ctx) error {
+		identity, ok := requestctx.From(c.UserContext())
+		if !ok {
+			t.Fatal("verified WebSocket identity missing")
+		}
+		return c.SendString(identity.WorkspaceID())
+	})
+
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/ws/events?workspace_id=ws_selected", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || string(body) != "ws_verified" {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+	}
+	if r.requested != "ws_selected" {
+		t.Fatalf("resolver selector = %q, want ws_selected", r.requested)
+	}
+}
+
 func TestWorkspaceContextMapsLegacyPersonalCredentialAliases(t *testing.T) {
 	s := withCfg(&Server{log: zap.NewNop()}, &config.Config{Deployment: config.DeploymentConfig{Mode: config.DeploymentModePersonal}})
 	r := &recordingMembershipResolver{membership: tenancy.Membership{OrganizationID: "org_real", WorkspaceID: "ws_real", MembershipID: "mem_real", Role: "owner"}}

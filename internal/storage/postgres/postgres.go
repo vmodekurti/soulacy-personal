@@ -274,11 +274,15 @@ func (a *ActionLog) run() {
 	defer timer.Stop()
 
 	flush := func() {
-		if len(batch) == 0 {
-			return
+		if len(batch) > 0 {
+			a.flush(batch)
+			batch = batch[:0]
 		}
-		a.flush(batch)
-		batch = batch[:0]
+		// Reset even when the batch is empty. Previously the first idle tick
+		// returned above without arming another timer. Any later low-volume
+		// events then remained only in memory until 256 accumulated or the
+		// process shut down, which made completed run traces unavailable for
+		// reconnect/backfill.
 		if !timer.Stop() {
 			select {
 			case <-timer.C:

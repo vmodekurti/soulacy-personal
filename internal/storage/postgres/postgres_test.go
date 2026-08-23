@@ -447,6 +447,28 @@ func TestPostgresActionLogAppendTail(t *testing.T) {
 	}
 }
 
+// The timer must remain periodic even if its first tick finds no work. A
+// one-shot timer that is only reset after a non-empty flush strands the first
+// event arriving after an idle startup until shutdown or a 256-event batch.
+func TestPostgresActionLogFlushesFirstEventAfterIdleTick(t *testing.T) {
+	al, _, pool := testStores(t)
+	time.Sleep(batchFlushInterval + 100*time.Millisecond)
+	al.Append(message.Event{AgentID: "idle-agent", SessionID: "s-idle", Type: "llm.call", Timestamp: time.Now().UTC()})
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		var count int
+		if err := pool.QueryRow(context.Background(), `SELECT COUNT(*) FROM agent_events WHERE agent_id='idle-agent'`).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count == 1 {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("event arriving after an idle timer tick was not flushed")
+}
+
 // TestPostgresActionLogTailEmpty verifies Tail on an unknown agent returns an
 // empty slice (not an error) — matches the SQLite backend's behaviour.
 func TestPostgresActionLogTailEmpty(t *testing.T) {

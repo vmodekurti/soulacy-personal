@@ -146,6 +146,32 @@ func (s *Server) workspaceContextMW() fiber.Handler {
 	}
 }
 
+// websocketWorkspaceContextMW gives a browser WebSocket the same verified
+// workspace selection used by the JSON API. Browsers cannot attach the
+// X-Soulacy-Workspace header to a WebSocket handshake, so the GUI sends a
+// workspace_id query parameter. It is only a selector: workspaceContextMW
+// still resolves the authenticated subject's live membership and refuses a
+// workspace they do not belong to.
+//
+// Scoped plugin event tokens predate workspace identities and have no role.
+// Their capability gate remains the authority for those connections; forcing
+// them through human membership resolution would break that separate path.
+func (s *Server) websocketWorkspaceContextMW() fiber.Handler {
+	resolve := s.workspaceContextMW()
+	return func(c *fiber.Ctx) error {
+		claims := auth.ClaimsFromCtx(c)
+		if claims != nil && strings.TrimSpace(claims.Role) == "" {
+			return c.Next()
+		}
+		if strings.TrimSpace(c.Get("X-Soulacy-Workspace")) == "" {
+			if requested := strings.TrimSpace(c.Query("workspace_id")); requested != "" {
+				c.Request().Header.Set("X-Soulacy-Workspace", requested)
+			}
+		}
+		return resolve(c)
+	}
+}
+
 type admissionRefusal struct {
 	status  int
 	message string

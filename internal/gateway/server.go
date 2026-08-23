@@ -851,6 +851,11 @@ func (s *Server) buildApp() *fiber.App {
 		}
 		return s.authHandler()(c)
 	})
+	// Resolve the tab-selected workspace after authentication and before
+	// capturing the immutable WebSocket principal. Without this, a user who
+	// switched workspaces connected successfully but every event from the
+	// visible workspace was (correctly) filtered as foreign.
+	app.Use("/ws", s.websocketWorkspaceContextMW())
 	app.Use("/ws", func(c *fiber.Ctx) error {
 		c.Locals(wsPrincipalKey, websocketPrincipalFromCtx(c))
 		return c.Next()

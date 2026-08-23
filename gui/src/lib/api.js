@@ -1540,7 +1540,15 @@ export const api = {
 export function createEventSocket() {
   const key  = get(apiKey)
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  let url = `${proto}//${location.host}/ws/events`
-  if (key) url += `?api_key=${encodeURIComponent(key)}`
-  return new WebSocket(url)
+  const query = new URLSearchParams()
+  if (key) query.set('api_key', key)
+  // A browser WebSocket cannot send X-Soulacy-Workspace. REST requests carry
+  // that selector on every call, so omitting it here leaves a signed-in tab's
+  // event feed bound to whichever workspace happened to be embedded in the
+  // login token. The server treats this only as a REQUEST and re-verifies the
+  // subject's stored membership before upgrading the connection.
+  const workspace = activeWorkspaceId()
+  if (workspace) query.set('workspace_id', workspace)
+  const suffix = query.size ? `?${query.toString()}` : ''
+  return new WebSocket(`${proto}//${location.host}/ws/events${suffix}`)
 }

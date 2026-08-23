@@ -519,6 +519,7 @@
     const turnAttachments = textArg == null ? pendingAttachments : []
     const attachmentIds = turnAttachments.map(a => a.id).filter(Boolean)
     const thinking = { open: true, events: [] }
+    const runStartedAt = Date.now()
     activeRuns = { ...activeRuns, [runKey]: threadId }
     if (textArg == null) input = ''
     if (textArg == null) pendingAttachments = []
@@ -555,6 +556,11 @@
         streamText: '',   // final reply is authoritative; drop the live preview
         messages: [...t.messages, { role: 'assistant', text: res.reply, via: viaName, agentId: runAgentId, runId: res.run_id || '', responseId: res.response_id || '', feedback: 0, parts: (res.parts || []).filter(p => p && p.type && p.type !== 'text'), ts: new Date(), thinking: t.thinking || thinking, metrics: route ? null : delta }],
       }))
+      // A reconnect or a briefly unavailable socket must not turn a completed
+      // run into an empty Thinking panel. The action log is the authoritative,
+      // workspace-scoped trace; merge it after the run while the live stream
+      // remains the fast path.
+      await backfillThinkingForTurn(threadId, runAgentId, runSessionId, runStartedAt)
       await loadArtifacts(threadId, runAgentId, runSessionId)
     } catch (e) {
       updateThread(threadId, t => ({
@@ -1186,6 +1192,69 @@
             'reasoning.start', 'reasoning.step', 'reasoning.result'].includes(ev.type || '')
   }
 
+  const THINKING_EVENT_TYPES = 'llm.call,llm.result,tool.call,tool.result,tool.log,error,reasoning.start,reasoning.step,reasoning.result'
+
+  function thinkingEventKey(ev) {
+    return `${ev.type || ''}|${ev.timestamp || ''}|${ev.payload?.call_id || ''}|${ev.payload?.name || ''}`
+  }
+
+  async function backfillThinkingForTurn(threadId, agentId, sessionId, startedAt, endedAt = Date.now() + 2000) {
+    try {
+      const res = await api.agents.actions(agentId, 500, THINKING_EVENT_TYPES, { durable: true })
+      const recovered = (res.events || []).filter(ev => {
+        if (ev.session_id !== sessionId || !isThinkingEvent(ev)) return false
+        const at = Date.parse(ev.timestamp || '')
+        return Number.isFinite(at) && at >= startedAt - 1000 && at <= endedAt
+      })
+      if (!recovered.length) return
+      updateThread(threadId, t => {
+        const current = t.thinking?.events || []
+        const seen = new Set(current.map(thinkingEventKey))
+        const merged = [...current]
+        for (const ev of recovered) {
+          const key = thinkingEventKey(ev)
+          if (!seen.has(key)) {
+            seen.add(key)
+            merged.push(ev)
+          }
+        }
+        merged.sort((a, b) => Date.parse(a.timestamp || '') - Date.parse(b.timestamp || ''))
+        const nextThinking = { open: true, events: merged.slice(-80) }
+        const messages = [...t.messages]
+        const last = messages.length - 1
+        if (last >= 0 && messages[last].role === 'assistant') {
+          messages[last] = { ...messages[last], thinking: nextThinking }
+        }
+        return { ...t, messages, thinking: nextThinking }
+      })
+    } catch (_) { /* live events remain available when durable history is disabled */ }
+  }
+
+  async function backfillLatestThinking(threadId, agentId, sessionId) {
+    const thread = $chatThreads[threadId]
+    if (!thread?.messages?.length) return
+    let assistantIndex = -1
+    for (let i = thread.messages.length - 1; i >= 0; i--) {
+      if (thread.messages[i].role === 'assistant') { assistantIndex = i; break }
+    }
+    if (assistantIndex < 0) return
+    let userIndex = -1
+    for (let i = assistantIndex - 1; i >= 0; i--) {
+      if (thread.messages[i].role === 'user') { userIndex = i; break }
+    }
+    if (userIndex < 0) return
+    const startedAt = new Date(thread.messages[userIndex].ts).getTime()
+    const endedAt = new Date(thread.messages[assistantIndex].ts).getTime() + 2000
+    await backfillThinkingForTurn(threadId, agentId, sessionId, startedAt, endedAt)
+    updateThread(threadId, t => ({
+      ...t,
+      messages: t.messages.map((m, i) => i === assistantIndex && t.thinking?.events?.length
+        ? { ...m, thinking: t.thinking }
+        : m),
+      thinking: null,
+    }))
+  }
+
   function toggleThinking(thinking) {
     if (!thinking) return
     thinking.open = !thinking.open
@@ -1804,6 +1873,9 @@
     }
     await Promise.all([loadVoiceStatus(), loadChatStatus()])
     connectEvents()
+    if (activeThread?.id && activeThread?.agentId && activeThread?.sessionId) {
+      await backfillLatestThinking(activeThread.id, activeThread.agentId, activeThread.sessionId)
+    }
     window.addEventListener('keydown', onGlobalKey)
     // Scroll to bottom when returning to a conversation already in progress
     await scrollBottom()

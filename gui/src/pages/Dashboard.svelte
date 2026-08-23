@@ -8,6 +8,7 @@
   let agents  = []
   let events  = []
   let ws      = null
+  let stopWS  = false
   let error   = null
   let authError = false
   let permissionError = false
@@ -77,6 +78,7 @@
 
 
   function connectWS() {
+    if (stopWS) return
     try { ws = createEventSocket() } catch { return }
     ws.onopen    = () => { $connected = true }
     ws.onmessage = (e) => {
@@ -87,7 +89,8 @@
     }
     ws.onclose = () => {
       $connected = false
-      setTimeout(connectWS, 3000)
+      ws = null
+      if (!stopWS) setTimeout(connectWS, 3000)
     }
     ws.onerror = () => ws.close()
   }
@@ -99,7 +102,7 @@
     return () => clearInterval(t)
   })
 
-  onDestroy(() => { if (ws) ws.close() })
+  onDestroy(() => { stopWS = true; if (ws) ws.close() })
 
   function eventColor(type = '') {
     if (type.includes('error'))                        return '#f06060'
