@@ -15,9 +15,9 @@
 package agentmemory
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -155,6 +155,15 @@ const maxEpisodicBytes = 8 << 20
 // caller asks for "everything". Callers ask for 5.
 const maxEpisodicScanRecords = 500
 
+// tailReadBlockBytes keeps ReadRecent I/O proportional to the requested tail,
+// instead of the age of the agent. Episodic writes are capped well below the
+// maximum line size at the gateway, but retain the larger bound for files
+// created by older versions or imported by an operator.
+const (
+	tailReadBlockBytes       = 64 << 10
+	maxEpisodicLineReadBytes = 1 << 20
+)
+
 // rotateLocked rolls episodic.jsonl to episodic.jsonl.1 once it passes the cap,
 // discarding whatever the previous .1 held. Caller holds s.mu.
 //
@@ -184,35 +193,17 @@ func (s *EpisodicStore) ReadRecent(agentID string, max int) ([]Record, error) {
 	}
 	defer f.Close()
 
-	// Keep only a bounded window of the most recent records while scanning,
-	// rather than accumulating the whole file and sorting it afterwards. This
-	// read is on the hot path — it runs on every agent turn to build the system
-	// prompt — and the file is append-ordered, so the tail is what matters.
 	keep := max
 	if keep <= 0 || keep > maxEpisodicScanRecords {
 		keep = maxEpisodicScanRecords
 	}
-	ring := make([]Record, 0, keep)
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 1<<20), 1<<20) // 1 MB per line
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			continue
-		}
-		var r Record
-		if err := json.Unmarshal([]byte(line), &r); err != nil {
-			continue // skip malformed lines rather than failing the whole read
-		}
-		if len(ring) == keep {
-			copy(ring, ring[1:])
-			ring = ring[:keep-1]
-		}
-		ring = append(ring, r)
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("agentmemory: stat episodic: %w", err)
 	}
-	records := ring
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("agentmemory: scan episodic: %w", err)
+	records, _, err := readRecentTail(f, info.Size(), keep)
+	if err != nil {
+		return nil, fmt.Errorf("agentmemory: tail episodic: %w", err)
 	}
 
 	// Newest first
@@ -224,6 +215,75 @@ func (s *EpisodicStore) ReadRecent(agentID string, max int) ([]Record, error) {
 		records = records[:max]
 	}
 	return records, nil
+}
+
+// readRecentTail walks newline-delimited records backwards from EOF. bytesRead
+// is returned so the bounded-I/O property can be asserted without relying on
+// timing or process-memory measurements.
+func readRecentTail(reader io.ReaderAt, size int64, keep int) (records []Record, bytesRead int64, err error) {
+	if size <= 0 || keep <= 0 {
+		return nil, 0, nil
+	}
+
+	records = make([]Record, 0, keep)
+	offset := size
+	var fragment []byte
+	firstBlock := true
+
+	parse := func(line []byte) {
+		if len(line) == 0 || len(records) >= keep {
+			return
+		}
+		var record Record
+		if json.Unmarshal(line, &record) == nil {
+			records = append(records, record)
+		}
+	}
+
+	for offset > 0 && len(records) < keep {
+		readSize := int64(tailReadBlockBytes)
+		if offset < readSize {
+			readSize = offset
+		}
+		offset -= readSize
+
+		block := make([]byte, int(readSize))
+		n, readErr := reader.ReadAt(block, offset)
+		bytesRead += int64(n)
+		if readErr != nil && readErr != io.EOF {
+			return nil, bytesRead, readErr
+		}
+		block = block[:n]
+
+		data := make([]byte, 0, len(block)+len(fragment))
+		data = append(data, block...)
+		data = append(data, fragment...)
+		end := len(data)
+		if firstBlock && end > 0 && data[end-1] == '\n' {
+			end--
+		}
+		firstBlock = false
+
+		for i := end - 1; i >= 0 && len(records) < keep; i-- {
+			if data[i] != '\n' {
+				continue
+			}
+			parse(data[i+1 : end])
+			end = i
+		}
+		if len(records) >= keep {
+			break
+		}
+
+		fragment = append(fragment[:0], data[:end]...)
+		if len(fragment) > maxEpisodicLineReadBytes {
+			return nil, bytesRead, fmt.Errorf("record exceeds %d bytes", maxEpisodicLineReadBytes)
+		}
+	}
+	if offset == 0 && len(records) < keep {
+		parse(fragment)
+	}
+	return records, bytesRead, nil
 }
 
 // ─── Procedural ──────────────────────────────────────────────────────────────

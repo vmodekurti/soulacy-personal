@@ -21,22 +21,23 @@ type Backend interface {
 	// Write embeds entry.Content and stores it in the vector index.
 	Write(ctx context.Context, entry memory.Entry) error
 
-	// Search embeds query and returns the topK most similar entries.
-	// An empty agentID searches across all agents.
-	Search(ctx context.Context, agentID, query string, topK int) ([]Result, error)
+	// Search embeds query and returns the topK most similar entries in one
+	// explicit workspace. Empty workspace IDs must be rejected by backends.
+	// An empty agentID searches across all agents in that workspace.
+	Search(ctx context.Context, workspaceID, agentID, query string, topK int) ([]Result, error)
 
 	// Close releases all held resources (connections, goroutines, etc.).
 	Close() error
 }
 
-// WorkspaceBackend is the tenant-aware search surface for a vector store.
+// WorkspaceBackend is the pre-v2 compatibility spelling of the tenant-aware
+// search surface. Backend.Search itself now requires a workspace, so new code
+// does not need to assert this interface.
 //
-// It is a separate interface rather than new methods on Backend because
-// Backend is frozen for this SDK major version. A backend that does not
-// implement this one keeps working exactly as before; a caller that needs
-// tenant isolation type-asserts for it and refuses to serve multi-tenant
-// traffic when the assertion fails, rather than silently searching across
-// tenants.
+// It remains a separate interface so sidecars compiled during the transition
+// can retain the descriptive method while moving to the mandatory scoped
+// Backend.Search signature. New backends should implement both methods by
+// routing them to the same workspace-prefiltered operation.
 //
 // Write needs no counterpart: memory.Entry carries WorkspaceID, so a write is
 // already tenant-aware for any backend that persists the field.

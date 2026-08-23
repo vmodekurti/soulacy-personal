@@ -28,7 +28,7 @@ func TestVectorBackend_WriteSearchRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
-	hits, err := b.Search(context.Background(), "a1", "quick", 5)
+	hits, err := b.Search(context.Background(), wsroot.PersonalWorkspaceID, "a1", "quick", 5)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -40,12 +40,28 @@ func TestVectorBackend_WriteSearchRoundTrip(t *testing.T) {
 	}
 
 	// Agent scoping: other agents see nothing.
-	hits, err = b.Search(context.Background(), "other", "quick", 5)
+	hits, err = b.Search(context.Background(), wsroot.PersonalWorkspaceID, "other", "quick", 5)
 	if err != nil {
 		t.Fatalf("Search other: %v", err)
 	}
 	if len(hits) != 0 {
 		t.Errorf("cross-agent hits = %+v", hits)
+	}
+}
+
+func TestVectorBackend_LegacySidecarRefusesTenantReadsAndWrites(t *testing.T) {
+	b, err := NewVectorBackend(context.Background(), helperConfig(t, "happy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+
+	entry := memory.Entry{WorkspaceID: "ws_tenant", ID: "e1", AgentID: "a1", Content: "secret", CreatedAt: time.Now()}
+	if err := b.Write(context.Background(), entry); err == nil || !strings.Contains(err.Error(), "vector.workspace") {
+		t.Fatalf("tenant write error=%v, want vector.workspace capability refusal", err)
+	}
+	if _, err := b.Search(context.Background(), "ws_tenant", "a1", "secret", 5); err == nil || !strings.Contains(err.Error(), "vector.workspace") {
+		t.Fatalf("tenant search error=%v, want vector.workspace capability refusal", err)
 	}
 }
 
@@ -302,7 +318,7 @@ func TestBackends_FileSpilling(t *testing.T) {
 	}
 
 	// Verify that we can search and read it back
-	hits, err := vBack.Search(context.Background(), "a1", "aaaa", 5)
+	hits, err := vBack.Search(context.Background(), wsroot.PersonalWorkspaceID, "a1", "aaaa", 5)
 	if err != nil {
 		t.Fatalf("Vector Search: %v", err)
 	}

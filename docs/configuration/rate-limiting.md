@@ -31,8 +31,8 @@ rate_limit:
     heavy-agent:
       requests_per_minute: 10
 
-  # Storage backend for counters
-  # Uses Redis if configured, otherwise in-process
+  # Storage backend for counters. Scale deployments require Redis and
+  # fail startup/requests closed if the shared counter is unavailable.
   backend: redis                # redis | memory
 ```
 
@@ -41,7 +41,7 @@ rate_limit:
 Rate limits use a **sliding window** algorithm. When a request arrives:
 
 1. The user/org identity is extracted from the JWT or API key.
-2. Current counts are fetched from Redis (or in-memory store).
+2. An atomic operation records the request and counts events in the immediately preceding minute in Redis (or the in-memory store).
 3. If any limit is exceeded, `429 Too Many Requests` is returned with a `Retry-After` header.
 4. Otherwise, the request proceeds and counters are incremented.
 
@@ -75,7 +75,7 @@ rate_limit:
   backend: redis
 ```
 
-Without Redis, each replica maintains independent in-memory counters, which allows up to `N × limit` total requests across `N` replicas.
+Without Redis, each replica maintains independent in-memory counters, which allows up to `N × limit` total requests across `N` replicas. Soulacy therefore rejects Scale configuration without an enabled, reachable Redis-backed per-user limit. If Redis later becomes unavailable, requests return `503 Service Unavailable` instead of silently degrading to per-process counters.
 
 ## Disabling rate limits
 

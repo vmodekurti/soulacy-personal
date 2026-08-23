@@ -21,7 +21,7 @@ func TestPostgresSchemaContainsTenantIntegrityAndAuditConstraints(t *testing.T) 
 		"CREATE TABLE IF NOT EXISTS workspace_identity_providers",
 		"CREATE TABLE IF NOT EXISTS workspace_setup_tokens",
 		"CREATE TABLE IF NOT EXISTS tenant_mutation_audit",
-		"tenant_mutation_audit_resource_created", "tenant_mutation_audit_action_created", "tenant_mutation_audit_actor_created",
+		"tenant_mutation_audit_workspace_created", "tenant_mutation_audit_resource_created", "tenant_mutation_audit_action_created", "tenant_mutation_audit_actor_created",
 		"FOREIGN KEY(workspace_id,organization_id) REFERENCES workspaces(id,organization_id)",
 		"UNIQUE(provider, external_subject)", "users_normalized_email_unique",
 		"provider=LOWER(BTRIM(provider))",
@@ -255,6 +255,30 @@ func TestPostgresTenantLifecycleIntegration(t *testing.T) {
 	}
 	if auditCount < 8 {
 		t.Fatalf("audit rows = %d, want at least 8", auditCount)
+	}
+	var unscopedTenantRows int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM tenant_mutation_audit
+		WHERE resource_type IN ('workspace','membership','invitation') AND workspace_id IS NULL`).Scan(&unscopedTenantRows); err != nil {
+		t.Fatal(err)
+	}
+	if unscopedTenantRows != 0 {
+		t.Fatalf("%d workspace-owned audit rows were inserted without workspace_id", unscopedTenantRows)
+	}
+	page, err := store.ListMembershipAuditPage(ctx, wsA.ID, 100, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Entries) == 0 {
+		t.Fatal("workspace audit page is empty")
+	}
+	for _, entry := range page.Entries {
+		var indexedWorkspace string
+		if err := pool.QueryRow(ctx, `SELECT workspace_id FROM tenant_mutation_audit WHERE id=$1`, entry.ID).Scan(&indexedWorkspace); err != nil {
+			t.Fatal(err)
+		}
+		if indexedWorkspace != wsA.ID {
+			t.Fatalf("workspace %q audit page returned row %q indexed for %q", wsA.ID, entry.ID, indexedWorkspace)
+		}
 	}
 }
 

@@ -139,8 +139,8 @@ func (s *Store) Write(ctx context.Context, entry memory.Entry) error {
 // Search embeds query and returns the topK most similar entries.
 // When agentID is non-empty a payload filter is applied so only that agent's
 // memories are returned.
-func (s *Store) Search(ctx context.Context, agentID, query string, topK int) ([]vector.Result, error) {
-	return s.SearchInWorkspace(ctx, wsroot.PersonalWorkspaceID, agentID, query, topK)
+func (s *Store) Search(ctx context.Context, workspaceID, agentID, query string, topK int) ([]vector.Result, error) {
+	return s.searchInWorkspace(ctx, workspaceID, agentID, query, topK)
 }
 
 // SearchInWorkspace pre-filters on the workspace as well as the agent.
@@ -150,6 +150,10 @@ func (s *Store) Search(ctx context.Context, agentID, query string, topK int) ([]
 // memories were — so a personal search matches either the personal value or a
 // missing field, and no other tenant can match them at all.
 func (s *Store) SearchInWorkspace(ctx context.Context, workspaceID, agentID, query string, topK int) ([]vector.Result, error) {
+	return s.Search(ctx, workspaceID, agentID, query, topK)
+}
+
+func (s *Store) searchInWorkspace(ctx context.Context, workspaceID, agentID, query string, topK int) ([]vector.Result, error) {
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, fmt.Errorf("qdrant: workspace is required")
 	}

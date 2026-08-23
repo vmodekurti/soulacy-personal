@@ -122,15 +122,9 @@ func TestPersonalSearchAlsoMatchesUntaggedLegacyPoints(t *testing.T) {
 	}
 }
 
-// The frozen Backend.Search resolves to the personal workspace, which is what
-// a single-tenant caller is.
-func TestFrozenSearchResolvesToPersonal(t *testing.T) {
-	var seen captured
-	store := newCapturingStore(t, &seen)
-	if _, err := store.Search(context.Background(), "", "anything", 5); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := seen.body["filter"].(map[string]any)["should"]; !ok {
-		t.Fatalf("the frozen Search did not resolve to the personal workspace: %+v", seen.body)
+func TestSearchRejectsImplicitWorkspace(t *testing.T) {
+	store := newCapturingStore(t, &captured{})
+	if _, err := store.Search(context.Background(), "", "", "anything", 5); err == nil {
+		t.Fatal("Search accepted an empty workspace")
 	}
 }

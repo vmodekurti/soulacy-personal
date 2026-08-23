@@ -69,9 +69,14 @@ How a call executes:
 
 ## The Sandbox
 
-Python tools run inside a resource sandbox — the soulacy binary re-execs
+In Team and Scale, Python tools are submitted to the remote execution plane and
+run in a digest-pinned, signature-verified container under a hardened OCI
+runtime. The gateway refuses local fallback. Privileged built-ins use a fresh
+read-only, unnetworked container for each call.
+
+Personal mode uses a local compatibility guard: the Soulacy binary re-execs
 itself as a hidden wrapper that applies syscall-level rlimits before running
-your script. Default caps:
+the script. Default caps:
 
 | Limit | Default |
 |-------|---------|
@@ -80,10 +85,8 @@ your script. Default caps:
 | Open file descriptors | 256 |
 | Largest single file written | 64 MB |
 
-No external sandboxer is needed; it works on any Unix host. Operators can tune
-or disable the limits in `config.yaml`. On multi-user deployments,
-`runtime.allowed_tool_dirs` additionally restricts which paths `python_file`
-may point at — a crafted SOUL.yaml cannot execute arbitrary host files.
+The local guard is not a tenant boundary and is unavailable as a Team/Scale
+execution backend. Operators can tune or disable it only for Personal mode.
 
 ## Built-ins
 

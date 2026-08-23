@@ -250,9 +250,7 @@ func (s *PostgresStore) ListMembershipAudit(ctx context.Context, workspaceID str
 		limit = maxMembershipAuditPage
 	}
 	rows, err := s.pool.Query(ctx, `SELECT a.id,a.actor_subject,a.request_id,a.action,a.resource_type,a.resource_id,a.before_data,a.after_data,a.created_at
-		FROM tenant_mutation_audit a WHERE
-		(a.resource_type='membership' AND a.resource_id IN (SELECT id FROM memberships WHERE workspace_id=$1)) OR
-		(a.resource_type='invitation' AND a.resource_id IN (SELECT id FROM invitations WHERE workspace_id=$1))
+		FROM tenant_mutation_audit a WHERE a.workspace_id=$1
 		ORDER BY a.created_at DESC, a.id DESC LIMIT $2`, workspaceID, limit)
 	if err != nil {
 		return nil, err

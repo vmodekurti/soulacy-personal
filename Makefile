@@ -199,14 +199,16 @@ loadtest:
 	go test -tags loadtest ./internal/quota/ -run TestNoisyTenantQueueLatencyProfile -v -count=1
 	go test ./internal/loadprofile/ -count=1
 
-## Full production publication gate. Requires live PostgreSQL and Qdrant plus
+## Full production publication gate. Requires live PostgreSQL, Qdrant, Redis plus
 ## the independent-review JSON described in docs/operations/disaster-recovery.md.
 production-assurance:
 	@test -n "$$SOULACY_TEST_POSTGRES_DSN" || (echo "SOULACY_TEST_POSTGRES_DSN is required" >&2; exit 1)
 	@test -n "$$SOULACY_TEST_QDRANT_URL" || (echo "SOULACY_TEST_QDRANT_URL is required" >&2; exit 1)
+	@test -n "$$SOULACY_TEST_REDIS_URL" || (echo "SOULACY_TEST_REDIS_URL is required" >&2; exit 1)
 	@test -n "$$SOULACY_SECURITY_REVIEW_ATTESTATION" || (echo "SOULACY_SECURITY_REVIEW_ATTESTATION is required" >&2; exit 1)
 	go test ./internal/recovery/ -run TestProductionLikeRestoreDrill -v -count=1
 	go test ./internal/vector/qdrant/ -run TestLiveQdrantEnforcesWorkspacePrefilter -v -count=1
+	go test ./internal/ratelimit/ -run TestLiveRedisSlidingWindow -v -count=1
 	$(MAKE) loadtest
 	SOULACY_ENFORCE_RELEASE_GATE=1 $(MAKE) security
 

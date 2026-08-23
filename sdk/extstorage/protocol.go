@@ -223,13 +223,14 @@ func Negotiate(p NegotiateParams) (int, error) {
 // inline; oversized Content should be spilled to a SharedDir file and
 // referenced via ContentFile instead (one of Content/ContentFile).
 type VectorWriteParams struct {
-	ID        string  `json:"id"`
-	AgentID   string  `json:"agent_id"`
-	SessionID string  `json:"session_id,omitempty"`
-	Scope     string  `json:"scope,omitempty"`
-	Content   string  `json:"content,omitempty"`
-	Timestamp int64   `json:"timestamp,omitempty"` // unix seconds
-	Relevance float64 `json:"relevance,omitempty"`
+	WorkspaceID string  `json:"workspace_id"`
+	ID          string  `json:"id"`
+	AgentID     string  `json:"agent_id"`
+	SessionID   string  `json:"session_id,omitempty"`
+	Scope       string  `json:"scope,omitempty"`
+	Content     string  `json:"content,omitempty"`
+	Timestamp   int64   `json:"timestamp,omitempty"` // unix seconds
+	Relevance   float64 `json:"relevance,omitempty"`
 
 	// ContentFile is a path RELATIVE to the negotiated SharedDir holding
 	// the content bytes (shared-mount transport for large payloads).
@@ -243,9 +244,10 @@ type VectorWriteResult struct {
 
 // VectorSearchParams mirrors vector.Backend.Search.
 type VectorSearchParams struct {
-	AgentID string `json:"agent_id,omitempty"` // empty = all agents
-	Query   string `json:"query"`
-	TopK    int    `json:"top_k"`
+	WorkspaceID string `json:"workspace_id"`
+	AgentID     string `json:"agent_id,omitempty"` // empty = all agents
+	Query       string `json:"query"`
+	TopK        int    `json:"top_k"`
 }
 
 // VectorHit is one search result.

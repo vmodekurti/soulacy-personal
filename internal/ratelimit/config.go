@@ -3,7 +3,7 @@
 //
 // Two enforcement axes:
 //
-//  1. Requests per minute (RPM) — sliding fixed-window counter, checked on
+//  1. Requests per minute (RPM) — sliding-window counter, checked on
 //     every API request. Keyed by JWT subject (per-user) and/or agent ID
 //     (per-agent). In-memory by default; Redis for multi-instance deployments.
 //

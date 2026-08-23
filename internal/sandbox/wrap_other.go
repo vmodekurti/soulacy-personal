@@ -8,11 +8,10 @@ import (
 	"os/exec"
 )
 
-// applyLimits is a no-op on platforms that don't support POSIX rlimits
-// the way Linux/Darwin do (currently: Windows). The sandbox subcommand
-// still passes the wrapped command through to exec.LookPath/exec.Command
-// so the engine doesn't have to branch on GOOS.
-func applyLimits(_ Limits) error { return nil }
+// applyLimits fails closed on platforms that cannot enforce POSIX limits.
+// Personal deployments can explicitly disable the compatibility wrapper; a
+// configured guard must never become a silent passthrough.
+func applyLimits(_ Limits) error { return fmt.Errorf("POSIX resource limits are unavailable on this platform") }
 
 // execCommand falls back to the os/exec stdlib: spawn the command,
 // wait for it, mirror its exit code. We can't execve on Windows from

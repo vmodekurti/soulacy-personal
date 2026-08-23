@@ -64,7 +64,7 @@ func TestReferenceSidecarEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
-	hits, err := vb.Search(context.Background(), "a1", "storage protocol", 3)
+	hits, err := vb.Search(context.Background(), wsroot.PersonalWorkspaceID, "a1", "storage protocol", 3)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestReferenceSidecarLargeContentSpillsToSharedDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
-	hits, err := vb.Search(context.Background(), "a1", "spill marker", 1)
+	hits, err := vb.Search(context.Background(), wsroot.PersonalWorkspaceID, "a1", "spill marker", 1)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}

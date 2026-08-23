@@ -112,9 +112,7 @@ func (s *PostgresStore) ListMembershipAuditPage(ctx context.Context, workspaceID
 	// load-bearing rather than tidy: a page whose filter differs from the
 	// list's would return rows the caller cannot see anywhere else, or hide
 	// rows they can.
-	const scope = `((a.resource_type='membership' AND a.resource_id IN (SELECT id FROM memberships WHERE workspace_id=$1)) OR
-		(a.resource_type='invitation' AND a.resource_id IN (SELECT id FROM invitations WHERE workspace_id=$1)) OR
-		(a.resource_type='workspace' AND a.resource_id=$1))`
+	const scope = `a.workspace_id=$1`
 
 	// Read limit+1. The extra row is never returned; it is the only way to
 	// know whether a next cursor exists without a second query, and without it

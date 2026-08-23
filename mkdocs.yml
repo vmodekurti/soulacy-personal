@@ -210,6 +210,7 @@ nav:
   - Security:
     - Overview: security/index.md
     - Tool Sandbox: security/sandbox.md
+    - Framework Review Remediation: security/framework-review-remediation.md
     - Audit & Incident Records: security/audit.md
     - Execution Isolation Tests: operations/execution-isolation-tests.md
     - Incident Response: operations/incident-response.md

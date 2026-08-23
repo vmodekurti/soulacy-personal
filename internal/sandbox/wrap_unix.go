@@ -12,9 +12,7 @@ import (
 )
 
 // applyLimits sets every requested rlimit before execve. Each failure is
-// returned as the first error (the caller logs and continues — a Darwin
-// host that ignores RLIMIT_AS in some edge case shouldn't block the
-// actual command from running).
+// returned as the first error and the caller refuses execution.
 func applyLimits(l Limits) error {
 	if l.CPUSeconds > 0 {
 		if err := setLim(unix.RLIMIT_CPU, uint64(l.CPUSeconds)); err != nil {

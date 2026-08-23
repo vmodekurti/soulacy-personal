@@ -18,10 +18,10 @@ package sqlitevec
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/soulacy/soulacy/internal/memory"
 	"github.com/soulacy/soulacy/internal/vector"
-	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
 // compile-time interface check
@@ -47,14 +47,21 @@ func (s *Store) Write(ctx context.Context, entry memory.Entry) error {
 // agentID is used as a SQL pre-filter via SearchFiltered so that KNN is
 // scoped to only that agent's rows, eliminating the over-fetch heuristic
 // that failed when other agents dominated the vector space.
-func (s *Store) Search(ctx context.Context, agentID, query string, topK int) ([]vector.Result, error) {
-	return s.SearchInWorkspace(ctx, wsroot.PersonalWorkspaceID, agentID, query, topK)
+func (s *Store) Search(ctx context.Context, workspaceID, agentID, query string, topK int) ([]vector.Result, error) {
+	if strings.TrimSpace(workspaceID) == "" {
+		return nil, fmt.Errorf("sqlitevec: workspace is required")
+	}
+	return s.searchInWorkspace(ctx, workspaceID, agentID, query, topK)
 }
 
 // SearchInWorkspace pre-filters on the workspace as well as the agent, so a
 // neighbouring tenant's vectors are never candidates and never consume the
 // topK budget.
 func (s *Store) SearchInWorkspace(ctx context.Context, workspaceID, agentID, query string, topK int) ([]vector.Result, error) {
+	return s.Search(ctx, workspaceID, agentID, query, topK)
+}
+
+func (s *Store) searchInWorkspace(ctx context.Context, workspaceID, agentID, query string, topK int) ([]vector.Result, error) {
 	raw, err := s.vs.SearchFiltered(ctx, workspaceID, query, topK, agentID)
 	if err != nil {
 		return nil, fmt.Errorf("sqlitevec: search: %w", err)

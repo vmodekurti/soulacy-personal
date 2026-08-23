@@ -62,14 +62,17 @@ the risk.
 
 ## Tool Execution Boundary
 
-Python tools run as subprocesses. On Unix-like hosts, Soulacy can wrap those
-subprocesses with the hidden `soulacy __exec-sandbox` runner, which applies
-resource limits for CPU, memory, open files, and single-file output size.
+Team and Scale never run tenant Python in the gateway process. They require the
+remote worker executor with a hardened OCI runtime and a digest-pinned,
+signature-verified execution image. Privileged built-ins run in a new
+read-only, capability-free, unnetworked container per call. Startup refuses a
+multi-user configuration that does not provide these boundaries.
 
-This resource sandbox reduces runaway-tool blast radius. It is not a complete
-filesystem, network, user, or kernel isolation boundary. A Python tool still
-runs with the gateway process's OS user permissions unless you add external
-isolation such as containers, VMs, or a dedicated OS account.
+Personal mode can instead wrap local subprocesses with the hidden
+`soulacy __exec-sandbox` runner, which applies resource limits for CPU, memory,
+open files, and single-file output size. This compatibility guard limits
+resource exhaustion but is not a filesystem, network, user, or kernel
+isolation boundary.
 
 Recommended hardening:
 
@@ -82,6 +85,10 @@ runtime:
     - "/opt/soulacy/tools"
   sandbox:
     enabled: true
+    mode: docker
+    image: registry.example/soulacy-execution@sha256:<digest>
+    container_runtime: runsc
+    require_signed_image: true
     cpu_seconds: 30
     memory_mb: 512
     open_files: 256

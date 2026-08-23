@@ -557,9 +557,36 @@ func insertAudit(ctx context.Context, tx pgx.Tx, mutation Mutation, action, reso
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO tenant_mutation_audit(id, actor_subject, request_id, action, resource_type, resource_id, before_data, after_data, created_at)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, newID("aud"), mutation.ActorSubject, mutation.RequestID, action, resourceType, resourceID, beforeJSON, afterJSON, mutationTime(mutation))
+	workspaceID, err := auditWorkspaceID(ctx, tx, resourceType, resourceID)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO tenant_mutation_audit(id, workspace_id, actor_subject, request_id, action, resource_type, resource_id, before_data, after_data, created_at)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, newID("aud"), workspaceID, mutation.ActorSubject, mutation.RequestID, action, resourceType, resourceID, beforeJSON, afterJSON, mutationTime(mutation))
 	return err
+}
+
+func auditWorkspaceID(ctx context.Context, tx pgx.Tx, resourceType, resourceID string) (any, error) {
+	switch resourceType {
+	case "workspace":
+		return resourceID, nil
+	case "membership":
+		var workspaceID string
+		if err := tx.QueryRow(ctx, `SELECT workspace_id FROM memberships WHERE id=$1`, resourceID).Scan(&workspaceID); err != nil {
+			return nil, fmt.Errorf("resolve audit membership workspace: %w", err)
+		}
+		return workspaceID, nil
+	case "invitation":
+		var workspaceID string
+		if err := tx.QueryRow(ctx, `SELECT workspace_id FROM invitations WHERE id=$1`, resourceID).Scan(&workspaceID); err != nil {
+			return nil, fmt.Errorf("resolve audit invitation workspace: %w", err)
+		}
+		return workspaceID, nil
+	default:
+		// Organization-level lifecycle events deliberately have no single
+		// workspace scope and remain visible only through platform audit.
+		return nil, nil
+	}
 }
 
 func mutationTime(m Mutation) time.Time {
@@ -745,14 +772,19 @@ var postgresSchema = []string{
 		status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','revoked','expired')), expires_at TIMESTAMPTZ,
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), CHECK(NUM_NONNULLS(user_id,service_account_id)=1))`,
 	`CREATE TABLE IF NOT EXISTS tenant_mutation_audit(
-		id TEXT PRIMARY KEY CHECK (id ~ '^aud_[a-f0-9]{32}$'), actor_subject TEXT NOT NULL, request_id TEXT NOT NULL,
+		id TEXT PRIMARY KEY CHECK (id ~ '^aud_[a-f0-9]{32}$'), workspace_id TEXT, actor_subject TEXT NOT NULL, request_id TEXT NOT NULL,
 		action TEXT NOT NULL, resource_type TEXT NOT NULL, resource_id TEXT NOT NULL,
 		before_data JSONB NOT NULL, after_data JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL)`,
-	// Audit reads are keyset-paginated. These indexes match the actual scopes:
-	// tenant audit resolves workspace-owned resource IDs; platform audit filters
-	// lifecycle actions; investigations commonly filter an actor. There is no
-	// denormalized workspace_id column to index, so claiming such an index would
-	// not accelerate the queries Soulacy actually executes.
+	`ALTER TABLE tenant_mutation_audit ADD COLUMN IF NOT EXISTS workspace_id TEXT`,
+	`UPDATE tenant_mutation_audit a SET workspace_id=CASE
+		WHEN a.resource_type='workspace' THEN a.resource_id
+		WHEN a.resource_type='membership' THEN (SELECT m.workspace_id FROM memberships m WHERE m.id=a.resource_id)
+		WHEN a.resource_type='invitation' THEN (SELECT i.workspace_id FROM invitations i WHERE i.id=a.resource_id)
+		END
+		WHERE a.workspace_id IS NULL AND a.resource_type IN ('workspace','membership','invitation')`,
+	// Audit reads are keyset-paginated. Tenant rows carry their denormalized
+	// workspace so the isolation predicate and ordering are served by one index.
+	`CREATE INDEX IF NOT EXISTS tenant_mutation_audit_workspace_created ON tenant_mutation_audit(workspace_id,created_at DESC,id DESC) WHERE workspace_id IS NOT NULL`,
 	`CREATE INDEX IF NOT EXISTS tenant_mutation_audit_resource_created ON tenant_mutation_audit(resource_type,resource_id,created_at DESC,id DESC)`,
 	`CREATE INDEX IF NOT EXISTS tenant_mutation_audit_action_created ON tenant_mutation_audit(action,created_at DESC,id DESC)`,
 	`CREATE INDEX IF NOT EXISTS tenant_mutation_audit_actor_created ON tenant_mutation_audit(actor_subject,created_at DESC,id DESC)`,

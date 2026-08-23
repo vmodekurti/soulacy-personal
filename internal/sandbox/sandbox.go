@@ -1,5 +1,7 @@
-// Package sandbox runs subprocesses (currently: user-supplied Python tools)
-// under host-enforced *resource limits*.
+// Package sandbox supplies the local-process compatibility guard used only by
+// Personal deployments. It is deliberately not Soulacy's SaaS security
+// boundary: Team and Scale validation requires the remote worker executor for
+// ordinary tools and disposable hardened OCI containers for privileged tools.
 //
 // SCOPE — what this package guarantees and, just as importantly, what it does
 // NOT. It is a resource-exhaustion guard, NOT a security boundary:
@@ -18,15 +20,15 @@
 //
 //   - RLIMIT_AS is enforced strictly on Linux but only ADVISORILY on macOS
 //     (some mmap'd allocations can exceed it before the kernel notices).
-//   - A setrlimit failure is NON-FATAL: applyLimits' error is logged to stderr
-//     and the tool runs anyway (see RunSandboxedAndExit), so a tool may run
-//     with fewer limits than configured — or none.
-//   - On non-Unix platforms (currently: Windows) the wrapper is a no-op
-//     passthrough and applies no limits at all.
+//   - A setrlimit failure is fatal. The wrapper never silently runs with fewer
+//     limits than configured.
+//   - On non-Unix platforms (currently: Windows) enabling this wrapper refuses
+//     execution because POSIX resource caps are unavailable.
 //
-// Treat every Python tool as fully-privileged host code. For real isolation
-// (untrusted tools, multi-tenant), run the whole gateway inside a container or
-// VM. See docs/security/sandbox.md for the operator-facing version of this.
+// Treat every Personal-mode Python tool as fully-privileged host code. For
+// untrusted or multi-tenant execution use Team/Scale, whose startup validation
+// refuses configurations that could reach this local path. See
+// docs/security/sandbox.md for the operator-facing architecture.
 //
 // PRODUCTION_AUDIT — F1 (2026-05-27): before this package, the engine
 // fork+exec'd python -c <script> directly with no caps at all. The sandbox
@@ -161,10 +163,8 @@ func RunSandboxedAndExit(argv []string) {
 		os.Exit(2)
 	}
 	if err := applyLimits(flags); err != nil {
-		// Don't abort the user's tool on a setrlimit failure — log it
-		// and continue. A failed AS limit on macOS shouldn't stop the
-		// engine from running a perfectly normal tool.
-		fmt.Fprintf(os.Stderr, "sandbox: warn: %v\n", err)
+		fmt.Fprintf(os.Stderr, "sandbox: refusing execution: %v\n", err)
+		os.Exit(126)
 	}
 	if err := execCommand(cmd, flags.EnvAllow); err != nil {
 		fmt.Fprintf(os.Stderr, "sandbox: exec %q: %v\n", cmd[0], err)
