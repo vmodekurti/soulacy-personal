@@ -6,6 +6,7 @@
 package storage
 
 import (
+	"context"
 	"time"
 
 	"github.com/soulacy/soulacy/sdk/memory"
@@ -119,6 +120,22 @@ type MemoryBackend interface {
 	Close() error
 }
 
+// ContextMemoryBackend is the cancellation-aware companion to MemoryBackend.
+//
+// MemoryBackend remains frozen for SDK compatibility. Backends that perform
+// network or IPC operations should implement this optional surface so callers
+// can stop outstanding work when a request is cancelled or its deadline
+// expires. Callers fall back to MemoryBackend for older implementations.
+type ContextMemoryBackend interface {
+	MemoryBackend
+
+	ArchiveContext(ctx context.Context, entry memory.Entry) error
+	SearchContext(ctx context.Context, agentID, query string, limit int) ([]memory.Entry, error)
+	ReadByScopeContext(ctx context.Context, agentID, sessionID string, scope memory.Scope, limit int) ([]memory.Entry, error)
+	ReadGlobalContext(ctx context.Context, agentID string, limit int) ([]memory.Entry, error)
+	PruneContext(ctx context.Context, agentID string, before time.Time) (int64, error)
+}
+
 // WorkspaceMemoryBackend is the tenant-aware read surface for a memory
 // archive.
 //
@@ -143,4 +160,16 @@ type WorkspaceMemoryBackend interface {
 	// ReadGlobalInWorkspace returns the most recent entries across one
 	// workspace's sessions for agentID.
 	ReadGlobalInWorkspace(workspaceID, agentID string, limit int) ([]memory.Entry, error)
+}
+
+// ContextWorkspaceMemoryBackend combines tenant-aware reads with request
+// cancellation. It is optional for the same compatibility reason as
+// ContextMemoryBackend and WorkspaceMemoryBackend.
+type ContextWorkspaceMemoryBackend interface {
+	ContextMemoryBackend
+	WorkspaceMemoryBackend
+
+	SearchInWorkspaceContext(ctx context.Context, workspaceID, agentID, query string, limit int) ([]memory.Entry, error)
+	ReadByScopeInWorkspaceContext(ctx context.Context, workspaceID, agentID, sessionID string, scope memory.Scope, limit int) ([]memory.Entry, error)
+	ReadGlobalInWorkspaceContext(ctx context.Context, workspaceID, agentID string, limit int) ([]memory.Entry, error)
 }

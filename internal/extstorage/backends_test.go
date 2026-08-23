@@ -2,13 +2,14 @@ package extstorage
 
 import (
 	"context"
-	"github.com/soulacy/soulacy/internal/wsroot"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/sdk/memory"
 	"github.com/soulacy/soulacy/sdk/queue"
 )
@@ -108,6 +109,25 @@ func TestStorageBackend_ArchiveSearchPruneRoundTrip(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Errorf("expected 0 entries after prune, got %+v", entries)
+	}
+}
+
+func TestStorageBackend_ContextCancellationStopsInflightIPC(t *testing.T) {
+	b, err := NewStorageBackend(context.Background(), helperConfig(t, "slowstorage"))
+	if err != nil {
+		t.Fatalf("NewStorageBackend: %v", err)
+	}
+	defer b.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err = b.SearchContext(ctx, "agent", "query", 5)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("SearchContext error = %v, want context deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("cancelled IPC returned after %v; parent context was not propagated", elapsed)
 	}
 }
 

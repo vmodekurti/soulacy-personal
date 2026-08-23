@@ -72,6 +72,9 @@ func runHelperSidecar(mode string) {
 			continue
 		}
 		id := *m.ID
+		if mode == "slowstorage" && strings.HasPrefix(m.Method, "storage.") {
+			time.Sleep(time.Second)
+		}
 		switch m.Method {
 		case sdkext.MethodNegotiate:
 			var p sdkext.NegotiateParams

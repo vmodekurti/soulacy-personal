@@ -223,6 +223,12 @@ func (e *Engine) memoryArchiveFor(workspaceID string) (storage.WorkspaceMemoryBa
 // along. An accessor that cannot name a tenant is the shape that produced that
 // asymmetry, so it is gone rather than deprecated.
 func (e *Engine) MemoryList(workspaceID, agentID string, limit int) ([]memory.Entry, error) {
+	return e.MemoryListContext(context.Background(), workspaceID, agentID, limit)
+}
+
+// MemoryListContext is MemoryList with request cancellation propagated to
+// context-aware archive backends.
+func (e *Engine) MemoryListContext(ctx context.Context, workspaceID, agentID string, limit int) ([]memory.Entry, error) {
 	if e.archive == nil {
 		return []memory.Entry{}, nil
 	}
@@ -238,9 +244,17 @@ func (e *Engine) MemoryList(workspaceID, agentID string, limit int) ([]memory.En
 	}
 	var entries []memory.Entry
 	if scoped != nil {
-		entries, err = scoped.ReadGlobalInWorkspace(NormalizeWorkspace(workspaceID), agentID, limit)
+		if contextual, supportsContext := scoped.(storage.ContextWorkspaceMemoryBackend); supportsContext {
+			entries, err = contextual.ReadGlobalInWorkspaceContext(ctx, NormalizeWorkspace(workspaceID), agentID, limit)
+		} else {
+			entries, err = scoped.ReadGlobalInWorkspace(NormalizeWorkspace(workspaceID), agentID, limit)
+		}
 	} else {
-		entries, err = e.archive.ReadGlobal(agentID, limit)
+		if contextual, supportsContext := e.archive.(storage.ContextMemoryBackend); supportsContext {
+			entries, err = contextual.ReadGlobalContext(ctx, agentID, limit)
+		} else {
+			entries, err = e.archive.ReadGlobal(agentID, limit)
+		}
 	}
 	if err != nil {
 		return nil, err
@@ -254,6 +268,12 @@ func (e *Engine) MemoryList(workspaceID, agentID string, limit int) ([]memory.En
 // MemorySearch performs a substring search over an agent's archived memories
 // within one workspace. If query is empty it falls back to MemoryList.
 func (e *Engine) MemorySearch(workspaceID, agentID, query string, limit int) ([]memory.Entry, error) {
+	return e.MemorySearchContext(context.Background(), workspaceID, agentID, query, limit)
+}
+
+// MemorySearchContext is MemorySearch with request cancellation propagated to
+// context-aware archive backends.
+func (e *Engine) MemorySearchContext(ctx context.Context, workspaceID, agentID, query string, limit int) ([]memory.Entry, error) {
 	if e.archive == nil {
 		return []memory.Entry{}, nil
 	}
@@ -261,7 +281,7 @@ func (e *Engine) MemorySearch(workspaceID, agentID, query string, limit int) ([]
 		limit = 200
 	}
 	if query == "" {
-		return e.MemoryList(workspaceID, agentID, limit)
+		return e.MemoryListContext(ctx, workspaceID, agentID, limit)
 	}
 	scoped, ok, err := e.memoryArchiveFor(workspaceID)
 	if err != nil {
@@ -272,9 +292,17 @@ func (e *Engine) MemorySearch(workspaceID, agentID, query string, limit int) ([]
 	}
 	var entries []memory.Entry
 	if scoped != nil {
-		entries, err = scoped.SearchInWorkspace(NormalizeWorkspace(workspaceID), agentID, query, limit)
+		if contextual, supportsContext := scoped.(storage.ContextWorkspaceMemoryBackend); supportsContext {
+			entries, err = contextual.SearchInWorkspaceContext(ctx, NormalizeWorkspace(workspaceID), agentID, query, limit)
+		} else {
+			entries, err = scoped.SearchInWorkspace(NormalizeWorkspace(workspaceID), agentID, query, limit)
+		}
 	} else {
-		entries, err = e.archive.Search(agentID, query, limit)
+		if contextual, supportsContext := e.archive.(storage.ContextMemoryBackend); supportsContext {
+			entries, err = contextual.SearchContext(ctx, agentID, query, limit)
+		} else {
+			entries, err = e.archive.Search(agentID, query, limit)
+		}
 	}
 	if err != nil {
 		return nil, err

@@ -27,11 +27,14 @@ type (
 	ActionLogBackend = sdkstorage.ActionLogBackend
 	// MemoryBackend is the interface satisfied by every memory-archive implementation.
 	MemoryBackend = sdkstorage.MemoryBackend
+	// ContextMemoryBackend is the optional cancellation-aware memory surface.
+	ContextMemoryBackend = sdkstorage.ContextMemoryBackend
 
 	// WorkspaceActionLogBackend and WorkspaceMemoryBackend are the tenant-aware
 	// surfaces. They are optional: the frozen interfaces above cannot grow
 	// methods, so a caller needing isolation type-asserts for these and fails
 	// closed when the assertion does not hold.
-	WorkspaceActionLogBackend = sdkstorage.WorkspaceActionLogBackend
-	WorkspaceMemoryBackend    = sdkstorage.WorkspaceMemoryBackend
+	WorkspaceActionLogBackend     = sdkstorage.WorkspaceActionLogBackend
+	WorkspaceMemoryBackend        = sdkstorage.WorkspaceMemoryBackend
+	ContextWorkspaceMemoryBackend = sdkstorage.ContextWorkspaceMemoryBackend
 )

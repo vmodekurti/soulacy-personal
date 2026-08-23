@@ -7,6 +7,7 @@ import (
 
 	sdkext "github.com/soulacy/soulacy/sdk/extstorage"
 	"github.com/soulacy/soulacy/sdk/memory"
+	"github.com/soulacy/soulacy/sdk/storage"
 )
 
 // storageCallTimeout bounds each archive call — sdk/storage.MemoryBackend
@@ -19,6 +20,8 @@ const storageCallTimeout = 30 * time.Second
 type StorageBackend struct {
 	c *Client
 }
+
+var _ storage.ContextMemoryBackend = (*StorageBackend)(nil)
 
 // NewStorageBackend spawns + negotiates a sidecar and verifies it
 // advertises the "storage" capability.
@@ -38,14 +41,22 @@ func NewStorageBackend(ctx context.Context, cfg ClientConfig) (*StorageBackend, 
 // Client exposes the underlying session to the host.
 func (b *StorageBackend) Client() *Client { return b.c }
 
-func (b *StorageBackend) call(method string, params, result any) error {
-	ctx, cancel := context.WithTimeout(context.Background(), storageCallTimeout)
+func (b *StorageBackend) call(ctx context.Context, method string, params, result any) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, storageCallTimeout)
 	defer cancel()
 	return b.c.Call(ctx, method, params, result)
 }
 
 // Archive implements storage.MemoryBackend.
 func (b *StorageBackend) Archive(entry memory.Entry) error {
+	return b.ArchiveContext(context.Background(), entry)
+}
+
+// ArchiveContext persists an entry while honoring caller cancellation.
+func (b *StorageBackend) ArchiveContext(ctx context.Context, entry memory.Entry) error {
 	params := sdkext.StorageArchiveParams{
 		Entry: entry,
 	}
@@ -61,13 +72,18 @@ func (b *StorageBackend) Archive(entry memory.Entry) error {
 	}
 
 	var res sdkext.StorageArchiveResult
-	return b.call(sdkext.MethodStorageArchive, params, &res)
+	return b.call(ctx, sdkext.MethodStorageArchive, params, &res)
 }
 
 // Search implements storage.MemoryBackend.
 func (b *StorageBackend) Search(agentID, query string, limit int) ([]memory.Entry, error) {
+	return b.SearchContext(context.Background(), agentID, query, limit)
+}
+
+// SearchContext searches while honoring caller cancellation.
+func (b *StorageBackend) SearchContext(ctx context.Context, agentID, query string, limit int) ([]memory.Entry, error) {
 	var res sdkext.StorageSearchResult
-	err := b.call(sdkext.MethodStorageSearch, sdkext.StorageSearchParams{
+	err := b.call(ctx, sdkext.MethodStorageSearch, sdkext.StorageSearchParams{
 		AgentID: agentID, Query: query, Limit: limit,
 	}, &res)
 	return res.Entries, err
@@ -75,8 +91,13 @@ func (b *StorageBackend) Search(agentID, query string, limit int) ([]memory.Entr
 
 // ReadByScope implements storage.MemoryBackend.
 func (b *StorageBackend) ReadByScope(agentID, sessionID string, scope memory.Scope, limit int) ([]memory.Entry, error) {
+	return b.ReadByScopeContext(context.Background(), agentID, sessionID, scope, limit)
+}
+
+// ReadByScopeContext reads scoped entries while honoring caller cancellation.
+func (b *StorageBackend) ReadByScopeContext(ctx context.Context, agentID, sessionID string, scope memory.Scope, limit int) ([]memory.Entry, error) {
 	var res sdkext.StorageReadByScopeResult
-	err := b.call(sdkext.MethodStorageReadByScope, sdkext.StorageReadByScopeParams{
+	err := b.call(ctx, sdkext.MethodStorageReadByScope, sdkext.StorageReadByScopeParams{
 		AgentID: agentID, SessionID: sessionID, Scope: scope, Limit: limit,
 	}, &res)
 	return res.Entries, err
@@ -84,8 +105,13 @@ func (b *StorageBackend) ReadByScope(agentID, sessionID string, scope memory.Sco
 
 // ReadGlobal implements storage.MemoryBackend.
 func (b *StorageBackend) ReadGlobal(agentID string, limit int) ([]memory.Entry, error) {
+	return b.ReadGlobalContext(context.Background(), agentID, limit)
+}
+
+// ReadGlobalContext reads recent entries while honoring caller cancellation.
+func (b *StorageBackend) ReadGlobalContext(ctx context.Context, agentID string, limit int) ([]memory.Entry, error) {
 	var res sdkext.StorageReadGlobalResult
-	err := b.call(sdkext.MethodStorageReadGlobal, sdkext.StorageReadGlobalParams{
+	err := b.call(ctx, sdkext.MethodStorageReadGlobal, sdkext.StorageReadGlobalParams{
 		AgentID: agentID, Limit: limit,
 	}, &res)
 	return res.Entries, err
@@ -93,8 +119,13 @@ func (b *StorageBackend) ReadGlobal(agentID string, limit int) ([]memory.Entry, 
 
 // Prune implements storage.MemoryBackend.
 func (b *StorageBackend) Prune(agentID string, before time.Time) (int64, error) {
+	return b.PruneContext(context.Background(), agentID, before)
+}
+
+// PruneContext deletes old entries while honoring caller cancellation.
+func (b *StorageBackend) PruneContext(ctx context.Context, agentID string, before time.Time) (int64, error) {
 	var res sdkext.StoragePruneResult
-	err := b.call(sdkext.MethodStoragePrune, sdkext.StoragePruneParams{
+	err := b.call(ctx, sdkext.MethodStoragePrune, sdkext.StoragePruneParams{
 		AgentID: agentID, Before: before,
 	}, &res)
 	return res.RowsDeleted, err

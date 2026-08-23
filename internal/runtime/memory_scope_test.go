@@ -11,6 +11,7 @@
 package runtime
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -156,5 +157,48 @@ func TestNoArchiveIsEmptyRatherThanAnError(t *testing.T) {
 	entries, err := e.MemoryList("ws_a", "assistant", 10)
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("nil archive: entries=%+v err=%v", entries, err)
+	}
+}
+
+type contextArchive struct {
+	frozenArchive
+	searchCalled bool
+	listCalled   bool
+}
+
+func (a *contextArchive) ArchiveContext(ctx context.Context, entry memory.Entry) error {
+	return ctx.Err()
+}
+func (a *contextArchive) SearchContext(ctx context.Context, agentID, query string, limit int) ([]memory.Entry, error) {
+	a.searchCalled = true
+	return nil, ctx.Err()
+}
+func (a *contextArchive) ReadByScopeContext(ctx context.Context, agentID, sessionID string, scope memory.Scope, limit int) ([]memory.Entry, error) {
+	return nil, ctx.Err()
+}
+func (a *contextArchive) ReadGlobalContext(ctx context.Context, agentID string, limit int) ([]memory.Entry, error) {
+	a.listCalled = true
+	return nil, ctx.Err()
+}
+func (a *contextArchive) PruneContext(ctx context.Context, agentID string, before time.Time) (int64, error) {
+	return 0, ctx.Err()
+}
+
+var _ sdkstorage.ContextMemoryBackend = (*contextArchive)(nil)
+
+func TestMemoryReadsPropagateCallerCancellation(t *testing.T) {
+	archive := &contextArchive{}
+	e := &Engine{archive: archive}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := e.MemorySearchContext(ctx, wsroot.PersonalWorkspaceID, "assistant", "note", 10); !errors.Is(err, context.Canceled) {
+		t.Fatalf("search error = %v, want context canceled", err)
+	}
+	if _, err := e.MemoryListContext(ctx, wsroot.PersonalWorkspaceID, "assistant", 10); !errors.Is(err, context.Canceled) {
+		t.Fatalf("list error = %v, want context canceled", err)
+	}
+	if !archive.searchCalled || !archive.listCalled {
+		t.Fatalf("context surface calls: search=%v list=%v", archive.searchCalled, archive.listCalled)
 	}
 }

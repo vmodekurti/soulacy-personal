@@ -3965,9 +3965,9 @@ func (s *Server) handleListMemory(c *fiber.Ctx) error {
 	var entries interface{}
 	var err error
 	if query != "" {
-		entries, err = s.engine.MemorySearch(workspaceID, agentID, query, 200)
+		entries, err = s.engine.MemorySearchContext(c.UserContext(), workspaceID, agentID, query, 200)
 	} else {
-		entries, err = s.engine.MemoryList(workspaceID, agentID, 200)
+		entries, err = s.engine.MemoryListContext(c.UserContext(), workspaceID, agentID, 200)
 	}
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
