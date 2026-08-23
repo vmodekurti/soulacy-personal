@@ -748,6 +748,14 @@ var postgresSchema = []string{
 		id TEXT PRIMARY KEY CHECK (id ~ '^aud_[a-f0-9]{32}$'), actor_subject TEXT NOT NULL, request_id TEXT NOT NULL,
 		action TEXT NOT NULL, resource_type TEXT NOT NULL, resource_id TEXT NOT NULL,
 		before_data JSONB NOT NULL, after_data JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL)`,
+	// Audit reads are keyset-paginated. These indexes match the actual scopes:
+	// tenant audit resolves workspace-owned resource IDs; platform audit filters
+	// lifecycle actions; investigations commonly filter an actor. There is no
+	// denormalized workspace_id column to index, so claiming such an index would
+	// not accelerate the queries Soulacy actually executes.
+	`CREATE INDEX IF NOT EXISTS tenant_mutation_audit_resource_created ON tenant_mutation_audit(resource_type,resource_id,created_at DESC,id DESC)`,
+	`CREATE INDEX IF NOT EXISTS tenant_mutation_audit_action_created ON tenant_mutation_audit(action,created_at DESC,id DESC)`,
+	`CREATE INDEX IF NOT EXISTS tenant_mutation_audit_actor_created ON tenant_mutation_audit(actor_subject,created_at DESC,id DESC)`,
 	`CREATE INDEX IF NOT EXISTS memberships_lookup_active ON memberships(workspace_id,user_id) WHERE status='active'`,
 	`CREATE INDEX IF NOT EXISTS identities_subject_active ON identities(external_subject,user_id) WHERE status='active'`,
 }

@@ -13,6 +13,7 @@ import (
 
 var ErrAlreadyBootstrapped = errors.New("tenant catalog is already bootstrapped")
 var ErrBootstrapBlocked = errors.New("tenant catalog is partially initialized")
+var ErrSelfServiceAlreadyProvisioned = errors.New("this identity already belongs to a workspace")
 
 type BootstrapState struct {
 	Required      bool  `json:"required"`
@@ -135,7 +136,19 @@ func (s *PostgresStore) BootstrapFirstOwner(ctx context.Context, mutation Mutati
 // after initial bootstrap. Unlike BootstrapFirstOwner it does not require an
 // empty catalog, and it never grants the platform actor membership.
 func (s *PostgresStore) ProvisionOrganization(ctx context.Context, mutation Mutation, req BootstrapRequest) (BootstrapResult, error) {
-	return s.provisionTenant(ctx, mutation, "tenant.provision", req, "")
+	return s.provisionTenant(ctx, mutation, "tenant.provision", req, "", "")
+}
+
+// ProvisionSelfServiceOrganization binds tenant ownership to the already
+// linked, verified OIDC user. The subject-specific advisory lock and membership
+// check live inside the creation transaction, making retries and concurrent
+// signup tabs safe without a separate mutable signup record.
+func (s *PostgresStore) ProvisionSelfServiceOrganization(ctx context.Context, mutation Mutation, subject string, req BootstrapRequest) (BootstrapResult, error) {
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		return BootstrapResult{}, errors.New("verified signup subject is required")
+	}
+	return s.provisionTenant(ctx, mutation, "tenant.self_service_provision", req, "", subject)
 }
 
 // ProvisionWorkspace adds a workspace to an existing organization and assigns
@@ -160,10 +173,10 @@ func (s *PostgresStore) ProvisionWorkspace(ctx context.Context, mutation Mutatio
 		WorkspaceSlug: req.WorkspaceSlug,
 		OwnerEmail:    req.OwnerEmail, OwnerDisplayName: req.OwnerDisplayName,
 		WorkspaceLogo: req.WorkspaceLogo,
-	}, organizationID)
+	}, organizationID, "")
 }
 
-func (s *PostgresStore) provisionTenant(ctx context.Context, mutation Mutation, action string, req BootstrapRequest, existingOrganizationID string) (BootstrapResult, error) {
+func (s *PostgresStore) provisionTenant(ctx context.Context, mutation Mutation, action string, req BootstrapRequest, existingOrganizationID, selfServiceSubject string) (BootstrapResult, error) {
 	if s == nil || s.pool == nil {
 		return BootstrapResult{}, errors.New("tenancy store is unavailable")
 	}
@@ -188,11 +201,35 @@ func (s *PostgresStore) provisionTenant(ctx context.Context, mutation Mutation, 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	lockKey := "soulacy:provision:" + existingOrganizationID
-	if existingOrganizationID == "" {
+	if selfServiceSubject != "" {
+		lockKey = "soulacy:self-service-provision:" + selfServiceSubject
+	} else if existingOrganizationID == "" {
 		lockKey = "soulacy:provision-organizations"
 	}
 	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, lockKey); err != nil {
 		return BootstrapResult{}, err
+	}
+	if selfServiceSubject != "" {
+		var verifiedEmail, currentDisplayName string
+		if err = tx.QueryRow(ctx, `SELECT COALESCE(normalized_email,''),display_name FROM users WHERE id=$1 FOR UPDATE`, selfServiceSubject).Scan(&verifiedEmail, &currentDisplayName); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return BootstrapResult{}, errors.New("verified signup identity was not found")
+			}
+			return BootstrapResult{}, err
+		}
+		if verifiedEmail == "" || verifiedEmail != req.OwnerEmail {
+			return BootstrapResult{}, errors.New("signup email does not match the verified identity")
+		}
+		var alreadyMember bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM memberships WHERE user_id=$1)`, selfServiceSubject).Scan(&alreadyMember); err != nil {
+			return BootstrapResult{}, err
+		}
+		if alreadyMember {
+			return BootstrapResult{}, ErrSelfServiceAlreadyProvisioned
+		}
+		if req.OwnerDisplayName == "" {
+			req.OwnerDisplayName = currentDisplayName
+		}
 	}
 	result := BootstrapResult{Organization: Organization{ID: existingOrganizationID, Name: req.OrganizationName, LogoDataURL: req.OrganizationLogo}, Workspace: Workspace{ID: newID("ws"), Name: req.WorkspaceName, LogoDataURL: req.WorkspaceLogo, IdentityStatus: "pending"}, User: User{Email: req.OwnerEmail, DisplayName: req.OwnerDisplayName}}
 	if result.Organization.ID == "" {
@@ -223,6 +260,9 @@ func (s *PostgresStore) provisionTenant(ctx context.Context, mutation Mutation, 
 	}
 	if err != nil {
 		return BootstrapResult{}, err
+	}
+	if selfServiceSubject != "" && result.User.ID != selfServiceSubject {
+		return BootstrapResult{}, errors.New("signup identity ownership could not be verified")
 	}
 	result.Membership = StoredMembership{ID: newID("mem"), OrganizationID: result.Organization.ID, WorkspaceID: result.Workspace.ID, UserID: result.User.ID, Role: RoleOwner, Status: MembershipActive, Email: result.User.Email, DisplayName: result.User.DisplayName}
 	if _, err = tx.Exec(ctx, `INSERT INTO workspaces(id,slug,organization_id,name,logo_data_url,identity_status) VALUES($1,$2,$3,$4,$5,'pending')`, result.Workspace.ID, result.Workspace.Slug, result.Organization.ID, result.Workspace.Name, nullableString(result.Workspace.LogoDataURL)); err != nil {

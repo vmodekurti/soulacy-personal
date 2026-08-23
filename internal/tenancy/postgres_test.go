@@ -21,6 +21,7 @@ func TestPostgresSchemaContainsTenantIntegrityAndAuditConstraints(t *testing.T) 
 		"CREATE TABLE IF NOT EXISTS workspace_identity_providers",
 		"CREATE TABLE IF NOT EXISTS workspace_setup_tokens",
 		"CREATE TABLE IF NOT EXISTS tenant_mutation_audit",
+		"tenant_mutation_audit_resource_created", "tenant_mutation_audit_action_created", "tenant_mutation_audit_actor_created",
 		"FOREIGN KEY(workspace_id,organization_id) REFERENCES workspaces(id,organization_id)",
 		"UNIQUE(provider, external_subject)", "users_normalized_email_unique",
 		"provider=LOWER(BTRIM(provider))",
@@ -190,6 +191,21 @@ func TestPostgresTenantLifecycleIntegration(t *testing.T) {
 	unverified, err := store.LinkOIDCIdentity(ctx, "https://issuer.example", "unverified-subject", "alice@example.com", false, "Unverified")
 	if err != nil || unverified == user.ID {
 		t.Fatalf("unverified email attached to existing account: %q, %v", unverified, err)
+	}
+	signupUser, err := store.LinkOIDCIdentity(ctx, "https://issuer.example", "new-customer", "founder@example.com", true, "Founder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	signupResult, err := store.ProvisionSelfServiceOrganization(ctx, Mutation{ActorSubject: signupUser, RequestID: "req-self-service"}, signupUser, BootstrapRequest{
+		OrganizationName: "Founder Co", WorkspaceName: "AI Operations", OwnerEmail: "founder@example.com", OwnerDisplayName: "Founder",
+	})
+	if err != nil || signupResult.User.ID != signupUser || signupResult.Membership.Role != RoleOwner || signupResult.SetupToken == "" {
+		t.Fatalf("self-service provision = %#v, %v", signupResult, err)
+	}
+	if _, err = store.ProvisionSelfServiceOrganization(ctx, Mutation{ActorSubject: signupUser, RequestID: "req-self-service-retry"}, signupUser, BootstrapRequest{
+		OrganizationName: "Second Co", WorkspaceName: "Second", OwnerEmail: "founder@example.com", OwnerDisplayName: "Founder",
+	}); err != ErrSelfServiceAlreadyProvisioned {
+		t.Fatalf("duplicate self-service provision error = %v", err)
 	}
 	memberA, err := store.CreateMembership(ctx, mutation, orgA.ID, wsA.ID, user.ID, RoleOwner)
 	if err != nil {

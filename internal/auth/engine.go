@@ -60,6 +60,12 @@ type Config struct {
 
 	// OIDCScopes defaults to openid, profile, email.
 	OIDCScopes []string
+
+	// AllowUnprovisionedOIDC permits a cryptographically verified global OIDC
+	// identity with a verified email to receive an onboarding-only session when
+	// it has no workspace membership. Gateway routing confines that principal
+	// to self-service signup; it is never accepted by workspace middleware.
+	AllowUnprovisionedOIDC bool
 }
 
 func (c *Config) applyDefaults() {

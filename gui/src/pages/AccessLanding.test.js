@@ -29,6 +29,15 @@ describe('public access landing', () => {
     expect(document.querySelector('.deployment-admin-link')?.getAttribute('href')).toBe('/admin')
   })
 
+  it('offers self-service workspace creation only when enabled', () => {
+    render({ signupEnabled: true })
+    expect(document.querySelector('.signup-link')?.getAttribute('href')).toBe('/signup')
+    app.$destroy()
+    target.innerHTML = ''
+    app = new AccessLanding({ target, props: { signupEnabled: false } })
+    expect(document.querySelector('.signup-link')).toBeNull()
+  })
+
   it('turns a safe OAuth error code into an actionable message', () => {
     history.replaceState({}, '', '/?auth_error=not_authorized')
     render()

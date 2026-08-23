@@ -983,16 +983,17 @@ func (a *App) wireAuth(stack *closerStack) (*auth.Engine, error) {
 	accessTTL, _ := time.ParseDuration(cfg.Auth.JWTAccessTTL)
 	refreshTTL, _ := time.ParseDuration(cfg.Auth.JWTRefreshTTL)
 	authEngine, authErr := auth.New(auth.Config{
-		Mode:             cfg.Auth.Mode,
-		JWTSecret:        cfg.Auth.JWTSecret,
-		JWTAccessTTL:     accessTTL,
-		JWTRefreshTTL:    refreshTTL,
-		OIDCIssuer:       cfg.Auth.OIDCIssuer,
-		OIDCAudience:     cfg.Auth.OIDCAudience,
-		OIDCClientID:     cfg.Auth.OIDCClientID,
-		OIDCClientSecret: cfg.Auth.OIDCClientSecret,
-		OIDCRedirectURL:  cfg.Auth.OIDCRedirectURL,
-		OIDCScopes:       cfg.Auth.OIDCScopes,
+		Mode:                   cfg.Auth.Mode,
+		JWTSecret:              cfg.Auth.JWTSecret,
+		JWTAccessTTL:           accessTTL,
+		JWTRefreshTTL:          refreshTTL,
+		OIDCIssuer:             cfg.Auth.OIDCIssuer,
+		OIDCAudience:           cfg.Auth.OIDCAudience,
+		OIDCClientID:           cfg.Auth.OIDCClientID,
+		OIDCClientSecret:       cfg.Auth.OIDCClientSecret,
+		OIDCRedirectURL:        cfg.Auth.OIDCRedirectURL,
+		OIDCScopes:             cfg.Auth.OIDCScopes,
+		AllowUnprovisionedOIDC: cfg.Signup.Enabled,
 	}, cfg.Server.APIKey, log)
 	if authErr != nil {
 		return nil, fmt.Errorf("auth engine: %w", authErr)

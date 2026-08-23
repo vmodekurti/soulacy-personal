@@ -308,7 +308,11 @@ func TestProtectedRouteArchitectureIncludesAuthWorkspaceAndAuthorizationGates(t 
 		// Authenticated but intentionally pre-workspace: invitees do not have a
 		// membership until this endpoint succeeds.
 		"/api/v1/invitations/accept": true,
-		"/api/v1/shared/:token":      true,
+		// Signup configuration is public. Session inspection and creation are
+		// authenticated but intentionally pre-workspace: the verified onboarding
+		// principal has no membership until creation succeeds.
+		"/api/v1/signup/config": true, "/api/v1/signup": true,
+		"/api/v1/shared/:token": true,
 	}
 	var protected []fiber.Route
 	for _, route := range s.app.GetRoutes(true) {

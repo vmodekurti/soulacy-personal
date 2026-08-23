@@ -57,6 +57,7 @@ type setupConfig struct {
 	QueueBackend        string
 	NATSURL             string
 	NATSCredentials     string
+	RedisURL            string
 	SharedArtifactStore string
 	ExecutorBackend     string
 	KMSProvider         string
@@ -132,6 +133,7 @@ func runSetupWizard() error {
 		DeploymentMode:  config.DeploymentModePersonal,
 		QueueBackend:    "memory",
 		NATSURL:         "tls://nats.internal:4222",
+		RedisURL:        "rediss://redis.internal:6379",
 		ExecutorBackend: "process",
 		Host:            "127.0.0.1",
 		Port:            1947,
@@ -261,6 +263,7 @@ func setupDeployment(cfg *setupConfig) {
 		cfg.AWSKMSKeyID = prompt("  AWS KMS key id or alias", "alias/soulacy-production")
 	}
 	if cfg.DeploymentMode == config.DeploymentModeScale {
+		cfg.RedisURL = prompt("  Redis URL for shared rate limits", cfg.RedisURL)
 		cfg.SharedArtifactStore = prompt("  Shared artifact store (for example s3://bucket/prefix)", "")
 	}
 }
@@ -587,6 +590,10 @@ func writeConfig(cfg *setupConfig) error {
 			queueSection += fmt.Sprintf("\n  nats_credentials: %q", cfg.NATSCredentials)
 		}
 	}
+	rateLimitSection := ""
+	if cfg.DeploymentMode == config.DeploymentModeScale {
+		rateLimitSection = fmt.Sprintf("rate_limit:\n  enabled: true\n  per_user_rpm: 60\n  backend: redis\n  redis_url: %q\n", cfg.RedisURL)
+	}
 	credentialSection := "credentials:\n  kms_provider: local"
 	if cfg.DeploymentMode != config.DeploymentModePersonal {
 		if cfg.KMSProvider == "vault-transit" {
@@ -651,6 +658,8 @@ executor:
 
 %s
 
+%s
+
 memory:
   max_history: 50
   vector_db: ""
@@ -678,6 +687,7 @@ log:
 		executorSection,
 		queueSection,
 		credentialSection,
+		rateLimitSection,
 		cfg.LLMProvider,
 		nvidiaSection, ollamaSection, openaiSection, anthropicSection,
 		searchSection,

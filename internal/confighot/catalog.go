@@ -171,6 +171,12 @@ var Sections = []Section{
 			"token in flight at a moment nobody chose; a restart makes that a deliberate, announced event",
 	},
 	{
+		Field: "Signup", Key: "signup", Scope: ScopePlatform, Apply: ApplyBoot,
+		Reason: "enabling self-service signup changes which identities the authentication engine may issue " +
+			"onboarding sessions for; applying only the route setting live would leave authentication and " +
+			"routing with different enrollment policies",
+	},
+	{
 		Field: "Deployment", Key: "deployment", Scope: ScopePlatform, Apply: ApplyBoot,
 		Reason: "the mode decides whether tenancy, durable schedules and approval enforcement exist at " +
 			"all; changing it live would leave half the process in one mode and half in the other",

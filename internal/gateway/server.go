@@ -930,6 +930,12 @@ func (s *Server) buildApp() *fiber.App {
 	// Invitation acceptance requires an authenticated identity but deliberately
 	// runs before workspace resolution: a new user has no membership yet.
 	app.Post("/api/v1/invitations/accept", s.authWithPluginTokens(), s.rlUserMW(), s.handleAcceptInvitation)
+	// Verified global OIDC identities may create their first tenant before a
+	// workspace context exists. The onboarding principal accepted here cannot
+	// pass workspaceContextMW and therefore reaches no tenant API prematurely.
+	app.Get("/api/v1/signup/config", s.handleSignupConfig)
+	app.Get("/api/v1/signup", s.authWithPluginTokens(), s.rlUserMW(), s.handleSignupSession)
+	app.Post("/api/v1/signup", s.authWithPluginTokens(), s.rlUserMW(), s.handleSelfServiceSignup)
 
 	// --- Shared read-only chat sessions (public — no auth) ---
 	// A share token is an unguessable capability, so the read view bypasses the

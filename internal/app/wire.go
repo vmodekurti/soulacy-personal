@@ -731,7 +731,7 @@ func (a *App) Run(parent context.Context) error {
 	// Construction + every host-side capability (plugin GUI mounts, installer,
 	// safety pipeline, registries, voice, workboard/ratelimit/apikey/dlq/history
 	// stores, file watcher) is delegated to wireGateway.
-	srv := a.wireGateway(gatewayDeps{
+	srv, err := a.wireGateway(gatewayDeps{
 		ws:                  ws,
 		engine:              engine,
 		loader:              loader,
@@ -763,6 +763,9 @@ func (a *App) Run(parent context.Context) error {
 		costGovernor:        a.costGovernor,
 		tenantPool:          tenantPool,
 	}, stack)
+	if err != nil {
+		return err
+	}
 	if config.IsMultiUserMode(cfg.DeploymentMode()) {
 		if tenantPool == nil {
 			return fmt.Errorf("entitlements require the tenancy PostgreSQL pool")

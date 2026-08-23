@@ -141,6 +141,17 @@ llm:
 #     # base_url: ""              # override for Azure/compatible endpoints
 
 # ── SaaS billing (Team/Scale) ─────────────────────────────────────────────────
+# Self-service signup uses the deployment's global OIDC provider to verify the
+# first owner, creates one organization per new identity, then hands off to the
+# workspace's one-time identity-provider setup. See docs/configuration/auth.md.
+# signup:
+#     enabled: true
+# rate_limit:
+#     enabled: true
+#     per_user_rpm: 60
+#     backend: redis             # Shared across gateway replicas; never degrades to memory
+#     redis_url: rediss://redis.internal:6379
+#
 # billing:
 #     provider: stripe
 #     enforcement: strict

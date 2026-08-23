@@ -51,6 +51,10 @@ func validTeamConfig() *Config {
 	c.Runtime.Sandbox.Image = c.Executor.DockerImage
 	c.Runtime.Sandbox.ContainerRuntime = "runsc"
 	c.Runtime.Sandbox.RequireSignedImage = true
+	c.RateLimit.Enabled = true
+	c.RateLimit.PerUserRPM = 60
+	c.RateLimit.Backend = "redis"
+	c.RateLimit.RedisURL = "rediss://redis.internal:6379"
 	return c
 }
 
@@ -201,6 +205,38 @@ func TestValidateOIDCInteractiveRequirements(t *testing.T) {
 	c.Auth.OIDCRedirectURL = "http://agents.example/api/v1/auth/oidc/callback"
 	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "HTTPS") {
 		t.Fatalf("public HTTP callback accepted: %v", err)
+	}
+}
+
+func TestValidateSelfServiceSignupRequiresMultiUserGlobalOIDC(t *testing.T) {
+	c := validConfig()
+	c.Signup.Enabled = true
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "deployment.mode=team or scale") || !strings.Contains(err.Error(), "global OIDC") {
+		t.Fatalf("unsafe self-service signup accepted: %v", err)
+	}
+	c = validTeamConfig()
+	c.Signup.Enabled = true
+	c.Auth.OIDCIssuer = "https://issuer.example"
+	c.Auth.OIDCClientID = "soulacy"
+	c.RateLimit.Enabled = true
+	c.RateLimit.PerUserRPM = 60
+	c.RateLimit.Backend = "redis"
+	c.RateLimit.RedisURL = "rediss://redis.example:6379"
+	c.Auth.OIDCScopes = []string{"openid", "profile"}
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "email scope") {
+		t.Fatalf("signup without verified-email scope accepted: %v", err)
+	}
+	c.Auth.OIDCScopes = []string{"openid", "profile", "email"}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("valid self-service signup rejected: %v", err)
+	}
+}
+
+func TestValidateRejectsUnknownRateLimitBackend(t *testing.T) {
+	c := validConfig()
+	c.RateLimit.Backend = "shared-ish"
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "rate_limit.backend") {
+		t.Fatalf("unknown rate limit backend error = %v", err)
 	}
 }
 

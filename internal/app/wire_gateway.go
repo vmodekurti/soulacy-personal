@@ -9,7 +9,9 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -101,7 +103,7 @@ type gatewayDeps struct {
 // wireGateway builds the gateway server and attaches every host capability.
 // Owned resources push their Close on stack. Returns the configured server,
 // ready for Listen().
-func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
+func (a *App) wireGateway(d gatewayDeps, stack *closerStack) (*gateway.Server, error) {
 	cfg, cfgPath, log := a.cfg, a.cfgPath, a.log
 	ws := d.ws
 
@@ -356,6 +358,9 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 		rlCfg = ratelimit.DefaultConfig()
 	}
 	if rlManager, rlErr := ratelimit.New(rlCfg, log); rlErr != nil {
+		if config.IsMultiUserMode(cfg.DeploymentMode()) || strings.EqualFold(rlCfg.Backend, "redis") {
+			return nil, fmt.Errorf("rate limiter: %w", rlErr)
+		}
 		log.Warn("rate limiter init failed, running without rate limiting", zap.Error(rlErr))
 	} else {
 		stack.pushClose("rate-limiter", rlManager)
@@ -451,7 +456,7 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 	}
 
 	stack.pushClose("gateway-learning", srv)
-	return srv
+	return srv, nil
 }
 
 // readinessProbes builds the dependency checks for GET /ready.

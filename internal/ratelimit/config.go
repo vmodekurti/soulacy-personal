@@ -51,8 +51,8 @@ type Config struct {
 	PerAgentTokensDay int `mapstructure:"per_agent_tokens_day"`
 
 	// Backend selects the RPM counter backend: "memory" (default) or "redis".
-	// "redis" requires RedisURL to be set; falls back to memory on connection
-	// failure so the gateway can still start.
+	// "redis" requires RedisURL to be set and reachable at startup. Explicit
+	// shared enforcement never degrades to a per-process counter.
 	Backend string `mapstructure:"backend"`
 
 	// RedisURL is the Redis connection string used when Backend == "redis".

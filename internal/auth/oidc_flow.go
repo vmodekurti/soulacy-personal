@@ -452,8 +452,9 @@ func (e *Engine) issueOIDCSessionWithProvider(ctx context.Context, idToken, nonc
 		return "", "", 0, oidcStage("id_token", errors.New("invalid ID token"))
 	}
 	localSubject := deterministicOIDCSubject(validator.issuer, claims.Subject)
+	emailVerified := oidcEmailVerified(idToken)
 	if e.identityLinker != nil {
-		localSubject, err = e.identityLinker.LinkOIDCIdentity(ctx, validator.issuer, claims.Subject, claims.Email, oidcEmailVerified(idToken), claims.Email)
+		localSubject, err = e.identityLinker.LinkOIDCIdentity(ctx, validator.issuer, claims.Subject, claims.Email, emailVerified, claims.Email)
 		if err != nil || localSubject == "" {
 			stage := "identity_link"
 			var safeStager interface{ SafeStage() string }
@@ -484,6 +485,14 @@ func (e *Engine) issueOIDCSessionWithProvider(ctx context.Context, idToken, nonc
 		id.PrincipalKind = "user"
 	} else {
 		id, ok = e.tokenIdentityFor(ctx, base)
+	}
+	if !ok && workspaceID == "" && e.cfg.AllowUnprovisionedOIDC && emailVerified && strings.TrimSpace(claims.Email) != "" {
+		// This principal has proved identity but has no tenant authority. It is
+		// intentionally distinguishable from a normal user session, and the only
+		// route accepting it is the pre-workspace signup boundary.
+		id = base
+		id.PrincipalKind = "onboarding"
+		ok = true
 	}
 	if !ok {
 		return "", "", 0, oidcStage("membership", errors.New("no active workspace membership"))
@@ -599,7 +608,7 @@ func safeLoopbackRedirect(raw string) bool {
 // open redirect. Add named application destinations only as they are needed.
 func safeGUIReturnTo(raw string) string {
 	switch strings.TrimSpace(raw) {
-	case "/admin/setup", "/admin/setup?resume=workspace-create", "/admin/login":
+	case "/admin/setup", "/admin/setup?resume=workspace-create", "/admin/login", "/signup":
 		return strings.TrimSpace(raw)
 	default:
 		return "/#auth=success"

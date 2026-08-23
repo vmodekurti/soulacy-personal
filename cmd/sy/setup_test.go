@@ -32,6 +32,7 @@ func TestWriteConfigDeploymentModesLoadSuccessfully(t *testing.T) {
 				PostgresDSN:         "postgres://db/soulacy",
 				NATSURL:             "tls://queue:4222",
 				NATSCredentials:     "/run/secrets/nats.creds",
+				RedisURL:            "rediss://redis.internal:6379",
 				SharedArtifactStore: "s3://soulacy-artifacts/prod",
 			}
 			if mode != config.DeploymentModePersonal {

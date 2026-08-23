@@ -161,6 +161,7 @@ func runOnboardWizard() error {
 			}
 		}
 		if mode == config.DeploymentModeScale {
+			settings.RedisURL = prompt("  Redis URL for shared rate limits", defaultString(cfg.RateLimit.RedisURL, "rediss://redis.internal:6379"))
 			settings.SharedArtifactStore = prompt("  Shared artifact store URL", cfg.Deployment.SharedArtifactStore)
 		}
 		if err := patchDeploymentSettings(cfgPath, settings); err != nil {
@@ -737,6 +738,7 @@ type deploymentSettings struct {
 	APIKey              string
 	NATSURL             string
 	NATSCredentials     string
+	RedisURL            string
 	SharedArtifactStore string
 	KMSProvider         string
 	AWSKMSKeyID         string
@@ -800,6 +802,11 @@ func patchDeploymentSettings(path string, settings deploymentSettings) error {
 		setScalar(server, "api_key", settings.APIKey, yaml.DoubleQuotedStyle)
 	}
 	if settings.Mode == config.DeploymentModeScale {
+		rateLimit := ensureMapping(root, "rate_limit")
+		setBool(rateLimit, "enabled", true)
+		setScalar(rateLimit, "per_user_rpm", "60", 0)
+		setScalar(rateLimit, "backend", "redis", 0)
+		setScalar(rateLimit, "redis_url", settings.RedisURL, yaml.DoubleQuotedStyle)
 		setScalar(deployment, "shared_artifact_store", settings.SharedArtifactStore, yaml.DoubleQuotedStyle)
 	}
 	return saveConfigDoc(path, doc)

@@ -16,6 +16,7 @@
   import WorkspaceAccess from './pages/WorkspaceAccess.svelte'
   import WorkspaceLogin from './pages/WorkspaceLogin.svelte'
   import AccessLanding from './pages/AccessLanding.svelte'
+  import Signup from './pages/Signup.svelte'
   import {
     loadWalkthroughState, startWalkthrough, shouldAutoStart,
   } from './lib/walkthrough/store.js'
@@ -25,7 +26,8 @@
   const platformAdminPath = ['/admin', '/admin/platform'].includes(location.pathname.replace(/\/+$/, '') || '/')
 	const workspacePathMatch = location.pathname.match(/^\/w\/([^/]+)(?:\/setup)?\/?$/)
   const workspaceLoginPath = location.pathname.replace(/\/+$/, '') === '/workspace-login'
-  const standaloneAdminPath = adminSetupPath || platformAdminPath || workspaceLoginPath || !!workspacePathMatch
+  const signupPath = location.pathname.replace(/\/+$/, '') === '/signup'
+  const standaloneAdminPath = adminSetupPath || platformAdminPath || workspaceLoginPath || signupPath || !!workspacePathMatch
   let shareToken = ''   // set from #share/<token> — renders the public read-only view
   let pluginPages = []   // nav entries for mounted plugin UIs (E8)
   let showKeyModal = false
@@ -38,6 +40,7 @@
   let pageLoadStale = false
   let pageLoadSeq = 0
   let oidcEnabled = false
+  let signupEnabled = false
   let loginDiscoveryComplete = false
   let showRestartModal = false
   let restarting = false
@@ -233,9 +236,10 @@
   // ── Login screen (shown full-screen while $authRequired) ──────────────────
 	async function discoverLogin() {
 		try {
-			const res = await fetch('/api/v1/auth/oidc/config')
+			const [res, signupRes] = await Promise.all([fetch('/api/v1/auth/oidc/config'), fetch('/api/v1/signup/config')])
 			const cfg = res.ok ? await res.json() : null
 			oidcEnabled = !!cfg?.enabled
+			signupEnabled = signupRes.ok && !!(await signupRes.json())?.enabled
 		} catch (_) { oidcEnabled = false }
 		finally { loginDiscoveryComplete = true }
 	}
@@ -309,12 +313,14 @@
   <PlatformAdmin />
 {:else if workspaceLoginPath}
   <WorkspaceLogin />
+{:else if signupPath}
+  <Signup />
 {:else if workspacePathMatch}
   <WorkspaceAccess workspaceID={decodeURIComponent(workspacePathMatch[1])} />
 {:else if shareToken}
   <ShareView token={shareToken} />
 {:else if $authRequired}
-  <AccessLanding />
+  <AccessLanding {signupEnabled} />
 {/if}
 
 {#if showRestartModal && !multiUserWorkspace}

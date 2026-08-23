@@ -36,6 +36,41 @@ bootstrap. Newly provisioned Team and Scale workspaces can activate their own
 locked provider configuration through a one-time setup link. See
 [Workspace identity and login](workspace-identity.md).
 
+## Self-service SaaS signup
+
+Hosted Team and Scale deployments can let a verified customer create their
+first organization without giving them any deployment-level authority:
+
+```yaml
+signup:
+  enabled: true
+
+rate_limit:
+  enabled: true
+  per_user_rpm: 60
+  backend: redis
+  redis_url: rediss://redis.internal:6379
+```
+
+The global OIDC provider must return a verified email and the configured
+scopes must include `email`. A new identity initially receives a short-lived
+`onboarding` session that is accepted only by `GET/POST /api/v1/signup`; it
+cannot pass workspace middleware. Tenant creation binds the owner to that
+verified local user, allows one first organization per identity under a
+database transaction lock, and ignores any client-supplied owner address.
+After creation, normal session refresh resolves the new owner membership and
+the browser continues to the expiring, one-time workspace identity setup link.
+
+With strict billing enabled, the new owner can reach the billing remediation
+routes while all ordinary mutations and agent runs remain blocked until Stripe
+activates the workspace entitlement.
+
+Self-service signup requires the shared Redis limiter. Soulacy uses one atomic
+Lua operation for increment plus first-write expiry, refuses to start a
+multi-user deployment when the configured Redis counter cannot connect, and
+returns `503` if shared enforcement becomes unavailable at runtime. It never
+silently falls back to a per-replica memory counter.
+
 ## Authentication flow
 
 Requests are authenticated in this order:

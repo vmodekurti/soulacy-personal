@@ -118,6 +118,11 @@ type Config struct {
 
 	// Auth controls request authentication. See AuthConfig for details.
 	Auth AuthConfig `mapstructure:"auth"`
+	// Signup controls verified, self-service tenant creation in hosted Team and
+	// Scale deployments. Authentication still comes from Auth's global OIDC
+	// provider; this section only decides whether a verified outsider may create
+	// their first organization.
+	Signup SignupConfig `mapstructure:"signup"`
 
 	// Credentials configures the encrypted credential vault.
 	Credentials CredentialsConfig `mapstructure:"credentials"`
@@ -737,6 +742,13 @@ type AuthConfig struct {
 	OIDCClientSecret string   `mapstructure:"oidc_client_secret"` // prefer SOULACY_AUTH_OIDC_CLIENT_SECRET
 	OIDCRedirectURL  string   `mapstructure:"oidc_redirect_url"`  // optional public callback override
 	OIDCScopes       []string `mapstructure:"oidc_scopes"`        // defaults to openid/profile/email
+}
+
+// SignupConfig enables the public SaaS acquisition path. It is deliberately
+// small: plan selection and payment remain provider-independent billing
+// concerns, while signup establishes only identity and tenant ownership.
+type SignupConfig struct {
+	Enabled bool `mapstructure:"enabled"`
 }
 
 // QueueConfig selects the durable message queue backend.

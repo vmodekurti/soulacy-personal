@@ -6,6 +6,7 @@ package ratelimit
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -309,24 +310,12 @@ func TestManagerClose(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// NewRedisCounter stub
+// Redis counter startup
 // ---------------------------------------------------------------------------
 
-// TestNewRedisCounterFallsBackToMemory verifies the Redis stub returns a
-// working Counter (the MemoryCounter fallback) without requiring Redis.
-func TestNewRedisCounterFallsBackToMemory(t *testing.T) {
-	c, err := NewRedisCounter("redis://localhost:6379")
-	if err != nil {
-		t.Fatalf("NewRedisCounter: %v", err)
-	}
-	defer c.Close()
-
-	n, err := c.Increment(context.Background(), "redis-stub-key", time.Minute)
-	if err != nil {
-		t.Fatalf("Increment on fallback counter: %v", err)
-	}
-	if n != 1 {
-		t.Errorf("first increment = %d, want 1", n)
+func TestNewRedisCounterRejectsInvalidURL(t *testing.T) {
+	if _, err := NewRedisCounter("not-a-redis-url"); err == nil {
+		t.Fatal("invalid Redis URL was accepted")
 	}
 }
 
@@ -334,20 +323,59 @@ func TestNewRedisCounterFallsBackToMemory(t *testing.T) {
 // Manager — redis backend selection path
 // ---------------------------------------------------------------------------
 
-// TestNewManagerRedisBackendFallsBack verifies that specifying backend=redis
-// with a URL that cannot connect still produces a usable Manager (memory fallback).
-func TestNewManagerRedisBackendFallsBack(t *testing.T) {
+// TestNewManagerRedisBackendFailsClosedAtStartup verifies an unavailable
+// shared counter never silently becomes a per-replica memory counter.
+func TestNewManagerRedisBackendFailsClosedAtStartup(t *testing.T) {
 	cfg := Config{
 		Enabled:    true,
 		PerUserRPM: 10,
 		Backend:    "redis",
-		RedisURL:   "redis://localhost:6379",
+		RedisURL:   "redis://127.0.0.1:1",
 	}
-	m, err := New(cfg, zap.NewNop())
+	if m, err := New(cfg, zap.NewNop()); err == nil {
+		_ = m.Close()
+		t.Fatal("unavailable Redis silently degraded")
+	}
+}
+
+func TestRedisBackendNameIsNormalizedAndNeverFallsBack(t *testing.T) {
+	_, err := New(Config{
+		Enabled:    true,
+		PerUserRPM: 10,
+		Backend:    " Redis ",
+		RedisURL:   "redis://127.0.0.1:1",
+	}, zap.NewNop())
+	if err == nil {
+		t.Fatal("case-insensitive Redis backend silently fell back to memory")
+	}
+}
+
+func TestUnknownBackendIsRejected(t *testing.T) {
+	_, err := New(Config{Enabled: true, PerUserRPM: 10, Backend: "shared-ish"}, zap.NewNop())
+	if err == nil {
+		t.Fatal("unknown backend should not silently select memory")
+	}
+}
+
+type failingCounter struct{}
+
+func (failingCounter) Increment(context.Context, string, time.Duration) (int64, error) {
+	return 0, errors.New("redis unavailable")
+}
+func (failingCounter) Close() error { return nil }
+
+func TestRedisRuntimeFailureReturnsServiceUnavailable(t *testing.T) {
+	m := &Manager{cfg: Config{Enabled: true, PerUserRPM: 10, Backend: "redis"}, counter: failingCounter{}, log: zap.NewNop(), failClosed: true}
+	app := newRPMApp(m.UserRPMMiddleware())
+	req, _ := http.NewRequest(http.MethodGet, "/ping", nil)
+	resp, err := app.Test(req)
 	if err != nil {
-		t.Fatalf("New with redis backend: %v", err)
+		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = m.Close() })
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable || resp.Header.Get("Retry-After") != "1" {
+		t.Fatalf("counter failure status=%d retry=%q", resp.StatusCode, resp.Header.Get("Retry-After"))
+	}
 }
 
 // TestNewManagerRedisBackendEmptyURLErrors verifies an error is returned when

@@ -115,6 +115,30 @@ func (c *Config) Validate() error {
 			}
 		}
 	}
+	if c.Signup.Enabled {
+		if !IsMultiUserMode(c.DeploymentMode()) {
+			errs = append(errs, fmt.Errorf("signup.enabled requires deployment.mode=team or scale"))
+		}
+		if c.Auth.Mode != "jwt" || strings.TrimSpace(c.Auth.OIDCIssuer) == "" || strings.TrimSpace(c.Auth.OIDCClientID) == "" {
+			errs = append(errs, fmt.Errorf("signup.enabled requires global OIDC (auth.mode=jwt, auth.oidc_issuer, and auth.oidc_client_id)"))
+		}
+		hasEmailScope := false
+		for _, scope := range c.Auth.OIDCScopes {
+			if strings.EqualFold(strings.TrimSpace(scope), "email") {
+				hasEmailScope = true
+				break
+			}
+		}
+		if len(c.Auth.OIDCScopes) > 0 && !hasEmailScope {
+			errs = append(errs, fmt.Errorf("signup.enabled requires the OIDC email scope"))
+		}
+		if !c.RateLimit.Enabled || c.RateLimit.PerUserRPM <= 0 || !strings.EqualFold(strings.TrimSpace(c.RateLimit.Backend), "redis") || strings.TrimSpace(c.RateLimit.RedisURL) == "" {
+			errs = append(errs, fmt.Errorf("signup.enabled requires an enabled Redis-backed per-user rate limit"))
+		}
+	}
+	if backend := strings.ToLower(strings.TrimSpace(c.RateLimit.Backend)); backend != "" && backend != "memory" && backend != "redis" {
+		errs = append(errs, fmt.Errorf("rate_limit.backend must be memory or redis"))
+	}
 	dur("queue.nats_ack_wait", c.Queue.NATSAckWait)
 	dur("voice.timeout", c.Voice.Timeout)
 	dur("billing.webhook_tolerance", c.Billing.WebhookTolerance)

@@ -194,6 +194,9 @@ func (c *Config) deploymentIssueGroups() ([]string, []string) {
 		}
 	}
 	if mode == DeploymentModeScale {
+		if !c.RateLimit.Enabled || c.RateLimit.PerUserRPM <= 0 || strings.ToLower(strings.TrimSpace(c.RateLimit.Backend)) != "redis" || strings.TrimSpace(c.RateLimit.RedisURL) == "" {
+			infrastructureIssues = append(infrastructureIssues, "rate_limit: scale deployments require an enabled Redis-backed per-user RPM limit shared by every gateway replica")
+		}
 		if strings.TrimSpace(c.Deployment.SharedArtifactStore) == "" {
 			// Still required, and the message now says what setting it does
 			// and does not buy. No runtime code reads this value yet — it is

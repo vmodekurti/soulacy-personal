@@ -2,6 +2,7 @@ package ratelimit
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -24,6 +25,10 @@ type Manager struct {
 	cfg     Config
 	counter Counter
 	log     *zap.Logger
+	// A shared counter is a SaaS enforcement boundary. If it becomes
+	// unavailable, allowing traffic would silently multiply every configured
+	// limit by the replica count, so explicit Redis mode fails closed.
+	failClosed bool
 
 	// Per-user 24h token buckets. Key: JWT subject (or "anon" for open mode).
 
@@ -31,33 +36,35 @@ type Manager struct {
 }
 
 // New creates a Manager from cfg. The Counter backend is selected from
-// cfg.Backend ("memory" or "redis"). Falls back to memory on Redis failure.
+// cfg.Backend ("memory" or "redis"). Explicit Redis mode fails startup rather
+// than silently multiplying limits by the number of gateway replicas.
 func New(cfg Config, log *zap.Logger) (*Manager, error) {
 	var counter Counter
 	var err error
+	backend := strings.ToLower(strings.TrimSpace(cfg.Backend))
+	cfg.Backend = backend
 
-	switch cfg.Backend {
+	switch backend {
 	case "redis":
 		if cfg.RedisURL == "" {
 			return nil, fmt.Errorf("ratelimit: backend=redis but redis_url is empty")
 		}
 		counter, err = NewRedisCounter(cfg.RedisURL)
 		if err != nil {
-			log.Warn("ratelimit: Redis unavailable, falling back to in-memory counter",
-				zap.String("url", cfg.RedisURL), zap.Error(err))
-			counter = NewMemoryCounter()
+			return nil, err
 		} else {
 			log.Info("ratelimit: Redis counter ready", zap.String("url", cfg.RedisURL))
 		}
-	default: // "memory" or empty
+	case "memory", "":
 		counter = NewMemoryCounter()
 		log.Info("ratelimit: in-memory counter ready")
+	default:
+		return nil, fmt.Errorf("ratelimit: unsupported backend %q", cfg.Backend)
 	}
 
 	m := &Manager{
-		cfg:     cfg,
-		counter: counter,
-		log:     log,
+		cfg: cfg, counter: counter, log: log,
+		failClosed: backend == "redis",
 	}
 	return m, nil
 }
@@ -116,6 +123,10 @@ func (m *Manager) UserRPMMiddleware() fiber.Handler {
 		count, err := m.counter.Increment(c.Context(), key, time.Minute)
 		if err != nil {
 			m.log.Warn("ratelimit: counter error", zap.Error(err))
+			if m.failClosed {
+				c.Set("Retry-After", "1")
+				return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "rate limit service unavailable"})
+			}
 			return c.Next() // fail open
 		}
 		if count > limit {
@@ -161,6 +172,10 @@ func (m *Manager) AgentRPMMiddleware() fiber.Handler {
 		count, err := m.counter.Increment(c.Context(), key, time.Minute)
 		if err != nil {
 			m.log.Warn("ratelimit: counter error", zap.Error(err))
+			if m.failClosed {
+				c.Set("Retry-After", "1")
+				return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "rate limit service unavailable"})
+			}
 			return c.Next()
 		}
 		if count > limit {

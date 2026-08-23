@@ -128,6 +128,44 @@ func TestOIDCPKCEFlowValidatesStateNonceAndVerifiedSubject(t *testing.T) {
 	}
 }
 
+func TestVerifiedOIDCOutsiderReceivesOnboardingOnlySession(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuerURL := "https://signup.example"
+	validator := &OIDCValidator{
+		issuer: issuerURL, audience: "client", client: &http.Client{},
+		keys: map[string]any{"key": &key.PublicKey}, allowedAlgorithms: map[string]struct{}{"RS256": {}}, quit: make(chan struct{}),
+	}
+	issuer, _ := newIssuer("01234567890123456789012345678901", time.Minute, time.Hour)
+	defer issuer.Close()
+	engine := &Engine{cfg: Config{AllowUnprovisionedOIDC: true}, issuer: issuer, identityLinker: &captureLinker{}}
+	engine.SetTokenIdentityResolver(func(context.Context, string) (TokenIdentity, bool) { return TokenIdentity{}, false })
+
+	sign := func(verified bool) string {
+		claims := jwt.MapClaims{"iss": issuerURL, "aud": "client", "sub": "new-customer", "email": "owner@example.test", "email_verified": verified, "exp": time.Now().Add(time.Minute).Unix()}
+		token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		token.Header["kid"] = "key"
+		signed, signErr := token.SignedString(key)
+		if signErr != nil {
+			t.Fatal(signErr)
+		}
+		return signed
+	}
+	access, _, _, err := engine.issueOIDCSessionWithProvider(context.Background(), sign(true), "", "", "", "", validator)
+	if err != nil {
+		t.Fatalf("verified outsider was denied onboarding: %v", err)
+	}
+	claims, err := issuer.VerifyAccess(access)
+	if err != nil || claims.PrincipalKind != "onboarding" || claims.WorkspaceID != "" {
+		t.Fatalf("onboarding claims = %#v, err=%v", claims, err)
+	}
+	if _, _, _, err = engine.issueOIDCSessionWithProvider(context.Background(), sign(false), "", "", "", "", validator); err == nil || oidcFailureStage(err) != "membership" {
+		t.Fatalf("unverified-email outsider received a session: %v", err)
+	}
+}
+
 func newFiberRequest(method, path string, body []byte) *http.Request {
 	req, _ := http.NewRequest(method, path, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -201,6 +239,9 @@ func TestGUIReturnDestinationIsAllowlisted(t *testing.T) {
 	}
 	if got := safeGUIReturnTo("/admin/setup?resume=workspace-create"); got != "/admin/setup?resume=workspace-create" {
 		t.Fatalf("workspace-create return = %q", got)
+	}
+	if got := safeGUIReturnTo("/signup"); got != "/signup" {
+		t.Fatalf("signup return = %q", got)
 	}
 	for _, candidate := range []string{"https://evil.example", "//evil.example", "/admin/setup?next=https://evil.example", "/"} {
 		if got := safeGUIReturnTo(candidate); got != "/#auth=success" {

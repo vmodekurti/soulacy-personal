@@ -186,6 +186,7 @@ func TestPatchDeploymentSettingsScaleIsIdempotent(t *testing.T) {
 		APIKey:              "sy_admin",
 		NATSURL:             "tls://queue:4222",
 		NATSCredentials:     "/run/secrets/nats.creds",
+		RedisURL:            "rediss://redis.internal:6379",
 		KMSProvider:         "awskms",
 		AWSKMSKeyID:         "alias/soulacy-test",
 		SharedArtifactStore: "s3://soulacy-artifacts/prod",
@@ -201,6 +202,10 @@ func TestPatchDeploymentSettingsScaleIsIdempotent(t *testing.T) {
 	}
 	if got := m["deployment"].(map[string]any)["shared_artifact_store"]; got != settings.SharedArtifactStore {
 		t.Fatalf("shared artifact store = %v", got)
+	}
+	rateLimit := m["rate_limit"].(map[string]any)
+	if rateLimit["enabled"] != true || rateLimit["backend"] != "redis" || rateLimit["redis_url"] != settings.RedisURL {
+		t.Fatalf("unexpected rate limiter: %#v", rateLimit)
 	}
 }
 

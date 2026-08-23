@@ -2,8 +2,12 @@ package ratelimit
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 // ---------------------------------------------------------------------------
@@ -103,44 +107,55 @@ func (c *MemoryCounter) sweep() {
 }
 
 // ---------------------------------------------------------------------------
-// Redis counter (optional — requires go get github.com/redis/go-redis/v9)
+// Redis fixed-window counter
 // ---------------------------------------------------------------------------
-// RedisCounter is intentionally left as a stub that falls back to the memory
-// counter at construction time. To enable it:
-//
-//  1. go get github.com/redis/go-redis/v9
-//  2. Replace the stub body of NewRedisCounter with the real implementation
-//     shown in the comment below.
-//
-// Stub implementation — always falls back to MemoryCounter:
 
-// NewRedisCounter attempts to connect to Redis at url. On failure (or when
-// the redis package is not yet imported) it logs and returns a MemoryCounter.
-//
-// Real implementation (uncomment after go get github.com/redis/go-redis/v9):
-//
-//	func NewRedisCounter(url string) (Counter, error) {
-//	    opt, err := redis.ParseURL(url)
-//	    if err != nil { return nil, err }
-//	    rdb := redis.NewClient(opt)
-//	    if err := rdb.Ping(context.Background()).Err(); err != nil {
-//	        rdb.Close()
-//	        return nil, fmt.Errorf("redis ping: %w", err)
-//	    }
-//	    return &redisCounter{rdb: rdb}, nil
-//	}
-//
-//	type redisCounter struct { rdb *redis.Client }
-//	func (r *redisCounter) Increment(ctx context.Context, key string, window time.Duration) (int64, error) {
-//	    pipe := r.rdb.Pipeline()
-//	    incr := pipe.Incr(ctx, key)
-//	    pipe.Expire(ctx, key, window)
-//	    if _, err := pipe.Exec(ctx); err != nil { return 0, err }
-//	    return incr.Val(), nil
-//	}
-//	func (r *redisCounter) Close() error { return r.rdb.Close() }
-func NewRedisCounter(_ string) (Counter, error) {
-	// TODO: implement after go get github.com/redis/go-redis/v9
-	// For now, fall back to in-memory so the gateway can start without Redis.
-	return NewMemoryCounter(), nil
+// incrementWindowScript makes INCR plus first-write expiry one atomic Redis
+// operation. A plain pipeline is not sufficient: a process dying between the
+// two commands can leave an immortal counter, and resetting expiry on every
+// request turns a fixed window into a lockout that never ends under traffic.
+var incrementWindowScript = redis.NewScript(`
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then
+  redis.call('PEXPIRE', KEYS[1], ARGV[1])
+end
+return count
+`)
+
+type redisCounter struct{ client *redis.Client }
+
+func NewRedisCounter(rawURL string) (Counter, error) {
+	options, err := redis.ParseURL(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("ratelimit: parse Redis URL: %w", err)
+	}
+	client := redis.NewClient(options)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err = client.Ping(ctx).Err(); err != nil {
+		_ = client.Close()
+		return nil, fmt.Errorf("ratelimit: Redis ping: %w", err)
+	}
+	return &redisCounter{client: client}, nil
+}
+
+func (r *redisCounter) Increment(ctx context.Context, key string, window time.Duration) (int64, error) {
+	if r == nil || r.client == nil {
+		return 0, errors.New("ratelimit: Redis counter is unavailable")
+	}
+	if window <= 0 {
+		return 0, errors.New("ratelimit: window must be positive")
+	}
+	count, err := incrementWindowScript.Run(ctx, r.client, []string{"soulacy:ratelimit:" + key}, window.Milliseconds()).Int64()
+	if err != nil {
+		return 0, fmt.Errorf("ratelimit: Redis increment: %w", err)
+	}
+	return count, nil
+}
+
+func (r *redisCounter) Close() error {
+	if r == nil || r.client == nil {
+		return nil
+	}
+	return r.client.Close()
 }

@@ -164,6 +164,13 @@ type PlatformProvisioner interface {
 	ProvisionWorkspace(ctx context.Context, mutation Mutation, organizationID string, request WorkspaceProvisionRequest) (BootstrapResult, error)
 }
 
+// SelfServiceProvisioner creates exactly one first tenant for a verified local
+// user. Implementations must derive the owner from subject and reject a second
+// attempt; callers are not trusted to nominate an arbitrary owner email.
+type SelfServiceProvisioner interface {
+	ProvisionSelfServiceOrganization(ctx context.Context, mutation Mutation, subject string, request BootstrapRequest) (BootstrapResult, error)
+}
+
 // PlatformLifecycleManager changes tenant availability without granting the
 // deployment operator membership in tenant data.
 type PlatformLifecycleManager interface {
