@@ -4112,6 +4112,11 @@ func (s *Server) providerErrJSON(c *fiber.Ctx, status int, providerID string, er
 	})
 }
 
+// agentValidationProviderProbeTimeout bounds provider model discovery during
+// validation. Keep this request-path policy in one place so personal and
+// workspace-scoped provider inventories cannot drift.
+const agentValidationProviderProbeTimeout = 3 * time.Second
+
 func (s *Server) agentValidationOptions(ctx context.Context) agentvalidate.Options {
 	opts := agentvalidate.Options{Config: s.config(), ProviderModels: map[string][]string{}}
 	if s.llmRouter == nil {
@@ -4126,7 +4131,7 @@ func (s *Server) agentValidationOptions(ctx context.Context) agentvalidate.Optio
 		if p == nil {
 			continue
 		}
-		probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		probeCtx, cancel := context.WithTimeout(ctx, agentValidationProviderProbeTimeout)
 		models, err := p.Models(probeCtx)
 		cancel()
 		if err == nil && len(models) > 0 {
@@ -4190,7 +4195,7 @@ func (s *Server) probeValidationProvider(ctx context.Context, id string, provide
 	if provider == nil || len(models[id]) > 0 {
 		return
 	}
-	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	probeCtx, cancel := context.WithTimeout(ctx, agentValidationProviderProbeTimeout)
 	available, err := provider.Models(probeCtx)
 	cancel()
 	if err == nil && len(available) > 0 {
