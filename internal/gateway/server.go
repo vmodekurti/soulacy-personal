@@ -75,6 +75,7 @@ import (
 	"github.com/soulacy/soulacy/internal/queue/dlq"
 	"github.com/soulacy/soulacy/internal/ratelimit"
 	"github.com/soulacy/soulacy/internal/rbac"
+	"github.com/soulacy/soulacy/internal/runcontrol"
 	"github.com/soulacy/soulacy/internal/runs"
 	"github.com/soulacy/soulacy/internal/runtime"
 	"github.com/soulacy/soulacy/internal/scheduler"
@@ -560,6 +561,12 @@ func (s *Server) SetArtifactStore(st artifactstore.Store) {
 	s.artifactObjects = st
 	if st != nil && s.hub != nil {
 		s.hub.AddObserver(s.observeTerminalArtifacts)
+	}
+}
+
+func (s *Server) SetSharedRunControl(st *runcontrol.Store) {
+	if s.runReg != nil {
+		s.runReg.SetShared(st)
 	}
 }
 

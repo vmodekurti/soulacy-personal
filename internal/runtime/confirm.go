@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -351,6 +352,46 @@ func (b *ConfirmBroker) Decision(ctx context.Context, workspaceID, callID string
 		return approvals.Approval{}, false
 	}
 	return approval, true
+}
+
+// Await listens to both the local rendezvous channel and the shared durable
+// decision. The latter is what lets an approval handled by replica B release
+// an engine blocked on replica A.
+func (b *ConfirmBroker) Await(ctx context.Context, workspaceID, callID string, local <-chan bool) (bool, error) {
+	b.mu.Lock()
+	store := b.store
+	b.mu.Unlock()
+	if store == nil {
+		select {
+		case approved := <-local:
+			return approved, nil
+		case <-ctx.Done():
+			return false, ctx.Err()
+		}
+	}
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case approved := <-local:
+			return approved, nil
+		case <-ticker.C:
+			decision, err := store.Get(ctx, wsroot.Normalize(workspaceID), callID)
+			if err != nil {
+				continue
+			}
+			switch decision.Status {
+			case approvals.StatusApproved:
+				return true, nil
+			case approvals.StatusDenied:
+				return false, nil
+			case approvals.StatusExpired, approvals.StatusInvalidated:
+				return false, fmt.Errorf("approval %s became %s: %s", callID, decision.Status, decision.DecisionReason)
+			}
+		case <-ctx.Done():
+			return false, ctx.Err()
+		}
+	}
 }
 
 func fromRecord(a approvals.Approval) PendingApproval {

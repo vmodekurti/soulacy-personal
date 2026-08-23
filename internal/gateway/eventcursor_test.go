@@ -3,6 +3,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -10,9 +11,30 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/config"
+	"github.com/soulacy/soulacy/internal/storage"
 	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/message"
 )
+
+type fakeDurableReplay struct{ window storage.EventReplayWindow }
+
+func (f fakeDurableReplay) ReplayEvents(_ context.Context, workspaceID string, after uint64, limit int) (storage.EventReplayWindow, error) {
+	out := f.window
+	out.Events = nil
+	for _, event := range f.window.Events {
+		if event.Event.WorkspaceID == workspaceID && event.ID > after {
+			out.Events = append(out.Events, event)
+		}
+	}
+	if len(out.Events) > limit {
+		out.HasMore = true
+		out.Events = out.Events[:limit]
+	}
+	return out, nil
+}
+func (f fakeDurableReplay) LatestEventCursor(context.Context, string) (uint64, error) {
+	return f.window.Latest, nil
+}
 
 func hubWithReplay(t *testing.T, capacity int) *EventHub {
 	t.Helper()
@@ -60,6 +82,28 @@ func TestAReconnectingClientResumesFromItsCursor(t *testing.T) {
 	}
 	if len(again) != 0 {
 		t.Fatalf("a caught-up client replayed %d events", len(again))
+	}
+}
+
+func TestAClientCanResumeOnAnotherReplicaFromDurableCursor(t *testing.T) {
+	h := hubWithReplay(t, 16)
+	h.durableReplay = fakeDurableReplay{window: storage.EventReplayWindow{
+		Oldest: 40, Latest: 42,
+		Events: []storage.CursorEvent{
+			{ID: 41, Event: message.Event{Type: "tool.result", WorkspaceID: "ws_a", SessionID: "s1"}},
+			{ID: 42, Event: message.Event{Type: "message.out", WorkspaceID: "ws_a", SessionID: "s1"}},
+		},
+	}}
+	h.SetEventAuthorizer(func(eventPrincipal, message.Event) bool { return true })
+	replayed, latest, err := h.ResumeSince(subscriber("ws_a", "operator:alice", "operator", false), formatCursor("ws_a", 40))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(replayed) != 2 || latest != formatCursor("ws_a", 42) {
+		t.Fatalf("cross-replica replay=%d latest=%q", len(replayed), latest)
+	}
+	if got := h.currentCursor("ws_a"); got != formatCursor("ws_a", 42) {
+		t.Fatalf("current cursor=%q", got)
 	}
 }
 

@@ -42,6 +42,7 @@ import (
 	"github.com/soulacy/soulacy/internal/queue/dlq"
 	"github.com/soulacy/soulacy/internal/ratelimit"
 	"github.com/soulacy/soulacy/internal/rbac"
+	"github.com/soulacy/soulacy/internal/runcontrol"
 	"github.com/soulacy/soulacy/internal/runs"
 	"github.com/soulacy/soulacy/internal/runtime"
 	"github.com/soulacy/soulacy/internal/sandbox"
@@ -111,6 +112,16 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) (*gateway.Server, e
 	// Created BEFORE the watcher so the watcher can wire its OnPyChange hook
 	// to the server's tool-catalog cache.
 	srv := gateway.New(cfg, cfgPath, d.engine, d.loader, d.llmRouter, d.chanReg, d.sched, d.httpAdapter, d.waAdapter, d.skillLoader, d.actionBackend, d.mcpClient, d.hub, log)
+	if config.IsMultiUserMode(cfg.DeploymentMode()) {
+		controlCtx, controlCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		control, controlErr := runcontrol.OpenPostgres(controlCtx, cfg.Storage.PostgresDSN)
+		controlCancel()
+		if controlErr != nil {
+			return nil, fmt.Errorf("shared chat run control: %w", controlErr)
+		}
+		stack.pushClose("chat-run-control", control)
+		srv.SetSharedRunControl(control)
+	}
 	if raw := strings.TrimSpace(cfg.Deployment.SharedArtifactStore); raw != "" {
 		artifactCtx, artifactCancel := context.WithTimeout(context.Background(), 15*time.Second)
 		objects, objectErr := artifactstore.OpenStore(artifactCtx, raw)

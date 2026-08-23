@@ -30,8 +30,8 @@ type RunRef struct {
 // Approvals with no run_id are skipped: they block a call that was never
 // recorded as a durable run, so there is no run record to repair.
 func (s *Store) PendingRunRefs(ctx context.Context) ([]RunRef, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT DISTINCT workspace_id, run_id FROM tool_approvals WHERE status = ? AND run_id <> ''`,
+	rows, err := s.db.QueryContext(ctx, s.query(
+		`SELECT DISTINCT workspace_id, run_id FROM tool_approvals WHERE status = ? AND run_id <> ''`),
 		StatusPending)
 	if err != nil {
 		return nil, fmt.Errorf("approvals: pending run refs: %w", err)

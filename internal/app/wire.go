@@ -351,6 +351,15 @@ func (a *App) Run(parent context.Context) error {
 	eventPublisher := events.NewPublisher(queueBackend, log)
 	stack.pushClose("event-publisher", eventPublisher)
 	hub.SetEventPublisher(eventPublisher)
+	if cfg.DeploymentMode() == config.DeploymentModeScale {
+		relay, relayErr := events.StartReplicaRelay(parent, queueBackend, eventPublisher.NodeID(), hub.EmitReplica, log)
+		if relayErr != nil {
+			return fmt.Errorf("scale event relay: %w", relayErr)
+		}
+		if relay != nil {
+			stack.push("event-replica-relay", relay.Unsubscribe)
+		}
+	}
 	log.Info("event publishing ready", zap.String("subject", "soulacy.events.>"))
 
 	// ── Outbound webhooks (extensibility E2) ──────────────────────────────────
@@ -569,17 +578,23 @@ func (a *App) Run(parent context.Context) error {
 
 	// ── Durable approval records (MU-022) ───────────────────────────────────
 	var approvalStore *approvals.Store
-	if store, aerr := approvals.Open(ws.DB("approvals")); aerr != nil {
+	var approvalOpenErr error
+	if config.IsMultiUserMode(cfg.DeploymentMode()) {
+		approvalStore, approvalOpenErr = approvals.OpenPostgres(ctx, cfg.Storage.PostgresDSN)
+	} else {
+		approvalStore, approvalOpenErr = approvals.Open(ws.DB("approvals"))
+	}
+	if approvalOpenErr != nil {
 		if config.IsMultiUserMode(cfg.DeploymentMode()) {
 			// In Team/Scale the in-memory fallback is not a lesser option, it
 			// is the wrong one: without a workspace on the record, listing and
 			// deciding fall back to a tenant-free map. Refuse rather than
 			// serve every workspace's paused calls to every admin.
-			return fmt.Errorf("durable approvals are required outside personal mode: %w", aerr)
+			return fmt.Errorf("shared durable approvals are required outside personal mode: %w", approvalOpenErr)
 		}
-		log.Warn("durable approvals unavailable; approvals will not survive a restart", zap.Error(aerr))
+		log.Warn("durable approvals unavailable; approvals will not survive a restart", zap.Error(approvalOpenErr))
 	} else {
-		approvalStore = store
+		store := approvalStore
 		stack.pushClose("approvals", store)
 		engine.Broker().SetStore(store, log)
 		// A restart severs every channel a paused run was waiting on, so a
@@ -594,17 +609,27 @@ func (a *App) Run(parent context.Context) error {
 		// premise that stops holding the instant the approval is invalidated,
 		// leaving a run nobody and nothing can move. See
 		// runs.Store.ResolveOrphanedPause.
-		blocked, berr := store.PendingRunRefs(ctx)
-		if berr != nil {
-			log.Warn("runs blocked on stale approvals could not be listed", zap.Error(berr))
-		}
-		if n, ierr := store.InvalidateAllPending(ctx, approvals.ReasonWorkspaceRestarting); ierr != nil {
-			log.Warn("stale approvals could not be closed", zap.Error(ierr))
-		} else if n > 0 {
-			log.Info("approvals left unanswered by a previous process were closed", zap.Int("closed", n))
-		}
-		if runStore != nil {
-			recovered = append(recovered, a.resolveOrphanedPauses(ctx, runStore, blocked)...)
+		if config.IsMultiUserMode(cfg.DeploymentMode()) {
+			// Starting one replica must not invalidate approvals whose engines
+			// are live on another. Expiry remains safe to sweep globally.
+			if n, sweepErr := store.SweepExpired(ctx); sweepErr != nil {
+				log.Warn("expired shared approvals could not be swept", zap.Error(sweepErr))
+			} else if n > 0 {
+				log.Info("expired shared approvals swept", zap.Int("closed", n))
+			}
+		} else {
+			blocked, berr := store.PendingRunRefs(ctx)
+			if berr != nil {
+				log.Warn("runs blocked on stale approvals could not be listed", zap.Error(berr))
+			}
+			if n, ierr := store.InvalidateAllPending(ctx, approvals.ReasonWorkspaceRestarting); ierr != nil {
+				log.Warn("stale approvals could not be closed", zap.Error(ierr))
+			} else if n > 0 {
+				log.Info("approvals left unanswered by a previous process were closed", zap.Int("closed", n))
+			}
+			if runStore != nil {
+				recovered = append(recovered, a.resolveOrphanedPauses(ctx, runStore, blocked)...)
+			}
 		}
 	}
 

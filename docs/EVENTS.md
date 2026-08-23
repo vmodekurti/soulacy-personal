@@ -11,6 +11,7 @@ log shippers — subscribe to these instead of polling the API.
 {
   "schema": 1,
   "id": "9b2f6c1e-…",                  // unique per emission (UUID v4)
+  "workspace_id": "ws_customer-a",     // tenant routing boundary
   "type": "run.failed",
   "agent_id": "support-bot",
   "session_id": "wb-12-1765043210",
@@ -19,8 +20,9 @@ log shippers — subscribe to these instead of polling the API.
 }
 ```
 
-`data` carries the type-specific payload (the engine's event payload,
-verbatim). It may be an object, a string, or null.
+`data` carries the redacted type-specific payload. It may be an object, a
+string, or null. `workspace_id` is required for multi-tenant routing; consumers
+must authorize that boundary before exposing an envelope to an end user.
 
 ## Event types
 

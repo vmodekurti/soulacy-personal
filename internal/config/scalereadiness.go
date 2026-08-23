@@ -26,12 +26,7 @@ package config
 // describes are silent: none of them produce an error, they produce wrong
 // answers.
 func ScaleReplicationBlockers() []string {
-	return []string{
-		"a run paused for approval can only be released by the replica it paused on",
-		"cancelling a CHAT OR STREAM run only works if the request reaches the replica executing " +
-			"it; durable runs are cancelled through their record and do reach any replica",
-		"a client reconnecting to a different replica cannot resume the event stream where it left off",
-	}
+	return nil
 }
 
 // resolvedScaleBlockers is the list this file used to carry and no longer
@@ -53,12 +48,15 @@ func ScaleReplicationBlockers() []string {
 //     and chat artifacts are copied to the configured shared S3/POSIX object
 //     store, metadata carries opaque object references, downloads read through
 //     that store, and workspace erasure deletes the tenant object prefix.
+//   - "a run paused for approval can only be released by the replica it paused
+//     on" — Team/Scale approvals now use PostgreSQL and blocked engines observe
+//     the shared decision as well as their local rendezvous channel.
+//   - "cancelling a chat or stream run only works on its executing replica" —
+//     active chat controls and cancellation requests now use a workspace-scoped
+//     PostgreSQL mailbox polled by the context-owning replica.
+//   - "a reconnecting client cannot resume on another replica" — events fan
+//     out through the deployment queue for live delivery and PostgreSQL action
+//     event IDs provide shared, workspace-bound replay cursors.
 //
-// The cancellation entry was also NARROWED rather than removed: durable runs
-// have always been cancelled through their record, which any replica can
-// write and the executing one polls. Only chat and stream runs, which live in
-// an in-memory registry, are replica-local. An overstated hazard costs the
-// list its credibility as surely as a missing one.
-
 // ScaleIsReplicationReady reports whether the blocker list is empty.
 func ScaleIsReplicationReady() bool { return len(ScaleReplicationBlockers()) == 0 }

@@ -94,8 +94,8 @@ func (s *Store) invalidate(ctx context.Context, where, reason string, args ...an
 	// condition that makes an invalidation lose to a real decision is not
 	// something a caller should be able to omit.
 	args = append(args, StatusPending)
-	res, err := s.db.ExecContext(ctx,
-		`UPDATE tool_approvals SET status = ?, decision_reason = ?, updated_at = ? WHERE `+where,
+	res, err := s.db.ExecContext(ctx, s.query(
+		`UPDATE tool_approvals SET status = ?, decision_reason = ?, updated_at = ? WHERE `+where),
 		append([]any{StatusInvalidated, reason, now}, args...)...)
 	if err != nil {
 		return 0, fmt.Errorf("approvals: invalidate: %w", err)
@@ -114,9 +114,9 @@ func (s *Store) invalidate(ctx context.Context, where, reason string, args ...an
 // interpreting.
 func (s *Store) SweepExpired(ctx context.Context) (int, error) {
 	now := time.Now().UTC()
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.db.ExecContext(ctx, s.query(
 		`UPDATE tool_approvals SET status = ?, decision_reason = ?, updated_at = ?
-          WHERE status = ? AND expires_at <= ?`,
+          WHERE status = ? AND expires_at <= ?`),
 		StatusExpired, ReasonExpired, now, StatusPending, now)
 	if err != nil {
 		return 0, fmt.Errorf("approvals: sweep: %w", err)

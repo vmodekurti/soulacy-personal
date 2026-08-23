@@ -11,6 +11,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"sync"
@@ -21,10 +22,12 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/storage"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/message"
 )
 
 const wsPrincipalKey = "ws_event_principal"
+const eventReplayQueryTimeout = 5 * time.Second
 
 // eventPrincipal is copied into the upgraded connection's locals. It contains
 // no credential material and is immutable for the connection lifetime.
@@ -75,7 +78,8 @@ type EventHub struct {
 
 	// replay retains recent events per workspace so a reconnecting client can
 	// resume from a bounded cursor (MU-026 criterion 4). See eventcursor.go.
-	replay *replayBuffer
+	replay        *replayBuffer
+	durableReplay storage.DurableEventReplay
 
 	// activity is the E4c hung-session tracker. Every event that passes through
 	// Emit() is noted so /activity/running can render "session hung" callouts
@@ -121,13 +125,17 @@ func (h *EventHub) eventPublisherOrNil() eventPublisher {
 
 // NewEventHub creates an EventHub. actions may be nil to disable persistence.
 func NewEventHub(log *zap.Logger, actions storage.ActionLogBackend) *EventHub {
-	return &EventHub{
+	h := &EventHub{
 		clients:  make(map[*wsClient]struct{}),
 		log:      log,
 		actions:  actions,
 		replay:   newReplayBuffer(defaultReplayPerWorkspace),
 		activity: newSessionActivityTracker(),
 	}
+	if durable, ok := actions.(storage.DurableEventReplay); ok {
+		h.durableReplay = durable
+	}
+	return h
 }
 
 // RunningSessions returns the current hung-session-aware snapshot. Handlers
@@ -180,6 +188,23 @@ func (h *EventHub) Emit(event message.Event) {
 	h.broadcastEvent(data, event)
 }
 
+// EmitReplica delivers an event already persisted/published by another
+// gateway. It deliberately skips the action log, publisher and observers so
+// the relay cannot create loops or repeat side effects.
+func (h *EventHub) EmitReplica(event message.Event) {
+	if h.activity != nil {
+		h.activity.Note(event)
+	}
+	data, err := json.Marshal(project(event))
+	if err != nil {
+		return
+	}
+	if h.replay != nil {
+		h.replay.Append(event, data)
+	}
+	h.broadcastEvent(data, event)
+}
+
 // ResumeSince replays the events a subscriber missed, re-authorizing each one.
 //
 // Re-authorized rather than replayed as stored: a reconnecting client is a NEW
@@ -188,6 +213,38 @@ func (h *EventHub) Emit(event message.Event) {
 // path with no permission check — which is how a replay feature becomes the
 // leak the live path was careful to prevent.
 func (h *EventHub) ResumeSince(principal eventPrincipal, cursor string) ([][]byte, string, error) {
+	if h != nil && h.durableReplay != nil {
+		cursorWorkspace, requested, err := parseCursor(cursor)
+		if err != nil {
+			return nil, "", err
+		}
+		if cursorWorkspace != wsroot.Normalize(principal.WorkspaceID) {
+			return nil, "", ErrCursorForeign
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), eventReplayQueryTimeout)
+		defer cancel()
+		window, err := h.durableReplay.ReplayEvents(ctx, principal.WorkspaceID, requested, defaultReplayPerWorkspace)
+		if err != nil {
+			return nil, "", err
+		}
+		if requested > window.Latest {
+			return nil, "", ErrCursorUnknown
+		}
+		if (requested > 0 && window.Oldest > requested) || window.HasMore {
+			return nil, "", &ErrCursorGap{WorkspaceID: principal.WorkspaceID, Requested: requested, Oldest: window.Oldest}
+		}
+		out := make([][]byte, 0, len(window.Events))
+		for _, record := range window.Events {
+			if h.authorize != nil && !h.authorize(principal, record.Event) {
+				continue
+			}
+			data, marshalErr := json.Marshal(project(record.Event))
+			if marshalErr == nil {
+				out = append(out, data)
+			}
+		}
+		return out, formatCursor(principal.WorkspaceID, window.Latest), nil
+	}
 	if h == nil || h.replay == nil {
 		return nil, "", nil
 	}
@@ -205,6 +262,21 @@ func (h *EventHub) ResumeSince(principal eventPrincipal, cursor string) ([][]byt
 		out = append(out, entry.data)
 	}
 	return out, latest, nil
+}
+
+func (h *EventHub) currentCursor(workspaceID string) string {
+	workspaceID = wsroot.Normalize(workspaceID)
+	if h != nil && h.durableReplay != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), eventReplayQueryTimeout)
+		defer cancel()
+		if latest, err := h.durableReplay.LatestEventCursor(ctx, workspaceID); err == nil {
+			return formatCursor(workspaceID, latest)
+		}
+	}
+	if h != nil && h.replay != nil {
+		return formatCursor(workspaceID, h.replay.Current(workspaceID))
+	}
+	return formatCursor(workspaceID, 0)
 }
 
 func (h *EventHub) broadcastEvent(data []byte, event message.Event) {
@@ -252,6 +324,9 @@ func (h *EventHub) Handler(conn *fws.Conn) {
 	// it treat replayed events as new ones arriving after it caught up.
 	resumeCursor := strings.TrimSpace(conn.Query("cursor"))
 	latestCursor := resumeCursor
+	if resumeCursor == "" {
+		latestCursor = h.currentCursor(principal.WorkspaceID)
+	}
 	var resumeGap error
 	if resumeCursor != "" {
 		replayed, latest, err := h.ResumeSince(principal, resumeCursor)

@@ -16,11 +16,12 @@ import (
 func TestEnvelope_SchemaV1Shape(t *testing.T) {
 	ts := time.Date(2026, 6, 6, 18, 0, 0, 0, time.UTC)
 	env := NewEnvelope(message.Event{
-		Type:      "run.failed",
-		AgentID:   "bot",
-		SessionID: "wb-1-99",
-		Payload:   map[string]any{"reason": "boom"},
-		Timestamp: ts,
+		Type:        "run.failed",
+		WorkspaceID: "ws-a",
+		AgentID:     "bot",
+		SessionID:   "wb-1-99",
+		Payload:     map[string]any{"reason": "boom"},
+		Timestamp:   ts,
 	})
 
 	if env.Schema != 1 {
@@ -45,7 +46,7 @@ func TestEnvelope_SchemaV1Shape(t *testing.T) {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	for _, key := range []string{"schema", "id", "type", "agent_id", "session_id", "ts", "data"} {
+	for _, key := range []string{"schema", "id", "workspace_id", "type", "agent_id", "session_id", "ts", "data"} {
 		if _, ok := m[key]; !ok {
 			t.Errorf("JSON missing key %q: %s", key, raw)
 		}
@@ -53,6 +54,30 @@ func TestEnvelope_SchemaV1Shape(t *testing.T) {
 	data, _ := m["data"].(map[string]any)
 	if data["reason"] != "boom" {
 		t.Errorf("data = %v", m["data"])
+	}
+}
+
+func TestReplicaRelayFansOutWithoutEchoingOrigin(t *testing.T) {
+	q := queuememory.New()
+	t.Cleanup(func() { _ = q.Close() })
+	p := NewPublisher(q, zap.NewNop())
+	t.Cleanup(func() { _ = p.Close() })
+	received := make(chan message.Event, 1)
+	sub, err := StartReplicaRelay(context.Background(), q, "another-node", func(event message.Event) {
+		received <- event
+	}, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+	p.PublishEvent(message.Event{Type: "message.out", WorkspaceID: "ws-a", AgentID: "bot"})
+	select {
+	case event := <-received:
+		if event.WorkspaceID != "ws-a" || event.Type != "message.out" {
+			t.Fatalf("relayed event=%+v", event)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("replica did not receive event")
 	}
 }
 

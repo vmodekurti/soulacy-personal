@@ -34,13 +34,15 @@ const SubjectPrefix = "soulacy.events."
 
 // Envelope is the versioned wire format for one event.
 type Envelope struct {
-	Schema    int       `json:"schema"`
-	ID        string    `json:"id"`
-	Type      string    `json:"type"`
-	AgentID   string    `json:"agent_id"`
-	SessionID string    `json:"session_id"`
-	TS        time.Time `json:"ts"`
-	Data      any       `json:"data"`
+	Schema      int       `json:"schema"`
+	ID          string    `json:"id"`
+	Source      string    `json:"source,omitempty"`
+	WorkspaceID string    `json:"workspace_id,omitempty"`
+	Type        string    `json:"type"`
+	AgentID     string    `json:"agent_id"`
+	SessionID   string    `json:"session_id"`
+	TS          time.Time `json:"ts"`
+	Data        any       `json:"data"`
 }
 
 // NewEnvelope wraps a message.Event in the schema-v1 envelope.
@@ -62,13 +64,14 @@ func NewEnvelope(ev message.Event) Envelope {
 		ts = time.Now().UTC()
 	}
 	return Envelope{
-		Schema:    SchemaVersion,
-		ID:        uuid.New().String(),
-		Type:      ev.Type,
-		AgentID:   ev.AgentID,
-		SessionID: ev.SessionID,
-		TS:        ts,
-		Data:      redact.Value(ev.Payload),
+		Schema:      SchemaVersion,
+		ID:          uuid.New().String(),
+		WorkspaceID: ev.WorkspaceID,
+		Type:        ev.Type,
+		AgentID:     ev.AgentID,
+		SessionID:   ev.SessionID,
+		TS:          ts,
+		Data:        redact.Value(ev.Payload),
 	}
 }
 
@@ -100,6 +103,7 @@ const (
 type Publisher struct {
 	backend queue.Backend
 	log     *zap.Logger
+	id      string
 
 	queue  chan Envelope
 	stop   chan struct{}
@@ -117,6 +121,7 @@ func NewPublisher(backend queue.Backend, log *zap.Logger) *Publisher {
 	p := &Publisher{
 		backend: backend,
 		log:     log,
+		id:      uuid.NewString(),
 		queue:   make(chan Envelope, publishQueueSize),
 		stop:    make(chan struct{}),
 		cancel:  cancel,
@@ -135,11 +140,37 @@ func (p *Publisher) PublishEvent(ev message.Event) {
 		return
 	}
 	select {
-	case p.queue <- NewEnvelope(ev):
+	case p.queue <- func() Envelope { env := NewEnvelope(ev); env.Source = p.id; return env }():
 	default:
 		p.log.Warn("events: publish buffer full, dropping event",
 			zap.String("type", ev.Type), zap.String("agent", ev.AgentID))
 	}
+}
+
+func (p *Publisher) NodeID() string { return p.id }
+
+// StartReplicaRelay fans queue events back into this gateway's live hub. An
+// ephemeral fan-out subscription gives every replica a copy; source IDs avoid
+// echoing the event back to its origin.
+func StartReplicaRelay(ctx context.Context, backend queue.Backend, localNode string, receive func(message.Event), log *zap.Logger) (queue.Subscription, error) {
+	if backend == nil || receive == nil {
+		return nil, nil
+	}
+	return backend.Subscribe(ctx, SubjectPrefix+">", "", func(m *queue.Message) {
+		var env Envelope
+		if err := json.Unmarshal(m.Data, &env); err != nil {
+			if log != nil {
+				log.Warn("events: replica relay decode failed", zap.Error(err))
+			}
+			_ = m.Ack()
+			return
+		}
+		if env.Source != localNode {
+			receive(message.Event{Type: env.Type, WorkspaceID: env.WorkspaceID, AgentID: env.AgentID,
+				SessionID: env.SessionID, Payload: env.Data, Timestamp: env.TS})
+		}
+		_ = m.Ack()
+	})
 }
 
 func (p *Publisher) run(ctx context.Context) {

@@ -33,9 +33,11 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/soulacy/soulacy/internal/sqlitex"
@@ -167,8 +169,26 @@ CREATE INDEX IF NOT EXISTS idx_approvals_ws_run     ON tool_approvals(workspace_
 CREATE INDEX IF NOT EXISTS idx_approvals_ws_subject ON tool_approvals(workspace_id, requester_subject, created_at DESC);
 `
 
+const postgresSchema = `
+CREATE TABLE IF NOT EXISTS tool_approvals (
+    id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, run_id TEXT NOT NULL DEFAULT '',
+    session_id TEXT NOT NULL DEFAULT '', agent_id TEXT NOT NULL DEFAULT '', tool TEXT NOT NULL,
+    args_redacted TEXT NOT NULL DEFAULT '', reason TEXT NOT NULL DEFAULT '', fingerprint TEXT NOT NULL,
+    requester_subject TEXT NOT NULL DEFAULT '', required_resource TEXT NOT NULL DEFAULT '',
+    required_action TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, decided_by TEXT NOT NULL DEFAULT '',
+    decided_at TIMESTAMPTZ, decision_reason TEXT NOT NULL DEFAULT '', created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_approvals_ws_status ON tool_approvals(workspace_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_approvals_ws_run ON tool_approvals(workspace_id, run_id);
+CREATE INDEX IF NOT EXISTS idx_approvals_ws_subject ON tool_approvals(workspace_id, requester_subject, created_at DESC);
+`
+
 // Store is the SQLite-backed approval record.
-type Store struct{ db *sql.DB }
+type Store struct {
+	db       *sql.DB
+	postgres bool
+}
 
 // Open creates or opens the approval store at path.
 func Open(path string) (*Store, error) {
@@ -192,6 +212,44 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	return &Store{db: db}, nil
+}
+
+// OpenPostgres opens the shared approval authority used by Team and Scale.
+// Decisions written by any gateway become visible to every blocked engine.
+func OpenPostgres(ctx context.Context, dsn string) (*Store, error) {
+	db, err := sql.Open("pgx", strings.TrimSpace(dsn))
+	if err != nil {
+		return nil, fmt.Errorf("approvals: open postgres: %w", err)
+	}
+	db.SetMaxOpenConns(20)
+	db.SetMaxIdleConns(5)
+	if err = db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("approvals: ping postgres: %w", err)
+	}
+	if _, err = db.ExecContext(ctx, postgresSchema); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("approvals: postgres schema: %w", err)
+	}
+	return &Store{db: db, postgres: true}, nil
+}
+
+func (s *Store) query(raw string) string {
+	if s == nil || !s.postgres {
+		return raw
+	}
+	var out strings.Builder
+	index := 1
+	for _, r := range raw {
+		if r == '?' {
+			out.WriteByte('$')
+			out.WriteString(strconv.Itoa(index))
+			index++
+		} else {
+			out.WriteRune(r)
+		}
+	}
+	return out.String()
 }
 
 // Close releases the database.
@@ -231,11 +289,11 @@ func (s *Store) Request(ctx context.Context, req Approval, fullArgs map[string]a
 	if err != nil {
 		return Approval{}, fmt.Errorf("approvals: encode args: %w", err)
 	}
-	if _, err := s.db.ExecContext(ctx, `
+	if _, err := s.db.ExecContext(ctx, s.query(`
 INSERT INTO tool_approvals (id, workspace_id, run_id, session_id, agent_id, tool,
     args_redacted, reason, fingerprint, requester_subject, required_resource, required_action,
     status, decided_by, decided_at, decision_reason, created_at, updated_at, expires_at)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'',NULL,'',?,?,?)`,
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'',NULL,'',?,?,?)`),
 		req.ID, req.WorkspaceID, req.RunID, req.SessionID, req.AgentID, req.Tool,
 		string(encoded), req.Reason, req.Fingerprint, req.RequesterSubject,
 		req.RequiredResource, req.RequiredAction, req.Status,
@@ -248,8 +306,8 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'',NULL,'',?,?,?)`,
 
 // Get returns one approval within a workspace.
 func (s *Store) Get(ctx context.Context, workspaceID, id string) (Approval, error) {
-	row := s.db.QueryRowContext(ctx,
-		selectColumns+` FROM tool_approvals WHERE workspace_id = ? AND id = ?`,
+	row := s.db.QueryRowContext(ctx, s.query(
+		selectColumns+` FROM tool_approvals WHERE workspace_id = ? AND id = ?`),
 		wsroot.Normalize(workspaceID), strings.TrimSpace(id))
 	approval, err := scan(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -263,8 +321,8 @@ func (s *Store) Get(ctx context.Context, workspaceID, id string) (Approval, erro
 // Expired-but-unswept records are filtered out rather than returned with a
 // stale status, so a client never renders a decision it cannot make.
 func (s *Store) ListPending(ctx context.Context, workspaceID string) ([]Approval, error) {
-	rows, err := s.db.QueryContext(ctx,
-		selectColumns+` FROM tool_approvals WHERE workspace_id = ? AND status = ? ORDER BY created_at DESC`,
+	rows, err := s.db.QueryContext(ctx, s.query(
+		selectColumns+` FROM tool_approvals WHERE workspace_id = ? AND status = ? ORDER BY created_at DESC`),
 		wsroot.Normalize(workspaceID), StatusPending)
 	if err != nil {
 		return nil, err
@@ -293,8 +351,8 @@ func (s *Store) ListPending(ctx context.Context, workspaceID string) ([]Approval
 // ListPending it intentionally includes decided and expired records: those are
 // the audit evidence a workspace export is expected to preserve.
 func (s *Store) ListWorkspace(ctx context.Context, workspaceID string) ([]Approval, error) {
-	rows, err := s.db.QueryContext(ctx,
-		selectColumns+` FROM tool_approvals WHERE workspace_id = ? ORDER BY created_at DESC, id DESC`,
+	rows, err := s.db.QueryContext(ctx, s.query(
+		selectColumns+` FROM tool_approvals WHERE workspace_id = ? ORDER BY created_at DESC, id DESC`),
 		wsroot.Normalize(workspaceID))
 	if err != nil {
 		return nil, err
@@ -354,8 +412,8 @@ func (s *Store) Decide(ctx context.Context, workspaceID, id string, approved boo
 		if current.Status == StatusPending {
 			// Past its expiry but not yet swept. Relabel it so the caller and
 			// every later reader see the same thing.
-			_, _ = s.db.ExecContext(ctx,
-				`UPDATE tool_approvals SET status = ?, updated_at = ? WHERE workspace_id = ? AND id = ? AND status = ?`,
+			_, _ = s.db.ExecContext(ctx, s.query(
+				`UPDATE tool_approvals SET status = ?, updated_at = ? WHERE workspace_id = ? AND id = ? AND status = ?`),
 				StatusExpired, now, workspaceID, id, StatusPending)
 		}
 		return Approval{}, ErrNotPending
@@ -381,10 +439,10 @@ func (s *Store) Decide(ctx context.Context, workspaceID, id string, approved boo
 // both pass the read and one silently overwrites the other's answer along with
 // their name on it.
 func (s *Store) recordDecision(ctx context.Context, workspaceID, id, status, by, reason string, now time.Time) error {
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.db.ExecContext(ctx, s.query(`
 UPDATE tool_approvals
    SET status = ?, decided_by = ?, decided_at = ?, decision_reason = ?, updated_at = ?
- WHERE workspace_id = ? AND id = ? AND status = ?`,
+ WHERE workspace_id = ? AND id = ? AND status = ?`),
 		status, by, now, strings.TrimSpace(reason), now, workspaceID, id, StatusPending)
 	if err != nil {
 		return err
@@ -501,5 +559,13 @@ func scan(row interface{ Scan(...any) error }) (Approval, error) {
 // consequence of drift is data outliving a deletion somebody was told
 // completed.
 func (s *Store) PurgeWorkspace(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+	if s.postgres {
+		res, err := s.db.ExecContext(ctx, `DELETE FROM tool_approvals WHERE workspace_id = $1`, wsroot.Normalize(workspaceID))
+		if err != nil {
+			return workspacepurge.Removed{}, err
+		}
+		rows, _ := res.RowsAffected()
+		return workspacepurge.Removed{Rows: rows}, nil
+	}
 	return workspacepurge.PurgeCatalogTables(ctx, s.db, "approvals", workspaceID)
 }

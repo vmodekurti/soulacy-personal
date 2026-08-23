@@ -1120,16 +1120,15 @@ func (e *Engine) maybeConfirm(ctx context.Context, def *agent.Definition, call m
 	// clean up after itself, or the approval sits in the broker forever.
 	defer e.Broker().Forget(ctx, callID)
 
-	select {
-	case approved := <-resultCh:
-		if !approved {
-			e.logAudit(ctx, def, call, "", time.Now(), true, nil)
-			return fmt.Errorf("tool %q was denied by the user", call.Name)
-		}
-		return e.verifyApproved(ctx, callID, call)
-	case <-ctx.Done():
-		return ctx.Err()
+	approved, err := e.Broker().Await(ctx, WorkspaceFromContext(ctx), callID, resultCh)
+	if err != nil {
+		return err
 	}
+	if !approved {
+		e.logAudit(ctx, def, call, "", time.Now(), true, nil)
+		return fmt.Errorf("tool %q was denied by the user", call.Name)
+	}
+	return e.verifyApproved(ctx, callID, call)
 }
 
 func (e *Engine) dynamicConfirm(ctx context.Context, def *agent.Definition, call message.ToolCall, reason string) error {
@@ -1159,16 +1158,15 @@ func (e *Engine) dynamicConfirm(ctx context.Context, def *agent.Definition, call
 	})
 	defer e.Broker().Forget(ctx, callID)
 
-	select {
-	case approved := <-resultCh:
-		if !approved {
-			e.logAudit(ctx, def, call, "", time.Now(), true, nil)
-			return fmt.Errorf("tool %q was denied by the user (guardrail flag: %s)", call.Name, reason)
-		}
-		return e.verifyApproved(ctx, callID, call)
-	case <-ctx.Done():
-		return ctx.Err()
+	approved, err := e.Broker().Await(ctx, WorkspaceFromContext(ctx), callID, resultCh)
+	if err != nil {
+		return err
 	}
+	if !approved {
+		e.logAudit(ctx, def, call, "", time.Now(), true, nil)
+		return fmt.Errorf("tool %q was denied by the user (guardrail flag: %s)", call.Name, reason)
+	}
+	return e.verifyApproved(ctx, callID, call)
 }
 
 // verifyApproved is MU-022 criterion 5: "approved execution verifies the exact

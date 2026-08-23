@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -43,6 +44,40 @@ func TestAPausedCallOutlivesTheProcessThatPausedIt(t *testing.T) {
 	}
 	if list[0].ExpiresAt.IsZero() {
 		t.Fatal("the surviving record has no expiry")
+	}
+}
+
+func TestDecisionOnAnotherBrokerReleasesTheBlockedBroker(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "approvals.db")
+	storeA, err := approvals.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer storeA.Close()
+	storeB, err := approvals.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer storeB.Close()
+	blocked, decider := newConfirmBroker(), newConfirmBroker()
+	blocked.SetStore(storeA, zap.NewNop())
+	decider.SetStore(storeB, zap.NewNop())
+	ctx, cancel := context.WithTimeout(inWorkspace(context.Background(), "ws-a"), 3*time.Second)
+	defer cancel()
+	local := blocked.Register(ctx, ApprovalRequest{CallID: "cross-replica", Tool: "shell_exec"})
+	done := make(chan error, 1)
+	go func() {
+		approved, waitErr := blocked.Await(ctx, "ws-a", "cross-replica", local)
+		if waitErr == nil && !approved {
+			waitErr = errors.New("approval was not released")
+		}
+		done <- waitErr
+	}()
+	if err := decider.Resolve(ctx, "ws-a", "cross-replica", true, approverIn("ws-a"), ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
 

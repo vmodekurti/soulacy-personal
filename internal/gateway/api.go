@@ -1156,8 +1156,10 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 	// Register the run under its session id so a client can cancel a slow
 	// (local-model) run via POST /chat/cancel {run_id: <session_id>} (Story #22).
 	if s.runReg != nil {
-		s.runReg.Register(sessionID, cancel)
-		defer s.runReg.Done(sessionID)
+		if err := s.runReg.RegisterScoped(ctx, s.requestWorkspace(c), sessionID, cancel, s.resolveRunTimeout(def)); err != nil {
+			return s.errJSON(c, fiber.StatusServiceUnavailable, err)
+		}
+		defer s.runReg.DoneScoped(s.requestWorkspace(c), sessionID)
 	}
 
 	// Per-request dry-run: header lets a client preview an agent without side
@@ -1357,12 +1359,16 @@ func (s *Server) handleChatStream(c *fiber.Ctx) error {
 	// Register this run so it can be cancelled mid-flight (Story #22). The id is
 	// emitted to the client below as a "run" event; POST /chat/cancel cancels it.
 	runID := msg.ID
+	runWorkspace := s.requestWorkspace(c)
 	if err := s.claimSession(c, req.AgentID, runID); err != nil {
 		cancel()
 		return err
 	}
 	if s.runReg != nil {
-		s.runReg.Register(runID, cancel)
+		if err := s.runReg.RegisterScoped(runCtx, runWorkspace, runID, cancel, s.resolveRunTimeout(def)); err != nil {
+			cancel()
+			return s.errJSON(c, fiber.StatusServiceUnavailable, err)
+		}
 	}
 
 	// sseEvent is the unified event type for the SSE stream.
@@ -1414,7 +1420,7 @@ func (s *Server) handleChatStream(c *fiber.Ctx) error {
 		defer func() {
 			cancel()
 			if s.runReg != nil {
-				s.runReg.Done(runID)
+				s.runReg.DoneScoped(runWorkspace, runID)
 			}
 		}()
 		defer close(events)
@@ -1483,7 +1489,7 @@ func (s *Server) handleChatCancel(c *fiber.Ctx) error {
 	if err := s.requireSession(c, "", req.RunID); err != nil {
 		return err
 	}
-	if s.runReg == nil || !s.runReg.Cancel(req.RunID) {
+	if s.runReg == nil || !s.runReg.CancelScoped(c.UserContext(), s.requestWorkspace(c), req.RunID) {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"error": "run not found — it may have already finished",
 		})

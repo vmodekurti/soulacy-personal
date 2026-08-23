@@ -127,6 +127,11 @@ completed chat and workboard artifacts there, and deletes the workspace object
 prefix during final erasure. Queue consumers must use durable delivery; the
 in-memory queue is not accepted in Scale mode.
 
+Scale gateways also share approval decisions and chat cancellation signals in
+PostgreSQL. Live events fan out through NATS, while reconnect cursors replay
+from workspace-scoped PostgreSQL event IDs, so a client may reconnect through
+a different gateway without losing its run stream.
+
 ## Emergency unsafe acknowledgement
 
 An operator can deliberately bypass mode prerequisite validation during an

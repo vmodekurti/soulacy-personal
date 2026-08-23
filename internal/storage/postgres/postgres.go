@@ -41,6 +41,7 @@ import (
 // compile-time interface checks
 var _ storage.ActionLogBackend = (*ActionLog)(nil)
 var _ storage.WorkspaceActionLogBackend = (*ActionLog)(nil)
+var _ storage.DurableEventReplay = (*ActionLog)(nil)
 var _ storage.MemoryBackend = (*MemoryStore)(nil)
 
 // ddlStatements are executed once at Open() to ensure the schema exists.
@@ -168,6 +169,53 @@ func (a *ActionLog) PurgeWorkspace(ctx context.Context, workspaceID string) (wor
 	removed.Rows += result.RowsAffected()
 	removed.Note = "action-event rows and workspace mirror files"
 	return removed, nil
+}
+
+func (a *ActionLog) LatestEventCursor(ctx context.Context, workspaceID string) (uint64, error) {
+	var latest uint64
+	err := a.pool.QueryRow(ctx, `SELECT COALESCE(MAX(id),0) FROM agent_events WHERE workspace_id=$1`,
+		workspaceOrPersonal(workspaceID)).Scan(&latest)
+	return latest, err
+}
+
+func (a *ActionLog) ReplayEvents(ctx context.Context, workspaceID string, after uint64, limit int) (storage.EventReplayWindow, error) {
+	if limit <= 0 || limit > 5000 {
+		limit = 256
+	}
+	window := storage.EventReplayWindow{}
+	if err := a.pool.QueryRow(ctx, `SELECT COALESCE(MIN(id),0),COALESCE(MAX(id),0) FROM agent_events WHERE workspace_id=$1`,
+		workspaceOrPersonal(workspaceID)).Scan(&window.Oldest, &window.Latest); err != nil {
+		return window, err
+	}
+	rows, err := a.pool.Query(ctx, `SELECT id,workspace_id,agent_id,session_id,type,payload,created_at
+FROM agent_events WHERE workspace_id=$1 AND id>$2 ORDER BY id ASC LIMIT $3`,
+		workspaceOrPersonal(workspaceID), after, limit+1)
+	if err != nil {
+		return window, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var record storage.CursorEvent
+		var payload []byte
+		if err := rows.Scan(&record.ID, &record.Event.WorkspaceID, &record.Event.AgentID, &record.Event.SessionID,
+			&record.Event.Type, &payload, &record.Event.Timestamp); err != nil {
+			return window, err
+		}
+		if len(payload) > 0 && string(payload) != "null" {
+			if err := json.Unmarshal(payload, &record.Event.Payload); err != nil {
+				record.Event.Payload = string(payload)
+			}
+		}
+		window.Events = append(window.Events, record)
+	}
+	if err := rows.Err(); err != nil {
+		return window, err
+	}
+	if len(window.Events) > limit {
+		window.HasMore = true
+		window.Events = window.Events[:limit]
+	}
+	return window, nil
 }
 
 // OpenActionLog creates an ActionLog and starts its background writer goroutine.

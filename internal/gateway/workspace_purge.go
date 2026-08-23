@@ -257,6 +257,13 @@ func (s *Server) workspacePurgers() []workspacepurge.Purger {
 						return removed, err
 					}
 				}
+				if s.runReg != nil && s.runReg.shared != nil {
+					controls, err := s.runReg.shared.PurgeWorkspace(ctx, workspaceID)
+					removed.Rows += controls.Rows
+					if err != nil {
+						return removed, err
+					}
+				}
 				removed.Note = "session ownership, attachments, and workflow checkpoints"
 				return removed, nil
 			},

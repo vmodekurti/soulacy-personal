@@ -50,6 +50,7 @@ var eventReaders = map[string]string{
 	// change from a security fix.
 	"internal/runtime/engine.go:emit":           "stamps the workspace and forwards to the sink; every sink redacts at its own boundary",
 	"internal/gateway/events.go:Emit":           "fans out to the action log, the publisher and the projection, each of which redacts",
+	"internal/gateway/events.go:EmitReplica":    "receives an already-redacted broker envelope and passes it through the redacting public projection before broadcast",
 	"internal/gateway/events.go:broadcastEvent": "receives already-projected bytes; the event value is used only for the authorization check",
 	"internal/events/events.go:PublishEvent":    "enqueues; the envelope constructor is the redaction point",
 	"internal/runtime/engine.go:Emit":           "the no-op sink discards the event",

@@ -106,6 +106,12 @@ func (b *replayBuffer) Append(event message.Event, data []byte) string {
 	return formatCursor(workspaceID, seq)
 }
 
+func (b *replayBuffer) Current(workspaceID string) uint64 {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.nextSeq[wsroot.Normalize(workspaceID)]
+}
+
 // ErrCursorGap reports that a cursor is older than what the buffer retains, so
 // events between it and the oldest retained one are gone.
 //
