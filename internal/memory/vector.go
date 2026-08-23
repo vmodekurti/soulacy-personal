@@ -106,10 +106,25 @@ func (vs *VectorStore) PurgeWorkspace(ctx context.Context, workspaceID string) (
 	if err != nil {
 		return workspacepurge.Removed{}, err
 	}
+	var stageRows int64
+	var stageExists int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name='memory_vector_reindex_stage'`).Scan(&stageExists); err != nil {
+		return workspacepurge.Removed{}, err
+	}
+	if stageExists != 0 {
+		result, err = tx.ExecContext(ctx, `DELETE FROM memory_vector_reindex_stage WHERE workspace_id = ?`, workspaceID)
+		if err != nil {
+			return workspacepurge.Removed{}, err
+		}
+		stageRows, err = result.RowsAffected()
+		if err != nil {
+			return workspacepurge.Removed{}, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return workspacepurge.Removed{}, err
 	}
-	return workspacepurge.Removed{Rows: vectorRows + metadataRows, Note: "vector rows and rebuild metadata"}, nil
+	return workspacepurge.Removed{Rows: vectorRows + metadataRows + stageRows, Note: "vector rows, metadata, and reindex staging"}, nil
 }
 
 // NewVectorStore creates the schema (if missing) and returns a VectorStore.
@@ -161,6 +176,13 @@ func (vs *VectorStore) ensureSchema() error {
 			}
 			return fmt.Errorf("exec %q: %w", preview, err)
 		}
+	}
+	actualDims, err := VectorDimensions(context.Background(), vs.db)
+	if err != nil {
+		return fmt.Errorf("vector memory: inspect dimensions: %w", err)
+	}
+	if actualDims != vs.dims {
+		return fmt.Errorf("vector memory: index has %d dimensions but configuration requires %d; stop the gateway and run sy memory reindex --dims %d --confirm-offline", actualDims, vs.dims, vs.dims)
 	}
 	// A database created before tenancy has no workspace column. Add it in
 	// place and assign its rows to the personal workspace, which is what a

@@ -1135,6 +1135,7 @@ func buildMemoryCmd() *cobra.Command {
 	}
 	listCmd.Flags().StringVar(&agentID, "agent", "", "Agent ID")
 	cmd.AddCommand(listCmd)
+	cmd.AddCommand(buildMemoryReindexCmd())
 	return cmd
 }
 

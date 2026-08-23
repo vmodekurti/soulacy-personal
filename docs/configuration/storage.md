@@ -167,7 +167,11 @@ knowledge:
 
 The default embedding model (`nomic-embed-text`) produces 768-dimension
 vectors, matching the `vector.dims` / `memory.vector_dims` default of
-`768`. If you change embedders, keep these in sync.
+`768`. If a replacement model has a different dimension, stop the gateway and
+run `sy memory reindex --model <model> --confirm-offline` before changing
+`vector.dims`. Start with `--dry-run` to inspect the source dimension, probed
+target dimension, and row count. Interrupted migrations resume from their last
+checkpoint; the live index changes only after an atomic row-count verification.
 
 The empty legacy `memory.vector_db` value no longer disables the modern vector
 layer when `vector.backend` is also empty; runtime selects sqlite-vec. To use a

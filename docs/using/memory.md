@@ -69,9 +69,19 @@ one agent's semantic records from entering another agent's results. If the
 vector store or embedder cannot initialize, semantic writes and retrieval fail
 explicitly and startup logs explain why.
 
-Changing embedding models can change vector dimensions. Update `vector.dims`
-to match and rebuild or reindex affected semantic content. See
-[Storage & backends](../configuration/storage.md).
+Changing embedding models can change vector dimensions. Stop the gateway,
+inspect the migration, rebuild the index, and then update `vector.dims`:
+
+```bash
+sy memory reindex --model text-embedding-3-large --dry-run
+sy memory reindex --model text-embedding-3-large --confirm-offline
+```
+
+The command probes the configured model's dimensions, checkpoints each batch,
+resumes after interruption, and atomically swaps the verified index into place.
+Use `--restart` only when intentionally discarding a checkpoint created for a
+different target model. Provider credentials come from Soulacy configuration,
+not command-line flags. See [Storage & backends](../configuration/storage.md).
 
 ### The Brain Mem page
 

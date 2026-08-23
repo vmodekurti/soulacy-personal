@@ -58,6 +58,42 @@ func TestVectorExportAndPurgeAreWorkspaceScoped(t *testing.T) {
 	}
 }
 
+// An interrupted model migration holds derived tenant data outside the live
+// vec0 table. Workspace erasure must cover that checkpoint too; otherwise a
+// deleted tenant's embedding survives until an operator resumes or restarts
+// the migration.
+func TestVectorPurgeRemovesInterruptedReindexStaging(t *testing.T) {
+	vs := newVectorStoreForTest(t)
+	ctx := context.Background()
+	writeVector(t, vs, "ws_delete", "assistant", "delete staged memory")
+	writeVector(t, vs, "ws_keep", "assistant", "keep staged memory")
+
+	_, err := ReindexVectorStore(ctx, vs.db, &fixedDimEmbedder{dims: 3, failAfter: 1}, VectorReindexOptions{
+		TargetDims: 3, ModelID: "test/embed-3", BatchSize: 1,
+	})
+	if err == nil {
+		t.Fatal("provider interruption did not leave a resumable checkpoint")
+	}
+
+	removed, err := vs.PurgeWorkspace(ctx, "ws_delete")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed.Rows != 3 {
+		t.Fatalf("removed %+v, want live vector, metadata, and staged embedding", removed)
+	}
+	var deleted, kept int
+	if err := vs.db.QueryRow(`SELECT COUNT(*) FROM memory_vector_reindex_stage WHERE workspace_id = 'ws_delete'`).Scan(&deleted); err != nil {
+		t.Fatal(err)
+	}
+	if err := vs.db.QueryRow(`SELECT COUNT(*) FROM memory_vector_meta WHERE workspace_id = 'ws_keep'`).Scan(&kept); err != nil {
+		t.Fatal(err)
+	}
+	if deleted != 0 || kept != 1 {
+		t.Fatalf("after purge staged deleted=%d kept metadata=%d", deleted, kept)
+	}
+}
+
 // axisEmbedder places content at a controlled distance from the query so the
 // KNN ordering in these tests is deterministic rather than incidental.
 //
