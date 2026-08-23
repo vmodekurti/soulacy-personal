@@ -2,7 +2,10 @@ package channels
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -10,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/metrics"
+	"github.com/soulacy/soulacy/internal/queue"
 	"github.com/soulacy/soulacy/pkg/message"
 )
 
@@ -99,6 +103,105 @@ func TestRegistryEnqueueRecordsInboundMetric(t *testing.T) {
 	after := testutil.ToFloat64(metrics.ChannelInboundTotal.WithLabelValues("slack"))
 	if after != before+1 {
 		t.Fatalf("inbound metric delta = %v, want 1", after-before)
+	}
+}
+
+type durableTestSubscription struct{ unsubscribed atomic.Bool }
+
+func (s *durableTestSubscription) Unsubscribe() error { s.unsubscribed.Store(true); return nil }
+
+type durableTestBackend struct {
+	mu      sync.Mutex
+	handler func(*queue.Message)
+	data    [][]byte
+	acks    atomic.Int64
+	sub     durableTestSubscription
+}
+
+func (b *durableTestBackend) Publish(_ context.Context, subject string, data []byte) error {
+	b.mu.Lock()
+	b.data = append(b.data, append([]byte(nil), data...))
+	handler := b.handler
+	b.mu.Unlock()
+	if handler != nil {
+		handler(queue.NewMessage(subject, data, func() error { b.acks.Add(1); return nil }))
+	}
+	return nil
+}
+
+func (b *durableTestBackend) Subscribe(_ context.Context, _ string, _ string, handler func(*queue.Message)) (queue.Subscription, error) {
+	b.mu.Lock()
+	b.handler = handler
+	b.mu.Unlock()
+	return &b.sub, nil
+}
+
+func (b *durableTestBackend) Close() error { return nil }
+
+func (b *durableTestBackend) redeliver(subject string) {
+	b.mu.Lock()
+	data := append([]byte(nil), b.data[len(b.data)-1]...)
+	handler := b.handler
+	b.mu.Unlock()
+	handler(queue.NewMessage(subject, data, func() error { b.acks.Add(1); return nil }))
+}
+
+func TestDurableIngressPersistsBeforeLocalAdmissionAndRedeliversWhenFull(t *testing.T) {
+	reg := NewRegistry(1)
+	reg.SetLogger(zap.NewNop())
+	backend := &durableTestBackend{}
+	const subject = "soulacy.channels.inbound"
+	if err := reg.EnableDurableIngress(context.Background(), backend, subject); err != nil {
+		t.Fatal(err)
+	}
+	if !reg.enqueueLive(message.Message{ID: "occupier", Channel: "internal"}) {
+		t.Fatal("could not fill local inbox")
+	}
+	want := message.Message{ID: "provider-1", Channel: "slack", AgentID: "agent-a", Parts: message.Text("durable")}
+	if !reg.Enqueue(want) {
+		t.Fatal("durable publish failed")
+	}
+	if backend.acks.Load() != 0 {
+		t.Fatal("delivery was acknowledged while the local inbox was full")
+	}
+	backend.mu.Lock()
+	if len(backend.data) != 1 {
+		backend.mu.Unlock()
+		t.Fatalf("durable publish count = %d, want 1", len(backend.data))
+	}
+	var persisted message.Message
+	if err := json.Unmarshal(backend.data[0], &persisted); err != nil {
+		backend.mu.Unlock()
+		t.Fatal(err)
+	}
+	backend.mu.Unlock()
+	if persisted.ID != want.ID {
+		t.Fatalf("persisted message = %#v", persisted)
+	}
+	<-reg.Inbox()
+	backend.redeliver(subject)
+	if backend.acks.Load() != 0 {
+		t.Fatal("delivery was acknowledged before router completion")
+	}
+	got := <-reg.Inbox()
+	if got.ID != want.ID {
+		t.Fatalf("redelivered message id = %q, want %q", got.ID, want.ID)
+	}
+	reg.CompleteInbound(got)
+	if backend.acks.Load() != 1 {
+		t.Fatal("delivery was not acknowledged after router completion")
+	}
+	backend.redeliver(subject)
+	if backend.acks.Load() != 2 {
+		t.Fatal("duplicate delivery did not close the broker acknowledgement gap")
+	}
+	select {
+	case duplicate := <-reg.Inbox():
+		t.Fatalf("duplicate durable message entered the worker inbox: %#v", duplicate)
+	default:
+	}
+	if errs := reg.StopAll(); len(errs) != 0 || !backend.sub.unsubscribed.Load() {
+		t.Fatalf("durable subscription was not closed: errs=%v", errs)
 	}
 }
 

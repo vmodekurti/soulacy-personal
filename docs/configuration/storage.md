@@ -85,6 +85,7 @@ Carries the [event stream](events.md) and internal work distribution.
 | `nats_subject_prefix` | `""` (= `<stream>.>`) | Subject filter applied to the stream |
 | `nats_ack_wait` | `30s` | How long JetStream waits for an Ack before redelivering |
 | `nats_max_deliver` | `0` | Max delivery attempts per message; `0` = unlimited |
+| `channel_ingress_subject` | `<stream>.channels.inbound` | Durable WAL subject for inbound Team/Scale channel messages |
 | `nats_credentials` | empty | Mounted NATS user/JWT credentials file |
 | `nats_tls_ca` | empty | Private CA bundle for NATS TLS |
 | `nats_tls_cert`, `nats_tls_key` | empty | Optional mTLS worker/gateway identity |
@@ -95,6 +96,7 @@ queue:
   backend: nats
   nats_url: nats://localhost:4222
   nats_stream: soulacy
+  channel_ingress_subject: soulacy.channels.inbound
   nats_ack_wait: 30s
 ```
 
@@ -102,9 +104,17 @@ With the default `memory` backend, events exist in-process only (still
 consumed by the webhook dispatcher). Switch to `nats` to consume events
 from other processes or machines.
 
+In Team and Scale modes, the same backend also acts as the inbound-channel
+write-ahead queue. Channel adapters apply backpressure instead of dropping,
+workspace identity is stamped before publishing, and the gateway acknowledges
+the broker delivery only after the agent router reaches a terminal outcome.
+If a replica stops during processing or its local worker inbox is full, the
+broker redelivers to the consumer group. A bounded one-hour receipt cache
+suppresses duplicate processing when an acknowledgement itself is lost.
+
 !!! warning "NATS is experimental"
-    The `nats` queue backend has **no automated tests and no known production
-    users**. Enabling it logs a startup WARN. It is unsupported — the default
+    The `nats` queue backend has automated JetStream redelivery coverage but
+    **no known production users**. Enabling it logs a startup WARN. It is unsupported — the default
     in-memory queue is the supported path; use an external sidecar if you need
     cross-process durability.
 

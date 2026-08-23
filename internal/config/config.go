@@ -767,19 +767,23 @@ type SignupConfig struct {
 //	                     Max delivery attempts per message; 0 = unlimited.
 //	command/args:        external sidecar process (backend: "external", E24)
 type QueueConfig struct {
-	Backend           string   `mapstructure:"backend"`             // "memory" (default), "nats", or "external"
-	NATSUrl           string   `mapstructure:"nats_url"`            // NATS server URL
-	NATSStream        string   `mapstructure:"nats_stream"`         // JetStream stream name
-	NATSSubjectPrefix string   `mapstructure:"nats_subject_prefix"` // subjects filter
-	NATSAckWait       string   `mapstructure:"nats_ack_wait"`       // e.g. "30s"
-	NATSMaxDeliver    int      `mapstructure:"nats_max_deliver"`    // 0 = unlimited
-	NATSCredentials   string   `mapstructure:"nats_credentials"`    // mounted NATS user/JWT credentials file
-	NATSTLSCA         string   `mapstructure:"nats_tls_ca"`         // private CA bundle
-	NATSTLSCert       string   `mapstructure:"nats_tls_cert"`       // optional mTLS client certificate
-	NATSTLSKey        string   `mapstructure:"nats_tls_key"`        // optional mTLS client key
-	NATSTLSServerName string   `mapstructure:"nats_tls_server_name"`
-	Command           string   `mapstructure:"command"` // external sidecar command (E24)
-	Args              []string `mapstructure:"args"`    // external sidecar args (E24)
+	Backend           string `mapstructure:"backend"`             // "memory" (default), "nats", or "external"
+	NATSUrl           string `mapstructure:"nats_url"`            // NATS server URL
+	NATSStream        string `mapstructure:"nats_stream"`         // JetStream stream name
+	NATSSubjectPrefix string `mapstructure:"nats_subject_prefix"` // subjects filter
+	NATSAckWait       string `mapstructure:"nats_ack_wait"`       // e.g. "30s"
+	NATSMaxDeliver    int    `mapstructure:"nats_max_deliver"`    // 0 = unlimited
+	// ChannelIngressSubject is the durable WAL subject used before inbound
+	// channel messages enter a gateway's local worker buffer. Empty derives a
+	// subject from nats_stream (or uses soulacy.channels.inbound externally).
+	ChannelIngressSubject string   `mapstructure:"channel_ingress_subject"`
+	NATSCredentials       string   `mapstructure:"nats_credentials"` // mounted NATS user/JWT credentials file
+	NATSTLSCA             string   `mapstructure:"nats_tls_ca"`      // private CA bundle
+	NATSTLSCert           string   `mapstructure:"nats_tls_cert"`    // optional mTLS client certificate
+	NATSTLSKey            string   `mapstructure:"nats_tls_key"`     // optional mTLS client key
+	NATSTLSServerName     string   `mapstructure:"nats_tls_server_name"`
+	Command               string   `mapstructure:"command"` // external sidecar command (E24)
+	Args                  []string `mapstructure:"args"`    // external sidecar args (E24)
 }
 
 type LLMConfig struct {
@@ -1094,6 +1098,7 @@ func Load(cfgPath string) (*Config, string, error) {
 	v.SetDefault("queue.nats_stream", "soulacy")
 	v.SetDefault("queue.nats_ack_wait", "30s")
 	v.SetDefault("queue.nats_max_deliver", 0)
+	v.SetDefault("queue.channel_ingress_subject", "")
 	v.SetDefault("auth.mode", "apikey")
 	v.SetDefault("auth.jwt_access_ttl", "15m")
 	v.SetDefault("auth.jwt_refresh_ttl", "168h")

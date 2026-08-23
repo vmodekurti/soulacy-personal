@@ -10,16 +10,20 @@ package channels
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/metrics"
+	"github.com/soulacy/soulacy/internal/queue"
 	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/message"
 	sdkchannel "github.com/soulacy/soulacy/sdk/channel"
-	"strings"
 )
 
 // Adapter is the interface every channel must implement. Canonical
@@ -41,10 +45,215 @@ type Registry struct {
 	adapters map[string]Adapter
 	inbox    chan message.Message
 	log      *zap.Logger
+	// ingress is set in Team/Scale mode. Adapter traffic is published to the
+	// deployment queue before it may enter the process-local worker inbox, so a
+	// full gateway buffer causes broker redelivery instead of message loss.
+	ingressMu      sync.RWMutex
+	ingress        queue.Backend
+	ingressSubject string
+	ingressCtx     context.Context
+	ingressSub     queue.Subscription
+	receiptMu      sync.Mutex
+	receipts       map[string]ingressReceipt
+	pendingAcks    map[string]*queue.Message
+	receiptSweep   uint64
 	// owners records which workspace each channel connection belongs to
 	// (MU-018). Empty means every channel is personal's, which is what a
 	// single-tenant deployment is.
 	owners ownership
+}
+
+type ingressReceipt struct {
+	pending   bool
+	expiresAt time.Time
+}
+
+type ingressReceiptState uint8
+
+const (
+	receiptNew ingressReceiptState = iota
+	receiptPending
+	receiptDelivered
+	ingressReceiptTTL  = time.Hour
+	maxIngressReceipts = 65_536
+)
+
+func durableIngressGroup(subject string) string {
+	digest := sha256.Sum256([]byte(subject))
+	return fmt.Sprintf("soulacy-channel-ingress-%x", digest[:6])
+}
+
+// EnableDurableIngress places the deployment queue in front of the local
+// channel inbox. The subject must belong to the configured durable stream.
+// It is boot wiring: swapping the broker while deliveries are in flight would
+// make it impossible to know which backend owns their acknowledgements.
+func (r *Registry) EnableDurableIngress(ctx context.Context, backend queue.Backend, subject string) error {
+	if backend == nil {
+		return fmt.Errorf("channels: durable ingress backend is required")
+	}
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		return fmt.Errorf("channels: durable ingress subject is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	r.ingressMu.Lock()
+	defer r.ingressMu.Unlock()
+	if r.ingress != nil {
+		return fmt.Errorf("channels: durable ingress is already enabled")
+	}
+	group := durableIngressGroup(subject)
+	sub, err := backend.Subscribe(ctx, subject, group, func(delivery *queue.Message) {
+		var msg message.Message
+		if err := json.Unmarshal(delivery.Data, &msg); err != nil {
+			// A malformed durable record can never become valid through retry.
+			// Acknowledge it after recording the failure so it cannot become a
+			// poison message that blocks the consumer forever.
+			r.log.Error("durable channel ingress contains an invalid message",
+				zap.String("subject", delivery.Subject), zap.Error(err))
+			if err := delivery.Ack(); err != nil {
+				r.log.Error("invalid durable ingress acknowledgement failed",
+					zap.String("subject", delivery.Subject), zap.Error(err))
+			}
+			return
+		}
+		receiptKey, receiptState := r.reserveIngressReceipt(msg, delivery.Data)
+		switch receiptState {
+		case receiptDelivered:
+			// Ack can fail after completed processing. A broker retry of the same
+			// provider message must close that acknowledgement gap, not run the
+			// agent twice.
+			if err := delivery.Ack(); err != nil {
+				r.log.Error("duplicate durable ingress acknowledgement failed",
+					zap.String("msg_id", msg.ID), zap.String("channel", msg.Channel), zap.Error(err))
+			}
+			return
+		case receiptPending:
+			// Another concurrent delivery owns admission. Leaving this copy
+			// unacknowledged lets the broker retry if that owner fails.
+			return
+		}
+		r.receiptMu.Lock()
+		if r.pendingAcks == nil {
+			r.pendingAcks = make(map[string]*queue.Message)
+		}
+		r.pendingAcks[receiptKey] = delivery
+		r.receiptMu.Unlock()
+		if !r.enqueueDurableDelivery(msg) {
+			r.releaseIngressReceipt(receiptKey)
+			// Deliberately no Ack: JetStream/external durable backends redeliver
+			// after capacity becomes available.
+			return
+		}
+	})
+	if err != nil {
+		return fmt.Errorf("channels: subscribe durable ingress: %w", err)
+	}
+	r.ingress, r.ingressSubject, r.ingressCtx, r.ingressSub = backend, subject, ctx, sub
+	r.log.Info("durable channel ingress ready", zap.String("subject", subject), zap.String("group", group))
+	return nil
+}
+
+// CompleteInbound acknowledges a durable delivery after the router has
+// finished processing it. Personal-mode/direct messages have no pending
+// acknowledgement and are a no-op. Calling this before engine completion
+// would recreate the crash-loss window durable ingress exists to close.
+func (r *Registry) CompleteInbound(msg message.Message) {
+	key := ingressReceiptKey(msg, nil)
+	r.receiptMu.Lock()
+	delivery := r.pendingAcks[key]
+	delete(r.pendingAcks, key)
+	r.receiptMu.Unlock()
+	if delivery == nil {
+		return
+	}
+	r.completeIngressReceipt(key)
+	if err := delivery.Ack(); err != nil {
+		r.log.Error("durable channel ingress acknowledgement failed",
+			zap.String("msg_id", msg.ID), zap.String("channel", msg.Channel), zap.Error(err))
+	}
+}
+
+func ingressReceiptKey(msg message.Message, data []byte) string {
+	if strings.TrimSpace(msg.ID) != "" {
+		return strings.TrimSpace(msg.WorkspaceID) + "\x00" + strings.TrimSpace(msg.Channel) + "\x00" + strings.TrimSpace(msg.ID)
+	}
+	if len(data) == 0 {
+		data, _ = json.Marshal(msg)
+	}
+	digest := sha256.Sum256(data)
+	return fmt.Sprintf("payload:%x", digest[:])
+}
+
+func (r *Registry) reserveIngressReceipt(msg message.Message, data []byte) (string, ingressReceiptState) {
+	key := ingressReceiptKey(msg, data)
+	now := time.Now()
+	r.receiptMu.Lock()
+	defer r.receiptMu.Unlock()
+	if existing, ok := r.receipts[key]; ok {
+		if existing.pending {
+			// Active work has no arbitrary TTL: agents may declare runs longer
+			// than the usual timeout, and expiry during execution would admit a
+			// concurrent duplicate.
+			return key, receiptPending
+		}
+		if existing.expiresAt.After(now) {
+			return key, receiptDelivered
+		}
+	}
+	if r.receipts == nil {
+		r.receipts = make(map[string]ingressReceipt)
+	}
+	r.receiptSweep++
+	if r.receiptSweep%1024 == 0 || len(r.receipts) >= maxIngressReceipts {
+		for candidate, receipt := range r.receipts {
+			if !receipt.pending && !receipt.expiresAt.After(now) {
+				delete(r.receipts, candidate)
+			}
+		}
+	}
+	if len(r.receipts) >= maxIngressReceipts {
+		// Prefer evicting the oldest COMPLETED duplicate receipt. Active
+		// deliveries are never evicted; if all 65k are active, broker
+		// backpressure is safer than losing completion correlation.
+		oldestKey := ""
+		var oldestExpiry time.Time
+		for candidate, receipt := range r.receipts {
+			if receipt.pending {
+				continue
+			}
+			if oldestKey == "" || receipt.expiresAt.Before(oldestExpiry) {
+				oldestKey, oldestExpiry = candidate, receipt.expiresAt
+			}
+		}
+		if oldestKey == "" {
+			return "", receiptPending
+		}
+		delete(r.receipts, oldestKey)
+	}
+	r.receipts[key] = ingressReceipt{pending: true}
+	return key, receiptNew
+}
+
+func (r *Registry) releaseIngressReceipt(key string) {
+	if key == "" {
+		return
+	}
+	r.receiptMu.Lock()
+	delete(r.receipts, key)
+	delete(r.pendingAcks, key)
+	r.receiptMu.Unlock()
+}
+
+func (r *Registry) completeIngressReceipt(key string) {
+	if key == "" {
+		return
+	}
+	r.receiptMu.Lock()
+	r.receipts[key] = ingressReceipt{expiresAt: time.Now().Add(ingressReceiptTTL)}
+	r.receiptMu.Unlock()
 }
 
 // NewRegistry creates an empty channel registry with a shared inbox.
@@ -92,7 +301,10 @@ func (r *Registry) ChannelsOf(workspaceID string) []string { return r.owners.Cha
 // field. Stamping *after* the adapter is done means there is no code path in
 // which content selects a tenant, rather than a rule saying it must not.
 func (r *Registry) stampedInbox(channelID string) chan message.Message {
-	staged := make(chan message.Message, 16)
+	// Unbuffered on purpose: hosted adapters may not build a second volatile
+	// backlog in front of the durable ingress WAL. The handoff applies
+	// backpressure immediately when persistence is unavailable.
+	staged := make(chan message.Message)
 	go func() {
 		for msg := range staged {
 			msg.WorkspaceID = r.owners.WorkspaceOf(channelID)
@@ -108,7 +320,8 @@ func (r *Registry) stampedInbox(channelID string) chan message.Message {
 // Inbox returns the shared inbound message channel (read by the gateway router).
 func (r *Registry) Inbox() <-chan message.Message { return r.inbox }
 
-// Enqueue posts a message onto the shared inbox without blocking. Used by
+// Enqueue posts a message through durable ingress when configured, otherwise
+// directly onto the shared inbox without blocking. Used by
 // the gateway's startup crash-recovery (re-injecting in-flight runs that
 // the previous process didn't get to finish) and by any future internal
 // caller that needs to fan messages into the worker pool.
@@ -118,11 +331,48 @@ func (r *Registry) Inbox() <-chan message.Message { return r.inbox }
 // the operator can re-trigger them manually if they care.
 // (PRODUCTION_AUDIT → F2, 2026-05-27)
 func (r *Registry) Enqueue(msg message.Message) bool {
+	r.ingressMu.RLock()
+	backend, subject, ctx := r.ingress, r.ingressSubject, r.ingressCtx
+	r.ingressMu.RUnlock()
+	if backend != nil {
+		data, err := json.Marshal(msg)
+		if err != nil {
+			r.log.Error("channel message could not be encoded for durable ingress",
+				zap.String("msg_id", msg.ID), zap.String("channel", msg.Channel), zap.Error(err))
+			return false
+		}
+		publishCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		if err := backend.Publish(publishCtx, subject, data); err != nil {
+			r.log.Error("channel message could not be persisted to durable ingress",
+				zap.String("msg_id", msg.ID), zap.String("channel", msg.Channel), zap.Error(err))
+			return false
+		}
+		return true
+	}
+	return r.enqueueLive(msg)
+}
+
+func (r *Registry) enqueueLive(msg message.Message) bool {
+	return r.tryEnqueueLocal(msg, false)
+}
+
+func (r *Registry) enqueueDurableDelivery(msg message.Message) bool {
+	return r.tryEnqueueLocal(msg, true)
+}
+
+func (r *Registry) tryEnqueueLocal(msg message.Message, durable bool) bool {
 	select {
 	case r.inbox <- msg:
 		metrics.ChannelInboundTotal.WithLabelValues(channelMetricLabel(msg.Channel)).Inc()
 		return true
 	default:
+		if durable {
+			r.log.Warn("local channel inbox full — durable delivery deferred",
+				zap.String("msg_id", msg.ID), zap.String("agent_id", msg.AgentID),
+				zap.String("channel", channelMetricLabel(msg.Channel)), zap.Int("inbox_cap", cap(r.inbox)))
+			return false
+		}
 		// Inbox is full — increment the Prometheus drop counter and log at
 		// ERROR level so operators can alert on this condition. A sustained
 		// non-zero rate here means the inbox buffer (config: channel.inbox_buffer)
@@ -264,6 +514,14 @@ func (r *Registry) StopAll() []error {
 			errs = append(errs, err)
 		}
 	}
+	r.ingressMu.Lock()
+	if r.ingressSub != nil {
+		if err := r.ingressSub.Unsubscribe(); err != nil {
+			errs = append(errs, err)
+		}
+		r.ingressSub = nil
+	}
+	r.ingressMu.Unlock()
 	return errs
 }
 

@@ -206,16 +206,14 @@ func (a *Adapter) run(ctx context.Context) error {
 					Parts:     message.Text(text),
 					CreatedAt: time.Now().UTC(),
 				}
-				// Non-blocking send so a wedged engine doesn't wedge the
-				// Discord gateway socket loop too. (PRODUCTION_AUDIT → HIGH)
+				// Backpressure is intentional: hosted registries persist this
+				// handoff before admitting it to the local worker buffer.
 				select {
 				case a.inbox <- msg:
 				case <-ctx.Done():
 					return nil
 				case <-a.stopCh:
 					return nil
-				default:
-					log.Printf("discord: inbox full, dropping message %s", msg.ID)
 				}
 			}
 		}

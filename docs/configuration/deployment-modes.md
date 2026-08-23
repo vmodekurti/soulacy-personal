@@ -63,6 +63,7 @@ queue:
   backend: nats
   nats_url: "tls://nats.internal:4222"
   nats_credentials: "/var/run/secrets/nats/soulacy.creds"
+  channel_ingress_subject: "soulacy.channels.inbound"
 
 credentials:
   kms_provider: awskms

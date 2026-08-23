@@ -218,8 +218,6 @@ func (a *Adapter) handleMessage(ctx context.Context, ev sidecarEvent) {
 	select {
 	case a.inbox <- msg:
 	case <-ctx.Done():
-	default:
-		a.log.Warn("inbox full, dropping WhatsApp Web message", zap.String("msg_id", msg.ID))
 	}
 }
 

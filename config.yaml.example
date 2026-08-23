@@ -331,13 +331,15 @@ server:
 
 # ── Queue backend ─────────────────────────────────────────────────────────────
 # Default: "memory" (in-process, zero-dependency). The NATS JetStream backend
-# below is EXPERIMENTAL: it has no automated tests and no known production
-# users — enabling it logs a startup WARN. The in-memory queue is the
-# supported path; use an external sidecar (below) if you need durability.
+# below is EXPERIMENTAL: it has automated JetStream redelivery coverage but no
+# known production users — enabling it logs a startup WARN. The in-memory
+# queue is the supported path; use an external sidecar (below) if you need
+# durability.
 # queue:
 #     backend: nats                         # EXPERIMENTAL / untested — use at your own risk
 #     nats_url: nats://localhost:4222
 #     nats_stream: soulacy
+#     channel_ingress_subject: soulacy.channels.inbound
 #     nats_ack_wait: 30s
 
 # ── External storage sidecars (Story E24) ────────────────────────────────────

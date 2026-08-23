@@ -472,6 +472,15 @@ func (a *App) Run(parent context.Context) error {
 	// ── Channel Registry ─────────────────────────────────────────────────────
 	chanReg := channels.NewRegistry(512)
 	chanReg.SetLogger(log)
+	if config.IsMultiUserMode(cfg.DeploymentMode()) {
+		ingressSubject, subjectErr := resolveChannelIngressSubject(cfg.Queue)
+		if subjectErr != nil {
+			return subjectErr
+		}
+		if err := chanReg.EnableDurableIngress(ctx, queueBackend, ingressSubject); err != nil {
+			return fmt.Errorf("durable channel ingress: %w", err)
+		}
+	}
 	engine.SetChannelRegistry(chanReg)
 	sched.SetChannelRegistry(chanReg)
 	channelDefaults := scheduler.DefaultOutputsFromChannelConfig(cfg.Channels)

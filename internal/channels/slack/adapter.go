@@ -206,16 +206,15 @@ func (a *Adapter) run(ctx context.Context, wsURL string) error {
 					Metadata:  map[string]string{"ts": ep.Event.TS},
 					CreatedAt: time.Now().UTC(),
 				}
-				// Non-blocking send so a wedged engine doesn't wedge the
-				// Slack socket loop too. (PRODUCTION_AUDIT → HIGH)
+				// Backpressure is intentional. In Team/Scale the registry's
+				// receiver persists to durable ingress before the local worker
+				// buffer; dropping here would bypass that guarantee.
 				select {
 				case a.inbox <- msg:
 				case <-ctx.Done():
 					return nil
 				case <-a.stopCh:
 					return nil
-				default:
-					log.Printf("slack: inbox full, dropping message %s", msg.ID)
 				}
 			}
 		}

@@ -185,9 +185,6 @@ func (a *Adapter) poll(ctx context.Context) {
 				return
 			case <-a.stopCh:
 				return
-			default:
-				log.Printf("telegram: inbox full, dropping message %s", msg.ID)
-				a.offset = u.UpdateID + 1
 			}
 		}
 	}

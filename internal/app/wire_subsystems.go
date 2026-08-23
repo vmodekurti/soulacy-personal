@@ -790,8 +790,8 @@ func (a *App) wireQueue(stack *closerStack) (queue.Backend, error) {
 		queueName = "memory"
 	}
 	if queueName == "nats" {
-		// DOC-2: the NATS queue backend has no automated tests and no known
-		// production users.
+		// NATS is integration-tested against JetStream redelivery, but still has
+		// no known production users.
 		//
 		// WHY TWO MESSAGES. The old single warning told every NATS operator to
 		// "use the default in-memory queue instead", which is advice scale mode
@@ -802,12 +802,12 @@ func (a *App) wireQueue(stack *closerStack) (queue.Backend, error) {
 		// a scale install cannot, and needs to know the requirement it
 		// satisfied is itself unvetted rather than being sent in a circle.
 		if cfg.DeploymentMode() == config.DeploymentModeScale {
-			log.Warn("nats queue backend is EXPERIMENTAL and untested — no automated tests, no known " +
+			log.Warn("nats queue backend is EXPERIMENTAL — integration-tested but with no known " +
 				"production users. Scale mode REQUIRES a distributed queue, so this is not a setting to " +
 				"revert: treat the queue as an unvetted dependency, exercise failover before relying on " +
 				"it, or supply your own with queue.backend \"external\"")
 		} else {
-			log.Warn("nats queue backend is EXPERIMENTAL and untested — no automated tests, no known " +
+			log.Warn("nats queue backend is EXPERIMENTAL — integration-tested but with no known " +
 				"production users. Nothing in this deployment mode requires it; the default in-memory " +
 				"queue is the supported path")
 		}
@@ -1628,6 +1628,7 @@ func (a *App) startMessageRouter(ctx context.Context, chanReg *channels.Registry
 					msg = m
 				}
 				if msg.Channel == "http" {
+					chanReg.CompleteInbound(msg)
 					continue // synchronous path
 				}
 				// A durable run carries its own record. It executes here like
@@ -1636,6 +1637,9 @@ func (a *App) startMessageRouter(ctx context.Context, chanReg *channels.Registry
 				// result by run id.
 				if runID := RunIDOf(msg); runID != "" {
 					a.executeDurableRun(ctx, engine, loader, runStore, msg, runID)
+					if ctx.Err() == nil {
+						chanReg.CompleteInbound(msg)
+					}
 					continue
 				}
 				if config.IsMultiUserMode(cfg.DeploymentMode()) && personalTenant == nil {
@@ -1686,6 +1690,9 @@ func (a *App) startMessageRouter(ctx context.Context, chanReg *channels.Registry
 							zap.String("channel", msg.Channel), zap.Error(serr))
 					}
 					mCancel()
+					if ctx.Err() == nil {
+						chanReg.CompleteInbound(msg)
+					}
 					continue
 				}
 				if err := chanReg.Send(mCtx, reply); err != nil {
@@ -1693,6 +1700,9 @@ func (a *App) startMessageRouter(ctx context.Context, chanReg *channels.Registry
 						zap.String("channel", msg.Channel), zap.Error(err))
 				}
 				mCancel()
+				if ctx.Err() == nil {
+					chanReg.CompleteInbound(msg)
+				}
 			}
 		}()
 	}

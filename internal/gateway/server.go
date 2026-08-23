@@ -870,15 +870,24 @@ func (s *Server) buildApp() *fiber.App {
 					zap.String("remote", c.IP()))
 				return c.SendStatus(fiber.StatusForbidden)
 			}
-			go func() {
+			// Dispatch synchronously so Meta receives 200 only after the message
+			// has crossed the registry handoff. Under broker pressure this applies
+			// webhook backpressure and lets Meta retry instead of acknowledging a
+			// message that an unbounded goroutine may later lose.
+			dispatched := true
+			func() {
 				defer func() {
-					if r := recover(); r != nil {
+					if recovered := recover(); recovered != nil {
+						dispatched = false
 						s.log.Error("whatsapp webhook dispatch panicked",
-							zap.Any("recover", r))
+							zap.Any("recover", recovered))
 					}
 				}()
 				s.waChan.Dispatch(body)
 			}()
+			if !dispatched {
+				return c.SendStatus(fiber.StatusInternalServerError)
+			}
 			return c.SendStatus(fiber.StatusOK)
 		})
 	}

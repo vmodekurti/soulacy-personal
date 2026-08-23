@@ -58,6 +58,7 @@ type Adapter struct {
 	activation channels.ActivationPolicy
 	log        *zap.Logger
 	inbox      chan<- message.Message
+	ctx        context.Context
 	client     *http.Client
 }
 
@@ -131,6 +132,7 @@ func (a *Adapter) Name() string { return "WhatsApp (Meta Business Cloud)" }
 // polling goroutine — messages arrive via HandleWebhook.
 func (a *Adapter) Start(ctx context.Context, inbox chan<- message.Message) error {
 	a.inbox = inbox
+	a.ctx = ctx
 	a.log.Info("whatsapp adapter ready",
 		zap.String("phone_number_id", a.phoneNumberID),
 		zap.String("agent_id", a.agentID),
@@ -260,10 +262,14 @@ func (a *Adapter) Dispatch(body []byte) {
 				}
 
 				if a.inbox != nil {
+					ctx := a.ctx
+					if ctx == nil {
+						ctx = context.Background()
+					}
 					select {
 					case a.inbox <- msg:
-					default:
-						a.log.Warn("whatsapp: inbox full, dropping message", zap.String("from", wamsg.From))
+					case <-ctx.Done():
+						return
 					}
 				}
 			}

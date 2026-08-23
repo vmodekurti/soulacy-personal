@@ -315,8 +315,6 @@ func (a *Adapter) handleMessage(ctx context.Context, f Frame) {
 	select {
 	case inbox <- msg:
 	case <-ctx.Done():
-	default:
-		a.log.Warn("inbox full, dropping external message", zap.String("msg_id", msg.ID))
 	}
 }
 
