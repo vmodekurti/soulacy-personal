@@ -2222,13 +2222,13 @@ func (s *Server) validateAgentsAtBoot(ctx context.Context) {
 	if s.loader == nil || s.llmRouter == nil {
 		return
 	}
-	opts := s.agentValidationOptions(ctx)
-	opts.AuthoritativeModels = true
+	deploymentOpts := s.agentValidationOptions(ctx)
+	deploymentOpts.AuthoritativeModels = true
 
 	// Reachability: a registered provider with no probed model list was
 	// unreachable (bad base_url / down host / bad key). Surface it once.
-	for _, id := range opts.RegisteredProviders {
-		if len(opts.ProviderModels[id]) == 0 {
+	for _, id := range deploymentOpts.RegisteredProviders {
+		if len(deploymentOpts.ProviderModels[id]) == 0 {
 			s.log.Warn("provider unreachable at startup — model validation skipped for it; check base_url/api_key/host",
 				zap.String("provider", id))
 		}
@@ -2238,6 +2238,21 @@ func (s *Server) validateAgentsAtBoot(ctx context.Context) {
 	// Boot validation covers every tenant, one workspace at a time, so a bad
 	// definition is disabled in the workspace that owns it and nowhere else.
 	s.eachWorkspace(func(scope agentScope) {
+		opts := deploymentOpts
+		// A Team/Scale workspace can own a provider without registering it in
+		// the deployment-global router. Validate against the same effective
+		// inventory request execution resolves, otherwise a healthy tenant agent
+		// is disabled on every gateway restart even though it ran moments earlier.
+		if s.workspaceSettings != nil {
+			settings, err := s.workspaceSettings.Get(ctx, scope.WorkspaceID())
+			if err != nil {
+				s.log.Warn("workspace settings unavailable during boot agent validation",
+					zap.String("workspace_id", scope.WorkspaceID()), zap.Error(err))
+			} else {
+				opts = s.agentValidationOptionsForWorkspace(ctx, scope.WorkspaceID(), settings)
+				opts.AuthoritativeModels = true
+			}
+		}
 		for _, def := range scope.All() {
 			if def == nil || !def.Enabled {
 				continue
