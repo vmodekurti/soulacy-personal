@@ -196,7 +196,19 @@ test:
 ## internal/loadprofile, with each number's reasoning recorded beside it.
 loadtest:
 	go test -tags loadtest ./internal/gateway/ -run TestTeamPreviewMeetsItsLatencyTargets -v -count=1
+	go test -tags loadtest ./internal/quota/ -run TestNoisyTenantQueueLatencyProfile -v -count=1
 	go test ./internal/loadprofile/ -count=1
+
+## Full production publication gate. Requires live PostgreSQL and Qdrant plus
+## the independent-review JSON described in docs/operations/disaster-recovery.md.
+production-assurance:
+	@test -n "$$SOULACY_TEST_POSTGRES_DSN" || (echo "SOULACY_TEST_POSTGRES_DSN is required" >&2; exit 1)
+	@test -n "$$SOULACY_TEST_QDRANT_URL" || (echo "SOULACY_TEST_QDRANT_URL is required" >&2; exit 1)
+	@test -n "$$SOULACY_SECURITY_REVIEW_ATTESTATION" || (echo "SOULACY_SECURITY_REVIEW_ATTESTATION is required" >&2; exit 1)
+	go test ./internal/recovery/ -run TestProductionLikeRestoreDrill -v -count=1
+	go test ./internal/vector/qdrant/ -run TestLiveQdrantEnforcesWorkspacePrefilter -v -count=1
+	$(MAKE) loadtest
+	SOULACY_ENFORCE_RELEASE_GATE=1 $(MAKE) security
 
 ## Dedicated isolation suite (MU-021 criterion 7). These tests also run as
 ## part of `make test`; this target is for running them alone, under the race
@@ -212,7 +224,7 @@ loadtest:
 ## passing for the wrong reason, and the gate would stay green.
 security:
 	go test ./internal/runtime/ -run 'TestIsolationEscape|TestNoisyNeighbour' -race -count=1 -v
-	go test ./internal/releasegate/ -count=1
+	go test ./internal/releasegate/ -count=1 -v
 	go test -race -count=1 \
 		./internal/app/ \
 		./internal/approvals/ \
@@ -236,6 +248,7 @@ security:
 		./internal/quota/ \
 		./internal/ratelimit/ \
 		./internal/redact/ \
+		./internal/recovery/ \
 		./internal/runs/ \
 		./internal/schedules/ \
 		./internal/skills/ \

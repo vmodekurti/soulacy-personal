@@ -4546,20 +4546,23 @@ Four failure directions, each mutation-verified:
 - a `Criterion` that is a paraphrase rather than a quote from the backlog, so
   the mapping from surface to acceptance criterion can be checked instead of
   trusted;
-- a named test file that stops looking like what the surface claims. Two kinds
-  are recognised — `two-tenant` and `build-guard` — because they decay
-  differently: a two-tenant test that no longer mentions a second workspace has
-  drifted, whereas a build guard has no tenant to mention and its tell is that
-  it reads the repository's source.
+- a named test file that stops looking like what the surface claims. Four kinds
+  are recognised because they decay differently: a `two-tenant` test must name
+  a second workspace, a `build-guard` must read repository source,
+  `fault-injection` must show a crash or restore path, and `attestation` must
+  validate external review evidence rather than pretending a unit test can
+  perform a human review.
 
-**Gaps are declared, not discovered, and do not fail the build.** `Blockers()`
-mirrors `ownership.MultiUserBlockers`, including the part that makes it work: a
-gate that failed on any recorded gap is a gate people route around by deleting
-the record. Three gaps are recorded — Qdrant's filter tests need a live
-instance, the p50/p95/p99 figures come from `make loadtest` rather than from a
-test, and backup restore verification covers SQLite only. At boot they are
-logged as warnings in multi-user mode; an *unclassified store* is still fatal,
-because that is a hole nobody has looked at rather than one somebody wrote down.
+**Gaps are declared, not discovered.** `Blockers()` remains the machine-readable
+mechanism, but the current list is empty. The former three gaps now execute in
+the publication workflow: a live Qdrant proves the server honors workspace
+pre-filters, open-loop API and fair-share queue profiles publish p50/p95/p99 and
+error rates under a 20x noisy tenant, and a live PostgreSQL dump/restore drill
+verifies relational rows, object checksums, vector references, encrypted
+secrets, and schema versions. A fourth, human-only gate requires a dated HTTPS
+independent-review attestation for the exact release commit with zero unresolved
+critical or high findings. Missing evidence blocks container and release
+publication; an *unclassified store* remains fatal at application startup.
 
 ### Widening the gate found a real data race on its first run
 

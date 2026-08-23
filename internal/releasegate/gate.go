@@ -48,8 +48,9 @@ import (
 //     that parses Go files.
 //   - FaultInjection abandons the production sequence part-way and asserts what
 //     recovery does. Its adversary is a crash rather than a neighbour.
+//   - Attestation validates external human evidence that code cannot produce.
 //
-// The third value was added because the chaos suite was neither of the first
+// FaultInjection was added because the chaos suite was neither of the first
 // two and the guard said so. Mislabelling it TwoTenant to get a green build
 // would have been the moment this taxonomy stopped meaning anything — a kind
 // nobody can be wrong about is a kind that checks nothing.
@@ -59,6 +60,7 @@ const (
 	KindTwoTenant      Kind = "two-tenant"
 	KindBuildGuard     Kind = "build-guard"
 	KindFaultInjection Kind = "fault-injection"
+	KindAttestation    Kind = "attestation"
 )
 
 // Surface is one attack surface MU-037 criterion 1 names, and the coverage
@@ -213,11 +215,11 @@ var Surfaces = []Surface{
 		Package:   "internal/quota",
 		Tests: []string{
 			"internal/quota/fairshare_test.go",
+			"internal/quota/fairshare_load_test.go",
 			"internal/quota/limits_test.go",
 		},
-		Why: "one tenant saturating the deployment cannot starve another's share",
-		Gap: "the published p50/p95/p99 figures come from `make loadtest` against a real gateway, " +
-			"which is a measurement rather than a test and is not part of this gate",
+		Why: "one tenant saturating the deployment cannot starve another's share; the release workflow " +
+			"also runs the open-loop real-gateway profile and publishes its p50/p95/p99/error evidence",
 	},
 	{
 		ID:        "export",
@@ -277,10 +279,12 @@ var Surfaces = []Surface{
 		Kind:      KindTwoTenant,
 		Criterion: "every ... vector query ... for cross-tenant access",
 		Package:   "internal/vector/qdrant",
-		Tests:     []string{"internal/vector/qdrant/workspace_test.go"},
-		Why:       "a similarity search cannot return a neighbour from another workspace's collection",
-		Gap: "the Qdrant tests exercise the client's filter construction against a fake; a live Qdrant " +
-			"instance would be needed to prove the server honours it",
+		Tests: []string{
+			"internal/vector/qdrant/workspace_test.go",
+			"internal/vector/qdrant/workspace_live_test.go",
+		},
+		Why: "request-shape tests prove the pre-filter is sent, and the mandatory live release test " +
+			"proves Qdrant executes it without returning a neighbouring tenant's identical vector",
 	},
 	{
 		ID:        "rate-limits",
@@ -345,13 +349,29 @@ var Surfaces = []Surface{
 	},
 	{
 		ID:        "backup-integrity",
-		Kind:      KindBuildGuard,
+		Kind:      KindFaultInjection,
+		Criterion: "Backup restoration and worker/gateway chaos tests pass",
+		Package:   "internal/recovery",
+		Tests:     []string{"internal/recovery/recovery_test.go"},
+		Why: "the mandatory release drill destroys and restores PostgreSQL relational rows, object bytes, " +
+			"vector references, encrypted secrets and schema versions, then checks every recovered value",
+	},
+	{
+		ID:        "migration-backup",
+		Kind:      KindFaultInjection,
 		Criterion: "Backup restoration and worker/gateway chaos tests pass",
 		Package:   "internal/sqlitex",
 		Tests:     []string{"internal/sqlitex/backupgate_test.go"},
-		Why:       "a destructive migration leaves a snapshot that opens and still contains what it dropped",
-		Gap: "covers SQLite only. Postgres and object-store restore verification need a live instance " +
-			"and a live bucket, so neither is in this gate",
+		Why:       "a destructive schema migration refuses to run without a snapshot that opens and contains what it will drop",
+	},
+	{
+		ID:        "independent-security-review",
+		Kind:      KindAttestation,
+		Criterion: "Threat modeling and an independent security review have no unresolved critical or high findings",
+		Package:   "internal/releasegate",
+		Tests:     []string{"internal/releasegate/independent_review_test.go"},
+		Why: "the release workflow requires a dated HTTPS review attestation and refuses publication when " +
+			"the reviewer reports any unresolved critical or high finding",
 	},
 }
 
@@ -413,8 +433,8 @@ func Validate() error {
 			return fmt.Errorf("releasegate: surface %q names no package", surface.ID)
 		case len(surface.Tests) == 0:
 			return fmt.Errorf("releasegate: surface %q names no tests", surface.ID)
-		case surface.Kind != KindTwoTenant && surface.Kind != KindBuildGuard && surface.Kind != KindFaultInjection:
-			return fmt.Errorf("releasegate: surface %q has kind %q, want two-tenant, build-guard or fault-injection", surface.ID, surface.Kind)
+		case surface.Kind != KindTwoTenant && surface.Kind != KindBuildGuard && surface.Kind != KindFaultInjection && surface.Kind != KindAttestation:
+			return fmt.Errorf("releasegate: surface %q has unsupported kind %q", surface.ID, surface.Kind)
 		case strings.TrimSpace(surface.Why) == "":
 			// Enforced because "internal/x is tested" is unfalsifiable. The
 			// sentence is what lets a reviewer decide whether the named tests

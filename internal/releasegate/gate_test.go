@@ -58,7 +58,8 @@ func TestEveryNamedTestFileActuallyAttemptsACrossTenantAccess(t *testing.T) {
 	// A fault-injection test's tell is that it abandons the sequence and then
 	// asks what recovered. It has no second tenant either — its adversary is a
 	// crash.
-	faultInjection := regexp.MustCompile(`(?i)(crash|abandon|recover|lease.?lost|orphan)`)
+	faultInjection := regexp.MustCompile(`(?i)(crash|abandon|recover|restore|lease.?lost|orphan)`)
+	attestation := regexp.MustCompile(`(?i)(attestation|independent.security.review|reviewer)`)
 
 	root := repoRoot()
 	for _, surface := range Surfaces {
@@ -69,6 +70,8 @@ func TestEveryNamedTestFileActuallyAttemptsACrossTenantAccess(t *testing.T) {
 			want, shape = buildGuard, "any reading of the repository's source"
 		case KindFaultInjection:
 			want, shape = faultInjection, "a crash, an abandonment, or a recovery"
+		case KindAttestation:
+			want, shape = attestation, "an external review attestation"
 		}
 		covered := false
 		for _, test := range surface.Tests {
