@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -48,6 +50,34 @@ func TestDetectURLPackageKind(t *testing.T) {
 			t.Fatal("expected an unsupported-package error")
 		}
 	})
+}
+
+func TestMCPSourceInstallIsDisabledInMultiUserModes(t *testing.T) {
+	for _, mode := range []string{"team", "scale"} {
+		t.Run(mode, func(t *testing.T) {
+			workspace := t.TempDir()
+			t.Setenv("SOULACY_WORKSPACE", workspace)
+			if err := os.WriteFile(filepath.Join(workspace, "config.yaml"), []byte("deployment:\n  mode: "+mode+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			err := installMCPFromRepository(context.Background(), "https://example.com/server.git", t.TempDir(), true, true)
+			if err == nil || !strings.Contains(err.Error(), "immutable approved artifact") {
+				t.Fatalf("%s source install was not refused safely: %v", mode, err)
+			}
+		})
+	}
+}
+
+func TestPersonalMCPSourceInstallRequiresExplicitHostBuildWaiver(t *testing.T) {
+	workspace := t.TempDir()
+	t.Setenv("SOULACY_WORKSPACE", workspace)
+	if err := os.WriteFile(filepath.Join(workspace, "config.yaml"), []byte("deployment:\n  mode: personal\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := installMCPFromRepository(context.Background(), "https://example.com/server.git", t.TempDir(), true, false)
+	if err == nil || !strings.Contains(err.Error(), "--allow-host-build") {
+		t.Fatalf("Personal source install did not require its break-glass waiver: %v", err)
+	}
 }
 
 func TestReadLegacyMCPDependencies(t *testing.T) {

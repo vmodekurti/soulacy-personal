@@ -69,7 +69,7 @@ func buildPackageCmd() *cobra.Command {
 		Short: "Install a Skill or MCP server from one URL",
 	}
 	var kind string
-	var assumeYes, allowUnverified bool
+	var assumeYes, allowUnverified, allowHostBuild bool
 	install := &cobra.Command{
 		Use:   "install <https-git-url>",
 		Short: "Detect, inspect, install, register, and verify a Skill or MCP server",
@@ -79,20 +79,23 @@ The installer detects SKILL.md or MCP package manifests, runs safety
 introspection, installs into the persistent Soulacy workspace, registers MCP
 servers in the live config, and skips packages that are already installed.
 Raw Git sources are not cryptographically signed, so non-interactive callers
-must explicitly pass --allow-unverified.`,
+must explicitly pass --allow-unverified. MCP source installation is refused in
+Team and Scale. Personal mode additionally requires --allow-host-build because
+package build backends can execute code on the host.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return installURLPackage(cmd.Context(), args[0], urlPackageKind(kind), assumeYes, allowUnverified)
+			return installURLPackage(cmd.Context(), args[0], urlPackageKind(kind), assumeYes, allowUnverified, allowHostBuild)
 		},
 	}
 	install.Flags().StringVar(&kind, "kind", string(urlPackageAuto), "Package kind: auto, skill, or mcp")
 	install.Flags().BoolVarP(&assumeYes, "yes", "y", false, "Use the approval already collected by the caller")
 	install.Flags().BoolVar(&allowUnverified, "allow-unverified", false, "Allow an unsigned/raw Git source after explicit operator approval")
+	install.Flags().BoolVar(&allowHostBuild, "allow-host-build", false, "Personal mode only: permit package build/install code to run on this host")
 	cmd.AddCommand(install)
 	return cmd
 }
 
-func installURLPackage(ctx context.Context, source string, kind urlPackageKind, assumeYes, allowUnverified bool) error {
+func installURLPackage(ctx context.Context, source string, kind urlPackageKind, assumeYes, allowUnverified, allowHostBuild bool) error {
 	source = strings.TrimSpace(source)
 	if !strings.HasPrefix(strings.ToLower(source), "https://") {
 		return fmt.Errorf("source must be an HTTPS Git repository URL")
@@ -137,7 +140,7 @@ func installURLPackage(ctx context.Context, source string, kind urlPackageKind, 
 		// atomic activation, and gateway rescan all remain in one place.
 		return runRemoteSkillInstall(ctx, source, assumeYes, allowUnverified)
 	}
-	return installMCPFromRepository(ctx, source, probe, assumeYes)
+	return installMCPFromRepository(ctx, source, probe, assumeYes, allowHostBuild)
 }
 
 func detectURLPackageKind(dir string) (urlPackageKind, error) {
@@ -176,10 +179,20 @@ func repositoryMentionsMCP(dir string) bool {
 	return false
 }
 
-func installMCPFromRepository(ctx context.Context, source, probe string, assumeYes bool) error {
+func installMCPFromRepository(ctx context.Context, source, probe string, assumeYes, allowHostBuild bool) error {
 	ws, err := config.ResolveWorkspace()
 	if err != nil {
 		return fmt.Errorf("resolve workspace: %w", err)
+	}
+	mode, modeErr := packageInstallDeploymentMode(ws.ConfigFile)
+	if modeErr != nil {
+		return fmt.Errorf("read deployment mode before MCP installation: %w", modeErr)
+	}
+	if mode != config.DeploymentModePersonal {
+		return fmt.Errorf("source-based MCP installation is disabled in %s mode: publish an immutable approved artifact and enable it through the platform catalog", mode)
+	}
+	if !allowHostBuild {
+		return fmt.Errorf("MCP source installation can execute package build code on the host; use an approved remote MCP server, or in Personal mode explicitly pass --allow-host-build after reviewing the complete dependency tree")
 	}
 	manifest, _ := readMCPServerManifest(filepath.Join(probe, "server.json"))
 	id := packageInstallID(manifest.Name)
@@ -261,6 +274,33 @@ func installMCPFromRepository(ctx context.Context, source, probe string, assumeY
 	return nil
 }
 
+// packageInstallDeploymentMode reads only the field needed for the security
+// decision. config.Load performs whole-deployment validation; using it here
+// could turn an incomplete Team config into an error before this fail-closed
+// source-install policy was reached.
+func packageInstallDeploymentMode(path string) (string, error) {
+	mode := struct {
+		Deployment struct {
+			Mode string `yaml:"mode"`
+		} `yaml:"deployment"`
+	}{}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return config.DeploymentModePersonal, nil
+		}
+		return "", err
+	}
+	if err := yaml.Unmarshal(b, &mode); err != nil {
+		return "", err
+	}
+	value := strings.ToLower(strings.TrimSpace(mode.Deployment.Mode))
+	if value == "" {
+		value = config.DeploymentModePersonal
+	}
+	return value, nil
+}
+
 func installMCPRuntime(ctx context.Context, dest, sourceDir string) (string, []string, error) {
 	if fileExists(filepath.Join(sourceDir, "pyproject.toml")) {
 		var project pythonProject
@@ -293,7 +333,7 @@ func installMCPRuntime(ctx context.Context, dest, sourceDir string) (string, []s
 		}
 		installCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 		defer cancel()
-		if out, err := exec.CommandContext(installCtx, "npm", "install", "--omit=dev", "--prefix", sourceDir).CombinedOutput(); err != nil {
+		if out, err := exec.CommandContext(installCtx, "npm", "install", "--ignore-scripts", "--omit=dev", "--prefix", sourceDir).CombinedOutput(); err != nil {
 			return "", nil, fmt.Errorf("install Node MCP dependencies: %v: %s", err, tailText(string(out), 4000))
 		}
 		if bin := firstNodeBin(project.Bin); bin != "" {

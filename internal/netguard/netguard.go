@@ -45,11 +45,12 @@ type dialContextFunc func(context.Context, string, string) (net.Conn, error)
 // request. Redirects pass through RoundTrip again and therefore receive their
 // own independently validated, pinned address.
 type GuardedTransport struct {
-	Base         *http.Transport
-	Resolver     resolver
-	DialContext  dialContextFunc
-	BlockPrivate bool
-	AllowedHosts []string
+	Base           *http.Transport
+	Resolver       resolver
+	DialContext    dialContextFunc
+	BlockPrivate   bool
+	RejectLoopback bool
+	AllowedHosts   []string
 }
 
 // NewHTTPClient returns a client suitable for URLs influenced by users,
@@ -65,11 +66,24 @@ func NewHTTPClient(timeout time.Duration, blockPrivate bool, allowedHosts []stri
 	}
 }
 
+// NewPublicHTTPClient is the stricter client for tenant-selected remote
+// services. In addition to metadata, link-local, and private networks it also
+// rejects loopback. Loopback remains available through NewHTTPClient because
+// operator-configured local sidecars legitimately use it; an untrusted tenant
+// URL must never be able to reach services bound to the gateway host.
+func NewPublicHTTPClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout:       timeout,
+		Transport:     &GuardedTransport{BlockPrivate: true, RejectLoopback: true},
+		CheckRedirect: checkRedirect(true, true, nil),
+	}
+}
+
 func (t *GuardedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req == nil || req.URL == nil {
 		return nil, fmt.Errorf("ssrf: request has no URL")
 	}
-	ips, err := resolveAllowed(req.Context(), req.URL, t.BlockPrivate, t.AllowedHosts, t.resolver())
+	ips, err := resolveAllowedPolicy(req.Context(), req.URL, t.BlockPrivate, t.RejectLoopback, t.AllowedHosts, t.resolver())
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +189,23 @@ func CheckURL(u *url.URL, blockPrivate bool, allowedHosts []string) error {
 	return err
 }
 
+// CheckPublic applies the policy used for workspace-selected remote services:
+// HTTPS is checked by the caller, while every non-public destination,
+// including loopback, is rejected here.
+func CheckPublic(rawURL string) error {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return fmt.Errorf("ssrf: invalid URL: %w", err)
+	}
+	_, err = resolveAllowedPolicy(context.Background(), u, true, true, nil, net.DefaultResolver)
+	return err
+}
+
 func resolveAllowed(ctx context.Context, u *url.URL, blockPrivate bool, allowedHosts []string, r resolver) ([]net.IP, error) {
+	return resolveAllowedPolicy(ctx, u, blockPrivate, false, allowedHosts, r)
+}
+
+func resolveAllowedPolicy(ctx context.Context, u *url.URL, blockPrivate, rejectLoopback bool, allowedHosts []string, r resolver) ([]net.IP, error) {
 	if u == nil {
 		return nil, fmt.Errorf("ssrf: no URL")
 	}
@@ -210,6 +240,9 @@ func resolveAllowed(ctx context.Context, u *url.URL, blockPrivate bool, allowedH
 		}
 		ipStr := ip.String()
 		if ip.IsLoopback() {
+			if rejectLoopback {
+				return nil, fmt.Errorf("ssrf: request to %s (%s) is blocked — loopback is not available to workspace-selected services", host, ipStr)
+			}
 			approved = append(approved, append(net.IP(nil), ip...))
 			continue
 		}
@@ -242,6 +275,10 @@ func resolveAllowed(ctx context.Context, u *url.URL, blockPrivate bool, allowedH
 // http://169.254.169.254/latest/meta-data/iam/security-credentials/ — which Go's
 // default client follows without asking anyone.
 func CheckRedirect(blockPrivate bool, allowedHosts []string) func(*http.Request, []*http.Request) error {
+	return checkRedirect(blockPrivate, false, allowedHosts)
+}
+
+func checkRedirect(blockPrivate, rejectLoopback bool, allowedHosts []string) func(*http.Request, []*http.Request) error {
 	return func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 10 {
 			return fmt.Errorf("stopped after 10 redirects")
@@ -249,6 +286,7 @@ func CheckRedirect(blockPrivate bool, allowedHosts []string) func(*http.Request,
 		if len(via) > 0 && strings.EqualFold(via[len(via)-1].URL.Scheme, "https") && !strings.EqualFold(req.URL.Scheme, "https") {
 			return fmt.Errorf("ssrf: refusing redirect downgrade from HTTPS to %s", req.URL.Scheme)
 		}
-		return CheckURL(req.URL, blockPrivate, allowedHosts)
+		_, err := resolveAllowedPolicy(req.Context(), req.URL, blockPrivate, rejectLoopback, allowedHosts, net.DefaultResolver)
+		return err
 	}
 }

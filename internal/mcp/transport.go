@@ -16,10 +16,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -30,6 +33,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/soulacy/soulacy/internal/netguard"
 	"github.com/soulacy/soulacy/internal/sandbox"
 )
 
@@ -165,6 +169,45 @@ func newStdio(cfg ServerConfig, log *zap.Logger) (*stdioTx, error) {
 	go t.readLoop(stdout)
 
 	return t, nil
+}
+
+// newContainerStdio launches an admin-approved, immutable OCI image and uses
+// its stdio as the MCP transport. Command is the image digest, not a host
+// executable. Every docker option is generated here; workspace input can
+// neither add mounts nor weaken the isolation profile.
+func newContainerStdio(cfg ServerConfig, log *zap.Logger) (*stdioTx, error) {
+	image := strings.TrimSpace(cfg.Command)
+	digestAt := strings.LastIndex(image, "@sha256:")
+	digest := ""
+	if digestAt >= 0 {
+		digest = image[digestAt+len("@sha256:"):]
+	}
+	digestBytes, digestErr := hex.DecodeString(digest)
+	if digestAt <= 0 || digestErr != nil || len(digestBytes) != sha256.Size || strings.ToLower(digest) != digest {
+		return nil, fmt.Errorf("container: immutable image digest is required")
+	}
+	args := []string{
+		"run", "--rm", "-i",
+		"--read-only",
+		"--cap-drop", "ALL",
+		"--security-opt", "no-new-privileges",
+		"--pids-limit", "128",
+		"--memory", "1g",
+		"--cpus", "1",
+		"--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
+	}
+	// MCP servers commonly need public APIs. Docker bridge networking is a
+	// disclosed permission in the approval report. There are deliberately no
+	// host mounts, host networking, privileged mode, or Docker socket access.
+	for key, value := range cfg.Env {
+		if key == "" || strings.ContainsAny(key, "=\x00") || strings.ContainsRune(value, '\x00') {
+			return nil, fmt.Errorf("container: invalid environment entry")
+		}
+		args = append(args, "--env", key+"="+value)
+	}
+	args = append(args, image)
+	args = append(args, cfg.Args...)
+	return newStdio(ServerConfig{Command: "docker", Args: args}, log)
 }
 
 func (t *stdioTx) readLoop(stdout io.Reader) {
@@ -332,24 +375,44 @@ func (t *stdioTx) processRootPID() int {
 // ── HTTP / SSE transport ─────────────────────────────────────────────────────
 
 type httpTx struct {
-	url       string
-	headers   map[string]string
-	client    *http.Client
-	nextID    atomic.Int64
-	sessionID atomic.Pointer[string]
+	url          string
+	headers      map[string]string
+	client       *http.Client
+	publicRemote bool
+	nextID       atomic.Int64
+	sessionID    atomic.Pointer[string]
 }
 
 func newHTTP(cfg ServerConfig) *httpTx {
+	client := &http.Client{Timeout: 60 * time.Second}
+	if cfg.PublicRemote {
+		client = netguard.NewPublicHTTPClient(60 * time.Second)
+	}
 	return &httpTx{
-		url:     cfg.URL,
-		headers: cfg.Headers,
-		client:  &http.Client{Timeout: 60 * time.Second},
+		url:          cfg.URL,
+		headers:      cfg.Headers,
+		client:       client,
+		publicRemote: cfg.PublicRemote,
 	}
 }
 
-func (t *httpTx) request(ctx context.Context, method string, params any) (json.RawMessage, error) {
+func (t *httpTx) validateURL() error {
 	if t.url == "" {
-		return nil, fmt.Errorf("http: url is required")
+		return fmt.Errorf("http: url is required")
+	}
+	if !t.publicRemote {
+		return nil
+	}
+	u, err := url.Parse(t.url)
+	if err != nil || !strings.EqualFold(u.Scheme, "https") || u.Hostname() == "" || u.User != nil || u.Fragment != "" {
+		return fmt.Errorf("http: workspace MCP URL must be an absolute HTTPS URL")
+	}
+	return nil
+}
+
+func (t *httpTx) request(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	if err := t.validateURL(); err != nil {
+		return nil, err
 	}
 	id := t.nextID.Add(1)
 	payload, _ := json.Marshal(map[string]any{
@@ -448,8 +511,8 @@ func extractSSEResponse(body []byte, wantID int64) (json.RawMessage, error) {
 }
 
 func (t *httpTx) notify(method string, params any) error {
-	if t.url == "" {
-		return fmt.Errorf("http: url is required")
+	if err := t.validateURL(); err != nil {
+		return err
 	}
 	payload, _ := json.Marshal(map[string]any{
 		"jsonrpc": "2.0", "method": method, "params": params,

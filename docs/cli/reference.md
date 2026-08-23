@@ -128,16 +128,19 @@ sy channel whatsapp-web status                            # connection state + Q
 ## Skills & registries
 
 For a Git URL, the unified installer detects whether the repository contains a
-Skill or MCP server, shows the safety/approval step, installs it persistently,
-and registers MCP servers automatically:
+Skill or MCP server and shows the safety/approval step. Skills install through
+the normal flow. MCP source builds are refused in Team/Scale and require an
+additional explicit Personal-mode host-build waiver:
 
 ```bash
 sy package install https://github.com/owner/repository --allow-unverified
+sy package install https://github.com/owner/mcp-server --kind mcp \
+  --allow-unverified --allow-host-build
 ```
 
-The built-in **System** agent uses this same installer when you say “Install
-the Skill/MCP server from this URL.” Existing installations are reported and
-left unchanged.
+The built-in **System** agent uses the safe default of this installer. It can
+install a Skill, but it cannot grant the MCP host-build waiver. Existing
+installations are reported and left unchanged.
 
 ```bash
 sy skill list

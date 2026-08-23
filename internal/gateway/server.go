@@ -142,6 +142,12 @@ type Server struct {
 	// itself, as opposed to s.mcp/mcpPool which instantiate the operator's
 	// template. Both feed the same pool; only this one is the tenant's.
 	mcpServers *mcpstore.Store
+	// mcpInstallStages holds short-lived, workspace-bound security reviews for
+	// the two-phase "inspect, then approve" MCP installer. The source tree is
+	// never retained: only immutable identifiers and the reviewed execution
+	// plan survive the inspection request.
+	mcpInstallMu     sync.Mutex
+	mcpInstallStages map[string]stagedMCPInstall
 	// pluginStores is the per-workspace plugin registry. A lifecycle change
 	// invalidates that workspace's cached loader through it, so a revoked
 	// plugin stops being callable without waiting for a restart.
@@ -1253,8 +1259,10 @@ func (s *Server) buildApp() *fiber.App {
 	// the one thing about an MCP server that must never be the operator's.
 	api.Get("/mcp/pending", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleMCPPending)
 	api.Get("/mcp/own", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleListOwnMCPServers)
-	api.Put("/mcp/own/:id", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handlePutOwnMCPServer)
-	api.Delete("/mcp/own/:id", s.rbacMW(rbac.ResourceMCP, rbac.ActionDelete), s.handleDeleteOwnMCPServer)
+	api.Put("/mcp/own/:id", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.workspaceMCPAdmin, s.handlePutOwnMCPServer)
+	api.Delete("/mcp/own/:id", s.rbacMW(rbac.ResourceMCP, rbac.ActionDelete), s.workspaceMCPAdmin, s.handleDeleteOwnMCPServer)
+	api.Post("/mcp/own/install/inspect", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.workspaceMCPAdmin, s.handleInspectWorkspaceMCP)
+	api.Post("/mcp/own/install/approve", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.workspaceMCPAdmin, s.handleApproveWorkspaceMCP)
 	api.Get("/plugins/settings/pending", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handlePluginSettingsPending)
 	api.Get("/mcp/:id/credentials", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleListMCPCredentials)
 	api.Put("/mcp/:id/credentials", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleSetMCPCredential)

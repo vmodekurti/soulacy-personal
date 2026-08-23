@@ -859,6 +859,12 @@ export const api = {
     ownList: () => apiFetch('/mcp/own'),
     ownPut: (id, body) => apiFetch(`/mcp/own/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) }),
     ownDelete: (id) => apiFetch(`/mcp/own/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    inspectInstall: (sourceURL) => apiFetch('/mcp/own/install/inspect', {
+      method: 'POST', body: JSON.stringify({ source_url: sourceURL }),
+    }),
+    approveInstall: (approvalToken, fingerprint) => apiFetch('/mcp/own/install/approve', {
+      method: 'POST', body: JSON.stringify({ approval_token: approvalToken, fingerprint }),
+    }),
   },
 
   plugins: {

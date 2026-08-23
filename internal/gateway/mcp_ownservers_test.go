@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/mcp"
 	"github.com/soulacy/soulacy/internal/mcpstore"
 	"github.com/soulacy/soulacy/internal/wsroot"
@@ -22,6 +23,42 @@ func ownServerServer(t *testing.T) (*Server, *mcpstore.Store, *memVault) {
 	s.SetCredentialVault(vault)
 	s.SetMCPServerStore(store)
 	return s, store, vault
+}
+
+func TestTeamWorkspaceMCPPolicyRejectsExecutableAndHostDestinations(t *testing.T) {
+	s, _, _ := ownServerServer(t)
+	s.config().Deployment.Mode = config.DeploymentModeTeam
+
+	bad := []ownServerBody{
+		{Transport: "stdio", Command: "/bin/sh", Args: []string{"-c", "id"}},
+		{Transport: "http", URL: "http://example.com/mcp"},
+		{Transport: "http", URL: "https://127.0.0.1/mcp"},
+		{Transport: "http", URL: "https://token@example.com/mcp"},
+		{Transport: "http", URL: "https://93.184.216.34/mcp", InheritEnv: []string{"DATABASE_URL"}},
+		{Transport: "http", URL: "https://93.184.216.34/mcp", Env: map[string]string{"TOKEN": "x"}},
+	}
+	for i, body := range bad {
+		if err := s.validateOwnMCPPolicy(body); err == nil {
+			t.Errorf("unsafe definition %d was accepted: %+v", i, body)
+		}
+	}
+
+	if err := s.validateOwnMCPPolicy(ownServerBody{Transport: "http", URL: "https://93.184.216.34/mcp"}); err != nil {
+		t.Fatalf("public remote MCP definition was rejected: %v", err)
+	}
+}
+
+func TestTeamWorkspaceWithholdsLegacyStdioDefinition(t *testing.T) {
+	s, store, _ := ownServerServer(t)
+	s.config().Deployment.Mode = config.DeploymentModeTeam
+	if err := store.Put(context.Background(), mcpstore.Server{
+		WorkspaceID: wsroot.PersonalWorkspaceID, ID: "legacy", Transport: "stdio", Command: "/bin/sh",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.workspaceOwnedServers(wsroot.PersonalWorkspaceID); len(got) != 0 {
+		t.Fatalf("legacy executable definition was loaded in Team mode: %+v", got)
+	}
 }
 
 // The store is plain SQLite on the gateway's disk. A tenant's token must not

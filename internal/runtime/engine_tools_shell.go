@@ -53,7 +53,7 @@ func (e *Engine) buildShellTools() []BuiltinTool {
 		{
 			Name:        "package_install",
 			Gate:        "",
-			Description: "Install and register a Soulacy Skill or MCP server from an HTTPS Git repository URL. Use this tool directly whenever the operator asks to install a Skill or MCP server from a URL. The installer detects the package type, performs safety inspection, uses persistent workspace paths, updates config when needed, avoids reinstalling an existing package, and verifies the result. Never substitute shell_exec or narrate CLI commands for this task.",
+			Description: "Install a Soulacy Skill from an HTTPS Git repository URL through the typed, approval-gated installer. MCP source installation is intentionally refused by the safe default because package builds execute host code; connect a remote HTTPS MCP endpoint instead. Never substitute shell_exec or construct installation commands.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

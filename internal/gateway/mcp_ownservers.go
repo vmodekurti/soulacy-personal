@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"net/url"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -10,7 +11,9 @@ import (
 
 	"github.com/soulacy/soulacy/internal/mcp"
 	"github.com/soulacy/soulacy/internal/mcpstore"
+	"github.com/soulacy/soulacy/internal/netguard"
 	"github.com/soulacy/soulacy/internal/redact"
+	"github.com/soulacy/soulacy/internal/tenancy"
 	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
@@ -55,14 +58,21 @@ func (s *Server) workspaceOwnedServers(workspaceID string) map[string]mcp.Server
 	}
 	out := make(map[string]mcp.ServerConfig, len(stored))
 	for _, server := range stored {
+		publicRemote := s.authorizationRequired()
+		if publicRemote && !safeWorkspaceRemoteDefinition(server.Transport, server.URL, server.Command, server.Args, server.Env, server.InheritEnv) {
+			s.log.Warn("unsafe legacy workspace MCP definition withheld",
+				zap.String("workspace_id", workspaceID), zap.String("server_id", server.ID))
+			continue
+		}
 		out[server.ID] = mcp.ServerConfig{
-			Transport:  server.Transport,
-			Command:    server.Command,
-			Args:       server.Args,
-			Env:        s.fillSecrets(workspaceID, server.ID, server.Env),
-			URL:        server.URL,
-			Headers:    s.fillSecrets(workspaceID, server.ID, server.Headers),
-			InheritEnv: server.InheritEnv,
+			Transport:    server.Transport,
+			Command:      server.Command,
+			Args:         server.Args,
+			Env:          s.fillSecrets(workspaceID, server.ID, server.Env),
+			URL:          server.URL,
+			Headers:      s.fillSecrets(workspaceID, server.ID, server.Headers),
+			InheritEnv:   server.InheritEnv,
+			PublicRemote: publicRemote,
 		}
 	}
 	return out
@@ -101,6 +111,50 @@ type ownServerBody struct {
 	InheritEnv []string          `json:"inherit_env"`
 }
 
+func safeWorkspaceRemoteDefinition(transport, rawURL, command string, args []string, env map[string]string, inheritEnv []string) bool {
+	t := strings.ToLower(strings.TrimSpace(transport))
+	if t == "container" {
+		// Container definitions are written only by the approval endpoint; the
+		// generic PUT policy below rejects this transport. Re-check the durable
+		// row on every load so a legacy/manual row cannot become host execution.
+		return immutableOCIReference.MatchString(strings.TrimSpace(command)) && rawURL == "" &&
+			len(inheritEnv) == 0 && len(env) == 0
+	}
+	if t != "http" && t != "https" {
+		return false
+	}
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	return err == nil && strings.EqualFold(u.Scheme, "https") && u.Hostname() != "" && u.User == nil && u.Fragment == "" &&
+		strings.TrimSpace(command) == "" && len(args) == 0 && len(env) == 0 && len(inheritEnv) == 0
+}
+
+// workspaceMCPAdmin limits changes to the two roles that administer a
+// workspace. Personal mode preserves its single-user compatibility path.
+func (s *Server) workspaceMCPAdmin(c *fiber.Ctx) error {
+	if !s.authorizationRequired() {
+		return c.Next()
+	}
+	identity, ok := requestIdentity(c)
+	if !ok || (identity.Role() != tenancy.RoleOwner && identity.Role() != tenancy.RoleAdmin) {
+		return fiber.NewError(fiber.StatusForbidden, "workspace MCP administration is not permitted")
+	}
+	return c.Next()
+}
+
+func (s *Server) validateOwnMCPPolicy(body ownServerBody) error {
+	if !s.authorizationRequired() {
+		return nil
+	}
+	if !safeWorkspaceRemoteDefinition(body.Transport, body.URL, body.Command, body.Args, body.Env, body.InheritEnv) {
+		return fiber.NewError(fiber.StatusBadRequest,
+			"Team and Scale workspaces may enable only remote HTTPS MCP servers; command, args, env, and inherit_env are not permitted")
+	}
+	if err := netguard.CheckPublic(body.URL); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "workspace MCP URL is not a public destination: "+err.Error())
+	}
+	return nil
+}
+
 // handlePutOwnMCPServer creates or replaces one of this workspace's servers.
 //
 // PUT /api/v1/mcp/own/:id — a workspace route. Writing the operator's template
@@ -122,6 +176,9 @@ func (s *Server) handlePutOwnMCPServer(c *fiber.Ctx) error {
 		Env: body.Env, URL: body.URL, Headers: body.Headers,
 	}); msg != "" {
 		return s.errMsg(c, fiber.StatusBadRequest, msg)
+	}
+	if err := s.validateOwnMCPPolicy(body); err != nil {
+		return err
 	}
 
 	workspaceID := mcpWorkspace(c)

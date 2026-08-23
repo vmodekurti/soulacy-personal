@@ -7,6 +7,7 @@
   import { activeWorkspace } from '../lib/workspace.js'
 
   $: workspaceScoped = ['team', 'scale'].includes(String($activeWorkspace?.deploymentMode || '').toLowerCase())
+  $: workspaceAdmin = ['owner', 'admin'].includes(String($activeWorkspace?.role || '').toLowerCase())
 
   let servers = []
   let loading = true
@@ -22,6 +23,56 @@
   let saving = false
   let testing = false
   let testResult = null  // { ok, message }
+
+  // Safe workspace installer: URL -> review -> explicit approval. The token
+  // and fingerprint are issued by the gateway and cannot be edited here.
+  let installModal = false
+  let installURL = ''
+  let installReview = null
+  let installToken = ''
+  let inspecting = false
+  let approving = false
+  let installError = ''
+
+  function openInstall() {
+    installModal = true
+    installURL = ''
+    installReview = null
+    installToken = ''
+    installError = ''
+  }
+  function closeInstall() {
+    if (inspecting || approving) return
+    installModal = false
+  }
+  async function inspectInstall() {
+    inspecting = true
+    installError = ''
+    installReview = null
+    try {
+      const res = await api.mcp.inspectInstall(installURL.trim())
+      installToken = res.approval_token
+      installReview = res.report
+    } catch (e) {
+      installError = e.message
+    } finally {
+      inspecting = false
+    }
+  }
+  async function approveInstall() {
+    approving = true
+    installError = ''
+    try {
+      const res = await api.mcp.approveInstall(installToken, installReview.fingerprint)
+      info = res.message || 'MCP server installed.'
+      installModal = false
+      await load()
+    } catch (e) {
+      installError = e.message
+    } finally {
+      approving = false
+    }
+  }
 
   // Glama provisioner state
   let glamaModal = false
@@ -252,7 +303,11 @@
     <div class="header-actions">
       <button class="btn-secondary" on:click={load} disabled={loading}>↺ Refresh</button>
       {#if !workspaceScoped}<button class="btn-glama" on:click={openGlamaModal}>⚡ Glama</button>{/if}
-      <button class="btn-primary"   on:click={openNew}>+ New Server</button>
+      {#if workspaceScoped && workspaceAdmin}
+        <button class="btn-primary" on:click={openInstall}>+ Install from GitHub</button>
+      {:else if !workspaceScoped}
+        <button class="btn-primary" on:click={openNew}>+ New Server</button>
+      {/if}
     </div>
         <TourButton />
     </div>
@@ -274,7 +329,7 @@
     <div class="empty-card">
       <div class="empty-icon">🔌</div>
       <p>No MCP servers configured.</p>
-      <p class="hint">Click <strong>+ New Server</strong> to add one — choose from a template or define your own.</p>
+      <p class="hint">{workspaceScoped ? (workspaceAdmin ? 'Paste a GitHub repository URL to inspect and install an isolated MCP server.' : 'A workspace owner or admin can install an MCP server after a security review.') : 'Click + New Server to add one — choose from a template or define your own.'}</p>
     </div>
   {:else}
     <div class="server-list">
@@ -292,8 +347,8 @@
               <span class="srv-chevron">{expanded[s.id] ? '▾' : '▸'}</span>
             </button>
             <div class="srv-actions">
-              <button class="btn-secondary tiny" on:click={() => openEdit(s)}>Edit</button>
-              <button class="btn-danger tiny"    on:click={() => remove(s)}>Delete</button>
+              {#if !workspaceScoped}<button class="btn-secondary tiny" on:click={() => openEdit(s)}>Edit</button>{/if}
+              {#if !workspaceScoped || workspaceAdmin}<button class="btn-danger tiny" on:click={() => remove(s)}>Delete</button>{/if}
             </div>
           </div>
 
@@ -339,9 +394,63 @@
       a process janitor around MCP tool calls so short-lived browser children are cleaned up after the call returns.
       Use <strong>Browser visible</strong> only for live debugging.
     </p>
-    <p>{workspaceScoped ? 'Workspace MCP changes take effect immediately and are isolated from every other workspace.' : 'Changes here are written to config.yaml; the gateway must be restarted to pick them up.'}</p>
+    <p>{workspaceScoped ? 'Only workspace owners and admins can install or remove servers. Every install requires a review and explicit approval, and runs from an immutable image without host mounts or inherited gateway secrets.' : 'Changes here are written to config.yaml; the gateway must be restarted to pick them up.'}</p>
   </div>
 </div>
+
+{#if installModal}
+  <div class="modal-bg" role="button" tabindex="0" aria-label="Close MCP installer" on:click|self={closeInstall} on:keydown={(e) => e.key === 'Escape' && closeInstall()}>
+    <div class="modal wide install-modal">
+      <h2>Install MCP server</h2>
+      <p class="glama-hint">Paste a public GitHub repository. Soulacy inspects its MCP manifest and source first; nothing is executed during inspection.</p>
+
+      <div class="field">
+        <span class="field-label">GitHub repository URL <span class="req">*</span></span>
+        <input type="url" bind:value={installURL} placeholder="https://github.com/wshobson/maverick-mcp" disabled={inspecting || approving || !!installReview} on:keydown={(e) => e.key === 'Enter' && !installReview && inspectInstall()} />
+      </div>
+
+      {#if installError}<div class="banner err">{installError}</div>{/if}
+
+      {#if installReview}
+        <div class="review-head">
+          <div><strong>{installReview.name}</strong><p>{installReview.description}</p></div>
+          <span class="review-ready">Ready for approval</span>
+        </div>
+        <div class="review-grid">
+          <div><span>Source commit</span><code>{installReview.revision}</code></div>
+          <div><span>Container image</span><code>{installReview.image}</code></div>
+          <div><span>Server ID</span><code>{installReview.server_id}</code></div>
+          <div><span>Approval fingerprint</span><code>{installReview.fingerprint}</code></div>
+        </div>
+        <h3 class="review-title">Security and permissions</h3>
+        <div class="finding-list">
+          {#each installReview.findings || [] as finding}
+            <div class="finding {finding.severity}"><span>{finding.severity === 'warning' ? '⚠' : '✓'}</span><div><strong>{finding.title}</strong><p>{finding.detail}</p></div></div>
+          {/each}
+        </div>
+        <div class="isolation-row">
+          <span>Read-only filesystem</span><span>No host mounts</span><span>No Docker socket</span><span>Capabilities dropped</span><span>CPU/RAM/PID limits</span>
+        </div>
+        {#if installReview.environment?.length}
+          <details class="env-review"><summary>Optional/required configuration requested ({installReview.environment.length})</summary>
+            {#each installReview.environment as item}<div><code>{item.name}</code> {item.required ? 'required' : 'optional'}{item.secret ? ' · secret' : ''}</div>{/each}
+          </details>
+        {/if}
+        <div class="approval-note"><strong>Explicit approval:</strong> approving pulls the publisher image, pins it by SHA-256 digest, and starts it only inside this workspace’s isolated runtime.</div>
+      {/if}
+
+      <div class="modal-row">
+        <button class="btn-secondary" on:click={closeInstall} disabled={inspecting || approving}>Cancel</button>
+        {#if !installReview}
+          <button class="btn-primary" on:click={inspectInstall} disabled={inspecting || !installURL.trim()}>{inspecting ? 'Inspecting…' : 'Inspect repository'}</button>
+        {:else}
+          <button class="btn-secondary" on:click={() => { installReview = null; installToken = ''; installError = '' }} disabled={approving}>Use another URL</button>
+          <button class="btn-primary" on:click={approveInstall} disabled={approving}>{approving ? 'Installing image…' : 'Approve & install'}</button>
+        {/if}
+      </div>
+    </div>
+  </div>
+{/if}
 
 {#if editing}
   <div
@@ -534,6 +643,23 @@
   }
   .empty-icon { font-size: 2.5rem; }
   .hint { font-size: .82rem; max-width: 540px; }
+  .review-head { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; padding:.8rem; background:#111426; border:1px solid #252b4b; border-radius:8px; }
+  .review-head p, .finding p { margin:.2rem 0 0; color:#8d94b8; font-size:.78rem; }
+  .review-ready { color:#60f0a0; border:1px solid rgba(96,240,160,.3); background:rgba(96,240,160,.08); padding:.3rem .55rem; border-radius:999px; white-space:nowrap; font-size:.72rem; }
+  .review-grid { display:grid; grid-template-columns:1fr 1fr; gap:.6rem; margin:.75rem 0; }
+  .review-grid > div { min-width:0; display:flex; flex-direction:column; gap:.25rem; padding:.55rem; background:#101322; border-radius:6px; }
+  .review-grid span { color:#777f9f; font-size:.68rem; text-transform:uppercase; letter-spacing:.05em; }
+  .review-grid code { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.7rem; }
+  .review-title { font-size:.82rem; margin:.8rem 0 .45rem; }
+  .finding-list { display:flex; flex-direction:column; gap:.4rem; max-height:210px; overflow:auto; }
+  .finding { display:flex; gap:.6rem; padding:.5rem .6rem; border:1px solid rgba(96,240,160,.18); border-radius:6px; color:#60f0a0; }
+  .finding.warning { color:#f0c460; border-color:rgba(240,196,96,.25); }
+  .finding strong { font-size:.78rem; }
+  .isolation-row { display:flex; flex-wrap:wrap; gap:.35rem; margin:.65rem 0; }
+  .isolation-row span { font-size:.67rem; color:#aeb5d3; background:#20253d; border-radius:999px; padding:.25rem .45rem; }
+  .env-review { color:#aeb5d3; font-size:.76rem; margin:.6rem 0; }
+  .env-review div { padding:.2rem 0 .2rem .7rem; }
+  .approval-note { padding:.65rem; border-radius:7px; background:rgba(139,133,255,.08); border:1px solid rgba(139,133,255,.25); color:#bdb9ff; font-size:.76rem; }
 
   .server-list { display: flex; flex-direction: column; gap: .65rem; }
   .srv { background: #141626; border: 1px solid #1a1e36; border-radius: 10px; overflow: hidden; }

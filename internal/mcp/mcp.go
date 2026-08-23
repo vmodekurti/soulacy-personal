@@ -39,7 +39,7 @@ type Config struct {
 
 // ServerConfig describes one MCP server connection.
 type ServerConfig struct {
-	Transport string            // "stdio" (default) or "http"
+	Transport string            // "stdio" (default), "http", or approved "container"
 	Command   string            // stdio: executable
 	Args      []string          // stdio: arguments
 	Env       map[string]string // stdio: extra env vars, and the highest-priority source
@@ -54,6 +54,11 @@ type ServerConfig struct {
 	InheritAll bool
 	URL        string            // http: server URL
 	Headers    map[string]string // http: extra headers (auth, etc.)
+	// PublicRemote marks a URL supplied by a workspace rather than an
+	// operator. It forces HTTPS plus public-network-only DNS and redirect
+	// handling in the transport. It is runtime enforcement, not just API input
+	// validation, so DNS rebinding cannot turn an approved URL into host SSRF.
+	PublicRemote bool
 
 	// WorkDir is the directory the stdio child starts in. Empty inherits the
 	// gateway's own working directory, which is what every MCP server did
@@ -242,8 +247,14 @@ func (c *Client) start(s *server) error {
 		s.tx = tx
 	case "http", "https":
 		s.tx = newHTTP(s.cfg)
+	case "container":
+		tx, err := newContainerStdio(s.cfg, c.log.With(zap.String("mcp_server", s.id)))
+		if err != nil {
+			return err
+		}
+		s.tx = tx
 	default:
-		return fmt.Errorf("unknown transport %q (expected stdio or http)", s.cfg.Transport)
+		return fmt.Errorf("unknown transport %q (expected stdio, http, or container)", s.cfg.Transport)
 	}
 
 	// Long-ish timeout: stdio servers run via `npx` may need to download their

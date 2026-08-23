@@ -701,15 +701,18 @@ func TestHasPermissionAdminMCPFullAccess(t *testing.T) {
 	}
 }
 
-func TestHasPermissionOperatorMCPReadAndWrite(t *testing.T) {
+func TestOnlyWorkspaceAdminsMayWriteMCPDefinitions(t *testing.T) {
 	if !HasPermission(RoleOperator, ResourceMCP, ActionRead) {
 		t.Error("operator should read mcp")
 	}
-	if !HasPermission(RoleOperator, ResourceMCP, ActionWrite) {
-		t.Error("operator should write mcp")
+	if HasPermission(RoleOperator, ResourceMCP, ActionWrite) {
+		t.Error("operator should not write executable MCP definitions")
 	}
 	if HasPermission(RoleOperator, ResourceMCP, ActionDelete) {
 		t.Error("operator should not delete mcp")
+	}
+	if HasPermission(RoleDeveloper, ResourceMCP, ActionWrite) || HasPermission(RoleDeveloper, ResourceMCP, ActionDelete) {
+		t.Error("developer should not administer executable MCP definitions")
 	}
 }
 
@@ -1088,7 +1091,7 @@ func TestInstallingAnExtensionIsASeparatePermissionFromUsingOne(t *testing.T) {
 	if !HasPermission(RoleDeveloper, ResourceSkills, ActionWrite) {
 		t.Error("developer lost the ability to author a local skill")
 	}
-	if !HasPermission(RoleDeveloper, ResourceMCP, ActionWrite) {
-		t.Error("developer lost the ability to configure an MCP server")
+	if HasPermission(RoleDeveloper, ResourceMCP, ActionWrite) {
+		t.Error("developer gained the ability to configure an executable MCP server")
 	}
 }

@@ -476,6 +476,13 @@ func TestUnknownTransport(t *testing.T) {
 	}
 }
 
+func TestWorkspaceRemoteTransportRequiresHTTPSAtRuntime(t *testing.T) {
+	tx := newHTTP(ServerConfig{Transport: "http", URL: "http://example.com/mcp", PublicRemote: true})
+	if _, err := tx.request(context.Background(), "tools/list", nil); err == nil || !strings.Contains(err.Error(), "HTTPS") {
+		t.Fatalf("workspace HTTP URL was not refused before network access: %v", err)
+	}
+}
+
 func TestSanitizeIDAndFullName(t *testing.T) {
 	tool := Tool{ServerID: "My Server!", Name: "do-thing"}
 	if want := "mcp__my_server___do-thing"; tool.FullName() != want {

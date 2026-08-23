@@ -17,29 +17,28 @@ built-in tools.
 
 ### Install from a repository URL
 
-In Chat, select the built-in **System** agent and ask:
+> **Deployment boundary:** source installation is a Personal-mode feature.
+> Team and Scale workspaces can connect an HTTPS MCP endpoint, but cannot
+> install or execute workspace-selected code on the gateway host. See
+> [Workspace MCP security policy](../security/workspace-mcp.md).
 
-> Install the MCP server from https://github.com/owner/repository
-
-Soulacy uses a typed installer tool and presents **Approve / Deny** before it
-changes anything. After approval it detects the package runtime, performs the
-safety scan, installs into `mcp-servers/`, updates the live config, and verifies
-the registered command. It does not ask the model to construct shell commands.
-
-This managed installer remains available when `runtime.allow_system_agents` is
-empty. You do not need to enable arbitrary shell access just to install an MCP
-server. The installer is limited to HTTPS Git URLs, preserves an explicit MCP
-choice from the request, and still requires approval for every installation.
+The Chat/System-agent installer does not accept the host-build waiver. This is
+intentional: an LLM approval prompt is not authorization to execute an
+untrusted package build on the gateway. A Personal-mode operator who has
+reviewed the complete source and dependency tree must use the CLI explicitly.
 
 The equivalent CLI command is:
 
 ```bash
-sy package install https://github.com/owner/repository --kind mcp --allow-unverified
+sy package install https://github.com/owner/repository --kind mcp \
+  --allow-unverified --allow-host-build
 ```
 
 Raw Git repositories are unsigned, so direct CLI use requires
-`--allow-unverified`. In Chat, approving the exact URL provides that explicit
-consent. Repeating the request does not reinstall an already registered server.
+`--allow-unverified`. MCP source packages also require `--allow-host-build`,
+because Python and Node package installation can execute build code. This
+break-glass path is refused entirely in Team and Scale. Repeating the request
+does not reinstall an already registered server.
 
 MCP servers are declared in your Soulacy config (or contributed by a plugin).
 Each server has a transport — a local subprocess over stdio, or a remote URL.

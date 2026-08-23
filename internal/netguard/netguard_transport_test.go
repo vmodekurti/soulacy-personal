@@ -83,6 +83,19 @@ func TestResolveAllowedFailsClosedOnDNSFailure(t *testing.T) {
 	}
 }
 
+func TestPublicPolicyRejectsLoopbackEvenThoughOperatorPolicyAllowsIt(t *testing.T) {
+	r := &sequenceResolver{answers: [][]net.IPAddr{{{IP: net.ParseIP("127.0.0.1")}}}}
+	u, _ := url.Parse("https://tenant-selected.test/mcp")
+	if _, err := resolveAllowedPolicy(context.Background(), u, true, true, nil, r); err == nil {
+		t.Fatal("workspace public policy accepted a loopback destination")
+	}
+
+	r.calls = 0
+	if _, err := resolveAllowed(context.Background(), u, true, nil, r); err != nil {
+		t.Fatalf("operator sidecar compatibility policy unexpectedly rejected loopback: %v", err)
+	}
+}
+
 func TestRedirectRefusesHTTPSDowngrade(t *testing.T) {
 	previous, _ := http.NewRequest(http.MethodGet, "https://public.example/start", nil)
 	next, _ := http.NewRequest(http.MethodGet, "http://public.example/next", nil)
