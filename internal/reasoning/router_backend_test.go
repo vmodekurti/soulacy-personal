@@ -61,6 +61,25 @@ func TestRouterBackend_ThinkHandlesMarkdownFences(t *testing.T) {
 	}
 }
 
+func TestRouterBackend_ThinkRecoversXMLToolCall(t *testing.T) {
+	fc := &fakeCompleter{reply: "<web_search>\n<query>current weather Buffalo Grove IL</query>\n</web_search>"}
+	b := NewRouterBackend(fc, "open-weight-model")
+
+	resp, err := b.Think(context.Background(), ThinkRequest{
+		TaskInput: "What is the current weather?",
+		ToolNames: []string{"web_search"},
+	})
+	if err != nil {
+		t.Fatalf("Think: %v", err)
+	}
+	if resp.IsDone || resp.Action.Tool != "web_search" {
+		t.Fatalf("recovered response = %+v", resp)
+	}
+	if got := resp.Action.Arguments["query"]; got != "current weather Buffalo Grove IL" {
+		t.Fatalf("query = %#v", got)
+	}
+}
+
 func TestRouterBackend_ThinkRecoversInputEqualsTextualAction(t *testing.T) {
 	fc := &fakeCompleter{reply: `Thought: Queue exists. Listing pending resources.
 Action: queue_list(input={"queue":"pending_resources"})`}
