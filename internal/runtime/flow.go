@@ -56,7 +56,7 @@ func (w *WorkflowExecutor) runFlow(ctx context.Context, msg message.Message, run
 	// ("its price", "that company") without the user restating context. Empty
 	// on the first turn. Exposed to every node as {{.history}} and auto-prepended
 	// to the entry agent's message below.
-	history := w.engine.flowHistoryTranscript(msg.SessionID, msg.AgentID, flowHistoryMaxMsgs)
+	history := w.engine.flowHistoryTranscript(ctx, msg.SessionID, msg.AgentID, flowHistoryMaxMsgs)
 	entryID := spec.Entry
 	if entryID == "" {
 		if len(spec.Nodes) > 0 {

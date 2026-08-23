@@ -181,6 +181,13 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 	} else if runStrategy == "" {
 		runStrategy = "auto"
 	}
+	if locker, ok := e.historyStore.(session.ConversationLocker); ok && strings.TrimSpace(msg.SessionID) != "" {
+		release, lockErr := locker.LockConversation(ctx, WorkspaceFromContext(ctx), msg.SessionID)
+		if lockErr != nil {
+			return message.Message{}, fmt.Errorf("serialize conversation: %w", lockErr)
+		}
+		defer release()
+	}
 	if metadata.DataClassification == "" {
 		metadata.DataClassification = strings.TrimSpace(def.LLM.DataClassification)
 		ctx = llm.WithCallMetadata(ctx, metadata)
@@ -319,7 +326,10 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 	}
 
 	// Retrieve or create session
-	sess := e.getOrCreateSession(msg.SessionID, msg.AgentID)
+	sess, err := e.getOrCreateSessionContext(ctx, WorkspaceFromContext(ctx), msg.SessionID, msg.AgentID)
+	if err != nil {
+		return message.Message{}, err
+	}
 
 	// PERF-1: mark the session as actively in use for the duration of this
 	// Handle call so the eviction sweep never reclaims a mid-conversation
@@ -962,11 +972,15 @@ const flowHistoryMaxMsgs = 12
 // last maxMsgs messages for the session, used to give a workflow's entry agent
 // the prior turns so follow-ups resolve without the user restating context.
 // Empty when there's no history yet.
-func (e *Engine) flowHistoryTranscript(sessionID, agentID string, maxMsgs int) string {
+func (e *Engine) flowHistoryTranscript(ctx context.Context, sessionID, agentID string, maxMsgs int) string {
 	if sessionID == "" {
 		return ""
 	}
-	sess := e.getOrCreateSession(sessionID, agentID)
+	sess, err := e.getOrCreateSessionContext(ctx, WorkspaceFromContext(ctx), sessionID, agentID)
+	if err != nil {
+		e.log.Warn("workflow history restore failed", zap.String("session", sessionID), zap.Error(err))
+		return ""
+	}
 	sess.mu.Lock()
 	hist := sess.History
 	if maxMsgs > 0 && len(hist) > maxMsgs {
@@ -1002,7 +1016,7 @@ func (e *Engine) flowHistoryTranscript(sessionID, agentID string, maxMsgs int) s
 // without this they'd never accumulate conversational context.
 func (e *Engine) recordWorkflowTurn(ctx context.Context, msg message.Message, replyText string) {
 	userText := flattenParts(msg.Parts)
-	sess := e.getOrCreateSession(msg.SessionID, msg.AgentID)
+	sess := e.getOrCreateSessionInWorkspace(WorkspaceFromContext(ctx), msg.SessionID, msg.AgentID)
 	sess.mu.Lock()
 	e.appendHistoryLocked(sess,
 		llm.ChatMessage{Role: "user", Content: userText},

@@ -28,7 +28,7 @@ func (s *Server) handleForkSession(c *fiber.Ctx) error {
 			"error": "conversation history not enabled",
 		})
 	}
-	forker, ok := s.historyStore.(*session.SQLiteHistoryStore)
+	forker, ok := s.historyStore.(session.ForkingHistoryStore)
 	if !ok {
 		return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{
 			"error": "history store does not support forking",
@@ -75,7 +75,7 @@ func (s *Server) handleForkSession(c *fiber.Ctx) error {
 	// Seed the engine so the next chat turn on the branch has the copied
 	// context (the engine builds LLM context from in-memory history).
 	if s.engine != nil && body.AgentID != "" {
-		s.engine.SeedSessionHistory(body.AgentID, newSession, entries)
+		s.engine.SeedSessionHistoryInWorkspace(historyWorkspace, body.AgentID, newSession, entries)
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{

@@ -498,6 +498,10 @@ type Session struct {
 	History   []llm.ChatMessage
 	CreatedAt time.Time
 	mu        sync.Mutex
+	// hydrated is set after the durable history store has been consulted for
+	// this process-local cache. It lets a request routed to a different replica
+	// rebuild context before appending the new user turn.
+	hydrated bool
 
 	// cachedPrefix is the rendered system_prompt+catalogs for this session.
 	// Primed by Handle() once per inbound user message and reused across
@@ -924,10 +928,16 @@ func (e *Engine) SetHistoryStore(s session.HistoryStore) { e.historyStore = s }
 // the next Handle. A no-op when the in-memory session already has history:
 // live conversations are never clobbered.
 func (e *Engine) SeedSessionHistory(agentID, sessionID string, entries []session.ConversationEntry) {
+	e.SeedSessionHistoryInWorkspace(wsroot.PersonalWorkspaceID, agentID, sessionID, entries)
+}
+
+// SeedSessionHistoryInWorkspace seeds a branch without allowing an identical
+// (agent, session) tuple in another tenant to share the same process cache.
+func (e *Engine) SeedSessionHistoryInWorkspace(workspaceID, agentID, sessionID string, entries []session.ConversationEntry) {
 	if len(entries) == 0 {
 		return
 	}
-	sess := e.getOrCreateSession(sessionID, agentID)
+	sess := e.getOrCreateSessionInWorkspace(workspaceID, sessionID, agentID)
 	sess.mu.Lock()
 	defer sess.mu.Unlock()
 	if len(sess.History) > 0 {
@@ -942,6 +952,7 @@ func (e *Engine) SeedSessionHistory(agentID, sessionID string, entries []session
 		history = append(history, llm.ChatMessage{Role: role, Content: en.Content})
 	}
 	sess.History = history
+	sess.hydrated = true
 }
 
 // SetDLQStore installs a dead-letter queue store. Safe to call once at startup.

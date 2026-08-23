@@ -405,14 +405,30 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) (*gateway.Server, e
 	}
 
 	// ── Conversation History Store ────────────────────────────────────────────
-	historyPath := ws.DB("history")
-	if histStore, histErr := session.NewSQLiteHistoryStore(historyPath, session.WithHistoryRetention(config.RetentionDuration(cfg.Runtime.Retention.ConversationHistory, 30*24*time.Hour))); histErr != nil {
-		log.Warn("conversation history store unavailable", zap.Error(histErr))
+	var historyStore session.HistoryStore
+	if config.IsMultiUserMode(cfg.DeploymentMode()) {
+		historyCtx, historyCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		histStore, histErr := session.NewPostgresHistoryStore(historyCtx, cfg.Storage.PostgresDSN)
+		historyCancel()
+		if histErr != nil {
+			return nil, fmt.Errorf("shared conversation history: %w", histErr)
+		}
+		historyStore = histStore
+		log.Info("shared conversation history ready", zap.String("backend", "postgres"))
 	} else {
-		stack.pushClose("history-store", histStore)
-		srv.SetHistoryStore(histStore)
-		d.engine.SetHistoryStore(histStore) // wire into engine turn recording
-		log.Info("conversation history ready", zap.String("path", historyPath))
+		historyPath := ws.DB("history")
+		histStore, histErr := session.NewSQLiteHistoryStore(historyPath, session.WithHistoryRetention(config.RetentionDuration(cfg.Runtime.Retention.ConversationHistory, 30*24*time.Hour)))
+		if histErr != nil {
+			log.Warn("conversation history store unavailable", zap.Error(histErr))
+		} else {
+			historyStore = histStore
+			log.Info("conversation history ready", zap.String("path", historyPath))
+		}
+	}
+	if historyStore != nil {
+		stack.pushClose("history-store", historyStore)
+		srv.SetHistoryStore(historyStore)
+		d.engine.SetHistoryStore(historyStore)
 	}
 
 	// ── Session Ownership ─────────────────────────────────────────────────────

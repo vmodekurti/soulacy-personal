@@ -19,12 +19,17 @@ import (
 	"github.com/soulacy/soulacy/internal/llm"
 	"github.com/soulacy/soulacy/internal/memory"
 	"github.com/soulacy/soulacy/internal/session"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 )
 
 // EventSink receives structured events as they happen during agent execution.
 func (e *Engine) getOrCreateSession(sessionID, agentID string) *Session {
+	return e.getOrCreateSessionInWorkspace(wsroot.PersonalWorkspaceID, sessionID, agentID)
+}
+
+func (e *Engine) getOrCreateSessionInWorkspace(workspaceID, sessionID, agentID string) *Session {
 	// Key sessions by (agentID, sessionID) — NOT sessionID alone — because the
 	// HTTP chat handler uses a fixed session id per browser user (`http-<userId>`),
 	// so multiple agents in the Chat Tester would otherwise share the same in-
@@ -34,6 +39,9 @@ func (e *Engine) getOrCreateSession(sessionID, agentID string) *Session {
 	// conversation state cleanly.
 	now := time.Now().UTC()
 	key := agentID + "|" + sessionID
+	if workspaceID = NormalizeWorkspace(workspaceID); workspaceID != wsroot.PersonalWorkspaceID {
+		key = workspaceID + "|" + key
+	}
 	val, _ := e.sessions.LoadOrStore(key, &Session{
 		ID: sessionID, AgentID: agentID, CreatedAt: now, lastAccess: now,
 	})
@@ -44,6 +52,38 @@ func (e *Engine) getOrCreateSession(sessionID, agentID string) *Session {
 	sess.lastAccess = now
 	sess.mu.Unlock()
 	return sess
+}
+
+// getOrCreateSessionContext restores the bounded recent conversation before a
+// process-local session is used for the first time. The session mutex makes
+// hydration single-flight: two concurrent requests cannot both load and then
+// overwrite turns appended by the other.
+func (e *Engine) getOrCreateSessionContext(ctx context.Context, workspaceID, sessionID, agentID string) (*Session, error) {
+	sess := e.getOrCreateSessionInWorkspace(workspaceID, sessionID, agentID)
+	if e.historyStore == nil {
+		return sess, nil
+	}
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+	if sess.hydrated {
+		return sess, nil
+	}
+	entries, err := e.historyStore.Load(ctx, NormalizeWorkspace(workspaceID), sessionID, e.historyCap())
+	if err != nil {
+		return nil, fmt.Errorf("restore conversation session %q: %w", sessionID, err)
+	}
+	if len(sess.History) == 0 {
+		history := make([]llm.ChatMessage, 0, len(entries))
+		for _, entry := range entries {
+			switch entry.Role {
+			case "user", "assistant", "system":
+				history = append(history, llm.ChatMessage{Role: entry.Role, Content: entry.Content})
+			}
+		}
+		sess.History = trimHistory(history, e.historyCap())
+	}
+	sess.hydrated = true
+	return sess, nil
 }
 
 // ── PERF-1: session eviction ────────────────────────────────────────────────

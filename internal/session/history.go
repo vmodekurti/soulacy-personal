@@ -75,6 +75,21 @@ type HistoryStore interface {
 	Close() error
 }
 
+// ForkingHistoryStore is implemented by durable history backends that can
+// atomically branch a session. Keeping it backend-neutral lets Scale use the
+// shared PostgreSQL store without losing the Chat branching feature.
+type ForkingHistoryStore interface {
+	HistoryStore
+	Fork(ctx context.Context, workspaceID, srcSessionID, newSessionID string, uptoEntryID int64) (int, error)
+}
+
+// ConversationLocker serializes turns for the same durable conversation
+// across gateway replicas. Without it, two replicas can both restore the same
+// prefix and independently answer concurrent follow-ups.
+type ConversationLocker interface {
+	LockConversation(ctx context.Context, workspaceID, sessionID string) (release func(), err error)
+}
+
 // ---------------------------------------------------------------------------
 // NoopHistoryStore — all no-ops for degraded / testing mode.
 // ---------------------------------------------------------------------------

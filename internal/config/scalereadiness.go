@@ -29,8 +29,6 @@ func ScaleReplicationBlockers() []string {
 	return []string{
 		"artifacts are stored on each replica's own disk, so a file written by one replica is not " +
 			"readable by another (deployment.shared_artifact_store is recorded but not yet used)",
-		"a conversation in progress lives in one replica's memory, so a follow-up message routed " +
-			"elsewhere starts from nothing",
 		"a run paused for approval can only be released by the replica it paused on",
 		"cancelling a CHAT OR STREAM run only works if the request reaches the replica executing " +
 			"it; durable runs are cancelled through their record and do reach any replica",
@@ -49,6 +47,10 @@ func ScaleReplicationBlockers() []string {
 //   - "the scheduler's repeated-failure counters are per-process" — the count
 //     lives on the schedule row (schedules.RecordFailure), so failures
 //     accumulate across replicas and the auto-disable limit is reachable.
+//   - "a conversation in progress lives in one replica's memory" — Team/Scale
+//     now use shared PostgreSQL history, hydrate a new replica before the next
+//     turn, key the local cache by workspace, and serialize concurrent turns
+//     with a PostgreSQL advisory lock.
 //
 // The cancellation entry was also NARROWED rather than removed: durable runs
 // have always been cancelled through their record, which any replica can

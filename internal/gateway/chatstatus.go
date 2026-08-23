@@ -43,12 +43,12 @@ func (s *Server) chatExperienceReadiness(c *fiber.Ctx) chatExperienceReadiness {
 	historySearch := false
 	if s != nil && s.historyStore != nil {
 		_, historySearch = s.historyStore.(interface {
-			Search(ctx context.Context, agentID, query string, limit int) ([]session.SearchHit, error)
+			Search(ctx context.Context, workspaceID, subject, agentID, query string, limit int) ([]session.SearchHit, error)
 		})
 	}
 	branching := false
 	if s != nil && s.historyStore != nil {
-		_, branching = s.historyStore.(*session.SQLiteHistoryStore)
+		_, branching = s.historyStore.(session.ForkingHistoryStore)
 	}
 	attachments := s != nil && s.resourceStore != nil
 	artifacts := s != nil && s.actions != nil
