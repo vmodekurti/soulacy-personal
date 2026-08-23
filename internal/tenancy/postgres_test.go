@@ -85,6 +85,32 @@ func TestOIDCSubjectLockKeyIsPostgresTextSafeAndTupleBound(t *testing.T) {
 	}
 }
 
+func TestWorkspaceSlugIsFriendlyStableAndUnique(t *testing.T) {
+	const id = "ws_0123456789abcdef0123456789abcdef"
+	if got := workspaceSlug("Customer Support", id); got != "customer-support-abcdef" {
+		t.Fatalf("workspace slug = %q", got)
+	}
+	if workspaceSlug("Customer Support", id) == workspaceSlug("Customer Support", "ws_0123456789abcdef0123456789abcdee") {
+		t.Fatal("workspace slug did not disambiguate duplicate names")
+	}
+	if got := workspaceSlug("研究 チーム", id); got != "workspace-abcdef" {
+		t.Fatalf("fallback workspace slug = %q", got)
+	}
+}
+
+func TestWorkspaceSlugValidation(t *testing.T) {
+	for _, valid := range []string{"acme", "acme-support", "team-42"} {
+		if err := validateWorkspaceSlug(valid); err != nil {
+			t.Errorf("valid slug %q: %v", valid, err)
+		}
+	}
+	for _, invalid := range []string{"ab", "Acme", "-acme", "acme-", "acme support", strings.Repeat("a", 49)} {
+		if err := validateWorkspaceSlug(invalid); err == nil {
+			t.Errorf("invalid slug %q accepted", invalid)
+		}
+	}
+}
+
 func TestPostgresMutationRequiresActorAndRequest(t *testing.T) {
 	s := &PostgresStore{}
 	if _, err := s.CreateOrganization(context.Background(), Mutation{}, "Acme"); err == nil || !strings.Contains(err.Error(), "actor") {

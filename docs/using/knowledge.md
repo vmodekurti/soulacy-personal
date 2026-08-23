@@ -13,17 +13,17 @@ Same flow via API:
 
 ```bash
 # Create the KB
-curl -X POST http://localhost:18789/api/v1/knowledge \
+curl -X POST http://localhost:1947/api/v1/knowledge \
   -H "Authorization: Bearer $SOULACY_API_KEY" -H "Content-Type: application/json" \
   -d '{"name":"product-docs","description":"Product manuals","embedding_provider":"ollama","embedding_model":"nomic-embed-text"}'
 
 # Ingest a document
-curl -X POST http://localhost:18789/api/v1/knowledge/product-docs/documents \
+curl -X POST http://localhost:1947/api/v1/knowledge/product-docs/documents \
   -H "Authorization: Bearer $SOULACY_API_KEY" -H "Content-Type: application/json" \
   -d '{"title":"FAQ","source":"paste","mime_type":"text/plain","content":"..."}'
 
 # Search it
-curl -X POST http://localhost:18789/api/v1/knowledge/product-docs/search \
+curl -X POST http://localhost:1947/api/v1/knowledge/product-docs/search \
   -H "Authorization: Bearer $SOULACY_API_KEY" -H "Content-Type: application/json" \
   -d '{"query":"refund policy","top_k":5}'
 ```

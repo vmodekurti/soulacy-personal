@@ -75,3 +75,30 @@ func TestEmbedderForProviderRegistersKnownEmbeddingProviders(t *testing.T) {
 		})
 	}
 }
+
+func TestLocalCredentialKMSPolicyMatchesDeploymentReadinessOverride(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		mode    string
+		waived  bool
+		refused bool
+	}{
+		{name: "personal", mode: config.DeploymentModePersonal},
+		{name: "team fail closed", mode: config.DeploymentModeTeam, refused: true},
+		{name: "scale fail closed", mode: config.DeploymentModeScale, refused: true},
+		{name: "team acknowledged local development", mode: config.DeploymentModeTeam, waived: true},
+		{name: "scale acknowledged local development", mode: config.DeploymentModeScale, waived: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{}
+			cfg.Deployment.Mode = tt.mode
+			if tt.waived {
+				cfg.Deployment.Acknowledgements = []string{config.UnsafeDeploymentPrerequisitesAcknowledgement}
+			}
+			got := config.IsMultiUserMode(cfg.DeploymentMode()) && !cfg.HasUnsafeDeploymentAcknowledgement()
+			if got != tt.refused {
+				t.Fatalf("local KMS refused = %v, want %v", got, tt.refused)
+			}
+		})
+	}
+}

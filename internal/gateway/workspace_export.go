@@ -80,7 +80,11 @@ func (s *Server) exportStore() (*workspaceexport.Store, error) {
 	// The workspace ROOT, not a pre-joined exports directory: the store adds
 	// "exports" beneath whichever workspace directory wsroot resolves, so
 	// joining it here too produced <root>/exports/.workspaces/<ws>/exports.
-	return workspaceexport.NewStore(ws.Root), nil
+	store := workspaceexport.NewStore(ws.Root)
+	if s.workspaceLayout.Root() != "" {
+		store.SetWorkspaceLayoutRoot(s.workspaceLayout.Root())
+	}
+	return store, nil
 }
 
 func newExportID() (string, error) {
@@ -231,6 +235,22 @@ func (s *Server) exportSources(organizationID, workspaceID string, definitions [
 					return false, nil
 				}
 				return encodeJSONValue(w, policy)
+			},
+		})
+	}
+	if s.workspaceSettings != nil {
+		store := s.workspaceSettings
+		sources = append(sources, workspaceexport.Source{
+			Resource: "workspace-settings", Filename: "workspace-settings.json",
+			Emit: func(ctx context.Context, w io.Writer) (bool, error) {
+				settings, err := store.Get(ctx, workspaceID)
+				if err != nil {
+					return false, err
+				}
+				if settings.UpdatedAt.IsZero() {
+					return false, nil
+				}
+				return encodeJSONValue(w, settings)
 			},
 		})
 	}

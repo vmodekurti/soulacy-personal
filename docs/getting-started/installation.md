@@ -19,7 +19,7 @@ What it does:
 4. Creates your workspace at `~/.soulacy/soulspace` with a default config.
 5. Offers to install [Ollama](https://ollama.com) and pull `llama3` so you
    have a local LLM out of the box.
-6. Offers to start the gateway and open the GUI at `http://localhost:18789`.
+6. Offers to start the gateway and open the GUI at `http://localhost:1947`.
 
 !!! tip "Pin a version"
     `SOULACY_VERSION=v0.1.11 curl -fsSL https://soulacy.io/install.sh | bash`
@@ -53,12 +53,12 @@ git clone https://github.com/vmodekurti/soulacy.git && cd soulacy
 docker compose up --build -d
 ```
 
-The gateway listens on **18789**; state persists in the
+The gateway listens on **1947**; state persists in the
 `/home/soulacy/.soulacy` volume:
 
 ```bash
 docker run -d --name soulacy \
-  -p 18789:18789 \
+  -p 1947:1947 \
   -v soulacy-data:/home/soulacy/.soulacy \
   ghcr.io/vmodekurti/soulacy:latest   # published with tagged releases
 ```

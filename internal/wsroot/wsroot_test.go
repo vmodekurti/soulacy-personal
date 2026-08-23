@@ -41,6 +41,51 @@ func TestOtherWorkspacesAreNamespaced(t *testing.T) {
 	}
 }
 
+func TestInstallationLayoutCreatesOneCoherentWorkspaceTree(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "soulspace")
+	layout := NewLayout(root)
+
+	if got := layout.Dir(filepath.Join(root, "agents"), PersonalWorkspaceID); got != filepath.Join(root, "agents") {
+		t.Fatalf("Personal Dir = %q; Personal mode must remain byte-identical", got)
+	}
+	if got := layout.File(filepath.Join(root, "data", "learning.db"), PersonalWorkspaceID); got != filepath.Join(root, "data", "learning.db") {
+		t.Fatalf("Personal File = %q; Personal mode must remain byte-identical", got)
+	}
+
+	wantAgents := filepath.Join(root, WorkspaceDir, "ws_acme", "agents")
+	if got := layout.Dir(filepath.Join(root, "agents"), "ws_acme"); got != wantAgents {
+		t.Fatalf("named agents dir = %q, want %q", got, wantAgents)
+	}
+	wantDB := filepath.Join(root, WorkspaceDir, "ws_acme", "data", "learning.db")
+	if got := layout.File(filepath.Join(root, "data", "learning.db"), "ws_acme"); got != wantDB {
+		t.Fatalf("named database = %q, want %q", got, wantDB)
+	}
+}
+
+func TestInstallationLayoutKeepsExternalMountIsolatedInPlace(t *testing.T) {
+	layout := NewLayout(filepath.Join(t.TempDir(), "soulspace"))
+	external := filepath.Join(t.TempDir(), "mounted-data")
+	want := filepath.Join(external, NamespaceDir, "ws_acme")
+	if got := layout.Dir(external, "ws_acme"); got != want {
+		t.Fatalf("external mount = %q, want legacy safe namespace %q", got, want)
+	}
+}
+
+func TestInstallationLayoutRecognizesCanonicalAndLegacyOwnership(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "soulspace")
+	base := filepath.Join(root, "agents")
+	layout := NewLayout(root)
+	paths := []string{
+		filepath.Join(root, WorkspaceDir, "ws_acme", "agents", "weather", "SOUL.yaml"),
+		filepath.Join(base, NamespaceDir, "ws_acme", "weather", "SOUL.yaml"),
+	}
+	for _, path := range paths {
+		if got, ok := layout.Of(base, path); !ok || got != "ws_acme" {
+			t.Errorf("Of(%q) = %q,%v, want ws_acme,true", path, got, ok)
+		}
+	}
+}
+
 // An ID that cannot be a path segment must never become one. Resolving to the
 // personal root is the safe failure: it can conflate with personal state,
 // which callers prevent by validating, but it cannot write outside the root.

@@ -217,6 +217,12 @@ var Sections = []Section{
 			"risk taken by accident",
 	},
 	{
+		Field: "Billing", Key: "billing", Scope: ScopePlatform, Apply: ApplyBoot,
+		Reason: "the billing provider, webhook verifier, and entitlement store are wired into the " +
+			"HTTP authorization chain at process start; changing them live could admit an event under " +
+			"one trust root and enforce it under another",
+	},
+	{
 		Field: "Telemetry", Key: "telemetry", Scope: ScopePlatform, Apply: ApplyBoot,
 		Reason: "the trace provider is installed globally at process start and spans in flight hold " +
 			"references to it",

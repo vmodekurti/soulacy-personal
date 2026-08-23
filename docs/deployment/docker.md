@@ -5,7 +5,7 @@
 ```bash
 docker run -d \
   --name soulacy \
-  -p 18789:18789 \
+  -p 1947:1947 \
   -v $(pwd)/config.yaml:/home/soulacy/.soulacy/config.yaml \
   -v $(pwd)/agents:/home/soulacy/.soulacy/agents \
   -v $(pwd)/memory:/home/soulacy/.soulacy/memory \
@@ -26,7 +26,7 @@ services:
     image: ghcr.io/vmodekurti/soulacy:latest
     restart: unless-stopped
     ports:
-      - "18789:18789"
+      - "1947:1947"
     volumes:
       - ./config.yaml:/home/soulacy/.soulacy/config.yaml:ro
       - ./agents:/home/soulacy/.soulacy/agents:ro
@@ -46,7 +46,7 @@ services:
     image: ghcr.io/vmodekurti/soulacy:latest
     restart: unless-stopped
     ports:
-      - "18789:18789"
+      - "1947:1947"
     volumes:
       - soulacy_data:/home/soulacy/.soulacy
     depends_on:
@@ -105,7 +105,7 @@ SOULACY_CHANNELS_TELEGRAM_TOKEN=1234:AAH...
 ## Health check
 
 ```bash
-curl http://localhost:18789/api/v1/health
+curl http://localhost:1947/api/v1/health
 # {"status":"ok","version":"0.1.0"}
 ```
 
@@ -113,7 +113,7 @@ Docker healthcheck in Compose:
 
 ```yaml
 healthcheck:
-  test: ["CMD", "curl", "-fs", "http://localhost:18789/api/v1/health"]
+  test: ["CMD", "curl", "-fs", "http://localhost:1947/api/v1/health"]
   interval: 30s
   timeout: 10s
   retries: 3
@@ -132,7 +132,7 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
 
     location / {
-        proxy_pass http://soulacy:18789;
+        proxy_pass http://soulacy:1947;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_read_timeout 120s;    # allow time for long LLM responses

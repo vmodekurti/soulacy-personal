@@ -137,7 +137,7 @@ Think of a `writer` agent as a **Manager**, and `researcher` and `critic` agents
    ```bash
    ./build-and-restart.command
    ```
-3. Open [http://127.0.0.1:18789](http://127.0.0.1:18789) to view the live dashboard.
+3. Open [http://127.0.0.1:1947](http://127.0.0.1:1947) to view the live dashboard.
 
 ---
 
@@ -189,7 +189,7 @@ Let's build a simple agent named `translator` that translates text.
 ---
 
 ### Step 4: Test the Agent
-1. Open the dashboard at [http://127.0.0.1:18789](http://127.0.0.1:18789).
+1. Open the dashboard at [http://127.0.0.1:1947](http://127.0.0.1:1947).
 2. Go to the **Agents** tab. You will see `Translator Assistant` loaded automatically (the file watcher picked it up instantly without a restart!).
 3. Select the agent, open the Chat Tester, and type: *"Hello, what a beautiful day!"*
 4. The agent will reply: *"¡Hola, qué hermoso día!"*

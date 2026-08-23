@@ -8,7 +8,8 @@
   } from '../lib/agentconflict.js'
   import { modelAvailability } from '../lib/agentmodel.js'
   import { parseMarkdown, richRenderer } from '../lib/markdown.js'
-  import { apiKey, editAgent, studioSession } from '../lib/stores.js'
+  import { apiKey, editAgent } from '../lib/stores.js'
+  import { activeWorkspace, activeWorkspaceId } from '../lib/workspace.js'
   import ChipPicker from '../lib/ChipPicker.svelte'
   import FilePicker from '../lib/FilePicker.svelte'
 
@@ -26,6 +27,9 @@
   let strategyManualOverride = false
   let strategyAutoNotice = ''
   let lastAutoStrategyKey = ''
+  let workspaceDefaultProvider = ''
+  let loadedProviderScope = ''
+  let loadingProviderScope = ''
 
   // Capability-ack modal state. When the backend returns 409 with
   // {needs_ack: true, capability_audit}, we open a blocking modal that shows
@@ -369,6 +373,7 @@
   let modelsByProv    = {}   // provider id → [model names]
   let modelsLoading   = {}   // provider id → bool
   let modelsError     = {}   // provider id → string
+  let modelRequestScope = {} // provider id → workspace/deployment scope
 
   // Lookup sources for the picker fields. Loaded once on mount so
   // typing errors are impossible — every selection is from a real list.
@@ -571,7 +576,7 @@
     trigger: 'channel', channels: ['http'], schedule: { cron: '' },
     webhook: { text_path: '', user_id_path: '', username_path: '', session_id_path: '', thread_id_path: '', include_raw: false },
     system_prompt: '',
-    llm: { provider: 'ollama', model: '', temperature: 0.7, top_p: 0.9, max_tokens: 512 },
+    llm: { provider: workspaceDefaultProvider || 'ollama', model: '', temperature: 0.7, top_p: 0.9, max_tokens: 512 },
     memory: { read_scopes: ['session'], write_scopes: ['session'], max_tokens: 20 },
     learning: { enabled: false, min_chars: 160, max_proposals: 3 },
     tools: [], skills: [], knowledge: [], agents: [], parallel_peer_calls: false, structured_peer_results: false, confirm_tools: [], unattended: false, max_turns: 5, stream_reply: false, enabled: true,
@@ -649,8 +654,18 @@
 
   // Fetch the list of registered providers (drives the LLM Provider dropdown)
   async function loadProviders() {
+    const workspaceID = activeWorkspaceId()
+    const requestedScope = workspaceID ? `workspace:${workspaceID}` : 'deployment'
+    if (loadingProviderScope === requestedScope) return
+    loadingProviderScope = requestedScope
     try {
-      const res  = await api.providers.list()
+      const providerAPI = workspaceID ? api.workspaceProviders : api.providers
+      const res  = await providerAPI.list()
+      const currentWorkspaceID = activeWorkspaceId()
+      const currentScope = currentWorkspaceID ? `workspace:${currentWorkspaceID}` : 'deployment'
+      // A deployment-scoped request can finish after workspace resolution.
+      // Never let that stale response replace the tenant catalog.
+      if (currentScope !== requestedScope) return
       const regs = res.registered || []      // currently registered with the live router
       const ids  = new Set([...regs, ...(res.known || []), ...Object.keys(res.providers || {})])
       providers  = [...ids].map(id => ({
@@ -659,8 +674,19 @@
         configured: (res.providers || {})[id] != null,
         defaultModel: (res.providers || {})[id]?.model || '',
       }))
+      workspaceDefaultProvider = res.default_provider || ''
+      loadedProviderScope = requestedScope
     } catch (e) {
-      providers = []
+      const currentWorkspaceID = activeWorkspaceId()
+      const currentScope = currentWorkspaceID ? `workspace:${currentWorkspaceID}` : 'deployment'
+      if (currentScope === requestedScope) {
+        providers = []
+        // Avoid an unbounded reactive retry loop when a catalog request fails.
+        // A later workspace-scope transition still triggers its own request.
+        loadedProviderScope = requestedScope
+      }
+    } finally {
+      if (loadingProviderScope === requestedScope) loadingProviderScope = ''
     }
   }
 
@@ -687,17 +713,30 @@
   // user selects a provider in the LLM section.
   async function loadModels(providerId, force = false) {
     if (!providerId) return
-    if (!force && (modelsByProv[providerId] || modelsLoading[providerId])) return
+    const workspaceID = activeWorkspaceId()
+    const requestedScope = workspaceID ? `workspace:${workspaceID}` : 'deployment'
+    if (!force && modelsByProv[providerId] && modelRequestScope[providerId] === requestedScope) return
+    if (modelsLoading[providerId] && modelRequestScope[providerId] === requestedScope) return
+    modelRequestScope = { ...modelRequestScope, [providerId]: requestedScope }
     modelsLoading = { ...modelsLoading, [providerId]: true }
     try {
-      const res = await api.providers.models(providerId)
+      const providerAPI = workspaceID ? api.workspaceProviders : api.providers
+      const res = await providerAPI.models(providerId)
+      const currentWorkspaceID = activeWorkspaceId()
+      const currentScope = currentWorkspaceID ? `workspace:${currentWorkspaceID}` : 'deployment'
+      if (currentScope !== requestedScope || modelRequestScope[providerId] !== requestedScope) return
       modelsByProv = { ...modelsByProv, [providerId]: res.models || [] }
       modelsError  = { ...modelsError,  [providerId]: '' }
     } catch (e) {
+      const currentWorkspaceID = activeWorkspaceId()
+      const currentScope = currentWorkspaceID ? `workspace:${currentWorkspaceID}` : 'deployment'
+      if (currentScope !== requestedScope || modelRequestScope[providerId] !== requestedScope) return
       modelsByProv = { ...modelsByProv, [providerId]: [] }
       modelsError  = { ...modelsError,  [providerId]: e.message }
     } finally {
-      modelsLoading = { ...modelsLoading, [providerId]: false }
+      if (modelRequestScope[providerId] === requestedScope) {
+        modelsLoading = { ...modelsLoading, [providerId]: false }
+      }
     }
   }
 
@@ -708,6 +747,20 @@
 
   // Reactive: any time the editor's provider changes, pull its model list.
   $: if (editing?.llm?.provider) loadModels(editing.llm.provider)
+
+  // The shell can resolve the active workspace after this page mounts. If we
+  // only load once in onMount, the editor keeps the deployment router's
+  // provider catalog for the lifetime of the page (typically just Ollama).
+  // Reload whenever workspace identity changes so Team/Scale gets the same
+  // provider/model experience as Personal mode, backed by tenant-scoped APIs.
+  $: providerScope = $activeWorkspace?.workspaceId ? `workspace:${$activeWorkspace.workspaceId}` : 'deployment'
+  $: if (providerScope !== loadedProviderScope && providerScope !== loadingProviderScope) {
+    modelsByProv = {}
+    modelsLoading = {}
+    modelsError = {}
+    modelRequestScope = {}
+    loadProviders()
+  }
 
   // Reactive: if the agent model is unset, default to the provider's defaultModel once providers are loaded.
   $: if (editing && providers.length > 0) {
@@ -989,6 +1042,11 @@
   function select(agent) {
     selected = agent
     editing  = JSON.parse(JSON.stringify(agent))
+    // Older/imported agents may omit these fields. Present safe, useful
+    // defaults in the editor without replacing values that were explicitly
+    // configured (including enabled: false).
+    if (!String(editing.trigger || '').trim()) editing.trigger = 'channel'
+    if (editing.enabled == null) editing.enabled = true
     // Ensure nested objects always exist in the editor copy
     editing.llm      = editing.llm      || { provider: 'ollama', model: '', temperature: 0.7, max_tokens: 512 }
     editing.memory   = editing.memory   || { read_scopes: ['session'], write_scopes: ['session'], max_tokens: 20 }
@@ -1024,14 +1082,10 @@
     lastAutoStrategyKey = ''
   }
 
-  function openStudioStarter() {
-    const starterIntent = [
-      'Build a production-ready Soulacy agent.',
-      'Ask for the trigger, required tools, memory, delivery channel, schedule, and safety level if they are missing.',
-      'Prefer Studio guided workflow generation, validate the whole workflow, and include a simple live test before saving.',
-    ].join(' ')
-    studioSession.set(null)
-    location.hash = 'studio?intent=' + encodeURIComponent(starterIntent)
+  function openStudio() {
+    // "Open Studio" is navigation, not a request to invent an agent. Preserve
+    // any workspace draft and let Studio show its normal Describe screen.
+    location.hash = 'studio'
   }
 
   async function validateEditing() {
@@ -1353,7 +1407,7 @@
     .filter(r => (r.kind || '').startsWith('required_') && !['available','configured','built_in','packaged'].includes(r.status))
   $: packageImportBlocked = packageMissingRequirements.length > 0 && !packageImportAcknowledgeMissing
 
-  $: gatewayOrigin = (typeof window !== 'undefined') ? window.location.origin : 'http://127.0.0.1:18789'
+  $: gatewayOrigin = (typeof window !== 'undefined') ? window.location.origin : 'http://127.0.0.1:1947'
   $: apiKeyValue   = $apiKey || '<your-api-key>'
 
   $: curlSnippet = selected ? `curl -X POST ${gatewayOrigin}/api/v1/chat \\
@@ -1552,7 +1606,6 @@ console.log(reply);` : ''
     await load()
     checkDoctorHash()
     loadCatalog()
-    loadProviders()
     loadLookups()
   })
 </script>
@@ -1586,7 +1639,7 @@ console.log(reply);` : ''
         <div class="empty empty-onboard">
           <div class="empty-kicker">No deployed agents yet</div>
           <p>Start in Studio for a guided build, deploy a proven template, or import an agent package.</p>
-          <button class="empty-primary" type="button" on:click={openStudioStarter}>Open Studio</button>
+          <button class="empty-primary" type="button" on:click={openStudio}>Open Studio</button>
           <button class="empty-secondary" type="button" on:click={openTemplates}>Use a template</button>
           <button class="empty-secondary" type="button" on:click={triggerPackageImport}>Import package</button>
         </div>
@@ -2748,7 +2801,7 @@ console.log(reply);` : ''
             {#if playSending}
               <div class="msg-row">
                 <div class="bubble">
-                  <div class="typing"><span/><span/><span/></div>
+                  <div class="typing"><span></span><span></span><span></span></div>
                 </div>
               </div>
             {/if}

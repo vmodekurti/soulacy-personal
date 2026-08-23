@@ -6,10 +6,10 @@ The API lives under `/api/v1` on the gateway port.
 ## Base URL
 
 ```
-http://localhost:18789/api/v1
+http://localhost:1947/api/v1
 ```
 
-The port comes from `server.port` (default `18789`).
+The port comes from `server.port` (default `1947`).
 
 ## Authentication
 
@@ -17,7 +17,7 @@ Send a bearer token on every request:
 
 ```bash
 curl -H "Authorization: Bearer $SOULACY_API_KEY" \
-  http://localhost:18789/api/v1/agents
+  http://localhost:1947/api/v1/agents
 ```
 
 | Mode | How it works |

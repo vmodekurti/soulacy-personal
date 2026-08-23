@@ -46,7 +46,7 @@
 
 {#if open}
   <div class="pt-scrim" role="presentation" on:click={() => dispatch('close')}></div>
-  <aside class="pt-panel" role="dialog" aria-modal="true" aria-labelledby="pt-title">
+  <div class="pt-panel" role="dialog" aria-modal="true" aria-labelledby="pt-title">
     <header class="pt-head">
       <div>
         <span class="pt-eyebrow">Show me around</span>
@@ -80,7 +80,7 @@
         <button class="pt-btn" on:click={() => dispatch('fulltour')}>Take the full tour</button>
       </div>
     {/if}
-  </aside>
+  </div>
 {/if}
 
 <script context="module">

@@ -161,7 +161,8 @@ describe('the sidebar shows what the caller can use', () => {
   it('shows everything in a deployment with no roles (invariant 7)', async () => {
     const { visibleNavPages, navPages } = await import('./nav.js')
     permissions.set({})
-    expect(visibleNavPages(can).length).toBe(navPages.length)
+    expect(visibleNavPages(can, undefined, { role: 'owner', deploymentMode: 'personal' }).length)
+      .toBe(navPages.filter(page => !page.multiUserOnly).length)
   })
 
   it('shows everything to an owner', async () => {
@@ -169,9 +170,62 @@ describe('the sidebar shows what the caller can use', () => {
     permissions.set({
       memory: ['read'], knowledge: ['read'], channels: ['read'], schedule: ['read'],
       skills: ['read'], mcp: ['read'], providers: ['read'], secrets: ['list'],
-      config: ['read'], logs: ['read'],
+      config: ['read'], logs: ['read'], plugins: ['read'],
     })
-    expect(visibleNavPages(can).length).toBe(navPages.length)
+    expect(visibleNavPages(can, undefined, { role: 'owner', deploymentMode: 'personal' }).length)
+      .toBe(navPages.filter(page => !page.multiUserOnly).length)
+  })
+
+  it('reserves workspace settings for workspace owners', async () => {
+    const { visibleNavPages } = await import('./nav.js')
+    expect(visibleNavPages(() => true, undefined, { role: 'viewer', deploymentMode: 'team' }).map(page => page.id)).not.toContain('workspace-admin')
+    expect(visibleNavPages(() => true, undefined, { role: 'owner', deploymentMode: 'team' }).map(page => page.id)).toContain('workspace-admin')
+  })
+
+  it('keeps tenant-safe config and MCP while removing deployment-owned administration', async () => {
+    const { visibleNavPages } = await import('./nav.js')
+    const pages = visibleNavPages(() => true, undefined, { deploymentMode: 'team' })
+    const visible = pages.map(page => page.id)
+    expect(visible).toContain('config')
+    expect(pages.find(page => page.id === 'config')).toMatchObject({
+      label: 'Config', icon: '≡', group: 'system',
+    })
+    expect(visible).toContain('mcp')
+    expect(visible).toContain('pluginmgr')
+    expect(visible).toContain('members')
+    expect(pages.find(page => page.id === 'providers')).toMatchObject({
+      label: 'Providers & models', group: 'integrations',
+    })
+  })
+
+  it('renders the complete Team workspace sidebar from the server permission projection', async () => {
+    const { visibleNavPages } = await import('./nav.js')
+    permissions.set({
+      agents: ['read'], chat: ['read'], memory: ['read'], knowledge: ['read'],
+      channels: ['read'], schedule: ['read'], skills: ['read'], mcp: ['read'],
+      plugins: ['read'], providers: ['read'], secrets: ['list'], config: ['read'],
+    })
+    const visible = visibleNavPages(can, undefined, { role: 'owner', deploymentMode: 'team' })
+      .map(page => page.id)
+    expect(visible).toEqual(expect.arrayContaining([
+      'studio', 'agents', 'templates', 'chat', 'memory', 'knowledge', 'queues',
+      'workboard', 'channels', 'schedule', 'skills', 'mcp', 'pluginmgr',
+      'providers', 'secrets', 'activity', 'browser', 'config', 'mobile',
+      'members', 'workspace-admin',
+    ]))
+    expect(visible).not.toContain('logs')
+  })
+
+  it('treats Personal mode as the Team/Scale baseline', async () => {
+    const { visibleNavPages, navPages } = await import('./nav.js')
+    const personal = visibleNavPages(() => true, undefined, { role: 'owner', deploymentMode: 'personal' })
+      .map(page => page.id)
+    const team = visibleNavPages(() => true, undefined, { role: 'owner', deploymentMode: 'team' })
+      .map(page => page.id)
+    const personalOnly = navPages.filter(page => page.personalOnly).map(page => page.id)
+    for (const id of personal.filter(id => !personalOnly.includes(id))) expect(team).toContain(id)
+    expect(personal.filter(id => !team.includes(id))).toEqual(personalOnly)
+    expect(team.filter(id => !personal.includes(id))).toEqual(['members', 'workspace-admin'])
   })
 
   it('every gated entry names a permission the server actually serves', async () => {
@@ -181,7 +235,7 @@ describe('the sidebar shows what the caller can use', () => {
     const known = new Set([
       'agents', 'chat', 'approvals', 'memory', 'channels', 'providers', 'skills',
       'mcp', 'knowledge', 'builder', 'templates', 'config', 'logs', 'metrics',
-      'schedule', 'rbac', 'secrets', 'credentials',
+      'schedule', 'rbac', 'secrets', 'credentials', 'plugins',
     ])
     for (const page of navPages) {
       if (!page.requires) continue

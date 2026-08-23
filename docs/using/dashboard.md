@@ -4,7 +4,7 @@ The Dashboard streams every runtime event live as it happens, and the Activity p
 
 ## Quick start
 
-1. Open **Dashboard** (`http://localhost:18789` → ◈ Dashboard).
+1. Open **Dashboard** (`http://localhost:1947` → ◈ Dashboard).
 2. Trigger anything — send a chat, run a scheduled agent — and watch events scroll in under **Live Event Log**.
 3. Switch to **📈 Activity**, pick the agent, and see the same run as a structured, persistent log.
 
@@ -12,11 +12,11 @@ CLI/API equivalents:
 
 ```bash
 # Persistent per-agent action history (same data as the Activity page)
-curl "http://localhost:18789/api/v1/agents/<agent-id>/actions?limit=500" \
+curl "http://localhost:1947/api/v1/agents/<agent-id>/actions?limit=500" \
   -H "Authorization: Bearer $SOULACY_API_KEY"
 
 # Per-session run metrics (tokens, cost, LLM calls)
-curl "http://localhost:18789/api/v1/runs/<session-id>/metrics" \
+curl "http://localhost:1947/api/v1/runs/<session-id>/metrics" \
   -H "Authorization: Bearer $SOULACY_API_KEY"
 ```
 

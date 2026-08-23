@@ -105,12 +105,17 @@ const (
 type ActionLog struct {
 	pool   *pgxpool.Pool
 	logDir string // directory for per-agent .log mirror files
+	layout wsroot.Layout
 	log    *zap.Logger
 
 	queue chan message.Event
 	stop  chan struct{}
 	wg    sync.WaitGroup
 }
+
+// SetWorkspaceLayoutRoot selects the canonical Team/Scale workspace tree for
+// mirror files. Personal mode leaves the zero-value layout unchanged.
+func (a *ActionLog) SetWorkspaceLayoutRoot(root string) { a.layout = wsroot.NewLayout(root) }
 
 // ExportWorkspaceJSONL streams the complete retention-controlled event record
 // for one workspace. The query is scoped before rows enter application memory.
@@ -152,7 +157,7 @@ func (a *ActionLog) ExportWorkspaceJSONL(ctx context.Context, workspaceID string
 // PurgeWorkspace removes the per-workspace mirror tree and its PostgreSQL
 // rows. The tree helper rejects the personal/shared root before SQL runs.
 func (a *ActionLog) PurgeWorkspace(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
-	removed, err := workspacepurge.PurgeTree(ctx, a.logDir, workspaceID)
+	removed, err := workspacepurge.PurgeLayoutTree(ctx, a.layout, a.logDir, workspaceID)
 	if err != nil {
 		return removed, err
 	}
@@ -312,7 +317,11 @@ func (a *ActionLog) writeFile(workspaceID, agentID string, events []message.Even
 			return
 		}
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	// Agent logs can contain prompts, tool output, filenames, and other tenant
+	// data. Keep the mirror owner-only just like the SQLite action-log mirror;
+	// a workspace directory boundary is not useful if another local account can
+	// read every file inside it.
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return
 	}
@@ -339,7 +348,7 @@ func (a *ActionLog) EventFilePath(agentID string) string {
 // workspace. A tenant's mirror is a different file, so a tail cannot reach
 // another tenant's events however the agent ID is chosen.
 func (a *ActionLog) EventFilePathInWorkspace(workspaceID, agentID string) string {
-	return filepath.Join(wsroot.Dir(a.logDir, workspaceID), sanitize(agentID)+".log")
+	return filepath.Join(a.layout.Dir(a.logDir, workspaceID), sanitize(agentID)+".log")
 }
 
 // Tail reads up to limit recent events from the personal workspace's log file.

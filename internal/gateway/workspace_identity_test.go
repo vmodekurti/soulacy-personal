@@ -98,6 +98,50 @@ func TestWorkspaceOwnerCanCreateAnotherWorkspace(t *testing.T) {
 	}
 }
 
+func TestWorkspaceOIDCRedirectURLUsesTheBrowserLocalPort(t *testing.T) {
+	app := fiber.New(fiber.Config{DisableStartupMessage: true, Immutable: true})
+	app.Get("/redirect", func(c *fiber.Ctx) error {
+		return c.SendString(workspaceOIDCRedirectURL(c, "http://localhost:18789/api/v1/auth/oidc/callback"))
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "http://localhost:1947/redirect", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body := make([]byte, 256)
+	n, err := resp.Body.Read(body)
+	if err != nil && n == 0 {
+		t.Fatal(err)
+	}
+	if got, want := string(body[:n]), "http://localhost:1947/api/v1/auth/oidc/callback"; got != want {
+		t.Fatalf("redirect URL = %q, want %q", got, want)
+	}
+}
+
+func TestWorkspaceOIDCRedirectURLPreservesPublicHTTPSOverride(t *testing.T) {
+	app := fiber.New(fiber.Config{DisableStartupMessage: true, Immutable: true})
+	app.Get("/redirect", func(c *fiber.Ctx) error {
+		return c.SendString(workspaceOIDCRedirectURL(c, "https://agents.example/api/v1/auth/oidc/callback"))
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "http://localhost:1947/redirect", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body := make([]byte, 256)
+	n, err := resp.Body.Read(body)
+	if err != nil && n == 0 {
+		t.Fatal(err)
+	}
+	if got, want := string(body[:n]), "https://agents.example/api/v1/auth/oidc/callback"; got != want {
+		t.Fatalf("redirect URL = %q, want %q", got, want)
+	}
+}
+
 func TestWorkspaceAdminCannotCreateAnOwnerWorkspace(t *testing.T) {
 	resolver := &listingResolver{recordingMembershipResolver: recordingMembershipResolver{
 		membership: tenancy.Membership{OrganizationID: "org_a", WorkspaceID: "ws_a", MembershipID: "mem_a", UserID: "usr_alice", Role: tenancy.RoleAdmin},
@@ -147,6 +191,45 @@ func TestIdentityEndpointReportsTheVerifiedRoleNotTheTokenRole(t *testing.T) {
 	}
 	if identity.DeploymentMode != config.DeploymentModeTeam {
 		t.Fatalf("identity reported deployment mode %q", identity.DeploymentMode)
+	}
+}
+
+func TestIdentityEndpointProjectsPersonalCapabilityPermissionsForWorkspaceOwner(t *testing.T) {
+	app := identityApp(t, &listingResolver{recordingMembershipResolver: recordingMembershipResolver{
+		membership: tenancy.Membership{OrganizationID: "org_a", WorkspaceID: "ws_a", MembershipID: "mem_a", Role: tenancy.RoleOwner},
+	}}, config.DeploymentModeTeam)
+
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/identity", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+	var identity identityResponse
+	if err := json.NewDecoder(resp.Body).Decode(&identity); err != nil {
+		t.Fatal(err)
+	}
+
+	// Team/Scale wrap the Personal product in a tenant boundary; they do not
+	// replace it with a smaller product. Keep every tenant-safe capability in
+	// the identity projection so the GUI cannot silently hide working pages.
+	for _, resource := range []string{
+		"agents", "chat", "memory", "knowledge", "channels", "schedule",
+		"skills", "mcp", "plugins", "providers", "secrets", "config",
+	} {
+		actions := identity.Permissions[resource]
+		foundRead := false
+		for _, action := range actions {
+			if action == "read" || (resource == "secrets" && action == "list") {
+				foundRead = true
+				break
+			}
+		}
+		if !foundRead {
+			t.Errorf("owner identity is missing usable %s permission: %v", resource, actions)
+		}
 	}
 }
 

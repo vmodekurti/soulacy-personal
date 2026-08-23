@@ -19,7 +19,7 @@
 //   action = { kind: 'consent', nodeId }   → open the Review & grant dialog
 //          | { kind: 'timeout',  nodeId }  → focus the node's timeout field
 //          | { kind: 'tools' }             → open the agent's tool settings
-//          | { kind: 'providers' }         → open Providers / Secrets
+//          | { kind: 'secrets' }           → open workspace Secrets
 //          | { kind: 'channels' }          → open channel settings
 
 // nodeFromError pulls the flow node id out of an engine error, which formats
@@ -99,7 +99,7 @@ const PLATFORM_RULES = [
           ? 'The search provider didn’t answer in time. This is usually the provider being slow rather than a problem with your workflow — and it gets much more likely when a fan-out runs several searches at once.'
           : `The step${node ? ` “${node}”` : ''} ran longer than its time limit and was stopped.`,
         fix: isSearch
-          ? 'Give the search more time: add a timeout_s argument to this block (e.g. 90), or raise search.timeout in config.yaml to apply it everywhere. Lowering the fan-out’s max-parallel also helps.'
+          ? 'Give the search more time: add a timeout_s argument to this block (e.g. 90), or raise the web-search timeout in Workspace settings. Lowering the fan-out’s max-parallel also helps.'
           : 'Raise this step’s timeout in the inspector, or reduce how much it has to do.',
       }
       if (node) out.action = { kind: 'timeout', nodeId: node }
@@ -118,8 +118,8 @@ const PLATFORM_RULES = [
     match: /\b401\b|unauthorized|invalid api key|no .{0,20}api key|credentials/i,
     build: () => ({
       summary: 'A provider or integration rejected the request because its credentials are missing or invalid.',
-      fix: 'Open Providers (or Secrets) and re-test the key for this provider. If the gateway loads keys at boot, restart it after saving.',
-      action: { kind: 'providers' },
+      fix: 'Open Secrets and update this workspace’s provider credential, then run the workflow again.',
+      action: { kind: 'secrets' },
     }),
   },
   {

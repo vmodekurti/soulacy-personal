@@ -85,7 +85,7 @@ Authorization: Bearer <token>
 Use `/api/v1/chat/stream` to receive Server-Sent Events.
 
 ```bash
-curl -N -X POST http://localhost:18789/api/v1/chat/stream \
+curl -N -X POST http://localhost:1947/api/v1/chat/stream \
   -H "Authorization: Bearer sk_..." \
   -H "Content-Type: application/json" \
   -d '{"agent_id":"assistant","user_id":"u1","text":"Tell me a joke"}'

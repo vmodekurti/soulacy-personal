@@ -7,7 +7,7 @@ Usage:
   python3.11 refresh_cookie.py --clear  # delete saved cookie to force re-extract
 
 After running, restart Soulacy so the MCP server picks up the new cookie:
-  lsof -ti :18789 | xargs kill -9 2>/dev/null; sleep 2
+  lsof -ti :1947 | xargs kill -9 2>/dev/null; sleep 2
   cd ~ && nohup soulacy serve > ~/.soulacy/logs/soulacy.log 2>&1 &
 """
 import os, sys
@@ -83,5 +83,5 @@ print(f"✅ Cookie written: {len(cookie_str)} bytes, {len(all_cookies)} cookies"
 print(f"   auth_verification: {len(auth_val)} chars")
 print()
 print("Now restart Soulacy:")
-print("  lsof -ti :18789 | xargs kill -9 2>/dev/null; sleep 2")
+print("  lsof -ti :1947 | xargs kill -9 2>/dev/null; sleep 2")
 print("  cd ~ && nohup soulacy serve > ~/.soulacy/logs/soulacy.log 2>&1 &")

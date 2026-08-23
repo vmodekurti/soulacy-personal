@@ -30,7 +30,7 @@ func TestFormatProbeReport(t *testing.T) {
 
 func TestAppendRegistryToConfigFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	seed := "server:\n  port: 18789\nregistries:\n  - id: main\n    type: http\n    base_url: https://r.example\n"
+	seed := "server:\n  port: 1947\nregistries:\n  - id: main\n    type: http\n    base_url: https://r.example\n"
 	if err := os.WriteFile(path, []byte(seed), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestAppendRegistryToConfigFile(t *testing.T) {
 	if added["base_url"] != "https://skills.sh" || added["type"] != "skillssh" {
 		t.Errorf("added = %v", added)
 	}
-	if srv := disk["server"].(map[string]any); srv["port"] != 18789 {
+	if srv := disk["server"].(map[string]any); srv["port"] != 1947 {
 		t.Errorf("server block mutated: %v", disk["server"])
 	}
 

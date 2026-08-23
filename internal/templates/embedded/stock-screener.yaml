@@ -46,8 +46,8 @@ system_prompt: |
     confirmed news; keep the whole screen under 350 words; add the disclaimer
     "Informational only — not investment advice." as the last line.
 llm:
-    provider: ollama
-    model: llama3.3:70b
+    provider: nvidia
+    model: meta/llama-3.3-70b-instruct
     temperature: 0.3
     max_tokens: 2048
 builtins:

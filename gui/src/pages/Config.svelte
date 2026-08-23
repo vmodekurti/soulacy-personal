@@ -13,7 +13,6 @@
   let error    = ''
   let saved    = false
   let writable = false
-  let restarting = false
   let downloadingSupport = false
   let auditLoading = false
   let auditError = ''
@@ -441,19 +440,6 @@
     }
   }
 
-  async function restartGateway() {
-    restarting = true
-    error = ''
-    try {
-      await api.admin.restart()
-      saved = false
-    } catch (e) {
-      error = e.message
-    } finally {
-      setTimeout(() => { restarting = false }, 5000)
-    }
-  }
-
   async function downloadSupportBundle() {
     downloadingSupport = true
     error = ''
@@ -559,9 +545,7 @@
   {#if saved}
     <div class="banner ok restart-banner">
       <span>✓ Config saved. Restart the gateway for changes to take full effect.</span>
-      <button class="btn-secondary" on:click={restartGateway} disabled={restarting}>
-        {restarting ? 'Restarting…' : 'Restart Gateway'}
-      </button>
+      <small>A deployment administrator must restart the gateway from the platform control plane.</small>
     </div>
   {/if}
   {#if !writable && config}

@@ -107,7 +107,7 @@ Quick start:
 			if gatewayURL == "" {
 				port := viper.GetInt("server.port")
 				if port == 0 {
-					port = 18789
+					port = 1947
 				}
 				gatewayURL = fmt.Sprintf("http://localhost:%d", port)
 			}
@@ -132,7 +132,7 @@ Quick start:
 		},
 	}
 
-	root.PersistentFlags().StringVar(&gatewayURL, "gateway", "", "Gateway URL (default: http://localhost:18789)")
+	root.PersistentFlags().StringVar(&gatewayURL, "gateway", "", "Gateway URL (default: http://localhost:1947)")
 	root.PersistentFlags().StringVar(&apiKey, "api-key", "", "API key for gateway authentication")
 	root.PersistentFlags().StringVar(&activeWorkspaceID, "workspace", "", "Workspace ID to target (default: the current context's workspace)")
 	root.PersistentFlags().StringVar(&idempotencyKey, "idempotency-key", "", "Make this mutation safe to retry; a repeat replays the original response")

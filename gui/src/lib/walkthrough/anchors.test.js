@@ -12,7 +12,8 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { walkthroughSteps } from './steps.js'
-import { navIds, navAnchor } from '../nav.js'
+import { navPages, navAnchor, visibleNavPages } from '../nav.js'
+import { activeWorkspace } from '../workspace.js'
 
 let app = null
 let target = null
@@ -20,11 +21,14 @@ let target = null
 beforeEach(async () => {
   // App.svelte probes the gateway on mount. Nothing here depends on the
   // answers — we only need the sidebar to render — so every call resolves empty.
-  vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', {
-    status: 200,
-    headers: { 'content-type': 'application/json' },
-  })))
+  vi.stubGlobal('fetch', vi.fn(async (url) => new Response(
+    String(url).includes('/workspace/identity')
+      ? JSON.stringify({ role: 'owner', deployment_mode: 'personal' })
+      : '{}',
+    { status: 200, headers: { 'content-type': 'application/json' } },
+  )))
   localStorage.clear()
+  activeWorkspace.set({ role: 'owner', deploymentMode: 'personal' })
 
   const { default: App } = await import('../../App.svelte')
   target = document.createElement('div')
@@ -40,9 +44,16 @@ afterEach(() => {
   app = null
   target = null
   vi.unstubAllGlobals()
+  activeWorkspace.set(null)
 })
 
-const anchoredSteps = walkthroughSteps.filter((s) => s.anchor)
+const personalNavPages = visibleNavPages(() => true, navPages, {
+  role: 'owner',
+  deploymentMode: 'personal',
+})
+const personalNavAnchors = new Set(personalNavPages.map((page) => navAnchor(page.id)))
+const anchoredSteps = walkthroughSteps.filter((step) => step.anchor
+  && (!step.anchor.startsWith('nav:') || personalNavAnchors.has(step.anchor)))
 
 describe('walkthrough anchors resolve against the real app shell', () => {
   it.each(anchoredSteps.map((s) => [s.id, s.anchor]))(
@@ -56,7 +67,7 @@ describe('walkthrough anchors resolve against the real app shell', () => {
     const rendered = [...document.querySelectorAll('[data-tour^="nav:"]')]
       .map((el) => el.getAttribute('data-tour'))
       .sort()
-    expect(rendered).toEqual(navIds.map(navAnchor).sort())
+    expect(rendered).toEqual(personalNavPages.map((page) => navAnchor(page.id)).sort())
   })
 
   it('renders anchors on elements with a real box, not display:none holders', () => {

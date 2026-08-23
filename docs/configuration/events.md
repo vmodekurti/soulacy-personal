@@ -121,7 +121,7 @@ The same events the GUI renders, available to your own tools:
 ```bash
 # wscat example — browser WebSockets can't set headers, so the
 # credential may be passed as a query parameter:
-wscat -c "ws://localhost:18789/ws/events?api_key=sy_..."
+wscat -c "ws://localhost:1947/ws/events?api_key=sy_..."
 ```
 
 Authentication uses the same engine as the REST API. Scoped plugin tokens

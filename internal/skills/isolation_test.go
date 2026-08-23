@@ -9,6 +9,7 @@
 package skills
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -165,5 +166,63 @@ func TestRescanAffectsOnlyItsOwnWorkspace(t *testing.T) {
 	}
 	if b.Count() != 0 {
 		t.Fatalf("another workspace's inventory changed: %d skills", b.Count())
+	}
+}
+
+func TestCanonicalWorkspacePurgeRemovesOnlyItsOwnSkills(t *testing.T) {
+	root := t.TempDir()
+	platform := filepath.Join(root, "platform")
+	base := filepath.Join(root, "skills")
+	stores := NewStores([]string{platform}, base, zap.NewNop())
+	stores.SetWorkspaceLayoutRoot(root)
+
+	if err := os.MkdirAll(platform, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeSkill(t, platform, "shared-helper", "a platform template")
+	for _, workspaceID := range []string{"ws_a", "ws_b"} {
+		dir, err := stores.EnsureDir(workspaceID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeSkill(t, dir, workspaceID+"-only", workspaceID+" private skill")
+	}
+	if stores.For("ws_a").Get("ws_a-only") == nil || stores.For("ws_b").Get("ws_b-only") == nil {
+		t.Fatal("test setup did not load both workspace inventories")
+	}
+
+	removed, err := stores.PurgeWorkspace(context.Background(), "ws_a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed.Rows == 0 || removed.Bytes == 0 {
+		t.Fatalf("purge reported no removed files: %+v", removed)
+	}
+	if _, err := os.Stat(stores.Dir("ws_a")); !os.IsNotExist(err) {
+		t.Fatalf("purged workspace directory still exists: %v", err)
+	}
+	if stores.For("ws_a").Get("ws_a-only") != nil {
+		t.Fatal("purged workspace skill survived in the loader cache")
+	}
+	if stores.For("ws_b").Get("ws_b-only") == nil {
+		t.Fatal("purging ws_a changed ws_b's skill inventory")
+	}
+	if stores.For("ws_b").Get("shared-helper") == nil {
+		t.Fatal("purging a workspace removed the platform skill template")
+	}
+}
+
+func TestPersonalSkillsCannotBePurgedAsAWorkspace(t *testing.T) {
+	stores, _, base := newTestStores(t)
+	writeSkill(t, base, "local", "the single user's own skill")
+
+	if _, err := stores.PurgeWorkspace(context.Background(), wsroot.PersonalWorkspaceID); err == nil {
+		t.Fatal("personal skill inventory was accepted as a tenant purge target")
+	}
+	if stores.For(wsroot.PersonalWorkspaceID).Get("local") == nil {
+		t.Fatal("a refused personal purge removed or uncached the personal skill")
+	}
+	if _, err := os.Stat(filepath.Join(base, "local", "SKILL.md")); err != nil {
+		t.Fatalf("a refused personal purge changed the personal filesystem: %v", err)
 	}
 }

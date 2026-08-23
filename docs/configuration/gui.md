@@ -3,7 +3,7 @@
 Soulacy includes a built-in web GUI served by the gateway. Open it at the same host and port as the API, for example:
 
 ```text
-http://localhost:18789
+http://localhost:1947
 ```
 
 If `server.api_key` is set, use the key button in the sidebar to enter a bearer token.

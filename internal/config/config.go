@@ -121,6 +121,7 @@ type Config struct {
 
 	// Credentials configures the encrypted credential vault.
 	Credentials CredentialsConfig `mapstructure:"credentials"`
+	Billing     BillingConfig     `mapstructure:"billing"`
 
 	// Telemetry configures OpenTelemetry tracing.
 	Telemetry TelemetryConfig `mapstructure:"telemetry"`
@@ -378,10 +379,23 @@ type CostPricing struct {
 
 // CredentialsConfig holds credential vault settings.
 type CredentialsConfig struct {
-	KMSProvider    string `mapstructure:"kms_provider"` // "local" (default), "hashicorp", "awskms"
-	HashiCorpAddr  string `mapstructure:"hashicorp_addr"`
-	HashiCorpToken string `mapstructure:"hashicorp_token"`
-	AWSKMSKeyID    string `mapstructure:"aws_kms_key_id"`
+	KMSProvider             string `mapstructure:"kms_provider"` // "local" (default), "hashicorp", "awskms"
+	HashiCorpAddr           string `mapstructure:"hashicorp_addr"`
+	HashiCorpToken          string `mapstructure:"hashicorp_token"`
+	HashiCorpMount          string `mapstructure:"hashicorp_mount"`
+	HashiCorpKey            string `mapstructure:"hashicorp_key"`
+	HashiCorpKubernetesRole string `mapstructure:"hashicorp_kubernetes_role"`
+	HashiCorpJWTPath        string `mapstructure:"hashicorp_jwt_path"`
+	AWSKMSKeyID             string `mapstructure:"aws_kms_key_id"`
+}
+
+// BillingConfig configures customer billing. Authorization code consumes the
+// provider-independent entitlement service; Stripe is only an event source.
+type BillingConfig struct {
+	Provider            string `mapstructure:"provider"`
+	StripeSecretKey     string `mapstructure:"stripe_secret_key"`
+	StripeWebhookSecret string `mapstructure:"stripe_webhook_secret"`
+	WebhookTolerance    string `mapstructure:"webhook_tolerance"`
 }
 
 type ServerConfig struct {
@@ -590,14 +604,20 @@ func RetentionDuration(raw string, fallback time.Duration) time.Duration {
 
 // SandboxConfig is the YAML face of internal/sandbox.Limits.
 type SandboxConfig struct {
-	Enabled    bool   `mapstructure:"enabled"`
-	Mode       string `mapstructure:"mode"`  // docker (default) | unsandboxed
-	Image      string `mapstructure:"image"` // disposable command container
-	CPUSeconds int    `mapstructure:"cpu_seconds"`
-	MemoryMB   int    `mapstructure:"memory_mb"`
-	OpenFiles  int    `mapstructure:"open_files"`
-	FileSizeMB int    `mapstructure:"file_size_mb"`
-	PIDs       int    `mapstructure:"pids"`
+	Enabled            bool     `mapstructure:"enabled"`
+	Mode               string   `mapstructure:"mode"`  // docker (default) | unsandboxed
+	Image              string   `mapstructure:"image"` // disposable command container
+	CPUSeconds         int      `mapstructure:"cpu_seconds"`
+	MemoryMB           int      `mapstructure:"memory_mb"`
+	OpenFiles          int      `mapstructure:"open_files"`
+	FileSizeMB         int      `mapstructure:"file_size_mb"`
+	PIDs               int      `mapstructure:"pids"`
+	ContainerRuntime   string   `mapstructure:"container_runtime"` // runsc (gVisor) or kata-runtime
+	RequireSignedImage bool     `mapstructure:"require_signed_image"`
+	CosignKey          string   `mapstructure:"cosign_key"`
+	EgressProxy        string   `mapstructure:"egress_proxy"`
+	EgressNetwork      string   `mapstructure:"egress_network"`
+	AllowedEgressHosts []string `mapstructure:"allowed_egress_hosts"`
 }
 
 type MemoryConfig struct {
@@ -654,14 +674,17 @@ type VectorConfig struct {
 //	          "ssh"      — run Python on a remote host over the system ssh client
 //	workers:  4          — pool only: number of pre-forked Python processes
 type ExecutorConfig struct {
-	Backend       string `mapstructure:"backend"`        // "process" (default), "pool", "docker", or "ssh"
-	Workers       int    `mapstructure:"workers"`        // pool only: worker count
-	DockerImage   string `mapstructure:"docker_image"`   // docker only: image to run
-	DockerNetwork string `mapstructure:"docker_network"` // docker only: defaults to none
-	SSHHost       string `mapstructure:"ssh_host"`       // ssh only: host or user@host
-	SSHUser       string `mapstructure:"ssh_user"`       // ssh only: optional user
-	SSHPythonBin  string `mapstructure:"ssh_python_bin"` // ssh only: remote python binary
-	SSHIdentity   string `mapstructure:"ssh_identity"`   // ssh only: private key path
+	Backend            string `mapstructure:"backend"`        // "process" (default), "pool", "docker", or "ssh"
+	Workers            int    `mapstructure:"workers"`        // pool only: worker count
+	DockerImage        string `mapstructure:"docker_image"`   // docker only: image to run
+	DockerNetwork      string `mapstructure:"docker_network"` // docker only: defaults to none
+	DockerRuntime      string `mapstructure:"docker_runtime"` // runsc (gVisor) in hosted deployments
+	RequireSignedImage bool   `mapstructure:"require_signed_image"`
+	CosignKey          string `mapstructure:"cosign_key"`
+	SSHHost            string `mapstructure:"ssh_host"`       // ssh only: host or user@host
+	SSHUser            string `mapstructure:"ssh_user"`       // ssh only: optional user
+	SSHPythonBin       string `mapstructure:"ssh_python_bin"` // ssh only: remote python binary
+	SSHIdentity        string `mapstructure:"ssh_identity"`   // ssh only: private key path
 
 	// DockerVolumes is the explicit mount allowlist for the docker backend
 	// (each entry "host:container[:ro]"). No host paths are mounted unless
@@ -706,7 +729,7 @@ type AuthConfig struct {
 	OIDCAudience     string   `mapstructure:"oidc_audience"`      // aud claim value
 	OIDCClientID     string   `mapstructure:"oidc_client_id"`     // audience fallback
 	OIDCClientSecret string   `mapstructure:"oidc_client_secret"` // prefer SOULACY_AUTH_OIDC_CLIENT_SECRET
-	OIDCRedirectURL  string   `mapstructure:"oidc_redirect_url"`  // registered GUI callback
+	OIDCRedirectURL  string   `mapstructure:"oidc_redirect_url"`  // optional public callback override
 	OIDCScopes       []string `mapstructure:"oidc_scopes"`        // defaults to openid/profile/email
 }
 
@@ -732,8 +755,13 @@ type QueueConfig struct {
 	NATSSubjectPrefix string   `mapstructure:"nats_subject_prefix"` // subjects filter
 	NATSAckWait       string   `mapstructure:"nats_ack_wait"`       // e.g. "30s"
 	NATSMaxDeliver    int      `mapstructure:"nats_max_deliver"`    // 0 = unlimited
-	Command           string   `mapstructure:"command"`             // external sidecar command (E24)
-	Args              []string `mapstructure:"args"`                // external sidecar args (E24)
+	NATSCredentials   string   `mapstructure:"nats_credentials"`    // mounted NATS user/JWT credentials file
+	NATSTLSCA         string   `mapstructure:"nats_tls_ca"`         // private CA bundle
+	NATSTLSCert       string   `mapstructure:"nats_tls_cert"`       // optional mTLS client certificate
+	NATSTLSKey        string   `mapstructure:"nats_tls_key"`        // optional mTLS client key
+	NATSTLSServerName string   `mapstructure:"nats_tls_server_name"`
+	Command           string   `mapstructure:"command"` // external sidecar command (E24)
+	Args              []string `mapstructure:"args"`    // external sidecar args (E24)
 }
 
 type LLMConfig struct {
@@ -983,7 +1011,7 @@ func Load(cfgPath string) (*Config, string, error) {
 	// var; main.go additionally refuses to start when bound to a non-loopback
 	// address with no API key set.
 	v.SetDefault("server.host", "127.0.0.1")
-	v.SetDefault("server.port", 18789)
+	v.SetDefault("server.port", 1947)
 	v.SetDefault("server.gui_enabled", true)
 	v.SetDefault("deployment.mode", DeploymentModePersonal)
 	v.SetDefault("runtime.max_concurrent_sessions", 100)
@@ -1049,7 +1077,10 @@ func Load(cfgPath string) (*Config, string, error) {
 	v.SetDefault("auth.mode", "apikey")
 	v.SetDefault("auth.jwt_access_ttl", "15m")
 	v.SetDefault("auth.jwt_refresh_ttl", "168h")
-	v.SetDefault("llm.default_provider", "ollama")
+	v.SetDefault("llm.default_provider", "nvidia")
+	v.SetDefault("llm.providers.nvidia.api_key", "")
+	v.SetDefault("llm.providers.nvidia.base_url", "https://integrate.api.nvidia.com/v1")
+	v.SetDefault("llm.providers.nvidia.model", "meta/llama-3.3-70b-instruct")
 	v.SetDefault("llm.providers.ollama.base_url", "http://localhost:11434")
 	v.SetDefault("llm.providers.ollama.model", "llama3")
 	v.SetDefault("llm.studio.max_build_tokens", 100000)
@@ -1066,8 +1097,8 @@ func Load(cfgPath string) (*Config, string, error) {
 	v.SetDefault("costs.reconciliation.enabled", false)
 	v.SetDefault("costs.reconciliation.interval", "24h")
 	v.SetDefault("costs.reconciliation.variance_alert_threshold", 0.1)
-	v.SetDefault("knowledge.embedding_provider", "ollama")
-	v.SetDefault("knowledge.embedding_model", "nomic-embed-text")
+	v.SetDefault("knowledge.embedding_provider", "nvidia")
+	v.SetDefault("knowledge.embedding_model", "nvidia/nv-embedqa-e5-v5")
 	v.SetDefault("knowledge.chunk_size", 1000)
 	v.SetDefault("knowledge.chunk_overlap", 200)
 	v.SetDefault("knowledge.max_document_bytes", int64(50<<20))

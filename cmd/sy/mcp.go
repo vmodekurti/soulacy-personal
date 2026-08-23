@@ -129,7 +129,7 @@ tool that accepts agent_id explicitly. Configure this command in Claude,
 Codex, or any MCP client using stdio transport.
 
 Example MCP command:
-  sy --gateway http://localhost:18789 mcp serve`,
+  sy --gateway http://localhost:1947 mcp serve`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			allowed := map[string]bool{}
 			for _, id := range agentIDs {

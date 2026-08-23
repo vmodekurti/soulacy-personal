@@ -251,7 +251,7 @@ func (s *Server) handleInspectAgentPackage(c *fiber.Ctx) error {
 	if err != nil {
 		return s.errJSON(c, fiber.StatusBadRequest, err)
 	}
-	inspected, err := s.inspectAgentPackage(s.agents(c), pkg)
+	inspected, err := s.inspectAgentPackage(c, s.agents(c), pkg)
 	if err != nil {
 		return s.errJSON(c, fiber.StatusBadRequest, err)
 	}
@@ -292,7 +292,7 @@ func (s *Server) handleImportAgentPackage(c *fiber.Ctx) error {
 		}
 		pkg.Integrity = agentPackageIntegrity{Algorithm: "sha256", SHA256: sum}
 	}
-	inspected, err := s.inspectAgentPackage(s.agents(c), pkg)
+	inspected, err := s.inspectAgentPackage(c, s.agents(c), pkg)
 	if err != nil {
 		return s.errJSON(c, fiber.StatusBadRequest, err)
 	}
@@ -483,7 +483,7 @@ func parseAgentPackageBody(body []byte) (*agentPackageResponse, error) {
 	return &pkg, nil
 }
 
-func (s *Server) inspectAgentPackage(scope agentScope, pkg *agentPackageResponse) (*agentPackageInspectResponse, error) {
+func (s *Server) inspectAgentPackage(c *fiber.Ctx, scope agentScope, pkg *agentPackageResponse) (*agentPackageInspectResponse, error) {
 	if pkg == nil {
 		return nil, errors.New("package is required")
 	}
@@ -515,7 +515,7 @@ func (s *Server) inspectAgentPackage(scope agentScope, pkg *agentPackageResponse
 	if err := yaml.Unmarshal([]byte(pkg.SOULYAML), &def); err != nil {
 		return nil, fmt.Errorf("SOUL.yaml parse failed: %w", err)
 	}
-	report := agentvalidate.Bytes([]byte(pkg.SOULYAML), "package:SOUL.yaml", s.agentValidationOptions(context.TODO()))
+	report := agentvalidate.Bytes([]byte(pkg.SOULYAML), "package:SOUL.yaml", s.agentValidationOptionsFor(c))
 	requirements := s.agentPackageRequirements(scope, pkg, &def)
 	warnings := append([]string(nil), pkg.Manifest.Warnings...)
 	if v1Warning != "" {

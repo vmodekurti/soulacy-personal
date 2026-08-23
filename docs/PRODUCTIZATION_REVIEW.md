@@ -562,7 +562,7 @@ User-facing docs re-aligned with everything that shipped in Cohorts A / B / C / 
 - `docs/deployment/upgrades.md` — added an admonition on the v1 agent-package deprecation timeline (cutoff `2027-06-01`) with a pointer to `packaging.md`.
 - `docs/packaging.md` — already current from 7A; verified against the audit and left as-is.
 
-**Screenshots (deferred, needs local run):** the Playwright screenshot pipeline (`make docs-screenshots`) requires a live gateway on port 18789 and `npm i playwright` per `scripts/browser-render-smoke.mjs`. It cannot run reliably from the sandbox. Please run locally after `make build` and `soulacy` are up:
+**Screenshots (deferred, needs local run):** the Playwright screenshot pipeline (`make docs-screenshots`) requires a live gateway on port 1947 and `npm i playwright` per `scripts/browser-render-smoke.mjs`. It cannot run reliably from the sandbox. Please run locally after `make build` and `soulacy` are up:
 
 ```
 make docs-screenshots

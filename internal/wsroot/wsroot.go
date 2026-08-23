@@ -33,6 +33,132 @@ const PersonalWorkspaceID = "ws_personal"
 // out of the way of directory listings that expect to see user content.
 const NamespaceDir = ".workspaces"
 
+// WorkspaceDir is the canonical container for named workspaces in a
+// multi-user installation. Unlike NamespaceDir, which is repeated below each
+// file-backed subsystem, WorkspaceDir creates one coherent workspace tree:
+//
+//	<installation>/workspaces/<workspace-id>/<personal-layout>
+//
+// NamespaceDir remains exported because it is the legacy on-disk layout and
+// must stay readable while installations migrate.
+const WorkspaceDir = "workspaces"
+
+// Layout resolves workspace paths relative to one Soulacy installation root.
+// It is deliberately a value passed by the application rather than mutable
+// package state: tests, embedded gateways, and multiple installations in one
+// process must not be able to change one another's storage boundary.
+type Layout struct {
+	root string
+}
+
+// NewLayout creates an installation-aware workspace layout. An empty root is
+// valid and retains the legacy per-subsystem behavior; this keeps direct
+// library users backward compatible until their application supplies a root.
+func NewLayout(root string) Layout {
+	if strings.TrimSpace(root) == "" {
+		return Layout{}
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return Layout{root: filepath.Clean(root)}
+	}
+	return Layout{root: filepath.Clean(abs)}
+}
+
+// Root returns the canonical installation root used by this layout.
+func (l Layout) Root() string { return l.root }
+
+// WorkspaceRoot returns the single tree owned by a named workspace. Personal
+// mode intentionally returns the installation root unchanged.
+func (l Layout) WorkspaceRoot(workspaceID string) string {
+	workspaceID = Normalize(workspaceID)
+	if workspaceID == PersonalWorkspaceID || Validate(workspaceID) != nil || l.root == "" {
+		return l.root
+	}
+	return filepath.Join(l.root, WorkspaceDir, workspaceID)
+}
+
+// Dir resolves a subsystem directory for one workspace. Directories inside
+// the installation root preserve their Personal relative layout beneath the
+// named workspace root. Explicit external mounts cannot be moved under the
+// installation, so they retain the legacy safe namespace beneath that mount.
+func (l Layout) Dir(base, workspaceID string) string {
+	workspaceID = Normalize(workspaceID)
+	if workspaceID == PersonalWorkspaceID || Validate(workspaceID) != nil {
+		return base
+	}
+	rel, ok := l.relative(base)
+	if !ok {
+		return Dir(base, workspaceID)
+	}
+	return filepath.Join(l.WorkspaceRoot(workspaceID), rel)
+}
+
+// File is the file equivalent of Dir.
+func (l Layout) File(path, workspaceID string) string {
+	if strings.TrimSpace(path) == "" {
+		return ""
+	}
+	workspaceID = Normalize(workspaceID)
+	if workspaceID == PersonalWorkspaceID || Validate(workspaceID) != nil {
+		return path
+	}
+	rel, ok := l.relative(path)
+	if !ok {
+		return File(path, workspaceID)
+	}
+	return filepath.Join(l.WorkspaceRoot(workspaceID), rel)
+}
+
+// UserDir places user-private state inside the workspace's coherent tree.
+func (l Layout) UserDir(base, workspaceID, subject string) string {
+	dir := l.Dir(base, workspaceID)
+	if segment := UserSegment(subject); segment != "" {
+		return filepath.Join(dir, segment)
+	}
+	return dir
+}
+
+// Of derives ownership from either the canonical layout or the legacy
+// per-subsystem namespace. Accepting both makes reads and migration tooling
+// backward compatible without ever guessing an invalid path into a tenant.
+func (l Layout) Of(base, path string) (string, bool) {
+	if l.root != "" {
+		rel, err := filepath.Rel(l.root, path)
+		if err == nil {
+			parts := strings.Split(filepath.ToSlash(rel), "/")
+			if len(parts) >= 3 && parts[0] == WorkspaceDir {
+				if Validate(parts[1]) != nil {
+					return "", false
+				}
+				return parts[1], true
+			}
+			if len(parts) > 0 && parts[0] == WorkspaceDir {
+				return "", false
+			}
+		}
+	}
+	return Of(base, path)
+}
+
+func (l Layout) relative(path string) (string, bool) {
+	if l.root == "" {
+		return "", false
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", false
+	}
+	rel, err := filepath.Rel(l.root, abs)
+	if err != nil || rel == ".." || strings.HasPrefix(filepath.ToSlash(rel), "../") {
+		return "", false
+	}
+	if rel == "." {
+		return "", true
+	}
+	return rel, true
+}
+
 // idPattern is deliberately narrow: these IDs become path segments, so the set
 // of legal characters is the set that is unambiguous in a filename on every
 // supported platform.

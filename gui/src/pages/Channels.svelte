@@ -13,7 +13,6 @@
   let notice   = ''
   let actionLoading = {}
   let restartNeeded = false
-  let restarting = false
   let diagnosis = {}   // adapterId → { ok, category, reason, fix, detail, to }
   let channelMetrics = { inbound: [], outbound: [], inbox_drops: [] }
   let deliveryReadiness = null
@@ -502,19 +501,6 @@
     }
   }
 
-  async function restartGateway() {
-    restarting = true
-    error = ''
-    try {
-      await api.admin.restart()
-      restartNeeded = false
-      notice = 'Restart requested. Reconnect this page in a few seconds if it does not refresh automatically.'
-    } catch (e) {
-      error = e.message
-    } finally {
-      setTimeout(() => { restarting = false }, 5000)
-    }
-  }
 </script>
 
 <div class="page">
@@ -533,9 +519,7 @@
   {#if restartNeeded}
     <div class="banner warn restart-banner">
       <span>Channel settings were saved. Restart the gateway to reconnect adapters.</span>
-      <button class="btn-secondary" on:click={restartGateway} disabled={restarting}>
-        {restarting ? 'Restarting…' : 'Restart Gateway'}
-      </button>
+      <small>A deployment administrator must restart the gateway from the platform control plane.</small>
     </div>
   {/if}
 

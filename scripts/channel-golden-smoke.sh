@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE_URL="${SOULACY_GOLDEN_BASE_URL:-${SOULACY_BASE_URL:-http://127.0.0.1:18789/api/v1}}"
+BASE_URL="${SOULACY_GOLDEN_BASE_URL:-${SOULACY_BASE_URL:-http://127.0.0.1:1947/api/v1}}"
 API_KEY="${SOULACY_GOLDEN_API_KEY:-${SOULACY_API_KEY:-}}"
 
 WANT_ANY=0

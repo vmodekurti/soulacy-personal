@@ -25,7 +25,7 @@ func legacyFixture(t *testing.T) (home, root string) {
 		}
 	}
 	files := map[string]string{
-		"config.yaml":                 "server:\n  port: 18789\nagent_dirs:\n    - " + filepath.Join(root, "agents") + "\nlog:\n    file: " + filepath.Join(root, "logs", "soulacy.log") + "\n",
+		"config.yaml":                 "server:\n  port: 1947\nagent_dirs:\n    - " + filepath.Join(root, "agents") + "\nlog:\n    file: " + filepath.Join(root, "logs", "soulacy.log") + "\n",
 		"agents/bot.yaml":             "id: bot\n",
 		"skills/greeter/SKILL.md":     "# greeter",
 		"plugins/weather/plugin.yaml": "id: weather\n",

@@ -27,14 +27,17 @@ type WorkspaceIdentityProvider struct {
 }
 
 type WorkspaceLoginConfig struct {
-	WorkspaceID      string `json:"workspace_id"`
-	WorkspaceName    string `json:"workspace_name"`
-	WorkspaceLogo    string `json:"workspace_logo,omitempty"`
-	OrganizationID   string `json:"organization_id"`
-	OrganizationName string `json:"organization_name"`
-	OrganizationLogo string `json:"organization_logo,omitempty"`
-	IdentityStatus   string `json:"identity_status"`
-	ProviderType     string `json:"provider_type,omitempty"`
+	WorkspaceID        string `json:"workspace_id"`
+	WorkspaceSlug      string `json:"workspace_slug"`
+	WorkspaceName      string `json:"workspace_name"`
+	WorkspaceLogo      string `json:"workspace_logo,omitempty"`
+	OrganizationID     string `json:"organization_id"`
+	OrganizationName   string `json:"organization_name"`
+	OrganizationLogo   string `json:"organization_logo,omitempty"`
+	OrganizationStatus string `json:"organization_status"`
+	WorkspaceStatus    string `json:"workspace_status"`
+	IdentityStatus     string `json:"identity_status"`
+	ProviderType       string `json:"provider_type,omitempty"`
 }
 
 type WorkspaceIdentitySetupRequest struct {
@@ -65,7 +68,8 @@ func (s *PostgresStore) ValidateWorkspaceSetupToken(ctx context.Context, workspa
 		SELECT 1 FROM workspace_setup_tokens t
 		JOIN workspaces w ON w.id=t.workspace_id
 		WHERE t.workspace_id=$1 AND t.token_hash=$2 AND t.consumed_at IS NULL
-		AND t.expires_at>NOW() AND w.identity_status='pending'
+		AND t.expires_at>NOW() AND w.identity_status='pending' AND w.status='active'
+		AND EXISTS(SELECT 1 FROM organizations o WHERE o.id=w.organization_id AND o.status='active')
 	)`, strings.TrimSpace(workspaceID), hash[:]).Scan(&exists)
 	if err != nil {
 		return err
@@ -88,9 +92,9 @@ func (s *PostgresStore) ConfigureProviderEncryptionSecret(secret string) {
 
 func (s *PostgresStore) WorkspaceLoginConfig(ctx context.Context, workspaceID string) (WorkspaceLoginConfig, error) {
 	var out WorkspaceLoginConfig
-	err := s.pool.QueryRow(ctx, `SELECT w.id,w.name,COALESCE(w.logo_data_url,''),w.organization_id,o.name,COALESCE(o.logo_data_url,''),w.identity_status,COALESCE(p.provider_type,'')
-		FROM workspaces w JOIN organizations o ON o.id=w.organization_id LEFT JOIN workspace_identity_providers p ON p.workspace_id=w.id WHERE w.id=$1`, strings.TrimSpace(workspaceID)).Scan(
-		&out.WorkspaceID, &out.WorkspaceName, &out.WorkspaceLogo, &out.OrganizationID, &out.OrganizationName, &out.OrganizationLogo, &out.IdentityStatus, &out.ProviderType)
+	err := s.pool.QueryRow(ctx, `SELECT w.id,w.slug,w.name,COALESCE(w.logo_data_url,''),w.organization_id,o.name,COALESCE(o.logo_data_url,''),o.status,w.status,w.identity_status,COALESCE(p.provider_type,'')
+		FROM workspaces w JOIN organizations o ON o.id=w.organization_id LEFT JOIN workspace_identity_providers p ON p.workspace_id=w.id WHERE w.id=$1 OR w.slug=LOWER($1)`, strings.TrimSpace(workspaceID)).Scan(
+		&out.WorkspaceID, &out.WorkspaceSlug, &out.WorkspaceName, &out.WorkspaceLogo, &out.OrganizationID, &out.OrganizationName, &out.OrganizationLogo, &out.OrganizationStatus, &out.WorkspaceStatus, &out.IdentityStatus, &out.ProviderType)
 	return out, err
 }
 
@@ -141,7 +145,7 @@ func (s *PostgresStore) ActivateWorkspaceIdentity(ctx context.Context, mutation 
 	defer tx.Rollback(ctx) //nolint:errcheck
 	tokenHash := sha256.Sum256([]byte(req.SetupToken))
 	var identityStatus string
-	if err = tx.QueryRow(ctx, `SELECT w.identity_status FROM workspaces w JOIN workspace_setup_tokens t ON t.workspace_id=w.id WHERE w.id=$1 AND t.token_hash=$2 AND t.consumed_at IS NULL AND t.expires_at>NOW() FOR UPDATE`, workspaceID, tokenHash[:]).Scan(&identityStatus); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT w.identity_status FROM workspaces w JOIN organizations o ON o.id=w.organization_id JOIN workspace_setup_tokens t ON t.workspace_id=w.id WHERE w.id=$1 AND t.token_hash=$2 AND t.consumed_at IS NULL AND t.expires_at>NOW() AND w.status='active' AND o.status='active' FOR UPDATE`, workspaceID, tokenHash[:]).Scan(&identityStatus); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return WorkspaceIdentityProvider{}, errors.New("workspace setup link is invalid or expired")
 		}

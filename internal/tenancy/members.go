@@ -284,9 +284,10 @@ func (s *PostgresStore) ListMembershipAudit(ctx context.Context, workspaceID str
 // deployment's own.
 func (s *PostgresStore) PrimaryMembership(ctx context.Context, userID string) (StoredMembership, bool) {
 	var m StoredMembership
-	err := s.pool.QueryRow(ctx, `SELECT id, organization_id, workspace_id, user_id, role, status
-		FROM memberships WHERE user_id=$1 AND status='active'
-		ORDER BY created_at ASC, id ASC LIMIT 1`, strings.TrimSpace(userID)).
+	err := s.pool.QueryRow(ctx, `SELECT m.id, m.organization_id, m.workspace_id, m.user_id, m.role, m.status
+		FROM memberships m JOIN workspaces w ON w.id=m.workspace_id JOIN organizations o ON o.id=m.organization_id
+		WHERE m.user_id=$1 AND m.status='active' AND w.status='active' AND o.status='active'
+		ORDER BY m.created_at ASC, m.id ASC LIMIT 1`, strings.TrimSpace(userID)).
 		Scan(&m.ID, &m.OrganizationID, &m.WorkspaceID, &m.UserID, &m.Role, &m.Status)
 	if err != nil {
 		return StoredMembership{}, false
@@ -301,9 +302,9 @@ func (s *PostgresStore) PrimaryMembership(ctx context.Context, userID string) (S
 func (s *PostgresStore) CanRefreshUser(ctx context.Context, userID string) bool {
 	var allowed bool
 	err := s.pool.QueryRow(ctx, `SELECT
-		EXISTS(SELECT 1 FROM memberships WHERE user_id=$1 AND status='active') OR
-		EXISTS(SELECT 1 FROM invitations i JOIN users u ON u.normalized_email=i.normalized_email
-			WHERE u.id=$1 AND i.status='pending' AND i.expires_at>NOW())`, strings.TrimSpace(userID)).Scan(&allowed)
+		EXISTS(SELECT 1 FROM memberships m JOIN workspaces w ON w.id=m.workspace_id JOIN organizations o ON o.id=m.organization_id WHERE m.user_id=$1 AND m.status='active' AND w.status='active' AND o.status='active') OR
+		EXISTS(SELECT 1 FROM invitations i JOIN users u ON u.normalized_email=i.normalized_email JOIN workspaces w ON w.id=i.workspace_id JOIN organizations o ON o.id=i.organization_id
+			WHERE u.id=$1 AND i.status='pending' AND i.expires_at>NOW() AND w.status='active' AND o.status='active')`, strings.TrimSpace(userID)).Scan(&allowed)
 	return err == nil && allowed
 }
 

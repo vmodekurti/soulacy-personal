@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,7 +19,7 @@ func TestWriteConfigDeploymentModesLoadSuccessfully(t *testing.T) {
 				QueueBackend:        "memory",
 				ExecutorBackend:     "process",
 				Host:                "127.0.0.1",
-				Port:                18789,
+				Port:                1947,
 				APIKey:              "sy_bootstrap",
 				LLMProvider:         "ollama",
 				LLMModel:            "llama3",
@@ -29,14 +30,15 @@ func TestWriteConfigDeploymentModesLoadSuccessfully(t *testing.T) {
 				ConfigPath:          filepath.Join(home, "config.yaml"),
 				JWTSecret:           strings.Repeat("j", 32),
 				PostgresDSN:         "postgres://db/soulacy",
-				NATSURL:             "nats://queue:4222",
+				NATSURL:             "tls://queue:4222",
+				NATSCredentials:     "/run/secrets/nats.creds",
 				SharedArtifactStore: "s3://soulacy-artifacts/prod",
 			}
 			if mode != config.DeploymentModePersonal {
-				cfg.ExecutorBackend = "docker"
-			}
-			if mode == config.DeploymentModeScale {
+				cfg.ExecutorBackend = "worker"
 				cfg.QueueBackend = "nats"
+				cfg.KMSProvider = "awskms"
+				cfg.AWSKMSKeyID = "alias/soulacy-test"
 			}
 			if err := writeConfig(cfg); err != nil {
 				t.Fatalf("writeConfig: %v", err)
@@ -49,5 +51,44 @@ func TestWriteConfigDeploymentModesLoadSuccessfully(t *testing.T) {
 				t.Fatalf("deployment mode = %q, want %q", got, mode)
 			}
 		})
+	}
+}
+
+func TestWriteConfigNVIDIADefaultDoesNotRequireOllama(t *testing.T) {
+	home := t.TempDir()
+	cfg := &setupConfig{
+		DeploymentMode:  config.DeploymentModePersonal,
+		QueueBackend:    "memory",
+		ExecutorBackend: "process",
+		Host:            "127.0.0.1",
+		Port:            1947,
+		APIKey:          "sy_bootstrap",
+		LLMProvider:     "nvidia",
+		LLMModel:        "meta/llama-3.3-70b-instruct",
+		NVIDIAKey:       "nvapi-test",
+		PythonBin:       "python3",
+		LogLevel:        "info",
+		DataDir:         home,
+		ConfigPath:      filepath.Join(home, "config.yaml"),
+	}
+	if err := writeConfig(cfg); err != nil {
+		t.Fatalf("writeConfig: %v", err)
+	}
+	loaded, _, err := config.Load(cfg.ConfigPath)
+	if err != nil {
+		t.Fatalf("generated config does not load: %v", err)
+	}
+	if loaded.LLM.DefaultProvider != "nvidia" {
+		t.Fatalf("default provider = %q, want nvidia", loaded.LLM.DefaultProvider)
+	}
+	if got := loaded.LLM.Providers["nvidia"]; got.BaseURL != "https://integrate.api.nvidia.com/v1" || got.Model != "meta/llama-3.3-70b-instruct" || got.APIKey != "nvapi-test" {
+		t.Fatalf("unexpected NVIDIA provider: %#v", got)
+	}
+	data, err := os.ReadFile(cfg.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "    ollama:") {
+		t.Fatalf("NVIDIA default config unexpectedly includes Ollama:\n%s", data)
 	}
 }

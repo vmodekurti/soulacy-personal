@@ -3,7 +3,7 @@ import { looksLikeStaleAssetError } from './stalerecovery.js'
 
 describe('stale asset recovery detection', () => {
   it('recognizes Vite dynamic import failures', () => {
-    expect(looksLikeStaleAssetError(new Error('Failed to fetch dynamically imported module: http://localhost:18789/assets/Agents-DbNK-spe.js'))).toBe(true)
+    expect(looksLikeStaleAssetError(new Error('Failed to fetch dynamically imported module: http://localhost:1947/assets/Agents-DbNK-spe.js'))).toBe(true)
     expect(looksLikeStaleAssetError({ reason: { message: 'error loading dynamically imported module' } })).toBe(true)
   })
 

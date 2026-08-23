@@ -75,7 +75,7 @@ Manual smoke checks once a gateway is running locally:
 
 ```bash
 # Deep health surfaces channel + watcher state (S2.13)
-curl -s 'http://127.0.0.1:18789/health?deep=1' | jq
+curl -s 'http://127.0.0.1:1947/health?deep=1' | jq
 
 # Config validation refuses a bad duration (S8.1)
 SOULACY_RUNTIME_TOOL_TIMEOUT=120 soulacy serve   # expect a startup error naming runtime.tool_timeout

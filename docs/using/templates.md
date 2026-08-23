@@ -12,10 +12,10 @@ The Templates tab turns a known-good starter into a working agent: pick a shippe
 API equivalents:
 
 ```bash
-curl http://localhost:18789/api/v1/templates \
+curl http://localhost:1947/api/v1/templates \
   -H "Authorization: Bearer $SOULACY_API_KEY"
 
-curl -X POST http://localhost:18789/api/v1/templates/<name>/instantiate \
+curl -X POST http://localhost:1947/api/v1/templates/<name>/instantiate \
   -H "Authorization: Bearer $SOULACY_API_KEY"
 ```
 

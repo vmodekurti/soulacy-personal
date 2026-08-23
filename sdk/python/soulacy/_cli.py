@@ -19,7 +19,7 @@ Usage::
     sy-py install path/to/agent.py      # register agent with the gateway
 
 Environment variables:
-    SOULACY_GATEWAY   Gateway URL (default: http://localhost:18789)
+    SOULACY_GATEWAY   Gateway URL (default: http://localhost:1947)
     SOULACY_API_KEY   API key (default: empty = dev mode)
 """
 
@@ -41,7 +41,7 @@ from urllib import request as urllib_request, error as urllib_error
 
 _GATEWAY_ENV = "SOULACY_GATEWAY"
 _KEY_ENV = "SOULACY_API_KEY"
-_DEFAULT_GW = "http://localhost:18789"
+_DEFAULT_GW = "http://localhost:1947"
 
 
 def _gateway_url() -> str:
@@ -298,7 +298,7 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""
             Environment:
-              SOULACY_GATEWAY   Gateway URL (default: http://localhost:18789)
+              SOULACY_GATEWAY   Gateway URL (default: http://localhost:1947)
               SOULACY_API_KEY   API key
 
             Examples:

@@ -903,7 +903,7 @@ func checkAgentCount() doctorCheck {
 // Bug fix 2026-06-09: previously hit `/healthz` (which 404s; the real
 // endpoint is `/api/v1/health` under the API prefix) and used `httpJSON`
 // (no auth, requires JSON decode). The 404 from the wrong path made
-// every running-gateway-on-port-18789 look like "another process".
+// every running-gateway-on-port-1947 look like "another process".
 // Fixed: reuse `gatewayJSON("/health", ...)` — same code path as
 // checkGatewayHealth, so the two checks now agree.
 func checkPort() doctorCheck {
@@ -913,7 +913,7 @@ func checkPort() doctorCheck {
 	}
 	port := viper.GetInt("server.port")
 	if port == 0 {
-		port = 18789
+		port = 1947
 	}
 	addr := fmt.Sprintf("%s:%d", host, port)
 

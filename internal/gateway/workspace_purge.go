@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"path/filepath"
 
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/workspacepurge"
@@ -133,11 +134,45 @@ func (s *Server) workspacePurgers() []workspacepurge.Purger {
 			},
 		})
 	}
+	if s.pluginStores != nil {
+		purgers = append(purgers, workspacepurge.Purger{
+			Resource: "plugins",
+			Purge:    s.pluginStores.PurgeWorkspace,
+		})
+	}
+	if s.skillStores != nil {
+		purgers = append(purgers, workspacepurge.Purger{
+			Resource: "skills",
+			Purge:    s.skillStores.PurgeWorkspace,
+		})
+	}
+	if s.buildTraces != nil {
+		purgers = append(purgers, workspacepurge.Purger{
+			Resource: "studio-traces",
+			Purge:    s.buildTraces.PurgeWorkspace,
+		})
+	}
+	if s.workspaceLayout.Root() != "" {
+		purgers = append(purgers, workspacepurge.Purger{
+			Resource: "studio-learning",
+			Purge:    s.purgeStudioLearning,
+		})
+	}
 
 	if s.workspacePolicies != nil {
 		store := s.workspacePolicies
 		purgers = append(purgers, workspacepurge.Purger{
 			Resource: "workspace-policy",
+			Purge: func(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+				rows, err := store.PurgeWorkspace(ctx, workspaceID)
+				return workspacepurge.Removed{Rows: rows}, err
+			},
+		})
+	}
+	if s.workspaceSettings != nil {
+		store := s.workspaceSettings
+		purgers = append(purgers, workspacepurge.Purger{
+			Resource: "workspace-settings",
 			Purge: func(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
 				rows, err := store.PurgeWorkspace(ctx, workspaceID)
 				return workspacepurge.Removed{Rows: rows}, err
@@ -217,27 +252,38 @@ func (s *Server) workspacePurgers() []workspacepurge.Purger {
 		})
 	}
 
-	// File-backed classes are a SUBTREE REMOVAL PER CLASS, not one removal for
-	// all of them, and the reason is worth stating because the opposite is the
-	// natural assumption. `wsroot.Dir(base, id)` is applied per store with a
-	// different base each time — the agent dirs, `<root>/studio/drafts`, the
-	// trace dir, the skills base — so a workspace's files live in a dozen
-	// `.workspaces/<id>` directories under a dozen different parents. There is
-	// no single tree whose removal settles them.
+	// Team/Scale has one canonical filesystem boundary per workspace. Remove
+	// the export subtree in its own catalog phase, then remove the entire
+	// workspace tree in the final workspace-files phase. workspacepurge.Run
+	// executes purgers in ownership-catalog order, so subsystem and database
+	// cleanup has already run before that final tree removal.
 	//
-	// Only the export archives are registered here so far, because their base
-	// is the one this package owns and can name without guessing. Every other
-	// file-backed class reports as surviving, by name, until its own purger
-	// arrives — which is the point of the report.
-	//
-	// The personal workspace is refused inside PurgeTree: wsroot resolves it
-	// to the shared base, so a delete there would take the whole installation.
-	if ws, err := config.ResolveWorkspace(); err == nil {
+	// Personal mode deliberately retains the historical per-subsystem layout.
+	// It can purge export archives, but it never registers a whole-workspace
+	// tree purger: the personal root is the installation itself.
+	if root := s.workspaceLayout.Root(); root != "" {
+		purgers = append(purgers, workspacepurge.Purger{
+			Resource: "studio-drafts",
+			Purge: func(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+				return workspacepurge.PurgeLayoutTree(ctx, s.workspaceLayout, filepath.Join(root, "studio", "drafts"), workspaceID)
+			},
+		})
 		purgers = append(purgers, workspacepurge.Purger{
 			Resource: "workspace-exports",
 			Purge: func(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
-				// The same base workspaceexport.NewStore is given, so the
-				// directory purged is the directory written.
+				return workspacepurge.PurgeLayoutTree(ctx, s.workspaceLayout, filepath.Join(root, "exports"), workspaceID)
+			},
+		})
+		purgers = append(purgers, workspacepurge.Purger{
+			Resource: "workspace-files",
+			Purge: func(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+				return workspacepurge.PurgeLayoutTree(ctx, s.workspaceLayout, root, workspaceID)
+			},
+		})
+	} else if ws, err := config.ResolveWorkspace(); err == nil {
+		purgers = append(purgers, workspacepurge.Purger{
+			Resource: "workspace-exports",
+			Purge: func(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
 				return workspacepurge.PurgeSubtree(ctx, ws.Root, workspaceID, "exports")
 			},
 		})

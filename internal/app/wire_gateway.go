@@ -51,6 +51,7 @@ import (
 	"github.com/soulacy/soulacy/internal/voice"
 	"github.com/soulacy/soulacy/internal/workboard"
 	"github.com/soulacy/soulacy/internal/workspacepolicy"
+	"github.com/soulacy/soulacy/internal/workspacesettings"
 	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
@@ -89,6 +90,7 @@ type gatewayDeps struct {
 	// (MU-030 criterion 1). Nil keeps the flat YAML ceilings as the only
 	// limits, which is what every existing deployment has.
 	workspacePolicies *workspacepolicy.Store
+	workspaceSettings *workspacesettings.Store
 	// workspaceMCPServers is the durable registry of servers a workspace
 	// defined for itself, as opposed to the operator's config.yaml template.
 	workspaceMCPServers *mcpstore.Store
@@ -106,6 +108,9 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 	// Created BEFORE the watcher so the watcher can wire its OnPyChange hook
 	// to the server's tool-catalog cache.
 	srv := gateway.New(cfg, cfgPath, d.engine, d.loader, d.llmRouter, d.chanReg, d.sched, d.httpAdapter, d.waAdapter, d.skillLoader, d.actionBackend, d.mcpClient, d.hub, log)
+	if config.IsMultiUserMode(cfg.DeploymentMode()) {
+		srv.SetWorkspaceLayoutRoot(ws.Root)
+	}
 	// Per-workspace skill inventory. Without it the gateway falls back to the
 	// single loader, which is what a personal deployment wants.
 	// Per-workspace MCP servers. Set before any request can arrive; after this
@@ -165,6 +170,9 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 	}
 	if d.workspacePolicies != nil {
 		srv.SetWorkspacePolicyStore(d.workspacePolicies)
+	}
+	if d.workspaceSettings != nil {
+		srv.SetWorkspaceSettingsStore(d.workspaceSettings)
 	}
 	if d.approvalStore != nil {
 		srv.SetApprovalStore(d.approvalStore)
@@ -235,7 +243,11 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 		// Per-workspace installers over the same root: personal resolves to it
 		// unchanged, every other tenant installs beneath its own namespace and
 		// the loader for that workspace is the one that picks the plugin up.
-		srv.SetPluginInstallers(plugininstall.NewInstallers(cfg.PluginDirs[0]))
+		installers := plugininstall.NewInstallers(cfg.PluginDirs[0])
+		if config.IsMultiUserMode(cfg.DeploymentMode()) {
+			installers.SetWorkspaceLayoutRoot(ws.Root)
+		}
+		srv.SetPluginInstallers(installers)
 	}
 
 	// Pre-installation safety introspection (Story E20): static scan always

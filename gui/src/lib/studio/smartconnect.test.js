@@ -100,7 +100,7 @@ describe('explainPythonError — platform errors', () => {
   it('explains a web_search timeout as a provider problem and points at the timeout', () => {
     const r = explainPythonError('flow: node "search_article_sources": item 4: web_search: request failed: Post "https://ollama.com/api/web_search": context deadline exceeded (Client.Timeout exceeded while awaiting headers)')
     expect(r.summary).toMatch(/didn’t answer in time/)
-    expect(r.fix).toMatch(/timeout_s|search\.timeout/)
+    expect(r.fix).toMatch(/timeout_s|Workspace settings/)
     expect(r.action).toEqual({ kind: 'timeout', nodeId: 'search_article_sources' })
   })
 
@@ -112,7 +112,10 @@ describe('explainPythonError — platform errors', () => {
 
   it('routes missing tools, bad credentials and channel failures to the right place', () => {
     expect(explainPythonError('flow: node "x": no such tool: mcp__foo__bar').action).toEqual({ kind: 'tools' })
-    expect(explainPythonError('web_search: no Ollama API key. Create one at https://ollama.com/settings/keys').action).toEqual({ kind: 'providers' })
+    const credential = explainPythonError('web_search: no Ollama API key. Create one at https://ollama.com/settings/keys')
+    expect(credential.action).toEqual({ kind: 'secrets' })
+    expect(credential.fix).toMatch(/workspace’s provider credential/)
+    expect(credential.fix).not.toMatch(/restart|Providers/)
     expect(explainPythonError('channel.send: send failed through channel "telegram": chat not found').action).toEqual({ kind: 'channels' })
   })
 

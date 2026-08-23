@@ -107,7 +107,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 				dcancel()
 			}
 			if e.failureNotifier != nil {
-				d := e.loader.Get(msg.AgentID)
+				d := e.loader.GetInWorkspace(WorkspaceFromContext(ctx), msg.AgentID)
 				if d == nil {
 					// Synthesize a placeholder so the notifier can still
 					// route the message via the inbound-channel fallback
@@ -163,7 +163,11 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 	}
 
 	// Resolve agent definition
-	def := e.loader.Get(msg.AgentID)
+	// Agent identity is (workspace, id). The gateway already resolved the
+	// workspace into the run principal, so execution must use that same scope.
+	// Looking up the legacy personal registry here made a workspace agent appear
+	// in Deployed but fail in Playground as "unknown agent".
+	def := e.loader.GetInWorkspace(WorkspaceFromContext(ctx), msg.AgentID)
 	if def == nil {
 		return message.Message{}, fmt.Errorf("engine: unknown agent %q", msg.AgentID)
 	}

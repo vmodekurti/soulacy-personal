@@ -4,7 +4,7 @@ The Chat page lets you converse with any enabled agent, watch its reasoning live
 
 ## Quick start
 
-1. Open **Chat** in the GUI (`http://localhost:18789` → ◎ Chat).
+1. Open **Chat** in the GUI (`http://localhost:1947` → ◎ Chat).
 2. Pick an agent in the dropdown (the `system` agent is pre-selected when available).
 3. Type a message and press **Enter** (Shift+Enter for a newline).
 
@@ -13,7 +13,7 @@ The same conversation via CLI or API:
 ```bash
 sy chat --agent system "Hello!"
 
-curl -X POST http://localhost:18789/api/v1/chat \
+curl -X POST http://localhost:1947/api/v1/chat \
   -H "Authorization: Bearer $SOULACY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"agent_id": "system", "user_id": "api-user", "text": "Hello!"}'
@@ -79,7 +79,7 @@ This is ideal for "what if I had asked it differently?" exploration: branch, rep
 API equivalent:
 
 ```bash
-curl -X POST http://localhost:18789/api/v1/history/<session_id>/fork \
+curl -X POST http://localhost:1947/api/v1/history/<session_id>/fork \
   -H "Authorization: Bearer $SOULACY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"agent_id": "system", "upto_entry_id": "<entry-id>"}'
@@ -108,7 +108,7 @@ The built-in **system** agent ships with confirmation required for `shell_exec`,
 How it works: on the streaming chat endpoint (`POST /api/v1/chat/stream`), when the model requests a gated tool the run pauses and the server emits a `tool_confirm` SSE event carrying a `call_id`, the tool name, and its arguments. The client approves or denies with:
 
 ```bash
-curl -X POST http://localhost:18789/api/v1/chat/confirm \
+curl -X POST http://localhost:1947/api/v1/chat/confirm \
   -H "Authorization: Bearer $SOULACY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"call_id": "<id-from-the-event>", "approved": true}'

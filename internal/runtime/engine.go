@@ -32,6 +32,8 @@ import (
 	"github.com/soulacy/soulacy/internal/sandbox"
 	"github.com/soulacy/soulacy/internal/session"
 	"github.com/soulacy/soulacy/internal/storage"
+	"github.com/soulacy/soulacy/internal/workspacepurge"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 	"github.com/soulacy/soulacy/pkg/skill"
@@ -153,7 +155,8 @@ type Engine struct {
 	// searchTimeout is the operator-level HTTP timeout for the built-in
 	// web_search tool (config.yaml search.timeout). Zero = DefaultSearchTimeout.
 	// Guarded by searchProviderMu. See searchtimeout.go.
-	searchTimeout time.Duration
+	searchTimeout  time.Duration
+	searchResolver func(context.Context) (provider, apiKey, timeout string, ok bool)
 
 	// mcpClient routes MCP tool calls to configured external MCP servers.
 	// All tools from connected servers are offered to every agent, namespaced
@@ -267,6 +270,7 @@ type Engine struct {
 	// symlinks, which every filesystem builtin call would otherwise repeat.
 	workspaceRootsMu    sync.Mutex
 	workspaceRootsCache map[string][]string
+	workspaceLayout     wsroot.Layout
 
 	// pyExecutor is the optional pre-forked Python worker pool. When nil,
 	// the engine falls back to the original exec-per-call subprocess path.
@@ -657,6 +661,33 @@ func (e *Engine) getSearchConfig() (string, string) {
 	return e.searchProvider, e.searchAPIKey
 }
 
+// SetWorkspaceSearchResolver overlays tenant-owned search settings at call
+// time. The request context carries the verified workspace identity, so a
+// shared worker never needs a mutable "current tenant" global.
+func (e *Engine) SetWorkspaceSearchResolver(resolve func(context.Context) (string, string, string, bool)) {
+	e.searchProviderMu.Lock()
+	defer e.searchProviderMu.Unlock()
+	e.searchResolver = resolve
+}
+
+func (e *Engine) getSearchConfigFor(ctx context.Context) (string, string, string) {
+	e.searchProviderMu.RLock()
+	provider, key, resolver := e.searchProvider, e.searchAPIKey, e.searchResolver
+	e.searchProviderMu.RUnlock()
+	if resolver != nil {
+		if wp, wk, wt, ok := resolver(ctx); ok {
+			if strings.TrimSpace(wp) != "" {
+				provider = wp
+			}
+			if strings.TrimSpace(wk) != "" {
+				key = wk
+			}
+			return provider, key, wt
+		}
+	}
+	return provider, key, ""
+}
+
 // SetChannelRegistry wires the outbound channel registry used by channel.send.
 func (e *Engine) SetChannelRegistry(reg *channels.Registry) {
 	e.channelRegistry = reg
@@ -725,6 +756,15 @@ func (e *Engine) SetAdaptiveNodes(on bool) { e.adaptiveNodes = on }
 // LearningStores returns the per-workspace proposal stores, or nil when
 // learning is disabled.
 func (e *Engine) LearningStores() *learning.Stores { return e.learningStores }
+
+// PurgeBrainWorkspace removes one workspace's file-backed long-term memory
+// without exposing the registry to the gateway.
+func (e *Engine) PurgeBrainWorkspace(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+	if e == nil || e.brainStores == nil {
+		return workspacepurge.Removed{}, nil
+	}
+	return e.brainStores.PurgeWorkspace(ctx, workspaceID)
+}
 
 // LearningStoreInWorkspace returns one workspace's proposal store, or nil when
 // learning is disabled or the store could not be created. A nil result is

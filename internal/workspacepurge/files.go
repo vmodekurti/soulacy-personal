@@ -48,9 +48,52 @@ func PurgeTree(ctx context.Context, base, workspaceID string) (Removed, error) {
 	return purgeTree(ctx, base, workspaceID, "")
 }
 
+// PurgeLayoutTree removes one workspace's canonical Team/Scale subtree for a
+// subsystem rooted at base. Personal callers should continue to use
+// PurgeTree; Layout deliberately preserves their historical paths.
+func PurgeLayoutTree(ctx context.Context, layout wsroot.Layout, base, workspaceID string) (Removed, error) {
+	return purgeResolvedTree(ctx, layout.Dir(base, workspaceID), base, workspaceID, "")
+}
+
+// PurgeLayoutFile removes one exact file in a canonical workspace, rather
+// than the containing subsystem. It is used for stores such as Studio's
+// SQLite and JSON files that share a directory with unrelated resources.
+func PurgeLayoutFile(ctx context.Context, layout wsroot.Layout, base, workspaceID string) (Removed, error) {
+	workspaceID = wsroot.Normalize(workspaceID)
+	workspaceDir := layout.WorkspaceRoot(workspaceID)
+	target := layout.File(base, workspaceID)
+	if workspaceID == wsroot.PersonalWorkspaceID || wsroot.Validate(workspaceID) != nil || workspaceDir == "" || target == "" {
+		return Removed{}, fmt.Errorf("refusing to purge workspace file %q for workspace %q", base, workspaceID)
+	}
+	resolvedWorkspace, ok := layout.Of(base, target)
+	if !ok || resolvedWorkspace != workspaceID {
+		return Removed{}, fmt.Errorf("refusing to purge %q: it is outside workspace root %q", target, workspaceDir)
+	}
+	if err := ctx.Err(); err != nil {
+		return Removed{}, err
+	}
+	info, err := os.Lstat(target)
+	if os.IsNotExist(err) {
+		return Removed{Note: "removed " + target}, nil
+	}
+	if err != nil {
+		return Removed{}, err
+	}
+	if info.IsDir() {
+		return Removed{}, fmt.Errorf("refusing to purge %q as a file: it is a directory", target)
+	}
+	if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+		return Removed{}, err
+	}
+	return Removed{Rows: 1, Bytes: info.Size(), Note: "removed " + target}, nil
+}
+
 func purgeTree(ctx context.Context, base, workspaceID, sub string) (Removed, error) {
+	return purgeResolvedTree(ctx, wsroot.Dir(base, workspaceID), base, workspaceID, sub)
+}
+
+func purgeResolvedTree(ctx context.Context, dir, base, workspaceID, sub string) (Removed, error) {
 	normalized := wsroot.Normalize(workspaceID)
-	dir := wsroot.Dir(base, normalized)
 
 	// The shared-root check is on the WORKSPACE directory, before `sub` is
 	// appended. Checking the final path instead would let a personal workspace
@@ -69,7 +112,7 @@ func purgeTree(ctx context.Context, base, workspaceID, sub string) (Removed, err
 	// So the condition is the single fact that matters (did this resolve to
 	// the shared root?) and the BRANCHES exist only to say why, because the
 	// three causes send an operator to three different places.
-	if dir == base || dir == "" {
+	if normalized == wsroot.PersonalWorkspaceID || wsroot.Validate(normalized) != nil || dir == base || dir == "" {
 		switch {
 		case normalized == wsroot.PersonalWorkspaceID:
 			return Removed{}, fmt.Errorf(

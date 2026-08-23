@@ -18,7 +18,7 @@ Ran the production dogfood loop against the local Soulacy workspace:
 
 ### Gateway and Providers
 
-- Gateway starts on `127.0.0.1:18789`.
+- Gateway starts on `127.0.0.1:1947`.
 - Credential vault loads and reapplies 6 secrets.
 - Provider doctor passes for 5 providers:
   - `google`
@@ -155,7 +155,7 @@ Recommendation:
 
 ## Current Runtime State After QA
 
-- Gateway: running on `127.0.0.1:18789`
+- Gateway: running on `127.0.0.1:1947`
 - Agents loaded: 5
 - Active schedules: none
 - Telegram: connected

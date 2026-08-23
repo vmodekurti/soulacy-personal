@@ -56,8 +56,14 @@ type setupConfig struct {
 	JWTSecret           string
 	QueueBackend        string
 	NATSURL             string
+	NATSCredentials     string
 	SharedArtifactStore string
 	ExecutorBackend     string
+	KMSProvider         string
+	AWSKMSKeyID         string
+	VaultAddress        string
+	VaultTransitKey     string
+	VaultKubernetesRole string
 
 	// Server
 	Host   string
@@ -69,6 +75,7 @@ type setupConfig struct {
 	LLMModel     string
 	OllamaURL    string
 	OllamaAPIKey string
+	NVIDIAKey    string
 	OpenAIKey    string
 	AnthropicKey string
 
@@ -124,12 +131,12 @@ func runSetupWizard() error {
 	cfg := &setupConfig{
 		DeploymentMode:  config.DeploymentModePersonal,
 		QueueBackend:    "memory",
-		NATSURL:         "nats://localhost:4222",
+		NATSURL:         "tls://nats.internal:4222",
 		ExecutorBackend: "process",
 		Host:            "127.0.0.1",
-		Port:            18789,
-		LLMProvider:     "ollama",
-		LLMModel:        "llama3",
+		Port:            1947,
+		LLMProvider:     "nvidia",
+		LLMModel:        "meta/llama-3.3-70b-instruct",
 		OllamaURL:       "http://localhost:11434",
 		PythonBin:       "python3",
 		LogLevel:        "info",
@@ -210,8 +217,8 @@ func runSetupWizard() error {
 
 func setupDeployment(cfg *setupConfig) {
 	fmt.Printf("  %s Personal keeps today's zero-dependency single-user setup.\n", dim("Personal"))
-	fmt.Printf("  %s Team uses PostgreSQL, JWT identity, and isolated Docker tools.\n", dim("Team"))
-	fmt.Printf("  %s Scale additionally requires a distributed queue and shared artifacts.\n", dim("Scale"))
+	fmt.Printf("  %s Team uses PostgreSQL, JWT identity, external KMS, NATS, and isolated workers.\n", dim("Team"))
+	fmt.Printf("  %s Scale additionally requires replicated gateways and shared artifacts.\n", dim("Scale"))
 	choice := promptChoices("  Operating mode", []string{
 		"Personal (recommended for one user)",
 		"Team (shared single-node deployment)",
@@ -238,11 +245,22 @@ func setupDeployment(cfg *setupConfig) {
 	}
 	cfg.PostgresDSN = prompt("  PostgreSQL DSN", "postgres://soulacy@localhost:5432/soulacy?sslmode=require")
 	cfg.JWTSecret = generateJWTSecret()
-	cfg.ExecutorBackend = "docker"
-	fmt.Printf("  %s Generated a stable JWT signing secret and selected isolated Docker execution.\n", green("✓"))
+	cfg.ExecutorBackend = "worker"
+	cfg.QueueBackend = "nats"
+	cfg.NATSURL = prompt("  NATS URL", cfg.NATSURL)
+	cfg.NATSCredentials = prompt("  NATS credentials file", "/var/run/secrets/nats/soulacy.creds")
+	fmt.Printf("  %s Generated a stable JWT signing secret and selected separate execution workers.\n", green("✓"))
+	kmsChoice := promptChoices("  Credential KMS", []string{"AWS KMS workload identity", "Vault Transit Kubernetes workload identity"})
+	if kmsChoice == 1 {
+		cfg.KMSProvider = "vault-transit"
+		cfg.VaultAddress = prompt("  Vault address", "https://vault.internal")
+		cfg.VaultTransitKey = prompt("  Vault Transit key", "soulacy-production")
+		cfg.VaultKubernetesRole = prompt("  Vault Kubernetes role", "soulacy-gateway")
+	} else {
+		cfg.KMSProvider = "awskms"
+		cfg.AWSKMSKeyID = prompt("  AWS KMS key id or alias", "alias/soulacy-production")
+	}
 	if cfg.DeploymentMode == config.DeploymentModeScale {
-		cfg.QueueBackend = "nats"
-		cfg.NATSURL = prompt("  NATS URL", cfg.NATSURL)
 		cfg.SharedArtifactStore = prompt("  Shared artifact store (for example s3://bucket/prefix)", "")
 	}
 }
@@ -351,7 +369,8 @@ func setupGateway(cfg *setupConfig) {
 func setupLLM(cfg *setupConfig) {
 	fmt.Printf("  %s\n", dim("Choose your primary LLM provider:"))
 	choice := promptChoices("  Provider", []string{
-		"Ollama (local, private, no API key needed) ← recommended",
+		"NVIDIA NIM / API Catalog (hosted, requires API key) ← recommended",
+		"Ollama (local, private, no API key needed)",
 		"OpenAI (GPT-4o, requires API key)",
 		"Anthropic (Claude, requires API key)",
 		"Other (OpenAI-compatible endpoint)",
@@ -359,23 +378,30 @@ func setupLLM(cfg *setupConfig) {
 
 	switch choice {
 	case 0:
+		cfg.LLMProvider = "nvidia"
+		fmt.Printf("  %s NVIDIA hosted Developer endpoints are intended for prototyping and may have model/account token and rate limits.\n", yellow("⚠"))
+		cfg.NVIDIAKey = prompt("  NVIDIA API key", "")
+		models := []string{"meta/llama-3.3-70b-instruct", "meta/llama-3.1-70b-instruct", "meta/llama-3.1-8b-instruct"}
+		cfg.LLMModel = models[promptChoices("  Model", models)]
+
+	case 1:
 		cfg.LLMProvider = "ollama"
 		cfg.OllamaURL = prompt("  Ollama URL", cfg.OllamaURL)
 		cfg.LLMModel = pickOllamaModel(cfg.OllamaURL)
 
-	case 1:
+	case 2:
 		cfg.LLMProvider = "openai"
 		cfg.OpenAIKey = prompt("  OpenAI API key", "")
 		models := []string{"gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"}
 		cfg.LLMModel = models[promptChoices("  Model", models)]
 
-	case 2:
+	case 3:
 		cfg.LLMProvider = "anthropic"
 		cfg.AnthropicKey = prompt("  Anthropic API key", "")
 		models := []string{"claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5-20251001"}
 		cfg.LLMModel = models[promptChoices("  Model", models)]
 
-	case 3:
+	case 4:
 		cfg.LLMProvider = "openai" // compatible
 		cfg.OllamaURL = prompt("  Base URL (e.g. http://my-server:8080/v1)", "")
 		cfg.OpenAIKey = prompt("  API key (if required)", "")
@@ -475,14 +501,26 @@ func writeConfig(cfg *setupConfig) error {
 		apiKeyLine = fmt.Sprintf(`api_key: "%s"`, cfg.APIKey)
 	}
 
-	ollamaSection := fmt.Sprintf(`    ollama:
-      base_url: "%s"
-      model: "%s"`, cfg.OllamaURL, cfg.LLMModel)
-	if cfg.OllamaAPIKey != "" {
+	ollamaSection := ""
+	if cfg.LLMProvider == "ollama" {
 		ollamaSection = fmt.Sprintf(`    ollama:
       base_url: "%s"
       model: "%s"
-      api_key: "%s"`, cfg.OllamaURL, cfg.LLMModel, cfg.OllamaAPIKey)
+`, cfg.OllamaURL, cfg.LLMModel)
+	} else if cfg.OllamaAPIKey != "" {
+		ollamaSection = fmt.Sprintf(`    ollama:
+      base_url: "%s"
+      api_key: "%s"
+`, cfg.OllamaURL, cfg.OllamaAPIKey)
+	}
+
+	nvidiaSection := ""
+	if cfg.LLMProvider == "nvidia" || cfg.NVIDIAKey != "" {
+		nvidiaSection = fmt.Sprintf(`    nvidia:
+      base_url: "https://integrate.api.nvidia.com/v1"
+      api_key: "%s"
+      model: "%s"
+`, cfg.NVIDIAKey, cfg.LLMModel)
 	}
 
 	openaiSection := ""
@@ -545,6 +583,41 @@ func writeConfig(cfg *setupConfig) error {
 	queueSection := fmt.Sprintf("queue:\n  backend: %s", cfg.QueueBackend)
 	if cfg.QueueBackend == "nats" {
 		queueSection += fmt.Sprintf("\n  nats_url: %q", cfg.NATSURL)
+		if cfg.NATSCredentials != "" {
+			queueSection += fmt.Sprintf("\n  nats_credentials: %q", cfg.NATSCredentials)
+		}
+	}
+	credentialSection := "credentials:\n  kms_provider: local"
+	if cfg.DeploymentMode != config.DeploymentModePersonal {
+		if cfg.KMSProvider == "vault-transit" {
+			credentialSection = fmt.Sprintf("credentials:\n  kms_provider: vault-transit\n  hashicorp_addr: %q\n  hashicorp_key: %q\n  hashicorp_kubernetes_role: %q", cfg.VaultAddress, cfg.VaultTransitKey, cfg.VaultKubernetesRole)
+		} else {
+			credentialSection = fmt.Sprintf("credentials:\n  kms_provider: awskms\n  aws_kms_key_id: %q", cfg.AWSKMSKeyID)
+		}
+	}
+	sandboxSection := `    enabled: true
+    mode: docker`
+	executorSection := fmt.Sprintf(`  backend: %s
+  docker_image: "python:3.12-slim"
+  docker_network: none`, cfg.ExecutorBackend)
+	if cfg.DeploymentMode != config.DeploymentModePersonal {
+		// Hosted deployments deliberately receive a non-runnable placeholder
+		// digest. The operator must replace it with an attested execution image;
+		// silently falling back to an unsigned mutable tag would defeat the
+		// isolation boundary that Team/Scale mode promises.
+		const placeholderImage = "ghcr.io/soulacy/execution@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+		sandboxSection = fmt.Sprintf(`    enabled: true
+    mode: docker
+    image: %q
+    container_runtime: runsc
+    require_signed_image: true
+    cosign_key: "/etc/soulacy/execution-image.pub"`, placeholderImage)
+		executorSection = fmt.Sprintf(`  backend: worker
+  docker_image: %q
+  docker_network: none
+  docker_runtime: runsc
+  require_signed_image: true
+  cosign_key: "/etc/soulacy/execution-image.pub"`, placeholderImage)
 	}
 
 	content := fmt.Sprintf(`# Soulacy configuration
@@ -565,17 +638,16 @@ runtime:
   python_bin: "%s"
   tool_timeout: "30s"
   sandbox:
-    enabled: true
-    mode: docker
+%s
 
 %s
 
 %s
 
 executor:
-  backend: %s
-  docker_image: "python:3.12-slim"
-  docker_network: none
+%s
+
+%s
 
 %s
 
@@ -586,7 +658,7 @@ memory:
 llm:
   default_provider: %s
   providers:
-%s%s%s
+%s%s%s%s
 %s
 channels:
   http:
@@ -600,13 +672,14 @@ log:
 		time.Now().Format("2006-01-02 15:04:05"),
 		deploymentSection,
 		cfg.Host, cfg.Port, apiKeyLine,
-		cfg.PythonBin,
+		cfg.PythonBin, sandboxSection,
 		authSection,
 		storageSection,
-		cfg.ExecutorBackend,
+		executorSection,
 		queueSection,
+		credentialSection,
 		cfg.LLMProvider,
-		ollamaSection, openaiSection, anthropicSection,
+		nvidiaSection, ollamaSection, openaiSection, anthropicSection,
 		searchSection,
 		telegramSection, discordSection, slackSection, waSection,
 		cfg.LogLevel,
@@ -657,7 +730,8 @@ func printSummary(cfg *setupConfig) {
 	fmt.Printf("  %-20s %s\n", "Deployment mode", bold(cfg.DeploymentMode))
 	if cfg.DeploymentMode != config.DeploymentModePersonal {
 		fmt.Printf("  %-20s %s\n", "Storage", "PostgreSQL")
-		fmt.Printf("  %-20s %s\n", "Executor", "Docker (isolated)")
+		fmt.Printf("  %-20s %s\n", "Executor", "Separate signed gVisor workers")
+		fmt.Printf("  %-20s %s\n", "Credential KMS", cfg.KMSProvider)
 	}
 	if cfg.APIKey != "" {
 		fmt.Printf("  %-20s %s\n", "API key", bold(cfg.APIKey))

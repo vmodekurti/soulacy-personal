@@ -16,6 +16,7 @@ package skills
 // installs land only in the workspace's own directory.
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +24,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/soulacy/soulacy/internal/workspacepurge"
 	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
@@ -30,10 +32,48 @@ import (
 type Stores struct {
 	platformDirs []string
 	base         string
+	layout       wsroot.Layout
 
 	mu      sync.Mutex
 	loaders map[string]*Loader
 	log     *zap.Logger
+}
+
+// PurgeWorkspace removes one named workspace's writable skill inventory and
+// drops its cached loader. Platform skill templates are never below this path
+// and therefore cannot be removed by a tenant deletion.
+func (s *Stores) PurgeWorkspace(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+	if s == nil || s.base == "" {
+		return workspacepurge.Removed{}, nil
+	}
+	workspaceID = wsroot.Normalize(workspaceID)
+	var (
+		removed workspacepurge.Removed
+		err     error
+	)
+	if s.layout.Root() != "" {
+		removed, err = workspacepurge.PurgeLayoutTree(ctx, s.layout, s.base, workspaceID)
+	} else {
+		removed, err = workspacepurge.PurgeTree(ctx, s.base, workspaceID)
+	}
+	if err != nil {
+		return removed, err
+	}
+	s.mu.Lock()
+	delete(s.loaders, workspaceID)
+	s.mu.Unlock()
+	removed.Note = "workspace-installed skills"
+	return removed, nil
+}
+
+func (s *Stores) SetWorkspaceLayoutRoot(root string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.layout = wsroot.NewLayout(root)
+	s.loaders = map[string]*Loader{}
 }
 
 // NewStores builds the registry from the platform scan list and the directory
@@ -57,7 +97,7 @@ func (s *Stores) Dir(workspaceID string) string {
 	if s == nil || s.base == "" {
 		return ""
 	}
-	return wsroot.Dir(s.base, wsroot.Normalize(workspaceID))
+	return s.layout.Dir(s.base, wsroot.Normalize(workspaceID))
 }
 
 // ScanDirs is the ordered scan list for one workspace: platform templates

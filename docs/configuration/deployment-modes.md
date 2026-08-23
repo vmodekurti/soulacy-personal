@@ -7,8 +7,8 @@ not silently introduce infrastructure dependencies.
 | Mode | Intended use | Required infrastructure |
 |------|--------------|-------------------------|
 | `personal` | One operator on one gateway | Embedded stores and process execution are allowed |
-| `team` | Multiple authenticated users in one organization | JWT auth, PostgreSQL, Docker execution and sandboxing |
-| `scale` | Multiple gateway/worker instances | Everything in Team, plus NATS/external queue and shared artifact storage |
+| `team` | Multiple authenticated users in one organization | JWT auth, PostgreSQL, external KMS, NATS, and signed gVisor execution workers |
+| `scale` | Multiple gateway/worker instances | Everything in Team, plus replicated gateways and shared artifact storage |
 
 Choose a mode during `sy setup` or change an existing installation with:
 
@@ -52,17 +52,40 @@ storage:
   postgres_dsn: "postgres://soulacy:password@db:5432/soulacy"
 
 executor:
-  backend: docker
+  backend: worker
+  docker_image: "registry.example/soulacy-execution@sha256:<digest>"
+  docker_network: none
+  docker_runtime: runsc
+  require_signed_image: true
+  cosign_key: /etc/soulacy/execution-image.pub
+
+queue:
+  backend: nats
+  nats_url: "tls://nats.internal:4222"
+  nats_credentials: "/var/run/secrets/nats/soulacy.creds"
+
+credentials:
+  kms_provider: awskms
+  aws_kms_key_id: "alias/soulacy-production"
 
 runtime:
   sandbox:
     enabled: true
     mode: docker
+    image: "registry.example/soulacy-execution@sha256:<digest>"
+    container_runtime: runsc
+    require_signed_image: true
+    cosign_key: /etc/soulacy/execution-image.pub
 ```
 
 The bootstrap API key is an administrative recovery credential, not a shared
 end-user password. Normal users authenticate with short-lived JWTs or the
 configured OIDC provider.
+
+Use `/admin/setup` once to bootstrap a new catalog, then use `/admin` for
+normal deployment administration and tenant provisioning. These control-plane
+routes do not grant the operator workspace membership. See
+[Platform administration](platform-administration.md).
 
 On startup, Team mode creates the multi-user catalog in the configured
 PostgreSQL database. The catalog stores organizations, workspaces, users,
@@ -79,18 +102,22 @@ membership role is authoritative, so a user can be an administrator in one
 workspace and a viewer in another. Suspending or deleting that membership
 blocks the next request without waiting for a token to expire.
 
+Each workspace may activate a different OIDC provider through its one-time
+setup link. The provider and issuer are locked after validation so an in-place
+configuration edit cannot reinterpret existing external identities. See
+[Workspace identity and login](workspace-identity.md).
+
 ## Scale
 
-Scale adds distributed work coordination and a shared artifact location:
+Scale adds replicated gateways and a shared artifact location. Team and Scale
+both execute tenant code on out-of-process workers; a gateway never starts
+tenant Python or a tenant shell:
 
 ```yaml
 deployment:
   mode: scale
   shared_artifact_store: "s3://company-soulacy/prod"
 
-queue:
-  backend: nats
-  nats_url: "nats://nats:4222"
 ```
 
 `shared_artifact_store` must name storage reachable by every gateway and

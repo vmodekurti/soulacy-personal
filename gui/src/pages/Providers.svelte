@@ -4,6 +4,9 @@
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
 
+  export let scope = 'deployment'
+  $: providerAPI = scope === 'workspace' ? api.workspaceProviders : api.providers
+
   let providers       = {}
   let defaultProvider = ''
   let known           = []   // known provider ids the GUI offers
@@ -17,7 +20,6 @@
   let error           = ''
   let notice          = ''
   let restartNeeded   = false
-  let restarting      = false
   let doctor          = []
   let vaultCheck      = null
   let doctorLoading   = false
@@ -86,7 +88,7 @@
     loading = true
     error   = ''
     try {
-      const res       = await api.providers.list()
+      const res       = await providerAPI.list()
       providers       = res.providers || {}
       defaultProvider = res.default_provider || ''
       known           = res.known || []
@@ -102,7 +104,7 @@
   async function runDoctor() {
     doctorLoading = true
     try {
-      const res = await api.providers.doctor()
+      const res = await providerAPI.doctor()
       doctor = res.providers || []
       vaultCheck = res.vault || null
     } catch (e) {
@@ -177,7 +179,7 @@
         if (addOrganization) body.organization = addOrganization
         if (addParallelToolCalls !== null) body.parallel_tool_calls = addParallelToolCalls
       }
-      const res = await api.providers.setCredentials(targetId, body)
+      const res = await providerAPI.setCredentials(targetId, body)
       restartNeeded = false
       showAdd = false
       await load()
@@ -245,7 +247,7 @@
     modelsLoading = { ...modelsLoading, [providerId]: true }
     error = ''
     try {
-      const res = await api.providers.models(providerId)
+      const res = await providerAPI.models(providerId)
       models = { ...models, [providerId]: res.models || [] }
       // Default the selection to the currently-configured model, else the first one.
       const current = res.selected || providers[providerId]?.model || ''
@@ -264,7 +266,7 @@
     savingModel = { ...savingModel, [providerId]: true }
     error = ''; notice = ''
     try {
-      const res = await api.providers.setModel(providerId, model)
+      const res = await providerAPI.setModel(providerId, model)
       // reflect immediately
       providers = { ...providers, [providerId]: { ...providers[providerId], model } }
       notice = res.message || `Saved ${model} as the default model for ${providerId}.`
@@ -279,7 +281,7 @@
   async function test(providerId) {
     testResults = { ...testResults, [providerId]: { loading: true } }
     try {
-      await api.providers.models(providerId)
+      await providerAPI.models(providerId)
       testResults = { ...testResults, [providerId]: { ok: true, msg: 'Reachable ✓' } }
     } catch (e) {
       // E4 — Failure handling: the backend now attaches a diagnosis
@@ -308,25 +310,11 @@
     testResults = { ...testResults, [providerId]: { ...r, showDetail: !r.showDetail } }
   }
 
-  async function restartGateway() {
-    restarting = true
-    error = ''
-    try {
-      await api.admin.restart()
-      restartNeeded = false
-      notice = 'Restart requested. Reconnect this page in a few seconds if it does not refresh automatically.'
-    } catch (e) {
-      error = e.message
-    } finally {
-      setTimeout(() => { restarting = false }, 5000)
-    }
-  }
-
   async function deleteProvider(providerId) {
     if (!confirmDestructive(`Are you sure you want to delete ${providerId}?`)) return
     error = ''; notice = ''
     try {
-      const res = await api.providers.delete(providerId)
+      const res = await providerAPI.delete(providerId)
       notice = res.message || `Deleted provider ${providerId}.`
       restartNeeded = false
       await load()
@@ -352,7 +340,10 @@
 
 <div class="page">
   <div class="page-header">
-    <h1>Providers &amp; Models</h1>
+    <div>
+      <h1>Providers &amp; Models</h1>
+      {#if scope === 'workspace'}<p class="scope-copy">The Personal-mode provider experience, isolated to this workspace.</p>{/if}
+    </div>
     <div class="header-actions">
       <button class="btn-primary" on:click={() => openAdd('openai')}>+ Add provider</button>
       <button class="btn-secondary" on:click={runDoctor} disabled={doctorLoading}>
@@ -365,12 +356,10 @@
 
   {#if error}<div class="banner err">{error}</div>{/if}
   {#if notice}<div class="banner ok">{notice}</div>{/if}
-  {#if restartNeeded}
+  {#if restartNeeded && scope !== 'workspace'}
     <div class="banner warn restart-banner">
       <span>Provider settings were saved. Restart the gateway to reload provider registrations.</span>
-      <button class="btn-secondary" on:click={restartGateway} disabled={restarting}>
-        {restarting ? 'Restarting…' : 'Restart Gateway'}
-      </button>
+      <small>A deployment administrator must restart the gateway from the platform control plane.</small>
     </div>
   {/if}
 
@@ -452,13 +441,14 @@
             <div class="pv-identity">
               <span class="pv-name">{id}</span>
               {#if id === defaultProvider}<span class="default-badge">default</span>{/if}
-              {#if !pc.registered && pc.api_key}
+              {#if scope === 'workspace' && pc.inherited}<span class="default-badge">deployment default</span>{/if}
+              {#if scope !== 'workspace' && !pc.registered && pc.api_key}
                 <span class="warn-badge" title="Configured in config.yaml but not yet registered. Restart the gateway.">restart needed</span>
               {/if}
             </div>
             <div class="pv-actions">
               <button class="icon-btn-edit" title="Edit credentials" on:click={() => openAdd(id)}>✎</button>
-              <button class="icon-btn-delete" title="Delete provider" on:click={() => deleteProvider(id)}>🗑️</button>
+              {#if scope !== 'workspace' || !pc.inherited}<button class="icon-btn-delete" title="Delete provider" on:click={() => deleteProvider(id)}>🗑️</button>{/if}
             </div>
           </div>
 
@@ -559,10 +549,17 @@
 
   <div class="info-card">
     <h3>Adding a provider</h3>
-    <p>Click <strong>+ Add provider</strong> above to wire up an API key for OpenAI, Anthropic, or Google. Or edit <code>config.yaml</code> directly under <code>llm.providers</code>:</p>
+    {#if scope === 'workspace'}
+      <p>Use the same provider workflow as Personal mode. Credentials are encrypted in this workspace’s vault, are unavailable to other workspaces, and take effect without restarting the gateway.</p>
+    {:else}
+    <p>Click <strong>+ Add provider</strong> above to wire up an API key for NVIDIA, OpenAI, Anthropic, or Google. Or edit <code>config.yaml</code> directly under <code>llm.providers</code>:</p>
     <pre class="code-block">llm:
-  default_provider: ollama
+  default_provider: nvidia
   providers:
+    nvidia:
+      base_url: https://integrate.api.nvidia.com/v1
+      api_key: "" # Prefer SOULACY_LLM_PROVIDERS_NVIDIA_API_KEY
+      model: meta/llama-3.3-70b-instruct
     ollama:
       base_url: http://localhost:11434
       model: llama3
@@ -580,6 +577,7 @@
       api_key: AIza...
       model: gemini-2.5-flash</pre>
     <p><strong>List models</strong> queries the live provider. Pick one and <strong>Save model</strong> to persist it to config.yaml. New providers and credential changes require a gateway restart.</p>
+    {/if}
   </div>
 </div>
 
@@ -771,7 +769,7 @@
         <button class="btn-secondary" on:click={() => showAdd = false}>Cancel</button>
         <button class="btn-primary" on:click={saveCreds} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
       </div>
-      <p class="modal-hint">Settings persist to <code>config.yaml</code>. Restart the gateway for new providers to be registered.</p>
+      <p class="modal-hint">{scope === 'workspace' ? 'Settings persist in this workspace and take effect immediately.' : 'Settings persist to config.yaml. Restart the gateway for new providers to be registered.'}</p>
     </div>
   </div>
 {/if}
@@ -780,6 +778,7 @@
   .page        { padding: 1.5rem; display: flex; flex-direction: column; gap: 1.5rem; }
   .page-header { display: flex; align-items: center; justify-content: space-between; }
   .page-header h1 { font-size: 1.2rem; font-weight: 600; }
+  .scope-copy { margin:.3rem 0 0; color:#8f96b5; font-size:.82rem; }
   .header-actions { display: flex; gap: .5rem; }
 
   .suggest-card {
@@ -834,7 +833,6 @@
     box-shadow: 0 -10px 12px -10px rgba(0, 0, 0, 0.6);
   }
   .modal-hint { font-size: .72rem; color: #555a7a; }
-  .modal-hint code { background: #1c1f35; padding: .05rem .3rem; border-radius: 4px; color: #8b85ff; }
   .cache-on { color: #4caf82 !important; }
 
   .anthropic-tuning, .provider-tuning {

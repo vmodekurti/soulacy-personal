@@ -412,6 +412,7 @@
   .strip-ok { background: rgba(54, 211, 153, 0.12); color: var(--ok); }
   .strip-reco { background: rgba(124, 122, 255, 0.12); color: var(--text); }
   .strip-warn { background: rgba(245, 167, 66, 0.12); color: var(--warn, #f5a742); }
+  .nvidia-limit-warning { margin: 10px 0; line-height: 1.45; }
 
   /* ── Architect: build button + report + self-heal ─────────────────────── */
   .btn.architect { background: var(--accent, #7c7aff); color: #fff; border-color: transparent; font-weight: 600; }
@@ -1408,10 +1409,27 @@
     .describe-right { padding-left: 0; border-left: 0; border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); padding-top: 12px; }
   }
 
-  /* Recorded justification for saving past warnings. */
-  .accept-reason { display: flex; flex-direction: column; gap: 4px; margin: 10px 0 0; }
-  .accept-reason label { font-size: .8rem; color: var(--text-dim, #6b7294); }
-  .accept-reason input { width: 100%; box-sizing: border-box; }
+  /* Explicit acknowledgement for saving past warnings. */
+  .warning-acceptance {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+    margin: 12px 0 0; padding: 0; border: 0;
+  }
+  .warning-acceptance legend {
+    width: 100%; margin-bottom: 2px; padding: 0;
+    font-size: .8rem; color: var(--text-dim, #6b7294);
+  }
+  .warning-acceptance label {
+    display: inline-flex; align-items: center; gap: 6px;
+    min-width: 64px; padding: 7px 12px; border: 1px solid var(--border);
+    border-radius: 8px; cursor: pointer; color: var(--text-muted);
+    background: color-mix(in srgb, var(--surface-2) 85%, transparent);
+  }
+  .warning-acceptance label.chosen {
+    border-color: var(--accent); color: var(--text);
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+  }
+  .warning-acceptance input { margin: 0; }
+  .warning-choice-help { width: 100%; font-size: .75rem; color: var(--text-muted); }
 
   /* Strategy advisor: confidence badge + capability warning. Styled as a
      warning rather than an error — it is advice about a tradeoff, not a
@@ -1574,6 +1592,19 @@
 
   /* ── Pre-generation refinement dialog ───────────────────────────────────── */
   .refine-modal { max-width: 640px; width: 92vw; max-height: 84vh; overflow-y: auto; }
+
+  /* The save-readiness report contains full remediation text and several
+     independently actionable checks. Give it a review-sized surface instead
+     of inheriting the narrower prompt-refinement dialog width. */
+  .preflight-modal {
+    width: min(980px, calc(100vw - 48px));
+    max-width: none;
+    max-height: 88vh;
+  }
+
+  @media (max-width: 640px) {
+    .preflight-modal { width: calc(100vw - 24px); }
+  }
 
   /* Prompt editor modal: roomy editor for writing/editing the (refined) prompt */
   .prompt-modal { max-width: 820px; width: 92vw; max-height: 88vh; overflow-y: auto; }

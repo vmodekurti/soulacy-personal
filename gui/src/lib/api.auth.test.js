@@ -1,8 +1,8 @@
 // Story 1 — auth-error display behavior.
 //
-// The sidebar and Dashboard render "Authentication required" (instead of
-// "Gateway Offline") based on the `authRequired` store. These tests pin the
-// store transitions driven by apiFetch.
+// The application routes an expired workspace session back through workspace
+// login based on the `authRequired` store. A 403 is only a role denial and must
+// not turn into the legacy server-API-key prompt.
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { get } from 'svelte/store'
 import { authRequired } from './stores.js'
@@ -30,7 +30,14 @@ describe('apiFetch auth-state transitions', () => {
     expect(get(authRequired)).toBe(true)
   })
 
-  it('sets authRequired on 403', async () => {
+  it('keeps an authenticated viewer signed in when an owner-only call returns 403', async () => {
+    fetch.mockResolvedValue(jsonResponse(403, { error: 'forbidden' }))
+    await expect(apiFetch('/config')).rejects.toMatchObject({ status: 403 })
+    expect(get(authRequired)).toBe(false)
+  })
+
+  it('does not clear an existing login prompt on 403', async () => {
+    authRequired.set(true)
     fetch.mockResolvedValue(jsonResponse(403, { error: 'forbidden' }))
     await expect(apiFetch('/config')).rejects.toMatchObject({ status: 403 })
     expect(get(authRequired)).toBe(true)

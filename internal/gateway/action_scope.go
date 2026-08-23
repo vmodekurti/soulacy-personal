@@ -106,6 +106,32 @@ type workspaceTailFilterer interface {
 	TailFilteredInWorkspace(string, string, int, map[string]bool) ([]message.Event, error)
 }
 
+// workspaceEventFilePather is implemented by action-log backends that keep
+// their optional JSONL mirrors in tenant-specific directories. It remains an
+// optional structural interface because ActionLogBackend is a frozen SDK
+// contract, but Team/Scale callers must never fall back to its unscoped
+// personal-workspace path.
+type workspaceEventFilePather interface {
+	EventFilePathInWorkspace(string, string) string
+}
+
+// EventFilePath reports the mirror owned by this scope. A backend without the
+// workspace-aware path surface may still serve Personal mode, but fails closed
+// for a named workspace instead of displaying a deployment-level path that the
+// caller neither owns nor reads.
+func (a actionScope) EventFilePath(agentID string) string {
+	if a.actions == nil {
+		return ""
+	}
+	if scoped, ok := a.actions.(workspaceEventFilePather); ok {
+		return scoped.EventFilePathInWorkspace(a.workspaceID, agentID)
+	}
+	if !a.personal() {
+		return ""
+	}
+	return a.actions.EventFilePath(agentID)
+}
+
 type legacyEventQuerier interface {
 	QueryEvents(string, string, int, map[string]bool) ([]message.Event, error)
 	QueryFiltered(string, int, map[string]bool) ([]message.Event, error)

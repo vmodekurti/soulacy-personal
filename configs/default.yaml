@@ -5,7 +5,7 @@
 
 server:
   host: "0.0.0.0"
-  port: 18789
+  port: 1947
   gui_enabled: true
   api_key: ""           # Set to a secret string to require bearer auth on all API calls
 
@@ -49,7 +49,7 @@ memory:
   vector_url: ""
 
 llm:
-  default_provider: ollama
+  default_provider: nvidia
   allowed_regions: [] # optional workspace residency allowlist; empty permits configured regions
   # Empty/null means unrestricted. In production, explicitly list providers
   # and models that this workspace is permitted to use.
@@ -59,6 +59,10 @@ llm:
     max_build_tokens: 100000
     max_build_cost_usd: 5.0
   providers:
+    nvidia:
+      base_url: "https://integrate.api.nvidia.com/v1"
+      api_key: ""       # Prefer SOULACY_LLM_PROVIDERS_NVIDIA_API_KEY
+      model: "meta/llama-3.3-70b-instruct"
     ollama:
       base_url: "http://localhost:11434"
       model: "llama3"

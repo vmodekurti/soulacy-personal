@@ -198,15 +198,22 @@ nav:
     - Events & Webhooks: configuration/events.md
     - Voice: configuration/voice.md
     - Auth: configuration/auth.md
+    - Platform Administration: configuration/platform-administration.md
+    - Workspace Administration: configuration/workspace-administration.md
+    - Workspace Identity & Login: configuration/workspace-identity.md
     - Workspace Members: configuration/workspace-members.md
     - Authorization Policy: configuration/authorization.md
     - Security Posture: configuration/security.md
+    - Production Runtime: configuration/production-runtime.md
     - Rate Limiting: configuration/rate-limiting.md
     - Telemetry: configuration/telemetry.md
   - Security:
     - Overview: security/index.md
     - Tool Sandbox: security/sandbox.md
     - Audit & Incident Records: security/audit.md
+    - Execution Isolation Tests: operations/execution-isolation-tests.md
+    - Incident Response: operations/incident-response.md
+    - Disaster Recovery: operations/disaster-recovery.md
   - Compare: comparison-chart.md
   - API Reference:
     - Overview: api/index.md

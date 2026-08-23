@@ -81,6 +81,18 @@ type SQLiteVault struct {
 // NewSQLiteVault opens (or creates) the SQLite database at path and returns a
 // Vault that encrypts every value with a key from kms.
 func NewSQLiteVault(path string, kms KMSProvider) (*SQLiteVault, error) {
+	var wrapper KeyWrapper
+	if candidate, ok := kms.(KeyWrapper); ok {
+		wrapper = candidate
+	}
+	return NewSQLiteVaultWithWrapper(path, kms, wrapper)
+}
+
+// NewSQLiteVaultWithWrapper keeps legacy ciphertext readable with kms while
+// writing all new data through an external envelope-encryption wrapper. This
+// split is required by cloud KMS products: they wrap keys but deliberately do
+// not expose key material from which the legacy per-agent key can be derived.
+func NewSQLiteVaultWithWrapper(path string, kms KMSProvider, wrapper KeyWrapper) (*SQLiteVault, error) {
 	db, err := sqlitex.Open(path, sqlitex.DefaultOptions())
 	if err != nil {
 		return nil, fmt.Errorf("credentials: open sqlite %s: %w", path, err)
@@ -104,7 +116,7 @@ func NewSQLiteVault(path string, kms KMSProvider) (*SQLiteVault, error) {
 	// derived-key path. That is the whole compatibility story: a deployment
 	// supplying its own KMSProvider — which cannot have implemented an
 	// interface that did not exist — is unaffected rather than broken.
-	if wrapper, ok := kms.(KeyWrapper); ok {
+	if wrapper != nil {
 		if err := ensureDataKeySchema(db); err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("credentials: data key schema: %w", err)

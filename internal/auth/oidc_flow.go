@@ -31,6 +31,7 @@ type oidcFlow struct {
 	client          string
 	expiresAt       time.Time
 	workspaceID     string
+	invitationToken string
 	provider        WorkspaceOIDCProvider
 	validator       *OIDCValidator
 }
@@ -79,9 +80,9 @@ func (s *oidcFlowStore) deleteDevice(handle string) {
 	s.mu.Unlock()
 }
 
-func (s *oidcFlowStore) create(redirectURI, client, returnTo string, reauthenticate bool, expectedSubject, workspaceID string, provider WorkspaceOIDCProvider, validator *OIDCValidator) (state string, flow oidcFlow) {
+func (s *oidcFlowStore) create(redirectURI, client, returnTo string, reauthenticate bool, expectedSubject, workspaceID, invitationToken string, provider WorkspaceOIDCProvider, validator *OIDCValidator) (state string, flow oidcFlow) {
 	state = randomHex(32)
-	flow = oidcFlow{redirectURI: redirectURI, returnTo: returnTo, reauthenticate: reauthenticate, expectedSubject: expectedSubject, verifier: base64.RawURLEncoding.EncodeToString(randomBytes(48)), nonce: randomHex(32), client: client, expiresAt: time.Now().Add(oidcFlowTTL), workspaceID: workspaceID, provider: provider, validator: validator}
+	flow = oidcFlow{redirectURI: redirectURI, returnTo: returnTo, reauthenticate: reauthenticate, expectedSubject: expectedSubject, verifier: base64.RawURLEncoding.EncodeToString(randomBytes(48)), nonce: randomHex(32), client: client, expiresAt: time.Now().Add(oidcFlowTTL), workspaceID: workspaceID, invitationToken: invitationToken, provider: provider, validator: validator}
 	s.mu.Lock()
 	s.flows[state] = flow
 	s.mu.Unlock()
@@ -93,10 +94,49 @@ func (s *oidcFlowStore) consume(state, redirectURI string) (oidcFlow, bool) {
 	defer s.mu.Unlock()
 	flow, ok := s.flows[state]
 	delete(s.flows, state) // state is one-shot, including failed attempts
-	if !ok || time.Now().After(flow.expiresAt) || !secretEqual(flow.redirectURI, redirectURI) {
+	// Browser callbacks recover the exact redirect URI from the one-time flow.
+	// CLI callers still supply a redirect URI, which must match byte-for-byte.
+	if !ok || time.Now().After(flow.expiresAt) || (redirectURI != "" && !secretEqual(flow.redirectURI, redirectURI)) {
 		return oidcFlow{}, false
 	}
 	return flow, true
+}
+
+const oidcCallbackPath = "/api/v1/auth/oidc/callback"
+
+// browserOIDCRedirectURI derives the callback from the browser-facing request.
+// This keeps localhost logins aligned with any user-selected listening port.
+// A configured public HTTPS callback remains an explicit reverse-proxy override.
+func (e *Engine) browserOIDCRedirectURI(c *fiber.Ctx) (string, bool) {
+	requestURI := strings.TrimSpace(c.Protocol()) + "://" + strings.TrimSpace(string(c.Context().Host())) + oidcCallbackPath
+	requestURL, requestOK := validBrowserCallback(requestURI)
+	configuredURL, configuredOK := validBrowserCallback(strings.TrimSpace(e.cfg.OIDCRedirectURL))
+
+	if configuredOK && !isLoopbackHost(configuredURL.Hostname()) {
+		return configuredURL.String(), true
+	}
+	if requestOK {
+		return requestURL.String(), true
+	}
+	if configuredOK {
+		return configuredURL.String(), true
+	}
+	return "", false
+}
+
+func validBrowserCallback(raw string) (*url.URL, bool) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != oidcCallbackPath {
+		return nil, false
+	}
+	if u.Scheme != "https" && !(u.Scheme == "http" && isLoopbackHost(u.Hostname())) {
+		return nil, false
+	}
+	return u, true
+}
+
+func isLoopbackHost(host string) bool {
+	return strings.EqualFold(host, "localhost") || (net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback())
 }
 
 func (s *oidcFlowStore) close() { s.once.Do(func() { close(s.quit) }) }
@@ -125,10 +165,12 @@ func (s *oidcFlowStore) sweep() {
 }
 
 type oidcStartRequest struct {
-	RedirectURI    string `json:"redirect_uri"`
-	Client         string `json:"client"`
-	ReturnTo       string `json:"return_to"`
-	Reauthenticate bool   `json:"reauthenticate"`
+	RedirectURI     string `json:"redirect_uri"`
+	Client          string `json:"client"`
+	ReturnTo        string `json:"return_to"`
+	Reauthenticate  bool   `json:"reauthenticate"`
+	WorkspaceID     string `json:"workspace_id"`
+	InvitationToken string `json:"invitation_token"`
 }
 type oidcCompleteRequest struct {
 	State       string `json:"state"`
@@ -141,13 +183,20 @@ type oidcCompleteRequest struct {
 // to the browser, so diagnostics improve without creating an account oracle or
 // putting authorization codes/tokens in logs.
 type oidcFlowError struct {
-	stage string
-	err   error
+	stage       string
+	err         error
+	workspaceID string
 }
 
 func (e *oidcFlowError) Error() string        { return e.stage }
 func (e *oidcFlowError) Unwrap() error        { return e.err }
 func oidcStage(stage string, err error) error { return &oidcFlowError{stage: stage, err: err} }
+func oidcStageForFlow(flow oidcFlow, stage string, err error) error {
+	return &oidcFlowError{stage: stage, err: err, workspaceID: flow.workspaceID}
+}
+func oidcErrorForFlow(flow oidcFlow, err error) error {
+	return oidcStageForFlow(flow, oidcFailureStage(err), err)
+}
 func oidcFailureStage(err error) string {
 	var flowErr *oidcFlowError
 	if errors.As(err, &flowErr) && flowErr.stage != "" {
@@ -195,7 +244,7 @@ func (e *Engine) HandleOIDCStart(c *fiber.Ctx) error {
 	if e.issuer == nil || e.flows == nil {
 		return authUnavailable(c)
 	}
-	req := oidcStartRequest{RedirectURI: c.Query("redirect_uri"), Client: c.Query("client"), ReturnTo: c.Query("return_to"), Reauthenticate: c.QueryBool("reauthenticate")}
+	req := oidcStartRequest{RedirectURI: c.Query("redirect_uri"), Client: c.Query("client"), ReturnTo: c.Query("return_to"), Reauthenticate: c.QueryBool("reauthenticate"), WorkspaceID: c.Query("workspace_id"), InvitationToken: c.Query("invitation_token")}
 	if len(c.Body()) > 0 && c.Method() == fiber.MethodPost {
 		if err := c.BodyParser(&req); err != nil {
 			return authFailed(c)
@@ -206,10 +255,17 @@ func (e *Engine) HandleOIDCStart(c *fiber.Ctx) error {
 		req.Client = "gui"
 	}
 	var expectedSubject, loginHint string
-	workspaceID := strings.TrimSpace(c.Query("workspace_id"))
+	workspaceID := strings.TrimSpace(req.WorkspaceID)
+	invitationToken := strings.TrimSpace(req.InvitationToken)
+	if workspaceID == "" || len(invitationToken) > 1024 {
+		invitationToken = ""
+	}
 	provider := WorkspaceOIDCProvider{Issuer: e.cfg.OIDCIssuer, ClientID: e.cfg.OIDCClientID, ClientSecret: e.cfg.OIDCClientSecret, Audience: e.cfg.OIDCAudience, Scopes: e.cfg.OIDCScopes}
 	validator := e.oidc
 	if workspaceID != "" {
+		if e.workspaceAvailability != nil && !e.workspaceAvailability(c.UserContext(), workspaceID) {
+			return authUnavailable(c)
+		}
 		if e.workspaceProviderResolver == nil {
 			if validator == nil {
 				return authUnavailable(c)
@@ -232,9 +288,10 @@ func (e *Engine) HandleOIDCStart(c *fiber.Ctx) error {
 		return authUnavailable(c)
 	}
 	if req.Client == "gui" {
-		req.RedirectURI = e.cfg.OIDCRedirectURL
+		var ok bool
+		req.RedirectURI, ok = e.browserOIDCRedirectURI(c)
 		req.ReturnTo = safeGUIReturnTo(req.ReturnTo)
-		if req.RedirectURI == "" {
+		if !ok {
 			return authUnavailable(c)
 		}
 		if req.Reauthenticate {
@@ -249,7 +306,7 @@ func (e *Engine) HandleOIDCStart(c *fiber.Ctx) error {
 	} else if req.Reauthenticate {
 		return authFailed(c)
 	}
-	state, flow := e.flows.create(req.RedirectURI, req.Client, req.ReturnTo, req.Reauthenticate, expectedSubject, workspaceID, provider, validator)
+	state, flow := e.flows.create(req.RedirectURI, req.Client, req.ReturnTo, req.Reauthenticate, expectedSubject, workspaceID, invitationToken, provider, validator)
 	challenge := sha256.Sum256([]byte(flow.verifier))
 	params := url.Values{
 		"response_type": {"code"}, "client_id": {provider.ClientID}, "redirect_uri": {req.RedirectURI},
@@ -295,12 +352,14 @@ func (e *Engine) currentGUIIdentity(c *fiber.Ctx) (*Claims, error) {
 // HandleOIDCCallback completes the GUI flow and stores tokens only in secure,
 // HttpOnly same-origin cookies. Tokens never appear in redirect URLs/history.
 func (e *Engine) HandleOIDCCallback(c *fiber.Ctx) error {
-	access, refresh, expires, returnTo, err := e.completeOIDC(c.Context(), oidcCompleteRequest{State: c.Query("state"), Code: c.Query("code"), RedirectURI: e.cfg.OIDCRedirectURL})
+	// The callback URI is already bound to the one-time state. Recover it from
+	// that flow so a configurable port cannot drift between start and callback.
+	access, refresh, expires, returnTo, err := e.completeOIDC(c.Context(), oidcCompleteRequest{State: c.Query("state"), Code: c.Query("code")})
 	if err != nil {
 		if e.log != nil {
 			e.log.Warn("auth: OIDC callback failed", zap.String("stage", oidcFailureStage(err)))
 		}
-		return authFailed(c)
+		return c.Redirect(oidcFailureRedirect(err, c.Query("error")), fiber.StatusFound)
 	}
 	e.setAuthCookies(c, access, refresh, expires)
 	return c.Redirect(returnTo, fiber.StatusFound)
@@ -321,12 +380,20 @@ func (e *Engine) HandleOIDCComplete(c *fiber.Ctx) error {
 }
 
 func (e *Engine) completeOIDC(ctx context.Context, req oidcCompleteRequest) (string, string, int, string, error) {
-	if strings.TrimSpace(req.Code) == "" || strings.TrimSpace(req.State) == "" {
+	if strings.TrimSpace(req.State) == "" {
 		return "", "", 0, "", oidcStage("authorization_response", errors.New("missing authorization response"))
 	}
 	flow, ok := e.flows.consume(req.State, req.RedirectURI)
 	if !ok {
 		return "", "", 0, "", oidcStage("state", errors.New("invalid authorization state"))
+	}
+	if flow.workspaceID != "" {
+		if !e.workspaceAvailableForOIDCCallback(ctx, flow.workspaceID) {
+			return "", "", 0, "", oidcStageForFlow(flow, "workspace_unavailable", errors.New("workspace is not accepting sign-ins"))
+		}
+	}
+	if strings.TrimSpace(req.Code) == "" {
+		return "", "", 0, "", oidcStageForFlow(flow, "authorization_response", errors.New("missing authorization response"))
 	}
 	form := url.Values{"grant_type": {"authorization_code"}, "code": {req.Code}, "redirect_uri": {flow.redirectURI}, "client_id": {flow.provider.ClientID}, "code_verifier": {flow.verifier}}
 	if flow.provider.ClientSecret != "" {
@@ -334,35 +401,49 @@ func (e *Engine) completeOIDC(ctx context.Context, req oidcCompleteRequest) (str
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, flow.validator.discovery.TokenEndpoint, strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", "", 0, "", oidcStage("token_request", err)
+		return "", "", 0, "", oidcStageForFlow(flow, "token_request", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := flow.validator.client.Do(httpReq)
 	if err != nil {
-		return "", "", 0, "", oidcStage("token_transport", err)
+		return "", "", 0, "", oidcStageForFlow(flow, "token_transport", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", "", 0, "", oidcStage("token_exchange", fmt.Errorf("token exchange failed"))
+		return "", "", 0, "", oidcStageForFlow(flow, "token_exchange", fmt.Errorf("token exchange failed"))
 	}
 	var tokenResponse struct {
 		IDToken string `json:"id_token"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&tokenResponse); err != nil || tokenResponse.IDToken == "" {
-		return "", "", 0, "", oidcStage("token_response", errors.New("provider returned no ID token"))
+		return "", "", 0, "", oidcStageForFlow(flow, "token_response", errors.New("provider returned no ID token"))
 	}
-	access, refresh, expires, err := e.issueOIDCSessionWithProvider(ctx, tokenResponse.IDToken, flow.nonce, flow.expectedSubject, flow.workspaceID, flow.validator)
+	access, refresh, expires, err := e.issueOIDCSessionWithProvider(ctx, tokenResponse.IDToken, flow.nonce, flow.expectedSubject, flow.workspaceID, flow.invitationToken, flow.validator)
 	if err != nil {
-		return "", "", 0, "", err
+		return "", "", 0, "", oidcErrorForFlow(flow, err)
 	}
 	return access, refresh, expires, safeGUIReturnTo(flow.returnTo), nil
 }
 
-func (e *Engine) issueOIDCSession(ctx context.Context, idToken, nonce, expectedSubject string) (string, string, int, error) {
-	return e.issueOIDCSessionWithProvider(ctx, idToken, nonce, expectedSubject, "", e.oidc)
+func (e *Engine) workspaceAvailableForOIDCCallback(ctx context.Context, workspaceID string) bool {
+	if e.workspaceAvailability != nil {
+		return e.workspaceAvailability(ctx, workspaceID)
+	}
+	if e.workspaceProviderResolver != nil {
+		// Compatibility for embedders that have not wired the dedicated
+		// lifecycle resolver. The application wires it, which lets legacy
+		// workspaces intentionally use the deployment provider.
+		current, resolved := e.workspaceProviderResolver(ctx, workspaceID)
+		return resolved && current.ClientID != "" && current.Issuer != ""
+	}
+	return true
 }
 
-func (e *Engine) issueOIDCSessionWithProvider(ctx context.Context, idToken, nonce, expectedSubject, workspaceID string, validator *OIDCValidator) (string, string, int, error) {
+func (e *Engine) issueOIDCSession(ctx context.Context, idToken, nonce, expectedSubject string) (string, string, int, error) {
+	return e.issueOIDCSessionWithProvider(ctx, idToken, nonce, expectedSubject, "", "", e.oidc)
+}
+
+func (e *Engine) issueOIDCSessionWithProvider(ctx context.Context, idToken, nonce, expectedSubject, workspaceID, invitationToken string, validator *OIDCValidator) (string, string, int, error) {
 	if validator == nil {
 		return "", "", 0, oidcStage("provider", errors.New("identity provider unavailable"))
 	}
@@ -393,7 +474,11 @@ func (e *Engine) issueOIDCSessionWithProvider(ctx context.Context, idToken, nonc
 	}
 	var id TokenIdentity
 	var ok bool
-	if workspaceID != "" && e.workspaceIdentityResolver != nil {
+	if workspaceID != "" && invitationToken != "" && e.workspaceInvitationAccepter != nil {
+		id, ok = e.workspaceInvitationAccepter(ctx, invitationToken, localSubject, workspaceID)
+		id.Email = claims.Email
+		id.PrincipalKind = "user"
+	} else if workspaceID != "" && e.workspaceIdentityResolver != nil {
 		id, ok = e.workspaceIdentityResolver(ctx, localSubject, workspaceID)
 		id.Email = claims.Email
 		id.PrincipalKind = "user"
@@ -519,6 +604,32 @@ func safeGUIReturnTo(raw string) string {
 	default:
 		return "/#auth=success"
 	}
+}
+
+// oidcFailureRedirect turns browser callback failures into a safe, useful UI
+// destination. Only a small public error vocabulary crosses the redirect; the
+// precise stage remains in structured server logs and cannot become an account
+// or tenant-membership oracle. A known workspace returns to its branded access
+// page, while invalid/expired state fails closed to the public landing page.
+func oidcFailureRedirect(err error, providerError string) string {
+	code := "sign_in_failed"
+	stage := oidcFailureStage(err)
+	switch {
+	case strings.TrimSpace(providerError) != "":
+		code = "cancelled"
+	case stage == "state":
+		code = "session_expired"
+	case stage == "membership":
+		code = "not_authorized"
+	case stage == "workspace_unavailable":
+		code = "workspace_unavailable"
+	}
+	base := "/"
+	var flowErr *oidcFlowError
+	if errors.As(err, &flowErr) && strings.TrimSpace(flowErr.workspaceID) != "" {
+		base = "/w/" + url.PathEscape(strings.TrimSpace(flowErr.workspaceID))
+	}
+	return base + "?auth_error=" + url.QueryEscape(code)
 }
 
 func deterministicOIDCSubject(issuer, subject string) string {

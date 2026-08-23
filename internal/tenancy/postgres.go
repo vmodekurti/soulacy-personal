@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -32,13 +33,16 @@ type Mutation struct {
 type Organization struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
+	Status      string `json:"status,omitempty"`
 	LogoDataURL string `json:"logo_data_url,omitempty"`
 }
 
 type Workspace struct {
 	ID             string `json:"id"`
+	Slug           string `json:"slug,omitempty"`
 	OrganizationID string `json:"organization_id"`
 	Name           string `json:"name"`
+	Status         string `json:"status,omitempty"`
 	LogoDataURL    string `json:"logo_data_url,omitempty"`
 	IdentityStatus string `json:"identity_status,omitempty"`
 }
@@ -236,11 +240,12 @@ func (s *PostgresStore) CreateOrganization(ctx context.Context, mutation Mutatio
 
 func (s *PostgresStore) CreateWorkspace(ctx context.Context, mutation Mutation, organizationID, name string) (Workspace, error) {
 	ws := Workspace{ID: newID("ws"), OrganizationID: strings.TrimSpace(organizationID), Name: strings.TrimSpace(name)}
+	ws.Slug = workspaceSlug(ws.Name, ws.ID)
 	if ws.OrganizationID == "" || ws.Name == "" {
 		return Workspace{}, errors.New("organization ID and workspace name are required")
 	}
 	err := s.mutate(ctx, mutation, "workspace.create", "workspace", ws.ID, nil, ws, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO workspaces(id, organization_id, name) VALUES($1, $2, $3)`, ws.ID, ws.OrganizationID, ws.Name)
+		_, err := tx.Exec(ctx, `INSERT INTO workspaces(id, slug, organization_id, name) VALUES($1, $2, $3, $4)`, ws.ID, ws.Slug, ws.OrganizationID, ws.Name)
 		return err
 	})
 	return ws, err
@@ -253,6 +258,7 @@ func (s *PostgresStore) CreateWorkspaceForOwner(ctx context.Context, mutation Mu
 	sourceWorkspaceID = strings.TrimSpace(sourceWorkspaceID)
 	ownerUserID = strings.TrimSpace(ownerUserID)
 	workspace := Workspace{ID: newID("ws"), OrganizationID: organizationID, Name: strings.TrimSpace(name)}
+	workspace.Slug = workspaceSlug(workspace.Name, workspace.ID)
 	membership := StoredMembership{ID: newID("mem"), OrganizationID: organizationID, WorkspaceID: workspace.ID, UserID: ownerUserID, Role: RoleOwner, Status: MembershipActive}
 	if organizationID == "" || sourceWorkspaceID == "" || workspace.Name == "" || ownerUserID == "" {
 		return Workspace{}, StoredMembership{}, errors.New("organization, source workspace, workspace name, and owner are required")
@@ -275,7 +281,7 @@ func (s *PostgresStore) CreateWorkspaceForOwner(ctx context.Context, mutation Mu
 	if !authorized {
 		return Workspace{}, StoredMembership{}, ErrRoleEscalation
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO workspaces(id,organization_id,name) VALUES($1,$2,$3)`, workspace.ID, workspace.OrganizationID, workspace.Name); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO workspaces(id,slug,organization_id,name) VALUES($1,$2,$3,$4)`, workspace.ID, workspace.Slug, workspace.OrganizationID, workspace.Name); err != nil {
 		return Workspace{}, StoredMembership{}, err
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO memberships(id,organization_id,workspace_id,user_id,role,status) VALUES($1,$2,$3,$4,'owner','active')`, membership.ID, membership.OrganizationID, membership.WorkspaceID, membership.UserID); err != nil {
@@ -489,9 +495,11 @@ func (s *PostgresStore) ResolveMembership(ctx context.Context, subject, requeste
 	// The workspace's lifecycle is read in the SAME query as the membership.
 	// A separate lookup is a window: deletion begins between the two reads and
 	// the write it was meant to stop lands anyway.
-	row := s.pool.QueryRow(ctx, `SELECT m.organization_id, m.workspace_id, m.id, m.user_id, m.role, COALESCE(w.status,'active')
+	row := s.pool.QueryRow(ctx, `SELECT m.organization_id, m.workspace_id, m.id, m.user_id, m.role,
+		CASE WHEN o.status='suspended' THEN 'suspended' ELSE COALESCE(w.status,'active') END
 		FROM memberships m
 		JOIN workspaces w ON w.id=m.workspace_id
+		JOIN organizations o ON o.id=m.organization_id
 		LEFT JOIN identities i ON i.user_id=m.user_id AND i.status='active'
 		WHERE m.workspace_id=$1 AND m.status='active' AND (m.user_id=$2 OR i.external_subject=$2)
 		LIMIT 1`, requestedWorkspaceID, subject)
@@ -501,7 +509,7 @@ func (s *PostgresStore) ResolveMembership(ctx context.Context, subject, requeste
 			// The service-account path carries the workspace status too. A
 			// machine credential is exactly the caller that keeps writing into
 			// a workspace nobody is watching being deleted.
-			serviceRow := s.pool.QueryRow(ctx, `SELECT b.organization_id,b.workspace_id,b.service_account_id,b.service_account_id,b.role,COALESCE(w.status,'active') FROM service_account_workspaces b JOIN service_accounts s ON s.id=b.service_account_id JOIN workspaces w ON w.id=b.workspace_id WHERE b.workspace_id=$1 AND b.service_account_id=$2 AND b.status='active' AND s.status='active'`, requestedWorkspaceID, subject)
+			serviceRow := s.pool.QueryRow(ctx, `SELECT b.organization_id,b.workspace_id,b.service_account_id,b.service_account_id,b.role,CASE WHEN o.status='suspended' THEN 'suspended' ELSE COALESCE(w.status,'active') END FROM service_account_workspaces b JOIN service_accounts s ON s.id=b.service_account_id JOIN workspaces w ON w.id=b.workspace_id JOIN organizations o ON o.id=b.organization_id WHERE b.workspace_id=$1 AND b.service_account_id=$2 AND b.status='active' AND s.status='active'`, requestedWorkspaceID, subject)
 			if serviceErr := serviceRow.Scan(&m.OrganizationID, &m.WorkspaceID, &m.MembershipID, &m.UserID, &m.Role, &m.WorkspaceStatus); serviceErr != nil {
 				if errors.Is(serviceErr, pgx.ErrNoRows) {
 					return Membership{}, ErrMembershipNotFound
@@ -563,6 +571,90 @@ func mutationTime(m Mutation) time.Time {
 
 func normalizeEmail(email string) string { return strings.ToLower(strings.TrimSpace(email)) }
 
+// workspaceSlug is a short public address, deliberately separate from the
+// opaque workspace primary key. The small ID suffix makes it stable and
+// collision-free without asking customers to remember the full identifier.
+func workspaceSlug(name, id string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range strings.ToLower(strings.TrimSpace(name)) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			dash = false
+		} else if b.Len() > 0 && !dash {
+			b.WriteByte('-')
+			dash = true
+		}
+	}
+	base := strings.Trim(b.String(), "-")
+	if base == "" {
+		base = "workspace"
+	}
+	if len(base) > 40 {
+		base = strings.TrimRight(base[:40], "-")
+	}
+	suffix := strings.TrimPrefix(strings.TrimSpace(id), "ws_")
+	if len(suffix) > 6 {
+		suffix = suffix[len(suffix)-6:]
+	}
+	if suffix == "" {
+		return base
+	}
+	return base + "-" + strings.ToLower(suffix)
+}
+
+func validateWorkspaceSlug(slug string) error {
+	slug = strings.TrimSpace(slug)
+	if len(slug) < 3 || len(slug) > 48 || slug != strings.ToLower(slug) || slug[0] == '-' || slug[len(slug)-1] == '-' {
+		return errors.New("workspace address must be 3-48 lowercase letters, numbers, or hyphens")
+	}
+	for _, r := range slug {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
+			return errors.New("workspace address must be 3-48 lowercase letters, numbers, or hyphens")
+		}
+	}
+	return nil
+}
+
+func workspaceInsertError(err error) error {
+	var databaseError *pgconn.PgError
+	if errors.As(err, &databaseError) && databaseError.Code == "23505" && databaseError.ConstraintName == "workspaces_slug_unique" {
+		return errors.New("workspace address is already in use")
+	}
+	return err
+}
+
+func (s *PostgresStore) SetWorkspaceSlug(ctx context.Context, mutation Mutation, workspaceID, slug string) (Workspace, error) {
+	workspaceID, slug = strings.TrimSpace(workspaceID), strings.ToLower(strings.TrimSpace(slug))
+	if workspaceID == "" {
+		return Workspace{}, errors.New("workspace ID is required")
+	}
+	if err := validateWorkspaceSlug(slug); err != nil {
+		return Workspace{}, err
+	}
+	var before Workspace
+	err := s.pool.QueryRow(ctx, `SELECT id,slug,organization_id,name,COALESCE(logo_data_url,''),identity_status FROM workspaces WHERE id=$1`, workspaceID).Scan(&before.ID, &before.Slug, &before.OrganizationID, &before.Name, &before.LogoDataURL, &before.IdentityStatus)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Workspace{}, errors.New("workspace not found")
+		}
+		return Workspace{}, err
+	}
+	after := before
+	after.Slug = slug
+	err = s.mutate(ctx, mutation, "workspace.address.update", "workspace", workspaceID, before, after, func(tx pgx.Tx) error {
+		var other string
+		if checkErr := tx.QueryRow(ctx, `SELECT id FROM workspaces WHERE slug=$1 AND id<>$2`, slug, workspaceID).Scan(&other); checkErr == nil {
+			return errors.New("workspace address is already in use")
+		} else if !errors.Is(checkErr, pgx.ErrNoRows) {
+			return checkErr
+		}
+		_, updateErr := tx.Exec(ctx, `UPDATE workspaces SET slug=$2 WHERE id=$1`, workspaceID, slug)
+		return updateErr
+	})
+	return after, err
+}
+
 type rowScanner interface{ Scan(...any) error }
 
 func scanMembership(row rowScanner, target *StoredMembership) error {
@@ -573,6 +665,7 @@ var postgresSchema = []string{
 	`CREATE TABLE IF NOT EXISTS organizations(
 		id TEXT PRIMARY KEY CHECK (id ~ '^org_[a-f0-9]{32}$'), name TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`,
 	`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS logo_data_url TEXT`,
+	`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','suspended'))`,
 	`CREATE TABLE IF NOT EXISTS workspaces(
 		id TEXT NOT NULL CHECK (id ~ '^ws_[a-f0-9]{32}$'), organization_id TEXT NOT NULL REFERENCES organizations(id),
 		name TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(id), UNIQUE(id, organization_id))`,
@@ -587,6 +680,10 @@ var postgresSchema = []string{
 	// with an empty scope value is data that has silently stopped matching,
 	// which is harder to notice than a leak.
 	`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'`,
+	`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS slug TEXT`,
+	`UPDATE workspaces SET slug=LEFT(TRIM(BOTH '-' FROM LOWER(REGEXP_REPLACE(name,'[^a-zA-Z0-9]+','-','g'))),40)||'-'||RIGHT(REPLACE(id,'ws_',''),6) WHERE slug IS NULL OR BTRIM(slug)=''`,
+	`ALTER TABLE workspaces ALTER COLUMN slug SET NOT NULL`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS workspaces_slug_unique ON workspaces(slug)`,
 	`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS logo_data_url TEXT`,
 	`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS identity_status TEXT NOT NULL DEFAULT 'active' CHECK(identity_status IN ('pending','active'))`,
 	`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS deletion_requested_at TIMESTAMPTZ`,
@@ -705,13 +802,15 @@ func (s *PostgresStore) PlatformOverview(ctx context.Context) (PlatformOverview,
 	var out PlatformOverview
 	err := s.pool.QueryRow(ctx, `SELECT
 		(SELECT COUNT(*) FROM organizations),
+		(SELECT COUNT(*) FROM organizations WHERE status='suspended'),
 		(SELECT COUNT(*) FROM workspaces),
-		(SELECT COUNT(*) FROM workspaces WHERE status='active'),
+		(SELECT COUNT(*) FROM workspaces w JOIN organizations o ON o.id=w.organization_id WHERE w.status='active' AND o.status='active'),
+		(SELECT COUNT(*) FROM workspaces w JOIN organizations o ON o.id=w.organization_id WHERE w.status='suspended' OR (w.status='active' AND o.status='suspended')),
 		(SELECT COUNT(*) FROM workspaces WHERE status='deleting'),
 		(SELECT COUNT(*) FROM users),
 		(SELECT COUNT(*) FROM memberships WHERE status='active'),
 		(SELECT COUNT(*) FROM invitations WHERE status='pending' AND expires_at > NOW())`).Scan(
-		&out.Organizations, &out.Workspaces, &out.ActiveWorkspaces,
+		&out.Organizations, &out.SuspendedOrganizations, &out.Workspaces, &out.ActiveWorkspaces, &out.SuspendedWorkspaces,
 		&out.DeletingWorkspaces, &out.Users, &out.ActiveMemberships,
 		&out.PendingInvitations)
 	return out, err
@@ -721,8 +820,8 @@ func (s *PostgresStore) PlatformOverview(ctx context.Context) (PlatformOverview,
 // identities, roles, secrets, agents, runs, and all other tenant content are
 // deliberately absent.
 func (s *PostgresStore) ListPlatformOrganizations(ctx context.Context) ([]PlatformOrganization, error) {
-	rows, err := s.pool.Query(ctx, `SELECT o.id,o.name,o.created_at,COALESCE(o.logo_data_url,''),
-		w.id,w.name,w.status,w.created_at,COALESCE(w.logo_data_url,''),COALESCE(w.identity_status,'active'),COALESCE(p.provider_type,''),
+	rows, err := s.pool.Query(ctx, `SELECT o.id,o.name,o.status,o.created_at,COALESCE(o.logo_data_url,''),
+		w.id,w.slug,w.name,w.status,w.created_at,COALESCE(w.logo_data_url,''),COALESCE(w.identity_status,'active'),COALESCE(p.provider_type,''),
 		(SELECT COUNT(*) FROM memberships m WHERE m.workspace_id=w.id AND m.status='active'),
 		(SELECT COUNT(*) FROM invitations i WHERE i.workspace_id=w.id AND i.status='pending' AND i.expires_at > NOW())
 		FROM organizations o
@@ -737,12 +836,12 @@ func (s *PostgresStore) ListPlatformOrganizations(ctx context.Context) ([]Platfo
 	index := map[string]int{}
 	for rows.Next() {
 		var org PlatformOrganization
-		var workspaceID, workspaceName, workspaceStatus *string
+		var workspaceID, workspaceSlug, workspaceName, workspaceStatus *string
 		var workspaceCreated *time.Time
 		var workspaceLogo, identityStatus, providerType *string
 		var members, invitations *int
-		if err := rows.Scan(&org.ID, &org.Name, &org.CreatedAt, &org.LogoDataURL, &workspaceID,
-			&workspaceName, &workspaceStatus, &workspaceCreated, &workspaceLogo, &identityStatus, &providerType, &members, &invitations); err != nil {
+		if err := rows.Scan(&org.ID, &org.Name, &org.Status, &org.CreatedAt, &org.LogoDataURL, &workspaceID,
+			&workspaceSlug, &workspaceName, &workspaceStatus, &workspaceCreated, &workspaceLogo, &identityStatus, &providerType, &members, &invitations); err != nil {
 			return nil, err
 		}
 		pos, exists := index[org.ID]
@@ -754,7 +853,7 @@ func (s *PostgresStore) ListPlatformOrganizations(ctx context.Context) ([]Platfo
 		}
 		if workspaceID != nil {
 			out[pos].Workspaces = append(out[pos].Workspaces, PlatformWorkspace{
-				ID: *workspaceID, Name: derefString(workspaceName), Status: derefString(workspaceStatus),
+				ID: *workspaceID, Slug: derefString(workspaceSlug), Name: derefString(workspaceName), Status: derefString(workspaceStatus),
 				CreatedAt: derefTime(workspaceCreated), ActiveMembers: derefInt(members),
 				PendingInvitations: derefInt(invitations),
 				LogoDataURL:        derefString(workspaceLogo), IdentityStatus: derefString(identityStatus), ProviderType: derefString(providerType),

@@ -71,7 +71,7 @@ func (e *Engine) workspaceRoots(workspaceID string) ([]string, error) {
 
 	derived := make([]string, 0, len(e.filesystemRoots))
 	for _, base := range e.filesystemRoots {
-		dir := wsroot.Dir(base, workspaceID)
+		dir := e.workspaceLayout.Dir(base, workspaceID)
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, fmt.Errorf("workspace %q filesystem root: %w", workspaceID, err)
 		}
@@ -92,6 +92,17 @@ func (e *Engine) workspaceRoots(workspaceID string) ([]string, error) {
 	return derived, nil
 }
 
+// SetWorkspaceLayoutRoot opts Team/Scale into the installation-wide layout:
+// <installation>/workspaces/<workspace-id>/<personal-layout>. Leaving it unset
+// preserves Personal mode byte-for-byte, including an ordinary directory named
+// "workspaces" inside a user's filesystem root.
+func (e *Engine) SetWorkspaceLayoutRoot(root string) {
+	e.workspaceRootsMu.Lock()
+	defer e.workspaceRootsMu.Unlock()
+	e.workspaceLayout = wsroot.NewLayout(root)
+	e.workspaceRootsCache = nil
+}
+
 // WorkspaceFilesystemRoots exposes one workspace's confinement set for
 // diagnostics and for tests that must assert two workspaces do not overlap.
 func (e *Engine) WorkspaceFilesystemRoots(workspaceID string) ([]string, error) {
@@ -109,16 +120,27 @@ func (e *Engine) WorkspaceFilesystemRoots(workspaceID string) ([]string, error) 
 // Containment alone cannot answer this: <base>/.workspaces/tenant-b/x IS
 // under <base>, which is exactly the personal workspace's root.
 func denyNamespaceEscape(path, root string) bool {
+	return pathContainsNamespace(path, root, wsroot.NamespaceDir)
+}
+
+func pathContainsNamespace(path, root, namespace string) bool {
 	rel, err := filepath.Rel(root, path)
 	if err != nil {
 		return true
 	}
 	for _, part := range strings.Split(filepath.ToSlash(rel), "/") {
-		if part == wsroot.NamespaceDir {
+		if part == namespace {
 			return true
 		}
 	}
 	return false
+}
+
+func (e *Engine) denyWorkspaceNamespace(path, root string) bool {
+	if denyNamespaceEscape(path, root) {
+		return true
+	}
+	return e.workspaceLayout.Root() != "" && pathContainsNamespace(path, root, wsroot.WorkspaceDir)
 }
 
 // workspaceScratchDir returns the host tree a privileged subprocess for this

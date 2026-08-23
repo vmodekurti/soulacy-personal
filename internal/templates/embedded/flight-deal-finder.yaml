@@ -44,8 +44,8 @@ system_prompt: |
     Rules: only report fares a fetched source confirms; always include the
     booking link; note the currency; keep it under 300 words.
 llm:
-    provider: ollama
-    model: llama3.3:70b
+    provider: nvidia
+    model: meta/llama-3.3-70b-instruct
     temperature: 0.3
     max_tokens: 2048
 builtins:

@@ -4,10 +4,9 @@ package plugins
 //
 // A plugin contributes tools that agents can call, so a single process-wide
 // loader means every workspace's agents can invoke every workspace's plugins.
-// Plugins are ordinarily organization-owned rather than workspace-owned — the
-// ownership catalog classifies them that way — but "organization-owned" is not
-// "deployment-wide", and until an organization has its own extension shelf the
-// safe reading of a shared loader is that it is nobody's.
+// An installed/enabled plugin instance is workspace-owned. A shared platform
+// directory is only a read-only catalog of operator-approved plugin packages;
+// it does not make another workspace's installation or settings visible.
 //
 // The scan list layers exactly like skills: configured platform directories
 // stay read-only templates available to every workspace, and each workspace's
@@ -15,12 +14,14 @@ package plugins
 // without touching the platform copy.
 
 import (
+	"context"
 	"os"
 	"strings"
 	"sync"
 
 	"go.uber.org/zap"
 
+	"github.com/soulacy/soulacy/internal/workspacepurge"
 	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
@@ -28,6 +29,7 @@ import (
 type Stores struct {
 	platformDirs []string
 	base         string
+	layout       wsroot.Layout
 
 	mu      sync.Mutex
 	loaders map[string]*Loader
@@ -62,6 +64,16 @@ type Stores struct {
 	withheldSettings map[string][]WithheldSetting
 }
 
+func (s *Stores) SetWorkspaceLayoutRoot(root string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.layout = wsroot.NewLayout(root)
+	s.loaders = map[string]*Loader{}
+}
+
 // NewStores builds the registry. base is the directory under which each
 // workspace's own plugins live; personal resolves to base itself, so a
 // single-user installation is unchanged.
@@ -79,7 +91,7 @@ func (s *Stores) Dir(workspaceID string) string {
 	if s == nil || s.base == "" {
 		return ""
 	}
-	return wsroot.Dir(s.base, wsroot.Normalize(workspaceID))
+	return s.layout.Dir(s.base, wsroot.Normalize(workspaceID))
 }
 
 // ScanDirs is the ordered scan list for one workspace.
@@ -151,6 +163,28 @@ func (s *Stores) Invalidate(workspaceID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.loaders, wsroot.Normalize(workspaceID))
+}
+
+// PurgeWorkspace removes only one named workspace's installed plugin tree and
+// its cached, derived state. Platform catalog directories are never targets,
+// and workspacepurge.PurgeTree refuses the personal workspace because it
+// resolves to the shared base directory.
+func (s *Stores) PurgeWorkspace(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+	if s == nil || s.base == "" {
+		return workspacepurge.Removed{}, os.ErrInvalid
+	}
+	removed, err := workspacepurge.PurgeLayoutTree(ctx, s.layout, s.base, workspaceID)
+	if err != nil {
+		return removed, err
+	}
+
+	workspaceID = wsroot.Normalize(workspaceID)
+	s.mu.Lock()
+	delete(s.loaders, workspaceID)
+	delete(s.withheldSettings, workspaceID)
+	s.mu.Unlock()
+	removed.Note = "workspace-installed plugins and cached plugin state"
+	return removed, nil
 }
 
 // SetSettings installs the live plugins_config and re-applies it to every

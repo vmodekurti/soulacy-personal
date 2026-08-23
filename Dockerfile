@@ -9,7 +9,7 @@
 #
 # Usage (standalone):
 #   docker build -t soulacy .
-#   docker run -p 18789:18789 -v ~/.soulacy:/home/soulacy/.soulacy soulacy
+#   docker run -p 1947:1947 -v ~/.soulacy:/home/soulacy/.soulacy soulacy
 #
 # Usage (full stack):
 #   docker compose up   ← starts gateway + Postgres + Qdrant
@@ -120,10 +120,10 @@ ENV SOULACY_CONFIG_FILE=/home/soulacy/.soulacy/soulspace/config.yaml \
     SOULACY_PLUGINS_DIR=/home/soulacy/.soulacy/soulspace/plugins \
     SOULACY_MCP_DIR=/home/soulacy/.soulacy/soulspace/mcp-servers
 
-EXPOSE 18789
+EXPOSE 1947
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -fs http://localhost:18789/api/v1/health || exit 1
+    CMD curl -fs http://localhost:1947/api/v1/health || exit 1
 
 ENTRYPOINT ["soulacy"]
 CMD ["serve"]

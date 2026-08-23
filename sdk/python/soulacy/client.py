@@ -48,7 +48,7 @@ class SoulacyClient:
     ) -> None:
         self.gateway_url = (
             gateway_url
-            or os.environ.get("SOULACY_GATEWAY", "http://localhost:18789")
+            or os.environ.get("SOULACY_GATEWAY", "http://localhost:1947")
         ).rstrip("/")
         self.api_key = api_key or os.environ.get("SOULACY_API_KEY", "")
         self.timeout = timeout

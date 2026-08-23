@@ -43,15 +43,16 @@ export const navPages = [
   { id: 'schedule',  icon: '⏱', label: 'Automations', group: 'integrations', requires: ['schedule', 'read'] },
   { id: 'skills',    icon: '🧩', label: 'Skills',      group: 'integrations', requires: ['skills', 'read'] },
   { id: 'mcp',       icon: '🔌', label: 'MCP',         group: 'integrations', requires: ['mcp', 'read'] },
-  { id: 'pluginmgr', icon: '🧱', label: 'Plugins',     group: 'integrations' },
+  { id: 'pluginmgr', icon: '🧱', label: 'Plugins',     group: 'integrations', requires: ['plugins', 'read'] },
   { id: 'providers', icon: '⚙', label: 'Providers',   group: 'integrations', requires: ['providers', 'read'] },
   { id: 'secrets',   icon: '🔑', label: 'Secrets',     group: 'integrations', requires: ['secrets', 'list'] },
   { id: 'activity',  icon: '📈', label: 'Runs',        group: 'system'       },
   { id: 'browser',   icon: '🕸', label: 'Browser',     group: 'system'       },
   { id: 'config',    icon: '≡', label: 'Config',      group: 'system',       requires: ['config', 'read'] },
   { id: 'mobile',    icon: '▣', label: 'Mobile',      group: 'system'       },
-  { id: 'logs',      icon: '📋', label: 'Logs',        group: 'system',       requires: ['logs', 'read'] },
-  { id: 'members',   icon: '👥', label: 'Members',     group: 'system'       },
+  { id: 'logs',      icon: '📋', label: 'Logs',        group: 'system',       personalOnly: true },
+  { id: 'members',   icon: '👥', label: 'Members',     group: 'system', multiUserOnly: true },
+  { id: 'workspace-admin', icon: '🛡', label: 'Workspace settings', group: 'system', ownerOnly: true, multiUserOnly: true },
 ]
 
 /** Nav ids in render order. */
@@ -63,9 +64,18 @@ export const navIds = navPages.map((p) => p.id)
  * `allow` is injected rather than imported so this stays a pure function the
  * walkthrough's own tests can drive without standing up a permission store.
  */
-export function visibleNavPages(allow, pages = navPages) {
-  if (typeof allow !== 'function') return pages
-  return pages.filter((p) => !p.requires || allow(p.requires[0], p.requires[1]))
+export function visibleNavPages(allow, pages = navPages, options = {}) {
+  const multiUser = ['team', 'scale'].includes(String(options.deploymentMode || '').toLowerCase())
+  return pages
+    .filter((p) => {
+      if (!multiUser && p.multiUserOnly) return false
+      if (multiUser && p.personalOnly) return false
+      if (p.ownerOnly && String(options.role || '').toLowerCase() !== 'owner') return false
+      return typeof allow !== 'function' || !p.requires || allow(p.requires[0], p.requires[1])
+    })
+    .map((p) => multiUser && p.id === 'providers'
+      ? { ...p, label: 'Providers & models' }
+      : p)
 }
 
 /**

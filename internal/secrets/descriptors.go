@@ -39,6 +39,13 @@ func structuredDescriptors(cfg *config.Config) []Descriptor {
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
+		// `ollama` is the built-in local provider and authenticates to the local
+		// daemon without a credential. Hosted Ollama-compatible services use a
+		// separately named provider (for example `ollama_cloud`) and still get an
+		// API-key descriptor through the normal path below.
+		if strings.EqualFold(strings.TrimSpace(id), "ollama") {
+			continue
+		}
 		out = append(out, Descriptor{
 			Name:        llmKey(id),
 			Category:    CategoryLLM,

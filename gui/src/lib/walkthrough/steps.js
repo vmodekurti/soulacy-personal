@@ -93,21 +93,25 @@ export const navTourCopy = {
     when: 'Open it when a web-browsing agent came back with the wrong answer and you need to see where it went.',
   },
   config: {
-    what: 'The gateway configuration, edited safely from the UI instead of by hand.',
-    when: 'For settings that have no dedicated screen — and to see exactly what is on disk.',
+    what: 'Configuration for the current scope. In Team and Scale this is where workspace model, search, and budget defaults live.',
+    when: 'Choose the models Studio and Chat should use, store a workspace search key, or tighten workspace budgets.',
   },
   mobile: {
     what: 'A phone-sized control surface: approvals waiting on you, and quick run controls.',
     when: 'Pin this on your phone so you can approve an agent’s request without opening a laptop.',
   },
   logs: {
-    what: 'Raw gateway logs, live-tailing.',
-    when: 'The last resort when a failure has no diagnosis anywhere else.',
+    what: 'Raw gateway logs for this Personal deployment.',
+    when: 'Use them for host-level diagnostics. In Team and Scale, raw deployment logs stay in the deployment administrator console.',
   },
   members: {
     what: 'Invite people and manage workspace membership.',
     why: 'Owners can control roles, suspend access, remove members, and review membership audit history.',
     action: 'Invite a teammate with the smallest role they need, then copy the one-time invitation token securely.',
+  },
+  'workspace-admin': {
+    what: 'The owner control center for workspace limits, automation credentials, audit history, exports, and recoverable deletion.',
+    when: 'Use it for durable governance changes that affect the whole workspace rather than one agent or integration.',
   },
 }
 

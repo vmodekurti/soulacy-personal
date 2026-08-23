@@ -64,7 +64,7 @@ Create `/etc/soulacy/config.yaml`:
 ```yaml title="/etc/soulacy/config.yaml"
 server:
   host: 127.0.0.1
-  port: 18789
+  port: 1947
   api_key: "replace-with-a-long-random-value"
 
 llm:
@@ -202,7 +202,7 @@ Install Caddy using its current official instructions, then configure:
 
 ```caddyfile title="/etc/caddy/Caddyfile"
 soulacy.example.com {
-    reverse_proxy 127.0.0.1:18789 {
+    reverse_proxy 127.0.0.1:1947 {
         header_up X-Real-IP {remote_host}
         flush_interval -1
     }
@@ -213,7 +213,7 @@ soulacy.example.com {
 sudo systemctl reload caddy
 ```
 
-Keep port `18789` closed to the public. Caddy terminates TLS on ports 80/443
+Keep port `1947` closed to the public. Caddy terminates TLS on ports 80/443
 and proxies to Soulacy over loopback. Preserve streaming by retaining
 `flush_interval -1`.
 
@@ -226,7 +226,7 @@ sudo ufw allow 443/tcp
 sudo ufw enable
 ```
 
-Do not open port `18789` when using the loopback/Caddy configuration.
+Do not open port `1947` when using the loopback/Caddy configuration.
 
 ## Service operations
 

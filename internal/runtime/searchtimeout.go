@@ -65,6 +65,11 @@ func (e *Engine) searchTimeoutFor(ctx context.Context, args map[string]any) time
 	if d, ok := ctx.Value(toolTimeoutOverrideKey{}).(time.Duration); ok && d > 0 {
 		return clampSearchTimeout(d)
 	}
+	if _, _, raw := e.getSearchConfigFor(ctx); strings.TrimSpace(raw) != "" {
+		if d, err := time.ParseDuration(strings.TrimSpace(raw)); err == nil && d > 0 {
+			return clampSearchTimeout(d)
+		}
+	}
 	return e.getSearchTimeout()
 }
 

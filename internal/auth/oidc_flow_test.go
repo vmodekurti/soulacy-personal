@@ -7,6 +7,7 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"math/big"
 	"net/http"
@@ -208,6 +209,25 @@ func TestGUIReturnDestinationIsAllowlisted(t *testing.T) {
 	}
 }
 
+func TestOIDCFailureRedirectUsesSafeMessagesAndWorkspaceDestination(t *testing.T) {
+	tests := []struct {
+		name, stage, providerError, workspaceID, want string
+	}{
+		{"expired state", "state", "", "", "/?auth_error=session_expired"},
+		{"provider cancellation", "authorization_response", "access_denied", "", "/?auth_error=cancelled"},
+		{"workspace membership", "membership", "", "ws_customer", "/w/ws_customer?auth_error=not_authorized"},
+		{"generic workspace failure", "token_exchange", "", "ws_customer", "/w/ws_customer?auth_error=sign_in_failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := &oidcFlowError{stage: tt.stage, err: errors.New("internal detail"), workspaceID: tt.workspaceID}
+			if got := oidcFailureRedirect(err, tt.providerError); got != tt.want {
+				t.Fatalf("redirect = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestOIDCReauthenticationForcesProviderInteraction(t *testing.T) {
 	issuer, err := newIssuer("01234567890123456789012345678901", time.Minute, time.Hour)
 	if err != nil {
@@ -221,7 +241,7 @@ func TestOIDCReauthenticationForcesProviderInteraction(t *testing.T) {
 	engine := &Engine{
 		cfg: Config{
 			Mode: "jwt", OIDCClientID: "client", OIDCScopes: []string{"openid"},
-			OIDCRedirectURL: "http://localhost:18789/api/v1/auth/oidc/callback",
+			OIDCRedirectURL: "http://localhost:1947/api/v1/auth/oidc/callback",
 		},
 		issuer: issuer, oidc: validator, flows: newOIDCFlowStore(), log: zap.NewNop(),
 	}
@@ -260,6 +280,86 @@ func TestOIDCReauthenticationForcesProviderInteraction(t *testing.T) {
 	}
 }
 
+func TestOIDCStartDerivesCallbackFromCustomLocalPort(t *testing.T) {
+	issuer, err := newIssuer("01234567890123456789012345678901", time.Minute, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer issuer.Close()
+	validator := &OIDCValidator{
+		discovery: oidcDiscovery{AuthorizationEndpoint: "https://issuer.example/authorize"},
+		quit:      make(chan struct{}),
+	}
+	engine := &Engine{
+		// This simulates an older installation whose persisted local callback
+		// still names the previous port.
+		cfg: Config{
+			Mode: "jwt", OIDCClientID: "client", OIDCScopes: []string{"openid"},
+			OIDCRedirectURL: "http://localhost:18789/api/v1/auth/oidc/callback",
+		},
+		issuer: issuer, oidc: validator, flows: newOIDCFlowStore(), log: zap.NewNop(),
+	}
+	defer engine.flows.close()
+	app := fiber.New()
+	app.Get("/start", engine.HandleOIDCStart)
+	req := newFiberRequest(http.MethodGet, "/start?client=gui", nil)
+	req.Host = "localhost:1947"
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		AuthorizationURL string `json:"authorization_url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	authURL, err := url.Parse(body.AuthorizationURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := authURL.Query().Get("redirect_uri"), "http://localhost:1947/api/v1/auth/oidc/callback"; got != want {
+		t.Fatalf("redirect_uri = %q, want %q", got, want)
+	}
+}
+
+func TestOIDCStartPreservesExplicitPublicCallback(t *testing.T) {
+	engine := &Engine{cfg: Config{OIDCRedirectURL: "https://agents.example.com/api/v1/auth/oidc/callback"}}
+	app := fiber.New()
+	app.Get("/callback", func(c *fiber.Ctx) error {
+		got, ok := engine.browserOIDCRedirectURI(c)
+		return c.JSON(fiber.Map{"redirect_uri": got, "ok": ok})
+	})
+	req := newFiberRequest(http.MethodGet, "/callback", nil)
+	req.Host = "localhost:27777"
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		RedirectURI string `json:"redirect_uri"`
+		OK          bool   `json:"ok"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if !body.OK || body.RedirectURI != "https://agents.example.com/api/v1/auth/oidc/callback" {
+		t.Fatalf("public override not preserved: %+v", body)
+	}
+}
+
+func TestOIDCFlowCallbackRecoversBoundRedirectURI(t *testing.T) {
+	store := newOIDCFlowStore()
+	defer store.close()
+	state, want := store.create("http://localhost:27777/api/v1/auth/oidc/callback", "gui", "", false, "", "", "", WorkspaceOIDCProvider{}, nil)
+	got, ok := store.consume(state, "")
+	if !ok || got.redirectURI != want.redirectURI {
+		t.Fatalf("callback did not recover redirect: ok=%v got=%q want=%q", ok, got.redirectURI, want.redirectURI)
+	}
+}
+
 func TestOIDCStartUsesWorkspaceProvider(t *testing.T) {
 	issuer, err := newIssuer("01234567890123456789012345678901", time.Minute, time.Hour)
 	if err != nil {
@@ -276,7 +376,7 @@ func TestOIDCStartUsesWorkspaceProvider(t *testing.T) {
 		quit:      make(chan struct{}),
 	}
 	engine := &Engine{
-		cfg:    Config{Mode: "jwt", OIDCRedirectURL: "http://localhost:18789/api/v1/auth/oidc/callback"},
+		cfg:    Config{Mode: "jwt", OIDCRedirectURL: "http://localhost:1947/api/v1/auth/oidc/callback"},
 		issuer: issuer, flows: newOIDCFlowStore(), log: zap.NewNop(),
 		providerValidators: map[string]*OIDCValidator{provider.Issuer + "\x00" + provider.Audience: validator},
 	}
@@ -286,7 +386,7 @@ func TestOIDCStartUsesWorkspaceProvider(t *testing.T) {
 	})
 	app := fiber.New()
 	app.Get("/start", engine.HandleOIDCStart)
-	resp, err := app.Test(newFiberRequest(http.MethodGet, "/start?client=gui&workspace_id=ws_customer", nil))
+	resp, err := app.Test(newFiberRequest(http.MethodGet, "/start?client=gui&workspace_id=ws_customer&invitation_token=invite-secret", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,6 +407,105 @@ func TestOIDCStartUsesWorkspaceProvider(t *testing.T) {
 	}
 	if parsed.Host != "tenant.okta.example" || parsed.Query().Get("client_id") != "workspace-client" || parsed.Query().Get("scope") != "openid email" {
 		t.Fatalf("workspace provider was not used: %s", body.AuthorizationURL)
+	}
+	state := parsed.Query().Get("state")
+	engine.flows.mu.Lock()
+	flow := engine.flows.flows[state]
+	engine.flows.mu.Unlock()
+	if flow.workspaceID != "ws_customer" || flow.invitationToken != "invite-secret" {
+		t.Fatalf("workspace invitation context was not preserved in OIDC state: %+v", flow)
+	}
+}
+
+func TestOIDCStartAllowsLegacyWorkspaceDeploymentProviderFallback(t *testing.T) {
+	issuer, err := newIssuer("01234567890123456789012345678901", time.Minute, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer issuer.Close()
+	validator := &OIDCValidator{
+		discovery: oidcDiscovery{AuthorizationEndpoint: "https://accounts.example/authorize"},
+		quit:      make(chan struct{}),
+	}
+	engine := &Engine{
+		cfg: Config{
+			Mode: "jwt", OIDCRedirectURL: "http://localhost:1947/api/v1/auth/oidc/callback",
+			OIDCIssuer: "https://accounts.example", OIDCClientID: "deployment-client",
+			OIDCAudience: "deployment-client", OIDCScopes: []string{"openid", "email"},
+		},
+		issuer: issuer, oidc: validator, flows: newOIDCFlowStore(), log: zap.NewNop(),
+		providerValidators: map[string]*OIDCValidator{},
+	}
+	defer engine.flows.close()
+	engine.SetWorkspaceOIDCAvailabilityResolver(func(_ context.Context, workspaceID string) bool {
+		return workspaceID == "ws_legacy"
+	})
+	engine.SetWorkspaceOIDCProviderResolver(func(context.Context, string) (WorkspaceOIDCProvider, bool) {
+		return WorkspaceOIDCProvider{}, false
+	})
+	app := fiber.New()
+	app.Get("/start", engine.HandleOIDCStart)
+	resp, err := app.Test(newFiberRequest(http.MethodGet, "/start?client=gui&workspace_id=ws_legacy", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("start status=%d body=%s", resp.StatusCode, raw)
+	}
+	var body struct {
+		AuthorizationURL string `json:"authorization_url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(body.AuthorizationURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Query().Get("client_id") != "deployment-client" {
+		t.Fatalf("deployment provider fallback was not used: %s", body.AuthorizationURL)
+	}
+}
+
+func TestOIDCStartRejectsUnavailableWorkspaceBeforeProviderFallback(t *testing.T) {
+	issuer, err := newIssuer("01234567890123456789012345678901", time.Minute, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer issuer.Close()
+	engine := &Engine{
+		cfg:    Config{Mode: "jwt", OIDCRedirectURL: "http://localhost:1947/api/v1/auth/oidc/callback"},
+		issuer: issuer, oidc: &OIDCValidator{}, flows: newOIDCFlowStore(), log: zap.NewNop(),
+	}
+	defer engine.flows.close()
+	engine.SetWorkspaceOIDCAvailabilityResolver(func(context.Context, string) bool { return false })
+	app := fiber.New()
+	app.Get("/start", engine.HandleOIDCStart)
+	resp, err := app.Test(newFiberRequest(http.MethodGet, "/start?client=gui&workspace_id=ws_missing", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	}
+}
+
+func TestOIDCCallbackAvailabilityAllowsLegacyProviderFallback(t *testing.T) {
+	engine := &Engine{}
+	engine.SetWorkspaceOIDCAvailabilityResolver(func(_ context.Context, workspaceID string) bool {
+		return workspaceID == "ws_legacy"
+	})
+	engine.SetWorkspaceOIDCProviderResolver(func(context.Context, string) (WorkspaceOIDCProvider, bool) {
+		return WorkspaceOIDCProvider{}, false
+	})
+	if !engine.workspaceAvailableForOIDCCallback(context.Background(), "ws_legacy") {
+		t.Fatal("legacy workspace using the deployment provider was rejected at callback")
+	}
+	if engine.workspaceAvailableForOIDCCallback(context.Background(), "ws_suspended") {
+		t.Fatal("unavailable workspace was accepted at callback")
 	}
 }
 

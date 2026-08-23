@@ -35,7 +35,7 @@ system_prompt: >
 The endpoint is:
 
 ```bash
-curl -X POST http://localhost:18789/api/v1/webhooks/github-triage \
+curl -X POST http://localhost:1947/api/v1/webhooks/github-triage \
   -H "Authorization: Bearer $SOULACY_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"issue":{"number":42,"title":"Crash on launch"},"sender":{"id":7,"login":"vasu"}}'

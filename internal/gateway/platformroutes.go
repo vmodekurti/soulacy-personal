@@ -20,8 +20,10 @@ import (
 // Meanwhile `owner` and `admin` in the RBAC policy hold config:write, and
 // those are MEMBERSHIP roles: owner of a workspace, i.e. a customer. So a
 // customer could restart the process for every other customer, rewrite the one
-// shared config.yaml — provider keys, budgets, security settings, the MCP
-// template — and install or remove plugins deployment-wide.
+// shared config.yaml — provider allowlists and ceilings, security settings,
+// worker policy, and the approved extension catalogs. Workspace plugin and MCP
+// instances are deliberately not platform routes: their stores are selected
+// from verified workspace context.
 //
 // WHY A TABLE AND NOT A ROLE. Adding a `superadmin` value to the membership
 // roles would put deployment power on the same ladder as tenant power, one
@@ -49,10 +51,9 @@ type platformRoute struct {
 	Why string
 }
 
-// platformRoutes is the complete set. Reads are deliberately absent: seeing the
-// deployment's plugin list or MCP template is not the same as changing it, and
-// a tenant that cannot read the settings page it is shown gets a broken UI
-// rather than a safer one.
+// platformRoutes is the complete set. Workspace-scoped extensions are
+// deliberately absent: their stores are selected from the verified workspace
+// context and their lifecycle is governed by workspace RBAC.
 var platformRoutes = []platformRoute{
 	{"GET", "/api/v1/admin/bootstrap",
 		"reports whether the deployment-wide tenant catalog needs its first owner"},
@@ -62,32 +63,29 @@ var platformRoutes = []platformRoute{
 		"reports deployment health and tenant counts without entering a workspace"},
 	{"GET", "/api/v1/admin/platform/organizations",
 		"lists tenant lifecycle metadata without exposing workspace content"},
+	{"GET", "/api/v1/admin/platform/audit",
+		"reads deployment-key and tenant lifecycle audit metadata without entering a workspace"},
 	{"POST", "/api/v1/admin/platform/organizations",
 		"provisions a tenant boundary and assigns its first owner without joining it"},
 	{"POST", "/api/v1/admin/platform/organizations/:id/workspaces",
 		"provisions a workspace and designated owner without granting the operator membership"},
+	{"PATCH", "/api/v1/admin/platform/organizations/:id/status",
+		"places or removes a deployment-level hold across every workspace in an organization"},
+	{"PATCH", "/api/v1/admin/platform/workspaces/:workspaceID/address",
+		"changes a workspace's public sign-in address without entering the workspace"},
+	{"PATCH", "/api/v1/admin/platform/workspaces/:workspaceID/status",
+		"places or removes an administrative hold on one workspace"},
 	{"POST", "/api/v1/admin/restart",
 		"calls os.Exit(0) on the process shared by every workspace"},
+	{"GET", "/api/v1/logs",
+		"tails the shared gateway log, which can contain signals from every workspace"},
+	{"GET", "/api/v1/support/bundle",
+		"downloads deployment diagnostics and shared gateway logs"},
 
 	{"GET", "/api/v1/config",
 		"returns the single deployment-wide config.yaml, including provider and channel settings"},
 	{"PATCH", "/api/v1/config",
 		"writes the single deployment-wide config.yaml: provider keys, budgets, security, channels"},
-
-	{"POST", "/api/v1/plugins/install",
-		"stages plugin code on the deployment's disk"},
-	{"POST", "/api/v1/plugins/install/:staged/approve",
-		"admits staged plugin code into the deployment"},
-	{"DELETE", "/api/v1/plugins/install/:staged",
-		"discards a staged plugin for the whole deployment"},
-	{"POST", "/api/v1/plugins/:id/enable",
-		"the installed plugin set is one per deployment, not one per workspace"},
-	{"POST", "/api/v1/plugins/:id/disable",
-		"the installed plugin set is one per deployment, not one per workspace"},
-	{"POST", "/api/v1/plugins/:id/reapprove",
-		"re-admits plugin code for the whole deployment"},
-	{"DELETE", "/api/v1/plugins/:id",
-		"removes plugin code every workspace may be using"},
 
 	{"GET", "/api/v1/registries",
 		"the registry list lives in the deployment-wide config"},

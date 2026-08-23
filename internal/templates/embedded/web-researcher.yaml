@@ -30,8 +30,8 @@ system_prompt: |
        definitions, etc.) and you're confident, you may answer without
        searching — but err on the side of searching when in doubt.
 llm:
-    provider: ollama
-    model: llama3.3:70b
+    provider: nvidia
+    model: meta/llama-3.3-70b-instruct
     temperature: 0.3
     max_tokens: 1024
 builtins:

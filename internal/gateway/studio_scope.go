@@ -80,7 +80,7 @@ func (sc studioScope) lessons() *studio.LessonStore {
 	if !sc.enabled() {
 		return nil
 	}
-	path := wsroot.File(lessonsPath(), sc.workspaceID)
+	path := sc.server.workspaceLayout.File(lessonsPath(), sc.workspaceID)
 	if path == "" {
 		return nil
 	}
@@ -117,7 +117,7 @@ func (sc studioScope) preferences() *studio.PreferenceStore {
 	if !sc.enabled() {
 		return nil
 	}
-	path := wsroot.File(preferencesPath(), sc.workspaceID)
+	path := sc.server.workspaceLayout.File(preferencesPath(), sc.workspaceID)
 	if path == "" {
 		return nil
 	}
@@ -142,7 +142,7 @@ func (sc studioScope) preferences() *studio.PreferenceStore {
 // macros and strategyFit are cheap file-backed stores with no pooled handle,
 // so they are constructed per call exactly as they were before.
 func (sc studioScope) macros() *studio.MacroStore {
-	path := wsroot.File(macrosPath(), sc.workspaceID)
+	path := sc.server.workspaceLayout.File(macrosPath(), sc.workspaceID)
 	if path == "" || ensureParentDir(path) != nil {
 		return nil
 	}
@@ -150,7 +150,7 @@ func (sc studioScope) macros() *studio.MacroStore {
 }
 
 func (sc studioScope) strategyFit() *studio.StrategyFitStore {
-	path := wsroot.File(strategyFitPath(), sc.workspaceID)
+	path := sc.server.workspaceLayout.File(strategyFitPath(), sc.workspaceID)
 	if path == "" || ensureParentDir(path) != nil {
 		return nil
 	}
@@ -164,7 +164,7 @@ func (sc studioScope) draftsDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return wsroot.UserDir(base, sc.workspaceID, sc.subject), nil
+	return sc.server.workspaceLayout.UserDir(base, sc.workspaceID, sc.subject), nil
 }
 
 // rulesDir is workspace-owned: a rulebook is the team's shared standard.
@@ -173,7 +173,7 @@ func (sc studioScope) rulesDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return wsroot.Dir(base, sc.workspaceID), nil
+	return sc.server.workspaceLayout.Dir(base, sc.workspaceID), nil
 }
 
 // lessonEmbedder builds the embedding adapter shared by every workspace's

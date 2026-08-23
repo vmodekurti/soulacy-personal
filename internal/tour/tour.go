@@ -83,7 +83,7 @@ func hasContent(id string, st InstallState) bool {
 		return st.Runs > 0
 	case "queues":
 		return st.Runs > 0
-	case "chat", "templates", "logs", "browser", "mobile", "secrets", "config", "onboarding", "dashboard":
+	case "chat", "templates", "browser", "mobile", "secrets", "config", "onboarding", "dashboard":
 		return st.Runs > 0
 	default:
 		return true

@@ -65,6 +65,10 @@ type Loader struct {
 	agents map[agentKey]*agent.Definition
 	mu     sync.RWMutex
 	log    *zap.Logger
+	// layout is set by the Team/Scale application wiring. Its zero value keeps
+	// every direct Loader user and Personal installation on the original
+	// per-subsystem layout.
+	layout wsroot.Layout
 	// platformAgents controls whether the built-in System agent exists at all.
 	//
 	// A BOOLEAN, not a deployment mode, on purpose. Nothing else in
@@ -147,6 +151,45 @@ func NewLoader(dirs []string) *Loader {
 	}
 	l.seedBuiltins()
 	return l
+}
+
+// SetWorkspaceLayoutRoot opts the loader into the installation-wide
+// Team/Scale layout. Call before LoadAll; Personal installations deliberately
+// never call it.
+func (l *Loader) SetWorkspaceLayoutRoot(root string) {
+	l.layout = wsroot.NewLayout(root)
+}
+
+func (l *Loader) workspaceAgentRoot(dir, workspaceID string) string {
+	return l.layout.Dir(dir, workspaceID)
+}
+
+func (l *Loader) workspaceForPath(dir, path string) (string, bool) {
+	return l.layout.Of(dir, path)
+}
+
+// scanRoots returns the Personal directory plus each canonical named
+// workspace's equivalent subsystem directory. Missing subsystem directories
+// are harmless; a workspace need not have created an agent yet.
+func (l *Loader) scanRoots(dir string) []string {
+	roots := []string{dir}
+	if l.layout.Root() == "" {
+		return roots
+	}
+	entries, err := os.ReadDir(filepath.Join(l.layout.Root(), wsroot.WorkspaceDir))
+	if err != nil {
+		return roots
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || wsroot.Validate(entry.Name()) != nil {
+			continue
+		}
+		root := l.layout.Dir(dir, entry.Name())
+		if info, err := os.Stat(root); err == nil && info.IsDir() {
+			roots = append(roots, root)
+		}
+	}
+	return roots
 }
 
 // SetLogger attaches a structured logger used for YAML parse warnings.
@@ -356,75 +399,77 @@ func (l *Loader) LoadAll() []error {
 	found := map[agentKey]bool{}
 
 	for _, dir := range l.dirs {
-		// Walk the directory looking for *.yaml and *.yml files
-		err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return nil // skip inaccessible paths
-			}
-			if info.IsDir() {
-				if info.Name() == ".agent-history" {
-					return filepath.SkipDir
+		for _, scanRoot := range l.scanRoots(dir) {
+			// Walk the directory looking for *.yaml and *.yml files
+			err := filepath.Walk(scanRoot, func(path string, info os.FileInfo, err error) error {
+				if err != nil {
+					return nil // skip inaccessible paths
 				}
-				return nil
-			}
-			ext := filepath.Ext(path)
-			if ext != ".yaml" && ext != ".yml" {
-				return nil
-			}
-
-			// The owning workspace comes from the path and only from the path.
-			// This is the whole defence against a hot-reload loading an agent
-			// into another tenant: a SOUL.yaml has no say in where it belongs,
-			// so dropping a file into one workspace's directory cannot reach
-			// another, however the file is authored.
-			workspaceID, ok := workspaceForPath(dir, path)
-			if !ok {
-				return nil
-			}
-
-			def, err := l.parseFile(path)
-			if err != nil {
-				errs = append(errs, fmt.Errorf("load %s: %w", path, err))
-				return nil
-			}
-			if def.ID == SystemAgentID {
-				if !l.platformAgents {
-					// A file named the reserved ID would otherwise be PROMOTED
-					// below — enabled, given SystemTools, handed the full
-					// privileged confirm list. That turns "can write an agent
-					// file" into "has host shell", which is escalation by
-					// filename. Refused rather than downgraded to a normal
-					// agent, because a definition that silently loses its
-					// tools is a support case; a refusal with the path in it
-					// is an answer.
-					l.log.Warn("ignoring an agent that claims the reserved platform ID; "+
-						"platform agents are disabled in this deployment",
-						zap.String("path", path), zap.String("id", SystemAgentID))
+				if info.IsDir() {
+					if info.Name() == ".agent-history" {
+						return filepath.SkipDir
+					}
 					return nil
 				}
-				def.ID = SystemAgentID
-				def.Enabled = true
-				def.SystemTools = true
-				def.Channels = []string{"http"}
-				if len(def.ConfirmTools) == 0 {
-					def.ConfirmTools = []string{"package_install", "shell_exec", "run_script", "write_file", "http_request", "download_file", "install_library"}
-				} else if !containsExactString(def.ConfirmTools, "package_install") {
-					def.ConfirmTools = append(def.ConfirmTools, "package_install")
+				ext := filepath.Ext(path)
+				if ext != ".yaml" && ext != ".yml" {
+					return nil
 				}
-				def.SourcePath = path
-				key := agentKey{workspaceID, SystemAgentID}
+
+				// The owning workspace comes from the path and only from the path.
+				// This is the whole defence against a hot-reload loading an agent
+				// into another tenant: a SOUL.yaml has no say in where it belongs,
+				// so dropping a file into one workspace's directory cannot reach
+				// another, however the file is authored.
+				workspaceID, ok := l.workspaceForPath(dir, path)
+				if !ok {
+					return nil
+				}
+
+				def, err := l.parseFile(path)
+				if err != nil {
+					errs = append(errs, fmt.Errorf("load %s: %w", path, err))
+					return nil
+				}
+				if def.ID == SystemAgentID {
+					if !l.platformAgents {
+						// A file named the reserved ID would otherwise be PROMOTED
+						// below — enabled, given SystemTools, handed the full
+						// privileged confirm list. That turns "can write an agent
+						// file" into "has host shell", which is escalation by
+						// filename. Refused rather than downgraded to a normal
+						// agent, because a definition that silently loses its
+						// tools is a support case; a refusal with the path in it
+						// is an answer.
+						l.log.Warn("ignoring an agent that claims the reserved platform ID; "+
+							"platform agents are disabled in this deployment",
+							zap.String("path", path), zap.String("id", SystemAgentID))
+						return nil
+					}
+					def.ID = SystemAgentID
+					def.Enabled = true
+					def.SystemTools = true
+					def.Channels = []string{"http"}
+					if len(def.ConfirmTools) == 0 {
+						def.ConfirmTools = []string{"package_install", "shell_exec", "run_script", "write_file", "http_request", "download_file", "install_library"}
+					} else if !containsExactString(def.ConfirmTools, "package_install") {
+						def.ConfirmTools = append(def.ConfirmTools, "package_install")
+					}
+					def.SourcePath = path
+					key := agentKey{workspaceID, SystemAgentID}
+					l.agents[key] = def
+					found[key] = true
+					return nil
+				}
+
+				key := agentKey{workspaceID, def.ID}
 				l.agents[key] = def
 				found[key] = true
 				return nil
+			})
+			if err != nil {
+				errs = append(errs, fmt.Errorf("walk %s: %w", scanRoot, err))
 			}
-
-			key := agentKey{workspaceID, def.ID}
-			l.agents[key] = def
-			found[key] = true
-			return nil
-		})
-		if err != nil {
-			errs = append(errs, fmt.Errorf("walk %s: %w", dir, err))
 		}
 	}
 
@@ -721,7 +766,7 @@ func (l *Loader) UpsertInWorkspace(workspaceID, dir string, def *agent.Definitio
 		}
 	}
 
-	root := workspaceAgentRoot(dir, workspaceID)
+	root := l.workspaceAgentRoot(dir, workspaceID)
 	agentDir := filepath.Join(root, def.ID)
 	if err := os.MkdirAll(agentDir, 0755); err != nil {
 		return err
@@ -845,7 +890,7 @@ func (l *Loader) PurgeWorkspace(ctx context.Context, workspaceID string) (worksp
 	workspaceID = NormalizeWorkspace(workspaceID)
 	var removed workspacepurge.Removed
 	for _, dir := range l.dirs {
-		part, err := workspacepurge.PurgeTree(ctx, dir, workspaceID)
+		part, err := workspacepurge.PurgeLayoutTree(ctx, l.layout, dir, workspaceID)
 		if err != nil {
 			return removed, err
 		}
@@ -1085,7 +1130,7 @@ func (l *Loader) historyRoots(workspaceID, preferredDir string) []string {
 		if dir == "" {
 			return
 		}
-		root := filepath.Join(workspaceAgentRoot(dir, workspaceID), ".agent-history")
+		root := filepath.Join(l.workspaceAgentRoot(dir, workspaceID), ".agent-history")
 		for _, existing := range roots {
 			if existing == root {
 				return

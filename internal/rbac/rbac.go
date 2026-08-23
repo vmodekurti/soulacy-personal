@@ -65,6 +65,7 @@ const (
 	ResourceProviders   = "providers"
 	ResourceSkills      = "skills"
 	ResourceMCP         = "mcp"
+	ResourcePlugins     = "plugins"
 	ResourceKnowledge   = "knowledge"
 	ResourceBuilder     = "builder"
 	ResourceTemplates   = "templates"
@@ -135,6 +136,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 		ResourceProviders:   {ActionRead: true, ActionWrite: true},
 		ResourceSkills:      {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionInstall: true},
 		ResourceMCP:         {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionInstall: true},
+		ResourcePlugins:     {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionInstall: true},
 		ResourceKnowledge:   {ActionRead: true, ActionWrite: true, ActionDelete: true},
 		ResourceBuilder:     {ActionRead: true, ActionWrite: true},
 		ResourceTemplates:   {ActionRead: true, ActionWrite: true, ActionDelete: true},
@@ -155,6 +157,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 		ResourceProviders:   {ActionRead: true, ActionWrite: true},
 		ResourceSkills:      {ActionRead: true, ActionInstall: true},
 		ResourceMCP:         {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionInstall: true},
+		ResourcePlugins:     {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionInstall: true},
 		ResourceKnowledge:   {ActionRead: true, ActionWrite: true, ActionDelete: true},
 		ResourceBuilder:     {ActionWrite: true},
 		ResourceTemplates:   {ActionRead: true, ActionWrite: true},
@@ -175,6 +178,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 		ResourceProviders:   {ActionRead: true},
 		ResourceSkills:      {ActionRead: true, ActionWrite: true},
 		ResourceMCP:         {ActionRead: true, ActionWrite: true, ActionDelete: true},
+		ResourcePlugins:     {ActionRead: true},
 		ResourceKnowledge:   {ActionRead: true, ActionWrite: true, ActionDelete: true},
 		ResourceBuilder:     {ActionRead: true, ActionWrite: true},
 		ResourceTemplates:   {ActionRead: true, ActionWrite: true},
@@ -195,6 +199,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 		ResourceProviders:   {ActionRead: true},
 		ResourceSkills:      {ActionRead: true},
 		ResourceMCP:         {ActionRead: true, ActionWrite: true},
+		ResourcePlugins:     {ActionRead: true},
 		ResourceKnowledge:   {ActionRead: true, ActionWrite: true},
 		ResourceBuilder:     {ActionWrite: true},
 		ResourceTemplates:   {ActionRead: true, ActionWrite: true},
@@ -215,6 +220,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 		ResourceProviders:   {ActionRead: true},
 		ResourceSkills:      {ActionRead: true},
 		ResourceMCP:         {ActionRead: true},
+		ResourcePlugins:     {ActionRead: true},
 		ResourceKnowledge:   {ActionRead: true},
 		ResourceBuilder:     {},
 		ResourceTemplates:   {ActionRead: true},

@@ -83,7 +83,7 @@ Installing a skill through the GUI or the API triggers a rescan
 automatically; you can also force one:
 
 ```bash
-curl -X POST http://localhost:18789/api/v1/skills/rescan \
+curl -X POST http://localhost:1947/api/v1/skills/rescan \
   -H "Authorization: Bearer $SOULACY_API_KEY"
 ```
 

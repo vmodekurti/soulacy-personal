@@ -28,17 +28,17 @@
 ```bash
 cd ~/Documents/Documents*MacBook*1/Vasu/Personal/Development/agentic/soulacy
 go clean -cache && make gui && make build
-pkill -9 -f soulacy          # kill any stale gateway holding :18789
+pkill -9 -f soulacy          # kill any stale gateway holding :1947
 ./scripts/run-runtime.sh
 # then hard-refresh the browser: Cmd+Shift+R
 ```
 
 ### Build/deploy gotchas we hit (so you don't re-debug them)
 1. **Stale Go build cache** — `make build` silently reused a cached `gateway`/`studio` package object, so new routes/code never made it into the binary even though it relinked. Fix: `go clean -cache` before `make build`.
-2. **Stale process** — killing/restarting didn't help when an old gateway process was still bound to `:18789`. Confirm with `lsof -nP -iTCP:18789 -sTCP:LISTEN`, then `pkill -9 -f soulacy`.
+2. **Stale process** — killing/restarting didn't help when an old gateway process was still bound to `:1947`. Confirm with `lsof -nP -iTCP:1947 -sTCP:LISTEN`, then `pkill -9 -f soulacy`.
 3. **GUI vs binary mismatch** — a fresh `make gui` updates the served GUI, but new **routes** need `make build` + restart. If a new endpoint 404s but the new buttons appear, you rebuilt the GUI but not the binary.
 4. **`.git/HEAD.lock`** — committing from a sandbox left a stale lock; if git says "another process," `rm -f .git/HEAD.lock`.
-5. **Verify a route is live:** `curl -s -o /dev/null -w '%{http_code}\n' -X POST http://localhost:18789/api/v1/studio/fix-yaml` → `400/401` = registered, `404` = old binary.
+5. **Verify a route is live:** `curl -s -o /dev/null -w '%{http_code}\n' -X POST http://localhost:1947/api/v1/studio/fix-yaml` → `400/401` = registered, `404` = old binary.
 
 ---
 

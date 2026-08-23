@@ -1,6 +1,8 @@
 package gateway
 
 import (
+	"net"
+	"net/url"
 	"strings"
 	"time"
 
@@ -19,10 +21,52 @@ func (s *Server) handleWorkspaceLoginConfig(c *fiber.Ctx) error {
 	if err != nil {
 		return s.errMsg(c, fiber.StatusNotFound, "workspace was not found")
 	}
+	if config.OrganizationStatus == tenancy.WorkspaceSuspended {
+		return c.Status(fiber.StatusLocked).JSON(fiber.Map{"error": "This organization is temporarily unavailable. Contact your organization administrator or Soulacy deployment operator.", "workspace": config})
+	}
+	if config.WorkspaceStatus == tenancy.WorkspaceSuspended {
+		return c.Status(fiber.StatusLocked).JSON(fiber.Map{"error": "This workspace is temporarily unavailable. Contact your workspace owner or Soulacy deployment operator.", "workspace": config})
+	}
+	if config.WorkspaceStatus == tenancy.WorkspaceDeleting || config.WorkspaceStatus == tenancy.WorkspaceDeleted {
+		return c.Status(fiber.StatusGone).JSON(fiber.Map{"error": "This workspace is no longer available.", "workspace": config})
+	}
 	if config.IdentityStatus == "active" && config.ProviderType == "" {
 		config.ProviderType = providerTypeForIssuer(s.config().Auth.OIDCIssuer)
 	}
-	return c.JSON(fiber.Map{"workspace": config, "redirect_url": s.config().Auth.OIDCRedirectURL})
+	return c.JSON(fiber.Map{"workspace": config, "redirect_url": workspaceOIDCRedirectURL(c, s.config().Auth.OIDCRedirectURL)})
+}
+
+func workspaceOIDCRedirectURL(c *fiber.Ctx, configured string) string {
+	const callbackPath = "/api/v1/auth/oidc/callback"
+	requestURL, requestOK := validWorkspaceCallback(c.Protocol() + "://" + string(c.Context().Host()) + callbackPath)
+	configuredURL, configuredOK := validWorkspaceCallback(strings.TrimSpace(configured))
+	if configuredOK && !workspaceLoopbackHost(configuredURL.Hostname()) {
+		return configuredURL.String()
+	}
+	if requestOK {
+		return requestURL.String()
+	}
+	if configuredOK {
+		return configuredURL.String()
+	}
+	return ""
+}
+
+func validWorkspaceCallback(raw string) (*url.URL, bool) {
+	const callbackPath = "/api/v1/auth/oidc/callback"
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != callbackPath {
+		return nil, false
+	}
+	if u.Scheme != "https" && !(u.Scheme == "http" && workspaceLoopbackHost(u.Hostname())) {
+		return nil, false
+	}
+	return u, true
+}
+
+func workspaceLoopbackHost(host string) bool {
+	ip := net.ParseIP(host)
+	return strings.EqualFold(host, "localhost") || (ip != nil && ip.IsLoopback())
 }
 
 func providerTypeForIssuer(issuer string) string {
@@ -79,5 +123,9 @@ func (s *Server) handleWorkspaceIdentitySetup(c *fiber.Ctx) error {
 		}
 		return s.errMsg(c, fiber.StatusInternalServerError, "workspace identity provider could not be activated")
 	}
-	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"provider": provider, "login_url": "/w/" + provider.WorkspaceID})
+	loginRef := provider.WorkspaceID
+	if config, configErr := store.WorkspaceLoginConfig(c.UserContext(), provider.WorkspaceID); configErr == nil && config.WorkspaceSlug != "" {
+		loginRef = config.WorkspaceSlug
+	}
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"provider": provider, "login_url": "/w/" + loginRef})
 }

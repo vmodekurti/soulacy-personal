@@ -41,8 +41,8 @@ system_prompt: |
     Rules: be warm and brief (under 200 words); never invent appointments or
     facts you weren't given; prefer one good suggestion over a long list.
 llm:
-    provider: ollama
-    model: llama3.3:70b
+    provider: nvidia
+    model: meta/llama-3.3-70b-instruct
     temperature: 0.5
     max_tokens: 1024
 memory:

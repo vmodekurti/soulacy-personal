@@ -570,11 +570,11 @@ fi
 printf "  ${BOLD}%d.${NC} Start the gateway. On first run it will:\n" "$STEP"
 printf "     • Create ~/.soulacy/soulspace/ with sane defaults\n"
 printf "     • Generate an API key (printed once on stderr -- save it)\n"
-printf "     • Bind to http://127.0.0.1:18789\n"
+printf "     • Bind to http://127.0.0.1:1947\n"
 printf "     ${YELLOW}soulacy serve${NC}\n\n"
 STEP=$((STEP+1))
 printf "  ${BOLD}%d.${NC} Open the dashboard, paste the key from the banner:\n" "$STEP"
-printf "     ${YELLOW}http://127.0.0.1:18789${NC}\n\n"
+printf "     ${YELLOW}http://127.0.0.1:1947${NC}\n\n"
 STEP=$((STEP+1))
 printf "  ${BOLD}%d.${NC} Try the CLI:\n" "$STEP"
 printf "     ${YELLOW}sy doctor${NC}            -- check the workspace\n"

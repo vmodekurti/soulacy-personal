@@ -105,6 +105,24 @@ func TestRawMetricsAreRestrictedInMultiUserMode(t *testing.T) {
 	}
 }
 
+// Gateway logs and support bundles describe the shared process. Workspace
+// owners must use the tenant-scoped run ledger and agent action history rather
+// than receiving a tail of output that may mention another tenant.
+func TestDeploymentDiagnosticsRequirePlatformCredential(t *testing.T) {
+	src := readGatewaySource(t, "server.go")
+	for _, route := range []string{`api.Get("/logs"`, `api.Get("/support/bundle"`} {
+		line := findLine(t, src, route)
+		if !strings.Contains(line, "s.platformMW(") {
+			t.Fatalf("deployment diagnostic route is not platform-only: %s", line)
+		}
+	}
+
+	actions := readGatewaySource(t, "api.go")
+	if !strings.Contains(actions, "actions := s.actionLog(c)") {
+		t.Fatal("agent action history is not resolved through the request's workspace-scoped action log")
+	}
+}
+
 func writeFile(dir, name, body string) error {
 	return os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600)
 }

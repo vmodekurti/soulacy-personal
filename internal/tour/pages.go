@@ -97,6 +97,18 @@ var pages = map[string]page{
 		},
 	},
 
+	"logs": {
+		stage: StageEyes, nextAction: "", nextLabel: "",
+		role:         "The raw gateway record for this Personal deployment.",
+		contribution: "It exposes host-level failures that cannot be explained from an individual agent run alone.",
+		whenEmpty: func(InstallState) string {
+			return "There are no gateway log entries to inspect yet. In Personal mode this screen remains available because you operate the deployment as well as the agents running on it."
+		},
+		whenUsed: func(InstallState) string {
+			return "Use this when a provider, channel, or gateway operation fails before an agent can create a normal run trace. Team and Scale workspaces intentionally see only their workspace-scoped run activity instead."
+		},
+	},
+
 	"dashboard": {
 		stage: StageEyes, nextAction: "", nextLabel: "",
 		role:         "The overnight summary.",
@@ -213,18 +225,6 @@ var pages = map[string]page{
 		},
 	},
 
-	"logs": {
-		stage: StageEyes, nextAction: "", nextLabel: "",
-		role:         "The raw gateway log, live.",
-		contribution: "The last resort, for when a failure has no readable explanation anywhere else.",
-		whenEmpty: func(InstallState) string {
-			return "Try Runs before here. Runs explains failures in plain language; this is the unfiltered version for when that explanation is not enough."
-		},
-		whenUsed: func(InstallState) string {
-			return "Try Runs first — it explains failures in plain language and links them to the step that broke. Come here when that is not enough, or when something failed before a run even started."
-		},
-	},
-
 	"browser": {
 		stage: StageEyes, nextAction: "", nextLabel: "",
 		role:         "A replay of what a browsing agent saw and clicked.",
@@ -282,6 +282,18 @@ var pages = map[string]page{
 		},
 		whenUsed: func(InstallState) string {
 			return "Review who can enter this workspace and what each person can do. Membership changes apply to their next request, and owners can inspect the audit history here."
+		},
+	},
+
+	"workspace-admin": {
+		stage: StageKeeping, nextAction: "", nextLabel: "",
+		role:         "The workspace owner's operational controls, without deployment-wide authority.",
+		contribution: "Limits, automation credentials, audit evidence, exports, and recoverable deletion keep a workspace governable over its whole lifetime.",
+		whenEmpty: func(InstallState) string {
+			return "Start with limits that fit this workspace and issue automation credentials only when a non-interactive client actually needs one. Human members keep using organization sign-in."
+		},
+		whenUsed: func(InstallState) string {
+			return "Review limits and credentials periodically, use the audit trail when something changes unexpectedly, and create an export before any planned deletion."
 		},
 	},
 

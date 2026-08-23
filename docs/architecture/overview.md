@@ -14,7 +14,7 @@ flowchart TB
         WA[WhatsApp] --- HT[HTTP] --- SC["Sidecar channels<br/>(External Channel Protocol)"]
     end
 
-    subgraph Gateway["Gateway (Fiber, :18789)"]
+    subgraph Gateway["Gateway (Fiber, :1947)"]
         API["REST API /api/v1"]
         GUI["Embedded Svelte GUI"]
         WS["WebSocket /ws/events"]

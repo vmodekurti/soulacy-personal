@@ -60,7 +60,7 @@ func providerMap(t *testing.T, m map[string]any, id string) map[string]any {
 const baseConfig = `# Soulacy gateway configuration.
 server:
   host: 127.0.0.1
-  port: 18789
+  port: 1947
   api_key: "sy_existing"
 llm:
   default_provider: ollama
@@ -143,10 +143,14 @@ func TestPatchServerHost(t *testing.T) {
 func TestPatchDeploymentSettingsTeam(t *testing.T) {
 	p := writeTemp(t, baseConfig)
 	err := patchDeploymentSettings(p, deploymentSettings{
-		Mode:        "team",
-		PostgresDSN: "postgres://db/soulacy",
-		JWTSecret:   strings.Repeat("j", 32),
-		APIKey:      "sy_admin",
+		Mode:            "team",
+		PostgresDSN:     "postgres://db/soulacy",
+		JWTSecret:       strings.Repeat("j", 32),
+		APIKey:          "sy_admin",
+		NATSURL:         "tls://queue:4222",
+		NATSCredentials: "/run/secrets/nats.creds",
+		KMSProvider:     "awskms",
+		AWSKMSKeyID:     "alias/soulacy-test",
 	})
 	if err != nil {
 		t.Fatalf("patch deployment: %v", err)
@@ -161,7 +165,7 @@ func TestPatchDeploymentSettingsTeam(t *testing.T) {
 	if got := m["storage"].(map[string]any)["backend"]; got != "postgres" {
 		t.Fatalf("storage.backend = %v", got)
 	}
-	if got := m["executor"].(map[string]any)["backend"]; got != "docker" {
+	if got := m["executor"].(map[string]any)["backend"]; got != "worker" {
 		t.Fatalf("executor.backend = %v", got)
 	}
 	sandbox := m["runtime"].(map[string]any)["sandbox"].(map[string]any)
@@ -180,7 +184,10 @@ func TestPatchDeploymentSettingsScaleIsIdempotent(t *testing.T) {
 		PostgresDSN:         "postgres://db/soulacy",
 		JWTSecret:           strings.Repeat("j", 32),
 		APIKey:              "sy_admin",
-		NATSURL:             "nats://queue:4222",
+		NATSURL:             "tls://queue:4222",
+		NATSCredentials:     "/run/secrets/nats.creds",
+		KMSProvider:         "awskms",
+		AWSKMSKeyID:         "alias/soulacy-test",
 		SharedArtifactStore: "s3://soulacy-artifacts/prod",
 	}
 	for i := 0; i < 2; i++ {

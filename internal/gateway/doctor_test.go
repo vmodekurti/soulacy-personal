@@ -2,11 +2,17 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"testing"
+
+	"github.com/gofiber/fiber/v2"
 
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/secrets"
+	"github.com/soulacy/soulacy/internal/workspacesettings"
 )
 
 func TestGatewayDoctorProviderVaultBackedOK(t *testing.T) {
@@ -87,6 +93,61 @@ func TestGatewayDoctorLocalProviderDoesNotRequireKey(t *testing.T) {
 	check := firstProviderCheck(t, body)
 	if check["key_source"] != "not required" {
 		t.Fatalf("key_source = %v, want not required; check=%v", check["key_source"], check)
+	}
+}
+
+func TestGatewayDoctorResolvesWorkspaceVaultProviderWithoutGlobalRegistration(t *testing.T) {
+	s, _ := newTestGatewayWithLLM(t, "secret")
+	s.mutateConfig(func(cfg *config.Config) {
+		cfg.Deployment.Mode = config.DeploymentModeTeam
+		cfg.LLM.Providers = map[string]config.ProviderConfig{}
+	})
+
+	store, err := workspacesettings.NewStore(filepath.Join(t.TempDir(), "workspace-settings.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	s.SetWorkspaceSettingsStore(store)
+	vault := newMemVault()
+	s.SetCredentialVault(vault) // Deliberately wired after the store.
+
+	const workspaceID = "ws_a"
+	if _, err := store.Set(context.Background(), workspaceID, "usr_ws_a", workspacesettings.Settings{
+		LLM: workspacesettings.LLM{Providers: map[string]workspacesettings.Provider{
+			"nvidia": {BaseURL: "https://integrate.api.nvidia.com/v1", Model: "nvidia/test-model"},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := vault.Set(context.Background(), workspaceID, workspacesettings.SecretNamespace,
+		workspacesettings.ProviderAPIKey("nvidia"), []byte("nvapi-test")); err != nil {
+		t.Fatal(err)
+	}
+
+	checksApp := appAsWorkspace(t, s, workspaceID, func(app *fiber.App) {
+		app.Get("/doctor", s.handleDoctor)
+	})
+	resp, err := checksApp.Test(httptest.NewRequest(http.MethodGet, "/doctor", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	check := firstProviderCheck(t, body)
+	if check["id"] != "nvidia" || check["status"] != "ok" || check["registered"] != true {
+		t.Fatalf("workspace provider check = %v, want registered nvidia ok", check)
+	}
+	if check["key_source"] != "workspace vault" {
+		t.Fatalf("key_source = %v, want workspace vault", check["key_source"])
+	}
+	for _, id := range s.llmRouter.ProviderIDs() {
+		if id == "nvidia" {
+			t.Fatal("workspace provider leaked into the deployment-global router")
+		}
 	}
 }
 

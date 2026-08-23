@@ -11,7 +11,7 @@ Two binaries:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--gateway` | `http://localhost:18789` (or `cli.gateway_url` / `server.port` from config) | Gateway URL |
+| `--gateway` | `http://localhost:1947` (or `cli.gateway_url` / `server.port` from config) | Gateway URL |
 | `--api-key` | `server.api_key` from config | API key for gateway authentication |
 | `--json` | `false` | Output raw JSON |
 

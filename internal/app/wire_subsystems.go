@@ -32,6 +32,7 @@ import (
 	executordocker "github.com/soulacy/soulacy/internal/executor/docker"
 	"github.com/soulacy/soulacy/internal/executor/pool"
 	"github.com/soulacy/soulacy/internal/executor/process"
+	executorremote "github.com/soulacy/soulacy/internal/executor/remote"
 	executorssh "github.com/soulacy/soulacy/internal/executor/ssh"
 	"github.com/soulacy/soulacy/internal/extstorage"
 	"github.com/soulacy/soulacy/internal/gateway"
@@ -80,6 +81,9 @@ func (a *App) wireBrainMemory(ws config.Paths, stack *closerStack) *agentmemory.
 		return nil
 	}
 	brainStores := agentmemory.NewStores(brainMemDir)
+	if config.IsMultiUserMode(a.cfg.DeploymentMode()) {
+		brainStores.SetWorkspaceLayoutRoot(ws.Root)
+	}
 	stack.push("brain-memory", func() error { return brainStores.Close() }) // releases every workspace's E23 rulebook db
 	log.Info("agent brain memory enabled", zap.String("dir", brainMemDir))
 	return brainStores
@@ -91,17 +95,23 @@ func (a *App) wireLearning(ws config.Paths) *learning.Stores {
 		a.log.Warn("learning proposal store unavailable", zap.Error(err))
 		return nil
 	}
+	if config.IsMultiUserMode(a.cfg.DeploymentMode()) {
+		stores.SetWorkspaceLayoutRoot(ws.Root)
+	}
 	a.log.Info("learning proposal store ready", zap.String("path", ws.DB("learning")))
 	return stores
 }
 
 // wireMemory builds the file store and the SQLite archive. Both failures are
 // fatal. The archive's Close is registered on the stack.
-func (a *App) wireMemory(stack *closerStack) (*memory.FileStore, *memory.SQLiteArchive, error) {
+func (a *App) wireMemory(ws config.Paths, stack *closerStack) (*memory.FileStore, *memory.SQLiteArchive, error) {
 	cfg := a.cfg
 	fileStore, err := memory.NewFileStore(cfg.Memory.Dir)
 	if err != nil {
 		return nil, nil, fmt.Errorf("file store: %w", err)
+	}
+	if config.IsMultiUserMode(cfg.DeploymentMode()) {
+		fileStore.SetWorkspaceLayoutRoot(ws.Root)
 	}
 	archive, err := memory.NewSQLiteArchive(cfg.Memory.SQLitePath)
 	if err != nil {
@@ -130,6 +140,9 @@ func (a *App) wireStorageBackend(parent context.Context, ws config.Paths, archiv
 		if pgErr != nil {
 			return nil, nil, fmt.Errorf("postgres storage backend: %w", pgErr)
 		}
+		if config.IsMultiUserMode(cfg.DeploymentMode()) {
+			pgAL.SetWorkspaceLayoutRoot(ws.Root)
+		}
 		// pgAL.Close() flushes the async queue and closes the shared pgx pool.
 		stack.pushClose("postgres-storage", pgAL)
 		actionBackend = pgAL
@@ -142,6 +155,9 @@ func (a *App) wireStorageBackend(parent context.Context, ws config.Paths, archiv
 		sqAL, sqErr := actionlog.New(logsDir, actionsDB, log, actionlog.WithRetention(config.RetentionDuration(cfg.Runtime.Retention.ActionEvents, 90*24*time.Hour)))
 		if sqErr != nil {
 			return nil, nil, fmt.Errorf("sqlite action log: %w", sqErr)
+		}
+		if config.IsMultiUserMode(cfg.DeploymentMode()) {
+			sqAL.SetWorkspaceLayoutRoot(ws.Root)
 		}
 		stack.pushClose("sqlite-action-log", sqAL)
 		actionBackend = storagesqlite.NewActionLog(sqAL)
@@ -175,6 +191,9 @@ func (a *App) wireStorageBackend(parent context.Context, ws config.Paths, archiv
 		sqAL, sqErr := actionlog.New(logsDir, actionsDB, log, actionlog.WithRetention(config.RetentionDuration(cfg.Runtime.Retention.ActionEvents, 90*24*time.Hour)))
 		if sqErr != nil {
 			return nil, nil, fmt.Errorf("sqlite action log: %w", sqErr)
+		}
+		if config.IsMultiUserMode(cfg.DeploymentMode()) {
+			sqAL.SetWorkspaceLayoutRoot(ws.Root)
 		}
 		stack.pushClose("sqlite-action-log", sqAL)
 		actionBackend = storagesqlite.NewActionLog(sqAL)
@@ -238,6 +257,9 @@ func (a *App) wireLoaders(ws config.Paths, credVault credentials.Vault) (*runtim
 	// ── Agent Loader ─────────────────────────────────────────────────────────
 	loader := runtime.NewLoader(cfg.AgentDirs)
 	loader.SetLogger(log)
+	if config.IsMultiUserMode(cfg.DeploymentMode()) {
+		loader.SetWorkspaceLayoutRoot(ws.Root)
+	}
 	// Decided here, applied BEFORE LoadAll, because LoadAll is where a
 	// SOUL.yaml claiming the reserved ID would otherwise be promoted to a
 	// system-tools agent.
@@ -333,6 +355,7 @@ func (a *App) wireLoaders(ws config.Paths, credVault credentials.Vault) (*runtim
 	// and when they did every tenant ran on the operator's key. See
 	// internal/plugins/tenantsettings.go.
 	if config.IsMultiUserMode(cfg.DeploymentMode()) {
+		pluginStores.SetWorkspaceLayoutRoot(ws.Root)
 		pluginStores.RequireTenantSettings(vaultPluginSettings(credVault))
 		log.Info("credential-looking plugins_config values are per-workspace; a value a workspace " +
 			"has not supplied is withheld rather than inherited from the operator")
@@ -367,6 +390,9 @@ func (a *App) wireLoaders(ws config.Paths, credVault credentials.Vault) (*runtim
 	// name without modifying the platform copy (MU-017 criterion 1).
 	platformSkillDirs := skills.PlatformDirs(workDir, skillDirs)
 	skillStores := skills.NewStores(platformSkillDirs, ws.Skills, log)
+	if config.IsMultiUserMode(cfg.DeploymentMode()) {
+		skillStores.SetWorkspaceLayoutRoot(ws.Root)
+	}
 	skillLoader := skills.NewWithDirs(skillStores.ScanDirs(wsroot.PersonalWorkspaceID), log)
 	if errs := skillLoader.Scan(); len(errs) > 0 {
 		for _, e := range errs {
@@ -611,7 +637,7 @@ func (a *App) wireVector(archive *memory.SQLiteArchive, llmRouter *llm.Router) (
 
 // wirePythonExecutor selects the Python executor backend (process-per-call or
 // pre-forked pool). A failed pool degrades to the process executor.
-func (a *App) wirePythonExecutor(stack *closerStack, vault credentials.Vault) executor.Backend {
+func (a *App) wirePythonExecutor(stack *closerStack, vault credentials.Vault, queueBackend queue.Backend) executor.Backend {
 	cfg, log := a.cfg, a.log
 	switch cfg.Executor.Backend {
 	case "pool":
@@ -635,6 +661,9 @@ func (a *App) wirePythonExecutor(stack *closerStack, vault credentials.Vault) ex
 		return a.buildDockerExecutor()
 	case "ssh":
 		return a.buildSSHExecutor(vault)
+	case "worker":
+		log.Info("python executor: remote execution worker", zap.String("subject", executorremote.JobsSubject))
+		return executorremote.New(queueBackend)
 	default: // "process" or empty
 		log.Info("python executor: process-per-call",
 			zap.String("python_bin", cfg.Runtime.PythonBin))
@@ -659,7 +688,7 @@ func (a *App) buildDockerExecutor() executor.Backend {
 		zap.String("network", network),
 		zap.Int("volumes", len(cfg.Executor.DockerVolumes)),
 		zap.String("python_bin", cfg.Runtime.PythonBin))
-	return executordocker.NewWithVolumes(image, cfg.Runtime.PythonBin, network, cfg.Executor.DockerVolumes)
+	return executordocker.NewHardened(executordocker.Config{Image: image, PythonBin: cfg.Runtime.PythonBin, Network: network, Volumes: cfg.Executor.DockerVolumes, Runtime: cfg.Executor.DockerRuntime, RequireSignedImage: cfg.Executor.RequireSignedImage, CosignKey: cfg.Executor.CosignKey})
 }
 
 // buildSSHExecutor constructs the ssh backend. When executor.ssh_identity_credential
@@ -719,11 +748,16 @@ func writeTempIdentity(key string) (string, error) {
 // "ssh" are registered when their config is present (or when they are the server
 // default), so an agent can opt into container/remote execution even when the
 // global default is local, and vice versa.
-func (a *App) wireNamedExecutors(vault credentials.Vault) map[string]executor.Backend {
+func (a *App) wireNamedExecutors(vault credentials.Vault, queueBackend queue.Backend) map[string]executor.Backend {
 	cfg := a.cfg
-	out := map[string]executor.Backend{
-		"local": process.New(cfg.Runtime.PythonBin),
+	out := map[string]executor.Backend{"worker": executorremote.New(queueBackend)}
+	if config.IsMultiUserMode(cfg.DeploymentMode()) {
+		// An agent-level execution.backend override must never move tenant code
+		// back into the gateway. Team/Scale expose only the queue boundary; local,
+		// Docker, SSH, and cloud CLIs all execute from the control-plane process.
+		return out
 	}
+	out["local"] = process.New(cfg.Runtime.PythonBin)
 	if cfg.Executor.Backend == "docker" || strings.TrimSpace(cfg.Executor.DockerImage) != "" {
 		out["docker"] = a.buildDockerExecutor()
 	}
@@ -779,11 +813,16 @@ func (a *App) wireQueue(stack *closerStack) (queue.Backend, error) {
 		}
 	}
 	queueBackend, qok, qerr := registry.NewQueue(queueName, map[string]any{
-		"url":            cfg.Queue.NATSUrl,
-		"stream":         cfg.Queue.NATSStream,
-		"subject_prefix": cfg.Queue.NATSSubjectPrefix,
-		"ack_wait":       cfg.Queue.NATSAckWait,
-		"max_deliver":    cfg.Queue.NATSMaxDeliver,
+		"url":             cfg.Queue.NATSUrl,
+		"stream":          cfg.Queue.NATSStream,
+		"subject_prefix":  cfg.Queue.NATSSubjectPrefix,
+		"ack_wait":        cfg.Queue.NATSAckWait,
+		"max_deliver":     cfg.Queue.NATSMaxDeliver,
+		"credentials":     cfg.Queue.NATSCredentials,
+		"tls_ca":          cfg.Queue.NATSTLSCA,
+		"tls_cert":        cfg.Queue.NATSTLSCert,
+		"tls_key":         cfg.Queue.NATSTLSKey,
+		"tls_server_name": cfg.Queue.NATSTLSServerName,
 		// external storage sidecar keys (backend: "external", E24)
 		"id":           "queue-external",
 		"command":      cfg.Queue.Command,
@@ -804,26 +843,69 @@ func (a *App) wireQueue(stack *closerStack) (queue.Backend, error) {
 
 // wireCredentialVault builds the credential vault. Created before the channel
 // registry so plugin sidecar channels (E6/E7) can resolve their delegated
-// credentials at spawn. A KMS or store failure disables the vault (warn, not
-// fatal) and returns nil. The vault's Close registers on stack.
-func (a *App) wireCredentialVault(ws config.Paths, stack *closerStack) credentials.Vault {
+// credentials at spawn. Team and Scale fail closed on any KMS or store error;
+// Personal mode retains its compatibility warning. The vault's Close
+// registers on stack.
+func (a *App) wireCredentialVault(ctx context.Context, ws config.Paths, stack *closerStack) (credentials.Vault, error) {
 	log := a.log
 	vaultPath := ws.CredentialsDB()
 	// Persist the master secret next to the vault so credentials survive
 	// restarts even without a hardware machine id (e.g. in containers).
 	localKMS, kmsErr := credentials.NewLocalKMSWithStore(filepath.Dir(vaultPath))
 	if kmsErr != nil {
-		log.Warn("credential vault KMS init failed, vault disabled", zap.Error(kmsErr))
-		return nil
+		return nil, fmt.Errorf("credential vault legacy KMS: %w", kmsErr)
 	}
-	cv, cvErr := credentials.NewSQLiteVault(vaultPath, localKMS)
+	var wrapper credentials.KeyWrapper = localKMS
+	provider := strings.ToLower(strings.TrimSpace(a.cfg.Credentials.KMSProvider))
+	switch provider {
+	case "", "local":
+		provider = "local"
+	case "awskms", "aws-kms":
+		var err error
+		wrapper, err = credentials.NewAWSKMS(ctx, a.cfg.Credentials.AWSKMSKeyID, func(event credentials.KMSAuditEvent) {
+			log.Info("credential KMS operation", zap.String("provider", event.Provider), zap.String("operation", event.Operation), zap.String("workspace_id", event.WorkspaceID), zap.String("key_id", event.KeyID), zap.Bool("succeeded", event.Succeeded))
+		})
+		if err != nil {
+			return nil, fmt.Errorf("credential KMS: %w", err)
+		}
+	case "hashicorp", "vault", "vault-transit":
+		var err error
+		wrapper, err = credentials.NewVaultTransit(credentials.VaultTransitConfig{Address: a.cfg.Credentials.HashiCorpAddr, Mount: a.cfg.Credentials.HashiCorpMount, Key: a.cfg.Credentials.HashiCorpKey, Token: a.cfg.Credentials.HashiCorpToken, KubernetesRole: a.cfg.Credentials.HashiCorpKubernetesRole, JWTPath: a.cfg.Credentials.HashiCorpJWTPath,
+			Auditor: func(event credentials.KMSAuditEvent) {
+				log.Info("credential KMS operation", zap.String("provider", event.Provider), zap.String("operation", event.Operation), zap.String("workspace_id", event.WorkspaceID), zap.String("key_id", event.KeyID), zap.Bool("succeeded", event.Succeeded))
+			}})
+		if err != nil {
+			return nil, fmt.Errorf("credential KMS: %w", err)
+		}
+	default:
+		return nil, fmt.Errorf("credential KMS: unsupported provider %q", provider)
+	}
+	if config.IsMultiUserMode(a.cfg.DeploymentMode()) && provider == "local" && !a.cfg.HasUnsafeDeploymentAcknowledgement() {
+		return nil, fmt.Errorf("credential KMS: %s mode requires awskms or vault-transit; local key files are refused", a.cfg.DeploymentMode())
+	}
+	if config.IsMultiUserMode(a.cfg.DeploymentMode()) && provider == "local" {
+		log.Warn("credential KMS uses acknowledged unsafe local development fallback",
+			zap.String("deployment_mode", a.cfg.DeploymentMode()),
+			zap.String("acknowledgement", config.UnsafeDeploymentPrerequisitesAcknowledgement))
+	}
+	if provider != "local" {
+		probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		if err := credentials.VerifyKeyWrapper(probeCtx, wrapper); err != nil {
+			return nil, fmt.Errorf("credential KMS startup verification: %w", err)
+		}
+	}
+	cv, cvErr := credentials.NewSQLiteVaultWithWrapper(vaultPath, localKMS, wrapper)
 	if cvErr != nil {
+		if config.IsMultiUserMode(a.cfg.DeploymentMode()) {
+			return nil, fmt.Errorf("credential vault unavailable: %w", cvErr)
+		}
 		log.Warn("credential vault unavailable", zap.String("path", vaultPath), zap.Error(cvErr))
-		return nil
+		return nil, nil
 	}
 	stack.pushClose("credential-vault", cv)
-	log.Info("credential vault ready", zap.String("path", vaultPath))
-	return cv
+	log.Info("credential vault ready", zap.String("path", vaultPath), zap.String("kms_provider", provider))
+	return cv, nil
 }
 
 // wireSecrets (SEC-8) migrates any plaintext secrets in config.yaml into the
@@ -1087,12 +1169,14 @@ type engineDeps struct {
 	pluginStores   *plugins.Stores
 	pyExecutor     executor.Backend
 	namedExecutors map[string]executor.Backend
+	queueBackend   queue.Backend
 	brainStores    *agentmemory.Stores
 	learningStore  *learning.Stores
 	ollamaAPIKey   string
 	searchProvider string
 	searchAPIKey   string
 	toolTimeout    time.Duration
+	workspaceRoot  string
 	// stack registers the MCP pool for shutdown; it owns processes the
 	// boot-time client does not.
 	stack *closerStack
@@ -1109,6 +1193,9 @@ func (a *App) wireEngine(d engineDeps) *runtime.Engine {
 		cfg.Runtime.PythonBin, d.toolTimeout, log, d.hub, d.skillLoader, d.ollamaAPIKey, d.mcpClient, d.knowledgeSvc,
 		cfg.Runtime.AllowSystemAgents, d.vectorStore, d.pluginProvider,
 	)
+	if config.IsMultiUserMode(cfg.DeploymentMode()) {
+		engine.SetWorkspaceLayoutRoot(d.workspaceRoot)
+	}
 	filesystemRoots := append([]string(nil), cfg.Runtime.FilesystemRoots...)
 	if len(filesystemRoots) == 0 {
 		if ws, err := config.ResolveWorkspace(); err == nil {
@@ -1226,7 +1313,11 @@ func (a *App) wireEngine(d engineDeps) *runtime.Engine {
 			// The engine narrows the mount to the running workspace's own tree
 			// (see workspaceScratchDir); roots[0] is what makes that legal
 			// without letting any caller name an arbitrary host path.
-			engine.SetPrivilegedCommandRunner(runtime.DockerPrivilegedRunner{Workspace: sandboxWorkDir, Root: roots[0], Image: sbx.Image, Limits: limits, PIDs: sbx.PIDs})
+			if strings.EqualFold(cfg.Executor.Backend, "worker") {
+				engine.SetPrivilegedCommandRunner(executorremote.NewPrivilegedRunner(d.queueBackend))
+			} else {
+				engine.SetPrivilegedCommandRunner(runtime.DockerPrivilegedRunner{Workspace: sandboxWorkDir, Root: roots[0], Image: sbx.Image, Limits: limits, PIDs: sbx.PIDs, ContainerRuntime: sbx.ContainerRuntime, RequireSignedImage: sbx.RequireSignedImage, CosignKey: sbx.CosignKey, EgressProxy: sbx.EgressProxy, EgressNetwork: sbx.EgressNetwork, AllowedEgressHosts: sbx.AllowedEgressHosts})
+			}
 			log.Info("privileged tool isolation enabled", zap.String("mode", "docker"), zap.String("image", sbx.Image), zap.String("network", "none"), zap.String("workspace", sandboxWorkDir))
 		}
 	} else {

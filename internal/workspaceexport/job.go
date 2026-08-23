@@ -118,12 +118,17 @@ var validExportID = regexp.MustCompile(`^[a-zA-Z0-9_-]{8,64}$`)
 // filter reads another tenant's rows, whereas a handler that forgets to pass a
 // workspace here reads the personal root and finds nothing.
 type Store struct {
-	root string
+	root   string
+	layout wsroot.Layout
 }
 
 // NewStore roots a store at base. base is the deployment data directory; each
 // workspace's exports live beneath its own wsroot directory.
 func NewStore(base string) *Store { return &Store{root: base} }
+
+// SetWorkspaceLayoutRoot enables the coherent Team/Scale layout. Personal
+// mode deliberately leaves this unset and retains its historical paths.
+func (s *Store) SetWorkspaceLayoutRoot(root string) { s.layout = wsroot.NewLayout(root) }
 
 // dir resolves one export's directory, refusing an ID that could escape.
 func (s *Store) dir(workspaceID, exportID string) (string, error) {
@@ -134,7 +139,7 @@ func (s *Store) dir(workspaceID, exportID string) (string, error) {
 }
 
 func (s *Store) workspaceDir(workspaceID string) string {
-	return filepath.Join(wsroot.Dir(s.root, wsroot.Normalize(workspaceID)), "exports")
+	return filepath.Join(s.layout.Dir(s.root, wsroot.Normalize(workspaceID)), "exports")
 }
 
 const (

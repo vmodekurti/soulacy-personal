@@ -93,5 +93,5 @@ COPY --from=gobuild --chown=soulacy /out/sy      /out/sy
 
 # Default entrypoint — useful for `docker run` smoke tests.
 ENV SOULACY_CONFIG_PATH=/home/soulacy/.soulacy/config.yaml
-EXPOSE 18789
+EXPOSE 1947
 ENTRYPOINT ["/out/soulacy", "serve"]

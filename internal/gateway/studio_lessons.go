@@ -39,6 +39,26 @@ func (s *Server) studioLearningEnabled() bool {
 // run-trace resolution: explicit env → workspace → ~/.soulacy. Returns "" when
 // no home/workspace is resolvable (learning then silently no-ops).
 func lessonsPath() string {
+	dbPath := lessonsBasePath()
+	if dbPath == "" {
+		return ""
+	}
+	legacyPath := strings.TrimSuffix(dbPath, filepath.Ext(dbPath)) + ".json"
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		if _, legacyErr := os.Stat(legacyPath); legacyErr == nil {
+			// Move the legacy array into the new path. LessonStore detects JSON,
+			// preserves it as .legacy.json, and imports every row into sqlite-vec.
+			_ = os.Rename(legacyPath, dbPath)
+		}
+	}
+	return dbPath
+}
+
+// lessonsBasePath resolves the configured lesson database without migrating
+// anything. Destructive lifecycle operations use this pure form: deleting one
+// named workspace must never rename files in the Personal workspace as a side
+// effect of merely calculating the tenant path.
+func lessonsBasePath() string {
 	if p := os.Getenv("SOULACY_STUDIO_LESSONS"); p != "" {
 		return p
 	}
@@ -51,16 +71,7 @@ func lessonsPath() string {
 	if ws == "" {
 		return ""
 	}
-	dbPath := filepath.Join(ws, "studio-lessons.db")
-	legacyPath := filepath.Join(ws, "studio-lessons.json")
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-		if _, legacyErr := os.Stat(legacyPath); legacyErr == nil {
-			// Move the legacy array into the new path. LessonStore detects JSON,
-			// preserves it as .legacy.json, and imports every row into sqlite-vec.
-			_ = os.Rename(legacyPath, dbPath)
-		}
-	}
-	return dbPath
+	return filepath.Join(ws, "studio-lessons.db")
 }
 
 type lessonEmbedAdapter struct {

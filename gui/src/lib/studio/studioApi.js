@@ -293,18 +293,18 @@ export const bridge = {
     api.studio.codegen({ nodeId, description, workflow }),
 
   // Studio model picker: read current config + set the llm.studio override.
-  getConfig: () => api.config.get(),
+  getConfig: () => api.workspaceConfig.get(),
   providerModels: (id) => api.providers.models(id),
   setStudioModel: (provider, model) =>
-    api.config.patch({ llm: { studio: { provider, model } } }),
+    api.workspaceConfig.patch({ llm: { studio: { provider, model } } }),
   // Story 9 (Cohort B): intent-named preset catalog — "fast local" / "reliable
   // local" / "cloud quality". Persisted via the same config patch pipeline.
   presets: () => apiFetch('/studio/presets'),
   setStudioPreset: (preset) =>
-    api.config.patch({ llm: { studio: { preset } } }),
+    api.workspaceConfig.patch({ llm: { studio: { preset } } }),
   // Story 9 M (Cohort C): default generate UX ('streamed' | 'wizard').
   setBuildUX: (mode) =>
-    api.config.patch({ llm: { studio: { build_ux: mode } } }),
+    api.workspaceConfig.patch({ llm: { studio: { build_ux: mode } } }),
   // Streamed generate pipeline — emits one PipelineEvent per phase-boundary
   // and a terminating `done` frame with the full PipelineResult.
   // `signal` aborts the stream; the server cancels the run when the connection

@@ -52,7 +52,7 @@ Set `server.api_key` before binding to a non-loopback address.
 ```yaml
 server:
   host: "127.0.0.1"
-  port: 18789
+  port: 1947
   api_key: "sy_replace_with_a_long_random_secret"
 ```
 
@@ -97,7 +97,7 @@ The `executor` block chooses where Python tools and Studio Python blocks run.
 
 ```yaml
 executor:
-  backend: process   # process | pool | docker | ssh
+  backend: process   # personal only: process | pool | docker | ssh
   workers: 4         # pool only
 ```
 
@@ -127,6 +127,24 @@ executor:
 Docker and SSH execute the same Python harness as the local backend, so workflow
 behavior stays consistent. They do not automatically copy local files or host
 packages; install needed libraries in the image or remote environment.
+
+Team and Scale require the `worker` backend. The gateway publishes jobs to
+NATS and the separate `soulacy-worker` binary executes them in a signed,
+digest-pinned image under gVisor:
+
+```yaml
+executor:
+  backend: worker
+  docker_image: registry.example/soulacy-execution@sha256:<digest>
+  docker_network: none
+  docker_runtime: runsc
+  require_signed_image: true
+  cosign_key: /etc/soulacy/execution-image.pub
+```
+
+The worker verifies Docker, `runsc`, and the Cosign signature before it
+subscribes for jobs. Any readiness failure exits the worker; there is no local
+process fallback.
 
 ## System Tools (SEC-3)
 

@@ -10,7 +10,7 @@ import (
 func validConfig() *Config {
 	c := &Config{}
 	c.Deployment.Mode = DeploymentModePersonal
-	c.Server.Port = 18789
+	c.Server.Port = 1947
 	c.Runtime.MaxConcurrentSessions = 100
 	c.Runtime.DefaultMaxTurns = 20
 	c.Runtime.MaxTurnsCeiling = 50
@@ -37,9 +37,20 @@ func validTeamConfig() *Config {
 	c.Server.APIKey = "sy_bootstrap"
 	c.Storage.Backend = "postgres"
 	c.Storage.PostgresDSN = "postgres://localhost/soulacy"
-	c.Executor.Backend = "docker"
+	c.Queue.Backend = "nats"
+	c.Queue.NATSUrl = "tls://nats.internal:4222"
+	c.Queue.NATSCredentials = "/var/run/secrets/nats/soulacy.creds"
+	c.Credentials.KMSProvider = "awskms"
+	c.Credentials.AWSKMSKeyID = "alias/soulacy-test"
+	c.Executor.Backend = "worker"
+	c.Executor.DockerImage = "registry.example/soulacy-worker@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	c.Executor.DockerRuntime = "runsc"
+	c.Executor.RequireSignedImage = true
 	c.Runtime.Sandbox.Enabled = true
 	c.Runtime.Sandbox.Mode = "docker"
+	c.Runtime.Sandbox.Image = c.Executor.DockerImage
+	c.Runtime.Sandbox.ContainerRuntime = "runsc"
+	c.Runtime.Sandbox.RequireSignedImage = true
 	return c
 }
 
@@ -70,7 +81,7 @@ func TestValidate_TeamRequirements(t *testing.T) {
 	if err == nil {
 		t.Fatal("unsafe team config unexpectedly passed")
 	}
-	for _, field := range []string{"auth.mode", "auth.jwt_secret", "server.api_key", "storage", "executor.backend", "runtime.sandbox"} {
+	for _, field := range []string{"auth.mode", "auth.jwt_secret", "server.api_key", "storage", "queue.backend", "credentials.kms_provider", "executor.backend", "runtime.sandbox"} {
 		if !strings.Contains(err.Error(), field) {
 			t.Errorf("team validation error missing %q: %v", field, err)
 		}
@@ -81,7 +92,7 @@ func TestValidate_ScaleRequirements(t *testing.T) {
 	c := validTeamConfig()
 	c.Deployment.Mode = DeploymentModeScale
 	err := c.Validate()
-	if err == nil || !strings.Contains(err.Error(), "queue.backend") || !strings.Contains(err.Error(), "shared_artifact_store") {
+	if err == nil || !strings.Contains(err.Error(), "shared_artifact_store") {
 		t.Fatalf("scale requirements not enforced: %v", err)
 	}
 	c.Queue.Backend = "nats"
@@ -174,13 +185,16 @@ func TestValidate_AccumulatesAllErrors(t *testing.T) {
 func TestValidateOIDCInteractiveRequirements(t *testing.T) {
 	c := validConfig()
 	c.Auth.OIDCIssuer = "https://issuer.example"
-	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "oidc_client_id") || !strings.Contains(err.Error(), "oidc_redirect_url") || !strings.Contains(err.Error(), "auth.mode=jwt") {
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "oidc_client_id") || !strings.Contains(err.Error(), "auth.mode=jwt") {
 		t.Fatalf("missing OIDC requirements: %v", err)
 	}
 	c.Auth.Mode = "jwt"
 	c.Auth.JWTSecret = strings.Repeat("a", 32)
 	c.Auth.OIDCClientID = "soulacy"
-	c.Auth.OIDCRedirectURL = "http://127.0.0.1:18789/api/v1/auth/oidc/callback"
+	if err := c.Validate(); err != nil {
+		t.Fatalf("request-derived callback should be valid without an override: %v", err)
+	}
+	c.Auth.OIDCRedirectURL = "http://127.0.0.1:1947/api/v1/auth/oidc/callback"
 	if err := c.Validate(); err != nil {
 		t.Fatalf("loopback development callback should be valid: %v", err)
 	}

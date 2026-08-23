@@ -87,6 +87,18 @@ func (s *Server) vaultDoctorCheck(c *fiber.Ctx) doctorVaultCheck {
 }
 
 func (s *Server) providerDoctorChecks(c *fiber.Ctx) []doctorProviderCheck {
+	if s.authorizationRequired() {
+		if _, ok := identityForWorkspaceSettings(c); ok {
+			checks, err := s.workspaceProviderDoctorChecks(c)
+			if err == nil {
+				return checks
+			}
+			return []doctorProviderCheck{{
+				ID: "workspace", Status: "fail", Detail: "workspace provider readiness could not be determined",
+				Remedy: "verify the workspace settings store and credential vault", KeySource: "unavailable",
+			}}
+		}
+	}
 	registered := map[string]bool{}
 	if s.llmRouter != nil {
 		for _, id := range s.llmRouter.ProviderIDs() {

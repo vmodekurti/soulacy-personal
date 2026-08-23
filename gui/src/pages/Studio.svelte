@@ -2771,15 +2771,13 @@ Use null for fields that are not present.`
 
   // From the preflight dialog: proceed to save despite warnings (only reachable
   // when there are no blockers).
-  // The reason the operator gave for accepting the warnings. Required, and sent
-  // with the save so the acceptance is auditable. A one-click bypass records
-  // nothing, which makes "why is this deployed with a known warning?"
-  // unanswerable later — usually at the exact moment someone needs the answer.
-  let acceptReason = ''
+  // Explicit warning acknowledgement. Warnings may be overridden only after
+  // the operator answers Yes; No keeps the save gated and leaves the repair
+  // actions available. The affirmative decision is recorded with the save.
+  let acceptWarnings = ''
   $: preflightHasBlockers = !!(preflight && preflight.blockers && preflight.blockers.length)
   $: preflightHasWarnings = !!(preflight && preflight.warnings && preflight.warnings.length)
-  // A justification is only demanded when warnings are actually being accepted.
-  $: canProceedPastPreflight = !preflightHasBlockers && (!preflightHasWarnings || !!acceptReason.trim())
+  $: canProceedPastPreflight = !preflightHasBlockers && (!preflightHasWarnings || acceptWarnings === 'yes')
 
   // ── Wizard IA: Describe › Build › Test › Save ─────────────────────────────
   // The step the user is ON. `viewMode` (plan / canvas / code) becomes
@@ -3081,6 +3079,7 @@ Use null for fields that are not present.`
   function cancelPreflight() {
     if (saving) return
     closePreflight()
+    acceptWarnings = ''
   }
 
   // Jump from a validation blocker/warning to the offending block: close the
@@ -3105,6 +3104,7 @@ Use null for fields that are not present.`
     const subject = gateSubject()
     if (!subject || rechecking) return
     rechecking = true
+    acceptWarnings = ''
     try { preflight = await runStudioContract(subject) } catch (_) { /* keep current */ }
     finally { rechecking = false }
   }
@@ -3508,7 +3508,10 @@ Use null for fields that are not present.`
   async function doSave(acceptPrivilegedExposure, grants) {
     saveError = ''
     try {
-      const res = await bridge.save(workflow, acceptPrivilegedExposure, grants, acceptReason.trim(), initialGeneratedWorkflow)
+      const warningAcceptance = acceptWarnings === 'yes'
+        ? 'Warnings accepted by workspace operator.'
+        : ''
+      const res = await bridge.save(workflow, acceptPrivilegedExposure, grants, warningAcceptance, initialGeneratedWorkflow)
       const id = res.agentId
       loadedAgentId = id || loadedAgentId
       // A workflow that delegates to a peer the workspace didn't have causes
@@ -3526,7 +3529,7 @@ Use null for fields that are not present.`
         : `Saved as disabled agent ${id} — enable it from Deployed.${alsoMade}`
       // The justification belongs to the save that consumed it; carrying it into
       // the next one would silently reuse a reason the user never re-affirmed.
-      acceptReason = ''
+      acceptWarnings = ''
       $editAgent = res.agentId
       // A saved draft is finished work, not work-in-progress.
       //
@@ -4363,7 +4366,8 @@ Use null for fields that are not present.`
   // ── Studio model picker (llm.studio) ─────────────────────────────────────
   // Lets the developer choose which IN-FRAMEWORK provider/model Studio uses for
   // its reasoning + code generation, without editing config.yaml by hand.
-  let modelPicker = { open: false, provider: '', model: '', models: [], saving: false, error: '' }
+  let modelPicker = { open: false, provider: '', defaultProvider: '', model: '', models: [], saving: false, error: '' }
+  $: modelPickerUsesNVIDIA = modelPicker.provider === 'nvidia' || (!modelPicker.provider && modelPicker.defaultProvider === 'nvidia')
   let studioModelLabel = 'default'
 
   // Story 9 (Cohort B) — intent-named runtime presets. `studioPresets` holds
@@ -4592,12 +4596,12 @@ Use null for fields that are not present.`
   //              what lands in SOUL.yaml, and until now Studio gave you no way
   //              to choose it: you got the workspace default or nothing.
   async function openModelPicker() {
-    modelPicker = { open: true, target: 'studio', provider: '', model: '', models: [], saving: false, error: '' }
+    modelPicker = { open: true, target: 'studio', provider: '', defaultProvider: '', model: '', models: [], saving: false, error: '' }
     resetModelChooser()
     try {
       const cfg = await bridge.getConfig()
       const st = (cfg && cfg.llm && cfg.llm.studio) || {}
-      modelPicker = { ...modelPicker, provider: st.provider || '', model: st.model || '' }
+      modelPicker = { ...modelPicker, provider: st.provider || '', defaultProvider: (cfg && cfg.llm && cfg.llm.default_provider) || '', model: st.model || '' }
       if (st.provider) loadModelsFor(st.provider)
     } catch (e) {
       modelPicker = { ...modelPicker, error: e.message || 'could not load config' }
@@ -4609,7 +4613,7 @@ Use null for fields that are not present.`
   // what would actually happen rather than an empty box.
   async function openAgentModelPicker() {
     const cur = (workflow && workflow.llm) || {}
-    modelPicker = { open: true, target: 'agent', provider: cur.provider || '', model: cur.model || '', models: [], saving: false, error: '' }
+    modelPicker = { open: true, target: 'agent', provider: cur.provider || '', defaultProvider: '', model: cur.model || '', models: [], saving: false, error: '' }
     resetModelChooser()
     try {
       if (!cur.provider) {
@@ -6091,12 +6095,12 @@ Use null for fields that are not present.`
                       >
                         ⏱ Open “{ex.action.nodeId}”
                       </button>
-                      <span class="try-fix-hint">Raise this block's timeout, or set search.timeout in config.yaml.</span>
+                      <span class="try-fix-hint">Raise this block's timeout, or change the web-search timeout in Workspace settings.</span>
                     {:else if ex.action && ex.action.kind === 'tools'}
                       <span class="try-fix-hint">Add the missing tool to this agent, or install the MCP server / skill that provides it.</span>
-                    {:else if ex.action && ex.action.kind === 'providers'}
-                      <a class="btn btn-sm cv-fixbtn primary" href="#providers" data-tooltip="Open Providers to re-test the key">🔑 Open Providers</a>
-                      <span class="try-fix-hint">Re-test the key, then run again.</span>
+                    {:else if ex.action && ex.action.kind === 'secrets'}
+                      <a class="btn btn-sm cv-fixbtn primary" href="#secrets" data-tooltip="Open workspace Secrets to update the credential">🔑 Open Secrets</a>
+                      <span class="try-fix-hint">Update this workspace's credential, then run again.</span>
                     {:else if ex.action && ex.action.kind === 'channels'}
                       <a class="btn btn-sm cv-fixbtn primary" href="#delivery" data-tooltip="Open channel settings">📣 Open Delivery</a>
                       <span class="try-fix-hint">Check the destination id and the bot's access.</span>
@@ -7213,10 +7217,11 @@ Use null for fields that are not present.`
           {:else}
             Which provider/model should Studio use for its reasoning and code
             generation? Uses your configured providers — leave provider blank to
-            use the global default.
+            use the workspace default.
           {/if}
         </p>
         {#if modelPicker.error}<div class="strip strip-error">⚠ {modelPicker.error}</div>{/if}
+        {#if modelPickerUsesNVIDIA}<div class="strip strip-warn nvidia-limit-warning">⚠ NVIDIA’s hosted Developer endpoint is for prototyping and may enforce model- and account-dependent token, rate, or availability limits. Use workspace budgets and an entitled or self-hosted endpoint for production.</div>{/if}
         <label class="field-label" for="mp-provider">provider</label>
         <select id="mp-provider" value={modelPicker.provider} on:change={(e) => pickProvider(e.target.value)}>
           <option value="">(default provider)</option>
@@ -7583,7 +7588,7 @@ Use null for fields that are not present.`
   <!-- Pre-save validation: blockers must be fixed; warnings can be saved over. -->
   {#if preflight}
     <div class="modal-backdrop" on:click|self={cancelPreflight} role="presentation">
-      <div class="modal refine-modal" role="dialog" aria-modal="true" aria-labelledby="preflight-title">
+      <div class="modal refine-modal preflight-modal" role="dialog" aria-modal="true" aria-labelledby="preflight-title">
         <h2 id="preflight-title" class="modal-title">
           {#if preflight.blockers && preflight.blockers.length}Fix these before saving{:else}Ready to save — a few warnings{/if}
         </h2>
@@ -7688,22 +7693,22 @@ Use null for fields that are not present.`
           onDestination={chooseReadinessDestination}
         />
 
-        <!-- A reason is required only when there is something to justify.
-             Requiring it unconditionally meant that once "Fix automatically"
-             cleared every blocker AND every warning, the save button stayed
-             disabled with nothing left to explain — the check outlived its
-             reason for existing. -->
+        <!-- Saving past warnings is a deliberate binary acknowledgement. -->
         {#if !preflightHasBlockers && preflightHasWarnings}
-          <div class="accept-reason">
-            <label for="accept-why">Why are these warnings acceptable?</label>
-            <input
-              id="accept-why"
-              type="text"
-              bind:value={acceptReason}
-              placeholder="e.g. the delivery channel is configured in production only"
-              disabled={saving || fixing}
-            />
-          </div>
+          <fieldset class="warning-acceptance" disabled={saving || fixing}>
+            <legend>Are these warnings acceptable?</legend>
+            <label class:chosen={acceptWarnings === 'yes'}>
+              <input type="radio" name="warning-acceptance" value="yes" bind:group={acceptWarnings} />
+              Yes
+            </label>
+            <label class:chosen={acceptWarnings === 'no'}>
+              <input type="radio" name="warning-acceptance" value="no" bind:group={acceptWarnings} />
+              No
+            </label>
+            {#if acceptWarnings === 'no'}
+              <span class="warning-choice-help">Return to editing or fix the warnings before saving.</span>
+            {/if}
+          </fieldset>
         {/if}
         <div class="modal-actions">
           <button class="btn" on:click={cancelPreflight} disabled={saving || fixing}>Back to editing</button>
@@ -7716,7 +7721,7 @@ Use null for fields that are not present.`
           {#if !preflightHasBlockers}
             <button class="btn primary" on:click={proceedAfterPreflight}
               disabled={saving || fixing || !canProceedPastPreflight}
-              data-tooltip={canProceedPastPreflight ? '' : 'Give a reason to record with this save'}>
+              data-tooltip={canProceedPastPreflight ? '' : 'Select Yes to acknowledge these warnings'}>
               <!-- "Save anyway" only makes sense when something is being
                    overridden. With a clean report it is just Save. -->
               {preflightHasWarnings ? 'Save anyway' : 'Save'}

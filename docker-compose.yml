@@ -8,7 +8,7 @@
 # Quick start:
 #   docker compose up
 #
-# Then open: http://localhost:18789
+# Then open: http://localhost:1947
 #
 # Configuration:
 #   Copy .env.example to .env and edit before first run.
@@ -26,7 +26,7 @@ services:
     container_name: soulacy
     restart: unless-stopped
     ports:
-      - "${SOULACY_PORT:-18789}:18789"
+      - "${SOULACY_PORT:-1947}:1947"
     volumes:
       # Persist agents, plugins, skills, and local config.
       - soulacy_data:/home/soulacy/.soulacy
@@ -44,12 +44,13 @@ services:
       SOULACY_VECTOR_COLLECTION: soulacy_memory
       SOULACY_VECTOR_DIMS: 768
 
-      # LLM — default to Ollama (can be overridden in .env)
-      SOULACY_LLM_DEFAULT_PROVIDER: ${SOULACY_LLM_DEFAULT_PROVIDER:-ollama}
-      SOULACY_LLM_PROVIDERS_OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      SOULACY_LLM_PROVIDERS_OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3}
+      # LLM — NVIDIA NIM/API Catalog is the shipped default.
+      SOULACY_LLM_DEFAULT_PROVIDER: ${SOULACY_LLM_DEFAULT_PROVIDER:-nvidia}
+      SOULACY_LLM_PROVIDERS_NVIDIA_API_KEY: ${SOULACY_LLM_PROVIDERS_NVIDIA_API_KEY:-}
+      SOULACY_LLM_PROVIDERS_NVIDIA_BASE_URL: ${SOULACY_LLM_PROVIDERS_NVIDIA_BASE_URL:-https://integrate.api.nvidia.com/v1}
+      SOULACY_LLM_PROVIDERS_NVIDIA_MODEL: ${SOULACY_LLM_PROVIDERS_NVIDIA_MODEL:-meta/llama-3.3-70b-instruct}
 
-      # Bind — 0.0.0.0 so the container's port mapping (ports: 18789:18789) can
+      # Bind — 0.0.0.0 so the container's port mapping (ports: 1947:1947) can
       # actually forward host traffic into the gateway. Without this the
       # gateway defaults to 127.0.0.1 (the container's loopback), the port
       # mapping delivers to an unbound address, and curl on the host gets

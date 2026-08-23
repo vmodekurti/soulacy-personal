@@ -3,6 +3,7 @@ package learning
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/soulacy/soulacy/internal/workspacepurge"
 	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
@@ -468,8 +470,18 @@ func dedupeKey(p Proposal) string {
 // move.
 type Stores struct {
 	base   string
+	layout wsroot.Layout
 	mu     sync.Mutex
 	stores map[string]*Store
+}
+
+func (s *Stores) SetWorkspaceLayoutRoot(root string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.layout = wsroot.NewLayout(root)
 }
 
 // NewStores takes the path a single-tenant installation already uses. Other
@@ -500,13 +512,38 @@ func (s *Stores) For(workspaceID string) *Store {
 	if existing, ok := s.stores[workspaceID]; ok {
 		return existing
 	}
-	store, err := NewStore(wsroot.File(s.base, workspaceID))
+	store, err := NewStore(s.layout.File(s.base, workspaceID))
 	if err != nil {
 		s.stores[workspaceID] = nil
 		return nil
 	}
 	s.stores[workspaceID] = store
 	return store
+}
+
+// PurgeWorkspace removes one tenant's proposal file and evicts the cached
+// handle. Personal is deliberately refused by workspacepurge: deleting a
+// workspace must never become an installation-wide data wipe.
+func (s *Stores) PurgeWorkspace(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+	if s == nil {
+		return workspacepurge.Removed{}, nil
+	}
+	workspaceID = wsroot.Normalize(workspaceID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var (
+		removed workspacepurge.Removed
+		err     error
+	)
+	if s.layout.Root() != "" {
+		removed, err = workspacepurge.PurgeLayoutTree(ctx, s.layout, s.base, workspaceID)
+	} else {
+		removed, err = workspacepurge.PurgeTree(ctx, s.base, workspaceID)
+	}
+	if err == nil {
+		delete(s.stores, workspaceID)
+	}
+	return removed, err
 }
 
 // ── evidence lineage ─────────────────────────────────────────────────────────

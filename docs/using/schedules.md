@@ -25,7 +25,7 @@ CLI / API:
 sy schedule list                       # all scheduled entries
 sy schedule trigger <agent-id>         # run now
 
-curl -X POST http://localhost:18789/api/v1/agents/<agent-id>/trigger \
+curl -X POST http://localhost:1947/api/v1/agents/<agent-id>/trigger \
   -H "Authorization: Bearer $SOULACY_API_KEY"
 ```
 

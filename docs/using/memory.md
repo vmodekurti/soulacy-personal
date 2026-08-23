@@ -110,7 +110,7 @@ On the Procedural tab, **⧗ History** lists every version with:
 API:
 
 ```bash
-curl http://localhost:18789/api/v1/brain-memory/<agent>/rulebook \
+curl http://localhost:1947/api/v1/brain-memory/<agent>/rulebook \
   -H "Authorization: Bearer $SOULACY_API_KEY"
 # → {current, locked, versions[]}
 
@@ -123,7 +123,7 @@ GET /api/v1/brain-memory/<agent>/rulebook/<version>
 Rolling back to v3 re-applies v3's text as a **new** version with source `rollback` — the audit trail stays append-only.
 
 ```bash
-curl -X POST http://localhost:18789/api/v1/brain-memory/<agent>/rulebook/rollback \
+curl -X POST http://localhost:1947/api/v1/brain-memory/<agent>/rulebook/rollback \
   -H "Authorization: Bearer $SOULACY_API_KEY" -H "Content-Type: application/json" \
   -d '{"version": 3}'
 ```
@@ -133,7 +133,7 @@ curl -X POST http://localhost:18789/api/v1/brain-memory/<agent>/rulebook/rollbac
 The **🔒 Lock** toggle freezes the rulebook: auto-updates from the reasoning loop **and** manual edits are refused (the API returns HTTP 423) until you unlock. The agent's runs still succeed — only the rule write is refused, and a warning event records it. Rollback also requires unlocking first.
 
 ```bash
-curl -X POST http://localhost:18789/api/v1/brain-memory/<agent>/rulebook/lock \
+curl -X POST http://localhost:1947/api/v1/brain-memory/<agent>/rulebook/lock \
   -H "Authorization: Bearer $SOULACY_API_KEY" -H "Content-Type: application/json" \
   -d '{"locked": true}'
 ```

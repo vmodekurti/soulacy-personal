@@ -49,7 +49,7 @@ func (s *Server) handleAdminBootstrap(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusConflict, "the first owner already exists; sign in with your organization")
 	case errors.Is(err, tenancy.ErrBootstrapBlocked):
 		return s.errMsg(c, fiber.StatusConflict, "tenant data is partially initialized; repair it before running first-owner setup")
-	case strings.Contains(err.Error(), "required"):
+	case strings.Contains(err.Error(), "required") || strings.Contains(err.Error(), "address"):
 		return s.errMsg(c, fiber.StatusBadRequest, err.Error())
 	default:
 		return s.errMsg(c, fiber.StatusInternalServerError, "first-owner setup failed")

@@ -81,10 +81,16 @@ type DockerPrivilegedRunner struct {
 	// which is the correct single-tenant reading.
 	Root string
 
-	Image  string
-	Limits sandbox.Limits
-	PIDs   int
-	Binary string
+	Image              string
+	Limits             sandbox.Limits
+	PIDs               int
+	Binary             string
+	ContainerRuntime   string
+	RequireSignedImage bool
+	CosignKey          string
+	EgressProxy        string
+	EgressNetwork      string
+	AllowedEgressHosts []string
 }
 
 func (DockerPrivilegedRunner) Mode() string { return "docker" }
@@ -98,6 +104,25 @@ func (r DockerPrivilegedRunner) Ready(ctx context.Context) error {
 	defer cancel()
 	if err := exec.CommandContext(checkCtx, binary, "version", "--format", "{{.Server.Version}}").Run(); err != nil {
 		return fmt.Errorf("docker isolation unavailable (no host fallback): %w", err)
+	}
+	if rt := strings.TrimSpace(r.ContainerRuntime); rt != "" {
+		out, err := exec.CommandContext(checkCtx, binary, "info", "--format", "{{json .Runtimes}}").Output()
+		if err != nil || !strings.Contains(string(out), `"`+rt+`"`) {
+			return fmt.Errorf("hardened container runtime %q is unavailable", rt)
+		}
+	}
+	if r.RequireSignedImage {
+		if !strings.Contains(r.Image, "@sha256:") {
+			return fmt.Errorf("signed execution image must be pinned by sha256 digest")
+		}
+		args := []string{"verify"}
+		if strings.TrimSpace(r.CosignKey) != "" {
+			args = append(args, "--key", r.CosignKey)
+		}
+		args = append(args, r.Image)
+		if err := exec.CommandContext(checkCtx, "cosign", args...).Run(); err != nil {
+			return fmt.Errorf("execution image signature verification failed: %w", err)
+		}
 	}
 	return nil
 }
@@ -162,9 +187,23 @@ func (r DockerPrivilegedRunner) Run(ctx context.Context, req PrivilegedCommand) 
 		containerWork = filepath.ToSlash(filepath.Join(containerWork, rel))
 	}
 	argv := translateWorkspaceArgs(req.Argv, root)
-	args := []string{"run", "--rm", "-i", "--network", "none", "--read-only",
+	network := "none"
+	if strings.TrimSpace(r.EgressProxy) != "" {
+		network = strings.TrimSpace(r.EgressNetwork)
+		if network == "" || network == "none" {
+			return "", fmt.Errorf("docker isolation: proxy egress requires a dedicated egress network")
+		}
+	}
+	args := []string{"run", "--rm", "-i", "--network", network, "--read-only", "--user", "65532:65532",
 		"--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", strconv.Itoa(defaultInt(r.PIDs, 128)),
 		"--tmpfs", "/tmp:rw,noexec,nosuid,size=64m", "-v", root + ":/workspace:rw", "-w", containerWork,
+	}
+	if rt := strings.TrimSpace(r.ContainerRuntime); rt != "" {
+		args = append(args, "--runtime", rt)
+	}
+	if proxy := strings.TrimSpace(r.EgressProxy); proxy != "" {
+		args = append(args, "-e", "HTTPS_PROXY="+proxy, "-e", "HTTP_PROXY="+proxy, "-e", "ALL_PROXY="+proxy,
+			"-e", "SOULACY_EGRESS_ALLOWLIST="+strings.Join(r.AllowedEgressHosts, ","))
 	}
 	if r.Limits.MemoryMB > 0 {
 		args = append(args, "--memory", strconv.Itoa(r.Limits.MemoryMB)+"m")

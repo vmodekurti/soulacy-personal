@@ -35,6 +35,7 @@ package nats
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"strings"
 	"sync"
@@ -69,7 +70,8 @@ type Config struct {
 
 	// MaxDeliver is the maximum number of delivery attempts per message.
 	// 0 means unlimited.
-	MaxDeliver int
+	MaxDeliver                                         int
+	Credentials, TLSCA, TLSCert, TLSKey, TLSServerName string
 
 	// NATSOptions are extra nats.Option values passed to nats.Connect
 	// (e.g. nats.UserCredentials("creds.file"), nats.TLSConfig(…)).
@@ -124,9 +126,24 @@ func New(cfg Config) (*Backend, error) {
 
 	opts := append([]natsgo.Option{
 		natsgo.Name("soulacy-gateway"),
-		natsgo.MaxReconnects(-1),       // reconnect forever
+		natsgo.MaxReconnects(-1), // reconnect forever
 		natsgo.ReconnectWait(2 * time.Second),
 	}, cfg.NATSOptions...)
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(cfg.URL)), "tls://") || strings.TrimSpace(cfg.TLSServerName) != "" {
+		opts = append(opts, natsgo.Secure(&tls.Config{MinVersion: tls.VersionTLS12, ServerName: strings.TrimSpace(cfg.TLSServerName)}))
+	}
+	if strings.TrimSpace(cfg.Credentials) != "" {
+		opts = append(opts, natsgo.UserCredentials(cfg.Credentials))
+	}
+	if strings.TrimSpace(cfg.TLSCA) != "" {
+		opts = append(opts, natsgo.RootCAs(cfg.TLSCA))
+	}
+	if strings.TrimSpace(cfg.TLSCert) != "" || strings.TrimSpace(cfg.TLSKey) != "" {
+		if strings.TrimSpace(cfg.TLSCert) == "" || strings.TrimSpace(cfg.TLSKey) == "" {
+			return nil, fmt.Errorf("nats mTLS requires both client certificate and key")
+		}
+		opts = append(opts, natsgo.ClientCert(cfg.TLSCert, cfg.TLSKey))
+	}
 
 	nc, err := natsgo.Connect(cfg.URL, opts...)
 	if err != nil {

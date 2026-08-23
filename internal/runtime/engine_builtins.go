@@ -551,7 +551,7 @@ func marshalSearchResults(query string, items []searchResultItem) (string, error
 }
 
 func (e *Engine) webSearch(ctx context.Context, args map[string]any) (string, error) {
-	provider, _ := e.getSearchConfig()
+	provider, _, _ := e.getSearchConfigFor(ctx)
 	provider = strings.ToLower(provider)
 	if provider == "" {
 		provider = "ollama"
@@ -577,7 +577,7 @@ func (e *Engine) tavilyWebSearch(ctx context.Context, args map[string]any) (stri
 		maxResults = 5
 	}
 
-	_, key := e.getSearchConfig()
+	_, key, _ := e.getSearchConfigFor(ctx)
 	if key == "" {
 		key = os.Getenv("TAVILY_API_KEY")
 	}
@@ -639,7 +639,7 @@ func (e *Engine) serperWebSearch(ctx context.Context, args map[string]any) (stri
 		maxResults = 5
 	}
 
-	_, key := e.getSearchConfig()
+	_, key, _ := e.getSearchConfigFor(ctx)
 	if key == "" {
 		key = os.Getenv("SERPER_API_KEY")
 	}
@@ -707,7 +707,7 @@ func (e *Engine) ollamaWebSearch(ctx context.Context, args map[string]any) (stri
 		key = e.getOllamaAPIKey()
 	}
 	if key == "" {
-		_, searchKey := e.getSearchConfig()
+		_, searchKey, _ := e.getSearchConfigFor(ctx)
 		key = searchKey
 	}
 	if key == "" {

@@ -10,8 +10,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/soulacy/soulacy/internal/llm"
+	"github.com/soulacy/soulacy/internal/memory"
 	"github.com/soulacy/soulacy/pkg/agent"
+	"github.com/soulacy/soulacy/pkg/message"
+	"go.uber.org/zap"
 )
 
 func newTestLoader(t *testing.T) (*Loader, string) {
@@ -90,6 +95,81 @@ func TestSameAgentIDInTwoWorkspacesAreDistinctAgents(t *testing.T) {
 	}
 	if got := loader.GetInWorkspace("ws_b", "support-bot"); got == nil || got.Name != "B's bot" {
 		t.Fatalf("after reload ws_b sees %v", got)
+	}
+}
+
+func TestInstallationLayoutPersistsReloadsAndPurgesCanonicalWorkspaceAgents(t *testing.T) {
+	installRoot := t.TempDir()
+	agentsDir := filepath.Join(installRoot, "agents")
+	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	loader := NewLoader([]string{agentsDir})
+	loader.SetWorkspaceLayoutRoot(installRoot)
+	writeAgent(t, loader, "ws_team", agentsDir, "support", "Team support", "usr_owner")
+
+	want := filepath.Join(installRoot, "workspaces", "ws_team", "agents", "support", "SOUL.yaml")
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("agent was not written to the canonical workspace tree %s: %v", want, err)
+	}
+	if _, err := os.Stat(filepath.Join(agentsDir, workspaceRootDir, "ws_team")); !os.IsNotExist(err) {
+		t.Fatalf("write recreated the legacy workspace namespace: %v", err)
+	}
+
+	reloaded := NewLoader([]string{agentsDir})
+	reloaded.SetWorkspaceLayoutRoot(installRoot)
+	if errs := reloaded.LoadAll(); len(errs) != 0 {
+		t.Fatalf("reload canonical workspace agents: %v", errs)
+	}
+	if got := reloaded.GetInWorkspace("ws_team", "support"); got == nil || got.Name != "Team support" {
+		t.Fatalf("canonical workspace agent did not survive restart: %+v", got)
+	}
+	if got := reloaded.Get("support"); got != nil {
+		t.Fatalf("canonical workspace agent leaked into Personal: %+v", got)
+	}
+
+	if _, err := reloaded.PurgeWorkspace(context.Background(), "ws_team"); err != nil {
+		t.Fatalf("purge canonical workspace agents: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(installRoot, "workspaces", "ws_team", "agents")); !os.IsNotExist(err) {
+		t.Fatalf("canonical agent subtree survived purge: %v", err)
+	}
+}
+
+func TestEngineRunsAgentFromPrincipalWorkspace(t *testing.T) {
+	loader, dir := newTestLoader(t)
+	def := &agent.Definition{
+		ID: "workspace-bot", Name: "Workspace bot", Enabled: true,
+		Trigger: agent.TriggerChannel,
+		LLM:     agent.LLMConfig{Provider: "test", Model: "fake-model"},
+	}
+	if err := loader.UpsertInWorkspace("ws_team", dir, def, "usr_owner"); err != nil {
+		t.Fatalf("upsert workspace agent: %v", err)
+	}
+
+	provider := &fakeHandleProvider{responses: []llm.CompletionResponse{{Content: "workspace reply"}}}
+	router := llm.NewRouter("test")
+	router.Register(provider)
+	mem, err := memory.NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("memory store: %v", err)
+	}
+	engine := NewEngine(loader, router, mem, nil, "", time.Second, zap.NewNop(), nil, nil, "", nil, nil, nil, nil, nil)
+	ctx := WithPrincipal(context.Background(), Principal{Subject: "usr_viewer", Role: "viewer", WorkspaceID: "ws_team"})
+	reply, err := engine.Handle(ctx, message.Message{
+		ID: "msg-1", SessionID: "session-1", AgentID: "workspace-bot",
+		Channel: "http", UserID: "usr_viewer", Role: message.RoleUser,
+		Parts: message.Text("hello"),
+	})
+	if err != nil {
+		t.Fatalf("workspace agent should execute: %v", err)
+	}
+	if len(reply.Parts) == 0 || reply.Parts[0].Text != "workspace reply" {
+		t.Fatalf("unexpected reply: %+v", reply)
+	}
+	if personal := loader.Get("workspace-bot"); personal != nil {
+		t.Fatalf("test requires agent to be absent from personal registry: %+v", personal)
 	}
 }
 

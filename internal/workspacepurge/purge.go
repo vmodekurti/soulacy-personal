@@ -89,21 +89,12 @@ type Purger struct {
 }
 
 // A NOTE ON WHAT IS NOT HERE: a `Purger.Also` field, letting one purger claim
-// it settles several classes.
-//
-// It was written and removed, because the premise turned out to be false. The
-// idea was that removing a workspace's directory tree takes its agents, Studio
-// drafts, traces and skills with it in one syscall, so the report should not
-// list those as surviving data that is already gone.
-//
-// But a workspace's files are NOT one tree. `wsroot.Dir(base, id)` is applied
-// per store with a different base each time — the agent dirs, `<root>/studio/
-// drafts`, the trace dir, the skills base — so a workspace's data lives in a
-// dozen `.workspaces/<id>` directories under a dozen different parents. One
-// subtree removal settles one of them. Shipping the field would have let a
-// purger make a claim that reads as verified and is not, which is the exact
-// failure this package exists to make impossible. Per-class tree purgers, each
-// with its own base, is the honest shape and the next unit of work.
+// it settles several classes. Team/Scale now has one canonical filesystem tree
+// per workspace, and deleting it does remove every file below it. The report
+// still records each ownership class independently: a tree removal cannot
+// prove that a class's database rows, external objects, or revoked credentials
+// were handled correctly. Each class therefore needs its own purger, while the
+// final workspace-files purger is only the filesystem-boundary cleanup.
 
 // Entry is one resource class's line in the deletion report.
 type Entry struct {

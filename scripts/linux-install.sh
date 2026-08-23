@@ -200,16 +200,17 @@ if [ ! -f "${CONFIG_DIR}/config.yaml" ]; then
 
 server:
   host: "0.0.0.0"
-  port: 18789
+  port: 1947
   gui_enabled: true
   api_key: ""        # ⚠ Set this before exposing to a network
 
 llm:
-  default_provider: ollama
+  default_provider: nvidia
   providers:
-    ollama:
-      base_url: "http://localhost:11434"
-      model: "llama3"
+    nvidia:
+      base_url: "https://integrate.api.nvidia.com/v1"
+      api_key: ""       # Set SOULACY_LLM_PROVIDERS_NVIDIA_API_KEY in the service environment
+      model: "meta/llama-3.3-70b-instruct"
 
 log:
   level: info
@@ -282,7 +283,7 @@ echo -e "${GREEN}${BOLD}━━━━━━━━━━━━━━━━━━�
 echo -e "${GREEN}${BOLD}  Soulacy installed successfully!${NC}"
 echo -e "${GREEN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
-echo "  GUI:    http://$(hostname -I | awk '{print $1}'):18789"
+echo "  GUI:    http://$(hostname -I | awk '{print $1}'):1947"
 echo "  Config: ${CONFIG_DIR}/config.yaml"
 echo ""
 echo "  Manage the service:"

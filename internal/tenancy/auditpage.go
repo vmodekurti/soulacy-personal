@@ -166,3 +166,61 @@ func (s *PostgresStore) ListMembershipAuditPage(ctx context.Context, workspaceID
 	}
 	return page, nil
 }
+
+// ListPlatformAuditPage returns deployment-created tenant lifecycle changes
+// across the catalog. The API layer intentionally projects these rows down to
+// metadata and never returns Before or After to the deployment operator.
+func (s *PostgresStore) ListPlatformAuditPage(ctx context.Context, limit int, cursor string) (AuditPage, error) {
+	if s == nil || s.pool == nil {
+		return AuditPage{}, errors.New("tenancy store is unavailable")
+	}
+	if limit <= 0 {
+		limit = 100
+	} else if limit > maxMembershipAuditPage {
+		limit = maxMembershipAuditPage
+	}
+	position, err := decodeAuditCursor(cursor)
+	if err != nil {
+		return AuditPage{}, err
+	}
+	const actions = `('tenant.bootstrap','tenant.provision','workspace.provision','organization.status.update','workspace.status.update','workspace.address.update')`
+	lookahead := limit + 1
+	var rows interface {
+		Next() bool
+		Scan(...any) error
+		Err() error
+		Close()
+	}
+	if position.id == "" {
+		rows, err = s.pool.Query(ctx, `SELECT id,actor_subject,request_id,action,resource_type,resource_id,before_data,after_data,created_at
+			FROM tenant_mutation_audit WHERE action IN `+actions+`
+			ORDER BY created_at DESC,id DESC LIMIT $1`, lookahead)
+	} else {
+		rows, err = s.pool.Query(ctx, `SELECT id,actor_subject,request_id,action,resource_type,resource_id,before_data,after_data,created_at
+			FROM tenant_mutation_audit WHERE action IN `+actions+`
+			AND (created_at < $1 OR (created_at = $1 AND id < $2))
+			ORDER BY created_at DESC,id DESC LIMIT $3`, position.createdAt, position.id, lookahead)
+	}
+	if err != nil {
+		return AuditPage{}, err
+	}
+	defer rows.Close()
+	var page AuditPage
+	for rows.Next() {
+		var entry MembershipAudit
+		if err := rows.Scan(&entry.ID, &entry.ActorSubject, &entry.RequestID, &entry.Action,
+			&entry.ResourceType, &entry.ResourceID, &entry.Before, &entry.After, &entry.CreatedAt); err != nil {
+			return AuditPage{}, err
+		}
+		page.Entries = append(page.Entries, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return AuditPage{}, err
+	}
+	if len(page.Entries) > limit {
+		last := page.Entries[limit-1]
+		page.Entries = page.Entries[:limit]
+		page.NextCursor = encodeAuditCursor(auditCursor{createdAt: last.CreatedAt, id: last.ID})
+	}
+	return page, nil
+}

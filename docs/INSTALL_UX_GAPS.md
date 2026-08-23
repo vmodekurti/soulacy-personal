@@ -33,10 +33,10 @@ For a brand-new user, this should be the entire experience:
 
 ```
 brew install soulacy            # or curl … | sh
-soulacy serve                   # binds 127.0.0.1:18789, GUI live
+soulacy serve                   # binds 127.0.0.1:1947, GUI live
 ```
 
-Open `http://127.0.0.1:18789`, paste the API key the gateway just generated, see the GUI with the starter agent (`basic-chat`) listed, chat with it. **Zero file edits. Zero environment variables. Zero hunting for paths.** Every `sy ...` subcommand also works without `--agent-dir` flags or config edits, because both binaries resolve paths through the same helper.
+Open `http://127.0.0.1:1947`, paste the API key the gateway just generated, see the GUI with the starter agent (`basic-chat`) listed, chat with it. **Zero file edits. Zero environment variables. Zero hunting for paths.** Every `sy ...` subcommand also works without `--agent-dir` flags or config edits, because both binaries resolve paths through the same helper.
 
 What's missing today, in priority order:
 
@@ -60,7 +60,7 @@ The grep that flagged them matched the `~/.soulacy` legacy-fallback inside the `
 
 ### Tier 3 — bigger improvements (separate sessions)
 
-- **`soulacy serve` auto-bootstraps a config.yaml on first run.** If `ResolveWorkspace().ConfigFile` doesn't exist, generate one with sane defaults: `127.0.0.1`, port 18789, auto-generated API key, `provider: ollama` if `ollama` is reachable. Print the API key once to stdout with the URL. Operators never have to handwrite a config file.
+- **`soulacy serve` auto-bootstraps a config.yaml on first run.** If `ResolveWorkspace().ConfigFile` doesn't exist, generate one with sane defaults: `127.0.0.1`, port 1947, auto-generated API key, `provider: ollama` if `ollama` is reachable. Print the API key once to stdout with the URL. Operators never have to handwrite a config file.
 - **`sy` calls `config.Load()` on startup.** Move config bootstrap into a `PersistentPreRun` on the root cobra command. Every subcommand inherits a fully-loaded viper without needing per-command fallbacks. Removes the entire class of bugs the audit found.
 - **`brew install soulacy` works.** There's already a `homebrew-tap/` folder in the repo — needs a tap published + formula points at the latest release. Closes the "where do I download this?" gap.
 - **First-launch experience in the GUI.** When the user opens the GUI before any agent exists, instead of an empty list show a "Pick a starter template" screen (we already have templates implemented — just route the empty state through it).

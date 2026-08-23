@@ -38,7 +38,7 @@ func (s *Server) handleStudioAddStep(c *fiber.Ctx) error {
 		Catalog:  s.studioCatalogSnapshot(s.agents(c)),
 		Upstream: upstreamVarsFor(req.Workflow),
 	}
-	node, err := studio.CompileNode(c.Context(), s.studioLLM(c), compileReq)
+	node, err := studio.CompileNode(authorizedRequestContext(c), s.studioLLM(c), compileReq)
 	if err != nil {
 		return s.errMsg(c, fiber.StatusBadRequest, "could not turn that into a step: "+err.Error())
 	}

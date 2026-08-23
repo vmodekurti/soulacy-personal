@@ -189,7 +189,23 @@ func (s *Server) handleListOwnMCPServers(c *fiber.Ctx) error {
 	if stored == nil {
 		stored = []mcpstore.Server{}
 	}
-	return c.JSON(fiber.Map{"servers": stored})
+	statusByID := map[string]mcp.ServerStatus{}
+	if client := s.mcpFor(c); client != nil {
+		for _, status := range client.ServersSnapshot() {
+			statusByID[status.ID] = status
+		}
+	}
+	servers := make([]fiber.Map, 0, len(stored))
+	for _, server := range stored {
+		status := statusByID[server.ID]
+		servers = append(servers, fiber.Map{
+			"id": server.ID, "transport": server.Transport, "command": server.Command,
+			"args": server.Args, "env": server.Env, "url": server.URL, "headers": server.Headers,
+			"inherit_env": server.InheritEnv, "connected": status.Connected,
+			"detail": status.Detail, "tools": status.Tools,
+		})
+	}
+	return c.JSON(fiber.Map{"servers": servers})
 }
 
 // divertSecrets moves credential-looking values into the vault and returns the

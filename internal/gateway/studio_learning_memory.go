@@ -33,7 +33,7 @@ func (s *Server) handleStudioDeleteLearningMemory(c *fiber.Ctx) error {
 		}
 	case "lesson":
 		if store := s.studio(c).lessons(); store != nil {
-			ctx, cancel := context.WithTimeout(c.Context(), s.studioLearningTimeout())
+	ctx, cancel := context.WithTimeout(authorizedRequestContext(c), s.studioLearningTimeout())
 			defer cancel()
 			err = store.Delete(ctx, id)
 		}

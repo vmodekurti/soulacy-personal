@@ -24,6 +24,68 @@ Providers that advertise Device Authorization also enable
 `POST /api/v1/auth/oidc/device/start` and `/device/poll`. Authentication errors
 use one generic response and do not disclose whether an account exists.
 
+Browser callbacks never leave a raw API error on screen. A cancelled, expired,
+or unauthorized attempt returns to the relevant access page with a safe
+`auth_error` message. The CLI completion endpoint continues to return a
+machine-readable JSON error.
+
+## Inspect a workspace login configuration
+
+This public endpoint provides only the branding and provider type needed to
+render a workspace access page. It never returns OIDC client credentials.
+
+```http
+GET /api/v1/auth/workspaces/{workspace-id}/config
+```
+
+```json
+{
+  "workspace": {
+    "workspace_id": "ws_production",
+    "workspace_name": "Production",
+    "workspace_logo": "data:image/png;base64,...",
+    "organization_id": "org_acme",
+    "organization_name": "Acme",
+    "identity_status": "active",
+    "provider_type": "google"
+  },
+  "redirect_url": "https://agents.acme.example/api/v1/auth/oidc/callback"
+}
+```
+
+## Activate a workspace identity provider
+
+The initial workspace administrator uses the one-time setup credential issued
+by the deployment control plane. Soulacy validates that credential before
+following the supplied issuer URL, then validates OIDC discovery and signing
+keys before committing the provider.
+
+```http
+POST /api/v1/auth/workspaces/{workspace-id}/setup
+Content-Type: application/json
+
+{
+  "setup_token": "<one-time-token>",
+  "provider_type": "google",
+  "issuer": "https://accounts.google.com",
+  "client_id": "<client-id>",
+  "client_secret": "<client-secret>",
+  "audience": "<optional-audience>",
+  "scopes": ["openid", "profile", "email"],
+  "workspace_logo": "data:image/png;base64,..."
+}
+```
+
+Supported provider types are `google`, `microsoft`, `okta`, `auth0`,
+`keycloak`, and `custom`. The response contains the activated provider without
+its secret and the workspace `login_url`. Setup credentials expire after seven
+days and are single-use. Once activated, the provider and issuer are locked;
+changing them requires an explicit identity migration rather than an ordinary
+settings edit.
+
+See [Workspace identity and login](../configuration/workspace-identity.md) for
+provider registration and troubleshooting.
+
 ## Exchange the server key for JWTs
 
 This endpoint is available when `auth.mode: jwt` is enabled. It exchanges the

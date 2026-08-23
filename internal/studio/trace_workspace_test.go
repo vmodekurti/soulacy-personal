@@ -8,6 +8,7 @@
 package studio
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -145,5 +146,63 @@ func TestGlobalEvictionKeepsPerWorkspaceIndexesConsistent(t *testing.T) {
 	}
 	if listed := st.List("ws_b"); len(listed) != 2 {
 		t.Fatalf("ws_b listed %d traces, want 2: %+v", len(listed), listed)
+	}
+}
+
+func TestCanonicalTracePurgeRemovesOnlyItsWorkspace(t *testing.T) {
+	root := t.TempDir()
+	traceBase := filepath.Join(root, "logs", "studio-builds")
+	st := NewBuildTraceStore(50, traceBase)
+	st.SetWorkspaceLayoutRoot(root)
+
+	alpha := st.New("ws_a", "alpha intent")
+	beta := st.New("ws_b", "beta intent")
+	if err := alpha.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := beta.Close(); err != nil {
+		t.Fatal(err)
+	}
+	alphaPath := filepath.Join(st.Dir("ws_a"), alpha.ID+".jsonl")
+	betaPath := filepath.Join(st.Dir("ws_b"), beta.ID+".jsonl")
+
+	removed, err := st.PurgeWorkspace(context.Background(), "ws_a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed.Rows == 0 || removed.Bytes == 0 {
+		t.Fatalf("purge reported no removed files: %+v", removed)
+	}
+	if _, err := os.Stat(alphaPath); !os.IsNotExist(err) {
+		t.Fatalf("purged workspace trace still exists: %v", err)
+	}
+	if _, ok := st.Get("ws_a", alpha.ID); ok {
+		t.Fatal("purged trace survived in memory")
+	}
+	if _, err := os.Stat(betaPath); err != nil {
+		t.Fatalf("neighboring workspace trace was changed: %v", err)
+	}
+	if got, ok := st.Get("ws_b", beta.ID); !ok || got.ID != beta.ID {
+		t.Fatal("neighboring workspace trace was removed from memory")
+	}
+}
+
+func TestPersonalTracePurgeIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	st := NewBuildTraceStore(50, dir)
+	personal := st.New(wsroot.PersonalWorkspaceID, "personal intent")
+	if err := personal.Close(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, personal.ID+".jsonl")
+
+	if _, err := st.PurgeWorkspace(context.Background(), wsroot.PersonalWorkspaceID); err == nil {
+		t.Fatal("personal trace directory was accepted as a tenant purge target")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("a refused personal purge changed the filesystem: %v", err)
+	}
+	if _, ok := st.Get(wsroot.PersonalWorkspaceID, personal.ID); !ok {
+		t.Fatal("a refused personal purge removed the trace from memory")
 	}
 }

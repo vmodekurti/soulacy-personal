@@ -18,8 +18,8 @@ system_prompt: |
     user's questions directly. If you don't know something, say so plainly
     rather than guessing.
 llm:
-    provider: ollama
-    model: llama3.3:70b
+    provider: nvidia
+    model: meta/llama-3.3-70b-instruct
     temperature: 0.7
     max_tokens: 1024
 memory:

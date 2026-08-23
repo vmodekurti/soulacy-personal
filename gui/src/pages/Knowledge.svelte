@@ -12,12 +12,12 @@
   let error          = ''
   let info           = ''
   let enabled        = true
-  let defaultProvider = 'ollama'
-  let defaultModel    = 'nomic-embed-text'
+  let defaultProvider = 'nvidia'
+  let defaultModel    = 'nvidia/nv-embedqa-e5-v5'
   let embeddingProviders = []
 
   let showCreate = false
-  let newKB = { name: '', description: '', embedding_provider: 'ollama', embedding_model: 'nomic-embed-text' }
+  let newKB = { name: '', description: '', embedding_provider: 'nvidia', embedding_model: 'nvidia/nv-embedqa-e5-v5' }
 
   let showIngest = false
   // ingest can be either (a) a single pasted-text doc, or (b) a list of files.

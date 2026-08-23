@@ -98,7 +98,7 @@ func EnsureBootstrap(cfg *Config, cfgPath string) (BootstrapResult, error) {
 			cfg.Server.Host = "127.0.0.1"
 		}
 		if cfg.Server.Port == 0 {
-			cfg.Server.Port = 18789
+			cfg.Server.Port = 1947
 		}
 		return BootstrapResult{
 			Action:     BootstrapWroteConfig,
@@ -157,7 +157,7 @@ func writeDefaultConfig(path, apiKey string) error {
 
 server:
   host: 127.0.0.1
-  port: 18789
+  port: 1947
   gui_enabled: true
   # Auto-generated on first run. Rotate any time with:
   #   sed -i '' 's/api_key:.*/api_key: "sy_NEWKEY"/' %s
@@ -183,18 +183,20 @@ runtime:
     file_size_mb: 64
 
 llm:
-  default_provider: ollama
+  default_provider: nvidia
   providers:
-    ollama:
-      base_url: "http://localhost:11434"
-      # Pull this with: ollama pull llama3.3:70b
-      model: "llama3.3:70b"
+    nvidia:
+      base_url: "https://integrate.api.nvidia.com/v1"
+      # Keep credentials outside source control. Set with:
+      #   export SOULACY_LLM_PROVIDERS_NVIDIA_API_KEY="nvapi-..."
+      api_key: ""
+      model: "meta/llama-3.3-70b-instruct"
 
-# RAG defaults — sqlite-vec embedded vector store, Ollama embeddings.
+# RAG defaults — sqlite-vec embedded vector store, NVIDIA embeddings.
 # Knowledge bases are created from the GUI (Knowledge page).
 knowledge:
-  embedding_provider: ollama
-  embedding_model: nomic-embed-text
+  embedding_provider: nvidia
+  embedding_model: nvidia/nv-embedqa-e5-v5
   chunk_size: 1000
   chunk_overlap: 200
 

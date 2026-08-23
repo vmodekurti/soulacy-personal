@@ -115,7 +115,7 @@ func (s *Server) handleStudioRepairLive(c *fiber.Ctx) error {
 		})
 	}
 
-	proposals := studio.ProposeLiveRepairs(c.Context(), s.studioLLM(c), req.Workflow, runs)
+	proposals := studio.ProposeLiveRepairs(authorizedRequestContext(c), s.studioLLM(c), req.Workflow, runs)
 	if proposals == nil {
 		proposals = []studio.RepairProposal{}
 	}
@@ -221,7 +221,7 @@ func (s *Server) handleStudioApplyRepair(c *fiber.Ctx) error {
 		advice = &a
 	}
 
-	replay, note := s.studioSandboxReplay(c.Context(), req.NodeTrace)
+	replay, note := s.studioSandboxReplay(authorizedRequestContext(c), req.NodeTrace)
 	candidate, attempt := studio.ApplyRepairTransactionally(
 		req.Workflow,
 		req.Proposal,

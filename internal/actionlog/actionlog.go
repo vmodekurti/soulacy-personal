@@ -89,7 +89,7 @@ func (l *Logger) ExportWorkspaceJSONL(ctx context.Context, workspaceID string, w
 // PurgeTree performs the safety check before any database mutation, so an
 // invalid or personal workspace ID cannot turn this into a broad delete.
 func (l *Logger) PurgeWorkspace(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
-	removed, err := workspacepurge.PurgeTree(ctx, l.dir, workspaceID)
+	removed, err := workspacepurge.PurgeLayoutTree(ctx, l.layout, l.dir, workspaceID)
 	if err != nil {
 		return removed, err
 	}
@@ -152,9 +152,10 @@ CREATE INDEX IF NOT EXISTS idx_events_session ON agent_events(workspace_id, sess
 
 // Logger writes agent action events to per-agent files and SQLite.
 type Logger struct {
-	dir string
-	db  *sql.DB
-	log *zap.Logger
+	dir    string
+	layout wsroot.Layout
+	db     *sql.DB
+	log    *zap.Logger
 
 	// queue receives events from Append; the writer goroutine drains it.
 	queue chan message.Event
@@ -173,6 +174,11 @@ type Logger struct {
 	retention          time.Duration
 	lastRetentionSweep time.Time
 }
+
+// SetWorkspaceLayoutRoot makes named-workspace mirror files use the
+// installation's canonical workspace tree. Personal mode deliberately leaves
+// the zero-value layout in place.
+func (l *Logger) SetWorkspaceLayoutRoot(root string) { l.layout = wsroot.NewLayout(root) }
 
 // Option configures a Logger at construction time. Defined as a variadic on
 // New so existing 3-arg callers keep compiling.
@@ -270,7 +276,7 @@ func (l *Logger) Path(agentID string) string {
 // IDs are only unique within a workspace — two tenants each running an agent
 // called "assistant" appended to one file and each read the other's runs.
 func (l *Logger) PathInWorkspace(workspaceID, agentID string) string {
-	return filepath.Join(wsroot.Dir(l.dir, workspaceID), sanitize(agentID)+".log")
+	return filepath.Join(l.layout.Dir(l.dir, workspaceID), sanitize(agentID)+".log")
 }
 
 // Append enqueues one event for the writer goroutine. Never blocks the

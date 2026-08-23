@@ -151,6 +151,12 @@ type PlatformCatalog interface {
 	ListPlatformOrganizations(ctx context.Context) ([]PlatformOrganization, error)
 }
 
+// PlatformAuditReader exposes only deployment lifecycle audit metadata. The
+// control plane deliberately receives no before/after tenant payloads.
+type PlatformAuditReader interface {
+	ListPlatformAuditPage(ctx context.Context, limit int, cursor string) (AuditPage, error)
+}
+
 // PlatformProvisioner creates tenant boundaries and assigns their initial
 // owner. The deployment operator is the actor, never the resulting member.
 type PlatformProvisioner interface {
@@ -158,25 +164,40 @@ type PlatformProvisioner interface {
 	ProvisionWorkspace(ctx context.Context, mutation Mutation, organizationID string, request WorkspaceProvisionRequest) (BootstrapResult, error)
 }
 
+// PlatformLifecycleManager changes tenant availability without granting the
+// deployment operator membership in tenant data.
+type PlatformLifecycleManager interface {
+	SetOrganizationStatus(ctx context.Context, mutation Mutation, organizationID, status, reason string) (Organization, error)
+	SetWorkspaceStatus(ctx context.Context, mutation Mutation, workspaceID, status, reason string) (WorkspaceRecord, error)
+}
+
 type WorkspaceProvisionRequest struct {
 	WorkspaceName    string `json:"workspace_name"`
+	WorkspaceSlug    string `json:"workspace_slug,omitempty"`
 	OwnerEmail       string `json:"owner_email"`
 	OwnerDisplayName string `json:"owner_display_name"`
 	WorkspaceLogo    string `json:"workspace_logo,omitempty"`
 }
 
+type WorkspaceAddressManager interface {
+	SetWorkspaceSlug(ctx context.Context, mutation Mutation, workspaceID, slug string) (Workspace, error)
+}
+
 type PlatformOverview struct {
-	Organizations      int `json:"organizations"`
-	Workspaces         int `json:"workspaces"`
-	ActiveWorkspaces   int `json:"active_workspaces"`
-	DeletingWorkspaces int `json:"deleting_workspaces"`
-	Users              int `json:"users"`
-	ActiveMemberships  int `json:"active_memberships"`
-	PendingInvitations int `json:"pending_invitations"`
+	Organizations          int `json:"organizations"`
+	SuspendedOrganizations int `json:"suspended_organizations"`
+	Workspaces             int `json:"workspaces"`
+	ActiveWorkspaces       int `json:"active_workspaces"`
+	SuspendedWorkspaces    int `json:"suspended_workspaces"`
+	DeletingWorkspaces     int `json:"deleting_workspaces"`
+	Users                  int `json:"users"`
+	ActiveMemberships      int `json:"active_memberships"`
+	PendingInvitations     int `json:"pending_invitations"`
 }
 
 type PlatformWorkspace struct {
 	ID                 string    `json:"id"`
+	Slug               string    `json:"slug"`
 	Name               string    `json:"name"`
 	Status             string    `json:"status"`
 	CreatedAt          time.Time `json:"created_at"`
@@ -190,6 +211,7 @@ type PlatformWorkspace struct {
 type PlatformOrganization struct {
 	ID          string              `json:"id"`
 	Name        string              `json:"name"`
+	Status      string              `json:"status"`
 	CreatedAt   time.Time           `json:"created_at"`
 	Workspaces  []PlatformWorkspace `json:"workspaces"`
 	LogoDataURL string              `json:"logo_data_url,omitempty"`

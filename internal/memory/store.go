@@ -88,11 +88,18 @@ var ErrWorkspaceRequired = errors.New("memory: workspace is required")
 //     scan the trailing window. Sessions that fit in the window are read
 //     in full as before, so behaviour is unchanged for short conversations.
 type FileStore struct {
-	dir string
+	dir    string
+	layout wsroot.Layout
 	// shards holds per-(agent,session) mutexes lazily; the outer shardMu
 	// only protects the map itself.
 	shardMu sync.Mutex
 	shards  map[string]*sync.Mutex
+}
+
+func (s *FileStore) SetWorkspaceLayoutRoot(root string) {
+	if s != nil {
+		s.layout = wsroot.NewLayout(root)
+	}
 }
 
 // readTailBytes caps how much of a memory file we re-read on each turn. 64 KB
@@ -119,7 +126,7 @@ func (s *FileStore) sessionPath(workspaceID, agentID, sessionID string) string {
 }
 
 func (s *FileStore) workspaceDir(workspaceID string) string {
-	return wsroot.Dir(s.dir, workspaceID)
+	return s.layout.Dir(s.dir, workspaceID)
 }
 
 // ExportWorkspaceJSONL streams the hot-memory files for one workspace. Each

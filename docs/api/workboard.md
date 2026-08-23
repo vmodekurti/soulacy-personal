@@ -21,7 +21,7 @@ All routes live under `/api/v1` and require
 ### Create a task
 
 ```bash
-curl -X POST http://localhost:18789/api/v1/workboard/tasks \
+curl -X POST http://localhost:1947/api/v1/workboard/tasks \
   -H "Authorization: Bearer $SOULACY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -44,7 +44,7 @@ Body fields (all optional except a meaningful `title`): `title`,
 `due_at` **clears** the due date:
 
 ```bash
-curl -X PATCH http://localhost:18789/api/v1/workboard/tasks/12 \
+curl -X PATCH http://localhost:1947/api/v1/workboard/tasks/12 \
   -H "Authorization: Bearer $SOULACY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"status": "done", "due_at": ""}'
@@ -54,7 +54,7 @@ curl -X PATCH http://localhost:18789/api/v1/workboard/tasks/12 \
 
 ```bash
 curl -H "Authorization: Bearer $SOULACY_API_KEY" \
-  "http://localhost:18789/api/v1/workboard/tasks?status=running&agent_id=support-bot"
+  "http://localhost:1947/api/v1/workboard/tasks?status=running&agent_id=support-bot"
 ```
 
 ```json
@@ -81,7 +81,7 @@ already active for the task.
 
 ```bash
 curl -X POST -H "Authorization: Bearer $SOULACY_API_KEY" \
-  http://localhost:18789/api/v1/workboard/tasks/12/run
+  http://localhost:1947/api/v1/workboard/tasks/12/run
 ```
 
 Follow progress via the [event stream](../configuration/events.md):
@@ -100,7 +100,7 @@ attached to the task automatically.
 
 ```bash
 curl -H "Authorization: Bearer $SOULACY_API_KEY" \
-  http://localhost:18789/api/v1/workboard/tasks/12/artifacts
+  http://localhost:1947/api/v1/workboard/tasks/12/artifacts
 ```
 
 ```json
@@ -127,7 +127,7 @@ attachment` header. It returns `404` for an unknown artifact and
 | `DELETE` | `/workboard/comments/:id` | Delete a comment (`204`) |
 
 ```bash
-curl -X POST http://localhost:18789/api/v1/workboard/tasks/12/comments \
+curl -X POST http://localhost:1947/api/v1/workboard/tasks/12/comments \
   -H "Authorization: Bearer $SOULACY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"author": "vasu", "body": "Looks good — ship it.", "kind": "review"}'

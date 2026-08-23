@@ -11,7 +11,7 @@ import (
 
 func TestMarketplaceStatusReportsDefaultSourcesAndInstalledSkills(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(cfgPath, []byte("server:\n  port: 18789\n"), 0o600); err != nil {
+	if err := os.WriteFile(cfgPath, []byte("server:\n  port: 1947\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	s := newTestGatewayWithCfgPath(t, "secret", cfgPath)
@@ -44,7 +44,7 @@ func TestReadinessIncludesMarketplaceParity(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	seed := `
 server:
-  port: 18789
+  port: 1947
 registries:
   - id: signed
     type: http

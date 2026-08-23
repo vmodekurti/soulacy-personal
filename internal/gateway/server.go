@@ -61,6 +61,7 @@ import (
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/costs"
 	"github.com/soulacy/soulacy/internal/credentials"
+	"github.com/soulacy/soulacy/internal/entitlements"
 	"github.com/soulacy/soulacy/internal/introspect"
 	"github.com/soulacy/soulacy/internal/knowledge"
 	"github.com/soulacy/soulacy/internal/llm"
@@ -86,6 +87,8 @@ import (
 	"github.com/soulacy/soulacy/internal/webui"
 	"github.com/soulacy/soulacy/internal/workboard"
 	"github.com/soulacy/soulacy/internal/workspacepolicy"
+	"github.com/soulacy/soulacy/internal/workspacesettings"
+	"github.com/soulacy/soulacy/internal/wsroot"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/gofiber/fiber/v2/middleware/adaptor"
@@ -192,6 +195,10 @@ type Server struct {
 	// Nil on deployments that do not offer per-workspace policy, which is what
 	// makes those routes 503 rather than pretending.
 	workspacePolicies *workspacepolicy.Store
+	workspaceSettings *workspacesettings.Store
+	// workspaceLayout is configured only for Team/Scale installations. Its
+	// zero value deliberately preserves Personal mode's existing paths.
+	workspaceLayout wsroot.Layout
 	// costGovernor is the reservation path the composed quota policy is
 	// installed into. Held so a policy change takes effect without a restart.
 	costGovernor  *costs.Governor
@@ -226,7 +233,9 @@ type Server struct {
 	// costStore is the optional per-agent token-cost store (Task #32).
 	// Wired via SetCostStore after construction. When nil, the /api/v1/costs
 	// handlers return 503.
-	costStore *costs.Store
+	costStore              *costs.Store
+	entitlementService     *entitlements.Service
+	stripeEntitlementStore entitlements.Store
 
 	// runReg tracks cancellable in-flight chat/stream runs (Story #22).
 	runReg         *runRegistry
@@ -445,6 +454,8 @@ func (s *Server) SetIdempotencyStore(db *IdempotencyCache) {
 // first request is served. When nil, credential routes return 503.
 func (s *Server) SetCredentialVault(v credentials.Vault) {
 	s.credVault = v
+	s.configureWorkspaceSearchResolver()
+	s.configureWorkspaceProviderResolver()
 }
 
 // CredentialVault returns the current Vault (may be nil). Satisfies
@@ -465,6 +476,10 @@ func (s *Server) SetBuilderRegistry(r *builder.Registry) {
 // 503.
 func (s *Server) SetCostStore(cs *costs.Store) {
 	s.costStore = cs
+}
+
+func (s *Server) SetEntitlements(service *entitlements.Service, store entitlements.Store) {
+	s.entitlementService, s.stripeEntitlementStore = service, store
 }
 
 // SetWorkboardStore wires a workboard task store into the server (Story 5).
@@ -903,6 +918,10 @@ func (s *Server) buildApp() *fiber.App {
 	app.Post("/api/v1/auth/oidc/complete", s.requireAuthEngine(func(s *Server) fiber.Handler { return s.authEngine.HandleOIDCComplete }))
 	app.Post("/api/v1/auth/oidc/device/start", s.requireAuthEngine(func(s *Server) fiber.Handler { return s.authEngine.HandleOIDCDeviceStart }))
 	app.Post("/api/v1/auth/oidc/device/poll", s.requireAuthEngine(func(s *Server) fiber.Handler { return s.authEngine.HandleOIDCDevicePoll }))
+	// Stripe authenticates this endpoint with its signed raw-body header. It is
+	// intentionally outside user authentication; putting it behind OIDC would
+	// make genuine provider delivery impossible.
+	app.Post("/webhooks/stripe", s.handleStripeWebhook)
 	// Invitation acceptance requires an authenticated identity but deliberately
 	// runs before workspace resolution: a new user has no membership yet.
 	app.Post("/api/v1/invitations/accept", s.authWithPluginTokens(), s.rlUserMW(), s.handleAcceptInvitation)
@@ -925,7 +944,7 @@ func (s *Server) buildApp() *fiber.App {
 	// idempotencyMW runs after workspace context is established so replay keys
 	// are namespaced by the verified workspace, and before handlers so a
 	// duplicate never reaches one.
-	api := app.Group("/api/v1", s.authWithPluginTokens(), s.workspaceContextMW(), s.pluginGateMW(), s.rlUserMW(), s.idempotencyMW())
+	api := app.Group("/api/v1", s.authWithPluginTokens(), s.workspaceContextMW(), s.entitlementMW(), s.pluginGateMW(), s.rlUserMW(), s.idempotencyMW())
 
 	// Health
 	api.Get("/health", s.handleHealth)
@@ -946,16 +965,17 @@ func (s *Server) buildApp() *fiber.App {
 	api.Get("/plugins/ui", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleListPluginUIs)
 	api.Post("/plugins/:id/token", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleIssuePluginToken)
 
-	// Plugin install & management (Story E13) — admin surface, config-level
-	// rbac. Plugin principals are default-denied by pluginGateMW (E8).
-	api.Get("/plugins/installed", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleListInstalledPlugins)
-	api.Post("/plugins/install", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.auditing("plugin.stage", "plugin", "", s.handleStagePlugin))
-	api.Post("/plugins/install/:staged/approve", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.auditing("plugin.approve", "plugin", "staged", s.handleApprovePlugin))
-	api.Delete("/plugins/install/:staged", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.auditing("plugin.discard", "plugin", "staged", s.handleDiscardStagedPlugin))
-	api.Post("/plugins/:id/enable", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.auditing("plugin.enable", "plugin", "id", s.handleSetPluginEnabled(true)))
-	api.Post("/plugins/:id/disable", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.auditing("plugin.disable", "plugin", "id", s.handleSetPluginEnabled(false)))
-	api.Post("/plugins/:id/reapprove", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.auditing("plugin.reapprove", "plugin", "id", s.handleReapprovePlugin))
-	api.Delete("/plugins/:id", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.auditing("plugin.remove", "plugin", "id", s.handleRemovePlugin))
+	// Plugins preserve the Personal-mode lifecycle, but the installer/store is
+	// selected from the verified workspace context. Installation is a distinct
+	// high-risk permission; it must never be inferred from config:write.
+	api.Get("/plugins/installed", s.rbacMW(rbac.ResourcePlugins, rbac.ActionRead), s.handleListInstalledPlugins)
+	api.Post("/plugins/install", s.rbacMW(rbac.ResourcePlugins, rbac.ActionInstall), s.auditing("plugin.stage", "plugin", "", s.handleStagePlugin))
+	api.Post("/plugins/install/:staged/approve", s.rbacMW(rbac.ResourcePlugins, rbac.ActionInstall), s.auditing("plugin.approve", "plugin", "staged", s.handleApprovePlugin))
+	api.Delete("/plugins/install/:staged", s.rbacMW(rbac.ResourcePlugins, rbac.ActionInstall), s.auditing("plugin.discard", "plugin", "staged", s.handleDiscardStagedPlugin))
+	api.Post("/plugins/:id/enable", s.rbacMW(rbac.ResourcePlugins, rbac.ActionWrite), s.auditing("plugin.enable", "plugin", "id", s.handleSetPluginEnabled(true)))
+	api.Post("/plugins/:id/disable", s.rbacMW(rbac.ResourcePlugins, rbac.ActionWrite), s.auditing("plugin.disable", "plugin", "id", s.handleSetPluginEnabled(false)))
+	api.Post("/plugins/:id/reapprove", s.rbacMW(rbac.ResourcePlugins, rbac.ActionInstall), s.auditing("plugin.reapprove", "plugin", "id", s.handleReapprovePlugin))
+	api.Delete("/plugins/:id", s.rbacMW(rbac.ResourcePlugins, rbac.ActionDelete), s.auditing("plugin.remove", "plugin", "id", s.handleRemovePlugin))
 
 	// Auth identity — returns claims from the current token; useful for GUI.
 	{
@@ -987,6 +1007,7 @@ func (s *Server) buildApp() *fiber.App {
 	s.registerWorkspaceExportRoutes(api)
 	s.registerWorkspaceDeletionRoutes(api)
 	s.registerWorkspacePolicyRoutes(api)
+	s.registerWorkspaceSettingsRoutes(api)
 	s.registerWorkspaceKeyRoutes(api)
 
 	// Context resolution for the CLI and GUI. These report the identity and
@@ -1005,8 +1026,12 @@ func (s *Server) buildApp() *fiber.App {
 	api.Post("/admin/bootstrap", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleAdminBootstrap)
 	api.Get("/admin/platform/overview", s.platformMW(rbac.ResourceConfig, rbac.ActionRead), s.handlePlatformOverview)
 	api.Get("/admin/platform/organizations", s.platformMW(rbac.ResourceConfig, rbac.ActionRead), s.handlePlatformOrganizations)
+	api.Get("/admin/platform/audit", s.platformMW(rbac.ResourceConfig, rbac.ActionRead), s.handlePlatformAudit)
 	api.Post("/admin/platform/organizations", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.handlePlatformProvisionOrganization)
 	api.Post("/admin/platform/organizations/:id/workspaces", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.handlePlatformProvisionWorkspace)
+	api.Patch("/admin/platform/organizations/:id/status", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.handlePlatformOrganizationStatus)
+	api.Patch("/admin/platform/workspaces/:workspaceID/address", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.handlePlatformWorkspaceAddress)
+	api.Patch("/admin/platform/workspaces/:workspaceID/status", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.handlePlatformWorkspaceStatus)
 	api.Post("/admin/restart", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleRestart)
 	api.Get("/admin/audit", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleAdminAudit)
 	api.Get("/onboarding/status", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleOnboardingStatus)
@@ -1368,9 +1393,13 @@ func (s *Server) buildApp() *fiber.App {
 	api.Post("/registries/probe", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleProbeRegistry)
 	api.Post("/registries", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleAddRegistry)
 
-	// Logs (tail gateway log file)
-	api.Get("/logs", s.rbacMW(rbac.ResourceLogs, rbac.ActionRead), s.handleGetLogs)
-	api.Get("/support/bundle", s.rbacMW(rbac.ResourceLogs, rbac.ActionRead), s.handleSupportBundle)
+	// Raw gateway logs and support bundles describe the shared process and may
+	// contain signals from every tenant. Workspace roles — including owners —
+	// therefore never authorize these deployment diagnostics in Team/Scale.
+	// Workspace and agent activity remains available through the tenant-scoped
+	// run ledger and /agents/:id/actions routes.
+	api.Get("/logs", s.platformMW(rbac.ResourceLogs, rbac.ActionRead), s.handleGetLogs)
+	api.Get("/support/bundle", s.platformMW(rbac.ResourceLogs, rbac.ActionRead), s.handleSupportBundle)
 
 	// RBAC management (admin only — enforced by static policy)
 	// Unconditional for the same reason the auth routes are: SetRBAC runs

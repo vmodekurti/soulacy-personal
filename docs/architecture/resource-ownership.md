@@ -5,6 +5,36 @@ machine-checked inventory lives in `internal/ownership/catalog.go`. Any pull
 request that introduces a SQL table without adding its ownership, scope,
 lifecycle policy, and isolation test fails CI.
 
+## Personal parity invariant
+
+Personal mode is the behavioral baseline. Team and Scale run that same product
+inside a verified workspace scope and add tenancy and governance; they are not
+reduced editions and must not replace working Personal features with parallel,
+weaker implementations.
+
+For a capability that is safe in Personal mode, the default ownership rule is
+workspace-owned in Team and Scale. A feature may be withheld only when it
+changes shared process, host, security, capacity, billing, or catalog state.
+The same UI component and API semantics should be reused wherever possible;
+the active scope selects the store, credentials, paths, and policy envelope.
+
+| Surface | Personal | Team/Scale ownership |
+|---|---|---|
+| Agents, Studio, templates, learning, knowledge, queues, workboard | Local user deployment | Workspace-owned |
+| Shared workspace Chat and agent runs | Local user deployment | Workspace-owned; conversations/messages remain user-private |
+| Delivery, automations, skills, MCP instances, plugins | Local user deployment | Workspace-owned, bounded by deployment allowlists |
+| Provider/model choices and credentials, secrets, safe config | Local user deployment | Workspace-owned overlays and vault entries; deployment sets allowed endpoints and ceilings |
+| Browser artifacts, agent logs, mobile integration | Local user deployment | Workspace-owned and stored/read through workspace scope |
+| Members, invitations, roles, OIDC binding, branding, retention | Not applicable | Workspace governance |
+| Organization metadata, domains, workspace collection | Not applicable | Organization-owned |
+| Gateway restart, raw host logs, upgrades, workers/sandbox, KMS, billing, registries, shared catalogs | Local operator | Platform-global control plane |
+
+User-private data remains private inside its workspace: sessions,
+conversations, messages, personal memory, Studio drafts, and user credentials
+carry both `workspace_id` and user/principal ownership. A deployment
+administrator is not a workspace super-user and cannot use control-plane
+credentials to read tenant payloads.
+
 ## Ownership classes
 
 | Class | Meaning | Required boundary |

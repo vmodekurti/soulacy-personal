@@ -116,7 +116,7 @@ log "Starting Soulacy gateway..."
 launchctl start "$AGENT_LABEL" 2>/dev/null || soulacy serve &
 sleep 2
 
-GATEWAY_URL="http://localhost:18789"
+GATEWAY_URL="http://localhost:1947"
 if curl -sf "${GATEWAY_URL}/api/v1/health" >/dev/null 2>&1; then
     ok "Gateway is running at ${GATEWAY_URL}"
 else

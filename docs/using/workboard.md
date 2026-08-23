@@ -12,12 +12,12 @@ API equivalents:
 
 ```bash
 # Create a task
-curl -X POST http://localhost:18789/api/v1/workboard/tasks \
+curl -X POST http://localhost:1947/api/v1/workboard/tasks \
   -H "Authorization: Bearer $SOULACY_API_KEY" -H "Content-Type: application/json" \
   -d '{"title": "Summarize Q2 numbers", "description": "...", "agent_id": "research-agent"}'
 
 # Run it
-curl -X POST http://localhost:18789/api/v1/workboard/tasks/<id>/run \
+curl -X POST http://localhost:1947/api/v1/workboard/tasks/<id>/run \
   -H "Authorization: Bearer $SOULACY_API_KEY"
 ```
 
@@ -54,7 +54,7 @@ Files the agent writes during a run are captured automatically and listed in the
 API:
 
 ```bash
-curl "http://localhost:18789/api/v1/workboard/tasks/<id>/artifacts" \
+curl "http://localhost:1947/api/v1/workboard/tasks/<id>/artifacts" \
   -H "Authorization: Bearer $SOULACY_API_KEY"
 
 # Direct download link (also what the GUI button uses)
@@ -80,7 +80,7 @@ Two safety nets catch failures:
 2. **The dead-letter queue.** When a run fails at the engine level, the failed message is pushed to the DLQ so nothing is silently lost. Inspect and clean it via the admin API:
 
     ```bash
-    curl "http://localhost:18789/api/v1/admin/dlq?queue=<agent-id>" \
+    curl "http://localhost:1947/api/v1/admin/dlq?queue=<agent-id>" \
       -H "Authorization: Bearer $SOULACY_API_KEY"
     # GET  /api/v1/admin/dlq/<id>      — one item with payload, error, attempts
     # DELETE /api/v1/admin/dlq/<id>    — discard after handling

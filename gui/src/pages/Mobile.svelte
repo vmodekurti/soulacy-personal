@@ -533,7 +533,7 @@
           rows="2"
           placeholder="Ask an agent or send a quick instruction…"
           aria-label="Pocket chat message"
-        />
+        ></textarea>
         <button class="btn-primary" type="button" on:click={sendPocketChat} disabled={pocketBusy || !pocketText.trim() || !pocketAgentId}>
           {pocketBusy ? 'Sending…' : 'Send'}
         </button>

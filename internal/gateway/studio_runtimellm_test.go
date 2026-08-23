@@ -16,6 +16,7 @@ package gateway
 
 import (
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 )
@@ -105,5 +106,24 @@ func TestStudioGenerateStream_StampsRuntimeProviderNotBuilder(t *testing.T) {
 	}
 	if got, _ := llm["model"].(string); got == "glm-5.2" {
 		t.Fatal("the BUILDER model leaked into the draft — the agent would run on a model the operator never chose")
+	}
+}
+
+// The streamed endpoint outlives its Fiber handler. Keep this assertion close
+// to the behavior test above so a future refactor cannot accidentally pass the
+// recycled request context back into workspace-settings resolution.
+func TestStudioGenerateStream_ResolvesRuntimeLLMBeforeBackgroundWork(t *testing.T) {
+	source, err := os.ReadFile("studio.go")
+	if err != nil {
+		t.Fatalf("read studio.go: %v", err)
+	}
+	body := string(source)
+	if strings.Contains(body, "stampDefaultLLM(&res.Compile.Workflow, c)") {
+		t.Fatal("stream producer reads the Fiber request after the handler returns")
+	}
+	if !strings.Contains(body, "runtimeProvider, runtimeModel := s.defaultAgentLLM(c)") ||
+		!strings.Contains(body, "runtimeRegistered := s.providerRegisteredFor(c, runtimeProvider)") ||
+		!strings.Contains(body, "stampResolvedDefaultLLMWithInventory(") {
+		t.Fatal("stream handler must capture the workspace runtime LLM before starting background work")
 	}
 }

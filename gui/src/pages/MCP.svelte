@@ -4,6 +4,9 @@
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
   import KeyValueEditor from '../lib/KeyValueEditor.svelte'
+  import { activeWorkspace } from '../lib/workspace.js'
+
+  $: workspaceScoped = ['team', 'scale'].includes(String($activeWorkspace?.deploymentMode || '').toLowerCase())
 
   let servers = []
   let loading = true
@@ -11,7 +14,6 @@
   let info    = ''
   let expanded = {}      // serverID → bool
   let restartNeeded = false
-  let restarting = false
 
   // Edit / create modal state. `editing` is null when the modal is closed.
   // When `editing.id` is set AND matches a row in `servers`, we're editing;
@@ -37,7 +39,7 @@
     loading = true
     error   = ''
     try {
-      const res = await api.mcp.list()
+      const res = workspaceScoped ? await api.mcp.ownList() : await api.mcp.list()
       servers = res.servers || []
     } catch (e) {
       error = e.message
@@ -108,9 +110,9 @@
     error = ''; info = ''
     const isExisting = servers.some(s => s.id === editing.id)
     try {
-      const res = isExisting
-        ? await api.mcp.update(editing.id, editing)
-        : await api.mcp.create(editing)
+      const res = workspaceScoped
+        ? await api.mcp.ownPut(editing.id, editing)
+        : (isExisting ? await api.mcp.update(editing.id, editing) : await api.mcp.create(editing))
       info = res.message || 'Saved.'
       if (res.restart_needed) restartNeeded = true
       closeModal()
@@ -125,30 +127,16 @@
   }
 
   async function remove(s) {
-    if (!confirmDestructive(`Remove MCP server "${s.id}"? It will stop accepting tool calls after the next gateway restart.`)) return
+    if (!confirmDestructive(`Remove MCP server "${s.id}"?`)) return
     error = ''; info = ''
     try {
-      const res = await api.mcp.delete(s.id)
+      const res = workspaceScoped ? await api.mcp.ownDelete(s.id) : await api.mcp.delete(s.id)
       info = res.message || 'Removed.'
       if (res.restart_needed) restartNeeded = true
       await new Promise(r => setTimeout(r, 500))
       await load()
     } catch (e) {
       error = e.message
-    }
-  }
-
-  async function restartGateway() {
-    restarting = true
-    error = ''; info = ''
-    try {
-      await api.admin.restart()
-      info = 'Restart requested. Reconnect this page in a few seconds if it does not refresh automatically.'
-      restartNeeded = false
-    } catch (e) {
-      error = e.message
-    } finally {
-      setTimeout(() => { restarting = false }, 5000)
     }
   }
 
@@ -263,20 +251,18 @@
     <h1>MCP Servers</h1>
     <div class="header-actions">
       <button class="btn-secondary" on:click={load} disabled={loading}>↺ Refresh</button>
-      <button class="btn-glama"     on:click={openGlamaModal}>⚡ Glama</button>
+      {#if !workspaceScoped}<button class="btn-glama" on:click={openGlamaModal}>⚡ Glama</button>{/if}
       <button class="btn-primary"   on:click={openNew}>+ New Server</button>
     </div>
         <TourButton />
     </div>
 
-  {#if restartNeeded}
+  {#if restartNeeded && !workspaceScoped}
     <div class="banner warn">
       <span>
         <strong>Restart needed.</strong> MCP config was modified and persisted in <code>config.yaml</code>.
       </span>
-      <button class="btn-secondary" on:click={restartGateway} disabled={restarting}>
-        {restarting ? 'Restarting…' : 'Restart Gateway'}
-      </button>
+      <small>A deployment administrator must restart the gateway from the platform control plane.</small>
     </div>
   {/if}
   {#if error}<div class="banner err">{error}</div>{/if}
@@ -353,7 +339,7 @@
       a process janitor around MCP tool calls so short-lived browser children are cleaned up after the call returns.
       Use <strong>Browser visible</strong> only for live debugging.
     </p>
-    <p>Changes here are written to <code>config.yaml</code>; the gateway must be restarted to pick them up.</p>
+    <p>{workspaceScoped ? 'Workspace MCP changes take effect immediately and are isolated from every other workspace.' : 'Changes here are written to config.yaml; the gateway must be restarted to pick them up.'}</p>
   </div>
 </div>
 

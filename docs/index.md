@@ -115,7 +115,7 @@ sy chat --agent assistant "What can you do?"
 ## Five-minute tour
 
 1. **Install** — one line on [macOS](deployment/macos.md), [Linux](deployment/linux.md), or [Docker](deployment/docker.md), then `sy setup` walks you through providers and channels. → [Installation](getting-started/installation.md)
-2. **Meet the GUI** — everything lives at `http://localhost:18789`: Dashboard, Agents, Chat, Workboard, Knowledge, Memory, Skills, Flow, Plugins. → [GUI tour](getting-started/gui-tour.md)
+2. **Meet the GUI** — everything lives at `http://localhost:1947`: Dashboard, Agents, Chat, Workboard, Knowledge, Memory, Skills, Flow, Plugins. → [GUI tour](getting-started/gui-tour.md)
 3. **Write an agent** — a complete `SOUL.yaml` walkthrough: prompt, tools, memory, schedule. → [Your first agent](getting-started/first-agent.md)
 4. **Give it skills** — `sy registry add https://www.skills.sh/` then `sy skill install anthropics/skills/skill-creator`. → [Skill sources](extend/skill-sources.md)
 5. **Put it to work** — bind a Telegram bot, schedule a daily run, or start from a shipped [workflow template](using/templates.md).
@@ -154,5 +154,5 @@ self-disqualify quickly if the fit's wrong.
 
 - **Users**: [Quick Start](getting-started/quickstart.md) → [GUI Tour](getting-started/gui-tour.md) → [Using Soulacy](using/chat.md)
 - **Agent authors**: [SOUL.yaml Reference](agents/soul-yaml.md) → [Tools](agents/tools.md) → [Reasoning](agents/reasoning.md) → [Flow Graphs](agents/flows.md)
-- **Operators**: [Configuration](configuration/index.md) → [Events & Webhooks](configuration/events.md) → [Upgrades](deployment/upgrades.md)
+- **Operators and workspace owners**: [Platform administration](configuration/platform-administration.md) → [Workspace administration](configuration/workspace-administration.md) → [Workspace identity](configuration/workspace-identity.md) → [Configuration](configuration/index.md) → [Upgrades](deployment/upgrades.md)
 - **Extenders**: [Plugins](extend/plugins.md) → [Custom Channels](channels/sidecars.md) → [Custom Distributions](extend/custom-distributions.md) → [Specs](architecture/specs.md)

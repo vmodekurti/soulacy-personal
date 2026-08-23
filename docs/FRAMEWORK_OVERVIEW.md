@@ -228,7 +228,7 @@ Config is loaded by `internal/config/config.go` using Viper. Search order: an ex
 
 The top-level structure mirrors `Config` in `config.go`:
 
-- `server` — `host` (default `127.0.0.1` — the gateway refuses to start on a non-loopback host with an empty `api_key`, see `main.go:65`), `port` (18789), `gui_enabled`, `api_key`, `tls_cert`/`tls_key`, `allowed_origins`.
+- `server` — `host` (default `127.0.0.1` — the gateway refuses to start on a non-loopback host with an empty `api_key`, see `main.go:65`), `port` (1947), `gui_enabled`, `api_key`, `tls_cert`/`tls_key`, `allowed_origins`.
 - `runtime` — `max_concurrent_sessions` (100), `default_max_turns` (20), `python_bin` (`python3`), `tool_timeout` (`120s`).
 - `memory` — `dir`, `sqlite_path`, `vector_db` (empty by default — vector tier disabled), `max_history`.
 - `llm` — `default_provider` (`ollama`) and a `providers` map. Standard ids are `ollama`, `openai`, `anthropic`, `google`; any other id with a `base_url` and `api_key` is registered as a generic OpenAI-compatible provider so you can add `openrouter`, `together`, `groq`, or `vllm` purely via config.

@@ -109,7 +109,7 @@ The web GUI **Restart Gateway** button is available after config-changing action
 
 Telegram, Slack, Discord, and WhatsApp webhooks require a public HTTPS URL. Options:
 
-- **ngrok** (dev): `ngrok http 18789` — gives you a temporary public URL
+- **ngrok** (dev): `ngrok http 1947` — gives you a temporary public URL
 - **Cloudflare Tunnel** (recommended for persistent): zero-config secure tunnel, no port forwarding needed
 - **Router port forwarding** + **Let's Encrypt**: forward port 443 to your Mac, use Caddy for automatic TLS
 
@@ -120,5 +120,5 @@ brew install cloudflared
 cloudflared tunnel login
 cloudflared tunnel create soulacy
 cloudflared tunnel route dns soulacy yourdomain.com
-cloudflared tunnel run --url http://localhost:18789 soulacy
+cloudflared tunnel run --url http://localhost:1947 soulacy
 ```

@@ -64,6 +64,12 @@ func withRequestPrincipal(c *fiber.Ctx, ctx context.Context) context.Context {
 	return ctx
 }
 
+// authorizedRequestContext returns Fiber's standard request context decorated
+// with the verified workspace identity and runtime principal.
+func authorizedRequestContext(c *fiber.Ctx) context.Context {
+	return withRequestPrincipal(c, c.UserContext())
+}
+
 func authenticatedPrincipal(c *fiber.Ctx) (string, bool, bool) {
 	if identity, ok := requestIdentity(c); ok {
 		role := strings.TrimSpace(identity.Role())

@@ -27,7 +27,10 @@ runtime:
   sandbox:
     enabled: true
     mode: docker
-    image: python:3.12-slim
+    image: registry.example/soulacy-execution@sha256:<digest>
+    container_runtime: runsc
+    require_signed_image: true
+    cosign_key: /etc/soulacy/execution-image.pub
     cpu_seconds: 30
     memory_mb: 512
     open_files: 256
@@ -44,13 +47,23 @@ process after the chokepoint, but their targets pass the same symlink-aware
 workspace containment policy used by all filesystem tools. They cannot write
 outside configured roots.
 
-## Ordinary Python tools: resource limits only
+## Ordinary Python tools: remote execution plane
 
-Agent/plugin Python execution still uses the `__exec-sandbox` POSIX rlimit
-wrapper. It caps CPU, address space, open descriptors, and single-file size and
-filters the environment. This wrapper is a resource-exhaustion guard, not a
-filesystem or network boundary. Use a Docker executor for untrusted ordinary
-Python tools as well.
+Team and Scale deployments set `executor.backend: worker`. The gateway publishes
+jobs to NATS JetStream and never starts tenant Python. Stateless
+`soulacy-worker` processes consume those jobs and run the digest-pinned,
+Cosign-verified image under the configured hardened OCI runtime (`runsc` for
+gVisor). The worker has no HTTP listener and never loads the gateway config;
+its narrow `SOULACY_WORKER_*` environment contains only NATS identity,
+execution-image trust, limits, and workspace-mount settings.
+
+Network is `none` by default. An egress-enabled sandbox must name a dedicated
+egress network and an authenticated proxy; the proxy is responsible for
+enforcing `allowed_egress_hosts`, DNS policy, byte limits, and audit records.
+Direct bridge networking without a proxy is rejected in Team and Scale.
+
+Personal mode retains process and pool executors for local compatibility. They
+are not a tenant security boundary.
 
 On macOS `RLIMIT_AS` is advisory; on non-Unix systems the rlimit wrapper is a
 no-op. These limitations do not weaken the Docker boundary for privileged

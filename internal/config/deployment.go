@@ -145,18 +145,55 @@ func (c *Config) deploymentIssueGroups() ([]string, []string) {
 		if strings.ToLower(strings.TrimSpace(c.Storage.Backend)) != "postgres" || strings.TrimSpace(c.Storage.PostgresDSN) == "" {
 			infrastructureIssues = append(infrastructureIssues, fmt.Sprintf("storage: %s deployments require backend \"postgres\" and a non-empty postgres_dsn", mode))
 		}
-		if strings.ToLower(strings.TrimSpace(c.Executor.Backend)) != "docker" {
-			infrastructureIssues = append(infrastructureIssues, fmt.Sprintf("executor.backend: %s deployments require the isolated \"docker\" backend", mode))
+		queueBackend := strings.ToLower(strings.TrimSpace(c.Queue.Backend))
+		if queueBackend != "nats" && queueBackend != "external" {
+			infrastructureIssues = append(infrastructureIssues, fmt.Sprintf("queue.backend: %s deployments require nats or an external durable queue so gateways and workers remain separate", mode))
+		}
+		if queueBackend == "nats" {
+			if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(c.Queue.NATSUrl)), "tls://") {
+				infrastructureIssues = append(infrastructureIssues, "queue.nats_url: Team/Scale NATS connections must use tls://")
+			}
+			mtls := strings.TrimSpace(c.Queue.NATSTLSCert) != "" && strings.TrimSpace(c.Queue.NATSTLSKey) != ""
+			if strings.TrimSpace(c.Queue.NATSCredentials) == "" && !mtls {
+				infrastructureIssues = append(infrastructureIssues, "queue.nats_credentials: Team/Scale NATS requires a scoped credentials file or mTLS client identity")
+			}
+		}
+		kmsProvider := strings.ToLower(strings.TrimSpace(c.Credentials.KMSProvider))
+		switch kmsProvider {
+		case "awskms", "aws-kms":
+			if strings.TrimSpace(c.Credentials.AWSKMSKeyID) == "" {
+				infrastructureIssues = append(infrastructureIssues, "credentials.aws_kms_key_id: required for the AWS KMS provider")
+			}
+		case "hashicorp", "vault", "vault-transit":
+			if strings.TrimSpace(c.Credentials.HashiCorpAddr) == "" || strings.TrimSpace(c.Credentials.HashiCorpKey) == "" {
+				infrastructureIssues = append(infrastructureIssues, "credentials: Vault Transit requires hashicorp_addr and hashicorp_key")
+			}
+			if strings.TrimSpace(c.Credentials.HashiCorpToken) == "" && strings.TrimSpace(c.Credentials.HashiCorpKubernetesRole) == "" {
+				infrastructureIssues = append(infrastructureIssues, "credentials: Vault Transit requires workload identity (hashicorp_kubernetes_role) or a token")
+			}
+		default:
+			infrastructureIssues = append(infrastructureIssues, fmt.Sprintf("credentials.kms_provider: %s deployments require awskms or vault-transit", mode))
+		}
+		if strings.ToLower(strings.TrimSpace(c.Executor.Backend)) != "worker" {
+			infrastructureIssues = append(infrastructureIssues, fmt.Sprintf("executor.backend: %s deployments require the out-of-process \"worker\" backend", mode))
+		}
+		if strings.TrimSpace(c.Executor.DockerRuntime) == "" {
+			infrastructureIssues = append(infrastructureIssues, fmt.Sprintf("executor.docker_runtime: %s deployments require a hardened OCI runtime such as runsc", mode))
+		}
+		if !strings.Contains(c.Executor.DockerImage, "@sha256:") || !c.Executor.RequireSignedImage {
+			infrastructureIssues = append(infrastructureIssues, fmt.Sprintf("executor.docker_image: %s deployments require a digest-pinned, signature-verified image", mode))
+		}
+		if strings.TrimSpace(c.Runtime.Sandbox.ContainerRuntime) == "" || !c.Runtime.Sandbox.RequireSignedImage || !strings.Contains(c.Runtime.Sandbox.Image, "@sha256:") {
+			infrastructureIssues = append(infrastructureIssues, fmt.Sprintf("runtime.sandbox: %s deployments require a hardened runtime and digest-pinned, signature-verified image", mode))
+		}
+		if c.Executor.DockerNetwork != "" && !strings.EqualFold(c.Executor.DockerNetwork, "none") {
+			infrastructureIssues = append(infrastructureIssues, "executor.docker_network: ordinary worker jobs must use network none; networked tools must use the policy-proxied privileged sandbox")
 		}
 		if !c.Runtime.Sandbox.Enabled || strings.ToLower(strings.TrimSpace(c.Runtime.Sandbox.Mode)) != "docker" {
 			infrastructureIssues = append(infrastructureIssues, fmt.Sprintf("runtime.sandbox: %s deployments require enabled=true and mode \"docker\"", mode))
 		}
 	}
 	if mode == DeploymentModeScale {
-		queueBackend := strings.ToLower(strings.TrimSpace(c.Queue.Backend))
-		if queueBackend != "nats" && queueBackend != "external" {
-			infrastructureIssues = append(infrastructureIssues, "queue.backend: scale deployments require \"nats\" or \"external\" durable distributed jobs")
-		}
 		if strings.TrimSpace(c.Deployment.SharedArtifactStore) == "" {
 			// Still required, and the message now says what setting it does
 			// and does not buy. No runtime code reads this value yet — it is

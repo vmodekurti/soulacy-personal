@@ -11,6 +11,8 @@ package gateway
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -22,34 +24,34 @@ import (
 	"github.com/soulacy/soulacy/internal/knowledge"
 	"github.com/soulacy/soulacy/internal/mcpstore"
 	"github.com/soulacy/soulacy/internal/memory"
+	"github.com/soulacy/soulacy/internal/plugins"
 	"github.com/soulacy/soulacy/internal/queue/dlq"
 	"github.com/soulacy/soulacy/internal/rbac"
 	"github.com/soulacy/soulacy/internal/runs"
 	"github.com/soulacy/soulacy/internal/runtime"
 	"github.com/soulacy/soulacy/internal/schedules"
 	"github.com/soulacy/soulacy/internal/session"
+	"github.com/soulacy/soulacy/internal/skills"
 	storagesqlite "github.com/soulacy/soulacy/internal/storage/sqlite"
+	"github.com/soulacy/soulacy/internal/studio"
 	"github.com/soulacy/soulacy/internal/workboard"
 	"github.com/soulacy/soulacy/internal/workspacepolicy"
 	"github.com/soulacy/soulacy/internal/workspacepurge"
+	"github.com/soulacy/soulacy/internal/workspacesettings"
+	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
 // notYetPurged is the deletion gap, one line per class, each with what is
 // missing. An entry is a claim a reviewer can check; the absence of one is the
 // build failing.
 var notYetPurged = map[string]string{
-	"studio-drafts":   "per-workspace, per-user directory under <root>/studio/drafts",
-	"studio-traces":   "trace directory, which is env-configurable",
-	"studio-learning": "four tables plus the lesson files",
-	"skills":          "per-workspace skill inventory under its own base",
-	"channels":        "same as mcp: configuration, not a store",
-	"webhooks":        "same as mcp: configuration, not a store",
-	"shares":          "share records are file-backed under their own root",
-	"artifacts":       "workboard_artifacts is purged with workboard; object storage is not",
-	"secrets":         "cryptographic erasure, not a DELETE — the catalog says so, and doing it as a row delete would leave the ciphertext recoverable from a backup",
-	"credentials":     "revoke-then-purge across three tables, and revocation has to happen first so a credential cannot be used between the two",
-	"api-keys":        "same shape as credentials",
-	"workspace-files": "there is no single workspace file tree; each store applies wsroot to its own base, so this needs one purger per class rather than one for all",
+	"channels":    "same as mcp: configuration, not a store",
+	"webhooks":    "same as mcp: configuration, not a store",
+	"shares":      "share records are file-backed under their own root",
+	"artifacts":   "workboard_artifacts is purged with workboard; object storage is not",
+	"secrets":     "cryptographic erasure, not a DELETE — the catalog says so, and doing it as a row delete would leave the ciphertext recoverable from a backup",
+	"credentials": "revoke-then-purge across three tables, and revocation has to happen first so a credential cannot be used between the two",
+	"api-keys":    "same shape as credentials",
 }
 
 func TestTheWorkspacePurgeCoverageGapIsAKnownList(t *testing.T) {
@@ -75,6 +77,11 @@ func TestTheWorkspacePurgeCoverageGapIsAKnownList(t *testing.T) {
 	// build can purge, not about what one instance happens to have wired. A
 	// zero-valued store is enough: the coverage question is which resources
 	// are registered, and no purger runs here.
+	root := t.TempDir()
+	skillStores := skills.NewStores(nil, filepath.Join(root, "skills"), zap.NewNop())
+	skillStores.SetWorkspaceLayoutRoot(root)
+	buildTraces := studio.NewBuildTraceStore(10, filepath.Join(root, "studio", "traces"))
+	buildTraces.SetWorkspaceLayoutRoot(root)
 	server := &Server{
 		actions:           storagesqlite.NewActionLog(actions),
 		memoryStore:       hotMemory,
@@ -85,7 +92,11 @@ func TestTheWorkspacePurgeCoverageGapIsAKnownList(t *testing.T) {
 		runStore:          &runs.Store{},
 		workboardStore:    &workboard.Store{},
 		workspacePolicies: &workspacepolicy.Store{},
+		workspaceSettings: &workspacesettings.Store{},
 		mcpServers:        &mcpstore.Store{},
+		pluginStores:      plugins.NewStores(nil, t.TempDir()+"/plugins", zap.NewNop()),
+		skillStores:       skillStores,
+		buildTraces:       buildTraces,
 		dlqStore:          &dlq.SQLiteStore{},
 		approvalStore:     &approvals.Store{},
 		scheduleStore:     &schedules.Store{},
@@ -94,6 +105,7 @@ func TestTheWorkspacePurgeCoverageGapIsAKnownList(t *testing.T) {
 		sessionOwnership:  &session.SQLiteOwnershipStore{},
 		resourceStore:     &session.SQLiteStore{},
 		checkpointStore:   &runtime.CheckpointStore{},
+		workspaceLayout:   wsroot.NewLayout(root),
 	}
 	purgers := server.workspacePurgers()
 	if err := workspacepurge.ValidatePurgers(purgers); err != nil {
@@ -128,6 +140,54 @@ func TestTheWorkspacePurgeCoverageGapIsAKnownList(t *testing.T) {
 	for resource := range notYetPurged {
 		if !covered[resource] {
 			t.Errorf("%q is listed as not-yet-purged but is now covered — remove the entry", resource)
+		}
+	}
+}
+
+func TestWorkspaceFilesPurgerRemovesOnlyCanonicalDeletingWorkspace(t *testing.T) {
+	root := t.TempDir()
+	layout := wsroot.NewLayout(root)
+	deletedFile := filepath.Join(layout.WorkspaceRoot("ws_delete"), "agents", "one.yaml")
+	keptFile := filepath.Join(layout.WorkspaceRoot("ws_keep"), "agents", "two.yaml")
+	for _, path := range []string{deletedFile, keptFile} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("agent"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	server := &Server{workspaceLayout: layout}
+	var purge workspacepurge.Purger
+	for _, candidate := range server.workspacePurgers() {
+		if candidate.Resource == "workspace-files" {
+			purge = candidate
+			break
+		}
+	}
+	if purge.Purge == nil {
+		t.Fatal("Team/Scale registered no canonical workspace-files purger")
+	}
+	removed, err := purge.Purge(context.Background(), "ws_delete")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed.Rows != 1 {
+		t.Fatalf("removed %d files, want 1", removed.Rows)
+	}
+	if _, err := os.Stat(layout.WorkspaceRoot("ws_delete")); !os.IsNotExist(err) {
+		t.Fatalf("deleted workspace root still exists: %v", err)
+	}
+	if _, err := os.Stat(keptFile); err != nil {
+		t.Fatalf("other workspace file was removed: %v", err)
+	}
+}
+
+func TestPersonalModeDoesNotRegisterWholeWorkspaceTreePurger(t *testing.T) {
+	for _, candidate := range (&Server{}).workspacePurgers() {
+		if candidate.Resource == "workspace-files" {
+			t.Fatal("Personal mode must not expose whole-installation deletion as workspace purge")
 		}
 	}
 }

@@ -49,7 +49,7 @@ import (
 	"github.com/soulacy/soulacy/internal/agentprompt"
 	"github.com/soulacy/soulacy/internal/config"
 	// Imported for its init(): registers the built-in LLM provider factories
-	// (ollama/openai/anthropic/gemini/google) into the global registry so
+	// (nvidia/ollama/openai/anthropic/gemini/google) into the global registry so
 	// onboard can build a client and query live models.
 	_ "github.com/soulacy/soulacy/internal/llm"
 	"github.com/soulacy/soulacy/sdk/registry"
@@ -64,7 +64,7 @@ func buildOnboardCmd() *cobra.Command {
   1. Confirm the workspace path (~/.soulacy/soulspace by default).
   2. Choose Personal, Team, or Scale deployment mode.
   3. Choose loopback or expose (loopback = local-only; expose = LAN/remote).
-  4. Pick an LLM provider (Ollama auto-detect / OpenAI / Anthropic / skip).
+  4. Configure the shipped NVIDIA provider or choose another provider.
   5. Set up web search (Ollama / Tavily / Serper) for the web_search tool.
   6. Optionally adopt a starter agent so the GUI isn't empty on first open.
   7. Optionally configure the release manifest used by update checks.
@@ -124,11 +124,11 @@ func runOnboardWizard() error {
 	printStep(2, "Deployment mode")
 	currentMode := cfg.DeploymentMode()
 	fmt.Printf("  %s %s\n", dim("Current:"), cyan(currentMode))
-	fmt.Printf("  %s Personal keeps the zero-dependency local setup. Team and Scale require JWT, PostgreSQL, and Docker isolation.\n", gray("→"))
+	fmt.Printf("  %s Personal keeps the zero-dependency local setup. Team and Scale require JWT, PostgreSQL, external KMS, NATS, and signed execution workers.\n", gray("→"))
 	if confirm("  Change deployment mode?", false) {
 		choices := []string{
 			"Personal (single operator, local stores)",
-			"Team (multi-user, PostgreSQL, Docker isolation)",
+			"Team (multi-user, external KMS and execution workers)",
 			"Scale (multi-instance, distributed queue and shared artifacts)",
 		}
 		mode := []string{config.DeploymentModePersonal, config.DeploymentModeTeam, config.DeploymentModeScale}[promptChoices("Deployment mode:", choices)]
@@ -145,9 +145,22 @@ func runOnboardWizard() error {
 				settings.APIKey = generateAPIKey()
 				fmt.Printf("  %s Generated bootstrap administration key: %s\n", green("✓"), bold(settings.APIKey))
 			}
+			settings.NATSURL = prompt("  NATS URL", defaultString(cfg.Queue.NATSUrl, "tls://nats.internal:4222"))
+			settings.NATSCredentials = prompt("  NATS credentials file", defaultString(cfg.Queue.NATSCredentials, "/var/run/secrets/nats/soulacy.creds"))
+			provider := strings.ToLower(strings.TrimSpace(cfg.Credentials.KMSProvider))
+			if provider != "awskms" && provider != "aws-kms" && provider != "vault-transit" && provider != "vault" && provider != "hashicorp" {
+				provider = []string{"awskms", "vault-transit"}[promptChoices("Credential KMS:", []string{"AWS KMS workload identity", "Vault Transit Kubernetes workload identity"})]
+			}
+			settings.KMSProvider = provider
+			if provider == "awskms" || provider == "aws-kms" {
+				settings.AWSKMSKeyID = prompt("  AWS KMS key id or alias", defaultString(cfg.Credentials.AWSKMSKeyID, "alias/soulacy-production"))
+			} else {
+				settings.VaultAddress = prompt("  Vault address", defaultString(cfg.Credentials.HashiCorpAddr, "https://vault.internal"))
+				settings.VaultTransitKey = prompt("  Vault Transit key", defaultString(cfg.Credentials.HashiCorpKey, "soulacy-production"))
+				settings.VaultKubernetesRole = prompt("  Vault Kubernetes role", defaultString(cfg.Credentials.HashiCorpKubernetesRole, "soulacy-gateway"))
+			}
 		}
 		if mode == config.DeploymentModeScale {
-			settings.NATSURL = prompt("  NATS URL", defaultString(cfg.Queue.NATSUrl, "nats://127.0.0.1:4222"))
 			settings.SharedArtifactStore = prompt("  Shared artifact store URL", cfg.Deployment.SharedArtifactStore)
 		}
 		if err := patchDeploymentSettings(cfgPath, settings); err != nil {
@@ -194,40 +207,41 @@ func runOnboardWizard() error {
 	// ── Step 4: LLM provider ───────────────────────────────────────────────
 	printStep(4, "LLM provider")
 	fmt.Printf("  %s %s\n", dim("Current default:"), cyan(cfg.LLM.DefaultProvider))
-	fmt.Printf("  %s Detecting Ollama on localhost:11434...\n", gray("→"))
-	if ollamaUp() {
-		fmt.Printf("  %s Ollama is running locally. You're good — `sy chat` should work right now.\n", green("✓"))
+	nvidia := cfg.LLM.Providers["nvidia"]
+	needsNVIDIAKey := cfg.LLM.DefaultProvider == "nvidia" && strings.TrimSpace(nvidia.APIKey) == ""
+	if needsNVIDIAKey {
+		fmt.Printf("  %s NVIDIA is the shipped default. Add an API key to enable model access.\n", yellow("⚠"))
+		fmt.Printf("  %s Hosted Developer endpoints are for prototyping and may enforce model/account token and rate limits.\n", yellow("⚠"))
 	} else {
-		fmt.Printf("  %s Ollama not reachable. You'll want OpenAI or Anthropic.\n", yellow("⚠"))
+		fmt.Printf("  %s Existing provider settings will be preserved unless you change them.\n", gray("→"))
 	}
 	fmt.Println()
-	if confirm("  Add or change an LLM provider key?", false) {
+	if confirm("  Add or change an LLM provider key?", needsNVIDIAKey) {
 		choice := promptChoices("Provider:", []string{
+			"NVIDIA NIM / API Catalog",
 			"OpenAI",
 			"Anthropic",
 			"Google (Gemini)",
 			"Groq",
 			"OpenRouter",
-			"NVIDIA NIM",
 			"Custom (OpenAI-compatible)",
 			"Skip",
 		})
 		switch choice {
 		case 0:
-			runProviderSetup(cfgPath, "openai", "https://api.openai.com/v1")
+			runProviderSetup(cfgPath, "nvidia", "https://integrate.api.nvidia.com/v1")
 		case 1:
+			runProviderSetup(cfgPath, "openai", "https://api.openai.com/v1")
+		case 2:
 			// No /v1 suffix: the Anthropic client appends /v1/... itself.
 			runProviderSetup(cfgPath, "anthropic", "https://api.anthropic.com")
-		case 2:
+		case 3:
 			// No /v1beta suffix: the Gemini client appends /v1beta/... itself.
 			runProviderSetup(cfgPath, "google", "https://generativelanguage.googleapis.com")
-		case 3:
-			runProviderSetup(cfgPath, "groq", "https://api.groq.com/openai/v1")
 		case 4:
-			runProviderSetup(cfgPath, "openrouter", "https://openrouter.ai/api/v1")
+			runProviderSetup(cfgPath, "groq", "https://api.groq.com/openai/v1")
 		case 5:
-			// NVIDIA NIM / API catalog — OpenAI-compatible.
-			runProviderSetup(cfgPath, "nvidia", "https://integrate.api.nvidia.com/v1")
+			runProviderSetup(cfgPath, "openrouter", "https://openrouter.ai/api/v1")
 		case 6:
 			runProviderSetup(cfgPath, "custom", "")
 		}
@@ -343,7 +357,7 @@ func loadOrFreshConfig(ws config.Paths) *config.Config {
 	return &config.Config{
 		Server: config.ServerConfig{
 			Host: "127.0.0.1",
-			Port: 18789,
+			Port: 1947,
 		},
 		AgentDirs: []string{ws.Agents},
 	}
@@ -722,7 +736,13 @@ type deploymentSettings struct {
 	JWTSecret           string
 	APIKey              string
 	NATSURL             string
+	NATSCredentials     string
 	SharedArtifactStore string
+	KMSProvider         string
+	AWSKMSKeyID         string
+	VaultAddress        string
+	VaultTransitKey     string
+	VaultKubernetesRole string
 }
 
 func defaultString(value, fallback string) string {
@@ -747,18 +767,39 @@ func patchDeploymentSettings(path string, settings deploymentSettings) error {
 		setScalar(ensureMapping(root, "auth"), "jwt_secret", settings.JWTSecret, yaml.DoubleQuotedStyle)
 		setScalar(ensureMapping(root, "storage"), "backend", "postgres", 0)
 		setScalar(ensureMapping(root, "storage"), "postgres_dsn", settings.PostgresDSN, yaml.DoubleQuotedStyle)
-		setScalar(ensureMapping(root, "executor"), "backend", "docker", 0)
+		const image = "ghcr.io/soulacy/execution@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+		executor := ensureMapping(root, "executor")
+		setScalar(executor, "backend", "worker", 0)
+		setScalar(executor, "docker_image", image, yaml.DoubleQuotedStyle)
+		setScalar(executor, "docker_network", "none", 0)
+		setScalar(executor, "docker_runtime", "runsc", 0)
+		setBool(executor, "require_signed_image", true)
+		setScalar(executor, "cosign_key", "/etc/soulacy/execution-image.pub", yaml.DoubleQuotedStyle)
 		sandbox := ensureMapping(ensureMapping(root, "runtime"), "sandbox")
 		setBool(sandbox, "enabled", true)
 		setScalar(sandbox, "mode", "docker", 0)
+		setScalar(sandbox, "image", image, yaml.DoubleQuotedStyle)
+		setScalar(sandbox, "container_runtime", "runsc", 0)
+		setBool(sandbox, "require_signed_image", true)
+		setScalar(sandbox, "cosign_key", "/etc/soulacy/execution-image.pub", yaml.DoubleQuotedStyle)
+		queue := ensureMapping(root, "queue")
+		setScalar(queue, "backend", "nats", 0)
+		setScalar(queue, "nats_url", settings.NATSURL, yaml.DoubleQuotedStyle)
+		setScalar(queue, "nats_credentials", settings.NATSCredentials, yaml.DoubleQuotedStyle)
+		credentials := ensureMapping(root, "credentials")
+		setScalar(credentials, "kms_provider", settings.KMSProvider, 0)
+		if settings.KMSProvider == "awskms" || settings.KMSProvider == "aws-kms" {
+			setScalar(credentials, "aws_kms_key_id", settings.AWSKMSKeyID, yaml.DoubleQuotedStyle)
+		} else {
+			setScalar(credentials, "hashicorp_addr", settings.VaultAddress, yaml.DoubleQuotedStyle)
+			setScalar(credentials, "hashicorp_key", settings.VaultTransitKey, yaml.DoubleQuotedStyle)
+			setScalar(credentials, "hashicorp_kubernetes_role", settings.VaultKubernetesRole, yaml.DoubleQuotedStyle)
+		}
 		server := ensureMapping(root, "server")
 		setBool(server, "allow_unauthenticated", false)
 		setScalar(server, "api_key", settings.APIKey, yaml.DoubleQuotedStyle)
 	}
 	if settings.Mode == config.DeploymentModeScale {
-		queue := ensureMapping(root, "queue")
-		setScalar(queue, "backend", "nats", 0)
-		setScalar(queue, "nats_url", settings.NATSURL, yaml.DoubleQuotedStyle)
 		setScalar(deployment, "shared_artifact_store", settings.SharedArtifactStore, yaml.DoubleQuotedStyle)
 	}
 	return saveConfigDoc(path, doc)

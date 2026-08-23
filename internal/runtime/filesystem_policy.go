@@ -94,7 +94,7 @@ func (e *Engine) resolveFilesystemPath(ctx context.Context, raw string, forWrite
 		// so a path under <root>/.workspaces/<other> passes the test above
 		// while belonging to someone else. Deny it by structure rather than
 		// by knowing the other tenants' IDs.
-		if denyNamespaceEscape(resolved, root) {
+		if e.denyWorkspaceNamespace(resolved, root) {
 			return "", fmt.Errorf("filesystem access denied for %q: belongs to another workspace", raw)
 		}
 		return resolved, nil

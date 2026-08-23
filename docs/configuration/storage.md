@@ -85,6 +85,9 @@ Carries the [event stream](events.md) and internal work distribution.
 | `nats_subject_prefix` | `""` (= `<stream>.>`) | Subject filter applied to the stream |
 | `nats_ack_wait` | `30s` | How long JetStream waits for an Ack before redelivering |
 | `nats_max_deliver` | `0` | Max delivery attempts per message; `0` = unlimited |
+| `nats_credentials` | empty | Mounted NATS user/JWT credentials file |
+| `nats_tls_ca` | empty | Private CA bundle for NATS TLS |
+| `nats_tls_cert`, `nats_tls_key` | empty | Optional mTLS worker/gateway identity |
 | `command` / `args` | — | Sidecar process (external only) |
 
 ```yaml

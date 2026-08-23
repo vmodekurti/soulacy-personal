@@ -250,7 +250,7 @@ func withWorkspaceIdentity(c *fiber.Ctx, ctx context.Context) context.Context {
 // detachedRequestContext preserves verified authority while decoupling work
 // from Fiber's reusable request buffer and client disconnect lifecycle.
 func detachedRequestContext(c *fiber.Ctx) context.Context {
-	return withRequestPrincipal(c, context.WithoutCancel(c.UserContext()))
+	return context.WithoutCancel(authorizedRequestContext(c))
 }
 
 // defaultPersonalResolver keeps directly constructed test/embedded gateways

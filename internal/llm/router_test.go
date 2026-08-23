@@ -157,6 +157,25 @@ func TestRouterCompleteDispatchesToNamedProvider(t *testing.T) {
 	}
 }
 
+func TestRouterCompletePrefersContextProviderResolver(t *testing.T) {
+	r := NewRouter("shared")
+	r.Register(&fakeProvider{id: "shared", response: &CompletionResponse{Content: "deployment"}})
+	r.SetProviderResolver(func(_ context.Context, providerID string) (Provider, bool) {
+		if providerID != "shared" {
+			return nil, false
+		}
+		return &fakeProvider{id: "shared", response: &CompletionResponse{Content: "workspace"}}, true
+	})
+
+	resp, err := r.Complete(context.Background(), "shared", CompletionRequest{})
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if resp.Content != "workspace" {
+		t.Fatalf("content = %q, want workspace resolver provider", resp.Content)
+	}
+}
+
 func TestRouterCompleteEmptyProviderUsesDefault(t *testing.T) {
 	r := NewRouter("default-p")
 	r.Register(&fakeProvider{id: "default-p", response: &CompletionResponse{Content: "default-resp"}})

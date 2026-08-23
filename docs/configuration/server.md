@@ -7,7 +7,7 @@ Controls the HTTP server that exposes the REST API and channel webhooks.
 ```yaml
 server:
   host: 127.0.0.1      # bind address (default: 127.0.0.1)
-  port: 18789          # port to listen on (default: 18789)
+  port: 1947          # port to listen on (default: 1947)
   api_key: "sy_..."    # master server API key (required)
   read_timeout: 30s    # HTTP read timeout
   write_timeout: 60s   # HTTP write timeout
@@ -26,7 +26,7 @@ IP address or hostname to bind. Use `0.0.0.0` to accept connections on all inter
 
 ### `port`
 
-TCP port the HTTP server listens on. Default: `18789`.
+TCP port the HTTP server listens on. Default: `1947`.
 
 ### `api_key`
 
@@ -45,7 +45,7 @@ Enable HTTPS. Provide paths to your certificate and private key files. Behind a 
 ```yaml
 server:
   host: 127.0.0.1
-  port: 18789
+  port: 1947
   api_key: "dev-only-key"
 ```
 

@@ -20,7 +20,7 @@ func seedRegistriesConfig(t *testing.T) (string, *Server) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	seed := `
 server:
-  port: 18789
+  port: 1947
 registries:
   - id: main
     type: http
@@ -97,7 +97,7 @@ func TestSearchRegistries_ReturnsProviderWarnings(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	seed := `
 server:
-  port: 18789
+  port: 1947
 registries:
   - id: test-skills
     type: skillssh
@@ -147,7 +147,7 @@ func TestSearchRegistries_KeepsGitFallbackWithConfiguredSources(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	seed := `
 server:
-  port: 18789
+  port: 1947
 registries:
   - id: private-skills
     type: skillssh
@@ -192,7 +192,7 @@ func TestSearchRegistries_UsesConfiguredAuthHeaders(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	seed := `
 server:
-  port: 18789
+  port: 1947
 registries:
   - id: authed-skills
     type: skillssh
@@ -232,7 +232,7 @@ func TestSearchRegistries_IncludesInstalledLocalSkillMatches(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	seed := `
 server:
-  port: 18789
+  port: 1947
 registries:
   - id: remote-skills
     type: skillssh
@@ -339,7 +339,7 @@ func testRegistryInstallGateway(t *testing.T, baseURL string) *Server {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	seed := `
 server:
-  port: 18789
+  port: 1947
 registries:
   - id: test-skills
     type: skillssh
@@ -407,7 +407,7 @@ func TestAddRegistry_AppendsAndValidates(t *testing.T) {
 		t.Errorf("added auth headers missing: %v", added)
 	}
 	// Server section untouched.
-	if srv, _ := disk["server"].(map[string]any); srv == nil || srv["port"] != 18789 {
+	if srv, _ := disk["server"].(map[string]any); srv == nil || srv["port"] != 1947 {
 		t.Errorf("server block mutated: %v", disk["server"])
 	}
 }

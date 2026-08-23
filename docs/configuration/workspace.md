@@ -144,7 +144,7 @@ Any config key can also be overridden by environment variables with the
 
 ```bash
 export SOULACY_SERVER_API_KEY="sy_..."   # overrides server.api_key
-export SOULACY_SERVER_PORT=18789          # overrides server.port
+export SOULACY_SERVER_PORT=1947          # overrides server.port
 ```
 
 ## See also

@@ -39,8 +39,8 @@ system_prompt: |
     user tells you facts to use in replies (their availability, decisions),
     remember them for this session.
 llm:
-    provider: ollama
-    model: llama3.3:70b
+    provider: nvidia
+    model: meta/llama-3.3-70b-instruct
     temperature: 0.4
     max_tokens: 2048
 memory:

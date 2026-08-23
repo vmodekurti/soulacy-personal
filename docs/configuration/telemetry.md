@@ -109,11 +109,11 @@ costs:
 
 ```bash
 # View cost summary
-curl http://localhost:18789/api/v1/costs \
+curl http://localhost:1947/api/v1/costs \
   -H "Authorization: Bearer $SOULACY_API_KEY"
 
 # Filter by agent
-curl "http://localhost:18789/api/v1/costs?agent_id=assistant&since=7d" \
+curl "http://localhost:1947/api/v1/costs?agent_id=assistant&since=7d" \
   -H "Authorization: Bearer $SOULACY_API_KEY"
 ```
 
@@ -124,7 +124,7 @@ See the [Costs API reference](../api/costs.md) for full details.
 The dashboard's Run Reliability panel is backed by the durable action log, not the rolling per-agent JSONL tail. This makes the summary useful for cron jobs, manual triggers, and chat runs even after the visible log file rotates.
 
 ```bash
-curl "http://localhost:18789/api/v1/runs/ops-summary?window=24h" \
+curl "http://localhost:1947/api/v1/runs/ops-summary?window=24h" \
   -H "Authorization: Bearer $SOULACY_API_KEY"
 ```
 

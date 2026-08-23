@@ -43,8 +43,8 @@ system_prompt: |
     Rules: report only what a cited source supports; distinguish rumours
     from announcements; keep the whole brief under 400 words.
 llm:
-    provider: ollama
-    model: llama3.3:70b
+    provider: nvidia
+    model: meta/llama-3.3-70b-instruct
     temperature: 0.4
     max_tokens: 2048
 memory:

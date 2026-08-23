@@ -116,6 +116,60 @@ func TestPersonalWorkspaceRootsAreByteIdenticalToConfiguration(t *testing.T) {
 	}
 }
 
+func TestInstallationLayoutUsesOneCanonicalExecutionRoot(t *testing.T) {
+	root := isolationRoot(t)
+	e := newMinimalEngine(t)
+	if err := e.SetFilesystemRoots([]string{root}); err != nil {
+		t.Fatal(err)
+	}
+	e.SetWorkspaceLayoutRoot(root)
+
+	roots, err := e.WorkspaceFilesystemRoots("ws-alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(root, wsroot.WorkspaceDir, "ws-alpha")
+	if len(roots) != 1 || roots[0] != want {
+		t.Fatalf("canonical workspace root = %v, want [%s]", roots, want)
+	}
+
+	victimRoots, err := e.WorkspaceFilesystemRoots("ws-victim")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(victimRoots[0], "secret.txt")
+	if err := os.WriteFile(secret, []byte("victim-only"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.resolveFilesystemPath(context.Background(), secret, false); err == nil || !strings.Contains(err.Error(), "belongs to another workspace") {
+		t.Fatalf("personal fallback reached a canonical tenant tree: %v", err)
+	}
+}
+
+func TestPersonalModeDoesNotReserveAnOrdinaryWorkspacesDirectory(t *testing.T) {
+	root := isolationRoot(t)
+	e := newMinimalEngine(t)
+	if err := e.SetFilesystemRoots([]string{root}); err != nil {
+		t.Fatal(err)
+	}
+
+	ordinary := filepath.Join(root, wsroot.WorkspaceDir)
+	if err := os.MkdirAll(ordinary, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	note := filepath.Join(ordinary, "notes.txt")
+	if err := os.WriteFile(note, []byte("personal data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.resolveFilesystemPath(context.Background(), note, false)
+	if err != nil {
+		t.Fatalf("Personal mode treated an ordinary workspaces directory as tenant state: %v", err)
+	}
+	if got != note {
+		t.Fatalf("Personal mode rewrote ordinary path: got %s want %s", got, note)
+	}
+}
+
 func TestOneWorkspaceCannotReadAnothersFileByAbsolutePath(t *testing.T) {
 	root := isolationRoot(t)
 	e := newMinimalEngine(t)

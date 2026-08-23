@@ -12,10 +12,12 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"go.uber.org/zap"
 
+	"github.com/soulacy/soulacy/internal/actionlog"
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/requestctx"
 	"github.com/soulacy/soulacy/internal/runtime"
 	"github.com/soulacy/soulacy/internal/scheduler"
+	storagesqlite "github.com/soulacy/soulacy/internal/storage/sqlite"
 	"github.com/soulacy/soulacy/pkg/agent"
 )
 
@@ -61,6 +63,38 @@ func appAsWorkspace(t *testing.T, s *Server, workspaceID string, register func(*
 	})
 	register(app)
 	return app
+}
+
+// The Runs page must expose the same workspace-owned mirror that its scoped
+// event query reads. Returning ActionLogBackend.EventFilePath here used to
+// display the legacy Personal-mode path even for a Team/Scale workspace.
+func TestAgentActionsReturnsWorkspaceLogPath(t *testing.T) {
+	root := t.TempDir()
+	log, err := actionlog.New(filepath.Join(root, "logs"), filepath.Join(root, "actions.db"), zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = log.Close() })
+
+	s := &Server{actions: storagesqlite.NewActionLog(log), log: zap.NewNop()}
+	app := appAsWorkspace(t, s, "ws_a", func(app *fiber.App) {
+		app.Get("/agents/:id/actions", s.handleAgentActions)
+	})
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/agents/weather-advice-agent/actions", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var payload struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(root, "logs", ".workspaces", "ws_a", "weather-advice-agent.log")
+	if payload.Path != want {
+		t.Fatalf("workspace log path = %q, want %q", payload.Path, want)
+	}
 }
 
 // A handler resolves agents through the request's verified workspace, so the

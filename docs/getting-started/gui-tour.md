@@ -5,7 +5,7 @@ The built-in web GUI gives you a full control panel for every part of Soulacy �
 Open it at:
 
 ```
-http://localhost:18789
+http://localhost:1947
 ```
 
 If pages show **🔒 Authentication required**, click the **🔑** button in the

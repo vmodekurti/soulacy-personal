@@ -4,8 +4,8 @@
   import ShareView from './pages/ShareView.svelte'
   import { pageTitle } from './lib/pagetitle.js'
   import { api } from './lib/api.js'
-  import { pluginNavEntries, isPluginPage, pluginIdFromPage } from './lib/pluginui.js'
   import { waitForGateway, waitingMessage, timeoutMessage, RESTART_BUDGET } from './lib/gatewaywait.js'
+  import { pluginNavEntries, isPluginPage, pluginIdFromPage } from './lib/pluginui.js'
   import { looksLikeStaleAssetError, recoverFromStaleAssets } from './lib/stalerecovery.js'
   import { navPages, navGroups, navAnchor, visibleNavPages } from './lib/nav.js'
   import { activeWorkspace, can, permissions } from './lib/workspace.js'
@@ -14,6 +14,8 @@
   import AdminSetup from './pages/AdminSetup.svelte'
   import PlatformAdmin from './pages/PlatformAdmin.svelte'
   import WorkspaceAccess from './pages/WorkspaceAccess.svelte'
+  import WorkspaceLogin from './pages/WorkspaceLogin.svelte'
+  import AccessLanding from './pages/AccessLanding.svelte'
   import {
     loadWalkthroughState, startWalkthrough, shouldAutoStart,
   } from './lib/walkthrough/store.js'
@@ -22,7 +24,8 @@
   const adminSetupPath = ['/admin/setup', '/admin/login'].includes(location.pathname.replace(/\/+$/, '') || '/')
   const platformAdminPath = ['/admin', '/admin/platform'].includes(location.pathname.replace(/\/+$/, '') || '/')
 	const workspacePathMatch = location.pathname.match(/^\/w\/([^/]+)(?:\/setup)?\/?$/)
-  const standaloneAdminPath = adminSetupPath || platformAdminPath || !!workspacePathMatch
+  const workspaceLoginPath = location.pathname.replace(/\/+$/, '') === '/workspace-login'
+  const standaloneAdminPath = adminSetupPath || platformAdminPath || workspaceLoginPath || !!workspacePathMatch
   let shareToken = ''   // set from #share/<token> — renders the public read-only view
   let pluginPages = []   // nav entries for mounted plugin UIs (E8)
   let showKeyModal = false
@@ -34,24 +37,29 @@
   let pageLoadError = ''
   let pageLoadStale = false
   let pageLoadSeq = 0
+  let oidcEnabled = false
+  let loginDiscoveryComplete = false
+  let showRestartModal = false
+  let restarting = false
+  let restartError = ''
+  let restartMessage = ''
+  $: multiUserWorkspace = ['team', 'scale'].includes(
+    String($activeWorkspace?.deploymentMode || '').toLowerCase(),
+  )
+  $: workspaceUsesOrganizationLogin = oidcEnabled || multiUserWorkspace
 
   function toggleNav() {
     navCollapsed = !navCollapsed
     try { localStorage.setItem('soulacy-nav-collapsed', navCollapsed ? '1' : '0') } catch (_) {}
   }
 
-  // Gateway restart (main-menu action): confirm modal + a blocking overlay
-  // that polls /health until the replacement process answers, then reloads.
-  let showRestartModal = false
-  let restarting = false
-  let restartError = ''
-  let restartMessage = ''
-
   // MU-030 criterion 2. Recomputed from the permissions store so the sidebar
   // settles as soon as identity resolves rather than after a navigation. In a
   // personal deployment the store is empty and can() allows everything, so the
   // list is exactly what it has always been (product invariant 7).
-  $: pages = ($permissions, visibleNavPages(can))
+  $: pages = ($permissions, $activeWorkspace, visibleNavPages(can, navPages, {
+    deploymentMode: $activeWorkspace?.deploymentMode, role: $activeWorkspace?.role,
+  }))
 
   const retiredPages = {
     builder: 'studio',
@@ -74,14 +82,19 @@
     skills: () => import('./pages/Skills.svelte'),
     mcp: () => import('./pages/MCP.svelte'),
     pluginmgr: () => import('./pages/PluginManager.svelte'),
-    providers: () => import('./pages/Providers.svelte'),
+    providers: () => ['team', 'scale'].includes(String($activeWorkspace?.deploymentMode || '').toLowerCase())
+      ? import('./pages/WorkspaceProviders.svelte')
+      : import('./pages/Providers.svelte'),
     secrets: () => import('./pages/Secrets.svelte'),
     activity: () => import('./pages/Activity.svelte'),
     browser: () => import('./pages/BrowserTrace.svelte'),
-    config: () => import('./pages/Config.svelte'),
+    config: () => ['team', 'scale'].includes(String($activeWorkspace?.deploymentMode || '').toLowerCase())
+      ? import('./pages/WorkspaceConfig.svelte')
+      : import('./pages/Config.svelte'),
     mobile: () => import('./pages/Mobile.svelte'),
     logs: () => import('./pages/Logs.svelte'),
     members: () => import('./pages/Members.svelte'),
+    'workspace-admin': () => import('./pages/WorkspaceAdmin.svelte'),
   }
 
   // Keep the browser tab title in sync with the active page (Story 15).
@@ -93,12 +106,6 @@
     page = p
     sidebarOpen = false
     history.pushState({}, '', '#' + p)
-  }
-
-  function openRestartModal() {
-    restartError = ''
-    showRestartModal = true
-    sidebarOpen = false
   }
 
   async function loadPageComponent(nextPage) {
@@ -121,44 +128,6 @@
       }
       pageLoadError = e?.message || `Could not load ${nextPage}.`
     }
-  }
-
-  async function restartGateway() {
-    if (restarting) return
-    restarting = true
-    restartError = ''
-    try {
-      await api.admin.restart()
-    } catch (e) {
-      // The server exits ~250ms after responding, so the fetch itself may
-      // fail with a network error even though the restart was accepted.
-      // Only a real auth/permission error should stop us.
-      if (e?.status === 401 || e?.status === 403) {
-        restarting = false
-        showRestartModal = false
-        restartError = 'You are not authorized to restart the gateway.'
-        return
-      }
-    }
-    showRestartModal = false
-    waitForGatewayBack()
-  }
-
-  // Poll /health until the re-exec'd gateway answers, then hard-reload the
-  // SPA so every store/stream reconnects to the fresh process.
-  async function waitForGatewayBack() {
-    // Shared with the two upgrade buttons. This loop was the correct one all
-    // along; the upgrade paths each had their own five-second guess instead,
-    // which is how "upgrade successful" ended up sitting above "Failed to
-    // fetch". One implementation now, so there is nothing left to drift.
-    const outcome = await waitForGateway(api.health, {
-      ...RESTART_BUDGET,
-      onAttempt: (n, total) => { restartMessage = waitingMessage(n, total) },
-    })
-    if (outcome.ok) { location.reload(); return }
-    restarting = false
-    restartMessage = ''
-    restartError = timeoutMessage('restart', outcome.waitedMs)
   }
 
   onMount(() => {
@@ -262,48 +231,14 @@
   })
 
   // ── Login screen (shown full-screen while $authRequired) ──────────────────
-  let loginKey = ''
-  let loginError = ''
-  let loginChecking = false
-	let oidcEnabled = false
-	let multiUserLogin = false
-
 	async function discoverLogin() {
 		try {
-			const [res, pingRes] = await Promise.all([fetch('/api/v1/auth/oidc/config'), fetch('/ping')])
+			const res = await fetch('/api/v1/auth/oidc/config')
 			const cfg = res.ok ? await res.json() : null
-			const ping = pingRes.ok ? await pingRes.json() : null
 			oidcEnabled = !!cfg?.enabled
-			multiUserLogin = ['team','scale'].includes(ping?.deployment_mode)
 		} catch (_) { oidcEnabled = false }
+		finally { loginDiscoveryComplete = true }
 	}
-
-	function startOIDCLogin() {
-		$apiKey = ''
-		$authRequired = false
-		location.assign('/api/v1/auth/oidc/start?client=gui&navigate=true')
-	}
-
-  async function submitLogin() {
-    const key = loginKey.trim()
-    if (!key || loginChecking) return
-    loginChecking = true
-    loginError = ''
-    const prev = $apiKey
-    $apiKey = key // apiFetch reads the key from this store
-    try {
-      await api.agents.list() // validate the key
-      $authRequired = false   // success → reveal the app
-      loginKey = ''
-    } catch (e) {
-      $apiKey = prev          // never persist a rejected key
-      loginError = (e && (e.status === 401 || e.status === 403))
-        ? 'That key was rejected. Double-check it and try again.'
-        : (e?.message || 'Could not reach the gateway. Is it running?')
-    } finally {
-      loginChecking = false
-    }
-  }
 
   function saveKey() {
     $apiKey = keyInput.trim()
@@ -314,6 +249,45 @@
   function openKeyModal() {
     keyInput = $apiKey
     showKeyModal = true
+  }
+
+  function openRestartModal() {
+    if (multiUserWorkspace) return
+    restartError = ''
+    showRestartModal = true
+    sidebarOpen = false
+  }
+
+  async function restartGateway() {
+    if (restarting || multiUserWorkspace) return
+    restarting = true
+    restartError = ''
+    try {
+      await api.admin.restart()
+    } catch (e) {
+      if (e?.status === 401 || e?.status === 403) {
+        restarting = false
+        showRestartModal = false
+        restartError = 'You are not authorized to restart the gateway.'
+        return
+      }
+    }
+    showRestartModal = false
+    waitForGatewayBack()
+  }
+
+  async function waitForGatewayBack() {
+    const outcome = await waitForGateway(api.health, {
+      ...RESTART_BUDGET,
+      onAttempt: (attempt, total) => { restartMessage = waitingMessage(attempt, total) },
+    })
+    if (outcome.ok) {
+      window.location.reload()
+      return
+    }
+    restarting = false
+    restartMessage = ''
+    restartError = timeoutMessage('restart', outcome.waitedMs)
   }
 
 	async function logoutSession() {
@@ -333,102 +307,48 @@
   <AdminSetup />
 {:else if platformAdminPath}
   <PlatformAdmin />
+{:else if workspaceLoginPath}
+  <WorkspaceLogin />
 {:else if workspacePathMatch}
   <WorkspaceAccess workspaceID={decodeURIComponent(workspacePathMatch[1])} />
 {:else if shareToken}
   <ShareView token={shareToken} />
 {:else if $authRequired}
-  <div class="login-screen">
-    <div class="login-aurora" aria-hidden="true"></div>
-    <form class="login-card" on:submit|preventDefault={submitLogin}>
-      <div class="login-brand">
-        <span class="login-glyph" aria-hidden="true">⬡</span>
+  <AccessLanding />
+{/if}
+
+{#if showRestartModal && !multiUserWorkspace}
+  <div class="modal-bg" role="presentation" on:click|self={() => showRestartModal = false}>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="restart-title">
+      <h2 id="restart-title">Restart gateway?</h2>
+      <p>Active runs and live connections may be interrupted briefly. Soulacy will reload when the Personal gateway is healthy again.</p>
+      <div class="modal-row">
+        <button class="btn-secondary" on:click={() => showRestartModal = false}>Cancel</button>
+        <button class="btn-danger" on:click={restartGateway}>Restart gateway</button>
       </div>
-      <h1 class="login-title">Soulacy</h1>
-      <p class="login-sub">{multiUserLogin ? 'Sign in with your organization to continue.' : 'Enter your API key to continue.'}</p>
+    </div>
+  </div>
+{/if}
 
-      {#if !multiUserLogin}
-      <input
-        class="login-input"
-        type="password"
-        autocomplete="current-password"
-        placeholder="sy_…"
-        bind:value={loginKey}
-        disabled={loginChecking}
-      />
+{#if restarting && !multiUserWorkspace}
+  <div class="restart-overlay" role="status" aria-live="polite">
+    <div class="restart-card">
+      <div class="restart-spinner" aria-hidden="true"></div>
+      <strong>Restarting Soulacy</strong>
+      <span>{restartMessage || 'Waiting for the gateway…'}</span>
+    </div>
+  </div>
+{/if}
 
-      {#if loginError}
-        <p class="login-error" role="alert">{loginError}</p>
-      {/if}
-
-      <button class="login-submit" type="submit" disabled={loginChecking || !loginKey.trim()}>
-        {loginChecking ? 'Verifying…' : 'Unlock'}
-      </button>
-	  {/if}
-		{#if oidcEnabled}
-			{#if !multiUserLogin}<div class="login-divider"><span>or</span></div>{/if}
-			<button class="login-submit login-sso" type="button" on:click={startOIDCLogin}>Continue with your organization</button>
-		{/if}
-
-      {#if !multiUserLogin}
-      <p class="login-hint">
-        Find your key in <code>~/.soulacy/soulspace/config.yaml</code> (under
-        <code>server.api_key</code>) or the <code>SOULACY_API_KEY</code> env var.
-      </p>
-	  {/if}
-      <p class="login-hint"><a href="/admin/setup">Administrator setup or sign-in</a></p>
-    </form>
+{#if restartError && !multiUserWorkspace}
+  <div class="restart-error" role="alert">
+    <span>{restartError}</span>
+    <button on:click={() => restartError = ''} aria-label="Dismiss restart error">×</button>
   </div>
 {/if}
 
 <!-- API Key modal -->
-{#if showRestartModal}
-  <div
-    class="modal-bg"
-    role="button"
-    tabindex="0"
-    aria-label="Close restart dialog"
-    on:click|self={() => showRestartModal = false}
-    on:keydown={(e) => e.key === 'Escape' && (showRestartModal = false)}
-  >
-    <div class="modal">
-      <h2>Restart Gateway</h2>
-      <p>This stops the running gateway and starts a fresh process. In-flight
-         requests are dropped and the UI reconnects automatically once it's back
-         (usually a few seconds).</p>
-      <div class="modal-row">
-        <button class="btn-secondary" on:click={() => showRestartModal = false}>Cancel</button>
-        <button class="btn-danger" on:click={restartGateway}>Restart</button>
-      </div>
-    </div>
-  </div>
-{/if}
-
-{#if restarting}
-  <div class="restart-overlay" aria-live="polite">
-    <div class="restart-card">
-      <span class="restart-spinner" aria-hidden="true">⟳</span>
-      <p>Restarting gateway…</p>
-      <small>{restartMessage || 'Reconnecting as soon as the new process answers.'}</small>
-    </div>
-  </div>
-{/if}
-
-{#if restartError}
-  <div class="modal-bg" role="button" tabindex="0" aria-label="Dismiss error"
-       on:click|self={() => restartError = ''}
-       on:keydown={(e) => e.key === 'Escape' && (restartError = '')}>
-    <div class="modal">
-      <h2>Restart</h2>
-      <p>{restartError}</p>
-      <div class="modal-row">
-        <button class="btn-primary" on:click={() => restartError = ''}>OK</button>
-      </div>
-    </div>
-  </div>
-{/if}
-
-{#if showKeyModal}
+{#if showKeyModal && !workspaceUsesOrganizationLogin}
   <div
     class="modal-bg"
     role="button"
@@ -539,24 +459,20 @@
       {/if}
     </nav>
 
-    <button class="nav-item nav-action" on:click={openRestartModal}
-            title="Restart the gateway server">
-      <span class="nav-icon restart-dot">●</span>
-      <span class="nav-label">Restart Gateway</span>
-    </button>
+    {#if !multiUserWorkspace}
+      <button class="nav-item nav-action" on:click={openRestartModal} title="Restart Gateway" aria-label="Restart Gateway">
+        <span class="nav-icon restart-dot">●</span>
+        <span class="nav-label">Restart Gateway</span>
+      </button>
+    {/if}
 
     <div class="sidebar-footer">
-      {#if $authRequired}
-        <button class="conn-dot auth-required" on:click={openKeyModal}
-                title="The gateway rejected your API key — click to set it">
-          🔒 Authentication required
-        </button>
-      {:else}
-        <span class="conn-dot" class:live={$connected} title={$connected ? 'Event stream live' : 'Disconnected from event stream'}>
-          {$connected ? '● Live' : '○ Offline'}
-        </span>
+      <span class="conn-dot" class:live={$connected} title={$connected ? 'Event stream live' : 'Disconnected from event stream'}>
+        {$connected ? '● Live' : '○ Offline'}
+      </span>
+      {#if !workspaceUsesOrganizationLogin}
+        <button class="icon-btn" on:click={openKeyModal} title="Set API key">🔑</button>
       {/if}
-      <button class="icon-btn" on:click={openKeyModal} title="Set API key">🔑</button>
       <button class="logout-btn" on:click={logoutSession} title="Sign out of Soulacy" aria-label="Sign out">
         <span aria-hidden="true">↪</span><span class="logout-label">Sign out</span>
       </button>
@@ -817,32 +733,9 @@
   .nav-item:hover  { background: #181b30; color: #d4d7ea; }
   .nav-item.active { background: rgba(108, 99, 255, 0.16); color: #b3adff; }
   .nav-icon { font-size: 1rem; width: 1.2rem; text-align: center; }
-
-  /* Action item (not a page): restart the gateway — pinned at the bottom. */
-  .nav-action { margin: 0.35rem 0.5rem 0.6rem; width: auto; color: #d98a8a; border-radius: 9px; }
+  .nav-action { margin: 0.35rem 0.5rem 0.6rem; width: auto; color: #d98a8a; }
   .nav-action:hover { background: rgba(127, 32, 32, 0.18); color: #ff9d9d; }
   .restart-dot { color: #e06666; font-size: 0.7rem; }
-
-  /* Blocking overlay shown while the gateway re-execs. */
-  .restart-overlay {
-    position: fixed; inset: 0; z-index: 1000;
-    display: flex; align-items: center; justify-content: center;
-    background: rgba(8, 10, 20, 0.82);
-    backdrop-filter: blur(3px);
-  }
-  .restart-card {
-    text-align: center; color: #e8eaf6;
-    background: #14172a; border: 1px solid #2a2f4a;
-    border-radius: 12px; padding: 1.75rem 2.25rem;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
-  }
-  .restart-card p { margin: 0.6rem 0 0.25rem; font-weight: 500; }
-  .restart-card small { color: #8b8fa8; }
-  .restart-spinner {
-    display: inline-block; font-size: 1.8rem; color: #8b85ff;
-    animation: restart-spin 1s linear infinite;
-  }
-  @keyframes restart-spin { to { transform: rotate(360deg); } }
 
   .sidebar-footer {
     display: flex; align-items: center; justify-content: space-between;
@@ -851,11 +744,6 @@
   }
   .conn-dot { font-size: 0.72rem; font-family: monospace; color: #5a3030; }
   .conn-dot.live { color: #4caf82; }
-  .conn-dot.auth-required {
-    background: none; color: #f0a060; padding: 0;
-    font-size: 0.72rem; font-family: monospace; text-align: left;
-  }
-  .conn-dot.auth-required:hover { color: #ffc08a; text-decoration: underline; }
   .icon-btn { background: none; color: #6b7294; font-size: 0.85rem; padding: 0.15rem; }
   .icon-btn:hover { color: #e8eaf6; }
   .logout-btn { display:flex;align-items:center;gap:.3rem;background:none;color:#8f96bd;font-size:.72rem;padding:.2rem .25rem;border-radius:5px;white-space:nowrap; }
@@ -894,73 +782,26 @@
   .modal p  { color: #7b82a8; font-size: 0.85rem; line-height: 1.6; }
   .modal p code { background: #1c1f35; padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.8rem; }
   .modal-row { display: flex; gap: 0.75rem; justify-content: flex-end; }
-
-  /* ── Login screen (glassmorphic) ──────────────────────────────────────── */
-  .login-screen {
+  .restart-overlay {
     position: fixed; inset: 0; z-index: 1000;
     display: flex; align-items: center; justify-content: center;
-    background: radial-gradient(1200px 800px at 50% -10%, hsl(248 60% 16%), hsl(240 40% 6%) 60%);
-    overflow: hidden;
+    background: rgba(8, 10, 20, 0.82); backdrop-filter: blur(3px);
   }
-  .login-aurora {
-    position: absolute; inset: -20%;
-    background:
-      radial-gradient(40% 40% at 20% 30%, hsla(258, 90%, 60%, 0.35), transparent 70%),
-      radial-gradient(35% 35% at 80% 25%, hsla(190, 90%, 55%, 0.25), transparent 70%),
-      radial-gradient(45% 45% at 60% 90%, hsla(280, 90%, 60%, 0.22), transparent 70%);
-    filter: blur(40px);
-    animation: login-drift 18s ease-in-out infinite alternate;
+  .restart-card {
+    min-width: 280px; display: flex; flex-direction: column; align-items: center; gap: 0.75rem;
+    text-align: center; color: #e8eaf6; background: #14172a;
+    border: 1px solid #2a2f4a; border-radius: 12px; padding: 1.75rem 2.25rem;
+    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
   }
-  @keyframes login-drift {
-    from { transform: translate3d(-3%, -2%, 0) scale(1); }
-    to   { transform: translate3d(3%, 2%, 0) scale(1.08); }
+  .restart-card span { color: #8f96bd; font-size: 0.82rem; }
+  .restart-spinner { width: 24px; height: 24px; border: 3px solid #2a2f4a; border-top-color: #7e5cff; border-radius: 50%; animation: restart-spin 0.8s linear infinite; }
+  .restart-error {
+    position: fixed; right: 1rem; bottom: 1rem; z-index: 1001;
+    display: flex; align-items: center; gap: 0.8rem; max-width: min(440px, calc(100vw - 2rem));
+    color: #ffb3b3; background: #321b25; border: 1px solid #6e2d3c; border-radius: 9px; padding: 0.75rem 0.9rem;
   }
-  .login-card {
-    position: relative; z-index: 1;
-    width: min(380px, 92vw);
-    padding: 2.4rem 2rem 1.8rem;
-    display: flex; flex-direction: column; align-items: center; gap: 0.5rem;
-    background: hsla(240, 30%, 16%, 0.55);
-    border: 1px solid hsla(255, 40%, 70%, 0.18);
-    border-radius: 20px;
-    backdrop-filter: blur(22px) saturate(140%);
-    -webkit-backdrop-filter: blur(22px) saturate(140%);
-    box-shadow: 0 24px 80px hsla(248, 60%, 4%, 0.6), inset 0 1px 0 hsla(0,0%,100%,0.06);
-  }
-  .login-glyph {
-    font-size: 2.6rem;
-    color: hsl(252, 90%, 72%);
-    filter: drop-shadow(0 0 16px hsla(252, 90%, 65%, 0.7));
-    animation: login-pulse 3.2s ease-in-out infinite;
-  }
-  @keyframes login-pulse {
-    0%,100% { filter: drop-shadow(0 0 12px hsla(252,90%,65%,0.5)); }
-    50%     { filter: drop-shadow(0 0 26px hsla(252,90%,70%,0.95)); }
-  }
-  .login-title { font-size: 1.5rem; font-weight: 700; letter-spacing: 0.06em; color: hsl(0,0%,98%); margin-top: 0.2rem; }
-  .login-sub { font-size: 0.85rem; color: hsl(240, 15%, 72%); margin-bottom: 0.6rem; }
-  .login-input {
-    width: 100%; text-align: center; letter-spacing: 0.04em;
-    padding: 0.7rem 0.9rem; font-size: 0.95rem;
-    background: hsla(240, 30%, 10%, 0.6);
-    border: 1px solid hsla(255, 40%, 70%, 0.2);
-    border-radius: 10px; color: hsl(0,0%,96%);
-  }
-  .login-input:focus { outline: none; border-color: hsl(252, 90%, 68%); box-shadow: 0 0 0 3px hsla(252,90%,65%,0.25); }
-  .login-error { font-size: 0.8rem; color: hsl(352, 90%, 72%); margin: 0.1rem 0; text-align: center; }
-  .login-submit {
-    width: 100%; margin-top: 0.5rem; padding: 0.7rem 1rem;
-    font-size: 0.95rem; font-weight: 600; color: #fff; border: none; border-radius: 10px; cursor: pointer;
-    background: linear-gradient(135deg, hsl(252, 85%, 62%), hsl(280, 80%, 60%));
-    box-shadow: 0 8px 24px hsla(258, 80%, 50%, 0.4);
-  }
-  .login-submit:hover:not(:disabled) { filter: brightness(1.08); }
-  .login-submit:disabled { opacity: 0.55; cursor: not-allowed; }
-	.login-sso { background: hsl(240, 20%, 20%); border: 1px solid hsla(252, 80%, 72%, 0.45); }
-	.login-divider { display: flex; align-items: center; gap: 0.6rem; color: hsl(240, 10%, 55%); font-size: 0.7rem; }
-	.login-divider::before, .login-divider::after { content: ''; height: 1px; flex: 1; background: hsla(240, 20%, 60%, 0.2); }
-  .login-hint { margin-top: 0.8rem; font-size: 0.72rem; line-height: 1.5; color: hsl(240, 12%, 60%); text-align: center; }
-  .login-hint code { background: hsla(240, 30%, 12%, 0.7); padding: 0.05rem 0.3rem; border-radius: 4px; font-size: 0.7rem; }
+  .restart-error button { background: none; color: #ffb3b3; font-size: 1.1rem; }
+  @keyframes restart-spin { to { transform: rotate(360deg); } }
 
   /* ── Custom Tooltips ────────────────────────────────────────────────────── */
   :global([data-tooltip]) {

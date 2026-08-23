@@ -17,6 +17,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,9 +48,11 @@ import (
 	"github.com/soulacy/soulacy/internal/secrets"
 	"github.com/soulacy/soulacy/internal/templates"
 	"github.com/soulacy/soulacy/internal/tier"
+	"github.com/soulacy/soulacy/internal/workspacesettings"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 	"github.com/soulacy/soulacy/pkg/plugin"
+	sdkllm "github.com/soulacy/soulacy/sdk/llm"
 	"github.com/soulacy/soulacy/sdk/registry"
 )
 
@@ -446,7 +449,7 @@ func (s *Server) handleUpdateAgentYAML(c *fiber.Ctx) error {
 	// Structural validation (same checks as POST /agents/validate). Blocking
 	// errors are returned so the user can fix them; the report also rides along
 	// on success so the UI can surface non-blocking warnings.
-	report := agentvalidate.Definition(&def, "", s.agentValidationOptions(c.Context()), agentvalidate.Report{})
+	report := agentvalidate.Definition(&def, "", s.agentValidationOptionsFor(c), agentvalidate.Report{})
 	if report.Errors > 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error":      "validation failed",
@@ -579,7 +582,7 @@ func (s *Server) handleValidateAgent(c *fiber.Ctx) error {
 	if err := c.BodyParser(&def); err != nil {
 		return s.errJSON(c, fiber.StatusBadRequest, err)
 	}
-	report := agentvalidate.Definition(&def, "", s.agentValidationOptions(c.Context()), agentvalidate.Report{})
+	report := agentvalidate.Definition(&def, "", s.agentValidationOptionsFor(c), agentvalidate.Report{})
 	return c.JSON(report)
 }
 
@@ -1113,6 +1116,11 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 	if (strings.TrimSpace(ovProvider) != "" || strings.TrimSpace(ovModel) != "") && !canOverrideModel(claims) {
 		return s.errMsg(c, fiber.StatusForbidden, "provider/model overrides require the admin or operator role")
 	}
+	workspaceDefault := false
+	if strings.TrimSpace(ovProvider) == "" && strings.TrimSpace(ovModel) == "" {
+		ovProvider, ovModel = s.workspaceChatLLM(c)
+		workspaceDefault = ovProvider != "" || ovModel != ""
+	}
 
 	chatMeta := chatOverrideMetadata(ovProvider, ovModel, ovTemp, ovTopP, ovMaxTokens, req.Overrides.MaxTurns, ovToolChoice, ovResponseFormat, ovReasoningEffort, ovPresencePenalty, ovFrequencyPenalty)
 	if responseMode == "voice" {
@@ -1160,7 +1168,7 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 	ctx = llm.WithCallMetadata(ctx, llm.CallMetadata{
 		Subject: req.UserID, AgentID: req.AgentID, SessionID: sessionID,
 		RunID: msg.ID, Source: "http", CostConfirmed: req.ConfirmCost || isTruthy(c.Get("X-Soulacy-Cost-Confirmed")),
-		OverrideAuthorized: canOverrideModel(claims),
+		OverrideAuthorized: canOverrideModel(claims) || workspaceDefault,
 	})
 
 	// Inject confirm sender so synchronous GUI chats can still receive tool confirmation
@@ -1310,6 +1318,7 @@ func (s *Server) handleChatStream(c *fiber.Ctx) error {
 		return err
 	}
 	def := s.agents(c).Get(req.AgentID)
+	chatProvider, chatModel := s.workspaceChatLLM(c)
 
 	msg := message.Message{
 		ID:        uuid.New().String(),
@@ -1322,6 +1331,7 @@ func (s *Server) handleChatStream(c *fiber.Ctx) error {
 		Role:      message.RoleUser,
 		Parts:     message.Text(req.Text),
 		CreatedAt: time.Now().UTC(),
+		Metadata:  chatOverrideMetadata(chatProvider, chatModel, nil, nil, nil, nil, "", "", "", nil, nil),
 	}
 
 	// Decouple the client connection lifetime from background execution.
@@ -1376,7 +1386,7 @@ func (s *Server) handleChatStream(c *fiber.Ctx) error {
 	})
 	streamCtx = llm.WithCallMetadata(streamCtx, llm.CallMetadata{
 		Subject: req.UserID, AgentID: req.AgentID, SessionID: msg.SessionID,
-		RunID: runID, Source: "http", CostConfirmed: req.ConfirmCost || isTruthy(c.Get("X-Soulacy-Cost-Confirmed")),
+		RunID: runID, Source: "http", CostConfirmed: req.ConfirmCost || isTruthy(c.Get("X-Soulacy-Cost-Confirmed")), OverrideAuthorized: chatProvider != "" || chatModel != "",
 	})
 
 	// Confirm sender emits a tool_confirm event and registers a result channel
@@ -3896,7 +3906,7 @@ func (s *Server) handleAgentActions(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{
 		"agent_id": id,
-		"path":     s.actions.EventFilePath(id),
+		"path":     actions.EventFilePath(id),
 		"events":   events,
 		"count":    len(events),
 	})
@@ -4124,6 +4134,68 @@ func (s *Server) agentValidationOptions(ctx context.Context) agentvalidate.Optio
 		}
 	}
 	return opts
+}
+
+// agentValidationOptionsFor validates against the same effective provider
+// inventory the request can execute with. Team/Scale workspaces may own a
+// provider and encrypted credential without registering either globally.
+func (s *Server) agentValidationOptionsFor(c *fiber.Ctx) agentvalidate.Options {
+	if c == nil {
+		return s.agentValidationOptions(context.Background())
+	}
+	settings := s.workspaceSettingsFor(c)
+	id, ok := identityForWorkspaceSettings(c)
+	if !ok || strings.TrimSpace(id.WorkspaceID()) == "" {
+		return s.agentValidationOptions(c.UserContext())
+	}
+	return s.agentValidationOptionsForWorkspace(c.UserContext(), id.WorkspaceID(), settings)
+}
+
+func (s *Server) agentValidationOptionsForWorkspace(ctx context.Context, workspaceID string, settings workspacesettings.Settings) agentvalidate.Options {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	opts := agentvalidate.Options{Config: s.effectiveWorkspaceConfig(settings), ProviderModels: map[string][]string{}}
+	registered := map[string]struct{}{}
+	if s.llmRouter != nil {
+		for _, id := range s.llmRouter.ProviderIDs() {
+			registered[id] = struct{}{}
+			provider := s.llmRouter.Provider(id)
+			if _, overridden := settings.LLM.Providers[id]; overridden {
+				provider, _ = s.workspaceProvider(ctx, workspaceID, id, settings.LLM.Providers[id])
+			}
+			s.probeValidationProvider(ctx, id, provider, opts.ProviderModels)
+		}
+	}
+	for id, configured := range settings.LLM.Providers {
+		id = strings.ToLower(strings.TrimSpace(id))
+		if id == "" {
+			continue
+		}
+		provider, err := s.workspaceProvider(ctx, workspaceID, id, configured)
+		if err != nil || provider == nil {
+			continue
+		}
+		registered[id] = struct{}{}
+		s.probeValidationProvider(ctx, id, provider, opts.ProviderModels)
+	}
+	for id := range registered {
+		opts.RegisteredProviders = append(opts.RegisteredProviders, id)
+	}
+	sort.Strings(opts.RegisteredProviders)
+	return opts
+}
+
+func (s *Server) probeValidationProvider(ctx context.Context, id string, provider sdkllm.Provider, models map[string][]string) {
+	if provider == nil || len(models[id]) > 0 {
+		return
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	available, err := provider.Models(probeCtx)
+	cancel()
+	if err == nil && len(available) > 0 {
+		models[id] = available
+	}
 }
 
 // handleSetProviderModel persists the chosen default model for a provider into

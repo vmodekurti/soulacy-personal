@@ -26,10 +26,11 @@ Start from the annotated example at the repo root:
 | `storage` | Durable event-log/archive backend: sqlite (default), postgres, external | [Storage & Backends](storage.md) |
 | `vector` | Vector search backend: sqlite-vec (default), qdrant, external sidecar | [Storage & Backends](storage.md) |
 | `queue` | Message queue: memory (default), NATS JetStream (`nats_*` keys), external sidecar | [Storage & Backends](storage.md) |
-| `executor` | Python tool executor: `process` (default), pre-forked `pool`, `docker`, or `ssh` | [Security Posture](security.md) |
+| `executor` | Python tool executor: local backends in Personal; remote `worker` in Team/Scale | [Security Posture](security.md) |
 | `knowledge` | RAG defaults: knowledge DB path, embedding provider/model, chunking | [Storage & Backends](storage.md) |
 | `auth` | `apikey` (default) or `jwt` mode, JWT secret/TTLs, OIDC issuer | [Auth](auth.md) |
 | `credentials` | Credential vault KMS provider: local (default), hashicorp, awskms | [Credentials API](../api/credentials.md) |
+| `billing` | Provider events and webhook verification; authorization consumes provider-independent entitlements | [Production runtime](production-runtime.md) |
 | `updates` | Release manifest for `sy update check/install` and launch readiness | [CLI Reference](../cli/reference.md) |
 | `rate_limit` | Per-user/per-agent RPM and daily token quotas; memory or redis backend | [Rate Limiting](rate-limiting.md) |
 | `telemetry` | OpenTelemetry tracing: exporter, OTLP endpoint, service name | [Telemetry](telemetry.md) |
@@ -50,7 +51,7 @@ at all (loopback only, Ollama provider). A typical small config:
 ```yaml
 server:
   host: 127.0.0.1
-  port: 18789
+  port: 1947
   api_key: "sy_..."          # openssl rand -hex 32 | sed 's/^/sy_/'
 
 llm:
@@ -85,7 +86,7 @@ Any config key can be overridden with an environment variable: prefix
 
 ```bash
 export SOULACY_SERVER_API_KEY="sy_..."     # server.api_key
-export SOULACY_SERVER_PORT=18789            # server.port
+export SOULACY_SERVER_PORT=1947            # server.port
 export SOULACY_LOG_LEVEL=debug             # log.level
 export SOULACY_UPDATE_MANIFEST="https://example.com/release-manifest.json"
 ```

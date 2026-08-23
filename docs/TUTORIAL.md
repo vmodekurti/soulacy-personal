@@ -90,7 +90,7 @@ Soulacy compiles into a single binary that bundles the HTTP server, the runtime 
    ./build-and-restart.command
    ```
 3. **Verify running status**:
-   Open [http://127.0.0.1:18789](http://127.0.0.1:18789) to view the live dashboard.
+   Open [http://127.0.0.1:1947](http://127.0.0.1:1947) to view the live dashboard.
 
 ---
 
@@ -123,7 +123,7 @@ Let's build a simple translation agent called `translator` that speaks English a
    enabled: true
    ```
 3. **Test the agent**:
-   Open [http://127.0.0.1:18789](http://127.0.0.1:18789), navigate to the **Agents** tab, choose the `translator` agent, and type: *"Hello, how are you doing today?"*
+   Open [http://127.0.0.1:1947](http://127.0.0.1:1947), navigate to the **Agents** tab, choose the `translator` agent, and type: *"Hello, how are you doing today?"*
 
 ---
 

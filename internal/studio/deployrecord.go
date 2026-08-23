@@ -380,10 +380,17 @@ type deploymentHistory struct {
 // record and re-applies its Definition, so a mixed history does not merely
 // leak, it hands one tenant's system prompt to another tenant's agent.
 type DeploymentStore struct {
-	root string
+	root   string
+	layout wsroot.Layout
 	// mu serialises read-modify-write cycles so two concurrent deploys cannot
 	// both read version N and both write N+1, losing one of them.
 	mu sync.Mutex
+}
+
+// SetWorkspaceLayoutRoot selects the canonical Team/Scale workspace tree.
+// Personal mode intentionally retains the historical root layout.
+func (s *DeploymentStore) SetWorkspaceLayoutRoot(root string) {
+	s.layout = wsroot.NewLayout(root)
 }
 
 // NewDeploymentStore returns a store rooted at dir. The directory is created
@@ -677,5 +684,5 @@ func (s *DeploymentStore) pathFor(workspaceID, agentID string) (string, error) {
 // the root itself, so a single-user installation's files stay exactly where
 // they have always been (product invariant 7).
 func (s *DeploymentStore) workspaceDir(workspaceID string) string {
-	return wsroot.Dir(s.root, wsroot.Normalize(workspaceID))
+	return s.layout.Dir(s.root, wsroot.Normalize(workspaceID))
 }

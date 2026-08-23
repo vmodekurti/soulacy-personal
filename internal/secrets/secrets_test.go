@@ -158,6 +158,9 @@ func TestCatalog(t *testing.T) {
 	if d, ok := byName["llm.providers.anthropic.api_key"]; !ok || !d.Set || d.Category != CategoryLLM || d.Source != SourceVault {
 		t.Errorf("anthropic descriptor wrong: %+v ok=%v", d, ok)
 	}
+	if _, ok := byName["llm.providers.ollama.api_key"]; ok {
+		t.Error("local Ollama must not advertise a required API-key slot")
+	}
 	// Present in config as plaintext, absent from the vault. Set must be true:
 	// it RESOLVES, which is what every caller means by "set" — readiness blocks
 	// on it, doctor reports on it, and `sy secrets` ticks it. This assertion

@@ -35,7 +35,7 @@ Content-Type: application/json
 For real-time token streaming, add `Accept: text/event-stream`:
 
 ```bash
-curl -N -X POST http://localhost:18789/api/v1/chat/stream \
+curl -N -X POST http://localhost:1947/api/v1/chat/stream \
   -H "Authorization: Bearer sy_your-key" \
   -H "Content-Type: application/json" \
   -d '{"agent_id":"assistant","user_id":"u1","text":"Tell me a short story"}'

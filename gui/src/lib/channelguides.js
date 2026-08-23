@@ -65,7 +65,7 @@ export const channelGuides = {
       'Add the **WhatsApp** product. The *API Setup* page gives you a test number, a temporary **Access token**, and the **Phone number ID** — copy both below.',
       'Choose any random string as your **Verify token** (you invent it; Meta echoes it back during verification).',
       'Copy **App secret** from *App settings → Basic* — Soulacy uses it to verify webhook signatures.',
-      'Expose your gateway publicly (reverse proxy or a tunnel like `ngrok http 18789`), then in *WhatsApp → Configuration* set the **Callback URL** to `https://YOUR-HOST/channels/whatsapp/webhook` with your Verify token, and subscribe to the **messages** webhook field.',
+      'Expose your gateway publicly (reverse proxy or a tunnel like `ngrok http 1947`), then in *WhatsApp → Configuration* set the **Callback URL** to `https://YOUR-HOST/channels/whatsapp/webhook` with your Verify token, and subscribe to the **messages** webhook field.',
       'Save here, restart the gateway, and complete Meta\'s webhook verification.',
     ],
     fields: {
@@ -103,7 +103,7 @@ export const channelGuides = {
       'POST a message to any agent and read the reply from the JSON response.',
     ],
     fields: {},
-    test: 'curl -X POST http://localhost:18789/api/v1/agents/YOUR-AGENT/chat -H "Authorization: Bearer YOUR-KEY" -H "Content-Type: application/json" -d \'{"message":"hello"}\'',
+    test: 'curl -X POST http://localhost:1947/api/v1/agents/YOUR-AGENT/chat -H "Authorization: Bearer YOUR-KEY" -H "Content-Type: application/json" -d \'{"message":"hello"}\'',
   },
 
   email: {

@@ -62,7 +62,7 @@ git pull
 make all
 
 # Restart the gateway (foreground example)
-lsof -ti :18789 | xargs kill 2>/dev/null || true
+lsof -ti :1947 | xargs kill 2>/dev/null || true
 ./bin/soulacy
 ```
 
@@ -195,7 +195,7 @@ a genuinely clean slate:
 What it does, in order:
 
 1. Prompts for a **typed confirmation** — you must literally type `wipe`.
-2. Stops the gateway (port 18789, plus any launchd service).
+2. Stops the gateway (port 1947, plus any launchd service).
 3. **Deletes `~/.soulacy` entirely — agents, memories, the encrypted
    credential vault, config.yaml. No backup is taken.**
 4. Rebuilds the GUI dist and binaries from the checkout (`make all`).

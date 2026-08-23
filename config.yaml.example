@@ -103,7 +103,7 @@ search:
 
 # ── LLM providers ─────────────────────────────────────────────────────────────
 llm:
-    default_provider: ollama
+    default_provider: nvidia
     # studio: overrides the model that BUILDS workflows in Studio (independent of
     # the model agents run on). learning (default: true) lets Studio record
     # lessons from repairs you accept after a Run Live and inject them into future
@@ -113,6 +113,10 @@ llm:
     #     model: claude-sonnet-4-6
     #     learning: true
     providers:
+        nvidia:
+            api_key: ""                    # Prefer SOULACY_LLM_PROVIDERS_NVIDIA_API_KEY
+            base_url: https://integrate.api.nvidia.com/v1
+            model: meta/llama-3.3-70b-instruct
         anthropic:
             api_key: "sk-ant-..."          # Your Anthropic API key
             base_url: https://api.anthropic.com
@@ -257,7 +261,7 @@ server:
     api_key: "sy_..."                      # Generate: openssl rand -hex 32 | sed 's/^/sy_/'
     gui_enabled: true
     host: 127.0.0.1
-    port: 18789
+    port: 1947
 
 # ── Plugin settings (Story E17) ──────────────────────────────────────────────
 # Arbitrary plugin-specific configuration, keyed by plugin ID. The shape under

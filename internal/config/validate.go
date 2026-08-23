@@ -109,10 +109,10 @@ func (c *Config) Validate() error {
 		if strings.TrimSpace(c.Auth.OIDCClientID) == "" {
 			errs = append(errs, fmt.Errorf("auth.oidc_client_id is required when auth.oidc_issuer is set"))
 		}
-		if strings.TrimSpace(c.Auth.OIDCRedirectURL) == "" {
-			errs = append(errs, fmt.Errorf("auth.oidc_redirect_url is required for GUI login"))
-		} else if parsed, err := url.Parse(c.Auth.OIDCRedirectURL); err != nil || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" || (parsed.Scheme != "https" && !(parsed.Scheme == "http" && (parsed.Hostname() == "localhost" || (net.ParseIP(parsed.Hostname()) != nil && net.ParseIP(parsed.Hostname()).IsLoopback())))) {
-			errs = append(errs, fmt.Errorf("auth.oidc_redirect_url must use HTTPS (HTTP is allowed only for loopback development)"))
+		if strings.TrimSpace(c.Auth.OIDCRedirectURL) != "" {
+			if parsed, err := url.Parse(c.Auth.OIDCRedirectURL); err != nil || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" || (parsed.Scheme != "https" && !(parsed.Scheme == "http" && (parsed.Hostname() == "localhost" || (net.ParseIP(parsed.Hostname()) != nil && net.ParseIP(parsed.Hostname()).IsLoopback())))) {
+				errs = append(errs, fmt.Errorf("auth.oidc_redirect_url must use HTTPS (HTTP is allowed only for loopback development)"))
+			}
 		}
 	}
 	dur("queue.nats_ack_wait", c.Queue.NATSAckWait)
@@ -203,7 +203,7 @@ func (c *Config) Validate() error {
 
 	// --- Executor ---
 	switch c.Executor.Backend {
-	case "", "process", "pool", "docker", "ssh":
+	case "", "process", "pool", "docker", "ssh", "worker":
 	default:
 		errs = append(errs, fmt.Errorf("executor.backend: unsupported value %q", c.Executor.Backend))
 	}

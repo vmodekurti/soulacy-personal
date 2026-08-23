@@ -50,7 +50,7 @@ func TestResolveWorkspace_LegacyInstallationDetected(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(legacy, "agents"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(legacy, "config.yaml"), []byte("server:\n  port: 18789\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(legacy, "config.yaml"), []byte("server:\n  port: 1947\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -236,7 +236,7 @@ func TestLoad_LegacyInstallKeepsOldDefaults(t *testing.T) {
 	if err := os.MkdirAll(legacy, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(legacy, "config.yaml"), []byte("server:\n  port: 18789\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(legacy, "config.yaml"), []byte("server:\n  port: 1947\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cwd, _ := os.Getwd()

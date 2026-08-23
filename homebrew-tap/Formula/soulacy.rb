@@ -56,7 +56,7 @@ class Soulacy < Formula
     (var/"soulacy").mkpath
     ohai "Soulacy installed!"
     ohai "Start the gateway:  soulacy serve"
-    ohai "Open the GUI:       http://localhost:18789"
+    ohai "Open the GUI:       http://localhost:1947"
     ohai "Config:             #{Dir.home}/.soulacy/config.yaml"
   end
 

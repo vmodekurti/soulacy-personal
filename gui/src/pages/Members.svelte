@@ -3,6 +3,7 @@
   import { confirmDestructive } from '../lib/destructive.js'
   import TourButton from '../lib/TourButton.svelte'
   import { api } from '../lib/api.js'
+  import { activeWorkspace } from '../lib/workspace.js'
 
   const roles = ['viewer', 'operator', 'developer', 'admin', 'owner']
   const roleRank = { viewer: 1, operator: 2, developer: 3, admin: 4, owner: 5 }
@@ -51,13 +52,13 @@
     try {
       const created = await api.workspaceMembers.invite(email.trim(), role, expiresIn)
       inviteToken = created.token || ''
-      invitationURL = inviteToken ? `${location.origin}${location.pathname}#members?invite=${encodeURIComponent(inviteToken)}` : ''
+      invitationURL = inviteToken && $activeWorkspace?.workspaceId ? `${location.origin}/w/${encodeURIComponent($activeWorkspace.workspaceId)}?invite=${encodeURIComponent(inviteToken)}` : ''
       notice = `Invitation created for ${created.email}. The token is shown once.`
       email = ''
       await load()
       notice = `Invitation created for ${created.email}. The token is shown once.`
       inviteToken = created.token || ''
-      invitationURL = inviteToken ? `${location.origin}${location.pathname}#members?invite=${encodeURIComponent(inviteToken)}` : ''
+      invitationURL = inviteToken && $activeWorkspace?.workspaceId ? `${location.origin}/w/${encodeURIComponent($activeWorkspace.workspaceId)}?invite=${encodeURIComponent(inviteToken)}` : ''
     } catch (e) { error = e.message } finally { saving = false }
   }
 

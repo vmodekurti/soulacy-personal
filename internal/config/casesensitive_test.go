@@ -16,7 +16,7 @@ func TestLoad_PreservesMCPEnvKeyCase(t *testing.T) {
 	yaml := `
 server:
   host: 127.0.0.1
-  port: 18789
+  port: 1947
 mcp:
   servers:
     letsfg:

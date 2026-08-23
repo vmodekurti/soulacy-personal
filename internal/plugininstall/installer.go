@@ -478,10 +478,21 @@ func readManifest(dir string) (plugin.Manifest, error) {
 // Each workspace installs into its own plugin directory, which is also the one
 // the loader scans for that workspace.
 type Installers struct {
-	base string
+	base   string
+	layout wsroot.Layout
 
 	mu         sync.Mutex
 	installers map[string]*Installer
+}
+
+func (s *Installers) SetWorkspaceLayoutRoot(root string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.layout = wsroot.NewLayout(root)
+	s.installers = map[string]*Installer{}
 }
 
 // NewInstallers builds the registry over the directory that holds each
@@ -507,7 +518,7 @@ func (s *Installers) For(workspaceID string) *Installer {
 	if existing, ok := s.installers[workspaceID]; ok {
 		return existing
 	}
-	ins, err := New(wsroot.Dir(s.base, workspaceID))
+	ins, err := New(s.layout.Dir(s.base, workspaceID))
 	if err != nil {
 		s.installers[workspaceID] = nil
 		return nil
@@ -521,5 +532,5 @@ func (s *Installers) Root(workspaceID string) string {
 	if s == nil {
 		return ""
 	}
-	return wsroot.Dir(s.base, wsroot.Normalize(workspaceID))
+	return s.layout.Dir(s.base, wsroot.Normalize(workspaceID))
 }

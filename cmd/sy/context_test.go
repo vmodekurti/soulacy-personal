@@ -95,7 +95,7 @@ func TestContextFileNeverHoldsSecrets(t *testing.T) {
 func TestContextFileIsNotWorldReadable(t *testing.T) {
 	withTempWorkspace(t)
 	if err := saveContexts(contextFile{Current: "local", Contexts: map[string]syContext{
-		"local": {Name: "local", Server: "http://localhost:18789"},
+		"local": {Name: "local", Server: "http://localhost:1947"},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -188,9 +188,9 @@ func TestApplyActiveContextDoesNotOverrideExplicitFlags(t *testing.T) {
 		t.Fatalf("stored context was not applied: %q %q", gatewayURL, activeWorkspaceID)
 	}
 
-	gatewayURL, activeWorkspaceID = "http://localhost:18789", "ws_explicit"
+	gatewayURL, activeWorkspaceID = "http://localhost:1947", "ws_explicit"
 	applyActiveContext()
-	if gatewayURL != "http://localhost:18789" || activeWorkspaceID != "ws_explicit" {
+	if gatewayURL != "http://localhost:1947" || activeWorkspaceID != "ws_explicit" {
 		t.Fatalf("stored context overrode explicit flags: %q %q", gatewayURL, activeWorkspaceID)
 	}
 }

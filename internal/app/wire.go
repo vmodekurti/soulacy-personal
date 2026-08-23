@@ -24,6 +24,7 @@ import (
 	"github.com/soulacy/soulacy/internal/channels"
 	httpchan "github.com/soulacy/soulacy/internal/channels/http"
 	"github.com/soulacy/soulacy/internal/config"
+	"github.com/soulacy/soulacy/internal/entitlements"
 	"github.com/soulacy/soulacy/internal/events"
 	"github.com/soulacy/soulacy/internal/gateway"
 	"github.com/soulacy/soulacy/internal/hooks"
@@ -39,7 +40,9 @@ import (
 	"github.com/soulacy/soulacy/internal/schedules"
 	"github.com/soulacy/soulacy/internal/studio"
 	"github.com/soulacy/soulacy/internal/tenancy"
+	"github.com/soulacy/soulacy/internal/workspacelayout"
 	"github.com/soulacy/soulacy/internal/workspacepolicy"
+	"github.com/soulacy/soulacy/internal/workspacesettings"
 	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/message"
 )
@@ -95,6 +98,17 @@ func (a *App) Run(parent context.Context) error {
 	if err != nil {
 		return fmt.Errorf("resolve workspace: %w", err)
 	}
+	if config.IsMultiUserMode(cfg.DeploymentMode()) {
+		migration, migrateErr := workspacelayout.Migrate(ws.Root)
+		if migrateErr != nil {
+			return fmt.Errorf("migrate named workspaces into isolated roots: %w", migrateErr)
+		}
+		if len(migration.Moves) > 0 {
+			log.Info("migrated legacy workspace filesystem layout",
+				zap.Int("subtrees", len(migration.Moves)),
+				zap.String("workspace_root", filepath.Join(ws.Root, wsroot.WorkspaceDir)))
+		}
+	}
 	log.Info("workspace", zap.String("root", ws.Root), zap.Bool("legacy", ws.Legacy))
 	var personalTenant *tenancy.PersonalTenant
 	var tenantResolver tenancy.Resolver
@@ -135,7 +149,10 @@ func (a *App) Run(parent context.Context) error {
 	// overlaid onto the in-memory config BEFORE the LLM router and channel
 	// adapters read their api_keys / tokens. Secrets live only at runtime in the
 	// encrypted vault under the workspace (~/.soulacy/soulspace/credentials.db).
-	credVault := a.wireCredentialVault(ws, stack)
+	credVault, err := a.wireCredentialVault(parent, ws, stack)
+	if err != nil {
+		return err
+	}
 	a.wireSecrets(credVault)
 
 	// ── Agent brain memory (episodic / semantic / procedural) ────────────────
@@ -143,7 +160,7 @@ func (a *App) Run(parent context.Context) error {
 	learningStore := a.wireLearning(ws)
 
 	// ── Memory ───────────────────────────────────────────────────────────────
-	fileStore, archive, err := a.wireMemory(stack)
+	fileStore, archive, err := a.wireMemory(ws, stack)
 	if err != nil {
 		return err
 	}
@@ -313,19 +330,20 @@ func (a *App) Run(parent context.Context) error {
 		log.Info("agent brain semantic memory enabled (sqlite-vec)")
 	}
 
-	// ── Python Executor Backend ───────────────────────────────────────────────
-	// "process" (default): one python3 subprocess per call, simple + compatible.
-	// "pool": N pre-forked persistent workers, eliminates interpreter cold-start.
-	pyExecutor := a.wirePythonExecutor(stack, credVault)
-	// Named backends agents can opt into via `execution.backend` (local/docker/ssh).
-	namedExecutors := a.wireNamedExecutors(credVault)
-
 	// ── Queue Backend ─────────────────────────────────────────────────────────
-	// Resolved through the SDK factory registry (Story E10).
+	// Execution workers use this boundary too, so it must exist before the
+	// executor is selected.
 	queueBackend, err := a.wireQueue(stack)
 	if err != nil {
 		return err
 	}
+
+	// ── Python Executor Backend ───────────────────────────────────────────────
+	// "process" (default): one python3 subprocess per call, simple + compatible.
+	// "pool": N pre-forked persistent workers, eliminates interpreter cold-start.
+	pyExecutor := a.wirePythonExecutor(stack, credVault, queueBackend)
+	// Named backends agents can opt into via `execution.backend` (local/docker/ssh).
+	namedExecutors := a.wireNamedExecutors(credVault, queueBackend)
 
 	// ── Event publishing (extensibility E1) ───────────────────────────────────
 	// Every EventHub emission is wrapped in a schema-v1 envelope and published
@@ -375,12 +393,14 @@ func (a *App) Run(parent context.Context) error {
 		pluginStores:   pluginStores,
 		pyExecutor:     pyExecutor,
 		namedExecutors: namedExecutors,
+		queueBackend:   queueBackend,
 		brainStores:    brainStores,
 		learningStore:  learningStore,
 		ollamaAPIKey:   ollamaAPIKey,
 		searchProvider: searchProvider,
 		searchAPIKey:   searchAPIKey,
 		toolTimeout:    toolTimeout,
+		workspaceRoot:  ws.Root,
 	})
 
 	// App-lifetime context. Created here (before scheduler + channels) so
@@ -435,7 +455,11 @@ func (a *App) Run(parent context.Context) error {
 	// schedule once its deployment carries passing certification. The store is
 	// re-read on every tick, so re-certifying unblocks the schedule without a
 	// restart; agents with no deployment record are unaffected.
-	sched.SetReadinessGate(deploymentReadinessGate(studio.NewDeploymentStore(studio.DeploymentsDir(ws.Root))))
+	deploymentStore := studio.NewDeploymentStore(studio.DeploymentsDir(ws.Root))
+	if config.IsMultiUserMode(cfg.DeploymentMode()) {
+		deploymentStore.SetWorkspaceLayoutRoot(ws.Root)
+	}
+	sched.SetReadinessGate(deploymentReadinessGate(deploymentStore))
 	for _, def := range loader.All() {
 		if err := sched.RegisterAgent(def); err != nil {
 			log.Warn("scheduler register failed", zap.String("agent", def.ID), zap.Error(err))
@@ -605,6 +629,18 @@ func (a *App) Run(parent context.Context) error {
 		authEngine.SetIdentityLinker(tenantIdentityLinker)
 	}
 	if providers, ok := tenantResolver.(tenancy.WorkspaceIdentityStore); ok {
+		authEngine.SetWorkspaceOIDCAvailabilityResolver(func(ctx context.Context, workspaceID string) bool {
+			login, err := providers.WorkspaceLoginConfig(ctx, workspaceID)
+			if err != nil {
+				return false
+			}
+			organizationStatus := strings.ToLower(strings.TrimSpace(login.OrganizationStatus))
+			workspaceStatus := strings.ToLower(strings.TrimSpace(login.WorkspaceStatus))
+			identityStatus := strings.ToLower(strings.TrimSpace(login.IdentityStatus))
+			return (organizationStatus == "" || organizationStatus == tenancy.WorkspaceActive) &&
+				(workspaceStatus == "" || workspaceStatus == tenancy.WorkspaceActive) &&
+				identityStatus == "active"
+		})
 		authEngine.SetWorkspaceOIDCProviderResolver(func(ctx context.Context, workspaceID string) (auth.WorkspaceOIDCProvider, bool) {
 			provider, err := providers.ResolveWorkspaceIdentityProvider(ctx, workspaceID)
 			if err != nil {
@@ -638,6 +674,13 @@ func (a *App) Run(parent context.Context) error {
 			}
 			return auth.TokenIdentity{Subject: subject, Role: membership.Role, OrganizationID: membership.OrganizationID, WorkspaceID: membership.WorkspaceID, MembershipID: membership.MembershipID}, true
 		})
+		authEngine.SetWorkspaceInvitationAccepter(func(ctx context.Context, token, subject, workspaceID string) (auth.TokenIdentity, bool) {
+			membership, err := members.AcceptInvitation(ctx, tenancy.Mutation{ActorSubject: subject, RequestID: "oidc-invitation", At: time.Now().UTC()}, token, subject)
+			if err != nil || membership.WorkspaceID != workspaceID {
+				return auth.TokenIdentity{}, false
+			}
+			return auth.TokenIdentity{Subject: subject, Role: membership.Role, OrganizationID: membership.OrganizationID, WorkspaceID: membership.WorkspaceID, MembershipID: membership.ID}, true
+		})
 	}
 
 	// ── RBAC Manager ──────────────────────────────────────────────────────────
@@ -658,6 +701,13 @@ func (a *App) Run(parent context.Context) error {
 	} else {
 		workspacePolicies = store
 		stack.pushClose("workspace-policies", store)
+	}
+	var workspaceSettings *workspacesettings.Store
+	if store, err := workspacesettings.NewStore(ws.DB("workspace-settings")); err != nil {
+		log.Warn("workspace settings unavailable", zap.Error(err))
+	} else {
+		workspaceSettings = store
+		stack.pushClose("workspace-settings", store)
 	}
 
 	// The servers a WORKSPACE defined for itself, as opposed to the operator's
@@ -708,10 +758,24 @@ func (a *App) Run(parent context.Context) error {
 		tenantResolver:      tenantResolver,
 		workspaceLifecycle:  workspaceLifecycle,
 		workspacePolicies:   workspacePolicies,
+		workspaceSettings:   workspaceSettings,
 		workspaceMCPServers: workspaceMCPServers,
 		costGovernor:        a.costGovernor,
 		tenantPool:          tenantPool,
 	}, stack)
+	if config.IsMultiUserMode(cfg.DeploymentMode()) {
+		if tenantPool == nil {
+			return fmt.Errorf("entitlements require the tenancy PostgreSQL pool")
+		}
+		entitlementStore, entitlementErr := entitlements.OpenPostgres(parent, tenantPool)
+		if entitlementErr != nil {
+			return fmt.Errorf("entitlement store: %w", entitlementErr)
+		}
+		srv.SetEntitlements(entitlements.New(entitlementStore), entitlementStore)
+		if strings.EqualFold(cfg.Billing.Provider, "stripe") && strings.TrimSpace(cfg.Billing.StripeWebhookSecret) == "" {
+			return fmt.Errorf("billing.stripe_webhook_secret is required when billing.provider=stripe")
+		}
+	}
 
 	// ── Workspace deletion sweep ──────────────────────────────────────────────
 	// The thing that makes a requested deletion actually happen. Without it the

@@ -24,6 +24,11 @@ func init() {
 			SubjectPrefix: cfgmap.Str(cfg, "subject_prefix", ""),
 			AckWait:       ackWait,
 			MaxDeliver:    cfgmap.Int(cfg, "max_deliver", 0),
+			Credentials:   cfgmap.Str(cfg, "credentials", ""),
+			TLSCA:         cfgmap.Str(cfg, "tls_ca", ""),
+			TLSCert:       cfgmap.Str(cfg, "tls_cert", ""),
+			TLSKey:        cfgmap.Str(cfg, "tls_key", ""),
+			TLSServerName: cfgmap.Str(cfg, "tls_server_name", ""),
 		})
 	})
 }

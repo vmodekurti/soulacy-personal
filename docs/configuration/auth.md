@@ -15,14 +15,26 @@ auth:
   jwt_refresh_ttl: 168h
   oidc_issuer: https://login.example.com
   oidc_client_id: soulacy
+  # Optional reverse-proxy override. Otherwise Soulacy derives this from the
+  # browser-facing origin, including the user-selected port.
   oidc_redirect_url: https://agents.example.com/api/v1/auth/oidc/callback
   oidc_scopes: [openid, profile, email]
 ```
 
-Register the exact callback URL with the provider. Providers that require a
+Register the exact callback URL with the provider. For example, a Soulacy
+instance opened at `http://localhost:1947` uses
+`http://localhost:1947/api/v1/auth/oidc/callback`; choosing another port changes
+that URL accordingly. `auth.oidc_redirect_url` is optional and should normally
+be set only when a reverse proxy gives Soulacy a different public origin.
+Providers that require a
 confidential client secret can read `SOULACY_AUTH_OIDC_CLIENT_SECRET`; do not
 commit the secret to `config.yaml`. Discovery must advertise authorization,
 token and JWKS endpoints plus supported ID-token signing algorithms.
+
+The fields above are also the deployment default used by the initial
+bootstrap. Newly provisioned Team and Scale workspaces can activate their own
+locked provider configuration through a one-time setup link. See
+[Workspace identity and login](workspace-identity.md).
 
 ## Authentication flow
 
@@ -49,7 +61,7 @@ If none match, the request is rejected with `401 Unauthorized`.
 Issue a JWT by calling the token endpoint with your master API key:
 
 ```bash
-curl -X POST http://localhost:18789/api/v1/auth/token \
+curl -X POST http://localhost:1947/api/v1/auth/token \
   -H "Content-Type: application/json" \
   -d '{"api_key": "sy_your-server-key"}'
 ```
@@ -91,7 +103,7 @@ organization, explicit workspace bindings, role, and resource/action scopes.
 ```bash
 # Create a 30-day service-account key. The service account and its workspace
 # binding must already exist.
-curl -X POST http://localhost:18789/api/v1/admin/api-keys \
+curl -X POST http://localhost:1947/api/v1/admin/api-keys \
   -H "Authorization: Bearer $SOULACY_ACCESS_TOKEN" \
   -H "X-Soulacy-Workspace: ws_production" \
   -H "Content-Type: application/json" \

@@ -26,7 +26,7 @@ layers so those decisions are visible and reviewable.
 ## Recommended production baseline
 
 1. Bind the gateway to `127.0.0.1` and expose it through an authenticated TLS
-   reverse proxy. Do not expose port `18789` directly to the internet.
+   reverse proxy. Do not expose port `1947` directly to the internet.
 2. Set a strong `server.api_key`; never put it in screenshots, shell history,
    agent prompts, or committed YAML.
 3. Give every agent the smallest useful tool allowlist. Avoid wildcard tools or

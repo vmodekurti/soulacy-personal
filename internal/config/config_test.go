@@ -196,8 +196,8 @@ func TestLoadNoConfigFileUsesDefaults(t *testing.T) {
 	if cfg.Server.Host != "127.0.0.1" {
 		t.Errorf("server.host = %q, want 127.0.0.1", cfg.Server.Host)
 	}
-	if cfg.Server.Port != 18789 {
-		t.Errorf("server.port = %d, want 18789", cfg.Server.Port)
+	if cfg.Server.Port != 1947 {
+		t.Errorf("server.port = %d, want 1947", cfg.Server.Port)
 	}
 	if !cfg.Server.GUIEnabled {
 		t.Error("server.gui_enabled should default to true")
@@ -316,16 +316,23 @@ func TestLoadNoConfigFileUsesDefaults(t *testing.T) {
 	}
 
 	// LLM defaults.
-	if cfg.LLM.DefaultProvider != "ollama" {
-		t.Errorf("llm.default_provider = %q, want ollama", cfg.LLM.DefaultProvider)
+	if cfg.LLM.DefaultProvider != "nvidia" {
+		t.Errorf("llm.default_provider = %q, want nvidia", cfg.LLM.DefaultProvider)
+	}
+	nvidia := cfg.LLM.Providers["nvidia"]
+	if nvidia.BaseURL != "https://integrate.api.nvidia.com/v1" {
+		t.Errorf("llm.providers.nvidia.base_url = %q", nvidia.BaseURL)
+	}
+	if nvidia.Model != "meta/llama-3.3-70b-instruct" {
+		t.Errorf("llm.providers.nvidia.model = %q", nvidia.Model)
 	}
 
 	// Knowledge defaults.
-	if cfg.Knowledge.EmbeddingProvider != "ollama" {
-		t.Errorf("knowledge.embedding_provider = %q, want ollama", cfg.Knowledge.EmbeddingProvider)
+	if cfg.Knowledge.EmbeddingProvider != "nvidia" {
+		t.Errorf("knowledge.embedding_provider = %q, want nvidia", cfg.Knowledge.EmbeddingProvider)
 	}
-	if cfg.Knowledge.EmbeddingModel != "nomic-embed-text" {
-		t.Errorf("knowledge.embedding_model = %q, want nomic-embed-text", cfg.Knowledge.EmbeddingModel)
+	if cfg.Knowledge.EmbeddingModel != "nvidia/nv-embedqa-e5-v5" {
+		t.Errorf("knowledge.embedding_model = %q, want nvidia/nv-embedqa-e5-v5", cfg.Knowledge.EmbeddingModel)
 	}
 	if cfg.Knowledge.ChunkSize != 1000 {
 		t.Errorf("knowledge.chunk_size = %d, want 1000", cfg.Knowledge.ChunkSize)

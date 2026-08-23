@@ -326,7 +326,7 @@ Soulacy includes a high-performance command-line interface, **`sy`** (compiled d
 ### 1. Gateway Server Control (`sy server`)
 * **Start the Gateway**:
   ```bash
-  sy server start --port 18789 --config ~/.soulacy/config.yaml
+  sy server start --port 1947 --config ~/.soulacy/config.yaml
   ```
 * **Verify Server Status**:
   ```bash

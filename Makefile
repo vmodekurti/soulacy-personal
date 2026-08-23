@@ -1,5 +1,6 @@
 BINARY_GATEWAY := soulacy
 BINARY_CLI     := sy
+BINARY_WORKER  := soulacy-worker
 VERSION        ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS        := -ldflags "-X github.com/soulacy/soulacy/internal/config.Version=$(VERSION)"
 PLAYWRIGHT_RUNNER ?= $(shell if [ -e .cache ] && [ ! -d .cache ]; then echo tmp/playwright-runner; else echo .cache/playwright-runner; fi)
@@ -28,7 +29,7 @@ GUI_SRC  := $(shell find gui/src gui/index.html gui/package.json gui/package-loc
 ## gui/ is newer than the last build, so a pure-Go change skips npm entirely
 ## while a GUI change is always picked up. `go mod tidy` runs first so go.sum
 ## picks up any newly-added deps.
-build: deps $(GUI_DIST) build-gateway build-cli
+build: deps $(GUI_DIST) build-gateway build-worker build-cli
 
 ## Ensure module deps are fetched and go.sum is consistent.
 deps:
@@ -54,6 +55,10 @@ gui:
 build-gateway:
 	@echo "→ Building gateway server..."
 	CGO_ENABLED=1 go build $(LDFLAGS) -o bin/$(BINARY_GATEWAY) ./cmd/soulacy
+
+build-worker:
+	@echo "→ Building execution worker..."
+	CGO_ENABLED=1 go build $(LDFLAGS) -o bin/$(BINARY_WORKER) ./cmd/soulacy-worker
 
 build-cli:
 	@echo "→ Building CLI..."
@@ -82,8 +87,9 @@ install: all
 	  mv -f "$$tmp" "$$dst"; \
 	}; \
 	install_bin bin/$(BINARY_GATEWAY) $(BINARY_GATEWAY); \
+	install_bin bin/$(BINARY_WORKER) $(BINARY_WORKER); \
 	install_bin bin/$(BINARY_CLI) $(BINARY_CLI)
-	@echo "✓ Installed soulacy and sy to $(BINDIR)"
+	@echo "✓ Installed soulacy, soulacy-worker, and sy to $(BINDIR)"
 	@# Shadow check: confirm the copy we just wrote is the one PATH resolves.
 	@resolved=$$(command -v $(BINARY_GATEWAY) 2>/dev/null); \
 	if [ "$$resolved" = "$(BINDIR)/$(BINARY_GATEWAY)" ]; then \
@@ -113,7 +119,9 @@ upgrade: all
 	@mkdir -p "$(BINDIR)"
 	@[ -f "$(BINDIR)/$(BINARY_GATEWAY)" ] && cp "$(BINDIR)/$(BINARY_GATEWAY)" "$(BINDIR)/$(BINARY_GATEWAY).prev" || true
 	@[ -f "$(BINDIR)/$(BINARY_CLI)" ] && cp "$(BINDIR)/$(BINARY_CLI)" "$(BINDIR)/$(BINARY_CLI).prev" || true
+	@[ -f "$(BINDIR)/$(BINARY_WORKER)" ] && cp "$(BINDIR)/$(BINARY_WORKER)" "$(BINDIR)/$(BINARY_WORKER).prev" || true
 	@cp bin/$(BINARY_GATEWAY) "$(BINDIR)/$(BINARY_GATEWAY)"
+	@cp bin/$(BINARY_WORKER) "$(BINDIR)/$(BINARY_WORKER)"
 	@cp bin/$(BINARY_CLI) "$(BINDIR)/$(BINARY_CLI)"
 	@echo "✓ Upgraded. Previous build saved as *.prev — run 'make rollback' to revert."
 
@@ -156,14 +164,14 @@ sdk-install-release:
 	pip3 install soulacy
 
 ## ONE COMMAND: (re)build the GUI + binaries, then run the gateway serving the
-## embedded GUI on http://localhost:18789. No vite dev server, no second process
-## — what you see at :18789 is exactly the built binary. The GUI rebuild is
+## embedded GUI on http://localhost:1947. No vite dev server, no second process
+## — what you see at :1947 is exactly the built binary. The GUI rebuild is
 ## incremental (only runs npm when gui/ changed). Stop any running gateway first
 ## (the port must be free). Override the config with:
 ##     make up CONFIG=./config.dev.yaml
 CONFIG ?=
 up: build
-	@echo "→ Gateway on http://localhost:18789  (embedded GUI — Ctrl-C to stop)"
+	@echo "→ Gateway on http://localhost:1947  (embedded GUI — Ctrl-C to stop)"
 	@$(if $(CONFIG),SOULACY_CONFIG_PATH=$(CONFIG) ,)./bin/$(BINARY_GATEWAY) serve
 
 ## Run gateway in dev mode (auto-restart on changes with Air)
@@ -174,7 +182,7 @@ dev:
 ## Build everything and serve with the repo dev config (config.dev.yaml).
 ## One-liner to see the portal incl. the Studio plugin during development.
 run-dev: all
-	@echo "→ Serving with ./config.dev.yaml — open http://127.0.0.1:18789"
+	@echo "→ Serving with ./config.dev.yaml — open http://127.0.0.1:1947"
 	SOULACY_CONFIG_PATH=./config.dev.yaml ./bin/soulacy serve
 
 ## Run tests
@@ -215,6 +223,9 @@ security:
 		./internal/confighot/ \
 		./internal/costs/ \
 		./internal/credentials/ \
+		./internal/entitlements/ \
+		./internal/executor/docker/ \
+		./internal/executor/remote/ \
 		./internal/knowledge/ \
 		./internal/mcpstore/ \
 		./internal/memory/ \
@@ -317,13 +328,13 @@ COMPOSE        ?= docker compose
 docker-up:
 	@echo "→ Starting full stack (gateway + Postgres + Qdrant)..."
 	$(COMPOSE) up --build -d
-	@echo "✓ Soulacy running at http://localhost:18789"
+	@echo "✓ Soulacy running at http://localhost:1947"
 
 ## Start lightweight stack (gateway + SQLite only, no external dependencies)
 docker-up-lite:
 	@echo "→ Starting lite stack (gateway + SQLite only)..."
 	$(COMPOSE) -f docker-compose.lite.yml up --build -d
-	@echo "✓ Soulacy running at http://localhost:18789"
+	@echo "✓ Soulacy running at http://localhost:1947"
 
 ## Stop all compose services
 docker-down:

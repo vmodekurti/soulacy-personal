@@ -54,8 +54,8 @@ type Config struct {
 	// manager instead of writing it to config.yaml.
 	OIDCClientSecret string
 
-	// OIDCRedirectURL is the registered browser callback for the GUI, for
-	// example https://soulacy.example.com/api/v1/auth/oidc/callback.
+	// OIDCRedirectURL optionally overrides the browser-derived GUI callback,
+	// for example when Soulacy runs behind a reverse proxy with a public origin.
 	OIDCRedirectURL string
 
 	// OIDCScopes defaults to openid, profile, email.
@@ -93,7 +93,9 @@ type WorkspaceOIDCProvider struct {
 }
 
 type WorkspaceOIDCProviderResolver func(context.Context, string) (WorkspaceOIDCProvider, bool)
+type WorkspaceOIDCAvailabilityResolver func(context.Context, string) bool
 type WorkspaceTokenIdentityResolver func(context.Context, string, string) (TokenIdentity, bool)
+type WorkspaceInvitationAccepter func(context.Context, string, string, string) (TokenIdentity, bool)
 
 // Engine is the Soulacy auth subsystem.
 //
@@ -105,21 +107,23 @@ type WorkspaceTokenIdentityResolver func(context.Context, string, string) (Token
 //	                       (3) validates OIDC-provider JWTs when oidc_issuer is set.
 //	                       Tokens carry Claims (sub, email, role) for downstream RBAC.
 type Engine struct {
-	cfg                       Config
-	staticKey                 string         // server.api_key; always checked, any mode
-	issuer                    *Issuer        // non-nil when cfg.Mode == "jwt"
-	oidc                      *OIDCValidator // non-nil when cfg.OIDCIssuer != ""
-	log                       *zap.Logger
-	apiKeyStore               apikeys.Store // non-nil when managed API keys are enabled
-	flows                     *oidcFlowStore
-	identityLinker            IdentityLinker
-	refreshAllowed            func(context.Context, string) bool
-	identityResolver          TokenIdentityResolver
-	workspaceIdentityResolver WorkspaceTokenIdentityResolver
-	workspaceProviderResolver WorkspaceOIDCProviderResolver
-	providerMu                sync.Mutex
-	providerValidators        map[string]*OIDCValidator
-	auditSink                 func(*fiber.Ctx, AuthEvent)
+	cfg                         Config
+	staticKey                   string         // server.api_key; always checked, any mode
+	issuer                      *Issuer        // non-nil when cfg.Mode == "jwt"
+	oidc                        *OIDCValidator // non-nil when cfg.OIDCIssuer != ""
+	log                         *zap.Logger
+	apiKeyStore                 apikeys.Store // non-nil when managed API keys are enabled
+	flows                       *oidcFlowStore
+	identityLinker              IdentityLinker
+	refreshAllowed              func(context.Context, string) bool
+	identityResolver            TokenIdentityResolver
+	workspaceIdentityResolver   WorkspaceTokenIdentityResolver
+	workspaceProviderResolver   WorkspaceOIDCProviderResolver
+	workspaceAvailability       WorkspaceOIDCAvailabilityResolver
+	workspaceInvitationAccepter WorkspaceInvitationAccepter
+	providerMu                  sync.Mutex
+	providerValidators          map[string]*OIDCValidator
+	auditSink                   func(*fiber.Ctx, AuthEvent)
 }
 
 // AuthEvent is one authentication-lifecycle occurrence, for the workspace
@@ -175,8 +179,14 @@ func (e *Engine) SetWorkspaceOIDCProviderResolver(resolve WorkspaceOIDCProviderR
 		e.flows = newOIDCFlowStore()
 	}
 }
+func (e *Engine) SetWorkspaceOIDCAvailabilityResolver(resolve WorkspaceOIDCAvailabilityResolver) {
+	e.workspaceAvailability = resolve
+}
 func (e *Engine) SetWorkspaceTokenIdentityResolver(resolve WorkspaceTokenIdentityResolver) {
 	e.workspaceIdentityResolver = resolve
+}
+func (e *Engine) SetWorkspaceInvitationAccepter(accept WorkspaceInvitationAccepter) {
+	e.workspaceInvitationAccepter = accept
 }
 
 func (e *Engine) workspaceValidator(provider WorkspaceOIDCProvider) (*OIDCValidator, error) {

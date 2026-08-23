@@ -108,16 +108,50 @@ func TestReadsBesideAPlatformRouteAreNotClaimedByIt(t *testing.T) {
 	}
 }
 
+// Team and Scale add a tenant boundary around the Personal product; they do
+// not replace it with a smaller product. These representative Personal-mode
+// capabilities must remain workspace routes so a verified workspace member
+// can keep using them through workspace RBAC and workspace-scoped storage.
+// Only the explicitly deployment-wide routes in platformRoutes may cross to
+// the operator control plane.
+func TestPersonalCapabilitiesRemainWorkspaceScopedInTeamAndScale(t *testing.T) {
+	capabilities := []struct{ method, path string }{
+		{"GET", "/api/v1/agents"},
+		{"POST", "/api/v1/agents"},
+		{"POST", "/api/v1/chat"},
+		{"GET", "/api/v1/workspace/config"},
+		{"PATCH", "/api/v1/workspace/config"},
+		{"GET", "/api/v1/workspace/providers"},
+		{"POST", "/api/v1/workspace/providers/nvidia"},
+		{"DELETE", "/api/v1/workspace/providers/nvidia"},
+		{"GET", "/api/v1/mcp"},
+		{"GET", "/api/v1/mcp/own"},
+		{"PUT", "/api/v1/mcp/own/weather"},
+		{"DELETE", "/api/v1/mcp/own/weather"},
+		{"GET", "/api/v1/plugins/installed"},
+		{"POST", "/api/v1/plugins/install"},
+		{"GET", "/api/v1/skills"},
+		{"GET", "/api/v1/knowledge"},
+		{"POST", "/api/v1/knowledge"},
+		{"GET", "/api/v1/channels"},
+		{"GET", "/api/v1/schedule"},
+		{"GET", "/api/v1/templates"},
+		{"GET", "/api/v1/runs"},
+		{"GET", "/api/v1/browser/status"},
+		{"GET", "/api/v1/tool-catalog"},
+	}
+	for _, capability := range capabilities {
+		if isPlatformRoute(capability.method, capability.path) {
+			t.Errorf("%s %s is a Personal capability but was moved behind deployment administration",
+				capability.method, capability.path)
+		}
+	}
+}
+
 func TestTheWritesThatChangeTheDeploymentAreAllClaimed(t *testing.T) {
 	writes := []struct{ method, path string }{
 		{"POST", "/api/v1/admin/restart"},
 		{"PATCH", "/api/v1/config"},
-		{"POST", "/api/v1/plugins/install"},
-		{"POST", "/api/v1/plugins/install/stg_1/approve"},
-		{"DELETE", "/api/v1/plugins/install/stg_1"},
-		{"POST", "/api/v1/plugins/matrix/enable"},
-		{"POST", "/api/v1/plugins/matrix/disable"},
-		{"DELETE", "/api/v1/plugins/matrix"},
 		{"POST", "/api/v1/registries"},
 		{"POST", "/api/v1/mcp"},
 		{"PATCH", "/api/v1/mcp/weather"},
@@ -135,10 +169,10 @@ func TestTheWritesThatChangeTheDeploymentAreAllClaimed(t *testing.T) {
 // different decisions, and matching on the path alone would make one of them
 // wrong whichever way it went.
 func TestTheMethodIsPartOfTheMatch(t *testing.T) {
-	if isPlatformRoute("GET", "/api/v1/plugins/install") {
+	if isPlatformRoute("GET", "/api/v1/admin/restart") {
 		t.Error("a GET matched a POST-only platform route")
 	}
-	if !isPlatformRoute("POST", "/api/v1/plugins/install") {
+	if !isPlatformRoute("POST", "/api/v1/admin/restart") {
 		t.Error("the POST it was written for does not match")
 	}
 }

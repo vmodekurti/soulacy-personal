@@ -45,13 +45,13 @@ fresh config from scratch.
 soulacy
 ```
 
-The gateway starts on **http://localhost:18789** with the full web GUI: Dashboard, Studio, Agents, Chat, Workboard, Knowledge, Memory, Skills, integrations, and observability. Take the [GUI tour](gui-tour.md).
+The gateway starts on **http://localhost:1947** with the full web GUI: Dashboard, Studio, Agents, Chat, Workboard, Knowledge, Memory, Skills, integrations, and observability. Take the [GUI tour](gui-tour.md).
 
 ## 4. Talk to an agent
 
 === "GUI"
 
-    Open **http://localhost:18789** → **Chat** → pick your agent → say hello.
+    Open **http://localhost:1947** → **Chat** → pick your agent → say hello.
     Watch the *Thinking* section show reasoning steps and tool calls live.
 
 === "CLI"
@@ -63,7 +63,7 @@ The gateway starts on **http://localhost:18789** with the full web GUI: Dashboar
 === "HTTP"
 
     ```bash
-    curl -X POST http://localhost:18789/api/v1/agents/assistant/chat \
+    curl -X POST http://localhost:1947/api/v1/agents/assistant/chat \
       -H "Authorization: Bearer $SOULACY_SERVER_API_KEY" \
       -H "Content-Type: application/json" \
       -d '{"message": "Hello!"}'
@@ -128,7 +128,7 @@ Changes hot-reload — no restart. The full schema (tools, memory, reasoning, sc
 |---|---|
 | Workspace (agents, skills, data) | `~/.soulacy/soulspace/` — [layout](../configuration/workspace.md) |
 | Config file | `config.yaml` in the workspace — [reference](../configuration/index.md) |
-| GUI | `http://localhost:18789` — [tour](gui-tour.md) |
+| GUI | `http://localhost:1947` — [tour](gui-tour.md) |
 | CLI | `sy` — [reference](../cli/reference.md) |
 
 ## Verify the first run

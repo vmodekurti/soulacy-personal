@@ -42,8 +42,8 @@ system_prompt: |
     Rules: if information is missing to set severity, say what to ask for.
     Never invent repro steps that the issue doesn't support.
 llm:
-    provider: ollama
-    model: llama3.3:70b
+    provider: nvidia
+    model: meta/llama-3.3-70b-instruct
     temperature: 0.2
     max_tokens: 1024
 builtins:

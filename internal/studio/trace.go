@@ -22,6 +22,7 @@ package studio
 
 import (
 	"bufio"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -32,6 +33,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/soulacy/soulacy/internal/workspacepurge"
 	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
@@ -146,10 +148,11 @@ type BuildTrace struct {
 	Intent      string
 	Start       time.Time
 
-	mu   sync.Mutex
-	seq  int
-	mem  *memoryRecorder // in-memory mirror, always present
-	sink Recorder        // mem, optionally fanned out to a JSONL file
+	mu     sync.Mutex
+	seq    int
+	mem    *memoryRecorder // in-memory mirror, always present
+	sink   Recorder        // mem, optionally fanned out to a JSONL file
+	closed bool
 }
 
 func newBuildTrace(id string, extra Recorder) *BuildTrace {
@@ -262,6 +265,11 @@ func (t *BuildTrace) Close() error {
 		return nil
 	}
 	t.mu.Lock()
+	if t.closed {
+		t.mu.Unlock()
+		return nil
+	}
+	t.closed = true
 	sink := t.sink
 	t.mu.Unlock()
 	return sink.Close()
@@ -343,9 +351,10 @@ type traceKey struct {
 // tenant's traces early. That costs a debugging aid, never confidentiality —
 // eviction drops traces, it never exposes them.
 type BuildTraceStore struct {
-	mu  sync.Mutex
-	max int
-	dir string // "" disables disk persistence
+	mu     sync.Mutex
+	max    int
+	dir    string // "" disables disk persistence
+	layout wsroot.Layout
 	// byKey is the only lookup path, so a trace cannot be resolved without
 	// naming its owner.
 	byKey map[traceKey]*BuildTrace
@@ -354,6 +363,70 @@ type BuildTraceStore struct {
 	perWorkspace map[string][]string
 	// eviction is the global retention order, oldest first.
 	eviction []traceKey
+}
+
+// SetWorkspaceLayoutRoot selects the canonical Team/Scale workspace tree for
+// durable traces. Call this during startup before the store is served.
+func (s *BuildTraceStore) SetWorkspaceLayoutRoot(root string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.layout = wsroot.NewLayout(root)
+}
+
+// PurgeWorkspace removes both retained in-memory traces and durable JSONL
+// files for one named workspace. Personal is refused because its trace
+// directory is the shared installation directory, not a tenant subtree.
+func (s *BuildTraceStore) PurgeWorkspace(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+	if s == nil {
+		return workspacepurge.Removed{}, nil
+	}
+	workspaceID = wsroot.Normalize(workspaceID)
+	if err := wsroot.Validate(workspaceID); err != nil || workspaceID == wsroot.PersonalWorkspaceID {
+		return workspacepurge.Removed{}, fmt.Errorf("refusing to purge Studio traces for workspace %q", workspaceID)
+	}
+
+	var (
+		removed workspacepurge.Removed
+		err     error
+	)
+	if s.dir != "" {
+		if s.layout.Root() != "" {
+			removed, err = workspacepurge.PurgeLayoutTree(ctx, s.layout, s.dir, workspaceID)
+		} else {
+			removed, err = workspacepurge.PurgeTree(ctx, s.dir, workspaceID)
+		}
+		if err != nil {
+			return removed, err
+		}
+	}
+
+	s.mu.Lock()
+	ids := append([]string(nil), s.perWorkspace[workspaceID]...)
+	traces := make([]*BuildTrace, 0, len(ids))
+	for _, id := range ids {
+		key := traceKey{workspaceID: workspaceID, id: id}
+		if trace := s.byKey[key]; trace != nil {
+			traces = append(traces, trace)
+		}
+		delete(s.byKey, key)
+	}
+	delete(s.perWorkspace, workspaceID)
+	kept := s.eviction[:0]
+	for _, key := range s.eviction {
+		if key.workspaceID != workspaceID {
+			kept = append(kept, key)
+		}
+	}
+	s.eviction = kept
+	s.mu.Unlock()
+	for _, trace := range traces {
+		_ = trace.Close()
+	}
+	if removed.Rows == 0 {
+		removed.Rows = int64(len(traces))
+	}
+	removed.Note = "Studio build traces"
+	return removed, nil
 }
 
 // NewBuildTraceStore returns a store retaining up to max traces (default 50).
@@ -382,7 +455,7 @@ func (s *BuildTraceStore) Dir(workspaceID string) string {
 	if s.dir == "" {
 		return ""
 	}
-	return wsroot.Dir(s.dir, wsroot.Normalize(workspaceID))
+	return s.layout.Dir(s.dir, wsroot.Normalize(workspaceID))
 }
 
 // New starts and registers a new build trace, opening its JSONL file
@@ -433,7 +506,7 @@ func (s *BuildTraceStore) workspaceDir(workspaceID string) string {
 	if s.dir == "" {
 		return ""
 	}
-	dir := wsroot.Dir(s.dir, workspaceID)
+	dir := s.layout.Dir(s.dir, workspaceID)
 	if dir == s.dir {
 		return dir // personal: created at construction
 	}

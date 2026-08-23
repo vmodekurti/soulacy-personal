@@ -21,7 +21,7 @@ config-level RBAC (they read and write `config.yaml`).
 
 ```bash
 curl -H "Authorization: Bearer $SOULACY_API_KEY" \
-  http://localhost:18789/api/v1/registries
+  http://localhost:1947/api/v1/registries
 ```
 
 ```json
@@ -46,7 +46,7 @@ Probe before you trust: the server fetches the URL and classifies it
 page), returning sample packages and a suggested config entry.
 
 ```bash
-curl -X POST http://localhost:18789/api/v1/registries/probe \
+curl -X POST http://localhost:1947/api/v1/registries/probe \
   -H "Authorization: Bearer $SOULACY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"url": "https://www.skills.sh/"}'
@@ -60,7 +60,7 @@ unreachable URL returns `400`.
 ### Add a source
 
 ```bash
-curl -X POST http://localhost:18789/api/v1/registries \
+curl -X POST http://localhost:1947/api/v1/registries \
   -H "Authorization: Bearer $SOULACY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -101,7 +101,7 @@ installed skill without a gateway restart:
 
 ```bash
 curl -X POST -H "Authorization: Bearer $SOULACY_API_KEY" \
-  http://localhost:18789/api/v1/skills/rescan
+  http://localhost:1947/api/v1/skills/rescan
 ```
 
 ## Plugin installs (summary)

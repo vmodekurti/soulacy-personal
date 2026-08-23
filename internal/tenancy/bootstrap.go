@@ -25,6 +25,7 @@ type BootstrapState struct {
 type BootstrapRequest struct {
 	OrganizationName string `json:"organization_name"`
 	WorkspaceName    string `json:"workspace_name"`
+	WorkspaceSlug    string `json:"workspace_slug,omitempty"`
 	OwnerEmail       string `json:"owner_email"`
 	OwnerDisplayName string `json:"owner_display_name"`
 	OrganizationLogo string `json:"organization_logo,omitempty"`
@@ -69,6 +70,7 @@ func (s *PostgresStore) BootstrapFirstOwner(ctx context.Context, mutation Mutati
 	}
 	req.OrganizationName = strings.TrimSpace(req.OrganizationName)
 	req.WorkspaceName = strings.TrimSpace(req.WorkspaceName)
+	req.WorkspaceSlug = strings.ToLower(strings.TrimSpace(req.WorkspaceSlug))
 	req.OwnerEmail = normalizeEmail(req.OwnerEmail)
 	req.OwnerDisplayName = strings.TrimSpace(req.OwnerDisplayName)
 	if req.OrganizationName == "" || req.WorkspaceName == "" || req.OwnerEmail == "" || req.OwnerDisplayName == "" || !strings.Contains(req.OwnerEmail, "@") {
@@ -108,8 +110,14 @@ func (s *PostgresStore) BootstrapFirstOwner(ctx context.Context, mutation Mutati
 	if _, err = tx.Exec(ctx, `INSERT INTO organizations(id,name) VALUES($1,$2)`, result.Organization.ID, result.Organization.Name); err != nil {
 		return BootstrapResult{}, err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO workspaces(id,organization_id,name) VALUES($1,$2,$3)`, result.Workspace.ID, result.Organization.ID, result.Workspace.Name); err != nil {
+	result.Workspace.Slug = req.WorkspaceSlug
+	if result.Workspace.Slug == "" {
+		result.Workspace.Slug = workspaceSlug(result.Workspace.Name, result.Workspace.ID)
+	} else if err = validateWorkspaceSlug(result.Workspace.Slug); err != nil {
 		return BootstrapResult{}, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO workspaces(id,slug,organization_id,name) VALUES($1,$2,$3,$4)`, result.Workspace.ID, result.Workspace.Slug, result.Organization.ID, result.Workspace.Name); err != nil {
+		return BootstrapResult{}, workspaceInsertError(err)
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO memberships(id,organization_id,workspace_id,user_id,role,status) VALUES($1,$2,$3,$4,'owner','active')`, result.Membership.ID, result.Organization.ID, result.Workspace.ID, result.User.ID); err != nil {
 		return BootstrapResult{}, err
@@ -149,7 +157,8 @@ func (s *PostgresStore) ProvisionWorkspace(ctx context.Context, mutation Mutatio
 	}
 	return s.provisionTenant(ctx, mutation, "workspace.provision", BootstrapRequest{
 		OrganizationName: organizationName, WorkspaceName: req.WorkspaceName,
-		OwnerEmail: req.OwnerEmail, OwnerDisplayName: req.OwnerDisplayName,
+		WorkspaceSlug: req.WorkspaceSlug,
+		OwnerEmail:    req.OwnerEmail, OwnerDisplayName: req.OwnerDisplayName,
 		WorkspaceLogo: req.WorkspaceLogo,
 	}, organizationID)
 }
@@ -162,6 +171,7 @@ func (s *PostgresStore) provisionTenant(ctx context.Context, mutation Mutation, 
 		return BootstrapResult{}, errors.New("mutation actor and request ID are required")
 	}
 	req.OrganizationName, req.WorkspaceName = strings.TrimSpace(req.OrganizationName), strings.TrimSpace(req.WorkspaceName)
+	req.WorkspaceSlug = strings.ToLower(strings.TrimSpace(req.WorkspaceSlug))
 	req.OwnerEmail, req.OwnerDisplayName = normalizeEmail(req.OwnerEmail), strings.TrimSpace(req.OwnerDisplayName)
 	if err := validateLogoDataURL(req.OrganizationLogo); err != nil {
 		return BootstrapResult{}, err
@@ -191,11 +201,20 @@ func (s *PostgresStore) provisionTenant(ctx context.Context, mutation Mutation, 
 			return BootstrapResult{}, err
 		}
 	} else {
-		if err = tx.QueryRow(ctx, `SELECT name FROM organizations WHERE id=$1 FOR UPDATE`, result.Organization.ID).Scan(&result.Organization.Name); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT name,status FROM organizations WHERE id=$1 FOR UPDATE`, result.Organization.ID).Scan(&result.Organization.Name, &result.Organization.Status); err != nil {
 			return BootstrapResult{}, err
+		}
+		if result.Organization.Status != WorkspaceActive {
+			return BootstrapResult{}, errors.New("organization is suspended")
 		}
 	}
 	result.Workspace.OrganizationID = result.Organization.ID
+	result.Workspace.Slug = req.WorkspaceSlug
+	if result.Workspace.Slug == "" {
+		result.Workspace.Slug = workspaceSlug(result.Workspace.Name, result.Workspace.ID)
+	} else if err = validateWorkspaceSlug(result.Workspace.Slug); err != nil {
+		return BootstrapResult{}, err
+	}
 	if err = tx.QueryRow(ctx, `SELECT id FROM users WHERE normalized_email=$1 FOR UPDATE`, req.OwnerEmail).Scan(&result.User.ID); errors.Is(err, pgx.ErrNoRows) {
 		result.User.ID = newID("usr")
 		_, err = tx.Exec(ctx, `INSERT INTO users(id,normalized_email,display_name) VALUES($1,$2,$3)`, result.User.ID, result.User.Email, result.User.DisplayName)
@@ -206,8 +225,8 @@ func (s *PostgresStore) provisionTenant(ctx context.Context, mutation Mutation, 
 		return BootstrapResult{}, err
 	}
 	result.Membership = StoredMembership{ID: newID("mem"), OrganizationID: result.Organization.ID, WorkspaceID: result.Workspace.ID, UserID: result.User.ID, Role: RoleOwner, Status: MembershipActive, Email: result.User.Email, DisplayName: result.User.DisplayName}
-	if _, err = tx.Exec(ctx, `INSERT INTO workspaces(id,organization_id,name,logo_data_url,identity_status) VALUES($1,$2,$3,$4,'pending')`, result.Workspace.ID, result.Organization.ID, result.Workspace.Name, nullableString(result.Workspace.LogoDataURL)); err != nil {
-		return BootstrapResult{}, err
+	if _, err = tx.Exec(ctx, `INSERT INTO workspaces(id,slug,organization_id,name,logo_data_url,identity_status) VALUES($1,$2,$3,$4,$5,'pending')`, result.Workspace.ID, result.Workspace.Slug, result.Organization.ID, result.Workspace.Name, nullableString(result.Workspace.LogoDataURL)); err != nil {
+		return BootstrapResult{}, workspaceInsertError(err)
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO memberships(id,organization_id,workspace_id,user_id,role,status) VALUES($1,$2,$3,$4,'owner','active')`, result.Membership.ID, result.Organization.ID, result.Workspace.ID, result.User.ID); err != nil {
 		return BootstrapResult{}, err

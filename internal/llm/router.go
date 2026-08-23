@@ -35,6 +35,16 @@ type Router struct {
 	providers  map[string]Provider
 	defaultID  string
 	controller Controller
+	resolver   func(context.Context, string) (Provider, bool)
+}
+
+// SetProviderResolver installs a tenant-aware provider resolver. It is checked
+// before the process-wide registry, allowing a workspace to use credentials
+// from its own vault without registering those credentials for other tenants.
+func (r *Router) SetProviderResolver(resolve func(context.Context, string) (Provider, bool)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.resolver = resolve
 }
 
 // SetController installs the process-wide LLM admission and accounting
@@ -126,9 +136,15 @@ func (r *Router) Complete(ctx context.Context, providerID string, req Completion
 	if providerID == "" {
 		providerID = r.defaultID
 	}
+	resolver := r.resolver
 	p, ok := r.providers[providerID]
 	controller := r.controller
 	r.mu.RUnlock()
+	if resolver != nil {
+		if scoped, found := resolver(ctx, providerID); found {
+			p, ok = scoped, true
+		}
+	}
 
 	if !ok {
 		return nil, fmt.Errorf("llm: unknown provider %q (registered: %v)", providerID, r.providerIDs())

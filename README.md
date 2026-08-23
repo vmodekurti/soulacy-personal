@@ -8,19 +8,28 @@ You get more than a runtime: Studio for authoring and healing agents, Channels f
 
 Think of it as Ollama — but for agents.
 
+[Website](https://soulacy.io) · [Documentation](https://docs.soulacy.io)
+
 ### Team/Scale administrator sign-in
 
-Open `https://your-soulacy-host/admin/setup` (or `/admin/login`). On a new
-deployment, enter the `server.api_key` held by the host operator, choose an OIDC
-provider, and create the first organization, workspace, and owner. Soulacy
-restarts and sends that owner through the normal organization sign-in flow.
+Open `https://your-soulacy-host/admin/setup` once on a new deployment. Enter
+the `server.api_key` held by the host operator and create the initial tenant
+catalog. For normal platform operations, use `/admin`: the deployment
+administrator can create organizations and workspaces and designate each
+workspace's first owner without becoming a workspace member. The same control
+plane can suspend and reactivate organizations or individual workspaces with
+an audited reason and explicit confirmation.
 
-The first-owner operation is atomic and can run only once. The deployment key
-does not become a hidden workspace administrator: after setup, workspace owners
-sign in with OIDC and the key remains limited to deployment-wide operations.
-Google Workspace, Microsoft Entra ID, Okta, Auth0, Keycloak, and standards-based
-OIDC issuers are supported by the wizard. GitHub OAuth and Sign in with Apple
-require provider-specific flows and are not advertised as generic OIDC.
+The initial bootstrap is atomic and can run only once. Each new workspace gets
+a one-time setup link for its designated owner. That owner selects and validates
+the workspace's OIDC provider; the provider and issuer are then locked. Google
+Workspace, Microsoft Entra ID, Okta, Auth0, Keycloak, and standards-based OIDC
+issuers are supported. GitHub OAuth and Sign in with Apple require
+provider-specific flows and are not advertised as generic OIDC.
+
+The deployment key does not become a hidden workspace administrator: it remains
+limited to deployment-wide operations. See [Platform administration](https://docs.soulacy.io/configuration/platform-administration/)
+and [Workspace identity and login](https://docs.soulacy.io/configuration/workspace-identity/).
 
 **Build it. Run it. Fix and learn.**
 
@@ -67,7 +76,7 @@ What it does, with zero questions asked:
 3. Installs both binaries into `~/.local/bin` (no `sudo`).
 4. Prints clear next steps + offers to launch the gateway on the spot.
 
-When you run `soulacy serve` (either right away or later), the gateway prints a one-time banner with the URL and a freshly-generated API key. Then open <http://127.0.0.1:18789>, paste the key, and you're in. The runtime workspace (`~/.soulacy/soulspace/`), config file, starter agent, and API key are all created automatically on first launch — you never have to touch a config file.
+When you run `soulacy serve` (either right away or later), the gateway prints a one-time banner with the URL and a freshly-generated API key. Then open <http://127.0.0.1:1947>, paste the key, and you're in. The runtime workspace (`~/.soulacy/soulspace/`), config file, starter agent, and API key are all created automatically on first launch — you never have to touch a config file.
 
 Overrides:
 
@@ -126,7 +135,7 @@ your host port via the left side of `-p`.
 ```bash
 docker build -t soulacy .
 docker run -d --name soulacy \
-  -p 9000:18789 \
+  -p 9000:1947 \
   -e SOULACY_SERVER_HOST=0.0.0.0 \
   -e SOULACY_LLM_PROVIDERS_OLLAMA_BASE_URL=http://host.docker.internal:11434 \
   -v ~/.soulacy:/home/soulacy/.soulacy \
@@ -158,9 +167,9 @@ cp .env.example .env   # set POSTGRES_PASSWORD, your LLM key, and SOULACY_PORT
 docker compose up
 ```
 
-The compose file publishes `${SOULACY_PORT:-18789}` on the host — set
+The compose file publishes `${SOULACY_PORT:-1947}` on the host — set
 `SOULACY_PORT` in `.env` to change it. Open
-[http://localhost:18789](http://localhost:18789) (or your chosen port).
+[http://localhost:1947](http://localhost:1947) (or your chosen port).
 
 ### Running CLI commands against a container
 
@@ -217,15 +226,16 @@ Default config is created at `~/.soulacy/config.yaml` on first run.
 ```yaml
 server:
   host: "127.0.0.1"
-  port: 18789
+  port: 1947
   api_key: ""          # set to protect the gateway
 
 llm:
-  default_provider: ollama
+  default_provider: nvidia
   providers:
-    ollama:
-      base_url: "http://localhost:11434"
-      model: "llama3"
+    nvidia:
+      base_url: "https://integrate.api.nvidia.com/v1"
+      api_key: "" # Prefer SOULACY_LLM_PROVIDERS_NVIDIA_API_KEY
+      model: "meta/llama-3.3-70b-instruct"
 ```
 
 All fields can be overridden with environment variables: `SOULACY_<SECTION>_<KEY>`.  
@@ -248,8 +258,9 @@ schedule:
     bot_name: "Daily Briefing Bot"
 
 llm:
-  provider: ollama
-  model: llama3.3:70b
+  # Omit provider/model to inherit the workspace defaults, or pin them here.
+  provider: nvidia
+  model: meta/llama-3.3-70b-instruct
 
 tools:
   - name: get_weather

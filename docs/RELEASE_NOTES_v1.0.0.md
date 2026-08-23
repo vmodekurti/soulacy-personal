@@ -117,10 +117,10 @@ and non-loopback binds require an API key or explicit
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vmodekurti/soulacy/main/install.sh | bash
 soulacy serve
-# open http://127.0.0.1:18789 and paste the printed API key
+# open http://127.0.0.1:1947 and paste the printed API key
 ```
 
-Docker path: `docker run -d -p 9000:18789 ghcr.io/vmodekurti/soulacy:v1.0.0`
+Docker path: `docker run -d -p 9000:1947 ghcr.io/vmodekurti/soulacy:v1.0.0`
 
 See [README.md](https://github.com/vmodekurti/soulacy#readme) for the full
 install matrix.

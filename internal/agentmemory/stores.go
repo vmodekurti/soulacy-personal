@@ -24,10 +24,12 @@ package agentmemory
 // (product invariant 7).
 
 import (
+	"context"
 	"os"
 	"strings"
 	"sync"
 
+	"github.com/soulacy/soulacy/internal/workspacepurge"
 	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
@@ -40,9 +42,19 @@ type SemanticStores func(workspaceID string) SemanticStore
 // Stores is the per-workspace registry of composite brain-memory stores.
 type Stores struct {
 	base     string
+	layout   wsroot.Layout
 	mu       sync.Mutex
 	semantic SemanticStores
 	stores   map[string]*CompositeStore
+}
+
+func (s *Stores) SetWorkspaceLayoutRoot(root string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.layout = wsroot.NewLayout(root)
 }
 
 // NewStores takes the directory a single-tenant installation already uses.
@@ -91,7 +103,7 @@ func (s *Stores) For(workspaceID string) *CompositeStore {
 	if existing, ok := s.stores[workspaceID]; ok {
 		return existing
 	}
-	dir := wsroot.Dir(s.base, workspaceID)
+	dir := s.layout.Dir(s.base, workspaceID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		s.stores[workspaceID] = nil
 		return nil
@@ -111,7 +123,37 @@ func (s *Stores) Dir(workspaceID string) string {
 	if s == nil {
 		return ""
 	}
-	return wsroot.Dir(s.base, wsroot.Normalize(workspaceID))
+	return s.layout.Dir(s.base, wsroot.Normalize(workspaceID))
+}
+
+// PurgeWorkspace closes the tenant's SQLite rulebook before removing its
+// three-layer memory tree. Holding the registry lock prevents a concurrent
+// request from recreating the store between close and deletion.
+func (s *Stores) PurgeWorkspace(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+	if s == nil {
+		return workspacepurge.Removed{}, nil
+	}
+	workspaceID = wsroot.Normalize(workspaceID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if store, ok := s.stores[workspaceID]; ok && store != nil {
+		if err := store.Close(); err != nil {
+			return workspacepurge.Removed{}, err
+		}
+	}
+	var (
+		removed workspacepurge.Removed
+		err     error
+	)
+	if s.layout.Root() != "" {
+		removed, err = workspacepurge.PurgeLayoutTree(ctx, s.layout, s.base, workspaceID)
+	} else {
+		removed, err = workspacepurge.PurgeTree(ctx, s.base, workspaceID)
+	}
+	if err == nil {
+		delete(s.stores, workspaceID)
+	}
+	return removed, err
 }
 
 // Close releases every workspace's rulebook database.

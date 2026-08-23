@@ -47,8 +47,8 @@ system_prompt: |
     - If no knowledge base is attached, say so and explain the setup steps
       instead of auditing.
 llm:
-    provider: ollama
-    model: llama3.3:70b
+    provider: nvidia
+    model: meta/llama-3.3-70b-instruct
     temperature: 0.2
     max_tokens: 2048
 memory:

@@ -92,7 +92,11 @@ export async function apiFetch(path, opts = {}) {
       throw Object.assign(new Error(body.error || 'This action needs you to confirm it is still you.'),
         { status: res.status, body })
     }
-    if (res.status === 401 || res.status === 403) authRequired.set(true)
+    // 401 means the credential is missing or expired. A 403 means the
+    // credential was accepted but this workspace role cannot perform this
+    // particular action. Treating both as logout made a valid viewer session
+    // disappear as soon as Dashboard probed owner-only readiness/config APIs.
+    if (res.status === 401) authRequired.set(true)
     // A refused conditional write leaves us holding a version the server has
     // just told us is wrong. Keeping it would make the next save fail
     // identically, so the page's only route back is an explicit reload — which
@@ -200,7 +204,8 @@ async function apiBlob(path, opts = {}) {
   })
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
-    if (res.status === 401 || res.status === 403) authRequired.set(true)
+    // A forbidden download is an authorization result, not an expired login.
+    if (res.status === 401) authRequired.set(true)
     throw Object.assign(new Error(body.error || res.statusText), { status: res.status, body })
   }
   authRequired.set(false)
@@ -257,7 +262,7 @@ export async function streamSSE(path, body, onEvent, signal) {
   })
   if (!res.ok || !res.body) {
     const b = await res.json().catch(() => ({}))
-    if (res.status === 401 || res.status === 403) authRequired.set(true)
+    if (res.status === 401) authRequired.set(true)
     throw Object.assign(new Error(b.error || res.statusText), { status: res.status, body: b })
   }
   const reader = res.body.getReader()
@@ -437,7 +442,7 @@ export const api = {
     })
     if (!res.ok) {
       const body = await res.json().catch(() => ({}))
-      if (res.status === 401 || res.status === 403) authRequired.set(true)
+      if (res.status === 401) authRequired.set(true)
       throw Object.assign(new Error(body.error || res.statusText), { status: res.status, body })
     }
     authRequired.set(false)
@@ -460,7 +465,7 @@ export const api = {
     const res = await fetch('/api/v1/chat/attachments', { method: 'POST', headers, body: fd })
     if (!res.ok) {
       const body = await res.json().catch(() => ({}))
-      if (res.status === 401 || res.status === 403) authRequired.set(true)
+      if (res.status === 401) authRequired.set(true)
       throw Object.assign(new Error(body.error || res.statusText), { status: res.status, body })
     }
     authRequired.set(false)
@@ -475,7 +480,7 @@ export const api = {
     })
     if (!res.ok) {
       const body = await res.json().catch(() => ({}))
-      if (res.status === 401 || res.status === 403) authRequired.set(true)
+      if (res.status === 401) authRequired.set(true)
       throw Object.assign(new Error(body.error || res.statusText), { status: res.status, body })
     }
     authRequired.set(false)
@@ -493,13 +498,21 @@ export const api = {
     // workspace's work and a bare POST from a prober or scanner would have
     // been enough to do it. Personal ignores it.
     restart: () => apiFetch('/admin/restart', { method: 'POST', body: JSON.stringify({ confirm: 'restart' }) }),
-    audit: (limit = 50) => apiFetch('/admin/audit?limit=' + encodeURIComponent(limit)),
+    audit: (limit = 50, cursor = '') => apiFetch('/admin/audit?' + new URLSearchParams({
+      limit: String(limit), ...(cursor ? { cursor } : {}),
+    }).toString()),
     bootstrapStatus: () => apiFetch('/admin/bootstrap'),
     bootstrap: (body) => apiFetch('/admin/bootstrap', { method: 'POST', body: JSON.stringify(body) }),
     platformOverview: () => apiFetch('/admin/platform/overview'),
     platformOrganizations: () => apiFetch('/admin/platform/organizations'),
+    platformAudit: (limit = 50, cursor = '') => apiFetch('/admin/platform/audit?' + new URLSearchParams({
+      limit: String(limit), ...(cursor ? { cursor } : {}),
+    }).toString()),
     provisionOrganization: (body) => apiFetch('/admin/platform/organizations', { method:'POST', body:JSON.stringify(body) }),
     provisionWorkspace: (organizationId, body) => apiFetch(`/admin/platform/organizations/${encodeURIComponent(organizationId)}/workspaces`, { method:'POST', body:JSON.stringify(body) }),
+    updateWorkspaceAddress: (workspaceId, slug) => apiFetch(`/admin/platform/workspaces/${encodeURIComponent(workspaceId)}/address`, { method:'PATCH', body:JSON.stringify({ slug }) }),
+    updateOrganizationStatus: (organizationId, body) => apiFetch(`/admin/platform/organizations/${encodeURIComponent(organizationId)}/status`, { method:'PATCH', body:JSON.stringify(body) }),
+    updateWorkspaceStatus: (workspaceId, body) => apiFetch(`/admin/platform/workspaces/${encodeURIComponent(workspaceId)}/status`, { method:'PATCH', body:JSON.stringify(body) }),
   },
 
   // MU-029. The three endpoints a client needs to know where it is, where it
@@ -538,6 +551,59 @@ export const api = {
     remove: (id) => apiFetch(`/workspace/members/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     audit: (limit = 100) => apiFetch('/workspace/membership-audit?limit=' + encodeURIComponent(limit)),
     accept: (token) => apiFetch('/invitations/accept', { method: 'POST', body: JSON.stringify({ token }) }),
+  },
+
+  workspaceAdmin: {
+    policy: () => apiFetch('/workspace/policy'),
+    savePolicy: (body) => apiFetch('/workspace/policy', {
+      method: 'PUT', body: JSON.stringify(body),
+      _oidcReauthReturnTo: '/#workspace-admin',
+    }),
+    credentials: (includeRevoked = false) => apiFetch('/admin/api-keys?include_revoked=' + String(includeRevoked)),
+    createCredential: (body) => apiFetch('/admin/api-keys', {
+      method: 'POST', body: JSON.stringify(body),
+      _oidcReauthReturnTo: '/#workspace-admin',
+    }),
+    revokeCredential: (id) => apiFetch(`/admin/api-keys/${encodeURIComponent(id)}`, {
+      method: 'DELETE', _oidcReauthReturnTo: '/#workspace-admin',
+    }),
+    rotateCredential: (id) => apiFetch(`/admin/api-keys/${encodeURIComponent(id)}/rotate`, {
+      method: 'POST', body: '{}', _oidcReauthReturnTo: '/#workspace-admin',
+    }),
+    audit: (limit = 100, cursor = '') => api.admin.audit(limit, cursor),
+    exports: () => apiFetch('/workspace/export'),
+    requestExport: () => apiFetch('/workspace/export', {
+      method: 'POST', body: '{}', _oidcReauthReturnTo: '/#workspace-admin',
+    }),
+    deletion: () => apiFetch('/workspace/deletion'),
+    requestDeletion: (body) => apiFetch('/workspace/deletion', {
+      method: 'POST', body: JSON.stringify(body), _oidcReauthReturnTo: '/#workspace-admin',
+    }),
+    cancelDeletion: () => apiFetch('/workspace/deletion', {
+      method: 'DELETE', _oidcReauthReturnTo: '/#workspace-admin',
+    }),
+    downloadExport: async (id) => {
+      const res = await fetch(`/api/v1/workspace/export/${encodeURIComponent(id)}/download`, { headers: authHeaders() })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw Object.assign(new Error(body.error || res.statusText), { status: res.status, body })
+      }
+      return { blob: await res.blob(), filename: `soulacy-workspace-export-${id}.tar.gz` }
+    },
+  },
+
+  workspaceConfig: {
+    get: () => apiFetch('/workspace/config'),
+    patch: (body) => apiFetch('/workspace/config', { method: 'PATCH', body: JSON.stringify(body) }),
+  },
+
+  workspaceProviders: {
+    list: () => apiFetch('/workspace/providers'),
+    doctor: () => apiFetch('/workspace/providers/doctor'),
+    models: (id) => apiFetch(`/workspace/providers/${encodeURIComponent(id)}/models`),
+    setModel: (id, model) => apiFetch(`/workspace/providers/${encodeURIComponent(id)}/model`, { method: 'POST', body: JSON.stringify({ model }) }),
+    setCredentials: (id, body) => apiFetch(`/workspace/providers/${encodeURIComponent(id)}`, { method: 'POST', body: JSON.stringify(body) }),
+    delete: (id) => apiFetch(`/workspace/providers/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
 
   memory: {
@@ -785,6 +851,9 @@ export const api = {
     delete: (id)      => apiFetch(`/mcp/${encodeURIComponent(id)}`,            { method: 'DELETE' }),
     test:           (body)    => apiFetch('/mcp/test',             { method: 'POST', body: JSON.stringify(body) }),
     provisionGlama:    (body)         => apiFetch('/mcp/provision-glama',    { method: 'POST', body: JSON.stringify(body) }),
+    ownList: () => apiFetch('/mcp/own'),
+    ownPut: (id, body) => apiFetch(`/mcp/own/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) }),
+    ownDelete: (id) => apiFetch(`/mcp/own/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
 
   plugins: {
@@ -1341,7 +1410,7 @@ export const api = {
       })
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
-        if (res.status === 401 || res.status === 403) authRequired.set(true)
+        if (res.status === 401) authRequired.set(true)
         throw Object.assign(new Error(body.error || res.statusText), { status: res.status })
       }
       authRequired.set(false)

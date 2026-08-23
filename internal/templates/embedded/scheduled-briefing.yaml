@@ -36,8 +36,8 @@ system_prompt: |
        search tool, a knowledge base, or a delivery channel.
     3. End with one practical next action.
 llm:
-    provider: ollama
-    model: llama3.3:70b
+    provider: nvidia
+    model: meta/llama-3.3-70b-instruct
     temperature: 0.5
     max_tokens: 1024
 memory:

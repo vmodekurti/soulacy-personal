@@ -532,3 +532,69 @@ func TestASubtreePurgeRemovesOnlyThatWorkspacesSubdirectory(t *testing.T) {
 		t.Fatalf("another workspace's exports were removed: %v", err)
 	}
 }
+
+func TestLayoutFilePurgeRemovesOnlyTheNamedWorkspacesFile(t *testing.T) {
+	root := t.TempDir()
+	layout := wsroot.NewLayout(root)
+	base := filepath.Join(root, "studio-lessons.db")
+	write := func(workspaceID, body string) string {
+		path := layout.File(base, workspaceID)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+
+	personal := write(wsroot.PersonalWorkspaceID, "personal")
+	mine := write("ws_a", "mine")
+	theirs := write("ws_b", "theirs")
+
+	removed, err := PurgeLayoutFile(context.Background(), layout, base, "ws_a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed.Rows != 1 || removed.Bytes != int64(len("mine")) {
+		t.Fatalf("removed = %+v", removed)
+	}
+	if _, err := os.Stat(mine); !os.IsNotExist(err) {
+		t.Fatal("the named workspace file survived")
+	}
+	for _, path := range []string{personal, theirs} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("purge removed a file owned by another scope: %v", err)
+		}
+	}
+
+	if _, err := PurgeLayoutFile(context.Background(), layout, base, "ws_a"); err != nil {
+		t.Fatalf("purging an already absent file failed: %v", err)
+	}
+}
+
+func TestLayoutFilePurgeRefusesSharedInvalidAndDirectoryTargets(t *testing.T) {
+	root := t.TempDir()
+	layout := wsroot.NewLayout(root)
+	base := filepath.Join(root, "studio-lessons.db")
+	if err := os.WriteFile(base, []byte("personal"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, id := range []string{"", wsroot.PersonalWorkspaceID, "..", "Not A Workspace"} {
+		if _, err := PurgeLayoutFile(context.Background(), layout, base, id); err == nil {
+			t.Errorf("workspace id %q was allowed to purge an exact file", id)
+		}
+	}
+	if _, err := os.Stat(base); err != nil {
+		t.Fatalf("the Personal file was removed: %v", err)
+	}
+
+	target := layout.File(base, "ws_a")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PurgeLayoutFile(context.Background(), layout, base, "ws_a"); err == nil || !strings.Contains(err.Error(), "directory") {
+		t.Fatalf("directory target was not clearly refused: %v", err)
+	}
+}
