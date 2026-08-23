@@ -27,6 +27,29 @@ func TestPrincipalContextIsImmutableAndMessageIndependent(t *testing.T) {
 	}
 }
 
+func TestWorkspaceOwnerRetainsAgentToolAccess(t *testing.T) {
+	e := newMinimalEngine(t)
+	e.builtins = e.buildBuiltins()
+	grants := []string{"web_search"}
+	def := &agent.Definition{ID: "weather", Builtins: &grants}
+
+	names := toolSchemaNameSet(e.allToolSchemasForContext(
+		WithPrincipal(context.Background(), Principal{Role: "owner"}), def, "http"))
+	if !names["web_search"] {
+		t.Fatal("workspace owner lost the explicitly granted web_search tool")
+	}
+}
+
+func TestWorkspaceDeveloperRetainsSafeBuiltinAccess(t *testing.T) {
+	ctx := WithPrincipal(context.Background(), Principal{Role: "developer"})
+	if !callerAllowsTool(ctx, "web_search") {
+		t.Fatal("developer lost safe built-in tool access")
+	}
+	if callerAllowsTool(ctx, "shell_exec") || callerAllowsTool(ctx, "plugin__ops__run") {
+		t.Fatal("developer gained operator-only privileged or external tool access")
+	}
+}
+
 func TestExternalToolsRequireAgentGrantAndCallerPermission(t *testing.T) {
 	e := newMinimalEngine(t)
 	e.builtins = e.buildBuiltins()

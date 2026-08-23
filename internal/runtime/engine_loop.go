@@ -780,6 +780,19 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 			if recovered, ok := recoverXMLToolCalls(resp.Content, tools); ok {
 				resp.Content = ""
 				resp.ToolCalls = recovered
+			} else if strings.HasPrefix(strings.TrimSpace(resp.Content), "<") {
+				// Keep this visible in production: an XML-looking assistant reply is
+				// usually a provider/model tool-call compatibility issue. Never log
+				// the response body (it may contain user data); the offered names are
+				// configuration metadata and make an allowlist mismatch diagnosable.
+				offered := make([]string, 0, len(tools))
+				for _, tool := range tools {
+					offered = append(offered, tool.Name)
+				}
+				e.log.Warn("model emitted XML-like content that was not recoverable as an offered tool call",
+					zap.String("agent", msg.AgentID),
+					zap.Int("offered_tool_count", len(tools)),
+					zap.Strings("offered_tools", offered))
 			}
 		}
 		// Do not let provider quirks change the operator's install target or

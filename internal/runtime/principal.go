@@ -46,7 +46,10 @@ func callerAllowsTool(ctx context.Context, toolName string) bool {
 	if !ok {
 		return true // scheduler/channel/internal invocations are trusted services
 	}
-	if p.Role == "admin" {
+	// Workspace memberships use owner/admin/developer/operator/viewer. Owner is
+	// the highest workspace role and must retain the same execution authority as
+	// admin; omitting it silently removed every tool from an owner's chat run.
+	if p.Role == "owner" || p.Role == "admin" {
 		return true
 	}
 	if isPrivilegedSystemTool(toolName) {
@@ -55,7 +58,7 @@ func callerAllowsTool(ctx context.Context, toolName string) bool {
 	if strings.HasPrefix(toolName, "mcp__") || strings.HasPrefix(toolName, "plugin__") {
 		return p.Role == "operator"
 	}
-	return p.Role == "operator" || p.Role == "viewer"
+	return p.Role == "developer" || p.Role == "operator" || p.Role == "viewer"
 }
 
 // WorkspaceFromContext returns the workspace a run is acting in, falling back
