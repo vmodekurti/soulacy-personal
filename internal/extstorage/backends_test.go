@@ -131,6 +131,41 @@ func TestStorageBackend_ContextCancellationStopsInflightIPC(t *testing.T) {
 	}
 }
 
+func TestStorageBackend_WorkspaceIsolation(t *testing.T) {
+	b, err := NewStorageBackend(context.Background(), helperConfig(t, "happy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	for workspace, content := range map[string]string{"ws_a": "alpha secret", "ws_b": "beta secret"} {
+		if err := b.Archive(memory.Entry{WorkspaceID: workspace, ID: workspace, AgentID: "assistant", SessionID: "same", Scope: memory.ScopeSession, Content: content, CreatedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, err := b.SearchInWorkspace("ws_a", "assistant", "secret", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bEntries, err := b.SearchInWorkspace("ws_b", "assistant", "secret", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a) != 1 || a[0].Content != "alpha secret" || len(bEntries) != 1 || bEntries[0].Content != "beta secret" {
+		t.Fatalf("cross-workspace storage: A=%+v B=%+v", a, bEntries)
+	}
+}
+
+func TestStorageBackend_LegacySidecarFailsClosedForTenantReads(t *testing.T) {
+	b, err := NewStorageBackend(context.Background(), helperConfig(t, "legacyworkspace"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	if _, err := b.SearchInWorkspace("ws_tenant", "assistant", "secret", 10); err == nil || !strings.Contains(err.Error(), "storage.workspace") {
+		t.Fatalf("legacy sidecar tenant read error = %v", err)
+	}
+}
+
 func TestQueueBackend_PublishSubscribeAck(t *testing.T) {
 	b, err := NewQueueBackend(context.Background(), helperConfig(t, "happy"))
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/soulacy/soulacy/internal/wsroot"
 	sdkext "github.com/soulacy/soulacy/sdk/extstorage"
 	"github.com/soulacy/soulacy/sdk/memory"
 	"github.com/soulacy/soulacy/sdk/storage"
@@ -18,10 +19,12 @@ const storageCallTimeout = 30 * time.Second
 // (the long-term memory archive). The "storage" capability must be
 // advertised in negotiate.
 type StorageBackend struct {
-	c *Client
+	c              *Client
+	workspaceAware bool
 }
 
 var _ storage.ContextMemoryBackend = (*StorageBackend)(nil)
+var _ storage.ContextWorkspaceMemoryBackend = (*StorageBackend)(nil)
 
 // NewStorageBackend spawns + negotiates a sidecar and verifies it
 // advertises the "storage" capability.
@@ -35,7 +38,7 @@ func NewStorageBackend(ctx context.Context, cfg ClientConfig) (*StorageBackend, 
 		return nil, fmt.Errorf("extstorage: %s does not advertise the storage capability (got %v)",
 			cfg.Name, c.Negotiated().Capabilities)
 	}
-	return &StorageBackend{c: c}, nil
+	return &StorageBackend{c: c, workspaceAware: hasCapability(c.Negotiated().Capabilities, "storage.workspace")}, nil
 }
 
 // Client exposes the underlying session to the host.
@@ -82,9 +85,20 @@ func (b *StorageBackend) Search(agentID, query string, limit int) ([]memory.Entr
 
 // SearchContext searches while honoring caller cancellation.
 func (b *StorageBackend) SearchContext(ctx context.Context, agentID, query string, limit int) ([]memory.Entry, error) {
+	return b.SearchInWorkspaceContext(ctx, "", agentID, query, limit)
+}
+
+func (b *StorageBackend) SearchInWorkspace(workspaceID, agentID, query string, limit int) ([]memory.Entry, error) {
+	return b.SearchInWorkspaceContext(context.Background(), workspaceID, agentID, query, limit)
+}
+
+func (b *StorageBackend) SearchInWorkspaceContext(ctx context.Context, workspaceID, agentID, query string, limit int) ([]memory.Entry, error) {
+	if err := b.requireWorkspaceCapability(workspaceID); err != nil {
+		return nil, err
+	}
 	var res sdkext.StorageSearchResult
 	err := b.call(ctx, sdkext.MethodStorageSearch, sdkext.StorageSearchParams{
-		AgentID: agentID, Query: query, Limit: limit,
+		WorkspaceID: workspaceID, AgentID: agentID, Query: query, Limit: limit,
 	}, &res)
 	return res.Entries, err
 }
@@ -96,9 +110,20 @@ func (b *StorageBackend) ReadByScope(agentID, sessionID string, scope memory.Sco
 
 // ReadByScopeContext reads scoped entries while honoring caller cancellation.
 func (b *StorageBackend) ReadByScopeContext(ctx context.Context, agentID, sessionID string, scope memory.Scope, limit int) ([]memory.Entry, error) {
+	return b.ReadByScopeInWorkspaceContext(ctx, "", agentID, sessionID, scope, limit)
+}
+
+func (b *StorageBackend) ReadByScopeInWorkspace(workspaceID, agentID, sessionID string, scope memory.Scope, limit int) ([]memory.Entry, error) {
+	return b.ReadByScopeInWorkspaceContext(context.Background(), workspaceID, agentID, sessionID, scope, limit)
+}
+
+func (b *StorageBackend) ReadByScopeInWorkspaceContext(ctx context.Context, workspaceID, agentID, sessionID string, scope memory.Scope, limit int) ([]memory.Entry, error) {
+	if err := b.requireWorkspaceCapability(workspaceID); err != nil {
+		return nil, err
+	}
 	var res sdkext.StorageReadByScopeResult
 	err := b.call(ctx, sdkext.MethodStorageReadByScope, sdkext.StorageReadByScopeParams{
-		AgentID: agentID, SessionID: sessionID, Scope: scope, Limit: limit,
+		WorkspaceID: workspaceID, AgentID: agentID, SessionID: sessionID, Scope: scope, Limit: limit,
 	}, &res)
 	return res.Entries, err
 }
@@ -110,9 +135,20 @@ func (b *StorageBackend) ReadGlobal(agentID string, limit int) ([]memory.Entry, 
 
 // ReadGlobalContext reads recent entries while honoring caller cancellation.
 func (b *StorageBackend) ReadGlobalContext(ctx context.Context, agentID string, limit int) ([]memory.Entry, error) {
+	return b.ReadGlobalInWorkspaceContext(ctx, "", agentID, limit)
+}
+
+func (b *StorageBackend) ReadGlobalInWorkspace(workspaceID, agentID string, limit int) ([]memory.Entry, error) {
+	return b.ReadGlobalInWorkspaceContext(context.Background(), workspaceID, agentID, limit)
+}
+
+func (b *StorageBackend) ReadGlobalInWorkspaceContext(ctx context.Context, workspaceID, agentID string, limit int) ([]memory.Entry, error) {
+	if err := b.requireWorkspaceCapability(workspaceID); err != nil {
+		return nil, err
+	}
 	var res sdkext.StorageReadGlobalResult
 	err := b.call(ctx, sdkext.MethodStorageReadGlobal, sdkext.StorageReadGlobalParams{
-		AgentID: agentID, Limit: limit,
+		WorkspaceID: workspaceID, AgentID: agentID, Limit: limit,
 	}, &res)
 	return res.Entries, err
 }
@@ -133,3 +169,11 @@ func (b *StorageBackend) PruneContext(ctx context.Context, agentID string, befor
 
 // Close implements storage.MemoryBackend.
 func (b *StorageBackend) Close() error { return b.c.Close() }
+
+func (b *StorageBackend) requireWorkspaceCapability(workspaceID string) error {
+	workspaceID = wsroot.Normalize(workspaceID)
+	if workspaceID != wsroot.PersonalWorkspaceID && !b.workspaceAware {
+		return fmt.Errorf("extstorage: sidecar does not advertise storage.workspace; refusing workspace %q", workspaceID)
+	}
+	return nil
+}

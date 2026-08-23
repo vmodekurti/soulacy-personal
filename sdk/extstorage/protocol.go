@@ -322,9 +322,10 @@ type StorageArchiveResult struct {
 
 // StorageSearchParams is the query for storage.search.
 type StorageSearchParams struct {
-	AgentID string `json:"agent_id"`
-	Query   string `json:"query"`
-	Limit   int    `json:"limit"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	AgentID     string `json:"agent_id"`
+	Query       string `json:"query"`
+	Limit       int    `json:"limit"`
 }
 
 // StorageSearchResult returns FTS/substring matches.
@@ -334,10 +335,11 @@ type StorageSearchResult struct {
 
 // StorageReadByScopeParams lists scoped entries.
 type StorageReadByScopeParams struct {
-	AgentID   string       `json:"agent_id"`
-	SessionID string       `json:"session_id"`
-	Scope     memory.Scope `json:"scope"`
-	Limit     int          `json:"limit"`
+	WorkspaceID string       `json:"workspace_id,omitempty"`
+	AgentID     string       `json:"agent_id"`
+	SessionID   string       `json:"session_id"`
+	Scope       memory.Scope `json:"scope"`
+	Limit       int          `json:"limit"`
 }
 
 // StorageReadByScopeResult returns the scoped entries.
@@ -347,8 +349,9 @@ type StorageReadByScopeResult struct {
 
 // StorageReadGlobalParams lists global entries.
 type StorageReadGlobalParams struct {
-	AgentID string `json:"agent_id"`
-	Limit   int    `json:"limit"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	AgentID     string `json:"agent_id"`
+	Limit       int    `json:"limit"`
 }
 
 // StorageReadGlobalResult returns the global entries.
@@ -358,8 +361,9 @@ type StorageReadGlobalResult struct {
 
 // StoragePruneParams deletes old records.
 type StoragePruneParams struct {
-	AgentID string    `json:"agent_id"`
-	Before  time.Time `json:"before"`
+	WorkspaceID string    `json:"workspace_id,omitempty"`
+	AgentID     string    `json:"agent_id"`
+	Before      time.Time `json:"before"`
 }
 
 // StoragePruneResult returns how many records were deleted.

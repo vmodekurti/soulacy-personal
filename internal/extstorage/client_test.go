@@ -41,8 +41,8 @@ func runHelperSidecar(mode string) {
 	var store []entry
 
 	type storageEntry struct {
-		ID, AgentID, SessionID, Scope, Key, Content string
-		CreatedAt                                   time.Time
+		ID, WorkspaceID, AgentID, SessionID, Scope, Key, Content string
+		CreatedAt                                                time.Time
 	}
 	var storageStore []storageEntry
 
@@ -84,10 +84,14 @@ func runHelperSidecar(mode string) {
 			if mode == "noecho" {
 				shared = "/somewhere/else"
 			}
+			capabilities := []string{"vector", "queue", "storage", "storage.workspace"}
+			if mode == "legacyworkspace" {
+				capabilities = []string{"vector", "queue", "storage"}
+			}
 			respond(id, sdkext.NegotiateResult{
 				Protocol:     1,
 				Name:         "go-helper",
-				Capabilities: []string{"vector", "queue", "storage"},
+				Capabilities: capabilities,
 				SharedDir:    shared,
 			})
 			if mode == "crashafterhello" {
@@ -167,13 +171,14 @@ func runHelperSidecar(mode string) {
 				}
 			}
 			storageStore = append(storageStore, storageEntry{
-				ID:        entry.ID,
-				AgentID:   entry.AgentID,
-				SessionID: entry.SessionID,
-				Scope:     string(entry.Scope),
-				Key:       entry.Key,
-				Content:   content,
-				CreatedAt: entry.CreatedAt,
+				ID:          entry.ID,
+				WorkspaceID: wsroot.Normalize(entry.WorkspaceID),
+				AgentID:     entry.AgentID,
+				SessionID:   entry.SessionID,
+				Scope:       string(entry.Scope),
+				Key:         entry.Key,
+				Content:     content,
+				CreatedAt:   entry.CreatedAt,
 			})
 			respond(id, sdkext.StorageArchiveResult{OK: true})
 		case sdkext.MethodStorageSearch:
@@ -181,11 +186,14 @@ func runHelperSidecar(mode string) {
 			_ = json.Unmarshal(m.Params, &p)
 			var entries []memory.Entry
 			for _, e := range storageStore {
+				if e.WorkspaceID != wsroot.Normalize(p.WorkspaceID) {
+					continue
+				}
 				if p.AgentID != "" && e.AgentID != p.AgentID {
 					continue
 				}
 				if strings.Contains(e.Content, p.Query) {
-					entries = append(entries, memory.Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
+					entries = append(entries, memory.Entry{WorkspaceID: e.WorkspaceID,
 						ID:        e.ID,
 						AgentID:   e.AgentID,
 						SessionID: e.SessionID,
@@ -202,8 +210,8 @@ func runHelperSidecar(mode string) {
 			_ = json.Unmarshal(m.Params, &p)
 			var entries []memory.Entry
 			for _, e := range storageStore {
-				if e.AgentID == p.AgentID && e.SessionID == p.SessionID && e.Scope == string(p.Scope) {
-					entries = append(entries, memory.Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
+				if e.WorkspaceID == wsroot.Normalize(p.WorkspaceID) && e.AgentID == p.AgentID && e.SessionID == p.SessionID && e.Scope == string(p.Scope) {
+					entries = append(entries, memory.Entry{WorkspaceID: e.WorkspaceID,
 						ID:        e.ID,
 						AgentID:   e.AgentID,
 						SessionID: e.SessionID,
@@ -220,8 +228,8 @@ func runHelperSidecar(mode string) {
 			_ = json.Unmarshal(m.Params, &p)
 			var entries []memory.Entry
 			for _, e := range storageStore {
-				if e.AgentID == p.AgentID {
-					entries = append(entries, memory.Entry{WorkspaceID: wsroot.PersonalWorkspaceID,
+				if e.WorkspaceID == wsroot.Normalize(p.WorkspaceID) && e.AgentID == p.AgentID {
+					entries = append(entries, memory.Entry{WorkspaceID: e.WorkspaceID,
 						ID:        e.ID,
 						AgentID:   e.AgentID,
 						SessionID: e.SessionID,
@@ -239,7 +247,7 @@ func runHelperSidecar(mode string) {
 			var keep []storageEntry
 			deleted := int64(0)
 			for _, e := range storageStore {
-				if e.AgentID == p.AgentID && e.CreatedAt.Before(p.Before) {
+				if e.WorkspaceID == wsroot.Normalize(p.WorkspaceID) && e.AgentID == p.AgentID && e.CreatedAt.Before(p.Before) {
 					deleted++
 				} else {
 					keep = append(keep, e)
