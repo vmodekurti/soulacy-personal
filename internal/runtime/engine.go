@@ -276,6 +276,10 @@ type Engine struct {
 	// the engine falls back to the original exec-per-call subprocess path.
 	// Set via SetExecutor after construction.
 	pyExecutor executor.Backend
+	// requireIsolatedExecutor is enabled in Team/Scale. It makes pyExecutor the
+	// only legal route for tenant-authored Python, including plugin handlers;
+	// an absent executor refuses the call instead of falling back to host exec.
+	requireIsolatedExecutor bool
 
 	// namedExecutors holds additional execution backends an agent can opt into
 	// via its `execution.backend` (e.g. "local", "docker", "ssh"). Registered at
@@ -786,6 +790,12 @@ func (e *Engine) SetActionLogBackend(store storage.ActionLogBackend) {
 // engine uses the original per-call subprocess path.
 // Safe to call once at startup before any traffic.
 func (e *Engine) SetExecutor(ex executor.Backend) { e.pyExecutor = ex }
+
+// RequireIsolatedExecutor removes the local Python fallback. Enable once at
+// boot for every multi-user deployment, after installing the worker executor.
+func (e *Engine) RequireIsolatedExecutor(required bool) {
+	e.requireIsolatedExecutor = required
+}
 
 // SetNamedExecutor registers an execution backend under a name that agents can
 // select via `execution.backend` in SOUL.yaml. Call once per backend at startup.

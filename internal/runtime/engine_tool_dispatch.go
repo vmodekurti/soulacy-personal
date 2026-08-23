@@ -10,6 +10,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -129,7 +130,9 @@ func (e *Engine) runToolDispatch(ctx context.Context, def *agent.Definition, ses
 	}
 
 	// Plugin tools — namespaced as plugin__<pluginID>__<tool>. Execute as a
-	// Python subprocess using the handler path from the plugin manifest.
+	// Python subprocess using the handler path from the plugin manifest. In
+	// Team/Scale the source is copied into the isolated worker request; the
+	// worker is never given a gateway-host path to open.
 	if provider := e.plugins(ctx); strings.HasPrefix(call.Name, "plugin__") && provider != nil {
 		if !pluginToolAllowed(def, call.Name) {
 			return "", fmt.Errorf("plugin tool %q is not explicitly granted to agent %q", call.Name, def.ID)
@@ -162,6 +165,24 @@ result = getattr(mod, %q)(**args)
 _sys.stdout = _orig_stdout
 print(result if isinstance(result, str) else json.dumps(result))
 `, pyFile, funcName)
+			if e.requireIsolatedExecutor {
+				source, readErr := os.ReadFile(pyFile)
+				if readErr != nil {
+					return "", fmt.Errorf("plugin tool %q: read isolated source: %w", call.Name, readErr)
+				}
+				script = embeddedPythonModule(source, pyFile, funcName)
+				if e.pyExecutor == nil {
+					return "", fmt.Errorf("plugin tool %q: isolated execution worker is unavailable", call.Name)
+				}
+				tctx, cancel := context.WithTimeout(ctx, e.effectiveToolTimeout(ctx))
+				defer cancel()
+				out, runErr := e.pyExecutor.Run(tctx, "", "", script, argsJSON)
+				if runErr != nil {
+					return "", fmt.Errorf("plugin tool %q (isolated worker): %w", call.Name, runErr)
+				}
+				return strings.TrimSpace(out), nil
+			}
+
 			// SEC-5: scrub env to base allowlist + agent-declared names.
 			limits := e.sandboxLimits
 			limits.EnvAllow = def.Env
@@ -339,7 +360,14 @@ print(result if isinstance(result, str) else json.dumps(result))
 				)
 			}
 		}
-		script = fmt.Sprintf(`
+		if e.requireIsolatedExecutor {
+			source, readErr := os.ReadFile(pyFile)
+			if readErr != nil {
+				return "", fmt.Errorf("tool %q: read isolated source: %w", call.Name, readErr)
+			}
+			script = embeddedPythonModule(source, pyFile, call.Name)
+		} else {
+			script = fmt.Sprintf(`
 import sys as _sys, json, importlib.util
 # Redirect stdout → stderr so any print() inside the tool code does not
 # corrupt the JSON result we write at the very end.
@@ -353,6 +381,7 @@ result = getattr(mod, %q)(**args)
 _sys.stdout = _orig_stdout
 print(result if isinstance(result, str) else json.dumps(result))
 `, pyFile, call.Name)
+		}
 	} else {
 		return "", fmt.Errorf("tool %q has neither python_file nor inline", call.Name)
 	}
@@ -413,6 +442,22 @@ print(result if isinstance(result, str) else json.dumps(result))
 }
 
 func (e *Engine) runPythonToolOnce(tctx, auditCtx context.Context, def *agent.Definition, sessionID string, call message.ToolCall, script string, argsJSON []byte) (string, error) {
+	if e.requireIsolatedExecutor {
+		if e.pyExecutor == nil {
+			return "", fmt.Errorf("tool %q: isolated execution worker is unavailable", call.Name)
+		}
+		if requested := strings.ToLower(strings.TrimSpace(def.Execution.Backend)); requested != "" && requested != "worker" {
+			return "", fmt.Errorf("tool %q: execution backend %q is not permitted in a multi-user deployment", call.Name, def.Execution.Backend)
+		}
+		tstart := time.Now()
+		out, runErr := e.pyExecutor.Run(tctx, "", "", script, argsJSON)
+		e.logAudit(auditCtx, def, call, out, tstart, false, runErr)
+		if runErr != nil {
+			return "", fmt.Errorf("tool %q (isolated worker): %w", call.Name, runErr)
+		}
+		return strings.TrimSpace(out), nil
+	}
+
 	// Per-agent execution backend: when the agent explicitly selected a
 	// registered non-default backend (docker/ssh/…), run the tool's python
 	// through it instead of the local sandboxed subprocess. `script` is already
@@ -536,6 +581,24 @@ func (e *Engine) runPythonToolOnce(tctx, auditCtx context.Context, def *agent.De
 		return "", fmt.Errorf("tool execution failed (%v): %s", runErr, errMsg)
 	}
 	return strings.TrimSpace(stdout.String()), nil
+}
+
+// embeddedPythonModule makes a Python file self-contained for an execution
+// worker that intentionally has no access to the gateway filesystem. Base64
+// avoids turning source text into a quoted-code injection problem.
+func embeddedPythonModule(source []byte, filename, function string) string {
+	return fmt.Sprintf(`
+import sys as _sys, json, base64, types
+_orig_stdout = _sys.stdout
+_sys.stdout = _sys.stderr
+args = json.loads(_sys.stdin.read())
+mod = types.ModuleType("tool")
+mod.__file__ = %q
+exec(compile(base64.b64decode(%q), %q, "exec"), mod.__dict__)
+result = getattr(mod, %q)(**args)
+_sys.stdout = _orig_stdout
+print(result if isinstance(result, str) else json.dumps(result))
+`, filename, base64.StdEncoding.EncodeToString(source), filename, function)
 }
 
 // allToolSchemas combines the agent's Python tools with the engine's built-in

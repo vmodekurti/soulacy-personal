@@ -1245,6 +1245,7 @@ func (a *App) wireEngine(d engineDeps) *runtime.Engine {
 	engine.SetIntentGateDefault(cfg.Security.IntentGate)
 	engine.SetActionLogBackend(d.actionBackend)
 	engine.SetExecutor(d.pyExecutor)
+	engine.RequireIsolatedExecutor(config.IsMultiUserMode(cfg.DeploymentMode()))
 	for name, be := range d.namedExecutors {
 		engine.SetNamedExecutor(name, be)
 	}
