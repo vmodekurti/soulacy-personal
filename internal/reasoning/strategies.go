@@ -7,6 +7,7 @@ package reasoning
 import (
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"regexp"
 	"strings"
@@ -832,6 +833,9 @@ func recoverTextualToolCall(text string, toolNames []string) (ToolCall, bool) {
 		}
 		s = strings.TrimSpace(s)
 	}
+	if call, ok := recoverXMLTextualToolCall(s, toolNames); ok {
+		return call, true
+	}
 	if call, ok := recoverJSONToolCall(s, toolNames); ok {
 		return call, true
 	}
@@ -886,6 +890,56 @@ func recoverTextualToolCall(text string, toolNames []string) (ToolCall, bool) {
 		}
 	}
 	return ToolCall{Tool: name, Input: input, Arguments: args}, true
+}
+
+type textualXMLToolNode struct {
+	XMLName  xml.Name
+	Attrs    []xml.Attr           `xml:",any,attr"`
+	Text     string               `xml:",chardata"`
+	Children []textualXMLToolNode `xml:",any"`
+}
+
+// recoverXMLTextualToolCall accepts the compact function syntax emitted by
+// several open-weight reasoning models. The complete response must be exactly
+// one call to an offered tool; attributes, prose and nested markup are rejected
+// so an example in ordinary model text cannot become an executable action.
+func recoverXMLTextualToolCall(s string, toolNames []string) (ToolCall, bool) {
+	if !strings.HasPrefix(strings.TrimSpace(s), "<") {
+		return ToolCall{}, false
+	}
+	var root textualXMLToolNode
+	if err := xml.Unmarshal([]byte(s), &root); err != nil || len(root.Attrs) != 0 ||
+		strings.TrimSpace(root.Text) != "" || len(root.Children) == 0 {
+		return ToolCall{}, false
+	}
+	name, ok := canonicalAllowedTool(root.XMLName.Local, toolNames)
+	if !ok {
+		return ToolCall{}, false
+	}
+	args := make(map[string]any, len(root.Children))
+	for _, child := range root.Children {
+		if child.XMLName.Local == "" || len(child.Attrs) != 0 || len(child.Children) != 0 {
+			return ToolCall{}, false
+		}
+		key, value := child.XMLName.Local, strings.TrimSpace(child.Text)
+		if (key == "arguments" || key == "parameters") && strings.HasPrefix(value, "{") {
+			var decoded map[string]any
+			if json.Unmarshal([]byte(value), &decoded) != nil {
+				return ToolCall{}, false
+			}
+			for k, v := range decoded {
+				args[k] = v
+			}
+			continue
+		}
+		if _, duplicate := args[key]; duplicate {
+			return ToolCall{}, false
+		}
+		args[key] = value
+	}
+	call := ToolCall{Tool: name, Arguments: args}
+	normalizeToolCallArgs(&call)
+	return call, true
 }
 
 func recoverJSONToolCall(s string, toolNames []string) (ToolCall, bool) {
