@@ -554,6 +554,11 @@ export const api = {
   },
 
   workspaceAdmin: {
+    billing: () => apiFetch('/billing'),
+    checkout: (plan) => apiFetch('/billing/checkout', {
+      method: 'POST', body: JSON.stringify({ plan }),
+    }),
+    portal: () => apiFetch('/billing/portal', { method: 'POST', body: '{}' }),
     policy: () => apiFetch('/workspace/policy'),
     savePolicy: (body) => apiFetch('/workspace/policy', {
       method: 'PUT', body: JSON.stringify(body),

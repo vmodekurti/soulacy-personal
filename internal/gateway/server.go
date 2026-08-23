@@ -236,6 +236,7 @@ type Server struct {
 	costStore              *costs.Store
 	entitlementService     *entitlements.Service
 	stripeEntitlementStore entitlements.Store
+	billingSessions        entitlements.SessionProvider
 
 	// runReg tracks cancellable in-flight chat/stream runs (Story #22).
 	runReg         *runRegistry
@@ -480,6 +481,10 @@ func (s *Server) SetCostStore(cs *costs.Store) {
 
 func (s *Server) SetEntitlements(service *entitlements.Service, store entitlements.Store) {
 	s.entitlementService, s.stripeEntitlementStore = service, store
+}
+
+func (s *Server) SetBillingSessions(provider entitlements.SessionProvider) {
+	s.billingSessions = provider
 }
 
 // SetWorkboardStore wires a workboard task store into the server (Story 5).
@@ -945,6 +950,9 @@ func (s *Server) buildApp() *fiber.App {
 	// are namespaced by the verified workspace, and before handlers so a
 	// duplicate never reaches one.
 	api := app.Group("/api/v1", s.authWithPluginTokens(), s.workspaceContextMW(), s.entitlementMW(), s.pluginGateMW(), s.rlUserMW(), s.idempotencyMW())
+	api.Get("/billing", s.handleBillingStatus)
+	api.Post("/billing/checkout", s.handleBillingCheckout)
+	api.Post("/billing/portal", s.handleBillingPortal)
 
 	// Health
 	api.Get("/health", s.handleHealth)

@@ -140,6 +140,21 @@ llm:
 #     model: gpt-realtime-mini    # default; gpt-realtime for higher quality
 #     # base_url: ""              # override for Azure/compatible endpoints
 
+# ── SaaS billing (Team/Scale) ─────────────────────────────────────────────────
+# billing:
+#     provider: stripe
+#     enforcement: strict
+#     stripe_secret_key: ""       # Prefer SOULACY_BILLING_STRIPE_SECRET_KEY
+#     stripe_webhook_secret: ""   # Prefer SOULACY_BILLING_STRIPE_WEBHOOK_SECRET
+#     webhook_tolerance: 5m
+#     default_plan: team
+#     stripe_prices:
+#         team: price_replace_me
+#         scale: price_replace_me
+#     checkout_success_url: https://app.example.com/#workspace-admin
+#     checkout_cancel_url: https://app.example.com/#workspace-admin
+#     portal_return_url: https://app.example.com/#workspace-admin
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 log:
     file: /Users/yourname/.soulacy/logs/soulacy.log

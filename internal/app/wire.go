@@ -771,9 +771,25 @@ func (a *App) Run(parent context.Context) error {
 		if entitlementErr != nil {
 			return fmt.Errorf("entitlement store: %w", entitlementErr)
 		}
-		srv.SetEntitlements(entitlements.New(entitlementStore), entitlementStore)
-		if strings.EqualFold(cfg.Billing.Provider, "stripe") && strings.TrimSpace(cfg.Billing.StripeWebhookSecret) == "" {
-			return fmt.Errorf("billing.stripe_webhook_secret is required when billing.provider=stripe")
+		missingPolicy := entitlements.MissingAllowed
+		if strings.EqualFold(cfg.Billing.Enforcement, "strict") {
+			missingPolicy = entitlements.MissingDenied
+		}
+		srv.SetEntitlements(entitlements.NewWithOptions(entitlementStore, entitlements.ServiceOptions{Missing: missingPolicy}), entitlementStore)
+		if strings.EqualFold(cfg.Billing.Provider, "stripe") {
+			if strings.TrimSpace(cfg.Billing.StripeWebhookSecret) == "" {
+				return fmt.Errorf("billing.stripe_webhook_secret is required when billing.provider=stripe")
+			}
+			if strings.TrimSpace(cfg.Billing.StripeSecretKey) != "" {
+				srv.SetBillingSessions(&entitlements.StripeClient{SecretKey: cfg.Billing.StripeSecretKey})
+			}
+			if strings.EqualFold(cfg.Billing.Enforcement, "strict") {
+				plan := strings.TrimSpace(cfg.Billing.DefaultPlan)
+				if strings.TrimSpace(cfg.Billing.StripeSecretKey) == "" || plan == "" || strings.TrimSpace(cfg.Billing.StripePrices[plan]) == "" ||
+					strings.TrimSpace(cfg.Billing.CheckoutSuccessURL) == "" || strings.TrimSpace(cfg.Billing.CheckoutCancelURL) == "" || strings.TrimSpace(cfg.Billing.PortalReturnURL) == "" {
+					return fmt.Errorf("strict Stripe billing requires stripe_secret_key, default_plan with a stripe_prices entry, checkout URLs, and portal_return_url")
+				}
+			}
 		}
 	}
 

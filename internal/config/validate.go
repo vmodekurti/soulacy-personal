@@ -117,6 +117,7 @@ func (c *Config) Validate() error {
 	}
 	dur("queue.nats_ack_wait", c.Queue.NATSAckWait)
 	dur("voice.timeout", c.Voice.Timeout)
+	dur("billing.webhook_tolerance", c.Billing.WebhookTolerance)
 	if c.Runtime.ToolTimeout != "" && c.Runtime.Timeouts.Tool != "" && c.Runtime.ToolTimeout != c.Runtime.Timeouts.Tool {
 		errs = append(errs, fmt.Errorf("runtime.tool_timeout (%s) must match runtime.timeouts.tool (%s); prefer runtime.timeouts.tool", c.Runtime.ToolTimeout, c.Runtime.Timeouts.Tool))
 	}
@@ -137,6 +138,40 @@ func (c *Config) Validate() error {
 	case "", "openai", "sidecar":
 	default:
 		errs = append(errs, fmt.Errorf("voice.provider: unsupported value %q", c.Voice.Provider))
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Billing.Enforcement)) {
+	case "", "migration", "strict":
+	default:
+		errs = append(errs, fmt.Errorf("billing.enforcement: unsupported value %q", c.Billing.Enforcement))
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Billing.Provider)) {
+	case "", "stripe":
+	default:
+		errs = append(errs, fmt.Errorf("billing.provider: unsupported value %q", c.Billing.Provider))
+	}
+	if strings.EqualFold(c.Billing.Provider, "stripe") {
+		if strings.TrimSpace(c.Billing.StripeWebhookSecret) == "" {
+			errs = append(errs, fmt.Errorf("billing.stripe_webhook_secret is required when billing.provider=stripe"))
+		}
+		if strings.EqualFold(c.Billing.Enforcement, "strict") {
+			plan := strings.TrimSpace(c.Billing.DefaultPlan)
+			if strings.TrimSpace(c.Billing.StripeSecretKey) == "" {
+				errs = append(errs, fmt.Errorf("billing.stripe_secret_key is required for strict Stripe billing"))
+			}
+			if plan == "" || strings.TrimSpace(c.Billing.StripePrices[plan]) == "" {
+				errs = append(errs, fmt.Errorf("billing.default_plan must name a configured billing.stripe_prices entry"))
+			}
+			for field, raw := range map[string]string{
+				"billing.checkout_success_url": c.Billing.CheckoutSuccessURL,
+				"billing.checkout_cancel_url":  c.Billing.CheckoutCancelURL,
+				"billing.portal_return_url":    c.Billing.PortalReturnURL,
+			} {
+				parsed, err := url.Parse(strings.TrimSpace(raw))
+				if err != nil || parsed.Host == "" || parsed.User != nil || parsed.Scheme != "https" {
+					errs = append(errs, fmt.Errorf("%s must be an absolute HTTPS URL", field))
+				}
+			}
+		}
 	}
 
 	// --- Runtime numeric bounds ---

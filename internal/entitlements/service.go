@@ -34,12 +34,35 @@ type Store interface {
 
 var ErrNotFound = errors.New("entitlement not found")
 
-type Service struct{ store Store }
+type MissingPolicy string
 
-func New(store Store) *Service { return &Service{store: store} }
+const (
+	MissingAllowed MissingPolicy = "allow"
+	MissingDenied  MissingPolicy = "deny"
+)
+
+type ServiceOptions struct{ Missing MissingPolicy }
+
+type Service struct {
+	store   Store
+	missing MissingPolicy
+}
+
+func New(store Store) *Service { return NewWithOptions(store, ServiceOptions{}) }
+
+func NewWithOptions(store Store, opts ServiceOptions) *Service {
+	if opts.Missing == "" {
+		opts.Missing = MissingAllowed
+	}
+	return &Service{store: store, missing: opts.Missing}
+}
+
 func (s *Service) Allowed(ctx context.Context, workspaceID, capability string) (bool, string, error) {
 	e, err := s.store.Get(ctx, workspaceID)
 	if errors.Is(err, ErrNotFound) {
+		if s.missing == MissingDenied {
+			return false, "subscription required", nil
+		}
 		return true, "unmetered", nil
 	}
 	if err != nil {

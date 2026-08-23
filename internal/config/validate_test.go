@@ -213,3 +213,22 @@ func TestValidateJWTSessionTTLBounds(t *testing.T) {
 		t.Fatalf("unsafe TTLs accepted: %v", err)
 	}
 }
+
+func TestValidateStrictStripeBilling(t *testing.T) {
+	c := validConfig()
+	c.Billing.Provider = "stripe"
+	c.Billing.Enforcement = "strict"
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "stripe_secret_key") || !strings.Contains(err.Error(), "default_plan") {
+		t.Fatalf("incomplete strict billing was accepted: %v", err)
+	}
+	c.Billing.StripeSecretKey = "sk_test"
+	c.Billing.StripeWebhookSecret = "whsec_test"
+	c.Billing.DefaultPlan = "team"
+	c.Billing.StripePrices = map[string]string{"team": "price_team"}
+	c.Billing.CheckoutSuccessURL = "https://app.example/#workspace-admin"
+	c.Billing.CheckoutCancelURL = "https://app.example/#workspace-admin"
+	c.Billing.PortalReturnURL = "https://app.example/#workspace-admin"
+	if err := c.Validate(); err != nil {
+		t.Fatalf("complete strict billing rejected: %v", err)
+	}
+}

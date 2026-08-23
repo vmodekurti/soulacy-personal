@@ -52,6 +52,8 @@ var selfAuthorizingHandlers = map[string]string{
 	"handleRemoveWorkspaceMember":     "membershipAdmin(c) on the freshly resolved role, plus ErrLastOwner",
 	"handleCreateWorkspaceInvitation": "membershipAdmin(c) plus tenancy.CanAdministerRole, on the freshly resolved role",
 	"handleCreateWorkspace":           "requires the freshly resolved owner role and a human principal; the store rechecks active ownership transactionally",
+	"handleBillingCheckout":           "billingOwner(c) requires the freshly resolved workspace owner role and a human principal",
+	"handleBillingPortal":             "billingOwner(c) requires the freshly resolved workspace owner role and a human principal",
 	// Selecting a workspace is not privileged: it resolves membership and
 	// refuses with a 404 when there is none, so it grants nothing an
 	// authorization check would need to narrow.

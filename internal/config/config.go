@@ -392,10 +392,16 @@ type CredentialsConfig struct {
 // BillingConfig configures customer billing. Authorization code consumes the
 // provider-independent entitlement service; Stripe is only an event source.
 type BillingConfig struct {
-	Provider            string `mapstructure:"provider"`
-	StripeSecretKey     string `mapstructure:"stripe_secret_key"`
-	StripeWebhookSecret string `mapstructure:"stripe_webhook_secret"`
-	WebhookTolerance    string `mapstructure:"webhook_tolerance"`
+	Provider            string            `mapstructure:"provider"`
+	Enforcement         string            `mapstructure:"enforcement"` // "migration" (missing row allowed) | "strict"
+	StripeSecretKey     string            `mapstructure:"stripe_secret_key"`
+	StripeWebhookSecret string            `mapstructure:"stripe_webhook_secret"`
+	WebhookTolerance    string            `mapstructure:"webhook_tolerance"`
+	DefaultPlan         string            `mapstructure:"default_plan"`
+	StripePrices        map[string]string `mapstructure:"stripe_prices"`
+	CheckoutSuccessURL  string            `mapstructure:"checkout_success_url"`
+	CheckoutCancelURL   string            `mapstructure:"checkout_cancel_url"`
+	PortalReturnURL     string            `mapstructure:"portal_return_url"`
 }
 
 type ServerConfig struct {
@@ -1014,6 +1020,8 @@ func Load(cfgPath string) (*Config, string, error) {
 	v.SetDefault("server.port", 1947)
 	v.SetDefault("server.gui_enabled", true)
 	v.SetDefault("deployment.mode", DeploymentModePersonal)
+	v.SetDefault("billing.enforcement", "migration")
+	v.SetDefault("billing.webhook_tolerance", "5m")
 	v.SetDefault("runtime.max_concurrent_sessions", 100)
 	v.SetDefault("runtime.default_max_turns", 20)
 	v.SetDefault("runtime.max_turns_ceiling", 50)

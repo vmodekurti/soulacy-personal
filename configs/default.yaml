@@ -107,6 +107,23 @@ costs:
       input_per_mtok: 0
       output_per_mtok: 0
 
+# Customer subscription enforcement. Keep migration mode while importing
+# existing workspaces; use strict for public SaaS so a missing entitlement is
+# denied rather than treated as an unmetered legacy workspace.
+billing:
+  provider: ""              # stripe | "" (operator-managed/unconfigured)
+  enforcement: migration    # migration | strict
+  stripe_secret_key: ""     # Prefer SOULACY_BILLING_STRIPE_SECRET_KEY
+  stripe_webhook_secret: ""
+  webhook_tolerance: "5m"
+  default_plan: team
+  stripe_prices:
+    team: ""                # e.g. price_...
+    scale: ""
+  checkout_success_url: ""
+  checkout_cancel_url: ""
+  portal_return_url: ""
+
 rate_limit:
   enabled: true
   per_user_rpm: 60

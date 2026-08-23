@@ -70,8 +70,17 @@ documented re-encryption/retirement step completes.
 ```yaml
 billing:
   provider: stripe
+  enforcement: strict
+  stripe_secret_key: ${STRIPE_SECRET_KEY}
   stripe_webhook_secret: ${STRIPE_WEBHOOK_SECRET}
   webhook_tolerance: 5m
+  default_plan: team
+  stripe_prices:
+    team: price_replace_me
+    scale: price_replace_me
+  checkout_success_url: https://app.example.com/#workspace-admin
+  checkout_cancel_url: https://app.example.com/#workspace-admin
+  portal_return_url: https://app.example.com/#workspace-admin
 ```
 
 Point Stripe at `POST /webhooks/stripe`. The raw body is HMAC verified, stale
@@ -81,7 +90,18 @@ entitlement service whether the workspace may mutate or execute. Payment
 failure and subscription deletion block writes/runs immediately while reads
 remain available for diagnosis and remediation. A missing entitlement is
 treated as an unmetered migration state; operators should reconcile all
-production workspaces before enabling paid enforcement.
+production workspaces before changing `billing.enforcement` from `migration`
+to `strict`.
+
+Workspace owners see subscription state under **Workspace settings → Plan &
+billing**. `POST /api/v1/billing/checkout` creates a hosted Stripe Checkout
+session using the configured plan-to-price allowlist; clients cannot submit an
+arbitrary Stripe price. `POST /api/v1/billing/portal` creates a short-lived
+customer-portal session for the customer ID already bound to that workspace.
+Both operations require the freshly resolved human owner role, use Stripe
+idempotency keys, and remain reachable while a workspace is past due so the
+owner can remediate payment. The URLs returned by Stripe are short-lived and
+are never persisted by Soulacy.
 
 ## Release gates
 

@@ -95,3 +95,15 @@ func TestUnknownStripeEventCannotGrantAccess(t *testing.T) {
 		t.Fatal("unrecognized Stripe event changed entitlements")
 	}
 }
+
+func TestMissingEntitlementPolicy(t *testing.T) {
+	store := &memoryStore{}
+	allowed, reason, err := New(store).Allowed(context.Background(), "ws_new", CapabilityRuns)
+	if err != nil || !allowed || reason != "unmetered" {
+		t.Fatalf("migration policy = (%v, %q, %v), want allowed unmetered", allowed, reason, err)
+	}
+	allowed, reason, err = NewWithOptions(store, ServiceOptions{Missing: MissingDenied}).Allowed(context.Background(), "ws_new", CapabilityRuns)
+	if err != nil || allowed || reason != "subscription required" {
+		t.Fatalf("strict policy = (%v, %q, %v), want denied subscription required", allowed, reason, err)
+	}
+}
