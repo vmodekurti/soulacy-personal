@@ -613,7 +613,8 @@ func RetentionDuration(raw string, fallback time.Duration) time.Duration {
 	return d
 }
 
-// SandboxConfig is the YAML face of internal/sandbox.Limits.
+// SandboxConfig controls the disposable container boundary and the explicit
+// Personal-only POSIX compatibility wrapper.
 type SandboxConfig struct {
 	Enabled            bool     `mapstructure:"enabled"`
 	Mode               string   `mapstructure:"mode"`  // docker (default) | unsandboxed

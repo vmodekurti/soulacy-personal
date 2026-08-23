@@ -475,6 +475,33 @@ func (e *Engine) runPythonToolOnce(tctx, auditCtx context.Context, def *agent.De
 		return strings.TrimSpace(out), nil
 	}
 
+	// The default Personal configuration uses the same disposable OCI boundary
+	// as privileged builtins. Team/Scale returned through the mandatory worker
+	// branch above; this closes the last default path that could otherwise run
+	// tenant-authored Python beside the gateway with only POSIX rlimits.
+	if e.privilegedRunner != nil && e.privilegedRunner.Mode() == "docker" {
+		workDir, wdErr := e.toolWorkDir(tctx)
+		if wdErr != nil {
+			return "", wdErr
+		}
+		pythonBin := filepath.Base(strings.TrimSpace(e.pythonBin))
+		if pythonBin == "" || pythonBin == "." {
+			pythonBin = "python3"
+		}
+		tstart := time.Now()
+		out, runErr := e.runPrivilegedCommand(tctx, PrivilegedCommand{
+			Argv:       []string{pythonBin, "-c", script},
+			WorkingDir: workDir,
+			Env:        sandbox.FilteredEnv(os.Environ(), def.Env),
+			Stdin:      argsJSON,
+		}, 0)
+		e.logAudit(auditCtx, def, call, out, tstart, false, runErr)
+		if runErr != nil {
+			return "", fmt.Errorf("tool %q (docker sandbox): %w", call.Name, runErr)
+		}
+		return strings.TrimSpace(out), nil
+	}
+
 	// PRODUCTION_AUDIT → F1 (2026-05-27): wrap the python invocation in
 	// the soulacy __exec-sandbox subcommand to apply CPU/memory/FD/file
 	// caps before execve. When sandboxing is disabled OR we couldn't

@@ -1282,9 +1282,9 @@ func (a *App) wireEngine(d engineDeps) *runtime.Engine {
 		})
 	}
 
-	// Privileged builtins use a mandatory, fail-closed isolation backend. The
-	// legacy rlimit wrapper remains for ordinary agent Python tools; it is not
-	// treated as a security boundary.
+	// The disposable runner is shared by privileged builtins and ordinary agent
+	// Python whenever mode=docker. The legacy rlimit wrapper is reachable only
+	// through Personal mode's explicit unsandboxed compatibility setting.
 	sbx := cfg.Runtime.Sandbox
 	limits := sandbox.Limits{Enabled: true, CPUSeconds: sbx.CPUSeconds, MemoryMB: sbx.MemoryMB, OpenFiles: sbx.OpenFiles, FileSizeMB: sbx.FileSizeMB}
 	isolation, isolationReason := privilegedIsolationFor(sbx.Enabled, sbx.Mode, cfg.DeploymentMode())

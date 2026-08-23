@@ -21,6 +21,7 @@ type PrivilegedCommand struct {
 	Argv       []string
 	WorkingDir string
 	Env        []string
+	Stdin      []byte
 
 	// Workspace is the ONLY host tree the runner may expose to the command.
 	// MU-021: it is stamped by runPrivilegedCommand from the run's workspace,
@@ -60,6 +61,7 @@ func (HostPrivilegedRunner) Run(ctx context.Context, req PrivilegedCommand) (str
 	}
 	cmd := exec.CommandContext(ctx, req.Argv[0], req.Argv[1:]...)
 	cmd.Dir, cmd.Env = req.WorkingDir, req.Env
+	cmd.Stdin = bytes.NewReader(req.Stdin)
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	err := cmd.Run()
@@ -236,6 +238,7 @@ func (r DockerPrivilegedRunner) Run(ctx context.Context, req PrivilegedCommand) 
 		binary = "docker"
 	}
 	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd.Stdin = bytes.NewReader(req.Stdin)
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := cmd.Run(); err != nil {

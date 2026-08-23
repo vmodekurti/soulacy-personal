@@ -225,7 +225,7 @@ production-assurance:
 ## does not execute is documentation: any of those suites could rot, or start
 ## passing for the wrong reason, and the gate would stay green.
 security:
-	go test ./internal/runtime/ -run 'TestIsolationEscape|TestNoisyNeighbour' -race -count=1 -v
+	go test ./internal/runtime/ -run 'TestIsolationEscape|TestNoisyNeighbour|TestPersonalPythonUsesDisposableContainerByDefault|TestMultiUserPython' -race -count=1 -v
 	go test ./internal/releasegate/ -count=1 -v
 	go test -race -count=1 \
 		./internal/app/ \

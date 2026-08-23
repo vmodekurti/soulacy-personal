@@ -68,11 +68,11 @@ signature-verified execution image. Privileged built-ins run in a new
 read-only, capability-free, unnetworked container per call. Startup refuses a
 multi-user configuration that does not provide these boundaries.
 
-Personal mode can instead wrap local subprocesses with the hidden
-`soulacy __exec-sandbox` runner, which applies resource limits for CPU, memory,
-open files, and single-file output size. This compatibility guard limits
-resource exhaustion but is not a filesystem, network, user, or kernel
-isolation boundary.
+Personal mode uses the same disposable Docker boundary by default. Selecting
+the explicit Personal-only `runtime.sandbox.mode: unsandboxed` escape hatch
+instead enables the hidden `soulacy __exec-sandbox` compatibility runner. That
+runner applies resource limits but is not a filesystem, network, user, or
+kernel isolation boundary.
 
 Recommended hardening:
 

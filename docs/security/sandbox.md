@@ -3,11 +3,12 @@
 Soulacy uses two different protections. They are intentionally named here so
 operators do not mistake resource limits for a security boundary.
 
-## Privileged builtins: disposable container boundary
+## Local execution: disposable container boundary
 
-`shell_exec`, `run_script`, `python_eval`, `install_library`, `write_file`, and
-`download_file` all pass through one privileged-tool chokepoint. With the
-shipped configuration, command execution uses a new Docker container per call:
+Ordinary agent Python plus `shell_exec`, `run_script`, `python_eval`,
+`install_library`, `write_file`, and `download_file` pass through the isolated
+execution chokepoints. With the shipped configuration, command execution uses
+a new Docker container per call:
 
 - no network (`--network none`), including no cloud metadata endpoint;
 - read-only container root, all Linux capabilities dropped, and
@@ -62,8 +63,9 @@ egress network and an authenticated proxy; the proxy is responsible for
 enforcing `allowed_egress_hosts`, DNS policy, byte limits, and audit records.
 Direct bridge networking without a proxy is rejected in Team and Scale.
 
-Personal mode retains process and pool executors for local compatibility. They
-are not a tenant security boundary.
+Personal mode retains the POSIX process wrapper only behind the explicit
+`runtime.sandbox.mode: unsandboxed` compatibility escape hatch. It is not a
+tenant security boundary and is never permitted in Team or Scale.
 
 On macOS `RLIMIT_AS` is advisory; on non-Unix systems the rlimit wrapper is a
 no-op. These limitations do not weaken the Docker boundary for privileged

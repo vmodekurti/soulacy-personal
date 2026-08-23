@@ -74,9 +74,10 @@ run in a digest-pinned, signature-verified container under a hardened OCI
 runtime. The gateway refuses local fallback. Privileged built-ins use a fresh
 read-only, unnetworked container for each call.
 
-Personal mode uses a local compatibility guard: the Soulacy binary re-execs
-itself as a hidden wrapper that applies syscall-level rlimits before running
-the script. Default caps:
+Personal mode also uses a disposable Docker container by default. Only the
+explicit Personal-only `runtime.sandbox.mode: unsandboxed` escape hatch uses
+the local compatibility guard, where Soulacy re-execs itself as a hidden
+wrapper that applies syscall-level rlimits. Default caps for that guard:
 
 | Limit | Default |
 |-------|---------|

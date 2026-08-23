@@ -1,7 +1,7 @@
-// Package sandbox supplies the local-process compatibility guard used only by
-// Personal deployments. It is deliberately not Soulacy's SaaS security
-// boundary: Team and Scale validation requires the remote worker executor for
-// ordinary tools and disposable hardened OCI containers for privileged tools.
+// Package sandbox supplies the local-process compatibility guard reachable
+// only through Personal mode's explicit unsandboxed setting. It is deliberately
+// not Soulacy's security boundary: default Personal execution uses disposable
+// containers, while Team and Scale require the remote hardened OCI worker.
 //
 // SCOPE — what this package guarantees and, just as importantly, what it does
 // NOT. It is a resource-exhaustion guard, NOT a security boundary:

@@ -26,6 +26,44 @@ func (r *recordingExecutor) Run(_ context.Context, _, _, inline string, args []b
 }
 func (*recordingExecutor) Close() error { return nil }
 
+type recordingDockerRunner struct {
+	calls int
+	req   PrivilegedCommand
+	out   string
+}
+
+func (*recordingDockerRunner) Mode() string { return "docker" }
+func (r *recordingDockerRunner) Run(_ context.Context, req PrivilegedCommand) (string, error) {
+	r.calls++
+	r.req = req
+	return r.out, nil
+}
+
+func TestPersonalPythonUsesDisposableContainerByDefault(t *testing.T) {
+	e := newMinimalEngine(t)
+	runner := &recordingDockerRunner{out: "container-result"}
+	e.SetPrivilegedCommandRunner(runner)
+	def := &agent.Definition{ID: "personal-agent", Tools: []agent.ToolDef{{
+		Name: "calculate", Inline: "print('host execution must never reach this')",
+	}}}
+
+	out, err := e.runTool(context.Background(), def, "session", message.ToolCall{
+		ID: "call", Name: "calculate", Arguments: map[string]any{"n": 7},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "container-result" || runner.calls != 1 {
+		t.Fatalf("container dispatch: out=%q calls=%d", out, runner.calls)
+	}
+	if len(runner.req.Argv) < 3 || runner.req.Argv[1] != "-c" || !strings.Contains(runner.req.Argv[2], "host execution") {
+		t.Fatalf("container argv=%q", runner.req.Argv)
+	}
+	if !strings.Contains(string(runner.req.Stdin), `"n":7`) {
+		t.Fatalf("container stdin=%s", runner.req.Stdin)
+	}
+}
+
 func TestMultiUserPythonAlwaysUsesIsolatedExecutor(t *testing.T) {
 	e := newMinimalEngine(t)
 	worker := &recordingExecutor{out: "worker-result"}
