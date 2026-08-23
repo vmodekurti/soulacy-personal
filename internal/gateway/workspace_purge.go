@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 
+	"github.com/soulacy/soulacy/internal/artifactstore"
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/workspacepurge"
 )
@@ -29,6 +30,16 @@ import (
 // into. Everything comes from the server's own wiring.
 func (s *Server) workspacePurgers() []workspacepurge.Purger {
 	var purgers []workspacepurge.Purger
+	if s.artifactObjects != nil {
+		objects := s.artifactObjects
+		purgers = append(purgers, workspacepurge.Purger{
+			Resource: "artifacts",
+			Purge: func(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+				rows, err := objects.DeletePrefix(ctx, artifactstore.WorkspacePrefix(workspaceID))
+				return workspacepurge.Removed{Rows: rows, Note: "shared artifact objects"}, err
+			},
+		})
+	}
 
 	if store, ok := s.actions.(interface {
 		PurgeWorkspace(context.Context, string) (workspacepurge.Removed, error)

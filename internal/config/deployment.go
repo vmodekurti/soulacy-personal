@@ -198,15 +198,8 @@ func (c *Config) deploymentIssueGroups() ([]string, []string) {
 			infrastructureIssues = append(infrastructureIssues, "rate_limit: scale deployments require an enabled Redis-backed per-user RPM limit shared by every gateway replica")
 		}
 		if strings.TrimSpace(c.Deployment.SharedArtifactStore) == "" {
-			// Still required, and the message now says what setting it does
-			// and does not buy. No runtime code reads this value yet — it is
-			// recorded intent, not a wired dependency — and an operator who
-			// configured it had every reason to believe artifacts had become
-			// shared. See ScaleReplicationBlockers.
 			infrastructureIssues = append(infrastructureIssues,
-				"deployment.shared_artifact_store: required for scale deployments. Note that it is "+
-					"currently RECORDED and not yet used: artifacts still live on each replica's own "+
-					"disk. See the startup report of scale replication blockers")
+				"deployment.shared_artifact_store: scale deployments require a shared s3:// or file:// object root for artifacts")
 		}
 	}
 	return hardIssues, infrastructureIssues

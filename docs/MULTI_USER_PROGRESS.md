@@ -4888,8 +4888,9 @@ Outside scale it still says revert. Inside scale it says the honest thing: the
 queue is required, it is unvetted, exercise failover or supply your own with
 `queue.backend: external`.
 
-`deployment.shared_artifact_store` stays required and its message now says the
-value is **recorded and not yet used**.
+At that milestone `deployment.shared_artifact_store` stayed required but was
+only recorded. It is now wired: completed chat and workboard artifacts use
+opaque references in the shared store and workspace purge removes their prefix.
 
 ### 5. The unsafe-prerequisites waiver waived the check, not the dependency
 

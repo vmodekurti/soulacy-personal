@@ -219,6 +219,7 @@ var Tables = []Table{
 var Repositories = []Repository{
 	{Source: "internal/agentmemory/store.go", Resource: "memory", Class: UserPrivate, ScopeKey: "workspace_id,agent_id", Isolation: Scoped, IsolationTest: "internal/agentmemory/isolation_test.go"},
 	{Source: "internal/approvals/store.go", Resource: "approvals", Class: WorkspaceOwned, ScopeKey: "workspace_id + required permission", Isolation: Scoped, IsolationTest: "internal/approvals/store_test.go"},
+	{Source: "internal/artifactstore/store.go", Resource: "artifacts", Class: WorkspaceOwned, ScopeKey: "workspaces/<workspace_id>/ object prefix", Isolation: Scoped, IsolationTest: "internal/artifactstore/store_test.go"},
 	{Source: "internal/auth/apikeys/postgres.go", Resource: "api-keys", Class: UserPrivate, ScopeKey: "workspace_id,subject_id", Isolation: Scoped, IsolationTest: "internal/auth/apikeys/postgres_test.go"},
 	{Source: "internal/auth/apikeys/store.go", Resource: "api-keys", Class: UserPrivate, ScopeKey: "workspace_id,subject_id", Isolation: Scoped, IsolationTest: "internal/auth/apikeys/isolation_test.go"},
 	{Source: "internal/auth/jwt.go", Resource: "credentials", Class: UserPrivate, ScopeKey: "workspace_id,user_id", Isolation: Scoped, IsolationTest: "internal/auth/token_tenancy_test.go"},

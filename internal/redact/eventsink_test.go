@@ -55,9 +55,10 @@ var eventReaders = map[string]string{
 	"internal/runtime/engine.go:Emit":           "the no-op sink discards the event",
 
 	// ── authorization and routing: they read metadata, never the payload.
-	"internal/gateway/session_auth.go:authorizeEvent":       "compares workspace and session identity; never touches the payload",
-	"internal/gateway/session_activity.go:Note":             "bumps a heartbeat keyed by session; never touches the payload",
-	"internal/gateway/runledger.go:runLedgerIsBrowserEvent": "tests the event type string",
+	"internal/gateway/session_auth.go:authorizeEvent":                  "compares workspace and session identity; never touches the payload",
+	"internal/gateway/session_activity.go:Note":                        "bumps a heartbeat keyed by session; never touches the payload",
+	"internal/gateway/runledger.go:runLedgerIsBrowserEvent":            "tests the event type string",
+	"internal/gateway/workboard_artifacts.go:observeTerminalArtifacts": "tests terminal metadata and asynchronously materializes paths from the already-redacted action log; never reads this event's payload",
 
 	// ── field extractors: they pull named, non-secret fields and drop the
 	// rest, so the payload does not survive the call.

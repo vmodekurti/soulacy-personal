@@ -21,6 +21,7 @@ import (
 
 	"github.com/soulacy/soulacy/internal/actionlog"
 	"github.com/soulacy/soulacy/internal/approvals"
+	"github.com/soulacy/soulacy/internal/artifactstore"
 	"github.com/soulacy/soulacy/internal/knowledge"
 	"github.com/soulacy/soulacy/internal/mcpstore"
 	"github.com/soulacy/soulacy/internal/memory"
@@ -48,7 +49,6 @@ var notYetPurged = map[string]string{
 	"channels":    "same as mcp: configuration, not a store",
 	"webhooks":    "same as mcp: configuration, not a store",
 	"shares":      "share records are file-backed under their own root",
-	"artifacts":   "workboard_artifacts is purged with workboard; object storage is not",
 	"secrets":     "cryptographic erasure, not a DELETE — the catalog says so, and doing it as a row delete would leave the ciphertext recoverable from a backup",
 	"credentials": "revoke-then-purge across three tables, and revocation has to happen first so a credential cannot be used between the two",
 	"api-keys":    "same shape as credentials",
@@ -107,6 +107,12 @@ func TestTheWorkspacePurgeCoverageGapIsAKnownList(t *testing.T) {
 		checkpointStore:   &runtime.CheckpointStore{},
 		workspaceLayout:   wsroot.NewLayout(root),
 	}
+	objects, err := artifactstore.OpenStore(t.Context(), "file://"+filepath.Join(root, "objects"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = objects.Close() })
+	server.artifactObjects = objects
 	purgers := server.workspacePurgers()
 	if err := workspacepurge.ValidatePurgers(purgers); err != nil {
 		t.Fatalf("the registered purgers disagree with the ownership catalog: %v", err)

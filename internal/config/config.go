@@ -334,8 +334,8 @@ type DeploymentConfig struct {
 	// personal for backwards compatibility with every pre-multi-user config.
 	Mode string `mapstructure:"mode"`
 	// SharedArtifactStore is required by scale deployments. It is the durable
-	// shared artifact root (for example s3://bucket/prefix). The artifact layer
-	// consumes this value as it is migrated off node-local paths.
+	// shared artifact root (for example s3://bucket/prefix) used for completed
+	// chat and workboard outputs and workspace erasure.
 	SharedArtifactStore string `mapstructure:"shared_artifact_store"`
 	// Acknowledgements records explicit named acknowledgements for deployment
 	// compromises that have a supported degraded mode. Authentication and

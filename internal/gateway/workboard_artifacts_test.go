@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"fmt"
-	"github.com/soulacy/soulacy/internal/wsroot"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -10,7 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+
+	"github.com/soulacy/soulacy/internal/artifactstore"
 	"github.com/soulacy/soulacy/internal/workboard"
+	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/message"
 )
 
@@ -206,6 +209,35 @@ func TestRecordRunArtifacts_PersistsWithMetadata(t *testing.T) {
 	}
 }
 
+func TestRecordRunArtifacts_SharedObjectSurvivesSourceRemoval(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "shared-report.md")
+	if err := os.WriteFile(source, []byte("durable artifact"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, store, task, run := wbArtifactGateway(t, []message.Event{
+		toolCallEvent("wb-art-1", "write_file", map[string]any{"path": source}),
+	})
+	objects, err := artifactstore.OpenStore(t.Context(), "file://"+filepath.Join(t.TempDir(), "objects"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = objects.Close() })
+	s.SetArtifactStore(objects)
+	s.recordRunArtifacts(run, task)
+	list, err := store.ListArtifacts(t.Context(), wsroot.PersonalWorkspaceID, task.ID)
+	if err != nil || len(list) != 1 || !strings.HasPrefix(list[0].Path, "artifact://") {
+		t.Fatalf("shared artifact metadata = %+v, err=%v", list, err)
+	}
+	if err := os.Remove(source); err != nil {
+		t.Fatal(err)
+	}
+	status, body := gatewayRaw(t, s, "GET", fmt.Sprintf("/api/v1/workboard/artifacts/%d/download", list[0].ID), "", "")
+	if status != 200 || body != "durable artifact" {
+		t.Fatalf("shared download status=%d body=%q", status, body)
+	}
+}
+
 func TestChatArtifacts_ListAndDownload(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "chat-report.md")
@@ -232,6 +264,42 @@ func TestChatArtifacts_ListAndDownload(t *testing.T) {
 
 	status, raw := gatewayRaw(t, s, "GET", "/api/v1/chat/artifacts/download?agent_id=agent-1&session_id=chat-art-1&path="+url.QueryEscape(path), "", "")
 	if status != 200 || !strings.Contains(raw, "hello from chat") {
+		t.Fatalf("download status=%d raw=%q", status, raw)
+	}
+}
+
+func TestChatArtifacts_SharedAcrossReplicaAndSourceRemoval(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "chat-shared.txt")
+	if err := os.WriteFile(source, []byte("shared chat artifact"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	actions := &fakeTailBackend{events: []message.Event{
+		toolCallEvent("chat-shared-1", "write_file", map[string]any{"path": source}),
+	}}
+	s := newTestGateway(t, "")
+	s.actions = actions
+	s.hub = NewEventHub(zap.NewNop(), actions)
+	objects, err := artifactstore.OpenStore(t.Context(), "file://"+filepath.Join(t.TempDir(), "objects"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = objects.Close() })
+	s.SetArtifactStore(objects)
+	if err := s.materializeChatArtifacts(wsroot.PersonalWorkspaceID, "agent-1", "chat-shared-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(source); err != nil {
+		t.Fatal(err)
+	}
+	status, body := gatewayJSON(t, s, "GET", "/api/v1/chat/artifacts?agent_id=agent-1&session_id=chat-shared-1", "", "")
+	if status != 200 || body["count"].(float64) != 1 {
+		t.Fatalf("list status=%d body=%v", status, body)
+	}
+	artifact := body["artifacts"].([]any)[0].(map[string]any)
+	ref := artifact["path"].(string)
+	status, raw := gatewayRaw(t, s, "GET", "/api/v1/chat/artifacts/download?agent_id=agent-1&session_id=chat-shared-1&path="+url.QueryEscape(ref), "", "")
+	if status != 200 || raw != "shared chat artifact" {
 		t.Fatalf("download status=%d raw=%q", status, raw)
 	}
 }

@@ -18,6 +18,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/approvals"
+	"github.com/soulacy/soulacy/internal/artifactstore"
 	"github.com/soulacy/soulacy/internal/audit"
 	"github.com/soulacy/soulacy/internal/auth"
 	"github.com/soulacy/soulacy/internal/auth/apikeys"
@@ -110,6 +111,21 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) (*gateway.Server, e
 	// Created BEFORE the watcher so the watcher can wire its OnPyChange hook
 	// to the server's tool-catalog cache.
 	srv := gateway.New(cfg, cfgPath, d.engine, d.loader, d.llmRouter, d.chanReg, d.sched, d.httpAdapter, d.waAdapter, d.skillLoader, d.actionBackend, d.mcpClient, d.hub, log)
+	if raw := strings.TrimSpace(cfg.Deployment.SharedArtifactStore); raw != "" {
+		artifactCtx, artifactCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		objects, objectErr := artifactstore.OpenStore(artifactCtx, raw)
+		artifactCancel()
+		if objectErr != nil {
+			if cfg.DeploymentMode() == config.DeploymentModeScale {
+				return nil, fmt.Errorf("shared artifact store: %w", objectErr)
+			}
+			log.Warn("shared artifact store unavailable", zap.Error(objectErr))
+		} else {
+			stack.pushClose("shared-artifact-store", objects)
+			srv.SetArtifactStore(objects)
+			log.Info("shared artifact store ready", zap.String("root", raw))
+		}
+	}
 	if config.IsMultiUserMode(cfg.DeploymentMode()) {
 		srv.SetWorkspaceLayoutRoot(ws.Root)
 	}

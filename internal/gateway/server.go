@@ -51,6 +51,7 @@ import (
 
 	"github.com/soulacy/soulacy/internal/agentvalidate"
 	"github.com/soulacy/soulacy/internal/approvals"
+	"github.com/soulacy/soulacy/internal/artifactstore"
 	"github.com/soulacy/soulacy/internal/auth"
 	"github.com/soulacy/soulacy/internal/auth/apikeys"
 	"github.com/soulacy/soulacy/internal/builder"
@@ -125,12 +126,13 @@ type Server struct {
 	skillLoader runtime.SkillLoader // nil if no skills installed
 	// skillStores, when set, resolves one workspace's skill inventory and takes
 	// precedence over skillLoader. Handlers reach it through s.skillCatalog(c).
-	skillStores   *skills.Stores
-	actions       storage.ActionLogBackend // nil if action logging disabled
-	memoryStore   memory.Store
-	memoryArchive storage.MemoryBackend
-	vectorMemory  *memory.VectorStore
-	mcp           *mcp.Client // nil if no MCP servers configured; the UNSCOPED client, see mcp_scope.go
+	skillStores     *skills.Stores
+	actions         storage.ActionLogBackend // nil if action logging disabled
+	memoryStore     memory.Store
+	memoryArchive   storage.MemoryBackend
+	vectorMemory    *memory.VectorStore
+	artifactObjects artifactstore.Store
+	mcp             *mcp.Client // nil if no MCP servers configured; the UNSCOPED client, see mcp_scope.go
 	// mcpPool gives each workspace its own MCP subprocesses. When it is set,
 	// no handler may use s.mcp — a guard test enforces that, because the two
 	// fields differ only in which tenant's servers they reach.
@@ -552,6 +554,13 @@ func (s *Server) SetHistoryStore(st session.HistoryStore) {
 // SetResourceStore wires binary chat/session resources into the server.
 func (s *Server) SetResourceStore(st session.ResourceStore) {
 	s.resourceStore = st
+}
+
+func (s *Server) SetArtifactStore(st artifactstore.Store) {
+	s.artifactObjects = st
+	if st != nil && s.hub != nil {
+		s.hub.AddObserver(s.observeTerminalArtifacts)
+	}
 }
 
 // healthReporter is anything that can report its own liveness — satisfied by

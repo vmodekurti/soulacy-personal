@@ -121,9 +121,11 @@ deployment:
 
 ```
 
-`shared_artifact_store` must name storage reachable by every gateway and
-worker. Queue consumers must use durable delivery; the in-memory queue is not
-accepted in Scale mode.
+`shared_artifact_store` must name storage reachable by every gateway. Soulacy
+accepts `s3://bucket/prefix` or an absolute `file:///shared/mount` URL, uploads
+completed chat and workboard artifacts there, and deletes the workspace object
+prefix during final erasure. Queue consumers must use durable delivery; the
+in-memory queue is not accepted in Scale mode.
 
 ## Emergency unsafe acknowledgement
 
