@@ -605,6 +605,50 @@ func TestHandleExecutesToolThenSynthesizesFinalResponse(t *testing.T) {
 	}
 }
 
+func TestHandleRecoversXMLToolCallThenSynthesizesFinalResponse(t *testing.T) {
+	var toolCalls int
+	e, provider := newHandleTestEngine(t, &agent.Definition{
+		ID:           "assistant",
+		Name:         "Assistant",
+		Enabled:      true,
+		SystemPrompt: "Use tools.",
+		LLM:          agent.LLMConfig{Provider: "test", Model: "open-weight-model"},
+		MaxTurns:     3,
+		Builtins:     strListPtr("web_search"),
+	})
+	e.builtins = []BuiltinTool{{
+		Name:        "web_search",
+		Description: "Searches the web.",
+		Parameters:  map[string]any{"type": "object"},
+		Handler: func(ctx context.Context, args map[string]any) (string, error) {
+			toolCalls++
+			if args["query"] != "current weather Buffalo Grove, IL" {
+				t.Fatalf("tool args = %#v", args)
+			}
+			return "72°F and clear", nil
+		},
+	}}
+	provider.responses = []llm.CompletionResponse{
+		{Content: "<web_search>\n<query>current weather Buffalo Grove, IL</query>\n</web_search>"},
+		{Content: "It is 72°F and clear."},
+	}
+
+	reply, err := e.Handle(context.Background(), testUserMessage("assistant", "session-xml-tool", "How is the weather?"))
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if got := flattenParts(reply.Parts); got != "It is 72°F and clear." {
+		t.Fatalf("reply = %q", got)
+	}
+	if toolCalls != 1 {
+		t.Fatalf("tool calls = %d, want 1", toolCalls)
+	}
+	reqs := provider.requestsSnapshot()
+	if len(reqs) != 2 || !chatMessagesContain(reqs[1].Messages, "tool", "72°F and clear") {
+		t.Fatalf("follow-up request missing recovered tool result: %#v", reqs)
+	}
+}
+
 func TestHandleDuplicateToolCallRunsToolOnlyOnceThenSynthesizes(t *testing.T) {
 	var toolCalls int
 	e, provider := newHandleTestEngine(t, &agent.Definition{
