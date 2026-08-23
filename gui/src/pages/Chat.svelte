@@ -13,7 +13,7 @@
   import { modelAvailability } from '../lib/agentmodel.js'
   import {
     filterThreads, suggestedPrompts, buildOverrides,
-    lastUserText, truncateForRerun, isLongOutput,
+    lastUserText, truncateForRerun, isLongOutput, isHistoricalFailureResolved,
   } from '../lib/chatactions.js'
   import {
     nextVoiceState, realtimeCallURL, classifyRealtimeEvent,
@@ -2227,7 +2227,8 @@
         {#each visibleMessages as msg, mi}
           {@const k = msgKey(mi)}
           {@const long = msg.role === 'assistant' && isLongOutput(msg.text) && !expanded[k]}
-          <div class="msg-row" class:user={msg.role==='user'} class:sys={msg.role==='system'}>
+          {@const resolvedFailure = isHistoricalFailureResolved(visibleMessages, mi)}
+          <div class="msg-row" class:user={msg.role==='user'} class:sys={msg.role==='system'} class:resolved={resolvedFailure}>
             <div class="bubble">
               {#if msg.role === 'user' && editingMsg === mi}
                 <textarea class="edit-area" bind:value={editText}
@@ -2261,6 +2262,15 @@
                       {/each}
                     </div>
                   {/if}
+                {:else if msg.role === 'system'}
+                  <div class="failure-state">
+                    <span class="failure-state-icon">{resolvedFailure ? '✓' : '!'}</span>
+                    <span>{resolvedFailure ? 'Earlier turn failed · resolved by a later reply' : 'This turn failed'}</span>
+                  </div>
+                  <details class="failure-detail" open={!resolvedFailure}>
+                    <summary>Technical details</summary>
+                    <div class="btext">{msg.text}</div>
+                  </details>
                 {:else}
                   <div class="btext markdown-body" class:clamped={long} use:richRenderer={msg.text}>{@html parseMarkdown(msg.text)}</div>
                   {#if msg.role === 'assistant' && isLongOutput(msg.text)}
@@ -2297,7 +2307,7 @@
                   {/each}
                 </div>
               {/if}
-              {#if msg.thinking}
+              {#if msg.thinking && !resolvedFailure}
                 <div class="thinking" class:open={msg.thinking.open}>
                   <button class="thinking-head" type="button" on:click={() => toggleThinking(msg.thinking)}>
                     <span class="chev">{msg.thinking.open ? '▾' : '▸'}</span>
@@ -2945,6 +2955,12 @@
     color: #fff; border-bottom-left-radius: 12px; border-bottom-right-radius: 3px;
   }
   .sys .bubble  { background: rgba(240,96,96,.1); border-color: rgba(240,96,96,.3); color: #f06060; }
+  .sys.resolved .bubble { background: rgba(70,196,151,.08); border-color: rgba(70,196,151,.24); color: #91d9bd; }
+  .failure-state { display: flex; align-items: center; gap: .45rem; font-size: .8rem; font-weight: 650; }
+  .failure-state-icon { display: inline-flex; width: 1.15rem; height: 1.15rem; align-items: center; justify-content: center; border: 1px solid currentColor; border-radius: 999px; font-size: .68rem; }
+  .failure-detail { margin-top: .2rem; color: inherit; opacity: .88; }
+  .failure-detail summary { cursor: pointer; font-size: .72rem; user-select: none; }
+  .failure-detail .btext { margin-top: .45rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .72rem; }
 
   .btext { font-size: .88rem; white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
   .msg-parts { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }

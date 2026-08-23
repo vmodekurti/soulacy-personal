@@ -771,6 +771,17 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 			}
 			resp.Content = sb.String()
 		}
+		// A few open-weight models advertise native tool calling but emit a
+		// compact XML invocation in message content instead of the provider's
+		// typed tool_calls field. Recover only a pure, whole-response invocation
+		// of a tool that was actually offered. The recovered call then follows the
+		// ordinary RBAC, intent, confirmation, isolation and audit path below.
+		if len(resp.ToolCalls) == 0 {
+			if recovered, ok := recoverXMLToolCalls(resp.Content, tools); ok {
+				resp.Content = ""
+				resp.ToolCalls = recovered
+			}
+		}
 		// Do not let provider quirks change the operator's install target or
 		// package type. Some OpenAI-compatible models ignore tool_choice, call
 		// fetch_url first, or send kind=auto even after the user explicitly says

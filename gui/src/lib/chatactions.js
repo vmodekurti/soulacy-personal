@@ -102,3 +102,12 @@ export function isLongOutput(text, { maxChars = 1400, maxLines = 24 } = {}) {
   for (let i = 0; i < text.length; i++) if (text[i] === '\n') lines++
   return lines > maxLines
 }
+
+// A system message is the Chat UI's record of a failed turn. Once a later
+// assistant reply exists in the same thread, that failure is historical rather
+// than the conversation's current state. Keep the diagnostic available without
+// continuing to present it as an active outage.
+export function isHistoricalFailureResolved(messages, index) {
+  if (!Array.isArray(messages) || messages[index]?.role !== 'system') return false
+  return messages.slice(index + 1).some((message) => message?.role === 'assistant')
+}

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   filterThreads, suggestedPrompts, buildOverrides,
-  lastUserText, truncateForRerun, isLongOutput,
+  lastUserText, truncateForRerun, isLongOutput, isHistoricalFailureResolved,
 } from './chatactions.js'
 
 const name = (id) => ({ a: 'Alpha', b: 'Bravo' }[id] || id)
@@ -73,5 +73,25 @@ describe('isLongOutput', () => {
     expect(isLongOutput('x'.repeat(2000))).toBe(true)
     expect(isLongOutput(Array(40).fill('line').join('\n'))).toBe(true)
     expect(isLongOutput('short')).toBe(false)
+  })
+})
+
+describe('isHistoricalFailureResolved', () => {
+  const messages = [
+    { role: 'user', text: 'first try' },
+    { role: 'system', text: 'backend failed' },
+    { role: 'user', text: 'retry' },
+    { role: 'assistant', text: 'success' },
+    { role: 'system', text: 'new failure' },
+  ]
+
+  it('marks only failures followed by a successful assistant turn as historical', () => {
+    expect(isHistoricalFailureResolved(messages, 1)).toBe(true)
+    expect(isHistoricalFailureResolved(messages, 4)).toBe(false)
+  })
+
+  it('never classifies ordinary messages as failures', () => {
+    expect(isHistoricalFailureResolved(messages, 0)).toBe(false)
+    expect(isHistoricalFailureResolved(messages, 3)).toBe(false)
   })
 })
