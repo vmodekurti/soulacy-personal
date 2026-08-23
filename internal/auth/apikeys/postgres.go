@@ -298,3 +298,33 @@ func (s *PostgresStore) List(ctx context.Context, includeRevoked bool) ([]APIKey
 	}
 	return out, rows.Err()
 }
+
+func (s *PostgresStore) RevokeWorkspace(ctx context.Context, workspaceID string) (int64, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return 0, ErrInvalidRequest
+	}
+	result, err := s.pool.Exec(ctx, `UPDATE access_credentials
+		SET status='revoked', revoked_at=COALESCE(revoked_at,NOW())
+		WHERE status NOT IN ('revoked','deleted') AND workspace_ids @> to_jsonb($1::text)`, workspaceID)
+	if err != nil {
+		return 0, fmt.Errorf("apikeys: revoke workspace credentials: %w", err)
+	}
+	return result.RowsAffected(), nil
+}
+
+func (s *PostgresStore) PurgeWorkspace(ctx context.Context, workspaceID string) (int64, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return 0, ErrInvalidRequest
+	}
+	if _, err := s.RevokeWorkspace(ctx, workspaceID); err != nil {
+		return 0, err
+	}
+	result, err := s.pool.Exec(ctx, `DELETE FROM access_credentials
+		WHERE workspace_ids @> to_jsonb($1::text)`, workspaceID)
+	if err != nil {
+		return 0, fmt.Errorf("apikeys: purge workspace credential hashes: %w", err)
+	}
+	return result.RowsAffected(), nil
+}

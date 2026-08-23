@@ -7,6 +7,7 @@ package apikeys
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -75,6 +76,42 @@ func TestListForWorkspaceRequiresBothScopeComponents(t *testing.T) {
 		if _, err := s.ListForWorkspace(context.Background(), scope[0], scope[1], true); err == nil {
 			t.Fatalf("listing with an incomplete scope %v was allowed", scope)
 		}
+	}
+}
+
+func TestPurgeWorkspaceRevokesThenRemovesCredentialHashes(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	deletedPlaintext, deleted, err := s.CreateScoped(ctx, CreateRequest{
+		Name: "delete", Kind: KindPersonal, SubjectID: "usr_delete",
+		OrganizationID: "org_a", WorkspaceIDs: []string{"ws_delete", "ws_shared"},
+		Role: "developer", Scopes: []string{"agents:read"}, Issuer: "soulacy",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept := seedCredential(t, s, "keep", "org_a", []string{"ws_keep"})
+
+	removed, err := s.PurgeWorkspace(ctx, "ws_delete")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 1 {
+		t.Fatalf("purged %d credential hashes, want 1", removed)
+	}
+	if _, err := s.Validate(ctx, deletedPlaintext); !errors.Is(err, ErrInvalidKey) {
+		t.Fatalf("deleted workspace credential still validates: %v", err)
+	}
+	all, err := s.List(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, key := range all {
+		seen[key.ID] = true
+	}
+	if seen[deleted.ID] || !seen[kept.ID] {
+		t.Fatalf("post-purge credential set = %v", seen)
 	}
 }
 

@@ -22,6 +22,9 @@ import (
 	"github.com/soulacy/soulacy/internal/actionlog"
 	"github.com/soulacy/soulacy/internal/approvals"
 	"github.com/soulacy/soulacy/internal/artifactstore"
+	"github.com/soulacy/soulacy/internal/auth/apikeys"
+	"github.com/soulacy/soulacy/internal/channels"
+	"github.com/soulacy/soulacy/internal/credentials"
 	"github.com/soulacy/soulacy/internal/knowledge"
 	"github.com/soulacy/soulacy/internal/mcpstore"
 	"github.com/soulacy/soulacy/internal/memory"
@@ -45,14 +48,7 @@ import (
 // notYetPurged is the deletion gap, one line per class, each with what is
 // missing. An entry is a claim a reviewer can check; the absence of one is the
 // build failing.
-var notYetPurged = map[string]string{
-	"channels":    "same as mcp: configuration, not a store",
-	"webhooks":    "same as mcp: configuration, not a store",
-	"shares":      "share records are file-backed under their own root",
-	"secrets":     "cryptographic erasure, not a DELETE — the catalog says so, and doing it as a row delete would leave the ciphertext recoverable from a backup",
-	"credentials": "revoke-then-purge across three tables, and revocation has to happen first so a credential cannot be used between the two",
-	"api-keys":    "same shape as credentials",
-}
+var notYetPurged = map[string]string{}
 
 func TestTheWorkspacePurgeCoverageGapIsAKnownList(t *testing.T) {
 	actions, err := actionlog.New(t.TempDir()+"/events", t.TempDir()+"/events.db", zap.NewNop())
@@ -113,6 +109,23 @@ func TestTheWorkspacePurgeCoverageGapIsAKnownList(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = objects.Close() })
 	server.artifactObjects = objects
+	kms, err := credentials.NewLocalKMS()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vault, err := credentials.NewSQLiteVault(t.TempDir()+"/credentials.db", kms)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = vault.Close() })
+	server.credVault = vault
+	keys, err := apikeys.NewSQLiteStore(t.TempDir() + "/apikeys.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = keys.Close() })
+	server.apiKeyStore = keys
+	server.channels = channels.NewRegistry(1)
 	purgers := server.workspacePurgers()
 	if err := workspacepurge.ValidatePurgers(purgers); err != nil {
 		t.Fatalf("the registered purgers disagree with the ownership catalog: %v", err)

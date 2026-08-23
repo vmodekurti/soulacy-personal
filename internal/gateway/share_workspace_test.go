@@ -9,6 +9,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -204,5 +205,34 @@ func TestTheOwnerCanRevokeTheirShare(t *testing.T) {
 	// And the public link stops resolving.
 	if view, _ := gatewayJSON(t, s, http.MethodGet, "/api/v1/shared/"+token, "", ""); view != http.StatusNotFound {
 		t.Fatalf("a revoked share still resolved: %d", view)
+	}
+}
+
+func TestWorkspacePurgeRevokesOnlyTargetShares(t *testing.T) {
+	dir, err := sharesDir()
+	if err != nil {
+		t.Skipf("share storage unavailable: %v", err)
+	}
+	now := time.Now().UTC()
+	deletedToken, keptToken := shareToken(14), shareToken(15)
+	writeShare(t, dir, sharedSession{Token: deletedToken, Version: 2, WorkspaceID: "ws_delete", CreatedAt: now, ExpiresAt: now.Add(shareTTL)})
+	writeShare(t, dir, sharedSession{Token: keptToken, Version: 2, WorkspaceID: "ws_keep", CreatedAt: now, ExpiresAt: now.Add(shareTTL)})
+	t.Cleanup(func() {
+		_ = os.Remove(filepath.Join(dir, deletedToken+".json"))
+		_ = os.Remove(filepath.Join(dir, keptToken+".json"))
+	})
+
+	removed, err := purgeWorkspaceShares(context.Background(), "ws_delete")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed.Rows != 1 || removed.Bytes == 0 {
+		t.Fatalf("share purge = %+v, want one non-empty snapshot", removed)
+	}
+	if _, err := os.Stat(filepath.Join(dir, deletedToken+".json")); !os.IsNotExist(err) {
+		t.Fatalf("target share survived: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, keptToken+".json")); err != nil {
+		t.Fatalf("neighbouring workspace share changed: %v", err)
 	}
 }

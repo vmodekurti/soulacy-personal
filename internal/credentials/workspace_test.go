@@ -80,6 +80,42 @@ func TestSecretFromAnotherWorkspaceReadsAsAbsent(t *testing.T) {
 	}
 }
 
+func TestEraseWorkspaceDestroysKeysCiphertextAndHistoryOnlyForTarget(t *testing.T) {
+	vault, _ := newWorkspaceVault(t)
+	ctx := context.Background()
+	for workspace, value := range map[string]string{"ws_delete": "gone", "ws_keep": "present"} {
+		if err := vault.Set(ctx, workspace, "agent", "token", []byte(value)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := vault.Rotate(ctx, "ws_delete", "agent", "token"); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := vault.EraseWorkspace(ctx, "ws_delete")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed < 3 { // wrapped DEK, current credential, version history
+		t.Fatalf("erasure removed %d rows, want key, ciphertext, and history", removed)
+	}
+	if _, err := vault.Get(ctx, "ws_delete", "agent", "token"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("erased secret read = %v, want ErrNotFound", err)
+	}
+	if got, err := vault.Get(ctx, "ws_keep", "agent", "token"); err != nil || string(got) != "present" {
+		t.Fatalf("neighbouring workspace changed: %q %v", got, err)
+	}
+	for _, table := range []string{"workspace_data_keys", "credentials", "credential_versions"} {
+		var count int
+		if err := vault.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table+` WHERE workspace_id=?`, "ws_delete").Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("%s retained %d erased-workspace rows", table, count)
+		}
+	}
+}
+
 // The workspace is part of the key derivation, not just the lookup. A database
 // read that somehow escaped the workspace predicate still yields ciphertext
 // the reader cannot open — the boundary survives a query bug.

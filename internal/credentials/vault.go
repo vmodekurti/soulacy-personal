@@ -47,6 +47,13 @@ type Vault interface {
 	Close() error
 }
 
+// WorkspaceEraser is implemented by vaults that can irreversibly remove one
+// workspace without touching any neighbouring tenant. It is deliberately
+// separate from Vault so third-party implementations remain source compatible.
+type WorkspaceEraser interface {
+	EraseWorkspace(ctx context.Context, workspaceID string) (int64, error)
+}
+
 const credentialSchema = `
 CREATE TABLE IF NOT EXISTS credentials (
     workspace_id TEXT NOT NULL DEFAULT 'ws_personal',
@@ -366,6 +373,52 @@ func (v *SQLiteVault) Delete(ctx context.Context, workspaceID, agentID, key stri
 		return fmt.Errorf("credentials: delete: %w", err)
 	}
 	return nil
+}
+
+// EraseWorkspace destroys wrapped tenant keys before removing ciphertext and
+// version history. All statements share a transaction, so readers see either
+// the intact vault or no usable tenant material.
+func (v *SQLiteVault) EraseWorkspace(ctx context.Context, workspaceID string) (int64, error) {
+	if v.keys == nil {
+		return 0, errors.New("credentials: workspace cryptographic erasure requires envelope encryption")
+	}
+	workspaceID = wsroot.Normalize(workspaceID)
+	tx, err := v.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("credentials: begin workspace erasure: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	var removed int64
+	for _, statement := range []string{
+		`DELETE FROM workspace_data_keys WHERE workspace_id = ?`,
+		`DELETE FROM credential_versions WHERE workspace_id = ?`,
+		`DELETE FROM credentials WHERE workspace_id = ?`,
+	} {
+		// credential_versions is created lazily by the rotation API.
+		if strings.Contains(statement, "credential_versions") {
+			var exists int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='credential_versions'`).Scan(&exists); err != nil {
+				return 0, fmt.Errorf("credentials: inspect version store during erasure: %w", err)
+			}
+			if exists == 0 {
+				continue
+			}
+		}
+		result, err := tx.ExecContext(ctx, statement, workspaceID)
+		if err != nil {
+			return removed, fmt.Errorf("credentials: erase workspace %q: %w", workspaceID, err)
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return removed, fmt.Errorf("credentials: count workspace erasure: %w", err)
+		}
+		removed += rows
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("credentials: commit workspace erasure: %w", err)
+	}
+	return removed, nil
 }
 
 // List returns all credential keys for agentID.

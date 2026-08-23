@@ -102,6 +102,13 @@ type ScopedLister interface {
 	ListForWorkspace(ctx context.Context, organizationID, workspaceID string, includeRevoked bool) ([]APIKey, error)
 }
 
+// WorkspaceCredentialPurger is the deletion contract for managed access
+// credentials. Revocation is durable before hash removal is attempted.
+type WorkspaceCredentialPurger interface {
+	RevokeWorkspace(ctx context.Context, workspaceID string) (int64, error)
+	PurgeWorkspace(ctx context.Context, workspaceID string) (int64, error)
+}
+
 var (
 	ErrInvalidKey     = fmt.Errorf("apikeys: invalid or revoked key")
 	ErrNotFound       = fmt.Errorf("apikeys: key not found")
@@ -550,6 +557,41 @@ func (s *SQLiteStore) ListForWorkspace(ctx context.Context, organizationID, work
 		out = append(out, key)
 	}
 	return out, nil
+}
+
+func (s *SQLiteStore) RevokeWorkspace(ctx context.Context, workspaceID string) (int64, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return 0, ErrInvalidRequest
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE api_keys
+		SET status = ?, revoked_at = COALESCE(revoked_at, ?)
+		WHERE status NOT IN (?, ?) AND EXISTS (
+			SELECT 1 FROM json_each(api_keys.workspace_ids) WHERE value = ?
+		)`, StatusRevoked, time.Now().UTC(), StatusRevoked, StatusDeleted, workspaceID)
+	if err != nil {
+		return 0, fmt.Errorf("apikeys: revoke workspace credentials: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	return rows, err
+}
+
+func (s *SQLiteStore) PurgeWorkspace(ctx context.Context, workspaceID string) (int64, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return 0, ErrInvalidRequest
+	}
+	if _, err := s.RevokeWorkspace(ctx, workspaceID); err != nil {
+		return 0, err
+	}
+	result, err := s.db.ExecContext(ctx, `DELETE FROM api_keys WHERE EXISTS (
+		SELECT 1 FROM json_each(api_keys.workspace_ids) WHERE value = ?
+	)`, workspaceID)
+	if err != nil {
+		return 0, fmt.Errorf("apikeys: purge workspace credential hashes: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	return rows, err
 }
 
 // Close closes the DB connection.

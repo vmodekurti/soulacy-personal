@@ -12,6 +12,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -24,6 +25,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/soulacy/soulacy/internal/config"
+	"github.com/soulacy/soulacy/internal/workspacepurge"
 	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
@@ -271,6 +273,41 @@ func readShare(dir, token string) (sharedSession, error) {
 		return sharedSession{}, err
 	}
 	return snap, nil
+}
+
+func purgeWorkspaceShares(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+	dir, err := sharesDir()
+	if err != nil {
+		return workspacepurge.Removed{}, err
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return workspacepurge.Removed{}, err
+	}
+	workspaceID = wsroot.Normalize(workspaceID)
+	var removed workspacepurge.Removed
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return removed, err
+		}
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		token := strings.TrimSuffix(entry.Name(), ".json")
+		snap, err := readShare(dir, token)
+		if err != nil || snapWorkspace(snap) != workspaceID {
+			continue
+		}
+		if info, statErr := entry.Info(); statErr == nil {
+			removed.Bytes += info.Size()
+		}
+		if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil && !os.IsNotExist(err) {
+			return removed, err
+		}
+		removed.Rows++
+	}
+	removed.Note = "public share links revoked and snapshots purged"
+	return removed, nil
 }
 
 // shareScope is the workspace and person a share request acts for.

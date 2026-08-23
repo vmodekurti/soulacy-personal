@@ -22,6 +22,7 @@ type fakeAdapter struct {
 	inbound []message.Message
 	sent    []message.Message
 	out     chan<- message.Message
+	stopped bool
 }
 
 func (f *fakeAdapter) ID() string   { return f.id }
@@ -33,7 +34,7 @@ func (f *fakeAdapter) Start(_ context.Context, out chan<- message.Message) error
 	}
 	return nil
 }
-func (f *fakeAdapter) Stop() error { return nil }
+func (f *fakeAdapter) Stop() error { f.stopped = true; return nil }
 func (f *fakeAdapter) Send(_ context.Context, msg message.Message) error {
 	f.sent = append(f.sent, msg)
 	return nil
@@ -182,6 +183,37 @@ func TestChannelsOfListsOnlyTheWorkspacesOwnConnections(t *testing.T) {
 	}
 	if other := reg.ChannelsOf("ws_b"); len(other) != 1 || other[0] != "discord" {
 		t.Fatalf("ChannelsOf(ws_b) = %v", other)
+	}
+}
+
+func TestPurgeWorkspaceDisconnectsOnlyTenantChannels(t *testing.T) {
+	reg := newBoundRegistry(t)
+	deleted := &fakeAdapter{id: "deleted-webhook"}
+	kept := &fakeAdapter{id: "kept-slack"}
+	reg.Register(deleted)
+	reg.Register(kept)
+	if err := reg.BindWorkspace(deleted.id, "ws_delete"); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.BindWorkspace(kept.id, "ws_keep"); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := reg.PurgeWorkspace("ws_delete")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 1 || !deleted.stopped || kept.stopped {
+		t.Fatalf("purge removed=%d deletedStopped=%v keptStopped=%v", removed, deleted.stopped, kept.stopped)
+	}
+	if got := reg.ChannelsOf("ws_delete"); len(got) != 0 {
+		t.Fatalf("deleted workspace retained bindings: %v", got)
+	}
+	if got := reg.ChannelsOf("ws_keep"); len(got) != 1 || got[0] != kept.id {
+		t.Fatalf("neighbouring workspace bindings changed: %v", got)
+	}
+	if adapters := reg.Adapters(); len(adapters) != 1 || adapters[0].ID() != kept.id {
+		t.Fatalf("post-purge adapters = %v", adapters)
 	}
 }
 

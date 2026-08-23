@@ -5,7 +5,9 @@ import (
 	"path/filepath"
 
 	"github.com/soulacy/soulacy/internal/artifactstore"
+	"github.com/soulacy/soulacy/internal/auth/apikeys"
 	"github.com/soulacy/soulacy/internal/config"
+	"github.com/soulacy/soulacy/internal/credentials"
 	"github.com/soulacy/soulacy/internal/workspacepurge"
 )
 
@@ -190,6 +192,51 @@ func (s *Server) workspacePurgers() []workspacepurge.Purger {
 			},
 		})
 	}
+
+	if vault, ok := s.credVault.(credentials.WorkspaceEraser); ok {
+		purgers = append(purgers, workspacepurge.Purger{
+			Resource: "secrets",
+			Purge: func(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+				rows, err := vault.EraseWorkspace(ctx, workspaceID)
+				return workspacepurge.Removed{Rows: rows, Note: "wrapped workspace DEKs destroyed before ciphertext and version history"}, err
+			},
+		})
+	}
+	if store, ok := s.apiKeyStore.(apikeys.WorkspaceCredentialPurger); ok {
+		purgers = append(purgers, workspacepurge.Purger{
+			Resource: "credentials",
+			Purge: func(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+				rows, err := store.RevokeWorkspace(ctx, workspaceID)
+				return workspacepurge.Removed{Rows: rows, Note: "workspace-bound managed credentials revoked before hash purge"}, err
+			},
+		})
+		purgers = append(purgers, workspacepurge.Purger{
+			Resource: "api-keys",
+			Purge: func(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
+				rows, err := store.PurgeWorkspace(ctx, workspaceID)
+				return workspacepurge.Removed{Rows: rows, Note: "revoked credential hashes purged"}, err
+			},
+		})
+	}
+	if s.channels != nil {
+		purgers = append(purgers, workspacepurge.Purger{
+			Resource: "channels",
+			Purge: func(_ context.Context, workspaceID string) (workspacepurge.Removed, error) {
+				rows, err := s.channels.PurgeWorkspace(workspaceID)
+				return workspacepurge.Removed{Rows: rows, Note: "live tenant channel connections disconnected and unbound"}, err
+			},
+		})
+		// Webhook destinations are channel adapters in this architecture. The
+		// explicit, idempotent second phase keeps the ownership catalog honest.
+		purgers = append(purgers, workspacepurge.Purger{
+			Resource: "webhooks",
+			Purge: func(_ context.Context, workspaceID string) (workspacepurge.Removed, error) {
+				rows, err := s.channels.PurgeWorkspace(workspaceID)
+				return workspacepurge.Removed{Rows: rows, Note: "webhook channel destinations disabled and unbound"}, err
+			},
+		})
+	}
+	purgers = append(purgers, workspacepurge.Purger{Resource: "shares", Purge: purgeWorkspaceShares})
 
 	// PurgeWorkspace is deliberately optional on the operational DLQ
 	// interface: third-party/no-op implementations can still receive failed

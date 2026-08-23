@@ -12,6 +12,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -478,6 +479,27 @@ func (r *Registry) StopAdapter(channelID string) (bool, error) {
 		return true, err
 	}
 	return true, nil
+}
+
+// PurgeWorkspace disconnects every live channel owned by one workspace and
+// removes its ownership bindings. It is idempotent for deletion retries.
+func (r *Registry) PurgeWorkspace(workspaceID string) (int64, error) {
+	channelIDs := r.owners.ChannelsOf(workspaceID)
+	var errs []error
+	var removed int64
+	for _, channelID := range channelIDs {
+		present, err := r.StopAdapter(channelID)
+		// The adapter is already absent from the registry when Stop reports an
+		// error, so remove the tenant binding and prevent future attribution.
+		r.owners.Unbind(channelID)
+		if present {
+			removed++
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", channelID, err))
+		}
+	}
+	return removed, errors.Join(errs...)
 }
 
 // Adapters returns a snapshot of the registered adapters.

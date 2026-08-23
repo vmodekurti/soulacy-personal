@@ -3222,6 +3222,19 @@ listed with their reasons. The two most interesting are not oversights:
 says revoke-then-purge in that order, because a credential must not be usable
 in the window between the two.
 
+**2026-08-23 completion.** The workspace deletion registry now covers every
+workspace-owned purge disposition in the ownership catalog. Envelope-encrypted
+vaults destroy the target workspace's wrapped DEKs before deleting current
+ciphertext and version history in one transaction; a legacy shared-derived-key
+vault fails closed because it cannot truthfully perform tenant cryptographic
+erasure. Managed credentials are durably revoked before their hashes are
+removed in both SQLite and PostgreSQL. Public share snapshots are selected by
+their stored workspace identity, and live channel/webhook adapters are removed
+from routing, stopped, and unbound. Each isolation test seeds a neighbouring
+workspace and proves it survives unchanged. `notYetPurged` is consequently an
+empty, build-checked map rather than a deleted guard: any new resource class
+still fails the build until its deletion behavior is explicit.
+
 ### MU-025 criterion 5: the window a background job walks through
 
 "Background jobs revalidate workspace status and policy before committing" was
