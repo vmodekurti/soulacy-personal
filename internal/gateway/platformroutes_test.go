@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -59,8 +60,16 @@ func platformCall(t *testing.T, s *Server, method, path, credentialID string) in
 func TestAWorkspaceOwnerCannotChangeTheDeployment(t *testing.T) {
 	for _, mode := range []string{config.DeploymentModeTeam, config.DeploymentModeScale} {
 		s := platformServer(t, mode)
-		if code := platformCall(t, s, "PATCH", "/api/v1/config", "cred_alice"); code != fiber.StatusForbidden {
-			t.Errorf("%s: a workspace owner got %d editing the deployment config", mode, code)
+		for _, endpoint := range []struct{ method, path string }{
+			{"PATCH", "/api/v1/config"},
+			{"GET", "/api/v1/deployment/status"},
+			{"GET", "/api/v1/system/updates/status"},
+			{"POST", "/api/v1/system/updates/check"},
+			{"POST", "/api/v1/system/updates/upgrade"},
+		} {
+			if code := platformCall(t, s, endpoint.method, endpoint.path, "cred_alice"); code != fiber.StatusForbidden {
+				t.Errorf("%s: a workspace owner got %d for %s %s", mode, code, endpoint.method, endpoint.path)
+			}
 		}
 	}
 }
@@ -151,6 +160,7 @@ func TestPersonalCapabilitiesRemainWorkspaceScopedInTeamAndScale(t *testing.T) {
 func TestTheWritesThatChangeTheDeploymentAreAllClaimed(t *testing.T) {
 	writes := []struct{ method, path string }{
 		{"POST", "/api/v1/admin/restart"},
+		{"POST", "/api/v1/system/updates/upgrade"},
 		{"PATCH", "/api/v1/config"},
 		{"POST", "/api/v1/registries"},
 		{"POST", "/api/v1/mcp"},
@@ -183,12 +193,8 @@ func TestTheMethodIsPartOfTheMatch(t *testing.T) {
 // nothing while reading as though it does.
 func TestTheTableAndTheRegistrationsAgree(t *testing.T) {
 	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "server.go", nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
 	registered := map[string]bool{}
-	ast.Inspect(file, func(n ast.Node) bool {
+	inspectRegistration := func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok || len(call.Args) < 2 {
 			return true
@@ -220,7 +226,24 @@ func TestTheTableAndTheRegistrationsAgree(t *testing.T) {
 			registered[method+" /api/v1"+strings.Trim(lit.Value, `"`)] = true
 		}
 		return true
-	})
+	}
+	// Platform routes may be grouped into focused registration helpers. Parse
+	// every gateway source file so moving a route out of server.go cannot make
+	// this boundary audit silently incomplete.
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range files {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file, parseErr := parser.ParseFile(fset, name, nil, 0)
+		if parseErr != nil {
+			t.Fatal(parseErr)
+		}
+		ast.Inspect(file, inspectRegistration)
+	}
 
 	tabled := map[string]bool{}
 	for _, route := range platformRoutes {

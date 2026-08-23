@@ -54,6 +54,10 @@ func TestPlatformControlPlaneUsesDeploymentCredentialAndReturnsMetadataOnly(t *t
 	if overview["summary"].(map[string]any)["workspaces"] != float64(3) {
 		t.Fatalf("overview summary=%#v", overview["summary"])
 	}
+	deployment, ok := overview["deployment"].(map[string]any)
+	if !ok || deployment["ready"] != false || deployment["queue_backend"] == nil {
+		t.Fatalf("overview deployment posture=%#v", overview["deployment"])
+	}
 
 	status, organizations := gatewayJSON(t, s, http.MethodGet, "/api/v1/admin/platform/organizations", "deployment-key", "")
 	if status != http.StatusOK {

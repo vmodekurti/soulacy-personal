@@ -1,12 +1,10 @@
 <script>
   import TourButton from '../lib/TourButton.svelte'
-  import { confirmLocal } from '../lib/destructive.js'
   import { onMount, onDestroy } from 'svelte'
   import { connected } from '../lib/stores.js'
   import { api, createEventSocket } from '../lib/api.js'
-  import { waitForGateway, waitingMessage, timeoutMessage, UPGRADE_BUDGET } from '../lib/gatewaywait.js'
+  import { activeWorkspace } from '../lib/workspace.js'
 
-  let status  = null
   let agents  = []
   let events  = []
   let ws      = null
@@ -21,18 +19,11 @@
   let ops = null
   let opsError = ''
   let alertTestStatus = ''
-  let downloadingSupport = false
-  let supportMessage = ''
   // F-GUI-4 — Cohort F S4 detail: the /readiness journey already lists the
   // security row, but the operator needs the concrete blocker/warning text and
   // a one-click deep-link into the affected agent's Security Doctor. That
   // requires the richer /security/readiness payload.
   let securityReadiness = null
-
-  let updateInfo = null
-  let upgrading = false
-  let upgradeMessage = ''
-  let upgradeError = ''
 
   const EVENT_FILTERS = [
     { id: 'all', label: 'All' },
@@ -43,13 +34,6 @@
   ]
 
   async function load() {
-    // /health is unauthenticated — it tells us whether the gateway is up,
-    // independent of whether our credentials are valid.
-    try {
-      status = await api.health()
-    } catch {
-      status = null
-    }
     try {
       const res = await api.agents.list()
       agents    = res.agents || []
@@ -83,41 +67,6 @@
     } catch (e) {
       ops = null
       opsError = e.status === 503 ? 'Run reliability needs durable action logging.' : (e.message || 'Run reliability unavailable.')
-    }
-    try {
-      updateInfo = await api.updates.status()
-    } catch {
-      updateInfo = null
-    }
-  }
-
-  async function startUpgrade() {
-    // confirmLocal, not confirmDestructive: upgrading restarts the whole
-    // gateway, which is deployment-wide. Naming a workspace here would imply
-    // the action is scoped to it, which is worse than saying nothing.
-    if (!confirmLocal(`Are you sure you want to upgrade to ${updateInfo.latest_version}? The gateway will restart automatically.`)) {
-      return
-    }
-    upgrading = true
-    upgradeError = ''
-    upgradeMessage = 'Downloading and installing the update...'
-    try {
-      const res = await api.updates.upgrade()
-      upgradeMessage = res.message || 'Upgrade installed. Waiting for the gateway to restart...'
-      // Do NOT reload on a timer. The old process exits 250ms after this reply
-      // and the replacement still has to boot and bind the port; a fixed 5s
-      // wait reloaded into a dead port and showed "Failed to fetch" directly
-      // under a message saying the upgrade had succeeded.
-      const outcome = await waitForGateway(api.health, {
-        ...UPGRADE_BUDGET,
-        onAttempt: (n, total) => { upgradeMessage = waitingMessage(n, total) },
-      })
-      if (outcome.ok) { window.location.reload(); return }
-      upgrading = false
-      upgradeError = timeoutMessage('upgrade', outcome.waitedMs)
-    } catch (e) {
-      upgrading = false
-      upgradeError = 'Upgrade failed: ' + (e.message || e)
     }
   }
 
@@ -192,27 +141,6 @@
       alertTestStatus = `Sent to ${res.channel || 'channel'} ${res.to || ''}`.trim()
     } catch (e) {
       alertTestStatus = e.message || 'Alert test failed.'
-    }
-  }
-
-  async function downloadSupportBundle() {
-    downloadingSupport = true
-    supportMessage = ''
-    try {
-      const { blob, filename } = await api.support.bundle()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = filename || `soulacy-support-${new Date().toISOString().slice(0, 19).replaceAll(':', '')}.zip`
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      URL.revokeObjectURL(url)
-      supportMessage = 'Support bundle includes readiness, doctor output, run ledger, redacted config, agent manifests, and recent logs.'
-    } catch (e) {
-      supportMessage = e.message || 'Could not prepare support bundle.'
-    } finally {
-      downloadingSupport = false
     }
   }
 
@@ -293,7 +221,27 @@
     return s.length > 110 ? s.slice(0, 110) + '…' : s
   }
 
+  function workspaceReadinessSummary(items) {
+    const total = items.length
+    const ready = items.filter(item => item.status === 'ok').length
+    const warnings = items.filter(item => item.status === 'warn').length
+    const blockers = items.filter(item => item.status === 'fail').length
+    const points = items.reduce((sum, item) => sum + (item.status === 'ok' ? 100 : item.status === 'warn' ? 55 : 0), 0)
+    return {
+      total,
+      ready,
+      warnings,
+      blockers,
+      score: total ? Math.floor(points / total) : 0,
+      status: blockers ? 'needs_setup' : warnings ? 'at_risk' : 'ready',
+    }
+  }
+
   $: filteredEvents = events.filter(matchesFilter)
+  $: workspaceJourney = (readiness?.journey || []).filter(item => item.key !== 'deployment')
+  $: workspaceChecklist = (readiness?.launch_checklist || []).filter(item => item.key !== 'vault' && !String(item.key || '').startsWith('deployment:'))
+  $: workspaceNextActions = (readiness?.next_actions || []).filter(item => item.key !== 'deployment')
+  $: workspaceSummary = workspaceReadinessSummary(workspaceJourney)
 </script>
 
 <div class="page">
@@ -315,41 +263,12 @@
     </div>
   {/if}
 
-  {#if updateInfo && updateInfo.update_available}
-    <div class="update-banner">
-      <div class="update-banner-icon">✨</div>
-      <div class="update-banner-content">
-        <strong>Update Available</strong>
-        <span>Soulacy {updateInfo.latest_version} is available! (Current: {updateInfo.current_version}).</span>
-      </div>
-      <div class="update-banner-actions">
-        <button class="btn-primary btn-sm" on:click={startUpgrade}>Upgrade Now</button>
-        <button class="btn-secondary btn-sm" on:click={() => window.open("https://github.com/vmodekurti/soulacy/releases/latest", "_blank")}>View Release Notes</button>
-      </div>
-    </div>
-  {/if}
-
-  {#if upgrading}
-    <div class="upgrading-overlay">
-      <div class="upgrading-spinner"></div>
-      <div class="upgrading-text">Upgrading Soulacy...</div>
-      <div class="upgrading-subtext">{upgradeMessage}</div>
-    </div>
-  {/if}
-
-  {#if upgradeError}
-    <div class="banner err upgrade-err">
-      <span>{upgradeError}</span>
-      <button class="linkish" on:click={() => window.location.reload()}>Reload</button>
-    </div>
-  {/if}
-
   <!-- Status cards -->
   <div class="cards">
-    <div class="card" class:card-ok={!!status} data-tooltip="Active connection state of the local Soulacy gateway daemon">
-      <div class="card-label">Gateway</div>
-      <div class="card-value">{status ? '● Online' : authError ? '🔒 Session expired' : permissionError ? '◌ Limited access' : '○ Offline'}</div>
-      {#if status}<div class="card-sub">v{status.version}</div>{/if}
+    <div class="card" class:card-ok={!!$activeWorkspace} data-tooltip="The workspace whose agents, runs, and settings are shown on this dashboard">
+      <div class="card-label">Workspace</div>
+      <div class="card-value">{$activeWorkspace?.workspaceName || 'Current workspace'}</div>
+      <div class="card-sub">{$activeWorkspace?.role || 'member'}{#if $activeWorkspace?.organizationName} · {$activeWorkspace.organizationName}{/if}</div>
     </div>
 
     <div class="card" data-tooltip="Total number of active multi-agent runtimes loaded in your workspace">
@@ -405,9 +324,9 @@
           </div>
         {/if}
         {#if readiness?.ops_alerts}
-          <div class="slo-strip {readiness.ops_alerts.status}" data-tooltip="Configuration state of active operations notification channels">
+          <div class="slo-strip {readiness.ops_alerts.status}" data-tooltip="Workspace operations notification delivery">
             <div>
-              <div class="ops-label">Ops Alert Delivery</div>
+              <div class="ops-label">Workspace Alert Delivery</div>
               <strong>{statusLabel(readiness.ops_alerts.status)} · {readiness.ops_alerts.channel || 'not configured'}</strong>
               <span>
                 {readiness.ops_alerts.to ? `destination ${readiness.ops_alerts.to}` : 'No destination configured'} ·
@@ -470,12 +389,12 @@
     <div class="readiness">
       <div class="readiness-top">
         <div>
-          <div class="eyebrow">Launch Readiness</div>
-          <h2>{readiness.summary?.score || 0}% · {readiness.summary?.status === 'ready' ? 'Ready' : readiness.summary?.status === 'at_risk' ? 'At risk' : 'Needs setup'}</h2>
+          <div class="eyebrow">Workspace Readiness</div>
+          <h2>{workspaceSummary.score}% · {workspaceSummary.status === 'ready' ? 'Ready' : workspaceSummary.status === 'at_risk' ? 'At risk' : 'Needs setup'}</h2>
           <p>
-            {readiness.summary?.ready_items || 0}/{readiness.summary?.total_items || 0} checks ready ·
-            {readiness.summary?.blocker_items || 0} blockers ·
-            {readiness.summary?.warning_items || 0} warnings
+            {workspaceSummary.ready}/{workspaceSummary.total} workspace checks ready ·
+            {workspaceSummary.blockers} blockers ·
+            {workspaceSummary.warnings} warnings
           </p>
           <p>
             {readiness.summary?.enabled_agents || 0} enabled agents ·
@@ -486,61 +405,8 @@
         </div>
         <div class="readiness-actions">
           <button class="btn-primary" on:click={() => openHref('#studio')}>Open Studio</button>
-          <button class="btn-secondary" on:click={downloadSupportBundle} disabled={downloadingSupport} data-tooltip="Generate a ZIP archive of diagnostics, configs, and active logs for troubleshooting">
-            {downloadingSupport ? 'Preparing...' : 'Download support bundle'}
-          </button>
         </div>
       </div>
-      {#if supportMessage}
-        <div class:ok-note={!supportMessage.toLowerCase().includes('could not')} class:err-note={supportMessage.toLowerCase().includes('could not')}>
-          {supportMessage}
-        </div>
-      {/if}
-
-      {#if readiness.release}
-        <div class:release-strip={true} class:ok={readiness.release?.updates_ready} class:warn={!readiness.release?.updates_ready}>
-          <div>
-            <div class="release-title">
-              <span>{readiness.release?.updates_ready ? 'Updates configured' : 'Updates need setup'}</span>
-              <small>{readiness.release?.version || 'unknown version'}</small>
-            </div>
-            <p>{readiness.release?.update_hint || 'Configure a release manifest before production launch.'}</p>
-            {#if readiness.release?.update_manifest}
-              <code>{readiness.release.update_manifest}</code>
-            {/if}
-          </div>
-          <div class="release-cmds">
-            <code>{readiness.release?.dry_run_command || 'sy update install --dry-run'}</code>
-            <code>{readiness.release?.install_command || 'sy update install --yes'}</code>
-          </div>
-        </div>
-      {/if}
-
-      {#if readiness.deployment}
-        <div class:release-strip={true}
-             class:ok={readiness.deployment.status === 'ok'}
-             class:warn={readiness.deployment.status === 'warn'}
-             class:fail={readiness.deployment.status === 'fail'}>
-          <div>
-            <div class="release-title">
-              <span>{readiness.deployment.label || 'Local'} deployment</span>
-              <small>{readiness.deployment.strict ? 'strict launch gate' : 'advisory checks'}</small>
-            </div>
-            <p>
-              {readiness.deployment.ready || 0}/{readiness.deployment.total || 0} deployment checks ready ·
-              {statusLabel(readiness.deployment.status)}
-            </p>
-            {#if readiness.deployment.owner || readiness.deployment.region || readiness.deployment.notes}
-              <code>
-                {readiness.deployment.owner || 'unowned'}
-                {#if readiness.deployment.region} · {readiness.deployment.region}{/if}
-                {#if readiness.deployment.notes} · {readiness.deployment.notes}{/if}
-              </code>
-            {/if}
-          </div>
-          <button class="btn-secondary" on:click={() => openHref('#config')}>Edit profile</button>
-        </div>
-      {/if}
 
       {#if readiness.studio_contracts}
         <div class:release-strip={true}
@@ -569,14 +435,14 @@
         </div>
       {/if}
 
-      {#if readiness.launch_checklist?.length}
+      {#if workspaceChecklist.length}
         <div class="launch-checklist">
           <div class="section-hdr inline">
-            <span>Production gate</span>
-            <span class="pill">{readiness.launch_checklist.length}</span>
+            <span>Workspace action items</span>
+            <span class="pill">{workspaceChecklist.length}</span>
           </div>
           <div class="launch-list">
-            {#each readiness.launch_checklist as item}
+            {#each workspaceChecklist as item}
               <button class="launch-row {item.status}" type="button" on:click={() => openHref(item.href)}>
                 <span class="journey-status">{statusLabel(item.status)}</span>
                 <strong>{item.label}</strong>
@@ -598,7 +464,7 @@
            readiness.parity for API consumers who want the scorecard. -->
 
       <div class="journey-grid">
-        {#each readiness.journey || [] as item}
+        {#each workspaceJourney as item}
           {#if item.key === 'security'}
             <!-- F-GUI-4 — the S4 backend already emits a Security row in
                  readiness.journey. We enrich it here with the highest-priority
@@ -628,13 +494,13 @@
         {/each}
       </div>
 
-      {#if readiness.next_actions?.length}
+      {#if workspaceNextActions.length}
         <div class="next-actions">
           <div class="section-hdr inline">
             <span>Next best actions</span>
-            <span class="pill">{readiness.next_actions.length}</span>
+            <span class="pill">{workspaceNextActions.length}</span>
           </div>
-          {#each readiness.next_actions as action}
+          {#each workspaceNextActions as action}
             <button class="action-row {action.status}" type="button" on:click={() => openHref(action.href)}>
               <span>{action.label}</span>
               <small>{action.detail}</small>
@@ -936,87 +802,6 @@
   .log-type  { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .log-agent { color: #6c63ff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .log-data  { color: #6b7294; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .update-banner {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    padding: 16px 24px;
-    margin-bottom: 24px;
-    background: linear-gradient(135deg, rgba(126, 92, 255, 0.12), rgba(34, 196, 122, 0.12));
-    border: 1px solid rgba(126, 92, 255, 0.35);
-    border-radius: 12px;
-    box-shadow: 0 8px 32px 0 rgba(126, 92, 255, 0.06);
-    backdrop-filter: blur(8px);
-    animation: fadeIn 0.4s ease-out;
-  }
-  @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(-8px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-  .update-banner-icon {
-    font-size: 22px;
-  }
-  .update-banner-content {
-    flex-grow: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .update-banner-content strong {
-    font-size: 15px;
-    color: #fff;
-  }
-  .update-banner-content span {
-    font-size: 13px;
-    color: #a0aec0;
-  }
-  .update-banner-actions {
-    display: flex;
-    gap: 12px;
-  }
-  .btn-sm {
-    padding: 6px 14px;
-    font-size: 12px;
-  }
-  .upgrading-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(10, 10, 15, 0.9);
-    backdrop-filter: blur(16px);
-    z-index: 10000;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    color: white;
-  }
-  .upgrading-spinner {
-    width: 60px;
-    height: 60px;
-    border: 4px solid rgba(255, 255, 255, 0.1);
-    border-top: 4px solid #7e5cff;
-    border-radius: 50%;
-    animation: spin 0.9s linear infinite;
-    margin-bottom: 24px;
-  }
-  @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-  }
-  .upgrading-text {
-    font-size: 20px;
-    font-weight: 600;
-    margin-bottom: 12px;
-    letter-spacing: -0.02em;
-  }
-  .upgrading-subtext {
-    font-size: 13px;
-    color: #8a91b8;
-  }
-
   @media (max-width: 640px) {
     /* Event log: time+type on row 1, agent+data on row 2 */
     .log-row { grid-template-columns: 72px minmax(0, 1fr); row-gap: 0.1rem; }
@@ -1029,20 +814,5 @@
     .slo-strip { flex-direction: column; align-items: flex-start; }
     .release-cmds { align-items: flex-start; min-width: 0; width: 100%; }
     .action-row { grid-template-columns: 1fr; gap: .25rem; }
-  }
-  .upgrade-err {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-  }
-  .upgrade-err .linkish {
-    background: none;
-    border: none;
-    color: inherit;
-    text-decoration: underline;
-    cursor: pointer;
-    font: inherit;
-    padding: 0;
   }
 </style>

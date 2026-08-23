@@ -2,6 +2,8 @@ package session
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,6 +17,24 @@ import (
 	"github.com/soulacy/soulacy/internal/workspacepurge"
 	"github.com/soulacy/soulacy/internal/wsroot"
 )
+
+// conversationLockKey maps the full tenant/conversation identity onto the
+// signed 64-bit key accepted by PostgreSQL advisory locks. Passing a composite
+// text key through hashtextextended used to join the fields with a NUL byte;
+// PostgreSQL text explicitly rejects NUL before the hash function can run.
+// Length-prefixing keeps field boundaries unambiguous before truncating the
+// cryptographic digest to PostgreSQL's advisory-lock width.
+func conversationLockKey(workspaceID, sessionID string) int64 {
+	h := sha256.New()
+	var length [8]byte
+	binary.BigEndian.PutUint64(length[:], uint64(len(workspaceID)))
+	_, _ = h.Write(length[:])
+	_, _ = h.Write([]byte(workspaceID))
+	binary.BigEndian.PutUint64(length[:], uint64(len(sessionID)))
+	_, _ = h.Write(length[:])
+	_, _ = h.Write([]byte(sessionID))
+	return int64(binary.BigEndian.Uint64(h.Sum(nil)[:8]))
+}
 
 const postgresHistorySchema = `
 CREATE TABLE IF NOT EXISTS conversation_history (
@@ -62,8 +82,8 @@ func (s *PostgresHistoryStore) LockConversation(ctx context.Context, workspaceID
 	if err != nil {
 		return nil, fmt.Errorf("session/history postgres: acquire conversation lock connection: %w", err)
 	}
-	key := workspaceID + "\x00" + sessionID
-	if _, err = conn.Exec(ctx, `SELECT pg_advisory_lock(hashtextextended($1,0))`, key); err != nil {
+	key := conversationLockKey(workspaceID, sessionID)
+	if _, err = conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, key); err != nil {
 		conn.Release()
 		return nil, fmt.Errorf("session/history postgres: lock conversation: %w", err)
 	}
@@ -72,7 +92,7 @@ func (s *PostgresHistoryStore) LockConversation(ctx context.Context, workspaceID
 		once.Do(func() {
 			unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			if _, unlockErr := conn.Exec(unlockCtx, `SELECT pg_advisory_unlock(hashtextextended($1,0))`, key); unlockErr != nil {
+			if _, unlockErr := conn.Exec(unlockCtx, `SELECT pg_advisory_unlock($1)`, key); unlockErr != nil {
 				// A pooled connection carrying a session advisory lock must never be
 				// returned to the pool. Closing the hijacked connection releases it.
 				raw := conn.Hijack()

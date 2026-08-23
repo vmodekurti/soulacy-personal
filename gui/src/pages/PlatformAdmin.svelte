@@ -3,12 +3,17 @@
   import { api } from '../lib/api.js'
   import { apiKey, authRequired } from '../lib/stores.js'
   import { confirmPlatform } from '../lib/destructive.js'
+  import { waitForGateway, waitingMessage, timeoutMessage, UPGRADE_BUDGET } from '../lib/gatewaywait.js'
   import ProviderIcon from '../lib/ProviderIcon.svelte'
   import PublicNav from '../lib/PublicNav.svelte'
   import PageHelp from '../lib/PageHelp.svelte'
 
   let keyInput = '', authenticated = false, loading = false, error = '', active = 'overview'
   let overview = null, organizations = [], refreshedAt = null, restarting = false
+  let platformConfig = null, updateInfo = null
+  let deploymentProfile = 'local', deploymentOwner = '', deploymentRegion = '', deploymentNotes = ''
+  let deploymentSaving = false, deploymentMessage = '', checkingUpdates = false, upgrading = false
+  let supportDownloading = false, supportMessage = ''
   let logLines = [], logSource = '', logNote = '', logFilter = '', logsLoading = false
   let auditEvents = [], auditCursor = '', auditFilter = '', auditLoading = false
   let provisioning = false, provisionMessage = ''
@@ -17,7 +22,7 @@
 	let organizationLogo='', firstWorkspaceLogo='', workspaceLogo='', setupLink=''
   let editingWorkspaceID='', editingSlug='', addressSaving=false
 	let lifecycleTarget=null, lifecycleReason='', lifecycleConfirmation='', lifecycleSaving=false
-  const tabs = [['overview','Overview'],['tenants','Organizations'],['diagnostics','Diagnostics'],['audit','Audit trail'],['security','Security boundary']]
+  const tabs = [['overview','Overview'],['deployment','Deployment'],['tenants','Organizations'],['diagnostics','Diagnostics'],['audit','Audit trail'],['security','Security boundary']]
 
   $: filteredAudit = auditEvents.filter(event => {
     const query = auditFilter.trim().toLowerCase()
@@ -33,15 +38,22 @@
   async function refresh(clearOnFailure = false) {
     loading = true; error = ''
     try {
-      const [o, t] = await Promise.all([api.admin.platformOverview(), api.admin.platformOrganizations()])
-      overview = o; organizations = t?.organizations || []; authenticated = true; refreshedAt = new Date()
+      const [o, t, c, u] = await Promise.all([
+        api.admin.platformOverview(), api.admin.platformOrganizations(), api.config.get(), api.updates.status(),
+      ])
+      overview = o; organizations = t?.organizations || []; platformConfig = c; updateInfo = u
+      deploymentProfile = c?.deployment?.profile || 'local'
+      deploymentOwner = c?.deployment?.owner || ''
+      deploymentRegion = c?.deployment?.region || ''
+      deploymentNotes = c?.deployment?.notes || ''
+      authenticated = true; refreshedAt = new Date()
     } catch (e) {
       authenticated = false
       error = e?.status === 401 || e?.status === 403 ? 'That deployment administrator key was rejected.' : (e?.message || 'The control plane could not be loaded.')
       if (clearOnFailure) $apiKey = ''
     } finally { loading = false }
   }
-  function signOut() { $apiKey = ''; keyInput = ''; authenticated = false; overview = null; organizations = [] }
+  function signOut() { $apiKey = ''; keyInput = ''; authenticated = false; overview = null; organizations = []; platformConfig = null; updateInfo = null }
   async function provisionOrganization() {
     provisioning = true; error = ''; provisionMessage = ''
     try {
@@ -117,6 +129,53 @@
     const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `soulacy-platform-audit-${Date.now()}.json`; link.click(); URL.revokeObjectURL(link.href)
   }
   function formatDate(value) { return value ? new Date(value).toLocaleString() : '—' }
+
+  async function saveDeploymentProfile() {
+    deploymentSaving = true; deploymentMessage = ''; error = ''
+    try {
+      const result = await api.config.patch({ deployment: {
+        profile: deploymentProfile, owner: deploymentOwner.trim(), region: deploymentRegion.trim(), notes: deploymentNotes.trim(),
+      }})
+      platformConfig = result?.config || platformConfig
+      deploymentMessage = result?.message || 'Deployment profile saved.'
+    } catch (e) { error = e?.message || 'Deployment profile could not be saved.' }
+    finally { deploymentSaving = false }
+  }
+
+  async function checkForUpdates() {
+    checkingUpdates = true; deploymentMessage = ''; error = ''
+    try { updateInfo = await api.updates.check(); deploymentMessage = 'Release manifest checked.' }
+    catch (e) { error = e?.message || 'Update check failed.' }
+    finally { checkingUpdates = false }
+  }
+
+  async function installUpdate() {
+    if (!updateInfo?.update_available) return
+    if (!confirmPlatform(`Upgrade the entire Soulacy deployment to ${updateInfo.latest_version}? In-flight work in every workspace will be interrupted.`)) return
+    upgrading = true; error = ''; deploymentMessage = 'Downloading and installing the release…'
+    try {
+      const result = await api.updates.upgrade()
+      deploymentMessage = result?.message || 'Update installed. Waiting for the gateway to restart…'
+      const outcome = await waitForGateway(api.health, { ...UPGRADE_BUDGET, onAttempt: (n, total) => { deploymentMessage = waitingMessage(n, total) } })
+      if (outcome.ok) { location.reload(); return }
+      error = timeoutMessage('upgrade', outcome.waitedMs)
+    } catch (e) { error = e?.message || 'Upgrade failed.' }
+    finally { upgrading = false }
+  }
+
+  async function downloadSupportBundle() {
+    supportDownloading = true; supportMessage = ''; error = ''
+    try {
+      const { blob, filename } = await api.support.bundle()
+      const link = document.createElement('a')
+      link.href = URL.createObjectURL(blob)
+      link.download = filename || `soulacy-support-${Date.now()}.zip`
+      link.click()
+      URL.revokeObjectURL(link.href)
+      supportMessage = 'Redacted deployment support bundle downloaded.'
+    } catch (e) { error = e?.message || 'Support bundle could not be prepared.' }
+    finally { supportDownloading = false }
+  }
 </script>
 
 <svelte:head><title>Platform administration · Soulacy</title></svelte:head>
@@ -152,6 +211,31 @@
       <section class="panel"><div class="panel-title"><div><h2>Platform status</h2><p>Service-level signals only; no tenant payloads are queried.</p></div><span class="badge {statusClass(overview?.replica?.status)}">{overview?.replica?.status}</span></div>
         <div class="rows"><div><span>Gateway version</span><strong>{overview?.version||'unknown'}</strong></div><div><span>Deployment mode</span><strong>{overview?.mode}</strong></div><div><span>Authentication</span><strong>{overview?.authentication?.mode} · {overview?.authentication?.status}</strong></div><div><span>Pending invitations</span><strong>{overview?.summary?.pending_invitations||0}</strong></div></div>
       </section>
+    {:else if active === 'deployment'}
+      <section class="split">
+        <form class="panel deployment-form" on:submit|preventDefault={saveDeploymentProfile}>
+          <div class="panel-title"><div><h2>Deployment profile</h2><p>Shared operator metadata and launch strictness for this Soulacy installation.</p></div><span class="badge {overview?.deployment?.ready ? 'good' : 'warn'}">{overview?.deployment?.ready ? 'ready' : 'attention'}</span></div>
+          <label>Profile<select bind:value={deploymentProfile}><option value="local">Local</option><option value="development">Development</option><option value="staging">Staging</option><option value="production">Production</option></select></label>
+          <div class="form-two"><label>Owner<input bind:value={deploymentOwner} placeholder="Platform team" /></label><label>Region<input bind:value={deploymentRegion} placeholder="us-central" /></label></div>
+          <label>Operator notes<textarea bind:value={deploymentNotes} maxlength="1000" placeholder="Runbook, environment purpose, or maintenance notes"></textarea></label>
+          <button class="primary" disabled={deploymentSaving}>{deploymentSaving ? 'Saving…' : 'Save deployment profile'}</button>
+        </form>
+        <article class="panel">
+          <div class="panel-title"><div><h2>Infrastructure posture</h2><p>Deployment-wide services that workspace administrators cannot configure.</p></div><span class="badge {overview?.deployment?.ready ? 'good' : 'warn'}">{overview?.deployment?.issues?.length || 0} issues</span></div>
+          <div class="posture-grid"><div><span>Storage</span><strong>{overview?.deployment?.storage_backend || 'unknown'}</strong></div><div><span>Queue</span><strong>{overview?.deployment?.queue_backend || 'unknown'}</strong></div><div><span>Credential KMS</span><strong>{overview?.deployment?.kms_provider || 'unknown'}</strong></div><div><span>Tool executor</span><strong>{overview?.deployment?.executor_backend || 'unknown'}</strong></div><div><span>Sandbox</span><strong>{overview?.deployment?.sandbox_enabled ? overview?.deployment?.sandbox_mode : 'disabled'}</strong></div><div><span>Rate limiting</span><strong>{overview?.deployment?.rate_limit_enabled ? overview?.deployment?.rate_limit_backend : 'disabled'}</strong></div></div>
+          {#if overview?.deployment?.issues?.length}<div class="issue-list"><h3>Required operator actions</h3>{#each overview.deployment.issues as issue}<code>{issue}</code>{/each}</div>{:else}<p class="success">Deployment infrastructure checks are ready.</p>{/if}
+          {#if overview?.deployment?.acknowledged_issues?.length}<div class="issue-list acknowledged"><h3>Acknowledged compromises</h3>{#each overview.deployment.acknowledged_issues as issue}<code>{issue}</code>{/each}</div>{/if}
+        </article>
+      </section>
+      <section class="split">
+        <article class="panel"><div class="panel-title"><div><h2>Release management</h2><p>Updates replace the shared gateway and are available only to deployment administrators.</p></div><span class="badge {updateInfo?.update_available ? 'warn' : 'good'}">{updateInfo?.update_available ? 'update available' : 'current'}</span></div>
+          <div class="rows"><div><span>Installed</span><strong>{updateInfo?.current_version || overview?.version || 'unknown'}</strong></div><div><span>Latest</span><strong>{updateInfo?.latest_version || 'not checked'}</strong></div></div>
+          {#if updateInfo?.error}<p class="error">{updateInfo.error}</p>{/if}
+          <div class="deployment-actions"><button class="secondary" on:click={checkForUpdates} disabled={checkingUpdates || upgrading}>{checkingUpdates ? 'Checking…' : 'Check for updates'}</button><button class="danger" on:click={installUpdate} disabled={!updateInfo?.update_available || upgrading}>{upgrading ? 'Installing…' : 'Install update'}</button></div>
+        </article>
+        <article class="panel"><h2>Operator support</h2><p>Download deployment diagnostics. The bundle is redacted but can include cross-workspace service signals, so it is intentionally unavailable inside workspaces.</p><button class="secondary" on:click={downloadSupportBundle} disabled={supportDownloading}>{supportDownloading ? 'Preparing…' : 'Download support bundle'}</button>{#if supportMessage}<p class="success">{supportMessage}</p>{/if}</article>
+      </section>
+      {#if deploymentMessage}<p class="success">{deploymentMessage}</p>{/if}
     {:else if active === 'tenants'}
       <section class="provision-grid">
         <form class="panel" on:submit|preventDefault={provisionOrganization}><h2>Create organization</h2><p>Create its first workspace and designate the customer owner. You will not become a member.</p>
@@ -191,6 +275,7 @@
 {/if}
 
 <style>
+	.deployment-form label{display:grid;gap:6px;margin-top:12px;color:#aeb6cc;font-size:12px}.deployment-form input,.deployment-form select,.deployment-form textarea{box-sizing:border-box;width:100%;padding:10px;border:1px solid #ffffff18;border-radius:8px;background:#090c16;color:#fff}.deployment-form textarea{min-height:92px;resize:vertical}.posture-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;margin-top:18px;background:#ffffff0c}.posture-grid>div{display:grid;gap:5px;padding:13px;background:#121625}.posture-grid span{color:#8992ae;font-size:11px}.posture-grid strong{font-size:13px}.issue-list{display:grid;gap:7px;margin-top:18px;padding:14px;border:1px solid #f5ad4240;border-radius:9px;background:#f5ad420b}.issue-list.acknowledged{border-color:#795cff40;background:#795cff0b}.issue-list h3{margin:0 0 4px;font-size:13px}.issue-list code{color:#d9b979;line-height:1.45}.issue-list.acknowledged code{color:#aaa0dc}.deployment-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}.deployment-actions .secondary,.deployment-actions .danger{margin-top:12px}
 	.provision-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.provision-grid label{display:grid;gap:6px;margin-top:12px;color:#aeb6cc;font-size:12px}.provision-grid input,.provision-grid select{box-sizing:border-box;width:100%;padding:10px;border:1px solid #ffffff18;border-radius:8px;background:#090c16;color:#fff}.form-two{display:grid;grid-template-columns:1fr 1fr;gap:10px}.success{padding:12px 14px;border-radius:9px;background:#22bd7b18;color:#8ce4b9}.setup-link code{overflow-wrap:anywhere;padding:12px;background:#090c16;border-radius:8px}.tenant-logo{width:36px;height:36px;object-fit:contain;border-radius:8px;background:#fff;padding:3px}.org-identity{display:flex!important;align-items:center;gap:10px;min-width:0!important}.provider-state{display:flex;align-items:center;gap:6px}.workspace-address{color:#8fddb9;font-size:11px;text-decoration:none}.workspace-address:hover{text-decoration:underline}@media(max-width:900px){.provision-grid{grid-template-columns:1fr}}@media(max-width:560px){.form-two{grid-template-columns:1fr}}
 	.address-row{display:flex;align-items:center;gap:8px}.edit-address{padding:2px 6px;border:1px solid #ffffff18;border-radius:5px;background:transparent;color:#9c93d8;font-size:10px}.address-editor{display:flex;align-items:center;gap:5px;margin-top:4px}.address-editor span{color:#737d99;font-size:10px}.address-editor input{min-width:110px;padding:5px;border:1px solid #ffffff20;border-radius:5px;background:#090c16;color:#fff}.address-editor button{padding:5px 7px;border:1px solid #ffffff18;border-radius:5px;background:#20263a;color:#fff;font-size:10px}
 	.tenant-actions{display:flex;align-items:center;gap:10px}.suspend,.reactivate{padding:6px 9px;border-radius:7px;font-size:11px;font-weight:700}.suspend{border:1px solid #ef5b6855;background:#ef5b6815;color:#ff9da7}.reactivate{border:1px solid #22bd7b55;background:#22bd7b12;color:#7ce0ae}.lifecycle-confirm{margin:16px 0;padding:18px;border:1px solid #ef5b6855;border-radius:12px;background:#ef5b680b}.lifecycle-confirm h3{margin:0}.lifecycle-confirm label{display:grid;gap:6px;margin-top:12px;color:#adb5cb;font-size:12px}.lifecycle-confirm input,.lifecycle-confirm textarea{box-sizing:border-box;width:100%;padding:10px;border:1px solid #ffffff20;border-radius:8px;background:#090c16;color:#fff}.lifecycle-confirm textarea{min-height:78px;resize:vertical}.lifecycle-actions{display:flex;gap:10px}.lifecycle-actions .danger,.lifecycle-actions .secondary{width:auto}.workspace>.badge{white-space:nowrap}

@@ -125,7 +125,9 @@ func (s *Server) handleTriggerUpgrade(c *fiber.Ctx) error {
 }
 
 func (s *Server) registerUpdatesRoutes(api fiber.Router) {
-	api.Get("/system/updates/status", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleGetUpdatesStatus)
-	api.Post("/system/updates/check", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleTriggerUpdatesCheck)
-	api.Post("/system/updates/upgrade", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleTriggerUpgrade)
+	// Releases replace the shared gateway process and therefore affect every
+	// workspace. A workspace role, including owner, must never authorize them.
+	api.Get("/system/updates/status", s.platformMW(rbac.ResourceConfig, rbac.ActionRead), s.handleGetUpdatesStatus)
+	api.Post("/system/updates/check", s.platformMW(rbac.ResourceConfig, rbac.ActionRead), s.handleTriggerUpdatesCheck)
+	api.Post("/system/updates/upgrade", s.platformMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleTriggerUpgrade)
 }

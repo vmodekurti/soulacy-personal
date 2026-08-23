@@ -8,6 +8,19 @@ import (
 	"time"
 )
 
+func TestConversationLockKeyIsStableAndPreservesFieldBoundaries(t *testing.T) {
+	key := conversationLockKey("workspace", "conversation")
+	if key != conversationLockKey("workspace", "conversation") {
+		t.Fatal("the same conversation produced different advisory lock keys")
+	}
+	if key == conversationLockKey("work", "spaceconversation") {
+		t.Fatal("workspace/session field boundaries collided")
+	}
+	if key == conversationLockKey("workspace", "other") {
+		t.Fatal("different conversations produced the same advisory lock key")
+	}
+}
+
 func TestPostgresHistoryWorkspaceIsolation(t *testing.T) {
 	dsn := strings.TrimSpace(os.Getenv("SOULACY_TEST_POSTGRES_DSN"))
 	if dsn == "" {

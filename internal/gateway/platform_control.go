@@ -25,12 +25,24 @@ func (s *Server) handlePlatformOverview(c *fiber.Ctx) error {
 	}
 	ready, readiness, dependencies := s.readinessState(c.UserContext())
 	authStatus, authMode, authDetail := s.authPosture()
+	cfg := s.config()
+	issues := cfg.DeploymentReadinessIssues()
+	acknowledgedIssues := cfg.AcknowledgedDeploymentIssues()
 	return c.JSON(fiber.Map{
-		"mode": s.config().DeploymentMode(), "version": config.Version,
+		"mode": cfg.DeploymentMode(), "version": config.Version,
 		"timestamp": time.Now().UTC(), "summary": summary,
 		"replica":        fiber.Map{"ready": ready, "status": readiness, "draining": s.Draining()},
 		"dependencies":   dependencies,
 		"authentication": fiber.Map{"status": authStatus, "mode": authMode, "detail": authDetail},
+		"deployment": fiber.Map{
+			"profile": cfg.Deployment.Profile, "owner": cfg.Deployment.Owner,
+			"region": cfg.Deployment.Region, "notes": cfg.Deployment.Notes,
+			"ready": len(issues) == 0, "issues": issues, "acknowledged_issues": acknowledgedIssues,
+			"storage_backend": cfg.Storage.Backend, "queue_backend": cfg.Queue.Backend,
+			"kms_provider": cfg.Credentials.KMSProvider, "executor_backend": cfg.Executor.Backend,
+			"sandbox_enabled": cfg.Runtime.Sandbox.Enabled, "sandbox_mode": cfg.Runtime.Sandbox.Mode,
+			"rate_limit_backend": cfg.RateLimit.Backend, "rate_limit_enabled": cfg.RateLimit.Enabled,
+		},
 	})
 }
 

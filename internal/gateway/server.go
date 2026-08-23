@@ -1079,7 +1079,9 @@ func (s *Server) buildApp() *fiber.App {
 	api.Get("/readiness", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleReadiness)
 	s.registerUpdatesRoutes(api)
 
-	api.Get("/deployment/status", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleDeploymentStatus)
+	// Deployment posture describes shared infrastructure, not a tenant. Keep
+	// it behind the platform credential just like config, logs, and updates.
+	api.Get("/deployment/status", s.platformMW(rbac.ResourceConfig, rbac.ActionRead), s.handleDeploymentStatus)
 	api.Get("/security/readiness", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleSecurityReadiness)
 	// S7 (Cohort F) — Security Doctor: per-agent synthesis view +
 	// dry-run injection simulation without executing anything.
