@@ -21,7 +21,7 @@ func (s *Server) handleOnboardingStatus(c *fiber.Ctx) error {
 	providers := s.providerDoctorChecks(c)
 	channels := s.channelDoctorChecks()
 	templates, _ := s.templatesCatalog().List()
-	s.applyTemplateRuntimeDefaults(templates)
+	s.applyTemplateRuntimeDefaults(c, templates)
 
 	steps := []onboardingStep{
 		s.onboardingProviderStep(providers),

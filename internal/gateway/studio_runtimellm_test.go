@@ -19,7 +19,28 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/soulacy/soulacy/internal/config"
 )
+
+func TestStudioProviderAvailabilityIncludesWorkspaceEffectiveModel(t *testing.T) {
+	effective := &config.Config{LLM: config.LLMConfig{Providers: map[string]config.ProviderConfig{
+		"ollama-cloud": {Model: "glm-5.2"},
+		"openai":       {Model: "gpt-4o"},
+	}}}
+	providers, models := studioProviderAvailability(effective, func(id string) bool {
+		return id == "ollama-cloud"
+	})
+	if !providers["ollama-cloud"] || providers["openai"] {
+		t.Fatalf("provider availability = %#v", providers)
+	}
+	if !models["glm-5.2"] || !models["ollama-cloud/glm-5.2"] {
+		t.Fatalf("workspace-selected model missing from availability: %#v", models)
+	}
+	if models["gpt-4o"] {
+		t.Fatalf("model from unavailable provider was advertised: %#v", models)
+	}
+}
 
 // A draft with no llm block is legal: the runtime resolves the workspace
 // default. The save gate must resolve it the same way instead of blocking.

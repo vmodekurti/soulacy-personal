@@ -41,7 +41,10 @@
   import { repairVerdict, repairProofLabel } from '../lib/studio/repairverdict.js'
   import { fixturesFromWorkflow, outcomeWithFixtures } from '../lib/studio/benchfixtures.js'
   import { specWithTrigger, unresolvedBlockers } from '../lib/studio/buildspecview.js'
-  import { snapshotSession, sessionAfterDelete, promptsForDraft } from '../lib/studio/session.js'
+  import {
+    snapshotSession, sessionAfterDelete, promptsForDraft,
+    providerSetupTarget, studioResumeRequested,
+  } from '../lib/studio/session.js'
   import {
     partitionLibrary, filterLibrary, libraryFacets, hasActiveFilters, emptyQuery,
   } from '../lib/studio/libraryfilter.js'
@@ -2954,7 +2957,9 @@ Use null for fields that are not present.`
     if (!action) return
     switch (actionKind(action)) {
       case 'navigate':
-        window.location.hash = NAVIGATE_TARGETS[action]
+        window.location.hash = action === 'open_providers'
+          ? providerSetupTarget(NAVIGATE_TARGETS[action], item, workflow)
+          : NAVIGATE_TARGETS[action]
         return
 
       case 'apply': {
@@ -4735,10 +4740,14 @@ Use null for fields that are not present.`
     const s = get(studioSession)
     if (!s) return
     carriedSession = s
+    if (studioResumeRequested(location.hash)) {
+      resumeCarriedSession(s.step || STEP_BUILD)
+      history.replaceState({}, '', '#studio')
+    }
   }
 
   // The user chose "pick up where you left off": now apply it.
-  function resumeCarriedSession() {
+  function resumeCarriedSession(returnStep = STEP_BUILD) {
     const s = carriedSession
     if (!s) return
     carriedSession = null
@@ -4763,7 +4772,7 @@ Use null for fields that are not present.`
     if (s.refinement) { refinement = s.refinement; refineAnswers = s.refineAnswers || {} }
     // Resuming IS the deliberate act of going back into the work, so this one
     // path may land on Build. Arriving in Studio never does.
-    if (workflow) advanceToStep(STEP_BUILD)
+    if (workflow) advanceToStep(returnStep)
   }
 
   // A carried session describing an agent that has since been deleted must go
@@ -4846,6 +4855,7 @@ Use null for fields that are not present.`
       intent,
       rawPrompt,
       loadedAgentId,
+      step,
       notes,
       questions,
       suggestions,
@@ -5077,7 +5087,7 @@ Use null for fields that are not present.`
                          last open rather than anything the user asked for. -->
                     {#if carriedSession}
                       <li>
-                        <button class="d-existing-item" type="button" on:click={resumeCarriedSession}>
+                        <button class="d-existing-item" type="button" on:click={() => resumeCarriedSession()}>
                           <span class="d-existing-name">
                             {carriedName}
                             <span class="agent-badge off">in progress</span>

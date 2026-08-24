@@ -522,7 +522,11 @@ func (s *Server) groundGenerationProfile(cat *studio.Catalog, intent string, req
 	}
 	provider, model := s.studioProviderModel(request...)
 	baseURL := ""
-	if pc, ok := s.config().LLM.Providers[provider]; ok {
+	var effective = s.config()
+	if len(request) > 0 && request[0] != nil {
+		effective = s.effectiveWorkspaceConfig(s.workspaceSettingsFor(request[0]))
+	}
+	if pc, ok := effective.LLM.Providers[provider]; ok {
 		baseURL = pc.BaseURL
 	}
 	gp := studio.BuildGenerationProfile(provider, model, baseURL, intent, *cat)
@@ -642,7 +646,7 @@ func (s *Server) handleStudioPreflight(c *fiber.Ctx) error {
 
 	// Ground a fresh catalog so tool/MCP/channel references are checked against
 	// the real, live inventory rather than whatever the GUI happened to send.
-	cat := s.studioCatalogSnapshot(s.agents(c))
+	cat := s.studioCatalogSnapshot(c, s.agents(c))
 	s.groundCatalog(s.studio(c), &cat)
 	learningOwner := studioLearningOwner(c)
 	s.groundPreferencesFor(s.studio(c), &cat, learningOwner)
@@ -660,7 +664,7 @@ func (s *Server) handleStudioContract(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusBadRequest, "invalid request body: "+err.Error())
 	}
 
-	cat := s.studioCatalogSnapshot(s.agents(c))
+	cat := s.studioCatalogSnapshot(c, s.agents(c))
 	s.groundCatalog(s.studio(c), &cat)
 
 	// Story 2b (Cohort C): when the draft carries an existing agent id, look
@@ -722,18 +726,21 @@ func (s *Server) preflightInput(c *fiber.Ctx, cat studio.Catalog) studio.Preflig
 	// verdict, which is right — claiming every provider is missing because we
 	// could not check would be a confident lie.
 	if s.canCheckProviders() {
-		providers := map[string]bool{}
-		models := map[string]bool{}
-		// Everything the config names starts as unavailable, so a configured but
-		// unregistered provider is reported rather than simply absent from the map.
-		for id := range s.config().LLM.Providers {
-			providers[id] = false
-		}
+		// Readiness must use the same effective, workspace-scoped inventory as
+		// request execution and the Providers screen. Workspace-owned providers
+		// intentionally do not live in the deployment-global router; consulting
+		// only s.config()/ProviderIDs() therefore reported a configured tenant
+		// provider and its selected model as two blockers.
+		settings := s.workspaceSettingsFor(c)
+		effective := s.effectiveWorkspaceConfig(settings)
+		providers, models := studioProviderAvailability(effective, func(id string) bool {
+			return s.providerRegisteredFor(c, id)
+		})
+		// Plugin providers may be registered without a config block. Keep them in
+		// the provider inventory even though there is no configured model to add.
 		for _, id := range s.llmRouter.ProviderIDs() {
-			providers[id] = true
-			if pc, ok := s.config().LLM.Providers[id]; ok && strings.TrimSpace(pc.Model) != "" {
-				models[pc.Model] = true
-				models[id+"/"+pc.Model] = true
+			if _, exists := providers[id]; !exists {
+				providers[id] = true
 			}
 		}
 		in.ProvidersAvailable = providers
@@ -742,13 +749,36 @@ func (s *Server) preflightInput(c *fiber.Ctx, cat studio.Catalog) studio.Preflig
 	return in
 }
 
+func studioProviderAvailability(effective *config.Config, available func(string) bool) (map[string]bool, map[string]bool) {
+	providers := map[string]bool{}
+	models := map[string]bool{}
+	if effective == nil {
+		return providers, models
+	}
+	for id, pc := range effective.LLM.Providers {
+		id = strings.ToLower(strings.TrimSpace(id))
+		if id == "" {
+			continue
+		}
+		usable := available != nil && available(id)
+		providers[id] = usable
+		model := strings.TrimSpace(pc.Model)
+		if !usable || model == "" {
+			continue
+		}
+		models[model] = true
+		models[id+"/"+model] = true
+	}
+	return providers, models
+}
+
 // studioCatalogSnapshot builds the agents/tools/providers portion of the
 // catalog from authoritative live state (the agent loader, the unified tool
 // catalog, and the LLM router). groundCatalog then fills Skills/MCP/Channels/
 // KBs. Used by preflight (no GUI-supplied catalog) and reusable elsewhere.
 // studioCatalogSnapshot lists the agents Studio may wire together. It is
 // scoped so a draft can only reference peers the caller's workspace owns.
-func (s *Server) studioCatalogSnapshot(scope agentScope) studio.Catalog {
+func (s *Server) studioCatalogSnapshot(c *fiber.Ctx, scope agentScope) studio.Catalog {
 	var cat studio.Catalog
 	if s.loader != nil {
 		for _, d := range scope.All() {
@@ -769,9 +799,23 @@ func (s *Server) studioCatalogSnapshot(scope agentScope) studio.Catalog {
 			cat.Tools = append(cat.Tools, p.Name)
 		}
 	}
-	if s.llmRouter != nil {
-		cat.Providers = append(cat.Providers, s.llmRouter.ProviderIDs()...)
+	seenProviders := map[string]bool{}
+	effective := s.effectiveWorkspaceConfig(s.workspaceSettingsFor(c))
+	for id := range effective.LLM.Providers {
+		id = strings.ToLower(strings.TrimSpace(id))
+		if id != "" && s.providerRegisteredFor(c, id) {
+			seenProviders[id] = true
+			cat.Providers = append(cat.Providers, id)
+		}
 	}
+	if s.llmRouter != nil {
+		for _, id := range s.llmRouter.ProviderIDs() {
+			if !seenProviders[id] {
+				cat.Providers = append(cat.Providers, id)
+			}
+		}
+	}
+	sort.Strings(cat.Providers)
 	return cat
 }
 
@@ -809,7 +853,7 @@ func (s *Server) handleStudioAutowire(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return s.errMsg(c, fiber.StatusBadRequest, "invalid request body: "+err.Error())
 	}
-	cat := s.studioCatalogSnapshot(s.agents(c))
+	cat := s.studioCatalogSnapshot(c, s.agents(c))
 	s.groundCatalog(s.studio(c), &cat)
 	in := s.preflightInput(c, cat)
 	model := s.studioLLM(c)
@@ -905,7 +949,7 @@ func (s *Server) handleStudioTroubleshoot(c *fiber.Ctx) error {
 	if model == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "LLM router unavailable")
 	}
-	cat := s.studioCatalogSnapshot(s.agents(c))
+	cat := s.studioCatalogSnapshot(c, s.agents(c))
 	s.groundCatalog(s.studio(c), &cat)
 	problem := "At RUN TIME the agent failed with this error — change the workflow so it cannot happen again: " + strings.TrimSpace(req.Error)
 	if strings.TrimSpace(req.Input) != "" {
@@ -1038,7 +1082,7 @@ func (s *Server) handleStudioBuild(c *fiber.Ctx) error {
 	if model == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "LLM router unavailable")
 	}
-	cat := s.studioCatalogSnapshot(s.agents(c))
+	cat := s.studioCatalogSnapshot(c, s.agents(c))
 	s.groundCatalog(s.studio(c), &cat)
 	in := s.preflightInput(c, cat)
 
@@ -1111,7 +1155,7 @@ func (s *Server) handleStudioBuildStream(c *fiber.Ctx) error {
 	if model == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "LLM router unavailable")
 	}
-	cat := s.studioCatalogSnapshot(s.agents(c))
+	cat := s.studioCatalogSnapshot(c, s.agents(c))
 	s.groundCatalog(s.studio(c), &cat)
 	in := s.preflightInput(c, cat)
 	// Detach from the request context so the loop isn't cancelled when the
@@ -1278,7 +1322,7 @@ func (s *Server) handleStudioGenerateStream(c *fiber.Ctx) error {
 	if model == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "LLM router unavailable")
 	}
-	cat := s.studioCatalogSnapshot(s.agents(c))
+	cat := s.studioCatalogSnapshot(c, s.agents(c))
 	s.groundCatalog(s.studio(c), &cat)
 	learningOwner := studioLearningOwner(c)
 	s.groundPreferencesFor(s.studio(c), &cat, learningOwner)
@@ -1550,7 +1594,7 @@ type studioRunPreview struct {
 // live catalog + preflight state: it never runs anything.
 func (s *Server) studioRunPreviewFor(c *fiber.Ctx, draft studio.Draft) studioRunPreview {
 	draft = s.studioDraftWithRuntimeLLM(draft, c)
-	cat := s.studioCatalogSnapshot(s.agents(c))
+	cat := s.studioCatalogSnapshot(c, s.agents(c))
 	s.groundCatalog(s.studio(c), &cat)
 	in := s.preflightInput(c, cat)
 
@@ -2632,7 +2676,7 @@ func (s *Server) handleStudioDiagnoseRun(c *fiber.Ctx) error {
 	}
 	draft := studio.FromAgentDefinition(*def)
 
-	cat := s.studioCatalogSnapshot(s.agents(c))
+	cat := s.studioCatalogSnapshot(c, s.agents(c))
 	s.groundCatalog(s.studio(c), &cat)
 	in := s.preflightInput(c, cat)
 
@@ -2727,7 +2771,7 @@ func (s *Server) handleStudioDiagnoseSession(c *fiber.Ctx) error {
 	}
 
 	draft := studio.FromAgentDefinition(*def)
-	cat := s.studioCatalogSnapshot(s.agents(c))
+	cat := s.studioCatalogSnapshot(c, s.agents(c))
 	s.groundCatalog(s.studio(c), &cat)
 	in := s.preflightInput(c, cat)
 
@@ -3308,13 +3352,16 @@ func (s *Server) applyLocalPreset(def *agent.Definition, request ...*fiber.Ctx) 
 	if provider == "" {
 		provider, _ = s.defaultAgentLLM(request...)
 	}
-	baseURL := ""
-	if pc, ok := s.config().LLM.Providers[provider]; ok {
-		baseURL = pc.BaseURL
-	}
+	effective := s.config()
 	intent := strings.TrimSpace(s.config().LLM.Studio.Preset)
-	if len(request) > 0 {
-		intent = firstNonEmpty(s.workspaceSettingsFor(request[0]).LLM.Studio.Preset, intent)
+	if len(request) > 0 && request[0] != nil {
+		settings := s.workspaceSettingsFor(request[0])
+		effective = s.effectiveWorkspaceConfig(settings)
+		intent = firstNonEmpty(settings.LLM.Studio.Preset, intent)
+	}
+	baseURL := ""
+	if pc, ok := effective.LLM.Providers[provider]; ok {
+		baseURL = pc.BaseURL
 	}
 	// Cloud-quality is a deliberate choice for cloud runs; other intents keep
 	// the local-only gate to avoid mistakenly applying local-tuned generous
@@ -3448,7 +3495,7 @@ func (s *Server) handleStudioValidate(c *fiber.Ctx) error {
 	// Argument-schema check against the live catalog: flag a tool node passing an
 	// argument the tool doesn't accept (the "unexpected keyword argument" class),
 	// before it fails at run time.
-	res.Warnings = append(res.Warnings, studio.ValidateToolArgs(req.Workflow, s.studioCatalogSnapshot(s.agents(c)))...)
+	res.Warnings = append(res.Warnings, studio.ValidateToolArgs(req.Workflow, s.studioCatalogSnapshot(c, s.agents(c)))...)
 	// Python validity: syntax-check every inline python node and require the
 	// run(inputs) entrypoint — catches broken generated code at build time
 	// instead of at run time. Parse-only; never executes the code.
@@ -3718,7 +3765,7 @@ func (s *Server) handleStudioValidateYAML(c *fiber.Ctx) error {
 			add("warning", "graph", w.NodeID, w.Message, "")
 		}
 	}
-	cat := s.studioCatalogSnapshot(s.agents(c))
+	cat := s.studioCatalogSnapshot(c, s.agents(c))
 	s.groundCatalog(s.studio(c), &cat)
 	pf := studio.Preflight(draft, s.preflightInput(c, cat))
 	for _, b := range pf.Blockers {
@@ -3805,7 +3852,7 @@ func (s *Server) handleStudioFixYAML(c *fiber.Ctx) error {
 			add("WARNING", w.NodeID, w.Message)
 		}
 	}
-	cat := s.studioCatalogSnapshot(s.agents(c))
+	cat := s.studioCatalogSnapshot(c, s.agents(c))
 	s.groundCatalog(s.studio(c), &cat)
 	pf := studio.Preflight(draft, s.preflightInput(c, cat))
 	for _, b := range pf.Blockers {
@@ -3848,7 +3895,7 @@ func (s *Server) handleStudioFixYAML(c *fiber.Ctx) error {
 			Entry:  check.Workflow.Entry,
 			Output: check.Workflow.Output,
 		}}
-		cat := s.studioCatalogSnapshot(s.agents(c))
+		cat := s.studioCatalogSnapshot(c, s.agents(c))
 		s.groundCatalog(s.studio(c), &cat)
 		studio.RepairWiring(&d, cat)
 		studio.ApplyTemplateFixes(&d)
@@ -3963,7 +4010,7 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 	// same generation contract shown on the canvas. The GUI runs this before
 	// Save, but enforcing it here protects imports, stale tabs, and alternate API
 	// clients from creating an agent that is born broken and only fails later.
-	cat := s.studioCatalogSnapshot(s.agents(c))
+	cat := s.studioCatalogSnapshot(c, s.agents(c))
 	s.groundCatalog(s.studio(c), &cat)
 	in := s.preflightInput(c, cat)
 	// Judge the draft the RUNTIME will see, not the one the client sent. A draft
@@ -4026,7 +4073,7 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 	// reaching for connected-server state. A later schema change then reads as
 	// drift with a named node, instead of a validation error indistinguishable
 	// from a workflow that was always wrong.
-	saveCatalog := s.studioCatalogSnapshot(s.agents(c))
+	saveCatalog := s.studioCatalogSnapshot(c, s.agents(c))
 	s.groundCatalog(s.studio(c), &saveCatalog)
 	if snap := studio.CaptureToolSchemas(req.Workflow.Flow, saveCatalog, time.Now()); snap != nil {
 		def.ToolSchemas = snap
@@ -4297,7 +4344,7 @@ func (s *Server) handleStudioCompileNode(c *fiber.Ctx) error {
 	}
 	// Ground in the live catalog when the caller didn't supply one.
 	if len(req.Catalog.Tools) == 0 && len(req.Catalog.MCP) == 0 && len(req.Catalog.Agents) == 0 {
-		req.Catalog = s.studioCatalogSnapshot(s.agents(c))
+		req.Catalog = s.studioCatalogSnapshot(c, s.agents(c))
 	}
 	node, err := studio.CompileNode(authorizedRequestContext(c), s.studioLLM(c), req)
 	if err != nil {

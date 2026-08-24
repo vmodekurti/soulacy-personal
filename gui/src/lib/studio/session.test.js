@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { snapshotSession, restoreLandingStep, sessionAfterDelete, promptsForDraft } from './session.js'
+import {
+  snapshotSession, restoreLandingStep, sessionAfterDelete, promptsForDraft,
+  providerSetupTarget, providerReturnContext, studioResumeRequested,
+} from './session.js'
 import { STEP_DESCRIBE, STEP_BUILD } from './wizard.js'
 
 const draft = { name: 'Weather', flow: { nodes: [{ id: 'a' }] } }
@@ -28,6 +31,10 @@ describe('snapshotSession', () => {
     expect(snapshotSession({ workflow: draft, loadedAgentId: 'agent-7' }).loadedAgentId).toBe('agent-7')
   })
 
+  it('keeps the wizard step for an explicit settings round trip', () => {
+    expect(snapshotSession({ workflow: draft, step: 'save' }).step).toBe('save')
+  })
+
   it('is safe on missing input', () => {
     expect(snapshotSession(null)).toBeNull()
     expect(snapshotSession({})).toBeNull()
@@ -39,6 +46,26 @@ describe('snapshotSession', () => {
     expect(s.questions).toEqual([])
     expect(s.refineAnswers).toEqual({})
     expect(s.loadedAgentId).toBe('')
+  })
+})
+
+describe('provider settings round trip', () => {
+  it('deep-links to the provider and names the preserved draft', () => {
+    const target = providerSetupTarget('#providers', {
+      actionParams: { provider: 'ollama-cloud' },
+    }, { name: 'Travel Advisor' })
+    expect(target).toBe('#providers?return=studio&resume=1&provider=ollama-cloud&draft=Travel+Advisor')
+    expect(providerReturnContext(target)).toEqual({ provider: 'ollama-cloud', draft: 'Travel Advisor' })
+  })
+
+  it('returns to Studio only for an explicit resume route', () => {
+    expect(studioResumeRequested('#studio?resume=1')).toBe(true)
+    expect(studioResumeRequested('#studio')).toBe(false)
+    expect(providerReturnContext('#providers')).toBeNull()
+  })
+
+  it('does not add return state when there is no draft to preserve', () => {
+    expect(providerSetupTarget('#providers', {}, null)).toBe('#providers')
   })
 })
 

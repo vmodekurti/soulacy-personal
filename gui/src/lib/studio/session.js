@@ -36,6 +36,7 @@ export function snapshotSession(state) {
     // matched back to the agent it came from, so deleting that agent leaves it
     // on screen and the next save creates a duplicate instead of updating.
     loadedAgentId: s.loadedAgentId || '',
+    step: s.step || '',
     notes: s.notes || [],
     questions: s.questions || [],
     suggestions: s.suggestions || [],
@@ -43,6 +44,42 @@ export function snapshotSession(state) {
     refinement: s.refinement || null,
     refineAnswers: s.refineAnswers || {},
   }
+}
+
+/**
+ * Carry an explicit return route when a Studio finding sends the operator to
+ * provider settings. The draft stays in the in-memory studioSession store;
+ * only navigation metadata is placed in the URL.
+ */
+export function providerSetupTarget(base, finding, draft) {
+  if (!draft) return base
+  const params = (finding && (finding.actionParams || finding.action_params)) || {}
+  const query = new URLSearchParams({ return: 'studio', resume: '1' })
+  const provider = String(params.provider || '').trim()
+  const draftName = String(draft.name || '').trim()
+  if (provider) query.set('provider', provider)
+  if (draftName) query.set('draft', draftName)
+  return `${base}?${query.toString()}`
+}
+
+export function providerReturnContext(hash) {
+  const raw = String(hash || '')
+  const q = raw.indexOf('?')
+  if (q < 0) return null
+  const params = new URLSearchParams(raw.slice(q + 1))
+  if (params.get('return') !== 'studio') return null
+  return {
+    provider: (params.get('provider') || '').trim(),
+    draft: (params.get('draft') || '').trim(),
+  }
+}
+
+export function studioResumeRequested(hash) {
+  const raw = String(hash || '')
+  const q = raw.indexOf('?')
+  if (q < 0) return false
+  const params = new URLSearchParams(raw.slice(q + 1))
+  return params.get('resume') === '1'
 }
 
 /**

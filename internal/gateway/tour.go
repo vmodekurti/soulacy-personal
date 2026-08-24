@@ -18,11 +18,13 @@ import (
 // tour, because a tour that 500s is worse than one that assumes less.
 // installSnapshot describes what the caller has set up in their own
 // workspace, which is what the tour is guiding them through.
-func (s *Server) installSnapshot(scope agentScope) tour.InstallState {
+func (s *Server) installSnapshot(c *fiber.Ctx, scope agentScope) tour.InstallState {
 	var st tour.InstallState
 
-	if s.llmRouter != nil {
-		st.Providers = len(s.llmRouter.ProviderIDs())
+	for id := range s.effectiveWorkspaceConfig(s.workspaceSettingsFor(c)).LLM.Providers {
+		if s.providerRegisteredFor(c, id) {
+			st.Providers++
+		}
 	}
 	if s.loader != nil {
 		for _, a := range scope.All() {
@@ -62,7 +64,7 @@ func (s *Server) installSnapshot(scope agentScope) tour.InstallState {
 // handleTour implements GET /api/v1/tour/:page.
 func (s *Server) handleTour(c *fiber.Ctx) error {
 	page := strings.TrimSpace(c.Params("page"))
-	story, ok := tour.Narrate(page, s.installSnapshot(s.agents(c)))
+	story, ok := tour.Narrate(page, s.installSnapshot(c, s.agents(c)))
 	if !ok {
 		return s.errMsg(c, fiber.StatusNotFound, "no tour for \""+page+"\"")
 	}

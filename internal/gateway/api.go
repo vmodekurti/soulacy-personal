@@ -600,7 +600,12 @@ func (s *Server) handleCreateAgent(c *fiber.Ctx) error {
 
 	// Default LLM to configured provider
 	if def.LLM.Provider == "" {
-		def.LLM.Provider = s.config().LLM.DefaultProvider
+		def.LLM.Provider, def.LLM.Model = s.defaultAgentLLM(c)
+	} else if def.LLM.Model == "" {
+		effective := s.effectiveWorkspaceConfig(s.workspaceSettingsFor(c))
+		if pc, ok := effective.LLM.Providers[def.LLM.Provider]; ok {
+			def.LLM.Model = strings.TrimSpace(pc.Model)
+		}
 	}
 	def.Enabled = true
 
@@ -4967,16 +4972,16 @@ func (s *Server) handleListTemplates(c *fiber.Ctx) error {
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
-	s.applyTemplateRuntimeDefaults(entries)
+	s.applyTemplateRuntimeDefaults(c, entries)
 	return c.JSON(fiber.Map{"templates": entries, "count": len(entries)})
 }
 
-func (s *Server) applyTemplateRuntimeDefaults(entries []templates.Entry) {
+func (s *Server) applyTemplateRuntimeDefaults(c *fiber.Ctx, entries []templates.Entry) {
 	for i := range entries {
 		if entries[i].Definition == nil {
 			continue
 		}
-		s.applyTemplateDefinitionDefaults(entries[i].Definition)
+		s.applyTemplateDefinitionDefaults(c, entries[i].Definition)
 		modelDetail := strings.TrimSpace(entries[i].Definition.LLM.Provider)
 		if model := strings.TrimSpace(entries[i].Definition.LLM.Model); model != "" {
 			if modelDetail != "" {
@@ -4994,13 +4999,16 @@ func (s *Server) applyTemplateRuntimeDefaults(entries []templates.Entry) {
 	}
 }
 
-func (s *Server) applyTemplateDefinitionDefaults(def *agent.Definition) {
-	if def == nil || s.config().LLM.DefaultProvider == "" {
+func (s *Server) applyTemplateDefinitionDefaults(c *fiber.Ctx, def *agent.Definition) {
+	if def == nil {
 		return
 	}
-	def.LLM.Provider = s.config().LLM.DefaultProvider
-	if pc, ok := s.config().LLM.Providers[def.LLM.Provider]; ok && strings.TrimSpace(pc.Model) != "" {
-		def.LLM.Model = strings.TrimSpace(pc.Model)
+	provider, model := s.defaultAgentLLM(c)
+	if provider != "" {
+		def.LLM.Provider = provider
+	}
+	if model != "" {
+		def.LLM.Model = model
 	}
 }
 
@@ -5047,7 +5055,7 @@ func (s *Server) handleInstantiateTemplate(c *fiber.Ctx) error {
 	// Embedded templates intentionally carry conservative example providers
 	// (often local Ollama), but a one-click install should not create an agent
 	// that gets disabled at boot because the example model is unavailable.
-	s.applyTemplateDefinitionDefaults(def)
+	s.applyTemplateDefinitionDefaults(c, def)
 	if strings.TrimSpace(req.Cron) != "" {
 		if def.Schedule == nil {
 			def.Schedule = &agent.Schedule{}

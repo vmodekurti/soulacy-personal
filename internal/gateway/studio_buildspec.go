@@ -78,7 +78,7 @@ func (s *Server) handleStudioBuildSpec(c *fiber.Ctx) error {
 	// in agents, builtin tools and providers, but MCP servers and skills are
 	// populated only here. Without it the spec panel would go on reporting
 	// "not specified" for every MCP server the user named.
-	cat := s.studioCatalogSnapshot(s.agents(c))
+	cat := s.studioCatalogSnapshot(c, s.agents(c))
 	s.groundCatalog(s.studio(c), &cat)
 
 	// An empty intent is NOT a 400: ExtractBuildSpec answers it with the blocking

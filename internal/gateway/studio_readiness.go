@@ -49,7 +49,7 @@ func (s *Server) handleStudioReadiness(c *fiber.Ctx) error {
 	if req.Catalog != nil {
 		cat = *req.Catalog
 	} else {
-		cat = s.studioCatalogSnapshot(s.agents(c))
+		cat = s.studioCatalogSnapshot(c, s.agents(c))
 	}
 	s.groundCatalog(s.studio(c), &cat)
 

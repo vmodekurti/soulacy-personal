@@ -38,11 +38,13 @@ func (s *Server) handleTemplateReadiness(c *fiber.Ctx) error {
 
 	// Provider: configured (registered) in the LLM config, or local (ollama).
 	provider := strings.TrimSpace(def.LLM.Provider)
+	effective := s.effectiveWorkspaceConfig(s.workspaceSettingsFor(c))
 	if provider == "" {
-		provider = strings.TrimSpace(s.config().LLM.DefaultProvider)
+		provider = strings.TrimSpace(effective.LLM.DefaultProvider)
 	}
 	if provider != "" {
-		_, configured := s.config().LLM.Providers[provider]
+		_, configured := effective.LLM.Providers[provider]
+		configured = configured && s.providerRegisteredFor(c, provider)
 		local := provider == "ollama"
 		checks = append(checks, readinessCheck{
 			Key: "provider:" + provider, Label: "LLM provider: " + provider, Category: "provider",
@@ -87,7 +89,7 @@ func (s *Server) handleTemplateReadiness(c *fiber.Ctx) error {
 			if srv == "" {
 				continue
 			}
-			_, configured := s.config().MCP.Servers[srv]
+			configured := s.connectedMCPSet(s.agents(c).WorkspaceID())[srv]
 			checks = append(checks, readinessCheck{
 				Key: "mcp:" + srv, Label: "MCP server: " + srv, Category: "mcp",
 				Satisfied: configured,

@@ -3,6 +3,7 @@
   import { confirmDestructive } from '../lib/destructive.js'
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
+  import { providerReturnContext } from '../lib/studio/session.js'
 
   export let scope = 'deployment'
   $: providerAPI = scope === 'workspace' ? api.workspaceProviders : api.providers
@@ -23,6 +24,7 @@
   let doctor          = []
   let vaultCheck      = null
   let doctorLoading   = false
+  let studioReturn    = null
 
   // Add/edit-credentials modal state
   let showAdd  = false
@@ -323,7 +325,13 @@
     }
   }
 
-  onMount(load)
+  onMount(async () => {
+    studioReturn = providerReturnContext(location.hash)
+    await load()
+    if (studioReturn && studioReturn.provider && providers[studioReturn.provider]) {
+      openAdd(studioReturn.provider)
+    }
+  })
 
   const PROVIDER_ICONS = {
     ollama: '🦙', openai: '🤖', anthropic: '🔮', openrouter: '🌐',
@@ -353,6 +361,18 @@
     </div>
         <TourButton />
     </div>
+
+  {#if studioReturn}
+    <div class="banner studio-return">
+      <div>
+        <strong>Provider setup for {studioReturn.draft || 'your Studio agent'}</strong>
+        <span>Your in-progress agent is preserved.</span>
+      </div>
+      <button class="btn-primary" on:click={() => window.location.hash = '#studio?resume=1'}>
+        ← Back to Studio
+      </button>
+    </div>
+  {/if}
 
   {#if error}<div class="banner err">{error}</div>{/if}
   {#if notice}<div class="banner ok">{notice}</div>{/if}
@@ -875,6 +895,9 @@
   .err    { background: rgba(240,96,96,.1); border: 1px solid rgba(240,96,96,.3); color: #f06060; }
   .ok     { background: rgba(76,175,130,.1); border: 1px solid rgba(76,175,130,.3); color: #4caf82; }
   .warn   { background: rgba(240,196,96,.08); border: 1px solid rgba(240,196,96,.3); color: #f0c460; }
+  .studio-return { display:flex; align-items:center; justify-content:space-between; gap:1rem; color:#d9d7ff; background:rgba(108,99,255,.08); border:1px solid rgba(108,99,255,.28); }
+  .studio-return div { display:flex; flex-direction:column; gap:.2rem; }
+  .studio-return span { color:#9299bd; font-size:.82rem; }
   .restart-banner { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; }
   .empty  { color: #6b7294; padding: 3rem; text-align: center; }
 

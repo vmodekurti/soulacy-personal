@@ -90,7 +90,7 @@ func (s *Server) readinessPayload(c *fiber.Ctx) fiber.Map {
 	channels := s.channelDoctorChecks()
 	vault := s.vaultDoctorCheck(c)
 	templates, _ := s.templatesCatalog().List()
-	s.applyTemplateRuntimeDefaults(templates)
+	s.applyTemplateRuntimeDefaults(c, templates)
 
 	agents, enabledAgents, chatAgents, scheduledAgents, learningAgents := s.agentReadinessCounts(s.agents(c))
 	providersReady := countDoctorProviders(providers, "ok", "warn")
@@ -628,7 +628,7 @@ func (s *Server) studioContractReadiness(c *fiber.Ctx) studioContractReadiness {
 		out.WorstSummary = "Agent loader is not available, so saved workflows could not be contract-scanned."
 		return out
 	}
-	cat := s.studioCatalogSnapshot(s.agents(c))
+	cat := s.studioCatalogSnapshot(c, s.agents(c))
 	s.groundCatalog(s.studio(c), &cat)
 	in := s.preflightInput(c, cat)
 

@@ -60,12 +60,17 @@ func (s *Server) handleCostEstimate(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusBadRequest, "token counts must be non-negative")
 	}
 	provider := strings.TrimSpace(req.Provider)
-	if provider == "" {
-		provider = s.config().LLM.DefaultProvider
-	}
 	model := strings.TrimSpace(req.Model)
+	defaultProvider, defaultModel := s.defaultAgentLLM(c)
+	if provider == "" {
+		provider = defaultProvider
+	}
 	if model == "" {
-		model = s.config().LLM.Providers[provider].Model
+		if provider == defaultProvider {
+			model = defaultModel
+		} else if pc, ok := s.effectiveWorkspaceConfig(s.workspaceSettingsFor(c)).LLM.Providers[provider]; ok {
+			model = strings.TrimSpace(pc.Model)
+		}
 	}
 	if req.MaxOutputTokens == 0 {
 		req.MaxOutputTokens = s.config().Costs.DefaultMaxOutputTokens
