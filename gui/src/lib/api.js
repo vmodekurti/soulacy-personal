@@ -38,10 +38,15 @@ function authHeaders() {
 }
 
 export async function apiFetch(path, opts = {}) {
-	const { _costConfirmed, _authRetried, _reauthRetried, _oidcReauthReturnTo, ...requestOpts } = opts
+	const { _costConfirmed, _authRetried, _reauthRetried, _oidcReauthReturnTo, _versionPath, ...requestOpts } = opts
+  // Composite authoring routes such as POST /studio/save mutate an agent but
+  // do not carry its id in the URL. Their caller supplies the canonical agent
+  // path solely for version lookup/recording; the HTTP request still goes to
+  // the Studio endpoint.
+  const versionPath = _versionPath || path
   const res = await fetch('/api/v1' + path, {
 	...requestOpts,
-	headers: { ...authHeaders(), ...withPrecondition(path, requestOpts) },
+	headers: { ...authHeaders(), ...withPrecondition(versionPath, requestOpts) },
   })
   // A 401 body has to be read BEFORE deciding what to do about it, because
   // two different failures wear that status and they have opposite remedies
@@ -101,7 +106,7 @@ export async function apiFetch(path, opts = {}) {
     // just told us is wrong. Keeping it would make the next save fail
     // identically, so the page's only route back is an explicit reload — which
     // is what the conflict dialog offers.
-    if (res.status === 409 || res.status === 428) forgetVersion(path)
+    if (res.status === 409 || res.status === 428) forgetVersion(versionPath)
     // Preserve the full error body alongside the status so callers can read
     // structured fields (e.g. Studio's 409 consent fallback carries
     // requiresConsent + consentItems beyond the human `error` string).
@@ -116,7 +121,7 @@ export async function apiFetch(path, opts = {}) {
   // /agents/:id, /agents/:id/yaml) and the write (which re-derives it from
   // what it just stored) set it, so a save followed by another save works
   // without an intervening reload.
-  rememberVersion(path, res.headers?.get?.('ETag') || '')
+  rememberVersion(versionPath, res.headers?.get?.('ETag') || '')
   if (res.status === 204) return null
   const text = await res.text()
   const parsed = text ? JSON.parse(text) : null
@@ -859,11 +864,11 @@ export const api = {
     ownList: () => apiFetch('/mcp/own'),
     ownPut: (id, body) => apiFetch(`/mcp/own/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) }),
     ownDelete: (id) => apiFetch(`/mcp/own/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-    inspectInstall: (sourceURL) => apiFetch('/mcp/own/install/inspect', {
-      method: 'POST', body: JSON.stringify({ source_url: sourceURL }),
+    inspectInstall: (sourceURL, permissions) => apiFetch('/mcp/own/install/inspect', {
+      method: 'POST', body: JSON.stringify({ source_url: sourceURL, permissions }),
     }),
-    approveInstall: (approvalToken, fingerprint) => apiFetch('/mcp/own/install/approve', {
-      method: 'POST', body: JSON.stringify({ approval_token: approvalToken, fingerprint }),
+    approveInstall: (approvalToken, fingerprint, settings = {}) => apiFetch('/mcp/own/install/approve', {
+      method: 'POST', body: JSON.stringify({ approval_token: approvalToken, fingerprint, settings }),
     }),
   },
 
@@ -1020,8 +1025,11 @@ export const api = {
     fromYaml: ({ yaml } = {}) =>
       apiFetch('/studio/from-yaml', { method: 'POST', body: JSON.stringify({ yaml }) }),
     /** Save authored SOUL.yaml directly to disk (code view is authoritative). */
-    saveYaml: ({ yaml } = {}) =>
-      apiFetch('/studio/save-yaml', { method: 'POST', body: JSON.stringify({ yaml }) }),
+    saveYaml: ({ yaml, agentId } = {}) =>
+      apiFetch('/studio/save-yaml', {
+        method: 'POST', body: JSON.stringify({ yaml }),
+        ...(agentId ? { _versionPath: `/agents/${agentId}` } : {}),
+      }),
     /** Full validation of edited SOUL.yaml: syntax + definition + graph + runtime. */
     validateYaml: ({ yaml } = {}) =>
       apiFetch('/studio/validate-yaml', { method: 'POST', body: JSON.stringify({ yaml }) }),
@@ -1323,6 +1331,7 @@ export const api = {
     save: ({ workflow, initialWorkflow, acceptPrivilegedExposure, grants, acceptWarningsReason } = {}) =>
       apiFetch('/studio/save', {
         method: 'POST',
+        ...(workflow?.id ? { _versionPath: `/agents/${workflow.id}` } : {}),
         body: JSON.stringify({
           workflow,
           ...(initialWorkflow ? { initial_workflow: initialWorkflow } : {}),

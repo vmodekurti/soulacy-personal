@@ -485,6 +485,8 @@
     provider: 'Which configured LLM provider this agent uses by default.',
     model: 'Which model this agent calls. The list is loaded from the selected provider when possible.',
     maxTokens: 'Caps each model response. Raise for long reports or synthesis; lower to reduce cost, latency, and rambling.',
+    runBudgetTokens: 'Total prompt and response tokens across the complete run, including every tool turn. Scheduled and interactive runs both use this limit.',
+    runBudgetCalls: 'Maximum model calls across the complete run. This remains a separate runaway-loop guard when you raise the token budget.',
     temperature: 'Controls randomness. Use lower values for reliable tool use and extraction; higher values for creative or exploratory answers.',
     topP: 'Nucleus sampling. Lower values restrict the token pool for stability; higher values allow more varied phrasing.',
     maxTurns: 'Maximum LLM/tool turns before the agent stops. Raise for complex tool workflows; lower to prevent runaway loops.',
@@ -577,6 +579,7 @@
     webhook: { text_path: '', user_id_path: '', username_path: '', session_id_path: '', thread_id_path: '', include_raw: false },
     system_prompt: '',
     llm: { provider: workspaceDefaultProvider || 'ollama', model: '', temperature: 0.7, top_p: 0.9, max_tokens: 512 },
+    budget: { max_tokens: 100000, max_llm_calls: 20 },
     memory: { read_scopes: ['session'], write_scopes: ['session'], max_tokens: 20 },
     learning: { enabled: false, min_chars: 160, max_proposals: 3 },
     tools: [], skills: [], knowledge: [], agents: [], parallel_peer_calls: false, structured_peer_results: false, confirm_tools: [], unattended: false, max_turns: 5, stream_reply: false, enabled: true,
@@ -1049,6 +1052,7 @@
     if (editing.enabled == null) editing.enabled = true
     // Ensure nested objects always exist in the editor copy
     editing.llm      = editing.llm      || { provider: 'ollama', model: '', temperature: 0.7, max_tokens: 512 }
+    editing.budget   = editing.budget   || { max_tokens: 100000, max_llm_calls: 20 }
     editing.memory   = editing.memory   || { read_scopes: ['session'], write_scopes: ['session'], max_tokens: 20 }
     editing.schedule = editing.schedule || { cron: '' }
     editing.webhook  = editing.webhook  || { text_path: '', user_id_path: '', username_path: '', session_id_path: '', thread_id_path: '', include_raw: false }
@@ -1584,27 +1588,31 @@ console.log(reply);` : ''
   // F-GUI-2 — deep-link support: #agents?agent_id=X&doctor=1 auto-opens the
   // Security Doctor drawer after the agent list resolves. Used by Dashboard's
   // Security readiness row and the channel-editor "learn more" callout.
-  function checkDoctorHash() {
+  function checkAgentHash() {
     try {
       const hash = window.location.hash || ''
       const idx = hash.indexOf('?')
       if (idx < 0) return
       const params = new URLSearchParams(hash.slice(idx + 1))
-      if (params.get('doctor') !== '1') return
       const wantId = params.get('agent_id') || ''
       if (!wantId) return
       const target = agents.find(a => a.id === wantId)
       if (target) {
         select(target)
-        // Defer to next tick so `selected` is populated when openDoctor reads it.
-        Promise.resolve().then(() => openDoctor(target))
+        if (params.get('section') === 'budget') {
+          setTimeout(() => document.getElementById('agent-run-budget')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50)
+        }
+        if (params.get('doctor') === '1') {
+          // Defer to next tick so `selected` is populated when openDoctor reads it.
+          Promise.resolve().then(() => openDoctor(target))
+        }
       }
     } catch (_) { /* best-effort */ }
   }
 
   onMount(async () => {
     await load()
-    checkDoctorHash()
+    checkAgentHash()
     loadCatalog()
     loadLookups()
   })
@@ -2140,6 +2148,23 @@ console.log(reply);` : ''
               <div class="field">
                 <span class="field-label" data-tooltip={llmTips.maxTokens}>Max tokens</span>
                 <input type="number" bind:value={editing.llm.max_tokens} min="64" max="8192" data-tooltip={llmTips.maxTokens} />
+              </div>
+            </div>
+
+            <div class="row-3" id="agent-run-budget">
+              <div class="field">
+                <span class="field-label" data-tooltip={llmTips.runBudgetTokens}>Whole-run token budget</span>
+                <input type="number" bind:value={editing.budget.max_tokens} min="1000" max="1000000" step="10000" data-tooltip={llmTips.runBudgetTokens} />
+                <span class="field-hint">All prompts + responses across every turn. Long research reports commonly need 150k–300k.</span>
+              </div>
+              <div class="field">
+                <span class="field-label" data-tooltip={llmTips.runBudgetCalls}>Whole-run model calls</span>
+                <input type="number" bind:value={editing.budget.max_llm_calls} min="1" max="100" data-tooltip={llmTips.runBudgetCalls} />
+                <span class="field-hint">Keep this guard unless the agent genuinely needs more tool/model turns.</span>
+              </div>
+              <div class="field">
+                <span class="field-label">Budget scope</span>
+                <div class="model-status info"><b>Permanent</b><span>Applies to Chat, cron, schedules, and API runs after you save.</span></div>
               </div>
             </div>
 

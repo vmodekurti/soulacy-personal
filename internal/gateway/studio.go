@@ -3682,6 +3682,10 @@ func (s *Server) handleStudioSaveYAML(c *fiber.Ctx) error {
 	if err := s.agents(c).Upsert(dir, &def); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
+	// The guard set the validator for the definition that was replaced. Replace
+	// it with the version that now exists so a second save from the same editor
+	// remains conditional without forcing an intervening reload.
+	c.Set(fiber.HeaderETag, resourceETag(&def))
 	s.schedules(c).Deregister(def.ID)
 	if err := s.schedules(c).Register(&def); err != nil {
 		s.log.Warn("scheduler registration failed", zap.String("agent", def.ID), zap.Error(err))
@@ -4151,6 +4155,9 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 	if err := s.agents(c).Upsert(dir, &def); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
+	// Return the newly written validator, not the old one guardAgentUpdate put
+	// on the response before the write.
+	c.Set(fiber.HeaderETag, resourceETag(&def))
 	if req.InitialWorkflow != nil && s.verifyGenerationProof(studioLearningOwner(c), *req.InitialWorkflow) {
 		s.minePreferences(s.studio(c), studioLearningOwner(c), def.ID, *req.InitialWorkflow, req.Workflow)
 	}
@@ -4219,6 +4226,7 @@ func (s *Server) handleStudioListAgents(c *fiber.Ctx) error {
 		Strategy string `json:"strategy,omitempty"`
 	}
 	out := []agentSummary{}
+	versions := map[string]string{}
 	for _, d := range s.agents(c).All() {
 		if d == nil {
 			continue
@@ -4245,8 +4253,9 @@ func (s *Server) handleStudioListAgents(c *fiber.Ctx) error {
 			Nodes:       nodes,
 			Strategy:    strategy,
 		})
+		versions[d.ID] = resourceETag(d)
 	}
-	return c.JSON(fiber.Map{"agents": out})
+	return c.JSON(fiber.Map{"agents": out, "versions": versions})
 }
 
 // handleStudioLoadAgent implements GET /api/v1/studio/agents/:id. It returns the
@@ -4300,6 +4309,7 @@ func (s *Server) handleStudioLoadAgent(c *fiber.Ctx) error {
 	if !studio.HasWorkflow(*def) && !isReasoningAgent && !studioAuthored {
 		return s.errMsg(c, fiber.StatusBadRequest, "agent has no editable workflow")
 	}
+	c.Set(fiber.HeaderETag, resourceETag(def))
 	return c.JSON(fiber.Map{"workflow": studio.FromAgentDefinition(*def)})
 }
 

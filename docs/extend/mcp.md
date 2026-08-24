@@ -17,10 +17,13 @@ built-in tools.
 
 ### Install from a repository URL
 
-> **Deployment boundary:** source installation is a Personal-mode feature.
-> Team and Scale workspaces can connect an HTTPS MCP endpoint, but cannot
-> install or execute workspace-selected code on the gateway host. See
-> [Workspace MCP security policy](../security/workspace-mcp.md).
+> **Deployment boundary:** Personal mode may use a reviewed native install.
+> Team and Scale workspace admins use the MCP page: paste the GitHub URL,
+> choose network/file permissions, review, and approve. OCI or exact-version
+> npm/PyPI servers then run only inside an isolated container. Supported
+> source-only locked Node or Python MCP repositories are built in a disposable builder and
+> launched from a content-addressed runtime image. Repository commands never
+> run in the gateway process. See [Workspace MCP security policy](../security/workspace-mcp.md).
 
 The Chat/System-agent installer does not accept the host-build waiver. This is
 intentional: an LLM approval prompt is not authorization to execute an

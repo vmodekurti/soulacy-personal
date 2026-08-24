@@ -91,6 +91,7 @@
       const sorted = evs.slice().sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
       const outEv    = sorted.find(e => e.type === 'message.out')
       const errEv    = sorted.find(e => e.type === 'error')
+      const scheduleFailEv = sorted.find(e => e.type === 'schedule.run_failed')
       const inEv     = sorted.find(e => e.type === 'message.in')
       const reasonEv = sorted.find(e => e.type === 'reasoning.result')
       const deliveryEv = sorted.slice().reverse().find(e => e.type === 'schedule.output')
@@ -102,7 +103,7 @@
 
       let status = 'unknown'
       if (outEv && !toolFailed && !errEv) status = 'success'
-      else if (toolFailed || errEv)        status = 'failed'
+      else if (toolFailed || errEv || scheduleFailEv) status = 'failed'
       else if (outEv)                      status = 'success'
       if (status === 'success' && (reasonEv?.payload?.confident === false || recovered)) status = 'degraded'
 
@@ -114,6 +115,11 @@
         const ep = errEv.payload
         const errText = typeof ep === 'string' ? ep : (ep?.message || ep?.error || JSON.stringify(ep))
         output = output ? output + '\n\n⚠ Error: ' + errText : '⚠ Error: ' + errText
+        status = 'failed'
+      }
+      if (scheduleFailEv) {
+        const detail = scheduleFailEv.payload?.error || scheduleFailEv.payload?.runbook || 'Scheduled run failed'
+        output = output ? output + '\n\n⚠ ' + detail : '⚠ ' + detail
         status = 'failed'
       }
 
@@ -143,6 +149,14 @@
 
   function runKey(run) {
     return run.id || `${run.sessionId || ''}:${run.startTime || ''}:${run.source || ''}`
+  }
+
+  function isBudgetFailure(run) {
+    return /token budget|Recommended next-run token budget/i.test(run?.output || '')
+  }
+
+  function editAgentBudget(agentId) {
+    location.hash = `#agents?agent_id=${encodeURIComponent(agentId)}&section=budget`
   }
 
   function mergeHistoryRuns(primary, fallback) {
@@ -226,7 +240,7 @@
         deliveryTo: r.deliveryTo || '',
         deliveryError: r.deliveryError || '',
       }))
-      const actions = await api.agents.actions(a.id, 10000, 'message.in,message.out,error,tool.result,reasoning.step,reasoning.result,schedule.output', { durable: true }).catch(() => ({ events: [] }))
+      const actions = await api.agents.actions(a.id, 10000, 'message.in,message.out,error,tool.result,reasoning.step,reasoning.result,schedule.output,schedule.run_failed', { durable: true }).catch(() => ({ events: [] }))
       const actionRuns = groupRuns(actions.events || [])
       historyRuns = mergeHistoryRuns(retainedRuns, actionRuns)
       historySourceSummary = `${historyRuns.length} shown · ${retainedRuns.length} retained · ${actionRuns.length} reconstructed from action log`
@@ -255,7 +269,7 @@
       const ledgerError = e.message
       const res = await api.runs.events({
         limit: 5000,
-        types: 'message.in,message.out,error,tool.result,reasoning.step,reasoning.result,schedule.output',
+        types: 'message.in,message.out,error,tool.result,reasoning.step,reasoning.result,schedule.output,schedule.run_failed',
       }).catch(() => ({ events: [] }))
       recentRuns = groupRuns(res.events || []).slice(0, recentLimit)
       recentError = recentRuns.length ? '' : ledgerError
@@ -693,6 +707,7 @@
                   <td class="td-hint">{run.source}</td>
                   <td class="td-action">
                     {#if run.agentId}
+                      {#if isBudgetFailure(run)}<button class="btn-primary xs" on:click={() => editAgentBudget(run.agentId)}>Adjust budget</button>{/if}
                       <button class="btn-secondary xs" on:click={() => watchAgent(run.agentId, run.sessionId)}>Open Activity</button>
                     {:else}
                       <button class="btn-secondary xs" on:click={() => location.hash = 'activity'}>Open Activity</button>

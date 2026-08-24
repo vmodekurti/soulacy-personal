@@ -37,6 +37,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -48,6 +49,7 @@ import (
 
 	"github.com/soulacy/soulacy/internal/agentprompt"
 	"github.com/soulacy/soulacy/internal/config"
+	"github.com/soulacy/soulacy/internal/dockerutil"
 	// Imported for its init(): registers the built-in LLM provider factories
 	// (nvidia/ollama/openai/anthropic/gemini/google) into the global registry so
 	// onboard can build a client and query live models.
@@ -97,6 +99,7 @@ func runOnboardWizard() error {
 		cfg = loadOrFreshConfig(ws)
 		cfgPath = ws.ConfigFile
 	}
+	dockerutil.Configure(cfg.Deployment.ContainerRuntime)
 	bootstrap, berr := config.EnsureBootstrap(cfg, cfgPath)
 	if berr != nil {
 		return fmt.Errorf("first-run bootstrap: %w", berr)
@@ -123,6 +126,7 @@ func runOnboardWizard() error {
 	// ── Step 2: Deployment mode ────────────────────────────────────────────
 	printStep(2, "Deployment mode")
 	currentMode := cfg.DeploymentMode()
+	selectedMode := currentMode
 	fmt.Printf("  %s %s\n", dim("Current:"), cyan(currentMode))
 	fmt.Printf("  %s Personal keeps the zero-dependency local setup. Team and Scale require JWT, PostgreSQL, external KMS, NATS, and signed execution workers.\n", gray("→"))
 	if confirm("  Change deployment mode?", false) {
@@ -134,6 +138,12 @@ func runOnboardWizard() error {
 		mode := []string{config.DeploymentModePersonal, config.DeploymentModeTeam, config.DeploymentModeScale}[promptChoices("Deployment mode:", choices)]
 		settings := deploymentSettings{Mode: mode}
 		if config.IsMultiUserMode(mode) {
+			containerPath, containerVersion, containerErr := inspectContainerRuntime(context.Background())
+			if containerErr != nil {
+				return fmt.Errorf("%s mode requires an available OCI container runtime for isolated workspace MCP installation: %w\n%s", mode, containerErr, containerInstallGuidance())
+			}
+			settings.ContainerRuntime = containerPath
+			fmt.Printf("  %s Container runtime ready: Docker %s (%s)\n", green("✓"), containerVersion, containerPath)
 			settings.PostgresDSN = prompt("  PostgreSQL DSN", cfg.Storage.PostgresDSN)
 			settings.JWTSecret = strings.TrimSpace(cfg.Auth.JWTSecret)
 			if len(settings.JWTSecret) < 32 {
@@ -167,7 +177,22 @@ func runOnboardWizard() error {
 		if err := patchDeploymentSettings(cfgPath, settings); err != nil {
 			fmt.Printf("  %s Couldn't patch deployment settings: %v\n", red("✗"), err)
 		} else {
+			selectedMode = mode
 			fmt.Printf("  %s Deployment mode set to %s. Run %s to verify prerequisites.\n", green("✓"), cyan(mode), bold("sy doctor"))
+		}
+	}
+	if config.IsMultiUserMode(selectedMode) {
+		path, version, runtimeErr := inspectContainerRuntime(context.Background())
+		if runtimeErr != nil {
+			return fmt.Errorf("%s mode container prerequisite is not ready: %w\n%s", selectedMode, runtimeErr, containerInstallGuidance())
+		}
+		fmt.Printf("  %s Isolated MCP runtime available: Docker %s (%s)\n", green("✓"), version, path)
+		if cfg.Deployment.ContainerRuntime != path {
+			if err := patchDeploymentContainerRuntime(cfgPath, path); err != nil {
+				return fmt.Errorf("persist validated container runtime: %w", err)
+			}
+			dockerutil.Configure(path)
+			fmt.Printf("  %s Saved deployment.container_runtime.\n", green("✓"))
 		}
 	}
 	fmt.Println()
@@ -745,6 +770,35 @@ type deploymentSettings struct {
 	VaultAddress        string
 	VaultTransitKey     string
 	VaultKubernetesRole string
+	ContainerRuntime    string
+}
+
+func inspectContainerRuntime(ctx context.Context) (string, string, error) {
+	path, err := dockerutil.Resolve()
+	if err != nil {
+		return "", "", err
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	versionBytes, err := exec.CommandContext(checkCtx, path, "version", "--format", "{{.Server.Version}}").Output()
+	if err != nil {
+		return "", "", fmt.Errorf("Docker CLI found at %s, but its daemon is unavailable: %w", path, err)
+	}
+	if err := exec.CommandContext(checkCtx, path, "info", "--format", "{{json .SecurityOptions}}").Run(); err != nil {
+		return "", "", fmt.Errorf("Docker daemon does not expose the isolation capabilities Soulacy requires: %w", err)
+	}
+	return path, strings.TrimSpace(string(versionBytes)), nil
+}
+
+func containerInstallGuidance() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "Install and start Docker Desktop, then rerun `sy onboard`."
+	case "linux":
+		return "Install and start Docker Engine (or configure a compatible OCI worker runtime), then rerun `sy onboard`."
+	default:
+		return "Install and start a Docker-compatible OCI runtime, then rerun `sy onboard`."
+	}
 }
 
 func defaultString(value, fallback string) string {
@@ -765,6 +819,7 @@ func patchDeploymentSettings(path string, settings deploymentSettings) error {
 	setScalar(deployment, "mode", settings.Mode, 0)
 
 	if config.IsMultiUserMode(settings.Mode) {
+		setScalar(deployment, "container_runtime", settings.ContainerRuntime, yaml.DoubleQuotedStyle)
 		setScalar(ensureMapping(root, "auth"), "mode", "jwt", 0)
 		setScalar(ensureMapping(root, "auth"), "jwt_secret", settings.JWTSecret, yaml.DoubleQuotedStyle)
 		setScalar(ensureMapping(root, "storage"), "backend", "postgres", 0)
@@ -809,6 +864,15 @@ func patchDeploymentSettings(path string, settings deploymentSettings) error {
 		setScalar(rateLimit, "redis_url", settings.RedisURL, yaml.DoubleQuotedStyle)
 		setScalar(deployment, "shared_artifact_store", settings.SharedArtifactStore, yaml.DoubleQuotedStyle)
 	}
+	return saveConfigDoc(path, doc)
+}
+
+func patchDeploymentContainerRuntime(path, runtimePath string) error {
+	doc, root, err := loadConfigDoc(path)
+	if err != nil {
+		return err
+	}
+	setScalar(ensureMapping(root, "deployment"), "container_runtime", runtimePath, yaml.DoubleQuotedStyle)
 	return saveConfigDoc(path, doc)
 }
 

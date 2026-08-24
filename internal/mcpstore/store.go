@@ -42,17 +42,19 @@ import (
 // escape hatch that hands third-party code the gateway's whole environment,
 // which is the operator's decision and never a tenant's.
 type Server struct {
-	WorkspaceID string            `json:"workspace_id"`
-	ID          string            `json:"id"`
-	Transport   string            `json:"transport,omitempty"`
-	Command     string            `json:"command,omitempty"`
-	Args        []string          `json:"args,omitempty"`
-	Env         map[string]string `json:"env,omitempty"`
-	URL         string            `json:"url,omitempty"`
-	Headers     map[string]string `json:"headers,omitempty"`
-	InheritEnv  []string          `json:"inherit_env,omitempty"`
-	CreatedBy   string            `json:"created_by,omitempty"`
-	UpdatedAt   time.Time         `json:"updated_at,omitempty"`
+	WorkspaceID        string            `json:"workspace_id"`
+	ID                 string            `json:"id"`
+	Transport          string            `json:"transport,omitempty"`
+	Command            string            `json:"command,omitempty"`
+	Args               []string          `json:"args,omitempty"`
+	Env                map[string]string `json:"env,omitempty"`
+	URL                string            `json:"url,omitempty"`
+	Headers            map[string]string `json:"headers,omitempty"`
+	InheritEnv         []string          `json:"inherit_env,omitempty"`
+	ContainerNetwork   string            `json:"container_network,omitempty"`
+	ContainerWorkspace string            `json:"container_workspace,omitempty"`
+	CreatedBy          string            `json:"created_by,omitempty"`
+	UpdatedAt          time.Time         `json:"updated_at,omitempty"`
 }
 
 const schema = `
@@ -66,6 +68,8 @@ CREATE TABLE IF NOT EXISTS workspace_mcp_servers(
 	url          TEXT NOT NULL DEFAULT '',
 	headers      TEXT NOT NULL DEFAULT '{}',
 	inherit_env  TEXT NOT NULL DEFAULT '[]',
+	container_network TEXT NOT NULL DEFAULT 'public',
+	container_workspace TEXT NOT NULL DEFAULT 'none',
 	created_by   TEXT NOT NULL DEFAULT '',
 	updated_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	PRIMARY KEY (workspace_id, id)
@@ -90,7 +94,47 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	// Existing installations predate container permissions. SQLite has no
+	// ADD COLUMN IF NOT EXISTS, so inspect first and migrate without replacing
+	// or rebuilding the tenant-scoped table.
+	for name, definition := range map[string]string{
+		"container_network":   "TEXT NOT NULL DEFAULT 'public'",
+		"container_workspace": "TEXT NOT NULL DEFAULT 'none'",
+	} {
+		if err := ensureColumn(db, "workspace_mcp_servers", name, definition); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+	}
 	return &Store{db: db}, nil
+}
+
+func ensureColumn(db *sql.DB, table, name, definition string) error {
+	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return err
+	}
+	found := false
+	for rows.Next() {
+		var cid int
+		var column, kind string
+		var notNull int
+		var defaultValue any
+		var primaryKey int
+		if err := rows.Scan(&cid, &column, &kind, &notNull, &defaultValue, &primaryKey); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		found = found || column == name
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if found {
+		return nil
+	}
+	_, err = db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + name + ` ` + definition)
+	return err
 }
 
 func (s *Store) Close() error {
@@ -121,15 +165,18 @@ func (s *Store) Put(ctx context.Context, server Server) error {
 	inherit, _ := json.Marshal(nonNilStrings(server.InheritEnv))
 
 	_, err := s.db.ExecContext(ctx, `INSERT INTO workspace_mcp_servers(
-		workspace_id, id, transport, command, args, env, url, headers, inherit_env, created_by, updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?)
+		workspace_id, id, transport, command, args, env, url, headers, inherit_env,
+		container_network, container_workspace, created_by, updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(workspace_id, id) DO UPDATE SET
 			transport=excluded.transport, command=excluded.command, args=excluded.args,
 			env=excluded.env, url=excluded.url, headers=excluded.headers,
-			inherit_env=excluded.inherit_env, created_by=excluded.created_by,
+			inherit_env=excluded.inherit_env, container_network=excluded.container_network,
+			container_workspace=excluded.container_workspace, created_by=excluded.created_by,
 			updated_at=excluded.updated_at`,
 		workspaceID, id, server.Transport, server.Command, string(args), string(env),
-		server.URL, string(headers), string(inherit), server.CreatedBy, time.Now().UTC())
+		server.URL, string(headers), string(inherit), server.ContainerNetwork,
+		server.ContainerWorkspace, server.CreatedBy, time.Now().UTC())
 	return err
 }
 
@@ -154,7 +201,7 @@ func (s *Store) List(ctx context.Context, workspaceID string) ([]Server, error) 
 	}
 	workspaceID = wsroot.Normalize(workspaceID)
 	rows, err := s.db.QueryContext(ctx, `SELECT id, transport, command, args, env, url, headers,
-		inherit_env, created_by, updated_at FROM workspace_mcp_servers
+		inherit_env, container_network, container_workspace, created_by, updated_at FROM workspace_mcp_servers
 		WHERE workspace_id = ? ORDER BY id`, workspaceID)
 	if err != nil {
 		return nil, err
@@ -165,7 +212,8 @@ func (s *Store) List(ctx context.Context, workspaceID string) ([]Server, error) 
 		server := Server{WorkspaceID: workspaceID}
 		var args, env, headers, inherit string
 		if err := rows.Scan(&server.ID, &server.Transport, &server.Command, &args, &env,
-			&server.URL, &headers, &inherit, &server.CreatedBy, &server.UpdatedAt); err != nil {
+			&server.URL, &headers, &inherit, &server.ContainerNetwork,
+			&server.ContainerWorkspace, &server.CreatedBy, &server.UpdatedAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(args), &server.Args)

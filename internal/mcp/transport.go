@@ -25,6 +25,8 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -33,6 +35,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/soulacy/soulacy/internal/dockerutil"
+	"github.com/soulacy/soulacy/internal/mcppackage"
 	"github.com/soulacy/soulacy/internal/netguard"
 	"github.com/soulacy/soulacy/internal/sandbox"
 )
@@ -176,29 +180,105 @@ func newStdio(cfg ServerConfig, log *zap.Logger) (*stdioTx, error) {
 // executable. Every docker option is generated here; workspace input can
 // neither add mounts nor weaken the isolation profile.
 func newContainerStdio(cfg ServerConfig, log *zap.Logger) (*stdioTx, error) {
-	image := strings.TrimSpace(cfg.Command)
-	digestAt := strings.LastIndex(image, "@sha256:")
-	digest := ""
-	if digestAt >= 0 {
-		digest = image[digestAt+len("@sha256:"):]
+	args, err := containerDockerArgs(cfg)
+	if err != nil {
+		return nil, err
 	}
-	digestBytes, digestErr := hex.DecodeString(digest)
-	if digestAt <= 0 || digestErr != nil || len(digestBytes) != sha256.Size || strings.ToLower(digest) != digest {
-		return nil, fmt.Errorf("container: immutable image digest is required")
+	dockerBin, err := dockerutil.Resolve()
+	if err != nil {
+		return nil, fmt.Errorf("container: %w", err)
+	}
+	dockerEnv := dockerutil.Environ()
+	dockerPATH := ""
+	for _, entry := range dockerEnv {
+		if strings.HasPrefix(entry, "PATH=") {
+			dockerPATH = strings.TrimPrefix(entry, "PATH=")
+			break
+		}
+	}
+	return newStdio(ServerConfig{Command: dockerBin, Args: args, Env: map[string]string{"PATH": dockerPATH}}, log)
+}
+
+// containerDockerArgs is deliberately the only place where a tenant-owned
+// container command is assembled. Keeping this pure also makes the complete
+// isolation profile testable without a Docker daemon.
+func containerDockerArgs(cfg ServerConfig) ([]string, error) {
+	image := strings.TrimSpace(cfg.Command)
+	if strings.HasPrefix(image, "sha256:") {
+		digest := strings.TrimPrefix(image, "sha256:")
+		digestBytes, digestErr := hex.DecodeString(digest)
+		if digestErr != nil || len(digestBytes) != sha256.Size || strings.ToLower(digest) != digest {
+			return nil, fmt.Errorf("container: immutable image digest is required")
+		}
+	} else {
+		digestAt := strings.LastIndex(image, "@sha256:")
+		digest := ""
+		if digestAt >= 0 {
+			digest = image[digestAt+len("@sha256:"):]
+		}
+		digestBytes, digestErr := hex.DecodeString(digest)
+		if digestAt <= 0 || digestErr != nil || len(digestBytes) != sha256.Size || strings.ToLower(digest) != digest {
+			return nil, fmt.Errorf("container: immutable image digest is required")
+		}
 	}
 	args := []string{
 		"run", "--rm", "-i",
+		"--init",
 		"--read-only",
 		"--cap-drop", "ALL",
 		"--security-opt", "no-new-privileges",
 		"--pids-limit", "128",
 		"--memory", "1g",
+		"--memory-swap", "1g",
 		"--cpus", "1",
-		"--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
+		"--ulimit", "nofile=1024:1024",
+		// npm/PyPI runners install their exact-version package into this
+		// disposable filesystem. It must permit execution, but is never mounted
+		// from the host and disappears with --rm.
+		"--tmpfs", "/tmp:rw,nosuid,nodev,size=256m",
+		"--env", "HOME=/tmp",
+		"--env", "XDG_CACHE_HOME=/tmp/.cache",
+		"--env", "XDG_CONFIG_HOME=/tmp/.config",
 	}
-	// MCP servers commonly need public APIs. Docker bridge networking is a
-	// disclosed permission in the approval report. There are deliberately no
-	// host mounts, host networking, privileged mode, or Docker socket access.
+	uid, gid := os.Getuid(), os.Getgid()
+	if uid == 0 {
+		uid, gid = 65532, 65532
+	}
+	args = append(args, "--user", strconv.Itoa(uid)+":"+strconv.Itoa(gid))
+
+	switch strings.ToLower(strings.TrimSpace(cfg.ContainerNetwork)) {
+	case "", "none":
+		args = append(args, "--network", "none")
+	case "public":
+		// This is an explicit permission disclosed in the approval report. Host
+		// networking remains impossible and the Docker socket is never mounted.
+		args = append(args, "--network", "bridge", "--add-host", "host.docker.internal:127.0.0.1")
+	default:
+		return nil, fmt.Errorf("container: unsupported network permission %q", cfg.ContainerNetwork)
+	}
+
+	switch strings.ToLower(strings.TrimSpace(cfg.ContainerWorkspace)) {
+	case "", "none":
+	case "read", "write":
+		root := strings.TrimSpace(cfg.WorkDir)
+		if root == "" || !filepath.IsAbs(root) || strings.Contains(root, ",") {
+			return nil, fmt.Errorf("container: workspace confinement is unavailable")
+		}
+		mount := "type=bind,src=" + root + ",dst=/workspace"
+		if strings.EqualFold(cfg.ContainerWorkspace, "read") {
+			mount += ",readonly"
+		}
+		args = append(args, "--mount", mount, "--workdir", "/workspace")
+	default:
+		return nil, fmt.Errorf("container: unsupported workspace permission %q", cfg.ContainerWorkspace)
+	}
+	if dataDir := strings.TrimSpace(cfg.ContainerDataDir); dataDir != "" {
+		if !filepath.IsAbs(dataDir) || strings.Contains(dataDir, ",") {
+			return nil, fmt.Errorf("container: invalid private data directory")
+		}
+		args = append(args, "--mount", "type=bind,src="+dataDir+",dst=/data")
+	}
+
 	for key, value := range cfg.Env {
 		if key == "" || strings.ContainsAny(key, "=\x00") || strings.ContainsRune(value, '\x00') {
 			return nil, fmt.Errorf("container: invalid environment entry")
@@ -206,8 +286,8 @@ func newContainerStdio(cfg ServerConfig, log *zap.Logger) (*stdioTx, error) {
 		args = append(args, "--env", key+"="+value)
 	}
 	args = append(args, image)
-	args = append(args, cfg.Args...)
-	return newStdio(ServerConfig{Command: "docker", Args: args}, log)
+	args = append(args, mcppackage.UpgradeLegacyNodeRunnerArgs(cfg.Args)...)
+	return args, nil
 }
 
 func (t *stdioTx) readLoop(stdout io.Reader) {

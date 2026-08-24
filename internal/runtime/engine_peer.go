@@ -544,6 +544,22 @@ func applyPlaygroundOverrides(def *agent.Definition, meta map[string]string) {
 	if v := strings.TrimSpace(meta["playground.llm.tool_choice"]); v != "" {
 		def.LLM.ToolChoice = v
 	}
+	if v := strings.TrimSpace(meta["playground.run_budget.max_tokens"]); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			if def.Budget == nil {
+				def.Budget = &agent.BudgetConfig{}
+			}
+			def.Budget.MaxTokens = n
+		}
+	}
+	if v := strings.TrimSpace(meta["playground.run_budget.max_llm_calls"]); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			if def.Budget == nil {
+				def.Budget = &agent.BudgetConfig{}
+			}
+			def.Budget.MaxLLMCalls = n
+		}
+	}
 }
 
 // skillCatalogFor builds the <available_skills> catalog for the named skills.

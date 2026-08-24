@@ -404,7 +404,8 @@ func (p *GeminiProvider) Complete(ctx context.Context, req CompletionRequest) (*
 
 	var result struct {
 		Candidates []struct {
-			Content struct {
+			FinishReason string `json:"finishReason"`
+			Content      struct {
 				Parts []struct {
 					Text    string `json:"text"`
 					Thought bool   `json:"thought"` // internal reasoning — skip in visible content
@@ -444,6 +445,7 @@ func (p *GeminiProvider) Complete(ctx context.Context, req CompletionRequest) (*
 	if len(result.Candidates) == 0 {
 		return r, nil
 	}
+	r.FinishReason = result.Candidates[0].FinishReason
 
 	for i, part := range result.Candidates[0].Content.Parts {
 		// Skip internal thought parts — they are not user-visible text.

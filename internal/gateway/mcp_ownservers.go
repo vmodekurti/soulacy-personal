@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -59,20 +61,41 @@ func (s *Server) workspaceOwnedServers(workspaceID string) map[string]mcp.Server
 	out := make(map[string]mcp.ServerConfig, len(stored))
 	for _, server := range stored {
 		publicRemote := s.authorizationRequired()
-		if publicRemote && !safeWorkspaceRemoteDefinition(server.Transport, server.URL, server.Command, server.Args, server.Env, server.InheritEnv) {
+		if publicRemote && !safeWorkspaceRemoteDefinition(server) {
 			s.log.Warn("unsafe legacy workspace MCP definition withheld",
 				zap.String("workspace_id", workspaceID), zap.String("server_id", server.ID))
 			continue
 		}
+		dataDir := ""
+		if strings.EqualFold(strings.TrimSpace(server.Transport), "container") {
+			workspaceRoot := s.workspaceLayout.WorkspaceRoot(workspaceID)
+			if workspaceRoot == "" {
+				s.log.Warn("workspace MCP private data root unavailable", zap.String("workspace_id", workspaceID), zap.String("server_id", server.ID))
+				continue
+			}
+			dataDir = filepath.Join(workspaceRoot, ".mcp-data", server.ID)
+			if err := os.MkdirAll(dataDir, 0o700); err != nil {
+				s.log.Warn("workspace MCP private data directory unavailable", zap.String("workspace_id", workspaceID), zap.String("server_id", server.ID), zap.Error(err))
+				continue
+			}
+		}
 		out[server.ID] = mcp.ServerConfig{
-			Transport:    server.Transport,
-			Command:      server.Command,
-			Args:         server.Args,
-			Env:          s.fillSecrets(workspaceID, server.ID, server.Env),
-			URL:          server.URL,
-			Headers:      s.fillSecrets(workspaceID, server.ID, server.Headers),
-			InheritEnv:   server.InheritEnv,
-			PublicRemote: publicRemote,
+			Transport:          server.Transport,
+			Command:            server.Command,
+			Args:               server.Args,
+			Env:                s.fillSecrets(workspaceID, server.ID, server.Env),
+			URL:                server.URL,
+			Headers:            s.fillSecrets(workspaceID, server.ID, server.Headers),
+			InheritEnv:         server.InheritEnv,
+			PublicRemote:       publicRemote,
+			ContainerNetwork:   server.ContainerNetwork,
+			ContainerWorkspace: server.ContainerWorkspace,
+			ContainerDataDir:   dataDir,
+			// The container transport uses this only when the reviewed
+			// workspace permission is read or write. Derive it here from the
+			// authenticated workspace id; a stored MCP definition can never
+			// choose another tenant's host path.
+			WorkDir: s.workspaceLayout.WorkspaceRoot(workspaceID),
 		}
 	}
 	return out
@@ -88,6 +111,10 @@ func (s *Server) fillSecrets(workspaceID, serverID string, values map[string]str
 	}
 	out := make(map[string]string, len(values))
 	for key, value := range values {
+		if safeContainerLocalSetting(key, value) {
+			out[key] = value
+			continue
+		}
 		if !redact.SecretKeyName(key) {
 			out[key] = value
 			continue
@@ -101,6 +128,17 @@ func (s *Server) fillSecrets(workspaceID, serverID string, values map[string]str
 	return out
 }
 
+// safeContainerLocalSetting recognizes the one credential-shaped value
+// Soulacy itself generates. /data is a private per-workspace, per-server mount
+// assembled by the container transport, never an arbitrary host path.
+func safeContainerLocalSetting(key, value string) bool {
+	if key != "DATABASE_URL" || !strings.HasPrefix(value, "sqlite:////data/") {
+		return false
+	}
+	name := strings.TrimPrefix(value, "sqlite:////data/")
+	return name != "" && strings.HasSuffix(name, ".db") && filepath.Base(name) == name && !strings.ContainsAny(name, "\\\x00")
+}
+
 type ownServerBody struct {
 	Transport  string            `json:"transport"`
 	Command    string            `json:"command"`
@@ -111,21 +149,28 @@ type ownServerBody struct {
 	InheritEnv []string          `json:"inherit_env"`
 }
 
-func safeWorkspaceRemoteDefinition(transport, rawURL, command string, args []string, env map[string]string, inheritEnv []string) bool {
-	t := strings.ToLower(strings.TrimSpace(transport))
+func safeWorkspaceRemoteDefinition(server mcpstore.Server) bool {
+	t := strings.ToLower(strings.TrimSpace(server.Transport))
 	if t == "container" {
 		// Container definitions are written only by the approval endpoint; the
 		// generic PUT policy below rejects this transport. Re-check the durable
 		// row on every load so a legacy/manual row cannot become host execution.
-		return immutableOCIReference.MatchString(strings.TrimSpace(command)) && rawURL == "" &&
-			len(inheritEnv) == 0 && len(env) == 0
+		return immutableContainerReference(server.Command) && server.URL == "" &&
+			len(server.InheritEnv) == 0 && validContainerPermissions(server.ContainerNetwork, server.ContainerWorkspace)
 	}
 	if t != "http" && t != "https" {
 		return false
 	}
-	u, err := url.Parse(strings.TrimSpace(rawURL))
+	u, err := url.Parse(strings.TrimSpace(server.URL))
 	return err == nil && strings.EqualFold(u.Scheme, "https") && u.Hostname() != "" && u.User == nil && u.Fragment == "" &&
-		strings.TrimSpace(command) == "" && len(args) == 0 && len(env) == 0 && len(inheritEnv) == 0
+		strings.TrimSpace(server.Command) == "" && len(server.Args) == 0 && len(server.Env) == 0 && len(server.InheritEnv) == 0
+}
+
+func validContainerPermissions(network, workspace string) bool {
+	network = strings.ToLower(strings.TrimSpace(network))
+	workspace = strings.ToLower(strings.TrimSpace(workspace))
+	return (network == "none" || network == "public") &&
+		(workspace == "none" || workspace == "read" || workspace == "write")
 }
 
 // workspaceMCPAdmin limits changes to the two roles that administer a
@@ -145,7 +190,10 @@ func (s *Server) validateOwnMCPPolicy(body ownServerBody) error {
 	if !s.authorizationRequired() {
 		return nil
 	}
-	if !safeWorkspaceRemoteDefinition(body.Transport, body.URL, body.Command, body.Args, body.Env, body.InheritEnv) {
+	if strings.EqualFold(strings.TrimSpace(body.Transport), "container") {
+		return fiber.NewError(fiber.StatusBadRequest, "container MCP servers must use the reviewed workspace installer")
+	}
+	if !safeWorkspaceRemoteDefinition(mcpstore.Server{Transport: body.Transport, URL: body.URL, Command: body.Command, Args: body.Args, Env: body.Env, InheritEnv: body.InheritEnv}) {
 		return fiber.NewError(fiber.StatusBadRequest,
 			"Team and Scale workspaces may enable only remote HTTPS MCP servers; command, args, env, and inherit_env are not permitted")
 	}
@@ -259,6 +307,7 @@ func (s *Server) handleListOwnMCPServers(c *fiber.Ctx) error {
 			"id": server.ID, "transport": server.Transport, "command": server.Command,
 			"args": server.Args, "env": server.Env, "url": server.URL, "headers": server.Headers,
 			"inherit_env": server.InheritEnv, "connected": status.Connected,
+			"container_network": server.ContainerNetwork, "container_workspace": server.ContainerWorkspace,
 			"detail": status.Detail, "tools": status.Tools,
 		})
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -106,6 +107,21 @@ func TestReportRunFailureEmitsActionableScheduleEvents(t *testing.T) {
 	}
 	if sink.events[2].Type != "schedule.auto_disabled" {
 		t.Fatalf("expected auto-disable event, got %+v", sink.events[2])
+	}
+}
+
+func TestBudgetHaltReplyIsAScheduledFailureWithTargetedRunbook(t *testing.T) {
+	text := "Partial report. ⚠ Run paused before the next model call because its prompt no longer fits the run token budget. Recommended next-run token budget: **160000**."
+	if !isBudgetHaltReply(text) {
+		t.Fatal("budget halt should not be recorded as a successful cron occurrence")
+	}
+	sink := &captureSink{}
+	s := New(nil, nil, zap.NewNop(), context.Background())
+	s.SetEventSink(sink)
+	s.reportRunFailure(&agent.Definition{ID: "report"}, message.Message{SessionID: "sched-report"}, "cron", errors.New("scheduled run needs a larger agent token budget"), time.Second, 1, false)
+	payload := sink.events[0].Payload.(map[string]any)
+	if payload["remediation"] != "increase_agent_run_budget" || !strings.Contains(payload["runbook"].(string), "recommended") {
+		t.Fatalf("budget failure guidance = %#v", payload)
 	}
 }
 

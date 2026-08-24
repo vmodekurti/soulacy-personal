@@ -143,14 +143,15 @@ func TestPatchServerHost(t *testing.T) {
 func TestPatchDeploymentSettingsTeam(t *testing.T) {
 	p := writeTemp(t, baseConfig)
 	err := patchDeploymentSettings(p, deploymentSettings{
-		Mode:            "team",
-		PostgresDSN:     "postgres://db/soulacy",
-		JWTSecret:       strings.Repeat("j", 32),
-		APIKey:          "sy_admin",
-		NATSURL:         "tls://queue:4222",
-		NATSCredentials: "/run/secrets/nats.creds",
-		KMSProvider:     "awskms",
-		AWSKMSKeyID:     "alias/soulacy-test",
+		Mode:             "team",
+		PostgresDSN:      "postgres://db/soulacy",
+		JWTSecret:        strings.Repeat("j", 32),
+		APIKey:           "sy_admin",
+		NATSURL:          "tls://queue:4222",
+		NATSCredentials:  "/run/secrets/nats.creds",
+		KMSProvider:      "awskms",
+		AWSKMSKeyID:      "alias/soulacy-test",
+		ContainerRuntime: "/usr/local/bin/docker",
 	})
 	if err != nil {
 		t.Fatalf("patch deployment: %v", err)
@@ -158,6 +159,9 @@ func TestPatchDeploymentSettingsTeam(t *testing.T) {
 	m := parseConfig(t, p)
 	if got := m["deployment"].(map[string]any)["mode"]; got != "team" {
 		t.Fatalf("deployment.mode = %v", got)
+	}
+	if got := m["deployment"].(map[string]any)["container_runtime"]; got != "/usr/local/bin/docker" {
+		t.Fatalf("deployment.container_runtime = %v", got)
 	}
 	if got := m["auth"].(map[string]any)["mode"]; got != "jwt" {
 		t.Fatalf("auth.mode = %v", got)
@@ -190,6 +194,7 @@ func TestPatchDeploymentSettingsScaleIsIdempotent(t *testing.T) {
 		KMSProvider:         "awskms",
 		AWSKMSKeyID:         "alias/soulacy-test",
 		SharedArtifactStore: "s3://soulacy-artifacts/prod",
+		ContainerRuntime:    "/usr/local/bin/docker",
 	}
 	for i := 0; i < 2; i++ {
 		if err := patchDeploymentSettings(p, settings); err != nil {
@@ -206,6 +211,20 @@ func TestPatchDeploymentSettingsScaleIsIdempotent(t *testing.T) {
 	rateLimit := m["rate_limit"].(map[string]any)
 	if rateLimit["enabled"] != true || rateLimit["backend"] != "redis" || rateLimit["redis_url"] != settings.RedisURL {
 		t.Fatalf("unexpected rate limiter: %#v", rateLimit)
+	}
+}
+
+func TestPatchDeploymentContainerRuntimePreservesMode(t *testing.T) {
+	p := writeTemp(t, baseConfig+"deployment:\n  mode: team\n")
+	if err := patchDeploymentContainerRuntime(p, "/Applications/Docker.app/Contents/Resources/bin/docker"); err != nil {
+		t.Fatal(err)
+	}
+	deployment := parseConfig(t, p)["deployment"].(map[string]any)
+	if got := deployment["container_runtime"]; got != "/Applications/Docker.app/Contents/Resources/bin/docker" {
+		t.Fatalf("deployment.container_runtime = %v", got)
+	}
+	if got := deployment["mode"]; got != "team" {
+		t.Fatalf("deployment.mode changed to %v", got)
 	}
 }
 

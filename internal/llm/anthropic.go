@@ -297,6 +297,7 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req CompletionRequest)
 	}
 
 	r := &CompletionResponse{
+		FinishReason:        result.StopReason,
 		InputTokens:         result.Usage.InputTokens,
 		OutputTokens:        result.Usage.OutputTokens,
 		CacheCreationTokens: result.Usage.CacheCreationInputTokens,

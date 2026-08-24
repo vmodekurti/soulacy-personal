@@ -2,9 +2,41 @@ package mcpstore
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"testing"
 )
+
+func TestOpenMigratesExistingRegistryToSafeLegacyPermissions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`CREATE TABLE workspace_mcp_servers(
+		workspace_id TEXT NOT NULL, id TEXT NOT NULL, transport TEXT NOT NULL DEFAULT '',
+		command TEXT NOT NULL DEFAULT '', args TEXT NOT NULL DEFAULT '[]', env TEXT NOT NULL DEFAULT '{}',
+		url TEXT NOT NULL DEFAULT '', headers TEXT NOT NULL DEFAULT '{}', inherit_env TEXT NOT NULL DEFAULT '[]',
+		created_by TEXT NOT NULL DEFAULT '', updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY(workspace_id,id));
+		INSERT INTO workspace_mcp_servers(workspace_id,id,transport,command) VALUES('ws_a','old','container','image@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	servers, err := store.List(context.Background(), "ws_a")
+	if err != nil || len(servers) != 1 {
+		t.Fatalf("migrated servers = %+v, %v", servers, err)
+	}
+	if servers[0].ContainerNetwork != "public" || servers[0].ContainerWorkspace != "none" {
+		t.Fatalf("legacy permissions changed unexpectedly: %+v", servers[0])
+	}
+}
 
 func newStore(t *testing.T) *Store {
 	t.Helper()

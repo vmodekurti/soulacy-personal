@@ -659,6 +659,22 @@ func TestOpenAICompleteStreamWithToolsDoesNotStream(t *testing.T) {
 	}
 }
 
+func TestOpenAICompletePreservesLengthFinishReason(t *testing.T) {
+	p := NewOpenAIProvider("openai", "http://openai.test", "key", "gpt")
+	p.client = clientWithRoundTripper(func(r *http.Request) (*http.Response, error) {
+		return jsonResponse(200, `{"choices":[{"message":{"content":"partial answer"},"finish_reason":"length"}],"usage":{"completion_tokens":32}}`), nil
+	})
+	resp, err := p.Complete(context.Background(), CompletionRequest{
+		Messages: []ChatMessage{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if resp.Content != "partial answer" || resp.FinishReason != "length" {
+		t.Fatalf("response = %+v, want content plus length finish reason", resp)
+	}
+}
+
 // TestOpenAICompleteRetryReplaysBody verifies transient retry attempts send a
 // fresh request body instead of reusing a drained reader.
 func TestOpenAICompleteRetryReplaysBody(t *testing.T) {

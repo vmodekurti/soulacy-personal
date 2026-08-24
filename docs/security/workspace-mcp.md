@@ -2,9 +2,11 @@
 
 Soulacy treats an MCP server selected by a workspace as untrusted. Team and
 Scale workspaces may connect to guarded remote HTTPS MCP servers or install a
-repository that publishes a declared OCI MCP package. They cannot register a
-local command, inherit gateway environment variables, or install a source
-package on the gateway host.
+repository that publishes a declared OCI, exact-version npm, or exact-version
+PyPI MCP package. A supported source-only locked Node or Python MCP package can instead
+be built in a disposable Docker builder. Workspaces cannot register a local
+command, inherit gateway environment variables, or run package code in the
+gateway process.
 
 ## Enforced boundary
 
@@ -19,9 +21,11 @@ package on the gateway host.
 | Credentials | Workspace vault values may be supplied as remote request headers |
 | Legacy definitions | Unsafe stored rows are withheld rather than started |
 | GitHub installation | Two phase: inspect, then explicit owner/admin approval |
-| Source execution | Refused; the repository must declare a tagged OCI stdio package |
+| Source execution | Refused in the gateway; tagged OCI runs directly, exact npm/PyPI packages use disposable runners, and supported locked Node/Python source is compiled in a disposable builder |
 | Container identity | Tag is pulled once at approval and persisted as a SHA-256 digest |
-| Container boundary | Read-only root, no host mounts or Docker socket, all capabilities dropped, `no-new-privileges`, CPU/RAM/PID limits |
+| Container boundary | Non-root user, read-only root, no Docker socket, all capabilities dropped, `no-new-privileges`, CPU/RAM/PID/open-file limits |
+| Network permission | Admin chooses public API access or no network; host networking is never available |
+| Workspace permission | Admin chooses none, read-only, or read/write access to that workspace alone |
 | Approval binding | Workspace, approving actor, source commit, image, entry point, 15-minute expiry, and report fingerprint |
 | Audit | Inspection and approval identity/revision/digest are recorded |
 
@@ -35,19 +39,31 @@ The MCP page intentionally exposes only one simple workflow to a Team or Scale
 workspace administrator:
 
 1. Paste a public `https://github.com/<owner>/<repository>` URL.
-2. Review the resolved commit, declared image, requested configuration names,
-   network permission, isolation profile, and findings.
-3. Explicitly approve the fingerprinted report.
+2. Choose whether the server needs public API access and whether it needs no,
+   read-only, or read/write access to this workspace.
+3. Review the resolved commit, isolated runtime, requested configuration,
+   permission summary, and findings.
+4. Enter required settings. Declared secrets go directly to the workspace
+   vault rather than the MCP registry database.
+5. Explicitly approve the fingerprinted report.
 
 Inspection shallow-clones data into a temporary directory, rejects symlinked
 metadata and oversized repositories, and never runs repository code. The
 manifest's repository identity must match the submitted URL. Soulacy will not
-fall back to `npm install`, `pip install`, a Docker build, or an arbitrary host
-command when the OCI declaration is absent.
+run `npm install`, `pip install`, or repository commands in the gateway
+process. An exact-version npm/PyPI declaration may run inside a pinned,
+disposable package-runner image. For a supported source-only Node repository,
+Soulacy requires `package-lock.json`, disables npm lifecycle scripts, pins the
+builder base image, and runs the recognized TypeScript compilation step with
+networking disabled. Locked Python repositories require `uv.lock`; Soulacy
+installs their frozen dependency graph before copying source, then installs the
+project offline with a pinned build backend. Resulting runtime images are
+addressed by their SHA-256 image IDs and Python starts with `--offline --no-sync`.
 
-The local Docker runtime provides process/filesystem isolation and permits
-outbound bridge networking because many MCP tools call public APIs. That
-network permission is shown as a warning before approval. High-assurance Scale
+The local Docker runtime provides process/filesystem isolation. Outbound bridge
+networking and workspace mounting are explicit, fingerprint-bound permissions
+shown before approval; both are disabled or absent when not selected.
+High-assurance Scale
 deployments should place these containers on the platform's policy-controlled
 OCI worker network so egress is also restricted and audited.
 

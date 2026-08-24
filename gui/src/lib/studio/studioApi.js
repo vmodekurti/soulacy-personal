@@ -129,7 +129,7 @@ export const bridge = {
   // back to a draft (+ warnings), and save authored YAML straight to disk.
   toYaml: (workflow) => api.studio.yaml({ workflow }),
   fromYaml: (yaml) => api.studio.fromYaml({ yaml }),
-  saveYaml: (yaml) => api.studio.saveYaml({ yaml }),
+  saveYaml: (yaml, agentId = '') => api.studio.saveYaml({ yaml, agentId }),
   validateYaml: (yaml) => api.studio.validateYaml({ yaml }),
   fixYaml: (yaml) => api.studio.fixYaml({ yaml }),
   reviewYaml: (yaml) => api.studio.reviewYaml({ yaml }),

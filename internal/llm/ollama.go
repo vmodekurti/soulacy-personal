@@ -197,9 +197,10 @@ func (o *OllamaProvider) Complete(ctx context.Context, req CompletionRequest) (*
 					Message struct {
 						Content string `json:"content"`
 					} `json:"message"`
-					Done            bool `json:"done"`
-					EvalCount       int  `json:"eval_count"`
-					PromptEvalCount int  `json:"prompt_eval_count"`
+					Done            bool   `json:"done"`
+					DoneReason      string `json:"done_reason"`
+					EvalCount       int    `json:"eval_count"`
+					PromptEvalCount int    `json:"prompt_eval_count"`
 				}
 				if err := json.Unmarshal([]byte(line), &chunk); err != nil {
 					continue
@@ -208,6 +209,7 @@ func (o *OllamaProvider) Complete(ctx context.Context, req CompletionRequest) (*
 					ch <- chunk.Message.Content
 				}
 				if chunk.Done {
+					result.FinishReason = chunk.DoneReason
 					result.InputTokens = chunk.PromptEvalCount
 					result.OutputTokens = chunk.EvalCount
 					result.TotalTokens = chunk.PromptEvalCount + chunk.EvalCount
@@ -261,8 +263,9 @@ func (o *OllamaProvider) Complete(ctx context.Context, req CompletionRequest) (*
 				} `json:"function"`
 			} `json:"tool_calls"`
 		} `json:"message"`
-		EvalCount       int `json:"eval_count"`
-		PromptEvalCount int `json:"prompt_eval_count"`
+		EvalCount       int    `json:"eval_count"`
+		PromptEvalCount int    `json:"prompt_eval_count"`
+		DoneReason      string `json:"done_reason"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -301,6 +304,7 @@ func (o *OllamaProvider) Complete(ctx context.Context, req CompletionRequest) (*
 
 	r := &CompletionResponse{
 		Content:      content,
+		FinishReason: result.DoneReason,
 		InputTokens:  result.PromptEvalCount,
 		OutputTokens: result.EvalCount,
 		TotalTokens:  result.PromptEvalCount + result.EvalCount,

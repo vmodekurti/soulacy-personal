@@ -8,7 +8,7 @@ import {
   resourceKey, rememberVersion, rememberVersions, versionFor, forgetVersion,
   clearVersions, isConflict, isPreconditionRequired,
 } from './resourceversions.js'
-import { apiFetch } from './api.js'
+import { api, apiFetch } from './api.js'
 
 function staleError(extra = {}) {
   return Object.assign(new Error('“support-bot” was changed by usr_bob since you loaded it.'), {
@@ -109,6 +109,7 @@ describe('the version registry', () => {
     expect(resourceKey('/agents/support-bot')).toBe('agents/support-bot')
     expect(resourceKey('/agents/support-bot/yaml')).toBe('agents/support-bot')
     expect(resourceKey('/agents/support-bot/rollback')).toBe('agents/support-bot')
+    expect(resourceKey('/studio/agents/support-bot')).toBe('agents/support-bot')
     rememberVersion('/agents/support-bot/yaml', '"v1"')
     expect(versionFor('/agents/support-bot')).toBe('"v1"')
   })
@@ -180,6 +181,22 @@ describe('apiFetch attaches the precondition itself', () => {
     fetch.mockResolvedValueOnce(response(200, { ok: true }))
     await apiFetch('/agents/support-bot', { method: 'DELETE' })
     expect(fetch.mock.calls[1][1].headers['If-Match']).toBe('"v7"')
+  })
+
+  it('uses a canonical version path for composite Studio saves', async () => {
+    rememberVersion('/studio/agents/support-bot', '"v7"')
+    fetch.mockResolvedValueOnce(response(201, { agentId: 'support-bot' }, { ETag: '"v8"' }))
+    await api.studio.save({ workflow: { id: 'support-bot', name: 'Support bot' } })
+    expect(fetch.mock.calls[0][1].headers['If-Match']).toBe('"v7"')
+    expect(versionFor('/agents/support-bot')).toBe('"v8"')
+  })
+
+  it('uses the loaded agent version when Studio saves authoritative YAML', async () => {
+    rememberVersion('/agents/support-bot', '"v4"')
+    fetch.mockResolvedValueOnce(response(200, { id: 'support-bot' }, { ETag: '"v5"' }))
+    await api.studio.saveYaml({ yaml: 'id: support-bot\n', agentId: 'support-bot' })
+    expect(fetch.mock.calls[0][1].headers['If-Match']).toBe('"v4"')
+    expect(versionFor('/studio/agents/support-bot')).toBe('"v5"')
   })
 
   it('never sends a precondition on a read', async () => {

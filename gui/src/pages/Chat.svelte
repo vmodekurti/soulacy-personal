@@ -4,6 +4,7 @@
   import { slide } from 'svelte/transition'
   import { api, apiFetch, createEventSocket } from '../lib/api.js'
   import { chatActiveThreadId, chatThreads, connected } from '../lib/stores.js'
+  import { activeWorkspace } from '../lib/workspace.js'
   import RunMetrics from '../lib/RunMetrics.svelte'
   import { entryIdForMessage, nextBranchLabel, entriesToMessages } from '../lib/chatbranch.js'
   import { deltaMetrics, deltaLabel, deltaTitle } from '../lib/chatmetrics.js'
@@ -12,8 +13,8 @@
   import { searchSkills, parseSlashQuery, applySkillChoice } from '../lib/skillsearch.js'
   import { modelAvailability } from '../lib/agentmodel.js'
   import {
-    filterThreads, suggestedPrompts, buildOverrides,
-    lastUserText, truncateForRerun, isLongOutput, isHistoricalFailureResolved,
+    filterThreads, suggestedPrompts, buildOverrides, tokenBudgetRecovery,
+    lastUserText, truncateForRerun, rerunCheckpointStrategy, isLongOutput, isHistoricalFailureResolved,
   } from '../lib/chatactions.js'
   import {
     nextVoiceState, realtimeCallURL, classifyRealtimeEvent,
@@ -51,8 +52,11 @@
     presencePenalty: 'Positive values encourage introducing new topics instead of repeating already-mentioned concepts.',
     frequencyPenalty: 'Positive values reduce repeated words and phrases. Useful when responses loop or overuse the same wording.',
     toolChoice: 'Constrains the first tool call. Use auto for normal routing, or a specific tool name to force the opening move.',
+    runBudgetTokens: 'Total prompt and response tokens available across the entire run, including every tool turn. This is different from Max tokens, which only limits one model response.',
+    runBudgetCalls: 'Maximum model calls across the run. Keep the current value when only the token budget needs more room.',
   }
-  let controls = { provider: '', model: '', temperature: '', topP: '', maxTokens: '', responseFormat: '', reasoningEffort: '', presencePenalty: '', frequencyPenalty: '', toolChoice: '' }
+  const emptyControls = () => ({ provider: '', model: '', temperature: '', topP: '', maxTokens: '', responseFormat: '', reasoningEffort: '', presencePenalty: '', frequencyPenalty: '', toolChoice: '', runBudgetTokens: '', runBudgetCalls: '' })
+  let controls = emptyControls()
   let providers = []
   let modelsByProv = {}
   let modelsLoading = {}
@@ -82,6 +86,7 @@
   $: threads = filterThreads(Object.values($chatThreads), threadSearch, showArchived, agentName)
   $: visibleMessages = activeThread?.messages || []
   $: isSending = !!activeThread?.sending
+  $: canAdjustRunBudget = ['owner', 'admin'].includes(String($activeWorkspace?.role || '').toLowerCase())
   $: currentArtifacts = activeThread ? (artifactsByThread[activeThread.id] || []) : []
   $: enabledProviders = providers.filter(p => p.registered)
   $: activeAgentConfig = agents.find(a => a.id === activeThread?.agentId) || null
@@ -998,11 +1003,11 @@
   // Re-run a turn from a point in the thread. The replay must use a new backend
   // session; otherwise the model would still see the old future turns from the
   // original session even though the UI was truncated.
-  async function rerunFrom(mi, text, overrides) {
+  async function rerunFrom(mi, text, overrides, { allowFreshFallback = false } = {}) {
     if (isSending || forking || !activeThread) return
     const source = activeThread
     const threadId = source.id
-    const kept = truncateForRerun(source.messages, mi)
+    let kept = truncateForRerun(source.messages, mi)
     forking = true
     error = null
     try {
@@ -1010,14 +1015,22 @@
       if (kept.length > 0) {
         const hist = await api.history.get(source.sessionId)
         const prevEntryId = entryIdForMessage(hist.entries || [], source.messages, mi - 1)
-        if (!prevEntryId) {
+        const strategy = rerunCheckpointStrategy(true, prevEntryId, allowFreshFallback)
+        if (strategy === 'blocked') {
           throw new Error('This turn has no saved checkpoint yet — finish the current reply before rerunning.')
         }
-        const res = await api.history.fork(source.sessionId, {
-          agent_id: source.agentId,
-          upto_entry_id: prevEntryId,
-        })
-        sessionId = res.session_id || sessionId
+        if (strategy === 'fork') {
+          const res = await api.history.fork(source.sessionId, {
+            agent_id: source.agentId,
+            upto_entry_id: prevEntryId,
+          })
+          sessionId = res.session_id || sessionId
+        } else {
+          // The budget pause can happen before the runtime persists a history
+          // checkpoint. Restart from the selected user request in a clean
+          // session; the original conversation remains available as `main`.
+          kept = []
+        }
       }
 
       let branches = source.branches || []
@@ -1043,6 +1056,37 @@
     } finally {
       forking = false
     }
+  }
+
+  function editRecommendedBudget(recovery) {
+    controls = { ...controls, runBudgetTokens: recovery.recommended, runBudgetCalls: recovery.calls }
+    controlsOpen = true
+  }
+
+  function editAgentBudgetDefault() {
+    if (!activeThread?.agentId) return
+    location.hash = `#agents?agent_id=${encodeURIComponent(activeThread.agentId)}&section=budget`
+  }
+
+  async function retryWithRecommendedBudget(mi, recovery) {
+    let ui = mi - 1
+    while (ui >= 0 && visibleMessages[ui]?.role !== 'user') ui--
+    if (ui < 0) return
+    const overrides = {
+      ...(buildOverrides(controls) || {}),
+      run_budget: { max_tokens: recovery.recommended, max_llm_calls: recovery.calls },
+    }
+    await rerunFrom(ui, visibleMessages[ui].text, overrides, { allowFreshFallback: true })
+  }
+
+  function budgetRecoveryFor(msg) {
+    const structured = tokenBudgetRecovery(msg?.text || '')
+    if (structured) return structured
+    if (!String(msg?.text || '').includes('token budget cannot fit its prompt')) return null
+    const used = Math.max(0, Number(msg?.metrics?.tokens || 0))
+    const current = Math.max(1, Number(activeAgentConfig?.budget?.max_tokens || 100000))
+    const recommended = Math.min(1000000, Math.ceil(Math.max(current * 1.5, used * 1.5) / 10000) * 10000)
+    return { used, current, recommended, calls: Number(activeAgentConfig?.budget?.max_llm_calls ?? 20), ceiling: 1000000 }
   }
   async function regenerate() {
     if (isSending || !activeThread) return
@@ -2200,7 +2244,11 @@
           <input type="number" step="0.1" min="-2" max="2" bind:value={controls.frequencyPenalty} placeholder="—" title={controlTips.frequencyPenalty} /></label>
         <label class="cp-field" title={controlTips.toolChoice}><span>Tool choice</span>
           <input bind:value={controls.toolChoice} placeholder="auto" title={controlTips.toolChoice} /></label>
-        <button class="mini-btn" on:click={() => controls = { provider:'', model:'', temperature:'', topP:'', maxTokens:'', responseFormat:'', reasoningEffort:'', presencePenalty:'', frequencyPenalty:'', toolChoice:'' }}>Reset</button>
+        <label class="cp-field" title={controlTips.runBudgetTokens}><span>Run token budget</span>
+          <input type="number" min="1" bind:value={controls.runBudgetTokens} placeholder="agent default" title={controlTips.runBudgetTokens} /></label>
+        <label class="cp-field" title={controlTips.runBudgetCalls}><span>Run model calls</span>
+          <input type="number" min="0" bind:value={controls.runBudgetCalls} placeholder="agent default" title={controlTips.runBudgetCalls} /></label>
+        <button class="mini-btn" on:click={() => controls = emptyControls()}>Reset</button>
       </div>
       {#if effectiveProvider || effectiveModel}
         <div class="cp-status {chatModelStatus.kind}" title={chatModelStatus.detail}>
@@ -2345,6 +2393,25 @@
                   </details>
                 {:else}
                   <div class="btext markdown-body" class:clamped={long} use:richRenderer={msg.text}>{@html parseMarkdown(msg.text)}</div>
+                  {@const budgetRecovery = budgetRecoveryFor(msg)}
+                  {#if budgetRecovery}
+                    <div class="budget-recovery" role="status">
+                      <div>
+                        <strong>This run needs more working room</strong>
+                        <span>{budgetRecovery.current.toLocaleString()} tokens was too small. Soulacy recommends {budgetRecovery.recommended.toLocaleString()} for the retry.</span>
+                        <small>This changes only the next run and stays below the deployment ceiling of {budgetRecovery.ceiling.toLocaleString()}.</small>
+                      </div>
+                      <div class="budget-recovery-actions">
+                        {#if canAdjustRunBudget}
+                          <button class="mini-btn primary" disabled={isSending || budgetRecovery.recommended <= 0} on:click={() => retryWithRecommendedBudget(mi, budgetRecovery)}>Retry with {budgetRecovery.recommended.toLocaleString()}</button>
+                          <button class="mini-btn" on:click={() => editRecommendedBudget(budgetRecovery)}>Adjust manually</button>
+                          <button class="mini-btn" on:click={editAgentBudgetDefault}>Make it the agent default</button>
+                        {:else}
+                          <span class="budget-admin-note">Ask a workspace owner or admin to increase this agent's run budget.</span>
+                        {/if}
+                      </div>
+                    </div>
+                  {/if}
                   {#if msg.role === 'assistant' && isLongOutput(msg.text)}
                     <button class="show-more" on:click={() => toggleExpand(mi)}>{expanded[k] ? 'Show less ▲' : 'Show more ▼'}</button>
                   {/if}
@@ -3812,6 +3879,13 @@
   .modern-chat :global(.markdown-body > blockquote) { max-width: 92ch; }
   .modern-chat :global(.markdown-body table) { display: table; width: 100%; }
   .modern-chat .bmeta { margin-top: .25rem; color: #727c9c; }
+  .budget-recovery { margin-top: 1rem; padding: .9rem 1rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; border: 1px solid #74642d; border-radius: 12px; background: linear-gradient(135deg, rgba(124,99,35,.18), rgba(83,74,137,.12)); }
+  .budget-recovery > div:first-child { display: grid; gap: .25rem; }
+  .budget-recovery strong { color: #fff0b8; }
+  .budget-recovery span { color: #d9dcef; font-size: .82rem; }
+  .budget-recovery small { color: #949dbb; font-size: .72rem; }
+  .budget-recovery-actions { display: flex; flex: 0 0 auto; gap: .5rem; }
+  .budget-admin-note { max-width: 34ch; color: #fff0b8; font-size: .78rem; }
   .modern-chat .pending-attachments { width: min(1500px, calc(100% - 4rem)); margin: 0 auto; }
   .modern-chat .input-row {
     width: min(1500px, calc(100% - 4rem)); margin: .5rem auto 1rem; padding: .55rem;
@@ -3878,5 +3952,7 @@
     .cp-field input, .cp-field select, .cp-field .model-custom, .cp-field input[type=number] { width: 100%; }
     .cp-field { flex: 1 1 45%; }
     .thread-search { max-width: none; }
+    .budget-recovery { align-items: stretch; flex-direction: column; }
+    .budget-recovery-actions { flex-wrap: wrap; }
   }
 </style>

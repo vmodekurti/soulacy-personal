@@ -62,6 +62,17 @@ func TestEffectiveRunBudgetInheritanceOverridesAndCeilings(t *testing.T) {
 	}
 }
 
+func TestPlaygroundRunBudgetOverrideIsPerRunAndKeepsBothGuards(t *testing.T) {
+	def := &agent.Definition{}
+	applyPlaygroundOverrides(def, map[string]string{
+		"playground.run_budget.max_tokens":    "160000",
+		"playground.run_budget.max_llm_calls": "20",
+	})
+	if def.Budget == nil || def.Budget.MaxTokens != 160000 || def.Budget.MaxLLMCalls != 20 {
+		t.Fatalf("run budget override = %+v", def.Budget)
+	}
+}
+
 func TestInheritedBudgetHaltReturnsPartialToolOutput(t *testing.T) {
 	def := &agent.Definition{ID: "budgeted", Name: "Budgeted", Enabled: true, LLM: agent.LLMConfig{Provider: "test", Model: "fake-model"}, MaxTurns: 3, Builtins: strListPtr("lookup")}
 	e, provider := newHandleTestEngine(t, def)
@@ -75,6 +86,52 @@ func TestInheritedBudgetHaltReturnsPartialToolOutput(t *testing.T) {
 	got := flattenParts(reply.Parts)
 	if !strings.Contains(got, "partial evidence survives") || !strings.Contains(got, "Run halted") {
 		t.Fatalf("partial budget reply = %q", got)
+	}
+}
+
+func TestLengthLimitedAnswerContinuesWithinRunBudget(t *testing.T) {
+	def := &agent.Definition{
+		ID: "continued", Name: "Continued", Enabled: true,
+		LLM:      agent.LLMConfig{Provider: "test", Model: "fake-model", MaxTokens: 200},
+		MaxTurns: 3, Builtins: strListPtr(),
+	}
+	e, provider := newHandleTestEngine(t, def)
+	provider.responses = []llm.CompletionResponse{
+		{Content: "The answer stopped in", FinishReason: "length", InputTokens: 10, OutputTokens: 200},
+		{Content: "the middle, but now it is complete.", FinishReason: "stop", InputTokens: 20, OutputTokens: 9},
+	}
+	reply, err := e.Handle(context.Background(), testUserMessage(def.ID, "continued-session", "write a report"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := flattenParts(reply.Parts); got != "The answer stopped in the middle, but now it is complete." {
+		t.Fatalf("continued reply = %q", got)
+	}
+	requests := provider.requestsSnapshot()
+	if len(requests) != 2 {
+		t.Fatalf("provider calls = %d, want 2", len(requests))
+	}
+	last := requests[1].Messages[len(requests[1].Messages)-1]
+	if last.Role != "system" || !strings.Contains(last.Content, "Continue exactly where it stopped") {
+		t.Fatalf("continuation instruction = %+v", last)
+	}
+}
+
+func TestLengthLimitedAnswerWarnsWhenContinuationCeilingIsReached(t *testing.T) {
+	def := &agent.Definition{
+		ID: "limited", Name: "Limited", Enabled: true,
+		LLM:      agent.LLMConfig{Provider: "test", Model: "fake-model", MaxTokens: 50},
+		MaxTurns: 1, Builtins: strListPtr(),
+	}
+	e, provider := newHandleTestEngine(t, def)
+	provider.responses = []llm.CompletionResponse{{Content: "partial", FinishReason: "MAX_TOKENS"}}
+	reply, err := e.Handle(context.Background(), testUserMessage(def.ID, "limited-session", "write"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := flattenParts(reply.Parts)
+	if !strings.Contains(got, "partial") || !strings.Contains(got, "reached its continuation limit") {
+		t.Fatalf("limited reply = %q", got)
 	}
 }
 

@@ -21,6 +21,7 @@ import (
 
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/credentials"
+	"github.com/soulacy/soulacy/internal/dockerutil"
 	"github.com/soulacy/soulacy/internal/secrets"
 	"github.com/soulacy/soulacy/internal/updates"
 )
@@ -109,6 +110,7 @@ func collectDoctorReport() doctorReport {
 
 	add(checkConfig())
 	add(checkDeploymentMode())
+	add(checkContainerRuntime())
 	add(checkScaleReplication())
 	add(checkPlatformAgents())
 	add(checkRuntimeDir(runtimeDir))
@@ -130,6 +132,23 @@ func collectDoctorReport() doctorReport {
 	add(checkMCPStatus())
 
 	return report
+}
+
+func checkContainerRuntime() doctorCheck {
+	cfg, err := loadDoctorConfig()
+	if err != nil || !config.IsMultiUserMode(cfg.DeploymentMode()) {
+		return doctorCheck{Name: "container runtime", Status: doctorOK, Detail: "not required in Personal mode"}
+	}
+	dockerutil.Configure(cfg.Deployment.ContainerRuntime)
+	path, version, runtimeErr := inspectContainerRuntime(context.Background())
+	if runtimeErr != nil {
+		return doctorCheck{
+			Name: "container runtime", Status: doctorFail,
+			Detail: "Team/Scale isolated MCP runtime is unavailable: " + runtimeErr.Error(),
+			Remedy: containerInstallGuidance(),
+		}
+	}
+	return doctorCheck{Name: "container runtime", Status: doctorOK, Detail: "Docker " + version + " ready at " + path + "; daemon isolation capabilities available"}
 }
 
 func checkUpdateManifest() doctorCheck {

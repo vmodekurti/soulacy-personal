@@ -1,8 +1,16 @@
 import { describe, it, expect } from 'vitest'
 import {
-  filterThreads, suggestedPrompts, buildOverrides,
-  lastUserText, truncateForRerun, isLongOutput, isHistoricalFailureResolved,
+  filterThreads, suggestedPrompts, buildOverrides, tokenBudgetRecovery,
+  lastUserText, truncateForRerun, rerunCheckpointStrategy, isLongOutput, isHistoricalFailureResolved,
 } from './chatactions.js'
+
+describe('token budget recovery', () => {
+  it('extracts the recommendation and builds a scoped run override', () => {
+    const text = '⚠ Run paused. This run used about 88800 of 100000 tokens. Recommended next-run token budget: **160000** (LLM-call limit: 20; deployment ceiling: 1000000).'
+    expect(tokenBudgetRecovery(text)).toEqual({ used: 88800, current: 100000, recommended: 160000, calls: 20, ceiling: 1000000 })
+    expect(buildOverrides({ runBudgetTokens: 160000, runBudgetCalls: 20 })).toEqual({ run_budget: { max_tokens: 160000, max_llm_calls: 20 } })
+  })
+})
 
 const name = (id) => ({ a: 'Alpha', b: 'Bravo' }[id] || id)
 
@@ -65,6 +73,21 @@ describe('lastUserText / truncateForRerun', () => {
   it('truncateForRerun keeps everything before the index', () => {
     expect(truncateForRerun(msgs, 2).map((m) => m.text)).toEqual(['hi', 'hello'])
     expect(truncateForRerun(msgs, 0)).toEqual([])
+  })
+})
+
+describe('rerunCheckpointStrategy', () => {
+  it('forks when retained history has a durable checkpoint', () => {
+    expect(rerunCheckpointStrategy(true, 'entry-42')).toBe('fork')
+  })
+
+  it('keeps ordinary reruns blocked when retained history is not durable', () => {
+    expect(rerunCheckpointStrategy(true, '')).toBe('blocked')
+  })
+
+  it('allows an explicit recovery action to start a clean session', () => {
+    expect(rerunCheckpointStrategy(true, '', true)).toBe('fresh')
+    expect(rerunCheckpointStrategy(false, '', false)).toBe('fresh')
   })
 })
 

@@ -2356,7 +2356,7 @@ Use null for fields that are not present.`
     saveError = ''
     saveMsg = ''
     try {
-      const res = await bridge.saveYaml(codeYaml)
+      const res = await bridge.saveYaml(codeYaml, loadedAgentId)
       codeOrig = codeYaml
       const id = (res && res.id) || ''
       saveMsg = id ? `Saved ${id} — manage it from Deployed.` : 'Saved'

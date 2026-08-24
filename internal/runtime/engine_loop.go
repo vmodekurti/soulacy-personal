@@ -576,6 +576,8 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 	const repeatToolNudgeAt = 3
 
 	var finalContent string
+	continuingOutput := false
+	outputLimitStillHit := false
 	for turn := 0; turn < maxTurns; turn++ {
 		// S3.1 — budget gate. Check BEFORE issuing the call so we never spend
 		// past the cap. When exceeded we stop the loop and let the
@@ -619,7 +621,13 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 		// without one (the plain /chat path), we now relay tokens to the event
 		// sink as `assistant.delta` events so the web UI can render the answer
 		// live over the existing /ws/events socket.
-		wantStream := def.StreamReply && len(tools) == 0
+		requestTools := tools
+		if continuingOutput {
+			// A continuation is part of the same final answer. Do not let the
+			// model start another tool cycle after it already began synthesizing.
+			requestTools = nil
+		}
+		wantStream := def.StreamReply && len(requestTools) == 0
 
 		// Story 4 / S5.1 — proactively keep the prompt within the model's
 		// context window. Reserve room for the completion, then trim the oldest
@@ -634,13 +642,27 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 		// provider. This prevents a run with one token remaining from starting a
 		// large final request and overshooting its declared budget.
 		if budgetTokens > 0 {
-			remainingOutput := budgetTokens - usedTokens - estimateTokens(chatMsgs, tools)
+			promptTokens := estimateTokens(chatMsgs, requestTools)
+			remainingOutput := budgetTokens - usedTokens - promptTokens
 			if remainingOutput <= 0 {
 				finalContent = strings.TrimSpace(bestEffortFinal(chatMsgs))
 				if finalContent != "" {
 					finalContent += "\n\n"
 				}
-				finalContent += "⚠ Run halted before the next model call because the token budget cannot fit its prompt."
+				needed := usedTokens + promptTokens + reserveOut
+				recommended := budgetTokens + budgetTokens/2
+				if needed > recommended {
+					recommended = needed
+				}
+				recommended = ((recommended + 9999) / 10000) * 10000
+				ceiling := defaultMaxBudgetTokens
+				if e.runBudgetConfigured {
+					ceiling = e.maxRunBudget.MaxTokens
+				}
+				if ceiling > 0 && recommended > ceiling {
+					recommended = ceiling
+				}
+				finalContent += fmt.Sprintf("⚠ Run paused before the next model call because its prompt no longer fits the run token budget. This run used about %d of %d tokens. Recommended next-run token budget: **%d** (LLM-call limit: %d; deployment ceiling: %d).", usedTokens, budgetTokens, recommended, budgetCalls, ceiling)
 				metrics.AgentBudgetHaltsTotal.Inc()
 				break
 			}
@@ -649,7 +671,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 			}
 		}
 		inputBudget := ctxLimit - reserveOut
-		if trimmed, dropped := trimMessagesToFit(chatMsgs, tools, inputBudget); dropped > 0 {
+		if trimmed, dropped := trimMessagesToFit(chatMsgs, requestTools, inputBudget); dropped > 0 {
 			chatMsgs = trimmed
 			e.log.Warn("engine: trimmed history to fit context window",
 				zap.String("agent", msg.AgentID),
@@ -661,7 +683,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 		req := llm.CompletionRequest{
 			Model:            def.LLM.Model,
 			Messages:         chatMsgs,
-			Tools:            tools,
+			Tools:            requestTools,
 			Temperature:      def.LLM.Temperature,
 			TopP:             def.LLM.TopP,
 			MaxTokens:        reserveOut,
@@ -830,15 +852,37 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 				"model":         model,
 				"input_tokens":  resp.InputTokens,
 				"output_tokens": resp.OutputTokens,
+				"finish_reason": resp.FinishReason,
 				"duration_ms":   time.Since(llmStart).Milliseconds(),
 				"tool_calls":    len(resp.ToolCalls),
 			},
 			Timestamp: time.Now().UTC(),
 		})
 
+		// A provider can return HTTP 200 with a partial answer and a stop reason
+		// such as "length"/"MAX_TOKENS". Treating that as a completed reply is
+		// silent data loss. Continue in the same run, governed by the ordinary
+		// max-turn, model-call, token, timeout, and cost ceilings above.
+		if len(resp.ToolCalls) == 0 && outputLimitFinishReason(resp.FinishReason) && strings.TrimSpace(resp.Content) != "" {
+			finalContent = joinOutputContinuation(finalContent, resp.Content)
+			outputLimitStillHit = true
+			continuingOutput = true
+			chatMsgs = append(chatMsgs,
+				llm.ChatMessage{Role: "assistant", Content: resp.Content},
+				llm.ChatMessage{Role: "system", Content: "The previous answer hit the provider's per-call output limit. Continue exactly where it stopped. Do not repeat prior text, restart the answer, or call tools; finish the response."},
+			)
+			e.emit(ctx, message.Event{
+				Type: "warn", AgentID: msg.AgentID, SessionID: msg.SessionID,
+				Payload:   map[string]any{"stage": "llm", "reason": "output_limit", "action": "continuing", "finish_reason": resp.FinishReason},
+				Timestamp: time.Now().UTC(),
+			})
+			continue
+		}
+
 		// No tool calls → we have a final answer
 		if len(resp.ToolCalls) == 0 {
-			finalContent = resp.Content
+			finalContent = joinOutputContinuation(finalContent, resp.Content)
+			outputLimitStillHit = false
 			break
 		}
 
@@ -918,6 +962,9 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 		sess.mu.Unlock()
 
 		chatMsgs = e.buildContext(ctx, def, sess, msg) // rebuild with tool results
+	}
+	if outputLimitStillHit {
+		finalContent += "\n\n⚠ The provider stopped at its per-call output limit, and this run reached its continuation limit before the answer finished. Increase the agent's max turns/output allowance or retry the response."
 	}
 
 	if strings.TrimSpace(finalContent) == "" {

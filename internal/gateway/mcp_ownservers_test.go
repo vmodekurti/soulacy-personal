@@ -2,7 +2,9 @@ package gateway
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/soulacy/soulacy/internal/config"
@@ -112,6 +114,55 @@ func TestTheStoredServerIsRebuiltWithItsSecret(t *testing.T) {
 	}
 	if sc.Env["API_KEY"] != "tenant-secret" {
 		t.Fatalf("API_KEY = %q, want the value from the vault", sc.Env["API_KEY"])
+	}
+}
+
+func TestContainerServerReceivesOnlyItsCanonicalWorkspaceRoot(t *testing.T) {
+	s, store, _ := ownServerServer(t)
+	root := t.TempDir()
+	s.SetWorkspaceLayoutRoot(root)
+	workspaceID := "ws_tenant_one"
+	if err := store.Put(context.Background(), mcpstore.Server{
+		WorkspaceID:        workspaceID,
+		ID:                 "isolated",
+		Transport:          "container",
+		Command:            "example.invalid/mcp@sha256:" + strings.Repeat("a", 64),
+		ContainerNetwork:   "none",
+		ContainerWorkspace: "read",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	server, ok := s.workspaceOwnedServers(workspaceID)["isolated"]
+	if !ok {
+		t.Fatal("container server was not resolved")
+	}
+	want := filepath.Join(root, wsroot.WorkspaceDir, workspaceID)
+	if server.WorkDir != want {
+		t.Fatalf("container workspace root = %q, want %q", server.WorkDir, want)
+	}
+	wantData := filepath.Join(want, ".mcp-data", "isolated")
+	if server.ContainerDataDir != wantData {
+		t.Fatalf("container private data = %q, want %q", server.ContainerDataDir, wantData)
+	}
+	if info, err := os.Stat(wantData); err != nil || !info.IsDir() {
+		t.Fatalf("private data directory was not created: %v", err)
+	}
+}
+
+func TestSafeContainerLocalSettingIsNarrow(t *testing.T) {
+	for _, value := range []string{"sqlite:////data/maverick.db", "sqlite:////data/server-1.db"} {
+		if !safeContainerLocalSetting("DATABASE_URL", value) {
+			t.Fatalf("generated local database rejected: %q", value)
+		}
+	}
+	for _, value := range []string{
+		"postgres://user:pass@db/app", "sqlite:////etc/passwd", "sqlite:////data/../other.db",
+		"sqlite:////data/nested/other.db", "sqlite:////data/no-extension",
+	} {
+		if safeContainerLocalSetting("DATABASE_URL", value) {
+			t.Fatalf("unsafe or user-supplied database accepted: %q", value)
+		}
 	}
 }
 

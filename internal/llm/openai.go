@@ -234,6 +234,9 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req CompletionRequest) (*
 				if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
 					ch <- chunk.Choices[0].Delta.Content
 				}
+				if len(chunk.Choices) > 0 && chunk.Choices[0].FinishReason != "" {
+					result.FinishReason = chunk.Choices[0].FinishReason
+				}
 				if chunk.Usage != nil {
 					result.CacheReadTokens = chunk.Usage.PromptDetails.CachedTokens
 					result.InputTokens = max(0, chunk.Usage.PromptTokens-result.CacheReadTokens)
@@ -311,6 +314,7 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req CompletionRequest) (*
 					} `json:"function"`
 				} `json:"tool_calls"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 		Usage struct {
 			PromptTokens     int `json:"prompt_tokens"`
@@ -334,6 +338,7 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req CompletionRequest) (*
 
 	r := &CompletionResponse{
 		Content:           result.Choices[0].Message.Content,
+		FinishReason:      result.Choices[0].FinishReason,
 		InputTokens:       max(0, result.Usage.PromptTokens-result.Usage.PromptDetails.CachedTokens),
 		OutputTokens:      result.Usage.CompletionTokens,
 		TotalTokens:       result.Usage.TotalTokens,

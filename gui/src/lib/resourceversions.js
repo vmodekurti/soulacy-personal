@@ -35,6 +35,12 @@ export function resourceKey(path) {
   if (typeof path !== 'string') return ''
   const clean = path.split('?')[0].replace(/^\/+/, '')
   const parts = clean.split('/').filter(Boolean)
+  // Studio re-opens the same agent through its draft projection. It is not a
+  // different resource: /studio/agents/:id and /agents/:id are two views over
+  // the same definition and therefore share one validator.
+  if (parts[0] === 'studio' && parts[1] === 'agents' && parts.length === 3) {
+    return `agents/${parts[2]}`
+  }
   if (parts[0] !== 'agents' || parts.length < 2) return ''
   // `/agents/validate` and `/agents/package/...` are not an agent's identity.
   if (parts[1] === 'validate' || parts[1] === 'package') return ''

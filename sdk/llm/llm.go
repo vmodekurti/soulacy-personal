@@ -81,6 +81,10 @@ type ToolSchema struct {
 type CompletionResponse struct {
 	Content   string
 	ToolCalls []message.ToolCall
+	// FinishReason is the provider-reported reason generation stopped. Common
+	// values include "stop", "length", "max_tokens", and "MAX_TOKENS".
+	// The runtime uses this to distinguish a complete answer from a partial one.
+	FinishReason string
 	// Usage statistics
 	InputTokens  int
 	OutputTokens int

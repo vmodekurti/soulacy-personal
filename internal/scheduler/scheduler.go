@@ -633,6 +633,11 @@ func (s *Scheduler) definitionIn(key scheduleKey) *agent.Definition {
 	return s.loader.GetInWorkspace(key.workspaceID, key.agentID)
 }
 
+func isBudgetHaltReply(text string) bool {
+	return strings.Contains(text, "Run paused before the next model call because its prompt no longer fits the run token budget") ||
+		strings.Contains(text, "Run halted before the next model call because the token budget cannot fit its prompt")
+}
+
 // fire synthesises a trigger message and dispatches it to the engine.
 func (s *Scheduler) fireAt(key scheduleKey, triggerType string, scheduledAt time.Time) {
 	agentID := key.agentID
@@ -759,6 +764,26 @@ func (s *Scheduler) fireAt(key scheduleKey, triggerType string, scheduledAt time
 		}
 		return
 	}
+	replyText := ""
+	for _, p := range reply.Parts {
+		if p.Type == message.ContentText && p.Text != "" {
+			replyText = p.Text
+			break
+		}
+	}
+	// A budget halt intentionally returns the best partial answer instead of a
+	// Go error. That is useful in interactive Chat, but a cron system must not
+	// record an incomplete report as a successful occurrence. Preserve and
+	// deliver the partial result, while recording a targeted, actionable failure.
+	if isBudgetHaltReply(replyText) {
+		runErr = fmt.Errorf("scheduled run needs a larger agent token budget: %s", replyText)
+		if isCron {
+			disabled, failures := s.recordFireResult(key, false)
+			s.reportRunFailure(def, msg, triggerType, runErr, elapsed, failures, disabled)
+		}
+		s.sendScheduledOutput(ctx, def, msg, replyText, triggerType, reply.Metadata)
+		return
+	}
 	if isCron {
 		s.recordFireResult(key, true) // success resets the failure streak
 		s.markScheduleCompleted(key, scheduledAt)
@@ -774,13 +799,6 @@ func (s *Scheduler) fireAt(key scheduleKey, triggerType string, scheduledAt time
 			URL:   "/#mobile",
 			Tag:   "sched-" + agentID,
 		})
-	}
-	replyText := ""
-	for _, p := range reply.Parts {
-		if p.Type == message.ContentText && p.Text != "" {
-			replyText = p.Text
-			break
-		}
 	}
 	s.sendScheduledOutput(ctx, def, msg, replyText, triggerType, reply.Metadata)
 	s.log.Info("scheduled agent completed",
@@ -814,6 +832,10 @@ func (s *Scheduler) reportRunFailure(def *agent.Definition, source message.Messa
 		"consecutive_failures": consecutiveFailures,
 		"auto_disabled":        autoDisabled,
 		"runbook":              "Open Activity, use Debug in Studio, fix the failing node/provider/channel, then re-enable the cron agent.",
+	}
+	if strings.Contains(runErr.Error(), "token budget") {
+		payload["runbook"] = "Open the agent budget settings, apply the recommended run token budget (within the deployment ceiling), save, then run once manually before re-enabling the schedule."
+		payload["remediation"] = "increase_agent_run_budget"
 	}
 	sink.Emit(message.Event{
 		Type:      "schedule.run_failed",

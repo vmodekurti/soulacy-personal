@@ -59,6 +59,14 @@ type ServerConfig struct {
 	// handling in the transport. It is runtime enforcement, not just API input
 	// validation, so DNS rebinding cannot turn an approved URL into host SSRF.
 	PublicRemote bool
+	// ContainerNetwork and ContainerWorkspace are approval-bound permissions
+	// for workspace-installed container transports. Empty values fail to the
+	// safest policy (no network and no workspace mount).
+	ContainerNetwork   string
+	ContainerWorkspace string
+	// ContainerDataDir is a platform-derived host directory for the server's
+	// private durable state. Workspace input never controls it.
+	ContainerDataDir string
 
 	// WorkDir is the directory the stdio child starts in. Empty inherits the
 	// gateway's own working directory, which is what every MCP server did

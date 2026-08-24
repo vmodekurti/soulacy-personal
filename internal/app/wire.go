@@ -24,6 +24,7 @@ import (
 	"github.com/soulacy/soulacy/internal/channels"
 	httpchan "github.com/soulacy/soulacy/internal/channels/http"
 	"github.com/soulacy/soulacy/internal/config"
+	"github.com/soulacy/soulacy/internal/dockerutil"
 	"github.com/soulacy/soulacy/internal/entitlements"
 	"github.com/soulacy/soulacy/internal/events"
 	"github.com/soulacy/soulacy/internal/gateway"
@@ -51,6 +52,7 @@ import (
 // cancellation and SIGINT/SIGTERM both shut the process down cleanly).
 func (a *App) Run(parent context.Context) error {
 	cfg, log := a.cfg, a.log
+	dockerutil.Configure(cfg.Deployment.ContainerRuntime)
 	defer log.Sync() //nolint:errcheck
 
 	log.Info("Soulacy starting", zap.String("version", config.Version))

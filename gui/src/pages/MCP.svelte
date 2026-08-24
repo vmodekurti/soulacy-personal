@@ -33,6 +33,10 @@
   let inspecting = false
   let approving = false
   let installError = ''
+	let installNetwork = 'public'
+	let installWorkspace = 'none'
+	let installSettings = {}
+	$: installRequiredMissing = !!installReview?.environment?.some(item => item.required && !String(installSettings[item.name] || '').trim())
 
   function openInstall() {
     installModal = true
@@ -40,6 +44,9 @@
     installReview = null
     installToken = ''
     installError = ''
+		installNetwork = 'public'
+		installWorkspace = 'none'
+		installSettings = {}
   }
   function closeInstall() {
     if (inspecting || approving) return
@@ -50,9 +57,10 @@
     installError = ''
     installReview = null
     try {
-      const res = await api.mcp.inspectInstall(installURL.trim())
+		const res = await api.mcp.inspectInstall(installURL.trim(), { network: installNetwork, workspace: installWorkspace })
       installToken = res.approval_token
       installReview = res.report
+		installSettings = Object.fromEntries((installReview.environment || []).map(item => [item.name, '']))
     } catch (e) {
       installError = e.message
     } finally {
@@ -63,7 +71,7 @@
     approving = true
     installError = ''
     try {
-      const res = await api.mcp.approveInstall(installToken, installReview.fingerprint)
+		const res = await api.mcp.approveInstall(installToken, installReview.fingerprint, installSettings)
       info = res.message || 'MCP server installed.'
       installModal = false
       await load()
@@ -394,7 +402,7 @@
       a process janitor around MCP tool calls so short-lived browser children are cleaned up after the call returns.
       Use <strong>Browser visible</strong> only for live debugging.
     </p>
-    <p>{workspaceScoped ? 'Only workspace owners and admins can install or remove servers. Every install requires a review and explicit approval, and runs from an immutable image without host mounts or inherited gateway secrets.' : 'Changes here are written to config.yaml; the gateway must be restarted to pick them up.'}</p>
+		<p>{workspaceScoped ? 'Only workspace owners and admins can install or remove servers. Published packages and supported source-only MCP servers are prepared and run in isolated containers with only the network and workspace-file permissions approved during installation.' : 'Changes here are written to config.yaml; the gateway must be restarted to pick them up.'}</p>
   </div>
 </div>
 
@@ -409,6 +417,13 @@
         <input type="url" bind:value={installURL} placeholder="https://github.com/wshobson/maverick-mcp" disabled={inspecting || approving || !!installReview} on:keydown={(e) => e.key === 'Enter' && !installReview && inspectInstall()} />
       </div>
 
+		{#if !installReview}
+			<div class="permission-picker">
+				<label><span>Internet access</span><select bind:value={installNetwork} disabled={inspecting}><option value="public">Allow public APIs</option><option value="none">No internet</option></select><small>Choose “No internet” for filesystem and local-data servers.</small></label>
+				<label><span>Workspace files</span><select bind:value={installWorkspace} disabled={inspecting}><option value="none">No files</option><option value="read">Read only</option><option value="write">Read and write</option></select><small>Only this workspace is ever mounted, at <code>/workspace</code>.</small></label>
+			</div>
+		{/if}
+
       {#if installError}<div class="banner err">{installError}</div>{/if}
 
       {#if installReview}
@@ -418,7 +433,7 @@
         </div>
         <div class="review-grid">
           <div><span>Source commit</span><code>{installReview.revision}</code></div>
-          <div><span>Container image</span><code>{installReview.image}</code></div>
+					<div><span>Isolated runtime</span><code>{installReview.runtime || 'oci'} · {installReview.image}</code></div>
           <div><span>Server ID</span><code>{installReview.server_id}</code></div>
           <div><span>Approval fingerprint</span><code>{installReview.fingerprint}</code></div>
         </div>
@@ -429,14 +444,14 @@
           {/each}
         </div>
         <div class="isolation-row">
-          <span>Read-only filesystem</span><span>No host mounts</span><span>No Docker socket</span><span>Capabilities dropped</span><span>CPU/RAM/PID limits</span>
+					<span>Non-root</span><span>Read-only container</span><span>{installReview.permissions?.network === 'none' ? 'No network' : 'Public API access'}</span><span>{installReview.permissions?.workspace === 'none' ? 'No workspace files' : (installReview.permissions?.workspace === 'read' ? 'Workspace read only' : 'Workspace read/write')}</span><span>No Docker socket</span><span>Capabilities dropped</span><span>CPU/RAM/PID/file limits</span>
         </div>
         {#if installReview.environment?.length}
-          <details class="env-review"><summary>Optional/required configuration requested ({installReview.environment.length})</summary>
-            {#each installReview.environment as item}<div><code>{item.name}</code> {item.required ? 'required' : 'optional'}{item.secret ? ' · secret' : ''}</div>{/each}
-          </details>
+					<div class="install-settings"><h3>Configuration</h3><p>Secrets are saved directly in this workspace’s encrypted vault.</p>
+						{#each installReview.environment as item}<label><span><code>{item.name}</code> {item.required ? '· required' : '· optional'}</span><input type={item.secret ? 'password' : 'text'} bind:value={installSettings[item.name]} autocomplete="off" placeholder={item.description || item.name} /><small>{item.secret ? 'Stored in workspace vault' : item.description}</small></label>{/each}
+					</div>
         {/if}
-        <div class="approval-note"><strong>Explicit approval:</strong> approving pulls the publisher image, pins it by SHA-256 digest, and starts it only inside this workspace’s isolated runtime.</div>
+        <div class="approval-note"><strong>Explicit approval:</strong> approving {installReview.runtime === 'source-npm' ? 'builds this source in a disposable builder, content-addresses the result,' : 'pulls and pins the runtime image by SHA-256,'} and starts it only inside this workspace’s isolated runtime. Discovered tools become selectable in Studio; agents still need an explicit server or tool grant.</div>
       {/if}
 
       <div class="modal-row">
@@ -444,8 +459,8 @@
         {#if !installReview}
           <button class="btn-primary" on:click={inspectInstall} disabled={inspecting || !installURL.trim()}>{inspecting ? 'Inspecting…' : 'Inspect repository'}</button>
         {:else}
-          <button class="btn-secondary" on:click={() => { installReview = null; installToken = ''; installError = '' }} disabled={approving}>Use another URL</button>
-          <button class="btn-primary" on:click={approveInstall} disabled={approving}>{approving ? 'Installing image…' : 'Approve & install'}</button>
+					<button class="btn-secondary" on:click={() => { installReview = null; installToken = ''; installError = ''; installSettings = {} }} disabled={approving}>Change</button>
+					<button class="btn-primary" on:click={approveInstall} disabled={approving || installRequiredMissing}>{approving ? 'Installing safely…' : 'Approve & install'}</button>
         {/if}
       </div>
     </div>
@@ -644,6 +659,11 @@
   .empty-icon { font-size: 2.5rem; }
   .hint { font-size: .82rem; max-width: 540px; }
   .review-head { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; padding:.8rem; background:#111426; border:1px solid #252b4b; border-radius:8px; }
+	.permission-picker { display:grid; grid-template-columns:1fr 1fr; gap:.7rem; padding:.75rem; border:1px solid #252b4b; background:#101322; border-radius:8px; }
+	.permission-picker label, .install-settings label { display:flex; flex-direction:column; gap:.3rem; color:#aeb5d3; font-size:.76rem; }
+	.permission-picker select, .install-settings input { background:#0e1020; border:1px solid #2a2f4a; color:#e8eaf6; border-radius:6px; padding:.48rem .6rem; }
+	.permission-picker small, .install-settings small { color:#697190; font-size:.68rem; line-height:1.35; }
+	.permission-picker code { color:#aaa5ff; }
   .review-head p, .finding p { margin:.2rem 0 0; color:#8d94b8; font-size:.78rem; }
   .review-ready { color:#60f0a0; border:1px solid rgba(96,240,160,.3); background:rgba(96,240,160,.08); padding:.3rem .55rem; border-radius:999px; white-space:nowrap; font-size:.72rem; }
   .review-grid { display:grid; grid-template-columns:1fr 1fr; gap:.6rem; margin:.75rem 0; }
@@ -659,6 +679,10 @@
   .isolation-row span { font-size:.67rem; color:#aeb5d3; background:#20253d; border-radius:999px; padding:.25rem .45rem; }
   .env-review { color:#aeb5d3; font-size:.76rem; margin:.6rem 0; }
   .env-review div { padding:.2rem 0 .2rem .7rem; }
+	.install-settings { display:grid; grid-template-columns:1fr 1fr; gap:.65rem; margin:.7rem 0; padding:.75rem; border:1px solid #252b4b; border-radius:8px; }
+	.install-settings h3, .install-settings > p { grid-column:1 / -1; margin:0; }
+	.install-settings h3 { font-size:.8rem; }
+	.install-settings > p { color:#7b82a8; font-size:.72rem; }
   .approval-note { padding:.65rem; border-radius:7px; background:rgba(139,133,255,.08); border:1px solid rgba(139,133,255,.25); color:#bdb9ff; font-size:.76rem; }
 
   .server-list { display: flex; flex-direction: column; gap: .65rem; }

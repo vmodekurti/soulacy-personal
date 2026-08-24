@@ -79,6 +79,8 @@ func teamAgentAppWithLLM(t *testing.T, actor *string) (*Server, *fiber.App, *fak
 	app.Post("/agents/:id/rollback", srv.handleRollbackAgent)
 	app.Post("/studio/save-yaml", srv.handleStudioSaveYAML)
 	app.Post("/studio/save", srv.handleStudioSave)
+	app.Get("/studio/agents", srv.handleStudioListAgents)
+	app.Get("/studio/agents/:id", srv.handleStudioLoadAgent)
 	app.Post("/builder/deploy", srv.handleBuilderDeploy)
 	app.Post("/agents/import", srv.handleImportAgentPackage)
 	app.Post("/builder/chat", srv.handleBuilderChat)
@@ -434,6 +436,52 @@ func TestTheStudioCanvasSaveRefusesAStaleGraph(t *testing.T) {
 	}
 	if got := storedName(t, srv, "canvas"); got != "bob's edit" {
 		t.Fatalf("the refused canvas save still wrote: name = %q", got)
+	}
+}
+
+func TestStudioReadRoutesHandTheEditorACurrentVersion(t *testing.T) {
+	actor := "usr_alice"
+	_, app := teamAgentApp(t, &actor)
+	if status, body, _ := agentRequest(t, app, http.MethodPost, "/agents", "",
+		`{"id":"studio-edit","name":"Studio edit","enabled":true,"studio_intent":"edit me"}`); status != http.StatusCreated {
+		t.Fatalf("seed create = %d %v", status, body)
+	}
+
+	status, _, loadedVersion := agentRequest(t, app, http.MethodGet, "/studio/agents/studio-edit", "", "")
+	if status != http.StatusOK || loadedVersion == "" {
+		t.Fatalf("Studio load = %d, ETag %q; editor cannot save conditionally", status, loadedVersion)
+	}
+
+	status, listed, _ := agentRequest(t, app, http.MethodGet, "/studio/agents", "", "")
+	versions, _ := listed["versions"].(map[string]any)
+	listedVersion, _ := versions["studio-edit"].(string)
+	if status != http.StatusOK || listedVersion == "" {
+		t.Fatalf("Studio list = %d without agent version: %v", status, listed)
+	}
+	if listedVersion != loadedVersion {
+		t.Fatalf("Studio list version %q != load ETag %q", listedVersion, loadedVersion)
+	}
+}
+
+func TestStudioYAMLSaveReturnsTheNewVersion(t *testing.T) {
+	actor := "usr_alice"
+	_, app := teamAgentApp(t, &actor)
+	if status, body, _ := agentRequest(t, app, http.MethodPost, "/agents", "",
+		`{"id":"yaml-edit","name":"Before","enabled":false}`); status != http.StatusCreated {
+		t.Fatalf("seed create = %d %v", status, body)
+	}
+	_, _, before := agentRequest(t, app, http.MethodGet, "/agents/yaml-edit", "", "")
+	payload, _ := json.Marshal(map[string]any{"yaml": "id: yaml-edit\nname: After\nenabled: false\n"})
+	status, body, written := agentRequest(t, app, http.MethodPost, "/studio/save-yaml", before, string(payload))
+	if status != http.StatusOK {
+		t.Fatalf("Studio YAML save = %d %v", status, body)
+	}
+	if written == "" || written == before {
+		t.Fatalf("save returned version %q, want a new validator after %q", written, before)
+	}
+	_, _, current := agentRequest(t, app, http.MethodGet, "/agents/yaml-edit", "", "")
+	if written != current {
+		t.Fatalf("save returned %q but the stored definition is %q", written, current)
 	}
 }
 

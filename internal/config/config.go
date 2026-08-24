@@ -337,6 +337,9 @@ type DeploymentConfig struct {
 	// shared artifact root (for example s3://bucket/prefix) used for completed
 	// chat and workboard outputs and workspace erasure.
 	SharedArtifactStore string `mapstructure:"shared_artifact_store"`
+	// ContainerRuntime is the operator-validated absolute Docker/OCI CLI path
+	// used by local Team/Scale builders and isolated MCP workers.
+	ContainerRuntime string `mapstructure:"container_runtime"`
 	// Acknowledgements records explicit named acknowledgements for deployment
 	// compromises that have a supported degraded mode. Authentication and
 	// tenant isolation are never acknowledgement-overridable.

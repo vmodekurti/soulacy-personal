@@ -47,6 +47,7 @@ import (
 	"github.com/soulacy/soulacy/internal/scheduler"
 	"github.com/soulacy/soulacy/internal/secrets"
 	"github.com/soulacy/soulacy/internal/templates"
+	"github.com/soulacy/soulacy/internal/tenancy"
 	"github.com/soulacy/soulacy/internal/tier"
 	"github.com/soulacy/soulacy/internal/workspacesettings"
 	"github.com/soulacy/soulacy/pkg/agent"
@@ -1033,7 +1034,11 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 			PresencePenalty  *float64 `json:"presence_penalty"`
 			FrequencyPenalty *float64 `json:"frequency_penalty"`
 			ToolChoice       string   `json:"tool_choice"`
-			LLM              struct {
+			RunBudget        struct {
+				MaxTokens   *int `json:"max_tokens"`
+				MaxLLMCalls *int `json:"max_llm_calls"`
+			} `json:"run_budget"`
+			LLM struct {
 				Provider         string   `json:"provider"`
 				Model            string   `json:"model"`
 				Temperature      *float64 `json:"temperature"`
@@ -1121,6 +1126,18 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 	if (strings.TrimSpace(ovProvider) != "" || strings.TrimSpace(ovModel) != "") && !canOverrideModel(claims) {
 		return s.errMsg(c, fiber.StatusForbidden, "provider/model overrides require the admin or operator role")
 	}
+	if (req.Overrides.RunBudget.MaxTokens != nil || req.Overrides.RunBudget.MaxLLMCalls != nil) && !s.canOverrideRunBudget(c) {
+		return s.errMsg(c, fiber.StatusForbidden, "run budget overrides require the workspace owner or admin role")
+	}
+	if (req.Overrides.RunBudget.MaxTokens == nil) != (req.Overrides.RunBudget.MaxLLMCalls == nil) {
+		return s.errMsg(c, fiber.StatusBadRequest, "run budget overrides require both max_tokens and max_llm_calls")
+	}
+	if req.Overrides.RunBudget.MaxTokens != nil && *req.Overrides.RunBudget.MaxTokens <= 0 {
+		return s.errMsg(c, fiber.StatusBadRequest, "run_budget.max_tokens must be greater than zero")
+	}
+	if req.Overrides.RunBudget.MaxLLMCalls != nil && *req.Overrides.RunBudget.MaxLLMCalls < 0 {
+		return s.errMsg(c, fiber.StatusBadRequest, "run_budget.max_llm_calls must not be negative")
+	}
 	workspaceDefault := false
 	if strings.TrimSpace(ovProvider) == "" && strings.TrimSpace(ovModel) == "" {
 		ovProvider, ovModel = s.workspaceChatLLM(c)
@@ -1128,6 +1145,17 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 	}
 
 	chatMeta := chatOverrideMetadata(ovProvider, ovModel, ovTemp, ovTopP, ovMaxTokens, req.Overrides.MaxTurns, ovToolChoice, ovResponseFormat, ovReasoningEffort, ovPresencePenalty, ovFrequencyPenalty)
+	if req.Overrides.RunBudget.MaxTokens != nil || req.Overrides.RunBudget.MaxLLMCalls != nil {
+		if chatMeta == nil {
+			chatMeta = map[string]string{}
+		}
+		if req.Overrides.RunBudget.MaxTokens != nil {
+			chatMeta["playground.run_budget.max_tokens"] = strconv.Itoa(*req.Overrides.RunBudget.MaxTokens)
+		}
+		if req.Overrides.RunBudget.MaxLLMCalls != nil {
+			chatMeta["playground.run_budget.max_llm_calls"] = strconv.Itoa(*req.Overrides.RunBudget.MaxLLMCalls)
+		}
+	}
 	if responseMode == "voice" {
 		if chatMeta == nil {
 			chatMeta = map[string]string{}
@@ -1233,6 +1261,19 @@ func canOverrideModel(claims *auth.Claims) bool {
 		return true
 	}
 	return strings.EqualFold(claims.Role, "admin") || strings.EqualFold(claims.Role, "operator")
+}
+
+// canOverrideRunBudget is workspace authority, not deployment authority. The
+// hard ceiling remains deployment-owned, but choosing a smaller per-run limit
+// for one workspace's agent is a tenant operation. Always use the verified
+// membership projected into request context; a stale token role must not grant
+// control after the member was demoted or moved to another workspace.
+func (s *Server) canOverrideRunBudget(c *fiber.Ctx) bool {
+	if !s.authorizationRequired() {
+		return true
+	}
+	identity, ok := requestIdentity(c)
+	return ok && (identity.Role() == tenancy.RoleOwner || identity.Role() == tenancy.RoleAdmin)
 }
 
 func chatOverrideMetadata(provider, model string, temperature, topP *float64, maxTokens, maxTurns *int, toolChoice, responseFormat, reasoningEffort string, presencePenalty, frequencyPenalty *float64) map[string]string {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/soulacy/soulacy/internal/dockerutil"
 	"github.com/soulacy/soulacy/internal/executor"
 	"github.com/soulacy/soulacy/internal/executor/process"
 	"github.com/soulacy/soulacy/pkg/message"
@@ -77,11 +78,19 @@ func (e *Executor) SetOnProgress(fn func(message.ProgressEvent)) { e.onProgress 
 func (e *Executor) Ready(ctx context.Context) error {
 	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	if err := exec.CommandContext(checkCtx, "docker", "version", "--format", "{{.Server.Version}}").Run(); err != nil {
+	versionCmd, err := dockerutil.CommandContext(checkCtx, "version", "--format", "{{.Server.Version}}")
+	if err != nil {
+		return fmt.Errorf("executor/docker: %w", err)
+	}
+	if err := versionCmd.Run(); err != nil {
 		return fmt.Errorf("executor/docker: Docker daemon unavailable: %w", err)
 	}
 	if e.runtime != "" {
-		out, err := exec.CommandContext(checkCtx, "docker", "info", "--format", "{{json .Runtimes}}").Output()
+		infoCmd, cmdErr := dockerutil.CommandContext(checkCtx, "info", "--format", "{{json .Runtimes}}")
+		if cmdErr != nil {
+			return fmt.Errorf("executor/docker: %w", cmdErr)
+		}
+		out, err := infoCmd.Output()
 		if err != nil || !strings.Contains(string(out), `"`+e.runtime+`"`) {
 			return fmt.Errorf("executor/docker: hardened runtime %q unavailable", e.runtime)
 		}
@@ -123,7 +132,10 @@ func (e *Executor) Run(ctx context.Context, pyFile, funcName, inline string, arg
 	if e.runtime != "" {
 		args = append(args[:2], append([]string{"--runtime", e.runtime}, args[2:]...)...)
 	}
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd, err := dockerutil.CommandContext(ctx, args...)
+	if err != nil {
+		return "", fmt.Errorf("executor/docker: %w", err)
+	}
 	cmd.Stdin = bytes.NewReader(argsJSON)
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {

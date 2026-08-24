@@ -72,7 +72,19 @@ export function buildOverrides(controls = {}) {
   }
   if (str(controls.toolChoice)) llm.tool_choice = str(controls.toolChoice)
   if (Object.keys(llm).length) o.llm = llm
+  if (Number(controls.runBudgetTokens) > 0 && controls.runBudgetCalls !== '' && controls.runBudgetCalls != null && Number(controls.runBudgetCalls) >= 0) {
+    o.run_budget = {
+      max_tokens: Number(controls.runBudgetTokens),
+      max_llm_calls: Number(controls.runBudgetCalls),
+    }
+  }
   return Object.keys(o).length ? o : null
+}
+
+export function tokenBudgetRecovery(text = '') {
+  const m = String(text).match(/This run used about (\d+) of (\d+) tokens\. Recommended next-run token budget: \*\*(\d+)\*\* \(LLM-call limit: (\d+); deployment ceiling: (\d+)\)\./)
+  if (!m) return null
+  return { used: Number(m[1]), current: Number(m[2]), recommended: Number(m[3]), calls: Number(m[4]), ceiling: Number(m[5]) }
 }
 
 // lastUserText returns the text of the most recent user message (for regenerate).
@@ -90,6 +102,16 @@ export function lastUserText(messages) {
 export function truncateForRerun(messages, mi) {
   if (!Array.isArray(messages) || mi < 0) return messages || []
   return messages.slice(0, mi)
+}
+
+// rerunCheckpointStrategy keeps ordinary edit/regenerate operations strict,
+// while allowing explicitly recoverable pauses (such as an exhausted run
+// budget between model calls) to restart in a clean backend session. A clean
+// restart must not retain UI-only history that the new session cannot see.
+export function rerunCheckpointStrategy(hasKeptMessages, previousEntryId, allowFreshFallback = false) {
+  if (!hasKeptMessages) return 'fresh'
+  if (previousEntryId) return 'fork'
+  return allowFreshFallback ? 'fresh' : 'blocked'
 }
 
 // isLongOutput reports whether a message body is tall enough to warrant the
