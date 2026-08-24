@@ -1069,18 +1069,18 @@ func (e *Engine) finalizeReply(ctx context.Context, def *agent.Definition, sess 
 		finalContent, spokenContent = splitVoiceResponse(finalContent)
 	}
 
+	// Append any charts before writing ANY history surface. Previously the
+	// live reply and durable conversation row contained the chart, but the
+	// in-memory session history captured the pre-chart prose. Revisiting a
+	// conversation through that cache therefore made a chart appear to vanish.
+	finalContent = appendCollectedCharts(finalContent, chartSinkFrom(ctx))
+
 	// Append final assistant response to the in-memory session history
 	sess.mu.Lock()
 	e.appendHistoryLocked(sess, llm.ChatMessage{
 		Role: "assistant", Content: finalContent,
 	})
 	sess.mu.Unlock()
-
-	// Append any charts produced by the generate_chart builtin during this run.
-	// Doing it here (rather than trusting the model to echo the spec) guarantees
-	// the chart reaches the user, and dedupes against a spec the model already
-	// included on its own.
-	finalContent = appendCollectedCharts(finalContent, chartSinkFrom(ctx))
 
 	// Persist reply to session memory
 	if err := e.memory.Write(memory.Entry{

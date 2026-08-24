@@ -75,6 +75,32 @@ func TestFinalizeReplySanitizesControlEnvelope(t *testing.T) {
 	}
 }
 
+func TestFinalizeReplyKeepsCollectedChartInSessionHistory(t *testing.T) {
+	mem, err := memory.NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("memory store: %v", err)
+	}
+	e := NewEngine(nil, nil, mem, nil, "", time.Second, zap.NewNop(), &captureSink6{}, nil, "", nil, nil, nil, nil, nil)
+	def := &agent.Definition{ID: "weather-advisor", Name: "Weather Advisor", Enabled: true}
+	sess := &Session{ID: "sess-chart", AgentID: def.ID, CreatedAt: time.Now().UTC()}
+	msg := testUserMessage(def.ID, sess.ID, "Show the weekly temperature trend")
+	ctx := withChartSink(context.Background())
+	chart := "```chart\n{\"series\":[{\"type\":\"bar\",\"data\":[31,35,39]}]}\n```"
+	chartSinkFrom(ctx).add(chart)
+
+	reply := e.finalizeReply(ctx, def, sess, msg, "Here is the forecast trend.")
+	got := flattenParts(reply.Parts)
+	if !strings.Contains(got, chart) {
+		t.Fatalf("reply does not contain collected chart: %q", got)
+	}
+	if len(sess.History) != 1 {
+		t.Fatalf("session history entries = %d, want 1", len(sess.History))
+	}
+	if sess.History[0].Content != got {
+		t.Fatalf("session history lost chart:\n history=%q\n reply=%q", sess.History[0].Content, got)
+	}
+}
+
 func eventsByType(events []message.Event, typ string) []message.Event {
 	var out []message.Event
 	for _, ev := range events {

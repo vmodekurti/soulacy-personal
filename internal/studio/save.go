@@ -150,6 +150,7 @@ func ToAgentDefinition(draft Draft, acceptPrivilegedExposure bool) (agent.Defini
 	// flow agent node naming a peer feeds transitive peer detection.
 	builtins, mcpTools := flowTools(draft.Flow)
 	if len(builtins) > 0 {
+		builtins = withStudioChartBuiltin(builtins)
 		def.Builtins = &builtins
 	}
 	if flowNeedsSystemCapability(draft.Flow) && acceptPrivilegedExposure {
@@ -270,6 +271,7 @@ func toReActAgentDefinition(draft Draft, id string, acceptPrivilegedExposure boo
 		}
 	}
 	if len(builtins) > 0 {
+		builtins = withStudioChartBuiltin(builtins)
 		def.Builtins = &builtins
 	}
 	if len(mcpTools) > 0 {
@@ -665,6 +667,22 @@ func flowTools(flow Flow) (builtins []string, mcpTools []string) {
 		}
 	}
 	return builtins, mcpTools
+}
+
+// withStudioChartBuiltin preserves Soulacy's safe presentation capability
+// when Studio turns selected tools into an explicit runtime allowlist. Without
+// this, choosing web_search (or any other tool) accidentally removed
+// generate_chart, even though an agent with no explicit allowlist receives it
+// by default. An intentionally empty builtins list remains the runtime's
+// documented opt-out; this helper is called only when Studio selected at least
+// one builtin.
+func withStudioChartBuiltin(builtins []string) []string {
+	for _, name := range builtins {
+		if name == "generate_chart" || name == "*" || name == "all" {
+			return builtins
+		}
+	}
+	return append(builtins, "generate_chart")
 }
 
 // flowPeers collects the distinct, non-empty peer agent ids referenced by a

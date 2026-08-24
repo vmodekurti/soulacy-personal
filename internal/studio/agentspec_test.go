@@ -2,6 +2,7 @@ package studio
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -219,7 +220,7 @@ func TestToAgentDefinition_ReActHasNoWorkflow(t *testing.T) {
 	if def.Reasoning.Strategy != "react" {
 		t.Errorf("strategy not set: %q", def.Reasoning.Strategy)
 	}
-	if def.Builtins == nil || len(*def.Builtins) != 1 || (*def.Builtins)[0] != "web_search" {
+	if def.Builtins == nil || len(*def.Builtins) != 2 || (*def.Builtins)[0] != "web_search" || (*def.Builtins)[1] != "generate_chart" {
 		t.Errorf("builtins: %+v", def.Builtins)
 	}
 	if def.MCPTools == nil || len(*def.MCPTools) != 1 {
@@ -227,6 +228,27 @@ func TestToAgentDefinition_ReActHasNoWorkflow(t *testing.T) {
 	}
 	if !strings.Contains(def.SystemPrompt, "Reasoning Strategy Contract") || !strings.Contains(def.SystemPrompt, "Call exactly one tool") {
 		t.Errorf("system prompt should carry a loop directive: %q", def.SystemPrompt)
+	}
+}
+
+func TestWithStudioChartBuiltin(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{name: "adds chart", in: []string{"web_search"}, want: []string{"web_search", "generate_chart"}},
+		{name: "does not duplicate chart", in: []string{"generate_chart", "web_search"}, want: []string{"generate_chart", "web_search"}},
+		{name: "wildcard already includes chart", in: []string{"*"}, want: []string{"*"}},
+		{name: "all already includes chart", in: []string{"all"}, want: []string{"all"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := withStudioChartBuiltin(append([]string(nil), tt.in...))
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("withStudioChartBuiltin(%v) = %v, want %v", tt.in, got, tt.want)
+			}
+		})
 	}
 }
 
