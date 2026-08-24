@@ -61,8 +61,8 @@ func TestToAgentDefinition_WellDefinedPrompt(t *testing.T) {
 	}
 
 	// Tool classification
-	if def.Builtins == nil || len(*def.Builtins) != 1 || (*def.Builtins)[0] != "channel.send" {
-		t.Errorf("expected Builtins to contain [channel.send], got %v", def.Builtins)
+	if def.Builtins == nil || len(*def.Builtins) != 2 || (*def.Builtins)[0] != "channel.send" || (*def.Builtins)[1] != "generate_chart" {
+		t.Errorf("expected Builtins to contain [channel.send generate_chart], got %v", def.Builtins)
 	}
 	if def.MCPTools == nil || len(*def.MCPTools) != 1 || (*def.MCPTools)[0] != "mcp__github__search" {
 		t.Errorf("expected MCPTools to contain [mcp__github__search], got %v", def.MCPTools)

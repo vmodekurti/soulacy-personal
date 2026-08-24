@@ -28,7 +28,11 @@ import (
 	"github.com/soulacy/soulacy/internal/plugininstall"
 )
 
-const mcpInstallStageTTL = 15 * time.Minute
+const (
+	mcpInstallStageTTL       = 15 * time.Minute
+	mcpRepositoryScanTimeout = 2 * time.Minute
+	mcpContainerPullTimeout  = 5 * time.Minute
+)
 
 type stagedMCPInstall struct {
 	Token       string
@@ -102,7 +106,7 @@ func (s *Server) handleInspectWorkspaceMCP(c *fiber.Ctx) error {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
 	defer os.RemoveAll(dir)
-	ctx, cancel := context.WithTimeout(c.UserContext(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(c.UserContext(), mcpRepositoryScanTimeout)
 	defer cancel()
 	revision, err := plugininstall.GitClone(ctx, source, filepath.Join(dir, "source"))
 	if err != nil {
@@ -161,7 +165,7 @@ func (s *Server) handleApproveWorkspaceMCP(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusConflict, "security report changed; inspect the repository again")
 	}
 
-	ctx, cancel := context.WithTimeout(c.UserContext(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(c.UserContext(), mcpContainerPullTimeout)
 	defer cancel()
 	pinned, err := pullAndPinOCI(ctx, stage.Image)
 	if err != nil {

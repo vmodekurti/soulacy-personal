@@ -346,7 +346,7 @@ func TestAgentDefinitionRoundTrip_PreservesReasoningStrategy(t *testing.T) {
 	if !back.Unattended {
 		t.Error("unattended flag not preserved")
 	}
-	if !reflect.DeepEqual(back.Tools, []string{"web_search", "mcp__finance__quote"}) {
+	if !reflect.DeepEqual(back.Tools, []string{"web_search", "generate_chart", "mcp__finance__quote"}) {
 		t.Errorf("tools not preserved (builtin+mcp split should reassemble): %v", back.Tools)
 	}
 	if !reflect.DeepEqual(back.Skills, orig.Skills) {

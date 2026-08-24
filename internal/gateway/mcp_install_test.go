@@ -85,7 +85,7 @@ func TestWorkspaceMCPInstallIsAdminOnly(t *testing.T) {
 	for _, role := range []string{"viewer", "developer", "operator", "admin", "owner"} {
 		t.Run(role, func(t *testing.T) {
 			s := platformServer(t, config.DeploymentModeTeam)
-			app := fiber.New(fiber.Config{DisableStartupMessage: true})
+			app := fiber.New(fiber.Config{DisableStartupMessage: true, Immutable: true})
 			app.Use(func(c *fiber.Ctx) error {
 				identity, err := requestctx.New(requestctx.Input{Subject: "usr_one", OrganizationID: "org_one", WorkspaceID: "ws_one", MembershipID: "mem_one", Role: role, RequestID: "req_one", PrincipalKind: "user"})
 				if err != nil {
