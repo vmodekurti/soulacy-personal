@@ -14,7 +14,7 @@ gateway=$(jq -r '.gateway_instance_id.value' <<<"$outputs")
 worker=$(jq -r '.worker_instance_id.value // empty' <<<"$outputs")
 nats=$(jq -r '.nats_instance_id.value // empty' <<<"$outputs")
 printf 'Variant: %s\nURL: %s\n' "$DEPLOYMENT_MODE" "$url"
-curl --fail --silent --show-error "$url/api/v1/health" | jq . || true
+curl --fail --silent --show-error "$url/ready" | jq . || true
 instance_ids=("$gateway")
 [[ -n "$worker" ]] && instance_ids+=("$worker")
 [[ -n "$nats" ]] && instance_ids+=("$nats")

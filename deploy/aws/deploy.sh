@@ -217,7 +217,7 @@ chmod 0600 "$SCRIPT_DIR/.deployment.env"
 
 URL=$(terraform -chdir="$SCRIPT_DIR" output -raw url)
 printf 'Waiting for %s to become healthy...\n' "$URL"
-if ! curl --fail --silent --show-error --retry 90 --retry-delay 10 --retry-all-errors "$URL/api/v1/health" >/dev/null; then
+if ! curl --fail --silent --show-error --retry 90 --retry-delay 10 --retry-all-errors "$URL/ready" >/dev/null; then
   printf 'Deployment created, but health did not become ready. Run %s/status.sh for diagnostics.\n' "$SCRIPT_DIR" >&2
   exit 1
 fi

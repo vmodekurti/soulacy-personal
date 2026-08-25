@@ -144,7 +144,9 @@ resource "aws_lb_target_group" "gateway" {
 
   health_check {
     enabled             = true
-    path                = "/api/v1/health"
+    # Public, code-only readiness endpoint. /api/v1/health is intentionally
+    # authenticated and cannot be used by an ALB health checker.
+    path                = "/ready"
     protocol            = "HTTP"
     matcher             = "200"
     interval            = 15

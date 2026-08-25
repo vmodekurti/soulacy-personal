@@ -1,6 +1,6 @@
 # Automated AWS deployment
 
-This directory deploys any of Soulacy's three variants with one command. It builds the current checkout, publishes immutable images, signs the execution image with AWS KMS, creates only the infrastructure selected by the operator, waits for the public HTTPS health endpoint, and prints the application URL.
+This directory deploys any of Soulacy's three variants with one command. It builds the current checkout, publishes immutable images, signs the execution image with AWS KMS, creates only the infrastructure selected by the operator, waits for the public HTTPS readiness endpoint, and prints the application URL.
 
 ## Variant selection
 
