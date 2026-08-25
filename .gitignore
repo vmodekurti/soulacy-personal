@@ -75,6 +75,7 @@ gui/vite.config.js.timestamp-*
 # ── Personal convenience scripts (never commit — HYG-2/HYG-3) ────────────────
 *.command
 deploy.sh
+!deploy/aws/deploy.sh
 reinstall.sh
 reinstall-from-scratch.command
 run_memory_tests.sh
