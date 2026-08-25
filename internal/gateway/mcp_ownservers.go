@@ -3,9 +3,11 @@ package gateway
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -303,15 +305,150 @@ func (s *Server) handleListOwnMCPServers(c *fiber.Ctx) error {
 	servers := make([]fiber.Map, 0, len(stored))
 	for _, server := range stored {
 		status := statusByID[server.ID]
+		environment := s.workspaceMCPEnvironmentStatus(mcpWorkspace(c), server)
 		servers = append(servers, fiber.Map{
 			"id": server.ID, "transport": server.Transport, "command": server.Command,
 			"args": server.Args, "env": server.Env, "url": server.URL, "headers": server.Headers,
 			"inherit_env": server.InheritEnv, "connected": status.Connected,
 			"container_network": server.ContainerNetwork, "container_workspace": server.ContainerWorkspace,
-			"detail": status.Detail, "tools": status.Tools,
+			"environment": environment,
+			"detail":      status.Detail, "tools": status.Tools,
 		})
 	}
 	return c.JSON(fiber.Map{"servers": servers})
+}
+
+func (s *Server) workspaceMCPEnvironmentStatus(workspaceID string, server mcpstore.Server) []fiber.Map {
+	items := server.Environment
+	if len(items) == 0 {
+		// Legacy rows retained credential names in Env but predate the reviewed
+		// environment-contract column. Keep unset credential placeholders
+		// configurable. A non-empty secret-looking value here is ordinary
+		// generated configuration from the pre-contract installer (notably its
+		// private SQLite DATABASE_URL); it is already configured and must not be
+		// presented as a missing API key.
+		for key, value := range server.Env {
+			if strings.TrimSpace(value) == "" && redact.SecretKeyName(key) {
+				items = append(items, mcpstore.EnvironmentItem{Name: key, Secret: true})
+			}
+		}
+		sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
+	}
+	out := make([]fiber.Map, 0, len(items))
+	for _, item := range items {
+		configured := strings.TrimSpace(server.Env[item.Name]) != ""
+		value := ""
+		if item.Secret {
+			_, configured = s.vaultServerSecret(workspaceID, server.ID, item.Name)
+		} else if configured {
+			value = server.Env[item.Name]
+		}
+		out = append(out, fiber.Map{
+			"name": item.Name, "description": item.Description, "required": item.Required,
+			"secret": item.Secret, "configured": configured, "value": value,
+		})
+	}
+	return out
+}
+
+// handleConfigureOwnMCPServer updates only settings declared by the reviewed
+// install contract. Secret values go directly to the workspace vault and are
+// never returned by either this endpoint or the list endpoint.
+func (s *Server) handleConfigureOwnMCPServer(c *fiber.Ctx) error {
+	if s.mcpServers == nil {
+		return s.errMsg(c, fiber.StatusServiceUnavailable, "workspace MCP servers are not available")
+	}
+	id := strings.TrimSpace(c.Params("id"))
+	if !validMCPID(id) {
+		return s.errMsg(c, fiber.StatusBadRequest, "invalid server id")
+	}
+	var body struct {
+		Settings map[string]string `json:"settings"`
+	}
+	if err := c.BodyParser(&body); err != nil {
+		return s.errJSON(c, fiber.StatusBadRequest, err)
+	}
+	workspaceID := mcpWorkspace(c)
+	servers, err := s.mcpServers.List(c.UserContext(), workspaceID)
+	if err != nil {
+		return s.errJSON(c, fiber.StatusInternalServerError, err)
+	}
+	var server *mcpstore.Server
+	for i := range servers {
+		if servers[i].ID == id {
+			server = &servers[i]
+			break
+		}
+	}
+	if server == nil {
+		return s.errMsg(c, fiber.StatusNotFound, "workspace MCP server not found")
+	}
+	items := server.Environment
+	if len(items) == 0 {
+		for key := range server.Env {
+			if redact.SecretKeyName(key) {
+				items = append(items, mcpstore.EnvironmentItem{Name: key, Secret: true})
+			}
+		}
+	}
+	declared := make(map[string]mcpstore.EnvironmentItem, len(items))
+	for _, item := range items {
+		declared[item.Name] = item
+	}
+	for key := range body.Settings {
+		if _, ok := declared[key]; !ok {
+			return s.errMsg(c, fiber.StatusBadRequest, fmt.Sprintf("setting %q was not declared by this MCP server", key))
+		}
+	}
+	if server.Env == nil {
+		server.Env = map[string]string{}
+	}
+	// Validate the complete request before writing any vault value so a missing
+	// companion property cannot leave a partially applied configuration.
+	for _, item := range items {
+		if !item.Required {
+			continue
+		}
+		value, supplied := body.Settings[item.Name]
+		if item.Secret {
+			if strings.TrimSpace(value) == "" {
+				if _, ok := s.vaultServerSecret(workspaceID, id, item.Name); !ok {
+					return s.errMsg(c, fiber.StatusBadRequest, item.Name+" is required")
+				}
+			}
+			continue
+		}
+		if (!supplied && strings.TrimSpace(server.Env[item.Name]) == "") || (supplied && strings.TrimSpace(value) == "") {
+			return s.errMsg(c, fiber.StatusBadRequest, item.Name+" is required")
+		}
+	}
+	for _, item := range items {
+		value, supplied := body.Settings[item.Name]
+		if item.Secret {
+			if supplied && strings.TrimSpace(value) != "" {
+				if s.credVault == nil {
+					return s.errMsg(c, fiber.StatusServiceUnavailable, "workspace credential vault is unavailable")
+				}
+				if err := s.credVault.Set(c.UserContext(), workspaceID, mcp.CredentialNamespace(id), item.Name, []byte(value)); err != nil {
+					return s.errJSON(c, fiber.StatusInternalServerError, err)
+				}
+			}
+			continue
+		}
+		if supplied {
+			if strings.TrimSpace(value) == "" && !item.Required {
+				delete(server.Env, item.Name)
+			} else {
+				server.Env[item.Name] = value
+			}
+		}
+	}
+	if err := s.mcpServers.Put(c.UserContext(), *server); err != nil {
+		return s.errJSON(c, fiber.StatusInternalServerError, err)
+	}
+	s.invalidateMCPWorkspace(workspaceID)
+	s.recordAdminAudit(c, "mcp.own.settings", "mcp", id, "ok", map[string]any{"settings_updated": len(body.Settings)})
+	return c.JSON(fiber.Map{"ok": true, "id": id, "message": "MCP server configuration saved securely."})
 }
 
 // divertSecrets moves credential-looking values into the vault and returns the

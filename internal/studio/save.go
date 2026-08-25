@@ -166,6 +166,19 @@ func ToAgentDefinition(draft Draft, acceptPrivilegedExposure bool) (agent.Defini
 	// agent Privileged exactly as if it had been listed in `builtins:`; a
 	// flow agent node naming a peer feeds transitive peer detection.
 	builtins, mcpTools := flowTools(draft.Flow)
+	// Agent nodes may need dynamic capabilities even though those capabilities
+	// do not appear as fixed tool nodes in the parent graph. Studio records that
+	// explicit allowlist in Draft.Tools. Preserve it on workflow definitions so
+	// synthesized peers can inherit the same narrow, operator-approved surface.
+	for _, tool := range dedupeNonEmpty(draft.Tools) {
+		if strings.HasPrefix(tool, "mcp__") {
+			mcpTools = append(mcpTools, tool)
+		} else {
+			builtins = append(builtins, tool)
+		}
+	}
+	builtins = dedupeNonEmpty(builtins)
+	mcpTools = dedupeNonEmpty(mcpTools)
 	if len(builtins) > 0 {
 		builtins = withStudioChartBuiltin(builtins)
 		def.Builtins = &builtins
@@ -561,7 +574,10 @@ func reasoningConfigFor(draft Draft, strategy string) agent.ReasoningConfig {
 func defaultReasoningBudgets(draft Draft, strategy string) (int, int) {
 	if strings.EqualFold(strategy, "plan_execute") {
 		if highComplexityReasoningTask(draft) {
-			return 24, 12
+			// Plans beyond eight steps routinely create oversized prompts, and the
+			// validator already treats them as unreliable. Execution may still use
+			// up to 24 turns while planning stays compact.
+			return 24, 8
 		}
 		return 16, 8
 	}

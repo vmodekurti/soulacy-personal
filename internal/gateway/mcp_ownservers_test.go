@@ -191,6 +191,77 @@ func TestListingOwnServersReturnsConfigButNeverACredential(t *testing.T) {
 	}
 }
 
+func TestWorkspaceAdminCanConfigureReviewedMCPSettingsWithoutSecretDisclosure(t *testing.T) {
+	s, store, vault := ownServerServer(t)
+	ws := wsroot.PersonalWorkspaceID
+	if err := store.Put(context.Background(), mcpstore.Server{
+		WorkspaceID: ws, ID: "maverick", Transport: "container",
+		Command: "example.invalid/maverick@sha256:" + strings.Repeat("a", 64),
+		Env:     map[string]string{"EXA_API_KEY": ""},
+		Environment: []mcpstore.EnvironmentItem{
+			{Name: "LLM_PROVIDER", Description: "Provider", Required: false},
+			{Name: "EXA_API_KEY", Description: "Research key", Secret: true},
+		},
+		ContainerNetwork: "public", ContainerWorkspace: "none",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	status, response := gatewayJSON(t, s, "PUT", "/api/v1/mcp/own/maverick/settings", "secret",
+		`{"settings":{"LLM_PROVIDER":"openai","EXA_API_KEY":"exa-sensitive"}}`)
+	if status != 200 {
+		t.Fatalf("configure status=%d body=%v", status, response)
+	}
+	value, err := vault.Get(context.Background(), ws, mcp.CredentialNamespace("maverick"), "EXA_API_KEY")
+	if err != nil || string(value) != "exa-sensitive" {
+		t.Fatalf("vault value=%q err=%v", value, err)
+	}
+	servers, _ := store.List(context.Background(), ws)
+	if servers[0].Env["LLM_PROVIDER"] != "openai" || servers[0].Env["EXA_API_KEY"] != "" {
+		t.Fatalf("stored environment leaked or lost a setting: %+v", servers[0].Env)
+	}
+	_, raw := gatewayRaw(t, s, "GET", "/api/v1/mcp/own", "secret", "")
+	if strings.Contains(raw, "exa-sensitive") || !strings.Contains(raw, `"configured":true`) {
+		t.Fatalf("listing leaked the value or hid its status: %s", raw)
+	}
+}
+
+func TestLegacyMCPSettingsExposeOnlyUnsetCredentialPlaceholders(t *testing.T) {
+	s, store, _ := ownServerServer(t)
+	if err := store.Put(context.Background(), mcpstore.Server{
+		WorkspaceID: wsroot.PersonalWorkspaceID, ID: "maverick",
+		Env: map[string]string{
+			"DATABASE_URL": "sqlite:////data/maverick.db",
+			"EXA_API_KEY":  "",
+			"LLM_API_KEY":  "",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, raw := gatewayRaw(t, s, "GET", "/api/v1/mcp/own", "secret", "")
+	if strings.Contains(raw, `"name":"DATABASE_URL"`) {
+		t.Fatalf("configured generated database was offered as a missing credential: %s", raw)
+	}
+	if !strings.Contains(raw, `"name":"EXA_API_KEY"`) ||
+		!strings.Contains(raw, `"name":"LLM_API_KEY"`) {
+		t.Fatalf("legacy API-key placeholders were not exposed: %s", raw)
+	}
+}
+
+func TestWorkspaceMCPConfigurationRejectsUndeclaredSettings(t *testing.T) {
+	s, store, _ := ownServerServer(t)
+	if err := store.Put(context.Background(), mcpstore.Server{
+		WorkspaceID: wsroot.PersonalWorkspaceID, ID: "maverick",
+		Environment: []mcpstore.EnvironmentItem{{Name: "EXA_API_KEY", Secret: true}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	status, _ := gatewayJSON(t, s, "PUT", "/api/v1/mcp/own/maverick/settings", "secret",
+		`{"settings":{"UNREVIEWED_SECRET":"nope"}}`)
+	if status != 400 {
+		t.Fatalf("undeclared setting status=%d, want 400", status)
+	}
+}
+
 // Deleting removes the definition, so the server stops being started.
 func TestDeletingAnOwnServerStopsIt(t *testing.T) {
 	s, _, _ := ownServerServer(t)

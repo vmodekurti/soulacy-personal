@@ -1035,7 +1035,7 @@ Use null for fields that are not present.`
     compiling = true
     compileError = ''
     try {
-      const data = await bridge.compileAgent(intentWithGenerationTrigger(text, generationTrigger), mode, ans, compactCatalog(catalog))
+      const data = await bridge.compileAgent(intentWithGenerationTrigger(text, generationTrigger), mode, ans, compactCatalog(catalog), rawPrompt)
       applyCompile(data)
       // Mark the prompt as refined so a later edit + Generate uses the fast
       // LIGHT touch-up pass; persists via the workflow's `refined` field.
@@ -1667,6 +1667,15 @@ Use null for fields that are not present.`
     refreshStrategyFit(workflow && workflow.llm && workflow.llm.model, workflow && workflow.llm && workflow.llm.provider).catch(() => {})
     if (gate && data && data.contract) {
       const generatedGate = contractToPreflight(data.contract)
+	  // The trigger/output selector is applied to the returned draft on the
+	  // client after the server compiled it. A model-generated schedule warning
+	  // therefore describes the pre-patch draft when the operator explicitly
+	  // selected Manual/Chat/Webhook. Do not open a blocker dialog for state that
+	  // no longer exists; the debounced validator below checks the final draft.
+	  if (generationTrigger.type && generationTrigger.type !== 'auto' && generationTrigger.type !== 'schedule') {
+		generatedGate.blockers = generatedGate.blockers.filter((x) => !/scheduled agent|schedule is missing|cron expression/i.test(String(x && (x.message || x.text || x))))
+		generatedGate.warnings = generatedGate.warnings.filter((x) => !/scheduled agent|schedule is missing|cron expression/i.test(String(x && (x.message || x.text || x))))
+	  }
       if (generatedGate.blockers.length) {
         preflight = {
           ok: false,
@@ -4405,10 +4414,25 @@ Use null for fields that are not present.`
   // and the classic refine→compile path (refining/compiling, no sub-events).
   // `pipelineModalHidden` lets them dismiss the overlay and let it run on.
   let pipelineModalHidden = false
+  let busyTimer = null
+  let busyStartedAt = 0
   // modalRefining belongs here too: the Describe step's "Refine prompt" is a
   // full builder-model call, and leaving it out of genBusy is what made that
   // button the one place in Studio where a long wait showed nothing at all.
   $: genBusy = pipelineRunning || compiling || refining || modalRefining
+  // Classic refine/compile calls do not emit streamed phase events, but their
+  // elapsed time must still advance. Keep one timer for every busy mode; the
+  // streamed generator may also apply authoritative server elapsed values.
+  $: {
+    if (genBusy && !busyTimer) {
+      busyStartedAt = Date.now()
+      pipelineElapsed = 0
+      busyTimer = setInterval(() => { pipelineElapsed = Date.now() - busyStartedAt }, 200)
+    } else if (!genBusy && busyTimer) {
+      clearInterval(busyTimer)
+      busyTimer = null
+    }
+  }
   $: pipelineLatest = pipelineLog.length ? pipelineLog[pipelineLog.length - 1] : null
   // Real backend phase names (from internal/studio/generatepipeline.go) — not
   // invented UI copy. Used to label the streamed events the server actually
@@ -4509,8 +4533,6 @@ Use null for fields that are not present.`
     genAbort = new AbortController()
     // Tick locally so elapsed keeps moving during a long phase that emits no
     // events — a frozen counter is exactly what "is this stuck?" looks like.
-    const t0 = Date.now()
-    const timer = setInterval(() => { pipelineElapsed = Date.now() - t0 }, 200)
     try {
       const light = !!(workflow && workflow.refined)
       if (!light && !rawPrompt.trim()) rawPrompt = text
@@ -4568,7 +4590,6 @@ Use null for fields that are not present.`
         compileError = (e && e.message) || 'streamed generate failed'
       }
     } finally {
-      clearInterval(timer)
       genAbort = null
       pipelineRunning = false
       buildUXOverride = null // consume the override
@@ -4839,6 +4860,10 @@ Use null for fields that are not present.`
   })
 
   onDestroy(() => {
+    if (busyTimer) {
+      clearInterval(busyTimer)
+      busyTimer = null
+    }
     // Carried work the user never picked up survives another navigation
     // untouched. Without this, snapshotSession sees an empty canvas, returns
     // null, and the unsaved draft is gone on the second visit.
@@ -7596,7 +7621,7 @@ Use null for fields that are not present.`
   {/if}
 
   <!-- Pre-save validation: blockers must be fixed; warnings can be saved over. -->
-  {#if preflight}
+  {#if preflight && !agentRoute && !workflowExperiment && !refinement && !compiling}
     <div class="modal-backdrop" on:click|self={cancelPreflight} role="presentation">
       <div class="modal refine-modal preflight-modal" role="dialog" aria-modal="true" aria-labelledby="preflight-title">
         <h2 id="preflight-title" class="modal-title">

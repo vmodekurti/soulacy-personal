@@ -139,6 +139,32 @@ func TestAServerSurvivesReopening(t *testing.T) {
 	}
 }
 
+func TestReviewedEnvironmentContractSurvivesReopening(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mcp.db")
+	first, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []EnvironmentItem{{Name: "EXA_API_KEY", Description: "Research search key", Secret: true}, {Name: "LLM_MODEL", Required: false}}
+	if err := first.Put(context.Background(), Server{WorkspaceID: "ws_a", ID: "maverick", Environment: want}); err != nil {
+		t.Fatal(err)
+	}
+	_ = first.Close()
+	second, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	servers, err := second.List(context.Background(), "ws_a")
+	if err != nil || len(servers) != 1 || len(servers[0].Environment) != 2 {
+		t.Fatalf("environment contract = %+v, err=%v", servers, err)
+	}
+	if got := servers[0].Environment[0]; got.Name != "EXA_API_KEY" || !got.Secret || got.Description != "Research search key" {
+		t.Fatalf("environment item changed: %+v", got)
+	}
+}
+
 // Deleting a workspace must take its servers with it, and only its own.
 func TestPurgeRemovesOnlyThatWorkspacesServers(t *testing.T) {
 	store := newStore(t)

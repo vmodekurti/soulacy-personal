@@ -167,6 +167,13 @@ func (a actionScope) TailFiltered(agentID string, limit int, allowed map[string]
 	if scoped, ok := a.actions.(workspaceTailFilterer); ok {
 		return scoped.TailFilteredInWorkspace(a.workspaceID, agentID, limit, allowed)
 	}
+	// Some production backends (notably PostgreSQL) implement the mandatory
+	// workspace-aware tail but not this optional filter optimization. Falling
+	// back to Tail is still tenant-safe because a.scoped keeps the workspace
+	// predicate inside the backend; the handler applies allowed post-read.
+	if a.scoped != nil {
+		return a.Tail(agentID, limit)
+	}
 	if !a.personal() {
 		return nil, ErrActionLogNotTenantAware
 	}

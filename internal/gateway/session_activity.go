@@ -121,7 +121,7 @@ func (t *sessionActivityTracker) Note(ev message.Event) {
 	defer t.mu.Unlock()
 
 	switch ev.Type {
-	case "message.out", "error":
+	case "message.out", "error", "run.completed", "run.failed", "run.cancelled", "run.canceled", "run.finished":
 		// Terminal for the run — drop it from the map. `error` is not always
 		// terminal in the runtime (a ReAct loop can produce an intermediate
 		// error and continue) but for the "hung session" surface this is the

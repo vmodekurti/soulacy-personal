@@ -123,7 +123,8 @@
         status = 'failed'
       }
 
-      const channel = inEv?.payload?.channel || delivery.trigger || ''
+      const inputMetadata = inEv?.payload?.metadata || {}
+      const channel = delivery.trigger || inputMetadata.trigger || inEv?.payload?.trigger || inEv?.payload?.channel || ''
       const startTime = (inEv || sorted[0])?.timestamp
 
       const agentId = sorted.find(e => e.agent_id)?.agent_id || ''
@@ -145,6 +146,11 @@
         deliveryError,
       }
     }).sort((a, b) => new Date(b.startTime) - new Date(a.startTime))
+  }
+
+  function isCronRun(run) {
+    const trigger = String(run?.channel || run?.trigger || '').trim().toLowerCase()
+    return trigger === 'cron' || trigger.startsWith('cron_')
   }
 
   function runKey(run) {
@@ -260,7 +266,7 @@
     recentLoading = true
     recentError = ''
     try {
-      const res = await api.runs.ledger({ limit: recentLimit, eventLimit: 50000 })
+      const res = await api.runs.ledger({ trigger: 'cron', limit: recentLimit, eventLimit: 50000 })
       recentRuns = (res.runs || []).map(normalizeLedgerRun)
       if (res.event_truncated) {
         recentError = `Recent run list scanned ${res.event_limit || 50000} events and may be truncated. Use Activity for exact log tails.`
@@ -271,7 +277,7 @@
         limit: 5000,
         types: 'message.in,message.out,error,tool.result,reasoning.step,reasoning.result,schedule.output,schedule.run_failed',
       }).catch(() => ({ events: [] }))
-      recentRuns = groupRuns(res.events || []).slice(0, recentLimit)
+      recentRuns = groupRuns(res.events || []).filter(isCronRun).slice(0, recentLimit)
       recentError = recentRuns.length ? '' : ledgerError
     } finally {
       recentLoading = false
@@ -658,10 +664,10 @@
         <span>Recent runs</span>
         <span class="pill">{recentRuns.length}</span>
       </button>
-      <label class="history-depth" title="How many unified runs to show. Includes manual, chat/channel, cron, and scheduled-output runs when durable history is available.">
+      <label class="history-depth" title="How many cron executions to show, including missed-startup catch-up runs.">
         <span>Show</span>
         <select bind:value={recentLimit} on:change={loadRecentRuns} disabled={recentLoading}
-                title="How many unified runs to show. Includes manual, chat/channel, cron, and scheduled-output runs when durable history is available.">
+                title="How many cron executions to show, including missed-startup catch-up runs.">
           <option value={12}>12</option>
           <option value={25}>25</option>
           <option value={50}>50</option>
@@ -677,7 +683,7 @@
         {:else if recentError}
           <div class="empty err">{recentError}</div>
         {:else if recentRuns.length === 0}
-          <div class="empty">No recent runs recorded in durable history yet.</div>
+          <div class="empty">No recent cron runs recorded in durable history yet.</div>
         {:else}
           <table class="tbl">
             <thead>

@@ -23,7 +23,7 @@ func TestDefaultPolicyMatrix(t *testing.T) {
 		ResourceAgents, ResourceChat, ResourceMemory, ResourceChannels, ResourceProviders,
 		ResourceSkills, ResourceMCP, ResourceKnowledge, ResourceBuilder, ResourceTemplates,
 		ResourceConfig, ResourceLogs, ResourceMetrics, ResourceSchedule, ResourceRBAC,
-		ResourceSecrets, ResourceCredentials,
+		ResourceSecrets, ResourceCredentials, ResourceTour,
 	}
 	actions := []string{ActionRead, ActionWrite, ActionDelete, ActionChat, ActionEnable, ActionList, ActionSet, ActionRotate, ActionReveal}
 	for _, role := range KnownRoles {
@@ -43,6 +43,20 @@ func TestDefaultPolicyMatrix(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestEveryWorkspaceRoleCanReadProductToursWithoutConfigAccess(t *testing.T) {
+	for _, role := range KnownRoles {
+		if !HasPermission(role, ResourceTour, ActionRead) {
+			t.Errorf("%s cannot read its workspace product tour", role)
+		}
+	}
+	if HasPermission(RoleDeveloper, ResourceConfig, ActionRead) {
+		t.Fatal("tour access accidentally widened developer deployment-config access")
+	}
+	if HasPermission(RoleViewer, ResourceConfig, ActionRead) {
+		t.Fatal("tour access accidentally widened viewer deployment-config access")
 	}
 }
 

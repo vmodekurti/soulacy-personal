@@ -657,7 +657,7 @@ func (a *App) Run(parent context.Context) error {
 	}
 
 	// ── Auth Engine ───────────────────────────────────────────────────────────
-	authEngine, err := a.wireAuth(stack)
+	authEngine, err := a.wireAuth(ws, stack)
 	if err != nil {
 		return err
 	}

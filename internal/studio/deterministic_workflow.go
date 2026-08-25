@@ -21,6 +21,15 @@ func CompileDeterministicWorkflow(intent string, cat Catalog, answers map[string
 	if intent == "" {
 		return Result{}, false
 	}
+	// Parallel specialist councils are a common, well-defined graph shape and
+	// must not depend entirely on a builder model returning valid JSON.  The
+	// model is still allowed to produce a richer graph first, but this curated
+	// floor preserves the essential topology when the provider returns an empty
+	// response: fan-out, bounded partial failure, a single join/critic, then one
+	// coordinator response.
+	if parallelSpecialistWorkflow(intent) {
+		return compileParallelSpecialistWorkflow(intent, cat, answers)
+	}
 	// A template can only answer a request whose SHAPE it is able to build. Every
 	// pattern below is a straight line, so an intent that spells out a fan-out
 	// must not be claimed here — see StructureNamedButUnbuildable.
@@ -31,6 +40,81 @@ func CompileDeterministicWorkflow(intent string, cat Catalog, answers map[string
 		return Result{}, false
 	}
 	return CompileDeterministicWorkflowIgnoringShape(intent, cat, answers)
+}
+
+func parallelSpecialistWorkflow(intent string) bool {
+	li := strings.ToLower(intent)
+	return StructureNamedButUnbuildable(intent) &&
+		anyContains(li, "researcher", "researchers", "specialist", "specialists", "analyst", "analysts", "reviewer", "reviewers", "checker", "checkers") &&
+		anyContains(li, "critic", "reviewer", "coordinator", "editor", "synthesize", "synthesise", "compare")
+}
+
+func compileParallelSpecialistWorkflow(intent string, cat Catalog, answers map[string]string) (Result, bool) {
+	shapeIntent := intent
+	if raw := strings.TrimSpace(cat.RawIntent); raw != "" {
+		// Refinement legitimately adds detail, but it must not be allowed to
+		// change cardinality or naming from the user's source request. A refined
+		// two-researcher prompt often mentions critic/coordinator roles and was
+		// consequently misread as a four-worker fan-out.
+		shapeIntent = raw
+	}
+	name := "Parallel Specialist Council"
+	if m := explicitAgentNamePattern.FindStringSubmatch(shapeIntent); len(m) > 1 && strings.TrimSpace(m[1]) != "" {
+		name = strings.TrimSpace(m[1])
+	}
+	triggerInput := `{{ default .trigger.text "Run the requested specialist analysis." }}`
+	workerCount := PlanFromIntent(shapeIntent).wantedWorkers(shapeIntent)
+	if workerCount < 2 {
+		workerCount = 2
+	}
+	if workerCount > 6 {
+		workerCount = 6
+	}
+	nodes := []sdkr.FlowNode{
+		{
+			ID: "fan_out_specialists", Kind: sdkr.FlowNodeParallel,
+			Description: "Run the independent specialists concurrently.",
+			Join:        sdkr.JoinAll, JoinNode: "risk_critic", OnError: "skip",
+			X: 180, Y: 220,
+		},
+		{
+			ID: "risk_critic", Kind: sdkr.FlowNodeAgent, Agent: "risk_critic",
+			Description: "Compare both specialist results, flag missing or conflicting evidence, and assign confidence.",
+			Input:       "Compare every specialist result supplied by the parallel group. Treat a missing result as an explicit partial failure, preserve successful evidence, flag conflicts and missing sources, and assign confidence scores.",
+			Output:      "critic_review", Timeout: "5m", X: 800, Y: 220,
+		},
+		{
+			ID: "coordinate_final_response", Kind: sdkr.FlowNodeAgent, Agent: "coordinator",
+			Description: "Produce the single final response requested by the operator.",
+			Input:       "Return one human-readable final response for the original request. Include the requested executive summary, decision table, Mermaid flow, confidence-aware recommendation, and clearly labelled partial failures. Do not deliver externally. Original request: " + triggerInput + ` Critic review: {{ toJson .critic_review }}`,
+			Output:      "final_response", Timeout: "5m", X: 1120, Y: 220,
+		},
+	}
+	edges := []sdkr.FlowEdge{{From: "risk_critic", To: "coordinate_final_response"}}
+	for i := 1; i <= workerCount; i++ {
+		id := fmt.Sprintf("specialist_%d", i)
+		out := fmt.Sprintf("specialist_%d_result", i)
+		y := float64(60 + (i-1)*150)
+		nodes = append(nodes, sdkr.FlowNode{
+			ID: id, Kind: sdkr.FlowNodeAgent, Agent: id,
+			Description: fmt.Sprintf("Independently perform specialist workstream %d using only attached, relevant capabilities.", i),
+			Input:       fmt.Sprintf("Perform only specialist workstream %d from the original request. Use actual attached MCP/tool evidence when relevant, report source failures explicitly, and never invent missing data: %s", i, triggerInput),
+			Output:      out, OnError: "skip", Timeout: "5m", X: 480, Y: y,
+		})
+		edges = append(edges,
+			sdkr.FlowEdge{From: "fan_out_specialists", To: id},
+			sdkr.FlowEdge{From: id, To: "risk_critic"},
+		)
+	}
+	draft := Draft{
+		Name: name, Intent: intent, Trigger: inferredTriggerFromIntent(intent),
+		Channels:       deterministicChannels(intent, cat),
+		Tools:          namedMCPTools(intent, cat),
+		Flow:           Flow{Nodes: nodes, Edges: edges, Entry: "fan_out_specialists", Output: "coordinate_final_response", MaxNodeExecutions: 16},
+		Recommendation: &Recommendation{Mode: "workflow", Rationale: "Soulacy selected a topology-preserving parallel specialist council."},
+	}
+	ensureNewAgents(&draft, cat)
+	return finalizeDeterministicWorkflow(draft, intent, answers, cat, "parallel specialist council")
 }
 
 // CompileDeterministicWorkflowIgnoringShape is CompileDeterministicWorkflow

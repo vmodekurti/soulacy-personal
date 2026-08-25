@@ -56,7 +56,11 @@ func callerAllowsTool(ctx context.Context, toolName string) bool {
 		return p.Role == "operator"
 	}
 	if strings.HasPrefix(toolName, "mcp__") || strings.HasPrefix(toolName, "plugin__") {
-		return p.Role == "operator"
+		// Developers can author and test agents, so an extension explicitly
+		// granted by that agent must remain usable in developer chat. The agent
+		// allowlist and per-workspace MCP/plugin providers are separate mandatory
+		// gates; this role check must not silently erase their result.
+		return p.Role == "developer" || p.Role == "operator"
 	}
 	return p.Role == "developer" || p.Role == "operator" || p.Role == "viewer"
 }

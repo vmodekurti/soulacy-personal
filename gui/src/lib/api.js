@@ -863,6 +863,7 @@ export const api = {
     provisionGlama:    (body)         => apiFetch('/mcp/provision-glama',    { method: 'POST', body: JSON.stringify(body) }),
     ownList: () => apiFetch('/mcp/own'),
     ownPut: (id, body) => apiFetch(`/mcp/own/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) }),
+		ownConfigure: (id, settings) => apiFetch(`/mcp/own/${encodeURIComponent(id)}/settings`, { method: 'PUT', body: JSON.stringify({ settings }) }),
     ownDelete: (id) => apiFetch(`/mcp/own/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     inspectInstall: (sourceURL, permissions) => apiFetch('/mcp/own/install/inspect', {
       method: 'POST', body: JSON.stringify({ source_url: sourceURL, permissions }),
@@ -1055,10 +1056,10 @@ export const api = {
      * Generate a ReAct/Plan-Execute AGENT (no fixed flow) — for intents that
      * need a reasoning loop. Returns a draft with strategy + tools allowlist.
      */
-    compileAgent: ({ intent, strategy, catalog, answers } = {}) =>
+    compileAgent: ({ intent, rawIntent, strategy, catalog, answers } = {}) =>
       apiFetch('/studio/compile-agent', {
         method: 'POST',
-        body: JSON.stringify({ intent, strategy, catalog, answers }),
+        body: JSON.stringify({ intent, raw_intent: rawIntent, strategy, catalog, answers }),
       }),
     /**
      * Consolidated pre-save validation against live state: missing tools/MCP
@@ -1461,12 +1462,13 @@ export const api = {
   runs: {
     metrics: (sessionId, agentId = '') =>
       apiFetch(`/runs/${encodeURIComponent(sessionId)}/metrics${agentId ? '?agent_id=' + encodeURIComponent(agentId) : ''}`),
-    ledger: ({ agentId = '', sessionId = '', limit = 100, eventLimit = 10000 } = {}) => {
+    ledger: ({ agentId = '', sessionId = '', trigger = '', limit = 100, eventLimit = 10000 } = {}) => {
       const q = new URLSearchParams()
       q.set('limit', String(limit))
       q.set('event_limit', String(eventLimit))
       if (agentId) q.set('agent_id', agentId)
       if (sessionId) q.set('session_id', sessionId)
+      if (trigger) q.set('trigger', trigger)
       return apiFetch('/runs/ledger?' + q.toString())
     },
     events: ({ agentId = '', sessionId = '', limit = 500, types = '' } = {}) => {

@@ -144,8 +144,8 @@ export const bridge = {
   compositeBlocks: () => api.studio.compositeBlocks(),
 
   // Generate a ReAct/Plan-Execute agent (no fixed flow).
-  compileAgent: (intent, strategy, answers, catalog) =>
-    api.studio.compileAgent({ intent, strategy, answers, catalog }),
+  compileAgent: (intent, strategy, answers, catalog, rawIntent = '') =>
+    api.studio.compileAgent({ intent, rawIntent, strategy, answers, catalog }),
 
   // M5 test bench: only forward present optional fields; the backend defaults
   // the rest.

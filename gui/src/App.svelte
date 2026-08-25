@@ -3,7 +3,7 @@
   import { apiKey, connected, authRequired } from './lib/stores.js'
   import ShareView from './pages/ShareView.svelte'
   import { pageTitle } from './lib/pagetitle.js'
-  import { api } from './lib/api.js'
+  import { api, createEventSocket } from './lib/api.js'
   import { waitForGateway, waitingMessage, timeoutMessage, RESTART_BUDGET } from './lib/gatewaywait.js'
   import { pluginNavEntries, isPluginPage, pluginIdFromPage } from './lib/pluginui.js'
   import { looksLikeStaleAssetError, recoverFromStaleAssets } from './lib/stalerecovery.js'
@@ -46,6 +46,9 @@
   let restarting = false
   let restartError = ''
   let restartMessage = ''
+  let shellEventSocket = null
+  let stopShellEvents = false
+  let shellReconnectTimer = null
   $: multiUserWorkspace = ['team', 'scale'].includes(
     String($activeWorkspace?.deploymentMode || '').toLowerCase(),
   )
@@ -109,6 +112,30 @@
     page = p
     sidebarOpen = false
     history.pushState({}, '', '#' + p)
+  }
+
+  // The connection badge belongs to the application shell, so its socket must
+  // live here as well. Previously Dashboard and Chat owned the shared store;
+  // navigating to Studio destroyed those pages, closed their sockets, and made
+  // the global sidebar falsely report "Offline" while the gateway was healthy.
+  function connectShellEvents() {
+    if (stopShellEvents || standaloneAdminPath || shareToken) return
+    try { shellEventSocket = createEventSocket() } catch { scheduleShellReconnect(); return }
+    shellEventSocket.onopen = () => { $connected = true }
+    shellEventSocket.onclose = () => {
+      shellEventSocket = null
+      $connected = false
+      scheduleShellReconnect()
+    }
+    shellEventSocket.onerror = () => shellEventSocket?.close()
+  }
+
+  function scheduleShellReconnect() {
+    if (stopShellEvents || shellReconnectTimer) return
+    shellReconnectTimer = setTimeout(() => {
+      shellReconnectTimer = null
+      connectShellEvents()
+    }, 3000)
   }
 
   async function loadPageComponent(nextPage) {
@@ -226,11 +253,22 @@
     // Auth probe: hit an authenticated endpoint. apiFetch flips $authRequired
     // true on 401/403 (→ login screen) and false on success (→ dashboard).
     api.agents.list().then(() => { $authRequired = false }).catch(() => {})
+    connectShellEvents()
 
     // Plugin GUI mounts (E8): populate the Plugins nav group.
     api.plugins.ui()
       .then((res) => { pluginPages = pluginNavEntries(res?.mounts) })
       .catch(() => { pluginPages = [] }) // older gateways: no route, no nav group
+
+    return () => {
+      stopShellEvents = true
+      if (shellReconnectTimer) clearTimeout(shellReconnectTimer)
+      shellReconnectTimer = null
+      if (shellEventSocket) shellEventSocket.close()
+      shellEventSocket = null
+      window.removeEventListener('popstate', applyHash)
+      window.removeEventListener('hashchange', applyHash)
+    }
   })
 
   // ── Login screen (shown full-screen while $authRequired) ──────────────────

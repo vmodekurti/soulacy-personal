@@ -80,7 +80,9 @@
   function connectWS() {
     if (stopWS) return
     try { ws = createEventSocket() } catch { return }
-    ws.onopen    = () => { $connected = true }
+    // App.svelte owns the shell connectivity badge. This page socket only
+    // consumes dashboard events and must not mark the whole app offline when
+    // navigation destroys the Dashboard component.
     ws.onmessage = (e) => {
       try {
         const ev = JSON.parse(e.data)
@@ -88,7 +90,6 @@
       } catch {}
     }
     ws.onclose = () => {
-      $connected = false
       ws = null
       if (!stopWS) setTimeout(connectWS, 3000)
     }

@@ -37,6 +37,37 @@
 	let installWorkspace = 'none'
 	let installSettings = {}
 	$: installRequiredMissing = !!installReview?.environment?.some(item => item.required && !String(installSettings[item.name] || '').trim())
+	let configServer = null
+	let configSettings = {}
+	let configSaving = false
+	let configError = ''
+
+	function missingMCPSettings(server) {
+		return (server.environment || []).filter(item => item.required && !item.configured)
+	}
+	function optionalMCPSettings(server) {
+		return (server.environment || []).filter(item => !item.required && !item.configured)
+	}
+	function openConfiguration(server) {
+		configServer = server
+		configError = ''
+		configSettings = Object.fromEntries((server.environment || []).map(item => [item.name, item.secret ? '' : (item.value || '')]))
+	}
+	async function saveConfiguration() {
+		configSaving = true
+		configError = ''
+		try {
+			const res = await api.mcp.ownConfigure(configServer.id, configSettings)
+			info = res.message || 'MCP server configuration saved securely.'
+			configServer = null
+			await new Promise(r => setTimeout(r, 800))
+			await load()
+		} catch (e) {
+			configError = e.message
+		} finally {
+			configSaving = false
+		}
+	}
 
   function openInstall() {
     installModal = true
@@ -355,10 +386,16 @@
               <span class="srv-chevron">{expanded[s.id] ? '▾' : '▸'}</span>
             </button>
             <div class="srv-actions">
+							{#if workspaceScoped && workspaceAdmin && s.environment?.length}<button class="btn-secondary tiny" on:click={() => openConfiguration(s)}>Configure</button>{/if}
               {#if !workspaceScoped}<button class="btn-secondary tiny" on:click={() => openEdit(s)}>Edit</button>{/if}
               {#if !workspaceScoped || workspaceAdmin}<button class="btn-danger tiny" on:click={() => remove(s)}>Delete</button>{/if}
             </div>
           </div>
+					{#if workspaceScoped && missingMCPSettings(s).length}
+						<div class="setup-strip required"><strong>Setup required:</strong> {missingMCPSettings(s).map(item => item.name).join(', ')} <button on:click={() => openConfiguration(s)}>Add now</button></div>
+					{:else if workspaceScoped && optionalMCPSettings(s).length}
+						<div class="setup-strip optional"><strong>{optionalMCPSettings(s).length} optional setting{optionalMCPSettings(s).length === 1 ? '' : 's'} available</strong> for additional integrations and server features. <button on:click={() => openConfiguration(s)}>Configure</button></div>
+					{/if}
 
           {#if expanded[s.id]}
             <div class="srv-body">
@@ -465,6 +502,29 @@
       </div>
     </div>
   </div>
+{/if}
+
+{#if configServer}
+	<div class="modal-bg" role="button" tabindex="0" aria-label="Close MCP configuration" on:click|self={() => !configSaving && (configServer = null)} on:keydown={(e) => e.key === 'Escape' && !configSaving && (configServer = null)}>
+		<div class="modal wide install-modal">
+			<h2>Configure {configServer.id}</h2>
+			<p class="glama-hint">Add the keys and properties this server declared. Secret values are written directly to this workspace’s encrypted vault and are never shown again.</p>
+			{#if configError}<div class="banner err">{configError}</div>{/if}
+			<div class="install-settings">
+				{#each configServer.environment || [] as item}
+					<label>
+						<span><code>{item.name}</code> {item.required ? '· required' : '· optional'} {item.configured ? '· configured' : ''}</span>
+						<input type={item.secret ? 'password' : 'text'} bind:value={configSettings[item.name]} autocomplete="off" placeholder={item.secret && item.configured ? 'Leave blank to keep current value' : (item.description || item.name)} />
+						<small>{item.description || (item.secret ? 'Stored in workspace vault' : 'Server configuration value')}</small>
+					</label>
+				{/each}
+			</div>
+			<div class="modal-row">
+				<button class="btn-secondary" on:click={() => configServer = null} disabled={configSaving}>Cancel</button>
+				<button class="btn-primary" on:click={saveConfiguration} disabled={configSaving || (configServer.environment || []).some(item => item.required && !item.configured && !String(configSettings[item.name] || '').trim())}>{configSaving ? 'Saving securely…' : 'Save configuration'}</button>
+			</div>
+		</div>
+	</div>
 {/if}
 
 {#if editing}
@@ -649,6 +709,10 @@
   .ok     { background: rgba(96,240,160,.08); border: 1px solid rgba(96,240,160,.3); color: #60f0a0; }
   .warn   { background: rgba(240,196,96,.08); border: 1px solid rgba(240,196,96,.3); color: #f0c460; }
   .banner code { background: rgba(0,0,0,.25); padding: .05rem .3rem; border-radius: 4px; }
+	.setup-strip { margin:.45rem .75rem .65rem; padding:.5rem .65rem; border-radius:6px; font-size:.74rem; }
+	.setup-strip.required { color:#f0c460; background:rgba(240,196,96,.08); border:1px solid rgba(240,196,96,.25); }
+	.setup-strip.optional { color:#9da6cb; background:rgba(120,130,180,.07); border:1px solid rgba(120,130,180,.18); }
+	.setup-strip button { margin-left:.45rem; border:0; background:transparent; color:#aaa5ff; cursor:pointer; text-decoration:underline; }
 
   .empty  { color: #6b7294; padding: 3rem; text-align: center; }
   .empty-card {

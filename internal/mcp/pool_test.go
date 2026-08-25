@@ -11,7 +11,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -120,6 +122,62 @@ func TestTheSameWorkspaceReusesItsClient(t *testing.T) {
 	// nothing would report it.
 	if pool.For("ws-a") != pool.For("ws-a") {
 		t.Error("the same workspace got two clients, so its servers are running twice")
+	}
+}
+
+func TestConcurrentFirstUseStartsOneWorkspaceClient(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("sh-based test")
+	}
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "starts.txt")
+	script := `
+printf 'start\n' >> ` + marker + `
+sleep 0.2
+while IFS= read -r line; do
+  case "$line" in
+    *'"initialize"'*) printf '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"t","version":"1"}}}\n' ;;
+    *'"tools/list"'*) printf '{"jsonrpc":"2.0","id":2,"result":{"tools":[]}}\n' ;;
+  esac
+done
+`
+	pool := NewPool(
+		Config{Servers: map[string]ServerConfig{"slow": {Transport: "stdio", Command: "/bin/sh", Args: []string{"-c", script}}}},
+		fixedConfinement{dirs: map[string]string{"ws-a": dir}}, zap.NewNop(),
+	)
+	defer pool.Close()
+
+	const callers = 8
+	clients := make([]*Client, callers)
+	var wg sync.WaitGroup
+	ready := make(chan struct{})
+	for i := range clients {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-ready
+			clients[i] = pool.For("ws-a")
+		}(i)
+	}
+	close(ready)
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("concurrent first use did not complete")
+	}
+	for i := 1; i < callers; i++ {
+		if clients[i] != clients[0] {
+			t.Fatal("concurrent first use returned different clients")
+		}
+	}
+	raw, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(raw), "start\n"); got != 1 {
+		t.Fatalf("workspace server started %d times, want exactly once", got)
 	}
 }
 

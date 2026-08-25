@@ -33,6 +33,8 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1250,10 +1252,13 @@ func TestRefreshStoreSingleUse(t *testing.T) {
 	s := newRefreshStore()
 	defer s.close()
 
-	tok := s.put(TokenIdentity{
+	tok, err := s.put(TokenIdentity{
 		Subject: "alice", Email: "alice@example.com", Role: "admin",
 		OrganizationID: "org_a", WorkspaceID: "ws_a", MembershipID: "mem_a",
 	}, "", time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("put: %v", err)
+	}
 	entry, status := s.consume(tok)
 	if status != refreshValid {
 		t.Fatal("first get should succeed")
@@ -1271,6 +1276,91 @@ func TestRefreshStoreSingleUse(t *testing.T) {
 	_, status = s.consume(tok)
 	if status != refreshReused {
 		t.Error("second get should be detected as replay")
+	}
+}
+
+func TestRefreshSessionsSurviveRestartAndReplayRevokesFamily(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth-refresh-sessions.json")
+	secret := "stable-test-secret"
+	id := TokenIdentity{
+		Subject: "alice", Email: "alice@example.com", Role: "admin",
+		OrganizationID: "org_a", WorkspaceID: "ws_a", MembershipID: "mem_a",
+		AuthTime: time.Now().Add(-time.Minute).UTC(),
+	}
+
+	first, err := newIssuerWithStorePath(secret, time.Hour, 24*time.Hour, path)
+	if err != nil {
+		t.Fatalf("first issuer: %v", err)
+	}
+	_, originalRefresh, _, err := first.IssueFor(id)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	first.Close()
+
+	onDisk, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read journal: %v", err)
+	}
+	if bytes.Contains(onDisk, []byte(originalRefresh)) {
+		t.Fatal("journal contains a raw bearer refresh token")
+	}
+	if info, err := os.Stat(path); err != nil {
+		t.Fatalf("stat journal: %v", err)
+	} else if info.Mode().Perm()&0o077 != 0 {
+		t.Fatalf("journal permissions = %o, want owner-only", info.Mode().Perm())
+	}
+
+	second, err := newIssuerWithStorePath(secret, time.Hour, 24*time.Hour, path)
+	if err != nil {
+		t.Fatalf("second issuer: %v", err)
+	}
+	access, rotatedRefresh, _, err := second.Refresh(originalRefresh)
+	if err != nil {
+		t.Fatalf("refresh after restart: %v", err)
+	}
+	claims, err := second.VerifyAccess(access)
+	if err != nil {
+		t.Fatalf("verify rotated access: %v", err)
+	}
+	if claims.WorkspaceID != id.WorkspaceID || claims.OrganizationID != id.OrganizationID || claims.MembershipID != id.MembershipID {
+		t.Fatalf("rotated access lost tenancy: %+v", claims)
+	}
+	second.Close()
+
+	third, err := newIssuerWithStorePath(secret, time.Hour, 24*time.Hour, path)
+	if err != nil {
+		t.Fatalf("third issuer: %v", err)
+	}
+	defer third.Close()
+	if _, _, _, err := third.Refresh(originalRefresh); err == nil {
+		t.Fatal("consumed refresh token succeeded after restart")
+	}
+	if _, _, _, err := third.Refresh(rotatedRefresh); err == nil {
+		t.Fatal("replay did not revoke the rotated token family")
+	}
+}
+
+func TestRefreshSessionStoreRejectsCorruptionAndSymlink(t *testing.T) {
+	dir := t.TempDir()
+	corrupt := filepath.Join(dir, "corrupt.json")
+	if err := os.WriteFile(corrupt, []byte("not-json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := newIssuerWithStorePath("secret", time.Hour, time.Hour, corrupt); err == nil {
+		t.Fatal("corrupt refresh journal was accepted")
+	}
+
+	target := filepath.Join(dir, "target.json")
+	if err := os.WriteFile(target, []byte(`{"version":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := newIssuerWithStorePath("secret", time.Hour, time.Hour, link); err == nil {
+		t.Fatal("symlink refresh journal was accepted")
 	}
 }
 

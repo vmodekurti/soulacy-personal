@@ -1218,6 +1218,18 @@ func normalizeTrigger(d *Draft, intent string) {
 
 	inferred := inferTriggerType(lc)
 
+	// An explicit operator-selected/manual route is authoritative. Builder
+	// models occasionally emit `schedule` for long, numbered workflow briefs
+	// even when the brief says "manual invocation". Keeping that recognized but
+	// contradictory value turns an on-demand workflow into a cron blocker. Only
+	// override here for the unambiguous manual phrases handled below; ambiguous
+	// prompts retain the conservative behaviour.
+	if inferred == "manual" && typ != "manual" {
+		d.Trigger = Trigger{Type: "manual"}
+		typ = "manual"
+		known = true
+	}
+
 	// Fill a missing/unrecognized type from the intent when we can.
 	if !known && inferred != "" {
 		d.Trigger.Type = inferred
@@ -1264,6 +1276,17 @@ func inferTriggerType(lc string) string {
 	// Generic "every <time>" / "at <n>(am|pm)" cadence.
 	if hasAtClock(lc) {
 		return "schedule"
+	}
+
+	manualCues := []string{
+		"manual invocation", "manually invoked", "invoke manually",
+		"run manually", "manual / programmatic", "manual or programmatic",
+		"on manual", "on demand", "on-demand",
+	}
+	for _, cue := range manualCues {
+		if strings.Contains(lc, cue) {
+			return "manual"
+		}
 	}
 
 	webhookCues := []string{"webhook", "on post", "posts to", "http callback", "incoming request"}

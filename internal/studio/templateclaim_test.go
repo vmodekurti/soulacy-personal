@@ -27,24 +27,50 @@ const liveFanOutIntent = "Every weekday morning pull the latest incident reports
 	"affected accounts. Finally an editor combines all three reviews into one incident digest and posts " +
 	"it to Telegram."
 
-func TestDeterministicWorkflow_DeclinesTheLiveFanOutRequest(t *testing.T) {
+func TestDeterministicWorkflow_PreservesTheLiveFanOutRequest(t *testing.T) {
 	// It matches research_digest on topic words alone, so the guard is the only
 	// thing standing between this prompt and a canned two-node graph.
 	if !researchDigestWorkflow(liveFanOutIntent) {
 		t.Fatal("the digest pattern no longer matches this prompt — this test is guarding nothing")
 	}
-	if _, ok := CompileDeterministicWorkflow(liveFanOutIntent, Catalog{}, nil); ok {
-		t.Fatal("a template answered a three-way fan-out request with a straight line")
-	}
+	assertDeterministicFanOut(t, liveFanOutIntent, 3)
 }
 
 // The first live failure of the session, same shape, different words.
-func TestDeterministicWorkflow_DeclinesTheMarketDigestFanOut(t *testing.T) {
+func TestDeterministicWorkflow_PreservesTheMarketDigestFanOut(t *testing.T) {
 	intent := "Every weekday at 7am gather market data, then have a fundamentals analyst, a risk analyst " +
 		"and a sentiment analyst work in parallel on it, and an editor combine their analyses into one " +
 		"briefing sent to Telegram."
-	if _, ok := CompileDeterministicWorkflow(intent, Catalog{}, nil); ok {
-		t.Fatal("a template claimed a three-analyst fan-out")
+	assertDeterministicFanOut(t, intent, 3)
+}
+
+func TestDeterministicWorkflow_PreservesAdjectivalResearcherCount(t *testing.T) {
+	intent := "On manual invocation run two independent market researchers in parallel, then a risk critic " +
+		"compares their reports and a coordinator merges the result into one market report."
+	plan := PlanFromIntent(intent)
+	if got := plan.wantedWorkers(intent); got != 2 {
+		t.Fatalf("wanted workers = %d, want 2", got)
+	}
+	assertDeterministicFanOut(t, intent, 2)
+}
+
+func assertDeterministicFanOut(t *testing.T, intent string, workers int) {
+	t.Helper()
+	res, ok := CompileDeterministicWorkflow(intent, Catalog{}, nil)
+	if !ok {
+		t.Fatal("explicit specialist fan-out received no deterministic floor")
+	}
+	gotWorkers := 0
+	for _, n := range res.Workflow.Flow.Nodes {
+		if n.Kind == "parallel" && n.JoinNode != "risk_critic" {
+			t.Fatalf("parallel node has no critic barrier: %+v", n)
+		}
+		if strings.HasPrefix(n.ID, "specialist_") {
+			gotWorkers++
+		}
+	}
+	if gotWorkers != workers {
+		t.Fatalf("specialist workers = %d, want %d", gotWorkers, workers)
 	}
 }
 

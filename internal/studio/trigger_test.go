@@ -109,3 +109,18 @@ func TestNormalizeTrigger_ChannelAndWebhookFromPhrasing(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeTrigger_ExplicitManualOverridesModelSchedule(t *testing.T) {
+	llm := fakeLLM{out: triggerDraftJSON("schedule", "")}
+	res, err := Compile(context.Background(), llm,
+		"On manual invocation, accept two tickers and return the analysis to the caller.", Catalog{}, nil)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	if got := res.Workflow.Trigger.Type; got != "manual" {
+		t.Fatalf("trigger type = %q, want manual", got)
+	}
+	if len(res.Workflow.Trigger.Config) != 0 {
+		t.Fatalf("manual trigger retained schedule config: %#v", res.Workflow.Trigger.Config)
+	}
+}

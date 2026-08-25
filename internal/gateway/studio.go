@@ -2020,6 +2020,14 @@ func (s *Server) ensurePeerAgents(scope agentScope, dir string, def *agent.Defin
 				Provider:    s.config().LLM.DefaultProvider,
 				Temperature: 0.7,
 			},
+			// A workflow helper is useful only if it can perform the role the
+			// parent assigned. Inherit the parent's already-approved, workspace-
+			// scoped capability allowlists; never the deployment environment or
+			// arbitrary host capabilities.
+			Builtins:  cloneStringList(def.Builtins),
+			MCPTools:  cloneStringList(def.MCPTools),
+			Skills:    append([]string(nil), def.Skills...),
+			Knowledge: append([]string(nil), def.Knowledge...),
 		}
 		if err := scope.Upsert(dir, &peer); err != nil {
 			return created, fmt.Errorf("could not create helper agent %q that this workflow delegates to: %w", node.Agent, err)
@@ -2090,6 +2098,10 @@ func (s *Server) registerEphemeralPeers(scope agentScope, def *agent.Definition,
 				Provider:    s.config().LLM.DefaultProvider,
 				Temperature: 0.7,
 			},
+			Builtins:   cloneStringList(def.Builtins),
+			MCPTools:   cloneStringList(def.MCPTools),
+			Skills:     append([]string(nil), def.Skills...),
+			Knowledge:  append([]string(nil), def.Knowledge...),
 			SourcePath: "", // in-memory only, never persisted
 		})
 		registered = append(registered, node.Agent)
@@ -2100,6 +2112,14 @@ func (s *Server) registerEphemeralPeers(scope agentScope, def *agent.Definition,
 			scope.Unregister(id)
 		}
 	}
+}
+
+func cloneStringList(in *[]string) *[]string {
+	if in == nil {
+		return nil
+	}
+	out := append([]string(nil), (*in)...)
+	return &out
 }
 
 // handleStudioFailedRuns implements GET /api/v1/studio/failed-runs. It surfaces
@@ -2949,10 +2969,11 @@ func studioCompactPayload(v any, max int) string {
 
 // studioCompileAgentRequest is the POST /api/v1/studio/compile-agent body.
 type studioCompileAgentRequest struct {
-	Intent   string            `json:"intent"`
-	Strategy string            `json:"strategy"` // react | plan_execute
-	Catalog  studio.Catalog    `json:"catalog,omitempty"`
-	Answers  map[string]string `json:"answers,omitempty"`
+	Intent    string            `json:"intent"`
+	RawIntent string            `json:"raw_intent,omitempty"`
+	Strategy  string            `json:"strategy"` // react | plan_execute
+	Catalog   studio.Catalog    `json:"catalog,omitempty"`
+	Answers   map[string]string `json:"answers,omitempty"`
 }
 
 // handleStudioCompileAgent implements POST /api/v1/studio/compile-agent. It
@@ -2968,9 +2989,17 @@ func (s *Server) handleStudioCompileAgent(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusBadRequest, "intent is required")
 	}
 	s.groundCatalog(s.studio(c), &req.Catalog)
+	// compile-agent used to receive only the refined prompt. The GUI attached the
+	// original words to the returned draft afterwards, which was too late for
+	// naming and least-privilege capability selection. Make the original prompt
+	// available before deterministic compilation, matching /compile and the
+	// streamed pipeline.
+	if raw := strings.TrimSpace(req.RawIntent); raw != "" {
+		req.Catalog.RawIntent = raw
+	}
 	s.groundPreferencesFor(s.studio(c), &req.Catalog, studioLearningOwner(c))
-	s.groundGenerationProfile(&req.Catalog, req.Intent, c)
-	advice := studio.AdviseStrategy(req.Intent, req.Catalog, req.Strategy, false)
+	s.groundGenerationProfile(&req.Catalog, strings.TrimSpace(req.Intent+" "+req.RawIntent), c)
+	advice := studio.AdviseStrategy(req.Intent+" "+req.RawIntent, req.Catalog, req.Strategy, false)
 	strategy := advice.RuntimeStrategy
 	if strategy == "" {
 		strategy = "auto"
@@ -3045,6 +3074,9 @@ func (s *Server) handleStudioCompile(c *fiber.Ctx) error {
 	// (authoritative, server-side) so it maps loose references to actual
 	// capabilities and wires real MCP tools instead of inventing names.
 	s.groundCatalog(s.studio(c), &req.Catalog)
+	if raw := strings.TrimSpace(req.RawIntent); raw != "" {
+		req.Catalog.RawIntent = raw
+	}
 	s.groundPreferencesFor(s.studio(c), &req.Catalog, studioLearningOwner(c))
 	s.groundGenerationProfile(&req.Catalog, strings.TrimSpace(req.Intent+" "+req.RawIntent), c)
 
@@ -3182,6 +3214,14 @@ func (s *Server) studioDesignGraph(
 		} else {
 			res, lerr = studio.CompileAgent(designCtx, model, intent, designCat, strategy, answers)
 		}
+		// A fan-out graph cannot be replaced safely by any of the curated
+		// straight-line templates. Builder providers occasionally return an empty
+		// response for a large graph, so give that transient failure one bounded
+		// retry before reporting it. This is intentionally limited to explicit
+		// multi-worker shapes; ordinary generation remains a single model call.
+		if lerr != nil && advice.Mode == "workflow" && studio.StructureNamedButUnbuildable(intent) {
+			res, lerr = studio.Compile(designCtx, model, intent, designCat, answers)
+		}
 		if lerr != nil {
 			modelErr = lerr.Error()
 			s.log.Warn("studio: builder model produced no graph",
@@ -3263,6 +3303,11 @@ func (s *Server) studioDesignGraph(
 		return detRes, false, nil
 	}
 	if advice.Mode == "workflow" {
+		if studio.StructureNamedButUnbuildable(intent) {
+			return studio.Result{}, false, fmt.Errorf(
+				"the builder model could not produce the requested parallel multi-agent graph%s; no straight-line template was substituted because it would drop the specialists and join you requested",
+				becauseOf(modelErr))
+		}
 		// Last resort. The curated templates declined because they cannot build
 		// the shape this intent describes, and the builder model has produced
 		// nothing at all — so the choice is no longer "right graph or wrong

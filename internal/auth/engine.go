@@ -35,6 +35,11 @@ type Config struct {
 	// JWTRefreshTTL is the lifetime of opaque refresh tokens. Default 168h (7d).
 	JWTRefreshTTL time.Duration
 
+	// RefreshStorePath enables durable refresh rotation, replay detection, and
+	// logout revocation across gateway restarts. The store contains token
+	// hashes only and is written with owner-only permissions.
+	RefreshStorePath string
+
 	// OIDCIssuer is the base URL of a third-party OIDC provider
 	// (e.g. "https://accounts.google.com"). When set, the gateway acts as an
 	// OIDC resource server and accepts JWTs issued by this provider in addition
@@ -287,7 +292,7 @@ func New(cfg Config, staticKey string, log *zap.Logger) (*Engine, error) {
 	}
 
 	if cfg.Mode == "jwt" {
-		iss, err := newIssuer(cfg.JWTSecret, cfg.JWTAccessTTL, cfg.JWTRefreshTTL)
+		iss, err := newIssuerWithStorePath(cfg.JWTSecret, cfg.JWTAccessTTL, cfg.JWTRefreshTTL, cfg.RefreshStorePath)
 		if err != nil {
 			return nil, fmt.Errorf("auth jwt issuer: %w", err)
 		}

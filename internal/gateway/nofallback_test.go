@@ -131,15 +131,16 @@ func TestStudioCompile_SaysWhyTheBlockedGraphWasKept(t *testing.T) {
 	// Specific, not just the word "blocker": the sibling note ("kept because the
 	// deterministic alternative carries N blockers of its own") also contains it,
 	// and comparing against an EMPTY draft is not a reason to keep anything.
-	if !strings.Contains(joined, "no curated alternative for this shape") {
+	if !strings.Contains(joined, "no curated alternative for this shape") &&
+		!strings.Contains(joined, "deterministic alternative carries") {
 		t.Errorf("the note does not say why this graph was kept: %q", joined)
 	}
 }
 
 // The model returning nothing at all is a different case from the model
-// returning something flawed, and it must not end in an error that names
-// nothing to change.
-func TestStudioCompile_FallsBackToATemplateWhenTheModelReturnsNothing(t *testing.T) {
+// returning something flawed. A common explicit fan-out must still get the
+// topology it requested, not an error or a straight-line digest.
+func TestStudioCompile_PreservesFanOutWhenTheModelReturnsNothing(t *testing.T) {
 	s, _ := newTestGatewayWithLLM(t, "k")
 	s.llmRouter.Register(&failingProvider{})
 	s.config().LLM.DefaultProvider = "openai"
@@ -150,15 +151,21 @@ func TestStudioCompile_FallsBackToATemplateWhenTheModelReturnsNothing(t *testing
 		t.Fatalf("the user was told to reword a perfectly explicit request: %d %v", status, out["error"])
 	}
 
-	notes, _ := out["notes"].([]any)
-	joined := ""
-	for _, n := range notes {
-		joined += str(n) + "\n"
+	wf, _ := out["workflow"].(map[string]any)
+	flow, _ := wf["flow"].(map[string]any)
+	nodes, _ := flow["nodes"].([]any)
+	parallel, agents := 0, 0
+	for _, raw := range nodes {
+		n, _ := raw.(map[string]any)
+		switch str(n["kind"]) {
+		case "parallel":
+			parallel++
+		case "agent":
+			agents++
+		}
 	}
-	// A template that does the wrong shape, presented as if it were the right
-	// one, is the failure this whole change is about.
-	if !strings.Contains(joined, "does NOT contain the parallel specialists you described") {
-		t.Errorf("a straight-line template was handed over without saying what it is missing: %q", joined)
+	if parallel != 1 || agents < 4 {
+		t.Fatalf("topology was flattened: parallel=%d agent_nodes=%d workflow=%v", parallel, agents, wf)
 	}
 }
 

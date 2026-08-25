@@ -98,8 +98,8 @@ func TestReasoningAgentRaisesBudgetsForNotebookPodcastWork(t *testing.T) {
 	if def.Reasoning.MaxSteps < 24 {
 		t.Fatalf("complex podcast agent should get a larger max_steps budget, got %d", def.Reasoning.MaxSteps)
 	}
-	if def.Reasoning.MaxPlanSteps < 12 {
-		t.Fatalf("complex podcast agent should get a larger max_plan_steps budget, got %d", def.Reasoning.MaxPlanSteps)
+	if def.Reasoning.MaxPlanSteps != 8 {
+		t.Fatalf("complex podcast agent should keep max_plan_steps within the reliable limit, got %d", def.Reasoning.MaxPlanSteps)
 	}
 	if def.RunTimeout != "15m0s" {
 		t.Fatalf("run_timeout should be raised to match reasoning total timeout, got %q", def.RunTimeout)
@@ -139,6 +139,23 @@ func TestValidateAcceptsExplicitSameChannelReplyWithoutOutboundChannel(t *testin
 	got := Validate(d)
 	if validateHasError(got, "routable output channel") {
 		t.Fatalf("same-channel reply must not require an outbound destination: %+v", got.Errors)
+	}
+}
+
+func TestValidateAcceptsExplicitChatOnlyDespiteNegatedSendLanguage(t *testing.T) {
+	d := Draft{
+		Name:         "Market Risk Analyst",
+		Strategy:     "plan_execute",
+		Intent:       "Compare two stocks. Return the response in chat only; do not send externally.",
+		RawIntent:    "Create an analyst. Return the response in chat only; do not send externally.",
+		SystemPrompt: completionContractHeading + " return a useful comparison.",
+		Trigger:      Trigger{Type: "manual"},
+		DeliveryMode: "reply",
+		Tools:        []string{"mcp__market__quote"},
+	}
+	got := Validate(d)
+	if validateHasError(got, "routable output channel") {
+		t.Fatalf("explicit chat-only response must not require outbound delivery: %+v", got.Errors)
 	}
 }
 

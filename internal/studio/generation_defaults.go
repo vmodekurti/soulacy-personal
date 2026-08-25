@@ -154,6 +154,10 @@ func normalizeSameChannelReply(d *Draft, intent string) bool {
 		return false
 	}
 	removed := false
+	if !strings.EqualFold(strings.TrimSpace(d.Trigger.Type), "schedule") && normalizeStudioDeliveryMode(d.DeliveryMode) != "reply" {
+		d.DeliveryMode = "reply"
+		removed = true
+	}
 	d.Tools, removed = withoutChannelDeliveryTools(d.Tools)
 	var confirmRemoved bool
 	d.ConfirmTools, confirmRemoved = withoutChannelDeliveryTools(d.ConfirmTools)

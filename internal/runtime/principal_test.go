@@ -45,8 +45,11 @@ func TestWorkspaceDeveloperRetainsSafeBuiltinAccess(t *testing.T) {
 	if !callerAllowsTool(ctx, "web_search") {
 		t.Fatal("developer lost safe built-in tool access")
 	}
-	if callerAllowsTool(ctx, "shell_exec") || callerAllowsTool(ctx, "plugin__ops__run") {
-		t.Fatal("developer gained operator-only privileged or external tool access")
+	if callerAllowsTool(ctx, "shell_exec") {
+		t.Fatal("developer gained operator-only privileged host tool access")
+	}
+	if !callerAllowsTool(ctx, "plugin__ops__run") || !callerAllowsTool(ctx, "mcp__market__quote") {
+		t.Fatal("developer cannot test explicitly granted workspace extensions")
 	}
 }
 
@@ -65,6 +68,10 @@ func TestExternalToolsRequireAgentGrantAndCallerPermission(t *testing.T) {
 	names = toolSchemaNameSet(e.allToolSchemasForContext(WithPrincipal(context.Background(), Principal{Role: "admin"}), def, "http"))
 	if !names["plugin__weather__forecast"] {
 		t.Fatal("admin + explicit agent plugin grant did not expose tool")
+	}
+	names = toolSchemaNameSet(e.allToolSchemasForContext(WithPrincipal(context.Background(), Principal{Role: "developer"}), def, "http"))
+	if !names["plugin__weather__forecast"] {
+		t.Fatal("developer + explicit agent plugin grant did not expose tool")
 	}
 	names = toolSchemaNameSet(e.allToolSchemasForContext(WithPrincipal(context.Background(), Principal{Role: "viewer"}), def, "http"))
 	if names["plugin__weather__forecast"] {

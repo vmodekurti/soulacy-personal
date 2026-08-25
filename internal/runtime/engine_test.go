@@ -824,6 +824,26 @@ func TestHandleSynthesisRetryRecoversReply(t *testing.T) {
 	}
 }
 
+func TestLargeReasoningOnlySynthesisDoesNotRepeatTheFullPrompt(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		resp llm.CompletionResponse
+		want bool
+	}{
+		{name: "small empty compatibility response retries", resp: llm.CompletionResponse{OutputTokens: 758}, want: true},
+		{name: "large empty output does not retry", resp: llm.CompletionResponse{OutputTokens: 23900}, want: false},
+		{name: "large reasoning allocation does not retry", resp: llm.CompletionResponse{OutputTokens: 200, ReasoningTokens: 12000}, want: false},
+		{name: "provider output limit does not retry", resp: llm.CompletionResponse{OutputTokens: 1024, FinishReason: "length"}, want: false},
+		{name: "non-empty response does not retry", resp: llm.CompletionResponse{Content: "answer"}, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldRetryEmptySynthesis(&tc.resp); got != tc.want {
+				t.Fatalf("shouldRetryEmptySynthesis() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestHandleRetriesInvalidStructuredOutput(t *testing.T) {
 	schema := map[string]any{
 		"type": "object",

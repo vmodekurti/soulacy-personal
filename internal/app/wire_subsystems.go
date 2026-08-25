@@ -978,7 +978,7 @@ func (a *App) wirePluginContributions(ctx context.Context, ws config.Paths, plug
 // wireAuth builds the auth engine. Default "apikey" mode checks the static API
 // key on every request; auth.mode=jwt enables short-lived token issuance +
 // optional OIDC. Init failure is fatal. The engine's Close registers on stack.
-func (a *App) wireAuth(stack *closerStack) (*auth.Engine, error) {
+func (a *App) wireAuth(ws config.Paths, stack *closerStack) (*auth.Engine, error) {
 	cfg, log := a.cfg, a.log
 	accessTTL, _ := time.ParseDuration(cfg.Auth.JWTAccessTTL)
 	refreshTTL, _ := time.ParseDuration(cfg.Auth.JWTRefreshTTL)
@@ -987,6 +987,7 @@ func (a *App) wireAuth(stack *closerStack) (*auth.Engine, error) {
 		JWTSecret:              cfg.Auth.JWTSecret,
 		JWTAccessTTL:           accessTTL,
 		JWTRefreshTTL:          refreshTTL,
+		RefreshStorePath:       filepath.Join(ws.Data, "auth-refresh-sessions.json"),
 		OIDCIssuer:             cfg.Auth.OIDCIssuer,
 		OIDCAudience:           cfg.Auth.OIDCAudience,
 		OIDCClientID:           cfg.Auth.OIDCClientID,

@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+exec > >(tee /var/log/soulacy-bootstrap.log | logger -t soulacy-bootstrap -s 2>/dev/console) 2>&1
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y --no-install-recommends awscli ca-certificates docker.io jq
+systemctl enable --now docker
+install -d -m 0700 /etc/nats/tls /var/lib/nats
+
+aws secretsmanager get-secret-value --region '${aws_region}' --secret-id '${nats_secret_arn}' --query SecretString --output text >/run/nats-secret.json
+for pair in ca_b64:ca.pem server_cert_b64:server.pem server_key_b64:server-key.pem; do
+  field="$${pair%%:*}"
+  output="$${pair##*:}"
+  jq -r --arg field "$field" '.[$field]' /run/nats-secret.json | base64 --decode >"/etc/nats/tls/$output"
+done
+chmod 0600 /etc/nats/tls/*
+
+cat >/etc/nats/nats.conf <<'CONFIG'
+server_name: soulacy-nats
+port: 4222
+jetstream {
+  store_dir: /data/jetstream
+  max_memory_store: 1Gb
+  max_file_store: 20Gb
+}
+tls {
+  cert_file: /etc/nats/tls/server.pem
+  key_file: /etc/nats/tls/server-key.pem
+  ca_file: /etc/nats/tls/ca.pem
+  verify: true
+  verify_and_map: true
+  timeout: 5
+}
+authorization {
+  users: [
+    { user: gateway, permissions: { publish: ">", subscribe: ">" } },
+    { user: worker, permissions: { publish: ">", subscribe: ">" } }
+  ]
+}
+CONFIG
+
+cat >/etc/systemd/system/nats.service <<'UNIT'
+[Unit]
+Description=Soulacy NATS JetStream
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStartPre=-/usr/bin/docker rm -f soulacy-nats
+ExecStart=/usr/bin/docker run --name soulacy-nats --read-only --cap-drop ALL --security-opt no-new-privileges --pids-limit 256 --memory 2g --cpus 2 --tmpfs /tmp:rw,noexec,nosuid,size=64m -p 4222:4222 -v /etc/nats:/etc/nats:ro -v /var/lib/nats:/data '${nats_image}' -c /etc/nats/nats.conf
+ExecStop=/usr/bin/docker stop soulacy-nats
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now nats
+shred -u /run/nats-secret.json

@@ -75,7 +75,7 @@ var roleStopWords = map[string]bool{
 
 // countCue catches "three specialists" / "3 reviewers" — a stated number of
 // workers, which is a role count even when the roles are not each named.
-var countCue = regexp.MustCompile(`(?i)\b(two|three|four|five|six|\d+)\s+(analysts|reviewers|specialists|researchers|checkers|editors|writers|critics|auditors|agents)\b`)
+var countCue = regexp.MustCompile(`(?i)\b(two|three|four|five|six|\d+)\s+(?:[a-z][a-z-]*\s+){0,2}(analysts|reviewers|specialists|researchers|checkers|editors|writers|critics|auditors|agents)\b`)
 
 var numberWords = map[string]int{
 	"two": 2, "three": 3, "four": 4, "five": 5, "six": 6,

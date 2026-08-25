@@ -1182,7 +1182,8 @@
   function connectEvents() {
     if (stopEvents) return
     try { ws = createEventSocket() } catch { return }
-    ws.onopen = () => { $connected = true }
+    // App.svelte owns the shell connectivity badge. This socket is scoped to
+    // chat activity and closing it during navigation is not a gateway outage.
     ws.onmessage = async (e) => {
       try {
         const ev = JSON.parse(e.data)
@@ -1219,7 +1220,6 @@
       } catch {}
     }
     ws.onclose = () => {
-      $connected = false
       ws = null
       if (!stopEvents) setTimeout(connectEvents, 3000)
     }

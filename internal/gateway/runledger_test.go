@@ -85,6 +85,35 @@ func TestRunLedgerGroupsAllTriggerSources(t *testing.T) {
 	}
 }
 
+func TestRunLedgerCanReturnOnlyCronExecutions(t *testing.T) {
+	s := newTestGateway(t, "secret")
+	base := time.Date(2026, 7, 4, 7, 0, 0, 0, time.UTC)
+	s.actions = &fakeTailBackend{events: []message.Event{
+		{Type: "message.in", AgentID: "daily", SessionID: "cron-1", Timestamp: base,
+			Payload: message.Message{Channel: "http", Metadata: map[string]string{"trigger": "cron"}}},
+		{Type: "message.out", AgentID: "daily", SessionID: "cron-1", Timestamp: base.Add(time.Second), Payload: message.Message{Parts: message.Text("digest")}},
+		{Type: "message.in", AgentID: "daily", SessionID: "chat-1", Timestamp: base.Add(2 * time.Second), Payload: message.Message{Channel: "chat"}},
+		{Type: "message.out", AgentID: "daily", SessionID: "chat-1", Timestamp: base.Add(3 * time.Second), Payload: message.Message{Parts: message.Text("reply")}},
+		{Type: "schedule.output", AgentID: "catchup", SessionID: "cron-catchup", Timestamp: base.Add(4 * time.Second),
+			Payload: map[string]any{"trigger": "cron_missed_startup", "delivered": true, "reply_preview": "caught up"}},
+	}}
+
+	status, body := gatewayJSON(t, s, http.MethodGet, "/api/v1/runs/ledger?trigger=cron&limit=20", "secret", "")
+	if status != http.StatusOK {
+		t.Fatalf("ledger status = %d body=%v", status, body)
+	}
+	runs := body["runs"].([]any)
+	if len(runs) != 2 {
+		t.Fatalf("cron runs len = %d, want 2: %#v", len(runs), runs)
+	}
+	for _, raw := range runs {
+		trigger, _ := raw.(map[string]any)["trigger"].(string)
+		if !runLedgerTriggerMatches(trigger, "cron") {
+			t.Fatalf("non-cron run returned: %#v", raw)
+		}
+	}
+}
+
 func TestRunLedgerFiltersAgent(t *testing.T) {
 	s := newTestGateway(t, "secret")
 	base := time.Date(2026, 7, 4, 7, 0, 0, 0, time.UTC)

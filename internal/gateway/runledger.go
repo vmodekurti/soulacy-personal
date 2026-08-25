@@ -60,6 +60,7 @@ func (s *Server) handleRunLedger(c *fiber.Ctx) error {
 
 	agentID := strings.TrimSpace(c.Query("agent_id"))
 	sessionID := strings.TrimSpace(c.Query("session_id"))
+	trigger := strings.ToLower(strings.TrimSpace(c.Query("trigger")))
 	var (
 		events    []message.Event
 		rows      []runLedgerRow
@@ -94,10 +95,23 @@ func (s *Server) handleRunLedger(c *fiber.Ctx) error {
 		}
 		return c.Status(status).JSON(fiber.Map{"error": msg})
 	}
-	rows = mergeRunLedgerRows(rows, limit)
+	rows = mergeRunLedgerRows(rows, 0)
+	if trigger != "" {
+		filtered := rows[:0]
+		for _, row := range rows {
+			if runLedgerTriggerMatches(row.Trigger, trigger) {
+				filtered = append(filtered, row)
+			}
+		}
+		rows = filtered
+	}
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
+	}
 	return c.JSON(fiber.Map{
 		"agent_id":        agentID,
 		"session_id":      sessionID,
+		"trigger":         trigger,
 		"runs":            rows,
 		"count":           len(rows),
 		"event_count":     len(events),
@@ -106,6 +120,19 @@ func (s *Server) handleRunLedger(c *fiber.Ctx) error {
 		"durable":         runLedgerContainsString(sources, "action-log"),
 		"source":          strings.Join(studioUniqueStrings(sources), "+"),
 	})
+}
+
+// runLedgerTriggerMatches gives the Automations screen a durable, server-side
+// cron boundary. Startup catch-up runs retain their more specific
+// cron_missed_startup label but still belong to cron history; chat, manual,
+// channel and one-shot runs do not.
+func runLedgerTriggerMatches(actual, requested string) bool {
+	actual = strings.ToLower(strings.TrimSpace(actual))
+	requested = strings.ToLower(strings.TrimSpace(requested))
+	if requested == "cron" {
+		return actual == "cron" || strings.HasPrefix(actual, "cron_")
+	}
+	return actual == requested
 }
 
 func runLedgerEventTypes() map[string]bool {

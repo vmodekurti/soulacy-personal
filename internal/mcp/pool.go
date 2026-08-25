@@ -74,6 +74,14 @@ type Pool struct {
 
 	mu      sync.Mutex
 	clients map[string]*Client
+	// starting coalesces concurrent first use of the same workspace. Studio,
+	// the MCP page, and the tool catalog are loaded in parallel by the SPA; if
+	// each one starts its own client, every configured container is launched
+	// several times at once. Besides wasting resources, Docker Desktop can
+	// leave those competing `docker run -i` calls in Created state until all
+	// MCP handshakes time out. Different workspaces still initialize in
+	// parallel because the wait is scoped by workspace id.
+	starting map[string]*poolStart
 	// overrides are servers added at runtime through the API, per workspace.
 	// They live here rather than only inside the live Client so that a
 	// workspace's own servers survive a client being rebuilt — and so that
@@ -107,6 +115,11 @@ type Pool struct {
 	closed bool
 }
 
+type poolStart struct {
+	done   chan struct{}
+	client *Client
+}
+
 // NewPool returns a pool over the operator's configured servers.
 //
 // confine may be nil, in which case no workspace gets confinement and the pool
@@ -122,6 +135,7 @@ func NewPool(template Config, confine Confinement, log *zap.Logger) *Pool {
 		confine:   confine,
 		log:       log,
 		clients:   make(map[string]*Client),
+		starting:  make(map[string]*poolStart),
 		overrides: make(map[string]map[string]ServerConfig),
 		removed:   make(map[string]map[string]bool),
 		withheld:  make(map[string][]WithheldServer),
@@ -147,6 +161,13 @@ func (p *Pool) For(workspaceID string) *Client {
 		p.mu.Unlock()
 		return existing
 	}
+	if pending, ok := p.starting[workspaceID]; ok {
+		p.mu.Unlock()
+		<-pending.done
+		return pending.client
+	}
+	pending := &poolStart{done: make(chan struct{})}
+	p.starting[workspaceID] = pending
 	cfg := p.configFor(workspaceID)
 	p.mu.Unlock()
 
@@ -157,21 +178,17 @@ func (p *Pool) For(workspaceID string) *Client {
 	client := New(cfg, p.log)
 
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.closed {
 		go func() { _ = client.Close() }()
-		return &Client{log: p.log}
+		pending.client = &Client{log: p.log}
+	} else {
+		p.clients[workspaceID] = client
+		pending.client = client
 	}
-	// Another caller may have raced us here. Keep theirs and discard ours, so
-	// a workspace never ends up with two sets of live subprocesses — the
-	// duplicate would be invisible except as double the servers in the
-	// process table and double the side effects of every tool call.
-	if existing, ok := p.clients[workspaceID]; ok {
-		go func() { _ = client.Close() }()
-		return existing
-	}
-	p.clients[workspaceID] = client
-	return client
+	delete(p.starting, workspaceID)
+	close(pending.done)
+	p.mu.Unlock()
+	return pending.client
 }
 
 // configFor builds the effective server set for a workspace. Caller holds p.mu.

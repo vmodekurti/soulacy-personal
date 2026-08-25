@@ -268,6 +268,28 @@ func TestDeterministicAgentName_StillNamesRealFinanceAgents(t *testing.T) {
 	}
 }
 
+func TestDeterministicAgentName_PreservesExplicitRequestedName(t *testing.T) {
+	intent := "Create a complex agent named E2E QA Market Risk Analyst. On manual invocation, compare two stock tickers."
+	if got := deterministicAgentName(intent); got != "E2E QA Market Risk Analyst" {
+		t.Fatalf("deterministicAgentName = %q, want explicit name", got)
+	}
+}
+
+func TestDeterministicAgentUsesExplicitNameFromRawIntentAfterRefinement(t *testing.T) {
+	refined := "An agent named 'E2E QA Market Risk Analyst' that runs on manual invocation and compares two stocks."
+	raw := "Create a complex agent named E2E QA Market Risk Analyst. On manual invocation, compare two stock tickers."
+	res, ok := CompileDeterministicAgent(refined, Catalog{
+		RawIntent: raw,
+		Tools:     []string{"web_search"},
+	}, "plan_execute", nil)
+	if !ok {
+		t.Fatal("deterministic agent was not built")
+	}
+	if got := res.Workflow.Name; got != "E2E QA Market Risk Analyst" {
+		t.Fatalf("name = %q, want explicit raw-intent name", got)
+	}
+}
+
 func TestContainsWord_RespectsBoundaries(t *testing.T) {
 	if containsWord("flight/hotel options", "option") {
 		t.Error(`"option" must not match inside "options"`)

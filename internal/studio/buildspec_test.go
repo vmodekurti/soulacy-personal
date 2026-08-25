@@ -162,14 +162,30 @@ func TestSpecDiffAndMateriality(t *testing.T) {
 
 func TestExtractBuildSpec_TriggerKinds(t *testing.T) {
 	cases := map[string]string{
-		"every weekday at 8:00am email a summary":            "schedule",
-		"answers questions about our docs when someone asks": "channel",
-		"on webhook, summarize the payload and store it":     "webhook",
-		"summarize a document I give it and write a report":  "manual",
+		"every weekday at 8:00am email a summary":               "schedule",
+		"answers questions about our docs when someone asks":    "channel",
+		"on webhook, summarize the payload and store it":        "webhook",
+		"summarize a document I give it and write a report":     "manual",
+		"On manual invocation, answer in chat when a user asks": "manual",
 	}
 	for intent, want := range cases {
 		if got := ExtractBuildSpec(intent).Trigger; got != want {
 			t.Errorf("%q: trigger = %q, want %q", intent, got, want)
+		}
+	}
+}
+
+func TestBuildSpecChatOnlyOutputNeedsNoDeliveryDestination(t *testing.T) {
+	s := ExtractBuildSpecFrom(
+		"On manual invocation, write a report and return the response in chat only; do not send externally.",
+		Catalog{Channels: []string{"http"}},
+	)
+	if s.Trigger != "manual" {
+		t.Fatalf("trigger = %q, want manual", s.Trigger)
+	}
+	for _, q := range s.Questions {
+		if q.Field == "delivery" {
+			t.Fatalf("chat-only response asked for an external destination: %+v", q)
 		}
 	}
 }

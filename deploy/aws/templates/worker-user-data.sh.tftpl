@@ -1,0 +1,69 @@
+${common}
+
+install_gvisor
+install_cosign
+extract_soulacy_binaries
+
+aws secretsmanager get-secret-value --region '${aws_region}' --secret-id '${bootstrap_secret_arn}' --query SecretString --output text >/run/soulacy-bootstrap.json
+aws secretsmanager get-secret-value --region '${aws_region}' --secret-id '${nats_secret_arn}' --query SecretString --output text >/run/soulacy-nats.json
+chmod 0600 /run/soulacy-*.json
+
+decode_nats() {
+  local field="$1" output="$2"
+  jq -r --arg field "$field" '.[$field]' /run/soulacy-nats.json | base64 --decode >"$output"
+  chmod 0600 "$output"
+}
+decode_nats ca_b64 /etc/soulacy/nats/ca.pem
+decode_nats worker_cert_b64 /etc/soulacy/nats/client.pem
+decode_nats worker_key_b64 /etc/soulacy/nats/client-key.pem
+jq -r '.cosign_public_key_b64' /run/soulacy-bootstrap.json | base64 --decode >/etc/soulacy/execution-image.pub
+chmod 0644 /etc/soulacy/nats/ca.pem /etc/soulacy/nats/client.pem /etc/soulacy/execution-image.pub
+
+mkdir -p /var/lib/soulacy-worker/workspaces
+cat >/etc/soulacy/worker.env <<ENV
+SOULACY_WORKER_NATS_URL=tls://nats.soulacy.internal:4222
+SOULACY_WORKER_NATS_STREAM=soulacy
+SOULACY_WORKER_NATS_SUBJECT_PREFIX=soulacy.>
+SOULACY_WORKER_NATS_TLS_CA=/etc/soulacy/nats/ca.pem
+SOULACY_WORKER_NATS_TLS_CERT=/etc/soulacy/nats/client.pem
+SOULACY_WORKER_NATS_TLS_KEY=/etc/soulacy/nats/client-key.pem
+SOULACY_WORKER_NATS_TLS_SERVER_NAME=nats.soulacy.internal
+SOULACY_WORKER_IMAGE=${execution_image}
+SOULACY_WORKER_SANDBOX_IMAGE=${execution_image}
+SOULACY_WORKER_RUNTIME=runsc
+SOULACY_WORKER_COSIGN_KEY=/etc/soulacy/execution-image.pub
+SOULACY_EXECUTION_ROOT=/var/lib/soulacy-worker/workspaces
+SOULACY_WORKER_CONCURRENCY=${worker_concurrency}
+SOULACY_WORKER_CPU_SECONDS=30
+SOULACY_WORKER_MEMORY_MB=512
+SOULACY_WORKER_OPEN_FILES=256
+SOULACY_WORKER_FILE_SIZE_MB=64
+SOULACY_WORKER_PIDS=128
+ENV
+chmod 0600 /etc/soulacy/worker.env
+
+cat >/etc/systemd/system/soulacy-worker.service <<'UNIT'
+[Unit]
+Description=Soulacy isolated execution worker
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=/etc/soulacy/worker.env
+ExecStart=/opt/soulacy/bin/soulacy-worker
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/soulacy-worker /run /tmp
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now soulacy-worker
+
+shred -u /run/soulacy-bootstrap.json /run/soulacy-nats.json

@@ -154,6 +154,8 @@ func ExtractBuildSpecFrom(intent string, cat Catalog) BuildSpec {
 
 func extractTrigger(low string) (kind, cron, text string) {
 	switch {
+	case containsAny(low, "manual invocation", "manually invoked", "run manually", "on demand", "on-demand"):
+		return "manual", "", "when you run it"
 	case reEveryday.MatchString(low) || strings.Contains(low, "schedule") ||
 		strings.Contains(low, "daily") || strings.Contains(low, "weekly"):
 		kind = "schedule"
@@ -602,7 +604,7 @@ func deriveQuestions(s BuildSpec, low string, cat Catalog) []SpecQuestion {
 			})
 		}
 	}
-	if len(s.Delivery) == 0 && len(s.Outputs) > 0 {
+	if len(s.Delivery) == 0 && len(s.Outputs) > 0 && !explicitNoOutboundDeliveryIntent(low) {
 		// A BLOCKER, and offered as a choice. This used to be an optional
 		// free-text nudge, which meant an intent that named no channel was
 		// answered by the generator picking one — in practice always the first

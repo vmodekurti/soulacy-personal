@@ -1086,7 +1086,7 @@ func (s *Server) buildApp() *fiber.App {
 	api.Get("/admin/audit", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleAdminAudit)
 	api.Get("/onboarding/status", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleOnboardingStatus)
 	// Per-page walkthrough: the same outcome told from whichever screen you are on.
-	api.Get("/tour/:page", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleTour)
+	api.Get("/tour/:page", s.rbacMW(rbac.ResourceTour, rbac.ActionRead), s.handleTour)
 	api.Get("/readiness", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleReadiness)
 	s.registerUpdatesRoutes(api)
 
@@ -1260,6 +1260,7 @@ func (s *Server) buildApp() *fiber.App {
 	api.Get("/mcp/pending", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleMCPPending)
 	api.Get("/mcp/own", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleListOwnMCPServers)
 	api.Put("/mcp/own/:id", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.workspaceMCPAdmin, s.handlePutOwnMCPServer)
+	api.Put("/mcp/own/:id/settings", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.workspaceMCPAdmin, s.handleConfigureOwnMCPServer)
 	api.Delete("/mcp/own/:id", s.rbacMW(rbac.ResourceMCP, rbac.ActionDelete), s.workspaceMCPAdmin, s.handleDeleteOwnMCPServer)
 	api.Post("/mcp/own/install/inspect", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.workspaceMCPAdmin, s.handleInspectWorkspaceMCP)
 	api.Post("/mcp/own/install/approve", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.workspaceMCPAdmin, s.handleApproveWorkspaceMCP)

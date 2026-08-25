@@ -79,6 +79,16 @@ func TestSessionActivityTracker(t *testing.T) {
 		t.Fatal("message.out should evict the session")
 	}
 
+	// The runtime's authoritative terminal event is run.completed. Some entry
+	// points do not emit message.out, so leaving this as an ordinary heartbeat
+	// made completed Playground runs remain "in flight" for an hour.
+	now = now.Add(time.Second)
+	tr.Note(message.Event{Type: "message.in", AgentID: "briefer", SessionID: "completed", Timestamp: now})
+	tr.Note(message.Event{Type: "run.completed", AgentID: "briefer", SessionID: "completed", Timestamp: now})
+	if len(tr.Snapshot()) != 0 {
+		t.Fatal("run.completed should evict the session")
+	}
+
 	// Bootstrap-from-tail case: an llm.call for an unknown session should be
 	// tracked with StartedAt = event ts (so /activity/running still reports it).
 	orphan := now.Add(60 * time.Second)

@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+exec > >(tee /var/log/soulacy-bootstrap.log | logger -t soulacy-bootstrap -s 2>/dev/console) 2>&1
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y --no-install-recommends awscli apt-transport-https ca-certificates curl docker.io gnupg jq unzip
+systemctl enable --now docker
+
+install -d -m 0755 /etc/soulacy /etc/soulacy/nats /opt/soulacy/bin
+
+install_gvisor() {
+  curl --fail --silent --show-error --location --retry 5 https://gvisor.dev/archive.key | \
+    gpg --dearmor --yes -o /usr/share/keyrings/gvisor-archive-keyring.gpg
+  echo "deb [arch=amd64 signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" \
+    >/etc/apt/sources.list.d/gvisor.list
+  apt-get update
+  apt-get install -y runsc
+  /usr/bin/runsc install
+  systemctl restart docker
+}
+
+install_cosign() {
+  local version="${cosign_version}"
+  curl --fail --silent --show-error --location --retry 5 \
+    -o /usr/local/bin/cosign "https://github.com/sigstore/cosign/releases/download/$version/cosign-linux-amd64"
+  curl --fail --silent --show-error --location --retry 5 \
+    -o /tmp/cosign_checksums.txt "https://github.com/sigstore/cosign/releases/download/$version/cosign_checksums.txt"
+  grep ' cosign-linux-amd64$' /tmp/cosign_checksums.txt | sed 's#cosign-linux-amd64#/usr/local/bin/cosign#' | sha256sum --check -
+  chmod 0755 /usr/local/bin/cosign
+}
+
+ecr_login() {
+  aws ecr get-login-password --region '${aws_region}' | docker login --username AWS --password-stdin '${ecr_registry}'
+}
+
+extract_soulacy_binaries() {
+  ecr_login
+  docker pull '${gateway_image}'
+  local cid
+  cid=$(docker create '${gateway_image}')
+  trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' RETURN
+  for binary in soulacy sy soulacy-worker; do
+    docker cp "$cid:/usr/local/bin/$binary" "/opt/soulacy/bin/$binary"
+    chmod 0755 "/opt/soulacy/bin/$binary"
+  done
+  docker rm "$cid"
+  trap - RETURN
+}

@@ -1,0 +1,11 @@
+# syntax=docker/dockerfile:1.7
+# Deliberately tiny execution image. The deploy script supplies a digest-pinned
+# base, pushes the result to private ECR, and signs the resulting digest with
+# an asymmetric AWS KMS key.
+ARG PYTHON_IMAGE
+FROM ${PYTHON_IMAGE}
+
+RUN useradd --uid 65532 --no-create-home --shell /usr/sbin/nologin executor
+USER 65532:65532
+WORKDIR /tmp
+CMD ["python3"]

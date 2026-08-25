@@ -234,6 +234,9 @@ func hasToolContaining(draft Draft, needle string) bool {
 }
 
 func deliveryRequested(intent string) bool {
+	if explicitNoOutboundDeliveryIntent(intent) {
+		return false
+	}
 	return completionContainsAny(intent, "send", "deliver", "notify", "notification", "telegram", "slack", "discord", "whatsapp", "email", "channel", "dm ")
 }
 

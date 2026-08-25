@@ -1,6 +1,7 @@
 package studio
 
 import (
+	"regexp"
 	"sort"
 	"strings"
 
@@ -17,20 +18,30 @@ func CompileDeterministicAgent(intent string, cat Catalog, strategy string, answ
 		return Result{}, false
 	}
 	strategy = normalizeDeterministicStrategy(intent, strategy)
+	nameIntent := intent
+	// Refinement often rewrites `agent named X.` as `An agent named 'X' that…`.
+	// The operator's original wording is authoritative for an explicit name.
+	if explicitRequestedAgentName(cat.RawIntent) != "" {
+		nameIntent = cat.RawIntent
+	}
 	draft := Draft{
-		Name:         deterministicAgentName(intent),
-		Intent:       intent,
-		RawIntent:    strings.TrimSpace(cat.RawIntent),
-		Trigger:      inferredTriggerFromIntent(intent),
-		Strategy:     strategy,
-		Tools:        deterministicTools(intent, cat),
-		Knowledge:    deterministicKnowledge(intent, cat),
-		Channels:     deterministicChannels(intent, cat),
-		StepTimeout:  "120s",
-		TotalTimeout: "900s",
+		Name:        deterministicAgentName(nameIntent),
+		Intent:      intent,
+		RawIntent:   strings.TrimSpace(cat.RawIntent),
+		Trigger:     inferredTriggerFromIntent(intent),
+		Strategy:    strategy,
+		Tools:       deterministicTools(intent, cat),
+		Knowledge:   deterministicKnowledge(intent, cat),
+		Channels:    deterministicChannels(intent, cat),
+		StepTimeout: "120s",
+		// A generated agent gets fifteen turns at up to two minutes each. Keep
+		// the total budget consistent with that contract so a brand-new Studio
+		// agent does not immediately warn that its own defaults cannot finish.
+		TotalTimeout: "1800s",
 		MaxSteps:     deterministicMaxSteps(intent),
 		MaxTurns:     15,
 	}
+	draft.LLM.MaxTokens = deterministicOutputTokens(intent)
 	normalizeTrigger(&draft, intent)
 	if cron, ok := draft.Trigger.Config["cron"].(string); ok && strings.TrimSpace(cron) != "" {
 		draft.Unattended = true
@@ -49,6 +60,14 @@ func CompileDeterministicAgent(intent string, cat Catalog, strategy string, answ
 	notes := []string{"Studio used Soulacy's deterministic planner: the framework selected strategy, trigger, tools, and guardrails; the LLM only refined the prompt text."}
 	notes = append(notes, GroundAgentCapabilities(&draft, cat)...)
 	notes = append(notes, applyGenerationDefaults(&draft, intent)...)
+	if mcpOnlyCapabilityIntent(intent, cat.RawIntent) {
+		// An explicit MCP-only request is a privilege boundary, not a suggestion.
+		// Grounding may otherwise infer finance skills from words such as stock and
+		// a domain preset may add web_search. Keep only the installed MCP tools the
+		// request resolved and never silently broaden the agent's authority.
+		draft.Skills = nil
+		draft.Tools = filterMCPTools(draft.Tools)
+	}
 	if len(draft.Tools) == 0 {
 		return Result{}, false
 	}
@@ -106,6 +125,19 @@ func deterministicMaxSteps(intent string) int {
 	return 18
 }
 
+func deterministicOutputTokens(intent string) int {
+	li := strings.ToLower(intent)
+	// Rich research deliverables routinely exceed provider defaults (often 4K),
+	// especially when they combine tables, diagrams, citations and a narrative.
+	// Make the per-call output allowance explicit so a freshly generated agent
+	// does not stop halfway through a sentence before its required conclusion.
+	if anyContains(li, "decision table", "mermaid", "diagram", "comprehensive", "detailed report", "executive summary") ||
+		(strings.Contains(li, "research") && anyContains(li, "compare", "analysis", "recommendation")) {
+		return 8192
+	}
+	return 4096
+}
+
 // deterministicAgentName picks a display name from the intent.
 //
 // Matching is on WHOLE WORDS, and the finance case needs corroboration.
@@ -117,6 +149,9 @@ func deterministicMaxSteps(intent string) int {
 // Ordered most-specific first: a prompt can mention several domains, and the
 // one it is actually ABOUT is usually the one named earliest and most often.
 func deterministicAgentName(intent string) string {
+	if explicit := explicitRequestedAgentName(intent); explicit != "" {
+		return explicit
+	}
 	li := strings.ToLower(intent)
 	word := func(words ...string) bool {
 		for _, w := range words {
@@ -147,6 +182,24 @@ func deterministicAgentName(intent string) string {
 	default:
 		return "Soulacy Agent"
 	}
+}
+
+var explicitAgentNamePattern = regexp.MustCompile(`(?i)\b(?:agent|assistant|workflow)\s+(?:named|called)\s+["']?([a-z0-9][a-z0-9 _-]{1,79}?)["']?(?:[.;,\n]|$)`)
+
+// explicitRequestedAgentName preserves the name the operator supplied instead
+// of replacing it with a domain preset such as "Stock Advisor". The match is
+// deliberately bounded by sentence punctuation so the rest of the prompt can
+// never become part of the display name.
+func explicitRequestedAgentName(intent string) string {
+	match := explicitAgentNamePattern.FindStringSubmatch(strings.TrimSpace(intent))
+	if len(match) != 2 {
+		return ""
+	}
+	name := strings.Join(strings.Fields(strings.Trim(match[1], " \t\r\n\"'")), " ")
+	if len(name) < 2 || len(name) > 80 {
+		return ""
+	}
+	return name
 }
 
 // containsWord reports a WHOLE-word match, so "option" does not fire inside
@@ -180,6 +233,9 @@ func isWordByte(b byte) bool {
 }
 
 func deterministicChannels(intent string, cat Catalog) []string {
+	if explicitNoOutboundDeliveryIntent(intent) {
+		return nil
+	}
 	li := strings.ToLower(intent)
 	var out []string
 	add := func(name string) {
@@ -242,6 +298,11 @@ func deterministicKnowledge(intent string, cat Catalog) []string {
 
 func deterministicTools(intent string, cat Catalog) []string {
 	li := strings.ToLower(intent)
+	if mcpOnlyCapabilityIntent(intent, cat.RawIntent) {
+		if exact := exactNamedMCPTools(intent, cat); len(exact) > 0 {
+			return exact
+		}
+	}
 	var out []string
 	addBuiltin := func(name string) {
 		if hasCatalogBuiltin(cat, name) {
@@ -319,6 +380,46 @@ func deterministicTools(intent string, cat Catalog) []string {
 	return uniqueStrings(out)
 }
 
+func mcpOnlyCapabilityIntent(parts ...string) bool {
+	for _, part := range parts {
+		li := strings.ToLower(part)
+		if anyContains(li,
+			"use only available mcp", "use only mcp", "only available mcp",
+			"only mcp tools", "mcp tools only", "exclusively mcp") {
+			return true
+		}
+	}
+	return false
+}
+
+func filterMCPTools(tools []string) []string {
+	var out []string
+	for _, tool := range tools {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(tool)), "mcp__") {
+			out = append(out, tool)
+		}
+	}
+	return uniqueStrings(out)
+}
+
+// exactNamedMCPTools treats canonical tool identifiers in a refined prompt as
+// an explicit allowlist. Once at least one exact identifier is present, server
+// or topic matches must not expand it to every tool exposed by that server.
+func exactNamedMCPTools(intent string, cat Catalog) []string {
+	li := strings.ToLower(intent)
+	var out []string
+	for _, srv := range cat.MCP {
+		for _, tool := range srv.Tools {
+			name := strings.TrimSpace(tool.Name)
+			if name != "" && strings.Contains(li, strings.ToLower(name)) {
+				out = append(out, name)
+			}
+		}
+	}
+	sort.Strings(out)
+	return uniqueStrings(out)
+}
+
 // sameChannelReplyIntent distinguishes an ordinary reply from an outbound
 // delivery action. The runtime automatically sends an agent's final answer back
 // over the inbound channel; granting channel.send for wording such as "respond
@@ -326,6 +427,9 @@ func deterministicTools(intent string, cat Catalog) []string {
 // intent-deny policy that the conversation neither needs nor requested.
 func sameChannelReplyIntent(intent string) bool {
 	li := strings.ToLower(intent)
+	if explicitNoOutboundDeliveryIntent(li) {
+		return true
+	}
 	if !ConversationalIntent(intent) {
 		return false
 	}
@@ -334,6 +438,19 @@ func sameChannelReplyIntent(intent string) bool {
 		"sends it back to the user", "send it back to the user",
 		"responds to the user", "respond to the user", "replies to the user",
 		"reply to the user", "returns the answer to the user")
+}
+
+// explicitNoOutboundDeliveryIntent recognizes the operator's direct opt-out.
+// Negated phrases must win over the isolated word "send"; otherwise a prompt
+// such as "return in chat only; do not send externally" grants channel.send
+// and creates an impossible outbound-delivery blocker.
+func explicitNoOutboundDeliveryIntent(intent string) bool {
+	li := strings.ToLower(strings.TrimSpace(intent))
+	return anyContains(li,
+		"chat only", "in chat only", "return the response in chat",
+		"return the result in chat", "no external delivery", "no outbound delivery",
+		"do not send externally", "don't send externally", "without external delivery",
+		"no external push", "do not deliver externally")
 }
 
 func hasCatalogBuiltin(cat Catalog, name string) bool {

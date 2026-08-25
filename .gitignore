@@ -131,3 +131,8 @@ _to_delete/
 # Delivery staging and the lock files this mount cannot unlink.
 _incoming/
 _to_delete/
+# AWS deployment local metadata (contains no secret values, but is machine-specific).
+deploy/aws/.deployment.env
+deploy/aws/.terraform/
+deploy/aws/*.tfstate*
+deploy/aws/terraform.tfvars

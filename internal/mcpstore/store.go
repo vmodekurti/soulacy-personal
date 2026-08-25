@@ -53,8 +53,19 @@ type Server struct {
 	InheritEnv         []string          `json:"inherit_env,omitempty"`
 	ContainerNetwork   string            `json:"container_network,omitempty"`
 	ContainerWorkspace string            `json:"container_workspace,omitempty"`
+	Environment        []EnvironmentItem `json:"environment,omitempty"`
 	CreatedBy          string            `json:"created_by,omitempty"`
 	UpdatedAt          time.Time         `json:"updated_at,omitempty"`
+}
+
+// EnvironmentItem is the reviewed, non-secret configuration contract for an
+// installed server. Values never live here; secret values remain in the vault
+// and ordinary values remain in Env.
+type EnvironmentItem struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Required    bool   `json:"required"`
+	Secret      bool   `json:"secret"`
 }
 
 const schema = `
@@ -70,6 +81,7 @@ CREATE TABLE IF NOT EXISTS workspace_mcp_servers(
 	inherit_env  TEXT NOT NULL DEFAULT '[]',
 	container_network TEXT NOT NULL DEFAULT 'public',
 	container_workspace TEXT NOT NULL DEFAULT 'none',
+	environment  TEXT NOT NULL DEFAULT '[]',
 	created_by   TEXT NOT NULL DEFAULT '',
 	updated_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	PRIMARY KEY (workspace_id, id)
@@ -100,6 +112,7 @@ func Open(path string) (*Store, error) {
 	for name, definition := range map[string]string{
 		"container_network":   "TEXT NOT NULL DEFAULT 'public'",
 		"container_workspace": "TEXT NOT NULL DEFAULT 'none'",
+		"environment":         "TEXT NOT NULL DEFAULT '[]'",
 	} {
 		if err := ensureColumn(db, "workspace_mcp_servers", name, definition); err != nil {
 			_ = db.Close()
@@ -163,20 +176,21 @@ func (s *Store) Put(ctx context.Context, server Server) error {
 	env, _ := json.Marshal(nonNilMap(server.Env))
 	headers, _ := json.Marshal(nonNilMap(server.Headers))
 	inherit, _ := json.Marshal(nonNilStrings(server.InheritEnv))
+	environment, _ := json.Marshal(nonNilEnvironment(server.Environment))
 
 	_, err := s.db.ExecContext(ctx, `INSERT INTO workspace_mcp_servers(
 		workspace_id, id, transport, command, args, env, url, headers, inherit_env,
-		container_network, container_workspace, created_by, updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+		container_network, container_workspace, environment, created_by, updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(workspace_id, id) DO UPDATE SET
 			transport=excluded.transport, command=excluded.command, args=excluded.args,
 			env=excluded.env, url=excluded.url, headers=excluded.headers,
 			inherit_env=excluded.inherit_env, container_network=excluded.container_network,
-			container_workspace=excluded.container_workspace, created_by=excluded.created_by,
+			container_workspace=excluded.container_workspace, environment=excluded.environment, created_by=excluded.created_by,
 			updated_at=excluded.updated_at`,
 		workspaceID, id, server.Transport, server.Command, string(args), string(env),
 		server.URL, string(headers), string(inherit), server.ContainerNetwork,
-		server.ContainerWorkspace, server.CreatedBy, time.Now().UTC())
+		server.ContainerWorkspace, string(environment), server.CreatedBy, time.Now().UTC())
 	return err
 }
 
@@ -201,7 +215,7 @@ func (s *Store) List(ctx context.Context, workspaceID string) ([]Server, error) 
 	}
 	workspaceID = wsroot.Normalize(workspaceID)
 	rows, err := s.db.QueryContext(ctx, `SELECT id, transport, command, args, env, url, headers,
-		inherit_env, container_network, container_workspace, created_by, updated_at FROM workspace_mcp_servers
+		inherit_env, container_network, container_workspace, environment, created_by, updated_at FROM workspace_mcp_servers
 		WHERE workspace_id = ? ORDER BY id`, workspaceID)
 	if err != nil {
 		return nil, err
@@ -210,16 +224,17 @@ func (s *Store) List(ctx context.Context, workspaceID string) ([]Server, error) 
 	var out []Server
 	for rows.Next() {
 		server := Server{WorkspaceID: workspaceID}
-		var args, env, headers, inherit string
+		var args, env, headers, inherit, environment string
 		if err := rows.Scan(&server.ID, &server.Transport, &server.Command, &args, &env,
 			&server.URL, &headers, &inherit, &server.ContainerNetwork,
-			&server.ContainerWorkspace, &server.CreatedBy, &server.UpdatedAt); err != nil {
+			&server.ContainerWorkspace, &environment, &server.CreatedBy, &server.UpdatedAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(args), &server.Args)
 		_ = json.Unmarshal([]byte(env), &server.Env)
 		_ = json.Unmarshal([]byte(headers), &server.Headers)
 		_ = json.Unmarshal([]byte(inherit), &server.InheritEnv)
+		_ = json.Unmarshal([]byte(environment), &server.Environment)
 		out = append(out, server)
 	}
 	return out, rows.Err()
@@ -251,6 +266,13 @@ func nonNilStrings(v []string) []string {
 func nonNilMap(v map[string]string) map[string]string {
 	if v == nil {
 		return map[string]string{}
+	}
+	return v
+}
+
+func nonNilEnvironment(v []EnvironmentItem) []EnvironmentItem {
+	if v == nil {
+		return []EnvironmentItem{}
 	}
 	return v
 }

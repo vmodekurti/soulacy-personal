@@ -1,0 +1,167 @@
+${common}
+
+install_gvisor
+install_cosign
+extract_soulacy_binaries
+
+if ! id soulacy >/dev/null 2>&1; then
+  useradd --system --create-home --home-dir /var/lib/soulacy --shell /usr/sbin/nologin soulacy
+fi
+usermod -aG docker soulacy
+
+# Amazon's EFS mount helper provides encryption in transit and IAM-aware mounts.
+if ! apt-get install -y amazon-efs-utils; then
+  apt-get install -y --no-install-recommends git binutils build-essential pkg-config libssl-dev rustc cargo
+  git clone --depth 1 --branch v2.3.1 https://github.com/aws/efs-utils /tmp/efs-utils
+  (cd /tmp/efs-utils && ./build-deb.sh)
+  apt-get install -y /tmp/efs-utils/build/amazon-efs-utils*.deb
+fi
+mkdir -p /var/lib/soulacy
+echo '${efs_id}:/ /var/lib/soulacy efs _netdev,tls,iam 0 0' >> /etc/fstab
+mount -a -t efs
+chown soulacy:soulacy /var/lib/soulacy
+
+aws secretsmanager get-secret-value --region '${aws_region}' --secret-id '${bootstrap_secret_arn}' --query SecretString --output text >/run/soulacy-bootstrap.json
+aws secretsmanager get-secret-value --region '${aws_region}' --secret-id '${nats_secret_arn}' --query SecretString --output text >/run/soulacy-nats.json
+aws secretsmanager get-secret-value --region '${aws_region}' --secret-id '${rds_secret_arn}' --query SecretString --output text >/run/soulacy-rds.json
+chmod 0600 /run/soulacy-*.json
+
+decode_nats() {
+  local field="$1" output="$2"
+  jq -r --arg field "$field" '.[$field]' /run/soulacy-nats.json | base64 --decode >"$output"
+  chmod 0600 "$output"
+}
+decode_nats ca_b64 /etc/soulacy/nats/ca.pem
+decode_nats gateway_cert_b64 /etc/soulacy/nats/client.pem
+decode_nats gateway_key_b64 /etc/soulacy/nats/client-key.pem
+jq -r '.cosign_public_key_b64' /run/soulacy-bootstrap.json | base64 --decode >/etc/soulacy/execution-image.pub
+chmod 0644 /etc/soulacy/nats/ca.pem /etc/soulacy/nats/client.pem /etc/soulacy/execution-image.pub
+
+db_user=$(jq -r '.username' /run/soulacy-rds.json)
+db_password=$(jq -r '.password | @uri' /run/soulacy-rds.json)
+api_key=$(jq -r '.api_key' /run/soulacy-bootstrap.json)
+jwt_secret=$(jq -r '.jwt_secret' /run/soulacy-bootstrap.json)
+oidc_client_secret=$(jq -r '.oidc_client_secret // ""' /run/soulacy-bootstrap.json)
+
+cat >/var/lib/soulacy/config.yaml <<CONFIG
+deployment:
+  mode: ${deployment_mode}
+  profile: production
+  owner: platform-team
+  region: ${aws_region}
+  container_runtime: /usr/bin/docker
+%{ if is_scale ~}
+  shared_artifact_store: s3://${artifact_bucket}/production
+%{ endif ~}
+server:
+  host: 0.0.0.0
+  port: 1947
+  gui_enabled: true
+  api_key: "$api_key"
+  allow_unauthenticated: false
+  allowed_origins:
+    - https://${domain_name}
+auth:
+  mode: jwt
+  jwt_secret: "$jwt_secret"
+  jwt_access_ttl: 15m
+  jwt_refresh_ttl: 168h
+  oidc_issuer: "${oidc_issuer}"
+  oidc_client_id: "${oidc_client_id}"
+  oidc_audience: "${oidc_client_id}"
+  oidc_redirect_url: "https://${domain_name}/api/v1/auth/oidc/callback"
+  oidc_scopes: [openid, profile, email]
+storage:
+  backend: postgres
+  postgres_dsn: "postgres://$db_user:$db_password@${db_host}:5432/soulacy?sslmode=require"
+  postgres_log_dir: /var/lib/soulacy/logs
+queue:
+  backend: nats
+  nats_url: tls://nats.soulacy.internal:4222
+  nats_stream: soulacy
+  nats_subject_prefix: soulacy.>
+  nats_ack_wait: 30s
+  nats_max_deliver: 5
+  nats_tls_ca: /etc/soulacy/nats/ca.pem
+  nats_tls_cert: /etc/soulacy/nats/client.pem
+  nats_tls_key: /etc/soulacy/nats/client-key.pem
+  nats_tls_server_name: nats.soulacy.internal
+  channel_ingress_subject: soulacy.channels.inbound
+credentials:
+  kms_provider: awskms
+  aws_kms_key_id: ${credential_kms_arn}
+rate_limit:
+  enabled: true
+  per_user_rpm: 120
+  per_agent_rpm: 240
+%{ if is_scale ~}
+  backend: redis
+  redis_url: rediss://${redis_host}:6379
+%{ else ~}
+  backend: memory
+%{ endif ~}
+executor:
+  backend: worker
+  docker_image: ${execution_image}
+  docker_network: none
+  docker_runtime: runsc
+  require_signed_image: true
+  cosign_key: /etc/soulacy/execution-image.pub
+runtime:
+  filesystem_roots: [/var/lib/soulacy]
+  ssrf_protection: true
+  sandbox:
+    enabled: true
+    mode: docker
+    image: ${execution_image}
+    container_runtime: runsc
+    require_signed_image: true
+    cosign_key: /etc/soulacy/execution-image.pub
+    cpu_seconds: 30
+    memory_mb: 512
+    open_files: 256
+    file_size_mb: 64
+    pids: 128
+security:
+  intent_gate: deny
+CONFIG
+chown soulacy:soulacy /var/lib/soulacy/config.yaml
+chmod 0600 /var/lib/soulacy/config.yaml
+
+install -d -o soulacy -g soulacy /var/lib/soulacy/logs
+cat >/etc/soulacy/gateway.env <<ENV
+HOME=/var/lib/soulacy
+SOULACY_CONFIG_PATH=/var/lib/soulacy/config.yaml
+SOULACY_AUTH_OIDC_CLIENT_SECRET=$oidc_client_secret
+ENV
+chmod 0600 /etc/soulacy/gateway.env
+
+cat >/etc/systemd/system/soulacy.service <<'UNIT'
+[Unit]
+Description=Soulacy gateway
+After=network-online.target docker.service remote-fs.target
+Wants=network-online.target
+RequiresMountsFor=/var/lib/soulacy
+
+[Service]
+Type=simple
+User=soulacy
+Group=soulacy
+SupplementaryGroups=docker
+EnvironmentFile=/etc/soulacy/gateway.env
+ExecStart=/opt/soulacy/bin/soulacy serve
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/soulacy /run /tmp
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now soulacy
+
+shred -u /run/soulacy-bootstrap.json /run/soulacy-nats.json /run/soulacy-rds.json

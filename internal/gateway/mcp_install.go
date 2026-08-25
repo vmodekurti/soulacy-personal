@@ -257,6 +257,7 @@ func (s *Server) handleApproveWorkspaceMCP(c *fiber.Ctx) error {
 		Env:                env,
 		ContainerNetwork:   stage.Permissions.Network,
 		ContainerWorkspace: stage.Permissions.Workspace,
+		Environment:        storedMCPEnvironment(stage.Env),
 		CreatedBy:          stage.Actor,
 	}); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
@@ -270,6 +271,16 @@ func (s *Server) handleApproveWorkspaceMCP(c *fiber.Ctx) error {
 		"network": stage.Permissions.Network, "workspace_access": stage.Permissions.Workspace, "secrets_stored": secretCount,
 	})
 	return c.JSON(fiber.Map{"ok": true, "id": stage.ServerID, "image": pinned, "message": "MCP server installed. Its discovered tools are now available in Studio and to agents granted this server."})
+}
+
+func storedMCPEnvironment(items []mcpInstallEnv) []mcpstore.EnvironmentItem {
+	out := make([]mcpstore.EnvironmentItem, 0, len(items))
+	for _, item := range items {
+		out = append(out, mcpstore.EnvironmentItem{
+			Name: item.Name, Description: item.Description, Required: item.Required, Secret: item.Secret,
+		})
+	}
+	return out
 }
 
 func canonicalGitHubRepository(raw string) (string, error) {

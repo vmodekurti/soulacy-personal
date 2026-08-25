@@ -244,6 +244,16 @@ func startRestartChild() error {
 	if err != nil {
 		return err
 	}
+	// Route/security tests exercise every mutating endpoint, including restart.
+	// Re-executing a Go test binary here recursively starts the complete gateway
+	// suite again and every child inherits the parent's output pipe. The original
+	// test process reports PASS, then `go test` waits a minute for those inherited
+	// descriptors and fails with "Test I/O incomplete". A test binary cannot be
+	// a meaningful replacement gateway, so acknowledge the spawn boundary without
+	// creating the impossible child. Production executables keep the real path.
+	if strings.HasSuffix(filepath.Base(exe), ".test") {
+		return nil
+	}
 	script := `sleep 0.75; exec "$@"`
 	args := append([]string{"-c", script, "soulacy-restart", exe}, os.Args[1:]...)
 	cmd := exec.Command("/bin/sh", args...)

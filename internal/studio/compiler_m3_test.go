@@ -109,6 +109,56 @@ func TestCompile_PeerAgentHandoff(t *testing.T) {
 	}
 }
 
+func TestCompileDeterministicWorkflow_ParallelSpecialistCouncil(t *testing.T) {
+	intent := "Build a multi-agent workflow named E2E QA Council. On manual invocation, run two independent market researchers in parallel, then a risk critic compares them and a coordinator returns the final response."
+	res, ok := CompileDeterministicWorkflow(intent, Catalog{}, nil)
+	if !ok {
+		t.Fatal("expected a deterministic parallel specialist fallback")
+	}
+	if got := res.Workflow.Name; got != "E2E QA Council" {
+		t.Fatalf("name = %q, want E2E QA Council", got)
+	}
+	if got := res.Workflow.Trigger.Type; got != "manual" {
+		t.Fatalf("trigger = %q, want manual", got)
+	}
+	var fan *sdkr.FlowNode
+	for i := range res.Workflow.Flow.Nodes {
+		if res.Workflow.Flow.Nodes[i].ID == "fan_out_specialists" {
+			fan = &res.Workflow.Flow.Nodes[i]
+		}
+	}
+	if fan == nil || fan.Kind != sdkr.FlowNodeParallel || fan.Join != sdkr.JoinAll || fan.JoinNode != "risk_critic" {
+		t.Fatalf("parallel barrier not preserved: %+v", fan)
+	}
+	if len(res.Workflow.NewAgents) != 4 {
+		t.Fatalf("new agent profiles = %d, want 4", len(res.Workflow.NewAgents))
+	}
+	if _, err := reasoning.CompileFlow(res.Workflow.spec()); err != nil {
+		t.Fatalf("parallel specialist fallback failed CompileFlow: %v", err)
+	}
+}
+
+func TestCompileDeterministicWorkflow_UsesRawIntentForSpecialistCardinality(t *testing.T) {
+	raw := "Build a multi-agent workflow named E2E QA Council. Run two independent market researchers in parallel, then a critic and coordinator."
+	refined := "A workflow with two researchers in parallel. Step 3: risk critic. Step 4: coordinator. Four detailed output sections are required."
+	res, ok := CompileDeterministicWorkflow(refined, Catalog{RawIntent: raw}, nil)
+	if !ok {
+		t.Fatal("expected deterministic parallel workflow")
+	}
+	workers := 0
+	for _, n := range res.Workflow.Flow.Nodes {
+		if strings.HasPrefix(n.ID, "specialist_") {
+			workers++
+		}
+	}
+	if workers != 2 {
+		t.Fatalf("workers = %d, want original request's 2", workers)
+	}
+	if res.Workflow.Name != "E2E QA Council" {
+		t.Fatalf("name = %q, want original request name", res.Workflow.Name)
+	}
+}
+
 // TestCompile_TypedPortsPass (Story M3, test c happy path): a graph using
 // from_port/to_port with DECLARED node ports compiles.
 func TestCompile_TypedPortsPass(t *testing.T) {

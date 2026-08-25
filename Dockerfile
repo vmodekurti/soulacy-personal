@@ -4,8 +4,8 @@
 #
 # Stages:
 #   gui      → builds the Svelte dashboard with Node 20
-#   gobuild  → compiles soulacy + sy with cgo (sqlite-vec, mattn/go-sqlite3)
-#   runtime  → slim Debian image with Python 3 + the SDK + both binaries
+#   gobuild  → compiles soulacy + sy + soulacy-worker with cgo
+#   runtime  → slim Debian image with Python 3 + all production binaries
 #
 # Usage (standalone):
 #   docker build -t soulacy .
@@ -56,7 +56,10 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
         -o /out/soulacy ./cmd/soulacy \
     && go build \
         -ldflags "-X github.com/soulacy/soulacy/internal/config.Version=${VERSION}" \
-        -o /out/sy ./cmd/sy
+        -o /out/sy ./cmd/sy \
+    && go build \
+        -ldflags "-X github.com/soulacy/soulacy/internal/config.Version=${VERSION}" \
+        -o /out/soulacy-worker ./cmd/soulacy-worker
 
 # ── Stage 3: Runtime ─────────────────────────────────────────────────────────
 FROM debian:bookworm-slim AS runtime
@@ -87,6 +90,7 @@ RUN useradd --create-home --shell /usr/sbin/nologin soulacy
 
 COPY --from=gobuild --chown=soulacy /out/soulacy /usr/local/bin/soulacy
 COPY --from=gobuild --chown=soulacy /out/sy      /usr/local/bin/sy
+COPY --from=gobuild --chown=soulacy /out/soulacy-worker /usr/local/bin/soulacy-worker
 
 # Data directory — mount a volume here to persist agents, memory, and logs.
 RUN mkdir -p /home/soulacy/.soulacy && chown soulacy:soulacy /home/soulacy/.soulacy

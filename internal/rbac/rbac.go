@@ -76,6 +76,11 @@ const (
 	ResourceRBAC        = "rbac"
 	ResourceSecrets     = "secrets"
 	ResourceCredentials = "credentials"
+	// ResourceTour covers contextual, read-only product guidance assembled
+	// from the caller's own workspace. It is deliberately separate from
+	// ResourceConfig: learning what a screen does must not require permission
+	// to read deployment-global configuration.
+	ResourceTour = "tour"
 
 	// ResourceApprovals is the authority to see and decide paused tool calls
 	// (MU-022).
@@ -147,6 +152,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 		ResourceRBAC:        {ActionRead: true, ActionWrite: true, ActionDelete: true},
 		ResourceSecrets:     {ActionList: true, ActionSet: true, ActionDelete: true},
 		ResourceCredentials: {ActionList: true, ActionSet: true, ActionDelete: true, ActionRotate: true, ActionReveal: true},
+		ResourceTour:        {ActionRead: true},
 	},
 	RoleAdmin: {
 		ResourceAgents:      {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionEnable: true},
@@ -168,6 +174,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 		ResourceRBAC:        {ActionRead: true, ActionWrite: true, ActionDelete: true},
 		ResourceSecrets:     {ActionList: true, ActionSet: true, ActionDelete: true},
 		ResourceCredentials: {ActionList: true, ActionSet: true, ActionDelete: true, ActionRotate: true, ActionReveal: true},
+		ResourceTour:        {ActionRead: true},
 	},
 	RoleDeveloper: {
 		ResourceAgents:      {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionEnable: true},
@@ -189,6 +196,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 		ResourceRBAC:        {},
 		ResourceSecrets:     {},
 		ResourceCredentials: {ActionList: true, ActionSet: true, ActionDelete: true, ActionRotate: true},
+		ResourceTour:        {ActionRead: true},
 	},
 	RoleOperator: {
 		ResourceAgents:      {ActionRead: true, ActionWrite: true, ActionEnable: true},
@@ -210,6 +218,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 		ResourceRBAC:        {},
 		ResourceSecrets:     {},
 		ResourceCredentials: {ActionList: true, ActionSet: true, ActionDelete: true, ActionRotate: true},
+		ResourceTour:        {ActionRead: true},
 	},
 	RoleViewer: {
 		ResourceAgents:      {ActionRead: true},
@@ -231,6 +240,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 		ResourceRBAC:        {},
 		ResourceSecrets:     {},
 		ResourceCredentials: {},
+		ResourceTour:        {ActionRead: true},
 	},
 }
 

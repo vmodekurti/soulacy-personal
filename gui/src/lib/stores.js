@@ -38,6 +38,19 @@ function sessionWritable(key, initial) {
   return store
 }
 
+function sessionJSONWritable(key, initial) {
+  let stored = null
+  try { stored = JSON.parse(sessionStorage.getItem(key) || 'null') } catch (_) {}
+  const store = writable(stored !== null ? stored : initial)
+  store.subscribe(val => {
+    try {
+      if (val == null) sessionStorage.removeItem(key)
+      else sessionStorage.setItem(key, JSON.stringify(val))
+    } catch (_) {}
+  })
+  return store
+}
+
 export const apiKey = neutral('apiKey',
   'the credential authenticates the SUBJECT, not their membership — one person carries it into every workspace they belong to, and clearing it on a switch would log them out to move rooms',
   sessionWritable('soulacy_api_key', ''))
@@ -71,7 +84,12 @@ export const editAgent = scoped('editAgent', () => '')
 // generated/refined workflow, and the transparency panels survive switching to
 // another screen and back (the Studio component is destroyed on unmount). Null
 // until Studio first saves a snapshot.
-export const studioSession = scoped('studioSession', () => null)
+// A Studio draft must also survive the full-page OIDC round-trip used to renew
+// an expired workspace session. It remains tab-scoped and the workspace reset
+// registry clears the value on every workspace switch.
+export const studioSession = registerWorkspaceScoped(
+  'studioSession', sessionJSONWritable('soulacy_studio_session', null), () => null,
+)
 
 // Activity → Studio handoff: a concrete failed run to debug from the real
 // action log. Studio consumes and clears this when opened.

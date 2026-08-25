@@ -4,8 +4,12 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -16,14 +20,9 @@ import (
 // Issuer signs access tokens (HS256 JWTs) and manages opaque refresh tokens.
 //
 // Access tokens are signed JWTs with a short TTL (default 15m).
-// Refresh tokens are random opaque hex strings stored in an in-memory map
-// with a longer TTL (default 7d). They are single-use: each Refresh() call
-// rotates the token and issues a new one.
-//
-// NOTE: The refresh store is in-memory only. A gateway restart invalidates all
-// outstanding refresh tokens (users need to re-authenticate via /auth/token).
-// For persistent refresh tokens across restarts, store them in Postgres —
-// that's a Task #31/32 concern.
+// Refresh tokens are random opaque hex strings. Only their SHA-256 hashes are
+// retained. They are single-use: each Refresh() call rotates the token and
+// records the consumed hash so reuse revokes the complete token family.
 type Issuer struct {
 	secret     []byte
 	accessTTL  time.Duration
@@ -32,6 +31,10 @@ type Issuer struct {
 }
 
 func newIssuer(secret string, accessTTL, refreshTTL time.Duration) (*Issuer, error) {
+	return newIssuerWithStorePath(secret, accessTTL, refreshTTL, "")
+}
+
+func newIssuerWithStorePath(secret string, accessTTL, refreshTTL time.Duration, storePath string) (*Issuer, error) {
 	if secret == "" {
 		// Generate an ephemeral key. Not persistent across restarts.
 		b := make([]byte, 32)
@@ -40,11 +43,15 @@ func newIssuer(secret string, accessTTL, refreshTTL time.Duration) (*Issuer, err
 		}
 		secret = hex.EncodeToString(b)
 	}
+	store, err := newRefreshStoreAt(storePath)
+	if err != nil {
+		return nil, fmt.Errorf("open refresh session store: %w", err)
+	}
 	return &Issuer{
 		secret:     []byte(secret),
 		accessTTL:  accessTTL,
 		refreshTTL: refreshTTL,
-		store:      newRefreshStore(),
+		store:      store,
 	}, nil
 }
 
@@ -208,7 +215,10 @@ func (iss *Issuer) issueInFamilyAt(id TokenIdentity, familyID string, authTime t
 	if err != nil {
 		return "", "", 0, fmt.Errorf("sign access token: %w", err)
 	}
-	refreshToken = iss.store.put(id, familyID, now.Add(iss.refreshTTL))
+	refreshToken, err = iss.store.put(id, familyID, now.Add(iss.refreshTTL))
+	if err != nil {
+		return "", "", 0, fmt.Errorf("persist refresh token: %w", err)
+	}
 	return accessToken, refreshToken, int(iss.accessTTL.Seconds()), nil
 }
 
@@ -252,7 +262,7 @@ func (iss *Issuer) Close() {
 }
 
 // ---------------------------------------------------------------------------
-// refreshStore — in-memory opaque refresh token store
+// refreshStore — opaque refresh token store with optional durable journal
 // ---------------------------------------------------------------------------
 
 type refreshEntry struct {
@@ -292,22 +302,217 @@ type refreshStore struct {
 	revokedAccess   map[string]time.Time
 	quit            chan struct{}
 	once            sync.Once
+	path            string
+	persistErr      error
 }
 
 func newRefreshStore() *refreshStore {
+	s, err := newRefreshStoreAt("")
+	if err != nil {
+		panic(err)
+	}
+	return s
+}
+
+func newRefreshStoreAt(path string) (*refreshStore, error) {
 	s := &refreshStore{
 		tokens:          make(map[[32]byte]refreshEntry),
 		consumed:        make(map[[32]byte]consumedEntry),
 		revokedFamilies: make(map[string]time.Time),
 		revokedAccess:   make(map[string]time.Time),
 		quit:            make(chan struct{}),
+		path:            strings.TrimSpace(path),
+	}
+	if s.path != "" {
+		if err := s.load(); err != nil {
+			return nil, err
+		}
 	}
 	go s.sweepLoop()
-	return s
+	return s, nil
+}
+
+const refreshStoreVersion = 1
+
+type refreshStoreJournal struct {
+	Version         int                   `json:"version"`
+	Tokens          []refreshTokenRecord  `json:"tokens,omitempty"`
+	Consumed        []consumedTokenRecord `json:"consumed,omitempty"`
+	RevokedFamilies []expiryRecord        `json:"revoked_families,omitempty"`
+	RevokedAccess   []expiryRecord        `json:"revoked_access,omitempty"`
+}
+
+type refreshTokenRecord struct {
+	Hash      string        `json:"hash"`
+	Identity  TokenIdentity `json:"identity"`
+	Subject   string        `json:"subject"`
+	FamilyID  string        `json:"family_id"`
+	ExpiresAt time.Time     `json:"expires_at"`
+	AuthTime  time.Time     `json:"auth_time,omitempty"`
+}
+
+type consumedTokenRecord struct {
+	Hash      string    `json:"hash"`
+	FamilyID  string    `json:"family_id"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+type expiryRecord struct {
+	ID        string    `json:"id"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+func decodeRefreshHash(raw string) ([32]byte, error) {
+	var result [32]byte
+	b, err := hex.DecodeString(raw)
+	if err != nil || len(b) != len(result) {
+		return result, errors.New("invalid refresh token hash")
+	}
+	copy(result[:], b)
+	return result, nil
+}
+
+// load restores only non-expired hashes and revocations. The journal contains
+// no bearer credential: a filesystem reader cannot turn a stored hash back
+// into a usable refresh token.
+func (s *refreshStore) load() error {
+	info, err := os.Lstat(s.path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return errors.New("refresh session store must be a regular file")
+	}
+	if err := os.Chmod(s.path, 0o600); err != nil {
+		return fmt.Errorf("secure refresh session store: %w", err)
+	}
+	b, err := os.ReadFile(s.path)
+	if err != nil {
+		return err
+	}
+	if len(b) == 0 {
+		return nil
+	}
+	var journal refreshStoreJournal
+	if err := json.Unmarshal(b, &journal); err != nil {
+		return fmt.Errorf("decode refresh session store: %w", err)
+	}
+	if journal.Version != refreshStoreVersion {
+		return fmt.Errorf("unsupported refresh session store version %d", journal.Version)
+	}
+	now := time.Now()
+	for _, record := range journal.Tokens {
+		if !record.ExpiresAt.After(now) || record.FamilyID == "" {
+			continue
+		}
+		h, err := decodeRefreshHash(record.Hash)
+		if err != nil {
+			return err
+		}
+		s.tokens[h] = refreshEntry{identity: record.Identity, subject: record.Subject, familyID: record.FamilyID, expiresAt: record.ExpiresAt, authTime: record.AuthTime}
+	}
+	for _, record := range journal.Consumed {
+		if !record.ExpiresAt.After(now) || record.FamilyID == "" {
+			continue
+		}
+		h, err := decodeRefreshHash(record.Hash)
+		if err != nil {
+			return err
+		}
+		s.consumed[h] = consumedEntry{familyID: record.FamilyID, expiresAt: record.ExpiresAt}
+	}
+	for _, record := range journal.RevokedFamilies {
+		if record.ID != "" && record.ExpiresAt.After(now) {
+			s.revokedFamilies[record.ID] = record.ExpiresAt
+		}
+	}
+	for _, record := range journal.RevokedAccess {
+		if record.ID != "" && record.ExpiresAt.After(now) {
+			s.revokedAccess[record.ID] = record.ExpiresAt
+		}
+	}
+	return nil
+}
+
+func (s *refreshStore) journalLocked() refreshStoreJournal {
+	journal := refreshStoreJournal{Version: refreshStoreVersion}
+	for hash, entry := range s.tokens {
+		journal.Tokens = append(journal.Tokens, refreshTokenRecord{Hash: hex.EncodeToString(hash[:]), Identity: entry.identity, Subject: entry.subject, FamilyID: entry.familyID, ExpiresAt: entry.expiresAt, AuthTime: entry.authTime})
+	}
+	for hash, entry := range s.consumed {
+		journal.Consumed = append(journal.Consumed, consumedTokenRecord{Hash: hex.EncodeToString(hash[:]), FamilyID: entry.familyID, ExpiresAt: entry.expiresAt})
+	}
+	for id, expiry := range s.revokedFamilies {
+		journal.RevokedFamilies = append(journal.RevokedFamilies, expiryRecord{ID: id, ExpiresAt: expiry})
+	}
+	for id, expiry := range s.revokedAccess {
+		journal.RevokedAccess = append(journal.RevokedAccess, expiryRecord{ID: id, ExpiresAt: expiry})
+	}
+	sort.Slice(journal.Tokens, func(i, j int) bool { return journal.Tokens[i].Hash < journal.Tokens[j].Hash })
+	sort.Slice(journal.Consumed, func(i, j int) bool { return journal.Consumed[i].Hash < journal.Consumed[j].Hash })
+	sort.Slice(journal.RevokedFamilies, func(i, j int) bool { return journal.RevokedFamilies[i].ID < journal.RevokedFamilies[j].ID })
+	sort.Slice(journal.RevokedAccess, func(i, j int) bool { return journal.RevokedAccess[i].ID < journal.RevokedAccess[j].ID })
+	return journal
+}
+
+// persistLocked atomically replaces a permission-restricted journal. It is
+// called while s.mu is held so token rotation and its durable record are one
+// ordered operation from the issuer's perspective.
+func (s *refreshStore) persistLocked() error {
+	if s.path == "" {
+		return nil
+	}
+	dir := filepath.Dir(s.path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create refresh session directory: %w", err)
+	}
+	b, err := json.Marshal(s.journalLocked())
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".refresh-sessions-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(b); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, s.path); err != nil {
+		return err
+	}
+	return os.Chmod(s.path, 0o600)
+}
+
+func (s *refreshStore) recordPersistLocked() {
+	if s.persistErr != nil {
+		return
+	}
+	if err := s.persistLocked(); err != nil {
+		// A process that cannot durably record rotation/revocation must not
+		// continue accepting credentials on a divergent in-memory view.
+		s.persistErr = err
+	}
 }
 
 // put stores a new refresh token and returns the opaque token string.
-func (s *refreshStore) put(id TokenIdentity, familyID string, exp time.Time) string {
+func (s *refreshStore) put(id TokenIdentity, familyID string, exp time.Time) (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		// Unreachable on any supported OS — but the failure mode if it ever were
@@ -323,9 +528,20 @@ func (s *refreshStore) put(id TokenIdentity, familyID string, exp time.Time) str
 		familyID = randomHex(16)
 	}
 	s.mu.Lock()
-	s.tokens[sha256.Sum256([]byte(tok))] = refreshEntry{identity: id, subject: id.Subject, familyID: familyID, expiresAt: exp, authTime: id.AuthTime}
+	if s.persistErr != nil {
+		s.mu.Unlock()
+		return "", s.persistErr
+	}
+	h := sha256.Sum256([]byte(tok))
+	s.tokens[h] = refreshEntry{identity: id, subject: id.Subject, familyID: familyID, expiresAt: exp, authTime: id.AuthTime}
+	if err := s.persistLocked(); err != nil {
+		delete(s.tokens, h)
+		s.persistErr = err
+		s.mu.Unlock()
+		return "", err
+	}
 	s.mu.Unlock()
-	return tok
+	return tok, nil
 }
 
 // get looks up a refresh token and deletes it (single-use rotation).
@@ -333,22 +549,29 @@ func (s *refreshStore) put(id TokenIdentity, familyID string, exp time.Time) str
 func (s *refreshStore) consume(tok string) (refreshEntry, refreshStatus) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.persistErr != nil {
+		return refreshEntry{}, refreshInvalid
+	}
 	h := sha256.Sum256([]byte(tok))
 	if used, found := s.consumed[h]; found {
 		s.revokeFamilyLocked(used.familyID, used.expiresAt)
+		s.recordPersistLocked()
 		return refreshEntry{}, refreshReused
 	}
 	e, found := s.tokens[h]
 	if !found || time.Now().After(e.expiresAt) {
 		delete(s.tokens, h)
+		s.recordPersistLocked()
 		return refreshEntry{}, refreshInvalid
 	}
 	if exp, revoked := s.revokedFamilies[e.familyID]; revoked && time.Now().Before(exp) {
 		delete(s.tokens, h)
+		s.recordPersistLocked()
 		return refreshEntry{}, refreshInvalid
 	}
 	delete(s.tokens, h)
 	s.consumed[h] = consumedEntry{familyID: e.familyID, expiresAt: e.expiresAt}
+	s.recordPersistLocked()
 	return e, refreshValid
 }
 
@@ -358,16 +581,19 @@ func (s *refreshStore) revokeFamilyFor(tok string) {
 	h := sha256.Sum256([]byte(tok))
 	if e, ok := s.tokens[h]; ok {
 		s.revokeFamilyLocked(e.familyID, e.expiresAt)
+		s.recordPersistLocked()
 		return
 	}
 	if e, ok := s.consumed[h]; ok {
 		s.revokeFamilyLocked(e.familyID, e.expiresAt)
+		s.recordPersistLocked()
 	}
 }
 
 func (s *refreshStore) revokeFamily(family string, exp time.Time) {
 	s.mu.Lock()
 	s.revokeFamilyLocked(family, exp)
+	s.recordPersistLocked()
 	s.mu.Unlock()
 }
 
@@ -383,13 +609,14 @@ func (s *refreshStore) revokeFamilyLocked(family string, exp time.Time) {
 func (s *refreshStore) revokeAccess(id string, exp time.Time) {
 	s.mu.Lock()
 	s.revokedAccess[id] = exp
+	s.recordPersistLocked()
 	s.mu.Unlock()
 }
 func (s *refreshStore) accessRevoked(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	exp, ok := s.revokedAccess[id]
-	return ok && time.Now().Before(exp)
+	return s.persistErr != nil || ok && time.Now().Before(exp)
 }
 
 // close stops the sweep goroutine.
@@ -408,25 +635,33 @@ func (s *refreshStore) sweepLoop() {
 		case <-t.C:
 			now := time.Now()
 			s.mu.Lock()
+			changed := false
 			for k, e := range s.tokens {
 				if now.After(e.expiresAt) {
 					delete(s.tokens, k)
+					changed = true
 				}
 			}
 			for k, e := range s.consumed {
 				if now.After(e.expiresAt) {
 					delete(s.consumed, k)
+					changed = true
 				}
 			}
 			for k, exp := range s.revokedFamilies {
 				if now.After(exp) {
 					delete(s.revokedFamilies, k)
+					changed = true
 				}
 			}
 			for k, exp := range s.revokedAccess {
 				if now.After(exp) {
 					delete(s.revokedAccess, k)
+					changed = true
 				}
+			}
+			if changed {
+				s.recordPersistLocked()
 			}
 			s.mu.Unlock()
 		}

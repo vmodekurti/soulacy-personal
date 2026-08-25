@@ -1,0 +1,109 @@
+${common}
+
+install_gvisor
+install_cosign
+extract_soulacy_binaries
+
+if ! id soulacy >/dev/null 2>&1; then
+  useradd --system --create-home --home-dir /var/lib/soulacy --shell /usr/sbin/nologin soulacy
+fi
+usermod -aG docker soulacy
+
+if ! apt-get install -y amazon-efs-utils; then
+  apt-get install -y --no-install-recommends git binutils build-essential pkg-config libssl-dev rustc cargo
+  git clone --depth 1 --branch v2.3.1 https://github.com/aws/efs-utils /tmp/efs-utils
+  (cd /tmp/efs-utils && ./build-deb.sh)
+  apt-get install -y /tmp/efs-utils/build/amazon-efs-utils*.deb
+fi
+mkdir -p /var/lib/soulacy
+echo '${efs_id}:/ /var/lib/soulacy efs _netdev,tls,iam 0 0' >> /etc/fstab
+mount -a -t efs
+chown soulacy:soulacy /var/lib/soulacy
+
+aws secretsmanager get-secret-value --region '${aws_region}' --secret-id '${bootstrap_secret_arn}' --query SecretString --output text >/run/soulacy-bootstrap.json
+chmod 0600 /run/soulacy-bootstrap.json
+api_key=$(jq -r '.api_key' /run/soulacy-bootstrap.json)
+jq -r '.cosign_public_key_b64' /run/soulacy-bootstrap.json | base64 --decode >/etc/soulacy/execution-image.pub
+chmod 0644 /etc/soulacy/execution-image.pub
+
+cat >/var/lib/soulacy/config.yaml <<CONFIG
+deployment:
+  mode: personal
+  profile: production
+  owner: operator
+  region: ${aws_region}
+  container_runtime: /usr/bin/docker
+server:
+  host: 0.0.0.0
+  port: 1947
+  gui_enabled: true
+  api_key: "$api_key"
+  allow_unauthenticated: false
+  allowed_origins:
+    - https://${domain_name}
+auth:
+  mode: apikey
+storage:
+  backend: sqlite
+executor:
+  backend: docker
+  docker_image: ${execution_image}
+  docker_network: none
+  docker_runtime: runsc
+  require_signed_image: true
+  cosign_key: /etc/soulacy/execution-image.pub
+runtime:
+  filesystem_roots: [/var/lib/soulacy]
+  ssrf_protection: true
+  sandbox:
+    enabled: true
+    mode: docker
+    image: ${execution_image}
+    container_runtime: runsc
+    require_signed_image: true
+    cosign_key: /etc/soulacy/execution-image.pub
+    cpu_seconds: 30
+    memory_mb: 512
+    open_files: 256
+    file_size_mb: 64
+    pids: 128
+security:
+  intent_gate: deny
+CONFIG
+chown soulacy:soulacy /var/lib/soulacy/config.yaml
+chmod 0600 /var/lib/soulacy/config.yaml
+
+cat >/etc/soulacy/gateway.env <<'ENV'
+HOME=/var/lib/soulacy
+SOULACY_CONFIG_PATH=/var/lib/soulacy/config.yaml
+ENV
+chmod 0600 /etc/soulacy/gateway.env
+
+cat >/etc/systemd/system/soulacy.service <<'UNIT'
+[Unit]
+Description=Soulacy personal gateway
+After=network-online.target docker.service remote-fs.target
+Wants=network-online.target
+RequiresMountsFor=/var/lib/soulacy
+
+[Service]
+Type=simple
+User=soulacy
+Group=soulacy
+SupplementaryGroups=docker
+EnvironmentFile=/etc/soulacy/gateway.env
+ExecStart=/opt/soulacy/bin/soulacy serve
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/soulacy /run /tmp
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now soulacy
+shred -u /run/soulacy-bootstrap.json
