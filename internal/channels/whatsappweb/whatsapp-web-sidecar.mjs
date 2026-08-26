@@ -17,6 +17,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 
+// Some Baileys/libsignal dependencies bypass the supplied logger and write
+// cryptographic session diagnostics with console.*. The JSON-RPC protocol owns
+// stdout and gateway logs must never receive that key material.
+console.log = () => {};
+console.info = () => {};
+console.debug = () => {};
+console.warn = () => {};
+console.error = () => {};
+
 function arg(name, fallback = '') {
   const i = process.argv.indexOf(name);
   return i >= 0 && i + 1 < process.argv.length ? process.argv[i + 1] : fallback;
@@ -71,6 +80,11 @@ async function main() {
   }
 
   let sock;
+	const silentLogger = {
+	  level: 'silent',
+	  child() { return this; },
+	  trace() {}, debug() {}, info() {}, warn() {}, error() {}, fatal() {},
+	};
 
   // Ids of messages WE sent — used to tell the user's own typing in the
   // "Message yourself" chat apart from the agent's replies echoing back
@@ -94,6 +108,7 @@ async function main() {
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
     sock = makeWASocket({
       auth: state,
+	  logger: silentLogger,
       printQRInTerminal: true,
       browser: ['Soulacy', 'Chrome', '1.0.0'],
       markOnlineOnConnect: false,
@@ -220,11 +235,16 @@ async function main() {
     }
     if (cmd.type !== 'send') return;
     try {
-      await setTyping(cmd.to, 'paused');
-      const sent = await sock.sendMessage(cmd.to, { text: String(cmd.text || '') });
+	  const to = String(cmd.to || '').trim().toLowerCase() === 'self'
+	    ? jidNormalizedUser(sock.user?.id || sock.user?.lid || '')
+	    : String(cmd.to || '').trim();
+	  if (!to) throw new Error('no destination is available for this WhatsApp Web message');
+      await setTyping(to, 'paused');
+      const sent = await sock.sendMessage(to, { text: String(cmd.text || '') });
       rememberSent(sent?.key?.id);
+	  emit({ type: 'send_result', id: String(cmd.id || ''), ok: true, to });
     } catch (error) {
-      emit({ type: 'error', detail: 'send failed', error: String(error?.message || error) });
+	  emit({ type: 'send_result', id: String(cmd.id || ''), ok: false, detail: 'send failed', error: String(error?.message || error) });
     }
   });
 }

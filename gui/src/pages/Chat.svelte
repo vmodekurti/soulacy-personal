@@ -4,7 +4,7 @@
   import { slide } from 'svelte/transition'
   import { api, apiFetch, createEventSocket } from '../lib/api.js'
   import { chatActiveThreadId, chatThreads, connected } from '../lib/stores.js'
-  import { activeWorkspace } from '../lib/workspace.js'
+  import { activeWorkspace, can, permissions } from '../lib/workspace.js'
   import RunMetrics from '../lib/RunMetrics.svelte'
   import { entryIdForMessage, nextBranchLabel, entriesToMessages } from '../lib/chatbranch.js'
   import { deltaMetrics, deltaLabel, deltaTitle } from '../lib/chatmetrics.js'
@@ -86,6 +86,7 @@
   $: threads = filterThreads(Object.values($chatThreads), threadSearch, showArchived, agentName)
   $: visibleMessages = activeThread?.messages || []
   $: isSending = !!activeThread?.sending
+  $: canPrompt = ($permissions, can('chat', 'chat'))
   $: canAdjustRunBudget = ['owner', 'admin'].includes(String($activeWorkspace?.role || '').toLowerCase())
   $: currentArtifacts = activeThread ? (artifactsByThread[activeThread.id] || []) : []
   $: enabledProviders = providers.filter(p => p.registered)
@@ -508,6 +509,7 @@
   // If the component unmounts mid-request, the async continuation still
   // runs and updates the store; the component picks it up on remount.
   async function send(textArg, overridesArg, responseMode = '') {
+    if (!canPrompt) return
     const text = (textArg != null ? textArg : input).trim()
     if (!text || !activeThread?.agentId || isSending) return
     const overrides = overridesArg !== undefined ? overridesArg : buildOverrides(controls)
@@ -2611,12 +2613,15 @@
         {/each}
       </div>
     {/if}
-    <div class="input-row">
+    {#if !canPrompt}
+      <div class="viewer-chat-notice">🔒 Viewer access is read-only. Ask a workspace owner or administrator for the Operator role to run agents.</div>
+    {/if}
+    <div class="input-row" class:read-only={!canPrompt}>
       <input class="file-input" bind:this={fileInputEl} type="file" multiple on:change={(e) => uploadFiles(e.currentTarget.files)} />
-      <button class="attach-btn" on:click={() => fileInputEl?.click()} disabled={isSending || uploadingAttachment || !activeThread?.agentId} title="Attach files">
+      <button class="attach-btn" on:click={() => fileInputEl?.click()} disabled={!canPrompt || isSending || uploadingAttachment || !activeThread?.agentId} title="Attach files">
         {uploadingAttachment ? '…' : '+'}
       </button>
-      <button class="attach-btn" on:click={() => promptsOpen = !promptsOpen} title="Saved prompts (⌘K for commands)">≣</button>
+      <button class="attach-btn" on:click={() => promptsOpen = !promptsOpen} disabled={!canPrompt} title="Saved prompts (⌘K for commands)">≣</button>
       {#if skillOpen}
         <div class="skill-pop" role="listbox" aria-label="Skills">
           <div class="skill-pop-head">Skills · ↑↓ to move, Enter to insert, Esc to dismiss</div>
@@ -2643,17 +2648,17 @@
         on:keydown={onKeydown}
         on:input={onComposerInput}
         on:blur={() => setTimeout(() => skillQuery = null, 120)}
-        placeholder="Message {activeThread?.agentId ? agentName(activeThread.agentId) : 'the agent'}…  (Enter to send, / for skills)"
+        placeholder={canPrompt ? `Message ${activeThread?.agentId ? agentName(activeThread.agentId) : 'the agent'}…  (Enter to send, / for skills)` : 'Viewer access is read-only'}
         rows="2"
-        disabled={isSending || !activeThread?.agentId}
+        disabled={!canPrompt || isSending || !activeThread?.agentId}
       ></textarea>
-      <button class="composer-voice" on:click={() => { if (voiceState === 'live' || sidecarProcessing || voicePlaybackState !== 'idle') voiceSessionOpen = true; else voiceClick() }} disabled={isSending} title="Start a voice conversation" aria-label="Start a voice conversation">🎤</button>
+      <button class="composer-voice" on:click={() => { if (voiceState === 'live' || sidecarProcessing || voicePlaybackState !== 'idle') voiceSessionOpen = true; else voiceClick() }} disabled={!canPrompt || isSending} title="Start a voice conversation" aria-label="Start a voice conversation">🎤</button>
       {#if isSending}
         <button class="send-btn btn-danger" on:click={cancelSend} title="Stop this run">■</button>
       {:else}
         <button class="send-btn btn-primary"
                 on:click={send}
-                disabled={!activeThread?.agentId || !input.trim()}>
+                disabled={!canPrompt || !activeThread?.agentId || !input.trim()}>
           ↑
         </button>
       {/if}
@@ -3345,6 +3350,17 @@
     position: relative; /* anchors the "/" skill popup */
   }
   .input-row textarea { flex: 1; resize: none; }
+  .viewer-chat-notice {
+    margin: 0 10px 8px;
+    padding: 9px 12px;
+    border: 1px solid #5a4e27;
+    border-radius: 8px;
+    background: #292414;
+    color: #e7cf7a;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+  .input-row.read-only { opacity: .72; }
 
   /* Inline "/" skill picker. Sits ABOVE the composer: the composer is at the
      bottom of the viewport, so a dropdown below it would be off-screen. */

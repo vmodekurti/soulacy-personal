@@ -61,6 +61,10 @@
   // ── Plan steps ────────────────────────────────────────────────────────────
   $: steps = Array.isArray(plan.steps) ? plan.steps : []
   let selectedStep = 0
+  let showCapabilities = false
+  let capabilityQuery = ''
+  $: filteredTools = (tools || []).filter((tool) =>
+    !capabilityQuery.trim() || String(tool).toLowerCase().includes(capabilityQuery.trim().toLowerCase()))
   // Clamp in the DERIVATION rather than assigning selectedStep from a reactive
   // statement. A reactive block that both reads and writes the same variable is
   // a self-referential dependency, which Svelte can reject at compile time.
@@ -162,10 +166,27 @@
 
         <div class="sp-field">
           <span>Available capabilities</span>
-          <div class="sp-chips">
-            {#each tools as t}<span class="sp-chip">{t}</span>{/each}
-            {#if !tools.length}<span class="sp-empty">None yet</span>{/if}
+          <div class="sp-cap-summary">
+            <span>{tools.length ? `${tools.length} tool${tools.length === 1 ? '' : 's'} available` : 'None yet'}</span>
+            {#if tools.length}
+              <button type="button" class="sp-disclose" aria-expanded={showCapabilities}
+                on:click={() => (showCapabilities = !showCapabilities)}>
+                {showCapabilities ? 'Hide tools' : 'View tools'}
+              </button>
+            {/if}
           </div>
+          {#if showCapabilities && tools.length}
+            <div class="sp-cap-browser">
+              {#if tools.length > 8}
+                <input class="sp-cap-search" type="search" bind:value={capabilityQuery}
+                  placeholder="Search available tools…" aria-label="Search available tools" />
+              {/if}
+              <div class="sp-chips">
+                {#each filteredTools as t}<span class="sp-chip">{t}</span>{/each}
+                {#if !filteredTools.length}<span class="sp-empty">No matching tools</span>{/if}
+              </div>
+            </div>
+          {/if}
         </div>
 
         <label class="sp-field">
@@ -437,6 +458,25 @@
   .sp-toggle { display: flex; align-items: center; gap: 8px; font-size: .82rem; }
 
   .sp-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .sp-cap-summary {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    min-height: 32px; padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+    border-radius: 6px; color: var(--text-dim, #6b7294);
+  }
+  .sp-disclose {
+    border: 0; background: transparent; color: var(--accent, #6d5efc);
+    font: inherit; font-weight: 700; cursor: pointer; white-space: nowrap;
+  }
+  .sp-cap-browser {
+    display: flex; flex-direction: column; gap: 6px; max-height: 180px;
+    overflow: auto; padding: 7px; border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+    border-radius: 6px; background: color-mix(in srgb, var(--border) 10%, transparent);
+  }
+  .sp-cap-search {
+    position: sticky; top: 0; z-index: 1; width: 100%; box-sizing: border-box;
+    padding: 6px 8px; border-radius: 5px; border: 1px solid var(--border);
+    background: var(--bg, #0e1020); color: var(--text, inherit); font: inherit;
+  }
   .sp-chip {
     padding: 2px 8px; border-radius: 999px; font-size: .75rem;
     font-family: var(--mono, monospace);

@@ -1,4 +1,4 @@
-# docker-compose.yml — Full Soulacy stack
+# docker-compose.yml — Personal-mode full stack
 #
 # Services:
 #   soulacy   — gateway server (built from Dockerfile, embeds GUI)
@@ -34,6 +34,7 @@ services:
       # - ./examples/agents:/home/soulacy/.soulacy/agents:ro
     environment:
       # Storage — use Postgres instead of SQLite
+      SOULACY_DEPLOYMENT_MODE: personal
       SOULACY_STORAGE_BACKEND: postgres
       SOULACY_STORAGE_POSTGRES_DSN: "postgres://soulacy:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/soulacy?sslmode=disable"
       SOULACY_STORAGE_POSTGRES_LOG_DIR: /home/soulacy/.soulacy/logs
@@ -98,6 +99,12 @@ services:
     extra_hosts:
       # Allow the gateway to reach Ollama running on the host machine.
       - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:1947/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   # ── Postgres ─────────────────────────────────────────────────────────────────
   postgres:

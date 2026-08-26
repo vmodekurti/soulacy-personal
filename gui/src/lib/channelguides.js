@@ -13,7 +13,7 @@ export const channelGuides = {
       'Pick a display name and a unique username ending in `bot` (e.g. `my_soulacy_bot`).',
       'BotFather replies with a **bot token** like `110201543:AAHdqTcv…` — paste it into **Bot token** below.',
       'Set **Default agent ID** to the agent that should answer (pick from your Agents page).',
-      'Save, restart the gateway, then open your bot in Telegram and send `!soulacy hello`.',
+      'Save to connect the bot immediately, then open it in Telegram and send `!soulacy hello`.',
     ],
     fields: {
       token: 'From @BotFather after /newbot. Treat it like a password — anyone with it controls the bot.',
@@ -30,7 +30,7 @@ export const channelGuides = {
       'Open the **Bot** tab → **Reset Token** → copy the token into **Bot token** below. Soulacy accepts either the raw token or `Bot <token>`.',
       'Still on the Bot tab, enable **MESSAGE CONTENT INTENT** (required — without it the bot receives empty messages).',
       'Open **OAuth2 → URL Generator**: scope `bot`; permissions **View Channels**, **Send Messages**, and **Read Message History**. Open the generated URL and invite the bot to your server.',
-      'Set **Default agent ID**, save, restart the gateway.',
+      'Set **Default agent ID** and save. Soulacy connects the bot immediately.',
     ],
     fields: {
       token: 'Developer Portal → your app → Bot → Reset Token. Pasting the raw token is recommended; Soulacy adds the REST Bot prefix automatically.',
@@ -48,7 +48,7 @@ export const channelGuides = {
       '**OAuth & Permissions** → under *Bot Token Scopes* add: `chat:write`, `app_mentions:read`, `channels:history`, `groups:history`, `im:history`, `im:write`.',
       '**Event Subscriptions** → enable, and under *Subscribe to bot events* add: `message.im`, `message.channels`, `app_mention`.',
       '**Install App** (left sidebar) → *Install to Workspace* → copy the **Bot User OAuth Token** (`xoxb-…`) into **Bot token** below.',
-      'In Slack, invite the bot to a channel with `/invite @YourBot`, set **Default agent ID**, save, restart.',
+      'In Slack, invite the bot to a channel with `/invite @YourBot`, set **Default agent ID**, and save to connect it.',
     ],
     fields: {
       bot_token: 'OAuth & Permissions → Bot User OAuth Token (starts with xoxb-). Re-install the app after changing scopes.',
@@ -66,7 +66,7 @@ export const channelGuides = {
       'Choose any random string as your **Verify token** (you invent it; Meta echoes it back during verification).',
       'Copy **App secret** from *App settings → Basic* — Soulacy uses it to verify webhook signatures.',
       'Expose your gateway publicly (reverse proxy or a tunnel like `ngrok http 1947`), then in *WhatsApp → Configuration* set the **Callback URL** to `https://YOUR-HOST/channels/whatsapp/webhook` with your Verify token, and subscribe to the **messages** webhook field.',
-      'Save here, restart the gateway, and complete Meta\'s webhook verification.',
+      'Save here to apply the channel, then complete Meta\'s webhook verification.',
     ],
     fields: {
       access_token: 'The API Setup token expires in 24h — for production create a System User token (Business Settings → System Users) with whatsapp_business_messaging permission.',
@@ -114,7 +114,7 @@ export const channelGuides = {
       'Set **Username** to the login mailbox and paste the app password into **Password**. Store secrets in the vault rather than inline when possible.',
       'Set **From** to the address emails should appear from (e.g. `"Soulacy <bot@example.com>"`). If blank, the username is used.',
       'Set **Default recipient** to a safe fallback address — used whenever a scheduled/agent-triggered send has no explicit `to`. Set **Default subject** for the same reason.',
-      'Save, restart the gateway, then use the **Test delivery** button below — Soulacy sends a plain-text probe from the configured mailbox to the default recipient.',
+      'Save, then use the **Test delivery** button below — Soulacy applies the channel live and sends a plain-text probe from the configured mailbox to the default recipient.',
     ],
     fields: {
       host: 'SMTP hostname of your outbound provider — usually `smtp.<provider>.com`.',
@@ -138,7 +138,7 @@ export const channelGuides = {
       'Newer Teams tenants surface this as **Workflows → "Post to a channel when a webhook request is received"**. Either flavour of URL works — Soulacy just POSTs `{"text": ...}` to it.',
       'Paste the URL into **Webhook URL** below.',
       'Optionally set **Title** to a short bold prefix (e.g. the agent name) that appears above every message.',
-      'Save, restart the gateway, then click **Test delivery** — a probe message appears in the target Teams channel within seconds.',
+      'Save, then click **Test delivery** — the channel is applied live and a probe message appears in the target Teams channel within seconds.',
     ],
     fields: {
       webhook_url: 'The Incoming Webhook or Workflow URL from the Teams channel. Aliases `url` and `default_output_to` accept the same value for legacy configs.',
@@ -155,7 +155,7 @@ export const channelGuides = {
       'Open the Google Chat space → **space name → Apps & integrations → Add webhooks → Add webhook**. Name it (this shows as the message sender), optionally set an avatar, click **Save**, then copy the URL.',
       'Paste the URL into **Webhook URL** below.',
       'Optionally set **Prefix** — a short string prepended to every message body.',
-      'Save, restart the gateway, then use **Test delivery** to confirm the webhook is reachable.',
+      'Save, then use **Test delivery** to confirm the live-applied webhook is reachable.',
     ],
     fields: {
       webhook_url: 'The Incoming Webhook URL from the Google Chat space. Aliases `url` and `default_output_to` accept the same value for legacy configs.',

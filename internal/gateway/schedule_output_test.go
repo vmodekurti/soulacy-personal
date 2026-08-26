@@ -235,6 +235,27 @@ func TestGatewayHandleTestChannelDelivery_RejectsMissingDestination(t *testing.T
 	}
 }
 
+func TestGatewayHandleTestWhatsAppWebDelivery_DefaultsToLinkedAccount(t *testing.T) {
+	s := newTestGateway(t, "secret")
+	adp := &channelDeliveryTestAdapter{id: "whatsapp_web"}
+	s.channels.Register(adp)
+	s.config().Channels = map[string]map[string]any{
+		"whatsapp_web": {"enabled": true, "agent_id": "test-agent"},
+	}
+
+	status, res := gatewayJSON(t, s, http.MethodPost, "/api/v1/channels/whatsapp_web/test", "secret", `{}`)
+	if status != http.StatusOK {
+		t.Fatalf("WhatsApp Web test status = %d body=%v", status, res)
+	}
+	msg, ok := adp.last()
+	if !ok {
+		t.Fatal("adapter did not receive a WhatsApp Web test message")
+	}
+	if msg.ThreadID != "self" {
+		t.Fatalf("WhatsApp Web test destination = %q, want self", msg.ThreadID)
+	}
+}
+
 func TestGatewayHandleTestChannelDelivery_ReturnsDiagnosisOnSendFailure(t *testing.T) {
 	s := newTestGateway(t, "secret")
 	s.channels.Register(&channelDeliveryTestAdapter{

@@ -61,6 +61,7 @@ resource "aws_instance" "worker" {
     aws_region           = var.aws_region
     bootstrap_secret_arn = data.aws_secretsmanager_secret.bootstrap.arn
     nats_secret_arn      = data.aws_secretsmanager_secret.nats_tls[0].arn
+    efs_id               = aws_efs_file_system.workspace.id
     execution_image      = var.execution_image
     worker_concurrency   = var.worker_concurrency
   })
@@ -75,7 +76,7 @@ resource "aws_instance" "worker" {
     volume_type = "gp3"
     volume_size = 50
   }
-  depends_on = [aws_route53_record.nats]
+  depends_on = [aws_route53_record.nats, aws_efs_mount_target.workspace]
   tags       = { Name = "${local.prefix}-worker" }
 }
 

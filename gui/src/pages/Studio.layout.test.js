@@ -22,4 +22,10 @@ describe('Studio resizable frames', () => {
     const selectors = css.replace(/\/\*[\s\S]*?\*\//g, '')
     expect(selectors).not.toContain(':global(')
   })
+
+  it('lets the SOUL.yaml editor consume the remaining Studio pane', () => {
+    expect(css).toMatch(/\.code-view\s*\{[^}]*flex:\s*1\s+1\s+0[^}]*min-height:\s*0/s)
+    expect(css).toMatch(/\.code-editor-wrap\s*\{[^}]*flex:\s*1\s+1\s+0[^}]*min-height:\s*0/s)
+    expect(css).toMatch(/\.center\.code-mode\s*\{[^}]*overflow:\s*hidden/s)
+  })
 })

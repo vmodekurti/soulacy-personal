@@ -105,6 +105,10 @@ data "aws_iam_policy_document" "worker" {
     actions   = ["ecr:BatchCheckLayerAvailability", "ecr:GetDownloadUrlForLayer", "ecr:BatchGetImage"]
     resources = ["arn:${data.aws_partition.current.partition}:ecr:${var.aws_region}:${data.aws_caller_identity.current.account_id}:repository/${var.name}*"]
   }
+  statement {
+    actions   = ["elasticfilesystem:ClientMount", "elasticfilesystem:ClientWrite", "elasticfilesystem:ClientRootAccess"]
+    resources = [aws_efs_file_system.workspace.arn]
+  }
 }
 
 resource "aws_iam_role_policy" "worker" {

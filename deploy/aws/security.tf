@@ -110,13 +110,22 @@ resource "aws_security_group" "redis" {
 
 resource "aws_security_group" "efs" {
   name_prefix = "${local.prefix}-efs-"
-  description = "EFS from gateway only"
+  description = "Encrypted workspace EFS from gateway and isolated workers"
   vpc_id      = aws_vpc.this.id
   ingress {
     protocol        = "tcp"
     from_port       = 2049
     to_port         = 2049
     security_groups = [aws_security_group.gateway.id]
+  }
+  dynamic "ingress" {
+    for_each = local.is_multi_user ? [1] : []
+    content {
+      protocol        = "tcp"
+      from_port       = 2049
+      to_port         = 2049
+      security_groups = [aws_security_group.worker[0].id]
+    }
   }
   lifecycle { create_before_destroy = true }
 }

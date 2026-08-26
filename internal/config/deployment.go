@@ -60,6 +60,21 @@ func (c *Config) HasUnsafeDeploymentAcknowledgement() bool {
 	return c.hasAcknowledgement(UnsafeDeploymentPrerequisitesAcknowledgement)
 }
 
+// permitsLocalTeamWaiver keeps an explicitly acknowledged, single-machine
+// Team development install bootable. Production/staging Team and every Scale
+// deployment keep the tenant execution boundary non-waivable.
+func (c *Config) permitsLocalTeamWaiver() bool {
+	if c == nil || c.DeploymentMode() != DeploymentModeTeam {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Deployment.Profile)) {
+	case "", "local", "development":
+		return true
+	default:
+		return false
+	}
+}
+
 // HasTenantSystemAgentAcknowledgement reports whether the operator has
 // explicitly restored the built-in System agent in a multi-user deployment.
 func (c *Config) HasTenantSystemAgentAcknowledgement() bool {
@@ -174,23 +189,31 @@ func (c *Config) deploymentIssueGroups() ([]string, []string) {
 		default:
 			infrastructureIssues = append(infrastructureIssues, fmt.Sprintf("credentials.kms_provider: %s deployments require awskms or vault-transit", mode))
 		}
+		// The execution boundary is non-waivable in staging/production and Scale.
+		// A local/development Team install may retain the historical explicit
+		// unsafe acknowledgement so upgrades do not brick a single-machine dev
+		// environment; sy doctor continues to report every waived issue.
+		executionIssues := &hardIssues
+		if c.permitsLocalTeamWaiver() {
+			executionIssues = &infrastructureIssues
+		}
 		if strings.ToLower(strings.TrimSpace(c.Executor.Backend)) != "worker" {
-			infrastructureIssues = append(infrastructureIssues, fmt.Sprintf("executor.backend: %s deployments require the out-of-process \"worker\" backend", mode))
+			*executionIssues = append(*executionIssues, fmt.Sprintf("executor.backend: %s deployments require the out-of-process \"worker\" backend", mode))
 		}
 		if strings.TrimSpace(c.Executor.DockerRuntime) == "" {
-			infrastructureIssues = append(infrastructureIssues, fmt.Sprintf("executor.docker_runtime: %s deployments require a hardened OCI runtime such as runsc", mode))
+			*executionIssues = append(*executionIssues, fmt.Sprintf("executor.docker_runtime: %s deployments require a hardened OCI runtime such as runsc", mode))
 		}
 		if !strings.Contains(c.Executor.DockerImage, "@sha256:") || !c.Executor.RequireSignedImage {
-			infrastructureIssues = append(infrastructureIssues, fmt.Sprintf("executor.docker_image: %s deployments require a digest-pinned, signature-verified image", mode))
+			*executionIssues = append(*executionIssues, fmt.Sprintf("executor.docker_image: %s deployments require a digest-pinned, signature-verified image", mode))
 		}
 		if strings.TrimSpace(c.Runtime.Sandbox.ContainerRuntime) == "" || !c.Runtime.Sandbox.RequireSignedImage || !strings.Contains(c.Runtime.Sandbox.Image, "@sha256:") {
-			infrastructureIssues = append(infrastructureIssues, fmt.Sprintf("runtime.sandbox: %s deployments require a hardened runtime and digest-pinned, signature-verified image", mode))
+			*executionIssues = append(*executionIssues, fmt.Sprintf("runtime.sandbox: %s deployments require a hardened runtime and digest-pinned, signature-verified image", mode))
 		}
 		if c.Executor.DockerNetwork != "" && !strings.EqualFold(c.Executor.DockerNetwork, "none") {
-			infrastructureIssues = append(infrastructureIssues, "executor.docker_network: ordinary worker jobs must use network none; networked tools must use the policy-proxied privileged sandbox")
+			*executionIssues = append(*executionIssues, "executor.docker_network: ordinary worker jobs must use network none; networked tools must use the policy-proxied privileged sandbox")
 		}
 		if !c.Runtime.Sandbox.Enabled || strings.ToLower(strings.TrimSpace(c.Runtime.Sandbox.Mode)) != "docker" {
-			infrastructureIssues = append(infrastructureIssues, fmt.Sprintf("runtime.sandbox: %s deployments require enabled=true and mode \"docker\"", mode))
+			*executionIssues = append(*executionIssues, fmt.Sprintf("runtime.sandbox: %s deployments require enabled=true and mode \"docker\"", mode))
 		}
 	}
 	if mode == DeploymentModeScale {

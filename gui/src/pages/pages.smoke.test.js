@@ -32,6 +32,7 @@ const loaders = {
   schedule: () => import('./Schedule.svelte'),
   skills: () => import('./Skills.svelte'),
   mcp: () => import('./MCP.svelte'),
+  'connected-apps': () => import('./ConnectedApps.svelte'),
   pluginmgr: () => import('./PluginManager.svelte'),
   providers: () => import('./Providers.svelte'),
   secrets: () => import('./Secrets.svelte'),

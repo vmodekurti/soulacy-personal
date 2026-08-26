@@ -853,7 +853,7 @@ schedule:
           {#if outputBotOptions.length === 0}<em>No channel bots configured</em>{/if}
         </div>
         <div class="field-help output-help">
-          Add or rotate Telegram output bot tokens in <a href="#channels">Delivery</a>, then restart the gateway and select the bot here.
+          Add or rotate Telegram output bot tokens in <a href="#channels">Delivery</a>, save to connect them, then select the bot here.
         </div>
         <label class="field">
           <span class="field-label">Bot</span>

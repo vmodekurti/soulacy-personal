@@ -117,7 +117,7 @@ func (s *Server) fillSecrets(workspaceID, serverID string, values map[string]str
 			out[key] = value
 			continue
 		}
-		if !redact.SecretKeyName(key) {
+		if !redact.SecretKeyName(key) && !hostedIntegrationSecrets(serverID) {
 			out[key] = value
 			continue
 		}
@@ -464,7 +464,7 @@ func (s *Server) divertSecrets(ctx context.Context, workspaceID, serverID string
 	out := make(map[string]string, len(values))
 	stored := 0
 	for key, value := range values {
-		if !redact.SecretKeyName(key) {
+		if !redact.SecretKeyName(key) && !hostedIntegrationSecrets(serverID) {
 			out[key] = value
 			continue
 		}
@@ -482,4 +482,17 @@ func (s *Server) divertSecrets(ctx context.Context, workspaceID, serverID string
 		stored++
 	}
 	return out, stored, nil
+}
+
+// hostedIntegrationSecrets keeps every connection header for hosted app
+// brokers out of the plain workspace MCP registry. Connection and integration
+// IDs are less sensitive than bearer keys, but together they identify a
+// tenant's external account; there is no benefit to returning them to viewers.
+func hostedIntegrationSecrets(serverID string) bool {
+	switch strings.ToLower(strings.TrimSpace(serverID)) {
+	case "composio", "nango":
+		return true
+	default:
+		return false
+	}
 }

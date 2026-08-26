@@ -730,6 +730,9 @@ func TestGatewayHandleUpdateChannel_Happy(t *testing.T) {
 	if body["ok"] != true {
 		t.Fatalf("expected ok=true, body=%v", body)
 	}
+	if body["restart_required"] != false {
+		t.Fatalf("channel update should be live-applied, body=%v", body)
+	}
 }
 
 func TestGatewayHandleEnableChannel_UnknownChannel(t *testing.T) {
@@ -778,6 +781,9 @@ func TestGatewayHandleEnableChannel_Happy(t *testing.T) {
 	if body["ok"] != true {
 		t.Fatalf("expected ok=true, body=%v", body)
 	}
+	if body["restart_required"] != false {
+		t.Fatalf("channel enable should be live-applied, body=%v", body)
+	}
 }
 
 func TestGatewayHandleDisableChannel_Happy(t *testing.T) {
@@ -789,6 +795,9 @@ func TestGatewayHandleDisableChannel_Happy(t *testing.T) {
 	}
 	if body["ok"] != true {
 		t.Fatalf("expected ok=true, body=%v", body)
+	}
+	if body["restart_required"] != false {
+		t.Fatalf("channel disable should be live-applied, body=%v", body)
 	}
 }
 

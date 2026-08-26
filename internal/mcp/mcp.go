@@ -298,6 +298,9 @@ func (c *Client) start(s *server) error {
 	}
 	s.tools = make([]Tool, 0, len(lr.Tools))
 	for _, t := range lr.Tools {
+		if blockedHostedTool(s.id, t.Name) {
+			continue
+		}
 		s.tools = append(s.tools, Tool{
 			ServerID: s.id, Name: t.Name, Description: t.Description, InputSchema: t.InputSchema,
 		})
@@ -330,6 +333,9 @@ func (c *Client) Call(ctx context.Context, fullName string, args map[string]any)
 		return "", fmt.Errorf("malformed MCP tool name %q (expected mcp__<server>__<tool>)", fullName)
 	}
 	serverID, toolName := parts[0], parts[1]
+	if blockedHostedTool(serverID, toolName) {
+		return "", fmt.Errorf("MCP tool %q is blocked by Soulacy's hosted-integration policy", fullName)
+	}
 
 	var srv *server
 	c.mu.RLock()
@@ -391,6 +397,20 @@ func (c *Client) Call(ctx context.Context, fullName string, args map[string]any)
 		text = "(no text content)"
 	}
 	return text, nil
+}
+
+// blockedHostedTool is a second boundary behind the Composio session's own
+// tool preset. Connected-app sessions are useful precisely because they can
+// expose narrowly scoped SaaS actions; their generic remote shell/workbench
+// escape hatches are never appropriate inside the Soulacy agent runtime.
+func blockedHostedTool(serverID, toolName string) bool {
+	if sanitizeID(serverID) != "composio" {
+		return false
+	}
+	name := strings.ToLower(strings.NewReplacer("-", "_", ".", "_").Replace(strings.TrimSpace(toolName)))
+	return strings.Contains(name, "remote_workbench") ||
+		strings.Contains(name, "remote_bash") ||
+		strings.Contains(name, "shell_exec")
 }
 
 // ServersSnapshot returns the current view of all configured servers for the

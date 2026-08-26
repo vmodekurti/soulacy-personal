@@ -244,6 +244,13 @@ func (a *App) registerChannels(chanCfg map[string]map[string]any, chanReg *chann
 			if command == "" {
 				command = "node"
 			}
+			resolvedCommand, resolveErr := wawebchan.ResolveExecutable(command)
+			if resolveErr != nil {
+				log.Warn("whatsapp_web Node.js executable unavailable",
+					zap.String("command", command), zap.Error(resolveErr))
+			} else {
+				command = resolvedCommand
+			}
 			if sessionDir == "" {
 				sessionDir = filepath.Join(ws.Data, "whatsapp-web")
 			}

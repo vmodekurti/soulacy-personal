@@ -113,9 +113,9 @@ resource "aws_efs_file_system_policy" "workspace" {
         Condition = { Bool = { "aws:SecureTransport" = "false" } }
       },
       {
-        Sid       = "AllowGatewayRole"
+        Sid       = "AllowSoulacyRoles"
         Effect    = "Allow"
-        Principal = { AWS = aws_iam_role.gateway.arn }
+        Principal = { AWS = concat([aws_iam_role.gateway.arn], local.is_multi_user ? [aws_iam_role.worker[0].arn] : []) }
         Action    = ["elasticfilesystem:ClientMount", "elasticfilesystem:ClientWrite", "elasticfilesystem:ClientRootAccess"]
         Resource  = aws_efs_file_system.workspace.arn
         Condition = { Bool = { "aws:SecureTransport" = "true" } }

@@ -66,8 +66,8 @@ func DiagnoseDelivery(adapterID, to string, registered, connected bool, sendErr 
 	if !registered {
 		return Diagnosis{
 			Category: DeliveryAdapterDown,
-			Reason:   "The adapter for this channel is not running. It may be disabled, or the config changed since the gateway last started.",
-			Fix:      "Enable the channel and restart the gateway (`sy daemon stop && sy daemon start`), then diagnose again.",
+			Reason:   "The adapter for this channel is not running. It may be disabled or its credentials may have been rejected.",
+			Fix:      "Enable the channel or save its settings again to reconnect it, then diagnose again.",
 		}
 	}
 	if sendErr == nil {
@@ -149,7 +149,7 @@ func ClassifyDeliveryErrorForAdapter(adapterID, raw string) Diagnosis {
 			return Diagnosis{
 				Category: DeliveryBadToken,
 				Reason:   "The SMTP server rejected the mailbox credentials.",
-				Fix:      "Update the SMTP username and password (for Gmail use an app password, not the account password), save, and restart the gateway.",
+				Fix:      "Update the SMTP username and password (for Gmail use an app password, not the account password), save, and test again.",
 			}
 		case contains("550 5.7.1", "spf fail", "dmarc", "dkim=fail", "not authenticated", "not permitted to send", "relay access denied", "relay not permitted", "relaying denied"):
 			return Diagnosis{
@@ -207,13 +207,13 @@ func ClassifyDeliveryErrorForAdapter(adapterID, raw string) Diagnosis {
 			return Diagnosis{
 				Category: DeliveryBadToken,
 				Reason:   "The webhook endpoint rejected the request. The URL may be expired, revoked, or from a different workspace.",
-				Fix:      "Regenerate the incoming webhook URL in the provider, paste it into the channel settings, save, restart the gateway, and run the delivery test again.",
+				Fix:      "Regenerate the incoming webhook URL in the provider, paste it into the channel settings, save, and run the delivery test again.",
 			}
 		}
 		return Diagnosis{
 			Category: DeliveryBadToken,
 			Reason:   "The provider rejected the bot token — it is missing, wrong, or has been revoked.",
-			Fix:      "Update the bot token in the vault with a current, valid token, then restart the gateway.",
+			Fix:      "Update the bot token in the workspace channel settings with a current, valid token, save, and test again.",
 		}
 
 	// Destination doesn't exist (or bot can't see it). Telegram "chat not found",
@@ -242,7 +242,7 @@ func ClassifyDeliveryErrorForAdapter(adapterID, raw string) Diagnosis {
 			return Diagnosis{
 				Category: DeliveryInvalidDest,
 				Reason:   "The configured webhook URL no longer points to a valid destination.",
-				Fix:      "Create a fresh incoming webhook for this destination, update the channel settings, save, restart the gateway, and test delivery.",
+				Fix:      "Create a fresh incoming webhook for this destination, update the channel settings, save, and test delivery.",
 			}
 		}
 		return Diagnosis{

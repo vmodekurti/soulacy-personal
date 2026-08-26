@@ -25,6 +25,7 @@ services:
       - soulacy_data:/home/soulacy/.soulacy
     environment:
       # SQLite — everything in one place, zero dependencies.
+      SOULACY_DEPLOYMENT_MODE: personal
       SOULACY_STORAGE_BACKEND: sqlite
       SOULACY_VECTOR_BACKEND: ""       # uses sqlite-vec (built into the binary)
 
@@ -57,6 +58,12 @@ services:
 
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:1947/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
 volumes:
   soulacy_data:

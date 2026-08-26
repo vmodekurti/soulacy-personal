@@ -136,7 +136,7 @@ Open **Channels** in the web UI:
   "unknown".
 - Click **Edit** on Telegram, Slack, or Discord to manage **Bot mappings**.
 - Bot mapping rows record a friendly bot name and provide an agent ID dropdown populated from your installed agents.
-- After saving channel settings, click **Restart Gateway** from the banner to reconnect adapters.
+- Channel settings are applied live. If an adapter remains offline, use **Diagnose** and reconnect it after correcting the reported credentials or network issue.
 
 The same readiness checks are exposed through **Providers -> Doctor** / `GET /api/v1/doctor` so production setups can verify channel delivery before relying on scheduled agents.
 

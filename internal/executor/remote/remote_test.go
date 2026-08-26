@@ -26,3 +26,28 @@ func TestGatewayDispatchesExecutionToWorker(t *testing.T) {
 		t.Fatalf("output=%q", out)
 	}
 }
+
+func TestProbeRequiresLiveWorker(t *testing.T) {
+	q := queuememory.New()
+	defer q.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if err := Probe(ctx, q); err == nil {
+		t.Fatal("probe reported ready without a worker")
+	}
+}
+
+func TestProbeFindsLiveWorkerEvenWhenExecutionSlotsAreBusy(t *testing.T) {
+	q := queuememory.New()
+	defer q.Close()
+	w := NewWorker(q, process.New("python3"), "test-workers", 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := w.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	if err := Probe(ctx, q); err != nil {
+		t.Fatalf("live worker probe failed: %v", err)
+	}
+}

@@ -19,6 +19,7 @@
   // quietly dead. Svelte compiles an undeclared identifier as a global, so
   // nothing failed at build time either.
   import { api } from '../lib/api.js'
+  import { can, permissions } from '../lib/workspace.js'
   import { bridge } from '../lib/studio/studioApi.js'
   import { editAgent, studioDebugRun, studioSession } from '../lib/stores.js'
   import { toFlow, kindMeta } from '../lib/studio/graph.js'
@@ -84,6 +85,11 @@
   // Custom edge with weight + a heartbeat: glowing particles flow along it while
   // a build/run is in flight (see LiveEdge + the `building`→edge.active effect).
   const edgeTypes = { live: LiveEdge }
+
+  // Studio creates and mutates executable workspace definitions. Viewers may
+  // chat with already-deployed agents, but must not be offered a builder that
+  // every server-side request will correctly reject.
+  $: studioWritable = ($permissions, can('builder', 'write'))
 
   // ── Palette (Wave 1) ──────────────────────────────────────────────────────
   let catalog = null
@@ -2077,6 +2083,7 @@ Use null for fields that are not present.`
   // warns about anything the canvas can't show; Save in code view writes the
   // YAML straight to disk.
   let viewMode = 'canvas'     // 'canvas' | 'code'
+  let deliveryPickerOpen = false
   let codeYaml = ''
   let codeOrig = ''           // last-synced text (dirty detection)
   // Tracks the agent id whose RAW on-disk SOUL.yaml we've loaded into the code
@@ -4893,6 +4900,7 @@ Use null for fields that are not present.`
 
 <svelte:window on:keydown={(e) => { if (e.key === 'Escape' && promptViewer) promptViewer = false }} />
 
+{#if studioWritable}
 <div id="studio-app">
   <!-- Studio masthead. Keep one obvious primary action and place infrequent
        authoring utilities behind a compact menu so the creation path remains
@@ -5017,7 +5025,7 @@ Use null for fields that are not present.`
         class:full-width={step === STEP_DESCRIBE || step === STEP_SAVE}>
     <!-- The block palette belongs to Build. Showing it on Describe or Save
          offers drag-and-drop onto a canvas that is not on screen. -->
-    {#if step === STEP_BUILD}
+    {#if step === STEP_BUILD && viewMode !== 'code'}
     <Palette
       {catalog}
       status={paletteStatus}
@@ -5038,7 +5046,7 @@ Use null for fields that are not present.`
     <!-- Center: step-driven. Describe and Save own the full pane; Build and Test
          share the canvas layout below, with Build owning the graph and Test
          owning the bench. -->
-    <section class="center">
+    <section class="center" class:code-mode={viewMode === 'code'}>
       {#if step === STEP_DESCRIBE}
         <div class="describe-step">
           <div class="describe-cols">
@@ -5304,9 +5312,15 @@ Use null for fields that are not present.`
         <div class="strip strip-delivery" data-tooltip="Where this agent's result is sent">
           <span class="strip-label">Deliver to</span>
           <span class="dlv-hint">This {currentMode === 'workflow' ? 'workflow' : 'agent'} produces a result but has no delivery channel. Send it to:</span>
-          {#each channelOptions as ch}
-            <button class="dlv-btn" type="button" on:click={() => addDeliveryChannel(ch.id)}>+ {ch.name}</button>
-          {/each}
+          <button class="dlv-btn" type="button" aria-expanded={deliveryPickerOpen}
+            on:click={() => (deliveryPickerOpen = !deliveryPickerOpen)}>Choose channel…</button>
+          {#if deliveryPickerOpen}
+            <div class="delivery-picker" role="group" aria-label="Delivery channels">
+              {#each channelOptions as ch}
+                <button class="dlv-btn" type="button" on:click={() => { addDeliveryChannel(ch.id); deliveryPickerOpen = false }}>+ {ch.name}</button>
+              {/each}
+            </div>
+          {/if}
         </div>
       {/if}
 
@@ -8009,3 +8023,11 @@ Use null for fields that are not present.`
     on:close={() => { showBuildInspector = false; replayOverride = null }}
   />
 </div>
+{:else}
+  <section class="studio-access-denied" aria-live="polite">
+    <span aria-hidden="true">🔒</span>
+    <h1>Studio is read-only for your role</h1>
+    <p>Viewers can inspect deployed agents and their existing results, but cannot create, refine, test, save, or run agent definitions.</p>
+    <a href="#agents">View deployed agents</a>
+  </section>
+{/if}

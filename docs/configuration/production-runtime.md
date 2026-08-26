@@ -20,13 +20,38 @@ SOULACY_WORKER_NATS_TLS_CA=/var/run/secrets/nats/ca.pem
 SOULACY_WORKER_IMAGE=registry.example/execution@sha256:<digest>
 SOULACY_WORKER_RUNTIME=runsc
 SOULACY_WORKER_COSIGN_KEY=/var/run/keys/execution-image.pub
-SOULACY_EXECUTION_ROOT=/workspaces
+SOULACY_EXECUTION_ROOT=/var/lib/soulacy
 soulacy-worker
 ```
 
+`SOULACY_EXECUTION_ROOT` must be the same absolute shared-workspace mount used
+by the gateway. This is not a convenience: privileged requests carry the
+gateway-authorized workspace path, and the worker refuses paths outside this
+root. In AWS both processes mount encrypted EFS at `/var/lib/soulacy`.
+
 Optional `SOULACY_WORKER_*` settings cover stream/subject, mTLS, concurrency,
 resource limits, sandbox image, and the policy-proxy network. Give the worker
-NATS identity publish/subscribe rights only for execution job/result subjects.
+NATS identity subscribe rights only for `soulacy.execution.jobs`, publish
+rights only for `soulacy.execution.results.>`, and the minimum JetStream API
+and inbox permissions needed for its durable consumer. The gateway's `/ready`
+endpoint sends a probe through this same path, so a queue with no live worker
+fails readiness.
+
+### Containerized control planes
+
+The gateway may run in Docker or Kubernetes, but it must not receive a Docker,
+containerd, CRI-O, or Kubernetes-administration socket. Run the worker on a
+dedicated VM/node pool with the hardened runtime installed there. A direct
+remote Docker API is also host-equivalent; do not expose it to the gateway.
+
+For Kubernetes, put pod/job creation behind the worker service account, apply
+a gVisor/Kata `RuntimeClass`, NetworkPolicy, resource quotas, read-only roots,
+and per-workspace persistent-volume authorization. The gateway service account
+must not be able to create pods.
+
+For a single-host Team evaluation, use a dedicated execution VM. Raw
+`docker.sock` and privileged Docker-in-Docker are deliberately not supported
+as production Team/Scale topologies.
 
 The configured image must be immutable (`@sha256:`), signed, and admitted by
 Cosign. `runsc` must be registered with Docker. Ordinary Python jobs always use
@@ -109,3 +134,7 @@ Run `make security` for tenant-boundary, KMS, entitlement, queue, and execution
 unit/race tests. Run `scripts/execution-sandbox-smoke.sh` on a disposable gVisor
 worker node with the exact production image; never run an escape test on a
 shared worker node.
+
+Run `scripts/test-deployment-modes.sh` before a release to exercise Personal,
+Team, and Scale validation, worker round-trip readiness, Compose rendering,
+and Terraform profile contracts with the tooling available on the build host.

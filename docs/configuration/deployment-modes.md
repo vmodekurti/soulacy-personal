@@ -17,8 +17,8 @@ sy onboard
 sy doctor
 ```
 
-The wizard writes configuration; it does not provision PostgreSQL, Docker,
-NATS, or object storage. `sy doctor` reports the active mode, every unmet
+The wizard writes configuration; it does not provision PostgreSQL, the
+execution-worker fleet, NATS, or object storage. `sy doctor` reports the active mode, every unmet
 prerequisite, and a remediation. Startup refuses unsafe Team or Scale
 configuration rather than silently falling back to Personal behavior.
 
@@ -132,6 +132,25 @@ PostgreSQL. Live events fan out through NATS, while reconnect cursors replay
 from workspace-scoped PostgreSQL event IDs, so a client may reconnect through
 a different gateway without losing its run stream.
 
+## When the gateway itself runs in Docker
+
+Containerizing the gateway does not create an execution boundary. A container
+cannot launch isolated workloads unless it can reach another container runtime.
+Do not solve that by mounting `/var/run/docker.sock` into the gateway: Docker's
+API can mount host files and create privileged containers, so possession of the
+socket is effectively control of the host.
+
+Personal Compose runs the gateway without a runtime socket. Team and Scale use
+a separate `soulacy-worker` node pool. Workers may control the runtime on their
+dedicated execution nodes, but neither the gateway nor any workload container
+receives that socket. The worker and gateway mount the same encrypted workspace
+filesystem at the same absolute path; each job is narrowed to its stamped
+workspace before the worker creates the container.
+
+Gateway readiness performs a real queue round trip to an active worker. A
+healthy NATS server with zero consumers is therefore `not_ready`, not a
+partially functioning deployment.
+
 ## Emergency unsafe acknowledgement
 
 An operator can deliberately bypass mode prerequisite validation during an
@@ -144,6 +163,10 @@ deployment:
     - unsafe_multi_user_prerequisites
 ```
 
-This is not a compatibility switch. It weakens the deployment boundary and
-`sy doctor` continues to show a warning until the acknowledgement is removed.
+This is not a compatibility switch. It may temporarily waive availability
+infrastructure such as PostgreSQL or KMS while an operator performs recovery,
+and `sy doctor` continues to show a warning until it is removed. It can never
+waive JWT authentication or the execution boundary: the worker backend,
+hardened runtime, signed digest-pinned images, network-none policy, and Docker
+sandbox remain mandatory in Team and Scale.
 Prefer returning to `personal` when the deployment is genuinely single-user.

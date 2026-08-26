@@ -34,7 +34,11 @@ tls {
 authorization {
   users: [
     { user: gateway, permissions: { publish: ">", subscribe: ">" } },
-    { user: worker, permissions: { publish: ">", subscribe: ">" } }
+    { user: worker, permissions: {
+        publish: ["soulacy.execution.results.>", "$JS.API.>"],
+        subscribe: ["soulacy.execution.jobs", "_INBOX.>"]
+      }
+    }
   ]
 }
 CONFIG

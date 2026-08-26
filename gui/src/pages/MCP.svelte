@@ -4,10 +4,13 @@
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
   import KeyValueEditor from '../lib/KeyValueEditor.svelte'
-  import { activeWorkspace } from '../lib/workspace.js'
+  import { activeWorkspace, can, permissions } from '../lib/workspace.js'
 
   $: workspaceScoped = ['team', 'scale'].includes(String($activeWorkspace?.deploymentMode || '').toLowerCase())
   $: workspaceAdmin = ['owner', 'admin'].includes(String($activeWorkspace?.role || '').toLowerCase())
+  $: canWriteMCP = ($permissions, can('mcp', 'write'))
+  $: canInstallMCP = ($permissions, can('mcp', 'install'))
+  $: canDeleteMCP = ($permissions, can('mcp', 'delete'))
 
   let servers = []
   let loading = true
@@ -49,6 +52,7 @@
 		return (server.environment || []).filter(item => !item.required && !item.configured)
 	}
 	function openConfiguration(server) {
+		if (!canWriteMCP) return
 		configServer = server
 		configError = ''
 		configSettings = Object.fromEntries((server.environment || []).map(item => [item.name, item.secret ? '' : (item.value || '')]))
@@ -70,6 +74,7 @@
 	}
 
   function openInstall() {
+    if (!canInstallMCP) return
     installModal = true
     installURL = ''
     installReview = null
@@ -342,7 +347,7 @@
     <div class="header-actions">
       <button class="btn-secondary" on:click={load} disabled={loading}>↺ Refresh</button>
       {#if !workspaceScoped}<button class="btn-glama" on:click={openGlamaModal}>⚡ Glama</button>{/if}
-      {#if workspaceScoped && workspaceAdmin}
+      {#if workspaceScoped && workspaceAdmin && canInstallMCP}
         <button class="btn-primary" on:click={openInstall}>+ Install from GitHub</button>
       {:else if !workspaceScoped}
         <button class="btn-primary" on:click={openNew}>+ New Server</button>
@@ -386,14 +391,14 @@
               <span class="srv-chevron">{expanded[s.id] ? '▾' : '▸'}</span>
             </button>
             <div class="srv-actions">
-							{#if workspaceScoped && workspaceAdmin && s.environment?.length}<button class="btn-secondary tiny" on:click={() => openConfiguration(s)}>Configure</button>{/if}
+							{#if workspaceScoped && workspaceAdmin && canWriteMCP && s.environment?.length}<button class="btn-secondary tiny" on:click={() => openConfiguration(s)}>Configure</button>{/if}
               {#if !workspaceScoped}<button class="btn-secondary tiny" on:click={() => openEdit(s)}>Edit</button>{/if}
-              {#if !workspaceScoped || workspaceAdmin}<button class="btn-danger tiny" on:click={() => remove(s)}>Delete</button>{/if}
+              {#if (!workspaceScoped || workspaceAdmin) && canDeleteMCP}<button class="btn-danger tiny" on:click={() => remove(s)}>Delete</button>{/if}
             </div>
           </div>
-					{#if workspaceScoped && missingMCPSettings(s).length}
+					{#if workspaceScoped && workspaceAdmin && canWriteMCP && missingMCPSettings(s).length}
 						<div class="setup-strip required"><strong>Setup required:</strong> {missingMCPSettings(s).map(item => item.name).join(', ')} <button on:click={() => openConfiguration(s)}>Add now</button></div>
-					{:else if workspaceScoped && optionalMCPSettings(s).length}
+					{:else if workspaceScoped && workspaceAdmin && canWriteMCP && optionalMCPSettings(s).length}
 						<div class="setup-strip optional"><strong>{optionalMCPSettings(s).length} optional setting{optionalMCPSettings(s).length === 1 ? '' : 's'} available</strong> for additional integrations and server features. <button on:click={() => openConfiguration(s)}>Configure</button></div>
 					{/if}
 

@@ -41,7 +41,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	natsgo "github.com/nats-io/nats.go"
 	"github.com/soulacy/soulacy/internal/queue"
 )
@@ -234,11 +233,12 @@ func (b *Backend) Subscribe(_ context.Context, subject, group string, handler fu
 		}
 		sub, err = b.js.QueueSubscribe(subject, group, msgHandler, opts...)
 	} else {
-		// Ephemeral subscription — every subscriber gets every message.
-		// Use a unique durable name so replays work across restarts.
-		durName := "ephemeral-" + uuid.NewString()
+		// Ephemeral fan-out subscription — every current subscriber gets every
+		// message. Do not attach a generated durable consumer: request/result
+		// callers create one subscription per execution and readiness probe, and
+		// generated durables survive Unsubscribe, leaking one JetStream consumer
+		// per call forever. Replayable workloads use an explicit non-empty group.
 		opts := []natsgo.SubOpt{
-			natsgo.Durable(durName),
 			natsgo.ManualAck(),
 			natsgo.AckWait(ackWait),
 		}

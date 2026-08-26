@@ -4,6 +4,7 @@
   import QRCode from 'qrcode'
   import { api } from '../lib/api.js'
   import { guideFor, renderInline } from '../lib/channelguides.js'
+  import { can, permissions } from '../lib/workspace.js'
 
   let channels = []
   let agents   = []
@@ -12,16 +13,34 @@
   let error    = ''
   let notice   = ''
   let actionLoading = {}
-  let restartNeeded = false
   let diagnosis = {}   // adapterId → { ok, category, reason, fix, detail, to }
   let channelMetrics = { inbound: [], outbound: [], inbox_drops: [] }
   let deliveryReadiness = null
+	let expandedCards = {}
   // F-GUI-5 — the "saving without ack fails readiness" callout depends on the
   // active deployment profile (S4 readiness verdict is only `fail` in
   // production; `warn` otherwise). Deployment status is best-effort and the
   // callout still renders without it — we just don't escalate to a red
   // production warning if the profile isn't known.
   let deploymentProfile = ''
+
+	$: canWriteChannels = ($permissions, can('channels', 'write'))
+	$: canEnableChannels = ($permissions, can('channels', 'enable'))
+
+	function toggleCard(id) {
+		expandedCards = { ...expandedCards, [id]: !expandedCards[id] }
+	}
+
+	function compactSummary(ch) {
+		if (ch.id === 'whatsapp_web') {
+			return ch.status?.connected ? 'Device paired and ready' : ch.status?.qr_code ? 'QR code ready to scan' : 'Pair a device to connect'
+		}
+		const mappings = mappingRows(ch).length
+		if (ch.connected || ch.status?.connected) return mappings ? `${mappings} agent mapping${mappings === 1 ? '' : 's'} ready` : 'Connected and ready'
+		if (!ch.configured && !ch.always) return 'Setup required'
+		if (!ch.enabled && !ch.always) return 'Configured but disabled'
+		return 'Needs attention'
+	}
 
   // Edit modal state
   let editing   = null   // the channel being edited
@@ -100,7 +119,6 @@
     try {
       const res = ch.enabled ? await api.channels.disable(ch.id) : await api.channels.enable(ch.id)
       notice = res.message || 'Saved.'
-      restartNeeded = true
       await load()
     } catch (e) {
       error = e.message
@@ -155,6 +173,7 @@
   }
 
   function openEdit(ch) {
+    if (!canWriteChannels) return
     editing = ch
     form = {}
     advancedWhatsAppWeb = false
@@ -200,7 +219,6 @@
       if (editing.multi_bot) body.bots = botsForm
       const res = await api.channels.update(editing.id, body)
       notice = res.message || 'Channel saved.'
-      restartNeeded = true
       closeEdit()
       await load()
     } catch (e) {
@@ -227,7 +245,6 @@
         allowed_sender_ids: form.allowed_sender_ids || '',
       })
       notice = res.message || 'WhatsApp Web pairing started.'
-      restartNeeded = false
       for (let i = 0; i < 20; i += 1) {
         await wait(i === 0 ? 300 : 1000)
         await load()
@@ -255,10 +272,18 @@
     if (ch.status?.connected) return ch.status.detail || 'connected'
     if (ch.always) return 'always on'
     if (ch.enabled && !ch.configured) return 'needs config'
-    if (ch.enabled) return ch.status?.detail || 'restart to connect'
+    if (ch.enabled) return ch.status?.detail || 'connecting'
     if (ch.configured) return 'disabled'
     return 'not configured'
   }
+
+	function compactStatusLabel(ch) {
+		if (ch.status?.connected || connectedInteractiveBots(ch).length > 0) return 'connected'
+		if (ch.always) return 'always on'
+		if (ch.enabled && ch.configured) return 'attention'
+		if (ch.configured) return 'disabled'
+		return 'not configured'
+	}
 
   function connectionLabel(ch) {
     if (ch.status?.connected) return '● Live'
@@ -516,12 +541,6 @@
   {#if notice}
     <div class="banner ok">{notice}</div>
   {/if}
-  {#if restartNeeded}
-    <div class="banner warn restart-banner">
-      <span>Channel settings were saved. Restart the gateway to reconnect adapters.</span>
-      <small>A deployment administrator must restart the gateway from the platform control plane.</small>
-    </div>
-  {/if}
 
   {#if deliveryReadiness}
     <div class="delivery-summary {deliveryReadiness.status}">
@@ -558,7 +577,15 @@
               <span class="ch-name">{ch.name || ch.id}</span>
               <span class="ch-id">{ch.id}</span>
             </div>
-            <div class="ch-badge" style="color:{statusColor(ch)}">{statusLabel(ch)}</div>
+            {#if expandedCards[ch.id]}
+              <div class="ch-badge" style="color:{statusColor(ch)}">{statusLabel(ch)}</div>
+            {:else}
+              <span
+                class="ch-status-dot"
+                style="color:{statusColor(ch)}"
+                title={compactStatusLabel(ch)}
+                aria-label={compactStatusLabel(ch)}>●</span>
+            {/if}
           </div>
 
           <div class="ch-body">
@@ -572,7 +599,9 @@
               <span class="ch-label">Enabled</span>
               <span class="ch-val">{ch.always ? 'Always' : (ch.enabled ? 'Yes' : 'No')}</span>
             </div>
+			<div class="compact-summary">{compactSummary(ch)}</div>
 
+			{#if expandedCards[ch.id]}
             {#if ch.id === 'whatsapp_web'}
               <div class="settings">
                 <span class="settings-title">Pairing</span>
@@ -615,7 +644,7 @@
                     <div>
                       <code>{row.bot_name || row.adapter_id}</code>
                       {#if row.bot_name}<em>{row.adapter_id}</em>{/if}
-                      <span>{row.connected ? 'connected' : (row.detail || 'pending restart')}</span>
+                      <span>{row.connected ? 'connected' : (row.detail || 'not connected')}</span>
                     </div>
                     <div class="mapping-actions">
                       <strong class:send-only={row.outbound_only}>{row.agent_id}</strong>
@@ -628,7 +657,7 @@
                         <button
                           class="btn-secondary tiny"
                           disabled={!canTestMapping(ch, row) || actionLoading[`test:${row.adapter_id}`]}
-                          title={!row.connected ? 'Restart or reconnect this bot mapping before testing' : 'Send a real test message through this bot mapping'}
+                          title={!row.connected ? 'Reconnect this bot mapping before testing' : 'Send a real test message through this bot mapping'}
                           on:click={() => testChannel(ch, row)}>
                           {actionLoading[`test:${row.adapter_id}`] ? '…' : 'Test'}
                         </button>
@@ -643,11 +672,11 @@
                     </div>
                     {#if row._blocked_reason}
                       <div class="mapping-warning">
-                        This mapping is blocked because {row._blocked_reason}. Open settings, enable privileged exposure for this bot, save, then restart.
+                        This mapping is blocked because {row._blocked_reason}. Open settings, enable privileged exposure for this bot, and save again.
                       </div>
                     {:else if mappingTier(row)?.tier === 'privileged'}
                       <div class="mapping-warning">
-                        This bot exposes a privileged agent. Keep allowlists and trigger phrases tight, and require explicit exposure approval before restart.
+                        This bot exposes a privileged agent. Keep allowlists and trigger phrases tight, and require explicit exposure approval before saving.
                       </div>
                     {/if}
                     {#if diagnosis[row.adapter_id]}
@@ -704,20 +733,27 @@
                 {#if diagnosis[ch.id].detail}<details><summary>Raw error</summary><code>{diagnosis[ch.id].detail}</code></details>{/if}
               </div>
             {/if}
+			{/if}
 
           </div>
 
           <div class="ch-footer">
-            {#if ch.schema?.length}
+			<button
+				class="btn-secondary small-btn details-btn"
+				aria-expanded={expandedCards[ch.id] ? 'true' : 'false'}
+				on:click={() => toggleCard(ch.id)}>
+				{expandedCards[ch.id] ? 'Less' : 'Details'}
+			</button>
+            {#if ch.schema?.length && canWriteChannels}
               <button class="btn-secondary small-btn" on:click={() => openEdit(ch)}>
                 {ch.id === 'whatsapp_web' ? 'Connect' : 'Edit'}
               </button>
             {/if}
-            {#if ch.id !== 'http'}
+			{#if expandedCards[ch.id] && ch.id !== 'http' && canWriteChannels}
               <button
                 class="btn-secondary small-btn"
                 disabled={!canTestChannel(ch) || actionLoading[`test:${ch.id}`]}
-                title={!ch.registered ? 'Save settings and restart the gateway before testing' : !ch.enabled ? 'Enable this channel before testing' : 'Send a real test message through this channel'}
+                title={!ch.registered ? 'Save settings to connect the channel before testing' : !ch.enabled ? 'Enable this channel before testing' : 'Send a real test message through this channel'}
                 on:click={() => testChannel(ch)}>
                 {actionLoading[`test:${ch.id}`] ? 'Testing…' : 'Test'}
               </button>
@@ -729,7 +765,7 @@
                 {actionLoading[`diag:${ch.id}`] ? 'Diagnosing…' : 'Diagnose'}
               </button>
             {/if}
-            {#if !ch.always}
+            {#if !ch.always && canEnableChannels}
               <button
                 class={ch.enabled ? 'btn-danger' : 'btn-primary'}
                 disabled={actionLoading[ch.id] || (!ch.enabled && !ch.configured)}
@@ -745,7 +781,7 @@
 
     <div class="info-card">
       <h3>About channels</h3>
-      <p>Configure any channel here — settings are written to your <code>config.yaml</code>. Secrets are masked; leave a secret field blank when editing to keep the existing value. <strong>Restart the gateway</strong> after changes for adapters to connect or disconnect.</p>
+      <p>Configure any channel here — settings are written to your <code>config.yaml</code> and applied live. Secrets are masked; leave a secret field blank when editing to keep the existing value.</p>
     </div>
   {/if}
 </div>
@@ -1024,7 +1060,6 @@
   .err    { background: rgba(240,96,96,.1); border: 1px solid rgba(240,96,96,.3); color: #f06060; }
   .ok     { background: rgba(76,175,130,.1); border: 1px solid rgba(76,175,130,.3); color: #4caf82; }
   .warn   { background: rgba(240,196,96,.08); border: 1px solid rgba(240,196,96,.3); color: #f0c460; }
-  .restart-banner { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; }
   .empty  { color: #6b7294; padding: 3rem; text-align: center; }
   .delivery-summary {
     display: flex;
@@ -1047,32 +1082,39 @@
   .target-pill.warn { border-color: rgba(240,196,96,.38); color: #f0c460; }
   .target-pill.fail { border-color: rgba(240,96,96,.42); color: #ff7b7b; }
 
-  .channel-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+  .channel-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: .75rem; align-items: start; }
 
   .ch-card {
     background: #141626; border: 1px solid #1a1e36; border-radius: 10px;
     display: flex; flex-direction: column; overflow: hidden; transition: border-color .2s;
   }
   .ch-card.enabled { border-color: rgba(108,99,255,.3); }
+	.ch-card:focus-within { border-color: rgba(139,133,255,.48); }
 
   .ch-header {
     display: flex; align-items: flex-start; gap: .75rem;
-    padding: .9rem 1rem; border-bottom: 1px solid #1a1e36;
+    padding: .72rem .8rem; border-bottom: 1px solid #1a1e36;
   }
   .ch-icon   { font-size: 1.4rem; line-height: 1.2; flex: 0 0 auto; }
   .ch-identity { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
-  .ch-name   { font-weight: 600; font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ch-name   {
+    font-weight: 600; font-size: .9rem; line-height: 1.25;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
   .ch-id     { font-size: .72rem; color: #555a7a; font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* A long status detail (e.g. the WhatsApp "scan QR" hint) must stay in its own
      column on the right and wrap within itself instead of overlapping the name. */
   .ch-badge  { flex: 0 1 auto; max-width: 45%; font-size: .7rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; text-align: right; line-height: 1.25; overflow-wrap: anywhere; }
+  .ch-status-dot { flex: 0 0 auto; font-size: .78rem; line-height: 1.2; margin-top: .08rem; }
 
-  .ch-body   { flex: 1; padding: .75rem 1rem; display: flex; flex-direction: column; gap: .45rem; }
+  .ch-body   { flex: 1; padding: .65rem .8rem; display: flex; flex-direction: column; gap: .38rem; }
   .ch-row    { display: flex; justify-content: space-between; font-size: .82rem; gap: .5rem; }
   .ch-label  { color: #555a7a; flex-shrink: 0; }
   .ch-val    { color: #c8cadf; text-align: right; word-break: break-all; }
   .ch-val.mono { font-family: monospace; font-size: .78rem; color: #8b85ff; }
   .no-settings { color: #555a7a; font-style: italic; }
+	.compact-summary { margin-top: .2rem; color: #8f96bd; font-size: .74rem; line-height: 1.35; min-height: 1rem; }
 
   .settings { margin-top: .35rem; padding-top: .5rem; border-top: 1px solid #1a1e36; display: flex; flex-direction: column; gap: .4rem; }
   .settings-title { font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; color: #555a7a; font-weight: 600; }
@@ -1173,7 +1215,12 @@
   .diag-x { background: none; border: none; color: #7b82a8; font-size: 1rem; cursor: pointer; line-height: 1; padding: 0 .2rem; }
   .diag-x:hover { color: #c8cadf; }
 
-  .ch-footer { padding: .75rem 1rem; border-top: 1px solid #1a1e36; display: flex; gap: .5rem; justify-content: flex-end; }
+  .ch-footer {
+		padding: .58rem .72rem; border-top: 1px solid #1a1e36;
+		display: flex; flex-wrap: wrap; gap: .4rem; justify-content: flex-end; align-items: center;
+	}
+	.ch-footer button { flex: 0 0 auto; min-width: max-content; white-space: nowrap; }
+	.ch-footer .details-btn { margin-right: auto; }
   .small-btn { padding: .35rem .9rem; font-size: .8rem; border-radius: 6px; }
   .ch-footer button { padding: .35rem .9rem; font-size: .8rem; border-radius: 6px; }
 
@@ -1257,6 +1304,7 @@
   .bot-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
 
   @media (max-width: 720px) {
+		.channel-grid { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
     .qr-preview { grid-template-columns: 1fr; justify-items: center; text-align: center; }
     .advanced-panel { grid-template-columns: 1fr; }
   }

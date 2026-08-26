@@ -18,8 +18,9 @@
 #   ./scripts/deploy.sh --host-port 9000 --name myapp
 #   HOST_PORT=9000 APP_NAME=myapp ./scripts/deploy.sh --yes
 #
-# This script is intentionally generic. The defaults below target the Soulacy
-# gateway, but you can point IMAGE/Dockerfile/ports at any web service.
+# This helper deploys Soulacy Personal mode. Team and Scale require a separate
+# signed-image execution worker and must not be approximated by mounting a
+# container-runtime socket into the gateway.
 #
 set -euo pipefail
 
@@ -53,7 +54,7 @@ API_KEY="${API_KEY:-}"                     # auth key; blank = auto-generate
 # --provider-key flags. Provider names are case-insensitive (google, openai,
 # anthropic, ollama, …) and are upper-cased into the env var name.
 PROVIDER_KEYS="${PROVIDER_KEYS:-}"         # space-separated "<provider>=<key>" pairs; blank = none
-HEALTH_PATH="${HEALTH_PATH:-/api/v1/health}" # path polled to confirm readiness ("" to skip)
+HEALTH_PATH="${HEALTH_PATH:-/ready}"         # code-only readiness path ("" to skip)
 # Where the gateway should reach Ollama. Inside a container `localhost` is the
 # container itself, so a host-side Ollama must be addressed via the host. On
 # Docker Desktop (macOS/Windows) that's host.docker.internal; on Linux the
@@ -79,7 +80,7 @@ die()   { _DIED=1; printf "%s ✗ %s %s\n" "$R" "$N" "$*" >&2; exit 1; }
 
 usage() {
   cat <<EOF
-${B}docker-deploy.sh${N} — interactive Docker deploy
+${B}docker-deploy.sh${N} — Personal-mode interactive Docker deploy
 
 Usage: $0 [options]
 
@@ -306,6 +307,7 @@ RUN_ARGS=(
   --publish "${HOST_PORT}:${CONTAINER_PORT}"
   --env "SOULACY_SERVER_HOST=${BIND_HOST}"
   --env "SOULACY_SERVER_PORT=${CONTAINER_PORT}"
+  --env "SOULACY_DEPLOYMENT_MODE=personal"
   # NOTE: SOULACY_SERVER_API_KEY is intentionally NOT passed — the config loader
   # ignores it (no registered default for that key), so it would mislead. The
   # gateway generates its own key on first run; we read it back below.

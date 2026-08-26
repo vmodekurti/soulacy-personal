@@ -825,9 +825,12 @@ func TestHasPermissionViewerLogsRead(t *testing.T) {
 	}
 }
 
-func TestHasPermissionViewerCanChat(t *testing.T) {
-	if !HasPermission(RoleViewer, ResourceChat, ActionChat) {
-		t.Error("viewer should be able to chat")
+func TestHasPermissionViewerCannotRunAgents(t *testing.T) {
+	if HasPermission(RoleViewer, ResourceChat, ActionChat) {
+		t.Error("viewer should not be able to submit prompts or run agents")
+	}
+	if !HasPermission(RoleViewer, ResourceChat, ActionRead) {
+		t.Error("viewer should retain read access to existing conversations")
 	}
 }
 

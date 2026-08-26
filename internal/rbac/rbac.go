@@ -6,7 +6,7 @@
 //	admin     — full operational access without ownership transfer authority
 //	developer — build and maintain agents and their dependencies
 //	operator  — run and operate agents; cannot administer the workspace
-//	viewer    — read-only; can chat with agents but cannot mutate anything
+//	viewer    — inspection-only; cannot run agents or mutate workspace state
 //
 // # Resources and Actions
 //
@@ -89,7 +89,7 @@ const (
 	// approving is not a stronger form of chatting. The arguments of a paused
 	// call are, by construction, the details of something that was stopped for
 	// being dangerous, and releasing one authorizes an action the requester
-	// could not take alone. A viewer who may chat has not thereby been
+	// could not take alone. A caller allowed to chat has not thereby been
 	// trusted to release a privileged shell command somebody else's agent
 	// composed — which is exactly what "confirm a tool" under ActionChat
 	// meant before this.
@@ -222,7 +222,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 	},
 	RoleViewer: {
 		ResourceAgents:      {ActionRead: true},
-		ResourceChat:        {ActionRead: true, ActionChat: true},
+		ResourceChat:        {ActionRead: true},
 		ResourceApprovals:   {},
 		ResourceMemory:      {ActionRead: true},
 		ResourceChannels:    {ActionRead: true},

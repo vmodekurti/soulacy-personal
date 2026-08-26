@@ -168,6 +168,7 @@ describe('the sidebar shows what the caller can use', () => {
   it('shows everything to an owner', async () => {
     const { visibleNavPages, navPages } = await import('./nav.js')
     permissions.set({
+      builder: ['read', 'write'],
       memory: ['read'], knowledge: ['read'], channels: ['read'], schedule: ['read'],
       skills: ['read'], mcp: ['read'], providers: ['read'], secrets: ['list'],
       config: ['read'], logs: ['read'], plugins: ['read'],
@@ -201,7 +202,7 @@ describe('the sidebar shows what the caller can use', () => {
   it('renders the complete Team workspace sidebar from the server permission projection', async () => {
     const { visibleNavPages } = await import('./nav.js')
     permissions.set({
-      agents: ['read'], chat: ['read'], memory: ['read'], knowledge: ['read'],
+      agents: ['read'], chat: ['read'], builder: ['write'], memory: ['read'], knowledge: ['read'],
       channels: ['read'], schedule: ['read'], skills: ['read'], mcp: ['read'],
       plugins: ['read'], providers: ['read'], secrets: ['list'], config: ['read'],
     })
@@ -214,6 +215,19 @@ describe('the sidebar shows what the caller can use', () => {
       'members', 'workspace-admin',
     ]))
     expect(visible).not.toContain('logs')
+  })
+
+  it('keeps read-only Chat visible but removes the authoring-only Studio destination', async () => {
+    const { visibleNavPages } = await import('./nav.js')
+    permissions.set({
+      agents: ['read'], chat: ['read'], builder: [], channels: ['read'], mcp: ['read'],
+    })
+    const visible = visibleNavPages(can, undefined, { role: 'viewer', deploymentMode: 'team' })
+      .map(page => page.id)
+    expect(visible).toContain('chat')
+    expect(visible).toContain('channels')
+    expect(visible).toContain('mcp')
+    expect(visible).not.toContain('studio')
   })
 
   it('treats Personal mode as the Team/Scale baseline', async () => {

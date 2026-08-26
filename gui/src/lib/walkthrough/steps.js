@@ -72,6 +72,10 @@ export const navTourCopy = {
     what: 'External tool servers. Anything you connect here appears in the Studio tool palette.',
     when: 'This is how an agent gets to act on the outside world beyond the built-in tools.',
   },
+  'connected-apps': {
+    what: 'Workspace-scoped SaaS connections. Composio turns approved app actions into tools while Soulacy keeps credentials out of agent prompts.',
+    when: 'Connect business apps here, then grant only the discovered actions an agent actually needs in Studio.',
+  },
   pluginmgr: {
     what: 'Plugins bundle channels, tools and even whole pages of this UI. Install, enable and configure them here.',
     when: 'Worth a look when the capability you want is not built in.',

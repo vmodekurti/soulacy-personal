@@ -98,6 +98,13 @@ cd soulacy
 
 ### Docker — guided deploy script (recommended)
 
+> **Deployment boundary:** the Docker commands in this section are Personal
+> mode deployments. They intentionally do not mount `/var/run/docker.sock`.
+> Team and Scale require an independently operated, signed-image execution
+> worker and must not give the gateway control of a container daemon. Use the
+> [AWS deployment](deploy/aws/README.md) or follow the
+> [production execution-plane guide](docs/configuration/production-runtime.md).
+
 From a checkout, [`scripts/docker-deploy.sh`](scripts/docker-deploy.sh) builds the image, runs
 the container, publishes a host port, waits for the gateway to become healthy,
 and prints the URL plus the real API key. Every parameter can be entered
@@ -170,6 +177,24 @@ docker compose up
 The compose file publishes `${SOULACY_PORT:-1947}` on the host — set
 `SOULACY_PORT` in `.env` to change it. Open
 [http://localhost:1947](http://localhost:1947) (or your chosen port).
+PostgreSQL in this Compose file improves durability; it does not turn the
+deployment into Team mode. The file pins `deployment.mode=personal` explicitly.
+
+### Team and Scale deployment
+
+Team and Scale split the trusted control plane from untrusted execution:
+
+```text
+gateway containers → TLS-authenticated durable queue → dedicated OCI workers
+```
+
+Workers use a digest-pinned, signature-verified image and a hardened runtime
+such as gVisor. The gateway never receives `docker.sock`, and workload
+containers never receive the worker's runtime socket. `/ready` verifies
+PostgreSQL, the durable queue, and a live worker round trip before admitting
+traffic. See [Deployment modes](docs/configuration/deployment-modes.md),
+[Docker deployment](docs/deployment/docker.md), and
+[Automated AWS deployment](deploy/aws/README.md).
 
 ### Running CLI commands against a container
 

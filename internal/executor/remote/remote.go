@@ -31,6 +31,47 @@ type Executor struct{ queue queue.Backend }
 
 func New(q queue.Backend) *Executor { return &Executor{queue: q} }
 
+// Probe proves that at least one execution worker is actively consuming from
+// the queue. Queue health alone is not sufficient: a gateway can publish into
+// JetStream indefinitely while every worker is stopped or unable to establish
+// its OCI boundary. Team and Scale readiness use this round trip so traffic is
+// admitted only when the execution plane can actually answer.
+func Probe(ctx context.Context, q queue.Backend) error {
+	if q == nil {
+		return fmt.Errorf("execution worker queue is unavailable")
+	}
+	id := uuid.NewString()
+	subject := "soulacy.execution.results." + id
+	ch := make(chan result, 1)
+	sub, err := q.Subscribe(ctx, subject, "", func(m *queue.Message) {
+		var r result
+		if json.Unmarshal(m.Data, &r) == nil && r.ID == id {
+			select {
+			case ch <- r:
+			default:
+			}
+		}
+		_ = m.Ack()
+	})
+	if err != nil {
+		return fmt.Errorf("execution worker probe subscribe: %w", err)
+	}
+	defer sub.Unsubscribe()
+	payload, _ := json.Marshal(job{ID: id, Kind: "probe"})
+	if err := q.Publish(ctx, JobsSubject, payload); err != nil {
+		return fmt.Errorf("execution worker probe publish: %w", err)
+	}
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("execution worker did not answer: %w", ctx.Err())
+	case r := <-ch:
+		if r.Error != "" {
+			return fmt.Errorf("execution worker probe: %s", r.Error)
+		}
+		return nil
+	}
+}
+
 var _ executor.Backend = (*Executor)(nil)
 
 func (e *Executor) Run(ctx context.Context, pyFile, funcName, inline string, args []byte) (string, error) {
@@ -94,6 +135,18 @@ func NewWorker(q queue.Backend, backend executor.Backend, group string, concurre
 }
 func (w *Worker) Start(ctx context.Context) error {
 	sub, err := w.queue.Subscribe(ctx, JobsSubject, w.group, func(m *queue.Message) {
+		var j job
+		if err := json.Unmarshal(m.Data, &j); err != nil {
+			_ = m.Ack()
+			return
+		}
+		if j.Kind == "probe" {
+			data, _ := json.Marshal(result{ID: j.ID, Output: "ready"})
+			if w.queue.Publish(context.WithoutCancel(ctx), "soulacy.execution.results."+j.ID, data) == nil {
+				_ = m.Ack()
+			}
+			return
+		}
 		select {
 		case w.sem <- struct{}{}:
 		case <-ctx.Done():
@@ -101,11 +154,7 @@ func (w *Worker) Start(ctx context.Context) error {
 		}
 		go func() {
 			defer func() { <-w.sem }()
-			var j job
 			r := result{}
-			if err := json.Unmarshal(m.Data, &j); err != nil {
-				return
-			}
 			r.ID = j.ID
 			runCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 			defer cancel()

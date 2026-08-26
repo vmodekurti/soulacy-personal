@@ -87,6 +87,7 @@
     schedule: () => import('./pages/Schedule.svelte'),
     skills: () => import('./pages/Skills.svelte'),
     mcp: () => import('./pages/MCP.svelte'),
+    'connected-apps': () => import('./pages/ConnectedApps.svelte'),
     pluginmgr: () => import('./pages/PluginManager.svelte'),
     providers: () => ['team', 'scale'].includes(String($activeWorkspace?.deploymentMode || '').toLowerCase())
       ? import('./pages/WorkspaceProviders.svelte')

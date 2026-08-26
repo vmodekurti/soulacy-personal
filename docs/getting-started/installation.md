@@ -46,6 +46,12 @@ the GUI — the binary embeds the web UI at compile time, so use `make all`).
 
 ## Docker
 
+The Docker quick start is a **Personal mode** deployment. Team and Scale need a
+separate isolated execution-worker plane; adding PostgreSQL to Compose alone
+does not make a deployment multi-user safe. Never mount `docker.sock` into the
+Soulacy gateway. See [Docker deployment](../deployment/docker.md#team-and-scale)
+and [Deployment modes](../configuration/deployment-modes.md).
+
 From a checkout (works today, builds the image locally):
 
 ```bash

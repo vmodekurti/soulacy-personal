@@ -30,6 +30,7 @@ import (
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/costs"
 	"github.com/soulacy/soulacy/internal/credentials"
+	executorremote "github.com/soulacy/soulacy/internal/executor/remote"
 	"github.com/soulacy/soulacy/internal/gateway"
 	"github.com/soulacy/soulacy/internal/introspect"
 	"github.com/soulacy/soulacy/internal/llm"
@@ -506,7 +507,8 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) (*gateway.Server, e
 //
 // REQUIREDNESS COMES FROM THE DEPLOYMENT MODE, and deliberately from the same
 // place startup validation gets it: internal/config already refuses to boot a
-// team deployment without Postgres, or a scale one without a durable queue.
+// Team/Scale deployment without Postgres, a durable queue, and a live
+// isolated execution worker.
 // Readiness asks that same question at RUNTIME. A second list here would
 // eventually disagree with the one that gates startup, and the disagreement
 // would surface as a replica that booted and then never became ready, or —
@@ -518,8 +520,6 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) (*gateway.Server, e
 // before there was a readiness endpoint at all.
 func (a *App) readinessProbes(d gatewayDeps) []gateway.ReadinessProbe {
 	multiUser := config.IsMultiUserMode(a.cfg.DeploymentMode())
-	scale := a.cfg.DeploymentMode() == config.DeploymentModeScale
-
 	var probes []gateway.ReadinessProbe
 	if d.tenantPool != nil {
 		probes = append(probes, gateway.ReadinessProbe{
@@ -545,14 +545,25 @@ func (a *App) readinessProbes(d gatewayDeps) []gateway.ReadinessProbe {
 		if pinger, ok := d.queueBackend.(interface{ Ping(context.Context) error }); ok {
 			probes = append(probes, gateway.ReadinessProbe{
 				Name:     "queue",
-				Required: scale,
+				Required: multiUser,
 				Check:    func(ctx context.Context) error { return pinger.Ping(ctx) },
 			})
-		} else if scale {
+		} else if multiUser {
 			probes = append(probes, gateway.ReadinessProbe{Name: "queue", Required: true})
 		}
-	} else if scale {
+	} else if multiUser {
 		probes = append(probes, gateway.ReadinessProbe{Name: "queue", Required: true})
+	}
+	if multiUser {
+		if d.queueBackend == nil {
+			probes = append(probes, gateway.ReadinessProbe{Name: "execution_worker", Required: true})
+		} else {
+			probes = append(probes, gateway.ReadinessProbe{
+				Name:     "execution_worker",
+				Required: true,
+				Check:    func(ctx context.Context) error { return executorremote.Probe(ctx, d.queueBackend) },
+			})
+		}
 	}
 	return probes
 }

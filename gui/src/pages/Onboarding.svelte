@@ -441,7 +441,7 @@
         We’ll create <strong>{selectedTemplate?.display_name || templateName}</strong>
         on <strong>{providerId}</strong>{model ? ` (${model})` : ''}{wantChannel && channelDone ? ', wired to Telegram' : ''}{updatesDone ? ', update-ready' : ''}.
       </p>
-      {#if channelDone}<div class="banner ok">Telegram saved — restart the gateway later for it to connect.</div>{/if}
+      {#if channelDone}<div class="banner ok">Telegram saved and connected. No gateway restart is needed.</div>{/if}
       {#if updatesDone}<div class="banner ok">Updates configured — verify any time with <code>sy update check</code>.</div>{/if}
       {#if launchFix}<div class="banner err">{launchFix}</div>{/if}
       <div class="actions">

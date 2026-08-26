@@ -4,6 +4,19 @@ install_gvisor
 install_cosign
 extract_soulacy_binaries
 
+# The gateway stamps every command with its authorized workspace path. Mount
+# the same encrypted filesystem at the same path so the worker can narrow the
+# container mount to that workspace without translating or broadening it.
+if ! apt-get install -y amazon-efs-utils; then
+  apt-get install -y --no-install-recommends git binutils build-essential pkg-config libssl-dev rustc cargo
+  git clone --depth 1 --branch v2.3.1 https://github.com/aws/efs-utils /tmp/efs-utils
+  (cd /tmp/efs-utils && ./build-deb.sh)
+  apt-get install -y /tmp/efs-utils/build/amazon-efs-utils*.deb
+fi
+mkdir -p /var/lib/soulacy
+echo '${efs_id}:/ /var/lib/soulacy efs _netdev,tls,iam 0 0' >> /etc/fstab
+mount -a -t efs
+
 aws secretsmanager get-secret-value --region '${aws_region}' --secret-id '${bootstrap_secret_arn}' --query SecretString --output text >/run/soulacy-bootstrap.json
 aws secretsmanager get-secret-value --region '${aws_region}' --secret-id '${nats_secret_arn}' --query SecretString --output text >/run/soulacy-nats.json
 chmod 0600 /run/soulacy-*.json
@@ -19,7 +32,6 @@ decode_nats worker_key_b64 /etc/soulacy/nats/client-key.pem
 jq -r '.cosign_public_key_b64' /run/soulacy-bootstrap.json | base64 --decode >/etc/soulacy/execution-image.pub
 chmod 0644 /etc/soulacy/nats/ca.pem /etc/soulacy/nats/client.pem /etc/soulacy/execution-image.pub
 
-mkdir -p /var/lib/soulacy-worker/workspaces
 cat >/etc/soulacy/worker.env <<ENV
 SOULACY_WORKER_NATS_URL=tls://nats.soulacy.internal:4222
 SOULACY_WORKER_NATS_STREAM=soulacy
@@ -32,7 +44,7 @@ SOULACY_WORKER_IMAGE=${execution_image}
 SOULACY_WORKER_SANDBOX_IMAGE=${execution_image}
 SOULACY_WORKER_RUNTIME=runsc
 SOULACY_WORKER_COSIGN_KEY=/etc/soulacy/execution-image.pub
-SOULACY_EXECUTION_ROOT=/var/lib/soulacy-worker/workspaces
+SOULACY_EXECUTION_ROOT=/var/lib/soulacy
 SOULACY_WORKER_CONCURRENCY=${worker_concurrency}
 SOULACY_WORKER_CPU_SECONDS=30
 SOULACY_WORKER_MEMORY_MB=512
@@ -58,7 +70,7 @@ RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=/var/lib/soulacy-worker /run /tmp
+ReadWritePaths=/var/lib/soulacy /run /tmp
 
 [Install]
 WantedBy=multi-user.target

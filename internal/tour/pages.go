@@ -160,6 +160,19 @@ var pages = map[string]page{
 		},
 	},
 
+	"connected-apps": {
+		stage: StageMaterial, nextAction: "open_mcp", nextLabel: "Connect an app",
+		role:         "This is where workspace identities become narrowly scoped agent tools.",
+		contribution: "Composio and Nango handle external authorization while Soulacy decides which discovered action each agent may use.",
+		whenEmpty: func(InstallState) string {
+			return "No app broker is connected yet. Connect one constrained session here, then grant only the actions an agent needs in Studio. Structured Reasoning is already available without a connection."
+		},
+		whenUsed: func(s InstallState) string {
+			return fmt.Sprintf("%s available across MCP and connected apps. Credentials stay outside prompts, while each agent still receives an explicit tool grant.",
+				plural(s.MCPServers, "connection", "connections"))
+		},
+	},
+
 	"chat": {
 		stage: StagePlan, nextAction: "", nextLabel: "",
 		role:         "A direct line to any agent you have built.",

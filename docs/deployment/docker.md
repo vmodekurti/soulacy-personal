@@ -1,98 +1,80 @@
-# Docker Deployment
+# Docker deployment
 
-## Quick start
+## Supported topology
+
+The repository's Docker and Compose quick starts run **Personal mode**. They
+are appropriate for one trusted operator and deliberately do not mount a host
+container-runtime socket into Soulacy.
+
+| Mode | Gateway packaging | Execution plane | Supported path |
+|---|---|---|---|
+| Personal | Binary or container | Local/container execution owned by the operator | `docker-compose.lite.yml` or `docker-compose.yml` |
+| Team | Binary, container, or Kubernetes | Separate signed-image OCI worker on a dedicated node | AWS deployment or an equivalent operator-built worker plane |
+| Scale | Replicated containers/Kubernetes | Autoscaled, multi-node hardened worker pool | AWS/Kubernetes production architecture |
+
+PostgreSQL makes Personal Compose more durable; it does not make it Team mode.
+
+## Personal quick start
 
 ```bash
-docker run -d \
-  --name soulacy \
-  -p 1947:1947 \
-  -v $(pwd)/config.yaml:/home/soulacy/.soulacy/config.yaml \
-  -v $(pwd)/agents:/home/soulacy/.soulacy/agents \
-  -v $(pwd)/memory:/home/soulacy/.soulacy/memory \
-  ghcr.io/vmodekurti/soulacy:latest
+cp .env.example .env
+# Set SOULACY_API_KEY and, for the full stack, POSTGRES_PASSWORD.
+docker compose -f docker-compose.lite.yml up --build -d
+curl -fsS http://localhost:1947/ready
 ```
 
----
+Use the full Personal stack when you want PostgreSQL and Qdrant:
 
-## Docker Compose (recommended)
-
-### Basic setup (SQLite)
-
-```yaml title="docker-compose.yml"
-version: "3.9"
-
-services:
-  soulacy:
-    image: ghcr.io/vmodekurti/soulacy:latest
-    restart: unless-stopped
-    ports:
-      - "1947:1947"
-    volumes:
-      - ./config.yaml:/home/soulacy/.soulacy/config.yaml:ro
-      - ./agents:/home/soulacy/.soulacy/agents:ro
-      - soulacy_data:/home/soulacy/.soulacy/memory
-
-volumes:
-  soulacy_data:
+```bash
+docker compose up --build -d
+curl -fsS http://localhost:1947/ready
 ```
 
-### Full stack (Postgres + Qdrant)
+Both files persist `/home/soulacy/.soulacy`, explicitly set
+`SOULACY_DEPLOYMENT_MODE=personal`, and use `/ready` for container health.
 
-```yaml title="docker-compose.yml"
-version: "3.9"
+## Team and Scale
 
-services:
-  soulacy:
-    image: ghcr.io/vmodekurti/soulacy:latest
-    restart: unless-stopped
-    ports:
-      - "1947:1947"
-    volumes:
-      - soulacy_data:/home/soulacy/.soulacy
-    depends_on:
-      postgres:
-        condition: service_healthy
-      qdrant:
-        condition: service_started
-    environment:
-      - SOULACY_STORAGE_BACKEND=postgres
-      - SOULACY_STORAGE_POSTGRES_DSN=postgres://soulacy:secret@postgres:5432/soulacy?sslmode=disable
-      - SOULACY_VECTOR_BACKEND=qdrant
-      - SOULACY_VECTOR_URL=http://qdrant:6333
-      - SOULACY_VECTOR_COLLECTION=soulacy_memory
+Do not convert Personal Compose to Team or Scale by setting one environment
+variable. Multi-user operation requires all of the following:
 
-  postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: soulacy
-      POSTGRES_PASSWORD: secret
-      POSTGRES_DB: soulacy
-    volumes:
-      - pg_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U soulacy"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+- JWT/OIDC authentication and a bootstrap administration key;
+- PostgreSQL and an external KMS;
+- TLS-authenticated durable NATS;
+- `executor.backend: worker`;
+- at least one live `soulacy-worker` on a dedicated execution node;
+- a digest-pinned, Cosign-verified execution image;
+- gVisor `runsc` or an equivalent hardened OCI runtime;
+- the same encrypted workspace filesystem mounted at the same absolute path on
+  gateways and workers;
+- Redis-backed shared limits and shared artifacts in Scale.
 
-  qdrant:
-    image: qdrant/qdrant:latest
-    restart: unless-stopped
-    volumes:
-      - qdrant_data:/qdrant/storage
+The gateway's `/ready` endpoint checks PostgreSQL, the queue, and a real worker
+round trip. It returns 503 when the queue is alive but no worker is consuming.
 
-volumes:
-  soulacy_data:
-  pg_data:
-  qdrant_data:
-```
+Use [the automated AWS deployment](https://github.com/vmodekurti/soulacy/blob/main/deploy/aws/README.md) for the packaged
+Team/Scale path. For another cloud, reproduce the boundary described in
+[Production execution](../configuration/production-runtime.md).
 
----
+## Why `docker.sock` is prohibited
 
-## Environment variable overrides
+Do not mount `/var/run/docker.sock`, a rootless Docker socket, containerd,
+CRI-O, or a Kubernetes administrative credential into the gateway. A runtime
+API can create containers with host mounts and is therefore an administrative
+control plane, not a sandbox.
 
-All config values can be set via environment variables (useful for secrets in CI/CD). Note that Soulacy uses single underscores (`_`) as separators:
+Do not use privileged Docker-in-Docker for Team or Scale either. It creates a
+second daemon with a broad kernel boundary, complicated persistent storage, and
+an unnecessary breakout surface.
+
+Workers may control the runtime on their dedicated execution nodes. Disposable
+workload containers never receive the runtime socket. Compromise is therefore
+contained to a replaceable execution node rather than the gateway/database
+control plane.
+
+## Configuration and secrets
+
+Environment variables use the `SOULACY_` prefix:
 
 ```bash
 SOULACY_SERVER_API_KEY=sy_secret
@@ -100,30 +82,27 @@ SOULACY_LLM_PROVIDERS_OPENAI_API_KEY=sk-...
 SOULACY_CHANNELS_TELEGRAM_TOKEN=1234:AAH...
 ```
 
----
+Use a secret manager or mounted secret file in production. Never bake provider,
+OIDC, database, or workspace credentials into an image.
 
-## Health check
+## Health and readiness
 
-```bash
-curl http://localhost:1947/api/v1/health
-# {"status":"ok","version":"0.1.0"}
-```
-
-Docker healthcheck in Compose:
+`GET /ready` is the unauthenticated, non-diagnostic readiness endpoint intended
+for Docker, load balancers, and Kubernetes. It returns only a status and an
+actionable HTTP code. Authenticated operators can use `GET /api/v1/ready` for
+dependency detail.
 
 ```yaml
 healthcheck:
-  test: ["CMD", "curl", "-fs", "http://localhost:1947/api/v1/health"]
-  interval: 30s
-  timeout: 10s
-  retries: 3
+  test: ["CMD", "curl", "-fs", "http://localhost:1947/ready"]
+  interval: 15s
+  timeout: 5s
+  retries: 5
 ```
 
----
+## Reverse proxy
 
-## Using a reverse proxy (nginx)
-
-```nginx title="nginx.conf"
+```nginx
 server {
     listen 443 ssl;
     server_name yourdomain.com;
@@ -134,8 +113,9 @@ server {
     location / {
         proxy_pass http://soulacy:1947;
         proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_read_timeout 120s;    # allow time for long LLM responses
+        proxy_read_timeout 120s;
     }
 }
 ```

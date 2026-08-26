@@ -151,7 +151,7 @@ func (s *Server) channelDeliveryTarget(spec channelSpec, adapterID, label, mode,
 	if !enabled {
 		target.Status = "warn"
 		target.Issue = "Channel is disabled."
-		target.Next = "Enable the channel and restart the gateway."
+		target.Next = "Enable the channel; Soulacy connects it immediately."
 		return target
 	}
 	if !registered {

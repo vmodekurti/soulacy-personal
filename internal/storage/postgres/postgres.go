@@ -23,6 +23,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -446,6 +447,104 @@ func (a *ActionLog) TailInWorkspace(workspaceID, agentID string, limit int) ([]m
 		}
 	}
 	return events, nil
+}
+
+// QueryFiltered returns durable PostgreSQL-backed events for one agent in the
+// personal workspace. It mirrors the optional SQLite query surface used by the
+// run ledger and operational history screens.
+func (a *ActionLog) QueryFiltered(agentID string, limit int, allowed map[string]bool) ([]message.Event, error) {
+	return a.QueryEvents(agentID, "", limit, allowed)
+}
+
+// QueryFilteredInWorkspace is QueryFiltered with the workspace predicate
+// applied in SQL, before any rows enter application memory.
+func (a *ActionLog) QueryFilteredInWorkspace(workspaceID, agentID string, limit int, allowed map[string]bool) ([]message.Event, error) {
+	return a.QueryEventsInWorkspace(workspaceID, agentID, "", limit, allowed)
+}
+
+// QueryEvents returns the newest matching durable events oldest-first. Empty
+// agent/session filters mean all events in the personal workspace.
+func (a *ActionLog) QueryEvents(agentID, sessionID string, limit int, allowed map[string]bool) ([]message.Event, error) {
+	return a.QueryEventsInWorkspace(wsroot.PersonalWorkspaceID, agentID, sessionID, limit, allowed)
+}
+
+// QueryEventsInWorkspace is the durable, tenant-scoped history surface. The
+// PostgreSQL backend previously exposed only rolling per-agent tails, causing
+// Team/Scale run ledgers to report that durable event queries were unsupported
+// even though agent_events already contained the required history.
+func (a *ActionLog) QueryEventsInWorkspace(workspaceID, agentID, sessionID string, limit int, allowed map[string]bool) ([]message.Event, error) {
+	agentID = strings.TrimSpace(agentID)
+	sessionID = strings.TrimSpace(sessionID)
+	if limit <= 0 {
+		limit = 1000
+	} else if limit > 50000 {
+		limit = 50000
+	}
+
+	args := []any{workspaceOrPersonal(workspaceID)}
+	where := []string{"workspace_id = $1"}
+	add := func(clause string, value any) {
+		args = append(args, value)
+		where = append(where, fmt.Sprintf(clause, len(args)))
+	}
+	if agentID != "" {
+		add("agent_id = $%d", agentID)
+	}
+	if sessionID != "" {
+		add("session_id = $%d", sessionID)
+	}
+	if len(allowed) > 0 {
+		types := make([]string, 0, len(allowed))
+		for typ := range allowed {
+			if typ = strings.TrimSpace(typ); typ != "" {
+				types = append(types, typ)
+			}
+		}
+		sort.Strings(types)
+		if len(types) > 0 {
+			placeholders := make([]string, 0, len(types))
+			for _, typ := range types {
+				args = append(args, typ)
+				placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
+			}
+			where = append(where, "type IN ("+strings.Join(placeholders, ",")+")")
+		}
+	}
+	args = append(args, limit)
+	limitPlaceholder := fmt.Sprintf("$%d", len(args))
+	query := `
+		SELECT workspace_id, agent_id, session_id, type, payload, created_at
+		FROM (
+			SELECT workspace_id, agent_id, session_id, type, payload, created_at, id
+			FROM agent_events
+			WHERE ` + strings.Join(where, " AND ") + `
+			ORDER BY created_at DESC, id DESC
+			LIMIT ` + limitPlaceholder + `
+		) recent
+		ORDER BY created_at ASC, id ASC`
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	rows, err := a.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	events := make([]message.Event, 0, limit)
+	for rows.Next() {
+		var ev message.Event
+		var payload []byte
+		if err := rows.Scan(&ev.WorkspaceID, &ev.AgentID, &ev.SessionID, &ev.Type, &payload, &ev.Timestamp); err != nil {
+			return nil, err
+		}
+		if len(payload) > 0 && string(payload) != "null" {
+			if err := json.Unmarshal(payload, &ev.Payload); err != nil {
+				ev.Payload = string(payload)
+			}
+		}
+		events = append(events, ev)
+	}
+	return events, rows.Err()
 }
 
 // IncompleteMessageIns returns payloads of unresolved message.in events since `since`.

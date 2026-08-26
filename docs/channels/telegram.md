@@ -79,7 +79,7 @@ If the channel card says `OUTBOUND-ONLY`, that is expected for the default
 sender. It means the bot can send reports, but it will not poll inbound Telegram
 messages. Add a bot mapping when you want a user to chat with an agent.
 
-For interactive bot mappings, restart the gateway after saving, then send
+For interactive bot mappings, save to connect the adapter immediately, then send
 `/start` to that exact bot. If the bot is used in a group, set
 `ignore_groups: false`, add an allowlist if needed, and mention the bot or use
 the configured trigger phrase.

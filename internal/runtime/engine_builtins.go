@@ -63,6 +63,12 @@ func (e *Engine) buildBuiltins() []BuiltinTool {
 	// chart. Agents can opt out via `builtins: []` in SOUL.yaml.
 	tools = append(tools, e.buildChartBuiltin())
 
+	// structured_reasoning provides the useful control-flow contract of the
+	// Sequential Thinking MCP server without requiring npx or a sidecar. It
+	// records concise, user-auditable checkpoints rather than hidden chain of
+	// thought, and therefore works identically in Personal, Team, and Scale.
+	tools = append(tools, buildStructuredReasoningBuiltin())
+
 	// channel.send — generic outbound delivery through a registered channel
 	// adapter. Studio already emits this for Deliver steps; backing it with the
 	// registry makes generated workflows executable instead of merely plausible.

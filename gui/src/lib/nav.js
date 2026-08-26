@@ -31,7 +31,7 @@ export const navGroups = [
 export const navPages = [
   { id: 'dashboard', icon: '◈', label: 'Dashboard',   group: 'main'         },
   { id: 'onboarding', icon: '✓', label: 'First Run',   group: 'main'         },
-  { id: 'studio',    icon: '🎬', label: 'Studio',      group: 'main'         },
+  { id: 'studio',    icon: '🎬', label: 'Studio',      group: 'main', requires: ['builder', 'write'] },
   { id: 'agents',    icon: '⊕', label: 'Deployed',    group: 'main'         },
   { id: 'templates', icon: '📋', label: 'Templates',   group: 'main'         },
   { id: 'chat',      icon: '◎', label: 'Chat',        group: 'main'         },
@@ -43,6 +43,7 @@ export const navPages = [
   { id: 'schedule',  icon: '⏱', label: 'Automations', group: 'integrations', requires: ['schedule', 'read'] },
   { id: 'skills',    icon: '🧩', label: 'Skills',      group: 'integrations', requires: ['skills', 'read'] },
   { id: 'mcp',       icon: '🔌', label: 'MCP',         group: 'integrations', requires: ['mcp', 'read'] },
+  { id: 'connected-apps', icon: '🔗', label: 'Connected Apps', group: 'integrations', requires: ['mcp', 'read'] },
   { id: 'pluginmgr', icon: '🧱', label: 'Plugins',     group: 'integrations', requires: ['plugins', 'read'] },
   { id: 'providers', icon: '⚙', label: 'Providers',   group: 'integrations', requires: ['providers', 'read'] },
   { id: 'secrets',   icon: '🔑', label: 'Secrets',     group: 'integrations', requires: ['secrets', 'list'] },

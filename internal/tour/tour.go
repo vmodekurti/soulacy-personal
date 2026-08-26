@@ -73,7 +73,7 @@ func hasContent(id string, st InstallState) bool {
 		return st.KnowledgeBases > 0
 	case "skills":
 		return st.Skills > 0
-	case "mcp":
+	case "mcp", "connected-apps":
 		return st.MCPServers > 0
 	case "pluginmgr":
 		return st.Plugins > 0

@@ -46,6 +46,7 @@ type Adapter struct {
 	qrCode    string
 	lastError string
 	stopOnce  sync.Once
+	pending   map[string]chan error
 }
 
 // New creates an experimental WhatsApp Web adapter.
@@ -69,6 +70,7 @@ func New(id, command string, args []string, sessionDir, agentID, accountID strin
 		activation: activation,
 		log:        log.Named("whatsapp_web"),
 		detail:     "not started",
+		pending:    make(map[string]chan error),
 	}
 }
 
@@ -83,6 +85,11 @@ func (a *Adapter) Start(ctx context.Context, inbox chan<- message.Message) error
 		return errors.New("whatsapp_web: args must include the sidecar script path")
 	}
 	a.inbox = inbox
+	command, err := ResolveExecutable(a.command)
+	if err != nil {
+		return fmt.Errorf("whatsapp_web: Node.js executable unavailable: %w; install Node.js or configure channels.whatsapp_web.command with its absolute path", err)
+	}
+	a.command = command
 
 	args := append([]string{}, a.args...)
 	if a.sessionDir != "" {
@@ -131,7 +138,10 @@ func (a *Adapter) readEvents(ctx context.Context, r io.Reader) {
 	for sc.Scan() {
 		var ev sidecarEvent
 		if err := json.Unmarshal(sc.Bytes(), &ev); err != nil {
-			a.log.Warn("invalid sidecar event", zap.String("line", sc.Text()), zap.Error(err))
+			// Third-party libraries occasionally write diagnostics to stdout.
+			// Never copy the raw line into gateway logs: crypto/session libraries
+			// may include key material in those diagnostics.
+			a.log.Warn("invalid sidecar event suppressed", zap.Int("bytes", len(sc.Bytes())), zap.Error(err))
 			continue
 		}
 		switch ev.Type {
@@ -153,6 +163,17 @@ func (a *Adapter) readEvents(ctx context.Context, r io.Reader) {
 			a.mu.Unlock()
 			a.setStatus(false, detail, "")
 			a.log.Error("sidecar error", zap.String("detail", detail))
+		case "send_result":
+			a.mu.Lock()
+			waiter := a.pending[ev.ID]
+			a.mu.Unlock()
+			if waiter != nil {
+				if ev.OK {
+					waiter <- nil
+				} else {
+					waiter <- fmt.Errorf("whatsapp_web: send failed: %s", firstNonEmpty(ev.Error, ev.Detail, "unknown sidecar error"))
+				}
+			}
 		}
 	}
 	if err := sc.Err(); err != nil {
@@ -163,7 +184,10 @@ func (a *Adapter) readEvents(ctx context.Context, r io.Reader) {
 func (a *Adapter) readStderr(r io.Reader) {
 	sc := bufio.NewScanner(r)
 	for sc.Scan() {
-		a.log.Warn("sidecar stderr", zap.String("line", sc.Text()))
+		// Treat dependency stderr as untrusted. Baileys/libsignal has emitted
+		// cryptographic session diagnostics here in the past, so retain only
+		// enough metadata to diagnose that unexpected output occurred.
+		a.log.Warn("sidecar stderr suppressed", zap.Int("bytes", len(sc.Bytes())))
 	}
 }
 
@@ -229,16 +253,27 @@ func (a *Adapter) Send(ctx context.Context, msg message.Message) error {
 			break
 		}
 	}
-	if strings.TrimSpace(text) == "" || strings.TrimSpace(msg.ThreadID) == "" {
-		return nil
+	if strings.TrimSpace(text) == "" {
+		return errors.New("whatsapp_web: message text is empty")
+	}
+	if strings.TrimSpace(msg.ThreadID) == "" {
+		return errors.New("whatsapp_web: destination is empty")
 	}
 	a.mu.Lock()
 	stdin := a.stdin
+	requestID := uuid.New().String()
+	waiter := make(chan error, 1)
+	a.pending[requestID] = waiter
 	a.mu.Unlock()
+	defer func() {
+		a.mu.Lock()
+		delete(a.pending, requestID)
+		a.mu.Unlock()
+	}()
 	if stdin == nil {
 		return errors.New("whatsapp_web: sidecar stdin unavailable")
 	}
-	cmd := sidecarCommand{Type: "send", To: msg.ThreadID, Text: text}
+	cmd := sidecarCommand{Type: "send", ID: requestID, To: msg.ThreadID, Text: text}
 	data, _ := json.Marshal(cmd)
 	data = append(data, '\n')
 	done := make(chan error, 1)
@@ -253,7 +288,12 @@ func (a *Adapter) Send(ctx context.Context, msg message.Message) error {
 		if err != nil {
 			return fmt.Errorf("whatsapp_web: send command: %w", err)
 		}
-		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-waiter:
+		return err
 	}
 }
 
@@ -317,10 +357,12 @@ type sidecarEvent struct {
 	Text       string `json:"text,omitempty"`
 	Timestamp  int64  `json:"timestamp,omitempty"`
 	IsGroup    bool   `json:"is_group,omitempty"`
+	OK         bool   `json:"ok,omitempty"`
 }
 
 type sidecarCommand struct {
 	Type  string `json:"type"`
+	ID    string `json:"id,omitempty"`
 	To    string `json:"to"`
 	Text  string `json:"text,omitempty"`
 	State string `json:"state,omitempty"` // typing: "composing" | "paused"

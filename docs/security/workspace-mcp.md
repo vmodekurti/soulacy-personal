@@ -1,5 +1,10 @@
 # Workspace MCP security policy
 
+Hosted SaaS brokers (Composio and Nango) are configured through the
+[Connected Apps guide](../CONNECTED_APPS.md). Their connection headers are
+always vault-backed, including non-secret identifiers, so tenant account
+selectors never appear in the workspace MCP registry or viewer responses.
+
 Soulacy treats an MCP server selected by a workspace as untrusted. Team and
 Scale workspaces may connect to guarded remote HTTPS MCP servers or install a
 repository that publishes a declared OCI, exact-version npm, or exact-version
@@ -66,6 +71,13 @@ shown before approval; both are disabled or absent when not selected.
 High-assurance Scale
 deployments should place these containers on the platform's policy-controlled
 OCI worker network so egress is also restricted and audited.
+
+The repository's standard Docker Compose files are Personal mode and do not
+expose a runtime socket to the gateway. Do not enable Team/Scale MCP installation
+by mounting `docker.sock` into a containerized gateway. Use the packaged AWS
+topology, where the platform runtime is installed on controlled nodes, or an
+equivalent dedicated OCI execution plane. Workload MCP containers never receive
+the runtime socket themselves.
 
 ## Personal mode
 

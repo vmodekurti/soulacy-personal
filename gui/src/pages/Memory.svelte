@@ -644,24 +644,31 @@
 
   <!-- ══ LEARNING PROPOSALS ════════════════════════════════════════════════ -->
   {#if activeTab === 'learning'}
-    <div class="tab-toolbar">
+    <div class="tab-toolbar learning-toolbar">
       <span class="proc-info">Review post-run proposals before Soulacy writes them into memory or rules.</span>
-      <div style="flex:1"></div>
-      <select bind:value={proposalStatus} on:change={loadLearning}>
-        <option value="pending">Pending</option>
-        <option value="accepted">Accepted</option>
-        <option value="rejected">Rejected</option>
-        <option value="">All</option>
-      </select>
-      <select bind:value={learningWindow} on:change={loadLearning} title="Time window">
-        {#each learningWindowOptions as opt}
-          <option value={opt.value}>{opt.label}</option>
-        {/each}
-      </select>
-      <button class="btn-secondary" on:click={reflectRecentRuns} disabled={learningBusy || reflectingRuns || !selectedID}>
-        {reflectingRuns ? 'Reflecting…' : 'Reflect recent runs'}
-      </button>
-      <button class="btn-secondary" on:click={loadLearning} disabled={learningBusy}>{learningBusy?'Refreshing…':'Refresh'}</button>
+      <div class="learning-controls">
+        <label class="learning-filter">
+          <span>Status</span>
+          <select bind:value={proposalStatus} on:change={loadLearning} aria-label="Learning proposal status">
+            <option value="pending">Pending</option>
+            <option value="accepted">Accepted</option>
+            <option value="rejected">Rejected</option>
+            <option value="">All</option>
+          </select>
+        </label>
+        <label class="learning-filter">
+          <span>Period</span>
+          <select bind:value={learningWindow} on:change={loadLearning} title="Time window" aria-label="Learning proposal time window">
+            {#each learningWindowOptions as opt}
+              <option value={opt.value}>{opt.label}</option>
+            {/each}
+          </select>
+        </label>
+        <button class="btn-secondary" on:click={reflectRecentRuns} disabled={learningBusy || reflectingRuns || !selectedID}>
+          {reflectingRuns ? 'Reflecting…' : 'Reflect recent runs'}
+        </button>
+        <button class="btn-secondary" on:click={loadLearning} disabled={learningBusy}>{learningBusy?'Refreshing…':'Refresh'}</button>
+      </div>
     </div>
     {#if learningSummary}
       <div class="learning-health">
@@ -951,6 +958,13 @@
   .tab-toolbar{display:flex;gap:.55rem;align-items:center;flex-shrink:0;padding:.65rem 0 .2rem}
   .search-input{flex:1;max-width:260px}
   .proc-info{font-size:.78rem;color:#6b7294;flex:1}
+  .learning-toolbar{justify-content:space-between;align-items:flex-end;gap:1rem;flex-wrap:wrap}
+  .learning-toolbar .proc-info{flex:1 1 300px;max-width:560px;line-height:1.45;padding-bottom:.42rem}
+  .learning-controls{display:flex;align-items:flex-end;justify-content:flex-end;gap:.55rem;flex:1 1 560px;min-width:0}
+  .learning-filter{display:flex;flex-direction:column;gap:.24rem;flex:1 1 150px;min-width:120px;max-width:260px}
+  .learning-filter span{font-size:.62rem;font-weight:700;color:#6b7294;text-transform:uppercase;letter-spacing:.05em}
+  .learning-filter select{box-sizing:border-box;width:100%;min-width:0}
+  .learning-controls .btn-secondary{flex:0 0 auto;white-space:nowrap}
   .btn-icon{padding:.38rem .65rem;background:#141626;border:1px solid #1a1e36;border-radius:6px;cursor:pointer;font-size:.82rem;color:#6b7294}
   .btn-icon:hover,.btn-icon.active{color:#c5c9e8;border-color:#6c63ff44}
   .btn-danger-outline{padding:.38rem .85rem;background:transparent;border:1px solid rgba(240,96,96,.4);border-radius:6px;color:#f06060;cursor:pointer;font-size:.8rem}
@@ -1097,4 +1111,16 @@
   .proposal-why{font-size:.74rem;color:#a7d3ff;background:rgba(80,140,255,.08);border:1px solid rgba(80,140,255,.2);border-radius:7px;padding:.45rem .6rem;margin:.35rem 0}
   .disabled-tag{font-size:.63rem;padding:.1rem .4rem;border-radius:999px;background:rgba(255,107,129,.16);color:#ff8b9c}
   .proposal-status{font-size:.72rem;color:#6b7294;text-transform:uppercase;letter-spacing:.05em}
+  @media(max-width:900px){
+    .learning-toolbar{align-items:stretch}
+    .learning-toolbar .proc-info{max-width:none;padding-bottom:0}
+    .learning-controls{flex-basis:100%;justify-content:flex-start;flex-wrap:wrap}
+    .learning-filter{max-width:none}
+  }
+  @media(max-width:560px){
+    .page{padding:1rem}
+    .learning-controls{display:grid;grid-template-columns:1fr 1fr}
+    .learning-filter{min-width:0}
+    .learning-controls .btn-secondary{width:100%}
+  }
 </style>

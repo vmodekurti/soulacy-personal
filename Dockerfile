@@ -127,7 +127,7 @@ ENV SOULACY_CONFIG_FILE=/home/soulacy/.soulacy/soulspace/config.yaml \
 EXPOSE 1947
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -fs http://localhost:1947/api/v1/health || exit 1
+    CMD curl -fs http://localhost:1947/ready || exit 1
 
 ENTRYPOINT ["soulacy"]
 CMD ["serve"]

@@ -26,7 +26,9 @@ deploy/aws/deploy.sh --mode scale
 - Docker and the pinned gVisor `runsc` runtime on the gateway/worker hosts. Ordinary agent Python runs with no network, read-only rootfs, dropped capabilities, PID/memory/CPU limits, and a signed digest-pinned image.
 - Private mTLS NATS JetStream and Multi-AZ RDS PostgreSQL in Team and Scale.
 - Multi-AZ ElastiCache Valkey and encrypted, versioned S3 artifact storage in Scale.
-- Encrypted EFS workspace storage mounted with TLS in every variant.
+- Encrypted EFS workspace storage mounted with TLS in every variant. In Team
+  and Scale it is mounted at `/var/lib/soulacy` on both gateway and worker so a
+  job's authorized workspace path has the same identity on either side.
 - Separate KMS keys for storage and execution-image signing; Team and Scale add workspace-credential KMS.
 - Least-purpose EC2 instance roles, IMDSv2-only metadata, S3 public-access blocking, encrypted volumes, and Terraform state in a versioned private S3 bucket.
 
@@ -102,6 +104,10 @@ The status script checks the public health endpoint, EC2 status checks, and prin
 sudo journalctl -u soulacy -f
 sudo /opt/soulacy/bin/sy doctor
 ```
+
+`/ready` is end-to-end in Team and Scale: it returns 503 when PostgreSQL, NATS,
+or the execution-worker round trip is unavailable. A running queue with a
+stopped worker is not considered ready.
 
 Retrieve the bootstrap recovery key only when needed:
 

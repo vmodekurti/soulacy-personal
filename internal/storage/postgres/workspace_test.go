@@ -79,6 +79,37 @@ func TestPostgresTailCannotReachAnotherWorkspace(t *testing.T) {
 	}
 }
 
+func TestPostgresDurableQueryIsFilteredAndWorkspaceScoped(t *testing.T) {
+	log, _, _ := testStores(t)
+	flushEvents(t, log,
+		pgEvent("ws_a", "daily", "cron-a", "message.in", map[string]any{"trigger": "cron"}),
+		pgEvent("ws_a", "daily", "cron-a", "message.out", map[string]any{"text": "workspace a digest"}),
+		pgEvent("ws_a", "daily", "cron-a", "tool.log", map[string]any{"text": "noise"}),
+		pgEvent("ws_b", "daily", "cron-b", "message.out", map[string]any{"text": "workspace b confidential"}),
+	)
+
+	events, err := log.QueryEventsInWorkspace("ws_a", "daily", "", 20, map[string]bool{
+		"message.in": true, "message.out": true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("query returned %d events, want 2: %+v", len(events), events)
+	}
+	for _, ev := range events {
+		if ev.WorkspaceID != "ws_a" {
+			t.Fatalf("cross-workspace event returned: %+v", ev)
+		}
+		if ev.Type == "tool.log" {
+			t.Fatalf("disallowed event type returned: %+v", ev)
+		}
+	}
+	if events[0].Type != "message.in" || events[1].Type != "message.out" {
+		t.Fatalf("events are not oldest-first: %+v", events)
+	}
+}
+
 // Product invariant 7: the personal mirror stays at its historical path, and a
 // tenant's mirror is namespaced beside it rather than merged into it.
 func TestPostgresPersonalMirrorPathIsUnchanged(t *testing.T) {

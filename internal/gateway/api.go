@@ -1939,7 +1939,7 @@ func channelDiagnostics(spec channelSpec, cfg map[string]any, enabled, registere
 		if detail == "" {
 			detail = "adapter is offline"
 		}
-		add("warn", "Adapter is not connected: "+detail+".", "Check credentials, allowlists, network access, then restart or reconnect.")
+		add("warn", "Adapter is not connected: "+detail+".", "Check credentials, allowlists, network access, then reconnect.")
 	}
 	if valuePresent(cfg["token"]) || valuePresent(cfg["bot_token"]) || valuePresent(cfg["access_token"]) {
 		if !valuePresent(cfg["default_output_to"]) {
@@ -1956,9 +1956,9 @@ func channelDiagnostics(spec channelSpec, cfg map[string]any, enabled, registere
 		}
 		if !connected {
 			if reason, _ := bot["_blocked_reason"].(string); reason != "" {
-				add("fail", "Bot mapping "+adapterID+" is blocked: "+reason+".", "Open the bot mapping, enable privileged exposure, save, then restart the gateway.")
+				add("fail", "Bot mapping "+adapterID+" is blocked: "+reason+".", "Open the bot mapping, enable privileged exposure, and save again.")
 			} else {
-				add("warn", "Bot mapping "+adapterID+" is not connected.", "Restart the gateway or check that the bot token is valid.")
+				add("warn", "Bot mapping "+adapterID+" is not connected.", "Reconnect the mapping or check that the bot token is valid.")
 			}
 		}
 	}
@@ -2106,6 +2106,13 @@ func (s *Server) handleTestChannelDelivery(c *fiber.Ctx) error {
 	if to == "" {
 		to = channelDefaultDestination(cfg, id, adapterID)
 	}
+	// WhatsApp Web's safest test destination is the linked account's own
+	// "Message yourself" chat. The sidecar resolves this sentinel after
+	// pairing, so a user does not need to discover or type a WhatsApp JID just
+	// to verify delivery.
+	if to == "" && adapterID == "whatsapp_web" {
+		to = "self"
+	}
 	if to == "" && adapterID != "webhook" && adapterID != "teams" && adapterID != "google_chat" {
 		return s.errMsg(c, fiber.StatusBadRequest, "destination is required; provide to or configure default_output_to")
 	}
@@ -2115,7 +2122,7 @@ func (s *Server) handleTestChannelDelivery(c *fiber.Ctx) error {
 		text = "Soulacy channel delivery test from " + adapterID + " at " + time.Now().Format(time.RFC3339)
 	}
 	if _, ok := statuses[adapterID]; !ok {
-		return s.errMsg(c, fiber.StatusBadRequest, "channel "+adapterID+" is not registered; save settings and restart the gateway")
+		return s.errMsg(c, fiber.StatusBadRequest, "channel "+adapterID+" is not registered; save its settings again to reconnect it")
 	}
 	out := message.Message{
 		ID:        uuid.New().String(),
@@ -2183,6 +2190,9 @@ func (s *Server) handleDiagnoseChannelDelivery(c *fiber.Ctx) error {
 	to := firstNonBlank(req.To, req.Destination, req.ChatID, req.ChannelID)
 	if to == "" {
 		to = channelDefaultDestination(cfg, id, adapterID)
+	}
+	if to == "" && adapterID == "whatsapp_web" {
+		to = "self"
 	}
 
 	status, registered := statuses[adapterID]
@@ -2368,8 +2378,9 @@ func (s *Server) handleUpdateChannel(c *fiber.Ctx) error {
 	}
 	s.recordAdminAudit(c, "channel.update", "channel", id, "ok", details)
 	return c.JSON(fiber.Map{
-		"ok":      true,
-		"message": "Channel saved. " + applied,
+		"ok":               true,
+		"message":          "Channel saved. " + applied,
+		"restart_required": false,
 	})
 }
 
@@ -2413,6 +2424,14 @@ func (s *Server) handleStartWhatsAppWebPairing(c *fiber.Ctx) error {
 	if cfgMapStr(chMap, "command") == "" {
 		chMap["command"] = "node"
 	}
+	resolvedCommand, resolveErr := wawebchan.ResolveExecutable(cfgMapStr(chMap, "command"))
+	if resolveErr != nil {
+		return s.errMsg(c, fiber.StatusServiceUnavailable,
+			"WhatsApp Web needs Node.js, but the gateway service could not find it. Install Node.js or set channels.whatsapp_web.command to its absolute path: "+resolveErr.Error())
+	}
+	// Persist the absolute path so later service restarts do not depend on the
+	// interactive shell's PATH.
+	chMap["command"] = resolvedCommand
 	if cfgMapStr(chMap, "session_dir") == "" {
 		base := filepath.Dir(s.config().Memory.Dir)
 		if base == "." || base == "" {
@@ -2628,10 +2647,11 @@ func (s *Server) setChannelEnabled(c *fiber.Ctx, enabled bool) error {
 	}
 	s.recordAdminAudit(c, action, "channel", id, "ok", map[string]any{"enabled": enabled})
 	return c.JSON(fiber.Map{
-		"ok":      true,
-		"id":      id,
-		"enabled": enabled,
-		"message": applied,
+		"ok":               true,
+		"id":               id,
+		"enabled":          enabled,
+		"message":          applied,
+		"restart_required": false,
 	})
 }
 

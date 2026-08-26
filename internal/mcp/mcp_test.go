@@ -489,3 +489,17 @@ func TestSanitizeIDAndFullName(t *testing.T) {
 		t.Errorf("FullName = %q, want %q", tool.FullName(), want)
 	}
 }
+
+func TestBlockedHostedToolOnlyAppliesToComposioShellEscapes(t *testing.T) {
+	for _, name := range []string{"COMPOSIO_REMOTE_WORKBENCH", "composio_remote_bash_tool", "shell_exec"} {
+		if !blockedHostedTool("composio", name) {
+			t.Fatalf("expected %q to be blocked", name)
+		}
+	}
+	if blockedHostedTool("composio", "GITHUB_CREATE_ISSUE") {
+		t.Fatal("ordinary connected-app action was blocked")
+	}
+	if blockedHostedTool("internal-tools", "shell_exec") {
+		t.Fatal("policy unexpectedly affected a non-Composio server")
+	}
+}

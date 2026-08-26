@@ -110,11 +110,38 @@ func TestValidate_UnsafeDeploymentAcknowledgementAllowsStartup(t *testing.T) {
 	c := validTeamConfig()
 	c.Storage.Backend = "sqlite"
 	c.Storage.PostgresDSN = ""
-	c.Executor.Backend = "process"
-	c.Runtime.Sandbox.Enabled = false
 	c.Deployment.Acknowledgements = []string{UnsafeDeploymentPrerequisitesAcknowledgement}
 	if err := c.Validate(); err != nil {
 		t.Fatalf("explicit unsafe acknowledgement should permit startup: %v", err)
+	}
+}
+
+func TestValidate_UnsafeAcknowledgementCannotBypassExecutionIsolation(t *testing.T) {
+	c := validTeamConfig()
+	c.Deployment.Profile = "production"
+	c.Executor.Backend = "process"
+	c.Runtime.Sandbox.Enabled = false
+	c.Deployment.Acknowledgements = []string{UnsafeDeploymentPrerequisitesAcknowledgement}
+	err := c.Validate()
+	if err == nil || !strings.Contains(err.Error(), "executor.backend") || !strings.Contains(err.Error(), "runtime.sandbox") {
+		t.Fatalf("unsafe acknowledgement bypassed the tenant execution boundary: %v", err)
+	}
+}
+
+func TestValidate_LocalTeamAcknowledgementAllowsLegacyExecution(t *testing.T) {
+	c := validTeamConfig()
+	c.Deployment.Profile = "local"
+	c.Executor.Backend = "process"
+	c.Executor.DockerRuntime = ""
+	c.Executor.DockerImage = ""
+	c.Executor.RequireSignedImage = false
+	c.Runtime.Sandbox.Enabled = false
+	c.Runtime.Sandbox.ContainerRuntime = ""
+	c.Runtime.Sandbox.Image = ""
+	c.Runtime.Sandbox.RequireSignedImage = false
+	c.Deployment.Acknowledgements = []string{UnsafeDeploymentPrerequisitesAcknowledgement}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("acknowledged local Team development install should remain bootable: %v", err)
 	}
 }
 

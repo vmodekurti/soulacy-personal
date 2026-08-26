@@ -23,6 +23,7 @@ package main
 
 import (
 	"fmt"
+	"html"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -230,7 +231,7 @@ func installLaunchAgent(bin string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create LaunchAgents dir: %w", err)
 	}
-	plist := fmt.Sprintf(launchdPlistTemplate, launchdLabel, bin, home, ws.Logs, ws.Logs)
+	plist := fmt.Sprintf(launchdPlistTemplate, launchdLabel, bin, home, servicePATH(), ws.Logs, ws.Logs)
 	if err := os.WriteFile(path, []byte(plist), 0o644); err != nil {
 		return fmt.Errorf("write plist: %w", err)
 	}
@@ -249,6 +250,20 @@ func installLaunchAgent(bin string) error {
 	fmt.Printf("\nThe gateway will start automatically at login and on reboot.\n")
 	fmt.Printf("Manage it with: sy daemon {status,uninstall,logs}\n")
 	return nil
+}
+
+func servicePATH() string {
+	seen := map[string]bool{}
+	parts := make([]string, 0, 12)
+	for _, dir := range append(strings.Split(os.Getenv("PATH"), string(os.PathListSeparator)),
+		"/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin") {
+		dir = strings.TrimSpace(dir)
+		if dir != "" && !seen[dir] {
+			seen[dir] = true
+			parts = append(parts, dir)
+		}
+	}
+	return html.EscapeString(strings.Join(parts, string(os.PathListSeparator)))
 }
 
 func uninstallLaunchAgent() error {
@@ -347,6 +362,11 @@ const launchdPlistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
   </array>
   <key>WorkingDirectory</key>
   <string>%s</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>%s</string>
+  </dict>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>

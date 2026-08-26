@@ -58,10 +58,20 @@ gVisor). The worker has no HTTP listener and never loads the gateway config;
 its narrow `SOULACY_WORKER_*` environment contains only NATS identity,
 execution-image trust, limits, and workspace-mount settings.
 
+Readiness is end-to-end: Team and Scale require a response from a live worker,
+not merely a successful connection to NATS. The execution boundary is a
+non-waivable startup requirement even when an operator has acknowledged other
+temporarily unavailable multi-user infrastructure.
+
 Network is `none` by default. An egress-enabled sandbox must name a dedicated
 egress network and an authenticated proxy; the proxy is responsible for
 enforcing `allowed_egress_hosts`, DNS policy, byte limits, and audit records.
 Direct bridge networking without a proxy is rejected in Team and Scale.
+
+Never mount a host container-runtime socket into the gateway. A runtime socket
+is an administrative API, not a sandbox. Workers may access the runtime only on
+dedicated execution nodes; the disposable workload containers they create
+never receive the socket.
 
 Personal mode retains the POSIX process wrapper only behind the explicit
 `runtime.sandbox.mode: unsandboxed` compatibility escape hatch. It is not a

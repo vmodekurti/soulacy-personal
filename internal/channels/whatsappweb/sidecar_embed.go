@@ -27,6 +27,29 @@ const SidecarScriptName = "whatsapp-web-sidecar.mjs"
 // baileysPackage is the sidecar's single npm dependency.
 const baileysPackage = "@whiskeysockets/baileys"
 
+// ResolveExecutable finds a configured sidecar executable even when Soulacy
+// runs under launchd/systemd with a minimal PATH. Absolute configuration still
+// wins, followed by PATH and the standard Homebrew/system locations.
+func ResolveExecutable(command string) (string, error) {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return "", fmt.Errorf("executable name is empty")
+	}
+	if path, err := exec.LookPath(command); err == nil {
+		return path, nil
+	}
+	if filepath.IsAbs(command) {
+		return "", fmt.Errorf("%s is not executable", command)
+	}
+	for _, dir := range []string{"/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"} {
+		candidate := filepath.Join(dir, command)
+		if path, err := exec.LookPath(candidate); err == nil {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("%s was not found in PATH or standard install locations", command)
+}
+
 // EnsureSidecarScript writes the embedded sidecar script into dir
 // (creating it) and returns the script's absolute path. An existing file
 // with different content is overwritten — upgrades ship the new script
@@ -66,7 +89,7 @@ func EnsureBaileys(ctx context.Context, dir string) error {
 	if BaileysInstalled(dir) {
 		return nil
 	}
-	npm, err := exec.LookPath("npm")
+	npm, err := ResolveExecutable("npm")
 	if err != nil {
 		return fmt.Errorf("whatsapp_web: npm not found — WhatsApp Web needs Node.js (install from https://nodejs.org), or run manually: npm install --prefix %s %s", dir, baileysPackage)
 	}

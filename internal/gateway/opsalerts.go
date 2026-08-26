@@ -215,7 +215,7 @@ func opsAlertNextAction(key string) string {
 	case "registry":
 		return "Save the channel on the Channels page; saving connects the adapter immediately."
 	case "adapter":
-		return "Enable the selected channel and restart the gateway."
+		return "Enable the selected channel; Soulacy connects it immediately."
 	case "connected":
 		return "Open Channels and run Delivery Doctor for the selected alert channel."
 	default:

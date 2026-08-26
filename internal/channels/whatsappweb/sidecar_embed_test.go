@@ -65,3 +65,23 @@ func TestBaileysInstalledDetection(t *testing.T) {
 		t.Fatalf("EnsureBaileys short-circuit: %v", err)
 	}
 }
+
+func TestResolveExecutableAcceptsAbsolutePath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "node")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ResolveExecutable(path)
+	if err != nil {
+		t.Fatalf("ResolveExecutable: %v", err)
+	}
+	if got != path {
+		t.Fatalf("ResolveExecutable() = %q, want %q", got, path)
+	}
+}
+
+func TestResolveExecutableRejectsMissingCommand(t *testing.T) {
+	if _, err := ResolveExecutable("definitely-not-a-soulacy-executable"); err == nil {
+		t.Fatal("missing executable unexpectedly resolved")
+	}
+}

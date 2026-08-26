@@ -145,7 +145,7 @@
        chain provides no height at all. */
     flex: 1 1 auto;
     align-self: stretch;
-    min-height: 360px;
+    min-height: 0;
     height: 100%;
     background: #0e1020;
     border: 1px solid var(--border);
@@ -197,6 +197,11 @@
   .yv-pre {
     color: #d7dcf5 !important;
     -webkit-text-fill-color: #d7dcf5;
+    /* App-level code-block styling caps every <pre> at 320px. This <pre> is an
+       editor paint layer rather than a document code block, so that cap leaves
+       most of a full-height editor visually inactive. Keep it pinned to the
+       same inset box as the textarea. */
+    max-height: none !important;
     pointer-events: none;
     overflow: hidden;            /* scroll is driven by the textarea */
     z-index: 3;

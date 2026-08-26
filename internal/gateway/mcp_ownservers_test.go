@@ -117,6 +117,31 @@ func TestTheStoredServerIsRebuiltWithItsSecret(t *testing.T) {
 	}
 }
 
+func TestHostedIntegrationHeadersAllStayInWorkspaceVault(t *testing.T) {
+	s, store, vault := ownServerServer(t)
+	body := `{"transport":"http","url":"https://api.nango.dev/mcp","headers":{"Authorization":"Bearer env-secret","connection-id":"customer-42","provider-config-key":"github-prod"}}`
+	if status, resp := gatewayJSON(t, s, "PUT", "/api/v1/mcp/own/nango", "secret", body); status != 200 {
+		t.Fatalf("status=%d body=%v", status, resp)
+	}
+	rows, err := store.List(context.Background(), wsroot.PersonalWorkspaceID)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("stored rows=%v err=%v", rows, err)
+	}
+	for key, value := range rows[0].Headers {
+		if value != "" {
+			t.Fatalf("header %s leaked into MCP store: %q", key, value)
+		}
+		secret, getErr := vault.Get(context.Background(), wsroot.PersonalWorkspaceID, mcp.CredentialNamespace("nango"), key)
+		if getErr != nil || len(secret) == 0 {
+			t.Fatalf("header %s missing from vault: %v", key, getErr)
+		}
+	}
+	resolved := s.workspaceOwnedServers(wsroot.PersonalWorkspaceID)["nango"]
+	if resolved.Headers["connection-id"] != "customer-42" || resolved.Headers["provider-config-key"] != "github-prod" {
+		t.Fatalf("runtime headers were not restored: %#v", resolved.Headers)
+	}
+}
+
 func TestContainerServerReceivesOnlyItsCanonicalWorkspaceRoot(t *testing.T) {
 	s, store, _ := ownServerServer(t)
 	root := t.TempDir()
