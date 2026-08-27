@@ -5,15 +5,21 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/../.." && pwd)
 VAR_FILE="$SCRIPT_DIR/terraform.tfvars"
 DEPLOYMENT_MODE="${SOULACY_AWS_MODE:-}"
+INFRASTRUCTURE_PROFILE="${SOULACY_AWS_INFRASTRUCTURE_PROFILE:-standard}"
+BUDGET_EMAIL="${SOULACY_AWS_BUDGET_EMAIL:-}"
+MONTHLY_BUDGET_USD="${SOULACY_AWS_MONTHLY_BUDGET_USD:-180}"
+OFF_HOURS_TIMEZONE="${SOULACY_AWS_OFF_HOURS_TIMEZONE:-America/Chicago}"
+OFF_HOURS_START="${SOULACY_AWS_OFF_HOURS_START:-8}"
+OFF_HOURS_STOP="${SOULACY_AWS_OFF_HOURS_STOP:-22}"
 AWS_REGION="${SOULACY_AWS_REGION:-us-east-1}"
 DEPLOYMENT_NAME="${SOULACY_AWS_NAME:-soulacy}"
-ENVIRONMENT="${SOULACY_AWS_ENVIRONMENT:-production}"
+ENVIRONMENT="${SOULACY_AWS_ENVIRONMENT:-}"
 
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required"; }
 usage() {
   cat <<'USAGE'
-Usage: deploy.sh [--mode personal|team|scale] [--var-file PATH]
+Usage: deploy.sh [--mode personal|team-lite|team|scale] [--var-file PATH]
 
 If --mode is omitted on an interactive terminal, the script asks which Soulacy
 variant to install. CI must pass --mode or set SOULACY_AWS_MODE.
@@ -29,18 +35,45 @@ while (($#)); do
 done
 if [[ -z "$DEPLOYMENT_MODE" ]]; then
   if [[ -t 0 ]]; then
-    printf 'Select the Soulacy variant:\n  1) Personal — single operator, embedded storage\n  2) Team — multi-user, PostgreSQL, KMS, NATS and isolated worker\n  3) Scale — Team plus shared Redis and S3 artifacts\n'
-    read -r -p 'Choice [1-3]: ' choice
-    case "$choice" in 1) DEPLOYMENT_MODE=personal ;; 2) DEPLOYMENT_MODE=team ;; 3) DEPLOYMENT_MODE=scale ;; *) die "invalid variant selection" ;; esac
+    printf 'Select the Soulacy variant:\n  1) Personal — single operator, embedded storage\n  2) Team Lite — one-month small-team pilot targeted below $200 of AWS infrastructure\n  3) Team — multi-user, PostgreSQL, KMS, NATS and isolated worker\n  4) Scale — Team plus shared Redis and S3 artifacts\n'
+    read -r -p 'Choice [1-4]: ' choice
+    case "$choice" in 1) DEPLOYMENT_MODE=personal ;; 2) DEPLOYMENT_MODE=team-lite ;; 3) DEPLOYMENT_MODE=team ;; 4) DEPLOYMENT_MODE=scale ;; *) die "invalid variant selection" ;; esac
   else
-    die "select a variant with --mode personal|team|scale"
+    die "select a variant with --mode personal|team-lite|team|scale"
   fi
 fi
-[[ "$DEPLOYMENT_MODE" =~ ^(personal|team|scale)$ ]] || die "mode must be personal, team, or scale"
+[[ "$DEPLOYMENT_MODE" =~ ^(personal|team-lite|team|scale)$ ]] || die "mode must be personal, team-lite, team, or scale"
+INSTALL_VARIANT="$DEPLOYMENT_MODE"
+if [[ "$INSTALL_VARIANT" == "team-lite" ]]; then
+  DEPLOYMENT_MODE=team
+  INFRASTRUCTURE_PROFILE=budget
+fi
+if [[ -z "$ENVIRONMENT" ]]; then
+  if [[ "$INFRASTRUCTURE_PROFILE" == "budget" ]]; then ENVIRONMENT=pilot; else ENVIRONMENT=production; fi
+fi
+[[ "$INFRASTRUCTURE_PROFILE" =~ ^(standard|budget)$ ]] || die "infrastructure profile must be standard or budget"
+if [[ "$INFRASTRUCTURE_PROFILE" == "budget" && "$DEPLOYMENT_MODE" != "team" ]]; then
+  die "the budget infrastructure profile is supported only by Team Lite"
+fi
+if [[ "$INFRASTRUCTURE_PROFILE" == "budget" && -z "$BUDGET_EMAIL" ]]; then
+  if [[ -t 0 ]]; then
+    read -r -p 'Email for AWS spend alerts: ' BUDGET_EMAIL
+  else
+    die "Team Lite requires SOULACY_AWS_BUDGET_EMAIL for spend alerts"
+  fi
+fi
+if [[ "$INFRASTRUCTURE_PROFILE" == "budget" ]]; then
+  [[ "$BUDGET_EMAIL" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]] || die "invalid AWS budget alert email"
+  [[ "$MONTHLY_BUDGET_USD" =~ ^[0-9]+([.][0-9]+)?$ ]] || die "SOULACY_AWS_MONTHLY_BUDGET_USD must be numeric"
+  [[ "$OFF_HOURS_TIMEZONE" =~ ^[A-Za-z_]+/[A-Za-z0-9_+.-]+$ ]] || die "invalid SOULACY_AWS_OFF_HOURS_TIMEZONE"
+  [[ "$OFF_HOURS_START" =~ ^([0-9]|1[0-9]|2[0-3])$ ]] || die "SOULACY_AWS_OFF_HOURS_START must be an hour from 0 to 23"
+  [[ "$OFF_HOURS_STOP" =~ ^([0-9]|1[0-9]|2[0-3])$ ]] || die "SOULACY_AWS_OFF_HOURS_STOP must be an hour from 0 to 23"
+fi
 for command in aws terraform docker jq openssl cosign curl git; do need "$command"; done
 docker buildx version >/dev/null 2>&1 || die "Docker Buildx is required"
 [[ -f "$VAR_FILE" ]] || die "Terraform variable file not found: $VAR_FILE (copy terraform.tfvars.example first)"
 [[ "$DEPLOYMENT_NAME" =~ ^[a-z][a-z0-9-]{1,20}$ ]] || die "SOULACY_AWS_NAME has an invalid format"
+[[ "$ENVIRONMENT" =~ ^[a-z][a-z0-9-]{1,20}$ ]] || die "SOULACY_AWS_ENVIRONMENT has an invalid format"
 
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 REGISTRY="$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
@@ -62,7 +95,11 @@ TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/soulacy-aws.XXXXXX")
 cleanup() { rm -rf -- "$TMP_DIR"; }
 trap cleanup EXIT
 
-printf 'Deploying Soulacy %s (%s variant) to AWS account %s in %s\n' "$BUILD_TAG" "$DEPLOYMENT_MODE" "$ACCOUNT_ID" "$AWS_REGION"
+printf 'Deploying Soulacy %s (%s variant, %s infrastructure) to AWS account %s in %s\n' "$BUILD_TAG" "$INSTALL_VARIANT" "$INFRASTRUCTURE_PROFILE" "$ACCOUNT_ID" "$AWS_REGION"
+if [[ "$INFRASTRUCTURE_PROFILE" == "budget" ]]; then
+  printf '%s\n' 'Team Lite target: about $90-$150 for 730 hours at low traffic in us-east-1; AWS credits and prices are not guarantees.'
+  printf '%s\n' 'Availability tradeoff: PostgreSQL is Single-AZ and compute is burstable. Destroy it promptly after the pilot.'
+fi
 
 ensure_state_bucket() {
   if ! aws s3api head-bucket --bucket "$STATE_BUCKET" >/dev/null 2>&1; then
@@ -196,14 +233,24 @@ terraform -chdir="$SCRIPT_DIR" init -reconfigure \
   -backend-config="region=$AWS_REGION" -backend-config="encrypt=true" -backend-config="use_lockfile=true"
 terraform -chdir="$SCRIPT_DIR" apply -auto-approve -var-file="$VAR_FILE" \
   -var="aws_region=$AWS_REGION" -var="name=$DEPLOYMENT_NAME" -var="environment=$ENVIRONMENT" -var="deployment_mode=$DEPLOYMENT_MODE" \
+  -var="infrastructure_profile=$INFRASTRUCTURE_PROFILE" -var="budget_alert_email=$BUDGET_EMAIL" -var="monthly_budget_usd=$MONTHLY_BUDGET_USD" \
+  -var="off_hours_timezone=$OFF_HOURS_TIMEZONE" -var="off_hours_start_hour=$OFF_HOURS_START" -var="off_hours_stop_hour=$OFF_HOURS_STOP" \
   -var="gateway_image=$GATEWAY_IMAGE" -var="execution_image=$EXECUTION_IMAGE" -var="nats_image=$NATS_IMAGE" \
   -var="bootstrap_secret_name=$BOOTSTRAP_SECRET" -var="nats_tls_secret_name=$NATS_SECRET"
 
 cat >"$SCRIPT_DIR/.deployment.env" <<META
+AWS_PROFILE=${AWS_PROFILE:-}
 AWS_REGION=$AWS_REGION
 DEPLOYMENT_NAME=$DEPLOYMENT_NAME
 ENVIRONMENT=$ENVIRONMENT
 DEPLOYMENT_MODE=$DEPLOYMENT_MODE
+INSTALL_VARIANT=$INSTALL_VARIANT
+INFRASTRUCTURE_PROFILE=$INFRASTRUCTURE_PROFILE
+BUDGET_EMAIL=$BUDGET_EMAIL
+MONTHLY_BUDGET_USD=$MONTHLY_BUDGET_USD
+OFF_HOURS_TIMEZONE=$OFF_HOURS_TIMEZONE
+OFF_HOURS_START=$OFF_HOURS_START
+OFF_HOURS_STOP=$OFF_HOURS_STOP
 STATE_BUCKET=$STATE_BUCKET
 STATE_KEY=$STATE_KEY
 VAR_FILE=$VAR_FILE
@@ -223,5 +270,8 @@ if ! curl --fail --silent --show-error --retry 90 --retry-delay 10 --retry-all-e
 fi
 
 printf '\nSoulacy is ready: %s\n' "$URL"
+if [[ "$INFRASTRUCTURE_PROFILE" == "budget" ]]; then
+  printf 'Team Lite is running as application mode Team. Review AWS Billing daily and destroy the stack after the pilot.\n'
+fi
 printf 'Bootstrap key remains in Secrets Manager secret: %s\n' "$BOOTSTRAP_SECRET"
 printf 'Run: %s/status.sh\n' "$SCRIPT_DIR"

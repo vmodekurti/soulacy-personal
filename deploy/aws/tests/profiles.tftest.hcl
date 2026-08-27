@@ -66,6 +66,52 @@ run "team_adds_multi_user_plane" {
     condition     = length(aws_elasticache_replication_group.redis) == 0 && length(aws_s3_bucket.artifacts) == 0
     error_message = "Team must omit Scale-only Redis and artifact S3."
   }
+  assert {
+    condition     = length(aws_scheduler_schedule.start_compute) == 0 && length(aws_scheduler_schedule.stop_compute) == 0
+    error_message = "Standard Team must not receive the temporary pilot power schedule."
+  }
+}
+
+run "team_lite_preserves_team_boundaries_on_budget_resources" {
+  command = plan
+  variables {
+    deployment_mode        = "team"
+    infrastructure_profile = "budget"
+    budget_alert_email     = "operator@example.com"
+  }
+
+  assert {
+    condition     = length(aws_instance.worker) == 1 && length(aws_instance.nats) == 1 && length(aws_db_instance.postgres) == 1
+    error_message = "Team Lite must preserve the separate worker, NATS, and PostgreSQL boundaries."
+  }
+  assert {
+    condition     = aws_instance.gateway.instance_type == "t3.small" && aws_instance.worker[0].instance_type == "t3.small" && aws_instance.nats[0].instance_type == "t3.micro"
+    error_message = "Team Lite must use its cost-bounded burstable instance sizes."
+  }
+  assert {
+    condition     = aws_db_instance.postgres[0].instance_class == "db.t4g.micro" && !aws_db_instance.postgres[0].multi_az && aws_db_instance.postgres[0].allocated_storage == 20
+    error_message = "Team Lite must use the temporary Single-AZ 20 GB database profile."
+  }
+  assert {
+    condition     = length(aws_nat_gateway.this) == 0 && length(aws_eip.nat) == 0
+    error_message = "Team Lite must avoid the fixed NAT Gateway and EIP charges."
+  }
+  assert {
+    condition     = aws_instance.gateway.associate_public_ip_address && aws_instance.worker[0].associate_public_ip_address && aws_instance.nats[0].associate_public_ip_address
+    error_message = "Team Lite compute needs outbound internet through public IPs when NAT is omitted."
+  }
+  assert {
+    condition     = length(aws_budgets_budget.pilot) == 1 && aws_budgets_budget.pilot[0].limit_amount == "180"
+    error_message = "Team Lite must install the monthly account budget guardrail."
+  }
+  assert {
+    condition     = length(aws_scheduler_schedule.start_compute) == 1 && length(aws_scheduler_schedule.stop_compute) == 1 && length(aws_scheduler_schedule.start_database) == 1 && length(aws_scheduler_schedule.stop_database) == 1
+    error_message = "Team Lite must install the four ordered compute/database power schedules."
+  }
+  assert {
+    condition     = aws_scheduler_schedule.start_compute[0].schedule_expression == "cron(15 8 * * ? *)" && aws_scheduler_schedule.stop_compute[0].schedule_expression == "cron(0 22 * * ? *)" && aws_scheduler_schedule.start_compute[0].schedule_expression_timezone == "America/Chicago"
+    error_message = "Team Lite must default to the documented 08:00-22:00 America/Chicago schedule."
+  }
 }
 
 run "scale_adds_shared_services" {

@@ -10,6 +10,13 @@ not silently introduce infrastructure dependencies.
 | `team` | Multiple authenticated users in one organization | JWT auth, PostgreSQL, external KMS, NATS, and signed gVisor execution workers |
 | `scale` | Multiple gateway/worker instances | Everything in Team, plus replicated gateways and shared artifact storage |
 
+Team Lite is not a fourth application mode. It is the automated AWS
+deployment's temporary `infrastructure_profile=budget`, while the generated
+Soulacy configuration still says `deployment.mode: team`. Therefore all Team
+startup validation, authentication, tenant boundaries, KMS, queue, and worker
+isolation requirements continue to apply. See the
+[AWS deployment guide](https://github.com/vmodekurti/soulacy/blob/main/deploy/aws/README.md#team-lite-one-month-pilot-under-a-200-credit-budget).
+
 Choose a mode during `sy setup` or change an existing installation with:
 
 ```bash
@@ -82,6 +89,13 @@ runtime:
 The bootstrap API key is an administrative recovery credential, not a shared
 end-user password. Normal users authenticate with short-lived JWTs or the
 configured OIDC provider.
+
+For a small, temporary AWS evaluation, `deploy/aws/deploy.sh --mode team-lite`
+keeps this exact application contract while using burstable compute and a
+Single-AZ database. Do not reproduce that availability profile for a production
+Team deployment. Docker and gVisor remain installed on the isolated worker.
+The AWS profile also schedules RDS and EC2 off-hours and provides
+`deploy/aws/power.sh` for immediate manual start/stop overrides.
 
 Use `/admin/setup` once to bootstrap a new catalog, then use `/admin` for
 normal deployment administration and tenant provisioning. These control-plane

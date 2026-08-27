@@ -29,6 +29,16 @@ variable "deployment_mode" {
   }
 }
 
+variable "infrastructure_profile" {
+  description = "AWS topology sizing: standard for production defaults, budget for a temporary small Team pilot."
+  type        = string
+  default     = "standard"
+  validation {
+    condition     = contains(["standard", "budget"], var.infrastructure_profile)
+    error_message = "infrastructure_profile must be standard or budget."
+  }
+}
+
 variable "domain_name" {
   description = "Public DNS name, for example soulacy.example.com."
   type        = string
@@ -137,6 +147,62 @@ variable "enable_waf" {
   description = "Attach AWS managed WAF rules and an IP rate limit to the public ALB."
   type        = bool
   default     = true
+}
+
+variable "monthly_budget_usd" {
+  description = "Monthly AWS budget created for the budget profile."
+  type        = number
+  default     = 180
+  validation {
+    condition     = var.monthly_budget_usd > 0 && var.monthly_budget_usd <= 10000
+    error_message = "monthly_budget_usd must be greater than zero and no more than 10000."
+  }
+}
+
+variable "budget_alert_email" {
+  description = "Optional email for 50%, 80%, and 100% forecast/actual AWS budget alerts."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.budget_alert_email == "" || can(regex("^[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$", var.budget_alert_email))
+    error_message = "budget_alert_email must be empty or a valid email address."
+  }
+}
+
+variable "enable_off_hours_schedule" {
+  description = "Automatically stop Team Lite compute/database after hours and restart them in the morning."
+  type        = bool
+  default     = true
+}
+
+variable "off_hours_timezone" {
+  description = "IANA timezone used by the Team Lite start/stop schedule."
+  type        = string
+  default     = "America/Chicago"
+  validation {
+    condition     = can(regex("^[A-Za-z_]+/[A-Za-z0-9_+.-]+$", var.off_hours_timezone))
+    error_message = "off_hours_timezone must be an IANA timezone such as America/Chicago."
+  }
+}
+
+variable "off_hours_start_hour" {
+  description = "Local hour (0-23) when Team Lite begins starting; EC2 follows after PostgreSQL."
+  type        = number
+  default     = 8
+  validation {
+    condition     = floor(var.off_hours_start_hour) == var.off_hours_start_hour && var.off_hours_start_hour >= 0 && var.off_hours_start_hour <= 23
+    error_message = "off_hours_start_hour must be an integer from 0 through 23."
+  }
+}
+
+variable "off_hours_stop_hour" {
+  description = "Local hour (0-23) when Team Lite begins stopping; PostgreSQL follows EC2."
+  type        = number
+  default     = 22
+  validation {
+    condition     = floor(var.off_hours_stop_hour) == var.off_hours_stop_hour && var.off_hours_stop_hour >= 0 && var.off_hours_stop_hour <= 23
+    error_message = "off_hours_stop_hour must be an integer from 0 through 23."
+  }
 }
 
 variable "tags" {

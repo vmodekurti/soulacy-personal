@@ -124,7 +124,7 @@ resource "aws_security_group" "efs" {
       protocol        = "tcp"
       from_port       = 2049
       to_port         = 2049
-      security_groups = [aws_security_group.worker[0].id]
+      security_groups = [aws_security_group.worker.id]
     }
   }
   lifecycle { create_before_destroy = true }

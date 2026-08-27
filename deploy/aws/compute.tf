@@ -3,7 +3,14 @@ data "aws_ssm_parameter" "ubuntu_ami" {
 }
 
 locals {
-  ecr_registry = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com"
+  ecr_registry          = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com"
+  gateway_instance_type = local.is_budget ? "t3.small" : var.gateway_instance_type
+  worker_instance_type  = local.is_budget ? "t3.small" : var.worker_instance_type
+  nats_instance_type    = local.is_budget ? "t3.micro" : var.nats_instance_type
+  gateway_volume_size   = local.is_budget ? 20 : 40
+  worker_volume_size    = local.is_budget ? 25 : 50
+  nats_volume_size      = local.is_budget ? 15 : 40
+  worker_concurrency    = local.is_budget ? 1 : var.worker_concurrency
   common_bootstrap = templatefile("${path.module}/templates/common.sh.tftpl", {
     aws_region     = var.aws_region
     ecr_registry   = local.ecr_registry
@@ -15,8 +22,9 @@ locals {
 resource "aws_instance" "nats" {
   count                       = local.is_multi_user ? 1 : 0
   ami                         = data.aws_ssm_parameter.ubuntu_ami.value
-  instance_type               = var.nats_instance_type
-  subnet_id                   = aws_subnet.private[0].id
+  instance_type               = local.nats_instance_type
+  subnet_id                   = local.is_budget ? aws_subnet.public[0].id : aws_subnet.private[0].id
+  associate_public_ip_address = local.is_budget
   vpc_security_group_ids      = [aws_security_group.nats.id]
   iam_instance_profile        = aws_iam_instance_profile.nats[0].name
   user_data_replace_on_change = true
@@ -24,7 +32,16 @@ resource "aws_instance" "nats" {
     aws_region      = var.aws_region
     nats_secret_arn = data.aws_secretsmanager_secret.nats_tls[0].arn
     nats_image      = var.nats_image
+    memory_limit    = local.is_budget ? "512m" : "2g"
+    memory_store    = local.is_budget ? "256Mb" : "1Gb"
+    cpu_limit       = local.is_budget ? "0.5" : "2"
+    file_store      = local.is_budget ? "5Gb" : "20Gb"
   })
+
+  dynamic "credit_specification" {
+    for_each = local.is_budget ? [1] : []
+    content { cpu_credits = "standard" }
+  }
 
   metadata_options {
     http_endpoint = "enabled"
@@ -34,7 +51,7 @@ resource "aws_instance" "nats" {
     encrypted   = true
     kms_key_id  = aws_kms_key.storage.arn
     volume_type = "gp3"
-    volume_size = 40
+    volume_size = local.nats_volume_size
   }
   tags = { Name = "${local.prefix}-nats" }
 }
@@ -51,8 +68,9 @@ resource "aws_route53_record" "nats" {
 resource "aws_instance" "worker" {
   count                       = local.is_multi_user ? 1 : 0
   ami                         = data.aws_ssm_parameter.ubuntu_ami.value
-  instance_type               = var.worker_instance_type
-  subnet_id                   = aws_subnet.private[1].id
+  instance_type               = local.worker_instance_type
+  subnet_id                   = local.is_budget ? aws_subnet.public[1].id : aws_subnet.private[1].id
+  associate_public_ip_address = local.is_budget
   vpc_security_group_ids      = [aws_security_group.worker.id]
   iam_instance_profile        = aws_iam_instance_profile.worker[0].name
   user_data_replace_on_change = true
@@ -63,8 +81,13 @@ resource "aws_instance" "worker" {
     nats_secret_arn      = data.aws_secretsmanager_secret.nats_tls[0].arn
     efs_id               = aws_efs_file_system.workspace.id
     execution_image      = var.execution_image
-    worker_concurrency   = var.worker_concurrency
+    worker_concurrency   = local.worker_concurrency
   })
+
+  dynamic "credit_specification" {
+    for_each = local.is_budget ? [1] : []
+    content { cpu_credits = "standard" }
+  }
 
   metadata_options {
     http_endpoint = "enabled"
@@ -74,7 +97,7 @@ resource "aws_instance" "worker" {
     encrypted   = true
     kms_key_id  = aws_kms_key.storage.arn
     volume_type = "gp3"
-    volume_size = 50
+    volume_size = local.worker_volume_size
   }
   depends_on = [aws_route53_record.nats, aws_efs_mount_target.workspace]
   tags       = { Name = "${local.prefix}-worker" }
@@ -82,8 +105,9 @@ resource "aws_instance" "worker" {
 
 resource "aws_instance" "gateway" {
   ami                         = data.aws_ssm_parameter.ubuntu_ami.value
-  instance_type               = var.gateway_instance_type
-  subnet_id                   = aws_subnet.private[0].id
+  instance_type               = local.gateway_instance_type
+  subnet_id                   = local.is_budget ? aws_subnet.public[0].id : aws_subnet.private[0].id
+  associate_public_ip_address = local.is_budget
   vpc_security_group_ids      = [aws_security_group.gateway.id]
   iam_instance_profile        = aws_iam_instance_profile.gateway.name
   user_data_replace_on_change = true
@@ -117,11 +141,15 @@ resource "aws_instance" "gateway" {
     http_endpoint = "enabled"
     http_tokens   = "required"
   }
+  dynamic "credit_specification" {
+    for_each = local.is_budget ? [1] : []
+    content { cpu_credits = "standard" }
+  }
   root_block_device {
     encrypted   = true
     kms_key_id  = aws_kms_key.storage.arn
     volume_type = "gp3"
-    volume_size = 40
+    volume_size = local.gateway_volume_size
   }
   depends_on = [aws_efs_mount_target.workspace]
   tags       = { Name = "${local.prefix}-gateway" }
@@ -144,7 +172,7 @@ resource "aws_lb_target_group" "gateway" {
   target_type = "instance"
 
   health_check {
-    enabled             = true
+    enabled = true
     # Public, code-only readiness endpoint. /api/v1/health is intentionally
     # authenticated and cannot be used by an ALB health checker.
     path                = "/ready"

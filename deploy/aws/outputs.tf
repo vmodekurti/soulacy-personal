@@ -2,6 +2,14 @@ output "url" {
   value = "https://${var.domain_name}"
 }
 
+output "infrastructure_profile" {
+  value = var.infrastructure_profile
+}
+
+output "monthly_budget_usd" {
+  value = local.is_budget ? var.monthly_budget_usd : null
+}
+
 output "gateway_instance_id" {
   value = aws_instance.gateway.id
 }
@@ -25,6 +33,20 @@ output "credential_kms_key" {
 output "rds_endpoint" {
   value     = local.is_multi_user ? aws_db_instance.postgres[0].address : null
   sensitive = true
+}
+
+output "rds_instance_identifier" {
+  value = local.is_multi_user ? aws_db_instance.postgres[0].identifier : null
+}
+
+output "off_hours_schedule" {
+  value = local.power_schedule_enabled ? {
+    timezone     = var.off_hours_timezone
+    database_on  = format("%02d:00", var.off_hours_start_hour)
+    compute_on   = format("%02d:15", var.off_hours_start_hour)
+    compute_off  = format("%02d:00", var.off_hours_stop_hour)
+    database_off = format("%02d:10", var.off_hours_stop_hour)
+  } : null
 }
 
 output "redis_endpoint" {

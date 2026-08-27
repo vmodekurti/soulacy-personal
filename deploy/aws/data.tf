@@ -135,9 +135,9 @@ resource "aws_db_instance" "postgres" {
   identifier                    = local.prefix
   engine                        = "postgres"
   engine_version                = "16"
-  instance_class                = var.db_instance_class
-  allocated_storage             = 50
-  max_allocated_storage         = 500
+  instance_class                = local.is_budget ? "db.t4g.micro" : var.db_instance_class
+  allocated_storage             = local.is_budget ? 20 : 50
+  max_allocated_storage         = local.is_budget ? 100 : 500
   storage_type                  = "gp3"
   storage_encrypted             = true
   kms_key_id                    = aws_kms_key.storage.arn
@@ -148,14 +148,14 @@ resource "aws_db_instance" "postgres" {
   db_subnet_group_name          = aws_db_subnet_group.this[0].name
   vpc_security_group_ids        = [aws_security_group.database.id]
   publicly_accessible           = false
-  multi_az                      = true
-  backup_retention_period       = 14
-  deletion_protection           = var.enable_deletion_protection
-  skip_final_snapshot           = !var.enable_deletion_protection
-  final_snapshot_identifier     = var.enable_deletion_protection ? "${local.prefix}-final" : null
-  performance_insights_enabled  = true
+  multi_az                      = !local.is_budget
+  backup_retention_period       = local.is_budget ? 1 : 14
+  deletion_protection           = local.is_budget ? false : var.enable_deletion_protection
+  skip_final_snapshot           = local.is_budget ? true : !var.enable_deletion_protection
+  final_snapshot_identifier     = local.is_budget || !var.enable_deletion_protection ? null : "${local.prefix}-final"
+  performance_insights_enabled  = !local.is_budget
   auto_minor_version_upgrade    = true
-  apply_immediately             = false
+  apply_immediately             = local.is_budget
 }
 
 resource "aws_elasticache_subnet_group" "this" {

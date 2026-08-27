@@ -4,6 +4,7 @@ environment      = "production"
 # deploy.sh --mode is authoritative; this is the safe default for direct
 # Terraform use.
 deployment_mode  = "personal"
+infrastructure_profile = "standard"
 domain_name      = "soulacy.example.com"
 route53_zone_id  = "Z0123456789EXAMPLE"
 
@@ -22,6 +23,16 @@ redis_node_type       = "cache.t4g.small"
 worker_concurrency    = 4
 
 enable_deletion_protection = true
+
+# Used by --mode team-lite. The deployment script overrides the infrastructure
+# profile to budget and creates an account-wide AWS Budget. Set the alert email
+# with SOULACY_AWS_BUDGET_EMAIL. Email addresses are operational metadata, not
+# secrets, and will be recorded in Terraform state.
+monthly_budget_usd = 180
+enable_off_hours_schedule = true
+off_hours_timezone        = "America/Chicago"
+off_hours_start_hour       = 8
+off_hours_stop_hour        = 22
 
 tags = {
   Owner      = "platform-team"

@@ -71,6 +71,37 @@ docker run -d --name soulacy \
 
 More (Compose details, reverse proxies): [Docker deployment guide](../deployment/docker.md).
 
+## AWS Team Lite pilot
+
+For a small multi-user evaluation, the repository includes a Team Lite AWS
+profile targeted at less than `$200` of low-traffic infrastructure for one
+month. It remains Soulacy Team mode with PostgreSQL, authenticated workspaces,
+KMS credentials, mTLS NATS, and a separate signed/gVisor worker. It reduces
+capacity and availability, not tenant security controls.
+
+For a Cloudflare-hosted domain with Google login, the guided macOS wizard
+creates the delegated DNS zone, writes the non-secret Terraform configuration,
+and launches Team Lite:
+
+```bash
+deploy/aws/team-lite-quickstart.sh
+```
+
+It opens the Cloudflare and Google setup pages and prints the exact token
+permissions, origin, and callback URL. Provider secrets are never written to
+the Terraform variables file.
+
+After preparing `deploy/aws/terraform.tfvars` as described in the
+[automated AWS guide](https://github.com/vmodekurti/soulacy/blob/main/deploy/aws/README.md), run:
+
+```bash
+SOULACY_AWS_BUDGET_EMAIL=you@example.com deploy/aws/deploy.sh --mode team-lite
+```
+
+The profile creates a `$180` account-wide AWS Budget. A budget is an alert, not
+a hard spending stop; review Cost Explorer daily and destroy the pilot after
+the evaluation.
+
 ## Pre-built binaries
 
 Tagged releases publish `soulacy_<version>_<os>_<arch>.tar.gz` bundles

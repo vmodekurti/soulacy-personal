@@ -104,6 +104,11 @@ cd soulacy
 > worker and must not give the gateway control of a container daemon. Use the
 > [AWS deployment](deploy/aws/README.md) or follow the
 > [production execution-plane guide](docs/configuration/production-runtime.md).
+> For a small one-month AWS evaluation, the same deployment includes
+> `--mode team-lite`: full Team application boundaries on cost-bounded,
+> reduced-availability infrastructure with an AWS Budget guardrail.
+> Cloudflare DNS plus Google login can be bootstrapped interactively with
+> `deploy/aws/team-lite-quickstart.sh`.
 
 From a checkout, [`scripts/docker-deploy.sh`](scripts/docker-deploy.sh) builds the image, runs
 the container, publishes a host port, waits for the gateway to become healthy,
