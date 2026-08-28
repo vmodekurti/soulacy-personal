@@ -59,6 +59,9 @@ func TestJetStreamRedeliversAnUnacknowledgedIngressMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = backend.Close() })
+	if err := backend.Ping(ctx); err != nil {
+		t.Fatalf("ping connected NATS backend: %v", err)
+	}
 
 	var deliveries atomic.Int64
 	done := make(chan struct{}, 1)

@@ -34,9 +34,11 @@ tls {
 }
 authorization {
   users: [
-    { user: gateway, permissions: { publish: ">", subscribe: ">" } },
-    { user: worker, permissions: {
-        publish: ["soulacy.execution.results.>", "$JS.API.>"],
+    # With verify_and_map enabled, NATS maps the client certificate's DNS SAN
+    # to the authorization user. Keep these names aligned with deploy.sh.
+    { user: gateway.soulacy.internal, permissions: { publish: ">", subscribe: ">" } },
+    { user: worker.soulacy.internal, permissions: {
+        publish: ["soulacy.execution.results.>", "$JS.API.>", "$JS.ACK.>"],
         subscribe: ["soulacy.execution.jobs", "_INBOX.>"]
       }
     }

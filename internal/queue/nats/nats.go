@@ -163,6 +163,26 @@ func New(cfg Config) (*Backend, error) {
 	return &Backend{nc: nc, js: js, cfg: cfg}, nil
 }
 
+// Ping verifies that the live NATS connection can complete a protocol
+// round-trip before the caller's deadline. Team and Scale readiness use this
+// optional health contract; without it an otherwise healthy durable queue is
+// deliberately reported as unprobeable.
+func (b *Backend) Ping(ctx context.Context) error {
+	if b == nil || b.nc == nil {
+		return fmt.Errorf("nats connection is unavailable")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := b.nc.FlushWithContext(ctx); err != nil {
+		return fmt.Errorf("nats ping: %w", err)
+	}
+	if err := b.nc.LastError(); err != nil {
+		return fmt.Errorf("nats connection: %w", err)
+	}
+	return nil
+}
+
 // ensureStream creates the stream if it does not already exist.
 // If the stream exists with different subjects we leave it unchanged —
 // operators control retention/storage outside Soulacy.

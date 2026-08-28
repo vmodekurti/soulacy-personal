@@ -35,7 +35,9 @@ decode_nats ca_b64 /etc/soulacy/nats/ca.pem
 decode_nats gateway_cert_b64 /etc/soulacy/nats/client.pem
 decode_nats gateway_key_b64 /etc/soulacy/nats/client-key.pem
 jq -r '.cosign_public_key_b64' /run/soulacy-bootstrap.json | base64 --decode >/etc/soulacy/execution-image.pub
-chmod 0644 /etc/soulacy/nats/ca.pem /etc/soulacy/nats/client.pem /etc/soulacy/execution-image.pub
+chown soulacy:soulacy /etc/soulacy/nats/client.pem /etc/soulacy/nats/client-key.pem
+chmod 0644 /etc/soulacy/nats/ca.pem /etc/soulacy/execution-image.pub
+chmod 0600 /etc/soulacy/nats/client.pem /etc/soulacy/nats/client-key.pem
 
 db_user=$(jq -r '.username' /run/soulacy-rds.json)
 db_password=$(jq -r '.password | @uri' /run/soulacy-rds.json)
@@ -133,6 +135,8 @@ cat >/etc/soulacy/gateway.env <<ENV
 HOME=/var/lib/soulacy
 SOULACY_CONFIG_PATH=/var/lib/soulacy/config.yaml
 SOULACY_AUTH_OIDC_CLIENT_SECRET=$oidc_client_secret
+AWS_REGION=${aws_region}
+AWS_DEFAULT_REGION=${aws_region}
 ENV
 chmod 0600 /etc/soulacy/gateway.env
 
