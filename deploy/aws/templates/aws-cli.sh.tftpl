@@ -1,0 +1,14 @@
+install_aws_cli() {
+  local version='${aws_cli_version}'
+  local archive=/tmp/awscliv2.zip
+  local installer=/tmp/aws-cli-installer
+
+  curl --fail --silent --show-error --location --retry 5 \
+    -o "$${archive}" "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-$${version}.zip"
+  printf '%s  %s\n' '${aws_cli_sha256}' "$${archive}" | sha256sum --check -
+  install -d -m 0755 "$${installer}"
+  unzip -q -o "$${archive}" -d "$${installer}"
+  "$${installer}/aws/install" --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli --update
+}
+
+install_aws_cli

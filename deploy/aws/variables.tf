@@ -138,6 +138,18 @@ variable "cosign_version" {
   default = "v3.1.2"
 }
 
+variable "aws_cli_version" {
+  description = "Pinned AWS CLI v2 version installed on Ubuntu hosts."
+  type        = string
+  default     = "2.36.23"
+}
+
+variable "aws_cli_sha256" {
+  description = "SHA-256 for the pinned x86_64 AWS CLI v2 archive."
+  type        = string
+  default     = "ecc8eb0ee6c51cb374ec76bc9a3139e68574104569d4edd1650ab4f95a6a1ec4"
+}
+
 variable "enable_deletion_protection" {
   type    = bool
   default = true

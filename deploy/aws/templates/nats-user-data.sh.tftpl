@@ -3,7 +3,8 @@ set -Eeuo pipefail
 exec > >(tee /var/log/soulacy-bootstrap.log | logger -t soulacy-bootstrap -s 2>/dev/console) 2>&1
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y --no-install-recommends awscli ca-certificates docker.io jq
+apt-get install -y --no-install-recommends ca-certificates curl docker.io jq unzip
+${aws_cli}
 systemctl enable --now docker
 install -d -m 0700 /etc/nats/tls /var/lib/nats
 

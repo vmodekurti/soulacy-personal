@@ -11,11 +11,16 @@ locals {
   worker_volume_size    = local.is_budget ? 25 : 50
   nats_volume_size      = local.is_budget ? 15 : 40
   worker_concurrency    = local.is_budget ? 1 : var.worker_concurrency
+  aws_cli_bootstrap = templatefile("${path.module}/templates/aws-cli.sh.tftpl", {
+    aws_cli_version = var.aws_cli_version
+    aws_cli_sha256  = var.aws_cli_sha256
+  })
   common_bootstrap = templatefile("${path.module}/templates/common.sh.tftpl", {
     aws_region     = var.aws_region
     ecr_registry   = local.ecr_registry
     gateway_image  = var.gateway_image
     cosign_version = var.cosign_version
+    aws_cli        = local.aws_cli_bootstrap
   })
 }
 
@@ -30,6 +35,7 @@ resource "aws_instance" "nats" {
   user_data_replace_on_change = true
   user_data = templatefile("${path.module}/templates/nats-user-data.sh.tftpl", {
     aws_region      = var.aws_region
+    aws_cli         = local.aws_cli_bootstrap
     nats_secret_arn = data.aws_secretsmanager_secret.nats_tls[0].arn
     nats_image      = var.nats_image
     memory_limit    = local.is_budget ? "512m" : "2g"
