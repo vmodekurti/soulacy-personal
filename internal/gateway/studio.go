@@ -525,6 +525,7 @@ func (s *Server) handleStudioPreflight(c *fiber.Ctx) error {
 	learningOwner := studioLearningOwner(c)
 	s.groundPreferencesFor(&cat, learningOwner)
 
+	studio.EnsureCompletionContract(&req.Workflow)
 	res := studio.Preflight(req.Workflow, s.preflightInput(c, cat))
 	return c.JSON(res)
 }
@@ -551,6 +552,7 @@ func (s *Server) handleStudioContract(c *fiber.Ctx) error {
 			opts = append(opts, studio.WithAgentDefinition(def))
 		}
 	}
+	studio.EnsureCompletionContract(&req.Workflow)
 	res := studio.AssessContract(req.Workflow, cat, s.preflightInput(c, cat), opts...)
 	return c.JSON(res)
 }
@@ -3129,6 +3131,7 @@ func (s *Server) finalizeStudioResult(res *studio.Result, cat studio.Catalog, in
 	// manually edited drafts. In particular, a parallel fan-out can imply its
 	// join barrier from the graph even when the builder omitted join_node.
 	studio.RepairWiring(&res.Workflow, cat)
+	studio.EnsureCompletionContract(&res.Workflow)
 	pf := studio.Preflight(res.Workflow, in)
 	if res.Explanation != nil {
 		res.Explanation.NeedsConfig = preflightLines(pf)
@@ -3778,6 +3781,7 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 	// Resolving here also means the saved YAML names its provider/model outright
 	// instead of depending on a workspace default that can change under it.
 	req.Workflow = s.studioDraftWithRuntimeLLM(req.Workflow)
+	studio.EnsureCompletionContract(&req.Workflow)
 	saveStrategy := strings.TrimSpace(req.Workflow.Strategy)
 	if req.Workflow.Flow.Nodes != nil && !req.Workflow.IsAgent() {
 		saveStrategy = "workflow"

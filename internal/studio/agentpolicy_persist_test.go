@@ -218,8 +218,9 @@ func TestGeneratedAgentCarriesAContract(t *testing.T) {
 	}
 }
 
-// A model that ignores the new fields must still not leave the Goal box blank:
-// the user's own intent is what a successful run achieves.
+// A model that ignores the new fields still receives a complete contract: the
+// user's own intent supplies the goal and Soulacy supplies a safe, checkable
+// completion criterion.
 func TestGoalFallsBackToTheIntent(t *testing.T) {
 	pol := contractPolicyFrom(agentSpecPayload{}, "  Every weekday, send me an AI news digest.  ")
 	if pol == nil || pol.Contract == nil {
@@ -228,10 +229,34 @@ func TestGoalFallsBackToTheIntent(t *testing.T) {
 	if pol.Contract.Goal != "Every weekday, send me an AI news digest." {
 		t.Errorf("goal = %q, want the trimmed intent", pol.Contract.Goal)
 	}
-	// Not invented — an empty completion criterion must stay empty so the
-	// "no completion criteria" warning remains truthful.
-	if pol.Contract.CompletionCriteria != "" {
-		t.Errorf("completion criteria was invented: %q", pol.Contract.CompletionCriteria)
+	if pol.Contract.CompletionCriteria != completionGeneralDefault {
+		t.Errorf("completion criteria = %q, want platform default", pol.Contract.CompletionCriteria)
+	}
+}
+
+func TestEnsureCompletionContractTracksDeliveryModeWithoutOverwritingCustomText(t *testing.T) {
+	d := Draft{Strategy: StrategyAuto, Intent: "Research the request and answer", Trigger: Trigger{Type: "chat"}, DeliveryMode: "reply"}
+	if !EnsureCompletionContract(&d) {
+		t.Fatal("expected a generated contract")
+	}
+	if got := d.Policy.Contract.CompletionCriteria; got != completionReplyDefault {
+		t.Fatalf("reply completion = %q", got)
+	}
+
+	d.Trigger = Trigger{Type: "schedule"}
+	d.DeliveryMode = "outbound"
+	if !EnsureCompletionContract(&d) {
+		t.Fatal("expected the managed completion criterion to update")
+	}
+	if got := d.Policy.Contract.CompletionCriteria; got != completionDeliveryDefault {
+		t.Fatalf("scheduled completion = %q", got)
+	}
+
+	d.Policy.Contract.CompletionCriteria = "The signed report exists and its receipt ID is recorded."
+	d.DeliveryMode = "reply"
+	EnsureCompletionContract(&d)
+	if got := d.Policy.Contract.CompletionCriteria; got != "The signed report exists and its receipt ID is recorded." {
+		t.Fatalf("custom completion criterion was overwritten: %q", got)
 	}
 }
 

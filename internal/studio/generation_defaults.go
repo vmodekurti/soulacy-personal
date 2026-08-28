@@ -116,18 +116,63 @@ func ensureGeneratedAgentContract(d *Draft, intent string) bool {
 		c.Instructions = "Use only the capabilities attached to this agent. Read actual tool results before responding, never fabricate unavailable data or successful actions, and return a clear fallback when a required step cannot be completed."
 		changed = true
 	}
-	if strings.TrimSpace(c.CompletionCriteria) == "" {
-		switch {
-		case sameChannelReplyIntent(intent):
-			c.CompletionCriteria = "A complete, human-readable answer has been returned through the inbound channel, or a clear fallback explains what could not be completed."
-		case strings.EqualFold(strings.TrimSpace(d.Trigger.Type), "schedule") || d.Output != nil:
-			c.CompletionCriteria = "The requested result has been produced and delivered to the configured destination, or a clear fallback names the failed step."
-		default:
-			c.CompletionCriteria = "Every requested operation has completed and the final result, or a clear fallback, has been returned to the user."
+	desiredCompletion := generatedCompletionCriteria(d, intent)
+	// Platform-generated defaults remain platform-managed: when an operator
+	// changes an agent from chat to schedule (or back), replace the old default
+	// with the one matching the new delivery contract. Deliberately preserve
+	// custom wording entered by either the builder model or the operator.
+	if current := strings.TrimSpace(c.CompletionCriteria); current == "" || isGeneratedCompletionCriteria(current) {
+		if current != desiredCompletion {
+			c.CompletionCriteria = desiredCompletion
+			changed = true
 		}
+	}
+	if strings.TrimSpace(c.CompletionCriteria) == "" {
+		c.CompletionCriteria = desiredCompletion
 		changed = true
 	}
 	return changed
+}
+
+const (
+	completionReplyDefault    = "A complete, human-readable answer has been returned through the inbound channel, or a clear fallback explains what could not be completed."
+	completionDeliveryDefault = "The requested result has been produced and delivered to the configured destination, or a clear fallback names the failed step."
+	completionGeneralDefault  = "Every requested operation has completed and the final result, or a clear fallback, has been returned to the user."
+)
+
+func generatedCompletionCriteria(d *Draft, intent string) string {
+	switch {
+	case sameChannelReplyIntent(intent) || normalizeStudioDeliveryMode(d.DeliveryMode) == "reply":
+		return completionReplyDefault
+	case strings.EqualFold(strings.TrimSpace(d.Trigger.Type), "schedule") || d.Output != nil || normalizeStudioDeliveryMode(d.DeliveryMode) == "outbound":
+		return completionDeliveryDefault
+	default:
+		return completionGeneralDefault
+	}
+}
+
+func isGeneratedCompletionCriteria(value string) bool {
+	switch strings.TrimSpace(value) {
+	case completionReplyDefault, completionDeliveryDefault, completionGeneralDefault:
+		return true
+	default:
+		return false
+	}
+}
+
+// EnsureCompletionContract applies the non-optional Studio completion
+// contract to an agent draft. Callers use this after generation and again at
+// preflight/save boundaries so imported drafts, old saved agents, and edits to
+// trigger/delivery settings receive the same current contract.
+func EnsureCompletionContract(d *Draft) bool {
+	if d == nil || !d.IsAgent() {
+		return false
+	}
+	intent := strings.TrimSpace(d.Intent)
+	if intent == "" {
+		intent = strings.TrimSpace(d.RawIntent)
+	}
+	return ensureGeneratedAgentContract(d, intent)
 }
 
 func conciseContractGoal(intent string) string {

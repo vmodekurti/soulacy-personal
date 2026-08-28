@@ -327,6 +327,9 @@ func contractPolicyFrom(payload agentSpecPayload, intent string) *AgentPolicy {
 	}
 	instructions := strings.TrimSpace(payload.Instructions)
 	completion := strings.TrimSpace(payload.CompletionCriteria)
+	if completion == "" && (goal != "" || instructions != "") {
+		completion = completionGeneralDefault
+	}
 	if goal == "" && instructions == "" && completion == "" {
 		return nil
 	}
