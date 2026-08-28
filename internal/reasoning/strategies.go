@@ -1416,6 +1416,46 @@ func canonicalToolAlias(name string) string {
 // a real synthesis, the same way the reasoning loop already does.
 func IsProgressPreamble(text string) bool { return isPrematureFinalAnswer(text) }
 
+// IsInternalScratchNarration reports whether a purported final answer is the
+// model narrating its private work rather than addressing the user. Some
+// OpenAI-compatible reasoning models put their scratchpad in the ordinary
+// content field (instead of reasoning_content). A long scratchpad used to pass
+// the progress-preamble guard and could expose raw tool payloads in Chat.
+//
+// Keep this deliberately conservative: require both an explicit reference to
+// the user's request and first-person planning language. Ordinary reports may
+// say "the user" or "we need" independently, but rarely combine both while
+// describing what answer still needs to be produced.
+func IsInternalScratchNarration(text string) bool {
+	s := strings.ToLower(strings.TrimSpace(text))
+	if s == "" {
+		return false
+	}
+	// The evidence is normally in the opening workpad. Bounding the scan also
+	// prevents a legitimate long report from being rejected because it quotes
+	// planning language much later in the answer.
+	if len(s) > 1800 {
+		s = s[:1800]
+	}
+	userReference := containsAny(s,
+		"the user wants", "the user asked", "the user's request",
+		"user wants", "user asked", "user query", "user's query")
+	planning := containsAny(s,
+		"we need to", "i need to", "need to provide", "need to answer",
+		"let's examine", "let us examine", "let's inspect", "let us inspect",
+		"now synthesize", "need to synthesize")
+	return userReference && planning
+}
+
+func containsAny(s string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(s, needle) {
+			return true
+		}
+	}
+	return false
+}
+
 func isPrematureFinalAnswer(text string) bool {
 	s := strings.ToLower(strings.TrimSpace(text))
 	if s == "" {

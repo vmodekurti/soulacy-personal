@@ -5,6 +5,23 @@ import (
 	"testing"
 )
 
+func TestIsInternalScratchNarration(t *testing.T) {
+	scratch := `We have price history data for SNDK. The user wants "Tell me about SNDK stock performance." We need to provide a concise summary. Let's examine the data array and locate the last entry.`
+	if !IsInternalScratchNarration(scratch) {
+		t.Fatal("expected internal workpad narration to be detected")
+	}
+
+	for _, answer := range []string{
+		"SNDK rose 4.2% today and closed at $81.40.",
+		"Investors need to consider both valuation and execution risk.",
+		"The user guide explains how to configure the provider.",
+	} {
+		if IsInternalScratchNarration(answer) {
+			t.Fatalf("ordinary answer was misclassified: %q", answer)
+		}
+	}
+}
+
 func TestSanitize_PassesThroughRealAnswer(t *testing.T) {
 	ans := "Here is your playlist: 20 Carnatic jazz-fusion tracks added."
 	if got := SanitizeFinalOutput(ans, nil); got != ans {
