@@ -270,6 +270,39 @@ if [[ "$DEPLOYMENT_MODE" != "personal" ]]; then ensure_secret "$NATS_SECRET" "$T
 terraform -chdir="$SCRIPT_DIR" init -reconfigure \
   -backend-config="bucket=$STATE_BUCKET" -backend-config="key=$STATE_KEY" \
   -backend-config="region=$AWS_REGION" -backend-config="encrypt=true" -backend-config="use_lockfile=true"
+
+# Inline security-group references can outlive their Terraform configuration
+# during an ALB -> Cloudflare Tunnel migration. EC2 then keeps rejecting the
+# obsolete ALB security-group deletion until the provider's long waiter times
+# out. Remove only ingress rules that reference this deployment's legacy ALB
+# group; the following Terraform refresh records the same desired end state.
+remove_legacy_alb_references() {
+  local prefix="$DEPLOYMENT_NAME-$ENVIRONMENT" vpc_id legacy_group_id rules_json
+  [[ "$INGRESS_MODE" == "cloudflare_tunnel" ]] || return 0
+
+  vpc_id=$(aws ec2 describe-vpcs --region "$AWS_REGION" \
+    --filters "Name=tag:Name,Values=$prefix" \
+    --query 'Vpcs[0].VpcId' --output text)
+  [[ "$vpc_id" != "None" && -n "$vpc_id" ]] || return 0
+
+  while IFS= read -r legacy_group_id; do
+    [[ -n "$legacy_group_id" ]] || continue
+    rules_json=$(aws ec2 describe-security-group-rules --region "$AWS_REGION" \
+      --filters "Name=referenced-group-info.group-id,Values=$legacy_group_id" \
+      --query 'SecurityGroupRules[?IsEgress==`false`].{group:GroupId,rule:SecurityGroupRuleId}' \
+      --output json)
+    while IFS=$'\t' read -r owner_group_id rule_id; do
+      [[ -n "$owner_group_id" && -n "$rule_id" ]] || continue
+      printf 'Removing obsolete ALB reference %s from security group %s\n' "$rule_id" "$owner_group_id"
+      aws ec2 revoke-security-group-ingress --region "$AWS_REGION" \
+        --group-id "$owner_group_id" --security-group-rule-ids "$rule_id" >/dev/null
+    done < <(jq -r '.[] | [.group, .rule] | @tsv' <<<"$rules_json")
+  done < <(aws ec2 describe-security-groups --region "$AWS_REGION" \
+    --filters "Name=vpc-id,Values=$vpc_id" "Name=group-name,Values=$prefix-alb-*" \
+    --query 'SecurityGroups[].GroupId' --output text | tr '\t' '\n')
+}
+
+remove_legacy_alb_references
 terraform -chdir="$SCRIPT_DIR" apply -auto-approve -var-file="$VAR_FILE" \
   -var="aws_region=$AWS_REGION" -var="name=$DEPLOYMENT_NAME" -var="environment=$ENVIRONMENT" -var="deployment_mode=$DEPLOYMENT_MODE" \
   -var="infrastructure_profile=$INFRASTRUCTURE_PROFILE" -var="budget_alert_email=$BUDGET_EMAIL" -var="monthly_budget_usd=$MONTHLY_BUDGET_USD" \

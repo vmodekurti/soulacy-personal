@@ -32,6 +32,7 @@ variables {
   nats_tls_secret_name       = "soulacy/test/nats"
   enable_deletion_protection = false
   infrastructure_profile     = "standard"
+  ingress_mode               = "alb"
 }
 
 run "personal_omits_multi_user_services" {
