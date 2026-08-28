@@ -36,6 +36,15 @@ func (s *Server) entitlementMW() fiber.Handler {
 		if s.entitlementService == nil || !s.authorizationRequired() {
 			return c.Next()
 		}
+		// Deployment-wide mutations have no workspace by design. They are
+		// authorized later by platformMW using the static deployment
+		// credential, so asking the entitlement service for a workspace here
+		// creates an impossible bootstrap cycle: the first workspace cannot be
+		// created until a verified workspace already exists. Workspace context
+		// applies the same platform-route partition before this middleware.
+		if isPlatformRoute(c.Method(), c.Path()) {
+			return c.Next()
+		}
 		switch c.Method() {
 		case fiber.MethodGet, fiber.MethodHead, fiber.MethodOptions:
 			return c.Next()

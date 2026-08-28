@@ -126,3 +126,41 @@ func TestActiveSubscriptionCannotCreateDuplicateCheckout(t *testing.T) {
 		t.Fatalf("duplicate checkout status = %d, want 409", status)
 	}
 }
+
+func TestEntitlementMiddlewareDoesNotRequireWorkspaceForPlatformMutation(t *testing.T) {
+	srv := newTestGateway(t, "secret")
+	srv.config().Deployment.Mode = config.DeploymentModeTeam
+	srv.SetEntitlements(entitlements.NewWithOptions(&billingStore{}, entitlements.ServiceOptions{Missing: entitlements.MissingDenied}), &billingStore{})
+
+	app := fiber.New(fiber.Config{DisableStartupMessage: true, Immutable: true})
+	app.Use(func(c *fiber.Ctx) error {
+		auth.SetClaims(c, &auth.Claims{CredentialID: staticAPIKeyCredentialID})
+		return c.Next()
+	})
+	app.Use(srv.entitlementMW())
+	app.Post("/api/v1/admin/bootstrap", func(c *fiber.Ctx) error {
+		return c.SendStatus(fiber.StatusNoContent)
+	})
+
+	status, _ := billingRequest(t, app, http.MethodPost, "/api/v1/admin/bootstrap", `{}`)
+	if status != http.StatusNoContent {
+		t.Fatalf("platform bootstrap status = %d, want 204", status)
+	}
+}
+
+func TestEntitlementMiddlewareStillRequiresWorkspaceForTenantMutation(t *testing.T) {
+	srv := newTestGateway(t, "secret")
+	srv.config().Deployment.Mode = config.DeploymentModeTeam
+	srv.SetEntitlements(entitlements.NewWithOptions(&billingStore{}, entitlements.ServiceOptions{Missing: entitlements.MissingDenied}), &billingStore{})
+
+	app := fiber.New(fiber.Config{DisableStartupMessage: true, Immutable: true})
+	app.Use(srv.entitlementMW())
+	app.Post("/api/v1/agents", func(c *fiber.Ctx) error {
+		return c.SendStatus(fiber.StatusNoContent)
+	})
+
+	status, body := billingRequest(t, app, http.MethodPost, "/api/v1/agents", `{}`)
+	if status != http.StatusForbidden || body["error"] != "verified workspace membership is required" {
+		t.Fatalf("tenant mutation = %d %v, want workspace-membership 403", status, body)
+	}
+}
