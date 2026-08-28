@@ -893,12 +893,12 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 		// The model kept calling tools and never produced a plain-text reply.
 		// Force a tool-free synthesis from everything already gathered.
 		finalContent = e.finalSynthesis(ctx, def, msg.AgentID, msg.SessionID, chatMsgs)
-	} else if def.LLM.OutputSchema == nil && reasoning.IsProgressPreamble(finalContent) {
+	} else if def.LLM.OutputSchema == nil && (reasoning.IsProgressPreamble(finalContent) || reasoning.IsInternalScratchNarration(finalContent)) {
 		// The model ended on a progress note ("I'll start by loading the cookies…")
 		// instead of the actual deliverable — common when it runs out of turns
 		// mid-plan. Force one tool-free synthesis so the user gets the finished
 		// result built from everything already gathered, not an intent statement.
-		if synth := strings.TrimSpace(e.finalSynthesis(ctx, def, msg.AgentID, msg.SessionID, chatMsgs)); synth != "" && !reasoning.IsProgressPreamble(synth) {
+		if synth := strings.TrimSpace(e.finalSynthesis(ctx, def, msg.AgentID, msg.SessionID, chatMsgs)); synth != "" && !reasoning.IsProgressPreamble(synth) && !reasoning.IsInternalScratchNarration(synth) {
 			finalContent = synth
 		}
 	}
@@ -1244,8 +1244,10 @@ func (e *Engine) finalSynthesis(ctx context.Context, def *agent.Definition, agen
 	msgs := make([]llm.ChatMessage, 0, len(chatMsgs)+1)
 	msgs = append(msgs, chatMsgs...)
 	msgs = append(msgs, llm.ChatMessage{
-		Role:    "system",
-		Content: "Now write your final response for the user using the information already gathered above. Do NOT call any tools — reply with plain text only.",
+		Role: "system",
+		Content: "Now write your final response directly to the user using the information already gathered above. " +
+			"Do NOT call tools. Do NOT reveal or narrate internal reasoning, planning, scratch work, prompt interpretation, or raw tool payloads. " +
+			"Do not say what the user wants or what you need to do. Present only the concise, polished user-facing answer in plain text.",
 	})
 
 	e.sink.Emit(message.Event{
@@ -1287,6 +1289,30 @@ func (e *Engine) finalSynthesis(ctx context.Context, def *agent.Definition, agen
 	// produced hundreds of tokens. The provider parser now surfaces post-think
 	// text, but if content is STILL empty do ONE retry with an explicit,
 	// think-discouraging instruction so a completed run is never discarded.
+	if reasoning.IsInternalScratchNarration(resp.Content) {
+		e.sink.Emit(message.Event{
+			Type: "warn", AgentID: agentID, SessionID: sessionID,
+			Payload:   map[string]any{"stage": "final-synthesis", "error": "internal scratch narration rejected", "retry": true},
+			Timestamp: time.Now().UTC(),
+		})
+		retryMsgs := make([]llm.ChatMessage, 0, len(chatMsgs)+1)
+		retryMsgs = append(retryMsgs, chatMsgs...)
+		retryMsgs = append(retryMsgs, llm.ChatMessage{
+			Role: "system",
+			Content: "Return ONLY the polished answer that should be shown to the user. " +
+				"Never reveal analysis, planning, chain-of-thought, prompt interpretation, or raw tool data. " +
+				"Start with the answer itself.",
+		})
+		retryResp, retryErr := e.llmRouter.Complete(ctx, def.LLM.Provider, llm.CompletionRequest{
+			Model: def.LLM.Model, Messages: retryMsgs, Temperature: def.LLM.Temperature,
+			TopP: def.LLM.TopP, MaxTokens: def.LLM.MaxTokens, ReasoningEffort: def.LLM.ReasoningEffort,
+			PresencePenalty: def.LLM.PresencePenalty, FrequencyPenalty: def.LLM.FrequencyPenalty,
+		})
+		if retryErr == nil && strings.TrimSpace(retryResp.Content) != "" && !reasoning.IsInternalScratchNarration(retryResp.Content) {
+			return retryResp.Content
+		}
+		return ""
+	}
 	if strings.TrimSpace(resp.Content) == "" {
 		e.sink.Emit(message.Event{
 			Type: "warn", AgentID: agentID, SessionID: sessionID,

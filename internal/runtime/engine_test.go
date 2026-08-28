@@ -819,6 +819,45 @@ func TestHandleSynthesisRetryRecoversReply(t *testing.T) {
 	}
 }
 
+func TestHandleRejectsInternalScratchNarrationAndSynthesizesAnswer(t *testing.T) {
+	e, provider := newHandleTestEngine(t, &agent.Definition{
+		ID:           "assistant",
+		Name:         "Assistant",
+		Enabled:      true,
+		SystemPrompt: "Use tools and answer the user.",
+		LLM:          agent.LLMConfig{Provider: "test", Model: "fake-model"},
+		MaxTurns:     3,
+		Builtins:     strListPtr("lookup"),
+	})
+	e.builtins = []BuiltinTool{{
+		Name: "lookup", Description: "Looks up market data.",
+		Parameters: map[string]any{"type": "object"},
+		Handler: func(ctx context.Context, args map[string]any) (string, error) {
+			return `{"ticker":"SNDK","close":81.40,"change_percent":4.2}`, nil
+		},
+	}}
+	provider.responses = []llm.CompletionResponse{
+		{ToolCalls: []message.ToolCall{{ID: "call-1", Name: "lookup", Arguments: map[string]any{"ticker": "SNDK"}}}},
+		{Content: `We have price history data for SNDK. The user wants "Tell me about SNDK stock performance." We need to provide a concise summary. Let's examine the raw data array and locate the last entry.`},
+		{Content: "SNDK closed at $81.40, up 4.2% for the session."},
+	}
+
+	reply, err := e.Handle(context.Background(), testUserMessage("assistant", "session-1", "Tell me about SNDK stock performance"))
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	got := flattenParts(reply.Parts)
+	if got != "SNDK closed at $81.40, up 4.2% for the session." {
+		t.Fatalf("reply = %q", got)
+	}
+	if strings.Contains(got, "The user wants") || strings.Contains(got, "raw data") {
+		t.Fatalf("internal scratch narration leaked: %q", got)
+	}
+	reqs := provider.requestsSnapshot()
+	if len(reqs) != 3 || len(reqs[2].Tools) != 0 {
+		t.Fatalf("expected a third, tool-free synthesis request; requests=%d", len(reqs))
+	}
+}
 func TestHandleRetriesInvalidStructuredOutput(t *testing.T) {
 	schema := map[string]any{
 		"type": "object",
