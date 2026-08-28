@@ -93,7 +93,7 @@ func completionContractValidateIssues(draft Draft) ([]ValidateError, []ValidateW
 	}
 
 	if draft.IsAgent() {
-		if strings.Contains(strings.ToLower(draft.SystemPrompt), strings.ToLower(completionContractHeading)) {
+		if strings.Contains(strings.ToLower(draft.SystemPrompt), strings.ToLower(completionContractHeading)) || hasEditableCompletionContract(draft) {
 			return errs, warns
 		}
 		if requiresCompletionContract(draft) {
@@ -101,6 +101,10 @@ func completionContractValidateIssues(draft Draft) ([]ValidateError, []ValidateW
 		}
 	}
 	return errs, warns
+}
+
+func hasEditableCompletionContract(draft Draft) bool {
+	return draft.Policy != nil && draft.Policy.Contract != nil && strings.TrimSpace(draft.Policy.Contract.CompletionCriteria) != ""
 }
 
 func hasDeliveryConfigured(draft Draft) bool {
