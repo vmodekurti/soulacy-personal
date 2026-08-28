@@ -44,6 +44,7 @@ db_password=$(jq -r '.password | @uri' /run/soulacy-rds.json)
 api_key=$(jq -r '.api_key' /run/soulacy-bootstrap.json)
 jwt_secret=$(jq -r '.jwt_secret' /run/soulacy-bootstrap.json)
 oidc_client_secret=$(jq -r '.oidc_client_secret // ""' /run/soulacy-bootstrap.json)
+tunnel_token=$(jq -r '.cloudflare_tunnel_token // ""' /run/soulacy-bootstrap.json)
 
 cat >/var/lib/soulacy/config.yaml <<CONFIG
 deployment:
@@ -167,5 +168,39 @@ WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload
 systemctl enable --now soulacy
+
+%{ if cloudflare_tunnel_enabled ~}
+if [[ -z "$tunnel_token" ]]; then
+  echo 'Cloudflare Tunnel ingress is enabled but the bootstrap secret has no tunnel token' >&2
+  exit 1
+fi
+docker pull '${cloudflared_image}'
+cat >/etc/soulacy/cloudflared.env <<ENV
+TUNNEL_TOKEN=$tunnel_token
+ENV
+chmod 0600 /etc/soulacy/cloudflared.env
+cat >/etc/systemd/system/soulacy-cloudflared.service <<'UNIT'
+[Unit]
+Description=Soulacy Cloudflare Tunnel
+After=network-online.target docker.service soulacy.service
+Wants=network-online.target
+Requires=docker.service soulacy.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/soulacy/cloudflared.env
+ExecStartPre=-/usr/bin/docker rm -f soulacy-cloudflared
+ExecStart=/usr/bin/docker run --rm --name soulacy-cloudflared --network host --read-only --cap-drop ALL --security-opt no-new-privileges --memory 128m --cpus 0.25 --pids-limit 64 --tmpfs /tmp:rw,noexec,nosuid,size=16m --env-file /etc/soulacy/cloudflared.env ${cloudflared_image} tunnel --no-autoupdate run
+ExecStop=-/usr/bin/docker stop -t 20 soulacy-cloudflared
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now soulacy-cloudflared
+%{ endif ~}
 
 shred -u /run/soulacy-bootstrap.json /run/soulacy-nats.json /run/soulacy-rds.json

@@ -27,6 +27,7 @@ variables {
   gateway_image              = "example.com/soulacy@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   execution_image            = "example.com/execution@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
   nats_image                 = "nats@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  cloudflared_image          = "cloudflare/cloudflared@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
   bootstrap_secret_name      = "soulacy/test/bootstrap"
   nats_tls_secret_name       = "soulacy/test/nats"
   enable_deletion_protection = false
@@ -71,6 +72,10 @@ run "team_adds_multi_user_plane" {
     condition     = length(aws_scheduler_schedule.start_compute) == 0 && length(aws_scheduler_schedule.stop_compute) == 0
     error_message = "Standard Team must not receive the temporary pilot power schedule."
   }
+  assert {
+    condition     = length(aws_lb.this) == 1 && length(aws_wafv2_web_acl.this) == 1 && length(aws_acm_certificate.this) == 1
+    error_message = "Standard Team must retain ALB, WAF, and ACM ingress."
+  }
 }
 
 run "team_lite_preserves_team_boundaries_on_budget_resources" {
@@ -113,6 +118,14 @@ run "team_lite_preserves_team_boundaries_on_budget_resources" {
     condition     = aws_scheduler_schedule.start_compute[0].schedule_expression == "cron(15 8 * * ? *)" && aws_scheduler_schedule.stop_compute[0].schedule_expression == "cron(0 22 * * ? *)" && aws_scheduler_schedule.start_compute[0].schedule_expression_timezone == "America/Chicago"
     error_message = "Team Lite must default to the documented 08:00-22:00 America/Chicago schedule."
   }
+  assert {
+    condition     = length(aws_lb.this) == 0 && length(aws_lb_target_group.gateway) == 0 && length(aws_lb_listener.https) == 0 && length(aws_wafv2_web_acl.this) == 0 && length(aws_acm_certificate.this) == 0 && length(aws_route53_record.application) == 0
+    error_message = "Team Lite must omit ALB, WAF, ACM, and Route 53 application ingress."
+  }
+  assert {
+    condition     = length(aws_security_group.alb) == 0 && output.ingress_mode == "cloudflare_tunnel"
+    error_message = "Team Lite must use outbound Cloudflare Tunnel ingress and omit the ALB security group."
+  }
 }
 
 run "scale_adds_shared_services" {
@@ -126,5 +139,9 @@ run "scale_adds_shared_services" {
   assert {
     condition     = length(aws_elasticache_replication_group.redis) == 1 && length(aws_s3_bucket.artifacts) == 1
     error_message = "Scale must provision shared Redis and S3 artifacts."
+  }
+  assert {
+    condition     = length(aws_lb.this) == 1 && length(aws_wafv2_web_acl.this) == 1
+    error_message = "Scale must retain the standard ALB and WAF edge."
   }
 }

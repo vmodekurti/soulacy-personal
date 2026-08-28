@@ -118,22 +118,24 @@ resource "aws_instance" "gateway" {
   iam_instance_profile        = aws_iam_instance_profile.gateway.name
   user_data_replace_on_change = true
   user_data = local.is_multi_user ? templatefile("${path.module}/templates/gateway-user-data.sh.tftpl", {
-    common               = local.common_bootstrap
-    aws_region           = var.aws_region
-    deployment_mode      = var.deployment_mode
-    is_scale             = local.is_scale
-    domain_name          = var.domain_name
-    oidc_issuer          = var.oidc_issuer
-    oidc_client_id       = var.oidc_client_id
-    efs_id               = aws_efs_file_system.workspace.id
-    bootstrap_secret_arn = data.aws_secretsmanager_secret.bootstrap.arn
-    nats_secret_arn      = data.aws_secretsmanager_secret.nats_tls[0].arn
-    rds_secret_arn       = aws_db_instance.postgres[0].master_user_secret[0].secret_arn
-    db_host              = aws_db_instance.postgres[0].address
-    redis_host           = local.is_scale ? aws_elasticache_replication_group.redis[0].primary_endpoint_address : ""
-    artifact_bucket      = local.is_scale ? aws_s3_bucket.artifacts[0].id : ""
-    credential_kms_arn   = aws_kms_key.credentials[0].arn
-    execution_image      = var.execution_image
+    common                    = local.common_bootstrap
+    aws_region                = var.aws_region
+    deployment_mode           = var.deployment_mode
+    is_scale                  = local.is_scale
+    domain_name               = var.domain_name
+    oidc_issuer               = var.oidc_issuer
+    oidc_client_id            = var.oidc_client_id
+    efs_id                    = aws_efs_file_system.workspace.id
+    bootstrap_secret_arn      = data.aws_secretsmanager_secret.bootstrap.arn
+    nats_secret_arn           = data.aws_secretsmanager_secret.nats_tls[0].arn
+    rds_secret_arn            = aws_db_instance.postgres[0].master_user_secret[0].secret_arn
+    db_host                   = aws_db_instance.postgres[0].address
+    redis_host                = local.is_scale ? aws_elasticache_replication_group.redis[0].primary_endpoint_address : ""
+    artifact_bucket           = local.is_scale ? aws_s3_bucket.artifacts[0].id : ""
+    credential_kms_arn        = aws_kms_key.credentials[0].arn
+    execution_image           = var.execution_image
+    cloudflare_tunnel_enabled = local.use_cloudflare_tunnel
+    cloudflared_image         = var.cloudflared_image
     }) : templatefile("${path.module}/templates/personal-gateway-user-data.sh.tftpl", {
     common               = local.common_bootstrap
     aws_region           = var.aws_region
@@ -162,15 +164,17 @@ resource "aws_instance" "gateway" {
 }
 
 resource "aws_lb" "this" {
+  count                      = local.use_alb ? 1 : 0
   name                       = substr(local.prefix, 0, 32)
   internal                   = false
   load_balancer_type         = "application"
-  security_groups            = [aws_security_group.alb.id]
+  security_groups            = [aws_security_group.alb[0].id]
   subnets                    = aws_subnet.public[*].id
   drop_invalid_header_fields = true
 }
 
 resource "aws_lb_target_group" "gateway" {
+  count       = local.use_alb ? 1 : 0
   name        = substr("${local.prefix}-gateway", 0, 32)
   port        = 1947
   protocol    = "HTTP"
@@ -192,31 +196,34 @@ resource "aws_lb_target_group" "gateway" {
 }
 
 resource "aws_lb_target_group_attachment" "gateway" {
-  target_group_arn = aws_lb_target_group.gateway.arn
+  count            = local.use_alb ? 1 : 0
+  target_group_arn = aws_lb_target_group.gateway[0].arn
   target_id        = aws_instance.gateway.id
   port             = 1947
 }
 
 resource "aws_lb_listener" "https" {
-  load_balancer_arn = aws_lb.this.arn
+  count             = local.use_alb ? 1 : 0
+  load_balancer_arn = aws_lb.this[0].arn
   port              = 443
   protocol          = "HTTPS"
   ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
-  certificate_arn   = aws_acm_certificate_validation.this.certificate_arn
+  certificate_arn   = aws_acm_certificate_validation.this[0].certificate_arn
 
   default_action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.gateway.arn
+    target_group_arn = aws_lb_target_group.gateway[0].arn
   }
 }
 
 resource "aws_route53_record" "application" {
+  count   = local.use_alb ? 1 : 0
   zone_id = var.route53_zone_id
   name    = var.domain_name
   type    = "A"
   alias {
-    name                   = aws_lb.this.dns_name
-    zone_id                = aws_lb.this.zone_id
+    name                   = aws_lb.this[0].dns_name
+    zone_id                = aws_lb.this[0].zone_id
     evaluate_target_health = true
   }
 }

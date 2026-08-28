@@ -5,7 +5,7 @@ This directory deploys any Soulacy variant with one command. It builds the curre
 ## Easiest Team Lite setup: AWS + Cloudflare + Google
 
 Mac users whose parent domain is hosted by Cloudflare should use the guided
-bootstrap instead of configuring Route 53, Terraform, and OIDC independently:
+bootstrap instead of configuring Terraform, Cloudflare Tunnel, DNS, and OIDC independently:
 
 ```bash
 deploy/aws/team-lite-quickstart.sh
@@ -16,18 +16,23 @@ On its first run, the wizard asks only for:
 1. an AWS CLI profile (it reuses the current/default profile when possible);
 2. the AWS Budget notification email;
 3. the root domain and desired child label (`soulac.io` + `team` by default);
-4. a scoped Cloudflare token with `Zone:Read` and `DNS:Edit`; and
+4. a scoped Cloudflare token with `Zone:Read`, `DNS:Edit`, and `Cloudflare Tunnel:Edit`; and
 5. a Google Web OAuth client ID and secret.
 
-It creates or reuses a Route 53 public child zone, adds the delegation records
-to Cloudflare, writes a secret-free `terraform.tfvars`, and launches the normal
-signed Team Lite deployment. It opens the relevant Cloudflare and Google pages
+It creates or reuses a remotely managed Cloudflare Tunnel, points the selected
+proxied Cloudflare hostname at it, writes a secret-free `terraform.tfvars`, and
+launches the normal signed Team Lite deployment. The AWS gateway accepts no
+public inbound traffic: its digest-pinned `cloudflared` connector establishes
+the outbound tunnel. The wizard opens the relevant Cloudflare and Google pages
 on macOS and prints the exact Google origin and callback URL to copy. The
-Cloudflare token remains only in process memory. The Google secret is passed to
-`deploy.sh`, which writes it directly to AWS Secrets Manager.
+Cloudflare API token remains only in process memory. The connector token and
+Google secret are written directly to AWS Secrets Manager, never Terraform
+state.
 
-The wizard is rerunnable. It reuses matching DNS configuration and refuses to
-replace an existing, different subdomain delegation. Existing
+The wizard is rerunnable. It reuses a matching tunnel and DNS configuration and
+refuses to replace an existing hostname that points elsewhere. When migrating
+an older Team Lite stack, it removes only the Route 53 delegation matching the
+known child zone and deletes that zone after a successful deployment. Existing
 `terraform.tfvars` is backed up before replacement. For non-interactive use,
 run `deploy/aws/team-lite-quickstart.sh --help` to see the supported environment
 variables.
@@ -37,7 +42,7 @@ variables.
 | Variant | Intended use | Components installed |
 |---|---|---|
 | **Personal** | One trusted operator | Gateway, embedded SQLite/vector storage on encrypted EFS, Docker + gVisor, ALB/ACM/WAF |
-| **Team Lite** | Small audience or one-month evaluation | Team application mode on burstable compute, Single-AZ PostgreSQL, KMS, private mTLS NATS, separate isolated worker, ALB/ACM/WAF, and an AWS Budget |
+| **Team Lite** | Small audience or one-month evaluation | Team application mode on burstable compute, Single-AZ PostgreSQL, KMS, private mTLS NATS, separate isolated worker, outbound-only Cloudflare Tunnel, and an AWS Budget |
 | **Team** | Multiple users and workspaces | Personal edge components plus RDS PostgreSQL, credential KMS, private mTLS NATS and a separate isolated worker |
 | **Scale** | SaaS/shared production posture | Team components plus Multi-AZ Valkey/Redis and encrypted/versioned S3 artifact storage |
 
@@ -52,8 +57,9 @@ deploy/aws/deploy.sh --mode scale
 
 ## What it creates
 
-- A two-AZ VPC with public ALB subnets and private application/data subnets.
-- ACM TLS certificate, Route 53 application record, HTTPS-only Application Load Balancer, and AWS WAF managed protections plus an IP rate limit.
+- A two-AZ VPC with public edge/egress subnets and private application/data subnets.
+- Standard Personal/Team/Scale: ACM TLS certificate, Route 53 application record, HTTPS-only Application Load Balancer, and AWS WAF managed protections plus an IP rate limit.
+- Team Lite: a remotely managed Cloudflare Tunnel and proxied Cloudflare hostname, with no ALB, ACM certificate, WAF, Route 53 application record, or gateway ingress rule.
 - A gateway EC2 host. Standard profiles place compute in private subnets; Team Lite uses public-subnet egress with no public inbound security-group rules. Team variants add a separate execution-worker EC2 host. None accepts SSH; use AWS Systems Manager Session Manager.
 - Docker and the pinned gVisor `runsc` runtime on the gateway/worker hosts. Ordinary agent Python runs with no network, read-only rootfs, dropped capabilities, PID/memory/CPU limits, and a signed digest-pinned image.
 - Security-group-confined mTLS NATS JetStream and RDS PostgreSQL in Team variants. Standard Team/Scale use Multi-AZ RDS; Team Lite is Single-AZ.
@@ -86,12 +92,14 @@ worker rather than in the gateway process.
 | Worker capacity | One concurrent sandbox job |
 | EC2 storage | 20 + 25 + 15 GiB gp3 |
 | Egress | Direct public IPv4 on compute with **no inbound public SG rules**; no NAT Gateway |
-| Edge | Public HTTPS ALB, ACM certificate, and WAF remain enabled |
+| Edge | Outbound-only, digest-pinned Cloudflare Tunnel; no ALB, ACM, WAF, Route 53 child zone, or inbound gateway SG rule |
 | Guardrail | Account-wide AWS Budget, default `$180`, with 50/80% forecast and 100% actual alerts |
 | Off-hours | RDS starts at 08:00, EC2 at 08:15, EC2 stops at 22:00, and RDS at 22:10 in `America/Chicago` |
 
-At low traffic in `us-east-1`, the intended infrastructure envelope is roughly
-**$90–$150 for 730 hours**. That estimate is not a cap or an AWS guarantee.
+At low traffic in `us-east-1`, the intended always-on infrastructure envelope
+is roughly **$55–$115 for 730 hours**, before LLM/API usage. The default
+off-hours schedule should reduce compute and database instance-hour charges
+further. This estimate is not a cap or an AWS guarantee.
 Traffic, logs, storage, snapshots, public IPv4 pricing, regional differences,
 taxes, and AWS pricing changes can push it higher. LLM/API provider charges are
 separate and are not paid by AWS credits.
@@ -136,9 +144,10 @@ the EC2 nodes before PostgreSQL. The next scheduled event still applies after a
 manual override.
 
 Stopping is not destroying. EC2 CPU and RDS instance-hour charges pause, and
-their automatically assigned public IPv4 addresses are released, but the ALB,
-WAF, EFS data, EBS volumes, KMS keys, Route 53, ECR, secrets, and backups remain
-available and can continue to incur smaller charges. Destroying these nightly
+their automatically assigned public IPv4 addresses are released. Cloudflare
+Tunnel itself has no AWS hourly edge charge, but EFS data, EBS volumes, KMS
+keys, ECR, secrets, state storage, and backups remain and can continue to incur
+smaller charges. Destroying these nightly
 would delete or repeatedly recreate stateful/security infrastructure and is not
 a safe cost optimization. With the default 14-hour daily window, the expected
 monthly envelope should be lower than the always-on estimate, but the `$180`
@@ -156,7 +165,9 @@ The deployment machine needs:
 - Terraform 1.10 or newer.
 - Docker with Buildx.
 - Cosign, OpenSSL, `jq`, `curl`, and Git.
-- A public Route 53 hosted zone and a hostname inside it.
+- Standard ALB ingress: a public Route 53 hosted zone and a hostname inside it.
+- Team Lite quickstart: a Cloudflare-managed zone and a scoped token with
+  `Zone:Read`, `DNS:Edit`, and `Cloudflare Tunnel:Edit`.
 - An OIDC web client for normal user login (recommended). Its callback URL is `https://YOUR_DOMAIN/api/v1/auth/oidc/callback`.
 
 On macOS with Homebrew:
@@ -272,14 +283,19 @@ deploy/aws/destroy.sh
 
 The destroy script deliberately retains remote Terraform state, ECR images, Secrets Manager recovery material, and KMS keys pending their deletion windows. This prevents a single command from irreversibly destroying recovery data. Remove those retained resources separately only after backups and retention obligations are satisfied.
 
+For Team Lite, the Cloudflare Tunnel and proxied DNS record live in Cloudflare,
+outside Terraform, so AWS teardown intentionally does not delete them. They do
+not incur an AWS ALB charge. Remove the hostname and tunnel from Cloudflare
+Zero Trust after the pilot if they are no longer wanted.
+
 Those retained resources can continue to incur small charges. For a one-month
 pilot, inspect and remove ECR images, Secrets Manager secrets, old state object
-versions, and KMS keys after the recovery/deletion window. Also verify that the
-Route 53 hosted zone is still needed.
+versions, and KMS keys after the recovery/deletion window. For standard ALB
+deployments, also verify that the Route 53 hosted zone is still needed.
 
 ## Important production follow-ups
 
-- Tune the included AWS WAF managed rules and rate limit for the real traffic profile.
+- For standard ALB deployments, tune the included AWS WAF managed rules and rate limit for the real traffic profile. For Cloudflare Tunnel deployments, apply equivalent Cloudflare WAF/rate-limit policy appropriate to the audience.
 - Add CloudWatch log shipping, alarms, RDS/Valkey/NATS backup tests, AWS Backup policies, and budget alerts.
 - Replicate gateways and workers across AZs; move NATS to a three-node JetStream cluster for a zero-downtime SLA.
 - Establish image-update, KMS/certificate rotation, incident response, restore testing, and Terraform review pipelines.

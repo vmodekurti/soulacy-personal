@@ -84,7 +84,7 @@ case "$ACTION" in
       stopping) printf 'PostgreSQL is already stopping.\n' ;;
       *) die "PostgreSQL cannot be stopped while its status is $db_status" ;;
     esac
-    printf 'Off-hours shutdown requested. ALB, WAF, EFS, KMS, EBS, DNS, ECR, and secrets remain provisioned.\n'
+    printf 'Off-hours shutdown requested. The configured edge, EFS, KMS, EBS, DNS, ECR, and secrets remain provisioned.\n'
     ;;
   status) show_status ;;
 esac

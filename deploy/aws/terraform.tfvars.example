@@ -6,6 +6,9 @@ environment      = "production"
 deployment_mode  = "personal"
 infrastructure_profile = "standard"
 domain_name      = "soulacy.example.com"
+# Standard deployments use the AWS edge below. Team Lite's guided quickstart
+# writes ingress_mode="cloudflare_tunnel" and leaves route53_zone_id empty.
+ingress_mode      = "alb"
 route53_zone_id  = "Z0123456789EXAMPLE"
 
 # Strongly recommended for normal user login. The secret itself is supplied to

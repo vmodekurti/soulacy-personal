@@ -15,8 +15,8 @@ Usage: team-lite-quickstart.sh
 
 Guided Team Lite deployment from macOS. The wizard:
   * selects and verifies an AWS CLI profile;
-  * creates or reuses a Route 53 child zone;
-  * delegates that child zone from Cloudflare;
+  * creates or reuses an outbound-only Cloudflare Tunnel;
+  * points the selected Cloudflare hostname at that tunnel;
   * generates terraform.tfvars for Google OIDC; and
   * runs the normal signed, containerized Team Lite deployment.
 
@@ -25,7 +25,7 @@ Optional environment inputs for automation:
   SOULACY_AWS_BUDGET_EMAIL          AWS Budget notification email
   SOULACY_ROOT_DOMAIN               Cloudflare zone (default: soulac.io)
   SOULACY_SUBDOMAIN                 Child label (default: team)
-  CLOUDFLARE_API_TOKEN              Zone:Read and DNS:Edit token
+  CLOUDFLARE_API_TOKEN              Zone:Read, DNS:Edit, and Cloudflare Tunnel:Edit token
   GOOGLE_OIDC_CLIENT_ID             Google web OAuth client ID
   GOOGLE_OIDC_CLIENT_SECRET         Google web OAuth client secret
   SOULACY_AWS_REGION                AWS region (default: us-east-1)
@@ -175,54 +175,94 @@ ensure_cloudflare_zone() {
     die "Cloudflare token validation failed; it needs Zone:Read and DNS:Edit for $ROOT_DOMAIN"
   CF_ZONE_ID=$(jq -r --arg name "$ROOT_DOMAIN" '.result[] | select(.name == $name) | .id' <<<"$response" | head -n1)
   [[ -n "$CF_ZONE_ID" ]] || die "$ROOT_DOMAIN is not an active zone visible to this Cloudflare token"
+  CF_ACCOUNT_ID=$(jq -r --arg name "$ROOT_DOMAIN" '.result[] | select(.name == $name) | .account.id' <<<"$response" | head -n1)
+  [[ -n "$CF_ACCOUNT_ID" ]] || die "Cloudflare did not return the account that owns $ROOT_DOMAIN"
 }
 
-ensure_route53_child_zone() {
-  local zones create_json
+find_route53_child_zone() {
+  local zones
+  ROUTE53_ZONE_ID=""
+  ROUTE53_NAMESERVERS=()
   zones=$(aws route53 list-hosted-zones-by-name --dns-name "$FQDN" --max-items 10 --output json)
   ROUTE53_ZONE_ID=$(jq -r --arg fqdn "$FQDN." \
     '.HostedZones[] | select(.Name == $fqdn and .Config.PrivateZone == false) | .Id' <<<"$zones" | head -n1)
   ROUTE53_ZONE_ID="${ROUTE53_ZONE_ID#/hostedzone/}"
-  if [[ -z "$ROUTE53_ZONE_ID" ]]; then
-    say "Creating Route 53 child zone $FQDN"
-    create_json=$(aws route53 create-hosted-zone --name "$FQDN" \
-      --caller-reference "soulacy-$(date -u +%Y%m%dT%H%M%SZ)-$$" \
-      --hosted-zone-config "Comment=Soulacy Team Lite delegated child zone,PrivateZone=false" --output json)
-    ROUTE53_ZONE_ID=$(jq -r '.HostedZone.Id | sub("^/hostedzone/"; "")' <<<"$create_json")
-  else
-    say "Reusing Route 53 child zone $FQDN ($ROUTE53_ZONE_ID)"
-  fi
-  ROUTE53_NAMESERVERS=()
+  [[ -n "$ROUTE53_ZONE_ID" ]] || return 0
   while IFS= read -r server; do
     [[ -n "$server" ]] && ROUTE53_NAMESERVERS+=("$server")
   done < <(aws route53 get-hosted-zone --id "$ROUTE53_ZONE_ID" \
     --query 'DelegationSet.NameServers' --output json | jq -r '.[]' | sed 's/[.]$//' | sort)
-  ((${#ROUTE53_NAMESERVERS[@]} >= 2)) || die "Route 53 returned no usable delegation nameservers"
+  ((${#ROUTE53_NAMESERVERS[@]} >= 2)) || die "existing Route 53 zone returned no usable delegation nameservers"
 }
 
-ensure_cloudflare_delegation() {
-  local records non_ns current expected server body
-  records=$(cf_call GET "/zones/$CF_ZONE_ID/dns_records?name=$FQDN&per_page=100") || die "could not inspect Cloudflare DNS"
-  non_ns=$(jq -r '.result[] | select(.type != "NS") | "\(.type) \(.name) -> \(.content)"' <<<"$records")
-  [[ -z "$non_ns" ]] || die "Cloudflare already has non-NS records at $FQDN; move them before delegation: $non_ns"
-
-  current=$(jq -r '.result[] | select(.type == "NS") | (.content | ascii_downcase | rtrimstr("."))' <<<"$records" | sort)
-  expected=$(printf '%s\n' "${ROUTE53_NAMESERVERS[@]}" | tr '[:upper:]' '[:lower:]' | sort)
-  if [[ -n "$current" && "$current" != "$expected" ]]; then
-    printf 'Existing Cloudflare NS records for %s point elsewhere:\n%s\n' "$FQDN" "$current" >&2
-    die "refusing to replace an existing delegation automatically"
+ensure_cloudflare_tunnel() {
+  local response body tunnel_secret
+  TUNNEL_NAME="soulacy-$SUBDOMAIN-pilot"
+  response=$(cf_call GET "/accounts/$CF_ACCOUNT_ID/cfd_tunnel?name=$TUNNEL_NAME&is_deleted=false&per_page=100") || \
+    die "Cloudflare token needs Cloudflare Tunnel:Edit for account $CF_ACCOUNT_ID"
+  TUNNEL_ID=$(jq -r --arg name "$TUNNEL_NAME" '.result[] | select(.name == $name and .deleted_at == null) | .id' <<<"$response" | head -n1)
+  if [[ -z "$TUNNEL_ID" ]]; then
+    tunnel_secret=$(openssl rand -base64 32 | tr -d '\n')
+    body=$(jq -n --arg name "$TUNNEL_NAME" --arg secret "$tunnel_secret" \
+      '{name:$name,config_src:"cloudflare",tunnel_secret:$secret}')
+    response=$(cf_call POST "/accounts/$CF_ACCOUNT_ID/cfd_tunnel" "$body") || die "failed to create Cloudflare Tunnel"
+    TUNNEL_ID=$(jq -r '.result.id' <<<"$response")
+    say "Created Cloudflare Tunnel $TUNNEL_NAME"
+  else
+    say "Reusing Cloudflare Tunnel $TUNNEL_NAME"
   fi
+  body=$(jq -n --arg hostname "$FQDN" \
+    '{config:{ingress:[{hostname:$hostname,service:"http://localhost:1947",originRequest:{connectTimeout:"30s"}},{service:"http_status:404"}]}}')
+  cf_call PUT "/accounts/$CF_ACCOUNT_ID/cfd_tunnel/$TUNNEL_ID/configurations" "$body" >/dev/null || \
+    die "failed to configure the Cloudflare Tunnel public hostname"
+  response=$(cf_call GET "/accounts/$CF_ACCOUNT_ID/cfd_tunnel/$TUNNEL_ID/token") || die "failed to obtain the Cloudflare Tunnel connector token"
+  TUNNEL_TOKEN=$(jq -r '.result' <<<"$response")
+  [[ -n "$TUNNEL_TOKEN" && "$TUNNEL_TOKEN" != null ]] || die "Cloudflare returned an empty tunnel token"
+}
 
-  for server in "${ROUTE53_NAMESERVERS[@]}"; do
-    if ! jq -e --arg content "$server" \
-      '.result[] | select(.type == "NS" and ((.content | ascii_downcase | rtrimstr(".")) == ($content | ascii_downcase)))' \
-      >/dev/null <<<"$records"; then
-      body=$(jq -n --arg name "$FQDN" --arg content "$server" \
-        '{type:"NS", name:$name, content:$content, ttl:3600}')
-      cf_call POST "/zones/$CF_ZONE_ID/dns_records" "$body" >/dev/null || die "failed to create Cloudflare delegation record"
-    fi
-  done
-  say "Cloudflare now delegates $FQDN to Route 53"
+ensure_cloudflare_tunnel_dns() {
+  local records current expected record_id body id
+  records=$(cf_call GET "/zones/$CF_ZONE_ID/dns_records?name=$FQDN&per_page=100") || die "could not inspect Cloudflare DNS"
+  current=$(jq -r '.result[] | select(.type == "NS") | (.content | ascii_downcase | rtrimstr("."))' <<<"$records" | sort)
+  if [[ -n "$current" ]]; then
+    [[ -n "${ROUTE53_ZONE_ID:-}" ]] || die "refusing to replace an unrecognized NS delegation at $FQDN"
+    expected=$(printf '%s\n' "${ROUTE53_NAMESERVERS[@]}" | tr '[:upper:]' '[:lower:]' | sort)
+    [[ "$current" == "$expected" ]] || die "refusing to replace an NS delegation at $FQDN that does not match Route 53 zone $ROUTE53_ZONE_ID"
+    while IFS= read -r id; do
+      [[ -n "$id" ]] && cf_call DELETE "/zones/$CF_ZONE_ID/dns_records/$id" >/dev/null
+    done < <(jq -r '.result[] | select(.type == "NS") | .id' <<<"$records")
+    records=$(cf_call GET "/zones/$CF_ZONE_ID/dns_records?name=$FQDN&per_page=100") || die "could not refresh Cloudflare DNS"
+  fi
+  if jq -e '.result[] | select(.type != "CNAME")' >/dev/null <<<"$records"; then
+    jq -r '.result[] | "Existing record: \(.type) \(.name) -> \(.content)"' <<<"$records" >&2
+    die "refusing to replace existing non-CNAME records at $FQDN"
+  fi
+  record_id=$(jq -r '.result[] | select(.type == "CNAME") | .id' <<<"$records" | head -n1)
+  if [[ -n "$record_id" ]]; then
+    current=$(jq -r --arg id "$record_id" '.result[] | select(.id == $id) | .content' <<<"$records")
+    [[ "$current" == "$TUNNEL_ID.cfargotunnel.com" ]] || die "existing CNAME at $FQDN points to a different service: $current"
+    body=$(jq -n --arg name "$FQDN" --arg content "$TUNNEL_ID.cfargotunnel.com" \
+      '{type:"CNAME",name:$name,content:$content,proxied:true,ttl:1}')
+    cf_call PUT "/zones/$CF_ZONE_ID/dns_records/$record_id" "$body" >/dev/null || die "failed to refresh Cloudflare Tunnel DNS"
+  else
+    body=$(jq -n --arg name "$FQDN" --arg content "$TUNNEL_ID.cfargotunnel.com" \
+      '{type:"CNAME",name:$name,content:$content,proxied:true,ttl:1}')
+    cf_call POST "/zones/$CF_ZONE_ID/dns_records" "$body" >/dev/null || die "failed to create Cloudflare Tunnel DNS"
+  fi
+  say "Cloudflare now routes $FQDN through Tunnel $TUNNEL_NAME"
+}
+
+delete_empty_route53_child_zone() {
+  [[ -n "${ROUTE53_ZONE_ID:-}" ]] || return 0
+  local non_default
+  non_default=$(aws route53 list-resource-record-sets --hosted-zone-id "$ROUTE53_ZONE_ID" --output json | \
+    jq '[.ResourceRecordSets[] | select(.Type != "SOA" and .Type != "NS")] | length')
+  if [[ "$non_default" == 0 ]]; then
+    aws route53 delete-hosted-zone --id "$ROUTE53_ZONE_ID" >/dev/null
+    say "Removed the obsolete Route 53 child zone $FQDN"
+  else
+    printf 'Route 53 child zone %s still contains %s application record(s); leaving it for review.\n' "$ROUTE53_ZONE_ID" "$non_default"
+  fi
 }
 
 write_tfvars() {
@@ -234,7 +274,7 @@ write_tfvars() {
   local tmp
   tmp=$(mktemp "${TMPDIR:-/tmp}/soulacy-tfvars.XXXXXX")
   jq -Rnr \
-    --arg region "$AWS_REGION" --arg domain "$FQDN" --arg zone "$ROUTE53_ZONE_ID" \
+    --arg region "$AWS_REGION" --arg domain "$FQDN" \
     --arg client "$GOOGLE_CLIENT_ID" --arg timezone "$OFF_HOURS_TIMEZONE" '
       "# Generated by team-lite-quickstart.sh — contains no secrets\n" +
       "aws_region = " + ($region|tojson) + "\n" +
@@ -243,7 +283,8 @@ write_tfvars() {
       "deployment_mode = \"team\"\n" +
       "infrastructure_profile = \"budget\"\n" +
       "domain_name = " + ($domain|tojson) + "\n" +
-      "route53_zone_id = " + ($zone|tojson) + "\n" +
+      "route53_zone_id = \"\"\n" +
+      "ingress_mode = \"cloudflare_tunnel\"\n" +
       "oidc_issuer = \"https://accounts.google.com\"\n" +
       "oidc_client_id = " + ($client|tojson) + "\n" +
       "off_hours_timezone = " + ($timezone|tojson) + "\n" +
@@ -287,8 +328,9 @@ if is_interactive && [[ -z "$CF_TOKEN" ]] && [[ "$(uname -s)" == "Darwin" ]]; th
 fi
 prompt_secret CF_TOKEN "Cloudflare API token"
 ensure_cloudflare_zone
-ensure_route53_child_zone
-ensure_cloudflare_delegation
+find_route53_child_zone
+ensure_cloudflare_tunnel
+ensure_cloudflare_tunnel_dns
 
 say "Google OIDC"
 printf 'Create a Google OAuth client of type Web application with:\n'
@@ -306,7 +348,7 @@ write_tfvars
 say "Configuration complete"
 printf 'AWS account: %s\n' "$(aws sts get-caller-identity --query Account --output text)"
 printf 'Public URL:  https://%s\n' "$FQDN"
-printf 'DNS:         Cloudflare %s -> Route 53 %s\n' "$ROOT_DOMAIN" "$ROUTE53_ZONE_ID"
+printf 'Ingress:     Cloudflare Tunnel %s (outbound-only origin)\n' "$TUNNEL_NAME"
 printf 'Schedule:    08:00-22:00 %s\n' "$OFF_HOURS_TIMEZONE"
 if [[ "${SOULACY_QUICKSTART_CONFIGURE_ONLY:-}" == "1" ]]; then
   printf 'Configuration-only mode requested; AWS application resources were not deployed.\n'
@@ -321,4 +363,7 @@ export SOULACY_AWS_REGION="$AWS_REGION"
 export SOULACY_AWS_BUDGET_EMAIL="$BUDGET_EMAIL"
 export SOULACY_AWS_OFF_HOURS_TIMEZONE="$OFF_HOURS_TIMEZONE"
 export SOULACY_AWS_OIDC_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET"
-exec "$SCRIPT_DIR/deploy.sh" --mode team-lite --var-file "$VAR_FILE"
+export SOULACY_AWS_INGRESS_MODE=cloudflare_tunnel
+export SOULACY_CLOUDFLARE_TUNNEL_TOKEN="$TUNNEL_TOKEN"
+"$SCRIPT_DIR/deploy.sh" --mode team-lite --var-file "$VAR_FILE"
+delete_empty_route53_child_zone

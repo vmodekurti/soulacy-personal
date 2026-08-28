@@ -3,11 +3,13 @@ data "aws_availability_zones" "available" {
 }
 
 locals {
-  prefix        = "${var.name}-${var.environment}"
-  azs           = slice(data.aws_availability_zones.available.names, 0, 2)
-  is_multi_user = contains(["team", "scale"], var.deployment_mode)
-  is_scale      = var.deployment_mode == "scale"
-  is_budget     = var.infrastructure_profile == "budget"
+  prefix                = "${var.name}-${var.environment}"
+  azs                   = slice(data.aws_availability_zones.available.names, 0, 2)
+  is_multi_user         = contains(["team", "scale"], var.deployment_mode)
+  is_scale              = var.deployment_mode == "scale"
+  is_budget             = var.infrastructure_profile == "budget"
+  use_cloudflare_tunnel = local.is_budget || var.ingress_mode == "cloudflare_tunnel"
+  use_alb               = !local.use_cloudflare_tunnel
 }
 
 resource "aws_vpc" "this" {
@@ -20,6 +22,18 @@ resource "aws_vpc" "this" {
     precondition {
       condition     = !local.is_budget || var.deployment_mode == "team"
       error_message = "The budget infrastructure profile is supported only with deployment_mode=team."
+    }
+    precondition {
+      condition     = !local.use_alb || trimspace(var.route53_zone_id) != ""
+      error_message = "route53_zone_id is required when ingress_mode=alb."
+    }
+    precondition {
+      condition     = !local.use_cloudflare_tunnel || local.is_multi_user
+      error_message = "cloudflare_tunnel ingress is supported for Team and Scale; Personal uses the standard ALB edge."
+    }
+    precondition {
+      condition     = !local.use_cloudflare_tunnel || var.cloudflared_image != "cloudflare/cloudflared@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      error_message = "cloudflare_tunnel ingress requires a real digest-pinned cloudflared_image; deploy.sh resolves it automatically."
     }
   }
 }

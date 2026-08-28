@@ -45,8 +45,19 @@ variable "domain_name" {
 }
 
 variable "route53_zone_id" {
-  description = "Public Route 53 hosted-zone ID that owns domain_name."
+  description = "Public Route 53 hosted-zone ID that owns domain_name when ingress_mode is alb."
   type        = string
+  default     = ""
+}
+
+variable "ingress_mode" {
+  description = "Public ingress: alb for AWS ALB/ACM/WAF or cloudflare_tunnel for outbound-only Team/Scale Cloudflare Tunnel. Team Lite always uses cloudflare_tunnel."
+  type        = string
+  default     = "alb"
+  validation {
+    condition     = contains(["alb", "cloudflare_tunnel"], var.ingress_mode)
+    error_message = "ingress_mode must be alb or cloudflare_tunnel."
+  }
 }
 
 variable "oidc_issuer" {
@@ -159,6 +170,16 @@ variable "enable_waf" {
   description = "Attach AWS managed WAF rules and an IP rate limit to the public ALB."
   type        = bool
   default     = true
+}
+
+variable "cloudflared_image" {
+  description = "Digest-pinned Cloudflare cloudflared image used only by Cloudflare Tunnel ingress."
+  type        = string
+  default     = "cloudflare/cloudflared@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  validation {
+    condition     = strcontains(var.cloudflared_image, "@sha256:")
+    error_message = "cloudflared_image must be digest pinned."
+  }
 }
 
 variable "monthly_budget_usd" {

@@ -14,6 +14,7 @@ OFF_HOURS_STOP="${SOULACY_AWS_OFF_HOURS_STOP:-22}"
 AWS_REGION="${SOULACY_AWS_REGION:-us-east-1}"
 DEPLOYMENT_NAME="${SOULACY_AWS_NAME:-soulacy}"
 ENVIRONMENT="${SOULACY_AWS_ENVIRONMENT:-}"
+INGRESS_MODE="${SOULACY_AWS_INGRESS_MODE:-}"
 
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required"; }
@@ -47,6 +48,13 @@ INSTALL_VARIANT="$DEPLOYMENT_MODE"
 if [[ "$INSTALL_VARIANT" == "team-lite" ]]; then
   DEPLOYMENT_MODE=team
   INFRASTRUCTURE_PROFILE=budget
+fi
+if [[ -z "$INGRESS_MODE" ]]; then
+  if [[ "$INFRASTRUCTURE_PROFILE" == "budget" ]]; then INGRESS_MODE=cloudflare_tunnel; else INGRESS_MODE=alb; fi
+fi
+[[ "$INGRESS_MODE" =~ ^(alb|cloudflare_tunnel)$ ]] || die "ingress mode must be alb or cloudflare_tunnel"
+if [[ "$INGRESS_MODE" == "cloudflare_tunnel" && "$DEPLOYMENT_MODE" == "personal" ]]; then
+  die "Cloudflare Tunnel ingress is supported for Team and Scale; Personal uses the standard ALB edge"
 fi
 if [[ -z "$ENVIRONMENT" ]]; then
   if [[ "$INFRASTRUCTURE_PROFILE" == "budget" ]]; then ENVIRONMENT=pilot; else ENVIRONMENT=production; fi
@@ -121,7 +129,7 @@ trap cleanup EXIT
 
 printf 'Deploying Soulacy %s (%s variant, %s infrastructure) to AWS account %s in %s\n' "$BUILD_TAG" "$INSTALL_VARIANT" "$INFRASTRUCTURE_PROFILE" "$ACCOUNT_ID" "$AWS_REGION"
 if [[ "$INFRASTRUCTURE_PROFILE" == "budget" ]]; then
-  printf '%s\n' 'Team Lite target: about $90-$150 for 730 hours at low traffic in us-east-1; AWS credits and prices are not guarantees.'
+  printf '%s\n' 'Team Lite target: about $55-$115 for 730 always-on hours at low traffic in us-east-1, before LLM/API use; AWS credits and prices are not guarantees.'
   printf '%s\n' 'Availability tradeoff: PostgreSQL is Single-AZ and compute is burstable. Destroy it promptly after the pilot.'
 fi
 
@@ -173,8 +181,12 @@ fi
 api_key=$(jq -r '.api_key // empty' <<<"$existing_bootstrap")
 jwt_secret=$(jq -r '.jwt_secret // empty' <<<"$existing_bootstrap")
 oidc_secret="${SOULACY_AWS_OIDC_CLIENT_SECRET:-$(jq -r '.oidc_client_secret // empty' <<<"$existing_bootstrap")}"
+tunnel_token="${SOULACY_CLOUDFLARE_TUNNEL_TOKEN:-$(jq -r '.cloudflare_tunnel_token // empty' <<<"$existing_bootstrap")}"
 [[ -n "$api_key" ]] || api_key="sy_$(openssl rand -hex 32)"
 [[ -n "$jwt_secret" ]] || jwt_secret=$(openssl rand -base64 48 | tr -d '\n')
+if [[ "$INGRESS_MODE" == "cloudflare_tunnel" && -z "$tunnel_token" ]]; then
+  die "Cloudflare Tunnel ingress requires SOULACY_CLOUDFLARE_TUNNEL_TOKEN; use team-lite-quickstart.sh to create it automatically"
+fi
 
 ensure_state_bucket
 ensure_ecr_repo "$GATEWAY_REPO"
@@ -202,6 +214,8 @@ execution_digest=$(aws ecr describe-images --region "$AWS_REGION" --repository-n
 EXECUTION_IMAGE="$REGISTRY/$EXECUTION_REPO@$execution_digest"
 NATS_IMAGE="nats@sha256:0000000000000000000000000000000000000000000000000000000000000000"
 if [[ "$DEPLOYMENT_MODE" != "personal" ]]; then NATS_IMAGE=$(resolve_digest "nats:2.14.5-alpine"); fi
+CLOUDFLARED_IMAGE="cloudflare/cloudflared@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+if [[ "$INGRESS_MODE" == "cloudflare_tunnel" ]]; then CLOUDFLARED_IMAGE=$(resolve_digest "cloudflare/cloudflared:latest"); fi
 
 signing_key_id=$(aws kms list-aliases --region "$AWS_REGION" --query "Aliases[?AliasName=='$SIGNING_ALIAS'].TargetKeyId | [0]" --output text)
 if [[ -z "$signing_key_id" || "$signing_key_id" == "None" ]]; then
@@ -246,8 +260,9 @@ fi
 
 b64() { openssl base64 -A -in "$1"; }
 jq -n --arg api_key "$api_key" --arg jwt_secret "$jwt_secret" --arg oidc_client_secret "$oidc_secret" \
+  --arg cloudflare_tunnel_token "$tunnel_token" \
   --arg cosign_public_key_b64 "$(b64 "$TMP_DIR/execution-image.pub")" \
-  '{api_key:$api_key,jwt_secret:$jwt_secret,oidc_client_secret:$oidc_client_secret,cosign_public_key_b64:$cosign_public_key_b64}' \
+  '{api_key:$api_key,jwt_secret:$jwt_secret,oidc_client_secret:$oidc_client_secret,cloudflare_tunnel_token:$cloudflare_tunnel_token,cosign_public_key_b64:$cosign_public_key_b64}' \
   >"$TMP_DIR/bootstrap.json"
 ensure_secret "$BOOTSTRAP_SECRET" "$TMP_DIR/bootstrap.json"
 if [[ "$DEPLOYMENT_MODE" != "personal" ]]; then ensure_secret "$NATS_SECRET" "$TMP_DIR/nats.json"; fi
@@ -259,7 +274,7 @@ terraform -chdir="$SCRIPT_DIR" apply -auto-approve -var-file="$VAR_FILE" \
   -var="aws_region=$AWS_REGION" -var="name=$DEPLOYMENT_NAME" -var="environment=$ENVIRONMENT" -var="deployment_mode=$DEPLOYMENT_MODE" \
   -var="infrastructure_profile=$INFRASTRUCTURE_PROFILE" -var="budget_alert_email=$BUDGET_EMAIL" -var="monthly_budget_usd=$MONTHLY_BUDGET_USD" \
   -var="off_hours_timezone=$OFF_HOURS_TIMEZONE" -var="off_hours_start_hour=$OFF_HOURS_START" -var="off_hours_stop_hour=$OFF_HOURS_STOP" \
-  -var="gateway_image=$GATEWAY_IMAGE" -var="execution_image=$EXECUTION_IMAGE" -var="nats_image=$NATS_IMAGE" \
+  -var="ingress_mode=$INGRESS_MODE" -var="gateway_image=$GATEWAY_IMAGE" -var="execution_image=$EXECUTION_IMAGE" -var="nats_image=$NATS_IMAGE" -var="cloudflared_image=$CLOUDFLARED_IMAGE" \
   -var="bootstrap_secret_name=$BOOTSTRAP_SECRET" -var="nats_tls_secret_name=$NATS_SECRET"
 
 cat >"$SCRIPT_DIR/.deployment.env" <<META
@@ -270,6 +285,7 @@ ENVIRONMENT=$ENVIRONMENT
 DEPLOYMENT_MODE=$DEPLOYMENT_MODE
 INSTALL_VARIANT=$INSTALL_VARIANT
 INFRASTRUCTURE_PROFILE=$INFRASTRUCTURE_PROFILE
+INGRESS_MODE=$INGRESS_MODE
 BUDGET_EMAIL=$BUDGET_EMAIL
 MONTHLY_BUDGET_USD=$MONTHLY_BUDGET_USD
 OFF_HOURS_TIMEZONE=$OFF_HOURS_TIMEZONE
@@ -281,6 +297,7 @@ VAR_FILE=$VAR_FILE
 GATEWAY_IMAGE=$GATEWAY_IMAGE
 EXECUTION_IMAGE=$EXECUTION_IMAGE
 NATS_IMAGE=$NATS_IMAGE
+CLOUDFLARED_IMAGE=$CLOUDFLARED_IMAGE
 BOOTSTRAP_SECRET=$BOOTSTRAP_SECRET
 NATS_SECRET=$NATS_SECRET
 META

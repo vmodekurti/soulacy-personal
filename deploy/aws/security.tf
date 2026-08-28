@@ -1,4 +1,5 @@
 resource "aws_security_group" "alb" {
+  count       = local.use_alb ? 1 : 0
   name_prefix = "${local.prefix}-alb-"
   description = "Public HTTPS ingress"
   vpc_id      = aws_vpc.this.id
@@ -25,12 +26,15 @@ resource "aws_security_group" "gateway" {
   description = "Soulacy gateway"
   vpc_id      = aws_vpc.this.id
 
-  ingress {
-    description     = "ALB to gateway"
-    protocol        = "tcp"
-    from_port       = 1947
-    to_port         = 1947
-    security_groups = [aws_security_group.alb.id]
+  dynamic "ingress" {
+    for_each = local.use_alb ? [1] : []
+    content {
+      description     = "ALB to gateway"
+      protocol        = "tcp"
+      from_port       = 1947
+      to_port         = 1947
+      security_groups = [aws_security_group.alb[0].id]
+    }
   }
   egress {
     protocol    = "-1"
@@ -131,21 +135,23 @@ resource "aws_security_group" "efs" {
 }
 
 resource "aws_acm_certificate" "this" {
+  count             = local.use_alb ? 1 : 0
   domain_name       = var.domain_name
   validation_method = "DNS"
   lifecycle { create_before_destroy = true }
 }
 
 resource "aws_route53_record" "certificate_validation" {
-  count   = 1
+  count   = local.use_alb ? 1 : 0
   zone_id = var.route53_zone_id
-  name    = tolist(aws_acm_certificate.this.domain_validation_options)[0].resource_record_name
-  type    = tolist(aws_acm_certificate.this.domain_validation_options)[0].resource_record_type
+  name    = tolist(aws_acm_certificate.this[0].domain_validation_options)[0].resource_record_name
+  type    = tolist(aws_acm_certificate.this[0].domain_validation_options)[0].resource_record_type
   ttl     = 60
-  records = [tolist(aws_acm_certificate.this.domain_validation_options)[0].resource_record_value]
+  records = [tolist(aws_acm_certificate.this[0].domain_validation_options)[0].resource_record_value]
 }
 
 resource "aws_acm_certificate_validation" "this" {
-  certificate_arn         = aws_acm_certificate.this.arn
+  count                   = local.use_alb ? 1 : 0
+  certificate_arn         = aws_acm_certificate.this[0].arn
   validation_record_fqdns = [aws_route53_record.certificate_validation[0].fqdn]
 }

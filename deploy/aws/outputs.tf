@@ -6,6 +6,10 @@ output "infrastructure_profile" {
   value = var.infrastructure_profile
 }
 
+output "ingress_mode" {
+  value = local.use_cloudflare_tunnel ? "cloudflare_tunnel" : "alb"
+}
+
 output "monthly_budget_usd" {
   value = local.is_budget ? var.monthly_budget_usd : null
 }
