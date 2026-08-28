@@ -162,7 +162,8 @@ The deployment machine needs:
 On macOS with Homebrew:
 
 ```bash
-brew install awscli terraform cosign jq openssl
+brew install awscli cosign jq openssl
+brew tap hashicorp/tap && brew install hashicorp/tap/terraform
 brew install --cask docker
 ```
 

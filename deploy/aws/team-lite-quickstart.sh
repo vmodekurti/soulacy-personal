@@ -95,12 +95,17 @@ install_prerequisites() {
   for command in "${missing[@]}"; do
     case "$command" in
       aws) formulae+=(awscli) ;;
-      terraform|jq|openssl|cosign|git) formulae+=("$command") ;;
+      terraform) ;;
+      jq|openssl|cosign|git) formulae+=("$command") ;;
       docker) ;;
       curl) formulae+=(curl) ;;
     esac
   done
   ((${#formulae[@]} == 0)) || brew install "${formulae[@]}"
+  if ! has terraform; then
+    brew tap hashicorp/tap
+    brew install hashicorp/tap/terraform
+  fi
   if ! has docker; then
     brew install --cask docker
   fi
