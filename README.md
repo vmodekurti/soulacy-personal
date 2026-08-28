@@ -110,6 +110,16 @@ cd soulacy
 > Cloudflare DNS plus Google login can be bootstrapped interactively with
 > `deploy/aws/team-lite-quickstart.sh`.
 
+After the first AWS setup, install the Mac command once. Routine releases then
+avoid Terraform and EC2 replacement:
+
+```bash
+deploy/aws/install-mac-command.sh
+soulacy-aws start       # start RDS, then gateway/worker/NATS
+soulacy-aws stop        # stop compute, then wait for RDS to stop
+soulacy-aws deploy      # test, build, sign, release, verify, auto-rollback
+```
+
 From a checkout, [`scripts/docker-deploy.sh`](scripts/docker-deploy.sh) builds the image, runs
 the container, publishes a host port, waits for the gateway to become healthy,
 and prints the URL plus the real API key. Every parameter can be entered

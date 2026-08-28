@@ -26,6 +26,14 @@ for command in aws terraform jq; do need "$command"; done
 source "$ENV_FILE"
 [[ -n "${AWS_PROFILE:-}" ]] && export AWS_PROFILE
 [[ "${DEPLOYMENT_MODE:-}" == "team" || "${DEPLOYMENT_MODE:-}" == "scale" ]] || die "power control requires Team or Scale mode"
+export AWS_REGION AWS_DEFAULT_REGION="$AWS_REGION"
+if [[ -n "${AWS_PROFILE:-}" && -z "${AWS_ACCESS_KEY_ID:-}" ]]; then
+  session_credentials=$(aws configure export-credentials --profile "$AWS_PROFILE" --format process 2>/dev/null) || \
+    die "could not export short-lived credentials from AWS profile $AWS_PROFILE; authenticate the profile again"
+  export AWS_ACCESS_KEY_ID=$(jq -er '.AccessKeyId' <<<"$session_credentials")
+  export AWS_SECRET_ACCESS_KEY=$(jq -er '.SecretAccessKey' <<<"$session_credentials")
+  export AWS_SESSION_TOKEN=$(jq -er '.SessionToken' <<<"$session_credentials")
+fi
 
 terraform -chdir="$SCRIPT_DIR" init -reconfigure -input=false \
   -backend-config="bucket=$STATE_BUCKET" -backend-config="key=$STATE_KEY" \
@@ -42,6 +50,18 @@ database_status() {
   [[ -n "$db_identifier" ]] || { printf 'not-applicable'; return; }
   aws rds describe-db-instances --region "$AWS_REGION" --db-instance-identifier "$db_identifier" \
     --query 'DBInstances[0].DBInstanceStatus' --output text
+}
+
+wait_for_database_status() {
+  local wanted=$1 current
+  for _ in {1..120}; do
+    current=$(database_status)
+    [[ "$current" == "$wanted" ]] && return 0
+    [[ "$current" == "failed" || "$current" == "incompatible-restore" || "$current" == "incompatible-network" ]] && \
+      die "PostgreSQL entered terminal state $current"
+    sleep 10
+  done
+  die "PostgreSQL did not reach $wanted within 20 minutes (current state: $(database_status))"
 }
 
 show_status() {
@@ -61,10 +81,15 @@ case "$ACTION" in
         ;;
       available) printf 'PostgreSQL is already available.\n' ;;
       starting) printf 'PostgreSQL is already starting.\n' ;;
+      stopping)
+        printf 'PostgreSQL is still stopping; waiting before starting it again...\n'
+        wait_for_database_status stopped
+        aws rds start-db-instance --region "$AWS_REGION" --db-instance-identifier "$db_identifier" >/dev/null
+        ;;
       *) die "PostgreSQL cannot be started while its status is $db_status" ;;
     esac
     printf 'Waiting for PostgreSQL to become available...\n'
-    aws rds wait db-instance-available --region "$AWS_REGION" --db-instance-identifier "$db_identifier"
+    wait_for_database_status available
     printf 'Starting EC2 gateway, worker, and NATS...\n'
     aws ec2 start-instances --region "$AWS_REGION" --instance-ids "${instance_ids[@]}" >/dev/null
     aws ec2 wait instance-running --region "$AWS_REGION" --instance-ids "${instance_ids[@]}"
@@ -82,8 +107,15 @@ case "$ACTION" in
         ;;
       stopped) printf 'PostgreSQL is already stopped.\n' ;;
       stopping) printf 'PostgreSQL is already stopping.\n' ;;
+      starting)
+        printf 'PostgreSQL is still starting; waiting before stopping it...\n'
+        wait_for_database_status available
+        aws rds stop-db-instance --region "$AWS_REGION" --db-instance-identifier "$db_identifier" >/dev/null
+        ;;
       *) die "PostgreSQL cannot be stopped while its status is $db_status" ;;
     esac
+    printf 'Waiting for PostgreSQL to stop...\n'
+    wait_for_database_status stopped
     printf 'Off-hours shutdown requested. The configured edge, EFS, KMS, EBS, DNS, ECR, and secrets remain provisioned.\n'
     ;;
   status) show_status ;;

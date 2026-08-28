@@ -5,7 +5,7 @@ VERSION        ?= $(shell git describe --tags --always --dirty 2>/dev/null || ec
 LDFLAGS        := -ldflags "-X github.com/soulacy/soulacy/internal/config.Version=$(VERSION)"
 PLAYWRIGHT_RUNNER ?= $(shell if [ -e .cache ] && [ ! -d .cache ]; then echo tmp/playwright-runner; else echo .cache/playwright-runner; fi)
 
-.PHONY: all build build-gateway build-cli gui up install which test deployment-modes-test security release-gate loadtest regression uat uat-public uat-full uat-credential docs-build docs-screenshots release-smoke production-parity channel-golden-smoke browser-mcp-smoke lint dev run-dev sdk-install tidy \
+.PHONY: all build build-gateway build-cli gui up install which test deployment-modes-test aws-deploy-test security release-gate loadtest regression uat uat-public uat-full uat-credential docs-build docs-screenshots release-smoke production-parity channel-golden-smoke browser-mcp-smoke lint dev run-dev sdk-install tidy \
         docker-up docker-down docker-up-lite docker-build docker-push \
         release release-linux release-linux-amd64 release-linux-arm64 \
         release-darwin release-darwin-arm64 release-darwin-amd64 release-package release-create release-create-github \
@@ -193,6 +193,14 @@ test:
 ## cloud infrastructure. Optional Docker/Terraform checks run when installed.
 deployment-modes-test:
 	./scripts/test-deployment-modes.sh
+
+## Verify the Mac AWS controls, in-place release/rollback, Team Lite wizard,
+## and Terraform contracts without starting cloud resources.
+aws-deploy-test:
+	bash -n deploy/aws/power.sh deploy/aws/release.sh deploy/aws/remote-release.sh deploy/aws/soulacy-aws deploy/aws/install-mac-command.sh
+	deploy/aws/tests/remote-release.sh
+	deploy/aws/tests/team-lite-quickstart.sh
+	terraform -chdir=deploy/aws test
 
 ## Team Preview latency profile (MU-027). Behind a build tag and NOT part of
 ## `make test`: it drives thousands of requests for ten seconds, and a latency

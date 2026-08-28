@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+SOURCE=${BASH_SOURCE[0]}
+while [[ -L "$SOURCE" ]]; do
+  SOURCE_DIR=$(cd -- "$(dirname -- "$SOURCE")" && pwd)
+  SOURCE=$(readlink "$SOURCE")
+  [[ "$SOURCE" == /* ]] || SOURCE="$SOURCE_DIR/$SOURCE"
+done
+SCRIPT_DIR=$(cd -- "$(dirname -- "$SOURCE")" && pwd)
+COMMAND=${1:-help}
+shift || true
+
+case "$COMMAND" in
+  start|stop|status)
+    [[ $# -eq 0 ]] || { echo "usage: soulacy-aws $COMMAND" >&2; exit 2; }
+    exec "$SCRIPT_DIR/power.sh" "$COMMAND"
+    ;;
+  deploy|release)
+    exec "$SCRIPT_DIR/release.sh" "$@"
+    ;;
+  logs)
+    [[ $# -eq 0 ]] || { echo "usage: soulacy-aws logs" >&2; exit 2; }
+    exec "$SCRIPT_DIR/status.sh"
+    ;;
+  help|-h|--help)
+    cat <<'USAGE'
+Soulacy AWS control
+
+  soulacy-aws start   Start PostgreSQL, then gateway/worker/NATS
+  soulacy-aws stop    Stop gateway/worker/NATS, then PostgreSQL
+  soulacy-aws status  Show current compute and database state
+  soulacy-aws deploy  Test, build, sign, release, verify, and roll back on failure
+  soulacy-aws logs    Show deployment health and connection instructions
+USAGE
+    ;;
+  *)
+    echo "unknown command: $COMMAND (run soulacy-aws help)" >&2
+    exit 2
+    ;;
+esac

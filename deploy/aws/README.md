@@ -37,6 +37,40 @@ known child zone and deletes that zone after a successful deployment. Existing
 run `deploy/aws/team-lite-quickstart.sh --help` to see the supported environment
 variables.
 
+## Install the Mac control command
+
+After the first deployment, install a small command into `~/.local/bin`:
+
+```bash
+deploy/aws/install-mac-command.sh
+```
+
+If the installer asks you to add `~/.local/bin` to `PATH`, do that once in
+`~/.zshrc`. From then on, the complete on-demand controls are:
+
+```bash
+soulacy-aws start
+soulacy-aws stop
+soulacy-aws status
+```
+
+`start` waits for PostgreSQL before starting gateway, worker, and NATS. `stop`
+does the reverse and does not return until PostgreSQL is fully stopped.
+
+For normal application updates, commit the Mac checkout and run one command:
+
+```bash
+soulacy-aws deploy
+```
+
+The release command runs the Go suite, starts a stopped deployment, builds and
+publishes immutable images, signs the execution image with the deployment KMS
+key, updates worker and gateway through Systems Manager, checks local and public
+readiness, and rolls back automatically on failure. It does **not** run
+Terraform or replace EC2 instances. Use `deploy.sh` only when infrastructure,
+bootstrap configuration, instance sizing, networking, or managed AWS resources
+change.
+
 ## Variant selection
 
 | Variant | Intended use | Components installed |
@@ -131,17 +165,17 @@ SOULACY_AWS_OFF_HOURS_STOP=22 \
 deploy/aws/deploy.sh --mode team-lite
 ```
 
-For an immediate manual override after deployment:
+For an immediate manual override after installing the Mac command:
 
 ```bash
-deploy/aws/power.sh status
-deploy/aws/power.sh stop
-deploy/aws/power.sh start
+soulacy-aws status
+soulacy-aws stop
+soulacy-aws start
 ```
 
 `start` waits for PostgreSQL before starting the EC2 nodes. `stop` shuts down
-the EC2 nodes before PostgreSQL. The next scheduled event still applies after a
-manual override.
+the EC2 nodes before PostgreSQL and waits for the database to finish stopping.
+The next scheduled event still applies after a manual override.
 
 Stopping is not destroying. EC2 CPU and RDS instance-hour charges pause, and
 their automatically assigned public IPv4 addresses are released. Cloudflare
