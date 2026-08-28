@@ -115,7 +115,7 @@ func TestGatewayDoctorResolvesWorkspaceVaultProviderWithoutGlobalRegistration(t 
 	const workspaceID = "ws_a"
 	if _, err := store.Set(context.Background(), workspaceID, "usr_ws_a", workspacesettings.Settings{
 		LLM: workspacesettings.LLM{Providers: map[string]workspacesettings.Provider{
-			"nvidia": {BaseURL: "https://integrate.api.nvidia.com/v1", Model: "nvidia/test-model"},
+			"nvidia": {BaseURL: "https://integrate.api.nvidia.com/v1", Model: "nvidia/nemotron-3-nano-30b-a3b"},
 		}},
 	}); err != nil {
 		t.Fatal(err)

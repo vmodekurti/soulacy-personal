@@ -493,16 +493,17 @@
 						{#each installReview.environment as item}<label><span><code>{item.name}</code> {item.required ? '· required' : '· optional'}</span><input type={item.secret ? 'password' : 'text'} bind:value={installSettings[item.name]} autocomplete="off" placeholder={item.description || item.name} /><small>{item.secret ? 'Stored in workspace vault' : item.description}</small></label>{/each}
 					</div>
         {/if}
-        <div class="approval-note"><strong>Explicit approval:</strong> approving {installReview.runtime === 'source-npm' ? 'builds this source in a disposable builder, content-addresses the result,' : 'pulls and pins the runtime image by SHA-256,'} and starts it only inside this workspace’s isolated runtime. Discovered tools become selectable in Studio; agents still need an explicit server or tool grant.</div>
+        <div class="approval-note"><strong>Explicit approval:</strong> approving {installReview.runtime?.startsWith('source-') ? 'builds this source in a disposable builder, content-addresses the result,' : 'pulls and pins the runtime image by SHA-256,'} and starts it only inside this workspace’s isolated runtime. Discovered tools become selectable in Studio; agents still need an explicit server or tool grant.</div>
       {/if}
 
       <div class="modal-row">
+		{#if installError}<div class="modal-action-error" role="alert">{installError}</div>{/if}
         <button class="btn-secondary" on:click={closeInstall} disabled={inspecting || approving}>Cancel</button>
         {#if !installReview}
           <button class="btn-primary" on:click={inspectInstall} disabled={inspecting || !installURL.trim()}>{inspecting ? 'Inspecting…' : 'Inspect repository'}</button>
         {:else}
 					<button class="btn-secondary" on:click={() => { installReview = null; installToken = ''; installError = ''; installSettings = {} }} disabled={approving}>Change</button>
-					<button class="btn-primary" on:click={approveInstall} disabled={approving || installRequiredMissing}>{approving ? 'Installing safely…' : 'Approve & install'}</button>
+					<button class="btn-primary" on:click={approveInstall} disabled={approving || installRequiredMissing}>{approving ? 'Building securely…' : 'Approve & install'}</button>
         {/if}
       </div>
     </div>
@@ -820,6 +821,10 @@
     background: #141626; padding-top: .6rem;
     box-shadow: 0 -10px 12px -10px rgba(0, 0, 0, 0.6);
   }
+	.modal-action-error {
+		margin-right: auto; max-width: 70%; color: #ff8585; font-size: .76rem;
+		line-height: 1.35; overflow-wrap: anywhere;
+	}
 
   .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
   .field { display: flex; flex-direction: column; gap: .3rem; }

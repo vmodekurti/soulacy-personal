@@ -4,9 +4,14 @@ exec > >(tee /var/log/soulacy-bootstrap.log | logger -t soulacy-bootstrap -s 2>/
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y --no-install-recommends apt-transport-https ca-certificates curl docker.io gnupg jq unzip
+apt-get install -y --no-install-recommends apt-transport-https ca-certificates curl docker.io docker-buildx gnupg jq unzip
 ${aws_cli}
 systemctl enable --now docker
+
+# Tenant-approved MCP source installs use per-build-step network isolation.
+# Docker implements RUN --network=none through BuildKit, so fail bootstrap
+# loudly if the plugin is missing instead of allowing installs to fail later.
+docker buildx version >/dev/null
 
 install -d -m 0755 /etc/soulacy /etc/soulacy/nats /opt/soulacy/bin
 

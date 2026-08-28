@@ -36,6 +36,7 @@
   let navCollapsed = false   // desktop: collapse the left nav to an icon rail
   let PageComponent = null
   let loadedPage = ''
+  let loadedPageVariant = ''
   let pageLoadError = ''
   let pageLoadStale = false
   let pageLoadSeq = 0
@@ -106,7 +107,12 @@
 
   // Keep the browser tab title in sync with the active page (Story 15).
   $: if (typeof document !== 'undefined') document.title = pageTitle(page, pages, pluginPages)
-  $: if (!shareToken && !$authRequired && page !== loadedPage) loadPageComponent(page)
+  // Team/Scale identity arrives asynchronously. Providers and Config have
+  // deployment- and workspace-scoped implementations, so include that scope
+  // in the loaded-page identity. Otherwise a deep link can mount the Personal
+  // page before identity resolves and keep it for the whole session.
+  $: pageVariant = `${page}:${multiUserWorkspace ? 'workspace' : 'deployment'}`
+  $: if (!shareToken && !$authRequired && pageVariant !== loadedPageVariant) loadPageComponent(page)
 
   function navigate(p) {
     p = retiredPages[p] || p
@@ -142,6 +148,7 @@
   async function loadPageComponent(nextPage) {
     const seq = ++pageLoadSeq
     loadedPage = nextPage
+    loadedPageVariant = `${nextPage}:${multiUserWorkspace ? 'workspace' : 'deployment'}`
     pageLoadError = ''
     pageLoadStale = false
     PageComponent = null

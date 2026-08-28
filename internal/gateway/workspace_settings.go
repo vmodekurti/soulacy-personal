@@ -384,12 +384,39 @@ func (s *Server) handleSetWorkspaceProviderModel(c *fiber.Ctx) error {
 		settings.LLM.Providers = map[string]workspacesettings.Provider{}
 	}
 	p := settings.LLM.Providers[providerID]
-	p.Model = strings.TrimSpace(req.Model)
+	model := strings.TrimSpace(req.Model)
+	provider, err := s.workspaceProvider(c.UserContext(), id.WorkspaceID(), providerID, p)
+	if err != nil || provider == nil {
+		return s.errMsg(c, fiber.StatusBadRequest, errorText(err, "provider unavailable"))
+	}
+	if err := validateWorkspaceProviderModel(c.UserContext(), provider, model); err != nil {
+		return s.errMsg(c, fiber.StatusUnprocessableEntity, err.Error())
+	}
+	p.Model = model
 	settings.LLM.Providers[providerID] = p
 	if _, err := s.workspaceSettings.Set(c.UserContext(), id.WorkspaceID(), id.Subject(), settings); err != nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "workspace model could not be saved")
 	}
 	return c.JSON(fiber.Map{"ok": true, "model": p.Model, "message": "Model saved for this workspace."})
+}
+
+// validateWorkspaceProviderModel prevents a typo or stale catalog entry from
+// becoming the workspace default. Some compatible providers do not implement
+// model discovery; an unavailable catalog is therefore advisory, while a
+// successful non-empty catalog is authoritative.
+func validateWorkspaceProviderModel(ctx context.Context, provider llm.Provider, model string) error {
+	probeCtx, cancel := context.WithTimeout(ctx, workspaceProviderProbeTimeout)
+	defer cancel()
+	models, err := provider.Models(probeCtx)
+	if err != nil || len(models) == 0 {
+		return nil
+	}
+	for _, candidate := range models {
+		if strings.EqualFold(strings.TrimSpace(candidate), model) {
+			return nil
+		}
+	}
+	return fmt.Errorf("model %q is not available from this provider; choose a model returned by List models", model)
 }
 
 func (s *Server) handleDeleteWorkspaceProvider(c *fiber.Ctx) error {
@@ -490,6 +517,25 @@ func (s *Server) workspaceProviderDoctorChecks(c *fiber.Ctx) ([]doctorProviderCh
 			check.Status = "fail"
 			check.Detail = "remote provider has no workspace or deployment API key"
 			check.Remedy = "edit this provider and add its API key"
+		}
+		if check.Status == "ok" && provider != nil {
+			probeCtx, cancel := context.WithTimeout(c.UserContext(), workspaceProviderProbeTimeout)
+			models, modelsErr := provider.Models(probeCtx)
+			cancel()
+			if modelsErr == nil && len(models) > 0 {
+				modelFound := false
+				for _, candidate := range models {
+					if strings.EqualFold(strings.TrimSpace(candidate), strings.TrimSpace(effective.Model)) {
+						modelFound = true
+						break
+					}
+				}
+				if !modelFound {
+					check.Status = "fail"
+					check.Detail = fmt.Sprintf("configured model %q is not offered by this provider", effective.Model)
+					check.Remedy = "use List models and save an available model"
+				}
+			}
 		}
 		checks = append(checks, check)
 	}

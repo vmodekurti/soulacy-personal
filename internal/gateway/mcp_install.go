@@ -807,6 +807,13 @@ func pullAndPinOCI(ctx context.Context, image string) (string, error) {
 }
 
 func buildAndPinSource(ctx context.Context, stage stagedMCPInstall) (string, error) {
+	buildx, err := dockerutil.CommandContext(ctx, "buildx", "version")
+	if err != nil {
+		return "", fmt.Errorf("secure MCP source builds require Docker Buildx/BuildKit: %w", err)
+	}
+	if out, err := buildx.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("secure MCP source builds require Docker Buildx/BuildKit; install the Docker Buildx plugin and retry: %v: %s", err, strings.TrimSpace(string(out)))
+	}
 	root, err := os.MkdirTemp("", "soulacy-mcp-build-")
 	if err != nil {
 		return "", err
