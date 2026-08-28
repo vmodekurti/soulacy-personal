@@ -75,6 +75,12 @@ docker buildx version >/dev/null 2>&1 || die "Docker Buildx is required"
 [[ "$DEPLOYMENT_NAME" =~ ^[a-z][a-z0-9-]{1,20}$ ]] || die "SOULACY_AWS_NAME has an invalid format"
 [[ "$ENVIRONMENT" =~ ^[a-z][a-z0-9-]{1,20}$ ]] || die "SOULACY_AWS_ENVIRONMENT has an invalid format"
 
+# The AWS CLI receives --region explicitly below, but AWS-backed helpers such
+# as cosign's awskms signer use the SDK environment instead. Export both
+# conventional variables so every AWS client resolves the same endpoint.
+export AWS_REGION
+export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-$AWS_REGION}"
+
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 REGISTRY="$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
 GATEWAY_REPO="$DEPLOYMENT_NAME-gateway"
