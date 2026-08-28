@@ -3,10 +3,13 @@
   import { confirmDestructive } from '../lib/destructive.js'
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
+  import { can } from '../lib/workspace.js'
   import { providerReturnContext } from '../lib/studio/session.js'
 
   export let scope = 'deployment'
   $: providerAPI = scope === 'workspace' ? api.workspaceProviders : api.providers
+  $: canManageProviders = scope !== 'workspace' || can('providers', 'write')
+  $: canSelectModels = scope !== 'workspace' || can('providers', 'set')
 
   let providers       = {}
   let defaultProvider = ''
@@ -353,7 +356,7 @@
       {#if scope === 'workspace'}<p class="scope-copy">The Personal-mode provider experience, isolated to this workspace.</p>{/if}
     </div>
     <div class="header-actions">
-      <button class="btn-primary" on:click={() => openAdd('openai')}>+ Add provider</button>
+      {#if canManageProviders}<button class="btn-primary" on:click={() => openAdd('openai')}>+ Add provider</button>{/if}
       <button class="btn-secondary" on:click={runDoctor} disabled={doctorLoading}>
         {doctorLoading ? 'Checking…' : 'Run doctor'}
       </button>
@@ -383,7 +386,7 @@
     </div>
   {/if}
 
-  {#if missingKnown.length > 0}
+  {#if canManageProviders && missingKnown.length > 0}
     <div class="suggest-card">
       <span class="suggest-label">Quick add:</span>
       {#each missingKnown as id}
@@ -467,8 +470,8 @@
               {/if}
             </div>
             <div class="pv-actions">
-              <button class="icon-btn-edit" title="Edit credentials" on:click={() => openAdd(id)}>✎</button>
-              {#if scope !== 'workspace' || !pc.inherited}<button class="icon-btn-delete" title="Delete provider" on:click={() => deleteProvider(id)}>🗑️</button>{/if}
+              {#if canManageProviders}<button class="icon-btn-edit" title="Edit credentials" on:click={() => openAdd(id)}>✎</button>{/if}
+              {#if canManageProviders && (scope !== 'workspace' || !pc.inherited)}<button class="icon-btn-delete" title="Delete provider" on:click={() => deleteProvider(id)}>🗑️</button>{/if}
             </div>
           </div>
 
@@ -546,11 +549,11 @@
                       </label>
                     {/each}
                   </div>
-                  <button class="btn-primary small-btn save-model"
+                  {#if canSelectModels}<button class="btn-primary small-btn save-model"
                           on:click={() => saveModel(id)}
                           disabled={savingModel[id] || !chosen[id] || chosen[id] === pc.model}>
                     {savingModel[id] ? 'Saving…' : 'Save model'}
-                  </button>
+                  </button>{/if}
                 </div>
               {/if}
             {/if}

@@ -77,7 +77,7 @@ export const bridge = {
     return loadCatalogParts({
       agents: () => api.agents.list(),
       tools: () => api.tools.catalog(),
-      providers: () => api.providers.list(),
+      providers: () => api.workspaceProviders.list(),
       channels: () => api.channels.list(),
       skills: () => api.skills.list(),
       mcp: () => api.mcp.list(),
@@ -292,11 +292,13 @@ export const bridge = {
   generateCode: (nodeId, description, workflow) =>
     api.studio.codegen({ nodeId, description, workflow }),
 
-  // Studio model picker: read current config + set the llm.studio override.
-  getConfig: () => api.workspaceConfig.get(),
-  providerModels: (id) => api.providers.models(id),
+  // Studio model picker: use the workspace-scoped, author-safe selection API.
+  // This lets developers choose approved providers/models without granting
+  // access to credentials, deployment settings, or the full config editor.
+  getConfig: () => api.workspaceLLMSelection.get(),
+  providerModels: (id) => api.workspaceProviders.models(id),
   setStudioModel: (provider, model) =>
-    api.workspaceConfig.patch({ llm: { studio: { provider, model } } }),
+    api.workspaceLLMSelection.patch({ llm: { studio: { provider, model } } }),
   // Story 9 (Cohort B): intent-named preset catalog — "fast local" / "reliable
   // local" / "cloud quality". Persisted via the same config patch pipeline.
   presets: () => apiFetch('/studio/presets'),

@@ -607,6 +607,14 @@ export const api = {
     patch: (body) => apiFetch('/workspace/config', { method: 'PATCH', body: JSON.stringify(body) }),
   },
 
+  // Narrow, author-safe provider/model selection. Unlike workspaceConfig this
+  // endpoint cannot mutate credentials, budgets, security, or deployment
+  // policy, so developers can use it from Studio without becoming admins.
+  workspaceLLMSelection: {
+    get: () => apiFetch('/workspace/llm-selection'),
+    patch: (body) => apiFetch('/workspace/llm-selection', { method: 'PATCH', body: JSON.stringify(body) }),
+  },
+
   workspaceProviders: {
     list: () => apiFetch('/workspace/providers'),
     doctor: () => apiFetch('/workspace/providers/doctor'),

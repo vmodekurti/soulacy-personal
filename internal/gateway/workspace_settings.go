@@ -76,10 +76,13 @@ func (s *Server) registerWorkspaceSettingsRoutes(api fiber.Router) {
 	api.Get("/workspace/config", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleGetWorkspaceSettings)
 	api.Patch("/workspace/config", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite),
 		s.auditing("workspace.config_set", "workspace", "", s.handlePatchWorkspaceSettings))
+	api.Get("/workspace/llm-selection", s.rbacMW(rbac.ResourceProviders, rbac.ActionRead), s.handleGetWorkspaceLLMSelection)
+	api.Patch("/workspace/llm-selection", s.rbacMW(rbac.ResourceProviders, rbac.ActionSet),
+		s.auditing("workspace.llm_selection_set", "workspace", "", s.handlePatchWorkspaceLLMSelection))
 	api.Get("/workspace/providers", s.rbacMW(rbac.ResourceProviders, rbac.ActionRead), s.handleListWorkspaceProviders)
 	api.Get("/workspace/providers/doctor", s.rbacMW(rbac.ResourceProviders, rbac.ActionRead), s.handleWorkspaceProviderDoctor)
 	api.Get("/workspace/providers/:id/models", s.rbacMW(rbac.ResourceProviders, rbac.ActionRead), s.handleListWorkspaceProviderModels)
-	api.Post("/workspace/providers/:id/model", s.rbacMW(rbac.ResourceProviders, rbac.ActionWrite), s.handleSetWorkspaceProviderModel)
+	api.Post("/workspace/providers/:id/model", s.rbacMW(rbac.ResourceProviders, rbac.ActionSet), s.handleSetWorkspaceProviderModel)
 	api.Post("/workspace/providers/:id", s.rbacMW(rbac.ResourceProviders, rbac.ActionWrite),
 		s.auditing("workspace.provider_set", "provider", "", s.handleSetWorkspaceProvider))
 	api.Delete("/workspace/providers/:id", s.rbacMW(rbac.ResourceProviders, rbac.ActionWrite),
@@ -665,6 +668,145 @@ func (s *Server) workspaceSettingsResponse(c *fiber.Ctx, settings workspacesetti
 		"runtime":    settings.Runtime,
 		"updated_by": settings.UpdatedBy, "updated_at": settings.UpdatedAt,
 	})
+}
+
+// workspaceLLMSelectionResponse is the deliberately narrow view used by
+// Studio authors. It contains provider/model choices and builder presentation
+// preferences, but none of the workspace's budgets, security policy, search
+// credential state, operational settings, or deployment metadata.
+func (s *Server) workspaceLLMSelectionResponse(c *fiber.Ctx, settings workspacesettings.Settings) error {
+	providers := map[string]fiber.Map{}
+	for providerID, provider := range s.config().LLM.Providers {
+		providers[providerID] = fiber.Map{"model": provider.Model}
+	}
+	for providerID, provider := range settings.LLM.Providers {
+		entry := providers[providerID]
+		if entry == nil {
+			entry = fiber.Map{}
+		}
+		if provider.Model != "" {
+			entry["model"] = provider.Model
+		}
+		providers[providerID] = entry
+	}
+	return c.JSON(fiber.Map{
+		"scope": "workspace",
+		"llm": fiber.Map{
+			"default_provider": firstNonEmpty(settings.LLM.Default.Provider, s.config().LLM.DefaultProvider),
+			"default":          settings.LLM.Default,
+			"chat":             settings.LLM.Chat,
+			"studio":           effectiveStudioSettings(settings, s),
+			"reasoner":         settings.LLM.Reasoner,
+			"providers":        providers,
+		},
+	})
+}
+
+func (s *Server) handleGetWorkspaceLLMSelection(c *fiber.Ctx) error {
+	id, ok := identityForWorkspaceSettings(c)
+	if !ok {
+		return s.errMsg(c, fiber.StatusUnauthorized, "workspace identity is unavailable")
+	}
+	if s.workspaceSettings == nil {
+		return s.errMsg(c, fiber.StatusServiceUnavailable, "workspace settings are unavailable")
+	}
+	settings, err := s.workspaceSettings.Get(c.UserContext(), id.WorkspaceID())
+	if err != nil {
+		return s.errMsg(c, fiber.StatusServiceUnavailable, "workspace model selection could not be read")
+	}
+	return s.workspaceLLMSelectionResponse(c, settings)
+}
+
+type llmSelectionPatch struct {
+	LLM *struct {
+		Default  *modelPatch `json:"default"`
+		Chat     *modelPatch `json:"chat"`
+		Studio   *modelPatch `json:"studio"`
+		Reasoner *modelPatch `json:"reasoner"`
+	} `json:"llm"`
+}
+
+func applyModelSelection(dst *workspacesettings.ProviderModel, patch *modelPatch) {
+	if patch == nil {
+		return
+	}
+	if patch.Provider != nil {
+		next := strings.ToLower(strings.TrimSpace(*patch.Provider))
+		if !strings.EqualFold(next, dst.Provider) && patch.Model == nil {
+			// A model name belongs to its provider. Never carry the previous
+			// provider's model across a provider switch.
+			dst.Model = ""
+		}
+		dst.Provider = next
+	}
+	if patch.Model != nil {
+		dst.Model = strings.TrimSpace(*patch.Model)
+	}
+}
+
+func (s *Server) validateSelectedWorkspaceModel(ctx context.Context, workspaceID string, settings workspacesettings.Settings, selected workspacesettings.ProviderModel) error {
+	if selected.Provider == "" {
+		if selected.Model != "" {
+			return errors.New("choose a provider before choosing a model")
+		}
+		return nil
+	}
+	configured := settings.LLM.Providers[selected.Provider]
+	provider, err := s.workspaceProvider(ctx, workspaceID, selected.Provider, configured)
+	if err != nil || provider == nil {
+		return errors.New(errorText(err, "provider "+selected.Provider+" is unavailable"))
+	}
+	if selected.Model != "" {
+		return validateWorkspaceProviderModel(ctx, provider, selected.Model)
+	}
+	return nil
+}
+
+func (s *Server) handlePatchWorkspaceLLMSelection(c *fiber.Ctx) error {
+	id, ok := identityForWorkspaceSettings(c)
+	if !ok {
+		return s.errMsg(c, fiber.StatusUnauthorized, "workspace identity is unavailable")
+	}
+	if s.workspaceSettings == nil {
+		return s.errMsg(c, fiber.StatusServiceUnavailable, "workspace settings are unavailable")
+	}
+	var patch llmSelectionPatch
+	if err := c.BodyParser(&patch); err != nil || patch.LLM == nil {
+		return s.errMsg(c, fiber.StatusBadRequest, "an LLM selection is required")
+	}
+	current, err := s.workspaceSettings.Get(c.UserContext(), id.WorkspaceID())
+	if err != nil {
+		return s.errMsg(c, fiber.StatusServiceUnavailable, "workspace settings could not be read")
+	}
+	applyModelSelection(&current.LLM.Default, patch.LLM.Default)
+	applyModelSelection(&current.LLM.Chat, patch.LLM.Chat)
+	applyModelSelection(&current.LLM.Studio.ProviderModel, patch.LLM.Studio)
+	applyModelSelection(&current.LLM.Reasoner, patch.LLM.Reasoner)
+	if err := s.validateWorkspaceModels(current); err != nil {
+		return s.errMsg(c, fiber.StatusBadRequest, err.Error())
+	}
+	checks := []struct {
+		patch    *modelPatch
+		selected workspacesettings.ProviderModel
+	}{
+		{patch.LLM.Default, current.LLM.Default},
+		{patch.LLM.Chat, current.LLM.Chat},
+		{patch.LLM.Studio, current.LLM.Studio.ProviderModel},
+		{patch.LLM.Reasoner, current.LLM.Reasoner},
+	}
+	for _, check := range checks {
+		if check.patch == nil {
+			continue
+		}
+		if err := s.validateSelectedWorkspaceModel(c.UserContext(), id.WorkspaceID(), current, check.selected); err != nil {
+			return s.errMsg(c, fiber.StatusUnprocessableEntity, err.Error())
+		}
+	}
+	saved, err := s.workspaceSettings.Set(c.UserContext(), id.WorkspaceID(), id.Subject(), current)
+	if err != nil {
+		return s.errMsg(c, fiber.StatusServiceUnavailable, "workspace model selection could not be saved")
+	}
+	return s.workspaceLLMSelectionResponse(c, saved)
 }
 
 func effectiveStudioSettings(settings workspacesettings.Settings, s *Server) workspacesettings.Studio {

@@ -805,6 +805,8 @@ func TestDeveloperAndOperatorResponsibilitiesStaySeparated(t *testing.T) {
 	}{
 		{"developer authors agents", RoleDeveloper, ResourceAgents, ActionWrite, true},
 		{"developer uses Studio", RoleDeveloper, ResourceBuilder, ActionWrite, true},
+		{"developer selects approved provider models", RoleDeveloper, ResourceProviders, ActionSet, true},
+		{"developer cannot administer providers", RoleDeveloper, ResourceProviders, ActionWrite, false},
 		{"developer cannot approve production actions", RoleDeveloper, ResourceApprovals, ActionWrite, false},
 		{"developer cannot enable delivery channels", RoleDeveloper, ResourceChannels, ActionEnable, false},
 		{"operator cannot author agents", RoleOperator, ResourceAgents, ActionWrite, false},
