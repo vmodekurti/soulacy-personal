@@ -88,6 +88,7 @@
        dependent field below. -->
   <GenerationTrigger
     selection={generationTrigger}
+    inferredTrigger={spec && spec.trigger}
     {channels}
     onChange={onGenerationTrigger}
   />

@@ -715,6 +715,28 @@ func (s *Server) preflightInput(c *fiber.Ctx, cat studio.Catalog) studio.Preflig
 		for _, d := range mgr.Catalog(authorizedRequestContext(c), s.config()) {
 			set[d.Name] = d.Set
 		}
+		// Team/Scale provider credentials are intentionally stored in the
+		// workspace-settings namespace, not secrets.GlobalScope. The runtime and
+		// Providers page already read that namespace, but Studio preflight used
+		// only the generic secrets catalog above. A healthy workspace provider
+		// therefore appeared to be missing its API key during Save.
+		//
+		// Add every workspace-owned provider slot, including false for a genuinely
+		// missing key, so DeriveSecretRequirements can both require the credential
+		// and report its real state without duplicating secret values.
+		settings := s.workspaceSettingsFor(c)
+		workspaceID := s.agents(c).WorkspaceID()
+		for providerID := range settings.LLM.Providers {
+			name := workspacesettings.ProviderAPIKey(providerID)
+			if set[name] {
+				continue
+			}
+			_, err := s.CredentialVault().Get(
+				authorizedRequestContext(c), workspaceID,
+				workspacesettings.SecretNamespace, name,
+			)
+			set[name] = err == nil
+		}
 		in.SecretsSet = set
 	}
 	// Provider/model availability, judged by REGISTRATION rather than by config

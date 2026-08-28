@@ -3,11 +3,27 @@
 
   export let selection = { type: 'auto', cron: '', channel: '', delivery: 'auto', destination: '' }
   export let channels = []
+  // The build-spec service's current interpretation. Keep this separate from
+  // `selection`: an inferred value remains revisable, while anything selected
+  // by the user is an authoritative override.
+  export let inferredTrigger = ''
   export let onChange = () => {}
 
   $: channelList = Array.isArray(channels) ? channels : (channels && channels.channels) || []
   $: type = (selection && selection.type) || 'auto'
   $: delivery = (selection && selection.delivery) || 'auto'
+  $: inferredLabel = triggerGuessLabel(inferredTrigger)
+
+  function triggerGuessLabel(value) {
+    const text = String(value || '').trim().toLowerCase()
+    if (!text) return 'not specified'
+    if (/cron|schedul|every |daily|weekly|monthly/.test(text)) return 'Cron schedule'
+    if (/webhook/.test(text)) return 'Webhook'
+    if (/soulacy gui|gui chat|chat conversation/.test(text)) return 'Soulacy GUI Chat'
+    if (/channel|message arrives|incoming .*message/.test(text)) return 'Channel message'
+    if (/manual|on demand|programmatic|interactive/.test(text)) return 'Manual / programmatic'
+    return value
+  }
 
   function change(patch) {
     onChange({ type: 'auto', cron: '', channel: '', delivery: 'auto', destination: '', ...selection, ...patch })
@@ -25,14 +41,27 @@
   }
 </script>
 
-<div class="generation-trigger">
+<div class="generation-trigger" class:overridden={type !== 'auto'}>
+  <div class="trigger-heading">
+    <div>
+      <strong>Run this agent when</strong>
+      {#if type === 'auto'}
+        <span>Studio guessed: {inferredLabel}</span>
+      {:else}
+        <span class="override-status">Your selection overrides Studio’s guess.</span>
+      {/if}
+    </div>
+    {#if type !== 'auto'}
+      <button class="use-guess" type="button" on:click={() => change({ type: 'auto', cron: '', channel: '', delivery: 'auto', destination: '' })}>Use Studio’s guess</button>
+    {/if}
+  </div>
   <label for="generation-trigger-type">Trigger</label>
   <select
     id="generation-trigger-type"
     value={type}
     on:change={(e) => changeType(e.target.value)}
   >
-    <option value="auto">Use the prompt</option>
+    <option value="auto">Studio’s guess — {inferredLabel}</option>
     {#each TRIGGER_OPTIONS as option}
       <option value={option.value} disabled={option.value === 'channel' && channelList.length === 0}>
         {option.label}{option.value === 'channel' && channelList.length === 0 ? ' (configure a channel first)' : ''}
@@ -96,7 +125,7 @@
   {/if}
 
   <p class="route-summary"><strong>Route:</strong> {routeSummary(type, delivery, delivery)}</p>
-  <p>{type === 'auto' && delivery === 'auto' ? 'Studio will infer both sides from your prompt.' : 'Only output choices compatible with this input are shown.'}</p>
+  <p>{type === 'auto' && delivery === 'auto' ? 'If that guess is wrong, choose the correct trigger above before generating.' : 'Only output choices compatible with this input are shown.'}</p>
 </div>
 
 <style>
@@ -110,6 +139,23 @@
     border-radius: 8px;
     background: var(--bg-elev-2, #171d2c);
   }
+  .generation-trigger.overridden {
+    border-color: color-mix(in srgb, var(--accent, #6c63ff) 62%, var(--border, #2a3350));
+  }
+  .trigger-heading {
+    grid-column: 1 / -1; display: flex; align-items: center;
+    justify-content: space-between; gap: 10px; padding-bottom: 2px;
+  }
+  .trigger-heading > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .trigger-heading strong { color: var(--text, #e6e9ef); font-size: 12px; }
+  .trigger-heading span { color: var(--text-muted, #8b93ab); font-size: 10.5px; }
+  .trigger-heading .override-status { color: var(--ok, #3fb950); }
+  .use-guess {
+    flex: none; padding: 4px 7px; color: var(--text-muted, #8b93ab);
+    background: transparent; border: 1px solid var(--border, #2a3350);
+    border-radius: 6px; font-size: 10.5px; cursor: pointer;
+  }
+  .use-guess:hover { color: var(--text, #e6e9ef); border-color: var(--accent, #6c63ff); }
   label { color: var(--text-muted, #8b93ab); font-size: 11px; font-weight: 650; }
   select, input {
     min-width: 0; width: 100%; box-sizing: border-box; padding: 6px 8px;
@@ -124,6 +170,7 @@
   .route-summary { color: var(--text, #e6e9ef); }
   @media (max-width: 680px) {
     .generation-trigger { grid-template-columns: 1fr; }
+    .trigger-heading { grid-column: auto; align-items: flex-start; }
     p { grid-column: auto; }
   }
 </style>

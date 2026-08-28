@@ -46,6 +46,30 @@ describe('GenerationTrigger', () => {
     expect(changes.at(-1)).toMatchObject({ type: 'chat', delivery: 'reply' })
   })
 
+  it('names the inferred trigger and makes the correction path explicit', async () => {
+    const changes = []
+    const root = mount({
+      selection: { type: 'auto', delivery: 'auto' },
+      inferredTrigger: 'schedule',
+      channels: [],
+      onChange: (value) => changes.push(value),
+    }, GenerationTrigger)
+
+    expect(root.textContent).toContain('Studio guessed: Cron schedule')
+    expect(root.textContent).toContain('If that guess is wrong')
+    expect(root.querySelector('#generation-trigger-type option[value="auto"]').textContent)
+      .toContain('Studio’s guess — Cron schedule')
+
+    const type = root.querySelector('#generation-trigger-type')
+    type.value = 'manual'
+    type.dispatchEvent(new Event('change', { bubbles: true }))
+    component.$set({ selection: changes.at(-1) })
+    await tick()
+
+    expect(root.textContent).toContain('Your selection overrides Studio’s guess')
+    expect(changes.at(-1)).toMatchObject({ type: 'manual', delivery: 'reply' })
+  })
+
   it('keeps contextual reply for manual invocation and drops it for a schedule', async () => {
     const changes = []
     const root = mount({
