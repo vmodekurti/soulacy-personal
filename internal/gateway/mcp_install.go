@@ -52,6 +52,7 @@ type stagedMCPInstall struct {
 	Fingerprint string
 	WorkspaceID string
 	Actor       string
+	RequestID   string
 	SourceURL   string
 	Revision    string
 	ServerID    string
@@ -131,6 +132,7 @@ func (s *Server) handleInspectWorkspaceMCP(c *fiber.Ctx) error {
 	var body struct {
 		SourceURL   string                `json:"source_url"`
 		Permissions mcpInstallPermissions `json:"permissions"`
+		RequestID   string                `json:"request_id"`
 	}
 	if err := c.BodyParser(&body); err != nil {
 		return s.errJSON(c, fiber.StatusBadRequest, err)
@@ -138,6 +140,20 @@ func (s *Server) handleInspectWorkspaceMCP(c *fiber.Ctx) error {
 	source, err := canonicalGitHubRepository(body.SourceURL)
 	if err != nil {
 		return s.errMsg(c, fiber.StatusBadRequest, err.Error())
+	}
+	requestID := strings.TrimSpace(body.RequestID)
+	if requestID != "" {
+		if s.mcpServers == nil {
+			return s.errMsg(c, fiber.StatusServiceUnavailable, "workspace MCP requests are not available")
+		}
+		request, requestErr := s.mcpServers.GetInstallRequest(c.UserContext(), mcpWorkspace(c), requestID)
+		if requestErr != nil || request.Status != mcpstore.RequestPending {
+			return s.errMsg(c, fiber.StatusNotFound, "pending MCP request not found")
+		}
+		if request.SourceURL != source {
+			return s.errMsg(c, fiber.StatusConflict, "request source does not match the repository being reviewed")
+		}
+		body.Permissions = mcpInstallPermissions{Network: request.Network, Workspace: request.WorkspaceAccess}
 	}
 
 	dir, err := os.MkdirTemp("", "soulacy-mcp-inspect-")
@@ -173,6 +189,7 @@ func (s *Server) handleInspectWorkspaceMCP(c *fiber.Ctx) error {
 	stage.Token = randomInstallToken()
 	stage.WorkspaceID = mcpWorkspace(c)
 	stage.Actor = s.auditActor(c)
+	stage.RequestID = requestID
 	stage.ExpiresAt = time.Now().UTC().Add(mcpInstallStageTTL)
 	stage.Fingerprint = mcpInstallFingerprint(stage)
 
@@ -191,6 +208,7 @@ func (s *Server) handleInspectWorkspaceMCP(c *fiber.Ctx) error {
 
 	s.recordAdminAudit(c, "mcp.install.inspect", "mcp", stage.ServerID, "ok", map[string]any{
 		"source_url": stage.SourceURL, "revision": stage.Revision, "fingerprint": stage.Fingerprint,
+		"install_request_id": stage.RequestID,
 	})
 	return c.JSON(fiber.Map{"ok": true, "approval_token": stage.Token, "report": installReport(stage)})
 }
@@ -241,7 +259,9 @@ func (s *Server) handleApproveWorkspaceMCP(c *fiber.Ctx) error {
 		pinned, err = pullAndPinOCI(ctx, stage.Image)
 	}
 	if err != nil {
-		s.recordAdminAudit(c, "mcp.install.approve", "mcp", stage.ServerID, "failed", map[string]any{"reason": err.Error()})
+		s.recordAdminAudit(c, "mcp.install.approve", "mcp", stage.ServerID, "failed", map[string]any{
+			"reason": err.Error(), "install_request_id": stage.RequestID,
+		})
 		return s.errMsg(c, fiber.StatusBadGateway, "container image could not be installed: "+err.Error())
 	}
 	env, secretCount, err := s.storeMCPInstallSettings(c.UserContext(), stage, body.Settings)
@@ -262,6 +282,13 @@ func (s *Server) handleApproveWorkspaceMCP(c *fiber.Ctx) error {
 	}); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
+	if stage.RequestID != "" {
+		if err := s.mcpServers.DecideInstallRequest(c.UserContext(), stage.WorkspaceID, stage.RequestID,
+			mcpstore.RequestInstalled, stage.Actor, "Approved after isolated security review.", stage.ServerID); err != nil {
+			_ = s.mcpServers.Delete(c.UserContext(), stage.WorkspaceID, stage.ServerID)
+			return s.errMsg(c, fiber.StatusConflict, "the MCP request was already decided; the server was not installed")
+		}
+	}
 	s.mcpInstallMu.Lock()
 	delete(s.mcpInstallStages, stage.Token)
 	s.mcpInstallMu.Unlock()
@@ -269,6 +296,7 @@ func (s *Server) handleApproveWorkspaceMCP(c *fiber.Ctx) error {
 	s.recordAdminAudit(c, "mcp.install.approve", "mcp", stage.ServerID, "ok", map[string]any{
 		"source_url": stage.SourceURL, "revision": stage.Revision, "image": pinned, "fingerprint": stage.Fingerprint,
 		"network": stage.Permissions.Network, "workspace_access": stage.Permissions.Workspace, "secrets_stored": secretCount,
+		"install_request_id": stage.RequestID,
 	})
 	return c.JSON(fiber.Map{"ok": true, "id": stage.ServerID, "image": pinned, "message": "MCP server installed. Its discovered tools are now available in Studio and to agents granted this server."})
 }
@@ -701,11 +729,11 @@ func randomInstallToken() string {
 
 func mcpInstallFingerprint(stage stagedMCPInstall) string {
 	payload, _ := json.Marshal(struct {
-		Source, Revision, ID, Image, Runtime string
-		Args                                 []string
-		Permissions                          mcpInstallPermissions
-		Environment                          []mcpInstallEnv
-	}{stage.SourceURL, stage.Revision, stage.ServerID, stage.Image, stage.Runtime, stage.Args, stage.Permissions, stage.Env})
+		Source, Revision, ID, Image, Runtime, RequestID string
+		Args                                            []string
+		Permissions                                     mcpInstallPermissions
+		Environment                                     []mcpInstallEnv
+	}{stage.SourceURL, stage.Revision, stage.ServerID, stage.Image, stage.Runtime, stage.RequestID, stage.Args, stage.Permissions, stage.Env})
 	sum := sha256.Sum256(payload)
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
@@ -716,6 +744,7 @@ func installReport(stage stagedMCPInstall) fiber.Map {
 		"server_id": stage.ServerID, "name": stage.Name, "description": stage.Description,
 		"source_url": stage.SourceURL, "revision": stage.Revision, "image": stage.Image,
 		"runtime": stage.Runtime, "command": stage.Args, "environment": stage.Env,
+		"request_id":  stage.RequestID,
 		"permissions": stage.Permissions, "findings": stage.Findings,
 		"isolation": fiber.Map{"read_only": true, "non_root": true, "capabilities": "none", "host_mounts": stage.Permissions.Workspace != "none", "docker_socket": false, "resource_limits": true, "network": stage.Permissions.Network},
 	}

@@ -17,7 +17,7 @@ permission.
 | Channels | Full | Full | Read | Read/enable | Read |
 | Providers | Read/write | Read/write | Read | Read | Read |
 | Skills | Full | Read | Read/write | Read | Read |
-| MCP servers | Full | Full | Read | Read | Read |
+| MCP servers | Full | Full | Read/request install | Read | Read |
 | Knowledge | Full | Full | Full | Read/write | Read |
 | Studio builder | Read/write | Write | Read/write | — | — |
 | Templates | Full | Read/write | Read/write | Read | Read |
@@ -36,6 +36,15 @@ enable published agents, manage schedules and delivery-channel state, and
 approve guarded production actions. Removing Studio from the operator role is
 intentional separation of duties; an operator cannot silently change the code
 or prompt of the workload they are supervising.
+
+MCP installation follows the same separation. A Developer can submit a public
+GitHub repository, a reason, and the minimum network/workspace-file permissions
+the server needs. The request is durable and visible to that Developer and to
+workspace Owners/Admins. It does not download or execute code. An Owner or
+Admin must independently inspect the immutable source revision, review the
+container permissions and declared secrets, then approve and install it (or
+deny the request). Operators and Viewers can see installed MCP servers but
+cannot request, approve, install, configure, or remove them.
 
 ## Object grants
 

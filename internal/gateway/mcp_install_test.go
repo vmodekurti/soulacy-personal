@@ -139,6 +139,16 @@ func TestApprovalFingerprintBindsPermissions(t *testing.T) {
 	}
 }
 
+func TestApprovalFingerprintBindsInstallRequest(t *testing.T) {
+	stage := stagedMCPInstall{SourceURL: "https://github.com/acme/weather", Revision: "abc", ServerID: "weather", Image: "node:22-alpine"}
+	a := mcpInstallFingerprint(stage)
+	stage.RequestID = "mcp_req_123"
+	b := mcpInstallFingerprint(stage)
+	if a == b {
+		t.Fatal("adding an install request did not change the approval fingerprint")
+	}
+}
+
 func TestPackageRunnerRequiresInternetPermission(t *testing.T) {
 	permissions := mcpInstallPermissions{Network: "none", Workspace: "none"}
 	for _, runtime := range []string{"npm", "pypi"} {

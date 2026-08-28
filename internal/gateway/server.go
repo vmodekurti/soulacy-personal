@@ -1259,6 +1259,9 @@ func (s *Server) buildApp() *fiber.App {
 	// the one thing about an MCP server that must never be the operator's.
 	api.Get("/mcp/pending", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleMCPPending)
 	api.Get("/mcp/own", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleListOwnMCPServers)
+	api.Get("/mcp/own/install/requests", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleListMCPInstallRequests)
+	api.Post("/mcp/own/install/requests", s.rbacMW(rbac.ResourceMCP, rbac.ActionRequest), s.handleCreateMCPInstallRequest)
+	api.Post("/mcp/own/install/requests/:id/deny", s.rbacMW(rbac.ResourceMCP, rbac.ActionInstall), s.workspaceMCPAdmin, s.handleDenyMCPInstallRequest)
 	api.Put("/mcp/own/:id", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.workspaceMCPAdmin, s.handlePutOwnMCPServer)
 	api.Put("/mcp/own/:id/settings", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.workspaceMCPAdmin, s.handleConfigureOwnMCPServer)
 	api.Delete("/mcp/own/:id", s.rbacMW(rbac.ResourceMCP, rbac.ActionDelete), s.workspaceMCPAdmin, s.handleDeleteOwnMCPServer)

@@ -110,6 +110,9 @@ const (
 	ActionSet    = "set"
 	ActionRotate = "rotate"
 	ActionReveal = "reveal"
+	// ActionRequest lets a non-administrator ask for a privileged change
+	// without granting the authority to perform or approve that change.
+	ActionRequest = "request"
 
 	// ActionInstall is the authority to bring third-party code into a
 	// workspace: a skill from a registry, an MCP server from a marketplace, a
@@ -140,7 +143,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 		ResourceChannels:    {ActionRead: true, ActionWrite: true, ActionEnable: true},
 		ResourceProviders:   {ActionRead: true, ActionWrite: true},
 		ResourceSkills:      {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionInstall: true},
-		ResourceMCP:         {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionInstall: true},
+		ResourceMCP:         {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionInstall: true, ActionRequest: true},
 		ResourcePlugins:     {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionInstall: true},
 		ResourceKnowledge:   {ActionRead: true, ActionWrite: true, ActionDelete: true},
 		ResourceBuilder:     {ActionRead: true, ActionWrite: true},
@@ -162,7 +165,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 		ResourceChannels:    {ActionRead: true, ActionWrite: true, ActionEnable: true},
 		ResourceProviders:   {ActionRead: true, ActionWrite: true},
 		ResourceSkills:      {ActionRead: true, ActionInstall: true},
-		ResourceMCP:         {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionInstall: true},
+		ResourceMCP:         {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionInstall: true, ActionRequest: true},
 		ResourcePlugins:     {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionInstall: true},
 		ResourceKnowledge:   {ActionRead: true, ActionWrite: true, ActionDelete: true},
 		ResourceBuilder:     {ActionWrite: true},
@@ -184,7 +187,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 		ResourceChannels:    {ActionRead: true},
 		ResourceProviders:   {ActionRead: true},
 		ResourceSkills:      {ActionRead: true, ActionWrite: true},
-		ResourceMCP:         {ActionRead: true},
+		ResourceMCP:         {ActionRead: true, ActionRequest: true},
 		ResourcePlugins:     {ActionRead: true},
 		ResourceKnowledge:   {ActionRead: true, ActionWrite: true, ActionDelete: true},
 		ResourceBuilder:     {ActionRead: true, ActionWrite: true},

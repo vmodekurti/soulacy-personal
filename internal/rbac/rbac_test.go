@@ -1143,3 +1143,22 @@ func TestInstallingAnExtensionIsASeparatePermissionFromUsingOne(t *testing.T) {
 		t.Error("developer gained the ability to configure an executable MCP server")
 	}
 }
+
+func TestDeveloperCanRequestButNotInstallMCP(t *testing.T) {
+	if !HasPermission(RoleDeveloper, ResourceMCP, ActionRequest) {
+		t.Fatal("developer cannot request an MCP server")
+	}
+	if HasPermission(RoleDeveloper, ResourceMCP, ActionInstall) {
+		t.Fatal("developer request permission escalated to install permission")
+	}
+	for _, role := range []string{RoleOwner, RoleAdmin} {
+		if !HasPermission(role, ResourceMCP, ActionRequest) || !HasPermission(role, ResourceMCP, ActionInstall) {
+			t.Fatalf("%s must be able to request and install MCP servers", role)
+		}
+	}
+	for _, role := range []string{RoleOperator, RoleViewer} {
+		if HasPermission(role, ResourceMCP, ActionRequest) {
+			t.Fatalf("%s unexpectedly may request MCP installation", role)
+		}
+	}
+}

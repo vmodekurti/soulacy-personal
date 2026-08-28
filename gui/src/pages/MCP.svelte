@@ -10,6 +10,7 @@
   $: workspaceAdmin = ['owner', 'admin'].includes(String($activeWorkspace?.role || '').toLowerCase())
   $: canWriteMCP = ($permissions, can('mcp', 'write'))
   $: canInstallMCP = ($permissions, can('mcp', 'install'))
+  $: canRequestMCP = ($permissions, can('mcp', 'request'))
   $: canDeleteMCP = ($permissions, can('mcp', 'delete'))
 
   let servers = []
@@ -18,6 +19,16 @@
   let info    = ''
   let expanded = {}      // serverID → bool
   let restartNeeded = false
+  let installRequests = []
+  let requestModal = false
+  let requestURL = ''
+  let requestReason = ''
+  let requestNetwork = 'public'
+  let requestWorkspace = 'none'
+  let requesting = false
+  let requestError = ''
+  let installRequestID = ''
+  let denyingRequestID = ''
 
   // Edit / create modal state. `editing` is null when the modal is closed.
   // When `editing.id` is set AND matches a row in `servers`, we're editing;
@@ -82,7 +93,64 @@
     installError = ''
 		installNetwork = 'public'
 		installWorkspace = 'none'
-		installSettings = {}
+    installSettings = {}
+    installRequestID = ''
+  }
+
+  function openRequest() {
+    if (!canRequestMCP) return
+    requestModal = true
+    requestURL = ''
+    requestReason = ''
+    requestNetwork = 'public'
+    requestWorkspace = 'none'
+    requestError = ''
+  }
+
+  async function submitRequest() {
+    requesting = true
+    requestError = ''
+    try {
+      const res = await api.mcp.requestInstall(requestURL.trim(), requestReason.trim(), {
+        network: requestNetwork,
+        workspace: requestWorkspace,
+      })
+      info = res.message || 'MCP installation request sent.'
+      requestModal = false
+      await load()
+    } catch (e) {
+      requestError = e.message
+    } finally {
+      requesting = false
+    }
+  }
+
+  function reviewInstallRequest(request) {
+    if (!canInstallMCP) return
+    installModal = true
+    installURL = request.source_url
+    installNetwork = request.network || 'public'
+    installWorkspace = request.workspace_access || 'none'
+    installRequestID = request.id
+    installReview = null
+    installToken = ''
+    installError = ''
+    installSettings = {}
+  }
+
+  async function denyInstallRequest(request) {
+    if (!confirmDestructive(`Deny the MCP installation request for "${request.source_url}"?`)) return
+    denyingRequestID = request.id
+    error = ''
+    try {
+      const res = await api.mcp.denyInstallRequest(request.id, 'Denied by a workspace administrator.')
+      info = res.message || 'MCP installation request denied.'
+      await load()
+    } catch (e) {
+      error = e.message
+    } finally {
+      denyingRequestID = ''
+    }
   }
   function closeInstall() {
     if (inspecting || approving) return
@@ -93,7 +161,7 @@
     installError = ''
     installReview = null
     try {
-		const res = await api.mcp.inspectInstall(installURL.trim(), { network: installNetwork, workspace: installWorkspace })
+		const res = await api.mcp.inspectInstall(installURL.trim(), { network: installNetwork, workspace: installWorkspace }, installRequestID)
       installToken = res.approval_token
       installReview = res.report
 		installSettings = Object.fromEntries((installReview.environment || []).map(item => [item.name, '']))
@@ -134,8 +202,15 @@
     loading = true
     error   = ''
     try {
-      const res = workspaceScoped ? await api.mcp.ownList() : await api.mcp.list()
-      servers = res.servers || []
+      if (workspaceScoped) {
+        const [serverRes, requestRes] = await Promise.all([api.mcp.ownList(), api.mcp.installRequests()])
+        servers = serverRes.servers || []
+        installRequests = requestRes.requests || []
+      } else {
+        const res = await api.mcp.list()
+        servers = res.servers || []
+        installRequests = []
+      }
     } catch (e) {
       error = e.message
     } finally {
@@ -349,6 +424,8 @@
       {#if !workspaceScoped}<button class="btn-glama" on:click={openGlamaModal}>⚡ Glama</button>{/if}
       {#if workspaceScoped && workspaceAdmin && canInstallMCP}
         <button class="btn-primary" on:click={openInstall}>+ Install from GitHub</button>
+      {:else if workspaceScoped && canRequestMCP}
+        <button class="btn-primary" on:click={openRequest}>+ Request MCP server</button>
       {:else if !workspaceScoped}
         <button class="btn-primary" on:click={openNew}>+ New Server</button>
       {/if}
@@ -367,13 +444,40 @@
   {#if error}<div class="banner err">{error}</div>{/if}
   {#if info}<div class="banner ok">{info}</div>{/if}
 
+  {#if workspaceScoped && installRequests.length}
+    <section class="request-panel">
+      <div class="request-panel-head">
+        <div><h2>Installation requests</h2><p>{workspaceAdmin ? 'Review requests before any third-party code enters this workspace.' : 'Track MCP servers you asked a workspace administrator to review.'}</p></div>
+        <span>{installRequests.filter(request => request.status === 'pending').length} pending</span>
+      </div>
+      <div class="request-list">
+        {#each installRequests as request}
+          <article class="request-row">
+            <div class="request-main">
+              <div class="request-title"><code>{request.source_url}</code><span class="request-status {request.status}">{request.status}</span></div>
+              {#if request.reason}<p>{request.reason}</p>{/if}
+              <small>Requested by {request.requested_by} · {new Date(request.requested_at).toLocaleString()} · {request.network === 'none' ? 'no internet' : 'public APIs'} · workspace {request.workspace_access || 'none'}</small>
+              {#if request.decision_reason}<small>{request.decision_reason}</small>{/if}
+            </div>
+            {#if workspaceAdmin && request.status === 'pending'}
+              <div class="request-actions">
+                <button class="btn-secondary tiny" on:click={() => denyInstallRequest(request)} disabled={denyingRequestID === request.id}>{denyingRequestID === request.id ? 'Denying…' : 'Deny'}</button>
+                <button class="btn-primary tiny" on:click={() => reviewInstallRequest(request)}>Review & install</button>
+              </div>
+            {/if}
+          </article>
+        {/each}
+      </div>
+    </section>
+  {/if}
+
   {#if loading && servers.length === 0}
     <div class="empty">Loading…</div>
   {:else if servers.length === 0}
     <div class="empty-card">
       <div class="empty-icon">🔌</div>
       <p>No MCP servers configured.</p>
-      <p class="hint">{workspaceScoped ? (workspaceAdmin ? 'Paste a GitHub repository URL to inspect and install an isolated MCP server.' : 'A workspace owner or admin can install an MCP server after a security review.') : 'Click + New Server to add one — choose from a template or define your own.'}</p>
+      <p class="hint">{workspaceScoped ? (workspaceAdmin ? 'Paste a GitHub repository URL to inspect and install an isolated MCP server.' : (canRequestMCP ? 'Request a GitHub MCP server and a workspace administrator can review and install it.' : 'A workspace owner or admin can install an MCP server after a security review.')) : 'Click + New Server to add one — choose from a template or define your own.'}</p>
     </div>
   {:else}
     <div class="server-list">
@@ -444,9 +548,35 @@
       a process janitor around MCP tool calls so short-lived browser children are cleaned up after the call returns.
       Use <strong>Browser visible</strong> only for live debugging.
     </p>
-		<p>{workspaceScoped ? 'Only workspace owners and admins can install or remove servers. Published packages and supported source-only MCP servers are prepared and run in isolated containers with only the network and workspace-file permissions approved during installation.' : 'Changes here are written to config.yaml; the gateway must be restarted to pick them up.'}</p>
+		<p>{workspaceScoped ? 'Developers can request servers. Workspace owners and admins review, approve, install, or remove them. Published packages and supported source-only MCP servers are prepared and run in isolated containers with only the network and workspace-file permissions approved during installation.' : 'Changes here are written to config.yaml; the gateway must be restarted to pick them up.'}</p>
   </div>
 </div>
+
+{#if requestModal}
+  <div class="modal-bg" role="button" tabindex="0" aria-label="Close MCP request" on:click|self={() => !requesting && (requestModal = false)} on:keydown={(e) => e.key === 'Escape' && !requesting && (requestModal = false)}>
+    <div class="modal wide">
+      <h2>Request an MCP server</h2>
+      <p class="glama-hint">Tell your workspace administrator which public GitHub repository you need. Nothing is downloaded or executed until an owner or admin completes the security review.</p>
+      <div class="field">
+        <span class="field-label">GitHub repository URL <span class="req">*</span></span>
+        <input type="url" bind:value={requestURL} placeholder="https://github.com/wshobson/maverick-mcp" disabled={requesting} />
+      </div>
+      <div class="field">
+        <span class="field-label">Why you need it <span class="optional">(optional)</span></span>
+        <textarea bind:value={requestReason} maxlength="2000" rows="4" placeholder="Which agent or workflow needs this server, and what will it do?" disabled={requesting}></textarea>
+      </div>
+      <div class="permission-picker">
+        <label><span>Internet access</span><select bind:value={requestNetwork} disabled={requesting}><option value="public">Allow public APIs</option><option value="none">No internet</option></select><small>Request only the access this server needs.</small></label>
+        <label><span>Workspace files</span><select bind:value={requestWorkspace} disabled={requesting}><option value="none">No files</option><option value="read">Read only</option><option value="write">Read and write</option></select><small>Only this workspace can ever be mounted.</small></label>
+      </div>
+      {#if requestError}<div class="banner err">{requestError}</div>{/if}
+      <div class="modal-row">
+        <button class="btn-secondary" on:click={() => requestModal = false} disabled={requesting}>Cancel</button>
+        <button class="btn-primary" on:click={submitRequest} disabled={requesting || !requestURL.trim()}>{requesting ? 'Sending…' : 'Send request'}</button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 {#if installModal}
   <div class="modal-bg" role="button" tabindex="0" aria-label="Close MCP installer" on:click|self={closeInstall} on:keydown={(e) => e.key === 'Escape' && closeInstall()}>
@@ -728,6 +858,24 @@
   }
   .empty-icon { font-size: 2.5rem; }
   .hint { font-size: .82rem; max-width: 540px; }
+  .request-panel { background:#141626; border:1px solid #252b4b; border-radius:10px; overflow:hidden; }
+  .request-panel-head { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:.85rem 1rem; border-bottom:1px solid #1a1e36; }
+  .request-panel-head h2 { margin:0; font-size:.9rem; }
+  .request-panel-head p { margin:.2rem 0 0; color:#7b82a8; font-size:.75rem; }
+  .request-panel-head > span { color:#aaa5ff; background:rgba(108,99,255,.12); padding:.25rem .5rem; border-radius:999px; font-size:.7rem; white-space:nowrap; }
+  .request-list { display:flex; flex-direction:column; }
+  .request-row { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:.75rem 1rem; border-bottom:1px solid #1a1e36; }
+  .request-row:last-child { border-bottom:0; }
+  .request-main { min-width:0; display:flex; flex-direction:column; gap:.3rem; }
+  .request-title { display:flex; align-items:center; gap:.5rem; min-width:0; }
+  .request-title code { color:#c8cadf; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .request-main p { margin:0; color:#aeb5d3; font-size:.78rem; }
+  .request-main small { color:#697190; font-size:.68rem; }
+  .request-status { border-radius:999px; padding:.16rem .4rem; font-size:.62rem; text-transform:uppercase; letter-spacing:.04em; }
+  .request-status.pending { color:#f0c460; background:rgba(240,196,96,.1); }
+  .request-status.installed { color:#60f0a0; background:rgba(96,240,160,.08); }
+  .request-status.denied { color:#f06060; background:rgba(240,96,96,.1); }
+  .request-actions { display:flex; gap:.4rem; flex-shrink:0; }
   .review-head { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; padding:.8rem; background:#111426; border:1px solid #252b4b; border-radius:8px; }
 	.permission-picker { display:grid; grid-template-columns:1fr 1fr; gap:.7rem; padding:.75rem; border:1px solid #252b4b; background:#101322; border-radius:8px; }
 	.permission-picker label, .install-settings label { display:flex; flex-direction:column; gap:.3rem; color:#aeb5d3; font-size:.76rem; }
@@ -833,6 +981,10 @@
     background: #0e1020; border: 1px solid #2a2f4a; border-radius: 6px;
     color: #e8eaf6; font-size: .85rem; padding: .45rem .65rem; font-family: monospace;
   }
+  .field textarea {
+    resize:vertical; background:#0e1020; border:1px solid #2a2f4a; border-radius:6px;
+    color:#e8eaf6; font-size:.85rem; padding:.55rem .65rem; font-family:inherit;
+  }
   .req      { color: #f06060; margin-left: .15rem; }
   .optional { color: #555a7a; text-transform: none; font-weight: 400; font-size: .68rem; letter-spacing: 0; margin-left: .25rem; }
 
@@ -878,5 +1030,11 @@
   .glama-creds-label {
     font-size: .72rem; color: #6b7294; text-transform: uppercase; letter-spacing: .06em;
     font-weight: 600; border-top: 1px solid #1a1e36; padding-top: .75rem;
+  }
+
+  @media (max-width: 768px) {
+    .request-row { align-items:flex-start; flex-direction:column; }
+    .request-actions { width:100%; justify-content:flex-end; }
+    .permission-picker { grid-template-columns:1fr; }
   }
 </style>

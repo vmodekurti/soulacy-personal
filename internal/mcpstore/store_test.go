@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestOpenMigratesExistingRegistryToSafeLegacyPermissions(t *testing.T) {
@@ -191,5 +192,61 @@ func TestAnUnavailableStoreIsNotAFallback(t *testing.T) {
 	}
 	if err := store.Put(context.Background(), Server{WorkspaceID: "ws_a", ID: "x"}); err == nil {
 		t.Fatal("a nil store accepted a write")
+	}
+}
+
+func TestInstallRequestsAreDurableScopedAndDecidedOnce(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	requestedAt := time.Now().UTC().Truncate(time.Second)
+	for _, request := range []InstallRequest{
+		{ID: "mcp_req_a", WorkspaceID: "ws_a", SourceURL: "https://github.com/acme/a", Reason: "agent a", Network: "public", WorkspaceAccess: "none", RequestedBy: "usr_alice", RequestedAt: requestedAt},
+		{ID: "mcp_req_b", WorkspaceID: "ws_a", SourceURL: "https://github.com/acme/b", Network: "none", WorkspaceAccess: "read", RequestedBy: "usr_bob", RequestedAt: requestedAt.Add(time.Second)},
+		{ID: "mcp_req_c", WorkspaceID: "ws_b", SourceURL: "https://github.com/acme/c", RequestedBy: "usr_alice", RequestedAt: requestedAt},
+	} {
+		if err := store.CreateInstallRequest(ctx, request); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	alice, err := store.ListInstallRequests(ctx, "ws_a", "usr_alice")
+	if err != nil || len(alice) != 1 || alice[0].ID != "mcp_req_a" {
+		t.Fatalf("alice requests = %+v, err=%v", alice, err)
+	}
+	all, err := store.ListInstallRequests(ctx, "ws_a", "")
+	if err != nil || len(all) != 2 {
+		t.Fatalf("admin requests = %+v, err=%v", all, err)
+	}
+	if _, err := store.GetInstallRequest(ctx, "ws_b", "mcp_req_a"); err != sql.ErrNoRows {
+		t.Fatalf("cross-workspace request read = %v", err)
+	}
+	if err := store.DecideInstallRequest(ctx, "ws_a", "mcp_req_a", RequestInstalled, "usr_admin", "reviewed", "server-a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DecideInstallRequest(ctx, "ws_a", "mcp_req_a", RequestDenied, "usr_admin", "again", ""); err != sql.ErrNoRows {
+		t.Fatalf("second decision = %v, want sql.ErrNoRows", err)
+	}
+	got, err := store.GetInstallRequest(ctx, "ws_a", "mcp_req_a")
+	if err != nil || got.Status != RequestInstalled || got.InstalledServerID != "server-a" || got.DecidedBy != "usr_admin" || got.DecidedAt == nil {
+		t.Fatalf("decided request = %+v, err=%v", got, err)
+	}
+}
+
+func TestPurgeWorkspaceAlsoRemovesInstallRequests(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	_ = store.Put(ctx, Server{WorkspaceID: "ws_a", ID: "one"})
+	_ = store.CreateInstallRequest(ctx, InstallRequest{ID: "mcp_req_a", WorkspaceID: "ws_a", SourceURL: "https://github.com/acme/a", RequestedBy: "usr_a"})
+	_ = store.CreateInstallRequest(ctx, InstallRequest{ID: "mcp_req_b", WorkspaceID: "ws_b", SourceURL: "https://github.com/acme/b", RequestedBy: "usr_b"})
+
+	n, err := store.PurgeWorkspace(ctx, "ws_a")
+	if err != nil || n != 2 {
+		t.Fatalf("purged %d rows, err=%v", n, err)
+	}
+	if requests, _ := store.ListInstallRequests(ctx, "ws_a", ""); len(requests) != 0 {
+		t.Fatalf("purged workspace retained requests: %+v", requests)
+	}
+	if requests, _ := store.ListInstallRequests(ctx, "ws_b", ""); len(requests) != 1 {
+		t.Fatalf("other workspace request changed: %+v", requests)
 	}
 }

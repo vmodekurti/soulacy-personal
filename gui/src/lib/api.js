@@ -865,11 +865,18 @@ export const api = {
     ownPut: (id, body) => apiFetch(`/mcp/own/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) }),
 		ownConfigure: (id, settings) => apiFetch(`/mcp/own/${encodeURIComponent(id)}/settings`, { method: 'PUT', body: JSON.stringify({ settings }) }),
     ownDelete: (id) => apiFetch(`/mcp/own/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-    inspectInstall: (sourceURL, permissions) => apiFetch('/mcp/own/install/inspect', {
-      method: 'POST', body: JSON.stringify({ source_url: sourceURL, permissions }),
+    inspectInstall: (sourceURL, permissions, requestID = '') => apiFetch('/mcp/own/install/inspect', {
+      method: 'POST', body: JSON.stringify({ source_url: sourceURL, permissions, request_id: requestID }),
     }),
     approveInstall: (approvalToken, fingerprint, settings = {}) => apiFetch('/mcp/own/install/approve', {
       method: 'POST', body: JSON.stringify({ approval_token: approvalToken, fingerprint, settings }),
+    }),
+    installRequests: () => apiFetch('/mcp/own/install/requests'),
+    requestInstall: (sourceURL, reason, permissions) => apiFetch('/mcp/own/install/requests', {
+      method: 'POST', body: JSON.stringify({ source_url: sourceURL, reason, permissions }),
+    }),
+    denyInstallRequest: (id, reason = '') => apiFetch(`/mcp/own/install/requests/${encodeURIComponent(id)}/deny`, {
+      method: 'POST', body: JSON.stringify({ reason }),
     }),
   },
 
