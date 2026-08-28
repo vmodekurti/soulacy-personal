@@ -86,6 +86,19 @@ fi
 export AWS_REGION
 export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-$AWS_REGION}"
 
+# `aws login` profiles use login_session, which the AWS CLI understands but
+# older Terraform AWS providers may not. Bridge that profile to standard,
+# short-lived environment credentials for this process only. Nothing is
+# written to disk and an already configured environment always wins.
+if [[ -n "${AWS_PROFILE:-}" && -z "${AWS_ACCESS_KEY_ID:-}" ]]; then
+  session_credentials=$(aws configure export-credentials --profile "$AWS_PROFILE" --format process 2>/dev/null) || \
+    die "could not export short-lived credentials from AWS profile $AWS_PROFILE; run aws login --profile $AWS_PROFILE"
+  export AWS_ACCESS_KEY_ID="$(jq -er '.AccessKeyId' <<<"$session_credentials")"
+  export AWS_SECRET_ACCESS_KEY="$(jq -er '.SecretAccessKey' <<<"$session_credentials")"
+  export AWS_SESSION_TOKEN="$(jq -er '.SessionToken' <<<"$session_credentials")"
+  unset session_credentials
+fi
+
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 REGISTRY="$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
 GATEWAY_REPO="$DEPLOYMENT_NAME-gateway"
