@@ -71,6 +71,11 @@ if [[ "$INFRASTRUCTURE_PROFILE" == "budget" ]]; then
 fi
 for command in aws terraform docker jq openssl cosign curl git; do need "$command"; done
 docker buildx version >/dev/null 2>&1 || die "Docker Buildx is required"
+if [[ "$VAR_FILE" != /* ]]; then
+  var_file_dir=$(cd -- "$(dirname -- "$VAR_FILE")" 2>/dev/null && pwd) || \
+    die "Terraform variable file directory not found: $(dirname -- "$VAR_FILE")"
+  VAR_FILE="$var_file_dir/$(basename -- "$VAR_FILE")"
+fi
 [[ -f "$VAR_FILE" ]] || die "Terraform variable file not found: $VAR_FILE (copy terraform.tfvars.example first)"
 [[ "$DEPLOYMENT_NAME" =~ ^[a-z][a-z0-9-]{1,20}$ ]] || die "SOULACY_AWS_NAME has an invalid format"
 [[ "$ENVIRONMENT" =~ ^[a-z][a-z0-9-]{1,20}$ ]] || die "SOULACY_AWS_ENVIRONMENT has an invalid format"
