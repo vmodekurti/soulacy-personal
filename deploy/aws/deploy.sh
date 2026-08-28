@@ -160,7 +160,8 @@ ensure_ecr_repo() {
 
 resolve_digest() {
   local image="$1" digest
-  digest=$(docker buildx imagetools inspect "$image" | awk '/^Digest:/ {print $2; exit}')
+  digest=$(docker buildx imagetools inspect "$image" |
+    awk '/^Digest:/ && !found {digest=$2; found=1} END {print digest}')
   [[ "$digest" == sha256:* ]] || die "could not resolve immutable digest for $image"
   printf '%s@%s' "$image" "$digest"
 }

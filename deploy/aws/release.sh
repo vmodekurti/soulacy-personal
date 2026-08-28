@@ -54,7 +54,8 @@ gateway_digest=$(aws ecr describe-images --region "$AWS_REGION" --repository-nam
   --image-ids imageTag="$BUILD_TAG" --query 'imageDetails[0].imageDigest' --output text)
 GATEWAY_IMAGE="$REGISTRY/$GATEWAY_REPO@$gateway_digest"
 
-python_digest=$(docker buildx imagetools inspect python:3.12-slim | awk '/^Digest:/ {print $2; exit}')
+python_digest=$(docker buildx imagetools inspect python:3.12-slim |
+  awk '/^Digest:/ && !found {digest=$2; found=1} END {print digest}')
 [[ "$python_digest" == sha256:* ]] || die "could not resolve the Python execution base image"
 if ! aws ecr describe-images --region "$AWS_REGION" --repository-name "$EXECUTION_REPO" --image-ids imageTag="$BUILD_TAG" >/dev/null 2>&1; then
   docker buildx build --platform linux/amd64 --provenance=false --push \
