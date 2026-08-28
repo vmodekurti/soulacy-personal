@@ -132,7 +132,7 @@ func TestGroundFlowSkills_CorrectsReadSkillNodes(t *testing.T) {
 	}
 }
 
-// Tools are verified/corrected but never auto-injected.
+// Tools are verified/corrected; unrelated MCP tools are not injected.
 func TestGroundTools_VerifiesAndCorrects(t *testing.T) {
 	d := Draft{
 		Strategy: "react",
@@ -146,5 +146,34 @@ func TestGroundTools_VerifiesAndCorrects(t *testing.T) {
 	want := []string{"mcp__finance__quote", "web_search"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("tool grounding wrong; got %v want %v", got, want)
+	}
+}
+
+func TestGroundAgentCapabilities_AddsRelevantReadMCPInsteadOfWebOnly(t *testing.T) {
+	d := Draft{
+		RawIntent:    "Build a conversational market research agent for stock analysis",
+		Intent:       "Research equities and explain market performance",
+		SystemPrompt: "Research the requested company.",
+		Tools:        []string{"web_search"},
+	}
+	cat := Catalog{
+		Tools: []string{"web_search"},
+		MCP: []CatalogMCPServer{{Server: "maverick-mcp-server", Tools: []CatalogMCPTool{
+			{Name: "mcp__maverick-mcp-server__market_data_get_quote", Description: "Fetch a stock quote"},
+			{Name: "mcp__maverick-mcp-server__market_data_get_stock_fundamentals", Description: "Fetch company fundamentals"},
+			{Name: "mcp__maverick-mcp-server__portfolio_watchlist_add", Description: "Add a stock to a watchlist"},
+		}}},
+	}
+
+	notes := GroundAgentCapabilities(&d, cat)
+	if !containsFold(d.Tools, "mcp__maverick-mcp-server__market_data_get_quote") ||
+		!containsFold(d.Tools, "mcp__maverick-mcp-server__market_data_get_stock_fundamentals") {
+		t.Fatalf("relevant read MCP tools were not added: %v (notes %v)", d.Tools, notes)
+	}
+	if containsFold(d.Tools, "mcp__maverick-mcp-server__portfolio_watchlist_add") {
+		t.Fatalf("mutating MCP tool was auto-granted: %v", d.Tools)
+	}
+	if !strings.Contains(d.SystemPrompt, "Prefer the approved specialist MCP tools") {
+		t.Fatalf("agent prompt does not direct runtime to prefer MCP: %q", d.SystemPrompt)
 	}
 }

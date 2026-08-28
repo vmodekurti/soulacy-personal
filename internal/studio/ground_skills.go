@@ -22,9 +22,9 @@ import (
 )
 
 // GroundAgentCapabilities grounds an agent draft's Skills and Tools against the
-// catalog. Tools are verified/corrected but never bulk-injected (auto-granting
-// tools is a scope/security concern); skills — the safe, additive capability —
-// are also injected when the intent clearly calls for them.
+// catalog. Tools are verified/corrected and, when the draft chose no MCP tools,
+// a small relevant read-only MCP set may be added. Mutating tools are never
+// auto-granted; skills are injected when the intent clearly calls for them.
 func GroundAgentCapabilities(draft *Draft, cat Catalog) []string {
 	if draft == nil {
 		return nil
@@ -32,8 +32,69 @@ func GroundAgentCapabilities(draft *Draft, cat Catalog) []string {
 	var notes []string
 	notes = append(notes, groundSkills(draft, cat)...)
 	notes = append(notes, groundTools(draft, cat)...)
+	notes = append(notes, groundRelevantReadMCP(draft, cat)...)
 	notes = append(notes, ensureCompanionTools(draft)...)
 	return notes
+}
+
+// groundRelevantReadMCP closes a common Studio failure without widening an
+// agent to every installed integration. Builder models often choose the generic
+// web_search tool even when the live catalog contains a clearly relevant,
+// read-oriented MCP server. The saved allowlist then makes the better tools
+// impossible to call at runtime.
+//
+// Only the deterministic planner's topic-matched, read-like MCP candidates are
+// added, only when the model selected no MCP tool itself, and the result is
+// capped. Mutating verbs still require explicit model/user selection.
+func groundRelevantReadMCP(draft *Draft, cat Catalog) []string {
+	if draft == nil || len(cat.MCP) == 0 {
+		return nil
+	}
+	for _, tool := range draft.Tools {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(tool)), "mcp__") {
+			return nil
+		}
+	}
+	matchText := strings.TrimSpace(draft.RawIntent)
+	if matchText == "" {
+		matchText = draft.Intent
+	}
+	var added []string
+	for _, tool := range deterministicTools(matchText, cat) {
+		if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(tool)), "mcp__") || !readLikeMCPTool(tool) {
+			continue
+		}
+		if !containsFold(draft.Tools, tool) {
+			draft.Tools = append(draft.Tools, tool)
+			added = append(added, tool)
+		}
+		if len(added) == 8 {
+			break
+		}
+	}
+	if len(added) == 0 {
+		return nil
+	}
+	draft.Tools = uniqueStrings(draft.Tools)
+	preference := "Prefer the approved specialist MCP tools over generic web search when they can answer the request; use web search only for missing coverage or corroboration."
+	if !strings.Contains(draft.SystemPrompt, preference) {
+		draft.SystemPrompt = strings.TrimSpace(draft.SystemPrompt) + "\n\nTool preference:\n- " + preference
+	}
+	return []string{"Added relevant read-only MCP tools from the connected workspace server: " + strings.Join(added, ", ") + "."}
+}
+
+func readLikeMCPTool(tool string) bool {
+	name := strings.ToLower(strings.TrimSpace(tool))
+	if i := strings.LastIndex(name, "__"); i >= 0 {
+		name = name[i+2:]
+	}
+	if anyContains(name, "create", "add", "update", "delete", "remove", "clear", "write", "send", "place_order", "execute", "install") {
+		return false
+	}
+	return strings.HasPrefix(name, "get_") || strings.Contains(name, "_get_") ||
+		strings.HasPrefix(name, "list_") || strings.HasPrefix(name, "read_") ||
+		strings.HasPrefix(name, "search_") || strings.HasPrefix(name, "fetch_") ||
+		anyContains(name, "forecast", "current_weather", "weather_alert", "quote", "filing", "facts")
 }
 
 // skillEntry is one indexed skill: its canonical name plus a search corpus

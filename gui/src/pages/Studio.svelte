@@ -21,6 +21,7 @@
   import { api } from '../lib/api.js'
   import { can, permissions } from '../lib/workspace.js'
   import { bridge } from '../lib/studio/studioApi.js'
+  import { catalogSkillNames, compactCatalog } from '../lib/studio/catalog.js'
   import { editAgent, studioDebugRun, studioSession } from '../lib/stores.js'
   import { toFlow, kindMeta } from '../lib/studio/graph.js'
   import { validateConnection } from '../lib/studio/portcompat.js'
@@ -97,6 +98,7 @@
   let paletteStatusKind = ''
   let paletteError = ''
   let lastGoodCatalog = null
+  $: installedSkillNames = catalogSkillNames(catalog)
 
   // Map each connected MCP tool's full name → its published param hint
   // ("title*:string, …"), so the Inspector can show a tool node's allowed
@@ -188,56 +190,6 @@
     } finally {
       secretBusy = ''
     }
-  }
-
-  // Derive a COMPACT catalog of installed capability NAMES from the raw catalog
-  // payload and thread it into compile, so the backend can flag missing
-  // capabilities (M4). Without it the backend's empty-catalog guard returns no
-  // suggestions. Keys MUST match the studio Request.Catalog JSON tags:
-  //   { tools:[], agents:[], providers:[] }
-  //
-  // Raw shapes (see PluginFrame.svelte handleCatalogRequest):
-  //   agents:    { agents:[{id,name,...}], count }            (GET /agents)
-  //   tools:     { python_tools:[{name}], mcp_tools:[{name,server}],
-  //                builtins:[{name}] }                        (GET /tool-catalog)
-  //   providers: { providers:{<id>:{...}}, default_provider } (GET /providers)
-  function compactCatalog(cat) {
-    if (!cat) return undefined
-
-    // Tools: unique names across python_tools + mcp_tools + builtins.
-    const t = cat.tools || {}
-    const toolNames = []
-    const seenTool = new Set()
-    const pushTool = (name) => {
-      const n = (name == null ? '' : String(name)).trim()
-      if (!n || seenTool.has(n)) return
-      seenTool.add(n)
-      toolNames.push(n)
-    }
-    for (const arr of [t.python_tools, t.mcp_tools, t.builtins]) {
-      if (Array.isArray(arr)) for (const x of arr) pushTool(x && x.name)
-    }
-
-    // Agents: both ids AND names (a draft may reference either).
-    const agentList = (cat.agents && Array.isArray(cat.agents.agents)) ? cat.agents.agents : []
-    const agentNames = []
-    const seenAgent = new Set()
-    const pushAgent = (name) => {
-      const n = (name == null ? '' : String(name)).trim()
-      if (!n || seenAgent.has(n)) return
-      seenAgent.add(n)
-      agentNames.push(n)
-    }
-    for (const a of agentList) {
-      pushAgent(a && a.id)
-      pushAgent(a && a.name)
-    }
-
-    // Providers: the provider ids (keys of the providers map).
-    const provMap = (cat.providers && cat.providers.providers) || {}
-    const providerNames = (provMap && typeof provMap === 'object') ? Object.keys(provMap) : []
-
-    return { tools: toolNames, agents: agentNames, providers: providerNames }
   }
 
   // ── Compile loop ──────────────────────────────────────────────────────────
@@ -5724,6 +5676,11 @@ Use null for fields that are not present.`
               value={(workflow.skills || []).join('\n')}
               on:input={(e) => { workflow = { ...workflow, skills: e.target.value.split('\n') } }}
             ></textarea>
+            {#if installedSkillNames.length === 0}
+              <p class="agent-field-note">No Agent Skills are installed in this workspace yet. MCP tools are separate and appear in the tool allowlist above. Install reusable instruction skills from <button type="button" on:click={() => { window.location.hash = '#skills' }}>Skills</button>.</p>
+            {:else}
+              <p class="agent-field-note">Available: {installedSkillNames.join(', ')}</p>
+            {/if}
 
             <div class="agent-spec-meta">
               {#if workflow.knowledge && workflow.knowledge.length}<span><strong>Knowledge:</strong> {workflow.knowledge.join(', ')}</span>{/if}

@@ -1753,6 +1753,8 @@
   }
   .agent-yaml-link:hover { background: rgba(124, 132, 255, 0.18); }
   .agent-field-label { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin: 12px 0 4px; }
+  .agent-field-note { margin: 5px 0 0; color: var(--text-muted); font-size: 11px; line-height: 1.45; }
+  .agent-field-note button { border: 0; padding: 0; color: var(--accent); background: none; font: inherit; text-decoration: underline; cursor: pointer; }
   .agent-sys, .agent-tools {
     width: 100%; box-sizing: border-box; resize: vertical; font: inherit; font-size: 13px;
     line-height: 1.5; padding: 10px 12px; border-radius: 8px;
