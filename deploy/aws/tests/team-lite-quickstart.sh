@@ -19,12 +19,23 @@ MOCK
 
 cat >"$TMP_DIR/bin/curl" <<'MOCK'
 #!/usr/bin/env bash
+args=("$@")
+body=""
+for ((i = 0; i < ${#args[@]}; i++)); do
+  if [[ "${args[i]}" == "--data-binary" ]]; then body="${args[i + 1]}"; fi
+done
 while IFS= read -r _; do :; done
 url="${!#}"
 case "$url" in
   *'/zones?name=soulac.io'*) printf '{"success":true,"result":[{"id":"cf-zone","name":"soulac.io","account":{"id":"cf-account"}}]}' ;;
   *'/accounts/cf-account/cfd_tunnel?name=soulacy-team-pilot'*) printf '{"success":true,"result":[]}' ;;
-  *'/accounts/cf-account/cfd_tunnel/tunnel-test/configurations') printf '{"success":true,"result":{}}' ;;
+  *'/accounts/cf-account/cfd_tunnel/tunnel-test/configurations')
+    jq -e '.config.ingress[0].originRequest.connectTimeout == 30' >/dev/null <<<"$body" || {
+      printf '{"success":false,"errors":[{"code":1056,"message":"Bad Configuration: connectTimeout must be an integer"}]}'
+      exit 0
+    }
+    printf '{"success":true,"result":{}}'
+    ;;
   *'/accounts/cf-account/cfd_tunnel/tunnel-test/token') printf '{"success":true,"result":"test-tunnel-token"}' ;;
   *'/accounts/cf-account/cfd_tunnel') printf '{"success":true,"result":{"id":"tunnel-test"}}' ;;
   *'/dns_records?name=team.soulac.io'*) printf '{"success":true,"result":[]}' ;;

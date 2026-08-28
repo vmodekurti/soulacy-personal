@@ -212,7 +212,7 @@ ensure_cloudflare_tunnel() {
     say "Reusing Cloudflare Tunnel $TUNNEL_NAME"
   fi
   body=$(jq -n --arg hostname "$FQDN" \
-    '{config:{ingress:[{hostname:$hostname,service:"http://localhost:1947",originRequest:{connectTimeout:"30s"}},{service:"http_status:404"}]}}')
+    '{config:{ingress:[{hostname:$hostname,service:"http://localhost:1947",originRequest:{connectTimeout:30}},{service:"http_status:404"}]}}')
   cf_call PUT "/accounts/$CF_ACCOUNT_ID/cfd_tunnel/$TUNNEL_ID/configurations" "$body" >/dev/null || \
     die "failed to configure the Cloudflare Tunnel public hostname"
   response=$(cf_call GET "/accounts/$CF_ACCOUNT_ID/cfd_tunnel/$TUNNEL_ID/token") || die "failed to obtain the Cloudflare Tunnel connector token"
