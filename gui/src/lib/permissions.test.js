@@ -230,6 +230,22 @@ describe('the sidebar shows what the caller can use', () => {
     expect(visible).not.toContain('studio')
   })
 
+  it('gives operators the runtime surfaces without exposing Studio authoring', async () => {
+    const { visibleNavPages } = await import('./nav.js')
+    permissions.set({
+      agents: ['read', 'enable'], chat: ['read', 'chat'], builder: [],
+      approvals: ['read', 'write'], channels: ['read', 'enable'],
+      schedule: ['read', 'write'], templates: ['read'],
+    })
+    const visible = visibleNavPages(can, undefined, { role: 'operator', deploymentMode: 'team' })
+      .map(page => page.id)
+    expect(visible).toContain('chat')
+    expect(visible).toContain('agents')
+    expect(visible).toContain('schedule')
+    expect(visible).toContain('channels')
+    expect(visible).not.toContain('studio')
+  })
+
   it('treats Personal mode as the Team/Scale baseline', async () => {
     const { visibleNavPages, navPages } = await import('./nav.js')
     const personal = visibleNavPages(() => true, undefined, { role: 'owner', deploymentMode: 'personal' })

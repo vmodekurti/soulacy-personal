@@ -199,7 +199,10 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 		ResourceTour:        {ActionRead: true},
 	},
 	RoleOperator: {
-		ResourceAgents:      {ActionRead: true, ActionWrite: true, ActionEnable: true},
+		// Operators run and supervise published agents. Authoring and changing
+		// agent definitions belongs to developers; enable/disable remains an
+		// operational production control.
+		ResourceAgents:      {ActionRead: true, ActionEnable: true},
 		ResourceChat:        {ActionRead: true, ActionChat: true},
 		ResourceApprovals:   {ActionRead: true, ActionWrite: true},
 		ResourceMemory:      {ActionRead: true, ActionDelete: true},
@@ -209,8 +212,8 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 		ResourceMCP:         {ActionRead: true},
 		ResourcePlugins:     {ActionRead: true},
 		ResourceKnowledge:   {ActionRead: true, ActionWrite: true},
-		ResourceBuilder:     {ActionWrite: true},
-		ResourceTemplates:   {ActionRead: true, ActionWrite: true},
+		ResourceBuilder:     {},
+		ResourceTemplates:   {ActionRead: true},
 		ResourceConfig:      {ActionRead: true},
 		ResourceLogs:        {ActionRead: true},
 		ResourceMetrics:     {},

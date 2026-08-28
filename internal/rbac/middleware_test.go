@@ -263,13 +263,13 @@ func TestRequireClaimsDenied_BodyContainsRole(t *testing.T) {
 	}
 }
 
-func TestRequireOperatorAllowed_Write(t *testing.T) {
+func TestRequireOperatorDenied_Write(t *testing.T) {
 	m := newManager(t)
 	app := setupRequireApp(m, operatorClaims(), ResourceAgents, ActionWrite)
 
 	resp := doRequest(t, app, http.MethodGet, "/test", "")
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("operator write agents: status = %d, want 200", resp.StatusCode)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("operator write agents: status = %d, want 403", resp.StatusCode)
 	}
 }
 

@@ -11,16 +11,16 @@ permission.
 |---|---:|---:|---:|---:|---:|
 | Workspace policy, RBAC, and configuration | Full | Full | — | Read config | — |
 | Membership lifecycle | Full | Up to admin | — | — | — |
-| Agents | Full | Full | Build, delete, enable | Build, enable | Read |
-| Chat | Read/write/chat | Read/chat | Read/write/chat | Read/chat | Read/chat |
+| Agents | Full | Full | Build, delete, enable | Read and enable | Read |
+| Chat | Read/write/chat | Read/chat | Read/write/chat | Read/chat | Read history only |
 | Memory | Read/write/delete | Read/delete | Read/write/delete | Read/delete | Read |
 | Channels | Full | Full | Read | Read/enable | Read |
 | Providers | Read/write | Read/write | Read | Read | Read |
 | Skills | Full | Read | Read/write | Read | Read |
-| MCP servers | Full | Full | Full | Read/write | Read |
+| MCP servers | Full | Full | Read | Read | Read |
 | Knowledge | Full | Full | Full | Read/write | Read |
-| Studio builder | Read/write | Write | Read/write | Write | — |
-| Templates | Full | Read/write | Read/write | Read/write | Read |
+| Studio builder | Read/write | Write | Read/write | — | — |
+| Templates | Full | Read/write | Read/write | Read | Read |
 | Schedules | Full | Read/write | Read/write | Read/write | Read |
 | Logs | Read | Read | Read | Read | Read |
 | Metrics | Read/write | Read | Read | — | — |
@@ -29,6 +29,13 @@ permission.
 
 “Full” means all actions defined for that resource. Membership administration
 uses the separate hierarchy documented under [Workspace members](workspace-members.md).
+
+Developers own authoring: they use Studio, edit agent definitions and templates,
+and test their work. Operators own runtime supervision: they chat with and
+enable published agents, manage schedules and delivery-channel state, and
+approve guarded production actions. Removing Studio from the operator role is
+intentional separation of duties; an operator cannot silently change the code
+or prompt of the workload they are supervising.
 
 ## Object grants
 

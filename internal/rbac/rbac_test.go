@@ -434,9 +434,9 @@ func TestNoopStoreMutationsAreNoops(t *testing.T) {
 // HasPermission — broader matrix coverage
 // ---------------------------------------------------------------------------
 
-func TestHasPermissionOperatorCanWriteAgents(t *testing.T) {
-	if !HasPermission(RoleOperator, ResourceAgents, ActionWrite) {
-		t.Error("operator should be allowed to write agents")
+func TestHasPermissionOperatorCannotWriteAgents(t *testing.T) {
+	if HasPermission(RoleOperator, ResourceAgents, ActionWrite) {
+		t.Error("operator should not author or change agent definitions")
 	}
 }
 
@@ -771,9 +771,9 @@ func TestHasPermissionAdminBuilderWrite(t *testing.T) {
 	}
 }
 
-func TestHasPermissionOperatorBuilderWrite(t *testing.T) {
-	if !HasPermission(RoleOperator, ResourceBuilder, ActionWrite) {
-		t.Error("operator should use builder")
+func TestHasPermissionOperatorCannotUseBuilder(t *testing.T) {
+	if HasPermission(RoleOperator, ResourceBuilder, ActionWrite) {
+		t.Error("operator should not use Studio builder")
 	}
 }
 
@@ -786,12 +786,43 @@ func TestHasPermissionAdminTemplatesReadAndWrite(t *testing.T) {
 	}
 }
 
-func TestHasPermissionOperatorTemplatesReadAndWrite(t *testing.T) {
+func TestHasPermissionOperatorTemplatesReadOnly(t *testing.T) {
 	if !HasPermission(RoleOperator, ResourceTemplates, ActionRead) {
 		t.Error("operator should read templates")
 	}
-	if !HasPermission(RoleOperator, ResourceTemplates, ActionWrite) {
-		t.Error("operator should write templates")
+	if HasPermission(RoleOperator, ResourceTemplates, ActionWrite) {
+		t.Error("operator should not author or change templates")
+	}
+}
+
+func TestDeveloperAndOperatorResponsibilitiesStaySeparated(t *testing.T) {
+	tests := []struct {
+		name     string
+		role     string
+		resource string
+		action   string
+		want     bool
+	}{
+		{"developer authors agents", RoleDeveloper, ResourceAgents, ActionWrite, true},
+		{"developer uses Studio", RoleDeveloper, ResourceBuilder, ActionWrite, true},
+		{"developer cannot approve production actions", RoleDeveloper, ResourceApprovals, ActionWrite, false},
+		{"developer cannot enable delivery channels", RoleDeveloper, ResourceChannels, ActionEnable, false},
+		{"operator cannot author agents", RoleOperator, ResourceAgents, ActionWrite, false},
+		{"operator cannot use Studio", RoleOperator, ResourceBuilder, ActionWrite, false},
+		{"operator cannot author templates", RoleOperator, ResourceTemplates, ActionWrite, false},
+		{"operator can chat with agents", RoleOperator, ResourceChat, ActionChat, true},
+		{"operator can enable deployed agents", RoleOperator, ResourceAgents, ActionEnable, true},
+		{"operator can approve production actions", RoleOperator, ResourceApprovals, ActionWrite, true},
+		{"operator can enable delivery channels", RoleOperator, ResourceChannels, ActionEnable, true},
+		{"operator can manage schedules", RoleOperator, ResourceSchedule, ActionWrite, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := HasPermission(tt.role, tt.resource, tt.action); got != tt.want {
+				t.Fatalf("HasPermission(%q, %q, %q) = %v, want %v", tt.role, tt.resource, tt.action, got, tt.want)
+			}
+		})
 	}
 }
 
