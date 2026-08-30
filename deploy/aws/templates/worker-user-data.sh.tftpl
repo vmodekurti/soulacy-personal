@@ -64,6 +64,10 @@ Wants=network-online.target
 Type=simple
 User=root
 EnvironmentFile=/etc/soulacy/worker.env
+# ECR authorization tokens expire after 12 hours. Refresh the Docker registry
+# credential on every service start so an off-hours EC2 stop/start cycle does
+# not make Cosign verification fail against the private execution image.
+ExecStartPre=/bin/sh -c '/usr/local/bin/aws ecr get-login-password --region ${aws_region} | /usr/bin/docker login --username AWS --password-stdin ${ecr_registry}'
 ExecStart=/opt/soulacy/bin/soulacy-worker
 Restart=always
 RestartSec=5

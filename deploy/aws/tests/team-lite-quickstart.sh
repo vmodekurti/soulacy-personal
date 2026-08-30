@@ -76,4 +76,6 @@ if grep -q 'test-secret\|test-token' "$TMP_DIR/terraform.tfvars"; then
 fi
 grep -q 'Cloudflare Tunnel soulacy-team-pilot' "$TMP_DIR/output"
 grep -q 'Configuration-only mode requested' "$TMP_DIR/output"
+grep -q 'ecr get-login-password' "$AWS_DIR/templates/worker-user-data.sh.tftpl"
+grep -q 'kms:CreateGrant' "$AWS_DIR/power-schedule.tf"
 printf 'PASS: Team Lite quickstart tunnel and configuration flow\n'

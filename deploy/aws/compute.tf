@@ -87,6 +87,7 @@ resource "aws_instance" "worker" {
     nats_secret_arn      = data.aws_secretsmanager_secret.nats_tls[0].arn
     efs_id               = aws_efs_file_system.workspace.id
     execution_image      = var.execution_image
+    ecr_registry         = split("/", var.execution_image)[0]
     worker_concurrency   = local.worker_concurrency
   })
 

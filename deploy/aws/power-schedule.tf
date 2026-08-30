@@ -46,6 +46,32 @@ data "aws_iam_policy_document" "power_scheduler" {
     actions   = ["rds:StartDBInstance", "rds:StopDBInstance"]
     resources = [aws_db_instance.postgres[0].arn]
   }
+  # Starting an instance with an EBS volume encrypted by a customer-managed
+  # key requires the caller to use that key and let EC2 create its resource
+  # grant. Without these permissions EventBridge Scheduler accepts the
+  # StartInstances request, but each instance falls back to stopped with
+  # Client.InvalidKMSKey.
+  statement {
+    sid = "UsePilotStorageKey"
+    actions = [
+      "kms:Decrypt",
+      "kms:DescribeKey",
+      "kms:GenerateDataKeyWithoutPlaintext",
+      "kms:ReEncryptFrom",
+      "kms:ReEncryptTo",
+    ]
+    resources = [aws_kms_key.storage.arn]
+  }
+  statement {
+    sid       = "GrantPilotStorageKeyToAWSResources"
+    actions   = ["kms:CreateGrant"]
+    resources = [aws_kms_key.storage.arn]
+    condition {
+      test     = "Bool"
+      variable = "kms:GrantIsForAWSResource"
+      values   = ["true"]
+    }
+  }
 }
 
 resource "aws_iam_role_policy" "power_scheduler" {
