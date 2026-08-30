@@ -28,6 +28,10 @@
   let websiteScope = 'user'
   let websiteDomains = ''
   let websiteAgents = ''
+  let companionReady = false
+  let companionVersion = ''
+  let captureConnection = null
+  let captureOpened = false
 
   $: composio = servers.find(server => server.id === 'composio')
   $: nango = servers.find(server => server.id === 'nango')
@@ -54,16 +58,112 @@
 
   function shellQuote(value) { return `'${String(value).replaceAll("'", "'\\''")}'` }
 
+  function companionRequest(action, payload = {}, timeout = 1500) {
+    return new Promise((resolve, reject) => {
+      const requestId = crypto.randomUUID()
+      const timer = setTimeout(() => { cleanup(); reject(new Error('Soulacy Session Capture companion was not detected.')) }, timeout)
+      const receive = event => {
+        if (event.source !== window || event.origin !== window.location.origin) return
+        if (event.data?.source !== 'soulacy-session-capture' || event.data?.requestId !== requestId) return
+        cleanup()
+        if (event.data.ok) resolve(event.data.payload || {})
+        else reject(new Error(event.data.error || 'The secure session companion could not complete the request.'))
+      }
+      const cleanup = () => { clearTimeout(timer); window.removeEventListener('message', receive) }
+      window.addEventListener('message', receive)
+      window.postMessage({ source: 'soulacy-web', requestId, action, payload }, window.location.origin)
+    })
+  }
+
+  async function detectCompanion() {
+    try {
+      const result = await companionRequest('ping', {}, 600)
+      companionReady = true
+      companionVersion = result.version || ''
+    } catch (_) {
+      companionReady = false
+      companionVersion = ''
+    }
+  }
+
+  function resetWebsiteCapture() {
+    websiteName = ''
+    websiteURL = ''
+    websiteScope = 'user'
+    websiteDomains = ''
+    websiteAgents = ''
+    captureConnection = null
+    captureOpened = false
+  }
+
+  function openWebsiteCapture(connection = null) {
+    error = ''
+    info = ''
+    resetWebsiteCapture()
+    if (connection) {
+      captureConnection = connection
+      websiteName = connection.name || ''
+      websiteURL = connection.base_url || ''
+      websiteScope = connection.scope || 'user'
+      websiteDomains = (connection.allowed_domains || []).join(', ')
+      websiteAgents = (connection.agent_ids || []).join(', ')
+    }
+    showWebsite = true
+    detectCompanion()
+  }
+
+  function splitValues(value) { return String(value || '').split(',').map(item => item.trim()).filter(Boolean) }
+
+  async function openSecureSignIn() {
+    if (!companionReady) { error = 'Install or connect the Soulacy Session Capture companion first.'; return }
+    if (!websiteURL.trim()) { error = 'Enter the website sign-in URL first.'; return }
+    saving = true
+    error = ''
+    try {
+      if (!captureConnection) {
+        const parsed = new URL(websiteURL.trim())
+        const response = await api.connections.create({
+          name: websiteName.trim() || `${parsed.hostname} sign-in`,
+          scope: websiteScope,
+          kind: 'browser_session',
+          base_url: websiteURL.trim(),
+          allowed_domains: splitValues(websiteDomains),
+          agent_ids: splitValues(websiteAgents),
+        })
+        captureConnection = response.connection
+      }
+      await companionRequest('open', {
+        connectionId: captureConnection.id,
+        baseUrl: captureConnection.base_url,
+        allowedDomains: captureConnection.allowed_domains,
+      }, 15000)
+      captureOpened = true
+      info = `Secure sign-in opened for ${captureConnection.name}. Complete the normal login, then return here and save the session.`
+    } catch (e) { error = e.message } finally { saving = false }
+  }
+
+  async function saveSecureSession() {
+    if (!captureConnection) return
+    saving = true
+    error = ''
+    try {
+      const result = await companionRequest('capture', {
+        connectionId: captureConnection.id,
+        baseUrl: captureConnection.base_url,
+        allowedDomains: captureConnection.allowed_domains,
+      }, 15000)
+      await api.connections.setSession(captureConnection.id, { storage_state: result.storageState })
+      info = `${captureConnection.name} is signed in. Its encrypted session is ready for explicitly granted agents and scheduled jobs.`
+      showWebsite = false
+      resetWebsiteCapture()
+      await load()
+    } catch (e) { error = e.message } finally { saving = false }
+  }
+
   async function copyCaptureCommand() {
     if (!captureCommand) { error = 'Enter the website sign-in URL first.'; return }
     await navigator.clipboard.writeText(captureCommand)
     info = 'Capture command copied. Run it in Terminal; an isolated Chrome window will guide the one-time sign-in.'
-  }
-
-  async function copyReconnectCommand(connection) {
-    const command = `sy --gateway ${window.location.origin} connection capture ${shellQuote(connection.base_url)} --connection-id ${shellQuote(connection.id)}${connection.allowed_domains?.length ? ` --domains ${shellQuote(connection.allowed_domains.join(','))}` : ''}`
-    await navigator.clipboard.writeText(command)
-    info = `Reconnect command for ${connection.name} copied. Run it in Terminal and complete the website sign-in.`
   }
 
   async function removeConnection(connection) {
@@ -146,7 +246,7 @@
     catch (e) { error = e.message }
   }
 
-  onMount(load)
+  onMount(() => { load(); detectCompanion() })
 </script>
 
 <svelte:head><title>Connected Apps — Soulacy</title></svelte:head>
@@ -248,7 +348,7 @@
   <section class="website-connections">
     <div class="section-head">
       <div><p class="eyebrow">AUTHENTICATED WEBSITES</p><h2>Reusable sign-in sessions</h2><p>Use subscription websites in interactive and scheduled agents without storing passwords. Private connections belong to you; workspace connections are managed by owners and admins.</p></div>
-      {#if canCreateConnection}<button class="primary" on:click={() => { showWebsite = true; error = ''; info = '' }}>+ Add website sign-in</button>{/if}
+      {#if canCreateConnection}<button class="primary" on:click={() => openWebsiteCapture()}>+ Add website sign-in</button>{/if}
     </div>
     {#if connections.length}
       <div class="connection-list">
@@ -257,7 +357,7 @@
             <div class="connection-icon">🔐</div>
             <div class="connection-copy"><strong>{connection.name}</strong><span>{connection.base_url}</span><div class="facts"><span>{connection.scope === 'user' ? 'Private to you' : 'Shared workspace'}</span><span>{connection.kind === 'oauth' ? 'OAuth' : 'Browser session'}</span><span>{connection.agent_ids?.length || 0} agent grant(s)</span></div></div>
             <span class:online={connection.status === 'ready'} class="status">{connection.status}</span>
-            {#if connection.kind === 'browser_session'}<button class="compact" on:click={() => copyReconnectCommand(connection)}>{connection.status === 'ready' ? 'Refresh sign-in' : 'Reconnect'}</button>{/if}
+            {#if connection.kind === 'browser_session'}<button class="compact" on:click={() => openWebsiteCapture(connection)}>{connection.status === 'ready' ? 'Refresh sign-in' : 'Reconnect'}</button>{/if}
             {#if connection.scope === 'user' || workspaceAdmin}<button class="danger compact" on:click={() => removeConnection(connection)}>Delete</button>{/if}
           </article>
         {/each}
@@ -295,9 +395,9 @@
 {#if showWebsite}
   <div class="backdrop" role="presentation" on:click={() => showWebsite = false}>
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
-    <form class="modal" on:submit|preventDefault={copyCaptureCommand} on:click|stopPropagation>
+    <form class="modal" on:submit|preventDefault={captureOpened ? saveSecureSession : openSecureSignIn} on:click|stopPropagation>
       <h2>Add authenticated website</h2>
-      <p>Soulacy will open an isolated Chrome window on this device. Sign in directly to the website, return to Terminal, and the approved session state will be encrypted in your workspace vault.</p>
+      <p>Soulacy opens the website in a normal Chrome tab so password managers, MFA, and CAPTCHA continue to work. The companion returns only the approved domain's cookies and local storage; passwords are never captured.</p>
       <label>Display name<input bind:value={websiteName} placeholder="HBR subscription" /></label>
       <label>Website sign-in URL<input type="url" bind:value={websiteURL} placeholder="https://hbr.org/login" required /></label>
       <div class="header-row">
@@ -305,10 +405,19 @@
         <label>Approved domains<input bind:value={websiteDomains} placeholder="Defaults to the website domain" /></label>
       </div>
       <label>Agent IDs (optional)<input bind:value={websiteAgents} placeholder="research-agent, daily-briefing" /></label>
-      {#if captureCommand}<pre class="command">{captureCommand}</pre>{/if}
-      <ol class="capture-steps"><li>If needed, run <code>sy login --gateway {window.location.origin}</code> once.</li><li>Copy and run the generated command in Terminal.</li><li>Complete the normal website login in the isolated Chrome window, then press Enter in Terminal.</li></ol>
+      <div class:online={companionReady} class="companion-status">
+        <strong>{companionReady ? `Session Capture companion ready${companionVersion ? ` · v${companionVersion}` : ''}` : 'Session Capture companion not detected'}</strong>
+        {#if !companionReady}
+          <span>Download it, unzip it, then open <code>chrome://extensions</code>, enable Developer mode, and choose <strong>Load unpacked</strong>. Custom-domain deployments must distribute a companion allowlisted for their exact Soulacy hostname.</span>
+          <div class="actions"><a class="button-link inline" href="/downloads/soulacy-session-capture.zip">Download companion</a><button type="button" class="compact" on:click={detectCompanion}>Check again</button></div>
+        {/if}
+      </div>
+      {#if captureOpened}<ol class="capture-steps"><li>Complete the website's normal sign-in in the tab Soulacy opened.</li><li>Return here and select <strong>Save signed-in session</strong>.</li><li>Soulacy encrypts it and makes it available only to the selected scope and agents.</li></ol>{/if}
+      {#if !multiUser}
+        <details class="setup-guide"><summary>Personal-mode CLI fallback</summary>{#if captureCommand}<pre class="command">{captureCommand}</pre>{/if}<button type="button" class="compact" on:click={copyCaptureCommand}>Copy CLI capture command</button></details>
+      {/if}
       <p class="fine">For scheduled jobs, grant the connection to the scheduled agent. A private connection remains tied to your membership; use a workspace service account for team-owned automations.</p>
-      <div class="modal-actions"><button type="button" on:click={() => showWebsite = false}>Cancel</button><button class="primary">Copy capture command</button></div>
+      <div class="modal-actions"><button type="button" on:click={() => showWebsite = false} disabled={saving}>Cancel</button><button class="primary" disabled={saving || !companionReady}>{saving ? 'Working…' : captureOpened ? 'Save signed-in session' : 'Open secure sign-in'}</button></div>
     </form>
   </div>
 {/if}
@@ -333,5 +442,5 @@
 {/if}
 
 <style>
-  .page{padding:24px;max-width:1280px;margin:0 auto;color:var(--text,#eef)} header{display:flex;justify-content:space-between;gap:24px;align-items:start;margin-bottom:24px}h1{margin:2px 0 6px;font-size:28px}h2{margin:0;font-size:17px}.eyebrow{color:#8c7cff;font-size:11px;font-weight:800;letter-spacing:.12em;margin:0}.lede,.card p,.how li,.fine,.muted,.website-connections p{color:var(--muted,#9ba3c4)}.lede{margin:0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(390px,1fr));gap:16px}.card,.how,.website-connections{background:var(--panel,#121628);border:1px solid var(--border,#2a3152);border-radius:12px;padding:20px}.card-head{display:flex;align-items:center;gap:12px}.brand{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;background:#6857f5;color:white;font-weight:900;font-size:20px}.brand.nango{background:#ff6b35}.card-head p{margin:3px 0 0;font-size:12px}.status{margin-left:auto;padding:5px 9px;border-radius:999px;background:#2a2030;color:#f0b85c;font-size:11px;font-weight:700;text-transform:capitalize}.status.online{background:#12352d;color:#65e3a7}.facts{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}.facts span{background:#1c2239;border-radius:999px;padding:5px 9px;font-size:11px}.guardrail{border-left:3px solid #7868ff;background:#191b31;padding:10px 12px;font-size:12px;color:#bdc4e0}.setup-guide{margin-top:14px;border:1px solid #303757;border-radius:8px;background:#101426}.setup-guide summary{padding:11px 12px;cursor:pointer;color:#c8c1ff;font-size:12px;font-weight:750}.setup-guide[open] summary{border-bottom:1px solid #303757}.setup-guide ol{margin:12px 14px 10px;padding-left:20px;display:grid;gap:8px;color:#b6beda;font-size:12px;line-height:1.45}.setup-guide a{display:inline-block;margin:0 14px 13px;color:#9e91ff;font-size:12px}.actions{display:flex;align-items:center;gap:9px;margin-top:18px}button,.button-link{border:1px solid #343b60;background:#20263e;color:#eef;border-radius:7px;padding:9px 13px;cursor:pointer;text-decoration:none;font-size:13px}.primary{background:#6959f7;border-color:#6959f7}.danger{color:#ff8d98;border-color:#703943;background:#2d1c27}.compact{padding:6px 9px}.button-link{display:inline-block;margin-top:18px}.inline-error,.notice.error{color:#ff8995;background:#341d29}.inline-error{padding:9px;margin-top:10px;border-radius:7px}.notice{padding:11px 14px;border-radius:8px;margin-bottom:16px}.notice.success{color:#62dfa1;background:#12342c}.website-connections{margin-top:16px}.section-head{display:flex;align-items:start;justify-content:space-between;gap:20px}.section-head p{margin:6px 0 0}.connection-list{display:grid;gap:8px;margin:16px 0}.connection-row{display:flex;align-items:center;gap:12px;background:#101426;border:1px solid #2b3252;border-radius:9px;padding:12px}.connection-icon{font-size:20px}.connection-copy{min-width:0;flex:1;display:grid;gap:3px}.connection-copy>span{font-size:11px;color:#8993b7;overflow:hidden;text-overflow:ellipsis}.connection-copy .facts{margin:5px 0}.empty{margin:16px 0;padding:22px;border:1px dashed #343b5d;border-radius:9px;color:#929bbb;text-align:center}.how{margin-top:16px}.how ol{margin:12px 0 0;padding-left:20px;display:grid;gap:8px}.backdrop{position:fixed;inset:0;background:#050714c9;display:grid;place-items:center;z-index:100;padding:20px}.modal{width:min(600px,100%);max-height:90vh;overflow:auto;background:#14182b;border:1px solid #394161;border-radius:12px;padding:22px;box-shadow:0 20px 80px #0008}.modal>p{color:#aab2d0}.modal label{display:grid;gap:7px;margin:15px 0;font-size:12px;color:#bbc3e2}.modal input,.modal select{background:#0f1324;color:#eef;border:1px solid #343b5b;border-radius:7px;padding:10px}.header-row{display:grid;grid-template-columns:180px 1fr;gap:10px}.check{display:flex!important;grid-template-columns:auto 1fr!important;align-items:center}.command{white-space:pre-wrap;word-break:break-all;background:#090d1b;border:1px solid #343b5b;border-radius:7px;padding:11px;color:#b9f3dc;font-size:11px}.capture-steps{color:#b6beda;font-size:12px;display:grid;gap:7px;padding-left:20px}.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}.fine{font-size:11px}@media(max-width:650px){.grid{grid-template-columns:1fr}.header-row{grid-template-columns:1fr}.page{padding:16px}.section-head,.connection-row{align-items:stretch;flex-direction:column}.status{margin-left:0;width:max-content}}
+  .page{padding:24px;max-width:1280px;margin:0 auto;color:var(--text,#eef)} header{display:flex;justify-content:space-between;gap:24px;align-items:start;margin-bottom:24px}h1{margin:2px 0 6px;font-size:28px}h2{margin:0;font-size:17px}.eyebrow{color:#8c7cff;font-size:11px;font-weight:800;letter-spacing:.12em;margin:0}.lede,.card p,.how li,.fine,.muted,.website-connections p{color:var(--muted,#9ba3c4)}.lede{margin:0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(390px,1fr));gap:16px}.card,.how,.website-connections{background:var(--panel,#121628);border:1px solid var(--border,#2a3152);border-radius:12px;padding:20px}.card-head{display:flex;align-items:center;gap:12px}.brand{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;background:#6857f5;color:white;font-weight:900;font-size:20px}.brand.nango{background:#ff6b35}.card-head p{margin:3px 0 0;font-size:12px}.status{margin-left:auto;padding:5px 9px;border-radius:999px;background:#2a2030;color:#f0b85c;font-size:11px;font-weight:700;text-transform:capitalize}.status.online{background:#12352d;color:#65e3a7}.facts{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}.facts span{background:#1c2239;border-radius:999px;padding:5px 9px;font-size:11px}.guardrail{border-left:3px solid #7868ff;background:#191b31;padding:10px 12px;font-size:12px;color:#bdc4e0}.setup-guide{margin-top:14px;border:1px solid #303757;border-radius:8px;background:#101426}.setup-guide summary{padding:11px 12px;cursor:pointer;color:#c8c1ff;font-size:12px;font-weight:750}.setup-guide[open] summary{border-bottom:1px solid #303757}.setup-guide ol{margin:12px 14px 10px;padding-left:20px;display:grid;gap:8px;color:#b6beda;font-size:12px;line-height:1.45}.setup-guide a{display:inline-block;margin:0 14px 13px;color:#9e91ff;font-size:12px}.actions{display:flex;align-items:center;gap:9px;margin-top:18px}button,.button-link{border:1px solid #343b60;background:#20263e;color:#eef;border-radius:7px;padding:9px 13px;cursor:pointer;text-decoration:none;font-size:13px}.primary{background:#6959f7;border-color:#6959f7}.danger{color:#ff8d98;border-color:#703943;background:#2d1c27}.compact{padding:6px 9px}.button-link{display:inline-block;margin-top:18px}.inline-error,.notice.error{color:#ff8995;background:#341d29}.inline-error{padding:9px;margin-top:10px;border-radius:7px}.notice{padding:11px 14px;border-radius:8px;margin-bottom:16px}.notice.success{color:#62dfa1;background:#12342c}.website-connections{margin-top:16px}.section-head{display:flex;align-items:start;justify-content:space-between;gap:20px}.section-head p{margin:6px 0 0}.connection-list{display:grid;gap:8px;margin:16px 0}.connection-row{display:flex;align-items:center;gap:12px;background:#101426;border:1px solid #2b3252;border-radius:9px;padding:12px}.connection-icon{font-size:20px}.connection-copy{min-width:0;flex:1;display:grid;gap:3px}.connection-copy>span{font-size:11px;color:#8993b7;overflow:hidden;text-overflow:ellipsis}.connection-copy .facts{margin:5px 0}.empty{margin:16px 0;padding:22px;border:1px dashed #343b5d;border-radius:9px;color:#929bbb;text-align:center}.how{margin-top:16px}.how ol{margin:12px 0 0;padding-left:20px;display:grid;gap:8px}.backdrop{position:fixed;inset:0;background:#050714c9;display:grid;place-items:center;z-index:100;padding:20px}.modal{width:min(600px,100%);max-height:90vh;overflow:auto;background:#14182b;border:1px solid #394161;border-radius:12px;padding:22px;box-shadow:0 20px 80px #0008}.modal>p{color:#aab2d0}.modal label{display:grid;gap:7px;margin:15px 0;font-size:12px;color:#bbc3e2}.modal input,.modal select{background:#0f1324;color:#eef;border:1px solid #343b5b;border-radius:7px;padding:10px}.header-row{display:grid;grid-template-columns:180px 1fr;gap:10px}.check{display:flex!important;grid-template-columns:auto 1fr!important;align-items:center}.command{white-space:pre-wrap;word-break:break-all;background:#090d1b;border:1px solid #343b5b;border-radius:7px;padding:11px;color:#b9f3dc;font-size:11px}.capture-steps{color:#b6beda;font-size:12px;display:grid;gap:7px;padding-left:20px}.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}.fine{font-size:11px}.companion-status{display:grid;gap:8px;margin:14px 0;padding:12px;border:1px solid #70434b;border-radius:8px;background:#2b1b26;color:#ff9ca6;font-size:12px}.companion-status.online{border-color:#245c4d;background:#112e28;color:#65e3a7}.companion-status span{color:#b8c0dc;line-height:1.45}.companion-status .actions{margin:2px 0 0}.button-link.inline{margin:0;padding:7px 10px}@media(max-width:650px){.grid{grid-template-columns:1fr}.header-row{grid-template-columns:1fr}.page{padding:16px}.section-head,.connection-row{align-items:stretch;flex-direction:column}.status{margin-left:0;width:max-content}}
 </style>

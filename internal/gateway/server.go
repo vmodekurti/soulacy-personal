@@ -82,6 +82,7 @@ import (
 	"github.com/soulacy/soulacy/internal/scheduler"
 	"github.com/soulacy/soulacy/internal/schedules"
 	"github.com/soulacy/soulacy/internal/session"
+	"github.com/soulacy/soulacy/internal/sessioncapturecompanion"
 	"github.com/soulacy/soulacy/internal/skills"
 	"github.com/soulacy/soulacy/internal/storage"
 	"github.com/soulacy/soulacy/internal/studio"
@@ -945,6 +946,20 @@ func (s *Server) buildApp() *fiber.App {
 			"auth": authStatus, "mode": authMode, "detail": detail,
 			"deployment_mode": s.config().DeploymentMode(), "status": "ok",
 		})
+	})
+	// The companion contains source code only—no deployment configuration or
+	// secrets. Serving it outside the authenticated API lets a user install it
+	// before an OIDC session exists and keeps the hosted capture path free of a
+	// CLI/terminal dependency.
+	app.Get("/downloads/soulacy-session-capture.zip", func(c *fiber.Ctx) error {
+		archive, err := sessioncapturecompanion.Archive()
+		if err != nil {
+			return s.errMsg(c, fiber.StatusInternalServerError, "session capture companion could not be packaged")
+		}
+		c.Set(fiber.HeaderContentType, "application/zip")
+		c.Set(fiber.HeaderContentDisposition, `attachment; filename="soulacy-session-capture.zip"`)
+		c.Set(fiber.HeaderCacheControl, "public, max-age=3600")
+		return c.Send(archive)
 	})
 
 	// --- Auth endpoints (public — no auth middleware) ---
