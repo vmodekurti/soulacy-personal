@@ -958,7 +958,10 @@ func (s *Server) buildApp() *fiber.App {
 		}
 		c.Set(fiber.HeaderContentType, "application/zip")
 		c.Set(fiber.HeaderContentDisposition, `attachment; filename="soulacy-session-capture.zip"`)
-		c.Set(fiber.HeaderCacheControl, "public, max-age=3600")
+		// An outdated unpacked extension is especially confusing because Chrome
+		// still shows it as enabled. The UI version-tags this URL as a second
+		// defense for CDNs configured with an edge-level cache rule.
+		c.Set(fiber.HeaderCacheControl, "no-store")
 		return c.Send(archive)
 	})
 

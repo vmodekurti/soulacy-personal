@@ -30,6 +30,7 @@
   let websiteAgents = ''
   let companionReady = false
   let companionVersion = ''
+  const companionDownloadURL = '/downloads/soulacy-session-capture.zip?v=1.0.1'
   let captureConnection = null
   let captureOpened = false
 
@@ -415,7 +416,7 @@
         <strong>{companionReady ? `Session Capture companion ready${companionVersion ? ` · v${companionVersion}` : ''}` : 'Session Capture companion not detected'}</strong>
         {#if !companionReady}
           <span>Download it, unzip it, then open <code>chrome://extensions</code>, enable Developer mode, and choose <strong>Load unpacked</strong>. If it is already installed, reload this Soulacy tab once or open the extension from Chrome's toolbar and connect it to this tab. Custom-domain deployments must distribute a companion allowlisted for their exact Soulacy hostname.</span>
-          <div class="actions"><a class="button-link inline" href="/downloads/soulacy-session-capture.zip">Download companion</a><button type="button" class="compact" on:click={reloadForCompanion}>Reload Soulacy</button><button type="button" class="compact" on:click={detectCompanion}>Check again</button></div>
+          <div class="actions"><a class="button-link inline" href={companionDownloadURL}>Download companion</a><button type="button" class="compact" on:click={reloadForCompanion}>Reload Soulacy</button><button type="button" class="compact" on:click={detectCompanion}>Check again</button></div>
         {/if}
       </div>
       {#if captureOpened}<ol class="capture-steps"><li>Complete the website's normal sign-in in the tab Soulacy opened.</li><li>Return here and select <strong>Save signed-in session</strong>.</li><li>Soulacy encrypts it and makes it available only to the selected scope and agents.</li></ol>{/if}
