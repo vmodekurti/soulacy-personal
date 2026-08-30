@@ -23,6 +23,7 @@ import (
 	"github.com/soulacy/soulacy/internal/approvals"
 	"github.com/soulacy/soulacy/internal/artifactstore"
 	"github.com/soulacy/soulacy/internal/auth/apikeys"
+	"github.com/soulacy/soulacy/internal/authconnections"
 	"github.com/soulacy/soulacy/internal/channels"
 	"github.com/soulacy/soulacy/internal/credentials"
 	"github.com/soulacy/soulacy/internal/knowledge"
@@ -119,6 +120,12 @@ func TestTheWorkspacePurgeCoverageGapIsAKnownList(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = vault.Close() })
 	server.credVault = vault
+	authConnectionStore, err := authconnections.Open(t.TempDir() + "/authenticated-connections.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = authConnectionStore.Close() })
+	server.authConnections = authConnectionStore
 	keys, err := apikeys.NewSQLiteStore(t.TempDir() + "/apikeys.db")
 	if err != nil {
 		t.Fatal(err)

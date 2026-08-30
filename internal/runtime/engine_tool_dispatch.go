@@ -118,6 +118,16 @@ func (e *Engine) runToolDispatch(ctx context.Context, def *agent.Definition, ses
 		e.recordSideEffect(ctx, call.Name)
 	}
 
+	if call.Name == authenticatedFetchTool {
+		if err := e.maybeConfirm(ctx, def, call); err != nil {
+			return "", err
+		}
+		started := time.Now()
+		result, err := e.runAuthenticatedFetch(ctx, def, call.Arguments)
+		e.logAudit(ctx, def, call, result, started, false, err)
+		return result, err
+	}
+
 	// MCP tools — namespaced as mcp__<server>__<tool>. Route to the MCP client.
 	if client := e.mcpFor(ctx); client != nil && strings.HasPrefix(call.Name, mcp.FullNamePrefix) {
 		if !mcpToolAllowed(def, call.Name) {
@@ -698,6 +708,14 @@ func (e *Engine) allToolSchemasForContext(ctx context.Context, def *agent.Defini
 		}
 		schemas = append(schemas, llm.ToolSchema{
 			Name: b.Name, Description: b.Description, Parameters: b.Parameters,
+		})
+	}
+	if e.authConnectionResolver != nil && len(def.Connections) > 0 && callerAllowsTool(ctx, authenticatedFetchTool) {
+		connections := e.authConnectionResolver.Describe(ctx, WorkspaceFromContext(ctx), SubjectFromContext(ctx), def.ID, def.Connections)
+		schemas = append(schemas, llm.ToolSchema{
+			Name:        authenticatedFetchTool,
+			Description: "Read a page using a user-approved saved website session. Cookies stay inside Soulacy and are never returned. Use only a connection_id listed in this agent's authenticated connections.",
+			Parameters:  authenticatedFetchSchema(connections),
 		})
 	}
 

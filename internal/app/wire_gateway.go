@@ -22,6 +22,7 @@ import (
 	"github.com/soulacy/soulacy/internal/audit"
 	"github.com/soulacy/soulacy/internal/auth"
 	"github.com/soulacy/soulacy/internal/auth/apikeys"
+	"github.com/soulacy/soulacy/internal/authconnections"
 	"github.com/soulacy/soulacy/internal/builder"
 	"github.com/soulacy/soulacy/internal/caps"
 	"github.com/soulacy/soulacy/internal/channels"
@@ -113,6 +114,17 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) (*gateway.Server, e
 	// Created BEFORE the watcher so the watcher can wire its OnPyChange hook
 	// to the server's tool-catalog cache.
 	srv := gateway.New(cfg, cfgPath, d.engine, d.loader, d.llmRouter, d.chanReg, d.sched, d.httpAdapter, d.waAdapter, d.skillLoader, d.actionBackend, d.mcpClient, d.hub, log)
+	connectionStore, connectionErr := authconnections.Open(d.ws.DB("authenticated_connections"))
+	if connectionErr != nil {
+		if config.IsMultiUserMode(cfg.DeploymentMode()) {
+			return nil, fmt.Errorf("authenticated connections: %w", connectionErr)
+		}
+		log.Warn("authenticated connections unavailable", zap.Error(connectionErr))
+	} else {
+		stack.pushClose("authenticated-connections", connectionStore)
+		srv.SetAuthenticatedConnectionStore(connectionStore)
+		d.engine.SetAuthenticatedConnectionResolver(authconnections.NewResolver(connectionStore, d.credVault))
+	}
 	if config.IsMultiUserMode(cfg.DeploymentMode()) {
 		controlCtx, controlCancel := context.WithTimeout(context.Background(), 15*time.Second)
 		control, controlErr := runcontrol.OpenPostgres(controlCtx, cfg.Storage.PostgresDSN)

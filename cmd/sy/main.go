@@ -161,6 +161,7 @@ Quick start:
 		buildRegistryCmd(),     // sy registry — review + manage skill sources (E26)
 		buildSecretsCmd(),      // sy secrets — manage the gateway-global secrets store
 		buildCredentialCmd(),   // sy credential — scoped personal/service credentials
+		buildConnectionCmd(),   // sy connection — capture and manage authenticated website sessions
 		buildContextCmd(),      // sy context — named server/workspace targets
 		buildWhoamiCmd(),       // sy whoami — the identity the server resolves
 		buildMCPCmd(),          // sy mcp — manage MCP servers

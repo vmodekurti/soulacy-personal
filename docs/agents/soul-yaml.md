@@ -77,6 +77,7 @@ skills: [csv-analysis]             # Agent Skills (or ["*"] for all installed)
 agents: [critic]                   # peer agents exposed as agent__critic
 mcp_servers: [github]              # MCP allowlist by server
 mcp_tools: [mcp__github__search_repositories]   # …or by full tool name
+connections: [conn_0123456789abcdef] # explicitly granted authenticated website sessions
 capabilities: [system]             # SEC-3: grant privileged OS tools (shell_exec, write_file, …)
 system_tools: false                # legacy alias for capabilities: [system]
 env: [GITHUB_TOKEN]                # SEC-5: extra host env var NAMES passed to tool subprocesses
@@ -184,9 +185,14 @@ These are covered in depth on their own pages:
 - [Agent Tools](tools.md) — `tools:` (Python), `builtins:`, `mcp_servers:`/`mcp_tools:`, `system_tools:`, `confirm_tools:`.
 - [Skills](skills.md) — `skills:` names, or `["*"]` for all installed.
 - [Peer Agents & Built-ins](peers-builtins.md) — `agents:` peer list and built-ins modes.
+- [Authenticated Website Connections](authenticated-connections.md) — encrypted, user- or workspace-scoped sign-in sessions for interactive and scheduled agents.
 
 `knowledge:` lists knowledge base names this agent may search via the built-in
 `kb_search` tool. Empty means no KB catalog is injected at all.
+
+`connections:` lists opaque authenticated-connection IDs selected in Studio.
+The runtime also requires a matching metadata grant for this agent, so copying
+an ID into `SOUL.yaml` cannot release another member's saved session.
 
 ## Memory
 

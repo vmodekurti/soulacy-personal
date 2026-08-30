@@ -445,6 +445,13 @@ type Definition struct {
 	// enable all installed skills, or list specific skill names.
 	Skills []string `yaml:"skills,omitempty" json:"skills,omitempty"`
 
+	// Connections grants this agent use of named authenticated connections.
+	// The identifiers resolve to encrypted user/workspace sessions at run time;
+	// neither SOUL.yaml nor the model receives cookies or refresh tokens.
+	// User-scoped connections additionally require the initiating/schedule owner
+	// to match the connection owner.
+	Connections []string `yaml:"connections,omitempty" json:"connections,omitempty"`
+
 	// --- Knowledge bases (opt-in) ---
 	// Names of knowledge bases this agent may search via the built-in
 	// `kb_search` tool. Empty = no KB catalog is injected and kb_search is
@@ -801,6 +808,7 @@ func (d *Definition) Clone() *Definition {
 	cp.Channels = cloneStrSlice(d.Channels)
 	cp.Surfaces = cloneStrSlice(d.Surfaces)
 	cp.Skills = cloneStrSlice(d.Skills)
+	cp.Connections = cloneStrSlice(d.Connections)
 	cp.Knowledge = cloneStrSlice(d.Knowledge)
 	cp.Agents = cloneStrSlice(d.Agents)
 	cp.ConfirmTools = cloneStrSlice(d.ConfirmTools)

@@ -16,6 +16,7 @@ func TestAgentDefinitionRoundTrip(t *testing.T) {
 	orig := Draft{
 		Name:         "My Flow",
 		DeliveryMode: "outbound",
+		Connections:  []string{"conn_personal", "conn_workspace"},
 		Trigger:      Trigger{Type: "schedule", Config: map[string]any{"cron": "0 7 * * *"}},
 		Channels:     []string{"slack", "email"},
 		Output: &ScheduleOutput{
@@ -50,6 +51,9 @@ func TestAgentDefinitionRoundTrip(t *testing.T) {
 	}
 	if !reflect.DeepEqual(back.Channels, orig.Channels) {
 		t.Fatalf("channels: %v != %v", back.Channels, orig.Channels)
+	}
+	if !reflect.DeepEqual(back.Connections, orig.Connections) {
+		t.Fatalf("connections: %v != %v", back.Connections, orig.Connections)
 	}
 	if back.DeliveryMode != orig.DeliveryMode {
 		t.Fatalf("delivery mode: %q != %q", back.DeliveryMode, orig.DeliveryMode)

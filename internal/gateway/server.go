@@ -54,6 +54,7 @@ import (
 	"github.com/soulacy/soulacy/internal/artifactstore"
 	"github.com/soulacy/soulacy/internal/auth"
 	"github.com/soulacy/soulacy/internal/auth/apikeys"
+	"github.com/soulacy/soulacy/internal/authconnections"
 	"github.com/soulacy/soulacy/internal/builder"
 	"github.com/soulacy/soulacy/internal/caps"
 	"github.com/soulacy/soulacy/internal/channels"
@@ -181,12 +182,13 @@ type Server struct {
 	// because SetAuth runs afterwards, and it must not be resolved per
 	// request because the legacy fallback logs a warning when it resolves.
 	authStackCache  atomic.Pointer[fiber.Handler]
-	rbacManager     *rbac.Manager      // nil until SetRBAC() is called
-	credVault       credentials.Vault  // nil until SetCredentialVault() is called
-	builderRegistry *builder.Registry  // nil until SetBuilderRegistry() is called
-	rateLimiter     *ratelimit.Manager // nil until SetRateLimiter() is called
-	apiKeyStore     apikeys.Store      // nil until SetAPIKeyStore() is called
-	dlqStore        dlq.Store          // nil until SetDLQStore() is called
+	rbacManager     *rbac.Manager          // nil until SetRBAC() is called
+	credVault       credentials.Vault      // nil until SetCredentialVault() is called
+	authConnections *authconnections.Store // secret-free metadata; values remain in credVault
+	builderRegistry *builder.Registry      // nil until SetBuilderRegistry() is called
+	rateLimiter     *ratelimit.Manager     // nil until SetRateLimiter() is called
+	apiKeyStore     apikeys.Store          // nil until SetAPIKeyStore() is called
+	dlqStore        dlq.Store              // nil until SetDLQStore() is called
 	approvalStore   *approvals.Store
 	scheduleStore   *schedules.Store
 	knowledgeStore  *knowledge.Store
@@ -472,6 +474,13 @@ func (s *Server) SetCredentialVault(v credentials.Vault) {
 // credentials.VaultProvider so the API can resolve the vault at request time.
 func (s *Server) CredentialVault() credentials.Vault {
 	return s.credVault
+}
+
+// SetAuthenticatedConnectionStore wires the metadata and grant index for
+// user/workspace authenticated connections. Secret material is never passed to
+// this store; SetCredentialVault remains the only secret persistence path.
+func (s *Server) SetAuthenticatedConnectionStore(store *authconnections.Store) {
+	s.authConnections = store
 }
 
 // SetBuilderRegistry wires a builder.Registry into the server for E4 gap
@@ -1551,6 +1560,18 @@ func (s *Server) buildApp() *fiber.App {
 	// Listing key NAMES stays on read; fetching a VALUE requires write.
 	api.Get("/credentials/:agentID/:key", s.credentialAudit("credential.reveal"), s.denyGlobalCredentialScope, s.rbacAgentFromMW(rbac.ResourceCredentials, rbac.ActionReveal, rbac.AgentIDSource{PathParam: "agentID"}), s.requireCredentialRevealConfirmation, credAPI.HandleGet)
 	api.Delete("/credentials/:agentID/:key", s.credentialAudit("credential.delete"), s.denyGlobalCredentialScope, s.rbacAgentFromMW(rbac.ResourceCredentials, rbac.ActionDelete, rbac.AgentIDSource{PathParam: "agentID"}), credAPI.HandleDelete)
+
+	// --- Authenticated Connections ---
+	// Metadata is readable by members, but the handler filters private records
+	// to the current subject. Mutations use credential authority because they
+	// create or destroy reusable authentication material. No endpoint reveals a
+	// decrypted cookie jar or refresh token.
+	api.Get("/authenticated-connections", s.rbacMW(rbac.ResourceCredentials, rbac.ActionList), s.handleListAuthenticatedConnections)
+	api.Post("/authenticated-connections", s.rbacMW(rbac.ResourceCredentials, rbac.ActionSet), s.handleCreateAuthenticatedConnection)
+	api.Put("/authenticated-connections/:id/session", s.credentialAudit("authenticated_connection.session.set"), s.rbacMW(rbac.ResourceCredentials, rbac.ActionSet), s.handleSetAuthenticatedConnectionSession)
+	api.Put("/authenticated-connections/:id/grants", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleSetAuthenticatedConnectionGrants)
+	api.Post("/authenticated-connections/:id/revoke", s.credentialAudit("authenticated_connection.revoke"), s.rbacMW(rbac.ResourceCredentials, rbac.ActionDelete), s.handleRevokeAuthenticatedConnection)
+	api.Delete("/authenticated-connections/:id", s.credentialAudit("authenticated_connection.delete"), s.rbacMW(rbac.ResourceCredentials, rbac.ActionDelete), s.handleDeleteAuthenticatedConnection)
 	// Credential rotation (type-assert to VersionedVault at request time)
 	api.Post("/credentials/:agentID/:key/rotate", s.credentialAudit("credential.rotate"), s.denyGlobalCredentialScope, s.rbacAgentFromMW(rbac.ResourceCredentials, rbac.ActionRotate, rbac.AgentIDSource{PathParam: "agentID"}), func(c *fiber.Ctx) error {
 		if s.credVault == nil {

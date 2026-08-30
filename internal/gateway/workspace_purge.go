@@ -202,6 +202,12 @@ func (s *Server) workspacePurgers() []workspacepurge.Purger {
 			},
 		})
 	}
+	if s.authConnections != nil {
+		purgers = append(purgers, workspacepurge.Purger{
+			Resource: "authenticated-connections",
+			Purge:    s.authConnections.PurgeWorkspace,
+		})
+	}
 	if store, ok := s.apiKeyStore.(apikeys.WorkspaceCredentialPurger); ok {
 		purgers = append(purgers, workspacepurge.Purger{
 			Resource: "credentials",

@@ -19,6 +19,7 @@ import (
 
 	"github.com/soulacy/soulacy/internal/agentmemory"
 	"github.com/soulacy/soulacy/internal/audit"
+	"github.com/soulacy/soulacy/internal/authconnections"
 	"github.com/soulacy/soulacy/internal/channels"
 	"github.com/soulacy/soulacy/internal/executor"
 	"github.com/soulacy/soulacy/internal/injection"
@@ -133,6 +134,11 @@ type Engine struct {
 	channelDefaultMu sync.RWMutex
 	channelDefaults  map[string]agent.ScheduleOutput
 	queueStore       *agentQueueStore
+
+	// authConnectionResolver is the only component allowed to decrypt a
+	// user's saved website session. The returned state is consumed by the
+	// authenticated_fetch transport and is never added to prompts or logs.
+	authConnectionResolver *authconnections.Resolver
 
 	// ollamaAPIKey is used by the built-in web_search tool (Ollama Web Search API).
 	// Falls back to the OLLAMA_API_KEY env var at call time.
@@ -613,6 +619,12 @@ func (e *Engine) SetOllamaAPIKey(key string) {
 	e.ollamaAPIKeyMu.Lock()
 	defer e.ollamaAPIKeyMu.Unlock()
 	e.ollamaAPIKey = strings.TrimSpace(key)
+}
+
+// SetAuthenticatedConnectionResolver enables authenticated website reads for
+// agents that explicitly list and have been granted a saved connection.
+func (e *Engine) SetAuthenticatedConnectionResolver(resolver *authconnections.Resolver) {
+	e.authConnectionResolver = resolver
 }
 
 // SetIntentGateDefault installs the workspace-scoped default intent-gate mode

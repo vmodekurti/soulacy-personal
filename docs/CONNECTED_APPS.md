@@ -5,6 +5,11 @@ brokers. Connections belong to one workspace, may be changed only by a
 workspace owner or admin in Team and Scale, and are granted to agents tool by
 tool in Studio.
 
+Authenticated publisher and subscription sessions use a separate user-first
+scope model. See [Authenticated Website Connections](agents/authenticated-connections.md)
+for one-time browser sign-in, scheduled replay, reauthentication, and the
+workspace service-account option.
+
 ## Composio
 
 Create a Composio session with MCP enabled and an exact tool preset. In

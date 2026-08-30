@@ -888,6 +888,15 @@ export const api = {
     }),
   },
 
+  connections: {
+    list: () => apiFetch('/authenticated-connections'),
+    create: (body) => apiFetch('/authenticated-connections', { method: 'POST', body: JSON.stringify(body) }),
+    setSession: (id, body) => apiFetch(`/authenticated-connections/${encodeURIComponent(id)}/session`, { method: 'PUT', body: JSON.stringify(body) }),
+    setGrants: (id, agentIDs) => apiFetch(`/authenticated-connections/${encodeURIComponent(id)}/grants`, { method: 'PUT', body: JSON.stringify({ agent_ids: agentIDs }) }),
+    revoke: (id) => apiFetch(`/authenticated-connections/${encodeURIComponent(id)}/revoke`, { method: 'POST' }),
+    delete: (id) => apiFetch(`/authenticated-connections/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  },
+
   plugins: {
     ui:    ()   => apiFetch('/plugins/ui'),
     token: (id) => apiFetch(`/plugins/${encodeURIComponent(id)}/token`, { method: 'POST' }),

@@ -189,6 +189,7 @@ func ToAgentDefinition(draft Draft, acceptPrivilegedExposure bool) (agent.Defini
 	if len(mcpTools) > 0 {
 		def.MCPTools = &mcpTools
 	}
+	def.Connections = dedupeNonEmpty(draft.Connections)
 	if peers := flowPeers(draft.Flow); len(peers) > 0 {
 		def.Agents = peers
 	}
@@ -315,6 +316,7 @@ func toReActAgentDefinition(draft Draft, id string, acceptPrivilegedExposure boo
 	if sk := dedupeNonEmpty(draft.Skills); len(sk) > 0 {
 		def.Skills = sk
 	}
+	def.Connections = dedupeNonEmpty(draft.Connections)
 	if kb := dedupeNonEmpty(draft.Knowledge); len(kb) > 0 {
 		def.Knowledge = kb
 	}

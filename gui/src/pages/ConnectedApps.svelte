@@ -6,6 +6,7 @@
   import { confirmDestructive } from '../lib/destructive.js'
 
   let servers = []
+  let connections = []
   let loading = true
   let error = ''
   let info = ''
@@ -21,6 +22,12 @@
   let nangoConnection = ''
   let nangoIntegration = ''
   let acknowledgeActions = false
+  let showWebsite = false
+  let websiteName = ''
+  let websiteURL = ''
+  let websiteScope = 'user'
+  let websiteDomains = ''
+  let websiteAgents = ''
 
   $: composio = servers.find(server => server.id === 'composio')
   $: nango = servers.find(server => server.id === 'nango')
@@ -28,18 +35,41 @@
   $: workspaceAdmin = ['owner', 'admin'].includes(String($activeWorkspace?.role || '').toLowerCase())
   $: canWrite = ($permissions, can('mcp', 'write')) && (!multiUser || workspaceAdmin)
   $: canDelete = ($permissions, can('mcp', 'delete')) && (!multiUser || workspaceAdmin)
+  $: canCreateConnection = ($permissions, can('credentials', 'set'))
+  $: captureCommand = websiteURL.trim() ? `sy --gateway ${window.location.origin} connection capture ${shellQuote(websiteURL.trim())}${websiteName.trim() ? ` --name ${shellQuote(websiteName.trim())}` : ''} --scope ${websiteScope}${websiteDomains.trim() ? ` --domains ${shellQuote(websiteDomains.trim())}` : ''}${websiteAgents.trim() ? ` --agents ${shellQuote(websiteAgents.trim())}` : ''}` : ''
 
   async function load() {
     loading = true
     error = ''
     try {
-      const response = await api.mcp.ownList()
+      const [response, connectionResponse] = await Promise.all([api.mcp.ownList(), api.connections.list()])
       servers = response.servers || []
+      connections = connectionResponse.connections || []
     } catch (e) {
       error = e.message
     } finally {
       loading = false
     }
+  }
+
+  function shellQuote(value) { return `'${String(value).replaceAll("'", "'\\''")}'` }
+
+  async function copyCaptureCommand() {
+    if (!captureCommand) { error = 'Enter the website sign-in URL first.'; return }
+    await navigator.clipboard.writeText(captureCommand)
+    info = 'Capture command copied. Run it in Terminal; an isolated Chrome window will guide the one-time sign-in.'
+  }
+
+  async function copyReconnectCommand(connection) {
+    const command = `sy --gateway ${window.location.origin} connection capture ${shellQuote(connection.base_url)} --connection-id ${shellQuote(connection.id)}${connection.allowed_domains?.length ? ` --domains ${shellQuote(connection.allowed_domains.join(','))}` : ''}`
+    await navigator.clipboard.writeText(command)
+    info = `Reconnect command for ${connection.name} copied. Run it in Terminal and complete the website sign-in.`
+  }
+
+  async function removeConnection(connection) {
+    if (!confirmDestructive(`Delete ${connection.name}? Its encrypted session and all agent grants will be removed.`)) return
+    try { await api.connections.delete(connection.id); info = 'Authenticated connection deleted.'; await load() }
+    catch (e) { error = e.message }
   }
 
   function openConnect() {
@@ -215,6 +245,29 @@
     </article>
   </section>
 
+  <section class="website-connections">
+    <div class="section-head">
+      <div><p class="eyebrow">AUTHENTICATED WEBSITES</p><h2>Reusable sign-in sessions</h2><p>Use subscription websites in interactive and scheduled agents without storing passwords. Private connections belong to you; workspace connections are managed by owners and admins.</p></div>
+      {#if canCreateConnection}<button class="primary" on:click={() => { showWebsite = true; error = ''; info = '' }}>+ Add website sign-in</button>{/if}
+    </div>
+    {#if connections.length}
+      <div class="connection-list">
+        {#each connections as connection}
+          <article class="connection-row">
+            <div class="connection-icon">🔐</div>
+            <div class="connection-copy"><strong>{connection.name}</strong><span>{connection.base_url}</span><div class="facts"><span>{connection.scope === 'user' ? 'Private to you' : 'Shared workspace'}</span><span>{connection.kind === 'oauth' ? 'OAuth' : 'Browser session'}</span><span>{connection.agent_ids?.length || 0} agent grant(s)</span></div></div>
+            <span class:online={connection.status === 'ready'} class="status">{connection.status}</span>
+            {#if connection.kind === 'browser_session'}<button class="compact" on:click={() => copyReconnectCommand(connection)}>{connection.status === 'ready' ? 'Refresh sign-in' : 'Reconnect'}</button>{/if}
+            {#if connection.scope === 'user' || workspaceAdmin}<button class="danger compact" on:click={() => removeConnection(connection)}>Delete</button>{/if}
+          </article>
+        {/each}
+      </div>
+    {:else}
+      <div class="empty">No authenticated website sessions yet. Add one for HBR, MIT Technology Review, Gartner, or another subscription source.</div>
+    {/if}
+    <div class="guardrail">Passwords are never captured. The isolated browser exports only cookies and local storage inside the approved domain boundary; Soulacy encrypts that state and removes the temporary browser profile.</div>
+  </section>
+
   <section class="how">
     <h2>How connected tools reach agents</h2>
     <ol><li>A workspace owner or admin connects the service using the instructions on its card.</li><li>Soulacy encrypts connection values in the workspace vault and discovers the service's tools.</li><li>An agent builder explicitly grants selected discovered tools to each agent in Studio.</li></ol>
@@ -239,6 +292,27 @@
   </div>
 {/if}
 
+{#if showWebsite}
+  <div class="backdrop" role="presentation" on:click={() => showWebsite = false}>
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
+    <form class="modal" on:submit|preventDefault={copyCaptureCommand} on:click|stopPropagation>
+      <h2>Add authenticated website</h2>
+      <p>Soulacy will open an isolated Chrome window on this device. Sign in directly to the website, return to Terminal, and the approved session state will be encrypted in your workspace vault.</p>
+      <label>Display name<input bind:value={websiteName} placeholder="HBR subscription" /></label>
+      <label>Website sign-in URL<input type="url" bind:value={websiteURL} placeholder="https://hbr.org/login" required /></label>
+      <div class="header-row">
+        <label>Who can own it<select bind:value={websiteScope}><option value="user">Only me</option>{#if workspaceAdmin}<option value="workspace">Workspace</option>{/if}</select></label>
+        <label>Approved domains<input bind:value={websiteDomains} placeholder="Defaults to the website domain" /></label>
+      </div>
+      <label>Agent IDs (optional)<input bind:value={websiteAgents} placeholder="research-agent, daily-briefing" /></label>
+      {#if captureCommand}<pre class="command">{captureCommand}</pre>{/if}
+      <ol class="capture-steps"><li>If needed, run <code>sy login --gateway {window.location.origin}</code> once.</li><li>Copy and run the generated command in Terminal.</li><li>Complete the normal website login in the isolated Chrome window, then press Enter in Terminal.</li></ol>
+      <p class="fine">For scheduled jobs, grant the connection to the scheduled agent. A private connection remains tied to your membership; use a workspace service account for team-owned automations.</p>
+      <div class="modal-actions"><button type="button" on:click={() => showWebsite = false}>Cancel</button><button class="primary">Copy capture command</button></div>
+    </form>
+  </div>
+{/if}
+
 {#if showNango}
   <div class="backdrop" role="presentation" on:click={() => !saving && (showNango = false)}>
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
@@ -259,5 +333,5 @@
 {/if}
 
 <style>
-  .page{padding:24px;max-width:1280px;margin:0 auto;color:var(--text,#eef)} header{display:flex;justify-content:space-between;gap:24px;align-items:start;margin-bottom:24px}h1{margin:2px 0 6px;font-size:28px}h2{margin:0;font-size:17px}.eyebrow{color:#8c7cff;font-size:11px;font-weight:800;letter-spacing:.12em;margin:0}.lede,.card p,.how li,.fine,.muted{color:var(--muted,#9ba3c4)}.lede{margin:0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(390px,1fr));gap:16px}.card,.how{background:var(--panel,#121628);border:1px solid var(--border,#2a3152);border-radius:12px;padding:20px}.card-head{display:flex;align-items:center;gap:12px}.brand{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;background:#6857f5;color:white;font-weight:900;font-size:20px}.brand.nango{background:#ff6b35}.card-head p{margin:3px 0 0;font-size:12px}.status{margin-left:auto;padding:5px 9px;border-radius:999px;background:#2a2030;color:#f0b85c;font-size:11px;font-weight:700}.status.online{background:#12352d;color:#65e3a7}.facts{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}.facts span{background:#1c2239;border-radius:999px;padding:5px 9px;font-size:11px}.guardrail{border-left:3px solid #7868ff;background:#191b31;padding:10px 12px;font-size:12px;color:#bdc4e0}.setup-guide{margin-top:14px;border:1px solid #303757;border-radius:8px;background:#101426}.setup-guide summary{padding:11px 12px;cursor:pointer;color:#c8c1ff;font-size:12px;font-weight:750}.setup-guide[open] summary{border-bottom:1px solid #303757}.setup-guide ol{margin:12px 14px 10px;padding-left:20px;display:grid;gap:8px;color:#b6beda;font-size:12px;line-height:1.45}.setup-guide a{display:inline-block;margin:0 14px 13px;color:#9e91ff;font-size:12px}.actions{display:flex;align-items:center;gap:9px;margin-top:18px}button,.button-link{border:1px solid #343b60;background:#20263e;color:#eef;border-radius:7px;padding:9px 13px;cursor:pointer;text-decoration:none;font-size:13px}.primary{background:#6959f7;border-color:#6959f7}.danger{color:#ff8d98;border-color:#703943;background:#2d1c27}.button-link{display:inline-block;margin-top:18px}.inline-error,.notice.error{color:#ff8995;background:#341d29}.inline-error{padding:9px;margin-top:10px;border-radius:7px}.notice{padding:11px 14px;border-radius:8px;margin-bottom:16px}.notice.success{color:#62dfa1;background:#12342c}.how{margin-top:16px}.how ol{margin:12px 0 0;padding-left:20px;display:grid;gap:8px}.backdrop{position:fixed;inset:0;background:#050714c9;display:grid;place-items:center;z-index:100;padding:20px}.modal{width:min(600px,100%);background:#14182b;border:1px solid #394161;border-radius:12px;padding:22px;box-shadow:0 20px 80px #0008}.modal>p{color:#aab2d0}.modal label{display:grid;gap:7px;margin:15px 0;font-size:12px;color:#bbc3e2}.modal input,.modal select{background:#0f1324;color:#eef;border:1px solid #343b5b;border-radius:7px;padding:10px}.header-row{display:grid;grid-template-columns:180px 1fr;gap:10px}.check{display:flex!important;grid-template-columns:auto 1fr!important;align-items:center}.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}.fine{font-size:11px}@media(max-width:650px){.grid{grid-template-columns:1fr}.header-row{grid-template-columns:1fr}.page{padding:16px}}
+  .page{padding:24px;max-width:1280px;margin:0 auto;color:var(--text,#eef)} header{display:flex;justify-content:space-between;gap:24px;align-items:start;margin-bottom:24px}h1{margin:2px 0 6px;font-size:28px}h2{margin:0;font-size:17px}.eyebrow{color:#8c7cff;font-size:11px;font-weight:800;letter-spacing:.12em;margin:0}.lede,.card p,.how li,.fine,.muted,.website-connections p{color:var(--muted,#9ba3c4)}.lede{margin:0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(390px,1fr));gap:16px}.card,.how,.website-connections{background:var(--panel,#121628);border:1px solid var(--border,#2a3152);border-radius:12px;padding:20px}.card-head{display:flex;align-items:center;gap:12px}.brand{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;background:#6857f5;color:white;font-weight:900;font-size:20px}.brand.nango{background:#ff6b35}.card-head p{margin:3px 0 0;font-size:12px}.status{margin-left:auto;padding:5px 9px;border-radius:999px;background:#2a2030;color:#f0b85c;font-size:11px;font-weight:700;text-transform:capitalize}.status.online{background:#12352d;color:#65e3a7}.facts{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}.facts span{background:#1c2239;border-radius:999px;padding:5px 9px;font-size:11px}.guardrail{border-left:3px solid #7868ff;background:#191b31;padding:10px 12px;font-size:12px;color:#bdc4e0}.setup-guide{margin-top:14px;border:1px solid #303757;border-radius:8px;background:#101426}.setup-guide summary{padding:11px 12px;cursor:pointer;color:#c8c1ff;font-size:12px;font-weight:750}.setup-guide[open] summary{border-bottom:1px solid #303757}.setup-guide ol{margin:12px 14px 10px;padding-left:20px;display:grid;gap:8px;color:#b6beda;font-size:12px;line-height:1.45}.setup-guide a{display:inline-block;margin:0 14px 13px;color:#9e91ff;font-size:12px}.actions{display:flex;align-items:center;gap:9px;margin-top:18px}button,.button-link{border:1px solid #343b60;background:#20263e;color:#eef;border-radius:7px;padding:9px 13px;cursor:pointer;text-decoration:none;font-size:13px}.primary{background:#6959f7;border-color:#6959f7}.danger{color:#ff8d98;border-color:#703943;background:#2d1c27}.compact{padding:6px 9px}.button-link{display:inline-block;margin-top:18px}.inline-error,.notice.error{color:#ff8995;background:#341d29}.inline-error{padding:9px;margin-top:10px;border-radius:7px}.notice{padding:11px 14px;border-radius:8px;margin-bottom:16px}.notice.success{color:#62dfa1;background:#12342c}.website-connections{margin-top:16px}.section-head{display:flex;align-items:start;justify-content:space-between;gap:20px}.section-head p{margin:6px 0 0}.connection-list{display:grid;gap:8px;margin:16px 0}.connection-row{display:flex;align-items:center;gap:12px;background:#101426;border:1px solid #2b3252;border-radius:9px;padding:12px}.connection-icon{font-size:20px}.connection-copy{min-width:0;flex:1;display:grid;gap:3px}.connection-copy>span{font-size:11px;color:#8993b7;overflow:hidden;text-overflow:ellipsis}.connection-copy .facts{margin:5px 0}.empty{margin:16px 0;padding:22px;border:1px dashed #343b5d;border-radius:9px;color:#929bbb;text-align:center}.how{margin-top:16px}.how ol{margin:12px 0 0;padding-left:20px;display:grid;gap:8px}.backdrop{position:fixed;inset:0;background:#050714c9;display:grid;place-items:center;z-index:100;padding:20px}.modal{width:min(600px,100%);max-height:90vh;overflow:auto;background:#14182b;border:1px solid #394161;border-radius:12px;padding:22px;box-shadow:0 20px 80px #0008}.modal>p{color:#aab2d0}.modal label{display:grid;gap:7px;margin:15px 0;font-size:12px;color:#bbc3e2}.modal input,.modal select{background:#0f1324;color:#eef;border:1px solid #343b5b;border-radius:7px;padding:10px}.header-row{display:grid;grid-template-columns:180px 1fr;gap:10px}.check{display:flex!important;grid-template-columns:auto 1fr!important;align-items:center}.command{white-space:pre-wrap;word-break:break-all;background:#090d1b;border:1px solid #343b5b;border-radius:7px;padding:11px;color:#b9f3dc;font-size:11px}.capture-steps{color:#b6beda;font-size:12px;display:grid;gap:7px;padding-left:20px}.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}.fine{font-size:11px}@media(max-width:650px){.grid{grid-template-columns:1fr}.header-row{grid-template-columns:1fr}.page{padding:16px}.section-head,.connection-row{align-items:stretch;flex-direction:column}.status{margin-left:0;width:max-content}}
 </style>

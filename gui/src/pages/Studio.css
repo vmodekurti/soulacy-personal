@@ -1755,6 +1755,18 @@
   .agent-field-label { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin: 12px 0 4px; }
   .agent-field-note { margin: 5px 0 0; color: var(--text-muted); font-size: 11px; line-height: 1.45; }
   .agent-field-note button { border: 0; padding: 0; color: var(--accent); background: none; font: inherit; text-decoration: underline; cursor: pointer; }
+  .agent-field-note.err { color: var(--danger, #ff8792); }
+  .agent-connections-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-top: 16px; }
+  .agent-connections-head .agent-field-label { margin: 0; }
+  .agent-connections-head .agent-field-note { max-width: 760px; }
+  .agent-connections { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; margin-top: 9px; }
+  .agent-connections label { display: flex; align-items: flex-start; gap: 9px; min-width: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-soft, #151a2c); cursor: pointer; }
+  .agent-connections label.disabled { opacity: .55; cursor: not-allowed; }
+  .agent-connections label.needs-auth { border-color: color-mix(in srgb, var(--warning, #e7b55a) 55%, var(--border)); }
+  .agent-connections input { margin-top: 2px; }
+  .agent-connections span { display: grid; min-width: 0; gap: 3px; }
+  .agent-connections strong, .agent-connections small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .agent-connections small { color: var(--text-muted); font-size: 10px; }
   .agent-sys, .agent-tools {
     width: 100%; box-sizing: border-box; resize: vertical; font: inherit; font-size: 13px;
     line-height: 1.5; padding: 10px 12px; border-radius: 8px;

@@ -704,6 +704,17 @@ func (s *Scheduler) fireAt(key scheduleKey, triggerType string, scheduledAt time
 		zap.String("trigger", triggerType),
 	)
 	principal := s.principalFor(key.workspaceID)
+	// User-scoped authenticated connections belong to the member who created
+	// the schedule. Run as that subject (while retaining the scheduler service
+	// identity) so the vault resolver can enforce ownership. A removed/empty
+	// creator continues to fail closed as the workspace scheduler principal.
+	if store, _ := s.scheduleStore(); store != nil {
+		lookupCtx, lookupCancel := context.WithTimeout(s.appCtx, 5*time.Second)
+		if scheduled, lookupErr := store.GetByAgent(lookupCtx, key.workspaceID, agentID); lookupErr == nil && strings.TrimSpace(scheduled.CreatedBy) != "" {
+			principal.Subject = strings.TrimSpace(scheduled.CreatedBy)
+		}
+		lookupCancel()
+	}
 	if s.requirePrincipal && principal.Subject == "" {
 		s.log.Error("scheduled run blocked: verified workspace service principal is missing",
 			zap.String("schedule", key.String()), zap.String("trigger", triggerType))

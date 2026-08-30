@@ -82,6 +82,7 @@ var Resources = []Resource{
 	{Name: "entitlements", Class: WorkspaceOwned, ScopeKey: "workspace_id", Retention: "subscription lifecycle plus financial retention policy", Export: "plan and subscription status metadata", Deletion: "retain the financial status for the required period, pseudonymize customer references, then purge", Backup: "platform database"},
 	{Name: "billing-events", Class: PlatformGlobal, ScopeKey: "provider event id", Retention: "90-day webhook replay and audit window", Export: "deployment audit export", Deletion: "retention purge", Backup: "platform database"},
 	{Name: "credentials", Class: UserPrivate, ScopeKey: "principal -> memberships", Retention: "until revoked/expired", Export: "metadata only; never secrets", Deletion: "revoke then purge hash", Backup: "encrypted database; restore requires KMS"},
+	{Name: "authenticated-connections", Class: UserPrivate, ScopeKey: "workspace_id,owner_subject", Retention: "until revoked, expired, or deleted", Export: "metadata only; never cookies or tokens", Deletion: "revoke and cryptographically erase encrypted session, metadata, and grants", Backup: "encrypted vault plus workspace metadata database; restore requires KMS"},
 	{Name: "secrets", Class: WorkspaceOwned, ScopeKey: "workspace_id", Retention: "until deleted", Export: "names only; values excluded", Deletion: "cryptographic erasure and purge", Backup: "encrypted vault; restore requires KMS"},
 	{Name: "schedules", Class: WorkspaceOwned, ScopeKey: "workspace_id", Retention: "until deleted", Export: "agent/package export", Deletion: "disable then purge", Backup: "workspace database"},
 	// MU-022 reclassified this from UserPrivate. An approval is not the
@@ -144,6 +145,8 @@ var Tables = []Table{
 	{Source: "internal/agentmemory/rulelog.go", Name: "rulebook_versions", Resource: "studio-learning", Class: WorkspaceOwned, ScopeKey: "workspace_id,agent_id,version", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/agentmemory/isolation_test.go"},
 	{Source: "internal/auth/apikeys/postgres.go", Name: "access_credentials", Resource: "api-keys", Class: UserPrivate, ScopeKey: "organization_id,workspace_ids,subject_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/auth/apikeys/postgres_test.go"},
 	{Source: "internal/auth/apikeys/store.go", Name: "api_keys", Resource: "api-keys", Class: UserPrivate, ScopeKey: "organization_id,workspace_ids,subject_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/auth/apikeys/isolation_test.go"},
+	{Source: "internal/authconnections/store.go", Name: "authenticated_connections", Resource: "authenticated-connections", Class: UserPrivate, ScopeKey: "workspace_id,owner_subject,id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/authconnections/store_test.go"},
+	{Source: "internal/authconnections/store.go", Name: "authenticated_connection_grants", Resource: "authenticated-connections", Class: UserPrivate, ScopeKey: "workspace_id,connection_id,agent_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/authconnections/store_test.go"},
 	// cost_reconciliations is reclassified, not scoped. It records a comparison
 	// against the *provider's invoice*, and providers bill the deployment
 	// rather than the tenant. There is no honest way to split one invoice
@@ -228,6 +231,7 @@ var Repositories = []Repository{
 	{Source: "internal/auth/apikeys/store.go", Resource: "api-keys", Class: UserPrivate, ScopeKey: "workspace_id,subject_id", Isolation: Scoped, IsolationTest: "internal/auth/apikeys/isolation_test.go"},
 	{Source: "internal/auth/jwt.go", Resource: "credentials", Class: UserPrivate, ScopeKey: "workspace_id,user_id", Isolation: Scoped, IsolationTest: "internal/auth/token_tenancy_test.go"},
 	{Source: "internal/auth/oidc_flow.go", Resource: "credentials", Class: Ephemeral, ScopeKey: "verified provider subject", Isolation: Scoped, IsolationTest: "internal/auth/oidc_flow_test.go"},
+	{Source: "internal/authconnections/store.go", Resource: "authenticated-connections", Class: UserPrivate, ScopeKey: "workspace_id,owner_subject", Isolation: Scoped, IsolationTest: "internal/authconnections/store_test.go"},
 	{Source: "internal/costs/store.go", Resource: "costs", Class: WorkspaceOwned, ScopeKey: "workspace_id (column: workspace)", Isolation: Scoped, IsolationTest: "internal/costs/workspace_test.go"},
 	{Source: "internal/credentials/rotation.go", Resource: "secrets", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/credentials/workspace_test.go"},
 	{Source: "internal/credentials/vault.go", Resource: "secrets", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/credentials/workspace_test.go"},

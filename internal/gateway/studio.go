@@ -3697,6 +3697,10 @@ func (s *Server) handleStudioSaveYAML(c *fiber.Ctx) error {
 	if isProtectedSystemAgent(def.ID) {
 		return protectedSystemAgentResponse(c)
 	}
+	connectionSelection, connectionErr := s.prepareAuthenticatedConnectionSelection(c, def.ID, def.Connections)
+	if connectionErr != nil {
+		return connectionErr
+	}
 
 	// BEFORE validation, deliberately. A stale save of INVALID yaml is still a
 	// stale save, and answering 400 sends the author off to fix their YAML —
@@ -3751,6 +3755,9 @@ func (s *Server) handleStudioSaveYAML(c *fiber.Ctx) error {
 	}
 	if err := s.agents(c).Upsert(dir, &def); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
+	}
+	if err := s.applyAuthenticatedConnectionSelection(c, def.ID, connectionSelection); err != nil {
+		return err
 	}
 	// The guard set the validator for the definition that was replaced. Replace
 	// it with the version that now exists so a second save from the same editor

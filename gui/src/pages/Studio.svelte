@@ -19,7 +19,7 @@
   // quietly dead. Svelte compiles an undeclared identifier as a global, so
   // nothing failed at build time either.
   import { api } from '../lib/api.js'
-  import { can, permissions } from '../lib/workspace.js'
+  import { activeWorkspace, can, permissions } from '../lib/workspace.js'
   import { bridge } from '../lib/studio/studioApi.js'
   import { catalogSkillNames, compactCatalog } from '../lib/studio/catalog.js'
   import { editAgent, studioDebugRun, studioSession } from '../lib/stores.js'
@@ -94,11 +94,43 @@
 
   // ── Palette (Wave 1) ──────────────────────────────────────────────────────
   let catalog = null
+	let authenticatedConnections = []
+	let authenticatedConnectionsError = ''
   let paletteStatus = 'Loading capabilities…'
   let paletteStatusKind = ''
   let paletteError = ''
   let lastGoodCatalog = null
   $: installedSkillNames = catalogSkillNames(catalog)
+	$: workspaceAdmin = ['owner', 'admin'].includes(String($activeWorkspace?.role || '').toLowerCase())
+	$: selectedConnectionIDs = new Set((workflow && workflow.connections) || [])
+
+	async function loadAuthenticatedConnections() {
+		authenticatedConnectionsError = ''
+		try {
+			const response = await api.connections.list()
+			authenticatedConnections = response.connections || []
+		} catch (e) {
+			authenticatedConnections = []
+			authenticatedConnectionsError = e.message || 'Could not load authenticated connections.'
+		}
+	}
+
+	function connectionAlreadyGranted(connection) {
+		const agentID = (workflow && workflow.id) || loadedAgentId || ''
+		return !!agentID && (connection.agent_ids || []).includes(agentID)
+	}
+
+	function canChooseConnection(connection) {
+		return connection.scope === 'user' || workspaceAdmin || connectionAlreadyGranted(connection)
+	}
+
+	function toggleAuthenticatedConnection(connection) {
+		if (!workflow || !canChooseConnection(connection)) return
+		const next = new Set(workflow.connections || [])
+		if (next.has(connection.id)) next.delete(connection.id)
+		else next.add(connection.id)
+		workflow = { ...workflow, connections: [...next] }
+	}
 
   // Map each connected MCP tool's full name → its published param hint
   // ("title*:string, …"), so the Inspector can show a tool node's allowed
@@ -524,6 +556,7 @@ Use null for fields that are not present.`
       name: 'Untitled workflow',
       trigger: { type: 'manual' },
       channels: [],
+	  connections: [],
       flow: { nodes: [], edges: [], entry: '' },
     }
   }
@@ -4701,6 +4734,7 @@ Use null for fields that are not present.`
   }
 
   onMount(loadCatalog)
+  onMount(loadAuthenticatedConnections)
   onMount(loadSecrets)
   onMount(refreshPaletteDrafts)
 
@@ -5681,6 +5715,25 @@ Use null for fields that are not present.`
             {:else}
               <p class="agent-field-note">Available: {installedSkillNames.join(', ')}</p>
             {/if}
+
+			<div class="agent-connections-head">
+			  <div><span class="agent-field-label">Authenticated website connections</span><p class="agent-field-note">Use saved subscription sessions without exposing cookies or tokens to the model. Each selected connection is granted only to this agent.</p></div>
+			  <button type="button" class="btn" on:click={() => { window.location.hash = '#connected-apps' }}>Manage sign-ins</button>
+			</div>
+			{#if authenticatedConnectionsError}
+			  <p class="agent-field-note err">{authenticatedConnectionsError}</p>
+			{:else if authenticatedConnections.length === 0}
+			  <p class="agent-field-note">No authenticated website connections are available. Add one from Connected Apps.</p>
+			{:else}
+			  <div class="agent-connections">
+				{#each authenticatedConnections as connection (connection.id)}
+				  <label class:disabled={!canChooseConnection(connection)} class:needs-auth={connection.status !== 'ready'}>
+					<input type="checkbox" checked={selectedConnectionIDs.has(connection.id)} disabled={!canChooseConnection(connection)} on:change={() => toggleAuthenticatedConnection(connection)} />
+					<span><strong>{connection.name}</strong><small>{connection.scope === 'user' ? 'Private to you' : 'Workspace'} · {connection.status === 'ready' ? connection.allowed_domains?.join(', ') : 'Reconnect required'}</small></span>
+				  </label>
+				{/each}
+			  </div>
+			{/if}
 
             <div class="agent-spec-meta">
               {#if workflow.knowledge && workflow.knowledge.length}<span><strong>Knowledge:</strong> {workflow.knowledge.join(', ')}</span>{/if}
