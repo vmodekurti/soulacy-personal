@@ -22,6 +22,7 @@
   import { activeWorkspace, can, permissions } from '../lib/workspace.js'
   import { bridge } from '../lib/studio/studioApi.js'
   import { catalogSkillNames, compactCatalog } from '../lib/studio/catalog.js'
+  import { attachAuthenticatedSourceGuidance, suggestedConnectionIDs } from '../lib/studio/authenticatedconnections.js'
   import { editAgent, studioDebugRun, studioSession } from '../lib/stores.js'
   import { toFlow, kindMeta } from '../lib/studio/graph.js'
   import { validateConnection } from '../lib/studio/portcompat.js'
@@ -1623,6 +1624,25 @@ Use null for fields that are not present.`
     const prevAgentId = loadedAgentId
     resetTransientDraftState()
     workflow = applyGenerationTrigger((data && data.workflow) || null, generationTrigger)
+	let attachedSourceNames = []
+	// A healthy saved sign-in is useful only when the agent is granted it. Match
+	// ready connections against the actual request and attach them to the draft;
+	// save then persists the least-privilege grant for this agent.
+	if (workflow) {
+	  const requested = [rawPrompt, intent, workflow.raw_intent, workflow.intent].filter(Boolean).join('\n')
+	  const suggested = suggestedConnectionIDs(authenticatedConnections, requested, canChooseConnection)
+	  if (suggested.length) {
+		attachedSourceNames = authenticatedConnections
+		  .filter(connection => suggested.includes(connection.id))
+		  .map(connection => connection.name || connection.id)
+		const selected = [...new Set([...(workflow.connections || []), ...suggested])]
+		workflow = {
+		  ...workflow,
+		  connections: selected,
+		  system_prompt: attachAuthenticatedSourceGuidance(workflow.system_prompt, authenticatedConnections, selected),
+		}
+	  }
+	}
     // If we were editing an existing saved agent, keep the freshly generated
     // draft bound to that agent so re-generating from a tweaked prompt UPDATES
     // it instead of silently saving a brand-new duplicate (the "Flight Finder →
@@ -1638,6 +1658,9 @@ Use null for fields that are not present.`
     try { initialGeneratedWorkflow = workflow ? JSON.parse(JSON.stringify(workflow)) : null } catch (_) { initialGeneratedWorkflow = null }
     questions = (data && Array.isArray(data.questions)) ? data.questions : []
     notes = (data && Array.isArray(data.notes)) ? data.notes : []
+	if (attachedSourceNames.length) {
+	  notes = [...notes, `Attached authenticated source${attachedSourceNames.length === 1 ? '' : 's'}: ${attachedSourceNames.join(', ')}. Agent access will be saved with this workflow.`]
+	}
     notesExpanded = false
     explanation = (data && data.explanation) || null
     generationProfile = (data && data.generation) || null

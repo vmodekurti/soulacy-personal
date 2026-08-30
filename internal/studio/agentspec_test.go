@@ -34,6 +34,32 @@ func TestCompileAgent_ProducesReActDraft(t *testing.T) {
 	}
 }
 
+func TestCompileAgent_PreservesOriginalPromptBeforeSave(t *testing.T) {
+	out := `{
+	  "name": "HBR Curator",
+	  "system_prompt": "You curate articles.",
+	  "trigger": {"type":"channel"},
+	  "tools": ["web_search"],
+	  "skills": [],
+	  "knowledge": []
+	}`
+	raw := "Use my signed-in HBR subscription to curate the most relevant AI articles."
+	refined := "Build a conversational research curator."
+	res, err := CompileAgent(context.Background(), fakeLLM{out: out}, refined, Catalog{RawIntent: raw, Tools: []string{"web_search"}}, "auto", nil)
+	if err != nil {
+		t.Fatalf("CompileAgent: %v", err)
+	}
+	if !strings.Contains(res.Workflow.SystemPrompt, raw) || !strings.Contains(res.Workflow.SystemPrompt, "outside this agent's scope") {
+		t.Fatalf("generated prompt lost exact request or scope guard:\n%s", res.Workflow.SystemPrompt)
+	}
+	saved := reactSystemPrompt(res.Workflow)
+	for _, want := range []string{raw, autoToolCallingGuidance, completionContractHeading} {
+		if !strings.Contains(saved, want) {
+			t.Fatalf("saved prompt lost %q after replacing outcome section:\n%s", want, saved)
+		}
+	}
+}
+
 func TestCompileAgent_PreservesAutoStrategy(t *testing.T) {
 	out := `{
 	  "name": "Weather Assistant",

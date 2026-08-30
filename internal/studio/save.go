@@ -420,7 +420,11 @@ Operating rules:
 func reactSystemPrompt(draft Draft) string {
 	var b strings.Builder
 	if p := strings.TrimSpace(draft.SystemPrompt); p != "" {
-		b.WriteString(agentprompt.EnsureShared(p))
+		// Remove the prior framework-owned outcome block before appending any
+		// other framework contracts. Otherwise a prompt that round-trips from
+		// Studio has the outcome block in the middle, and replacing it later would
+		// also cut off the reasoning and completion contracts appended after it.
+		b.WriteString(agentprompt.EnsureShared(stripRequestedOutcome(p)))
 	} else {
 		name := strings.TrimSpace(draft.Name)
 		if name == "" {
@@ -453,11 +457,18 @@ func reactSystemPrompt(draft Draft) string {
 		b.WriteString("\n\n")
 		b.WriteString(oc)
 	}
-	if t := strings.TrimSpace(draft.Intent); t != "" {
-		if goal := "Goal: " + t; !strings.Contains(b.String(), goal) {
-			b.WriteString("\n\n")
-			b.WriteString(goal)
-		}
+	// The model-authored prompt is not authoritative about the mission. Builder
+	// models sometimes summarize the request so aggressively that the saved
+	// agent no longer contains what the user actually asked for. Rebuild this
+	// framework-owned section on every save so the exact request is retained and
+	// later prompt edits update it instead of accumulating stale copies.
+	outcome := requestedOutcomePrompt(draft.RawIntent, draft.Intent)
+	base := stripRequestedOutcome(b.String())
+	b.Reset()
+	b.WriteString(base)
+	if outcome != "" {
+		b.WriteString("\n\n")
+		b.WriteString(outcome)
 	}
 	// Self-heal prompts that already accumulated duplicate guidance paragraphs
 	// from earlier saves: keep the first occurrence, drop the rest, tidy blanks.
@@ -466,6 +477,40 @@ func reactSystemPrompt(draft Draft) string {
 		out = dedupeParagraph(out, para)
 	}
 	return out
+}
+
+const requestedOutcomeHeading = "## Requested Outcome and Scope"
+
+// requestedOutcomePrompt keeps the user's original request in the executable
+// contract and makes the mission a real boundary. The boundary is deliberately
+// narrow without being brittle: clarification and supporting work are allowed,
+// but an unrelated request must not turn a specialist into a general assistant.
+func requestedOutcomePrompt(rawIntent, refinedIntent string) string {
+	raw := strings.TrimSpace(rawIntent)
+	refined := strings.TrimSpace(refinedIntent)
+	if raw == "" {
+		raw = refined
+	}
+	if raw == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(requestedOutcomeHeading)
+	b.WriteString("\nThe user's exact request is:\n")
+	b.WriteString(raw)
+	if refined != "" && refined != raw {
+		b.WriteString("\n\nRefined build specification:\n")
+		b.WriteString(refined)
+	}
+	b.WriteString("\n\nTreat this requested outcome as your authorized mission. Answer questions and perform work that directly advances it, including necessary clarification and closely related supporting tasks. For an unrelated request, do not answer the unrelated question or call tools for it; briefly say it is outside this agent's scope, restate what you can help with, and invite a mission-related request.")
+	return b.String()
+}
+
+func stripRequestedOutcome(prompt string) string {
+	if i := strings.Index(prompt, requestedOutcomeHeading); i >= 0 {
+		return strings.TrimSpace(prompt[:i])
+	}
+	return strings.TrimSpace(prompt)
 }
 
 func reasoningGuidanceForStrategy(strategy string) string {

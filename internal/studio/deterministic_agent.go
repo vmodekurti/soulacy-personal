@@ -51,6 +51,7 @@ func CompileDeterministicAgent(intent string, cat Catalog, strategy string, answ
 	}
 	draft.SystemPrompt = deterministicSystemPrompt(draft, intent, answers, cat.Lessons)
 	draft.SystemPrompt = agentprompt.EnsureShared(draft.SystemPrompt)
+	draft.SystemPrompt = strings.TrimSpace(stripRequestedOutcome(draft.SystemPrompt) + "\n\n" + requestedOutcomePrompt(draft.RawIntent, draft.Intent))
 	draft.Recommendation = &Recommendation{
 		Mode:      strategy,
 		Rationale: deterministicStrategyReason(intent, strategy),

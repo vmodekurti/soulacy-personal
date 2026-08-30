@@ -259,6 +259,41 @@ func TestReactSystemPrompt_IdempotentGuidance(t *testing.T) {
 	}
 }
 
+func TestReactSystemPrompt_PreservesExactRequestAndScopesAgent(t *testing.T) {
+	draft := Draft{
+		Name:         "HBR Curator",
+		Strategy:     "auto",
+		SystemPrompt: "You curate useful articles.",
+		RawIntent:    "Read my HBR subscription and curate the most relevant AI articles.",
+		Intent:       "Build a conversational research curator using an authenticated HBR session.",
+	}
+
+	got := reactSystemPrompt(draft)
+	for _, want := range []string{
+		requestedOutcomeHeading,
+		draft.RawIntent,
+		draft.Intent,
+		"outside this agent's scope",
+		"do not answer the unrelated question or call tools for it",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("system prompt missing %q:\n%s", want, got)
+		}
+	}
+
+	// A changed request replaces the framework-owned mission section rather than
+	// retaining the old request or stacking another section.
+	draft.SystemPrompt = got
+	draft.RawIntent = "Read my MIT Technology Review subscription for robotics news."
+	updated := reactSystemPrompt(draft)
+	if strings.Contains(updated, "most relevant AI articles") {
+		t.Fatalf("old requested outcome survived update:\n%s", updated)
+	}
+	if strings.Count(updated, requestedOutcomeHeading) != 1 {
+		t.Fatalf("requested outcome section duplicated:\n%s", updated)
+	}
+}
+
 func TestReasoningSystemPrompt_UsesStrategySpecificGuidance(t *testing.T) {
 	plan := reactSystemPrompt(Draft{Name: "Podcast", Strategy: "plan_execute", SystemPrompt: "You create podcasts."})
 	if !strings.Contains(plan, planExecuteLoopGuidance) {
