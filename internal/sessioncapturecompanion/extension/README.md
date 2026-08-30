@@ -12,8 +12,12 @@ never read or stored by the extension.
 2. Open `chrome://extensions`, enable **Developer mode**, and select
    **Load unpacked**.
 3. Choose the `soulacy-session-capture` folder.
-4. Return to Soulacy. The bridge activates automatically on `*.soulacy.io` and
-   local Soulacy installations.
+4. Return to Soulacy. If that tab was open before the extension was installed,
+   reload it once. The bridge then activates automatically on `*.soulacy.io`
+   and local Soulacy installations.
+
+If Soulacy still reports that the companion is not detected, select the
+extension from Chrome's toolbar and connect it to the active Soulacy tab.
 
 For managed Chrome fleets, deploy this folder as a pinned enterprise extension.
 Administrators hosting Soulacy on a custom hostname must add that exact origin

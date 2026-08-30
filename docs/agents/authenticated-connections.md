@@ -33,7 +33,9 @@ and approved domain before it decrypts any session state.
 3. If prompted, download the Soulacy Session Capture companion, unzip it, then
    open `chrome://extensions`, enable **Developer mode**, and select
    **Load unpacked**. Managed Team/Scale deployments can push the same pinned
-   companion to members through Chrome enterprise policy.
+   companion to members through Chrome enterprise policy. If the Soulacy tab
+   was open before installation, reload it once; the extension toolbar action
+   can also connect the active Soulacy tab manually.
 4. Select **Open secure sign-in**. Chrome asks for access only to the approved
    website domain and opens its normal login page.
 5. Complete the website's normal sign-in, including password-manager, MFA,

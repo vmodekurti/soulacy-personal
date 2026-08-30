@@ -77,13 +77,19 @@
 
   async function detectCompanion() {
     try {
-      const result = await companionRequest('ping', {}, 600)
+      // A Manifest V3 service worker may need to wake after Chrome has idled
+      // it; do not misreport a healthy companion because of a sub-second race.
+      const result = await companionRequest('ping', {}, 2500)
       companionReady = true
       companionVersion = result.version || ''
     } catch (_) {
       companionReady = false
       companionVersion = ''
     }
+  }
+
+  function reloadForCompanion() {
+    window.location.reload()
   }
 
   function resetWebsiteCapture() {
@@ -408,8 +414,8 @@
       <div class:online={companionReady} class="companion-status">
         <strong>{companionReady ? `Session Capture companion ready${companionVersion ? ` · v${companionVersion}` : ''}` : 'Session Capture companion not detected'}</strong>
         {#if !companionReady}
-          <span>Download it, unzip it, then open <code>chrome://extensions</code>, enable Developer mode, and choose <strong>Load unpacked</strong>. Custom-domain deployments must distribute a companion allowlisted for their exact Soulacy hostname.</span>
-          <div class="actions"><a class="button-link inline" href="/downloads/soulacy-session-capture.zip">Download companion</a><button type="button" class="compact" on:click={detectCompanion}>Check again</button></div>
+          <span>Download it, unzip it, then open <code>chrome://extensions</code>, enable Developer mode, and choose <strong>Load unpacked</strong>. If it is already installed, reload this Soulacy tab once or open the extension from Chrome's toolbar and connect it to this tab. Custom-domain deployments must distribute a companion allowlisted for their exact Soulacy hostname.</span>
+          <div class="actions"><a class="button-link inline" href="/downloads/soulacy-session-capture.zip">Download companion</a><button type="button" class="compact" on:click={reloadForCompanion}>Reload Soulacy</button><button type="button" class="compact" on:click={detectCompanion}>Check again</button></div>
         {/if}
       </div>
       {#if captureOpened}<ol class="capture-steps"><li>Complete the website's normal sign-in in the tab Soulacy opened.</li><li>Return here and select <strong>Save signed-in session</strong>.</li><li>Soulacy encrypts it and makes it available only to the selected scope and agents.</li></ol>{/if}

@@ -1,4 +1,29 @@
 const sessions = new Map()
+const soulacyPagePatterns = [
+  'https://*.soulacy.io/*',
+  'http://localhost/*',
+  'http://127.0.0.1/*'
+]
+
+async function injectBridge(tabId) {
+  if (!tabId) return
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['content-script.js'] })
+  } catch (_) {
+    // Restricted pages and tabs that close during installation are safe to
+    // ignore. Normal navigations remain covered by manifest content_scripts.
+  }
+}
+
+async function connectExistingSoulacyTabs() {
+  const tabs = await chrome.tabs.query({ url: soulacyPagePatterns })
+  await Promise.all(tabs.map(tab => injectBridge(tab.id)))
+}
+
+// Manifest content scripts are not applied retroactively to tabs that were
+// already open when an unpacked extension was installed or updated.
+chrome.runtime.onInstalled.addListener(() => { void connectExistingSoulacyTabs() })
+chrome.runtime.onStartup.addListener(() => { void connectExistingSoulacyTabs() })
 
 function cleanDomain(value) {
   return String(value || '').trim().toLowerCase().replace(/^\*\./, '').replace(/^\./, '').replace(/\.$/, '')

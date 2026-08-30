@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Soulacy Secure Session Capture",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Captures an approved website session directly into a Soulacy workspace without exposing passwords.",
   "permissions": ["cookies", "scripting", "storage", "tabs"],
   "optional_host_permissions": ["https://*/*"],
