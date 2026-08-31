@@ -14,19 +14,24 @@ Usage:
   deploy/aws/public-demo.sh disable
   deploy/aws/public-demo.sh status
 
-Options: --tools CSV --membership-ttl 24h --draft-ttl 24h
+Options: --tools CSV --skills CSV --mcp-servers CSV
+         --membership-ttl 24h --draft-ttl 24h
          --max-active-members 100 --per-user-rpm 20 --per-user-tokens-day 50000
 EOF
 }
 [[ "$ACTION" == enable || "$ACTION" == disable || "$ACTION" == status ]] || { usage; exit 2; }
 shift
 
-WORKSPACE_ID=""; PROVIDER=""; MODEL=""; TOOLS="web_search,fetch_url,generate_chart"
+WORKSPACE_ID=""; PROVIDER=""; MODEL=""
+TOOLS="web_search,fetch_url,generate_chart,mcp__demo-decision-lab__weighted_decision_matrix"
+SKILLS="evidence-brief,decision-matrix,chart-storytelling"
+MCP_SERVERS="demo-decision-lab"
 MEMBERSHIP_TTL=24h; DRAFT_TTL=24h; MAX_MEMBERS=100; USER_RPM=20; USER_TOKENS=50000
 while (($#)); do
   case "$1" in
     --workspace-id) WORKSPACE_ID="$2"; shift 2;; --provider) PROVIDER="$2"; shift 2;; --model) MODEL="$2"; shift 2;;
-    --tools) TOOLS="$2"; shift 2;; --membership-ttl) MEMBERSHIP_TTL="$2"; shift 2;; --draft-ttl) DRAFT_TTL="$2"; shift 2;;
+    --tools) TOOLS="$2"; shift 2;; --skills) SKILLS="$2"; shift 2;; --mcp-servers) MCP_SERVERS="$2"; shift 2;;
+    --membership-ttl) MEMBERSHIP_TTL="$2"; shift 2;; --draft-ttl) DRAFT_TTL="$2"; shift 2;;
     --max-active-members) MAX_MEMBERS="$2"; shift 2;; --per-user-rpm) USER_RPM="$2"; shift 2;;
     --per-user-tokens-day) USER_TOKENS="$2"; shift 2;; *) printf 'Unknown argument: %s\n' "$1" >&2; usage; exit 2;;
   esac
@@ -77,12 +82,14 @@ case "$VARIANT" in
   *) printf 'Public demo is supported by Team Lite and Scale, not %s\n' "$VARIANT" >&2; exit 1;;
 esac
 
-SETTINGS_JSON_BASE64="$(python3 - "$WORKSPACE_ID" "$PROVIDER" "$MODEL" "$TOOLS" "$MEMBERSHIP_TTL" "$DRAFT_TTL" "$MAX_MEMBERS" "$USER_RPM" "$USER_TOKENS" "$REDIS_URL" <<'PY' | base64 | tr -d '\n'
+SETTINGS_JSON_BASE64="$(python3 - "$WORKSPACE_ID" "$PROVIDER" "$MODEL" "$TOOLS" "$SKILLS" "$MCP_SERVERS" "$MEMBERSHIP_TTL" "$DRAFT_TTL" "$MAX_MEMBERS" "$USER_RPM" "$USER_TOKENS" "$REDIS_URL" <<'PY' | base64 | tr -d '\n'
 import json, sys
-w,p,m,tools,mt,dt,mm,rpm,tokens,redis=sys.argv[1:]
+w,p,m,tools,skills,mcp,mt,dt,mm,rpm,tokens,redis=sys.argv[1:]
 print(json.dumps({"enabled":True,"workspace_id":w,"membership_ttl":mt,"draft_ttl":dt,
  "max_active_members":int(mm),"allowed_providers":[p],"allowed_models":[m],
- "allowed_tools":[x.strip() for x in tools.split(',') if x.strip()],"backend":"redis",
+ "allowed_tools":[x.strip() for x in tools.split(',') if x.strip()],
+ "allowed_skills":[x.strip() for x in skills.split(',') if x.strip()],
+ "allowed_mcp_servers":[x.strip() for x in mcp.split(',') if x.strip()],"backend":"redis",
  "redis_url":redis,"per_user_rpm":int(rpm),"per_user_tokens_day":int(tokens)}))
 PY
 )"

@@ -3,6 +3,7 @@ package gateway
 import (
 	"encoding/json"
 	"strings"
+	"unicode"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -46,9 +47,11 @@ func (s *Server) demoStudioMW() fiber.Handler {
 			return s.errMsg(c, fiber.StatusBadRequest, "public demo Studio requests must use a valid JSON body")
 		}
 		allowedTools := normalizedSet(cfg.AllowedTools)
+		allowedSkills := normalizedSet(cfg.AllowedSkills)
+		allowedMCPServers := normalizedSet(cfg.AllowedMCPServers)
 		allowedProviders := normalizedSet(cfg.AllowedProviders)
 		allowedModels := normalizedSet(cfg.AllowedModels)
-		if reason := validateDemoValue(body, "", allowedTools, allowedProviders, allowedModels); reason != "" {
+		if reason := validateDemoValue(body, "", allowedTools, allowedSkills, allowedMCPServers, allowedProviders, allowedModels); reason != "" {
 			return s.errMsg(c, fiber.StatusForbidden, reason)
 		}
 		return c.Next()
@@ -81,7 +84,7 @@ func (s *Server) demoSafeAgentMW(source rbac.AgentIDSource) fiber.Handler {
 			}
 		}
 		def := s.agents(c).Get(agentID)
-		if reason := validatePublicDemoAgent(def, normalizedSet(cfg.AllowedTools), normalizedSet(cfg.AllowedProviders), normalizedSet(cfg.AllowedModels)); reason != "" {
+		if reason := validatePublicDemoAgent(def, normalizedSet(cfg.AllowedTools), normalizedSet(cfg.AllowedSkills), normalizedSet(cfg.AllowedMCPServers), normalizedSet(cfg.AllowedProviders), normalizedSet(cfg.AllowedModels)); reason != "" {
 			return s.errMsg(c, fiber.StatusForbidden, reason)
 		}
 		return c.Next()
@@ -97,7 +100,7 @@ func (s *Server) denyDemoMW(message string) fiber.Handler {
 	}
 }
 
-func validatePublicDemoAgent(def *agent.Definition, tools, providers, models map[string]bool) string {
+func validatePublicDemoAgent(def *agent.Definition, tools, skills, mcpServers, providers, models map[string]bool) string {
 	if def == nil || strings.ToLower(strings.TrimSpace(def.Labels["soulacy.public_demo"])) != "true" {
 		return "this agent is not available in the public demo"
 	}
@@ -112,8 +115,27 @@ func validatePublicDemoAgent(def *agent.Definition, tools, providers, models map
 			return "this agent uses a tool outside the public demo allowance"
 		}
 	}
-	if len(def.Tools)+len(def.Skills)+len(def.Connections)+len(def.Knowledge)+len(def.Agents)+len(def.Channels)+len(def.Env)+len(def.ConfirmTools)+len(def.Hooks) > 0 ||
-		def.MCPServers != nil || def.MCPTools != nil || def.PluginTools != nil || def.SystemTools || def.AllowShell || len(def.Capabilities) > 0 ||
+	for _, name := range def.Skills {
+		if !skills[strings.ToLower(strings.TrimSpace(name))] {
+			return "this agent uses a skill outside the public demo allowance"
+		}
+	}
+	if def.MCPServers != nil {
+		for _, name := range *def.MCPServers {
+			if !mcpServers[strings.ToLower(strings.TrimSpace(name))] {
+				return "this agent uses an MCP server outside the public demo allowance"
+			}
+		}
+	}
+	if def.MCPTools != nil {
+		for _, name := range *def.MCPTools {
+			if !tools[strings.ToLower(strings.TrimSpace(name))] {
+				return "this agent uses an MCP tool outside the public demo allowance"
+			}
+		}
+	}
+	if len(def.Tools)+len(def.Connections)+len(def.Knowledge)+len(def.Agents)+len(def.Channels)+len(def.Env)+len(def.ConfirmTools)+len(def.Hooks) > 0 ||
+		def.PluginTools != nil || def.SystemTools || def.AllowShell || len(def.Capabilities) > 0 ||
 		def.Unattended || def.Schedule != nil || def.Webhook != nil || def.Workflow != nil {
 		return "this agent has capabilities that are unavailable in the public demo"
 	}
@@ -130,13 +152,13 @@ func normalizedSet(values []string) map[string]bool {
 	return out
 }
 
-func validateDemoValue(value any, key string, tools, providers, models map[string]bool) string {
-	key = strings.ToLower(strings.TrimSpace(key))
+func validateDemoValue(value any, key string, tools, skills, mcpServers, providers, models map[string]bool) string {
+	key = normalizedDemoKey(key)
 	if (key == "code" || key == "source_code" || key == "script") && demoValuePresent(value) {
 		return "custom code is unavailable in the public demo"
 	}
-	if (key == "skills" || key == "mcp_servers" || key == "channels" || key == "connections" || key == "knowledge" || key == "new_agents") && demoValuePresent(value) {
-		return "shared skills, MCP servers, connections, channels, knowledge, and agents cannot be attached in the public demo"
+	if (key == "channels" || key == "connections" || key == "knowledge" || key == "new_agents") && demoValuePresent(value) {
+		return "connections, channels, knowledge, and agent delegation cannot be attached in the public demo"
 	}
 	switch current := value.(type) {
 	case map[string]any:
@@ -165,13 +187,13 @@ func validateDemoValue(value any, key string, tools, providers, models map[strin
 			}
 		}
 		for childKey, child := range current {
-			if reason := validateDemoValue(child, childKey, tools, providers, models); reason != "" {
+			if reason := validateDemoValue(child, childKey, tools, skills, mcpServers, providers, models); reason != "" {
 				return reason
 			}
 		}
 	case []any:
 		for _, child := range current {
-			if reason := validateDemoValue(child, key, tools, providers, models); reason != "" {
+			if reason := validateDemoValue(child, key, tools, skills, mcpServers, providers, models); reason != "" {
 				return reason
 			}
 		}
@@ -193,9 +215,50 @@ func validateDemoValue(value any, key string, tools, providers, models map[strin
 			if !tools[candidate] {
 				return "that tool is not available in the public demo"
 			}
+		case key == "skills" || key == "skill":
+			if !skills[candidate] {
+				return "that skill is not available in the public demo"
+			}
+		case key == "mcp_servers" || key == "mcp_server":
+			if !mcpServers[candidate] {
+				return "that MCP server is not available in the public demo"
+			}
+		case key == "mcp_tools":
+			if !tools[candidate] {
+				return "that MCP tool is not available in the public demo"
+			}
 		}
 	}
 	return ""
+}
+
+// normalizedDemoKey makes the recursive request inspection independent of the
+// casing used by a client. Studio currently emits snake_case, but this remains
+// a security boundary for hand-written requests using mcpServers, sourceCode,
+// toolAllowlist, or another equivalent camelCase spelling.
+func normalizedDemoKey(value string) string {
+	runes := []rune(strings.TrimSpace(value))
+	var out strings.Builder
+	for index, current := range runes {
+		switch current {
+		case '-', ' ', '.':
+			if out.Len() > 0 && !strings.HasSuffix(out.String(), "_") {
+				out.WriteByte('_')
+			}
+			continue
+		}
+		if unicode.IsUpper(current) && index > 0 {
+			previous := runes[index-1]
+			nextIsLower := index+1 < len(runes) && unicode.IsLower(runes[index+1])
+			if previous != '_' && previous != '-' && previous != ' ' && previous != '.' &&
+				(unicode.IsLower(previous) || unicode.IsDigit(previous) || (unicode.IsUpper(previous) && nextIsLower)) {
+				out.WriteByte('_')
+			}
+		}
+		current = unicode.ToLower(current)
+		out.WriteRune(current)
+	}
+	return strings.Trim(out.String(), "_")
 }
 
 func demoValuePresent(value any) bool {

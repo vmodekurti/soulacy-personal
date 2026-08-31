@@ -7,6 +7,7 @@
   // creates a ready-to-run agent.
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
+  import { activeWorkspace, can, permissions } from '../lib/workspace.js'
 
   let templates = []
   let channels = []
@@ -28,6 +29,10 @@
   let readinessBusy = false
   let mockResult = null      // { plan[], note }
   let mockBusy = false
+
+  $: demoMode = String($activeWorkspace?.role || '').toLowerCase() === 'demo_developer'
+  $: templateWritable = ($permissions, can('templates', 'write'))
+  $: studioWritable = ($permissions, can('studio', 'write') || can('builder', 'write'))
 
   const WORKFLOW_TAG = 'workflow'
 
@@ -71,8 +76,15 @@
     mockResult = null
     error = ''
     notice = ''
-    if (!channels.length) loadChannels()
-    checkReadiness(t)
+    if (templateWritable) {
+      if (!channels.length) loadChannels()
+      checkReadiness(t)
+    }
+  }
+
+  function openStudio() {
+    wizard = null
+    window.location.hash = '#studio'
   }
 
   async function loadChannels() {
@@ -260,6 +272,11 @@
 
   {#if error}<div class="banner err">⚠ {error}</div>{/if}
   {#if notice}<div class="banner ok">✓ {notice}</div>{/if}
+  {#if demoMode}
+    <div class="banner info">
+      <strong>Demo Mode:</strong> templates are available as product examples. Shared model credentials are already managed by the demo; build and test an expiring private draft in Studio.
+    </div>
+  {/if}
 
   {#if loading}
     <p class="hint">Loading templates…</p>
@@ -272,7 +289,7 @@
   {:else}
     {#if workflows.length > 0}
       <h2 class="section-title">Agentic workflows</h2>
-      <p class="hint">Ready-made multi-step workflows — create the agent, follow the setup note in its description, go.</p>
+      <p class="hint">{demoMode ? 'Explore ready-made multi-step workflow patterns, then build a safe private draft in Studio.' : 'Ready-made multi-step workflows — create the agent, follow the setup note in its description, go.'}</p>
       <div class="grid">
         {#each workflows as t (t.name)}
           <div class="card tpl">
@@ -289,7 +306,7 @@
                 <span class="check {item.status}" title={item.detail}>{item.label}: {statusLabel(item.status)}</span>
               {/each}
             </div>
-            {#if t.required_secrets?.length || blockers(t).length}
+            {#if !demoMode && (t.required_secrets?.length || blockers(t).length)}
               <div class="setup-panel">
                 {#if t.required_secrets?.length}
                   <div class="setup-title">Required secrets</div>
@@ -316,7 +333,7 @@
                 {copiedPrompt === t.name ? 'Copied' : 'Copy test prompt'}
               </button>
               <button class="btn-primary" on:click={() => openWizard(t)} disabled={instantiating === t.name}>
-                Install
+                {templateWritable ? 'Install' : 'Preview'}
               </button>
             </div>
           </div>
@@ -342,7 +359,7 @@
                 <span class="check {item.status}" title={item.detail}>{item.label}: {statusLabel(item.status)}</span>
               {/each}
             </div>
-            {#if t.required_secrets?.length || blockers(t).length}
+            {#if !demoMode && (t.required_secrets?.length || blockers(t).length)}
               <div class="setup-panel">
                 {#if t.required_secrets?.length}
                   <div class="setup-title">Required secrets</div>
@@ -369,7 +386,7 @@
                 {copiedPrompt === t.name ? 'Copied' : 'Copy test prompt'}
               </button>
               <button class="btn-primary" on:click={() => openWizard(t)} disabled={instantiating === t.name}>
-                Install
+                {templateWritable ? 'Install' : 'Preview'}
               </button>
             </div>
           </div>
@@ -380,13 +397,13 @@
 </div>
 
 {#if wizard}
-  <div class="modal-bg" role="button" tabindex="0" aria-label="Close install wizard"
+  <div class="modal-bg" role="button" tabindex="0" aria-label={templateWritable ? 'Close install wizard' : 'Close template preview'}
        on:click|self={() => wizard = null}
        on:keydown={(e) => e.key === 'Escape' && (wizard = null)}>
     <div class="wizard">
       <div class="wizard-head">
         <div>
-          <span class="wizard-eyebrow">Template install</span>
+          <span class="wizard-eyebrow">{templateWritable ? 'Template install' : 'Template preview'}</span>
           <h2>{wizard.display_name || wizard.name}</h2>
         </div>
         <button class="ghost" on:click={() => wizard = null}>×</button>
@@ -394,36 +411,37 @@
 
       <p class="wizard-desc">{wizard.description}</p>
 
-      <label>
-        Agent ID
-        <input bind:value={wizardId} placeholder="daily-briefing" disabled={!!createdAgent} />
-      </label>
+      {#if templateWritable}
+        <label>
+          Agent ID
+          <input bind:value={wizardId} placeholder="daily-briefing" disabled={!!createdAgent} />
+        </label>
 
-      <div class="wizard-grid">
-        <div>
-          <h3>Readiness {#if readiness}<span class="ready-pill {readiness.ready ? 'ok' : 'no'}">{readiness.ready ? 'ready' : 'needs setup'}</span>{/if}
-            <button class="btn-link" on:click={() => checkReadiness(wizard)} disabled={readinessBusy}>{readinessBusy ? '…' : 'recheck'}</button>
-          </h3>
-          <div class="wizard-list">
-            {#if readiness && readiness.checks}
-              {#each readiness.checks as ck}
-                <div class="wizard-row {ck.satisfied ? 'ready' : (ck.optional ? 'optional' : 'needs_setup')}">
-                  <strong>{ck.satisfied ? '✓' : (ck.optional ? '○' : '✗')} {ck.label}</strong>
-                  <span>{ck.detail}</span>
-                </div>
-              {/each}
-            {:else}
-              {#each wizard.setup || [] as item}
-                <div class="wizard-row {item.status}">
-                  <strong>{item.label}</strong>
-                  <span>{item.detail}</span>
-                </div>
-              {/each}
-            {/if}
+        <div class="wizard-grid">
+          <div>
+            <h3>Readiness {#if readiness}<span class="ready-pill {readiness.ready ? 'ok' : 'no'}">{readiness.ready ? 'ready' : 'needs setup'}</span>{/if}
+              <button class="btn-link" on:click={() => checkReadiness(wizard)} disabled={readinessBusy}>{readinessBusy ? '…' : 'recheck'}</button>
+            </h3>
+            <div class="wizard-list">
+              {#if readiness && readiness.checks}
+                {#each readiness.checks as ck}
+                  <div class="wizard-row {ck.satisfied ? 'ready' : (ck.optional ? 'optional' : 'needs_setup')}">
+                    <strong>{ck.satisfied ? '✓' : (ck.optional ? '○' : '✗')} {ck.label}</strong>
+                    <span>{ck.detail}</span>
+                  </div>
+                {/each}
+              {:else}
+                {#each wizard.setup || [] as item}
+                  <div class="wizard-row {item.status}">
+                    <strong>{item.label}</strong>
+                    <span>{item.detail}</span>
+                  </div>
+                {/each}
+              {/if}
+            </div>
           </div>
-        </div>
-        <div>
-          <h3>Production options</h3>
+          <div>
+            <h3>Production options</h3>
           <label>
             Cron
             <input bind:value={wizardCron} placeholder="0 7 * * *" disabled={!!createdAgent} />
@@ -459,10 +477,19 @@
             Output template
             <textarea bind:value={wizardTemplate} rows="3" disabled={!!createdAgent}></textarea>
           </label>
+          </div>
         </div>
-      </div>
+      {:else}
+        <div class="preview-note">
+          {#if demoMode}
+            This shared demo does not install templates, request API keys, or configure production delivery. Studio gives you the safe authoring and test experience with an expiring private draft.
+          {:else}
+            You can inspect this template, but installing it requires template write permission.
+          {/if}
+        </div>
+      {/if}
 
-      {#if wizard.required_secrets?.length}
+      {#if templateWritable && wizard.required_secrets?.length}
         <div class="secrets-note">
           <strong>Secrets needed</strong>
           {#each wizard.required_secrets as secret}
@@ -497,7 +524,7 @@
               {testingOutput ? 'Sending…' : 'Test output'}
             </button>
           {/if}
-        {:else}
+        {:else if templateWritable}
           <button class="btn-secondary" on:click={() => wizard = null}>Cancel</button>
           <button class="btn-secondary" on:click={() => runMockTest(wizard)} disabled={mockBusy}>
             {mockBusy ? 'Testing…' : 'Mock test'}
@@ -505,6 +532,11 @@
           <button class="btn-primary" on:click={() => useTemplate(wizard)} disabled={instantiating === wizard.name || !wizardId.trim()}>
             {instantiating === wizard.name ? 'Installing…' : 'Install agent'}
           </button>
+        {:else}
+          <button class="btn-secondary" on:click={() => wizard = null}>Close</button>
+          {#if studioWritable}
+            <button class="btn-primary" on:click={openStudio}>Open Studio</button>
+          {/if}
         {/if}
       </div>
     </div>
@@ -520,6 +552,8 @@
   .banner { padding: .55rem .8rem; border-radius: 8px; font-size: .85rem; }
   .banner.err { background: rgba(240, 96, 96, .12); color: #f08080; }
   .banner.ok { background: rgba(76, 175, 130, .12); color: #5fce9a; }
+  .banner.info { background: rgba(139, 133, 255, .1); border: 1px solid rgba(139, 133, 255, .24); color: #b9b6ff; }
+  .preview-note { padding: .8rem .9rem; border: 1px solid rgba(139, 133, 255, .24); border-radius: 8px; background: rgba(139, 133, 255, .08); color: #b9b6d9; font-size: .82rem; line-height: 1.5; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
   .card.tpl { display: flex; flex-direction: column; gap: .5rem; padding: .9rem 1rem;
               background: #10121f; border: 1px solid #1a1e36; border-radius: 10px; }

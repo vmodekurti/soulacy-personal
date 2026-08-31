@@ -18,6 +18,7 @@
     activeWorkspace, selectableWorkspaces, workspaceAccessState,
     switchWorkspace, resolveDeepLink, accessStateFor, accessStateForList,
     workspaceLabel, normalizeWorkspace, permissions,
+    rememberedWorkspaceID, forgetWorkspaceSelection,
   } from './workspace.js'
 
   let open = false
@@ -38,7 +39,21 @@
 
   async function load() {
     try {
-      const identity = await api.workspace.identity()
+      let identity
+      try {
+        identity = await api.workspace.identity()
+      } catch (e) {
+        // A remembered selection can outlive a membership or a login. Drop
+        // only that tab-local hint and retry once; the server then resolves
+        // the token's verified default workspace.
+        if (rememberedWorkspaceID() && (e?.status === 403 || e?.status === 404)) {
+          forgetWorkspaceSelection()
+          activeWorkspace.set(null)
+          identity = await api.workspace.identity()
+        } else {
+          throw e
+        }
+      }
       activeWorkspace.set(normalizeWorkspace(identity))
       permissions.set(identity?.permissions || {})
     } catch (e) {

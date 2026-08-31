@@ -337,11 +337,13 @@ func (s *Server) handleListAgents(c *fiber.Ctx) error {
 	if identity, ok := requestIdentity(c); ok && identity.Role() == tenancy.RoleDemoDeveloper {
 		cfg := s.config().PublicDemo
 		tools := normalizedSet(cfg.AllowedTools)
+		skills := normalizedSet(cfg.AllowedSkills)
+		mcpServers := normalizedSet(cfg.AllowedMCPServers)
 		providers := normalizedSet(cfg.AllowedProviders)
 		models := normalizedSet(cfg.AllowedModels)
 		filtered := make([]*agent.Definition, 0, len(defs))
 		for _, def := range defs {
-			if validatePublicDemoAgent(def, tools, providers, models) == "" {
+			if validatePublicDemoAgent(def, tools, skills, mcpServers, providers, models) == "" {
 				filtered = append(filtered, def)
 			}
 		}

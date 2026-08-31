@@ -23,13 +23,43 @@
 import { writable, get } from 'svelte/store'
 import { clearVersions } from './resourceversions.js'
 
+const workspaceSelectionKey = 'soulacy.active_workspace'
+
+export function rememberedWorkspaceID() {
+  const storage = globalThis?.sessionStorage
+  if (!storage) return ''
+  try {
+    return String(storage.getItem(workspaceSelectionKey) || '').trim()
+  } catch (_) {
+    return ''
+  }
+}
+
+export function forgetWorkspaceSelection() {
+  const storage = globalThis?.sessionStorage
+  if (!storage) return
+  try { storage.removeItem(workspaceSelectionKey) } catch (_) {}
+}
+
+function rememberWorkspaceSelection(workspaceID) {
+  const storage = globalThis?.sessionStorage
+  if (!storage) return
+  const id = String(workspaceID || '').trim()
+  try {
+    if (id) storage.setItem(workspaceSelectionKey, id)
+    else storage.removeItem(workspaceSelectionKey)
+  } catch (_) {}
+}
+
 /**
  * activeWorkspace is what the shell renders and what every request is scoped
- * to. Null until the deployment tells us — NOT defaulted to a personal
- * placeholder, because "we have not asked yet" and "you are in your personal
- * workspace" must not render the same.
+ * to. A remembered ID is used only as a request-scoping placeholder until the
+ * deployment returns the verified workspace identity. With no remembered
+ * choice it remains null, so "we have not asked yet" is never rendered as a
+ * personal workspace.
  */
-export const activeWorkspace = writable(null)
+const rememberedWorkspace = rememberedWorkspaceID()
+export const activeWorkspace = writable(rememberedWorkspace ? { workspaceId: rememberedWorkspace } : null)
 
 /**
  * permissions is what the VERIFIED role may do, as the server reported it
@@ -142,10 +172,13 @@ export async function switchWorkspace(client, workspaceID) {
   permissions.set({})
   try {
     const verified = await client.select(workspaceID)
-    activeWorkspace.set(normalizeWorkspace(verified))
+    const normalized = normalizeWorkspace(verified)
+    rememberWorkspaceSelection(normalized?.workspaceId)
+    activeWorkspace.set(normalized)
     workspaceAccessState.set({ state: 'ok', detail: '', workspaceName: verified?.workspace_name || '' })
     return verified
   } catch (err) {
+    forgetWorkspaceSelection()
     activeWorkspace.set(null)
     workspaceAccessState.set(accessStateFor(err))
     throw err

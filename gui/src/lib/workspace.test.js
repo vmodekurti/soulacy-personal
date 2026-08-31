@@ -4,11 +4,13 @@ import { get } from 'svelte/store'
 import {
   activeWorkspace, workspaceAccessState, switchWorkspace, clearWorkspaceState,
   resolveDeepLink, accessStateFor, accessStateForList, workspaceLabel, normalizeWorkspace,
+  rememberedWorkspaceID, forgetWorkspaceSelection,
 } from './workspace.js'
 import { studioSession, chatThreads, editAgent, apiKey, chatSessionId } from './stores.js'
 import { rememberVersions, versionFor, clearVersions } from './resourceversions.js'
 
 beforeEach(() => {
+  forgetWorkspaceSelection()
   activeWorkspace.set(null)
   clearVersions()
 })
@@ -83,6 +85,19 @@ describe('switching clears workspace state before loading the destination', () =
       select: async () => ({ workspace_id: 'ws_verified', workspace_name: 'Verified' }),
     }, 'ws_requested')
     expect(get(activeWorkspace).workspaceId).toBe('ws_verified')
+    expect(rememberedWorkspaceID()).toBe('ws_verified')
+  })
+
+  it('persists the verified selection for the full-page reload', async () => {
+    await switchWorkspace({ select: async () => ({ workspace_id: 'ws_b' }) }, 'ws_b')
+    expect(sessionStorage.getItem('soulacy.active_workspace')).toBe('ws_b')
+  })
+
+  it('clears a remembered selection when the server refuses it', async () => {
+    await switchWorkspace({ select: async () => ({ workspace_id: 'ws_b' }) }, 'ws_b')
+    const denied = Object.assign(new Error('membership revoked'), { status: 403 })
+    await expect(switchWorkspace({ select: async () => { throw denied } }, 'ws_x')).rejects.toThrow()
+    expect(rememberedWorkspaceID()).toBe('')
   })
 })
 

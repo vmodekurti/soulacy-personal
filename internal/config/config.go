@@ -764,14 +764,16 @@ type SignupConfig struct {
 // Demo members receive the fixed demo_developer role; the role can author and
 // test private drafts but cannot publish agents or mutate integrations.
 type PublicDemoConfig struct {
-	Enabled          bool     `mapstructure:"enabled"`
-	WorkspaceID      string   `mapstructure:"workspace_id"`
-	MembershipTTL    string   `mapstructure:"membership_ttl"`
-	DraftTTL         string   `mapstructure:"draft_ttl"`
-	MaxActiveMembers int      `mapstructure:"max_active_members"`
-	AllowedProviders []string `mapstructure:"allowed_providers"`
-	AllowedModels    []string `mapstructure:"allowed_models"`
-	AllowedTools     []string `mapstructure:"allowed_tools"`
+	Enabled           bool     `mapstructure:"enabled"`
+	WorkspaceID       string   `mapstructure:"workspace_id"`
+	MembershipTTL     string   `mapstructure:"membership_ttl"`
+	DraftTTL          string   `mapstructure:"draft_ttl"`
+	MaxActiveMembers  int      `mapstructure:"max_active_members"`
+	AllowedProviders  []string `mapstructure:"allowed_providers"`
+	AllowedModels     []string `mapstructure:"allowed_models"`
+	AllowedTools      []string `mapstructure:"allowed_tools"`
+	AllowedSkills     []string `mapstructure:"allowed_skills"`
+	AllowedMCPServers []string `mapstructure:"allowed_mcp_servers"`
 }
 
 // QueueConfig selects the durable message queue backend.
@@ -1129,6 +1131,8 @@ func Load(cfgPath string) (*Config, string, error) {
 	v.SetDefault("public_demo.draft_ttl", "24h")
 	v.SetDefault("public_demo.max_active_members", 100)
 	v.SetDefault("public_demo.allowed_tools", []string{"web_search", "fetch_url", "generate_chart"})
+	v.SetDefault("public_demo.allowed_skills", []string{"evidence-brief", "decision-matrix", "chart-storytelling"})
+	v.SetDefault("public_demo.allowed_mcp_servers", []string{"demo-decision-lab"})
 	v.SetDefault("llm.default_provider", "nvidia")
 	v.SetDefault("llm.providers.nvidia.api_key", "")
 	v.SetDefault("llm.providers.nvidia.base_url", "https://integrate.api.nvidia.com/v1")
