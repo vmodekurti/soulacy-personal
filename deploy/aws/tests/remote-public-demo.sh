@@ -42,7 +42,7 @@ grep -q '  enforcement_mode: hard' "$CONFIG"
 grep -q '  daily_budget_usd: 12' "$CONFIG"
 grep -q '^runtime:$' "$CONFIG"
 
-AGENT_ROOT="$TMP_DIR/var/lib/soulacy/.soulacy/soulspace/agents/.workspaces/ws_test123"
+AGENT_ROOT="$TMP_DIR/var/lib/soulacy/.soulacy/soulspace/workspaces/ws_test123/agents"
 test -f "$AGENT_ROOT/demo-research-explorer/SOUL.yaml"
 test -f "$AGENT_ROOT/demo-data-storyteller/SOUL.yaml"
 test -f "$AGENT_ROOT/demo-workflow-guide/SOUL.yaml"
@@ -55,5 +55,8 @@ grep -q 'builtins: \["web_search"\]' "$AGENT_ROOT/demo-research-explorer/SOUL.ya
 PATH="$TMP_DIR/bin:$PATH" SOULACY_PUBLIC_DEMO_ROOT="$TMP_DIR" \
   "$AWS_DIR/remote-public-demo.sh" disable >/dev/null
 grep -A1 '^public_demo:$' "$CONFIG" | grep -q 'enabled: false'
+test ! -e "$AGENT_ROOT/demo-research-explorer/SOUL.yaml"
+test ! -e "$AGENT_ROOT/demo-data-storyteller/SOUL.yaml"
+test ! -e "$AGENT_ROOT/demo-workflow-guide/SOUL.yaml"
 grep -q '  daily_budget_usd: 12' "$CONFIG"
 printf 'remote-public-demo tests passed\n'

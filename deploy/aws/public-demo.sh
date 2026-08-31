@@ -95,8 +95,15 @@ PY
 )"
 COMMAND_ID="$(aws ssm send-command --region "$AWS_REGION" --instance-ids "$INSTANCE_ID" --document-name AWS-RunShellScript --parameters "$PARAMETERS" --query 'Command.CommandId' --output text)"
 set +e
-aws ssm wait command-executed --region "$AWS_REGION" --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID"
-WAIT_STATUS=$?
+WAIT_STATUS=1
+for _ in {1..120}; do
+  COMMAND_STATUS="$(aws ssm get-command-invocation --region "$AWS_REGION" --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --query Status --output text 2>/dev/null || true)"
+  case "$COMMAND_STATUS" in
+    Success) WAIT_STATUS=0; break ;;
+    Failed|Cancelled|Cancelling|TimedOut) break ;;
+  esac
+  sleep 5
+done
 set -e
 RESULT="$(aws ssm get-command-invocation --region "$AWS_REGION" --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID")"
 printf '%s\n' "$RESULT" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("StandardOutputContent",""),end=""); print(d.get("StandardErrorContent",""),end="",file=sys.stderr)'

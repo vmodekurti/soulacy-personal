@@ -9,6 +9,8 @@ BACKUP_PATH="$CONFIG_PATH.pre-public-demo"
 REDIS_NAME="soulacy-rate-limit-redis"
 REDIS_DIR="$ROOT/var/lib/soulacy-rate-limit/redis"
 REDIS_IMAGE="${SOULACY_DEMO_REDIS_IMAGE:-redis:7-alpine}"
+SOULSPACE_ROOT="$ROOT/var/lib/soulacy/.soulacy/soulspace"
+WORKSPACES_ROOT="$SOULSPACE_ROOT/workspaces"
 
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 [[ -f "$CONFIG_PATH" ]] || die "Soulacy config not found: $CONFIG_PATH"
@@ -45,6 +47,11 @@ if [[ "$ACTION" == enable ]]; then
   [[ -n "${SETTINGS_JSON_BASE64:-}" ]] || die "missing settings payload"
   SETTINGS_JSON="$(printf '%s' "$SETTINGS_JSON_BASE64" | base64 --decode 2>/dev/null || printf '%s' "$SETTINGS_JSON_BASE64" | base64 -D)"
 else
+  EXISTING_DEMO_WORKSPACE_ID="$(awk '
+    /^public_demo:/ { in_demo=1; next }
+    in_demo && /^[^[:space:]][A-Za-z0-9_]*:/ { exit }
+    in_demo && $1 == "workspace_id:" { gsub(/\"/, "", $2); print $2; exit }
+  ' "$CONFIG_PATH")"
   SETTINGS_JSON='{"enabled":false}'
 fi
 
@@ -131,10 +138,10 @@ fi
 # reserved IDs are replaced atomically on every enable, every capability is
 # explicit, and the runtime independently re-validates the public_demo label,
 # provider, model, and built-in allowlist before accepting a chat turn.
-DEMO_AGENT_ROOT="$ROOT/var/lib/soulacy/.soulacy/soulspace/agents/.workspaces"
 if [[ "$ACTION" == enable ]]; then
-  install -d -m 0750 "$DEMO_AGENT_ROOT"
   DEMO_WORKSPACE_ID="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["workspace_id"])' <<<"$SETTINGS_JSON")"
+  DEMO_AGENT_ROOT="$WORKSPACES_ROOT/$DEMO_WORKSPACE_ID/agents"
+  install -d -m 0750 "$DEMO_AGENT_ROOT"
   python3 - "$DEMO_AGENT_ROOT" "$SETTINGS_JSON" <<'PY'
 import json, os, pathlib, sys, tempfile
 
@@ -144,7 +151,7 @@ workspace_id = str(settings["workspace_id"]).strip()
 provider = str(settings["allowed_providers"][0]).strip()
 model = str(settings["allowed_models"][0]).strip()
 allowed = {str(value).strip() for value in settings.get("allowed_tools", [])}
-target = root / workspace_id
+target = root
 target.mkdir(parents=True, exist_ok=True)
 
 agents = [
@@ -229,15 +236,16 @@ for spec in agents:
     finally:
         if os.path.exists(temporary): os.unlink(temporary)
 PY
-  if [[ -z "$ROOT" ]]; then chown -R soulacy:soulacy "$DEMO_AGENT_ROOT/$DEMO_WORKSPACE_ID"; fi
+  if [[ -z "$ROOT" ]]; then chown -R soulacy:soulacy "$WORKSPACES_ROOT/$DEMO_WORKSPACE_ID"; fi
 else
   # Disable removes only Soulacy-owned showcase IDs. Visitor-created drafts
   # live in their separate expiring draft store and are unaffected here.
-  WORKSPACE_ID="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("workspace_id", ""))' <<<"$SETTINGS_JSON")"
+  WORKSPACE_ID="$EXISTING_DEMO_WORKSPACE_ID"
   if [[ -n "$WORKSPACE_ID" ]]; then
+    DEMO_AGENT_ROOT="$WORKSPACES_ROOT/$WORKSPACE_ID/agents"
     for id in demo-research-explorer demo-data-storyteller demo-workflow-guide; do
-      rm -f "$DEMO_AGENT_ROOT/$WORKSPACE_ID/$id/SOUL.yaml"
-      rmdir "$DEMO_AGENT_ROOT/$WORKSPACE_ID/$id" 2>/dev/null || true
+      rm -f "$DEMO_AGENT_ROOT/$id/SOUL.yaml"
+      rmdir "$DEMO_AGENT_ROOT/$id" 2>/dev/null || true
     done
   fi
 fi
