@@ -177,6 +177,12 @@ var Sections = []Section{
 			"routing with different enrollment policies",
 	},
 	{
+		Field: "PublicDemo", Key: "public_demo", Scope: ScopePlatform, Apply: ApplyBoot,
+		Reason: "public demo admission is installed into the OIDC authentication callback and its workspace, " +
+			"capacity, expiry, and capability boundary must change as one policy; updating only request-time " +
+			"guards would leave identity admission enforcing the previous boundary",
+	},
+	{
 		Field: "Deployment", Key: "deployment", Scope: ScopePlatform, Apply: ApplyBoot,
 		Reason: "the mode decides whether tenancy, durable schedules and approval enforcement exist at " +
 			"all; changing it live would leave half the process in one mode and half in the other",

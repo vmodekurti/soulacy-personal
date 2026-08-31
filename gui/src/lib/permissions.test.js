@@ -168,10 +168,14 @@ describe('the sidebar shows what the caller can use', () => {
   it('shows everything to an owner', async () => {
     const { visibleNavPages, navPages } = await import('./nav.js')
     permissions.set({
+      agents: ['read'],
+      chat: ['read', 'chat'],
       builder: ['read', 'write'],
+      studio: ['read', 'write'],
       memory: ['read'], knowledge: ['read'], channels: ['read'], schedule: ['read'],
       skills: ['read'], mcp: ['read'], providers: ['read'], secrets: ['list'],
       config: ['read'], logs: ['read'], plugins: ['read'],
+      rbac: ['read'],
     })
     expect(visibleNavPages(can, undefined, { role: 'owner', deploymentMode: 'personal' }).length)
       .toBe(navPages.filter(page => !page.multiUserOnly).length)
@@ -202,9 +206,10 @@ describe('the sidebar shows what the caller can use', () => {
   it('renders the complete Team workspace sidebar from the server permission projection', async () => {
     const { visibleNavPages } = await import('./nav.js')
     permissions.set({
-      agents: ['read'], chat: ['read'], builder: ['write'], memory: ['read'], knowledge: ['read'],
+      agents: ['read'], chat: ['read'], builder: ['write'], studio: ['read', 'write'], memory: ['read'], knowledge: ['read'],
       channels: ['read'], schedule: ['read'], skills: ['read'], mcp: ['read'],
       plugins: ['read'], providers: ['read'], secrets: ['list'], config: ['read'],
+      rbac: ['read'],
     })
     const visible = visibleNavPages(can, undefined, { role: 'owner', deploymentMode: 'team' })
       .map(page => page.id)
@@ -246,6 +251,26 @@ describe('the sidebar shows what the caller can use', () => {
     expect(visible).not.toContain('studio')
   })
 
+  it('gives public-demo developers a read-rich tour without administration pages', async () => {
+    const { visibleNavPages } = await import('./nav.js')
+    permissions.set({
+      agents: ['read'], chat: ['read', 'chat'], studio: ['read', 'write'],
+      providers: ['read'], templates: ['read'], mcp: ['read'], channels: ['read'],
+      skills: ['read'], plugins: ['read'], knowledge: ['read'], schedule: ['read'],
+    })
+    const visible = visibleNavPages(can, undefined, { role: 'demo_developer', deploymentMode: 'team' })
+      .map(page => page.id)
+    expect(visible).toContain('studio')
+    expect(visible).toContain('chat')
+    expect(visible).toContain('agents')
+    expect(visible).toContain('templates')
+    expect(visible).toContain('mcp')
+    expect(visible).toContain('channels')
+    expect(visible).not.toContain('secrets')
+    expect(visible).not.toContain('members')
+    expect(visible).not.toContain('workspace-admin')
+  })
+
   it('treats Personal mode as the Team/Scale baseline', async () => {
     const { visibleNavPages, navPages } = await import('./nav.js')
     const personal = visibleNavPages(() => true, undefined, { role: 'owner', deploymentMode: 'personal' })
@@ -264,7 +289,7 @@ describe('the sidebar shows what the caller can use', () => {
     const { navPages } = await import('./nav.js')
     const known = new Set([
       'agents', 'chat', 'approvals', 'memory', 'channels', 'providers', 'skills',
-      'mcp', 'knowledge', 'builder', 'templates', 'config', 'logs', 'metrics',
+      'mcp', 'knowledge', 'builder', 'studio', 'templates', 'config', 'logs', 'metrics',
       'schedule', 'rbac', 'secrets', 'credentials', 'plugins',
     ])
     for (const page of navPages) {

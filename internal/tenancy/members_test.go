@@ -24,7 +24,7 @@ func TestMembershipRoleAdministrationHierarchy(t *testing.T) {
 }
 
 func TestMembershipRolesAreClosedSet(t *testing.T) {
-	for _, role := range []string{RoleOwner, RoleAdmin, RoleDeveloper, RoleOperator, RoleViewer} {
+	for _, role := range []string{RoleOwner, RoleAdmin, RoleDeveloper, RoleOperator, RoleViewer, RoleDemoDeveloper} {
 		if !IsMembershipRole(role) {
 			t.Errorf("known role %q rejected", role)
 		}
@@ -33,5 +33,16 @@ func TestMembershipRolesAreClosedSet(t *testing.T) {
 		if IsMembershipRole(role) {
 			t.Errorf("unknown role %q accepted", role)
 		}
+	}
+}
+
+func TestDemoDeveloperRoleCannotBeAssignedByWorkspaceAdministrators(t *testing.T) {
+	for _, role := range []string{RoleOwner, RoleAdmin, RoleDeveloper, RoleOperator, RoleViewer} {
+		if !IsAssignableMembershipRole(role) {
+			t.Errorf("managed role %q should be assignable", role)
+		}
+	}
+	if IsAssignableMembershipRole(RoleDemoDeveloper) {
+		t.Fatal("demo_developer must only be created by the public-demo admission path")
 	}
 }

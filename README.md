@@ -268,6 +268,21 @@ sy logs --follow
 
 Default config is created at `~/.soulacy/config.yaml` on first run.
 
+For an AWS Team Lite or Scale deployment, a bounded public demo workspace can be
+enabled from the deployment Mac with:
+
+```bash
+deploy/aws/public-demo.sh enable \
+  --workspace-id ws_your_immutable_workspace_id \
+  --provider nvidia \
+  --model nvidia/your-model
+```
+
+Use `deploy/aws/public-demo.sh status` to inspect it and
+`deploy/aws/public-demo.sh disable` to close public enrollment. The helper applies
+the change over AWS SSM and rolls back if the gateway fails its readiness check.
+See [Public demo workspace](docs/configuration/public-demo.md) for the security model.
+
 ```yaml
 server:
   host: "127.0.0.1"

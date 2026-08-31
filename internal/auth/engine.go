@@ -108,6 +108,11 @@ type WorkspaceOIDCAvailabilityResolver func(context.Context, string) bool
 type WorkspaceTokenIdentityResolver func(context.Context, string, string) (TokenIdentity, bool)
 type WorkspaceInvitationAccepter func(context.Context, string, string, string) (TokenIdentity, bool)
 
+// WorkspaceDemoAdmitter is called only after a verified OIDC identity has no
+// existing membership in the explicitly requested workspace. Implementations
+// must independently verify that workspace is the operator-designated demo.
+type WorkspaceDemoAdmitter func(context.Context, string, string) (TokenIdentity, bool)
+
 // Engine is the Soulacy auth subsystem.
 //
 //	apikey mode (default): validates requests against the static server.api_key.
@@ -132,6 +137,7 @@ type Engine struct {
 	workspaceProviderResolver   WorkspaceOIDCProviderResolver
 	workspaceAvailability       WorkspaceOIDCAvailabilityResolver
 	workspaceInvitationAccepter WorkspaceInvitationAccepter
+	workspaceDemoAdmitter       WorkspaceDemoAdmitter
 	providerMu                  sync.Mutex
 	providerValidators          map[string]*OIDCValidator
 	auditSink                   func(*fiber.Ctx, AuthEvent)
@@ -198,6 +204,9 @@ func (e *Engine) SetWorkspaceTokenIdentityResolver(resolve WorkspaceTokenIdentit
 }
 func (e *Engine) SetWorkspaceInvitationAccepter(accept WorkspaceInvitationAccepter) {
 	e.workspaceInvitationAccepter = accept
+}
+func (e *Engine) SetWorkspaceDemoAdmitter(admit WorkspaceDemoAdmitter) {
+	e.workspaceDemoAdmitter = admit
 }
 
 func (e *Engine) workspaceValidator(provider WorkspaceOIDCProvider) (*OIDCValidator, error) {

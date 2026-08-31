@@ -91,7 +91,8 @@
   // Studio creates and mutates executable workspace definitions. Viewers may
   // chat with already-deployed agents, but must not be offered a builder that
   // every server-side request will correctly reject.
-  $: studioWritable = ($permissions, can('builder', 'write'))
+	$: studioWritable = ($permissions, can('studio', 'write') || can('builder', 'write'))
+	$: demoMode = String($activeWorkspace?.role || '').toLowerCase() === 'demo_developer'
 
   // ── Palette (Wave 1) ──────────────────────────────────────────────────────
   let catalog = null
@@ -4951,7 +4952,7 @@ Use null for fields that are not present.`
               data-tooltip="Open another agent, workflow or draft">
         Open workflows{#if libCount}<span class="toolbar-count">{libCount}</span>{/if}
       </button>
-      <button class="btn" type="button" on:click={openRules} data-tooltip="Edit the SOUL.yaml authoring rules used when generating, validating, and fixing">📋 Rules</button>
+      {#if !demoMode}<button class="btn" type="button" on:click={openRules} data-tooltip="Edit the SOUL.yaml authoring rules used when generating, validating, and fixing">📋 Rules</button>{/if}
       <button class="btn" type="button" on:click={openTemplates} data-tooltip="Start from a template">Templates</button>
       <button class="btn" type="button" on:click={openYamlBrowser} data-tooltip="View the raw SOUL.yaml of any agent (read-only)">Browse SOUL.yaml</button>
       <button class="btn" type="button" on:click={saveDraft} disabled={!workflow || savingDraft} data-tooltip="Save the current draft to the library">
@@ -4983,6 +4984,12 @@ Use null for fields that are not present.`
     </div>
 
   </header>
+
+  {#if demoMode}
+    <div class="strip demo-studio-notice" role="status">
+      <strong>Public demo workspace</strong> — build and test private drafts here. Drafts expire automatically; publishing agents, schedules, integrations, and workspace changes are disabled.
+    </div>
+  {/if}
 
   <!-- Step rail: Describe › Build › Test › Save. Sits under the header so the
        order of operations is visible at all times — previously Studio was a
@@ -5245,8 +5252,8 @@ Use null for fields that are not present.`
               </label>
 
               <div class="save-note">
-                <strong>New agents are saved disabled</strong>
-                <span>A new agent is staged so you review and deploy it explicitly — from My workflows. Editing an agent you have already enabled leaves it enabled, so a fix does not silently stop its schedule.</span>
+                <strong>{demoMode ? 'Demo drafts stay private' : 'New agents are saved disabled'}</strong>
+                <span>{demoMode ? 'Save this as your temporary private draft. Public-demo users cannot publish or deploy agents.' : 'A new agent is staged so you review and deploy it explicitly — from My workflows. Editing an agent you have already enabled leaves it enabled, so a fix does not silently stop its schedule.'}</span>
               </div>
 
               {#if deliveryModeOf(workflow) === 'reply'}
@@ -5271,12 +5278,18 @@ Use null for fields that are not present.`
               {#if saveError}<div class="strip strip-error">⚠ {saveError}</div>{/if}
               {#if saveMsg}<div class="strip">{saveMsg}</div>{/if}
 
-              <button class="btn primary save-go" type="button"
-                disabled={saving || !!saveBlocked}
-                data-tooltip={saveBlocked}
-                on:click={() => save()}>
-                {saving ? 'Saving…' : 'Save agent'}
-              </button>
+              {#if demoMode}
+                <button class="btn primary save-go" type="button" disabled={savingDraft || !workflow} on:click={saveDraft}>
+                  {savingDraft ? 'Saving…' : 'Save private draft'}
+                </button>
+              {:else}
+                <button class="btn primary save-go" type="button"
+                  disabled={saving || !!saveBlocked}
+                  data-tooltip={saveBlocked}
+                  on:click={() => save()}>
+                  {saving ? 'Saving…' : 'Save agent'}
+                </button>
+              {/if}
               {#if saveBlocked}<p class="save-blocked">{saveBlocked}</p>{/if}
 
               <button class="btn" type="button" on:click={() => goStep(STEP_BUILD)}>Back to Build</button>

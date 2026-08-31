@@ -166,6 +166,61 @@ func TestVerifiedOIDCOutsiderReceivesOnboardingOnlySession(t *testing.T) {
 	}
 }
 
+func TestVerifiedOIDCOutsiderIsAdmittedOnlyToRequestedDemoWorkspace(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuerURL := "https://demo.example"
+	validator := &OIDCValidator{
+		issuer: issuerURL, audience: "client", client: &http.Client{},
+		keys: map[string]any{"key": &key.PublicKey}, allowedAlgorithms: map[string]struct{}{"RS256": {}}, quit: make(chan struct{}),
+	}
+	issuer, _ := newIssuer("01234567890123456789012345678901", time.Minute, time.Hour)
+	defer issuer.Close()
+	engine := &Engine{issuer: issuer, identityLinker: &captureLinker{}}
+	engine.SetWorkspaceTokenIdentityResolver(func(context.Context, string, string) (TokenIdentity, bool) {
+		return TokenIdentity{}, false
+	})
+	admissions := 0
+	engine.SetWorkspaceDemoAdmitter(func(_ context.Context, subject, workspaceID string) (TokenIdentity, bool) {
+		admissions++
+		if subject == "" || workspaceID != "ws_demo" {
+			return TokenIdentity{}, false
+		}
+		return TokenIdentity{Subject: subject, WorkspaceID: workspaceID, Role: "demo_developer"}, true
+	})
+
+	sign := func(verified bool) string {
+		claims := jwt.MapClaims{"iss": issuerURL, "aud": "client", "sub": "visitor", "email": "visitor@example.test", "email_verified": verified, "exp": time.Now().Add(time.Minute).Unix()}
+		token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		token.Header["kid"] = "key"
+		signed, signErr := token.SignedString(key)
+		if signErr != nil {
+			t.Fatal(signErr)
+		}
+		return signed
+	}
+
+	access, _, _, err := engine.issueOIDCSessionWithProvider(context.Background(), sign(true), "", "", "ws_demo", "", validator)
+	if err != nil {
+		t.Fatalf("verified demo visitor was denied: %v", err)
+	}
+	claims, err := issuer.VerifyAccess(access)
+	if err != nil || claims.WorkspaceID != "ws_demo" || claims.Role != "demo_developer" {
+		t.Fatalf("demo claims = %#v, err=%v", claims, err)
+	}
+	if admissions != 1 {
+		t.Fatalf("demo admissions = %d, want 1", admissions)
+	}
+	if _, _, _, err = engine.issueOIDCSessionWithProvider(context.Background(), sign(false), "", "", "ws_demo", "", validator); err == nil || oidcFailureStage(err) != "membership" {
+		t.Fatalf("unverified demo visitor received a session: %v", err)
+	}
+	if admissions != 1 {
+		t.Fatalf("unverified email reached demo admission; admissions=%d", admissions)
+	}
+}
+
 func newFiberRequest(method, path string, body []byte) *http.Request {
 	req, _ := http.NewRequest(method, path, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

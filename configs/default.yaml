@@ -9,6 +9,21 @@ server:
   gui_enabled: true
   api_key: ""           # Set to a secret string to require bearer auth on all API calls
 
+# Optional invitation-free showcase workspace. Disabled by default. When
+# enabled in Team/Scale, verified OIDC users receive an expiring demo role that
+# can create and test private Studio drafts but cannot publish agents or change
+# deployment/workspace integrations. Production activation additionally
+# requires Redis-backed per-user request/token limits and hard cost enforcement.
+public_demo:
+  enabled: false
+  workspace_id: ""
+  membership_ttl: "24h"
+  draft_ttl: "24h"
+  max_active_members: 100
+  allowed_providers: []
+  allowed_models: []
+  allowed_tools: [web_search, fetch_url, generate_chart]
+
 runtime:
   max_concurrent_sessions: 100
   default_max_turns: 20

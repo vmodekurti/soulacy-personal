@@ -5,9 +5,11 @@ package studio
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	reasoning "github.com/soulacy/soulacy/internal/reasoning"
 )
@@ -185,6 +187,42 @@ func TestDraftLibrary_EmptyNameRejected(t *testing.T) {
 	root := t.TempDir()
 	if _, err := SaveDraft(root, "   ", Templates()[0].Workflow); err == nil {
 		t.Error("SaveDraft with blank name should error")
+	}
+}
+
+func TestDraftLibrary_ExpiringDraftLifecycle(t *testing.T) {
+	root := t.TempDir()
+	wf := Templates()[0].Workflow
+	future := time.Now().UTC().Add(time.Hour)
+	id, err := SaveDraftUntil(root, "Temporary Demo Draft", wf, future)
+	if err != nil {
+		t.Fatalf("SaveDraftUntil: %v", err)
+	}
+	metas, err := ListDrafts(root)
+	if err != nil || len(metas) != 1 {
+		t.Fatalf("ListDrafts = %#v, %v; want one draft", metas, err)
+	}
+	if metas[0].Expires == "" {
+		t.Fatal("expiring draft did not expose its expiry")
+	}
+	loaded, err := LoadDraft(root, id)
+	if err != nil || loaded.Expires == "" {
+		t.Fatalf("LoadDraft expiry = %q, %v", loaded.Expires, err)
+	}
+
+	expiredID, err := SaveDraftUntil(root, "Expired Demo Draft", wf, time.Now().UTC().Add(-time.Minute))
+	if err != nil {
+		t.Fatalf("save expired draft fixture: %v", err)
+	}
+	if _, err := LoadDraft(root, expiredID); err == nil || !strings.Contains(err.Error(), "expired") {
+		t.Fatalf("LoadDraft(expired) error = %v", err)
+	}
+	path, pathErr := draftPath(root, expiredID)
+	if pathErr != nil {
+		t.Fatal(pathErr)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expired draft was not removed: %v", err)
 	}
 }
 

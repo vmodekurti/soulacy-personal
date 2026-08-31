@@ -33,7 +33,8 @@ func (s *Server) handleWorkspaceLoginConfig(c *fiber.Ctx) error {
 	if config.IdentityStatus == "active" && config.ProviderType == "" {
 		config.ProviderType = providerTypeForIssuer(s.config().Auth.OIDCIssuer)
 	}
-	return c.JSON(fiber.Map{"workspace": config, "redirect_url": workspaceOIDCRedirectURL(c, s.config().Auth.OIDCRedirectURL)})
+	publicDemo := s.config().PublicDemo.Enabled && strings.TrimSpace(s.config().PublicDemo.WorkspaceID) == strings.TrimSpace(config.WorkspaceID)
+	return c.JSON(fiber.Map{"workspace": config, "redirect_url": workspaceOIDCRedirectURL(c, s.config().Auth.OIDCRedirectURL), "public_demo": publicDemo})
 }
 
 func workspaceOIDCRedirectURL(c *fiber.Ctx, configured string) string {

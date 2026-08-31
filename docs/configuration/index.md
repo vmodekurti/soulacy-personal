@@ -29,6 +29,7 @@ Start from the annotated example at the repo root:
 | `executor` | Python tool executor: local backends in Personal; remote `worker` in Team/Scale | [Security Posture](security.md) |
 | `knowledge` | RAG defaults: knowledge DB path, embedding provider/model, chunking | [Storage & Backends](storage.md) |
 | `auth` | `apikey` (default) or `jwt` mode, JWT secret/TTLs, OIDC issuer | [Auth](auth.md) |
+| `public_demo` | Invitation-free, expiring access to one constrained Studio workspace | [Public Demo Workspace](public-demo.md) |
 | `credentials` | Credential vault KMS provider: local (default), hashicorp, awskms | [Credentials API](../api/credentials.md) |
 | `billing` | Provider events and webhook verification; authorization consumes provider-independent entitlements | [Production runtime](production-runtime.md) |
 | `updates` | Release manifest for `sy update check/install` and launch readiness | [CLI Reference](../cli/reference.md) |

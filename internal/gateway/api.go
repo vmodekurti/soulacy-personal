@@ -229,10 +229,7 @@ func (s *Server) handleRestart(c *fiber.Ctx) error {
 		})
 	}
 	s.recordAdminAudit(c, "restart.request", "gateway", "", "accepted", nil)
-	go func() {
-		time.Sleep(250 * time.Millisecond)
-		os.Exit(0)
-	}()
+	exitAfterRestart()
 	return c.Status(fiber.StatusAccepted).JSON(fiber.Map{
 		"ok":      true,
 		"message": "Restart requested. A replacement gateway process is starting.",
@@ -264,6 +261,20 @@ func startRestartChild() error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Start()
+}
+
+// exitAfterRestart lets a successfully spawned replacement take over without
+// terminating a Go test process. Route/security tests intentionally exercise
+// deployment mutation endpoints, so the test binary must never call os.Exit.
+func exitAfterRestart() {
+	exe, err := os.Executable()
+	if err == nil && strings.HasSuffix(filepath.Base(exe), ".test") {
+		return
+	}
+	go func() {
+		time.Sleep(250 * time.Millisecond)
+		os.Exit(0)
+	}()
 }
 
 // --- Agents ---
@@ -319,6 +330,23 @@ func channelMapReferencesProtectedSystem(id string, chMap map[string]any) bool {
 
 func (s *Server) handleListAgents(c *fiber.Ctx) error {
 	defs := s.agents(c).All()
+	// A public-demo membership may inspect and chat with deliberately curated
+	// showcase agents, but it must not turn GET /agents into a catalogue of
+	// every definition in the workspace.  The label and capability validator
+	// are the same ones enforced immediately before execution.
+	if identity, ok := requestIdentity(c); ok && identity.Role() == tenancy.RoleDemoDeveloper {
+		cfg := s.config().PublicDemo
+		tools := normalizedSet(cfg.AllowedTools)
+		providers := normalizedSet(cfg.AllowedProviders)
+		models := normalizedSet(cfg.AllowedModels)
+		filtered := make([]*agent.Definition, 0, len(defs))
+		for _, def := range defs {
+			if validatePublicDemoAgent(def, tools, providers, models) == "" {
+				filtered = append(filtered, def)
+			}
+		}
+		defs = filtered
+	}
 	// Interface-aware design (Stories #11/#12): surface where each agent should
 	// appear so clients (the Chat picker, channel routers) can filter — e.g.
 	// hide cron-only agents from Chat. Computed, not stored, so it stays correct

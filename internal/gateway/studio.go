@@ -49,6 +49,7 @@ import (
 	"github.com/soulacy/soulacy/internal/secrets"
 	"github.com/soulacy/soulacy/internal/studio"
 	"github.com/soulacy/soulacy/internal/studio/consent"
+	"github.com/soulacy/soulacy/internal/tenancy"
 	"github.com/soulacy/soulacy/internal/workspacesettings"
 	"github.com/soulacy/soulacy/internal/wsroot"
 	"github.com/soulacy/soulacy/pkg/agent"
@@ -173,6 +174,7 @@ func (s *Server) studioProviderModel(request ...*fiber.Ctx) (provider, model str
 	if c != nil && !s.providerRegisteredFor(c, provider) {
 		provider, model = s.firstRegisteredProviderFor(c, effective)
 	}
+	provider, model = s.publicDemoProviderModel(c, effective, provider, model)
 	return provider, model
 }
 
@@ -194,8 +196,10 @@ func (s *Server) studioBuildLimits(c *fiber.Ctx) (int, float64) {
 // provider, not necessarily the (possibly cloud) builder model.
 func (s *Server) defaultAgentLLM(request ...*fiber.Ctx) (provider, model string) {
 	var workspace workspacesettings.Settings
+	var c *fiber.Ctx
 	if len(request) > 0 && request[0] != nil {
-		workspace = s.workspaceSettingsFor(request[0])
+		c = request[0]
+		workspace = s.workspaceSettingsFor(c)
 	}
 	effective := s.effectiveWorkspaceConfig(workspace)
 	provider = firstNonEmpty(workspace.LLM.Default.Provider, effective.LLM.DefaultProvider)
@@ -203,6 +207,51 @@ func (s *Server) defaultAgentLLM(request ...*fiber.Ctx) (provider, model string)
 	if pc, ok := effective.LLM.Providers[provider]; ok {
 		if model == "" {
 			model = strings.TrimSpace(pc.Model)
+		}
+	}
+	provider, model = s.publicDemoProviderModel(c, effective, provider, model)
+	return provider, model
+}
+
+// publicDemoProviderModel clamps both Studio compilation and generated agent
+// defaults to the operator-curated public-demo inventory. Request validation
+// blocks explicit substitutions; this clamp also covers omitted values and
+// workspace defaults, so a demo visitor cannot accidentally fall through to
+// a more expensive or sensitive deployment provider.
+func (s *Server) publicDemoProviderModel(c *fiber.Ctx, effective *config.Config, provider, model string) (string, string) {
+	if c == nil || effective == nil {
+		return provider, model
+	}
+	identity, ok := requestIdentity(c)
+	if !ok || identity.Role() != tenancy.RoleDemoDeveloper ||
+		!s.config().PublicDemo.Enabled ||
+		strings.TrimSpace(identity.WorkspaceID()) != strings.TrimSpace(s.config().PublicDemo.WorkspaceID) {
+		return provider, model
+	}
+	allowedProviders := normalizedSet(s.config().PublicDemo.AllowedProviders)
+	allowedModels := normalizedSet(s.config().PublicDemo.AllowedModels)
+	if !allowedProviders[strings.ToLower(strings.TrimSpace(provider))] || !s.providerRegisteredFor(c, provider) {
+		provider = ""
+		for _, candidate := range s.config().PublicDemo.AllowedProviders {
+			candidate = strings.ToLower(strings.TrimSpace(candidate))
+			if candidate != "" && s.providerRegisteredFor(c, candidate) {
+				provider = candidate
+				break
+			}
+		}
+	}
+	if !allowedModels[strings.ToLower(strings.TrimSpace(model))] {
+		model = ""
+		for _, candidate := range s.config().PublicDemo.AllowedModels {
+			if candidate = strings.TrimSpace(candidate); candidate != "" {
+				model = candidate
+				break
+			}
+		}
+	}
+	if model == "" && provider != "" {
+		if configured, exists := effective.LLM.Providers[provider]; exists && allowedModels[strings.ToLower(strings.TrimSpace(configured.Model))] {
+			model = strings.TrimSpace(configured.Model)
 		}
 	}
 	return provider, model
@@ -4640,7 +4689,13 @@ func (s *Server) handleStudioSaveDraft(c *fiber.Ctx) error {
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
-	id, err := studio.SaveDraft(dir, req.Name, req.Workflow)
+	var expires time.Time
+	if identity, ok := requestIdentity(c); ok && identity.Role() == tenancy.RoleDemoDeveloper {
+		if ttl, parseErr := time.ParseDuration(s.config().PublicDemo.DraftTTL); parseErr == nil && ttl > 0 {
+			expires = time.Now().UTC().Add(ttl)
+		}
+	}
+	id, err := studio.SaveDraftUntil(dir, req.Name, req.Workflow, expires)
 	if err != nil {
 		return s.errJSON(c, fiber.StatusBadRequest, err)
 	}

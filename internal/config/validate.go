@@ -94,6 +94,8 @@ func (c *Config) Validate() error {
 	}
 	dur("auth.jwt_access_ttl", c.Auth.JWTAccessTTL)
 	dur("auth.jwt_refresh_ttl", c.Auth.JWTRefreshTTL)
+	dur("public_demo.membership_ttl", c.PublicDemo.MembershipTTL)
+	dur("public_demo.draft_ttl", c.PublicDemo.DraftTTL)
 	if access, accessErr := time.ParseDuration(c.Auth.JWTAccessTTL); accessErr == nil && access > time.Hour {
 		errs = append(errs, fmt.Errorf("auth.jwt_access_ttl: %s exceeds the 1h interactive-session maximum", access))
 	}
@@ -134,6 +136,41 @@ func (c *Config) Validate() error {
 		}
 		if !c.RateLimit.Enabled || c.RateLimit.PerUserRPM <= 0 || !strings.EqualFold(strings.TrimSpace(c.RateLimit.Backend), "redis") || strings.TrimSpace(c.RateLimit.RedisURL) == "" {
 			errs = append(errs, fmt.Errorf("signup.enabled requires an enabled Redis-backed per-user rate limit"))
+		}
+	}
+	if c.PublicDemo.Enabled {
+		if !IsMultiUserMode(c.DeploymentMode()) {
+			errs = append(errs, fmt.Errorf("public_demo.enabled requires deployment.mode=team or scale"))
+		}
+		if strings.TrimSpace(c.PublicDemo.WorkspaceID) == "" {
+			errs = append(errs, fmt.Errorf("public_demo.workspace_id is required when public_demo is enabled"))
+		}
+		if c.Auth.Mode != "jwt" || strings.TrimSpace(c.Auth.OIDCIssuer) == "" || strings.TrimSpace(c.Auth.OIDCClientID) == "" {
+			errs = append(errs, fmt.Errorf("public_demo.enabled requires global OIDC (auth.mode=jwt, auth.oidc_issuer, and auth.oidc_client_id)"))
+		}
+		hasEmailScope := false
+		for _, scope := range c.Auth.OIDCScopes {
+			if strings.EqualFold(strings.TrimSpace(scope), "email") {
+				hasEmailScope = true
+				break
+			}
+		}
+		if len(c.Auth.OIDCScopes) > 0 && !hasEmailScope {
+			errs = append(errs, fmt.Errorf("public_demo.enabled requires the OIDC email scope"))
+		}
+		if c.PublicDemo.MaxActiveMembers <= 0 {
+			errs = append(errs, fmt.Errorf("public_demo.max_active_members must be greater than zero"))
+		}
+		if len(c.PublicDemo.AllowedProviders) == 0 || len(c.PublicDemo.AllowedModels) == 0 || len(c.PublicDemo.AllowedTools) == 0 {
+			errs = append(errs, fmt.Errorf("public_demo requires explicit allowed_providers, allowed_models, and allowed_tools"))
+		}
+		if !c.RateLimit.Enabled || c.RateLimit.PerUserRPM <= 0 || c.RateLimit.PerUserTokensDay <= 0 || !strings.EqualFold(strings.TrimSpace(c.RateLimit.Backend), "redis") || strings.TrimSpace(c.RateLimit.RedisURL) == "" {
+			errs = append(errs, fmt.Errorf("public_demo.enabled requires Redis-backed per-user request and daily-token limits"))
+		}
+		for field, raw := range map[string]string{"membership_ttl": c.PublicDemo.MembershipTTL, "draft_ttl": c.PublicDemo.DraftTTL} {
+			if parsed, err := time.ParseDuration(raw); err == nil && parsed <= 0 {
+				errs = append(errs, fmt.Errorf("public_demo.%s must be greater than zero", field))
+			}
 		}
 	}
 	if backend := strings.ToLower(strings.TrimSpace(c.RateLimit.Backend)); backend != "" && backend != "memory" && backend != "redis" {

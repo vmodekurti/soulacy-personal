@@ -486,6 +486,15 @@ func (e *Engine) issueOIDCSessionWithProvider(ctx context.Context, idToken, nonc
 	} else {
 		id, ok = e.tokenIdentityFor(ctx, base)
 	}
+	// Public-demo admission is deliberately last: an existing or invited
+	// membership always wins, and an unverified/missing email never creates
+	// tenant authority. The configured admitter also checks the exact workspace
+	// ID and capacity before creating a short-lived demo membership.
+	if !ok && workspaceID != "" && invitationToken == "" && emailVerified && strings.TrimSpace(claims.Email) != "" && e.workspaceDemoAdmitter != nil {
+		id, ok = e.workspaceDemoAdmitter(ctx, localSubject, workspaceID)
+		id.Email = claims.Email
+		id.PrincipalKind = "user"
+	}
 	if !ok && workspaceID == "" && e.cfg.AllowUnprovisionedOIDC && emailVerified && strings.TrimSpace(claims.Email) != "" {
 		// This principal has proved identity but has no tenant authority. It is
 		// intentionally distinguishable from a normal user session, and the only

@@ -123,7 +123,7 @@ func (s *Server) handleSetWorkspaceMemberRole(c *fiber.Ctx) error {
 	var req struct {
 		Role string `json:"role"`
 	}
-	if err := c.BodyParser(&req); err != nil || !tenancy.IsMembershipRole(req.Role) {
+	if err := c.BodyParser(&req); err != nil || !tenancy.IsAssignableMembershipRole(req.Role) {
 		return s.errMsg(c, fiber.StatusBadRequest, "invalid role")
 	}
 	membership, err := s.tenantMembers.SetMembershipRole(c.UserContext(), membershipMutation(identity), identity.WorkspaceID(), c.Params("id"), identity.Role(), req.Role)

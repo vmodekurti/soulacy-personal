@@ -123,6 +123,11 @@ type Config struct {
 	// provider; this section only decides whether a verified outsider may create
 	// their first organization.
 	Signup SignupConfig `mapstructure:"signup"`
+	// PublicDemo enables invitation-free, verified-OIDC access to exactly one
+	// workspace. It is a deployment security boundary rather than a normal
+	// workspace preference: only the operator may decide which tenant is safe
+	// to expose publicly.
+	PublicDemo PublicDemoConfig `mapstructure:"public_demo"`
 
 	// Credentials configures the encrypted credential vault.
 	Credentials CredentialsConfig `mapstructure:"credentials"`
@@ -755,6 +760,20 @@ type SignupConfig struct {
 	Enabled bool `mapstructure:"enabled"`
 }
 
+// PublicDemoConfig defines the deliberately narrow public Studio experience.
+// Demo members receive the fixed demo_developer role; the role can author and
+// test private drafts but cannot publish agents or mutate integrations.
+type PublicDemoConfig struct {
+	Enabled          bool     `mapstructure:"enabled"`
+	WorkspaceID      string   `mapstructure:"workspace_id"`
+	MembershipTTL    string   `mapstructure:"membership_ttl"`
+	DraftTTL         string   `mapstructure:"draft_ttl"`
+	MaxActiveMembers int      `mapstructure:"max_active_members"`
+	AllowedProviders []string `mapstructure:"allowed_providers"`
+	AllowedModels    []string `mapstructure:"allowed_models"`
+	AllowedTools     []string `mapstructure:"allowed_tools"`
+}
+
 // QueueConfig selects the durable message queue backend.
 //
 //	backend:             "memory"  — in-process channel-based (default, zero-dependency)
@@ -1106,6 +1125,10 @@ func Load(cfgPath string) (*Config, string, error) {
 	v.SetDefault("auth.mode", "apikey")
 	v.SetDefault("auth.jwt_access_ttl", "15m")
 	v.SetDefault("auth.jwt_refresh_ttl", "168h")
+	v.SetDefault("public_demo.membership_ttl", "24h")
+	v.SetDefault("public_demo.draft_ttl", "24h")
+	v.SetDefault("public_demo.max_active_members", 100)
+	v.SetDefault("public_demo.allowed_tools", []string{"web_search", "fetch_url", "generate_chart"})
 	v.SetDefault("llm.default_provider", "nvidia")
 	v.SetDefault("llm.providers.nvidia.api_key", "")
 	v.SetDefault("llm.providers.nvidia.base_url", "https://integrate.api.nvidia.com/v1")

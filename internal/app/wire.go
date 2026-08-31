@@ -717,6 +717,23 @@ func (a *App) Run(parent context.Context) error {
 			}
 			return auth.TokenIdentity{Subject: subject, Role: membership.Role, OrganizationID: membership.OrganizationID, WorkspaceID: membership.WorkspaceID, MembershipID: membership.ID}, true
 		})
+		if demoMembers, ok := members.(tenancy.DemoMemberAdmitter); a.cfg.PublicDemo.Enabled && ok {
+			demoWorkspaceID := strings.TrimSpace(a.cfg.PublicDemo.WorkspaceID)
+			demoTTL, _ := time.ParseDuration(a.cfg.PublicDemo.MembershipTTL)
+			demoCapacity := a.cfg.PublicDemo.MaxActiveMembers
+			authEngine.SetWorkspaceDemoAdmitter(func(ctx context.Context, subject, workspaceID string) (auth.TokenIdentity, bool) {
+				// Exact comparison prevents a public sign-in link from becoming a
+				// generic invitation bypass for any other tenant.
+				if strings.TrimSpace(workspaceID) != demoWorkspaceID {
+					return auth.TokenIdentity{}, false
+				}
+				membership, err := demoMembers.AdmitDemoMember(ctx, subject, demoWorkspaceID, demoTTL, demoCapacity)
+				if err != nil {
+					return auth.TokenIdentity{}, false
+				}
+				return auth.TokenIdentity{Subject: subject, Role: membership.Role, OrganizationID: membership.OrganizationID, WorkspaceID: membership.WorkspaceID, MembershipID: membership.ID}, true
+			})
+		}
 	}
 
 	// ── RBAC Manager ──────────────────────────────────────────────────────────

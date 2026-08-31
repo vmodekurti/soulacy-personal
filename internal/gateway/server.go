@@ -1040,7 +1040,7 @@ func (s *Server) buildApp() *fiber.App {
 	// token for the sandboxed iframe. Plugin tokens themselves cannot reach
 	// these routes (not in the gate's policy table).
 	api.Get("/plugins/ui", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleListPluginUIs)
-	api.Post("/plugins/:id/token", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleIssuePluginToken)
+	api.Post("/plugins/:id/token", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.denyDemoMW("plugin sessions are unavailable in the public demo"), s.handleIssuePluginToken)
 
 	// Plugins preserve the Personal-mode lifecycle, but the installer/store is
 	// selected from the verified workspace context. Installation is a distinct
@@ -1123,23 +1123,23 @@ func (s *Server) buildApp() *fiber.App {
 	api.Get("/security/readiness", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleSecurityReadiness)
 	// S7 (Cohort F) — Security Doctor: per-agent synthesis view +
 	// dry-run injection simulation without executing anything.
-	api.Get("/agents/:id/security_doctor", s.rbacAgentMW(rbac.ActionRead), s.handleSecurityDoctor)
-	api.Post("/agents/:id/security_doctor/dry_run", s.rbacAgentMW(rbac.ActionRead), s.handleSecurityDoctorDryRun)
+	api.Get("/agents/:id/security_doctor", s.rbacAgentMW(rbac.ActionRead), s.demoSafeAgentMW(rbac.AgentIDSource{PathParam: "id"}), s.handleSecurityDoctor)
+	api.Post("/agents/:id/security_doctor/dry_run", s.rbacAgentMW(rbac.ActionRead), s.demoSafeAgentMW(rbac.AgentIDSource{PathParam: "id"}), s.handleSecurityDoctorDryRun)
 	api.Get("/executors", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleExecutors)
 
 	// Agents
 	api.Get("/agents", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleListAgents)
-	api.Post("/agents/validate", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleValidateAgent)
-	api.Post("/agents/package/inspect", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleInspectAgentPackage)
+	api.Post("/agents/validate", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.denyDemoMW("raw agent validation is available through Studio in the public demo"), s.handleValidateAgent)
+	api.Post("/agents/package/inspect", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.denyDemoMW("agent package uploads are unavailable in the public demo"), s.handleInspectAgentPackage)
 	api.Post("/agents/package/import", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleImportAgentPackage)
-	api.Get("/agents/:id", s.rbacAgentMW(rbac.ActionRead), s.handleGetAgent)
-	api.Get("/agents/:id/yaml", s.rbacAgentMW(rbac.ActionRead), s.handleGetAgentYAML)
-	api.Get("/agents/:id/package", s.rbacAgentMW(rbac.ActionRead), s.handleGetAgentPackage)
+	api.Get("/agents/:id", s.rbacAgentMW(rbac.ActionRead), s.demoSafeAgentMW(rbac.AgentIDSource{PathParam: "id"}), s.handleGetAgent)
+	api.Get("/agents/:id/yaml", s.rbacAgentMW(rbac.ActionRead), s.demoSafeAgentMW(rbac.AgentIDSource{PathParam: "id"}), s.handleGetAgentYAML)
+	api.Get("/agents/:id/package", s.rbacAgentMW(rbac.ActionRead), s.demoSafeAgentMW(rbac.AgentIDSource{PathParam: "id"}), s.handleGetAgentPackage)
 	api.Put("/agents/:id/yaml", s.rbacAgentMW(rbac.ActionWrite), s.handleUpdateAgentYAML)
-	api.Get("/agents/:id/versions", s.rbacAgentMW(rbac.ActionRead), s.handleListAgentVersions)
-	api.Get("/agents/:id/versions/:version", s.rbacAgentMW(rbac.ActionRead), s.handleGetAgentVersion)
+	api.Get("/agents/:id/versions", s.rbacAgentMW(rbac.ActionRead), s.demoSafeAgentMW(rbac.AgentIDSource{PathParam: "id"}), s.handleListAgentVersions)
+	api.Get("/agents/:id/versions/:version", s.rbacAgentMW(rbac.ActionRead), s.demoSafeAgentMW(rbac.AgentIDSource{PathParam: "id"}), s.handleGetAgentVersion)
 	api.Post("/agents/:id/rollback", s.rbacAgentMW(rbac.ActionWrite), s.auditing("agent.rollback", "agent", "id", s.handleRollbackAgent))
-	api.Get("/agents/:id/tier", s.rbacAgentMW(rbac.ActionRead), s.handleGetAgentTier)
+	api.Get("/agents/:id/tier", s.rbacAgentMW(rbac.ActionRead), s.demoSafeAgentMW(rbac.AgentIDSource{PathParam: "id"}), s.handleGetAgentTier)
 	api.Post("/agents", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleCreateAgent)
 	api.Put("/agents/:id", s.rbacAgentMW(rbac.ActionWrite), s.handleUpdateAgent)
 	api.Delete("/agents/:id", s.rbacAgentMW(rbac.ActionDelete), s.auditing("agent.delete", "agent", "id", s.handleDeleteAgent))
@@ -1150,10 +1150,10 @@ func (s *Server) buildApp() *fiber.App {
 	// client keys for the browser's direct provider connection. Same RBAC
 	// surface as chat (the panel lives in Chat).
 	api.Get("/voice/status", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleVoiceStatus)
-	api.Post("/voice/ephemeral", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleVoiceEphemeral)
+	api.Post("/voice/ephemeral", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.denyDemoMW("realtime voice is unavailable in the public demo"), s.handleVoiceEphemeral)
 	api.Get("/voice/capabilities", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleVoiceCapabilities)
-	api.Post("/voice/transcribe", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleVoiceTranscribe)
-	api.Post("/voice/synthesize", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleVoiceSynthesize)
+	api.Post("/voice/transcribe", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.denyDemoMW("voice uploads are unavailable in the public demo"), s.handleVoiceTranscribe)
+	api.Post("/voice/synthesize", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.denyDemoMW("voice synthesis is unavailable in the public demo"), s.handleVoiceSynthesize)
 
 	// Chat — per-agent RPM applied on top of the user RPM limit.
 	//
@@ -1164,26 +1164,26 @@ func (s *Server) buildApp() *fiber.App {
 	// by internal/costs, durably and through a reservation; see the comment at
 	// the head of internal/ratelimit/manager.go.
 	api.Get("/chat/status", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.handleChatStatus)
-	api.Post("/chat", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{BodyField: "agent_id"}), s.rlAgentMW(), s.handleChat)
-	api.Post("/chat/feedback", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{BodyField: "agent_id"}), s.handleChatFeedback)
+	api.Post("/chat", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{BodyField: "agent_id"}), s.demoSafeAgentMW(rbac.AgentIDSource{BodyField: "agent_id"}), s.rlAgentMW(), s.handleChat)
+	api.Post("/chat/feedback", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{BodyField: "agent_id"}), s.denyDemoMW("persistent feedback is unavailable in the public demo"), s.handleChatFeedback)
 	api.Get("/learning/feedback", s.rbacMW(rbac.ResourceMemory, rbac.ActionRead), s.handleListChatFeedback)
-	api.Post("/chat/stream", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{BodyField: "agent_id"}), s.rlAgentMW(), s.handleChatStream)
-	api.Get("/chat/stream", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{QueryParam: "agent_id"}), s.rlAgentMW(), s.handleChatStream)
-	api.Post("/webhooks/:agent_id", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{PathParam: "agent_id"}), s.rlAgentMW(), s.handleGenericWebhook)
-	api.Post("/chat/confirm", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleToolConfirm)
+	api.Post("/chat/stream", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{BodyField: "agent_id"}), s.demoSafeAgentMW(rbac.AgentIDSource{BodyField: "agent_id"}), s.rlAgentMW(), s.handleChatStream)
+	api.Get("/chat/stream", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{QueryParam: "agent_id"}), s.demoSafeAgentMW(rbac.AgentIDSource{QueryParam: "agent_id"}), s.rlAgentMW(), s.handleChatStream)
+	api.Post("/webhooks/:agent_id", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{PathParam: "agent_id"}), s.denyDemoMW("webhooks are unavailable in the public demo"), s.rlAgentMW(), s.handleGenericWebhook)
+	api.Post("/chat/confirm", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.denyDemoMW("privileged tool confirmation is unavailable in the public demo"), s.handleToolConfirm)
 	// Cancel an in-flight run (Story #22): stop a slow local-model run.
-	api.Post("/chat/cancel", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleChatCancel)
-	api.Post("/chat/share", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.handleCreateShare)
+	api.Post("/chat/cancel", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.denyDemoMW("run control is unavailable in the public demo"), s.handleChatCancel)
+	api.Post("/chat/share", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.denyDemoMW("conversation sharing is unavailable in the public demo"), s.handleCreateShare)
 	// Listing and revocation are the other half of a shareable link: a
 	// published conversation that cannot be found or withdrawn is permanent.
 	// Both are scoped to the caller's workspace inside the handlers.
-	api.Get("/chat/shares", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.handleListShares)
+	api.Get("/chat/shares", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.denyDemoMW("conversation sharing is unavailable in the public demo"), s.handleListShares)
 	api.Delete("/chat/share/:token", s.rbacMW(rbac.ResourceChat, rbac.ActionWrite), s.handleRevokeShare)
-	api.Get("/chat/artifacts", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{QueryParam: "agent_id"}), s.handleChatArtifacts)
-	api.Get("/chat/artifacts/download", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{QueryParam: "agent_id"}), s.handleChatArtifactDownload)
-	api.Post("/chat/attachments", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{FormField: "agent_id"}), s.handleChatAttachmentUpload)
-	api.Get("/chat/attachments", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{QueryParam: "agent_id"}), s.handleChatAttachments)
-	api.Get("/chat/attachments/:id/download", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{QueryParam: "agent_id"}), s.handleChatAttachmentDownload)
+	api.Get("/chat/artifacts", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{QueryParam: "agent_id"}), s.denyDemoMW("artifact storage is unavailable in the public demo"), s.handleChatArtifacts)
+	api.Get("/chat/artifacts/download", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{QueryParam: "agent_id"}), s.denyDemoMW("artifact downloads are unavailable in the public demo"), s.handleChatArtifactDownload)
+	api.Post("/chat/attachments", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{FormField: "agent_id"}), s.denyDemoMW("file uploads are unavailable in the public demo"), s.handleChatAttachmentUpload)
+	api.Get("/chat/attachments", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{QueryParam: "agent_id"}), s.denyDemoMW("attachment storage is unavailable in the public demo"), s.handleChatAttachments)
+	api.Get("/chat/attachments/:id/download", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{QueryParam: "agent_id"}), s.denyDemoMW("attachment downloads are unavailable in the public demo"), s.handleChatAttachmentDownload)
 
 	// Channels
 	api.Get("/channels", s.rbacMW(rbac.ResourceChannels, rbac.ActionRead), s.handleListChannels)
@@ -1203,7 +1203,10 @@ func (s *Server) buildApp() *fiber.App {
 	api.Post("/agents/:id/replay", s.rbacAgentMW(rbac.ActionWrite), s.handleReplayAgentRun)
 	api.Post("/agents/:id/schedule-output/test", s.rbacAgentMW(rbac.ActionWrite), s.handleTestScheduledOutput)
 	api.Post("/agents/:id/clone", s.rbacAgentMW(rbac.ActionWrite), s.handleCloneAgent)
-	api.Get("/agents/:id/actions", s.rbacAgentMW(rbac.ActionRead), s.handleAgentActions)
+	// Action logs can contain another demo visitor's prompts and tool results for
+	// a shared showcase agent. Keep the curated agent definition inspectable,
+	// but do not expose its cross-user execution ledger to public-demo members.
+	api.Get("/agents/:id/actions", s.rbacAgentMW(rbac.ActionRead), s.denyDemoMW("agent action history is unavailable in the public demo"), s.handleAgentActions)
 
 	// Session memory (existing)
 	api.Get("/memory/:agent_id", s.rbacAgentFromMW(rbac.ResourceMemory, rbac.ActionRead, rbac.AgentIDSource{PathParam: "agent_id"}), s.handleListMemory)
@@ -1279,7 +1282,7 @@ func (s *Server) buildApp() *fiber.App {
 	api.Post("/mcp", s.platformMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleCreateMCPServer)
 	api.Patch("/mcp/:id", s.platformMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleUpdateMCPServer)
 	api.Delete("/mcp/:id", s.platformMW(rbac.ResourceMCP, rbac.ActionDelete), s.handleDeleteMCPServer)
-	api.Post("/mcp/test", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleTestMCPServer)
+	api.Post("/mcp/test", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.denyDemoMW("MCP execution is unavailable in the public demo"), s.handleTestMCPServer)
 	// The workspace half of MCP: the operator publishes the catalog behind
 	// platformMW above, each workspace supplies its OWN identity for the
 	// servers in it. Deliberately not platform routes — a tenant's token is
@@ -1320,7 +1323,7 @@ func (s *Server) buildApp() *fiber.App {
 
 	// Unified tool catalog (python tools + MCP tools + Go built-ins)
 	api.Get("/tool-catalog", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleToolCatalog)
-	api.Post("/tools/run", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleRunTool)
+	api.Post("/tools/run", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.denyDemoMW("direct tool execution is unavailable in the public demo"), s.handleRunTool)
 
 	// Conversational Agent Builder
 	api.Post("/builder/chat", s.rbacMW(rbac.ResourceBuilder, rbac.ActionWrite), s.handleBuilderChat)
@@ -1331,128 +1334,128 @@ func (s *Server) buildApp() *fiber.App {
 	// Studio plugin backend: mandatory pre-generation prompt refinement — turn a
 	// rough intent into a clear spec + assumptions + clarifying questions before
 	// a workflow is compiled.
-	api.Post("/studio/refine-prompt", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleStudioRefinePrompt)
+	api.Post("/studio/refine-prompt", s.rbacMW(rbac.ResourceStudio, rbac.ActionWrite), s.demoStudioMW(), s.handleStudioRefinePrompt)
 	// Studio plugin backend (Story S1.1): intent compiler.
-	api.Post("/studio/compile", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleStudioCompile)
+	api.Post("/studio/compile", s.rbacMW(rbac.ResourceStudio, rbac.ActionWrite), s.demoStudioMW(), s.handleStudioCompile)
 	// Studio plugin backend: generate a ReAct/Plan-Execute AGENT (no fixed flow)
 	// for intents that need a reasoning loop (local-first pivot).
-	api.Post("/studio/compile-agent", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleStudioCompileAgent)
+	api.Post("/studio/compile-agent", s.rbacMW(rbac.ResourceStudio, rbac.ActionWrite), s.demoStudioMW(), s.handleStudioCompileAgent)
 	// ST-01: Studio's structured reading of an intent ("Studio understood…"),
 	// with the blocking questions and — when previous_intent is supplied — the
 	// visible change summary that proves a refine changed the BUILD and not just
 	// the wording. Deterministic, no model call: read-only.
-	api.Post("/studio/build-spec", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioBuildSpec)
+	api.Post("/studio/build-spec", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioBuildSpec)
 	// ST-03 / ST-06: the plain-language plan — when it starts, what work happens
 	// (including parallel groups and their DECLARED join policy), where the result
 	// goes — so a user who cannot read a graph can still approve one. Read-only
 	// projection of the posted draft; nothing is persisted.
-	api.Post("/studio/plan-view", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioPlanView)
+	api.Post("/studio/plan-view", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioPlanView)
 	// ST-09: the model capability registry the Strategy Advisor decides from, so
 	// "Soulacy selected Workflow" can be checked rather than trusted.
-	api.Get("/studio/model-capabilities", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioModelCapabilities)
-	api.Get("/studio/strategy-fit", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioStrategyFit)
-	api.Get("/studio/learning-memory", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioLearningMemory)
-	api.Delete("/studio/learning-memory/:kind/:id", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleStudioDeleteLearningMemory)
+	api.Get("/studio/model-capabilities", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioModelCapabilities)
+	api.Get("/studio/strategy-fit", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioStrategyFit)
+	api.Get("/studio/learning-memory", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioLearningMemory)
+	api.Delete("/studio/learning-memory/:kind/:id", s.rbacMW(rbac.ResourceStudio, rbac.ActionWrite), s.demoStudioMW(), s.handleStudioDeleteLearningMemory)
 	// Studio plugin backend: consolidated pre-save validation (missing tools/MCP/
 	// channels/secrets, empty required args, invalid schedules).
-	api.Post("/studio/preflight", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioPreflight)
+	api.Post("/studio/preflight", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioPreflight)
 	// Studio generation contract: graph + runtime preflight + authoring rules.
-	api.Post("/studio/contract", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioContract)
+	api.Post("/studio/contract", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioContract)
 	// Studio security review (S6, Cohort F): pre-save summary of trust
 	// boundaries + network / file / channel / privileged tool usage +
 	// confirmation requirements + safer-scoped-tool recommendations.
-	api.Post("/studio/security_review", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioSecurityReview)
+	api.Post("/studio/security_review", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioSecurityReview)
 	// Studio plugin backend: builder-model strength advice (warn on weak models).
-	api.Get("/studio/model-advice", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioModelAdvice)
+	api.Get("/studio/model-advice", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioModelAdvice)
 	// Story 9 (Cohort B): intent-named preset catalog ("fast local" / "reliable
 	// local" / "cloud quality") for the GUI's Studio picker.
-	api.Get("/studio/presets", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioPresets)
+	api.Get("/studio/presets", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioPresets)
 	// Studio plugin backend: deterministic + iterative-LLM repair for the "Fix
 	// automatically" action.
-	api.Post("/studio/autowire", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleStudioAutowire)
+	api.Post("/studio/autowire", s.rbacMW(rbac.ResourceStudio, rbac.ActionWrite), s.demoStudioMW(), s.handleStudioAutowire)
 	// Studio plugin backend: AI troubleshoot of a runtime error ("Fix with AI").
-	api.Post("/studio/troubleshoot", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleStudioTroubleshoot)
+	api.Post("/studio/troubleshoot", s.rbacMW(rbac.ResourceStudio, rbac.ActionWrite), s.demoStudioMW(), s.handleStudioTroubleshoot)
 	// Studio Architect: autonomous build-verify-repair loop ("Build until it works").
-	api.Post("/studio/build", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleStudioBuild)
+	api.Post("/studio/build", s.rbacMW(rbac.ResourceStudio, rbac.ActionWrite), s.demoStudioMW(), s.handleStudioBuild)
 	// Streaming variant: live progress as a text/event-stream.
-	api.Post("/studio/build/stream", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleStudioBuildStream)
+	api.Post("/studio/build/stream", s.rbacMW(rbac.ResourceStudio, rbac.ActionWrite), s.demoStudioMW(), s.handleStudioBuildStream)
 	// Story 9 M (Cohort C): streamed generate pipeline — surfaces the 5
 	// phases (clarify_intent → choose_strategy → build_graph → validate →
 	// repair) as SSE events. Consumed by both the live-transcript panel
 	// (default) and the wizard-mode stepped modal (buffered client-side).
-	api.Post("/studio/generate/stream", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleStudioGenerateStream)
+	api.Post("/studio/generate/stream", s.rbacMW(rbac.ResourceStudio, rbac.ActionWrite), s.demoStudioMW(), s.handleStudioGenerateStream)
 	// Studio Architect: list/diagnose failed runs and self-heal the saved agent.
-	api.Get("/studio/failed-runs", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioFailedRuns)
-	api.Get("/studio/run-trace", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioRunTrace)
-	api.Get("/studio/run-diagnosis", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioRunDiagnosis)
-	api.Get("/studio/run-history", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioRunHistory)
-	api.Get("/studio/build-trace", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioBuildTrace)
-	api.Get("/studio/build-traces", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioBuildTraces)
-	api.Post("/studio/diagnose-run", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleStudioDiagnoseRun)
-	api.Post("/studio/diagnose-session", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleStudioDiagnoseSession)
+	api.Get("/studio/failed-runs", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioFailedRuns)
+	api.Get("/studio/run-trace", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioRunTrace)
+	api.Get("/studio/run-diagnosis", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioRunDiagnosis)
+	api.Get("/studio/run-history", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioRunHistory)
+	api.Get("/studio/build-trace", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioBuildTrace)
+	api.Get("/studio/build-traces", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioBuildTraces)
+	api.Post("/studio/diagnose-run", s.rbacMW(rbac.ResourceStudio, rbac.ActionWrite), s.demoStudioMW(), s.handleStudioDiagnoseRun)
+	api.Post("/studio/diagnose-session", s.rbacMW(rbac.ResourceStudio, rbac.ActionWrite), s.demoStudioMW(), s.handleStudioDiagnoseSession)
 	// Studio plugin backend (Wave 2): dry-run test and save-as-disabled-agent.
-	api.Post("/studio/test", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleStudioTest)
+	api.Post("/studio/test", s.rbacMW(rbac.ResourceStudio, rbac.ActionWrite), s.demoStudioMW(), s.handleStudioTest)
 	// Try an UNSAVED reasoning agent against one sample question (ephemeral run).
-	api.Post("/studio/try-agent", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleStudioTryAgent)
+	api.Post("/studio/try-agent", s.rbacMW(rbac.ResourceStudio, rbac.ActionWrite), s.demoStudioMW(), s.handleStudioTryAgent)
 	// What a Run Live of this draft would actually be allowed to do — the same
 	// preview /studio/try-agent refuses with (409), WITHOUT running anything, so
 	// the GUI can show the confirmation dialog before the operator commits.
 	// Read-only: gated on ActionRead.
-	api.Post("/studio/run-preview", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioRunPreview)
+	api.Post("/studio/run-preview", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioRunPreview)
 	// ST-07: ONE readiness verdict — preflight + generation contract + security
 	// review + consent — replacing the client-side stitch of three endpoints.
 	// A section the server could not evaluate is reported Unknown and forces
 	// ok=false, so readiness can no longer come back green because a call failed
 	// and the GUI quietly dropped it.
-	api.Post("/studio/readiness", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioReadiness)
+	api.Post("/studio/readiness", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioReadiness)
 	// Studio plugin backend (M2): capability-tier consent plan + gated save.
-	api.Post("/studio/plan", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleStudioPlan)
+	api.Post("/studio/plan", s.rbacMW(rbac.ResourceStudio, rbac.ActionWrite), s.demoStudioMW(), s.handleStudioPlan)
 	api.Post("/studio/save", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleStudioSave)
 	// Studio Canvas⇄Code (SOUL.yaml) view: serialize a draft to YAML, parse
 	// edited YAML back to a draft (with lossiness warnings), and save authored
 	// YAML directly to disk (code view is authoritative).
-	api.Post("/studio/yaml", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioYAML)
-	api.Post("/studio/from-yaml", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioFromYAML)
+	api.Post("/studio/yaml", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioYAML)
+	api.Post("/studio/from-yaml", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioFromYAML)
 	api.Post("/studio/save-yaml", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleStudioSaveYAML)
-	api.Post("/studio/validate-yaml", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioValidateYAML)
-	api.Post("/studio/fix-yaml", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleStudioFixYAML)
-	api.Get("/studio/rules", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioGetRules)
-	api.Put("/studio/rules", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleStudioSaveRules)
+	api.Post("/studio/validate-yaml", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioValidateYAML)
+	api.Post("/studio/fix-yaml", s.rbacMW(rbac.ResourceStudio, rbac.ActionWrite), s.demoStudioMW(), s.handleStudioFixYAML)
+	api.Get("/studio/rules", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioGetRules)
+	api.Put("/studio/rules", s.rbacMW(rbac.ResourceStudio, rbac.ActionWrite), s.demoStudioMW(), s.handleStudioSaveRules)
 	// The store has always been append-only; this is what makes its history
 	// reachable, so a deployment record's RulesVersion can be looked up.
-	api.Get("/studio/rules/history", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioRulesHistory)
-	api.Post("/studio/review-yaml", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleStudioReviewYAML)
+	api.Get("/studio/rules/history", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioRulesHistory)
+	api.Post("/studio/review-yaml", s.rbacMW(rbac.ResourceStudio, rbac.ActionWrite), s.demoStudioMW(), s.handleStudioReviewYAML)
 	// Studio plugin backend (M3): canvas-time graph validation (read-only).
-	api.Post("/studio/validate", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioValidate)
+	api.Post("/studio/validate", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioValidate)
 	// Learn-from-Run-Live: propose repairs from the last run's node trace, and
 	// apply one approved proposal (re-validated). Nothing is auto-applied.
-	api.Post("/studio/repair-live", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleStudioRepairLive)
-	api.Post("/studio/apply-repair", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleStudioApplyRepair)
-	api.Post("/studio/diff", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioDiff)
-	api.Post("/studio/add-step", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleStudioAddStep)
+	api.Post("/studio/repair-live", s.rbacMW(rbac.ResourceStudio, rbac.ActionWrite), s.demoStudioMW(), s.handleStudioRepairLive)
+	api.Post("/studio/apply-repair", s.rbacMW(rbac.ResourceStudio, rbac.ActionWrite), s.demoStudioMW(), s.handleStudioApplyRepair)
+	api.Post("/studio/diff", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioDiff)
+	api.Post("/studio/add-step", s.rbacMW(rbac.ResourceStudio, rbac.ActionWrite), s.demoStudioMW(), s.handleStudioAddStep)
 	// Studio plugin backend (M6): starter templates (read-only).
-	api.Get("/studio/templates", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioTemplates)
+	api.Get("/studio/templates", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioTemplates)
 	// Phase 2: coarse composite-block catalog (read-only) — one node that
 	// encapsulates a whole multi-step dance (e.g. NotebookLM podcast).
-	api.Get("/studio/composite-blocks", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioCompositeBlocks)
+	api.Get("/studio/composite-blocks", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioCompositeBlocks)
 	// Phase B: compile a plain-language connector gate into a flow predicate.
-	api.Post("/studio/compile-gate", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioCompileGate)
+	api.Post("/studio/compile-gate", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioCompileGate)
 	// Phase C: compile ONE node from its plain-language intent into concrete config.
-	api.Post("/studio/compile-node", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleStudioCompileNode)
+	api.Post("/studio/compile-node", s.rbacMW(rbac.ResourceStudio, rbac.ActionWrite), s.demoStudioMW(), s.handleStudioCompileNode)
 	// Studio plugin backend (M6): user draft library (save/list/load/delete).
-	api.Post("/studio/drafts", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleStudioSaveDraft)
-	api.Get("/studio/drafts", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioListDrafts)
-	api.Get("/studio/drafts/:id", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioLoadDraft)
-	api.Delete("/studio/drafts/:id", s.rbacMW(rbac.ResourceAgents, rbac.ActionDelete), s.handleStudioDeleteDraft)
+	api.Post("/studio/drafts", s.rbacMW(rbac.ResourceStudio, rbac.ActionWrite), s.demoStudioMW(), s.handleStudioSaveDraft)
+	api.Get("/studio/drafts", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioListDrafts)
+	api.Get("/studio/drafts/:id", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioLoadDraft)
+	api.Delete("/studio/drafts/:id", s.rbacMW(rbac.ResourceStudio, rbac.ActionWrite), s.demoStudioMW(), s.handleStudioDeleteDraft)
 	// Studio plugin backend (M6): per-node re-describe.
-	api.Post("/studio/refine", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleStudioRefine)
+	api.Post("/studio/refine", s.rbacMW(rbac.ResourceStudio, rbac.ActionWrite), s.demoStudioMW(), s.handleStudioRefine)
 	// Studio "My Workflows": list workflow-bearing agents + load one as a draft.
-	api.Get("/studio/agents", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioListAgents)
-	api.Get("/studio/agents/:id", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioLoadAgent)
+	api.Get("/studio/agents", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioListAgents)
+	api.Get("/studio/agents/:id", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioLoadAgent)
 	// Built-in framework Python scaffolds for the Custom Python editor.
-	api.Get("/studio/scaffolds", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleStudioScaffolds)
+	api.Get("/studio/scaffolds", s.rbacMW(rbac.ResourceStudio, rbac.ActionRead), s.demoStudioMW(), s.handleStudioScaffolds)
 	// In-framework code generation for one Custom Python node.
-	api.Post("/studio/codegen", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleStudioCodegen)
+	api.Post("/studio/codegen", s.rbacMW(rbac.ResourceStudio, rbac.ActionWrite), s.demoStudioMW(), s.handleStudioCodegen)
 
 	// E4: Capability Gap Detection
 	if s.builderRegistry != nil {
@@ -1466,7 +1469,9 @@ func (s *Server) buildApp() *fiber.App {
 	api.Get("/templates", s.rbacMW(rbac.ResourceTemplates, rbac.ActionRead), s.handleListTemplates)
 	api.Post("/templates/:name/instantiate", s.rbacMW(rbac.ResourceTemplates, rbac.ActionWrite), s.handleInstantiateTemplate)
 	api.Get("/templates/:name/readiness", s.rbacMW(rbac.ResourceTemplates, rbac.ActionRead), s.handleTemplateReadiness)
-	api.Post("/templates/:name/mock-test", s.rbacMW(rbac.ResourceTemplates, rbac.ActionRead), s.handleTemplateMockTest)
+	// Template browsing is part of the demo. Mock execution is not: it spends
+	// shared provider budget outside the per-visitor Studio draft boundary.
+	api.Post("/templates/:name/mock-test", s.rbacMW(rbac.ResourceTemplates, rbac.ActionRead), s.denyDemoMW("template mock execution is unavailable in the public demo"), s.handleTemplateMockTest)
 
 	// Config (read / write config.yaml via API)
 	api.Get("/config", s.platformMW(rbac.ResourceConfig, rbac.ActionRead), s.handleGetConfig)
@@ -1689,10 +1694,10 @@ func (s *Server) buildApp() *fiber.App {
 	// --- Durable runs (MU-020) ---
 	// Submission is gated on the same permission as chat: a run is a chat
 	// turn that outlives its request, not a new authority.
-	api.Post("/runs", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{BodyField: "agent_id"}), s.rlAgentMW(), s.handleSubmitRun)
-	api.Get("/runs", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.handleListRuns)
-	api.Get("/runs/:id", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.handleGetRun)
-	api.Post("/runs/:id/cancel", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleCancelRun)
+	api.Post("/runs", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{BodyField: "agent_id"}), s.denyDemoMW("durable background runs are unavailable in the public demo"), s.rlAgentMW(), s.handleSubmitRun)
+	api.Get("/runs", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.denyDemoMW("shared run history is unavailable in the public demo"), s.handleListRuns)
+	api.Get("/runs/:id", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.denyDemoMW("shared run history is unavailable in the public demo"), s.handleGetRun)
+	api.Post("/runs/:id/cancel", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.denyDemoMW("run control is unavailable in the public demo"), s.handleCancelRun)
 
 	// --- Schema state (admin) ---
 	// Behind the same owner/admin gate as the raw metrics endpoint: a schema

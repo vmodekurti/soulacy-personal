@@ -25,6 +25,7 @@
   // a one-click deep-link into the affected agent's Security Doctor. That
   // requires the richer /security/readiness payload.
   let securityReadiness = null
+  $: demoMode = String($activeWorkspace?.role || '').toLowerCase() === 'demo_developer'
 
   const EVENT_FILTERS = [
     { id: 'all', label: 'All' },
@@ -45,6 +46,14 @@
       error     = e.message
       authError = e.status === 401
       permissionError = e.status === 403
+    }
+    if (demoMode) {
+      suggestions = []
+      readiness = null
+      securityReadiness = null
+      ops = null
+      opsError = ''
+      return
     }
     try {
       const res = await api.proactive.suggestions()
@@ -78,7 +87,7 @@
 
 
   function connectWS() {
-    if (stopWS) return
+    if (stopWS || demoMode) return
     try { ws = createEventSocket() } catch { return }
     // App.svelte owns the shell connectivity badge. This page socket only
     // consumes dashboard events and must not mark the whole app offline when
@@ -98,7 +107,7 @@
 
   onMount(() => {
     load()
-    connectWS()
+    if (!demoMode) connectWS()
     const t = setInterval(load, 15_000)
     return () => clearInterval(t)
   })
@@ -267,6 +276,34 @@
     </div>
   {/if}
 
+  {#if demoMode}
+    <section class="demo-welcome">
+      <div>
+        <div class="eyebrow">Protected product experience</div>
+        <h2>Build, test, and explore Soulacy safely</h2>
+        <p>Your drafts and chats expire automatically. Shared settings, secrets, installations, schedules, and platform operations are view-only or unavailable, so every visitor can experiment without affecting the deployment.</p>
+      </div>
+      <button class="btn-primary" on:click={() => openHref('#studio')}>Build an agent</button>
+    </section>
+    <div class="demo-grid">
+      {#each [
+        { icon: '🎬', title: 'Agent Studio', text: 'Design and test an agent with approved models and safe tools.', href: '#studio', action: 'Start building' },
+        { icon: '◎', title: 'Live agent chat', text: 'Run curated research and visualization agents under strict per-user budgets.', href: '#chat', action: 'Try an agent' },
+        { icon: '📋', title: 'Templates', text: 'Explore reusable starting points for agents and multi-step workflows.', href: '#templates', action: 'Browse templates' },
+        { icon: '🔌', title: 'MCP & Skills', text: 'Inspect the tool, MCP, skill, and plugin catalogs without executing or installing code.', href: '#mcp', action: 'Explore tools' },
+        { icon: '📡', title: 'Delivery & automation', text: 'See how channels and scheduled agents are configured while shared controls stay locked.', href: '#channels', action: 'View delivery' },
+        { icon: '⚙', title: 'Models & providers', text: 'Compare the workspace-approved model catalog; credentials remain masked and immutable.', href: '#providers', action: 'View models' },
+      ] as feature}
+        <button class="demo-feature" on:click={() => openHref(feature.href)}>
+          <span class="demo-icon">{feature.icon}</span>
+          <strong>{feature.title}</strong>
+          <span>{feature.text}</span>
+          <em>{feature.action} →</em>
+        </button>
+      {/each}
+    </div>
+  {/if}
+
   <!-- Status cards -->
   <div class="cards">
     <div class="card" class:card-ok={!!$activeWorkspace} data-tooltip="The workspace whose agents, runs, and settings are shown on this dashboard">
@@ -281,14 +318,22 @@
       <div class="card-sub">{agents.filter(a => a.enabled).length} enabled</div>
     </div>
 
-    <div class="card" data-tooltip="Completed agent execution turns and workflow sessions since dashboard launch">
-      <div class="card-label">Runs (session)</div>
-      <div class="card-value">{events.length}</div>
-      <div class="card-sub">{filteredEvents.length} shown · {$connected ? 'streaming live' : 'reconnecting…'}</div>
-    </div>
+    {#if demoMode}
+      <div class="card" data-tooltip="Demo memberships and private drafts expire automatically">
+        <div class="card-label">Protected session</div>
+        <div class="card-value">24h</div>
+        <div class="card-sub">Private drafts · hard usage limits</div>
+      </div>
+    {:else}
+      <div class="card" data-tooltip="Completed agent execution turns and workflow sessions since dashboard launch">
+        <div class="card-label">Runs (session)</div>
+        <div class="card-value">{events.length}</div>
+        <div class="card-sub">{filteredEvents.length} shown · {$connected ? 'streaming live' : 'reconnecting…'}</div>
+      </div>
+    {/if}
   </div>
 
-  {#if ops || opsError}
+  {#if !demoMode && (ops || opsError)}
     <div class="ops">
       <div class="ops-top">
         <div>
@@ -538,7 +583,7 @@
   {/if}
 
   <!-- Live event log -->
-  <div class="section">
+  {#if !demoMode}<div class="section">
     <div class="section-hdr">
       <span>Live Event Log</span>
       <span class="pill" class:pill-live={$connected}>{$connected ? '● Live' : '○ Reconnecting'}</span>
@@ -573,7 +618,7 @@
         {/each}
       {/if}
     </div>
-  </div>
+  </div>{/if}
 </div>
 
 <style>
@@ -593,6 +638,16 @@
   .card-label { color: #6b7294; font-size: 0.72rem; text-transform: uppercase; letter-spacing: .06em; margin-bottom: .4rem; }
   .card-value { font-size: 1.45rem; font-weight: 600; }
   .card-sub   { color: #6b7294; font-size: 0.75rem; margin-top: .2rem; }
+  .demo-welcome { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:1.1rem 1.25rem; border:1px solid rgba(108,99,255,.45); border-radius:12px; background:linear-gradient(120deg,rgba(108,99,255,.14),rgba(76,175,130,.08)); }
+  .demo-welcome h2 { margin:0; font-size:1.15rem; }
+  .demo-welcome p { margin:.45rem 0 0; color:#a4a9c8; max-width:850px; font-size:.82rem; line-height:1.5; }
+  .demo-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:.85rem; }
+  .demo-feature { display:flex; flex-direction:column; align-items:flex-start; gap:.45rem; min-height:155px; padding:1rem; color:#eef0ff; text-align:left; background:#141626; border:1px solid #252a4a; border-radius:11px; cursor:pointer; }
+  .demo-feature:hover { border-color:#6c63ff; transform:translateY(-1px); }
+  .demo-feature strong { font-size:.9rem; }
+  .demo-feature span:not(.demo-icon) { color:#8f96bb; font-size:.76rem; line-height:1.45; }
+  .demo-feature em { margin-top:auto; color:#9d96ff; font-size:.73rem; font-style:normal; font-weight:700; }
+  .demo-icon { font-size:1.2rem; }
 
   .btn-primary {
     background: #6c63ff; color: white; border: 0; border-radius: 8px;

@@ -31,14 +31,14 @@ export const navGroups = [
 export const navPages = [
   { id: 'dashboard', icon: '◈', label: 'Dashboard',   group: 'main'         },
   { id: 'onboarding', icon: '✓', label: 'First Run',   group: 'main'         },
-  { id: 'studio',    icon: '🎬', label: 'Studio',      group: 'main', requires: ['builder', 'write'] },
-  { id: 'agents',    icon: '⊕', label: 'Deployed',    group: 'main'         },
+  { id: 'studio',    icon: '🎬', label: 'Studio',      group: 'main', requires: ['studio', 'write'] },
+  { id: 'agents',    icon: '⊕', label: 'Deployed',    group: 'main', requires: ['agents', 'read'] },
   { id: 'templates', icon: '📋', label: 'Templates',   group: 'main'         },
-  { id: 'chat',      icon: '◎', label: 'Chat',        group: 'main'         },
+  { id: 'chat',      icon: '◎', label: 'Chat',        group: 'main', requires: ['chat', 'read'] },
   { id: 'memory',    icon: '🧠', label: 'Learning',    group: 'capabilities', requires: ['memory', 'read'] },
   { id: 'knowledge', icon: '📚', label: 'Knowledge',   group: 'capabilities', requires: ['knowledge', 'read'] },
-  { id: 'queues',    icon: '☷', label: 'Queues',      group: 'capabilities' },
-  { id: 'workboard', icon: '▦', label: 'Workboard',   group: 'capabilities' },
+  { id: 'queues',    icon: '☷', label: 'Queues',      group: 'capabilities', demoUnavailable: true },
+  { id: 'workboard', icon: '▦', label: 'Workboard',   group: 'capabilities', demoUnavailable: true },
   { id: 'channels',  icon: '📡', label: 'Delivery',    group: 'integrations', requires: ['channels', 'read'] },
   { id: 'schedule',  icon: '⏱', label: 'Automations', group: 'integrations', requires: ['schedule', 'read'] },
   { id: 'skills',    icon: '🧩', label: 'Skills',      group: 'integrations', requires: ['skills', 'read'] },
@@ -47,12 +47,12 @@ export const navPages = [
   { id: 'pluginmgr', icon: '🧱', label: 'Plugins',     group: 'integrations', requires: ['plugins', 'read'] },
   { id: 'providers', icon: '⚙', label: 'Providers',   group: 'integrations', requires: ['providers', 'read'] },
   { id: 'secrets',   icon: '🔑', label: 'Secrets',     group: 'integrations', requires: ['secrets', 'list'] },
-  { id: 'activity',  icon: '📈', label: 'Runs',        group: 'system'       },
-  { id: 'browser',   icon: '🕸', label: 'Browser',     group: 'system'       },
+  { id: 'activity',  icon: '📈', label: 'Runs',        group: 'system', demoUnavailable: true },
+  { id: 'browser',   icon: '🕸', label: 'Browser',     group: 'system', demoUnavailable: true },
   { id: 'config',    icon: '≡', label: 'Config',      group: 'system',       requires: ['config', 'read'] },
-  { id: 'mobile',    icon: '▣', label: 'Mobile',      group: 'system'       },
+  { id: 'mobile',    icon: '▣', label: 'Mobile',      group: 'system', demoUnavailable: true },
   { id: 'logs',      icon: '📋', label: 'Logs',        group: 'system',       personalOnly: true },
-  { id: 'members',   icon: '👥', label: 'Members',     group: 'system', multiUserOnly: true },
+  { id: 'members',   icon: '👥', label: 'Members',     group: 'system', requires: ['rbac', 'read'], multiUserOnly: true },
   { id: 'workspace-admin', icon: '🛡', label: 'Workspace settings', group: 'system', ownerOnly: true, multiUserOnly: true },
 ]
 
@@ -67,11 +67,13 @@ export const navIds = navPages.map((p) => p.id)
  */
 export function visibleNavPages(allow, pages = navPages, options = {}) {
   const multiUser = ['team', 'scale'].includes(String(options.deploymentMode || '').toLowerCase())
+  const role = String(options.role || '').toLowerCase()
   return pages
     .filter((p) => {
+      if (role === 'demo_developer' && p.demoUnavailable) return false
       if (!multiUser && p.multiUserOnly) return false
       if (multiUser && p.personalOnly) return false
-      if (p.ownerOnly && String(options.role || '').toLowerCase() !== 'owner') return false
+      if (p.ownerOnly && role !== 'owner') return false
       return typeof allow !== 'function' || !p.requires || allow(p.requires[0], p.requires[1])
     })
     .map((p) => multiUser && p.id === 'providers'

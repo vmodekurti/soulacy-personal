@@ -33,15 +33,16 @@ import "sort"
 // ---------------------------------------------------------------------------
 
 const (
-	RoleOwner     = "owner"
-	RoleAdmin     = "admin"
-	RoleDeveloper = "developer"
-	RoleOperator  = "operator"
-	RoleViewer    = "viewer"
+	RoleOwner         = "owner"
+	RoleAdmin         = "admin"
+	RoleDeveloper     = "developer"
+	RoleOperator      = "operator"
+	RoleViewer        = "viewer"
+	RoleDemoDeveloper = "demo_developer"
 )
 
 // KnownRoles lists every role the system recognises.
-var KnownRoles = []string{RoleOwner, RoleAdmin, RoleDeveloper, RoleOperator, RoleViewer}
+var KnownRoles = []string{RoleOwner, RoleAdmin, RoleDeveloper, RoleOperator, RoleViewer, RoleDemoDeveloper}
 
 // IsKnownRole returns true if role is one of the three system roles.
 func IsKnownRole(role string) bool {
@@ -58,16 +59,20 @@ func IsKnownRole(role string) bool {
 // ---------------------------------------------------------------------------
 
 const (
-	ResourceAgents      = "agents"
-	ResourceChat        = "chat"
-	ResourceMemory      = "memory"
-	ResourceChannels    = "channels"
-	ResourceProviders   = "providers"
-	ResourceSkills      = "skills"
-	ResourceMCP         = "mcp"
-	ResourcePlugins     = "plugins"
-	ResourceKnowledge   = "knowledge"
-	ResourceBuilder     = "builder"
+	ResourceAgents    = "agents"
+	ResourceChat      = "chat"
+	ResourceMemory    = "memory"
+	ResourceChannels  = "channels"
+	ResourceProviders = "providers"
+	ResourceSkills    = "skills"
+	ResourceMCP       = "mcp"
+	ResourcePlugins   = "plugins"
+	ResourceKnowledge = "knowledge"
+	ResourceBuilder   = "builder"
+	// ResourceStudio is interactive draft authoring. It is separate from the
+	// legacy Builder resource because Builder also owns deployment endpoints;
+	// a public demo may author drafts but must never inherit builder.deploy.
+	ResourceStudio      = "studio"
 	ResourceTemplates   = "templates"
 	ResourceConfig      = "config"
 	ResourceLogs        = "logs"
@@ -147,6 +152,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 		ResourcePlugins:     {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionInstall: true},
 		ResourceKnowledge:   {ActionRead: true, ActionWrite: true, ActionDelete: true},
 		ResourceBuilder:     {ActionRead: true, ActionWrite: true},
+		ResourceStudio:      {ActionRead: true, ActionWrite: true},
 		ResourceTemplates:   {ActionRead: true, ActionWrite: true, ActionDelete: true},
 		ResourceConfig:      {ActionRead: true, ActionWrite: true},
 		ResourceLogs:        {ActionRead: true},
@@ -169,6 +175,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 		ResourcePlugins:     {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionInstall: true},
 		ResourceKnowledge:   {ActionRead: true, ActionWrite: true, ActionDelete: true},
 		ResourceBuilder:     {ActionWrite: true},
+		ResourceStudio:      {ActionRead: true, ActionWrite: true},
 		ResourceTemplates:   {ActionRead: true, ActionWrite: true},
 		ResourceConfig:      {ActionRead: true, ActionWrite: true},
 		ResourceLogs:        {ActionRead: true},
@@ -193,6 +200,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 		ResourcePlugins:     {ActionRead: true},
 		ResourceKnowledge:   {ActionRead: true, ActionWrite: true, ActionDelete: true},
 		ResourceBuilder:     {ActionRead: true, ActionWrite: true},
+		ResourceStudio:      {ActionRead: true, ActionWrite: true},
 		ResourceTemplates:   {ActionRead: true, ActionWrite: true},
 		ResourceConfig:      {},
 		ResourceLogs:        {ActionRead: true},
@@ -218,6 +226,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 		ResourcePlugins:     {ActionRead: true},
 		ResourceKnowledge:   {ActionRead: true, ActionWrite: true},
 		ResourceBuilder:     {},
+		ResourceStudio:      {},
 		ResourceTemplates:   {ActionRead: true},
 		ResourceConfig:      {ActionRead: true},
 		ResourceLogs:        {ActionRead: true},
@@ -240,9 +249,37 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 		ResourcePlugins:     {ActionRead: true},
 		ResourceKnowledge:   {ActionRead: true},
 		ResourceBuilder:     {},
+		ResourceStudio:      {},
 		ResourceTemplates:   {ActionRead: true},
 		ResourceConfig:      {},
 		ResourceLogs:        {ActionRead: true},
+		ResourceMetrics:     {},
+		ResourceSchedule:    {ActionRead: true},
+		ResourceRBAC:        {},
+		ResourceSecrets:     {},
+		ResourceCredentials: {},
+		ResourceTour:        {ActionRead: true},
+	},
+	RoleDemoDeveloper: {
+		// Public-demo users get a read-rich product tour plus private, expiring
+		// Studio authoring. Runtime middleware further limits chat to agents
+		// explicitly labelled for the public demo. No shared mutation authority
+		// is granted here: publishing, installs, credentials, schedules, channels,
+		// memory, operational telemetry, and workspace administration stay closed.
+		ResourceAgents:      {ActionRead: true},
+		ResourceChat:        {ActionRead: true, ActionChat: true},
+		ResourceMemory:      {},
+		ResourceChannels:    {ActionRead: true},
+		ResourceProviders:   {ActionRead: true},
+		ResourceSkills:      {ActionRead: true},
+		ResourceMCP:         {ActionRead: true},
+		ResourcePlugins:     {ActionRead: true},
+		ResourceKnowledge:   {ActionRead: true},
+		ResourceBuilder:     {},
+		ResourceStudio:      {ActionRead: true, ActionWrite: true},
+		ResourceTemplates:   {ActionRead: true},
+		ResourceConfig:      {},
+		ResourceLogs:        {},
 		ResourceMetrics:     {},
 		ResourceSchedule:    {ActionRead: true},
 		ResourceRBAC:        {},

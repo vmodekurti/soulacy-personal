@@ -221,7 +221,7 @@ func (s *PostgresStore) provisionTenant(ctx context.Context, mutation Mutation, 
 			return BootstrapResult{}, errors.New("signup email does not match the verified identity")
 		}
 		var alreadyMember bool
-		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM memberships WHERE user_id=$1)`, selfServiceSubject).Scan(&alreadyMember); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM memberships WHERE user_id=$1 AND status='active' AND (expires_at IS NULL OR expires_at>NOW()))`, selfServiceSubject).Scan(&alreadyMember); err != nil {
 			return BootstrapResult{}, err
 		}
 		if alreadyMember {

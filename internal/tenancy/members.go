@@ -10,11 +10,12 @@ import (
 )
 
 const (
-	RoleOwner     = "owner"
-	RoleAdmin     = "admin"
-	RoleDeveloper = "developer"
-	RoleOperator  = "operator"
-	RoleViewer    = "viewer"
+	RoleOwner         = "owner"
+	RoleAdmin         = "admin"
+	RoleDeveloper     = "developer"
+	RoleOperator      = "operator"
+	RoleViewer        = "viewer"
+	RoleDemoDeveloper = "demo_developer"
 )
 
 var (
@@ -42,6 +43,13 @@ type MemberManager interface {
 	PrimaryMembership(context.Context, string) (StoredMembership, bool)
 }
 
+// DemoMemberAdmitter is deliberately separate from MemberManager. Public-demo
+// admission is an optional deployment capability, not a requirement imposed
+// on personal-mode stores or lightweight membership readers used by tests.
+type DemoMemberAdmitter interface {
+	AdmitDemoMember(context.Context, string, string, time.Duration, int) (StoredMembership, error)
+}
+
 type MembershipAudit struct {
 	ID           string          `json:"id"`
 	ActorSubject string          `json:"actor_subject"`
@@ -56,6 +64,14 @@ type MembershipAudit struct {
 
 func IsMembershipRole(role string) bool { return roleRank(role) > 0 }
 
+// IsAssignableMembershipRole reports roles an owner/admin may place on an
+// invitation or membership. demo_developer is minted only by the verified
+// public-demo admission path; exposing it in ordinary role administration
+// would create non-expiring demo accounts and bypass the configured capacity.
+func IsAssignableMembershipRole(role string) bool {
+	return IsMembershipRole(role) && strings.ToLower(strings.TrimSpace(role)) != RoleDemoDeveloper
+}
+
 func CanAdministerRole(actorRole, targetRole string) bool {
 	actor, target := roleRank(actorRole), roleRank(targetRole)
 	return actor >= roleRank(RoleAdmin) && target > 0 && target <= actor
@@ -64,6 +80,8 @@ func CanAdministerRole(actorRole, targetRole string) bool {
 func roleRank(role string) int {
 	switch strings.ToLower(strings.TrimSpace(role)) {
 	case RoleViewer:
+		return 1
+	case RoleDemoDeveloper:
 		return 1
 	case RoleOperator:
 		return 2
@@ -98,7 +116,7 @@ func (s *PostgresStore) ListInvitations(ctx context.Context, workspaceID string)
 }
 
 func (s *PostgresStore) ListMembers(ctx context.Context, workspaceID string) ([]StoredMembership, error) {
-	rows, err := s.pool.Query(ctx, `SELECT m.id,m.organization_id,m.workspace_id,m.user_id,m.role,m.status,COALESCE(u.normalized_email,''),u.display_name
+	rows, err := s.pool.Query(ctx, `SELECT m.id,m.organization_id,m.workspace_id,m.user_id,m.role,m.status,COALESCE(u.normalized_email,''),u.display_name,m.admission_source,m.expires_at
 		FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.workspace_id=$1 AND m.status<>'deleted' ORDER BY m.created_at`, strings.TrimSpace(workspaceID))
 	if err != nil {
 		return nil, err
@@ -107,7 +125,7 @@ func (s *PostgresStore) ListMembers(ctx context.Context, workspaceID string) ([]
 	var out []StoredMembership
 	for rows.Next() {
 		var membership StoredMembership
-		if err := rows.Scan(&membership.ID, &membership.OrganizationID, &membership.WorkspaceID, &membership.UserID, &membership.Role, &membership.Status, &membership.Email, &membership.DisplayName); err != nil {
+		if err := rows.Scan(&membership.ID, &membership.OrganizationID, &membership.WorkspaceID, &membership.UserID, &membership.Role, &membership.Status, &membership.Email, &membership.DisplayName, &membership.AdmissionSource, &membership.ExpiresAt); err != nil {
 			return nil, err
 		}
 		out = append(out, membership)
@@ -154,8 +172,8 @@ func (s *PostgresStore) AcceptInvitation(ctx context.Context, mutation Mutation,
 	}
 
 	membership := StoredMembership{ID: newID("mem"), OrganizationID: invitation.OrganizationID, WorkspaceID: invitation.WorkspaceID, UserID: userID, Role: invitation.Role, Status: MembershipActive}
-	if err := scanMembership(tx.QueryRow(ctx, `INSERT INTO memberships(id,organization_id,workspace_id,user_id,role,status)
-		VALUES($1,$2,$3,$4,$5,'active') ON CONFLICT(workspace_id,user_id) DO UPDATE SET role=EXCLUDED.role,status='active',updated_at=NOW()
+	if err := scanMembership(tx.QueryRow(ctx, `INSERT INTO memberships(id,organization_id,workspace_id,user_id,role,status,admission_source,expires_at)
+		VALUES($1,$2,$3,$4,$5,'active','invitation',NULL) ON CONFLICT(workspace_id,user_id) DO UPDATE SET role=EXCLUDED.role,status='active',admission_source='invitation',expires_at=NULL,updated_at=NOW()
 		RETURNING id,organization_id,workspace_id,user_id,role,status`, membership.ID, membership.OrganizationID, membership.WorkspaceID, membership.UserID, membership.Role), &membership); err != nil {
 		return StoredMembership{}, err
 	}
@@ -170,9 +188,63 @@ func (s *PostgresStore) AcceptInvitation(ctx context.Context, mutation Mutation,
 	return membership, tx.Commit(ctx)
 }
 
+// AdmitDemoMember creates or refreshes a short-lived demo membership. It never
+// downgrades a managed/invited member and serializes capacity checks on the
+// workspace row so simultaneous first logins cannot overrun the demo ceiling.
+func (s *PostgresStore) AdmitDemoMember(ctx context.Context, userID, workspaceID string, ttl time.Duration, maxActive int) (StoredMembership, error) {
+	userID, workspaceID = strings.TrimSpace(userID), strings.TrimSpace(workspaceID)
+	if userID == "" || workspaceID == "" || ttl <= 0 || maxActive <= 0 {
+		return StoredMembership{}, errors.New("valid demo user, workspace, ttl, and capacity are required")
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return StoredMembership{}, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	var organizationID, workspaceStatus, organizationStatus string
+	if err := tx.QueryRow(ctx, `SELECT w.organization_id,w.status,o.status FROM workspaces w JOIN organizations o ON o.id=w.organization_id WHERE w.id=$1 FOR UPDATE`, workspaceID).Scan(&organizationID, &workspaceStatus, &organizationStatus); err != nil {
+		return StoredMembership{}, err
+	}
+	if workspaceStatus != WorkspaceActive || organizationStatus != WorkspaceActive {
+		return StoredMembership{}, ErrMembershipNotFound
+	}
+	var existing StoredMembership
+	var source string
+	var expiresAt *time.Time
+	err = tx.QueryRow(ctx, `SELECT id,organization_id,workspace_id,user_id,role,status,admission_source,expires_at FROM memberships WHERE workspace_id=$1 AND user_id=$2 FOR UPDATE`, workspaceID, userID).
+		Scan(&existing.ID, &existing.OrganizationID, &existing.WorkspaceID, &existing.UserID, &existing.Role, &existing.Status, &source, &expiresAt)
+	if err == nil && source != "demo" {
+		if existing.Status != MembershipActive {
+			return StoredMembership{}, ErrMembershipNotFound
+		}
+		return existing, tx.Commit(ctx)
+	}
+	var active int
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM memberships WHERE workspace_id=$1 AND admission_source='demo' AND status='active' AND expires_at>NOW() AND user_id<>$2`, workspaceID, userID).Scan(&active); err != nil {
+		return StoredMembership{}, err
+	}
+	if active >= maxActive {
+		return StoredMembership{}, errors.New("public demo is currently at capacity")
+	}
+	expires := time.Now().UTC().Add(ttl)
+	id := existing.ID
+	if id == "" {
+		id = newID("mem")
+	}
+	var out StoredMembership
+	if err := tx.QueryRow(ctx, `INSERT INTO memberships(id,organization_id,workspace_id,user_id,role,status,admission_source,expires_at,last_seen_at)
+		VALUES($1,$2,$3,$4,$5,'active','demo',$6,NOW())
+		ON CONFLICT(workspace_id,user_id) DO UPDATE SET role=$5,status='active',admission_source='demo',expires_at=$6,last_seen_at=NOW(),updated_at=NOW()
+		RETURNING id,organization_id,workspace_id,user_id,role,status,admission_source,expires_at`, id, organizationID, workspaceID, userID, RoleDemoDeveloper, expires).
+		Scan(&out.ID, &out.OrganizationID, &out.WorkspaceID, &out.UserID, &out.Role, &out.Status, &out.AdmissionSource, &out.ExpiresAt); err != nil {
+		return StoredMembership{}, err
+	}
+	return out, tx.Commit(ctx)
+}
+
 func (s *PostgresStore) SetMembershipRole(ctx context.Context, mutation Mutation, workspaceID, membershipID, actorRole, role string) (StoredMembership, error) {
 	role = strings.ToLower(strings.TrimSpace(role))
-	if !IsMembershipRole(role) {
+	if !IsAssignableMembershipRole(role) {
 		return StoredMembership{}, errors.New("unknown membership role")
 	}
 	return s.changeMembership(ctx, mutation, workspaceID, membershipID, actorRole, role, "", "membership.role")
@@ -284,7 +356,7 @@ func (s *PostgresStore) PrimaryMembership(ctx context.Context, userID string) (S
 	var m StoredMembership
 	err := s.pool.QueryRow(ctx, `SELECT m.id, m.organization_id, m.workspace_id, m.user_id, m.role, m.status
 		FROM memberships m JOIN workspaces w ON w.id=m.workspace_id JOIN organizations o ON o.id=m.organization_id
-		WHERE m.user_id=$1 AND m.status='active' AND w.status='active' AND o.status='active'
+		WHERE m.user_id=$1 AND m.status='active' AND (m.expires_at IS NULL OR m.expires_at>NOW()) AND w.status='active' AND o.status='active'
 		ORDER BY m.created_at ASC, m.id ASC LIMIT 1`, strings.TrimSpace(userID)).
 		Scan(&m.ID, &m.OrganizationID, &m.WorkspaceID, &m.UserID, &m.Role, &m.Status)
 	if err != nil {
@@ -300,7 +372,7 @@ func (s *PostgresStore) PrimaryMembership(ctx context.Context, userID string) (S
 func (s *PostgresStore) CanRefreshUser(ctx context.Context, userID string) bool {
 	var allowed bool
 	err := s.pool.QueryRow(ctx, `SELECT
-		EXISTS(SELECT 1 FROM memberships m JOIN workspaces w ON w.id=m.workspace_id JOIN organizations o ON o.id=m.organization_id WHERE m.user_id=$1 AND m.status='active' AND w.status='active' AND o.status='active') OR
+		EXISTS(SELECT 1 FROM memberships m JOIN workspaces w ON w.id=m.workspace_id JOIN organizations o ON o.id=m.organization_id WHERE m.user_id=$1 AND m.status='active' AND (m.expires_at IS NULL OR m.expires_at>NOW()) AND w.status='active' AND o.status='active') OR
 		EXISTS(SELECT 1 FROM invitations i JOIN users u ON u.normalized_email=i.normalized_email JOIN workspaces w ON w.id=i.workspace_id JOIN organizations o ON o.id=i.organization_id
 			WHERE u.id=$1 AND i.status='pending' AND i.expires_at>NOW() AND w.status='active' AND o.status='active')`, strings.TrimSpace(userID)).Scan(&allowed)
 	return err == nil && allowed

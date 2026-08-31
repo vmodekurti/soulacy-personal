@@ -71,6 +71,14 @@ multi-user deployment when the configured Redis counter cannot connect, and
 returns `503` if shared enforcement becomes unavailable at runtime. It never
 silently falls back to a per-replica memory counter.
 
+## Public demo workspace
+
+A showcase deployment can admit any verified Google/OIDC user to one named
+workspace without an invitation. This is intentionally different from signup:
+it creates no organization and grants no permanent membership. See
+[Public Demo Workspace](public-demo.md) for the constrained Studio role,
+expiry, model/tool allowlists, and required quota configuration.
+
 ## Authentication flow
 
 Requests are authenticated in this order:

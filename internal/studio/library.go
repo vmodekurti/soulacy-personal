@@ -29,6 +29,9 @@ type StoredDraft struct {
 	Workflow Draft  `json:"workflow"`
 	// Updated is the RFC3339 timestamp of the last save.
 	Updated string `json:"updated"`
+	// Expires is empty for normal workspaces. Public-demo drafts carry an
+	// absolute expiry so cleanup remains correct across gateway restarts.
+	Expires string `json:"expires,omitempty"`
 }
 
 // DraftMeta is the lightweight listing shape: enough to populate a library
@@ -37,6 +40,7 @@ type DraftMeta struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
 	Updated string `json:"updated"`
+	Expires string `json:"expires,omitempty"`
 }
 
 // draftFileExt is the on-disk extension for a stored draft.
@@ -47,6 +51,11 @@ const draftFileExt = ".json"
 // name+workflow again overwrites the same file (idempotent). root is created if
 // missing. An empty name is rejected (the slug would be empty).
 func SaveDraft(root, name string, workflow Draft) (string, error) {
+	return SaveDraftUntil(root, name, workflow, time.Time{})
+}
+
+// SaveDraftUntil is SaveDraft with an optional absolute expiry.
+func SaveDraftUntil(root, name string, workflow Draft, expires time.Time) (string, error) {
 	if strings.TrimSpace(root) == "" {
 		return "", fmt.Errorf("studio: drafts root is required")
 	}
@@ -69,6 +78,9 @@ func SaveDraft(root, name string, workflow Draft) (string, error) {
 		Name:     trimmed,
 		Workflow: workflow,
 		Updated:  time.Now().UTC().Format(time.RFC3339),
+	}
+	if !expires.IsZero() {
+		stored.Expires = expires.UTC().Format(time.RFC3339)
 	}
 	data, err := json.MarshalIndent(stored, "", "  ")
 	if err != nil {
@@ -129,7 +141,11 @@ func ListDrafts(root string) ([]DraftMeta, error) {
 		if err := json.Unmarshal(data, &sd); err != nil {
 			continue
 		}
-		out = append(out, DraftMeta{ID: sd.ID, Name: sd.Name, Updated: sd.Updated})
+		if draftExpired(sd, time.Now().UTC()) {
+			_ = os.Remove(filepath.Join(root, e.Name()))
+			continue
+		}
+		out = append(out, DraftMeta{ID: sd.ID, Name: sd.Name, Updated: sd.Updated, Expires: sd.Expires})
 	}
 
 	sort.Slice(out, func(i, j int) bool {
@@ -159,7 +175,19 @@ func LoadDraft(root, id string) (StoredDraft, error) {
 	if err := json.Unmarshal(data, &sd); err != nil {
 		return StoredDraft{}, fmt.Errorf("studio: parse stored draft %q: %w", id, err)
 	}
+	if draftExpired(sd, time.Now().UTC()) {
+		_ = os.Remove(path)
+		return StoredDraft{}, fmt.Errorf("studio: draft %q expired", id)
+	}
 	return sd, nil
+}
+
+func draftExpired(sd StoredDraft, now time.Time) bool {
+	if strings.TrimSpace(sd.Expires) == "" {
+		return false
+	}
+	expires, err := time.Parse(time.RFC3339, sd.Expires)
+	return err != nil || !expires.After(now)
 }
 
 // DeleteDraft removes one stored draft by id. Deleting a missing draft returns

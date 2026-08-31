@@ -93,14 +93,16 @@ type Credential struct {
 }
 
 type StoredMembership struct {
-	ID             string `json:"id"`
-	OrganizationID string `json:"organization_id"`
-	WorkspaceID    string `json:"workspace_id"`
-	UserID         string `json:"user_id"`
-	Role           string `json:"role"`
-	Status         string `json:"status"`
-	Email          string `json:"email,omitempty"`
-	DisplayName    string `json:"display_name,omitempty"`
+	ID              string     `json:"id"`
+	OrganizationID  string     `json:"organization_id"`
+	WorkspaceID     string     `json:"workspace_id"`
+	UserID          string     `json:"user_id"`
+	Role            string     `json:"role"`
+	Status          string     `json:"status"`
+	Email           string     `json:"email,omitempty"`
+	DisplayName     string     `json:"display_name,omitempty"`
+	AdmissionSource string     `json:"admission_source,omitempty"`
+	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
 }
 
 // PostgresStore is the durable Team/Scale identity catalog and implements the
@@ -330,7 +332,7 @@ func (s *PostgresStore) CreateIdentity(ctx context.Context, mutation Mutation, u
 
 func (s *PostgresStore) CreateInvitation(ctx context.Context, mutation Mutation, organizationID, workspaceID, actorRole, email, role string, expiresAt time.Time) (Invitation, error) {
 	invitation := Invitation{ID: newID("inv"), OrganizationID: strings.TrimSpace(organizationID), WorkspaceID: strings.TrimSpace(workspaceID), Email: normalizeEmail(email), Role: strings.ToLower(strings.TrimSpace(role)), Status: "pending", ExpiresAt: expiresAt.UTC()}
-	if invitation.OrganizationID == "" || invitation.WorkspaceID == "" || invitation.Email == "" || !IsMembershipRole(invitation.Role) || expiresAt.IsZero() || !invitation.ExpiresAt.After(time.Now().UTC()) {
+	if invitation.OrganizationID == "" || invitation.WorkspaceID == "" || invitation.Email == "" || !IsAssignableMembershipRole(invitation.Role) || expiresAt.IsZero() || !invitation.ExpiresAt.After(time.Now().UTC()) {
 		return Invitation{}, errors.New("organization, workspace, email, role, and expiry are required")
 	}
 	if !CanAdministerRole(actorRole, invitation.Role) {
@@ -373,7 +375,7 @@ func (s *PostgresStore) CreateServiceAccount(ctx context.Context, mutation Mutat
 // can only reference bindings created here; a token cannot create a grant.
 func (s *PostgresStore) BindServiceAccountWorkspace(ctx context.Context, mutation Mutation, serviceAccountID, organizationID, workspaceID, role string) error {
 	serviceAccountID, organizationID, workspaceID, role = strings.TrimSpace(serviceAccountID), strings.TrimSpace(organizationID), strings.TrimSpace(workspaceID), strings.ToLower(strings.TrimSpace(role))
-	if serviceAccountID == "" || organizationID == "" || workspaceID == "" || !IsMembershipRole(role) {
+	if serviceAccountID == "" || organizationID == "" || workspaceID == "" || !IsAssignableMembershipRole(role) {
 		return errors.New("service account, organization, workspace, and role are required")
 	}
 	after := map[string]string{"service_account_id": serviceAccountID, "organization_id": organizationID, "workspace_id": workspaceID, "role": role, "status": MembershipActive}
@@ -430,7 +432,8 @@ SELECT c.id, COALESCE(c.user_id,''), COALESCE(c.service_account_id,''), c.scopes
 FROM credentials c
 WHERE (c.user_id IS NOT NULL AND EXISTS (
         SELECT 1 FROM memberships m
-        WHERE m.user_id = c.user_id AND m.workspace_id = $1 AND m.status = 'active'))
+        WHERE m.user_id = c.user_id AND m.workspace_id = $1 AND m.status = 'active'
+          AND (m.expires_at IS NULL OR m.expires_at > NOW())))
    OR (c.service_account_id IS NOT NULL AND EXISTS (
         SELECT 1 FROM service_account_workspaces saw
         WHERE saw.service_account_id = c.service_account_id AND saw.workspace_id = $1 AND saw.status = 'active'))
@@ -501,7 +504,7 @@ func (s *PostgresStore) ResolveMembership(ctx context.Context, subject, requeste
 		JOIN workspaces w ON w.id=m.workspace_id
 		JOIN organizations o ON o.id=m.organization_id
 		LEFT JOIN identities i ON i.user_id=m.user_id AND i.status='active'
-		WHERE m.workspace_id=$1 AND m.status='active' AND (m.user_id=$2 OR i.external_subject=$2)
+		WHERE m.workspace_id=$1 AND m.status='active' AND (m.expires_at IS NULL OR m.expires_at>NOW()) AND (m.user_id=$2 OR i.external_subject=$2)
 		LIMIT 1`, requestedWorkspaceID, subject)
 	var m Membership
 	if err := row.Scan(&m.OrganizationID, &m.WorkspaceID, &m.MembershipID, &m.UserID, &m.Role, &m.WorkspaceStatus); err != nil {
@@ -744,6 +747,10 @@ var postgresSchema = []string{
 		user_id TEXT NOT NULL REFERENCES users(id), role TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','suspended','deleted')),
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		UNIQUE(workspace_id,user_id), FOREIGN KEY(workspace_id,organization_id) REFERENCES workspaces(id,organization_id))`,
+	`ALTER TABLE memberships ADD COLUMN IF NOT EXISTS admission_source TEXT NOT NULL DEFAULT 'managed'`,
+	`ALTER TABLE memberships ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ`,
+	`ALTER TABLE memberships ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ`,
+	`CREATE INDEX IF NOT EXISTS memberships_demo_expiry ON memberships(workspace_id,expires_at) WHERE admission_source='demo' AND status='active'`,
 	`CREATE TABLE IF NOT EXISTS invitations(
 		id TEXT PRIMARY KEY CHECK (id ~ '^inv_[a-f0-9]{32}$'), organization_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
 		normalized_email TEXT NOT NULL CHECK(normalized_email=LOWER(BTRIM(normalized_email))), role TEXT NOT NULL,
@@ -809,7 +816,7 @@ func (s *PostgresStore) ListSubjectWorkspaces(ctx context.Context, subject strin
 		  JOIN organizations o ON o.id=m.organization_id
 		  JOIN workspaces w ON w.id=m.workspace_id
 		  LEFT JOIN identities i ON i.user_id=m.user_id AND i.status='active'
-		 WHERE m.status='active' AND (m.user_id=$1 OR i.external_subject=$1)
+		 WHERE m.status='active' AND (m.expires_at IS NULL OR m.expires_at>NOW()) AND (m.user_id=$1 OR i.external_subject=$1)
 		UNION
 		SELECT b.organization_id, o.name, b.workspace_id, w.name, b.service_account_id, b.role, 'service_account',COALESCE(o.logo_data_url,''),COALESCE(w.logo_data_url,'')
 		  FROM service_account_workspaces b
@@ -848,7 +855,7 @@ func (s *PostgresStore) PlatformOverview(ctx context.Context) (PlatformOverview,
 		(SELECT COUNT(*) FROM workspaces w JOIN organizations o ON o.id=w.organization_id WHERE w.status='suspended' OR (w.status='active' AND o.status='suspended')),
 		(SELECT COUNT(*) FROM workspaces WHERE status='deleting'),
 		(SELECT COUNT(*) FROM users),
-		(SELECT COUNT(*) FROM memberships WHERE status='active'),
+		(SELECT COUNT(*) FROM memberships WHERE status='active' AND (expires_at IS NULL OR expires_at>NOW())),
 		(SELECT COUNT(*) FROM invitations WHERE status='pending' AND expires_at > NOW())`).Scan(
 		&out.Organizations, &out.SuspendedOrganizations, &out.Workspaces, &out.ActiveWorkspaces, &out.SuspendedWorkspaces,
 		&out.DeletingWorkspaces, &out.Users, &out.ActiveMemberships,
@@ -862,7 +869,7 @@ func (s *PostgresStore) PlatformOverview(ctx context.Context) (PlatformOverview,
 func (s *PostgresStore) ListPlatformOrganizations(ctx context.Context) ([]PlatformOrganization, error) {
 	rows, err := s.pool.Query(ctx, `SELECT o.id,o.name,o.status,o.created_at,COALESCE(o.logo_data_url,''),
 		w.id,w.slug,w.name,w.status,w.created_at,COALESCE(w.logo_data_url,''),COALESCE(w.identity_status,'active'),COALESCE(p.provider_type,''),
-		(SELECT COUNT(*) FROM memberships m WHERE m.workspace_id=w.id AND m.status='active'),
+		(SELECT COUNT(*) FROM memberships m WHERE m.workspace_id=w.id AND m.status='active' AND (m.expires_at IS NULL OR m.expires_at>NOW())),
 		(SELECT COUNT(*) FROM invitations i WHERE i.workspace_id=w.id AND i.status='pending' AND i.expires_at > NOW())
 		FROM organizations o
 		LEFT JOIN workspaces w ON w.organization_id=o.id

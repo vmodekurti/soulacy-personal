@@ -106,6 +106,32 @@ func TestValidate_ScaleRequirements(t *testing.T) {
 	}
 }
 
+func TestValidate_PublicDemoRequiresBoundedOIDCWorkspace(t *testing.T) {
+	c := validTeamConfig()
+	c.Auth.OIDCIssuer = "https://accounts.google.com"
+	c.Auth.OIDCClientID = "demo-client"
+	c.PublicDemo = PublicDemoConfig{
+		Enabled:          true,
+		WorkspaceID:      "wrk_demo",
+		MembershipTTL:    "24h",
+		DraftTTL:         "12h",
+		MaxActiveMembers: 25,
+		AllowedProviders: []string{"nvidia"},
+		AllowedModels:    []string{"meta/llama-3.3-70b-instruct"},
+		AllowedTools:     []string{"web_search"},
+	}
+	c.RateLimit.PerUserTokensDay = 100000
+	c.Costs.EnforcementMode = "hard"
+	if err := c.Validate(); err != nil {
+		t.Fatalf("bounded public demo rejected: %v", err)
+	}
+
+	c.RateLimit.Backend = "memory"
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "Redis-backed") {
+		t.Fatalf("unsafe public demo should require distributed quotas: %v", err)
+	}
+}
+
 func TestValidate_UnsafeDeploymentAcknowledgementAllowsStartup(t *testing.T) {
 	c := validTeamConfig()
 	c.Storage.Backend = "sqlite"

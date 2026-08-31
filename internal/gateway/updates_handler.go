@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"os"
 	"sync"
 	"time"
 
@@ -112,10 +111,7 @@ func (s *Server) handleTriggerUpgrade(c *fiber.Ctx) error {
 		})
 	}
 
-	go func() {
-		time.Sleep(250 * time.Millisecond)
-		os.Exit(0)
-	}()
+	exitAfterRestart()
 
 	return c.JSON(fiber.Map{
 		"ok":      true,

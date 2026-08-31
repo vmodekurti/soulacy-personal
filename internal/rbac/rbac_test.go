@@ -23,7 +23,7 @@ func TestDefaultPolicyMatrix(t *testing.T) {
 		ResourceAgents, ResourceChat, ResourceMemory, ResourceChannels, ResourceProviders,
 		ResourceSkills, ResourceMCP, ResourceKnowledge, ResourceBuilder, ResourceTemplates,
 		ResourceConfig, ResourceLogs, ResourceMetrics, ResourceSchedule, ResourceRBAC,
-		ResourceSecrets, ResourceCredentials, ResourceTour,
+		ResourceSecrets, ResourceCredentials, ResourceTour, ResourceStudio, ResourcePlugins,
 	}
 	actions := []string{ActionRead, ActionWrite, ActionDelete, ActionChat, ActionEnable, ActionList, ActionSet, ActionRotate, ActionReveal}
 	for _, role := range KnownRoles {
@@ -95,6 +95,31 @@ func TestHasPermissionViewerCanOnlyRead(t *testing.T) {
 	}
 	if HasPermission(RoleViewer, ResourceConfig, ActionRead) {
 		t.Error("viewer should not be allowed to read config")
+	}
+}
+
+func TestDemoDeveloperCanAuthorButCannotPublishOrAdminister(t *testing.T) {
+	for _, permission := range [][2]string{
+		{ResourceStudio, ActionRead}, {ResourceStudio, ActionWrite},
+		{ResourceAgents, ActionRead}, {ResourceChat, ActionRead}, {ResourceChat, ActionChat},
+		{ResourceChannels, ActionRead}, {ResourceProviders, ActionRead}, {ResourceTemplates, ActionRead},
+		{ResourceSkills, ActionRead}, {ResourceMCP, ActionRead}, {ResourcePlugins, ActionRead},
+		{ResourceKnowledge, ActionRead}, {ResourceSchedule, ActionRead},
+	} {
+		if !HasPermission(RoleDemoDeveloper, permission[0], permission[1]) {
+			t.Errorf("demo developer missing %s:%s", permission[0], permission[1])
+		}
+	}
+	for _, permission := range [][2]string{
+		{ResourceAgents, ActionWrite}, {ResourceAgents, ActionEnable}, {ResourceAgents, ActionDelete},
+		{ResourceBuilder, ActionWrite}, {ResourceChannels, ActionWrite}, {ResourceMCP, ActionWrite},
+		{ResourceSkills, ActionWrite}, {ResourceKnowledge, ActionWrite}, {ResourceSecrets, ActionSet},
+		{ResourceSchedule, ActionWrite}, {ResourceMemory, ActionRead}, {ResourceMetrics, ActionRead},
+		{ResourceConfig, ActionRead}, {ResourceRBAC, ActionRead},
+	} {
+		if HasPermission(RoleDemoDeveloper, permission[0], permission[1]) {
+			t.Errorf("demo developer unexpectedly has %s:%s", permission[0], permission[1])
+		}
 	}
 }
 
@@ -1093,7 +1118,7 @@ func TestIsKnownRoleViewer(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestKnownRolesContainsEveryWorkspaceRole(t *testing.T) {
-	want := map[string]bool{RoleOwner: false, RoleAdmin: false, RoleDeveloper: false, RoleOperator: false, RoleViewer: false}
+	want := map[string]bool{RoleOwner: false, RoleAdmin: false, RoleDeveloper: false, RoleOperator: false, RoleViewer: false, RoleDemoDeveloper: false}
 	for _, r := range KnownRoles {
 		if _, ok := want[r]; !ok {
 			t.Errorf("unexpected role in KnownRoles: %q", r)
