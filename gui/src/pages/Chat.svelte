@@ -2705,8 +2705,8 @@
         on:keydown={onKeydown}
         on:input={onComposerInput}
         on:blur={() => setTimeout(() => skillQuery = null, 120)}
-        placeholder={canPrompt ? `Message ${activeThread?.agentId ? agentName(activeThread.agentId) : 'the agent'}…  (Enter to send, / for skills)` : 'Viewer access is read-only'}
-        rows="2"
+        placeholder={canPrompt ? (mobileViewport ? `Message ${activeThread?.agentId ? agentName(activeThread.agentId) : 'agent'}…` : `Message ${activeThread?.agentId ? agentName(activeThread.agentId) : 'the agent'}…  (Enter to send, / for skills)`) : 'Viewer access is read-only'}
+        rows={mobileViewport ? 1 : 2}
         disabled={!canPrompt || isSending || !activeThread?.agentId}
       ></textarea>
       <button class="composer-voice" on:click={() => { if (voiceState === 'live' || sidecarProcessing || voicePlaybackState !== 'idle') voiceSessionOpen = true; else voiceClick() }} disabled={!canPrompt || isSending} title="Start a voice conversation" aria-label="Start a voice conversation">🎤</button>
@@ -4009,26 +4009,45 @@
 
   /* Responsive — narrow / mobile */
   @media (max-width: 720px) {
-    .modern-chat { padding: 0; gap: 0; }
-    .modern-chat .page-header { min-height: 52px; padding: 0 .55rem; flex-direction: row; flex-wrap: nowrap; align-items: center; }
+    .modern-chat { padding: 0; gap: 0; width: 100%; min-width: 0; min-height: 0; overflow: hidden; }
+    .modern-chat .page-header {
+      min-height: 58px; padding: .4rem max(.55rem, env(safe-area-inset-right)) .4rem max(.55rem, env(safe-area-inset-left));
+      flex-direction: row; flex-wrap: nowrap; align-items: center; gap: .35rem;
+      background: rgba(9,15,32,.94); box-shadow: 0 8px 24px rgba(2,5,14,.18);
+      backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+    }
     .chat-brand { min-width: auto; }
     .chat-brand > div, .primary-controls :global(.run-metrics), .new-chat-btn, .header-tour, .agent-picker .agent-presence, .top-search { display: none; }
-    .chat-list-toggle, .top-icon, .modern-chat .voice-btn { width: 42px; height: 42px; flex: 0 0 42px; }
-    .primary-controls { flex: 1; min-width: 0; justify-content: flex-end; gap: .3rem; }
-    .agent-picker { min-width: 0; max-width: 190px; height: 42px; flex: 1; }
+    .chat-list-toggle, .top-icon, .modern-chat .voice-btn { width: 44px; height: 44px; flex: 0 0 44px; border-radius: 12px; }
+    .primary-controls { flex: 1; min-width: 0; justify-content: flex-end; gap: .25rem; }
+    .agent-picker { min-width: 0; max-width: none; height: 44px; flex: 1; border: 0; background: transparent; }
     .agent-picker select { font-size: 16px; }
-    .modern-chat .chat-body { position: relative; }
+    .modern-chat .chat-body, .modern-chat .chat-main, .modern-chat .chat-workspace, .modern-chat .chat-wrap { position: relative; min-width: 0; max-width: 100%; overflow-x: hidden; }
     .chat-sidebar-backdrop { display: block; position: absolute; z-index: 29; inset: 0; width: 100%; border: 0; border-radius: 0; background: rgba(3,7,17,.62); backdrop-filter: blur(2px); }
-    .modern-chat .chat-sidebar { position: absolute; z-index: 30; top: 0; bottom: 0; left: 0; width: min(320px, 88vw); padding: .85rem; box-shadow: 18px 0 48px rgba(0,0,0,.45); }
-    .modern-chat .msg-row { width: 100%; padding: 0 .65rem; }
-    .modern-chat .messages { padding: 1rem 0 .55rem; gap: .8rem; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
-    .modern-chat .msg-row.user .bubble { max-width: 92%; }
-    .modern-chat .msg-row:not(.user):not(.sys) .bubble { max-width: 100%; padding: .85rem .8rem; }
-    .modern-chat .btext { font-size: .94rem; line-height: 1.58; }
+    .modern-chat .chat-sidebar { position: absolute; z-index: 30; top: 0; bottom: 0; left: 0; width: min(360px, 94vw); padding: 1rem; box-shadow: 18px 0 48px rgba(0,0,0,.45); }
+    .modern-chat .msg-row { width: 100%; min-width: 0; padding: 0 1rem; }
+    .modern-chat .messages { padding: 1rem 0 .45rem; gap: 1rem; overflow-x: hidden; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; scroll-padding-bottom: 84px; }
+    .modern-chat .msg-row.user .bubble { max-width: 88%; padding: .7rem .9rem; border-radius: 18px 18px 5px 18px; }
+    .modern-chat .msg-row:not(.user):not(.sys) .bubble { max-width: 100%; padding: .25rem 0 .65rem; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+    .modern-chat .msg-row.sys .bubble { width: 100%; max-width: 100%; padding: .8rem .9rem; border-radius: 14px; }
+    .modern-chat .btext { min-width: 0; max-width: 100%; overflow-wrap: anywhere; font-size: .96rem; line-height: 1.58; }
+    .modern-chat :global(.markdown-body) { min-width: 0; max-width: 100%; overflow-x: hidden; }
+    .modern-chat :global(.markdown-body table) {
+      display: block; width: 100%; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain;
+      border: 1px solid #263250; border-radius: 12px; background: #121b30;
+      -webkit-overflow-scrolling: touch;
+    }
+    .modern-chat :global(.markdown-body th), .modern-chat :global(.markdown-body td) { min-width: 132px; padding: .65rem .7rem; vertical-align: top; }
+    .modern-chat :global(.markdown-body th:first-child), .modern-chat :global(.markdown-body td:first-child) { min-width: 86px; }
+    .modern-chat .msg-actions { display: none; }
     .modern-chat .pending-attachments { width: calc(100% - 1rem); }
-    .modern-chat .input-row { width: auto; min-height: 56px; margin: .35rem .5rem .45rem; padding: .4rem; gap: .35rem; border-radius: 14px; }
-    .modern-chat .input-row textarea { min-width: 0; min-height: 44px; max-height: 124px; padding: .65rem .25rem; font-size: 16px; }
+    .modern-chat .input-row {
+      width: auto; min-height: 58px; margin: .35rem .65rem .55rem; padding: .38rem; gap: .35rem; border-radius: 20px;
+      background: rgba(25,35,59,.96); box-shadow: 0 10px 30px rgba(1,4,12,.28); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    }
+    .modern-chat .input-row textarea { min-width: 0; min-height: 44px; max-height: 124px; padding: .7rem .3rem; font-size: 16px; line-height: 1.35; }
     .modern-chat .attach-btn, .modern-chat .send-btn { width: 44px; height: 44px; flex: 0 0 44px; padding: 0; }
+    .modern-chat .attach-btn { border-radius: 14px; }
     .composer-voice, .saved-prompts-btn { display: none; }
     .skill-pop { position: fixed; left: .5rem; right: .5rem; bottom: calc(64px + env(safe-area-inset-bottom)); max-height: min(46vh, 340px); }
     .modern-chat > .banner, .modern-chat > .chat-status-panel, .modern-chat > .controls-panel { margin: .5rem .5rem 0; }
