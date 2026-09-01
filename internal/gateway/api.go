@@ -4733,6 +4733,58 @@ func (s *Server) handleGetSkill(c *fiber.Ctx) error {
 //  5. Write to ~/.soulacy/skills/<slug>/SKILL.md.
 //  6. Hot-rescan via the Scan() method on the loader (if available).
 var githubBlobRe = regexp.MustCompile(`href="(https://github\.com/[^/]+/[^/]+/blob/[^/"]+/[^"]+/SKILL\.md)"`)
+var githubTreeSkillRe = regexp.MustCompile(`href="(https://github\.com/[^/]+/[^/]+/tree/[^/"]+/[^"]+)"`)
+
+func (s *Server) writableSkillsDir(c *fiber.Ctx) (string, error) {
+	if s.skillStores != nil {
+		return s.skillStores.EnsureDir(s.requestWorkspace(c))
+	}
+	wsPaths, err := config.ResolveWorkspace()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(wsPaths.Skills, 0o755); err != nil {
+		return "", err
+	}
+	return wsPaths.Skills, nil
+}
+
+func (s *Server) rescanRequestSkills(c *fiber.Ctx) []error {
+	if s.skillStores != nil {
+		return s.skillStores.Rescan(s.requestWorkspace(c))
+	}
+	if scanner, ok := s.skillCatalog(c).(interface{ Scan() []error }); ok {
+		return scanner.Scan()
+	}
+	return nil
+}
+
+// agenticSkillRawURLs returns the immutable source advertised by the page
+// first, followed by the current branch source. AgenticSkills pages can retain
+// a blob link after an upstream force-push; falling back to the visible tree
+// link keeps the install button useful without guessing a repository or path.
+func agenticSkillRawURLs(pageHTML []byte) []string {
+	urls := make([]string, 0, 2)
+	seen := map[string]bool{}
+	for _, match := range githubBlobRe.FindAllSubmatch(pageHTML, -1) {
+		raw := strings.Replace(string(match[1]), "https://github.com/", "https://raw.githubusercontent.com/", 1)
+		raw = strings.Replace(raw, "/blob/", "/", 1)
+		if !seen[raw] {
+			seen[raw] = true
+			urls = append(urls, raw)
+		}
+	}
+	for _, match := range githubTreeSkillRe.FindAllSubmatch(pageHTML, -1) {
+		raw := strings.Replace(string(match[1]), "https://github.com/", "https://raw.githubusercontent.com/", 1)
+		raw = strings.Replace(raw, "/tree/", "/", 1)
+		raw = strings.TrimSuffix(raw, "/") + "/SKILL.md"
+		if !seen[raw] {
+			seen[raw] = true
+			urls = append(urls, raw)
+		}
+	}
+	return urls
+}
 
 // handleRescanSkills re-scans the skill directories so freshly installed
 // skills (e.g. `sy skill install <slug>`, Story E18) hot-load without a
@@ -4803,14 +4855,11 @@ func (s *Server) handleInstallRegistrySkill(c *fiber.Ctx) error {
 		})
 	}
 
-	wsPaths, err := config.ResolveWorkspace()
+	skillsDir, err := s.writableSkillsDir(c)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"ok": false, "error": "cannot resolve workspace: " + err.Error()})
 	}
-	if err := os.MkdirAll(wsPaths.Skills, 0o755); err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"ok": false, "error": "create skills dir: " + err.Error()})
-	}
-	staging := filepath.Join(wsPaths.Skills, fmt.Sprintf(".staging-%d", time.Now().UnixNano()))
+	staging := filepath.Join(skillsDir, fmt.Sprintf(".staging-%d", time.Now().UnixNano()))
 	if err := eng.Fetch(ctx, pkg, staging); err != nil {
 		_ = os.RemoveAll(staging)
 		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"ok": false, "error": "fetch failed: " + err.Error()})
@@ -4840,7 +4889,7 @@ func (s *Server) handleInstallRegistrySkill(c *fiber.Ctx) error {
 	}
 
 	name := registrySkillDirName(pkg.Slug)
-	dest := filepath.Join(wsPaths.Skills, name)
+	dest := filepath.Join(skillsDir, name)
 	if _, err := os.Stat(dest); err == nil {
 		cleanup()
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
@@ -4853,11 +4902,9 @@ func (s *Server) handleInstallRegistrySkill(c *fiber.Ctx) error {
 	}
 
 	rescanWarnings := []string{}
-	if scanner, ok := s.skillCatalog(c).(interface{ Scan() []error }); ok {
-		for _, e := range scanner.Scan() {
-			if e != nil {
-				rescanWarnings = append(rescanWarnings, e.Error())
-			}
+	for _, e := range s.rescanRequestSkills(c) {
+		if e != nil {
+			rescanWarnings = append(rescanWarnings, e.Error())
 		}
 	}
 	s.log.Info("skill installed from registry via API",
@@ -4929,7 +4976,7 @@ func (s *Server) handleProvisionAgenticSkill(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"ok": false, "error": "url or slug required"})
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(c.UserContext(), 30*time.Second)
 	defer cancel()
 
 	client := &http.Client{Timeout: 30 * time.Second}
@@ -4966,84 +5013,94 @@ func (s *Server) handleProvisionAgenticSkill(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"ok": false, "error": "failed to read page"})
 	}
 
-	// 2. Extract GitHub blob URL from page.
-	match := githubBlobRe.FindSubmatch(pageHTML)
-	if match == nil {
+	// 2. Extract downloadable GitHub sources from the page. Prefer its pinned
+	// blob, but try the advertised branch tree when that revision has gone
+	// stale (which currently happens for some AgenticSkills entries).
+	rawURLs := agenticSkillRawURLs(pageHTML)
+	if len(rawURLs) == 0 {
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
 			"ok":    false,
 			"error": "could not find SKILL.md GitHub source on agenticskills.io — the skill may not have a public GitHub source",
 		})
 	}
-	blobURL := string(match[1])
-
-	// 3. Convert blob URL → raw URL.
-	// https://github.com/{org}/{repo}/blob/{ref}/{path}
-	// → https://raw.githubusercontent.com/{org}/{repo}/{ref}/{path}
-	rawURL := strings.Replace(blobURL, "https://github.com/", "https://raw.githubusercontent.com/", 1)
-	rawURL = strings.Replace(rawURL, "/blob/", "/", 1)
-
-	rawReq, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"ok": false, "error": err.Error()})
+	var skillMD []byte
+	var rawURL string
+	var failures []string
+	for _, candidate := range rawURLs {
+		rawReq, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, candidate, nil)
+		if reqErr != nil {
+			failures = append(failures, reqErr.Error())
+			continue
+		}
+		rawResp, fetchErr := client.Do(rawReq)
+		if fetchErr != nil {
+			failures = append(failures, fetchErr.Error())
+			continue
+		}
+		if rawResp.StatusCode >= 300 {
+			failures = append(failures, fmt.Sprintf("HTTP %d", rawResp.StatusCode))
+			_ = rawResp.Body.Close()
+			continue
+		}
+		skillMD, err = io.ReadAll(io.LimitReader(rawResp.Body, 1<<20)) // 1 MB cap
+		_ = rawResp.Body.Close()
+		if err != nil {
+			failures = append(failures, err.Error())
+			continue
+		}
+		rawURL = candidate
+		break
 	}
-	rawResp, err := client.Do(rawReq)
-	if err != nil {
+	if len(skillMD) == 0 {
 		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
-			"ok": false, "error": fmt.Sprintf("download SKILL.md: %v", err),
+			"ok": false, "error": "GitHub did not provide SKILL.md: " + strings.Join(failures, "; "),
 		})
-	}
-	defer rawResp.Body.Close()
-
-	if rawResp.StatusCode >= 300 {
-		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
-			"ok": false, "error": fmt.Sprintf("GitHub: HTTP %d for SKILL.md", rawResp.StatusCode),
-		})
-	}
-
-	skillMD, err := io.ReadAll(io.LimitReader(rawResp.Body, 1<<20)) // 1 MB cap
-	if err != nil {
-		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"ok": false, "error": "failed to read SKILL.md"})
 	}
 
 	// 4. Write to <workspace>/skills/<slug>/SKILL.md.
-	wsPaths, err := config.ResolveWorkspace()
+	skillsDir, err := s.writableSkillsDir(c)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"ok": false, "error": "cannot resolve workspace",
+			"ok": false, "error": "cannot resolve workspace: " + err.Error(),
 		})
 	}
-	skillDir := filepath.Join(wsPaths.Skills, slug)
-	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+	skillDir := filepath.Join(skillsDir, slug)
+	if _, err := os.Stat(skillDir); err == nil {
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"ok": false, "error": fmt.Sprintf("skill %q is already installed", slug), "code": "already_installed",
+		})
+	}
+	staging := filepath.Join(skillsDir, fmt.Sprintf(".staging-%d", time.Now().UnixNano()))
+	if err := os.MkdirAll(staging, 0o755); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"ok": false, "error": fmt.Sprintf("create skill dir: %v", err),
 		})
 	}
-	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), skillMD, 0o644); err != nil {
+	defer os.RemoveAll(staging)
+	if err := os.WriteFile(filepath.Join(staging, "SKILL.md"), skillMD, 0o644); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"ok": false, "error": fmt.Sprintf("write SKILL.md: %v", err),
+		})
+	}
+	if err := os.Rename(staging, skillDir); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"ok": false, "error": fmt.Sprintf("activate skill: %v", err),
 		})
 	}
 
 	// 5. Hot-rescan (skills.Loader implements Scan(); use type assertion to
 	//    avoid adding the method to the runtime.SkillLoader interface).
-	if scanner, ok := s.skillCatalog(c).(interface{ Scan() []error }); ok {
-		_ = scanner.Scan()
-	}
+	_ = s.rescanRequestSkills(c)
 
-	// Derive a friendly source label from the blob URL.
-	// e.g. "anthropics/skills@5be498e"
-	source := strings.TrimPrefix(blobURL, "https://github.com/")
-	if i := strings.Index(source, "/blob/"); i >= 0 {
-		repo := source[:i]
-		rest := source[i+len("/blob/"):]
-		sha := rest
-		if j := strings.Index(rest, "/"); j >= 0 {
-			sha = rest[:j]
+	// Derive a friendly source label from the raw GitHub URL.
+	// e.g. "anthropics/skills@5be498e".
+	source := strings.TrimPrefix(rawURL, "https://raw.githubusercontent.com/")
+	if parts := strings.Split(source, "/"); len(parts) >= 3 {
+		ref := parts[2]
+		if len(ref) > 8 {
+			ref = ref[:8]
 		}
-		if len(sha) > 8 {
-			sha = sha[:8]
-		}
-		source = repo + "@" + sha
+		source = parts[0] + "/" + parts[1] + "@" + ref
 	}
 
 	return c.JSON(fiber.Map{

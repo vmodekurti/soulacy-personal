@@ -3,6 +3,7 @@
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
   import { searchSkills } from '../lib/skillsearch.js'
+  import { can, permissions } from '../lib/workspace.js'
 
   let skills        = []
   let selected      = null
@@ -44,6 +45,7 @@
   let installError = ''
   let marketplace = null
   let marketplaceError = ''
+  $: canInstallSkills = ($permissions, can('skills', 'install'))
 
   async function load() {
     loading = true
@@ -86,6 +88,7 @@
   }
 
   function openASModal() {
+    if (!canInstallSkills) return
     asURL     = ''
     asError   = ''
     asSuccess = ''
@@ -114,6 +117,7 @@
   }
 
   async function openSrcModal() {
+    if (!canInstallSkills) return
     srcURL = ''; srcAuthToken = ''; srcError = ''; srcSuccess = ''; srcReport = null
     installResult = ''; installError = ''; installingSlug = ''
     srcModal = true
@@ -184,7 +188,7 @@
   }
 
   async function installSkill(pkg) {
-    if (!pkg?.slug || pkg.provider === 'local' || pkg.manifest?.installed) return
+    if (!canInstallSkills || !pkg?.slug || pkg.provider === 'local' || pkg.manifest?.installed) return
     installingSlug = pkg.slug
     installError = ''
     installResult = ''
@@ -239,8 +243,8 @@
   <div class="page-header">
     <h1>Skills</h1>
     <div class="header-actions">
-      <button class="btn-as" on:click={openSrcModal}>➕ Skill sources</button>
-      <button class="btn-as" on:click={openASModal}>⚡ From AgenticSkills</button>
+      <button class="btn-as" on:click={openSrcModal} disabled={!canInstallSkills} title={canInstallSkills ? '' : 'Workspace owner or admin permission is required'}>➕ Skill sources</button>
+      <button class="btn-as" on:click={openASModal} disabled={!canInstallSkills} title={canInstallSkills ? '' : 'Workspace owner or admin permission is required'}>⚡ From AgenticSkills</button>
       <button class="btn-secondary" on:click={load} disabled={loading}>↺ Refresh</button>
     </div>
         <TourButton />
@@ -328,7 +332,7 @@
               {#if installResult}<div class="as-ok">✓ {installResult}</div>{/if}
               <div class="direct-install">
                 <code>{findQ.trim()}</code>
-                <button class="btn-install" on:click={installDirectQuery} disabled={installingSlug === findQ.trim()}>
+                <button class="btn-install" on:click={installDirectQuery} disabled={!canInstallSkills || installingSlug === findQ.trim()}>
                   {installingSlug === findQ.trim() ? 'Installing…' : 'Try direct install'}
                 </button>
               </div>
@@ -346,7 +350,7 @@
                   {#if pkg.provider === 'local' || pkg.manifest?.installed}
                     <span class="find-install installed">already installed</span>
                   {:else}
-                    <button class="btn-install" on:click={() => installSkill(pkg)} disabled={installingSlug === pkg.slug}>
+                    <button class="btn-install" on:click={() => installSkill(pkg)} disabled={!canInstallSkills || installingSlug === pkg.slug}>
                       {installingSlug === pkg.slug ? 'Installing…' : 'Install'}
                     </button>
                   {/if}
