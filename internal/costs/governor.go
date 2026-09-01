@@ -30,6 +30,10 @@ type GovernanceConfig struct {
 	ConfirmationThresholdUSD float64
 	ReservationTTL           time.Duration
 	PerUserTokensDay         int
+	// PerUserTokensWorkspaceID scopes the flat per-user token allowance to one
+	// workspace. Public demo deployments use it so the demo safety ceiling does
+	// not throttle authenticated customers in ordinary workspaces.
+	PerUserTokensWorkspaceID string
 	PerAgentTokensDay        int
 	AllowedProviders         []string
 	AllowedModels            []string
@@ -84,6 +88,9 @@ type Governor struct {
 	// six levels (MU-024 criterion 1). nil keeps the flat-config behaviour.
 	quotaMu     sync.RWMutex
 	quotaPolicy *quota.Policy
+	// workspaceUserTokenLimits are administrator-managed rolling 24-hour
+	// allowances for individual workspaces.
+	workspaceUserTokenLimits map[string]int64
 
 	providerShares   map[string]*quota.FairShare
 	providerReleases map[string][]func()
@@ -123,7 +130,8 @@ func NewGovernor(store *Store, prices PriceTable, cfg GovernanceConfig) *Governo
 	g := &Governor{store: store, prices: prices,
 		providerShares:   make(map[string]*quota.FairShare),
 		providerReleases: make(map[string][]func()),
-		providerFailures: make(map[string]int), circuitUntil: make(map[string]time.Time)}
+		providerFailures: make(map[string]int), circuitUntil: make(map[string]time.Time),
+		workspaceUserTokenLimits: make(map[string]int64)}
 	g.SetGovernance(cfg)
 	return g
 }
@@ -261,9 +269,10 @@ func (g *Governor) Before(ctx context.Context, provider string, req *llm.Complet
 			policy.GlobalMonthlyMicros = dollarsToMicros(gcfg.MonthlyBudgetUSD)
 			policy.UserDailyMicros = dollarsToMicros(gcfg.PerUserDailyBudgetUSD)
 			policy.AgentDailyMicros = dollarsToMicros(gcfg.PerAgentDailyBudgetUSD)
-			policy.UserTokenLimit = int64(gcfg.PerUserTokensDay)
+			policy.UserTokenLimit = configuredPerUserTokenLimit(gcfg, workspace)
 			policy.AgentTokenLimit = int64(gcfg.PerAgentTokensDay)
 		}
+		policy.UserTokenLimit = tighten(policy.UserTokenLimit, g.workspaceUserTokenLimit(workspace))
 		// Multi-level limits tighten the flat config; they never loosen it.
 		// See quotapolicy.go for why replacing would invert the precedence.
 		policy = g.applyQuotaPolicy(policy, quotaSubject{
@@ -302,6 +311,17 @@ func (g *Governor) Before(ctx context.Context, provider string, req *llm.Complet
 	}
 	admitted = true
 	return ctx, llm.Reservation{ID: id}, nil
+}
+
+func configuredPerUserTokenLimit(cfg GovernanceConfig, workspaceID string) int64 {
+	scope := strings.TrimSpace(cfg.PerUserTokensWorkspaceID)
+	if scope != "" {
+		scope = wsroot.Normalize(scope)
+	}
+	if scope != "" && scope != wsroot.Normalize(workspaceID) {
+		return 0
+	}
+	return int64(cfg.PerUserTokensDay)
 }
 
 func isInteractiveSource(source string) bool {

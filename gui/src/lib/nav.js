@@ -53,7 +53,7 @@ export const navPages = [
   { id: 'mobile',    icon: '▣', label: 'Mobile',      group: 'system', demoUnavailable: true },
   { id: 'logs',      icon: '📋', label: 'Logs',        group: 'system',       personalOnly: true },
   { id: 'members',   icon: '👥', label: 'Members',     group: 'system', requires: ['rbac', 'read'], multiUserOnly: true },
-  { id: 'workspace-admin', icon: '🛡', label: 'Workspace settings', group: 'system', ownerOnly: true, multiUserOnly: true },
+  { id: 'workspace-admin', icon: '🛡', label: 'Workspace settings', group: 'system', workspaceAdminOnly: true, multiUserOnly: true },
 ]
 
 /** Nav ids in render order. */
@@ -74,6 +74,7 @@ export function visibleNavPages(allow, pages = navPages, options = {}) {
       if (!multiUser && p.multiUserOnly) return false
       if (multiUser && p.personalOnly) return false
       if (p.ownerOnly && role !== 'owner') return false
+      if (p.workspaceAdminOnly && !['owner', 'admin'].includes(role)) return false
       return typeof allow !== 'function' || !p.requires || allow(p.requires[0], p.requires[1])
     })
     .map((p) => multiUser && p.id === 'providers'

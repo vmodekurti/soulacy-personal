@@ -45,6 +45,11 @@ type Config struct {
 	// may consume within a 24-hour sliding window. 0 disables token quotas.
 	PerUserTokensDay int `mapstructure:"per_user_tokens_day"`
 
+	// PerUserTokensWorkspaceID limits the token quota's scope. It is populated
+	// from public_demo.workspace_id at runtime and is intentionally not a
+	// second configuration key.
+	PerUserTokensWorkspaceID string
+
 	// PerAgentTokensDay is the maximum LLM tokens a single agent may consume
 	// within a 24-hour sliding window across all users. 0 disables per-agent
 	// token quotas.

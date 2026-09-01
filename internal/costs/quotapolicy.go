@@ -37,6 +37,28 @@ func (g *Governor) SetQuotaPolicy(policy *quota.Policy) {
 	g.quotaMu.Unlock()
 }
 
+// SetWorkspaceUserTokenLimits installs per-user rolling token allowances for
+// individual workspaces. The map is copied so callers cannot mutate a live
+// admission policy after publication.
+func (g *Governor) SetWorkspaceUserTokenLimits(limits map[string]int64) {
+	next := make(map[string]int64, len(limits))
+	for workspaceID, limit := range limits {
+		workspaceID = wsroot.Normalize(workspaceID)
+		if limit > 0 {
+			next[workspaceID] = limit
+		}
+	}
+	g.quotaMu.Lock()
+	g.workspaceUserTokenLimits = next
+	g.quotaMu.Unlock()
+}
+
+func (g *Governor) workspaceUserTokenLimit(workspaceID string) int64 {
+	g.quotaMu.RLock()
+	defer g.quotaMu.RUnlock()
+	return g.workspaceUserTokenLimits[wsroot.Normalize(workspaceID)]
+}
+
 func (g *Governor) quota() *quota.Policy {
 	g.quotaMu.RLock()
 	defer g.quotaMu.RUnlock()

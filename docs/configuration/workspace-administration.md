@@ -1,8 +1,9 @@
 # Workspace administration
 
-Workspace owners manage customer-owned controls from **Workspace settings** in
-the Soulacy sidebar. The page is available only to the active workspace's
-owner and never grants access to deployment operations.
+Workspace owners and administrators manage customer-owned limits from
+**Workspace settings** in the Soulacy sidebar. Owner-only tabs continue to
+protect billing, automation credentials, exports, and deletion. The page never
+grants access to deployment operations.
 
 !!! note "Separate responsibility"
     A deployment administrator provisions and suspends tenant boundaries, but
@@ -11,13 +12,17 @@ owner and never grants access to deployment operations.
 
 ## Limits and retention
 
-An owner can set daily and monthly spend limits, daily token limits, concurrent
-run limits, and retention windows for conversations, action events, and audit
-records. Zero or an empty duration means “inherit the deployment setting.”
+An owner or administrator can set daily and monthly spend limits, an aggregate
+workspace daily-token ceiling, a per-user rolling 24-hour token allowance,
+concurrent-run limits, and retention windows for conversations, action events,
+and audit records. Zero or an empty duration means “inherit the deployment
+setting.”
 
 Workspace values can only tighten the deployment administrator's ceiling. The
-screen shows both the stored request and the effective value so an owner can
-see when a deployment limit is lower. Retention values use Go duration syntax,
+screen shows both the stored request and the effective value so an administrator
+can see when a deployment limit is lower. A public-demo token ceiling applies
+only to the configured demo workspace; it does not throttle ordinary customer
+workspaces. Retention values use Go duration syntax,
 such as `720h` for 30 days.
 
 ## Workspace model and search configuration

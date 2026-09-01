@@ -49,7 +49,11 @@ type Policy struct {
 	DailyUSD    float64 `json:"daily_usd,omitempty"`
 	MonthlyUSD  float64 `json:"monthly_usd,omitempty"`
 	DailyTokens int64   `json:"daily_tokens,omitempty"`
-	Concurrency int     `json:"concurrency,omitempty"`
+	// PerUserDailyTokens is the rolling 24-hour token allowance for each
+	// principal in this workspace. It is separate from DailyTokens, which is
+	// the aggregate ceiling shared by the whole workspace.
+	PerUserDailyTokens int64 `json:"per_user_daily_tokens,omitempty"`
+	Concurrency        int   `json:"concurrency,omitempty"`
 	// ConversationHistory, ActionEvents and AuditLogs are retention windows in
 	// Go duration syntax. Empty means the deployment's window applies.
 	ConversationHistory string `json:"conversation_history,omitempty"`
@@ -78,6 +82,9 @@ func (p Policy) Validate() error {
 	}
 	if p.DailyTokens < 0 {
 		problems = append(problems, "daily_tokens must not be negative")
+	}
+	if p.PerUserDailyTokens < 0 {
+		problems = append(problems, "per_user_daily_tokens must not be negative")
 	}
 	if p.Concurrency < 0 {
 		problems = append(problems, "concurrency must not be negative")
@@ -134,6 +141,7 @@ CREATE TABLE IF NOT EXISTS workspace_policies(
 	daily_micros         INTEGER NOT NULL DEFAULT 0,
 	monthly_micros       INTEGER NOT NULL DEFAULT 0,
 	daily_tokens         INTEGER NOT NULL DEFAULT 0,
+	per_user_daily_tokens INTEGER NOT NULL DEFAULT 0,
 	concurrency          INTEGER NOT NULL DEFAULT 0,
 	conversation_history TEXT NOT NULL DEFAULT '',
 	action_events        TEXT NOT NULL DEFAULT '',
@@ -157,7 +165,40 @@ func NewStore(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := ensurePolicyColumn(db, "per_user_daily_tokens", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return &Store{db: db}, nil
+}
+
+func ensurePolicyColumn(db *sql.DB, name, definition string) error {
+	rows, err := db.Query(`PRAGMA table_info(workspace_policies)`)
+	if err != nil {
+		return err
+	}
+	found := false
+	for rows.Next() {
+		var cid int
+		var column, kind string
+		var notNull, primaryKey int
+		var defaultValue any
+		if err := rows.Scan(&cid, &column, &kind, &notNull, &defaultValue, &primaryKey); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if column == name {
+			found = true
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if found {
+		return nil
+	}
+	_, err = db.Exec(`ALTER TABLE workspace_policies ADD COLUMN ` + name + ` ` + definition)
+	return err
 }
 
 func (s *Store) Close() error {
@@ -176,10 +217,10 @@ func (s *Store) Get(ctx context.Context, workspaceID string) (Policy, error) {
 	workspaceID = wsroot.Normalize(workspaceID)
 	policy := Policy{WorkspaceID: workspaceID}
 	var dailyMicros, monthlyMicros int64
-	err := s.db.QueryRowContext(ctx, `SELECT daily_micros, monthly_micros, daily_tokens, concurrency,
+	err := s.db.QueryRowContext(ctx, `SELECT daily_micros, monthly_micros, daily_tokens, per_user_daily_tokens, concurrency,
 		conversation_history, action_events, audit_logs, updated_by, updated_at
 		FROM workspace_policies WHERE workspace_id = ?`, workspaceID).Scan(
-		&dailyMicros, &monthlyMicros, &policy.DailyTokens, &policy.Concurrency,
+		&dailyMicros, &monthlyMicros, &policy.DailyTokens, &policy.PerUserDailyTokens, &policy.Concurrency,
 		&policy.ConversationHistory, &policy.ActionEvents, &policy.AuditLogs,
 		&policy.UpdatedBy, &policy.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -209,16 +250,17 @@ func (s *Store) Set(ctx context.Context, workspaceID, actor string, policy Polic
 	workspaceID = wsroot.Normalize(workspaceID)
 	now := time.Now().UTC()
 	_, err := s.db.ExecContext(ctx, `INSERT INTO workspace_policies(
-		workspace_id, daily_micros, monthly_micros, daily_tokens, concurrency,
+		workspace_id, daily_micros, monthly_micros, daily_tokens, per_user_daily_tokens, concurrency,
 		conversation_history, action_events, audit_logs, updated_by, updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(workspace_id) DO UPDATE SET
 			daily_micros=excluded.daily_micros, monthly_micros=excluded.monthly_micros,
-			daily_tokens=excluded.daily_tokens, concurrency=excluded.concurrency,
+			daily_tokens=excluded.daily_tokens, per_user_daily_tokens=excluded.per_user_daily_tokens,
+			concurrency=excluded.concurrency,
 			conversation_history=excluded.conversation_history, action_events=excluded.action_events,
 			audit_logs=excluded.audit_logs, updated_by=excluded.updated_by, updated_at=excluded.updated_at`,
 		workspaceID, usdToMicros(policy.DailyUSD), usdToMicros(policy.MonthlyUSD),
-		policy.DailyTokens, policy.Concurrency,
+		policy.DailyTokens, policy.PerUserDailyTokens, policy.Concurrency,
 		strings.TrimSpace(policy.ConversationHistory), strings.TrimSpace(policy.ActionEvents),
 		strings.TrimSpace(policy.AuditLogs), actor, now)
 	if err != nil {
@@ -232,7 +274,7 @@ func (s *Store) All(ctx context.Context) ([]Policy, error) {
 	if s == nil || s.db == nil {
 		return nil, errors.New("workspacepolicy: store is unavailable")
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT workspace_id, daily_micros, monthly_micros, daily_tokens,
+	rows, err := s.db.QueryContext(ctx, `SELECT workspace_id, daily_micros, monthly_micros, daily_tokens, per_user_daily_tokens,
 		concurrency, conversation_history, action_events, audit_logs, updated_by, updated_at
 		FROM workspace_policies ORDER BY workspace_id`)
 	if err != nil {
@@ -243,7 +285,7 @@ func (s *Store) All(ctx context.Context) ([]Policy, error) {
 	for rows.Next() {
 		var policy Policy
 		var dailyMicros, monthlyMicros int64
-		if err := rows.Scan(&policy.WorkspaceID, &dailyMicros, &monthlyMicros, &policy.DailyTokens,
+		if err := rows.Scan(&policy.WorkspaceID, &dailyMicros, &monthlyMicros, &policy.DailyTokens, &policy.PerUserDailyTokens,
 			&policy.Concurrency, &policy.ConversationHistory, &policy.ActionEvents, &policy.AuditLogs,
 			&policy.UpdatedBy, &policy.UpdatedAt); err != nil {
 			return nil, err

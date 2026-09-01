@@ -68,11 +68,11 @@ func policyRequest(t *testing.T, app *fiber.App, method, body string) (int, map[
 	return resp.StatusCode, decoded
 }
 
-func TestOnlyAnOwnerReadsOrWritesTheWorkspacePolicy(t *testing.T) {
+func TestOnlyWorkspaceOwnersAndAdminsReadOrWriteTheWorkspacePolicy(t *testing.T) {
 	role := tenancy.RoleAdmin
 	_, app := policyApp(t, &role, "ws_team")
 
-	for _, denied := range []string{tenancy.RoleAdmin, "member", "viewer"} {
+	for _, denied := range []string{"member", "viewer", tenancy.RoleDemoDeveloper} {
 		role = denied
 		if status, _ := policyRequest(t, app, http.MethodPut, `{"daily_usd":5}`); status != http.StatusForbidden {
 			t.Errorf("role %q wrote the workspace policy: %d", denied, status)
@@ -80,6 +80,10 @@ func TestOnlyAnOwnerReadsOrWritesTheWorkspacePolicy(t *testing.T) {
 		if status, _ := policyRequest(t, app, http.MethodGet, ""); status != http.StatusForbidden {
 			t.Errorf("role %q read the workspace policy: %d", denied, status)
 		}
+	}
+	role = tenancy.RoleAdmin
+	if status, body := policyRequest(t, app, http.MethodPut, `{"per_user_daily_tokens":500000}`); status != http.StatusOK {
+		t.Fatalf("the admin was refused: %d %v", status, body)
 	}
 	role = tenancy.RoleOwner
 	if status, body := policyRequest(t, app, http.MethodPut, `{"daily_usd":5}`); status != http.StatusOK {
@@ -109,6 +113,20 @@ func TestTheResponseReportsWhatIsInForceNotOnlyWhatWasStored(t *testing.T) {
 	if got, _ := effective["daily_usd"].(float64); got != 25 {
 		t.Fatalf("effective daily = %v, want the operator's 25 — the response would have let "+
 			"the owner believe their number took", effective["daily_usd"])
+	}
+}
+
+func TestPublicDemoTokenCeilingDoesNotApplyToAnOrdinaryWorkspace(t *testing.T) {
+	srv := newTestGateway(t, "secret")
+	srv.config().RateLimit.PerUserTokensDay = 50_000
+	srv.config().PublicDemo.Enabled = true
+	srv.config().PublicDemo.WorkspaceID = "ws_demo"
+
+	if got := srv.effectivePerUserDailyTokens(workspacepolicy.Policy{WorkspaceID: "ws_demo", PerUserDailyTokens: 500_000}); got != 50_000 {
+		t.Fatalf("demo effective quota = %d, want operator ceiling 50000", got)
+	}
+	if got := srv.effectivePerUserDailyTokens(workspacepolicy.Policy{WorkspaceID: "ws_otg", PerUserDailyTokens: 500_000}); got != 500_000 {
+		t.Fatalf("ordinary workspace effective quota = %d, want workspace setting 500000", got)
 	}
 }
 

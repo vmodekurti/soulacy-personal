@@ -25,7 +25,7 @@ func TestABudgetRoundTripsExactly(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()
 
-	stored, err := store.Set(ctx, "ws_a", "usr_alice", Policy{DailyUSD: 25.55, MonthlyUSD: 500.01, DailyTokens: 1234})
+	stored, err := store.Set(ctx, "ws_a", "usr_alice", Policy{DailyUSD: 25.55, MonthlyUSD: 500.01, DailyTokens: 1234, PerUserDailyTokens: 500_000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,6 +34,9 @@ func TestABudgetRoundTripsExactly(t *testing.T) {
 	}
 	if stored.Limit().DailyMicros != 25_550_000 {
 		t.Fatalf("daily micros = %d, want 25_550_000", stored.Limit().DailyMicros)
+	}
+	if stored.PerUserDailyTokens != 500_000 {
+		t.Fatalf("per-user token allowance = %d, want 500000", stored.PerUserDailyTokens)
 	}
 	if stored.UpdatedBy != "usr_alice" || stored.UpdatedAt.IsZero() {
 		t.Fatalf("provenance not recorded: %+v", stored)

@@ -226,11 +226,15 @@ func (m *Manager) HandleStatus(c *fiber.Ctx) error {
 	// new limits — which is the one answer an operator checking whether their
 	// change took effect must not be given.
 	snapshot := m.config()
+	perUserTokensDay := snapshot.PerUserTokensDay
+	if scope := strings.TrimSpace(snapshot.PerUserTokensWorkspaceID); scope != "" && workspaceOf(c) != scope {
+		perUserTokensDay = 0
+	}
 	return c.JSON(fiber.Map{
 		"enabled":              snapshot.Enabled,
 		"per_user_rpm":         snapshot.PerUserRPM,
 		"per_agent_rpm":        snapshot.PerAgentRPM,
-		"per_user_tokens_day":  snapshot.PerUserTokensDay,
+		"per_user_tokens_day":  perUserTokensDay,
 		"per_agent_tokens_day": snapshot.PerAgentTokensDay,
 		"tokens_enforced_by":   "costs",
 		"tokens_usage_url":     "/api/v1/costs/status",

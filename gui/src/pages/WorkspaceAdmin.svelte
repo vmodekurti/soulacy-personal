@@ -6,7 +6,7 @@
   import TourButton from '../lib/TourButton.svelte'
   import { confirmDestructive } from '../lib/destructive.js'
 
-  const tabs = [['policy','Limits & retention'],['billing','Plan & billing'],['credentials','Automation credentials'],['audit','Audit trail'],['data','Export & deletion']]
+  const ownerTabs = [['policy','Limits & retention'],['billing','Plan & billing'],['credentials','Automation credentials'],['audit','Audit trail'],['data','Export & deletion']]
   let active = 'policy', loading = true, saving = false, error = '', message = ''
   let policy = emptyPolicy(), effective = {}, retention = {}
   let credentials = [], credentialName = '', credentialScopes = 'agents:read,chat:chat,runs:read', createdSecret = ''
@@ -15,6 +15,8 @@
   let billing = null, selectedPlan = ''
 
   $: isOwner = String($activeWorkspace?.role || '').toLowerCase() === 'owner'
+  $: isWorkspaceAdmin = ['owner', 'admin'].includes(String($activeWorkspace?.role || '').toLowerCase())
+  $: tabs = isOwner ? ownerTabs : ownerTabs.slice(0, 1)
   $: workspaceName = $activeWorkspace?.workspaceName || 'this workspace'
   $: filteredAudit = auditEvents.filter((event) => {
     const query = auditFilter.trim().toLowerCase()
@@ -22,7 +24,7 @@
   })
 
   function emptyPolicy() {
-    return { daily_usd:0, monthly_usd:0, daily_tokens:0, concurrency:0, conversation_history:'', action_events:'', audit_logs:'' }
+    return { daily_usd:0, monthly_usd:0, daily_tokens:0, per_user_daily_tokens:0, concurrency:0, conversation_history:'', action_events:'', audit_logs:'' }
   }
   function resetNotice() { error = ''; message = '' }
   function failure(e, fallback) {
@@ -31,22 +33,21 @@
   }
   async function loadAll() {
     loading = true; resetNotice()
-    if (!isOwner) { loading = false; return }
-    const results = await Promise.allSettled([
-      api.workspaceAdmin.policy(), api.workspaceAdmin.credentials(true), api.workspaceAdmin.audit(100),
-      api.workspaceAdmin.exports(), api.workspaceAdmin.deletion(), api.workspaceAdmin.billing(),
-    ])
+    if (!isWorkspaceAdmin) { loading = false; return }
+    const requests = [api.workspaceAdmin.policy()]
+    if (isOwner) requests.push(api.workspaceAdmin.credentials(true), api.workspaceAdmin.audit(100), api.workspaceAdmin.exports(), api.workspaceAdmin.deletion(), api.workspaceAdmin.billing())
+    const results = await Promise.allSettled(requests)
     if (results[0].status === 'fulfilled') {
       policy = { ...emptyPolicy(), ...(results[0].value?.policy || {}) }
       effective = results[0].value?.effective || {}; retention = results[0].value?.retention || {}
     }
-    if (results[1].status === 'fulfilled') credentials = results[1].value?.keys || []
-    if (results[2].status === 'fulfilled') {
+    if (isOwner && results[1]?.status === 'fulfilled') credentials = results[1].value?.keys || []
+    if (isOwner && results[2]?.status === 'fulfilled') {
       auditEvents = results[2].value?.events || []; auditCursor = results[2].value?.next_cursor || ''
     }
-    if (results[3].status === 'fulfilled') exportsList = results[3].value?.exports || []
-    if (results[4].status === 'fulfilled') deletion = results[4].value
-    if (results[5].status === 'fulfilled') {
+    if (isOwner && results[3]?.status === 'fulfilled') exportsList = results[3].value?.exports || []
+    if (isOwner && results[4]?.status === 'fulfilled') deletion = results[4].value
+    if (isOwner && results[5]?.status === 'fulfilled') {
       billing = results[5].value
       selectedPlan = billing?.plan || billing?.default_plan || billing?.plans?.[0] || ''
     }
@@ -159,8 +160,8 @@
 </script>
 
 <div class="page">
-  <header><div><p class="eyebrow">WORKSPACE OWNER</p><h1>Workspace settings</h1><p>Govern {workspaceName} without changing the Soulacy deployment.</p></div><div class="header-actions"><PageHelp page="workspace-admin" compact /><TourButton page="workspace-admin" /><button on:click={loadAll} disabled={loading}>↻ Refresh</button></div></header>
-  {#if !isOwner}<div class="notice denied"><strong>Owner access required</strong><span>Only the workspace owner can change workspace-wide policy, credentials, exports, or deletion.</span></div>
+  <header><div><p class="eyebrow">WORKSPACE ADMINISTRATION</p><h1>Workspace settings</h1><p>Govern {workspaceName} without changing the Soulacy deployment.</p></div><div class="header-actions"><PageHelp page="workspace-admin" compact /><TourButton page="workspace-admin" /><button on:click={loadAll} disabled={loading}>↻ Refresh</button></div></header>
+  {#if !isWorkspaceAdmin}<div class="notice denied"><strong>Administrator access required</strong><span>Only workspace owners and administrators can change workspace-wide limits.</span></div>
   {:else}
     <nav aria-label="Workspace settings sections">{#each tabs as tab}<button class:active={active===tab[0]} on:click={()=>active=tab[0]}>{tab[1]}</button>{/each}</nav>
     {#if error}<p class="notice error" role="alert">{error}</p>{/if}{#if message}<p class="notice success" role="status">{message}</p>{/if}
@@ -168,7 +169,7 @@
     {:else if active === 'policy'}
       <form class="panel" on:submit|preventDefault={savePolicy}>
         <div class="panel-title"><div><h2>Budgets and capacity</h2><p>Zero means inherit the deployment limit. A workspace can tighten, never raise, the operator ceiling.</p></div><button class="primary" disabled={saving}>{saving?'Saving…':'Save policy'}</button></div>
-        <div class="grid four"><label>Daily spend (USD)<input type="number" min="0" step="0.01" bind:value={policy.daily_usd}/><small>Effective: ${effective.daily_usd || 'unlimited'}</small></label><label>Monthly spend (USD)<input type="number" min="0" step="0.01" bind:value={policy.monthly_usd}/><small>Effective: ${effective.monthly_usd || 'unlimited'}</small></label><label>Daily tokens<input type="number" min="0" step="1" bind:value={policy.daily_tokens}/><small>Effective: {effective.daily_tokens || 'unlimited'}</small></label><label>Concurrent runs<input type="number" min="0" step="1" bind:value={policy.concurrency}/><small>Effective: {effective.concurrency || 'unlimited'}</small></label></div>
+        <div class="grid limits"><label>Daily spend (USD)<input type="number" min="0" step="0.01" bind:value={policy.daily_usd}/><small>Effective: ${effective.daily_usd || 'unlimited'}</small></label><label>Monthly spend (USD)<input type="number" min="0" step="0.01" bind:value={policy.monthly_usd}/><small>Effective: ${effective.monthly_usd || 'unlimited'}</small></label><label>Workspace daily tokens<input type="number" min="0" step="1" bind:value={policy.daily_tokens}/><small>Shared effective limit: {effective.daily_tokens || 'unlimited'}</small></label><label>Per-user tokens / 24h<input type="number" min="0" step="1000" bind:value={policy.per_user_daily_tokens}/><small>Effective per user: {effective.per_user_daily_tokens || 'unlimited'}</small></label><label>Concurrent runs<input type="number" min="0" step="1" bind:value={policy.concurrency}/><small>Effective: {effective.concurrency || 'unlimited'}</small></label></div>
         <h2 class="subhead">Retention</h2><div class="grid three"><label>Conversation history<input bind:value={policy.conversation_history} placeholder="720h"/><small>Effective: {retention.conversation_history || 'deployment default'}</small></label><label>Action events<input bind:value={policy.action_events} placeholder="720h"/><small>Effective: {retention.action_events || 'deployment default'}</small></label><label>Audit logs<input bind:value={policy.audit_logs} placeholder="2160h"/><small>Effective: {retention.audit_logs || 'deployment default'}</small></label></div>
       </form>
     {:else if active === 'billing'}
@@ -204,4 +205,5 @@
 <style>
   .page{max-width:1220px;margin:0 auto;padding:30px;color:#eef0ff}.page>header{display:flex;justify-content:space-between;gap:24px;align-items:flex-start;margin-bottom:22px}.eyebrow{margin:0 0 7px;color:#67d8a4;font-size:11px;font-weight:800;letter-spacing:.15em}h1{margin:0;font-size:30px}.page header p{color:#929ab4}.header-actions{display:flex;gap:10px}.header-actions>button,.panel button,nav button{border:1px solid #ffffff18;border-radius:8px;background:#20263a;color:#eef0ff;padding:9px 12px;font-weight:700;cursor:pointer}.page>nav{display:flex;gap:5px;margin-bottom:18px;border-bottom:1px solid #ffffff12}.page>nav button{border:0;border-radius:8px 8px 0 0;background:transparent;color:#8f98b3}.page>nav button.active{background:#795cff20;color:#d8d2ff}.panel{margin-bottom:18px;padding:21px;border:1px solid #ffffff14;border-radius:14px;background:#121625}.panel h2{margin:0 0 6px;font-size:18px}.panel p{color:#949db8;line-height:1.55}.panel-title{display:flex;justify-content:space-between;gap:20px;align-items:flex-start}.panel-title .primary{width:auto;margin:0}.grid{display:grid;gap:14px;margin-top:18px}.grid.four{grid-template-columns:repeat(4,1fr)}.grid.three{grid-template-columns:repeat(3,1fr)}.grid.two{grid-template-columns:2fr 1fr}label{display:grid;gap:7px;color:#cbd0e2;font-size:12px;font-weight:700}input,textarea,select{box-sizing:border-box;width:100%;padding:10px;border:1px solid #ffffff20;border-radius:8px;background:#090c16;color:#fff}textarea{min-height:82px;resize:vertical}label small,.row small{color:#7f88a3;font-weight:400}.subhead{margin-top:25px!important}.primary{border:0!important;background:linear-gradient(135deg,#795cff,#24bd7c)!important;color:#fff}.credential-form{display:grid;grid-template-columns:1fr 2fr auto;align-items:end;gap:12px}.credential-form .primary{margin:0}.secret{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;margin-top:16px;padding:14px;border:1px solid #63d7a955;border-radius:10px;background:#63d7a910}.secret code{overflow:auto;color:#a7f0ce}.table{margin-top:15px;border:1px solid #ffffff10;border-radius:10px;overflow:hidden}.row{display:grid;grid-template-columns:minmax(220px,2fr) 100px 90px 180px minmax(160px,auto);align-items:center;gap:12px;padding:12px;border-top:1px solid #ffffff0d}.row:first-child{border-top:0}.row>div:first-child{display:grid;gap:4px}.row>span{color:#939cb6;font-size:12px}.row-actions{display:flex;justify-content:flex-end;gap:7px}.row-actions button{padding:7px 9px}.row .danger,.danger-zone>.danger{border-color:#ef5b6855;background:#ef5b6815;color:#ff9da7}.active-status{color:#6de0aa!important}.search{margin:17px 0}.audit{display:grid;gap:8px}.audit article{padding:13px;border:1px solid #ffffff0d;border-radius:9px;background:#090c1688}.audit article>div{display:flex;justify-content:space-between}.audit p{margin:5px 0;font-size:12px}.audit small{color:#747e9b}.event-failed{color:#ff909b}.load-more{margin-top:14px}.export-row{grid-template-columns:2fr 100px 220px auto}.notice{display:grid;gap:4px;padding:12px 14px;border-radius:9px}.notice.error,.notice.denied{background:#ef5b6815;color:#ff9da7}.notice.success{background:#22bd7b15;color:#7ce0ae}.loading{padding:40px;text-align:center;color:#8992ad}.danger-zone{border-color:#ef5b6833}.danger-zone label{margin-top:15px}.danger-zone>.danger{margin-top:16px}.danger-zone>.primary{width:auto}.denied{max-width:620px}.denied span{color:#d4a8ad}@media(max-width:900px){.grid.four,.grid.three,.grid.two{grid-template-columns:1fr 1fr}.credential-form{grid-template-columns:1fr}.row,.export-row{grid-template-columns:1fr 1fr}.row>div:first-child{grid-column:1/-1}.page>header{display:grid}}@media(max-width:560px){.page{padding:20px 14px}.grid.four,.grid.three,.grid.two,.row,.export-row{grid-template-columns:1fr}.page>nav{overflow:auto}.panel-title,.secret{grid-template-columns:1fr;display:grid}}
   .billing-status{padding:6px 10px;border-radius:999px;background:#ef5b6815;color:#ff9da7;text-transform:capitalize}.billing-status.active-status{background:#22bd7b15}.billing-summary{display:grid;grid-template-columns:repeat(2,minmax(140px,1fr));gap:12px;margin:18px 0}.billing-summary>div{display:grid;gap:5px;padding:14px;border:1px solid #ffffff10;border-radius:10px;background:#090c1688}.billing-summary small{color:#7f88a3}.billing-actions{display:flex;align-items:end;gap:10px;flex-wrap:wrap}.billing-actions label{min-width:220px}.billing-actions button{margin-bottom:0}
+  .grid.limits{grid-template-columns:repeat(5,minmax(0,1fr))}@media(max-width:1050px){.grid.limits{grid-template-columns:repeat(3,1fr)}}@media(max-width:560px){.grid.limits{grid-template-columns:1fr}}
 </style>

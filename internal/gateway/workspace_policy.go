@@ -11,6 +11,8 @@ import (
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/costs"
 	"github.com/soulacy/soulacy/internal/quota"
+	"github.com/soulacy/soulacy/internal/requestctx"
+	"github.com/soulacy/soulacy/internal/tenancy"
 	"github.com/soulacy/soulacy/internal/workspacepolicy"
 	"github.com/soulacy/soulacy/internal/wsroot"
 )
@@ -18,7 +20,7 @@ import (
 func zapErr(err error) zap.Field { return zap.Error(err) }
 
 // workspace_policy.go — MU-030 criterion 1 at the HTTP edge: a workspace owner
-// sets budgets, quotas and retention for their own workspace.
+// or administrator sets budgets, quotas and retention for their own workspace.
 //
 // SAFE TO EXPOSE because of where the ceiling is enforced, not because of what
 // this handler validates. `workspacepolicy.Compose` takes the smaller positive
@@ -64,15 +66,39 @@ func (s *Server) workspacePolicyResponse(c *fiber.Ctx, stored workspacepolicy.Po
 func (s *Server) effectiveWorkspaceLimits(stored workspacepolicy.Policy) fiber.Map {
 	composed := workspacepolicy.Compose(s.configuredQuotaPolicy(), []workspacepolicy.Policy{stored})
 	if composed == nil {
-		return fiber.Map{"daily_usd": 0, "monthly_usd": 0, "daily_tokens": 0, "concurrency": 0}
+		return fiber.Map{"daily_usd": 0, "monthly_usd": 0, "daily_tokens": 0,
+			"per_user_daily_tokens": s.effectivePerUserDailyTokens(stored), "concurrency": 0}
 	}
 	tightest := composed.Tightest(quotaSubjectForWorkspace(stored.WorkspaceID))
 	return fiber.Map{
-		"daily_usd":    float64(tightest.DailyMicros) / 1_000_000,
-		"monthly_usd":  float64(tightest.MonthlyMicros) / 1_000_000,
-		"daily_tokens": tightest.DailyTokens,
-		"concurrency":  tightest.Concurrency,
+		"daily_usd":             float64(tightest.DailyMicros) / 1_000_000,
+		"monthly_usd":           float64(tightest.MonthlyMicros) / 1_000_000,
+		"daily_tokens":          tightest.DailyTokens,
+		"per_user_daily_tokens": s.effectivePerUserDailyTokens(stored),
+		"concurrency":           tightest.Concurrency,
 	}
+}
+
+func (s *Server) effectivePerUserDailyTokens(stored workspacepolicy.Policy) int64 {
+	configured := int64(s.config().RateLimit.PerUserTokensDay)
+	if demo := s.config().PublicDemo; demo.Enabled && wsroot.Normalize(stored.WorkspaceID) != wsroot.Normalize(demo.WorkspaceID) {
+		configured = 0
+	}
+	if stored.PerUserDailyTokens <= 0 {
+		return configured
+	}
+	if configured <= 0 || stored.PerUserDailyTokens < configured {
+		return stored.PerUserDailyTokens
+	}
+	return configured
+}
+
+func workspacePolicyAdmin(c *fiber.Ctx) (requestctx.Identity, error) {
+	identity, ok := requestIdentity(c)
+	if !ok || (identity.Role() != tenancy.RoleOwner && identity.Role() != tenancy.RoleAdmin) {
+		return requestctx.Identity{}, fiber.NewError(fiber.StatusForbidden, "only a workspace owner or admin can manage workspace limits")
+	}
+	return identity, nil
 }
 
 func (s *Server) effectiveWorkspaceRetention(stored workspacepolicy.Policy) fiber.Map {
@@ -111,7 +137,7 @@ func durationString(d time.Duration) string {
 }
 
 func (s *Server) handleGetWorkspacePolicy(c *fiber.Ctx) error {
-	identity, err := s.workspaceOwner(c)
+	identity, err := workspacePolicyAdmin(c)
 	if err != nil {
 		return err
 	}
@@ -126,7 +152,7 @@ func (s *Server) handleGetWorkspacePolicy(c *fiber.Ctx) error {
 }
 
 func (s *Server) handleSetWorkspacePolicy(c *fiber.Ctx) error {
-	identity, err := s.workspaceOwner(c)
+	identity, err := workspacePolicyAdmin(c)
 	if err != nil {
 		return err
 	}
@@ -214,6 +240,13 @@ func (s *Server) reloadQuotaPolicy(ctx context.Context) {
 		stored = loaded
 	}
 	s.costGovernor.SetQuotaPolicy(workspacepolicy.Compose(s.configuredQuotaPolicy(), stored))
+	perUser := make(map[string]int64, len(stored))
+	for _, policy := range stored {
+		if policy.PerUserDailyTokens > 0 {
+			perUser[policy.WorkspaceID] = policy.PerUserDailyTokens
+		}
+	}
+	s.costGovernor.SetWorkspaceUserTokenLimits(perUser)
 }
 
 // SetCostGovernor wires the reservation path a composed quota policy is

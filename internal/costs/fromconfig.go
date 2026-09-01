@@ -42,6 +42,10 @@ func GovernanceFrom(cfg *config.Config) GovernanceConfig {
 			PromptCaching:           providerCfg.PromptCaching,
 		}
 	}
+	perUserTokensWorkspaceID := ""
+	if cfg.PublicDemo.Enabled {
+		perUserTokensWorkspaceID = cfg.PublicDemo.WorkspaceID
+	}
 	return GovernanceConfig{
 		DailyBudgetUSD:           cfg.Costs.DailyBudgetUSD,
 		MonthlyBudgetUSD:         cfg.Costs.MonthlyBudgetUSD,
@@ -54,6 +58,7 @@ func GovernanceFrom(cfg *config.Config) GovernanceConfig {
 		ConfirmationThresholdUSD: cfg.Costs.ConfirmationThresholdUSD,
 		ReservationTTL:           reservationTTL,
 		PerUserTokensDay:         cfg.RateLimit.PerUserTokensDay,
+		PerUserTokensWorkspaceID: perUserTokensWorkspaceID,
 		PerAgentTokensDay:        cfg.RateLimit.PerAgentTokensDay,
 		AllowedProviders:         cfg.LLM.AllowedProviders,
 		AllowedModels:            cfg.LLM.AllowedModels,

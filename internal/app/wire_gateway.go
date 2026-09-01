@@ -386,10 +386,16 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) (*gateway.Server, e
 
 	// ── Rate Limiter (Task #33) ───────────────────────────────────────────────
 	rlCfg := ratelimit.Config{
-		Enabled:           cfg.RateLimit.Enabled,
-		PerUserRPM:        cfg.RateLimit.PerUserRPM,
-		PerAgentRPM:       cfg.RateLimit.PerAgentRPM,
-		PerUserTokensDay:  cfg.RateLimit.PerUserTokensDay,
+		Enabled:          cfg.RateLimit.Enabled,
+		PerUserRPM:       cfg.RateLimit.PerUserRPM,
+		PerAgentRPM:      cfg.RateLimit.PerAgentRPM,
+		PerUserTokensDay: cfg.RateLimit.PerUserTokensDay,
+		PerUserTokensWorkspaceID: func() string {
+			if cfg.PublicDemo.Enabled {
+				return cfg.PublicDemo.WorkspaceID
+			}
+			return ""
+		}(),
 		PerAgentTokensDay: cfg.RateLimit.PerAgentTokensDay,
 		Backend:           cfg.RateLimit.Backend,
 		RedisURL:          cfg.RateLimit.RedisURL,

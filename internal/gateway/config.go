@@ -679,7 +679,7 @@ func (s *Server) ReloadConfig() error {
 	s.applyLLMLive(newCfg.LLM)
 	s.applySearchLive(newCfg.Search)
 	s.applySecurityLive(newCfg.Security)
-	s.applyRateLimitLive(newCfg.RateLimit)
+	s.applyRateLimitLive(newCfg)
 	s.applyGovernanceLive(newCfg)
 	// Quotas last: reloadQuotaPolicy composes the flat config ceilings with
 	// each workspace's own limits, so it has to run after s.config() carries the
@@ -746,16 +746,21 @@ func (s *Server) applySecurityLive(next config.SecurityConfig) {
 // ratelimit.Manager.SetConfig. Changing memory↔redis live would discard every
 // in-flight window, which hands out a free burst at exactly the moment
 // somebody is trying to tighten a limit.
-func (s *Server) applyRateLimitLive(next config.RateLimitConfig) {
+func (s *Server) applyRateLimitLive(next *config.Config) {
 	if s == nil || s.rateLimiter == nil {
 		return
 	}
+	scope := ""
+	if next.PublicDemo.Enabled {
+		scope = next.PublicDemo.WorkspaceID
+	}
 	s.rateLimiter.SetConfig(ratelimit.Config{
-		Enabled:           next.Enabled,
-		PerUserRPM:        next.PerUserRPM,
-		PerAgentRPM:       next.PerAgentRPM,
-		PerUserTokensDay:  next.PerUserTokensDay,
-		PerAgentTokensDay: next.PerAgentTokensDay,
+		Enabled:                  next.RateLimit.Enabled,
+		PerUserRPM:               next.RateLimit.PerUserRPM,
+		PerAgentRPM:              next.RateLimit.PerAgentRPM,
+		PerUserTokensDay:         next.RateLimit.PerUserTokensDay,
+		PerUserTokensWorkspaceID: scope,
+		PerAgentTokensDay:        next.RateLimit.PerAgentTokensDay,
 	})
 }
 

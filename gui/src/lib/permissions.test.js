@@ -181,9 +181,10 @@ describe('the sidebar shows what the caller can use', () => {
       .toBe(navPages.filter(page => !page.multiUserOnly).length)
   })
 
-  it('reserves workspace settings for workspace owners', async () => {
+  it('reserves workspace settings for workspace owners and administrators', async () => {
     const { visibleNavPages } = await import('./nav.js')
     expect(visibleNavPages(() => true, undefined, { role: 'viewer', deploymentMode: 'team' }).map(page => page.id)).not.toContain('workspace-admin')
+    expect(visibleNavPages(() => true, undefined, { role: 'admin', deploymentMode: 'team' }).map(page => page.id)).toContain('workspace-admin')
     expect(visibleNavPages(() => true, undefined, { role: 'owner', deploymentMode: 'team' }).map(page => page.id)).toContain('workspace-admin')
   })
 

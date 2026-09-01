@@ -157,3 +157,27 @@ func TestAZeroQuotaAdmitsEverything(t *testing.T) {
 		t.Fatalf("an unconfigured quota refused a call: %v", err)
 	}
 }
+
+func TestPublicDemoPerUserQuotaDoesNotThrottleOrdinaryWorkspaces(t *testing.T) {
+	cfg := GovernanceConfig{PerUserTokensDay: 50_000, PerUserTokensWorkspaceID: "ws_demo"}
+	if got := configuredPerUserTokenLimit(cfg, "ws_demo"); got != 50_000 {
+		t.Fatalf("demo quota = %d, want 50000", got)
+	}
+	if got := configuredPerUserTokenLimit(cfg, "ws_otg"); got != 0 {
+		t.Fatalf("ordinary workspace inherited demo quota %d", got)
+	}
+	if got := configuredPerUserTokenLimit(GovernanceConfig{PerUserTokensDay: 75_000}, "ws_otg"); got != 75_000 {
+		t.Fatalf("unscoped deployment quota = %d, want 75000", got)
+	}
+}
+
+func TestWorkspaceAdministratorPerUserQuotaIsPublishedByWorkspace(t *testing.T) {
+	g := NewGovernor(quotaStore(t), nil, GovernanceConfig{})
+	g.SetWorkspaceUserTokenLimits(map[string]int64{"ws_otg": 500_000})
+	if got := g.workspaceUserTokenLimit("ws_otg"); got != 500_000 {
+		t.Fatalf("workspace quota = %d, want 500000", got)
+	}
+	if got := g.workspaceUserTokenLimit("ws_other"); got != 0 {
+		t.Fatalf("unconfigured workspace quota = %d, want unlimited", got)
+	}
+}

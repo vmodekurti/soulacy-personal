@@ -12,14 +12,14 @@
   let studioProvider = '', studioModel = '', reasonerProvider = '', reasonerModel = ''
   let studioPreset = '', buildUX = 'streamed', maxBuildTokens = 0, maxBuildCostUSD = 0
   let searchProvider = '', searchTimeout = '', searchAPIKey = '', searchKeySet = false
-  let dailyUSD = 0, monthlyUSD = 0, dailyTokens = 0, concurrency = 0
+  let dailyUSD = 0, monthlyUSD = 0, dailyTokens = 0, perUserDailyTokens = 0, concurrency = 0
   let costAlertThreshold = 0.8, costRows = []
   let sloWindow = '24h', sloMaxFailureRate = 0.1, sloMaxIncompleteRate = 0.05
   let sloMaxP95Duration = '5m', sloMinRuns = 10, opsAlertChannel = '', opsAlertDestination = '', opsAlertMinStatus = 'fail'
   let workspaceEnvironment = 'development', workspaceOwner = '', workspaceRegion = '', workspaceNotes = ''
   let securityIntentGate = 'prompt', toolTimeout = '30s', defaultMaxTurns = 15, maxAgentCallDepth = 5
   $: writable = can('config', 'write')
-  $: isOwner = $activeWorkspace?.role === 'owner'
+  $: isWorkspaceAdmin = ['owner', 'admin'].includes(String($activeWorkspace?.role || '').toLowerCase())
   $: usesNVIDIA = [defaultProvider, chatProvider, studioProvider, reasonerProvider].some((provider) => provider === 'nvidia')
 
   async function loadModels(providerID, force = false) {
@@ -94,11 +94,11 @@
       defaultMaxTurns = cfg.runtime?.default_max_turns ?? 15
       maxAgentCallDepth = cfg.runtime?.max_agent_call_depth ?? 5
       discoverSelectedModels()
-      if (isOwner) {
+      if (isWorkspaceAdmin) {
         const policy = await api.workspaceAdmin.policy()
         const p = policy.policy || {}
         dailyUSD = p.daily_usd || 0; monthlyUSD = p.monthly_usd || 0
-        dailyTokens = p.daily_tokens || 0; concurrency = p.concurrency || 0
+        dailyTokens = p.daily_tokens || 0; perUserDailyTokens = p.per_user_daily_tokens || 0; concurrency = p.concurrency || 0
       }
     } catch (e) { error = e.message } finally { loading = false }
   }
@@ -123,7 +123,7 @@
         security: { intent_gate: securityIntentGate },
         runtime: { tool_timeout: toolTimeout, default_max_turns: Number(defaultMaxTurns) || 0, max_agent_call_depth: Number(maxAgentCallDepth) || 0 },
       })
-      if (isOwner) await api.workspaceAdmin.savePolicy({ daily_usd: Number(dailyUSD) || 0, monthly_usd: Number(monthlyUSD) || 0, daily_tokens: Number(dailyTokens) || 0, concurrency: Number(concurrency) || 0 })
+      if (isWorkspaceAdmin) await api.workspaceAdmin.savePolicy({ daily_usd: Number(dailyUSD) || 0, monthly_usd: Number(monthlyUSD) || 0, daily_tokens: Number(dailyTokens) || 0, per_user_daily_tokens: Number(perUserDailyTokens) || 0, concurrency: Number(concurrency) || 0 })
       searchAPIKey = ''; info = 'Workspace configuration saved.'
       await load(); info = 'Workspace configuration saved.'
     } catch (e) { error = e.message } finally { saving = false }
@@ -163,8 +163,8 @@
         <label>Timeout<input bind:value={searchTimeout} placeholder="30s" disabled={!writable} /></label>
       </section>
 
-      {#if isOwner}<section class="card wide"><h2>Workspace LLM budgets</h2><p>Self-imposed limits can tighten deployment ceilings but can never raise them.</p>
-        <div class="four"><label>Daily spend (USD)<input type="number" min="0" step="0.01" bind:value={dailyUSD} disabled={!writable} /></label><label>Monthly spend (USD)<input type="number" min="0" step="0.01" bind:value={monthlyUSD} disabled={!writable} /></label><label>Daily tokens<input type="number" min="0" bind:value={dailyTokens} disabled={!writable} /></label><label>Concurrent runs<input type="number" min="0" bind:value={concurrency} disabled={!writable} /></label></div>
+      {#if isWorkspaceAdmin}<section class="card wide"><h2>Workspace LLM budgets</h2><p>Workspace owners and administrators can set practical limits. Deployment ceilings still remain the upper boundary.</p>
+        <div class="budget-grid"><label>Daily spend (USD)<input type="number" min="0" step="0.01" bind:value={dailyUSD} disabled={!writable} /></label><label>Monthly spend (USD)<input type="number" min="0" step="0.01" bind:value={monthlyUSD} disabled={!writable} /></label><label>Workspace daily tokens<input type="number" min="0" bind:value={dailyTokens} disabled={!writable} /></label><label>Per-user tokens / 24h<input type="number" min="0" step="1000" bind:value={perUserDailyTokens} disabled={!writable} /></label><label>Concurrent runs<input type="number" min="0" bind:value={concurrency} disabled={!writable} /></label></div>
       </section>{/if}
 
       <section class="card wide"><h2>Cost estimation</h2><p>Workspace-specific model pricing powers run metrics and budget alerts. Selectors use <code>provider/model</code> or <code>provider/*</code>.</p>
@@ -201,4 +201,5 @@
 
 <style>
   .page{max-width:1240px;margin:0 auto;padding:28px;color:#ececf8}.head{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:22px}.eyebrow{display:block;margin-bottom:8px;color:#72e6b5;font-size:10px;font-weight:800;letter-spacing:.16em}.head h1{margin:0;font-size:30px}.head p,.card p{color:#a9aec8;margin:6px 0 20px;line-height:1.5}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.card{background:#141728;border:1px solid #2b3049;border-radius:14px;padding:22px}.wide{grid-column:1/-1}.card h2{font-size:18px;margin:0}.card a,.scope-note a{color:#8b85ff}.provider-warning{margin:0 0 16px;padding:12px 14px;border:1px solid #665126;border-radius:9px;background:#2c2619;color:#e7ce8c;font-size:13px;line-height:1.5}.provider-warning a{color:#8bd9ff}.model-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.model{background:#0e1120;border:1px solid #272c46;border-radius:10px;padding:15px}.model h3{margin:0 0 12px;font-size:14px}.section-title{display:flex;justify-content:space-between;gap:20px}.scope{font-size:10px;letter-spacing:.14em;color:#72e6b5}.two,.four{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.four{grid-template-columns:repeat(4,1fr)}label{display:grid;gap:6px;color:#cdd1e8;font-size:13px;margin-top:12px}input,select,textarea{width:100%;box-sizing:border-box;background:#0d1020;color:#f2f3ff;border:1px solid #303655;border-radius:8px;padding:10px}.cost-head{display:flex;align-items:end;justify-content:space-between;gap:18px}.cost-head label{width:220px}.cost-row{display:grid;grid-template-columns:2fr 1fr 1fr auto;align-items:end;gap:12px}.secondary,.remove{border:1px solid #3a4060;border-radius:8px;background:#20243a;color:#e9eafd;padding:10px 13px;font-weight:650}.remove{color:#ff9caf;border-color:#713345;background:#311b27}.empty{padding:14px;border:1px dashed #343950;border-radius:8px;background:#101321}fieldset{border:1px solid #303655;border-radius:9px;margin:14px 0 0;padding:10px 12px}legend{padding:0 6px;color:#aeb3cf;font-size:12px}.radio{display:flex;align-items:center;gap:8px;margin:8px 0}.radio input{width:auto}.scope-note{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:16px 18px;border:1px dashed #363b57;border-radius:12px;background:#101321;color:#cfd3e8}.scope-note div{display:grid;gap:5px}.scope-note span{color:#8f95b2;font-size:12px;line-height:1.5}.scope-note a{white-space:nowrap;font-size:13px}.actions{display:flex;align-items:center;justify-content:flex-end;gap:20px;margin-top:18px;color:#9298b5}.primary{border:0;border-radius:9px;padding:11px 18px;color:white;font-weight:700;background:linear-gradient(90deg,#775cff,#20c887)}.primary:disabled{opacity:.5}.banner{padding:12px 15px;border-radius:9px;margin-bottom:15px}.err{background:#3a1d29;color:#ff9cb0}.ok{background:#12332b;color:#8ff0cb}@media(max-width:800px){.grid,.model-grid,.two,.four,.cost-row{grid-template-columns:1fr}.wide{grid-column:auto}.scope-note,.actions,.cost-head{align-items:stretch;flex-direction:column}.cost-head label{width:auto}}
+  .budget-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}@media(max-width:1050px){.budget-grid{grid-template-columns:repeat(3,1fr)}}@media(max-width:800px){.budget-grid{grid-template-columns:1fr}}
 </style>
