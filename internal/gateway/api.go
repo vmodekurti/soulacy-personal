@@ -4786,6 +4786,20 @@ func agenticSkillRawURLs(pageHTML []byte) []string {
 	return urls
 }
 
+func agenticSkillGitSource(rawURL string) (repoURL, subdir string, ok bool) {
+	const prefix = "https://raw.githubusercontent.com/"
+	if !strings.HasPrefix(rawURL, prefix) {
+		return "", "", false
+	}
+	parts := strings.Split(strings.TrimPrefix(rawURL, prefix), "/")
+	if len(parts) < 4 || parts[len(parts)-1] != "SKILL.md" {
+		return "", "", false
+	}
+	rel := path.Clean("/" + strings.Join(parts[3:len(parts)-1], "/"))
+	rel = strings.TrimPrefix(rel, "/")
+	return "https://github.com/" + parts[0] + "/" + parts[1], rel, true
+}
+
 // handleRescanSkills re-scans the skill directories so freshly installed
 // skills (e.g. `sy skill install <slug>`, Story E18) hot-load without a
 // gateway restart.
@@ -5071,12 +5085,32 @@ func (s *Server) handleProvisionAgenticSkill(c *fiber.Ctx) error {
 		})
 	}
 	staging := filepath.Join(skillsDir, fmt.Sprintf(".staging-%d", time.Now().UnixNano()))
+	sourceStaging := filepath.Join(skillsDir, fmt.Sprintf(".source-%d", time.Now().UnixNano()))
+	defer os.RemoveAll(staging)
+	defer os.RemoveAll(sourceStaging)
+	var installWarnings []string
+	if repoURL, subdir, ok := agenticSkillGitSource(rawURL); ok {
+		if _, cloneErr := plugininstall.GitClone(ctx, repoURL, sourceStaging); cloneErr != nil {
+			installWarnings = append(installWarnings, "supporting files were unavailable: "+cloneErr.Error())
+		} else {
+			sourceDir := sourceStaging
+			if subdir != "" {
+				sourceDir = filepath.Join(sourceStaging, filepath.FromSlash(subdir))
+			}
+			if copyErr := os.CopyFS(staging, os.DirFS(sourceDir)); copyErr != nil {
+				installWarnings = append(installWarnings, "supporting files were unavailable: "+copyErr.Error())
+				_ = os.RemoveAll(staging)
+			}
+		}
+	}
 	if err := os.MkdirAll(staging, 0o755); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"ok": false, "error": fmt.Sprintf("create skill dir: %v", err),
 		})
 	}
-	defer os.RemoveAll(staging)
+	// The page-selected file is authoritative even when the repository bundle
+	// was available, so a branch moving between the raw fetch and shallow clone
+	// cannot silently install a different instruction file.
 	if err := os.WriteFile(filepath.Join(staging, "SKILL.md"), skillMD, 0o644); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"ok": false, "error": fmt.Sprintf("write SKILL.md: %v", err),
@@ -5104,10 +5138,11 @@ func (s *Server) handleProvisionAgenticSkill(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{
-		"ok":      true,
-		"slug":    slug,
-		"source":  source,
-		"message": fmt.Sprintf("Skill %q installed from %s.", slug, source),
+		"ok":       true,
+		"slug":     slug,
+		"source":   source,
+		"warnings": installWarnings,
+		"message":  fmt.Sprintf("Skill %q installed from %s.", slug, source),
 	})
 }
 

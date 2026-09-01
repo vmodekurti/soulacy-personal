@@ -104,7 +104,7 @@
     try {
       const res = await api.skills.provisionAgenticSkills({ url: asURL.trim() })
       if (res.ok) {
-        asSuccess = res.message || `Skill installed.`
+        asSuccess = [res.message || 'Skill installed.', ...(res.warnings || [])].join(' ')
         setTimeout(() => { closeASModal(); load() }, 1800)
       } else {
         asError = res.error || 'Install failed.'

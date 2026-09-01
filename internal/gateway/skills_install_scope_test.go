@@ -24,6 +24,10 @@ func TestAgenticSkillRawURLsFallsBackToAdvertisedBranch(t *testing.T) {
 	if got := agenticSkillRawURLs(html); !reflect.DeepEqual(got, want) {
 		t.Fatalf("raw URLs = %#v, want %#v", got, want)
 	}
+	repo, subdir, ok := agenticSkillGitSource(want[1])
+	if !ok || repo != "https://github.com/acme/browser" || subdir != "skills/browser" {
+		t.Fatalf("git source = (%q, %q, %v)", repo, subdir, ok)
+	}
 }
 
 func TestWritableSkillsDirUsesRequestWorkspace(t *testing.T) {
