@@ -36,4 +36,14 @@ describe('mobile-first application foundation', () => {
     expect(studioCss).toContain('.studio-topbar')
     expect(studioCss).not.toMatch(/(^|[\s,{])\.topbar\b/m)
   })
+
+  it('uses an app-like Chat shell instead of stacking desktop mobile chrome', () => {
+    expect(app).toContain('class:chat-route={page === \'chat\'}')
+    expect(app).toContain('.layout.chat-route .topbar { display: none; }')
+    expect(chat).toContain('rows={mobileViewport ? 1 : 2}')
+    expect(chat).toContain('mobileViewport ? `Message ${activeThread?.agentId ? agentName(activeThread.agentId) : \'agent\'}…`')
+    expect(chat).toContain('.modern-chat .msg-row.sys .bubble { width: 100%; max-width: 100%;')
+    expect(chat).toContain('.modern-chat :global(.markdown-body table)')
+    expect(chat).toContain('overflow-x: auto; overscroll-behavior-inline: contain;')
+  })
 })

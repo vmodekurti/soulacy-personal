@@ -400,7 +400,7 @@
 <svelte:window on:keydown={(e) => e.key === 'Escape' && (sidebarOpen = false)} />
 
 {#if !shareToken}
-<div class="layout">
+<div class="layout" class:chat-route={page === 'chat'}>
   <!-- Mobile command bar. The current destination and workspace remain visible
        even when the full navigation is off canvas. -->
   <header class="topbar">
@@ -689,6 +689,11 @@
   @media (max-width: 768px) {
     .layout { flex-direction: column; }
 
+    /* Chat owns its navigation bar on phones. Keeping the shell command bar as
+       well produced a web-dashboard-style double header; the More tab remains
+       the entry point to the full application drawer. */
+    .layout.chat-route .topbar { display: none; }
+
     .topbar {
       display: flex; align-items: center; gap: 0.55rem;
       min-height: calc(56px + env(safe-area-inset-top));
@@ -750,7 +755,8 @@
       display: grid; grid-template-columns: repeat(auto-fit, minmax(54px, 1fr)); flex: 0 0 auto;
       min-height: calc(58px + env(safe-area-inset-bottom));
       padding: .3rem max(.35rem, env(safe-area-inset-right)) calc(.3rem + env(safe-area-inset-bottom)) max(.35rem, env(safe-area-inset-left));
-      border-top: 1px solid #1a1e36; background: rgba(12,15,29,.98);
+      border-top: 1px solid rgba(98,108,148,.2); background: rgba(12,15,29,.92);
+      box-shadow: 0 -10px 30px rgba(2,5,14,.24); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
     }
     .mobile-tabs button { min-width: 0; min-height: 48px; display: grid; place-items: center; align-content: center; gap: .12rem; border-radius: 10px; color: #777f9f; background: transparent; }
     .mobile-tabs button > span { font-size: 1.05rem; line-height: 1; }
