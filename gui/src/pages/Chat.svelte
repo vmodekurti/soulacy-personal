@@ -35,6 +35,9 @@
   let showArchived = false
   let renamingId = ''
   let renameText = ''
+  let mobileViewport = false
+  let mobileMedia = null
+  let syncMobileViewport = null
   let controlsOpen = false
   let chatMoreOpen = false
   let chatListHidden = false   // collapse the chat sub-menu (thread list)
@@ -277,6 +280,7 @@
     metricsRefresh++
     const t = $chatThreads[id]
     if (t?.agentId && t?.sessionId) loadArtifacts(id, t.agentId, t.sessionId)
+    if (mobileViewport) chatListHidden = true
     scrollBottom()
   }
 
@@ -284,6 +288,7 @@
     const thread = newThread(agentId || activeThread?.agentId || defaultAgentId())
     upsertThread(thread)
     chatActiveThreadId.set(thread.id)
+    if (mobileViewport) chatListHidden = true
     metricsRefresh++
     scrollBottom()
   }
@@ -1941,7 +1946,16 @@
   }
 
   onMount(async () => {
-    try { chatListHidden = localStorage.getItem('soulacy-chatlist-hidden') === '1' } catch (_) {}
+    mobileMedia = typeof window.matchMedia === 'function'
+      ? window.matchMedia('(max-width: 720px)')
+      : { matches: window.innerWidth <= 720 }
+    syncMobileViewport = () => { mobileViewport = mobileMedia.matches }
+    syncMobileViewport()
+    mobileMedia.addEventListener?.('change', syncMobileViewport)
+    try {
+      const savedChatList = localStorage.getItem('soulacy-chatlist-hidden')
+      chatListHidden = savedChatList == null ? mobileViewport : savedChatList === '1'
+    } catch (_) { chatListHidden = mobileViewport }
     restoreThreads()      // repopulate the chat list from a previous session
     hydrated = true       // now persist future changes
     await Promise.all([loadAgents(), loadProviders()])
@@ -1972,6 +1986,7 @@
     stopEvents = true
     if (ws) ws.close()
     teardownVoice()
+    mobileMedia?.removeEventListener?.('change', syncMobileViewport)
     window.removeEventListener('keydown', onGlobalKey)
   })
 </script>
@@ -2308,6 +2323,7 @@
 
   <div class="chat-body">
     {#if Object.keys($chatThreads).length > 0 && !chatListHidden}
+    <button class="chat-sidebar-backdrop" on:click={toggleChatList} aria-label="Close conversations"></button>
     <aside class="chat-sidebar">
     <div class="chat-sidebar-head">
       <div><strong>Conversations</strong><span>Continue recent work</span></div>
@@ -2662,7 +2678,7 @@
       <button class="attach-btn" on:click={() => fileInputEl?.click()} disabled={!canPrompt || isSending || uploadingAttachment || !activeThread?.agentId} title="Attach files">
         {uploadingAttachment ? '…' : '+'}
       </button>
-      <button class="attach-btn" on:click={() => promptsOpen = !promptsOpen} disabled={!canPrompt} title="Saved prompts (⌘K for commands)">≣</button>
+      <button class="attach-btn saved-prompts-btn" on:click={() => promptsOpen = !promptsOpen} disabled={!canPrompt} title="Saved prompts (⌘K for commands)">≣</button>
       {#if skillOpen}
         <div class="skill-pop" role="listbox" aria-label="Skills">
           <div class="skill-pop-head">Skills · ↑↓ to move, Enter to insert, Esc to dismiss</div>
@@ -2866,6 +2882,7 @@
     padding-right: 1rem; margin-right: 1rem;
     overflow: hidden;
   }
+  .chat-sidebar-backdrop { display: none; }
   .chat-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
   .threads {
@@ -3993,13 +4010,29 @@
   /* Responsive — narrow / mobile */
   @media (max-width: 720px) {
     .modern-chat { padding: 0; gap: 0; }
-    .modern-chat .page-header { min-height: 58px; padding: 0 .65rem; flex-direction: row; align-items: center; }
-    .chat-brand span, .primary-controls :global(.run-metrics), .new-chat-btn, .header-tour, .agent-picker .agent-presence { display: none; }
-    .agent-picker { min-width: 112px; }
-    .modern-chat .chat-sidebar { position: absolute; z-index: 30; top: 58px; bottom: 0; width: min(280px, 86vw); }
-    .modern-chat .msg-row { width: 100%; padding: 0 .75rem; }
-    .modern-chat .msg-row.user .bubble, .modern-chat .msg-row:not(.user):not(.sys) .bubble { max-width: 92%; }
-    .modern-chat .input-row { width: calc(100% - 1rem); margin-bottom: .5rem; }
+    .modern-chat .page-header { min-height: 52px; padding: 0 .55rem; flex-direction: row; flex-wrap: nowrap; align-items: center; }
+    .chat-brand { min-width: auto; }
+    .chat-brand > div, .primary-controls :global(.run-metrics), .new-chat-btn, .header-tour, .agent-picker .agent-presence, .top-search { display: none; }
+    .chat-list-toggle, .top-icon, .modern-chat .voice-btn { width: 42px; height: 42px; flex: 0 0 42px; }
+    .primary-controls { flex: 1; min-width: 0; justify-content: flex-end; gap: .3rem; }
+    .agent-picker { min-width: 0; max-width: 190px; height: 42px; flex: 1; }
+    .agent-picker select { font-size: 16px; }
+    .modern-chat .chat-body { position: relative; }
+    .chat-sidebar-backdrop { display: block; position: absolute; z-index: 29; inset: 0; width: 100%; border: 0; border-radius: 0; background: rgba(3,7,17,.62); backdrop-filter: blur(2px); }
+    .modern-chat .chat-sidebar { position: absolute; z-index: 30; top: 0; bottom: 0; left: 0; width: min(320px, 88vw); padding: .85rem; box-shadow: 18px 0 48px rgba(0,0,0,.45); }
+    .modern-chat .msg-row { width: 100%; padding: 0 .65rem; }
+    .modern-chat .messages { padding: 1rem 0 .55rem; gap: .8rem; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+    .modern-chat .msg-row.user .bubble { max-width: 92%; }
+    .modern-chat .msg-row:not(.user):not(.sys) .bubble { max-width: 100%; padding: .85rem .8rem; }
+    .modern-chat .btext { font-size: .94rem; line-height: 1.58; }
+    .modern-chat .pending-attachments { width: calc(100% - 1rem); }
+    .modern-chat .input-row { width: auto; min-height: 56px; margin: .35rem .5rem .45rem; padding: .4rem; gap: .35rem; border-radius: 14px; }
+    .modern-chat .input-row textarea { min-width: 0; min-height: 44px; max-height: 124px; padding: .65rem .25rem; font-size: 16px; }
+    .modern-chat .attach-btn, .modern-chat .send-btn { width: 44px; height: 44px; flex: 0 0 44px; padding: 0; }
+    .composer-voice, .saved-prompts-btn { display: none; }
+    .skill-pop { position: fixed; left: .5rem; right: .5rem; bottom: calc(64px + env(safe-area-inset-bottom)); max-height: min(46vh, 340px); }
+    .modern-chat > .banner, .modern-chat > .chat-status-panel, .modern-chat > .controls-panel { margin: .5rem .5rem 0; }
+    .modern-chat > .controls-panel { max-height: 52vh; overflow-y: auto; overscroll-behavior: contain; }
     .voice-session-head { grid-template-columns: 1fr auto; }
     .voice-session-agent { display: none; }
     .voice-session-stage { padding: 1rem; }
@@ -4007,7 +4040,7 @@
     .msg-row, .msg-row.user .bubble { max-width: 100%; }
     .bubble { max-width: 100%; }
     .cp-field input, .cp-field select, .cp-field .model-custom, .cp-field input[type=number] { width: 100%; }
-    .cp-field { flex: 1 1 45%; }
+    .cp-field { flex: 1 1 100%; }
     .thread-search { max-width: none; }
     .budget-recovery { align-items: stretch; flex-direction: column; }
     .budget-recovery-actions { flex-wrap: wrap; }
