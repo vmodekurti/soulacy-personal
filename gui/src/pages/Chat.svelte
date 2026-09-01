@@ -612,7 +612,7 @@
       } else {
         updateThread(threadId, t => ({
           ...t,
-          messages: [...t.messages, { role: 'system', text: '⚠ ' + e.message, ts: new Date(), thinking: t.thinking || thinking }],
+          messages: [...t.messages, { role: 'system', text: '⚠ ' + (e?.message || 'Chat request failed.'), ts: new Date(), thinking: t.thinking || thinking }],
         }))
       }
     }

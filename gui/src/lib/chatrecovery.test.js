@@ -5,6 +5,7 @@ describe('chat transport recovery', () => {
   it('recognizes browser transport errors but not HTTP failures', () => {
     expect(isChatTransportError(new Error('Load failed'))).toBe(true)
     expect(isChatTransportError(new Error('Failed to fetch'))).toBe(true)
+    expect(isChatTransportError(new TypeError(''))).toBe(true)
     expect(isChatTransportError(Object.assign(new Error('Bad Gateway'), { status: 502 }))).toBe(false)
   })
 
