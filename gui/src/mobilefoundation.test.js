@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url'
 
 const app = readFileSync(fileURLToPath(new URL('./App.svelte', import.meta.url)), 'utf8')
 const chat = readFileSync(fileURLToPath(new URL('./pages/Chat.svelte', import.meta.url)), 'utf8')
+const studio = readFileSync(fileURLToPath(new URL('./pages/Studio.svelte', import.meta.url)), 'utf8')
+const studioCss = readFileSync(fileURLToPath(new URL('./pages/Studio.css', import.meta.url)), 'utf8')
 
 describe('mobile-first application foundation', () => {
   it('keeps navigation reachable with a safe-area command bar and bottom tabs', () => {
@@ -27,5 +29,11 @@ describe('mobile-first application foundation', () => {
     expect(chat).toContain('if (mobileViewport) chatListHidden = true')
     expect(chat).toContain('.composer-voice, .saved-prompts-btn { display: none; }')
     expect(chat).toContain('width: 44px; height: 44px')
+  })
+
+  it('isolates Studio header styles from the application command bar', () => {
+    expect(studio).toContain('class="studio-topbar"')
+    expect(studioCss).toContain('.studio-topbar')
+    expect(studioCss).not.toMatch(/(^|[\s,{])\.topbar\b/m)
   })
 })

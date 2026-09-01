@@ -4857,7 +4857,7 @@ Use null for fields that are not present.`
   <!-- Studio masthead. Keep one obvious primary action and place infrequent
        authoring utilities behind a compact menu so the creation path remains
        readable even as Studio gains capabilities. -->
-  <header class="topbar">
+  <header class="studio-topbar">
     <div class="studio-heading">
       <span class="studio-kicker">Agent builder</span>
       <h1>Studio</h1>
