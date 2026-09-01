@@ -5,6 +5,10 @@ const TRANSPORT_FAILURE = /(load failed|failed to fetch|network\s*error|network 
 
 export function isChatTransportError(error) {
   if (!error || error.status) return false
+  // WebKit sometimes rejects a disconnected fetch with a native TypeError
+  // whose message is the empty string. It is still a transport failure; an
+  // HTTP/API failure reaches us with a status or a regular Error message.
+  if (error instanceof TypeError && !String(error.message || '').trim()) return true
   return TRANSPORT_FAILURE.test(String(error.message || error))
 }
 
@@ -44,7 +48,7 @@ export async function recoverDetachedChat({
   agentId,
   sentText,
   startedAt,
-  timeoutMs = 190000,
+  timeoutMs = 300000,
   pollMs = 2500,
   now = () => Date.now(),
   sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
