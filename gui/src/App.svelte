@@ -7,7 +7,7 @@
   import { pluginNavEntries, isPluginPage, pluginIdFromPage } from './lib/pluginui.js'
   import { waitForGateway, waitingMessage, timeoutMessage, RESTART_BUDGET } from './lib/gatewaywait.js'
   import { looksLikeStaleAssetError, recoverFromStaleAssets } from './lib/stalerecovery.js'
-  import { navPages, navGroups, navAnchor } from './lib/nav.js'
+	import { navPages, navGroups, navAnchor } from './lib/nav.js'
   import Walkthrough from './lib/walkthrough/Walkthrough.svelte'
   import {
     loadWalkthroughState, startWalkthrough, shouldAutoStart,
@@ -39,6 +39,11 @@
   let restartMessage = ''
 
   const pages = navPages
+  $: currentPageEntry = pages.find(p => p.id === page) || pluginPages.find(p => p.id === page)
+  $: currentPageLabel = currentPageEntry?.label || 'Soulacy'
+  const currentWorkspaceLabel = 'Personal'
+  $: mobilePrimaryPages = pages.filter(p => ['dashboard', 'studio', 'agents', 'chat'].includes(p.id))
+  $: mobileMoreActive = !mobilePrimaryPages.some(p => p.id === page)
 
   const retiredPages = {
     builder: 'studio',
@@ -392,12 +397,17 @@
   </div>
 {/if}
 
+<svelte:window on:keydown={(e) => e.key === 'Escape' && (sidebarOpen = false)} />
+
 {#if !shareToken}
 <div class="layout">
-  <!-- Mobile top bar (hidden on desktop) -->
+  <!-- Mobile command bar. The current destination and workspace remain visible
+       even when the full navigation is off canvas. -->
   <header class="topbar">
     <button class="hamburger" on:click={() => sidebarOpen = !sidebarOpen}
-            aria-label="Toggle navigation" aria-expanded={sidebarOpen}>☰</button>
+            aria-label={sidebarOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={sidebarOpen}>
+      <span aria-hidden="true">{sidebarOpen ? '×' : '☰'}</span>
+    </button>
     <svg class="brand-svg w-6 h-6" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <linearGradient id="mobile-logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -408,14 +418,16 @@
       <path d="M32 6 L54 14 V32 C54 45.5 44.5 55 32 58 C19.5 55 10 45.5 10 32 V14 L32 6 Z" fill="#0b0d1a" stroke="url(#mobile-logo-grad)" stroke-width="3" />
       <path d="M42 20 L24 20 C20 20 18 22 18 26 C18 30 22 32 32 34 C42 36 46 38 46 42 C46 46 44 48 40 48 L22 48" stroke="url(#mobile-logo-grad)" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" />
     </svg>
-    <span class="brand-name">Soulacy</span>
+    <div class="mobile-context">
+      <strong>{currentPageLabel}</strong>
+      <span>{currentWorkspaceLabel || 'Soulacy'}</span>
+    </div>
+    <span class="mobile-connection" class:live={$connected} aria-label={$connected ? 'Connected' : 'Reconnecting'}></span>
   </header>
 
   <!-- Backdrop behind the mobile drawer -->
   {#if sidebarOpen}
-    <div class="backdrop" role="button" tabindex="-1" aria-label="Close navigation"
-         on:click={() => sidebarOpen = false}
-         on:keydown={(e) => e.key === 'Escape' && (sidebarOpen = false)}></div>
+    <button class="backdrop" aria-label="Close navigation" on:click={() => sidebarOpen = false}></button>
   {/if}
 
   <!-- Sidebar -->
@@ -439,6 +451,7 @@
               aria-label={navCollapsed ? 'Expand menu' : 'Collapse menu'}>
         {navCollapsed ? '»' : '«'}
       </button>
+      <button class="drawer-close" on:click={() => sidebarOpen = false} aria-label="Close navigation">×</button>
     </div>
 
 
@@ -449,7 +462,7 @@
           {#if grp.label}<div class="nav-section" aria-hidden="true">{grp.label}</div>{/if}
           {#each groupPages as p}
             <button class="nav-item" class:active={page === p.id} on:click={() => navigate(p.id)} title={p.label}
-                    data-tour={navAnchor(p.id)}>
+                    aria-current={page === p.id ? 'page' : undefined} data-tour={navAnchor(p.id)}>
               <span class="nav-icon">{p.icon}</span>
               <span class="nav-label">{p.label}</span>
             </button>
@@ -516,6 +529,17 @@
       <div class="page-loading">Loading {pageTitle(page, pages, pluginPages)}…</div>
     {/if}
   </main>
+
+  <nav class="mobile-tabs" aria-label="Primary navigation">
+    {#each mobilePrimaryPages as p}
+      <button class:active={page === p.id} on:click={() => navigate(p.id)} aria-current={page === p.id ? 'page' : undefined}>
+        <span aria-hidden="true">{p.icon}</span><small>{p.label}</small>
+      </button>
+    {/each}
+    <button class:active={mobileMoreActive} on:click={() => sidebarOpen = true} aria-expanded={sidebarOpen}>
+      <span aria-hidden="true">•••</span><small>More</small>
+    </button>
+  </nav>
 </div>
 {/if}
 
@@ -524,6 +548,7 @@
   /* ── Reset & globals ────────────────────────────────────────────── */
   :global(*, *::before, *::after) { box-sizing: border-box; margin: 0; padding: 0; }
   :global(html, body) { height: 100%; }
+  :global(html) { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   :global(body) {
     background: #0c0e1a;
     color: #e8eaf6;
@@ -624,11 +649,13 @@
   :global(.btn-danger:hover:not(:disabled)) { background: #9f2828; }
 
   /* ── Layout ─────────────────────────────────────────────────────── */
-  .layout { display: flex; height: 100vh; overflow: hidden; }
+  .layout { display: flex; height: 100vh; height: 100dvh; min-width: 0; overflow: hidden; }
 
   /* ── Mobile top bar + drawer (≤768px) ───────────────────────────── */
   .topbar { display: none; }
   .backdrop { display: none; }
+  .mobile-tabs { display: none; }
+  .drawer-close { display: none; }
 
   /* ── Sidebar ─────────────────────────────────────────────────────── */
   .sidebar {
@@ -663,45 +690,82 @@
     .layout { flex-direction: column; }
 
     .topbar {
-      display: flex; align-items: center; gap: 0.6rem;
-      padding: 0.55rem 0.9rem;
+      display: flex; align-items: center; gap: 0.55rem;
+      min-height: calc(56px + env(safe-area-inset-top));
+      padding: calc(0.4rem + env(safe-area-inset-top)) max(0.65rem, env(safe-area-inset-right)) 0.4rem max(0.65rem, env(safe-area-inset-left));
       background: #0e1020;
       border-bottom: 1px solid #1a1e36;
       flex-shrink: 0;
     }
     .hamburger {
       background: none; color: #c8cadf;
-      font-size: 1.25rem; line-height: 1;
-      padding: 0.25rem 0.5rem; border-radius: 6px;
+      width: 44px; height: 44px; display: grid; place-items: center;
+      font-size: 1.35rem; line-height: 1; padding: 0; border-radius: 11px;
     }
     .hamburger:hover { background: #181b30; }
+    .topbar .brand-svg { width: 25px; height: 25px; }
+    .mobile-context { min-width: 0; display: grid; flex: 1; line-height: 1.2; }
+    .mobile-context strong { overflow: hidden; color: #f2f3fb; font-size: .9rem; text-overflow: ellipsis; white-space: nowrap; }
+    .mobile-context span { overflow: hidden; color: #737c9e; font-size: .66rem; text-overflow: ellipsis; white-space: nowrap; }
+    .mobile-connection { width: 8px; height: 8px; flex: 0 0 8px; margin-right: .25rem; border-radius: 50%; background: #9d5260; box-shadow: 0 0 0 4px rgba(157,82,96,.1); }
+    .mobile-connection.live { background: #59d7b0; box-shadow: 0 0 0 4px rgba(89,215,176,.1); }
 
     /* Sidebar becomes an off-canvas drawer */
     .sidebar {
       position: fixed; top: 0; bottom: 0; left: 0;
-      width: min(260px, 80vw);
+      width: min(320px, 88vw);
+      padding-top: env(safe-area-inset-top);
+      padding-bottom: env(safe-area-inset-bottom);
       transform: translateX(-105%);
-      transition: transform 0.2s ease;
+      transition: transform 0.22s cubic-bezier(.2,.8,.2,1);
       z-index: 90;
       box-shadow: 4px 0 24px rgba(0, 0, 0, 0.5);
     }
     .sidebar.open { transform: translateX(0); }
+    .sidebar.collapsed { width: min(320px, 88vw); }
+    .sidebar.collapsed .brand-name, .sidebar.collapsed .nav-label, .sidebar.collapsed .conn-dot,
+    .sidebar.collapsed .logout-label, .sidebar.collapsed .nav-section { display: initial; }
+    .sidebar.collapsed .brand { justify-content: initial; padding: 1.15rem 1.1rem; gap: .7rem; }
+    .sidebar.collapsed .nav-item { padding: .75rem 1rem; gap: .75rem; }
+    .sidebar.collapsed .nav-icon { width: 1.2rem; }
+    .sidebar.collapsed .sidebar-footer { justify-content: space-between; padding: .65rem 1rem; }
+    .nav-toggle { display: none; }
+    .drawer-close { display: grid; place-items: center; width: 44px; height: 44px; margin-left: auto; border-radius: 11px; color: #9ca4c4; background: transparent; font-size: 1.5rem; }
+    .drawer-close:hover { color: #fff; background: #181b30; }
 
     .backdrop {
       display: block;
       position: fixed; inset: 0;
       background: rgba(0, 0, 0, 0.55);
       z-index: 80;
-      border: none;
+      width: 100%; border: none; border-radius: 0;
     }
 
-    /* Slightly larger touch targets in the drawer */
-    .nav-item { padding: 0.75rem 1rem; }
+    .sidebar nav { padding-inline: .65rem; overscroll-behavior: contain; }
+    .nav-item { min-height: 48px; padding: 0.75rem 1rem; }
+    .sidebar-footer { min-height: 58px; }
+
+    .content { min-width: 0; min-height: 0; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+    .mobile-tabs {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(54px, 1fr)); flex: 0 0 auto;
+      min-height: calc(58px + env(safe-area-inset-bottom));
+      padding: .3rem max(.35rem, env(safe-area-inset-right)) calc(.3rem + env(safe-area-inset-bottom)) max(.35rem, env(safe-area-inset-left));
+      border-top: 1px solid #1a1e36; background: rgba(12,15,29,.98);
+    }
+    .mobile-tabs button { min-width: 0; min-height: 48px; display: grid; place-items: center; align-content: center; gap: .12rem; border-radius: 10px; color: #777f9f; background: transparent; }
+    .mobile-tabs button > span { font-size: 1.05rem; line-height: 1; }
+    .mobile-tabs small { max-width: 100%; overflow: hidden; font-size: .62rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+    .mobile-tabs button.active { color: #c4c0ff; background: rgba(108,99,255,.12); }
+
+    :global(input:not([type="radio"]):not([type="checkbox"])), :global(textarea), :global(select) { font-size: 16px !important; }
+    :global(.modal-bg), :global(.dialog-backdrop) { padding: max(.75rem, env(safe-area-inset-top)) max(.75rem, env(safe-area-inset-right)) max(.75rem, env(safe-area-inset-bottom)) max(.75rem, env(safe-area-inset-left)); }
+    :global(.table-wrap) { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    :global([data-tooltip]::after) { display: none; }
   }
 
   /* App-wide responsive defaults for page content */
   @media (max-width: 768px) {
-    :global(.page) { padding: 1rem !important; }
+    :global(.page) { min-width: 0; padding: 1rem !important; }
     :global(.page-header) { flex-wrap: wrap; gap: 0.6rem; row-gap: 0.6rem; }
     :global(.page-header h1) { font-size: 1.15rem; }
   }
