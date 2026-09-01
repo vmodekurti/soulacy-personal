@@ -12,6 +12,7 @@
   import { explainConfirmRequest } from '../lib/explainCommand.js'
   import { searchSkills, parseSlashQuery, applySkillChoice } from '../lib/skillsearch.js'
   import { modelAvailability } from '../lib/agentmodel.js'
+  import { isChatTransportError, recoverDetachedChat } from '../lib/chatrecovery.js'
   import {
     filterThreads, suggestedPrompts, buildOverrides, tokenBudgetRecovery,
     lastUserText, truncateForRerun, rerunCheckpointStrategy, isLongOutput, isHistoricalFailureResolved,
@@ -570,10 +571,50 @@
       await backfillThinkingForTurn(threadId, runAgentId, runSessionId, runStartedAt)
       await loadArtifacts(threadId, runAgentId, runSessionId)
     } catch (e) {
-      updateThread(threadId, t => ({
-        ...t,
-        messages: [...t.messages, { role: 'system', text: '⚠ ' + e.message, ts: new Date(), thinking: t.thinking || thinking }],
-      }))
+      if (isChatTransportError(e)) {
+        // Mobile browsers can drop a long, quiet POST while the detached
+        // server-side run continues. Keep the run associated with this thread
+        // and recover its durable answer/error instead of immediately showing
+        // Safari's opaque "Load failed" message.
+        updateThread(threadId, t => ({
+          ...t,
+          streamText: 'Connection interrupted — waiting for the server-side run…',
+        }))
+        const recovered = await recoverDetachedChat({
+          agentId: runAgentId,
+          sentText: sendText,
+          startedAt: runStartedAt,
+          loadHistory: () => api.history.get(runSessionId),
+          loadEvents: () => api.agents.actions(runAgentId, 500, THINKING_EVENT_TYPES, { durable: true }),
+        })
+        if (recovered.status === 'success') {
+          replyText = recovered.reply || ''
+          updateThread(threadId, t => ({
+            ...t,
+            streamText: '',
+            messages: [...t.messages, {
+              role: 'assistant', text: replyText, via: viaName, agentId: runAgentId,
+              ts: recovered.entry?.created_at ? new Date(recovered.entry.created_at) : new Date(),
+              thinking: t.thinking || thinking,
+            }],
+          }))
+          await backfillThinkingForTurn(threadId, runAgentId, runSessionId, runStartedAt)
+        } else {
+          const detail = recovered.status === 'error'
+            ? recovered.error
+            : 'The connection was interrupted and no completed server response was found. Please try again.'
+          updateThread(threadId, t => ({
+            ...t,
+            streamText: '',
+            messages: [...t.messages, { role: 'system', text: '⚠ ' + detail, ts: new Date(), thinking: t.thinking || thinking }],
+          }))
+        }
+      } else {
+        updateThread(threadId, t => ({
+          ...t,
+          messages: [...t.messages, { role: 'system', text: '⚠ ' + e.message, ts: new Date(), thinking: t.thinking || thinking }],
+        }))
+      }
     }
     updateThread(threadId, t => ({ ...t, sending: false, thinking: null, streamText: '', activeRunKey: '' }))
     const { [runKey]: _, ...rest } = activeRuns
