@@ -111,11 +111,20 @@ func TestGatewayDoctorResolvesWorkspaceVaultProviderWithoutGlobalRegistration(t 
 	s.SetWorkspaceSettingsStore(store)
 	vault := newMemVault()
 	s.SetCredentialVault(vault) // Deliberately wired after the store.
+	modelsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"nvidia/nemotron-3-nano-30b-a3b"}]}`))
+	}))
+	t.Cleanup(modelsServer.Close)
 
 	const workspaceID = "ws_a"
 	if _, err := store.Set(context.Background(), workspaceID, "usr_ws_a", workspacesettings.Settings{
 		LLM: workspacesettings.LLM{Providers: map[string]workspacesettings.Provider{
-			"nvidia": {BaseURL: "https://integrate.api.nvidia.com/v1", Model: "nvidia/nemotron-3-nano-30b-a3b"},
+			"nvidia": {BaseURL: modelsServer.URL + "/v1", Model: "nvidia/nemotron-3-nano-30b-a3b"},
 		}},
 	}); err != nil {
 		t.Fatal(err)
