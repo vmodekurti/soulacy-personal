@@ -16,6 +16,7 @@ import (
 	"github.com/soulacy/soulacy/internal/requestctx"
 	"github.com/soulacy/soulacy/internal/studio"
 	"github.com/soulacy/soulacy/internal/workspacesettings"
+	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/sdk/llm"
 	"github.com/soulacy/soulacy/sdk/registry"
 )
@@ -612,6 +613,16 @@ func (s *Server) workspaceChatLLM(c *fiber.Ctx) (string, string) {
 		}
 	}
 	return provider, model
+}
+
+// shouldUseWorkspaceChatLLM keeps the workspace Chat selection a fallback,
+// rather than turning it into an implicit per-run override. A provider or model
+// saved on the agent is an intentional assignment and must remain authoritative.
+func shouldUseWorkspaceChatLLM(def *agent.Definition, overrideProvider, overrideModel string) bool {
+	if strings.TrimSpace(overrideProvider) != "" || strings.TrimSpace(overrideModel) != "" {
+		return false
+	}
+	return def == nil || (strings.TrimSpace(def.LLM.Provider) == "" && strings.TrimSpace(def.LLM.Model) == "")
 }
 
 func (s *Server) handleGetWorkspaceSettings(c *fiber.Ctx) error {

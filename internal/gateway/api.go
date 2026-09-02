@@ -1179,7 +1179,7 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusBadRequest, "run_budget.max_llm_calls must not be negative")
 	}
 	workspaceDefault := false
-	if strings.TrimSpace(ovProvider) == "" && strings.TrimSpace(ovModel) == "" {
+	if shouldUseWorkspaceChatLLM(def, ovProvider, ovModel) {
 		ovProvider, ovModel = s.workspaceChatLLM(c)
 		workspaceDefault = ovProvider != "" || ovModel != ""
 	}
@@ -1406,7 +1406,10 @@ func (s *Server) handleChatStream(c *fiber.Ctx) error {
 		return err
 	}
 	def := s.agents(c).Get(req.AgentID)
-	chatProvider, chatModel := s.workspaceChatLLM(c)
+	chatProvider, chatModel := "", ""
+	if shouldUseWorkspaceChatLLM(def, "", "") {
+		chatProvider, chatModel = s.workspaceChatLLM(c)
+	}
 
 	msg := message.Message{
 		ID:        uuid.New().String(),

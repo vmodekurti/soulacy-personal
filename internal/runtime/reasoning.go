@@ -167,9 +167,9 @@ func (e *Engine) SetReasoningKeys(keys reasoning.ProviderKeys) {
 	e.reasoningKeys = keys
 }
 
-// SetReasonerOverride sets the optional global llm.reasoner provider/model used
-// by the reasoning loop for every agent. Empty strings clear the override (the
-// loop then uses each agent's own llm.provider/model). Called at boot.
+// SetReasonerOverride sets the optional global llm.reasoner provider/model
+// fallback used by reasoning agents that have no provider/model pin. Empty
+// strings clear the fallback. Called at boot.
 func (e *Engine) SetReasonerOverride(provider, model string) {
 	e.reasonerProvider = strings.TrimSpace(provider)
 	e.reasonerModel = strings.TrimSpace(model)

@@ -398,10 +398,8 @@ func (e *Engine) effectiveProvider(def *agent.Definition) string {
 // call tools via the native completion API. Drives the default ("auto"/unset)
 // execution-strategy choice in LoopConfigFromDefinition.
 func (e *Engine) providerSupportsNativeTools(def *agent.Definition) bool {
-	prov := e.effectiveProvider(def)
-	if e.reasonerProvider != "" {
-		prov = e.reasonerProvider // global llm.reasoner override drives the loop
-	}
+	rdef := e.reasoningDef(def)
+	prov := e.effectiveProvider(rdef)
 	return reasoning.ProviderSupportsNativeTools(prov)
 }
 
@@ -415,7 +413,7 @@ func (e *Engine) reasoningBackendAvailable(def *agent.Definition) bool {
 		return true
 	}
 	// Resolve the provider exactly as reasoningBackendFor will (including the
-	// global llm.reasoner override and its half-configured guard), so the gate
+	// global llm.reasoner fallback), so the gate
 	// and the backend selection never disagree.
 	rdef := e.reasoningDef(def)
 	prov := strings.ToLower(strings.TrimSpace(rdef.LLM.Provider))
@@ -432,21 +430,14 @@ func (e *Engine) reasoningBackendAvailable(def *agent.Definition) bool {
 }
 
 // reasoningDef returns the agent definition to use when resolving the reasoning
-// backend. With a global llm.reasoner override configured it returns a shallow
-// copy with the reasoner provider/model substituted (and base_url cleared so the
-// new provider's default / OllamaBaseURL fallback applies), so reasoning runs on
-// the operator's chosen model regardless of the agent's chat model.
+// backend. An agent-level provider or model is authoritative. The global
+// llm.reasoner pair is only a fallback for agents with no provider/model pin.
+// Treating it as an override made the model picker in Studio appear to save while
+// ReAct and Plan-Execute silently ran a different model configured in Config.
 func (e *Engine) reasoningDef(def *agent.Definition) *agent.Definition {
-	if e.reasonerProvider == "" && e.reasonerModel == "" {
+	if def == nil || strings.TrimSpace(def.LLM.Provider) != "" || strings.TrimSpace(def.LLM.Model) != "" ||
+		(e.reasonerProvider == "" && e.reasonerModel == "") {
 		return def
-	}
-	// Guard against a half-configured override: switching the provider WITHOUT a
-	// reasoner model carries the agent's model name onto the new provider, which
-	// usually doesn't have it (e.g. a "gemini-2.5-pro" name sent to local Ollama
-	// → "model not found"). Require both provider and model to switch providers.
-	if e.reasonerProvider != "" && e.reasonerModel == "" &&
-		!strings.EqualFold(e.reasonerProvider, def.LLM.Provider) {
-		return def // incomplete override → fall back to the agent's own provider/model
 	}
 	cp := *def
 	if e.reasonerProvider != "" {

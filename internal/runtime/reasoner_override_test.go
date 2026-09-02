@@ -6,33 +6,45 @@ import (
 	"github.com/soulacy/soulacy/pkg/agent"
 )
 
-// A half-configured global reasoner override (provider set, model empty) must
-// NOT switch a cloud agent onto a different provider — that carried the agent's
-// model name (e.g. "gemini-2.5-pro") onto local Ollama and failed with
-// "model not found". With the guard, such an agent keeps its own provider/model.
-func TestReasoningDef_GuardsHalfConfiguredOverride(t *testing.T) {
-	e := &Engine{reasonerProvider: "ollama", reasonerModel: ""}
+func TestReasoningDef_AgentAssignmentWinsOverReasonerFallback(t *testing.T) {
+	e := &Engine{reasonerProvider: "ollama", reasonerModel: "qwen3:32b"}
 
-	google := &agent.Definition{LLM: agent.LLMConfig{Provider: "google", Model: "gemini-2.5-pro"}}
-	got := e.reasoningDef(google)
+	assigned := &agent.Definition{LLM: agent.LLMConfig{Provider: "google", Model: "gemini-2.5-pro"}}
+	got := e.reasoningDef(assigned)
 	if got.LLM.Provider != "google" || got.LLM.Model != "gemini-2.5-pro" {
-		t.Fatalf("half-configured override must not switch provider: got %s/%s",
-			got.LLM.Provider, got.LLM.Model)
+		t.Fatalf("agent assignment must win: got %s/%s", got.LLM.Provider, got.LLM.Model)
 	}
 
-	// An agent already on the override provider is unaffected (no-op switch),
-	// keeping its own model.
-	local := &agent.Definition{LLM: agent.LLMConfig{Provider: "ollama", Model: "qwen3:32b"}}
-	got = e.reasoningDef(local)
-	if got.LLM.Provider != "ollama" || got.LLM.Model != "qwen3:32b" {
-		t.Fatalf("same-provider override should keep the model: got %s/%s",
-			got.LLM.Provider, got.LLM.Model)
+	providerOnly := &agent.Definition{LLM: agent.LLMConfig{Provider: "google"}}
+	got = e.reasoningDef(providerOnly)
+	if got.LLM.Provider != "google" || got.LLM.Model != "" {
+		t.Fatalf("partial agent assignment must not be mixed with fallback: got %s/%s", got.LLM.Provider, got.LLM.Model)
 	}
 
-	// A FULL override (provider + model) does switch everything, as intended.
-	e2 := &Engine{reasonerProvider: "ollama", reasonerModel: "qwen3:32b"}
-	got = e2.reasoningDef(google)
+	modelOnly := &agent.Definition{LLM: agent.LLMConfig{Model: "gemini-2.5-pro"}}
+	got = e.reasoningDef(modelOnly)
+	if got.LLM.Provider != "" || got.LLM.Model != "gemini-2.5-pro" {
+		t.Fatalf("partial agent assignment must remain authoritative: got %s/%s", got.LLM.Provider, got.LLM.Model)
+	}
+}
+
+func TestReasoningDef_UsesReasonerFallbackForUnassignedAgent(t *testing.T) {
+	e := &Engine{reasonerProvider: "ollama", reasonerModel: "qwen3:32b"}
+	unassigned := &agent.Definition{}
+
+	got := e.reasoningDef(unassigned)
 	if got.LLM.Provider != "ollama" || got.LLM.Model != "qwen3:32b" {
-		t.Fatalf("full override should apply: got %s/%s", got.LLM.Provider, got.LLM.Model)
+		t.Fatalf("reasoner fallback should apply: got %s/%s", got.LLM.Provider, got.LLM.Model)
+	}
+	if unassigned.LLM.Provider != "" || unassigned.LLM.Model != "" {
+		t.Fatal("reasoner fallback must not mutate the saved agent definition")
+	}
+}
+
+func TestProviderSupportsNativeTools_UsesAgentBeforeReasonerFallback(t *testing.T) {
+	e := &Engine{reasonerProvider: "ollama", reasonerModel: "qwen3:32b"}
+	assigned := &agent.Definition{LLM: agent.LLMConfig{Provider: "anthropic", Model: "claude-sonnet"}}
+	if !e.providerSupportsNativeTools(assigned) {
+		t.Fatal("native-tool capability must be selected from the assigned agent provider")
 	}
 }

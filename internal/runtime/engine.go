@@ -331,9 +331,8 @@ type Engine struct {
 	reasoningBackendFactory func(*agent.Definition) reasoning.LLMBackend
 
 	// reasonerProvider/reasonerModel are the optional global llm.reasoner
-	// override: when set, the reasoning loop runs on this provider/model for
-	// every agent (planning wants a strong model), regardless of the agent's
-	// own chat model. Empty = use the agent's llm.provider/model.
+	// fallback. Agent-level llm.provider/model pins are authoritative; the
+	// fallback is used only when an agent leaves both fields empty.
 	reasonerProvider string
 	reasonerModel    string
 
