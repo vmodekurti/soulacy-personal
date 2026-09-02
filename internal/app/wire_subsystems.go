@@ -1078,7 +1078,7 @@ func (a *App) wireEngine(d engineDeps) *runtime.Engine {
 		// reaches Ollama instead of an unreachable localhost inside a container.
 		OllamaBaseURL: cfg.LLM.Providers["ollama"].BaseURL,
 	})
-	// Optional global llm.reasoner override: run the reasoning loop on a strong
+	// Optional global llm.reasoner fallback for unassigned reasoning agents.
 	// model regardless of the agent's chat model.
 	engine.SetReasonerOverride(cfg.LLM.Reasoner.Provider, cfg.LLM.Reasoner.Model)
 

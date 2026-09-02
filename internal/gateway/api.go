@@ -970,7 +970,6 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 	if (strings.TrimSpace(ovProvider) != "" || strings.TrimSpace(ovModel) != "") && !canOverrideModel(claims) {
 		return s.errMsg(c, fiber.StatusForbidden, "provider/model overrides require the admin or operator role")
 	}
-
 	chatMeta := chatOverrideMetadata(ovProvider, ovModel, ovTemp, ovTopP, ovMaxTokens, req.Overrides.MaxTurns, ovToolChoice, ovResponseFormat, ovReasoningEffort, ovPresencePenalty, ovFrequencyPenalty)
 	if responseMode == "voice" {
 		if chatMeta == nil {

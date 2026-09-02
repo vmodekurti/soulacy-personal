@@ -68,7 +68,7 @@
   let modelsError = {}
   let studioProvider = ''    // llm.studio override (Studio compiler)
   let studioModel = ''
-  let reasonerProvider = ''  // llm.reasoner override (ReAct/Plan-Execute loop)
+  let reasonerProvider = ''  // fallback for reasoning agents without an assignment
   let reasonerModel = ''
   let searchProvider = 'ollama'
   let searchApiKey = ''
@@ -629,17 +629,17 @@
 
           <div class="field-row">
             <div class="field">
-              <label for="reasoner-provider" data-tooltip="Provider used by ReAct and Plan-Execute control loops. Pick a reliable structured-output model for tool-heavy agents.">Reasoner (ReAct / Plan-Execute) — provider</label>
+              <label for="reasoner-provider" data-tooltip="Fallback for ReAct and Plan-Execute agents that do not have a provider/model assigned. Agent-level choices always win.">Reasoner fallback — provider</label>
               <select id="reasoner-provider" bind:value={reasonerProvider} disabled={!writable}
-                      data-tooltip="Provider used by ReAct and Plan-Execute control loops. Pick a reliable structured-output model for tool-heavy agents."
+                      data-tooltip="Fallback for ReAct and Plan-Execute agents that do not have a provider/model assigned. Agent-level choices always win."
                       on:change={() => pickProviderDefault(effectiveRoleProvider(reasonerProvider), (m) => reasonerModel = m)}>
                 <option value="">— use default —</option>
                 {#each providerOptions as p}<option value={p}>{p}</option>{/each}
               </select>
             </div>
             <div class="field">
-              <label for="reasoner-model" data-tooltip="Model used for internal thinking, planning, and final reflection. Lower-latency models are fine if they follow JSON reliably.">
-                Reasoner model
+              <label for="reasoner-model" data-tooltip="Fallback model used only when the agent has no provider/model assignment.">
+                Reasoner fallback model
                 {#if modelsLoading[effectiveRoleProvider(reasonerProvider)]}
                   <span class="inline-status">loading…</span>
                 {:else if modelsError[effectiveRoleProvider(reasonerProvider)]}
@@ -647,7 +647,7 @@
                 {/if}
               </label>
               <select id="reasoner-model" bind:value={reasonerModel} disabled={!writable}
-                      data-tooltip="Model used for internal thinking, planning, and final reflection. Lower-latency models are fine if they follow JSON reliably.">
+                      data-tooltip="Fallback model used only when the agent has no provider/model assignment.">
                 <option value="">— provider default —</option>
                 {#each modelOptions(effectiveRoleProvider(reasonerProvider), reasonerModel) as m (m)}
                   <option value={m}>{m}</option>

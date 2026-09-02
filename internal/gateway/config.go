@@ -307,8 +307,8 @@ type PatchableConfig struct {
 			MaxBuildTokens  int     `json:"max_build_tokens" yaml:"max_build_tokens"`
 			MaxBuildCostUSD float64 `json:"max_build_cost_usd" yaml:"max_build_cost_usd"`
 		} `json:"studio" yaml:"studio"`
-		// Reasoner overrides the provider/model the ReAct/Plan-Execute loop uses
-		// (llm.reasoner). Empty strings fall back to each agent's own model.
+		// Reasoner is the provider/model fallback for ReAct/Plan-Execute agents
+		// without an agent-level assignment (llm.reasoner).
 		Reasoner *struct {
 			Provider string `json:"provider" yaml:"provider"`
 			Model    string `json:"model" yaml:"model"`
