@@ -602,13 +602,19 @@ func (s *Server) preflightInput(c *fiber.Ctx, cat studio.Catalog) studio.Preflig
 	// verdict, which is right — claiming every provider is missing because we
 	// could not check would be a confident lie.
 	if s.canCheckProviders() {
-		providers := map[string]bool{}
-		models := map[string]bool{}
-		// Everything the config names starts as unavailable, so a configured but
-		// unregistered provider is reported rather than simply absent from the map.
-		for id := range s.cfg.LLM.Providers {
-			providers[id] = false
+		// Readiness must use the same live provider inventory as the model picker.
+		// Otherwise Studio can offer a discovered non-default model and then reject
+		// that same model during Save.
+		validation := s.agentValidationOptions(c.Context())
+		registered := make(map[string]bool, len(validation.RegisteredProviders))
+		for _, id := range validation.RegisteredProviders {
+			registered[strings.ToLower(strings.TrimSpace(id))] = true
 		}
+		providers, models := studioProviderAvailability(validation.Config, func(id string) bool {
+			return registered[strings.ToLower(strings.TrimSpace(id))]
+		}, validation.ProviderModels)
+		// Plugin providers may be registered without a config block. Keep them in
+		// the provider inventory even though there is no configured model to add.
 		for _, id := range s.llmRouter.ProviderIDs() {
 			providers[id] = true
 			if pc, ok := s.cfg.LLM.Providers[id]; ok && strings.TrimSpace(pc.Model) != "" {
@@ -620,6 +626,53 @@ func (s *Server) preflightInput(c *fiber.Ctx, cat studio.Catalog) studio.Preflig
 		in.ModelsAvailable = models
 	}
 	return in
+}
+
+func studioProviderAvailability(effective *config.Config, available func(string) bool, discovered map[string][]string) (map[string]bool, map[string]bool) {
+	providers := map[string]bool{}
+	models := map[string]bool{}
+	addModel := func(provider, model string) {
+		provider = strings.ToLower(strings.TrimSpace(provider))
+		model = strings.TrimSpace(model)
+		if provider == "" || model == "" {
+			return
+		}
+		models[model] = true
+		models[strings.ToLower(model)] = true
+		models[provider+"/"+model] = true
+		models[provider+"/"+strings.ToLower(model)] = true
+	}
+	if effective != nil {
+		for id, pc := range effective.LLM.Providers {
+			id = strings.ToLower(strings.TrimSpace(id))
+			if id == "" {
+				continue
+			}
+			usable := available != nil && available(id)
+			providers[id] = usable
+			if usable {
+				// Preserve the configured default as an offline fallback. Some
+				// OpenAI-compatible providers do not expose model discovery.
+				addModel(id, pc.Model)
+			}
+		}
+	}
+	// Studio's model picker is backed by the live provider catalog, so Save must
+	// judge agent-level choices against that same catalog rather than only the
+	// provider's configured default. Model ids may themselves be namespaced
+	// (for example "nvidia/llama-3.1-nemotron-70b-instruct"); addModel keeps that
+	// exact id as well as the provider-scoped lookup form expected by preflight.
+	for id, list := range discovered {
+		id = strings.ToLower(strings.TrimSpace(id))
+		if id == "" || available == nil || !available(id) {
+			continue
+		}
+		providers[id] = true
+		for _, model := range list {
+			addModel(id, model)
+		}
+	}
+	return providers, models
 }
 
 // studioCatalogSnapshot builds the agents/tools/providers portion of the
