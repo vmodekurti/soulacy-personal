@@ -80,6 +80,10 @@ func TestOnlyWorkspaceOwnersAndAdminsReadOrWriteTheWorkspacePolicy(t *testing.T)
 		if status, _ := policyRequest(t, app, http.MethodGet, ""); status != http.StatusForbidden {
 			t.Errorf("role %q read the workspace policy: %d", denied, status)
 		}
+		req := httptest.NewRequest(http.MethodGet, "/workspace/usage-report?since=24h", nil)
+		if resp, err := app.Test(req); err != nil || resp.StatusCode != http.StatusForbidden {
+			t.Errorf("role %q read the workspace usage report: status=%v err=%v", denied, resp.StatusCode, err)
+		}
 	}
 	role = tenancy.RoleAdmin
 	if status, body := policyRequest(t, app, http.MethodPut, `{"per_user_daily_tokens":500000}`); status != http.StatusOK {
@@ -88,6 +92,54 @@ func TestOnlyWorkspaceOwnersAndAdminsReadOrWriteTheWorkspacePolicy(t *testing.T)
 	role = tenancy.RoleOwner
 	if status, body := policyRequest(t, app, http.MethodPut, `{"daily_usd":5}`); status != http.StatusOK {
 		t.Fatalf("the owner was refused: %d %v", status, body)
+	}
+}
+
+func TestWorkspaceUsageReportExplainsMonitoringAndDemand(t *testing.T) {
+	role := tenancy.RoleAdmin
+	srv, app := policyApp(t, &role, "ws_team")
+	store, err := costs.NewStore(t.TempDir() + "/costs.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	srv.SetCostStore(store)
+	for _, record := range []costs.UsageRecord{
+		{Workspace: "ws_team", Subject: "usr_alice", AgentID: "research-agent", Provider: "nvidia", Model: "nemotron", TotalTokens: 120_000, CostMicros: 250_000, CostUSD: .25, CallID: "call-1", Status: "success", CreatedAt: time.Now()},
+		{Workspace: "ws_team", Subject: "usr_bob", AgentID: "briefing-agent", Provider: "openai", Model: "gpt", TotalTokens: 40_000, CostMicros: 100_000, CostUSD: .10, CallID: "call-2", Status: "success", CreatedAt: time.Now()},
+		{Workspace: "ws_other", Subject: "usr_eve", AgentID: "private-agent", Provider: "openai", Model: "gpt", TotalTokens: 999_000, CostMicros: 900_000, CostUSD: .90, CallID: "call-3", Status: "success", CreatedAt: time.Now()},
+	} {
+		if err := store.Record(t.Context(), record); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/workspace/usage-report?since=24h", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var report struct {
+		MonitoringMode string `json:"monitoring_mode"`
+		Totals         struct {
+			TotalTokens         int64 `json:"total_tokens"`
+			HighestUserTokens   int64 `json:"highest_user_tokens"`
+			SuggestedUserTokens int64 `json:"suggested_user_tokens"`
+		} `json:"totals"`
+		TopUsers []costs.ChargebackRow `json:"top_users"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&report); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK || report.MonitoringMode != "monitor_only" {
+		t.Fatalf("status=%d report=%+v", resp.StatusCode, report)
+	}
+	if report.Totals.TotalTokens != 160_000 || report.Totals.HighestUserTokens != 120_000 || report.Totals.SuggestedUserTokens != 250_000 {
+		t.Fatalf("unexpected totals: %+v", report.Totals)
+	}
+	if len(report.TopUsers) != 2 {
+		t.Fatalf("cross-workspace or missing usage: %+v", report.TopUsers)
 	}
 }
 

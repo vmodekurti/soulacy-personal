@@ -43,6 +43,7 @@ func (s *Server) SetWorkspacePolicyStore(store *workspacepolicy.Store) {
 
 func (s *Server) registerWorkspacePolicyRoutes(api fiber.Router) {
 	api.Get("/workspace/policy", s.handleGetWorkspacePolicy)
+	api.Get("/workspace/usage-report", s.handleGetWorkspaceUsageReport)
 	// Recent auth on the write. Lowering your own budget is harmless; the
 	// action worth gating is an unattended session being used to change what a
 	// workspace may spend, which is quiet, persists after the session ends,

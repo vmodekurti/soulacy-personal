@@ -163,7 +163,7 @@
         <label>Timeout<input bind:value={searchTimeout} placeholder="30s" disabled={!writable} /></label>
       </section>
 
-      {#if isWorkspaceAdmin}<section class="card wide"><h2>Workspace LLM budgets</h2><p>Workspace owners and administrators can set practical limits. Deployment ceilings still remain the upper boundary.</p>
+      {#if isWorkspaceAdmin}<section class="card wide"><h2>Workspace LLM budgets</h2><p>Positive values are hard stops and will reject model calls when reached. Use zero for monitoring-only, then review observed demand in <a href="#workspace-admin">Workspace settings → Usage report</a> before choosing a ceiling. Deployment safeguards remain the upper boundary.</p>
         <div class="budget-grid"><label>Daily spend (USD)<input type="number" min="0" step="0.01" bind:value={dailyUSD} disabled={!writable} /></label><label>Monthly spend (USD)<input type="number" min="0" step="0.01" bind:value={monthlyUSD} disabled={!writable} /></label><label>Workspace daily tokens<input type="number" min="0" bind:value={dailyTokens} disabled={!writable} /></label><label>Per-user tokens / 24h<input type="number" min="0" step="1000" bind:value={perUserDailyTokens} disabled={!writable} /></label><label>Concurrent runs<input type="number" min="0" bind:value={concurrency} disabled={!writable} /></label></div>
       </section>{/if}
 

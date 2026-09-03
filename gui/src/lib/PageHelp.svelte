@@ -102,7 +102,8 @@
       title: 'Workspace owner settings',
       intro: 'These controls govern only the active workspace and never alter deployment-wide configuration.',
       sections: [
-        ['Limits and retention', 'Set tighter workspace budgets, token and concurrency ceilings, and retention windows. Deployment ceilings always remain authoritative.'],
+        ['Limits and retention', 'Use monitoring-only while learning normal demand. Positive budgets are hard stops; deployment ceilings always remain authoritative.'],
+        ['Usage report', 'Review 24-hour, 7-day, and 30-day tokens, estimated spend, blocked calls, accounting coverage, and the busiest users, agents, and models.'],
         ['Automation credentials', 'Issue short-lived personal automation credentials, rotate them, or revoke them. Plaintext is shown only once.'],
         ['Audit and exports', 'Search the workspace-scoped audit trail and create expiring, checksummed exports.'],
         ['Deletion', 'Deletion starts a recoverable window. New writes stop immediately; an owner can cancel before the purge deadline.'],

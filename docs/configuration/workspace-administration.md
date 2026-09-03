@@ -15,8 +15,10 @@ grants access to deployment operations.
 An owner or administrator can set daily and monthly spend limits, an aggregate
 workspace daily-token ceiling, a per-user rolling 24-hour token allowance,
 concurrent-run limits, and retention windows for conversations, action events,
-and audit records. Zero or an empty duration means “inherit the deployment
-setting.”
+and audit records. A positive usage budget is a hard stop: Soulacy rejects new
+model calls when the effective ceiling is reached. Zero keeps workspace usage
+in monitoring-only mode while still inheriting any deployment-level ceiling;
+an empty duration inherits the deployment retention setting.
 
 Workspace values can only tighten the deployment administrator's ceiling. The
 screen shows both the stored request and the effective value so an administrator
@@ -24,6 +26,14 @@ can see when a deployment limit is lower. A public-demo token ceiling applies
 only to the configured demo workspace; it does not throttle ordinary customer
 workspaces. Retention values use Go duration syntax,
 such as `720h` for 30 days.
+
+The **Usage report** tab is available to workspace owners and administrators.
+It reports prompt-free 24-hour, 7-day, and 30-day token and estimated-cost
+totals, accounting coverage, failures and blocked calls, plus the busiest users,
+agents, and provider/model combinations. Soulacy also shows the observed
+per-user high-water mark and, for the rolling 24-hour view, a conservative
+starting point should an administrator later choose to enable a hard ceiling.
+Provider safeguards continue to apply when workspace hard limits are off.
 
 ## Workspace model and search configuration
 

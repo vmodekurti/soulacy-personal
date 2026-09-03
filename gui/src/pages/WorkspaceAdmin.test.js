@@ -42,16 +42,18 @@ describe('workspace administration settings', () => {
         effective: { per_user_daily_tokens: 500000 },
         retention: {},
       })
+      if (String(url).includes('/workspace/usage-report')) return Response.json({ monitoring_mode:'hard_limits_active', health:'healthy', totals:{ total_tokens:120000, calls:4, accounting_coverage:1 }, top_users:[], top_agents:[], top_models:[], recommendations:[] })
       return Response.json({})
     }))
     mount()
     await new Promise(resolve => setTimeout(resolve, 20))
 
-    expect(target.textContent).toContain('Per-user tokens / 24h')
-    expect(target.textContent).toContain('Effective per user: 500000')
+    expect(target.textContent).toContain('Per-user tokens / rolling 24h')
+    expect(target.textContent).toContain('Effective: 500,000')
     expect(target.textContent).not.toContain('Plan & billing')
     expect(target.textContent).not.toContain('Create automation credential')
-    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(target.textContent).toContain('Usage report')
+    expect(fetch).toHaveBeenCalledTimes(2)
   })
 
   it('loads owner-scoped policy and management sections', async () => {
@@ -59,6 +61,7 @@ describe('workspace administration settings', () => {
     vi.stubGlobal('fetch', vi.fn(async url => {
       const path = String(url)
       if (path.includes('/workspace/policy')) return Response.json({ policy: { daily_usd: 12 }, effective: { daily_usd: 10 }, retention: {} })
+      if (path.includes('/workspace/usage-report')) return Response.json({ monitoring_mode:'hard_limits_active', health:'healthy', totals:{}, top_users:[], top_agents:[], top_models:[], recommendations:[] })
       if (path.includes('/admin/api-keys')) return Response.json({ keys: [] })
       if (path.includes('/admin/audit')) return Response.json({ events: [], next_cursor: '' })
       if (path.includes('/workspace/export')) return Response.json({ exports: [] })

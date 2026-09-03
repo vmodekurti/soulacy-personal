@@ -565,6 +565,7 @@ export const api = {
     }),
     portal: () => apiFetch('/billing/portal', { method: 'POST', body: '{}' }),
     policy: () => apiFetch('/workspace/policy'),
+    usageReport: (since = '24h') => apiFetch('/workspace/usage-report?since=' + encodeURIComponent(since)),
     savePolicy: (body) => apiFetch('/workspace/policy', {
       method: 'PUT', body: JSON.stringify(body),
       _oidcReauthReturnTo: '/#workspace-admin',
