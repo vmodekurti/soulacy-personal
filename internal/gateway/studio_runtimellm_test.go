@@ -30,6 +30,9 @@ func TestStudioProviderAvailabilityIncludesWorkspaceEffectiveModel(t *testing.T)
 	}}}
 	providers, models := studioProviderAvailability(effective, func(id string) bool {
 		return id == "ollama-cloud"
+	}, map[string][]string{
+		"ollama-cloud": {"glm-5.2", "qwen/qwen3.5-397b-a17b"},
+		"openai":       {"gpt-4.1"},
 	})
 	if !providers["ollama-cloud"] || providers["openai"] {
 		t.Fatalf("provider availability = %#v", providers)
@@ -37,8 +40,38 @@ func TestStudioProviderAvailabilityIncludesWorkspaceEffectiveModel(t *testing.T)
 	if !models["glm-5.2"] || !models["ollama-cloud/glm-5.2"] {
 		t.Fatalf("workspace-selected model missing from availability: %#v", models)
 	}
+	if !models["qwen/qwen3.5-397b-a17b"] || !models["ollama-cloud/qwen/qwen3.5-397b-a17b"] {
+		t.Fatalf("live non-default model missing from availability: %#v", models)
+	}
 	if models["gpt-4o"] {
 		t.Fatalf("model from unavailable provider was advertised: %#v", models)
+	}
+	if models["gpt-4.1"] {
+		t.Fatalf("discovered model from unavailable provider was advertised: %#v", models)
+	}
+}
+
+// Regression: the Studio picker can choose any model returned by a provider,
+// not just that provider's workspace default. Save used to reject such a
+// choice even though the same provider would serve it at runtime.
+func TestStudioSave_AcceptsDiscoveredNonDefaultModel(t *testing.T) {
+	s, _ := studioFake(t)
+	s.config().LLM.DefaultProvider = "openai"
+
+	body := `{"workflow":{"name":"Discovered Model","trigger":{"type":"manual"},
+	  "llm":{"provider":"openai","model":"fake-model"},
+	  "new_agents":[{"id":"summarizer","name":"Summarizer","description":"Summarises","system_prompt":"You are Summarizer. Turn structured input into a short, friendly answer. If the input is empty, say so plainly."}],
+	  "flow":{"entry":"step","nodes":[
+	    {"id":"step","kind":"agent","agent":"summarizer","input":"Summarise: {{ .trigger.text }}","output":"response"}],
+	  "edges":[]}}}`
+
+	status, out := gatewayJSON(t, s, http.MethodPost, "/api/v1/studio/save", "k", body)
+	if status != http.StatusCreated {
+		t.Fatalf("save status=%d body=%v", status, out)
+	}
+	saved := s.loader.Get("discovered-model")
+	if saved == nil || saved.LLM.Model != "fake-model" {
+		t.Fatalf("saved agent did not retain discovered model: %#v", saved)
 	}
 }
 

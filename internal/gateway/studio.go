@@ -804,11 +804,14 @@ func (s *Server) preflightInput(c *fiber.Ctx, cat studio.Catalog) studio.Preflig
 		// intentionally do not live in the deployment-global router; consulting
 		// only s.config()/ProviderIDs() therefore reported a configured tenant
 		// provider and its selected model as two blockers.
-		settings := s.workspaceSettingsFor(c)
-		effective := s.effectiveWorkspaceConfig(settings)
-		providers, models := studioProviderAvailability(effective, func(id string) bool {
-			return s.providerRegisteredFor(c, id)
-		})
+		validation := s.agentValidationOptionsFor(c)
+		registered := make(map[string]bool, len(validation.RegisteredProviders))
+		for _, id := range validation.RegisteredProviders {
+			registered[strings.ToLower(strings.TrimSpace(id))] = true
+		}
+		providers, models := studioProviderAvailability(validation.Config, func(id string) bool {
+			return registered[strings.ToLower(strings.TrimSpace(id))]
+		}, validation.ProviderModels)
 		// Plugin providers may be registered without a config block. Keep them in
 		// the provider inventory even though there is no configured model to add.
 		for _, id := range s.llmRouter.ProviderIDs() {
@@ -822,25 +825,49 @@ func (s *Server) preflightInput(c *fiber.Ctx, cat studio.Catalog) studio.Preflig
 	return in
 }
 
-func studioProviderAvailability(effective *config.Config, available func(string) bool) (map[string]bool, map[string]bool) {
+func studioProviderAvailability(effective *config.Config, available func(string) bool, discovered map[string][]string) (map[string]bool, map[string]bool) {
 	providers := map[string]bool{}
 	models := map[string]bool{}
-	if effective == nil {
-		return providers, models
-	}
-	for id, pc := range effective.LLM.Providers {
-		id = strings.ToLower(strings.TrimSpace(id))
-		if id == "" {
-			continue
-		}
-		usable := available != nil && available(id)
-		providers[id] = usable
-		model := strings.TrimSpace(pc.Model)
-		if !usable || model == "" {
-			continue
+	addModel := func(provider, model string) {
+		provider = strings.ToLower(strings.TrimSpace(provider))
+		model = strings.TrimSpace(model)
+		if provider == "" || model == "" {
+			return
 		}
 		models[model] = true
-		models[id+"/"+model] = true
+		models[strings.ToLower(model)] = true
+		models[provider+"/"+model] = true
+		models[provider+"/"+strings.ToLower(model)] = true
+	}
+	if effective != nil {
+		for id, pc := range effective.LLM.Providers {
+			id = strings.ToLower(strings.TrimSpace(id))
+			if id == "" {
+				continue
+			}
+			usable := available != nil && available(id)
+			providers[id] = usable
+			if usable {
+				// Preserve the configured default as an offline fallback. Some
+				// OpenAI-compatible providers do not expose model discovery.
+				addModel(id, pc.Model)
+			}
+		}
+	}
+	// Studio's model picker is backed by the live provider catalog, so Save must
+	// judge agent-level choices against that same catalog rather than only the
+	// provider's configured default. Model ids may themselves be namespaced
+	// (for example "nvidia/llama-3.1-nemotron-70b-instruct"); addModel keeps that
+	// exact id as well as the provider-scoped lookup form expected by preflight.
+	for id, list := range discovered {
+		id = strings.ToLower(strings.TrimSpace(id))
+		if id == "" || available == nil || !available(id) {
+			continue
+		}
+		providers[id] = true
+		for _, model := range list {
+			addModel(id, model)
+		}
 	}
 	return providers, models
 }
