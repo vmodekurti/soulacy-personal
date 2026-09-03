@@ -3471,6 +3471,11 @@ func (s *Server) finalizeStudioResult(res *studio.Result, cat studio.Catalog, in
 	if res == nil {
 		return
 	}
+	// Broad deterministic templates used to stamp every new draft with the same
+	// label ("Knowledge Ingestion Agent", "Research Agent", ...). Give a new
+	// draft a purpose-specific, collision-safe display name while preserving an
+	// explicit user-supplied name and every existing agent's name.
+	studio.ImproveGeneratedAgentName(&res.Workflow, cat)
 	// Generated graphs must cross the same deterministic repair boundary as
 	// manually edited drafts. In particular, a parallel fan-out can imply its
 	// join barrier from the graph even when the builder omitted join_node.
