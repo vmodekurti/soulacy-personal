@@ -120,4 +120,17 @@ fi
 
 trap - ERR
 printf '%s\n' "$VERSION" >"$RELEASE_DIR/active"
+
+# Release bundles are rebuildable from the digest-pinned ECR images. Bound the
+# local rollback cache so a long-lived Team Lite host cannot fill its root disk
+# and strand SSM before the next deployment can clean it up.
+mapfile -t obsolete_releases < <(
+  find "$OPT_DIR/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' |
+    sort -nr |
+    awk 'NR > 5 { sub(/^[^ ]+ /, ""); print }'
+)
+for obsolete_release in "${obsolete_releases[@]}"; do
+  rm -rf -- "$obsolete_release"
+done
+
 echo "Applied Soulacy release $VERSION to $ROLE"

@@ -7,7 +7,10 @@ locals {
   gateway_instance_type = local.is_budget ? "t3.small" : var.gateway_instance_type
   worker_instance_type  = local.is_budget ? "t3.small" : var.worker_instance_type
   nats_instance_type    = local.is_budget ? "t3.micro" : var.nats_instance_type
-  gateway_volume_size   = local.is_budget ? 20 : 40
+  # Gateway releases retain a rollback bundle and temporarily stage a second
+  # binary set. Twenty GiB eventually left too little room for SSM itself to
+  # perform cleanup, so Team Lite keeps a modest operational reserve.
+  gateway_volume_size   = local.is_budget ? 30 : 40
   worker_volume_size    = local.is_budget ? 25 : 50
   nats_volume_size      = local.is_budget ? 15 : 40
   worker_concurrency    = local.is_budget ? 1 : var.worker_concurrency
