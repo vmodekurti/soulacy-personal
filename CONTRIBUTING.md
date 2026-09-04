@@ -23,6 +23,9 @@ make test       # runs the Go test suite with the race detector
 - Keep commits focused; write imperative commit subjects (`gateway: ...`,
   `runtime: ...`) matching the existing history.
 - Open a pull request against `main`. CI must be green before merge.
+- Sign off every commit with `git commit -s`. The sign-off certifies the
+  [Developer Certificate of Origin](DCO.md); pull requests with unsigned
+  commits are rejected by the source-availability check.
 
 ## Code standards
 
@@ -39,5 +42,7 @@ public issue.
 
 ## License
 
-By contributing, you agree that your contributions are licensed under the
-project's Apache-2.0 license.
+By contributing, you certify the [Developer Certificate of Origin](DCO.md).
+Accepted contributions are licensed under the project's Apache-2.0 license.
+The project name and logos are governed separately by
+[TRADEMARKS.md](TRADEMARKS.md).

@@ -3,6 +3,8 @@ name: Personal source availability
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   schedule:
     - cron: "17 9 * * 1"
   workflow_dispatch:
@@ -31,6 +33,15 @@ jobs:
           env -u GITHUB_TOKEN git ls-remote "https://github.com/${PUBLIC_REPOSITORY}.git" HEAD >/dev/null
 
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify Developer Certificate of Origin
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash scripts/check-dco.sh "$BASE_SHA" "$HEAD_SHA"
 
       - name: Verify Personal-only boundary
         run: bash scripts/check-personal-boundary.sh
