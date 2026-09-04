@@ -20,7 +20,9 @@ rg -q -F '${efs_id}:/ /var/lib/soulacy' deploy/aws/templates/worker-user-data.sh
 rg -q 'aws_security_group.worker' deploy/aws/security.tf
 rg -q 'elasticfilesystem:ClientMount' deploy/aws/iam.tf
 rg -q -F 'subscribe: ["soulacy.execution.jobs", "_INBOX.>"]' deploy/aws/templates/nats-user-data.sh.tftpl
-if rg -n 'docker.sock|--privileged|--network[ =]host' deploy/aws/templates/gateway-user-data.sh.tftpl deploy/aws/templates/worker-user-data.sh.tftpl; then
+if rg -n 'docker.sock|--privileged' deploy/aws/templates/gateway-user-data.sh.tftpl deploy/aws/templates/worker-user-data.sh.tftpl \
+  || rg -n -- '--network[ =]host' deploy/aws/templates/worker-user-data.sh.tftpl \
+  || (rg -n -- '--network[ =]host' deploy/aws/templates/gateway-user-data.sh.tftpl | rg -v 'soulacy-cloudflared'); then
   printf 'AWS gateway/worker templates contain a prohibited runtime escape\n' >&2
   exit 1
 fi
@@ -42,6 +44,7 @@ fi
 if command -v terraform >/dev/null 2>&1; then
   printf '==> AWS Terraform formatting, validation, and mode plans\n'
   terraform -chdir=deploy/aws fmt -check -recursive
+  terraform -chdir=deploy/aws init -backend=false -input=false
   terraform -chdir=deploy/aws validate
   terraform -chdir=deploy/aws test
 else

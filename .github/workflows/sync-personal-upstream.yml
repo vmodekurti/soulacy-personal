@@ -1,0 +1,80 @@
+name: Sync Personal upstream
+
+on:
+  schedule:
+    - cron: "17 10 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: sync-personal-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Open Personal update PR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch public upstream
+        run: |
+          git remote add personal https://github.com/vmodekurti/soulacy-personal.git
+          git fetch --no-tags personal main
+
+      - name: Prepare synchronization merge
+        id: prepare
+        run: |
+          set -euo pipefail
+          current="$(tr -d '[:space:]' < .personal-base)"
+          incoming="$(git rev-parse personal/main)"
+          echo "incoming=$incoming" >> "$GITHUB_OUTPUT"
+          if [ "$current" = "$incoming" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git merge-base --is-ancestor "$current" personal/main || {
+            echo "Recorded Personal base is not an ancestor of Personal main." >&2
+            exit 1
+          }
+
+          branch="automation/sync-personal"
+          git fetch origin "$branch:refs/remotes/origin/$branch" || true
+          git checkout -B "$branch" origin/main
+          git config user.name "soulacy-upstream-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if ! git merge --no-ff --no-commit personal/main; then
+            git status --short
+            echo "Personal cannot be synchronized automatically; resolve the merge in a Commercial branch." >&2
+            exit 1
+          fi
+          printf '%s\n' "$incoming" > .personal-base
+          git add .personal-base
+          git commit -m "Sync Personal upstream to ${incoming:0:12}"
+          git push --force-with-lease origin "HEAD:$branch"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+
+      - name: Open or refresh pull request
+        if: steps.prepare.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.prepare.outputs.branch }}
+          INCOMING: ${{ steps.prepare.outputs.incoming }}
+        run: |
+          set -euo pipefail
+          number="$(gh pr list --state open --head "$BRANCH" --json number --jq '.[0].number // empty')"
+          body="Automated downstream merge of public Soulacy Personal at \`$INCOMING\`. Commercial CI must pass the Personal, Team, and Scale contracts before this PR is merged."
+          if [ -n "$number" ]; then
+            gh pr edit "$number" --title "Sync Personal upstream" --body "$body"
+          else
+            gh pr create --base main --head "$BRANCH" --title "Sync Personal upstream" --body "$body"
+          fi

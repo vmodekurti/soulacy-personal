@@ -1,6 +1,6 @@
 # Soulacy edition architecture
 
-Status: migration contract adopted; repository extraction still pending.
+Status: repositories separated; downstream synchronization active.
 
 ## Decision
 
@@ -8,13 +8,14 @@ Soulacy uses an open-core, two-repository architecture:
 
 | Repository | License | Product | Dependency direction |
 | --- | --- | --- | --- |
-| `soulacy/soulacy` | Apache-2.0 | A complete, self-hosted Personal product | Depends on no commercial module |
-| `soulacy/soulacy-commercial` | Proprietary | Teams and Scale distributions | Imports and composes the public module |
+| `vmodekurti/soulacy-personal` | Apache-2.0 | A complete, self-hosted Personal product | Depends on no commercial repository |
+| `vmodekurti/soulacy-commercial` | Private | Personal plus Teams and Scale distributions | Merges the public upstream; never the reverse |
 
 The GitHub repositories now exist with the required visibility:
-[`vmodekurti/soulacy`](https://github.com/vmodekurti/soulacy) is public and
-`vmodekurti/soulacy-commercial` is private. The private repository contains
-only its boundary policy while implementation extraction is in progress.
+[`vmodekurti/soulacy-personal`](https://github.com/vmodekurti/soulacy-personal)
+is public and `vmodekurti/soulacy-commercial` is private. The former mixed
+repository is private and archived. `.personal-base` and Git ancestry identify
+the precise public revision contained by every Commercial commit.
 
 Scale extends Teams; Teams extends Personal. There is no sibling fork for each
 edition. A commercial binary is assembled at a composition root by registering
@@ -23,22 +24,19 @@ edition descriptors and implementations against the contracts in
 the contract and `gui/src/distribution/edition.js` is the replaceable
 composition root.
 
-The present repository cannot serve as the private commercial boundary during
-extraction. Its existing Git history must not be copied into a new public
-repository: it contains the period when
-Personal and commercial implementation were mixed. **The current GitHub origin
-is already public**, so moving files later cannot make previously published
-objects confidential. Treat that code as disclosed, rotate any exposed secrets,
-and obtain legal/security advice before relying on exclusivity for it. The
-public Personal repository should start from a new, audited snapshot if its
-location changes and retain history from that point onward.
+The new public repository was created from an audited Personal snapshot rather
+than by copying the mixed history. The former mixed repository and the canonical
+Commercial repository are private. Commercial history is never pushed into the
+public repository.
 
 ## GitHub source-availability rule
 
 Personal is the canonical public upstream, not a periodically generated mirror
 of a private monorepo. Day-to-day development of Personal lands in the public
-repository first. `soulacy-commercial` consumes tagged public-core versions and
-contains only the additive Teams/Scale implementation, packaging and tests.
+repository first. During the extraction period, `soulacy-commercial` merges
+public Personal commits and layers Teams/Scale implementation, packaging and
+tests on top. `.personal-base` records the included public revision. The target
+architecture remains separately versioned public modules plus private adapters.
 
 This gives the desired invariant: losing access to the private repository can
 never make Personal source unavailable. Conversely, cloning the public
@@ -55,9 +53,10 @@ The private repository should run the complementary checks:
 
 1. its visibility is `private`;
 2. its pinned public-core revision is anonymously cloneable;
-3. it contains no copied public-core source except generated release assets;
-4. its build records both public-core and commercial revisions;
-5. dependency updates are opened automatically when Personal is released.
+3. the recorded public revision is a Git ancestor of Commercial;
+4. its build records both public and commercial revisions;
+5. upstream updates arrive through automated, reviewable pull requests;
+6. Personal, Team and Scale contracts pass before those pull requests merge.
 
 ## What remains open
 
@@ -113,7 +112,7 @@ move behind contracts; known mixed files are not falsely declared separated.
 
 ## Extraction sequence
 
-1. **Contracts and composition (current change).** Introduce immutable edition
+1. **Contracts and composition (complete).** Introduce immutable edition
    descriptors, capability checks and one composition root per runtime.
 2. **Service ports.** Move tenancy, authorization, entitlement, audit and
    distributed execution dependencies behind narrow public interfaces. Keep
@@ -121,17 +120,16 @@ move behind contracts; known mixed files are not falsely declared separated.
 3. **Commercial extraction.** Move Teams/Scale adapters and pages into the
    private module. The private repository builds a distribution that embeds the
    public GUI and registers its additions.
-4. **Fresh public snapshot.** Generate an allowlisted snapshot, scan its full
+4. **Fresh public snapshot (complete).** Generate an allowlisted snapshot, scan its full
    contents and Git objects for secrets and proprietary material, then create a
    new public repository with a single initial commit.
-5. **Independent release proof.** CI must build and exercise Personal from the
+5. **Independent release proof (active).** CI builds and exercises Personal from the
    public repository alone. Commercial CI pins a public-core version and runs
    Personal, Teams and Scale contract tests.
 
-Do not use subtree filtering to publish the old history. Do not maintain a
-long-lived source-copy script as the architecture. During migration, a snapshot
-tool may verify extraction, but the end state is ordinary Go/JavaScript module
-composition with one-way imports.
+Do not use subtree filtering to publish the old history. Git merges currently
+carry public changes downstream; no script copies private source upstream. The
+end state remains ordinary Go/JavaScript module composition with one-way imports.
 
 ## Versioning and releases
 

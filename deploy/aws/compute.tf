@@ -10,10 +10,10 @@ locals {
   # Gateway releases retain a rollback bundle and temporarily stage a second
   # binary set. Twenty GiB eventually left too little room for SSM itself to
   # perform cleanup, so Team Lite keeps a modest operational reserve.
-  gateway_volume_size   = local.is_budget ? 30 : 40
-  worker_volume_size    = local.is_budget ? 25 : 50
-  nats_volume_size      = local.is_budget ? 15 : 40
-  worker_concurrency    = local.is_budget ? 1 : var.worker_concurrency
+  gateway_volume_size = local.is_budget ? 30 : 40
+  worker_volume_size  = local.is_budget ? 25 : 50
+  nats_volume_size    = local.is_budget ? 15 : 40
+  worker_concurrency  = local.is_budget ? 1 : var.worker_concurrency
   aws_cli_bootstrap = templatefile("${path.module}/templates/aws-cli.sh.tftpl", {
     aws_cli_version = var.aws_cli_version
     aws_cli_sha256  = var.aws_cli_sha256

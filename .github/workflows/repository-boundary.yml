@@ -2,7 +2,9 @@ name: Repository boundary
 
 on:
   push:
-    branches: [main, "codex/**"]
+    branches: [main, "codex/**", "automation/**"]
+  pull_request:
+    branches: [main]
   schedule:
     - cron: "31 9 * * 1"
   workflow_dispatch:
@@ -15,6 +17,10 @@ jobs:
     name: Private extension with public upstream
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Refuse public commercial repository
         env:
           REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
@@ -24,6 +30,21 @@ jobs:
             exit 1
           fi
 
-      - name: Verify Personal is anonymously accessible
+      - name: Verify Personal lineage and availability
+        run: ./scripts/verify-personal-upstream.sh
+
+      - name: Verify edition dependency direction
+        run: make edition-boundary
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.6"
+          cache: true
+
+      - name: Provide embedded GUI placeholder
         run: |
-          env -u GITHUB_TOKEN git ls-remote https://github.com/vmodekurti/soulacy.git HEAD >/dev/null
+          mkdir -p internal/webui/dist
+          printf '<html><body>CI placeholder</body></html>\n' > internal/webui/dist/index.html
+
+      - name: Verify Personal, Team, and Scale contracts
+        run: make deployment-modes-test

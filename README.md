@@ -1,7 +1,8 @@
 # Soulacy Commercial
 
 Private Teams and Scale extensions for the public
-[`vmodekurti/soulacy`](https://github.com/vmodekurti/soulacy) Personal edition.
+[`vmodekurti/soulacy-personal`](https://github.com/vmodekurti/soulacy-personal)
+Personal edition.
 
 This repository now preserves the combined implementation while it is split
 into a strictly additive commercial module:
@@ -11,6 +12,11 @@ into a strictly additive commercial module:
 - Teams extends Personal; Scale extends Teams.
 - Public Personal code never imports this private repository.
 - New Teams/Scale implementation and commercial release work happens here.
+
+Personal updates are merged downstream through automated, reviewable pull
+requests. `.personal-base` records the exact public revision currently included.
+See the [repository workflow](docs/architecture/repository-workflow.md) before
+changing code shared by Personal and Commercial.
 
 The imported history was briefly reachable on a non-default public branch
 before that branch was removed. Do not publish this repository or mirror its
