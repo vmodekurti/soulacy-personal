@@ -564,7 +564,7 @@ func inspectPythonSourceRepository(root, source, revision string) (stagedMCPInst
 		}
 	}
 	if len(scripts) == 0 {
-		return stagedMCPInstall{}, fmt.Errorf("Python MCP package has no safe project script")
+		return stagedMCPInstall{}, fmt.Errorf("python MCP package has no safe project script")
 	}
 	sort.Strings(scripts)
 	stage := stagedMCPInstall{

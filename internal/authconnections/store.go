@@ -271,7 +271,7 @@ func (s *Store) ReplaceAgentGrants(ctx context.Context, workspaceID, id string, 
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var exists int
 	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM authenticated_connections WHERE workspace_id=? AND id=?`, workspaceID, id).Scan(&exists); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -327,7 +327,7 @@ func (s *Store) SyncAgentSelection(ctx context.Context, workspaceID, agentID str
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	for id := range manageable {
 		if selected[id] {
 			if _, err := tx.ExecContext(ctx, `INSERT INTO authenticated_connection_grants

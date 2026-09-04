@@ -19,13 +19,15 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}   # ghcr.io/vmodekurti/soulacy
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   # ── Objective SaaS production gates ────────────────────────────────────────
   production-assurance:
     name: Production assurance
     runs-on: ubuntu-latest
+    outputs:
+      personal-revision: ${{ steps.edition-metadata.outputs.personal-revision }}
     services:
       postgres:
         image: postgres:16.4-alpine
@@ -55,6 +57,10 @@ jobs:
           --health-retries 20
     steps:
       - uses: actions/checkout@v4
+
+      - name: Record edition dependency metadata
+        id: edition-metadata
+        run: echo "personal-revision=$(tr -d '[:space:]' < .personal-base)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -410,10 +416,21 @@ jobs:
                   "bytes": archive.stat().st_size,
               })
 
+          personal_commit = pathlib.Path(".personal-base").read_text().strip()
+          if len(personal_commit) != 40:
+              raise SystemExit(".personal-base must contain a full Personal commit SHA")
+
           manifest = {
               "product": "soulacy",
+              "edition": "commercial",
               "version": version,
               "commit": os.environ["COMMIT"],
+              "dependencies": {
+                  "personal": {
+                      "repository": "https://github.com/vmodekurti/soulacy-personal.git",
+                      "commit": personal_commit,
+                  }
+              },
               "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
               "artifacts": release_artifacts,
           }
@@ -491,23 +508,21 @@ jobs:
 
             ### Installation
 
-            **One-line install** (macOS & Linux — downloads this release's
-            binaries, falls back to building from source):
+            Soulacy Commercial is distributed from a private repository.
+            Authenticate with GitHub, then download the release assets:
             ```bash
-            curl -fsSL https://raw.githubusercontent.com/vmodekurti/soulacy/${{ github.ref_name }}/install.sh | bash
+            gh auth login
+            gh release download ${{ github.ref_name }} --repo vmodekurti/soulacy-commercial
             ```
 
-            **Docker (full stack)**:
+            **Docker** (authenticate to GHCR first):
             ```bash
-            curl -o docker-compose.yml https://raw.githubusercontent.com/vmodekurti/soulacy/${{ github.ref_name }}/docker-compose.yml
-            docker compose up
+            gh auth token | docker login ghcr.io -u USERNAME --password-stdin
+            docker pull ghcr.io/vmodekurti/soulacy-commercial:${{ github.ref_name }}
+            docker run -p 18789:18789 -v ~/.soulacy:/home/soulacy/.soulacy ghcr.io/vmodekurti/soulacy-commercial:${{ github.ref_name }}
             ```
 
-            **Docker (SQLite only)**:
-            ```bash
-            docker pull ghcr.io/vmodekurti/soulacy:${{ github.ref_name }}
-            docker run -p 18789:18789 -v ~/.soulacy:/home/soulacy/.soulacy ghcr.io/vmodekurti/soulacy:${{ github.ref_name }}
-            ```
+            Compatible Personal revision: `${{ needs.production-assurance.outputs.personal-revision }}`
 
             ### Downloads
             | Platform | Binary |
@@ -530,7 +545,7 @@ jobs:
             cosign verify-blob \
               --certificate checksums.sha256.pem \
               --signature checksums.sha256.sig \
-              --certificate-identity-regexp 'https://github.com/vmodekurti/soulacy/.github/workflows/release.yml@.*' \
+              --certificate-identity-regexp 'https://github.com/vmodekurti/soulacy-commercial/.github/workflows/release.yml@.*' \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com \
               checksums.sha256
             ```

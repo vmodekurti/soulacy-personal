@@ -35,7 +35,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -584,19 +583,6 @@ func patchUpdateManifestURL(path, manifestURL string) error {
 	return saveConfigDoc(path, doc)
 }
 
-// ollamaUp returns true when a HEAD/GET to localhost:11434 succeeds in
-// under 1 second. We use this for the "Ollama is running locally" hint
-// in step 3 — never to make a decision for the operator.
-func ollamaUp() bool {
-	client := &http.Client{Timeout: 1 * time.Second}
-	resp, err := client.Get("http://localhost:11434/api/tags")
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-	return resp.StatusCode < 500
-}
-
 // countAgentsOnDisk walks the agents dir looking for SOUL.yaml files.
 // Doesn't recurse beyond the immediate child dirs — agents live at
 // <agents>/<id>/SOUL.yaml in the soulspace layout.
@@ -782,10 +768,10 @@ func inspectContainerRuntime(ctx context.Context) (string, string, error) {
 	defer cancel()
 	versionBytes, err := exec.CommandContext(checkCtx, path, "version", "--format", "{{.Server.Version}}").Output()
 	if err != nil {
-		return "", "", fmt.Errorf("Docker CLI found at %s, but its daemon is unavailable: %w", path, err)
+		return "", "", fmt.Errorf("docker CLI found at %s, but its daemon is unavailable: %w", path, err)
 	}
 	if err := exec.CommandContext(checkCtx, path, "info", "--format", "{{json .SecurityOptions}}").Run(); err != nil {
-		return "", "", fmt.Errorf("Docker daemon does not expose the isolation capabilities Soulacy requires: %w", err)
+		return "", "", fmt.Errorf("docker daemon does not expose the isolation capabilities Soulacy requires: %w", err)
 	}
 	return path, strings.TrimSpace(string(versionBytes)), nil
 }

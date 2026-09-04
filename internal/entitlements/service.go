@@ -105,7 +105,7 @@ func (s *PostgresStore) ApplyEvent(ctx context.Context, id string, e Entitlement
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback(ctx) // no-op after commit
+	defer func() { _ = tx.Rollback(ctx) }() // no-op after commit
 	tag, err := tx.Exec(ctx, `INSERT INTO billing_webhook_events(event_id,source,workspace_id,applied_status) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, id, source, e.WorkspaceID, e.Status)
 	if err != nil {
 		return false, err
@@ -173,7 +173,7 @@ func (h StripeWebhook) Handle(ctx context.Context, body []byte, signature string
 		return err
 	}
 	if event.ID == "" {
-		return fmt.Errorf("Stripe event id is required")
+		return fmt.Errorf("stripe event id is required")
 	}
 	obj := event.Data.Object
 	workspace := strings.TrimSpace(obj.Metadata["workspace_id"])

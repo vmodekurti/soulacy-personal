@@ -674,12 +674,6 @@ func (e *Engine) SetSearchConfig(provider, apiKey string) {
 	e.searchAPIKey = strings.TrimSpace(apiKey)
 }
 
-func (e *Engine) getSearchConfig() (string, string) {
-	e.searchProviderMu.RLock()
-	defer e.searchProviderMu.RUnlock()
-	return e.searchProvider, e.searchAPIKey
-}
-
 // SetWorkspaceSearchResolver overlays tenant-owned search settings at call
 // time. The request context carries the verified workspace identity, so a
 // shared worker never needs a mutable "current tenant" global.

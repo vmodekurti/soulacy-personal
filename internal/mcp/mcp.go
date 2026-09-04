@@ -509,9 +509,11 @@ func (c *Client) RemoveServer(id string) error {
 
 	drained := make(chan struct{})
 	go func() {
+		// Taking the call lock is a barrier: once acquired, every call that was
+		// in flight when this server was removed has completed.
 		target.callMu.Lock()
-		target.callMu.Unlock()
 		close(drained)
+		target.callMu.Unlock()
 	}()
 	select {
 	case <-drained:

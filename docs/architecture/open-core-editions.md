@@ -58,7 +58,7 @@ The private repository should run the complementary checks:
 5. upstream updates arrive through automated, reviewable pull requests;
 6. Personal, Team and Scale contracts pass before those pull requests merge.
 
-## What remains open
+## What remains open source
 
 Personal is a useful product rather than a crippled trial. It owns:
 
@@ -133,11 +133,11 @@ end state remains ordinary Go/JavaScript module composition with one-way imports
 
 ## Versioning and releases
 
-The public core uses semantic versions. The commercial repository pins a core
-version and publishes its own release with a compatibility declaration, for
-example `commercial 1.4.x requires core ^1.8`. Breaking contract changes land in
+The public core uses semantic versions. The commercial repository pins an exact
+Personal commit in `.personal-base`; Commercial release manifests publish that
+revision beside their own version and commit. Breaking contract changes land in
 the public core first, with deprecation coverage, before commercial consumers
-move. Release artifacts state their edition and source revision at runtime.
+move. Release artifacts therefore state their edition and both source revisions.
 
 ## Licensing and trademarks
 

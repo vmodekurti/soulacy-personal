@@ -25,7 +25,8 @@ The imported history was briefly reachable on a non-default public branch
 before that branch was removed. Do not publish this repository or mirror its
 branches to the public remote.
 
-No license is granted for new work in this repository unless a file explicitly
-says otherwise. Files imported from the former public history retain the
-license under which they were published. Commercial license terms require
-legal review before distribution.
+Files imported from Personal retain their Apache-2.0 license. Teams/Scale work
+first authored here is governed by [LICENSE-COMMERCIAL](LICENSE-COMMERCIAL).
+See the [commercial source boundary](docs/architecture/commercial-source-boundary.md)
+for ownership rules. Final product terms require legal review before external
+commercial distribution.

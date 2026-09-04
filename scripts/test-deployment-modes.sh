@@ -43,8 +43,13 @@ fi
 
 if command -v terraform >/dev/null 2>&1; then
   printf '==> AWS Terraform formatting, validation, and mode plans\n'
+  # Never reuse an operator's initialized backend or credentials. Contract
+  # tests are read-only and must behave identically on a laptop and in CI.
+  terraform_data_dir="$(mktemp -d "${TMPDIR:-/tmp}/soulacy-terraform-test-XXXXXXXX")"
+  trap 'rm -rf "$terraform_data_dir"' EXIT
+  export TF_DATA_DIR="$terraform_data_dir"
   terraform -chdir=deploy/aws fmt -check -recursive
-  terraform -chdir=deploy/aws init -backend=false -input=false
+  terraform -chdir=deploy/aws init -backend=false -input=false -reconfigure
   terraform -chdir=deploy/aws validate
   terraform -chdir=deploy/aws test
 else

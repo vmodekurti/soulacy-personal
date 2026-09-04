@@ -611,17 +611,6 @@ func (s *Scheduler) addOneShot(key scheduleKey, def *agent.Definition) error {
 	return nil
 }
 
-// fire synthesises a trigger message and dispatches it to the engine.
-func (s *Scheduler) fire(agentID, triggerType string) {
-	s.fireAt(keyFor(s.defaultWorkspace(), agentID), triggerType, time.Now().UTC().Truncate(time.Second))
-}
-
-// definition looks the agent up, tolerating a scheduler built without a loader
-// (embedded uses and some tests) — "no opinion" rather than a panic.
-func (s *Scheduler) definition(agentID string) *agent.Definition {
-	return s.definitionIn(keyFor(s.defaultWorkspace(), agentID))
-}
-
 // definitionIn resolves an agent within its own workspace. Resolving by ID
 // alone returned whichever tenant's agent happened to be registered under that
 // ID — the collision this story is about, in the one place where getting it

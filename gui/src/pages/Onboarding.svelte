@@ -7,7 +7,7 @@
   import { api } from '../lib/api.js'
 
   const STEPS = ['Provider', 'Test', 'Template', 'Channel', 'Updates', 'Launch']
-  const DEFAULT_UPDATE_MANIFEST = 'https://github.com/vmodekurti/soulacy/releases/latest/download/release-manifest.json'
+  const DEFAULT_UPDATE_MANIFEST = 'https://github.com/vmodekurti/soulacy-commercial/releases/latest/download/release-manifest.json'
   const FOCUS_OPTIONS = [
     { id: 'research', label: 'Daily research', terms: ['research', 'brief', 'market', 'stock', 'monitor', 'weather', 'news'] },
     { id: 'work', label: 'Inbox & meetings', terms: ['inbox', 'meeting', 'minutes', 'triage', 'action'] },

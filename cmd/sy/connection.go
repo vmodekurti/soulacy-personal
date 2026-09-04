@@ -178,7 +178,7 @@ func findChrome(explicit string) (string, error) {
 		if _, err := os.Stat(explicit); err == nil {
 			return explicit, nil
 		}
-		return "", fmt.Errorf("Chrome executable not found at %s", explicit)
+		return "", fmt.Errorf("chrome executable not found at %s", explicit)
 	}
 	candidates := []string{"google-chrome", "google-chrome-stable", "chromium", "chromium-browser"}
 	if runtime.GOOS == "darwin" {
@@ -195,7 +195,7 @@ func findChrome(explicit string) (string, error) {
 			return path, nil
 		}
 	}
-	return "", errors.New("Chrome or Chromium is required for secure session capture; install it or pass --chrome")
+	return "", errors.New("chrome or Chromium is required for secure session capture; install it or pass --chrome")
 }
 
 func waitForChromePage(ctx context.Context, port int) (string, error) {
@@ -205,7 +205,7 @@ func waitForChromePage(ctx context.Context, port int) (string, error) {
 	for {
 		select {
 		case <-ctx.Done():
-			return "", errors.New("Chrome did not expose its isolated debugging session")
+			return "", errors.New("chrome did not expose its isolated debugging session")
 		case <-ticker.C:
 			response, err := http.Get(endpoint)
 			if err != nil {

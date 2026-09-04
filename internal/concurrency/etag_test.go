@@ -31,7 +31,9 @@ func TestAStaleUpdateIsRefused(t *testing.T) {
 // needs none — any replica computes the same token for the same bytes.
 func TestTheTokenIsDerivedFromContentNotACounter(t *testing.T) {
 	content := []byte("agent: unchanged")
-	if ETag(content) != ETag(content) {
+	firstToken := ETag(content)
+	secondToken := ETag(content)
+	if firstToken != secondToken {
 		t.Fatal("the same content produced two tokens; replicas would disagree")
 	}
 	if ETag(content) == ETag([]byte("agent: edited")) {

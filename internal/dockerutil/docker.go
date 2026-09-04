@@ -58,7 +58,7 @@ func Resolve() (string, error) {
 			}
 		}
 	}
-	return "", fmt.Errorf("Docker CLI not found; install Docker Desktop or set SOULACY_DOCKER_BIN to its absolute path")
+	return "", fmt.Errorf("docker CLI not found; install Docker Desktop or set SOULACY_DOCKER_BIN to its absolute path")
 }
 
 func resolveCandidate(candidate string) (string, error) {

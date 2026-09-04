@@ -31,6 +31,20 @@
       ]
     }
   },
+  "commercial_modules": {
+    "teams": [
+      "internal/entitlements",
+      "internal/tenancy",
+      "internal/ratelimit/tenancy.go",
+      "gui/src/pages/Members.svelte",
+      "gui/src/pages/WorkspaceAdmin.svelte",
+      "gui/src/pages/WorkspaceProviders.svelte"
+    ],
+    "scale": [
+      "internal/executor/remote",
+      "gui/src/pages/PlatformAdmin.svelte"
+    ]
+  },
   "contracts": {
     "public_agent_api": {
       "path": "pkg/agent",
@@ -59,6 +73,10 @@
     "dependency_boundary": {
       "path": "scripts/check-edition-boundary.sh",
       "change_policy": "coordinated"
+    },
+    "commercial_overlay": {
+      "path": "dependencies/commercial-overlay.txt",
+      "change_policy": "commercial_only"
     }
   }
 }

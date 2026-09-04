@@ -1,0 +1,24 @@
+Soulacy Commercial Proprietary License Notice
+
+Copyright (c) 2026 Vasu. All rights reserved.
+
+This repository contains two classes of source code:
+
+1. Files incorporated from Soulacy Personal remain available under the
+   Apache License 2.0 in LICENSE and retain all rights granted by that license.
+2. Teams and Scale source code, private adapters, commercial packaging, and
+   other work first authored in this repository are proprietary unless a file
+   or directory explicitly states another license.
+
+No license is granted to use, reproduce, modify, distribute, sublicense, sell,
+or disclose the proprietary material except under a separate written agreement
+with the copyright owner. Access to this private repository does not itself
+grant those rights.
+
+THE PROPRIETARY MATERIAL IS PROVIDED "AS IS", WITHOUT WARRANTIES OR CONDITIONS
+OF ANY KIND, EXPRESS OR IMPLIED, EXCEPT AS EXPRESSLY PROVIDED IN A SEPARATE
+WRITTEN AGREEMENT.
+
+This notice does not restrict rights already granted for Apache-2.0 material
+or third-party components. Product distribution terms and this notice should
+be reviewed by qualified counsel before external commercial distribution.

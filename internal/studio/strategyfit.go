@@ -210,7 +210,6 @@ func SingleStrategyFitStore(store *StrategyFitStore) StrategyFitStores {
 // StrategyFitCollector records exactly one terminal outcome per run. Record is
 // dispatched asynchronously so action-log emission is never coupled to disk IO.
 type StrategyFitCollector struct {
-	store    *StrategyFitStore
 	stores   StrategyFitStores
 	resolve  StrategyResolver
 	mu       sync.Mutex

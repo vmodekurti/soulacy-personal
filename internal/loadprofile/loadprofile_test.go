@@ -268,7 +268,7 @@ func TestTheLoadIsSpreadAcrossWorkspaces(t *testing.T) {
 	}
 	seen := map[string]int{}
 	current := time.Unix(0, 0)
-	var mu chan struct{} = make(chan struct{}, 1)
+	mu := make(chan struct{}, 1)
 	mu <- struct{}{}
 	_, err := Run(context.Background(), Options{
 		Profile: profile,
