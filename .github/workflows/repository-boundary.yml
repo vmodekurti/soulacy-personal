@@ -1,0 +1,29 @@
+name: Repository boundary
+
+on:
+  push:
+    branches: [main, "codex/**"]
+  schedule:
+    - cron: "31 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  visibility-and-upstream:
+    name: Private extension with public upstream
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse public commercial repository
+        env:
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          if [ "$REPOSITORY_PRIVATE" != "true" ]; then
+            echo "Soulacy Commercial must remain private." >&2
+            exit 1
+          fi
+
+      - name: Verify Personal is anonymously accessible
+        run: |
+          env -u GITHUB_TOKEN git ls-remote https://github.com/vmodekurti/soulacy.git HEAD >/dev/null
