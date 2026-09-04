@@ -42,4 +42,21 @@ describe('focused Chat workspace', () => {
     expect(chat).toContain('An auditable summary of decisions, tools, and evidence.')
     expect(chat).not.toContain('const thinking = { open: true, events: [] }')
   })
+
+  it('keeps active chat runs and every turn trace across page navigation', () => {
+    expect(chat).toContain('thinking: m.thinking ? { ...m.thinking, open: false } : null')
+    expect(chat).toContain('if (Object.keys($chatThreads).length === 0) restoreThreads()')
+    expect(chat).toContain('const live = Object.values($chatThreads).find(t => t.activeRunKey === key)')
+    expect(chat).toContain("return live?.id || ''")
+    expect(chat).toContain('backfillAllThinking(id, t.agentId, t.sessionId)')
+    expect(chat).toContain('await backfillAllThinking(activeThread.id, activeThread.agentId, activeThread.sessionId)')
+    expect(chat).not.toContain('await backfillLatestThinking(')
+  })
+
+  it('makes complete conversation-history search reachable on mobile', () => {
+    expect(chat).toContain('Search conversation history</button>')
+    expect(chat).toContain("api.history.search(historyQuery.trim(), '', 50)")
+    expect(chat).toContain('Search questions and answers')
+    expect(chat).toContain('position: fixed; z-index: 55; top: calc(58px + env(safe-area-inset-top))')
+  })
 })

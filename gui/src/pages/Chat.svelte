@@ -24,7 +24,6 @@
   let metricsRefresh = 0
   let forking = false
   let activeThread = null
-  let activeRuns = {}
   let threads = []
   let visibleMessages = []
   let isSending = false
@@ -169,6 +168,9 @@
             parts: m.parts || null,
             attachments: m.attachments || null,
             runId: m.runId || '', responseId: m.responseId || '', feedback: m.feedback || 0,
+            // Keep the per-turn activity record with the message. Closed is the
+            // durable/default presentation; opening a trace is transient UI.
+            thinking: m.thinking ? { ...m.thinking, open: false } : null,
           })),
         }
       }
@@ -191,7 +193,11 @@
           pinned: !!t.pinned, archived: !!t.archived,
           createdAt: t.createdAt || Date.now(), updatedAt: t.updatedAt || Date.now(),
           branches: t.branches || [],
-          messages: (t.messages || []).map(m => ({ ...m, ts: m.ts ? new Date(m.ts) : new Date() })),
+          messages: (t.messages || []).map(m => ({
+            ...m,
+            ts: m.ts ? new Date(m.ts) : new Date(),
+            thinking: m.thinking ? { ...m.thinking, open: false, events: m.thinking.events || [] } : null,
+          })),
         }
       }
       chatThreads.set(revived)
@@ -273,7 +279,10 @@
     chatActiveThreadId.set(id)
     metricsRefresh++
     const t = $chatThreads[id]
-    if (t?.agentId && t?.sessionId) loadArtifacts(id, t.agentId, t.sessionId)
+    if (t?.agentId && t?.sessionId) {
+      loadArtifacts(id, t.agentId, t.sessionId)
+      backfillAllThinking(id, t.agentId, t.sessionId)
+    }
     if (mobileViewport) chatListHidden = true
     scrollBottom()
   }
@@ -530,7 +539,6 @@
     const attachmentIds = turnAttachments.map(a => a.id).filter(Boolean)
     const thinking = { open: false, events: [] }
     const runStartedAt = Date.now()
-    activeRuns = { ...activeRuns, [runKey]: threadId }
     if (!hasExplicitText) input = ''
     if (!hasExplicitText) pendingAttachments = []
     updateThread(threadId, t => ({
@@ -614,8 +622,6 @@
       }
     }
     updateThread(threadId, t => ({ ...t, sending: false, thinking: null, streamText: '', activeRunKey: '' }))
-    const { [runKey]: _, ...rest } = activeRuns
-    activeRuns = rest
     metricsRefresh++   // re-fetch the session metrics strip (Story 7)
     await scrollBottom()
 	return responseMode === 'voice' ? (spokenReply || replyText) : replyText
@@ -908,7 +914,9 @@
     historySearching = true
     historySearchError = ''
     try {
-      const res = await api.history.search(historyQuery.trim(), activeThread?.agentId || '', 50)
+      // Search the user's complete workspace history, not just whichever agent
+      // happens to be selected when the search panel opens.
+      const res = await api.history.search(historyQuery.trim(), '', 50)
       historyResults = res.hits || []
     } catch (e) {
       historySearchError = e.message || 'Search failed'
@@ -922,6 +930,7 @@
     try {
       const hist = await api.history.get(hit.session_id)
       const existing = Object.values($chatThreads).find(t => t.sessionId === hit.session_id)
+      let openedThread = existing
       if (existing) {
         chatActiveThreadId.set(existing.id)
       } else {
@@ -933,9 +942,13 @@
         t.updatedAt = Date.now()
         upsertThread(t)
         chatActiveThreadId.set(t.id)
+        openedThread = t
       }
       historySearchOpen = false
       metricsRefresh++
+      if (openedThread?.id && openedThread?.agentId) {
+        await backfillAllThinking(openedThread.id, openedThread.agentId, openedThread.sessionId)
+      }
       await scrollBottom()
     } catch (e) {
       historySearchError = e.message || 'Could not open session'
@@ -1229,7 +1242,11 @@
 
   function threadIdForRunEvent(ev) {
     const key = `${ev.agent_id || ''}|${ev.session_id || ''}`
-    return activeRuns[key] || ''
+    // A new Chat component is created after navigating away and back. Rebuild
+    // routing from the shared thread state so its websocket can immediately
+    // resume streaming the run started by the previous component instance.
+    const live = Object.values($chatThreads).find(t => t.activeRunKey === key)
+    return live?.id || ''
   }
 
   function isThinkingEvent(ev) {
@@ -1275,29 +1292,61 @@
     } catch (_) { /* live events remain available when durable history is disabled */ }
   }
 
-  async function backfillLatestThinking(threadId, agentId, sessionId) {
+  async function backfillAllThinking(threadId, agentId, sessionId) {
     const thread = $chatThreads[threadId]
     if (!thread?.messages?.length) return
-    let assistantIndex = -1
-    for (let i = thread.messages.length - 1; i >= 0; i--) {
-      if (thread.messages[i].role === 'assistant') { assistantIndex = i; break }
-    }
-    if (assistantIndex < 0) return
+    const responseTurns = []
     let userIndex = -1
-    for (let i = assistantIndex - 1; i >= 0; i--) {
-      if (thread.messages[i].role === 'user') { userIndex = i; break }
+    for (let i = 0; i < thread.messages.length; i++) {
+      const msg = thread.messages[i]
+      if (msg.role === 'user') { userIndex = i; continue }
+      const isFailedTurn = msg.role === 'system' && String(msg.text || '').startsWith('⚠')
+      if (userIndex >= 0 && (msg.role === 'assistant' || isFailedTurn)) {
+        responseTurns.push({ index: i, userIndex, agentId: msg.agentId || agentId })
+        userIndex = -1
+      }
     }
-    if (userIndex < 0) return
-    const startedAt = new Date(thread.messages[userIndex].ts).getTime()
-    const endedAt = new Date(thread.messages[assistantIndex].ts).getTime() + 2000
-    await backfillThinkingForTurn(threadId, agentId, sessionId, startedAt, endedAt)
-    updateThread(threadId, t => ({
-      ...t,
-      messages: t.messages.map((m, i) => i === assistantIndex && t.thinking?.events?.length
-        ? { ...m, thinking: t.thinking }
-        : m),
-      thinking: null,
+    if (!responseTurns.length) return
+
+    const eventSets = {}
+    await Promise.all([...new Set(responseTurns.map(turn => turn.agentId).filter(Boolean))].map(async id => {
+      try {
+        const res = await api.agents.actions(id, 500, THINKING_EVENT_TYPES, { durable: true })
+        eventSets[id] = (res.events || []).filter(ev => ev.session_id === sessionId && isThinkingEvent(ev))
+      } catch (_) {
+        eventSets[id] = []
+      }
     }))
+
+    updateThread(threadId, current => {
+      const messages = [...current.messages]
+      for (const turn of responseTurns) {
+        const response = messages[turn.index]
+        const prompt = messages[turn.userIndex]
+        if (!response || !prompt) continue
+        const startedAt = new Date(prompt.ts).getTime() - 1000
+        const endedAt = new Date(response.ts).getTime() + 2000
+        const recovered = (eventSets[turn.agentId] || []).filter(ev => {
+          const at = Date.parse(ev.timestamp || '')
+          return Number.isFinite(at) && at >= startedAt && at <= endedAt
+        })
+        const existing = response.thinking?.events || []
+        const seen = new Set(existing.map(thinkingEventKey))
+        const merged = [...existing]
+        for (const ev of recovered) {
+          const key = thinkingEventKey(ev)
+          if (!seen.has(key)) { seen.add(key); merged.push(ev) }
+        }
+        if (merged.length) {
+          merged.sort((a, b) => Date.parse(a.timestamp || '') - Date.parse(b.timestamp || ''))
+          messages[turn.index] = {
+            ...response,
+            thinking: { open: response.thinking?.open ?? false, events: merged.slice(-80) },
+          }
+        }
+      }
+      return { ...current, messages }
+    })
   }
 
   function toggleThinking(thinking) {
@@ -1949,7 +1998,10 @@
       const savedChatList = localStorage.getItem('soulacy-chatlist-hidden')
       chatListHidden = savedChatList == null ? mobileViewport : savedChatList === '1'
     } catch (_) { chatListHidden = mobileViewport }
-    restoreThreads()      // repopulate the chat list from a previous session
+    // The shared store survives SPA navigation and may contain an active run.
+    // Only restore disk state on a genuine cold load; replacing a populated
+    // store here can erase an answer that completed while Chat was unmounted.
+    if (Object.keys($chatThreads).length === 0) restoreThreads()
     hydrated = true       // now persist future changes
     await Promise.all([loadAgents(), loadProviders()])
     // First-run wizard hands off the freshly created agent so Chat opens with it
@@ -1967,6 +2019,9 @@
     }
     await Promise.all([loadVoiceStatus(), loadChatStatus()])
     connectEvents()
+    if (activeThread?.id && activeThread?.agentId && activeThread?.sessionId) {
+      await backfillAllThinking(activeThread.id, activeThread.agentId, activeThread.sessionId)
+    }
     window.addEventListener('keydown', onGlobalKey)
     // Scroll to bottom when returning to a conversation already in progress
     await scrollBottom()
@@ -2199,6 +2254,7 @@
         {#if chatMoreOpen}
           <div class="chat-more-menu">
             {#if chatStatus}<button on:click={() => { chatStatusOpen = !chatStatusOpen; chatMoreOpen = false }}>{chatStatus.score || 0}% Chat readiness</button>{/if}
+            <button on:click={() => { historySearchOpen = true; chatMoreOpen = false }}>Search conversation history</button>
             <button on:click={() => { controlsOpen = !controlsOpen; chatMoreOpen = false }}>Model &amp; generation controls</button>
             <button on:click={() => { artifactPanelOpen = !artifactPanelOpen; if (artifactPanelOpen && activeThread) loadArtifacts(activeThread.id, activeThread.agentId, activeThread.sessionId); chatMoreOpen = false }} disabled={!activeThread?.agentId}>Artifacts {currentArtifacts.length ? `(${currentArtifacts.length})` : ''}</button>
             <button on:click={() => { exportThreadMarkdown(); chatMoreOpen = false }} disabled={!activeThread?.messages?.length}>Export Markdown</button>
@@ -2727,12 +2783,13 @@
     <aside class="history-panel" transition:slide|local={{ duration: 160 }} aria-label="Chat history search">
       <div class="artifact-head">
         <div>
-          <h2>Search</h2>
-          <p>{activeThread?.agentId ? agentName(activeThread.agentId) : 'All chats'}</p>
+          <h2>Search conversation history</h2>
+          <p>All agents and previous requests</p>
         </div>
+        <button class="ghost-icon" type="button" on:click={() => historySearchOpen = false} title="Close search" aria-label="Close search">×</button>
       </div>
       <form class="history-search-form" on:submit|preventDefault={searchHistory}>
-        <input type="search" bind:value={historyQuery} placeholder="Search old conversations" />
+        <input type="search" bind:value={historyQuery} placeholder="Search questions and answers" aria-label="Search previous questions and answers" />
         <button class="mini-btn" disabled={historySearching || !historyQuery.trim()}>{historySearching ? 'Searching...' : 'Go'}</button>
       </form>
       {#if historySearchError}
@@ -4011,6 +4068,12 @@
     .modern-chat :global(.markdown-body th:first-child), .modern-chat :global(.markdown-body td:first-child) { min-width: 86px; }
     .modern-chat .msg-actions { display: none; }
     .modern-chat .pending-attachments { width: calc(100% - 1rem); }
+    .modern-chat .history-panel {
+      position: fixed; z-index: 55; top: calc(58px + env(safe-area-inset-top));
+      right: 0; bottom: calc(64px + env(safe-area-inset-bottom)); left: 0;
+      width: 100%; max-width: none; border: 0; border-radius: 0;
+      background: rgba(15, 22, 40, .98);
+    }
     .modern-chat .input-row {
       width: auto; min-height: 58px; margin: .35rem .65rem .55rem; padding: .38rem; gap: .35rem; border-radius: 20px;
       background: rgba(25,35,59,.96); box-shadow: 0 10px 30px rgba(1,4,12,.28); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);

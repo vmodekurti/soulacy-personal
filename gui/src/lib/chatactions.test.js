@@ -8,7 +8,7 @@ const name = (id) => ({ a: 'Alpha', b: 'Bravo' }[id] || id)
 
 describe('filterThreads', () => {
   const threads = [
-    { id: '1', agentId: 'a', title: 'Taxes', updatedAt: 10 },
+    { id: '1', agentId: 'a', title: 'Taxes', updatedAt: 10, messages: [{ role: 'user', text: 'capital gains allowance' }] },
     { id: '2', agentId: 'b', title: 'Travel', updatedAt: 30, pinned: true },
     { id: '3', agentId: 'a', title: 'Old', updatedAt: 5, archived: true },
     { id: '4', agentId: 'b', title: 'Trip planning', updatedAt: 20 },
@@ -20,9 +20,10 @@ describe('filterThreads', () => {
   it('includes archived when requested', () => {
     expect(filterThreads(threads, '', true, name).some((t) => t.id === '3')).toBe(true)
   })
-  it('searches title and agent name', () => {
+  it('searches title, agent name, and previous message content', () => {
     expect(filterThreads(threads, 'tr', false, name).map((t) => t.id).sort()).toEqual(['2', '4'])
     expect(filterThreads(threads, 'bravo', false, name).map((t) => t.id).sort()).toEqual(['2', '4'])
+    expect(filterThreads(threads, 'capital gains', false, name).map((t) => t.id)).toEqual(['1'])
   })
 })
 

@@ -2,15 +2,16 @@
 // Kept framework-free so the logic is unit-testable without mounting Svelte.
 
 // filterThreads returns the threads to show in the sidebar/tab strip: archived
-// hidden unless showArchived, filtered by a case-insensitive query over title +
-// agent name, and sorted pinned-first then by most-recent activity.
+// hidden unless showArchived, filtered by a case-insensitive query over title,
+// agent name, and message content, then sorted pinned-first by recent activity.
 export function filterThreads(threads, query = '', showArchived = false, agentNameOf = (id) => id) {
   const q = (query || '').trim().toLowerCase()
   return (threads || [])
     .filter((t) => (showArchived ? true : !t.archived))
     .filter((t) => {
       if (!q) return true
-      const hay = `${t.title || ''} ${agentNameOf(t.agentId) || ''}`.toLowerCase()
+      const messageText = (t.messages || []).map(m => m?.text || '').join(' ')
+      const hay = `${t.title || ''} ${agentNameOf(t.agentId) || ''} ${messageText}`.toLowerCase()
       return hay.includes(q)
     })
     .sort((a, b) => {
