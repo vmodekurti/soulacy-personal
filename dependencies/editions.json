@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "personal": {
+    "repository": "https://github.com/vmodekurti/soulacy-personal.git",
+    "branch": "main",
+    "revision": "a05f2f2361c882e58e075b67e785961b4a0bd3de",
+    "update_policy": "reviewed_pull_request",
+    "automatic_merge": false
+  },
+  "editions": {
+    "personal": {
+      "depends_on": []
+    },
+    "teams": {
+      "depends_on": [
+        "personal"
+      ],
+      "compatibility_commands": [
+        "make edition-boundary",
+        "make deployment-modes-test"
+      ]
+    },
+    "scale": {
+      "depends_on": [
+        "personal",
+        "teams"
+      ],
+      "compatibility_commands": [
+        "make edition-boundary",
+        "make deployment-modes-test"
+      ]
+    }
+  },
+  "contracts": {
+    "public_agent_api": {
+      "path": "pkg/agent",
+      "change_policy": "personal_first"
+    },
+    "public_configuration": {
+      "path": "internal/config",
+      "change_policy": "personal_first"
+    },
+    "public_runtime": {
+      "path": "internal/runtime",
+      "change_policy": "personal_first"
+    },
+    "public_studio": {
+      "path": "internal/studio",
+      "change_policy": "personal_first"
+    },
+    "public_browser_api": {
+      "path": "gui/src/lib/api.js",
+      "change_policy": "personal_first"
+    },
+    "commercial_composition": {
+      "path": "gui/src/distribution/edition.js",
+      "change_policy": "commercial_only"
+    },
+    "dependency_boundary": {
+      "path": "scripts/check-edition-boundary.sh",
+      "change_policy": "coordinated"
+    }
+  }
+}

@@ -13,6 +13,9 @@ vmodekurti/soulacy-commercial (private main)
 ```
 
 `.personal-base` records the exact public commit incorporated by Commercial.
+`dependencies/editions.json` is the machine-readable dependency contract: Teams
+depends on Personal, Scale depends on Teams and Personal, and upstream changes
+require a reviewed pull request rather than automatic merging.
 That commit is also a Git ancestor of Commercial: the initial relationship was
 established with an explicit history-linking merge, and every later update is a
 normal merge. This makes Git—not a source-copy script—the synchronization and
@@ -23,7 +26,9 @@ conflict-resolution mechanism.
 1. Create the change in `soulacy-personal` and merge it into public `main`.
 2. The `Sync Personal upstream` workflow fetches public `main`, creates
    `automation/sync-personal`, performs a merge, updates `.personal-base`, and
-   opens or refreshes a pull request in this private repository.
+   opens or refreshes a pull request in this private repository. Its PR body
+   reports the exact commits and counts changes across Go contracts/runtime,
+   browser UI, storage/schema, deployment, and documentation.
 3. Review the merge as a normal Commercial change. Commercial CI runs the
    Personal, Team, and Scale deployment contracts before it may merge.
 4. Merge the synchronization PR. Commercial releases can report both their own
@@ -57,6 +62,7 @@ Check lineage and public availability:
 
 ```bash
 ./scripts/verify-personal-upstream.sh
+./scripts/verify-edition-dependencies.sh
 ```
 
 To prepare the same merge locally when automation reports a conflict:

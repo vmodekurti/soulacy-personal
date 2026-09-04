@@ -33,6 +33,9 @@ jobs:
       - name: Verify Personal lineage and availability
         run: ./scripts/verify-personal-upstream.sh
 
+      - name: Verify explicit edition dependencies
+        run: ./scripts/verify-edition-dependencies.sh
+
       - name: Verify edition dependency direction
         run: make edition-boundary
 

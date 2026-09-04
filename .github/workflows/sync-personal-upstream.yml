@@ -8,7 +8,6 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  issues: write
 
 concurrency:
   group: sync-personal-upstream
@@ -51,13 +50,53 @@ jobs:
           git config user.name "soulacy-upstream-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          report="$RUNNER_TEMP/personal-sync-report.md"
+          commit_count="$(git rev-list --count "$current..$incoming")"
+          changed_files="$(git diff --name-only "$current" "$incoming")"
+          count_matches() {
+            local pattern="$1"
+            printf '%s\n' "$changed_files" | grep -Ec "$pattern" || true
+          }
+          {
+            echo "## Personal dependency update"
+            echo
+            echo "This proposes a reviewed downstream update; it does **not** auto-merge Personal changes into Commercial."
+            echo
+            echo "| Dependency | Current | Proposed | Commits |"
+            echo "| --- | --- | --- | ---: |"
+            echo "| Soulacy Personal | \`$current\` | \`$incoming\` | $commit_count |"
+            echo
+            echo "### Impact surface"
+            echo
+            echo "| Surface | Changed files |"
+            echo "| --- | ---: |"
+            echo "| Go contracts/runtime | $(count_matches '^(go\\.(mod|sum)|pkg/|internal/(config|runtime|studio|gateway)/)') |"
+            echo "| Browser/UI | $(count_matches '^gui/') |"
+            echo "| Storage/schema | $(count_matches '^(internal/(storage|memory|knowledge)/|migrations/)') |"
+            echo "| Build/deployment | $(count_matches '^(\\.github/|Makefile|Dockerfile|deploy/|scripts/)') |"
+            echo "| Documentation | $(count_matches '^(README|docs/)') |"
+            echo
+            echo "### Personal commits"
+            echo
+            git log --no-merges -n 50 --format='- `%h` %s' "$current..$incoming"
+            if [ "$commit_count" -gt 50 ]; then
+              echo "- …and $((commit_count - 50)) more commits"
+            fi
+            echo
+            echo "Required review: shared behavior, edition contracts, migrations, security boundaries, and Teams/Scale integration."
+          } > "$report"
+          echo "report=$report" >> "$GITHUB_OUTPUT"
+
           if ! git merge --no-ff --no-commit personal/main; then
             git status --short
             echo "Personal cannot be synchronized automatically; resolve the merge in a Commercial branch." >&2
             exit 1
           fi
           printf '%s\n' "$incoming" > .personal-base
-          git add .personal-base
+          manifest_tmp="$(mktemp)"
+          jq --arg revision "$incoming" '.personal.revision = $revision' dependencies/editions.json > "$manifest_tmp"
+          mv "$manifest_tmp" dependencies/editions.json
+          git add .personal-base dependencies/editions.json
           git commit -m "Sync Personal upstream to ${incoming:0:12}"
           git push --force-with-lease origin "HEAD:$branch"
           echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -69,12 +108,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ steps.prepare.outputs.branch }}
           INCOMING: ${{ steps.prepare.outputs.incoming }}
+          REPORT: ${{ steps.prepare.outputs.report }}
         run: |
           set -euo pipefail
           number="$(gh pr list --state open --head "$BRANCH" --json number --jq '.[0].number // empty')"
-          body="Automated downstream merge of public Soulacy Personal at \`$INCOMING\`. Commercial CI must pass the Personal, Team, and Scale contracts before this PR is merged."
           if [ -n "$number" ]; then
-            gh pr edit "$number" --title "Sync Personal upstream" --body "$body"
+            gh pr edit "$number" --title "Sync Personal upstream" --body-file "$REPORT"
           else
-            gh pr create --base main --head "$BRANCH" --title "Sync Personal upstream" --body "$body"
+            gh pr create --base main --head "$BRANCH" --title "Sync Personal upstream" --body-file "$REPORT"
           fi

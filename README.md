@@ -15,6 +15,9 @@ into a strictly additive commercial module:
 
 Personal updates are merged downstream through automated, reviewable pull
 requests. `.personal-base` records the exact public revision currently included.
+`dependencies/editions.json` declares the Personal → Teams → Scale dependency
+graph, required contracts, compatibility commands, and non-automatic update
+policy.
 See the [repository workflow](docs/architecture/repository-workflow.md) before
 changing code shared by Personal and Commercial.
 

@@ -13,6 +13,7 @@ fail() {
 }
 
 [[ -f "$base_file" ]] || fail "$base_file is missing"
+./scripts/verify-edition-dependencies.sh
 base="$(tr -d '[:space:]' < "$base_file")"
 [[ "$base" =~ ^[0-9a-f]{40}$ ]] || fail "$base_file must contain one full Git commit SHA"
 
@@ -24,6 +25,12 @@ env -u GITHUB_TOKEN -u GH_TOKEN git -c credential.helper= \
 git fetch --quiet --no-tags "$personal_url" main
 personal_head="$(git rev-parse FETCH_HEAD)"
 git cat-file -e "${base}^{commit}" 2>/dev/null || fail "recorded Personal commit is unavailable"
+while IFS=$'\t' read -r policy contract_path; do
+  if [[ "$policy" == "personal_first" ]]; then
+    git cat-file -e "${base}:${contract_path}" 2>/dev/null || \
+      fail "Personal base does not contain declared public contract: $contract_path"
+  fi
+done < <(jq -r '.contracts[] | [.change_policy, .path] | @tsv' dependencies/editions.json)
 git merge-base --is-ancestor "$base" HEAD || fail "Commercial history does not contain the recorded Personal base"
 git merge-base --is-ancestor "$base" "$personal_head" || fail "recorded base is not on Personal main"
 
