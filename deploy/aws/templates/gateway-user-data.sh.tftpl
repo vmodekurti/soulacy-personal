@@ -141,6 +141,69 @@ AWS_DEFAULT_REGION=${aws_region}
 ENV
 chmod 0600 /etc/soulacy/gateway.env
 
+# RDS-managed master passwords rotate independently of the EC2 lifecycle. Keep
+# the persisted gateway configuration synchronized without logging the secret.
+# ExecStartPre closes the stop/start gap; the timer handles rotations that occur
+# while the gateway is already running.
+cat >/usr/local/sbin/soulacy-sync-rds-credentials <<'SCRIPT'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+config=/var/lib/soulacy/config.yaml
+secret_arn='${rds_secret_arn}'
+db_host='${db_host}'
+no_restart=false
+[[ "$${1:-}" == "--no-restart" ]] && no_restart=true
+
+secret_json=$(aws secretsmanager get-secret-value --region '${aws_region}' --secret-id "$secret_arn" --query SecretString --output text)
+db_user=$(printf '%s' "$secret_json" | jq -er '.username')
+db_password=$(printf '%s' "$secret_json" | jq -er '.password | @uri')
+export SOULACY_ROTATED_DSN="postgres://$db_user:$db_password@$db_host:5432/soulacy?sslmode=require"
+unset db_password secret_json
+
+set +e
+python3 <<'PY'
+import os
+import pathlib
+import tempfile
+
+path = pathlib.Path("/var/lib/soulacy/config.yaml")
+lines = path.read_text().splitlines()
+matches = [index for index, line in enumerate(lines) if line.lstrip().startswith("postgres_dsn:")]
+if len(matches) != 1:
+    raise RuntimeError(f"expected exactly one postgres_dsn setting, found {len(matches)}")
+index = matches[0]
+indent = lines[index][: len(lines[index]) - len(lines[index].lstrip())]
+replacement = f'{indent}postgres_dsn: "{os.environ["SOULACY_ROTATED_DSN"]}"'
+if lines[index] == replacement:
+    raise SystemExit(10)
+lines[index] = replacement
+fd, temporary = tempfile.mkstemp(prefix="config.yaml.", dir=str(path.parent))
+os.close(fd)
+temporary_path = pathlib.Path(temporary)
+temporary_path.write_text("\n".join(lines) + "\n")
+stat = path.stat()
+os.chmod(temporary_path, 0o600)
+os.chown(temporary_path, stat.st_uid, stat.st_gid)
+os.replace(temporary_path, path)
+PY
+sync_status=$?
+set -e
+unset SOULACY_ROTATED_DSN
+
+if [[ $sync_status -eq 10 ]]; then
+  exit 0
+fi
+if [[ $sync_status -ne 0 ]]; then
+  exit "$sync_status"
+fi
+logger -t soulacy-rds-credential-sync 'updated gateway PostgreSQL credentials after managed-secret rotation'
+if [[ "$no_restart" != true ]]; then
+  systemctl try-restart soulacy.service
+fi
+SCRIPT
+chmod 0750 /usr/local/sbin/soulacy-sync-rds-credentials
+
 cat >/etc/systemd/system/soulacy.service <<'UNIT'
 [Unit]
 Description=Soulacy gateway
@@ -154,6 +217,7 @@ User=soulacy
 Group=soulacy
 SupplementaryGroups=docker
 EnvironmentFile=/etc/soulacy/gateway.env
+ExecStartPre=+/usr/local/sbin/soulacy-sync-rds-credentials --no-restart
 ExecStart=/opt/soulacy/bin/soulacy serve
 Restart=always
 RestartSec=5
@@ -166,8 +230,33 @@ ProtectHome=true
 [Install]
 WantedBy=multi-user.target
 UNIT
+
+cat >/etc/systemd/system/soulacy-rds-credential-sync.service <<'UNIT'
+[Unit]
+Description=Synchronize Soulacy with the current RDS managed password
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/soulacy-sync-rds-credentials
+UNIT
+
+cat >/etc/systemd/system/soulacy-rds-credential-sync.timer <<'UNIT'
+[Unit]
+Description=Poll for RDS managed-password rotation
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=2min
+RandomizedDelaySec=15s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
 systemctl daemon-reload
 systemctl enable --now soulacy
+systemctl enable --now soulacy-rds-credential-sync.timer
 
 %{ if cloudflare_tunnel_enabled ~}
 if [[ -z "$tunnel_token" ]]; then

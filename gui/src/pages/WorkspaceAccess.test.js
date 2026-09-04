@@ -60,3 +60,28 @@ describe('workspace invitation sign-in', () => {
     expect(JSON.parse(options.body).workspace_id).toBe('ws_customer')
   })
 })
+
+describe('workspace availability errors', () => {
+  it('does not report an infrastructure outage as a missing workspace', async () => {
+    history.replaceState({}, '', '/w/soulacy-demo3')
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('upstream unavailable', { status: 503 })))
+    target = document.createElement('div')
+    document.body.appendChild(target)
+    app = new WorkspaceAccess({ target, props: { workspaceID: 'soulacy-demo3' } })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(document.body.textContent).toContain('Soulacy is temporarily unavailable')
+    expect(document.body.textContent).not.toContain('Workspace was not found')
+    expect(document.querySelector('.retry')).not.toBeNull()
+  })
+
+  it('keeps the missing-workspace message for a real 404', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ error: 'workspace was not found' }, { status: 404 })))
+    target = document.createElement('div')
+    document.body.appendChild(target)
+    app = new WorkspaceAccess({ target, props: { workspaceID: 'does-not-exist' } })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(document.body.textContent).toContain('workspace was not found')
+  })
+})

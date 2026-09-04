@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"errors"
 	"net"
 	"net/url"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/soulacy/soulacy/internal/auth"
 	"github.com/soulacy/soulacy/internal/tenancy"
 )
@@ -19,7 +21,13 @@ func (s *Server) handleWorkspaceLoginConfig(c *fiber.Ctx) error {
 	}
 	config, err := store.WorkspaceLoginConfig(c.UserContext(), c.Params("id"))
 	if err != nil {
-		return s.errMsg(c, fiber.StatusNotFound, "workspace was not found")
+		if errors.Is(err, pgx.ErrNoRows) {
+			return s.errMsg(c, fiber.StatusNotFound, "workspace was not found")
+		}
+		// A database outage is not evidence that the requested workspace does
+		// not exist. Returning 404 here made every tenant appear deleted when
+		// Postgres was unavailable and sent operators down the wrong runbook.
+		return s.errMsg(c, fiber.StatusServiceUnavailable, "workspace directory is temporarily unavailable")
 	}
 	if config.OrganizationStatus == tenancy.WorkspaceSuspended {
 		return c.Status(fiber.StatusLocked).JSON(fiber.Map{"error": "This organization is temporarily unavailable. Contact your organization administrator or Soulacy deployment operator.", "workspace": config})
