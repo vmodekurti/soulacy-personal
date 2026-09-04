@@ -516,7 +516,11 @@
   // runs and updates the store; the component picks it up on remount.
   async function send(textArg, overridesArg, responseMode = '') {
     if (!canPrompt) return
-    const text = (textArg != null ? textArg : input).trim()
+    // Event handlers receive a MouseEvent as their first argument when they are
+    // passed directly to on:click. Only an explicit string is a message;
+    // everything else must use the composer value.
+    const hasExplicitText = typeof textArg === 'string'
+    const text = (hasExplicitText ? textArg : input).trim()
     if (!text || !activeThread?.agentId || isSending) return
     const overrides = overridesArg !== undefined ? overridesArg : buildOverrides(controls)
     const threadId = activeThread.id
@@ -529,13 +533,13 @@
     const sendText = route ? route.cleanText : text
     const viaName = route ? route.name : ''
     const runKey = `${runAgentId}|${runSessionId}`
-    const turnAttachments = textArg == null ? pendingAttachments : []
+    const turnAttachments = hasExplicitText ? [] : pendingAttachments
     const attachmentIds = turnAttachments.map(a => a.id).filter(Boolean)
-    const thinking = { open: true, events: [] }
+    const thinking = { open: false, events: [] }
     const runStartedAt = Date.now()
     activeRuns = { ...activeRuns, [runKey]: threadId }
-    if (textArg == null) input = ''
-    if (textArg == null) pendingAttachments = []
+    if (!hasExplicitText) input = ''
+    if (!hasExplicitText) pendingAttachments = []
     updateThread(threadId, t => ({
       ...t,
       title: t.messages.length ? t.title : snippet(text, 36),
@@ -1311,7 +1315,7 @@
           }
         }
         merged.sort((a, b) => Date.parse(a.timestamp || '') - Date.parse(b.timestamp || ''))
-        const nextThinking = { open: true, events: merged.slice(-80) }
+        const nextThinking = { open: t.thinking?.open ?? false, events: merged.slice(-80) }
         const messages = [...t.messages]
         const last = messages.length - 1
         if (last >= 0 && messages[last].role === 'assistant') {
@@ -1390,6 +1394,46 @@
     if (ev.type === 'reasoning.step') return snippet(p.recovery ? (p.observation || p.thought || '') : (p.thought || ''), 260)
     if (ev.type === 'reasoning.result') return `${p.duration_ms ?? 0}ms · ${p.confident ? 'confident' : 'not confident'}`
     return ''
+  }
+
+  // Explain the observable decision behind each event. This is deliberately
+  // grounded in runtime metadata (model turn, chosen tool, returned evidence),
+  // not a claim that the UI can expose a provider's private chain-of-thought.
+  function eventExplanation(ev) {
+    const p = ev.payload || {}
+    switch (ev.type) {
+      case 'llm.call':
+        return p.turn === 'final-synthesis'
+          ? 'Purpose: combine the gathered evidence into the final answer.'
+          : Number(p.turn) > 1
+            ? 'Purpose: review the latest evidence and decide the next action or answer.'
+            : 'Purpose: interpret the request and decide whether tools or external evidence are needed.'
+      case 'llm.result':
+        return p.tool_calls
+          ? `Decision: use ${p.tool_calls} tool call${p.tool_calls === 1 ? '' : 's'} before answering.`
+          : 'Outcome: the model had enough context to produce answer content.'
+      case 'tool.call':
+        return `Purpose: use ${String(p.name || 'this tool').replaceAll('_', ' ')} to gather information or perform the requested action.`
+      case 'tool.result':
+        return `Evidence: ${String(p.name || 'the tool').replaceAll('_', ' ')} returned information for the next decision.`
+      case 'tool.log':
+        return 'Progress: the tool reported an execution update.'
+      case 'reasoning.start':
+        return `Plan: run up to ${p.max_steps ?? '?'} structured decision steps using the available tools.`
+      case 'reasoning.step': {
+        const rationale = snippet(p.thought || '', 180)
+        const observation = snippet(p.observation || '', 180)
+        return [rationale && `Decision: ${rationale}`, observation && `Evidence: ${observation}`].filter(Boolean).join('\n')
+      }
+      case 'reasoning.result':
+        return p.confident === false
+          ? 'Outcome: the structured reasoning loop finished without high confidence; review the evidence and answer carefully.'
+          : 'Outcome: the structured reasoning loop completed with sufficient confidence.'
+      case 'error':
+        return 'Outcome: this step failed; expand it to inspect the reported error.'
+      default:
+        return ''
+    }
   }
 
   function eventClass(type = '', ev = null) {
@@ -2509,11 +2553,12 @@
                 <div class="thinking" class:open={msg.thinking.open}>
                   <button class="thinking-head" type="button" on:click={() => toggleThinking(msg.thinking)}>
                     <span class="chev">{msg.thinking.open ? '▾' : '▸'}</span>
-                    <span class="thinking-title">Thinking</span>
+                    <span class="thinking-title">How this answer was made</span>
                     <span class="thinking-meta">{thinkingSummary(msg.thinking)}</span>
                   </button>
                   {#if msg.thinking.open}
                     <div class="thinking-body">
+                      <div class="thinking-note">An auditable summary of decisions, tools, and evidence. Provider-private reasoning is not exposed.</div>
                       {#if msg.thinking.events.length === 0}
                         <div class="thinking-empty">No activity captured for this run.</div>
                       {:else}
@@ -2525,6 +2570,7 @@
                                 <span class="think-text">{eventTitle(ev)}</span>
                                 {#if eventDuration(ev)}<span class="think-dur">{eventDuration(ev)}</span>{/if}
                               </summary>
+                              {#if eventExplanation(ev)}<div class="think-explanation">{eventExplanation(ev)}</div>{/if}
                               <pre class="think-full">{fullEventDetail(ev)}</pre>
                               {#if ev.type === 'tool.call'}
                                 {@const rr = toolRetry[toolKey(ev)]}
@@ -2552,6 +2598,7 @@
                               {#if eventDetail(ev)}
                                 <div class="think-detail">{eventDetail(ev)}</div>
                               {/if}
+                              {#if eventExplanation(ev)}<div class="think-explanation">{eventExplanation(ev)}</div>{/if}
                             </div>
                           {/if}
                         {/each}
@@ -2601,15 +2648,16 @@
                 <div class="typing"><span></span><span></span><span></span></div>
               {/if}
               {#if activeThread?.thinking}
-                <div class="thinking open live">
+                <div class="thinking live" class:open={activeThread.thinking.open}>
                   <button class="thinking-head" type="button" on:click={() => toggleThinking(activeThread.thinking)}>
                     <span class="chev">{activeThread.thinking.open ? '▾' : '▸'}</span>
                     <span class="live-dot" aria-hidden="true"></span>
-                    <span class="thinking-title">Thinking</span>
+                    <span class="thinking-title">How the answer is being made</span>
                     <span class="thinking-meta">{thinkingSummary(activeThread.thinking)}</span>
                   </button>
                   {#if activeThread.thinking.open}
                     <div class="thinking-body">
+                      <div class="thinking-note">Live decisions, tools, and evidence. Provider-private reasoning is not exposed.</div>
                       {#each activeThread.thinking.events as ev (ev)}
                         {#if eventExpandable(ev)}
                           <details class="think-event {eventClass(ev.type, ev)}" transition:slide|local={{ duration: 220 }}>
@@ -2618,6 +2666,7 @@
                               <span class="think-text">{eventTitle(ev)}</span>
                               {#if eventDuration(ev)}<span class="think-dur">{eventDuration(ev)}</span>{/if}
                             </summary>
+                            {#if eventExplanation(ev)}<div class="think-explanation">{eventExplanation(ev)}</div>{/if}
                             <pre class="think-full">{fullEventDetail(ev)}</pre>
                           </details>
                         {:else}
@@ -2630,6 +2679,7 @@
                             {#if eventDetail(ev)}
                               <div class="think-detail">{eventDetail(ev)}</div>
                             {/if}
+                            {#if eventExplanation(ev)}<div class="think-explanation">{eventExplanation(ev)}</div>{/if}
                           </div>
                         {/if}
                       {/each}
@@ -2713,8 +2763,10 @@
       {#if isSending}
         <button class="send-btn btn-danger" on:click={cancelSend} title="Stop this run">■</button>
       {:else}
-        <button class="send-btn btn-primary"
-                on:click={send}
+        <button type="button" class="send-btn btn-primary"
+                on:click={() => send()}
+                aria-label="Send message"
+                title="Send message"
                 disabled={!canPrompt || !activeThread?.agentId || !input.trim()}>
           ↑
         </button>
@@ -3242,6 +3294,14 @@
     font-size: .75rem;
     padding: .25rem .15rem;
   }
+  .thinking-note {
+    padding: .35rem .45rem;
+    border-radius: 6px;
+    color: #aeb3d4;
+    background: rgba(139, 133, 255, .07);
+    font-size: .7rem;
+    line-height: 1.4;
+  }
   .think-event {
     padding: .38rem .45rem;
     border-radius: 6px;
@@ -3283,6 +3343,14 @@
     color: #aeb3d4;
     font-size: .72rem;
     line-height: 1.35;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .think-explanation {
+    margin-top: .3rem;
+    color: #c9ccec;
+    font-size: .72rem;
+    line-height: 1.42;
     white-space: pre-wrap;
     word-break: break-word;
   }
