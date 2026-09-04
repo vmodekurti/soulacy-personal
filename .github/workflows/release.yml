@@ -1,0 +1,501 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  # Manual re-run. REQUIRED as an escape hatch, because the tag push from
+  # create-release.yml uses the default GITHUB_TOKEN, and GitHub deliberately
+  # suppresses workflow triggers for token-pushed refs to prevent recursion.
+  # The result was silent: three green "Create Release" runs, three tags, three
+  # release pages — and zero Release runs, so no binaries and no
+  # release-manifest.json were ever published.
+  #
+  # IMPORTANT when running this by hand: in the "Run workflow" dropdown, set
+  # "Use workflow from" to the TAG (e.g. v0.1.1), not a branch. Every step reads
+  # the version from github.ref_name, so running it from `main` would build
+  # artifacts named soulacy_main_* and a manifest to match.
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}   # ghcr.io/vmodekurti/soulacy
+
+jobs:
+  # ── Build Linux binaries (inside Docker for cgo cross-compile) ───────────────
+  build-linux:
+    name: Build Linux (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU (for arm64 emulation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build release binary via Dockerfile.release
+        run: |
+          VERSION="${{ github.ref_name }}"
+          DOCKER_BUILDKIT=1 docker buildx build \
+            --platform linux/${{ matrix.arch }} \
+            --build-arg VERSION="${VERSION}" \
+            -f Dockerfile.release \
+            -t soulacy-release:linux-${{ matrix.arch }} \
+            --load .
+
+      - name: Extract binaries
+        run: |
+          mkdir -p bin/release
+          docker create --name soulacy-extract soulacy-release:linux-${{ matrix.arch }}
+          docker cp soulacy-extract:/out/soulacy bin/release/soulacy-linux-${{ matrix.arch }}
+          docker cp soulacy-extract:/out/sy      bin/release/sy-linux-${{ matrix.arch }}
+          docker rm soulacy-extract
+
+      - name: Create tarballs
+        run: |
+          VERSION="${{ github.ref_name }}"
+          cd bin/release
+          # Rename to plain names for the tarball, then archive both binaries
+          # together. install.sh expects: soulacy_<version>_linux_<arch>.tar.gz
+          cp soulacy-linux-${{ matrix.arch }} soulacy
+          cp sy-linux-${{ matrix.arch }} sy
+          tar czf soulacy_${VERSION}_linux_${{ matrix.arch }}.tar.gz soulacy sy
+          rm soulacy sy
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: bin/release/*.tar.gz
+
+  # ── Build macOS binaries (native, on macOS runner) ───────────────────────────
+  build-darwin:
+    name: Build macOS (${{ matrix.arch }})
+    runs-on: macos-14      # Apple Silicon runner
+    strategy:
+      matrix:
+        arch: [arm64, amd64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.6"
+          cache: true
+
+      - name: Set up Node.js (for GUI build)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: gui/package-lock.json
+
+      - name: Build GUI
+        working-directory: gui
+        run: npm ci && npm run build
+
+      - name: Build binaries
+        run: |
+          VERSION="${{ github.ref_name }}"
+          mkdir -p bin/release
+          CGO_ENABLED=1 GOOS=darwin GOARCH=${{ matrix.arch }} \
+            go build \
+              -ldflags "-X github.com/soulacy/soulacy/internal/config.Version=${VERSION}" \
+              -o bin/release/soulacy-darwin-${{ matrix.arch }} ./cmd/soulacy
+          CGO_ENABLED=1 GOOS=darwin GOARCH=${{ matrix.arch }} \
+            go build \
+              -ldflags "-X github.com/soulacy/soulacy/internal/config.Version=${VERSION}" \
+              -o bin/release/sy-darwin-${{ matrix.arch }} ./cmd/sy
+
+      # Sign + notarize the Mach-O binaries BEFORE tarballing, so the release
+      # checksums (computed later) cover the signed bytes. Fully gated on signing
+      # secrets: when they're absent the job ships unsigned binaries and only
+      # emits a warning, so forks and pre-notarization releases still build.
+      - name: Codesign & notarize (macOS)
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          if [ -z "${MACOS_CERTIFICATE:-}" ] || [ -z "${APPLE_ID:-}" ]; then
+            echo "::warning::macOS signing secrets not configured — shipping unsigned binaries (Gatekeeper will warn on first run)."
+            exit 0
+          fi
+          set -euo pipefail
+          KEYCHAIN=build.keychain
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "$MACOS_CERTIFICATE" | base64 --decode > cert.p12
+          security import cert.p12 -k "$KEYCHAIN" -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          for b in bin/release/soulacy-darwin-${{ matrix.arch }} bin/release/sy-darwin-${{ matrix.arch }}; do
+            codesign --force --timestamp --options runtime --sign "$CODESIGN_IDENTITY" "$b"
+            codesign --verify --strict --verbose=2 "$b"
+          done
+          # Notarize the pair (CLI tools can't be stapled; Gatekeeper verifies the
+          # notarization ticket online on first run).
+          ZIP="notarize-${{ matrix.arch }}.zip"
+          /usr/bin/zip -j "$ZIP" bin/release/soulacy-darwin-${{ matrix.arch }} bin/release/sy-darwin-${{ matrix.arch }}
+          xcrun notarytool submit "$ZIP" \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" --wait
+          rm -f cert.p12 "$ZIP"
+          echo "Signed + notarized ${{ matrix.arch }} binaries."
+
+      - name: Create tarballs
+        run: |
+          VERSION="${{ github.ref_name }}"
+          cd bin/release
+          cp soulacy-darwin-${{ matrix.arch }} soulacy
+          cp sy-darwin-${{ matrix.arch }} sy
+          tar czf soulacy_${VERSION}_darwin_${{ matrix.arch }}.tar.gz soulacy sy
+          rm soulacy sy
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: darwin-${{ matrix.arch }}
+          path: bin/release/*.tar.gz
+
+  # ── Build and push Docker image ───────────────────────────────────────────────
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - name: Build and push multi-platform image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── Prove the release GUI boots every main route before publishing ──────────
+  gui-render-smoke:
+    name: GUI render smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.6"
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: gui/package-lock.json
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev build-essential pkg-config
+
+      - name: Capture GUI screenshot evidence
+        run: make docs-screenshots
+
+      - name: Upload GUI screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-render-smoke
+          path: docs/assets/screenshots/
+
+  # ── Create GitHub Release with all artifacts ─────────────────────────────────
+  github-release:
+    name: GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-linux, build-darwin, docker, gui-render-smoke]
+    permissions:
+      contents: write
+      # Required for cosign keyless (Sigstore) signing via the OIDC token.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Flatten artifacts
+        run: |
+          # download-artifact restores each upload into its own subdirectory
+          # (linux-amd64/, darwin-arm64/, ...). Move all tarballs up to
+          # artifacts/ so checksums + signatures reference plain filenames.
+          cd artifacts
+          find . -mindepth 2 -name "*.tar.gz" -exec mv -t . {} +
+          ls -la
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          find . -maxdepth 1 -name "*.tar.gz" -printf '%f\n' \
+            | sort \
+            | xargs sha256sum > checksums.sha256
+          cat checksums.sha256
+
+      - name: Generate release update manifest
+        env:
+          VERSION: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          from datetime import datetime, timezone
+
+          artifacts_dir = pathlib.Path("artifacts")
+          checksums = {}
+          for line in (artifacts_dir / "checksums.sha256").read_text().splitlines():
+              parts = line.split()
+              if len(parts) >= 2:
+                  checksums[parts[1]] = parts[0]
+
+          version = os.environ["VERSION"]
+          release_artifacts = []
+          for archive in sorted(artifacts_dir.glob(f"soulacy_{version}_*.tar.gz")):
+              suffix = archive.name.removeprefix(f"soulacy_{version}_").removesuffix(".tar.gz")
+              os_name, arch = suffix.rsplit("_", 1)
+              release_artifacts.append({
+                  "name": archive.name,
+                  "os": os_name,
+                  "arch": arch,
+                  "sha256": checksums.get(archive.name, ""),
+                  "bytes": archive.stat().st_size,
+              })
+
+          manifest = {
+              "product": "soulacy",
+              "version": version,
+              "commit": os.environ["COMMIT"],
+              "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+              "artifacts": release_artifacts,
+          }
+          (artifacts_dir / "release-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+          print((artifacts_dir / "release-manifest.json").read_text())
+          if not release_artifacts:
+              raise SystemExit("release-manifest.json has no artifacts")
+          if any(not item["sha256"] for item in release_artifacts):
+              raise SystemExit("release-manifest.json has an artifact without sha256")
+          PY
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign checksums and artifacts (keyless / OIDC)
+        env:
+          COSIGN_YES: "true"
+        run: |
+          cd artifacts
+          # Keyless signing — no long-lived keys. cosign obtains a short-lived
+          # certificate from Fulcio bound to this workflow's OIDC identity and
+          # records the signature in the Rekor transparency log.
+          #
+          # Sign the checksums manifest (covers every tarball transitively).
+          cosign sign-blob \
+            --output-signature checksums.sha256.sig \
+            --output-certificate checksums.sha256.pem \
+            --bundle checksums.sha256.cosign.bundle \
+            checksums.sha256
+
+          # Also sign each tarball individually so consumers can verify a
+          # single download without the manifest.
+          for f in *.tar.gz; do
+            cosign sign-blob \
+              --output-signature "${f}.sig" \
+              --output-certificate "${f}.pem" \
+              --bundle "${f}.cosign.bundle" \
+              "${f}"
+          done
+
+          # The updater trusts metadata only after the same workflow identity
+          # signs it. This prevents a validly signed archive from being relabelled
+          # as another product/version/platform by a substituted manifest.
+          cosign sign-blob \
+            --output-signature release-manifest.json.sig \
+            --output-certificate release-manifest.json.pem \
+            --bundle release-manifest.json.cosign.bundle \
+            release-manifest.json
+          ls -la
+
+      - name: Generate SBOM (SPDX)
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: artifacts/soulacy.sbom.spdx.json
+
+      - name: Sign SBOM (keyless / OIDC)
+        env:
+          COSIGN_YES: "true"
+        run: |
+          cd artifacts
+          cosign sign-blob \
+            --output-signature soulacy.sbom.spdx.json.sig \
+            --output-certificate soulacy.sbom.spdx.json.pem \
+            --bundle soulacy.sbom.spdx.json.cosign.bundle \
+            soulacy.sbom.spdx.json
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Soulacy ${{ github.ref_name }}"
+          body: |
+            ## Soulacy ${{ github.ref_name }}
+
+            ### Installation
+
+            **One-line install** (macOS & Linux — downloads this release's
+            binaries, falls back to building from source):
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/vmodekurti/soulacy/${{ github.ref_name }}/install.sh | bash
+            ```
+
+            **Docker (full stack)**:
+            ```bash
+            curl -o docker-compose.yml https://raw.githubusercontent.com/vmodekurti/soulacy/${{ github.ref_name }}/docker-compose.yml
+            docker compose up
+            ```
+
+            **Docker (SQLite only)**:
+            ```bash
+            docker pull ghcr.io/vmodekurti/soulacy:${{ github.ref_name }}
+            docker run -p 18789:18789 -v ~/.soulacy:/home/soulacy/.soulacy ghcr.io/vmodekurti/soulacy:${{ github.ref_name }}
+            ```
+
+            ### Downloads
+            | Platform | Binary |
+            |----------|--------|
+            | macOS Apple Silicon | `soulacy_${{ github.ref_name }}_darwin_arm64.tar.gz` |
+            | macOS Intel | `soulacy_${{ github.ref_name }}_darwin_amd64.tar.gz` |
+            | Linux x86_64 | `soulacy_${{ github.ref_name }}_linux_amd64.tar.gz` |
+            | Linux ARM64 | `soulacy_${{ github.ref_name }}_linux_arm64.tar.gz` |
+
+            ### Verifying downloads
+
+            Verify checksums:
+            ```bash
+            sha256sum -c checksums.sha256
+            ```
+
+            Verify signatures with [cosign](https://docs.sigstore.dev/)
+            (keyless — no public key needed):
+            ```bash
+            cosign verify-blob \
+              --certificate checksums.sha256.pem \
+              --signature checksums.sha256.sig \
+              --certificate-identity-regexp 'https://github.com/vmodekurti/soulacy/.github/workflows/release.yml@.*' \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              checksums.sha256
+            ```
+
+            An SBOM (`soulacy.sbom.spdx.json`) is attached and signed the
+            same way.
+          files: |
+            artifacts/*.tar.gz
+            artifacts/checksums.sha256
+            artifacts/checksums.sha256.sig
+            artifacts/checksums.sha256.pem
+            artifacts/checksums.sha256.cosign.bundle
+            artifacts/release-manifest.json
+            artifacts/release-manifest.json.sig
+            artifacts/release-manifest.json.pem
+            artifacts/release-manifest.json.cosign.bundle
+            artifacts/*.tar.gz.sig
+            artifacts/*.tar.gz.pem
+            artifacts/*.tar.gz.cosign.bundle
+            artifacts/soulacy.sbom.spdx.json
+            artifacts/soulacy.sbom.spdx.json.sig
+            artifacts/soulacy.sbom.spdx.json.pem
+            artifacts/soulacy.sbom.spdx.json.cosign.bundle
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+
+      # Auto-bump the Homebrew tap formula to this release with the REAL macOS
+      # checksums, replacing the placeholder hashes. Gated on a tap push token so
+      # it's a no-op when unset.
+      - name: Bump Homebrew formula
+        if: ${{ !contains(github.ref_name, '-') }}
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "${HOMEBREW_TAP_TOKEN:-}" ]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN not set — skipping Homebrew formula bump."
+            exit 0
+          fi
+          set -euo pipefail
+          VERSION="${{ github.ref_name }}"
+          ARM_SHA="$(grep "soulacy_${VERSION}_darwin_arm64.tar.gz" artifacts/checksums.sha256 | awk '{print $1}')"
+          AMD_SHA="$(grep "soulacy_${VERSION}_darwin_amd64.tar.gz" artifacts/checksums.sha256 | awk '{print $1}')"
+          if [ -z "$ARM_SHA" ] || [ -z "$AMD_SHA" ]; then
+            echo "::error::could not find darwin checksums for $VERSION"; exit 1
+          fi
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/vmodekurti/homebrew-tap.git" tap
+          F=tap/Formula/soulacy.rb
+          # Version, urls, and both sha256 lines (works whether the current value
+          # is the placeholder or a previous real hash).
+          sed -i.bak -E "s/version \"[^\"]+\"/version \"${VERSION#v}\"/" "$F"
+          sed -i.bak -E "s#(download/)v?[^/]+/soulacy_v?[^_]+_darwin_arm64#\1${VERSION}/soulacy_${VERSION}_darwin_arm64#g" "$F"
+          sed -i.bak -E "s#(download/)v?[^/]+/soulacy_v?[^_]+_darwin_amd64#\1${VERSION}/soulacy_${VERSION}_darwin_amd64#g" "$F"
+          awk -v arm="$ARM_SHA" -v amd="$AMD_SHA" '
+            /darwin_arm64/ { print; getline; sub(/sha256 "[^"]*"/, "sha256 \"" arm "\""); print; next }
+            /darwin_amd64/ { print; getline; sub(/sha256 "[^"]*"/, "sha256 \"" amd "\""); print; next }
+            { print }
+          ' "$F" > "$F.new" && mv "$F.new" "$F"
+          rm -f "$F.bak"
+          cd tap
+          git config user.name "soulacy-release-bot"
+          git config user.email "bot@soulacy.local"
+          git add Formula/soulacy.rb
+          git commit -m "soulacy ${VERSION}" || { echo "no formula changes"; exit 0; }
+          git push origin HEAD:main

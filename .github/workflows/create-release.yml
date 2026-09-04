@@ -1,0 +1,110 @@
+name: Create Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version to create, for example v0.1.0"
+        required: true
+        type: string
+      target_ref:
+        description: "Commit, branch, or tag to release"
+        required: false
+        default: "main"
+        type: string
+      dry_run:
+        description: "Validate only; do not create or push the tag"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  # Required to start the Release workflow below. Without it the tag is
+  # created and nothing ever builds it.
+  actions: write
+
+concurrency:
+  group: create-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  create-tag:
+    name: Create release tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.target_ref }}
+
+      - name: Validate release request
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ inputs.version }}"
+          target_ref="${{ inputs.target_ref }}"
+
+          if [[ ! "${version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Version must look like v1.2.3 or v1.2.3-rc.1; got '${version}'"
+            exit 2
+          fi
+
+          git fetch --tags origin
+          if git ls-remote --exit-code --tags origin "refs/tags/${version}" >/dev/null 2>&1; then
+            echo "::error::Release tag '${version}' already exists on origin."
+            exit 1
+          fi
+
+          commit="$(git rev-parse HEAD)"
+          short_commit="$(git rev-parse --short HEAD)"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "commit=${commit}" >> "${GITHUB_OUTPUT}"
+          echo "short_commit=${short_commit}" >> "${GITHUB_OUTPUT}"
+
+          echo "Release request is valid."
+          echo "Version: ${version}"
+          echo "Target: ${target_ref} (${short_commit})"
+
+      - name: Dry run summary
+        if: ${{ inputs.dry_run }}
+        run: |
+          echo "Dry run only. Would create tag '${{ steps.release.outputs.version }}' at ${{ steps.release.outputs.short_commit }}."
+
+      - name: Create and push release tag
+        if: ${{ !inputs.dry_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.release.outputs.version }}"
+          commit="${{ steps.release.outputs.commit }}"
+
+          git config user.name "soulacy-release-bot"
+          git config user.email "bot@soulacy.local"
+          git tag -a "${version}" "${commit}" -m "Soulacy ${version}"
+          git push origin "refs/tags/${version}"
+
+          echo "Created ${version} at ${{ steps.release.outputs.short_commit }}."
+
+      # A tag pushed with the default GITHUB_TOKEN does NOT trigger workflows —
+      # GitHub suppresses that to prevent recursion. The result was a release
+      # page with no binaries and no release-manifest.json, so `sy update` could
+      # never see the release, and the only thing standing between a tag and a
+      # usable release was somebody remembering to run this by hand.
+      #
+      # An explicit workflow_dispatch is NOT suppressed, so start it here.
+      - name: Build and publish the release for this tag
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.release.outputs.version }}"
+          # --ref <tag> is what makes every step in release.yml read the TAG from
+          # github.ref_name. Dispatching from a branch would build artifacts
+          # named after the branch and a manifest to match.
+          gh workflow run release.yml --ref "${version}"
+          echo "Release workflow started for ${version}."
+          echo "Watch it: gh run list --workflow=release.yml --limit 5"

@@ -1,0 +1,36 @@
+name: Personal source availability
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  public-personal-source:
+    name: Public and Personal-only
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse private visibility
+        env:
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          if [ "$REPOSITORY_PRIVATE" = "true" ]; then
+            echo "Soulacy Personal must remain public." >&2
+            exit 1
+          fi
+
+      - name: Verify anonymous Git access
+        env:
+          PUBLIC_REPOSITORY: ${{ github.repository }}
+        run: |
+          env -u GITHUB_TOKEN git ls-remote "https://github.com/${PUBLIC_REPOSITORY}.git" HEAD >/dev/null
+
+      - uses: actions/checkout@v4
+
+      - name: Verify Personal-only boundary
+        run: bash scripts/check-personal-boundary.sh

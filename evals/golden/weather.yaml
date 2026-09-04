@@ -1,0 +1,35 @@
+name: weather
+description: >
+  Golden suite for the weather / market-monitor style agent. Verifies the agent
+  reports current conditions for a named location and does not hallucinate a
+  location it was not asked about. Non-secret: runs in CI when a provider key is
+  configured for the target gateway.
+tags: [flagship, weather, non-secret]
+defaults:
+  timeout_sec: 60
+cases:
+  - name: current-conditions-london
+    input: "What's the weather in London right now?"
+    expected_contains: ["london"]
+    expected_regex:
+      - "(?i)(temperature|°|degrees|celsius|fahrenheit|humidity|wind|rain|cloud|sunny|clear)"
+    expected_not_contains: ["as an ai language model"]
+    max_latency_ms: 45000
+
+  - name: forecast-tomorrow
+    input: "Will it rain tomorrow in Paris?"
+    expected_contains: ["paris"]
+    expected_regex:
+      - "(?i)(rain|dry|forecast|chance|%|precipitation|clear|cloud)"
+
+  - name: no-location-asks-for-one
+    input: "What's the weather?"
+    expected_regex:
+      - "(?i)(which|what) (city|location|place)|where"
+    expected_not_contains: ["london", "paris", "new york"]
+
+  - name: uses-weather-tool
+    input: "Give me the current temperature in Tokyo."
+    expected_contains: ["tokyo"]
+    # Asserted only if the gateway returns a tool trace; otherwise ignored.
+    expect_tool_success: ["get_weather"]

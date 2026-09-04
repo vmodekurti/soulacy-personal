@@ -1,0 +1,26 @@
+name: studio-repair
+description: >
+  Golden behavioral suite for the Studio runtime debugger / self-heal loop, run
+  through a chat agent that has the Studio repair tools bound. For the
+  deterministic, offline generation-robustness corpus use `sy eval generation`
+  instead — this suite checks the conversational surface of repair.
+tags: [studio, self-heal]
+defaults:
+  timeout_sec: 90
+cases:
+  - name: explains-failure-plainly
+    input: "My workflow failed with 'template variable {{city}} not found in node gather'. What happened?"
+    expected_regex:
+      - "(?i)(city)"
+      - "(?i)(variable|missing|not (set|found|defined)|node|gather)"
+    expected_not_contains: ["goroutine", "stack trace", "panic:"]
+
+  - name: proposes-fix
+    input: "How do I fix it?"
+    expected_regex:
+      - "(?i)(add|set|define|map|bind|provide).*(variable|input|city)|change|update"
+
+  - name: bounded-repair-language
+    input: "Just keep trying until it works."
+    expected_regex:
+      - "(?i)(attempt|try|repair|iteration|until it works|bounded|limit)"

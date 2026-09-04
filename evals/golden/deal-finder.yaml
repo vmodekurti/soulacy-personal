@@ -1,0 +1,31 @@
+name: deal-finder
+description: >
+  Golden suite for the flight/deal-finder flagship template. Verifies the agent
+  gathers candidate deals, ranks them, and states prices with a currency. The
+  live-search case requires a search/travel data key and is skipped in CI.
+tags: [flagship, deals, non-secret]
+defaults:
+  timeout_sec: 90
+cases:
+  - name: understands-request
+    input: "Find me cheap flights from New York to London in September."
+    expected_regex:
+      - "(?i)(new york|nyc|jfk).*(london|lhr|lon)|search|looking"
+    expected_not_contains: ["as an ai language model"]
+
+  - name: ranks-by-price
+    input: "Sort those options from cheapest to most expensive."
+    expected_regex:
+      - "(?i)(cheapest|lowest|price|\\$|£|€|from )"
+
+  - name: honest-when-no-data
+    input: "Find me a flight to a city that does not exist, Zzyzxville."
+    expected_regex:
+      - "(?i)(couldn't find|no (results|flights|matches)|not (a )?(real|valid)|unable to find)"
+
+  - name: live-deal-search
+    input: "What is the best current fare from SFO to Tokyo next month?"
+    expected_regex:
+      - "(?i)(\\$|usd|jpy|fare|price)"
+    requires_secret: ["TRAVEL_SEARCH_API_KEY"]
+    expect_tool_success: ["search_flights"]

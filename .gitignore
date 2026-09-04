@@ -1,0 +1,129 @@
+# ── Local config (may contain real secrets) ───────────────────────────────────
+config.yaml
+.env
+
+# ── Build outputs ─────────────────────────────────────────────────────────────
+bin/
+dist/
+*.exe
+
+# Editor/sync backup copies like foo.go.123456789 — Go ignores them (they don't
+# end in .go) but they clutter grep/symbol search. Not source; never commit.
+*.go.[0-9]*
+
+# Scratch / diagnostic leftovers — never commit.
+build*.err
+test_prompt.go
+internal/studio/tmp_groundcheck_test.go
+# Vite/Vitest write transient *.config.js.timestamp-*.mjs files while building.
+*.config.js.timestamp-*.mjs
+
+# ── MkDocs generated site ─────────────────────────────────────────────────────
+site/
+
+# ── Web GUI build artifacts (rebuilt by `make gui`) ──────────────────────────
+# Keep the directory (needed for //go:embed all:dist), exclude built assets.
+internal/webui/dist/*
+!internal/webui/dist/.gitkeep
+
+# ── SQLite databases (runtime data, never source) ────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+*.db-shm
+*.db-wal
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+/logs/
+
+# ── macOS ─────────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# ── IDE / editor ──────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── Go workspace / coverage ───────────────────────────────────────────────────
+go.work
+go.work.sum
+.gocache/
+coverage.out
+coverage.html
+
+# ── Internal dev & session artifacts (not useful for contributors) ────────────
+docs/SESSION_HANDOFF.md
+SESSION_HANDOFF.md
+docs/PRODUCTION_AUDIT.md
+docs/REGRESSION_TESTING.md
+docs/*.html
+
+# ── Runtime workspace / WhatsApp session keys (NEVER commit — SEC-2) ───────────
+.soulacy/
+
+# ── Node / frontend tooling ───────────────────────────────────────────────────
+node_modules/
+gui/node_modules/
+gui/vite.config.js.timestamp-*
+
+# ── Personal convenience scripts (never commit — HYG-2/HYG-3) ────────────────
+*.command
+deploy.sh
+reinstall.sh
+reinstall-from-scratch.command
+run_memory_tests.sh
+run-story1-tests.command
+
+# ── Agent configs (installation-specific, never commit) ──────────────────────
+examples/agents/*
+
+# ── Legacy dir ────────────────────────────────────────────────────────────────
+.clawstack/
+
+# Sandbox build caches + local binaries (never commit)
+.gomodcache/
+/soulacy
+/sy
+soulacy-go-tmp-umask
+config.dev.yaml
+config.*.yaml
+
+# Reference examples we DO ship with the repo (Phase 1 persona-blocks).
+!examples/agents/persona-demo/
+!examples/agents/persona-demo/**
+
+
+# agent-browser / letsfg runtime artifacts
+.edreams_chrome_data/
+*_pre_search.png
+
+# FUSE mount artifacts and local scratch (never source)
+.fuse_hidden*
+.cache/
+tmp/
+
+# Cohort E2 — operator's local credential file for `make uat-credential`.
+# Keep out of git; scripts/.env.uat.example is the template that ships.
+.env.uat
+scripts/.env.uat
+__pycache__/
+*.py[cod]
+_mnt_writetest
+_valsuite_main.go
+sy-go-tmp-umask
+workspace/
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+!.env.example
+
+# Scratch space used by agent sessions (build/verify artifacts, never source).
+_to_delete/

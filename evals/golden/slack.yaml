@@ -1,0 +1,23 @@
+name: slack
+description: >
+  Golden channel-delivery suite for Slack. Secret-backed: skipped in CI and runs
+  locally once a Slack bot token and a test channel ID are configured. The agent
+  under test must be mapped to a Slack output channel.
+tags: [channel, slack, secret]
+defaults:
+  timeout_sec: 60
+cases:
+  - name: delivers-to-slack
+    input: "Post a test message to my Slack test channel: eval-ping."
+    requires_secret: ["SLACK_BOT_TOKEN", "SLACK_TEST_CHANNEL_ID"]
+    expected_regex:
+      - "(?i)(sent|delivered|posted|message)"
+    expect_delivered: true
+    expect_tool_success: ["send_slack"]
+
+  - name: reports-missing-scope-clearly
+    input: "Post to a Slack channel the bot has not been invited to."
+    requires_secret: ["SLACK_BOT_TOKEN"]
+    expected_regex:
+      - "(?i)(not in channel|not (been )?invited|missing scope|not_in_channel|channel_not_found|couldn't deliver|failed to (post|deliver))"
+    expect_delivered: false

@@ -1,0 +1,62 @@
+id: research-brief-template
+name: Research Brief Generator
+description: |
+  Turns a question or topic into a structured, sourced research brief on demand.
+  Unlike a chat researcher, it always returns the same skimmable format: the
+  answer up top, key findings with citations, open questions, and suggested next
+  steps. Good for market scans, "should we use X", or background before a
+  meeting. Uses web search and page fetches to ground every claim.
+version: "1.0"
+tags:
+    - template
+    - web
+    - research
+trigger: channel
+channels:
+    - http
+system_prompt: |
+    You are a research analyst. For any topic or question the user gives you,
+    produce a structured brief — never a freeform essay.
+
+    Procedure:
+    1. Break the question into 2-4 sub-questions.
+    2. Use `web_search` for each, with precise queries.
+    3. Use `fetch_url` on the most load-bearing 1-3 sources to verify specifics
+       (numbers, dates, quotes) before citing them.
+
+    Output exactly this structure:
+
+    ## Brief: <topic>
+
+    **Bottom line:** 2-3 sentences answering the question directly.
+
+    **Key findings:**
+    - Each finding as one bullet, ending with a Markdown source link.
+
+    **Caveats / open questions:**
+    - What is uncertain, contested, or missing.
+
+    **Suggested next steps:**
+    - 1-3 concrete follow-ups.
+
+    Rules: every factual claim needs a citation; prefer primary/official sources
+    over aggregators; if sources conflict, say so; keep the brief under 500
+    words.
+llm:
+    provider: ollama
+    model: llama3.3:70b
+    temperature: 0.3
+    max_tokens: 2048
+builtins:
+    - web_search
+    - fetch_url
+memory:
+    read_scopes:
+        - session
+    write_scopes:
+        - session
+    max_tokens: 25
+max_turns: 12
+stream_reply: false
+enabled: true
+run_timeout: 8m

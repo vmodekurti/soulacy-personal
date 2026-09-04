@@ -1,0 +1,326 @@
+# Soulacy configuration example
+# Copy to ~/.soulacy/soulspace/config.yaml (the workspace; legacy installs
+# keep ~/.soulacy/config.yaml — see docs/WORKSPACE.md) and fill in values.
+# NEVER commit config.yaml — it may contain secrets.
+
+# ── Agent directories ─────────────────────────────────────────────────────────
+# Use ABSOLUTE paths. Relative paths resolve from the working directory at
+# startup — unpredictable when launched via LaunchAgent or systemd.
+agent_dirs:
+    - /Users/yourname/.soulacy/agents
+
+# ── Channels ─────────────────────────────────────────────────────────────────
+channels:
+    discord:
+        enabled: false
+        token: ""
+        agent_id: assistant              # Create this agent before enabling.
+        guild_id: ""
+        # Safety defaults: require an explicit wake phrase and ignore servers.
+        trigger_phrase: "!soulacy"
+        ignore_groups: true
+        allowed_chat_ids: ""
+        allowed_user_ids: ""
+    http:
+        enabled: true
+    slack:
+        enabled: false
+        bot_token: ""
+        app_token: ""
+        agent_id: assistant              # Create this agent before enabling.
+        # Safety defaults: require an explicit wake phrase and ignore channels.
+        trigger_phrase: "!soulacy"
+        ignore_groups: true
+        allowed_chat_ids: ""
+        allowed_user_ids: ""
+    telegram:
+        enabled: false
+        # Single-bot (simple):
+        agent_id: assistant              # Create this agent before enabling.
+        token: ""                          # Your Telegram bot token
+        # Safety defaults: require an explicit wake phrase and ignore groups.
+        trigger_phrase: "!soulacy"
+        ignore_groups: true
+        allowed_chat_ids: ""
+        allowed_user_ids: []              # Allowlist of Telegram user IDs (int64)
+
+        # Multi-bot — one bot per agent. Comment out the three lines above and
+        # use this instead:
+        # bots:
+        #   - token: "BOT_TOKEN_1"
+        #     agent_id: assistant
+        #     allowed_user_ids: [123456789]
+        #   - token: "BOT_TOKEN_2"
+        #     agent_id: financial-agent
+        #     allowed_user_ids: [123456789]
+    whatsapp:
+        enabled: false
+        # Official Meta WhatsApp Business Cloud API.
+        phone_number_id: ""
+        access_token: ""
+        verify_token: ""
+        app_secret: ""
+        agent_id: assistant              # Create this agent before enabling.
+        # Safety defaults: require an explicit wake phrase.
+        trigger_phrase: "!soulacy"
+        allowed_user_ids: ""
+    whatsapp_web:
+        enabled: false
+        # Experimental QR-linked WhatsApp Web sidecar. Not the official
+        # WhatsApp Business API; use only for personal/local automation.
+        command: node
+        args:
+            - scripts/whatsapp-web-sidecar.mjs
+        session_dir: /Users/yourname/.soulacy/whatsapp-web
+        account_id: default
+        agent_id: assistant              # Create this agent before enabling.
+        # Safety defaults: do not respond to every WhatsApp message.
+        trigger_phrase: "!soulacy"
+        ignore_groups: true
+        allowed_chat_ids: ""
+        allowed_sender_ids: ""
+
+# ── Web search ────────────────────────────────────────────────────────────────
+# Backs the built-in web_search tool, available to every agent regardless of
+# which LLM provider it runs on. Leave api_key blank to read the provider's env
+# var instead (OLLAMA_API_KEY / TAVILY_API_KEY / SERPER_API_KEY).
+search:
+    provider: ollama # ollama | tavily | serper
+    # api_key: "…"
+    #
+    # timeout bounds how long web_search waits for the provider. A Go duration
+    # ("90s", "2m") or a bare number of seconds ("90"). Default 30s.
+    #
+    # Raise this if you see:
+    #   web_search: request failed: context deadline exceeded
+    #   (Client.Timeout exceeded while awaiting headers)
+    #
+    # …especially with a fan-out block running several searches at once, which
+    # makes a slow provider much more likely to blow the ceiling. A workflow
+    # node can also override it per call with a `timeout_s` argument, and any
+    # value is capped at 10m.
+    # timeout: 90s
+
+# ── LLM providers ─────────────────────────────────────────────────────────────
+llm:
+    default_provider: ollama
+    # studio: overrides the model that BUILDS workflows in Studio (independent of
+    # the model agents run on). learning (default: true) lets Studio record
+    # lessons from repairs you accept after a Run Live and inject them into future
+    # generations so it builds flows that work the first time. Set false to opt out.
+    # studio:
+    #     provider: anthropic
+    #     model: claude-sonnet-4-6
+    #     learning: true
+    providers:
+        anthropic:
+            api_key: "sk-ant-..."          # Your Anthropic API key
+            base_url: https://api.anthropic.com
+            model: claude-sonnet-4-6
+            prompt_caching: true           # Cache system prompt + tools — 90% off repeated input tokens (recommended)
+        groq:
+            api_key: "gsk_..."             # Your Groq API key
+            base_url: https://api.groq.com/openai/v1
+            model: qwen/qwen3-32b
+        ollama:
+            base_url: http://localhost:11434
+            model: llama3.3:70b
+
+# ── Realtime voice (Story 11, docs/VOICE_SPIKE.md) ────────────────────────────
+# Enables the push-to-talk voice panel in Chat. The browser connects to the
+# provider directly over WebRTC using a short-lived key minted by the gateway;
+# your real API key never reaches the browser. Key comes from
+# llm.providers.openai.api_key or the OPENAI_API_KEY env var.
+# voice:
+#     provider: openai            # only "openai" supported (v1)
+#     model: gpt-realtime-mini    # default; gpt-realtime for higher quality
+#     # base_url: ""              # override for Azure/compatible endpoints
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+log:
+    file: /Users/yourname/.soulacy/logs/soulacy.log
+    format: console
+    level: info
+
+# ── MCP servers ───────────────────────────────────────────────────────────────
+# Connected servers are not automatically a security boundary. By default,
+# legacy agents see every connected MCP tool; restrict new/sensitive agents with
+# SOUL.yaml fields such as:
+#
+#   mcp_servers: [rocketmoney]                         # allow one server
+#   mcp_tools: [mcp__rocketmoney__get_transactions]    # allow one tool
+#   mcp_servers: []                                    # allow no MCP tools
+mcp:
+    servers:
+        filesystem:
+            args:
+                - -y
+                - '@modelcontextprotocol/server-filesystem'
+                - /Users/yourname/Documents
+            command: npx
+            transport: stdio
+        rocketmoney:
+            args:
+                - /Users/yourname/.soulacy/mcp-servers/rocketmoney/start.sh
+            command: bash
+            transport: stdio
+            # DO NOT put the cookie in env here — the PATCH /api/v1/mcp/* endpoint
+            # rewrites config.yaml and silently strips env vars. Store the cookie
+            # in ~/.soulacy/secrets/rocket_money_cookie instead; start.sh reads it
+            # from there automatically.
+
+# ── Memory ────────────────────────────────────────────────────────────────────
+memory:
+    max_history: 50
+
+# ── Runtime ───────────────────────────────────────────────────────────────────
+runtime:
+    default_max_turns: 30
+    max_concurrent_sessions: 100
+
+    # Python interpreter used for all python_file tools.
+    # Must match the interpreter you install packages with:
+    #   python3.11 -m pip install --break-system-packages feedparser httpx pyyaml
+    # Avoid plain "python3" — on macOS it maps to the system 3.9 which has no packages.
+    python_bin: python3.11
+
+    tool_timeout: 30s
+
+    # adaptive_nodes (default: true): when a workflow node hits an unexpected data
+    # shape at run time — it errors, or "succeeds" but its output reports an error
+    # (e.g. a script that couldn't parse a real API response) — the runtime asks
+    # the model to produce the node's intended output from the actual input so the
+    # flow keeps running instead of aborting. Bounded to one salvage attempt per
+    # node, and only for shape/format surprises (never auth/network/consent).
+    # Set false to require per-node opt-in (adaptive: true on a flow node) instead.
+    # adaptive_nodes: true
+
+    # Python sandbox resource caps (Linux rlimits — ignored on macOS).
+    # For long-running tools (e.g. the AI podcast pipeline takes ~15 min),
+    # set cpu_seconds: 0 to remove the cap.
+    # sandbox:
+    #   enabled: true
+    #   cpu_seconds: 0      # 0 = no cap (default 30)
+    #   memory_mb: 0        # 0 = no cap (default 512)
+    #   open_files: 256
+    #   file_size_mb: 64
+
+    # Optional, OFF by default: also write per-session tool-call audit logs as
+    # JSONL. This is redundant debug output — the authoritative incident record
+    # is the SQLite action log (always on). See docs/security/audit.md.
+    # audit_dir: /Users/yourname/.soulacy/audit
+
+# ── Execution backends ──────────────────────────────────────────────────────────
+# Where an agent's Python tool code runs. The server-wide default is set here;
+# individual agents can opt into any *registered* backend via `execution.backend`
+# in their SOUL.yaml (values: local, docker, ssh, or a cloud preset name).
+# executor:
+#     backend: process                   # process (default) | pool | docker | ssh
+#     workers: 4                          # pool only: pre-forked worker count
+#
+#     # docker backend
+#     docker_image: python:3.12-slim
+#     docker_network: none               # none (default) | bridge | host | <name>
+#     docker_volumes:                    # explicit mount allowlist; nothing else is mounted
+#       - /data/in:/data/in:ro
+#
+#     # ssh backend
+#     ssh_host: user@remote-host         # or just the host if ssh_user is set
+#     ssh_user: ""
+#     ssh_python_bin: python3
+#     ssh_identity: /path/to/id_ed25519  # private key file, OR:
+#     ssh_identity_credential: ""        # name of a vault secret holding the key
+#                                        # (resolved to a 0600 temp file at startup)
+#
+#     # cloud preset — registers a backend named after the preset (modal/runpod/
+#     # daytona) that agents can select. The provider CLI must be installed and
+#     # authenticated on this host.
+#     cloud_preset: ""                   # modal | runpod | daytona
+#     cloud_target: ""                   # pod id / workspace / app handle
+#     cloud_cli: ""                      # optional override of the provider CLI binary
+
+# ── Per-agent options (set in each agent's SOUL.yaml, shown here for reference) ──
+# policy:                                # gate high-risk tool actions
+#     enabled: true
+#     shell: prompt                      # allow | prompt | deny
+#     file: prompt
+#     network: allow
+#     allow_domains: [example.com]       # network limited to these hosts
+#     deny_domains: []
+#     deny_paths: ["*.env", "/etc/*"]
+# dry_run: true                          # simulate side-effecting tools; no real actions
+# execution:
+#     backend: docker                    # pick a registered backend for this agent
+
+# ── Server ────────────────────────────────────────────────────────────────────
+server:
+    api_key: "sy_..."                      # Generate: openssl rand -hex 32 | sed 's/^/sy_/'
+    gui_enabled: true
+    host: 127.0.0.1
+    port: 18789
+
+# ── Plugin settings (Story E17) ──────────────────────────────────────────────
+# Arbitrary plugin-specific configuration, keyed by plugin ID. The shape under
+# each key is owned by the plugin — the core parser never validates it.
+# Secret-looking values (token/secret/password/api_key/credential in the key
+# name) are redacted in the config API; the GUI never sees them.
+# plugins_config:
+#     weather-bot:
+#         units: metric
+#         cache_ttl: 15m
+
+# ── Package registries (Story E19) ───────────────────────────────────────────
+# Sources for `sy skill install <slug>` and the GUI install flow. Entries are
+# queried in ascending priority order (lower runs first) with fallback — the
+# first registry that resolves a slug wins. Types: http (default; an E19
+# registry serving /v1/search + /v1/packages/{slug}) and git (resolves
+# github.com/user/my-skill style sources via shallow clone).
+# registries:
+#     - id: main
+#       type: http
+#       base_url: https://registry.example.com
+#       priority: 10
+#       auth_headers:
+#           Authorization: "Bearer sk_..."
+#       signing_key: "3b6a27bc..."  # hex ed25519 public key; when set, unsigned/tampered packages are refused
+#     - id: github
+#       type: git
+#       priority: 100
+
+# ── Vector memory backend ────────────────────────────────────────────────────
+# Default: "sqlite-vec" (built-in, no external service). The Qdrant backend
+# below is EXPERIMENTAL: it has no automated tests and no known production
+# users — enabling it logs a startup WARN. Prefer sqlite-vec or an external
+# sidecar (see below) for anything you depend on.
+# vector:
+#     backend: qdrant                       # EXPERIMENTAL / untested — use at your own risk
+#     url: http://localhost:6333
+#     collection: soulacy_memory
+#     api_key: ""
+#     dims: 768
+
+# ── Queue backend ─────────────────────────────────────────────────────────────
+# Default: "memory" (in-process, zero-dependency). The NATS JetStream backend
+# below is EXPERIMENTAL: it has no automated tests and no known production
+# users — enabling it logs a startup WARN. The in-memory queue is the
+# supported path; use an external sidecar (below) if you need durability.
+# queue:
+#     backend: nats                         # EXPERIMENTAL / untested — use at your own risk
+#     nats_url: nats://localhost:4222
+#     nats_stream: soulacy
+#     nats_ack_wait: 30s
+
+# ── External storage sidecars (Story E24) ────────────────────────────────────
+# Vector and queue backends can be served by a sidecar process speaking the
+# External Storage Protocol (JSON-RPC 2.0 over stdio) — third-party database
+# drivers without recompiling. See docs/EXTERNAL_STORAGE_PROTOCOL.md. The
+# gateway provisions a per-run shared scratch directory (workspace
+# data/scratch/…) and passes it in negotiate.shared_dir; large payloads move
+# as files under it. Conformance kit: sdk/extstorage/storagetest.
+# vector:
+#     backend: external
+#     command: /usr/local/bin/my-vector-sidecar
+#     args: ["--db", "/var/lib/mydb"]
+# queue:
+#     backend: external
+#     command: /usr/local/bin/my-queue-sidecar

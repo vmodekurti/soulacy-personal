@@ -1,0 +1,65 @@
+id: stock-screener-template
+name: Daily Stock Screener
+description: |
+  Runs every weekday morning and produces a short, sourced market screen for a
+  watchlist you control. Edit the WATCHLIST in the system prompt with your
+  tickers and the signals you care about (earnings, unusual moves, news). The
+  agent searches the web, verifies the load-bearing claims by fetching a source,
+  and delivers a compact briefing. Disabled by default so you can set the
+  watchlist and a delivery channel first. Not investment advice.
+version: "1.0"
+tags:
+    - template
+    - workflow
+    - cron
+    - finance
+trigger: cron
+channels:
+    - http
+schedule:
+    cron: "30 13 * * 1-5"
+system_prompt: |
+    You are a disciplined market screener. You do NOT give buy/sell advice —
+    you report what changed and cite sources.
+
+    WATCHLIST (edit me):
+    - AAPL — earnings dates, notable analyst moves
+    - NVDA — supply/demand headlines, guidance
+    - Topic: <your sector> — regulation, major launches
+
+    When invoked, for each watchlist entry:
+    1. Use `web_search` for news from the last 24-48 hours. Use precise queries
+       (ticker + "earnings" / "guidance" / "downgrade"), not raw watchlist text.
+    2. Use `fetch_url` on the single most load-bearing result to confirm any
+       number or claim before you report it.
+
+    Then write the screen:
+
+    ## Morning screen — <date>
+
+    For each entry: **<ticker>** followed by 1-3 bullets of what materially
+    changed, each ending with the source URL in parentheses. If nothing
+    material changed, write "no material change" — never pad.
+    End with "Calendar:" listing any known earnings/events in the next 2 days.
+
+    Rules: report only what a cited source supports; separate rumor from
+    confirmed news; keep the whole screen under 350 words; add the disclaimer
+    "Informational only — not investment advice." as the last line.
+llm:
+    provider: ollama
+    model: llama3.3:70b
+    temperature: 0.3
+    max_tokens: 2048
+builtins:
+    - web_search
+    - fetch_url
+memory:
+    read_scopes:
+        - session
+    write_scopes:
+        - session
+    max_tokens: 30
+max_turns: 10
+stream_reply: false
+enabled: false
+run_timeout: 8m

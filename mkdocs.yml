@@ -1,0 +1,228 @@
+site_name: Soulacy
+site_description: Secure, self-hosted AI agent runtime with Studio, native MCP, persistent semantic memory, governed LLM spend, and multi-channel delivery.
+site_url: https://docs.soulacy.io
+repo_url: https://github.com/vmodekurti/soulacy-personal
+repo_name: vmodekurti/soulacy-personal
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: purple
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: purple
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  logo: assets/logo.svg
+  favicon: assets/logo.svg
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.path
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - content.action.edit
+
+extra_css:
+  - stylesheets/extra.css
+
+
+plugins:
+  - search
+
+# Internal working documents — never published to the public site.
+exclude_docs: |
+  AGENT_DESIGN.md
+  SESSION_HANDOFF.md
+  STUDIO_*.md
+  BACKLOG.md
+  CHANNEL_DESIGN.md
+  CLEAN_RUNTIME_UAT_REPORT_*.md
+  CRITIQUE_RESPONSE.md
+  CUSTOM_DISTRIBUTIONS.md
+  EVENTS.md
+  EXTENSIBILITY.md
+  EXTERNAL_CHANNEL_PROTOCOL.md
+  EXTERNAL_STORAGE_PROTOCOL.md
+  FLOW_GRAPHS.md
+  FOUNDER_QA_REPORT_*.md
+  FRAMEWORK_OVERVIEW.md
+  FRAMEWORK_PARITY_BACKLOG.md
+  INSTALL_UX_GAPS.md
+  LAUNCH_STRATEGY.md
+  OPENCLAW_PARITY.md
+  PACKAGE_REGISTRIES.md
+  PACKAGE_VERSIONING_DESIGN.md
+  PLUGIN_*.md
+  COHORT_*.md
+  PRODUCTION_AUDIT.md
+  PRODUCTION_PARITY.md
+  PRODUCTIZATION_REVIEW.md
+  RELEASE_CHECKLIST.md
+  RELEASE_NOTES_*.md
+  PRODUCT_GUIDE.md
+  REASONING_STRATEGIES.md
+  REGRESSION_TESTING.md
+  RULEBOOKS.md
+  SAFETY_INTROSPECTION.md
+  SOULACY_*.md
+  TUTORIAL.md
+  UPGRADE_STABILITY.md
+  USER_GUIDE.md
+  VASU_OS_FEASIBILITY.md
+  VOICE_SPIKE.md
+  WORKSPACE.md
+  *.html
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - attr_list
+  - md_in_html
+  - tables
+  - footnotes
+  - toc:
+      permalink: true
+
+extra:
+  social:
+    - icon: fontawesome/solid/globe
+      link: https://soulacy.io
+      name: Main Website (soulacy.io)
+    - icon: fontawesome/brands/github
+      link: https://github.com/vmodekurti/soulacy-personal
+  version:
+    provider: mike
+
+
+nav:
+  - Home: index.md
+  - Recent Updates: recent-updates.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quickstart.md
+    - Your First Agent: getting-started/first-agent.md
+    - GUI Tour: getting-started/gui-tour.md
+  - Using Soulacy:
+    - Chat: using/chat.md
+    - Studio (Agent Builder): using/studio.md
+    - Studio Learning & Memory: studio-learning-memory.md
+    - Voice Conversations: using/voice.md
+    - Dashboard & Activity: using/dashboard.md
+    - Workboard: using/workboard.md
+    - Schedules: using/schedules.md
+    - Knowledge Bases: using/knowledge.md
+    - Agent Memory & Rulebooks: using/memory.md
+    - Workflow Templates: using/templates.md
+    - Evaluations (sy eval): using/evaluations.md
+    - Flow View: using/flow-view.md
+  - Template Setup Guides:
+    - Overview: template-guides/index.md
+    - Weather: template-guides/weather.md
+    - Stock Screener: template-guides/stock-screener.md
+    - Deal Finder: template-guides/deal-finder.md
+    - Research Librarian: template-guides/research-librarian.md
+    - Document Ingestion: template-guides/document-ingestion.md
+    - Inbox / Meeting Assistant: template-guides/inbox-meeting.md
+  - Agents:
+    - SOUL.yaml Reference: agents/soul-yaml.md
+    - Agent Tools: agents/tools.md
+    - Skills: agents/skills.md
+    - Reasoning Strategies: agents/reasoning.md
+    - Workflow Steps: agents/workflow.md
+    - Flow Graphs: agents/flows.md
+    - Peer Agents & Built-ins: agents/peers-builtins.md
+  - Skills & Plugins:
+    - Installing Skills: extend/installing-skills.md
+    - Skill Sources: extend/skill-sources.md
+    - MCP Servers: extend/mcp.md
+    - Plugins: extend/plugins.md
+    - Plugin Security Model: extend/plugin-security.md
+    - Safety Introspection: extend/safety.md
+    - Package Registries: extend/registries.md
+    - Custom Distributions: extend/custom-distributions.md
+  - Channels:
+    - Overview: channels/index.md
+    - Telegram: channels/telegram.md
+    - Slack: channels/slack.md
+    - Discord: channels/discord.md
+    - Email / SMTP: channels/email.md
+    - Microsoft Teams: channels/teams.md
+    - Google Chat: channels/google-chat.md
+    - Webhook: channels/webhook.md
+    - WhatsApp: channels/whatsapp.md
+    - HTTP: channels/http.md
+    - Custom Sidecar Channels: channels/sidecars.md
+  - Configuration:
+    - Overview: configuration/index.md
+    - Workspace Layout: configuration/workspace.md
+    - Web GUI: configuration/gui.md
+    - Server: configuration/server.md
+    - LLM Providers: configuration/llm.md
+    - LLM Cost Controls: LLM_COST_CONTROLS.md
+    - Request Timeouts: configuration/timeouts.md
+    - Storage & Backends: configuration/storage.md
+    - Events & Webhooks: configuration/events.md
+    - Voice: configuration/voice.md
+    - Auth: configuration/auth.md
+    - Security Posture: configuration/security.md
+    - Rate Limiting: configuration/rate-limiting.md
+    - Telemetry: configuration/telemetry.md
+  - Security:
+    - Overview: security/index.md
+    - Tool Sandbox: security/sandbox.md
+    - Audit & Incident Records: security/audit.md
+  - Compare: comparison-chart.md
+  - API Reference:
+    - Overview: api/index.md
+    - Auth: api/auth.md
+    - Agents: api/agents.md
+    - Workboard: api/workboard.md
+    - Registries & Skills: api/registries.md
+    - Credentials: api/credentials.md
+    - Costs: api/costs.md
+    - Admin: api/admin.md
+  - CLI:
+    - Reference: cli/reference.md
+  - Deployment:
+    - Docker: deployment/docker.md
+    - macOS: deployment/macos.md
+    - Linux / VPS: deployment/linux.md
+    - Upgrades & Reinstall: deployment/upgrades.md
+  - Troubleshooting:
+    - Common Failures → Fixes: troubleshooting/common-failures.md
+  - Architecture:
+    - Overview: architecture/overview.md
+    - Specs & Deep Dives: architecture/specs.md

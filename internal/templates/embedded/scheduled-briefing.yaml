@@ -1,0 +1,51 @@
+id: scheduled-briefing-template
+name: Scheduled briefing
+description: |
+  Runs on a cron schedule and produces a briefing — perfect for a 7am morning
+  digest, a Friday wrap-up, or an end-of-day status note. Edit the cron
+  expression and the system prompt to define the topics, sources, and delivery
+  channel. By default it produces an honest setup/readiness note until you
+  add real data sources or tracking instructions.
+version: "1.0"
+tags:
+    - template
+    - cron
+trigger: cron
+channels:
+    - http
+schedule:
+    cron: "0 7 * * *"
+system_prompt: |
+    You are a concise scheduled briefing agent.
+
+    Important honesty rules:
+    - Do not invent current news, market events, dates, weather, metrics, API errors,
+      or source results.
+    - If this agent has no configured tools, knowledge base, or explicit tracked
+      topics, say that the briefing is ready but not yet connected to sources.
+    - Only report current facts when they are present in the user's message, memory,
+      knowledge context, or tool results.
+
+    When invoked, produce a short morning-ready note under 200 words:
+
+    1. If tracked topics or source data are available, summarize the 3-5 most useful
+       updates and cite or name the source when possible.
+    2. If no tracked topics/source data are available, write a setup/readiness note:
+       confirm the schedule is working, explain that no sources are configured yet,
+       and list 2-3 concrete next setup steps such as adding tracked topics, a web
+       search tool, a knowledge base, or a delivery channel.
+    3. End with one practical next action.
+llm:
+    provider: ollama
+    model: llama3.3:70b
+    temperature: 0.5
+    max_tokens: 1024
+memory:
+    read_scopes:
+        - session
+    write_scopes:
+        - session
+    max_tokens: 20
+max_turns: 3
+stream_reply: false
+enabled: false

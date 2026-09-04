@@ -1,0 +1,147 @@
+# Soulacy default configuration
+# Copy to ~/.soulacy/config.yaml and edit as needed.
+# All values can also be set via environment variables: SOULACY_<SECTION>_<KEY>
+# e.g. SOULACY_SERVER_PORT=8080
+
+server:
+  host: "0.0.0.0"
+  port: 18789
+  gui_enabled: true
+  api_key: ""           # Set to a secret string to require bearer auth on all API calls
+
+runtime:
+  max_concurrent_sessions: 100
+  default_max_turns: 20
+  python_bin: "python3"
+  tool_timeout: "120s" # legacy alias; must match timeouts.tool
+  timeouts:
+    tool: "120s"
+    llm: "180s"
+    step: "240s"
+    run: "15m"
+    http: "16m"
+  # Host filesystem tools are confined to the Soulacy workspace by default.
+  # Set explicit absolute roots only when an agent must access another tree.
+  filesystem_roots: []
+  sandbox:
+    enabled: true
+    mode: docker            # docker | unsandboxed (unsafe, warns every startup)
+    image: python:3.12-slim
+    cpu_seconds: 30
+    memory_mb: 512
+    open_files: 256
+    file_size_mb: 64
+    pids: 128
+  retention:
+    conversation_history: "720h" # 30 days; "0" keeps indefinitely
+    action_events: "2160h"       # 90 days
+    audit_logs: "720h"           # 30 days
+  default_budget:
+    max_tokens: 100000
+    max_llm_calls: 20
+  max_budget:
+    max_tokens: 1000000
+    max_llm_calls: 100
+
+memory:
+  max_history: 50       # Max messages kept in hot (file) memory per session
+  vector_db: ""         # "chroma" | "qdrant" | "" (disabled)
+  vector_url: ""
+
+llm:
+  default_provider: ollama
+  allowed_regions: [] # optional workspace residency allowlist; empty permits configured regions
+  # Empty/null means unrestricted. In production, explicitly list providers
+  # and models that this workspace is permitted to use.
+  allowed_providers: null
+  allowed_models: null
+  studio:
+    max_build_tokens: 100000
+    max_build_cost_usd: 5.0
+  providers:
+    ollama:
+      base_url: "http://localhost:11434"
+      model: "llama3"
+    openai:
+      base_url: "https://api.openai.com/v1"
+      api_key: ""       # or set SOULACY_LLM_PROVIDERS_OPENAI_API_KEY
+      model: "gpt-4o"
+      max_tokens_per_minute: 0 # set to the provider/project TPM limit; 0 disables
+      region: ""
+      retention: "provider-default"
+      allowed_data_classes: [public, internal]
+      cache_allowed_data_classes: [public] # explicit opt-in when prompt_caching is enabled
+    anthropic:
+      base_url: "https://api.anthropic.com"
+      api_key: ""       # or set SOULACY_LLM_PROVIDERS_ANTHROPIC_API_KEY
+      model: "claude-sonnet-4-6"
+
+# Central admission, accounting, and resilience controls for every LLM call.
+costs:
+  enforcement_mode: soft       # off | soft | hard
+  unknown_pricing: allow       # allow | block
+  daily_budget_usd: 0          # UTC calendar day; 0 disables this budget
+  monthly_budget_usd: 0        # UTC calendar month; 0 disables this budget
+  per_user_daily_budget_usd: 0
+  per_agent_daily_budget_usd: 0
+  alert_threshold: 0.8
+  default_max_output_tokens: 4096
+  max_output_tokens_ceiling: 32768
+  confirmation_threshold_usd: 0 # require confirm_cost=true above this estimate; 0 disables
+  reservation_ttl: "15m"
+  max_concurrent_per_provider: 8
+  circuit_failure_threshold: 5
+  circuit_cooldown: "30s"
+  reconciliation:
+    enabled: false
+    interval: "24h"
+    variance_alert_threshold: 0.10
+    providers: {}
+  pricing:
+    # Explicit zero rates mark local Ollama as free rather than unknown.
+    ollama/*:
+      input_per_mtok: 0
+      output_per_mtok: 0
+
+rate_limit:
+  enabled: true
+  per_user_rpm: 60
+  per_agent_rpm: 0
+  per_user_tokens_day: 0
+  per_agent_tokens_day: 0
+  backend: memory
+  redis_url: ""
+
+# Channel adapter configurations.
+# Each key is the channel adapter ID. The inner map is adapter-specific.
+channels:
+  http:
+    enabled: true       # Always-on HTTP webhook channel, no extra config needed
+  telegram:
+    enabled: false
+    token: ""           # SOULACY_CHANNELS_TELEGRAM_TOKEN
+  discord:
+    enabled: false
+    token: ""           # SOULACY_CHANNELS_DISCORD_TOKEN
+    app_id: ""
+  slack:
+    enabled: false
+    bot_token: ""
+    app_token: ""       # Socket mode app token (xapp-)
+  whatsapp:
+    enabled: false
+    phone_number_id: ""
+    token: ""
+  email:
+    enabled: false
+    imap_host: ""
+    imap_port: 993
+    smtp_host: ""
+    smtp_port: 587
+    username: ""
+    password: ""
+
+log:
+  level: info           # debug | info | warn | error
+  format: console       # console | json
+  file: ""              # optional path to log file

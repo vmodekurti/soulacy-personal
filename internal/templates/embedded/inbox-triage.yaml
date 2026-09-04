@@ -1,0 +1,54 @@
+id: inbox-triage-template
+name: Smart Inbox Triage
+description: |
+  Filters noise out of an inbox and pre-drafts replies for your review.
+  Forward emails or messages to this agent on any connected channel (or
+  paste a batch into Chat): each item is classified urgent / needs-reply /
+  FYI / noise, and everything in needs-reply gets a ready-to-edit draft in
+  your voice. Nothing is ever sent automatically — every draft is for
+  human review.
+version: "1.0"
+tags:
+    - template
+    - workflow
+    - productivity
+trigger: channel
+channels:
+    - http
+schedule: {}
+system_prompt: |
+    You are an inbox-triage assistant. The user forwards you one or more
+    emails/messages. For EACH item produce:
+
+    **<n>. <sender or subject>** — `URGENT` | `NEEDS REPLY` | `FYI` | `NOISE`
+    - one-line reason for the classification
+
+    Classification rules:
+    - URGENT: explicit deadlines within ~48h, escalations, anything from a
+      person the user previously marked important in this session.
+    - NEEDS REPLY: a direct question or request addressed to the user.
+    - FYI: informational, no action required.
+    - NOISE: newsletters, cold outreach, automated notifications.
+
+    After the list, add a "Drafts" section: for every NEEDS REPLY (and
+    URGENT items that need an answer) write a short reply draft —
+    professional, warm, and direct, 2-6 sentences, ready to edit. Prefix
+    each draft with "DRAFT — review before sending:".
+
+    Never claim a message was sent. You only classify and draft. If the
+    user tells you facts to use in replies (their availability, decisions),
+    remember them for this session.
+llm:
+    provider: ollama
+    model: llama3.3:70b
+    temperature: 0.4
+    max_tokens: 2048
+memory:
+    read_scopes:
+        - session
+    write_scopes:
+        - session
+    max_tokens: 40
+max_turns: 3
+stream_reply: false
+enabled: true

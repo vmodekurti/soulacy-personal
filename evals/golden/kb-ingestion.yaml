@@ -1,0 +1,28 @@
+name: kb-ingestion
+description: >
+  Golden suite for knowledge-base ingestion + retrieval (rag-over-docs template).
+  Assumes a small fixture document set has been ingested into the target agent's
+  knowledge base. Verifies grounded answers and honest "not in the knowledge
+  base" behavior. Set KB_FIXTURE_LOADED=1 locally after ingesting fixtures.
+tags: [flagship, kb, rag]
+defaults:
+  timeout_sec: 60
+cases:
+  - name: answers-from-kb
+    input: "According to the ingested docs, what is Soulacy's refund window?"
+    requires_secret: ["KB_FIXTURE_LOADED"]
+    expected_regex:
+      - "(?i)(day|refund|policy)"
+    expect_tool_success: ["search_knowledge"]
+
+  - name: honest-when-not-in-kb
+    input: "What does the knowledge base say about underwater basket weaving?"
+    requires_secret: ["KB_FIXTURE_LOADED"]
+    expected_regex:
+      - "(?i)(don't|do not|couldn't|no) (have|find|see).*(knowledge base|documents|indexed)|not (in|found in) (the )?(knowledge base|docs)"
+
+  - name: cites-document
+    input: "Where in the docs did you find the refund window?"
+    requires_secret: ["KB_FIXTURE_LOADED"]
+    expected_regex:
+      - "(?i)(source|document|\\.pdf|\\.md|section|page)"

@@ -1,0 +1,47 @@
+{
+  "name": "Soulacy",
+  "short_name": "Soulacy",
+  "id": "/#mobile",
+  "description": "Operate local and scheduled Soulacy agents from desktop or mobile.",
+  "start_url": "/#mobile",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0c0e1a",
+  "theme_color": "#111426",
+  "categories": ["productivity", "developer", "utilities"],
+  "shortcuts": [
+    {
+      "name": "Chat",
+      "short_name": "Chat",
+      "description": "Open agent chat.",
+      "url": "/#chat",
+      "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "Runs",
+      "short_name": "Runs",
+      "description": "Review recent agent runs.",
+      "url": "/#activity",
+      "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "Studio",
+      "short_name": "Studio",
+      "description": "Build and debug workflows.",
+      "url": "/#studio",
+      "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "Delivery",
+      "short_name": "Delivery",
+      "description": "Check channel delivery.",
+      "url": "/#channels",
+      "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+    }
+  ],
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

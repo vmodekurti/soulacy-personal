@@ -1,0 +1,13 @@
+README.md
+pyproject.toml
+soulacy/__init__.py
+soulacy/_cli.py
+soulacy/agent.py
+soulacy/client.py
+soulacy/tool.py
+soulacy.egg-info/PKG-INFO
+soulacy.egg-info/SOURCES.txt
+soulacy.egg-info/dependency_links.txt
+soulacy.egg-info/entry_points.txt
+soulacy.egg-info/requires.txt
+soulacy.egg-info/top_level.txt

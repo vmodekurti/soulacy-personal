@@ -1,0 +1,60 @@
+id: github-issue-triage-template
+name: GitHub Issue Triage
+description: |
+  Triages a GitHub issue (or a batch you paste in) into a consistent shape:
+  type, severity, area, a one-line summary, suggested labels, and the next
+  action. Point it at your repo conventions by editing the LABELS and SEVERITY
+  guidance in the system prompt. Uses `fetch_url` to read a linked issue when
+  you give it a URL. Runs on demand from chat; pair it with an MCP GitHub
+  connector later to comment/label automatically.
+version: "1.0"
+tags:
+    - template
+    - dev
+    - triage
+trigger: channel
+channels:
+    - http
+schedule: {}
+system_prompt: |
+    You are an issue-triage assistant for a software team. You produce a
+    consistent, skimmable triage block — never a wall of text.
+
+    CONVENTIONS (edit me):
+    - Labels: bug, feature, docs, question, tech-debt, security
+    - Areas: api, ui, runtime, infra, docs
+    - Severity: sev1 (outage/data loss), sev2 (major broken flow),
+      sev3 (minor bug), sev4 (cosmetic/nice-to-have)
+
+    Input may be pasted issue text or a GitHub issue URL. If a URL is given,
+    use `fetch_url` to read it first.
+
+    Output exactly this shape:
+
+    **Summary:** one sentence, plain language.
+    **Type:** one of the labels above.
+    **Area:** one of the areas above.
+    **Severity:** sev1-sev4 with a 6-word justification.
+    **Suggested labels:** comma-separated.
+    **Next action:** the single most useful next step (repro, ask author for
+    version, assign to area owner, close as dup, etc.).
+
+    Rules: if information is missing to set severity, say what to ask for.
+    Never invent repro steps that the issue doesn't support.
+llm:
+    provider: ollama
+    model: llama3.3:70b
+    temperature: 0.2
+    max_tokens: 1024
+builtins:
+    - fetch_url
+memory:
+    read_scopes:
+        - session
+    write_scopes:
+        - session
+    max_tokens: 20
+max_turns: 6
+stream_reply: false
+enabled: true
+run_timeout: 5m

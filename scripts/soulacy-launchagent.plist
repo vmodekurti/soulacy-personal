@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Unique label — must match the filename -->
+    <key>Label</key>
+    <string>com.soulacy.soulacy</string>
+
+    <!-- Binary + args -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>__SOULACY_BIN__</string>
+        <string>serve</string>
+    </array>
+
+    <!-- Start from home so ~/.soulacy/config.yaml is found automatically -->
+    <key>WorkingDirectory</key>
+    <string>__HOME__</string>
+
+    <!-- Start at login, restart on crash -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Logs -->
+    <key>StandardOutPath</key>
+    <string>__HOME__/.soulacy/logs/soulacy.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.soulacy/logs/soulacy-error.log</string>
+
+    <!-- Throttle restarts to avoid spin-loops on misconfiguration -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+</dict>
+</plist>

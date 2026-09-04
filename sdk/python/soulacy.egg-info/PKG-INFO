@@ -1,0 +1,42 @@
+Metadata-Version: 2.4
+Name: soulacy
+Version: 0.1.0
+Summary: Python SDK for the Soulacy agentic framework
+Author: Soulacy Contributors
+License: Apache-2.0
+Keywords: ai,agents,llm,soulacy,agentic
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Provides-Extra: vector
+Requires-Dist: chromadb>=0.4; extra == "vector"
+Provides-Extra: dev
+Requires-Dist: pytest>=8; extra == "dev"
+Requires-Dist: httpx>=0.27; extra == "dev"
+
+# Soulacy Python SDK
+
+> ⚠️ **Experimental.** This SDK is not yet published to PyPI and currently has
+> **no test coverage**. APIs may change without notice. Install from source and
+> pin to a commit if you depend on it. A versioned PyPI release will follow once
+> the test suite lands and is wired into CI.
+
+Python SDK for the [Soulacy](https://github.com/vmodekurti/soulacy-personal) agentic
+framework — define and run agents in Python.
+
+## Install (from source)
+
+```bash
+pip install ./sdk/python
+```
+
+## License
+
+Apache-2.0 — see the repository root `LICENSE`.

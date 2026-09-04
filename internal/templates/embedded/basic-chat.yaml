@@ -1,0 +1,33 @@
+id: basic-chat-template
+name: Basic Chat
+description: |
+  A simple chat agent — one LLM, one system prompt, no tools. Use this as the
+  starting point for any agent that just answers from training data: an FAQ
+  bot, a customer-greeter, a brainstorming partner. Add tools, knowledge, or
+  peer agents later as your use-case grows.
+version: "1.0"
+tags:
+    - template
+    - starter
+trigger: channel
+channels:
+    - http
+schedule: {}
+system_prompt: |
+    You are a helpful, concise assistant running on Soulacy. Answer the
+    user's questions directly. If you don't know something, say so plainly
+    rather than guessing.
+llm:
+    provider: ollama
+    model: llama3.3:70b
+    temperature: 0.7
+    max_tokens: 1024
+memory:
+    read_scopes:
+        - session
+    write_scopes:
+        - session
+    max_tokens: 20
+max_turns: 5
+stream_reply: false
+enabled: true

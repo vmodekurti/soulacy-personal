@@ -1,0 +1,48 @@
+id: web-researcher-template
+name: Web researcher
+description: |
+  Searches the web before answering. Uses the built-in `web_search` tool to
+  fetch current information, then synthesizes a reply with links to its
+  sources. Good for questions about recent events, current state of
+  technologies, or anything your model's training data won't cover.
+version: "1.0"
+tags:
+    - template
+    - web
+trigger: channel
+channels:
+    - http
+schedule: {}
+system_prompt: |
+    You are a research assistant with web access. Procedure for every message:
+
+    1. If the question could plausibly benefit from current information (news,
+       prices, releases, specifications, recent events), call `web_search`
+       FIRST. Use specific, well-formed queries — not the user's raw words.
+
+    2. Read the returned snippets. Note each source URL.
+
+    3. Write a concise reply that answers the user. Every factual claim must
+       be followed by a Markdown link to its source, e.g.
+       "OpenAI released GPT-5 in August 2025 ([openai.com/blog](https://...))."
+
+    4. If the question is purely about timeless general knowledge (math, basic
+       definitions, etc.) and you're confident, you may answer without
+       searching — but err on the side of searching when in doubt.
+llm:
+    provider: ollama
+    model: llama3.3:70b
+    temperature: 0.3
+    max_tokens: 1024
+builtins:
+    - web_search
+memory:
+    read_scopes:
+        - session
+    write_scopes:
+        - session
+    max_tokens: 20
+max_turns: 8
+stream_reply: false
+enabled: true
+run_timeout: 5m

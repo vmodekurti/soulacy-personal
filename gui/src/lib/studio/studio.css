@@ -1,0 +1,58 @@
+/* Studio theme — migrated from the old studio plugin's app.css (ARCH-6).
+ *
+ * Studio is now a first-class page of the core dashboard rather than a
+ * sandboxed iframe, so its theme must NOT leak onto the rest of the app. The
+ * old app.css defined its palette and @xyflow/svelte overrides on :root, which
+ * would have recoloured the existing Flow page (which also uses @xyflow). We
+ * therefore scope every variable and every xyflow override under #studio-app
+ * (the Studio page root); the variables cascade to the Studio subcomponents and
+ * to the SvelteFlow canvas mounted inside #studio-app, and nowhere else.
+ *
+ * The body/html/`*` resets from the old app.css are dropped — the core GUI
+ * already provides them (gui/src/App.svelte). */
+
+#studio-app {
+  --bg: #0c0f1a;
+  --bg-elev: #141927;
+  --bg-elev-2: #1b2235;
+  --border: #262e44;
+  --text: #e6e9f2;
+  --text-muted: #8b93ab;
+  --accent: #6c63ff;
+  --accent-dim: rgba(108, 99, 255, 0.18);
+  --ok: #36d399;
+  --warn: #f5c542;
+  --error: #ff6b81;
+  --radius: 10px;
+  --gap: 14px;
+
+  /* @xyflow/svelte dark-mode overrides (its base.css ships a light palette). */
+  --xy-background-color: var(--bg);
+  --xy-edge-stroke: #4a5170;
+  --xy-edge-stroke-selected: var(--accent);
+  --xy-connectionline-stroke: var(--accent);
+  --xy-attribution-background-color: transparent;
+  --xy-controls-button-background-color: var(--bg-elev-2);
+  --xy-controls-button-background-color-hover: var(--bg-elev);
+  --xy-controls-button-color: var(--text);
+  --xy-controls-button-color-hover: var(--accent);
+  --xy-controls-button-border-color: var(--border);
+  --xy-minimap-background-color: var(--bg-elev);
+  --xy-minimap-mask-background-color: rgba(12, 15, 26, 0.7);
+  --xy-node-color: var(--text);
+  --xy-node-border: 1px solid var(--border);
+  --xy-node-background-color: var(--bg-elev-2);
+}
+
+/* The xyflow viewport must own the navy background; clear its default handles.
+ * Scoped under #studio-app so the existing Flow page keeps its own styling. */
+#studio-app .svelte-flow { background: var(--bg); }
+#studio-app .svelte-flow__attribution { display: none; }
+#studio-app .svelte-flow__handle {
+  width: 7px;
+  height: 7px;
+  background: var(--accent);
+  border: none;
+}
+#studio-app .svelte-flow__edge-text { fill: var(--text-muted); font-size: 10px; }
+#studio-app .svelte-flow__edge-textbg { fill: var(--bg-elev); }

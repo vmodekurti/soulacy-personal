@@ -1,0 +1,19 @@
+# Cloudflare Pages redirects.
+# https://developers.cloudflare.com/pages/platform/redirects/
+
+# Old GitHub Pages path lands people here — keep them on soulacy.io.
+/soulacy/*                              /:splat                           301
+
+# Docs live on the subdomain now.
+/docs                                   https://docs.soulacy.io/          301
+/docs/*                                 https://docs.soulacy.io/:splat    301
+
+# Vanity paths for launch collateral.
+/security                               /#security                        302
+/compare                                /#compare                         302
+/install                                /#install                         302
+
+# Short links for HN / Twitter drops.
+/hn                                     https://news.ycombinator.com/from?site=github.com/vmodekurti/soulacy-personal   302
+/gh                                     https://github.com/vmodekurti/soulacy-personal    302
+/discord                                https://github.com/vmodekurti/soulacy-personal/discussions   302

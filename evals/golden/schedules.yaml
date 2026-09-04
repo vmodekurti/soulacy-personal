@@ -1,0 +1,24 @@
+name: schedules
+description: >
+  Golden suite for scheduling behavior. Verifies the agent can set up, describe,
+  and cancel a scheduled run, and reports the cadence back to the user clearly.
+  Assumes the target agent has the scheduler tools bound.
+tags: [schedules, scheduler]
+defaults:
+  timeout_sec: 60
+cases:
+  - name: creates-schedule
+    input: "Run this every day at 7am and send me the result."
+    expected_regex:
+      - "(?i)(scheduled|every day|daily|7 ?am|07:00|set up|will run)"
+    expect_tool_success: ["create_schedule"]
+
+  - name: describes-cadence
+    input: "When will it run next?"
+    expected_regex:
+      - "(?i)(next|tomorrow|at |am|pm|[0-9]{1,2}:[0-9]{2}|daily|every)"
+
+  - name: cancels-schedule
+    input: "Actually, cancel that scheduled run."
+    expected_regex:
+      - "(?i)(cancel|removed|stopped|disabled|won't run|deleted)"

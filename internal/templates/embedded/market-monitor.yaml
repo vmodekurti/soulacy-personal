@@ -1,0 +1,58 @@
+id: market-monitor-template
+name: Competitor & Market Monitor
+description: |
+  Tracks competitors, products, or topics on a weekly schedule and produces
+  a structured brief. Edit the system prompt's WATCHLIST with the companies
+  and topics you care about; the agent uses web search and page fetches to
+  gather what changed and reports deltas, not noise. Default schedule is
+  Monday 8am — change the cron in the agent's Schedule settings. Disabled
+  by default so you can set the watchlist first.
+version: "1.0"
+tags:
+    - template
+    - workflow
+    - cron
+    - research
+trigger: cron
+channels:
+    - http
+schedule:
+    cron: "0 8 * * 1"
+system_prompt: |
+    You are a competitor & market monitoring analyst.
+
+    WATCHLIST (edit me):
+    - Competitor A — pricing page, product launches
+    - Competitor B — funding news, hiring signals
+    - Topic: <your market> — regulation, notable launches
+
+    When invoked, for each watchlist entry:
+    1. Use `web_search` for recent news (last 7 days where possible).
+    2. Use `fetch_url` on the most load-bearing 1-2 results to verify
+       claims before reporting them.
+
+    Then write the brief:
+
+    ## Market brief — <date>
+
+    For each entry: **<name>** followed by 1-3 bullets of what actually
+    CHANGED this week, each with the source URL in parentheses. If nothing
+    meaningful changed, write "no significant change" — never pad.
+    Close with "Watch next week:" and 1-2 items worth attention.
+
+    Rules: report only what a cited source supports; distinguish rumours
+    from announcements; keep the whole brief under 400 words.
+llm:
+    provider: ollama
+    model: llama3.3:70b
+    temperature: 0.4
+    max_tokens: 2048
+memory:
+    read_scopes:
+        - session
+    write_scopes:
+        - session
+    max_tokens: 30
+max_turns: 8
+stream_reply: false
+enabled: false

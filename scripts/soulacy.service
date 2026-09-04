@@ -1,0 +1,38 @@
+[Unit]
+Description=Soulacy — self-hosted agentic framework
+Documentation=https://docs.soulacy.dev
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=soulacy
+Group=soulacy
+
+# Binary installed to __INSTALL_DIR__ by the installer
+ExecStart=__INSTALL_DIR__/soulacy serve
+ExecReload=/bin/kill -HUP $MAINPID
+
+Restart=on-failure
+RestartSec=10s
+TimeoutStopSec=30s
+
+# Data directory — all state lives here
+WorkingDirectory=/var/lib/soulacy
+Environment=SOULACY_CONFIG_PATH=/etc/soulacy/config.yaml
+Environment=HOME=/var/lib/soulacy
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/soulacy /tmp
+PrivateTmp=yes
+ProtectHome=read-only
+
+# Logging — use journald; view with: journalctl -u soulacy -f
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=soulacy
+
+[Install]
+WantedBy=multi-user.target

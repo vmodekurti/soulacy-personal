@@ -1,0 +1,155 @@
+# docker-compose.yml — Full Soulacy stack
+#
+# Services:
+#   soulacy   — gateway server (built from Dockerfile, embeds GUI)
+#   postgres  — persistent action log + memory storage
+#   qdrant    — vector memory for semantic search
+#
+# Quick start:
+#   docker compose up
+#
+# Then open: http://localhost:18789
+#
+# Configuration:
+#   Copy .env.example to .env and edit before first run.
+#   The .env file is git-ignored and never committed.
+
+services:
+  # ── Soulacy gateway ─────────────────────────────────────────────────────────
+  soulacy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
+    image: soulacy:${VERSION:-latest}
+    container_name: soulacy
+    restart: unless-stopped
+    ports:
+      - "${SOULACY_PORT:-18789}:18789"
+    volumes:
+      # Persist agents, plugins, skills, and local config.
+      - soulacy_data:/home/soulacy/.soulacy
+      # Optional: mount your local agent directory for live editing.
+      # - ./examples/agents:/home/soulacy/.soulacy/agents:ro
+    environment:
+      # Storage — use Postgres instead of SQLite
+      SOULACY_STORAGE_BACKEND: postgres
+      SOULACY_STORAGE_POSTGRES_DSN: "postgres://soulacy:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/soulacy?sslmode=disable"
+      SOULACY_STORAGE_POSTGRES_LOG_DIR: /home/soulacy/.soulacy/logs
+
+      # Vector memory — use Qdrant
+      SOULACY_VECTOR_BACKEND: qdrant
+      SOULACY_VECTOR_URL: "http://qdrant:6333"
+      SOULACY_VECTOR_COLLECTION: soulacy_memory
+      SOULACY_VECTOR_DIMS: 768
+
+      # LLM — default to Ollama (can be overridden in .env)
+      SOULACY_LLM_DEFAULT_PROVIDER: ${SOULACY_LLM_DEFAULT_PROVIDER:-ollama}
+      SOULACY_LLM_PROVIDERS_OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      SOULACY_LLM_PROVIDERS_OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3}
+
+      # Bind — 0.0.0.0 so the container's port mapping (ports: 18789:18789) can
+      # actually forward host traffic into the gateway. Without this the
+      # gateway defaults to 127.0.0.1 (the container's loopback), the port
+      # mapping delivers to an unbound address, and curl on the host gets
+      # connection-refused. Setting a non-loopback bind requires an API key
+      # (SEC-4 guard), which we set immediately below.
+      SOULACY_SERVER_HOST: 0.0.0.0
+
+      # Auth — a secret API key is REQUIRED (the container binds to a
+      # non-loopback interface, so an empty key refuses to start; SEC-4).
+      # Generate one with: openssl rand -hex 32
+      SOULACY_SERVER_API_KEY: "${SOULACY_API_KEY:?SOULACY_API_KEY must be set — generate one with: openssl rand -hex 32}"
+
+      # Executor — use pre-forked Python pool for faster tool calls
+      SOULACY_EXECUTOR_BACKEND: pool
+      SOULACY_EXECUTOR_WORKERS: 4
+
+      # ── Security & deployment profile (v1.0.0 defaults for a real prod stack) ──
+      # This compose file is a production-shaped deployment (Postgres + Qdrant +
+      # persistent volumes + no host-side dev workflow). The three vars below turn
+      # on the security posture that ships with v1.0.0:
+      #   deployment.profile = production activates Cohort F S4's readiness
+      #     verdict — it BLOCKS the launch dashboard when any privileged agent is
+      #     exposed on a shared channel (Telegram/Slack/etc.) without an
+      #     explicit accept_privileged_exposure:true on the binding.
+      #   security.intent_gate = deny is the strictest Cohort F S3 mode: any
+      #     high-risk tool call (shell_exec, write_file, http_request, MCP write
+      #     verbs) that the operator's original message didn't request AND that
+      #     lands on untrusted evidence with a Medium+ injection finding is
+      #     REFUSED at dispatch — before policy/guardrail/confirm layers run.
+      #   runtime.sandbox.enabled = true wraps every Python tool call with
+      #     RLIMIT_CPU/AS/NOFILE/FSIZE so a malicious tool can't fork-bomb, eat
+      #     all RAM, or exhaust file descriptors on the container's uid.
+      # Override any of these via .env if you have a specific reason.
+      SOULACY_DEPLOYMENT_PROFILE: ${SOULACY_DEPLOYMENT_PROFILE:-production}
+      SOULACY_SECURITY_INTENT_GATE: ${SOULACY_SECURITY_INTENT_GATE:-deny}
+      SOULACY_RUNTIME_SANDBOX_ENABLED: ${SOULACY_RUNTIME_SANDBOX_ENABLED:-true}
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    networks:
+      - soulacy_net
+    extra_hosts:
+      # Allow the gateway to reach Ollama running on the host machine.
+      - "host.docker.internal:host-gateway"
+
+  # ── Postgres ─────────────────────────────────────────────────────────────────
+  postgres:
+    # Pinned to a specific minor version. NOTE: a digest pin
+    # (postgres:16.4-alpine@sha256:<digest>) is preferred for full
+    # supply-chain immutability — replace this tag with a verified digest
+    # for the platform(s) you run. Resolve one with:
+    #   docker buildx imagetools inspect postgres:16.4-alpine
+    image: postgres:16.4-alpine
+    container_name: soulacy_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: soulacy
+      # No insecure default — POSTGRES_PASSWORD must be supplied via .env.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: soulacy
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - soulacy_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U soulacy"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    # Postgres is not exposed to the host by default — only reachable inside
+    # the soulacy_net network. Uncomment to allow external access:
+    # ports:
+    #   - "5432:5432"
+
+  # ── Qdrant ───────────────────────────────────────────────────────────────────
+  qdrant:
+    # Pinned to a specific version rather than :latest. A digest pin
+    # (qdrant/qdrant:v1.12.4@sha256:<digest>) is preferred — resolve one with:
+    #   docker buildx imagetools inspect qdrant/qdrant:v1.12.4
+    image: qdrant/qdrant:v1.12.4
+    container_name: soulacy_qdrant
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - soulacy_net
+    # Qdrant REST API is not exposed to the host by default.
+    # Uncomment to access the Qdrant dashboard at http://localhost:6333/dashboard
+    # ports:
+    #   - "6333:6333"
+
+volumes:
+  soulacy_data:
+  postgres_data:
+  qdrant_data:
+
+networks:
+  soulacy_net:
+    driver: bridge

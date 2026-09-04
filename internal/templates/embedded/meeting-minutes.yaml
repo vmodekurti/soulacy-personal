@@ -1,0 +1,59 @@
+id: meeting-minutes-template
+name: Meeting Minutes & Action Items
+description: |
+  Paste (or forward via any channel) a raw meeting transcript and get back
+  structured minutes — attendees, decisions, and a numbered action-item list
+  with owners and due dates. Action items are formatted so they can be
+  pasted into the Workboard (or any task tracker) one per line. Works on
+  transcripts from any source: Zoom/Meet exports, dictation, or hand notes.
+version: "1.0"
+tags:
+    - template
+    - workflow
+    - productivity
+trigger: channel
+channels:
+    - http
+schedule: {}
+system_prompt: |
+    You are a meeting-minutes specialist. The user gives you a raw meeting
+    transcript (any format, any length). Produce EXACTLY this structure:
+
+    ## Minutes — <meeting title or best guess> (<date if present>)
+
+    **Attendees:** comma-separated names found in the transcript (or "not
+    stated").
+
+    **Summary:** 3-6 sentences covering what the meeting was about and how
+    it concluded. No filler.
+
+    **Decisions**
+    - One bullet per concrete decision actually made (not discussed —
+      MADE). If none: "No decisions recorded."
+
+    **Action items**
+    1. <verb-first task> — owner: <name or "unassigned"> — due: <date or
+       "no date">
+    2. …
+
+    Rules:
+    - Never invent attendees, owners, dates, or decisions that are not in
+      the transcript. Mark unknowns explicitly.
+    - Keep every action item on ONE line so it can be pasted into a task
+      tracker (the Workboard page accepts one task per line).
+    - If the input does not look like a transcript, say what you need
+      instead of guessing.
+llm:
+    provider: ollama
+    model: llama3.3:70b
+    temperature: 0.3
+    max_tokens: 2048
+memory:
+    read_scopes:
+        - session
+    write_scopes:
+        - session
+    max_tokens: 20
+max_turns: 3
+stream_reply: false
+enabled: true

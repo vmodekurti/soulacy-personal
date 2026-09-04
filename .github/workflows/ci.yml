@@ -1,0 +1,242 @@
+name: CI
+
+on:
+  push:
+    # Trigger on the trunk branches AND on the working codex/* branches so
+    # developers see regression + GUI build failures BEFORE they open a PR
+    # to main. Prior configuration only ran CI on push to main/develop, so
+    # a branch like codex/pto-parity-push could accumulate a red regression
+    # suite for days without anyone noticing until merge time — which is
+    # exactly the state the audit report flagged.
+    branches: [main, develop, "codex/**"]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  # ── Secret scanning (gitleaks) ───────────────────────────────────────────────
+  gitleaks:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── Go build + test ──────────────────────────────────────────────────────────
+  go:
+    name: Go build & test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: soulacy
+          POSTGRES_PASSWORD: soulacy-test-only
+          POSTGRES_DB: soulacy_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U soulacy -d soulacy_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.6"
+          cache: true
+
+      - name: Install SQLite dev libs (needed for cgo)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev build-essential pkg-config
+
+      - name: Build GUI placeholder (so //go:embed all:dist works)
+        run: |
+          mkdir -p internal/webui/dist
+          touch internal/webui/dist/.gitkeep
+          echo '<html><body>CI placeholder</body></html>' > internal/webui/dist/index.html
+
+      - name: go mod tidy
+        run: go mod tidy
+
+      - name: go build
+        run: CGO_ENABLED=1 go build ./...
+
+      - name: go test (race detector)
+        run: CGO_ENABLED=1 go test -race -timeout 120s ./...
+        env:
+          SOULACY_TEST_POSTGRES_DSN: postgres://soulacy:soulacy-test-only@localhost:5432/soulacy_test?sslmode=disable
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: govulncheck
+        run: govulncheck ./...
+
+  # ── Go lint (golangci-lint) ──────────────────────────────────────────────────
+  lint:
+    name: Go lint (golangci-lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.6"
+          cache: true
+
+      - name: Install SQLite dev libs (needed for cgo)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev build-essential pkg-config
+
+      - name: Build GUI placeholder (so //go:embed all:dist works)
+        run: |
+          mkdir -p internal/webui/dist
+          touch internal/webui/dist/.gitkeep
+          echo '<html><body>CI placeholder</body></html>' > internal/webui/dist/index.html
+
+      - name: go mod tidy
+        run: go mod tidy
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.12.2
+
+  # ── GUI build ────────────────────────────────────────────────────────────────
+  gui:
+    name: GUI build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: gui/package-lock.json
+
+      - name: Install dependencies
+        working-directory: gui
+        run: npm ci
+
+      - name: Audit production dependencies
+        working-directory: gui
+        run: npm audit --omit=dev --audit-level=moderate
+
+      - name: Test
+        working-directory: gui
+        run: npm test
+
+      - name: Build
+        working-directory: gui
+        run: npm run build
+
+  # ── Public documentation build ──────────────────────────────────────────────
+  docs:
+    name: Docs build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install MkDocs Material
+        run: pip install mkdocs-material
+
+      - name: Build docs
+        run: make docs-build
+
+  # ── Clean-runtime UAT (non-secret subset) + regression smoke ────────────────
+  # Story 6 (Cohort B): CI never had `make uat` / `make regression` wired, so
+  # CI could pass while UAT was broken. This job runs the `public` UAT variant
+  # (skips every credential-gated block) plus the focused regression smoke,
+  # and uploads the auto-generated timestamped report as an artifact so
+  # reviewers can inspect the run without local reproduction.
+  uat:
+    name: Clean-runtime UAT (public)
+    runs-on: ubuntu-latest
+    needs: [go, gui]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.6"
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: gui/package-lock.json
+
+      - name: Install SQLite dev libs (needed for cgo)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev build-essential pkg-config
+
+      - name: Build (gui + gateway + cli)
+        run: make build
+
+      - name: Regression smoke
+        run: make regression
+
+      - name: Clean-runtime UAT (public subset)
+        run: make uat-public
+
+      - name: Upload UAT report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uat-report-${{ github.run_id }}
+          path: .cache/uat-reports/
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ── Python SDK lint ──────────────────────────────────────────────────────────
+  python:
+    name: Python SDK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install SDK
+        working-directory: sdk/python
+        run: pip install -e . --quiet
+
+      - name: Basic import check
+        run: python3 -c "import soulacy; print('SDK ok')"
+
+      - name: Install test deps
+        working-directory: sdk/python
+        run: pip install pytest --quiet
+
+      - name: Run pytest
+        working-directory: sdk/python
+        # Exit code 5 == "no tests collected"; treat as success until tests are added.
+        run: pytest || ([ $? -eq 5 ] && echo "No Python tests collected yet")

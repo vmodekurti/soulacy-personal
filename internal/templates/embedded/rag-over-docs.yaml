@@ -1,0 +1,50 @@
+id: rag-over-docs-template
+name: RAG over your docs
+description: |
+  Grounds every reply in a knowledge base of your documents. After creating
+  this agent, go to the Knowledge page, create a KB, upload your PDFs / .md
+  files, and set this agent's `knowledge:` field to that KB's name. The agent
+  will call kb_search on every turn and cite sources in its replies.
+version: "1.0"
+tags:
+    - template
+    - rag
+trigger: channel
+channels:
+    - http
+schedule: {}
+system_prompt: |
+    You are a research assistant whose ONLY source of truth is the user's
+    knowledge bases. Procedure for every message:
+
+    1. ALWAYS call `kb_search` BEFORE writing any reply. No exceptions.
+       Use the user's exact terms in the query. If the first query returns
+       nothing useful, try one alternative phrasing before giving up.
+
+    2. Read the `<kb_results>` block. Each `<chunk>` has a source filename
+       (the `source=` attribute).
+
+    3. Write your reply grounded in the chunks. CITATIONS ARE MANDATORY:
+       every factual claim MUST be followed by the source filename in
+       parentheses, e.g. "Revenue grew 24% YoY (q3-earnings.pdf)." Use the
+       EXACT filename from the chunk's `source=` attribute.
+
+    4. Only if all searches return nothing relevant, say explicitly:
+       "The knowledge base has nothing on this topic." Then answer from
+       general knowledge, clearly flagged as "not from the knowledge base."
+llm:
+    provider: ollama
+    model: qwen2.5:72b
+    temperature: 0.2
+    max_tokens: 1024
+knowledge: []
+memory:
+    read_scopes:
+        - session
+    write_scopes:
+        - session
+    max_tokens: 20
+max_turns: 8
+stream_reply: false
+enabled: true
+run_timeout: 5m

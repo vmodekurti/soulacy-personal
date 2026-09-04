@@ -1,0 +1,97 @@
+# syntax=docker/dockerfile:1.6
+#
+# Dockerfile.release — produces a Linux soulacy binary for the requested
+# target architecture, including the cgo-bound sqlite-vec extension.
+#
+# Cross-compiling cgo from macOS to Linux requires an osxcross or a
+# containerised cross-toolchain — neither is friendly. The pragmatic answer
+# is to build INSIDE a Linux container matching the target arch. buildkit's
+# `--platform` flag transparently selects a native-arch build environment,
+# so a single Dockerfile yields either amd64 or arm64 with no host toolchain
+# pain.
+#
+# Build (from the repo root):
+#   docker buildx build --platform linux/amd64 \
+#       -f Dockerfile.release -t soulacy:linux-amd64 --load .
+#   docker buildx build --platform linux/arm64 \
+#       -f Dockerfile.release -t soulacy:linux-arm64 --load .
+#
+# Extract the binary:
+#   docker create --name sy-tmp soulacy:linux-amd64
+#   docker cp sy-tmp:/out/soulacy ./bin/release/soulacy-linux-amd64
+#   docker rm sy-tmp
+#
+# The Makefile targets `release-linux-amd64` and `release-linux-arm64`
+# wrap all of the above into one command.
+
+# ---
+# Stage 1 — GUI builder. The Svelte bundle is embedded via //go:embed, so
+# we have to build it before the Go compile step. Node 20 LTS is enough.
+FROM --platform=$BUILDPLATFORM node:20-bookworm AS gui
+WORKDIR /src/gui
+COPY gui/package.json gui/package-lock.json* ./
+RUN --mount=type=cache,target=/root/.npm npm install --no-audit --no-fund
+COPY gui ./
+RUN npm run build
+
+# ---
+# Stage 2 — Go builder. TARGETARCH is set by buildx based on --platform.
+# Bookworm has gcc + sqlite3-dev on amd64 and arm64 out of the box, so
+# the cgo build of sqlite-vec works natively without a cross-toolchain.
+FROM golang:1.26.6-bookworm AS gobuild
+ARG TARGETARCH
+ARG VERSION=dev
+WORKDIR /src
+
+# Install build deps needed by mattn/go-sqlite3 + sqlite-vec.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential pkg-config libsqlite3-dev ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Module cache first so dep changes don't bust the source layer.
+COPY go.mod go.sum ./
+COPY sdk/go.mod ./sdk/go.mod
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+
+# Copy source + the prebuilt GUI bundle into the embed location.
+COPY . .
+COPY --from=gui /src/internal/webui/dist /src/internal/webui/dist
+
+# Build with cgo on (sqlite-vec requires it). GOARCH inherits from the
+# buildx --platform flag so the same Dockerfile produces amd64 or arm64.
+ENV CGO_ENABLED=1
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    GOARCH=${TARGETARCH} go build \
+        -ldflags "-X github.com/soulacy/soulacy/internal/config.Version=${VERSION}" \
+        -o /out/soulacy ./cmd/soulacy \
+    && GOARCH=${TARGETARCH} go build \
+        -ldflags "-X github.com/soulacy/soulacy/internal/config.Version=${VERSION}" \
+        -o /out/sy ./cmd/sy
+
+# ---
+# Stage 3 — runtime. Slim Debian for libsqlite3 + glibc compatibility.
+# Keep bookworm-slim (not distroless) so the container is debuggable in
+# production — apt, ps, curl are one `apt install` away.
+FROM debian:bookworm-slim AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libsqlite3-0 ca-certificates python3 python3-pip \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --shell /usr/sbin/nologin soulacy
+
+# Install the Python SDK so Python-based tools and agents work out of the box.
+RUN pip3 install --break-system-packages soulacy 2>/dev/null || true
+
+WORKDIR /home/soulacy
+USER soulacy
+
+# Output binaries land at /out for easy extraction via `docker cp`.
+COPY --from=gobuild --chown=soulacy /out/soulacy /out/soulacy
+COPY --from=gobuild --chown=soulacy /out/sy      /out/sy
+
+# Default entrypoint — useful for `docker run` smoke tests.
+ENV SOULACY_CONFIG_PATH=/home/soulacy/.soulacy/config.yaml
+EXPOSE 18789
+ENTRYPOINT ["/out/soulacy", "serve"]

@@ -1,0 +1,23 @@
+name: telegram
+description: >
+  Golden channel-delivery suite for Telegram. Secret-backed: skipped in CI and
+  runs locally once a Telegram bot token and a test chat ID are configured. The
+  agent under test must be mapped to a Telegram output channel.
+tags: [channel, telegram, secret]
+defaults:
+  timeout_sec: 60
+cases:
+  - name: delivers-to-telegram
+    input: "Send a test message to my Telegram: eval-ping."
+    requires_secret: ["TELEGRAM_BOT_TOKEN", "TELEGRAM_TEST_CHAT_ID"]
+    expected_regex:
+      - "(?i)(sent|delivered|posted|message)"
+    expect_delivered: true
+    expect_tool_success: ["send_telegram"]
+
+  - name: reports-delivery-failure-clearly
+    input: "Send a message to Telegram chat 000000000 which the bot has not been added to."
+    requires_secret: ["TELEGRAM_BOT_TOKEN"]
+    expected_regex:
+      - "(?i)(not (a )?member|not (been )?(added|invited)|chat not found|couldn't deliver|failed to (send|deliver)|invalid chat)"
+    expect_delivered: false

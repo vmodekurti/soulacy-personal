@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.vasu.syncmain</string>
+
+    <!-- What to run -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/clawagent/Documents/Development/agenticai/soulacy/scripts/sync-main.sh</string>
+    </array>
+
+    <!-- Run every 3 hours (10800 seconds). Change as you like. -->
+    <key>StartInterval</key>
+    <integer>10800</integer>
+
+    <!-- Also run once right after it's loaded / after login -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Logs, so you can see what happened -->
+    <key>StandardOutPath</key>
+    <string>/Users/clawagent/Library/Logs/syncmain.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/clawagent/Library/Logs/syncmain.log</string>
+</dict>
+</plist>

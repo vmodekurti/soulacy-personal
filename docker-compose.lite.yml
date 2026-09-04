@@ -1,0 +1,61 @@
+# docker-compose.lite.yml — Minimal Soulacy stack (no external dependencies)
+#
+# Uses SQLite for storage and sqlite-vec for vector memory.
+# Perfect for local development, single-user use, or machines without Docker volumes.
+#
+# Quick start:
+#   docker compose -f docker-compose.lite.yml up
+#
+# Then open: http://localhost:18789
+
+services:
+  soulacy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
+    image: soulacy:${VERSION:-latest}
+    container_name: soulacy
+    restart: unless-stopped
+    ports:
+      - "${SOULACY_PORT:-18789}:18789"
+    volumes:
+      # All data (SQLite DBs, agent files, logs) persists here.
+      - soulacy_data:/home/soulacy/.soulacy
+    environment:
+      # SQLite — everything in one place, zero dependencies.
+      SOULACY_STORAGE_BACKEND: sqlite
+      SOULACY_VECTOR_BACKEND: ""       # uses sqlite-vec (built into the binary)
+
+      # LLM
+      SOULACY_LLM_DEFAULT_PROVIDER: ${SOULACY_LLM_DEFAULT_PROVIDER:-ollama}
+      SOULACY_LLM_PROVIDERS_OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      SOULACY_LLM_PROVIDERS_OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3}
+
+      # Bind — 0.0.0.0 so the port mapping (ports: 18789:18789) can forward
+      # host traffic. Without this the gateway would bind container-loopback
+      # only and http://localhost:18789 from the host would connection-refuse.
+      SOULACY_SERVER_HOST: 0.0.0.0
+
+      # Auth — this published-port profile requires an explicit key. Compose
+      # stops during interpolation when SOULACY_API_KEY is absent or empty.
+      # Generate one with: openssl rand -hex 32
+      SOULACY_SERVER_API_KEY: ${SOULACY_API_KEY:?Set SOULACY_API_KEY before starting Soulacy Lite}
+
+      # ── Security defaults (development-shaped) ────────────────────────────────
+      # Lite compose is dev-first: readiness verdict stays advisory (development
+      # profile — findings surface without blocking), intent gate stays at the
+      # prompt default so you can iterate without approving every high-risk
+      # tool call, and the Python-tool sandbox stays ON because it's cheap.
+      # Flip SOULACY_DEPLOYMENT_PROFILE=production + SOULACY_SECURITY_INTENT_GATE=deny
+      # via .env when you're ready to test the production posture locally.
+      SOULACY_DEPLOYMENT_PROFILE: ${SOULACY_DEPLOYMENT_PROFILE:-development}
+      SOULACY_SECURITY_INTENT_GATE: ${SOULACY_SECURITY_INTENT_GATE:-prompt}
+      SOULACY_RUNTIME_SANDBOX_ENABLED: ${SOULACY_RUNTIME_SANDBOX_ENABLED:-true}
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  soulacy_data:

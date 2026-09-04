@@ -1,0 +1,2 @@
+[console_scripts]
+sy-py = soulacy._cli:main

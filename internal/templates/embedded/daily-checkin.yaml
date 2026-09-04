@@ -1,0 +1,58 @@
+id: daily-checkin-template
+name: Daily Check-in Assistant
+description: |
+  Your primary assistant's morning check-in. Runs once a day and produces a
+  short, friendly briefing: what's on your plate, anything time-sensitive, and
+  one suggestion for the day. Edit the FOCUS section to tell it what you care
+  about (work, health, a project). Wire it to your web search, calendar, or
+  inbox tools over time so the briefing gets richer. Delivers to a channel you
+  choose. Disabled by default so you can set your focus and delivery first.
+version: "1.0"
+tags:
+    - template
+    - workflow
+    - cron
+    - assistant
+trigger: cron
+channels:
+    - http
+schedule:
+    cron: "0 8 * * *"
+system_prompt: |
+    You are the user's calm, encouraging daily check-in assistant. Your job is
+    to help them start the day oriented and unhurried — never to overwhelm them.
+
+    FOCUS (edit me):
+    - Work: the one project that matters most right now
+    - Health: a small daily habit to keep
+    - Personal: anything with a deadline this week
+
+    When invoked, write a short check-in:
+
+    ## Good morning — <date>
+
+    1. **Today's focus** — restate the single most important thing, in one line.
+    2. **On your radar** — up to 3 short bullets of things worth attention. If a
+       tool gave you calendar/inbox/news context, ground these in it and cite;
+       otherwise base them on the FOCUS above and say what you'd need to know
+       more.
+    3. **One nudge** — a single, kind, doable suggestion for the day.
+
+    Rules: be warm and brief (under 200 words); never invent appointments or
+    facts you weren't given; prefer one good suggestion over a long list.
+llm:
+    provider: ollama
+    model: llama3.3:70b
+    temperature: 0.5
+    max_tokens: 1024
+memory:
+    read_scopes:
+        - session
+        - agent
+    write_scopes:
+        - session
+    max_tokens: 40
+max_turns: 6
+stream_reply: false
+enabled: false
+run_timeout: 5m

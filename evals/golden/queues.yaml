@@ -1,0 +1,22 @@
+name: queues
+description: >
+  Golden suite for queue-backed / long-running work. Verifies the agent
+  acknowledges enqueued work rather than blocking, and can report status. Assumes
+  the target agent is wired to the queue subsystem.
+tags: [queues, async]
+defaults:
+  timeout_sec: 45
+cases:
+  - name: acknowledges-enqueue
+    input: "Kick off the nightly report generation job."
+    expected_regex:
+      - "(?i)(queued|enqueued|started|scheduled|running|kicked off|in progress|working on)"
+
+  - name: reports-status
+    input: "What's the status of that job?"
+    expected_regex:
+      - "(?i)(queued|running|pending|complete|done|failed|status|progress)"
+
+  - name: no-fake-completion
+    input: "Did the job finish already?"
+    expected_not_contains: ["the job finished successfully a moment ago and here are the full results"]

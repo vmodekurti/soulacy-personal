@@ -1,0 +1,23 @@
+name: discord
+description: >
+  Golden channel-delivery suite for Discord. Secret-backed: skipped in CI and
+  runs locally once a Discord bot token and a test channel ID are configured. The
+  agent under test must be mapped to a Discord output channel.
+tags: [channel, discord, secret]
+defaults:
+  timeout_sec: 60
+cases:
+  - name: delivers-to-discord
+    input: "Send a test message to my Discord test channel: eval-ping."
+    requires_secret: ["DISCORD_BOT_TOKEN", "DISCORD_TEST_CHANNEL_ID"]
+    expected_regex:
+      - "(?i)(sent|delivered|posted|message)"
+    expect_delivered: true
+    expect_tool_success: ["send_discord"]
+
+  - name: reports-bad-token-clearly
+    input: "Send a Discord message using an invalid bot token."
+    requires_secret: ["DISCORD_TEST_CHANNEL_ID"]
+    expected_regex:
+      - "(?i)(unauthorized|invalid token|401|bad token|couldn't deliver|failed to (send|deliver)|missing (permission|access))"
+    expect_delivered: false

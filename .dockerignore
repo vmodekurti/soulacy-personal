@@ -1,0 +1,45 @@
+# Keep the Docker build context small and reproducible. Anything the image
+# needs is either source (kept) or rebuilt inside the image (node_modules, the
+# Go caches, the compiled GUI). Everything below is excluded from the context.
+
+# Version control / CI
+.git
+.github
+.gitignore
+
+# Local Go build & module caches (rebuilt in the gobuild stage)
+.gocache
+.gomodcache
+coverage.out
+
+# Compiled binaries / local outputs
+bin
+soulacy
+sy
+soulacy-go-tmp-umask
+site
+
+# Node / GUI build artifacts (npm install + npm run build run in the image)
+gui/node_modules
+gui/dist
+gui/.svelte-kit
+gui/vite.config.js.timestamp-*.mjs
+
+# The embedded GUI dist is injected from the gui build stage; don't ship copies
+internal/webui/dist
+internal/webui/dist_backup
+internal/webui/dist_backup2
+
+# Local runtime data / secrets / editor cruft
+.soulacy
+config.yaml
+.env
+*.log
+*.orig
+patch.diff
+**/.DS_Store
+
+# Docker meta (no need to send these into the context)
+Dockerfile*
+docker-compose*.yml
+.dockerignore

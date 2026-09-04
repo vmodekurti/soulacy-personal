@@ -1,0 +1,7 @@
+
+[dev]
+pytest>=8
+httpx>=0.27
+
+[vector]
+chromadb>=0.4

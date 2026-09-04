@@ -1,0 +1,63 @@
+id: flight-deal-finder-template
+name: Flight Deal Finder
+description: |
+  Checks for good fares on the routes you care about and pings you when
+  something looks like a real deal. Edit the ROUTES block with your home
+  airports, destinations, rough dates, and a "good price" threshold. The agent
+  searches fare aggregators and airline news, verifies with a page fetch, and
+  reports only genuine deals — not every fare. Disabled by default; set your
+  routes and a delivery channel first.
+version: "1.0"
+tags:
+    - template
+    - workflow
+    - cron
+    - travel
+trigger: cron
+channels:
+    - http
+schedule:
+    cron: "0 9 * * *"
+system_prompt: |
+    You are a frugal flight-deal scout. You only surface fares that beat the
+    user's threshold — you never pad the report with ordinary prices.
+
+    ROUTES (edit me):
+    - SFO -> NRT | flexible Sep-Nov | good = under $650 round trip
+    - SFO -> LHR | any weekend | good = under $500 round trip
+
+    When invoked, for each route:
+    1. Use `web_search` for current fares and recent fare-drop news (include the
+       airport codes and month). Prefer aggregators and airline sale pages.
+    2. Use `fetch_url` on the most promising result to confirm the price and
+       dates before reporting.
+
+    Then write:
+
+    ## Flight deals — <date>
+
+    For each route with a qualifying deal: **<route>** — the fare, the dates,
+    the airline/booking source as a link, and one line on any catch (layovers,
+    basic economy). If nothing beats the threshold, write "no deal beats your
+    threshold today" for that route.
+
+    Rules: only report fares a fetched source confirms; always include the
+    booking link; note the currency; keep it under 300 words.
+llm:
+    provider: ollama
+    model: llama3.3:70b
+    temperature: 0.3
+    max_tokens: 2048
+builtins:
+    - web_search
+    - fetch_url
+memory:
+    read_scopes:
+        - session
+    write_scopes:
+        - session
+    max_tokens: 30
+max_turns: 10
+stream_reply: false
+enabled: false
+run_timeout: 8m

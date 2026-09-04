@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.soulacy.soulacy.plist — macOS LaunchAgent for the Soulacy gateway.
+
+  Install:
+    cp scripts/com.soulacy.gateway.plist ~/Library/LaunchAgents/com.soulacy.soulacy.plist
+    launchctl load -w ~/Library/LaunchAgents/com.soulacy.soulacy.plist
+
+  Or use:
+    make service-install
+
+  Logs:
+    tail -f /tmp/soulacy-gateway.log
+    tail -f /tmp/soulacy-gateway-error.log
+
+  Start/stop manually:
+    launchctl start com.soulacy.soulacy
+    launchctl stop  com.soulacy.soulacy
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.soulacy.soulacy</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__INSTALL_DIR__/soulacy</string>
+        <string>serve</string>
+    </array>
+
+    <!-- Start automatically when the user logs in -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Restart if it crashes -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <!-- Throttle restart to avoid tight crash loops -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!-- Log files -->
+    <key>StandardOutPath</key>
+    <string>/tmp/soulacy-gateway.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/soulacy-gateway-error.log</string>
+
+    <!-- Environment -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>/Users/REPLACE_WITH_USERNAME</string>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:__INSTALL_DIR__</string>
+    </dict>
+</dict>
+</plist>
