@@ -46,5 +46,10 @@ jobs:
           mkdir -p internal/webui/dist
           printf '<html><body>CI placeholder</body></html>\n' > internal/webui/dist/index.html
 
+      - name: Install contract-test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ripgrep
+
       - name: Verify Personal, Team, and Scale contracts
         run: make deployment-modes-test
