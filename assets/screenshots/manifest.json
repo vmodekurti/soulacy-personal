@@ -1,0 +1,101 @@
+{
+  "generated_at": "2026-07-21T17:34:40.815Z",
+  "base_url": "http://127.0.0.1:18894",
+  "viewport": {
+    "width": 1440,
+    "height": 960
+  },
+  "routes": [
+    {
+      "name": "dashboard",
+      "path": "/",
+      "screenshot": "dashboard.png",
+      "bytes": 150445,
+      "text_length": 3903
+    },
+    {
+      "name": "studio",
+      "path": "/#studio",
+      "screenshot": "studio.png",
+      "bytes": 139264,
+      "text_length": 3628
+    },
+    {
+      "name": "studio_workflow",
+      "path": "/#studio/github-issue-triage",
+      "screenshot": "studio_workflow.png",
+      "bytes": 144483,
+      "text_length": 3628
+    },
+    {
+      "name": "agents",
+      "path": "/#agents",
+      "screenshot": "agents.png",
+      "bytes": 51851,
+      "text_length": 1303
+    },
+    {
+      "name": "agent_config",
+      "path": "/#agents/github-issue-triage",
+      "screenshot": "agent_config.png",
+      "bytes": 121202,
+      "text_length": 1303
+    },
+    {
+      "name": "chat",
+      "path": "/#chat",
+      "screenshot": "chat.png",
+      "bytes": 80452,
+      "text_length": 757
+    },
+    {
+      "name": "channels",
+      "path": "/#channels",
+      "screenshot": "channels.png",
+      "bytes": 179157,
+      "text_length": 3900
+    },
+    {
+      "name": "knowledge",
+      "path": "/#knowledge",
+      "screenshot": "knowledge.png",
+      "bytes": 73932,
+      "text_length": 496
+    },
+    {
+      "name": "schedule",
+      "path": "/#schedule",
+      "screenshot": "schedule.png",
+      "bytes": 164178,
+      "text_length": 1849
+    },
+    {
+      "name": "providers",
+      "path": "/#providers",
+      "screenshot": "providers.png",
+      "bytes": 114944,
+      "text_length": 1632
+    },
+    {
+      "name": "activity",
+      "path": "/#activity",
+      "screenshot": "activity.png",
+      "bytes": 80433,
+      "text_length": 916
+    },
+    {
+      "name": "skills",
+      "path": "/#skills",
+      "screenshot": "skills.png",
+      "bytes": 128360,
+      "text_length": 1121
+    },
+    {
+      "name": "config",
+      "path": "/#config",
+      "screenshot": "config.png",
+      "bytes": 201664,
+      "text_length": 8323
+    }
+  ]
+}
