@@ -6,6 +6,20 @@ import (
 	"strings"
 )
 
+var explicitAgentNamePattern = regexp.MustCompile(`(?i)\b(?:agent|assistant|workflow)\s+(?:named|called)\s+["']?([a-z0-9][a-z0-9 _-]{1,79}?)["']?(?:[.;,\n]|$)`)
+
+func explicitRequestedAgentName(intent string) string {
+	match := explicitAgentNamePattern.FindStringSubmatch(strings.TrimSpace(intent))
+	if len(match) != 2 {
+		return ""
+	}
+	name := strings.Join(strings.Fields(strings.Trim(match[1], " \t\r\n\"'")), " ")
+	if len(name) < 2 || len(name) > 80 {
+		return ""
+	}
+	return name
+}
+
 // ImproveGeneratedAgentName replaces Studio's broad fallback labels with a
 // concise name derived from what this particular agent does. It runs only for
 // brand-new generated drafts: an existing agent's name is user-owned, and an
