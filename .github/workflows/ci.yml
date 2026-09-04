@@ -13,6 +13,14 @@ on:
     branches: [main, develop]
 
 jobs:
+  edition-boundary:
+    name: Edition boundary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check open-core dependency direction
+        run: make edition-boundary
+
   # ── Secret scanning (gitleaks) ───────────────────────────────────────────────
   gitleaks:
     name: Secret scan (gitleaks)

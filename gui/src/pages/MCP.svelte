@@ -5,8 +5,10 @@
   import { api } from '../lib/api.js'
   import KeyValueEditor from '../lib/KeyValueEditor.svelte'
   import { activeWorkspace, can, permissions } from '../lib/workspace.js'
+  import { editionCapabilities } from '../lib/edition.js'
+  import { editionHas } from '../distribution/edition.js'
 
-  $: workspaceScoped = ['team', 'scale'].includes(String($activeWorkspace?.deploymentMode || '').toLowerCase())
+  $: workspaceScoped = editionHas($activeWorkspace?.deploymentMode, editionCapabilities.multiUser)
   $: workspaceAdmin = ['owner', 'admin'].includes(String($activeWorkspace?.role || '').toLowerCase())
   $: canWriteMCP = ($permissions, can('mcp', 'write'))
   $: canInstallMCP = ($permissions, can('mcp', 'install'))

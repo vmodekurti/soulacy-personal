@@ -6,6 +6,9 @@
 // tour step (or a tour step points at a nav id that no longer exists), which is
 // the drift that quietly rots every hand-maintained product tour.
 
+import { editionCapabilities } from './edition.js'
+import { editionHas } from '../distribution/edition.js'
+
 /** Ordered nav sections with their (optional) uppercase headers. */
 export const navGroups = [
   { key: 'main',         label: ''             },
@@ -51,9 +54,9 @@ export const navPages = [
   { id: 'browser',   icon: '🕸', label: 'Browser',     group: 'system', demoUnavailable: true },
   { id: 'config',    icon: '≡', label: 'Config',      group: 'system',       requires: ['config', 'read'] },
   { id: 'mobile',    icon: '▣', label: 'Mobile',      group: 'system', demoUnavailable: true },
-  { id: 'logs',      icon: '📋', label: 'Logs',        group: 'system',       personalOnly: true },
-  { id: 'members',   icon: '👥', label: 'Members',     group: 'system', requires: ['rbac', 'read'], multiUserOnly: true },
-  { id: 'workspace-admin', icon: '🛡', label: 'Workspace settings', group: 'system', workspaceAdminOnly: true, multiUserOnly: true },
+  { id: 'logs',      icon: '📋', label: 'Logs',        group: 'system', excludedByEditionCapability: editionCapabilities.multiUser },
+  { id: 'members',   icon: '👥', label: 'Members',     group: 'system', requires: ['rbac', 'read'], editionCapability: editionCapabilities.multiUser },
+  { id: 'workspace-admin', icon: '🛡', label: 'Workspace settings', group: 'system', workspaceAdminOnly: true, editionCapability: editionCapabilities.workspaceAdmin },
 ]
 
 /** Nav ids in render order. */
@@ -66,13 +69,14 @@ export const navIds = navPages.map((p) => p.id)
  * walkthrough's own tests can drive without standing up a permission store.
  */
 export function visibleNavPages(allow, pages = navPages, options = {}) {
-  const multiUser = ['team', 'scale'].includes(String(options.deploymentMode || '').toLowerCase())
+  const mode = options.deploymentMode
+  const multiUser = editionHas(mode, editionCapabilities.multiUser)
   const role = String(options.role || '').toLowerCase()
   return pages
     .filter((p) => {
       if (role === 'demo_developer' && p.demoUnavailable) return false
-      if (!multiUser && p.multiUserOnly) return false
-      if (multiUser && p.personalOnly) return false
+      if (p.editionCapability && !editionHas(mode, p.editionCapability)) return false
+      if (p.excludedByEditionCapability && editionHas(mode, p.excludedByEditionCapability)) return false
       if (p.ownerOnly && role !== 'owner') return false
       if (p.workspaceAdminOnly && !['owner', 'admin'].includes(role)) return false
       return typeof allow !== 'function' || !p.requires || allow(p.requires[0], p.requires[1])

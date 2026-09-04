@@ -4,6 +4,8 @@
   import { activeWorkspace, can, permissions } from '../lib/workspace.js'
   import TourButton from '../lib/TourButton.svelte'
   import { confirmDestructive } from '../lib/destructive.js'
+  import { editionCapabilities } from '../lib/edition.js'
+  import { editionHas } from '../distribution/edition.js'
 
   let servers = []
   let connections = []
@@ -39,7 +41,7 @@
 
   $: composio = servers.find(server => server.id === 'composio')
   $: nango = servers.find(server => server.id === 'nango')
-  $: multiUser = ['team', 'scale'].includes(String($activeWorkspace?.deploymentMode || '').toLowerCase())
+  $: multiUser = editionHas($activeWorkspace?.deploymentMode, editionCapabilities.multiUser)
   $: workspaceAdmin = ['owner', 'admin'].includes(String($activeWorkspace?.role || '').toLowerCase())
   $: canWrite = ($permissions, can('mcp', 'write')) && (!multiUser || workspaceAdmin)
   $: canDelete = ($permissions, can('mcp', 'delete')) && (!multiUser || workspaceAdmin)

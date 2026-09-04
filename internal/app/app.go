@@ -29,6 +29,7 @@ import (
 	"github.com/soulacy/soulacy/internal/costs"
 	"github.com/soulacy/soulacy/internal/mcp"
 	"github.com/soulacy/soulacy/internal/secrets"
+	"github.com/soulacy/soulacy/pkg/edition"
 )
 
 // App owns the fully-wired Soulacy gateway process.
@@ -36,6 +37,7 @@ type App struct {
 	cfg     *config.Config
 	cfgPath string
 	log     *zap.Logger
+	edition edition.Descriptor
 	// costGovernor is retained from subsystem wiring so the gateway can
 	// reinstall a recomposed quota policy when a workspace changes its own
 	// limits — without it, a per-workspace budget would take effect only on
@@ -68,6 +70,13 @@ func WithLogger(log *zap.Logger) Option {
 	return func(a *App) { a.log = log }
 }
 
+// WithEdition supplies the descriptor registered by a distribution's
+// composition root. Commercial binaries use this seam to add capabilities
+// without making the open-source Personal module import commercial code.
+func WithEdition(descriptor edition.Descriptor) Option {
+	return func(a *App) { a.edition = descriptor }
+}
+
 // New validates cfg, prints the security guardrail warning when binding
 // non-loopback without an API key, and builds the process logger.
 func New(cfg *config.Config, opts ...Option) (*App, error) {
@@ -77,6 +86,15 @@ func New(cfg *config.Config, opts ...Option) (*App, error) {
 	a := &App{cfg: cfg}
 	for _, opt := range opts {
 		opt(a)
+	}
+	if a.edition.ID == "" {
+		a.edition = edition.PersonalDescriptor()
+	}
+	if err := a.edition.Validate(); err != nil {
+		return nil, fmt.Errorf("app: invalid edition: %w", err)
+	}
+	if string(a.edition.ID) != cfg.DeploymentMode() {
+		return nil, fmt.Errorf("app: edition %q does not match deployment mode %q", a.edition.ID, cfg.DeploymentMode())
 	}
 
 	// ── Security guardrail ──────────────────────────────────────────────
@@ -104,6 +122,14 @@ func New(cfg *config.Config, opts ...Option) (*App, error) {
 
 // Logger exposes the process logger (embedders, tests).
 func (a *App) Logger() *zap.Logger { return a.log }
+
+// Edition exposes the active immutable descriptor to embedders and subsystem
+// wiring. The capability slice is copied so callers cannot mutate App state.
+func (a *App) Edition() edition.Descriptor {
+	descriptor := a.edition
+	descriptor.Capabilities = append([]edition.Capability(nil), descriptor.Capabilities...)
+	return descriptor
+}
 
 // isLoopbackHost returns true if host is a well-known loopback address
 // (127.0.0.0/8, ::1, localhost). Gates the empty-API-key guardrail.

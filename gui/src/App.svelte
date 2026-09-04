@@ -8,6 +8,8 @@
   import { pluginNavEntries, isPluginPage, pluginIdFromPage } from './lib/pluginui.js'
   import { looksLikeStaleAssetError, recoverFromStaleAssets } from './lib/stalerecovery.js'
   import { navPages, navGroups, navAnchor, visibleNavPages } from './lib/nav.js'
+  import { editionCapabilities } from './lib/edition.js'
+  import { editionHas } from './distribution/edition.js'
   import { activeWorkspace, can, permissions, workspaceLabel } from './lib/workspace.js'
   import Walkthrough from './lib/walkthrough/Walkthrough.svelte'
   import WorkspaceSwitcher from './lib/WorkspaceSwitcher.svelte'
@@ -50,8 +52,8 @@
   let shellEventSocket = null
   let stopShellEvents = false
   let shellReconnectTimer = null
-  $: multiUserWorkspace = ['team', 'scale'].includes(
-    String($activeWorkspace?.deploymentMode || '').toLowerCase(),
+  $: multiUserWorkspace = editionHas(
+    $activeWorkspace?.deploymentMode, editionCapabilities.multiUser,
   )
   $: workspaceUsesOrganizationLogin = oidcEnabled || multiUserWorkspace
 
@@ -95,13 +97,13 @@
     mcp: () => import('./pages/MCP.svelte'),
     'connected-apps': () => import('./pages/ConnectedApps.svelte'),
     pluginmgr: () => import('./pages/PluginManager.svelte'),
-    providers: () => ['team', 'scale'].includes(String($activeWorkspace?.deploymentMode || '').toLowerCase())
+    providers: () => editionHas($activeWorkspace?.deploymentMode, editionCapabilities.centralizedProviders)
       ? import('./pages/WorkspaceProviders.svelte')
       : import('./pages/Providers.svelte'),
     secrets: () => import('./pages/Secrets.svelte'),
     activity: () => import('./pages/Activity.svelte'),
     browser: () => import('./pages/BrowserTrace.svelte'),
-    config: () => ['team', 'scale'].includes(String($activeWorkspace?.deploymentMode || '').toLowerCase())
+    config: () => editionHas($activeWorkspace?.deploymentMode, editionCapabilities.workspaceAdmin)
       ? import('./pages/WorkspaceConfig.svelte')
       : import('./pages/Config.svelte'),
     mobile: () => import('./pages/Mobile.svelte'),

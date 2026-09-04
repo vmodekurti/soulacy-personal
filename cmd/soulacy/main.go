@@ -16,7 +16,9 @@ import (
 	"github.com/soulacy/soulacy/internal/app"
 	"github.com/soulacy/soulacy/internal/buildtool"
 	"github.com/soulacy/soulacy/internal/config"
+	"github.com/soulacy/soulacy/internal/distribution"
 	"github.com/soulacy/soulacy/internal/sandbox"
+	"github.com/soulacy/soulacy/pkg/edition"
 )
 
 func main() {
@@ -165,7 +167,11 @@ func run() error {
 			st.Have, st.Want, cfgPath)
 	}
 
-	a, err := app.New(cfg, app.WithConfigPath(cfgPath))
+	descriptor, err := distribution.Resolve(edition.ID(cfg.DeploymentMode()))
+	if err != nil {
+		return fmt.Errorf("compose distribution: %w", err)
+	}
+	a, err := app.New(cfg, app.WithConfigPath(cfgPath), app.WithEdition(descriptor))
 	if err != nil {
 		return err
 	}

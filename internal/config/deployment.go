@@ -3,12 +3,14 @@ package config
 import (
 	"fmt"
 	"strings"
+
+	"github.com/soulacy/soulacy/pkg/edition"
 )
 
 const (
-	DeploymentModePersonal = "personal"
-	DeploymentModeTeam     = "team"
-	DeploymentModeScale    = "scale"
+	DeploymentModePersonal = string(edition.Personal)
+	DeploymentModeTeam     = string(edition.Team)
+	DeploymentModeScale    = string(edition.Scale)
 
 	// UnsafeDeploymentPrerequisitesAcknowledgement is intentionally verbose:
 	// operators must opt in explicitly and `sy doctor` keeps the risk visible.
@@ -48,8 +50,8 @@ func (c *Config) DeploymentMode() string {
 }
 
 func IsMultiUserMode(mode string) bool {
-	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case DeploymentModeTeam, DeploymentModeScale:
+	switch edition.ID(strings.ToLower(strings.TrimSpace(mode))) {
+	case edition.Team, edition.Scale:
 		return true
 	default:
 		return false

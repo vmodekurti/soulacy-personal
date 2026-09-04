@@ -5,7 +5,7 @@ VERSION        ?= $(shell git describe --tags --always --dirty 2>/dev/null || ec
 LDFLAGS        := -ldflags "-X github.com/soulacy/soulacy/internal/config.Version=$(VERSION)"
 PLAYWRIGHT_RUNNER ?= $(shell if [ -e .cache ] && [ ! -d .cache ]; then echo tmp/playwright-runner; else echo .cache/playwright-runner; fi)
 
-.PHONY: all build build-gateway build-cli gui up install which test deployment-modes-test aws-deploy-test security release-gate loadtest regression uat uat-public uat-full uat-credential docs-build docs-screenshots release-smoke production-parity channel-golden-smoke browser-mcp-smoke lint dev run-dev sdk-install tidy \
+.PHONY: all build build-gateway build-cli gui up install which test deployment-modes-test edition-boundary aws-deploy-test security release-gate loadtest regression uat uat-public uat-full uat-credential docs-build docs-screenshots release-smoke production-parity channel-golden-smoke browser-mcp-smoke lint dev run-dev sdk-install tidy \
         docker-up docker-down docker-up-lite docker-build docker-push \
         release release-linux release-linux-amd64 release-linux-arm64 \
         release-darwin release-darwin-arm64 release-darwin-amd64 release-package release-create release-create-github \
@@ -15,6 +15,10 @@ PLAYWRIGHT_RUNNER ?= $(shell if [ -e .cache ] && [ ! -d .cache ]; then echo tmp/
 ## Go binaries. ARCH-6 folded the Studio visual builder into the core GUI, so
 ## there is no longer a separate plugin-ui step — `make gui` embeds Studio.
 all: gui build
+
+## Enforce the open-core dependency direction and edition composition seams.
+edition-boundary:
+	@bash scripts/check-edition-boundary.sh
 
 # The embedded GUI bundle (go:embed all:dist) and the sources it's built from.
 # Defined BEFORE the `build` rule so `$(GUI_DIST)` is non-empty when used as a

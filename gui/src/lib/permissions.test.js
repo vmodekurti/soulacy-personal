@@ -162,7 +162,7 @@ describe('the sidebar shows what the caller can use', () => {
     const { visibleNavPages, navPages } = await import('./nav.js')
     permissions.set({})
     expect(visibleNavPages(can, undefined, { role: 'owner', deploymentMode: 'personal' }).length)
-      .toBe(navPages.filter(page => !page.multiUserOnly).length)
+      .toBe(navPages.filter(page => !page.editionCapability).length)
   })
 
   it('shows everything to an owner', async () => {
@@ -178,7 +178,7 @@ describe('the sidebar shows what the caller can use', () => {
       rbac: ['read'],
     })
     expect(visibleNavPages(can, undefined, { role: 'owner', deploymentMode: 'personal' }).length)
-      .toBe(navPages.filter(page => !page.multiUserOnly).length)
+      .toBe(navPages.filter(page => !page.editionCapability).length)
   })
 
   it('reserves workspace settings for workspace owners and administrators', async () => {
@@ -278,7 +278,7 @@ describe('the sidebar shows what the caller can use', () => {
       .map(page => page.id)
     const team = visibleNavPages(() => true, undefined, { role: 'owner', deploymentMode: 'team' })
       .map(page => page.id)
-    const personalOnly = navPages.filter(page => page.personalOnly).map(page => page.id)
+    const personalOnly = navPages.filter(page => page.excludedByEditionCapability).map(page => page.id)
     for (const id of personal.filter(id => !personalOnly.includes(id))) expect(team).toContain(id)
     expect(personal.filter(id => !team.includes(id))).toEqual(personalOnly)
     expect(team.filter(id => !personal.includes(id))).toEqual(['members', 'workspace-admin'])
