@@ -9,27 +9,48 @@ fail() {
   exit 1
 }
 
+search_tree() {
+  local pattern=$1
+  shift
+  if command -v rg >/dev/null 2>&1; then
+    rg -n "$pattern" "$@"
+  else
+    grep -RInE "$pattern" "$@"
+  fi
+}
+
+list_matching_files() {
+  local pattern=$1
+  shift
+  if command -v rg >/dev/null 2>&1; then
+    rg -l "$pattern" "$@"
+  else
+    grep -RlE "$pattern" "$@"
+  fi
+}
+
 # The reusable Go contract must remain importable by an external commercial
 # module. Any dependency on Soulacy internals would make that impossible.
-if rg -n 'github.com/soulacy/soulacy/(internal|commercial)/' pkg/edition; then
+if search_tree 'github.com/soulacy/soulacy/(internal|commercial)/' pkg/edition; then
   fail "pkg/edition imports implementation code"
 fi
 
 # Browser contracts are equally dependency-inverted: only the distribution
 # composition root may select a commercial implementation.
-if rg -n "from ['\"]\.\./(pages|editions|distribution)/" gui/src/lib/edition.js; then
+if search_tree "from ['\"]\.\./(pages|editions|distribution)/" gui/src/lib/edition.js; then
   fail "the GUI edition contract imports an implementation"
 fi
 
-commercial_importers="$(rg -l "editions/commercial\.js" gui/src || true)"
+commercial_importers="$(list_matching_files "editions/commercial\.js" gui/src || true)"
 if [[ "$commercial_importers" != "gui/src/distribution/edition.js" ]]; then
   printf '%s\n' "$commercial_importers" >&2
   fail "commercial GUI editions must be imported only by the distribution composition root"
 fi
 
 # Capability consumers must not grow a second, string-based edition system.
-if rg -n "\[['\"]team['\"], ['\"]scale['\"]\]\.includes|deploymentMode[^\n]*(===|==)[^\n]*['\"](?:team|scale)['\"]" \
-  gui/src --glob '!**/*.test.js' --glob '!editions/commercial.js'; then
+if find gui/src -type f \( -name '*.js' -o -name '*.svelte' \) \
+  ! -name '*.test.js' ! -path '*/editions/commercial.js' -print0 \
+  | xargs -0 grep -nE "\[['\"]team['\"], ['\"]scale['\"]\]\.includes|deploymentMode.*(===|==).*['\"](team|scale)['\"]"; then
   fail "GUI code branches on edition names; use editionHas(capability)"
 fi
 
