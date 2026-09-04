@@ -60,7 +60,9 @@ func TestAWorkerClaimsWithItsOwnIdentity(t *testing.T) {
 func TestTheWorkerIDIsStableWithinAProcessAndUniqueAcrossThem(t *testing.T) {
 	a := &App{}
 	// Stable: a renewal has to be recognisable as coming from the holder.
-	if a.workerID() != a.workerID() {
+	firstWorkerID := a.workerID()
+	secondWorkerID := a.workerID()
+	if firstWorkerID != secondWorkerID {
 		t.Error("the worker identity changed between calls, so this process cannot renew its own leases")
 	}
 	// Unique: a restarted container keeps its hostname, and its predecessor's

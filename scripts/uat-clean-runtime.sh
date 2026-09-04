@@ -434,8 +434,8 @@ if [[ -z "$DASHBOARD_PATH" ]]; then
   exit 1
 fi
 DASHBOARD_JS="$(curl -fsS "$URL$DASHBOARD_PATH")"
-if ! grep -Fq "Launch Readiness" <<<"$DASHBOARD_JS"; then
-  echo "Dashboard chunk does not contain Launch Readiness" >&2
+if ! grep -Fq "Workspace Readiness" <<<"$DASHBOARD_JS"; then
+  echo "Dashboard chunk does not contain Workspace Readiness" >&2
   exit 1
 fi
 MOBILE_PATH="$(printf '%s' "$GUI_JS" | python3 -c '
@@ -678,7 +678,7 @@ while [ "$#" -gt 0 ]; do
     *) artifact="$1"; shift ;;
   esac
 done
-[ "$identity" = "https://github.com/vmodekurti/soulacy/.github/workflows/release.yml@refs/tags/v99.0.0" ]
+[ "$identity" = "https://github.com/vmodekurti/soulacy-commercial/.github/workflows/release.yml@refs/tags/v99.0.0" ]
 [ -s "$bundle" ]
 [ -s "$artifact" ]
 SH

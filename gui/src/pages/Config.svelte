@@ -519,7 +519,7 @@
       </div>
       <div class="update-banner-actions">
         <button class="btn-primary btn-sm" on:click={startUpgrade}>Upgrade Now</button>
-        <button class="btn-secondary btn-sm" on:click={() => window.open("https://github.com/vmodekurti/soulacy/releases/latest", "_blank")}>View Release Notes</button>
+        <button class="btn-secondary btn-sm" on:click={() => window.open("https://github.com/vmodekurti/soulacy-commercial/releases/latest", "_blank")}>View Release Notes</button>
       </div>
     </div>
   {/if}

@@ -38,6 +38,27 @@ func TestCompareSemver(t *testing.T) {
 	}
 }
 
+func TestGitHubAuthorizationIsScopedAndUsesExplicitToken(t *testing.T) {
+	t.Setenv("SOULACY_GITHUB_TOKEN", "private-release-token")
+	githubRequest, err := http.NewRequest(http.MethodGet, "https://github.com/vmodekurti/soulacy-commercial/releases/latest", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorizeGitHubRequest(githubRequest)
+	if got := githubRequest.Header.Get("Authorization"); got != "Bearer private-release-token" {
+		t.Fatalf("GitHub authorization = %q", got)
+	}
+
+	externalRequest, err := http.NewRequest(http.MethodGet, "https://updates.example.test/manifest.json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorizeGitHubRequest(externalRequest)
+	if got := externalRequest.Header.Get("Authorization"); got != "" {
+		t.Fatalf("credential leaked to external update host: %q", got)
+	}
+}
+
 func TestCheckForUpdateCustomManifest(t *testing.T) {
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

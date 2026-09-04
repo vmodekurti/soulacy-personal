@@ -5,11 +5,9 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
-	"math/big"
 	"net/http"
 	"net/url"
 	"strings"
@@ -615,8 +613,4 @@ func TestOIDCValidatorRejectsUnadvertisedAlgorithm(t *testing.T) {
 	if _, err := v.Validate(signed); err == nil {
 		t.Fatal("accepted an algorithm not advertised by discovery")
 	}
-}
-
-func rsaJWK(key *rsa.PublicKey) (string, string) {
-	return base64.RawURLEncoding.EncodeToString(key.N.Bytes()), base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes())
 }

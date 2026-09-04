@@ -1,0 +1,12 @@
+* @vmodekurti
+
+/.github/ @vmodekurti
+/LICENSE* @vmodekurti
+/.personal-base @vmodekurti
+/dependencies/ @vmodekurti
+/pkg/edition/ @vmodekurti
+/gui/src/distribution/ @vmodekurti
+/gui/src/editions/ @vmodekurti
+/internal/entitlements/ @vmodekurti
+/internal/tenancy/ @vmodekurti
+/scripts/check-edition-boundary.sh @vmodekurti

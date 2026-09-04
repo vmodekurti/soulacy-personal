@@ -26,9 +26,14 @@ conflict-resolution mechanism.
 1. Create the change in `soulacy-personal` and merge it into public `main`.
 2. The `Sync Personal upstream` workflow fetches public `main`, creates
    `automation/sync-personal`, performs a merge, updates `.personal-base`, and
-   opens or refreshes a pull request in this private repository. Its PR body
-   reports the exact commits and counts changes across Go contracts/runtime,
-   browser UI, storage/schema, deployment, and documentation.
+opens or refreshes a pull request in this private repository. Its PR body
+reports the exact commits and counts changes across Go contracts/runtime,
+browser UI, storage/schema, deployment, and documentation.
+   Before committing, `scripts/apply-commercial-overlay.sh` restores the small,
+   declared set of distribution-owned files in
+   `dependencies/commercial-overlay.txt`. This prevents Personal release URLs,
+   signing identities, or repository policy from replacing their Commercial
+   counterparts while leaving every other Personal change visible for review.
 3. Review the merge as a normal Commercial change. Commercial CI runs the
    Personal, Team, and Scale deployment contracts before it may merge.
 4. Merge the synchronization PR. Commercial releases can report both their own

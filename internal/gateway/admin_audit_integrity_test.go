@@ -218,7 +218,6 @@ func (c *capturingLog) Close() error                              { return nil }
 // testable without a real sink.
 type capturingCore struct {
 	messages []string
-	fields   []string
 }
 
 func (c *capturingCore) logger() *zap.Logger {

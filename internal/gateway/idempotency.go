@@ -353,16 +353,3 @@ func lastModifiedAt(current any) string {
 	}
 	return ""
 }
-
-// matchesETag accepts a comma-separated If-Match list and tolerates the weak
-// validator prefix, which proxies add without asking.
-func matchesETag(supplied, current string) bool {
-	for _, candidate := range strings.Split(supplied, ",") {
-		candidate = strings.TrimSpace(candidate)
-		candidate = strings.TrimPrefix(candidate, "W/")
-		if candidate == current {
-			return true
-		}
-	}
-	return false
-}

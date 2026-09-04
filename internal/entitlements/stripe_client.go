@@ -62,7 +62,7 @@ func (c *StripeClient) CreateCheckout(ctx context.Context, req CheckoutRequest) 
 
 func (c *StripeClient) CreatePortal(ctx context.Context, req PortalRequest) (BillingSession, error) {
 	if strings.TrimSpace(req.CustomerID) == "" {
-		return BillingSession{}, fmt.Errorf("Stripe customer is required")
+		return BillingSession{}, fmt.Errorf("stripe customer is required")
 	}
 	return c.post(ctx, "/billing_portal/sessions", url.Values{
 		"customer":   {req.CustomerID},
@@ -72,7 +72,7 @@ func (c *StripeClient) CreatePortal(ctx context.Context, req PortalRequest) (Bil
 
 func (c *StripeClient) post(ctx context.Context, path string, form url.Values, idempotencyKey string) (BillingSession, error) {
 	if strings.TrimSpace(c.SecretKey) == "" {
-		return BillingSession{}, fmt.Errorf("Stripe secret key is not configured")
+		return BillingSession{}, fmt.Errorf("stripe secret key is not configured")
 	}
 	base := strings.TrimRight(strings.TrimSpace(c.BaseURL), "/")
 	if base == "" {
@@ -93,12 +93,12 @@ func (c *StripeClient) post(ctx context.Context, path string, form url.Values, i
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return BillingSession{}, fmt.Errorf("Stripe request: %w", err)
+		return BillingSession{}, fmt.Errorf("stripe request: %w", err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	if err != nil {
-		return BillingSession{}, fmt.Errorf("Stripe response: %w", err)
+		return BillingSession{}, fmt.Errorf("stripe response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var envelope struct {
@@ -111,14 +111,14 @@ func (c *StripeClient) post(ctx context.Context, path string, form url.Values, i
 		if message == "" {
 			message = http.StatusText(resp.StatusCode)
 		}
-		return BillingSession{}, fmt.Errorf("Stripe returned %d: %s", resp.StatusCode, message)
+		return BillingSession{}, fmt.Errorf("stripe returned %d: %s", resp.StatusCode, message)
 	}
 	var session BillingSession
 	if err := json.Unmarshal(body, &session); err != nil {
 		return BillingSession{}, fmt.Errorf("decode Stripe session: %w", err)
 	}
 	if strings.TrimSpace(session.URL) == "" {
-		return BillingSession{}, fmt.Errorf("Stripe session response did not include a URL")
+		return BillingSession{}, fmt.Errorf("stripe session response did not include a URL")
 	}
 	return session, nil
 }

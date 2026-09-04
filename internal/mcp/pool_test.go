@@ -120,7 +120,9 @@ func TestTheSameWorkspaceReusesItsClient(t *testing.T) {
 	// Not merely an optimisation: a second client would mean a second set of
 	// subprocesses, so every tool call would have a duplicate side effect and
 	// nothing would report it.
-	if pool.For("ws-a") != pool.For("ws-a") {
+	firstClient := pool.For("ws-a")
+	secondClient := pool.For("ws-a")
+	if firstClient != secondClient {
 		t.Error("the same workspace got two clients, so its servers are running twice")
 	}
 }

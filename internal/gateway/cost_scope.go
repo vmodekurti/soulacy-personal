@@ -7,7 +7,6 @@ import (
 	"github.com/gofiber/fiber/v2"
 
 	"github.com/soulacy/soulacy/internal/costs"
-	"github.com/soulacy/soulacy/internal/wsroot"
 )
 
 // costScope binds the accounting store to one workspace.
@@ -25,12 +24,6 @@ type costScope struct {
 // costs returns the request's scoped view of accounting.
 func (s *Server) costs(c *fiber.Ctx) costScope {
 	return costScope{store: s.costStore, workspaceID: s.costWorkspace(c)}
-}
-
-// costsForWorkspace scopes accounting without a request, for background work
-// that already knows which tenant it is acting for.
-func (s *Server) costsForWorkspace(workspaceID string) costScope {
-	return costScope{store: s.costStore, workspaceID: wsroot.Normalize(workspaceID)}
 }
 
 // Available reports whether cost tracking is wired at all.

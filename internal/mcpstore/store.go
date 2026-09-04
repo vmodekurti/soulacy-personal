@@ -410,7 +410,7 @@ func (s *Store) PurgeWorkspace(ctx context.Context, workspaceID string) (int, er
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var total int64
 	for _, table := range []string{"workspace_mcp_servers", "workspace_mcp_install_requests"} {
 		res, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE workspace_id = ?`, wsroot.Normalize(workspaceID))

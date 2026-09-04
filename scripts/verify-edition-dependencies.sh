@@ -41,4 +41,29 @@ while IFS= read -r contract_path; do
   [[ -e "$contract_path" ]] || fail "declared contract path is missing: $contract_path"
 done < <(jq -r '.contracts[].path' "$manifest")
 
+while IFS= read -r commercial_path; do
+  [[ -e "$commercial_path" ]] || fail "declared commercial module is missing: $commercial_path"
+  if git cat-file -e "${base}:${commercial_path}" 2>/dev/null; then
+    fail "commercial module is present in the pinned Personal source: $commercial_path"
+  fi
+done < <(jq -r '.commercial_modules[][]' "$manifest")
+
+[[ -f LICENSE-COMMERCIAL ]] || fail "commercial license notice is missing"
+[[ -x scripts/apply-commercial-overlay.sh ]] || fail "commercial overlay applicator is missing or not executable"
+[[ -f dependencies/commercial-overlay.txt ]] || fail "commercial overlay policy is missing"
+while read -r action overlay_path extra; do
+  [[ -z "${action:-}" || "$action" == \#* ]] && continue
+  [[ "$action" == "preserve" || "$action" == "delete" ]] || fail "invalid overlay action: $action"
+  [[ -z "${extra:-}" ]] || fail "invalid overlay entry for $overlay_path"
+  if [[ "$action" == "preserve" ]]; then
+    [[ -f "$overlay_path" ]] || fail "preserved Commercial path is missing: $overlay_path"
+  fi
+done < dependencies/commercial-overlay.txt
+grep -Fq '"edition": "commercial"' .github/workflows/release.yml || \
+  fail "release manifest does not declare the commercial edition"
+grep -Fq 'soulacy-commercial/.github/workflows/release.yml' .github/workflows/release.yml || \
+  fail "release signatures are not bound to the private repository"
+grep -Fq '"dependencies"' .github/workflows/release.yml || \
+  fail "release manifest does not record dependency revisions"
+
 echo "edition dependencies: Personal $revision -> Teams -> Scale"

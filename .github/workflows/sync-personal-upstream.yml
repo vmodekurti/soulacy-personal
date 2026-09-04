@@ -87,10 +87,17 @@ jobs:
           } > "$report"
           echo "report=$report" >> "$GITHUB_OUTPUT"
 
-          if ! git merge --no-ff --no-commit personal/main; then
-            git status --short
-            echo "Personal cannot be synchronized automatically; resolve the merge in a Commercial branch." >&2
-            exit 1
+          # A handful of distribution-owned files deliberately differ from
+          # Personal. Restore those explicit overlays even when Git could
+          # auto-merge them; otherwise a public release edit can silently turn
+          # the private updater, image, or signing identity back into Personal.
+          set +e
+          git merge --no-ff --no-commit personal/main
+          merge_status=$?
+          set -e
+          ./scripts/apply-commercial-overlay.sh origin/main
+          if [ "$merge_status" -ne 0 ]; then
+            echo "Known Commercial overlays were resolved; checking for unrelated conflicts."
           fi
           printf '%s\n' "$incoming" > .personal-base
           manifest_tmp="$(mktemp)"

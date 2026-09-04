@@ -80,11 +80,6 @@ func agentKey(c *fiber.Ctx, agentID string) string {
 	return "ws:" + workspaceOf(c) + "|agent:" + strings.TrimSpace(agentID)
 }
 
-// bucketKey is the in-memory token-bucket key for an agent.
-func bucketKey(workspaceID, agentID string) string {
-	return wsroot.Normalize(workspaceID) + "|" + strings.TrimSpace(agentID)
-}
-
 // bucketUserKey is the in-memory token-bucket key for a credential. Exposed so
 // the recorder, the middleware, the status endpoint and the tests all name a
 // bucket the same way — four hand-rolled key expressions is how a limiter ends

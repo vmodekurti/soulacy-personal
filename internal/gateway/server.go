@@ -295,19 +295,16 @@ type Server struct {
 	// voiceMinter is the realtime-voice control plane (Story 11). Wired via
 	// SetVoiceMinter; nil = voice unavailable (graceful fallback).
 	// Guarded by pluginMu (same wire-after-New lifecycle).
-	voiceMinter           VoiceMinter
-	voiceSidecar          *voice.Sidecar
-	workflowDistiller     *studio.WorkflowDistiller
-	strategyCollector     *studio.StrategyFitCollector
-	lessonStoreOnce       sync.Once
-	lessonStoreCached     *studio.LessonStore
-	preferenceStoreOnce   sync.Once
-	preferenceStoreCached *studio.PreferenceStore
-	generationProofMu     sync.Mutex
-	generationProofs      map[string]generationProofRecord
-	preferenceJobs        chan preferenceMineJob
-	preferenceJobsWG      sync.WaitGroup
-	learningReplayWG      sync.WaitGroup
+	voiceMinter       VoiceMinter
+	voiceSidecar      *voice.Sidecar
+	workflowDistiller *studio.WorkflowDistiller
+	strategyCollector *studio.StrategyFitCollector
+	lessonStoreCached *studio.LessonStore
+	generationProofMu sync.Mutex
+	generationProofs  map[string]generationProofRecord
+	preferenceJobs    chan preferenceMineJob
+	preferenceJobsWG  sync.WaitGroup
+	learningReplayWG  sync.WaitGroup
 }
 
 // New creates and configures the Fiber server but does not start listening.

@@ -169,9 +169,9 @@ func (s *SQLiteStore) Put(ctx context.Context, workspaceID, id, mimeType string,
 	}
 	expiresAt := time.Now().UTC().Add(ttl)
 	_, err := s.db.ExecContext(ctx, `
-		INSERT OR REPLACE INTO session_resources (id, mime_type, size_bytes, data, expires_at, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)`,
-		id, mimeType, len(data), data, expiresAt, time.Now().UTC(),
+		INSERT OR REPLACE INTO session_resources (id, workspace_id, mime_type, size_bytes, data, expires_at, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		id, workspaceID, mimeType, len(data), data, expiresAt, time.Now().UTC(),
 	)
 	if err != nil {
 		return fmt.Errorf("session: put resource %q: %w", id, err)

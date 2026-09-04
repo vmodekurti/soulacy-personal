@@ -23,9 +23,17 @@ import (
 )
 
 type UpdateManifest struct {
-	Product   string           `json:"product"`
-	Version   string           `json:"version"`
-	Artifacts []UpdateArtifact `json:"artifacts"`
+	Product      string                      `json:"product"`
+	Edition      string                      `json:"edition,omitempty"`
+	Version      string                      `json:"version"`
+	Commit       string                      `json:"commit,omitempty"`
+	Dependencies map[string]UpdateDependency `json:"dependencies,omitempty"`
+	Artifacts    []UpdateArtifact            `json:"artifacts"`
+}
+
+type UpdateDependency struct {
+	Repository string `json:"repository,omitempty"`
+	Commit     string `json:"commit"`
 }
 
 type UpdateArtifact struct {
@@ -64,7 +72,7 @@ type UpdateInstallResult struct {
 	Backups    []string `json:"backups,omitempty"`
 }
 
-const defaultGitHubRepo = "vmodekurti/soulacy"
+const defaultGitHubRepo = "vmodekurti/soulacy-commercial"
 
 const (
 	maxUpdateManifestBytes  = 2 << 20
@@ -229,6 +237,7 @@ func readUpdateManifestBytes(ctx context.Context, source string) ([]byte, error)
 			return nil, err
 		}
 		req.Header.Set("User-Agent", "soulacy-updater")
+		authorizeGitHubRequest(req)
 		resp, err := HTTPClient.Do(req)
 		if err != nil {
 			return nil, err
@@ -434,6 +443,7 @@ func downloadUpdateSource(ctx context.Context, source string, limit int64) (stri
 		return "", func() {}, err
 	}
 	req.Header.Set("User-Agent", "soulacy-updater")
+	authorizeGitHubRequest(req)
 	resp, err := HTTPClient.Do(req)
 	if err != nil {
 		return "", func() {}, err
@@ -464,6 +474,25 @@ func downloadUpdateSource(ctx context.Context, source string, limit int64) (stri
 		return "", func() {}, fmt.Errorf("update source exceeds %d byte limit", limit)
 	}
 	return path, cleanup, nil
+}
+
+// authorizeGitHubRequest enables Commercial installations to read private
+// release manifests and assets without leaking credentials to arbitrary update
+// servers. GitHub removes this header when redirecting to its signed asset CDN.
+func authorizeGitHubRequest(req *http.Request) {
+	if req == nil || req.URL == nil {
+		return
+	}
+	host := strings.ToLower(req.URL.Hostname())
+	if host != "github.com" && host != "api.github.com" {
+		return
+	}
+	for _, name := range []string{"SOULACY_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"} {
+		if token := strings.TrimSpace(os.Getenv(name)); token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+			return
+		}
+	}
 }
 
 func downloadUpdateArtifact(ctx context.Context, manifestSource string, artifact UpdateArtifact) (string, string, func(), error) {

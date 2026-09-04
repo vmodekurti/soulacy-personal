@@ -56,7 +56,7 @@ func Probe(ctx context.Context, q queue.Backend) error {
 	if err != nil {
 		return fmt.Errorf("execution worker probe subscribe: %w", err)
 	}
-	defer sub.Unsubscribe()
+	defer func() { _ = sub.Unsubscribe() }()
 	payload, _ := json.Marshal(job{ID: id, Kind: "probe"})
 	if err := q.Publish(ctx, JobsSubject, payload); err != nil {
 		return fmt.Errorf("execution worker probe publish: %w", err)
@@ -95,7 +95,7 @@ func (e *Executor) Run(ctx context.Context, pyFile, funcName, inline string, arg
 	if err != nil {
 		return "", fmt.Errorf("remote executor subscribe: %w", err)
 	}
-	defer sub.Unsubscribe()
+	defer func() { _ = sub.Unsubscribe() }()
 	payload, _ := json.Marshal(job{ID: id, Kind: "python", Script: script, Args: args})
 	if err := e.queue.Publish(ctx, JobsSubject, payload); err != nil {
 		return "", fmt.Errorf("remote executor publish: %w", err)
@@ -205,7 +205,7 @@ func (r *PrivilegedRunner) Run(ctx context.Context, command runtime.PrivilegedCo
 	if err != nil {
 		return "", err
 	}
-	defer sub.Unsubscribe()
+	defer func() { _ = sub.Unsubscribe() }()
 	payload, _ := json.Marshal(job{ID: id, Kind: "command", Command: &command})
 	if err := r.queue.Publish(ctx, JobsSubject, payload); err != nil {
 		return "", err
