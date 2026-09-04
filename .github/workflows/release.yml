@@ -19,7 +19,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}   # ghcr.io/vmodekurti/soulacy
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   # ── Build Linux binaries (inside Docker for cgo cross-compile) ───────────────
@@ -316,6 +316,7 @@ jobs:
 
           manifest = {
               "product": "soulacy",
+              "edition": "personal",
               "version": version,
               "commit": os.environ["COMMIT"],
               "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -398,19 +399,19 @@ jobs:
             **One-line install** (macOS & Linux — downloads this release's
             binaries, falls back to building from source):
             ```bash
-            curl -fsSL https://raw.githubusercontent.com/vmodekurti/soulacy/${{ github.ref_name }}/install.sh | bash
+            curl -fsSL https://raw.githubusercontent.com/vmodekurti/soulacy-personal/${{ github.ref_name }}/install.sh | bash
             ```
 
             **Docker (full stack)**:
             ```bash
-            curl -o docker-compose.yml https://raw.githubusercontent.com/vmodekurti/soulacy/${{ github.ref_name }}/docker-compose.yml
+            curl -o docker-compose.yml https://raw.githubusercontent.com/vmodekurti/soulacy-personal/${{ github.ref_name }}/docker-compose.yml
             docker compose up
             ```
 
             **Docker (SQLite only)**:
             ```bash
-            docker pull ghcr.io/vmodekurti/soulacy:${{ github.ref_name }}
-            docker run -p 18789:18789 -v ~/.soulacy:/home/soulacy/.soulacy ghcr.io/vmodekurti/soulacy:${{ github.ref_name }}
+            docker pull ghcr.io/vmodekurti/soulacy-personal:${{ github.ref_name }}
+            docker run -p 18789:18789 -v ~/.soulacy:/home/soulacy/.soulacy ghcr.io/vmodekurti/soulacy-personal:${{ github.ref_name }}
             ```
 
             ### Downloads
@@ -434,7 +435,7 @@ jobs:
             cosign verify-blob \
               --certificate checksums.sha256.pem \
               --signature checksums.sha256.sig \
-              --certificate-identity-regexp 'https://github.com/vmodekurti/soulacy/.github/workflows/release.yml@.*' \
+              --certificate-identity-regexp 'https://github.com/vmodekurti/soulacy-personal/.github/workflows/release.yml@.*' \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com \
               checksums.sha256
             ```

@@ -15,6 +15,10 @@ Apache-2.0 licensed, self-hosted, and has no dependency on the private Teams or
 Scale codebases. Personal development, issues, releases, and source history
 remain public here.
 
+Contributions use the [Developer Certificate of Origin](DCO.md). Code is
+Apache-2.0 licensed; the project name and logos follow the separate
+[trademark policy](TRADEMARKS.md).
+
 **Build it. Run it. Fix and learn.**
 
 - **Build it** — describe the automation in plain English in Studio, or start from
