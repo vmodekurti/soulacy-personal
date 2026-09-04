@@ -10,6 +10,19 @@ Think of it as Ollama — but for agents.
 
 [Website](https://soulacy.io) · [Documentation](https://docs.soulacy.io)
 
+## Editions and source availability
+
+**Soulacy Personal is the canonical open-source product and will remain
+publicly accessible in this repository under Apache-2.0.** Teams and Scale are
+additive commercial distributions maintained in a separate private repository;
+commercial code imports the public core, never the reverse.
+
+The repository is currently completing that extraction. Teams/Scale code that
+was already published in this Git history remains covered by the license under
+which it was released; moving future development to a private repository does
+not retroactively make public commits confidential. See the
+[edition architecture and migration policy](docs/architecture/open-core-editions.md).
+
 ### Team/Scale administrator sign-in
 
 Open `https://your-soulacy-host/admin/setup` once on a new deployment. Enter
