@@ -56,14 +56,14 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Record edition dependency metadata
         id: edition-metadata
         run: echo "personal-revision=$(tr -d '[:space:]' < .personal-base)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version: "1.26.6"
           cache: true
@@ -118,7 +118,7 @@ jobs:
 
       - name: Upload production evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: production-assurance-${{ github.sha }}
           path: '*-gate.log'
@@ -131,13 +131,13 @@ jobs:
       matrix:
         arch: [amd64, arm64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Set up QEMU (for arm64 emulation)
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
 
       - name: Build release binary via Dockerfile.release
         run: |
@@ -169,7 +169,7 @@ jobs:
           rm soulacy sy
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: linux-${{ matrix.arch }}
           path: bin/release/*.tar.gz
@@ -182,16 +182,16 @@ jobs:
       matrix:
         arch: [arm64, amd64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version: "1.26.6"
           cache: true
 
       - name: Set up Node.js (for GUI build)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "22"
           cache: npm
@@ -215,30 +215,50 @@ jobs:
               -o bin/release/sy-darwin-${{ matrix.arch }} ./cmd/sy
 
       # Sign + notarize the Mach-O binaries BEFORE tarballing, so the release
-      # checksums (computed later) cover the signed bytes. Fully gated on signing
-      # secrets: when they're absent the job ships unsigned binaries and only
-      # emits a warning, so forks and pre-notarization releases still build.
+      # checksums (computed later) cover the signed bytes. Release signing fails
+      # closed: a release must never silently ship unsigned binaries.
       - name: Codesign & notarize (macOS)
         env:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
           CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
         run: |
-          if [ -z "${MACOS_CERTIFICATE:-}" ] || [ -z "${APPLE_ID:-}" ]; then
-            echo "::warning::macOS signing secrets not configured — shipping unsigned binaries (Gatekeeper will warn on first run)."
-            exit 0
-          fi
           set -euo pipefail
-          KEYCHAIN=build.keychain
+          required=(
+            MACOS_CERTIFICATE MACOS_CERTIFICATE_PWD KEYCHAIN_PASSWORD
+            CODESIGN_IDENTITY APPLE_API_KEY_ID APPLE_API_ISSUER_ID
+            APPLE_API_PRIVATE_KEY
+          )
+          for name in "${required[@]}"; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Required release secret ${name} is missing."
+              exit 1
+            fi
+          done
+
+          KEYCHAIN="${RUNNER_TEMP}/soulacy-release.keychain-db"
+          CERT_FILE="${RUNNER_TEMP}/developer-id.p12"
+          API_KEY_FILE="${RUNNER_TEMP}/AuthKey_${APPLE_API_KEY_ID}.p8"
+          ZIP="${RUNNER_TEMP}/notarize-${{ matrix.arch }}.zip"
+          ORIGINAL_KEYCHAIN="$(security default-keychain | tr -d '\"')"
+          cleanup() {
+            security default-keychain -s "$ORIGINAL_KEYCHAIN" >/dev/null 2>&1 || true
+            security delete-keychain "$KEYCHAIN" >/dev/null 2>&1 || true
+            rm -f "$CERT_FILE" "$API_KEY_FILE" "$ZIP"
+          }
+          trap cleanup EXIT
+
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
           security default-keychain -s "$KEYCHAIN"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          echo "$MACOS_CERTIFICATE" | base64 --decode > cert.p12
-          security import cert.p12 -k "$KEYCHAIN" -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
+          printf '%s' "$MACOS_CERTIFICATE" | base64 --decode > "$CERT_FILE"
+          printf '%s' "$APPLE_API_PRIVATE_KEY" > "$API_KEY_FILE"
+          chmod 600 "$CERT_FILE" "$API_KEY_FILE"
+          security import "$CERT_FILE" -k "$KEYCHAIN" -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
           for b in bin/release/soulacy-darwin-${{ matrix.arch }} bin/release/sy-darwin-${{ matrix.arch }}; do
             codesign --force --timestamp --options runtime --sign "$CODESIGN_IDENTITY" "$b"
@@ -246,12 +266,12 @@ jobs:
           done
           # Notarize the pair (CLI tools can't be stapled; Gatekeeper verifies the
           # notarization ticket online on first run).
-          ZIP="notarize-${{ matrix.arch }}.zip"
           /usr/bin/zip -j "$ZIP" bin/release/soulacy-darwin-${{ matrix.arch }} bin/release/sy-darwin-${{ matrix.arch }}
           xcrun notarytool submit "$ZIP" \
-            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
-            --password "$APPLE_APP_SPECIFIC_PASSWORD" --wait
-          rm -f cert.p12 "$ZIP"
+            --key "$API_KEY_FILE" \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER_ID" \
+            --wait
           echo "Signed + notarized ${{ matrix.arch }} binaries."
 
       - name: Create tarballs
@@ -264,7 +284,7 @@ jobs:
           rm soulacy sy
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: darwin-${{ matrix.arch }}
           path: bin/release/*.tar.gz
@@ -278,16 +298,16 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -295,7 +315,7 @@ jobs:
 
       - name: Extract Docker metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -304,7 +324,7 @@ jobs:
             type=raw,value=latest
 
       - name: Build and push multi-platform image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25
         with:
           context: .
           file: Dockerfile
@@ -322,16 +342,16 @@ jobs:
     name: GUI render smoke
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version: "1.26.6"
           cache: true
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "22"
           cache: npm
@@ -346,7 +366,7 @@ jobs:
         run: make docs-screenshots
 
       - name: Upload GUI screenshots
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: gui-render-smoke
           path: docs/assets/screenshots/
@@ -361,10 +381,10 @@ jobs:
       # Required for cosign keyless (Sigstore) signing via the OIDC token.
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           path: artifacts/
 
@@ -443,7 +463,7 @@ jobs:
           PY
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac
 
       - name: Sign checksums and artifacts (keyless / OIDC)
         env:
@@ -482,7 +502,7 @@ jobs:
           ls -la
 
       - name: Generate SBOM (SPDX)
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610
         with:
           path: .
           format: spdx-json
@@ -500,7 +520,7 @@ jobs:
             soulacy.sbom.spdx.json
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
           name: "Soulacy ${{ github.ref_name }}"
           body: |
