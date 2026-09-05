@@ -3,6 +3,7 @@
 # "delete" keeps a Personal-only path absent from Commercial.
 preserve .github/CODEOWNERS
 preserve .github/pull_request_template.md
+preserve .github/workflows/ci.yml
 preserve .github/workflows/release.yml
 delete .github/workflows/personal-source-availability.yml
 preserve README.md

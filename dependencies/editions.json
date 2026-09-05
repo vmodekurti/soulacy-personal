@@ -3,7 +3,7 @@
   "personal": {
     "repository": "https://github.com/vmodekurti/soulacy-personal.git",
     "branch": "main",
-    "revision": "fc1de34fa568e41a57e4dc35ef58b9e4f9cf9348",
+    "revision": "78368a449276e64c34d688bd0ccd2af77117aae0",
     "update_policy": "reviewed_pull_request",
     "automatic_merge": false
   },

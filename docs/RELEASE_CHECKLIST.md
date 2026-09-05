@@ -91,8 +91,8 @@ Commit any changed screenshots before tagging.
 grep -rn "config.Version" internal/config/version.go     # confirm current version
 ```
 
-If the version constant is still `0.9.x`-ish, bump it to `1.0.0` and commit that
-alone (`chore(release): bump version to 1.0.0`) before tagging.
+If the version constant is stale, bump it and commit that change alone before
+tagging.
 
 ### 8. Dry-run the release workflow
 
@@ -100,13 +100,22 @@ The release workflow at `.github/workflows/release.yml` triggers on tags matchin
 `v*`. Before pushing the real tag, verify the workflow file references no stale
 secrets and that all needed secrets are in the repo settings:
 
-- `GHCR_TOKEN` (or the default `GITHUB_TOKEN` if using GH's container registry)
-- `HOMEBREW_TAP_TOKEN` (for the Homebrew tap bump)
-- `SIGSTORE` / `COSIGN` keys (if signing artifacts)
-- `APPLE_ID_USERNAME` + `APPLE_ID_PASSWORD` + `APPLE_TEAM_ID` (for macOS notarization)
+- `MACOS_CERTIFICATE` (base64-encoded Developer ID Application `.p12`)
+- `MACOS_CERTIFICATE_PWD`
+- `MACOS_CODESIGN_IDENTITY`
+- `KEYCHAIN_PASSWORD` (an ephemeral CI keychain password)
+- `APPLE_API_KEY_ID` + `APPLE_API_ISSUER_ID` + `APPLE_API_PRIVATE_KEY`
+  (a team App Store Connect API key used only by `notarytool`)
+- `HOMEBREW_TAP_TOKEN` (for the Homebrew tap bump, when enabled)
 
-Missing secrets → the workflow fails on the step that needs them. Add them under
-Settings → Secrets and variables → Actions before tagging.
+Store release credentials as **environment secrets** in the protected `release`
+environment, not as repository-level secrets. The environment permits only
+tags matching `v*` and requires maintainer approval. The workflow deliberately
+fails instead of publishing unsigned macOS binaries when a signing secret is
+missing.
+
+Sigstore artifact signing is keyless and uses GitHub OIDC; do not create a
+long-lived cosign private key for this workflow.
 
 **Acceptance:** all required secrets present in the repo settings.
 
