@@ -148,6 +148,9 @@ func New(cfg Config, staticKey string, log *zap.Logger) (*Engine, error) {
 func (e *Engine) Middleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		token := strings.TrimPrefix(c.Get("Authorization"), "Bearer ")
+		if token == "" {
+			token = c.Cookies("soulacy_access")
+		}
 		// WebSocket connections cannot set headers; accept ?api_key= as fallback.
 		if token == "" {
 			token = c.Query("api_key")
@@ -235,6 +238,7 @@ func (e *Engine) HandleTokenRequest(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
+	e.setAuthCookies(c, access, refresh, expiresIn)
 	return c.JSON(fiber.Map{
 		"access_token":  access,
 		"refresh_token": refresh,
@@ -261,16 +265,21 @@ func (e *Engine) HandleRefresh(c *fiber.Ctx) error {
 	var req struct {
 		RefreshToken string `json:"refresh_token"`
 	}
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.BodyParser(&req); err != nil && len(c.Body()) > 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	if req.RefreshToken == "" {
+		req.RefreshToken = c.Cookies("soulacy_refresh")
 	}
 	if req.RefreshToken == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "refresh_token is required"})
 	}
 	access, newRefresh, expiresIn, err := e.issuer.Refresh(req.RefreshToken)
 	if err != nil {
+		e.clearAuthCookies(c)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": err.Error()})
 	}
+	e.setAuthCookies(c, access, newRefresh, expiresIn)
 	return c.JSON(fiber.Map{
 		"access_token":  access,
 		"refresh_token": newRefresh,
@@ -312,6 +321,19 @@ func (e *Engine) Close() {
 	}
 	if e.oidc != nil {
 		e.oidc.close()
+	}
+}
+
+func (e *Engine) setAuthCookies(c *fiber.Ctx, access, refresh string, expiresIn int) {
+	secure := strings.EqualFold(c.Protocol(), "https") || strings.EqualFold(c.Get("X-Forwarded-Proto"), "https")
+	c.Cookie(&fiber.Cookie{Name: "soulacy_access", Value: access, HTTPOnly: true, Secure: secure, SameSite: "Lax", MaxAge: expiresIn, Path: "/"})
+	c.Cookie(&fiber.Cookie{Name: "soulacy_refresh", Value: refresh, HTTPOnly: true, Secure: secure, SameSite: "Strict", MaxAge: int(e.cfg.JWTRefreshTTL.Seconds()), Path: "/api/v1/auth"})
+}
+
+func (e *Engine) clearAuthCookies(c *fiber.Ctx) {
+	secure := strings.EqualFold(c.Protocol(), "https") || strings.EqualFold(c.Get("X-Forwarded-Proto"), "https")
+	for _, item := range []struct{ name, path string }{{"soulacy_access", "/"}, {"soulacy_refresh", "/api/v1/auth"}} {
+		c.Cookie(&fiber.Cookie{Name: item.name, Value: "", HTTPOnly: true, Secure: secure, SameSite: "Strict", MaxAge: -1, Path: item.path})
 	}
 }
 

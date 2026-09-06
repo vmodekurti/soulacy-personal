@@ -8,12 +8,41 @@ function authHeaders() {
   return h
 }
 
+async function establishBrowserSession(key) {
+  const res = await fetch('/api/v1/auth/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ api_key: key }),
+  })
+  // Direct API-key mode remains available for local and older gateways. Its
+  // credential stays tab-scoped; hosted JWT deployments return a short-lived
+  // access token and set rotating HttpOnly cookies.
+  if (res.status === 404) return { accessToken: key, persistent: false }
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw Object.assign(new Error(body.error || res.statusText), { status: res.status, body })
+  }
+  if (!body.access_token) throw new Error('The gateway did not create a browser session.')
+  return { accessToken: body.access_token, persistent: true }
+}
+
 export async function apiFetch(path, opts = {}) {
-	const { _costConfirmed, ...requestOpts } = opts
+	const { _costConfirmed, _authRetried, ...requestOpts } = opts
   const res = await fetch('/api/v1' + path, {
 	...requestOpts,
 	headers: { ...authHeaders(), ...(requestOpts.headers || {}) },
   })
+  if (res.status === 401 && !_authRetried && path !== '/auth/refresh') {
+    const refreshed = await fetch('/api/v1/auth/refresh', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    }).then(async r => {
+      if (!r.ok) return false
+      const issued = await r.json().catch(() => ({}))
+      if (issued.access_token) apiKey.set(issued.access_token)
+      return true
+    }).catch(() => false)
+    if (refreshed) return apiFetch(path, { ...opts, _authRetried: true })
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
 	// Cost confirmation is deliberately user-driven. Retry the identical
@@ -27,7 +56,7 @@ export async function apiFetch(path, opts = {}) {
 	    body: withCostConfirmation(opts.body),
 	  })
 	}
-    if (res.status === 401 || res.status === 403) authRequired.set(true)
+    if (res.status === 401) authRequired.set(true)
     // Preserve the full error body alongside the status so callers can read
     // structured fields (e.g. Studio's 409 consent fallback carries
     // requiresConsent + consentItems beyond the human `error` string).
@@ -164,6 +193,9 @@ function capabilityAckHeaders(opts = {}) {
 }
 
 export const api = {
+  auth: {
+    login: (key) => establishBrowserSession(key),
+  },
   health: () => apiFetch('/health'),
   readiness: () => apiFetch('/readiness'),
   executors: () => apiFetch('/executors'),

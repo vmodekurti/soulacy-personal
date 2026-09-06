@@ -62,6 +62,14 @@ services:
       # Generate one with: openssl rand -hex 32
       SOULACY_SERVER_API_KEY: "${SOULACY_API_KEY:?SOULACY_API_KEY must be set — generate one with: openssl rand -hex 32}"
 
+      # Browser login — exchange the deployment key once for short-lived JWTs.
+      # The rotating refresh token is a Secure, HttpOnly cookie, so a trusted
+      # personal device stays signed in across browser restarts without putting
+      # the raw API key in localStorage or JavaScript-readable storage.
+      SOULACY_AUTH_MODE: ${SOULACY_AUTH_MODE:-jwt}
+      SOULACY_AUTH_JWT_SECRET: "${SOULACY_AUTH_JWT_SECRET:-${SOULACY_API_KEY}}"
+      SOULACY_AUTH_JWT_REFRESH_TTL: ${SOULACY_AUTH_JWT_REFRESH_TTL:-720h}
+
       # Executor — use pre-forked Python pool for faster tool calls
       SOULACY_EXECUTOR_BACKEND: pool
       SOULACY_EXECUTOR_WORKERS: 4

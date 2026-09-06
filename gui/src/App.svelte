@@ -18,6 +18,8 @@
   let pluginPages = []   // nav entries for mounted plugin UIs (E8)
   let showKeyModal = false
   let keyInput = ''
+  let keyError = ''
+  let keySaving = false
   let sidebarOpen = false   // mobile drawer state (≤768px)
   let navCollapsed = false   // desktop: collapse the left nav to an icon rail
   let PageComponent = null
@@ -261,8 +263,9 @@
     loginChecking = true
     loginError = ''
     const prev = $apiKey
-    $apiKey = key // apiFetch reads the key from this store
     try {
+      const session = await api.auth.login(key)
+      $apiKey = session.accessToken
       await api.agents.list() // validate the key
       $authRequired = false   // success → reveal the app
       loginKey = ''
@@ -276,14 +279,30 @@
     }
   }
 
-  function saveKey() {
-    $apiKey = keyInput.trim()
-    showKeyModal = false
-    window.location.reload()
+  async function saveKey() {
+    const key = keyInput.trim()
+    if (!key || keySaving) return
+    keySaving = true
+    keyError = ''
+    try {
+      const session = await api.auth.login(key)
+      $apiKey = session.accessToken
+      await api.agents.list()
+      showKeyModal = false
+      keyInput = ''
+      window.location.reload()
+    } catch (e) {
+      keyError = (e && (e.status === 401 || e.status === 403))
+        ? 'That key was rejected. Double-check it and try again.'
+        : (e?.message || 'Could not create a browser session.')
+    } finally {
+      keySaving = false
+    }
   }
 
   function openKeyModal() {
-    keyInput = $apiKey
+    keyInput = ''
+    keyError = ''
     showKeyModal = true
   }
 </script>
@@ -300,7 +319,7 @@
         <span class="login-glyph" aria-hidden="true">⬡</span>
       </div>
       <h1 class="login-title">Soulacy</h1>
-      <p class="login-sub">Enter your API key to continue.</p>
+      <p class="login-sub">Enter your API key once to trust this browser.</p>
 
       <input
         class="login-input"
@@ -385,13 +404,14 @@
   >
     <div class="modal">
       <h2>API Key</h2>
-      <p>Enter your Soulacy API key. Find it in <code>~/.soulacy/config.yaml</code> or the <code>SOULACY_API_KEY</code> env var.</p>
-      <input type="password" bind:value={keyInput}
-             placeholder="claw_..."
+      <p>Replace this browser's Soulacy login. The deployment key is exchanged for a secure session and is not saved in browser storage.</p>
+      <input type="password" bind:value={keyInput} disabled={keySaving}
+             placeholder="sy_…"
              on:keydown={(e) => e.key === 'Enter' && saveKey()} />
+      {#if keyError}<p class="login-error" role="alert">{keyError}</p>{/if}
       <div class="modal-row">
-        <button class="btn-secondary" on:click={() => showKeyModal = false}>Cancel</button>
-        <button class="btn-primary"   on:click={saveKey}>Save &amp; Reload</button>
+        <button class="btn-secondary" on:click={() => showKeyModal = false} disabled={keySaving}>Cancel</button>
+        <button class="btn-primary" on:click={saveKey} disabled={keySaving || !keyInput.trim()}>{keySaving ? 'Verifying…' : 'Save & Reload'}</button>
       </div>
     </div>
   </div>
@@ -497,7 +517,7 @@
           {$connected ? '● Live' : '○ Offline'}
         </span>
       {/if}
-      <button class="icon-btn" on:click={openKeyModal} title="Set API key">🔑</button>
+      <button class="icon-btn" on:click={openKeyModal} title="Change browser login">🔑</button>
     </div>
   </aside>
 
