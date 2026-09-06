@@ -1448,7 +1448,7 @@ console.log(reply);` : ''
 <div class="page">
   <div class="page-header">
     <h1>Deployed Agents</h1>
-    <div class="hdr-actions">
+    <div class="hdr-actions page-actions">
       <button class="btn-secondary" on:click={openTemplates}>📋 From template…</button>
       <button class="btn-secondary" on:click={triggerPackageImport} data-tooltip="Inspect and import a .soulacy-agent.json package">Import package…</button>
       <button class="btn-primary"   on:click={newAgent}>+ New Agent</button>
@@ -1459,9 +1459,9 @@ console.log(reply);` : ''
         style="display:none"
         on:change={onPackageFilePicked}
       />
+      <TourButton />
     </div>
-        <TourButton />
-    </div>
+  </div>
 
   {#if error}
     <div class="banner err">⚠ {error}</div>
@@ -1512,7 +1512,7 @@ console.log(reply);` : ''
         <div class="editor">
           <div class="editor-hdr">
             <span>{selected ? 'Editing: ' + selected.id : 'New Agent'}</span>
-            <div class="hdr-actions">
+            <div class="hdr-actions editor-actions">
               {#if selected}
                 <button class="btn-secondary" on:click={() => showExport = true}
                         data-tooltip="Show API snippets for this agent">&lt;/&gt; API</button>
@@ -1542,10 +1542,10 @@ console.log(reply);` : ''
                   🛡 Security Doctor
                 </button>
               {/if}
-              <button class="btn-secondary" on:click={validateEditing} disabled={validating} data-tooltip="Verify that the agent manifest is valid and secure">
+              <button class="btn-secondary validate-action" on:click={validateEditing} disabled={validating} data-tooltip="Verify that the agent manifest is valid and secure">
                 {validating ? 'Checking…' : 'Validate'}
               </button>
-              <button class="btn-primary" on:click={save} disabled={saving} data-tooltip="Save changes to the agent manifest">
+              <button class="btn-primary save-action" on:click={save} disabled={saving} data-tooltip="Save changes to the agent manifest">
                 {saving ? 'Saving…' : 'Save'}
               </button>
               {#if saveMsg}
@@ -4165,5 +4165,130 @@ console.log(reply);` : ''
     border-radius: 5px; color: #7b82a8;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: .68rem; white-space: pre-wrap; word-break: break-word;
+  }
+
+  /* Mobile-first deployed-agent workspace. Keep these rules last so desktop
+     dimensions above cannot override the narrow-screen layout. */
+  @media (max-width: 900px) {
+    .page {
+      height: auto;
+      min-height: 100%;
+      padding: 1rem;
+      gap: .9rem;
+      overflow-x: hidden;
+    }
+    .page-header {
+      align-items: flex-start;
+      flex-wrap: wrap;
+      gap: .75rem;
+    }
+    .page-header h1 { flex: 1 0 100%; margin: 0; }
+    .page-actions {
+      width: 100%;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: .5rem;
+    }
+    .page-actions :global(button) {
+      min-width: 0;
+      min-height: 44px;
+      padding-inline: .65rem;
+      white-space: normal;
+    }
+    .split {
+      flex-direction: column;
+      overflow: visible;
+      min-width: 0;
+    }
+    .list-col {
+      width: 100%;
+      max-height: none;
+      flex: 0 0 auto;
+      flex-direction: row;
+      overflow-x: auto;
+      overflow-y: hidden;
+      scroll-snap-type: x proximity;
+      padding-bottom: .25rem;
+    }
+    .agent-card {
+      width: min(280px, 82vw);
+      min-width: min(280px, 82vw);
+      scroll-snap-align: start;
+    }
+    .editor-col {
+      width: 100%;
+      overflow: visible;
+    }
+    .editor { overflow: visible; }
+    .editor-hdr {
+      position: sticky;
+      top: 0;
+      z-index: 12;
+      align-items: stretch;
+      flex-direction: column;
+      gap: .7rem;
+      background: #141626;
+      box-shadow: 0 8px 18px rgba(5, 7, 18, .28);
+    }
+    .editor-actions {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: .45rem;
+    }
+    .editor-actions > button {
+      width: 100%;
+      min-width: 0;
+      min-height: 42px;
+      padding: .45rem .5rem;
+      white-space: normal;
+      line-height: 1.2;
+    }
+    .editor-actions .save-action {
+      order: -3;
+      grid-column: span 2;
+    }
+    .editor-actions .validate-action { order: -2; }
+    .editor-actions .save-msg {
+      order: -1;
+      grid-column: 1 / -1;
+    }
+    .fields { padding: .85rem; }
+    .play-col { width: 100%; flex: 0 0 auto; }
+  }
+
+  @media (max-width: 640px) {
+    .page { padding: .75rem; }
+    .page-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .page-actions > .btn-primary {
+      order: -1;
+      grid-column: 1 / -1;
+    }
+    .agent-card {
+      width: min(260px, 84vw);
+      min-width: min(260px, 84vw);
+    }
+    .editor-hdr { padding: .75rem; }
+    .editor-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .editor-actions .save-action,
+    .editor-actions .validate-action { grid-column: 1 / -1; }
+    .editor-actions > button { min-height: 44px; }
+    .fields { padding: .75rem; }
+    .row-2,
+    .row-3,
+    .learning-fields,
+    .webhook-grid,
+    .doctor-dr-fields { grid-template-columns: 1fr; }
+    .field-row3 { flex-direction: column; }
+    .validation-head,
+    .validation-line { align-items: flex-start; flex-direction: column; }
+    .validation-suggestion,
+    .validation-alts { margin-left: 0; }
+    .modal,
+    .modal.wide {
+      width: calc(100vw - 1rem);
+      max-width: calc(100vw - 1rem);
+      max-height: calc(100dvh - 1rem);
+      padding: 1rem;
+    }
   }
 </style>
