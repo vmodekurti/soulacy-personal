@@ -467,6 +467,22 @@ func TestMiddlewareJWTModeAcceptsLocalToken(t *testing.T) {
 		t.Fatalf("local JWT: status = %d, want 200", status)
 	}
 
+	// Browser sessions authenticate with the HttpOnly access cookie and send
+	// no JavaScript-readable Authorization header after a relaunch.
+	cookieReq, err := http.NewRequest(http.MethodGet, "/me", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookieReq.AddCookie(&http.Cookie{Name: "soulacy_access", Value: accessToken})
+	cookieResp, err := app.Test(cookieReq, 5000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = cookieResp.Body.Close()
+	if cookieResp.StatusCode != http.StatusOK {
+		t.Fatalf("access cookie: status = %d, want 200", cookieResp.StatusCode)
+	}
+
 	// Tampered token must fail.
 	status, _ = fiberJSON(t, app, http.MethodGet, "/me", accessToken+"tampered", "")
 	if status != http.StatusUnauthorized {
@@ -553,6 +569,43 @@ func TestHandleTokenRequestJWTModeSuccess(t *testing.T) {
 	}
 }
 
+func TestHandleTokenRequestJWTModeSetsPersistentBrowserCookies(t *testing.T) {
+	e := newTestEngine(t, "jwt", "real-key")
+	app := fiber.New(fiber.Config{DisableStartupMessage: true})
+	app.Post("/token", e.HandleTokenRequest)
+
+	req, err := http.NewRequest(http.MethodPost, "/token", strings.NewReader(`{"api_key":"real-key"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req, 5000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	cookies := map[string]*http.Cookie{}
+	for _, cookie := range resp.Cookies() {
+		cookies[cookie.Name] = cookie
+	}
+	for _, name := range []string{"soulacy_access", "soulacy_refresh"} {
+		cookie := cookies[name]
+		if cookie == nil {
+			t.Fatalf("missing %s cookie", name)
+		}
+		if !cookie.HttpOnly || cookie.MaxAge <= 0 {
+			t.Fatalf("%s cookie must be HttpOnly and persistent: %#v", name, cookie)
+		}
+	}
+	if cookies["soulacy_access"].Path != "/" {
+		t.Fatalf("access cookie path = %q, want /", cookies["soulacy_access"].Path)
+	}
+	if cookies["soulacy_refresh"].Path != "/api/v1/auth" {
+		t.Fatalf("refresh cookie path = %q", cookies["soulacy_refresh"].Path)
+	}
+}
+
 // TestHandleRefreshInvalidToken returns 401 for unknown refresh tokens.
 func TestHandleRefreshInvalidToken(t *testing.T) {
 	e := newTestEngine(t, "jwt", "key")
@@ -591,6 +644,39 @@ func TestHandleRefreshSuccess(t *testing.T) {
 	status, _ = fiberJSON(t, app, http.MethodPost, "/refresh", "key", refreshBody)
 	if status != http.StatusUnauthorized {
 		t.Fatalf("second refresh: status = %d, want 401", status)
+	}
+}
+
+func TestHandleRefreshUsesAndRotatesBrowserCookie(t *testing.T) {
+	e := newTestEngine(t, "jwt", "key")
+	_, refresh, _, err := e.issuer.Issue("admin", "", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := fiber.New(fiber.Config{DisableStartupMessage: true})
+	app.Post("/refresh", e.HandleRefresh)
+	req, err := http.NewRequest(http.MethodPost, "/refresh", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: "soulacy_refresh", Value: refresh})
+	resp, err := app.Test(req, 5000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("cookie refresh: status = %d", resp.StatusCode)
+	}
+	rotated := ""
+	for _, cookie := range resp.Cookies() {
+		if cookie.Name == "soulacy_refresh" {
+			rotated = cookie.Value
+		}
+	}
+	if rotated == "" || rotated == refresh {
+		t.Fatal("refresh cookie was not rotated")
 	}
 }
 

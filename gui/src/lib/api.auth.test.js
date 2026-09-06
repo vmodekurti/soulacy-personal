@@ -5,8 +5,8 @@
 // store transitions driven by apiFetch.
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { get } from 'svelte/store'
-import { authRequired } from './stores.js'
-import { apiFetch } from './api.js'
+import { apiKey, authRequired } from './stores.js'
+import { api, apiFetch } from './api.js'
 
 function jsonResponse(status, body = {}) {
   return {
@@ -20,6 +20,7 @@ function jsonResponse(status, body = {}) {
 
 beforeEach(() => {
   authRequired.set(false)
+  apiKey.set('')
   globalThis.fetch = vi.fn()
 })
 
@@ -30,10 +31,10 @@ describe('apiFetch auth-state transitions', () => {
     expect(get(authRequired)).toBe(true)
   })
 
-  it('sets authRequired on 403', async () => {
+  it('does not turn an authorization refusal into a login prompt', async () => {
     fetch.mockResolvedValue(jsonResponse(403, { error: 'forbidden' }))
     await expect(apiFetch('/config')).rejects.toMatchObject({ status: 403 })
-    expect(get(authRequired)).toBe(true)
+    expect(get(authRequired)).toBe(false)
   })
 
   it('clears authRequired when an authenticated call succeeds', async () => {
@@ -63,5 +64,27 @@ describe('apiFetch auth-state transitions', () => {
   it('error carries the server message for the banner', async () => {
     fetch.mockResolvedValue(jsonResponse(401, { error: 'invalid or missing API key' }))
     await expect(apiFetch('/agents')).rejects.toThrow('invalid or missing API key')
+  })
+
+  it('exchanges the deployment key for a browser session', async () => {
+    fetch.mockResolvedValue(jsonResponse(200, { access_token: 'short-lived-access' }))
+    await expect(api.auth.login('deployment-secret')).resolves.toEqual({
+      accessToken: 'short-lived-access', persistent: true,
+    })
+    expect(fetch).toHaveBeenCalledWith('/api/v1/auth/token', expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ api_key: 'deployment-secret' }),
+    }))
+  })
+
+  it('refreshes an expired browser session and retries the request', async () => {
+    fetch
+      .mockResolvedValueOnce(jsonResponse(401, { error: 'expired' }))
+      .mockResolvedValueOnce(jsonResponse(200, { access_token: 'renewed-access' }))
+      .mockResolvedValueOnce(jsonResponse(200, { agents: [] }))
+
+    await expect(apiFetch('/agents')).resolves.toEqual({ agents: [] })
+    expect(get(apiKey)).toBe('renewed-access')
+    expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/auth/refresh', expect.objectContaining({ body: '{}' }))
+    expect(get(authRequired)).toBe(false)
   })
 })
