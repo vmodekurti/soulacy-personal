@@ -98,7 +98,8 @@ type Server struct {
 	actions         storage.ActionLogBackend // nil if action logging disabled
 	mcp             *mcp.Client              // nil if no MCP servers configured
 	hub             *EventHub
-	authEngine      *auth.Engine         // nil until SetAuth() is called
+	authEngine      *auth.Engine // nil until SetAuth() is called
+	authStackCache  atomic.Pointer[fiber.Handler]
 	rbacManager     *rbac.Manager        // nil until SetRBAC() is called
 	credVault       credentials.Vault    // nil until SetCredentialVault() is called
 	builderRegistry *builder.Registry    // nil until SetBuilderRegistry() is called
@@ -260,6 +261,9 @@ func (s *Server) errMsg(c *fiber.Ctx, status int, msg string) error {
 // static-key check using s.cfg.Server.APIKey (identical to Phase 2 behaviour).
 func (s *Server) SetAuth(e *auth.Engine) {
 	s.authEngine = e
+	// A health probe or warm-up request may have populated the cache before
+	// wiring completed. Ensure the newly installed engine becomes authoritative.
+	s.authStackCache.Store(nil)
 }
 
 // SetRBAC wires an RBAC Manager into the server. Must be called before the
@@ -657,10 +661,8 @@ func (s *Server) buildApp() *fiber.App {
 	// POST /api/v1/auth/token   — exchange static API key for JWT pair (jwt mode)
 	// POST /api/v1/auth/refresh — rotate refresh token → new access token (jwt mode)
 	// GET  /api/v1/auth/me      — return identity from current token (protected below)
-	if s.authEngine != nil {
-		app.Post("/api/v1/auth/token", s.authEngine.HandleTokenRequest)
-		app.Post("/api/v1/auth/refresh", s.authEngine.HandleRefresh)
-	}
+	app.Post("/api/v1/auth/token", s.requireAuthEngine(func(s *Server) fiber.Handler { return s.authEngine.HandleTokenRequest }))
+	app.Post("/api/v1/auth/refresh", s.requireAuthEngine(func(s *Server) fiber.Handler { return s.authEngine.HandleRefresh }))
 
 	// --- Shared read-only chat sessions (public — no auth) ---
 	// A share token is an unguessable capability, so the read view bypasses the
@@ -701,9 +703,7 @@ func (s *Server) buildApp() *fiber.App {
 	api.Delete("/plugins/:id", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleRemovePlugin)
 
 	// Auth identity — returns claims from the current token; useful for GUI.
-	if s.authEngine != nil {
-		api.Get("/auth/me", s.authEngine.HandleMe)
-	}
+	api.Get("/auth/me", s.requireAuthEngine(func(s *Server) fiber.Handler { return s.authEngine.HandleMe }))
 
 	// Prometheus metrics. Wrapped in the API auth group so the same key
 	// gates scraping. Scrape via:
