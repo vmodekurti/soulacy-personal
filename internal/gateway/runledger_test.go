@@ -177,3 +177,65 @@ func TestRunLedgerMergesFlowHistory(t *testing.T) {
 		t.Fatalf("source = %v, want action-log+flow", got)
 	}
 }
+
+func TestRunLedgerAutomationScopeIncludesScheduledAndManualAutomationRuns(t *testing.T) {
+	s := newTestGateway(t, "secret")
+	cronAgent := `{"id":"daily-brief","name":"Daily Brief","trigger":"cron","channels":[],"llm":{"provider":"test","model":"m"},"system_prompt":"brief","enabled":true,"schedule":{"cron":"0 8 * * *"}}`
+	if status, body := gatewayJSON(t, s, http.MethodPost, "/api/v1/agents", "secret", cronAgent); status != http.StatusCreated {
+		t.Fatalf("create scheduled agent: status=%d body=%v", status, body)
+	}
+	chatAgent := `{"id":"chat-only","name":"Chat Only","trigger":"channel","channels":["http"],"llm":{"provider":"test","model":"m"},"system_prompt":"chat","enabled":true}`
+	if status, body := gatewayJSON(t, s, http.MethodPost, "/api/v1/agents", "secret", chatAgent); status != http.StatusCreated {
+		t.Fatalf("create chat agent: status=%d body=%v", status, body)
+	}
+
+	base := time.Date(2026, 9, 7, 8, 0, 0, 0, time.UTC)
+	s.actions = &fakeTailBackend{events: []message.Event{
+		{Type: "message.in", AgentID: "daily-brief", SessionID: "cron-1", Timestamp: base, Payload: message.Message{Metadata: map[string]string{"trigger": "cron"}, Parts: message.Text("__trigger:cron__")}},
+		{Type: "message.out", AgentID: "daily-brief", SessionID: "cron-1", Timestamp: base.Add(time.Second), Payload: message.Message{Parts: message.Text("scheduled output")}},
+		{Type: "message.in", AgentID: "daily-brief", SessionID: "manual-1", Timestamp: base.Add(time.Minute), Payload: message.Message{Channel: "http", Parts: message.Text("__trigger:manual__")}},
+		{Type: "message.out", AgentID: "daily-brief", SessionID: "manual-1", Timestamp: base.Add(time.Minute + time.Second), Payload: message.Message{Parts: message.Text("manual output")}},
+		{Type: "message.in", AgentID: "daily-brief", SessionID: "chat-1", Timestamp: base.Add(2 * time.Minute), Payload: message.Message{Channel: "http", Parts: message.Text("ordinary chat")}},
+		{Type: "message.out", AgentID: "daily-brief", SessionID: "chat-1", Timestamp: base.Add(2*time.Minute + time.Second), Payload: message.Message{Parts: message.Text("chat output")}},
+		{Type: "message.in", AgentID: "chat-only", SessionID: "manual-chat", Timestamp: base.Add(3 * time.Minute), Payload: message.Message{Channel: "http", Parts: message.Text("__trigger:manual__")}},
+		{Type: "message.out", AgentID: "chat-only", SessionID: "manual-chat", Timestamp: base.Add(3*time.Minute + time.Second), Payload: message.Message{Parts: message.Text("not an automation")}},
+		{Type: "schedule.run_failed", AgentID: "daily-brief", SessionID: "cron-failed", Timestamp: base.Add(4 * time.Minute), Payload: map[string]any{"trigger": "cron", "error": "provider unavailable"}},
+	}}
+
+	status, body := gatewayJSON(t, s, http.MethodGet, "/api/v1/runs/ledger?scope=automation&limit=20", "secret", "")
+	if status != http.StatusOK {
+		t.Fatalf("automation ledger status = %d body=%v", status, body)
+	}
+	if got := body["scope"]; got != "automation" {
+		t.Fatalf("scope = %v, want automation", got)
+	}
+	rawRuns := body["runs"].([]any)
+	if len(rawRuns) != 3 {
+		t.Fatalf("automation runs len = %d, want scheduled + manual + failed scheduled: %#v", len(rawRuns), rawRuns)
+	}
+	bySession := map[string]map[string]any{}
+	for _, raw := range rawRuns {
+		run := raw.(map[string]any)
+		bySession[run["sessionId"].(string)] = run
+	}
+	if bySession["cron-1"]["trigger"] != "cron" || bySession["manual-1"]["trigger"] != "manual" {
+		t.Fatalf("scheduled/manual origins not retained: %#v", bySession)
+	}
+	if bySession["cron-failed"]["status"] != "failed" || bySession["cron-failed"]["error"] != "provider unavailable" {
+		t.Fatalf("scheduled failure not retained: %#v", bySession["cron-failed"])
+	}
+	if _, ok := bySession["chat-1"]; ok {
+		t.Fatalf("ordinary chat run leaked into automation history: %#v", bySession["chat-1"])
+	}
+	if _, ok := bySession["manual-chat"]; ok {
+		t.Fatalf("manual run of non-automation agent leaked into history: %#v", bySession["manual-chat"])
+	}
+}
+
+func TestRunLedgerRejectsUnknownScope(t *testing.T) {
+	s := newTestGateway(t, "secret")
+	status, body := gatewayJSON(t, s, http.MethodGet, "/api/v1/runs/ledger?scope=other", "secret", "")
+	if status != http.StatusBadRequest {
+		t.Fatalf("unknown scope status = %d body=%v", status, body)
+	}
+}

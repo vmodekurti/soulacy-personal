@@ -93,15 +93,17 @@
       const inEv     = sorted.find(e => e.type === 'message.in')
       const reasonEv = sorted.find(e => e.type === 'reasoning.result')
       const deliveryEv = sorted.slice().reverse().find(e => e.type === 'schedule.output')
+      const scheduleFailEv = sorted.slice().reverse().find(e => e.type === 'schedule.run_failed')
       const delivery = deliveryEv?.payload || {}
+      const scheduleFailure = scheduleFailEv?.payload || {}
       // A run is failed if any tool returned is_error:true, even when the LLM
       // still produced a message.out summarising the failure.
       const toolFailed = sorted.some(e => e.type === 'tool.result' && e.payload?.is_error === true)
       const recovered = sorted.some(e => e.type === 'reasoning.step' && e.payload?.recovery === true)
 
       let status = 'unknown'
-      if (outEv && !toolFailed && !errEv) status = 'success'
-      else if (toolFailed || errEv)        status = 'failed'
+      if (outEv && !toolFailed && !errEv && !scheduleFailEv) status = 'success'
+      else if (toolFailed || errEv || scheduleFailEv) status = 'failed'
       else if (outEv)                      status = 'success'
       if (status === 'success' && (reasonEv?.payload?.confident === false || recovered)) status = 'degraded'
 
@@ -115,8 +117,17 @@
         output = output ? output + '\n\n⚠ Error: ' + errText : '⚠ Error: ' + errText
         status = 'failed'
       }
+      if (scheduleFailEv) {
+        const failText = scheduleFailure.error || scheduleFailure.message || 'Scheduled run failed'
+        output = output ? output + '\n\n⚠ Error: ' + failText : '⚠ Error: ' + failText
+        status = 'failed'
+      }
 
-      const channel = inEv?.payload?.channel || delivery.trigger || ''
+      const marker = partsText(inEv?.payload)
+      const markerTrigger = marker.startsWith('__trigger:') && marker.endsWith('__')
+        ? marker.slice('__trigger:'.length, -2)
+        : ''
+      const channel = inEv?.payload?.metadata?.trigger || markerTrigger || delivery.trigger || scheduleFailure.trigger || inEv?.payload?.channel || ''
       const startTime = (inEv || sorted[0])?.timestamp
 
       const agentId = sorted.find(e => e.agent_id)?.agent_id || ''
@@ -194,6 +205,20 @@
     }
   }
 
+  function isAutomationRun(run) {
+    const trigger = String(run?.channel || run?.trigger || '').toLowerCase()
+    const scheduledAgent = cronAgents.some((a) => a.id === run?.agentId)
+    return scheduledAgent && ['cron', 'cron_missed_startup', 'oneshot', 'schedule', 'manual'].includes(trigger)
+  }
+
+  function automationOrigin(run) {
+    const trigger = String(run?.channel || run?.trigger || '').toLowerCase()
+    if (trigger === 'manual') return 'Manual · Run now'
+    if (trigger === 'cron_missed_startup') return 'Scheduled · Catch-up'
+    if (trigger === 'oneshot') return 'Scheduled · One-time'
+    return 'Scheduled · Cron'
+  }
+
   async function openHistory(a) {
     historyAgent   = a
     historyRuns    = []
@@ -202,7 +227,7 @@
     expandedRuns   = {}
     historyLoading = true
     try {
-      const ledger = await api.runs.ledger({ agentId: a.id, limit: 100, eventLimit: 50000 }).catch(() => ({ runs: null }))
+      const ledger = await api.runs.ledger({ agentId: a.id, scope: 'automation', limit: 100, eventLimit: 50000 }).catch(() => ({ runs: null }))
       if (Array.isArray(ledger.runs)) {
         historyRuns = ledger.runs.map(normalizeLedgerRun)
         const source = ledger.source ? ` · source: ${ledger.source}` : ''
@@ -224,9 +249,9 @@
         deliveryChannel: r.deliveryChannel || '',
         deliveryTo: r.deliveryTo || '',
         deliveryError: r.deliveryError || '',
-      }))
-      const actions = await api.agents.actions(a.id, 10000, 'message.in,message.out,error,tool.result,reasoning.step,reasoning.result,schedule.output', { durable: true }).catch(() => ({ events: [] }))
-      const actionRuns = groupRuns(actions.events || [])
+      })).filter(isAutomationRun)
+      const actions = await api.agents.actions(a.id, 10000, 'message.in,message.out,error,tool.result,reasoning.step,reasoning.result,schedule.output,schedule.run_failed', { durable: true }).catch(() => ({ events: [] }))
+      const actionRuns = groupRuns(actions.events || []).filter(isAutomationRun)
       historyRuns = mergeHistoryRuns(retainedRuns, actionRuns)
       historySourceSummary = `${historyRuns.length} shown · ${retainedRuns.length} retained · ${actionRuns.length} reconstructed from action log`
     } catch (e) {
@@ -245,7 +270,7 @@
     recentLoading = true
     recentError = ''
     try {
-      const res = await api.runs.ledger({ limit: recentLimit, eventLimit: 50000 })
+      const res = await api.runs.ledger({ scope: 'automation', limit: recentLimit, eventLimit: 50000 })
       recentRuns = (res.runs || []).map(normalizeLedgerRun)
       if (res.event_truncated) {
         recentError = `Recent run list scanned ${res.event_limit || 50000} events and may be truncated. Use Activity for exact log tails.`
@@ -254,9 +279,9 @@
       const ledgerError = e.message
       const res = await api.runs.events({
         limit: 5000,
-        types: 'message.in,message.out,error,tool.result,reasoning.step,reasoning.result,schedule.output',
+        types: 'message.in,message.out,error,tool.result,reasoning.step,reasoning.result,schedule.output,schedule.run_failed',
       }).catch(() => ({ events: [] }))
-      recentRuns = groupRuns(res.events || []).slice(0, recentLimit)
+      recentRuns = groupRuns(res.events || []).filter(isAutomationRun).slice(0, recentLimit)
       recentError = recentRuns.length ? '' : ledgerError
     } finally {
       recentLoading = false
@@ -640,13 +665,13 @@
         title={recentRunsExpanded ? 'Collapse recent runs' : 'Expand recent runs'}
       >
         <span class="section-chevron" aria-hidden="true">{recentRunsExpanded ? '▾' : '▸'}</span>
-        <span>Recent runs</span>
+        <span>Automation history</span>
         <span class="pill">{recentRuns.length}</span>
       </button>
-      <label class="history-depth" title="How many unified runs to show. Includes manual, chat/channel, cron, and scheduled-output runs when durable history is available.">
+      <label class="history-depth" title="How many scheduled and manually started automation runs to show.">
         <span>Show</span>
         <select bind:value={recentLimit} on:change={loadRecentRuns} disabled={recentLoading}
-                title="How many unified runs to show. Includes manual, chat/channel, cron, and scheduled-output runs when durable history is available.">
+                title="How many scheduled and manually started automation runs to show.">
           <option value={12}>12</option>
           <option value={25}>25</option>
           <option value={50}>50</option>
@@ -662,18 +687,18 @@
         {:else if recentError}
           <div class="empty err">{recentError}</div>
         {:else if recentRuns.length === 0}
-          <div class="empty">No recent runs recorded in durable history yet.</div>
+          <div class="empty">No scheduled or manually started automation runs have been recorded yet.</div>
         {:else}
           <table class="tbl">
             <thead>
-              <tr><th>Agent</th><th>Started</th><th>Trigger</th><th>Status</th><th>Delivery</th><th>Source</th><th class="td-action">Actions</th></tr>
+              <tr><th>Agent</th><th>Started</th><th>Execution</th><th>Status</th><th>Delivery</th><th>Source</th><th class="td-action">Actions</th></tr>
             </thead>
             <tbody>
               {#each recentRuns as run (run.id)}
                 <tr class:row-failed={run.status === 'failed'} class:row-degraded={run.status === 'degraded'}>
                   <td class="td-name">{recentAgentName(run) || 'Unknown agent'}</td>
                   <td class="td-hint">{run.startTime ? new Date(run.startTime).toLocaleString() : '—'}</td>
-                  <td class="td-hint">{run.channel || '—'}</td>
+                  <td class="td-hint">{automationOrigin(run)}</td>
                   <td>
                     <span class="run-badge inline" class:badge-ok={run.status === 'success'} class:badge-fail={run.status === 'failed'} class:badge-warn={run.status === 'degraded'} class:badge-unk={run.status === 'unknown'}>
                       {run.status === 'success' ? 'success' : run.status === 'failed' ? 'failed' : run.status === 'degraded' ? 'degraded' : 'unknown'}
@@ -885,7 +910,7 @@ schedule:
     <div class="history-panel">
       <div class="panel-hdr">
         <div class="panel-title">
-          <span class="panel-label">Run history</span>
+          <span class="panel-label">Automation history</span>
           <span class="panel-agent">{historyAgent.name || historyAgent.id}</span>
         </div>
         <div class="panel-actions">
@@ -912,7 +937,7 @@ schedule:
                   {run.status === 'success' ? '✓ success' : run.status === 'failed' ? '✗ failed' : run.status === 'degraded' ? '⚠ degraded' : '? unknown'}
                 </span>
                 <span class="run-time">{run.startTime ? new Date(run.startTime).toLocaleString() : '—'}</span>
-                {#if run.channel}<span class="run-channel">{run.channel}</span>{/if}
+                <span class="run-channel">{automationOrigin(run)}</span>
                 {#if run.source}<span class="run-channel">{run.source}</span>{/if}
                 {#if run.steps}<span class="run-channel">{run.steps} step{run.steps === 1 ? '' : 's'}</span>{/if}
                 {#if run.deliveryStatus}
