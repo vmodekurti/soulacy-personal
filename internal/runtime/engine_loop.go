@@ -886,6 +886,16 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 		e.appendHistoryLocked(sess, turns...)
 		sess.mu.Unlock()
 
+		// An explicit install-from-URL request is a deterministic operator action,
+		// not an open-ended research task. The installer result is authoritative:
+		// return it directly instead of asking the model to interpret it and risk
+		// another tool loop, a budget overrun, or a generic provider failure that
+		// hides the actionable installer error.
+		if turn == 0 && !autoDelegated && forcePackageInstall {
+			finalContent = formatPackageInstallReply(toolResults)
+			break
+		}
+
 		chatMsgs = e.buildContext(def, sess, msg) // rebuild with tool results
 	}
 
@@ -955,6 +965,30 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 
 	runOutcome = "success" // flips the deferred AgentRunsTotal counter from "error"
 	return reply, nil
+}
+
+func formatPackageInstallReply(results []message.ToolResult) string {
+	if len(results) != 1 {
+		return "MCP server installation failed because the installer returned an unexpected result. Check the run details and retry."
+	}
+	result := results[0]
+	detail := strings.TrimSpace(result.Content)
+	detail = strings.TrimPrefix(detail, "error: package_install: ")
+	detail = strings.TrimPrefix(detail, "error: ")
+	if len(detail) > 4000 {
+		detail = detail[len(detail)-4000:]
+		detail = "…" + detail
+	}
+	if result.IsError {
+		if detail == "" {
+			detail = "The package installer did not provide an error message."
+		}
+		return "MCP server installation failed.\n\n" + detail
+	}
+	if detail == "" {
+		detail = "The MCP server was installed and registered successfully."
+	}
+	return "MCP server installation completed.\n\n" + detail
 }
 
 // flowHistoryMaxMsgs caps how many recent chat messages a workflow run pulls
