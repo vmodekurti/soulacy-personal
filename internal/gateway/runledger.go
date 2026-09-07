@@ -8,6 +8,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
+	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 )
 
@@ -60,6 +61,13 @@ func (s *Server) handleRunLedger(c *fiber.Ctx) error {
 
 	agentID := strings.TrimSpace(c.Query("agent_id"))
 	sessionID := strings.TrimSpace(c.Query("session_id"))
+	scope := strings.ToLower(strings.TrimSpace(c.Query("scope")))
+	if scope == "" {
+		scope = "all"
+	}
+	if scope != "all" && scope != "automation" {
+		return s.errMsg(c, fiber.StatusBadRequest, "scope must be all or automation")
+	}
 	var (
 		events    []message.Event
 		rows      []runLedgerRow
@@ -95,7 +103,17 @@ func (s *Server) handleRunLedger(c *fiber.Ctx) error {
 		}
 		return c.Status(status).JSON(fiber.Map{"error": msg})
 	}
-	rows = mergeRunLedgerRows(rows, limit)
+	// Merge before filtering so an execution reconstructed from both the flow
+	// store and action log is classified once. Automation is a product surface,
+	// not merely a trigger string: a manual run belongs here only when the agent
+	// itself is scheduled, while chat requests to that same agent do not.
+	rows = mergeRunLedgerRows(rows, 0)
+	if scope == "automation" {
+		rows = s.automationRunLedgerRows(rows)
+	}
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
 	return c.JSON(fiber.Map{
 		"agent_id":        agentID,
 		"session_id":      sessionID,
@@ -106,20 +124,44 @@ func (s *Server) handleRunLedger(c *fiber.Ctx) error {
 		"event_truncated": len(events) >= eventLimit,
 		"durable":         runLedgerContainsString(sources, "action-log"),
 		"source":          strings.Join(studioUniqueStrings(sources), "+"),
+		"scope":           scope,
 	})
 }
 
 func runLedgerEventTypes() map[string]bool {
 	return map[string]bool{
-		"message.in":       true,
-		"message.out":      true,
-		"error":            true,
-		"tool.call":        true,
-		"tool.result":      true,
-		"reasoning.step":   true,
-		"reasoning.result": true,
-		"schedule.output":  true,
+		"message.in":          true,
+		"message.out":         true,
+		"error":               true,
+		"tool.call":           true,
+		"tool.result":         true,
+		"reasoning.step":      true,
+		"reasoning.result":    true,
+		"schedule.output":     true,
+		"schedule.run_failed": true,
 	}
+}
+
+func (s *Server) automationRunLedgerRows(rows []runLedgerRow) []runLedgerRow {
+	scheduled := map[string]bool{}
+	if s != nil && s.loader != nil {
+		for _, def := range s.loader.All() {
+			if def != nil && def.AppearsOn(agent.SurfaceSchedule) {
+				scheduled[def.ID] = true
+			}
+		}
+	}
+	filtered := make([]runLedgerRow, 0, len(rows))
+	for _, row := range rows {
+		if !scheduled[row.AgentID] {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(row.Trigger)) {
+		case "cron", "cron_missed_startup", "oneshot", "schedule", "manual":
+			filtered = append(filtered, row)
+		}
+	}
+	return filtered
 }
 
 func (s *Server) buildRunLedger(events []message.Event, limit int) []runLedgerRow {

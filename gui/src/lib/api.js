@@ -1206,12 +1206,13 @@ export const api = {
   runs: {
     metrics: (sessionId, agentId = '') =>
       apiFetch(`/runs/${encodeURIComponent(sessionId)}/metrics${agentId ? '?agent_id=' + encodeURIComponent(agentId) : ''}`),
-    ledger: ({ agentId = '', sessionId = '', limit = 100, eventLimit = 10000 } = {}) => {
+    ledger: ({ agentId = '', sessionId = '', scope = '', limit = 100, eventLimit = 10000 } = {}) => {
       const q = new URLSearchParams()
       q.set('limit', String(limit))
       q.set('event_limit', String(eventLimit))
       if (agentId) q.set('agent_id', agentId)
       if (sessionId) q.set('session_id', sessionId)
+      if (scope) q.set('scope', scope)
       return apiFetch('/runs/ledger?' + q.toString())
     },
     events: ({ agentId = '', sessionId = '', limit = 500, types = '' } = {}) => {

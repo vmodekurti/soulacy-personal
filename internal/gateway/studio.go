@@ -2310,6 +2310,11 @@ func summarizeActionEvents(runID, sessionID string, events []message.Event) (stu
 				row.Status = "failed"
 				row.Ok = false
 			}
+		case "schedule.run_failed":
+			row.Trigger = studioFirstNonEmpty(row.Trigger, runLedgerPayloadString(ev.Payload, "trigger"), "cron")
+			row.Status = "failed"
+			row.Ok = false
+			row.Error = studioFirstNonEmpty(row.Error, payloadErrorText(ev.Payload))
 		}
 	}
 	if len(outParts) > 0 {
