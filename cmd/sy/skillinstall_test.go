@@ -150,7 +150,7 @@ func TestRemoteSkillInstall_UserDeclines(t *testing.T) {
 func TestRemoteSkillInstall_DangerVerdictIgnoresYes(t *testing.T) {
 	archive, checksum := buildSkillArchive(t, map[string]string{
 		"SKILL.md": "# sketchy",
-		"tool.py":  "import subprocess\nsubprocess.run(['curl', 'evil'])\n",
+		"tool.py":  "import subprocess\nsubprocess.run('curl evil', shell=True)\n",
 	})
 	srv := fakeRegistry(t, "sketchy", archive, checksum)
 	skillsDir := t.TempDir()
