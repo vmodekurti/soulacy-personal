@@ -11,6 +11,7 @@
   let ws      = null
   let error   = null
   let authError = false
+  let permissionError = false
   let eventsEl
   let eventFilter = 'all'
   let suggestions = []
@@ -53,9 +54,11 @@
       agents    = res.agents || []
       error     = null
       authError = false
+      permissionError = false
     } catch (e) {
       error     = e.message
-      authError = e.status === 401 || e.status === 403
+      authError = e.status === 401
+      permissionError = e.status === 403
     }
     try {
       const res = await api.proactive.suggestions()
@@ -300,6 +303,8 @@
     <div class="banner err">
       {#if authError}
         🔒 Authentication required — click 🔑 in the sidebar to set your API key
+      {:else if permissionError}
+        🚫 This login does not have permission to view the dashboard
       {:else}
         ⚠ {error}
       {/if}
@@ -339,7 +344,7 @@
   <div class="cards">
     <div class="card" class:card-ok={!!status} data-tooltip="Active connection state of the local Soulacy gateway daemon">
       <div class="card-label">Gateway</div>
-      <div class="card-value">{status ? '● Online' : authError ? '🔒 Authentication required' : '○ Offline'}</div>
+      <div class="card-value">{status ? '● Online' : authError ? '🔒 Authentication required' : permissionError ? '🚫 Access denied' : '○ Offline'}</div>
       {#if status}<div class="card-sub">v{status.version}</div>{/if}
     </div>
 
