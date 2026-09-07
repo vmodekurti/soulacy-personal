@@ -21,7 +21,7 @@ function sessionWritable(key, initial) {
 export const apiKey   = sessionWritable('soulacy_api_key', '')
 export const connected = writable(false)  // WebSocket event stream status
 
-// True when the gateway rejected our credentials (401/403). Distinct from
+// True when the gateway rejected our credentials (401). Distinct from
 // "offline": the gateway is reachable but authentication is required.
 export const authRequired = writable(false)
 

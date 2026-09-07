@@ -25,6 +25,10 @@
   let navCollapsed = false   // desktop: collapse the left nav to an icon rail
   let PageComponent = null
   let loadedPage = ''
+  // Authentication is asynchronous. Do not mount a page behind the login
+  // screen: page-local error state from that unauthenticated mount would still
+  // be there when a successful login merely revealed the shell again.
+  let sessionChecked = false
   let pageLoadError = ''
   let pageLoadStale = false
   let pageLoadSeq = 0
@@ -80,7 +84,7 @@
 
   // Keep the browser tab title in sync with the active page (Story 15).
   $: if (typeof document !== 'undefined' && !$authRequired) document.title = pageTitle(page, pages, pluginPages)
-  $: if (!shareToken && !$authRequired && page !== loadedPage) loadPageComponent(page)
+  $: if (!shareToken && sessionChecked && !$authRequired && page !== loadedPage) loadPageComponent(page)
 
   function navigate(p) {
     p = retiredPages[p] || p
@@ -245,7 +249,10 @@
 
     // Auth probe: hit an authenticated endpoint. apiFetch flips $authRequired
     // true on 401/403 (→ login screen) and false on success (→ dashboard).
-    api.agents.list().then(() => { $authRequired = false }).catch(() => {})
+    api.agents.list()
+      .then(() => { $authRequired = false })
+      .catch(() => {})
+      .finally(() => { sessionChecked = true })
 
     // Plugin GUI mounts (E8): populate the Plugins nav group.
     api.plugins.ui()
@@ -268,8 +275,18 @@
       const session = await api.auth.login(key)
       $apiKey = session.accessToken
       await api.agents.list() // validate the key
-      $authRequired = false   // success → reveal the app
+      // An expired session can leave the currently mounted page holding a
+      // local auth error. Remount it after login so every screen starts from
+      // the newly established browser session.
+      PageComponent = null
+      loadedPage = ''
+      pageLoadError = ''
+      sessionChecked = true
+      $authRequired = false
       loginKey = ''
+      api.plugins.ui()
+        .then((res) => { pluginPages = pluginNavEntries(res?.mounts) })
+        .catch(() => { pluginPages = [] })
     } catch (e) {
       $apiKey = prev          // never persist a rejected key
       loginError = (e && (e.status === 401 || e.status === 403))
@@ -312,6 +329,11 @@
      login gate and the app shell, so it needs no API key. -->
 {#if shareToken}
   <ShareView token={shareToken} />
+{:else if !sessionChecked}
+  <div class="session-check" role="status" aria-live="polite">
+    <span class="session-check-mark" aria-hidden="true">S</span>
+    <strong>Restoring your session…</strong>
+  </div>
 {:else if $authRequired}
   <PersonalLanding
     bind:loginKey
@@ -394,7 +416,7 @@
 
 <svelte:window on:keydown={(e) => e.key === 'Escape' && (sidebarOpen = false)} />
 
-{#if !shareToken}
+{#if !shareToken && sessionChecked && !$authRequired}
 <div class="layout" class:chat-route={page === 'chat'}>
   <!-- Mobile command bar. The current destination and workspace remain visible
        even when the full navigation is off canvas. -->
@@ -551,6 +573,30 @@
     font-size: 14px;
     line-height: 1.5;
   }
+
+  .session-check {
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.85rem;
+    color: #a9afcf;
+    background: radial-gradient(circle at 50% 35%, rgba(92, 79, 196, 0.14), transparent 34%), #0c0e1a;
+  }
+  .session-check-mark {
+    display: grid;
+    place-items: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    border: 1px solid #7068dd;
+    border-radius: 0.8rem;
+    color: #9d97ff;
+    font-size: 1.2rem;
+    font-weight: 700;
+    animation: session-pulse 1.2s ease-in-out infinite alternate;
+  }
+  @keyframes session-pulse { to { opacity: 0.55; transform: scale(0.96); } }
 
   /* ── Form elements ──────────────────────────────────────────────── */
   :global(input:not([type="radio"]):not([type="checkbox"])), :global(textarea), :global(select) {

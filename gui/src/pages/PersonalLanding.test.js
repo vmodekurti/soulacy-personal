@@ -27,6 +27,14 @@ describe('Personal public landing page', () => {
     expect(app).toContain('const session = await api.auth.login(key)')
   })
 
+  it('waits for session discovery and remounts the active page after login', () => {
+    expect(app).toContain('let sessionChecked = false')
+    expect(app).toContain("sessionChecked && !$authRequired && page !== loadedPage")
+    expect(app).toContain('Restoring your session…')
+    expect(app).toContain("loadedPage = ''")
+    expect(app).toContain('sessionChecked = true')
+  })
+
   it('keeps touch targets and a single-column mobile layout', () => {
     expect(landing).toContain('min-height: 44px')
     expect(landing).toContain('.feature-grid { grid-template-columns: 1fr;')
