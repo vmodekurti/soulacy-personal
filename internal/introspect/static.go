@@ -22,10 +22,15 @@ var pythonRules = []staticRule{
 	{"exec(", SeverityCritical, "dangerous call: exec() executes arbitrary code"},
 	{"os.system", SeverityCritical, "dangerous call: os.system() runs shell commands"},
 	{"os.popen", SeverityCritical, "dangerous call: os.popen() runs shell commands"},
-	{"subprocess.run", SeverityCritical, "dangerous call: subprocess.run() spawns processes"},
-	{"subprocess.Popen", SeverityCritical, "dangerous call: subprocess.Popen() spawns processes"},
-	{"subprocess.call", SeverityCritical, "dangerous call: subprocess.call() spawns processes"},
-	{"subprocess.check_output", SeverityCritical, "dangerous call: subprocess.check_output() spawns processes"},
+	// Process spawning is a capability to review, but it is common in legitimate
+	// MCP servers and is not itself arbitrary shell execution. Keep it visible
+	// as a warning; an explicit shell=True remains a hard blocker below.
+	{"subprocess.run", SeverityWarning, "suspicious call: subprocess.run() spawns processes"},
+	{"subprocess.Popen", SeverityWarning, "suspicious call: subprocess.Popen() spawns processes"},
+	{"subprocess.call", SeverityWarning, "suspicious call: subprocess.call() spawns processes"},
+	{"subprocess.check_output", SeverityWarning, "suspicious call: subprocess.check_output() spawns processes"},
+	{"shell=true", SeverityCritical, "dangerous subprocess option: shell=True enables shell command execution"},
+	{"shell = true", SeverityCritical, "dangerous subprocess option: shell=True enables shell command execution"},
 	{"__import__(", SeverityCritical, "dangerous call: __import__() loads modules dynamically"},
 	{"ctypes.", SeverityCritical, "dangerous call: ctypes invokes native code"},
 	// Suspicious imports — capability acquisition worth reviewing.
@@ -119,6 +124,12 @@ func scanFile(path, rel string, rules []staticRule, skipComments bool) []Finding
 		}
 		lower := strings.ToLower(line)
 		for _, r := range rules {
+			// Do not read an ellipsis used in prose or a Python docstring (for
+			// example `.../base.py`) as a relative-parent traversal. A genuine
+			// ../ or ..\\ segment still matches.
+			if (r.substr == "../" || r.substr == "..\\") && !containsRelativeParentPath(lower, r.substr) {
+				continue
+			}
 			if strings.Contains(lower, strings.ToLower(r.substr)) {
 				findings = append(findings, Finding{
 					Check: "static", Severity: r.severity,
@@ -128,4 +139,19 @@ func scanFile(path, rel string, rules []staticRule, skipComments bool) []Finding
 		}
 	}
 	return findings
+}
+
+func containsRelativeParentPath(line, marker string) bool {
+	for from := 0; from < len(line); {
+		i := strings.Index(line[from:], marker)
+		if i < 0 {
+			return false
+		}
+		i += from
+		if i == 0 || line[i-1] != '.' {
+			return true
+		}
+		from = i + 1
+	}
+	return false
 }

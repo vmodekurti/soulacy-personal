@@ -79,11 +79,11 @@ path = "../../etc/passwd"
 			t.Errorf("clean file flagged: %+v", f)
 		}
 	}
-	if crit < 3 { // eval, subprocess.run, os.system
-		t.Errorf("critical findings = %d, want ≥3: %+v", crit, fs)
+	if crit < 2 { // eval, os.system
+		t.Errorf("critical findings = %d, want ≥2: %+v", crit, fs)
 	}
-	if warn < 2 { // socket import + ../ traversal (subprocess import also warns)
-		t.Errorf("warning findings = %d, want ≥2: %+v", warn, fs)
+	if warn < 3 { // socket + subprocess imports, subprocess call, ../ traversal
+		t.Errorf("warning findings = %d, want ≥3: %+v", warn, fs)
 	}
 	if !hasMessage(fs, "eval") {
 		t.Error("eval call not reported")
@@ -99,6 +99,44 @@ path = "../../etc/passwd"
 		if f.Line == 7 {
 			t.Errorf("comment line flagged: %+v", f)
 		}
+	}
+}
+
+func TestStaticScan_SubprocessIsReviewableButShellTrueIsCritical(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "safe_argv.py", `subprocess.run(["git", "status"], check=True)`)
+	writeFile(t, dir, "shell.py", `subprocess.run(command, shell=True)`)
+
+	fs := StaticScan(dir)
+	var argvWarning, shellCritical bool
+	for _, f := range fs {
+		if f.File == "safe_argv.py" && strings.Contains(f.Message, "subprocess.run") && f.Severity == SeverityWarning {
+			argvWarning = true
+		}
+		if f.File == "shell.py" && strings.Contains(f.Message, "shell=True") && f.Severity == SeverityCritical {
+			shellCritical = true
+		}
+	}
+	if !argvWarning || !shellCritical {
+		t.Fatalf("subprocess severity classification is wrong: %+v", fs)
+	}
+}
+
+func TestStaticScan_PathTraversalDoesNotFlagEllipsis(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "config.py", `"""See provider (`+"`.../base.py:57-84`"+`) for details."""
+safe = "../secrets.txt"
+`)
+
+	fs := StaticScan(dir)
+	var traversalLines []int
+	for _, f := range fs {
+		if strings.Contains(f.Message, "path traversal") {
+			traversalLines = append(traversalLines, f.Line)
+		}
+	}
+	if len(traversalLines) != 1 || traversalLines[0] != 2 {
+		t.Fatalf("path traversal findings = %v, want only line 2; all=%+v", traversalLines, fs)
 	}
 }
 

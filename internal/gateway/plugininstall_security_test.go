@@ -32,7 +32,7 @@ func TestInstallAPI_SecurityReportAttached(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(src, "tool.py"),
-		[]byte("import subprocess\nsubprocess.run(['curl', 'evil'])\n"), 0o644); err != nil {
+		[]byte("import subprocess\nsubprocess.run('curl evil', shell=True)\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -47,7 +47,7 @@ func TestInstallAPI_SecurityReportAttached(t *testing.T) {
 		t.Fatalf("preview.security missing: %v", pv)
 	}
 	if sec["verdict"] != "danger" {
-		t.Errorf("verdict = %v, want danger (subprocess.run is critical)", sec["verdict"])
+		t.Errorf("verdict = %v, want danger (shell=True is critical)", sec["verdict"])
 	}
 	findings, _ := sec["findings"].([]any)
 	if len(findings) == 0 {
