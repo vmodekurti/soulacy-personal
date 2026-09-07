@@ -5,7 +5,7 @@
 # Stages:
 #   gui      → builds the Svelte dashboard with Node 20
 #   gobuild  → compiles soulacy + sy with cgo (sqlite-vec, mattn/go-sqlite3)
-#   runtime  → slim Debian image with Python 3 + the SDK + both binaries
+#   runtime  → slim Python 3.12 image + the SDK + both binaries
 #
 # Usage (standalone):
 #   docker build -t soulacy .
@@ -59,7 +59,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
         -o /out/sy ./cmd/sy
 
 # ── Stage 3: Runtime ─────────────────────────────────────────────────────────
-FROM debian:bookworm-slim AS runtime
+FROM python:3.12-slim-bookworm AS runtime
 
 # Runtime + agent tooling. soulacy itself only needs libsqlite3 + ca-certificates;
 # everything else is so the system agent's shell_exec tasks — cloning repos,
@@ -71,12 +71,12 @@ FROM debian:bookworm-slim AS runtime
 # the lines, so a '#' would comment out every package after it.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libsqlite3-0 ca-certificates \
-        python3 python3-pip python3-dev python3-venv pipx \
         nodejs npm \
         git curl wget unzip zip tar xz-utils \
         build-essential pkg-config \
         jq ripgrep less file procps \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m pip install --no-cache-dir pipx
 
 # Python SDK — agents written in Python work without any extra setup.
 # The SDK is experimental and not yet published to PyPI, so it is NOT installed

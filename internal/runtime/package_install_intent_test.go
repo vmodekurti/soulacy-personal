@@ -1,9 +1,11 @@
 package runtime
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/soulacy/soulacy/internal/llm"
+	"github.com/soulacy/soulacy/pkg/message"
 )
 
 func TestURLPackageInstallRequest(t *testing.T) {
@@ -25,6 +27,41 @@ func TestURLPackageInstallRequest(t *testing.T) {
 				t.Fatalf("isURLPackageInstallRequest() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestFormatPackageInstallReply(t *testing.T) {
+	tests := []struct {
+		name   string
+		result message.ToolResult
+		want   string
+	}{
+		{
+			name:   "success",
+			result: message.ToolResult{Name: "package_install", Content: "Installed and registered maverick-mcp."},
+			want:   "MCP server installation completed.\n\nInstalled and registered maverick-mcp.",
+		},
+		{
+			name:   "failure exposes actionable cause",
+			result: message.ToolResult{Name: "package_install", IsError: true, Content: "error: package_install: Python >=3.12 is required"},
+			want:   "MCP server installation failed.\n\nPython >=3.12 is required",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := formatPackageInstallReply([]message.ToolResult{tt.result}); got != tt.want {
+				t.Fatalf("formatPackageInstallReply() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatPackageInstallReplyBoundsLongErrors(t *testing.T) {
+	reply := formatPackageInstallReply([]message.ToolResult{{
+		Name: "package_install", IsError: true, Content: "error: " + strings.Repeat("x", 5000),
+	}})
+	if len(reply) > 4100 || !strings.HasPrefix(reply, "MCP server installation failed.\n\n…") {
+		t.Fatalf("long installer error was not bounded: len=%d prefix=%q", len(reply), reply[:40])
 	}
 }
 
