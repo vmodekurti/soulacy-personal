@@ -4771,41 +4771,67 @@ func (s *Server) handleInstallRegistrySkill(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"ok": false, "error": "fetch failed: " + err.Error()})
 	}
 	cleanup := func() { _ = os.RemoveAll(staging) }
-	if _, err := os.Stat(filepath.Join(staging, "SKILL.md")); err != nil {
+	candidates, err := registrySkillCandidates(staging)
+	if err != nil {
 		cleanup()
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
-			"ok": false, "error": fmt.Sprintf("package %q has no SKILL.md at its root", pkg.Slug),
+			"ok": false, "error": fmt.Sprintf("package %q has no SKILL.md at its root or in a conventional skills/ directory", pkg.Slug),
 		})
 	}
 
-	var manifest *plugin.Manifest
-	if m, merr := plugininstall.ReadManifest(staging); merr == nil {
-		manifest = &m
-	}
 	pipeline := introspect.Pipeline{DryRun: &introspect.DryRunConfig{Timeout: 5 * time.Second}}
-	report := pipeline.Run(ctx, staging, manifest)
-	if report.Verdict == introspect.VerdictDanger {
+	type preparedSkill struct {
+		name   string
+		source string
+		dest   string
+		report introspect.SecurityReport
+	}
+	prepared := make([]preparedSkill, 0, len(candidates))
+	alreadyInstalled := make([]string, 0)
+	for _, source := range candidates {
+		name := registrySkillDirName(pkg.Slug)
+		if len(candidates) > 1 {
+			name = filepath.Base(source)
+		}
+		dest := filepath.Join(wsPaths.Skills, name)
+		if _, statErr := os.Stat(dest); statErr == nil {
+			alreadyInstalled = append(alreadyInstalled, name)
+			continue
+		}
+		var manifest *plugin.Manifest
+		if m, manifestErr := plugininstall.ReadManifest(source); manifestErr == nil {
+			manifest = &m
+		}
+		report := pipeline.Run(ctx, source, manifest)
+		if report.Verdict == introspect.VerdictDanger {
+			cleanup()
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+				"ok":              false,
+				"error":           fmt.Sprintf("skill %q failed safety introspection", name),
+				"code":            "danger_verdict",
+				"security_report": report,
+			})
+		}
+		prepared = append(prepared, preparedSkill{name: name, source: source, dest: dest, report: report})
+	}
+	if len(prepared) == 0 {
 		cleanup()
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
-			"ok":              false,
-			"error":           "skill failed safety introspection",
-			"code":            "danger_verdict",
-			"security_report": report,
+			"ok": false, "error": "all skills in this package are already installed", "code": "already_installed",
 		})
 	}
-
-	name := registrySkillDirName(pkg.Slug)
-	dest := filepath.Join(wsPaths.Skills, name)
-	if _, err := os.Stat(dest); err == nil {
-		cleanup()
-		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
-			"ok": false, "error": fmt.Sprintf("skill %q is already installed", name), "code": "already_installed",
-		})
+	installed := make([]string, 0, len(prepared))
+	for _, skill := range prepared {
+		if renameErr := os.Rename(skill.source, skill.dest); renameErr != nil {
+			for _, name := range installed {
+				_ = os.RemoveAll(filepath.Join(wsPaths.Skills, name))
+			}
+			cleanup()
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"ok": false, "error": "activate skill: " + renameErr.Error()})
+		}
+		installed = append(installed, skill.name)
 	}
-	if err := os.Rename(staging, dest); err != nil {
-		cleanup()
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"ok": false, "error": "activate skill: " + err.Error()})
-	}
+	cleanup()
 
 	rescanWarnings := []string{}
 	if scanner, ok := s.skillLoader.(interface{ Scan() []error }); ok {
@@ -4815,20 +4841,62 @@ func (s *Server) handleInstallRegistrySkill(c *fiber.Ctx) error {
 			}
 		}
 	}
-	s.log.Info("skill installed from registry via API",
-		zap.String("slug", pkg.Slug), zap.String("provider", pkg.Provider), zap.String("dest", dest), zap.Bool("verified", verified))
+	if len(alreadyInstalled) > 0 {
+		rescanWarnings = append(rescanWarnings, fmt.Sprintf("Skipped already-installed skills: %s", strings.Join(alreadyInstalled, ", ")))
+	}
+	s.log.Info("skill package installed from registry via API",
+		zap.String("slug", pkg.Slug), zap.String("provider", pkg.Provider), zap.Strings("skills", installed), zap.Bool("verified", verified))
+	message := fmt.Sprintf("Installed and hot-loaded %d skills.", len(installed))
+	if len(installed) == 1 {
+		message = fmt.Sprintf("Skill %q installed and hot-loaded.", installed[0])
+	}
+	reports := make([]introspect.SecurityReport, 0, len(prepared))
+	paths := make([]string, 0, len(prepared))
+	for _, skill := range prepared {
+		reports = append(reports, skill.report)
+		paths = append(paths, skill.dest)
+	}
 	return c.JSON(fiber.Map{
-		"ok":              true,
-		"slug":            pkg.Slug,
-		"name":            name,
-		"version":         pkg.Version,
-		"provider":        pkg.Provider,
-		"verified":        verified,
-		"path":            dest,
-		"security_report": report,
-		"warnings":        append(registryWarningStrings(warnings), rescanWarnings...),
-		"message":         fmt.Sprintf("Skill %q installed and hot-loaded.", name),
+		"ok":               true,
+		"slug":             pkg.Slug,
+		"name":             installed[0],
+		"names":            installed,
+		"path":             paths[0],
+		"paths":            paths,
+		"version":          pkg.Version,
+		"provider":         pkg.Provider,
+		"verified":         verified,
+		"security_report":  reports[0],
+		"security_reports": reports,
+		"warnings":         append(registryWarningStrings(warnings), rescanWarnings...),
+		"message":          message,
 	})
+}
+
+// registrySkillCandidates accepts a single skill at the package root or a
+// conventional collection whose immediate skills/* children contain SKILL.md.
+func registrySkillCandidates(root string) ([]string, error) {
+	if info, err := os.Stat(filepath.Join(root, "SKILL.md")); err == nil && !info.IsDir() {
+		return []string{root}, nil
+	}
+	entries, err := os.ReadDir(filepath.Join(root, "skills"))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		dir := filepath.Join(root, "skills", entry.Name())
+		if info, statErr := os.Stat(filepath.Join(dir, "SKILL.md")); statErr == nil && !info.IsDir() {
+			out = append(out, dir)
+		}
+	}
+	if len(out) == 0 {
+		return nil, os.ErrNotExist
+	}
+	return out, nil
 }
 
 func registryWarningStrings(warnings []error) []string {

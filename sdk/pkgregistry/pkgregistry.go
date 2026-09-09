@@ -46,6 +46,11 @@ type Package struct {
 	// Source is the provider-specific fetch location (archive URL, git
 	// remote). Set by Resolve; consumed by Fetch.
 	Source string `json:"source,omitempty"`
+	// SourceRef is an optional git branch or tag selected by a source URL.
+	SourceRef string `json:"source_ref,omitempty"`
+	// SourceSubdir selects a package directory within Source. Providers must
+	// validate that it cannot escape the fetched source root.
+	SourceSubdir string `json:"source_subdir,omitempty"`
 	// Description is an optional human-readable summary for search results.
 	Description string `json:"description,omitempty"`
 	// Provider is the ID of the provider that resolved this package. Hosts

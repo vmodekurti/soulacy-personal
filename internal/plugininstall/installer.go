@@ -288,7 +288,13 @@ func isArchive(s string) bool {
 // Exported for reuse by the package-registry git provider (Story E19) so
 // every git fetch in the install pipeline shares one hardened path.
 func GitClone(ctx context.Context, url, dst string) error {
-	return gitClone(ctx, url, dst)
+	return gitCloneRef(ctx, url, "", dst)
+}
+
+// GitCloneRef shallow-clones one branch or tag into dst and strips .git.
+// An empty ref clones the remote's default branch.
+func GitCloneRef(ctx context.Context, url, ref, dst string) error {
+	return gitCloneRef(ctx, url, ref, dst)
 }
 
 // VerifyAndExtract sha256-verifies archivePath against checksum (hex,
@@ -300,9 +306,21 @@ func VerifyAndExtract(archivePath, checksum, dst string) error {
 }
 
 func gitClone(ctx context.Context, url, dst string) error {
+	return gitCloneRef(ctx, url, "", dst)
+}
+
+func gitCloneRef(ctx context.Context, url, ref, dst string) error {
 	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", url, dst)
+	args := []string{"clone", "--depth", "1"}
+	if strings.TrimSpace(ref) != "" && ref != "HEAD" {
+		if strings.HasPrefix(ref, "-") || strings.ContainsAny(ref, "\x00\r\n") {
+			return fmt.Errorf("plugininstall: invalid git ref %q", ref)
+		}
+		args = append(args, "--branch", ref, "--single-branch")
+	}
+	args = append(args, "--", url, dst)
+	cmd := exec.CommandContext(ctx, "git", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("plugininstall: git clone %s: %v: %s", url, err, strings.TrimSpace(string(out)))
