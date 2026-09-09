@@ -40,6 +40,7 @@
   let findStatus = ''
   let allowUnverifiedInstall = false
   let installingSlug = ''
+  let installFeedbackSlug = ''
   let installResult = ''
   let installError = ''
   let marketplace = null
@@ -186,6 +187,7 @@
   async function installSkill(pkg) {
     if (!pkg?.slug || pkg.provider === 'local' || pkg.manifest?.installed) return
     installingSlug = pkg.slug
+    installFeedbackSlug = pkg.slug
     installError = ''
     installResult = ''
     try {
@@ -337,18 +339,24 @@
                 <input type="checkbox" bind:checked={allowUnverifiedInstall} />
                 <span>Allow unverified installs from sources I trust</span>
               </label>
-              {#if installError}<div class="as-err">{installError}</div>{/if}
-              {#if installResult}<div class="as-ok">✓ {installResult}</div>{/if}
               {#each findResults.slice(0, 10) as pkg}
                 <div class="find-row">
-                  <code>{pkg.slug}</code>
-                  {#if pkg.description}<span class="find-desc">{pkg.description}</span>{/if}
-                  {#if pkg.provider === 'local' || pkg.manifest?.installed}
-                    <span class="find-install installed">already installed</span>
-                  {:else}
-                    <button class="btn-install" on:click={() => installSkill(pkg)} disabled={installingSlug === pkg.slug}>
-                      {installingSlug === pkg.slug ? 'Installing…' : 'Install'}
-                    </button>
+                  <div class="find-row-main">
+                    <code>{pkg.slug}</code>
+                    {#if pkg.description}<span class="find-desc">{pkg.description}</span>{/if}
+                    {#if pkg.provider === 'local' || pkg.manifest?.installed}
+                      <span class="find-install installed">already installed</span>
+                    {:else}
+                      <button class="btn-install" on:click={() => installSkill(pkg)} disabled={installingSlug === pkg.slug}>
+                        {installingSlug === pkg.slug ? 'Installing…' : 'Install'}
+                      </button>
+                    {/if}
+                  </div>
+                  {#if installFeedbackSlug === pkg.slug && installError}
+                    <div class="install-feedback error" role="alert">Install failed: {installError}</div>
+                  {/if}
+                  {#if installFeedbackSlug === pkg.slug && installResult}
+                    <div class="install-feedback success" role="status">✓ {installResult}</div>
                   {/if}
                 </div>
               {/each}
@@ -863,10 +871,16 @@
   }
   .unverified-toggle input { accent-color: #6c63ff; }
   .find-row {
-    display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
     padding: .3rem 0; border-bottom: 1px solid #1c2038; font-size: .8rem;
   }
-  .find-row > code { color: #8b85ff; }
+  .find-row-main { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+  .find-row-main > code { color: #8b85ff; }
+  .install-feedback {
+    width: 100%; box-sizing: border-box; margin-top: .45rem; padding: .5rem .6rem;
+    border-radius: 6px; line-height: 1.4; overflow-wrap: anywhere;
+  }
+  .install-feedback.error { color: #ff8c8c; background: rgba(240,96,96,.1); border: 1px solid rgba(240,96,96,.3); }
+  .install-feedback.success { color: #8bd6b0; background: rgba(76,175,130,.08); border: 1px solid rgba(76,175,130,.3); }
   .direct-install {
     display: flex; align-items: center; gap: .55rem; flex-wrap: wrap;
     margin-top: .65rem; padding-top: .65rem; border-top: 1px solid #1c2038;
