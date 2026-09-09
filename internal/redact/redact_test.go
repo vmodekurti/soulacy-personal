@@ -37,3 +37,16 @@ func TestTextRedactsCredentialsInResults(t *testing.T) {
 		}
 	}
 }
+
+func TestSecretKeyNameIsTheSharedCredentialPredicate(t *testing.T) {
+	for _, key := range []string{"Authorization", "X-Api-Key", "client_secret", "access_token"} {
+		if !SecretKeyName(key) {
+			t.Errorf("%q was not classified as sensitive", key)
+		}
+	}
+	for _, key := range []string{"region", "tenant", "locale"} {
+		if SecretKeyName(key) {
+			t.Errorf("%q was incorrectly classified as sensitive", key)
+		}
+	}
+}

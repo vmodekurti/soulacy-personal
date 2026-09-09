@@ -41,6 +41,7 @@ import (
 	"github.com/soulacy/soulacy/internal/pkgregistry"
 	"github.com/soulacy/soulacy/internal/plugininstall"
 	"github.com/soulacy/soulacy/internal/policy"
+	"github.com/soulacy/soulacy/internal/redact"
 	"github.com/soulacy/soulacy/internal/runtime"
 	"github.com/soulacy/soulacy/internal/scheduler"
 	"github.com/soulacy/soulacy/internal/secrets"
@@ -3095,11 +3096,8 @@ func validateMCPServer(body mcpServerBody) string {
 			return "credentials must not be embedded in the URL; use Authentication"
 		}
 		for key := range body.Query {
-			lower := strings.ToLower(key)
-			for _, sensitive := range []string{"token", "secret", "password", "api_key", "apikey", "authorization"} {
-				if strings.Contains(lower, sensitive) {
-					return fmt.Sprintf("query parameter %q looks sensitive; use Authentication or Headers instead", key)
-				}
+			if redact.SecretKeyName(key) {
+				return fmt.Sprintf("query parameter %q looks sensitive; use Authentication or Headers instead", key)
 			}
 		}
 		kind := strings.ToLower(strings.TrimSpace(body.Auth.Type))
