@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -253,19 +254,154 @@ func (t *stdioTx) processRootPID() int {
 // ── HTTP / SSE transport ─────────────────────────────────────────────────────
 
 type httpTx struct {
-	url       string
-	headers   map[string]string
-	client    *http.Client
-	nextID    atomic.Int64
-	sessionID atomic.Pointer[string]
+	url           string
+	headers       map[string]string
+	query         map[string]string
+	auth          AuthConfig
+	resolveSecret func(context.Context, string) (string, error)
+	client        *http.Client
+	tokenMu       sync.Mutex
+	token         string
+	tokenExpiry   time.Time
+	nextID        atomic.Int64
+	sessionID     atomic.Pointer[string]
 }
 
-func newHTTP(cfg ServerConfig) *httpTx {
-	return &httpTx{
-		url:     cfg.URL,
-		headers: cfg.Headers,
-		client:  &http.Client{Timeout: 60 * time.Second},
+type oauthTokenResponse struct {
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
+	ExpiresIn   int64  `json:"expires_in"`
+}
+
+func newHTTP(cfg ServerConfig, resolveSecret func(context.Context, string) (string, error)) *httpTx {
+	timeout := cfg.Timeout
+	if timeout <= 0 {
+		timeout = 60 * time.Second
 	}
+	return &httpTx{
+		url:           cfg.URL,
+		headers:       cfg.Headers,
+		query:         cfg.Query,
+		auth:          cfg.Auth,
+		resolveSecret: resolveSecret,
+		client:        &http.Client{Timeout: timeout},
+	}
+}
+
+func (t *httpTx) requestURL() (string, error) {
+	u, err := url.Parse(t.url)
+	if err != nil {
+		return "", err
+	}
+	q := u.Query()
+	for k, v := range t.query {
+		q.Set(k, v)
+	}
+	u.RawQuery = q.Encode()
+	return u.String(), nil
+}
+
+func (t *httpTx) secret(ctx context.Context, ref string) (string, error) {
+	if strings.TrimSpace(ref) == "" {
+		return "", fmt.Errorf("authentication secret is not configured")
+	}
+	if t.resolveSecret == nil {
+		return "", fmt.Errorf("secret store is unavailable")
+	}
+	return t.resolveSecret(ctx, ref)
+}
+
+func (t *httpTx) oauthToken(ctx context.Context) (string, error) {
+	t.tokenMu.Lock()
+	defer t.tokenMu.Unlock()
+	if t.token != "" && time.Now().Add(30*time.Second).Before(t.tokenExpiry) {
+		return t.token, nil
+	}
+	secret, err := t.secret(ctx, t.auth.ClientSecretRef)
+	if err != nil {
+		return "", err
+	}
+	values := url.Values{"grant_type": {"client_credentials"}}
+	if len(t.auth.Scopes) > 0 {
+		values.Set("scope", strings.Join(t.auth.Scopes, " "))
+	}
+	if t.auth.Audience != "" {
+		values.Set("audience", t.auth.Audience)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.auth.TokenURL, strings.NewReader(values.Encode()))
+	if err != nil {
+		return "", err
+	}
+	req.SetBasicAuth(t.auth.ClientID, secret)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("OAuth token request: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode >= 300 {
+		return "", fmt.Errorf("OAuth token endpoint returned HTTP %d", resp.StatusCode)
+	}
+	var token oauthTokenResponse
+	if err := json.Unmarshal(body, &token); err != nil || token.AccessToken == "" {
+		return "", fmt.Errorf("OAuth token endpoint returned an invalid response")
+	}
+	t.token = token.AccessToken
+	expires := token.ExpiresIn
+	if expires <= 0 {
+		expires = 300
+	}
+	t.tokenExpiry = time.Now().Add(time.Duration(expires) * time.Second)
+	return t.token, nil
+}
+
+func (t *httpTx) applyAuth(ctx context.Context, req *http.Request) error {
+	kind := strings.ToLower(strings.TrimSpace(t.auth.Type))
+	if kind == "" || kind == "none" {
+		return nil
+	}
+	header := strings.TrimSpace(t.auth.Header)
+	if header == "" {
+		if kind == "api_key" {
+			header = "X-API-Key"
+		} else {
+			header = "Authorization"
+		}
+	}
+	var value string
+	switch kind {
+	case "bearer", "api_key":
+		secret, err := t.secret(ctx, t.auth.SecretRef)
+		if err != nil {
+			return err
+		}
+		scheme := strings.TrimSpace(t.auth.Scheme)
+		if kind == "bearer" && scheme == "" {
+			scheme = "Bearer"
+		}
+		value = secret
+		if scheme != "" {
+			value = scheme + " " + secret
+		}
+	case "oauth_client_credentials":
+		token, err := t.oauthToken(ctx)
+		if err != nil {
+			return err
+		}
+		value = "Bearer " + token
+	default:
+		return fmt.Errorf("unsupported MCP authentication type %q", t.auth.Type)
+	}
+	req.Header.Set(header, value)
+	return nil
+}
+
+func (t *httpTx) applyRequestOptions(ctx context.Context, req *http.Request) error {
+	for k, v := range t.headers {
+		req.Header.Set(k, v)
+	}
+	return t.applyAuth(ctx, req)
 }
 
 func (t *httpTx) request(ctx context.Context, method string, params any) (json.RawMessage, error) {
@@ -276,7 +412,11 @@ func (t *httpTx) request(ctx context.Context, method string, params any) (json.R
 	payload, _ := json.Marshal(map[string]any{
 		"jsonrpc": "2.0", "id": id, "method": method, "params": params,
 	})
-	req, err := http.NewRequestWithContext(ctx, "POST", t.url, bytes.NewReader(payload))
+	requestURL, err := t.requestURL()
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", requestURL, bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
@@ -285,8 +425,8 @@ func (t *httpTx) request(ctx context.Context, method string, params any) (json.R
 	if sid := t.sessionID.Load(); sid != nil {
 		req.Header.Set("Mcp-Session-Id", *sid)
 	}
-	for k, v := range t.headers {
-		req.Header.Set(k, v)
+	if err := t.applyRequestOptions(ctx, req); err != nil {
+		return nil, err
 	}
 
 	resp, err := t.client.Do(req)
@@ -377,7 +517,11 @@ func (t *httpTx) notify(method string, params any) error {
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, "POST", t.url, bytes.NewReader(payload))
+	requestURL, err := t.requestURL()
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", requestURL, bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
@@ -386,8 +530,8 @@ func (t *httpTx) notify(method string, params any) error {
 	if sid := t.sessionID.Load(); sid != nil {
 		req.Header.Set("Mcp-Session-Id", *sid)
 	}
-	for k, v := range t.headers {
-		req.Header.Set(k, v)
+	if err := t.applyRequestOptions(ctx, req); err != nil {
+		return err
 	}
 	resp, err := t.client.Do(req)
 	if err != nil {
@@ -398,3 +542,18 @@ func (t *httpTx) notify(method string, params any) error {
 }
 
 func (t *httpTx) close() error { return nil }
+
+// ProbeHTTP performs the real MCP initialize handshake with the supplied HTTP
+// connection settings. It is used by the GUI's Test connection action so a
+// successful result proves that query parameters and authentication work, not
+// merely that the host answers HEAD requests.
+func ProbeHTTP(ctx context.Context, cfg ServerConfig, resolveSecret func(context.Context, string) (string, error)) error {
+	t := newHTTP(cfg, resolveSecret)
+	defer t.close()
+	_, err := t.request(ctx, "initialize", map[string]any{
+		"protocolVersion": ProtocolVersion,
+		"capabilities":    map[string]any{},
+		"clientInfo":      map[string]any{"name": "soulacy-connection-test", "version": "dev"},
+	})
+	return err
+}

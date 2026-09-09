@@ -32,7 +32,8 @@ const FullNamePrefix = "mcp__"
 
 // Config groups all MCP servers.
 type Config struct {
-	Servers map[string]ServerConfig
+	Servers       map[string]ServerConfig
+	ResolveSecret func(context.Context, string) (string, error)
 }
 
 // ServerConfig describes one MCP server connection.
@@ -43,6 +44,21 @@ type ServerConfig struct {
 	Env       map[string]string // stdio: extra env vars (merged onto os.Environ)
 	URL       string            // http: server URL
 	Headers   map[string]string // http: extra headers (auth, etc.)
+	Query     map[string]string // http: non-sensitive URL query parameters
+	Auth      AuthConfig        // http: structured authentication
+	Timeout   time.Duration     // http: per-request timeout
+}
+
+type AuthConfig struct {
+	Type            string   `json:"type,omitempty"`
+	Header          string   `json:"header,omitempty"`
+	Scheme          string   `json:"scheme,omitempty"`
+	SecretRef       string   `json:"secret_ref,omitempty"`
+	TokenURL        string   `json:"token_url,omitempty"`
+	ClientID        string   `json:"client_id,omitempty"`
+	ClientSecretRef string   `json:"client_secret_ref,omitempty"`
+	Scopes          []string `json:"scopes,omitempty"`
+	Audience        string   `json:"audience,omitempty"`
 }
 
 // Tool is one tool exposed by an MCP server.
@@ -70,6 +86,9 @@ type ServerStatus struct {
 	Env       map[string]string `json:"env,omitempty"`
 	URL       string            `json:"url,omitempty"`
 	Headers   map[string]string `json:"headers,omitempty"`
+	Query     map[string]string `json:"query,omitempty"`
+	Auth      AuthConfig        `json:"auth,omitempty"`
+	Timeout   string            `json:"timeout,omitempty"`
 }
 
 // ToolSummary is a short tool descriptor returned by /mcp.
@@ -141,9 +160,10 @@ type server struct {
 
 // Client is the top-level MCP client managing multiple servers.
 type Client struct {
-	log     *zap.Logger
-	servers []*server
-	mu      sync.RWMutex
+	log           *zap.Logger
+	servers       []*server
+	mu            sync.RWMutex
+	resolveSecret func(context.Context, string) (string, error)
 }
 
 // New connects to every configured server. Failures are logged but never fatal —
@@ -155,7 +175,7 @@ type Client struct {
 // no longer blocks every other MCP — and by extension the rest of the
 // gateway boot. Total wait is capped by the slowest server, not the sum.
 func New(cfg Config, log *zap.Logger) *Client {
-	c := &Client{log: log}
+	c := &Client{log: log, resolveSecret: cfg.ResolveSecret}
 	ids := make([]string, 0, len(cfg.Servers))
 	for id := range cfg.Servers {
 		ids = append(ids, id)
@@ -201,7 +221,7 @@ func (c *Client) start(s *server) error {
 		}
 		s.tx = tx
 	case "http", "https":
-		s.tx = newHTTP(s.cfg)
+		s.tx = newHTTP(s.cfg, c.resolveSecret)
 	default:
 		return fmt.Errorf("unknown transport %q (expected stdio or http)", s.cfg.Transport)
 	}
@@ -353,6 +373,11 @@ func (c *Client) ServersSnapshot() []ServerStatus {
 			Env:     s.cfg.Env,
 			URL:     s.cfg.URL,
 			Headers: s.cfg.Headers,
+			Query:   s.cfg.Query,
+			Auth:    s.cfg.Auth,
+		}
+		if s.cfg.Timeout > 0 {
+			ss.Timeout = s.cfg.Timeout.String()
 		}
 		for _, t := range s.tools {
 			ss.Tools = append(ss.Tools, ToolSummary{

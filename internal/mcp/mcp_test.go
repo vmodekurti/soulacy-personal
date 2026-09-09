@@ -125,6 +125,73 @@ func (f *fakeServer) standardTools() {
 	})
 }
 
+func TestProbeHTTPAppliesQueryAndBearerSecret(t *testing.T) {
+	var sawQuery, sawAuth bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawQuery = r.URL.Query().Get("region") == "us-east-1"
+		sawAuth = r.Header.Get("Authorization") == "Bearer vault-token"
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{}}}`)
+	}))
+	defer srv.Close()
+
+	cfg := ServerConfig{
+		Transport: "http", URL: srv.URL, Query: map[string]string{"region": "us-east-1"},
+		Auth: AuthConfig{Type: "bearer", SecretRef: "mcp.demo.credential"},
+	}
+	resolve := func(_ context.Context, ref string) (string, error) {
+		if ref != "mcp.demo.credential" {
+			t.Fatalf("unexpected secret ref %q", ref)
+		}
+		return "vault-token", nil
+	}
+	if err := ProbeHTTP(context.Background(), cfg, resolve); err != nil {
+		t.Fatalf("ProbeHTTP: %v", err)
+	}
+	if !sawQuery || !sawAuth {
+		t.Fatalf("request options missing: query=%v auth=%v", sawQuery, sawAuth)
+	}
+}
+
+func TestProbeHTTPOAuthClientCredentials(t *testing.T) {
+	var tokenCalls int
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		tokenCalls++
+		id, secret, ok := r.BasicAuth()
+		if !ok || id != "client-id" || secret != "client-secret" {
+			http.Error(w, "bad client", http.StatusUnauthorized)
+			return
+		}
+		if err := r.ParseForm(); err != nil || r.Form.Get("scope") != "tools.read tools.run" || r.Form.Get("audience") != "mcp-api" {
+			http.Error(w, "bad grant", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"access_token":"oauth-token","token_type":"Bearer","expires_in":3600}`)
+	})
+	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer oauth-token" {
+			http.Error(w, "missing token", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{}}}`)
+	})
+	cfg := ServerConfig{Transport: "http", URL: srv.URL + "/mcp", Auth: AuthConfig{
+		Type: "oauth_client_credentials", TokenURL: srv.URL + "/token", ClientID: "client-id",
+		ClientSecretRef: "mcp.demo.client_secret", Scopes: []string{"tools.read", "tools.run"}, Audience: "mcp-api",
+	}}
+	if err := ProbeHTTP(context.Background(), cfg, func(context.Context, string) (string, error) { return "client-secret", nil }); err != nil {
+		t.Fatalf("ProbeHTTP: %v", err)
+	}
+	if tokenCalls != 1 {
+		t.Fatalf("token calls = %d, want 1", tokenCalls)
+	}
+}
+
 func newTestClient(t *testing.T, id string, srv *httptest.Server) *Client {
 	t.Helper()
 	cfg := Config{Servers: map[string]ServerConfig{

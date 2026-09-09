@@ -30,7 +30,11 @@
   let glamaError = ''
   let glamaSaving = false
 
-  const BLANK_STDIO = () => ({ id: '', transport: 'stdio', command: '', args: [], env: {}, url: '', headers: {} })
+  const BLANK_AUTH = () => ({ type: 'none', header: '', scheme: '', secret_ref: '', token_url: '', client_id: '', client_secret_ref: '', scopes: [], audience: '' })
+  const BLANK_STDIO = () => ({
+    id: '', transport: 'stdio', command: '', args: [], env: {}, url: '', headers: {},
+    query: {}, auth: BLANK_AUTH(), auth_secret: '', timeout: '60s',
+  })
 
   async function load() {
     loading = true
@@ -64,6 +68,10 @@
       env: s.env ? { ...s.env } : {},
       url: s.url || '',
       headers: s.headers ? { ...s.headers } : {},
+      query: s.query ? { ...s.query } : {},
+      auth: { ...BLANK_AUTH(), ...(s.auth || {}) },
+      auth_secret: '',
+      timeout: s.timeout || '60s',
     }
     testResult = null
     error = ''; info = ''
@@ -86,6 +94,9 @@
     while ((m = re.exec(str)) !== null) out.push(m[1] !== undefined ? m[1] : m[2])
     return out
   }
+
+  function scopesToString(scopes) { return (scopes || []).join(' ') }
+  function stringToScopes(str) { return str.split(/[\s,]+/).map(v => v.trim()).filter(Boolean) }
 
   async function testConnection() {
     if (!editing) return
@@ -420,22 +431,118 @@
           <span class="field-label">URL <span class="req">*</span></span>
           <input type="text" bind:value={editing.url} placeholder="https://example.com/mcp" />
         </div>
+
+        <div class="connection-section">
+          <div class="section-heading">
+            <div>
+              <strong>Authentication</strong>
+              <span>Credentials are stored in Soulacy's encrypted secret vault.</span>
+            </div>
+          </div>
+          <div class="field">
+            <span class="field-label">Method</span>
+            <select bind:value={editing.auth.type}>
+              <option value="none">No authentication</option>
+              <option value="bearer">Bearer token</option>
+              <option value="api_key">API key</option>
+              <option value="oauth_client_credentials">OAuth 2.0 client credentials</option>
+            </select>
+          </div>
+
+          {#if editing.auth.type === 'bearer' || editing.auth.type === 'api_key'}
+            <div class="row-2">
+              <div class="field">
+                <span class="field-label">Header</span>
+                <input type="text" bind:value={editing.auth.header}
+                  placeholder={editing.auth.type === 'bearer' ? 'Authorization' : 'X-API-Key'} />
+              </div>
+              <div class="field">
+                <span class="field-label">Scheme <span class="optional">(optional)</span></span>
+                <input type="text" bind:value={editing.auth.scheme}
+                  placeholder={editing.auth.type === 'bearer' ? 'Bearer' : 'Leave blank'} />
+              </div>
+            </div>
+            <div class="field">
+              <span class="field-label">Credential</span>
+              <input type="password" bind:value={editing.auth_secret}
+                placeholder={editing.auth.secret_ref ? 'Saved — enter only to replace' : 'Paste token or API key'} />
+            </div>
+            <div class="field">
+              <span class="field-label">Saved secret name <span class="optional">(advanced)</span></span>
+              <input type="text" bind:value={editing.auth.secret_ref} placeholder={`mcp.${editing.id || 'server'}.credential`} />
+              <span class="field-help">Use an existing secret by name, or leave blank to create one automatically from the credential above.</span>
+            </div>
+          {:else if editing.auth.type === 'oauth_client_credentials'}
+            <div class="field">
+              <span class="field-label">Token URL <span class="req">*</span></span>
+              <input type="url" bind:value={editing.auth.token_url} placeholder="https://auth.example.com/oauth/token" />
+            </div>
+            <div class="row-2">
+              <div class="field">
+                <span class="field-label">Client ID <span class="req">*</span></span>
+                <input type="text" bind:value={editing.auth.client_id} placeholder="client-id" />
+              </div>
+              <div class="field">
+                <span class="field-label">Client secret <span class="req">*</span></span>
+                <input type="password" bind:value={editing.auth_secret}
+                  placeholder={editing.auth.client_secret_ref ? 'Saved — enter only to replace' : 'Paste client secret'} />
+              </div>
+            </div>
+            <div class="row-2">
+              <div class="field">
+                <span class="field-label">Scopes <span class="optional">(space-separated)</span></span>
+                <input type="text" value={scopesToString(editing.auth.scopes)}
+                  on:input={(e) => editing.auth.scopes = stringToScopes(e.target.value)}
+                  placeholder="mcp.read mcp.execute" />
+              </div>
+              <div class="field">
+                <span class="field-label">Audience <span class="optional">(optional)</span></span>
+                <input type="text" bind:value={editing.auth.audience} placeholder="https://mcp.example.com" />
+              </div>
+            </div>
+            <div class="field">
+              <span class="field-label">Saved client-secret name <span class="optional">(advanced)</span></span>
+              <input type="text" bind:value={editing.auth.client_secret_ref} placeholder={`mcp.${editing.id || 'server'}.client_secret`} />
+              <span class="field-help">Use an existing secret by name, or leave blank to create one automatically.</span>
+            </div>
+          {/if}
+        </div>
+
         <div class="field">
-          <span class="field-label">Headers <span class="optional">(sent on every request)</span></span>
+          <span class="field-label">Request headers <span class="optional">(metadata sent on every request)</span></span>
           <KeyValueEditor
             value={editing.headers || {}}
             keyLabel="Header" valueLabel="Value"
-            keyPlaceholder="Authorization" valuePlaceholder="Bearer ..."
-            maskValues={true}
+            keyPlaceholder="X-Workspace-ID" valuePlaceholder="workspace-123"
+            maskValues={false}
             on:change={(e) => editing.headers = e.detail}
           />
+          <span class="field-help">Use Authentication above for tokens and API keys.</span>
+        </div>
+
+        <div class="field">
+          <span class="field-label">Query parameters <span class="optional">(non-sensitive values only)</span></span>
+          <KeyValueEditor
+            value={editing.query || {}}
+            keyLabel="Parameter" valueLabel="Value"
+            keyPlaceholder="version" valuePlaceholder="2026-01-01"
+            maskValues={false}
+            on:change={(e) => editing.query = e.detail}
+          />
+          <span class="field-help">Credentials are blocked here because URLs can appear in logs and browser history.</span>
+        </div>
+
+        <div class="field compact-field">
+          <span class="field-label">Request timeout</span>
+          <input type="text" bind:value={editing.timeout} placeholder="60s" />
+          <span class="field-help">Between 1s and 10m.</span>
         </div>
       {/if}
 
       {#if testResult}
         <div class="test-result" class:ok={testResult.ok}>
           {#if testResult.ok}
-            ✓ Reachable{#if testResult.resolved_command} · resolved to <code>{testResult.resolved_command}</code>{/if}{#if testResult.status_code} · HTTP {testResult.status_code}{/if}
+            ✓ {testResult.message || 'Reachable'}{#if testResult.resolved_command} · resolved to <code>{testResult.resolved_command}</code>{/if}
           {:else}
             ✗ {testResult.error}
           {/if}
@@ -622,6 +729,15 @@
     background: #0e1020; border: 1px solid #2a2f4a; border-radius: 6px;
     color: #e8eaf6; font-size: .85rem; padding: .45rem .65rem; font-family: monospace;
   }
+  .field-help { color: #666d91; font-size: .7rem; line-height: 1.45; }
+  .compact-field { max-width: 180px; }
+  .connection-section {
+    border: 1px solid #252a45; border-radius: 9px; background: rgba(10,12,28,.45);
+    padding: .85rem; display: flex; flex-direction: column; gap: .7rem;
+  }
+  .section-heading div { display: flex; flex-direction: column; gap: .18rem; }
+  .section-heading strong { font-size: .84rem; color: #dfe2f5; }
+  .section-heading span { font-size: .72rem; color: #6b7294; }
   .req      { color: #f06060; margin-left: .15rem; }
   .optional { color: #555a7a; text-transform: none; font-weight: 400; font-size: .68rem; letter-spacing: 0; margin-left: .25rem; }
 
@@ -667,5 +783,18 @@
   .glama-creds-label {
     font-size: .72rem; color: #6b7294; text-transform: uppercase; letter-spacing: .06em;
     font-weight: 600; border-top: 1px solid #1a1e36; padding-top: .75rem;
+  }
+
+  @media (max-width: 640px) {
+    .modal-bg { align-items: flex-end; }
+    .modal, .modal.wide {
+      width: 100%; max-width: 100vw; max-height: 92dvh; border-radius: 16px 16px 0 0;
+      padding: 1rem; padding-bottom: max(1rem, env(safe-area-inset-bottom));
+    }
+    .row-2 { grid-template-columns: 1fr; }
+    .compact-field { max-width: none; }
+    .modal-row { display: grid; grid-template-columns: 1fr 1fr; }
+    .modal-row .btn-primary, .modal-row .btn-glama { grid-column: 1 / -1; grid-row: 1; }
+    .modal-row button { min-height: 44px; }
   }
 </style>
