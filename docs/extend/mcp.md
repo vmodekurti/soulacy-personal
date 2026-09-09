@@ -35,6 +35,11 @@ The equivalent CLI command is:
 
 ```bash
 sy package install https://github.com/owner/repository --kind mcp --allow-unverified
+
+# Run the complete installation on a remote Personal gateway host.
+sy --gateway https://soul.example.com package install \
+  https://github.com/owner/repository --kind mcp \
+  --allow-unverified --allow-host-build
 ```
 
 Raw Git repositories are unsigned, so direct CLI use requires
@@ -60,6 +65,28 @@ mcp:
 
 After adding a server, restart the gateway (or reload config) so the tools are
 discovered.
+
+The same definitions can be registered without editing the gateway host:
+
+```bash
+# Idempotently create or update an HTTP MCP server on a remote gateway.
+sy --gateway https://soul.example.com mcp add \
+  --name company-crm --transport http \
+  --url https://mcp.internal.example.com/mcp \
+  --header 'Authorization=Bearer ${CRM_MCP_TOKEN}'
+
+# Personal edition only: launch a stdio server on the remote gateway host.
+sy --gateway https://soul.example.com mcp add \
+  --name filesystem --transport stdio \
+  --command /srv/soulacy/mcp-servers/filesystem/venv/bin/mcp-server-filesystem \
+  --args '--root,/srv/soulacy-files' --env 'LOG_LEVEL=info'
+```
+
+`sy` sends remote registrations to `PUT /api/v1/mcp/own/:id`; it does not edit
+the caller's configuration. Team and Scale deployments accept only HTTPS
+remote MCP definitions through this endpoint and reject stdio. For a repository
+that needs cloning or a build environment, use remote `sy package install`
+instead; raw source builds can be limited to an administrator-approved catalog.
 
 ## Using MCP tools in an agent
 

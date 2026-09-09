@@ -24,8 +24,9 @@ func buildMCPCmd() *cobra.Command {
 		Short: "Manage MCP servers",
 	}
 
-	var name, transport, command, pipSpec string
+	var name, transport, command, pipSpec, serverURL string
 	var args []string
+	var env, headers map[string]string
 
 	addCmd := &cobra.Command{
 		Use:   "add",
@@ -40,9 +41,44 @@ comments and writes 0600 (the file holds secrets).
 Examples:
   sy mcp add --name weather --command weather-mcp --transport stdio
   sy mcp add --name notebooklm --pip notebooklm-mcp-cli --command notebooklm-mcp-cli`,
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			if name == "" {
 				return fmt.Errorf("--name is required")
+			}
+			transport = strings.ToLower(strings.TrimSpace(transport))
+			if transport == "https" {
+				transport = "http"
+			}
+			if transport != "stdio" && transport != "http" {
+				return fmt.Errorf("--transport must be stdio or http")
+			}
+			if isRemoteGateway() {
+				if pipSpec != "" {
+					return requireRemoteDelegation("sy mcp add --pip (use 'sy package install <git-url> --allow-host-build' instead)")
+				}
+				payload := map[string]any{
+					"transport": transport,
+					"command":   command,
+					"args":      args,
+					"env":       env,
+					"url":       serverURL,
+					"headers":   headers,
+				}
+				if transport == "stdio" && strings.TrimSpace(command) == "" {
+					return fmt.Errorf("--command is required for stdio transport")
+				}
+				if transport == "http" && strings.TrimSpace(serverURL) == "" {
+					return fmt.Errorf("--url is required for http transport")
+				}
+				body, err := json.Marshal(payload)
+				if err != nil {
+					return err
+				}
+				if _, err := apiCallWithTimeout(http.MethodPut, "/mcp/own/"+url.PathEscape(name), body, 2*time.Minute); err != nil {
+					return err
+				}
+				fmt.Printf("✓ [%s] Registered MCP server %q.\n", targetDescription(), name)
+				return nil
 			}
 			ws, err := config.ResolveWorkspace()
 			if err != nil {
@@ -75,8 +111,11 @@ Examples:
 				}
 			}
 
-			if command == "" {
-				return fmt.Errorf("--command is required")
+			if transport == "stdio" && command == "" {
+				return fmt.Errorf("--command is required for stdio transport")
+			}
+			if transport == "http" && serverURL == "" {
+				return fmt.Errorf("--url is required for http transport")
 			}
 
 			// Register in the live config, preserving comments (yaml.Node — the
@@ -89,15 +128,25 @@ Examples:
 			servers := ensureMapping(ensureMapping(root, "mcp"), "servers")
 			srv := ensureMapping(servers, name)
 			setScalar(srv, "transport", transport, 0)
-			setScalar(srv, "command", command, yaml.DoubleQuotedStyle)
-			if len(args) > 0 {
-				setSequence(srv, "args", args)
+			if transport == "stdio" {
+				setScalar(srv, "command", command, yaml.DoubleQuotedStyle)
+				if len(args) > 0 {
+					setSequence(srv, "args", args)
+				}
+				if len(env) > 0 {
+					setStringMap(srv, "env", env)
+				}
+			} else {
+				setScalar(srv, "url", serverURL, yaml.DoubleQuotedStyle)
+				if len(headers) > 0 {
+					setStringMap(srv, "headers", headers)
+				}
 			}
 			if err := saveConfigDoc(configPath, doc); err != nil {
 				return fmt.Errorf("write config: %w", err)
 			}
 
-			fmt.Printf("✓ Registered MCP server %q in %s\n", name, configPath)
+			fmt.Printf("✓ [%s] Registered MCP server %q in %s\n", targetDescription(), name, configPath)
 			fmt.Println("  Restart the gateway (or it hot-reloads on config change) to connect.")
 			return nil
 		},
@@ -107,11 +156,21 @@ Examples:
 	addCmd.Flags().StringVar(&transport, "transport", "stdio", "Transport type (stdio or http)")
 	addCmd.Flags().StringVar(&command, "command", "", "Command to run the server (a bare name resolves to the venv bin when --pip is used)")
 	addCmd.Flags().StringSliceVar(&args, "args", nil, "Arguments for the command")
+	addCmd.Flags().StringToStringVar(&env, "env", nil, "Environment entry for stdio transport (KEY=value; repeatable)")
+	addCmd.Flags().StringVar(&serverURL, "url", "", "Remote MCP endpoint URL for http transport")
+	addCmd.Flags().StringToStringVar(&headers, "header", nil, "HTTP header (Name=value; repeatable)")
 	addCmd.Flags().StringVar(&pipSpec, "pip", "", "Optional pip package/spec to install into a persistent venv before registering")
 
 	cmd.AddCommand(addCmd)
 	cmd.AddCommand(buildMCPServeCmd())
 	return cmd
+}
+
+func setStringMap(parent *yaml.Node, key string, values map[string]string) {
+	m := ensureMapping(parent, key)
+	for k, v := range values {
+		setScalar(m, k, v, yaml.DoubleQuotedStyle)
+	}
 }
 
 func buildMCPServeCmd() *cobra.Command {

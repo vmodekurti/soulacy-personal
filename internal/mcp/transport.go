@@ -23,11 +23,13 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/soulacy/soulacy/internal/netguard"
 	"go.uber.org/zap"
 )
 
@@ -91,6 +93,20 @@ type stdioTx struct {
 func newStdio(cfg ServerConfig, log *zap.Logger) (*stdioTx, error) {
 	if cfg.Command == "" {
 		return nil, fmt.Errorf("stdio: command is required")
+	}
+	if cfg.ManagedRoot != "" {
+		resolvedRoot, err := filepath.EvalSymlinks(cfg.ManagedRoot)
+		if err != nil {
+			return nil, fmt.Errorf("stdio: resolve managed root: %w", err)
+		}
+		resolvedCommand, err := filepath.EvalSymlinks(cfg.Command)
+		if err != nil {
+			return nil, fmt.Errorf("stdio: resolve managed executable: %w", err)
+		}
+		rel, err := filepath.Rel(resolvedRoot, resolvedCommand)
+		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return nil, fmt.Errorf("stdio: executable escaped managed root %s", resolvedRoot)
+		}
 	}
 	cmd := exec.Command(cfg.Command, cfg.Args...)
 	env := os.Environ()
@@ -278,13 +294,17 @@ func newHTTP(cfg ServerConfig, resolveSecret func(context.Context, string) (stri
 	if timeout <= 0 {
 		timeout = 60 * time.Second
 	}
+	client := &http.Client{Timeout: timeout}
+	if cfg.PublicOnly {
+		client = netguard.NewHTTPClient(timeout, true, nil)
+	}
 	return &httpTx{
 		url:           cfg.URL,
 		headers:       cfg.Headers,
 		query:         cfg.Query,
 		auth:          cfg.Auth,
 		resolveSecret: resolveSecret,
-		client:        &http.Client{Timeout: timeout},
+		client:        client,
 	}
 }
 

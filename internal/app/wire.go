@@ -171,6 +171,12 @@ func (a *App) Run(parent context.Context) error {
 				Scopes: sc.Auth.Scopes, Audience: sc.Auth.Audience,
 			},
 			Timeout: sc.Timeout,
+			PublicOnly: sc.PublicOnly,
+		}
+		if sc.ManagedOnly {
+			entry := mcpServers[id]
+			entry.ManagedRoot = filepath.Join(ws.Root, "mcp-servers")
+			mcpServers[id] = entry
 		}
 	}
 	resolveMCPSecret := func(ctx context.Context, name string) (string, error) {

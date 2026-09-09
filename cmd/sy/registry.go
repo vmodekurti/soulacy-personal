@@ -156,6 +156,8 @@ func addRegistryEntry(entry config.RegistryConfig) error {
 	if _, err := apiCall("POST", "/registries", payload); err == nil {
 		fmt.Printf("✓ source %q saved via gateway. Try: sy skill install <slug>\n", entry.ID)
 		return nil
+	} else if isRemoteGateway() {
+		return fmt.Errorf("remote registry update failed: %w; no local files were changed", err)
 	}
 	// Gateway down → write config.yaml directly.
 	ws, err := config.ResolveWorkspace()

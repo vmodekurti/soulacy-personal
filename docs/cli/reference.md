@@ -12,8 +12,62 @@ Two binaries:
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--gateway` | `http://localhost:18789` (or `cli.gateway_url` / `server.port` from config) | Gateway URL |
+| `--context` | `SOULACY_CONTEXT` or `cli.active_context` | Named entry under `cli.contexts` |
 | `--api-key` | `server.api_key` from config | API key for gateway authentication |
 | `--json` | `false` | Output raw JSON |
+
+`SOULACY_GATEWAY` and `SOULACY_API_KEY` are the environment equivalents of
+the gateway and API-key flags. Named contexts keep several targets explicit:
+
+```yaml
+cli:
+  active_context: personal
+  contexts:
+    personal:
+      gateway_url: https://soul.example.com
+      api_key: ${SOULACY_PERSONAL_API_KEY}
+    local:
+      gateway_url: http://localhost:18789
+```
+
+Flags take precedence over environment variables, which take precedence over
+the selected context and then the default local configuration.
+
+## Local and remote execution
+
+`sy` treats Unix sockets, `localhost`, and loopback IP addresses as local. Any
+other gateway is remote. The selected target is resolved once, before a command
+runs; an unreachable remote gateway never causes a fallback to local files.
+
+Remote targets allow:
+
+- REST-backed reads and diagnostics, including agent, channel, schedule,
+  memory, skill, secret, MCP, log, and gateway status operations.
+- REST-backed mutations, including agent/channel management, MCP registration,
+  registry changes, and remote package installation.
+- Client-only read operations such as `registry probe`, `workspace info`,
+  `daemon status`, `daemon logs`, `version`, and update/launch checks. These
+  describe or inspect the client host where applicable, not the remote host.
+- Explicit client maintenance such as CLI update/upgrade and support-bundle
+  creation. Their command names make the local effect clear; they never expose
+  a remote daemon or operating-system upgrade API.
+
+| Command type | Remote policy | Enforced guardrail |
+| --- | --- | --- |
+| Agent, chat, and state | Allowed | Gateway authentication and workspace RBAC |
+| Secrets and credentials | Allowed, write-only values | TLS, encrypted vault, response redaction |
+| Remote HTTP MCP | Allowed | HTTPS plus NetGuard public-address, DNS-pinning, and redirect checks |
+| stdio host MCP | Personal only | Executable must resolve inside the managed `mcp-servers/` root; checked again at process start |
+| Git source package | Explicit approval required | Static inspection, sandboxed dry-run, `allow_unverified`, and separate `allow_host_build` consent |
+| Server daemon or platform upgrade | No remote API | Operate on the platform host; client self-upgrade remains explicitly local |
+
+Commands whose current implementation would ambiguously mutate the client host
+are refused for remote targets before any file is written. This includes
+`setup`, `onboard`, `server start`, daemon install/start/stop/uninstall,
+`workspace migrate` (except `--dry-run`), `seed-examples`, `pull`, and mutating
+`voice` setup commands. Run these on the gateway host or use a corresponding
+gateway API. The refusal always identifies the remote target and confirms that
+no local files were changed.
 
 ---
 
@@ -133,7 +187,18 @@ and registers MCP servers automatically:
 
 ```bash
 sy package install https://github.com/owner/repository --allow-unverified
+
+# Delegate cloning, scanning, building, registration, and activation to a remote gateway.
+sy --gateway https://soul.example.com package install \
+  https://github.com/owner/repository \
+  --allow-unverified --allow-host-build
 ```
+
+Remote package installation creates an asynchronous gateway job and reports
+its progress until completion. `--allow-unverified` records approval of the raw
+Git source; `--allow-host-build` separately records approval for the gateway to
+build source and create package environments. Team and Scale deployments may
+restrict host builds to their approved catalog even when both flags are set.
 
 The built-in **System** agent uses this same installer when you say “Install
 the Skill/MCP server from this URL.” Existing installations are reported and
@@ -148,10 +213,12 @@ sy skill install github.com/user/my-skill        # git source
 sy skill install some-skill --yes                # skip consent prompt
 ```
 
-Remote installs resolve through the `registries:` config block (falling
-back to a bare git provider), run the safety introspection pipeline
-(static scan + sandboxed dry-run), show a consent prompt, then hot-load
-via the gateway's `/skills/rescan` API.
+Local installs resolve through the `registries:` config block (falling back to
+a bare git provider), run the safety introspection pipeline (static scan +
+sandboxed dry-run), show a consent prompt, then hot-load via the gateway's
+`/skills/rescan` API. With a remote target, a registry slug or package URL is
+delegated to the gateway; a local skill directory is refused rather than copied
+or installed on the client by mistake.
 
 !!! note "`--yes` never bypasses danger"
     `--yes` skips the routine consent prompt, but a **danger** safety
@@ -166,8 +233,33 @@ sy registry add https://www.skills.sh/            # probe + consent + save
 sy registry add https://reg.example.com --id main --priority 10 -y
 ```
 
-`probe` runs client-side (no gateway needed). `add` saves via the gateway
-API when it is reachable, otherwise appends directly to `config.yaml`.
+`probe` runs client-side (no gateway needed). `add` saves through the gateway
+API for a remote target. A remote API or network failure is returned to the
+caller and never falls back to editing the client's `config.yaml`.
+
+## MCP registration
+
+```bash
+# Remote HTTP/SSE-compatible endpoint. Repeat --header as needed.
+sy --context personal mcp add --name company-crm --transport http \
+  --url https://mcp.example.com/mcp \
+  --header 'Authorization=Bearer ${CRM_TOKEN}'
+
+# Personal edition can register a stdio process on the remote gateway host.
+sy --context personal mcp add --name filesystem --transport stdio \
+  --command /srv/soulacy/mcp-servers/filesystem/venv/bin/mcp-server-filesystem \
+  --args '--root,/srv/soulacy/files' \
+  --env 'LOG_LEVEL=info'
+```
+
+Remote registration uses an idempotent `PUT /api/v1/mcp/own/:id`; repeating the
+same command updates that server. Arguments and environment variables apply to
+stdio, while URL and headers apply to HTTP. Team and Scale policy rejects stdio
+registrations and non-HTTPS remote endpoints. `mcp add --pip` is intentionally
+local-only; use `package install --allow-host-build` for a remote source build.
+Personal stdio registration does not search the host `PATH`: its executable
+must already exist under that gateway workspace's managed `mcp-servers/`
+directory. Symlinks are resolved before the path-boundary check.
 
 ## Memory, schedule & logs
 

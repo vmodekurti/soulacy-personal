@@ -38,6 +38,7 @@ import (
 	"github.com/soulacy/soulacy/internal/introspect"
 	"github.com/soulacy/soulacy/internal/llm"
 	"github.com/soulacy/soulacy/internal/mcp"
+	"github.com/soulacy/soulacy/internal/netguard"
 	"github.com/soulacy/soulacy/internal/pkgregistry"
 	"github.com/soulacy/soulacy/internal/plugininstall"
 	"github.com/soulacy/soulacy/internal/policy"
@@ -3031,17 +3032,19 @@ func maskValues(m map[string]string) map[string]string {
 // server. Mirrors config.MCPServerConfig with JSON tags so the same payload
 // can be re-marshalled back into YAML cleanly.
 type mcpServerBody struct {
-	ID         string            `json:"id"`
-	Transport  string            `json:"transport"`
-	Command    string            `json:"command"`
-	Args       []string          `json:"args"`
-	Env        map[string]string `json:"env"`
-	URL        string            `json:"url"`
-	Headers    map[string]string `json:"headers"`
-	Query      map[string]string `json:"query"`
-	Auth       mcpAuthBody       `json:"auth"`
-	AuthSecret string            `json:"auth_secret"` // write-only; moved to the encrypted vault
-	Timeout    string            `json:"timeout"`
+	ID          string            `json:"id"`
+	Transport   string            `json:"transport"`
+	Command     string            `json:"command"`
+	Args        []string          `json:"args"`
+	Env         map[string]string `json:"env"`
+	URL         string            `json:"url"`
+	Headers     map[string]string `json:"headers"`
+	Query       map[string]string `json:"query"`
+	Auth        mcpAuthBody       `json:"auth"`
+	AuthSecret  string            `json:"auth_secret"` // write-only; moved to the encrypted vault
+	Timeout     string            `json:"timeout"`
+	PublicOnly  bool              `json:"-"`
+	ManagedOnly bool              `json:"-"`
 }
 
 type mcpAuthBody struct {
@@ -3135,15 +3138,16 @@ func validateMCPServer(body mcpServerBody) string {
 func mcpBodyToServerConfig(body mcpServerBody) mcp.ServerConfig {
 	timeout, _ := parseMCPTimeout(body.Timeout)
 	return mcp.ServerConfig{
-		Transport: body.Transport,
-		Command:   body.Command,
-		Args:      body.Args,
-		Env:       body.Env,
-		URL:       body.URL,
-		Headers:   body.Headers,
-		Query:     body.Query,
-		Auth:      body.Auth.toMCP(),
-		Timeout:   timeout,
+		Transport:  body.Transport,
+		Command:    body.Command,
+		Args:       body.Args,
+		Env:        body.Env,
+		URL:        body.URL,
+		Headers:    body.Headers,
+		Query:      body.Query,
+		Auth:       body.Auth.toMCP(),
+		Timeout:    timeout,
+		PublicOnly: body.PublicOnly,
 	}
 }
 
@@ -3259,6 +3263,123 @@ func (s *Server) handleCreateMCPServer(c *fiber.Ctx) error {
 		resp["connect_error"] = connectErr
 	}
 	return c.Status(fiber.StatusCreated).JSON(resp)
+}
+
+// handlePutOwnedMCPServer is the idempotent CLI registration route. Personal
+// mode owns a single workspace, so "own" resolves to that workspace. Shared
+// editions retain the contract while applying tenant scoping in their store.
+func (s *Server) handlePutOwnedMCPServer(c *fiber.Ctx) error {
+	if s.cfgPath == "" {
+		return s.errMsg(c, fiber.StatusServiceUnavailable, "config file path unknown — cannot persist")
+	}
+	id := strings.TrimSpace(c.Params("id"))
+	if !validMCPID(id) {
+		return s.errMsg(c, fiber.StatusBadRequest, "id may contain only letters, digits, '-' and '_'")
+	}
+	var body mcpServerBody
+	if err := c.BodyParser(&body); err != nil {
+		return s.errJSON(c, fiber.StatusBadRequest, err)
+	}
+	body.ID = id
+	if msg := validateMCPServer(body); msg != "" {
+		return s.errMsg(c, fiber.StatusBadRequest, msg)
+	}
+	if s.mcpRegistrationPolicy != nil {
+		if err := s.mcpRegistrationPolicy(strings.ToLower(strings.TrimSpace(body.Transport)), strings.TrimSpace(body.URL), strings.TrimSpace(body.Command)); err != nil {
+			return s.errMsg(c, fiber.StatusForbidden, err.Error())
+		}
+	}
+	if err := s.validateRemoteMCPBoundary(body); err != nil {
+		return s.errMsg(c, fiber.StatusForbidden, err.Error())
+	}
+	if strings.EqualFold(strings.TrimSpace(body.Transport), "stdio") || strings.TrimSpace(body.Transport) == "" {
+		body.ManagedOnly = true
+	} else {
+		body.PublicOnly = true
+	}
+	raw, err := readRawConfig(s.cfgPath)
+	if err != nil {
+		return s.errJSON(c, fiber.StatusInternalServerError, err)
+	}
+	mcpMap := getOrCreateMap(raw, "mcp")
+	servers := getOrCreateMap(mcpMap, "servers")
+	old, existed := servers[id]
+	if oldMap, ok := old.(map[string]any); ok {
+		body.Env = preserveMaskedMCPValues(body.Env, oldMap["env"])
+		body.Headers = preserveMaskedMCPValues(body.Headers, oldMap["headers"])
+	}
+	if err := s.saveMCPAuthSecret(c, &body); err != nil {
+		return s.errMsg(c, fiber.StatusServiceUnavailable, err.Error())
+	}
+	servers[id] = mcpServerToYAML(body)
+	if err := writeRawConfig(s.cfgPath, raw); err != nil {
+		return s.errJSON(c, fiber.StatusInternalServerError, err)
+	}
+	connectErr := ""
+	if s.mcp != nil {
+		hotCfg := mcpBodyToServerConfig(body)
+		if body.ManagedOnly {
+			hotCfg.ManagedRoot = filepath.Join(filepath.Dir(s.cfgPath), "mcp-servers")
+		}
+		if err := s.mcp.AddServer(id, hotCfg); err != nil {
+			connectErr = err.Error()
+		}
+	}
+	status := fiber.StatusCreated
+	message := "Registered and connected."
+	if existed {
+		status = fiber.StatusOK
+		message = "Updated and reconnected."
+	}
+	resp := fiber.Map{"ok": true, "id": id, "created": !existed, "restart_needed": false, "message": message}
+	if connectErr != "" {
+		resp["message"] = "Saved, but could not connect: " + connectErr
+		resp["connect_error"] = connectErr
+	}
+	return c.Status(status).JSON(resp)
+}
+
+// validateRemoteMCPBoundary applies the Personal-edition baseline before an
+// extension can reach config or process startup. Shared editions add stricter
+// policy through SetMCPRegistrationPolicy.
+func (s *Server) validateRemoteMCPBoundary(body mcpServerBody) error {
+	transport := strings.ToLower(strings.TrimSpace(body.Transport))
+	if transport == "http" || transport == "https" {
+		u, err := url.Parse(strings.TrimSpace(body.URL))
+		if err != nil || !strings.EqualFold(u.Scheme, "https") || u.Hostname() == "" || u.User != nil {
+			return fmt.Errorf("remote HTTP MCP endpoints must use HTTPS without embedded credentials")
+		}
+		if err := netguard.CheckPublic(body.URL); err != nil {
+			return fmt.Errorf("remote HTTP MCP endpoint failed the public-network check: %w", err)
+		}
+		return nil
+	}
+
+	command := strings.TrimSpace(body.Command)
+	if !filepath.IsAbs(command) {
+		return fmt.Errorf("remote stdio MCP commands must use an absolute executable path under the managed mcp-servers directory")
+	}
+	if s.cfgPath == "" {
+		return fmt.Errorf("remote stdio MCP registration requires a writable workspace")
+	}
+	managedRoot := filepath.Join(filepath.Dir(s.cfgPath), "mcp-servers")
+	resolvedRoot, err := filepath.EvalSymlinks(managedRoot)
+	if err != nil {
+		return fmt.Errorf("resolve managed MCP directory: %w", err)
+	}
+	resolvedCommand, err := filepath.EvalSymlinks(command)
+	if err != nil {
+		return fmt.Errorf("remote stdio MCP executable cannot be resolved: %w", err)
+	}
+	rel, err := filepath.Rel(resolvedRoot, resolvedCommand)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("remote stdio MCP executable must remain under %s", resolvedRoot)
+	}
+	info, err := os.Stat(resolvedCommand)
+	if err != nil || info.IsDir() || info.Mode()&0o111 == 0 {
+		return fmt.Errorf("remote stdio MCP command must resolve to an executable file under %s", resolvedRoot)
+	}
+	return nil
 }
 
 // handleUpdateMCPServer overwrites an existing MCP server config in
@@ -3415,6 +3536,12 @@ func mcpServerToYAML(body mcpServerBody) map[string]any {
 		t = "stdio"
 	}
 	out := map[string]any{"transport": t}
+	if body.PublicOnly {
+		out["public_only"] = true
+	}
+	if body.ManagedOnly {
+		out["managed_only"] = true
+	}
 	if t == "stdio" {
 		if body.Command != "" {
 			out["command"] = body.Command

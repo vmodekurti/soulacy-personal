@@ -878,15 +878,17 @@ type MCPConfig struct {
 
 // MCPServerConfig describes one MCP server connection.
 type MCPServerConfig struct {
-	Transport string            `mapstructure:"transport"` // "stdio" (default) or "http"
-	Command   string            `mapstructure:"command"`   // stdio: executable
-	Args      []string          `mapstructure:"args"`      // stdio: arguments
-	Env       map[string]string `mapstructure:"env"`       // stdio: extra env
-	URL       string            `mapstructure:"url"`       // http: server URL
-	Headers   map[string]string `mapstructure:"headers"`   // http: extra headers
-	Query     map[string]string `mapstructure:"query"`     // http: non-sensitive URL query parameters
-	Auth      MCPAuthConfig     `mapstructure:"auth"`      // http: structured authentication
-	Timeout   time.Duration     `mapstructure:"timeout"`   // http: per-request timeout
+	Transport   string            `mapstructure:"transport"`    // "stdio" (default) or "http"
+	Command     string            `mapstructure:"command"`      // stdio: executable
+	Args        []string          `mapstructure:"args"`         // stdio: arguments
+	Env         map[string]string `mapstructure:"env"`          // stdio: extra env
+	URL         string            `mapstructure:"url"`          // http: server URL
+	Headers     map[string]string `mapstructure:"headers"`      // http: extra headers
+	Query       map[string]string `mapstructure:"query"`        // http: non-sensitive URL query parameters
+	Auth        MCPAuthConfig     `mapstructure:"auth"`         // http: structured authentication
+	Timeout     time.Duration     `mapstructure:"timeout"`      // http: per-request timeout
+	PublicOnly  bool              `mapstructure:"public_only"`  // remote API: enforce public destinations on every request
+	ManagedOnly bool              `mapstructure:"managed_only"` // remote API: executable must remain in mcp-servers/
 }
 
 // MCPAuthConfig keeps authentication separate from ordinary request metadata.
