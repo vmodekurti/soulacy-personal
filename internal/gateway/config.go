@@ -537,14 +537,21 @@ func (s *Server) ReloadConfig() error {
 		}
 		// Add/Update existing servers
 		for id, srvCfg := range newCfg.MCP.Servers {
-			_ = s.mcp.AddServer(id, mcp.ServerConfig{
-				Transport: srvCfg.Transport,
-				Command:   srvCfg.Command,
-				Args:      srvCfg.Args,
-				Env:       srvCfg.Env,
-				URL:       srvCfg.URL,
-				Headers:   srvCfg.Headers,
-			})
+			hotCfg := mcp.ServerConfig{
+				Transport: srvCfg.Transport, Command: srvCfg.Command, Args: srvCfg.Args,
+				Env: srvCfg.Env, URL: srvCfg.URL, Headers: srvCfg.Headers, Query: srvCfg.Query,
+				Auth: mcp.AuthConfig{
+					Type: srvCfg.Auth.Type, Header: srvCfg.Auth.Header, Scheme: srvCfg.Auth.Scheme,
+					SecretRef: srvCfg.Auth.SecretRef, TokenURL: srvCfg.Auth.TokenURL,
+					ClientID: srvCfg.Auth.ClientID, ClientSecretRef: srvCfg.Auth.ClientSecretRef,
+					Scopes: srvCfg.Auth.Scopes, Audience: srvCfg.Auth.Audience,
+				},
+				Timeout: srvCfg.Timeout, PublicOnly: srvCfg.PublicOnly,
+			}
+			if srvCfg.ManagedOnly {
+				hotCfg.ManagedRoot = filepath.Join(filepath.Dir(s.cfgPath), "mcp-servers")
+			}
+			_ = s.mcp.AddServer(id, hotCfg)
 		}
 	}
 

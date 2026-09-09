@@ -46,9 +46,10 @@ import (
 )
 
 var (
-	gatewayURL string
-	apiKey     string
-	outputJSON bool
+	gatewayURL  string
+	apiKey      string
+	outputJSON  bool
+	contextName string
 )
 
 func main() {
@@ -75,6 +76,12 @@ Quick start:
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			// Skip config loading for setup — it creates the config
 			if cmd.Name() == "setup" {
+				if gatewayURL == "" {
+					gatewayURL = strings.TrimSpace(os.Getenv("SOULACY_GATEWAY"))
+				}
+				if targetMode(gatewayURL) == targetRemoteGateway {
+					return guardRemoteCommand(cmd.CommandPath(), false)
+				}
 				return nil
 			}
 			viper.SetConfigName("config")
@@ -89,6 +96,22 @@ Quick start:
 			viper.AutomaticEnv()
 			_ = viper.ReadInConfig()
 
+			selectedContext := strings.TrimSpace(contextName)
+			if selectedContext == "" {
+				selectedContext = strings.TrimSpace(os.Getenv("SOULACY_CONTEXT"))
+			}
+			if selectedContext == "" {
+				selectedContext = strings.TrimSpace(viper.GetString("cli.active_context"))
+			}
+			if gatewayURL == "" {
+				gatewayURL = strings.TrimSpace(os.Getenv("SOULACY_GATEWAY"))
+			}
+			if gatewayURL == "" && selectedContext != "" {
+				gatewayURL = viper.GetString("cli.contexts." + selectedContext + ".gateway_url")
+				if gatewayURL == "" {
+					gatewayURL = viper.GetString("cli.contexts." + selectedContext + ".gateway")
+				}
+			}
 			if gatewayURL == "" {
 				gatewayURL = viper.GetString("cli.gateway_url")
 			}
@@ -100,14 +123,23 @@ Quick start:
 				gatewayURL = fmt.Sprintf("http://localhost:%d", port)
 			}
 			if apiKey == "" {
+				apiKey = strings.TrimSpace(os.Getenv("SOULACY_API_KEY"))
+			}
+			if apiKey == "" && selectedContext != "" {
+				apiKey = viper.GetString("cli.contexts." + selectedContext + ".api_key")
+			}
+			if apiKey == "" {
 				apiKey = viper.GetString("server.api_key")
 			}
-			return nil
+			gatewayURL = strings.TrimRight(strings.TrimSpace(gatewayURL), "/")
+			dryRun, _ := cmd.Flags().GetBool("dry-run")
+			return guardRemoteCommand(cmd.CommandPath(), dryRun)
 		},
 	}
 
 	root.PersistentFlags().StringVar(&gatewayURL, "gateway", "", "Gateway URL (default: http://localhost:18789)")
 	root.PersistentFlags().StringVar(&apiKey, "api-key", "", "API key for gateway authentication")
+	root.PersistentFlags().StringVar(&contextName, "context", "", "Named gateway context from cli.contexts")
 	root.PersistentFlags().BoolVar(&outputJSON, "json", false, "Output raw JSON")
 
 	// Sub-commands
@@ -1157,6 +1189,20 @@ no signing_key, or a raw git source — are BLOCKED unless you pass
 --allow-unverified to accept the risk explicitly.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if isRemoteGateway() {
+				if st, err := os.Stat(args[0]); err == nil && st.IsDir() {
+					return requireRemoteDelegation("sy skill install from a local directory")
+				}
+				body, err := json.Marshal(map[string]any{"slug": args[0], "allow_unverified": allowUnverified})
+				if err != nil {
+					return err
+				}
+				if _, err := apiCallWithTimeout(http.MethodPost, "/skills/install", body, 2*time.Minute); err != nil {
+					return err
+				}
+				fmt.Printf("✓ [%s] Installed skill %q.\n", targetDescription(), args[0])
+				return nil
+			}
 			// Local directory keeps the original behaviour exactly.
 			if st, err := os.Stat(args[0]); err == nil && st.IsDir() {
 				return installSkill(args[0])
@@ -1384,7 +1430,7 @@ func apiCall(method, path string, body []byte) ([]byte, error) {
 }
 
 func apiCallWithTimeout(method, path string, body []byte, timeout time.Duration) ([]byte, error) {
-	url := gatewayURL + "/api/v1" + path
+	url := strings.TrimRight(gatewayURL, "/") + "/api/v1" + path
 	var bodyReader io.Reader
 	if body != nil {
 		bodyReader = bytes.NewReader(body)
@@ -1416,9 +1462,26 @@ func apiCallWithTimeout(method, path string, body []byte, timeout time.Duration)
 	}
 
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("gateway error %d: %s", resp.StatusCode, string(data))
+		message := strings.TrimSpace(string(data))
+		var envelope struct {
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(data, &envelope) == nil && strings.TrimSpace(envelope.Error) != "" {
+			message = strings.TrimSpace(envelope.Error)
+		}
+		if resp.StatusCode == http.StatusUnauthorized {
+			return nil, fmt.Errorf("gateway returned %s - verify your API key%s", resp.Status, suffixMessage(message))
+		}
+		return nil, fmt.Errorf("gateway returned %s%s", resp.Status, suffixMessage(message))
 	}
 	return data, nil
+}
+
+func suffixMessage(message string) string {
+	if message == "" {
+		return ""
+	}
+	return ": " + message
 }
 
 func apiGet(path, field string) error {

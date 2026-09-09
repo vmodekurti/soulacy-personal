@@ -11,6 +11,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -69,7 +71,7 @@ func buildPackageCmd() *cobra.Command {
 		Short: "Install a Skill or MCP server from one URL",
 	}
 	var kind string
-	var assumeYes, allowUnverified bool
+	var assumeYes, allowUnverified, allowHostBuild bool
 	install := &cobra.Command{
 		Use:   "install <https-git-url>",
 		Short: "Detect, inspect, install, register, and verify a Skill or MCP server",
@@ -82,14 +84,88 @@ Raw Git sources are not cryptographically signed, so non-interactive callers
 must explicitly pass --allow-unverified.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if isRemoteGateway() {
+				return installRemoteURLPackage(cmd.Context(), args[0], urlPackageKind(kind), allowUnverified, allowHostBuild)
+			}
 			return installURLPackage(cmd.Context(), args[0], urlPackageKind(kind), assumeYes, allowUnverified)
 		},
 	}
 	install.Flags().StringVar(&kind, "kind", string(urlPackageAuto), "Package kind: auto, skill, or mcp")
 	install.Flags().BoolVarP(&assumeYes, "yes", "y", false, "Use the approval already collected by the caller")
 	install.Flags().BoolVar(&allowUnverified, "allow-unverified", false, "Allow an unsigned/raw Git source after explicit operator approval")
+	install.Flags().BoolVar(&allowHostBuild, "allow-host-build", false, "Allow the remote gateway to build source and create package environments")
 	cmd.AddCommand(install)
 	return cmd
+}
+
+type remotePackageInstallStatus struct {
+	JobID    string   `json:"job_id"`
+	Status   string   `json:"status"`
+	Messages []string `json:"messages"`
+	Error    string   `json:"error"`
+}
+
+func installRemoteURLPackage(ctx context.Context, source string, kind urlPackageKind, allowUnverified, allowHostBuild bool) error {
+	source = strings.TrimSpace(source)
+	if !strings.HasPrefix(strings.ToLower(source), "https://") {
+		return fmt.Errorf("source must be an HTTPS Git repository URL")
+	}
+	switch kind {
+	case urlPackageAuto, urlPackageSkill, urlPackageMCP:
+	default:
+		return fmt.Errorf("--kind must be auto, skill, or mcp")
+	}
+	body, err := json.Marshal(map[string]any{
+		"source": source, "kind": kind,
+		"allow_unverified": allowUnverified,
+		"allow_host_build": allowHostBuild,
+	})
+	if err != nil {
+		return err
+	}
+	data, err := apiCallWithTimeout(http.MethodPost, "/packages/install", body, 30*time.Second)
+	if err != nil {
+		return err
+	}
+	var status remotePackageInstallStatus
+	if err := json.Unmarshal(data, &status); err != nil {
+		return fmt.Errorf("decode remote install response: %w", err)
+	}
+	if status.JobID == "" {
+		return fmt.Errorf("gateway did not return an installation job id")
+	}
+	seen := 0
+	for {
+		for _, message := range status.Messages[seen:] {
+			fmt.Printf("→ [Remote] %s\n", message)
+		}
+		seen = len(status.Messages)
+		switch status.Status {
+		case "succeeded":
+			fmt.Printf("✓ [%s] Package installed successfully.\n", targetDescription())
+			return nil
+		case "failed":
+			if status.Error == "" {
+				status.Error = "remote package installation failed"
+			}
+			return fmt.Errorf("remote package installation failed: %s", status.Error)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+		data, err = apiCallWithTimeout(http.MethodGet, "/packages/install/"+url.PathEscape(status.JobID), nil, 30*time.Second)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(data, &status); err != nil {
+			return fmt.Errorf("decode remote install status: %w", err)
+		}
+		if seen > len(status.Messages) {
+			seen = 0
+		}
+	}
 }
 
 func installURLPackage(ctx context.Context, source string, kind urlPackageKind, assumeYes, allowUnverified bool) error {

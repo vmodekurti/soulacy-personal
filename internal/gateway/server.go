@@ -179,6 +179,12 @@ type Server struct {
 	preferenceJobs        chan preferenceMineJob
 	preferenceJobsWG      sync.WaitGroup
 	learningReplayWG      sync.WaitGroup
+
+	packageInstallMu      sync.RWMutex
+	packageInstallJobs    map[string]*packageInstallJob
+	packageInstallRunner  packageInstallRunner
+	packageInstallPolicy  func(PackageInstallRequest) error
+	mcpRegistrationPolicy func(transport, endpoint, command string) error
 }
 
 // New creates and configures the Fiber server but does not start listening.
@@ -201,24 +207,25 @@ func New(
 	log *zap.Logger,
 ) *Server {
 	s := &Server{
-		cfg:              cfg,
-		cfgPath:          cfgPath,
-		engine:           engine,
-		loader:           loader,
-		llmRouter:        llmRouter,
-		channels:         chanReg,
-		scheduler:        sched,
-		httpChan:         httpChan,
-		waChan:           waChan,
-		skillLoader:      skillLoader,
-		actions:          actions,
-		mcp:              mcpClient,
-		hub:              hub,
-		log:              log,
-		runReg:           newRunRegistry(),
-		sessionOwners:    make(map[string]sessionOwner),
-		generationProofs: make(map[string]generationProofRecord),
-		preferenceJobs:   make(chan preferenceMineJob, 128),
+		cfg:                cfg,
+		cfgPath:            cfgPath,
+		engine:             engine,
+		loader:             loader,
+		llmRouter:          llmRouter,
+		channels:           chanReg,
+		scheduler:          sched,
+		httpChan:           httpChan,
+		waChan:             waChan,
+		skillLoader:        skillLoader,
+		actions:            actions,
+		mcp:                mcpClient,
+		hub:                hub,
+		log:                log,
+		runReg:             newRunRegistry(),
+		sessionOwners:      make(map[string]sessionOwner),
+		generationProofs:   make(map[string]generationProofRecord),
+		preferenceJobs:     make(chan preferenceMineJob, 128),
+		packageInstallJobs: make(map[string]*packageInstallJob),
 	}
 	go s.runPreferenceMiner()
 	if s.hub != nil {
@@ -234,6 +241,18 @@ func New(
 	}
 	s.app = s.buildApp()
 	return s
+}
+
+// SetPackageInstallPolicy lets commercial editions enforce catalog-only or
+// source-build restrictions without forking the Personal API contract.
+func (s *Server) SetPackageInstallPolicy(policy func(PackageInstallRequest) error) {
+	s.packageInstallPolicy = policy
+}
+
+// SetMCPRegistrationPolicy lets shared editions reject host-process or
+// non-HTTPS definitions while Personal mode retains explicit stdio support.
+func (s *Server) SetMCPRegistrationPolicy(policy func(transport, endpoint, command string) error) {
+	s.mcpRegistrationPolicy = policy
 }
 
 // errJSON writes a standard error envelope `{"error": err.Error()}` with the
@@ -863,12 +882,15 @@ func (s *Server) buildApp() *fiber.App {
 	// MCP (Model Context Protocol) — configured external servers + their tools
 	api.Get("/mcp", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleListMCP)
 	api.Post("/mcp", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleCreateMCPServer)
+	api.Put("/mcp/own/:id", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handlePutOwnedMCPServer)
 	api.Patch("/mcp/:id", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleUpdateMCPServer)
 	api.Delete("/mcp/:id", s.rbacMW(rbac.ResourceMCP, rbac.ActionDelete), s.handleDeleteMCPServer)
 	api.Post("/mcp/test", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleTestMCPServer)
 	api.Post("/mcp/provision-glama", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleProvisionGlama)
 	api.Get("/mcp/registry/search", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleMCPRegistrySearch)
 	api.Post("/mcp/provision-registry", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleProvisionMCPRegistry)
+	api.Post("/packages/install", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleStartPackageInstall)
+	api.Get("/packages/install/:job", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handlePackageInstallStatus)
 
 	// Knowledge (RAG) — KBs, documents, search
 	api.Get("/knowledge", s.rbacMW(rbac.ResourceKnowledge, rbac.ActionRead), s.handleListKnowledge)

@@ -168,6 +168,29 @@ func Check(rawURL string, blockPrivate bool, allowedHosts []string) error {
 	return CheckURL(u, blockPrivate, allowedHosts)
 }
 
+// CheckPublic is the stricter registration-time policy for remotely supplied
+// service endpoints. Unlike Check, it does not permit loopback: a remote API
+// caller must not be able to turn the gateway into a proxy to localhost or a
+// private control-plane address. DNS is resolved now and the live HTTP
+// transport must still use GuardedTransport so rebinding and redirects are
+// checked again when requests are made.
+func CheckPublic(rawURL string) error {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return fmt.Errorf("ssrf: invalid URL: %w", err)
+	}
+	ips, err := resolveAllowed(context.Background(), u, true, nil, net.DefaultResolver)
+	if err != nil {
+		return err
+	}
+	for _, ip := range ips {
+		if ip.IsLoopback() || ip.IsUnspecified() {
+			return fmt.Errorf("ssrf: request to %s (%s) is blocked — remote endpoints must resolve to public addresses", u.Hostname(), ip)
+		}
+	}
+	return nil
+}
+
 // CheckURL is Check for an already-parsed URL, which is the shape the redirect
 // hook receives.
 func CheckURL(u *url.URL, blockPrivate bool, allowedHosts []string) error {

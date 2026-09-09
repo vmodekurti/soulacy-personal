@@ -38,15 +38,17 @@ type Config struct {
 
 // ServerConfig describes one MCP server connection.
 type ServerConfig struct {
-	Transport string            // "stdio" (default) or "http"
-	Command   string            // stdio: executable
-	Args      []string          // stdio: arguments
-	Env       map[string]string // stdio: extra env vars (merged onto os.Environ)
-	URL       string            // http: server URL
-	Headers   map[string]string // http: extra headers (auth, etc.)
-	Query     map[string]string // http: non-sensitive URL query parameters
-	Auth      AuthConfig        // http: structured authentication
-	Timeout   time.Duration     // http: per-request timeout
+	Transport   string            // "stdio" (default) or "http"
+	Command     string            // stdio: executable
+	Args        []string          // stdio: arguments
+	Env         map[string]string // stdio: extra env vars (merged onto os.Environ)
+	URL         string            // http: server URL
+	Headers     map[string]string // http: extra headers (auth, etc.)
+	Query       map[string]string // http: non-sensitive URL query parameters
+	Auth        AuthConfig        // http: structured authentication
+	Timeout     time.Duration     // http: per-request timeout
+	PublicOnly  bool              // use NetGuard and reject private/loopback destinations
+	ManagedRoot string            // stdio: executable must resolve beneath this directory
 }
 
 type AuthConfig struct {
