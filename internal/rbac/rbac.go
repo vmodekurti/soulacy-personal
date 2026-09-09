@@ -95,12 +95,16 @@ const (
 
 var defaultPolicy = map[string]map[string]map[string]bool{
 	RoleAdmin: {
-		ResourceAgents:      {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionEnable: true},
-		ResourceChat:        {ActionRead: true, ActionChat: true},
-		ResourceMemory:      {ActionRead: true, ActionDelete: true},
-		ResourceChannels:    {ActionRead: true, ActionWrite: true, ActionEnable: true},
-		ResourceProviders:   {ActionRead: true, ActionWrite: true},
-		ResourceSkills:      {ActionRead: true},
+		ResourceAgents:    {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionEnable: true},
+		ResourceChat:      {ActionRead: true, ActionChat: true},
+		ResourceMemory:    {ActionRead: true, ActionDelete: true},
+		ResourceChannels:  {ActionRead: true, ActionWrite: true, ActionEnable: true},
+		ResourceProviders: {ActionRead: true, ActionWrite: true},
+		// Installing, rescanning, and provisioning skills are administrator
+		// mutations.  The routes already require skills:write; keep that
+		// permission in the default admin policy so the primary Personal API key
+		// can actually use the Skills UI.
+		ResourceSkills:      {ActionRead: true, ActionWrite: true},
 		ResourceMCP:         {ActionRead: true, ActionWrite: true, ActionDelete: true},
 		ResourceKnowledge:   {ActionRead: true, ActionWrite: true, ActionDelete: true},
 		ResourceBuilder:     {ActionWrite: true},

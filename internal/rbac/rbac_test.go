@@ -775,9 +775,11 @@ func TestHasPermissionViewerChannelsRead(t *testing.T) {
 	}
 }
 
-func TestHasPermissionAdminSkillsRead(t *testing.T) {
-	if !HasPermission(RoleAdmin, ResourceSkills, ActionRead) {
-		t.Error("admin should read skills")
+func TestHasPermissionAdminSkillsReadAndWrite(t *testing.T) {
+	for _, action := range []string{ActionRead, ActionWrite} {
+		if !HasPermission(RoleAdmin, ResourceSkills, action) {
+			t.Errorf("admin should have skills:%s", action)
+		}
 	}
 }
 

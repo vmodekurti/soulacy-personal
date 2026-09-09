@@ -241,6 +241,19 @@ func TestRequireOperatorDenied_Delete(t *testing.T) {
 	}
 }
 
+// The Skills page installs registry results and direct Git sources through
+// routes guarded by skills:write.  Keep the primary Personal administrator
+// credential authorized for both flows.
+func TestRequireAdminAllowed_WriteSkills(t *testing.T) {
+	m := newManager(t)
+	app := setupRequireApp(m, adminClaims(), ResourceSkills, ActionWrite)
+
+	resp := doRequest(t, app, http.MethodGet, "/test", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("admin write skills: status = %d, want 200; body=%s", resp.StatusCode, readBody(t, resp))
+	}
+}
+
 // ---------------------------------------------------------------------------
 // RequireAgent middleware
 // ---------------------------------------------------------------------------
