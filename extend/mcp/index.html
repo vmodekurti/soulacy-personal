@@ -4081,6 +4081,11 @@ server. The installer is limited to HTTPS Git URLs, preserves an explicit MCP
 choice from the request, and still requires approval for every installation.</p>
 <p>The equivalent CLI command is:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>sy<span class="w"> </span>package<span class="w"> </span>install<span class="w"> </span>https://github.com/owner/repository<span class="w"> </span>--kind<span class="w"> </span>mcp<span class="w"> </span>--allow-unverified
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="c1"># Run the complete installation on a remote Personal gateway host.</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>sy<span class="w"> </span>--gateway<span class="w"> </span>https://soul.example.com<span class="w"> </span>package<span class="w"> </span>install<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span>https://github.com/owner/repository<span class="w"> </span>--kind<span class="w"> </span>mcp<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span>--allow-unverified<span class="w"> </span>--allow-host-build
 </span></code></pre></div>
 <p>Raw Git repositories are unsigned, so direct CLI use requires
 <code>--allow-unverified</code>. In Chat, approving the exact URL provides that explicit
@@ -4101,13 +4106,31 @@ Each server has a transport — a local subprocess over stdio, or a remote URL.<
 </span></code></pre></div>
 <p>After adding a server, restart the gateway (or reload config) so the tools are
 discovered.</p>
+<p>The same definitions can be registered without editing the gateway host:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Idempotently create or update an HTTP MCP server on a remote gateway.</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>sy<span class="w"> </span>--gateway<span class="w"> </span>https://soul.example.com<span class="w"> </span>mcp<span class="w"> </span>add<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>--name<span class="w"> </span>company-crm<span class="w"> </span>--transport<span class="w"> </span>http<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span>--url<span class="w"> </span>https://mcp.internal.example.com/mcp<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span>--header<span class="w"> </span><span class="s1">'Authorization=Bearer ${CRM_MCP_TOKEN}'</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="c1"># Personal edition only: launch a stdio server on the remote gateway host.</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>sy<span class="w"> </span>--gateway<span class="w"> </span>https://soul.example.com<span class="w"> </span>mcp<span class="w"> </span>add<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">  </span>--name<span class="w"> </span>filesystem<span class="w"> </span>--transport<span class="w"> </span>stdio<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">  </span>--command<span class="w"> </span>/srv/soulacy/mcp-servers/filesystem/venv/bin/mcp-server-filesystem<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">  </span>--args<span class="w"> </span><span class="s1">'--root,/srv/soulacy-files'</span><span class="w"> </span>--env<span class="w"> </span><span class="s1">'LOG_LEVEL=info'</span>
+</span></code></pre></div>
+<p><code>sy</code> sends remote registrations to <code>PUT /api/v1/mcp/own/:id</code>; it does not edit
+the caller's configuration. Team and Scale deployments accept only HTTPS
+remote MCP definitions through this endpoint and reject stdio. For a repository
+that needs cloning or a build environment, use remote <code>sy package install</code>
+instead; raw source builds can be limited to an administrator-approved catalog.</p>
 <h2 id="using-mcp-tools-in-an-agent">Using MCP tools in an agent<a class="headerlink" href="#using-mcp-tools-in-an-agent" title="Permanent link">&para;</a></h2>
 <p>Reference the discovered tool names in a SOUL.yaml <code>tools:</code> block:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">crm-assistant</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">tools</span><span class="p">:</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">company-crm.search_contacts</span>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">company-crm.create_note</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">filesystem.read_file</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">crm-assistant</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nt">tools</span><span class="p">:</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">company-crm.search_contacts</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">company-crm.create_note</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">filesystem.read_file</span>
 </span></code></pre></div>
 <p>MCP tools carry the same <strong>risk tiers</strong> and policy controls as any other tool
 (see <a href="../safety/">Safety Introspection</a>). A privileged or network-capable MCP tool
