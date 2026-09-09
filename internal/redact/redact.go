@@ -22,6 +22,11 @@ var (
 	bearer     = regexp.MustCompile(`(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]+`)
 )
 
+// SecretKeyName is the shared predicate for deciding whether a configuration
+// key is likely to contain credential material. Callers should use this rather
+// than maintaining narrower, feature-specific lists that drift over time.
+func SecretKeyName(key string) bool { return secretKey.MatchString(key) }
+
 // Value returns a JSON-compatible deep copy with sensitive leaves replaced.
 // Structs are normalized through JSON so json field names, not Go internals,
 // govern the persisted representation.
@@ -53,7 +58,7 @@ func walk(v any, key string, wholesale bool, depth int) any {
 	if depth >= maxDepth {
 		return Marker
 	}
-	if wholesale || secretKey.MatchString(key) {
+	if wholesale || SecretKeyName(key) {
 		return redactLeaves(v, depth+1)
 	}
 	switch x := v.(type) {
