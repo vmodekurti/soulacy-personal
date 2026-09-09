@@ -18,6 +18,7 @@
 package gateway
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -26,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/soulacy/soulacy/internal/secrets"
 	"github.com/soulacy/soulacy/pkg/agent"
 )
 
@@ -324,6 +326,62 @@ func TestMCPServerToYAML_HTTP(t *testing.T) {
 	}
 	if _, ok := out["headers"]; !ok {
 		t.Error("expected headers field")
+	}
+}
+
+func TestMCPServerToYAML_HTTPConnectionOptions(t *testing.T) {
+	body := mcpServerBody{
+		Transport: "http", URL: "https://mcp.example.com", Timeout: "45s",
+		Query: map[string]string{"region": "us-east-1"},
+		Auth: mcpAuthBody{Type: "oauth_client_credentials", TokenURL: "https://auth.example.com/token",
+			ClientID: "client-id", ClientSecretRef: "mcp.demo.client_secret", Scopes: []string{"tools.read"}},
+	}
+	out := mcpServerToYAML(body)
+	if out["timeout"] != "45s" {
+		t.Fatalf("timeout = %v", out["timeout"])
+	}
+	if _, ok := out["query"].(map[string]any); !ok {
+		t.Fatalf("query = %#v", out["query"])
+	}
+	auth, ok := out["auth"].(map[string]any)
+	if !ok || auth["client_secret_ref"] != "mcp.demo.client_secret" {
+		t.Fatalf("auth = %#v", out["auth"])
+	}
+	if _, leaked := auth["client_secret"]; leaked {
+		t.Fatal("client secret leaked into YAML")
+	}
+}
+
+func TestValidateMCPServerRejectsSensitiveQueryParameters(t *testing.T) {
+	msg := validateMCPServer(mcpServerBody{Transport: "http", URL: "https://mcp.example.com", Query: map[string]string{"api_token": "secret"}})
+	if !strings.Contains(msg, "looks sensitive") {
+		t.Fatalf("validation = %q", msg)
+	}
+}
+
+func TestCreateMCPServerMovesCredentialToVault(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	s := newTestGatewayWithCfgPath(t, "secret", cfgPath)
+	vault := newMemVault()
+	s.SetCredentialVault(vault)
+	status, body := gatewayJSON(t, s, http.MethodPost, "/api/v1/mcp", "secret",
+		`{"id":"secure-remote","transport":"http","url":"https://mcp.example.com","auth":{"type":"bearer"},"auth_secret":"never-write-me"}`)
+	if status != http.StatusCreated {
+		t.Fatalf("status=%d body=%v", status, body)
+	}
+	stored, err := vault.Get(context.Background(), secrets.GlobalScope, "mcp.secure-remote.credential")
+	if err != nil || string(stored) != "never-write-me" {
+		t.Fatalf("vault credential = %q err=%v", stored, err)
+	}
+	yamlBody, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(yamlBody), "never-write-me") {
+		t.Fatal("MCP credential leaked into config.yaml")
+	}
+	if !strings.Contains(string(yamlBody), "mcp.secure-remote.credential") {
+		t.Fatal("config is missing the vault reference")
 	}
 }
 

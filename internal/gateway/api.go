@@ -3030,13 +3030,48 @@ func maskValues(m map[string]string) map[string]string {
 // server. Mirrors config.MCPServerConfig with JSON tags so the same payload
 // can be re-marshalled back into YAML cleanly.
 type mcpServerBody struct {
-	ID        string            `json:"id"`
-	Transport string            `json:"transport"`
-	Command   string            `json:"command"`
-	Args      []string          `json:"args"`
-	Env       map[string]string `json:"env"`
-	URL       string            `json:"url"`
-	Headers   map[string]string `json:"headers"`
+	ID         string            `json:"id"`
+	Transport  string            `json:"transport"`
+	Command    string            `json:"command"`
+	Args       []string          `json:"args"`
+	Env        map[string]string `json:"env"`
+	URL        string            `json:"url"`
+	Headers    map[string]string `json:"headers"`
+	Query      map[string]string `json:"query"`
+	Auth       mcpAuthBody       `json:"auth"`
+	AuthSecret string            `json:"auth_secret"` // write-only; moved to the encrypted vault
+	Timeout    string            `json:"timeout"`
+}
+
+type mcpAuthBody struct {
+	Type            string   `json:"type"`
+	Header          string   `json:"header"`
+	Scheme          string   `json:"scheme"`
+	SecretRef       string   `json:"secret_ref"`
+	TokenURL        string   `json:"token_url"`
+	ClientID        string   `json:"client_id"`
+	ClientSecretRef string   `json:"client_secret_ref"`
+	Scopes          []string `json:"scopes"`
+	Audience        string   `json:"audience"`
+}
+
+func (a mcpAuthBody) toMCP() mcp.AuthConfig {
+	return mcp.AuthConfig{
+		Type: a.Type, Header: a.Header, Scheme: a.Scheme, SecretRef: a.SecretRef,
+		TokenURL: a.TokenURL, ClientID: a.ClientID, ClientSecretRef: a.ClientSecretRef,
+		Scopes: a.Scopes, Audience: a.Audience,
+	}
+}
+
+func parseMCPTimeout(raw string) (time.Duration, error) {
+	if strings.TrimSpace(raw) == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d < time.Second || d > 10*time.Minute {
+		return 0, fmt.Errorf("timeout must be a duration between 1s and 10m (for example, 60s)")
+	}
+	return d, nil
 }
 
 // validateMCPServer enforces the per-transport invariants. Returns "" on success
@@ -3052,6 +3087,45 @@ func validateMCPServer(body mcpServerBody) string {
 		if strings.TrimSpace(body.URL) == "" {
 			return "http transport requires a `url`"
 		}
+		u, err := url.ParseRequestURI(body.URL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return "http transport requires a valid http:// or https:// URL"
+		}
+		if u.User != nil {
+			return "credentials must not be embedded in the URL; use Authentication"
+		}
+		for key := range body.Query {
+			lower := strings.ToLower(key)
+			for _, sensitive := range []string{"token", "secret", "password", "api_key", "apikey", "authorization"} {
+				if strings.Contains(lower, sensitive) {
+					return fmt.Sprintf("query parameter %q looks sensitive; use Authentication or Headers instead", key)
+				}
+			}
+		}
+		kind := strings.ToLower(strings.TrimSpace(body.Auth.Type))
+		switch kind {
+		case "", "none":
+		case "bearer", "api_key":
+			if body.Auth.SecretRef == "" && body.AuthSecret == "" {
+				return "authentication requires a saved secret or a new credential"
+			}
+		case "oauth_client_credentials":
+			if body.Auth.TokenURL == "" || body.Auth.ClientID == "" {
+				return "OAuth client credentials requires a token URL and client ID"
+			}
+			tokenURL, err := url.ParseRequestURI(body.Auth.TokenURL)
+			if err != nil || (tokenURL.Scheme != "http" && tokenURL.Scheme != "https") || tokenURL.Host == "" || tokenURL.User != nil {
+				return "OAuth token URL must be a valid http:// or https:// URL without embedded credentials"
+			}
+			if body.Auth.ClientSecretRef == "" && body.AuthSecret == "" {
+				return "OAuth client credentials requires a saved client secret or a new client secret"
+			}
+		default:
+			return fmt.Sprintf("unknown authentication type %q", body.Auth.Type)
+		}
+		if _, err := parseMCPTimeout(body.Timeout); err != nil {
+			return err.Error()
+		}
 	default:
 		return fmt.Sprintf("unknown transport %q — expected stdio or http", body.Transport)
 	}
@@ -3061,6 +3135,7 @@ func validateMCPServer(body mcpServerBody) string {
 // mcpBodyToServerConfig converts an mcpServerBody to an mcp.ServerConfig for
 // hot-adding to the live client.
 func mcpBodyToServerConfig(body mcpServerBody) mcp.ServerConfig {
+	timeout, _ := parseMCPTimeout(body.Timeout)
 	return mcp.ServerConfig{
 		Transport: body.Transport,
 		Command:   body.Command,
@@ -3068,7 +3143,68 @@ func mcpBodyToServerConfig(body mcpServerBody) mcp.ServerConfig {
 		Env:       body.Env,
 		URL:       body.URL,
 		Headers:   body.Headers,
+		Query:     body.Query,
+		Auth:      body.Auth.toMCP(),
+		Timeout:   timeout,
 	}
+}
+
+func (s *Server) saveMCPAuthSecret(c *fiber.Ctx, body *mcpServerBody) error {
+	if body == nil || body.AuthSecret == "" {
+		return nil
+	}
+	mgr := secrets.New(s.CredentialVault())
+	if !mgr.Enabled() {
+		return fmt.Errorf("encrypted secret store is unavailable")
+	}
+	ref := body.Auth.SecretRef
+	if strings.EqualFold(body.Auth.Type, "oauth_client_credentials") {
+		ref = body.Auth.ClientSecretRef
+		if ref == "" {
+			ref = "mcp." + body.ID + ".client_secret"
+		}
+		body.Auth.ClientSecretRef = ref
+	} else {
+		if ref == "" {
+			ref = "mcp." + body.ID + ".credential"
+		}
+		body.Auth.SecretRef = ref
+	}
+	if err := mgr.Set(c.Context(), ref, body.AuthSecret); err != nil {
+		return err
+	}
+	body.AuthSecret = ""
+	return nil
+}
+
+func (s *Server) mcpSecretResolver(overrideRef, overrideValue string) func(context.Context, string) (string, error) {
+	return func(ctx context.Context, ref string) (string, error) {
+		if overrideValue != "" && ref == overrideRef {
+			return overrideValue, nil
+		}
+		if value, ok := secrets.New(s.CredentialVault()).Get(ctx, ref); ok {
+			return value, nil
+		}
+		return "", fmt.Errorf("MCP secret %q is not set", ref)
+	}
+}
+
+func (s *Server) restoreMaskedMCPBody(body *mcpServerBody) {
+	if body == nil || body.ID == "" || s.cfgPath == "" {
+		return
+	}
+	raw, err := readRawConfig(s.cfgPath)
+	if err != nil {
+		return
+	}
+	mcpMap, _ := raw["mcp"].(map[string]any)
+	servers, _ := mcpMap["servers"].(map[string]any)
+	old, _ := servers[body.ID].(map[string]any)
+	if old == nil {
+		return
+	}
+	body.Env = preserveMaskedMCPValues(body.Env, old["env"])
+	body.Headers = preserveMaskedMCPValues(body.Headers, old["headers"])
 }
 
 // handleCreateMCPServer adds a new MCP server to config.yaml and hot-connects
@@ -3088,10 +3224,10 @@ func (s *Server) handleCreateMCPServer(c *fiber.Ctx) error {
 	if !validMCPID(id) {
 		return s.errMsg(c, fiber.StatusBadRequest, "id may contain only letters, digits, '-' and '_'")
 	}
+	body.ID = id
 	if msg := validateMCPServer(body); msg != "" {
 		return s.errMsg(c, fiber.StatusBadRequest, msg)
 	}
-
 	raw, err := readRawConfig(s.cfgPath)
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
@@ -3100,6 +3236,9 @@ func (s *Server) handleCreateMCPServer(c *fiber.Ctx) error {
 	serversMap := getOrCreateMap(mcpMap, "servers")
 	if _, exists := serversMap[id]; exists {
 		return s.errMsg(c, fiber.StatusConflict, fmt.Sprintf("server %q already exists; use PATCH to edit", id))
+	}
+	if err := s.saveMCPAuthSecret(c, &body); err != nil {
+		return s.errMsg(c, fiber.StatusServiceUnavailable, err.Error())
 	}
 	serversMap[id] = mcpServerToYAML(body)
 
@@ -3142,7 +3281,6 @@ func (s *Server) handleUpdateMCPServer(c *fiber.Ctx) error {
 	if msg := validateMCPServer(body); msg != "" {
 		return s.errMsg(c, fiber.StatusBadRequest, msg)
 	}
-
 	raw, err := readRawConfig(s.cfgPath)
 	if err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
@@ -3151,6 +3289,13 @@ func (s *Server) handleUpdateMCPServer(c *fiber.Ctx) error {
 	serversMap := getOrCreateMap(mcpMap, "servers")
 	if _, exists := serversMap[id]; !exists {
 		return s.errMsg(c, fiber.StatusNotFound, fmt.Sprintf("server %q not found", id))
+	}
+	if err := s.saveMCPAuthSecret(c, &body); err != nil {
+		return s.errMsg(c, fiber.StatusServiceUnavailable, err.Error())
+	}
+	if old, ok := serversMap[id].(map[string]any); ok {
+		body.Env = preserveMaskedMCPValues(body.Env, old["env"])
+		body.Headers = preserveMaskedMCPValues(body.Headers, old["headers"])
 	}
 	serversMap[id] = mcpServerToYAML(body)
 
@@ -3221,7 +3366,14 @@ func (s *Server) handleTestMCPServer(c *fiber.Ctx) error {
 	if err := c.BodyParser(&body); err != nil {
 		return s.errJSON(c, fiber.StatusBadRequest, err)
 	}
+	s.restoreMaskedMCPBody(&body)
 	if msg := validateMCPServer(body); msg != "" {
+		// Preserve the test endpoint's established contract for malformed remote
+		// URLs: a syntactically valid test request returns 200 + ok=false so the
+		// modal can render the result inline instead of treating it as API failure.
+		if strings.Contains(msg, "valid http:// or https:// URL") {
+			return c.JSON(fiber.Map{"ok": false, "error": msg})
+		}
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"ok": false, "error": msg})
 	}
 
@@ -3239,23 +3391,20 @@ func (s *Server) handleTestMCPServer(c *fiber.Ctx) error {
 		}
 		return c.JSON(fiber.Map{"ok": true, "resolved_command": path})
 	case "http", "https":
-		req, err := http.NewRequestWithContext(c.Context(), http.MethodHead, body.URL, nil)
-		if err != nil {
+		ref := body.Auth.SecretRef
+		if strings.EqualFold(body.Auth.Type, "oauth_client_credentials") {
+			ref = body.Auth.ClientSecretRef
+		}
+		probeTimeout := s.httpRequestTimeout()
+		if configured := mcpBodyToServerConfig(body).Timeout; configured > 0 && configured < probeTimeout {
+			probeTimeout = configured
+		}
+		ctx, cancel := context.WithTimeout(c.Context(), probeTimeout)
+		defer cancel()
+		if err := mcp.ProbeHTTP(ctx, mcpBodyToServerConfig(body), s.mcpSecretResolver(ref, body.AuthSecret)); err != nil {
 			return c.JSON(fiber.Map{"ok": false, "error": err.Error()})
 		}
-		for k, v := range body.Headers {
-			req.Header.Set(k, v)
-		}
-		client := &http.Client{Timeout: 5 * time.Second}
-		resp, err := client.Do(req)
-		if err != nil {
-			return c.JSON(fiber.Map{"ok": false, "error": fmt.Sprintf("could not reach %s: %v", body.URL, err)})
-		}
-		// defer ensures we close the body regardless of which branch we return on.
-		defer resp.Body.Close()
-		// 405/501 from a HEAD is acceptable — the server is reachable, just doesn't
-		// support HEAD. Real MCP handshake happens at gateway boot.
-		return c.JSON(fiber.Map{"ok": true, "status_code": resp.StatusCode})
+		return c.JSON(fiber.Map{"ok": true, "message": "MCP handshake succeeded"})
 	}
 	return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"ok": false, "error": "unknown transport"})
 }
@@ -3289,6 +3438,40 @@ func mcpServerToYAML(body mcpServerBody) map[string]any {
 		if len(body.Headers) > 0 {
 			out["headers"] = mapToAny(body.Headers)
 		}
+		if len(body.Query) > 0 {
+			out["query"] = mapToAny(body.Query)
+		}
+		if strings.TrimSpace(body.Auth.Type) != "" && !strings.EqualFold(body.Auth.Type, "none") {
+			auth := map[string]any{"type": strings.ToLower(strings.TrimSpace(body.Auth.Type))}
+			if body.Auth.Header != "" {
+				auth["header"] = body.Auth.Header
+			}
+			if body.Auth.Scheme != "" {
+				auth["scheme"] = body.Auth.Scheme
+			}
+			if body.Auth.SecretRef != "" {
+				auth["secret_ref"] = body.Auth.SecretRef
+			}
+			if body.Auth.TokenURL != "" {
+				auth["token_url"] = body.Auth.TokenURL
+			}
+			if body.Auth.ClientID != "" {
+				auth["client_id"] = body.Auth.ClientID
+			}
+			if body.Auth.ClientSecretRef != "" {
+				auth["client_secret_ref"] = body.Auth.ClientSecretRef
+			}
+			if len(body.Auth.Scopes) > 0 {
+				auth["scopes"] = body.Auth.Scopes
+			}
+			if body.Auth.Audience != "" {
+				auth["audience"] = body.Auth.Audience
+			}
+			out["auth"] = auth
+		}
+		if strings.TrimSpace(body.Timeout) != "" {
+			out["timeout"] = body.Timeout
+		}
 	}
 	return out
 }
@@ -3301,6 +3484,29 @@ func mapToAny(m map[string]string) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+func preserveMaskedMCPValues(in map[string]string, raw any) map[string]string {
+	if len(in) == 0 || raw == nil {
+		return in
+	}
+	old := map[string]string{}
+	switch values := raw.(type) {
+	case map[string]any:
+		for key, value := range values {
+			old[key] = fmt.Sprint(value)
+		}
+	case map[string]string:
+		old = values
+	}
+	for key, value := range in {
+		if value == "***" {
+			if previous, ok := old[key]; ok {
+				in[key] = previous
+			}
+		}
+	}
+	return in
 }
 
 // handleProvisionGlama fetches an MCP server spec from the Glama registry and

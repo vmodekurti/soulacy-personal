@@ -27,6 +27,7 @@ import (
 	"github.com/soulacy/soulacy/internal/mcp"
 	"github.com/soulacy/soulacy/internal/runtime"
 	"github.com/soulacy/soulacy/internal/scheduler"
+	"github.com/soulacy/soulacy/internal/secrets"
 	"github.com/soulacy/soulacy/internal/studio"
 	"github.com/soulacy/soulacy/pkg/message"
 )
@@ -162,9 +163,23 @@ func (a *App) Run(parent context.Context) error {
 			Env:       sc.Env,
 			URL:       sc.URL,
 			Headers:   sc.Headers,
+			Query:     sc.Query,
+			Auth: mcp.AuthConfig{
+				Type: sc.Auth.Type, Header: sc.Auth.Header, Scheme: sc.Auth.Scheme,
+				SecretRef: sc.Auth.SecretRef, TokenURL: sc.Auth.TokenURL,
+				ClientID: sc.Auth.ClientID, ClientSecretRef: sc.Auth.ClientSecretRef,
+				Scopes: sc.Auth.Scopes, Audience: sc.Auth.Audience,
+			},
+			Timeout: sc.Timeout,
 		}
 	}
-	mcpClient := mcp.New(mcp.Config{Servers: mcpServers}, log)
+	resolveMCPSecret := func(ctx context.Context, name string) (string, error) {
+		if value, ok := secrets.New(credVault).Get(ctx, name); ok {
+			return value, nil
+		}
+		return "", fmt.Errorf("MCP secret %q is not set", name)
+	}
+	mcpClient := mcp.New(mcp.Config{Servers: mcpServers, ResolveSecret: resolveMCPSecret}, log)
 	stack.pushClose("mcp-client", mcpClient)
 
 	// ── Knowledge (RAG) — SQLite + sqlite-vec + Ollama embeddings ─────────────

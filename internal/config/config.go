@@ -884,6 +884,24 @@ type MCPServerConfig struct {
 	Env       map[string]string `mapstructure:"env"`       // stdio: extra env
 	URL       string            `mapstructure:"url"`       // http: server URL
 	Headers   map[string]string `mapstructure:"headers"`   // http: extra headers
+	Query     map[string]string `mapstructure:"query"`     // http: non-sensitive URL query parameters
+	Auth      MCPAuthConfig     `mapstructure:"auth"`      // http: structured authentication
+	Timeout   time.Duration     `mapstructure:"timeout"`   // http: per-request timeout
+}
+
+// MCPAuthConfig keeps authentication separate from ordinary request metadata.
+// SecretRef names a value in Soulacy's encrypted global secret store; the
+// credential itself is deliberately never serialized into config.yaml.
+type MCPAuthConfig struct {
+	Type            string   `mapstructure:"type"` // none | bearer | api_key | oauth_client_credentials
+	Header          string   `mapstructure:"header"`
+	Scheme          string   `mapstructure:"scheme"`
+	SecretRef       string   `mapstructure:"secret_ref"`
+	TokenURL        string   `mapstructure:"token_url"`
+	ClientID        string   `mapstructure:"client_id"`
+	ClientSecretRef string   `mapstructure:"client_secret_ref"`
+	Scopes          []string `mapstructure:"scopes"`
+	Audience        string   `mapstructure:"audience"`
 }
 
 // RegistryConfig describes one package registry for skill/plugin installs
@@ -1124,6 +1142,7 @@ func restoreCaseSensitiveMaps(cfg *Config, path string) {
 			Servers map[string]struct {
 				Env     map[string]string `yaml:"env"`
 				Headers map[string]string `yaml:"headers"`
+				Query   map[string]string `yaml:"query"`
 			} `yaml:"servers"`
 		} `yaml:"mcp"`
 	}
@@ -1141,6 +1160,9 @@ func restoreCaseSensitiveMaps(cfg *Config, path string) {
 		}
 		if len(rs.Headers) > 0 {
 			sc.Headers = rs.Headers
+		}
+		if len(rs.Query) > 0 {
+			sc.Query = rs.Query
 		}
 		cfg.MCP.Servers[key] = sc
 	}
