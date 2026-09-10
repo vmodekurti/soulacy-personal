@@ -478,7 +478,7 @@
     editCron    = a.schedule?.cron || ''
     editEnabled = !!a.enabled
     editOutputChannel = a.schedule?.output?.channel || ''
-    editOutputTo = a.schedule?.output?.to || ''
+    editOutputTo = editOutputChannel === 'mobile' ? 'all' : (a.schedule?.output?.to || '')
     editOutputBotName = a.schedule?.output?.bot_name || botNameForChannel(editOutputChannel)
     editOutputTemplate = a.schedule?.output?.template || ''
     editRunMissedOnStartup = !!a.schedule?.run_missed_on_startup
@@ -541,6 +541,20 @@
     for (const ch of list || []) {
       if (!ch || ch.id === 'http') continue
 
+      // Native mobile delivery is a durable broadcast destination, not a
+      // bot-backed channel. It has no token/default_output_to setting and must
+      // still be available to scheduled agents.
+      if (ch.id === 'mobile') {
+        pushOpt({
+          channel: 'mobile',
+          bot_name: ch.name || 'Soulacy Mobile',
+          agent_id: '',
+          connected: !!ch.status?.connected,
+          label: `${ch.name || 'Soulacy Mobile'} (all paired devices)`,
+        })
+        continue
+      }
+
       // Channel-level DEFAULT OUTBOUND sender — the target for cron/scheduled
       // output that isn't routed through a per-agent bot. This was previously
       // omitted, so Telegram's default outbound never appeared as an option.
@@ -586,6 +600,7 @@
   function selectOutputChannel(channelID) {
     editOutputChannel = channelID
     editOutputBotName = botNameForChannel(channelID)
+    if (channelID === 'mobile') editOutputTo = 'all'
   }
   function outputSummary(a) {
     const out = a.schedule?.output
@@ -885,10 +900,10 @@ schedule:
           {#if outputBotOptions.length === 0}<em>No channel bots configured</em>{/if}
         </div>
         <div class="field-help output-help">
-          Add or rotate Telegram output bot tokens in <a href="#channels">Delivery</a>, then restart the gateway and select the bot here.
+          Choose a connected delivery channel. Soulacy Mobile sends to every paired device; bot channels use their configured destination.
         </div>
         <label class="field">
-          <span class="field-label">Bot</span>
+          <span class="field-label">Delivery channel</span>
           <select value={editOutputChannel} on:change={(e) => selectOutputChannel(e.currentTarget.value)} disabled={outputBotOptions.length === 0}>
             <option value="">Do not send output</option>
             {#each outputBotOptions as opt}
@@ -897,12 +912,16 @@ schedule:
           </select>
           <span class="field-help">The scheduler sends the agent reply through this channel adapter ID.</span>
         </label>
-        {#if editOutputChannel}
+        {#if editOutputChannel === 'mobile'}
+          <div class="field-help">Results will be retained in the app inbox and pushed to all paired iPhones.</div>
+        {:else if editOutputChannel}
           <label class="field">
             <span class="field-label">Destination ID</span>
             <input type="text" bind:value={editOutputTo} placeholder="Telegram chat ID, Slack channel ID, Discord channel ID, or WhatsApp number" />
             <span class="field-help">This becomes the outbound message thread/chat/channel/user ID for the selected bot.</span>
           </label>
+        {/if}
+        {#if editOutputChannel}
           <label class="field">
             <span class="field-label">Bot name</span>
             <input type="text" bind:value={editOutputBotName} placeholder="Friendly bot name" />

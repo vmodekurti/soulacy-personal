@@ -55,6 +55,10 @@ func TestAPNsPushUsesProviderTokenAndGenericPayload(t *testing.T) {
 	if body["delivery_id"] != "delivery-1" || body["deep_link"] != "soulacy://delivery/delivery-1" {
 		t.Fatalf("payload routing fields = %#v", body)
 	}
+	aps, ok := body["aps"].(map[string]any)
+	if !ok || aps["content-available"] != float64(1) {
+		t.Fatalf("push must wake the app to refresh its durable inbox: %#v", body["aps"])
+	}
 	if strings.Contains(string(mustJSON(t, body)), "private result") {
 		t.Fatal("push payload exposed durable result content")
 	}
