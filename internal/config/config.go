@@ -973,10 +973,15 @@ func Load(cfgPath string) (*Config, string, error) {
 	v.SetDefault("runtime.retention.conversation_history", "720h") // 30 days
 	v.SetDefault("runtime.retention.action_events", "2160h")       // 90 days
 	v.SetDefault("runtime.retention.audit_logs", "720h")           // 30 days
-	v.SetDefault("runtime.default_budget.max_tokens", 100000)
-	v.SetDefault("runtime.default_budget.max_llm_calls", 20)
-	v.SetDefault("runtime.max_budget.max_tokens", 1000000)
-	v.SetDefault("runtime.max_budget.max_llm_calls", 100)
+	// Multi-step agents repeatedly submit their growing history and tool schemas.
+	// The old 100k/20 defaults could stop a capable tool-heavy agent after only a
+	// few turns. Keep a finite runaway guard, but make ordinary research and MCP
+	// workflows practical. Operators can set either dimension to 0 for unlimited
+	// execution while usage monitoring remains active.
+	v.SetDefault("runtime.default_budget.max_tokens", 500000)
+	v.SetDefault("runtime.default_budget.max_llm_calls", 50)
+	v.SetDefault("runtime.max_budget.max_tokens", 2000000)
+	v.SetDefault("runtime.max_budget.max_llm_calls", 200)
 	// PRODUCTION_AUDIT → F1: sandbox defaults ON with conservative caps
 	// suitable for typical agent tools. Disable per-deployment by setting
 	// runtime.sandbox.enabled=false. Limits = 0 means "no cap for that knob"

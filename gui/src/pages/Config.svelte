@@ -60,6 +60,10 @@
   let maxTurns    = 20
   let maxSessions = 100
   let maxAgentCallDepth = 5
+  let defaultBudgetTokens = 500000
+  let defaultBudgetCalls = 50
+  let maxBudgetTokens = 2000000
+  let maxBudgetCalls = 200
   let defaultProvider = ''
   let providerOptions = []   // configured llm.providers names (for the dropdown)
   let providerDefaults = {}   // provider id -> configured default model
@@ -283,6 +287,10 @@
       maxTurns        = config.runtime?.default_max_turns       || 20
       maxSessions     = config.runtime?.max_concurrent_sessions || 100
       maxAgentCallDepth = config.runtime?.max_agent_call_depth || 5
+      defaultBudgetTokens = config.runtime?.default_budget?.max_tokens ?? 500000
+      defaultBudgetCalls = config.runtime?.default_budget?.max_llm_calls ?? 50
+      maxBudgetTokens = config.runtime?.max_budget?.max_tokens ?? 2000000
+      maxBudgetCalls = config.runtime?.max_budget?.max_llm_calls ?? 200
       defaultProvider = config.llm?.default_provider || ''
       providerOptions = Object.keys(config.llm?.providers || {})
       // Make sure the current value is selectable even if it isn't a
@@ -370,6 +378,14 @@
           default_max_turns:       Number(maxTurns),
           max_concurrent_sessions: Number(maxSessions),
           max_agent_call_depth:    Number(maxAgentCallDepth),
+          default_budget: {
+            max_tokens: Number(defaultBudgetTokens || 0),
+            max_llm_calls: Number(defaultBudgetCalls || 0),
+          },
+          max_budget: {
+            max_tokens: Number(maxBudgetTokens || 0),
+            max_llm_calls: Number(maxBudgetCalls || 0),
+          },
         },
         executor: {
           backend: executorBackend,
@@ -896,6 +912,31 @@
               <label for="max-agent-call-depth" data-tooltip="Caps recursive peer-agent delegation chains. Raise for deeper coordinator teams; lower to stop accidental loops sooner. Default is 5.">Max agent-call depth</label>
               <input id="max-agent-call-depth" type="number" bind:value={maxAgentCallDepth} min="1" max="50" disabled={!writable} />
             </div>
+          </div>
+          <h3>Agent run budgets</h3>
+          <p class="hint">
+            These limits cover an entire run, not one response. Input history and tool schemas are
+            counted again on each model call, so tool-heavy agents need substantially more than their
+            visible answer length. Set a value to <strong>0</strong> for unlimited execution; usage and
+            estimated cost reporting continue even when enforcement is unlimited.
+          </p>
+          <div class="budget-row">
+            <label class="field cost-rate">
+              <span data-tooltip="Default total input + output tokens available to an agent run. 0 means unlimited.">Default run tokens</span>
+              <input type="number" min="0" step="10000" bind:value={defaultBudgetTokens} disabled={!writable} />
+            </label>
+            <label class="field cost-rate">
+              <span data-tooltip="Default number of model calls available to one run. Tool calls often require another model call. 0 means unlimited.">Default model calls</span>
+              <input type="number" min="0" step="1" bind:value={defaultBudgetCalls} disabled={!writable} />
+            </label>
+            <label class="field cost-rate">
+              <span data-tooltip="Highest token budget an individual agent may request. 0 removes the workspace ceiling.">Per-agent token ceiling</span>
+              <input type="number" min="0" step="10000" bind:value={maxBudgetTokens} disabled={!writable} />
+            </label>
+            <label class="field cost-rate">
+              <span data-tooltip="Highest model-call budget an individual agent may request. 0 removes the workspace ceiling.">Per-agent call ceiling</span>
+              <input type="number" min="0" step="1" bind:value={maxBudgetCalls} disabled={!writable} />
+            </label>
           </div>
         </div>
 
