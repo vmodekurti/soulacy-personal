@@ -57,11 +57,25 @@ type Claims struct {
 // resource. Scopes only ever NARROW: a credential with none is unrestricted,
 // and one with scopes must still satisfy its role on top of this.
 func (c *Claims) AllowsResource(resource string) bool {
+	return c.Allows(resource, "")
+}
+
+// Allows reports whether a scoped credential permits one resource action.
+// Resource-only scopes retain their historical meaning, while resource:action
+// scopes let clients receive the minimum permission they need.
+func (c *Claims) Allows(resource, action string) bool {
 	if c == nil || len(c.Scopes) == 0 {
 		return true
 	}
 	for _, s := range c.Scopes {
-		if strings.EqualFold(strings.TrimSpace(s), resource) {
+		s = strings.TrimSpace(s)
+		if strings.EqualFold(s, resource) || strings.EqualFold(s, resource+":*") || (action != "" && strings.EqualFold(s, resource+":"+action)) {
+			return true
+		}
+		// Devices paired before action-scoped agent access carried only `chat`.
+		// Choosing a chat agent requires reading the directory, so preserve that
+		// one read-only implication without permitting agent management.
+		if strings.EqualFold(s, "chat") && strings.EqualFold(resource, "agents") && strings.EqualFold(action, "read") {
 			return true
 		}
 	}

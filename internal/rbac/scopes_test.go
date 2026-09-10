@@ -44,6 +44,19 @@ func TestScopedCredentialStillReachesItsOwnScopes(t *testing.T) {
 	}
 }
 
+func TestLegacyMobileChatScopeCanReadButNotManageAgentDirectory(t *testing.T) {
+	phone := &auth.Claims{Role: "operator", Scopes: []string{"chat", "memory", "config"}}
+
+	if !phone.Allows(ResourceAgents, ActionRead) {
+		t.Fatal("an already-paired phone cannot read the agent directory needed for chat")
+	}
+	for _, action := range []string{ActionWrite, ActionDelete, ActionEnable} {
+		if phone.Allows(ResourceAgents, action) {
+			t.Fatalf("legacy chat scope unexpectedly allows agents:%s", action)
+		}
+	}
+}
+
 // Everything that existed before this change has no scopes, and must keep
 // working exactly as it did — a JWT, the static admin key, an older API key.
 func TestUnscopedCredentialsAreUnrestricted(t *testing.T) {
