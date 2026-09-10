@@ -34,6 +34,7 @@ import (
 
 	"github.com/soulacy/soulacy/internal/actionlog"
 	"github.com/soulacy/soulacy/internal/memory"
+	"github.com/soulacy/soulacy/internal/redact"
 	"github.com/soulacy/soulacy/internal/storage"
 	"github.com/soulacy/soulacy/pkg/message"
 )
@@ -124,6 +125,9 @@ func (a *ActionLog) Append(ev message.Event) {
 	if ev.Timestamp.IsZero() {
 		ev.Timestamp = time.Now().UTC()
 	}
+	// Match the SQLite persistence boundary: durable logs must never retain
+	// credentials that appeared in tool arguments, headers, or results.
+	ev.Payload = redact.Value(ev.Payload)
 	select {
 	case a.queue <- ev:
 	default:
@@ -352,7 +356,9 @@ func (a *ActionLog) QueryEvents(agentID, sessionID string, limit int, allowed ma
 		if len(payload) > 0 && string(payload) != "null" {
 			var decoded any
 			if err := json.Unmarshal(payload, &decoded); err == nil {
-				ev.Payload = decoded
+				// Redact on read as well so rows written by older releases cannot
+				// leak credential-shaped values through the new query endpoints.
+				ev.Payload = redact.Value(decoded)
 			} else {
 				ev.Payload = string(payload)
 			}
