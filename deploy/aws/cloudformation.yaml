@@ -1,0 +1,221 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Soulacy Personal - secure single-VM deployment with PostgreSQL, Qdrant, and HTTPS.
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: t3.small
+    AllowedValues: [t3.small, t3.medium, t3.large, t3.xlarge, t4g.small, t4g.large, t4g.xlarge]
+    Description: t3.small is the economical starting point; t3.large is recommended for heavier agents.
+  ImageVersion:
+    Type: String
+    Default: latest
+    AllowedPattern: "^[A-Za-z0-9._-]+$"
+    Description: GHCR image tag to deploy.
+  ReleaseRef:
+    Type: String
+    Default: main
+    AllowedPattern: "^[A-Za-z0-9._/-]+$"
+    Description: Git tag or branch containing the matching cloud bootstrap assets.
+  Amd64Ami:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+  Arm64Ami:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/arm64/hvm/ebs-gp3/ami-id
+
+Mappings:
+  Architecture:
+    t3.small: {Arch: amd64}
+    t3.medium: {Arch: amd64}
+    t3.large: {Arch: amd64}
+    t3.xlarge: {Arch: amd64}
+    t4g.small: {Arch: arm64}
+    t4g.large: {Arch: arm64}
+    t4g.xlarge: {Arch: arm64}
+
+Conditions:
+  IsArm: !Equals [!FindInMap [Architecture, !Ref InstanceType, Arch], arm64]
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.91.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags: [{Key: Name, Value: soulacy-personal}]
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  GatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.91.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags: [{Key: Name, Value: soulacy-public}]
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  DefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayAttachment
+    Properties:
+      RouteTableId: !Ref RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  SubnetRouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref RouteTable
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: HTTPS access to Soulacy Personal; no inbound SSH.
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0, Description: ACME and HTTPS redirect}
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0, Description: Soulacy HTTPS}
+
+  PublicIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags: [{Key: Name, Value: soulacy-personal}]
+
+  LoginSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Generated Soulacy Personal browser login key.
+      GenerateSecretString:
+        SecretStringTemplate: '{"purpose":"soulacy-personal"}'
+        GenerateStringKey: api_key
+        PasswordLength: 48
+        ExcludePunctuation: true
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ec2.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: ReadSoulacyLoginSecret
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref LoginSecret
+              - Effect: Allow
+                Action: cloudformation:SignalResource
+                Resource: !Ref AWS::StackId
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref InstanceRole]
+
+  Instance:
+    Type: AWS::EC2::Instance
+    DependsOn: DefaultRoute
+    CreationPolicy:
+      ResourceSignal:
+        Count: 1
+        Timeout: PT20M
+    Properties:
+      ImageId: !If
+        - IsArm
+        - !Ref Arm64Ami
+        - !Ref Amd64Ami
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref InstanceProfile
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds: [!Ref SecurityGroup]
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: 40
+            Encrypted: true
+            DeleteOnTermination: true
+      Tags:
+        - {Key: Name, Value: soulacy-personal}
+      UserData:
+        Fn::Base64: !Sub |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec > >(tee /var/log/soulacy-bootstrap.log | logger -t soulacy-bootstrap) 2>&1
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl jq unzip
+          case "$(uname -m)" in
+            x86_64) AWSCLI_ARCH=x86_64 ;;
+            aarch64|arm64) AWSCLI_ARCH=aarch64 ;;
+            *) echo "Unsupported architecture" >&2; exit 1 ;;
+          esac
+          curl --fail --silent --show-error --location "https://awscli.amazonaws.com/awscli-exe-linux-$AWSCLI_ARCH.zip" -o /tmp/awscliv2.zip
+          unzip -q /tmp/awscliv2.zip -d /tmp
+          /tmp/aws/install
+          SECRET_JSON=$(aws secretsmanager get-secret-value --region ${AWS::Region} --secret-id '${LoginSecret}' --query SecretString --output text)
+          export SOULACY_API_KEY=$(printf '%s' "$SECRET_JSON" | jq -r .api_key)
+          export SOULACY_DOMAIN='${PublicIP}.sslip.io'
+          export SOULACY_VERSION='${ImageVersion}'
+          export SOULACY_RELEASE_REF='${ReleaseRef}'
+          curl --fail --silent --show-error --location "https://raw.githubusercontent.com/vmodekurti/soulacy-personal/${ReleaseRef}/deploy/common/bootstrap.sh" -o /tmp/soulacy-bootstrap.sh
+          chmod 0700 /tmp/soulacy-bootstrap.sh
+          /tmp/soulacy-bootstrap.sh
+          aws cloudformation signal-resource --region '${AWS::Region}' --stack-name '${AWS::StackName}' --logical-resource-id Instance --unique-id soulacy-bootstrap --status SUCCESS
+
+  IPAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt PublicIP.AllocationId
+      InstanceId: !Ref Instance
+
+  RecoveryAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Recover the Soulacy VM after an AWS system failure.
+      Namespace: AWS/EC2
+      MetricName: StatusCheckFailed_System
+      Dimensions: [{Name: InstanceId, Value: !Ref Instance}]
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      AlarmActions: [!Sub "arn:${AWS::Partition}:automate:${AWS::Region}:ec2:recover"]
+
+Outputs:
+  SoulacyURL:
+    Description: Open after the stack reaches CREATE_COMPLETE. DNS and TLS can take another minute.
+    Value: !Sub "https://${PublicIP}.sslip.io"
+  LoginSecretARN:
+    Description: Open this secret in AWS Secrets Manager and retrieve the api_key field once to log in.
+    Value: !Ref LoginSecret
+  LoginKeyCommand:
+    Description: Alternative CLI command for retrieving the generated login key.
+    Value: !Sub "aws secretsmanager get-secret-value --region ${AWS::Region} --secret-id ${LoginSecret} --query SecretString --output text"

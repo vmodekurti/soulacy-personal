@@ -1,0 +1,86 @@
+name: soulacy
+
+services:
+  soulacy:
+    image: ghcr.io/vmodekurti/soulacy-personal:${SOULACY_VERSION:-latest}
+    restart: unless-stopped
+    volumes:
+      - soulacy_data:/home/soulacy/.soulacy
+    environment:
+      SOULACY_STORAGE_BACKEND: postgres
+      SOULACY_STORAGE_POSTGRES_DSN: postgres://soulacy:${POSTGRES_PASSWORD}@postgres:5432/soulacy?sslmode=disable
+      SOULACY_STORAGE_POSTGRES_LOG_DIR: /home/soulacy/.soulacy/logs
+      SOULACY_VECTOR_BACKEND: qdrant
+      SOULACY_VECTOR_URL: http://qdrant:6333
+      SOULACY_VECTOR_COLLECTION: soulacy_memory
+      SOULACY_VECTOR_DIMS: 768
+      SOULACY_SERVER_HOST: 0.0.0.0
+      SOULACY_SERVER_API_KEY: ${SOULACY_API_KEY}
+      SOULACY_AUTH_MODE: jwt
+      SOULACY_AUTH_JWT_SECRET: ${SOULACY_JWT_SECRET}
+      SOULACY_AUTH_JWT_REFRESH_TTL: 720h
+      SOULACY_EXECUTOR_BACKEND: pool
+      SOULACY_EXECUTOR_WORKERS: 4
+      SOULACY_DEPLOYMENT_PROFILE: production
+      SOULACY_SECURITY_INTENT_GATE: deny
+      SOULACY_RUNTIME_SANDBOX_ENABLED: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    networks: [internal]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:18789/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  postgres:
+    image: postgres:16.4-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: soulacy
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: soulacy
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U soulacy"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks: [internal]
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks: [internal]
+
+  caddy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SOULACY_DOMAIN: ${SOULACY_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [soulacy]
+    networks: [internal]
+
+volumes:
+  soulacy_data:
+  postgres_data:
+  qdrant_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  internal:

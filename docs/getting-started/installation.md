@@ -2,6 +2,15 @@
 
 The fastest path is the one-command installer — it brings its own dependencies.
 
+## One-click cloud
+
+Prefer a hosted VM? Launch the complete Postgres + Qdrant stack from the
+**Deploy to AWS** or **Deploy to Azure** buttons on
+[soulacy.io](https://soulacy.io/#cloud). Both paths create an HTTPS endpoint
+without exposing SSH or the data services. See the
+[cloud deployment guide](../deployment/cloud.md) for the exact resources and
+operating model.
+
 ## One command (macOS / Linux — recommended)
 
 ```bash
