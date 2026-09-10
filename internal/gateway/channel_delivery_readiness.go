@@ -44,7 +44,7 @@ func (s *Server) channelDeliveryReadiness() channelDeliveryReadiness {
 	}
 	targets := make([]channelDeliveryTarget, 0)
 	for _, spec := range channelSpecs {
-		if spec.Always {
+		if spec.Always && spec.ID != "mobile" {
 			continue
 		}
 		cfg := map[string]any{}
@@ -56,6 +56,9 @@ func (s *Server) channelDeliveryReadiness() channelDeliveryReadiness {
 		}
 		enabled := channelEnabled(spec, cfg)
 		defaultTo := channelDefaultDestination(cfg, spec.ID, spec.ID)
+		if spec.ID == "mobile" && defaultTo == "" {
+			defaultTo = "all"
+		}
 		if spec.ID == "webhook" && defaultTo == "" && valuePresent(cfg["url"]) {
 			defaultTo = "configured webhook URL"
 		}
@@ -119,6 +122,9 @@ func (s *Server) channelDeliveryReadiness() channelDeliveryReadiness {
 }
 
 func channelHasDefaultDeliveryTarget(channelID string, cfg map[string]any) bool {
+	if channelID == "mobile" {
+		return true
+	}
 	if cfg == nil {
 		return false
 	}
@@ -175,7 +181,7 @@ func (s *Server) channelDeliveryTarget(spec channelSpec, adapterID, label, mode,
 		target.Next = "Select an agent for this bot mapping or mark it send-only."
 		return target
 	}
-	if outbound && strings.TrimSpace(to) == "" && adapterID != "webhook" && adapterID != "teams" && adapterID != "google_chat" {
+	if outbound && strings.TrimSpace(to) == "" && adapterID != "webhook" && adapterID != "teams" && adapterID != "google_chat" && adapterID != "mobile" {
 		target.Status = "fail"
 		target.Issue = "Outbound destination is missing."
 		target.Next = "Set default_output_to for this channel or bot mapping."

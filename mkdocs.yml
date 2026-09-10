@@ -184,6 +184,7 @@ nav:
     - Webhook: channels/webhook.md
     - WhatsApp: channels/whatsapp.md
     - HTTP: channels/http.md
+    - Soulacy Mobile: channels/mobile.md
     - Custom Sidecar Channels: channels/sidecars.md
   - Configuration:
     - Overview: configuration/index.md

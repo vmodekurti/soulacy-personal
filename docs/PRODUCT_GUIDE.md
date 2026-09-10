@@ -84,7 +84,7 @@ Enable `learning.enabled` on an agent and successful runs produce reviewable pro
 
 ## The mobile companion
 
-The GUI is an installable PWA. On the **Mobile** page you can pair a phone (generate a code on one device, enter it on the other), enable push notifications, use Pocket Chat with any chat-ready agent, trigger scheduled jobs, test channel delivery, and review or resolve pending tool approvals. Pairing issues a scoped credential so the phone can reach the gateway.
+The GUI is an installable PWA, and the native iOS companion uses the same authenticated gateway. On the **Mobile** page you can pair a phone (generate a code on one device, enter it on the other), enable push notifications, use Pocket Chat with any chat-ready agent, trigger scheduled jobs, test channel delivery, and review or resolve pending tool approvals. Pairing issues a scoped credential so the phone can reach the gateway. Agents and schedules can publish durable native inbox results through `output.channel: mobile`; APNs is an optional wake-up signal rather than the source of truth.
 
 The companion page also works as a small operations console: active and recent runs link directly to Activity, scheduled agents can be started or have their output path tested, and Delivery Health shows each configured channel or bot mapping with a dry check and a live send-test action.
 

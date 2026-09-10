@@ -26,7 +26,7 @@ The remaining parity work is not "add more primitives." It is productization: li
 | Onboarding | `openclaw onboard` | `sy onboard` plus GUI First Run | Closed |
 | Daemon | CLI-managed daemon | `sy daemon` for service lifecycle | Closed |
 | Doctor | Broad doctor checks | `sy doctor`, GUI/API provider and channel doctor, support bundle, live browser/mobile/chat readiness artifacts, mobile delivery checks | Mostly closed; keep expanding from real failures |
-| Channels | Very broad channel list | HTTP, Telegram, Slack, Discord, Email/SMTP, Teams, Google Chat, WhatsApp/WhatsApp Web, plus webhook/MCP extension path | Strong MVP coverage; keep adding adapters from real demand |
+| Channels | Very broad channel list | Soulacy Mobile, HTTP, Telegram, Slack, Discord, Email/SMTP, Teams, Google Chat, WhatsApp/WhatsApp Web, plus webhook/MCP extension path | Strong MVP coverage; keep adding adapters from real demand |
 | MCP client | External MCP tools | External MCP tools | Closed |
 | MCP server | Exposes OpenClaw to MCP clients | `sy mcp serve` exposes agents, chat, schedules, Workboard, KB, queues | Closed |
 | Browser automation | Native/plugin browser control | Playwright MCP sidecar, headless template, process cleanup, per-agent domain policy docs, Browser trace page/API, trace export, screenshot gallery, and authenticated local screenshot serving | Closed for MVP |
@@ -34,7 +34,7 @@ The remaining parity work is not "add more primitives." It is productization: li
 | Studio/canvas | Assistant canvas/workflow surfaces | Studio workflow canvas, ReAct/Plan-Execute authoring, self-heal, run traces | Stronger for auditable workflows |
 | Memory/learning | Persistent memory and skill learning | Episodic/semantic/procedural memory, proposals, accepted skill injection | Strong, still needs polished narrative |
 | Queues | Plugin/storage primitives | Built-in ephemeral queue tools and GUI | Closed |
-| Mobile companion | Native apps | Responsive Mobile operations page with Pocket Chat, approvals, active runs, retained run history, schedule actions, delivery checks, PWA install signals, and run-review readiness | MVP closed; native app remains deferred |
+| Mobile companion | Native apps | Native iOS companion plus responsive Mobile operations page, with a durable agent-result inbox, device-scoped read receipts, Pocket Chat, approvals, active runs, retained run history, schedule actions, delivery checks, and PWA fallback | iOS delivery contract shipped; continue native distribution and APNs relay operations |
 | Voice | Voice/wake/talk-back | Chat push-to-talk voice MVP with ephemeral OpenAI Realtime keys, readiness/parity visibility, and safe key handling | **Not v1 scope** (`docs/LAUNCH_STRATEGY.md` §9 decision 3). The Chat push-to-talk MVP is present but deliberately not marketed for v1.0.0 — the security wedge is the launch narrative and voice dilutes it. Re-scope post-launch if voice becomes a differentiator worth investing in. |
 | Auto-update | npm/Sparkle-style update story | Manifest-backed `sy update check/install`, checksum verification, dry-run, backups, rollback docs, readiness/support-bundle visibility, signed release artifacts, SBOM, and optional macOS codesign/notarization | MVP closed |
 

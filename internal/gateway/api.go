@@ -1529,6 +1529,7 @@ var channelSpecs = []channelSpec{
 		{Key: "default_output_to", Label: "Default output destination", Type: "password", Required: false, Secret: true, Help: "Optional override URL used by scheduled agents. Leave empty to use Webhook URL."},
 		{Key: "default_output_template", Label: "Default output template", Type: "text", Required: false, Help: "Optional scheduled-output wrapper; use {reply}, {agent_id}, {agent_name}, {trigger}, {timestamp}"},
 	}},
+	{ID: "mobile", Name: "Soulacy Mobile", Always: true, Fields: nil},
 }
 
 func channelSpecByID(id string) *channelSpec {
@@ -1886,6 +1887,9 @@ func (s *Server) handleTestChannelDelivery(c *fiber.Ctx) error {
 	to := firstNonBlank(req.To, req.Destination, req.ChatID, req.ChannelID)
 	if to == "" {
 		to = channelDefaultDestination(cfg, id, adapterID)
+	}
+	if to == "" && adapterID == "mobile" {
+		to = "all"
 	}
 	if to == "" && adapterID != "webhook" && adapterID != "teams" && adapterID != "google_chat" {
 		return s.errMsg(c, fiber.StatusBadRequest, "destination is required; provide to or configure default_output_to")

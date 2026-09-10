@@ -182,6 +182,21 @@ func TestGatewayHandleTestChannelDelivery_UsesConfiguredDefaultDestination(t *te
 	}
 }
 
+func TestGatewayHandleTestChannelDelivery_MobileDefaultsToAllDevices(t *testing.T) {
+	s := newTestGateway(t, "secret")
+	adp := &channelDeliveryTestAdapter{id: "mobile"}
+	s.channels.Register(adp)
+
+	status, res := gatewayJSON(t, s, http.MethodPost, "/api/v1/channels/mobile/test", "secret", `{"text":"hello phone"}`)
+	if status != http.StatusOK {
+		t.Fatalf("mobile channel test status = %d body=%v", status, res)
+	}
+	msg, ok := adp.last()
+	if !ok || msg.Channel != "mobile" || msg.ThreadID != "all" {
+		t.Fatalf("mobile test should broadcast to all registered devices: %+v", msg)
+	}
+}
+
 func TestGatewayHandleTestChannelDelivery_UsesBotMappingAdapterAndDefaultDestination(t *testing.T) {
 	s := newTestGateway(t, "secret")
 	adp := &channelDeliveryTestAdapter{id: "slack-research-librarian"}
