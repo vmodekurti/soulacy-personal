@@ -446,6 +446,40 @@ func TestPostgresActionLogAppendTail(t *testing.T) {
 	}
 }
 
+// A production gateway commonly sits idle for longer than the flush interval
+// before its first automation fires. The timer must remain periodic; otherwise
+// sparse run events stay buffered forever and both Automation History and the
+// per-agent log appear empty until 256 events accumulate or the process exits.
+func TestPostgresActionLogFlushesFirstEventAfterIdle(t *testing.T) {
+	al, _, _ := testStores(t)
+	time.Sleep(2 * batchFlushInterval)
+	al.Append(message.Event{
+		AgentID: "idle-agent", SessionID: "manual-idle-1", Type: "message.in",
+		Payload:   map[string]any{"metadata": map[string]string{"trigger": "manual"}},
+		Timestamp: time.Now().UTC(),
+	})
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		events, err := al.QueryEvents("idle-agent", "manual-idle-1", 10, nil)
+		if err != nil {
+			t.Fatalf("QueryEvents: %v", err)
+		}
+		if len(events) == 1 {
+			stats, err := al.SessionStats("idle-agent", "manual-idle-1")
+			if err != nil {
+				t.Fatalf("SessionStats: %v", err)
+			}
+			if stats.Events != 1 {
+				t.Fatalf("SessionStats events = %d, want 1", stats.Events)
+			}
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatal("event appended after idle was not flushed")
+}
+
 // TestPostgresActionLogTailEmpty verifies Tail on an unknown agent returns an
 // empty slice (not an error) — matches the SQLite backend's behaviour.
 func TestPostgresActionLogTailEmpty(t *testing.T) {
