@@ -62,7 +62,7 @@ func (s *Server) handleRedeemPairingToken(c *fiber.Ctx) error {
 	// On a verified redeem, mint a scoped mobile credential so the phone can call
 	// the gateway (chat, approvals, push). Returned once — the client stores it.
 	if s.apiKeyStore != nil {
-		plaintext, key, err := s.apiKeyStore.Create(c.Context(), "mobile-companion", []string{"chat", "memory", "config"})
+		plaintext, key, err := s.apiKeyStore.Create(c.Context(), "mobile-companion", []string{"chat", "agents:read", "memory", "config"})
 		if err != nil {
 			return s.errMsg(c, fiber.StatusInternalServerError, "paired but could not issue credential: "+err.Error())
 		}
