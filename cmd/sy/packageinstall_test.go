@@ -139,6 +139,33 @@ func TestCopyPackageDirRejectsSymlink(t *testing.T) {
 	}
 }
 
+func TestWriteManagedMCPLauncherDoesNotResolveOutsideRoot(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "mcp-servers", "weather-server")
+	launcher, err := writeManagedMCPLauncher(dest, "python", `exec "${0%/*}/../venv/bin/python" "$@"`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(launcher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := filepath.EvalSymlinks(filepath.Dir(dest))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel, err := filepath.Rel(root, resolved)
+	if err != nil || rel == ".." || len(rel) >= 3 && rel[:3] == "../" {
+		t.Fatalf("launcher resolved outside managed root: %q (%v)", resolved, err)
+	}
+	info, err := os.Stat(launcher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&0o111 == 0 {
+		t.Fatalf("launcher is not executable: %v", info.Mode())
+	}
+}
+
 func TestDiscoverExternalMCPBundleFixture(t *testing.T) {
 	root := os.Getenv("SOULACY_TEST_MCP_BUNDLE")
 	if root == "" {

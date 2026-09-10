@@ -661,7 +661,11 @@ func installMCPRuntime(ctx context.Context, dest, sourceDir, discoveredEntrypoin
 		if out, err := exec.CommandContext(installCtx, pip, pipArgs...).CombinedOutput(); err != nil {
 			return "", nil, fmt.Errorf("install Python MCP dependencies: %v: %s", err, tailText(string(out), 4000))
 		}
-		return filepath.Join(venv, "bin", "python"), []string{filepath.Join(sourceDir, discoveredEntrypoint)}, nil
+		launcher, err := writeManagedMCPLauncher(dest, "python", `exec "${0%/*}/../venv/bin/python" "$@"`)
+		if err != nil {
+			return "", nil, err
+		}
+		return launcher, []string{filepath.Join(sourceDir, discoveredEntrypoint)}, nil
 	}
 
 	if fileExists(filepath.Join(sourceDir, "package.json")) {
@@ -676,10 +680,18 @@ func installMCPRuntime(ctx context.Context, dest, sourceDir, discoveredEntrypoin
 			return "", nil, fmt.Errorf("install Node MCP dependencies: %v: %s", err, tailText(string(out), 4000))
 		}
 		if bin := firstNodeBin(project.Bin); bin != "" {
-			return "node", []string{filepath.Join(sourceDir, bin)}, nil
+			launcher, err := writeManagedMCPLauncher(dest, "node", `exec node "$@"`)
+			if err != nil {
+				return "", nil, err
+			}
+			return launcher, []string{filepath.Join(sourceDir, bin)}, nil
 		}
 		if _, ok := project.Scripts["start"]; ok {
-			return "npm", []string{"--prefix", sourceDir, "start"}, nil
+			launcher, err := writeManagedMCPLauncher(dest, "npm", `exec npm "$@"`)
+			if err != nil {
+				return "", nil, err
+			}
+			return launcher, []string{"--prefix", sourceDir, "start"}, nil
 		}
 		return "", nil, fmt.Errorf("node MCP repository has neither a bin entry nor a start script")
 	}
@@ -711,9 +723,33 @@ func installMCPRuntime(ctx context.Context, dest, sourceDir, discoveredEntrypoin
 				return "", nil, fmt.Errorf("install legacy Python MCP dependencies: %v: %s", err, tailText(string(out), 4000))
 			}
 		}
-		return filepath.Join(venv, "bin", "python"), []string{server}, nil
+		launcher, err := writeManagedMCPLauncher(dest, "python", `exec "${0%/*}/../venv/bin/python" "$@"`)
+		if err != nil {
+			return "", nil, err
+		}
+		return launcher, []string{server}, nil
 	}
 	return "", nil, fmt.Errorf("MCP repository has no supported Python or Node package manifest")
+}
+
+// writeManagedMCPLauncher creates an installer-owned executable beneath the
+// managed MCP directory. Python virtual environments commonly implement
+// bin/python as a symlink to the host interpreter; registering that symlink
+// directly is correctly rejected by the runtime's anti-escape check. The
+// fixed launcher remains beneath the managed root while delegating to the
+// environment that the installer created. launchLine is always a hard-coded
+// installer value, never package-controlled input.
+func writeManagedMCPLauncher(dest, name, launchLine string) (string, error) {
+	binDir := filepath.Join(dest, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		return "", fmt.Errorf("create managed MCP launcher directory: %w", err)
+	}
+	path := filepath.Join(binDir, "soulacy-mcp-"+name)
+	body := []byte("#!/bin/sh\nset -eu\n" + launchLine + "\n")
+	if err := os.WriteFile(path, body, 0o700); err != nil {
+		return "", fmt.Errorf("write managed MCP launcher: %w", err)
+	}
+	return path, nil
 }
 
 var pythonMinimumPattern = regexp.MustCompile(`(?:^|,)\s*>=\s*([0-9]+)\.([0-9]+)(?:\.([0-9]+))?`)
