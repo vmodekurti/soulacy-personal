@@ -30,6 +30,9 @@ services:
     volumes:
       # Persist agents, plugins, skills, and local config.
       - soulacy_data:/home/soulacy/.soulacy
+      # Optional APNs provider key. /dev/null keeps a default deployment
+      # portable; set SOULACY_MOBILE_APNS_HOST_KEY_FILE to the protected .p8.
+      - "${SOULACY_MOBILE_APNS_HOST_KEY_FILE:-/dev/null}:/run/secrets/soulacy-apns-key.p8:ro"
       # Optional: mount your local agent directory for live editing.
       # - ./examples/agents:/home/soulacy/.soulacy/agents:ro
     environment:
@@ -61,6 +64,12 @@ services:
       # non-loopback interface, so an empty key refuses to start; SEC-4).
       # Generate one with: openssl rand -hex 32
       SOULACY_SERVER_API_KEY: "${SOULACY_API_KEY:?SOULACY_API_KEY must be set — generate one with: openssl rand -hex 32}"
+
+      # Native iOS push (optional). The .p8 key is mounted read-only below in
+      # deployments that enable it; never paste the key itself into .env.
+      SOULACY_MOBILE_APNS_TEAM_ID: ${SOULACY_MOBILE_APNS_TEAM_ID:-}
+      SOULACY_MOBILE_APNS_KEY_ID: ${SOULACY_MOBILE_APNS_KEY_ID:-}
+      SOULACY_MOBILE_APNS_PRIVATE_KEY_FILE: ${SOULACY_MOBILE_APNS_PRIVATE_KEY_FILE:-}
 
       # Browser login — exchange the deployment key once for short-lived JWTs.
       # The rotating refresh token is a Secure, HttpOnly cookie, so a trusted

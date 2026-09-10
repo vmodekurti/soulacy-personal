@@ -18,23 +18,27 @@ import (
 )
 
 type Adapter struct {
-	store      *Store
-	relayURL   string
-	relayToken string
-	client     *http.Client
-	log        *zap.Logger
-	mu         sync.RWMutex
-	started    bool
+	store         *Store
+	relayURL      string
+	relayToken    string
+	apns          *apnsClient
+	pushConfigErr error
+	client        *http.Client
+	log           *zap.Logger
+	mu            sync.RWMutex
+	started       bool
 }
 
 func New(store *Store, log *zap.Logger) *Adapter {
 	if log == nil {
 		log = zap.NewNop()
 	}
+	apns, apnsErr := newAPNSClientFromEnvironment()
 	return &Adapter{
 		store: store, relayURL: strings.TrimRight(strings.TrimSpace(os.Getenv("SOULACY_MOBILE_PUSH_RELAY_URL")), "/"),
 		relayToken: strings.TrimSpace(os.Getenv("SOULACY_MOBILE_PUSH_RELAY_TOKEN")),
-		client:     &http.Client{Timeout: 8 * time.Second}, log: log.Named("mobile-channel"),
+		apns:       apns, pushConfigErr: apnsErr,
+		client: &http.Client{Timeout: 8 * time.Second}, log: log.Named("mobile-channel"),
 	}
 }
 
@@ -63,7 +67,11 @@ func (a *Adapter) Status() sdkchannel.AdapterStatus {
 	started := a.started
 	a.mu.RUnlock()
 	detail := "durable app inbox"
-	if a.relayURL == "" {
+	if a.pushConfigErr != nil {
+		detail += "; native push misconfigured"
+	} else if a.apns != nil {
+		detail += "; direct APNs ready"
+	} else if a.relayURL == "" {
 		detail += "; push relay not configured"
 	} else {
 		detail += "; native push ready"
@@ -84,7 +92,7 @@ func (a *Adapter) Send(ctx context.Context, msg message.Message) error {
 	}
 	// APNs is a wake-up signal, not the source of truth. A relay failure must
 	// never turn a safely persisted result into an undelivered run.
-	if a.relayURL != "" {
+	if a.apns != nil || a.relayURL != "" {
 		if err := a.notify(ctx, "personal", d); err != nil {
 			a.log.Warn("native push failed; result remains in the mobile inbox", zap.String("delivery_id", d.ID), zap.Error(err))
 		}
@@ -119,9 +127,16 @@ func (a *Adapter) notify(ctx context.Context, workspaceID string, delivery Deliv
 	}
 	var firstErr error
 	for _, device := range devices {
-		payload, _ := json.Marshal(relayNotification{DeviceToken: device.PushToken, Environment: device.PushEnvironment,
+		notification := relayNotification{DeviceToken: device.PushToken, Environment: device.PushEnvironment,
 			BundleID: device.BundleID, DeliveryID: delivery.ID, Title: delivery.Title,
-			Body: "An agent result is ready to review.", DeepLink: "soulacy://delivery/" + delivery.ID})
+			Body: "An agent result is ready to review.", DeepLink: "soulacy://delivery/" + delivery.ID}
+		if a.apns != nil {
+			if err := a.apns.push(ctx, notification); err != nil && firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		payload, _ := json.Marshal(notification)
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.relayURL+"/v1/push", bytes.NewReader(payload))
 		if err != nil {
 			return err
