@@ -141,8 +141,9 @@ self-disqualify quickly if the fit's wrong.
   point of the product.
 - **Not a LangGraph replacement.** If you need explicit state-machine graphs
   with checkpoints and resumable execution, use LangGraph.
-- **Not a personal assistant.** Soulacy runs headless and delivers to
-  channels; it doesn't ship a wake-word, a Canvas, or a native mobile app.
+- **Not a general-purpose personal assistant.** Soulacy runs headless and delivers to
+  focused channels, including its native iOS companion; it doesn't ship a wake-word,
+  a general-purpose Canvas, or consumer messaging impersonation.
   If you want an iMessage / WeChat / Signal / Matrix personal assistant, use
   [OpenClaw](https://openclaw.ai/).
 - **Not vendor-locked.** Not tied to Anthropic, OpenAI, Google, or any

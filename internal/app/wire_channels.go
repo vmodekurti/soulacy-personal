@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/channels"
+	mobilechan "github.com/soulacy/soulacy/internal/channels/mobile"
 	wachan "github.com/soulacy/soulacy/internal/channels/whatsapp"
 	wawebchan "github.com/soulacy/soulacy/internal/channels/whatsappweb"
 	"github.com/soulacy/soulacy/internal/config"
@@ -26,6 +27,15 @@ import (
 // chanReg.StartAll afterwards.
 func (a *App) registerChannels(chanCfg map[string]map[string]any, chanReg *channels.Registry, loader *runtime.Loader, ws config.Paths) *wachan.Adapter {
 	log := a.log
+
+	// The native app inbox is an always-on outbound channel. Persisting the
+	// result is the delivery contract; APNs is only an optional wake-up signal.
+	if store, err := mobilechan.Open(ws.DB("mobile-deliveries")); err != nil {
+		log.Warn("mobile delivery channel unavailable", zap.Error(err))
+	} else {
+		mobilechan.SetDefaultStore(store)
+		chanReg.Register(mobilechan.New(store, log))
+	}
 
 	// ── Telegram ─────────────────────────────────────────────────────────────
 	// Top-level config is the canonical/default adapter ID ("telegram"). It is
@@ -289,7 +299,7 @@ func (a *App) registerChannels(chanCfg map[string]map[string]any, chanReg *chann
 	// changes. Unknown names warn and skip; the gateway always boots.
 	for chID, chCfg := range chanCfg {
 		switch chID {
-		case "telegram", "discord", "slack", "whatsapp", "whatsapp_web", "http":
+		case "telegram", "discord", "slack", "whatsapp", "whatsapp_web", "http", "mobile":
 			continue
 		}
 		if enabled, _ := chCfg["enabled"].(bool); !enabled {

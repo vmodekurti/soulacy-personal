@@ -283,7 +283,7 @@
   }
 
   const CHANNEL_ICONS = {
-    whatsapp: '📱', whatsapp_web: '🔗', telegram: '✈️', slack: '💬', discord: '🎮', http: '🌐', email: '📧', webhook: '🔗',
+    mobile: '📲', whatsapp: '📱', whatsapp_web: '🔗', telegram: '✈️', slack: '💬', discord: '🎮', http: '🌐', email: '📧', webhook: '🔗',
   }
   function chanIcon(id = '') { return CHANNEL_ICONS[id.toLowerCase()] || '⚡' }
   function isMessageChannel(id = '') {

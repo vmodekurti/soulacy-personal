@@ -24,17 +24,18 @@ func TestChannelDeliveryReadinessListsDefaultAndBotTargets(t *testing.T) {
 	}
 	s.channels.Register(&fakeOpsAlertAdapter{id: "telegram", live: true})
 	s.channels.Register(&fakeOpsAlertAdapter{id: "telegram-research-librarian", live: true})
+	s.channels.Register(&fakeOpsAlertAdapter{id: "mobile", live: true})
 
 	status, body := gatewayJSON(t, s, http.MethodGet, "/api/v1/channels/delivery-readiness", "secret", "")
 	if status != http.StatusOK {
 		t.Fatalf("delivery readiness = %d body=%v", status, body)
 	}
-	if body["status"] != "ok" || body["ready"] != float64(2) || body["total"] != float64(2) {
+	if body["status"] != "ok" || body["ready"] != float64(3) || body["total"] != float64(3) {
 		t.Fatalf("unexpected readiness summary: %v", body)
 	}
 	targets, ok := body["targets"].([]any)
-	if !ok || len(targets) != 2 {
-		t.Fatalf("expected 2 targets, got %v", body["targets"])
+	if !ok || len(targets) != 3 {
+		t.Fatalf("expected 3 targets, got %v", body["targets"])
 	}
 }
 
@@ -47,6 +48,7 @@ func TestChannelDeliveryReadinessFlagsMissingDestination(t *testing.T) {
 		},
 	}
 	s.channels.Register(&fakeOpsAlertAdapter{id: "slack", live: true})
+	s.channels.Register(&fakeOpsAlertAdapter{id: "mobile", live: true})
 
 	status, body := gatewayJSON(t, s, http.MethodGet, "/api/v1/channels/delivery-readiness", "secret", "")
 	if status != http.StatusOK {
@@ -66,20 +68,42 @@ func TestChannelDeliveryReadinessTreatsWebhookURLAsDefaultTarget(t *testing.T) {
 		},
 	}
 	s.channels.Register(&fakeOpsAlertAdapter{id: "webhook", live: true})
+	s.channels.Register(&fakeOpsAlertAdapter{id: "mobile", live: true})
 
 	status, body := gatewayJSON(t, s, http.MethodGet, "/api/v1/channels/delivery-readiness", "secret", "")
 	if status != http.StatusOK {
 		t.Fatalf("delivery readiness = %d body=%v", status, body)
 	}
-	if body["status"] != "ok" || body["ready"] != float64(1) || body["total"] != float64(1) {
-		t.Fatalf("webhook URL should count as one ready outbound target without default_output_to: %v", body)
+	if body["status"] != "ok" || body["ready"] != float64(2) || body["total"] != float64(2) {
+		t.Fatalf("webhook and mobile should count as ready outbound targets without default_output_to: %v", body)
 	}
 	targets, ok := body["targets"].([]any)
-	if !ok || len(targets) != 1 {
-		t.Fatalf("expected one webhook target, got %v", body["targets"])
+	if !ok || len(targets) != 2 {
+		t.Fatalf("expected webhook and mobile targets, got %v", body["targets"])
 	}
+	var webhook map[string]any
+	for _, raw := range targets {
+		target, _ := raw.(map[string]any)
+		if target["family"] == "webhook" {
+			webhook = target
+		}
+	}
+	if webhook == nil || webhook["to"] != "configured webhook URL" {
+		t.Fatalf("webhook readiness should not expose the secret URL, got targets=%v", targets)
+	}
+}
+
+func TestChannelDeliveryReadinessTreatsMobileAsAlwaysOnBroadcast(t *testing.T) {
+	s := newTestGateway(t, "secret")
+	s.channels.Register(&fakeOpsAlertAdapter{id: "mobile", live: true})
+
+	status, body := gatewayJSON(t, s, http.MethodGet, "/api/v1/channels/delivery-readiness", "secret", "")
+	if status != http.StatusOK || body["status"] != "ok" || body["ready"] != float64(1) || body["total"] != float64(1) {
+		t.Fatalf("mobile should be an always-on delivery target: status=%d body=%v", status, body)
+	}
+	targets, _ := body["targets"].([]any)
 	target, _ := targets[0].(map[string]any)
-	if target["to"] != "configured webhook URL" {
-		t.Fatalf("webhook readiness should not expose the secret URL, got target=%v", target)
+	if target["family"] != "mobile" || target["to"] != "all" {
+		t.Fatalf("mobile should default to all registered devices: %v", target)
 	}
 }

@@ -7,6 +7,7 @@ Channels are adapters that connect agents to messaging platforms. Each channel h
 | Channel | Status | Config key |
 |---------|--------|-----------|
 | [HTTP](http.md) | ✅ Stable | — (always active) |
+| [Soulacy Mobile](mobile.md) | ✅ Stable outbound | — (always active) |
 | [Generic Webhooks](webhook.md) | ✅ Stable | agent `trigger: webhook` |
 | [Telegram](telegram.md) | ✅ Stable | `channels.telegram` |
 | [Slack](slack.md) | ✅ Stable | `channels.slack` |
