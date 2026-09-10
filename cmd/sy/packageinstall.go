@@ -494,10 +494,11 @@ func installMCPFromRepository(ctx context.Context, source, probe string, assumeY
 	}
 	servers := ensureMapping(ensureMapping(root, "mcp"), "servers")
 	type installPlan struct {
-		pkg     mcpPackage
-		id      string
-		dest    string
-		envRefs map[string]string
+		pkg            mcpPackage
+		id             string
+		dest           string
+		envRefs        map[string]string
+		repairLauncher string
 	}
 	seenIDs := map[string]string{}
 	var plans []installPlan
@@ -513,11 +514,19 @@ func installMCPFromRepository(ctx context.Context, source, probe string, assumeY
 			return fmt.Errorf("MCP bundle server id %q is duplicated by %s and %s", id, first, pkg.RelDir)
 		}
 		seenIDs[id] = pkg.RelDir
-		if yamlMapValue(servers, id) != nil {
+		dest := filepath.Join(ws.Root, "mcp-servers", id)
+		if existing := yamlMapValue(servers, id); existing != nil {
+			command := ""
+			if commandNode := yamlMapValue(existing, "command"); commandNode != nil {
+				command = commandNode.Value
+			}
+			if kind := legacyManagedLauncherKind(dest, command); kind != "" {
+				plans = append(plans, installPlan{pkg: pkg, id: id, dest: dest, repairLauncher: kind})
+				continue
+			}
 			fmt.Printf("✓ MCP server %q is already registered; skipping it.\n", id)
 			continue
 		}
-		dest := filepath.Join(ws.Root, "mcp-servers", id)
 		if _, statErr := os.Stat(dest); statErr == nil {
 			return fmt.Errorf("MCP install directory already exists at %s but the server is not registered; inspect or remove that partial installation before retrying", dest)
 		} else if !os.IsNotExist(statErr) {
@@ -560,9 +569,13 @@ func installMCPFromRepository(ctx context.Context, source, probe string, assumeY
 	}
 
 	var created []string
+	var createdFiles []string
 	committed := false
 	defer func() {
 		if !committed {
+			for _, path := range createdFiles {
+				_ = os.Remove(path)
+			}
 			for _, dest := range created {
 				_ = os.RemoveAll(dest)
 			}
@@ -570,6 +583,19 @@ func installMCPFromRepository(ctx context.Context, source, probe string, assumeY
 	}()
 
 	for _, plan := range plans {
+		if plan.repairLauncher != "" {
+			line := `exec "${0%/*}/../venv/bin/python" "$@"`
+			if plan.repairLauncher != "python" {
+				line = `exec ` + plan.repairLauncher + ` "$@"`
+			}
+			launcher, repairErr := writeManagedMCPLauncher(plan.dest, plan.repairLauncher, line)
+			if repairErr != nil {
+				return fmt.Errorf("repair MCP server %q launcher: %w", plan.id, repairErr)
+			}
+			createdFiles = append(createdFiles, launcher)
+			setScalar(yamlMapValue(servers, plan.id), "command", launcher, yaml.DoubleQuotedStyle)
+			continue
+		}
 		sourceDir := filepath.Join(plan.dest, "source")
 		if err := os.MkdirAll(plan.dest, 0o755); err != nil {
 			return err
@@ -608,6 +634,10 @@ func installMCPFromRepository(ctx context.Context, source, probe string, assumeY
 	committed = true
 
 	for _, plan := range plans {
+		if plan.repairLauncher != "" {
+			fmt.Printf("✓ Repaired managed launcher for MCP server %q.\n", plan.id)
+			continue
+		}
 		fmt.Printf("✓ Installed and registered MCP server %q from %s.\n", plan.id, plan.pkg.RelDir)
 		if len(plan.envRefs) > 0 {
 			fmt.Printf("  Vault-backed environment; configure missing values in Secrets: %s\n", strings.Join(sortedKeys(plan.envRefs), ", "))
@@ -616,6 +646,24 @@ func installMCPFromRepository(ctx context.Context, source, probe string, assumeY
 	fmt.Printf("✓ Registered %d MCP server(s) atomically in %s.\n", len(plans), ws.ConfigFile)
 	fmt.Println("✓ Config was written atomically; the gateway will hot-reload it.")
 	return nil
+}
+
+// legacyManagedLauncherKind identifies registrations written by older package
+// installers that pointed directly at a venv interpreter, node, or npm. Those
+// commands cannot pass the managed-root process-start check. A repeat install
+// upgrades only this installer-owned command path and preserves args, secrets,
+// source, and every other server setting.
+func legacyManagedLauncherKind(dest, command string) string {
+	switch filepath.Clean(command) {
+	case filepath.Join(dest, "venv", "bin", "python"):
+		return "python"
+	case "node":
+		return "node"
+	case "npm":
+		return "npm"
+	default:
+		return ""
+	}
 }
 
 func installMCPRuntime(ctx context.Context, dest, sourceDir, discoveredEntrypoint string) (string, []string, error) {

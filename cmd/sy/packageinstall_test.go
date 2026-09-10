@@ -166,6 +166,19 @@ func TestWriteManagedMCPLauncherDoesNotResolveOutsideRoot(t *testing.T) {
 	}
 }
 
+func TestLegacyManagedLauncherKind(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "mcp-servers", "weather-server")
+	if got := legacyManagedLauncherKind(dest, filepath.Join(dest, "venv", "bin", "python")); got != "python" {
+		t.Fatalf("python launcher kind = %q", got)
+	}
+	if got := legacyManagedLauncherKind(dest, "node"); got != "node" {
+		t.Fatalf("node launcher kind = %q", got)
+	}
+	if got := legacyManagedLauncherKind(dest, "/tmp/unmanaged/python"); got != "" {
+		t.Fatalf("unmanaged command was eligible for repair: %q", got)
+	}
+}
+
 func TestDiscoverExternalMCPBundleFixture(t *testing.T) {
 	root := os.Getenv("SOULACY_TEST_MCP_BUNDLE")
 	if root == "" {
