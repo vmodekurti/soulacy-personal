@@ -80,6 +80,14 @@
   let historySearchError = ''
   let chatStatus = null
   let chatStatusOpen = false
+	let genieDrawerOpen = false
+	let genieLoading = false
+	let genieMonitors = []
+	let genieSubagents = []
+	let genieSkillCount = 0
+	let genieMcpToolCount = 0
+	let genieTranscript = null
+	let geniePoll = null
 
   $: activeThread = $chatActiveThreadId ? ($chatThreads[$chatActiveThreadId] || null) : null
   $: threads = filterThreads(Object.values($chatThreads), threadSearch, showArchived, agentName)
@@ -113,6 +121,46 @@
       chatStatus = null
     }
   }
+
+	async function loadGenieActivity() {
+		if (activeThread?.agentId !== 'genie') return
+		genieLoading = true
+		try {
+			const [agentRes, scheduleRes, statusRes, skillRes, mcpRes, actionRes] = await Promise.all([
+				api.agents.list(), api.schedule.list(), api.schedule.status(), api.skills.list(), api.mcp.list(),
+				api.agents.actions('genie', 200, 'agent.call.started,agent.call.completed,agent.call.failed', { durable: true }),
+			])
+			const schedules = new Map((scheduleRes.schedule || []).map(s => [s.agent_id, s]))
+			genieMonitors = (agentRes.agents || []).filter(a => a.labels?.['soulacy.owner'] === 'genie' && a.labels?.['soulacy.kind'] === 'monitor').map(a => ({ ...a, ...(schedules.get(a.id) || {}), running: !!statusRes.running?.[a.id], startedAt: statusRes.running?.[a.id] }))
+			genieSkillCount = (skillRes.skills || []).length
+			genieMcpToolCount = (mcpRes.servers || mcpRes.mcp || []).reduce((n, s) => n + (s.tools || []).length, 0)
+			const events = actionRes.events || actionRes.actions || []
+			const state = new Map()
+			for (const ev of events) {
+				const p = ev.payload || {}
+				const sid = p.subagent_session_id
+				if (!sid) continue
+				const row = state.get(sid) || { sessionId: sid, agentId: p.target_agent, status: 'running', timestamp: ev.timestamp }
+				if (ev.type === 'agent.call.completed') row.status = 'completed'
+				if (ev.type === 'agent.call.failed') row.status = 'failed'
+				state.set(sid, row)
+			}
+			genieSubagents = [...state.values()].slice(-20).reverse()
+		} catch (_) { /* drawer is supplementary; Chat remains usable */ }
+		finally { genieLoading = false }
+	}
+
+	async function pauseGenieMonitor(id) { await api.schedule.pause(id); await loadGenieActivity() }
+	async function cancelGenieMonitor(id) { if (!confirm('Cancel and permanently remove this monitor?')) return; await api.schedule.cancel(id); await loadGenieActivity() }
+	async function inspectGenieSubagent(row) {
+		try {
+			const res = await api.agents.actions(row.agentId, 500, '', { durable: true })
+			const events = res.events || res.actions || []
+			genieTranscript = { ...row, events: events.filter(e => !e.session_id || e.session_id === row.sessionId) }
+		} catch (e) {
+			genieTranscript = { ...row, error: e.message, events: [] }
+		}
+	}
 
   function chatStatusTitle(status) {
     if (!status) return 'Chat readiness'
@@ -297,6 +345,8 @@
   }
 
   function defaultAgentId() {
+	const genie = agents.find(a => a.id === 'genie')
+	if (genie) return genie.id
     const sys = agents.find(a => a.id === 'system')
     return sys ? sys.id : (agents[0]?.id || '')
   }
@@ -2019,6 +2069,7 @@
     }
     await Promise.all([loadVoiceStatus(), loadChatStatus()])
     connectEvents()
+		geniePoll = window.setInterval(loadGenieActivity, 5000)
     if (activeThread?.id && activeThread?.agentId && activeThread?.sessionId) {
       await backfillAllThinking(activeThread.id, activeThread.agentId, activeThread.sessionId)
     }
@@ -2031,6 +2082,7 @@
     stopEvents = true
     if (ws) ws.close()
     teardownVoice()
+		if (geniePoll) window.clearInterval(geniePoll)
     mobileMedia?.removeEventListener?.('change', syncMobileViewport)
     window.removeEventListener('keydown', onGlobalKey)
   })
@@ -2245,6 +2297,9 @@
           {#if !agents.length}<option value="">No enabled agents</option>{:else}{#each agents as a}<option value={a.id}>{a.name || a.id}</option>{/each}{/if}
         </select>
       </label>
+		{#if activeThread?.agentId === 'genie'}
+			<button class="genie-status" on:click={() => { genieDrawerOpen = !genieDrawerOpen; if (genieDrawerOpen) loadGenieActivity() }} aria-expanded={genieDrawerOpen}>✦ <span>Automations &amp; Subagents</span></button>
+		{/if}
       <button class="top-icon top-search" class:active={historySearchOpen} on:click={() => historySearchOpen = !historySearchOpen} title="Search conversations" aria-label="Search conversations">⌘ K</button>
       <button class="voice-btn {voiceState}" on:click={() => { if (voiceState === 'live' || sidecarProcessing || voicePlaybackState !== 'idle') voiceSessionOpen = true; else voiceClick() }} title={voiceHint(voiceState, voiceDetail)} aria-label="Open voice conversation">🎤</button>
       <button class="new-chat-btn" on:click={() => startThread()} disabled={!agents.length}>＋ New chat</button>
@@ -2266,6 +2321,23 @@
       </div>
     </div>
   </div>
+
+	{#if genieDrawerOpen && activeThread?.agentId === 'genie'}
+		<div class="genie-backdrop" on:click={() => genieDrawerOpen = false} role="presentation"></div>
+		<aside class="genie-drawer" aria-label="Active Automations and Subagents">
+			<header><div><strong>Genie activity</strong><span>{genieSkillCount} skills · {genieMcpToolCount} MCP tools</span></div><button on:click={() => genieDrawerOpen = false}>✕</button></header>
+			<button class="genie-refresh" on:click={loadGenieActivity} disabled={genieLoading}>{genieLoading ? 'Refreshing…' : 'Refresh live inventory'}</button>
+			<section><h3>Background monitors</h3>
+				{#each genieMonitors as monitor (monitor.id)}
+					<div class="genie-row"><div><strong>{monitor.name || monitor.id}</strong><span>{monitor.running ? 'Running now' : monitor.enabled ? (monitor.next ? `Next ${new Date(monitor.next).toLocaleString()}` : 'Scheduled') : 'Paused'}</span></div><div class="genie-actions">{#if monitor.enabled}<button on:click={() => pauseGenieMonitor(monitor.id)}>Pause</button>{/if}<button class="danger" on:click={() => cancelGenieMonitor(monitor.id)}>Cancel</button></div></div>
+				{:else}<p class="genie-empty">No Genie monitors yet. Ask Genie to monitor something on a schedule.</p>{/each}
+			</section>
+			<section><h3>Subagent executions</h3>
+				{#each genieSubagents as row (row.sessionId)}<button class="genie-row clickable" on:click={() => inspectGenieSubagent(row)}><div><strong>{row.agentId}</strong><span>{row.status} · {row.sessionId}</span></div><span>Inspect ›</span></button>{:else}<p class="genie-empty">No delegated work recorded yet.</p>{/each}
+			</section>
+			{#if genieTranscript}<section class="genie-transcript"><h3>{genieTranscript.agentId} transcript</h3>{#if genieTranscript.error}<p>{genieTranscript.error}</p>{:else}<pre>{JSON.stringify(genieTranscript.events, null, 2)}</pre>{/if}</section>{/if}
+		</aside>
+	{/if}
 
   {#if error}
     <div class="banner err">⚠ {error}</div>
@@ -3926,6 +3998,28 @@
   }
   .new-chat-btn:hover:not(:disabled) { background: #cbc9ff; }
   .new-chat-btn:disabled { opacity: .45; }
+	.genie-status { height: 36px; display: flex; align-items: center; gap: .35rem; padding: 0 .65rem; border: 1px solid #49447d; border-radius: 9px; color: #d5d2ff; background: #1c1d42; cursor: pointer; font-size: .72rem; font-weight: 700; }
+	.genie-status:hover, .genie-status[aria-expanded="true"] { background: #29275b; border-color: #7770d4; }
+	.genie-backdrop { position: fixed; z-index: 68; inset: 0; background: rgba(2,5,14,.48); backdrop-filter: blur(2px); }
+	.genie-drawer { position: fixed; z-index: 69; top: 0; right: 0; bottom: 0; width: min(440px, 94vw); display: flex; flex-direction: column; gap: 1rem; padding: 1rem; overflow-y: auto; border-left: 1px solid #30385b; color: #e9ebfa; background: #10182c; box-shadow: -20px 0 60px rgba(0,0,0,.45); }
+	.genie-drawer > header { display: flex; align-items: center; justify-content: space-between; padding-bottom: .85rem; border-bottom: 1px solid #28314e; }
+	.genie-drawer > header div { display: grid; gap: .2rem; }
+	.genie-drawer > header span { color: #929bb9; font-size: .72rem; }
+	.genie-drawer button { border: 1px solid #303b5d; border-radius: 8px; color: #cdd2e8; background: #18223a; cursor: pointer; }
+	.genie-drawer > header button { width: 34px; height: 34px; }
+	.genie-refresh { padding: .6rem; }
+	.genie-drawer section { display: grid; gap: .55rem; }
+	.genie-drawer h3 { margin: .35rem 0 0; color: #9994f4; font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; }
+	.genie-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; width: 100%; padding: .7rem; border: 1px solid #273250; border-radius: 10px; background: #141e34; text-align: left; }
+	.genie-row > div:first-child { min-width: 0; display: grid; gap: .2rem; }
+	.genie-row strong { overflow: hidden; text-overflow: ellipsis; }
+	.genie-row span { color: #8e98b6; font-size: .68rem; overflow-wrap: anywhere; }
+	.genie-row.clickable:hover { border-color: #655fb3; }
+	.genie-actions { display: flex !important; grid-auto-flow: column; gap: .35rem !important; }
+	.genie-actions button { padding: .35rem .48rem; font-size: .66rem; }
+	.genie-actions button.danger { color: #ff9da8; border-color: #63333e; }
+	.genie-empty { margin: 0; padding: .75rem; border: 1px dashed #303956; border-radius: 9px; color: #858fad; font-size: .75rem; line-height: 1.45; }
+	.genie-transcript pre { max-height: 340px; margin: 0; padding: .7rem; overflow: auto; border-radius: 9px; color: #bac2dd; background: #090f20; font-size: .65rem; white-space: pre-wrap; }
   .header-tour :global(button) { height: 36px; padding-inline: .65rem; }
   .chat-more-wrap { position: relative; }
   .chat-more-menu {
@@ -4045,6 +4139,9 @@
     }
     .chat-brand { min-width: auto; }
     .chat-brand > div, .primary-controls :global(.run-metrics), .new-chat-btn, .header-tour, .agent-picker .agent-presence, .top-search { display: none; }
+		.genie-status { width: 44px; height: 44px; flex: 0 0 44px; padding: 0; justify-content: center; border-radius: 12px; }
+		.genie-status span { display: none; }
+		.genie-drawer { top: env(safe-area-inset-top); bottom: calc(64px + env(safe-area-inset-bottom)); width: 100%; max-width: none; border-left: 0; }
     .chat-list-toggle, .top-icon, .modern-chat .voice-btn { width: 44px; height: 44px; flex: 0 0 44px; border-radius: 12px; }
     .primary-controls { flex: 1; min-width: 0; justify-content: flex-end; gap: .25rem; }
     .agent-picker { min-width: 0; max-width: none; height: 44px; flex: 1; border: 0; background: transparent; }

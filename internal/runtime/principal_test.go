@@ -27,6 +27,25 @@ func TestPrincipalContextIsImmutableAndMessageIndependent(t *testing.T) {
 	}
 }
 
+func TestGeniePrincipalIsAlwaysCappedAtOperator(t *testing.T) {
+	genie := &agent.Definition{ID: GenieAgentID}
+	ctx := applyAgentPrincipalBoundary(WithPrincipal(context.Background(), Principal{Subject: "admin-1", Role: "admin"}), genie)
+	p, ok := PrincipalFromContext(ctx)
+	if !ok || p.Role != "operator" || p.Subject != "admin-1" {
+		t.Fatalf("Genie principal = %+v, %v; want admin subject capped at operator", p, ok)
+	}
+	ctx = applyAgentPrincipalBoundary(context.Background(), genie)
+	p, ok = PrincipalFromContext(ctx)
+	if !ok || p.Role != "operator" {
+		t.Fatalf("internal Genie principal = %+v, %v; want operator", p, ok)
+	}
+	ctx = applyAgentPrincipalBoundary(WithPrincipal(context.Background(), Principal{Role: "viewer"}), genie)
+	p, _ = PrincipalFromContext(ctx)
+	if p.Role != "viewer" {
+		t.Fatalf("viewer was elevated to %q", p.Role)
+	}
+}
+
 func TestExternalToolsRequireAgentGrantAndCallerPermission(t *testing.T) {
 	e := newMinimalEngine(t)
 	e.builtins = e.buildBuiltins()

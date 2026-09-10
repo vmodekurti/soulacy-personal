@@ -325,21 +325,32 @@ func (e *Engine) runAgentCall(ctx context.Context, callerDef *agent.Definition, 
 	defer chainCancel()
 
 	subCtx = withAgentCallDepth(subCtx, depth+1)
+	subSessionID := "agent-call-" + uuidShort()
+	e.sink.Emit(message.Event{Type: "agent.call.started", AgentID: callerDef.ID, SessionID: inboundSessionID(ctx), Payload: map[string]any{"target_agent": targetID, "subagent_session_id": subSessionID, "depth": depth + 1}, Timestamp: time.Now().UTC()})
 	reply, err := e.Handle(subCtx, message.Message{
 		AgentID:   targetID,
-		SessionID: "agent-call-" + uuidShort(),
+		SessionID: subSessionID,
 		Channel:   "internal",
 		Username:  "agent:" + callerDef.ID,
 		Parts:     message.Text(msg),
 	})
 	if err != nil {
+		e.sink.Emit(message.Event{Type: "agent.call.failed", AgentID: callerDef.ID, SessionID: inboundSessionID(ctx), Payload: map[string]any{"target_agent": targetID, "subagent_session_id": subSessionID, "error": err.Error()}, Timestamp: time.Now().UTC()})
 		return "", fmt.Errorf("agent call %q: %w", targetID, err)
 	}
 	content := flattenParts(reply.Parts)
+	e.sink.Emit(message.Event{Type: "agent.call.completed", AgentID: callerDef.ID, SessionID: inboundSessionID(ctx), Payload: map[string]any{"target_agent": targetID, "subagent_session_id": subSessionID, "content": content}, Timestamp: time.Now().UTC()})
 	if callerDef.StructuredPeerResults {
 		return formatAgentCallResult(targetID, content), nil
 	}
 	return content, nil
+}
+
+func inboundSessionID(ctx context.Context) string {
+	if msg, ok := ctx.Value(inboundMsgKey{}).(message.Message); ok {
+		return msg.SessionID
+	}
+	return ""
 }
 
 func formatAgentCallResult(targetID, content string) string {

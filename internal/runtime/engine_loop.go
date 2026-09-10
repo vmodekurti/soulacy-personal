@@ -168,6 +168,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 		return message.Message{}, fmt.Errorf("engine: unknown agent %q", msg.AgentID)
 	}
 	def = def.Clone()
+	ctx = applyAgentPrincipalBoundary(ctx, def)
 	applyPlaygroundOverrides(def, msg.Metadata)
 	runProvider = strings.TrimSpace(def.LLM.Provider)
 	runModel = strings.TrimSpace(def.LLM.Model)

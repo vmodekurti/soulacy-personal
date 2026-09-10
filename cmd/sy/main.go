@@ -1116,6 +1116,16 @@ func buildScheduleCmd() *cobra.Command {
 			return apiGet("/schedule", "schedule")
 		},
 	})
+	cmd.AddCommand(&cobra.Command{
+		Use: "pause <id>", Short: "Pause a Genie-owned monitor",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error { return apiPost("/schedule/"+args[0]+"/pause", nil) },
+	})
+	cmd.AddCommand(&cobra.Command{
+		Use: "cancel <id>", Short: "Cancel and remove a Genie-owned monitor",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error { return apiDelete("/schedule/" + args[0]) },
+	})
 	return cmd
 }
 

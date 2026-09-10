@@ -468,6 +468,11 @@ func (e *Engine) buildSystemPrefix(def *agent.Definition) string {
 				catalog
 		}
 	}
+	if isGenieDefinition(def) {
+		if catalog := e.mcpCatalogForGenie(); catalog != "" {
+			systemPrompt += "\n\n## Connected MCP Tools (live)\nThis compact index is refreshed for every invocation; call list_mcp_tools for descriptions and parameters.\n\n" + catalog
+		}
+	}
 	// Encourage charts when the visualization tool is available to this agent.
 	if agentHasChartTool(def) {
 		systemPrompt += "\n\n" + chartToolGuide

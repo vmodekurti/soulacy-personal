@@ -153,6 +153,26 @@ func (e *Engine) agentCatalogFor(def *agent.Definition) string {
 	return sb.String()
 }
 
+// mcpCatalogForGenie is intentionally compact: full JSON schemas are already
+// provided in the model tool registry. This header tells Genie which live
+// servers/tools exist without duplicating potentially large schemas in tokens.
+func (e *Engine) mcpCatalogForGenie() string {
+	if e.mcpClient == nil {
+		return ""
+	}
+	tools := e.mcpClient.AllTools()
+	if len(tools) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("<connected_mcp>\n")
+	for _, t := range tools {
+		sb.WriteString(fmt.Sprintf("  <tool server=%q name=%q />\n", t.ServerID, t.FullName()))
+	}
+	sb.WriteString("</connected_mcp>")
+	return sb.String()
+}
+
 // skillNamesCSV returns a comma-separated list of all installed skill names,
 // used to help the model self-correct when it calls read_skill with a bad name.
 func (e *Engine) skillNamesCSV() string {

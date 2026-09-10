@@ -189,12 +189,13 @@ func startRestartChild() error {
 // --- Agents ---
 
 func isProtectedSystemAgent(id string) bool {
-	return strings.TrimSpace(id) == runtime.SystemAgentID
+	id = strings.TrimSpace(id)
+	return id == runtime.SystemAgentID || id == runtime.GenieAgentID
 }
 
 func protectedSystemAgentResponse(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-		"error": "system agent is protected and cannot be modified, deleted, cloned, disabled, or routed to external channels",
+		"error": "built-in agent is protected and cannot be modified, deleted, cloned, disabled, or routed to external channels",
 	})
 }
 
@@ -2395,6 +2396,42 @@ func (s *Server) handleDisableChannel(c *fiber.Ctx) error { return s.setChannelE
 
 func (s *Server) handleListSchedule(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"schedule": s.scheduler.Entries()})
+}
+
+func isGenieOwnedMonitor(def *agent.Definition) bool {
+	return def != nil && def.Labels["soulacy.owner"] == runtime.GenieAgentID && def.Labels["soulacy.kind"] == "monitor"
+}
+
+func (s *Server) handlePauseGenieMonitor(c *fiber.Ctx) error {
+	id := strings.TrimSpace(c.Params("id"))
+	def := s.loader.Get(id)
+	if !isGenieOwnedMonitor(def) {
+		return s.errMsg(c, fiber.StatusForbidden, "only Genie-owned monitors can be managed through this endpoint")
+	}
+	def.Enabled = false
+	dir := ""
+	if len(s.cfg.AgentDirs) > 0 {
+		dir = s.cfg.AgentDirs[0]
+	}
+	if err := s.loader.Upsert(dir, def); err != nil {
+		return s.errJSON(c, fiber.StatusInternalServerError, err)
+	}
+	s.scheduler.DeregisterAgent(id)
+	s.recordAdminAudit(c, "schedule.pause", "agent", id, "ok", nil)
+	return c.JSON(fiber.Map{"ok": true, "id": id, "status": "paused"})
+}
+
+func (s *Server) handleCancelGenieMonitor(c *fiber.Ctx) error {
+	id := strings.TrimSpace(c.Params("id"))
+	if !isGenieOwnedMonitor(s.loader.Get(id)) {
+		return s.errMsg(c, fiber.StatusForbidden, "only Genie-owned monitors can be managed through this endpoint")
+	}
+	s.scheduler.DeregisterAgent(id)
+	if err := s.loader.Delete(id); err != nil {
+		return s.errJSON(c, fiber.StatusInternalServerError, err)
+	}
+	s.recordAdminAudit(c, "schedule.cancel", "agent", id, "ok", nil)
+	return c.SendStatus(fiber.StatusNoContent)
 }
 
 func (s *Server) handleManualTrigger(c *fiber.Ctx) error {

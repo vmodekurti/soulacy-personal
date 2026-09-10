@@ -804,6 +804,8 @@ func (s *Server) buildApp() *fiber.App {
 	// Schedule
 	api.Get("/schedule", s.rbacMW(rbac.ResourceSchedule, rbac.ActionRead), s.handleListSchedule)
 	api.Get("/schedule/status", s.rbacMW(rbac.ResourceSchedule, rbac.ActionRead), s.handleScheduleStatus)
+	api.Post("/schedule/:id/pause", s.rbacMW(rbac.ResourceSchedule, rbac.ActionWrite), s.handlePauseGenieMonitor)
+	api.Delete("/schedule/:id", s.rbacMW(rbac.ResourceSchedule, rbac.ActionDelete), s.handleCancelGenieMonitor)
 	api.Post("/agents/:id/trigger", s.rbacAgentMW(rbac.ActionWrite), s.handleManualTrigger)
 	api.Post("/agents/:id/replay", s.rbacAgentMW(rbac.ActionWrite), s.handleReplayAgentRun)
 	api.Post("/agents/:id/schedule-output/test", s.rbacAgentMW(rbac.ActionWrite), s.handleTestScheduledOutput)
