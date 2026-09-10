@@ -37,6 +37,7 @@
   let recentLoading = false
   let recentError = ''
   let recentRunsExpanded = true
+  let expandedRecentRuns = {}
 
   // Modals
   let editing  = null
@@ -263,6 +264,9 @@
 
   function closeHistory() { historyAgent = null }
   function toggleRun(runId) { expandedRuns = { ...expandedRuns, [runId]: !expandedRuns[runId] } }
+  function toggleRecentRun(runId) {
+    expandedRecentRuns = { ...expandedRecentRuns, [runId]: !expandedRecentRuns[runId] }
+  }
 
   let statusTimer, tick
 
@@ -716,13 +720,38 @@
                   </td>
                   <td class="td-hint">{run.source}</td>
                   <td class="td-action">
-                    {#if run.agentId}
-                      <button class="btn-secondary xs" on:click={() => watchAgent(run.agentId, run.sessionId)}>Open Activity</button>
-                    {:else}
-                      <button class="btn-secondary xs" on:click={() => location.hash = 'activity'}>Open Activity</button>
-                    {/if}
+                    <div class="history-actions">
+                      <button class="btn-secondary xs" on:click={() => toggleRecentRun(run.id)}>
+                        {expandedRecentRuns[run.id] ? 'Hide result' : 'View result'}
+                      </button>
+                      {#if run.agentId}
+                        <button class="btn-secondary xs" on:click={() => watchAgent(run.agentId, run.sessionId)}>Open logs</button>
+                      {:else}
+                        <button class="btn-secondary xs" on:click={() => location.hash = 'activity'}>Open logs</button>
+                      {/if}
+                    </div>
                   </td>
                 </tr>
+                {#if expandedRecentRuns[run.id]}
+                  <tr class="result-row">
+                    <td colspan="7">
+                      <div class="history-result">
+                        <div class="result-meta">
+                          <span>{run.sessionId || 'No session ID'}</span>
+                          {#if run.durationMs}<span>{(run.durationMs / 1000).toFixed(1)}s</span>{/if}
+                          {#if run.eventCount}<span>{run.eventCount} log event{run.eventCount === 1 ? '' : 's'}</span>{/if}
+                        </div>
+                        {#if run.output}
+                          <pre>{run.output}</pre>
+                        {:else if run.status === 'failed'}
+                          <div class="no-output">The run failed before producing a result. Open logs for the recorded failure and tool activity.</div>
+                        {:else}
+                          <div class="no-output">No result text was captured. Open logs to inspect the run lifecycle and tool activity.</div>
+                        {/if}
+                      </div>
+                    </td>
+                  </tr>
+                {/if}
               {/each}
             </tbody>
           </table>
@@ -1082,6 +1111,18 @@ schedule:
   }
   .missed-help    { margin-top: .5rem; max-width: 70ch; }
   .td-action { text-align: right; }
+  .history-actions { display: flex; justify-content: flex-end; gap: .35rem; white-space: nowrap; }
+  .result-row td { padding: 0 1.25rem 1rem; background: rgba(108,99,255,.035); }
+  .result-row:hover td { background: rgba(108,99,255,.035); }
+  .history-result {
+    padding: .8rem 1rem; border: 1px solid #252a48; border-radius: 8px;
+    background: #0e1020;
+  }
+  .result-meta { display: flex; flex-wrap: wrap; gap: .6rem; margin-bottom: .6rem; color: #6b7294; font: .7rem monospace; }
+  .history-result pre {
+    margin: 0; color: #c8cadf; font: .78rem/1.6 monospace;
+    white-space: pre-wrap; overflow-wrap: anywhere;
+  }
   .actions   { display: flex; gap: .35rem; justify-content: flex-end; flex-wrap: wrap; }
   .xs { padding: .28rem .6rem; font-size: .75rem; border-radius: 6px; }
   .output-cell { display: flex; flex-direction: column; gap: .15rem; min-width: 150px; }

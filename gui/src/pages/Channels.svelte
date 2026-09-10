@@ -33,6 +33,11 @@
   let advancedWhatsAppWeb = false
   let guideOpen = false
   let qrDataUrl = ''
+  let mobilePairing = null
+  let mobilePairingQR = ''
+  let mobilePairingLoading = false
+  let mobilePairingError = ''
+  let mobilePairingCopied = false
 
   $: activeGuide = editing ? guideFor(editing.id) : null
   let lastQR    = ''
@@ -50,6 +55,46 @@
       return
     }
     qrDataUrl = await QRCode.toDataURL(value, { width: 256, margin: 2, errorCorrectionLevel: 'M' })
+  }
+
+  async function createMobilePairing() {
+    mobilePairingLoading = true
+    mobilePairingError = ''
+    mobilePairingCopied = false
+    try {
+      const token = await api.pairing.createToken()
+      if (!token?.code || !token?.pair_url) throw new Error('The gateway did not return a pairing code.')
+      mobilePairingQR = await QRCode.toDataURL(token.pair_url, {
+        width: 360,
+        margin: 2,
+        errorCorrectionLevel: 'M',
+      })
+      mobilePairing = token
+    } catch (e) {
+      mobilePairing = null
+      mobilePairingQR = ''
+      mobilePairingError = e.message || 'Could not create a pairing code.'
+    } finally {
+      mobilePairingLoading = false
+    }
+  }
+
+  async function copyMobilePairingCode() {
+    if (!mobilePairing?.code) return
+    try {
+      await navigator.clipboard.writeText(mobilePairing.code)
+      mobilePairingCopied = true
+      setTimeout(() => { mobilePairingCopied = false }, 1800)
+    } catch (_) {
+      mobilePairingError = 'Could not copy automatically. Select the code and copy it manually.'
+    }
+  }
+
+  function pairingExpiryLabel(value) {
+    if (!value) return 'Expires shortly'
+    const expiry = new Date(value)
+    if (Number.isNaN(expiry.getTime())) return 'Expires shortly'
+    return `Expires at ${expiry.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
   }
 
   async function load() {
@@ -589,7 +634,34 @@
               <span class="ch-val">{ch.always ? 'Always' : (ch.enabled ? 'Yes' : 'No')}</span>
             </div>
 
-            {#if ch.id === 'whatsapp_web'}
+            {#if ch.id === 'mobile'}
+              <div class="settings mobile-pairing">
+                <span class="settings-title">Pair an iPhone</span>
+                {#if mobilePairing && mobilePairingQR}
+                  <div class="mobile-pairing-ready" aria-live="polite">
+                    <img src={mobilePairingQR} alt="Soulacy iOS pairing QR code" />
+                    <div class="mobile-pairing-copy">
+                      <span>Pairing code</span>
+                      <button class="pairing-code" type="button" on:click={copyMobilePairingCode} title="Copy pairing code">
+                        {mobilePairing.code}
+                      </button>
+                      <small>{pairingExpiryLabel(mobilePairing.expires_at)} · single use</small>
+                    </div>
+                    <p>In Soulacy iOS, choose <strong>Connect a gateway</strong> → <strong>Scan pairing code</strong>.</p>
+                    <button class="btn-secondary small-btn" type="button" on:click={createMobilePairing} disabled={mobilePairingLoading}>
+                      {mobilePairingLoading ? 'Generating…' : 'Generate a new code'}
+                    </button>
+                    {#if mobilePairingCopied}<span class="pairing-copied">Copied</span>{/if}
+                  </div>
+                {:else}
+                  <p class="mobile-pairing-intro">Generate a secure, single-use code to connect the Soulacy iOS app without entering your administrator API key.</p>
+                  <button class="btn-primary small-btn pair-device" type="button" on:click={createMobilePairing} disabled={mobilePairingLoading}>
+                    {mobilePairingLoading ? 'Generating…' : 'Pair a device'}
+                  </button>
+                {/if}
+                {#if mobilePairingError}<span class="mobile-pairing-error" role="alert">{mobilePairingError}</span>{/if}
+              </div>
+            {:else if ch.id === 'whatsapp_web'}
               <div class="settings">
                 <span class="settings-title">Pairing</span>
                 <div class="ch-row">
@@ -1089,6 +1161,31 @@
   .ch-val    { color: #c8cadf; text-align: right; word-break: break-all; }
   .ch-val.mono { font-family: monospace; font-size: .78rem; color: #8b85ff; }
   .no-settings { color: #555a7a; font-style: italic; }
+
+  .mobile-pairing { gap: .65rem; }
+  .mobile-pairing-intro { margin: 0; color: #8f95b8; font-size: .76rem; line-height: 1.45; }
+  .pair-device { align-self: flex-start; }
+  .mobile-pairing-ready {
+    display: flex; flex-direction: column; align-items: center; gap: .65rem;
+    padding: .75rem; border: 1px solid rgba(108,99,255,.35); border-radius: 9px;
+    background: rgba(108,99,255,.07);
+  }
+  .mobile-pairing-ready img {
+    width: min(210px, 100%); aspect-ratio: 1; border-radius: 9px;
+    background: #fff; padding: .35rem;
+  }
+  .mobile-pairing-ready p { margin: 0; color: #b8bddb; font-size: .76rem; line-height: 1.45; text-align: center; }
+  .mobile-pairing-copy { width: 100%; display: flex; flex-direction: column; align-items: center; gap: .25rem; }
+  .mobile-pairing-copy > span { color: #777eaa; font-size: .66rem; text-transform: uppercase; letter-spacing: .08em; }
+  .pairing-code {
+    width: 100%; border: 1px solid #3a3f68; border-radius: 7px; background: #0d1020;
+    color: #e8e7ff; font-family: monospace; font-size: 1rem; font-weight: 700;
+    letter-spacing: .12em; padding: .5rem; cursor: pointer; user-select: text;
+  }
+  .pairing-code:hover { border-color: #6c63ff; }
+  .mobile-pairing-copy small { color: #777eaa; font-size: .66rem; }
+  .pairing-copied { color: #6ee0a6; font-size: .7rem; font-weight: 700; }
+  .mobile-pairing-error { color: #ff8f8f; font-size: .72rem; line-height: 1.4; }
 
   .settings { margin-top: .35rem; padding-top: .5rem; border-top: 1px solid #1a1e36; display: flex; flex-direction: column; gap: .4rem; }
   .settings-title { font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; color: #555a7a; font-weight: 600; }

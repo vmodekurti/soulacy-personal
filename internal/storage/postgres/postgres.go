@@ -19,17 +19,22 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 
+	"github.com/soulacy/soulacy/internal/actionlog"
 	"github.com/soulacy/soulacy/internal/memory"
+	"github.com/soulacy/soulacy/internal/redact"
 	"github.com/soulacy/soulacy/internal/storage"
 	"github.com/soulacy/soulacy/pkg/message"
 )
@@ -120,6 +125,9 @@ func (a *ActionLog) Append(ev message.Event) {
 	if ev.Timestamp.IsZero() {
 		ev.Timestamp = time.Now().UTC()
 	}
+	// Match the SQLite persistence boundary: durable logs must never retain
+	// credentials that appeared in tool arguments, headers, or results.
+	ev.Payload = redact.Value(ev.Payload)
 	select {
 	case a.queue <- ev:
 	default:
@@ -137,6 +145,10 @@ func (a *ActionLog) run() {
 
 	flush := func() {
 		if len(batch) == 0 {
+			// A one-shot timer is consumed even when there is nothing to flush.
+			// Reset it here so a quiet gateway does not permanently stop flushing
+			// the first sparse run that arrives later.
+			timer.Reset(batchFlushInterval)
 			return
 		}
 		a.flush(batch)
@@ -275,6 +287,143 @@ func (a *ActionLog) Tail(agentID string, limit int) ([]message.Event, error) {
 		}
 	}
 	return events, nil
+}
+
+// QueryEvents returns durable PostgreSQL-backed events, oldest-first, from the
+// newest matching window. It intentionally matches actionlog.Logger's optional
+// interface so the run ledger, Automation history, Activity, and support
+// bundle all work identically when PostgreSQL is selected.
+func (a *ActionLog) QueryEvents(agentID, sessionID string, limit int, allowed map[string]bool) ([]message.Event, error) {
+	agentID = strings.TrimSpace(agentID)
+	sessionID = strings.TrimSpace(sessionID)
+	if limit <= 0 {
+		limit = 1000
+	} else if limit > 50000 {
+		limit = 50000
+	}
+
+	where := []string{"TRUE"}
+	args := []any{}
+	add := func(clause string, value any) {
+		args = append(args, value)
+		where = append(where, fmt.Sprintf(clause, len(args)))
+	}
+	if agentID != "" {
+		add("agent_id = $%d", agentID)
+	}
+	if sessionID != "" {
+		add("session_id = $%d", sessionID)
+	}
+	if len(allowed) > 0 {
+		types := make([]string, 0, len(allowed))
+		for typ := range allowed {
+			if typ = strings.TrimSpace(typ); typ != "" {
+				types = append(types, typ)
+			}
+		}
+		sort.Strings(types)
+		if len(types) > 0 {
+			add("type = ANY($%d::text[])", types)
+		}
+	}
+	args = append(args, limit)
+	limitArg := len(args)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	rows, err := a.pool.Query(ctx, fmt.Sprintf(`
+		SELECT agent_id, session_id, type, payload, created_at
+		FROM (
+			SELECT id, agent_id, session_id, type, payload, created_at
+			  FROM agent_events
+			 WHERE %s
+			 ORDER BY created_at DESC, id DESC
+			 LIMIT $%d
+		) recent
+		ORDER BY created_at ASC, id ASC`, strings.Join(where, " AND "), limitArg), args...)
+	if err != nil {
+		return nil, fmt.Errorf("postgres actionlog: query events: %w", err)
+	}
+	defer rows.Close()
+
+	events := make([]message.Event, 0, limit)
+	for rows.Next() {
+		var ev message.Event
+		var payload []byte
+		if err := rows.Scan(&ev.AgentID, &ev.SessionID, &ev.Type, &payload, &ev.Timestamp); err != nil {
+			return nil, fmt.Errorf("postgres actionlog: scan event: %w", err)
+		}
+		if len(payload) > 0 && string(payload) != "null" {
+			var decoded any
+			if err := json.Unmarshal(payload, &decoded); err == nil {
+				// Redact on read as well so rows written by older releases cannot
+				// leak credential-shaped values through the new query endpoints.
+				ev.Payload = redact.Value(decoded)
+			} else {
+				ev.Payload = string(payload)
+			}
+		}
+		events = append(events, ev)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("postgres actionlog: iterate events: %w", err)
+	}
+	return events, nil
+}
+
+// SessionStats provides the same per-run metrics contract as the SQLite
+// action log. Activity uses it to show useful logs and timing after a browser
+// refresh or gateway restart.
+func (a *ActionLog) SessionStats(agentID, sessionID string) (actionlog.SessionStats, error) {
+	var st actionlog.SessionStats
+	where := []string{"session_id = $1"}
+	args := []any{strings.TrimSpace(sessionID)}
+	if id := strings.TrimSpace(agentID); id != "" {
+		args = append(args, id)
+		where = append(where, "agent_id = $2")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err := a.pool.QueryRow(ctx, `
+		SELECT COUNT(*),
+		       COUNT(*) FILTER (WHERE type = 'tool.call'),
+		       COALESCE(MIN(created_at), 'epoch'::timestamptz),
+		       COALESCE(MAX(created_at), 'epoch'::timestamptz)
+		  FROM agent_events
+		 WHERE `+strings.Join(where, " AND "), args...).Scan(
+		&st.Events, &st.ToolCalls, &st.FirstEvent, &st.LastEvent)
+	if err != nil {
+		return actionlog.SessionStats{}, fmt.Errorf("postgres actionlog: session stats: %w", err)
+	}
+	if st.Events == 0 {
+		st.FirstEvent = time.Time{}
+		st.LastEvent = time.Time{}
+		return st, nil
+	}
+	var payload []byte
+	err = a.pool.QueryRow(ctx, `
+		SELECT payload
+		  FROM agent_events
+		 WHERE `+strings.Join(where, " AND ")+` AND type = 'error'
+		 ORDER BY created_at DESC, id DESC LIMIT 1`, args...).Scan(&payload)
+	if err == nil {
+		st.LastError = postgresErrorText(payload)
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return actionlog.SessionStats{}, fmt.Errorf("postgres actionlog: session error: %w", err)
+	}
+	return st, nil
+}
+
+func postgresErrorText(payload []byte) string {
+	var obj map[string]any
+	if json.Unmarshal(payload, &obj) == nil {
+		for _, key := range []string{"error", "detail", "message", "reason"} {
+			if value, ok := obj[key].(string); ok && strings.TrimSpace(value) != "" {
+				return value
+			}
+		}
+	}
+	return string(payload)
 }
 
 // IncompleteMessageIns returns payloads of unresolved message.in events since `since`.
