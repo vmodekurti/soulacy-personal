@@ -18,7 +18,17 @@ The iOS app registers its installation through `/api/v1/mobile/devices`, reads `
 
 ## Native alerts
 
-Durable inbox delivery needs no additional configuration. To wake a device immediately, configure a trusted APNs relay:
+Durable inbox delivery needs no additional configuration. A Personal gateway can wake a device directly through APNs. Mount the downloaded Apple `.p8` key read-only into the container, then set:
+
+```bash
+SOULACY_MOBILE_APNS_TEAM_ID=YOUR_APPLE_TEAM_ID
+SOULACY_MOBILE_APNS_KEY_ID=YOUR_APNS_KEY_ID
+SOULACY_MOBILE_APNS_PRIVATE_KEY_FILE=/run/secrets/soulacy-apns-key.p8
+```
+
+Never commit the `.p8` key or paste it into `.env`. The key file should be readable only by the service account. Direct APNs supports both sandbox and production device tokens and is the recommended Personal-edition configuration.
+
+Alternatively, configure a trusted APNs relay:
 
 ```text
 SOULACY_MOBILE_PUSH_RELAY_URL=https://push.example.com

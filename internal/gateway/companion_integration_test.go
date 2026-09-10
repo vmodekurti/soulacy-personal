@@ -83,12 +83,14 @@ func TestPairingRoundTrip(t *testing.T) {
 	}
 
 	// Redeem succeeds once.
-	status, body = gatewayJSON(t, srv, http.MethodPost, "/api/v1/pairing/redeem", "secret", `{"code":"`+code+`"}`)
+	// A fresh phone has no credential yet: the one-time pairing code is the
+	// bootstrap capability and must be redeemable without Authorization.
+	status, body = gatewayJSON(t, srv, http.MethodPost, "/api/v1/pairing/redeem", "", `{"code":"`+code+`"}`)
 	if status != http.StatusOK || body["paired"] != true {
 		t.Fatalf("redeem failed: %d %v", status, body)
 	}
 	// Second redeem is rejected (single use).
-	status, _ = gatewayJSON(t, srv, http.MethodPost, "/api/v1/pairing/redeem", "secret", `{"code":"`+code+`"}`)
+	status, _ = gatewayJSON(t, srv, http.MethodPost, "/api/v1/pairing/redeem", "", `{"code":"`+code+`"}`)
 	if status != http.StatusUnauthorized {
 		t.Fatalf("second redeem should be 401, got %d", status)
 	}

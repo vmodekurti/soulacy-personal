@@ -683,6 +683,12 @@ func (s *Server) buildApp() *fiber.App {
 	app.Post("/api/v1/auth/token", s.requireAuthEngine(func(s *Server) fiber.Handler { return s.authEngine.HandleTokenRequest }))
 	app.Post("/api/v1/auth/refresh", s.requireAuthEngine(func(s *Server) fiber.Handler { return s.authEngine.HandleRefresh }))
 
+	// Pairing redemption is the one unauthenticated mutating endpoint. The
+	// short-lived, single-use code is the bootstrap capability; requiring an API
+	// key here would mean a fresh companion device must already be paired. Token
+	// creation remains protected below by config:write.
+	app.Post("/api/v1/pairing/redeem", s.handleRedeemPairingToken)
+
 	// --- Shared read-only chat sessions (public — no auth) ---
 	// A share token is an unguessable capability, so the read view bypasses the
 	// API key just like the static GUI does. Registered before the /api/v1
@@ -843,7 +849,6 @@ func (s *Server) buildApp() *fiber.App {
 	api.Get("/mobile/deliveries/:id", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleGetMobileDelivery)
 	api.Post("/mobile/deliveries/:id/read", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleReadMobileDelivery)
 	api.Post("/pairing/tokens", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleCreatePairingToken)
-	api.Post("/pairing/redeem", s.handleRedeemPairingToken)
 	api.Get("/approvals", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleListApprovals)
 	api.Post("/approvals/:id/approve", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleResolveApproval(true))
 	api.Post("/approvals/:id/deny", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleResolveApproval(false))
