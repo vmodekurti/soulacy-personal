@@ -21,4 +21,11 @@ describe('automation run history', () => {
     expect(schedule).toContain("e.type === 'schedule.run_failed'")
     expect(schedule).toContain('scheduleFailure.error')
   })
+
+  it('lets operators inspect the retained result and jump to the exact logs', () => {
+    expect(schedule).toContain("expandedRecentRuns")
+    expect(schedule).toContain("'View result'")
+    expect(schedule).toContain('Open logs')
+    expect(schedule).toContain('{run.output}')
+  })
 })
