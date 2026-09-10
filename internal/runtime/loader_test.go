@@ -181,6 +181,33 @@ func TestLoader_ProtectedSystemCannotBeModifiedOrDeleted(t *testing.T) {
 	}
 }
 
+func TestLoader_SeedsProtectedNonPrivilegedGenie(t *testing.T) {
+	dir := t.TempDir()
+	l := NewLoader([]string{dir})
+	g := l.Get(GenieAgentID)
+	if g == nil || !g.Enabled || g.SourcePath != builtinSourcePath {
+		t.Fatalf("Genie not seeded as an enabled builtin: %#v", g)
+	}
+	if g.SystemTools || g.AllowShell || g.HasCapability("system") {
+		t.Fatal("Genie received system capability")
+	}
+	if g.LLM.ReasoningEffort != "high" || len(g.Agents) != 1 || g.Agents[0] != "*" {
+		t.Fatalf("Genie orchestration defaults are incomplete: %#v", g)
+	}
+	if err := l.Delete(GenieAgentID); err == nil {
+		t.Fatal("Delete should reject protected Genie")
+	}
+
+	// Custom model/prompt may be saved, but the security boundary is restored.
+	if err := l.Upsert(dir, &agent.Definition{ID: GenieAgentID, Name: "My Genie", Enabled: false, SystemTools: true, AllowShell: true, Capabilities: []string{"system"}}); err != nil {
+		t.Fatalf("Upsert Genie: %v", err)
+	}
+	g = l.Get(GenieAgentID)
+	if !g.Enabled || g.SystemTools || g.AllowShell || g.HasCapability("system") {
+		t.Fatalf("Genie hardening was not enforced: %#v", g)
+	}
+}
+
 func TestLoader_LoadAllAppliesOnDiskSystemOverride(t *testing.T) {
 	dir := t.TempDir()
 	sysDir := filepath.Join(dir, SystemAgentID)

@@ -21,6 +21,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
+	"github.com/soulacy/soulacy/internal/runtime"
 	"github.com/soulacy/soulacy/internal/tier"
 	"github.com/soulacy/soulacy/pkg/agent"
 )
@@ -132,7 +133,10 @@ func (s *Server) evaluateSecurityReadiness() securityReadiness {
 		// tier system already marks these Privileged (`internal/tier`
 		// wildcard rules), but this collects them so the report has a
 		// separate "wildcard MCP" bullet the operator can act on.
-		if hasWildcardMCP(def) {
+		// Genie intentionally discovers the live MCP catalog. Its immutable
+		// http-only/operator boundary is enforced by the runtime, so treating its
+		// built-in wildcard as an operator configuration smell is misleading.
+		if def.ID != runtime.GenieAgentID && hasWildcardMCP(def) {
 			wildcardMCP = append(wildcardMCP, def.ID)
 		}
 	}

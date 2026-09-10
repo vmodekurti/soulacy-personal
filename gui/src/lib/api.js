@@ -523,6 +523,8 @@ export const api = {
   schedule: {
     list:   () => apiFetch('/schedule'),
     status: () => apiFetch('/schedule/status'),
+		pause: (id) => apiFetch(`/schedule/${encodeURIComponent(id)}/pause`, { method: 'POST' }),
+		cancel: (id) => apiFetch(`/schedule/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
 
   queues: {

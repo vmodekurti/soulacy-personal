@@ -290,6 +290,11 @@ func (a *App) Run(parent context.Context) error {
 
 	// ── Scheduler ────────────────────────────────────────────────────────────
 	sched := scheduler.New(engine, loader, log, ctx)
+	agentDir := ""
+	if len(cfg.AgentDirs) > 0 {
+		agentDir = cfg.AgentDirs[0]
+	}
+	engine.SetGenieMonitorManager(&genieMonitorManager{loader: loader, scheduler: sched, agentDir: agentDir})
 	sched.SetStatePath(filepath.Join(cfg.Memory.Dir, "scheduler-state.json"))
 	sched.SetEventSink(hub) // record scheduled-delivery outcomes in Activity
 	// Readiness gate (ST-16): a Studio-deployed agent may only fire on a

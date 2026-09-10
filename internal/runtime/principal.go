@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"strings"
+
+	"github.com/soulacy/soulacy/pkg/agent"
 )
 
 // Principal is the immutable authentication identity supplied by the gateway.
@@ -25,6 +27,24 @@ func WithPrincipal(ctx context.Context, p Principal) context.Context {
 func PrincipalFromContext(ctx context.Context) (Principal, bool) {
 	p, ok := ctx.Value(principalContextKey{}).(Principal)
 	return p, ok
+}
+
+// applyAgentPrincipalBoundary prevents a protected non-admin agent from
+// inheriting elevated authority from either an administrator's chat session or
+// a trusted internal/scheduler invocation. Viewer stays viewer; every stronger
+// or absent role is capped at operator.
+func applyAgentPrincipalBoundary(ctx context.Context, def *agent.Definition) context.Context {
+	if def == nil || (strings.TrimSpace(def.ID) != GenieAgentID && def.Labels["soulacy.owner"] != GenieAgentID) {
+		return ctx
+	}
+	p, ok := PrincipalFromContext(ctx)
+	if !ok {
+		return WithPrincipal(ctx, Principal{Subject: "builtin:genie", Role: "operator"})
+	}
+	if p.Role != "viewer" {
+		p.Role = "operator"
+	}
+	return WithPrincipal(ctx, p)
 }
 
 func callerAllowsTool(ctx context.Context, toolName string) bool {

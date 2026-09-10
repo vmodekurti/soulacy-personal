@@ -56,6 +56,16 @@ type SkillLoader interface {
 	All() []*skill.Skill
 }
 
+// GenieMonitorManager is implemented by the application wiring layer so the
+// runtime can expose narrow schedule operations without importing the scheduler
+// package or granting the model generic config/file access.
+type GenieMonitorManager interface {
+	CreateGenieMonitor(prompt, cron, at, channel, to string) (map[string]any, error)
+	ListGenieMonitors() []map[string]any
+	PauseGenieMonitor(id string) error
+	CancelGenieMonitor(id string) error
+}
+
 // BuiltinTool is a Go-native tool that runs inside the engine process rather
 // than delegating to a Python subprocess. Built-ins are added alongside the
 // agent's Python tool definitions when building the LLM tool schema.
@@ -99,6 +109,7 @@ type Engine struct {
 	channelDefaultMu sync.RWMutex
 	channelDefaults  map[string]agent.ScheduleOutput
 	queueStore       *agentQueueStore
+	genieMonitors    GenieMonitorManager
 
 	// ollamaAPIKey is used by the built-in web_search tool (Ollama Web Search API).
 	// Falls back to the OLLAMA_API_KEY env var at call time.
@@ -293,6 +304,9 @@ type Engine struct {
 	stepTimeout         time.Duration
 	runTimeout          time.Duration
 }
+
+// SetGenieMonitorManager attaches the constrained scheduler facade.
+func (e *Engine) SetGenieMonitorManager(m GenieMonitorManager) { e.genieMonitors = m }
 
 const (
 	defaultSessionTTL        = 24 * time.Hour

@@ -20,9 +20,13 @@ import (
 	"github.com/soulacy/soulacy/pkg/agent"
 )
 
-// SystemAgentID is the reserved ID for Soulacy's built-in web-only system
-// agent. It is seeded in memory and cannot be replaced by SOUL.yaml files.
-const SystemAgentID = "system"
+// SystemAgentID and GenieAgentID are reserved built-in agents. System is the
+// privileged host operator; Genie is the deliberately non-privileged master
+// orchestrator. Both are seeded for new and existing installations.
+const (
+	SystemAgentID = "system"
+	GenieAgentID  = "genie"
+)
 
 // builtinSourcePath is the sentinel SourcePath stored on built-in agent
 // definitions so LoadAll's stale-file cleanup never removes them.
@@ -69,9 +73,57 @@ func (l *Loader) SetLogger(log *zap.Logger) {
 //
 // Currently seeded:
 //   - "system" — master chat agent with full OS-level tool access.
+//   - "genie"  — master orchestrator with live catalogs and peer delegation.
 func (l *Loader) seedBuiltins() {
 	system := builtinSystemAgent()
 	l.agents[system.ID] = system
+	genie := builtinGenieAgent()
+	l.agents[genie.ID] = genie
+}
+
+func builtinGenieAgent() *agent.Definition {
+	builtins := []string{"web_search", "list_skills", "read_skill", "read_skill_file", "list_mcp_tools", "list_agents", "create_monitor", "list_monitors", "pause_monitor", "cancel_monitor", "channel.send", "channel.status"}
+	mcpServers := []string{"*"}
+	return &agent.Definition{
+		ID: GenieAgentID, Name: "Genie",
+		Description: "Master orchestrator — discovers live capabilities, delegates to specialist agents, and coordinates multi-step work.",
+		Trigger:     agent.TriggerChannel, Channels: []string{"http"}, Surfaces: []string{"chat"},
+		Enabled: true, StreamReply: true, MaxTurns: 50, RunTimeout: "30m",
+		Skills: []string{"*"}, Agents: []string{"*"}, ParallelPeerCalls: true, StructuredPeerResults: true,
+		Builtins: &builtins, MCPServers: &mcpServers, ConfirmTools: []string{"cancel_monitor", "channel.send"},
+		LLM:    agent.LLMConfig{Temperature: 0.2, MaxTokens: 8192, ReasoningEffort: "high"},
+		Memory: agent.MemoryPolicy{ReadScopes: []string{"session"}, WriteScopes: []string{"session"}, MaxTokens: 4000},
+		Policy: agent.ToolPolicyConfig{Enabled: true, Shell: "deny", File: "deny", Network: "allow"},
+		SystemPrompt: `You are Genie, Soulacy's master orchestration agent. Turn a user's goal into a concise plan, discover the capabilities that are available right now, delegate specialist work to peer agents, and synthesize a verified result.
+
+Your catalogs are live. Use list_skills, list_mcp_tools, and list_agents instead of assuming that a capability exists. Read a relevant skill before applying it. Prefer a specialist peer when one clearly fits, and run independent peers in parallel when useful.
+
+You operate as an operator, never as a deployment administrator. You cannot change gateway configuration, restart or upgrade the service, access host credentials, run shell commands, write host files, or bypass confirmations. If work requires an unavailable or administrative capability, explain the exact boundary and ask an administrator to perform that step. Never claim a delegated action succeeded until its returned evidence shows that it did.`,
+		SourcePath: builtinSourcePath,
+	}
+}
+
+func hardenGenieDefinition(def *agent.Definition) {
+	base := builtinGenieAgent()
+	def.ID = GenieAgentID
+	def.Enabled = true
+	def.Trigger = agent.TriggerChannel
+	def.Channels = []string{"http"}
+	def.Surfaces = []string{"chat"}
+	def.SystemTools = false
+	def.AllowShell = false
+	def.Capabilities = nil
+	def.Builtins = base.Builtins
+	def.MCPServers = base.MCPServers
+	def.Policy = base.Policy
+	for _, required := range []string{"cancel_monitor", "channel.send"} {
+		if !containsExactString(def.ConfirmTools, required) {
+			def.ConfirmTools = append(def.ConfirmTools, required)
+		}
+	}
+	if strings.TrimSpace(def.LLM.ReasoningEffort) == "" {
+		def.LLM.ReasoningEffort = "high"
+	}
 }
 
 // builtinSystemAgent returns the Definition for the always-on system agent.
@@ -247,6 +299,13 @@ func (l *Loader) LoadAll() []error {
 				found[SystemAgentID] = true
 				return nil
 			}
+			if def.ID == GenieAgentID {
+				hardenGenieDefinition(def)
+				def.SourcePath = path
+				l.agents[GenieAgentID] = def
+				found[GenieAgentID] = true
+				return nil
+			}
 
 			l.agents[def.ID] = def
 			found[def.ID] = true
@@ -267,6 +326,8 @@ func (l *Loader) LoadAll() []error {
 		if !found[id] {
 			if id == SystemAgentID {
 				l.agents[SystemAgentID] = builtinSystemAgent()
+			} else if id == GenieAgentID {
+				l.agents[GenieAgentID] = builtinGenieAgent()
 			} else {
 				delete(l.agents, id)
 			}
@@ -318,7 +379,7 @@ func (l *Loader) parseFile(path string) (*agent.Definition, error) {
 // excluded from wildcard peer expansion so they don't appear as callable tools
 // unless an agent explicitly names them by ID.
 func (l *Loader) IsBuiltin(id string) bool {
-	if id == SystemAgentID {
+	if id == SystemAgentID || id == GenieAgentID {
 		return true
 	}
 	l.mu.RLock()
@@ -420,6 +481,9 @@ func (l *Loader) Upsert(dir string, def *agent.Definition) error {
 			def.ConfirmTools = append(def.ConfirmTools, "package_install")
 		}
 	}
+	if def.ID == GenieAgentID {
+		hardenGenieDefinition(def)
+	}
 
 	oldPath := def.SourcePath // where this agent currently lives (empty for new agents/imports)
 	if oldPath == "" {
@@ -500,7 +564,7 @@ func (l *Loader) Delete(id string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if id == SystemAgentID {
+	if id == SystemAgentID || id == GenieAgentID {
 		return fmt.Errorf("agent %q is a protected built-in and cannot be deleted", id)
 	}
 

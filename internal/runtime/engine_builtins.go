@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/soulacy/soulacy/pkg/agent"
@@ -73,6 +74,8 @@ func (e *Engine) buildBuiltins() []BuiltinTool {
 	// workflows. These tools avoid write_file/system access for ephemeral
 	// intermediate state.
 	tools = append(tools, e.buildQueueBuiltins()...)
+	tools = append(tools, e.buildIntrospectionBuiltins()...)
+	tools = append(tools, e.buildGenieMonitorBuiltins()...)
 
 	if e.actionLog != nil {
 		tools = append(tools, e.buildSessionSearchBuiltin())
@@ -101,6 +104,142 @@ func (e *Engine) buildBuiltins() []BuiltinTool {
 	// inbound channel. See allToolSchemas for the enforcement logic.
 
 	return tools
+}
+
+func (e *Engine) buildGenieMonitorBuiltins() []BuiltinTool {
+	return []BuiltinTool{
+		{
+			Name: "create_monitor", Description: "Create a Genie-owned background cron or one-shot monitor. Supply exactly one of cron (five-field expression) or at (RFC3339 timestamp).",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{
+				"prompt":  map[string]any{"type": "string", "description": "The task and alert condition to evaluate on every run"},
+				"cron":    map[string]any{"type": "string", "description": "Five-field cron expression, such as 0 */4 * * *"},
+				"at":      map[string]any{"type": "string", "description": "One-shot RFC3339 timestamp"},
+				"channel": map[string]any{"type": "string", "description": "Optional delivery channel ID"},
+				"to":      map[string]any{"type": "string", "description": "Optional delivery destination"},
+			}, "required": []string{"prompt"}},
+			Handler: func(_ context.Context, args map[string]any) (string, error) {
+				if e.genieMonitors == nil {
+					return "", fmt.Errorf("create_monitor: scheduler integration is unavailable")
+				}
+				result, err := e.genieMonitors.CreateGenieMonitor(argString(args, "prompt"), argString(args, "cron"), argString(args, "at"), argString(args, "channel"), argString(args, "to"))
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
+			Name: "list_monitors", Description: "List Genie-owned background monitors with schedule and running status.", Parameters: map[string]any{"type": "object", "properties": map[string]any{}},
+			Handler: func(_ context.Context, _ map[string]any) (string, error) {
+				if e.genieMonitors == nil {
+					return "", fmt.Errorf("list_monitors: scheduler integration is unavailable")
+				}
+				items := e.genieMonitors.ListGenieMonitors()
+				b, err := json.Marshal(map[string]any{"count": len(items), "monitors": items})
+				return string(b), err
+			},
+		},
+		{
+			Name: "pause_monitor", Description: "Pause a Genie-owned monitor without deleting its definition.",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"type": "string"}}, "required": []string{"id"}},
+			Handler: func(_ context.Context, args map[string]any) (string, error) {
+				if e.genieMonitors == nil {
+					return "", fmt.Errorf("pause_monitor: scheduler integration is unavailable")
+				}
+				id := argString(args, "id")
+				if err := e.genieMonitors.PauseGenieMonitor(id); err != nil {
+					return "", err
+				}
+				return `{"ok":true,"status":"paused"}`, nil
+			},
+		},
+		{
+			Name: "cancel_monitor", Description: "Permanently cancel and remove a Genie-owned monitor. Requires interactive confirmation.",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"type": "string"}}, "required": []string{"id"}},
+			Handler: func(_ context.Context, args map[string]any) (string, error) {
+				if e.genieMonitors == nil {
+					return "", fmt.Errorf("cancel_monitor: scheduler integration is unavailable")
+				}
+				id := argString(args, "id")
+				if err := e.genieMonitors.CancelGenieMonitor(id); err != nil {
+					return "", err
+				}
+				return `{"ok":true,"status":"cancelled"}`, nil
+			},
+		},
+	}
+}
+
+// buildIntrospectionBuiltins exposes redacted, read-only snapshots of the
+// engine's live registries. The handlers deliberately query at call time so a
+// skill rescan, MCP hot-add, or agent reload is immediately visible without a
+// gateway restart.
+func (e *Engine) buildIntrospectionBuiltins() []BuiltinTool {
+	empty := map[string]any{"type": "object", "properties": map[string]any{}}
+	return []BuiltinTool{
+		{
+			Name: "list_skills", Description: "List every currently installed Agent Skill with its name and description.", Parameters: empty,
+			Handler: func(_ context.Context, _ map[string]any) (string, error) {
+				type item struct {
+					Name        string `json:"name"`
+					Description string `json:"description,omitempty"`
+				}
+				items := []item{}
+				if e.skillLoader != nil {
+					for _, s := range e.skillLoader.All() {
+						items = append(items, item{Name: s.Name, Description: s.Description})
+					}
+				}
+				sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
+				b, err := json.Marshal(map[string]any{"count": len(items), "skills": items})
+				return string(b), err
+			},
+		},
+		{
+			Name: "list_mcp_tools", Description: "List connected MCP servers and their currently available tools. Credentials and connection configuration are never returned.", Parameters: empty,
+			Handler: func(_ context.Context, _ map[string]any) (string, error) {
+				type item struct {
+					Server      string         `json:"server"`
+					Name        string         `json:"name"`
+					FullName    string         `json:"full_name"`
+					Description string         `json:"description,omitempty"`
+					InputSchema map[string]any `json:"input_schema,omitempty"`
+				}
+				items := []item{}
+				if e.mcpClient != nil {
+					for _, t := range e.mcpClient.AllTools() {
+						items = append(items, item{Server: t.ServerID, Name: t.Name, FullName: t.FullName(), Description: t.Description, InputSchema: t.InputSchema})
+					}
+				}
+				sort.Slice(items, func(i, j int) bool { return items[i].FullName < items[j].FullName })
+				b, err := json.Marshal(map[string]any{"count": len(items), "tools": items})
+				return string(b), err
+			},
+		},
+		{
+			Name: "list_agents", Description: "List currently loaded peer agents and whether each is enabled and available for delegation.", Parameters: empty,
+			Handler: func(_ context.Context, _ map[string]any) (string, error) {
+				type item struct {
+					ID          string            `json:"id"`
+					Name        string            `json:"name"`
+					Description string            `json:"description,omitempty"`
+					Enabled     bool              `json:"enabled"`
+					Trigger     agent.TriggerKind `json:"trigger"`
+				}
+				items := []item{}
+				for _, d := range e.loader.All() {
+					if d.ID == GenieAgentID || d.ID == SystemAgentID {
+						continue
+					}
+					items = append(items, item{ID: d.ID, Name: d.Name, Description: d.Description, Enabled: d.Enabled, Trigger: d.Trigger})
+				}
+				sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
+				b, err := json.Marshal(map[string]any{"count": len(items), "agents": items})
+				return string(b), err
+			},
+		},
+	}
 }
 
 // appendSkillBuiltins adds the skills tier-2/tier-3 built-ins (read_skill,

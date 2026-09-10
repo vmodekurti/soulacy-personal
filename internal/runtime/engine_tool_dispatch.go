@@ -104,6 +104,16 @@ func (e *Engine) runToolDispatch(ctx context.Context, def *agent.Definition, ses
 		}
 	}
 
+	// Genie may discover arbitrary MCP/plugin catalogs at runtime, so its
+	// immutable blueprint cannot enumerate every future write tool in
+	// ConfirmTools. Apply a conservative semantic gate to action-like external
+	// tools while leaving read/search/list operations autonomous.
+	if isGenieDefinition(def) && highImpactExternalTool(call.Name) {
+		if err := e.dynamicConfirm(ctx, def, call, "Genie is requesting a potentially high-impact external write action"); err != nil {
+			return "", err
+		}
+	}
+
 	// MCP tools — namespaced as mcp__<server>__<tool>. Route to the MCP client.
 	if e.mcpClient != nil && strings.HasPrefix(call.Name, mcp.FullNamePrefix) {
 		if !mcpToolAllowed(def, call.Name) {
@@ -392,6 +402,24 @@ print(result if isinstance(result, str) else json.dumps(result))
 		lastErr = err
 	}
 	return "", lastErr
+}
+
+func isGenieDefinition(def *agent.Definition) bool {
+	return def != nil && (def.ID == GenieAgentID || def.Labels["soulacy.owner"] == GenieAgentID)
+}
+
+func highImpactExternalTool(name string) bool {
+	if !strings.HasPrefix(name, mcp.FullNamePrefix) && !strings.HasPrefix(name, "plugin__") {
+		return false
+	}
+	parts := strings.Split(strings.ToLower(name), "__")
+	action := parts[len(parts)-1]
+	for _, word := range []string{"create", "add", "update", "set", "write", "send", "post", "put", "patch", "delete", "remove", "cancel", "transfer", "purchase", "buy", "sell", "execute", "deploy", "install", "invite", "publish"} {
+		if action == word || strings.HasPrefix(action, word+"_") || strings.Contains(action, "_"+word+"_") || strings.HasSuffix(action, "_"+word) {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Engine) runPythonToolOnce(tctx, auditCtx context.Context, def *agent.Definition, sessionID string, call message.ToolCall, script string, argsJSON []byte) (string, error) {
