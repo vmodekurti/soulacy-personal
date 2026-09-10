@@ -777,3 +777,28 @@ storage:
 		t.Errorf("storage.postgres_dsn = %q", cfg.Storage.PostgresDSN)
 	}
 }
+
+func TestLoadVectorAndStorageConfigFromEnvironment(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("SOULACY_STORAGE_BACKEND", "postgres")
+	t.Setenv("SOULACY_STORAGE_POSTGRES_DSN", "postgres://soulacy:secret@postgres:5432/soulacy")
+	t.Setenv("SOULACY_STORAGE_POSTGRES_LOG_DIR", "/data/logs")
+	t.Setenv("SOULACY_VECTOR_BACKEND", "qdrant")
+	t.Setenv("SOULACY_VECTOR_URL", "http://qdrant:6333")
+	t.Setenv("SOULACY_VECTOR_COLLECTION", "cloud_memory")
+
+	cfg, _, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Storage.PostgresDSN != "postgres://soulacy:secret@postgres:5432/soulacy" {
+		t.Errorf("storage.postgres_dsn = %q", cfg.Storage.PostgresDSN)
+	}
+	if cfg.Storage.PostgresLogDir != "/data/logs" {
+		t.Errorf("storage.postgres_log_dir = %q", cfg.Storage.PostgresLogDir)
+	}
+	if cfg.Vector.URL != "http://qdrant:6333" || cfg.Vector.Collection != "cloud_memory" {
+		t.Errorf("vector config = url %q collection %q", cfg.Vector.URL, cfg.Vector.Collection)
+	}
+}

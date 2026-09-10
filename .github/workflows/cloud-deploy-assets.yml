@@ -1,0 +1,31 @@
+name: Validate cloud deployment assets
+
+on:
+  pull_request:
+    paths:
+      - "deploy/**"
+      - "website/**"
+      - "scripts/test-cloud-deploy.sh"
+      - ".github/workflows/cloud-deploy-assets.yml"
+  push:
+    branches: [main]
+    paths:
+      - "deploy/**"
+      - "website/**"
+      - "scripts/test-cloud-deploy.sh"
+      - ".github/workflows/cloud-deploy-assets.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Validate bootstrap, Compose, ARM, and website links
+        run: ./scripts/test-cloud-deploy.sh
+      - name: Validate CloudFormation
+        run: |
+          python -m pip install cfn-lint==1.46.0
+          cfn-lint deploy/aws/cloudformation.yaml
