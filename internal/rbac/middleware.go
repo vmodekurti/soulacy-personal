@@ -63,7 +63,7 @@ func (m *Manager) Require(resource, action string) fiber.Handler {
 			// Open mode or auth bypass (health endpoint etc.) — allow.
 			return c.Next()
 		}
-		if HasPermission(cl.Role, resource, action) && cl.AllowsResource(resource) {
+		if HasPermission(cl.Role, resource, action) && cl.Allows(resource, action) {
 			return c.Next()
 		}
 		m.log.Info("rbac: access denied",
@@ -99,7 +99,7 @@ func (m *Manager) RequireAgent(agentParam, action string) fiber.Handler {
 		// key scoped to [chat] would still reach every /agents/:id route,
 		// because the per-agent store consults the ROLE and knows nothing about
 		// the credential the request arrived on.
-		if !cl.AllowsResource(ResourceAgents) {
+		if !cl.Allows(ResourceAgents, action) {
 			return m.deny(c, cl.Role, ResourceAgents+":"+action)
 		}
 		agentID := c.Params(agentParam)
@@ -138,7 +138,7 @@ func (m *Manager) RequireAgentFrom(resource, action string, sources ...AgentIDSo
 		if cl == nil {
 			return c.Next()
 		}
-		if !cl.AllowsResource(resource) {
+		if !cl.Allows(resource, action) {
 			return m.deny(c, cl.Role, resource+":"+action)
 		}
 		agentID := resolveAgentID(c, sources)
