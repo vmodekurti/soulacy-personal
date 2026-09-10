@@ -4156,8 +4156,8 @@ imports the public repository and its Dockerfile. The root <code>railway.json</c
 records compatible health and restart defaults for Railway services that still
 support config-as-code.
 Before exposing the service, set a strong <code>SOULACY_SERVER_API_KEY</code>, mount a
-persistent volume at <code>/home/soulacy/.soulacy</code>, set <code>PORT=18789</code>, and generate a
-public domain.
+persistent volume at <code>/home/soulacy/.soulacy</code>, set <code>PORT=18789</code>, configure <code>/</code>
+as the health-check path, and generate a public domain.
 Railway detects the container's port from the Dockerfile; the checked-in
 configuration supplies the health check and restart policy.</p>
 <h2 id="render">Render<a class="headerlink" href="#render" title="Permanent link">&para;</a></h2>
