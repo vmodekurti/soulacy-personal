@@ -61,8 +61,9 @@ func main() {
 
 func buildRoot() *cobra.Command {
 	root := &cobra.Command{
-		Use:   "sy",
-		Short: "Soulacy CLI — manage your agentic framework from the terminal",
+		Use:          "sy",
+		Short:        "Soulacy CLI — manage your agentic framework from the terminal",
+		SilenceUsage: true,
 		Long: `sy is the command-line interface for Soulacy.
 
 Every GUI action is available here. All commands communicate with the

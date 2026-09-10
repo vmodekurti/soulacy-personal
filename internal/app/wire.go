@@ -157,20 +157,21 @@ func (a *App) Run(parent context.Context) error {
 	mcpServers := make(map[string]mcp.ServerConfig, len(cfg.MCP.Servers))
 	for id, sc := range cfg.MCP.Servers {
 		mcpServers[id] = mcp.ServerConfig{
-			Transport: sc.Transport,
-			Command:   sc.Command,
-			Args:      sc.Args,
-			Env:       sc.Env,
-			URL:       sc.URL,
-			Headers:   sc.Headers,
-			Query:     sc.Query,
+			Transport:     sc.Transport,
+			Command:       sc.Command,
+			Args:          sc.Args,
+			Env:           sc.Env,
+			EnvSecretRefs: sc.EnvSecretRefs,
+			URL:           sc.URL,
+			Headers:       sc.Headers,
+			Query:         sc.Query,
 			Auth: mcp.AuthConfig{
 				Type: sc.Auth.Type, Header: sc.Auth.Header, Scheme: sc.Auth.Scheme,
 				SecretRef: sc.Auth.SecretRef, TokenURL: sc.Auth.TokenURL,
 				ClientID: sc.Auth.ClientID, ClientSecretRef: sc.Auth.ClientSecretRef,
 				Scopes: sc.Auth.Scopes, Audience: sc.Auth.Audience,
 			},
-			Timeout: sc.Timeout,
+			Timeout:    sc.Timeout,
 			PublicOnly: sc.PublicOnly,
 		}
 		if sc.ManagedOnly {
@@ -181,6 +182,9 @@ func (a *App) Run(parent context.Context) error {
 	}
 	resolveMCPSecret := func(ctx context.Context, name string) (string, error) {
 		if value, ok := secrets.New(credVault).Get(ctx, name); ok {
+			return value, nil
+		}
+		if value, ok := os.LookupEnv(name); ok && value != "" {
 			return value, nil
 		}
 		return "", fmt.Errorf("MCP secret %q is not set", name)

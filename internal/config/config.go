@@ -878,17 +878,18 @@ type MCPConfig struct {
 
 // MCPServerConfig describes one MCP server connection.
 type MCPServerConfig struct {
-	Transport   string            `mapstructure:"transport"`    // "stdio" (default) or "http"
-	Command     string            `mapstructure:"command"`      // stdio: executable
-	Args        []string          `mapstructure:"args"`         // stdio: arguments
-	Env         map[string]string `mapstructure:"env"`          // stdio: extra env
-	URL         string            `mapstructure:"url"`          // http: server URL
-	Headers     map[string]string `mapstructure:"headers"`      // http: extra headers
-	Query       map[string]string `mapstructure:"query"`        // http: non-sensitive URL query parameters
-	Auth        MCPAuthConfig     `mapstructure:"auth"`         // http: structured authentication
-	Timeout     time.Duration     `mapstructure:"timeout"`      // http: per-request timeout
-	PublicOnly  bool              `mapstructure:"public_only"`  // remote API: enforce public destinations on every request
-	ManagedOnly bool              `mapstructure:"managed_only"` // remote API: executable must remain in mcp-servers/
+	Transport     string            `mapstructure:"transport"`       // "stdio" (default) or "http"
+	Command       string            `mapstructure:"command"`         // stdio: executable
+	Args          []string          `mapstructure:"args"`            // stdio: arguments
+	Env           map[string]string `mapstructure:"env"`             // stdio: extra env
+	EnvSecretRefs map[string]string `mapstructure:"env_secret_refs"` // stdio: env name → encrypted vault key
+	URL           string            `mapstructure:"url"`             // http: server URL
+	Headers       map[string]string `mapstructure:"headers"`         // http: extra headers
+	Query         map[string]string `mapstructure:"query"`           // http: non-sensitive URL query parameters
+	Auth          MCPAuthConfig     `mapstructure:"auth"`            // http: structured authentication
+	Timeout       time.Duration     `mapstructure:"timeout"`         // http: per-request timeout
+	PublicOnly    bool              `mapstructure:"public_only"`     // remote API: enforce public destinations on every request
+	ManagedOnly   bool              `mapstructure:"managed_only"`    // remote API: executable must remain in mcp-servers/
 }
 
 // MCPAuthConfig keeps authentication separate from ordinary request metadata.
@@ -1126,8 +1127,8 @@ func Load(cfgPath string) (*Config, string, error) {
 }
 
 // restoreCaseSensitiveMaps fixes the keys Viper lowercased on load for the maps
-// where case is significant: each MCP server's `env` (environment variable
-// names are case-sensitive on Unix) and `headers` (HTTP header *values* are
+// where case is significant: each MCP server's `env`/`env_secret_refs`
+// (environment variable names are case-sensitive on Unix) and `headers` (HTTP header *values* are
 // matched case-insensitively, but some servers care). It re-reads only those
 // maps from the raw YAML at path and overwrites the lowercased versions in cfg,
 // matching servers case-insensitively (Viper also lowercased the server IDs).
@@ -1142,9 +1143,10 @@ func restoreCaseSensitiveMaps(cfg *Config, path string) {
 	var raw struct {
 		MCP struct {
 			Servers map[string]struct {
-				Env     map[string]string `yaml:"env"`
-				Headers map[string]string `yaml:"headers"`
-				Query   map[string]string `yaml:"query"`
+				Env           map[string]string `yaml:"env"`
+				EnvSecretRefs map[string]string `yaml:"env_secret_refs"`
+				Headers       map[string]string `yaml:"headers"`
+				Query         map[string]string `yaml:"query"`
 			} `yaml:"servers"`
 		} `yaml:"mcp"`
 	}
@@ -1159,6 +1161,9 @@ func restoreCaseSensitiveMaps(cfg *Config, path string) {
 		}
 		if len(rs.Env) > 0 {
 			sc.Env = rs.Env
+		}
+		if len(rs.EnvSecretRefs) > 0 {
+			sc.EnvSecretRefs = rs.EnvSecretRefs
 		}
 		if len(rs.Headers) > 0 {
 			sc.Headers = rs.Headers

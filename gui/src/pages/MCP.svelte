@@ -32,7 +32,7 @@
 
   const BLANK_AUTH = () => ({ type: 'none', header: '', scheme: '', secret_ref: '', token_url: '', client_id: '', client_secret_ref: '', scopes: [], audience: '' })
   const BLANK_STDIO = () => ({
-    id: '', transport: 'stdio', command: '', args: [], env: {}, url: '', headers: {},
+    id: '', transport: 'stdio', command: '', args: [], env: {}, env_secret_refs: {}, url: '', headers: {},
     query: {}, auth: BLANK_AUTH(), auth_secret: '', timeout: '60s',
   })
 
@@ -66,6 +66,7 @@
       command: s.command || '',
       args: s.args ? [...s.args] : [],
       env: s.env ? { ...s.env } : {},
+      env_secret_refs: s.env_secret_refs ? { ...s.env_secret_refs } : {},
       url: s.url || '',
       headers: s.headers ? { ...s.headers } : {},
       query: s.query ? { ...s.query } : {},

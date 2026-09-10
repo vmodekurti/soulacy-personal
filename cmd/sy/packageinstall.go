@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -55,14 +56,33 @@ type pythonProject struct {
 	Project struct {
 		Name           string            `toml:"name"`
 		RequiresPython string            `toml:"requires-python"`
+		Dependencies   []string          `toml:"dependencies"`
 		Scripts        map[string]string `toml:"scripts"`
 	} `toml:"project"`
+}
+
+type pythonVersion struct {
+	Major int
+	Minor int
+	Patch int
 }
 
 type nodeProject struct {
 	Name    string            `json:"name"`
 	Bin     json.RawMessage   `json:"bin"`
 	Scripts map[string]string `json:"scripts"`
+}
+
+// mcpPackage is one independently runnable server inside a Git repository.
+// RelDir is always slash-separated and relative to the cloned repository.
+// Conventional MCP monorepos commonly keep these under servers/*.
+type mcpPackage struct {
+	Name       string
+	RelDir     string
+	SourceDir  string
+	Entrypoint string
+	Manifest   mcpServerManifest
+	EnvVars    []string
 }
 
 func buildPackageCmd() *cobra.Command {
@@ -220,12 +240,14 @@ func detectURLPackageKind(dir string) (urlPackageKind, error) {
 	if fileExists(filepath.Join(dir, "SKILL.md")) {
 		return urlPackageSkill, nil
 	}
-	if fileExists(filepath.Join(dir, "mcp_server.py")) || fileExists(filepath.Join(dir, "server.json")) || fileExists(filepath.Join(dir, "pyproject.toml")) || fileExists(filepath.Join(dir, "package.json")) {
-		if fileExists(filepath.Join(dir, "server.json")) || repositoryMentionsMCP(dir) {
-			return urlPackageMCP, nil
-		}
+	packages, err := discoverMCPPackages(dir)
+	if err != nil {
+		return "", err
 	}
-	return "", fmt.Errorf("repository is neither a Soulacy Skill (SKILL.md) nor a recognizable MCP server (server.json or MCP package manifest)")
+	if len(packages) > 0 {
+		return urlPackageMCP, nil
+	}
+	return "", unsupportedMCPRepositoryError()
 }
 
 func repositorySupportsPackageKind(dir string, kind urlPackageKind) bool {
@@ -233,13 +255,214 @@ func repositorySupportsPackageKind(dir string, kind urlPackageKind) bool {
 	case urlPackageSkill:
 		return fileExists(filepath.Join(dir, "SKILL.md"))
 	case urlPackageMCP:
-		if fileExists(filepath.Join(dir, "server.json")) || fileExists(filepath.Join(dir, "mcp_server.py")) {
-			return true
-		}
-		return (fileExists(filepath.Join(dir, "pyproject.toml")) || fileExists(filepath.Join(dir, "package.json"))) && repositoryMentionsMCP(dir)
+		packages, err := discoverMCPPackages(dir)
+		return err == nil && len(packages) > 0
 	default:
 		return false
 	}
+}
+
+func unsupportedMCPRepositoryError() error {
+	return fmt.Errorf("repository is neither a Soulacy Skill (SKILL.md) nor a recognizable MCP server; expected a root MCP package or independently runnable packages under servers/*")
+}
+
+// discoverMCPPackages deliberately checks only the repository root and direct
+// children of servers/. Bounded discovery supports normal MCP monorepos without
+// turning every nested package, fixture, or vendored dependency into executable
+// code. A candidate must have a supported manifest and an unambiguous entrypoint.
+func discoverMCPPackages(root string) ([]mcpPackage, error) {
+	var rootErr error
+	if repositoryLooksLikeMCP(root) {
+		pkg, err := inspectMCPPackage(root, ".")
+		if err == nil {
+			return []mcpPackage{pkg}, nil
+		}
+		rootErr = err
+	}
+
+	serversDir := filepath.Join(root, "servers")
+	entries, err := os.ReadDir(serversDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			if rootErr != nil {
+				return nil, rootErr
+			}
+			return nil, nil
+		}
+		return nil, fmt.Errorf("inspect MCP bundle: %w", err)
+	}
+	if len(entries) > 64 {
+		return nil, fmt.Errorf("MCP bundle contains %d entries under servers/; maximum is 64", len(entries))
+	}
+	var packages []mcpPackage
+	var rejected []string
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		dir := filepath.Join(serversDir, entry.Name())
+		if !repositoryLooksLikeMCP(dir) {
+			continue
+		}
+		pkg, inspectErr := inspectMCPPackage(dir, filepath.ToSlash(filepath.Join("servers", entry.Name())))
+		if inspectErr != nil {
+			rejected = append(rejected, fmt.Sprintf("%s: %v", filepath.ToSlash(filepath.Join("servers", entry.Name())), inspectErr))
+			continue
+		}
+		packages = append(packages, pkg)
+	}
+	if len(rejected) > 0 {
+		sort.Strings(rejected)
+		return nil, fmt.Errorf("detected an MCP bundle, but some servers are not safely runnable:\n  - %s", strings.Join(rejected, "\n  - "))
+	}
+	if len(packages) == 0 && rootErr != nil {
+		return nil, rootErr
+	}
+	sort.Slice(packages, func(i, j int) bool { return packages[i].RelDir < packages[j].RelDir })
+	return packages, nil
+}
+
+func repositoryLooksLikeMCP(dir string) bool {
+	if fileExists(filepath.Join(dir, "server.json")) || fileExists(filepath.Join(dir, "mcp_server.py")) {
+		return true
+	}
+	return (fileExists(filepath.Join(dir, "pyproject.toml")) || fileExists(filepath.Join(dir, "package.json"))) && repositoryMentionsMCP(dir)
+}
+
+func inspectMCPPackage(dir, relDir string) (mcpPackage, error) {
+	pkg := mcpPackage{RelDir: relDir, SourceDir: dir}
+	if manifest, err := readMCPServerManifest(filepath.Join(dir, "server.json")); err == nil {
+		pkg.Manifest = manifest
+		pkg.Name = manifest.Name
+	}
+	if fileExists(filepath.Join(dir, "pyproject.toml")) {
+		var project pythonProject
+		b, err := os.ReadFile(filepath.Join(dir, "pyproject.toml"))
+		if err != nil || toml.Unmarshal(b, &project) != nil {
+			return pkg, fmt.Errorf("could not read pyproject.toml")
+		}
+		if pkg.Name == "" {
+			pkg.Name = project.Project.Name
+		}
+		if len(project.Project.Scripts) == 0 {
+			entrypoint, err := discoverPythonMCPEntrypoint(dir)
+			if err != nil {
+				return pkg, err
+			}
+			pkg.Entrypoint = entrypoint
+		}
+	}
+	if pkg.Name == "" && fileExists(filepath.Join(dir, "package.json")) {
+		var project nodeProject
+		b, err := os.ReadFile(filepath.Join(dir, "package.json"))
+		if err != nil || json.Unmarshal(b, &project) != nil {
+			return pkg, fmt.Errorf("could not read package.json")
+		}
+		pkg.Name = project.Name
+		if firstNodeBin(project.Bin) == "" {
+			if _, ok := project.Scripts["start"]; !ok {
+				return pkg, fmt.Errorf("node MCP package has neither a bin entry nor a start script")
+			}
+		}
+	}
+	if pkg.Name == "" {
+		pkg.Name = filepath.Base(dir)
+	}
+	envSource := dir
+	if pkg.Entrypoint != "" {
+		envSource = filepath.Join(dir, pkg.Entrypoint)
+	}
+	pkg.EnvVars = discoverMCPEnvironmentReferences(envSource)
+	return pkg, nil
+}
+
+var (
+	pythonEnvCallPattern  = regexp.MustCompile(`(?i)(?:os\.)?(?:getenv|environ\.get)\(\s*["']([A-Z][A-Z0-9_]*)["']`)
+	pythonEnvIndexPattern = regexp.MustCompile(`(?i)os\.environ\s*\[\s*["']([A-Z][A-Z0-9_]*)["']\s*\]`)
+	nodeEnvPattern        = regexp.MustCompile(`(?i)process\.env\.([A-Z][A-Z0-9_]*)`)
+)
+
+func discoverMCPEnvironmentReferences(path string) []string {
+	seen := map[string]bool{}
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil
+	}
+	var files []string
+	if info.IsDir() {
+		entries, readErr := os.ReadDir(path)
+		if readErr != nil {
+			return nil
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				files = append(files, filepath.Join(path, entry.Name()))
+			}
+		}
+	} else {
+		files = []string{path}
+	}
+	for _, file := range files {
+		ext := strings.ToLower(filepath.Ext(file))
+		if ext != ".py" && ext != ".js" && ext != ".mjs" && ext != ".cjs" && ext != ".ts" {
+			continue
+		}
+		b, readErr := os.ReadFile(file)
+		if readErr != nil {
+			continue
+		}
+		for _, pattern := range []*regexp.Regexp{pythonEnvCallPattern, pythonEnvIndexPattern, nodeEnvPattern} {
+			for _, match := range pattern.FindAllSubmatch(b, -1) {
+				if len(match) > 1 {
+					seen[strings.ToUpper(string(match[1]))] = true
+				}
+			}
+		}
+	}
+	return sortedKeys(seen)
+}
+
+// discoverPythonMCPEntrypoint accepts only a top-level Python file that both
+// constructs an MCP server and runs it. The directory-matching filename is a
+// deterministic convention used by many uv-created MCP monorepos. Otherwise
+// there must be exactly one runnable candidate; ambiguity is an error.
+func discoverPythonMCPEntrypoint(dir string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", fmt.Errorf("inspect Python MCP entrypoint: %w", err)
+	}
+	var candidates []string
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".py" {
+			continue
+		}
+		b, readErr := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if readErr != nil {
+			return "", fmt.Errorf("read Python MCP candidate %s: %w", entry.Name(), readErr)
+		}
+		compact := strings.ToLower(strings.ReplaceAll(string(b), " ", ""))
+		constructsServer := strings.Contains(compact, "fastmcp(") || strings.Contains(compact, "server(")
+		runsServer := strings.Contains(compact, ".run(")
+		if constructsServer && runsServer {
+			candidates = append(candidates, entry.Name())
+		}
+	}
+	if len(candidates) == 0 {
+		return "", fmt.Errorf("python MCP package has no [project.scripts] entry and no statically recognizable server runner")
+	}
+	sort.Strings(candidates)
+	preferred := []string{filepath.Base(dir) + ".py", "mcp_server.py", "server.py"}
+	for _, name := range preferred {
+		for _, candidate := range candidates {
+			if candidate == name {
+				return candidate, nil
+			}
+		}
+	}
+	if len(candidates) == 1 {
+		return candidates[0], nil
+	}
+	return "", fmt.Errorf("python MCP package has multiple possible entrypoints (%s); add [project.scripts] to select one", strings.Join(candidates, ", "))
 }
 
 func repositoryMentionsMCP(dir string) bool {
@@ -257,13 +480,12 @@ func installMCPFromRepository(ctx context.Context, source, probe string, assumeY
 	if err != nil {
 		return fmt.Errorf("resolve workspace: %w", err)
 	}
-	manifest, _ := readMCPServerManifest(filepath.Join(probe, "server.json"))
-	id := packageInstallID(manifest.Name)
-	if id == "" {
-		id = packageInstallID(source)
+	packages, err := discoverMCPPackages(probe)
+	if err != nil {
+		return err
 	}
-	if id == "" {
-		return fmt.Errorf("could not derive a safe MCP server id")
+	if len(packages) == 0 {
+		return unsupportedMCPRepositoryError()
 	}
 
 	doc, root, err := loadConfigDoc(ws.ConfigFile)
@@ -271,18 +493,65 @@ func installMCPFromRepository(ctx context.Context, source, probe string, assumeY
 		return fmt.Errorf("read config: %w", err)
 	}
 	servers := ensureMapping(ensureMapping(root, "mcp"), "servers")
-	if yamlMapValue(servers, id) != nil {
-		fmt.Printf("✓ MCP server %q is already registered; no packages were reinstalled.\n", id)
+	type installPlan struct {
+		pkg     mcpPackage
+		id      string
+		dest    string
+		envRefs map[string]string
+	}
+	seenIDs := map[string]string{}
+	var plans []installPlan
+	for _, pkg := range packages {
+		id := packageInstallID(pkg.Name)
+		if id == "" && pkg.RelDir == "." {
+			id = packageInstallID(source)
+		}
+		if id == "" {
+			return fmt.Errorf("could not derive a safe MCP server id for %s", pkg.RelDir)
+		}
+		if first, duplicate := seenIDs[id]; duplicate {
+			return fmt.Errorf("MCP bundle server id %q is duplicated by %s and %s", id, first, pkg.RelDir)
+		}
+		seenIDs[id] = pkg.RelDir
+		if yamlMapValue(servers, id) != nil {
+			fmt.Printf("✓ MCP server %q is already registered; skipping it.\n", id)
+			continue
+		}
+		dest := filepath.Join(ws.Root, "mcp-servers", id)
+		if _, statErr := os.Stat(dest); statErr == nil {
+			return fmt.Errorf("MCP install directory already exists at %s but the server is not registered; inspect or remove that partial installation before retrying", dest)
+		} else if !os.IsNotExist(statErr) {
+			return fmt.Errorf("inspect MCP install directory %s: %w", dest, statErr)
+		}
+		envNames, envErr := mcpPackageEnvironmentNames(pkg)
+		if envErr != nil {
+			return fmt.Errorf("inspect MCP environment for %s: %w", pkg.RelDir, envErr)
+		}
+		envRefs := make(map[string]string, len(envNames))
+		for _, name := range envNames {
+			envRefs[name] = name
+		}
+		plans = append(plans, installPlan{pkg: pkg, id: id, dest: dest, envRefs: envRefs})
+	}
+	if len(plans) == 0 {
+		fmt.Println("✓ Every MCP server in this repository is already registered; no packages were reinstalled.")
 		return nil
 	}
 
-	report := (&introspect.Pipeline{DryRun: &introspect.DryRunConfig{Timeout: 5 * time.Second}}).Run(ctx, probe, nil)
-	printSecurityReport(os.Stdout, report)
-	if report.Verdict == introspect.VerdictDanger {
-		return fmt.Errorf("refusing MCP install because safety introspection returned DANGER")
+	for _, plan := range plans {
+		fmt.Printf("→ Inspecting MCP server %q from %s\n", plan.id, plan.pkg.RelDir)
+		report := (&introspect.Pipeline{DryRun: &introspect.DryRunConfig{Timeout: 5 * time.Second}}).Run(ctx, plan.pkg.SourceDir, nil)
+		printSecurityReport(os.Stdout, report)
+		if report.Verdict == introspect.VerdictDanger {
+			return fmt.Errorf("refusing MCP bundle before making changes: safety introspection returned DANGER for %s", plan.pkg.RelDir)
+		}
 	}
 	if !assumeYes {
-		fmt.Printf("Install and register MCP server %q from %s? [y/N] ", id, source)
+		ids := make([]string, 0, len(plans))
+		for _, plan := range plans {
+			ids = append(ids, plan.id)
+		}
+		fmt.Printf("Install and register %d MCP server(s) (%s) from %s? [y/N] ", len(plans), strings.Join(ids, ", "), source)
 		var answer string
 		_, _ = fmt.Scanln(&answer)
 		if a := strings.ToLower(strings.TrimSpace(answer)); a != "y" && a != "yes" {
@@ -290,54 +559,66 @@ func installMCPFromRepository(ctx context.Context, source, probe string, assumeY
 		}
 	}
 
-	dest := filepath.Join(ws.Root, "mcp-servers", id)
-	if _, err := os.Stat(dest); err == nil {
-		return fmt.Errorf("MCP install directory already exists at %s but the server is not registered; inspect or remove that partial installation before retrying", dest)
-	}
-	sourceDir := filepath.Join(dest, "source")
-	if err := os.MkdirAll(dest, 0o755); err != nil {
-		return err
-	}
-	activated := false
+	var created []string
+	committed := false
 	defer func() {
-		if !activated {
-			_ = os.RemoveAll(dest)
+		if !committed {
+			for _, dest := range created {
+				_ = os.RemoveAll(dest)
+			}
 		}
 	}()
-	if err := copyDir(probe, sourceDir); err != nil {
-		return fmt.Errorf("persist source: %w", err)
-	}
 
-	command, args, installErr := installMCPRuntime(ctx, dest, sourceDir)
-	if installErr != nil {
-		return installErr
-	}
-	srv := ensureMapping(servers, id)
-	setScalar(srv, "transport", "stdio", 0)
-	setScalar(srv, "command", command, yaml.DoubleQuotedStyle)
-	if len(args) > 0 {
-		setSequence(srv, "args", args)
-	}
-	if !fileExists(command) && !executableOnPath(command) {
-		return fmt.Errorf("registered command %q could not be verified", command)
+	for _, plan := range plans {
+		sourceDir := filepath.Join(plan.dest, "source")
+		if err := os.MkdirAll(plan.dest, 0o755); err != nil {
+			return err
+		}
+		created = append(created, plan.dest)
+		if err := copyPackageDir(plan.pkg.SourceDir, sourceDir); err != nil {
+			return fmt.Errorf("persist MCP source for %s: %w", plan.pkg.RelDir, err)
+		}
+
+		command, args, installErr := installMCPRuntime(ctx, plan.dest, sourceDir, plan.pkg.Entrypoint)
+		if installErr != nil {
+			return fmt.Errorf("install MCP server %q from %s: %w", plan.id, plan.pkg.RelDir, installErr)
+		}
+		if plan.pkg.Entrypoint != "" {
+			if verifyErr := verifyScriptMCPStartup(ctx, command, args); verifyErr != nil {
+				return fmt.Errorf("verify MCP server %q from %s: %w", plan.id, plan.pkg.RelDir, verifyErr)
+			}
+		}
+		if !fileExists(command) && !executableOnPath(command) {
+			return fmt.Errorf("registered command %q for %s could not be verified", command, plan.id)
+		}
+		srv := ensureMapping(servers, plan.id)
+		setScalar(srv, "transport", "stdio", 0)
+		setScalar(srv, "command", command, yaml.DoubleQuotedStyle)
+		setBoolScalar(srv, "managed_only", true)
+		if len(args) > 0 {
+			setSequence(srv, "args", args)
+		}
+		if len(plan.envRefs) > 0 {
+			setStringMap(srv, "env_secret_refs", plan.envRefs)
+		}
 	}
 	if err := saveConfigDoc(ws.ConfigFile, doc); err != nil {
-		return fmt.Errorf("register MCP server: %w", err)
+		return fmt.Errorf("register MCP servers: %w", err)
 	}
-	activated = true
+	committed = true
 
-	fmt.Printf("✓ Installed and registered MCP server %q.\n", id)
-	fmt.Printf("  Source: %s\n  Command: %s %s\n  Config: %s\n", sourceDir, command, strings.Join(args, " "), ws.ConfigFile)
-	if required := requiredMCPEnvironment(manifest); len(required) > 0 {
-		fmt.Printf("  Required environment still to configure: %s\n", strings.Join(required, ", "))
-	} else {
-		fmt.Println("✓ Manifest has no required environment variables.")
+	for _, plan := range plans {
+		fmt.Printf("✓ Installed and registered MCP server %q from %s.\n", plan.id, plan.pkg.RelDir)
+		if len(plan.envRefs) > 0 {
+			fmt.Printf("  Vault-backed environment; configure missing values in Secrets: %s\n", strings.Join(sortedKeys(plan.envRefs), ", "))
+		}
 	}
+	fmt.Printf("✓ Registered %d MCP server(s) atomically in %s.\n", len(plans), ws.ConfigFile)
 	fmt.Println("✓ Config was written atomically; the gateway will hot-reload it.")
 	return nil
 }
 
-func installMCPRuntime(ctx context.Context, dest, sourceDir string) (string, []string, error) {
+func installMCPRuntime(ctx context.Context, dest, sourceDir, discoveredEntrypoint string) (string, []string, error) {
 	if fileExists(filepath.Join(sourceDir, "pyproject.toml")) {
 		var project pythonProject
 		b, err := os.ReadFile(filepath.Join(sourceDir, "pyproject.toml"))
@@ -345,20 +626,42 @@ func installMCPRuntime(ctx context.Context, dest, sourceDir string) (string, []s
 			return "", nil, fmt.Errorf("read pyproject.toml")
 		}
 		scripts := sortedKeys(project.Project.Scripts)
-		if len(scripts) == 0 {
-			return "", nil, fmt.Errorf("python MCP repository has no [project.scripts] entrypoint")
+		python, err := selectPythonInterpreter(ctx, project.Project.RequiresPython)
+		if err != nil {
+			return "", nil, err
 		}
 		venv := filepath.Join(dest, "venv")
-		if out, err := exec.CommandContext(ctx, "python3", "-m", "venv", venv).CombinedOutput(); err != nil {
+		if out, err := exec.CommandContext(ctx, python, "-m", "venv", venv).CombinedOutput(); err != nil {
 			return "", nil, fmt.Errorf("create MCP venv: %v: %s", err, strings.TrimSpace(string(out)))
 		}
 		pip := filepath.Join(venv, "bin", "pip")
 		installCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 		defer cancel()
-		if out, err := exec.CommandContext(installCtx, pip, "install", sourceDir).CombinedOutput(); err != nil {
+		if len(scripts) > 0 {
+			if out, err := exec.CommandContext(installCtx, pip, "install", sourceDir).CombinedOutput(); err != nil {
+				return "", nil, fmt.Errorf("install Python MCP package: %v: %s", err, tailText(string(out), 4000))
+			}
+			return filepath.Join(venv, "bin", scripts[0]), nil, nil
+		}
+		if discoveredEntrypoint == "" {
+			return "", nil, fmt.Errorf("python MCP repository has no [project.scripts] entrypoint")
+		}
+		dependencies, err := validatedPythonRegistryDependencies(project.Project.Dependencies)
+		if err != nil {
+			return "", nil, err
+		}
+		dependencies, err = applyKnownPythonMCPCompatibility(filepath.Join(sourceDir, discoveredEntrypoint), dependencies)
+		if err != nil {
+			return "", nil, err
+		}
+		if len(dependencies) == 0 {
+			return "", nil, fmt.Errorf("script-style Python MCP package declares no registry dependencies")
+		}
+		pipArgs := append([]string{"install"}, dependencies...)
+		if out, err := exec.CommandContext(installCtx, pip, pipArgs...).CombinedOutput(); err != nil {
 			return "", nil, fmt.Errorf("install Python MCP dependencies: %v: %s", err, tailText(string(out), 4000))
 		}
-		return filepath.Join(venv, "bin", scripts[0]), nil, nil
+		return filepath.Join(venv, "bin", "python"), []string{filepath.Join(sourceDir, discoveredEntrypoint)}, nil
 	}
 
 	if fileExists(filepath.Join(sourceDir, "package.json")) {
@@ -413,7 +716,177 @@ func installMCPRuntime(ctx context.Context, dest, sourceDir string) (string, []s
 	return "", nil, fmt.Errorf("MCP repository has no supported Python or Node package manifest")
 }
 
-var legacyRequirementPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*(?:\[[A-Za-z0-9_,.-]+\])?(?:(?:==|!=|~=|>=|<=|>|<)[A-Za-z0-9.*+!_-]+)?$`)
+var pythonMinimumPattern = regexp.MustCompile(`(?:^|,)\s*>=\s*([0-9]+)\.([0-9]+)(?:\.([0-9]+))?`)
+
+func pythonRequirementMinimum(requirement string) (pythonVersion, bool) {
+	match := pythonMinimumPattern.FindStringSubmatch(strings.TrimSpace(requirement))
+	if len(match) == 0 {
+		return pythonVersion{}, false
+	}
+	var version pythonVersion
+	if _, err := fmt.Sscanf(match[1]+"."+match[2], "%d.%d", &version.Major, &version.Minor); err != nil {
+		return pythonVersion{}, false
+	}
+	if match[3] != "" {
+		if _, err := fmt.Sscanf(match[3], "%d", &version.Patch); err != nil {
+			return pythonVersion{}, false
+		}
+	}
+	return version, true
+}
+
+func selectPythonInterpreter(ctx context.Context, requirement string) (string, error) {
+	minimum, constrained := pythonRequirementMinimum(requirement)
+	candidates := []string{"python3"}
+	if constrained {
+		minimumName := fmt.Sprintf("python%d.%d", minimum.Major, minimum.Minor)
+		candidates = append([]string{minimumName}, candidates...)
+		for minor := minimum.Minor + 1; minor <= minimum.Minor+4; minor++ {
+			candidates = append(candidates, fmt.Sprintf("python%d.%d", minimum.Major, minor))
+		}
+	}
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		path, err := exec.LookPath(candidate)
+		if err != nil || seen[path] {
+			continue
+		}
+		seen[path] = true
+		versionCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		out, runErr := exec.CommandContext(versionCtx, path, "-c", "import sys; print('%d.%d.%d' % sys.version_info[:3])").CombinedOutput()
+		cancel()
+		if runErr != nil {
+			continue
+		}
+		var actual pythonVersion
+		if _, err := fmt.Sscanf(strings.TrimSpace(string(out)), "%d.%d.%d", &actual.Major, &actual.Minor, &actual.Patch); err != nil {
+			continue
+		}
+		if !constrained || !pythonVersionLess(actual, minimum) {
+			return path, nil
+		}
+	}
+	if constrained {
+		return "", fmt.Errorf("python MCP package requires Python %s, but no compatible python3 interpreter was found", requirement)
+	}
+	return "", fmt.Errorf("python MCP package requires python3, but it was not found")
+}
+
+func pythonVersionLess(a, b pythonVersion) bool {
+	if a.Major != b.Major {
+		return a.Major < b.Major
+	}
+	if a.Minor != b.Minor {
+		return a.Minor < b.Minor
+	}
+	return a.Patch < b.Patch
+}
+
+func applyKnownPythonMCPCompatibility(entrypoint string, dependencies []string) ([]string, error) {
+	b, err := os.ReadFile(entrypoint)
+	if err != nil {
+		return nil, fmt.Errorf("read Python MCP entrypoint for compatibility check: %w", err)
+	}
+	compact := strings.ToLower(string(b))
+	compact = strings.NewReplacer(" ", "", "\t", "", "\r", "", "\n", "").Replace(compact)
+	if !strings.Contains(compact, "frommcp.server.fastmcpimport") {
+		return dependencies, nil
+	}
+	out := append([]string(nil), dependencies...)
+	for i, dependency := range out {
+		lower := strings.ToLower(dependency)
+		if lower != "mcp" && !strings.HasPrefix(lower, "mcp>") && !strings.HasPrefix(lower, "mcp=") && !strings.HasPrefix(lower, "mcp!") && !strings.HasPrefix(lower, "mcp~") && !strings.HasPrefix(lower, "mcp<") {
+			continue
+		}
+		if strings.Contains(lower, "<2") || strings.Contains(lower, "<=1") {
+			return out, nil
+		}
+		if lower == "mcp" {
+			out[i] = dependency + "<2"
+		} else {
+			out[i] = dependency + ",<2"
+		}
+		return out, nil
+	}
+	return nil, fmt.Errorf("python MCP entrypoint imports the MCP v1 FastMCP API but pyproject.toml does not declare the mcp dependency")
+}
+
+func verifyScriptMCPStartup(ctx context.Context, command string, args []string) error {
+	verifyCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(verifyCtx, command, args...)
+	cmd.Stdin = strings.NewReader("")
+	out, err := cmd.CombinedOutput()
+	if verifyCtx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("startup check did not stop after stdin closed")
+	}
+	if err != nil {
+		return fmt.Errorf("startup check failed: %v: %s", err, tailText(string(out), 2000))
+	}
+	return nil
+}
+
+// copyPackageDir persists reviewed source without following symlinks. Git
+// repositories can contain symlinks pointing outside the checkout; following
+// one here could copy an unrelated host file into a remotely managed package.
+func copyPackageDir(src, dst string) error {
+	const (
+		maxFiles = 10_000
+		maxBytes = int64(512 << 20)
+	)
+	files := 0
+	var bytes int64
+	return filepath.WalkDir(src, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("package path escapes source directory: %s", path)
+		}
+		if d.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("package contains unsupported symlink %s", filepath.ToSlash(rel))
+		}
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("package contains unsupported non-regular file %s", filepath.ToSlash(rel))
+		}
+		files++
+		bytes += info.Size()
+		if files > maxFiles || bytes > maxBytes {
+			return fmt.Errorf("package exceeds persistence limit (%d files or %d bytes)", maxFiles, maxBytes)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o644)
+	})
+}
+
+var legacyRequirementPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*(?:\[[A-Za-z0-9_,.-]+\])?(?:(?:==|!=|~=|>=|<=|>|<)[A-Za-z0-9.*+!_-]+(?:,(?:==|!=|~=|>=|<=|>|<)[A-Za-z0-9.*+!_-]+)*)?$`)
+
+func validatedPythonRegistryDependencies(dependencies []string) ([]string, error) {
+	if len(dependencies) > 128 {
+		return nil, fmt.Errorf("python MCP package declares %d dependencies; maximum is 128", len(dependencies))
+	}
+	out := make([]string, 0, len(dependencies))
+	for _, dependency := range dependencies {
+		dependency = strings.TrimSpace(dependency)
+		if !legacyRequirementPattern.MatchString(dependency) {
+			return nil, fmt.Errorf("python MCP package contains an unsafe or unsupported dependency %q; only package-registry requirements are allowed", dependency)
+		}
+		out = append(out, dependency)
+	}
+	return out, nil
+}
 
 func readLegacyMCPDependencies(readmePath string) ([]string, error) {
 	b, err := os.ReadFile(readmePath)
@@ -467,6 +940,19 @@ func requiredMCPEnvironment(m mcpServerManifest) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+var environmentNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+func mcpPackageEnvironmentNames(pkg mcpPackage) ([]string, error) {
+	seen := map[string]bool{}
+	for _, name := range append(requiredMCPEnvironment(pkg.Manifest), pkg.EnvVars...) {
+		if !environmentNamePattern.MatchString(name) {
+			return nil, fmt.Errorf("invalid environment variable name %q", name)
+		}
+		seen[name] = true
+	}
+	return sortedKeys(seen), nil
 }
 
 func packageInstallID(value string) string {

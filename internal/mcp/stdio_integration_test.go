@@ -21,6 +21,9 @@ func TestMCPStdioHelperProcess(t *testing.T) {
 		return
 	}
 	mode := os.Getenv("SOULACY_MCP_HELPER_MODE")
+	if expected := os.Getenv("SOULACY_MCP_HELPER_EXPECT_SECRET"); expected != "" && os.Getenv("TEST_TOKEN") != expected {
+		os.Exit(24)
+	}
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		line, err := reader.ReadString('\n')
@@ -77,6 +80,31 @@ func TestMCPStdioHelperProcess(t *testing.T) {
 				helperReply(id, toolResult("echo-ok"))
 			}
 		}
+	}
+}
+
+func TestStdioResolvesEnvironmentSecrets(t *testing.T) {
+	c := New(Config{
+		ResolveSecret: func(_ context.Context, name string) (string, error) {
+			if name != "travel-api-key" {
+				return "", fmt.Errorf("unexpected secret %q", name)
+			}
+			return "vault-value", nil
+		},
+		Servers: map[string]ServerConfig{"helper": {
+			Command: os.Args[0],
+			Args:    []string{"-test.run=^TestMCPStdioHelperProcess$"},
+			Env: map[string]string{
+				"SOULACY_MCP_HELPER":               "1",
+				"SOULACY_MCP_HELPER_EXPECT_SECRET": "vault-value",
+			},
+			EnvSecretRefs: map[string]string{"TEST_TOKEN": "travel-api-key"},
+		}},
+	}, zaptest.NewLogger(t))
+	t.Cleanup(func() { _ = c.Close() })
+	statuses := c.ServersSnapshot()
+	if len(statuses) != 1 || !statuses[0].Connected {
+		t.Fatalf("vault-backed stdio server did not connect: %+v", statuses)
 	}
 }
 

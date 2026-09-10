@@ -701,6 +701,8 @@ mcp:
       command: "/usr/local/bin/mcp-fs"
       args:
         - "/tmp"
+      env_secret_refs:
+        SERPAPI_KEY: travel-serpapi
 `
 	if err := os.WriteFile(cfgPath, []byte(yaml), 0600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -722,6 +724,9 @@ mcp:
 	}
 	if len(svr.Args) != 1 || svr.Args[0] != "/tmp" {
 		t.Errorf("mcp.servers.filesystem.args = %v, want [\"/tmp\"]", svr.Args)
+	}
+	if svr.EnvSecretRefs["SERPAPI_KEY"] != "travel-serpapi" {
+		t.Errorf("mcp.servers.filesystem.env_secret_refs = %v", svr.EnvSecretRefs)
 	}
 }
 
