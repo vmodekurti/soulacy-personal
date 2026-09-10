@@ -37,11 +37,14 @@ runtime:
     action_events: "2160h"       # 90 days
     audit_logs: "720h"           # 30 days
   default_budget:
-    max_tokens: 100000
-    max_llm_calls: 20
+    # Tool-heavy agents resend their conversation and tool schemas on every
+    # model turn. 500k leaves room for useful multi-step work while remaining
+    # a finite runaway guard. Set either value to 0 for unlimited monitoring.
+    max_tokens: 500000
+    max_llm_calls: 50
   max_budget:
-    max_tokens: 1000000
-    max_llm_calls: 100
+    max_tokens: 2000000
+    max_llm_calls: 200
 
 memory:
   max_history: 50       # Max messages kept in hot (file) memory per session

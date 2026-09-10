@@ -92,6 +92,14 @@ func (s *Server) safeConfigView() fiber.Map {
 			"max_agent_call_depth":    cfg.Runtime.MaxAgentCallDepth,
 			"python_bin":              cfg.Runtime.PythonBin,
 			"tool_timeout":            cfg.Runtime.ToolTimeout,
+			"default_budget": fiber.Map{
+				"max_tokens":    cfg.Runtime.DefaultBudget.MaxTokens,
+				"max_llm_calls": cfg.Runtime.DefaultBudget.MaxLLMCalls,
+			},
+			"max_budget": fiber.Map{
+				"max_tokens":    cfg.Runtime.MaxBudget.MaxTokens,
+				"max_llm_calls": cfg.Runtime.MaxBudget.MaxLLMCalls,
+			},
 		},
 		"memory": fiber.Map{
 			"dir":         cfg.Memory.Dir,
@@ -276,6 +284,14 @@ type PatchableConfig struct {
 		MaxAgentCallDepth     int    `json:"max_agent_call_depth" yaml:"max_agent_call_depth"`
 		PythonBin             string `json:"python_bin" yaml:"python_bin"`
 		ToolTimeout           string `json:"tool_timeout" yaml:"tool_timeout"`
+		DefaultBudget         *struct {
+			MaxTokens   *int `json:"max_tokens" yaml:"max_tokens"`
+			MaxLLMCalls *int `json:"max_llm_calls" yaml:"max_llm_calls"`
+		} `json:"default_budget" yaml:"default_budget"`
+		MaxBudget *struct {
+			MaxTokens   *int `json:"max_tokens" yaml:"max_tokens"`
+			MaxLLMCalls *int `json:"max_llm_calls" yaml:"max_llm_calls"`
+		} `json:"max_budget" yaml:"max_budget"`
 	} `json:"runtime" yaml:"runtime"`
 
 	Executor *struct {
@@ -615,6 +631,24 @@ func applyPatch(dst map[string]any, patch PatchableConfig) {
 		}
 		if patch.Runtime.ToolTimeout != "" {
 			rt["tool_timeout"] = patch.Runtime.ToolTimeout
+		}
+		if patch.Runtime.DefaultBudget != nil {
+			budget := getOrCreateMap(rt, "default_budget")
+			if patch.Runtime.DefaultBudget.MaxTokens != nil {
+				budget["max_tokens"] = max(0, *patch.Runtime.DefaultBudget.MaxTokens)
+			}
+			if patch.Runtime.DefaultBudget.MaxLLMCalls != nil {
+				budget["max_llm_calls"] = max(0, *patch.Runtime.DefaultBudget.MaxLLMCalls)
+			}
+		}
+		if patch.Runtime.MaxBudget != nil {
+			budget := getOrCreateMap(rt, "max_budget")
+			if patch.Runtime.MaxBudget.MaxTokens != nil {
+				budget["max_tokens"] = max(0, *patch.Runtime.MaxBudget.MaxTokens)
+			}
+			if patch.Runtime.MaxBudget.MaxLLMCalls != nil {
+				budget["max_llm_calls"] = max(0, *patch.Runtime.MaxBudget.MaxLLMCalls)
+			}
 		}
 	}
 	if patch.Executor != nil {

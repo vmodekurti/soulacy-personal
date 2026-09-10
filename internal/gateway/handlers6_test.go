@@ -108,10 +108,36 @@ func TestGatewayHandleGetConfig_RuntimeSectionPresent(t *testing.T) {
 	if !ok {
 		t.Fatalf("runtime is not a map: %v", body)
 	}
-	for _, key := range []string{"max_concurrent_sessions", "default_max_turns", "python_bin", "tool_timeout"} {
+	for _, key := range []string{"max_concurrent_sessions", "default_max_turns", "python_bin", "tool_timeout", "default_budget", "max_budget"} {
 		if _, exists := rt[key]; !exists {
 			t.Errorf("runtime missing key %q", key)
 		}
+	}
+}
+
+func TestGatewayHandlePatchConfig_RuntimeBudgetsIncludingUnlimited(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	s := newTestGatewayWithCfgPath(t, "secret", cfgPath)
+	status, body := gatewayJSON(t, s, http.MethodPatch, "/api/v1/config", "secret",
+		`{"runtime":{"default_budget":{"max_tokens":500000,"max_llm_calls":50},"max_budget":{"max_tokens":0,"max_llm_calls":0}}}`)
+	if status != http.StatusOK {
+		t.Fatalf("patch runtime budgets status = %d body=%v", status, body)
+	}
+	disk, err := readRawConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	runtime, ok := disk["runtime"].(map[string]any)
+	if !ok {
+		t.Fatalf("runtime is not a map: %v", disk)
+	}
+	defaults, ok := runtime["default_budget"].(map[string]any)
+	if !ok || defaults["max_tokens"] != 500000 || defaults["max_llm_calls"] != 50 {
+		t.Fatalf("default budget not persisted: %v", runtime["default_budget"])
+	}
+	ceiling, ok := runtime["max_budget"].(map[string]any)
+	if !ok || ceiling["max_tokens"] != 0 || ceiling["max_llm_calls"] != 0 {
+		t.Fatalf("zero/unlimited ceiling not persisted: %v", runtime["max_budget"])
 	}
 }
 
