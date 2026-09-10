@@ -289,11 +289,12 @@ func TestDisplayChannelValue_SliceInt(t *testing.T) {
 
 func TestMCPServerToYAML_Stdio(t *testing.T) {
 	body := mcpServerBody{
-		ID:        "myserver",
-		Transport: "stdio",
-		Command:   "npx",
-		Args:      []string{"-y", "@mcp/server"},
-		Env:       map[string]string{"API_KEY": "secret"},
+		ID:            "myserver",
+		Transport:     "stdio",
+		Command:       "npx",
+		Args:          []string{"-y", "@mcp/server"},
+		Env:           map[string]string{"API_KEY": "secret"},
+		EnvSecretRefs: map[string]string{"SERPAPI_KEY": "travel-serpapi"},
 	}
 	out := mcpServerToYAML(body)
 	if out["transport"] != "stdio" {
@@ -307,6 +308,9 @@ func TestMCPServerToYAML_Stdio(t *testing.T) {
 	}
 	if _, ok := out["env"]; !ok {
 		t.Error("expected env field")
+	}
+	if refs, ok := out["env_secret_refs"].(map[string]any); !ok || refs["SERPAPI_KEY"] != "travel-serpapi" {
+		t.Errorf("env_secret_refs = %#v", out["env_secret_refs"])
 	}
 }
 

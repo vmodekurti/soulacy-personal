@@ -32,7 +32,7 @@ func TestManagedStdioRechecksSymlinkEscapeAtProcessStart(t *testing.T) {
 	if err := os.Symlink(outside, link); err != nil {
 		t.Fatal(err)
 	}
-	_, err := newStdio(ServerConfig{Command: link, ManagedRoot: root}, zap.NewNop())
+	_, err := newStdio(ServerConfig{Command: link, ManagedRoot: root}, nil, zap.NewNop())
 	if err == nil || !strings.Contains(err.Error(), "escaped managed root") {
 		t.Fatalf("error = %v, want managed-root refusal", err)
 	}

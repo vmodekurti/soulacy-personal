@@ -38,17 +38,18 @@ type Config struct {
 
 // ServerConfig describes one MCP server connection.
 type ServerConfig struct {
-	Transport   string            // "stdio" (default) or "http"
-	Command     string            // stdio: executable
-	Args        []string          // stdio: arguments
-	Env         map[string]string // stdio: extra env vars (merged onto os.Environ)
-	URL         string            // http: server URL
-	Headers     map[string]string // http: extra headers (auth, etc.)
-	Query       map[string]string // http: non-sensitive URL query parameters
-	Auth        AuthConfig        // http: structured authentication
-	Timeout     time.Duration     // http: per-request timeout
-	PublicOnly  bool              // use NetGuard and reject private/loopback destinations
-	ManagedRoot string            // stdio: executable must resolve beneath this directory
+	Transport     string            // "stdio" (default) or "http"
+	Command       string            // stdio: executable
+	Args          []string          // stdio: arguments
+	Env           map[string]string // stdio: extra env vars (merged onto os.Environ)
+	EnvSecretRefs map[string]string // stdio: env name → encrypted vault key
+	URL           string            // http: server URL
+	Headers       map[string]string // http: extra headers (auth, etc.)
+	Query         map[string]string // http: non-sensitive URL query parameters
+	Auth          AuthConfig        // http: structured authentication
+	Timeout       time.Duration     // http: per-request timeout
+	PublicOnly    bool              // use NetGuard and reject private/loopback destinations
+	ManagedRoot   string            // stdio: executable must resolve beneath this directory
 }
 
 type AuthConfig struct {
@@ -78,19 +79,20 @@ func (t Tool) FullName() string {
 
 // ServerStatus is the API/GUI view of a server (what the MCP page renders).
 type ServerStatus struct {
-	ID        string            `json:"id"`
-	Transport string            `json:"transport"`
-	Connected bool              `json:"connected"`
-	Detail    string            `json:"detail,omitempty"`
-	Tools     []ToolSummary     `json:"tools"`
-	Command   string            `json:"command,omitempty"`
-	Args      []string          `json:"args,omitempty"`
-	Env       map[string]string `json:"env,omitempty"`
-	URL       string            `json:"url,omitempty"`
-	Headers   map[string]string `json:"headers,omitempty"`
-	Query     map[string]string `json:"query,omitempty"`
-	Auth      AuthConfig        `json:"auth,omitempty"`
-	Timeout   string            `json:"timeout,omitempty"`
+	ID            string            `json:"id"`
+	Transport     string            `json:"transport"`
+	Connected     bool              `json:"connected"`
+	Detail        string            `json:"detail,omitempty"`
+	Tools         []ToolSummary     `json:"tools"`
+	Command       string            `json:"command,omitempty"`
+	Args          []string          `json:"args,omitempty"`
+	Env           map[string]string `json:"env,omitempty"`
+	EnvSecretRefs map[string]string `json:"env_secret_refs,omitempty"`
+	URL           string            `json:"url,omitempty"`
+	Headers       map[string]string `json:"headers,omitempty"`
+	Query         map[string]string `json:"query,omitempty"`
+	Auth          AuthConfig        `json:"auth,omitempty"`
+	Timeout       string            `json:"timeout,omitempty"`
 }
 
 // ToolSummary is a short tool descriptor returned by /mcp.
@@ -217,7 +219,7 @@ func (c *Client) start(s *server) error {
 	transport := strings.ToLower(s.cfg.Transport)
 	switch transport {
 	case "", "stdio":
-		tx, err := newStdio(s.cfg, c.log.With(zap.String("mcp_server", s.id)))
+		tx, err := newStdio(s.cfg, c.resolveSecret, c.log.With(zap.String("mcp_server", s.id)))
 		if err != nil {
 			return err
 		}
@@ -369,14 +371,15 @@ func (c *Client) ServersSnapshot() []ServerStatus {
 		}
 		ss := ServerStatus{
 			ID: s.id, Transport: transport, Connected: s.connected, Detail: s.detail,
-			Tools:   make([]ToolSummary, 0, len(s.tools)),
-			Command: s.cfg.Command,
-			Args:    s.cfg.Args,
-			Env:     s.cfg.Env,
-			URL:     s.cfg.URL,
-			Headers: s.cfg.Headers,
-			Query:   s.cfg.Query,
-			Auth:    s.cfg.Auth,
+			Tools:         make([]ToolSummary, 0, len(s.tools)),
+			Command:       s.cfg.Command,
+			Args:          s.cfg.Args,
+			Env:           s.cfg.Env,
+			EnvSecretRefs: s.cfg.EnvSecretRefs,
+			URL:           s.cfg.URL,
+			Headers:       s.cfg.Headers,
+			Query:         s.cfg.Query,
+			Auth:          s.cfg.Auth,
 		}
 		if s.cfg.Timeout > 0 {
 			ss.Timeout = s.cfg.Timeout.String()

@@ -90,7 +90,7 @@ type stdioTx struct {
 	closed  atomic.Bool
 }
 
-func newStdio(cfg ServerConfig, log *zap.Logger) (*stdioTx, error) {
+func newStdio(cfg ServerConfig, resolveSecret func(context.Context, string) (string, error), log *zap.Logger) (*stdioTx, error) {
 	if cfg.Command == "" {
 		return nil, fmt.Errorf("stdio: command is required")
 	}
@@ -112,6 +112,16 @@ func newStdio(cfg ServerConfig, log *zap.Logger) (*stdioTx, error) {
 	env := os.Environ()
 	for k, v := range cfg.Env {
 		env = append(env, k+"="+v)
+	}
+	for envName, secretRef := range cfg.EnvSecretRefs {
+		if resolveSecret == nil {
+			return nil, fmt.Errorf("stdio: environment %s requires vault secret %q, but secret resolution is unavailable", envName, secretRef)
+		}
+		value, err := resolveSecret(context.Background(), secretRef)
+		if err != nil {
+			return nil, fmt.Errorf("stdio: resolve vault secret %q for environment %s: %w", secretRef, envName, err)
+		}
+		env = append(env, envName+"="+value)
 	}
 	cmd.Env = env
 

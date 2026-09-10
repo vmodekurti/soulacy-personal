@@ -3032,19 +3032,20 @@ func maskValues(m map[string]string) map[string]string {
 // server. Mirrors config.MCPServerConfig with JSON tags so the same payload
 // can be re-marshalled back into YAML cleanly.
 type mcpServerBody struct {
-	ID          string            `json:"id"`
-	Transport   string            `json:"transport"`
-	Command     string            `json:"command"`
-	Args        []string          `json:"args"`
-	Env         map[string]string `json:"env"`
-	URL         string            `json:"url"`
-	Headers     map[string]string `json:"headers"`
-	Query       map[string]string `json:"query"`
-	Auth        mcpAuthBody       `json:"auth"`
-	AuthSecret  string            `json:"auth_secret"` // write-only; moved to the encrypted vault
-	Timeout     string            `json:"timeout"`
-	PublicOnly  bool              `json:"-"`
-	ManagedOnly bool              `json:"-"`
+	ID            string            `json:"id"`
+	Transport     string            `json:"transport"`
+	Command       string            `json:"command"`
+	Args          []string          `json:"args"`
+	Env           map[string]string `json:"env"`
+	EnvSecretRefs map[string]string `json:"env_secret_refs"`
+	URL           string            `json:"url"`
+	Headers       map[string]string `json:"headers"`
+	Query         map[string]string `json:"query"`
+	Auth          mcpAuthBody       `json:"auth"`
+	AuthSecret    string            `json:"auth_secret"` // write-only; moved to the encrypted vault
+	Timeout       string            `json:"timeout"`
+	PublicOnly    bool              `json:"-"`
+	ManagedOnly   bool              `json:"-"`
 }
 
 type mcpAuthBody struct {
@@ -3086,6 +3087,14 @@ func validateMCPServer(body mcpServerBody) string {
 	case "", "stdio":
 		if strings.TrimSpace(body.Command) == "" {
 			return "stdio transport requires a `command` (e.g. 'npx' or '/usr/local/bin/server')"
+		}
+		for envName, secretRef := range body.EnvSecretRefs {
+			if !mcpEnvironmentNamePattern.MatchString(envName) {
+				return fmt.Sprintf("invalid environment variable name %q", envName)
+			}
+			if strings.TrimSpace(secretRef) == "" {
+				return fmt.Sprintf("environment variable %q requires a vault secret reference", envName)
+			}
 		}
 	case "http", "https":
 		if strings.TrimSpace(body.URL) == "" {
@@ -3138,16 +3147,17 @@ func validateMCPServer(body mcpServerBody) string {
 func mcpBodyToServerConfig(body mcpServerBody) mcp.ServerConfig {
 	timeout, _ := parseMCPTimeout(body.Timeout)
 	return mcp.ServerConfig{
-		Transport:  body.Transport,
-		Command:    body.Command,
-		Args:       body.Args,
-		Env:        body.Env,
-		URL:        body.URL,
-		Headers:    body.Headers,
-		Query:      body.Query,
-		Auth:       body.Auth.toMCP(),
-		Timeout:    timeout,
-		PublicOnly: body.PublicOnly,
+		Transport:     body.Transport,
+		Command:       body.Command,
+		Args:          body.Args,
+		Env:           body.Env,
+		EnvSecretRefs: body.EnvSecretRefs,
+		URL:           body.URL,
+		Headers:       body.Headers,
+		Query:         body.Query,
+		Auth:          body.Auth.toMCP(),
+		Timeout:       timeout,
+		PublicOnly:    body.PublicOnly,
 	}
 }
 
@@ -3555,6 +3565,9 @@ func mcpServerToYAML(body mcpServerBody) map[string]any {
 		}
 		if len(body.Env) > 0 {
 			out["env"] = mapToAny(body.Env)
+		}
+		if len(body.EnvSecretRefs) > 0 {
+			out["env_secret_refs"] = mapToAny(body.EnvSecretRefs)
 		}
 	} else {
 		if body.URL != "" {
@@ -3968,6 +3981,8 @@ func registrySpecToServerBody(id string, spec *builder.GlamaProvisionSpec, value
 
 // validMCPID accepts the same characters the rest of the codebase uses for
 // safe identifiers (filenames, table-name sanitisation, etc.).
+var mcpEnvironmentNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 func validMCPID(id string) bool {
 	if id == "" {
 		return false

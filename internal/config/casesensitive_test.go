@@ -25,6 +25,8 @@ mcp:
       env:
         LETSFG_PYTHON: /Users/me/.letsfg-venv/bin/python
         Mixed_Case_Var: value1
+      env_secret_refs:
+        SERPAPI_KEY: travel-serpapi
       headers:
         X-API-Key: secret
 `
@@ -49,6 +51,9 @@ mcp:
 	}
 	if got := srv.Env["Mixed_Case_Var"]; got != "value1" {
 		t.Fatalf("Mixed_Case_Var not preserved: env=%v", srv.Env)
+	}
+	if got := srv.EnvSecretRefs["SERPAPI_KEY"]; got != "travel-serpapi" {
+		t.Fatalf("SERPAPI_KEY not preserved: env_secret_refs=%v", srv.EnvSecretRefs)
 	}
 	if got := srv.Headers["X-API-Key"]; got != "secret" {
 		t.Fatalf("X-API-Key header not preserved: headers=%v", srv.Headers)
