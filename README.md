@@ -51,6 +51,19 @@ The field is crowded with frameworks that assume you want to write Python and de
 
 ### Install
 
+### Cloud launchers
+
+[Deploy to AWS](https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https%3A%2F%2Fsoulacy-public-deploy-633654243571.s3.us-east-1.amazonaws.com%2Fcloudformation.yaml&stackName=SoulacyPersonal)
+· [Deploy to Azure](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fvmodekurti%2Fsoulacy-personal%2Fmain%2Fdeploy%2Fazure%2Fazuredeploy.json)
+· [Deploy to Railway](https://railway.com/new?repo=https%3A%2F%2Fgithub.com%2Fvmodekurti%2Fsoulacy-personal)
+· [Deploy to Render](https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2Fvmodekurti%2Fsoulacy-personal)
+· [Deploy with Coolify](docs/deployment/cloud.md#coolify)
+
+AWS and Azure provision the production-shaped Postgres + Qdrant stack. Render,
+Railway, and Coolify provide simpler single-container Personal deployments with
+persistent workspace storage. See the [cloud deployment guide](docs/deployment/cloud.md)
+for setup and security details.
+
 ### One line — macOS & Linux
 
 ```bash

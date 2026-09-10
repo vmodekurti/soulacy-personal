@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: soulacy-personal
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: starter
+    region: oregon
+    autoDeployTrigger: off
+    healthCheckPath: /
+    envVars:
+      - key: SOULACY_SERVER_HOST
+        value: 0.0.0.0
+      - key: SOULACY_SERVER_PORT
+        value: "18789"
+      - key: PORT
+        value: "18789"
+      - key: SOULACY_SERVER_API_KEY
+        generateValue: true
+      - key: SOULACY_AUTH_MODE
+        value: jwt
+      - key: SOULACY_AUTH_JWT_SECRET
+        generateValue: true
+      - key: SOULACY_DEPLOYMENT_PROFILE
+        value: production
+    disk:
+      name: soulacy-data
+      mountPath: /home/soulacy/.soulacy
+      sizeGB: 5

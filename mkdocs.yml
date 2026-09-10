@@ -218,6 +218,7 @@ nav:
   - CLI:
     - Reference: cli/reference.md
   - Deployment:
+    - One-click Cloud: deployment/cloud.md
     - Docker: deployment/docker.md
     - macOS: deployment/macos.md
     - Linux / VPS: deployment/linux.md

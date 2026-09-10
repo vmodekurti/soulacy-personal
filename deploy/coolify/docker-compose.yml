@@ -1,0 +1,24 @@
+services:
+  soulacy:
+    image: ghcr.io/vmodekurti/soulacy-personal:${SOULACY_VERSION:-latest}
+    restart: unless-stopped
+    ports:
+      - "18789:18789"
+    environment:
+      SOULACY_SERVER_HOST: 0.0.0.0
+      SOULACY_SERVER_PORT: "18789"
+      SOULACY_SERVER_API_KEY: ${SOULACY_SERVER_API_KEY:?Set a strong Soulacy login key}
+      SOULACY_AUTH_MODE: jwt
+      SOULACY_AUTH_JWT_SECRET: ${SOULACY_AUTH_JWT_SECRET:?Set a separate random JWT secret}
+      SOULACY_DEPLOYMENT_PROFILE: production
+    volumes:
+      - soulacy_data:/home/soulacy/.soulacy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:18789/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  soulacy_data:
