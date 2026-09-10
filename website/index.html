@@ -625,13 +625,13 @@
             </div>
             <span class="chip chip-green">guided setup</span>
           </div>
-          <p class="mt-3 text-sm text-ink-400 leading-relaxed">Imports the public Personal repository, builds its Dockerfile, and uses the checked-in health and restart policy. Add a persistent volume and login key before going live.</p>
+          <p class="mt-3 text-sm text-ink-400 leading-relaxed">Imports the public Personal repository and builds its Dockerfile. Add the login key, persistent volume, port, and health check during Railway’s guided setup.</p>
           <div class="mt-auto pt-5 flex flex-wrap items-center gap-3">
             <a href="https://railway.com/new?repo=https%3A%2F%2Fgithub.com%2Fvmodekurti%2Fsoulacy-personal" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-2 rounded-lg bg-[#18181b] hover:bg-[#27272a] text-white border border-white/15 px-4 py-2.5 text-sm font-semibold">
               Deploy to Railway <span aria-hidden="true">↗</span>
             </a>
           </div>
-          <p class="mt-3 text-xs text-ink-400">Set <span class="code-font">SOULACY_SERVER_API_KEY</span> and <span class="code-font">PORT=18789</span>, bind a volume at <span class="code-font">/home/soulacy/.soulacy</span>, and generate a public domain.</p>
+          <p class="mt-3 text-xs text-ink-400">Set <span class="code-font">SOULACY_SERVER_API_KEY</span> and <span class="code-font">PORT=18789</span>, bind <span class="code-font">/home/soulacy/.soulacy</span>, use health path <span class="code-font">/</span>, and generate a domain.</p>
         </div>
 
         <div class="card p-6 flex flex-col">
