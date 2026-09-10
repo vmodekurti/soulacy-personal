@@ -15,6 +15,7 @@
   let restartNeeded = false
   let restarting = false
   let diagnosis = {}   // adapterId → { ok, category, reason, fix, detail, to }
+  let expandedCards = {} // channel id → reveal settings, mappings, checks, traffic
   let channelMetrics = { inbound: [], outbound: [], inbox_drops: [] }
   let deliveryReadiness = null
   // F-GUI-5 — the "saving without ack fails readiness" callout depends on the
@@ -38,6 +39,10 @@
   let mobilePairingLoading = false
   let mobilePairingError = ''
   let mobilePairingCopied = false
+
+  function toggleCardDetails(id) {
+    expandedCards = { ...expandedCards, [id]: !expandedCards[id] }
+  }
 
   $: activeGuide = editing ? guideFor(editing.id) : null
   let lastQR    = ''
@@ -661,7 +666,10 @@
                 {/if}
                 {#if mobilePairingError}<span class="mobile-pairing-error" role="alert">{mobilePairingError}</span>{/if}
               </div>
-            {:else if ch.id === 'whatsapp_web'}
+            {/if}
+
+            {#if expandedCards[ch.id]}
+              {#if ch.id === 'whatsapp_web'}
               <div class="settings">
                 <span class="settings-title">Pairing</span>
                 <div class="ch-row">
@@ -780,6 +788,7 @@
                 {/each}
               </div>
             {/if}
+            {/if}
 
             {#if diagnosis[ch.id]}
               <div class="diag-result {diagnosis[ch.id].ok ? 'ok' : 'bad'}">
@@ -796,6 +805,12 @@
           </div>
 
           <div class="ch-footer">
+            <button
+              class="btn-secondary small-btn detail-toggle"
+              aria-expanded={!!expandedCards[ch.id]}
+              on:click={() => toggleCardDetails(ch.id)}>
+              {expandedCards[ch.id] ? 'Less' : 'Details'}
+            </button>
             {#if ch.schema?.length}
               <button class="btn-secondary small-btn" on:click={() => openEdit(ch)}>
                 {ch.id === 'whatsapp_web' ? 'Connect' : 'Edit'}
@@ -1135,7 +1150,7 @@
   .target-pill.warn { border-color: rgba(240,196,96,.38); color: #f0c460; }
   .target-pill.fail { border-color: rgba(240,96,96,.42); color: #ff7b7b; }
 
-  .channel-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+  .channel-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .8rem; align-items: start; }
 
   .ch-card {
     background: #141626; border: 1px solid #1a1e36; border-radius: 10px;
@@ -1145,7 +1160,7 @@
 
   .ch-header {
     display: flex; align-items: flex-start; gap: .75rem;
-    padding: .9rem 1rem; border-bottom: 1px solid #1a1e36;
+    padding: .75rem .85rem; border-bottom: 1px solid #1a1e36;
   }
   .ch-icon   { font-size: 1.4rem; line-height: 1.2; flex: 0 0 auto; }
   .ch-identity { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
@@ -1155,7 +1170,7 @@
      column on the right and wrap within itself instead of overlapping the name. */
   .ch-badge  { flex: 0 1 auto; max-width: 45%; font-size: .7rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; text-align: right; line-height: 1.25; overflow-wrap: anywhere; }
 
-  .ch-body   { flex: 1; padding: .75rem 1rem; display: flex; flex-direction: column; gap: .45rem; }
+  .ch-body   { flex: 1; padding: .65rem .85rem; display: flex; flex-direction: column; gap: .4rem; }
   .ch-row    { display: flex; justify-content: space-between; font-size: .82rem; gap: .5rem; }
   .ch-label  { color: #555a7a; flex-shrink: 0; }
   .ch-val    { color: #c8cadf; text-align: right; word-break: break-all; }
@@ -1286,7 +1301,8 @@
   .diag-x { background: none; border: none; color: #7b82a8; font-size: 1rem; cursor: pointer; line-height: 1; padding: 0 .2rem; }
   .diag-x:hover { color: #c8cadf; }
 
-  .ch-footer { padding: .75rem 1rem; border-top: 1px solid #1a1e36; display: flex; gap: .5rem; justify-content: flex-end; }
+  .ch-footer { padding: .6rem .85rem; border-top: 1px solid #1a1e36; display: flex; gap: .4rem; justify-content: flex-end; flex-wrap: wrap; }
+  .detail-toggle { margin-right: auto; }
   .small-btn { padding: .35rem .9rem; font-size: .8rem; border-radius: 6px; }
   .ch-footer button { padding: .35rem .9rem; font-size: .8rem; border-radius: 6px; }
 
@@ -1370,8 +1386,17 @@
   .bot-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
 
   @media (max-width: 720px) {
+    .channel-grid { grid-template-columns: 1fr; }
     .qr-preview { grid-template-columns: 1fr; justify-items: center; text-align: center; }
     .advanced-panel { grid-template-columns: 1fr; }
+  }
+
+  @media (min-width: 721px) and (max-width: 1100px) {
+    .channel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+
+  @media (min-width: 1101px) and (max-width: 1500px) {
+    .channel-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   }
 
   /* Inline setup guides */

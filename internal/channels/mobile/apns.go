@@ -103,6 +103,8 @@ func (a *apnsClient) push(ctx context.Context, n relayNotification) error {
 		"aps": map[string]any{
 			"alert": map[string]string{"title": n.Title, "body": n.Body},
 			"sound": "default",
+			// APNs remains a wake-up signal; the app fetches the durable result.
+			"content-available": 1,
 		},
 		"delivery_id": n.DeliveryID,
 		"deep_link":   n.DeepLink,
