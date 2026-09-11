@@ -16,14 +16,13 @@
 FROM node:20-bookworm-slim AS gui
 WORKDIR /src/gui
 COPY gui/package.json gui/package-lock.json* ./
-RUN --mount=type=cache,id=soulacy-npm,target=/root/.npm \
-    npm install --no-audit --no-fund --silent
+RUN npm install --no-audit --no-fund --silent
 COPY gui ./
 RUN npm run build
 # Output: /src/gui/dist  (copied to /src/internal/webui/dist in gobuild)
 
 # ── Stage 2: Go binary ───────────────────────────────────────────────────────
-FROM golang:1.23-bookworm AS gobuild
+FROM golang:1.26.6-bookworm AS gobuild
 ARG VERSION=dev
 WORKDIR /src
 
@@ -36,9 +35,7 @@ COPY go.mod go.sum ./
 # `go mod download` must be able to read the replacement module's go.mod.
 # Copy just that file first to keep this layer cacheable.
 COPY sdk/go.mod ./sdk/go.mod
-RUN --mount=type=cache,id=soulacy-go-build,target=/root/.cache/go-build \
-    --mount=type=cache,id=soulacy-go-mod,target=/go/pkg/mod \
-    go mod download
+RUN go mod download
 
 COPY . .
 # Inject the Svelte build so the gateway binary embeds the GUI.
@@ -47,9 +44,7 @@ COPY . .
 COPY --from=gui /src/internal/webui/dist /src/internal/webui/dist
 
 ENV CGO_ENABLED=1
-RUN --mount=type=cache,id=soulacy-go-build,target=/root/.cache/go-build \
-    --mount=type=cache,id=soulacy-go-mod,target=/go/pkg/mod \
-    go build \
+RUN go build \
         -ldflags "-X github.com/soulacy/soulacy/internal/config.Version=${VERSION}" \
         -o /out/soulacy ./cmd/soulacy \
     && go build \
