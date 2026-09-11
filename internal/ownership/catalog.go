@@ -147,6 +147,9 @@ var Tables = []Table{
 	{Source: "internal/auth/apikeys/store.go", Name: "api_keys", Resource: "api-keys", Class: UserPrivate, ScopeKey: "organization_id,workspace_ids,subject_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/auth/apikeys/isolation_test.go"},
 	{Source: "internal/authconnections/store.go", Name: "authenticated_connections", Resource: "authenticated-connections", Class: UserPrivate, ScopeKey: "workspace_id,owner_subject,id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/authconnections/store_test.go"},
 	{Source: "internal/authconnections/store.go", Name: "authenticated_connection_grants", Resource: "authenticated-connections", Class: UserPrivate, ScopeKey: "workspace_id,connection_id,agent_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/authconnections/store_test.go"},
+	{Source: "internal/channels/mobile/store.go", Name: "mobile_devices", Resource: "channels", Class: UserPrivate, ScopeKey: "workspace_id,user_id,id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/channels/mobile/store_test.go"},
+	{Source: "internal/channels/mobile/store.go", Name: "mobile_deliveries", Resource: "channels", Class: UserPrivate, ScopeKey: "workspace_id,user_id,id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/channels/mobile/store_test.go"},
+	{Source: "internal/channels/mobile/store.go", Name: "mobile_delivery_receipts", Resource: "channels", Class: UserPrivate, ScopeKey: "workspace_id,delivery_id,device_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/channels/mobile/store_test.go"},
 	// cost_reconciliations is reclassified, not scoped. It records a comparison
 	// against the *provider's invoice*, and providers bill the deployment
 	// rather than the tenant. There is no honest way to split one invoice
@@ -176,6 +179,7 @@ var Tables = []Table{
 	{Source: "internal/workspacesettings/store.go", Name: "workspace_settings", Resource: "workspace-settings", Class: WorkspaceOwned, ScopeKey: "workspace_id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/workspacesettings/store_test.go"},
 	{Source: "internal/mcpstore/store.go", Name: "workspace_mcp_servers", Resource: "mcp", Class: WorkspaceOwned, ScopeKey: "workspace_id,id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/mcpstore/store_test.go"},
 	{Source: "internal/mcpstore/store.go", Name: "workspace_mcp_install_requests", Resource: "mcp", Class: WorkspaceOwned, ScopeKey: "workspace_id,id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/mcpstore/store_test.go"},
+	{Source: "internal/skillstore/store.go", Name: "workspace_skill_install_requests", Resource: "skills", Class: WorkspaceOwned, ScopeKey: "workspace_id,id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/skillstore/store_test.go"},
 	{Source: "internal/gateway/idempotency_durable.go", Name: "idempotency_records", Resource: "idempotency", Class: WorkspaceOwned, ScopeKey: "key (sha256 of workspace_id,method,route,client key)", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/gateway/idempotency_durable_test.go"},
 	{Source: "internal/runs/store.go", Name: "agent_runs", Resource: "runs", Class: WorkspaceOwned, ScopeKey: "workspace_id,id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/runs/store_test.go"},
 	{Source: "internal/queue/dlq/dlq.go", Name: "dead_letters", Resource: "queue-dlq", Class: WorkspaceOwned, ScopeKey: "workspace_id,id", CompositeUniqueness: true, Isolation: Scoped, IsolationTest: "internal/queue/dlq/isolation_test.go"},
@@ -232,6 +236,7 @@ var Repositories = []Repository{
 	{Source: "internal/auth/jwt.go", Resource: "credentials", Class: UserPrivate, ScopeKey: "workspace_id,user_id", Isolation: Scoped, IsolationTest: "internal/auth/token_tenancy_test.go"},
 	{Source: "internal/auth/oidc_flow.go", Resource: "credentials", Class: Ephemeral, ScopeKey: "verified provider subject", Isolation: Scoped, IsolationTest: "internal/auth/oidc_flow_test.go"},
 	{Source: "internal/authconnections/store.go", Resource: "authenticated-connections", Class: UserPrivate, ScopeKey: "workspace_id,owner_subject", Isolation: Scoped, IsolationTest: "internal/authconnections/store_test.go"},
+	{Source: "internal/channels/mobile/store.go", Resource: "channels", Class: UserPrivate, ScopeKey: "workspace_id,user_id", Isolation: Scoped, IsolationTest: "internal/channels/mobile/store_test.go"},
 	{Source: "internal/costs/store.go", Resource: "costs", Class: WorkspaceOwned, ScopeKey: "workspace_id (column: workspace)", Isolation: Scoped, IsolationTest: "internal/costs/workspace_test.go"},
 	{Source: "internal/credentials/rotation.go", Resource: "secrets", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/credentials/workspace_test.go"},
 	{Source: "internal/credentials/vault.go", Resource: "secrets", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/credentials/workspace_test.go"},
@@ -275,6 +280,7 @@ var Repositories = []Repository{
 	{Source: "internal/session/ownership.go", Resource: "sessions", Class: UserPrivate, ScopeKey: "workspace_id,creator", Isolation: Scoped, IsolationTest: "internal/session/ownership_test.go"},
 	{Source: "internal/session/store.go", Resource: "sessions", Class: UserPrivate, ScopeKey: "workspace_id,user_id via session ownership", Isolation: Scoped, IsolationTest: "internal/session/resources_workspace_test.go"},
 	{Source: "internal/skills/loader.go", Resource: "skills", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/skills/isolation_test.go"},
+	{Source: "internal/skillstore/store.go", Resource: "skills", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/skillstore/store_test.go"},
 	{Source: "internal/storage/postgres/postgres.go", Resource: "memory", Class: UserPrivate, ScopeKey: "workspace_id,agent_id,session_id", Isolation: Scoped, IsolationTest: "internal/storage/postgres/workspace_test.go"},
 	{Source: "internal/storage/sqlite/sqlite.go", Resource: "memory", Class: UserPrivate, ScopeKey: "workspace_id,agent_id,session_id", Isolation: Scoped, IsolationTest: "internal/storage/sqlite/workspace_test.go"},
 	{Source: "internal/studio/deployrecord.go", Resource: "definitions", Class: WorkspaceOwned, ScopeKey: "workspace_id", Isolation: Scoped, IsolationTest: "internal/studio/deployrecord_workspace_test.go"},
