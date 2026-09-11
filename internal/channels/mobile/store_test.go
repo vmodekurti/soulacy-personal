@@ -52,3 +52,46 @@ func TestDeliveryVisibilityAndReceiptsArePerDevice(t *testing.T) {
 		t.Fatal("phone-a receipt leaked to phone-b")
 	}
 }
+
+func TestUnqualifiedDeliveryDestinationsRemainFetchable(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "mobile.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	ctx := context.Background()
+	if err := store.UpsertDevice(ctx, "personal", "admin", Device{ID: "phone"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Scheduler and legacy channel routes may use an unqualified thread name.
+	// New deliveries must normalize to broadcast so the same phone that receives
+	// the APNs notification can fetch the result.
+	if err := store.Add(ctx, "personal", Delivery{
+		ID: "new-unqualified", Destination: "scheduler", AgentID: "reporter", Body: "new result",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Get(ctx, "personal", "new-unqualified", "phone", "admin")
+	if err != nil {
+		t.Fatalf("fetch new unqualified delivery: %v", err)
+	}
+	if got.Destination != "all" {
+		t.Fatalf("normalized destination = %q, want all", got.Destination)
+	}
+
+	// Existing databases can already contain an unqualified destination written
+	// by an older gateway. Keep those rows readable after upgrading.
+	createdAt := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := store.db.ExecContext(ctx, `INSERT INTO mobile_deliveries
+    (workspace_id,id,destination,agent_id,session_id,title,body,parts_json,metadata_json,created_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?)`, "personal", "legacy-unqualified", "mobile", "reporter", "", "Legacy", "old result", "[]", "{}", createdAt); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Get(ctx, "personal", "legacy-unqualified", "phone", "admin"); err != nil {
+		t.Fatalf("fetch legacy unqualified delivery: %v", err)
+	}
+	if err := store.MarkRead(ctx, "personal", "legacy-unqualified", "phone", "admin"); err != nil {
+		t.Fatalf("mark legacy unqualified delivery read: %v", err)
+	}
+}
