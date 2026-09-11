@@ -472,100 +472,93 @@
         <div class="chip mb-4">honest positioning</div>
         <h2 class="text-3xl md:text-4xl font-bold tracking-tight">How Soulacy compares.</h2>
         <p class="mt-4 text-ink-400 text-lg leading-relaxed">
-          Every cell below is defensible. We're not the best at everything — but the axes we win on are the ones that block production deployment for everyone else.
+          Different products solve different layers. This research-backed snapshot compares operating models, not logos or feature counts.
         </p>
+        <p class="mt-3 text-xs text-ink-400 code-font">Primary-source review · updated September 10, 2026</p>
       </div>
 
       <div class="mt-8 overflow-x-auto -mx-5 md:mx-0">
-        <table class="min-w-full text-sm">
+        <table class="min-w-[1180px] text-sm">
           <thead>
             <tr class="text-left text-ink-400 border-b border-white/10">
               <th class="px-4 py-3 font-medium"></th>
               <th class="px-4 py-3 font-semibold text-ink-100">Soulacy</th>
               <th class="px-4 py-3 font-medium">LangGraph</th>
               <th class="px-4 py-3 font-medium">CrewAI</th>
-              <th class="px-4 py-3 font-medium">Claude / OpenAI SDK</th>
-              <th class="px-4 py-3 font-medium">Dify / n8n / Flowise</th>
+              <th class="px-4 py-3 font-medium">Agent SDKs</th>
+              <th class="px-4 py-3 font-medium">Visual platforms</th>
+              <th class="px-4 py-3 font-medium">OpenClaw</th>
             </tr>
           </thead>
           <tbody class="text-ink-100">
             <tr class="border-b border-white/5">
+              <td class="px-4 py-3 text-ink-400 font-medium">Product shape</td>
+              <td class="px-4 py-3 text-signal-400 font-medium">Private agent runtime + control plane</td>
+              <td class="px-4 py-3 text-ink-400">Low-level orchestration runtime</td>
+              <td class="px-4 py-3 text-ink-400">Multi-agent framework + AMP</td>
+              <td class="px-4 py-3 text-ink-400">Code libraries and managed services</td>
+              <td class="px-4 py-3 text-ink-400">Visual app/workflow platforms</td>
+              <td class="px-4 py-3 text-ink-400">Personal-assistant gateway</td>
+            </tr>
+            <tr class="border-b border-white/5">
+              <td class="px-4 py-3 text-ink-400 font-medium">Authoring</td>
+              <td class="px-4 py-3 text-signal-400 font-medium">Versionable YAML + Studio</td>
+              <td class="px-4 py-3 text-ink-400">Python / JavaScript graphs</td>
+              <td class="px-4 py-3 text-ink-400">Python Crews and Flows; Studio in AMP</td>
+              <td class="px-4 py-3 text-ink-400">Code or versioned service config</td>
+              <td class="px-4 py-3 text-ink-400">Canvas, nodes, and plugins</td>
+              <td class="px-4 py-3 text-ink-400">CLI, config, skills, and plugins</td>
+            </tr>
+            <tr class="border-b border-white/5">
               <td class="px-4 py-3 text-ink-400 font-medium">Deployment</td>
-              <td class="px-4 py-3 text-signal-400 font-medium">Single Go binary</td>
-              <td class="px-4 py-3 text-ink-400">Python package</td>
-              <td class="px-4 py-3 text-ink-400">Python package</td>
-              <td class="px-4 py-3 text-ink-400">Vendor SDK</td>
-              <td class="px-4 py-3 text-ink-400">Docker + Postgres + Redis</td>
+              <td class="px-4 py-3 text-signal-400 font-medium">Single Go binary or container</td>
+              <td class="px-4 py-3 text-ink-400">Your app; LangSmith managed/hybrid/self-hosted</td>
+              <td class="px-4 py-3 text-ink-400">Your Python app or CrewAI AMP</td>
+              <td class="px-4 py-3 text-ink-400">Your app or vendor-managed workers</td>
+              <td class="px-4 py-3 text-ink-400">Cloud or self-hosted server stacks</td>
+              <td class="px-4 py-3 text-ink-400">Self-hosted Node.js gateway/daemon</td>
             </tr>
             <tr class="border-b border-white/5">
-              <td class="px-4 py-3 text-ink-400 font-medium">Agent config</td>
-              <td class="px-4 py-3 text-signal-400 font-medium">One YAML file</td>
-              <td class="px-4 py-3 text-ink-400">Code</td>
-              <td class="px-4 py-3 text-ink-400">Code</td>
-              <td class="px-4 py-3 text-ink-400">Code</td>
-              <td class="px-4 py-3 text-ink-400">Visual editor</td>
+              <td class="px-4 py-3 text-ink-400 font-medium">Operations</td>
+              <td class="px-4 py-3 text-signal-400 font-medium">Runs, schedules, logs, diagnostics, delivery</td>
+              <td class="px-4 py-3 text-ink-400">Persistence in runtime; LangSmith for tracing/ops</td>
+              <td class="px-4 py-3 text-ink-400">Framework events; AMP for deployment/monitoring</td>
+              <td class="px-4 py-3 text-ink-400">Tracing/sessions; app owns surrounding ops</td>
+              <td class="px-4 py-3 text-ink-400">Execution history, logs, and platform UI</td>
+              <td class="px-4 py-3 text-ink-400">Gateway state, sessions, Control UI, doctor</td>
             </tr>
             <tr class="border-b border-white/5">
-              <td class="px-4 py-3 text-ink-400 font-medium">Injection scanner</td>
-              <td class="px-4 py-3 text-signal-400 font-medium">✓ Shipped, 14 patterns</td>
-              <td class="px-4 py-3 text-hot-400">Operator's problem</td>
-              <td class="px-4 py-3 text-hot-400">Operator's problem</td>
-              <td class="px-4 py-3 text-hot-400">Operator's problem</td>
-              <td class="px-4 py-3 text-hot-400">3rd-party plugin</td>
+              <td class="px-4 py-3 text-ink-400 font-medium">Human oversight</td>
+              <td class="px-4 py-3 text-signal-400 font-medium">Approvals + capability, intent, and readiness gates</td>
+              <td class="px-4 py-3 text-ink-400">Durable interrupts; approve/edit/reject policies</td>
+              <td class="px-4 py-3 text-ink-400">Guardrails and human-feedback patterns</td>
+              <td class="px-4 py-3 text-ink-400">Guardrails or permission policies; app supplies UX</td>
+              <td class="px-4 py-3 text-ink-400">Human-input and approval features vary by product</td>
+              <td class="px-4 py-3 text-ink-400">Exec approvals, allowlists, tool policy, sandbox</td>
             </tr>
             <tr class="border-b border-white/5">
-              <td class="px-4 py-3 text-ink-400 font-medium">Intent gate</td>
-              <td class="px-4 py-3 text-signal-400 font-medium">✓ Shipped, workspace-scoped</td>
-              <td class="px-4 py-3 text-hot-400">—</td>
-              <td class="px-4 py-3 text-hot-400">—</td>
-              <td class="px-4 py-3 text-hot-400">—</td>
-              <td class="px-4 py-3 text-hot-400">—</td>
-            </tr>
-            <tr class="border-b border-white/5">
-              <td class="px-4 py-3 text-ink-400 font-medium">Readiness verdict</td>
-              <td class="px-4 py-3 text-signal-400 font-medium">✓ Blocks unsafe launch</td>
-              <td class="px-4 py-3 text-hot-400">—</td>
-              <td class="px-4 py-3 text-hot-400">—</td>
-              <td class="px-4 py-3 text-hot-400">—</td>
-              <td class="px-4 py-3 text-hot-400">—</td>
-            </tr>
-            <tr class="border-b border-white/5">
-              <td class="px-4 py-3 text-ink-400 font-medium">Red-team regression</td>
-              <td class="px-4 py-3 text-signal-400 font-medium">✓ 7 fixtures, every push</td>
-              <td class="px-4 py-3 text-hot-400">—</td>
-              <td class="px-4 py-3 text-hot-400">—</td>
-              <td class="px-4 py-3 text-hot-400">—</td>
-              <td class="px-4 py-3 text-hot-400">—</td>
-            </tr>
-            <tr class="border-b border-white/5">
-              <td class="px-4 py-3 text-ink-400 font-medium">Debug failed run</td>
-              <td class="px-4 py-3 text-signal-400 font-medium">Replay + diff preview + apply</td>
-              <td class="px-4 py-3 text-ink-400">Stack trace</td>
-              <td class="px-4 py-3 text-ink-400">Stack trace</td>
-              <td class="px-4 py-3 text-ink-400">Stack trace</td>
-              <td class="px-4 py-3 text-ink-400">Node console</td>
-            </tr>
-            <tr class="border-b border-white/5">
-              <td class="px-4 py-3 text-ink-400 font-medium">Provider coverage</td>
-              <td class="px-4 py-3 text-signal-400 font-medium">Any (config alone)</td>
-              <td class="px-4 py-3 text-ink-400">Any</td>
-              <td class="px-4 py-3 text-ink-400">Any</td>
-              <td class="px-4 py-3 text-hot-400">Vendor-first</td>
-              <td class="px-4 py-3 text-ink-400">Most</td>
+              <td class="px-4 py-3 text-ink-400 font-medium">Mobile + channels</td>
+              <td class="px-4 py-3 text-signal-400 font-medium">Native iPhone + web/chat channels</td>
+              <td class="px-4 py-3 text-ink-400">Application-defined clients</td>
+              <td class="px-4 py-3 text-ink-400">Application-defined integrations and clients</td>
+              <td class="px-4 py-3 text-ink-400">Application-defined clients</td>
+              <td class="px-4 py-3 text-ink-400">Published web apps, APIs, and integrations</td>
+              <td class="px-4 py-3 text-ink-400">Broad chat catalog + iOS/Android companions</td>
             </tr>
             <tr>
-              <td class="px-4 py-3 text-ink-400 font-medium">Runs on</td>
-              <td class="px-4 py-3 text-signal-400 font-medium">Laptop, $5 VPS, Raspberry Pi</td>
-              <td class="px-4 py-3 text-ink-400">Dev machine</td>
-              <td class="px-4 py-3 text-ink-400">Dev machine</td>
-              <td class="px-4 py-3 text-ink-400">Wherever SDK runs</td>
-              <td class="px-4 py-3 text-ink-400">Needs a server stack</td>
+              <td class="px-4 py-3 text-ink-400 font-medium">Best fit</td>
+              <td class="px-4 py-3 text-signal-400 font-medium">Private multi-agent operations with versionable config</td>
+              <td class="px-4 py-3 text-ink-400">Custom stateful agent applications</td>
+              <td class="px-4 py-3 text-ink-400">Code-first multi-agent applications</td>
+              <td class="px-4 py-3 text-ink-400">Agents embedded in custom products</td>
+              <td class="px-4 py-3 text-ink-400">Canvas-centric automation and LLM apps</td>
+              <td class="px-4 py-3 text-ink-400">Personal assistant across devices and chat networks</td>
             </tr>
           </tbody>
         </table>
       </div>
 
-      <p class="mt-6 text-xs text-ink-400">Sources for competitor claims: <a href="https://docs.soulacy.io/comparison-chart/" class="hover:text-ink-100 underline decoration-dotted">docs.soulacy.io/comparison-chart</a> (with cited URLs per cell).</p>
+      <p class="mt-6 text-xs text-ink-400">Read the <a href="/docs/comparison-chart/" class="hover:text-ink-100 underline decoration-dotted">methodology, product-by-product analysis, and primary sources</a>. OpenClaw is included as the closest personal-assistant gateway comparison.</p>
     </div>
   </section>
 
