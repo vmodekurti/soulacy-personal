@@ -1,0 +1,23 @@
+version: "3.8"
+
+services:
+  soulacy:
+    image: ghcr.io/vmodekurti/soulacy:latest
+    container_name: soulacy-personal
+    restart: unless-stopped
+    ports:
+      - "1947:1947"
+    environment:
+      - SOULACY_DEPLOYMENT_MODE=personal
+      - SOULACY_SERVER_API_KEY=${SOULACY_SERVER_API_KEY:-sy_secret_12345}
+      - SOULACY_LLM_PROVIDERS_OPENAI_API_KEY=${SOULACY_LLM_PROVIDERS_OPENAI_API_KEY:-}
+    volumes:
+      - soulacy-data:/home/soulacy/.soulacy
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:1947/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  soulacy-data:

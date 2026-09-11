@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: soulacy-personal
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    region: oregon
+    envVars:
+      - key: SOULACY_DEPLOYMENT_MODE
+        value: personal
+      - key: PORT
+        value: "1947"
+      - key: SOULACY_SERVER_API_KEY
+        generateValue: true
+      - key: SOULACY_LLM_PROVIDERS_OPENAI_API_KEY
+        sync: false
+    disk:
+      name: soulacy-data
+      mountPath: /home/soulacy/.soulacy
+      sizeGB: 5
+    healthCheckPath: /ready

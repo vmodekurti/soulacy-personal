@@ -18,7 +18,7 @@
 FROM node:20-bookworm-slim AS gui
 WORKDIR /src/gui
 COPY gui/package.json gui/package-lock.json* ./
-RUN --mount=type=cache,target=/root/.npm \
+RUN --mount=type=cache,id=npm,target=/root/.npm \
     npm install --no-audit --no-fund --silent
 COPY gui ./
 RUN npm run build
@@ -38,8 +38,8 @@ COPY go.mod go.sum ./
 # `go mod download` must be able to read the replacement module's go.mod.
 # Copy just that file first to keep this layer cacheable.
 COPY sdk/go.mod ./sdk/go.mod
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/go/pkg/mod \
+RUN --mount=type=cache,id=go-build,target=/root/.cache/go-build \
+    --mount=type=cache,id=go-mod,target=/go/pkg/mod \
     go mod download
 
 COPY . .
@@ -49,8 +49,8 @@ COPY . .
 COPY --from=gui /src/internal/webui/dist /src/internal/webui/dist
 
 ENV CGO_ENABLED=1
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/go/pkg/mod \
+RUN --mount=type=cache,id=go-build,target=/root/.cache/go-build \
+    --mount=type=cache,id=go-mod,target=/go/pkg/mod \
     go build \
         -ldflags "-X github.com/soulacy/soulacy/internal/config.Version=${VERSION}" \
         -o /out/soulacy ./cmd/soulacy \
@@ -92,9 +92,9 @@ COPY --from=gobuild --chown=soulacy /out/soulacy /usr/local/bin/soulacy
 COPY --from=gobuild --chown=soulacy /out/sy      /usr/local/bin/sy
 COPY --from=gobuild --chown=soulacy /out/soulacy-worker /usr/local/bin/soulacy-worker
 
-# Data directory — mount a volume here to persist agents, memory, and logs.
+# Data directory — mount a persistent volume here to persist agents, memory, and logs.
+# NOTE: explicit VOLUME ["..."] instruction is omitted for compatibility with PaaS platform builders (e.g. Railway).
 RUN mkdir -p /home/soulacy/.soulacy && chown soulacy:soulacy /home/soulacy/.soulacy
-VOLUME ["/home/soulacy/.soulacy"]
 
 USER soulacy
 WORKDIR /home/soulacy
