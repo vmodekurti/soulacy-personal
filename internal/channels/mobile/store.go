@@ -131,7 +131,8 @@ func (s *Store) List(ctx context.Context, workspaceID, deviceID, userID string, 
 	rows, err := s.db.QueryContext(ctx, `SELECT d.id,d.destination,d.agent_id,d.session_id,d.title,d.body,d.parts_json,d.metadata_json,d.created_at,
       (SELECT read_at FROM mobile_delivery_receipts r WHERE r.workspace_id=d.workspace_id AND r.delivery_id=d.id AND r.device_id=?)
     FROM mobile_deliveries d WHERE d.workspace_id=? AND
-      (destination='all' OR destination=? OR destination=?)
+      (destination='all' OR destination=? OR destination=? OR
+       (destination NOT LIKE 'device:%' AND destination NOT LIKE 'user:%'))
 	ORDER BY created_at DESC,d.id DESC LIMIT ?`, strings.TrimSpace(deviceID), workspaceID, "device:"+strings.TrimSpace(deviceID),
 		"user:"+strings.TrimSpace(userID), limit)
 	if err != nil {
@@ -155,8 +156,9 @@ func (s *Store) Get(ctx context.Context, workspaceID, deliveryID, deviceID, user
 	}
 	row := s.db.QueryRowContext(ctx, `SELECT d.id,d.destination,d.agent_id,d.session_id,d.title,d.body,d.parts_json,d.metadata_json,d.created_at,
       (SELECT read_at FROM mobile_delivery_receipts r WHERE r.workspace_id=d.workspace_id AND r.delivery_id=d.id AND r.device_id=?)
-	    FROM mobile_deliveries d WHERE d.workspace_id=? AND d.id=? AND
-	      (destination='all' OR destination=? OR destination=?)`, strings.TrimSpace(deviceID), normalizeWorkspaceID(workspaceID), deliveryID,
+    FROM mobile_deliveries d WHERE d.workspace_id=? AND d.id=? AND
+      (destination='all' OR destination=? OR destination=? OR
+       (destination NOT LIKE 'device:%' AND destination NOT LIKE 'user:%'))`, strings.TrimSpace(deviceID), normalizeWorkspaceID(workspaceID), deliveryID,
 		"device:"+strings.TrimSpace(deviceID), "user:"+strings.TrimSpace(userID))
 	return scanDelivery(row)
 }
@@ -170,7 +172,8 @@ func (s *Store) MarkRead(ctx context.Context, workspaceID, deliveryID, deviceID,
 	}
 	result, err := s.db.ExecContext(ctx, `INSERT INTO mobile_delivery_receipts(workspace_id,delivery_id,device_id,read_at)
     SELECT workspace_id,id,?,? FROM mobile_deliveries WHERE workspace_id=? AND id=? AND
-      (destination='all' OR destination=? OR destination=?)
+      (destination='all' OR destination=? OR destination=? OR
+       (destination NOT LIKE 'device:%' AND destination NOT LIKE 'user:%'))
     ON CONFLICT(workspace_id,delivery_id,device_id) DO UPDATE SET read_at=excluded.read_at`, strings.TrimSpace(deviceID),
 		time.Now().UTC().Format(time.RFC3339Nano), normalizeWorkspaceID(workspaceID), deliveryID,
 		"device:"+strings.TrimSpace(deviceID), "user:"+strings.TrimSpace(userID))
@@ -288,10 +291,13 @@ func (s *Store) TargetDevices(ctx context.Context, workspaceID, destination stri
 
 func normalizeDestination(v string) string {
 	v = strings.TrimSpace(v)
-	if v == "" || v == "broadcast" || v == "*" {
-		return "all"
+	if strings.HasPrefix(v, "device:") || strings.HasPrefix(v, "user:") {
+		return v
 	}
-	return v
+	// The mobile adapter historically treated any unqualified destination as a
+	// broadcast when selecting APNs devices. Store it with the same semantics so
+	// a phone that receives the push can also fetch and acknowledge the result.
+	return "all"
 }
 
 func normalizeWorkspaceID(v string) string {
