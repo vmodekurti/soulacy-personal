@@ -1020,6 +1020,7 @@ func Load(cfgPath string) (*Config, string, error) {
 	v.SetDefault("queue.nats_ack_wait", "30s")
 	v.SetDefault("queue.nats_max_deliver", 0)
 	v.SetDefault("auth.mode", "apikey")
+	v.SetDefault("auth.jwt_secret", "")
 	v.SetDefault("auth.jwt_access_ttl", "15m")
 	v.SetDefault("auth.jwt_refresh_ttl", "168h")
 	v.SetDefault("llm.default_provider", "ollama")
