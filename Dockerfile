@@ -80,6 +80,7 @@ RUN useradd --create-home --shell /usr/sbin/nologin soulacy
 
 COPY --from=gobuild --chown=soulacy /out/soulacy /usr/local/bin/soulacy
 COPY --from=gobuild --chown=soulacy /out/sy      /usr/local/bin/sy
+COPY --chown=soulacy --chmod=755 deploy/common/docker-entrypoint.sh /usr/local/bin/soulacy-entrypoint
 
 # Data directory — mount a volume here to persist agents, memory, and logs.
 # The hosting platform owns the volume declaration. Keeping this as a normal
@@ -120,7 +121,7 @@ ENV SOULACY_SERVER_HOST=0.0.0.0 \
 EXPOSE 18789
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -fs http://localhost:18789/ >/dev/null || exit 1
+    CMD curl -fs "http://localhost:${PORT:-${SOULACY_SERVER_PORT:-18789}}/" >/dev/null || exit 1
 
-ENTRYPOINT ["soulacy"]
+ENTRYPOINT ["soulacy-entrypoint"]
 CMD ["serve"]

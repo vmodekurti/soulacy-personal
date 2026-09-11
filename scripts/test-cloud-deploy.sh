@@ -5,6 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 bash -n deploy/common/bootstrap.sh
+sh -n deploy/common/docker-entrypoint.sh
 jq empty deploy/azure/azuredeploy.json
 jq empty railway.json
 grep -q '^FROM golang:1.26.6-bookworm AS gobuild$' Dockerfile
@@ -21,7 +22,9 @@ if grep -Eq '^[[:space:]]*VOLUME[[:space:]]' Dockerfile; then
   exit 1
 fi
 grep -q 'SOULACY_SERVER_HOST=0.0.0.0' Dockerfile
-grep -q 'CMD curl -fs http://localhost:18789/' Dockerfile
+grep -q 'SOULACY_SERVER_PORT="$PORT"' deploy/common/docker-entrypoint.sh
+grep -Fq 'CMD curl -fs "http://localhost:${PORT:-${SOULACY_SERVER_PORT:-18789}}/"' Dockerfile
+grep -q '^ENTRYPOINT \["soulacy-entrypoint"\]$' Dockerfile
 
 SOULACY_API_KEY=test-login-key \
 SOULACY_JWT_SECRET=test-jwt-secret \
