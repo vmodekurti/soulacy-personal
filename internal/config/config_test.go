@@ -396,6 +396,20 @@ func TestLoadEnvVarOverridesAuthMode(t *testing.T) {
 	}
 }
 
+func TestLoadEnvVarOverridesJWTSecret(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("SOULACY_AUTH_JWT_SECRET", "persistent-signing-secret")
+
+	cfg, _, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Auth.JWTSecret != "persistent-signing-secret" {
+		t.Errorf("auth.jwt_secret was not loaded from the environment")
+	}
+}
+
 // TestLoadEnvVarOverridesLogLevel verifies SOULACY_LOG_LEVEL override.
 func TestLoadEnvVarOverridesLogLevel(t *testing.T) {
 	home := t.TempDir()
