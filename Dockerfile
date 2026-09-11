@@ -18,7 +18,7 @@
 FROM node:20-bookworm-slim AS gui
 WORKDIR /src/gui
 COPY gui/package.json gui/package-lock.json* ./
-RUN --mount=type=cache,target=/root/.npm \
+RUN --mount=type=cache,id=soulacy-npm,target=/root/.npm \
     npm install --no-audit --no-fund --silent
 COPY gui ./
 RUN npm run build
@@ -38,8 +38,8 @@ COPY go.mod go.sum ./
 # `go mod download` must be able to read the replacement module's go.mod.
 # Copy just that file first to keep this layer cacheable.
 COPY sdk/go.mod ./sdk/go.mod
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/go/pkg/mod \
+RUN --mount=type=cache,id=soulacy-go-build,target=/root/.cache/go-build \
+    --mount=type=cache,id=soulacy-go-mod,target=/go/pkg/mod \
     go mod download
 
 COPY . .
@@ -49,8 +49,8 @@ COPY . .
 COPY --from=gui /src/internal/webui/dist /src/internal/webui/dist
 
 ENV CGO_ENABLED=1
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/go/pkg/mod \
+RUN --mount=type=cache,id=soulacy-go-build,target=/root/.cache/go-build \
+    --mount=type=cache,id=soulacy-go-mod,target=/go/pkg/mod \
     go build \
         -ldflags "-X github.com/soulacy/soulacy/internal/config.Version=${VERSION}" \
         -o /out/soulacy ./cmd/soulacy \
@@ -89,8 +89,10 @@ COPY --from=gobuild --chown=soulacy /out/soulacy /usr/local/bin/soulacy
 COPY --from=gobuild --chown=soulacy /out/sy      /usr/local/bin/sy
 
 # Data directory — mount a volume here to persist agents, memory, and logs.
+# The hosting platform owns the volume declaration. Keeping this as a normal
+# directory makes the image compatible with Railway's Dockerfile validator
+# while Docker Compose and Railway templates can still mount it persistently.
 RUN mkdir -p /home/soulacy/.soulacy && chown soulacy:soulacy /home/soulacy/.soulacy
-VOLUME ["/home/soulacy/.soulacy"]
 
 USER soulacy
 WORKDIR /home/soulacy
@@ -114,7 +116,9 @@ WORKDIR /home/soulacy
 #    it would override legacy-layout detection. The engine still injects the
 #    correctly-resolved paths into agent shell tools at runtime, so accuracy is
 #    preserved even on non-default layouts.
-ENV SOULACY_CONFIG_FILE=/home/soulacy/.soulacy/soulspace/config.yaml \
+ENV SOULACY_SERVER_HOST=0.0.0.0 \
+    SOULACY_SERVER_PORT=18789 \
+    SOULACY_CONFIG_FILE=/home/soulacy/.soulacy/soulspace/config.yaml \
     SOULACY_AGENTS_DIR=/home/soulacy/.soulacy/soulspace/agents \
     SOULACY_SKILLS_DIR=/home/soulacy/.soulacy/soulspace/skills \
     SOULACY_PLUGINS_DIR=/home/soulacy/.soulacy/soulspace/plugins \
@@ -123,7 +127,7 @@ ENV SOULACY_CONFIG_FILE=/home/soulacy/.soulacy/soulspace/config.yaml \
 EXPOSE 18789
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -fs http://localhost:18789/api/v1/health || exit 1
+    CMD curl -fs http://localhost:18789/ >/dev/null || exit 1
 
 ENTRYPOINT ["soulacy"]
 CMD ["serve"]
