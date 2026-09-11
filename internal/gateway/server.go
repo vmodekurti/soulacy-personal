@@ -84,6 +84,7 @@ import (
 	"github.com/soulacy/soulacy/internal/session"
 	"github.com/soulacy/soulacy/internal/sessioncapturecompanion"
 	"github.com/soulacy/soulacy/internal/skills"
+	"github.com/soulacy/soulacy/internal/skillstore"
 	"github.com/soulacy/soulacy/internal/storage"
 	"github.com/soulacy/soulacy/internal/studio"
 	"github.com/soulacy/soulacy/internal/tenancy"
@@ -129,7 +130,8 @@ type Server struct {
 	skillLoader runtime.SkillLoader // nil if no skills installed
 	// skillStores, when set, resolves one workspace's skill inventory and takes
 	// precedence over skillLoader. Handlers reach it through s.skillCatalog(c).
-	skillStores     *skills.Stores
+	skillStores   *skills.Stores
+	skillRequests *skillstore.Store
 	actions         storage.ActionLogBackend // nil if action logging disabled
 	memoryStore     memory.Store
 	memoryArchive   storage.MemoryBackend
