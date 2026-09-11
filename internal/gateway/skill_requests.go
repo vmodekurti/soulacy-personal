@@ -78,6 +78,9 @@ func (s *Server) handleListSkillInstallRequests(c *fiber.Ctx) error {
 
 // handleDenySkillInstallRequest denies a pending skill request.
 func (s *Server) handleDenySkillInstallRequest(c *fiber.Ctx) error {
+	if err := s.workspaceSkillAdmin(c); err != nil {
+		return err
+	}
 	if s.skillRequests == nil {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "workspace skill requests are not available")
 	}
@@ -110,13 +113,13 @@ func (s *Server) SetSkillRequestStore(store *skillstore.Store) {
 
 func (s *Server) workspaceSkillAdmin(c *fiber.Ctx) error {
 	if !s.authorizationRequired() {
-		return c.Next()
+		return nil
 	}
 	identity, ok := requestIdentity(c)
 	if !ok || (identity.Role() != tenancy.RoleOwner && identity.Role() != tenancy.RoleAdmin) {
 		return fiber.NewError(fiber.StatusForbidden, "workspace skill administration is not permitted")
 	}
-	return c.Next()
+	return nil
 }
 
 func newSkillRequestID() string {

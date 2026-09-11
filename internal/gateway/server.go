@@ -1232,6 +1232,11 @@ func (s *Server) buildApp() *fiber.App {
 	api.Get("/browser/artifact", s.rbacMW(rbac.ResourceMemory, rbac.ActionRead), s.handleBrowserArtifact)
 	api.Get("/browser/status", s.rbacMW(rbac.ResourceMemory, rbac.ActionRead), s.handleBrowserStatus)
 	api.Get("/mobile/status", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleMobileStatus)
+	api.Post("/mobile/devices", s.rbacMW(rbac.ResourceChat, rbac.ActionWrite), s.handleRegisterMobileDevice)
+	api.Delete("/mobile/devices/:id", s.rbacMW(rbac.ResourceChat, rbac.ActionDelete), s.handleDeleteMobileDevice)
+	api.Get("/mobile/deliveries", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.handleListMobileDeliveries)
+	api.Get("/mobile/deliveries/:id", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.handleGetMobileDelivery)
+	api.Post("/mobile/deliveries/:id/read", s.rbacMW(rbac.ResourceChat, rbac.ActionWrite), s.handleReadMobileDelivery)
 	api.Post("/pairing/tokens", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleCreatePairingToken)
 	api.Post("/pairing/redeem", s.handleRedeemPairingToken)
 	api.Get("/approvals", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleListApprovals)
@@ -1274,6 +1279,9 @@ func (s *Server) buildApp() *fiber.App {
 	api.Post("/skills/install", s.rbacMW(rbac.ResourceSkills, rbac.ActionInstall), s.handleInstallRegistrySkill)
 	api.Post("/skills/provision-agenticskills", s.rbacMW(rbac.ResourceSkills, rbac.ActionInstall), s.handleProvisionAgenticSkill)
 	api.Post("/skills/rescan", s.rbacMW(rbac.ResourceSkills, rbac.ActionWrite), s.handleRescanSkills)
+	api.Post("/skills/requests", s.rbacMW(rbac.ResourceSkills, rbac.ActionRequest), s.handleCreateSkillInstallRequest)
+	api.Get("/skills/requests", s.rbacMW(rbac.ResourceSkills, rbac.ActionRead), s.handleListSkillInstallRequests)
+	api.Post("/skills/requests/:id/deny", s.rbacMW(rbac.ResourceSkills, rbac.ActionInstall), s.handleDenySkillInstallRequest)
 	api.Get("/marketplace/status", s.rbacMW(rbac.ResourceSkills, rbac.ActionRead), s.handleMarketplaceStatus)
 
 	// MCP (Model Context Protocol) — configured external servers + their tools
