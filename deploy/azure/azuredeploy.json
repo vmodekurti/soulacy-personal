@@ -197,6 +197,10 @@
     "login": {
       "type": "string",
       "value": "Use the Soulacy login key you supplied during deployment."
+    },
+    "pairIPhone": {
+      "type": "string",
+      "value": "After signing in, open Mobile > Pair a device and scan the short-lived QR code with Soulacy for iOS."
     }
   }
 }
