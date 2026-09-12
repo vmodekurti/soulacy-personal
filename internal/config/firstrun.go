@@ -9,7 +9,8 @@
 // and EnsureDirs. It performs two side-effecting steps, each idempotent:
 //
 //   1. If the resolved config.yaml doesn't exist on disk, write a
-//      minimal default with a freshly-generated API key.
+//      minimal default. Preserve a key supplied by configuration (for
+//      example SOULACY_SERVER_API_KEY); otherwise generate one.
 //   2. If config.yaml DOES exist but server.api_key is empty AND the
 //      operator hasn't explicitly bound to a non-loopback host (i.e.
 //      they're not running behind a reverse proxy that handles auth),
@@ -28,6 +29,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // BootstrapAction describes what (if anything) EnsureBootstrap did.
@@ -39,7 +41,7 @@ const (
 	// a reverse proxy. Nothing changed.
 	BootstrapNoop BootstrapAction = iota
 	// BootstrapWroteConfig — config.yaml didn't exist; a full default
-	// was written, including a generated api_key.
+	// was written, preserving a configured api_key or generating one.
 	BootstrapWroteConfig
 	// BootstrapGeneratedKey — config.yaml existed but api_key was empty
 	// on a loopback bind. Just the api_key was added (existing config
@@ -48,9 +50,10 @@ const (
 )
 
 // BootstrapResult tells the caller what happened so it can print an
-// appropriate one-time banner. APIKey is non-empty whenever the action
-// generated one — the caller should display it ONCE to the operator and
-// never log it later.
+// appropriate one-time banner. APIKey is non-empty whenever a config is
+// written or a key is generated. Callers must not log a key that came from
+// an environment variable because cloud deployment logs are not a secret
+// delivery channel.
 type BootstrapResult struct {
 	Action     BootstrapAction
 	ConfigPath string
@@ -80,11 +83,19 @@ func EnsureBootstrap(cfg *Config, cfgPath string) (BootstrapResult, error) {
 		cfgPath = ws.ConfigFile
 	}
 
-	// Case 1: config file is missing — write a full default.
+	// Case 1: config file is missing — write a full default. Config.Load
+	// applies environment overrides before this helper runs, so preserve
+	// a platform-provided key instead of silently replacing it. This is
+	// important for cloud templates, where the deployer retrieves the
+	// generated environment secret after the service starts.
 	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
-		key, err := generateAPIKey()
-		if err != nil {
-			return BootstrapResult{}, fmt.Errorf("EnsureBootstrap: generate key: %w", err)
+		key := strings.TrimSpace(cfg.Server.APIKey)
+		if key == "" {
+			var err error
+			key, err = generateAPIKey()
+			if err != nil {
+				return BootstrapResult{}, fmt.Errorf("EnsureBootstrap: generate key: %w", err)
+			}
 		}
 		if err := writeDefaultConfig(cfgPath, key); err != nil {
 			return BootstrapResult{}, fmt.Errorf("EnsureBootstrap: write default config: %w", err)
