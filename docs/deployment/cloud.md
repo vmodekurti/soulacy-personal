@@ -51,7 +51,9 @@ path, and generate a public domain.
 Railway injects its assigned runtime port as `PORT`. The container entrypoint
 maps that value to `SOULACY_SERVER_PORT`; outside Railway, Soulacy continues to
 use port `18789`. The checked-in configuration supplies the health check and
-restart policy.
+restart policy. The entrypoint also repairs the ownership of a newly mounted
+Railway volume before dropping to the unprivileged `soulacy` user, so the
+gateway can initialize its workspace without running as root.
 
 ## Render
 
