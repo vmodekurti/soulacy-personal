@@ -178,6 +178,7 @@ func run() error {
 // logs regardless of stdout redirection.
 func printFirstRunBanner(b config.BootstrapResult, host string, port int) {
 	url := fmt.Sprintf("http://%s:%d", host, port)
+	displayKey, keyGuidance := firstRunBannerKey(b.APIKey)
 	what := "Bootstrapped configuration"
 	if b.Action == config.BootstrapGeneratedKey {
 		what = "Generated API key (config file kept)"
@@ -188,8 +189,15 @@ func printFirstRunBanner(b config.BootstrapResult, host string, port int) {
 			"│ Config:  %-53s │\n"+
 			"│ URL:     %-53s │\n"+
 			"│ API key: %-53s │\n"+
-			"│ This banner appears once. Save the key — it gates every API. │\n"+
+			"│ %-62s │\n"+
 			"└────────────────────────────────────────────────────────────────┘\n\n",
-		what, b.ConfigPath, url, b.APIKey,
+		what, b.ConfigPath, url, displayKey, keyGuidance,
 	)
+}
+
+func firstRunBannerKey(apiKey string) (displayKey, guidance string) {
+	if strings.TrimSpace(os.Getenv("SOULACY_SERVER_API_KEY")) != "" {
+		return "(configured by environment)", "Reveal the key securely in your cloud console."
+	}
+	return apiKey, "Save the key — it gates every API."
 }
