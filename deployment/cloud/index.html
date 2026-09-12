@@ -3565,6 +3565,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#pair-an-iphone-after-any-cloud-deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pair an iPhone after any cloud deployment
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#render" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4002,6 +4013,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#pair-an-iphone-after-any-cloud-deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pair an iPhone after any cloud deployment
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#render" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4135,8 +4157,11 @@ open. SSH is not exposed.</p>
 <p>After the stack reaches <code>CREATE_COMPLETE</code>:</p>
 <ol>
 <li>Open the <code>SoulacyURL</code> stack output.</li>
-<li>Open the Secrets Manager secret named by <code>LoginSecretARN</code>.</li>
-<li>Retrieve the <code>api_key</code> field and use it once on the Soulacy login page.</li>
+<li>Open the <code>LoginSecretConsoleURL</code> output (or find the secret named by
+   <code>LoginSecretARN</code>) and reveal the <code>api_key</code> field.</li>
+<li>Use that key on the Soulacy login page and save it in a password manager.</li>
+<li>Choose <strong>Mobile → Pair a device</strong> and scan the short-lived QR code with
+   Soulacy for iOS. Normal phone use relies on the scoped paired credential.</li>
 </ol>
 <p>The generated hostname uses the Elastic IP through <code>sslip.io</code> so Caddy can
 obtain a trusted certificate without requiring a domain during provisioning.
@@ -4149,21 +4174,39 @@ that installs the stack. Only ports 80 and 443 are open. SSH is not exposed.</p>
 <p>Azure asks for a 24-character-or-longer Soulacy login key during deployment.
 Store it in your password manager; secure ARM parameters are not displayed
 after deployment. Open the <code>soulacyURL</code> deployment output when provisioning
-finishes and log in with that key.</p>
+finishes and log in with that key. Then choose <strong>Mobile → Pair a device</strong> and
+scan the short-lived QR code with Soulacy for iOS.</p>
 <h2 id="railway">Railway<a class="headerlink" href="#railway" title="Permanent link">&para;</a></h2>
-<p>The <a href="https://railway.com/new?repo=https%3A%2F%2Fgithub.com%2Fvmodekurti%2Fsoulacy-personal">Railway launcher</a>
-imports the public repository and its Dockerfile. The root <code>railway.json</code> also
-records compatible health and restart defaults for Railway services that still
-support config-as-code.
-Before exposing the service, set a strong <code>SOULACY_SERVER_API_KEY</code>, mount a
-persistent volume at <code>/home/soulacy/.soulacy</code>, configure <code>/</code> as the health-check
-path, and generate a public domain.
+<p>The <a href="https://railway.com/deploy/soulacy-personal?utm_medium=integration&amp;utm_source=button&amp;utm_campaign=soulacy-personal">Soulacy Personal Railway template</a>
+imports the public repository and its Dockerfile, attaches persistent storage,
+enables public networking and health checks, and generates two independent
+secrets for every deployment. No configuration fields are required.</p>
+<p>After Railway reports the service online:</p>
+<ol>
+<li>Open the service's <strong>Variables</strong> tab.</li>
+<li>Reveal and copy <code>SOULACY_SERVER_API_KEY</code> (the <code>sy_...</code> value). Do not use
+   <code>SOULACY_AUTH_JWT_SECRET</code>; that is an internal signing secret.</li>
+<li>Open the generated public domain and sign in with the gateway key.</li>
+<li>Choose <strong>Mobile → Pair a device</strong> and scan the short-lived QR code with the
+   iOS app. The QR contains a single-use pairing code, not the permanent key.</li>
+</ol>
+<p>Keep the generated gateway key unsealed so the project owner can retrieve it.
+Railway account permissions protect the Variables page. Do not publish it in
+logs, screenshots, support tickets, or URL query parameters.</p>
+<p>The root <code>railway.json</code> records compatible health and restart defaults for
+Railway services that support config-as-code.
 Railway injects its assigned runtime port as <code>PORT</code>. The container entrypoint
 maps that value to <code>SOULACY_SERVER_PORT</code>; outside Railway, Soulacy continues to
 use port <code>18789</code>. The checked-in configuration supplies the health check and
 restart policy. The entrypoint also repairs the ownership of a newly mounted
 Railway volume before dropping to the unprivileged <code>soulacy</code> user, so the
 gateway can initialize its workspace without running as root.</p>
+<h2 id="pair-an-iphone-after-any-cloud-deployment">Pair an iPhone after any cloud deployment<a class="headerlink" href="#pair-an-iphone-after-any-cloud-deployment" title="Permanent link">&para;</a></h2>
+<p>AWS, Azure, and Railway differ only in how the owner retrieves the initial
+gateway key. Once signed in, use <strong>Mobile → Pair a device</strong> in the Soulacy web
+workspace. Pairing codes expire after two minutes, work once, and redeem for a
+scoped mobile credential stored by iOS in Keychain. Never put the permanent
+gateway API key directly in a QR code or a public post-deployment URL.</p>
 <h2 id="render">Render<a class="headerlink" href="#render" title="Permanent link">&para;</a></h2>
 <p>The <a href="https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2Fvmodekurti%2Fsoulacy-personal">Render launcher</a>
 uses the root <code>render.yaml</code> Blueprint. It creates a Docker web service and a 5 GB
