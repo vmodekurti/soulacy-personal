@@ -23,6 +23,8 @@ if grep -Eq '^[[:space:]]*VOLUME[[:space:]]' Dockerfile; then
 fi
 grep -q 'SOULACY_SERVER_HOST=0.0.0.0' Dockerfile
 grep -q 'SOULACY_SERVER_PORT="$PORT"' deploy/common/docker-entrypoint.sh
+grep -q 'chown -R soulacy:soulacy "$data_root"' deploy/common/docker-entrypoint.sh
+grep -q 'exec gosu soulacy /usr/local/bin/soulacy "$@"' deploy/common/docker-entrypoint.sh
 grep -Fq 'CMD curl -fs "http://localhost:${PORT:-${SOULACY_SERVER_PORT:-18789}}/"' Dockerfile
 grep -q '^ENTRYPOINT \["soulacy-entrypoint"\]$' Dockerfile
 
