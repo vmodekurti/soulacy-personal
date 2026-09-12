@@ -4161,7 +4161,9 @@ path, and generate a public domain.
 Railway injects its assigned runtime port as <code>PORT</code>. The container entrypoint
 maps that value to <code>SOULACY_SERVER_PORT</code>; outside Railway, Soulacy continues to
 use port <code>18789</code>. The checked-in configuration supplies the health check and
-restart policy.</p>
+restart policy. The entrypoint also repairs the ownership of a newly mounted
+Railway volume before dropping to the unprivileged <code>soulacy</code> user, so the
+gateway can initialize its workspace without running as root.</p>
 <h2 id="render">Render<a class="headerlink" href="#render" title="Permanent link">&para;</a></h2>
 <p>The <a href="https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2Fvmodekurti%2Fsoulacy-personal">Render launcher</a>
 uses the root <code>render.yaml</code> Blueprint. It creates a Docker web service and a 5 GB
