@@ -35,6 +35,8 @@ SOULACY_DOMAIN=soulacy.example.com \
 docker compose -f deploy/common/docker-compose.cloud.yml config --quiet
 
 grep -q 'soulacy-public-deploy-633654243571.s3.us-east-1.amazonaws.com' website/index.html
-grep -q 'deploy%2Fazure%2Fazuredeploy.json' website/index.html
+grep -q 'soulacy-public-deploy-633654243571.s3.us-east-1.amazonaws.com%2Fazuredeploy.json' website/index.html
+grep -q 'curl --fail --silent --show-error --max-time 5 http://127.0.0.1:18789/' deploy/common/bootstrap.sh
+grep -q "\"defaultValue\": \"\[concat('Sy-', newGuid())\]\"" deploy/azure/azuredeploy.json
 
 echo "cloud deployment assets: ok"

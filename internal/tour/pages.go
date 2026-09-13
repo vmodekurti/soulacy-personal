@@ -11,6 +11,17 @@ package tour
 import "fmt"
 
 var pages = map[string]page{
+	"reports": {
+		stage:        StageEyes,
+		role:         "A read-only account of Soulacy's own activity and recorded model spending over a chosen period.",
+		contribution: "Requests, sessions and model attempts are counted separately; unknown pricing and missing sources stay visible rather than becoming misleading zeros.",
+		whenEmpty: func(InstallState) string {
+			return "Choose the last day, week or month, then check source availability first. With no retained data, the report explains what is missing instead of declaring the installation healthy."
+		},
+		whenUsed: func(InstallState) string {
+			return "Review activity and cost breakdowns by agent and model. Investigate flagged sessions in Runs, and download the reviewed snapshot as Markdown, CSV or JSON without another model call."
+		},
+	},
 	"autopilot": {
 		stage: StageEyes, nextAction: "", nextLabel: "",
 		role:         "Where a finished run must show its evidence before you rely on it.",
