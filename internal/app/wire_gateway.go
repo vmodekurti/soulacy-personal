@@ -68,6 +68,7 @@ type gatewayDeps struct {
 	openedCostStore *costs.Store
 	autopilotStore  *autopilot.Store
 	undoStore       *safeundo.Store
+	adaptiveRebuild gateway.AdaptiveMemoryRebuilder
 }
 
 // wireGateway builds the gateway server and attaches every host capability.
@@ -82,6 +83,7 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 	srv := gateway.New(cfg, cfgPath, d.engine, d.loader, d.llmRouter, d.chanReg, d.sched, d.httpAdapter, d.waAdapter, d.skillLoader, d.actionBackend, d.mcpClient, d.hub, log)
 	srv.SetAuth(d.authEngine)
 	srv.SetAutopilotStore(d.autopilotStore)
+	srv.SetAdaptiveMemoryRebuilder(d.adaptiveRebuild)
 	srv.SetSafeUndoStore(d.undoStore)
 	d.engine.SetSafeUndo(d.undoStore, d.authEngine != nil && d.authEngine.Effective())
 	d.engine.SetLearningNotebook(d.engine.LearningNotebook(), (d.authEngine != nil && d.authEngine.Effective()) || cfg.Server.APIKey != "")

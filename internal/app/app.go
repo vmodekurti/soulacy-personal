@@ -20,11 +20,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
 	"github.com/soulacy/soulacy/internal/config"
+	"github.com/soulacy/soulacy/internal/memory"
 )
 
 // App owns the fully-wired Soulacy gateway process.
@@ -32,6 +34,13 @@ type App struct {
 	cfg     *config.Config
 	cfgPath string
 	log     *zap.Logger
+
+	// memEmbedder is the embedder wired for vector memory; adaptive memory
+	// reuses it so both tiers agree on the embedding model.
+	memEmbedder memory.Embedder
+	// adaptiveStore is the local fact store, kept across hot reloads.
+	adaptiveMu    sync.Mutex
+	adaptiveStore *memory.FactSQLite
 }
 
 // Option customises App construction.

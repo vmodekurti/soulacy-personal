@@ -86,6 +86,7 @@ type BuiltinTool struct {
 type Engine struct {
 	notebook    atomic.Pointer[notebookRuntime]
 	safeUndo    atomic.Pointer[safeUndoRuntime]
+	adaptive    adaptiveField
 	autopilot   *autopilotRuntime
 	loader      *Loader
 	llmRouter   *llm.Router

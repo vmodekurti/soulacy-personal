@@ -77,6 +77,10 @@
   let searchProvider = 'ollama'
   let searchApiKey = ''
   let dailyBudgetUSD = ''
+  // Adaptive memory (memory.adaptive)
+  let adaptiveEnabled = true, adaptiveProvider = 'local', adaptiveModelProvider = '', adaptiveModel = ''
+  let adaptiveMaxFacts = 5, adaptiveTokenBudget = 50, adaptiveMinConfidence = 0.5, adaptiveSimilarity = 0.85
+  let mem0BaseURL = '', mem0ApiKey = '', mem0Graph = false, mem0Style = '', mem0Configured = false
   let monthlyBudgetUSD = ''
   let costAlertThreshold = 0.8
   let costRows = []
@@ -306,6 +310,22 @@
       searchProvider  = config.search?.provider || 'ollama'
       searchApiKey    = config.search?.api_key || ''
       dailyBudgetUSD = config.costs?.daily_budget_usd || ''
+      {
+        const ad = config.memory?.adaptive || {}
+        adaptiveEnabled = ad.enabled ?? true
+        adaptiveProvider = ad.provider || 'local'
+        adaptiveModelProvider = ad.model_provider || ''
+        adaptiveModel = ad.model || ''
+        adaptiveMaxFacts = ad.max_prompt_facts ?? 5
+        adaptiveTokenBudget = ad.prompt_token_budget ?? 50
+        adaptiveMinConfidence = ad.min_confidence ?? 0.5
+        adaptiveSimilarity = ad.similarity_threshold ?? 0.85
+        mem0BaseURL = ad.mem0?.base_url || ''
+        mem0ApiKey = ad.mem0?.api_key || ''
+        mem0Graph = !!ad.mem0?.enable_graph
+        mem0Style = ad.mem0?.api_style || ''
+        mem0Configured = !!ad.mem0?.configured
+      }
       monthlyBudgetUSD = config.costs?.monthly_budget_usd || ''
       costAlertThreshold = config.costs?.alert_threshold || 0.8
       sloWindow = config.ops?.slo_window || '24h'
@@ -412,6 +432,24 @@
         // saving without retyping the key never clobbers the real one on disk.
         search: { provider: searchProvider, api_key: searchApiKey },
         costs: costsPatch(),
+        memory: {
+          adaptive: {
+            enabled: !!adaptiveEnabled,
+            provider: adaptiveProvider || 'local',
+            model_provider: adaptiveModelProvider,
+            model: adaptiveModel === '__custom__' ? '' : adaptiveModel,
+            max_prompt_facts: Number(adaptiveMaxFacts || 5),
+            prompt_token_budget: Number(adaptiveTokenBudget || 50),
+            min_confidence: Number(adaptiveMinConfidence || 0.5),
+            similarity_threshold: Number(adaptiveSimilarity || 0.85),
+            mem0: {
+              base_url: mem0BaseURL,
+              api_key: mem0ApiKey,
+              enable_graph: !!mem0Graph,
+              api_style: mem0Style,
+            },
+          },
+        },
         ops: {
           slo_window: sloWindow,
           max_failure_rate: Number(sloMaxFailureRate || 0),
@@ -695,6 +733,88 @@
                      placeholder="leave as ••• to keep current; or set env var" disabled={!writable} />
             </div>
           </div>
+        </div>
+
+        <div class="section">
+          <h2 class="section-title">Adaptive memory</h2>
+          <p class="hint">
+            Soulacy distils durable facts about each signed-in user from their conversations
+            (preferences, identity, constraints, entities), reconciles newer facts against older
+            ones, and adds the few most relevant to every prompt. Changes here apply to the next
+            turn without a restart. Users manage what is remembered on the Learning page.
+          </p>
+          <div class="field">
+            <label class="checkbox-row">
+              <input type="checkbox" bind:checked={adaptiveEnabled} disabled={!writable} />
+              Enable adaptive memory
+            </label>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="adaptive-provider" data-tooltip="Local runs on this machine at no extra cost. An external provider hands extraction and storage to a hosted or self-hosted memory service.">Memory engine</label>
+              <select id="adaptive-provider" bind:value={adaptiveProvider} disabled={!writable || !adaptiveEnabled}>
+                <option value="local">Built-in local engine (default, $0)</option>
+                <option value="mem0">External provider (Mem0 cloud or self-hosted)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="adaptive-max-facts" data-tooltip="How many facts are recalled into each prompt. The block is also capped by the token budget.">Facts per prompt</label>
+              <input id="adaptive-max-facts" type="number" min="1" max="20" bind:value={adaptiveMaxFacts} disabled={!writable || !adaptiveEnabled} />
+            </div>
+            <div class="field">
+              <label for="adaptive-token-budget" data-tooltip="Maximum estimated tokens the memory block may add to a prompt.">Prompt token budget</label>
+              <input id="adaptive-token-budget" type="number" min="10" max="400" bind:value={adaptiveTokenBudget} disabled={!writable || !adaptiveEnabled} />
+            </div>
+          </div>
+          {#if adaptiveProvider === 'local'}
+            <div class="field-row">
+              <div class="field">
+                <label for="adaptive-model-provider" data-tooltip="Provider used for the small extraction and arbitration calls. Leave blank to use each agent's own provider.">Extraction model — provider</label>
+                <select id="adaptive-model-provider" bind:value={adaptiveModelProvider} disabled={!writable || !adaptiveEnabled}>
+                  <option value="">— agent's provider —</option>
+                  {#each providerOptions as p}<option value={p}>{p}</option>{/each}
+                </select>
+              </div>
+              <div class="field">
+                <label for="adaptive-model" data-tooltip="A small, fast model is ideal: each extraction prompt is under 200 tokens.">Extraction model</label>
+                <input id="adaptive-model" bind:value={adaptiveModel} placeholder="— agent's model —" disabled={!writable || !adaptiveEnabled} />
+              </div>
+              <div class="field">
+                <label for="adaptive-min-conf" data-tooltip="Candidates below this confidence are discarded.">Min confidence</label>
+                <input id="adaptive-min-conf" type="number" step="0.05" min="0" max="1" bind:value={adaptiveMinConfidence} disabled={!writable || !adaptiveEnabled} />
+              </div>
+              <div class="field">
+                <label for="adaptive-sim" data-tooltip="Similarity above which a new fact is compared against an existing one to decide whether it supersedes it.">Conflict threshold</label>
+                <input id="adaptive-sim" type="number" step="0.01" min="0.5" max="1" bind:value={adaptiveSimilarity} disabled={!writable || !adaptiveEnabled} />
+              </div>
+            </div>
+          {:else}
+            <div class="field-row">
+              <div class="field">
+                <label for="mem0-base-url" data-tooltip="Leave blank for the hosted cloud service, or point at your self-hosted memory server.">Base URL</label>
+                <input id="mem0-base-url" bind:value={mem0BaseURL} placeholder="https://api.mem0.ai (default) or http://memory-sidecar:8000" disabled={!writable || !adaptiveEnabled} />
+              </div>
+              <div class="field">
+                <label for="mem0-api-key" data-tooltip="Required for the hosted cloud service. Stored in config.yaml; never shown again after saving.">API key {#if mem0Configured}<span class="inline-status">configured</span>{/if}</label>
+                <input id="mem0-api-key" type="password" bind:value={mem0ApiKey} placeholder={mem0Configured ? '••••••••' : 'm0-…'} disabled={!writable || !adaptiveEnabled} />
+              </div>
+              <div class="field">
+                <label for="mem0-style" data-tooltip="Inferred from the base URL; override only if detection is wrong.">API style</label>
+                <select id="mem0-style" bind:value={mem0Style} disabled={!writable || !adaptiveEnabled}>
+                  <option value="">— auto —</option>
+                  <option value="platform">Hosted platform</option>
+                  <option value="server">Self-hosted server</option>
+                </select>
+              </div>
+            </div>
+            <div class="field">
+              <label class="checkbox-row">
+                <input type="checkbox" bind:checked={mem0Graph} disabled={!writable || !adaptiveEnabled} />
+                Enable graph memory on the provider (entity relationships)
+              </label>
+            </div>
+            <p class="hint">If the provider is not configured or cannot be reached at startup, Soulacy falls back to the built-in local engine.</p>
+          {/if}
         </div>
 
         <div class="section">

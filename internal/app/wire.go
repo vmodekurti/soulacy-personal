@@ -309,6 +309,12 @@ func (a *App) Run(parent context.Context) error {
 	stack.pushClose("learning-notebook", notebook)
 	engine.SetLearningNotebook(notebook, false)
 
+	// Adaptive memory: facts distilled from turns, injected into prompts.
+	if err := a.buildAdaptiveMemory(ws, engine, stack, cfg.Memory.Adaptive); err != nil {
+		return fmt.Errorf("adaptive memory: %w", err)
+	}
+	adaptiveRebuild := func(ac config.AdaptiveMemoryConfig) error { return a.buildAdaptiveMemory(ws, engine, nil, ac) }
+
 	// ── Scheduler ────────────────────────────────────────────────────────────
 	sched := scheduler.New(engine, loader, log, ctx)
 	agentDir := ""
@@ -396,6 +402,7 @@ func (a *App) Run(parent context.Context) error {
 	// stores, file watcher) is delegated to wireGateway.
 	srv := a.wireGateway(gatewayDeps{
 		ws:              ws,
+		adaptiveRebuild: adaptiveRebuild,
 		engine:          engine,
 		loader:          loader,
 		llmRouter:       llmRouter,

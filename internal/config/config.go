@@ -592,6 +592,62 @@ type MemoryConfig struct {
 	VectorURL  string `mapstructure:"vector_url"`
 	VectorDims int    `mapstructure:"vector_dims"` // embedding dimensions (default 768 for nomic-embed-text)
 	MaxHistory int    `mapstructure:"max_history"` // max messages to keep in hot memory
+
+	// Adaptive configures the fact-level memory that is distilled from
+	// conversations in the background and injected into prompts.
+	Adaptive AdaptiveMemoryConfig `mapstructure:"adaptive"`
+}
+
+// AdaptiveMemoryConfig selects and tunes the adaptive memory engine.
+//
+//	memory:
+//	  adaptive:
+//	    enabled: true
+//	    provider: local          # local (default, $0, on-device) | mem0
+//	    model_provider: ""       # lightweight model for extraction; "" = agent's provider
+//	    model: ""
+//	    min_confidence: 0.5
+//	    similarity_threshold: 0.85
+//	    max_prompt_facts: 5
+//	    prompt_token_budget: 50
+//	    mem0:
+//	      base_url: https://api.mem0.ai
+//	      api_key: ""            # or SOULACY_MEMORY_ADAPTIVE_MEM0_API_KEY
+//	      enable_graph: false
+//	      api_style: ""          # platform | server | "" (infer from base_url)
+type AdaptiveMemoryConfig struct {
+	Enabled             bool       `mapstructure:"enabled"`
+	Provider            string     `mapstructure:"provider"`
+	ModelProvider       string     `mapstructure:"model_provider"`
+	Model               string     `mapstructure:"model"`
+	MinConfidence       float64    `mapstructure:"min_confidence"`
+	SimilarityThreshold float64    `mapstructure:"similarity_threshold"`
+	MaxPromptFacts      int        `mapstructure:"max_prompt_facts"`
+	PromptTokenBudget   int        `mapstructure:"prompt_token_budget"`
+	Mem0                Mem0Config `mapstructure:"mem0"`
+}
+
+// Mem0Config configures the optional external Mem0 provider.
+type Mem0Config struct {
+	BaseURL     string `mapstructure:"base_url"`
+	APIKey      string `mapstructure:"api_key"`
+	EnableGraph bool   `mapstructure:"enable_graph"`
+	APIStyle    string `mapstructure:"api_style"`
+}
+
+// Mem0Configured reports whether the Mem0 provider has enough configuration
+// to be used. The hosted platform needs an API key; a self-hosted server only
+// needs a base URL.
+func (a AdaptiveMemoryConfig) Mem0Configured() bool {
+	base := strings.TrimSpace(a.Mem0.BaseURL)
+	key := strings.TrimSpace(a.Mem0.APIKey)
+	if base == "" {
+		return key != ""
+	}
+	if strings.Contains(base, "mem0.ai") {
+		return key != ""
+	}
+	return true
 }
 
 // StorageConfig selects the durable event-log and memory-archive backend.
@@ -1022,6 +1078,18 @@ func Load(cfgPath string) (*Config, string, error) {
 	v.SetDefault("memory.max_history", 50)
 	v.SetDefault("memory.vector_db", "")
 	v.SetDefault("memory.vector_dims", 768)
+	v.SetDefault("memory.adaptive.enabled", true)
+	v.SetDefault("memory.adaptive.provider", "local")
+	v.SetDefault("memory.adaptive.model_provider", "")
+	v.SetDefault("memory.adaptive.model", "")
+	v.SetDefault("memory.adaptive.min_confidence", 0.5)
+	v.SetDefault("memory.adaptive.similarity_threshold", 0.85)
+	v.SetDefault("memory.adaptive.max_prompt_facts", 5)
+	v.SetDefault("memory.adaptive.prompt_token_budget", 50)
+	v.SetDefault("memory.adaptive.mem0.base_url", "")
+	v.SetDefault("memory.adaptive.mem0.api_key", "")
+	v.SetDefault("memory.adaptive.mem0.enable_graph", false)
+	v.SetDefault("memory.adaptive.mem0.api_style", "")
 	v.SetDefault("storage.backend", "sqlite")
 	v.SetDefault("storage.postgres_dsn", "")
 	v.SetDefault("storage.postgres_log_dir", "")

@@ -89,6 +89,7 @@ import (
 type Server struct {
 	autopilotStore   *autopilot.Store
 	undoStore        *safeundo.Store
+	adaptiveRebuild  AdaptiveMemoryRebuilder
 	autopilotMu      sync.Mutex
 	autopilotGoals   map[string]context.CancelFunc
 	autopilotWG      sync.WaitGroup
@@ -829,6 +830,9 @@ func (s *Server) buildApp() *fiber.App {
 	api.Post("/agents/:id/schedule-output/test", s.rbacAgentMW(rbac.ActionWrite), s.handleTestScheduledOutput)
 	api.Post("/agents/:id/clone", s.rbacAgentMW(rbac.ActionWrite), s.handleCloneAgent)
 	api.Get("/agents/:id/actions", s.rbacAgentMW(rbac.ActionRead), s.handleAgentActions)
+
+	// Adaptive memory: user-scoped facts (Story E30)
+	s.registerAdaptiveMemoryRoutes(api)
 
 	// Session memory (existing)
 	api.Get("/memory/:agent_id", s.rbacAgentFromMW(rbac.ResourceMemory, rbac.ActionRead, rbac.AgentIDSource{PathParam: "agent_id"}), s.handleListMemory)

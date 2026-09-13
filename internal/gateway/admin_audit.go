@@ -190,6 +190,9 @@ func configPatchSections(p PatchableConfig) []string {
 	if p.UI != nil {
 		sections = append(sections, "ui")
 	}
+	if p.Memory != nil {
+		sections = append(sections, "memory")
+	}
 	if p.Executor != nil {
 		sections = append(sections, "executor")
 	}

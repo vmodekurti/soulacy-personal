@@ -468,6 +468,7 @@ func (a *App) wireVector(archive *memory.SQLiteArchive, llmRouter *llm.Router) (
 	}
 	rawEmbedder = llm.NewGovernedEmbedder(rawEmbedder, llmRouter)
 	memEmbedder := &llmEmbedAdapter{inner: rawEmbedder, model: embedModel}
+	a.memEmbedder = memEmbedder
 
 	dims := cfg.Vector.Dims
 	if dims <= 0 {

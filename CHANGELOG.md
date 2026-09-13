@@ -6,6 +6,20 @@ to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Adaptive memory: durable, user-scoped facts (preferences, identity,
+  constraints, entities) are distilled from each conversation turn in the
+  background, reconciled so newer facts supersede stale ones with an audit
+  trail, and injected into the system prompt under `### 🧠 MEMORY &
+  PREFERENCES` within a 50-token budget. Hybrid keyword + embedding recall,
+  strict (workspace, owner, agent) isolation, per-agent `memory.adaptive`
+  opt-out, `/api/v1/memory/facts` management API, and a "What it remembers"
+  tab on the Learning page with edit, add, delete, export, and purge.
+- Pluggable memory provider: `memory.adaptive.provider: mem0` swaps the
+  built-in engine for a hosted or self-hosted Mem0 service, hot-applied from
+  Config → Adaptive memory, with automatic fallback to the local engine when
+  the provider is unconfigured.
+
 ### Changed
 - Cloud one-click deployments: the release workflow now publishes
   version-pinned CloudFormation and ARM templates to the public deployment
