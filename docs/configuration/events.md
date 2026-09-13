@@ -31,7 +31,7 @@ Three ways to consume events:
 or null. New event types and fields may be added at any time; consumers
 **must ignore unknown types and fields**. Renaming or removing a field
 bumps `schema`, with the previous schema dual-published for at least two
-releases. Full contract: [`docs/EVENTS.md`](../EVENTS.md).
+releases. Full contract: [`docs/EVENTS.md`](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/EVENTS.md).
 
 ## Event types
 
@@ -133,6 +133,6 @@ dropped for that client rather than stalling the agent engine.
 
 ## See also
 
-- [`docs/EVENTS.md`](../EVENTS.md) — the full schema contract
+- [`docs/EVENTS.md`](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/EVENTS.md) — the full schema contract
 - [Storage & backends](storage.md) — queue backend configuration
 - [API overview](../api/index.md) — REST routes including `/ws/events`

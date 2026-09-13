@@ -130,4 +130,4 @@ export SOULACY_SERVER_PORT=18789          # overrides server.port
 
 - [Configuration overview](index.md) — every top-level config key
 - [Storage & backends](storage.md) — what lives in `data/`
-- In-repo spec: [`docs/WORKSPACE.md`](../WORKSPACE.md)
+- In-repo spec: [`docs/WORKSPACE.md`](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/WORKSPACE.md)

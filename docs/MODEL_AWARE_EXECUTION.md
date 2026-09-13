@@ -107,7 +107,8 @@ must explicitly forward these optional interfaces if they want to preserve them.
 
 ## Validation and limits
 
-See [validation results](MODEL_AWARE_VALIDATION_2026-09-12.md). Tests include real
-local-model inference, but this is not a general model-quality benchmark or a
-proof that every task, provider or device works. Cloud deployment and physical
-iPhone validation remain separate release gates when access is unavailable.
+Use the [validation checklist](contributing/documentation.md) and the
+repository's model-preparation unit/integration tests when making changes.
+An isolated or local-model test is not a general model-quality benchmark or
+proof that every provider/task/device works. Real deployment and physical
+iPhone checks remain distinct release gates; private receipts are not published here.

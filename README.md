@@ -1,5 +1,7 @@
 # Soulacy
 
+<img src="docs/assets/living-core-blue-v1.png" width="64" height="64" alt="Soulacy Blue Living Core logo" />
+
 **One binary. YAML agents. Runs anywhere — no cloud required.**
 
 Soulacy is a **local-first agent operating system**. Write an agent in a single YAML file (or generate one from plain English in Studio), point it at any LLM (Ollama, OpenAI, Anthropic, Groq, or anything OpenAI-compatible), and run it from a terminal or a $5 VPS with no infrastructure setup, no Docker orchestration, and no cloud dependency.
@@ -8,7 +10,26 @@ You get more than a runtime: Studio for authoring and healing agents, Channels f
 
 Think of it as Ollama — but for agents.
 
+## Start with a useful, checkable task
+
+- [First successful run](https://docs.soulacy.io/getting-started/quickstart/):
+  connect one model, summarize supplied notes, and test missing information.
+- [Connect your iPhone](https://docs.soulacy.io/getting-started/iphone/): pairing,
+  network checks, keyboard controls, permissions, and notification troubleshooting.
+- [Six worked use cases](https://docs.soulacy.io/use-cases/): notes, handbook Q&A,
+  a phone briefing, reviewed learning, Safe Undo, and a checked agent release.
+- [Find the failing step](https://docs.soulacy.io/troubleshooting/first-checks/):
+  distinguish networking, login, model, tool, delivery, and uncertain-write problems.
+
+Guides track `main`; an installed gateway or iOS build may lag the source.
+Safe Undo requires compatible configured resources, learning requires review,
+and verification means the configured checks passed—not that every fact is true.
+
 ## Personal edition
+
+Soulacy Commercial is the separate SaaS offering. This repository and its
+installation instructions cover self-hosted Personal, not SaaS account setup.
+See [the edition guide](https://docs.soulacy.io/editions/).
 
 This public repository is the complete Soulacy Personal edition. It is
 Apache-2.0 licensed, self-hosted, and has no dependency on the private Teams or
@@ -39,7 +60,7 @@ Apache-2.0 licensed; the project name and logos follow the separate
 
 | | Soulacy | n8n / Flowise / Dify | LangGraph / AutoGen |
 |---|---|---|---|
-| **Deploy** | Single binary, zero deps | Docker + Postgres + Redis | Python package |
+| **Deploy** | Gateway with embedded UI; [requirements vary](docs/deployment/footprint.md) | Docker + Postgres + Redis | Python package |
 | **Config** | One YAML file per agent | Visual editor (brittle exports) | Code |
 | **Runs on** | Laptop, VPS, Raspberry Pi | Needs a server stack | Dev machine |
 | **LLM** | Any — local or cloud | Mostly cloud | Any |
@@ -131,7 +152,7 @@ Useful flags: `--host-port`, `--container-port`, `--name`, `--data-dir`,
 `--api-key`, `--no-build`, `--yes`. Run `./scripts/docker-deploy.sh --help` for the
 full list.
 
-### Docker — lightweight (SQLite, zero dependencies)
+### Docker — embedded storage (no separate database service)
 
 Build the image, then run it. Note two requirements: bind to `0.0.0.0` inside
 the container (otherwise the published port can't reach the gateway), and choose

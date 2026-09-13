@@ -9,7 +9,29 @@ documentation with configuration and API details.
     Run `sy version` before relying on a feature, and follow the
     [upgrade guide](deployment/upgrades.md) when updating an existing host.
 
-## Persistent semantic agent memory
+## New: reviewed autonomy and practical guides
+
+Before the earlier memory/runtime work below, the current source also adds:
+
+- **Blue Living Core branding** across the workspace, marketing page, docs,
+  favicon, and PWA/notification assets.
+- **[Private Learning Notebook](using/learning-notebook.md):** teach a bounded
+  lesson, inspect its sources, approve it, and disable it when it stops helping.
+- **[Model preparation](using/model-preparation.md):** inspect available model
+  capabilities while preserving your chosen goal, permissions, and budget.
+- **[Verified Autopilot](using/autopilot.md):** explicit run checks, candidate
+  releases, staged promotion, bounded goal teams, and supervised recovery.
+- **[Safe Undo](use-cases/safe-undo-handoff.md):** review and reverse supported
+  conditional changes without treating arbitrary side effects as reversible.
+- **[iPhone setup](getting-started/iphone.md)** and **[published files](using/published-files.md)**
+  guides, with clear gateway configuration and permission prerequisites.
+
+Start with the [six worked use cases](use-cases/index.md). Each has sample input,
+expected results, edge cases, and recovery instructions. Existing data is not
+automatically migrated into a new learning mechanism. “Regression checks” in
+Autopilot is distinct from private Notebook lessons.
+
+## Earlier: persistent semantic agent memory
 
 Agent semantic memory now uses Soulacy's embedded **sqlite-vec** backend in
 production instead of an in-process vector store. Semantic entries survive a

@@ -160,5 +160,6 @@ automatic skill consolidation, Honcho integration, FTS5 recall, self-installed
 scripts, or model-weight training was added. The normal agent loop uses its
 existing model/tool budget; Teach makes one governed call using the agent's
 provider, model, and data classification. Extraction quality still depends on
-that model. See the accompanying validation report for measured results and
-remaining release gates.
+that model. Follow the [worked preference exercise](use-cases/teach-a-preference.md)
+to evaluate your own agent, and the [validation checklist](contributing/documentation.md)
+when changing the implementation. Private operational receipts are not public documentation.

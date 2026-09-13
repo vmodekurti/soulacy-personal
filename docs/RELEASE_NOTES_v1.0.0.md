@@ -102,7 +102,9 @@ and non-loopback binds require an API key or explicit
 
 ## What Soulacy is NOT (positioning honesty)
 
-- **Not a hosted SaaS.** No `soulacy.cloud`. Ever.
+- **Edition clarification (September 2026):** Personal is self-hosted;
+  Soulacy Commercial is SaaS. The original blanket “not hosted” positioning
+  is superseded. See [the edition guide](editions.md).
 - **Not a LangGraph replacement.** If you need explicit state-machine graphs
   with checkpoints and resumable execution, use LangGraph.
 - **Not a personal assistant.** Soulacy runs headless and delivers to

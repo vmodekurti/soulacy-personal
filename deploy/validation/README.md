@@ -63,5 +63,7 @@ start times, health, and running states afterward. Remove only the temporary
 resources created for the test. Never apply the fixture configuration to a live
 workspace.
 
-See [the validation report](../../docs/AUTOPILOT_VALIDATION_2026-09-12.md) for
-actual results, artifact identity, cleanup, and remaining release gates.
+Record results, artifact identity, cleanup, and remaining release gates in a
+private operational report. Do not commit production identifiers or credentials.
+See the [documentation and validation checklist](../../docs/contributing/documentation.md)
+for the public contribution workflow.

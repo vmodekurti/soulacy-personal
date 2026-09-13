@@ -147,4 +147,4 @@ Flavored binaries can ship additional registry types (S3, IPFS, your
 artifact store) by registering a factory with the SDK and selecting it via
 `type:` in a `registries:` entry — see
 [Custom Distributions](custom-distributions.md). The full provider
-contract lives in [the registry spec](../PACKAGE_REGISTRIES.md).
+contract lives in [the registry spec](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/PACKAGE_REGISTRIES.md).

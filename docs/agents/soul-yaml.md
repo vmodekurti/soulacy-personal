@@ -252,7 +252,19 @@ Use `notify_on_failure` to route errors somewhere a human will see them.
 Channel-triggered runs reply with errors automatically; cron and manual runs
 fail silently unless this block is set.
 
-## Security and Runtime
+## Reviewed learning and mission contracts
+
+`learning.enabled` enables the private Notebook; `learning.auto_propose` allows
+proposals during eligible runs, not automatic approval. Follow the
+[Notebook guide](../using/learning-notebook.md) and [exact learning reference](../LEARNING_NOTEBOOK.md).
+
+`mission` holds a goal, typed acceptance checks, and bounded runtime limits.
+An absent `allowed_tools` preserves existing policy; an empty list denies all
+tools. See the [mission example and release controls](../using/autopilot.md).
+Model preparation uses the selected saved model without weakening the mission;
+see [model preparation](../using/model-preparation.md).
+
+## Security and runtime controls
 
 `security.passphrase` requires every new session to present the exact string
 before the agent answers anything; it is enforced in Go before the LLM runs,
