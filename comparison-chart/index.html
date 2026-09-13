@@ -3669,6 +3669,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#the-simple-version" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The simple version
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#at-a-glance" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4723,6 +4734,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#the-simple-version" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The simple version
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#at-a-glance" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4856,6 +4878,42 @@ page compares their operating models rather than declaring a universal winner.</
 <p><strong>Research date:</strong> September 10, 2026. Claims below are linked to first-party
 documentation or repositories. Product capabilities and packaging change, so
 follow the links before making a purchasing or architecture decision.</p>
+<h2 id="the-simple-version">The simple version<a class="headerlink" href="#the-simple-version" title="Permanent link">&para;</a></h2>
+<p>Frameworks such as LangChain and LangGraph give you a <strong>library</strong> to build an
+agent application around. Soulacy gives you the <strong>running system</strong>: the agent
+runtime, login and web UI, phone and chat channels, schedules, and safety
+checks, in one binary you own.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Frameworks (LangChain, LangGraph)</th>
+<th>Soulacy</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>What you get</td>
+<td>Code libraries; you build hosting, sign-in, UI, integrations, and scheduling</td>
+<td>A gateway that already has them, so an agent is usable from your phone or Slack the day you write it</td>
+</tr>
+<tr>
+<td>How you author</td>
+<td>Python or JavaScript code that defines a graph</td>
+<td>One YAML file you can review in a pull request and roll back; Studio can write it from plain English</td>
+</tr>
+<tr>
+<td>How it stays safe</td>
+<td>Approval and interrupt steps you design and add</td>
+<td>Enforced by the runtime: confirmations for risky tools, the intent gate, a sandbox for tool code, and Safe Undo</td>
+</tr>
+</tbody>
+</table>
+<p>Pick LangGraph when you are embedding agents inside a product you are building
+and want full control of the control flow in code. Pick Soulacy when you want
+agents that run, on hardware you control, without building the surrounding
+application. The rest of this page covers more products and the operating
+details behind that summary.</p>
 <h2 id="at-a-glance">At a glance<a class="headerlink" href="#at-a-glance" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
