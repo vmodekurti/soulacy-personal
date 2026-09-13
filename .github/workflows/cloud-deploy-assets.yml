@@ -29,3 +29,17 @@ jobs:
         run: |
           python -m pip install cfn-lint==1.46.0
           cfn-lint deploy/aws/cloudformation.yaml
+
+      - name: Validate ARM template (arm-ttk)
+        shell: pwsh
+        run: |
+          git clone --quiet https://github.com/Azure/arm-ttk.git "$env:RUNNER_TEMP/arm-ttk"
+          git -C "$env:RUNNER_TEMP/arm-ttk" checkout --quiet 0ec9a41a4503e970a0ec8efb0cd08415cc172175
+          Import-Module "$env:RUNNER_TEMP/arm-ttk/arm-ttk/arm-ttk.psd1"
+          $results = Test-AzTemplate -TemplatePath deploy/azure -File azuredeploy.json
+          $results | Format-Table -AutoSize Name, Passed, Errors | Out-String -Width 200 | Write-Output
+          $failed = @($results | Where-Object { -not $_.Passed })
+          if ($failed.Count -gt 0) {
+            $failed | ForEach-Object { Write-Output "::error::arm-ttk failed: $($_.Name) - $($_.Errors -join '; ')" }
+            exit 1
+          }

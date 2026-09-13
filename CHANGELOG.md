@@ -6,7 +6,18 @@ to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-_Nothing yet — post-v1.0.0 work lands here._
+### Changed
+- Cloud one-click deployments: the release workflow now publishes
+  version-pinned CloudFormation and ARM templates to the public deployment
+  bucket, so the website buttons pair a tagged image with the matching
+  bootstrap instead of `latest` plus `main`. The Azure button reads the
+  published copy.
+- Cloud bootstrap readiness now requires the gateway to answer HTTP before the
+  stack reports complete.
+- Azure template: local admin password is generated per deployment with
+  `newGuid()` instead of a derivable value; admin username is a parameter;
+  default VM size is `Standard_B2s_v2` with B-series options.
+- CI validates the ARM template with `arm-ttk`.
 
 ## [1.0.0] - 2026-07-17
 

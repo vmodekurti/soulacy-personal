@@ -76,12 +76,15 @@ cd "${SOULACY_INSTALL_DIR}"
 docker compose pull
 docker compose up -d
 
-for _ in $(seq 1 90); do
-  if docker compose exec -T soulacy /usr/local/bin/soulacy --version >/dev/null 2>&1; then
+# Readiness means the gateway answers HTTP on its private port, not merely that
+# the binary starts. Caddy proxies to this same address, so a success here is
+# the same condition the public HTTPS endpoint depends on.
+for _ in $(seq 1 120); do
+  if docker compose exec -T soulacy curl --fail --silent --show-error --max-time 5 http://127.0.0.1:18789/ >/dev/null 2>&1; then
     touch "${SOULACY_INSTALL_DIR}/READY"
     exit 0
   fi
-  sleep 2
+  sleep 3
 done
 
 docker compose ps >&2
