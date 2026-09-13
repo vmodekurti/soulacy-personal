@@ -349,7 +349,7 @@ func TestContainsCI(t *testing.T) {
 		{"hello world", "WORLD", true},
 		{"hello world", "xyz", false},
 		{"", "x", false},
-		{"hello", "", true},  // empty substr always matches
+		{"hello", "", true}, // empty substr always matches
 		{"HELLO", "hello", true},
 		{"abc", "abcd", false}, // substr longer than string
 	}

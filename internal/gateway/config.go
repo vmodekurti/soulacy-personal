@@ -108,6 +108,23 @@ func (s *Server) safeConfigView() fiber.Map {
 			"vector_db":   cfg.Memory.VectorDB,
 			"vector_url":  cfg.Memory.VectorURL,
 			"max_history": cfg.Memory.MaxHistory,
+			"adaptive": fiber.Map{
+				"enabled":              cfg.Memory.Adaptive.Enabled,
+				"provider":             cfg.Memory.Adaptive.Provider,
+				"model_provider":       cfg.Memory.Adaptive.ModelProvider,
+				"model":                cfg.Memory.Adaptive.Model,
+				"min_confidence":       cfg.Memory.Adaptive.MinConfidence,
+				"similarity_threshold": cfg.Memory.Adaptive.SimilarityThreshold,
+				"max_prompt_facts":     cfg.Memory.Adaptive.MaxPromptFacts,
+				"prompt_token_budget":  cfg.Memory.Adaptive.PromptTokenBudget,
+				"mem0": fiber.Map{
+					"base_url":     cfg.Memory.Adaptive.Mem0.BaseURL,
+					"api_key":      maskSecret(cfg.Memory.Adaptive.Mem0.APIKey),
+					"enable_graph": cfg.Memory.Adaptive.Mem0.EnableGraph,
+					"api_style":    cfg.Memory.Adaptive.Mem0.APIStyle,
+					"configured":   cfg.Memory.Adaptive.Mem0Configured(),
+				},
+			},
 		},
 		"llm": fiber.Map{
 			"default_provider":  cfg.LLM.DefaultProvider,
@@ -429,6 +446,30 @@ type PatchableConfig struct {
 		WalkthroughStep    *int  `json:"walkthrough_step" yaml:"walkthrough_step"`
 		WalkthroughVersion *int  `json:"walkthrough_version" yaml:"walkthrough_version"`
 	} `json:"ui" yaml:"ui"`
+
+	// Memory.adaptive is hot-applied: the provider is rebuilt in place.
+	Memory *struct {
+		Adaptive *PatchableAdaptiveMemory `json:"adaptive" yaml:"adaptive"`
+	} `json:"memory" yaml:"memory"`
+}
+
+// PatchableAdaptiveMemory mirrors config.AdaptiveMemoryConfig with pointer
+// fields so "explicitly false" survives the round trip.
+type PatchableAdaptiveMemory struct {
+	Enabled             *bool    `json:"enabled" yaml:"enabled"`
+	Provider            string   `json:"provider" yaml:"provider"`
+	ModelProvider       *string  `json:"model_provider" yaml:"model_provider"`
+	Model               *string  `json:"model" yaml:"model"`
+	MinConfidence       *float64 `json:"min_confidence" yaml:"min_confidence"`
+	SimilarityThreshold *float64 `json:"similarity_threshold" yaml:"similarity_threshold"`
+	MaxPromptFacts      *int     `json:"max_prompt_facts" yaml:"max_prompt_facts"`
+	PromptTokenBudget   *int     `json:"prompt_token_budget" yaml:"prompt_token_budget"`
+	Mem0                *struct {
+		BaseURL     *string `json:"base_url" yaml:"base_url"`
+		APIKey      *string `json:"api_key" yaml:"api_key"`
+		EnableGraph *bool   `json:"enable_graph" yaml:"enable_graph"`
+		APIStyle    *string `json:"api_style" yaml:"api_style"`
+	} `json:"mem0" yaml:"mem0"`
 }
 
 // handlePatchConfig merges partial config updates into config.yaml on disk.
@@ -525,6 +566,17 @@ func (s *Server) handlePatchConfig(c *fiber.Ctx) error {
 		}
 	}
 
+	// Adaptive memory is rebuilt in place so a provider switch (local ⇄ mem0)
+	// or a tuning change applies to the next turn without a restart.
+	if patch.Memory != nil && patch.Memory.Adaptive != nil && s.cfg != nil {
+		s.applyAdaptiveMemoryPatch(patch.Memory.Adaptive)
+		if s.adaptiveRebuild != nil {
+			if err := s.adaptiveRebuild(s.cfg.Memory.Adaptive); err != nil {
+				s.log.Warn("adaptive memory hot-apply failed", zap.Error(err))
+			}
+		}
+	}
+
 	s.log.Info("config updated via API", zap.String("path", s.cfgPath))
 	s.recordAdminAudit(c, "config.patch", "config", s.cfgPath, "ok", map[string]any{
 		"sections": configPatchSections(patch),
@@ -554,6 +606,50 @@ func (s *Server) hotApplyRunBudgets() {
 			MaxLLMCalls: s.cfg.Runtime.MaxBudget.MaxLLMCalls,
 		},
 	)
+}
+
+// applyAdaptiveMemoryPatch copies patched memory.adaptive fields into the
+// live config so the rebuilder and safeConfigView see the new values.
+func (s *Server) applyAdaptiveMemoryPatch(a *PatchableAdaptiveMemory) {
+	ac := &s.cfg.Memory.Adaptive
+	if a.Enabled != nil {
+		ac.Enabled = *a.Enabled
+	}
+	if a.Provider != "" {
+		ac.Provider = a.Provider
+	}
+	if a.ModelProvider != nil {
+		ac.ModelProvider = *a.ModelProvider
+	}
+	if a.Model != nil {
+		ac.Model = *a.Model
+	}
+	if a.MinConfidence != nil {
+		ac.MinConfidence = *a.MinConfidence
+	}
+	if a.SimilarityThreshold != nil {
+		ac.SimilarityThreshold = *a.SimilarityThreshold
+	}
+	if a.MaxPromptFacts != nil {
+		ac.MaxPromptFacts = *a.MaxPromptFacts
+	}
+	if a.PromptTokenBudget != nil {
+		ac.PromptTokenBudget = *a.PromptTokenBudget
+	}
+	if a.Mem0 != nil {
+		if a.Mem0.BaseURL != nil {
+			ac.Mem0.BaseURL = *a.Mem0.BaseURL
+		}
+		if a.Mem0.APIKey != nil && *a.Mem0.APIKey != "***" {
+			ac.Mem0.APIKey = *a.Mem0.APIKey
+		}
+		if a.Mem0.EnableGraph != nil {
+			ac.Mem0.EnableGraph = *a.Mem0.EnableGraph
+		}
+		if a.Mem0.APIStyle != nil {
+			ac.Mem0.APIStyle = *a.Mem0.APIStyle
+		}
+	}
 }
 
 // readRawConfig parses a YAML file into a generic map.
@@ -588,6 +684,11 @@ func (s *Server) ReloadConfig() error {
 
 	s.cfg = newCfg
 	s.hotApplyRunBudgets()
+	if s.adaptiveRebuild != nil {
+		if err := s.adaptiveRebuild(newCfg.Memory.Adaptive); err != nil {
+			s.log.Warn("adaptive memory reload failed", zap.Error(err))
+		}
+	}
 
 	// Hot-reload MCP servers
 	if s.mcp != nil {
@@ -648,6 +749,49 @@ func applyPatch(dst map[string]any, patch PatchableConfig) {
 		}
 		if patch.Server.APIKey != "" && patch.Server.APIKey != "***" {
 			srv["api_key"] = patch.Server.APIKey
+		}
+	}
+	if patch.Memory != nil && patch.Memory.Adaptive != nil {
+		ad := getOrCreateMap(getOrCreateMap(dst, "memory"), "adaptive")
+		a := patch.Memory.Adaptive
+		if a.Enabled != nil {
+			ad["enabled"] = *a.Enabled
+		}
+		if a.Provider != "" {
+			ad["provider"] = a.Provider
+		}
+		if a.ModelProvider != nil {
+			ad["model_provider"] = *a.ModelProvider
+		}
+		if a.Model != nil {
+			ad["model"] = *a.Model
+		}
+		if a.MinConfidence != nil {
+			ad["min_confidence"] = *a.MinConfidence
+		}
+		if a.SimilarityThreshold != nil {
+			ad["similarity_threshold"] = *a.SimilarityThreshold
+		}
+		if a.MaxPromptFacts != nil {
+			ad["max_prompt_facts"] = *a.MaxPromptFacts
+		}
+		if a.PromptTokenBudget != nil {
+			ad["prompt_token_budget"] = *a.PromptTokenBudget
+		}
+		if a.Mem0 != nil {
+			m0 := getOrCreateMap(ad, "mem0")
+			if a.Mem0.BaseURL != nil {
+				m0["base_url"] = *a.Mem0.BaseURL
+			}
+			if a.Mem0.APIKey != nil && *a.Mem0.APIKey != "***" {
+				m0["api_key"] = *a.Mem0.APIKey
+			}
+			if a.Mem0.EnableGraph != nil {
+				m0["enable_graph"] = *a.Mem0.EnableGraph
+			}
+			if a.Mem0.APIStyle != nil {
+				m0["api_style"] = *a.Mem0.APIStyle
+			}
 		}
 	}
 	if patch.UI != nil {

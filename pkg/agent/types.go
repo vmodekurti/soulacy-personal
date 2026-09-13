@@ -26,6 +26,10 @@ type MemoryPolicy struct {
 	ReadScopes  []string `yaml:"read_scopes"  json:"read_scopes"`
 	WriteScopes []string `yaml:"write_scopes" json:"write_scopes"`
 	MaxTokens   int      `yaml:"max_tokens"   json:"max_tokens"`
+	// Adaptive opts this agent out of (false) or into (true) adaptive memory:
+	// background fact extraction and the MEMORY & PREFERENCES prompt block.
+	// nil follows the workspace default (memory.adaptive.enabled).
+	Adaptive *bool `yaml:"adaptive,omitempty" json:"adaptive,omitempty"`
 }
 
 // ReasoningConfig configures the multi-step reasoning loop for an agent (CFG-01).
@@ -825,6 +829,10 @@ func (d *Definition) Clone() *Definition {
 		MaxTokens:   d.Memory.MaxTokens,
 		ReadScopes:  cloneStrSlice(d.Memory.ReadScopes),
 		WriteScopes: cloneStrSlice(d.Memory.WriteScopes),
+	}
+	if d.Memory.Adaptive != nil {
+		v := *d.Memory.Adaptive
+		cp.Memory.Adaptive = &v
 	}
 
 	// LLM — clone slice/map sub-fields.

@@ -187,6 +187,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		return message.Message{}, fmt.Errorf("engine: agent %q is disabled", msg.AgentID)
 	}
 	ctx = e.startLearningRun(ctx, def, msg)
+	e.startAdaptiveMemory(ctx, def, msg)
 	if def.ID == SystemAgentID && msg.Channel != "http" && msg.Channel != "internal" {
 		return message.Message{}, fmt.Errorf("engine: system agent is only available on http/internal channel")
 	}
@@ -1187,6 +1188,8 @@ func (e *Engine) finalizeReply(ctx context.Context, def *agent.Definition, sess 
 		Payload: trimMessageForEvent(reply), Timestamp: time.Now().UTC(),
 	})
 
+	// Adaptive memory: background fact extraction; never awaited (latency-neutral).
+	e.queueAdaptiveMemory(ctx, def, msg, flattenParts(msg.Parts), finalContent)
 	// Persist user + assistant turns to the conversation history store.
 	if e.historyStore != nil {
 		userContent := flattenParts(msg.Parts)

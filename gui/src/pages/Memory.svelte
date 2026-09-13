@@ -1,6 +1,7 @@
 <script>
   import TourButton from '../lib/TourButton.svelte'
   import LearningNotebook from '../lib/LearningNotebook.svelte'
+  import AdaptiveMemory from '../lib/AdaptiveMemory.svelte'
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
   import { diffLines, diffStats, sourceBadge } from '../lib/rulediff.js'
@@ -8,7 +9,7 @@
   // ── State ──────────────────────────────────────────────────────────────────
   let agentStats   = []
   let selectedID   = ''
-  let activeTab    = 'notebook'
+  let activeTab    = 'facts'
 
   // Episodic
   let episodic     = []
@@ -416,7 +417,7 @@
     <div class="title-row">
       <span class="page-icon">🧠</span>
       <h1>Learning</h1>
-      <span class="subtitle">Memory · Procedures · Review queue</span>
+      <span class="subtitle">Adaptive memory · Procedures · Review queue</span>
     </div>
     <div class="hdr-actions">
       <select bind:value={selectedID} class="agent-select">
@@ -430,7 +431,7 @@
         <TourButton />
     </div>
 
-  {#if !brainEnabled && activeTab !== 'notebook'}
+  {#if !brainEnabled && activeTab !== 'notebook' && activeTab !== 'facts'}
     <div class="banner warn">
       ⚠ Learning memory is not enabled. Set <code>SOULACY_MEMORY_DIR</code> and restart Soulacy.
     </div>
@@ -478,6 +479,7 @@
 
   <!-- Tabs -->
   <div class="tabs">
+    <button class="tab {activeTab==='facts'?'active':''}" on:click={() => activeTab='facts'}>🧠 What it remembers</button>
     <button class="tab {activeTab==='notebook'?'active':''}" on:click={() => activeTab='notebook'}>Lessons</button>
     <button class="tab {activeTab==='episodic'?'active':''}" on:click={() => activeTab='episodic'}>
       🕐 Episodic {#if episodic.length}<span class="tab-count">{episodic.length}</span>{/if}
@@ -494,6 +496,7 @@
   </div>
 
   <!-- ══ EPISODIC ══════════════════════════════════════════════════════════ -->
+  {#if activeTab === 'facts'}{#key selectedID}<AdaptiveMemory agentID={selectedID} />{/key}{/if}
   {#if activeTab === 'notebook' && selectedID}{#key selectedID}<LearningNotebook agentID={selectedID} />{/key}{/if}
   {#if activeTab === 'episodic'}
     <div class="tab-toolbar">

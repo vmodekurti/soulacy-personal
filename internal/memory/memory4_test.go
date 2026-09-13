@@ -426,7 +426,7 @@ func TestVectorStoreWriteDimMismatch(t *testing.T) {
 	// directVS bypasses ensureSchema (which requires sqlite-vec) to let us test
 	// the Write-level dim check without needing the full extension.
 	vs := &VectorStore{
-		db:       nil,      // not needed — error is surfaced before any DB call
+		db:       nil, // not needed — error is surfaced before any DB call
 		embedder: &stubEmbedder{dims: 2, vec: []float32{0.1, 0.2}},
 		dims:     4, // mismatch: embedder produces 2, VectorStore expects 4
 	}

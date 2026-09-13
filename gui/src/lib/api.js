@@ -377,6 +377,28 @@ export const api = {
 
   memory: {
     list: (agentId) => apiFetch(`/memory/${agentId}`),
+    // Adaptive memory: user-scoped facts distilled from conversations.
+    facts: {
+      status: (agentId = '') => apiFetch(`/memory/facts/status${agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ''}`),
+      list: ({ agentId = '', status = '', q = '', owner = '' } = {}) => {
+        const p = new URLSearchParams()
+        if (agentId) p.set('agent_id', agentId)
+        if (status) p.set('status', status)
+        if (q) p.set('q', q)
+        if (owner) p.set('owner', owner)
+        const qs = p.toString()
+        return apiFetch(`/memory/facts${qs ? '?' + qs : ''}`)
+      },
+      add: (agentId, content, category) =>
+        apiFetch('/memory/facts', { method: 'POST', body: JSON.stringify({ agent_id: agentId, content, category }) }),
+      update: (id, agentId, content, category) =>
+        apiFetch(`/memory/facts/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ agent_id: agentId, content, category }) }),
+      remove: (id, agentId = '') =>
+        apiFetch(`/memory/facts/${encodeURIComponent(id)}${agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ''}`, { method: 'DELETE' }),
+      purge: (agentId = '') =>
+        apiFetch(`/memory/facts?confirm=true${agentId ? `&agent_id=${encodeURIComponent(agentId)}` : ''}`, { method: 'DELETE' }),
+      exportPath: (agentId = '') => `/api/v1/memory/facts/export${agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ''}`,
+    },
   },
 
   proactive: {

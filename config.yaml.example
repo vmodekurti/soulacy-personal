@@ -173,6 +173,24 @@ mcp:
 memory:
     max_history: 50
 
+    # Adaptive memory: durable facts about each signed-in user, distilled from
+    # conversations in the background, reconciled so newer facts replace stale
+    # ones, and injected into prompts under "### 🧠 MEMORY & PREFERENCES".
+    # Runs locally at no extra cost. Manage facts on Learning → What it remembers.
+    adaptive:
+        enabled: true
+        provider: local            # local (default) | mem0 (external provider)
+        model_provider: ""         # small model for extraction; "" = agent's provider
+        model: ""
+        min_confidence: 0.5
+        similarity_threshold: 0.85 # above this, a new fact is checked against an old one
+        max_prompt_facts: 5
+        prompt_token_budget: 50
+        # mem0:
+        #     base_url: https://api.mem0.ai   # or a self-hosted server URL
+        #     api_key: ""                     # SOULACY_MEMORY_ADAPTIVE_MEM0_API_KEY
+        #     enable_graph: false
+
 # ── Runtime ───────────────────────────────────────────────────────────────────
 runtime:
     default_max_turns: 30
