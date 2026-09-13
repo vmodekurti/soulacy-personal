@@ -16,6 +16,7 @@ import (
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/mcp"
 	"github.com/soulacy/soulacy/internal/voice"
+	"github.com/soulacy/soulacy/pkg/agent"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 )
@@ -497,6 +498,32 @@ func (s *Server) handlePatchConfig(c *fiber.Ctx) error {
 			s.cfg.Voice.AllowRemote = *patch.Voice.AllowRemote
 		}
 	}
+	// Run budgets (runtime.default_budget / runtime.max_budget) are read once
+	// at run start, so they can take effect on the next run without a restart.
+	if patch.Runtime != nil && s.cfg != nil {
+		budgetsPatched := false
+		if b := patch.Runtime.DefaultBudget; b != nil {
+			if b.MaxTokens != nil {
+				s.cfg.Runtime.DefaultBudget.MaxTokens = max(0, *b.MaxTokens)
+			}
+			if b.MaxLLMCalls != nil {
+				s.cfg.Runtime.DefaultBudget.MaxLLMCalls = max(0, *b.MaxLLMCalls)
+			}
+			budgetsPatched = true
+		}
+		if b := patch.Runtime.MaxBudget; b != nil {
+			if b.MaxTokens != nil {
+				s.cfg.Runtime.MaxBudget.MaxTokens = max(0, *b.MaxTokens)
+			}
+			if b.MaxLLMCalls != nil {
+				s.cfg.Runtime.MaxBudget.MaxLLMCalls = max(0, *b.MaxLLMCalls)
+			}
+			budgetsPatched = true
+		}
+		if budgetsPatched {
+			s.hotApplyRunBudgets()
+		}
+	}
 
 	s.log.Info("config updated via API", zap.String("path", s.cfgPath))
 	s.recordAdminAudit(c, "config.patch", "config", s.cfgPath, "ok", map[string]any{
@@ -505,9 +532,28 @@ func (s *Server) handlePatchConfig(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{
 		"ok":      true,
-		"message": "Config saved. Restart the gateway for changes to take full effect.",
+		"message": "Config saved. Run budgets apply to new runs immediately; restart the gateway for other changes to take full effect.",
 		"config":  s.safeConfigView(),
 	})
+}
+
+// hotApplyRunBudgets pushes the live run budgets into the engine. The engine
+// resolves a run's budget once at run start, so this takes effect for newly
+// started runs immediately; runs already in flight keep their original limits.
+func (s *Server) hotApplyRunBudgets() {
+	if s == nil || s.engine == nil || s.cfg == nil {
+		return
+	}
+	s.engine.SetRunBudgets(
+		agent.BudgetConfig{
+			MaxTokens:   s.cfg.Runtime.DefaultBudget.MaxTokens,
+			MaxLLMCalls: s.cfg.Runtime.DefaultBudget.MaxLLMCalls,
+		},
+		agent.BudgetConfig{
+			MaxTokens:   s.cfg.Runtime.MaxBudget.MaxTokens,
+			MaxLLMCalls: s.cfg.Runtime.MaxBudget.MaxLLMCalls,
+		},
+	)
 }
 
 // readRawConfig parses a YAML file into a generic map.
@@ -530,7 +576,7 @@ func readRawConfig(path string) (map[string]any, error) {
 }
 
 // ReloadConfig reads config.yaml from disk and applies hot-reloadable changes
-// to the running gateway (e.g. MCP servers).
+// to the running gateway (e.g. MCP servers, agent run budgets).
 func (s *Server) ReloadConfig() error {
 	if s.cfgPath == "" {
 		return nil
@@ -541,6 +587,7 @@ func (s *Server) ReloadConfig() error {
 	}
 
 	s.cfg = newCfg
+	s.hotApplyRunBudgets()
 
 	// Hot-reload MCP servers
 	if s.mcp != nil {
