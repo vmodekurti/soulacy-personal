@@ -370,11 +370,17 @@ jobs:
           path: docs/assets/screenshots/
 
   # ── Create GitHub Release with all artifacts ─────────────────────────────────
+  # The `release` environment (required reviewer) is declared only on the
+  # macOS build, which is the first job that needs the environment-scoped
+  # signing secrets. Approving it once releases the whole pipeline: this job
+  # cannot start until that approved build has produced its artifacts, so a
+  # second `environment:` here would only add a second identical approval
+  # prompt. This job needs no environment secrets (HOMEBREW_TAP_TOKEN is
+  # optional and cosign is keyless via the OIDC token).
   github-release:
     name: GitHub Release
     runs-on: ubuntu-latest
     needs: [build-linux, build-darwin, docker, gui-render-smoke]
-    environment: release
     permissions:
       contents: write
       # Required for cosign keyless (Sigstore) signing via the OIDC token.
