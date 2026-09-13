@@ -6,8 +6,14 @@ const app = readFileSync(fileURLToPath(new URL('./App.svelte', import.meta.url))
 const chat = readFileSync(fileURLToPath(new URL('./pages/Chat.svelte', import.meta.url)), 'utf8')
 const studio = readFileSync(fileURLToPath(new URL('./pages/Studio.svelte', import.meta.url)), 'utf8')
 const studioCss = readFileSync(fileURLToPath(new URL('./pages/Studio.css', import.meta.url)), 'utf8')
+const reports = readFileSync(fileURLToPath(new URL('./pages/Reports.svelte', import.meta.url)), 'utf8')
 
 describe('mobile-first application foundation', () => {
+  it('constrains reports to the flex container instead of shrink-wrapping wide tables', () => {
+    expect(reports).toMatch(/\.reports\s*\{[^}]*width:100%;[^}]*box-sizing:border-box;/)
+    expect(reports).toContain('.table-scroll { overflow-x:auto; max-width:100%; }')
+    expect(reports).toContain('Keyboard focus enables horizontal scrolling')
+  })
   it('keeps navigation reachable with a safe-area command bar and bottom tabs', () => {
     expect(app).toContain('class="mobile-tabs"')
     expect(app).toContain('aria-label="Primary navigation"')

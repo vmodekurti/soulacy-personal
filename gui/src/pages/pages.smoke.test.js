@@ -37,6 +37,7 @@ const loaders = {
   providers: () => import('./Providers.svelte'),
   secrets: () => import('./Secrets.svelte'),
   activity: () => import('./Activity.svelte'),
+  reports: () => import('./Reports.svelte'),
   browser: () => import('./BrowserTrace.svelte'),
   config: () => import('./Config.svelte'),
   mobile: () => import('./Mobile.svelte'),

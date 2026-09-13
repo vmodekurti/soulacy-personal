@@ -96,6 +96,10 @@ export const navTourCopy = {
     what: 'A step-by-step replay of what a browsing agent saw and clicked.',
     when: 'Open it when a web-browsing agent came back with the wrong answer and you need to see where it went.',
   },
+  reports: {
+    what: 'Read-only operations reports: recorded activity, model usage, estimated costs, and conditions worth investigating.',
+    when: 'Review the last day, week, or month, then download the same snapshot as Markdown, CSV, or JSON. Missing data is explicitly marked.',
+  },
   config: {
     what: 'The gateway configuration, edited safely from the UI instead of by hand.',
     when: 'For settings that have no dedicated screen — and to see exactly what is on disk.',

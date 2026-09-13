@@ -1147,6 +1147,7 @@ func (s *Server) buildApp() *fiber.App {
 	// Stores checked at request time; 503 when neither costs nor action log
 	// is wired, 404 when the session has no recorded data.
 	api.Get("/runs/ops-summary", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.handleOpsSummary)
+	api.Get("/reports/operations", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.handleOperationsReport)
 	api.Get("/runs/slo-status", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.handleSLOStatus)
 	api.Get("/runs/ledger", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.handleRunLedger)
 	api.Get("/runs/events", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.handleRunEvents)

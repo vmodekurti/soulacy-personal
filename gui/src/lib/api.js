@@ -200,6 +200,7 @@ export const api = {
   readiness: () => apiFetch('/readiness'),
   executors: () => apiFetch('/executors'),
   opsSummary: (window = '24h') => apiFetch('/runs/ops-summary?window=' + encodeURIComponent(window)),
+  operationsReport: (window = '24h') => apiFetch('/reports/operations?window=' + encodeURIComponent(window)),
   sloStatus: (window = '') => apiFetch('/runs/slo-status' + (window ? '?window=' + encodeURIComponent(window) : '')),
   costStatus: () => apiFetch('/costs/status'),
   opsAlertStatus: () => apiFetch('/ops/alerts/status'),

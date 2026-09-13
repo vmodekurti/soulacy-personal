@@ -2,6 +2,10 @@
 
 The Dashboard streams every runtime event live as it happens, and the Activity page lets you replay any agent's full action history after the fact.
 
+For a read-only daily, weekly, or monthly rollup of activity and model spending,
+open **System → Reports**. See [Operations Reports](operations-reports.md) for
+counting rules, cost caveats, and Markdown/CSV/JSON downloads.
+
 ## Quick start
 
 1. Open **Dashboard** (`http://localhost:18789` → ◈ Dashboard).

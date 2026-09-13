@@ -44,6 +44,13 @@ func Narrate(id string, st InstallState) (PageTour, bool) {
 		state = p.whenUsed(st)
 	}
 	t.Beats = append(t.Beats, Beat{Heading: "Where you are", Text: state})
+	// Historical reporting does not require a currently configured model,
+	// delivery channel or schedule. Do not tell operators to enable unrelated
+	// execution capabilities just to inspect retained records.
+	if id == "reports" {
+		t.Position = "the read-only operations review — independent of agent execution"
+		return t, true
+	}
 
 	// If an earlier link is missing, say so plainly — and hand over the action
 	// that unblocks it rather than the one this page would normally offer.
