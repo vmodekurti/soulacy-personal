@@ -33,6 +33,7 @@ import (
 // EventSink receives structured events as they happen during agent execution.
 func (e *Engine) runTool(ctx context.Context, def *agent.Definition, sessionID string, call message.ToolCall) (string, error) {
 	out, err := e.runToolDispatch(ctx, def, sessionID, call)
+	e.observeLearningTool(ctx, def, call, out, err)
 	if obs := toolObserverFrom(ctx); obs != nil {
 		obs(call, out, err != nil)
 	}
@@ -40,6 +41,12 @@ func (e *Engine) runTool(ctx context.Context, def *agent.Definition, sessionID s
 }
 
 func (e *Engine) runToolDispatch(ctx context.Context, def *agent.Definition, sessionID string, call message.ToolCall) (string, error) {
+	if err := missionToolAllowed(ctx, call.Name); err != nil {
+		return "", err
+	}
+	if missionSimulation(ctx) {
+		return dryRunResult(call), nil
+	}
 	if !callerAllowsTool(ctx, call.Name) {
 		return "", fmt.Errorf("caller is not permitted to execute tool %q", call.Name)
 	}
@@ -189,6 +196,12 @@ print(result if isinstance(result, str) else json.dumps(result))
 	for _, b := range e.builtins {
 		if b.Name != call.Name {
 			continue
+		}
+		if (b.Gate == "mobile" || b.Gate == "safe_undo") && (def == nil || def.Builtins == nil || !containsExactString(*def.Builtins, b.Name)) {
+			return "", fmt.Errorf("agent has not explicitly enabled tool %q", b.Name)
+		}
+		if b.Gate == "learning" && (def == nil || !def.Learning.Enabled || (def.Builtins != nil && !containsExactString(*def.Builtins, b.Name) && !containsExactString(*def.Builtins, "*") && !containsExactString(*def.Builtins, "all"))) {
+			return "", fmt.Errorf("agent has not enabled tool %q", b.Name)
 		}
 
 		// Confirmation gate: pause and ask the user before executing tools
@@ -602,6 +615,14 @@ func (e *Engine) allToolSchemasForContext(ctx context.Context, def *agent.Defini
 			continue
 		}
 		switch b.Gate {
+		case "learning":
+			if !def.Learning.Enabled || e.LearningNotebook() == nil {
+				continue
+			}
+		case "mobile", "safe_undo":
+			if !allow[b.Name] {
+				continue
+			}
 		case "skills":
 			if len(e.effectiveSkillNames(def)) == 0 {
 				continue

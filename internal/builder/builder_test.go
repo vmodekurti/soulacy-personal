@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/soulacy/soulacy/internal/httptestutil"
 	"go.uber.org/zap"
 )
 
@@ -850,7 +851,7 @@ func TestSearchMCPRegistry_SkipsEmptyNames(t *testing.T) {
 			Description string       `json:"description"`
 			Version     string       `json:"version"`
 		}{
-			{ID: "no-name", Name: ""},          // should be skipped
+			{ID: "no-name", Name: ""},           // should be skipped
 			{ID: "has-name", Name: "Good Tool"}, // should be kept
 		},
 	}
@@ -1106,7 +1107,7 @@ func fiberRequest(t *testing.T, app *fiber.App, method, path, body string) *http
 		t.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := app.Test(req, -1)
+	resp, err := app.Test(httptestutil.WithHost(req), -1)
 	if err != nil {
 		t.Fatal(err)
 	}

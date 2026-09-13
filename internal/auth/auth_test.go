@@ -41,6 +41,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/auth/apikeys"
+	"github.com/soulacy/soulacy/internal/httptestutil"
 )
 
 // ---------------------------------------------------------------------------
@@ -100,7 +101,7 @@ func fiberJSON(t *testing.T, app *fiber.App, method, path, bearer, body string) 
 	if bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
-	resp, err := app.Test(req, 5000)
+	resp, err := app.Test(httptestutil.WithHost(req), 5000)
 	if err != nil {
 		t.Fatalf("app.Test: %v", err)
 	}
@@ -118,7 +119,7 @@ func fiberJSONWithQuery(t *testing.T, app *fiber.App, method, path, apiKeyParam 
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
-	resp, err := app.Test(req, 5000)
+	resp, err := app.Test(httptestutil.WithHost(req), 5000)
 	if err != nil {
 		t.Fatalf("app.Test: %v", err)
 	}
@@ -474,7 +475,7 @@ func TestMiddlewareJWTModeAcceptsLocalToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	cookieReq.AddCookie(&http.Cookie{Name: "soulacy_access", Value: accessToken})
-	cookieResp, err := app.Test(cookieReq, 5000)
+	cookieResp, err := app.Test(httptestutil.WithHost(cookieReq), 5000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -579,7 +580,7 @@ func TestHandleTokenRequestJWTModeSetsPersistentBrowserCookies(t *testing.T) {
 		t.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := app.Test(req, 5000)
+	resp, err := app.Test(httptestutil.WithHost(req), 5000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -661,7 +662,7 @@ func TestHandleRefreshUsesAndRotatesBrowserCookie(t *testing.T) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: "soulacy_refresh", Value: refresh})
-	resp, err := app.Test(req, 5000)
+	resp, err := app.Test(httptestutil.WithHost(req), 5000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -876,7 +877,7 @@ func TestSetAndGetClaims(t *testing.T) {
 	})
 
 	req, _ := http.NewRequest(http.MethodGet, "/claims-test", nil)
-	resp, err := app.Test(req, 1000)
+	resp, err := app.Test(httptestutil.WithHost(req), 1000)
 	if err != nil {
 		t.Fatalf("app.Test: %v", err)
 	}
@@ -899,7 +900,7 @@ func TestClaimsFromCtxNilWhenAbsent(t *testing.T) {
 	})
 
 	req, _ := http.NewRequest(http.MethodGet, "/no-claims", nil)
-	resp, err := app.Test(req, 1000)
+	resp, err := app.Test(httptestutil.WithHost(req), 1000)
 	if err != nil {
 		t.Fatalf("app.Test: %v", err)
 	}

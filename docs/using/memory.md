@@ -2,6 +2,11 @@
 
 Soulacy agents remember on two levels: conversation memory (scopes) keeps recent context flowing between turns, and brain memory (episodic / semantic / procedural layers) lets an agent learn across tasks — including a versioned, lockable rulebook it can update itself.
 
+For private, review-first learning on web and iPhone, use the new
+[Learning notebook](../LEARNING_NOTEBOOK.md). It learns preferences and reusable
+procedures without writing shared rulebooks. Existing Brain Memory auto-update
+settings described below remain separate and opt-in.
+
 ## Quick start
 
 ```yaml

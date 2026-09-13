@@ -73,6 +73,8 @@ type Governor struct {
 	circuitUntil     map[string]time.Time
 }
 
+func (g *Governor) SupportsRunCostBudgets() bool { return g != nil && g.store != nil }
+
 func NewGovernor(store *Store, prices PriceTable, cfg GovernanceConfig) *Governor {
 	if cfg.DefaultMaxOutput <= 0 {
 		cfg.DefaultMaxOutput = 4096
@@ -139,7 +141,7 @@ func (g *Governor) Before(ctx context.Context, provider string, req *llm.Complet
 	estimatedUSD, estimatedMicros, pricingStatus := EstimateDetailed(g.prices, provider, req.Model, UsageDimensions{
 		InputTokens: inputTokens, OutputTokens: req.MaxTokens,
 	})
-	if pricingStatus == "unknown" && strings.EqualFold(g.cfg.UnknownPricing, "block") {
+	if pricingStatus == "unknown" && (llm.HasRunCostBudget(ctx) || strings.EqualFold(g.cfg.UnknownPricing, "block")) {
 		return ctx, llm.Reservation{}, fmt.Errorf("llm cost control: pricing is unknown for %s/%s", provider, req.Model)
 	}
 	if g.cfg.ConfirmationThresholdUSD > 0 && estimatedUSD > g.cfg.ConfirmationThresholdUSD &&
@@ -210,6 +212,10 @@ func (g *Governor) Before(ctx context.Context, provider string, req *llm.Complet
 			estimatedTokens = inputTokens + maxOutput
 			_, estimatedMicros, _ = EstimateDetailed(g.prices, provider, req.Model, UsageDimensions{InputTokens: inputTokens, OutputTokens: maxOutput})
 		}
+	}
+	if err := llm.ReserveRunCost(ctx, id, estimatedMicros); err != nil {
+		_ = g.store.Release(context.WithoutCancel(ctx), id)
+		return ctx, llm.Reservation{}, err
 	}
 	admitted = true
 	return ctx, llm.Reservation{ID: id}, nil
@@ -287,6 +293,7 @@ func (g *Governor) After(ctx context.Context, reservation llm.Reservation, provi
 		ReasoningTokens: record.ReasoningTokens, ToolUsePromptTokens: record.ToolUsePromptTokens,
 	})
 	record.PricingVersion = PricingVersion(g.prices, provider, req.Model)
+	llm.SettleRunCost(ctx, reservation.ID, record.CostMicros, callErr == nil && resp != nil && record.PricingStatus != "unknown")
 	_ = g.store.Record(ctx, record)
 }
 

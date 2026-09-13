@@ -25,8 +25,8 @@ theme:
   font:
     text: Inter
     code: JetBrains Mono
-  logo: assets/logo.svg
-  favicon: assets/logo.svg
+  logo: assets/living-core-blue-v1.png
+  favicon: assets/living-core-blue-v1.png
   features:
     - navigation.tabs
     - navigation.tabs.sticky
@@ -52,6 +52,11 @@ plugins:
 
 # Internal working documents — never published to the public site.
 exclude_docs: |
+  validation/**
+  brand/**
+  *_VALIDATION_*.md
+  PRODUCTION_RELEASE_*.md
+  LIVING_CORE_RELEASE_*.md
   AGENT_DESIGN.md
   SESSION_HANDOFF.md
   STUDIO_*.md

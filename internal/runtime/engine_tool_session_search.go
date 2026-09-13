@@ -40,6 +40,25 @@ func (e *Engine) buildSessionSearchBuiltin() BuiltinTool {
 }
 
 func (e *Engine) sessionSearch(ctx context.Context, args map[string]any) (string, error) {
+	if e.LearningNotebook() != nil {
+		n, run, err := e.learningToolRun(ctx)
+		if err != nil {
+			return "", err
+		}
+		if requested := strings.TrimSpace(argString(args, "agent_id")); requested != "" && requested != run.scope.AgentID {
+			return "", fmt.Errorf("session_search cannot search another agent's private notebook")
+		}
+		query := strings.TrimSpace(argString(args, "query"))
+		if query == "" || len(query) > 1000 {
+			return "", learning.ErrInvalidLesson
+		}
+		results, err := n.Recall(ctx, run.scope, query, run.sessionID)
+		if err != nil {
+			return "", err
+		}
+		b, err := json.Marshal(map[string]any{"results": results, "agent_id": run.scope.AgentID, "count": len(results)})
+		return string(b), err
+	}
 	if e.actionLog == nil {
 		return "", fmt.Errorf("session_search: action log is unavailable")
 	}

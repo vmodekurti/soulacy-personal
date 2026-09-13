@@ -9,6 +9,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/soulacy/soulacy/internal/auth"
+	"github.com/soulacy/soulacy/internal/httptestutil"
 	"github.com/soulacy/soulacy/internal/rbac"
 	"github.com/soulacy/soulacy/internal/secrets"
 	"go.uber.org/zap"
@@ -24,7 +25,7 @@ func TestRBACMiddlewareWiredAfterRouteConstructionStillEnforces(t *testing.T) {
 		return c.Next()
 	})
 	app.Get("/", middleware, func(c *fiber.Ctx) error { return c.SendStatus(http.StatusNoContent) })
-	resp, err := app.Test(mustRequest(t, http.MethodGet, "/"))
+	resp, err := app.Test(httptestutil.WithHost(mustRequest(t, http.MethodGet, "/")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +50,7 @@ func TestCredentialRevealRequiresConfirmationAndIsAudited(t *testing.T) {
 		if confirm {
 			req.Header.Set("X-Soulacy-Confirm-Credential-Reveal", "true")
 		}
-		resp, err := s.app.Test(req)
+		resp, err := s.app.Test(httptestutil.WithHost(req))
 		if err != nil {
 			t.Fatal(err)
 		}

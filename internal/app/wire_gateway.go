@@ -16,6 +16,7 @@ import (
 	"github.com/soulacy/soulacy/internal/audit"
 	"github.com/soulacy/soulacy/internal/auth"
 	"github.com/soulacy/soulacy/internal/auth/apikeys"
+	"github.com/soulacy/soulacy/internal/autopilot"
 	"github.com/soulacy/soulacy/internal/builder"
 	"github.com/soulacy/soulacy/internal/caps"
 	"github.com/soulacy/soulacy/internal/channels"
@@ -35,6 +36,7 @@ import (
 	"github.com/soulacy/soulacy/internal/ratelimit"
 	"github.com/soulacy/soulacy/internal/rbac"
 	"github.com/soulacy/soulacy/internal/runtime"
+	"github.com/soulacy/soulacy/internal/safeundo"
 	"github.com/soulacy/soulacy/internal/sandbox"
 	"github.com/soulacy/soulacy/internal/scheduler"
 	"github.com/soulacy/soulacy/internal/session"
@@ -64,6 +66,8 @@ type gatewayDeps struct {
 	credVault       credentials.Vault
 	pluginLoader    *plugins.Loader
 	openedCostStore *costs.Store
+	autopilotStore  *autopilot.Store
+	undoStore       *safeundo.Store
 }
 
 // wireGateway builds the gateway server and attaches every host capability.
@@ -77,6 +81,10 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 	// to the server's tool-catalog cache.
 	srv := gateway.New(cfg, cfgPath, d.engine, d.loader, d.llmRouter, d.chanReg, d.sched, d.httpAdapter, d.waAdapter, d.skillLoader, d.actionBackend, d.mcpClient, d.hub, log)
 	srv.SetAuth(d.authEngine)
+	srv.SetAutopilotStore(d.autopilotStore)
+	srv.SetSafeUndoStore(d.undoStore)
+	d.engine.SetSafeUndo(d.undoStore, d.authEngine != nil && d.authEngine.Effective())
+	d.engine.SetLearningNotebook(d.engine.LearningNotebook(), (d.authEngine != nil && d.authEngine.Effective()) || cfg.Server.APIKey != "")
 	logEffectiveSecuritySummary(log, cfg, d.authEngine != nil && d.authEngine.Effective())
 	srv.SetRBAC(d.rbacManager)
 	if d.credVault != nil {

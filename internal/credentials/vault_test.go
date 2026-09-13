@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/soulacy/soulacy/internal/httptestutil"
 	"go.uber.org/zap"
 )
 
@@ -592,7 +593,7 @@ func TestAPIHandleSetAndGet(t *testing.T) {
 	body := `{"key":"api_key","value":"` + base64.StdEncoding.EncodeToString([]byte("my-secret")) + `"}`
 	req, _ := http.NewRequest(http.MethodPost, "/credentials/agent-a", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := app.Test(req)
+	resp, err := app.Test(httptestutil.WithHost(req))
 	if err != nil {
 		t.Fatalf("POST /credentials/agent-a: %v", err)
 	}
@@ -602,7 +603,7 @@ func TestAPIHandleSetAndGet(t *testing.T) {
 
 	// GET the credential back.
 	req2, _ := http.NewRequest(http.MethodGet, "/credentials/agent-a/api_key", nil)
-	resp2, err := app.Test(req2)
+	resp2, err := app.Test(httptestutil.WithHost(req2))
 	if err != nil {
 		t.Fatalf("GET /credentials/agent-a/api_key: %v", err)
 	}
@@ -628,7 +629,7 @@ func TestAPIHandleSetMissingKey(t *testing.T) {
 	body := `{"key":"","value":"` + base64.StdEncoding.EncodeToString([]byte("v")) + `"}`
 	req, _ := http.NewRequest(http.MethodPost, "/credentials/agent-a", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	resp, _ := app.Test(req)
+	resp, _ := app.Test(httptestutil.WithHost(req))
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("POST empty key status = %d, want 400", resp.StatusCode)
 	}
@@ -639,7 +640,7 @@ func TestAPIHandleSetInvalidBase64(t *testing.T) {
 	body := `{"key":"k","value":"not-valid-base64!!!"}`
 	req, _ := http.NewRequest(http.MethodPost, "/credentials/agent-a", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	resp, _ := app.Test(req)
+	resp, _ := app.Test(httptestutil.WithHost(req))
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("POST invalid base64 status = %d, want 400", resp.StatusCode)
 	}
@@ -649,7 +650,7 @@ func TestAPIHandleSetInvalidBody(t *testing.T) {
 	app, _ := newAPIApp(t)
 	req, _ := http.NewRequest(http.MethodPost, "/credentials/agent-a", strings.NewReader("not-json"))
 	req.Header.Set("Content-Type", "application/json")
-	resp, _ := app.Test(req)
+	resp, _ := app.Test(httptestutil.WithHost(req))
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("POST invalid body status = %d, want 400", resp.StatusCode)
 	}
@@ -662,7 +663,7 @@ func TestAPIHandleList(t *testing.T) {
 	_ = v.Set(ctx, "agent-l", "k2", []byte("v"))
 
 	req, _ := http.NewRequest(http.MethodGet, "/credentials/agent-l", nil)
-	resp, err := app.Test(req)
+	resp, err := app.Test(httptestutil.WithHost(req))
 	if err != nil {
 		t.Fatalf("GET /credentials/agent-l: %v", err)
 	}
@@ -679,7 +680,7 @@ func TestAPIHandleList(t *testing.T) {
 func TestAPIHandleListEmpty(t *testing.T) {
 	app, _ := newAPIApp(t)
 	req, _ := http.NewRequest(http.MethodGet, "/credentials/unknown-agent", nil)
-	resp, _ := app.Test(req)
+	resp, _ := app.Test(httptestutil.WithHost(req))
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("List empty status = %d, want 200", resp.StatusCode)
 	}
@@ -694,7 +695,7 @@ func TestAPIHandleListEmpty(t *testing.T) {
 func TestAPIHandleGetNotFound(t *testing.T) {
 	app, _ := newAPIApp(t)
 	req, _ := http.NewRequest(http.MethodGet, "/credentials/agent-a/missing_key", nil)
-	resp, _ := app.Test(req)
+	resp, _ := app.Test(httptestutil.WithHost(req))
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("GET missing key status = %d, want 404", resp.StatusCode)
 	}
@@ -706,7 +707,7 @@ func TestAPIHandleDelete(t *testing.T) {
 	_ = v.Set(ctx, "agent-d", "del_key", []byte("value"))
 
 	req, _ := http.NewRequest(http.MethodDelete, "/credentials/agent-d/del_key", nil)
-	resp, err := app.Test(req)
+	resp, err := app.Test(httptestutil.WithHost(req))
 	if err != nil {
 		t.Fatalf("DELETE: %v", err)
 	}
@@ -753,13 +754,13 @@ func TestLazyAPIHandleSetAndGet(t *testing.T) {
 	body := `{"key":"lazy_key","value":"` + base64.StdEncoding.EncodeToString([]byte("lazy-val")) + `"}`
 	req, _ := http.NewRequest(http.MethodPost, "/credentials/agent-lazy", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	resp, _ := app.Test(req)
+	resp, _ := app.Test(httptestutil.WithHost(req))
 	if resp.StatusCode != http.StatusNoContent {
 		t.Errorf("LazyAPI POST status = %d, want 204", resp.StatusCode)
 	}
 
 	req2, _ := http.NewRequest(http.MethodGet, "/credentials/agent-lazy/lazy_key", nil)
-	resp2, _ := app.Test(req2)
+	resp2, _ := app.Test(httptestutil.WithHost(req2))
 	if resp2.StatusCode != http.StatusOK {
 		t.Errorf("LazyAPI GET status = %d, want 200", resp2.StatusCode)
 	}
@@ -772,13 +773,13 @@ func TestLazyAPIHandleListAndDelete(t *testing.T) {
 	_ = v.Set(ctx, "agent-lz", "k", []byte("v"))
 
 	req, _ := http.NewRequest(http.MethodGet, "/credentials/agent-lz", nil)
-	resp, _ := app.Test(req)
+	resp, _ := app.Test(httptestutil.WithHost(req))
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("LazyAPI List status = %d, want 200", resp.StatusCode)
 	}
 
 	req2, _ := http.NewRequest(http.MethodDelete, "/credentials/agent-lz/k", nil)
-	resp2, _ := app.Test(req2)
+	resp2, _ := app.Test(httptestutil.WithHost(req2))
 	if resp2.StatusCode != http.StatusNoContent {
 		t.Errorf("LazyAPI Delete status = %d, want 204", resp2.StatusCode)
 	}
@@ -805,7 +806,7 @@ func TestLazyAPIVaultNilReturnsServiceUnavailable(t *testing.T) {
 	} {
 		req, _ := http.NewRequest(tc.method, tc.path, strings.NewReader(`{"key":"k","value":""}`))
 		req.Header.Set("Content-Type", "application/json")
-		resp, _ := app.Test(req)
+		resp, _ := app.Test(httptestutil.WithHost(req))
 		if resp.StatusCode != http.StatusServiceUnavailable {
 			t.Errorf("%s %s: status = %d, want 503", tc.method, tc.path, resp.StatusCode)
 		}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/robfig/cron/v3"
 
+	"github.com/soulacy/soulacy/internal/autopilot"
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/policy"
 	"github.com/soulacy/soulacy/pkg/agent"
@@ -116,6 +117,9 @@ func Definition(def *agent.Definition, path string, opts Options, report Report)
 	}
 	report.AgentID = def.ID
 	validateDefinitionShape(&report, def, path)
+	if err := autopilot.ValidateMission(def.Mission); err != nil {
+		report.add(Error, "mission", err.Error(), "Use typed acceptance checks and bounded limits.", nil)
+	}
 	validateLLMFit(&report, def, opts)
 	validateReasoningFit(&report, def, opts)
 	validateToolSafety(&report, def)

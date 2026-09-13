@@ -31,15 +31,24 @@ type (
 
 // Router dispatches LLM calls to registered providers.
 type Router struct {
-	mu         sync.RWMutex
-	providers  map[string]Provider
-	defaultID  string
-	controller Controller
+	mu                sync.RWMutex
+	providers         map[string]Provider
+	defaultID         string
+	controller        Controller
+	profileGeneration uint64
+	modelProfiles     profileCache
 }
 
 // SetController installs the process-wide LLM admission and accounting
 // controller. All calls through this router, including Studio and workflow
 // calls, are governed after this point.
+func (r *Router) SupportsRunCostBudgets() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	c, ok := r.controller.(RunCostController)
+	return ok && c.SupportsRunCostBudgets()
+}
+
 func (r *Router) SetController(controller Controller) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -52,6 +61,12 @@ func (r *Router) BeginGovernedCall(ctx context.Context, provider string, req *Co
 	r.mu.RLock()
 	controller := r.controller
 	r.mu.RUnlock()
+	if HasRunCostBudget(ctx) {
+		capable, ok := controller.(RunCostController)
+		if !ok || !capable.SupportsRunCostBudgets() {
+			return ctx, Reservation{}, fmt.Errorf("mission cost limit requires an enabled cost controller")
+		}
+	}
 	if controller == nil {
 		return ctx, Reservation{}, nil
 	}
@@ -75,30 +90,56 @@ func NewRouter(defaultProviderID string) *Router {
 	}
 }
 
-// Register adds a provider. Panics if called with a duplicate ID after init.
+// Register adds or replaces a provider and invalidates cached model metadata.
 func (r *Router) Register(p Provider) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.providers[p.ID()] = p
+	r.profileGeneration++
 }
 
 // Complete routes a request to the named provider (or the default if providerID is "").
 func (r *Router) Complete(ctx context.Context, providerID string, req CompletionRequest) (*CompletionResponse, error) {
-	if providerID == "" {
-		providerID = r.defaultID
+	p, key, controller, snapshotErr := r.modelSnapshot(providerID, req.Model)
+	if snapshotErr != nil {
+		return nil, snapshotErr
 	}
-	r.mu.RLock()
-	p, ok := r.providers[providerID]
-	controller := r.controller
-	r.mu.RUnlock()
+	providerID, req.Model = key.provider, key.model
 
-	if !ok {
-		return nil, fmt.Errorf("llm: unknown provider %q (registered: %v)", providerID, r.providerIDs())
+	if HasRunCostBudget(ctx) {
+		capable, ok := controller.(RunCostController)
+		if !ok || !capable.SupportsRunCostBudgets() {
+			return nil, fmt.Errorf("mission cost limit requires an enabled cost controller")
+		}
+	}
+	profile := UnknownModelProfile(providerID, req.Model)
+	if req.Operation != "embedding" {
+		var err error
+		profile, err = r.describeSnapshot(ctx, p, key)
+		if err != nil {
+			return nil, err
+		}
+		if err := applyProfileLimits(profile, &req); err != nil {
+			return nil, err
+		}
 	}
 	var reservation Reservation
 	var err error
+	execution, reserveErr := reserveExecution(ctx, &req)
+	if reserveErr != nil {
+		return nil, reserveErr
+	}
+	reservedInput, reservedOutput := EstimateRequestTokens(req), req.MaxTokens
+	providerStarted, streamOwnsReservation := false, false
+	defer func() {
+		if !providerStarted {
+			execution.cancel()
+		} else if !streamOwnsReservation {
+			execution.settle(nil, fmt.Errorf("incomplete provider call"))
+		}
+	}()
 	if controller != nil {
-		ctx, reservation, err = r.BeginGovernedCall(ctx, providerID, &req)
+		ctx, reservation, err = controller.Before(ctx, providerID, &req)
 		if err != nil {
 			if recorder, ok := controller.(RejectionRecorder); ok {
 				recorder.Rejected(context.WithoutCancel(ctx), providerID, req, err)
@@ -106,7 +147,24 @@ func (r *Router) Complete(ctx context.Context, providerID string, req Completion
 			return nil, err
 		}
 	}
+	// Admission may supply a default output ceiling. Recheck it before the
+	// actual call and release any reservation if a controller broke the model
+	// contract. Never infer against an unprofiled model after admission.
+	if req.Model != key.model {
+		err = fmt.Errorf("model preflight: admission changed the selected model")
+	} else if execution != nil && (req.MaxTokens > reservedOutput || EstimateRequestTokens(req) > reservedInput) {
+		err = fmt.Errorf("model preflight: admission exceeded the reserved token limit")
+	} else {
+		err = applyProfileLimits(profile, &req)
+	}
+	if err != nil {
+		if controller != nil {
+			controller.After(context.WithoutCancel(ctx), reservation, providerID, req, nil, err)
+		}
+		return nil, err
+	}
 
+	providerStarted = true
 	providerCtx, retryStats := withRetryStats(ctx)
 	resp, callErr := p.Complete(providerCtx, req)
 	attemptCount, requestIDs := retryStats.snapshot()
@@ -131,7 +189,10 @@ func (r *Router) Complete(ctx context.Context, providerID string, req Completion
 			resp.ProviderRequestIDs = []string{resp.ProviderRequestID}
 		}
 	}
-	if controller == nil {
+	if callErr != nil || resp == nil || resp.Stream == nil {
+		execution.settle(resp, callErr)
+	}
+	if controller == nil && (resp == nil || resp.Stream == nil || execution == nil || callErr != nil) {
 		return resp, callErr
 	}
 	if callErr != nil || resp == nil || resp.Stream == nil {
@@ -152,6 +213,7 @@ func (r *Router) Complete(ctx context.Context, providerID string, req Completion
 	inner := resp.Stream
 	proxied := make(chan string, 64)
 	resp.Stream = proxied
+	streamOwnsReservation = true
 	go func() {
 		defer close(proxied)
 		var output strings.Builder
@@ -175,7 +237,10 @@ func (r *Router) Complete(ctx context.Context, providerID string, req Completion
 		if resp.TotalTokens == 0 {
 			resp.TotalTokens = resp.InputTokens + resp.OutputTokens + resp.ReasoningTokens
 		}
-		controller.After(context.WithoutCancel(ctx), reservation, providerID, req, resp, ctx.Err())
+		execution.settle(resp, ctx.Err())
+		if controller != nil {
+			controller.After(context.WithoutCancel(ctx), reservation, providerID, req, resp, ctx.Err())
+		}
 	}()
 	return resp, nil
 }

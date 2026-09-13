@@ -76,6 +76,9 @@ func (e *Engine) buildBuiltins() []BuiltinTool {
 	tools = append(tools, e.buildQueueBuiltins()...)
 	tools = append(tools, e.buildIntrospectionBuiltins()...)
 	tools = append(tools, e.buildGenieMonitorBuiltins()...)
+	tools = append(tools, e.buildMobileBuiltins()...)
+	tools = append(tools, e.buildSafeUndoBuiltins()...)
+	tools = append(tools, e.buildLearningBuiltins()...)
 
 	if e.actionLog != nil {
 		tools = append(tools, e.buildSessionSearchBuiltin())

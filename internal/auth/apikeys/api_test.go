@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/soulacy/soulacy/internal/httptestutil"
 	"go.uber.org/zap"
 )
 
@@ -54,7 +55,7 @@ func TestHandleCreate_HappyPath(t *testing.T) {
 	body := `{"name":"ci-bot","scopes":["read","write"]}`
 	req, _ := http.NewRequest(http.MethodPost, "/apikeys", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := app.Test(req)
+	resp, err := app.Test(httptestutil.WithHost(req))
 	if err != nil {
 		t.Fatalf("POST /apikeys: %v", err)
 	}
@@ -83,7 +84,7 @@ func TestHandleCreate_MissingName(t *testing.T) {
 	body := `{"name":"  ","scopes":[]}`
 	req, _ := http.NewRequest(http.MethodPost, "/apikeys", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	resp, _ := app.Test(req)
+	resp, _ := app.Test(httptestutil.WithHost(req))
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("Create empty name: status = %d, want 400", resp.StatusCode)
 	}
@@ -95,7 +96,7 @@ func TestHandleCreate_EmptyNameWhitespace(t *testing.T) {
 	body := `{"name":"\t  \n"}`
 	req, _ := http.NewRequest(http.MethodPost, "/apikeys", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	resp, _ := app.Test(req)
+	resp, _ := app.Test(httptestutil.WithHost(req))
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("Create whitespace-only name: status = %d, want 400", resp.StatusCode)
 	}
@@ -106,7 +107,7 @@ func TestHandleCreate_InvalidBody(t *testing.T) {
 
 	req, _ := http.NewRequest(http.MethodPost, "/apikeys", strings.NewReader("not-json{"))
 	req.Header.Set("Content-Type", "application/json")
-	resp, _ := app.Test(req)
+	resp, _ := app.Test(httptestutil.WithHost(req))
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("Create invalid body: status = %d, want 400", resp.StatusCode)
 	}
@@ -119,7 +120,7 @@ func TestHandleCreate_NilScopes(t *testing.T) {
 	body := `{"name":"no-scopes-key"}`
 	req, _ := http.NewRequest(http.MethodPost, "/apikeys", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	resp, _ := app.Test(req)
+	resp, _ := app.Test(httptestutil.WithHost(req))
 	if resp.StatusCode != http.StatusCreated {
 		t.Errorf("Create nil scopes: status = %d, want 201", resp.StatusCode)
 	}
@@ -133,7 +134,7 @@ func TestHandleList_EmptyStore(t *testing.T) {
 	app, _ := newAPIApp(t)
 
 	req, _ := http.NewRequest(http.MethodGet, "/apikeys", nil)
-	resp, err := app.Test(req)
+	resp, err := app.Test(httptestutil.WithHost(req))
 	if err != nil {
 		t.Fatalf("GET /apikeys: %v", err)
 	}
@@ -155,7 +156,7 @@ func TestHandleList_WithKeys(t *testing.T) {
 	s.Create(ctx, "beta", nil)
 
 	req, _ := http.NewRequest(http.MethodGet, "/apikeys", nil)
-	resp, err := app.Test(req)
+	resp, err := app.Test(httptestutil.WithHost(req))
 	if err != nil {
 		t.Fatalf("GET /apikeys: %v", err)
 	}
@@ -178,7 +179,7 @@ func TestHandleList_IncludeRevokedQuery(t *testing.T) {
 
 	// Without include_revoked — revoked key excluded.
 	req, _ := http.NewRequest(http.MethodGet, "/apikeys", nil)
-	resp, _ := app.Test(req)
+	resp, _ := app.Test(httptestutil.WithHost(req))
 	var got1 map[string][]interface{}
 	json.NewDecoder(resp.Body).Decode(&got1)
 	if len(got1["keys"]) != 0 {
@@ -187,7 +188,7 @@ func TestHandleList_IncludeRevokedQuery(t *testing.T) {
 
 	// With include_revoked=true — revoked key included.
 	req2, _ := http.NewRequest(http.MethodGet, "/apikeys?include_revoked=true", nil)
-	resp2, _ := app.Test(req2)
+	resp2, _ := app.Test(httptestutil.WithHost(req2))
 	var got2 map[string][]interface{}
 	json.NewDecoder(resp2.Body).Decode(&got2)
 	if len(got2["keys"]) != 1 {
@@ -205,7 +206,7 @@ func TestHandleRevoke_HappyPath(t *testing.T) {
 	_, key, _ := s.Create(ctx, "revoke-me", nil)
 
 	req, _ := http.NewRequest(http.MethodPost, "/apikeys/"+key.ID+"/revoke", nil)
-	resp, err := app.Test(req)
+	resp, err := app.Test(httptestutil.WithHost(req))
 	if err != nil {
 		t.Fatalf("POST revoke: %v", err)
 	}
@@ -227,7 +228,7 @@ func TestHandleRevoke_NotFound(t *testing.T) {
 	app, _ := newAPIApp(t)
 
 	req, _ := http.NewRequest(http.MethodPost, "/apikeys/nonexistent-id/revoke", nil)
-	resp, _ := app.Test(req)
+	resp, _ := app.Test(httptestutil.WithHost(req))
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("Revoke missing ID: status = %d, want 404", resp.StatusCode)
 	}
@@ -245,7 +246,7 @@ func TestHandleValidate_HappyPath(t *testing.T) {
 	body := `{"key":"` + plaintext + `"}`
 	req, _ := http.NewRequest(http.MethodPost, "/apikeys/validate", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := app.Test(req)
+	resp, err := app.Test(httptestutil.WithHost(req))
 	if err != nil {
 		t.Fatalf("POST validate: %v", err)
 	}
@@ -266,7 +267,7 @@ func TestHandleValidate_InvalidKey(t *testing.T) {
 	body := `{"key":"sk_totally_wrong_key"}`
 	req, _ := http.NewRequest(http.MethodPost, "/apikeys/validate", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	resp, _ := app.Test(req)
+	resp, _ := app.Test(httptestutil.WithHost(req))
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("Validate bad key: status = %d, want 401", resp.StatusCode)
 	}
@@ -281,7 +282,7 @@ func TestHandleValidate_RevokedKey(t *testing.T) {
 	body := `{"key":"` + plaintext + `"}`
 	req, _ := http.NewRequest(http.MethodPost, "/apikeys/validate", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	resp, _ := app.Test(req)
+	resp, _ := app.Test(httptestutil.WithHost(req))
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("Validate revoked key: status = %d, want 401", resp.StatusCode)
 	}
@@ -293,7 +294,7 @@ func TestHandleValidate_MissingKey(t *testing.T) {
 	body := `{"key":""}`
 	req, _ := http.NewRequest(http.MethodPost, "/apikeys/validate", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	resp, _ := app.Test(req)
+	resp, _ := app.Test(httptestutil.WithHost(req))
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("Validate empty key: status = %d, want 400", resp.StatusCode)
 	}
@@ -304,7 +305,7 @@ func TestHandleValidate_InvalidBody(t *testing.T) {
 
 	req, _ := http.NewRequest(http.MethodPost, "/apikeys/validate", strings.NewReader("bad-json"))
 	req.Header.Set("Content-Type", "application/json")
-	resp, _ := app.Test(req)
+	resp, _ := app.Test(httptestutil.WithHost(req))
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("Validate invalid body: status = %d, want 400", resp.StatusCode)
 	}
@@ -316,7 +317,7 @@ func TestHandleCreate_ResponseContainsPrefix(t *testing.T) {
 	body := `{"name":"prefix-test"}`
 	req, _ := http.NewRequest(http.MethodPost, "/apikeys", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	resp, _ := app.Test(req)
+	resp, _ := app.Test(httptestutil.WithHost(req))
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("Create: status = %d", resp.StatusCode)
 	}

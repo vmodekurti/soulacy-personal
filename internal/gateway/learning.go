@@ -14,8 +14,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/agentmemory"
+	"github.com/soulacy/soulacy/internal/auth"
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/learning"
+	"github.com/soulacy/soulacy/internal/rbac"
 	"github.com/soulacy/soulacy/internal/studio"
 	"github.com/soulacy/soulacy/pkg/message"
 	"github.com/soulacy/soulacy/pkg/skill"
@@ -497,6 +499,14 @@ func (s *Server) handleAcceptLearningProposal(c *fiber.Ctx) error {
 			return s.errMsg(c, fiber.StatusNotFound, "proposal not found")
 		}
 		return s.errMsg(c, fiber.StatusInternalServerError, err.Error())
+	}
+	// Installing legacy proposals writes a globally discoverable skill bundle,
+	// not private memory. Memory permission must not bypass skills:write.
+	if strings.EqualFold(pending.Kind, "skill") {
+		claims := auth.ClaimsFromCtx(c)
+		if claims != nil && (!claims.Allows(rbac.ResourceSkills, rbac.ActionWrite) || !rbac.HasPermission(claims.Role, rbac.ResourceSkills, rbac.ActionWrite)) {
+			return s.errMsg(c, fiber.StatusForbidden, "Installing a shared skill requires skills write permission")
+		}
 	}
 	// Story 8 AC3 — the accept modal may send an override for the "promote to
 	// Studio lessons" flag. When set, we mutate the pending proposal so its

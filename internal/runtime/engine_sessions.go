@@ -647,6 +647,11 @@ type historySearcher interface {
 }
 
 func (e *Engine) pastConversationRecall(def *agent.Definition, sessionID string, incoming message.Message) string {
+	// The notebook uses authenticated-owner recall through learning.search.
+	// Legacy history is only agent-scoped and must not cross that boundary.
+	if e.LearningNotebook() != nil {
+		return ""
+	}
 	if def == nil || !def.Learning.Enabled || e.historyStore == nil {
 		return ""
 	}

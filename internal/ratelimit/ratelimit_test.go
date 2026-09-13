@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/soulacy/soulacy/internal/httptestutil"
 	"go.uber.org/zap"
 )
 
@@ -46,7 +47,7 @@ func fiberReq(t *testing.T, app *fiber.App, method, path, body string) int {
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := app.Test(req, 5000)
+	resp, err := app.Test(httptestutil.WithHost(req), 5000)
 	if err != nil {
 		t.Fatalf("app.Test: %v", err)
 	}
@@ -626,7 +627,7 @@ func TestHandleStatusReturnsOK(t *testing.T) {
 	app := fiber.New(fiber.Config{DisableStartupMessage: true})
 	app.Get("/status", m.HandleStatus)
 
-	resp, err := app.Test(newGETRequest(t, "/status"), 5000)
+	resp, err := app.Test(httptestutil.WithHost(newGETRequest(t, "/status")), 5000)
 	if err != nil {
 		t.Fatalf("app.Test: %v", err)
 	}
@@ -659,7 +660,7 @@ func TestHandleStatusReflectsTokenUsage(t *testing.T) {
 	app := fiber.New(fiber.Config{DisableStartupMessage: true})
 	app.Get("/status", m.HandleStatus)
 
-	resp, err := app.Test(newGETRequest(t, "/status"), 5000)
+	resp, err := app.Test(httptestutil.WithHost(newGETRequest(t, "/status")), 5000)
 	if err != nil {
 		t.Fatalf("app.Test: %v", err)
 	}
@@ -680,4 +681,3 @@ func newGETRequest(t *testing.T, path string) *http.Request {
 	}
 	return req
 }
-

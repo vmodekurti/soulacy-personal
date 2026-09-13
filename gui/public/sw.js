@@ -1,5 +1,5 @@
-const CACHE = 'soulacy-shell-v3'
-const SHELL = ['/', '/manifest.webmanifest']
+const CACHE = 'soulacy-shell-v4-living-core'
+const SHELL = ['/', '/manifest.webmanifest', '/brand/living-core-blue-v1-128.png', '/brand/living-core-blue-v1-192.png']
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)).catch(() => undefined))
@@ -42,8 +42,7 @@ self.addEventListener('push', (event) => {
       body: data.body,
       tag: data.tag || undefined,
       data: { url: data.url || '/#mobile' },
-      badge: '/icon.svg',
-      icon: '/icon.svg',
+      icon: '/brand/living-core-blue-v1-192.png',
     }),
   )
 })

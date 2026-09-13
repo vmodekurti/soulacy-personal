@@ -11,6 +11,17 @@ package tour
 import "fmt"
 
 var pages = map[string]page{
+	"autopilot": {
+		stage: StageEyes, nextAction: "", nextLabel: "",
+		role:         "Where a finished run must show its evidence before you rely on it.",
+		contribution: "Mission checks, measured costs, and release gates make an agent's results inspectable; missing evidence stays unknown instead of becoming a success.",
+		whenEmpty: func(InstallState) string {
+			return "Start with a bounded mission and an immutable release draft. Simulate it first, then collect real run proofs before promoting it; simulations never count as live reliability."
+		},
+		whenUsed: func(InstallState) string {
+			return "Inspect proofs and unfinished runs before expanding autonomy. Safe Undo reviews and reverses supported external changes; release rollback only restores agent configuration. You can also freeze an agent or review a regression check."
+		},
+	},
 	"providers": {
 		stage: StageBrain, nextAction: "open_providers", nextLabel: "Add a provider",
 		role:         "This is where an agent gets something to think with.",

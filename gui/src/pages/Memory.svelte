@@ -1,5 +1,6 @@
 <script>
   import TourButton from '../lib/TourButton.svelte'
+  import LearningNotebook from '../lib/LearningNotebook.svelte'
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
   import { diffLines, diffStats, sourceBadge } from '../lib/rulediff.js'
@@ -7,7 +8,7 @@
   // ── State ──────────────────────────────────────────────────────────────────
   let agentStats   = []
   let selectedID   = ''
-  let activeTab    = 'episodic'
+  let activeTab    = 'notebook'
 
   // Episodic
   let episodic     = []
@@ -138,6 +139,10 @@
       const res = await api.brainMemory.stats()
       brainEnabled = res.enabled !== false
       agentStats   = res.agents || []
+      if (!agentStats.length) {
+        const all = await api.agents.list()
+        agentStats = (Array.isArray(all) ? all : all.agents || []).map(a => ({ agent_id: a.id, agent_name: a.name, episodic_count: 0, has_procedural: false }))
+      }
       if (agentStats.length && !selectedID) {
         selectedID = agentStats[0].agent_id
       }
@@ -425,7 +430,7 @@
         <TourButton />
     </div>
 
-  {#if !brainEnabled}
+  {#if !brainEnabled && activeTab !== 'notebook'}
     <div class="banner warn">
       ⚠ Learning memory is not enabled. Set <code>SOULACY_MEMORY_DIR</code> and restart Soulacy.
     </div>
@@ -473,6 +478,7 @@
 
   <!-- Tabs -->
   <div class="tabs">
+    <button class="tab {activeTab==='notebook'?'active':''}" on:click={() => activeTab='notebook'}>Lessons</button>
     <button class="tab {activeTab==='episodic'?'active':''}" on:click={() => activeTab='episodic'}>
       🕐 Episodic {#if episodic.length}<span class="tab-count">{episodic.length}</span>{/if}
     </button>
@@ -483,11 +489,12 @@
       🔍 Context Preview
     </button>
     <button class="tab {activeTab==='learning'?'active':''}" on:click={() => activeTab='learning'}>
-      ✨ Learning {#if proposals.length}<span class="tab-count">{proposals.length}</span>{/if}
+      Earlier drafts {#if proposals.length}<span class="tab-count">{proposals.length}</span>{/if}
     </button>
   </div>
 
   <!-- ══ EPISODIC ══════════════════════════════════════════════════════════ -->
+  {#if activeTab === 'notebook' && selectedID}{#key selectedID}<LearningNotebook agentID={selectedID} />{/key}{/if}
   {#if activeTab === 'episodic'}
     <div class="tab-toolbar">
       <input class="search-input" bind:value={epSearch} placeholder="Search records…" />

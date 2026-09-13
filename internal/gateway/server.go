@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -51,6 +52,7 @@ import (
 	"github.com/soulacy/soulacy/internal/agentvalidate"
 	"github.com/soulacy/soulacy/internal/auth"
 	"github.com/soulacy/soulacy/internal/auth/apikeys"
+	"github.com/soulacy/soulacy/internal/autopilot"
 	"github.com/soulacy/soulacy/internal/builder"
 	"github.com/soulacy/soulacy/internal/caps"
 	"github.com/soulacy/soulacy/internal/channels"
@@ -69,6 +71,7 @@ import (
 	"github.com/soulacy/soulacy/internal/ratelimit"
 	"github.com/soulacy/soulacy/internal/rbac"
 	"github.com/soulacy/soulacy/internal/runtime"
+	"github.com/soulacy/soulacy/internal/safeundo"
 	"github.com/soulacy/soulacy/internal/scheduler"
 	"github.com/soulacy/soulacy/internal/session"
 	"github.com/soulacy/soulacy/internal/storage"
@@ -84,32 +87,38 @@ import (
 
 // Server is the Soulacy gateway server.
 type Server struct {
-	cfg             *config.Config
-	cfgPath         string // path to config file on disk; empty = unknown
-	app             *fiber.App
-	engine          *runtime.Engine
-	loader          *runtime.Loader
-	llmRouter       *llm.Router
-	channels        *channels.Registry
-	scheduler       *scheduler.Scheduler
-	httpChan        *httpchan.Adapter
-	waChan          *wachan.Adapter          // nil if WhatsApp not configured
-	skillLoader     runtime.SkillLoader      // nil if no skills installed
-	actions         storage.ActionLogBackend // nil if action logging disabled
-	mcp             *mcp.Client              // nil if no MCP servers configured
-	hub             *EventHub
-	authEngine      *auth.Engine // nil until SetAuth() is called
-	authStackCache  atomic.Pointer[fiber.Handler]
-	rbacManager     *rbac.Manager        // nil until SetRBAC() is called
-	credVault       credentials.Vault    // nil until SetCredentialVault() is called
-	builderRegistry *builder.Registry    // nil until SetBuilderRegistry() is called
-	rateLimiter     *ratelimit.Manager   // nil until SetRateLimiter() is called
-	apiKeyStore     apikeys.Store        // nil until SetAPIKeyStore() is called
-	dlqStore        dlq.Store            // nil until SetDLQStore() is called
-	historyStore    session.HistoryStore // nil until SetHistoryStore() is called
-	resourceStore   session.ResourceStore
-	agentWatcher    healthReporter // nil until SetAgentWatcher() is called (S2.13)
-	log             *zap.Logger
+	autopilotStore   *autopilot.Store
+	undoStore        *safeundo.Store
+	autopilotMu      sync.Mutex
+	autopilotGoals   map[string]context.CancelFunc
+	autopilotWG      sync.WaitGroup
+	autopilotClosing bool
+	cfg              *config.Config
+	cfgPath          string // path to config file on disk; empty = unknown
+	app              *fiber.App
+	engine           *runtime.Engine
+	loader           *runtime.Loader
+	llmRouter        *llm.Router
+	channels         *channels.Registry
+	scheduler        *scheduler.Scheduler
+	httpChan         *httpchan.Adapter
+	waChan           *wachan.Adapter          // nil if WhatsApp not configured
+	skillLoader      runtime.SkillLoader      // nil if no skills installed
+	actions          storage.ActionLogBackend // nil if action logging disabled
+	mcp              *mcp.Client              // nil if no MCP servers configured
+	hub              *EventHub
+	authEngine       *auth.Engine // nil until SetAuth() is called
+	authStackCache   atomic.Pointer[fiber.Handler]
+	rbacManager      *rbac.Manager        // nil until SetRBAC() is called
+	credVault        credentials.Vault    // nil until SetCredentialVault() is called
+	builderRegistry  *builder.Registry    // nil until SetBuilderRegistry() is called
+	rateLimiter      *ratelimit.Manager   // nil until SetRateLimiter() is called
+	apiKeyStore      apikeys.Store        // nil until SetAPIKeyStore() is called
+	dlqStore         dlq.Store            // nil until SetDLQStore() is called
+	historyStore     session.HistoryStore // nil until SetHistoryStore() is called
+	resourceStore    session.ResourceStore
+	agentWatcher     healthReporter // nil until SetAgentWatcher() is called (S2.13)
+	log              *zap.Logger
 
 	// buildTraces retains recent Studio build traces in a bounded in-memory ring
 	// and, when SOULACY_STUDIO_TRACE_DIR is set, also persists each as a JSONL
@@ -756,7 +765,10 @@ func (s *Server) buildApp() *fiber.App {
 	api.Post("/agents/package/inspect", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleInspectAgentPackage)
 	api.Post("/agents/package/import", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleImportAgentPackage)
 	api.Get("/agents/:id", s.rbacAgentMW(rbac.ActionRead), s.handleGetAgent)
+	api.Get("/agents/:id/model-preparation", s.rbacAgentFromMW(rbac.ResourceAgents, rbac.ActionRead, rbac.AgentIDSource{PathParam: "id"}), s.handleModelPreparation)
 	api.Get("/agents/:id/yaml", s.rbacAgentMW(rbac.ActionRead), s.handleGetAgentYAML)
+	api.Get("/agents/:id/files", s.rbacAgentFromMW(rbac.ResourceAgents, rbac.ActionRead, rbac.AgentIDSource{PathParam: "id"}), s.handlePublishedFiles)
+	api.Get("/agents/:id/files/preview", s.rbacAgentFromMW(rbac.ResourceAgents, rbac.ActionRead, rbac.AgentIDSource{PathParam: "id"}), s.handlePublishedFile)
 	api.Get("/agents/:id/package", s.rbacAgentMW(rbac.ActionRead), s.handleGetAgentPackage)
 	api.Put("/agents/:id/yaml", s.rbacAgentMW(rbac.ActionWrite), s.handleUpdateAgentYAML)
 	api.Get("/agents/:id/versions", s.rbacAgentMW(rbac.ActionRead), s.handleListAgentVersions)
@@ -844,6 +856,10 @@ func (s *Server) buildApp() *fiber.App {
 	api.Get("/browser/status", s.rbacMW(rbac.ResourceMemory, rbac.ActionRead), s.handleBrowserStatus)
 	api.Get("/mobile/status", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleMobileStatus)
 	api.Post("/mobile/devices", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleRegisterMobileDevice)
+	s.registerMobileNodeRoutes(api)
+	s.registerAutopilotRoutes(api)
+	s.registerSafeUndoRoutes(api)
+	s.registerLearningNotebookRoutes(api)
 	api.Delete("/mobile/devices/:id", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleDeleteMobileDevice)
 	api.Get("/mobile/deliveries", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleListMobileDeliveries)
 	api.Get("/mobile/deliveries/:id", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleGetMobileDelivery)
@@ -1703,6 +1719,9 @@ func (s *Server) Listen(ctx context.Context) error {
 	if err := s.checkAuthBindSafety(); err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	// Story 2 / S1.x — probe providers and validate every agent's model BEFORE
 	// serving. Agents whose configured model is unavailable are quarantined
@@ -1711,32 +1730,68 @@ func (s *Server) Listen(ctx context.Context) error {
 	// message (or, worse, silently on every cron fire).
 	s.validateAgentsAtBoot(ctx)
 
-	addr := fmt.Sprintf("%s:%d", s.cfg.Server.Host, s.cfg.Server.Port)
+	addr := net.JoinHostPort(strings.Trim(s.cfg.Server.Host, "[]"), strconv.Itoa(s.cfg.Server.Port))
+	var certificate *tls.Certificate
+	if s.cfg.Server.TLSCert != "" || s.cfg.Server.TLSKey != "" {
+		loaded, err := tls.LoadX509KeyPair(s.cfg.Server.TLSCert, s.cfg.Server.TLSKey)
+		if err != nil {
+			return fmt.Errorf("gateway TLS certificate: %w", err)
+		}
+		certificate = &loaded
+	}
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("gateway listener: %w", err)
+	}
+	defer listener.Close()
+	if certificate != nil {
+		listener = tls.NewListener(listener, &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{*certificate}})
+	}
+	advertiser, err := s.startDiscovery(listener, certificate)
+	if err != nil {
+		return err
+	}
+	stopDiscovery := func() {
+		if advertiser != nil {
+			_ = advertiser.Shutdown()
+		}
+	}
+	defer stopDiscovery()
+
+	// Cancel the watcher and release the shutdown goroutine even if Serve
+	// returns because of a bind/transport failure instead of ctx cancellation.
+	serveCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	done := make(chan struct{})
+	shutdownDone := make(chan struct{})
+	defer func() { close(done); <-shutdownDone }()
 
 	// Start config watcher
 	if s.cfgPath != "" {
-		go s.watchConfig(ctx)
+		go s.watchConfig(serveCtx)
 	}
 
 	// Start release updates checker
-	s.startUpdatesChecker()
+	s.startUpdatesChecker(serveCtx)
 
-	// Start TLS if configured
-	if s.cfg.Server.TLSCert != "" && s.cfg.Server.TLSKey != "" {
-		s.log.Info("gateway listening with TLS", zap.String("addr", addr))
-		go func() {
-			<-ctx.Done()
-			_ = s.app.Shutdown()
-		}()
-		return s.app.ListenTLS(addr, s.cfg.Server.TLSCert, s.cfg.Server.TLSKey)
-	}
-
-	s.log.Info("gateway listening", zap.String("addr", addr))
+	s.log.Info("gateway listening", zap.String("addr", listener.Addr().String()), zap.Bool("tls", certificate != nil))
 	go func() {
-		<-ctx.Done()
-		_ = s.app.Shutdown()
+		defer close(shutdownDone)
+		select {
+		case <-ctx.Done():
+			stopDiscovery()
+			// Closing the listener also covers cancellation between startupProcess
+			// and Serve registering its listener with fasthttp's shutdown logic.
+			_ = listener.Close()
+			_ = s.app.Shutdown()
+		case <-done:
+		}
 	}()
-	return s.app.Listen(addr)
+	err = s.app.Listener(listener)
+	if ctx.Err() != nil {
+		return nil // closing the listener during normal shutdown is not a failure
+	}
+	return err
 }
 
 // validateAgentsAtBoot probes each registered provider for its model list and

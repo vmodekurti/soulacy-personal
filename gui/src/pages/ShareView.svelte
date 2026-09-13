@@ -3,6 +3,7 @@
   // /#share/<token> and rendered OUTSIDE the authenticated app shell, so no API
   // key is needed. Fetches the snapshot with a plain (unauthenticated) fetch.
   import { onMount } from 'svelte'
+  import BrandMark from '../lib/BrandMark.svelte'
   import { parseMarkdown } from '../lib/markdown.js'
 
   export let token = ''
@@ -38,7 +39,7 @@
 
 <div class="share-page">
   <header class="share-header">
-    <div class="brand">Soulacy</div>
+    <div class="brand"><BrandMark size={28} /><span>soulacy</span></div>
     {#if session}<h1>{session.title || 'Shared conversation'}</h1>{/if}
     {#if session?.agent_name}<div class="meta">Agent: {session.agent_name}</div>{/if}
     <div class="ro-badge">Read-only shared view</div>
@@ -72,7 +73,7 @@
 <style>
   .share-page { max-width: 820px; margin: 0 auto; padding: 28px 20px 60px; color: #e6e8f5; }
   .share-header { border-bottom: 1px solid #232743; padding-bottom: 14px; margin-bottom: 18px; }
-  .brand { color: #8b85ff; font-weight: 700; letter-spacing: .04em; font-size: .8rem; text-transform: uppercase; }
+  .brand { display: flex; align-items: center; gap: 9px; color: #e6e8f5; font-weight: 750; letter-spacing: -.04em; font-size: 1.15rem; }
   .share-header h1 { margin: 6px 0 2px; font-size: 1.4rem; }
   .meta { color: #8f96bb; font-size: .82rem; }
   .ro-badge { display: inline-block; margin-top: 8px; font-size: .68rem; color: #a7d3ff;

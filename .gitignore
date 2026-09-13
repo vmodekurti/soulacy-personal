@@ -127,3 +127,15 @@ workspace/
 
 # Scratch space used by agent sessions (build/verify artifacts, never source).
 _to_delete/
+
+# Operator-local cloud credentials, Terraform caches/state, and release receipts.
+# Keep reusable validation code in deploy/validation; never publish live records.
+deploy/aws/.deployment.env
+deploy/aws/.terraform/
+deploy/aws/terraform.tfvars
+deploy/aws/terraform.tfvars.backup.*
+deploy/aws/*.tfstate*
+docs/validation/
+docs/*_VALIDATION_*.md
+docs/PRODUCTION_RELEASE_*.md
+docs/LIVING_CORE_RELEASE_*.md
