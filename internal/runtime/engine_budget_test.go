@@ -36,6 +36,33 @@ func TestBudgetExceeded(t *testing.T) {
 	}
 }
 
+// TestSetRunBudgetsHotReload covers live budget updates (config hot-reload):
+// a second SetRunBudgets call must be visible to the next run's resolution,
+// and RunBudgets must report the currently installed values.
+func TestSetRunBudgetsHotReload(t *testing.T) {
+	e := &Engine{}
+
+	def, ceil, configured := e.RunBudgets()
+	if configured {
+		t.Fatalf("fresh engine should report configured=false, got %v/%v", def, ceil)
+	}
+
+	e.SetRunBudgets(agent.BudgetConfig{MaxTokens: 1000, MaxLLMCalls: 10}, agent.BudgetConfig{MaxTokens: 2000, MaxLLMCalls: 20})
+	if tokens, calls := e.effectiveRunBudget(&agent.Definition{}); tokens != 1000 || calls != 10 {
+		t.Fatalf("after first install got %d/%d, want 1000/10", tokens, calls)
+	}
+
+	// Operator raises the budget via PATCH /config — no restart.
+	e.SetRunBudgets(agent.BudgetConfig{MaxTokens: 9000, MaxLLMCalls: 90}, agent.BudgetConfig{MaxTokens: 0, MaxLLMCalls: 0})
+	if tokens, calls := e.effectiveRunBudget(&agent.Definition{}); tokens != 9000 || calls != 90 {
+		t.Fatalf("after hot update got %d/%d, want 9000/90", tokens, calls)
+	}
+	def, ceil, configured = e.RunBudgets()
+	if !configured || def.MaxTokens != 9000 || def.MaxLLMCalls != 90 || ceil.MaxTokens != 0 || ceil.MaxLLMCalls != 0 {
+		t.Fatalf("RunBudgets = %v/%v/%v, want 9000-90 / 0-0 / true", def, ceil, configured)
+	}
+}
+
 func TestEffectiveRunBudgetInheritanceOverridesAndCeilings(t *testing.T) {
 	e := &Engine{}
 	if tokens, calls := e.effectiveRunBudget(&agent.Definition{}); tokens != defaultRunBudgetTokens || calls != defaultRunBudgetCalls {

@@ -264,18 +264,34 @@ func (e *Engine) agentCallDepthLimit() int {
 
 // SetRunBudgets installs the inherited default and hard server ceiling. Zero
 // is preserved as an explicit unlimited value; without this setter the shipped
-// nonzero constants apply.
+// nonzero constants apply. Safe to call on a live engine: budgets are resolved
+// once at run start, so runs already in flight keep their original limits and
+// only new runs observe the change.
 func (e *Engine) SetRunBudgets(defaultBudget, maxBudget agent.BudgetConfig) {
+	e.budgetMu.Lock()
+	defer e.budgetMu.Unlock()
 	e.defaultRunBudget = defaultBudget
 	e.maxRunBudget = maxBudget
 	e.runBudgetConfigured = true
 }
 
+// RunBudgets reports the currently installed inherited default and hard
+// ceiling, and whether SetRunBudgets has ever been called.
+func (e *Engine) RunBudgets() (defaults, ceiling agent.BudgetConfig, configured bool) {
+	e.budgetMu.RLock()
+	defer e.budgetMu.RUnlock()
+	return e.defaultRunBudget, e.maxRunBudget, e.runBudgetConfigured
+}
+
 func (e *Engine) effectiveRunBudget(def *agent.Definition) (tokens, calls int) {
 	defaults := agent.BudgetConfig{MaxTokens: defaultRunBudgetTokens, MaxLLMCalls: defaultRunBudgetCalls}
 	maximum := agent.BudgetConfig{MaxTokens: defaultMaxBudgetTokens, MaxLLMCalls: defaultMaxBudgetCalls}
-	if e != nil && e.runBudgetConfigured {
-		defaults, maximum = e.defaultRunBudget, e.maxRunBudget
+	if e != nil {
+		e.budgetMu.RLock()
+		if e.runBudgetConfigured {
+			defaults, maximum = e.defaultRunBudget, e.maxRunBudget
+		}
+		e.budgetMu.RUnlock()
 	}
 	tokens, calls = defaults.MaxTokens, defaults.MaxLLMCalls
 	if def != nil && def.Budget != nil {

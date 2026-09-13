@@ -570,7 +570,7 @@
   {/if}
   {#if saved}
     <div class="banner ok restart-banner">
-      <span>✓ Config saved. Restart the gateway for changes to take full effect.</span>
+      <span>✓ Config saved. Run budgets apply to new runs immediately; restart the gateway for other changes to take full effect.</span>
       <button class="btn-secondary" on:click={restartGateway} disabled={restarting}>
         {restarting ? 'Restarting…' : 'Restart Gateway'}
       </button>
@@ -918,7 +918,8 @@
             These limits cover an entire run, not one response. Input history and tool schemas are
             counted again on each model call, so tool-heavy agents need substantially more than their
             visible answer length. Set a value to <strong>0</strong> for unlimited execution; usage and
-            estimated cost reporting continue even when enforcement is unlimited.
+            estimated cost reporting continue even when enforcement is unlimited. Changes apply to
+            newly started runs immediately — no restart needed.
           </p>
           <div class="budget-row">
             <label class="field cost-rate">
