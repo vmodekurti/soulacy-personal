@@ -4232,6 +4232,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#published-templates-and-versions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Published templates and versions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#source-and-security-boundary" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4797,6 +4808,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#published-templates-and-versions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Published templates and versions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#source-and-security-boundary" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4905,6 +4927,10 @@ open. SSH is not exposed.</p>
 </ol>
 <p>The generated hostname uses the Elastic IP through <code>sslip.io</code> so Caddy can
 obtain a trusted certificate without requiring a domain during provisioning.
+The stack reports <code>CREATE_COMPLETE</code> only after the gateway answers HTTP inside
+the VM, so a completed stack means the application started, not just the VM.</p>
+<p>Accounts on the AWS Free Tier plan may be limited to <code>t3.small</code>; larger types
+fail at instance creation with a Free Tier eligibility error.
 You can later point your own hostname at the Elastic IP and update
 <code>/opt/soulacy/.env</code> and <code>/opt/soulacy/Caddyfile</code> through AWS Systems Manager.</p>
 <h2 id="azure">Azure<a class="headerlink" href="#azure" title="Permanent link">&para;</a></h2>
@@ -4916,6 +4942,10 @@ Store it in your password manager; secure ARM parameters are not displayed
 after deployment. Open the <code>soulacyURL</code> deployment output when provisioning
 finishes and log in with that key. Then choose <strong>Mobile → Pair a device</strong> and
 scan the short-lived QR code with Soulacy for iOS.</p>
+<p>The VM's local administrator password is generated per deployment with
+<code>newGuid()</code> and never shown; SSH is closed, so administer the VM with Azure
+Run Command. The default size is <code>Standard_B2s_v2</code> (2 vCPU, 8 GiB); choose a
+<code>D</code> series size for heavier agents.</p>
 <h2 id="railway">Railway<a class="headerlink" href="#railway" title="Permanent link">&para;</a></h2>
 <p>The <a href="https://railway.com/deploy/soulacy-personal?utm_medium=integration&amp;utm_source=button&amp;utm_campaign=soulacy-personal">Soulacy Personal Railway template</a>
 imports the public repository and its Dockerfile, attaches persistent storage,
@@ -4979,6 +5009,20 @@ or Azure Run Command for administrative access. Common commands are:</p>
 <p>Docker volumes survive application and VM restarts. Back up the VM disk before
 upgrades and before deleting the cloud stack or resource group. Deleting the
 VM deletes its attached application data unless you first take a snapshot.</p>
+<h2 id="published-templates-and-versions">Published templates and versions<a class="headerlink" href="#published-templates-and-versions" title="Permanent link">&para;</a></h2>
+<p>The website buttons do not read the templates from the <code>main</code> branch. The
+release workflow publishes both templates to the public bucket
+<code>soulacy-public-deploy-633654243571</code> after the release image is pushed, with
+<code>ImageVersion</code>/<code>imageVersion</code> and <code>ReleaseRef</code>/<code>releaseRef</code> defaulted to that
+exact release. A one-click deployment therefore always pairs a tagged image
+with the bootstrap assets from the same tag. Each release also keeps an
+immutable copy under <code>releases/&lt;tag&gt;/</code>. The publish job needs the
+<code>AWS_DEPLOY_ASSETS_ROLE_ARN</code> repository variable, an IAM role trusted by
+GitHub's OIDC provider for <code>refs/tags/v*</code> of this repository, with <code>s3:PutObject</code>
+on the bucket; without it the job skips with a warning and the previously
+published templates remain live.</p>
+<p>Pull requests that touch <code>deploy/**</code> run <code>scripts/test-cloud-deploy.sh</code>,
+<code>cfn-lint</code> on the CloudFormation template, and <code>arm-ttk</code> on the ARM template.</p>
 <h2 id="source-and-security-boundary">Source and security boundary<a class="headerlink" href="#source-and-security-boundary" title="Permanent link">&para;</a></h2>
 <ul>
 <li>AWS template: <code>deploy/aws/cloudformation.yaml</code></li>
