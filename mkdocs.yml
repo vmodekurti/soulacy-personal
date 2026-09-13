@@ -44,7 +44,7 @@ theme:
     - content.action.edit
 
 extra_css:
-  - stylesheets/extra.css
+  - stylesheets/living-core-blue-v1.css
 
 
 plugins:

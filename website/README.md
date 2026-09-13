@@ -43,7 +43,21 @@ Any static server works. There's no build step.
 5. Under the deployed project → Custom domains → Set up custom domain → `soulacy.io` and `www.soulacy.io`.
 6. Wait for Cloudflare to verify the domains and provision their HTTPS certificates.
 
-**Current production setup:** the `soulacy` Pages project is connected to `vmodekurti/soulacy-personal`. A push to Personal `main` is the normal publishing path. Check the Cloudflare deployment's commit and the live page; a green GitHub job that defers to Git integration is not itself proof that the site deployed. Keep this public site connected to the Personal repository.
+**Current production setup (verified September 2026):** the Pages project is named `soulacy`, but its Git connection still points at the archived legacy repository, not `vmodekurti/soulacy-personal`. A push to Personal `main` does not currently trigger that Git connection. The GitHub website workflow can deploy when its Cloudflare credentials are configured; otherwise it only logs a deferral. A green deferral job is not proof that the website deployed.
+
+### Publish through the existing project
+
+Until an operator reconnects the Git integration or configures the deployment credentials, publish a clean, tested Personal `main` checkout explicitly. Authenticate with the intended Cloudflare account, then check that project `soulacy` owns `soulacy.io` and `www.soulacy.io` before uploading:
+
+```bash
+# Run from the repository root, with the tested changes already merged.
+git status --short --branch
+npx wrangler@4.131.1 pages project list
+npx wrangler@4.131.1 pages deploy website --project-name soulacy --branch main \
+  --commit-hash "$(git rev-parse HEAD)"
+```
+
+The explicit project and directory target the existing public site, not the running agent gateway. Wait for a deployment URL, then verify the production homepage, its new logo, and documentation links. Keep the deployment commit/URL in the release receipt. Do not change account permissions or replace a Pages project merely to publish a content update.
 
 ## Deploy — alternatives (if you're not using Cloudflare)
 
