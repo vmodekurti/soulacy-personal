@@ -16,8 +16,7 @@
 FROM node:20-bookworm-slim AS gui
 WORKDIR /src/gui
 COPY gui/package.json gui/package-lock.json* ./
-RUN --mount=type=cache,id=soulacy-npm,target=/root/.npm \
-    npm install --no-audit --no-fund --silent
+RUN npm install --no-audit --no-fund --silent
 COPY gui ./
 RUN npm run build
 # Output: /src/gui/dist  (copied to /src/internal/webui/dist in gobuild)
@@ -36,9 +35,7 @@ COPY go.mod go.sum ./
 # `go mod download` must be able to read the replacement module's go.mod.
 # Copy just that file first to keep this layer cacheable.
 COPY sdk/go.mod ./sdk/go.mod
-RUN --mount=type=cache,id=soulacy-go-build,target=/root/.cache/go-build \
-    --mount=type=cache,id=soulacy-go-mod,target=/go/pkg/mod \
-    go mod download
+RUN go mod download
 
 COPY . .
 # Inject the Svelte build so the gateway binary embeds the GUI.
@@ -47,9 +44,7 @@ COPY . .
 COPY --from=gui /src/internal/webui/dist /src/internal/webui/dist
 
 ENV CGO_ENABLED=1
-RUN --mount=type=cache,id=soulacy-go-build,target=/root/.cache/go-build \
-    --mount=type=cache,id=soulacy-go-mod,target=/go/pkg/mod \
-    go build \
+RUN go build \
         -ldflags "-X github.com/soulacy/soulacy/internal/config.Version=${VERSION}" \
         -o /out/soulacy ./cmd/soulacy \
     && go build \
@@ -68,7 +63,7 @@ FROM python:3.12-slim-bookworm AS runtime
 # intentionally NOT used inside the install list: backslash-continuation joins
 # the lines, so a '#' would comment out every package after it.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        libsqlite3-0 ca-certificates \
+        libsqlite3-0 ca-certificates gosu \
         nodejs npm \
         git curl wget unzip zip tar xz-utils \
         build-essential pkg-config \
@@ -85,6 +80,7 @@ RUN useradd --create-home --shell /usr/sbin/nologin soulacy
 
 COPY --from=gobuild --chown=soulacy /out/soulacy /usr/local/bin/soulacy
 COPY --from=gobuild --chown=soulacy /out/sy      /usr/local/bin/sy
+COPY --chown=soulacy --chmod=755 deploy/common/docker-entrypoint.sh /usr/local/bin/soulacy-entrypoint
 
 # Data directory — mount a volume here to persist agents, memory, and logs.
 # The hosting platform owns the volume declaration. Keeping this as a normal
@@ -92,8 +88,11 @@ COPY --from=gobuild --chown=soulacy /out/sy      /usr/local/bin/sy
 # while Docker Compose and Railway templates can still mount it persistently.
 RUN mkdir -p /home/soulacy/.soulacy && chown soulacy:soulacy /home/soulacy/.soulacy
 
-USER soulacy
 WORKDIR /home/soulacy
+
+# The entrypoint starts as root only long enough to initialize and repair the
+# ownership of a platform-mounted data volume, then drops permanently to the
+# unprivileged soulacy user before starting the gateway.
 
 # NOTE: do NOT pin SOULACY_CONFIG_PATH to an explicit file here. Doing so forces
 # explicit-file config mode, and a missing file becomes a hard startup error —
@@ -125,7 +124,7 @@ ENV SOULACY_SERVER_HOST=0.0.0.0 \
 EXPOSE 18789
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -fs http://localhost:18789/ >/dev/null || exit 1
+    CMD curl -fs "http://localhost:${PORT:-${SOULACY_SERVER_PORT:-18789}}/" >/dev/null || exit 1
 
-ENTRYPOINT ["soulacy"]
+ENTRYPOINT ["soulacy-entrypoint"]
 CMD ["serve"]

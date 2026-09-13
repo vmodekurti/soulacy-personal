@@ -20,8 +20,11 @@ open. SSH is not exposed.
 After the stack reaches `CREATE_COMPLETE`:
 
 1. Open the `SoulacyURL` stack output.
-2. Open the Secrets Manager secret named by `LoginSecretARN`.
-3. Retrieve the `api_key` field and use it once on the Soulacy login page.
+2. Open the `LoginSecretConsoleURL` output (or find the secret named by
+   `LoginSecretARN`) and reveal the `api_key` field.
+3. Use that key on the Soulacy login page and save it in a password manager.
+4. Choose **Mobile → Pair a device** and scan the short-lived QR code with
+   Soulacy for iOS. Normal phone use relies on the scoped paired credential.
 
 The generated hostname uses the Elastic IP through `sslip.io` so Caddy can
 obtain a trusted certificate without requiring a domain during provisioning.
@@ -37,19 +40,45 @@ that installs the stack. Only ports 80 and 443 are open. SSH is not exposed.
 Azure asks for a 24-character-or-longer Soulacy login key during deployment.
 Store it in your password manager; secure ARM parameters are not displayed
 after deployment. Open the `soulacyURL` deployment output when provisioning
-finishes and log in with that key.
+finishes and log in with that key. Then choose **Mobile → Pair a device** and
+scan the short-lived QR code with Soulacy for iOS.
 
 ## Railway
 
-The [Railway launcher](https://railway.com/new?repo=https%3A%2F%2Fgithub.com%2Fvmodekurti%2Fsoulacy-personal)
-imports the public repository and its Dockerfile. The root `railway.json` also
-records compatible health and restart defaults for Railway services that still
-support config-as-code.
-Before exposing the service, set a strong `SOULACY_SERVER_API_KEY`, mount a
-persistent volume at `/home/soulacy/.soulacy`, set `PORT=18789`, configure `/`
-as the health-check path, and generate a public domain.
-Railway detects the container's port from the Dockerfile; the checked-in
-configuration supplies the health check and restart policy.
+The [Soulacy Personal Railway template](https://railway.com/deploy/soulacy-personal?utm_medium=integration&utm_source=button&utm_campaign=soulacy-personal)
+imports the public repository and its Dockerfile, attaches persistent storage,
+enables public networking and health checks, and generates two independent
+secrets for every deployment. No configuration fields are required.
+
+After Railway reports the service online:
+
+1. Open the service's **Variables** tab.
+2. Reveal and copy `SOULACY_SERVER_API_KEY` (the `sy_...` value). Do not use
+   `SOULACY_AUTH_JWT_SECRET`; that is an internal signing secret.
+3. Open the generated public domain and sign in with the gateway key.
+4. Choose **Mobile → Pair a device** and scan the short-lived QR code with the
+   iOS app. The QR contains a single-use pairing code, not the permanent key.
+
+Keep the generated gateway key unsealed so the project owner can retrieve it.
+Railway account permissions protect the Variables page. Do not publish it in
+logs, screenshots, support tickets, or URL query parameters.
+
+The root `railway.json` records compatible health and restart defaults for
+Railway services that support config-as-code.
+Railway injects its assigned runtime port as `PORT`. The container entrypoint
+maps that value to `SOULACY_SERVER_PORT`; outside Railway, Soulacy continues to
+use port `18789`. The checked-in configuration supplies the health check and
+restart policy. The entrypoint also repairs the ownership of a newly mounted
+Railway volume before dropping to the unprivileged `soulacy` user, so the
+gateway can initialize its workspace without running as root.
+
+## Pair an iPhone after any cloud deployment
+
+AWS, Azure, and Railway differ only in how the owner retrieves the initial
+gateway key. Once signed in, use **Mobile → Pair a device** in the Soulacy web
+workspace. Pairing codes expire after two minutes, work once, and redeem for a
+scoped mobile credential stored by iOS in Keychain. Never put the permanent
+gateway API key directly in a QR code or a public post-deployment URL.
 
 ## Render
 

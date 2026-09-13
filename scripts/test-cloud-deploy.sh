@@ -5,14 +5,16 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 bash -n deploy/common/bootstrap.sh
+sh -n deploy/common/docker-entrypoint.sh
 jq empty deploy/azure/azuredeploy.json
 jq empty railway.json
+grep -q '^FROM golang:1.26.6-bookworm AS gobuild$' Dockerfile
 
-# Railway's Metal builder requires named BuildKit caches and manages attached
-# volumes itself. Catch Dockerfile constructs that its validator rejects before
-# a user discovers them during a one-click deployment.
-if grep -Eq -- '--mount=type=cache,target=' Dockerfile; then
-  echo "Dockerfile cache mounts must include an explicit id for Railway" >&2
+# Railway's Metal builder requires a service-specific cacheKey prefix, which a
+# reusable repository cannot know in advance. Rely on normal Docker layer
+# caching and reject non-portable BuildKit cache mounts before deployment.
+if grep -Eq -- '--mount=type=cache' Dockerfile; then
+  echo "Dockerfile must not use service-specific Railway cache mounts" >&2
   exit 1
 fi
 if grep -Eq '^[[:space:]]*VOLUME[[:space:]]' Dockerfile; then
@@ -20,7 +22,11 @@ if grep -Eq '^[[:space:]]*VOLUME[[:space:]]' Dockerfile; then
   exit 1
 fi
 grep -q 'SOULACY_SERVER_HOST=0.0.0.0' Dockerfile
-grep -q 'CMD curl -fs http://localhost:18789/' Dockerfile
+grep -q 'SOULACY_SERVER_PORT="$PORT"' deploy/common/docker-entrypoint.sh
+grep -q 'chown -R soulacy:soulacy "$data_root"' deploy/common/docker-entrypoint.sh
+grep -q 'exec gosu soulacy /usr/local/bin/soulacy "$@"' deploy/common/docker-entrypoint.sh
+grep -Fq 'CMD curl -fs "http://localhost:${PORT:-${SOULACY_SERVER_PORT:-18789}}/"' Dockerfile
+grep -q '^ENTRYPOINT \["soulacy-entrypoint"\]$' Dockerfile
 
 SOULACY_API_KEY=test-login-key \
 SOULACY_JWT_SECRET=test-jwt-secret \
