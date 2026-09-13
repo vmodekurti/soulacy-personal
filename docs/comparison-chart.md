@@ -10,21 +10,21 @@ follow the links before making a purchasing or architecture decision.
 
 ## The simple version
 
-Frameworks such as LangChain and LangGraph give you a **library** to build an
-agent application around. Soulacy gives you the **running system**: the agent
-runtime, login and web UI, phone and chat channels, schedules, and safety
-checks, in one binary you own.
+Soulacy is a private system that runs your AI agents. You describe an agent in
+one file. It runs on a computer you control. You reach it from your phone or
+your chat apps. It cannot do anything risky without your say-so.
 
-| | Frameworks (LangChain, LangGraph) | Soulacy |
+| | Everywhere else | Soulacy |
 | --- | --- | --- |
-| What you get | Code libraries; you build hosting, sign-in, UI, integrations, and scheduling | A gateway that already has them, so an agent is usable from your phone or Slack the day you write it |
-| How you author | Python or JavaScript code that defines a graph | One YAML file you can review in a pull request and roll back; Studio can write it from plain English |
-| How it stays safe | Approval and interrupt steps you design and add | Enforced by the runtime: confirmations for risky tools, the intent gate, a sandbox for tool code, and Safe Undo |
+| Where it runs | Code frameworks leave you to build and host the application; visual builders need a server stack; hosted agent services keep your agents in their cloud | One binary on a laptop, a $5 VPS, or a Raspberry Pi, with the web UI, login, channels, and schedules already inside it |
+| How you describe an agent | A program you write, or a canvas you drag boxes around | A single YAML file anyone can read, review in a pull request, and roll back; Studio can write it from plain English and repair it when it breaks |
+| What keeps it safe | Approvals and guardrails you wire in per project | Enforced by the runtime for every agent: confirmations for risky tools, the intent gate against injected instructions, a sandbox for tool code, and Safe Undo for reversible changes |
 
-Pick LangGraph when you are embedding agents inside a product you are building
-and want full control of the control flow in code. Pick Soulacy when you want
-agents that run, on hardware you control, without building the surrounding
-application. The rest of this page covers more products and the operating
+Building agents into a product of your own? A code framework or vendor SDK
+fits better. Want a drag-and-drop canvas for business workflows? A visual
+platform fits better. Soulacy is for people who want their own agents running
+privately, reachable from their phone, without building or renting the system
+around them. The rest of this page covers each product and the operating
 details behind that summary.
 
 ## At a glance

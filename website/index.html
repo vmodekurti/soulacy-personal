@@ -485,29 +485,29 @@
       <div class="mt-10 max-w-3xl">
         <h3 class="text-xl font-semibold text-ink-100">The simple version</h3>
         <p class="mt-3 text-ink-300 text-lg leading-relaxed">
-          Frameworks like LangChain and LangGraph give you a <strong class="text-ink-100">library</strong> to build an agent application around.
-          Soulacy gives you the <strong class="text-ink-100">running system</strong>: the agent runtime, the login and web UI, the phone and chat channels, schedules, and the safety checks, all in one binary you own.
+          Soulacy is a <strong class="text-ink-100">private system that runs your AI agents</strong>.
+          You describe an agent in one file. It runs on a computer you control. You reach it from your phone or your chat apps. It cannot do anything risky without your say-so.
         </p>
       </div>
 
       <div class="mt-6 grid md:grid-cols-3 gap-4">
         <div class="card p-6">
-          <div class="text-xs text-ink-400 code-font mb-2">what you get</div>
-          <h4 class="font-semibold text-ink-100">A finished system, not a toolkit</h4>
-          <p class="mt-2 text-sm text-ink-400 leading-relaxed">With a framework you still build hosting, sign-in, a UI, integrations, and scheduling. Soulacy ships those, so an agent is usable from your phone or Slack the day you write it.</p>
+          <div class="text-xs text-ink-400 code-font mb-2">where it runs</div>
+          <h4 class="font-semibold text-ink-100">Yours, on your hardware</h4>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Code frameworks leave you to build and host the application. Visual builders need a server stack. Hosted agent services keep your agents in their cloud. Soulacy is one binary that runs on a laptop, a $5 VPS, or a Raspberry Pi, with the web UI, login, channels, and schedules already inside it.</p>
         </div>
         <div class="card p-6">
-          <div class="text-xs text-ink-400 code-font mb-2">how you author</div>
-          <h4 class="font-semibold text-ink-100">One YAML file, not a program</h4>
-          <p class="mt-2 text-sm text-ink-400 leading-relaxed">A LangGraph agent is Python or JavaScript code that defines a graph. A Soulacy agent is a YAML file you can read, review in a pull request, and roll back. Studio can write it from plain English.</p>
+          <div class="text-xs text-ink-400 code-font mb-2">how you describe an agent</div>
+          <h4 class="font-semibold text-ink-100">One readable file</h4>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Not a program you write, not a canvas you drag boxes around. A Soulacy agent is a single YAML file anyone can read, review in a pull request, and roll back. Studio can write it from plain English and repair it when it breaks.</p>
         </div>
         <div class="card p-6">
-          <div class="text-xs text-ink-400 code-font mb-2">how it stays safe</div>
-          <h4 class="font-semibold text-ink-100">Safety that is on by default</h4>
-          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Frameworks let you add approval steps. Soulacy's runtime enforces them: confirmations for risky tools, the intent gate, a sandbox for tool code, and Safe Undo for reversible changes, whether or not the agent asks for them.</p>
+          <div class="text-xs text-ink-400 code-font mb-2">what keeps it safe</div>
+          <h4 class="font-semibold text-ink-100">Safety you cannot forget to add</h4>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Elsewhere, approvals and guardrails are something you wire in per project. Soulacy's runtime enforces them for every agent: confirmations for risky tools, the intent gate against injected instructions, a sandbox for tool code, and Safe Undo for reversible changes.</p>
         </div>
       </div>
-      <p class="mt-4 text-sm text-ink-400 max-w-3xl">Pick LangGraph when you are embedding agents inside a product you are building and want full control of the control flow in code. Pick Soulacy when you want agents that run, on hardware you control, without building the surrounding application. The full comparison below covers more products and the operating details.</p>
+      <p class="mt-4 text-sm text-ink-400 max-w-3xl">Building agents into a product of your own? A code framework or vendor SDK fits better. Want a drag-and-drop canvas for business workflows? A visual platform fits better. Soulacy is for people who want their own agents running privately, reachable from their phone, without building or renting the system around them. The full comparison below covers each product and the operating details.</p>
 
       <div class="mt-8 overflow-x-auto -mx-5 md:mx-0">
         <table class="min-w-[1180px] text-sm">
