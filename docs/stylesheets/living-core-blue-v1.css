@@ -1,3 +1,4 @@
+/* Versioned URL prevents old browser-cached themes from hiding the new brand. */
 /* Custom theme variables matching soulacy.io landing page palette */
 [data-md-color-scheme="slate"] {
   --md-default-bg-color: #05070f;
