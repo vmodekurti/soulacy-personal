@@ -8,6 +8,25 @@ page compares their operating models rather than declaring a universal winner.
 documentation or repositories. Product capabilities and packaging change, so
 follow the links before making a purchasing or architecture decision.
 
+## The simple version
+
+Frameworks such as LangChain and LangGraph give you a **library** to build an
+agent application around. Soulacy gives you the **running system**: the agent
+runtime, login and web UI, phone and chat channels, schedules, and safety
+checks, in one binary you own.
+
+| | Frameworks (LangChain, LangGraph) | Soulacy |
+| --- | --- | --- |
+| What you get | Code libraries; you build hosting, sign-in, UI, integrations, and scheduling | A gateway that already has them, so an agent is usable from your phone or Slack the day you write it |
+| How you author | Python or JavaScript code that defines a graph | One YAML file you can review in a pull request and roll back; Studio can write it from plain English |
+| How it stays safe | Approval and interrupt steps you design and add | Enforced by the runtime: confirmations for risky tools, the intent gate, a sandbox for tool code, and Safe Undo |
+
+Pick LangGraph when you are embedding agents inside a product you are building
+and want full control of the control flow in code. Pick Soulacy when you want
+agents that run, on hardware you control, without building the surrounding
+application. The rest of this page covers more products and the operating
+details behind that summary.
+
 ## At a glance
 
 | Product | Primary shape | Authoring model | Deployment and operations | Human oversight and security | Mobile and channel surface |

@@ -56,6 +56,25 @@ Apache-2.0 licensed; the project name and logos follow the separate
 
 ## Why Soulacy
 
+**The simple version.** Frameworks like LangChain and LangGraph give you a
+library to build an agent application around. Soulacy gives you the running
+system: the agent runtime, login and web UI, phone and chat channels,
+schedules, and safety checks, in one binary you own.
+
+- **A finished system, not a toolkit.** With a framework you still build
+  hosting, sign-in, a UI, integrations, and scheduling. Soulacy ships them.
+- **One YAML file, not a program.** A LangGraph agent is code that defines a
+  graph. A Soulacy agent is a YAML file you can review in a pull request and
+  roll back. Studio can write it from plain English.
+- **Safety that is on by default.** Frameworks let you add approval steps.
+  Soulacy's runtime enforces them: confirmations for risky tools, the intent
+  gate, a sandbox for tool code, and Safe Undo for reversible changes.
+
+Pick LangGraph when you are embedding agents inside a product you are building
+and want full control of the control flow in code. Pick Soulacy when you want
+agents that run, on hardware you control, without building the surrounding
+application. See the [full comparison](docs/comparison-chart.md).
+
 | | Soulacy | n8n / Flowise / Dify | LangGraph / AutoGen |
 |---|---|---|---|
 | **Deploy** | Gateway with embedded UI; [requirements vary](docs/deployment/footprint.md) | Docker + Postgres + Redis | Python package |
