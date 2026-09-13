@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/auth"
+	"github.com/soulacy/soulacy/internal/httptestutil"
 )
 
 // ---------------------------------------------------------------------------
@@ -82,7 +83,7 @@ func doRequest(t *testing.T, app *fiber.App, method, path, body string) *http.Re
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := app.Test(req, 2000)
+	resp, err := app.Test(httptestutil.WithHost(req), 2000)
 	if err != nil {
 		t.Fatalf("app.Test: %v", err)
 	}
@@ -576,7 +577,7 @@ func TestHandleSetAgentGrant_NoBody_Returns400(t *testing.T) {
 	// Send no body at all — BodyParser receives empty input.
 	req, _ := http.NewRequest(http.MethodPut, "/rbac/grants/admin/agent-x", nil)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := app.Test(req, 2000)
+	resp, err := app.Test(httptestutil.WithHost(req), 2000)
 	if err != nil {
 		t.Fatalf("app.Test: %v", err)
 	}

@@ -75,7 +75,7 @@ Mode), Discord (gateway WebSocket), WhatsApp (Meta Cloud webhook with
 HMAC verification), and the always-on HTTP channel behind `POST /chat`.
 Out-of-process channels (e.g. WhatsApp Web, voice bridges) run as
 supervised stdio **sidecars** speaking the
-[External Channel Protocol](../EXTERNAL_CHANNEL_PROTOCOL.md), with crash
+[External Channel Protocol](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/EXTERNAL_CHANNEL_PROTOCOL.md), with crash
 backoff and restart contained by the supervisor.
 
 **Runtime engine** — the heart. For each inbound message it builds
@@ -95,7 +95,7 @@ provider/model. See [LLM Providers](../configuration/llm.md).
 `memory.max_history`), a durable SQLite archive, and the three-layer
 *brain memory* (episodic / semantic / procedural) exposed via the
 brain-memory API. Procedural memory is versioned as
-[rulebooks](../RULEBOOKS.md) with history, rollback, and locking.
+[rulebooks](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/RULEBOOKS.md) with history, rollback, and locking.
 Semantic search runs on the configured
 [vector backend](../configuration/storage.md).
 
@@ -103,28 +103,28 @@ Semantic search runs on the configured
 `soulacy.events.<type>`, carried by the configured queue (in-process by
 default, NATS JetStream for multi-process). The same stream feeds the
 GUI's WebSocket, [signed webhooks](../configuration/events.md), and any
-external subscriber. Contract: [`docs/EVENTS.md`](../EVENTS.md).
+external subscriber. Contract: [`docs/EVENTS.md`](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/EVENTS.md).
 
 **Plugins & capabilities** — plugins ship a signed
-[manifest](../PLUGIN_MANIFEST.md) declaring the
-[capabilities](../PLUGIN_CAPABILITIES.md) they need (events, credentials,
+[manifest](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/PLUGIN_MANIFEST.md) declaring the
+[capabilities](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/PLUGIN_CAPABILITIES.md) they need (events, credentials,
 GUI mounts…). Installation is stage → safety introspection → explicit
-approval ([`PLUGIN_INSTALL.md`](../PLUGIN_INSTALL.md)); a failing plugin
+approval ([`PLUGIN_INSTALL.md`](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/PLUGIN_INSTALL.md)); a failing plugin
 is skipped with a diagnostic, never a crash. Plugin GUIs mount as
 sandboxed iframes with scoped tokens.
 
 **Registries** — skills and plugins resolve by slug through configured
-[package registries](../PACKAGE_REGISTRIES.md) (HTTP or git), queried in
+[package registries](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/PACKAGE_REGISTRIES.md) (HTTP or git), queried in
 priority order with optional ed25519 package signing. The reference
 registry server ships in the binary (`soulacy registry serve`).
 
 **Reasoning** — agents can opt into
-[reasoning strategies](../REASONING_STRATEGIES.md) (plan-act loops and
+[reasoning strategies](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/REASONING_STRATEGIES.md) (plan-act loops and
 friends) that emit `reasoning.start/step/result` events and can update
 the agent's rulebook (`rulebook.updated`).
 
 **Workflows & flows** — multi-step agent pipelines: declarative workflow
-steps in SOUL.yaml and [flow graphs](../FLOW_GRAPHS.md) rendered live in
+steps in SOUL.yaml and [flow graphs](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/FLOW_GRAPHS.md) rendered live in
 the GUI's Flow View.
 
 ## Request lifecycle (HTTP chat)
@@ -145,5 +145,5 @@ messages — same path, same observability.
 - [Specs & Deep Dives](specs.md) — annotated index of every in-repo spec
 - [Configuration overview](../configuration/index.md) — every knob
 - [API Reference](../api/index.md) — the full route catalog
-- [`docs/FRAMEWORK_OVERVIEW.md`](../FRAMEWORK_OVERVIEW.md) — code-level
+- [`docs/FRAMEWORK_OVERVIEW.md`](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/FRAMEWORK_OVERVIEW.md) — code-level
   walkthrough with file/line cite points

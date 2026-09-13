@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/soulacy/soulacy/internal/publishedfiles"
+	"github.com/soulacy/soulacy/internal/safeundo"
 )
 
 // Validate performs strict, fail-fast validation of a loaded Config (Story 5 /
@@ -62,8 +65,27 @@ func (c *Config) Validate() error {
 	}
 
 	// --- Server ---
+	if err := safeundo.Validate(c.Server.SafeUndo); err != nil {
+		errs = append(errs, fmt.Errorf("server.safe_undo: %w", err))
+	}
+	if len(c.Server.PublishedFiles) > 64 {
+		errs = append(errs, fmt.Errorf("server.published_files: at most 64 dedicated folders may be shared"))
+	}
+	shares := make(map[string]bool)
+	for _, share := range c.Server.PublishedFiles {
+		if strings.TrimSpace(share.AgentID) == "" || shares[share.AgentID] || !publishedfiles.ValidRoot(share.Root) {
+			errs = append(errs, fmt.Errorf("server.published_files: each entry needs a unique agent_id and an absolute, dedicated folder (not home or filesystem root)"))
+		}
+		shares[share.AgentID] = true
+	}
 	if c.Server.Port < 1 || c.Server.Port > 65535 {
 		errs = append(errs, fmt.Errorf("server.port: %d is out of range (1–65535)", c.Server.Port))
+	}
+	if c.Server.Discovery.Enabled && strings.TrimSpace(c.Server.Discovery.Interface) == "" {
+		errs = append(errs, fmt.Errorf("server.discovery.interface: required when LAN discovery is enabled"))
+	}
+	if c.Server.Discovery.Enabled && strings.TrimSpace(c.Server.Discovery.Hostname) == "" {
+		errs = append(errs, fmt.Errorf("server.discovery.hostname: a stable, unique .local hostname is required when LAN discovery is enabled"))
 	}
 	switch strings.ToLower(strings.TrimSpace(c.Voice.Provider)) {
 	case "", "openai", "sidecar":

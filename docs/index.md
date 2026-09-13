@@ -1,159 +1,82 @@
-# Soulacy
+# Put your first agent to useful work
 
-**One binary. YAML agents. Runs anywhere — no cloud required.**
+Soulacy runs agents on a gateway you control. Use the web workspace to create
+and supervise them, and the iPhone companion to chat, review work, and approve
+supported actions. A model supplies the reasoning; Soulacy supplies tools,
+permissions, scheduling, memory, and records of what happened.
 
-!!! info "Documentation channel"
-    These pages track the current `main` branch and may describe capabilities
-    newer than the latest tagged binary. Check `sy version`, review
-    [Recent platform updates](recent-updates.md), and use the
-    [upgrade guide](deployment/upgrades.md) before changing a production host.
+Start with a small, read-only task. Make it reliable before giving it more access.
 
-Soulacy is a self-hosted AI agent runtime. Write an agent in a single YAML file, point it at any LLM (Ollama, OpenAI, Anthropic, Gemini, or anything OpenAI-compatible), and run it from a laptop, a $5 VPS, or a Raspberry Pi — with a full web GUI, chat, voice, scheduling, memory, skills, and plugins built into the one binary.
+These guides cover **Soulacy Personal**, the open-source, self-hosted edition.
+See [how your Personal setup works](personal.md) to understand the gateway,
+model, and companion-client requirements.
 
-Think of it as Ollama — but for agents.
+[Start here: your first successful run](getting-started/quickstart.md){ .md-button .md-button--primary }
+[Pick a worked use case](use-cases/index.md){ .md-button }
 
-## Build it. Run it. Fix and learn.
+!!! info "Match these guides to your installation"
+    These docs follow the Personal repository's `main` branch. Your installed
+    gateway or TestFlight build may be older. Check `sy version` on the server
+    and the version in the iPhone app before expecting a new screen. Source
+    availability is not evidence that your server has been upgraded.
+    See [recent changes](recent-updates.md) and [safe upgrades](deployment/upgrades.md).
 
-- **Build it** — describe what you want in plain English in [Studio](using/studio.md),
-  or start from a [template](template-guides/index.md). Soulacy recommends an
-  agent strategy, lets you make the trigger and destination authoritative, and
-  checks the result before you save. Fixed-graph workflow generation is an
-  explicit experimental option in v0.1.8.
-- **Run it** — deploy to Telegram, Slack, Discord, WhatsApp, HTTP, or a schedule.
-  One binary, no cloud required.
-- **Fix and learn** — when a run fails, **Debug in Studio** explains it plainly and
-  proposes a fix you can preview; successful repairs become regression tests,
-  explicit 👍/👎 feedback improves workflow-pattern ranking, and the
-  [learning loop](studio-learning-memory.md) shows what Soulacy has learned.
+## Choose your starting point
 
-```bash
-# install, set up, talk to your first agent — under five minutes
-curl -fsSL https://soulacy.io/install.sh | bash
-sy setup
-sy chat --agent assistant "What can you do?"
-```
+| You want to… | Follow this guide | What you will have at the end |
+|---|---|---|
+| Try Soulacy for the first time | [First successful run](getting-started/quickstart.md) | A model connection and a response you can check yourself |
+| Use your gateway from an iPhone | [Connect your iPhone](getting-started/iphone.md) | A paired phone and a verified round-trip chat |
+| Turn messy notes into something useful | [Notes → action plan](use-cases/notes-to-action-plan.md) | Owners, next actions, and explicit unknowns without sending anything |
+| Answer questions from your documents | [Grounded handbook answers](use-cases/handbook-answers.md) | A searchable knowledge base and a tested “not found” response |
+| Get a briefing on your phone | [A morning briefing](use-cases/morning-brief.md) | Separate checks for generation, scheduled delivery, and notifications |
+| Teach an agent your report format | [Teach a preference](use-cases/teach-a-preference.md) | An approved lesson tested in a fresh conversation |
+| Review and reverse a record change | [Safe Undo: account handoff](use-cases/safe-undo-handoff.md) | A field-by-field preview, safe apply, and conflict-aware undo |
+| Test a revision before live use | [Release a checked agent](use-cases/verified-release.md) | A candidate with explicit checks and a staged promotion decision |
 
-[Get started :material-rocket-launch:](getting-started/quickstart.md){ .md-button .md-button--primary }
-[Tour the GUI :material-monitor:](getting-started/gui-tour.md){ .md-button }
+## Four words worth knowing
 
----
+- **Gateway:** the running Soulacy server. Closing the browser does not stop a
+  server, but turning off the computer hosting it does.
+- **Agent:** saved instructions plus a model, permitted tools, and optional
+  memory or schedule. Its definition is a `SOUL.yaml` file.
+- **Run:** one attempt to carry out a request. A reply is not automatically proof
+  that an external action succeeded.
+- **Tool:** an operation an agent can request, such as searching a knowledge
+  base. Knowing about a tool does not grant permission to use it.
 
-## What you can build
+## What is automatic, and what needs your decision?
 
-<div class="grid cards" markdown>
+| Capability | What Soulacy does | What you still control |
+|---|---|---|
+| [Model preparation](using/model-preparation.md) | Reads capability metadata and prepares an execution approach | Model, goal, permissions, required output, and budget |
+| [Learning Notebook](using/learning-notebook.md) | Proposes and retrieves source-backed lessons | Approval, rejection, disabling, and testing whether a lesson helps |
+| [Verified Autopilot](using/autopilot.md) | Records checks and enforces release gates | Meaningful criteria and whether to route live work |
+| [Safe Undo](SAFE_UNDO.md) | Tracks reviewed, conditional changes to configured resources | Integration setup, Apply/Undo confirmation, and resolving uncertainty |
+| [Published files](using/published-files.md) | Lists and previews a narrow output folder, read-only | Which agent/folder is exposed and which documents belong there |
 
--   :material-file-document-edit: **Agents from one YAML file**
+“Verified” means a run met its configured checks. It does not mean every fact is
+true, every model is equally capable, or every external effect can be reversed.
+Safe Undo is not a universal undo button for email, purchases, or shell commands.
 
-    ---
+## Where your information goes
 
-    Identity, LLM, tools, memory, schedule — one `SOUL.yaml` per agent. Edit in the GUI or your editor; changes hot-reload.
+Self-hosted does not automatically mean fully offline. A cloud model receives
+the prompts and tool content sent to it; external search and plugins contact
+their own services. Use approved providers and non-sensitive sample data while
+learning. Keep keys, pairing QR codes, and backups private.
+See [security](security/index.md) and [authentication](configuration/auth.md).
 
-    [:octicons-arrow-right-24: SOUL.yaml reference](agents/soul-yaml.md)
+## Need a different kind of help?
 
--   :material-chat-processing: **Chat with branching & voice**
+- **Something failed:** [Find the failing step](troubleshooting/first-checks.md).
+- **Writing YAML:** [first-agent walkthrough](getting-started/first-agent.md) and
+  [complete schema](agents/soul-yaml.md).
+- **Operating a server:** [configuration](configuration/index.md),
+  [cloud setup](deployment/cloud.md), and [upgrades](deployment/upgrades.md).
+- **Contributing:** [documentation and validation checklist](contributing/documentation.md).
 
-    ---
-
-    Fork a conversation from any message, watch reasoning steps live, see per-reply token costs, or hold a realtime voice conversation.
-
-    [:octicons-arrow-right-24: Chat](using/chat.md) · [Voice](using/voice.md)
-
--   :material-message-flash: **Every channel**
-
-    ---
-
-    Telegram, Slack, Discord, WhatsApp, HTTP out of the box — or any platform via a sidecar process in the language of your choice.
-
-    [:octicons-arrow-right-24: Channels](channels/index.md)
-
--   :material-puzzle: **Skills & plugins, safely**
-
-    ---
-
-    Install skills from skills.sh, GitHub, or your own registry. Every install runs a security pipeline; plugins are sandboxed, default-deny principals.
-
-    [:octicons-arrow-right-24: Installing skills](extend/installing-skills.md) · [Skill sources](extend/skill-sources.md)
-
--   :material-brain: **Memory that learns**
-
-    ---
-
-    Session/agent/global memory scopes, persistent native sqlite-vec retrieval,
-    and versioned procedural rulebooks — with locks, diffs, rollback, and
-    reviewable human feedback.
-
-    [:octicons-arrow-right-24: Memory & rulebooks](using/memory.md)
-
--   :material-graph: **Workflows & flow graphs**
-
-    ---
-
-    Linear steps or cyclic graphs with conditional edges and bounded loops — checkpointed, crash-resumable, rendered live on the Flow page.
-
-    [:octicons-arrow-right-24: Flow graphs](agents/flows.md)
-
--   :material-calendar-clock: **Scheduling that catches up**
-
-    ---
-
-    Cron agents with missed-run catch-up after downtime, a workboard with tasks, comments, and downloadable run artifacts.
-
-    [:octicons-arrow-right-24: Schedules](using/schedules.md) · [Workboard](using/workboard.md)
-
--   :material-shield-check: **Observable & governable**
-
-    ---
-
-    Every run emits schema-versioned events: live activity, signed webhooks,
-    atomic spend reservations, model allowlists, rate limits, object-scoped
-    RBAC, audit logs, and readiness checks.
-
-    [:octicons-arrow-right-24: Events & webhooks](configuration/events.md)
-
-</div>
-
-## Five-minute tour
-
-1. **Install** — one line on [macOS](deployment/macos.md), [Linux](deployment/linux.md), or [Docker](deployment/docker.md), then `sy setup` walks you through providers and channels. → [Installation](getting-started/installation.md)
-2. **Meet the GUI** — everything lives at `http://localhost:18789`: Dashboard, Agents, Chat, Workboard, Knowledge, Memory, Skills, Flow, Plugins. → [GUI tour](getting-started/gui-tour.md)
-3. **Write an agent** — a complete `SOUL.yaml` walkthrough: prompt, tools, memory, schedule. → [Your first agent](getting-started/first-agent.md)
-4. **Give it skills** — `sy registry add https://www.skills.sh/` then `sy skill install anthropics/skills/skill-creator`. → [Skill sources](extend/skill-sources.md)
-5. **Put it to work** — bind a Telegram bot, schedule a daily run, or start from a shipped [workflow template](using/templates.md).
-
-## Why Soulacy
-
-| | Soulacy | n8n / Flowise / Dify | LangGraph / AutoGen |
-|---|---|---|---|
-| **Deploy** | Single binary, zero deps | Docker + Postgres + Redis | Python package |
-| **Config** | One YAML file per agent | Visual editor (brittle exports) | Code |
-| **Runs on** | Laptop, VPS, Raspberry Pi | Needs a server stack | Dev machine |
-| **LLM** | Any — local or cloud | Mostly cloud | Any |
-| **No-code** | GUI included in binary | Yes | No |
-| **Extensible** | Skills, plugins, sidecars in any language | JS nodes | Python |
-| **Security stack** | Untrusted-content envelope, injection scanner, intent gate, Security Doctor — shipped | Third-party plugin | Operator's problem |
-
-## What Soulacy is NOT
-
-Positioning honesty — say what we are, and what we aren't, so you can
-self-disqualify quickly if the fit's wrong.
-
-- **Not a hosted SaaS.** No `soulacy.cloud`. Ever. Self-hosted-first is the
-  point of the product.
-- **Not a LangGraph replacement.** If you need explicit state-machine graphs
-  with checkpoints and resumable execution, use LangGraph.
-- **Not a general-purpose personal assistant.** Soulacy runs headless and delivers to
-  focused channels, including its native iOS companion; it doesn't ship a wake-word,
-  a general-purpose Canvas, or consumer messaging impersonation.
-  If you want an iMessage / WeChat / Signal / Matrix personal assistant, use
-  [OpenClaw](https://openclaw.ai/).
-- **Not vendor-locked.** Not tied to Anthropic, OpenAI, Google, or any
-  provider. Provider-agnostic via config.
-- **Not a low-code node editor for non-developers.** Studio helps, but the
-  audience is developers/ops who prefer YAML + Python tools.
-
-## Where to next
-
-- **Users**: [Quick Start](getting-started/quickstart.md) → [GUI Tour](getting-started/gui-tour.md) → [Using Soulacy](using/chat.md)
-- **Agent authors**: [SOUL.yaml Reference](agents/soul-yaml.md) → [Tools](agents/tools.md) → [Reasoning](agents/reasoning.md) → [Flow Graphs](agents/flows.md)
-- **Operators**: [Configuration](configuration/index.md) → [Events & Webhooks](configuration/events.md) → [Upgrades](deployment/upgrades.md)
-- **Extenders**: [Plugins](extend/plugins.md) → [Custom Channels](channels/sidecars.md) → [Custom Distributions](extend/custom-distributions.md) → [Specs](architecture/specs.md)
+The Personal edition is self-hosted and Apache-2.0 licensed. Provider access,
+hosting, and external services may cost money. The iPhone app needs a reachable
+gateway. There is no claim of complete parity with another framework or of
+guaranteed, bug-free automation.

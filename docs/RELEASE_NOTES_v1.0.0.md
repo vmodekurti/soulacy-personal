@@ -102,7 +102,8 @@ and non-loopback binds require an API key or explicit
 
 ## What Soulacy is NOT (positioning honesty)
 
-- **Not a hosted SaaS.** No `soulacy.cloud`. Ever.
+- **Current setup:** Soulacy Personal is open-source and self-hosted.
+  See [Personal](personal.md) for the current installation scope and requirements.
 - **Not a LangGraph replacement.** If you need explicit state-machine graphs
   with checkpoints and resumable execution, use LangGraph.
 - **Not a personal assistant.** Soulacy runs headless and delivers to

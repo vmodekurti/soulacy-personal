@@ -217,6 +217,7 @@ docs-build:
 	@python3 -c "import mkdocs" >/dev/null 2>&1 || { echo "mkdocs not found — install with: python3 -m pip install mkdocs-material"; exit 1; }
 	@cp install.sh docs/install.sh
 	python3 -m mkdocs build --strict
+	python3 scripts/check-docs-site.py
 
 ## Capture launch screenshots for the public docs using the production GUI bundle.
 docs-screenshots: build

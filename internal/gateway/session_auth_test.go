@@ -8,6 +8,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/soulacy/soulacy/internal/auth"
+	"github.com/soulacy/soulacy/internal/httptestutil"
 	"github.com/soulacy/soulacy/pkg/message"
 )
 
@@ -36,7 +37,7 @@ func TestSessionOwnershipIsPrincipalAndAgentBound(t *testing.T) {
 
 	request := func(method, path, subject string) int {
 		req, _ := http.NewRequest(method, path+"?subject="+url.QueryEscape(subject), nil)
-		resp, err := app.Test(req)
+		resp, err := app.Test(httptestutil.WithHost(req))
 		if err != nil {
 			t.Fatal(err)
 		}

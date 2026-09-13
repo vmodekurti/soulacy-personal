@@ -5,6 +5,7 @@ func (s *Server) Close() error {
 	if s == nil {
 		return nil
 	}
+	s.closeAutopilot()
 	s.learningReplayWG.Wait()
 	if s.workflowDistiller != nil {
 		s.workflowDistiller.Close()

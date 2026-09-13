@@ -114,7 +114,7 @@ Soulacy. The gateway spawns the sidecar, negotiates capabilities, and
 provisions a per-run shared scratch directory (`data/scratch/…`) so large
 payloads move as files instead of stdio JSON. Full wire spec and
 conformance kit (`sdk/extstorage/storagetest`): see
-[`docs/EXTERNAL_STORAGE_PROTOCOL.md`](../EXTERNAL_STORAGE_PROTOCOL.md).
+[`docs/EXTERNAL_STORAGE_PROTOCOL.md`](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/EXTERNAL_STORAGE_PROTOCOL.md).
 
 ```yaml
 vector:

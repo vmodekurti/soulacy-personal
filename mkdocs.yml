@@ -1,5 +1,5 @@
-site_name: Soulacy
-site_description: Secure, self-hosted AI agent runtime with Studio, native MCP, persistent semantic memory, governed LLM spend, and multi-channel delivery.
+site_name: soulacy
+site_description: Step-by-step guides for self-hosted agents, iPhone setup, reviewed learning, Safe Undo, and verified automation.
 site_url: https://docs.soulacy.io
 repo_url: https://github.com/vmodekurti/soulacy-personal
 repo_name: vmodekurti/soulacy-personal
@@ -10,23 +10,23 @@ theme:
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: deep purple
-      accent: purple
+      primary: indigo
+      accent: indigo
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: deep purple
-      accent: purple
+      primary: indigo
+      accent: indigo
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
   font:
     text: Inter
     code: JetBrains Mono
-  logo: assets/logo.svg
-  favicon: assets/logo.svg
+  logo: assets/living-core-blue-v1.png
+  favicon: assets/living-core-blue-v1.png
   features:
     - navigation.tabs
     - navigation.tabs.sticky
@@ -52,6 +52,11 @@ plugins:
 
 # Internal working documents — never published to the public site.
 exclude_docs: |
+  validation/**
+  brand/**
+  *_VALIDATION_*.md
+  PRODUCTION_RELEASE_*.md
+  LIVING_CORE_RELEASE_*.md
   AGENT_DESIGN.md
   SESSION_HANDOFF.md
   STUDIO_*.md
@@ -129,14 +134,31 @@ extra:
 
 nav:
   - Home: index.md
+  - About Personal: personal.md
   - Recent Updates: recent-updates.md
   - Getting Started:
     - Installation: getting-started/installation.md
     - Quick Start: getting-started/quickstart.md
+    - Connect Your iPhone: getting-started/iphone.md
     - Your First Agent: getting-started/first-agent.md
     - GUI Tour: getting-started/gui-tour.md
+  - Worked Use Cases:
+    - Choose a Use Case: use-cases/index.md
+    - Notes to an Action Plan: use-cases/notes-to-action-plan.md
+    - Grounded Handbook Answers: use-cases/handbook-answers.md
+    - Morning Briefing on iPhone: use-cases/morning-brief.md
+    - Teach a Report Preference: use-cases/teach-a-preference.md
+    - Safe Undo Account Handoff: use-cases/safe-undo-handoff.md
+    - Release a Checked Agent: use-cases/verified-release.md
   - Using Soulacy:
     - Chat: using/chat.md
+    - Verified Autopilot: using/autopilot.md
+    - Learning Notebook: using/learning-notebook.md
+    - Model Preparation: using/model-preparation.md
+    - Published Files: using/published-files.md
+    - Safe Undo (Operator Reference): SAFE_UNDO.md
+    - Learning (Technical Reference): LEARNING_NOTEBOOK.md
+    - Model Preparation (Technical Reference): MODEL_AWARE_EXECUTION.md
     - Studio (Agent Builder): using/studio.md
     - Studio Learning & Memory: studio-learning-memory.md
     - Voice Conversations: using/voice.md
@@ -218,13 +240,17 @@ nav:
   - CLI:
     - Reference: cli/reference.md
   - Deployment:
+    - Footprint & Requirements: deployment/footprint.md
     - One-click Cloud: deployment/cloud.md
     - Docker: deployment/docker.md
     - macOS: deployment/macos.md
     - Linux / VPS: deployment/linux.md
     - Upgrades & Reinstall: deployment/upgrades.md
   - Troubleshooting:
+    - Find the Failing Step: troubleshooting/first-checks.md
     - Common Failures → Fixes: troubleshooting/common-failures.md
+  - Contributing:
+    - Documentation & Validation: contributing/documentation.md
   - Architecture:
     - Overview: architecture/overview.md
     - Specs & Deep Dives: architecture/specs.md

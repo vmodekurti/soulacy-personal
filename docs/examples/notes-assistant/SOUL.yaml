@@ -1,0 +1,15 @@
+id: notes-assistant
+name: Notes Assistant
+description: Turn supplied notes into a checkable action plan without external tools.
+enabled: true
+trigger: channel
+channels: [http]
+llm:
+  provider: ollama # Replace with your configured provider ID.
+  model: replace-with-your-installed-model
+builtins: []
+system_prompt: |
+  Turn the user's supplied notes into an action plan.
+  Use only those notes. Do not browse, send messages, or change files.
+  List each action and its owner. If an owner or date is absent, say "Not specified".
+  Finish with a section called "Open questions". Never invent a commitment.

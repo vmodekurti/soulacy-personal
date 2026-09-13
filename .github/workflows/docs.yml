@@ -9,6 +9,7 @@ on:
       - "mkdocs.yml"
       - "install.sh"
       - "Makefile"
+      - "scripts/check-docs-site.py"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 

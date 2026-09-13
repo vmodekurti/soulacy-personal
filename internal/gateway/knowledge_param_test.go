@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/soulacy/soulacy/internal/httptestutil"
 )
 
 func TestKnowledgeKBParamDecodesEscapedName(t *testing.T) {
@@ -16,7 +17,7 @@ func TestKnowledgeKBParamDecodesEscapedName(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/knowledge/AI%20Documents/documents", nil)
-	resp, err := app.Test(req)
+	resp, err := app.Test(httptestutil.WithHost(req))
 	if err != nil {
 		t.Fatal(err)
 	}

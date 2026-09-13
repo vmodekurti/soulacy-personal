@@ -97,7 +97,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 	RoleAdmin: {
 		ResourceAgents:    {ActionRead: true, ActionWrite: true, ActionDelete: true, ActionEnable: true},
 		ResourceChat:      {ActionRead: true, ActionChat: true},
-		ResourceMemory:    {ActionRead: true, ActionDelete: true},
+		ResourceMemory:    {ActionRead: true, ActionWrite: true, ActionDelete: true},
 		ResourceChannels:  {ActionRead: true, ActionWrite: true, ActionEnable: true},
 		ResourceProviders: {ActionRead: true, ActionWrite: true},
 		// Installing, rescanning, and provisioning skills are administrator
@@ -120,7 +120,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 	RoleOperator: {
 		ResourceAgents:      {ActionRead: true, ActionWrite: true, ActionEnable: true},
 		ResourceChat:        {ActionRead: true, ActionChat: true},
-		ResourceMemory:      {ActionRead: true, ActionDelete: true},
+		ResourceMemory:      {ActionRead: true, ActionWrite: true, ActionDelete: true},
 		ResourceChannels:    {ActionRead: true, ActionEnable: true},
 		ResourceProviders:   {ActionRead: true},
 		ResourceSkills:      {ActionRead: true},

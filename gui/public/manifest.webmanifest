@@ -16,32 +16,32 @@
       "short_name": "Chat",
       "description": "Open agent chat.",
       "url": "/#chat",
-      "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+      "icons": [{ "src": "/brand/living-core-blue-v1-192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
       "name": "Runs",
       "short_name": "Runs",
       "description": "Review recent agent runs.",
       "url": "/#activity",
-      "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+      "icons": [{ "src": "/brand/living-core-blue-v1-192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
       "name": "Studio",
       "short_name": "Studio",
       "description": "Build and debug workflows.",
       "url": "/#studio",
-      "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+      "icons": [{ "src": "/brand/living-core-blue-v1-192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
       "name": "Delivery",
       "short_name": "Delivery",
       "description": "Check channel delivery.",
       "url": "/#channels",
-      "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+      "icons": [{ "src": "/brand/living-core-blue-v1-192.png", "sizes": "192x192", "type": "image/png" }]
     }
   ],
   "icons": [
-    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
-    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+    { "src": "/brand/living-core-blue-v1-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/brand/living-core-blue-v1-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
   ]
 }

@@ -19,6 +19,9 @@ func TestAgentObjectRoutesDeclareObjectAuthorization(t *testing.T) {
 	}
 	source := string(data)
 	required := []string{
+		`api.Get("/agents/:id/model-preparation", s.rbacAgentFromMW`,
+		`api.Get("/agents/:id/files", s.rbacAgentFromMW`,
+		`api.Get("/agents/:id/files/preview", s.rbacAgentFromMW`,
 		`api.Post("/chat", s.rbacAgentFromMW`,
 		`api.Post("/chat/stream", s.rbacAgentFromMW`,
 		`api.Get("/chat/stream", s.rbacAgentFromMW`,

@@ -159,7 +159,8 @@ The current README tagline is "One binary. YAML agents. Runs anywhere — no clo
 5. **Nine of the top provider APIs, ten shipping channels, MCP client + server, browser via Playwright, learning loop — no SDK dance.** Config alone brings in OpenAI/Anthropic/Gemini/Ollama/OpenRouter/Groq/Together/vLLM/any-OpenAI-compatible (`docs/FRAMEWORK_OVERVIEW.md:233-234`).
 
 **What Soulacy explicitly is NOT** (write this on the docs page — reduces churn).
-- Not a hosted SaaS. There is no soulacy.cloud plan.
+- Personal is open-source and self-hosted. Describe the current setup, not promises
+  about future hosting options. See [Personal](personal.md).
 - Not a LangGraph replacement. If you want explicit state-machine graphs with checkpoints, use LangGraph.
 - Not a personal-assistant "install everywhere" like OpenClaw. Soulacy runs headless, delivers to channels, and doesn't ship a wake-word or a native mobile app.
 - Not a low-code node-editor for non-developers. Studio helps, but the audience is developers/ops who prefer YAML + Python tools.
@@ -298,7 +299,7 @@ The six positioning/scope calls are answered. Each entry names the decision and 
 
 **Decision 5 — TypeScript SDK: defer to Q4.** A half-working stub reads worse than a shipped "coming Q4" note. Unlocks: honest omission in README + comparison chart; no scope creep on the pre-tag sprint.
 
-**Decision 6 — "Soulacy Cloud": categorically ruled out for the launch year.** Added to the `docs/index.md` "what Soulacy is NOT" strip. Self-hosted-first is a positioning weapon only if committed to. Unlocks: "we are not a SaaS" line in the elevator pitch; forecloses the "when will you host this" reviewer question.
+**Decision 6 — current public positioning.** Describe Soulacy Personal as open-source and self-hosted. Do not make promises about future hosting options. See [Personal](personal.md).
 
 **With these six locked, the pre-tag sprint scope is:** `docs/RELEASE_CHECKLIST.md`, `CHANGELOG.md` v1.0.0 entry, `docs/RELEASE_NOTES_v1.0.0.md`, `scripts/uat-parity-full.sh` (full opt-in credential-backed parity harness), README + `docs/index.md` hero rewrite, `docs/OPENCLAW_PARITY.md` voice update, GitHub-triage example agent, seven-framework security comparison chart, 60-90s demo video.
 

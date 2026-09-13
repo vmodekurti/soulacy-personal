@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte'
+  import BrandMark from './lib/BrandMark.svelte'
   import { apiKey, connected, authRequired } from './lib/stores.js'
   import ShareView from './pages/ShareView.svelte'
   import PersonalLanding from './pages/PersonalLanding.svelte'
@@ -58,6 +59,7 @@
   }
 
   const pageLoaders = {
+    autopilot: () => import('./pages/Autopilot.svelte'),
     dashboard: () => import('./pages/Dashboard.svelte'),
     onboarding: () => import('./pages/Onboarding.svelte'),
     studio: () => import('./pages/Studio.svelte'),
@@ -331,7 +333,7 @@
   <ShareView token={shareToken} />
 {:else if !sessionChecked}
   <div class="session-check" role="status" aria-live="polite">
-    <span class="session-check-mark" aria-hidden="true">S</span>
+    <BrandMark size={42} />
     <strong>Restoring your session…</strong>
   </div>
 {:else if $authRequired}
@@ -425,16 +427,7 @@
             aria-label={sidebarOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={sidebarOpen}>
       <span aria-hidden="true">{sidebarOpen ? '×' : '☰'}</span>
     </button>
-    <svg class="brand-svg w-6 h-6" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <linearGradient id="mobile-logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="#7e5cff" />
-          <stop offset="100%" stop-color="#22c47a" />
-        </linearGradient>
-      </defs>
-      <path d="M32 6 L54 14 V32 C54 45.5 44.5 55 32 58 C19.5 55 10 45.5 10 32 V14 L32 6 Z" fill="#0b0d1a" stroke="url(#mobile-logo-grad)" stroke-width="3" />
-      <path d="M42 20 L24 20 C20 20 18 22 18 26 C18 30 22 32 32 34 C42 36 46 38 46 42 C46 46 44 48 40 48 L22 48" stroke="url(#mobile-logo-grad)" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" />
-    </svg>
+    <BrandMark size={28} alt="Soulacy" />
     <div class="mobile-context">
       <strong>{currentPageLabel}</strong>
       <span>{currentWorkspaceLabel || 'Soulacy'}</span>
@@ -451,18 +444,9 @@
   <aside class="sidebar" class:open={sidebarOpen} class:collapsed={navCollapsed}>
     <div class="brand">
       <span class="brand-logo" aria-hidden="true">
-        <svg class="brand-svg" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <linearGradient id="sidebar-logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stop-color="#7e5cff" />
-              <stop offset="100%" stop-color="#22c47a" />
-            </linearGradient>
-          </defs>
-          <path d="M32 6 L54 14 V32 C54 45.5 44.5 55 32 58 C19.5 55 10 45.5 10 32 V14 L32 6 Z" fill="#0b0d1a" stroke="url(#sidebar-logo-grad)" stroke-width="3" />
-          <path d="M42 20 L24 20 C20 20 18 22 18 26 C18 30 22 32 32 34 C42 36 46 38 46 42 C46 46 44 48 40 48 L22 48" stroke="url(#sidebar-logo-grad)" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
+        <BrandMark size={30} />
       </span>
-      <span class="brand-name">Soulacy</span>
+      <span class="brand-name">soulacy</span>
       <button class="nav-toggle" on:click={toggleNav}
               title={navCollapsed ? 'Expand menu' : 'Collapse menu'}
               aria-label={navCollapsed ? 'Expand menu' : 'Collapse menu'}>
@@ -584,19 +568,6 @@
     color: #a9afcf;
     background: radial-gradient(circle at 50% 35%, rgba(92, 79, 196, 0.14), transparent 34%), #0c0e1a;
   }
-  .session-check-mark {
-    display: grid;
-    place-items: center;
-    width: 2.75rem;
-    height: 2.75rem;
-    border: 1px solid #7068dd;
-    border-radius: 0.8rem;
-    color: #9d97ff;
-    font-size: 1.2rem;
-    font-weight: 700;
-    animation: session-pulse 1.2s ease-in-out infinite alternate;
-  }
-  @keyframes session-pulse { to { opacity: 0.55; transform: scale(0.96); } }
 
   /* ── Form elements ──────────────────────────────────────────────── */
   :global(input:not([type="radio"]):not([type="checkbox"])), :global(textarea), :global(select) {
@@ -749,7 +720,6 @@
       font-size: 1.35rem; line-height: 1; padding: 0; border-radius: 11px;
     }
     .hamburger:hover { background: #181b30; }
-    .topbar .brand-svg { width: 25px; height: 25px; }
     .mobile-context { min-width: 0; display: grid; flex: 1; line-height: 1.2; }
     .mobile-context strong { overflow: hidden; color: #f2f3fb; font-size: .9rem; text-overflow: ellipsis; white-space: nowrap; }
     .mobile-context span { overflow: hidden; color: #737c9e; font-size: .66rem; text-overflow: ellipsis; white-space: nowrap; }
@@ -821,16 +791,12 @@
     display: flex; align-items: center; gap: 0.7rem;
     padding: 1.15rem 1.1rem;
   }
-  /* Vector shield logo mark */
+  /* The same Living Core artwork used by the native app. */
   .brand-logo {
     width: 30px; height: 30px; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
   }
-  .brand-svg {
-    width: 28px; height: 28px;
-    filter: drop-shadow(0 0 6px rgba(126, 92, 255, 0.45));
-  }
-  .brand-name { font-weight: 700; font-size: 1.02rem; letter-spacing: 0.01em; color: #f2f3fb; }
+  .brand-name { font-weight: 750; font-size: 1.15rem; letter-spacing: -0.04em; color: #f2f3fb; }
 
 
   nav { flex: 1; padding: 0.5rem 0.5rem; overflow-y: auto; }

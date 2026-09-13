@@ -16,6 +16,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/soulacy/soulacy/internal/autopilot"
 	"github.com/soulacy/soulacy/internal/channels"
 	httpchan "github.com/soulacy/soulacy/internal/channels/http"
 	"github.com/soulacy/soulacy/internal/config"
@@ -26,6 +27,7 @@ import (
 	"github.com/soulacy/soulacy/internal/learning"
 	"github.com/soulacy/soulacy/internal/mcp"
 	"github.com/soulacy/soulacy/internal/runtime"
+	"github.com/soulacy/soulacy/internal/safeundo"
 	"github.com/soulacy/soulacy/internal/scheduler"
 	"github.com/soulacy/soulacy/internal/secrets"
 	"github.com/soulacy/soulacy/internal/studio"
@@ -280,13 +282,32 @@ func (a *App) Run(parent context.Context) error {
 	ctx, cancel := context.WithCancel(parent)
 	stack.push("app-context-cancel", func() error { cancel(); return nil })
 
-	learningSweeper := learning.NewSweeper(learning.SweeperConfig{
-		Store:   learningStore,
-		Actions: actionBackend,
-		Agents:  loader,
-		Logger:  log.Named("learning-sweeper"),
-	})
-	learningSweeper.Start(ctx)
+	// Admission, metering and saved deployment controls must be ready before
+	// schedulers or channels are allowed to execute an agent.
+	openedCostStore := a.wireEngineExtras(ctx, ws, engine, llmRouter, stack)
+	autopilotStore, err := autopilot.NewStore(ws.DB("autopilot"))
+	if err != nil {
+		return fmt.Errorf("open autopilot controls: %w", err)
+	}
+	stack.pushClose("autopilot-store", autopilotStore)
+	engine.SetAutopilot(autopilotStore, nil)
+	var undoStore *safeundo.Store
+	if len(cfg.Server.SafeUndo.Resources) > 0 {
+		undoStore, err = safeundo.NewStore(ws.DB("safe-undo"), cfg.Server.SafeUndo)
+		if err != nil {
+			return fmt.Errorf("open safe undo: %w", err)
+		}
+		stack.pushClose("safe-undo-store", undoStore)
+	}
+
+	// Retain legacy proposals for review, but stop generating generic excerpt
+	// drafts. New learning is scoped, evidence-backed and versioned.
+	notebook, err := learning.OpenNotebook(ws.DB("learning-notebook"))
+	if err != nil {
+		return fmt.Errorf("open learning notebook: %w", err)
+	}
+	stack.pushClose("learning-notebook", notebook)
+	engine.SetLearningNotebook(notebook, false)
 
 	// ── Scheduler ────────────────────────────────────────────────────────────
 	sched := scheduler.New(engine, loader, log, ctx)
@@ -369,9 +390,6 @@ func (a *App) Run(parent context.Context) error {
 	// ── RBAC Manager ──────────────────────────────────────────────────────────
 	rbacManager := a.wireRBAC(ws, stack)
 
-	// ── Engine-attached stores (checkpoint / telemetry / cost) ───────────────
-	openedCostStore := a.wireEngineExtras(ctx, ws, engine, llmRouter, stack)
-
 	// ── Gateway Server ────────────────────────────────────────────────────────
 	// Construction + every host-side capability (plugin GUI mounts, installer,
 	// safety pipeline, registries, voice, workboard/ratelimit/apikey/dlq/history
@@ -394,6 +412,8 @@ func (a *App) Run(parent context.Context) error {
 		credVault:       credVault,
 		pluginLoader:    pluginLoader,
 		openedCostStore: openedCostStore,
+		autopilotStore:  autopilotStore,
+		undoStore:       undoStore,
 	}, stack)
 
 	// ── KB ingestion worker ───────────────────────────────────────────────────

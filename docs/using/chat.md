@@ -117,7 +117,11 @@ curl -X POST http://localhost:18789/api/v1/chat/confirm \
 A denial fails that tool call (the agent is told it was denied); an approval lets the run continue.
 
 !!! warning
-    Confirmation gates only pause runs that have a streaming connection to deliver the prompt. On non-streaming calls (plain `POST /api/v1/chat`) the engine logs a warning and proceeds, so pair `confirm_tools` with streaming clients for tools you truly want gated.
+    Confirmation needs an interactive channel to deliver the prompt. Without
+    one (for example a plain non-streaming request or a scheduled run), required
+    confirmation is denied by default. `unattended: true` explicitly opts an
+    agent into auto-approval in that situation and records it in the audit log.
+    Do not enable unattended execution merely to dismiss an approval error.
 
 ## Sharing a conversation
 

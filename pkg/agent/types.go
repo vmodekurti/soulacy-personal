@@ -138,13 +138,15 @@ type BrainMemoryConfig struct {
 	Procedural ProceduralMemoryConfig `yaml:"procedural,omitempty" json:"procedural,omitempty"`
 }
 
-// LearningConfig controls the post-run learning loop. When enabled, successful
-// runs create reviewable proposals instead of silently changing memory/rules.
+// LearningConfig enables the private, review-first notebook. Authenticated runs
+// reuse approved guidance and may propose source-backed lessons via tools.
 type LearningConfig struct {
-	Enabled      bool `yaml:"enabled,omitempty"       json:"enabled,omitempty"`
-	AutoPropose  bool `yaml:"auto_propose,omitempty"  json:"auto_propose,omitempty"`
-	MinChars     int  `yaml:"min_chars,omitempty"     json:"min_chars,omitempty"`
-	MaxProposals int  `yaml:"max_proposals,omitempty" json:"max_proposals,omitempty"`
+	Enabled     bool `yaml:"enabled,omitempty"       json:"enabled,omitempty"`
+	AutoPropose bool `yaml:"auto_propose,omitempty"  json:"auto_propose,omitempty"`
+	// MinChars is retained for legacy configuration compatibility; the notebook
+	// no longer creates excerpt proposals based on reply length.
+	MinChars     int `yaml:"min_chars,omitempty"     json:"min_chars,omitempty"`
+	MaxProposals int `yaml:"max_proposals,omitempty" json:"max_proposals,omitempty"`
 }
 
 // ToolPolicyConfig gates high-risk tool actions (shell, filesystem, network)
@@ -590,8 +592,8 @@ type Definition struct {
 	BrainMemory BrainMemoryConfig `yaml:"brain_memory,omitempty" json:"brain_memory,omitempty"`
 
 	// --- Learning loop ---
-	// Controls post-run learning proposals. Proposals are reviewable in the GUI
-	// and API; accepting one writes it into the relevant memory/rule layer.
+	// Controls the private learning notebook. Proposals require human approval
+	// on web, iOS or API and never modify shared rulebooks or executable skills.
 	Learning LearningConfig `yaml:"learning,omitempty" json:"learning,omitempty"`
 
 	// --- Tool policy ---
@@ -668,6 +670,12 @@ type Definition struct {
 	// the same result. Optional: an agent with no contract behaves exactly as
 	// before.
 	Outcome *OutcomeContract `yaml:"outcome,omitempty" json:"outcome,omitempty"`
+
+	// Mission is the run-wide Autopilot contract. Its deterministic checks are
+	// evaluated into an integrity-hashed proof record after every integrated run.
+	// It is additive to Outcome: existing workflow assertions keep their current
+	// behaviour and can be included in the same proof by the runtime.
+	Mission *MissionContract `yaml:"mission,omitempty" json:"mission,omitempty"`
 
 	// ToolSchemas records the tool contracts this agent was BUILT AGAINST
 	// (P0-3). MCP schemas are discovered live, but nothing recorded which
@@ -882,6 +890,30 @@ func (d *Definition) Clone() *Definition {
 		oc := *d.Outcome
 		oc.Assertions = append([]OutcomeAssertion(nil), d.Outcome.Assertions...)
 		cp.Outcome = &oc
+	}
+
+	// Mission contract — clone the slice and pointer-valued cost thresholds.
+	if d.Mission != nil {
+		mission := *d.Mission
+		mission.Acceptance = append([]MissionCheck(nil), d.Mission.Acceptance...)
+		for i := range mission.Acceptance {
+			if d.Mission.Acceptance[i].CostUSD != nil {
+				cost := *d.Mission.Acceptance[i].CostUSD
+				mission.Acceptance[i].CostUSD = &cost
+			}
+		}
+		if d.Mission.Limits.MaxCostUSD != nil {
+			cost := *d.Mission.Limits.MaxCostUSD
+			mission.Limits.MaxCostUSD = &cost
+		}
+		if d.Mission.Limits.AllowedTools != nil {
+			allowed := append([]string(nil), (*d.Mission.Limits.AllowedTools)...)
+			if allowed == nil {
+				allowed = []string{}
+			}
+			mission.Limits.AllowedTools = &allowed
+		}
+		cp.Mission = &mission
 	}
 
 	// Tool-schema snapshot — deep copy, including each record's node list.

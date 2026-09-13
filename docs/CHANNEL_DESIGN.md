@@ -140,7 +140,7 @@ Two genuine constraints:
 - ✅ Matches how Slack/Discord users think about scope.
 - ⚠ Introduces yet another concept (workspace vs agent vs channel). For a single-operator self-hosted runtime, this is over-modelling.
 - ⚠ Doesn't really solve the multi-agent-per-channel problem unless the workspace itself has a router — at which point it's the inbox model with extra steps.
-- ⚠ Most useful for multi-tenant SaaS deployments, which Soulacy isn't (and isn't claiming to be).
+- ⚠ Most useful when serving multiple independent tenants; Personal's self-hosted workflows may not need this channel.
 
 ### Recommendation summary for Q2
 

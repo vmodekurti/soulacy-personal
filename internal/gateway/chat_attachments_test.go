@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/soulacy/soulacy/internal/httptestutil"
 	"github.com/soulacy/soulacy/internal/session"
 )
 
@@ -45,7 +46,7 @@ func TestChatAttachmentUploadListAndPromptExpansion(t *testing.T) {
 	}
 	req.Header.Set("Authorization", "Bearer secret")
 	req.Header.Set("Content-Type", mw.FormDataContentType())
-	resp, err := s.app.Test(req, -1)
+	resp, err := s.app.Test(httptestutil.WithHost(req), -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +118,7 @@ func TestChatAttachmentPromptExpansionCapsLargeAttachmentText(t *testing.T) {
 	}
 	req.Header.Set("Authorization", "Bearer secret")
 	req.Header.Set("Content-Type", mw.FormDataContentType())
-	resp, err := s.app.Test(req, -1)
+	resp, err := s.app.Test(httptestutil.WithHost(req), -1)
 	if err != nil {
 		t.Fatal(err)
 	}

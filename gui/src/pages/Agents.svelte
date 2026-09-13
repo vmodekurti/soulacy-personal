@@ -7,6 +7,10 @@
   import { apiKey, editAgent, studioSession } from '../lib/stores.js'
   import ChipPicker from '../lib/ChipPicker.svelte'
   import FilePicker from '../lib/FilePicker.svelte'
+  import PublishedFiles from '../lib/PublishedFiles.svelte'
+  import ModelPreparation from '../lib/ModelPreparation.svelte'
+
+  let showFiles = false
 
   let agents   = []
   let selected = null   // the agent currently shown in the editor
@@ -1514,6 +1518,7 @@ console.log(reply);` : ''
             <span>{selected ? 'Editing: ' + selected.id : 'New Agent'}</span>
             <div class="hdr-actions editor-actions">
               {#if selected}
+                <button class="btn-secondary" on:click={() => showFiles = !showFiles} aria-expanded={showFiles}>Published files</button>
                 <button class="btn-secondary" on:click={() => showExport = true}
                         data-tooltip="Show API snippets for this agent">&lt;/&gt; API</button>
                 <button class="btn-secondary" on:click={downloadAgentPackage}
@@ -1554,6 +1559,9 @@ console.log(reply);` : ''
             </div>
           </div>
 
+          {#if selected && showFiles}
+            {#key selected.id}<PublishedFiles agentID={selected.id} />{/key}
+          {/if}
           <div class="fields">
             {#if saveAudit?.warnings?.length}
               <div class="save-audit" class:danger={saveAudit.requires_ack}>
@@ -1978,6 +1986,10 @@ console.log(reply);` : ''
               </div>
             </div>
 
+            {#if selected}
+              {#key selected}<ModelPreparation agentID={selected.id} />{/key}
+            {/if}
+
             <div class="row-3">
               <div class="field">
                 <span class="field-label" data-tooltip={llmTips.temperature}>Temperature</span>
@@ -2261,11 +2273,11 @@ console.log(reply);` : ''
               {/each}
             </div>
 
-            <div class="sep">Learning loop <span class="optional">(reviewable post-run proposals)</span></div>
+            <div class="sep">Learning notebook <span class="optional">(private, source-backed lessons)</span></div>
             <div class="learning-card {editing.learning?.enabled ? 'enabled' : ''}">
               <div class="bm-header">
                 <span class="bm-icon">✨</span>
-                <span class="bm-label">Create learning proposals after successful runs</span>
+                <span class="bm-label">Remember and reuse approved lessons</span>
                 <label class="toggle-sm">
                   <input type="checkbox" checked={!!editing.learning?.enabled}
                     on:change={e => {
@@ -2278,22 +2290,21 @@ console.log(reply);` : ''
                   <span class="toggle-track-sm"></span>
                 </label>
               </div>
-              <div class="bm-desc">Soulacy stores proposed memories and procedures for human review in Learning before applying them.</div>
+              <div class="bm-desc">Learn preferences, facts and procedures. Every new lesson or correction needs your review; it never changes tool permissions.</div>
               {#if editing.learning?.enabled}
                 <div class="learning-fields">
                   <div class="field">
-                    <span class="field-label">Minimum run text</span>
-                    <input type="number" min="80" max="5000"
-                      value={editing.learning?.min_chars || 160}
-                      on:input={e => {
+                    <label><input type="checkbox" checked={!!editing.learning?.auto_propose}
+                      on:change={e => {
                         editing.learning = editing.learning || {}
-                        editing.learning.min_chars = Number(e.target.value)||160
+                        editing.learning.auto_propose = e.target.checked
                         editing = editing
-                      }} />
+                      }} /> Propose useful lessons during tasks</label>
+                    <span class="bm-desc">Uses the task’s existing model and budget. Off means learning is proposed when you ask.</span>
                   </div>
                   <div class="field">
                     <span class="field-label">Max proposals per run</span>
-                    <input type="number" min="1" max="4"
+                    <input type="number" min="1" max="3"
                       value={editing.learning?.max_proposals || 3}
                       on:input={e => {
                         editing.learning = editing.learning || {}
