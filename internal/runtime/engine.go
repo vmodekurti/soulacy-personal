@@ -297,6 +297,10 @@ type Engine struct {
 	// SetMaxAgentCallDepth; <=0 falls back to defaultMaxAgentCallDepth.
 	maxAgentCallDepth int
 
+	// budgetMu guards the run-budget triple below: SetRunBudgets can be
+	// called after wiring (config hot-reload), while effectiveRunBudget reads
+	// at every run start on any goroutine.
+	budgetMu            sync.RWMutex
 	defaultRunBudget    agent.BudgetConfig
 	maxRunBudget        agent.BudgetConfig
 	runBudgetConfigured bool
