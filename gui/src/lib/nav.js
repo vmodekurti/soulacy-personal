@@ -35,6 +35,7 @@ export const navPages = [
   { id: 'providers', icon: '⚙', label: 'Providers',   group: 'integrations' },
   { id: 'secrets',   icon: '🔑', label: 'Secrets',     group: 'integrations' },
   { id: 'activity',  icon: '📈', label: 'Runs',        group: 'system'       },
+  { id: 'reports',   icon: '▤', label: 'Reports',     group: 'system'       },
   { id: 'browser',   icon: '🕸', label: 'Browser',     group: 'system'       },
   { id: 'config',    icon: '≡', label: 'Config',      group: 'system'       },
   { id: 'mobile',    icon: '▣', label: 'Mobile',      group: 'system'       },

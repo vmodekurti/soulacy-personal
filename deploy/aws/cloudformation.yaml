@@ -6,7 +6,7 @@ Parameters:
     Type: String
     Default: t3.small
     AllowedValues: [t3.small, t3.medium, t3.large, t3.xlarge, t4g.small, t4g.large, t4g.xlarge]
-    Description: t3.small is the economical starting point; t3.large is recommended for heavier agents.
+    Description: t3.small is the economical starting point; t3.large is recommended for heavier agents. Accounts on the AWS Free Tier plan may be limited to t3.small.
   ImageVersion:
     Type: String
     Default: latest

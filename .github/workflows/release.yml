@@ -265,6 +265,75 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  # ── Publish version-pinned cloud deployment templates ───────────────────────
+  # The website's Deploy to AWS / Azure buttons read from this bucket. The copies
+  # published here default ImageVersion/ReleaseRef to this exact release, so a
+  # one-click deployment never mixes a floating `latest` image with whatever the
+  # `main` bootstrap happens to be that day. The job authenticates to AWS with
+  # OIDC (no stored keys) and skips with a warning until the role variable is set.
+  publish-cloud-assets:
+    name: Publish cloud deployment assets
+    needs: [release-context, docker]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DEPLOY_ASSETS_BUCKET: soulacy-public-deploy-633654243571
+      DEPLOY_ASSETS_REGION: us-east-1
+      DEPLOY_ASSETS_ROLE_ARN: ${{ vars.AWS_DEPLOY_ASSETS_ROLE_ARN }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Pin templates to this release
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          IMAGE_TAG="${VERSION#v}"
+          mkdir -p publish
+          python3 - "$VERSION" "$IMAGE_TAG" <<'PY'
+          import json, pathlib, re, sys
+          ref, image = sys.argv[1], sys.argv[2]
+          cfn = pathlib.Path("deploy/aws/cloudformation.yaml").read_text()
+          cfn, n1 = re.subn(r"(?m)^(  ImageVersion:\n    Type: String\n    Default: )latest$", rf"\g<1>{image}", cfn)
+          cfn, n2 = re.subn(r"(?m)^(  ReleaseRef:\n    Type: String\n    Default: )main$", rf"\g<1>{ref}", cfn)
+          if n1 != 1 or n2 != 1:
+              raise SystemExit(f"cloudformation.yaml defaults not found (ImageVersion={n1}, ReleaseRef={n2})")
+          pathlib.Path("publish/cloudformation.yaml").write_text(cfn)
+          arm = json.loads(pathlib.Path("deploy/azure/azuredeploy.json").read_text())
+          arm["parameters"]["imageVersion"]["defaultValue"] = image
+          arm["parameters"]["releaseRef"]["defaultValue"] = ref
+          pathlib.Path("publish/azuredeploy.json").write_text(json.dumps(arm, indent=2) + "\n")
+          PY
+          grep -n 'Default: ' publish/cloudformation.yaml | head -4
+          python3 -c "import json;a=json.load(open('publish/azuredeploy.json'))['parameters'];print(a['imageVersion']['defaultValue'],a['releaseRef']['defaultValue'])"
+
+      - name: Skip when the publisher role is not configured
+        if: ${{ env.DEPLOY_ASSETS_ROLE_ARN == '' }}
+        run: echo "::warning::AWS_DEPLOY_ASSETS_ROLE_ARN repository variable is not set — cloud deployment templates were not published."
+
+      - name: Configure AWS credentials (OIDC)
+        if: ${{ env.DEPLOY_ASSETS_ROLE_ARN != '' }}
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ env.DEPLOY_ASSETS_ROLE_ARN }}
+          aws-region: ${{ env.DEPLOY_ASSETS_REGION }}
+
+      - name: Upload templates
+        if: ${{ env.DEPLOY_ASSETS_ROLE_ARN != '' }}
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          for f in cloudformation.yaml azuredeploy.json; do
+            case "$f" in *.yaml) ct=text/yaml ;; *) ct=application/json ;; esac
+            # Immutable per-release copy first, then the floating copy the website links to.
+            aws s3 cp "publish/$f" "s3://${DEPLOY_ASSETS_BUCKET}/releases/${VERSION}/$f" --content-type "$ct" --cache-control "public, max-age=31536000, immutable"
+            aws s3 cp "publish/$f" "s3://${DEPLOY_ASSETS_BUCKET}/$f" --content-type "$ct" --cache-control "public, max-age=300"
+          done
+          echo "Published ${VERSION} deployment templates to ${DEPLOY_ASSETS_BUCKET}."
+
   # ── Prove the release GUI boots every main route before publishing ──────────
   gui-render-smoke:
     name: GUI render smoke
