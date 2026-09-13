@@ -76,7 +76,7 @@
     "ipName": "[concat(variables('prefix'), '-ip')]",
     "nicName": "[concat(variables('prefix'), '-nic')]",
     "vmName": "[variables('prefix')]",
-    "bootstrapUrl": "[concat('https://raw.githubusercontent.com/vmodekurti/soulacy-personal/', parameters('releaseRef'), '/deploy/common/bootstrap.sh')]"
+    "bootstrapUrl": "[uri('https://raw.githubusercontent.com/vmodekurti/soulacy-personal/', format('{0}/deploy/common/bootstrap.sh', parameters('releaseRef')))]"
   },
   "resources": [
     {
@@ -253,7 +253,7 @@
   "outputs": {
     "soulacyURL": {
       "type": "string",
-      "value": "[concat('https://', variables('domain'))]",
+      "value": "[uri(format('https://{0}', variables('domain')), '/')]",
       "metadata": {
         "description": "Open after deployment completes. DNS and TLS can take another minute."
       }
