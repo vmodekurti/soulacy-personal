@@ -502,12 +502,34 @@ step "pwa manifest"
 MANIFEST_JSON="$(curl -fsS "$URL/manifest.webmanifest")"
 printf '%s' "$MANIFEST_JSON" | json_assert "doc.get('start_url') == '/#mobile' and doc.get('display') == 'standalone' and doc.get('id') == '/#mobile' and all(url in [s.get('url') for s in doc.get('shortcuts', [])] for url in ['/#chat', '/#activity', '/#studio', '/#channels'])"
 SW_JS="$(curl -fsS "$URL/sw.js")"
-for needle in "notificationclick" "/#mobile" "/icon.svg"; do
+for needle in "notificationclick" "/#mobile" "/brand/living-core-blue-v1-192.png" "soulacy-shell-v4-living-core"; do
   if ! grep -Fq "$needle" <<<"$SW_JS"; then
     echo "service worker does not contain expected PWA behavior: $needle" >&2
     exit 1
   fi
 done
+
+python3 - "$URL" "$ROOT/gui/public" "$MANIFEST_JSON" <<'PY'
+import json, pathlib, struct, sys, urllib.request
+
+base, source, raw_manifest = sys.argv[1:]
+manifest = json.loads(raw_manifest)
+expected = {f"/brand/living-core-blue-v1-{size}.png": size for size in (192, 512)}
+icons = manifest.get("icons", [])
+assert {icon.get("src") for icon in icons} == set(expected), "unexpected PWA icon paths"
+for icon in icons:
+    size = expected[icon["src"]]
+    assert icon.get("sizes") == f"{size}x{size}" and icon.get("type") == "image/png", "incorrect icon metadata"
+for size in (32, 128, 180, 192, 512):
+    path = f"/brand/living-core-blue-v1-{size}.png"
+    with urllib.request.urlopen(base + path, timeout=10) as response:
+        assert response.headers.get_content_type() == "image/png", f"not a PNG response: {path}"
+        data = response.read(2 * 1024 * 1024)
+    assert data[:8] == b"\x89PNG\r\n\x1a\n", f"invalid PNG: {path}"
+    assert struct.unpack(">II", data[16:24]) == (size, size), f"incorrect PNG dimensions: {path}"
+    assert data == (pathlib.Path(source) / path.lstrip("/")).read_bytes(), f"embedded icon differs from approved asset: {path}"
+print("approved Living Core assets served correctly")
+PY
 
 step "template catalog"
 TEMPLATE_JSON="$(api GET /templates)"
