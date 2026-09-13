@@ -78,6 +78,7 @@
     providers: () => import('./pages/Providers.svelte'),
     secrets: () => import('./pages/Secrets.svelte'),
     activity: () => import('./pages/Activity.svelte'),
+    reports: () => import('./pages/Reports.svelte'),
     browser: () => import('./pages/BrowserTrace.svelte'),
     config: () => import('./pages/Config.svelte'),
     mobile: () => import('./pages/Mobile.svelte'),
