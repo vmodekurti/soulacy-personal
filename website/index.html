@@ -482,6 +482,21 @@
         <p class="mt-3 text-xs text-ink-400 code-font">Primary-source review · updated September 10, 2026</p>
       </div>
 
+      <div class="mt-10 card p-6 md:p-8 border-signal-500/30">
+        <div class="text-xs text-ink-400 code-font mb-2">the one hard reason</div>
+        <h3 class="text-2xl md:text-3xl font-bold tracking-tight text-ink-100">Nothing risky happens unless you approved it, or you can point to the line that allowed it.</h3>
+        <p class="mt-4 text-ink-300 leading-relaxed max-w-3xl">
+          Every other option makes what an agent may do a matter of trust: code someone wrote, a canvas someone configured, or a service in someone else's cloud. In Soulacy it is a property of the runtime. Agents fail closed by default, and every exception is a line in a YAML file you can read. So for any action an agent ever takes, you can answer one of two questions: who approved it, or which line permitted it.
+        </p>
+        <p class="mt-5 text-sm font-semibold text-ink-100">Do not take our word for it. Check it in five minutes on your own machine.</p>
+        <ol class="mt-3 space-y-2 text-sm text-ink-400 leading-relaxed max-w-3xl">
+          <li class="flex gap-3"><span class="code-font text-signal-400 shrink-0">1</span><span><strong class="text-ink-100">Ask for something risky.</strong> Write a small agent and ask it to delete a file. It cannot: system tools are not even offered until <span class="code-font">runtime.allow_system_tools: true</span> is in your config and the agent declares them.</span></li>
+          <li class="flex gap-3"><span class="code-font text-signal-400 shrink-0">2</span><span><strong class="text-ink-100">Turn them on and ask again.</strong> Now the agent stops and waits for your approval before the privileged step runs.</span></li>
+          <li class="flex gap-3"><span class="code-font text-signal-400 shrink-0">3</span><span><strong class="text-ink-100">Schedule it for 3 a.m.</strong> The same step is refused because nobody is there to approve it, until the agent's file says <span class="code-font">unattended: true</span>.</span></li>
+          <li class="flex gap-3"><span class="code-font text-signal-400 shrink-0">4</span><span><strong class="text-ink-100">Read the diff.</strong> Every change that made the agent more capable is a line you wrote in a file you can read, review, and roll back. Safe Undo covers the changes it makes.</span></li>
+        </ol>
+      </div>
+
       <div class="mt-10 max-w-3xl">
         <h3 class="text-xl font-semibold text-ink-100">The simple version</h3>
         <p class="mt-3 text-ink-300 text-lg leading-relaxed">

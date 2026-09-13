@@ -8,6 +8,25 @@ page compares their operating models rather than declaring a universal winner.
 documentation or repositories. Product capabilities and packaging change, so
 follow the links before making a purchasing or architecture decision.
 
+## The one hard reason
+
+**Nothing risky happens unless you approved it, or you can point to the line
+that allowed it.**
+
+Every other option makes what an agent may do a matter of trust: code someone
+wrote, a canvas someone configured, or a service in someone else's cloud. In
+Soulacy it is a property of the runtime. Agents fail closed by default, and
+every exception is a line in a YAML file you can read. So for any action an
+agent ever takes, you can answer one of two questions: who approved it, or
+which line permitted it.
+
+Do not take our word for it. Check it in five minutes on your own machine:
+
+1. **Ask for something risky.** Write a small agent and ask it to delete a file. It cannot: system tools are not even offered until `runtime.allow_system_tools: true` is in your config and the agent declares them.
+2. **Turn them on and ask again.** Now the agent stops and waits for your approval before the privileged step runs.
+3. **Schedule it for 3 a.m.** The same step is refused because nobody is there to approve it, until the agent's file says `unattended: true`.
+4. **Read the diff.** Every change that made the agent more capable is a line you wrote in a file you can read, review, and roll back. Safe Undo covers the changes it makes.
+
 ## The simple version
 
 Soulacy is a private system that runs your AI agents. You describe an agent in
