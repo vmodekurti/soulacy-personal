@@ -3669,6 +3669,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#the-one-hard-reason" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The one hard reason
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-simple-version" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4734,6 +4745,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#the-one-hard-reason" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The one hard reason
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-simple-version" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4878,6 +4900,22 @@ page compares their operating models rather than declaring a universal winner.</
 <p><strong>Research date:</strong> September 10, 2026. Claims below are linked to first-party
 documentation or repositories. Product capabilities and packaging change, so
 follow the links before making a purchasing or architecture decision.</p>
+<h2 id="the-one-hard-reason">The one hard reason<a class="headerlink" href="#the-one-hard-reason" title="Permanent link">&para;</a></h2>
+<p><strong>Nothing risky happens unless you approved it, or you can point to the line
+that allowed it.</strong></p>
+<p>Every other option makes what an agent may do a matter of trust: code someone
+wrote, a canvas someone configured, or a service in someone else's cloud. In
+Soulacy it is a property of the runtime. Agents fail closed by default, and
+every exception is a line in a YAML file you can read. So for any action an
+agent ever takes, you can answer one of two questions: who approved it, or
+which line permitted it.</p>
+<p>Do not take our word for it. Check it in five minutes on your own machine:</p>
+<ol>
+<li><strong>Ask for something risky.</strong> Write a small agent and ask it to delete a file. It cannot: system tools are not even offered until <code>runtime.allow_system_tools: true</code> is in your config and the agent declares them.</li>
+<li><strong>Turn them on and ask again.</strong> Now the agent stops and waits for your approval before the privileged step runs.</li>
+<li><strong>Schedule it for 3 a.m.</strong> The same step is refused because nobody is there to approve it, until the agent's file says <code>unattended: true</code>.</li>
+<li><strong>Read the diff.</strong> Every change that made the agent more capable is a line you wrote in a file you can read, review, and roll back. Safe Undo covers the changes it makes.</li>
+</ol>
 <h2 id="the-simple-version">The simple version<a class="headerlink" href="#the-simple-version" title="Permanent link">&para;</a></h2>
 <p>Soulacy is a private system that runs your AI agents. You describe an agent in
 one file. It runs on a computer you control. You reach it from your phone or
