@@ -29,7 +29,7 @@ import (
 )
 
 // EventSink receives structured events as they happen during agent execution.
-func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message.Message, err error) {
+func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message.Message, err error) {
 	metadata := llm.CallMetadataFromContext(ctx)
 	if metadata.Subject == "" {
 		metadata.Subject = msg.UserID
@@ -85,7 +85,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 		// A single explicit terminal event gives learning/telemetry consumers an
 		// authoritative run boundary. Session IDs are conversational and may span
 		// hundreds of turns; error events may be recovered. Neither is a run ID.
-		if e.sink != nil {
+		if e.sink != nil && !autopilotManaged(ctx) {
 			e.sink.Emit(message.Event{
 				Type: "run.completed", AgentID: msg.AgentID, SessionID: msg.SessionID,
 				Payload: map[string]any{
@@ -119,6 +119,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 				e.failureNotifier.NotifyFailure(notifyCtx, d, msg, err.Error())
 			}
 		}
+		e.finishLearningRun(ctx, msg, reply, success)
 	}()
 
 	// S2.1 — Panic isolation. Channel- and cron-driven runs execute in bare
@@ -163,7 +164,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 	}
 
 	// Resolve agent definition
-	def := e.loader.Get(msg.AgentID)
+	def := e.definitionForContext(ctx, msg.AgentID)
 	if def == nil {
 		return message.Message{}, fmt.Errorf("engine: unknown agent %q", msg.AgentID)
 	}
@@ -185,9 +186,12 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 	if !def.Enabled {
 		return message.Message{}, fmt.Errorf("engine: agent %q is disabled", msg.AgentID)
 	}
+	ctx = e.startLearningRun(ctx, def, msg)
 	if def.ID == SystemAgentID && msg.Channel != "http" && msg.Channel != "internal" {
 		return message.Message{}, fmt.Errorf("engine: system agent is only available on http/internal channel")
 	}
+	preflightTokens, preflightCalls := e.effectiveRunBudget(def)
+	ctx = llm.WithExecutionBudget(ctx, preflightTokens, preflightCalls)
 
 	// Router short-circuit. Kind=="router" agents have no LLM loop — they
 	// match the inbound text against def.Routes and forward to the first
@@ -198,6 +202,10 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 	if def.Kind == "router" {
 		return e.dispatchRouter(ctx, def, msg)
 	}
+	if resolveErr := e.resolveExecutionModel(def); resolveErr != nil {
+		return message.Message{}, fmt.Errorf("model preflight: %w", resolveErr)
+	}
+	runProvider, runModel = def.LLM.Provider, def.LLM.Model
 
 	// Provider allowlist guard. Closes the "GUI dropdown fat-finger →
 	// paid-API hit" class of failure: an agent that declares
@@ -239,6 +247,19 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 			Timestamp: time.Now().UTC(),
 		})
 		return message.Message{}, fmt.Errorf("%s", errMsg)
+	}
+
+	preparation, prepareErr := e.prepareModelDefinition(ctx, def)
+	if prepareErr != nil {
+		return message.Message{}, fmt.Errorf("model preflight: %w", prepareErr)
+	}
+	runStrategy = preparation.Strategy
+	e.sink.Emit(message.Event{
+		Type: "agent.prepared", AgentID: msg.AgentID, SessionID: msg.SessionID,
+		Payload: preparation, Timestamp: time.Now().UTC(),
+	})
+	if preparation.BlockedReason != "" {
+		return message.Message{}, fmt.Errorf("model preflight: %s", preparation.BlockedReason)
 	}
 
 	e.sink.Emit(message.Event{
@@ -429,7 +450,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 	// google/gemini) DefaultBackendFor would silently fall back to local Ollama
 	// and fail. In that case we degrade to the classic tool loop, which works
 	// with every provider.
-	if loopCfg, ok := reasoning.LoopConfigFromDefinition(def, sysPrefix, e.providerSupportsNativeTools(def)); ok {
+	if loopCfg, ok := reasoning.LoopConfigFromDefinition(def, sysPrefix, preparation.Profile.NativeTools != llm.SupportNo); ok {
 		if strings.TrimSpace(def.Reasoning.StepTimeout) == "" {
 			loopCfg.StepTimeout = e.effectiveStepTimeout()
 		}
@@ -632,6 +653,9 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 			}
 		}
 		inputBudget := ctxLimit - reserveOut
+		if evidenced := llm.ProfileInputBudget(preparation.Profile, reserveOut); evidenced > 0 {
+			inputBudget = evidenced
+		}
 		if trimmed, dropped := trimMessagesToFit(chatMsgs, tools, inputBudget); dropped > 0 {
 			chatMsgs = trimmed
 			e.log.Warn("engine: trimmed history to fit context window",
@@ -680,8 +704,11 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 		llmStart := time.Now()
 
 		llmCtx, llmCancel := context.WithTimeout(ctx, e.effectiveLLMTimeout())
+		defer llmCancel() // panic/early-return guard; active streams own this deadline until drained.
 		resp, err := e.llmRouter.Complete(llmCtx, def.LLM.Provider, req)
-		llmCancel()
+		if err != nil || resp == nil || resp.Stream == nil {
+			llmCancel()
+		}
 		// Story 4 / S5.1 — reactive recovery: if the provider still rejects the
 		// prompt as too large (our estimate was optimistic, or the model's real
 		// window is smaller than our table), aggressively halve the non-system
@@ -694,8 +721,12 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 				req.Messages = chatMsgs
 				usedCalls++
 				retryCtx, retryCancel := context.WithTimeout(ctx, e.effectiveLLMTimeout())
+				defer retryCancel()
 				resp, err = e.llmRouter.Complete(retryCtx, def.LLM.Provider, req)
-				retryCancel()
+				if err != nil || resp == nil || resp.Stream == nil {
+					retryCancel()
+				}
+				llmCtx, llmCancel = retryCtx, retryCancel
 			}
 		}
 		// Prometheus: per-call duration + outcome counter + token counts.
@@ -753,6 +784,13 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 				sb.WriteString(token)
 			}
 			resp.Content = sb.String()
+			streamErr := llmCtx.Err()
+			llmCancel()
+			if streamErr != nil {
+				outErr := fmt.Errorf("engine: streaming model response interrupted: %w", streamErr)
+				e.sink.Emit(message.Event{Type: "error", AgentID: msg.AgentID, SessionID: msg.SessionID, Payload: map[string]any{"stage": "llm_stream", "error": outErr.Error()}, Timestamp: time.Now().UTC()})
+				return message.Message{}, outErr
+			}
 		}
 		// A few open-weight models advertise native tool calling but emit a
 		// compact XML invocation in message content instead of the provider's
@@ -1129,7 +1167,6 @@ func (e *Engine) finalizeReply(ctx context.Context, def *agent.Definition, sess 
 	// RL-09: persist task + reply as an episodic brain memory record. The
 	// reasoning loop's "feature active" signal is a configured strategy.
 	e.writeEpisodic(def, msg.AgentID, flattenParts(msg.Parts), finalContent, def.Reasoning.Strategy != "")
-	e.proposeLearning(ctx, def, msg, finalContent)
 
 	reply := message.Message{
 		ID:        msg.ID, // correlate reply to request

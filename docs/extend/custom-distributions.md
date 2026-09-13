@@ -138,4 +138,4 @@ func TestMatrixAdapterConforms(t *testing.T) {
 | Trust model | default-deny principal, install approval | compiled in — full trust, reviewed at build time |
 | Best for | third-party additions on a running host | curated distributions, native performance, custom storage/registry backends |
 
-Spec deep-dive: [Custom Distributions](../CUSTOM_DISTRIBUTIONS.md).
+Spec deep-dive: [Custom Distributions](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/CUSTOM_DISTRIBUTIONS.md).

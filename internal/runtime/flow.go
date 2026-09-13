@@ -248,7 +248,13 @@ func (w *WorkflowExecutor) runFlow(ctx context.Context, msg message.Message, run
 			// Fail-closed per-case consent (§13): refuse to run code beyond the
 			// ReadOnly guardrails unless the node carries a matching, valid
 			// consent stamp and the operator ceiling permits it.
-			def := w.engine.loader.Get(msg.AgentID)
+			def := w.engine.definitionForContext(ctx, msg.AgentID)
+			if err := missionToolAllowed(ctx, "inline_python"); err != nil {
+				return nil, err
+			}
+			if missionSimulation(ctx) {
+				return json.RawMessage(`{"simulated":true,"tool":"inline_python"}`), nil
+			}
 			if cerr := consent.Authorize(node, w.engine.IsSystemAgentAllowed(def)); cerr != nil {
 				return nil, cerr
 			}
@@ -256,7 +262,7 @@ func (w *WorkflowExecutor) runFlow(ctx context.Context, msg message.Message, run
 		}
 		var def *agent.Definition
 		if w.engine.loader != nil {
-			def = w.engine.loader.Get(msg.AgentID)
+			def = w.engine.definitionForContext(ctx, msg.AgentID)
 		}
 		if def == nil {
 			def = &agent.Definition{}

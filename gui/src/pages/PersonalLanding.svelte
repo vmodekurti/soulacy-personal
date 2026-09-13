@@ -1,5 +1,6 @@
 <script>
   import { createEventDispatcher } from 'svelte'
+  import BrandMark from '../lib/BrandMark.svelte'
 
   export let loginKey = ''
   export let loginError = ''
@@ -24,8 +25,8 @@
 
   <header class="public-header">
     <a class="brand" href="#personal-home" aria-label="Soulacy Personal home">
-      <span class="brand-mark" aria-hidden="true">⬡</span>
-      <span class="brand-copy"><strong>Soulacy</strong><small>Personal</small></span>
+      <BrandMark size={38} />
+      <span class="brand-copy"><strong>soulacy</strong><small>Personal</small></span>
     </a>
     <nav aria-label="Personal edition navigation">
       <a class="nav-link" href="#why-personal">Why Personal</a>
@@ -52,7 +53,7 @@
 
     <div class="login-panel" id="personal-login">
       <div class="panel-topline">
-        <span class="panel-glyph" aria-hidden="true">⬡</span>
+        <BrandMark size={32} />
         <span class="status"><i></i> Personal gateway</span>
       </div>
       <h2>Welcome back</h2>
@@ -144,9 +145,8 @@
 
   .public-header { position: relative; z-index: 5; display: flex; align-items: center; justify-content: space-between; box-sizing: border-box; width: min(1180px, calc(100% - 48px)); margin: auto; padding: calc(24px + env(safe-area-inset-top)) 0 24px; border-bottom: 1px solid #ffffff12; }
   .brand { display: flex; align-items: center; gap: 11px; color: #fff; text-decoration: none; }
-  .brand-mark { display: grid; place-items: center; width: 38px; height: 38px; border: 1px solid #8e7bff66; border-radius: 11px; background: #8e7bff15; color: #9d8cff; font-size: 24px; }
   .brand-copy { display: grid; line-height: 1.05; }
-  .brand-copy strong { font-size: 17px; letter-spacing: -.02em; }
+  .brand-copy strong { font-size: 21px; letter-spacing: -.04em; }
   .brand-copy small { margin-top: 4px; color: #777f9b; font-size: 9px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
   nav { display: flex; align-items: center; gap: 7px; }
   nav a { box-sizing: border-box; color: #c8cbe0; text-decoration: none; font-size: 13px; font-weight: 750; white-space: nowrap; }
@@ -173,7 +173,6 @@
   .login-panel { position: relative; scroll-margin-top: 28px; padding: clamp(25px, 3vw, 36px); border: 1px solid #ffffff1c; border-radius: 24px; background: linear-gradient(145deg, #181a30dc, #101722e8); box-shadow: 0 30px 90px #0009, inset 0 1px 0 #ffffff0c; backdrop-filter: blur(24px) saturate(135%); -webkit-backdrop-filter: blur(24px) saturate(135%); }
   .login-panel::before { content: ''; position: absolute; inset: -1px; z-index: -1; border-radius: 24px; background: linear-gradient(145deg, #9e8cff44, transparent 45%, #52da9c22); }
   .panel-topline { display: flex; align-items: center; justify-content: space-between; margin-bottom: 27px; }
-  .panel-glyph { color: #9e8cff; font-size: 30px; filter: drop-shadow(0 0 16px #7d65ff88); }
   .status { display: flex; align-items: center; gap: 7px; color: #8e96ae; font-size: 10px; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; }
   .status i { width: 7px; height: 7px; border-radius: 50%; background: #52da9c; box-shadow: 0 0 12px #52da9c; }
   .login-panel h2 { margin: 0; color: #fbfaff; font-size: 27px; letter-spacing: -.035em; }
@@ -222,7 +221,6 @@
   }
   @media (max-width: 680px) {
     .public-header { width: min(100% - 32px); padding-top: calc(17px + env(safe-area-inset-top)); padding-bottom: 17px; }
-    .brand-mark { width: 35px; height: 35px; }
     .nav-link { display: none; }
     .login-link { min-height: 44px; display: grid; place-items: center; padding: 0 17px; }
     .hero { width: min(100% - 32px); min-height: auto; gap: 48px; padding: 58px 0 82px; }

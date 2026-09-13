@@ -8,6 +8,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/soulacy/soulacy/internal/auth"
+	"github.com/soulacy/soulacy/internal/httptestutil"
 	"go.uber.org/zap"
 )
 
@@ -40,7 +41,7 @@ func TestRequireAgentFromAllIdentifierLocationsAndRoles(t *testing.T) {
 				app.Add(tc.method, "/objects/:agent?", h, func(c *fiber.Ctx) error { return c.SendStatus(http.StatusNoContent) })
 				req, _ := http.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
 				req.Header.Set("Content-Type", tc.contentType)
-				resp, err := app.Test(req)
+				resp, err := app.Test(httptestutil.WithHost(req))
 				if err != nil || resp.StatusCode != http.StatusNoContent {
 					t.Fatalf("allowed object status=%v err=%v", resp.StatusCode, err)
 				}
@@ -61,7 +62,7 @@ func TestRequireAgentFromExplicitObjectDeny(t *testing.T) {
 			func(c *fiber.Ctx) error { return c.SendStatus(http.StatusNoContent) })
 		req, _ := http.NewRequest(http.MethodPost, "/chat", strings.NewReader(`{"agent_id":"denied"}`))
 		req.Header.Set("Content-Type", "application/json")
-		resp, err := app.Test(req)
+		resp, err := app.Test(httptestutil.WithHost(req))
 		if err != nil || resp.StatusCode != http.StatusForbidden {
 			t.Fatalf("role %s denied object status=%v err=%v", role, resp.StatusCode, err)
 		}

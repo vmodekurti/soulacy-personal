@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"github.com/soulacy/soulacy/internal/httptestutil"
 	"net/http"
 	"strings"
 	"testing"
@@ -10,7 +11,7 @@ func TestBrowserSecurityHeadersApplyToGUIAndAPI(t *testing.T) {
 	s := newTestGateway(t, "secret")
 	for _, path := range []string{"/", "/api/v1/health"} {
 		req, _ := http.NewRequest(http.MethodGet, path, nil)
-		resp, err := s.app.Test(req)
+		resp, err := s.app.Test(httptestutil.WithHost(req))
 		if err != nil {
 			t.Fatal(err)
 		}

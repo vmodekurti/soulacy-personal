@@ -154,7 +154,7 @@ Rules worth knowing as an author:
 - Capabilities and credentials are the heart of the trust model — read
   [Plugin Security Model](plugin-security.md) before publishing.
 
-Full references: [plugin manifest](../PLUGIN_MANIFEST.md),
-[capabilities](../PLUGIN_CAPABILITIES.md),
-[credentials](../PLUGIN_CREDENTIALS.md),
-[migrations](../PLUGIN_MIGRATIONS.md).
+Full references: [plugin manifest](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/PLUGIN_MANIFEST.md),
+[capabilities](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/PLUGIN_CAPABILITIES.md),
+[credentials](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/PLUGIN_CREDENTIALS.md),
+[migrations](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/PLUGIN_MIGRATIONS.md).

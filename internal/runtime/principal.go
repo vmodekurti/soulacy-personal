@@ -55,6 +55,9 @@ func callerAllowsTool(ctx context.Context, toolName string) bool {
 	if p.Role == "admin" {
 		return true
 	}
+	if strings.HasPrefix(toolName, "safe_undo.") {
+		return p.Role == "operator"
+	}
 	if isPrivilegedSystemTool(toolName) {
 		return p.Role == "operator"
 	}

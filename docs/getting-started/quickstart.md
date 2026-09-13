@@ -1,153 +1,143 @@
-# Quick Start
+# Your first successful run
 
-A working agent, the web GUI, and your first chat — in under five minutes.
+**Outcome:** open your workspace, connect one model, and turn supplied notes
+into a checkable answer. No email, write tools, or schedule is needed.
 
-Soulacy is a **local-first agent operating system**: Studio for authoring
-and self-healing agents, Channels for delivery, Schedule for cron, Learning
-for making the same mistake less often, Packaging for versioned installs —
-all in one binary, all local by default.
+## Before you start
 
-## 1. Install
+You need a Mac or Linux machine for the gateway, or an existing hosted gateway
+and its login credential. You also need either a running local provider with a
+downloaded model, or access to a cloud model. Cloud inference may cost money.
 
-=== "macOS / Linux"
+If someone has given you a gateway URL and credential, **skip to step 3**.
+Do not install a second server just to connect a browser or phone.
+
+## 1. Install the gateway and CLI
+
+=== "Installer (macOS / Linux)"
 
     ```bash
     curl -fsSL https://soulacy.io/install.sh | bash
+    sy version
     ```
 
-=== "From source"
+    This executes the project's installer. If your organization requires script
+    review, download and inspect it first. Follow any PATH instruction it prints,
+    then open a new terminal if `sy` is not found.
+
+=== "Build from source"
+
+    Install the [prerequisites](installation.md), including the supported Go
+    toolchain, Node.js, and platform SQLite/C compiler requirements.
 
     ```bash
-    git clone https://github.com/vmodekurti/soulacy-personal && cd soulacy
-    make all          # builds the GUI + the soulacy and sy binaries into ./bin
+    git clone https://github.com/vmodekurti/soulacy-personal.git soulacy
+    cd soulacy
+    make all
+    ./bin/sy version
     ```
 
-More options (Docker, VPS, launchd service): [Installation](installation.md).
+    Below, use `./bin/sy` and `./bin/soulacy` from this directory instead of
+    `sy` and `soulacy` unless you install the binaries on PATH.
 
-## 2. Run the onboarding wizard
+**Checkpoint:** `sy version` prints a version. If not, fix installation first.
+[Other options](installation.md) include Docker and [cloud hosting](../deployment/cloud.md).
+
+## 2. Set up one provider and start the gateway
 
 ```bash
 sy onboard
 ```
 
-The wizard creates or updates your workspace (`~/.soulacy/soulspace` — the
-[soulspace layout](../configuration/workspace.md)), asks which LLM provider to
-use, can wire web search and a starter agent, and can configure the release
-manifest used by `sy update check`. Use `sy setup` only when you want to write a
-fresh config from scratch.
+Keep the local-only bind address for this exercise. Choose a provider and a
+model you actually have access to. A **gateway API key** signs you into Soulacy;
+a **provider API key** authenticates with the model service. Store both privately.
 
-!!! tip "No API key? Use Ollama."
-    If you run [Ollama](https://ollama.com) locally, pick it in the wizard and Soulacy works fully offline — no cloud account needed.
+`sy onboard` updates an existing workspace without replacing unrelated settings.
+`sy setup` is the separate, fresh-config path—do not use it casually to repair
+an existing installation.
 
-## 3. Start the gateway
+If you did not start a background service during onboarding:
 
 ```bash
 soulacy
 ```
 
-The gateway starts on **http://localhost:18789** with the full web GUI: Dashboard, Studio, Agents, Chat, Workboard, Knowledge, Memory, Skills, integrations, and observability. Take the [GUI tour](gui-tour.md).
+Leave that terminal open while testing. If a service already owns the port,
+use it; do not launch a competing gateway.
 
-## 4. Talk to an agent
+**Checkpoint:** the server reports its address, normally `http://localhost:18789`.
+A port-in-use error is not a reason to delete your workspace.
+See [first checks](../troubleshooting/first-checks.md).
 
-=== "GUI"
+## 3. Sign in and choose the model
 
-    Open **http://localhost:18789** → **Chat** → pick your agent → say hello.
-    Watch the *Thinking* section show reasoning steps and tool calls live.
+1. Open the gateway URL. For a local installation, use
+   `http://localhost:18789` on that same computer.
+2. Sign in with the gateway credential from onboarding or your server owner.
+   Cloud owners can find it using the [cloud login instructions](../deployment/cloud.md).
+3. Open **Providers**, check your provider, and test its connection. Choose a
+   model the provider actually lists.
+4. Open **Agents**. Select a suitable starter agent or choose **+ New Agent**.
+   Give a new agent a unique ID such as `notes-assistant`, choose your
+   provider/model, enable HTTP chat, and save it.
 
-=== "CLI"
+Use these instructions for this notes-only agent:
 
-    ```bash
-    sy chat --agent assistant "Summarize the latest AI news in 3 bullets"
-    ```
-
-=== "HTTP"
-
-    ```bash
-    curl -X POST http://localhost:18789/api/v1/agents/assistant/chat \
-      -H "Authorization: Bearer $SOULACY_SERVER_API_KEY" \
-      -H "Content-Type: application/json" \
-      -d '{"message": "Hello!"}'
-    ```
-
-## 5. Make it yours
-
-An agent is one YAML file. Open **Agents** in the GUI (or edit `~/.soulacy/soulspace/agents/assistant/SOUL.yaml`):
-
-```yaml title="SOUL.yaml"
-id: assistant
-name: Assistant
-trigger: channel
-llm:
-  provider: ollama        # or openai / anthropic / google / any OpenAI-compatible
-  model: llama3
-system_prompt: |
-  You are a helpful, concise assistant.
-channels:
-  - http
+```text
+Turn the user's supplied notes into an action plan.
+Use only those notes. Do not browse, send messages, or change files.
+List each action and its owner. If an owner or date is absent, say "Not specified".
+Finish with a section called "Open questions". Never invent a commitment.
 ```
 
-Changes hot-reload — no restart. The full schema (tools, memory, reasoning, schedules, workflows) is in the [SOUL.yaml reference](../agents/soul-yaml.md).
+Set built-in tools to **None**, and leave external tools, skills, and MCP
+integrations unconfigured. YAML users can start with the
+[downloadable definition](../examples/notes-assistant/SOUL.yaml); replace its
+model/provider placeholders before using it.
 
-## 6. Five things to try next
+**Checkpoint:** the saved agent is enabled. Inspect its **Model preparation**
+panel for the saved provider/model and any blocking reason. “Unknown” metadata
+is not a failed connection. [Understand preparation](../using/model-preparation.md).
 
-1. **Generate an agent from plain English** — open **Studio**, describe the
-   outcome, explicitly review the trigger and delivery controls beside the
-   prompt, then hit **Generate** (Streamed by default streams the pipeline
-   phases live below the canvas; the Wizard variant lets you step through
-   `clarify_intent → choose_strategy → build_graph → validate → repair`).
-   Studio defaults to a native tool-calling agent; generated fixed workflows
-   are experimental and require explicit opt-in. Pick a **Runtime intent**
-   preset (Fast local / Reliable local / Cloud
-   quality) in the Studio model modal to bake sensible timeouts into the
-   agent. → [Studio](../using/studio.md)
-2. **Give it skills** — add the public skill directory and install one:
-   ```bash
-   sy registry add https://www.skills.sh/
-   sy skill install anthropics/skills/skill-creator
-   ```
-   Every install passes a [security review](../extend/safety.md) before you consent. → [Skill sources](../extend/skill-sources.md)
-3. **Put it on Telegram** — a bot token and two YAML lines. The Channels page
-   has inline guided setup cards for Telegram / Slack / Discord / WhatsApp /
-   email / Teams / Google Chat, with per-field hints and a Test-delivery
-   button that returns a friendly Diagnose reason on failure. → [Channels](../channels/telegram.md)
-4. **Schedule it** — run every morning, with automatic catch-up after
-   downtime. If the gateway missed a fire, the Automations row shows a
-   `⟳ auto-replayed` chip and Activity emits a
-   `schedule.missed_run_backfilled` event so you can tell "why did this fire
-   at 03:04?" apart from a normal cron. → [Schedules](../using/schedules.md)
-5. **Install a versioned package** — `sy pull <owner>/<repo>` or import via
-   Agents → Import. The package v2 schema uses namespaced ids
-   (`owner/name`), calendar versioning (`2026.7.15`), and an install-time
-   secret gate that refuses to import if a required provider / channel /
-   secret / MCP server is missing (with an "I understand — import anyway"
-   opt-out for local experiments). → [Packaging](../packaging.md)
+## 4. Send a request you can verify without the internet
 
-## Where everything lives
+Open **Chat**, select the agent, and paste:
 
-| | |
-|---|---|
-| Workspace (agents, skills, data) | `~/.soulacy/soulspace/` — [layout](../configuration/workspace.md) |
-| Config file | `config.yaml` in the workspace — [reference](../configuration/index.md) |
-| GUI | `http://localhost:18789` — [tour](gui-tour.md) |
-| CLI | `sy` — [reference](../cli/reference.md) |
-
-## Verify the first run
-
-Do not stop at “the page opened.” Confirm the full path:
-
-```bash
-sy version
-sy doctor
+```text
+Create an action plan from these fictional project notes:
+- Maya will send the draft on Tuesday.
+- Leo will review it after the draft arrives.
+- Someone needs to arrange the customer demo; no date is agreed.
 ```
 
-Then check:
+**A good answer has:** Maya → draft → Tuesday; Leo → review → after draft;
+demo → owner/date not specified; and Open questions asking who owns the demo
+and when it should happen. Wording can vary. It must not invent a calendar
+invitation, an external send receipt, or a commitment.
 
-1. **Providers** reports at least one tested connection.
-2. **Chat** returns a response from the selected agent.
-3. **Activity** contains the completed run and no unresolved tool or provider
-   error.
-4. The selected agent's `SOUL.yaml` contains the provider, model, trigger, and
-   channels you intended.
+Open **Activity** and inspect the completed run. Expect a model call and no
+external tool write. A technically successful response can still be wrong:
+adjust the instructions and test again if it invents details.
 
-If the gateway runs as a service, execute Doctor with the same user and
-environment as that service; see [Linux/VPS deployment](../deployment/linux.md).
+## 5. Check the unhappy path before automating
+
+Send `There are no project notes yet. What are the next actions?` It should ask
+for notes or acknowledge the gap, not manufacture tasks. Continue with the
+[full notes exercise](../use-cases/notes-to-action-plan.md) for contradictory
+notes and a request to send email.
+
+For a local installation, run `sy doctor` using the same workspace, user, and
+environment as the gateway service. Doctor checks configuration/reachability;
+it does not guarantee output quality.
+
+## You are ready when…
+
+- You can sign in, select the intended agent, and receive a reply.
+- The reply uses supplied evidence and admits missing information.
+- Activity shows the intended provider/model and no unexpected tools.
+- You know which computer must stay on for the gateway to run.
+
+Next: [connect your iPhone](iphone.md), [teach a preference](../use-cases/teach-a-preference.md),
+or [search your documents](../use-cases/handbook-answers.md). Add one capability
+at a time so a failure has an identifiable cause.

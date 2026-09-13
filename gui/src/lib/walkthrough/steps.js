@@ -16,6 +16,10 @@ export const WALKTHROUGH_VERSION = 1
 
 /** What each destination is, and when you'd come here. */
 export const navTourCopy = {
+  autopilot: {
+    what: 'Verified runs, Safe Undo receipts, immutable releases, reviewed regression checks, and bounded goal teams.',
+    when: 'Review or reverse supported external changes, inspect evidence before promoting an agent, or freeze autonomous work.',
+  },
   dashboard: {
     what: 'The home screen: gateway health, your agents, and the runs that just happened.',
     when: 'Glance here first — if something broke overnight, it shows up here before anywhere else.',

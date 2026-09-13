@@ -25,6 +25,11 @@ func requestPrincipal(c *fiber.Ctx) (runtime.Principal, bool) {
 	if subject == "" {
 		subject = strings.TrimSpace(cl.Email)
 	}
+	// The validated legacy static-key middleware uses an admin claim without
+	// a subject. Match the stable local-owner identity used by private APIs.
+	if subject == "" && cl.Role == "admin" {
+		subject = "admin"
+	}
 	return runtime.Principal{Subject: subject, Role: cl.Role, Scopes: append([]string(nil), cl.Scopes...)}, true
 }
 

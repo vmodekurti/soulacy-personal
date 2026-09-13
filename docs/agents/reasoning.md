@@ -42,7 +42,7 @@ to configure the model: the agent's `llm` block.
 Custom strategies registered through the SDK (`sdk/reasoning` +
 `registry.RegisterReasoningStrategy`) are selected the same way — put their
 registered name in `strategy:`. See
-[`docs/REASONING_STRATEGIES.md`](../REASONING_STRATEGIES.md) in the repo for
+[`docs/REASONING_STRATEGIES.md`](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/REASONING_STRATEGIES.md) in the repo for
 the author-side contract.
 
 !!! tip

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/soulacy/soulacy/internal/httptestutil"
 	"github.com/soulacy/soulacy/pkg/message"
 )
 
@@ -65,7 +66,7 @@ func TestGatewaySupportBundleDownloadsRedactedZip(t *testing.T) {
 		t.Fatal(err)
 	}
 	req.Header.Set("Authorization", "Bearer secret")
-	resp, err := s.app.Test(req, -1)
+	resp, err := s.app.Test(httptestutil.WithHost(req), -1)
 	if err != nil {
 		t.Fatal(err)
 	}

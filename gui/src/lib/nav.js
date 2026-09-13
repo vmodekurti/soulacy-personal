@@ -22,6 +22,7 @@ export const navPages = [
   { id: 'agents',    icon: '⊕', label: 'Deployed',    group: 'main'         },
   { id: 'templates', icon: '📋', label: 'Templates',   group: 'main'         },
   { id: 'chat',      icon: '◎', label: 'Chat',        group: 'main'         },
+  { id: 'autopilot', icon: '◇', label: 'Autopilot',   group: 'main'         },
   { id: 'memory',    icon: '🧠', label: 'Learning',    group: 'capabilities' },
   { id: 'knowledge', icon: '📚', label: 'Knowledge',   group: 'capabilities' },
   { id: 'queues',    icon: '☷', label: 'Queues',      group: 'capabilities' },

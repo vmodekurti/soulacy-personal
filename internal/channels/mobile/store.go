@@ -89,11 +89,15 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("mobile delivery: open: %w", err)
 	}
-	if _, err := db.Exec(schema); err != nil {
+	if _, err := db.Exec(schema + nodeSchema); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("mobile delivery: schema: %w", err)
 	}
 	if err := sqlitex.RecordSchemaVersion(db, "mobile_deliveries", 1); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := sqlitex.RecordSchemaVersion(db, "mobile_nodes", 1); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -242,9 +246,20 @@ func (s *Store) UpsertDevice(ctx context.Context, workspaceID, userID string, d 
 }
 
 func (s *Store) DeleteDevice(ctx context.Context, workspaceID, userID, deviceID string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM mobile_devices WHERE workspace_id=? AND user_id=? AND id=?`,
-		normalizeWorkspaceID(workspaceID), userID, deviceID)
-	return err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }() // No-op after commit; preserve the operation's error.
+	for _, table := range []string{"mobile_devices", "mobile_nodes"} {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE workspace_id=? AND user_id=? AND id=?`, normalizeWorkspaceID(workspaceID), userID, deviceID); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE mobile_node_commands SET status='expired',error='device registration removed' WHERE workspace_id=? AND user_id=? AND device_id=? AND status='queued'`, normalizeWorkspaceID(workspaceID), userID, deviceID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) requireDeviceOwner(ctx context.Context, workspaceID, deviceID, userID string) error {

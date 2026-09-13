@@ -159,4 +159,4 @@ New optional fields and new frame types are **not** version bumps — ignore
 what you don't know. Renaming/removing fields or changing semantics bumps
 the version.
 
-Full specification: [External Channel Protocol](../EXTERNAL_CHANNEL_PROTOCOL.md).
+Full specification: [External Channel Protocol](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/EXTERNAL_CHANNEL_PROTOCOL.md).

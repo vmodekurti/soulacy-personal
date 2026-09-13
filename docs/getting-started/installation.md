@@ -31,34 +31,43 @@ What it does:
 6. Offers to start the gateway and open the GUI at `http://localhost:18789`.
 
 !!! tip "Pin a version"
-    `SOULACY_VERSION=v0.1.11 curl -fsSL https://soulacy.io/install.sh | bash`
+    `curl -fsSL https://soulacy.io/install.sh | SOULACY_VERSION=v0.1.11 bash`
+
+    Set the variable on the installer process (`bash`), not only on `curl`.
 
 ## Requirements
+
+See [footprint and requirements](../deployment/footprint.md) for measured size
+and the distinction between gateway, models, tools, and external services.
+There is no blanket RAM/startup guarantee.
 
 | | |
 |---|---|
 | OS | macOS 13+ or Linux (amd64 / arm64) |
-| Tools | `curl` and `tar` — everything else is installed automatically |
+| Prebuilt core | `curl`, `tar`, compatible platform/system libraries, and TLS trust store |
+| Source fallback / optional tools | Build dependencies and tool runtimes depend on platform/features |
 | LLM | Ollama (local, free) **or** an OpenAI / Anthropic / Gemini API key |
 
 ## Build from source
 
 ```bash
-git clone https://github.com/vmodekurti/soulacy-personal.git
+git clone https://github.com/vmodekurti/soulacy-personal.git soulacy
 cd soulacy
 make all          # GUI + gateway + CLI → ./bin/soulacy and ./bin/sy
 sudo install -m755 bin/soulacy bin/sy /usr/local/bin/
 ```
 
-`make all` needs Go 1.26.6+ and Node 18+ on your PATH (`make build` alone skips
-the GUI — the binary embeds the web UI at compile time, so use `make all`).
+`make all` needs Go 1.26.6+, Node/npm, and the platform's C/SQLite development
+requirements. It forces a GUI rebuild; `make build` rebuilds it incrementally
+when sources change. The gateway embeds the web UI at compile time.
 
 ## Docker
 
 From a checkout (works today, builds the image locally):
 
 ```bash
-git clone https://github.com/vmodekurti/soulacy-personal.git && cd soulacy
+git clone https://github.com/vmodekurti/soulacy-personal.git soulacy
+cd soulacy
 docker compose up --build -d
 ```
 

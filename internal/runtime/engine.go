@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -83,6 +84,9 @@ type BuiltinTool struct {
 
 // Engine orchestrates agent execution.
 type Engine struct {
+	notebook    atomic.Pointer[notebookRuntime]
+	safeUndo    atomic.Pointer[safeUndoRuntime]
+	autopilot   *autopilotRuntime
 	loader      *Loader
 	llmRouter   *llm.Router
 	memory      memory.Store
@@ -776,6 +780,22 @@ func (e *Engine) recordUsage(ctx context.Context, agentID, sessionID, provider, 
 // RunTool invokes a named tool with raw JSON arguments and returns raw JSON output.
 // Used by WorkflowExecutor to call individual tools without a full LLM round-trip.
 func (e *Engine) RunTool(ctx context.Context, toolName string, argsJSON string) (json.RawMessage, error) {
+	if scope, _ := ctx.Value(autopilotRunKey{}).(*managedRunContext); scope != nil {
+		args := map[string]any{}
+		if strings.TrimSpace(argsJSON) != "" {
+			if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+				return nil, err
+			}
+		}
+		result, err := e.runTool(ctx, scope.definition, llm.CallMetadataFromContext(ctx).SessionID, message.ToolCall{ID: uuid.NewString(), Name: toolName, Arguments: args})
+		if err != nil {
+			return nil, err
+		}
+		if json.Valid([]byte(result)) {
+			return json.RawMessage(result), nil
+		}
+		return json.Marshal(result)
+	}
 	// Look up the tool by name in the engine's built-in registry.
 	for _, bt := range e.builtins {
 		if bt.Name == toolName {
@@ -846,6 +866,12 @@ func (e *Engine) RunTool(ctx context.Context, toolName string, argsJSON string) 
 // consent model in internal/studio/plan.go and docs/STUDIO_PYTHON_TOOLS.md §13);
 // RunInlinePython itself is the mechanism, not the gate.
 func (e *Engine) RunInlinePython(ctx context.Context, code string, argsJSON []byte) (json.RawMessage, error) {
+	if err := missionToolAllowed(ctx, "inline_python"); err != nil {
+		return nil, err
+	}
+	if missionSimulation(ctx) {
+		return json.RawMessage(`{"simulated":true,"tool":"inline_python"}`), nil
+	}
 	if e.pyExecutor == nil {
 		return nil, fmt.Errorf("RunInlinePython: no python executor configured")
 	}
@@ -974,7 +1000,7 @@ func (e *Engine) dynamicConfirm(ctx context.Context, def *agent.Definition, call
 }
 
 func isSideEffectingTool(name string) bool {
-	if toolSecurityClasses[name].SideEffecting {
+	if name == "learning.propose" || name == "safe_undo.prepare" || toolSecurityClasses[name].SideEffecting {
 		return true
 	}
 	return strings.HasPrefix(name, "mcp__") || strings.HasPrefix(name, "plugin__")

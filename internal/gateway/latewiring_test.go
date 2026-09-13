@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/auth"
+	"github.com/soulacy/soulacy/internal/httptestutil"
 )
 
 func lateWiredTestEngine(t *testing.T, key string) *auth.Engine {
@@ -49,7 +50,7 @@ func TestLateWiredLoginCreatesUsableBrowserSession(t *testing.T) {
 	login := httptest.NewRequest(http.MethodPost, "/api/v1/auth/token",
 		strings.NewReader(`{"api_key":"engine-key"}`))
 	login.Header.Set("Content-Type", "application/json")
-	resp, err := s.app.Test(login)
+	resp, err := s.app.Test(httptestutil.WithHost(login))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +68,7 @@ func TestLateWiredLoginCreatesUsableBrowserSession(t *testing.T) {
 	for _, cookie := range cookies {
 		request.AddCookie(cookie)
 	}
-	resp, err = s.app.Test(request)
+	resp, err = s.app.Test(httptestutil.WithHost(request))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +84,7 @@ func TestLateWiredEngineGuardsAuthenticatedRoutes(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents", http.NoBody)
 	req.Header.Set("Authorization", "Bearer engine-key")
-	resp, err := s.app.Test(req)
+	resp, err := s.app.Test(httptestutil.WithHost(req))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +98,7 @@ func TestSetAuthInvalidatesWarmupMiddleware(t *testing.T) {
 	s := newTestGateway(t, "config-key")
 	warm := httptest.NewRequest(http.MethodGet, "/api/v1/agents", http.NoBody)
 	warm.Header.Set("Authorization", "Bearer config-key")
-	resp, err := s.app.Test(warm)
+	resp, err := s.app.Test(httptestutil.WithHost(warm))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +107,7 @@ func TestSetAuthInvalidatesWarmupMiddleware(t *testing.T) {
 	s.SetAuth(lateWiredTestEngine(t, "engine-key"))
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents", http.NoBody)
 	req.Header.Set("Authorization", "Bearer engine-key")
-	resp, err = s.app.Test(req)
+	resp, err = s.app.Test(httptestutil.WithHost(req))
 	if err != nil {
 		t.Fatal(err)
 	}

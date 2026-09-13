@@ -22,17 +22,24 @@ type updatesManager struct {
 
 var globalUpdates = &updatesManager{}
 
-func (s *Server) startUpdatesChecker() {
+func (s *Server) startUpdatesChecker(ctx context.Context) {
+	manifestURL := s.cfg.Updates.ManifestURL
 	go func() {
 		// Run initial check after a small delay to not block server startup
-		time.Sleep(5 * time.Second)
+		timer := time.NewTimer(5 * time.Second)
+		defer timer.Stop()
 		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-timer.C:
+			}
 			s.log.Info("running background release update check...")
 			globalUpdates.Lock()
 			globalUpdates.checking = true
 			globalUpdates.Unlock()
 
-			res, err := updates.CheckForUpdate(context.Background(), s.cfg.Updates.ManifestURL, "")
+			res, err := updates.CheckForUpdate(ctx, manifestURL, "")
 
 			globalUpdates.Lock()
 			globalUpdates.checking = false
@@ -49,7 +56,7 @@ func (s *Server) startUpdatesChecker() {
 			}
 
 			// Check every 12 hours
-			time.Sleep(12 * time.Hour)
+			timer.Reset(12 * time.Hour)
 		}
 	}()
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"go.uber.org/zap"
 
+	"github.com/soulacy/soulacy/internal/httptestutil"
 	"github.com/soulacy/soulacy/internal/mcp"
 )
 
@@ -38,7 +39,7 @@ func TestHandleListMCP_ResponseCarriesNoCredentials(t *testing.T) {
 	app := fiber.New()
 	app.Get("/api/v1/mcp", s.handleListMCP)
 
-	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/api/v1/mcp", nil))
+	resp, err := app.Test(httptestutil.WithHost(httptest.NewRequest(http.MethodGet, "/api/v1/mcp", nil)))
 	if err != nil {
 		t.Fatal(err)
 	}

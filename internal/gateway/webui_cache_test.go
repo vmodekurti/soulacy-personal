@@ -8,6 +8,7 @@ import (
 	"testing/fstest"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/soulacy/soulacy/internal/httptestutil"
 )
 
 // guiApp mounts the real cache policy over an in-memory FS. Note the zero
@@ -30,7 +31,7 @@ func guiApp() *fiber.App {
 func TestIndexHTMLIsRevalidatable(t *testing.T) {
 	app := guiApp()
 
-	res, err := app.Test(httptest.NewRequest(http.MethodGet, "/", nil))
+	res, err := app.Test(httptestutil.WithHost(httptest.NewRequest(http.MethodGet, "/", nil)))
 	if err != nil {
 		t.Fatalf("GET /: %v", err)
 	}
@@ -54,7 +55,7 @@ func TestIndexHTMLIsRevalidatable(t *testing.T) {
 	// A validator that is not honoured is decoration.
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("If-None-Match", etag)
-	res2, err := app.Test(req)
+	res2, err := app.Test(httptestutil.WithHost(req))
 	if err != nil {
 		t.Fatalf("conditional GET /: %v", err)
 	}
@@ -68,7 +69,7 @@ func TestIndexHTMLIsRevalidatable(t *testing.T) {
 // ETag would pass the test above and still ship a stale GUI.
 func TestChangedIndexHTMLGetsANewETag(t *testing.T) {
 	first := guiApp()
-	res, _ := first.Test(httptest.NewRequest(http.MethodGet, "/", nil))
+	res, _ := first.Test(httptestutil.WithHost(httptest.NewRequest(http.MethodGet, "/", nil)))
 	defer res.Body.Close()
 	oldETag := res.Header.Get("ETag")
 
@@ -80,7 +81,7 @@ func TestChangedIndexHTMLGetsANewETag(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("If-None-Match", oldETag)
-	res2, err := rebuilt.Test(req)
+	res2, err := rebuilt.Test(httptestutil.WithHost(req))
 	if err != nil {
 		t.Fatalf("conditional GET after rebuild: %v", err)
 	}
@@ -96,7 +97,7 @@ func TestChangedIndexHTMLGetsANewETag(t *testing.T) {
 // Hashed assets are immutable and must stay cacheable forever; adding the
 // validator must not make every asset revalidate on each page load.
 func TestHashedAssetsStayImmutable(t *testing.T) {
-	res, err := guiApp().Test(httptest.NewRequest(http.MethodGet, "/assets/index-abc123.js", nil))
+	res, err := guiApp().Test(httptestutil.WithHost(httptest.NewRequest(http.MethodGet, "/assets/index-abc123.js", nil)))
 	if err != nil {
 		t.Fatalf("GET asset: %v", err)
 	}
@@ -113,7 +114,7 @@ func TestHashedAssetsStayImmutable(t *testing.T) {
 // The SPA fallback must still work, and must not be cached as if it were the
 // asset the user asked for.
 func TestUnknownRouteFallsBackToIndexUncached(t *testing.T) {
-	res, err := guiApp().Test(httptest.NewRequest(http.MethodGet, "/studio", nil))
+	res, err := guiApp().Test(httptestutil.WithHost(httptest.NewRequest(http.MethodGet, "/studio", nil)))
 	if err != nil {
 		t.Fatalf("GET /studio: %v", err)
 	}

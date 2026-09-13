@@ -11,6 +11,7 @@ import (
 
 	"github.com/soulacy/soulacy/internal/audit"
 	"github.com/soulacy/soulacy/internal/auth"
+	"github.com/soulacy/soulacy/internal/httptestutil"
 	"github.com/soulacy/soulacy/pkg/plugin"
 )
 
@@ -169,7 +170,7 @@ func pluginClaims(id string) *auth.Claims {
 func get(t *testing.T, app *fiber.App) *http.Response {
 	t.Helper()
 	req, _ := http.NewRequest(http.MethodGet, "/guarded", nil)
-	resp, err := app.Test(req)
+	resp, err := app.Test(httptestutil.WithHost(req))
 	if err != nil {
 		t.Fatalf("app.Test: %v", err)
 	}

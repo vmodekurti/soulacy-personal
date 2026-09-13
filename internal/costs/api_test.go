@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/soulacy/soulacy/internal/httptestutil"
 	"go.uber.org/zap"
 )
 
@@ -77,7 +78,7 @@ func doJSON(t *testing.T, app *fiber.App, method, path, apiKey string) (int, map
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
-	resp, err := app.Test(req, -1)
+	resp, err := app.Test(httptestutil.WithHost(req), -1)
 	if err != nil {
 		t.Fatalf("app.Test: %v", err)
 	}

@@ -30,6 +30,7 @@ import (
 
 	"github.com/soulacy/soulacy/internal/agentvalidate"
 	"github.com/soulacy/soulacy/internal/auth"
+	"github.com/soulacy/soulacy/internal/autopilot"
 	"github.com/soulacy/soulacy/internal/builder"
 	"github.com/soulacy/soulacy/internal/channels"
 	wawebchan "github.com/soulacy/soulacy/internal/channels/whatsappweb"
@@ -994,6 +995,15 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 		Metadata:  chatMeta,
 		CreatedAt: time.Now().UTC(),
 	}
+	if key := strings.TrimSpace(c.Get("Idempotency-Key")); key != "" {
+		if len(key) > 128 {
+			return s.errMsg(c, 400, "Idempotency-Key must be at most 128 bytes")
+		}
+		if s.autopilotStore == nil {
+			return s.errMsg(c, 503, "durable chat admission is unavailable")
+		}
+		msg.ID = "chat:" + key
+	}
 
 	// Decouple client connection drop from background execution. Use the
 	// agent's declared run_timeout if set, otherwise the gateway default.
@@ -1038,6 +1048,9 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 
 	reply, err := s.engine.Handle(ctx, msg)
 	if err != nil {
+		if errors.Is(err, autopilot.ErrConflict) || errors.Is(err, autopilot.ErrFrozen) {
+			return s.errMsg(c, 409, err.Error())
+		}
 		var confirm *costs.ConfirmationRequiredError
 		if errors.As(err, &confirm) {
 			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": confirm.Error(), "confirmation_required": true,

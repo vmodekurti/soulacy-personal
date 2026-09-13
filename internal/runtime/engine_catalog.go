@@ -81,6 +81,9 @@ func (e *Engine) effectiveSkillNames(def *agent.Definition) []string {
 		return out
 	}
 	for _, p := range props {
+		if p.Disabled {
+			continue
+		}
 		if !strings.EqualFold(strings.TrimSpace(p.Kind), "skill") {
 			continue
 		}

@@ -1,6 +1,6 @@
 # soulacy.io marketing site
 
-Single-page landing site for [soulacy.io](https://soulacy.io/). Plain HTML + Tailwind (via CDN) — no build step, no npm dependency, deployable to any static host in seconds.
+Single-page landing site for [soulacy.io](https://soulacy.io/). Plain HTML + Tailwind (via CDN), with no local build step. The page introduces self-hosted Soulacy Personal and links to practical installation and usage guides.
 
 Docs (mkdocs Material) live separately at [docs.soulacy.io](https://docs.soulacy.io/).
 
@@ -9,6 +9,7 @@ Docs (mkdocs Material) live separately at [docs.soulacy.io](https://docs.soulacy
 ```
 website/
 ├── index.html         ← the entire landing page (hero, security stack, comparison, install, features, footer)
+├── brand/             ← approved blue Living Core logo and app-icon assets
 ├── _headers           ← Cloudflare Pages security + caching headers
 ├── _redirects         ← Cloudflare Pages redirects (docs subdomain, vanity paths, HN shortlink)
 ├── robots.txt
@@ -21,8 +22,8 @@ website/
 
 ```bash
 cd website
-python3 -m http.server 4321
-# → open http://localhost:4321
+python3 -m http.server 4321 --bind 127.0.0.1
+# → open http://127.0.0.1:4321
 ```
 
 Any static server works. There's no build step.
@@ -38,11 +39,11 @@ Any static server works. There's no build step.
    - **Build command:** _(leave empty)_
    - **Build output directory:** `website`
    - **Root directory:** _(leave empty)_
-4. Save & Deploy. First build takes ~10 seconds since nothing is built.
+4. Save & Deploy. Wait for the deployment to report success before checking its preview URL.
 5. Under the deployed project → Custom domains → Set up custom domain → `soulacy.io` and `www.soulacy.io`.
-6. Cloudflare will provision Let's Encrypt certs and route the apex + www.
+6. Wait for Cloudflare to verify the domains and provision their HTTPS certificates.
 
-**On every push to `main`:** Cloudflare rebuilds automatically (fast — it's just copying files). Preview deploys fire on every PR.
+**Current production setup:** the `soulacy` Pages project is connected to `vmodekurti/soulacy-personal`. A push to Personal `main` is the normal publishing path. Check the Cloudflare deployment's commit and the live page; a green GitHub job that defers to Git integration is not itself proof that the site deployed. Keep this public site connected to the Personal repository.
 
 ## Deploy — alternatives (if you're not using Cloudflare)
 
@@ -58,32 +59,12 @@ The repo root has the canonical `install.sh`. On every deploy, copy it into `web
 cp install.sh website/install.sh
 ```
 
-Or wire it into CI (`.github/workflows/website-sync-install.yml`):
-
-```yaml
-name: Sync install.sh to website
-on:
-  push:
-    branches: [main]
-    paths: [install.sh]
-jobs:
-  sync:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: cp install.sh website/install.sh
-      - run: |
-          git config user.email "actions@github.com"
-          git config user.name "GitHub Actions"
-          git add website/install.sh
-          git diff --cached --quiet || git commit -m "chore(website): sync install.sh"
-          git push
-```
+Review and commit both files together. Do not add a workflow that commits back to `main` merely to synchronize this copy.
 
 ## Iteration notes
 
 - Tailwind is loaded via CDN, which yells in the console. Fine for launch. Post-signal, convert to Astro or ship a built Tailwind bundle.
-- No JS beyond the copy-button clipboard call. Loads in ~100 ms.
+- Recheck the copy buttons, navigation, phone-width layout, and external documentation links after editing. Do not publish loading-time claims without a dated, reproducible measurement.
 - If you add a blog, convert to Astro or 11ty — plain HTML gets painful past ~5 pages.
 - Colors are declared in the inline Tailwind config in `index.html` — search `tailwind.config` to tweak.
 
@@ -96,6 +77,10 @@ Every headline claim maps back to:
 - Persistent semantic memory: `internal/app/adapters.go`, `internal/memory/vector.go`, and `internal/agentmemory/store.go`
 - Human feedback: `internal/gateway/chat_feedback.go` and `internal/learning/feedback.go`
 - Comparison chart: `docs/LAUNCH_STRATEGY.md` §3 (with cited URLs per competitor)
-- "What Soulacy is NOT": `docs/LAUNCH_STRATEGY.md` §5
+- Product scope: `docs/personal.md` (self-hosted Soulacy Personal)
+- Binary size and runtime requirements: `docs/deployment/footprint.md` (a measured candidate, not a universal size/RAM/startup guarantee)
+- Practical walkthroughs: `docs/use-cases/`
 
-If you edit the site, edit the memo/review too so the two don't drift.
+Keep public claims aligned with current code and these guides; historical launch notes are not a product contract. The core Personal runtime does not require Node.js or Python, but optional tools, providers, and integrations may need additional services or software.
+
+Before publishing, run `npm --prefix gui test -- --run` and `make docs-build` from the repository root. The tests guard the approved brand and key product claims; the docs build also checks local links, anchors, and private-artifact exclusions. See `docs/contributing/documentation.md` for the full review checklist.

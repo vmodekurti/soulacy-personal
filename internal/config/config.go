@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/soulacy/soulacy/internal/safeundo"
+
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
 )
@@ -370,13 +372,18 @@ type CredentialsConfig struct {
 }
 
 type ServerConfig struct {
-	Host         string `mapstructure:"host"`
-	Port         int    `mapstructure:"port"`
-	GUIEnabled   bool   `mapstructure:"gui_enabled"`
-	GUIStaticDir string `mapstructure:"gui_static_dir"`
-	APIKey       string `mapstructure:"api_key"` // gateway auth key; empty = no auth
-	TLSCert      string `mapstructure:"tls_cert"`
-	TLSKey       string `mapstructure:"tls_key"`
+	Host         string          `mapstructure:"host"`
+	Port         int             `mapstructure:"port"`
+	GUIEnabled   bool            `mapstructure:"gui_enabled"`
+	GUIStaticDir string          `mapstructure:"gui_static_dir"`
+	APIKey       string          `mapstructure:"api_key"` // gateway auth key; empty = no auth
+	TLSCert      string          `mapstructure:"tls_cert"`
+	TLSKey       string          `mapstructure:"tls_key"`
+	Discovery    DiscoveryConfig `mapstructure:"discovery"`
+	// PublishedFiles explicitly shares dedicated output folders, read-only.
+	// Never point these at the soulspace, home, or credential/config directories.
+	PublishedFiles []PublishedFilesConfig `mapstructure:"published_files"`
+	SafeUndo       safeundo.Config        `mapstructure:"safe_undo"`
 
 	// AllowUnauthenticated explicitly permits starting with no API key while
 	// bound to a non-loopback address. Without it, such a configuration is a
@@ -390,6 +397,20 @@ type ServerConfig struct {
 	// no localhost:3000 / 5173 dev-server escape hatch. (PRODUCTION_AUDIT
 	// → LOW/Config) Set explicitly in production.
 	AllowedOrigins []string `mapstructure:"allowed_origins"`
+}
+
+// DiscoveryConfig opts into LAN-only DNS-SD. It does not enable authentication,
+// change the HTTP bind address, open firewall ports, or advertise a proxy URL.
+type DiscoveryConfig struct {
+	Enabled   bool   `mapstructure:"enabled"`
+	Interface string `mapstructure:"interface"` // required, e.g. en0 or eth0
+	Name      string `mapstructure:"name"`      // optional human-readable prefix
+	Hostname  string `mapstructure:"hostname"`  // required stable, unique single-label .local name
+}
+
+type PublishedFilesConfig struct {
+	AgentID string `mapstructure:"agent_id"`
+	Root    string `mapstructure:"root"`
 }
 
 type RuntimeConfig struct {
@@ -945,6 +966,10 @@ func Load(cfgPath string) (*Config, string, error) {
 	v.SetDefault("server.host", "127.0.0.1")
 	v.SetDefault("server.port", 18789)
 	v.SetDefault("server.gui_enabled", true)
+	v.SetDefault("server.discovery.enabled", false)
+	v.SetDefault("server.discovery.interface", "")
+	v.SetDefault("server.discovery.name", "")
+	v.SetDefault("server.discovery.hostname", "")
 	v.SetDefault("runtime.max_concurrent_sessions", 100)
 	v.SetDefault("runtime.default_max_turns", 20)
 	v.SetDefault("runtime.max_turns_ceiling", 50)

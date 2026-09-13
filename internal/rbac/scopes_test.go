@@ -19,6 +19,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/auth"
+	"github.com/soulacy/soulacy/internal/httptestutil"
 )
 
 func TestScopedCredentialCannotReachAnUnscopedResource(t *testing.T) {
@@ -107,7 +108,7 @@ func TestRequire_ActuallyEnforcesScopes(t *testing.T) {
 			return c.SendString("reached")
 		})
 		req := httptest.NewRequest(http.MethodGet, "/x", nil)
-		resp, err := app.Test(req)
+		resp, err := app.Test(httptestutil.WithHost(req))
 		if err != nil {
 			t.Fatalf("request: %v", err)
 		}
@@ -144,7 +145,7 @@ func TestRequireAgent_ActuallyEnforcesScopes(t *testing.T) {
 		return c.SendString("reached")
 	})
 
-	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/agents/billing", nil))
+	resp, err := app.Test(httptestutil.WithHost(httptest.NewRequest(http.MethodGet, "/agents/billing", nil)))
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}

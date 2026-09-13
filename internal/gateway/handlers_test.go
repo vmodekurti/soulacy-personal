@@ -16,6 +16,7 @@ import (
 
 	"github.com/soulacy/soulacy/internal/channels"
 	"github.com/soulacy/soulacy/internal/config"
+	"github.com/soulacy/soulacy/internal/httptestutil"
 	"github.com/soulacy/soulacy/internal/llm"
 	"github.com/soulacy/soulacy/internal/memory"
 	"github.com/soulacy/soulacy/internal/runtime"
@@ -376,7 +377,10 @@ func TestGatewayChatStreamHandlerStreamsTokens(t *testing.T) {
 		t.Fatalf("stream body = %q", raw)
 	}
 	if !provider.waitForStreamRequest(500 * time.Millisecond) {
-		t.Fatalf("provider request Stream = false, want true")
+		t.Fatalf("provider request Stream = false, want true; body=%q", raw)
+	}
+	if !strings.Contains(raw, "data: hello\n\n") || !strings.Contains(raw, "data: [DONE]\n\n") {
+		t.Fatalf("stream lost tokens or completion: %q", raw)
 	}
 }
 
@@ -452,7 +456,7 @@ func gatewayJSON(t *testing.T, s *Server, method, path, apiKey, body string) (in
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
-	resp, err := s.app.Test(req, -1)
+	resp, err := s.app.Test(httptestutil.WithHost(req), -1)
 	if err != nil {
 		t.Fatalf("app.Test: %v", err)
 	}
@@ -491,7 +495,7 @@ func gatewayJSONWithHeader(t *testing.T, s *Server, method, path, apiKey, body, 
 	if headerKey != "" {
 		req.Header.Set(headerKey, headerVal)
 	}
-	resp, err := s.app.Test(req, -1)
+	resp, err := s.app.Test(httptestutil.WithHost(req), -1)
 	if err != nil {
 		t.Fatalf("app.Test: %v", err)
 	}
@@ -522,7 +526,7 @@ func gatewayRaw(t *testing.T, s *Server, method, path, apiKey, body string) (int
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
-	resp, err := s.app.Test(req, -1)
+	resp, err := s.app.Test(httptestutil.WithHost(req), -1)
 	if err != nil {
 		t.Fatalf("app.Test: %v", err)
 	}

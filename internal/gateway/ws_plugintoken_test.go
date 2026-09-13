@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/soulacy/soulacy/internal/httptestutil"
 	"github.com/soulacy/soulacy/pkg/plugin"
 )
 
@@ -31,7 +32,7 @@ func probe(t *testing.T, app *fiber.App, target, bearer string) (int, string) {
 	if bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
-	resp, err := app.Test(req, -1)
+	resp, err := app.Test(httptestutil.WithHost(req), -1)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,5 +1,6 @@
 <script>
   import TourButton from '../lib/TourButton.svelte'
+  import BrandMark from '../lib/BrandMark.svelte'
   import { onDestroy, onMount, tick } from 'svelte'
   import { slide } from 'svelte/transition'
   import { api, apiFetch, createEventSocket } from '../lib/api.js'
@@ -2248,7 +2249,7 @@
 {#if voiceSessionOpen}
   <div class="voice-session" role="dialog" aria-modal="true" aria-label="Voice conversation">
     <header class="voice-session-head">
-      <div class="voice-session-brand"><span class="voice-brand-mark">S</span><strong>Soulacy Voice</strong></div>
+      <div class="voice-session-brand"><BrandMark size={28} /><strong>soulacy Voice</strong></div>
       <div class="voice-session-agent"><span class="agent-presence"></span>{activeThread?.agentId ? agentName(activeThread.agentId) : 'Agent'}</div>
       <button class="voice-minimize" on:click={() => voiceSessionOpen = false} title="Return to text chat" aria-label="Minimize voice session">—</button>
     </header>
@@ -4103,7 +4104,6 @@
   .voice-session::before { content: ''; position: absolute; inset: 64px 0 0; pointer-events: none; backdrop-filter: blur(1px); }
   .voice-session-head { position: relative; z-index: 1; min-height: 64px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 0 1.2rem; border-bottom: 1px solid #1b2742; background: rgba(8,15,32,.78); }
   .voice-session-brand, .voice-session-agent { display: flex; align-items: center; gap: .55rem; font-size: .8rem; }
-  .voice-brand-mark { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; color: #b9b6ff; background: #171b40; font-weight: 800; }
   .voice-session-agent { color: #aeb5d1; }
   .voice-minimize { justify-self: end; width: 34px; height: 34px; border-radius: 9px; border-color: #293553; background: #151e35; font-size: 1.2rem; }
   .voice-session-stage { position: relative; z-index: 1; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; }
