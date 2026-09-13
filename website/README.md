@@ -43,11 +43,11 @@ Any static server works. There's no build step.
 5. Under the deployed project → Custom domains → Set up custom domain → `soulacy.io` and `www.soulacy.io`.
 6. Wait for Cloudflare to verify the domains and provision their HTTPS certificates.
 
-**Current production setup (verified September 2026):** the Pages project is named `soulacy`, but its Git connection still points at the archived legacy repository, not `vmodekurti/soulacy-personal`. A push to Personal `main` does not currently trigger that Git connection. The GitHub website workflow can deploy when its Cloudflare credentials are configured; otherwise it only logs a deferral. A green deferral job is not proof that the website deployed.
+**Current production setup (verified September 13, 2026):** the Pages project is named `soulacy` and its Git connection points at `vmodekurti/soulacy-personal`, production branch `main`, build output `website`, no build command. A push to `main` triggers a Pages deployment through Cloudflare's Git integration; check the project's Deployments tab for the commit. The GitHub website workflow only deploys when its Cloudflare credentials are configured; otherwise it logs a deferral, and a green deferral job is not proof that the website deployed.
 
 ### Publish through the existing project
 
-Until an operator reconnects the Git integration or configures the deployment credentials, publish a clean, tested Personal `main` checkout explicitly. Authenticate with the intended Cloudflare account, then check that project `soulacy` owns `soulacy.io` and `www.soulacy.io` before uploading:
+If the Git integration is ever disconnected again, or you need to publish without waiting for it, publish a clean, tested Personal `main` checkout explicitly. Authenticate with the intended Cloudflare account, then check that project `soulacy` owns `soulacy.io` and `www.soulacy.io` before uploading:
 
 ```bash
 # Run from the repository root, with the tested changes already merged.
