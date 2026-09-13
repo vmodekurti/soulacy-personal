@@ -33,6 +33,9 @@ jobs:
       - name: Validate ARM template (arm-ttk)
         shell: pwsh
         run: |
+          # Test-AzTemplate writes each failed test to the error stream; keep going
+          # so the full results table is printed before this step decides.
+          $ErrorActionPreference = 'Continue'
           git clone --quiet https://github.com/Azure/arm-ttk.git "$env:RUNNER_TEMP/arm-ttk"
           git -C "$env:RUNNER_TEMP/arm-ttk" checkout --quiet 0ec9a41a4503e970a0ec8efb0cd08415cc172175
           Import-Module "$env:RUNNER_TEMP/arm-ttk/arm-ttk/arm-ttk.psd1"
