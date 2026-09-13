@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/soulacy/soulacy/internal/auth"
 
+	"github.com/soulacy/soulacy/internal/auth"
 	"github.com/soulacy/soulacy/internal/llm"
 	"github.com/soulacy/soulacy/internal/safeundo"
 	"github.com/soulacy/soulacy/pkg/message"
@@ -26,7 +26,7 @@ func (e *Engine) buildSafeUndoBuiltins() []BuiltinTool {
 	base := func(ctx context.Context) (*safeundo.Store, string, string, error) {
 		state := e.safeUndo.Load()
 		if state == nil || state.store == nil || !state.authenticated {
-			return nil, "", "", fmt.Errorf("Safe Undo is not configured with authentication")
+			return nil, "", "", fmt.Errorf("safe undo is not configured with authentication")
 		}
 		owner, err := mobileToolOwner(ctx)
 		if err != nil {
@@ -40,7 +40,7 @@ func (e *Engine) buildSafeUndoBuiltins() []BuiltinTool {
 		}
 		inbound, ok := ctx.Value(inboundMsgKey{}).(message.Message)
 		if !ok || inbound.AgentID == "" {
-			return nil, "", "", fmt.Errorf("Safe Undo requires a current agent session")
+			return nil, "", "", fmt.Errorf("safe undo requires a current agent session")
 		}
 		return state.store, owner, inbound.AgentID, nil
 	}

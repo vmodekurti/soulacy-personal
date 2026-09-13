@@ -13,9 +13,9 @@ import (
 )
 
 func (o *OllamaProvider) DefaultModel() string    { return o.model }
-func (o *OpenAIProvider) DefaultModel() string    { return o.model }
-func (a *AnthropicProvider) DefaultModel() string { return a.model }
-func (g *GeminiProvider) DefaultModel() string    { return g.model }
+func (p *OpenAIProvider) DefaultModel() string    { return p.model }
+func (p *AnthropicProvider) DefaultModel() string { return p.model }
+func (p *GeminiProvider) DefaultModel() string    { return p.model }
 
 // readProfileJSON uses only the configured provider endpoint. It never follows
 // redirects (in particular with credentials), retries, loads models or performs
@@ -103,8 +103,8 @@ func (o *OllamaProvider) ProfileModel(ctx context.Context, model string) (ModelP
 
 // https://ai.google.dev/api/models. These are separate input/output ceilings,
 // not a shared context window. Missing capability fields remain unknown.
-func (g *GeminiProvider) ProfileModel(ctx context.Context, model string) (ModelProfile, error) {
-	p := UnknownModelProfile(g.ID(), model)
+func (p *GeminiProvider) ProfileModel(ctx context.Context, model string) (ModelProfile, error) {
+	profile := UnknownModelProfile(p.ID(), model)
 	var result struct {
 		Name     string    `json:"name"`
 		Input    int       `json:"inputTokenLimit"`
@@ -112,20 +112,20 @@ func (g *GeminiProvider) ProfileModel(ctx context.Context, model string) (ModelP
 		Methods  *[]string `json:"supportedGenerationMethods"`
 		Thinking *bool     `json:"thinking"`
 	}
-	endpoint := strings.TrimRight(g.baseURL, "/") + "/v1beta/models/" + url.PathEscape(model)
-	if err := readProfileJSON(ctx, g.client, http.MethodGet, endpoint, g.apiKey, nil, &result); err != nil {
-		return p, err
+	endpoint := strings.TrimRight(p.baseURL, "/") + "/v1beta/models/" + url.PathEscape(model)
+	if err := readProfileJSON(ctx, p.client, http.MethodGet, endpoint, p.apiKey, nil, &result); err != nil {
+		return profile, err
 	}
 	if result.Name != "models/"+model {
-		return p, fmt.Errorf("mismatched model metadata")
+		return profile, fmt.Errorf("mismatched model metadata")
 	}
-	p.Source, p.ContextSource = "provider_metadata", "provider_metadata"
-	p.InputTokens, p.OutputTokens = result.Input, result.Output
+	profile.Source, profile.ContextSource = "provider_metadata", "provider_metadata"
+	profile.InputTokens, profile.OutputTokens = result.Input, result.Output
 	if result.Methods != nil {
-		p.Chat = reportedSupport(slices.Contains(*result.Methods, "generateContent"))
+		profile.Chat = reportedSupport(slices.Contains(*result.Methods, "generateContent"))
 	}
 	if result.Thinking != nil {
-		p.Reasoning = reportedSupport(*result.Thinking)
+		profile.Reasoning = reportedSupport(*result.Thinking)
 	}
-	return p, nil
+	return profile, nil
 }

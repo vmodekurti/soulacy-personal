@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/url"
 	"strings"
 	"time"
@@ -424,9 +423,4 @@ func autopilotScopes(c *fiber.Ctx) []string {
 		return append([]string(nil), claims.Scopes...)
 	}
 	return nil
-}
-
-// Kept here to make bounded command errors useful to native and web clients.
-func autopilotInputError(message string) error {
-	return fmt.Errorf("%w: %s", autopilot.ErrInvalid, message)
 }

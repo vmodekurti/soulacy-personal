@@ -150,7 +150,7 @@ func (n *Notebook) Propose(ctx context.Context, scope Scope, runID, sessionID st
 	if err != nil {
 		return Lesson{}, false, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // No-op after commit; preserve the operation's error.
 	all, err := notebookLessons(ctx, tx, scope)
 	if err != nil {
 		return Lesson{}, false, err
@@ -210,7 +210,7 @@ func (n *Notebook) Review(ctx context.Context, scope Scope, id, action string) (
 	if err != nil {
 		return Lesson{}, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // No-op after commit; preserve the operation's error.
 	all, err := notebookLessons(ctx, tx, scope)
 	if err != nil {
 		return Lesson{}, err
@@ -380,7 +380,7 @@ func (n *Notebook) Feedback(ctx context.Context, scope Scope, id string, rating 
 	if err != nil {
 		return Lesson{}, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // No-op after commit; preserve the operation's error.
 	all, err := notebookLessons(ctx, tx, scope)
 	if err != nil {
 		return Lesson{}, err
@@ -425,7 +425,7 @@ func (n *Notebook) RecordUse(ctx context.Context, scope Scope, id, runID string)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // No-op after commit; preserve the operation's error.
 	all, err := notebookLessons(ctx, tx, scope)
 	if err != nil {
 		return err
@@ -477,7 +477,7 @@ func (n *Notebook) RecordEpisode(ctx context.Context, scope Scope, ep Episode) e
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // No-op after commit; preserve the operation's error.
 	_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO learned_episodes VALUES(?,?,?,?,?)`, scope.Owner, scope.AgentID, ep.RunID, ep.CreatedAt.UnixNano(), raw)
 	if err != nil {
 		return err

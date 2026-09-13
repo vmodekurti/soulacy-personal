@@ -250,7 +250,7 @@ func (s *Store) DeleteDevice(ctx context.Context, workspaceID, userID, deviceID 
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // No-op after commit; preserve the operation's error.
 	for _, table := range []string{"mobile_devices", "mobile_nodes"} {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE workspace_id=? AND user_id=? AND id=?`, normalizeWorkspaceID(workspaceID), userID, deviceID); err != nil {
 			return err

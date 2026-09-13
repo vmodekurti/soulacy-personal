@@ -250,7 +250,7 @@ func (s *Store) save(ctx context.Context, j *Job) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // No-op after commit; preserve the operation's error.
 	for i := range j.Actions {
 		a := &j.Actions[i]
 		if a.Status == "pending" || a.Status == "undone" {
