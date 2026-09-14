@@ -140,7 +140,16 @@ func TestModelProfileHTTPFailureBoundaries(t *testing.T) {
 			defer s.Close()
 			router := NewRouter("ollama")
 			router.Register(NewOllamaProvider(s.URL, "model", "", nil))
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			// Only the cancellation case wants a deadline the server outlives.
+			// The other modes must be given time to read the whole response:
+			// a 2 MiB body under the race detector on a busy CI runner can
+			// take longer than 100ms, and a deadline there reports a timeout
+			// instead of the boundary being tested.
+			timeout := 5 * time.Second
+			if mode == "cancelled" {
+				timeout = 100 * time.Millisecond
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			defer cancel()
 			p, err := router.DescribeModel(ctx, "", "")
 			if mode == "cancelled" {
