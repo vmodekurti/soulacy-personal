@@ -3083,6 +3083,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#live-activities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Live Activities
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#siri-and-shortcuts" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4759,6 +4770,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#live-activities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Live Activities
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#siri-and-shortcuts" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4885,6 +4907,33 @@ event matches the trigger's <code>on</code>, that the phone is allowed by <code>
 that the trigger's <code>cooldown</code> has passed, then starts the run and delivers
 the reply to that phone through this channel. See the
 <a href="../../agents/soul-yaml/#location-trigger">SOUL.yaml reference</a> for the block.</p>
+<h2 id="live-activities">Live Activities<a class="headerlink" href="#live-activities" title="Permanent link">&para;</a></h2>
+<p>A running agent can sit on the lock screen and in the Dynamic Island as a
+Live Activity: the agent's name, what it is doing, how many steps it has
+taken, elapsed time, and Approve/Deny buttons whenever it is waiting on
+you. Nothing is rendered on the gateway; it pushes a small content state and
+the phone draws it.</p>
+<p>Which runs appear:</p>
+<ul>
+<li>a background run (cron, webhook, location, another agent) as soon as it
+  calls its first tool;</li>
+<li>any run, including interactive chat, the moment it needs an approval.</li>
+</ul>
+<p>The phone sends an ActivityKit push-to-start token with its device
+registration (<code>live_start_token</code>). The gateway uses it to begin the activity
+even when the app is closed. Once the activity is on screen the phone reports
+the per-activity update token with
+<code>POST /api/v1/mobile/activities</code> (<code>device_id</code>, <code>agent_id</code>, <code>session_id</code>,
+<code>token</code>, <code>environment</code>), and the gateway pushes progress, "waiting on you",
+and the final state, then lets the phone dismiss it a few minutes later.
+Routine progress is throttled and sent at low priority; waiting and finished
+states are sent at once.</p>
+<p>With direct APNs the pushes go to Apple with <code>apns-push-type: liveactivity</code>
+and topic <code>dev.soulacy.ios.push-type.liveactivity</code>. A relay receives them at
+<code>POST &lt;relay&gt;/v1/live</code> as <code>{token, environment, bundle_id, event, priority,
+payload}</code> where <code>payload</code> is the exact APNs body. Turn the feature off per
+phone under <strong>Settings → Lock screen</strong>; the phone then stops sending its
+start token.</p>
 <h2 id="siri-and-shortcuts">Siri and Shortcuts<a class="headerlink" href="#siri-and-shortcuts" title="Permanent link">&para;</a></h2>
 <p>The iOS app exposes App Intents so agents work without opening the app:
 <strong>Ask an agent</strong>, <strong>Remember something</strong> (adds an adaptive-memory fact),
