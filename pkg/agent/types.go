@@ -19,7 +19,32 @@ const (
 	TriggerOneShot  TriggerKind = "oneshot"  // activated once at a specific time
 	TriggerWebhook  TriggerKind = "webhook"  // activated by an HTTP POST to its endpoint
 	TriggerInternal TriggerKind = "internal" // activated programmatically by another agent
+	TriggerLocation TriggerKind = "location" // activated when a paired phone enters or leaves a region
 )
+
+// LocationTrigger describes the geofence a paired phone monitors on the
+// agent's behalf. The phone does the monitoring (Core Location region
+// monitoring works while the app is in the background) and fires the agent
+// through the gateway; the gateway never tracks the phone itself.
+//
+//	trigger: location
+//	location:
+//	  name: Office
+//	  latitude: 37.7749
+//	  longitude: -122.4194
+//	  radius_m: 200          # 100–5000
+//	  on: enter              # enter | exit
+//	  device: ""             # empty = any paired phone; or a device id
+//	  cooldown: 30m          # ignore repeat fires inside this window
+type LocationTrigger struct {
+	Name      string  `yaml:"name,omitempty"      json:"name,omitempty"`
+	Latitude  float64 `yaml:"latitude"            json:"latitude"`
+	Longitude float64 `yaml:"longitude"           json:"longitude"`
+	RadiusM   float64 `yaml:"radius_m"            json:"radius_m"`
+	On        string  `yaml:"on"                  json:"on"`
+	Device    string  `yaml:"device,omitempty"    json:"device,omitempty"`
+	Cooldown  string  `yaml:"cooldown,omitempty"  json:"cooldown,omitempty"`
+}
 
 // MemoryPolicy controls how the agent reads and writes memory.
 type MemoryPolicy struct {
@@ -411,10 +436,11 @@ type Definition struct {
 	Surfaces []string `yaml:"surfaces,omitempty" json:"surfaces,omitempty"`
 
 	// --- Trigger ---
-	Trigger  TriggerKind    `yaml:"trigger"             json:"trigger"`
-	Channels []string       `yaml:"channels,omitempty"  json:"channels,omitempty"`
-	Schedule *Schedule      `yaml:"schedule,omitempty"  json:"schedule,omitempty"`
-	Webhook  *WebhookConfig `yaml:"webhook,omitempty"   json:"webhook,omitempty"`
+	Trigger  TriggerKind      `yaml:"trigger"             json:"trigger"`
+	Channels []string         `yaml:"channels,omitempty"  json:"channels,omitempty"`
+	Schedule *Schedule        `yaml:"schedule,omitempty"  json:"schedule,omitempty"`
+	Location *LocationTrigger `yaml:"location,omitempty"  json:"location,omitempty"`
+	Webhook  *WebhookConfig   `yaml:"webhook,omitempty"   json:"webhook,omitempty"`
 
 	// --- Intelligence ---
 	SystemPrompt string    `yaml:"system_prompt" json:"system_prompt"`
@@ -833,6 +859,10 @@ func (d *Definition) Clone() *Definition {
 	if d.Memory.Adaptive != nil {
 		v := *d.Memory.Adaptive
 		cp.Memory.Adaptive = &v
+	}
+	if d.Location != nil {
+		loc := *d.Location
+		cp.Location = &loc
 	}
 
 	// LLM — clone slice/map sub-fields.

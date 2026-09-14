@@ -7,6 +7,15 @@ to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- iPhone as Soulacy's extension, slice 1: approvals are pushed to paired
+  phones as actionable, time-sensitive notifications (`SOULACY_APPROVAL`)
+  that can be approved or denied from the lock screen; a new `location`
+  trigger kind lets an agent run when a paired phone enters or leaves a
+  place (`GET /api/v1/mobile/triggers`, `POST /api/v1/mobile/triggers/:id/fire`,
+  with `on`, `radius_m`, `device` and `cooldown` enforced on the gateway and
+  the reply delivered to the firing phone); mobile pushes carry a category,
+  thread id and data payload. The iOS app adds Siri/Shortcuts actions and a
+  "What it remembers" memory screen over the existing memory API.
 - Automatic updates: release installs check the signed manifest on a
   schedule (`updates.check_interval`, default 6h), download and verify new
   releases, replace their own binaries, prove the new binary runs, and

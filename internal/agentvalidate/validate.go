@@ -145,9 +145,14 @@ func validateDefinitionShape(report *Report, def *agent.Definition, path string)
 		report.add(Warn, "trigger", "not set; runtime defaults may not match the intended activation mode", "", nil)
 	}
 	switch def.Trigger {
-	case "", agent.TriggerChannel, agent.TriggerCron, agent.TriggerOneShot, agent.TriggerWebhook, agent.TriggerInternal:
+	case "", agent.TriggerChannel, agent.TriggerCron, agent.TriggerOneShot, agent.TriggerWebhook, agent.TriggerInternal, agent.TriggerLocation:
 	default:
 		report.add(Error, "trigger", fmt.Sprintf("unsupported trigger %q", def.Trigger), "", nil)
+	}
+	if def.Trigger == agent.TriggerLocation {
+		validateLocationTrigger(report, def.Location)
+	} else if def.Location != nil {
+		report.add(Warn, "location", "set but trigger is not \"location\"; the region is ignored", "", nil)
 	}
 	if def.Trigger == agent.TriggerChannel && len(def.Channels) == 0 {
 		report.add(Warn, "channels", "channel-triggered agents normally declare at least one channel", "", nil)
@@ -781,4 +786,27 @@ func sortedCopy(values []string) []string {
 	out := append([]string(nil), values...)
 	sort.Strings(out)
 	return out
+}
+
+// validateLocationTrigger checks the geofence a paired phone will monitor.
+func validateLocationTrigger(report *Report, loc *agent.LocationTrigger) {
+	if loc == nil {
+		report.add(Error, "location", "required for location trigger (latitude, longitude, radius_m, on)", "", nil)
+		return
+	}
+	if loc.Latitude < -90 || loc.Latitude > 90 {
+		report.add(Error, "location.latitude", "must be between -90 and 90", "", nil)
+	}
+	if loc.Longitude < -180 || loc.Longitude > 180 {
+		report.add(Error, "location.longitude", "must be between -180 and 180", "", nil)
+	}
+	if loc.RadiusM < 100 || loc.RadiusM > 5000 {
+		report.add(Error, "location.radius_m", "must be between 100 and 5000 metres; phones cannot monitor smaller or larger regions reliably", "", nil)
+	}
+	switch strings.ToLower(strings.TrimSpace(loc.On)) {
+	case "enter", "exit":
+	default:
+		report.add(Error, "location.on", "must be \"enter\" or \"exit\"", "", nil)
+	}
+	validateDuration(report, "location.cooldown", loc.Cooldown)
 }

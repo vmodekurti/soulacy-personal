@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -34,12 +35,112 @@ func New(store *Store, log *zap.Logger) *Adapter {
 		log = zap.NewNop()
 	}
 	apns, apnsErr := newAPNSClientFromEnvironment()
-	return &Adapter{
+	a := &Adapter{
 		store: store, relayURL: strings.TrimRight(strings.TrimSpace(os.Getenv("SOULACY_MOBILE_PUSH_RELAY_URL")), "/"),
 		relayToken: strings.TrimSpace(os.Getenv("SOULACY_MOBILE_PUSH_RELAY_TOKEN")),
 		apns:       apns, pushConfigErr: apnsErr,
 		client: &http.Client{Timeout: 8 * time.Second}, log: log.Named("mobile-channel"),
 	}
+	SetDefaultAdapter(a)
+	return a
+}
+
+var (
+	defaultAdapterMu sync.RWMutex
+	defaultAdapter   *Adapter
+)
+
+// SetDefaultAdapter records the process-wide adapter so gateway code that
+// does not hold the channel registry (approval broker hooks, triggers) can
+// still push to paired phones.
+func SetDefaultAdapter(a *Adapter) {
+	defaultAdapterMu.Lock()
+	defaultAdapter = a
+	defaultAdapterMu.Unlock()
+}
+
+// DefaultAdapter returns the process-wide adapter, or nil.
+func DefaultAdapter() *Adapter {
+	defaultAdapterMu.RLock()
+	defer defaultAdapterMu.RUnlock()
+	return defaultAdapter
+}
+
+// Notification categories the iOS app registers actions for.
+const (
+	CategoryApproval = "SOULACY_APPROVAL" // Approve / Deny actions
+	CategoryDelivery = "SOULACY_DELIVERY" // open the delivery
+	CategoryTrigger  = "SOULACY_TRIGGER"  // a location run completed
+)
+
+// Notification is a push a gateway feature wants a phone to show. Category
+// selects the actions the phone attaches; Data rides along for the action
+// handler (call id, agent id, session id). TimeSensitive raises the
+// interruption level so Focus modes still show it.
+type Notification struct {
+	Title         string
+	Body          string
+	Category      string
+	ThreadID      string
+	DeepLink      string
+	Data          map[string]string
+	TimeSensitive bool
+}
+
+// CanPush reports whether any push transport is configured.
+func (a *Adapter) CanPush() bool { return a != nil && (a.apns != nil || a.relayURL != "") }
+
+// Notify pushes n to every notification-enabled device matching destination
+// ("" = every device in the workspace, "user:<id>", or "device:<id>").
+// It never blocks a caller on a failed transport: the first error is
+// returned for logging after every device has been attempted.
+func (a *Adapter) Notify(ctx context.Context, workspaceID, destination string, n Notification) error {
+	if a == nil || a.store == nil {
+		return errors.New("mobile delivery store is unavailable")
+	}
+	devices, err := a.store.TargetDevices(ctx, workspaceID, destination)
+	if err != nil {
+		return err
+	}
+	var firstErr error
+	for _, device := range devices {
+		rn := relayNotification{DeviceToken: device.PushToken, Environment: device.PushEnvironment,
+			BundleID: device.BundleID, Title: n.Title, Body: n.Body, DeepLink: n.DeepLink,
+			Category: n.Category, ThreadID: n.ThreadID, Data: n.Data, TimeSensitive: n.TimeSensitive}
+		if err := a.deliver(ctx, rn); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+// deliver sends one relayNotification over APNs when configured, otherwise
+// through the push relay.
+func (a *Adapter) deliver(ctx context.Context, n relayNotification) error {
+	if a.apns != nil {
+		return a.apns.push(ctx, n)
+	}
+	if a.relayURL == "" {
+		return errors.New("no push transport configured")
+	}
+	payload, _ := json.Marshal(n)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.relayURL+"/v1/push", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if a.relayToken != "" {
+		req.Header.Set("Authorization", "Bearer "+a.relayToken)
+	}
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("push relay returned %d", resp.StatusCode)
+	}
+	return nil
 }
 
 func (a *Adapter) ID() string   { return "mobile" }
@@ -111,13 +212,17 @@ func messageText(msg message.Message) string {
 }
 
 type relayNotification struct {
-	DeviceToken string `json:"device_token"`
-	Environment string `json:"environment"`
-	BundleID    string `json:"bundle_id"`
-	DeliveryID  string `json:"delivery_id"`
-	Title       string `json:"title"`
-	Body        string `json:"body"`
-	DeepLink    string `json:"deep_link"`
+	DeviceToken   string            `json:"device_token"`
+	Environment   string            `json:"environment"`
+	BundleID      string            `json:"bundle_id"`
+	DeliveryID    string            `json:"delivery_id,omitempty"`
+	Title         string            `json:"title"`
+	Body          string            `json:"body"`
+	DeepLink      string            `json:"deep_link,omitempty"`
+	Category      string            `json:"category,omitempty"`
+	ThreadID      string            `json:"thread_id,omitempty"`
+	Data          map[string]string `json:"data,omitempty"`
+	TimeSensitive bool              `json:"time_sensitive,omitempty"`
 }
 
 func (a *Adapter) notify(ctx context.Context, workspaceID string, delivery Delivery) error {
@@ -129,7 +234,8 @@ func (a *Adapter) notify(ctx context.Context, workspaceID string, delivery Deliv
 	for _, device := range devices {
 		notification := relayNotification{DeviceToken: device.PushToken, Environment: device.PushEnvironment,
 			BundleID: device.BundleID, DeliveryID: delivery.ID, Title: delivery.Title,
-			Body: "An agent result is ready to review.", DeepLink: "soulacy://delivery/" + delivery.ID}
+			Body: "An agent result is ready to review.", DeepLink: "soulacy://delivery/" + delivery.ID,
+			Category: CategoryDelivery, ThreadID: "delivery-" + delivery.AgentID}
 		if a.apns != nil {
 			if err := a.apns.push(ctx, notification); err != nil && firstErr == nil {
 				firstErr = err

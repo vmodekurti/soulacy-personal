@@ -36,3 +36,36 @@ SOULACY_MOBILE_PUSH_RELAY_TOKEN=replace-with-a-secret
 ```
 
 The gateway posts a token, APNs environment, bundle ID, delivery ID, and a `soulacy://delivery/<id>` deep link to `POST <relay>/v1/push`. Notification text is intentionally generic; the sensitive output is fetched from the authenticated gateway after the user opens the app.
+
+## Lock-screen approvals
+
+When an agent needs your approval for a tool call, every paired phone that
+belongs to the same signed-in user receives a time-sensitive push in the
+`SOULACY_APPROVAL` category with **Approve** and **Deny** actions. Deciding
+from the lock screen calls the approvals API in the background; the app does
+not have to open. Tapping the notification opens the approval instead. The
+push carries only the agent name and tool name; the arguments are fetched from
+the authenticated gateway.
+
+Approvals still go through the same broker as the web, so a decision taken
+on the phone is visible everywhere, and an approval that has already been
+decided reports that instead of running twice.
+
+## Location triggers
+
+Agents declared with `trigger: location` are listed for paired phones at
+`GET /api/v1/mobile/triggers?device_id=<installation-id>`. The phone monitors
+those regions and reports a crossing with
+`POST /api/v1/mobile/triggers/<agent-id>/fire`. The gateway checks that the
+event matches the trigger's `on`, that the phone is allowed by `device`, and
+that the trigger's `cooldown` has passed, then starts the run and delivers
+the reply to that phone through this channel. See the
+[SOUL.yaml reference](../agents/soul-yaml.md#location-trigger) for the block.
+
+## Siri and Shortcuts
+
+The iOS app exposes App Intents so agents work without opening the app:
+**Ask an agent**, **Remember something** (adds an adaptive-memory fact),
+**Approve the pending action**, and **Run an agent**. They use the same
+paired credential and the same APIs as the app, so nothing new has to be
+configured on the gateway.

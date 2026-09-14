@@ -43,7 +43,7 @@ tags: [research, writing]
 labels: { owner: ops }
 
 # ── Trigger ───────────────────────────────────────────────
-trigger: channel             # primary start mode: channel | cron | oneshot | webhook | internal
+trigger: channel             # primary start mode: channel | cron | oneshot | webhook | internal | location
 channels: [http, telegram]   # channel adapter IDs this agent serves
 surfaces: [chat, telegram]   # optional UI/invocation surfaces; empty = derived
 
@@ -142,6 +142,7 @@ run_timeout: 10m             # whole-run wall-clock cap (default 15m)
 | `oneshot` | Run once at `schedule.at`. |
 | `webhook` | Activated by an HTTP POST to the agent's endpoint. |
 | `internal` | Callable by peer agents, not normally user-facing. |
+| `location` | Runs when a paired iPhone enters or leaves a place. Requires a `location` block (below). |
 
 `channels` binds the agent to channel adapter IDs. Platform credentials and
 inbound routing live in `config.yaml` — the agent only declares which adapters
@@ -165,6 +166,31 @@ schedule:
 With that shape, the scheduler fires the agent, the Chat picker can test it,
 and mapped Telegram/Slack bots can route inbound messages to the same agent.
 The channel credentials and bot mappings still live under `config.yaml`.
+
+### Location trigger
+
+A `location` agent asks every paired iPhone to watch one place. The phone does
+the geofencing with Core Location region monitoring, so nothing tracks the
+phone: the gateway learns only that the boundary was crossed, with the
+coordinate of that moment. The agent runs on the gateway and its reply is
+delivered to the phone that fired it.
+
+```yaml
+trigger: location
+location:
+  name: Office            # shown on the phone; defaults to the agent name
+  latitude: 47.6205
+  longitude: -122.3493
+  radius_m: 250           # 100–5000 metres
+  on: enter               # enter | exit
+  cooldown: 45m           # ignore repeat crossings for this long (default 30m)
+  # device: <installation-id>   # optional: only this phone watches the place
+```
+
+On the phone, enable **Settings → Location triggers** and grant *Always*
+location access. iOS delivers region events even when the app is suspended.
+Each crossing appears as a `trigger.location` event in the workspace event
+stream and in the phone's Location triggers screen with its outcome.
 
 ## LLM Block
 
