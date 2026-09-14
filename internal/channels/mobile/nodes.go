@@ -44,6 +44,9 @@ var SupportedNodeCommands = []string{
 	"device.info", "location.current", "contacts.search", "calendar.events",
 	"reminders.list", "motion.current", "system.notify", "camera.capture",
 	"photos.pick", "canvas.present", "canvas.snapshot",
+	// Slice 2: signals only a phone has. Both are read-only and, like every
+	// other command, run only when the phone advertised the capability.
+	"health.summary", "focus.status",
 }
 
 type Node struct {
