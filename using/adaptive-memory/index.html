@@ -1378,6 +1378,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#facts-that-come-and-go" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Facts that come and go
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#where-facts-live-and-who-can-see-them" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4748,6 +4759,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#facts-that-come-and-go" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Facts that come and go
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#where-facts-live-and-who-can-see-them" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4906,15 +4928,33 @@ cost, and is private to each signed-in user.</p>
    nothing.</li>
 <li><strong>Each fact is reconciled</strong> against your existing facts. If you previously
    said you lived in San Francisco, that fact is marked superseded and the New
-   York fact becomes active. Compatible details are added alongside; exact
-   restatements are dropped.</li>
+   York fact becomes active. If you say something is <em>no longer true</em> ("I don't
+   have a dog anymore"), the old fact is <strong>retracted</strong> rather than replaced.
+   Compatible details are added alongside; exact restatements are dropped.
+   Relationships between entities ("User → works at → Acme") are stored as a
+   small graph; a new object for the same subject and relationship supersedes
+   the old one.</li>
 <li><strong>On your next message</strong>, the agent's system prompt gains a short block:</li>
 </ol>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>### 🧠 MEMORY &amp; PREFERENCES
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>- User lives in New York
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>- User prefers short answers
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>- User works at Acme
 </span></code></pre></div>
-<p>The block is capped at about 50 tokens, so memory never crowds out the task.</p>
+<p>Facts come first, then the most relevant relationships if budget remains.
+   The block is capped at about 50 tokens, so memory never crowds out the task.</p>
+<h2 id="facts-that-come-and-go">Facts that come and go<a class="headerlink" href="#facts-that-come-and-go" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>This-conversation-only facts.</strong> "For this chat, answer in French" is
+  extracted as a <em>temporary</em> fact. It is recalled only inside the session it
+  came from and never leaks into other conversations. The Learning page marks
+  these "this conversation".</li>
+<li><strong>Expiring facts.</strong> Any fact can carry an expiry date, for example "User is
+  travelling until Friday". Expired facts stop being recalled but stay listed
+  until you delete them. Set an expiry when adding or editing a fact.</li>
+<li><strong>Retracted facts.</strong> When you say something stopped being true, the old
+  fact is retracted, kept for audit, and never recalled again.</li>
+</ul>
 <h2 id="where-facts-live-and-who-can-see-them">Where facts live and who can see them<a class="headerlink" href="#where-facts-live-and-who-can-see-them" title="Permanent link">&para;</a></h2>
 <p>Every fact is scoped to three things: the workspace, the <strong>owner</strong> (the
 signed-in identity that had the conversation), and the agent. The runtime never
@@ -4924,14 +4964,18 @@ Workspace admins can inspect another member's memory; nobody else can.</p>
 on shared external channels, dry runs, and simulations are excluded, so a fact
 is always attributable to one person.</p>
 <p>Superseded facts are kept, marked <code>superseded</code> with a pointer to the fact that
-replaced them. That is the audit trail: you can see what the agent used to
-believe and when it changed.</p>
+replaced them; retracted facts are kept, marked <code>retracted</code>. Every fact also
+has a <strong>change history</strong>: created, edited (with the previous wording),
+superseded, retracted, or deleted, with who did it (you, the extractor, or an
+external provider) and when. The history survives deletion of the fact.</p>
 <h2 id="managing-what-is-remembered">Managing what is remembered<a class="headerlink" href="#managing-what-is-remembered" title="Permanent link">&para;</a></h2>
 <p>Open <strong>Learning → 🧠 What it remembers</strong>. You can:</p>
 <ul>
 <li><strong>Search</strong> with plain words; results are ranked by relevance.</li>
-<li><strong>Filter</strong> active facts, superseded facts, or both.</li>
-<li><strong>Edit</strong> a fact inline, or change its category.</li>
+<li><strong>Filter</strong> active, superseded, or retracted facts, or all of them.</li>
+<li><strong>Edit</strong> a fact inline, change its category, or set an expiry date.</li>
+<li><strong>🕘 History</strong> to see every change a fact went through.</li>
+<li><strong>Relationships</strong> view to inspect and delete the entity graph.</li>
 <li><strong>➕ Add Fact</strong> by hand, for anything you want the agent to know now.</li>
 <li><strong>🗑️ Delete</strong> any fact; agents stop seeing it on the next turn.</li>
 <li><strong>📥 Export Memory (JSON)</strong> for a copy of everything, including superseded
@@ -4958,9 +5002,17 @@ block. Everything else about it is unchanged.</p>
 </span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">    </span><span class="nt">similarity_threshold</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.85</span>
 </span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">    </span><span class="nt">max_prompt_facts</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5</span>
 </span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">    </span><span class="nt">prompt_token_budget</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50</span>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">    </span><span class="nt">graph_enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">      </span><span class="c1"># remember relationships between entities</span>
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">    </span><span class="nt">instructions</span><span class="p">:</span><span class="w"> </span><span class="s">""</span><span class="w">         </span><span class="c1"># extra guidance for extraction (max 240 chars)</span>
+</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">    </span><span class="nt">custom_categories</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[]</span><span class="w">    </span><span class="c1"># e.g. [role, project, health]</span>
 </span></code></pre></div>
 <p>All of these can be changed from <strong>Config → Adaptive memory</strong> and apply to the
-next turn without a restart. Environment variables use the usual prefix, for
+next turn without a restart.</p>
+<p><strong>Shaping what gets remembered.</strong> <code>instructions</code> is appended to the extraction
+prompt, for example "Also capture the user's job title and team. Ignore
+weather small talk." <code>custom_categories</code> adds categories beyond the built-in
+four; extracted or hand-added facts may then use them. Both are forwarded to an
+external provider when one is configured. Environment variables use the usual prefix, for
 example <code>SOULACY_MEMORY_ADAPTIVE_ENABLED=false</code>.</p>
 <p><strong>Extraction cost.</strong> Each extraction prompt is under 200 input tokens, and
 conflict checks are shorter still. Point <code>model_provider</code>/<code>model</code> at a small,
@@ -4982,7 +5034,11 @@ built-in engine:</p>
 </span></code></pre></div>
 <p>The switch takes effect immediately when saved from <strong>Config → Adaptive
 memory</strong>. The same GUI, API, and per-agent controls apply; the provider does
-its own extraction and reconciliation. If the provider is not configured or
+its own extraction and reconciliation, and its graph memory, change history,
+expiry dates, and custom instructions and categories map onto the same
+features here. Two things stay local-only: the superseded/retracted audit
+states (an external provider rewrites or deletes in place, so only its history
+log shows what changed) and this-conversation-only facts. If the provider is not configured or
 its settings are invalid, Soulacy logs a warning and keeps using the built-in
 engine, so memory never silently disappears.</p>
 <h2 id="relationship-to-the-other-memory-tiers">Relationship to the other memory tiers<a class="headerlink" href="#relationship-to-the-other-memory-tiers" title="Permanent link">&para;</a></h2>
