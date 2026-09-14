@@ -4850,9 +4850,9 @@ device-node command set agents can call: <code>device.info</code>, <code>locatio
 <td>Multiple profiles on one phone; per-person pairing.</td>
 </tr>
 <tr>
-<td><strong>E61 Agent-built UI</strong></td>
-<td>Canvas command already exists; add typed components.</td>
-<td>Checklists, forms and charts rendered natively from an agent's canvas.</td>
+<td><strong>E61 Agent-built UI</strong> (shipped)</td>
+<td><code>canvas.present</code> accepts typed <code>components</code> (text, checklist, form, chart, metric), validated on enqueue; <code>mobile.invoke</code> takes <code>expires_in_seconds</code>; a form keeps the command running until the person answers and the result carries the answers.</td>
+<td>Native rendering with Swift Charts and form controls; the card appears as a sheet wherever the person is; Submit and Dismiss report back through the normal command result path.</td>
 </tr>
 </tbody>
 </table>

@@ -3104,6 +3104,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#agent-built-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent-built UI
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -4791,6 +4802,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#agent-built-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent-built UI
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -4940,6 +4962,52 @@ start token.</p>
 <strong>Approve the pending action</strong>, and <strong>Run an agent</strong>. They use the same
 paired credential and the same APIs as the app, so nothing new has to be
 configured on the gateway.</p>
+<h2 id="agent-built-ui">Agent-built UI<a class="headerlink" href="#agent-built-ui" title="Permanent link">&para;</a></h2>
+<p>An agent can draw a native card on a paired phone with the <code>canvas.present</code>
+device command (through the <code>mobile.invoke</code> tool, once the phone has the
+<strong>Soulacy canvas</strong> capability on). Besides the original <code>title</code>, <code>body</code> and
+<code>items</code>, a card may carry typed <code>components</code>, rendered with native controls:</p>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Fields</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>text</code></td>
+<td><code>markdown</code></td>
+</tr>
+<tr>
+<td><code>checklist</code></td>
+<td><code>title</code>, <code>items: [{label, done}]</code></td>
+</tr>
+<tr>
+<td><code>form</code></td>
+<td><code>id</code>, <code>fields: [{name, label, kind: text\|number\|choice\|toggle\|date, options, required, default}]</code>, <code>submit</code> (button label)</td>
+</tr>
+<tr>
+<td><code>chart</code></td>
+<td><code>title</code>, <code>kind: bar\|line</code>, <code>labels</code>, <code>series: [{label, values}]</code></td>
+</tr>
+<tr>
+<td><code>metric</code></td>
+<td><code>label</code>, <code>value</code>, <code>unit</code>, <code>trend: up\|down\|flat</code></td>
+</tr>
+</tbody>
+</table>
+<p>A card with a form (or a <code>submit</code> label at the top level) keeps the command
+<strong>running</strong> until the person submits or dismisses it, or the command expires,
+so set <code>expires_in_seconds</code> on <code>mobile.invoke</code> (up to 900). The result then
+carries <code>answers</code> keyed by field name and the state of every checklist:</p>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="p">{</span><span class="nt">"presented"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="nt">"submitted"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="nt">"form_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"pick"</span><span class="p">,</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w"> </span><span class="nt">"answers"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"option"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Beach"</span><span class="p">,</span><span class="w"> </span><span class="nt">"notes"</span><span class="p">:</span><span class="w"> </span><span class="s2">"leave early"</span><span class="p">},</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w"> </span><span class="nt">"checklists"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"Pack"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"label"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Passport"</span><span class="p">,</span><span class="w"> </span><span class="nt">"done"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">}]}}</span>
+</span></code></pre></div>
+<p>Limits: 12 components, one form of up to 12 fields, checklists of up to 30
+items, charts of up to 6 series and 60 points. The gateway refuses anything
+else with a message naming the vocabulary, so agents learn it from the error.</p>
 
 
 
