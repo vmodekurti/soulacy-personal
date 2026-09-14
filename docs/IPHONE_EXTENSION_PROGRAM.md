@@ -57,7 +57,7 @@ device-node command set agents can call: `device.info`, `location.current`,
 | Story | Gateway | App |
 |---|---|---|
 | **E58 Watch** | None. | Inbox on the wrist: approve, deny, snooze; complications for pending count. |
-| **E59 On-device memory** | Fact sync API with cursors. | Extraction and recall with on-device models when offline; sync on reconnect. |
+| **E59 On-device memory** (shipped) | `GET /memory/facts/sync?since=` change feed over the fact history: upserts and tombstones with a cursor, owner-scoped, `reset` after a purge, 501 for providers without history. | The phone keeps a local copy of the owner's facts, syncs incrementally on connect and reconnect, searches offline with on-device sentence embeddings, and queues additions (including Siri's Remember) until the gateway is reachable. |
 | **E60 Household** | Multiple owners per gateway with owner-scoped memory and inboxes (already the tenancy model). | Multiple profiles on one phone; per-person pairing. |
 | **E61 Agent-built UI** (shipped) | `canvas.present` accepts typed `components` (text, checklist, form, chart, metric), validated on enqueue; `mobile.invoke` takes `expires_in_seconds`; a form keeps the command running until the person answers and the result carries the answers. | Native rendering with Swift Charts and form controls; the card appears as a sheet wherever the person is; Submit and Dismiss report back through the normal command result path. |
 

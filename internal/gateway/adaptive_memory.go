@@ -35,6 +35,7 @@ func (s *Server) SetAdaptiveMemoryRebuilder(fn AdaptiveMemoryRebuilder) { s.adap
 //	GET    /memory/facts/export?agent_id=              JSON download
 //	DELETE /memory/facts?agent_id=&confirm=true        purge
 //	GET    /memory/facts/status                        provider, categories, counts
+//	GET    /memory/facts/sync?since=&limit=&agent_id=  change feed for devices
 //
 // Every route is scoped to the caller's own identity. Admins may pass
 // ?owner= to inspect another user's workspace-scoped memory; everyone else
@@ -44,6 +45,7 @@ func (s *Server) registerAdaptiveMemoryRoutes(api fiber.Router) {
 	write := s.rbacMW(rbac.ResourceMemory, rbac.ActionWrite)
 	del := s.rbacMW(rbac.ResourceMemory, rbac.ActionDelete)
 	api.Get("/memory/facts/status", read, s.handleAdaptiveMemoryStatus)
+	api.Get("/memory/facts/sync", read, s.handleAdaptiveMemorySync)
 	api.Get("/memory/facts/export", read, s.handleAdaptiveMemoryExport)
 	api.Get("/memory/facts/relations", read, s.handleAdaptiveMemoryRelations)
 	api.Delete("/memory/facts/relations/:id", del, s.handleAdaptiveMemoryDeleteRelation)
@@ -428,4 +430,28 @@ func maskSecret(v string) string {
 		return ""
 	}
 	return "***"
+}
+
+// handleAdaptiveMemorySync serves the incremental change feed a phone uses
+// to keep an on-device copy of the owner's memory. Only engines that keep
+// their own history can serve it; an external provider answers 501.
+func (s *Server) handleAdaptiveMemorySync(c *fiber.Ctx) error {
+	c.Set(fiber.HeaderCacheControl, "no-store")
+	engine, scope, err := s.adaptiveScopeFor(c)
+	if err != nil {
+		return adaptiveErr(c, err)
+	}
+	feed, ok := engine.(memory.ChangeFeed)
+	if !ok {
+		return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{"error": "the " + engine.Provider() + " provider does not offer a change feed"})
+	}
+	since, _ := strconv.ParseInt(c.Query("since", "0"), 10, 64)
+	limit, _ := strconv.Atoi(c.Query("limit", "200"))
+	ctx, cancel := s.adaptiveCtx(c)
+	defer cancel()
+	page, err := feed.Changes(ctx, scope, since, limit)
+	if err != nil {
+		return adaptiveErr(c, err)
+	}
+	return c.JSON(fiber.Map{"changes": page.Changes, "next_cursor": page.NextCursor, "has_more": page.HasMore, "reset": page.Reset, "provider": engine.Provider(), "owner": scope.Owner})
 }

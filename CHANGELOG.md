@@ -7,6 +7,11 @@ to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Memory change feed for devices: `GET /api/v1/memory/facts/sync?since=`
+  returns the owner's facts changed after a cursor as upserts and
+  tombstones, collapsed to their current state, with `next_cursor`,
+  `has_more` and a `reset` signal after a purge. The iOS app uses it to keep
+  memory on the phone and search it offline.
 - Agent-built UI on iPhone: `canvas.present` accepts typed `components`
   (text, checklist, form, chart, metric) that the phone renders natively; a
   form keeps the command running until the person submits and the result

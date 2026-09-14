@@ -387,3 +387,29 @@ func SortScored(items []ScoredFact) {
 		return items[i].ID < items[j].ID
 	})
 }
+
+// FactChange is one entry of the change feed a device syncs from. Deleted
+// facts (and facts removed by a purge) arrive as tombstones with no Fact.
+type FactChange struct {
+	Cursor  int64  `json:"cursor"`
+	FactID  string `json:"fact_id"`
+	Event   string `json:"event"`
+	Deleted bool   `json:"deleted"`
+	Fact    *Fact  `json:"fact,omitempty"`
+}
+
+// FactChanges is a page of the feed. Reset tells the device its cursor is
+// ahead of anything the gateway knows (a purge happened): drop the cache
+// and start from zero.
+type FactChanges struct {
+	Changes    []FactChange `json:"changes"`
+	NextCursor int64        `json:"next_cursor"`
+	HasMore    bool         `json:"has_more"`
+	Reset      bool         `json:"reset"`
+}
+
+// ChangeFeed is implemented by engines that can serve an incremental sync;
+// the built-in engine does, an external provider may not.
+type ChangeFeed interface {
+	Changes(ctx context.Context, scope FactScope, since int64, limit int) (FactChanges, error)
+}

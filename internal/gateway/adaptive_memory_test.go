@@ -3,8 +3,10 @@ package gateway
 import (
 	"encoding/json"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -30,6 +32,7 @@ func adaptiveApp(t *testing.T, s *Server, role, subject string) *fiber.App {
 	})
 	api := app.Group("/api/v1")
 	api.Get("/memory/facts/status", s.handleAdaptiveMemoryStatus)
+	api.Get("/memory/facts/sync", s.handleAdaptiveMemorySync)
 	api.Get("/memory/facts/export", s.handleAdaptiveMemoryExport)
 	api.Get("/memory/facts", s.handleAdaptiveMemoryList)
 	api.Post("/memory/facts", s.handleAdaptiveMemoryAdd)
@@ -223,5 +226,45 @@ func TestAdaptiveMemoryHistoryRelationsAndExpiry(t *testing.T) {
 	}
 	if code, _ := doJSON(t, api, "DELETE", "/api/v1/memory/facts/relations/"+rel.ID+"?agent_id=helper", ""); code != 204 {
 		t.Fatalf("delete relation: %d", code)
+	}
+}
+
+func TestAdaptiveMemorySyncFeedIsOwnerScopedAndIncremental(t *testing.T) {
+	s, _ := adaptiveGateway(t)
+	ada := adaptiveApp(t, s, "operator", "ada")
+	bob := adaptiveApp(t, s, "operator", "bob")
+
+	code, body := doJSON(t, ada, http.MethodPost, "/api/v1/memory/facts", `{"agent_id":"helper","content":"User prefers tea","category":"preference"}`)
+	if code != http.StatusCreated && code != http.StatusOK {
+		t.Fatalf("add: %d %+v", code, body)
+	}
+	fact, _ := body["fact"].(map[string]any)
+	id, _ := fact["id"].(string)
+
+	code, page := doJSON(t, ada, http.MethodGet, "/api/v1/memory/facts/sync?since=0", "")
+	if code != http.StatusOK {
+		t.Fatalf("sync: %d %+v", code, page)
+	}
+	changes, _ := page["changes"].([]any)
+	if len(changes) != 1 || page["reset"] != false {
+		t.Fatalf("expected one change, got %+v", page)
+	}
+	first, _ := changes[0].(map[string]any)
+	if first["fact_id"] != id || first["deleted"] != false || first["fact"] == nil {
+		t.Fatalf("change malformed: %+v", first)
+	}
+	cursor := page["next_cursor"].(float64)
+
+	if _, other := doJSON(t, bob, http.MethodGet, "/api/v1/memory/facts/sync?since=0", ""); len(other["changes"].([]any)) != 0 {
+		t.Fatalf("bob must not see ada's memory: %+v", other)
+	}
+
+	if code, _ := doJSON(t, ada, http.MethodDelete, "/api/v1/memory/facts/"+id+"?agent_id=helper", ""); code != http.StatusNoContent && code != http.StatusOK {
+		t.Fatalf("delete: %d", code)
+	}
+	_, page = doJSON(t, ada, http.MethodGet, "/api/v1/memory/facts/sync?since="+strconv.Itoa(int(cursor)), "")
+	changes, _ = page["changes"].([]any)
+	if len(changes) != 1 || changes[0].(map[string]any)["deleted"] != true {
+		t.Fatalf("expected a tombstone after delete, got %+v", page)
 	}
 }
