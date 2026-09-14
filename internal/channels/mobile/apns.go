@@ -163,8 +163,8 @@ func (a *apnsClient) push(ctx context.Context, n relayNotification) error {
 // bundle with Apple's liveactivity suffix; the token is a push-to-start token
 // for "start" and an activity update token otherwise.
 func (a *apnsClient) pushLive(ctx context.Context, p livePush) error {
-	if len(p.Token) != 64 {
-		return errors.New("APNs Live Activity token must be 32 bytes encoded as hexadecimal")
+	if len(p.Token) < 32 || len(p.Token) > 512 || len(p.Token)%2 != 0 {
+		return errors.New("APNs Live Activity token must be 16–256 bytes encoded as hexadecimal")
 	}
 	if subtle.ConstantTimeCompare([]byte(p.BundleID), []byte("dev.soulacy.ios")) != 1 {
 		return errors.New("APNs bundle ID is not allowed")

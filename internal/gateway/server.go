@@ -1740,6 +1740,7 @@ func (s *Server) Listen(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	s.migrateLegacyCompanionIdentities(ctx)
 
 	// Story 2 / S1.x — probe providers and validate every agent's model BEFORE
 	// serving. Agents whose configured model is unavailable are quarantined

@@ -834,3 +834,26 @@ func (s *FactSQLite) Changes(ctx context.Context, scope FactScope, since int64, 
 	out.Changes = compact
 	return out, nil
 }
+
+// ReassignOwner moves every fact, relation and history row of one owner to
+// another. Used once at startup so memory a phone built under a legacy
+// companion key id belongs to the person that key now authenticates as.
+func (s *FactSQLite) ReassignOwner(ctx context.Context, workspace, from, to string) (int64, error) {
+	from, to = strings.TrimSpace(from), strings.TrimSpace(to)
+	if from == "" || to == "" || from == to {
+		return 0, nil
+	}
+	if strings.TrimSpace(workspace) == "" {
+		workspace = DefaultWorkspace
+	}
+	var total int64
+	for _, table := range []string{"adaptive_facts", "adaptive_relations", "adaptive_fact_history"} {
+		res, err := s.db.ExecContext(ctx, `UPDATE `+table+` SET owner=? WHERE workspace=? AND owner=?`, to, workspace, from)
+		if err != nil {
+			return total, fmt.Errorf("adaptive memory: reassign owner: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		total += n
+	}
+	return total, nil
+}

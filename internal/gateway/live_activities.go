@@ -384,8 +384,12 @@ func (s *Server) handleRegisterLiveActivity(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"registered": true, "run_key": liveRunKey(req.AgentID, req.SessionID)})
 }
 
+// validHexToken accepts an ActivityKit token: hex, whole bytes, and between
+// 16 and 256 bytes. Unlike APNs device tokens, Live Activity push-to-start
+// and update tokens are not fixed at 32 bytes, so an exact-length check
+// rejected real phones and took their whole device registration with it.
 func validHexToken(v string) bool {
-	if len(v) != 64 {
+	if len(v) < 32 || len(v) > 512 || len(v)%2 != 0 {
 		return false
 	}
 	for _, r := range v {

@@ -339,3 +339,34 @@ func (a *Adapter) deliverLive(ctx context.Context, p livePush) error {
 	}
 	return nil
 }
+
+// ReassignUser moves everything a user owns in the mobile store to another
+// user: devices, nodes, queued commands, live activities and deliveries
+// addressed to them. Used once at startup to hand rows created under a
+// legacy companion key id to the owner that key now authenticates as.
+func (s *Store) ReassignUser(ctx context.Context, workspaceID, from, to string) (int64, error) {
+	from, to = strings.TrimSpace(from), strings.TrimSpace(to)
+	if from == "" || to == "" || from == to {
+		return 0, nil
+	}
+	ws := normalizeWorkspaceID(workspaceID)
+	var total int64
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`UPDATE mobile_devices SET user_id=? WHERE workspace_id=? AND user_id=?`, []any{to, ws, from}},
+		{`UPDATE mobile_nodes SET user_id=? WHERE workspace_id=? AND user_id=?`, []any{to, ws, from}},
+		{`UPDATE mobile_node_commands SET user_id=? WHERE workspace_id=? AND user_id=?`, []any{to, ws, from}},
+		{`UPDATE mobile_live_activities SET user_id=? WHERE workspace_id=? AND user_id=?`, []any{to, ws, from}},
+		{`UPDATE mobile_deliveries SET destination=? WHERE workspace_id=? AND destination=?`, []any{"user:" + to, ws, "user:" + from}},
+	} {
+		res, err := s.db.ExecContext(ctx, q.sql, q.args...)
+		if err != nil {
+			return total, err
+		}
+		n, _ := res.RowsAffected()
+		total += n
+	}
+	return total, nil
+}
