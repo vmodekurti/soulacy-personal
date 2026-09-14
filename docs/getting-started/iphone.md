@@ -72,6 +72,18 @@ Follow [the briefing exercise](../use-cases/morning-brief.md) to verify generati
 inbox delivery, and background push separately. Never paste private report data
 into a broadcast test.
 
+## 4a. Let agents reach the lock screen
+
+**Settings → Lock screen** is on by default: a background run appears as a
+Live Activity once it starts using tools, and any run appears the moment it
+needs your approval, with Approve and Deny right there. **Settings →
+Location triggers** needs *Always* location access and only watches places
+an agent declared with `trigger: location`.
+
+From any app's share sheet, choose Soulacy to file a document, photo, link
+or text into a knowledge base or send it to an agent. Photos are read on
+the phone first, so the gateway receives text it can index.
+
 ## 5. Grant device access only for a real task
 
 Open **Settings → Device access**. Capabilities start off. Enable only the ones
