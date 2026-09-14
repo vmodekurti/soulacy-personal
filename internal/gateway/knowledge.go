@@ -321,18 +321,39 @@ func (s *Server) handleIngestDocument(c *fiber.Ctx) error {
 		if mimeType == "" {
 			mimeType = fh.Header.Get("Content-Type")
 		}
+		// A phone that shares a photo or a scan has already read the text off
+		// it on-device; the gateway keeps the file name as the source and
+		// ingests that text instead of bytes it cannot read. A caption from
+		// the person sharing goes first so retrieval finds their words too.
+		if text, replaced := sharedDocumentText(c.FormValue("caption"), c.FormValue("extracted_text"), mimeType); replaced {
+			if err := s.rejectOversizedKnowledgePayload(c, int64(len(text))); err != nil {
+				return err
+			}
+			reader, size, mimeType = strings.NewReader(text), int64(len(text)), "text/plain"
+		} else if caption := strings.TrimSpace(c.FormValue("caption")); caption != "" && isTextMime(mimeType) {
+			raw, rerr := io.ReadAll(io.LimitReader(f, s.knowledgeMaxDocumentBytes()+1))
+			if rerr != nil {
+				return s.errMsg(c, fiber.StatusBadRequest, rerr.Error())
+			}
+			text := captionPrefix(caption) + string(raw)
+			reader, size = strings.NewReader(text), int64(len(text))
+		}
 	default:
 		var body struct {
 			Title    string `json:"title"`
 			Source   string `json:"source"`
 			MIMEType string `json:"mime_type"`
 			Content  string `json:"content"`
+			Caption  string `json:"caption"`
 		}
 		if perr := c.BodyParser(&body); perr != nil {
 			return s.errMsg(c, fiber.StatusBadRequest, perr.Error())
 		}
 		if body.Content == "" {
 			return s.errMsg(c, fiber.StatusBadRequest, "content is required")
+		}
+		if caption := strings.TrimSpace(body.Caption); caption != "" {
+			body.Content = captionPrefix(caption) + body.Content
 		}
 		title = body.Title
 		source = body.Source
@@ -441,4 +462,34 @@ func (s *Server) handleSearchKnowledge(c *fiber.Ctx) error {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
 	return c.JSON(fiber.Map{"hits": hits})
+}
+
+// sharedDocumentText decides whether a multipart upload should be ingested
+// as the text the sender already extracted (a phone's on-device OCR of a
+// photo, for example) rather than the file bytes. It applies when
+// extracted_text is present and the file is not a type the gateway can
+// read itself. The returned text carries the caption first.
+func sharedDocumentText(caption, extracted, mimeType string) (string, bool) {
+	extracted = strings.TrimSpace(extracted)
+	if extracted == "" || isTextMime(mimeType) {
+		return "", false
+	}
+	return captionPrefix(strings.TrimSpace(caption)) + extracted, true
+}
+
+// isTextMime reports whether ExtractText can read the type on its own.
+func isTextMime(mimeType string) bool {
+	switch strings.TrimSpace(strings.ToLower(strings.SplitN(mimeType, ";", 2)[0])) {
+	case "text/plain", "text/markdown", "application/pdf",
+		"application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+		return true
+	}
+	return false
+}
+
+func captionPrefix(caption string) string {
+	if caption == "" {
+		return ""
+	}
+	return "Note from the person who shared this: " + caption + "\n\n"
 }

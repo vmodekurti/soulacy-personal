@@ -7,6 +7,12 @@ to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Share-to-knowledge from iPhone: `POST /api/v1/knowledge/:kb/documents`
+  accepts a `caption` (JSON or multipart) that is stored ahead of the
+  content so retrieval finds the sharer's own words, and multipart uploads
+  may carry `extracted_text` for files the gateway cannot read itself
+  (photos and scans the phone has already run through on-device text
+  recognition), which is ingested in place of the bytes.
 - Phone signals for agents: `health.summary` and `focus.status` join the
   device-command allowlist, so an agent with `mobile.invoke` can ask a paired
   iPhone (with those capabilities enabled) for steps, energy, exercise
