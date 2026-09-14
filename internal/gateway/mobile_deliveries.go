@@ -20,6 +20,9 @@ type mobileDeviceRequest struct {
 	PushEnvironment      string `json:"push_environment"`
 	BundleID             string `json:"bundle_id"`
 	NotificationsEnabled bool   `json:"notifications_enabled"`
+	// LiveStartToken is the ActivityKit push-to-start token, when the phone
+	// allows agents on its lock screen.
+	LiveStartToken string `json:"live_start_token"`
 }
 
 const personalIOSBundleID = "dev.soulacy.ios"
@@ -72,6 +75,10 @@ func (s *Server) handleRegisterMobileDevice(c *fiber.Ctx) error {
 	if req.BundleID != "" && req.BundleID != personalIOSBundleID {
 		return s.errMsg(c, fiber.StatusBadRequest, "bundle_id must identify the Soulacy iOS app")
 	}
+	req.LiveStartToken = strings.ToLower(strings.TrimSpace(req.LiveStartToken))
+	if req.LiveStartToken != "" && !validHexToken(req.LiveStartToken) {
+		return s.errMsg(c, fiber.StatusBadRequest, "live_start_token must be a 32-byte APNs token encoded as hexadecimal")
+	}
 	if req.PushToken != "" {
 		decoded, decodeErr := hex.DecodeString(req.PushToken)
 		if decodeErr != nil || len(decoded) != 32 {
@@ -79,7 +86,8 @@ func (s *Server) handleRegisterMobileDevice(c *fiber.Ctx) error {
 		}
 	}
 	device := mobilechan.Device{ID: req.ID, Name: strings.TrimSpace(req.Name), PushToken: req.PushToken,
-		PushEnvironment: req.PushEnvironment, BundleID: personalIOSBundleID, NotificationsEnabled: req.NotificationsEnabled}
+		PushEnvironment: req.PushEnvironment, BundleID: personalIOSBundleID, NotificationsEnabled: req.NotificationsEnabled,
+		LiveStartToken: req.LiveStartToken}
 	if err := store.UpsertDevice(c.UserContext(), workspaceID, userID, device); err != nil {
 		if errors.Is(err, mobilechan.ErrDeviceOwnership) {
 			return s.errMsg(c, fiber.StatusForbidden, "device is registered to another user")

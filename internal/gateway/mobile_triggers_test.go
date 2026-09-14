@@ -36,6 +36,10 @@ func mobileFixture(t *testing.T, s *Server) (*mobilechan.Store, *pushCapture) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var n map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&n)
+		if n == nil {
+			n = map[string]any{}
+		}
+		n["_path"] = r.URL.Path
 		cap.mu.Lock()
 		cap.seen = append(cap.seen, n)
 		cap.mu.Unlock()
