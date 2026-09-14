@@ -1,12 +1,15 @@
 package gateway
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"sync"
 
 	"github.com/gofiber/fiber/v2"
+	"go.uber.org/zap"
 
+	mobilechan "github.com/soulacy/soulacy/internal/channels/mobile"
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/metrics"
 	"github.com/soulacy/soulacy/internal/runtime"
@@ -51,11 +54,12 @@ func getPushService() (*webpush.Service, error) {
 // once during route setup; a push init failure is non-fatal.
 func (s *Server) wirePushNotifications() {
 	svc, err := getPushService()
-	if err != nil || svc == nil {
-		return
+	if err != nil {
+		svc = nil
 	}
 	s.engine.Broker().SetOnRegister(func(p runtime.PendingApproval) {
-		if svc.Count() == 0 {
+		s.notifyPhonesOfApproval(p)
+		if svc == nil || svc.Count() == 0 {
 			return
 		}
 		res := svc.NotifyDetailed(webpush.Notification{
@@ -137,4 +141,43 @@ func (s *Server) handlePushTest(c *fiber.Ctx) error {
 	}
 	sent := svc.Notify(webpush.Notification{Title: "Soulacy", Body: "Push notifications are working.", URL: "/mobile"})
 	return c.JSON(fiber.Map{"ok": true, "sent": sent})
+}
+
+// notifyPhonesOfApproval pushes an actionable approval notification to the
+// requesting owner's paired phones (E50). The phone attaches Approve / Deny
+// actions to the SOULACY_APPROVAL category and answers through the same
+// approvals API as the web, so the broker sees one decision either way.
+func (s *Server) notifyPhonesOfApproval(p runtime.PendingApproval) {
+	adapter := mobilechan.DefaultAdapter()
+	if adapter == nil || !adapter.CanPush() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), s.httpRequestTimeout())
+	defer cancel()
+	n := mobilechan.Notification{
+		Title:         "Approval needed",
+		Body:          approvalBody(p),
+		Category:      mobilechan.CategoryApproval,
+		ThreadID:      "approval-" + p.AgentID,
+		DeepLink:      "soulacy://approval/" + p.CallID,
+		TimeSensitive: true,
+		Data:          map[string]string{"call_id": p.CallID, "agent_id": p.AgentID, "session_id": p.SessionID, "tool": p.Tool},
+	}
+	if err := adapter.Notify(ctx, "personal", approvalDestination(p.Principal), n); err != nil {
+		s.log.Warn("approval push to phones failed", zap.String("call_id", p.CallID), zap.Error(err))
+	}
+}
+
+// approvalDestination maps the broker principal ("admin" or "role:subject")
+// onto the mobile store's user destination; unknown principals fan out to
+// every paired phone in this single-owner workspace.
+func approvalDestination(principal string) string {
+	principal = strings.TrimSpace(principal)
+	if principal == "" {
+		return ""
+	}
+	if i := strings.Index(principal, ":"); i >= 0 {
+		principal = principal[i+1:]
+	}
+	return "user:" + principal
 }

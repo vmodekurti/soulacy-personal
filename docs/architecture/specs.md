@@ -31,6 +31,7 @@ subsystem.
 |------|-----------|
 | [PACKAGE_REGISTRIES.md](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/PACKAGE_REGISTRIES.md) | The registry provider model (http/git), priority-ordered resolution, the `/v1/search` + `/v1/packages/{slug}` API, ed25519 package signing |
 | [CUSTOM_DISTRIBUTIONS.md](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/CUSTOM_DISTRIBUTIONS.md) | Building flavored binaries with `soulacy build --with` — compiling third-party drivers into your own distribution |
+| [IPHONE_EXTENSION_PROGRAM.md](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/IPHONE_EXTENSION_PROGRAM.md) | The plan for the iPhone as Soulacy's extension: lock-screen approvals, location triggers, Siri actions, memory on the phone, and the slices that follow |
 | [EXTENSIBILITY.md](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/EXTENSIBILITY.md) | The umbrella extensibility design: factory registries, SDK seams, and how every extension point fits together |
 
 ## Agent behaviour

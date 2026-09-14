@@ -99,16 +99,32 @@ func (a *apnsClient) push(ctx context.Context, n relayNotification) error {
 	if err != nil {
 		return err
 	}
-	payload, err := json.Marshal(map[string]any{
-		"aps": map[string]any{
-			"alert": map[string]string{"title": n.Title, "body": n.Body},
-			"sound": "default",
-			// APNs remains a wake-up signal; the app fetches the durable result.
-			"content-available": 1,
-		},
-		"delivery_id": n.DeliveryID,
-		"deep_link":   n.DeepLink,
-	})
+	aps := map[string]any{
+		"alert": map[string]string{"title": n.Title, "body": n.Body},
+		"sound": "default",
+		// APNs remains a wake-up signal; the app fetches the durable result.
+		"content-available": 1,
+	}
+	if n.Category != "" {
+		aps["category"] = n.Category
+	}
+	if n.ThreadID != "" {
+		aps["thread-id"] = n.ThreadID
+	}
+	if n.TimeSensitive {
+		aps["interruption-level"] = "time-sensitive"
+	}
+	envelope := map[string]any{"aps": aps}
+	if n.DeliveryID != "" {
+		envelope["delivery_id"] = n.DeliveryID
+	}
+	if n.DeepLink != "" {
+		envelope["deep_link"] = n.DeepLink
+	}
+	for k, v := range n.Data {
+		envelope[k] = v
+	}
+	payload, err := json.Marshal(envelope)
 	if err != nil {
 		return err
 	}

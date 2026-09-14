@@ -833,6 +833,8 @@ func (s *Server) buildApp() *fiber.App {
 
 	// Adaptive memory: user-scoped facts (Story E30)
 	s.registerAdaptiveMemoryRoutes(api)
+	// Location triggers monitored by paired phones (E51)
+	s.registerMobileTriggerRoutes(api)
 
 	// Session memory (existing)
 	api.Get("/memory/:agent_id", s.rbacAgentFromMW(rbac.ResourceMemory, rbac.ActionRead, rbac.AgentIDSource{PathParam: "agent_id"}), s.handleListMemory)
