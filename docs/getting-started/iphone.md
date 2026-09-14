@@ -98,6 +98,17 @@ From any app's share sheet, choose Soulacy to file a document, photo, link
 or text into a knowledge base or send it to an agent. Photos are read on
 the phone first, so the gateway receives text it can index.
 
+## 4b. Siri and CarPlay
+
+Your agents are contacts to Siri. Say "send a message to Planner with
+Soulacy: what's on today" and Siri asks which agent if the name is
+ambiguous, sends the turn, and the reply arrives as a message Siri reads
+aloud, on AirPods and in the car. "Read my messages from Planner" repeats
+the latest reply. In CarPlay, Soulacy appears as a Communication app
+listing your agents; tapping one starts the same spoken exchange. Nothing
+else is shown in the car, and approvals always wait for the phone. Allow
+Siri for Soulacy the first time iOS asks.
+
 ## 5. Grant device access only for a real task
 
 Open **Settings → Device access**. Capabilities start off. Enable only the ones
