@@ -6,7 +6,7 @@
 
 Soulacy is a **local-first agent operating system**. Write an agent in a single YAML file (or generate one from plain English in Studio), point it at any LLM (Ollama, OpenAI, Anthropic, Groq, or anything OpenAI-compatible), and run it from a terminal or a $5 VPS with no infrastructure setup, no Docker orchestration, and no cloud dependency.
 
-You get more than a runtime: Studio for authoring and healing agents, Channels for delivering to Soulacy Mobile / Telegram / Slack / Discord / WhatsApp / email / Teams / Google Chat / HTTP, Schedule for cron and one-shot triggers, Learning for making the same mistake less often, Adaptive memory that remembers your preferences and updates itself when they change, and packaging for versioned installs — all in the same binary, all local by default.
+You get more than a runtime: Studio for authoring and healing agents, Channels for delivering to Soulacy Mobile / Telegram / Slack / Discord / WhatsApp / email / Teams / Google Chat / HTTP, Schedule for cron and one-shot triggers, Learning for making the same mistake less often, Adaptive memory that remembers your preferences and updates itself when they change (built in, or backed by an external provider such as Mem0), and packaging for versioned installs — all in the same binary, all local by default.
 
 Think of it as Ollama — but for agents.
 
