@@ -170,6 +170,16 @@ mcp:
             # from there automatically.
 
 # ── Memory ────────────────────────────────────────────────────────────────────
+# ── Updates ───────────────────────────────────────────────────────────────────
+# Release installs keep themselves current: verified releases are downloaded,
+# installed and applied automatically when the gateway is idle. Containers and
+# read-only installs are notified only. See docs/deployment/upgrades.md.
+updates:
+    auto: true
+    check_interval: 6h
+    idle_wait: 2h
+    manifest_url: ""       # blank = official GitHub release manifest
+
 memory:
     max_history: 50
 

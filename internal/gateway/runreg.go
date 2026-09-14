@@ -34,6 +34,14 @@ func (r *runRegistry) Done(id string) {
 	r.mu.Unlock()
 }
 
+// Active reports how many runs are in flight. The auto-updater uses it to
+// restart only when nobody is mid-conversation.
+func (r *runRegistry) Active() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.runs)
+}
+
 // Cancel cancels the run with id and removes it. Returns true if found.
 func (r *runRegistry) Cancel(id string) bool {
 	r.mu.Lock()

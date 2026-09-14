@@ -328,12 +328,49 @@ type DeploymentConfig struct {
 	Notes   string `mapstructure:"notes"`
 }
 
-// UpdateConfig points Soulacy at a signed or checksum-backed release manifest.
+// UpdateConfig points Soulacy at a signed or checksum-backed release manifest
+// and controls automatic installation.
 //
 //	updates:
 //	  manifest_url: https://releases.example.com/soulacy/release-manifest.json
+//	  auto: true             # install verified releases automatically (default true)
+//	  check_interval: 6h     # how often to look for a release
+//	  idle_wait: 2h          # how long to wait for in-flight runs before restarting
 type UpdateConfig struct {
-	ManifestURL string `mapstructure:"manifest_url"`
+	ManifestURL   string `mapstructure:"manifest_url"`
+	Auto          *bool  `mapstructure:"auto"`
+	CheckInterval string `mapstructure:"check_interval"`
+	IdleWait      string `mapstructure:"idle_wait"`
+}
+
+// AutoOn reports whether verified releases are installed automatically
+// (default true). Installation still requires a writable install directory
+// and a non-container process; otherwise the gateway only notifies.
+func (u UpdateConfig) AutoOn() bool { return u.Auto == nil || *u.Auto }
+
+// CheckIntervalDuration parses check_interval with a 6h default and a 15m floor.
+func (u UpdateConfig) CheckIntervalDuration() time.Duration {
+	d, err := time.ParseDuration(strings.TrimSpace(u.CheckInterval))
+	if err != nil || d <= 0 {
+		return 6 * time.Hour
+	}
+	if d < 15*time.Minute {
+		return 15 * time.Minute
+	}
+	return d
+}
+
+// IdleWaitDuration parses idle_wait with a 2h default; 0 restarts immediately.
+func (u UpdateConfig) IdleWaitDuration() time.Duration {
+	s := strings.TrimSpace(u.IdleWait)
+	if s == "" {
+		return 2 * time.Hour
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil || d < 0 {
+		return 2 * time.Hour
+	}
+	return d
 }
 
 // SecurityConfig holds workspace-scoped security defaults (Cohort F-Bridge).
@@ -1099,6 +1136,10 @@ func Load(cfgPath string) (*Config, string, error) {
 	v.SetDefault("memory.adaptive.instructions", "")
 	v.SetDefault("memory.adaptive.custom_categories", []string{})
 	v.SetDefault("memory.adaptive.graph_enabled", true)
+	v.SetDefault("updates.manifest_url", "")
+	v.SetDefault("updates.auto", true)
+	v.SetDefault("updates.check_interval", "6h")
+	v.SetDefault("updates.idle_wait", "2h")
 	v.SetDefault("memory.adaptive.mem0.base_url", "")
 	v.SetDefault("memory.adaptive.mem0.api_key", "")
 	v.SetDefault("memory.adaptive.mem0.enable_graph", false)

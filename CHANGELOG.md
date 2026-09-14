@@ -7,6 +7,14 @@ to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Automatic updates: release installs check the signed manifest on a
+  schedule (`updates.check_interval`, default 6h), download and verify new
+  releases, replace their own binaries, prove the new binary runs, and
+  restart when no agent run is in flight (`updates.idle_wait`). Failed
+  verification rolls back. Containers, read-only installs and source builds
+  are notified only. `updates.auto: false` disables installation; the policy
+  is hot-applied from Config, and `/system/updates/status` reports mode,
+  reason, last applied version and pending restarts.
 - Adaptive memory: durable, user-scoped facts (preferences, identity,
   constraints, entities) are distilled from each conversation turn in the
   background, reconciled so newer facts supersede stale ones with an audit

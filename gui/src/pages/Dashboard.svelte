@@ -316,7 +316,7 @@
       <div class="update-banner-icon">✨</div>
       <div class="update-banner-content">
         <strong>Update Available</strong>
-        <span>Soulacy {updateInfo.latest_version} is available! (Current: {updateInfo.current_version}).</span>
+        <span>Soulacy {updateInfo.latest_version} is available! (Current: {updateInfo.current_version}).{#if updateInfo.mode === 'install'} It will install automatically at the next idle moment.{:else if updateInfo.mode === 'notify'} {updateInfo.mode_reason}{/if}</span>
       </div>
       <div class="update-banner-actions">
         <button class="btn-primary btn-sm" on:click={startUpgrade}>Upgrade Now</button>
