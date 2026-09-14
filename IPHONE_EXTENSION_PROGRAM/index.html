@@ -4813,9 +4813,9 @@ device-node command set agents can call: <code>device.info</code>, <code>locatio
 <td>HealthKit read with an explicit <strong>Health summary</strong> capability toggle (iOS never reveals read grants, so the toggle is the consent record); <strong>Focus status</strong> capability via <code>INFocusStatusCenter</code>. Foreground-only, like all device commands.</td>
 </tr>
 <tr>
-<td><strong>E56 Capture into knowledge</strong></td>
-<td>Share-target endpoints already exist for facts; add a knowledge-base ingest path for shared files and photos with captions.</td>
-<td>Share sheet: <strong>File this</strong> to a knowledge base; camera capture flows into extraction (the honest multimodal path).</td>
+<td><strong>E56 Capture into knowledge</strong> (shipped)</td>
+<td>Knowledge ingest accepts a <code>caption</code> and, for files the gateway cannot read (photos, scans), <code>extracted_text</code> produced on the phone, ingested in place of the bytes.</td>
+<td>Share sheet is real: pick a knowledge base or an agent, add a caption, and send files, photos (with on-device text recognition), links and text. Profiles live in the app group so the extension shares the paired credential.</td>
 </tr>
 <tr>
 <td><strong>E57 Voice in hand</strong></td>
