@@ -25,6 +25,11 @@ const DefaultTTL = 2 * time.Minute
 type Token struct {
 	Code      string    `json:"code"`
 	ExpiresAt time.Time `json:"expires_at"`
+	// Who the phone will be. Subject is the stable identity every owner-scoped
+	// store keys on; DisplayName is what people see; Role bounds the credential.
+	Subject     string `json:"subject,omitempty"`
+	DisplayName string `json:"display_name,omitempty"`
+	Role        string `json:"role,omitempty"`
 }
 
 // Expired reports whether the token is past its expiry as of now.
@@ -32,6 +37,7 @@ func (t Token) Expired(now time.Time) bool { return !now.Before(t.ExpiresAt) }
 
 type entry struct {
 	expiresAt time.Time
+	meta      Token
 }
 
 // Store mints and redeems pairing tokens. Safe for concurrent use.
@@ -61,6 +67,45 @@ func (s *Store) Create(ttl time.Duration) (Token, error) {
 	exp := s.now().Add(ttl)
 	s.tokens[code] = entry{expiresAt: exp}
 	return Token{Code: code, ExpiresAt: exp}, nil
+}
+
+// CreateFor mints a token bound to a person: the redeemed credential takes
+// meta's Subject, DisplayName and Role.
+func (s *Store) CreateFor(ttl time.Duration, meta Token) (Token, error) {
+	if ttl <= 0 {
+		ttl = DefaultTTL
+	}
+	code, err := newCode()
+	if err != nil {
+		return Token{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sweepLocked()
+	exp := s.now().Add(ttl)
+	meta.Code, meta.ExpiresAt = code, exp
+	s.tokens[code] = entry{expiresAt: exp, meta: meta}
+	return meta, nil
+}
+
+// RedeemToken consumes a token and returns who it was minted for.
+func (s *Store) RedeemToken(code string) (Token, bool) {
+	code = normalize(code)
+	if code == "" {
+		return Token{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.tokens[code]
+	if !ok {
+		return Token{}, false
+	}
+	delete(s.tokens, code)
+	if !s.now().Before(e.expiresAt) {
+		return Token{}, false
+	}
+	e.meta.Code, e.meta.ExpiresAt = code, e.expiresAt
+	return e.meta, true
 }
 
 // Redeem consumes a token. It returns true only if the token exists and is not

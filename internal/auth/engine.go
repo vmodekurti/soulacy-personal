@@ -166,17 +166,7 @@ func (e *Engine) Middleware() fiber.Handler {
 		// Role defaults to "operator" (same as a regular authenticated user).
 		if e.apiKeyStore != nil && strings.HasPrefix(token, "sk_") {
 			if ak, err := e.apiKeyStore.Validate(c.Context(), token); err == nil {
-				SetClaims(c, &Claims{
-					RegisteredClaims: jwt.RegisteredClaims{Subject: ak.ID},
-					Email:            ak.Name,
-					Role:             "operator",
-					Kind:             "access",
-					// Carry the key's stored scopes so RBAC can honour them.
-					// They were persisted and echoed back but never enforced, so
-					// every sk_ key was a full operator whatever it was minted
-					// with.
-					Scopes: ak.Scopes,
-				})
+				SetClaims(c, ClaimsForAPIKey(ak))
 				return c.Next()
 			}
 		}
@@ -352,4 +342,36 @@ func secretEqual(got, want string) bool {
 	gh := sha256.Sum256([]byte(got))
 	wh := sha256.Sum256([]byte(want))
 	return subtle.ConstantTimeCompare(gh[:], wh[:]) == 1
+}
+
+// ClaimsForAPIKey is the one place a managed key becomes an identity.
+//
+// A key minted for a person carries that person's subject and role, so a
+// paired phone shares memory, approvals and inbox with the same person on
+// the web. Keys from before identities existed keep their old meaning: the
+// owner's companion key ("mobile-companion") was always the owner, so it
+// maps to the owner's subject; anything else stays keyed by its id. Scopes
+// are carried so RBAC can honour them.
+func ClaimsForAPIKey(ak apikeys.APIKey) *Claims {
+	subject := strings.TrimSpace(ak.Subject)
+	if subject == "" {
+		if ak.Name == "mobile-companion" {
+			subject = "admin"
+		} else {
+			subject = ak.ID
+		}
+	}
+	role := strings.ToLower(strings.TrimSpace(ak.Role))
+	switch role {
+	case "admin", "operator", "viewer":
+	default:
+		role = "operator"
+	}
+	return &Claims{
+		RegisteredClaims: jwt.RegisteredClaims{Subject: subject},
+		Email:            ak.Name,
+		Role:             role,
+		Kind:             "access",
+		Scopes:           ak.Scopes,
+	}
 }

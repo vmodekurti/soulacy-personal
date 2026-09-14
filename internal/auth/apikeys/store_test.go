@@ -717,3 +717,34 @@ func TestCreateAndListCreatedAtIsSet(t *testing.T) {
 		t.Errorf("CreatedAt %v is before test start %v", keys[0].CreatedAt, before)
 	}
 }
+
+func TestCreateForStoresIdentityAndLegacyRowsSurviveMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "keys.db")
+	s, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	plain, key, err := s.CreateFor(ctx, "mobile-companion (Priya)", []string{"chat"}, "priya", "viewer")
+	if err != nil || key.Subject != "priya" || key.Role != "viewer" {
+		t.Fatalf("create for: %v %+v", err, key)
+	}
+	got, err := s.Validate(ctx, plain)
+	if err != nil || got.Subject != "priya" || got.Role != "viewer" {
+		t.Fatalf("validate: %v %+v", err, got)
+	}
+	if _, legacy, err := s.Create(ctx, "plain", nil); err != nil || legacy.Subject != "" || legacy.Role != "" {
+		t.Fatalf("Create keeps identity empty: %v %+v", err, legacy)
+	}
+	list, err := s.List(ctx, false)
+	if err != nil || len(list) != 2 {
+		t.Fatalf("list: %v %d", err, len(list))
+	}
+	s.Close()
+	// Reopening runs the column check again without error.
+	if s2, err := NewSQLiteStore(path); err != nil {
+		t.Fatal(err)
+	} else {
+		s2.Close()
+	}
+}

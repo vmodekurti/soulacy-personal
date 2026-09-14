@@ -73,3 +73,22 @@ func lower(s string) string {
 	}
 	return string(b)
 }
+
+func TestCreateForCarriesIdentityThroughRedeem(t *testing.T) {
+	s := NewStore()
+	tok, err := s.CreateFor(0, Token{Subject: "priya", DisplayName: "Priya", Role: "viewer"})
+	if err != nil || tok.Code == "" || tok.Subject != "priya" {
+		t.Fatalf("create for: %v %+v", err, tok)
+	}
+	got, ok := s.RedeemToken(tok.Code)
+	if !ok || got.Subject != "priya" || got.DisplayName != "Priya" || got.Role != "viewer" {
+		t.Fatalf("redeem token: %v %+v", ok, got)
+	}
+	if _, ok := s.RedeemToken(tok.Code); ok {
+		t.Fatal("tokens are single use")
+	}
+	plain, _ := s.Create(0)
+	if got, ok := s.RedeemToken(plain.Code); !ok || got.Subject != "" {
+		t.Fatalf("plain tokens carry no identity: %v %+v", ok, got)
+	}
+}

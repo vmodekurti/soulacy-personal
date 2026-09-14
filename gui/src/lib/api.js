@@ -412,7 +412,9 @@ export const api = {
   },
 
   pairing: {
-    createToken: () => apiFetch('/pairing/tokens', { method: 'POST' }),
+    createToken: (body) => apiFetch('/pairing/tokens', { method: 'POST', body: body ? JSON.stringify(body) : undefined }),
+    members: () => apiFetch('/pairing/members'),
+    revokeKey: (id) => apiFetch(`/admin/api-keys/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     redeem: (code) => apiFetch('/pairing/redeem', { method: 'POST', body: JSON.stringify({ code }) }),
   },
 

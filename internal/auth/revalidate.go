@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"strings"
-
-	"github.com/golang-jwt/jwt/v5"
 )
 
 // RevalidateCredential supports bounded multi-step external mutations. In
@@ -20,7 +18,7 @@ func (e *Engine) RevalidateCredential(ctx context.Context, token string) (*Claim
 	}
 	if e.apiKeyStore != nil && strings.HasPrefix(token, "sk_") {
 		if ak, err := e.apiKeyStore.Validate(ctx, token); err == nil {
-			return &Claims{RegisteredClaims: jwt.RegisteredClaims{Subject: ak.ID}, Email: ak.Name, Role: "operator", Kind: "access", Scopes: ak.Scopes}, nil
+			return ClaimsForAPIKey(ak), nil
 		}
 	}
 	if e.issuer != nil {
