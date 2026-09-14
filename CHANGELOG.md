@@ -7,6 +7,11 @@ to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Agent-built UI on iPhone: `canvas.present` accepts typed `components`
+  (text, checklist, form, chart, metric) that the phone renders natively; a
+  form keeps the command running until the person submits and the result
+  carries their answers and checklist states. `mobile.invoke` gains
+  `expires_in_seconds` (up to 900) for commands that wait on a person.
 - Share-to-knowledge from iPhone: `POST /api/v1/knowledge/:kb/documents`
   accepts a `caption` (JSON or multipart) that is stored ahead of the
   content so retrieval finds the sharer's own words, and multipart uploads

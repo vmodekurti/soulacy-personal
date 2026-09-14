@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/soulacy/soulacy/internal/channels/mobile"
 	"github.com/soulacy/soulacy/pkg/message"
@@ -53,7 +54,7 @@ func (e *Engine) buildMobileBuiltins() []BuiltinTool {
 			v, err := s.Nodes(ctx, "personal", owner)
 			return encode(v, err)
 		}},
-		{Name: "mobile.invoke", Description: "Request an enabled command on a paired phone. Returns a queued receipt, not a completed action. Camera and photo commands require visible interaction on the phone. Use mobile.command_status to read the result.", Gate: "mobile", Parameters: map[string]any{"type": "object", "properties": map[string]any{"device_id": map[string]any{"type": "string"}, "command": map[string]any{"type": "string", "enum": mobile.SupportedNodeCommands}, "params": map[string]any{"type": "object"}}, "required": []string{"device_id", "command"}}, Handler: func(ctx context.Context, args map[string]any) (string, error) {
+		{Name: "mobile.invoke", Description: "Request an enabled command on a paired phone. Returns a queued receipt, not a completed action. Camera and photo commands require visible interaction on the phone. Use mobile.command_status to read the result. canvas.present draws a native card: params {title, components:[{type:text,markdown}|{type:checklist,title,items:[{label,done}]}|{type:form,id,fields:[{name,label,kind:text|number|choice|toggle|date,options,required}],submit}|{type:chart,title,kind:bar|line,labels,series:[{label,values}]}|{type:metric,label,value,unit,trend}]}. A form keeps the command running until the person submits; the result then carries answers keyed by field name and checklist states. Set expires_in_seconds (up to 900) when waiting on a person.", Gate: "mobile", Parameters: map[string]any{"type": "object", "properties": map[string]any{"device_id": map[string]any{"type": "string"}, "command": map[string]any{"type": "string", "enum": mobile.SupportedNodeCommands}, "params": map[string]any{"type": "object"}, "expires_in_seconds": map[string]any{"type": "integer", "minimum": 30, "maximum": 900}}, "required": []string{"device_id", "command"}}, Handler: func(ctx context.Context, args map[string]any) (string, error) {
 			s, owner, err := base(ctx)
 			if err != nil {
 				return "", err
@@ -66,7 +67,11 @@ func (e *Engine) buildMobileBuiltins() []BuiltinTool {
 			if err != nil {
 				return "", err
 			}
-			v, err := s.EnqueueNodeCommand(ctx, "personal", owner, mobile.NodeCommand{DeviceID: argString(args, "device_id"), Command: argString(args, "command"), Params: raw})
+			cmd := mobile.NodeCommand{DeviceID: argString(args, "device_id"), Command: argString(args, "command"), Params: raw}
+			if secs, ok := args["expires_in_seconds"].(float64); ok && secs >= 30 && secs <= 900 {
+				cmd.ExpiresAt = time.Now().UTC().Add(time.Duration(secs) * time.Second)
+			}
+			v, err := s.EnqueueNodeCommand(ctx, "personal", owner, cmd)
 			return encode(v, err)
 		}},
 		{Name: "mobile.command_status", Description: "Read the canonical status and result of a requested phone action. Running after a lost connection may be uncertain; never repeat an action just because its result has not arrived.", Gate: "mobile", Parameters: map[string]any{"type": "object", "properties": map[string]any{"device_id": map[string]any{"type": "string"}, "command_id": map[string]any{"type": "string"}}, "required": []string{"device_id", "command_id"}}, Handler: func(ctx context.Context, args map[string]any) (string, error) {

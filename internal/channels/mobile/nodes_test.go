@@ -152,3 +152,41 @@ func TestHealthAndFocusCommandsAreGatedByAdvertisedCapability(t *testing.T) {
 		t.Fatalf("health.summary should queue once enabled: %v", err)
 	}
 }
+
+func TestCanvasComponentsAreValidatedOnEnqueue(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "mobile.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	if err := s.RegisterNode(ctx, "w", "alice", Node{DeviceID: "phone", Name: "Ada", Platform: "ios", Capabilities: []string{"canvas.present"}}); err != nil {
+		t.Fatal(err)
+	}
+	good := `{"title":"Trip plan","components":[
+	  {"type":"text","markdown":"**Two options** for Friday."},
+	  {"type":"checklist","title":"Pack","items":[{"label":"Passport","done":false},{"label":"Charger","done":true}]},
+	  {"type":"chart","title":"Spend","kind":"bar","labels":["Mon","Tue"],"series":[{"label":"USD","values":[12,30]}]},
+	  {"type":"metric","label":"Budget left","value":"420","unit":"USD","trend":"down"},
+	  {"type":"form","id":"pick","fields":[{"name":"option","label":"Which one?","kind":"choice","options":["Beach","City"],"required":true},{"name":"notes","label":"Anything else","kind":"text"}],"submit":"Choose"}]}`
+	cmd, err := s.EnqueueNodeCommand(ctx, "w", "alice", NodeCommand{DeviceID: "phone", Command: "canvas.present", Params: json.RawMessage(good), ExpiresAt: time.Now().Add(14 * time.Minute)})
+	if err != nil || cmd.Status != "queued" {
+		t.Fatalf("typed canvas should queue: %v", err)
+	}
+	for name, bad := range map[string]string{
+		"unknown type": `{"components":[{"type":"video"}]}`,
+		"two forms":    `{"components":[{"type":"form","fields":[{"name":"a"}]},{"type":"form","fields":[{"name":"b"}]}]}`,
+		"empty form":   `{"components":[{"type":"form","fields":[]}]}`,
+		"bad kind":     `{"components":[{"type":"form","fields":[{"name":"a","kind":"slider"}]}]}`,
+		"not array":    `{"components":{"type":"text"}}`,
+		"empty chart":  `{"components":[{"type":"chart","series":[]}]}`,
+	} {
+		if _, err := s.EnqueueNodeCommand(ctx, "w", "alice", NodeCommand{DeviceID: "phone", Command: "canvas.present", Params: json.RawMessage(bad)}); !errors.Is(err, ErrNodeInvalid) {
+			t.Fatalf("%s should be refused, got %v", name, err)
+		}
+	}
+	// Legacy cards without components still work.
+	if _, err := s.EnqueueNodeCommand(ctx, "w", "alice", NodeCommand{DeviceID: "phone", Command: "canvas.present", Params: json.RawMessage(`{"title":"Hi","items":["a","b"]}`)}); err != nil {
+		t.Fatalf("legacy canvas: %v", err)
+	}
+}
