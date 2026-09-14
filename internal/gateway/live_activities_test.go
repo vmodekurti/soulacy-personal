@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -159,5 +160,22 @@ func TestLiveActivityRegistrationValidatesInput(t *testing.T) {
 	code, _ = gatewayJSON(t, s, "POST", "/api/v1/mobile/devices", "secret", `{"id":"phone-1","name":"Ada","push_token":"`+liveStartTok+`","notifications_enabled":true,"live_start_token":"zz"}`)
 	if code != 400 {
 		t.Fatalf("bad live_start_token should be 400, got %d", code)
+	}
+}
+
+func TestLiveActivityTokensMayBeLongerThanDeviceTokens(t *testing.T) {
+	s, _ := newTestGatewayWithLLM(t, "secret")
+	mobileFixture(t, s)
+	long := strings.Repeat("ab", 60) // 120 hex chars: a realistic push-to-start token
+	code, body := gatewayJSON(t, s, "POST", "/api/v1/mobile/devices", "secret", `{"id":"phone-1","name":"Ada","push_token":"`+liveStartTok+`","notifications_enabled":true,"live_start_token":"`+long+`"}`)
+	if code != 201 {
+		t.Fatalf("device registration with a long start token must succeed: %d %+v", code, body)
+	}
+	code, _ = gatewayJSON(t, s, "POST", "/api/v1/mobile/activities", "secret", `{"device_id":"phone-1","agent_id":"a","session_id":"s","token":"`+long+`"}`)
+	if code != 201 {
+		t.Fatalf("activity token of 60 bytes should register, got %d", code)
+	}
+	if code, _ := gatewayJSON(t, s, "POST", "/api/v1/mobile/activities", "secret", `{"device_id":"phone-1","agent_id":"a","session_id":"s","token":"abc"}`); code != 400 {
+		t.Fatalf("a token too short to be real must still be refused, got %d", code)
 	}
 }

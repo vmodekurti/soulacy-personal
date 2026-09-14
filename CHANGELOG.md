@@ -85,6 +85,15 @@ to follow [Semantic Versioning](https://semver.org/).
   the provider is unconfigured.
 
 ### Changed
+- Fixed: device registration from a phone that offered a Live Activity
+  push-to-start token was refused (400) because the token was checked
+  against the 32-byte APNs device-token length; ActivityKit tokens are
+  longer. Notification and push settings saved from the phone did not
+  persist while this was the case.
+- Rows created under a legacy companion key id (device, node, commands,
+  deliveries, adaptive memory) are moved to the owner at startup, so a
+  phone paired before identities existed keeps its settings and memory
+  after the identity fix.
 - Cloud one-click deployments: the release workflow now publishes
   version-pinned CloudFormation and ARM templates to the public deployment
   bucket, so the website buttons pair a tagged image with the matching
