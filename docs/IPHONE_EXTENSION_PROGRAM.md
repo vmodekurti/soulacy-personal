@@ -58,7 +58,7 @@ device-node command set agents can call: `device.info`, `location.current`,
 |---|---|---|
 | **E58 Watch** | None. | Inbox on the wrist: approve, deny, snooze; complications for pending count. |
 | **E59 On-device memory** (shipped) | `GET /memory/facts/sync?since=` change feed over the fact history: upserts and tombstones with a cursor, owner-scoped, `reset` after a purge, 501 for providers without history. | The phone keeps a local copy of the owner's facts, syncs incrementally on connect and reconnect, searches offline with on-device sentence embeddings, and queues additions (including Siri's Remember) until the gateway is reachable. |
-| **E60 Household** | Multiple owners per gateway with owner-scoped memory and inboxes (already the tenancy model). | Multiple profiles on one phone; per-person pairing. |
+| **E60 Household** (shipped) | Managed keys carry a subject and role; pairing tokens carry who they are for; `POST /pairing/tokens {name, role}` (admin) pairs a phone as another person, `GET /pairing/members` lists the household; legacy companion keys map to the owner. Fixes the pre-existing gap where a paired phone authenticated as its key id rather than the owner. | Pairing names the profile after the person; several profiles on one phone already switch identities. Web Mobile page gains name/role pairing and a Household list with Unpair. |
 | **E61 Agent-built UI** (shipped) | `canvas.present` accepts typed `components` (text, checklist, form, chart, metric), validated on enqueue; `mobile.invoke` takes `expires_in_seconds`; a form keeps the command running until the person answers and the result carries the answers. | Native rendering with Swift Charts and form controls; the card appears as a sheet wherever the person is; Submit and Dismiss report back through the normal command result path. |
 
 ## Non-goals
@@ -69,7 +69,11 @@ device-node command set agents can call: `device.info`, `location.current`,
 
 ## Identity note
 
-A paired phone holds a managed credential named `mobile-companion`. Adaptive
-memory, approvals and triggers are all keyed by the credential's subject, which
-in Personal resolves to the same owner as the web login. Slice 1 pins this with
-a test so web and phone never split a person's memory in two.
+A paired phone holds a managed credential named `mobile-companion` (with the
+person's name appended for household members). Adaptive memory, approvals
+and triggers are all keyed by the credential's subject. Since Slice 3 the
+key stores that subject explicitly and it is the person the code was
+minted for; the owner's own phone is `admin`, the same identity as the web
+login. Companion keys minted before that carried no subject and are mapped
+to the owner. Tests in `household_test.go` and `mobile_triggers_test.go`
+pin both halves so web and phone never split a person's memory in two.

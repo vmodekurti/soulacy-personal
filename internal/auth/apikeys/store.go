@@ -24,9 +24,18 @@ type APIKey struct {
 	CreatedAt  time.Time  `json:"created_at"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
+	// Subject and Role are the identity the key authenticates as. Empty on
+	// keys minted before identities existed.
+	Subject string `json:"subject,omitempty"`
+	Role    string `json:"role,omitempty"`
 }
 
 // Store defines the API key management interface.
+// IdentityStore is implemented by stores that can mint a key for a person.
+type IdentityStore interface {
+	CreateFor(ctx context.Context, name string, scopes []string, subject, role string) (plaintext string, key APIKey, err error)
+}
+
 type Store interface {
 	// Create generates a new API key with the given name and scopes.
 	// Returns the plaintext key (shown ONCE) and the stored record.
@@ -87,11 +96,56 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 		db.Close()
 		return nil, err
 	}
-	return &SQLiteStore{db: db}, nil
+	store := &SQLiteStore{db: db}
+	if err := store.ensureIdentityColumns(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return store, nil
+}
+
+// ensureIdentityColumns adds subject and role to databases created before
+// keys carried an identity. Existing rows keep NULLs, which the auth engine
+// maps to their historical meaning.
+func (s *SQLiteStore) ensureIdentityColumns() error {
+	rows, err := s.db.Query(`PRAGMA table_info(api_keys)`)
+	if err != nil {
+		return err
+	}
+	have := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		have[name] = true
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, col := range []string{"subject", "role"} {
+		if !have[col] {
+			if _, err := s.db.Exec(`ALTER TABLE api_keys ADD COLUMN ` + col + ` TEXT NOT NULL DEFAULT ''`); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // Create generates a new API key with the given name and scopes.
 func (s *SQLiteStore) Create(ctx context.Context, name string, scopes []string) (string, APIKey, error) {
+	return s.CreateFor(ctx, name, scopes, "", "")
+}
+
+// CreateFor generates a key that authenticates as subject with role. Empty
+// values keep the historical behaviour (subject = key id, role = operator).
+func (s *SQLiteStore) CreateFor(ctx context.Context, name string, scopes []string, subject, role string) (string, APIKey, error) {
 	// Generate 32 random bytes for the key
 	keyBytes := make([]byte, 32)
 	if _, err := rand.Read(keyBytes); err != nil {
@@ -116,11 +170,12 @@ func (s *SQLiteStore) Create(ctx context.Context, name string, scopes []string) 
 	now := time.Now().UTC()
 	scopesStr := strings.Join(scopes, ",")
 
+	subject, role = strings.TrimSpace(subject), strings.TrimSpace(role)
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO api_keys (id, name, key_hash, prefix, scopes, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO api_keys (id, name, key_hash, prefix, scopes, created_at, subject, role)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, name, keyHash, prefix, scopesStr,
-		now.Format("2006-01-02 15:04:05"),
+		now.Format("2006-01-02 15:04:05"), subject, role,
 	)
 	if err != nil {
 		return "", APIKey{}, fmt.Errorf("apikeys: failed to insert key: %w", err)
@@ -132,6 +187,8 @@ func (s *SQLiteStore) Create(ctx context.Context, name string, scopes []string) 
 		Prefix:    prefix,
 		Scopes:    scopes,
 		CreatedAt: now,
+		Subject:   subject,
+		Role:      role,
 	}
 	return plaintext, key, nil
 }
@@ -149,10 +206,10 @@ func (s *SQLiteStore) Validate(ctx context.Context, plaintext string) (APIKey, e
 	)
 
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, name, prefix, scopes, created_at, last_used_at, revoked_at
+		`SELECT id, name, prefix, scopes, created_at, last_used_at, revoked_at, subject, role
 		 FROM api_keys WHERE key_hash = ?`,
 		keyHash,
-	).Scan(&key.ID, &key.Name, &key.Prefix, &scopesStr, &key.CreatedAt, &lastUsedTime, &revokedTime)
+	).Scan(&key.ID, &key.Name, &key.Prefix, &scopesStr, &key.CreatedAt, &lastUsedTime, &revokedTime, &key.Subject, &key.Role)
 	if err == sql.ErrNoRows {
 		return APIKey{}, ErrInvalidKey
 	}
@@ -217,7 +274,7 @@ func (s *SQLiteStore) Revoke(ctx context.Context, id string) error {
 
 // List returns all API keys, optionally including revoked ones.
 func (s *SQLiteStore) List(ctx context.Context, includeRevoked bool) ([]APIKey, error) {
-	query := `SELECT id, name, prefix, scopes, created_at, last_used_at, revoked_at FROM api_keys`
+	query := `SELECT id, name, prefix, scopes, created_at, last_used_at, revoked_at, subject, role FROM api_keys`
 	if !includeRevoked {
 		query += ` WHERE revoked_at IS NULL`
 	}
@@ -237,7 +294,7 @@ func (s *SQLiteStore) List(ctx context.Context, includeRevoked bool) ([]APIKey, 
 			lastUsedTime sql.NullTime
 			revokedTime  sql.NullTime
 		)
-		if err := rows.Scan(&key.ID, &key.Name, &key.Prefix, &scopesStr, &key.CreatedAt, &lastUsedTime, &revokedTime); err != nil {
+		if err := rows.Scan(&key.ID, &key.Name, &key.Prefix, &scopesStr, &key.CreatedAt, &lastUsedTime, &revokedTime, &key.Subject, &key.Role); err != nil {
 			return nil, fmt.Errorf("apikeys: scan error: %w", err)
 		}
 

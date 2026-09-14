@@ -130,3 +130,16 @@ carries `answers` keyed by field name and the state of every checklist:
 Limits: 12 components, one form of up to 12 fields, checklists of up to 30
 items, charts of up to 6 series and 60 points. The gateway refuses anything
 else with a message naming the vocabulary, so agents learn it from the error.
+
+## Household: one gateway, several people
+
+Every paired phone signs in as a person. `POST /api/v1/pairing/tokens`
+with no body pairs a phone as the caller; with `{"name": "Priya", "role":
+"operator"|"viewer"}` an admin pairs a phone for someone else, whose
+subject becomes a slug of the name (`priya`). The credential minted on
+redeem carries that subject and role, so adaptive memory, approvals, the
+inbox and device commands are all scoped to that person, exactly as they
+are for the owner. `GET /api/v1/pairing/members` (admin) lists everyone
+with a paired phone; revoking their keys through `/admin/api-keys/:id`
+unpairs them. Companion keys minted before identities existed are the
+owner's and are treated as such.

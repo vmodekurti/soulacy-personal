@@ -33,6 +33,20 @@ Keychain; it does not grant every permission on the phone.
 **Checkpoint:** Settings shows the expected gateway address and server version.
 Open Agents and verify the expected agent list—not just a successful scan.
 
+## 1a. Pair a phone for someone else in your household
+
+Pairing with no name makes the phone *you*: the same identity as your web
+login, so it shares your memory, approvals and inbox. To give another
+person their own agents-in-their-pocket, an admin enters their **name** in
+**Pair a phone** and chooses **Can run agents** or **View only** before
+getting the code. Their phone then signs in as them: separate memory,
+separate inbox, and approvals only for what they started. The **Household**
+list on the Mobile page shows everyone with a paired phone; **Unpair**
+revokes their phone credentials and keeps their memory on the gateway.
+
+A person paired this way has no web login. If they should also use the
+web, give them a web account with the same name so the identities match.
+
 ## 2. Manual connection and nearby discovery
 
 For another gateway, open **Settings → Manage gateways → Add gateway**. Enter

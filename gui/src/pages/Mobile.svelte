@@ -61,6 +61,11 @@
   let pairCode = null
   let pairUrl = ''
   let pairQr = ''
+  let pairFor = ''
+  let pairRole = 'operator'
+  let pairSubject = ''
+  let household = []
+  let householdMsg = ''
   let redeemCode = ''
   let redeemMsg = ''
   let companionMsg = ''
@@ -121,11 +126,26 @@
     }
   }
 
+  async function loadHousehold() {
+    try { household = (await api.pairing.members()).members || [] } catch { household = [] }
+  }
+
+  async function revokeMember(m) {
+    if (!confirm(`Unpair every phone for ${m.display_name}? Their memory stays on the gateway.`)) return
+    try {
+      for (const id of m.key_ids || []) await api.pairing.revokeKey(id)
+      householdMsg = `${m.display_name} unpaired.`
+      await loadHousehold()
+    } catch (e) { householdMsg = e.message }
+  }
+
   async function makePairCode() {
     try {
-      const res = await api.pairing.createToken()
+      const name = pairFor.trim()
+      const res = await api.pairing.createToken(name ? { name, role: pairRole } : undefined)
       pairCode = res.code
       pairUrl = res.pair_url || ''
+      pairSubject = res.display_name || (res.subject === 'admin' ? 'you' : res.subject || '')
       pairQr = ''
       // Render a scannable QR of the pair URL. qrcode is code-split, so it only
       // loads the first time someone pairs a device.
@@ -148,6 +168,7 @@
   }
 
   async function load() {
+    loadHousehold()
     loading = true
     error = ''
     loading = true
@@ -617,13 +638,21 @@
     <div class="device-row">
       <div>
         <div class="device-label">Pair a phone</div>
-        <div class="device-sub">Generate a code, then enter it on the other device below.</div>
+        <div class="device-sub">Your own phone: leave the name empty. Someone else in your household: enter their name so their phone gets its own memory, inbox and approvals.</div>
       </div>
       <button class="btn-secondary small" on:click={makePairCode}>Get code</button>
+    </div>
+    <div class="device-row redeem-row">
+      <input class="redeem-input" placeholder="Name (leave empty for your own phone)" bind:value={pairFor} maxlength="60" />
+      <select class="redeem-input" bind:value={pairRole} disabled={!pairFor.trim()} aria-label="Role for this person">
+        <option value="operator">Can run agents</option>
+        <option value="viewer">View only</option>
+      </select>
     </div>
     {#if pairCode}
       {#if pairQr}<img class="pair-qr" src={pairQr} alt="Pairing QR code" />{/if}
       <div class="pair-code">{pairCode}</div>
+      {#if pairSubject}<div class="device-sub">This code pairs a phone for <strong>{pairSubject}</strong>. It expires in two minutes.</div>{/if}
       {#if pairUrl}<div class="pair-url">{pairUrl}</div>{/if}
     {/if}
 
@@ -632,6 +661,24 @@
       <button class="btn-secondary small" on:click={redeemPair} disabled={!redeemCode.trim()}>Pair</button>
     </div>
     {#if redeemMsg}<div class="redeem-msg">{redeemMsg}</div>{/if}
+  </section>
+
+  <!-- Household: who has a paired phone -->
+  <section class="m-card">
+    <div class="m-card-hd"><span>Household</span><button class="btn-secondary small" on:click={loadHousehold}>Refresh</button></div>
+    {#if household.length === 0}
+      <div class="device-sub">No phones paired yet, or you are not an admin.</div>
+    {/if}
+    {#each household as m (m.subject)}
+      <div class="device-row">
+        <div>
+          <div class="device-label">{m.display_name}{#if m.owner} · you{/if}</div>
+          <div class="device-sub">{m.role === 'viewer' ? 'View only' : 'Can run agents'} · {m.phones} phone{m.phones === 1 ? '' : 's'}{#if m.last_used_at} · last seen {new Date(m.last_used_at).toLocaleString()}{/if}</div>
+        </div>
+        <button class="btn-secondary small" on:click={() => revokeMember(m)}>Unpair</button>
+      </div>
+    {/each}
+    {#if householdMsg}<div class="redeem-msg">{householdMsg}</div>{/if}
   </section>
 
   {#if error}<div class="banner err">{error}</div>{/if}
