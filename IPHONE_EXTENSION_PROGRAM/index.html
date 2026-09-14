@@ -4845,9 +4845,9 @@ device-node command set agents can call: <code>device.info</code>, <code>locatio
 <td>The phone keeps a local copy of the owner's facts, syncs incrementally on connect and reconnect, searches offline with on-device sentence embeddings, and queues additions (including Siri's Remember) until the gateway is reachable.</td>
 </tr>
 <tr>
-<td><strong>E60 Household</strong></td>
-<td>Multiple owners per gateway with owner-scoped memory and inboxes (already the tenancy model).</td>
-<td>Multiple profiles on one phone; per-person pairing.</td>
+<td><strong>E60 Household</strong> (shipped)</td>
+<td>Managed keys carry a subject and role; pairing tokens carry who they are for; <code>POST /pairing/tokens {name, role}</code> (admin) pairs a phone as another person, <code>GET /pairing/members</code> lists the household; legacy companion keys map to the owner. Fixes the pre-existing gap where a paired phone authenticated as its key id rather than the owner.</td>
+<td>Pairing names the profile after the person; several profiles on one phone already switch identities. Web Mobile page gains name/role pairing and a Household list with Unpair.</td>
 </tr>
 <tr>
 <td><strong>E61 Agent-built UI</strong> (shipped)</td>
@@ -4863,10 +4863,14 @@ device-node command set agents can call: <code>device.info</code>, <code>locatio
 <li>A shrunk-down copy of the desktop authoring UI on the phone.</li>
 </ul>
 <h2 id="identity-note">Identity note<a class="headerlink" href="#identity-note" title="Permanent link">&para;</a></h2>
-<p>A paired phone holds a managed credential named <code>mobile-companion</code>. Adaptive
-memory, approvals and triggers are all keyed by the credential's subject, which
-in Personal resolves to the same owner as the web login. Slice 1 pins this with
-a test so web and phone never split a person's memory in two.</p>
+<p>A paired phone holds a managed credential named <code>mobile-companion</code> (with the
+person's name appended for household members). Adaptive memory, approvals
+and triggers are all keyed by the credential's subject. Since Slice 3 the
+key stores that subject explicitly and it is the person the code was
+minted for; the owner's own phone is <code>admin</code>, the same identity as the web
+login. Companion keys minted before that carried no subject and are mapped
+to the owner. Tests in <code>household_test.go</code> and <code>mobile_triggers_test.go</code>
+pin both halves so web and phone never split a person's memory in two.</p>
 
 
 

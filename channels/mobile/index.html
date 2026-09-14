@@ -3115,6 +3115,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#household-one-gateway-several-people" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Household: one gateway, several people
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -4813,6 +4824,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#household-one-gateway-several-people" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Household: one gateway, several people
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -5008,6 +5030,17 @@ carries <code>answers</code> keyed by field name and the state of every checklis
 <p>Limits: 12 components, one form of up to 12 fields, checklists of up to 30
 items, charts of up to 6 series and 60 points. The gateway refuses anything
 else with a message naming the vocabulary, so agents learn it from the error.</p>
+<h2 id="household-one-gateway-several-people">Household: one gateway, several people<a class="headerlink" href="#household-one-gateway-several-people" title="Permanent link">&para;</a></h2>
+<p>Every paired phone signs in as a person. <code>POST /api/v1/pairing/tokens</code>
+with no body pairs a phone as the caller; with <code>{"name": "Priya", "role":
+"operator"|"viewer"}</code> an admin pairs a phone for someone else, whose
+subject becomes a slug of the name (<code>priya</code>). The credential minted on
+redeem carries that subject and role, so adaptive memory, approvals, the
+inbox and device commands are all scoped to that person, exactly as they
+are for the owner. <code>GET /api/v1/pairing/members</code> (admin) lists everyone
+with a paired phone; revoking their keys through <code>/admin/api-keys/:id</code>
+unpairs them. Companion keys minted before identities existed are the
+owner's and are treated as such.</p>
 
 
 
