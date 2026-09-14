@@ -7,6 +7,11 @@ to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Siri and CarPlay messaging on iPhone: agents are message contacts for
+  Siri's send, read and mark-read intents; replies return as communication
+  notifications Siri reads aloud; CarPlay lists agents as conversations
+  (Apple's CarPlay Communication entitlement, granted 2026-09-14). No
+  gateway change; the phone uses the chat API.
 - Memory change feed for devices: `GET /api/v1/memory/facts/sync?since=`
   returns the owner's facts changed after a cursor as upserts and
   tombstones, collapsed to their current state, with `next_cursor`,
