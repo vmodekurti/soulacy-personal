@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,9 +38,13 @@ func TestDecideAutoUpdateModes(t *testing.T) {
 // autoUpdateFixture wires fakes into the seams and a manifest server that
 // advertises a newer release for this platform.
 type autoUpdateFixture struct {
-	installs, verifies, restores, restarts, exits int
+	installs, verifies, restores, restarts, exits atomic.Int32
 	verifyErr                                     error
 	installDir                                    string
+}
+
+func (f *autoUpdateFixture) counts() (installs, verifies, restores, restarts, exits int) {
+	return int(f.installs.Load()), int(f.verifies.Load()), int(f.restores.Load()), int(f.restarts.Load()), int(f.exits.Load())
 }
 
 func setupAutoUpdate(t *testing.T, s *Server, env autoUpdateEnv) *autoUpdateFixture {
@@ -48,17 +53,17 @@ func setupAutoUpdate(t *testing.T, s *Server, env autoUpdateEnv) *autoUpdateFixt
 	oldInstall, oldVerify, oldRestore, oldRestart, oldExit := autoInstall, autoVerifyBinary, autoRestoreBackups, autoRestart, autoExit
 	oldContainer, oldWritable, oldDir := autoInContainer, autoInstallDirWritable, autoInstallDir
 	autoInstall = func(_ context.Context, opts updates.UpdateInstallOptions) (updates.UpdateInstallResult, error) {
-		f.installs++
+		f.installs.Add(1)
 		check, err := updates.CheckForUpdate(context.Background(), opts.ManifestSource, "")
 		if err != nil {
 			return updates.UpdateInstallResult{}, err
 		}
 		return updates.UpdateInstallResult{UpdateCheckResult: check, Installed: true, InstallDir: f.installDir, Backups: []string{f.installDir + "/soulacy.bak-1"}}, nil
 	}
-	autoVerifyBinary = func(_ context.Context, _, _ string) error { f.verifies++; return f.verifyErr }
-	autoRestoreBackups = func(_ []string) error { f.restores++; return nil }
-	autoRestart = func() error { f.restarts++; return nil }
-	autoExit = func() { f.exits++ }
+	autoVerifyBinary = func(_ context.Context, _, _ string) error { f.verifies.Add(1); return f.verifyErr }
+	autoRestoreBackups = func(_ []string) error { f.restores.Add(1); return nil }
+	autoRestart = func() error { f.restarts.Add(1); return nil }
+	autoExit = func() { f.exits.Add(1) }
 	autoInContainer = func() bool { return env.InContainer }
 	autoInstallDirWritable = func(string) bool { return env.Writable }
 	autoInstallDir = func(string) (string, error) { return f.installDir, nil }
@@ -101,14 +106,14 @@ func TestAutoUpdateInstallsVerifiesAndRestartsWhenIdle(t *testing.T) {
 	withVersion(t, "1.0.0")
 	f := setupAutoUpdate(t, s, autoUpdateEnv{Writable: true})
 	next := s.runUpdateCycle(context.Background())
-	if f.installs != 1 || f.verifies != 1 || f.restarts != 1 || f.restores != 0 {
-		t.Fatalf("installs=%d verifies=%d restarts=%d restores=%d", f.installs, f.verifies, f.restarts, f.restores)
+	if i, v, rs, r, _ := f.counts(); i != 1 || v != 1 || r != 1 || rs != 0 {
+		t.Fatalf("installs=%d verifies=%d restarts=%d restores=%d", i, v, r, rs)
 	}
 	if next != time.Hour {
 		t.Fatalf("next cycle should be the configured interval, got %s", next)
 	}
 	time.Sleep(400 * time.Millisecond)
-	if f.exits != 1 {
+	if _, _, _, _, e := f.counts(); e != 1 {
 		t.Fatal("process should exit after spawning the replacement")
 	}
 	globalUpdates.RLock()
@@ -124,28 +129,28 @@ func TestAutoUpdateDefersRestartWhileRunsAreActive(t *testing.T) {
 	f := setupAutoUpdate(t, s, autoUpdateEnv{Writable: true})
 	s.runReg.Register("run-1", func() {})
 	next := s.runUpdateCycle(context.Background())
-	if f.installs != 1 || f.restarts != 0 {
-		t.Fatalf("expected install without restart, installs=%d restarts=%d", f.installs, f.restarts)
+	if i, _, _, r, _ := f.counts(); i != 1 || r != 0 {
+		t.Fatalf("expected install without restart, installs=%d restarts=%d", i, r)
 	}
 	if next != pendingRestartRetry {
 		t.Fatalf("should retry restart soon, got %s", next)
 	}
 	// Second cycle: still busy, still deferred, and no second download.
-	if s.runUpdateCycle(context.Background()) != pendingRestartRetry || f.installs != 1 {
+	if s.runUpdateCycle(context.Background()) != pendingRestartRetry || f.installs.Load() != 1 {
 		t.Fatal("busy gateway must keep deferring without reinstalling")
 	}
 	// Runs finish: restart proceeds.
 	s.runReg.Done("run-1")
-	if s.runUpdateCycle(context.Background()) != time.Hour || f.restarts != 1 {
-		t.Fatalf("restart should proceed once idle, restarts=%d", f.restarts)
+	if s.runUpdateCycle(context.Background()) != time.Hour || f.restarts.Load() != 1 {
+		t.Fatalf("restart should proceed once idle, restarts=%d", f.restarts.Load())
 	}
 	// Idle-wait exhaustion forces the restart even when busy.
 	globalUpdates = newUpdatesManager()
-	f.restarts = 0
+	f.restarts.Store(0)
 	s.cfg.Updates.IdleWait = "0s"
 	s.runReg.Register("run-2", func() {})
 	s.runUpdateCycle(context.Background())
-	if f.restarts != 1 {
+	if f.restarts.Load() != 1 {
 		t.Fatal("zero idle wait should restart immediately")
 	}
 }
@@ -155,7 +160,7 @@ func TestAutoUpdateOnlyNotifiesInContainerOrWhenDisabled(t *testing.T) {
 	withVersion(t, "1.0.0")
 	f := setupAutoUpdate(t, s, autoUpdateEnv{InContainer: true, Writable: true})
 	s.runUpdateCycle(context.Background())
-	if f.installs != 0 || f.restarts != 0 {
+	if f.installs.Load() != 0 || f.restarts.Load() != 0 {
 		t.Fatal("container must never install in place")
 	}
 	globalUpdates.RLock()
@@ -167,7 +172,7 @@ func TestAutoUpdateOnlyNotifiesInContainerOrWhenDisabled(t *testing.T) {
 	s.cfg.Updates.Auto = boolp(false)
 	autoInContainer = func() bool { return false }
 	s.runUpdateCycle(context.Background())
-	if f.installs != 0 {
+	if f.installs.Load() != 0 {
 		t.Fatal("auto=false must never install")
 	}
 	status, body := gatewayJSON(t, s, http.MethodGet, "/api/v1/system/updates/status", "secret", "")
@@ -182,8 +187,8 @@ func TestAutoUpdateRollsBackWhenNewBinaryFailsVerification(t *testing.T) {
 	f := setupAutoUpdate(t, s, autoUpdateEnv{Writable: true})
 	f.verifyErr = errors.New("exec format error")
 	s.runUpdateCycle(context.Background())
-	if f.installs != 1 || f.restores != 1 || f.restarts != 0 {
-		t.Fatalf("expected rollback and no restart: installs=%d restores=%d restarts=%d", f.installs, f.restores, f.restarts)
+	if i, _, rs, r, _ := f.counts(); i != 1 || rs != 1 || r != 0 {
+		t.Fatalf("expected rollback and no restart: installs=%d restores=%d restarts=%d", i, rs, r)
 	}
 	globalUpdates.RLock()
 	defer globalUpdates.RUnlock()
@@ -197,7 +202,7 @@ func TestAutoUpdateSkipsWhenCurrent(t *testing.T) {
 	withVersion(t, "99.0.0")
 	f := setupAutoUpdate(t, s, autoUpdateEnv{Writable: true})
 	s.runUpdateCycle(context.Background())
-	if f.installs != 0 {
+	if f.installs.Load() != 0 {
 		t.Fatal("no install when already current")
 	}
 }
