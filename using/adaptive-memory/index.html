@@ -1433,10 +1433,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#using-an-external-memory-service" class="md-nav__link">
+  <a href="#using-an-external-provider-such-as-mem0" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Using an external memory service
+        Using an external provider such as Mem0
       
     </span>
   </a>
@@ -4814,10 +4814,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#using-an-external-memory-service" class="md-nav__link">
+  <a href="#using-an-external-provider-such-as-mem0" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Using an external memory service
+        Using an external provider such as Mem0
       
     </span>
   </a>
@@ -4916,7 +4916,9 @@ them against what it already knows so newer facts replace stale ones, and adds
 the few most relevant facts to the next prompt. Nothing about this adds latency
 to chat, and everything it remembers is yours to inspect, edit, or erase.</p>
 <p>Adaptive memory is on by default, runs entirely on your own machine at no extra
-cost, and is private to each signed-in user.</p>
+cost, and is private to each signed-in user. If you prefer an external memory
+provider, <a href="#using-an-external-provider-such-as-mem0">Mem0 is supported</a> with a
+one-line switch.</p>
 <h2 id="what-it-does-in-one-turn">What it does, in one turn<a class="headerlink" href="#what-it-does-in-one-turn" title="Permanent link">&para;</a></h2>
 <ol>
 <li><strong>You chat.</strong> "I moved to New York last month, and please keep answers
@@ -5020,10 +5022,11 @@ fast model to keep this negligible; a local Ollama model works well.</p>
 <p><strong>Embeddings.</strong> Conflict detection and relevance ranking use the same embedding
 model as Knowledge (<code>knowledge.embedding_provider</code>). Without an embedder,
 adaptive memory still works using keyword matching.</p>
-<h2 id="using-an-external-memory-service">Using an external memory service<a class="headerlink" href="#using-an-external-memory-service" title="Permanent link">&para;</a></h2>
-<p>If your organisation already runs a hosted or self-hosted memory service that
-speaks the Mem0 API, you can hand extraction and storage to it instead of the
-built-in engine:</p>
+<h2 id="using-an-external-provider-such-as-mem0">Using an external provider such as Mem0<a class="headerlink" href="#using-an-external-provider-such-as-mem0" title="Permanent link">&para;</a></h2>
+<p>Adaptive memory is built in, but it is not locked in. If your organisation
+already uses <a href="https://mem0.ai">Mem0</a>, hosted or self-hosted, you can hand
+extraction and storage to it instead of the built-in engine and keep the same
+GUI, API, per-agent controls, and safety scoping:</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">memory</span><span class="p">:</span>
 </span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">adaptive</span><span class="p">:</span>
 </span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="nt">provider</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mem0</span>
