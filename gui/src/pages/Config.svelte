@@ -82,6 +82,8 @@
   let adaptiveMaxFacts = 5, adaptiveTokenBudget = 50, adaptiveMinConfidence = 0.5, adaptiveSimilarity = 0.85
   let mem0BaseURL = '', mem0ApiKey = '', mem0Graph = false, mem0Style = '', mem0Configured = false
   let adaptiveInstructions = '', adaptiveCustomCategories = '', adaptiveGraph = true
+  // Updates policy (updates.*)
+  let updatesAuto = true, updatesInterval = '6h', updatesManifestURL = ''
   let monthlyBudgetUSD = ''
   let costAlertThreshold = 0.8
   let costRows = []
@@ -329,6 +331,9 @@
         adaptiveInstructions = ad.instructions || ''
         adaptiveCustomCategories = (ad.custom_categories || []).join(', ')
         adaptiveGraph = ad.graph_enabled ?? true
+        updatesAuto = config.updates?.auto ?? true
+        updatesInterval = config.updates?.check_interval || '6h'
+        updatesManifestURL = config.updates?.manifest_url || ''
       }
       monthlyBudgetUSD = config.costs?.monthly_budget_usd || ''
       costAlertThreshold = config.costs?.alert_threshold || 0.8
@@ -436,6 +441,11 @@
         // saving without retyping the key never clobbers the real one on disk.
         search: { provider: searchProvider, api_key: searchApiKey },
         costs: costsPatch(),
+        updates: {
+          auto: !!updatesAuto,
+          check_interval: updatesInterval,
+          manifest_url: updatesManifestURL.trim(),
+        },
         memory: {
           adaptive: {
             enabled: !!adaptiveEnabled,
@@ -580,6 +590,27 @@
       {checkingUpdates ? 'Checking…' : 'Check for updates'}
     </button>
   </div>
+  {#if updateInfo}
+    <div class="auto-update-row" data-testid="auto-update-row">
+      <label class="checkbox-row" data-tooltip="When on, verified releases are downloaded, installed, and applied automatically at the next idle moment. Turn off to be notified only.">
+        <input type="checkbox" bind:checked={updatesAuto} disabled={!writable} on:change={save} />
+        Install updates automatically
+      </label>
+      <select bind:value={updatesInterval} disabled={!writable || !updatesAuto} on:change={save} title="How often to check for a release">
+        <option value="1h">every hour</option>
+        <option value="6h">every 6 hours</option>
+        <option value="24h">daily</option>
+        <option value="168h">weekly</option>
+      </select>
+      <span class="version-detail" class:behind={updateInfo.mode === 'notify'}>
+        {#if updateInfo.mode === 'install'}Auto-update on · checks {updateInfo.check_interval}{#if updateInfo.last_applied_version} · last applied {updateInfo.last_applied_version}{/if}
+        {:else if updateInfo.mode === 'notify'}Notify only: {updateInfo.mode_reason}
+        {:else}Auto-update off · new releases are reported here{/if}
+        {#if updateInfo.pending_restart} · {updateInfo.pending_restart} installed, restarting when idle{/if}
+        {#if updateInfo.last_error} · last attempt failed: {updateInfo.last_error}{/if}
+      </span>
+    </div>
+  {/if}
 
   {#if updateInfo && updateInfo.update_available}
     <div class="update-banner">
@@ -1615,6 +1646,8 @@
     font: inherit;
     padding: 0;
   }
+  .auto-update-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin: 0.25rem 0 1rem; font-size: 0.9rem; }
+  .auto-update-row select { padding: 0.2rem 0.4rem; }
   .version-row {
     display: flex;
     align-items: center;

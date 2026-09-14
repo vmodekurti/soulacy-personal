@@ -20,6 +20,41 @@ cannot reliably determine whether that commit is newer or older than a semantic
 release and reports **versions are not comparable**. In that case, install the
 desired tagged release explicitly rather than overriding the comparison.
 
+## Automatic updates
+
+A release install keeps itself current. The gateway checks the signed release
+manifest on a schedule (every 6 hours by default) and, when a newer release
+exists, downloads the artifact for its platform, verifies the checksum and the
+Sigstore signature, replaces its own `soulacy` and `sy` binaries, runs the new
+binary to confirm it starts and reports the expected version, and restarts
+into it. Restarts wait until no agent run is in flight (up to `idle_wait`, two
+hours by default). If the new binary fails verification, the previous binaries
+are put back and the failure is reported.
+
+```yaml
+updates:
+  auto: true            # set false to be notified only
+  check_interval: 6h    # minimum 15m
+  idle_wait: 2h         # 0s restarts immediately
+  manifest_url: ""      # blank = the official GitHub release manifest
+```
+
+The same controls are on **Config → Version** (toggle, interval) and apply
+without a restart. **Config** and the **Dashboard** show what the checker will
+do: `install`, `notify`, or `off`, with the reason.
+
+The gateway only notifies, and never replaces binaries, when:
+
+- it runs in a container (upgrade by pulling a newer image), or
+- its install directory is not writable by the gateway user (use
+  `sudo sy update install --yes`, or fix permissions), or
+- the running build is not a tagged release (a source build reports
+  "versions are not comparable").
+
+Every check, install, rollback and restart is logged and appears in Activity
+as a `system.update` event. `GET /api/v1/system/updates/status` reports the
+mode, last check, last applied version, and any pending restart.
+
 ## Release installation: standard upgrade
 
 ```bash

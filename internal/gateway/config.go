@@ -102,6 +102,12 @@ func (s *Server) safeConfigView() fiber.Map {
 				"max_llm_calls": cfg.Runtime.MaxBudget.MaxLLMCalls,
 			},
 		},
+		"updates": fiber.Map{
+			"manifest_url":   cfg.Updates.ManifestURL,
+			"auto":           cfg.Updates.AutoOn(),
+			"check_interval": cfg.Updates.CheckIntervalDuration().String(),
+			"idle_wait":      cfg.Updates.IdleWaitDuration().String(),
+		},
 		"memory": fiber.Map{
 			"dir":         cfg.Memory.Dir,
 			"sqlite_path": cfg.Memory.SQLitePath,
@@ -450,6 +456,14 @@ type PatchableConfig struct {
 		WalkthroughVersion *int  `json:"walkthrough_version" yaml:"walkthrough_version"`
 	} `json:"ui" yaml:"ui"`
 
+	// Updates: manifest source and automatic installation policy. Hot-applied.
+	Updates *struct {
+		ManifestURL   *string `json:"manifest_url" yaml:"manifest_url"`
+		Auto          *bool   `json:"auto" yaml:"auto"`
+		CheckInterval *string `json:"check_interval" yaml:"check_interval"`
+		IdleWait      *string `json:"idle_wait" yaml:"idle_wait"`
+	} `json:"updates" yaml:"updates"`
+
 	// Memory.adaptive is hot-applied: the provider is rebuilt in place.
 	Memory *struct {
 		Adaptive *PatchableAdaptiveMemory `json:"adaptive" yaml:"adaptive"`
@@ -570,6 +584,25 @@ func (s *Server) handlePatchConfig(c *fiber.Ctx) error {
 		if budgetsPatched {
 			s.hotApplyRunBudgets()
 		}
+	}
+
+	// Update policy is read by the checker loop on every cycle; waking it
+	// applies a change (for example auto on/off) without a restart.
+	if patch.Updates != nil && s.cfg != nil {
+		if patch.Updates.ManifestURL != nil {
+			s.cfg.Updates.ManifestURL = strings.TrimSpace(*patch.Updates.ManifestURL)
+		}
+		if patch.Updates.Auto != nil {
+			v := *patch.Updates.Auto
+			s.cfg.Updates.Auto = &v
+		}
+		if patch.Updates.CheckInterval != nil {
+			s.cfg.Updates.CheckInterval = *patch.Updates.CheckInterval
+		}
+		if patch.Updates.IdleWait != nil {
+			s.cfg.Updates.IdleWait = *patch.Updates.IdleWait
+		}
+		globalUpdates.Wake()
 	}
 
 	// Adaptive memory is rebuilt in place so a provider switch (local ⇄ mem0)
@@ -765,6 +798,21 @@ func applyPatch(dst map[string]any, patch PatchableConfig) {
 		}
 		if patch.Server.APIKey != "" && patch.Server.APIKey != "***" {
 			srv["api_key"] = patch.Server.APIKey
+		}
+	}
+	if patch.Updates != nil {
+		up := getOrCreateMap(dst, "updates")
+		if patch.Updates.ManifestURL != nil {
+			up["manifest_url"] = *patch.Updates.ManifestURL
+		}
+		if patch.Updates.Auto != nil {
+			up["auto"] = *patch.Updates.Auto
+		}
+		if patch.Updates.CheckInterval != nil {
+			up["check_interval"] = *patch.Updates.CheckInterval
+		}
+		if patch.Updates.IdleWait != nil {
+			up["idle_wait"] = *patch.Updates.IdleWait
 		}
 	}
 	if patch.Memory != nil && patch.Memory.Adaptive != nil {
