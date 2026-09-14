@@ -79,6 +79,13 @@ you understand and need; system permission and Soulacy's own toggle both matter.
 The app accepts device commands while it is open. Camera/photo requests require
 a visible choice; an agent cannot silently select or capture an image.
 
+Two capabilities are signals rather than actions. **Health summary** lets an
+agent ask for steps, energy, exercise minutes, last night's sleep and
+workouts over a bounded window; only totals leave the phone, and because iOS
+never tells apps what Health access was granted, the toggle itself is your
+consent record. **Focus status** reports whether a Focus is on, so an agent
+can hold something non-urgent until you are free.
+
 If a command reports uncertain delivery, inspect **Review required → Check
 gateway state**. Do not repeat a potentially completed device action blindly.
 Pairing is not consent to continuous background monitoring.

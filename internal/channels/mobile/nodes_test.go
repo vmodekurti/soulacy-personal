@@ -127,3 +127,28 @@ func TestNodePermissionRevokedBeforeClaim(t *testing.T) {
 		t.Fatalf("revoked capability was claimed: %v", err)
 	}
 }
+
+func TestHealthAndFocusCommandsAreGatedByAdvertisedCapability(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "mobile.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	if err := s.RegisterNode(ctx, "w", "alice", Node{DeviceID: "phone", Name: "Ada", Platform: "ios", Capabilities: []string{"focus.status"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EnqueueNodeCommand(ctx, "w", "alice", NodeCommand{DeviceID: "phone", Command: "health.summary"}); !errors.Is(err, ErrNodeInvalid) {
+		t.Fatalf("health.summary must be refused until the phone enables it: %v", err)
+	}
+	cmd, err := s.EnqueueNodeCommand(ctx, "w", "alice", NodeCommand{DeviceID: "phone", Command: "focus.status"})
+	if err != nil || cmd.Status != "queued" {
+		t.Fatalf("focus.status should queue: %v %+v", err, cmd)
+	}
+	if err := s.RegisterNode(ctx, "w", "alice", Node{DeviceID: "phone", Name: "Ada", Platform: "ios", Capabilities: []string{"focus.status", "health.summary"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EnqueueNodeCommand(ctx, "w", "alice", NodeCommand{DeviceID: "phone", Command: "health.summary", Params: json.RawMessage(`{"window":"today"}`)}); err != nil {
+		t.Fatalf("health.summary should queue once enabled: %v", err)
+	}
+}

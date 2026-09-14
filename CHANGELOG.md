@@ -7,6 +7,11 @@ to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Phone signals for agents: `health.summary` and `focus.status` join the
+  device-command allowlist, so an agent with `mobile.invoke` can ask a paired
+  iPhone (with those capabilities enabled) for steps, energy, exercise
+  minutes, sleep and workouts over a bounded window, or whether a Focus is
+  on before delivering something non-urgent.
 - Live Activities for paired iPhones: background runs appear on the lock
   screen and in the Dynamic Island once they call their first tool, and any
   run appears the moment it needs an approval, with Approve/Deny buttons that
