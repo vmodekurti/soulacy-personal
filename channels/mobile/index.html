@@ -3060,6 +3060,39 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#lock-screen-approvals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lock-screen approvals
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#location-triggers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Location triggers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#siri-and-shortcuts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Siri and Shortcuts
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -4703,6 +4736,39 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#lock-screen-approvals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lock-screen approvals
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#location-triggers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Location triggers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#siri-and-shortcuts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Siri and Shortcuts
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -4799,6 +4865,32 @@
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>SOULACY_MOBILE_PUSH_RELAY_TOKEN=replace-with-a-secret
 </span></code></pre></div>
 <p>The gateway posts a token, APNs environment, bundle ID, delivery ID, and a <code>soulacy://delivery/&lt;id&gt;</code> deep link to <code>POST &lt;relay&gt;/v1/push</code>. Notification text is intentionally generic; the sensitive output is fetched from the authenticated gateway after the user opens the app.</p>
+<h2 id="lock-screen-approvals">Lock-screen approvals<a class="headerlink" href="#lock-screen-approvals" title="Permanent link">&para;</a></h2>
+<p>When an agent needs your approval for a tool call, every paired phone that
+belongs to the same signed-in user receives a time-sensitive push in the
+<code>SOULACY_APPROVAL</code> category with <strong>Approve</strong> and <strong>Deny</strong> actions. Deciding
+from the lock screen calls the approvals API in the background; the app does
+not have to open. Tapping the notification opens the approval instead. The
+push carries only the agent name and tool name; the arguments are fetched from
+the authenticated gateway.</p>
+<p>Approvals still go through the same broker as the web, so a decision taken
+on the phone is visible everywhere, and an approval that has already been
+decided reports that instead of running twice.</p>
+<h2 id="location-triggers">Location triggers<a class="headerlink" href="#location-triggers" title="Permanent link">&para;</a></h2>
+<p>Agents declared with <code>trigger: location</code> are listed for paired phones at
+<code>GET /api/v1/mobile/triggers?device_id=&lt;installation-id&gt;</code>. The phone monitors
+those regions and reports a crossing with
+<code>POST /api/v1/mobile/triggers/&lt;agent-id&gt;/fire</code>. The gateway checks that the
+event matches the trigger's <code>on</code>, that the phone is allowed by <code>device</code>, and
+that the trigger's <code>cooldown</code> has passed, then starts the run and delivers
+the reply to that phone through this channel. See the
+<a href="../../agents/soul-yaml/#location-trigger">SOUL.yaml reference</a> for the block.</p>
+<h2 id="siri-and-shortcuts">Siri and Shortcuts<a class="headerlink" href="#siri-and-shortcuts" title="Permanent link">&para;</a></h2>
+<p>The iOS app exposes App Intents so agents work without opening the app:
+<strong>Ask an agent</strong>, <strong>Remember something</strong> (adds an adaptive-memory fact),
+<strong>Approve the pending action</strong>, and <strong>Run an agent</strong>. They use the same
+paired credential and the same APIs as the app, so nothing new has to be
+configured on the gateway.</p>
 
 
 

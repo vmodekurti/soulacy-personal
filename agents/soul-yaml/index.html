@@ -2258,6 +2258,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Trigger and Channels">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#location-trigger" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Location trigger
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -4833,6 +4850,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Trigger and Channels">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#location-trigger" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Location trigger
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -5031,7 +5065,7 @@
 </span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="nt">labels</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> owner</span><span class="p">:</span><span class="w"> </span><span class="nv">ops</span><span class="w"> </span><span class="p p-Indicator">}</span>
 </span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
 </span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="c1"># ── Trigger ───────────────────────────────────────────────</span>
-</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="nt">trigger</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">channel</span><span class="w">             </span><span class="c1"># primary start mode: channel | cron | oneshot | webhook | internal</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="nt">trigger</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">channel</span><span class="w">             </span><span class="c1"># primary start mode: channel | cron | oneshot | webhook | internal | location</span>
 </span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="nt">channels</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">http</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">telegram</span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># channel adapter IDs this agent serves</span>
 </span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="nt">surfaces</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">chat</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">telegram</span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># optional UI/invocation surfaces; empty = derived</span>
 </span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>
@@ -5171,6 +5205,10 @@
 <td><code>internal</code></td>
 <td>Callable by peer agents, not normally user-facing.</td>
 </tr>
+<tr>
+<td><code>location</code></td>
+<td>Runs when a paired iPhone enters or leaves a place. Requires a <code>location</code> block (below).</td>
+</tr>
 </tbody>
 </table>
 <p><code>channels</code> binds the agent to channel adapter IDs. Platform credentials and
@@ -5191,6 +5229,26 @@ duplicating it:</p>
 <p>With that shape, the scheduler fires the agent, the Chat picker can test it,
 and mapped Telegram/Slack bots can route inbound messages to the same agent.
 The channel credentials and bot mappings still live under <code>config.yaml</code>.</p>
+<h3 id="location-trigger">Location trigger<a class="headerlink" href="#location-trigger" title="Permanent link">&para;</a></h3>
+<p>A <code>location</code> agent asks every paired iPhone to watch one place. The phone does
+the geofencing with Core Location region monitoring, so nothing tracks the
+phone: the gateway learns only that the boundary was crossed, with the
+coordinate of that moment. The agent runs on the gateway and its reply is
+delivered to the phone that fired it.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">trigger</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">location</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nt">location</span><span class="p">:</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Office</span><span class="w">            </span><span class="c1"># shown on the phone; defaults to the agent name</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span><span class="nt">latitude</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">47.6205</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span><span class="nt">longitude</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">-122.3493</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">  </span><span class="nt">radius_m</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">250</span><span class="w">           </span><span class="c1"># 100–5000 metres</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">  </span><span class="nt">on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">enter</span><span class="w">               </span><span class="c1"># enter | exit</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">  </span><span class="nt">cooldown</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">45m</span><span class="w">           </span><span class="c1"># ignore repeat crossings for this long (default 30m)</span>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">  </span><span class="c1"># device: &lt;installation-id&gt;   # optional: only this phone watches the place</span>
+</span></code></pre></div>
+<p>On the phone, enable <strong>Settings → Location triggers</strong> and grant <em>Always</em>
+location access. iOS delivers region events even when the app is suspended.
+Each crossing appears as a <code>trigger.location</code> event in the workspace event
+stream and in the phone's Location triggers screen with its outcome.</p>
 <h2 id="llm-block">LLM Block<a class="headerlink" href="#llm-block" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -5318,15 +5376,15 @@ shapes are supported:</p>
 </ul>
 <h2 id="schedule">Schedule<a class="headerlink" href="#schedule" title="Permanent link">&para;</a></h2>
 <p>Cron and one-shot agents use <code>schedule</code>:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">trigger</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cron</span>
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nt">schedule</span><span class="p">:</span>
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="nt">cron</span><span class="p">:</span><span class="w"> </span><span class="s">"0</span><span class="nv"> </span><span class="s">8</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*"</span>
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span><span class="nt">run_missed_on_startup</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">     </span><span class="c1"># catch up after host downtime</span>
-</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span><span class="nt">missed_startup_window</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">24h</span><span class="w">      </span><span class="c1"># only replay fires within this window</span>
-</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">  </span><span class="nt">output</span><span class="p">:</span><span class="w">                         </span><span class="c1"># publish successful runs to a channel</span>
-</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">    </span><span class="nt">channel</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">telegram</span>
-</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">    </span><span class="nt">to</span><span class="p">:</span><span class="w"> </span><span class="s">"123456789"</span>
-</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">    </span><span class="nt">template</span><span class="p">:</span><span class="w"> </span><span class="s">"{reply}"</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">trigger</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cron</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="nt">schedule</span><span class="p">:</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="nt">cron</span><span class="p">:</span><span class="w"> </span><span class="s">"0</span><span class="nv"> </span><span class="s">8</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*"</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span><span class="nt">run_missed_on_startup</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">     </span><span class="c1"># catch up after host downtime</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">  </span><span class="nt">missed_startup_window</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">24h</span><span class="w">      </span><span class="c1"># only replay fires within this window</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">  </span><span class="nt">output</span><span class="p">:</span><span class="w">                         </span><span class="c1"># publish successful runs to a channel</span>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">    </span><span class="nt">channel</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">telegram</span>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">    </span><span class="nt">to</span><span class="p">:</span><span class="w"> </span><span class="s">"123456789"</span>
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">    </span><span class="nt">template</span><span class="p">:</span><span class="w"> </span><span class="s">"{reply}"</span>
 </span></code></pre></div>
 <p>When <code>run_missed_on_startup</code> is <code>true</code>, Soulacy replays at most <strong>one</strong> missed
 fire per startup — the latest one inside <code>missed_startup_window</code> (default
