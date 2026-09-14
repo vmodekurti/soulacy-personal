@@ -8,7 +8,9 @@ the few most relevant facts to the next prompt. Nothing about this adds latency
 to chat, and everything it remembers is yours to inspect, edit, or erase.
 
 Adaptive memory is on by default, runs entirely on your own machine at no extra
-cost, and is private to each signed-in user.
+cost, and is private to each signed-in user. If you prefer an external memory
+provider, [Mem0 is supported](#using-an-external-provider-such-as-mem0) with a
+one-line switch.
 
 ## What it does, in one turn
 
@@ -133,11 +135,12 @@ fast model to keep this negligible; a local Ollama model works well.
 model as Knowledge (`knowledge.embedding_provider`). Without an embedder,
 adaptive memory still works using keyword matching.
 
-## Using an external memory service
+## Using an external provider such as Mem0
 
-If your organisation already runs a hosted or self-hosted memory service that
-speaks the Mem0 API, you can hand extraction and storage to it instead of the
-built-in engine:
+Adaptive memory is built in, but it is not locked in. If your organisation
+already uses [Mem0](https://mem0.ai), hosted or self-hosted, you can hand
+extraction and storage to it instead of the built-in engine and keep the same
+GUI, API, per-agent controls, and safety scoping:
 
 ```yaml
 memory:
