@@ -62,6 +62,37 @@ that the trigger's `cooldown` has passed, then starts the run and delivers
 the reply to that phone through this channel. See the
 [SOUL.yaml reference](../agents/soul-yaml.md#location-trigger) for the block.
 
+## Live Activities
+
+A running agent can sit on the lock screen and in the Dynamic Island as a
+Live Activity: the agent's name, what it is doing, how many steps it has
+taken, elapsed time, and Approve/Deny buttons whenever it is waiting on
+you. Nothing is rendered on the gateway; it pushes a small content state and
+the phone draws it.
+
+Which runs appear:
+
+- a background run (cron, webhook, location, another agent) as soon as it
+  calls its first tool;
+- any run, including interactive chat, the moment it needs an approval.
+
+The phone sends an ActivityKit push-to-start token with its device
+registration (`live_start_token`). The gateway uses it to begin the activity
+even when the app is closed. Once the activity is on screen the phone reports
+the per-activity update token with
+`POST /api/v1/mobile/activities` (`device_id`, `agent_id`, `session_id`,
+`token`, `environment`), and the gateway pushes progress, "waiting on you",
+and the final state, then lets the phone dismiss it a few minutes later.
+Routine progress is throttled and sent at low priority; waiting and finished
+states are sent at once.
+
+With direct APNs the pushes go to Apple with `apns-push-type: liveactivity`
+and topic `dev.soulacy.ios.push-type.liveactivity`. A relay receives them at
+`POST <relay>/v1/live` as `{token, environment, bundle_id, event, priority,
+payload}` where `payload` is the exact APNs body. Turn the feature off per
+phone under **Settings → Lock screen**; the phone then stops sending its
+start token.
+
 ## Siri and Shortcuts
 
 The iOS app exposes App Intents so agents work without opening the app:

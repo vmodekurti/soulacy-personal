@@ -7,6 +7,14 @@ to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Live Activities for paired iPhones: background runs appear on the lock
+  screen and in the Dynamic Island once they call their first tool, and any
+  run appears the moment it needs an approval, with Approve/Deny buttons that
+  decide without opening the app. Device registration accepts an ActivityKit
+  push-to-start token (`live_start_token`); `POST /api/v1/mobile/activities`
+  registers per-run update tokens; the gateway pushes start, throttled
+  progress, waiting and end states over APNs (`liveactivity` push type) or a
+  relay (`/v1/live`). The approval broker gained an on-resolve hook.
 - iPhone as Soulacy's extension, slice 1: approvals are pushed to paired
   phones as actionable, time-sensitive notifications (`SOULACY_APPROVAL`)
   that can be approved or denied from the lock screen; a new `location`

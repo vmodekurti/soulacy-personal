@@ -78,6 +78,7 @@ type ConfirmBroker struct {
 	mu         sync.Mutex
 	pending    map[string]*pendingEntry
 	onRegister func(PendingApproval)
+	onResolve  func(PendingApproval, bool)
 }
 
 // newConfirmBroker allocates a ConfirmBroker.
@@ -90,6 +91,15 @@ func newConfirmBroker() *ConfirmBroker {
 func (b *ConfirmBroker) SetOnRegister(fn func(PendingApproval)) {
 	b.mu.Lock()
 	b.onRegister = fn
+	b.mu.Unlock()
+}
+
+// SetOnResolve installs a callback fired after a pending approval is decided,
+// with the decision. Used to clear "waiting on you" surfaces such as Live
+// Activities. Safe to call once at startup.
+func (b *ConfirmBroker) SetOnResolve(fn func(PendingApproval, bool)) {
+	b.mu.Lock()
+	b.onResolve = fn
 	b.mu.Unlock()
 }
 
@@ -179,9 +189,13 @@ func (b *ConfirmBroker) ResolveForPrincipal(callID string, approved bool, princi
 	if ok {
 		delete(b.pending, callID)
 	}
+	onResolve := b.onResolve
 	b.mu.Unlock()
 	if ok {
 		e.ch <- approved
+		if onResolve != nil {
+			onResolve(e.meta, approved)
+		}
 	}
 	return ok
 }

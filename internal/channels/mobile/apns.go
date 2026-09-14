@@ -158,3 +158,54 @@ func (a *apnsClient) push(ctx context.Context, n relayNotification) error {
 	}
 	return fmt.Errorf("APNs rejected notification: %s", rejected.Reason)
 }
+
+// pushLive sends a Live Activity start, update or end. The topic is the app
+// bundle with Apple's liveactivity suffix; the token is a push-to-start token
+// for "start" and an activity update token otherwise.
+func (a *apnsClient) pushLive(ctx context.Context, p livePush) error {
+	if len(p.Token) != 64 {
+		return errors.New("APNs Live Activity token must be 32 bytes encoded as hexadecimal")
+	}
+	if subtle.ConstantTimeCompare([]byte(p.BundleID), []byte("dev.soulacy.ios")) != 1 {
+		return errors.New("APNs bundle ID is not allowed")
+	}
+	providerToken, err := a.authorizationToken(time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(p.Payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.endpoint(p.Environment)+"/3/device/"+p.Token, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	priority := p.Priority
+	if priority != 5 {
+		priority = 10
+	}
+	req.Header.Set("Authorization", "bearer "+providerToken)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("apns-topic", p.BundleID+".push-type.liveactivity")
+	req.Header.Set("apns-push-type", "liveactivity")
+	req.Header.Set("apns-priority", fmt.Sprint(priority))
+	req.Header.Set("apns-expiration", "0")
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("send APNs request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		return nil
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	var rejected struct {
+		Reason string `json:"reason"`
+	}
+	_ = json.Unmarshal(body, &rejected)
+	if rejected.Reason == "" {
+		rejected.Reason = resp.Status
+	}
+	return fmt.Errorf("APNs rejected live activity push: %s", rejected.Reason)
+}

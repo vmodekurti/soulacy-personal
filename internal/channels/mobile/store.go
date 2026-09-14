@@ -71,15 +71,17 @@ type Delivery struct {
 }
 
 type Device struct {
-	ID                   string    `json:"id"`
-	UserID               string    `json:"user_id"`
-	Name                 string    `json:"name"`
-	PushToken            string    `json:"push_token,omitempty"`
-	PushEnvironment      string    `json:"push_environment"`
-	BundleID             string    `json:"bundle_id"`
-	NotificationsEnabled bool      `json:"notifications_enabled"`
-	CreatedAt            time.Time `json:"created_at"`
-	UpdatedAt            time.Time `json:"updated_at"`
+	ID                   string `json:"id"`
+	UserID               string `json:"user_id"`
+	Name                 string `json:"name"`
+	PushToken            string `json:"push_token,omitempty"`
+	PushEnvironment      string `json:"push_environment"`
+	BundleID             string `json:"bundle_id"`
+	NotificationsEnabled bool   `json:"notifications_enabled"`
+	// LiveStartToken lets the gateway start a Live Activity while the app is closed.
+	LiveStartToken string    `json:"live_start_token,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 type Store struct{ db *sql.DB }
@@ -89,7 +91,7 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("mobile delivery: open: %w", err)
 	}
-	if _, err := db.Exec(schema + nodeSchema); err != nil {
+	if _, err := db.Exec(schema + nodeSchema + liveSchema); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("mobile delivery: schema: %w", err)
 	}
@@ -101,7 +103,12 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	return &Store{db: db}, nil
+	store := &Store{db: db}
+	if err := store.ensureLiveColumns(); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("mobile delivery: live activity schema: %w", err)
+	}
+	return store, nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -228,14 +235,16 @@ func (s *Store) UpsertDevice(ctx context.Context, workspaceID, userID string, d 
 		d.BundleID = "dev.soulacy.ios"
 	}
 	result, err := s.db.ExecContext(ctx, `INSERT INTO mobile_devices
-    (workspace_id,id,user_id,name,push_token,push_environment,bundle_id,notifications_enabled,created_at,updated_at)
-    VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(workspace_id,id) DO UPDATE SET
+    (workspace_id,id,user_id,name,push_token,push_environment,bundle_id,notifications_enabled,live_start_token,created_at,updated_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(workspace_id,id) DO UPDATE SET
       user_id=excluded.user_id,name=excluded.name,push_token=excluded.push_token,
       push_environment=excluded.push_environment,bundle_id=excluded.bundle_id,
-      notifications_enabled=excluded.notifications_enabled,updated_at=excluded.updated_at
+      notifications_enabled=excluded.notifications_enabled,
+      live_start_token=COALESCE(NULLIF(excluded.live_start_token,''),mobile_devices.live_start_token),
+      updated_at=excluded.updated_at
     WHERE mobile_devices.user_id=excluded.user_id`,
 		normalizeWorkspaceID(workspaceID), d.ID, userID, d.Name, d.PushToken, d.PushEnvironment, d.BundleID,
-		d.NotificationsEnabled, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+		d.NotificationsEnabled, strings.ToLower(strings.TrimSpace(d.LiveStartToken)), now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
 	if err != nil {
 		return err
 	}

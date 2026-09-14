@@ -57,8 +57,16 @@ func (s *Server) wirePushNotifications() {
 	if err != nil {
 		svc = nil
 	}
+	s.engine.Broker().SetOnResolve(func(p runtime.PendingApproval, approved bool) {
+		if s.liveActivities != nil {
+			s.liveActivities.ApprovalResolved(p, approved)
+		}
+	})
 	s.engine.Broker().SetOnRegister(func(p runtime.PendingApproval) {
 		s.notifyPhonesOfApproval(p)
+		if s.liveActivities != nil {
+			s.liveActivities.ApprovalPending(p)
+		}
 		if svc == nil || svc.Count() == 0 {
 			return
 		}

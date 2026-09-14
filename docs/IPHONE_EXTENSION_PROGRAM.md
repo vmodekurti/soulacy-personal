@@ -47,7 +47,7 @@ device-node command set agents can call: `device.info`, `location.current`,
 
 | Story | Gateway | App |
 |---|---|---|
-| **E54 Live Activities** | Register Live Activity push tokens per run; push content-state updates (stage, progress, waiting-for-you) with `apns-push-type: liveactivity`. | Dynamic Island and lock-screen activity for long runs; tap to approve. |
+| **E54 Live Activities** (shipped) | Push-to-start token on device registration; `POST /mobile/activities` registers per-run update tokens; the event hub drives start/update/end with `apns-push-type: liveactivity`. Background runs start on their first tool call, any run starts when an approval is pending. | Lock-screen and Dynamic Island activity with elapsed time, steps, and Approve/Deny buttons backed by a `LiveActivityIntent` that decides without opening the app. Settings → Lock screen toggle. |
 | **E55 Health & context signals** | New node commands `health.summary` (sleep, steps, workouts for a window) and `focus.status`, gated like every other device command. | HealthKit read with per-command consent; Focus reporting; the morning briefing template uses both. |
 | **E56 Capture into knowledge** | Share-target endpoints already exist for facts; add a knowledge-base ingest path for shared files and photos with captions. | Share sheet: **File this** to a knowledge base; camera capture flows into extraction (the honest multimodal path). |
 | **E57 Voice in hand** | Existing voice pipeline. | Push-to-talk; CarPlay messaging integration for hands-free agent replies. |

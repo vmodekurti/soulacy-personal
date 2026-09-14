@@ -57,6 +57,7 @@ import (
 	"github.com/soulacy/soulacy/internal/caps"
 	"github.com/soulacy/soulacy/internal/channels"
 	httpchan "github.com/soulacy/soulacy/internal/channels/http"
+	mobilechan "github.com/soulacy/soulacy/internal/channels/mobile"
 	wachan "github.com/soulacy/soulacy/internal/channels/whatsapp"
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/costs"
@@ -108,6 +109,7 @@ type Server struct {
 	actions          storage.ActionLogBackend // nil if action logging disabled
 	mcp              *mcp.Client              // nil if no MCP servers configured
 	hub              *EventHub
+	liveActivities   *liveActivityTracker
 	authEngine       *auth.Engine // nil until SetAuth() is called
 	authStackCache   atomic.Pointer[fiber.Handler]
 	rbacManager      *rbac.Manager        // nil until SetRBAC() is called
@@ -238,8 +240,15 @@ func New(
 		packageInstallJobs: make(map[string]*packageInstallJob),
 	}
 	go s.runPreferenceMiner()
+	s.liveActivities = newLiveActivityTracker(mobilechan.DefaultAdapter, func(id string) string {
+		if def := loader.Get(id); def != nil && def.Name != "" {
+			return def.Name
+		}
+		return id
+	}, s.httpRequestTimeout, log)
 	if s.hub != nil {
 		s.hub.SetEventAuthorizer(s.authorizeEvent)
+		s.hub.AddObserver(s.liveActivities.Observe)
 		if s.studioLearningEnabled() {
 			s.workflowDistiller = studio.NewWorkflowDistiller(s.macroStore())
 			s.hub.AddObserver(s.workflowDistiller.Observe)
@@ -835,6 +844,7 @@ func (s *Server) buildApp() *fiber.App {
 	s.registerAdaptiveMemoryRoutes(api)
 	// Location triggers monitored by paired phones (E51)
 	s.registerMobileTriggerRoutes(api)
+	s.registerLiveActivityRoutes(api)
 
 	// Session memory (existing)
 	api.Get("/memory/:agent_id", s.rbacAgentFromMW(rbac.ResourceMemory, rbac.ActionRead, rbac.AgentIDSource{PathParam: "agent_id"}), s.handleListMemory)
