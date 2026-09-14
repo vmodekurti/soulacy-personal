@@ -100,3 +100,33 @@ The iOS app exposes App Intents so agents work without opening the app:
 **Approve the pending action**, and **Run an agent**. They use the same
 paired credential and the same APIs as the app, so nothing new has to be
 configured on the gateway.
+
+## Agent-built UI
+
+An agent can draw a native card on a paired phone with the `canvas.present`
+device command (through the `mobile.invoke` tool, once the phone has the
+**Soulacy canvas** capability on). Besides the original `title`, `body` and
+`items`, a card may carry typed `components`, rendered with native controls:
+
+| Type | Fields |
+|---|---|
+| `text` | `markdown` |
+| `checklist` | `title`, `items: [{label, done}]` |
+| `form` | `id`, `fields: [{name, label, kind: text\|number\|choice\|toggle\|date, options, required, default}]`, `submit` (button label) |
+| `chart` | `title`, `kind: bar\|line`, `labels`, `series: [{label, values}]` |
+| `metric` | `label`, `value`, `unit`, `trend: up\|down\|flat` |
+
+A card with a form (or a `submit` label at the top level) keeps the command
+**running** until the person submits or dismisses it, or the command expires,
+so set `expires_in_seconds` on `mobile.invoke` (up to 900). The result then
+carries `answers` keyed by field name and the state of every checklist:
+
+```json
+{"presented": true, "submitted": true, "form_id": "pick",
+ "answers": {"option": "Beach", "notes": "leave early"},
+ "checklists": {"Pack": [{"label": "Passport", "done": true}]}}
+```
+
+Limits: 12 components, one form of up to 12 fields, checklists of up to 30
+items, charts of up to 6 series and 60 points. The gateway refuses anything
+else with a message naming the vocabulary, so agents learn it from the error.

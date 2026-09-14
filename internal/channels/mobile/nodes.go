@@ -165,6 +165,11 @@ func (s *Store) EnqueueNodeCommand(ctx context.Context, workspace, user string, 
 	if len(command.Params) > 65536 || json.Unmarshal(command.Params, &params) != nil || params == nil {
 		return NodeCommand{}, fmt.Errorf("%w: params must be an object up to 64 KiB", ErrNodeInvalid)
 	}
+	if command.Command == "canvas.present" {
+		if err := ValidateCanvasParams(params); err != nil {
+			return NodeCommand{}, fmt.Errorf("%w: %v", ErrNodeInvalid, err)
+		}
+	}
 	command.Params, _ = json.Marshal(params)
 	command.CreatedAt = time.Now().UTC()
 	if command.ExpiresAt.IsZero() {
@@ -305,4 +310,84 @@ func (s *Store) FinishNodeCommand(ctx context.Context, workspace, user, device, 
 		return NodeCommand{}, ErrNodeConflict
 	}
 	return command, nil
+}
+
+// CanvasComponentTypes are the typed building blocks a canvas.present may
+// carry in "components". The phone renders them natively; anything else is
+// refused here so an agent learns the vocabulary from the error.
+var CanvasComponentTypes = []string{"text", "checklist", "form", "chart", "metric"}
+
+// CanvasFieldKinds are the input kinds a form field may use.
+var CanvasFieldKinds = []string{"text", "number", "choice", "toggle", "date"}
+
+// ValidateCanvasParams checks the typed-component shape of a canvas.present
+// request. Legacy title/body/items documents pass unchanged. Limits keep a
+// card readable on a phone and bound the result an agent can ask for.
+func ValidateCanvasParams(params map[string]any) error {
+	raw, ok := params["components"]
+	if !ok || raw == nil {
+		return nil
+	}
+	components, ok := raw.([]any)
+	if !ok {
+		return errors.New("components must be an array")
+	}
+	if len(components) > 12 {
+		return errors.New("a canvas may carry at most 12 components")
+	}
+	forms := 0
+	for i, c := range components {
+		obj, ok := c.(map[string]any)
+		if !ok {
+			return fmt.Errorf("component %d must be an object", i)
+		}
+		kind, _ := obj["type"].(string)
+		if !slices.Contains(CanvasComponentTypes, kind) {
+			return fmt.Errorf("component %d has unknown type %q (use one of %s)", i, kind, strings.Join(CanvasComponentTypes, ", "))
+		}
+		switch kind {
+		case "form":
+			forms++
+			if forms > 1 {
+				return errors.New("a canvas may carry only one form")
+			}
+			fields, _ := obj["fields"].([]any)
+			if len(fields) == 0 || len(fields) > 12 {
+				return errors.New("a form needs between 1 and 12 fields")
+			}
+			for j, f := range fields {
+				field, ok := f.(map[string]any)
+				if !ok {
+					return fmt.Errorf("form field %d must be an object", j)
+				}
+				name, _ := field["name"].(string)
+				if strings.TrimSpace(name) == "" {
+					return fmt.Errorf("form field %d needs a name", j)
+				}
+				if k, _ := field["kind"].(string); k != "" && !slices.Contains(CanvasFieldKinds, k) {
+					return fmt.Errorf("form field %q has unknown kind %q", name, k)
+				}
+				if opts, _ := field["options"].([]any); len(opts) > 20 {
+					return fmt.Errorf("form field %q may offer at most 20 options", name)
+				}
+			}
+		case "checklist":
+			items, _ := obj["items"].([]any)
+			if len(items) == 0 || len(items) > 30 {
+				return errors.New("a checklist needs between 1 and 30 items")
+			}
+		case "chart":
+			series, _ := obj["series"].([]any)
+			if len(series) == 0 || len(series) > 6 {
+				return errors.New("a chart needs between 1 and 6 series")
+			}
+			for _, sr := range series {
+				m, _ := sr.(map[string]any)
+				if values, _ := m["values"].([]any); len(values) == 0 || len(values) > 60 {
+					return errors.New("each chart series needs between 1 and 60 values")
+				}
+			}
+		}
+	}
+	return nil
 }
