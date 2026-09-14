@@ -1408,6 +1408,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Managing what is remembered">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#on-your-iphone-including-offline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        On your iPhone, including offline
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -4789,6 +4806,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Managing what is remembered">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#on-your-iphone-including-offline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        On your iPhone, including offline
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -4986,6 +5020,17 @@ external provider) and when. The history survives deletion of the fact.</p>
   one agent or across all agents.</li>
 </ul>
 <p>The same operations are available on the API under <code>/api/v1/memory/facts</code>.</p>
+<h3 id="on-your-iphone-including-offline">On your iPhone, including offline<a class="headerlink" href="#on-your-iphone-including-offline" title="Permanent link">&para;</a></h3>
+<p>The iOS app keeps a copy of your own facts on the phone and refreshes it
+through an incremental feed, <code>GET /api/v1/memory/facts/sync?since=&lt;cursor&gt;</code>,
+which returns the facts changed since the cursor as upserts and tombstones
+with a <code>next_cursor</code> to continue from. With no connection, <strong>What it
+remembers</strong> still searches the local copy, ranking with on-device sentence
+embeddings, and a fact you add or ask Siri to remember is queued and sent
+when the gateway is reachable again. The feed is owner-scoped like every
+other memory route. If the gateway's memory was purged, the feed answers
+<code>reset: true</code> and the phone starts over. External providers without a change
+log answer 501 and the phone falls back to a full refresh.</p>
 <h2 id="turning-it-off-for-one-agent">Turning it off for one agent<a class="headerlink" href="#turning-it-off-for-one-agent" title="Permanent link">&para;</a></h2>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># SOUL.yaml</span>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nt">memory</span><span class="p">:</span>
