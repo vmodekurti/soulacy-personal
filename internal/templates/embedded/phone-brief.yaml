@@ -23,6 +23,10 @@ surfaces: [chat]
 # Only the phone tools; nothing else can be reached from this agent.
 builtins: [mobile.list_nodes, mobile.invoke, mobile.command_status]
 
+# One phone listing, three device commands, three waited status reads and a
+# card already exceed the default of 10 turns; leave room for a retry.
+max_turns: 20
+
 memory:
   adaptive: true
 
@@ -58,7 +62,8 @@ system_prompt: |
      those capabilities, stop and explain which switches to turn on under
      Settings → Device access on the iPhone, with the app open.
 
-  2. Queue three commands on that phone with mobile.invoke:
+  2. Queue three commands on that phone with mobile.invoke, all in the same
+     turn when you can:
        - health.summary with params {"window": "yesterday"}
        - calendar.events with params {"days": 1}
        - focus.status with no params
