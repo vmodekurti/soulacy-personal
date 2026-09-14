@@ -74,13 +74,44 @@ func (e *Engine) buildMobileBuiltins() []BuiltinTool {
 			v, err := s.EnqueueNodeCommand(ctx, "personal", owner, cmd)
 			return encode(v, err)
 		}},
-		{Name: "mobile.command_status", Description: "Read the canonical status and result of a requested phone action. Running after a lost connection may be uncertain; never repeat an action just because its result has not arrived.", Gate: "mobile", Parameters: map[string]any{"type": "object", "properties": map[string]any{"device_id": map[string]any{"type": "string"}, "command_id": map[string]any{"type": "string"}}, "required": []string{"device_id", "command_id"}}, Handler: func(ctx context.Context, args map[string]any) (string, error) {
+		{Name: "mobile.command_status", Description: "Read the canonical status and result of a requested phone action. Pass wait_seconds (up to 25) to wait for the phone to finish before answering; the phone claims commands on a short poll, so an immediate read usually still says queued. Running after a lost connection may be uncertain; never repeat an action just because its result has not arrived.", Gate: "mobile", Parameters: map[string]any{"type": "object", "properties": map[string]any{"device_id": map[string]any{"type": "string"}, "command_id": map[string]any{"type": "string"}, "wait_seconds": map[string]any{"type": "integer", "minimum": 0, "maximum": 25}}, "required": []string{"device_id", "command_id"}}, Handler: func(ctx context.Context, args map[string]any) (string, error) {
 			s, owner, err := base(ctx)
 			if err != nil {
 				return "", err
 			}
-			v, err := s.NodeCommand(ctx, "personal", owner, argString(args, "device_id"), argString(args, "command_id"))
+			wait := time.Duration(0)
+			if secs, ok := args["wait_seconds"].(float64); ok && secs > 0 {
+				wait = time.Duration(min(secs, 25)) * time.Second
+			}
+			v, err := waitForNodeCommand(ctx, s, owner, argString(args, "device_id"), argString(args, "command_id"), wait)
 			return encode(v, err)
 		}},
+	}
+}
+
+// waitForNodeCommand reads a phone command and, when wait is positive, keeps
+// re-reading until it reaches a terminal state or the wait elapses. The
+// phone claims and answers commands on a poll of a few seconds; without
+// this an agent's immediate read almost always says "queued" and it gives
+// up on a result that arrives moments later.
+func waitForNodeCommand(ctx context.Context, s *mobile.Store, owner, deviceID, commandID string, wait time.Duration) (mobile.NodeCommand, error) {
+	deadline := time.Now().Add(wait)
+	for {
+		cmd, err := s.NodeCommand(ctx, "personal", owner, deviceID, commandID)
+		if err != nil {
+			return cmd, err
+		}
+		switch cmd.Status {
+		case "completed", "failed", "declined", "expired":
+			return cmd, nil
+		}
+		if wait <= 0 || time.Now().After(deadline) {
+			return cmd, nil
+		}
+		select {
+		case <-ctx.Done():
+			return cmd, ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
 	}
 }

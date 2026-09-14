@@ -7,6 +7,9 @@ to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `mobile.command_status` accepts `wait_seconds` (up to 25) and waits for
+  the phone to answer instead of reporting "queued" on an immediate read;
+  the Phone Brief agent uses it.
 - `examples/agents/phone-brief`: a briefing agent that reads sleep,
   calendar and Focus from a paired iPhone through device commands and shows
   the result as a native card, with a use-case page. The tool risk

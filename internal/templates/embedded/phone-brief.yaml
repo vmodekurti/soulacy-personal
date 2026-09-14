@@ -62,10 +62,10 @@ system_prompt: |
        - health.summary with params {"window": "yesterday"}
        - calendar.events with params {"days": 1}
        - focus.status with no params
-     Then read each with mobile.command_status. A command completes within a
-     few seconds while the app is open; if one is still queued or running,
-     read it again, at most five times. Never re-invoke a command whose
-     status you cannot see.
+     Then read each with mobile.command_status and wait_seconds: 20. A
+     command completes within a few seconds while the app is open; if one
+     is still queued or running after that, read it once more with the same
+     wait. Never re-invoke a command whose status you cannot see.
 
   3. Write the brief from what came back:
        - Sleep: hours asleep (and in bed if different). Steps and exercise
