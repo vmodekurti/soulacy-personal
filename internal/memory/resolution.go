@@ -4,14 +4,16 @@
 // For each candidate the engine finds the most similar active facts by
 // embedding cosine similarity. Above the similarity threshold a decision is
 // needed: does the candidate SUPERSEDE the old fact (same subject, new value),
-// COMPLEMENT it (related but compatible detail), or is it a NO-OP duplicate?
-// A cheap arbitration prompt decides; if the model is unavailable, a
-// conservative rule decides instead so the pipeline never stalls.
+// RETRACT it (the user says it is no longer true), COMPLEMENT it (related but
+// compatible detail), or is it a NO-OP duplicate? A cheap arbitration prompt
+// decides; if the model is unavailable, a conservative rule decides instead
+// so the pipeline never stalls.
 package memory
 
 import (
 	"context"
 	"encoding/json"
+	"regexp"
 	"strings"
 )
 
@@ -20,6 +22,7 @@ type Decision string
 
 const (
 	DecisionSupersede  Decision = "supersede"
+	DecisionRetract    Decision = "retract"
 	DecisionComplement Decision = "complement"
 	DecisionNoop       Decision = "noop"
 )
@@ -36,7 +39,11 @@ type Resolution struct {
 // are considered to be about the same thing.
 const DefaultSimilarityThreshold = 0.85
 
-const arbitrationSystemPrompt = `Two short facts about the same user. Decide how the NEW fact relates to the OLD one. Reply JSON only: {"decision":"supersede|complement|noop"}. supersede = same subject, the new value replaces the old (moved, changed preference, corrected). complement = compatible extra detail. noop = same information restated.`
+const arbitrationSystemPrompt = `Two short facts about the same user. Decide how the NEW fact relates to the OLD one. Reply JSON only: {"decision":"supersede|retract|complement|noop"}. supersede = same subject, the new value replaces the old (moved, changed preference, corrected). retract = the new statement says the old fact is no longer true or never was, without giving a replacement. complement = compatible extra detail. noop = same information restated.`
+
+// negation spots candidates that state something stopped being true, so the
+// rule fallback can retract without a model.
+var negation = regexp.MustCompile(`(?i)\b(no longer|not anymore|anymore|stopped|quit|never|doesn't|does not|don't|do not|isn't|is not|used to)\b`)
 
 // ResolveCandidate compares candidate against active facts and returns what
 // should happen. similar must already be filtered to the caller's scope.
@@ -80,6 +87,8 @@ func parseDecision(raw string) (Decision, bool) {
 	switch Decision(strings.ToLower(strings.Trim(raw, `" .`))) {
 	case DecisionSupersede:
 		return DecisionSupersede, true
+	case DecisionRetract:
+		return DecisionRetract, true
 	case DecisionComplement:
 		return DecisionComplement, true
 	case DecisionNoop:
@@ -88,11 +97,14 @@ func parseDecision(raw string) (Decision, bool) {
 	return "", false
 }
 
-// ruleDecision is the model-free fallback. Very high similarity with the same
-// category is a restatement; high similarity with the same category but
-// different wording is treated as an update; a different category is extra
-// detail.
+// ruleDecision is the model-free fallback. A negating candidate retracts;
+// very high similarity with the same category is a restatement; high
+// similarity with the same category but different wording is an update; a
+// different category is extra detail.
 func ruleDecision(score float64, candidate, existing Fact) Decision {
+	if negation.MatchString(candidate.Content) && !negation.MatchString(existing.Content) {
+		return DecisionRetract
+	}
 	if candidate.Category != existing.Category {
 		return DecisionComplement
 	}

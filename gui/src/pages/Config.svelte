@@ -81,6 +81,7 @@
   let adaptiveEnabled = true, adaptiveProvider = 'local', adaptiveModelProvider = '', adaptiveModel = ''
   let adaptiveMaxFacts = 5, adaptiveTokenBudget = 50, adaptiveMinConfidence = 0.5, adaptiveSimilarity = 0.85
   let mem0BaseURL = '', mem0ApiKey = '', mem0Graph = false, mem0Style = '', mem0Configured = false
+  let adaptiveInstructions = '', adaptiveCustomCategories = '', adaptiveGraph = true
   let monthlyBudgetUSD = ''
   let costAlertThreshold = 0.8
   let costRows = []
@@ -325,6 +326,9 @@
         mem0Graph = !!ad.mem0?.enable_graph
         mem0Style = ad.mem0?.api_style || ''
         mem0Configured = !!ad.mem0?.configured
+        adaptiveInstructions = ad.instructions || ''
+        adaptiveCustomCategories = (ad.custom_categories || []).join(', ')
+        adaptiveGraph = ad.graph_enabled ?? true
       }
       monthlyBudgetUSD = config.costs?.monthly_budget_usd || ''
       costAlertThreshold = config.costs?.alert_threshold || 0.8
@@ -442,6 +446,9 @@
             prompt_token_budget: Number(adaptiveTokenBudget || 50),
             min_confidence: Number(adaptiveMinConfidence || 0.5),
             similarity_threshold: Number(adaptiveSimilarity || 0.85),
+            instructions: adaptiveInstructions.trim().slice(0, 240),
+            custom_categories: adaptiveCustomCategories.split(',').map(s => s.trim().toLowerCase()).filter(Boolean),
+            graph_enabled: !!adaptiveGraph,
             mem0: {
               base_url: mem0BaseURL,
               api_key: mem0ApiKey,
@@ -743,11 +750,29 @@
             ones, and adds the few most relevant to every prompt. Changes here apply to the next
             turn without a restart. Users manage what is remembered on the Learning page.
           </p>
-          <div class="field">
-            <label class="checkbox-row">
-              <input type="checkbox" bind:checked={adaptiveEnabled} disabled={!writable} />
-              Enable adaptive memory
-            </label>
+          <div class="field-row">
+            <div class="field">
+              <label class="checkbox-row">
+                <input type="checkbox" bind:checked={adaptiveEnabled} disabled={!writable} />
+                Enable adaptive memory
+              </label>
+            </div>
+            <div class="field">
+              <label class="checkbox-row" data-tooltip="Also extract relationships between entities (User → works at → Acme) and recall the relevant ones alongside facts.">
+                <input type="checkbox" bind:checked={adaptiveGraph} disabled={!writable || !adaptiveEnabled} />
+                Remember relationships (graph memory)
+              </label>
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="adaptive-instructions" data-tooltip="Short guidance appended to the extraction prompt, for example what else to capture or what to ignore. Max 240 characters.">Extraction instructions</label>
+              <input id="adaptive-instructions" bind:value={adaptiveInstructions} maxlength="240" placeholder="e.g. Also capture the user's job title and team. Ignore weather small talk." disabled={!writable || !adaptiveEnabled} />
+            </div>
+            <div class="field">
+              <label for="adaptive-categories" data-tooltip="Extra categories beyond preference, identity, constraint, entity. Lowercase slugs, comma-separated.">Custom categories</label>
+              <input id="adaptive-categories" bind:value={adaptiveCustomCategories} placeholder="e.g. role, project, health" disabled={!writable || !adaptiveEnabled} />
+            </div>
           </div>
           <div class="field-row">
             <div class="field">

@@ -28,6 +28,7 @@ func (a *App) buildAdaptiveMemory(ws config.Paths, engine *runtime.Engine, stack
 		Model:             strings.TrimSpace(ac.Model),
 		MaxPromptFacts:    ac.MaxPromptFacts,
 		PromptTokenBudget: ac.PromptTokenBudget,
+		GraphEnabled:      ac.GraphOn(),
 	}
 	if !ac.Enabled {
 		engine.SetAdaptiveMemory(nil, opts)
@@ -42,7 +43,8 @@ func (a *App) buildAdaptiveMemory(ws config.Paths, engine *runtime.Engine, stack
 			provider = "local"
 		} else {
 			m, err := memory.NewMem0Adaptive(memory.Mem0Config{
-				BaseURL: ac.Mem0.BaseURL, APIKey: ac.Mem0.APIKey, EnableGraph: ac.Mem0.EnableGraph, APIStyle: ac.Mem0.APIStyle,
+				BaseURL: ac.Mem0.BaseURL, APIKey: ac.Mem0.APIKey, EnableGraph: ac.Mem0.EnableGraph || ac.GraphOn(), APIStyle: ac.Mem0.APIStyle,
+				Instructions: ac.Instructions, CustomCategories: ac.CustomCategories,
 			})
 			if err != nil {
 				log.Warn("adaptive memory: mem0 provider invalid; using the local engine", zap.Error(err))
@@ -80,6 +82,9 @@ func (a *App) buildAdaptiveMemory(ws config.Paths, engine *runtime.Engine, stack
 		MinConfidence:       float32(ac.MinConfidence),
 		SimilarityThreshold: ac.SimilarityThreshold,
 		MaxRecall:           ac.MaxPromptFacts,
+		Instructions:        ac.Instructions,
+		CustomCategories:    ac.CustomCategories,
+		GraphDisabled:       !ac.GraphOn(),
 	})
 	engine.SetAdaptiveMemory(local, opts)
 	log.Info("adaptive memory enabled (local)",

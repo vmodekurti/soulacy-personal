@@ -389,10 +389,16 @@ export const api = {
         const qs = p.toString()
         return apiFetch(`/memory/facts${qs ? '?' + qs : ''}`)
       },
-      add: (agentId, content, category) =>
-        apiFetch('/memory/facts', { method: 'POST', body: JSON.stringify({ agent_id: agentId, content, category }) }),
-      update: (id, agentId, content, category) =>
-        apiFetch(`/memory/facts/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ agent_id: agentId, content, category }) }),
+      add: (agentId, content, category, expiresAt = '') =>
+        apiFetch('/memory/facts', { method: 'POST', body: JSON.stringify({ agent_id: agentId, content, category, expires_at: expiresAt }) }),
+      update: (id, agentId, content, category, expiresAt = '') =>
+        apiFetch(`/memory/facts/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ agent_id: agentId, content, category, expires_at: expiresAt }) }),
+      history: (id, agentId = '') =>
+        apiFetch(`/memory/facts/${encodeURIComponent(id)}/history${agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ''}`),
+      relations: (agentId = '', status = 'active') =>
+        apiFetch(`/memory/facts/relations?status=${encodeURIComponent(status)}${agentId ? `&agent_id=${encodeURIComponent(agentId)}` : ''}`),
+      removeRelation: (id, agentId = '') =>
+        apiFetch(`/memory/facts/relations/${encodeURIComponent(id)}${agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ''}`, { method: 'DELETE' }),
       remove: (id, agentId = '') =>
         apiFetch(`/memory/facts/${encodeURIComponent(id)}${agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ''}`, { method: 'DELETE' }),
       purge: (agentId = '') =>

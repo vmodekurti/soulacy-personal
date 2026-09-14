@@ -21,17 +21,35 @@ cost, and is private to each signed-in user.
    nothing.
 4. **Each fact is reconciled** against your existing facts. If you previously
    said you lived in San Francisco, that fact is marked superseded and the New
-   York fact becomes active. Compatible details are added alongside; exact
-   restatements are dropped.
+   York fact becomes active. If you say something is *no longer true* ("I don't
+   have a dog anymore"), the old fact is **retracted** rather than replaced.
+   Compatible details are added alongside; exact restatements are dropped.
+   Relationships between entities ("User → works at → Acme") are stored as a
+   small graph; a new object for the same subject and relationship supersedes
+   the old one.
 5. **On your next message**, the agent's system prompt gains a short block:
 
    ```
    ### 🧠 MEMORY & PREFERENCES
    - User lives in New York
    - User prefers short answers
+   - User works at Acme
    ```
 
+   Facts come first, then the most relevant relationships if budget remains.
    The block is capped at about 50 tokens, so memory never crowds out the task.
+
+## Facts that come and go
+
+- **This-conversation-only facts.** "For this chat, answer in French" is
+  extracted as a *temporary* fact. It is recalled only inside the session it
+  came from and never leaks into other conversations. The Learning page marks
+  these "this conversation".
+- **Expiring facts.** Any fact can carry an expiry date, for example "User is
+  travelling until Friday". Expired facts stop being recalled but stay listed
+  until you delete them. Set an expiry when adding or editing a fact.
+- **Retracted facts.** When you say something stopped being true, the old
+  fact is retracted, kept for audit, and never recalled again.
 
 ## Where facts live and who can see them
 
@@ -45,16 +63,20 @@ on shared external channels, dry runs, and simulations are excluded, so a fact
 is always attributable to one person.
 
 Superseded facts are kept, marked `superseded` with a pointer to the fact that
-replaced them. That is the audit trail: you can see what the agent used to
-believe and when it changed.
+replaced them; retracted facts are kept, marked `retracted`. Every fact also
+has a **change history**: created, edited (with the previous wording),
+superseded, retracted, or deleted, with who did it (you, the extractor, or an
+external provider) and when. The history survives deletion of the fact.
 
 ## Managing what is remembered
 
 Open **Learning → 🧠 What it remembers**. You can:
 
 - **Search** with plain words; results are ranked by relevance.
-- **Filter** active facts, superseded facts, or both.
-- **Edit** a fact inline, or change its category.
+- **Filter** active, superseded, or retracted facts, or all of them.
+- **Edit** a fact inline, change its category, or set an expiry date.
+- **🕘 History** to see every change a fact went through.
+- **Relationships** view to inspect and delete the entity graph.
 - **➕ Add Fact** by hand, for anything you want the agent to know now.
 - **🗑️ Delete** any fact; agents stop seeing it on the next turn.
 - **📥 Export Memory (JSON)** for a copy of everything, including superseded
@@ -88,10 +110,19 @@ memory:
     similarity_threshold: 0.85
     max_prompt_facts: 5
     prompt_token_budget: 50
+    graph_enabled: true      # remember relationships between entities
+    instructions: ""         # extra guidance for extraction (max 240 chars)
+    custom_categories: []    # e.g. [role, project, health]
 ```
 
 All of these can be changed from **Config → Adaptive memory** and apply to the
-next turn without a restart. Environment variables use the usual prefix, for
+next turn without a restart.
+
+**Shaping what gets remembered.** `instructions` is appended to the extraction
+prompt, for example "Also capture the user's job title and team. Ignore
+weather small talk." `custom_categories` adds categories beyond the built-in
+four; extracted or hand-added facts may then use them. Both are forwarded to an
+external provider when one is configured. Environment variables use the usual prefix, for
 example `SOULACY_MEMORY_ADAPTIVE_ENABLED=false`.
 
 **Extraction cost.** Each extraction prompt is under 200 input tokens, and
@@ -120,7 +151,11 @@ memory:
 
 The switch takes effect immediately when saved from **Config → Adaptive
 memory**. The same GUI, API, and per-agent controls apply; the provider does
-its own extraction and reconciliation. If the provider is not configured or
+its own extraction and reconciliation, and its graph memory, change history,
+expiry dates, and custom instructions and categories map onto the same
+features here. Two things stay local-only: the superseded/retracted audit
+states (an external provider rewrites or deletes in place, so only its history
+log shows what changed) and this-conversation-only facts. If the provider is not configured or
 its settings are invalid, Soulacy logs a warning and keeps using the built-in
 engine, so memory never silently disappears.
 

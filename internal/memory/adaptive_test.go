@@ -69,7 +69,7 @@ var scope = FactScope{Owner: "ada", AgentID: "helper"}
 
 func TestExtractionPromptStaysUnder200Tokens(t *testing.T) {
 	long := strings.Repeat("I prefer concise answers and I live in Denver with my dog Rex. ", 20)
-	system, user := ExtractionPrompt(Turn{User: long, Assistant: strings.Repeat("Sure, noted. ", 40)})
+	system, user := ExtractionPrompt(Turn{User: long, Assistant: strings.Repeat("Sure, noted. ", 40)}, ExtractOptions{})
 	if got := EstimateTokens(system + "\n" + user); got >= 200 {
 		t.Fatalf("extraction prompt estimated at %d tokens, want < 200", got)
 	}
@@ -193,7 +193,7 @@ func TestRecallIsScopedToOwnerWorkspaceAndAgent(t *testing.T) {
 	otherWorkspace := FactScope{Workspace: "acme", Owner: "ada", AgentID: "helper"}
 	otherAgent := FactScope{Owner: "ada", AgentID: "planner"}
 	for _, sc := range []FactScope{mine, otherOwner, otherWorkspace, otherAgent} {
-		if _, err := eng.Add(ctx, sc, FactIdentity, "User lives in Denver near the mountains"); err != nil {
+		if _, err := eng.Add(ctx, sc, FactInput{Category: FactIdentity, Content: "User lives in Denver near the mountains"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -245,30 +245,30 @@ func TestManualAddUpdateDeletePurge(t *testing.T) {
 	store := newFactStore(t)
 	eng := NewLocalAdaptive(store, nil, nil, LocalOptions{})
 	ctx := context.Background()
-	f, err := eng.Add(ctx, scope, FactConstraint, "  Never email the user   before 9am ")
+	f, err := eng.Add(ctx, scope, FactInput{Category: FactConstraint, Content: "  Never email the user   before 9am "})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if f.Content != "Never email the user before 9am" || f.Source != "manual" {
 		t.Fatalf("normalisation failed: %+v", f)
 	}
-	if _, err := eng.Add(ctx, scope, "bogus", "x"); err == nil {
+	if _, err := eng.Add(ctx, scope, FactInput{Category: "bogus", Content: "x"}); err == nil {
 		t.Fatal("invalid category must be rejected")
 	}
-	if _, err := eng.Add(ctx, FactScope{AgentID: "helper"}, FactIdentity, "no owner"); err == nil {
+	if _, err := eng.Add(ctx, FactScope{AgentID: "helper"}, FactInput{Category: FactIdentity, Content: "no owner"}); err == nil {
 		t.Fatal("missing owner must be rejected")
 	}
-	u, err := eng.Update(ctx, scope, f.ID, "Never email the user before 10am", FactConstraint)
+	u, err := eng.Update(ctx, scope, f.ID, FactInput{Category: FactConstraint, Content: "Never email the user before 10am"})
 	if err != nil || u.Content != "Never email the user before 10am" {
 		t.Fatalf("update failed: %v %+v", err, u)
 	}
-	if _, err := eng.Update(ctx, FactScope{Owner: "bob", AgentID: "helper"}, f.ID, "hijack", FactConstraint); err == nil {
+	if _, err := eng.Update(ctx, FactScope{Owner: "bob", AgentID: "helper"}, f.ID, FactInput{Category: FactConstraint, Content: "hijack"}); err == nil {
 		t.Fatal("another owner must not be able to edit the fact")
 	}
 	if err := eng.Delete(ctx, FactScope{Owner: "bob", AgentID: "helper"}, f.ID); err == nil {
 		t.Fatal("another owner must not be able to delete the fact")
 	}
-	if _, err := eng.Add(ctx, scope, FactPreference, "Likes tea"); err != nil {
+	if _, err := eng.Add(ctx, scope, FactInput{Category: FactPreference, Content: "Likes tea"}); err != nil {
 		t.Fatal(err)
 	}
 	n, err := eng.Purge(ctx, scope)

@@ -1,5 +1,5 @@
-// retrieval.go — Story E29: pick the facts that matter for this turn and
-// render them as a tiny system-prompt block.
+// retrieval.go — Story E29: pick the facts and relations that matter for
+// this turn and render them as a tiny system-prompt block.
 //
 // Retrieval is hybrid: embedding similarity finds facts that are about the
 // same thing as the query even when the words differ, and keyword overlap
@@ -55,6 +55,49 @@ func RankFacts(facts []Fact, queryVec []float32, queryTokens []string, limit int
 	return out
 }
 
+// RankRelations orders active relations by keyword overlap with the query
+// (subject, predicate and object all count), then recency, and returns the
+// top limit. With an empty query the newest relations win.
+func RankRelations(rels []Relation, queryTokens []string, limit int) []Relation {
+	if limit <= 0 {
+		limit = 3
+	}
+	type scored struct {
+		r     Relation
+		score float64
+	}
+	items := make([]scored, 0, len(rels))
+	for i, r := range rels {
+		if r.Status != FactStatusActive {
+			continue
+		}
+		s := KeywordOverlap(queryTokens, r.Sentence())
+		if len(rels) > 1 {
+			s += recencyBonus * (1 - float64(i)/float64(len(rels)-1))
+		}
+		items = append(items, scored{r, s})
+	}
+	// insertion sort keeps this dependency-free and the lists are tiny
+	for i := 1; i < len(items); i++ {
+		for j := i; j > 0 && items[j].score > items[j-1].score; j-- {
+			items[j], items[j-1] = items[j-1], items[j]
+		}
+	}
+	out := make([]Relation, 0, limit)
+	for _, it := range items {
+		if len(queryTokens) > 0 && it.score < weightKeyword*0.34 && len(out) > 0 {
+			// With a query, only surface relations that actually match
+			// beyond the first fallback item.
+			continue
+		}
+		out = append(out, it.r)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
 func clamp01(x float64) float64 {
 	if x < 0 {
 		return 0
@@ -73,24 +116,29 @@ const PromptBlockHeader = "### 🧠 MEMORY & PREFERENCES"
 // the task. Fifty tokens is roughly five short bullets.
 const DefaultPromptTokenBudget = 50
 
-// FormatPromptBlock renders facts as concise bullets under the memory
-// heading, stopping before the token budget is exceeded. It returns "" when
-// no fact fits so callers can skip the block entirely.
-func FormatPromptBlock(facts []ScoredFact, tokenBudget int) string {
+// FormatPromptBlock renders facts (and then relations, if budget remains) as
+// concise bullets under the memory heading, stopping before the token budget
+// is exceeded. It returns "" when nothing fits so callers can skip the block.
+func FormatPromptBlock(facts []ScoredFact, tokenBudget int, relations ...Relation) string {
 	if tokenBudget <= 0 {
 		tokenBudget = DefaultPromptTokenBudget
 	}
 	var sb strings.Builder
 	used := 0
+	lines := make([]string, 0, len(facts)+len(relations))
 	for _, f := range facts {
-		line := "- " + f.Content
+		lines = append(lines, "- "+f.Content)
+	}
+	for _, r := range relations {
+		lines = append(lines, "- "+r.Sentence())
+	}
+	for i, line := range lines {
 		cost := EstimateTokens(line)
 		if used+cost > tokenBudget {
-			if used == 0 {
+			if i == 0 {
 				// Even a single fact is over budget: clip it rather than
 				// drop all memory.
-				line = clipToTokens(line, tokenBudget)
-				sb.WriteString(line)
+				sb.WriteString(clipToTokens(line, tokenBudget))
 				sb.WriteString("\n")
 			}
 			break

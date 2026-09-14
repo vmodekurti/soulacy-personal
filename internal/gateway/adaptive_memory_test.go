@@ -178,3 +178,50 @@ func TestConfigPatchHotAppliesAdaptiveMemory(t *testing.T) {
 		t.Fatalf("config view must mask the key and report configured: %+v", view)
 	}
 }
+
+func TestAdaptiveMemoryHistoryRelationsAndExpiry(t *testing.T) {
+	s, local := adaptiveGateway(t)
+	ada := adaptiveApp(t, s, "operator", "ada")
+	api := fiber.New()
+	api.Use(func(c *fiber.Ctx) error {
+		auth.SetClaims(c, &auth.Claims{Role: "operator", RegisteredClaims: jwt.RegisteredClaims{Subject: "ada"}})
+		return c.Next()
+	})
+	api.Get("/api/v1/memory/facts/:id/history", s.handleAdaptiveMemoryHistory)
+	api.Get("/api/v1/memory/facts/relations", s.handleAdaptiveMemoryRelations)
+	api.Delete("/api/v1/memory/facts/relations/:id", s.handleAdaptiveMemoryDeleteRelation)
+
+	code, out := doJSON(t, ada, "POST", "/api/v1/memory/facts", `{"agent_id":"helper","category":"constraint","content":"Out of office this week","expires_at":"2030-01-02"}`)
+	if code != 201 || out["fact"].(map[string]any)["expires_at"] == nil {
+		t.Fatalf("add with expiry: %d %+v", code, out)
+	}
+	id := out["fact"].(map[string]any)["id"].(string)
+	if code, _ := doJSON(t, ada, "POST", "/api/v1/memory/facts", `{"agent_id":"helper","category":"constraint","content":"x","expires_at":"not-a-date"}`); code != 400 {
+		t.Fatalf("bad expiry should be 400, got %d", code)
+	}
+	doJSON(t, ada, "PATCH", "/api/v1/memory/facts/"+id, `{"agent_id":"helper","content":"Out of office until Friday"}`)
+	code, out = doJSON(t, api, "GET", "/api/v1/memory/facts/"+id+"/history?agent_id=helper", "")
+	if code != 200 || len(out["events"].([]any)) != 2 {
+		t.Fatalf("history: %d %+v", code, out)
+	}
+	if code, _ := doJSON(t, adaptiveApp(t, s, "operator", "bob"), "GET", "/api/v1/memory/facts?agent_id=helper&status=retracted", ""); code != 200 {
+		t.Fatalf("retracted status must be accepted, got %d", code)
+	}
+	rel, _, err := local.Store().UpsertRelation(t.Context(), memory.FactScope{Owner: "ada", AgentID: "helper"}, memory.Relation{Subject: "User", Predicate: "has dog", Object: "Rex"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, out = doJSON(t, api, "GET", "/api/v1/memory/facts/relations?agent_id=helper", "")
+	if code != 200 || len(out["relations"].([]any)) != 1 {
+		t.Fatalf("relations: %d %+v", code, out)
+	}
+	if code, _ := doJSON(t, adaptiveApp(t, s, "operator", "bob"), "GET", "/api/v1/memory/facts/status?agent_id=helper", ""); code != 200 {
+		t.Fatalf("status: %d", code)
+	}
+	if code, out := doJSON(t, ada, "GET", "/api/v1/memory/facts/export?agent_id=helper", ""); code != 200 || len(out["relations"].([]any)) != 1 || len(out["categories"].([]any)) != 4 {
+		t.Fatalf("export should include relations and categories: %d %+v", code, out)
+	}
+	if code, _ := doJSON(t, api, "DELETE", "/api/v1/memory/facts/relations/"+rel.ID+"?agent_id=helper", ""); code != 204 {
+		t.Fatalf("delete relation: %d", code)
+	}
+}

@@ -186,6 +186,9 @@ memory:
         similarity_threshold: 0.85 # above this, a new fact is checked against an old one
         max_prompt_facts: 5
         prompt_token_budget: 50
+        graph_enabled: true        # also remember relationships (User → works at → Acme)
+        instructions: ""           # extra extraction guidance, max 240 chars
+        custom_categories: []      # e.g. [role, project]
         # mem0:
         #     base_url: https://api.mem0.ai   # or a self-hosted server URL
         #     api_key: ""                     # SOULACY_MEMORY_ADAPTIVE_MEM0_API_KEY
