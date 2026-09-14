@@ -326,6 +326,11 @@ func (l *LocalAdaptive) Delete(ctx context.Context, scope FactScope, id string) 
 	return l.store.Delete(ctx, scope, id, "user")
 }
 
+// Changes serves the incremental sync feed (ChangeFeed).
+func (l *LocalAdaptive) Changes(ctx context.Context, scope FactScope, since int64, limit int) (FactChanges, error) {
+	return l.store.Changes(ctx, scope, since, limit)
+}
+
 func (l *LocalAdaptive) History(ctx context.Context, scope FactScope, id string) ([]FactEvent, error) {
 	return l.store.History(ctx, scope, id)
 }

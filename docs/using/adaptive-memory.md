@@ -88,6 +88,19 @@ Open **Learning → 🧠 What it remembers**. You can:
 
 The same operations are available on the API under `/api/v1/memory/facts`.
 
+### On your iPhone, including offline
+
+The iOS app keeps a copy of your own facts on the phone and refreshes it
+through an incremental feed, `GET /api/v1/memory/facts/sync?since=<cursor>`,
+which returns the facts changed since the cursor as upserts and tombstones
+with a `next_cursor` to continue from. With no connection, **What it
+remembers** still searches the local copy, ranking with on-device sentence
+embeddings, and a fact you add or ask Siri to remember is queued and sent
+when the gateway is reachable again. The feed is owner-scoped like every
+other memory route. If the gateway's memory was purged, the feed answers
+`reset: true` and the phone starts over. External providers without a change
+log answer 501 and the phone falls back to a full refresh.
+
 ## Turning it off for one agent
 
 ```yaml

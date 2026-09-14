@@ -12,6 +12,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"net/url"
@@ -750,4 +751,86 @@ func (s *FactSQLite) DeleteRelation(ctx context.Context, scope FactScope, id str
 		return ErrFactNotFound
 	}
 	return nil
+}
+
+// Changes returns the facts touched after cursor `since`, in event order,
+// each collapsed to its current state. A phone applies them as upserts and
+// tombstones and keeps NextCursor for the next call.
+func (s *FactSQLite) Changes(ctx context.Context, scope FactScope, since int64, limit int) (FactChanges, error) {
+	scope = scope.Normalize()
+	if scope.Owner == "" {
+		return FactChanges{}, ErrInvalidScope
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	if since < 0 {
+		since = 0
+	}
+	var maxID int64
+	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM adaptive_fact_history`).Scan(&maxID); err != nil {
+		return FactChanges{}, fmt.Errorf("adaptive memory: changes: %w", err)
+	}
+	if since > maxID {
+		// The device is ahead of the log: a purge removed history. Start over.
+		return FactChanges{Changes: []FactChange{}, NextCursor: 0, Reset: true}, nil
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id, fact_id, event FROM adaptive_fact_history
+		WHERE id>? AND workspace=? AND owner=?`+agentClause(scope)+` ORDER BY id ASC LIMIT ?`,
+		append(append([]any{since, scope.Workspace, scope.Owner}, agentArgs(scope)...), limit+1)...)
+	if err != nil {
+		return FactChanges{}, fmt.Errorf("adaptive memory: changes: %w", err)
+	}
+	type row struct {
+		id     int64
+		factID string
+		event  string
+	}
+	var events []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.id, &r.factID, &r.event); err != nil {
+			rows.Close()
+			return FactChanges{}, err
+		}
+		events = append(events, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return FactChanges{}, err
+	}
+	out := FactChanges{Changes: []FactChange{}, NextCursor: since}
+	if len(events) > limit {
+		events = events[:limit]
+		out.HasMore = true
+	}
+	// Collapse to one change per fact, keeping the position of its last event.
+	last := map[string]int{}
+	for _, e := range events {
+		if idx, seen := last[e.factID]; seen {
+			out.Changes[idx] = FactChange{}
+		}
+		last[e.factID] = len(out.Changes)
+		out.Changes = append(out.Changes, FactChange{Cursor: e.id, FactID: e.factID, Event: e.event})
+		out.NextCursor = e.id
+	}
+	compact := out.Changes[:0]
+	for _, c := range out.Changes {
+		if c.FactID == "" {
+			continue
+		}
+		f, err := s.Get(ctx, scope, c.FactID)
+		switch {
+		case errors.Is(err, ErrFactNotFound):
+			c.Deleted = true
+		case err != nil:
+			return FactChanges{}, err
+		default:
+			fact := f
+			c.Fact = &fact
+		}
+		compact = append(compact, c)
+	}
+	out.Changes = compact
+	return out, nil
 }
