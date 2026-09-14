@@ -4306,6 +4306,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#automatic-updates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Automatic updates
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#release-installation-standard-upgrade" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4809,6 +4820,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#automatic-updates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Automatic updates
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#release-installation-standard-upgrade" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5024,10 +5046,39 @@ source build may identify itself by a commit such as <code>8c2c66f</code>; the u
 cannot reliably determine whether that commit is newer or older than a semantic
 release and reports <strong>versions are not comparable</strong>. In that case, install the
 desired tagged release explicitly rather than overriding the comparison.</p>
+<h2 id="automatic-updates">Automatic updates<a class="headerlink" href="#automatic-updates" title="Permanent link">&para;</a></h2>
+<p>A release install keeps itself current. The gateway checks the signed release
+manifest on a schedule (every 6 hours by default) and, when a newer release
+exists, downloads the artifact for its platform, verifies the checksum and the
+Sigstore signature, replaces its own <code>soulacy</code> and <code>sy</code> binaries, runs the new
+binary to confirm it starts and reports the expected version, and restarts
+into it. Restarts wait until no agent run is in flight (up to <code>idle_wait</code>, two
+hours by default). If the new binary fails verification, the previous binaries
+are put back and the failure is reported.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">updates</span><span class="p">:</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">auto</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">            </span><span class="c1"># set false to be notified only</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">check_interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">6h</span><span class="w">    </span><span class="c1"># minimum 15m</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">idle_wait</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2h</span><span class="w">         </span><span class="c1"># 0s restarts immediately</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span><span class="nt">manifest_url</span><span class="p">:</span><span class="w"> </span><span class="s">""</span><span class="w">      </span><span class="c1"># blank = the official GitHub release manifest</span>
+</span></code></pre></div>
+<p>The same controls are on <strong>Config → Version</strong> (toggle, interval) and apply
+without a restart. <strong>Config</strong> and the <strong>Dashboard</strong> show what the checker will
+do: <code>install</code>, <code>notify</code>, or <code>off</code>, with the reason.</p>
+<p>The gateway only notifies, and never replaces binaries, when:</p>
+<ul>
+<li>it runs in a container (upgrade by pulling a newer image), or</li>
+<li>its install directory is not writable by the gateway user (use
+  <code>sudo sy update install --yes</code>, or fix permissions), or</li>
+<li>the running build is not a tagged release (a source build reports
+  "versions are not comparable").</li>
+</ul>
+<p>Every check, install, rollback and restart is logged and appears in Activity
+as a <code>system.update</code> event. <code>GET /api/v1/system/updates/status</code> reports the
+mode, last check, last applied version, and any pending restart.</p>
 <h2 id="release-installation-standard-upgrade">Release installation: standard upgrade<a class="headerlink" href="#release-installation-standard-upgrade" title="Permanent link">&para;</a></h2>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>sy<span class="w"> </span>update<span class="w"> </span>check
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>sy<span class="w"> </span>update<span class="w"> </span>install<span class="w"> </span>--dry-run
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>sudo<span class="w"> </span>sy<span class="w"> </span>update<span class="w"> </span>install<span class="w"> </span>--yes
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sy<span class="w"> </span>update<span class="w"> </span>check
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>sy<span class="w"> </span>update<span class="w"> </span>install<span class="w"> </span>--dry-run
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>sudo<span class="w"> </span>sy<span class="w"> </span>update<span class="w"> </span>install<span class="w"> </span>--yes
 </span></code></pre></div>
 <p>Use <code>sudo</code> only when the binaries are root-owned under <code>/usr/local/bin</code>. Restart
 the same service that normally runs the gateway:</p>
@@ -5035,29 +5086,29 @@ the same service that normally runs the gateway:</p>
 <p class="admonition-title">Root-owned binaries with config outside root's home</p>
 <p><code>sudo</code> may not load your user's or service's <code>config.yaml</code>. Pass the release
 manifest explicitly:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nv">MANIFEST</span><span class="o">=</span>https://github.com/vmodekurti/soulacy-personal/releases/latest/download/release-manifest.json
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>sudo<span class="w"> </span>sy<span class="w"> </span>update<span class="w"> </span>install<span class="w"> </span>--manifest<span class="w"> </span><span class="s2">"</span><span class="nv">$MANIFEST</span><span class="s2">"</span><span class="w"> </span>--dry-run
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>sudo<span class="w"> </span>sy<span class="w"> </span>update<span class="w"> </span>install<span class="w"> </span>--manifest<span class="w"> </span><span class="s2">"</span><span class="nv">$MANIFEST</span><span class="s2">"</span><span class="w"> </span>--yes
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nv">MANIFEST</span><span class="o">=</span>https://github.com/vmodekurti/soulacy-personal/releases/latest/download/release-manifest.json
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>sudo<span class="w"> </span>sy<span class="w"> </span>update<span class="w"> </span>install<span class="w"> </span>--manifest<span class="w"> </span><span class="s2">"</span><span class="nv">$MANIFEST</span><span class="s2">"</span><span class="w"> </span>--dry-run
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>sudo<span class="w"> </span>sy<span class="w"> </span>update<span class="w"> </span>install<span class="w"> </span>--manifest<span class="w"> </span><span class="s2">"</span><span class="nv">$MANIFEST</span><span class="s2">"</span><span class="w"> </span>--yes
 </span></code></pre></div>
 </div>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># system service on a VPS</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>restart<span class="w"> </span>soulacy
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1"># user service installed by sy daemon</span>
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>systemctl<span class="w"> </span>--user<span class="w"> </span>restart<span class="w"> </span>soulacy
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># system service on a VPS</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>restart<span class="w"> </span>soulacy
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># user service installed by sy daemon</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>systemctl<span class="w"> </span>--user<span class="w"> </span>restart<span class="w"> </span>soulacy
 </span></code></pre></div>
 <p>Verify the version and startup logs after restarting.</p>
 <h2 id="source-checkout-rebuild-upgrade">Source checkout: rebuild upgrade<a class="headerlink" href="#source-checkout-rebuild-upgrade" title="Permanent link">&para;</a></h2>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nb">cd</span><span class="w"> </span>~/path/to/soulacy
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>git<span class="w"> </span>pull
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># Rebuild GUI + binaries</span>
-</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="o">(</span><span class="nb">cd</span><span class="w"> </span>gui<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>install<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>run<span class="w"> </span>build<span class="o">)</span>
-</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>make<span class="w"> </span>all
-</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>
-</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="c1"># Restart the gateway (foreground example)</span>
-</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>lsof<span class="w"> </span>-ti<span class="w"> </span>:18789<span class="w"> </span><span class="p">|</span><span class="w"> </span>xargs<span class="w"> </span><span class="nb">kill</span><span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
-</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>./bin/soulacy
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nb">cd</span><span class="w"> </span>~/path/to/soulacy
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>git<span class="w"> </span>pull
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># Rebuild GUI + binaries</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="o">(</span><span class="nb">cd</span><span class="w"> </span>gui<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>install<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>run<span class="w"> </span>build<span class="o">)</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>make<span class="w"> </span>all
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="c1"># Restart the gateway (foreground example)</span>
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>lsof<span class="w"> </span>-ti<span class="w"> </span>:18789<span class="w"> </span><span class="p">|</span><span class="w"> </span>xargs<span class="w"> </span><span class="nb">kill</span><span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>./bin/soulacy
 </span></code></pre></div>
 <p>On macOS checkouts, <code>build-and-restart.command</code> wraps the rebuild +
 restart steps. Under launchd/systemd, replace the last two steps with
@@ -5072,24 +5123,24 @@ not require a local Go toolchain.</p>
 runs as the dedicated <code>soulacy</code> user with home <code>/var/lib/soulacy</code>. Those two
 processes do not automatically read the same <code>config.yaml</code>.</p>
 <p>Inspect the service identity and environment:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>show<span class="w"> </span>soulacy<span class="w"> </span>-p<span class="w"> </span>User<span class="w"> </span>-p<span class="w"> </span>Group<span class="w"> </span>-p<span class="w"> </span>ExecStart<span class="w"> </span>--no-pager
-</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>show<span class="w"> </span>soulacy<span class="w"> </span>-p<span class="w"> </span>Environment<span class="w"> </span>--value<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="p">|</span><span class="w"> </span>tr<span class="w"> </span><span class="s1">' '</span><span class="w"> </span><span class="s1">'\n'</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-E<span class="w"> </span><span class="s1">'^(HOME|SOULACY_CONFIG_PATH|SOULACY_WORKSPACE)='</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>show<span class="w"> </span>soulacy<span class="w"> </span>-p<span class="w"> </span>User<span class="w"> </span>-p<span class="w"> </span>Group<span class="w"> </span>-p<span class="w"> </span>ExecStart<span class="w"> </span>--no-pager
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>show<span class="w"> </span>soulacy<span class="w"> </span>-p<span class="w"> </span>Environment<span class="w"> </span>--value<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span><span class="p">|</span><span class="w"> </span>tr<span class="w"> </span><span class="s1">' '</span><span class="w"> </span><span class="s1">'\n'</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">  </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-E<span class="w"> </span><span class="s1">'^(HOME|SOULACY_CONFIG_PATH|SOULACY_WORKSPACE)='</span>
 </span></code></pre></div>
 <p>For a system service, keep configuration in a service-readable location and
 make the path explicit in a systemd override:</p>
-<div class="language-ini highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">[Service]</span>
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="na">Environment</span><span class="o">=</span><span class="s">SOULACY_CONFIG_PATH=/etc/soulacy/config.yaml</span>
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="na">Environment</span><span class="o">=</span><span class="s">SOULACY_WORKSPACE=/var/lib/soulacy</span>
+<div class="language-ini highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">[Service]</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="na">Environment</span><span class="o">=</span><span class="s">SOULACY_CONFIG_PATH=/etc/soulacy/config.yaml</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="na">Environment</span><span class="o">=</span><span class="s">SOULACY_WORKSPACE=/var/lib/soulacy</span>
 </span></code></pre></div>
 <p>Then reload and verify:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>sudo<span class="w"> </span>install<span class="w"> </span>-d<span class="w"> </span>-o<span class="w"> </span>soulacy<span class="w"> </span>-g<span class="w"> </span>soulacy<span class="w"> </span>/etc/soulacy<span class="w"> </span>/var/lib/soulacy
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>sudo<span class="w"> </span>chown<span class="w"> </span>root:soulacy<span class="w"> </span>/etc/soulacy/config.yaml
-</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>sudo<span class="w"> </span>chmod<span class="w"> </span><span class="m">640</span><span class="w"> </span>/etc/soulacy/config.yaml
-</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>daemon-reload
-</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>restart<span class="w"> </span>soulacy
-</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>sudo<span class="w"> </span>journalctl<span class="w"> </span>-u<span class="w"> </span>soulacy<span class="w"> </span>-n<span class="w"> </span><span class="m">100</span><span class="w"> </span>--no-pager
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>sudo<span class="w"> </span>install<span class="w"> </span>-d<span class="w"> </span>-o<span class="w"> </span>soulacy<span class="w"> </span>-g<span class="w"> </span>soulacy<span class="w"> </span>/etc/soulacy<span class="w"> </span>/var/lib/soulacy
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>sudo<span class="w"> </span>chown<span class="w"> </span>root:soulacy<span class="w"> </span>/etc/soulacy/config.yaml
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>sudo<span class="w"> </span>chmod<span class="w"> </span><span class="m">640</span><span class="w"> </span>/etc/soulacy/config.yaml
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>daemon-reload
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>restart<span class="w"> </span>soulacy
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>sudo<span class="w"> </span>journalctl<span class="w"> </span>-u<span class="w"> </span>soulacy<span class="w"> </span>-n<span class="w"> </span><span class="m">100</span><span class="w"> </span>--no-pager
 </span></code></pre></div>
 <p>Do not solve this by making a credential-bearing configuration world-readable.</p>
 <div class="admonition note">
@@ -5142,8 +5193,8 @@ transition.</p>
 </ul>
 <h2 id="back-up-before-major-upgrades">Back up before major upgrades<a class="headerlink" href="#back-up-before-major-upgrades" title="Permanent link">&para;</a></h2>
 <p>All state lives in one place — the workspace:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Stop the gateway first so SQLite files are quiescent, then:</span>
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>tar<span class="w"> </span>-czf<span class="w"> </span>soulacy-backup-<span class="k">$(</span>date<span class="w"> </span>+%F<span class="k">)</span>.tar.gz<span class="w"> </span>~/.soulacy
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># Stop the gateway first so SQLite files are quiescent, then:</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>tar<span class="w"> </span>-czf<span class="w"> </span>soulacy-backup-<span class="k">$(</span>date<span class="w"> </span>+%F<span class="k">)</span>.tar.gz<span class="w"> </span>~/.soulacy
 </span></code></pre></div>
 <p>That captures <code>config.yaml</code>, agents, skills, plugins, all databases
 (<code>data/</code>), memory, and the credential vault (<code>secrets/</code>). Restoring is
@@ -5157,7 +5208,7 @@ untarring it back. Verify what your workspace contains with
 <h2 id="full-reinstall-from-scratch">Full reinstall from scratch<a class="headerlink" href="#full-reinstall-from-scratch" title="Permanent link">&para;</a></h2>
 <p>The repo ships <code>reinstall-from-scratch.command</code> (macOS) for when you want
 a genuinely clean slate:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>./reinstall-from-scratch.command
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>./reinstall-from-scratch.command
 </span></code></pre></div>
 <p>What it does, in order:</p>
 <ol>
@@ -5183,9 +5234,9 @@ both the <code>soulacy</code> and <code>sy</code> binaries and the current <code
 recent snapshots are kept (<code>SOULACY_BACKUP_KEEP</code> to change; <code>SOULACY_BACKUP_DIR</code>
 to relocate).</p>
 <p>If a new version misbehaves, roll straight back to the previous one:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>./install.sh<span class="w"> </span>--rollback
-</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="c1"># or from the one-liner:</span>
-</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://raw.githubusercontent.com/vmodekurti/soulacy-personal/main/install.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span>bash<span class="w"> </span>-s<span class="w"> </span>--<span class="w"> </span>--rollback
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>./install.sh<span class="w"> </span>--rollback
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="c1"># or from the one-liner:</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://raw.githubusercontent.com/vmodekurti/soulacy-personal/main/install.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span>bash<span class="w"> </span>-s<span class="w"> </span>--<span class="w"> </span>--rollback
 </span></code></pre></div>
 <p>This restores the previous binaries and their matching <code>config.yaml</code>. Your
 current config is never destroyed — it's saved next to the restored one as
