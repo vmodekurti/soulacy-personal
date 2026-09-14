@@ -616,16 +616,26 @@ type MemoryConfig struct {
 //	      enable_graph: false
 //	      api_style: ""          # platform | server | "" (infer from base_url)
 type AdaptiveMemoryConfig struct {
-	Enabled             bool       `mapstructure:"enabled"`
-	Provider            string     `mapstructure:"provider"`
-	ModelProvider       string     `mapstructure:"model_provider"`
-	Model               string     `mapstructure:"model"`
-	MinConfidence       float64    `mapstructure:"min_confidence"`
-	SimilarityThreshold float64    `mapstructure:"similarity_threshold"`
-	MaxPromptFacts      int        `mapstructure:"max_prompt_facts"`
-	PromptTokenBudget   int        `mapstructure:"prompt_token_budget"`
-	Mem0                Mem0Config `mapstructure:"mem0"`
+	Enabled             bool    `mapstructure:"enabled"`
+	Provider            string  `mapstructure:"provider"`
+	ModelProvider       string  `mapstructure:"model_provider"`
+	Model               string  `mapstructure:"model"`
+	MinConfidence       float64 `mapstructure:"min_confidence"`
+	SimilarityThreshold float64 `mapstructure:"similarity_threshold"`
+	MaxPromptFacts      int     `mapstructure:"max_prompt_facts"`
+	PromptTokenBudget   int     `mapstructure:"prompt_token_budget"`
+	// Instructions is short operator guidance appended to the extraction
+	// prompt (max 240 characters), e.g. "Also capture job title and team".
+	Instructions string `mapstructure:"instructions"`
+	// CustomCategories extends preference|identity|constraint|entity.
+	CustomCategories []string `mapstructure:"custom_categories"`
+	// GraphEnabled turns entity-relation extraction on (default true).
+	GraphEnabled *bool      `mapstructure:"graph_enabled"`
+	Mem0         Mem0Config `mapstructure:"mem0"`
 }
+
+// GraphOn reports whether relation extraction is enabled (default true).
+func (a AdaptiveMemoryConfig) GraphOn() bool { return a.GraphEnabled == nil || *a.GraphEnabled }
 
 // Mem0Config configures the optional external Mem0 provider.
 type Mem0Config struct {
@@ -1086,6 +1096,9 @@ func Load(cfgPath string) (*Config, string, error) {
 	v.SetDefault("memory.adaptive.similarity_threshold", 0.85)
 	v.SetDefault("memory.adaptive.max_prompt_facts", 5)
 	v.SetDefault("memory.adaptive.prompt_token_budget", 50)
+	v.SetDefault("memory.adaptive.instructions", "")
+	v.SetDefault("memory.adaptive.custom_categories", []string{})
+	v.SetDefault("memory.adaptive.graph_enabled", true)
 	v.SetDefault("memory.adaptive.mem0.base_url", "")
 	v.SetDefault("memory.adaptive.mem0.api_key", "")
 	v.SetDefault("memory.adaptive.mem0.enable_graph", false)

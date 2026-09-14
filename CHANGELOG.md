@@ -15,6 +15,14 @@ to follow [Semantic Versioning](https://semver.org/).
   strict (workspace, owner, agent) isolation, per-agent `memory.adaptive`
   opt-out, `/api/v1/memory/facts` management API, and a "What it remembers"
   tab on the Learning page with edit, add, delete, export, and purge.
+- Adaptive memory parity: entity relationships (graph memory) extracted with
+  facts and recalled into the prompt; contradiction handling retracts facts
+  that are no longer true; this-conversation-only ("temporary") facts;
+  per-fact expiry dates; a per-fact change history (created, edited,
+  superseded, retracted, deleted) that survives deletion; operator extraction
+  instructions and custom categories. New endpoints under
+  `/api/v1/memory/facts` for history and relations; Learning page gains a
+  Relationships view, retracted filter, expiry editing and history.
 - Pluggable memory provider: `memory.adaptive.provider: mem0` swaps the
   built-in engine for a hosted or self-hosted Mem0 service, hot-applied from
   Config → Adaptive memory, with automatic fallback to the local engine when

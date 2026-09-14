@@ -27,11 +27,14 @@ func (s *Server) SetAdaptiveMemoryRebuilder(fn AdaptiveMemoryRebuilder) { s.adap
 //
 //	GET    /memory/facts?agent_id=&status=&q=&owner=   list or search
 //	POST   /memory/facts                               add a fact by hand
-//	PATCH  /memory/facts/:id                           edit content/category
+//	PATCH  /memory/facts/:id                           edit content/category/expiry
 //	DELETE /memory/facts/:id                           delete one fact
+//	GET    /memory/facts/:id/history                   change log of one fact
+//	GET    /memory/facts/relations?agent_id=           entity relations
+//	DELETE /memory/facts/relations/:id                 delete one relation
 //	GET    /memory/facts/export?agent_id=              JSON download
 //	DELETE /memory/facts?agent_id=&confirm=true        purge
-//	GET    /memory/facts/status                        provider + counts
+//	GET    /memory/facts/status                        provider, categories, counts
 //
 // Every route is scoped to the caller's own identity. Admins may pass
 // ?owner= to inspect another user's workspace-scoped memory; everyone else
@@ -42,8 +45,11 @@ func (s *Server) registerAdaptiveMemoryRoutes(api fiber.Router) {
 	del := s.rbacMW(rbac.ResourceMemory, rbac.ActionDelete)
 	api.Get("/memory/facts/status", read, s.handleAdaptiveMemoryStatus)
 	api.Get("/memory/facts/export", read, s.handleAdaptiveMemoryExport)
+	api.Get("/memory/facts/relations", read, s.handleAdaptiveMemoryRelations)
+	api.Delete("/memory/facts/relations/:id", del, s.handleAdaptiveMemoryDeleteRelation)
 	api.Get("/memory/facts", read, s.handleAdaptiveMemoryList)
 	api.Post("/memory/facts", write, s.handleAdaptiveMemoryAdd)
+	api.Get("/memory/facts/:id/history", read, s.handleAdaptiveMemoryHistory)
 	api.Patch("/memory/facts/:id", write, s.handleAdaptiveMemoryUpdate)
 	api.Delete("/memory/facts/:id", del, s.handleAdaptiveMemoryDelete)
 	api.Delete("/memory/facts", del, s.handleAdaptiveMemoryPurge)
@@ -72,7 +78,7 @@ func (s *Server) adaptiveScopeFor(c *fiber.Ctx) (memory.Adaptive, memory.FactSco
 		}
 		owner = requested
 	}
-	scope := memory.FactScope{Workspace: s.adaptiveWorkspace(), Owner: owner, AgentID: strings.TrimSpace(c.Query("agent_id"))}.Normalize()
+	scope := memory.FactScope{Workspace: s.adaptiveWorkspace(), Owner: owner, AgentID: strings.TrimSpace(c.Query("agent_id")), SessionID: strings.TrimSpace(c.Query("session_id"))}.Normalize()
 	if scope.AgentID != "" && s.loader != nil && s.loader.Get(scope.AgentID) == nil {
 		return nil, memory.FactScope{}, fiber.NewError(fiber.StatusNotFound, "Agent not found")
 	}
@@ -95,13 +101,34 @@ func adaptiveErr(c *fiber.Ctx, err error) error {
 	case errors.Is(err, memory.ErrFactNotFound):
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Fact not found"})
 	case errors.Is(err, memory.ErrInvalidFact):
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "A fact is one short sentence (1-400 characters) with a category of preference, identity, constraint, or entity"})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "A fact is one short sentence (1-400 characters) with an allowed category; expiry must be a date (YYYY-MM-DD) or RFC 3339 timestamp"})
 	case errors.Is(err, memory.ErrInvalidScope):
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Memory requires a stable authenticated identity"})
+	case errors.Is(err, memory.ErrUnsupported):
+		return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{"error": "The active memory provider does not support this operation"})
 	case errors.Is(err, memory.ErrProviderFailed):
 		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "The memory provider did not respond: " + err.Error()})
 	}
 	return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+}
+
+// parseExpiry accepts "", a date, or an RFC 3339 timestamp. An empty value
+// means "no expiry".
+func parseExpiry(raw string) (*time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	for _, layout := range []string{time.RFC3339, "2006-01-02"} {
+		if t, err := time.Parse(layout, raw); err == nil {
+			if layout == "2006-01-02" {
+				t = t.Add(24*time.Hour - time.Second) // end of that day
+			}
+			t = t.UTC()
+			return &t, nil
+		}
+	}
+	return nil, memory.ErrInvalidFact
 }
 
 func (s *Server) handleAdaptiveMemoryStatus(c *fiber.Ctx) error {
@@ -115,11 +142,14 @@ func (s *Server) handleAdaptiveMemoryStatus(c *fiber.Ctx) error {
 		"prompt_token_budget": opts.PromptTokenBudget,
 		"model_provider":      opts.ModelProvider,
 		"model":               opts.Model,
+		"graph_enabled":       opts.GraphEnabled,
+		"categories":          []string{},
 	}
 	if engine == nil {
 		return c.JSON(out)
 	}
 	out["provider"] = engine.Provider()
+	out["categories"] = engine.Categories()
 	_, scope, err := s.adaptiveScopeFor(c)
 	if err != nil {
 		return c.JSON(out)
@@ -128,10 +158,14 @@ func (s *Server) handleAdaptiveMemoryStatus(c *fiber.Ctx) error {
 	if local, ok := engine.(*memory.LocalAdaptive); ok && local.Store() != nil {
 		ctx, cancel := s.adaptiveCtx(c)
 		defer cancel()
-		active, superseded, cerr := local.Store().Count(ctx, scope)
+		active, superseded, retracted, cerr := local.Store().Count(ctx, scope)
 		if cerr == nil {
 			out["active"] = active
 			out["superseded"] = superseded
+			out["retracted"] = retracted
+		}
+		if rels, rerr := local.Store().Relations(ctx, scope, memory.FactStatusActive, 2000); rerr == nil {
+			out["relations"] = len(rels)
 		}
 	}
 	return c.JSON(out)
@@ -144,8 +178,8 @@ func (s *Server) handleAdaptiveMemoryList(c *fiber.Ctx) error {
 		return adaptiveErr(c, err)
 	}
 	status := c.Query("status", "")
-	if status != "" && status != memory.FactStatusActive && status != memory.FactStatusSuperseded {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "status must be active or superseded"})
+	if status != "" && !memory.ValidFactStatus(status) {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "status must be active, superseded or retracted"})
 	}
 	limit, _ := strconv.Atoi(c.Query("limit", "200"))
 	ctx, cancel := s.adaptiveCtx(c)
@@ -154,6 +188,9 @@ func (s *Server) handleAdaptiveMemoryList(c *fiber.Ctx) error {
 		hits, err := engine.Recall(ctx, scope, q, max(1, min(limit, 50)))
 		if err != nil {
 			return adaptiveErr(c, err)
+		}
+		if hits == nil {
+			hits = []memory.ScoredFact{}
 		}
 		return c.JSON(fiber.Map{"facts": hits, "provider": engine.Provider(), "owner": scope.Owner, "query": q})
 	}
@@ -167,10 +204,56 @@ func (s *Server) handleAdaptiveMemoryList(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"facts": facts, "provider": engine.Provider(), "owner": scope.Owner})
 }
 
+func (s *Server) handleAdaptiveMemoryRelations(c *fiber.Ctx) error {
+	c.Set(fiber.HeaderCacheControl, "no-store")
+	engine, scope, err := s.adaptiveScopeFor(c)
+	if err != nil {
+		return adaptiveErr(c, err)
+	}
+	ctx, cancel := s.adaptiveCtx(c)
+	defer cancel()
+	limit, _ := strconv.Atoi(c.Query("limit", "200"))
+	var rels []memory.Relation
+	if local, ok := engine.(*memory.LocalAdaptive); ok && strings.TrimSpace(c.Query("q")) == "" {
+		status := c.Query("status", memory.FactStatusActive)
+		if status == "all" {
+			status = ""
+		}
+		rels, err = local.Store().Relations(ctx, scope, status, limit)
+	} else {
+		rels, err = engine.Relations(ctx, scope, c.Query("q"), max(1, min(limit, 50)))
+	}
+	if err != nil {
+		return adaptiveErr(c, err)
+	}
+	if rels == nil {
+		rels = []memory.Relation{}
+	}
+	return c.JSON(fiber.Map{"relations": rels, "provider": engine.Provider(), "owner": scope.Owner})
+}
+
+func (s *Server) handleAdaptiveMemoryDeleteRelation(c *fiber.Ctx) error {
+	engine, scope, err := s.adaptiveScopeFor(c)
+	if err != nil {
+		return adaptiveErr(c, err)
+	}
+	local, ok := engine.(*memory.LocalAdaptive)
+	if !ok {
+		return adaptiveErr(c, memory.ErrUnsupported)
+	}
+	ctx, cancel := s.adaptiveCtx(c)
+	defer cancel()
+	if err := local.Store().DeleteRelation(ctx, scope, strings.Clone(c.Params("id"))); err != nil {
+		return adaptiveErr(c, err)
+	}
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
 type adaptiveFactBody struct {
-	AgentID  string `json:"agent_id"`
-	Content  string `json:"content"`
-	Category string `json:"category"`
+	AgentID   string `json:"agent_id"`
+	Content   string `json:"content"`
+	Category  string `json:"category"`
+	ExpiresAt string `json:"expires_at"`
 }
 
 func (s *Server) handleAdaptiveMemoryAdd(c *fiber.Ctx) error {
@@ -188,9 +271,13 @@ func (s *Server) handleAdaptiveMemoryAdd(c *fiber.Ctx) error {
 	if body.Category == "" {
 		body.Category = string(memory.FactPreference)
 	}
+	expires, err := parseExpiry(body.ExpiresAt)
+	if err != nil {
+		return adaptiveErr(c, err)
+	}
 	ctx, cancel := s.adaptiveCtx(c)
 	defer cancel()
-	f, err := engine.Add(ctx, scope, memory.FactCategory(strings.ToLower(body.Category)), body.Content)
+	f, err := engine.Add(ctx, scope, memory.FactInput{Category: memory.FactCategory(strings.ToLower(body.Category)), Content: body.Content, ExpiresAt: expires})
 	if err != nil {
 		return adaptiveErr(c, err)
 	}
@@ -213,21 +300,32 @@ func (s *Server) handleAdaptiveMemoryUpdate(c *fiber.Ctx) error {
 	id := strings.Clone(c.Params("id"))
 	ctx, cancel := s.adaptiveCtx(c)
 	defer cancel()
-	if body.Category == "" {
-		// Keep the current category when the client only edits text.
-		if cur, gerr := engine.List(ctx, scope, "", 2000); gerr == nil {
-			for _, f := range cur {
-				if f.ID == id {
-					body.Category = string(f.Category)
-					break
-				}
+	// Keep the current category and expiry when the client only edits text.
+	var current *memory.Fact
+	if cur, gerr := engine.List(ctx, scope, "", 2000); gerr == nil {
+		for i := range cur {
+			if cur[i].ID == id {
+				current = &cur[i]
+				break
 			}
 		}
-		if body.Category == "" {
+	}
+	if body.Category == "" {
+		if current != nil {
+			body.Category = string(current.Category)
+		} else {
 			body.Category = string(memory.FactPreference)
 		}
 	}
-	f, err := engine.Update(ctx, scope, id, body.Content, memory.FactCategory(strings.ToLower(body.Category)))
+	var expires *time.Time
+	if body.ExpiresAt == "" && current != nil {
+		expires = current.ExpiresAt
+	} else if body.ExpiresAt != "" && body.ExpiresAt != "none" {
+		if expires, err = parseExpiry(body.ExpiresAt); err != nil {
+			return adaptiveErr(c, err)
+		}
+	}
+	f, err := engine.Update(ctx, scope, id, memory.FactInput{Category: memory.FactCategory(strings.ToLower(body.Category)), Content: body.Content, ExpiresAt: expires})
 	if err != nil {
 		return adaptiveErr(c, err)
 	}
@@ -248,6 +346,21 @@ func (s *Server) handleAdaptiveMemoryDelete(c *fiber.Ctx) error {
 	}
 	s.recordAdminAudit(c, "memory.fact.delete", "memory", id, "ok", nil)
 	return c.SendStatus(fiber.StatusNoContent)
+}
+
+func (s *Server) handleAdaptiveMemoryHistory(c *fiber.Ctx) error {
+	c.Set(fiber.HeaderCacheControl, "no-store")
+	engine, scope, err := s.adaptiveScopeFor(c)
+	if err != nil {
+		return adaptiveErr(c, err)
+	}
+	ctx, cancel := s.adaptiveCtx(c)
+	defer cancel()
+	events, err := engine.History(ctx, scope, strings.Clone(c.Params("id")))
+	if err != nil {
+		return adaptiveErr(c, err)
+	}
+	return c.JSON(fiber.Map{"events": events})
 }
 
 func (s *Server) handleAdaptiveMemoryPurge(c *fiber.Ctx) error {
@@ -282,6 +395,14 @@ func (s *Server) handleAdaptiveMemoryExport(c *fiber.Ctx) error {
 	if facts == nil {
 		facts = []memory.Fact{}
 	}
+	rels := []memory.Relation{}
+	if local, ok := engine.(*memory.LocalAdaptive); ok {
+		if r, rerr := local.Store().Relations(ctx, scope, "", 2000); rerr == nil && r != nil {
+			rels = r
+		}
+	} else if r, rerr := engine.Relations(ctx, scope, "", 50); rerr == nil && r != nil {
+		rels = r
+	}
 	name := "soulacy-memory"
 	if scope.AgentID != "" {
 		name += "-" + scope.AgentID
@@ -294,7 +415,9 @@ func (s *Server) handleAdaptiveMemoryExport(c *fiber.Ctx) error {
 		"owner":       scope.Owner,
 		"workspace":   scope.Workspace,
 		"agent_id":    scope.AgentID,
+		"categories":  engine.Categories(),
 		"facts":       facts,
+		"relations":   rels,
 	})
 }
 

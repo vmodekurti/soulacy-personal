@@ -117,6 +117,9 @@ func (s *Server) safeConfigView() fiber.Map {
 				"similarity_threshold": cfg.Memory.Adaptive.SimilarityThreshold,
 				"max_prompt_facts":     cfg.Memory.Adaptive.MaxPromptFacts,
 				"prompt_token_budget":  cfg.Memory.Adaptive.PromptTokenBudget,
+				"instructions":         cfg.Memory.Adaptive.Instructions,
+				"custom_categories":    append([]string{}, cfg.Memory.Adaptive.CustomCategories...),
+				"graph_enabled":        cfg.Memory.Adaptive.GraphOn(),
 				"mem0": fiber.Map{
 					"base_url":     cfg.Memory.Adaptive.Mem0.BaseURL,
 					"api_key":      maskSecret(cfg.Memory.Adaptive.Mem0.APIKey),
@@ -464,6 +467,9 @@ type PatchableAdaptiveMemory struct {
 	SimilarityThreshold *float64 `json:"similarity_threshold" yaml:"similarity_threshold"`
 	MaxPromptFacts      *int     `json:"max_prompt_facts" yaml:"max_prompt_facts"`
 	PromptTokenBudget   *int     `json:"prompt_token_budget" yaml:"prompt_token_budget"`
+	Instructions        *string  `json:"instructions" yaml:"instructions"`
+	CustomCategories    []string `json:"custom_categories" yaml:"custom_categories"`
+	GraphEnabled        *bool    `json:"graph_enabled" yaml:"graph_enabled"`
 	Mem0                *struct {
 		BaseURL     *string `json:"base_url" yaml:"base_url"`
 		APIKey      *string `json:"api_key" yaml:"api_key"`
@@ -636,6 +642,16 @@ func (s *Server) applyAdaptiveMemoryPatch(a *PatchableAdaptiveMemory) {
 	if a.PromptTokenBudget != nil {
 		ac.PromptTokenBudget = *a.PromptTokenBudget
 	}
+	if a.Instructions != nil {
+		ac.Instructions = *a.Instructions
+	}
+	if a.CustomCategories != nil {
+		ac.CustomCategories = append([]string(nil), a.CustomCategories...)
+	}
+	if a.GraphEnabled != nil {
+		v := *a.GraphEnabled
+		ac.GraphEnabled = &v
+	}
 	if a.Mem0 != nil {
 		if a.Mem0.BaseURL != nil {
 			ac.Mem0.BaseURL = *a.Mem0.BaseURL
@@ -777,6 +793,15 @@ func applyPatch(dst map[string]any, patch PatchableConfig) {
 		}
 		if a.PromptTokenBudget != nil {
 			ad["prompt_token_budget"] = *a.PromptTokenBudget
+		}
+		if a.Instructions != nil {
+			ad["instructions"] = *a.Instructions
+		}
+		if a.CustomCategories != nil {
+			ad["custom_categories"] = a.CustomCategories
+		}
+		if a.GraphEnabled != nil {
+			ad["graph_enabled"] = *a.GraphEnabled
 		}
 		if a.Mem0 != nil {
 			m0 := getOrCreateMap(ad, "mem0")

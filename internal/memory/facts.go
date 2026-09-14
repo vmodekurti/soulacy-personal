@@ -3,10 +3,11 @@
 //
 // Adaptive memory is the fourth memory tier. Where the hot/archive/semantic
 // tiers store *what was said*, adaptive memory stores *what is true about the
-// user*: preferences, identity facts, constraints and named entities. Facts
-// are extracted asynchronously after a turn, checked against existing facts so
-// newer information supersedes stale information, and the most relevant
-// handful is injected into the system prompt on the next turn.
+// user*: preferences, identity facts, constraints and named entities, plus the
+// relationships between entities. Facts are extracted asynchronously after a
+// turn, checked against existing facts so newer information supersedes or
+// retracts stale information, and the most relevant handful is injected into
+// the system prompt on the next turn.
 //
 // Every fact is scoped by (workspace, owner, agent). The owner is the
 // authenticated principal that produced the turn; the runtime never reads
@@ -18,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -34,27 +36,69 @@ const (
 	FactEntity     FactCategory = "entity"
 )
 
-// FactStatusActive / FactStatusSuperseded are the two lifecycle states. A
-// superseded fact is kept for audit and rollback; it never reaches a prompt.
+// BuiltinCategories are always accepted. Operators may add custom ones.
+var BuiltinCategories = []FactCategory{FactPreference, FactIdentity, FactConstraint, FactEntity}
+
+// Fact lifecycle states. Superseded and retracted facts are kept for audit
+// and rollback; they never reach a prompt.
 const (
 	FactStatusActive     = "active"
-	FactStatusSuperseded = "superseded"
+	FactStatusSuperseded = "superseded" // replaced by a newer fact
+	FactStatusRetracted  = "retracted"  // the user said it is no longer true
 )
 
-// ValidFactCategory reports whether c is one of the four supported categories.
+// ValidFactStatus reports whether s is a known lifecycle state.
+func ValidFactStatus(s string) bool {
+	return s == FactStatusActive || s == FactStatusSuperseded || s == FactStatusRetracted
+}
+
+var categorySlug = regexp.MustCompile(`^[a-z][a-z0-9_-]{1,31}$`)
+
+// ValidFactCategory reports whether c is one of the four built-in categories.
 func ValidFactCategory(c string) bool {
-	switch FactCategory(strings.ToLower(strings.TrimSpace(c))) {
-	case FactPreference, FactIdentity, FactConstraint, FactEntity:
-		return true
+	return AllowedCategory(c, nil)
+}
+
+// AllowedCategory reports whether c is a built-in category or one of the
+// operator-defined custom categories.
+func AllowedCategory(c string, custom []string) bool {
+	c = strings.ToLower(strings.TrimSpace(c))
+	for _, b := range BuiltinCategories {
+		if FactCategory(c) == b {
+			return true
+		}
+	}
+	for _, x := range custom {
+		if c == strings.ToLower(strings.TrimSpace(x)) && categorySlug.MatchString(c) {
+			return true
+		}
 	}
 	return false
 }
 
-// FactScope is the tenancy boundary for adaptive memory.
+// NormalizeCategories lower-cases, validates and dedupes custom categories.
+func NormalizeCategories(custom []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, c := range custom {
+		c = strings.ToLower(strings.TrimSpace(c))
+		if !categorySlug.MatchString(c) || seen[c] || AllowedCategory(c, nil) {
+			continue
+		}
+		seen[c] = true
+		out = append(out, c)
+	}
+	return out
+}
+
+// FactScope is the tenancy boundary for adaptive memory. SessionID is not
+// part of the boundary; it lets recall include facts that were marked
+// session-scoped ("temporary") when they were extracted in the same session.
 type FactScope struct {
 	Workspace string `json:"workspace"`
 	Owner     string `json:"owner"`
 	AgentID   string `json:"agent_id"`
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // Normalize fills the workspace default and trims fields. An empty owner is
@@ -66,6 +110,7 @@ func (s FactScope) Normalize() FactScope {
 	}
 	s.Owner = strings.TrimSpace(s.Owner)
 	s.AgentID = strings.TrimSpace(s.AgentID)
+	s.SessionID = strings.TrimSpace(s.SessionID)
 	return s
 }
 
@@ -86,14 +131,60 @@ type Fact struct {
 	Supersedes   string       `json:"supersedes,omitempty"`
 	// Source records where the fact came from: "extracted" (from a turn),
 	// "manual" (added in the GUI) or "provider" (an external engine).
+	Source          string `json:"source"`
+	SourceSessionID string `json:"source_session_id,omitempty"`
+	SourceRunID     string `json:"source_run_id,omitempty"`
+	// SessionScoped facts are only recalled inside the session that produced
+	// them ("for this conversation, answer in French").
+	SessionScoped bool `json:"session_scoped,omitempty"`
+	// ExpiresAt, when set, hides the fact from recall after that instant.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+	// Embedding is populated by the local engine; it is never serialised to
+	// API clients.
+	Embedding []float32 `json:"-"`
+}
+
+// Expired reports whether the fact has passed its expiry.
+func (f Fact) Expired(now time.Time) bool {
+	return f.ExpiresAt != nil && !f.ExpiresAt.IsZero() && !now.Before(*f.ExpiresAt)
+}
+
+// Relation is a graph edge between two entities, extracted from the same
+// turn as facts ("User" → "has dog" → "Rex"). Relations are scoped exactly
+// like facts.
+type Relation struct {
+	ID              string    `json:"id"`
+	Workspace       string    `json:"workspace"`
+	Owner           string    `json:"owner"`
+	AgentID         string    `json:"agent_id"`
+	Subject         string    `json:"subject"`
+	Predicate       string    `json:"predicate"`
+	Object          string    `json:"object"`
+	Status          string    `json:"status"`
 	Source          string    `json:"source"`
 	SourceSessionID string    `json:"source_session_id,omitempty"`
 	SourceRunID     string    `json:"source_run_id,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
-	// Embedding is populated by the local engine; it is never serialised to
-	// API clients.
-	Embedding []float32 `json:"-"`
+}
+
+// Sentence renders the relation as a short prompt line.
+func (r Relation) Sentence() string {
+	return r.Subject + " " + r.Predicate + " " + r.Object
+}
+
+// FactEvent is one entry in a fact's change history.
+type FactEvent struct {
+	ID        int64        `json:"id"`
+	FactID    string       `json:"fact_id"`
+	Event     string       `json:"event"` // created | updated | superseded | retracted | deleted | expired
+	Content   string       `json:"content"`
+	Category  FactCategory `json:"category"`
+	Status    string       `json:"status"`
+	Actor     string       `json:"actor"` // "extractor", "user", "provider"
+	CreatedAt time.Time    `json:"created_at"`
 }
 
 // ScoredFact is a fact plus its retrieval score in [0,1].
@@ -113,12 +204,21 @@ type Turn struct {
 // RememberOutcome summarises what one Remember call did. It exists so tests
 // and the activity log can see the pipeline's decisions without reading rows.
 type RememberOutcome struct {
-	Candidates  int      `json:"candidates"`
-	Added       []string `json:"added,omitempty"`
-	Superseded  []string `json:"superseded,omitempty"`
-	Skipped     int      `json:"skipped"`
-	Provider    string   `json:"provider"`
-	ExtractedAt time.Time
+	Candidates     int      `json:"candidates"`
+	Added          []string `json:"added,omitempty"`
+	Superseded     []string `json:"superseded,omitempty"`
+	Retracted      []string `json:"retracted,omitempty"`
+	RelationsAdded int      `json:"relations_added"`
+	Skipped        int      `json:"skipped"`
+	Provider       string   `json:"provider"`
+	ExtractedAt    time.Time
+}
+
+// FactInput carries the optional attributes of a manual add or edit.
+type FactInput struct {
+	Category  FactCategory
+	Content   string
+	ExpiresAt *time.Time
 }
 
 // Adaptive is the provider-agnostic contract the runtime and gateway use.
@@ -126,21 +226,30 @@ type RememberOutcome struct {
 type Adaptive interface {
 	// Provider names the backing engine: "local" or "mem0".
 	Provider() string
-	// Remember distills a completed turn into facts and reconciles them with
-	// what is already known. It must be safe to call from a background
-	// goroutine and must never mutate storage for turns that carry no facts.
+	// Categories lists every category the engine accepts (built-in + custom).
+	Categories() []string
+	// Remember distills a completed turn into facts and relations and
+	// reconciles them with what is already known. It must be safe to call
+	// from a background goroutine and must never mutate storage for turns
+	// that carry no facts.
 	Remember(ctx context.Context, scope FactScope, turn Turn) (RememberOutcome, error)
 	// Recall returns the active facts most relevant to query, best first.
 	Recall(ctx context.Context, scope FactScope, query string, limit int) ([]ScoredFact, error)
+	// Relations returns active entity relations relevant to query (or the
+	// most recent when query is empty).
+	Relations(ctx context.Context, scope FactScope, query string, limit int) ([]Relation, error)
 	// List returns facts in the scope filtered by status ("" = all).
 	List(ctx context.Context, scope FactScope, status string, limit int) ([]Fact, error)
 	// Add stores a fact the user wrote by hand.
-	Add(ctx context.Context, scope FactScope, category FactCategory, content string) (Fact, error)
-	// Update rewrites a fact's content and/or category.
-	Update(ctx context.Context, scope FactScope, id, content string, category FactCategory) (Fact, error)
+	Add(ctx context.Context, scope FactScope, in FactInput) (Fact, error)
+	// Update rewrites a fact's content, category and/or expiry.
+	Update(ctx context.Context, scope FactScope, id string, in FactInput) (Fact, error)
 	// Delete removes one fact permanently.
 	Delete(ctx context.Context, scope FactScope, id string) error
-	// Purge removes every fact in the scope and returns how many were removed.
+	// History returns the change log of one fact, newest first.
+	History(ctx context.Context, scope FactScope, id string) ([]FactEvent, error)
+	// Purge removes every fact and relation in the scope and returns how
+	// many facts were removed.
 	Purge(ctx context.Context, scope FactScope) (int64, error)
 	Close() error
 }
@@ -151,6 +260,7 @@ var (
 	ErrInvalidFact    = errors.New("adaptive memory: invalid fact")
 	ErrInvalidScope   = errors.New("adaptive memory: owner is required")
 	ErrProviderFailed = errors.New("adaptive memory: provider request failed")
+	ErrUnsupported    = errors.New("adaptive memory: not supported by this provider")
 )
 
 // MaxFactContent bounds a single fact. Facts are meant to be one-line

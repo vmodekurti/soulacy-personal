@@ -29,6 +29,9 @@ type AdaptiveMemoryOptions struct {
 	MaxPromptFacts int
 	// PromptTokenBudget caps the injected block (default 50 tokens).
 	PromptTokenBudget int
+	// GraphEnabled reports whether entity relations are extracted and
+	// recalled alongside facts.
+	GraphEnabled bool
 }
 
 type adaptiveRuntime struct {
@@ -142,7 +145,7 @@ func (e *Engine) adaptiveScope(ctx context.Context, def *agent.Definition, msg m
 		return nil, memory.FactScope{}, false
 	}
 	meta := llm.CallMetadataFromContext(ctx)
-	scope := memory.FactScope{Workspace: meta.Workspace, Owner: p.Subject, AgentID: def.ID}.Normalize()
+	scope := memory.FactScope{Workspace: meta.Workspace, Owner: p.Subject, AgentID: def.ID, SessionID: msg.SessionID}.Normalize()
 	return r, scope, true
 }
 
@@ -162,7 +165,12 @@ func (e *Engine) startAdaptiveMemory(ctx context.Context, def *agent.Definition,
 		e.log.Debug("adaptive memory recall failed", zap.String("agent", def.ID), zap.Error(err))
 		return
 	}
-	block := memory.FormatPromptBlock(facts, r.opts.PromptTokenBudget)
+	var rels []memory.Relation
+	if r.opts.GraphEnabled {
+		// Relations are a bonus: a failure here never blocks the fact block.
+		rels, _ = r.engine.Relations(rctx, scope, query, 3)
+	}
+	block := memory.FormatPromptBlock(facts, r.opts.PromptTokenBudget, rels...)
 	if block == "" {
 		return
 	}
@@ -247,13 +255,15 @@ func (e *Engine) queueAdaptiveMemory(ctx context.Context, def *agent.Definition,
 		e.log.Info("adaptive memory updated",
 			zap.String("agent", agentID), zap.String("provider", out.Provider),
 			zap.Int("candidates", out.Candidates), zap.Int("added", len(out.Added)),
-			zap.Int("superseded", len(out.Superseded)), zap.Int("skipped", out.Skipped))
-		if e.sink != nil && (len(out.Added) > 0 || len(out.Superseded) > 0) {
+			zap.Int("superseded", len(out.Superseded)), zap.Int("retracted", len(out.Retracted)),
+			zap.Int("relations", out.RelationsAdded), zap.Int("skipped", out.Skipped))
+		if e.sink != nil && (len(out.Added) > 0 || len(out.Superseded) > 0 || len(out.Retracted) > 0 || out.RelationsAdded > 0) {
 			e.sink.Emit(message.Event{
 				Type: "memory.adaptive", AgentID: agentID, SessionID: msg.SessionID,
 				Payload: map[string]any{
 					"agent_name": agentName, "provider": out.Provider,
-					"added": len(out.Added), "superseded": len(out.Superseded), "skipped": out.Skipped,
+					"added": len(out.Added), "superseded": len(out.Superseded), "retracted": len(out.Retracted),
+					"relations": out.RelationsAdded, "skipped": out.Skipped,
 				},
 				Timestamp: time.Now().UTC(),
 			})
