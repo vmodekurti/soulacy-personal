@@ -100,14 +100,24 @@ the phone first, so the gateway receives text it can index.
 
 ## 4b. Siri and CarPlay
 
-Your agents are contacts to Siri. Say "send a message to Planner with
-Soulacy: what's on today" and Siri asks which agent if the name is
-ambiguous, sends the turn, and the reply arrives as a message Siri reads
-aloud, on AirPods and in the car. "Read my messages from Planner" repeats
-the latest reply. In CarPlay, Soulacy appears as a Communication app
-listing your agents; tapping one starts the same spoken exchange. Nothing
-else is shown in the car, and approvals always wait for the phone. Allow
-Siri for Soulacy the first time iOS asks.
+Say **"Talk to Soulacy"**. Siri asks which agent, then what you want to
+say, and reads the agent's reply back to you. You can skip the questions:
+"Talk to Planner in Soulacy" or "Ask Planner in Soulacy what's on today".
+This works the same on the phone, on AirPods and in CarPlay, because Siri
+does the talking on both ends. Long replies are cut at a sentence with
+"the rest is in the app".
+
+"Run Phone brief in Soulacy" starts an agent and opens the app so it can
+use the phone's health, calendar and Focus signals; the brief lands in
+chat and as a card.
+
+In CarPlay, Soulacy also appears as a Communication app listing your
+agents. Tapping one starts Siri's messaging flow: your words are sent as a
+message and the reply arrives as a notification Siri announces when
+**Announce Notifications** is on for Soulacy (Settings → Notifications →
+Announce Notifications) and, in the car, **Announce Messages** is on for
+CarPlay. Nothing else is shown in the car, and approvals always wait for
+the phone. Allow Siri for Soulacy the first time iOS asks.
 
 ## 5. Grant device access only for a real task
 
