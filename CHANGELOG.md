@@ -7,6 +7,11 @@ to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `examples/agents/phone-brief`: a briefing agent that reads sleep,
+  calendar and Focus from a paired iPhone through device commands and shows
+  the result as a native card, with a use-case page. The tool risk
+  classifier now knows the mobile tools explicitly, so
+  `mobile.command_status` is no longer mistaken for a shell tool.
 - Siri and CarPlay messaging on iPhone: agents are message contacts for
   Siri's send, read and mark-read intents; replies return as communication
   notifications Siri reads aloud; CarPlay lists agents as conversations

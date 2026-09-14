@@ -33,3 +33,5 @@ Before using real data, try normal, missing, and contradictory input, a denied
 permission, and an unavailable dependency. Confirm the result **and** the run
 record. Never retry a possibly completed external write blindly.
 The [first-checks guide](../troubleshooting/first-checks.md) explains where to look.
+
+- [A brief from your phone's signals](phone-brief.md): sleep, calendar and Focus from the paired iPhone, delivered as a native card and read aloud by Siri.

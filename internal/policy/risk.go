@@ -107,6 +107,14 @@ var riskTiers = map[string]RiskTier{
 	"shell_exec":  RiskShellSystem,
 	"run_script":  RiskShellSystem,
 	"python_eval": RiskShellSystem,
+
+	// paired phone — a device action is a write the phone itself gates by
+	// capability and permission; the two lookups are reads. Listed here
+	// because "command" in mobile.command_status would otherwise trip the
+	// shell heuristic.
+	"mobile.list_nodes":     RiskSafe,
+	"mobile.command_status": RiskSafe,
+	"mobile.invoke":         RiskWrite,
 }
 
 // RiskTierOf returns the risk tier for a tool name. Known builtins use the
