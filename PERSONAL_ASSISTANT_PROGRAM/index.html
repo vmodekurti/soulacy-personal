@@ -1400,6 +1400,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../using/person-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The Person Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../using/learning-notebook/" class="md-nav__link">
         
   
@@ -4907,14 +4935,14 @@ memory, with a fixed shape so agents and observers agree on it.</p>
 </thead>
 <tbody>
 <tr>
-<td><strong>P1 Model store</strong></td>
-<td><code>internal/person</code>: SQLite store with the schema below; owner-scoped like memory; every entry carries <code>source</code>, <code>observed_at</code>, <code>confidence</code>, <code>expires_at</code>. <code>GET/PUT /person/model</code>, <code>GET /person/model/sync?since=</code> (same change-feed shape as memory).</td>
-<td>Phone caches the model in the app group (like <code>MemoryCache</code>); a "About you" screen in Settings shows it, lets the person correct or delete any entry, and export it. Web: a Person page.</td>
+<td><strong>P1 Model store</strong> (shipped)</td>
+<td><code>internal/person</code>: SQLite store, owner-scoped, precedence manual &gt; agent &gt; sense, expiring entries, change feed. <code>GET /person/model</code>, <code>PUT /person/model/entries</code>, <code>DELETE …/entries/:section/:key</code>, <code>GET /person/model/sync?since=</code>, <code>DELETE /person/model?confirm=true</code>. See <code>docs/using/person-model.md</code>.</td>
+<td>Still to do: phone cache in the app group, an "About you" screen, a web Person page.</td>
 </tr>
 <tr>
-<td><strong>P2 One tool</strong></td>
-<td>Builtin <code>person.model</code> for agents: <code>person.model(section, query?)</code> returns the relevant part in plain prose plus structured rows; <code>person.observe(entry)</code> lets an agent record something it learned, marked <code>source: agent:&lt;id&gt;</code>. Risk tier: read is safe, observe is write.</td>
-<td>Agent templates gain <code>person.model</code> in their builtins.</td>
+<td><strong>P2 One tool</strong> (shipped)</td>
+<td><code>person.model(sections?, query?)</code> answers in prose; <code>person.observe(...)</code> records what an agent learned as <code>agent:&lt;id&gt;</code>. Both opt-in per agent via <code>builtins:</code>, like the mobile tools. Risk tiers: read safe, observe write.</td>
+<td>Agent templates gain <code>person.model</code> in their builtins (next).</td>
 </tr>
 <tr>
 <td><strong>P3 Observers</strong></td>
