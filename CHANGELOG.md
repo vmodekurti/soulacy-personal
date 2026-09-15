@@ -18,6 +18,14 @@ to follow [Semantic Versioning](https://semver.org/).
   second device stays a viewer.
 
 ### Added
+- **Person triggers**: an agent can run because something about the person
+  changed rather than because a clock fired. `trigger: person` with
+  `when: state.changed | commitment.due | routine.deviation`. Three guards stop
+  it firing constantly: it compares model snapshots rather than writes, a
+  condition already true does not fire again, and a per-agent per-person
+  cooldown absorbs the burst of observations a phone delivers after being
+  offline. An agent that replies with nothing produces no notification.
+  See `docs/using/person-triggers.md`.
 - The **Steward**: an agent that reads the person model, works out what is
   different about today, and proposes at most three things, each with its
   reason and the lines it read. A quiet day gets a quiet answer. It refuses to

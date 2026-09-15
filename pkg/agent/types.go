@@ -20,6 +20,7 @@ const (
 	TriggerWebhook  TriggerKind = "webhook"  // activated by an HTTP POST to its endpoint
 	TriggerInternal TriggerKind = "internal" // activated programmatically by another agent
 	TriggerLocation TriggerKind = "location" // activated when a paired phone enters or leaves a region
+	TriggerPerson   TriggerKind = "person"   // activated when what Soulacy understands about the person changes
 )
 
 // LocationTrigger describes the geofence a paired phone monitors on the
@@ -44,6 +45,43 @@ type LocationTrigger struct {
 	On        string  `yaml:"on"                  json:"on"`
 	Device    string  `yaml:"device,omitempty"    json:"device,omitempty"`
 	Cooldown  string  `yaml:"cooldown,omitempty"  json:"cooldown,omitempty"`
+}
+
+// PersonTrigger runs an agent when the person model changes, rather than on a
+// clock.
+//
+// The difference matters: a morning briefing fires whether or not anything
+// happened, and a person learns to ignore it. A trigger fires because
+// something is actually different, which is the only kind of interruption
+// worth making.
+type PersonTrigger struct {
+	// When names the change to watch. See PersonTriggerConditions.
+	When string `yaml:"when"                json:"when"`
+	// Within bounds "soon" for commitment.due, as a duration ("2h", "24h").
+	// Ignored by the other conditions. Defaults to 24h.
+	Within string `yaml:"within,omitempty"  json:"within,omitempty"`
+	// Cooldown is the shortest gap between two runs of this agent for one
+	// person. Defaults to an hour, because the model can change many times a
+	// minute while a phone catches up after being offline.
+	Cooldown string `yaml:"cooldown,omitempty" json:"cooldown,omitempty"`
+}
+
+// The conditions a PersonTrigger may watch for.
+const (
+	// PersonWhenStateChanged fires when "right now" becomes something else:
+	// started driving, entered a Focus, woke up.
+	PersonWhenStateChanged = "state.changed"
+	// PersonWhenCommitmentDue fires when a commitment falls inside Within.
+	PersonWhenCommitmentDue = "commitment.due"
+	// PersonWhenRoutineDeviation fires when today departs from the usual
+	// shape of this weekday.
+	PersonWhenRoutineDeviation = "routine.deviation"
+)
+
+// PersonTriggerConditions lists every condition, for validation and for the
+// error message when someone writes a condition that does not exist.
+var PersonTriggerConditions = []string{
+	PersonWhenStateChanged, PersonWhenCommitmentDue, PersonWhenRoutineDeviation,
 }
 
 // MemoryPolicy controls how the agent reads and writes memory.
@@ -440,7 +478,11 @@ type Definition struct {
 	Channels []string         `yaml:"channels,omitempty"  json:"channels,omitempty"`
 	Schedule *Schedule        `yaml:"schedule,omitempty"  json:"schedule,omitempty"`
 	Location *LocationTrigger `yaml:"location,omitempty"  json:"location,omitempty"`
-	Webhook  *WebhookConfig   `yaml:"webhook,omitempty"   json:"webhook,omitempty"`
+
+	// Person is set when Trigger is "person": run me when what Soulacy
+	// understands about this person changes in this particular way.
+	Person  *PersonTrigger `yaml:"person,omitempty"    json:"person,omitempty"`
+	Webhook *WebhookConfig `yaml:"webhook,omitempty"   json:"webhook,omitempty"`
 
 	// --- Intelligence ---
 	SystemPrompt string    `yaml:"system_prompt" json:"system_prompt"`

@@ -145,7 +145,7 @@ func validateDefinitionShape(report *Report, def *agent.Definition, path string)
 		report.add(Warn, "trigger", "not set; runtime defaults may not match the intended activation mode", "", nil)
 	}
 	switch def.Trigger {
-	case "", agent.TriggerChannel, agent.TriggerCron, agent.TriggerOneShot, agent.TriggerWebhook, agent.TriggerInternal, agent.TriggerLocation:
+	case "", agent.TriggerChannel, agent.TriggerCron, agent.TriggerOneShot, agent.TriggerWebhook, agent.TriggerInternal, agent.TriggerLocation, agent.TriggerPerson:
 	default:
 		report.add(Error, "trigger", fmt.Sprintf("unsupported trigger %q", def.Trigger), "", nil)
 	}
@@ -153,6 +153,11 @@ func validateDefinitionShape(report *Report, def *agent.Definition, path string)
 		validateLocationTrigger(report, def.Location)
 	} else if def.Location != nil {
 		report.add(Warn, "location", "set but trigger is not \"location\"; the region is ignored", "", nil)
+	}
+	if def.Trigger == agent.TriggerPerson {
+		validatePersonTrigger(report, def.Person)
+	} else if def.Person != nil {
+		report.add(Warn, "person", "set but trigger is not \"person\"; the condition is ignored", "", nil)
 	}
 	if def.Trigger == agent.TriggerChannel && len(def.Channels) == 0 {
 		report.add(Warn, "channels", "channel-triggered agents normally declare at least one channel", "", nil)
@@ -786,6 +791,35 @@ func sortedCopy(values []string) []string {
 	out := append([]string(nil), values...)
 	sort.Strings(out)
 	return out
+}
+
+// validatePersonTrigger checks the change an agent wants to be woken for.
+//
+// A condition that does not exist is an error rather than a warning: an agent
+// that silently never runs is the worst failure mode here, because nothing
+// looks broken.
+func validatePersonTrigger(report *Report, trigger *agent.PersonTrigger) {
+	if trigger == nil {
+		report.add(Error, "person", "required for person trigger (when: "+strings.Join(agent.PersonTriggerConditions, ", ")+")", "", nil)
+		return
+	}
+	when := strings.ToLower(strings.TrimSpace(trigger.When))
+	known := false
+	for _, condition := range agent.PersonTriggerConditions {
+		if when == condition {
+			known = true
+		}
+	}
+	if !known {
+		report.add(Error, "person.when",
+			fmt.Sprintf("must be one of: %s", strings.Join(agent.PersonTriggerConditions, ", ")), "", nil)
+	}
+	if when != agent.PersonWhenCommitmentDue && strings.TrimSpace(trigger.Within) != "" {
+		report.add(Warn, "person.within",
+			"only "+agent.PersonWhenCommitmentDue+" uses a window; this one is ignored", "", nil)
+	}
+	validateDuration(report, "person.within", trigger.Within)
+	validateDuration(report, "person.cooldown", trigger.Cooldown)
 }
 
 // validateLocationTrigger checks the geofence a paired phone will monitor.

@@ -90,9 +90,9 @@ stops that section updating within one cycle.
 
 | Story | Gateway | Clients |
 |---|---|---|
-| **P5 Event sources** | The scheduler accepts triggers on model changes: `state.now` changed, `routine.deviation > x`, `commitments.due < 2h`, `relationships[x].pending`, `location.arrived(place)`, `focus.changed`. Debounced; one run per change per agent. | Phone reports the underlying signals; nothing new in the UI. |
+| **P5 Event sources** (shipped) | The scheduler accepts triggers on model changes: `state.now` changed, `routine.deviation > x`, `commitments.due < 2h`, `relationships[x].pending`, `location.arrived(place)`, `focus.changed`. Debounced; one run per change per agent. | Phone reports the underlying signals; nothing new in the UI. |
 | **P6 Channel senses** | Email and messaging channels become perception inputs, not only chat surfaces: an observer reads new mail/messages for commitments and relationship updates (with the person's consent per channel). | Web: per-channel "let Soulacy read this for commitments" switch. |
-| **P7 Quiet by design** | A run started by a trigger that finds nothing worth saying produces no notification, only an audit entry. Notification budget per day, per person, tunable. | Settings: "How often may Soulacy interrupt?" |
+| **P7 Quiet by design** (gateway shipped) | A run started by a trigger that finds nothing worth saying produces no notification, only an audit entry. Notification budget per day, per person, tunable. | Settings: "How often may Soulacy interrupt?" |
 
 ### Slice 3 — The life loop agent
 
