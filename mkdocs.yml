@@ -156,6 +156,7 @@ nav:
     - Chat: using/chat.md
     - Verified Autopilot: using/autopilot.md
     - Adaptive Memory: using/adaptive-memory.md
+    - The Person Model: using/person-model.md
     - Learning Notebook: using/learning-notebook.md
     - Model Preparation: using/model-preparation.md
     - Published Files: using/published-files.md

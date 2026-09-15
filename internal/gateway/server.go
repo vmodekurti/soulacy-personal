@@ -67,6 +67,7 @@ import (
 	"github.com/soulacy/soulacy/internal/llm"
 	"github.com/soulacy/soulacy/internal/mcp"
 	"github.com/soulacy/soulacy/internal/metrics"
+	"github.com/soulacy/soulacy/internal/person"
 	"github.com/soulacy/soulacy/internal/plugininstall"
 	"github.com/soulacy/soulacy/internal/queue/dlq"
 	"github.com/soulacy/soulacy/internal/ratelimit"
@@ -89,6 +90,7 @@ import (
 // Server is the Soulacy gateway server.
 type Server struct {
 	autopilotStore   *autopilot.Store
+	personModel      person.Store
 	undoStore        *safeundo.Store
 	adaptiveRebuild  AdaptiveMemoryRebuilder
 	autopilotMu      sync.Mutex
@@ -842,6 +844,7 @@ func (s *Server) buildApp() *fiber.App {
 
 	// Adaptive memory: user-scoped facts (Story E30)
 	s.registerAdaptiveMemoryRoutes(api)
+	s.registerPersonRoutes(api)
 	// Location triggers monitored by paired phones (E51)
 	s.registerMobileTriggerRoutes(api)
 	s.registerLiveActivityRoutes(api)
