@@ -1143,6 +1143,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../use-cases/steward/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The Steward
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../use-cases/phone-brief/" class="md-nav__link">
         
   
@@ -4945,7 +4973,7 @@ memory, with a fixed shape so agents and observers agree on it.</p>
 <td>Agent templates gain <code>person.model</code> in their builtins (next).</td>
 </tr>
 <tr>
-<td><strong>P3 Observers</strong> (state, routine shipped)</td>
+<td><strong>P3 Observers</strong> (state, routine, commitments shipped)</td>
 <td>Small scheduled digesters, not LLM agents where a rule will do: <strong>routine</strong> (from <code>location.current</code>, <code>motion.current</code>, <code>focus.status</code> samples: usual wake, leave, arrive, sleep windows and the deviation of today), <strong>commitments</strong> (from calendar, reminders, email threads with a question or a deadline), <strong>relationships</strong> (from contacts, calendar attendees, message senders: who, how often, what is pending), <strong>state</strong> (from health summary, Focus, time of day, travel). Each writes only its section and never overwrites a manual entry.</td>
 <td>Phone answers the sampling commands in the background where iOS allows (location, Focus, health summary once a day).</td>
 </tr>
@@ -5013,12 +5041,12 @@ stops that section updating within one cycle.</p>
 </thead>
 <tbody>
 <tr>
-<td><strong>P8 Steward template</strong></td>
+<td><strong>P8 Steward template</strong> (shipped)</td>
 <td>One agent template, <code>steward</code>, that owns the model: on each trigger it reads the model, reconciles commitments, and proposes at most three actions as approvals or a canvas checklist. It delegates to specialist agents (Planner, Receipt Keeper, Meeting Prep) rather than doing their work.</td>
 <td>Phone brief becomes a view of the steward's morning pass; CarPlay and watch read its short form.</td>
 </tr>
 <tr>
-<td><strong>P9 Explain itself</strong></td>
+<td><strong>P9 Explain itself</strong> (prompt-level, shipped)</td>
 <td>Every proposal carries "because": the model rows it used.</td>
 <td>Tap "why" on a proposal to see the rows; correcting a row re-runs the proposal.</td>
 </tr>
