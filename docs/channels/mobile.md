@@ -101,6 +101,16 @@ The iOS app exposes App Intents so agents work without opening the app:
 paired credential and the same APIs as the app, so nothing new has to be
 configured on the gateway.
 
+## Apple Watch
+
+The iPhone build carries a watch app. It pairs through the phone once:
+the phone calls `POST /pairing/tokens` with no body, which issues a code
+for the same subject, and the watch redeems it and keeps the resulting
+managed key. From then on the watch calls `GET /approvals`,
+`POST /approvals/:id/approve` or `…/deny`, `GET /agents` and `POST /chat` (voice mode)
+directly, so it shows up as its own key in the household list and can be
+revoked on its own. Nothing else has to be configured on the gateway.
+
 ## Agent-built UI
 
 An agent can draw a native card on a paired phone with the `canvas.present`

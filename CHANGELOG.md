@@ -7,6 +7,10 @@ to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Apple Watch app in the iPhone build (soulacy-ios): complication with the
+  pending-approval count, dictated questions read aloud, and an approvals
+  list. The watch pairs through the phone with `POST /pairing/tokens` and
+  holds its own managed key; no gateway change was needed.
 - Chat attachments accept `extracted_text` from the client: a phone reads a
   photo on-device (Vision) and sends the text alongside the file, since the
   gateway has no OCR. Server-side extraction still wins for documents. Image
