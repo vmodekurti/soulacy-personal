@@ -13,6 +13,9 @@ to follow [Semantic Versioning](https://semver.org/).
   second device stays a viewer.
 
 ### Added
+- `docs/PERSONAL_ASSISTANT_PROGRAM.md`: the build plan for Soulacy as a
+  true personal assistant (perceive, understand, act, learn), with the
+  person model as slice one and a concrete schema.
 - Apple Watch app in the iPhone build (soulacy-ios): complication with the
   pending-approval count, dictated questions read aloud, and an approvals
   list. The watch pairs through the phone with `POST /pairing/tokens` and
