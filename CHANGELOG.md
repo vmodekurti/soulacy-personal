@@ -88,6 +88,9 @@ to follow [Semantic Versioning](https://semver.org/).
   the provider is unconfigured.
 
 ### Changed
+- When an agent runs out of turns before writing its answer, the fallback
+  now says so and renders what was gathered as readable "key: value" lines
+  instead of raw tool JSON.
 - Fixed: device registration from a phone that offered a Live Activity
   push-to-start token was refused (400) because the token was checked
   against the 32-byte APNs device-token length; ActivityKit tokens are

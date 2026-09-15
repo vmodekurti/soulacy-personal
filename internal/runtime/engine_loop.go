@@ -1253,58 +1253,6 @@ func splitVoiceResponse(content string) (display, spoken string) {
 	return display, spoken
 }
 
-// bestEffortFinal recovers a usable reply from the conversation context when
-// every synthesis attempt yielded empty content (e.g. a reasoning model that
-// kept spending its turns inside <think> blocks). It prefers the last
-// substantive assistant message; failing that, it builds a concise digest of
-// the gathered tool results so the user receives the information that was
-// collected instead of "(no final response produced)". Returns "" only when
-// there is genuinely nothing to surface.
-func bestEffortFinal(chatMsgs []llm.ChatMessage) string {
-	// 1) Last substantive assistant message.
-	for i := len(chatMsgs) - 1; i >= 0; i-- {
-		m := chatMsgs[i]
-		if m.Role == "assistant" {
-			if c := strings.TrimSpace(m.Content); c != "" {
-				return c
-			}
-		}
-	}
-	// 2) Digest of tool results (most recent first, capped for sanity).
-	const maxToolResults = 6
-	const maxPerResult = 1200
-	var collected []string
-	for i := len(chatMsgs) - 1; i >= 0 && len(collected) < maxToolResults; i-- {
-		m := chatMsgs[i]
-		if m.Role != "tool" {
-			continue
-		}
-		c := strings.TrimSpace(m.Content)
-		if c == "" {
-			continue
-		}
-		if len(c) > maxPerResult {
-			c = c[:maxPerResult] + "…"
-		}
-		label := m.Name
-		if label == "" {
-			label = "result"
-		}
-		collected = append(collected, "- "+label+": "+c)
-	}
-	if len(collected) == 0 {
-		return ""
-	}
-	// Reverse back to chronological order for readability.
-	for l, r := 0, len(collected)-1; l < r; l, r = l+1, r-1 {
-		collected[l], collected[r] = collected[r], collected[l]
-	}
-	var b strings.Builder
-	b.WriteString("Based on the information gathered:\n\n")
-	b.WriteString(strings.Join(collected, "\n"))
-	return b.String()
-}
-
 // finalSynthesis makes one LLM call with NO tools, forcing the model to produce
 // a plain-text answer from the context it already gathered. Used when a model
 // won't stop emitting tool calls on its own (common with local/Ollama models).
