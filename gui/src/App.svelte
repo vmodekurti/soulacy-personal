@@ -67,6 +67,7 @@
     agents: () => import('./pages/Agents.svelte'),
     templates: () => import('./pages/Templates.svelte'),
     chat: () => import('./pages/Chat.svelte'),
+    person: () => import('./pages/Person.svelte'),
     memory: () => import('./pages/Memory.svelte'),
     knowledge: () => import('./pages/Knowledge.svelte'),
     queues: () => import('./pages/Queues.svelte'),

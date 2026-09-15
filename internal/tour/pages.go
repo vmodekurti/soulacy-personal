@@ -194,6 +194,21 @@ var pages = map[string]page{
 		},
 	},
 
+	"person": {
+		// No call to action: the shared vocabulary has no verb for "open a
+		// chat with this agent", and a button that cannot act is worse than
+		// the sentence below, which tells you exactly where to go.
+		stage: StageGrowth, nextAction: "", nextLabel: "",
+		role:         "What Soulacy understands about you, rather than about your agents.",
+		contribution: "Agents read it instead of working out your context from scratch every run, so they can tell an ordinary day from an unusual one.",
+		whenEmpty: func(InstallState) string {
+			return "Nothing known about you yet, which is the honest starting point. The quickest fix is the Getting to Know You agent in Chat: a few questions, and every other agent has something to work with. Sensors can fill in the rest, but only after you switch them on, and only after a few weeks of days to compare."
+		},
+		whenUsed: func(InstallState) string {
+			return "Read the labels, not just the lines. \"You told us\" is something you said; anything else is a guess, and a guess you leave uncorrected is one your agents will act on."
+		},
+	},
+
 	"memory": {
 		stage: StageGrowth, nextAction: "", nextLabel: "",
 		role:         "What your agents have picked up along the way.",
