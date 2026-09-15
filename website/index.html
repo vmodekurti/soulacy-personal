@@ -145,6 +145,7 @@
       <div class="hidden md:flex items-center gap-6 text-sm text-ink-400">
         <a href="#why" class="hover:text-ink-100">Why Soulacy</a>
           <a href="#recent" class="hover:text-ink-100">What's new</a>
+        <a href="#iphone" class="hover:text-ink-100">iPhone</a>
         <a href="#security" class="hover:text-ink-100">Security</a>
         <a href="#compare"  class="hover:text-ink-100">Compare</a>
         <a href="#cloud" class="hover:text-ink-100">Cloud</a>
@@ -414,6 +415,75 @@
         <span class="w-8 h-px bg-white/10"></span>
         <a href="https://docs.soulacy.io/recent-updates/" class="text-ink-100 hover:text-wire-500">Read the complete platform update →</a>
       </div>
+    </div>
+  </section>
+
+  <!-- ── IPHONE ─────────────────────────────────────────────────────────────── -->
+  <section id="iphone" class="border-t border-white/5 scroll-mt-24">
+    <div class="max-w-6xl mx-auto px-5 py-16 md:py-24">
+      <div class="max-w-3xl">
+        <div class="chip chip-green mb-4">native iPhone companion</div>
+        <h2 class="text-3xl md:text-4xl font-bold tracking-tight">Your agents, on your hardware, with your phone as their hands and eyes.</h2>
+        <p class="mt-4 text-ink-400 text-lg leading-relaxed">
+          The gateway is the brain. The iPhone is where an agent asks you for a decision when you are not at a desk, and the only device that knows where you are, what is on your calendar, how you slept, and whether a Focus is on. Every phone capability an agent can touch is a line in its file and a toggle on the phone. Nothing risky happens without you.
+        </p>
+      </div>
+
+      <div class="mt-10 grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div class="card p-5 border-signal-500/30">
+          <div class="text-lg mb-2">🔒</div>
+          <h3 class="font-semibold text-ink-100">Approve on the lock screen</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">A run that needs your yes appears as a Live Activity with Approve and Deny. High-risk tools ask for Face ID. The approval is a durable record on your own gateway, so you can always answer who approved what. <span class="text-signal-400 font-medium">Only here:</span> cloud assistants have no approval object to show you.</p>
+        </div>
+        <div class="card p-5 border-signal-500/30">
+          <div class="text-lg mb-2">📍</div>
+          <h3 class="font-semibold text-ink-100">Phone sensors as declared tools</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Location, calendar, reminders, contacts, motion, Health totals and Focus state are available only to an agent whose <span class="code-font">SOUL.yaml</span> lists them, and only after you enable the matching toggle on the phone. Two gates, both readable. <span class="text-signal-400 font-medium">Only here:</span> user-authored agents with a permission line you can review and roll back.</p>
+        </div>
+        <div class="card p-5 border-signal-500/30">
+          <div class="text-lg mb-2">🏠</div>
+          <h3 class="font-semibold text-ink-100">Signals that stay on your network</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Sleep, steps, location and Focus feed your agents and adaptive memory on a box you own, with a local model if you choose. <span class="text-signal-400 font-medium">Only here:</span> Apple keeps Health on-device but will not run your agents; every cloud assistant needs the data uploaded.</p>
+        </div>
+        <div class="card p-5">
+          <div class="text-lg mb-2">🌙</div>
+          <h3 class="font-semibold text-ink-100">Attended and unattended are different</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">A privileged step in a scheduled 3 a.m. run is refused unless the agent file says <span class="code-font">unattended: true</span>. An attended run pages your phone and waits. The rule is in the runtime; the phone is the proof a human is reachable.</p>
+        </div>
+        <div class="card p-5">
+          <div class="text-lg mb-2">🗺️</div>
+          <h3 class="font-semibold text-ink-100">Arrive, and an agent runs</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">An agent with <span class="code-font">trigger: location</span> runs when you reach or leave a place it declared. It inherits the same permissions and records as any other run.</p>
+        </div>
+        <div class="card p-5">
+          <div class="text-lg mb-2">🚗</div>
+          <h3 class="font-semibold text-ink-100">Siri, Shortcuts and CarPlay</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">“Talk to Planner in Soulacy” works on the phone, on AirPods and in the car, with replies read back. Run an agent, remember a fact or approve a pending action from a Shortcut. Approvals always wait for the phone.</p>
+        </div>
+        <div class="card p-5">
+          <div class="text-lg mb-2">📤</div>
+          <h3 class="font-semibold text-ink-100">Share sheet in, durable inbox out</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">File a document, photo, link or text from any app into a knowledge base or an agent; photos are read on the phone first. Scheduled results land in an inbox on the gateway, so a missing push never loses a result.</p>
+        </div>
+        <div class="card p-5">
+          <div class="text-lg mb-2">🧾</div>
+          <h3 class="font-semibold text-ink-100">The same safety, in your pocket</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Safe Undo previews and receipts, the Learning Notebook, release gates and published-file previews all work from the phone. Offline actions queue in an outbox; sensitive writes stay online.</p>
+        </div>
+        <div class="card p-5">
+          <div class="text-lg mb-2">👪</div>
+          <h3 class="font-semibold text-ink-100">One gateway, a household of phones</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Pair a phone for someone else with their own identity, inbox and memory, as <strong class="text-ink-200">Can run agents</strong> or <strong class="text-ink-200">View only</strong>. Unpair revokes the phone and keeps their memory on the gateway.</p>
+        </div>
+      </div>
+
+      <div class="mt-10 flex flex-wrap items-center gap-x-6 gap-y-3 text-sm text-ink-400">
+        <span class="w-8 h-px bg-white/10"></span>
+        <a href="https://docs.soulacy.io/iphone/" class="text-ink-100 hover:text-wire-500">See everything the iPhone adds →</a>
+        <a href="https://docs.soulacy.io/getting-started/iphone/" class="hover:text-ink-100">Connect your iPhone</a>
+        <a href="https://docs.soulacy.io/use-cases/phone-brief/" class="hover:text-ink-100">Build a brief from your phone’s signals</a>
+      </div>
+      <p class="mt-4 text-xs text-ink-400">Device capabilities start off and are foreground-bound. Pairing is not consent to monitoring. The iOS app and gateway are versioned independently.</p>
     </div>
   </section>
 
