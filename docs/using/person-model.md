@@ -103,6 +103,58 @@ The change feed has the same shape as `/memory/facts/sync`, so a phone or
 watch holds a local copy and catches up incrementally; `reset: true` means
 the model was purged and the device should drop its copy.
 
+## Where the sense entries come from
+
+Observers are small digesters that turn raw device signals into model
+entries. They are plain rules, not agents: "what time do they usually
+leave" is a median, and a rule cannot hallucinate.
+
+**The phone pushes; the gateway does not pull.** Device commands only run
+while the Soulacy app is in the foreground, so a scheduled pull would find
+an empty phone for most of the day. Region crossings and Focus changes
+arrive in the background instead, which is exactly when they matter.
+
+```
+POST /api/v1/person/observations
+{"observations": [
+  {"kind": "arrival",  "at": "2026-09-15T08:55:00Z", "payload": {"place": "work"}},
+  {"kind": "focus",    "payload": {"mode": "Work"}},
+  {"kind": "sleep",    "payload": {"hours": 6.2}}
+]}
+```
+
+The owner always comes from the credential, never from the body. The reply
+says how many signals were recorded, how many were ignored for want of
+consent, and how many model entries were applied or refused.
+
+| Observer | Reads | Concludes |
+| --- | --- | --- |
+| `state` | `focus`, `motion`, `sleep` | `state/now` (driving, moving, in a Focus, settled) and `state/rest`. Expires within the hour, because a stale "commuting" is worse than silence. |
+| `routine` | `arrival`, `departure` | One entry per weekday, kind and place ("Tuesday leaves home around 08:10"), plus `routine/today.deviation` when today is more than half an hour off. |
+
+`routine` needs at least four matching days before it will call anything
+usual, and ignores behaviour scattered over more than an hour. Today is
+never counted into the habit it is measured against.
+
+## Consent
+
+Every sense is off until you switch it on, one at a time.
+
+```
+GET /api/v1/person/senses          each sense, whether it is on, and its purpose
+PUT /api/v1/person/senses/state    {"enabled": true}
+```
+
+Each switch carries a plain-language purpose, because a consent control
+with no stated reason is not consent. Switching a sense **off** removes
+what it concluded and the raw signals it collected, not just what it would
+conclude next: withdrawing consent should leave no inference behind. Signals
+a switched-off sense would read are ignored on arrival, so a phone that has
+not noticed yet cannot keep feeding it.
+
+Raw signals are kept for 35 days at most, which is enough for a routine to
+have an opinion and no longer.
+
 ## Turning it off
 
 It is a store, not a behaviour: an agent that does not list the builtins
