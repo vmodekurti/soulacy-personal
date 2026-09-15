@@ -248,6 +248,9 @@ func TestPersonObservationsAreIgnoredWithoutConsentAndDigestedWithIt(t *testing.
 		t.Fatalf("withdrawing consent should forget the inference: %d %+v", code, body)
 	}
 	code, body = doJSON(t, kai, http.MethodGet, "/api/v1/person/model", "")
+	if code != http.StatusOK {
+		t.Fatalf("the model is still readable after a sense is switched off: %d", code)
+	}
 	if entries, _ := body["entries"].([]any); len(entries) != 0 {
 		t.Fatalf("the conclusion must go with the consent: %+v", entries)
 	}
