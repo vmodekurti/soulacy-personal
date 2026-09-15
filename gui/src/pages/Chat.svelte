@@ -4,7 +4,8 @@
   import { onDestroy, onMount, tick } from 'svelte'
   import { slide } from 'svelte/transition'
   import { api, apiFetch, createEventSocket } from '../lib/api.js'
-  import { chatActiveThreadId, chatThreads, connected } from '../lib/stores.js'
+  import { chatActiveThreadId, chatThreads, connected, genieAsk } from '../lib/stores.js'
+  import { pickGenieAgent } from '../lib/genie.js'
   import RunMetrics from '../lib/RunMetrics.svelte'
   import { entryIdForMessage, nextBranchLabel, entriesToMessages } from '../lib/chatbranch.js'
   import { deltaMetrics, deltaLabel, deltaTitle } from '../lib/chatmetrics.js'
@@ -343,6 +344,7 @@
     if (mobileViewport) chatListHidden = true
     metricsRefresh++
     scrollBottom()
+    return thread
   }
 
   function defaultAgentId() {
@@ -522,6 +524,29 @@
     } catch (e) { error = e.message }
   }
 
+  // ── Ask Genie handoff ────────────────────────────────────────────────
+  // The floating button (lib/AskGenie.svelte) stores the question and brings
+  // us here. Answer it in a fresh thread with the best agent for the words.
+  let pendingGenieAsk = null
+  const unsubscribeGenieAsk = genieAsk.subscribe(req => {
+    if (!req) return
+    pendingGenieAsk = req
+    genieAsk.set(null)
+    if (agents.length) answerGenieAsk()
+    // else: answered right after loadAgents() in onMount
+  })
+
+  async function answerGenieAsk() {
+    const req = pendingGenieAsk
+    if (!req) return
+    pendingGenieAsk = null
+    const agent = pickGenieAgent(agents, req.text)
+    if (!agent) { error = 'No chat-capable agent is available to answer that.'; return }
+    const thread = startThread(agent.id)
+    await tick()
+    await send(req.text, undefined, '', thread)
+  }
+
   async function loadProviders() {
     try {
       const res = await api.providers.list()
@@ -568,21 +593,24 @@
   // NOTE: this function intentionally uses store setters, not local vars.
   // If the component unmounts mid-request, the async continuation still
   // runs and updates the store; the component picks it up on remount.
-  async function send(textArg, overridesArg, responseMode = '') {
+  async function send(textArg, overridesArg, responseMode = '', threadArg = null) {
     // Event handlers receive a MouseEvent as their first argument when they are
     // passed directly to on:click. Only an explicit string is a message;
     // everything else must use the composer value.
     const hasExplicitText = typeof textArg === 'string'
     const text = (hasExplicitText ? textArg : input).trim()
-    if (!text || !activeThread?.agentId || isSending) return
+    // A caller that just created a thread passes it explicitly: the derived
+    // `activeThread` only catches up on the next render.
+    const thread = threadArg || activeThread
+    if (!text || !thread?.agentId || thread.sending) return
     const overrides = overridesArg !== undefined ? overridesArg : buildOverrides(controls)
-    const threadId = activeThread.id
-    const runSessionId = activeThread.sessionId
+    const threadId = thread.id
+    const runSessionId = thread.sessionId
     // @mention routing (#9): a leading "@agent" sends just this turn to another
     // agent. We keep the user's typed text (mention and all) in the bubble, but
     // send the stripped text to the routed agent and tag the reply with "via".
     const route = resolveMention(text)
-    const runAgentId = route ? route.agentId : activeThread.agentId
+    const runAgentId = route ? route.agentId : thread.agentId
     const sendText = route ? route.cleanText : text
     const viaName = route ? route.name : ''
     const runKey = `${runAgentId}|${runSessionId}`
@@ -605,7 +633,7 @@
 
     // Pre-turn metrics snapshot for the token delta (Story 9). Cached per
     // session; the first turn fetches (404 → null baseline = "all new").
-    let preTurn = activeThread.metricsBaseline?.[runSessionId] ?? null
+    let preTurn = thread.metricsBaseline?.[runSessionId] ?? null
     if (preTurn === null) {
       preTurn = await api.runs.metrics(runSessionId, runAgentId).catch(() => null)
     }
@@ -2055,6 +2083,8 @@
     if (Object.keys($chatThreads).length === 0) restoreThreads()
     hydrated = true       // now persist future changes
     await Promise.all([loadAgents(), loadProviders()])
+    // A question from the floating Ask Genie button, asked before Chat mounted.
+    if (pendingGenieAsk) await answerGenieAsk()
     // First-run wizard hands off the freshly created agent so Chat opens with it
     // already selected ("land in Chat with a working agent"). One-shot: consumed
     // then cleared so normal navigation isn't affected.
@@ -2080,6 +2110,7 @@
   })
 
   onDestroy(() => {
+    unsubscribeGenieAsk()
     stopEvents = true
     if (ws) ws.close()
     teardownVoice()
