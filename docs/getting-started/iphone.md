@@ -119,6 +119,23 @@ Announce Notifications) and, in the car, **Announce Messages** is on for
 CarPlay. Nothing else is shown in the car, and approvals always wait for
 the phone. Allow Siri for Soulacy the first time iOS asks.
 
+## 4c. Apple Watch
+
+The iPhone app includes a watch app. Install it from the Watch app on the
+phone (My Watch → Available Apps), open it, and tap **Pair with iPhone**
+with the phone nearby and unlocked. The phone asks your gateway for a
+pairing code on your behalf and the watch redeems it, so the watch signs in
+as you with a credential of its own. Revoking it on the web Mobile page
+signs out the watch only.
+
+On the wrist you get three things. A complication (add "Soulacy" to a
+watch face or the Smart Stack) shows how many approvals are waiting and
+how long the oldest has left, or the last thing an agent said. The first
+screen lets you dictate a question to the agent you picked and reads the
+reply aloud; past replies are one page down. Approvals are one page up,
+with Approve and Deny. Phone notifications already reach the watch with
+the same two actions, so most approvals never need the list.
+
 ## 5. Grant device access only for a real task
 
 Open **Settings → Device access**. Capabilities start off. Enable only the ones
