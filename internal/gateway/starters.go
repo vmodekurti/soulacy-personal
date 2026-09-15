@@ -17,7 +17,7 @@ import (
 // "system" and "genie" are not here: they are built in (see
 // runtime.Loader.seedBuiltins) and need no file. This list is for agents that
 // should exist as ordinary, editable, deletable YAML.
-var StarterAgents = []string{"getting-to-know-you"}
+var StarterAgents = []string{"getting-to-know-you", "steward"}
 
 // starterRecord remembers which starters an installation has already been
 // offered. It is not a list of what exists now: deleting a starter must keep

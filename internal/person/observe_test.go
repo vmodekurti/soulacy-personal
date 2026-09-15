@@ -288,3 +288,149 @@ func TestObservationBufferPrunesOldSignals(t *testing.T) {
 		t.Fatalf("kind filter: %+v", none)
 	}
 }
+
+func TestCommitmentsObserverKeepsOneEntryPerReminder(t *testing.T) {
+	now := time.Date(2026, 9, 15, 9, 0, 0, 0, time.UTC) // a Tuesday
+	observer := CommitmentsObserver{}
+
+	rem := func(id, title string, due time.Time, done bool, seen time.Time) Observation {
+		payload := map[string]any{"id": id, "title": title, "done": done}
+		if !due.IsZero() {
+			payload["due"] = due.Format(time.RFC3339)
+		}
+		return observation(KindReminder, seen, payload)
+	}
+
+	entries := observer.Digest("kai", []Observation{
+		rem("r1", "Send Priya the proposal", now.Add(72*time.Hour), false, now.Add(-time.Hour)),
+		rem("r2", "Renew the passport", time.Time{}, false, now.Add(-time.Hour)),
+		rem("r3", "Pay the water bill", now.Add(-48*time.Hour), false, now.Add(-time.Hour)),
+	}, now)
+
+	if len(entries) != 3 {
+		t.Fatalf("one entry per reminder: %+v", entries)
+	}
+	byKey := map[string]Entry{}
+	for _, e := range entries {
+		byKey[e.Key] = e
+	}
+	if got := byKey["reminder.r1"].Summary; !strings.Contains(got, "due Friday") {
+		t.Fatalf("a due date inside the week should read as a weekday: %q", got)
+	}
+	if got := byKey["reminder.r2"].Summary; got != "Renew the passport" {
+		t.Fatalf("no due date means no due clause: %q", got)
+	}
+	if got := byKey["reminder.r3"].Summary; !strings.Contains(got, "overdue since") {
+		t.Fatalf("an overdue commitment must say so: %q", got)
+	}
+	if byKey["reminder.r2"].ExpiresAt != nil {
+		t.Fatal("a commitment with no due date should not expire on its own")
+	}
+	if byKey["reminder.r1"].Source != "sense:commitments" {
+		t.Fatalf("source: %q", byKey["reminder.r1"].Source)
+	}
+}
+
+func TestCommitmentsObserverTrustsTheNewestSightingOfAReminder(t *testing.T) {
+	now := time.Date(2026, 9, 15, 9, 0, 0, 0, time.UTC)
+	entries := CommitmentsObserver{}.Digest("kai", []Observation{
+		observation(KindReminder, now.Add(-5*time.Hour), map[string]any{"id": "r1", "title": "Draft the proposal"}),
+		observation(KindReminder, now.Add(-time.Hour), map[string]any{"id": "r1", "title": "Send Priya the proposal"}),
+	}, now)
+
+	if len(entries) != 1 {
+		t.Fatalf("the same reminder must not become two commitments: %+v", entries)
+	}
+	if entries[0].Summary != "Send Priya the proposal" {
+		t.Fatalf("the newest sighting wins: %q", entries[0].Summary)
+	}
+}
+
+func TestAFinishedReminderStopsBeingACommitment(t *testing.T) {
+	now := time.Date(2026, 9, 15, 9, 0, 0, 0, time.UTC)
+	seen := now.Add(-time.Minute)
+	entries := CommitmentsObserver{}.Digest("kai", []Observation{
+		observation(KindReminder, seen, map[string]any{"id": "r1", "title": "Pay the water bill", "done": true}),
+	}, now)
+
+	if len(entries) != 1 {
+		t.Fatalf("expected the entry so it can be retired: %+v", entries)
+	}
+	if entries[0].ExpiresAt == nil || entries[0].ExpiresAt.After(now) {
+		t.Fatalf("a finished reminder must be expired, so devices see a tombstone: %+v", entries[0].ExpiresAt)
+	}
+	if !entries[0].Expired(now) {
+		t.Fatal("and it must not be read as an open commitment")
+	}
+}
+
+func TestCommitmentsObserverIgnoresUnusableReminders(t *testing.T) {
+	now := time.Now().UTC()
+	entries := CommitmentsObserver{}.Digest("kai", []Observation{
+		observation(KindReminder, now, map[string]any{"title": "No id, so nothing to key on"}),
+		observation(KindReminder, now, map[string]any{"id": "r9"}),
+	}, now)
+	if len(entries) != 0 {
+		t.Fatalf("a reminder with no id or no title cannot become a commitment: %+v", entries)
+	}
+}
+
+func TestForgettingEverythingAlsoForgetsTheSignalsBehindIt(t *testing.T) {
+	ctx := t.Context()
+	store := testStore(t)
+	now := time.Now().UTC()
+
+	if _, err := store.Record(ctx, []Observation{
+		observation(KindReminder, now.Add(-time.Minute), map[string]any{"id": "r1", "title": "Pay the water bill"}),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Digest(ctx, store, store, "kai", Observers(), func(string) bool { return true }, now); err != nil {
+		t.Fatal(err)
+	}
+	if entries, _ := store.List(ctx, "kai", Query{}); len(entries) != 1 {
+		t.Fatalf("precondition: one commitment: %+v", entries)
+	}
+
+	if _, err := store.Purge(ctx, "kai"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The next observer pass must not resurrect what was just forgotten.
+	if _, _, err := Digest(ctx, store, store, "kai", Observers(), func(string) bool { return true }, now); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := store.List(ctx, "kai", Query{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("forget everything must outlast the next digest: %+v", entries)
+	}
+	if observations, _ := store.Observations(ctx, "kai", nil, now.Add(-time.Hour)); len(observations) != 0 {
+		t.Fatalf("the raw signals should be gone too: %+v", observations)
+	}
+}
+
+func TestPurgingOneSectionLeavesTheSignalsAlone(t *testing.T) {
+	ctx := t.Context()
+	store := testStore(t)
+	now := time.Now().UTC()
+
+	if _, err := store.Record(ctx, []Observation{
+		observation(KindReminder, now.Add(-time.Minute), map[string]any{"id": "r1", "title": "Pay the water bill"}),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Digest(ctx, store, store, "kai", Observers(), func(string) bool { return true }, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Purge(ctx, "kai", SectionCommitments); err != nil {
+		t.Fatal(err)
+	}
+	// A narrower purge clears conclusions; the sense is still switched on, so
+	// its signals stay and the next pass legitimately rebuilds from them.
+	if observations, _ := store.Observations(ctx, "kai", nil, now.Add(-time.Hour)); len(observations) != 1 {
+		t.Fatalf("a sectioned purge should not drop raw signals: %+v", observations)
+	}
+}
