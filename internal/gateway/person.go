@@ -12,6 +12,7 @@ import (
 	"github.com/soulacy/soulacy/internal/auth"
 	"github.com/soulacy/soulacy/internal/person"
 	"github.com/soulacy/soulacy/internal/rbac"
+	"github.com/soulacy/soulacy/internal/runtime"
 )
 
 // SetPersonModel installs the person model store. Nil leaves the routes
@@ -371,9 +372,19 @@ func (s *Server) handlePersonObservations(c *fiber.Ctx) error {
 		return personErr(c, err)
 	}
 	now := time.Now().UTC()
+	// Snapshot before digesting: a trigger fires on the difference between
+	// two states, not on the fact that a write happened. An observer that
+	// rewrites an identical line every minute is not a change.
+	before, _ := person.ModelFor(ctx, store, owner, now)
 	applied, refused, err := person.Digest(ctx, store, buffer, owner, person.Observers(), func(sense string) bool { return enabled[sense] }, now)
 	if err != nil {
 		return personErr(c, err)
+	}
+	if applied > 0 {
+		if after, err := person.ModelFor(ctx, store, owner, now); err == nil {
+			principal, _ := requestPrincipal(c)
+			s.firePersonTriggers(before, after, owner, runtime.Principal{Subject: principal.Subject, Role: principal.Role})
+		}
 	}
 	// Self-maintaining: one indexed delete keeps the buffer inside its window.
 	_, _ = buffer.PruneObservations(ctx, now.Add(-person.ObservationRetention))
