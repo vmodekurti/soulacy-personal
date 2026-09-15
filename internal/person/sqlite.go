@@ -318,6 +318,17 @@ func (s *SQLiteStore) Purge(ctx context.Context, owner string, sections ...Secti
 	if _, err := tx.ExecContext(ctx, `DELETE FROM person_changes WHERE `+where, args...); err != nil {
 		return 0, err
 	}
+	// Forgetting everything has to mean the raw signals too. Leaving them
+	// would let the next observer pass re-derive exactly what was just
+	// forgotten, which makes "forget everything" a promise that lasts until
+	// the phone next checks in. A sectioned purge is narrower on purpose: it
+	// clears conclusions, and the signals behind them stay until that sense
+	// is switched off.
+	if len(sections) == 0 {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM person_observations WHERE owner = ?`, owner); err != nil {
+			return 0, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}

@@ -254,6 +254,8 @@ func personSensePurpose(sense string) string {
 		return "Notice whether you are driving, in a Focus or resting, so agents can pick their moment. Kept for under an hour."
 	case "routine":
 		return "Learn the usual shape of your day from arrivals and departures, so agents can tell an ordinary day from an unusual one."
+	case "commitments":
+		return "Keep track of what you are on the hook for, from your reminders, so an agent can raise something due without waiting for you to open the app."
 	default:
 		return "Digest device signals into what Soulacy understands about you."
 	}

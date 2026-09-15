@@ -36,10 +36,11 @@ const (
 	KindMotion    = "motion"
 	KindSleep     = "sleep"
 	KindCalendar  = "calendar"
+	KindReminder  = "reminder"
 )
 
 // KnownKinds is every kind an observer currently digests.
-var KnownKinds = []string{KindArrival, KindDeparture, KindFocus, KindMotion, KindSleep, KindCalendar}
+var KnownKinds = []string{KindArrival, KindDeparture, KindFocus, KindMotion, KindSleep, KindCalendar, KindReminder}
 
 // ObservationRetention bounds how far back the buffer is kept. Routines need
 // weeks of history to have an opinion; nothing needs months, and a device
@@ -81,6 +82,25 @@ func (o Observation) String(key string) string {
 	return ""
 }
 
+// Bool returns the payload value for key, or false.
+func (o Observation) Bool(key string) bool {
+	v, _ := o.Payload[key].(bool)
+	return v
+}
+
+// Time parses an RFC 3339 payload value, or returns the zero time.
+func (o Observation) Time(key string) time.Time {
+	raw := o.String(key)
+	if raw == "" {
+		return time.Time{}
+	}
+	parsed, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed.UTC()
+}
+
 // Number returns the payload value for key as a float, or 0.
 func (o Observation) Number(key string) float64 {
 	switch v := o.Payload[key].(type) {
@@ -109,7 +129,7 @@ type Observer interface {
 
 // Observers is the default set.
 func Observers() []Observer {
-	return []Observer{StateObserver{}, RoutineObserver{}}
+	return []Observer{StateObserver{}, RoutineObserver{}, CommitmentsObserver{}}
 }
 
 // Digest runs every enabled observer over the owner's recent observations and
@@ -392,4 +412,94 @@ func abs(v int) int {
 
 func clock(minute int) string {
 	return fmt.Sprintf("%02d:%02d", minute/60, minute%60)
+}
+
+// --- commitments -----------------------------------------------------------
+
+// CommitmentsObserver keeps the model's list of what the person is on the
+// hook for, from the reminders their phone already holds.
+//
+// The value is not that a reminder exists — they have an app for that. It is
+// that an agent can see it without the phone being awake and in the
+// foreground, which is when device commands work and when almost nothing
+// useful happens.
+type CommitmentsObserver struct{}
+
+func (CommitmentsObserver) Sense() string   { return "commitments" }
+func (CommitmentsObserver) Kinds() []string { return []string{KindReminder} }
+
+// CommitmentGrace is how long a commitment stays in the model after its due
+// date. Something overdue is exactly what an assistant should still be
+// raising; something a month overdue is noise.
+const CommitmentGrace = 14 * 24 * time.Hour
+
+func (o CommitmentsObserver) Digest(owner string, observations []Observation, now time.Time) []Entry {
+	// One entry per reminder, from the most recent sighting of it. A phone
+	// re-sends its whole list, so older sightings are stale by definition.
+	latest := map[string]Observation{}
+	for _, observation := range observations {
+		id := observation.String("id")
+		if id == "" {
+			continue
+		}
+		if existing, ok := latest[id]; !ok || observation.At.After(existing.At) {
+			latest[id] = observation
+		}
+	}
+
+	ids := make([]string, 0, len(latest))
+	for id := range latest {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	entries := make([]Entry, 0, len(ids))
+	for _, id := range ids {
+		observation := latest[id]
+		title := observation.String("title")
+		if title == "" {
+			continue
+		}
+		due := observation.Time("due")
+		entry := Entry{
+			Owner: owner, Section: SectionCommitments, Key: "reminder." + id,
+			Summary:    commitmentSummary(title, due, now),
+			Source:     SourceSensePrefix + o.Sense(),
+			Confidence: 0.9, ObservedAt: observation.At,
+			Value: map[string]any{"title": title, "reminder_id": id},
+		}
+		if !due.IsZero() {
+			entry.Value["due"] = due.Format(time.RFC3339)
+			expires := due.Add(CommitmentGrace)
+			entry.ExpiresAt = &expires
+		}
+		// A finished reminder is not a commitment. Expiring it rather than
+		// leaving it out is what reaches a device as a tombstone, so a phone
+		// holding the old copy is told it is done.
+		if observation.Bool("done") {
+			expired := observation.At
+			entry.ExpiresAt = &expired
+		}
+		entries = append(entries, entry)
+	}
+	return entries
+}
+
+func commitmentSummary(title string, due, now time.Time) string {
+	if due.IsZero() {
+		return title
+	}
+	days := int(due.Truncate(24*time.Hour).Sub(now.Truncate(24*time.Hour)).Hours() / 24)
+	switch {
+	case days < 0:
+		return fmt.Sprintf("%s (overdue since %s)", title, due.Format("2 Jan"))
+	case days == 0:
+		return title + " (due today)"
+	case days == 1:
+		return title + " (due tomorrow)"
+	case days <= 7:
+		return fmt.Sprintf("%s (due %s)", title, due.Format("Monday"))
+	default:
+		return fmt.Sprintf("%s (due %s)", title, due.Format("2 Jan"))
+	}
 }

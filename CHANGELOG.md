@@ -7,12 +7,27 @@ to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- "Forget everything" on the person model now drops the raw device signals
+  too. Without that, the next observer pass re-derived exactly what had just
+  been forgotten, so the promise lasted only until the phone next checked in.
+  A sectioned purge still keeps the signals: it clears conclusions, and the
+  signals go when that sense is switched off.
 - `POST /pairing/tokens` (pair a device for yourself) no longer requires
   `config:write`, which only admins hold: an operator phone can now pair its
   Apple Watch. Pairing someone else still requires admin, and a viewer's
   second device stays a viewer.
 
 ### Added
+- The **Steward**: an agent that reads the person model, works out what is
+  different about today, and proposes at most three things, each with its
+  reason and the lines it read. A quiet day gets a quiet answer. It refuses to
+  brief from an empty model, pointing at Getting to Know You instead of
+  guessing. Installed on new gateways alongside Getting to Know You. See
+  `docs/use-cases/steward.md`.
+- A **commitments observer**: what the person is on the hook for, from the
+  reminders their phone already holds, so an agent can raise something due
+  without the app being awake and in the foreground. A finished reminder
+  expires immediately, which reaches devices as a tombstone.
 - Starter agents: a new installation now has **Getting to Know You** under
   Deployed rather than an empty list and a Templates page to shop in. It is an
   ordinary editable agent on disk, installed once and recorded, so deleting it
