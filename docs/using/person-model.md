@@ -73,14 +73,44 @@ Open commitments:
 The qualifiers matter: an agent that cannot tell a guess from a statement
 will state guesses as fact.
 
+### Quoting the person
+
+A model asked to interview someone will, sooner or later, answer its own
+question and record the answer as fact. The precedence rule cannot catch
+that, because it arrives through the agent rather than around it. So
+`person.observe` takes a `quote`, and the quote is checked against what the
+person actually said in the message being answered.
+
+- **Quote them and it is recorded as certain**, with the words kept as
+  provenance. The model then reads "they told us", because they did.
+- **Invent a quote and the write is refused**, with an error saying so.
+- **Claim certainty with no quote and it is kept as a guess**, and the
+  agent is told that is what happened.
+
+Punctuation and case do not matter; a light paraphrase of real words
+passes. A sentence nobody said does not.
+
 `person.observe` records something the agent learned. Use a stable key so
 repeated observations update rather than pile up, and be honest about
 confidence — anything below 0.7 is rendered as a guess.
 
 ```
+person.observe(section: "identity", key: "home", summary: "Lives in Oak Park",
+               quote: "I live in Oak Park", confidence: 1)
 person.observe(section: "preferences", key: "meetings",
-               summary: "Prefers morning meetings", confidence: 0.8)
+               summary: "Prefers morning meetings", confidence: 0.6)
 ```
+
+## The agent that fills it in
+
+Soulacy ships a **Getting to Know You** agent. It reads the model, asks
+only about what is missing, records each answer with a quote, and stops
+after six questions. It has no tools but the person model, so it cannot
+reach your files, your phone or the network: it learns by asking.
+
+That is the honest way to start. Sensors need weeks before a routine means
+anything; a short conversation on the first day gives every other agent
+something to work with immediately.
 
 ## Reading and correcting it as a person
 

@@ -248,6 +248,28 @@ func TestRenderIsProseAnAgentCanRead(t *testing.T) {
 	}
 }
 
+func TestAQuotedEntryReadsAsSomethingTheyToldUs(t *testing.T) {
+	now := time.Now().UTC()
+	quoted := entry("kai", SectionIdentity, "home", "Lives in Oak Park", "agent:getting-to-know-you")
+	quoted.Value = map[string]any{"said": "I live in Oak Park"}
+	quoted.Confidence = 1
+	quoted.ObservedAt = now
+	inferred := entry("kai", SectionPreferences, "meetings", "Seems to prefer mornings", "agent:planner")
+	inferred.Confidence = 0.5
+	inferred.ObservedAt = now
+
+	text := Render(NewModel("kai", []Entry{quoted, inferred}, now), now)
+	if !strings.Contains(text, "Lives in Oak Park (they told us)") {
+		t.Fatalf("a quoted entry is not an inference:\n%s", text)
+	}
+	if !strings.Contains(text, "inferred by planner") || !strings.Contains(text, "low confidence") {
+		t.Fatalf("an unquoted guess should still read as one:\n%s", text)
+	}
+	if !quoted.Quoted() || inferred.Quoted() {
+		t.Fatal("Quoted() should distinguish the two")
+	}
+}
+
 func TestSearchMatchesEveryWord(t *testing.T) {
 	now := time.Now().UTC()
 	model := NewModel("kai", []Entry{

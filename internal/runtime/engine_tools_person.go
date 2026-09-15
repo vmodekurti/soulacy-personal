@@ -108,6 +108,11 @@ func (e *Engine) buildPersonBuiltins() []BuiltinTool {
 					"section": map[string]any{"type": "string", "enum": sectionNames(), "description": "Which part of the model this belongs to."},
 					"key":     map[string]any{"type": "string", "description": "Stable identifier within the section, e.g. \"priya-s\" or \"weekday.leave\"."},
 					"summary": map[string]any{"type": "string", "description": "One sentence, in plain language."},
+					"quote": map[string]any{
+						"type": "string",
+						"description": "The person's own words that support this, copied from what they just said. " +
+							"Required to record anything as certain; without it the entry is kept as a guess.",
+					},
 					"confidence": map[string]any{
 						"type": "number", "minimum": 0, "maximum": 1,
 						"description": "How sure you are. Be honest; low-confidence entries are marked as guesses.",
@@ -138,6 +143,30 @@ func (e *Engine) buildPersonBuiltins() []BuiltinTool {
 					Source:     person.SourceAgentPrefix + agentID,
 					Confidence: float32(floatArg(args, "confidence")),
 				}
+
+				// A model asked to interview someone will, sooner or later,
+				// answer its own question and record the answer as fact. That
+				// is the failure the precedence rule cannot catch, because it
+				// arrives through the agent rather than around it. So a claim
+				// of certainty has to be quotable, and the quote has to be
+				// something the person actually just said.
+				note := ""
+				quote := stringArg(args, "quote")
+				switch {
+				case quote != "":
+					said := userTurnText(ctx)
+					if said == "" || !containsLoosely(said, quote) {
+						return "", fmt.Errorf("that quote does not appear in what they just said, so it cannot be recorded; " +
+							"either quote them exactly or record it as a guess with no quote")
+					}
+					if entry.Value == nil {
+						entry.Value = map[string]any{}
+					}
+					entry.Value["said"] = quote
+				case entry.Confidence >= 0.9:
+					entry.Confidence = 0.6
+					note = " Recorded as a guess: nothing they said was quoted to support it."
+				}
 				if hours := floatArg(args, "expires_in_hours"); hours > 0 {
 					expires := time.Now().UTC().Add(time.Duration(hours * float64(time.Hour)))
 					entry.ExpiresAt = &expires
@@ -149,10 +178,50 @@ func (e *Engine) buildPersonBuiltins() []BuiltinTool {
 				if !result.Applied {
 					return "Not recorded: " + result.Reason + ". What is stored is: " + result.Entry.Summary, nil
 				}
-				return "Recorded.", nil
+				return "Recorded." + note, nil
 			},
 		},
 	}
+}
+
+// userTurnText is what the person said in the turn being handled.
+func userTurnText(ctx context.Context) string {
+	msg, ok := ctx.Value(inboundMsgKey{}).(message.Message)
+	if !ok {
+		return ""
+	}
+	var parts []string
+	for _, part := range msg.Parts {
+		if part.Type == message.ContentText && strings.TrimSpace(part.Text) != "" {
+			parts = append(parts, part.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+// containsLoosely matches a quote against what was said, ignoring case,
+// punctuation and runs of whitespace. A model that paraphrases slightly is
+// being helpful; one that invents a sentence is not, and this separates them.
+func containsLoosely(haystack, needle string) bool {
+	return strings.Contains(looseFold(haystack), looseFold(needle))
+}
+
+func looseFold(s string) string {
+	var b strings.Builder
+	lastSpace := false
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			lastSpace = false
+		default:
+			if !lastSpace {
+				b.WriteRune(' ')
+				lastSpace = true
+			}
+		}
+	}
+	return strings.TrimSpace(b.String())
 }
 
 func sectionNames() []string {

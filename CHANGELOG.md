@@ -13,6 +13,15 @@ to follow [Semantic Versioning](https://semver.org/).
   second device stays a viewer.
 
 ### Added
+- A **Getting to Know You** agent template that fills in the person model by
+  asking rather than by watching: it reads what is already known, asks only
+  about the gaps, records each answer with the person's own words, and stops
+  after six questions. Its only tools are the person model.
+- `person.observe` now takes a `quote` and checks it against what the person
+  actually said. An invented quote is refused; a claim of certainty with no
+  quote is kept as a guess. This closes the one gap the precedence rule could
+  not: a model answering its own interview question and recording the answer
+  as fact. Quoted entries read as "they told us" rather than as inferences.
 - Person model observers: `state` (driving, moving, in a Focus, resting, from
   Focus/motion/sleep signals) and `routine` (the usual shape of a weekday from
   arrivals and departures, plus how far today departs from it). Devices push
