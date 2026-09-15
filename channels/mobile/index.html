@@ -3179,6 +3179,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#apple-watch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Apple Watch
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#agent-built-ui" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4888,6 +4899,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#apple-watch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Apple Watch
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#agent-built-ui" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5058,6 +5080,14 @@ start token.</p>
 <strong>Approve the pending action</strong>, and <strong>Run an agent</strong>. They use the same
 paired credential and the same APIs as the app, so nothing new has to be
 configured on the gateway.</p>
+<h2 id="apple-watch">Apple Watch<a class="headerlink" href="#apple-watch" title="Permanent link">&para;</a></h2>
+<p>The iPhone build carries a watch app. It pairs through the phone once:
+the phone calls <code>POST /pairing/tokens</code> with no body, which issues a code
+for the same subject, and the watch redeems it and keeps the resulting
+managed key. From then on the watch calls <code>GET /approvals</code>,
+<code>POST /approvals/:id/approve</code> or <code>…/deny</code>, <code>GET /agents</code> and <code>POST /chat</code> (voice mode)
+directly, so it shows up as its own key in the household list and can be
+revoked on its own. Nothing else has to be configured on the gateway.</p>
 <h2 id="agent-built-ui">Agent-built UI<a class="headerlink" href="#agent-built-ui" title="Permanent link">&para;</a></h2>
 <p>An agent can draw a native card on a paired phone with the <code>canvas.present</code>
 device command (through the <code>mobile.invoke</code> tool, once the phone has the

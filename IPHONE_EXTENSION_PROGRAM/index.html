@@ -4909,9 +4909,9 @@ device-node command set agents can call: <code>device.info</code>, <code>locatio
 </thead>
 <tbody>
 <tr>
-<td><strong>E58 Watch</strong></td>
-<td>None.</td>
-<td>Inbox on the wrist: approve, deny, snooze; complications for pending count.</td>
+<td><strong>E58 Watch</strong> (shipped)</td>
+<td>None new: the phone mints a pairing code with <code>POST /pairing/tokens</code> (same subject) and the watch redeems it, so the watch holds its own managed key.</td>
+<td>A watchOS app inside the iPhone build: a complication with the pending-approval count and oldest deadline (or the last spoken reply), an Ask screen that dictates a question and reads the reply aloud, and an approvals list with Approve and Deny. Pairs once through WatchConnectivity, then talks to the gateway directly. Snooze was dropped: approvals expire on their own and the complication shows the countdown.</td>
 </tr>
 <tr>
 <td><strong>E59 On-device memory</strong> (shipped)</td>
