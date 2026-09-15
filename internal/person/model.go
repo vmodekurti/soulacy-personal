@@ -122,6 +122,14 @@ type Entry struct {
 // Origin is the entry's precedence rank.
 func (e Entry) Origin() Origin { return OriginOf(e.Source) }
 
+// Quoted reports whether the entry carries the person's own words. An agent
+// may only attach a quote the person actually said, so a quoted entry counts
+// as something they told us rather than something an agent concluded.
+func (e Entry) Quoted() bool {
+	said, ok := e.Value["said"].(string)
+	return ok && strings.TrimSpace(said) != ""
+}
+
 // Expired reports whether the entry should no longer be read. State entries
 // especially are short-lived: "commuting" is wrong an hour later.
 func (e Entry) Expired(now time.Time) bool {

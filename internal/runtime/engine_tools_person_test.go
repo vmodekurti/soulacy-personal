@@ -25,8 +25,17 @@ func personTestEngine(t *testing.T) (*Engine, person.Store) {
 // operatorCtx mirrors what an interactive run carries: a principal and the
 // inbound message (which is where the agent id comes from).
 func operatorCtx(agentID string) context.Context {
+	return operatorCtxSaying(agentID, "")
+}
+
+// operatorCtxSaying is the same, with the person's words for this turn.
+func operatorCtxSaying(agentID, said string) context.Context {
 	ctx := WithPrincipal(context.Background(), Principal{Subject: "kai", Role: "operator"})
-	return context.WithValue(ctx, inboundMsgKey{}, message.Message{AgentID: agentID, Channel: "http"})
+	msg := message.Message{AgentID: agentID, Channel: "http"}
+	if said != "" {
+		msg.Parts = message.Text(said)
+	}
+	return context.WithValue(ctx, inboundMsgKey{}, msg)
 }
 
 func personTool(t *testing.T, e *Engine, name string) BuiltinTool {
@@ -155,5 +164,83 @@ func TestPersonToolsAreOptInPerAgent(t *testing.T) {
 		if tool.Gate != "person" {
 			t.Fatalf("%s must be gated so an agent opts in explicitly, got %q", tool.Name, tool.Gate)
 		}
+	}
+}
+
+func TestPersonObserveWillNotRecordAnInventedQuote(t *testing.T) {
+	e, store := personTestEngine(t)
+	ctx := operatorCtxSaying("getting-to-know-you", "Call me Kai. I live in Oak Park.")
+	observe := personTool(t, e, "person.observe")
+
+	// The quote is really there, in the person's own words.
+	out, err := observe.Handler(ctx, map[string]any{
+		"section": "identity", "key": "home", "summary": "Lives in Oak Park",
+		"quote": "I live in Oak Park", "confidence": 1,
+	})
+	if err != nil || !strings.Contains(out, "Recorded") {
+		t.Fatalf("a true quote should be accepted: %q %v", out, err)
+	}
+	entry, err := store.Get(ctx, "kai", person.SectionIdentity, "home")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.Value["said"] != "I live in Oak Park" {
+		t.Fatalf("the quote should be kept as provenance: %+v", entry.Value)
+	}
+	if entry.Confidence != 1 {
+		t.Fatalf("a quoted entry keeps its confidence: %v", entry.Confidence)
+	}
+
+	// The model answers its own question and quotes words nobody said.
+	if _, err := observe.Handler(ctx, map[string]any{
+		"section": "routine", "key": "weekday.start", "summary": "Starts work around 8:30",
+		"quote": "I start at 8:30 every weekday", "confidence": 1,
+	}); err == nil {
+		t.Fatal("an invented quote must be refused")
+	}
+	if _, err := store.Get(ctx, "kai", person.SectionRoutine, "weekday.start"); err == nil {
+		t.Fatal("nothing should have been written")
+	}
+
+	// Slight paraphrase of real words is fine; punctuation and case are not
+	// what makes a quote true.
+	if _, err := observe.Handler(ctx, map[string]any{
+		"section": "identity", "key": "name", "summary": "Goes by Kai",
+		"quote": "call me kai", "confidence": 1,
+	}); err != nil {
+		t.Fatalf("a loose match of real words should pass: %v", err)
+	}
+}
+
+func TestPersonObserveKeepsUnquotedClaimsAsGuesses(t *testing.T) {
+	e, store := personTestEngine(t)
+	ctx := operatorCtxSaying("planner", "I have been really busy this week.")
+
+	out, err := personTool(t, e, "person.observe").Handler(ctx, map[string]any{
+		"section": "preferences", "key": "meetings", "summary": "Prefers morning meetings", "confidence": 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "guess") {
+		t.Fatalf("an unquoted claim of certainty should say it was downgraded: %q", out)
+	}
+	entry, err := store.Get(ctx, "kai", person.SectionPreferences, "meetings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.Confidence >= 0.9 {
+		t.Fatalf("certainty must be earned by a quote: %v", entry.Confidence)
+	}
+
+	// A modest claim is left exactly as the agent stated it.
+	if _, err := personTool(t, e, "person.observe").Handler(ctx, map[string]any{
+		"section": "preferences", "key": "pace", "summary": "Seems stretched this week", "confidence": 0.5,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	pace, _ := store.Get(ctx, "kai", person.SectionPreferences, "pace")
+	if pace.Confidence != 0.5 {
+		t.Fatalf("an honest guess should be untouched: %v", pace.Confidence)
 	}
 }

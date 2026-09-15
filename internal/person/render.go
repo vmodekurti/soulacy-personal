@@ -56,17 +56,22 @@ func sectionHeading(section Section) string {
 // tell a guess from a statement will state guesses as fact.
 func qualifier(entry Entry, now time.Time) string {
 	var parts []string
-	switch entry.Origin() {
-	case OriginManual:
+	switch {
+	case entry.Origin() == OriginManual:
 		parts = append(parts, "they told us")
-	case OriginAgent:
+	case entry.Quoted():
+		// An agent that can quote the person is not inferring. Calling this
+		// an inference would understate it and invite an agent to hedge
+		// about something the person stated plainly.
+		parts = append(parts, "they told us")
+	case entry.Origin() == OriginAgent:
 		parts = append(parts, "inferred by "+strings.TrimPrefix(entry.Source, SourceAgentPrefix))
 	default:
 		if name := strings.TrimPrefix(entry.Source, SourceSensePrefix); name != entry.Source {
 			parts = append(parts, "from "+name)
 		}
 	}
-	if entry.Origin() != OriginManual && entry.Confidence < 0.7 {
+	if entry.Origin() != OriginManual && !entry.Quoted() && entry.Confidence < 0.7 {
 		parts = append(parts, "low confidence")
 	}
 	if age := now.Sub(entry.ObservedAt); age > 36*time.Hour && !entry.ObservedAt.IsZero() {
