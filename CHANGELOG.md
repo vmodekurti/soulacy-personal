@@ -13,6 +13,13 @@ to follow [Semantic Versioning](https://semver.org/).
   second device stays a viewer.
 
 ### Added
+- Person model observers: `state` (driving, moving, in a Focus, resting, from
+  Focus/motion/sleep signals) and `routine` (the usual shape of a weekday from
+  arrivals and departures, plus how far today departs from it). Devices push
+  raw signals to `POST /person/observations`; the gateway digests them with
+  plain rules rather than an agent. Every sense is off until switched on at
+  `PUT /person/senses/:sense`, each switch states its purpose, and switching
+  one off forgets what it concluded and the signals it collected.
 - The person model (`internal/person`): Soulacy's structured understanding of
   the person it works for — identity, routine, current state, relationships,
   commitments, preferences. Owner-scoped, with a precedence rule that stops a

@@ -78,6 +78,23 @@ CREATE TABLE person_changes(
 );
 CREATE INDEX person_changes_owner ON person_changes(owner, cursor);
 `},
+		{Version: 2, SQL: `
+CREATE TABLE person_observations(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  payload TEXT
+);
+CREATE INDEX person_observations_scope ON person_observations(owner, kind, at);
+CREATE TABLE person_senses(
+  owner TEXT NOT NULL,
+  sense TEXT NOT NULL,
+  enabled INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (owner, sense)
+);
+`},
 	}); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("person: migrate: %w", err)

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gofiber/fiber/v2"
@@ -28,6 +29,9 @@ func personApp(t *testing.T, s *Server, role, subject string) *fiber.App {
 	api.Put("/person/model/entries", s.handlePersonPut)
 	api.Delete("/person/model/entries/:section/:key", s.handlePersonDelete)
 	api.Delete("/person/model", s.handlePersonPurge)
+	api.Get("/person/senses", s.handlePersonSenses)
+	api.Put("/person/senses/:sense", s.handlePersonSetSense)
+	api.Post("/person/observations", s.handlePersonObservations)
 	return app
 }
 
@@ -180,4 +184,111 @@ func TestPersonModelOffSaysSo(t *testing.T) {
 func jsonNumber(v float64) string {
 	b, _ := json.Marshal(int64(v))
 	return string(b)
+}
+
+func TestPersonSensesAreOffUntilAsked(t *testing.T) {
+	s := personGateway(t)
+	kai := personApp(t, s, "operator", "kai")
+
+	code, body := doJSON(t, kai, http.MethodGet, "/api/v1/person/senses", "")
+	if code != http.StatusOK {
+		t.Fatalf("senses: %d %+v", code, body)
+	}
+	senses, _ := body["senses"].([]any)
+	if len(senses) == 0 {
+		t.Fatal("the switches must be listed even when all are off")
+	}
+	for _, raw := range senses {
+		sense, _ := raw.(map[string]any)
+		if sense["enabled"] != false {
+			t.Fatalf("nothing is watched until asked: %+v", sense)
+		}
+		if purpose, _ := sense["purpose"].(string); purpose == "" {
+			t.Fatalf("a consent switch with no stated purpose is not consent: %+v", sense)
+		}
+	}
+	if code, _ := doJSON(t, kai, http.MethodPut, "/api/v1/person/senses/astrology", `{"enabled":true}`); code != http.StatusNotFound {
+		t.Fatalf("unknown sense should 404, got %d", code)
+	}
+}
+
+func TestPersonObservationsAreIgnoredWithoutConsentAndDigestedWithIt(t *testing.T) {
+	s := personGateway(t)
+	kai := personApp(t, s, "operator", "kai")
+	focus := `{"observations":[{"kind":"focus","payload":{"mode":"Work"}}]}`
+
+	// No consent: recorded nothing, concluded nothing.
+	code, body := doJSON(t, kai, http.MethodPost, "/api/v1/person/observations", focus)
+	if code != http.StatusOK || body["recorded"] != float64(0) || body["ignored"] != float64(1) {
+		t.Fatalf("signals without consent must be ignored: %d %+v", code, body)
+	}
+	if code, body := doJSON(t, kai, http.MethodGet, "/api/v1/person/model", ""); code != http.StatusOK {
+		t.Fatalf("model: %d %+v", code, body)
+	} else if entries, _ := body["entries"].([]any); len(entries) != 0 {
+		t.Fatalf("nothing should have been concluded: %+v", entries)
+	}
+
+	// Consent given: the same push is digested into the model.
+	if code, _ := doJSON(t, kai, http.MethodPut, "/api/v1/person/senses/state", `{"enabled":true}`); code != http.StatusOK {
+		t.Fatal("enabling the state sense failed")
+	}
+	code, body = doJSON(t, kai, http.MethodPost, "/api/v1/person/observations", focus)
+	if code != http.StatusOK || body["recorded"] != float64(1) || body["applied"] != float64(1) {
+		t.Fatalf("digest: %d %+v", code, body)
+	}
+	code, body = doJSON(t, kai, http.MethodGet, "/api/v1/person/model", "")
+	summary, _ := body["summary"].(string)
+	if code != http.StatusOK || !strings.Contains(summary, "In Work Focus") {
+		t.Fatalf("the model should now know: %d %q", code, summary)
+	}
+
+	// Withdrawing consent removes what the sense concluded.
+	code, body = doJSON(t, kai, http.MethodPut, "/api/v1/person/senses/state", `{"enabled":false}`)
+	if code != http.StatusOK || body["forgotten"] != float64(1) {
+		t.Fatalf("withdrawing consent should forget the inference: %d %+v", code, body)
+	}
+	code, body = doJSON(t, kai, http.MethodGet, "/api/v1/person/model", "")
+	if entries, _ := body["entries"].([]any); len(entries) != 0 {
+		t.Fatalf("the conclusion must go with the consent: %+v", entries)
+	}
+}
+
+func TestPersonObservationsRejectNonsense(t *testing.T) {
+	s := personGateway(t)
+	kai := personApp(t, s, "operator", "kai")
+	if code, _ := doJSON(t, kai, http.MethodPut, "/api/v1/person/senses/state", `{"enabled":true}`); code != http.StatusOK {
+		t.Fatal("enable failed")
+	}
+	if code, _ := doJSON(t, kai, http.MethodPost, "/api/v1/person/observations", `{"observations":[]}`); code != http.StatusBadRequest {
+		t.Fatalf("an empty batch should be refused, got %d", code)
+	}
+	future := `{"observations":[{"kind":"focus","at":"2099-01-01T00:00:00Z","payload":{"mode":"Work"}}]}`
+	if code, _ := doJSON(t, kai, http.MethodPost, "/api/v1/person/observations", future); code != http.StatusBadRequest {
+		t.Fatalf("a signal from the future should be refused, got %d", code)
+	}
+}
+
+func TestPersonObservationsCannotBeAttributedToSomeoneElse(t *testing.T) {
+	s := personGateway(t)
+	kai := personApp(t, s, "operator", "kai")
+	priya := personApp(t, s, "operator", "priya-s")
+	for _, app := range []*fiber.App{kai, priya} {
+		if code, _ := doJSON(t, app, http.MethodPut, "/api/v1/person/senses/state", `{"enabled":true}`); code != http.StatusOK {
+			t.Fatal("enable failed")
+		}
+	}
+	// Kai's phone claims the observation belongs to Priya. The owner comes
+	// from the credential, never the body.
+	spoofed := `{"observations":[{"kind":"focus","owner":"priya-s","payload":{"mode":"Work"}}]}`
+	if code, _ := doJSON(t, kai, http.MethodPost, "/api/v1/person/observations", spoofed); code != http.StatusOK {
+		t.Fatal("post failed")
+	}
+	_, body := doJSON(t, priya, http.MethodGet, "/api/v1/person/model", "")
+	if entries, _ := body["entries"].([]any); len(entries) != 0 {
+		t.Fatalf("one member must not write another's model: %+v", entries)
+	}
+	_, body = doJSON(t, kai, http.MethodGet, "/api/v1/person/model", "")
+	if entries, _ := body["entries"].([]any); len(entries) != 1 {
+		t.Fatalf("the signal belongs to the caller: %+v", entries)
+	}
 }
