@@ -6,6 +6,12 @@ to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- `POST /pairing/tokens` (pair a device for yourself) no longer requires
+  `config:write`, which only admins hold: an operator phone can now pair its
+  Apple Watch. Pairing someone else still requires admin, and a viewer's
+  second device stays a viewer.
+
 ### Added
 - Apple Watch app in the iPhone build (soulacy-ios): complication with the
   pending-approval count, dictated questions read aloud, and an approvals

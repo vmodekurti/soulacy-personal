@@ -108,6 +108,34 @@ func TestPairingForSomeoneElseMintsTheirIdentity(t *testing.T) {
 	}
 }
 
+func TestSelfPairingKeepsTheCallersRole(t *testing.T) {
+	s, _ := newTestGatewayWithLLM(t, "secret")
+	store, err := apikeys.NewSQLiteStore(filepath.Join(t.TempDir(), "keys.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	s.SetAPIKeyStore(store)
+
+	// A viewer pairing their own watch gets a viewer key, not an operator one.
+	viewer := householdApp(t, s, "viewer", "priya-s")
+	code, body := doJSON(t, viewer, http.MethodPost, "/api/v1/pairing/tokens", "")
+	if code != http.StatusOK || body["subject"] != "priya-s" || body["role"] != "viewer" {
+		t.Fatalf("viewer self-pairing: %d %+v", code, body)
+	}
+	code, redeemed := doJSON(t, viewer, http.MethodPost, "/api/v1/pairing/redeem", `{"code":"`+body["code"].(string)+`"}`)
+	if code != http.StatusOK || redeemed["role"] != "viewer" {
+		t.Fatalf("viewer redeem: %d %+v", code, redeemed)
+	}
+	// ...and still cannot pair anyone else.
+	if code, _ := doJSON(t, viewer, http.MethodPost, "/api/v1/pairing/tokens", `{"name":"Kai"}`); code != http.StatusForbidden {
+		t.Fatalf("viewer pairing for another person should be 403, got %d", code)
+	}
+	if selfPairingRole("admin") != "operator" || selfPairingRole("operator") != "operator" || selfPairingRole("VIEWER") != "viewer" || selfPairingRole("") != "operator" {
+		t.Fatal("self-pairing role cap wrong")
+	}
+}
+
 func TestLegacyCompanionKeysStillBelongToTheOwner(t *testing.T) {
 	legacy := apikeys.APIKey{ID: "abc123", Name: "mobile-companion"}
 	if cl := auth.ClaimsForAPIKey(legacy); cl.Subject != "admin" || cl.Role != "operator" {

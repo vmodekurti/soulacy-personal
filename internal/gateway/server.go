@@ -880,7 +880,10 @@ func (s *Server) buildApp() *fiber.App {
 	api.Get("/mobile/deliveries", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleListMobileDeliveries)
 	api.Get("/mobile/deliveries/:id", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleGetMobileDelivery)
 	api.Post("/mobile/deliveries/:id/read", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleReadMobileDelivery)
-	api.Post("/pairing/tokens", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleCreatePairingToken)
+	// Any signed-in person may pair another device of their own (a phone
+	// pairing its watch); the handler itself insists on admin for pairing
+	// someone else. chat:read is the one permission every role holds.
+	api.Post("/pairing/tokens", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.handleCreatePairingToken)
 	api.Get("/pairing/members", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleListHouseholdMembers)
 	api.Get("/approvals", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleListApprovals)
 	api.Post("/approvals/:id/approve", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleResolveApproval(true))

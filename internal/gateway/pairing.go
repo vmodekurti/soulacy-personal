@@ -45,7 +45,10 @@ func (s *Server) handleCreatePairingToken(c *fiber.Ctx) error {
 		}
 	}
 	principal, _ := requestPrincipal(c)
-	meta := pairing.Token{Subject: strings.TrimSpace(principal.Subject), Role: "operator"}
+	// A device paired for oneself never outranks the device that paired it:
+	// a viewer's watch is a viewer. Everyone else's second device is an
+	// operator, which is what a phone paired from the web already gets.
+	meta := pairing.Token{Subject: strings.TrimSpace(principal.Subject), Role: selfPairingRole(principal.Role)}
 	if meta.Subject == "" {
 		meta.Subject = "admin"
 	}
@@ -83,6 +86,13 @@ func (s *Server) handleCreatePairingToken(c *fiber.Ctx) error {
 		"display_name": tok.DisplayName,
 		"role":         tok.Role,
 	})
+}
+
+func selfPairingRole(callerRole string) string {
+	if strings.EqualFold(strings.TrimSpace(callerRole), rbac.RoleViewer) {
+		return rbac.RoleViewer
+	}
+	return rbac.RoleOperator
 }
 
 // householdSubject turns a person's name into a stable, URL-safe subject:
