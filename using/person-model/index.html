@@ -1499,6 +1499,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Reading it as an agent">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#quoting-the-person" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quoting the person
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-agent-that-fills-it-in" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The agent that fills it in
+      
+    </span>
+  </a>
+  
 </li>
       
         <li class="md-nav__item">
@@ -4869,6 +4897,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Reading it as an agent">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#quoting-the-person" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quoting the person
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-agent-that-fills-it-in" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The agent that fills it in
+      
+    </span>
+  </a>
+  
 </li>
       
         <li class="md-nav__item">
@@ -5070,12 +5126,37 @@ recency, and a late-arriving old sample never replaces a newer one.</p>
 </span></code></pre></div>
 <p>The qualifiers matter: an agent that cannot tell a guess from a statement
 will state guesses as fact.</p>
+<h3 id="quoting-the-person">Quoting the person<a class="headerlink" href="#quoting-the-person" title="Permanent link">&para;</a></h3>
+<p>A model asked to interview someone will, sooner or later, answer its own
+question and record the answer as fact. The precedence rule cannot catch
+that, because it arrives through the agent rather than around it. So
+<code>person.observe</code> takes a <code>quote</code>, and the quote is checked against what the
+person actually said in the message being answered.</p>
+<ul>
+<li><strong>Quote them and it is recorded as certain</strong>, with the words kept as
+  provenance. The model then reads "they told us", because they did.</li>
+<li><strong>Invent a quote and the write is refused</strong>, with an error saying so.</li>
+<li><strong>Claim certainty with no quote and it is kept as a guess</strong>, and the
+  agent is told that is what happened.</li>
+</ul>
+<p>Punctuation and case do not matter; a light paraphrase of real words
+passes. A sentence nobody said does not.</p>
 <p><code>person.observe</code> records something the agent learned. Use a stable key so
 repeated observations update rather than pile up, and be honest about
 confidence — anything below 0.7 is rendered as a guess.</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>person.observe(section: "preferences", key: "meetings",
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>               summary: "Prefers morning meetings", confidence: 0.8)
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>person.observe(section: "identity", key: "home", summary: "Lives in Oak Park",
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>               quote: "I live in Oak Park", confidence: 1)
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>person.observe(section: "preferences", key: "meetings",
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>               summary: "Prefers morning meetings", confidence: 0.6)
 </span></code></pre></div>
+<h2 id="the-agent-that-fills-it-in">The agent that fills it in<a class="headerlink" href="#the-agent-that-fills-it-in" title="Permanent link">&para;</a></h2>
+<p>Soulacy ships a <strong>Getting to Know You</strong> agent. It reads the model, asks
+only about what is missing, records each answer with a quote, and stops
+after six questions. It has no tools but the person model, so it cannot
+reach your files, your phone or the network: it learns by asking.</p>
+<p>That is the honest way to start. Sensors need weeks before a routine means
+anything; a short conversation on the first day gives every other agent
+something to work with immediately.</p>
 <h2 id="reading-and-correcting-it-as-a-person">Reading and correcting it as a person<a class="headerlink" href="#reading-and-correcting-it-as-a-person" title="Permanent link">&para;</a></h2>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>GET    /api/v1/person/model                          prose + entries
 </span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>PUT    /api/v1/person/model/entries                  add or correct one entry
