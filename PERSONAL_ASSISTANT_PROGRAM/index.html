@@ -4937,7 +4937,7 @@ memory, with a fixed shape so agents and observers agree on it.</p>
 <tr>
 <td><strong>P1 Model store</strong> (shipped)</td>
 <td><code>internal/person</code>: SQLite store, owner-scoped, precedence manual &gt; agent &gt; sense, expiring entries, change feed. <code>GET /person/model</code>, <code>PUT /person/model/entries</code>, <code>DELETE …/entries/:section/:key</code>, <code>GET /person/model/sync?since=</code>, <code>DELETE /person/model?confirm=true</code>. See <code>docs/using/person-model.md</code>.</td>
-<td>Still to do: phone cache in the app group, an "About you" screen, a web Person page.</td>
+<td>Web <strong>About You</strong> page: every line with its provenance, guesses marked as guesses, sense switches with their purposes, add or correct by hand, forget everything. Still to do: phone cache in the app group and an About You screen on iOS.</td>
 </tr>
 <tr>
 <td><strong>P2 One tool</strong> (shipped)</td>
@@ -4950,9 +4950,9 @@ memory, with a fixed shape so agents and observers agree on it.</p>
 <td>Phone answers the sampling commands in the background where iOS allows (location, Focus, health summary once a day).</td>
 </tr>
 <tr>
-<td><strong>P4 Consent and visibility</strong> (gateway shipped)</td>
-<td>Each observer is a capability switch with a plain-language purpose string, off by default, on per sense. Audit log entry per write.</td>
-<td>Onboarding step "What may Soulacy notice?" with per-sense switches; the same switches in Settings.</td>
+<td><strong>P4 Consent and visibility</strong> (gateway + web shipped)</td>
+<td>Each observer is a capability switch with a plain-language purpose string, off by default, on per sense. Switching one off deletes what it concluded and the signals behind it.</td>
+<td>Web: the switches live on About You, each with its purpose. Still to do: the same switches during iOS onboarding and in Settings.</td>
 </tr>
 </tbody>
 </table>
