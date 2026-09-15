@@ -13,6 +13,12 @@ to follow [Semantic Versioning](https://semver.org/).
   second device stays a viewer.
 
 ### Added
+- Starter agents: a new installation now has **Getting to Know You** under
+  Deployed rather than an empty list and a Templates page to shop in. It is an
+  ordinary editable agent on disk, installed once and recorded, so deleting it
+  after onboarding keeps it deleted and a starter added in a later release
+  still reaches an existing installation. (`system` and `genie` remain
+  built-ins and need no file.)
 - An **About You** page in the web app: every line the person model holds,
   grouped and labelled with where it came from ("you told us" with the quote,
   "guessed by" an agent, "noticed by" a sense). Guesses are marked as guesses.

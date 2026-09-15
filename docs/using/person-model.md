@@ -108,6 +108,10 @@ only about what is missing, records each answer with a quote, and stops
 after six questions. It has no tools but the person model, so it cannot
 reach your files, your phone or the network: it learns by asking.
 
+It is installed for you: a new gateway has it under Deployed from the
+first boot. Once you have answered its questions you can delete it like
+any other agent, and it will not come back.
+
 That is the honest way to start. Sensors need weeks before a routine means
 anything; a short conversation on the first day gives every other agent
 something to work with immediately.

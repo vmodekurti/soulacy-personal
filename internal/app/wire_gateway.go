@@ -88,6 +88,9 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 	srv.SetAdaptiveMemoryRebuilder(d.adaptiveRebuild)
 	srv.SetSafeUndoStore(d.undoStore)
 	srv.SetPersonModel(d.personStore)
+	// A new installation should have something under Deployed, not an empty
+	// list. Built-ins (system, genie) need no file; these are written once.
+	srv.SeedStarterAgents()
 	d.engine.SetSafeUndo(d.undoStore, d.authEngine != nil && d.authEngine.Effective())
 	d.engine.SetLearningNotebook(d.engine.LearningNotebook(), (d.authEngine != nil && d.authEngine.Effective()) || cfg.Server.APIKey != "")
 	logEffectiveSecuritySummary(log, cfg, d.authEngine != nil && d.authEngine.Effective())
