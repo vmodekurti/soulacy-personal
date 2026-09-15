@@ -1456,6 +1456,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../using/person-triggers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Triggers From What Changed
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../using/learning-notebook/" class="md-nav__link">
         
   
@@ -5014,7 +5042,7 @@ stops that section updating within one cycle.</p>
 </thead>
 <tbody>
 <tr>
-<td><strong>P5 Event sources</strong></td>
+<td><strong>P5 Event sources</strong> (shipped)</td>
 <td>The scheduler accepts triggers on model changes: <code>state.now</code> changed, <code>routine.deviation &gt; x</code>, <code>commitments.due &lt; 2h</code>, <code>relationships[x].pending</code>, <code>location.arrived(place)</code>, <code>focus.changed</code>. Debounced; one run per change per agent.</td>
 <td>Phone reports the underlying signals; nothing new in the UI.</td>
 </tr>
@@ -5024,7 +5052,7 @@ stops that section updating within one cycle.</p>
 <td>Web: per-channel "let Soulacy read this for commitments" switch.</td>
 </tr>
 <tr>
-<td><strong>P7 Quiet by design</strong></td>
+<td><strong>P7 Quiet by design</strong> (gateway shipped)</td>
 <td>A run started by a trigger that finds nothing worth saying produces no notification, only an audit entry. Notification budget per day, per person, tunable.</td>
 <td>Settings: "How often may Soulacy interrupt?"</td>
 </tr>
