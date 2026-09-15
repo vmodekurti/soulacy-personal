@@ -61,3 +61,8 @@ export const chatSessionId = writable(`gui-${Date.now()}-${Math.random().toStrin
 export const chatBranches = writable([])
 export const chatBranchMessages = writable({})
 export const chatMetricsBaseline = writable({})
+
+// Ask Genie handoff: the floating button anywhere in the app stores the
+// question here and navigates to Chat, which starts a thread with the best
+// agent, sends it, and clears the store. { text, at } or null.
+export const genieAsk = writable(null)

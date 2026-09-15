@@ -11,6 +11,7 @@
   import { looksLikeStaleAssetError, recoverFromStaleAssets } from './lib/stalerecovery.js'
 	import { navPages, navGroups, navAnchor } from './lib/nav.js'
   import Walkthrough from './lib/walkthrough/Walkthrough.svelte'
+  import AskGenie from './lib/AskGenie.svelte'
   import {
     loadWalkthroughState, startWalkthrough, shouldAutoStart,
   } from './lib/walkthrough/store.js'
@@ -531,6 +532,11 @@
       <div class="page-loading">Loading {pageTitle(page, pages, pluginPages)}…</div>
     {/if}
   </main>
+
+  {#if !$authRequired && page !== 'onboarding'}
+    <!-- Always-available quick question, as on the iPhone app. -->
+    <AskGenie route={page} on:navigate={(e) => navigate(e.detail)} />
+  {/if}
 
   <nav class="mobile-tabs" aria-label="Primary navigation">
     {#each mobilePrimaryPages as p}
