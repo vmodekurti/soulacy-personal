@@ -13,6 +13,7 @@ model, and companion-client requirements.
 
 [Start here: your first successful run](getting-started/quickstart.md){ .md-button .md-button--primary }
 [Pick a worked use case](use-cases/index.md){ .md-button }
+[See what your iPhone adds](iphone.md){ .md-button }
 
 !!! info "Match these guides to your installation"
     These docs follow the Personal repository's `main` branch. Your installed
@@ -27,6 +28,7 @@ model, and companion-client requirements.
 |---|---|---|
 | Try Soulacy for the first time | [First successful run](getting-started/quickstart.md) | A model connection and a response you can check yourself |
 | Use your gateway from an iPhone | [Connect your iPhone](getting-started/iphone.md) | A paired phone and a verified round-trip chat |
+| Let agents use your phone's signals | [Soulacy on iPhone](iphone.md) | Lock-screen approvals, declared device tools, Siri and CarPlay, and a brief built from health, calendar, and Focus |
 | Turn messy notes into something useful | [Notes → action plan](use-cases/notes-to-action-plan.md) | Owners, next actions, and explicit unknowns without sending anything |
 | Answer questions from your documents | [Grounded handbook answers](use-cases/handbook-answers.md) | A searchable knowledge base and a tested “not found” response |
 | Get a briefing on your phone | [A morning briefing](use-cases/morning-brief.md) | Separate checks for generation, scheduled delivery, and notifications |

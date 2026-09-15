@@ -54,6 +54,31 @@ Apache-2.0 licensed; the project name and logos follow the separate
 [![Docker](https://img.shields.io/badge/ghcr.io-vmodekurti%2Fsoulacy--personal-blue?logo=docker)](https://github.com/vmodekurti/soulacy-personal/pkgs/container/soulacy)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
+## Your iPhone is part of the runtime
+
+The native iPhone app is not a shrunk-down web GUI. It is the place an agent
+asks you for a decision when you are away from your desk, and the only device
+that knows where you are, what is on your calendar, how you slept, and whether
+a Focus is on. What that makes possible, and where it is different:
+
+- **Approve on the lock screen.** A run that needs your yes shows up as a Live
+  Activity with Approve and Deny, with Face ID for high-risk tools. The approval
+  is a durable record on your gateway, not a prompt inside someone's cloud.
+- **Phone sensors as declared tools.** `location.current`, `calendar.events`,
+  `health.summary`, `focus.status`, and more are available only to an agent whose
+  `SOUL.yaml` lists them, and only after you flip the matching toggle on the phone.
+- **Signals that stay on your network.** Sleep, steps, and location feed agents
+  and adaptive memory on hardware you own, with a local model if you choose.
+- **Location triggers.** `trigger: location` runs an agent when you arrive or leave.
+- **Siri, Shortcuts, and CarPlay.** "Talk to Planner in Soulacy" works on the
+  phone, on AirPods, and in the car. Approvals always wait for the phone.
+- **Share sheet, widgets, and durable delivery.** File anything into a knowledge
+  base from any app; scheduled results land in an inbox that survives a missing push.
+
+Read [Soulacy on iPhone](https://docs.soulacy.io/iphone/), then
+[connect your phone](https://docs.soulacy.io/getting-started/iphone/) and
+[build a brief from its signals](https://docs.soulacy.io/use-cases/phone-brief/).
+
 ## Why Soulacy
 
 **The one hard reason.** Nothing risky happens unless you approved it, or
