@@ -4945,12 +4945,12 @@ memory, with a fixed shape so agents and observers agree on it.</p>
 <td>Agent templates gain <code>person.model</code> in their builtins (next).</td>
 </tr>
 <tr>
-<td><strong>P3 Observers</strong></td>
+<td><strong>P3 Observers</strong> (state, routine shipped)</td>
 <td>Small scheduled digesters, not LLM agents where a rule will do: <strong>routine</strong> (from <code>location.current</code>, <code>motion.current</code>, <code>focus.status</code> samples: usual wake, leave, arrive, sleep windows and the deviation of today), <strong>commitments</strong> (from calendar, reminders, email threads with a question or a deadline), <strong>relationships</strong> (from contacts, calendar attendees, message senders: who, how often, what is pending), <strong>state</strong> (from health summary, Focus, time of day, travel). Each writes only its section and never overwrites a manual entry.</td>
 <td>Phone answers the sampling commands in the background where iOS allows (location, Focus, health summary once a day).</td>
 </tr>
 <tr>
-<td><strong>P4 Consent and visibility</strong></td>
+<td><strong>P4 Consent and visibility</strong> (gateway shipped)</td>
 <td>Each observer is a capability switch with a plain-language purpose string, off by default, on per sense. Audit log entry per write.</td>
 <td>Onboarding step "What may Soulacy notice?" with per-sense switches; the same switches in Settings.</td>
 </tr>
