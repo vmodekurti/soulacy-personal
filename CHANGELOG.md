@@ -11,6 +11,7 @@ to follow [Semantic Versioning](https://semver.org/).
   iPhone app. One question is routed to the best chat-capable agent (a
   gateway Genie when present, otherwise by vocabulary overlap with the
   agents' names, descriptions and tags) and answered in a new Chat thread.
+  The button is not shown in Chat itself, where the composer does the job.
 - `mobile.command_status` accepts `wait_seconds` (up to 25) and waits for
   the phone to answer instead of reporting "queued" on an immediate read;
   the Phone Brief agent uses it.

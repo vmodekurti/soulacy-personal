@@ -533,9 +533,11 @@
     {/if}
   </main>
 
-  {#if !$authRequired && page !== 'onboarding'}
-    <!-- Always-available quick question, as on the iPhone app. -->
-    <AskGenie route={page} on:navigate={(e) => navigate(e.detail)} />
+  {#if !$authRequired && page !== 'onboarding' && page !== 'chat'}
+    <!-- Always-available quick question, as on the iPhone app. Not in Chat:
+         the composer is the way to ask there, and the pill covered the
+         message metadata on a phone. -->
+    <AskGenie on:navigate={(e) => navigate(e.detail)} />
   {/if}
 
   <nav class="mobile-tabs" aria-label="Primary navigation">

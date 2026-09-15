@@ -11,9 +11,6 @@
   import { genieAsk } from './stores.js'
   import { genieRequest, GENIE_SUGGESTIONS } from './genie.js'
 
-  /** The current route; the pill keeps clear of Chat's composer. */
-  export let route = ''
-
   const dispatch = createEventDispatcher()
   let open = false
   let text = ''
@@ -41,7 +38,7 @@
   }
 </script>
 
-<div class="ask-genie" class:chat-route={route === 'chat'} class:open>
+<div class="ask-genie" class:open>
   {#if open}
     <button class="ask-genie-backdrop" aria-label="Close Ask Genie" on:click={close}></button>
     <section class="ask-genie-card" role="dialog" aria-label="Ask Genie">
@@ -72,8 +69,6 @@
 
 <style>
   .ask-genie { position: fixed; right: 20px; bottom: 20px; z-index: 55; display: flex; flex-direction: column; align-items: flex-end; gap: .6rem; }
-  /* Chat's composer owns the bottom edge; sit above it. */
-  .ask-genie.chat-route { bottom: 96px; }
 
   .ask-genie-pill {
     display: inline-flex; align-items: center; gap: .45rem;
@@ -135,7 +130,6 @@
   @media (max-width: 768px) {
     /* Clear the bottom tab bar (and Chat's composer on top of it). */
     .ask-genie { right: 14px; bottom: calc(74px + env(safe-area-inset-bottom)); }
-    .ask-genie.chat-route { bottom: calc(150px + env(safe-area-inset-bottom)); }
     .ask-genie-pill { padding: .65rem 1rem; }
   }
 </style>
