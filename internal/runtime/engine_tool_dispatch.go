@@ -197,7 +197,7 @@ print(result if isinstance(result, str) else json.dumps(result))
 		if b.Name != call.Name {
 			continue
 		}
-		if (b.Gate == "mobile" || b.Gate == "safe_undo") && (def == nil || def.Builtins == nil || !containsExactString(*def.Builtins, b.Name)) {
+		if (b.Gate == "mobile" || b.Gate == "safe_undo" || b.Gate == "person") && (def == nil || def.Builtins == nil || !containsExactString(*def.Builtins, b.Name)) {
 			return "", fmt.Errorf("agent has not explicitly enabled tool %q", b.Name)
 		}
 		if b.Gate == "learning" && (def == nil || !def.Learning.Enabled || (def.Builtins != nil && !containsExactString(*def.Builtins, b.Name) && !containsExactString(*def.Builtins, "*") && !containsExactString(*def.Builtins, "all"))) {
@@ -619,7 +619,7 @@ func (e *Engine) allToolSchemasForContext(ctx context.Context, def *agent.Defini
 			if !def.Learning.Enabled || e.LearningNotebook() == nil {
 				continue
 			}
-		case "mobile", "safe_undo":
+		case "mobile", "safe_undo", "person":
 			if !allow[b.Name] {
 				continue
 			}

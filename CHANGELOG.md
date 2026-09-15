@@ -13,6 +13,14 @@ to follow [Semantic Versioning](https://semver.org/).
   second device stays a viewer.
 
 ### Added
+- The person model (`internal/person`): Soulacy's structured understanding of
+  the person it works for — identity, routine, current state, relationships,
+  commitments, preferences. Owner-scoped, with a precedence rule that stops a
+  sensor or an agent overwriting what the person said, expiring entries for
+  anything short-lived, and a change feed shaped like the memory one so
+  devices can hold a local copy. New routes under `/person/model` and two
+  opt-in agent tools, `person.model` (answers in prose) and `person.observe`.
+  See `docs/using/person-model.md` and `docs/PERSONAL_ASSISTANT_PROGRAM.md`.
 - `docs/PERSONAL_ASSISTANT_PROGRAM.md`: the build plan for Soulacy as a
   true personal assistant (perceive, understand, act, learn), with the
   person model as slice one and a concrete schema.

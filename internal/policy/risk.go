@@ -112,6 +112,8 @@ var riskTiers = map[string]RiskTier{
 	// capability and permission; the two lookups are reads. Listed here
 	// because "command" in mobile.command_status would otherwise trip the
 	// shell heuristic.
+	"person.model":          RiskSafe,
+	"person.observe":        RiskWrite,
 	"mobile.list_nodes":     RiskSafe,
 	"mobile.command_status": RiskSafe,
 	"mobile.invoke":         RiskWrite,

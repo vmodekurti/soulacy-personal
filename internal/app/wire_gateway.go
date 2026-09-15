@@ -29,6 +29,7 @@ import (
 	"github.com/soulacy/soulacy/internal/introspect"
 	"github.com/soulacy/soulacy/internal/llm"
 	"github.com/soulacy/soulacy/internal/mcp"
+	"github.com/soulacy/soulacy/internal/person"
 	"github.com/soulacy/soulacy/internal/pkgregistry"
 	"github.com/soulacy/soulacy/internal/plugininstall"
 	"github.com/soulacy/soulacy/internal/plugins"
@@ -68,6 +69,7 @@ type gatewayDeps struct {
 	openedCostStore *costs.Store
 	autopilotStore  *autopilot.Store
 	undoStore       *safeundo.Store
+	personStore     person.Store
 	adaptiveRebuild gateway.AdaptiveMemoryRebuilder
 }
 
@@ -85,6 +87,7 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 	srv.SetAutopilotStore(d.autopilotStore)
 	srv.SetAdaptiveMemoryRebuilder(d.adaptiveRebuild)
 	srv.SetSafeUndoStore(d.undoStore)
+	srv.SetPersonModel(d.personStore)
 	d.engine.SetSafeUndo(d.undoStore, d.authEngine != nil && d.authEngine.Effective())
 	d.engine.SetLearningNotebook(d.engine.LearningNotebook(), (d.authEngine != nil && d.authEngine.Effective()) || cfg.Server.APIKey != "")
 	logEffectiveSecuritySummary(log, cfg, d.authEngine != nil && d.authEngine.Effective())

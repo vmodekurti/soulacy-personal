@@ -26,6 +26,7 @@ import (
 	"github.com/soulacy/soulacy/internal/knowledge"
 	"github.com/soulacy/soulacy/internal/learning"
 	"github.com/soulacy/soulacy/internal/mcp"
+	"github.com/soulacy/soulacy/internal/person"
 	"github.com/soulacy/soulacy/internal/runtime"
 	"github.com/soulacy/soulacy/internal/safeundo"
 	"github.com/soulacy/soulacy/internal/scheduler"
@@ -309,6 +310,16 @@ func (a *App) Run(parent context.Context) error {
 	stack.pushClose("learning-notebook", notebook)
 	engine.SetLearningNotebook(notebook, false)
 
+	// The person model: structured understanding of the human, written by
+	// observers and read by agents. Distinct from adaptive memory, which
+	// distils sentences from turns; this is the shape agents agree on.
+	personStore, err := person.OpenSQLite(ws.DB("person-model"))
+	if err != nil {
+		return fmt.Errorf("open person model: %w", err)
+	}
+	stack.pushClose("person-model", personStore)
+	engine.SetPersonModel(personStore)
+
 	// Adaptive memory: facts distilled from turns, injected into prompts.
 	if err := a.buildAdaptiveMemory(ws, engine, stack, cfg.Memory.Adaptive); err != nil {
 		return fmt.Errorf("adaptive memory: %w", err)
@@ -421,6 +432,7 @@ func (a *App) Run(parent context.Context) error {
 		openedCostStore: openedCostStore,
 		autopilotStore:  autopilotStore,
 		undoStore:       undoStore,
+		personStore:     personStore,
 	}, stack)
 
 	// ── KB ingestion worker ───────────────────────────────────────────────────
