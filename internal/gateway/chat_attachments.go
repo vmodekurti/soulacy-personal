@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -79,7 +80,7 @@ func textPreview(s string, max int) string {
 // best-effort text so a later /chat request can include it in the prompt.
 //
 //	POST /api/v1/chat/attachments multipart:
-//	  file, agent_id, session_id
+//	  file, agent_id, session_id, extracted_text (optional, for images)
 func (s *Server) handleChatAttachmentUpload(c *fiber.Ctx) error {
 	st, ok := s.chatAttachmentStore()
 	if !ok {
@@ -114,6 +115,19 @@ func (s *Server) handleChatAttachmentUpload(c *fiber.Ctx) error {
 	text, extractErr := knowledge.ExtractText(mimeType, data)
 	if extractErr != nil {
 		text = ""
+	}
+	// The generic extractor returns unknown bytes verbatim; for a photo that
+	// is JPEG noise, which used to reach the model as the file's "text".
+	if strings.HasPrefix(mimeType, "image/") || !utf8.ValidString(text) {
+		text = ""
+	}
+	// A phone can read what this server cannot: photos are recognised
+	// on-device and sent alongside the file as extracted_text. It is used
+	// only when the server found nothing itself, so a PDF's own text wins.
+	if strings.TrimSpace(text) == "" {
+		if supplied := strings.TrimSpace(c.FormValue("extracted_text")); supplied != "" {
+			text = supplied
+		}
 	}
 	text, textTruncated := truncateRunes(strings.TrimSpace(text), chatAttachmentStoredTextMaxRunes)
 	att := session.Attachment{

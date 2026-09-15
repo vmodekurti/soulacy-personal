@@ -7,6 +7,10 @@ to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Chat attachments accept `extracted_text` from the client: a phone reads a
+  photo on-device (Vision) and sends the text alongside the file, since the
+  gateway has no OCR. Server-side extraction still wins for documents. Image
+  uploads no longer store JPEG bytes as the attachment's "text".
 - Ask Genie in the web app: a floating button on every screen, as on the
   iPhone app. One question is routed to the best chat-capable agent (a
   gateway Genie when present, otherwise by vocabulary overlap with the
