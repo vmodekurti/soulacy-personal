@@ -148,3 +148,69 @@ func TestChatAttachmentPromptExpansionCapsLargeAttachmentText(t *testing.T) {
 		t.Fatalf("expected truncation marker in prompt: %q", content)
 	}
 }
+
+func TestChatAttachmentUploadKeepsClientExtractedTextForImages(t *testing.T) {
+	s, _ := newTestGatewayWithLLM(t, "secret")
+	resStore, err := session.NewSQLiteStore(filepath.Join(t.TempDir(), "resources.db"), session.DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = resStore.Close() })
+	s.SetResourceStore(resStore)
+	s.engine.SetResourceStore(resStore)
+
+	status, body := gatewayJSON(t, s, http.MethodPost, "/api/v1/agents", "secret",
+		`{"id":"ocr-agent","name":"OCR Agent","trigger":"channel","channels":["http"],"llm":{"provider":"test","model":"m"},"system_prompt":"Use uploaded files.","enabled":true}`)
+	if status != http.StatusCreated {
+		t.Fatalf("create status=%d body=%v", status, body)
+	}
+
+	upload := func(t *testing.T, filename, extracted string, content []byte) map[string]any {
+		t.Helper()
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		_ = mw.WriteField("agent_id", "ocr-agent")
+		_ = mw.WriteField("session_id", "sess-ocr")
+		if extracted != "" {
+			_ = mw.WriteField("extracted_text", extracted)
+		}
+		fw, err := mw.CreateFormFile("file", filename)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = fw.Write(content)
+		_ = mw.Close()
+		req, err := http.NewRequest(http.MethodPost, "/api/v1/chat/attachments", &buf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer secret")
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+		resp, err := s.app.Test(httptestutil.WithHost(req), -1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("upload %s status=%d", filename, resp.StatusCode)
+		}
+		var out struct {
+			Attachment map[string]any `json:"attachment"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			t.Fatal(err)
+		}
+		return out.Attachment
+	}
+
+	// A photo: the server cannot read it, so the phone's recognised text is kept.
+	photo := upload(t, "receipt.jpg", "  Coffee 4.50\nTOTAL 7.75  ", []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10})
+	if got := photo["text_preview"]; got != "Coffee 4.50\nTOTAL 7.75" {
+		t.Fatalf("photo text_preview=%q, want the client text", got)
+	}
+	// A text file: the server's own extraction wins over anything the client sent.
+	note := upload(t, "notes.txt", "client guess", []byte("server text"))
+	if got := note["text_preview"]; got != "server text" {
+		t.Fatalf("notes text_preview=%q, want the server's extraction", got)
+	}
+}
