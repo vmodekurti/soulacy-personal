@@ -44,6 +44,10 @@ export const navTourCopy = {
     what: 'A direct line to any deployed agent, with token counts and the full trace of every turn.',
     when: 'The fastest way to check whether a change actually improved an answer.',
   },
+  person: {
+    what: "What Soulacy understands about you: who you are, the shape of your week, the people who matter, what you owe, what you prefer — with the source of every line.",
+    when: 'Correct anything that is wrong, delete anything you would rather it forgot, and choose which senses may add to it. Nothing is watched until you switch it on.',
+  },
   memory: {
     what: 'What your agents have learned: remembered facts, picked-up procedures, and a queue of things waiting for your approval.',
     when: 'Check the review queue when an agent starts behaving in a way you did not ask for.',

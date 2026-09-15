@@ -407,6 +407,22 @@ export const api = {
     },
   },
 
+  // The person model: what Soulacy understands about you, and which senses
+  // may add to it. Everything here is scoped to the caller's own identity.
+  person: {
+    model: (includeExpired = false) =>
+      apiFetch(`/person/model${includeExpired ? '?include_expired=true' : ''}`),
+    put: (entry) =>
+      apiFetch('/person/model/entries', { method: 'PUT', body: JSON.stringify(entry) }),
+    remove: (section, key) =>
+      apiFetch(`/person/model/entries/${encodeURIComponent(section)}/${encodeURIComponent(key)}`, { method: 'DELETE' }),
+    purge: (sections = '') =>
+      apiFetch(`/person/model?confirm=true${sections ? `&sections=${encodeURIComponent(sections)}` : ''}`, { method: 'DELETE' }),
+    senses: () => apiFetch('/person/senses'),
+    setSense: (sense, enabled) =>
+      apiFetch(`/person/senses/${encodeURIComponent(sense)}`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
+  },
+
   proactive: {
     suggestions: (max = 6) => apiFetch(`/proactive/suggestions?max=${max}`),
   },

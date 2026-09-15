@@ -25,6 +25,7 @@ const loaders = {
   agents: () => import('./Agents.svelte'),
   templates: () => import('./Templates.svelte'),
   chat: () => import('./Chat.svelte'),
+  person: () => import('./Person.svelte'),
   memory: () => import('./Memory.svelte'),
   knowledge: () => import('./Knowledge.svelte'),
   queues: () => import('./Queues.svelte'),

@@ -112,6 +112,27 @@ That is the honest way to start. Sensors need weeks before a routine means
 anything; a short conversation on the first day gives every other agent
 something to work with immediately.
 
+## Seeing and correcting it: About You
+
+The web app has an **About You** page under Capabilities. It shows every
+line Soulacy holds, grouped by section, with where each one came from:
+
+- **You told us**, for anything you typed and anything an agent recorded
+  with a quote of your own words. The quote is shown underneath.
+- **Guessed by *agent***, for an inference with no quote behind it.
+- **Noticed by *sense***, for something an observer worked out.
+
+Low-confidence lines are shown in italics and labelled a guess, so a
+hunch never reads like a fact. A line that expires says so.
+
+The page also holds the sense switches, a box for adding or correcting a
+line by hand, and a button that forgets everything. A line you write there
+is yours, so it outranks every sense and agent from then on.
+
+A progress line at the top says how many areas have something in them and
+what to do next, so the first week feels like progress rather than
+silence.
+
 ## Reading and correcting it as a person
 
 ```

@@ -13,6 +13,11 @@ to follow [Semantic Versioning](https://semver.org/).
   second device stays a viewer.
 
 ### Added
+- An **About You** page in the web app: every line the person model holds,
+  grouped and labelled with where it came from ("you told us" with the quote,
+  "guessed by" an agent, "noticed by" a sense). Guesses are marked as guesses.
+  The sense switches live here with their purposes, alongside a box to add or
+  correct a line by hand and a button that forgets everything.
 - A **Getting to Know You** agent template that fills in the person model by
   asking rather than by watching: it reads what is already known, asks only
   about the gaps, records each answer with the person's own words, and stops
