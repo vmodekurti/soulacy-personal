@@ -705,6 +705,23 @@
   :global(.btn-primary:hover:not(:disabled)) { background: var(--sl-accent-hover); }
   :global(.btn-primary:active:not(:disabled)) { transform: translateY(1px); }
 
+  /* .linkish had no style anywhere in the app. Seventeen buttons across six
+     pages were therefore rendering as bare text on a dark background — they
+     looked like a sentence, not something you could press, which is exactly
+     how "Open Studio" and "Change something" were reported. A link still
+     reads as lighter than a button, but it has to read as pressable. */
+  :global(.linkish) {
+    background: none; border: none; padding: 0;
+    color: var(--sl-accent, #6c63ff); font: inherit; font-size: inherit;
+    cursor: pointer; text-decoration: underline; text-underline-offset: 3px;
+    text-decoration-color: color-mix(in srgb, var(--sl-accent, #6c63ff) 45%, transparent);
+    transition: color .15s ease, text-decoration-color .15s ease;
+  }
+  :global(.linkish:hover:not(:disabled)) {
+    color: #8b85ff; text-decoration-color: #8b85ff;
+  }
+  :global(.linkish:disabled) { opacity: .5; cursor: default; text-decoration: none; }
+
   :global(.btn-secondary) {
     background: var(--sl-surface-raised); color: var(--sl-text);
     border: 1px solid var(--sl-line);

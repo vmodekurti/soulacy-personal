@@ -68,7 +68,7 @@ func humanizeToolName(name string) string {
 func humanizeToolResult(content string) string {
 	const maxChars = 1200
 	const maxKeys = 10
-	trimmed := strings.TrimSpace(content)
+	trimmed := strings.TrimSpace(stripExternalContentEnvelope(content))
 	var obj map[string]any
 	if err := json.Unmarshal([]byte(trimmed), &obj); err != nil || len(obj) == 0 {
 		var arr []any
@@ -166,4 +166,32 @@ func mustJSON(v any) string {
 		return ""
 	}
 	return string(b)
+}
+
+// stripExternalContentEnvelope removes the <external_content trust="…"
+// source="…"> wrapper the runtime puts around tool results.
+//
+// That wrapper is scaffolding for the model — it marks where untrusted data
+// begins so the agent knows not to follow instructions inside it. It is not
+// for people. Leaving it on also broke the humaniser: the payload no longer
+// parsed as JSON, so a market-data result fell through to the raw-text branch
+// and a wall of quotes and braces was shown to the user as the agent's answer.
+func stripExternalContentEnvelope(content string) string {
+	s := strings.TrimSpace(content)
+	open := strings.Index(s, "<external_content")
+	if open < 0 {
+		return content
+	}
+	gt := strings.Index(s[open:], ">")
+	if gt < 0 {
+		return content
+	}
+	start := open + gt + 1
+	end := strings.LastIndex(s, "</external_content>")
+	if end < start {
+		// Truncated envelope: take everything after the opening tag rather
+		// than giving up, since the payload is still the useful part.
+		return strings.TrimSpace(s[start:])
+	}
+	return strings.TrimSpace(s[start:end])
 }

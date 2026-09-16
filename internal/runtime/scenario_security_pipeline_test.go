@@ -11,13 +11,13 @@
 // gate, and a fetch_url tool that returns adversarial content telling the
 // model to run shell_exec. The pipeline must:
 //
-//   1. Wrap the fetch result in the untrusted-content envelope (S1).
-//   2. Scan the wrapped body and record a High-severity injection finding
-//      on the session (S2).
-//   3. Emit an `injection.finding` event with source=fetch_url + severity=high.
-//   4. Deny the follow-up shell_exec call under the workspace-default gate
-//      even though the per-agent value is empty (S3 + F-Bridge).
-//   5. Emit an `intent.decision` event with decision=deny + injection_influenced=true.
+//  1. Wrap the fetch result in the untrusted-content envelope (S1).
+//  2. Scan the wrapped body and record a High-severity injection finding
+//     on the session (S2).
+//  3. Emit an `injection.finding` event with source=fetch_url + severity=high.
+//  4. Deny the follow-up shell_exec call under the workspace-default gate
+//     even though the per-agent value is empty (S3 + F-Bridge).
+//  5. Emit an `intent.decision` event with decision=deny + injection_influenced=true.
 //
 // A break at any seam — the classifier misreading fetch_url, the scanner
 // missing the override phrase, the session losing the injection state

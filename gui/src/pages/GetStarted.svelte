@@ -374,7 +374,7 @@
           {/if}
 
           {#if setupError}<div class="notice err">{setupError}</div>{/if}
-          <button class="linkish" on:click={() => { setupMode = ''; pendingMessage = '' }}>Not now</button>
+          <button class="btn-secondary btn-sm" on:click={() => { setupMode = ''; pendingMessage = '' }}>Not now</button>
         </div>
       {/if}
 
@@ -450,7 +450,7 @@
             {/if}
             <div class="panel-foot">
               <button class="btn-primary" disabled={busy} on:click={createAndRun}>Create it and run it now</button>
-              <button class="linkish" on:click={() => { phase = 'converse' }}>Change something</button>
+              <button class="btn-secondary btn-sm" on:click={() => { phase = 'converse' }}>Change something</button>
             </div>
             <p class="foot-note">It runs once, now, so you can see the result before deciding whether it should run on its own.</p>
           </div>
@@ -476,8 +476,8 @@
               </div>
             {/if}
             <div class="panel-foot">
-              <button class="linkish" on:click={() => go('agents')}>See it under Deployed</button>
-              <button class="linkish" on:click={restart}>Build another</button>
+              <button class="btn-secondary btn-sm" on:click={() => go('agents')}>See it under Deployed</button>
+              <button class="btn-secondary btn-sm" on:click={restart}>Build another</button>
             </div>
           </div>
         {/if}

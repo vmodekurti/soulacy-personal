@@ -718,7 +718,11 @@ func understandingToAgentMap(u *BuilderUnderstanding, provider, model string) ma
 			"write_scopes": writeScopes,
 			"max_tokens":   50,
 		},
-		"max_turns": 10,
+		// Enough room to call a tool, read the result and write the answer.
+		// At ten, an agent that fetched market data ran out before it could
+		// write anything, and the user was shown the raw tool payload as its
+		// first result — which is the worst possible first impression.
+		"max_turns": 25,
 		"enabled":   true,
 	}
 	if trigger == "channel" && len(channels) > 0 {
