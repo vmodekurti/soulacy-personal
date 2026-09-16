@@ -250,10 +250,19 @@ func (s *Server) handleListAgents(c *fiber.Ctx) error {
 		if d == nil {
 			continue
 		}
-		meta[d.ID] = fiber.Map{
+		entry := fiber.Map{
 			"surfaces":      d.EffectiveSurfaces(),
 			"chat_eligible": d.AppearsOnChat(),
 		}
+		// Why this agent is switched off, when boot validation switched it
+		// off. Without it the dashboard shows "disabled" and the user has no
+		// way to learn that a model is missing, let alone which one.
+		if !d.Enabled {
+			if reason, ok := s.disabledReasons.Load(d.ID); ok {
+				entry["disabled_reason"] = reason
+			}
+		}
+		meta[d.ID] = entry
 	}
 	// Optional ?surface=chat filter returns only agents that appear there.
 	if surface := strings.TrimSpace(c.Query("surface")); surface != "" {

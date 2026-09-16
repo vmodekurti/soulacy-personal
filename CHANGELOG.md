@@ -7,6 +7,29 @@ to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- A fresh install can answer its first message. Four defects compounded into
+  a product that shipped unable to run. The generated config named a ~40GB
+  model nobody has, and the built-in fallbacks named another, so boot
+  validation disabled every built-in agent and chat replied only "agent is
+  disabled". The reason existed solely as a server log line, so the dashboard
+  could not show it. And first run wrote the config *after* loading it, so
+  even a correct file was invisible to the process that wrote it, which is why
+  the first message returned a bare 404. Now: first run detects the models
+  actually installed and names the largest one that can hold a conversation,
+  writing no model rather than a fictional one when the machine has none; the
+  process re-reads what it just wrote, so first boot behaves like every later
+  boot; and there are no invented fallback model names anywhere.
+- The readiness check actually checks. It asked whether a provider block
+  appeared in config, named a model, and carried a key when remote — all
+  satisfied by the config the product writes for itself — so a machine with no
+  model runtime at all reported "Provider ollama is ready". Since onboarding
+  only opens the setup wizard when the provider step is unfinished, the person
+  who most needed it was never sent there. It now asks the provider what
+  models it has and whether the configured one is among them, and reports both
+  with a remedy.
+- When boot validation switches an agent off, the dashboard says why and how
+  to fix it. The validator already words these well; they just had no way out
+  of the log file.
 - "Forget everything" on the person model now drops the raw device signals
   too. Without that, the next observer pass re-derived exactly what had just
   been forgotten, so the promise lasted only until the phone next checked in.

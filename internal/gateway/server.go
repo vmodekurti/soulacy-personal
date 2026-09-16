@@ -99,6 +99,11 @@ type Server struct {
 	autopilotClosing bool
 	cfg              *config.Config
 	cfgPath          string // path to config file on disk; empty = unknown
+	// disabledReasons records why boot validation switched an agent off,
+	// keyed by agent id. The reason used to exist only as a log line, so
+	// the dashboard could say an agent was disabled but never why, and the
+	// fix — which the validator already words correctly — reached nobody.
+	disabledReasons sync.Map
 	// pulls tracks in-flight local model downloads. A value, not a pointer:
 	// it needs no constructor wiring and a zero registry is usable.
 	pulls           pullRegistry
@@ -1878,9 +1883,20 @@ func (s *Server) validateAgentsAtBoot(ctx context.Context) {
 			}
 			if s.loader.SetEnabledInMemory(def.ID, false) {
 				disabled++
+				// Keep the first error: it is the one that stopped the agent,
+				// and a list of five is not more actionable than one.
+				for _, f := range report.Findings {
+					if f.Severity == agentvalidate.Error {
+						s.disabledReasons.Store(def.ID, agentDisableReason{
+							Field: f.Field, Problem: f.Message, Fix: f.Suggestion,
+						})
+						break
+					}
+				}
 			}
 			continue
 		}
+		s.disabledReasons.Delete(def.ID)
 		for _, f := range report.Findings {
 			if f.Severity == agentvalidate.Warn {
 				s.log.Warn("agent config warning",

@@ -1172,7 +1172,12 @@ func Load(cfgPath string) (*Config, string, error) {
 	v.SetDefault("auth.jwt_refresh_ttl", "168h")
 	v.SetDefault("llm.default_provider", "ollama")
 	v.SetDefault("llm.providers.ollama.base_url", "http://localhost:11434")
-	v.SetDefault("llm.providers.ollama.model", "llama3")
+	// No default model. Naming one the machine does not have is worse than
+	// naming none: boot validation disables every agent that inherits it,
+	// and the dashboard can only report that they are "disabled". An empty
+	// model is reported honestly as not-configured and can be fixed from
+	// Providers. First run writes whatever is actually installed here.
+	v.SetDefault("llm.providers.ollama.model", "")
 	v.SetDefault("llm.studio.max_build_tokens", 100000)
 	v.SetDefault("llm.studio.max_build_cost_usd", 5.0)
 	v.SetDefault("costs.enforcement_mode", "soft")

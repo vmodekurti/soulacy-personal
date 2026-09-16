@@ -1,9 +1,11 @@
 package gateway
 
 import (
+	"context"
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -21,6 +23,16 @@ type doctorProviderCheck struct {
 	KeySource  string `json:"key_source"`
 	BaseURL    string `json:"base_url,omitempty"`
 	Model      string `json:"model,omitempty"`
+	// Reachable and ModelPresent are the answers to the only two questions
+	// that decide whether this provider can actually serve a request. Before
+	// they existed the check asked whether a provider block appeared in
+	// config, named a model, and had a key when remote — all of which are
+	// satisfied by the config the product writes for itself at first run. So
+	// a machine with no model runtime at all reported "Provider ollama is
+	// ready", and onboarding, which only redirects when the provider step is
+	// todo, never opened the setup wizard for the person who needed it most.
+	Reachable    *bool `json:"reachable,omitempty"`
+	ModelPresent *bool `json:"model_present,omitempty"`
 }
 
 type doctorChannelCheck struct {
@@ -159,9 +171,92 @@ func (s *Server) providerDoctorChecks(c *fiber.Ctx) []doctorProviderCheck {
 			check.Detail = "provider works through " + source + ", not the encrypted vault"
 			check.Remedy = "store the key in Secrets for restart-safe operation"
 		}
+		s.probeProvider(c, &check)
 		out = append(out, check)
 	}
 	return out
+}
+
+// probeLiveProviders can be turned off in tests that do not want outbound
+// calls. Production always probes: a readiness report that never leaves the
+// process is not a readiness report.
+var probeLiveProviders = true
+
+// providerProbeTimeout is short because /doctor is on the onboarding path and
+// a slow answer there is its own bad first impression. A provider that cannot
+// answer in this long is not going to serve a chat turn either.
+const providerProbeTimeout = 3 * time.Second
+
+// probeProvider asks the provider what models it has, and checks that the one
+// this install is configured to use is among them.
+//
+// It only downgrades a verdict, never upgrades one: an existing failure about
+// a missing key is more useful than "unreachable", which is its consequence.
+func (s *Server) probeProvider(c *fiber.Ctx, check *doctorProviderCheck) {
+	if !probeLiveProviders || check.Status == "fail" || s.llmRouter == nil {
+		return
+	}
+	prov := s.llmRouter.Provider(check.ID)
+	if prov == nil {
+		return
+	}
+	lister, ok := prov.(interface {
+		Models(context.Context) ([]string, error)
+	})
+	if !ok {
+		return // nothing to ask; leave the verdict as it stands
+	}
+
+	ctx, cancel := context.WithTimeout(c.Context(), providerProbeTimeout)
+	defer cancel()
+	models, err := lister.Models(ctx)
+	if err != nil {
+		no := false
+		check.Reachable = &no
+		check.Status = "fail"
+		check.Detail = "provider is configured but not answering at " + check.BaseURL
+		check.Remedy = localProviderRemedy(check.ID, check.BaseURL)
+		return
+	}
+	yes := true
+	check.Reachable = &yes
+
+	if strings.TrimSpace(check.Model) == "" {
+		return // an earlier branch already reported the missing default
+	}
+	if !modelInList(check.Model, models) {
+		no := false
+		check.ModelPresent = &no
+		check.Status = "fail"
+		check.Detail = "the configured model " + check.Model + " is not installed on this provider"
+		if studio.IsLocalProvider(check.ID, check.BaseURL) {
+			check.Remedy = "install it from Providers, or pick one of the models this machine already has"
+		} else {
+			check.Remedy = "choose a model this provider offers"
+		}
+		return
+	}
+	present := true
+	check.ModelPresent = &present
+}
+
+// modelInList tolerates Ollama's implicit :latest, so a config naming
+// "nomic-embed-text" matches an installed "nomic-embed-text:latest".
+func modelInList(want string, have []string) bool {
+	want = strings.TrimSpace(want)
+	for _, h := range have {
+		if h == want || strings.TrimSuffix(h, ":latest") == strings.TrimSuffix(want, ":latest") {
+			return true
+		}
+	}
+	return false
+}
+
+func localProviderRemedy(id, baseURL string) string {
+	if studio.IsLocalProvider(id, baseURL) {
+		return "start the local model runtime, then reload this page"
+	}
+	return "check the base URL and that this machine can reach it"
 }
 
 func (s *Server) channelDoctorChecks() []doctorChannelCheck {
@@ -215,4 +310,14 @@ func (s *Server) channelDoctorChecks() []doctorChannelCheck {
 		})
 	}
 	return out
+}
+
+// agentDisableReason is why boot validation switched an agent off. The
+// validator already words these well ("model X was not found for provider Y",
+// "run `ollama pull X`"); the only thing missing was a way for them to leave
+// the log file.
+type agentDisableReason struct {
+	Field   string `json:"field,omitempty"`
+	Problem string `json:"problem"`
+	Fix     string `json:"fix,omitempty"`
 }

@@ -26,10 +26,14 @@ package config
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // BootstrapAction describes what (if anything) EnsureBootstrap did.
@@ -193,8 +197,7 @@ llm:
   providers:
     ollama:
       base_url: "http://localhost:11434"
-      # Pull this with: ollama pull llama3.3:70b
-      model: "llama3.3:70b"
+%s
 
 # RAG defaults — sqlite-vec embedded vector store, Ollama embeddings.
 # Knowledge bases are created from the GUI (Knowledge page).
@@ -214,7 +217,7 @@ log:
   level: info
   format: console
 `
-	body := fmt.Sprintf(tmpl, filepath.Base(path), apiKey)
+	body := fmt.Sprintf(tmpl, filepath.Base(path), apiKey, defaultOllamaModelBlock(defaultOllamaBaseURL))
 	return os.WriteFile(path, []byte(body), 0o600)
 }
 
@@ -362,6 +365,83 @@ func isLoopbackHostName(host string) bool {
 		// it as "loopback-equivalent" so a default install with
 		// host=0.0.0.0 still gets a key generated.
 		return true
+	}
+	return false
+}
+
+// defaultOllamaBaseURL matches the base_url written into the template above.
+const defaultOllamaBaseURL = "http://localhost:11434"
+
+// defaultOllamaModelBlock decides what model the generated config should name.
+//
+// The template used to hardcode a ~40GB model with a comment telling the user
+// to pull it. That is a default that cannot work: on a fresh machine every
+// built-in agent fails boot validation and is switched off, so the product
+// ships in a state where nothing can run and the dashboard says only that the
+// agents are "disabled".
+//
+// So: ask the local runtime what is actually installed and name that. If it
+// has nothing, name nothing, and say where to fix it. An empty model is an
+// honest "not configured yet" that the readiness check reports and the
+// dashboard can act on. A model nobody has is a lie that looks like a setting.
+func defaultOllamaModelBlock(baseURL string) string {
+	if m := detectInstalledOllamaModel(baseURL); m != "" {
+		return "      # Chosen on first run from the models already installed here.\n" +
+			"      model: \"" + m + "\""
+	}
+	return "      # No local model was installed when this file was written.\n" +
+		"      # Install one from the dashboard (Providers), or name it here.\n" +
+		"      model: \"\""
+}
+
+// detectInstalledOllamaModel returns the largest installed non-embedding
+// model, or "" when the runtime is absent or empty.
+//
+// Largest because it is already on the machine, so the user can evidently
+// store it, and a bigger model gives a better first impression than the
+// smallest one present. Embedding models are skipped: they cannot hold a
+// conversation, and picking one would produce a config that looks configured
+// and fails on the first message.
+func detectInstalledOllamaModel(baseURL string) string {
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(strings.TrimRight(baseURL, "/") + "/api/tags")
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	var result struct {
+		Models []struct {
+			Name string `json:"name"`
+			Size int64  `json:"size"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&result); err != nil {
+		return ""
+	}
+	best, bestSize := "", int64(-1)
+	for _, m := range result.Models {
+		if isEmbeddingModelName(m.Name) {
+			continue
+		}
+		if m.Size > bestSize {
+			best, bestSize = m.Name, m.Size
+		}
+	}
+	return best
+}
+
+// isEmbeddingModelName matches by name because /api/tags does not say what a
+// model is for. These substrings are the naming conventions every embedding
+// model on Ollama follows.
+func isEmbeddingModelName(name string) bool {
+	n := strings.ToLower(name)
+	for _, hint := range []string{"embed", "bge-", "gte-", "minilm"} {
+		if strings.Contains(n, hint) {
+			return true
+		}
 	}
 	return false
 }

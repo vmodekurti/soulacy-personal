@@ -155,6 +155,34 @@ func run() error {
 		printFirstRunBanner(bootstrap, cfg.Server.Host, cfg.Server.Port)
 	}
 
+	// Re-read what bootstrap just wrote.
+	//
+	// EnsureBootstrap patches the API key back into the in-memory config, so
+	// auth worked, but nothing else it wrote was visible to this process:
+	// every other setting kept the value config.Load had already resolved from
+	// defaults. First run therefore behaved differently from every subsequent
+	// run of the same install, which is exactly the boot a new user gets.
+	//
+	// It showed up as a 404 on the first message. Bootstrap detects the
+	// installed model and writes it to the file; the running process still
+	// held the empty default, fell through to the provider's own fallback
+	// name, and asked Ollama for a model that was not there.
+	if bootstrap.Action == config.BootstrapWroteConfig {
+		reloaded, _, err := config.Load(resolvedPath)
+		if err != nil {
+			return fmt.Errorf("re-reading the config written on first run: %w", err)
+		}
+		// Keep the key bootstrap resolved: it may have come from the
+		// environment, in which case it is deliberately absent from the file.
+		if cfg.Server.APIKey != "" {
+			reloaded.Server.APIKey = cfg.Server.APIKey
+		}
+		if cfg.Server.AllowUnauthenticated {
+			reloaded.Server.AllowUnauthenticated = true
+		}
+		cfg = reloaded
+	}
+
 	// Cohort G — advisory schema-version check. Warns on drift, never blocks
 	// startup so an operator upgrading from a prior version is never
 	// stranded. Silent on the happy path so we don't add noise to every boot.
