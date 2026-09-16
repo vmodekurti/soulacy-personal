@@ -1362,10 +1362,15 @@ export const api = {
      * Generate AND register the agent in one shot.
      * @returns {Promise<{agent_id, soul_yaml}>}
      */
-    deploy: (sessionId, provider = '', model = '') =>
+    deploy: (sessionId, provider = '', model = '', activateSchedule = false) =>
       apiFetch('/builder/deploy', {
         method: 'POST',
-        body: JSON.stringify({ session_id: sessionId, provider, model }),
+        body: JSON.stringify({
+          session_id: sessionId, provider, model,
+          // Off unless asked. An agent that fires unattended before anyone has
+          // watched it run is how a silent daily failure gets created.
+          activate_schedule: activateSchedule,
+        }),
       }),
 
     /**

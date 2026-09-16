@@ -54,12 +54,16 @@
   $: mobilePrimaryPages = pages.filter(p => ['dashboard', 'studio', 'agents', 'chat'].includes(p.id))
   $: mobileMoreActive = !mobilePrimaryPages.some(p => p.id === page)
 
+  // `builder` used to alias to Studio: the one route name that should have
+  // opened a conversation opened the graph editor instead, which is why the
+  // conversational builder shipped unreachable for months.
   const retiredPages = {
-    builder: 'studio',
-    build: 'studio',
+    builder: 'start',
+    build: 'start',
   }
 
   const pageLoaders = {
+    start: () => import('./pages/GetStarted.svelte'),
     autopilot: () => import('./pages/Autopilot.svelte'),
     dashboard: () => import('./pages/Dashboard.svelte'),
     onboarding: () => import('./pages/Onboarding.svelte'),

@@ -86,6 +86,25 @@ to follow [Semantic Versioning](https://semver.org/).
   and the workspace login page.
 
 ### Added
+- A front door: describe what you want, watch it run. Soulacy's shortest path
+  to a working agent ran through a visual graph editor, and a first-time user
+  met 25 screens and a dozen decisions before anything produced a result. The
+  conversational builder that solves this had existed on the server for months
+  with no screen calling it — its route id was even aliased to Studio, so the
+  one word that should have opened a conversation opened the graph editor
+  instead. Get Started is now the first item in the sidebar: one question, a
+  few follow-ups in plain language, a summary of what will happen in words
+  rather than YAML, and then a real run the user watches. A schedule is
+  offered only after they have seen the output, and only then is a cron armed.
+  Studio is one click away for anything needing branching, code or precise
+  tool wiring.
+- The builder no longer declares an agent ready that cannot be built. Its
+  readiness was entirely self-attested — a confidence score and a `missing`
+  list both written by the model — so it would announce "every Friday at 4pm"
+  while leaving the cron expression empty, and deploy would then refuse it.
+  That reads as the assistant saying yes and the product saying no. Readiness
+  now also checks the few things a build genuinely cannot proceed without, and
+  any gap goes back into the conversation as a question.
 - A local model can be installed from the dashboard. The shipped default
   provider is local, and until now nothing in the product could obtain a model
   for it: the first-run config comment, the validator's remedy, the provider
