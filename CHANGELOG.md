@@ -17,6 +17,16 @@ to follow [Semantic Versioning](https://semver.org/).
   Apple Watch. Pairing someone else still requires admin, and a viewer's
   second device stays a viewer.
 
+### Changed
+- The core narrative now leads with the assistant rather than the runtime.
+  Soulacy is "an assistant that actually knows you", and self-hosting is the
+  proof rather than the pitch. Learning is explicitly **by asking** — a
+  conversation in the browser, no phone required — with the iPhone app and its
+  senses labelled optional throughout, since a person may never install it.
+  The front page also says plainly that setup needs a machine and a terminal,
+  so nobody arrives expecting a hosted sign-up. Website, README, docs landing
+  and the workspace login page.
+
 ### Added
 - **Person triggers**: an agent can run because something about the person
   changed rather than because a clock fired. `trigger: person` with
@@ -167,15 +177,6 @@ to follow [Semantic Versioning](https://semver.org/).
   Config → Adaptive memory, with automatic fallback to the local engine when
   the provider is unconfigured.
 
-### Changed
-- The core narrative now leads with the assistant rather than the runtime.
-  Soulacy is "an assistant that actually knows you", and self-hosting is the
-  proof rather than the pitch. Learning is explicitly **by asking** — a
-  conversation in the browser, no phone required — with the iPhone app and its
-  senses labelled optional throughout, since a person may never install it.
-  The front page also says plainly that setup needs a machine and a terminal,
-  so nobody arrives expecting a hosted sign-up. Website, README, docs landing
-  and the workspace login page.
 - When an agent runs out of turns before writing its answer, the fallback
   now says so and renders what was gathered as readable "key: value" lines
   instead of raw tool JSON.
