@@ -48,22 +48,154 @@
     'Check a web page once a day and tell me when the price changes.',
   ]
 
-  let unreachable = false
-  onMount(async () => {
-    // A model has to exist before any of this can work. Saying so here beats
-    // failing three questions in.
+  // Setup, handled here rather than by sending someone away.
+  //
+  // A model has to exist before any of this can work, and the old banner just
+  // pointed at another page — which is the same dead end in a nicer coat. If
+  // nothing is usable we collect what is missing on this screen, then carry on
+  // with whatever the person was already trying to do.
+  let providerReady = true
+  let checkingProvider = true
+  let setupMode = ''          // '' | 'local' | 'cloud'
+  let setupBusy = false
+  let setupError = ''
+  let localModels = []        // installable models that fit this machine
+  let hostRamGB = 0
+  let pullJob = null
+  let pullTimer = null
+  let cloudProvider = 'anthropic'
+  let cloudKey = ''
+  let cloudModels = []
+  let cloudModel = ''
+  // What the person asked for before we interrupted them, replayed after setup.
+  let pendingMessage = ''
+
+  const CLOUD_PROVIDERS = [
+    { id: 'anthropic', label: 'Anthropic', where: 'console.anthropic.com' },
+    { id: 'openai',    label: 'OpenAI',    where: 'platform.openai.com' },
+    { id: 'google',    label: 'Google',    where: 'aistudio.google.com' },
+  ]
+
+  async function checkProvider() {
+    checkingProvider = true
     try {
       const doctor = await api.providers.doctor()
       const providers = doctor.providers || []
-      unreachable = providers.length > 0 && !providers.some(p => p.status === 'ok')
+      // No providers at all is also "not ready" — it used to read as fine.
+      providerReady = providers.some(p => p.status === 'ok')
     } catch {
-      unreachable = false
+      providerReady = true   // cannot tell; do not block on a permissions error
+    } finally {
+      checkingProvider = false
     }
-  })
+  }
+
+  onMount(checkProvider)
+
+  async function openLocalSetup() {
+    setupMode = 'local'
+    setupError = ''
+    try {
+      const res = await api.providers.suggested('ollama')
+      hostRamGB = res.host_ram_gb || 0
+      localModels = res.models || []
+    } catch (e) {
+      setupError = e.message || 'Could not reach a local model runtime on this machine.'
+      localModels = []
+    }
+  }
+
+  async function installModel(name) {
+    setupBusy = true
+    setupError = ''
+    try {
+      const res = await api.providers.pull('ollama', name)
+      pullJob = { model: name, status: 'starting', completed: 0, total: 0, job: res.job_id }
+      pollPull()
+    } catch (e) {
+      setupError = e.message || 'Could not start the download.'
+      setupBusy = false
+    }
+  }
+
+  function pollPull() {
+    clearTimeout(pullTimer)
+    pullTimer = setTimeout(async () => {
+      if (!pullJob?.job) return
+      try {
+        const j = await api.providers.pullStatus('ollama', pullJob.job)
+        pullJob = { ...pullJob, ...j }
+        if (!j.done) { pollPull(); return }
+        setupBusy = false
+        if (j.error) { setupError = j.error; return }
+        await api.providers.setModel('ollama', j.model)
+        await finishSetup()
+      } catch (e) {
+        setupBusy = false
+        setupError = e.message || 'Lost track of the download.'
+      }
+    }, 1000)
+  }
+
+  async function saveCloudKey() {
+    if (!cloudKey.trim()) return
+    setupBusy = true
+    setupError = ''
+    try {
+      await api.providers.setCredentials(cloudProvider, { api_key: cloudKey.trim() })
+      const res = await api.providers.models(cloudProvider)
+      cloudModels = res.models || []
+      cloudModel = res.selected || cloudModels[0] || ''
+      cloudKey = ''   // not kept in the page once the gateway has it
+    } catch (e) {
+      setupError = e.message || 'That key was not accepted.'
+    } finally {
+      setupBusy = false
+    }
+  }
+
+  async function useCloudModel() {
+    if (!cloudModel) return
+    setupBusy = true
+    setupError = ''
+    try {
+      await api.providers.setModel(cloudProvider, cloudModel)
+      await finishSetup()
+    } catch (e) {
+      setupError = e.message || 'Could not set that model.'
+    } finally {
+      setupBusy = false
+    }
+  }
+
+  // Setup done: re-check, close the panel, and resume what they asked for.
+  async function finishSetup() {
+    await checkProvider()
+    if (!providerReady) {
+      setupError = 'Still not reachable. A gateway restart may be needed for a new provider.'
+      return
+    }
+    setupMode = ''
+    pullJob = null
+    if (pendingMessage) {
+      const msg = pendingMessage
+      pendingMessage = ''
+      send(msg)
+    }
+  }
 
   async function send(text) {
     const message = (text ?? draft).trim()
     if (!message || busy) return
+    // Nothing can run without a model. Hold the request, set the model up on
+    // this screen, then replay it — rather than failing three questions in
+    // with a connection-refused error the person cannot act on.
+    if (!providerReady && !setupMode) {
+      pendingMessage = message
+      draft = ''
+      await openLocalSetup()
+      return
+    }
     busy = true
     error = ''
     turns = [...turns, { role: 'you', text: message }]
@@ -158,9 +290,81 @@
       <h1>What would you like help with?</h1>
       <p class="sub">Describe it in your own words. Soulacy works out the rest and shows you before anything runs.</p>
 
-      {#if unreachable}
+      {#if !checkingProvider && !providerReady && !setupMode}
         <div class="banner warn">
-          No model is available yet, so nothing can run. <button class="linkish" on:click={() => go('providers')}>Set one up first</button>.
+          No model is connected yet. Say what you want anyway and I will set one up first.
+        </div>
+      {/if}
+
+      {#if setupMode}
+        <div class="setup">
+          <h2>First, a model to think with</h2>
+          <p class="setup-sub">
+            {#if pendingMessage}Your request is saved. This takes a minute, then it carries on.{:else}Pick one and everything else follows.{/if}
+          </p>
+
+          <div class="setup-tabs">
+            <button class:on={setupMode === 'local'} on:click={openLocalSetup}>On this machine</button>
+            <button class:on={setupMode === 'cloud'} on:click={() => { setupMode = 'cloud'; setupError = '' }}>Use a cloud account</button>
+          </div>
+
+          {#if setupMode === 'local'}
+            {#if pullJob && !pullJob.done}
+              <div class="pull">
+                <div class="pull-row"><code>{pullJob.model}</code><span>{pullJob.status}</span></div>
+                <div class="pull-bar">
+                  <div class="pull-fill" style={`width:${pullJob.total ? Math.round(pullJob.completed / pullJob.total * 100) : 4}%`}></div>
+                </div>
+                <span class="setup-note">Downloading. You can leave this page; it keeps going.</span>
+              </div>
+            {:else if localModels.length}
+              <p class="setup-note">{hostRamGB ? `${hostRamGB} GB of memory detected.` : ''} Anything too big for this machine is greyed out.</p>
+              {#each localModels as m}
+                <div class="setup-row" class:unfit={!m.fits}>
+                  <div>
+                    <code>{m.name}</code>{#if m.default}<span class="tag">recommended</span>{/if}
+                    <div class="setup-sum">{m.summary}</div>
+                  </div>
+                  <div class="setup-side">
+                    <span class="setup-size">{Math.round(m.size_gb * 10) / 10} GB</span>
+                    {#if m.fits}
+                      <button class="btn-secondary btn-sm" disabled={setupBusy} on:click={() => installModel(m.name)}>Install</button>
+                    {:else}
+                      <span class="setup-no">needs {m.min_ram_gb} GB</span>
+                    {/if}
+                  </div>
+                </div>
+              {/each}
+            {:else}
+              <p class="setup-note">No local model runtime is reachable on this machine. Use a cloud account instead.</p>
+            {/if}
+          {:else if setupMode === 'cloud'}
+            {#if cloudModels.length}
+              <label class="setup-label" for="cloud-model">Choose a model</label>
+              <select id="cloud-model" bind:value={cloudModel}>
+                {#each cloudModels as m}<option value={m}>{m}</option>{/each}
+              </select>
+              <button class="btn-primary btn-sm setup-go" disabled={!cloudModel || setupBusy} on:click={useCloudModel}>
+                {setupBusy ? 'Saving…' : 'Use this model'}
+              </button>
+            {:else}
+              <div class="setup-tabs sub">
+                {#each CLOUD_PROVIDERS as p}
+                  <button class:on={cloudProvider === p.id} on:click={() => { cloudProvider = p.id; setupError = '' }}>{p.label}</button>
+                {/each}
+              </div>
+              <p class="setup-note">Create a key at {CLOUD_PROVIDERS.find(p => p.id === cloudProvider)?.where}, then paste it here. It is stored encrypted on your gateway and never shown again.</p>
+              <div class="setup-key">
+                <input type="password" placeholder="Paste the API key" bind:value={cloudKey} on:keydown={(e) => { if (e.key === 'Enter') saveCloudKey() }} />
+                <button class="btn-secondary btn-sm" disabled={!cloudKey.trim() || setupBusy} on:click={saveCloudKey}>
+                  {setupBusy ? 'Checking…' : 'Save'}
+                </button>
+              </div>
+            {/if}
+          {/if}
+
+          {#if setupError}<div class="banner err">{setupError}</div>{/if}
+          <button class="linkish setup-skip" on:click={() => { setupMode = ''; pendingMessage = '' }}>Not now</button>
         </div>
       {/if}
 
@@ -292,6 +496,42 @@
   .starter:hover { border-color: #8b85ff; color: #e6e9f5; }
 
   .escape { margin-top: 2rem; color: #6b7294; font-size: .78rem; }
+
+  /* Setup, inline. The point is that the person never leaves this screen and
+     never loses the thing they were trying to do. */
+  .setup { border: 1px solid rgba(232,168,72,.35); background: rgba(232,168,72,.06);
+           border-radius: 10px; padding: 1rem 1.1rem; margin-bottom: 1rem; }
+  .setup h2 { font-size: 1rem; font-weight: 600; margin-bottom: .2rem; }
+  .setup-sub { color: #a9b0cc; font-size: .82rem; margin-bottom: .8rem; }
+  .setup-tabs { display: flex; gap: .4rem; margin-bottom: .7rem; flex-wrap: wrap; }
+  .setup-tabs button { background: #11131f; border: 1px solid #1a1e36; color: #a9b0cc;
+                       border-radius: 7px; padding: .35rem .7rem; font-size: .78rem; cursor: pointer; }
+  .setup-tabs button.on { border-color: #8b85ff; color: #e6e9f5; }
+  .setup-tabs.sub button { font-size: .74rem; }
+  .setup-note { color: #6b7294; font-size: .75rem; margin-bottom: .5rem; }
+  .setup-label { display: block; color: #6b7294; font-size: .74rem; margin-bottom: .25rem; }
+  .setup select { width: 100%; background: #11131f; border: 1px solid #1a1e36; border-radius: 7px;
+                  padding: .4rem .5rem; color: inherit; font-size: .8rem; }
+  .setup-go { margin-top: .6rem; }
+  .setup-key { display: flex; gap: .4rem; }
+  .setup-key input { flex: 1; background: #11131f; border: 1px solid #1a1e36; border-radius: 7px;
+                     padding: .4rem .55rem; color: inherit; font-size: .8rem; }
+  .setup-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+               padding: .45rem .6rem; border: 1px solid #1a1e36; border-radius: 8px;
+               background: #11131f; margin-bottom: .3rem; }
+  .setup-row.unfit { opacity: .55; }
+  .setup-row code { color: #8b85ff; font-size: .8rem; }
+  .setup-sum { color: #6b7294; font-size: .72rem; margin-top: .1rem; }
+  .setup-side { display: flex; align-items: center; gap: .5rem; flex-shrink: 0; }
+  .setup-size { color: #a9b0cc; font-size: .72rem; }
+  .setup-no { color: #6b7294; font-size: .7rem; }
+  .tag { background: rgba(76,175,130,.16); color: #4caf82; font-size: .62rem;
+         padding: .05rem .35rem; border-radius: 4px; margin-left: .35rem; }
+  .setup-skip { margin-top: .6rem; }
+  .pull-row { display: flex; justify-content: space-between; font-size: .78rem; }
+  .pull-row code { color: #8b85ff; }
+  .pull-bar { height: 5px; background: #1a1e36; border-radius: 3px; overflow: hidden; margin: .4rem 0 .3rem; }
+  .pull-fill { height: 100%; background: #8b85ff; transition: width .3s ease; }
 
   .convo { display: flex; flex-direction: column; gap: .9rem; }
   .turn .who { color: #6b7294; font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; }

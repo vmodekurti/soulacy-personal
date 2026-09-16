@@ -423,6 +423,13 @@ func parseBuilderResponse(content string) (reply string, understanding *BuilderU
 		}
 	} else if replyIdx >= 0 {
 		reply = strings.TrimSpace(content[replyIdx+6:])
+	} else if looksLikeJSON(content) {
+		// The model meant to answer in JSON and the JSON did not parse — almost
+		// always because the reply was truncated mid-object. Showing the raw
+		// fragment puts a wall of braces on the user's screen and reads as the
+		// product being broken. Say something true and short instead, and
+		// return no understanding so the caller keeps the last good one.
+		reply = "Sorry — my answer got cut off. Could you say that again, or add a little more detail?"
 	} else {
 		// No markers — use full content as reply, try to find embedded JSON
 		reply = strings.TrimSpace(content)
@@ -712,7 +719,7 @@ Return ONLY this JSON object. No prose before or after. No code fences. No markd
   "description": "one-sentence summary of what the agent does" | null,
   "confidence":  0.0,
   "purpose":     "in plain English, what should the LLM core do?" | null,
-  "system_prompt": "the FULL detailed instructions the deployed agent will see — see rules below" | null,
+  "system_prompt": "the role-specific instructions for this agent — the shared contract is added for you, do not repeat it" | null,
   "trigger": {
     "type":     "cron" | "channel" | "manual" | null,
     "schedule": "cron expression like '0 7 * * *'" | null,
@@ -726,7 +733,7 @@ Return ONLY this JSON object. No prose before or after. No code fences. No markd
 
 ## CRITICAL — preserving the user's procedure
 The "system_prompt" field is the actual instructions the deployed agent will see on every run. It is NOT a summary — it is the operating procedure.
-- Begin every system_prompt with the shared Soulacy Agent Operating Contract, then append a role-specific "## Agent Role" section.
+- Write ONLY the role-specific instructions. The shared Soulacy Agent Operating Contract is prepended automatically when the agent is built, so do not reproduce it — copying it here wastes most of your output budget and gets your reply truncated mid-JSON.
 - Copy the user's numbered steps VERBATIM into system_prompt.
 - Preserve every specific value the user gave: cron times, dates, chat IDs, URLs, API endpoints, tool names, regex patterns, search queries.
 - If the user said "every morning at 7 AM", the cron MUST be "0 7 * * *" (not 8 or 9). NEVER change a time the user gave you.
@@ -802,4 +809,14 @@ func buildableGaps(u *BuilderUnderstanding) []string {
 		}
 	}
 	return gaps
+}
+
+// looksLikeJSON reports whether the model was trying to answer in the JSON
+// envelope, so a parse failure can be handled as a truncated machine reply
+// rather than shown to the user as prose.
+func looksLikeJSON(content string) bool {
+	t := strings.TrimSpace(content)
+	t = strings.TrimPrefix(t, "```json")
+	t = strings.TrimPrefix(t, "```")
+	return strings.HasPrefix(strings.TrimSpace(t), "{")
 }
