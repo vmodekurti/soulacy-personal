@@ -470,15 +470,21 @@ func TestUnderstandingToAgentMap_WithTools_E6(t *testing.T) {
 		},
 	}
 	m := understandingToAgentMap(u, "openai", "gpt-4o")
-	tools, ok := m["tools"].([]map[string]any)
-	if !ok || len(tools) != 2 {
-		t.Fatalf("tools = %v, want 2 entries", m["tools"])
+
+	// Names only. This layer does not know whether a chosen tool is a
+	// built-in, an MCP tool or a Python file; it used to guess a
+	// `tools/<name>.py` path for every one, which produced agents whose tools
+	// pointed at files nothing had written. The gateway resolves these names
+	// against the live catalog at deploy time.
+	names, ok := m["tool_names"].([]string)
+	if !ok || len(names) != 2 {
+		t.Fatalf("tool_names = %v, want 2 entries", m["tool_names"])
 	}
-	if tools[0]["name"] != "fetch-data" {
-		t.Errorf("first tool name = %v, want fetch-data", tools[0]["name"])
+	if names[0] != "fetch-data" || names[1] != "send-report" {
+		t.Errorf("tool_names = %v, want the chosen names in order", names)
 	}
-	if tools[1]["name"] != "send-report" {
-		t.Errorf("second tool name = %v, want send-report", tools[1]["name"])
+	if _, fabricated := m["tools"]; fabricated {
+		t.Error("this layer must not emit tool wiring it cannot know")
 	}
 }
 
