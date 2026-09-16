@@ -371,6 +371,24 @@ export const api = {
     apiFetch('/chat/cancel', { method: 'POST', body: JSON.stringify({ run_id: runId }) }),
 
   admin: {
+    /**
+     * Gateway access keys. The API has had create, list and revoke since the
+     * beginning; only revoke was ever wired up, and then only to clean up
+     * after a paired phone. So the key you log in with was minted once, echoed
+     * to a terminal, and after that there was no way to see what keys existed
+     * or to rotate one without editing config.yaml by hand.
+     *
+     * The plaintext key comes back exactly once, on create. Listing returns
+     * metadata only and never the secret.
+     */
+    keys: {
+      list: (includeRevoked = false) =>
+        apiFetch('/admin/api-keys' + (includeRevoked ? '?include_revoked=true' : '')),
+      create: (name, scopes = []) =>
+        apiFetch('/admin/api-keys', { method: 'POST', body: JSON.stringify({ name, scopes }) }),
+      revoke: (id) => apiFetch(`/admin/api-keys/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    },
+
     restart: () => apiFetch('/admin/restart', { method: 'POST' }),
     audit: (limit = 50) => apiFetch('/admin/audit?limit=' + encodeURIComponent(limit)),
 
