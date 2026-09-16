@@ -7,6 +7,22 @@ to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- The Get Started screen sets up a model itself instead of sending you away.
+  If nothing usable is connected it holds the request you just typed, offers a
+  local model sized to the machine or a cloud key with the place to get one,
+  and then replays your request. Previously it showed a banner pointing at
+  another page, which is the same dead end in a nicer coat, and a request made
+  before that check returned failed several questions later with a raw
+  connection-refused error.
+- The builder no longer shows raw JSON when the model's reply is cut off. Its
+  prompt told the model to begin every `system_prompt` with the full shared
+  Operating Contract, which the generator already prepends — so the model spent
+  most of its output budget copying boilerplate and was truncated mid-object.
+  Nothing parsed, and the fragment was handed back as the assistant's reply, so
+  a wall of braces appeared on screen and the conversation could never finish.
+  The model is now told the contract is added for it, and a reply that was
+  meant to be JSON but did not parse is reported as a cut-off answer rather
+  than printed.
 - The conversational agent builder produces agents whose tools exist. Its
   prompt promised that deploy would resolve each chosen tool against the live
   catalog; deploy instead wrote `tools/<name>.py` for every tool whatever kind
