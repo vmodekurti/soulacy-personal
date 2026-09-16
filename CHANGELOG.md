@@ -47,6 +47,19 @@ to follow [Semantic Versioning](https://semver.org/).
   and the workspace login page.
 
 ### Added
+- A local model can be installed from the dashboard. The shipped default
+  provider is local, and until now nothing in the product could obtain a model
+  for it: the first-run config comment, the validator's remedy, the provider
+  doctor and the Providers empty state all told the user to go and run
+  `ollama pull` in a terminal. For someone whose only surface is the browser
+  that was a dead end on day one, and it is a large part of why a fresh
+  install often cannot answer a single message. The Providers page now
+  suggests models that fit the machine's actual memory, shows the real
+  download size of each, and installs one with a progress bar. The download
+  is a job, so it survives a page refresh and closing the tab does not cancel
+  it. Every suggested name and size was checked against the Ollama registry
+  rather than recalled, because a suggestion that 404s reproduces the exact
+  dead end this removes.
 - Soulacy can be set to start on login from the dashboard. This was the
   single most consequential first-day setting hidden behind a terminal: with
   no autostart the gateway dies with the window that launched it, every
