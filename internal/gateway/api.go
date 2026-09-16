@@ -777,6 +777,14 @@ func (s *Server) handleDeleteAgent(c *fiber.Ctx) error {
 	if isProtectedSystemAgent(id) {
 		return protectedSystemAgentResponse(c)
 	}
+	// Core agents that are otherwise ordinary. Answered separately from the
+	// built-in response so the message does not claim more is locked than is:
+	// Steward can still be edited, renamed and switched off.
+	if runtime.IsUndeletableAgent(id) {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error": "this agent is core to Soulacy and cannot be deleted. You can edit it, rename it, or switch it off.",
+		})
+	}
 	s.scheduler.DeregisterAgent(id)
 	if err := s.loader.Delete(id); err != nil {
 		return s.errJSON(c, fiber.StatusNotFound, err)

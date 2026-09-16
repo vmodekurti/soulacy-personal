@@ -26,7 +26,32 @@ import (
 const (
 	SystemAgentID = "system"
 	GenieAgentID  = "genie"
+	// StewardAgentID is seeded from a template rather than built in, so it is
+	// an ordinary editable agent — but it is core to what the product does, so
+	// it cannot be deleted. See IsUndeletableAgent.
+	StewardAgentID = "steward"
 )
+
+// IsUndeletableAgent reports whether an agent may never be removed, by anyone,
+// through any route.
+//
+// This is deliberately separate from the built-in protection that covers
+// System and Genie. Those two are also immune to editing, disabling, cloning
+// and external-channel routing, because changing them changes the security
+// boundary. Steward is none of those things: it is a normal agent a person
+// should be free to rewrite, rename and switch off. It simply must still be
+// there tomorrow.
+//
+// The check lives in the loader rather than only in the HTTP handler because
+// the handler is one of several callers — the CLI goes through the API, but
+// monitor cleanup, package import and rollback all reach Delete directly.
+func IsUndeletableAgent(id string) bool {
+	switch strings.TrimSpace(id) {
+	case SystemAgentID, GenieAgentID, StewardAgentID:
+		return true
+	}
+	return false
+}
 
 // builtinSourcePath is the sentinel SourcePath stored on built-in agent
 // definitions so LoadAll's stale-file cleanup never removes them.
@@ -595,8 +620,15 @@ func (l *Loader) Delete(id string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if id == SystemAgentID || id == GenieAgentID {
-		return fmt.Errorf("agent %q is a protected built-in and cannot be deleted", id)
+	if IsUndeletableAgent(id) {
+		// Two different reasons, said accurately. System and Genie are built
+		// in and have no file; Steward is an ordinary on-disk agent that
+		// happens to be core. Telling someone Steward is a "built-in" would
+		// send them looking for something that is not there.
+		if id == SystemAgentID || id == GenieAgentID {
+			return fmt.Errorf("agent %q is a protected built-in and cannot be deleted", id)
+		}
+		return fmt.Errorf("agent %q is core to Soulacy and cannot be deleted", id)
 	}
 
 	def, ok := l.agents[id]
