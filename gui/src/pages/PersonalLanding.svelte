@@ -15,7 +15,7 @@
 </script>
 
 <svelte:head>
-  <title>Soulacy Personal · Your agents, on your terms</title>
+  <title>Soulacy Personal · An assistant that knows you</title>
   <meta name="description" content="Build, run, and automate with private AI agents in your own Soulacy Personal environment." />
 </svelte:head>
 
@@ -38,8 +38,8 @@
   <section class="hero" id="personal-home">
     <div class="hero-copy">
       <p class="eyebrow"><span></span> OPEN-SOURCE · SELF-HOSTED · PERSONAL AI</p>
-      <h1>Your agents.<br /><em>Your machine. Your rules.</em></h1>
-      <p class="lead">Build capable AI agents, connect the models and tools you choose, and keep the entire workspace under your control.</p>
+      <h1>An assistant that<br /><em>actually knows you.</em></h1>
+      <p class="lead">Soulacy learns how your days work, what you have promised, and who is waiting on you — by asking, not by watching. Your machine. Your rules.</p>
 
       <div class="hero-actions">
         <a class="primary-action" href="#personal-login">Open your workspace <span aria-hidden="true">→</span></a>

@@ -1,9 +1,14 @@
-# Put your first agent to useful work
+# An assistant that knows you, on a gateway you control
 
-Soulacy runs agents on a gateway you control. Use the web workspace to create
-and supervise them, and the iPhone companion to chat, review work, and approve
-supported actions. A model supplies the reasoning; Soulacy supplies tools,
-permissions, scheduling, memory, and records of what happened.
+Soulacy keeps a structured picture of how your days go — your routine, the
+people who matter, what you owe and when — and every agent you run reads the
+same one. A model supplies the reasoning; Soulacy supplies the picture, the
+tools, the permissions, the scheduling, and the record of what happened.
+
+It learns **by asking**. A few questions in the web workspace on your first
+day are enough for agents to stop starting from nothing. The iPhone companion
+is optional: pair it and allow a sense, and Soulacy keeps up on its own;
+skip it and everything still works from what you have told it.
 
 Start with a small, read-only task. Make it reliable before giving it more access.
 
@@ -12,6 +17,7 @@ See [how your Personal setup works](personal.md) to understand the gateway,
 model, and companion-client requirements.
 
 [Start here: your first successful run](getting-started/quickstart.md){ .md-button .md-button--primary }
+[What it learns about you](using/person-model.md){ .md-button }
 [Pick a worked use case](use-cases/index.md){ .md-button }
 [See what your iPhone adds](iphone.md){ .md-button }
 

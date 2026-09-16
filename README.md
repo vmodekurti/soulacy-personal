@@ -2,13 +2,34 @@
 
 <img src="docs/assets/living-core-blue-v1.png" width="64" height="64" alt="Soulacy Blue Living Core logo" />
 
-**One binary. YAML agents. Runs anywhere — no cloud required.**
+**An assistant that actually knows you — running on a machine you own.**
 
-Soulacy is a **local-first agent operating system**. Write an agent in a single YAML file (or generate one from plain English in Studio), point it at any LLM (Ollama, OpenAI, Anthropic, Groq, or anything OpenAI-compatible), and run it from a terminal or a $5 VPS with no infrastructure setup, no Docker orchestration, and no cloud dependency.
+Most assistants answer questions and forget you in between. Soulacy keeps a
+structured picture of how your days actually go: your routine, the people who
+matter, what you owe and when, how you want to be helped. Every agent you run
+reads the same picture, so none of them start from nothing.
 
-You get more than a runtime: Studio for authoring and healing agents, Channels for delivering to Soulacy Mobile / Telegram / Slack / Discord / WhatsApp / email / Teams / Google Chat / HTTP, Schedule for cron and one-shot triggers, Learning for making the same mistake less often, Adaptive memory that remembers your preferences and updates itself when they change (built in, or backed by an external provider such as Mem0), and packaging for versioned installs — all in the same binary, all local by default.
+**It learns by asking.** A few questions on your first day, answered in a
+browser, and it records what you said in your own words. No phone, no sensors,
+nothing switched on. You can read every line it holds, see where each came
+from, and correct or delete any of it.
 
-Think of it as Ollama — but for agents.
+**It can also notice, if you let it.** Pair the iPhone app and switch on a
+sense, and it keeps up on its own — a deadline moving, a Focus turning on,
+today not looking like a normal Tuesday. Every sense is off until you allow
+it, and switching one off erases what it worked out. Skip the app entirely and
+Soulacy still works; it just knows only what you told it.
+
+Underneath is a complete agent runtime you own: one binary, agents as YAML (or
+generated from plain English in Studio), any LLM (Ollama, OpenAI, Anthropic,
+Groq, or anything OpenAI-compatible), channels to Telegram / Slack / Discord /
+WhatsApp / email / Teams / Google Chat / HTTP, scheduling, approvals you can
+check, and adaptive memory. It runs from a terminal or a $5 VPS with no cloud
+dependency.
+
+**Honest about setup:** there is no hosted version to sign up for. You need a
+machine you can run a server on and about ten minutes in a terminal. That is
+also the reason nobody else holds your data.
 
 ## Start with a useful, checkable task
 
