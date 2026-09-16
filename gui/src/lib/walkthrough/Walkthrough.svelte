@@ -13,6 +13,8 @@
 <script>
   import { createEventDispatcher, tick } from 'svelte'
   import { walkthrough, nextStep, prevStep, skipWalkthrough, pauseWalkthrough, gotoStep } from './store.js'
+  import { pagesForLevel } from '../nav.js'
+  import { navLevel } from '../stores.js'
   import { walkthroughSteps } from './steps.js'
 
   const dispatch = createEventDispatcher()
@@ -25,8 +27,15 @@
   $: active = $walkthrough.active
   $: index = $walkthrough.index
   $: step = walkthroughSteps[index] || walkthroughSteps[0]
-  $: total = walkthroughSteps.length
-  $: isLast = index >= total - 1
+  // Count the stops this person will actually be shown. Announcing "Step 1 of
+  // 28" to someone whose sidebar lists six screens is both wrong and the exact
+  // impression the levels exist to avoid.
+  $: visibleSteps = walkthroughSteps.filter(
+    (st) => !st.nav || pagesForLevel($navLevel).some((pg) => pg.id === st.nav),
+  )
+  $: total = visibleSteps.length
+  $: position = Math.max(1, visibleSteps.findIndex((st) => st.id === walkthroughSteps[index]?.id) + 1)
+  $: isLast = index >= walkthroughSteps.length - 1
 
   // Drive the app to the screen this step describes, then find its nav anchor.
   $: if (active && step) enterStep(step)
@@ -120,7 +129,7 @@
        aria-labelledby="wt-title"
        tabindex="-1">
     <div class="wt-head">
-      <span class="wt-count">Step {index + 1} of {total}</span>
+      <span class="wt-count">Step {position} of {total}</span>
       <button class="wt-close" on:click={pauseWalkthrough} aria-label="Close the tour">✕</button>
     </div>
 
@@ -133,7 +142,7 @@
     {#if step.when}<p class="wt-when">{step.when}</p>{/if}
 
     <div class="wt-bar" aria-hidden="true">
-      <div class="wt-bar-fill" style="width: {Math.round(((index + 1) / total) * 100)}%"></div>
+      <div class="wt-bar-fill" style="width: {Math.round((position / total) * 100)}%"></div>
     </div>
 
     <div class="wt-actions">

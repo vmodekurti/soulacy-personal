@@ -18,6 +18,29 @@ function sessionWritable(key, initial) {
   return store
 }
 
+/**
+ * How much of the sidebar to show. Persisted in localStorage rather than the
+ * session, because it is a preference about this person, not a credential —
+ * having to re-choose it on every visit would defeat the point.
+ *
+ * Defaults to simple. A returning power user flips it once; a first-time user
+ * never has to look at 26 destinations to find the one that matters.
+ */
+function localWritable(key, initial) {
+  let start = initial
+  try {
+    const v = localStorage.getItem(key)
+    if (v) start = v
+  } catch { /* private window, blocked storage */ }
+  const store = writable(start)
+  store.subscribe((v) => {
+    try { localStorage.setItem(key, v) } catch { /* ignore */ }
+  })
+  return store
+}
+
+export const navLevel = localWritable('soulacy_nav_level', 'simple')
+
 export const apiKey   = sessionWritable('soulacy_api_key', '')
 export const connected = writable(false)  // WebSocket event stream status
 

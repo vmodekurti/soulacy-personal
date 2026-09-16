@@ -56,3 +56,28 @@ describe('walkthrough script', () => {
     expect(clampIndex(NaN)).toBe(0)
   })
 })
+
+// The tour covers every destination, but the sidebar shows a subset depending
+// on the chosen level. A stop for a screen that is not listed would dim the
+// page and point at nothing, so the runtime skips it — and that skip has to be
+// wired to the real nav, not silently defaulted on by a swallowed import error.
+describe('tour stops follow the visible sidebar', () => {
+  it('every nav step names a page that exists at some level', async () => {
+    const { navPages } = await import('../nav.js')
+    const ids = new Set(navPages.map((p) => p.id))
+    for (const step of walkthroughSteps.filter((s) => s.nav)) {
+      expect(ids.has(step.nav), `step ${step.id} points at a page that no longer exists`).toBe(true)
+    }
+  })
+
+  it('simple mode hides most stops but keeps the essentials', async () => {
+    const { pagesForLevel } = await import('../nav.js')
+    const simple = new Set(pagesForLevel('simple').map((p) => p.id))
+    const navSteps = walkthroughSteps.filter((s) => s.nav)
+    const shown = navSteps.filter((s) => simple.has(s.nav))
+    expect(shown.length).toBeGreaterThan(0)
+    expect(shown.length).toBeLessThan(navSteps.length)
+    // Get Started is the whole point of simple mode; it must be toured.
+    expect(shown.some((s) => s.nav === 'start')).toBe(true)
+  })
+})

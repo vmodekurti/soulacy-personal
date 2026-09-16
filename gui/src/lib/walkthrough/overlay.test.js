@@ -4,6 +4,7 @@
 // to a centred card when it cannot find the thing it is meant to point at.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { navLevel } from '../stores.js'
 import { get } from 'svelte/store'
 import { tick } from 'svelte'
 
@@ -39,6 +40,12 @@ const frames = () => new Promise((r) => setTimeout(r, 20))
 
 beforeEach(() => {
   localStorage.clear()
+  // Tour at the advanced level so every stop is present and stepping is
+  // sequential. These tests are about key handling and when progress is
+  // written, not about which screens a given level lists. Set through the
+  // store, not localStorage: the store reads storage once at import, so a
+  // later write to it would have no effect here.
+  navLevel.set('advanced')
   navigated.length = 0
   resetWalkthrough()
 })

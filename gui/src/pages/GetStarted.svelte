@@ -23,6 +23,11 @@
   // The app routes on the URL hash; there is no navigate helper to import.
   const go = (page) => { window.location.hash = page }
 
+  // A greeting rather than a title. The screen is a conversation, and opening
+  // with the product's own name would be the wrong voice for it.
+  const hour = new Date().getHours()
+  const partOfDay = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'
+
   // ask → converse → ready → running → result
   let phase = 'ask'
   let draft = ''
@@ -42,10 +47,10 @@
   // Deliberately few, and phrased as outcomes rather than capabilities. A
   // blank box is the most expensive thing to put in front of a new user.
   const STARTERS = [
-    'Every morning, summarise the news in my industry and send it to me.',
-    'Watch my calendar and warn me when two things clash.',
-    'Each Friday, write a short summary of what I worked on this week.',
-    'Check a web page once a day and tell me when the price changes.',
+    { icon: '📰', title: 'Morning briefing',  text: 'Every morning, summarise the news in my industry and send it to me.' },
+    { icon: '📅', title: 'Calendar watch',    text: 'Watch my calendar and warn me when two things clash.' },
+    { icon: '📝', title: 'Weekly summary',    text: 'Each Friday, write a short summary of what I worked on this week.' },
+    { icon: '🔔', title: 'Price watch',       text: 'Check a web page once a day and tell me when the price changes.' },
   ]
 
   // Setup, handled here rather than by sending someone away.
@@ -287,8 +292,8 @@
   <div class="page-head"><TourButton /></div>
   {#if phase === 'ask'}
     <div class="hero">
-      <h1>What would you like help with?</h1>
-      <p class="sub">Describe it in your own words. Soulacy works out the rest and shows you before anything runs.</p>
+      <h1>Good {partOfDay}. What would you like help with?</h1>
+      <p class="sub">Describe it in your own words. Soulacy works out the rest, shows you the plan, and runs it once before anything is scheduled.</p>
 
       {#if !checkingProvider && !providerReady && !setupMode}
         <div class="banner warn">
@@ -383,7 +388,13 @@
 
       <div class="starters">
         {#each STARTERS as s}
-          <button class="starter" on:click={() => send(s)}>{s}</button>
+          <button class="starter" on:click={() => send(s.text)}>
+            <span class="starter-icon">{s.icon}</span>
+            <span class="starter-body">
+              <span class="starter-title">{s.title}</span>
+              <span class="starter-text">{s.text}</span>
+            </span>
+          </button>
         {/each}
       </div>
 
@@ -473,27 +484,46 @@
 </div>
 
 <style>
-  .page { max-width: 760px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+  .page { max-width: 820px; margin: 0 auto; padding: 2rem 1.25rem 3rem; }
   .page-head { display: flex; justify-content: flex-end; margin-bottom: .4rem; }
 
-  .hero h1 { font-size: 1.8rem; font-weight: 600; margin-bottom: .4rem; }
-  .sub { color: #6b7294; font-size: .9rem; margin-bottom: 1.2rem; }
+  /* Bigger and quieter than a page title. This is the first thing a new user
+     reads, and it should sound like a question, not a header. */
+  .hero h1 { font-size: 2.1rem; line-height: 1.2; font-weight: 600; margin-bottom: .5rem; letter-spacing: -.01em; }
+  .sub { color: var(--sl-text-dim, #a9b0cc); font-size: .95rem; margin-bottom: 1.4rem; max-width: 60ch; }
 
   textarea, input {
-    width: 100%; background: #11131f; border: 1px solid #1a1e36; border-radius: 10px;
-    padding: .8rem .9rem; color: inherit; font: inherit; font-size: .92rem; resize: vertical;
+    width: 100%; background: #11131f; border: 1px solid var(--sl-line, #1f2440);
+    border-radius: var(--sl-radius-lg, 14px);
+    padding: 1rem 1.1rem; color: inherit; font: inherit; font-size: .95rem; resize: vertical;
+    transition: border-color .15s ease, box-shadow .15s ease;
   }
-  textarea:focus, input:focus { outline: none; border-color: #8b85ff; }
+  textarea:focus, input:focus {
+    outline: none; border-color: var(--sl-accent, #6c63ff);
+    box-shadow: 0 0 0 3px var(--sl-accent-soft, rgba(139,133,255,.12));
+  }
 
   .row { display: flex; align-items: center; gap: .8rem; margin-top: .8rem; flex-wrap: wrap; }
   .hint { color: #6b7294; font-size: .78rem; }
 
-  .starters { display: grid; gap: .5rem; margin-top: 1rem; }
-  .starter {
-    text-align: left; background: #11131f; border: 1px solid #1a1e36; border-radius: 8px;
-    padding: .65rem .8rem; color: #a9b0cc; font-size: .84rem; cursor: pointer;
+  /* Two-up cards rather than four stacked sentences: a grid reads as a menu of
+     things the product can do, a list reads as homework. */
+  .starters {
+    display: grid; gap: .6rem; margin-top: 1.1rem;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   }
-  .starter:hover { border-color: #8b85ff; color: #e6e9f5; }
+  .starter {
+    display: flex; gap: .7rem; align-items: flex-start; text-align: left;
+    background: var(--sl-surface, #141626); border: 1px solid var(--sl-line, #1f2440);
+    border-radius: var(--sl-radius-lg, 14px); padding: .85rem .9rem; cursor: pointer;
+    transition: border-color .15s ease, background .15s ease, transform .1s ease;
+  }
+  .starter:hover { border-color: var(--sl-accent, #6c63ff); background: var(--sl-surface-raised, #191c2f); }
+  .starter:active { transform: translateY(1px); }
+  .starter-icon { font-size: 1.1rem; line-height: 1.2; flex-shrink: 0; }
+  .starter-body { display: flex; flex-direction: column; gap: .15rem; }
+  .starter-title { color: var(--sl-text, #e6e9f5); font-size: .86rem; font-weight: 500; }
+  .starter-text { color: var(--sl-text-faint, #6b7294); font-size: .78rem; line-height: 1.45; }
 
   .escape { margin-top: 2rem; color: #6b7294; font-size: .78rem; }
 

@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import BrandMark from './lib/BrandMark.svelte'
-  import { apiKey, connected, authRequired } from './lib/stores.js'
+  import { apiKey, connected, authRequired, navLevel } from './lib/stores.js'
   import ShareView from './pages/ShareView.svelte'
   import PersonalLanding from './pages/PersonalLanding.svelte'
   import { pageTitle } from './lib/pagetitle.js'
@@ -9,7 +9,7 @@
   import { pluginNavEntries, isPluginPage, pluginIdFromPage } from './lib/pluginui.js'
   import { waitForGateway, waitingMessage, timeoutMessage, RESTART_BUDGET } from './lib/gatewaywait.js'
   import { looksLikeStaleAssetError, recoverFromStaleAssets } from './lib/stalerecovery.js'
-	import { navPages, navGroups, navAnchor } from './lib/nav.js'
+	import { navPages, navGroups, navAnchor, navLevels, pagesForLevel } from './lib/nav.js'
   import Walkthrough from './lib/walkthrough/Walkthrough.svelte'
   import AskGenie from './lib/AskGenie.svelte'
   import {
@@ -47,11 +47,19 @@
   let restartError = ''
   let restartMessage = ''
 
-  const pages = navPages
-  $: currentPageEntry = pages.find(p => p.id === page) || pluginPages.find(p => p.id === page)
+  // Visible destinations follow the chosen level. The page currently open is
+  // always included, so a deep link or a jump from another screen never lands
+  // on a page that is missing from its own sidebar.
+  $: pages = (() => {
+    const visible = pagesForLevel($navLevel)
+    if (visible.some((p) => p.id === page)) return visible
+    const current = navPages.find((p) => p.id === page)
+    return current ? [...visible, current] : visible
+  })()
+  $: currentPageEntry = navPages.find(p => p.id === page) || pluginPages.find(p => p.id === page)
   $: currentPageLabel = currentPageEntry?.label || 'Soulacy'
   const currentWorkspaceLabel = 'Personal'
-  $: mobilePrimaryPages = pages.filter(p => ['dashboard', 'studio', 'agents', 'chat'].includes(p.id))
+  $: mobilePrimaryPages = navPages.filter(p => ['dashboard', 'studio', 'agents', 'chat'].includes(p.id))
   $: mobileMoreActive = !mobilePrimaryPages.some(p => p.id === page)
 
   // `builder` used to alias to Studio: the one route name that should have
@@ -180,7 +188,7 @@
         navigate(retiredPages[route])
         return
       }
-      if (route && (pages.find(p => p.id === route) || isPluginPage(route))) { page = route; return }
+      if (route && (navPages.find(p => p.id === route) || isPluginPage(route))) { page = route; return }
       // Path-based entry (ARCH-6): the SPA fallback serves index.html for any
       // unmatched path, so a deep link / refresh on e.g. /studio lands here
       // with an empty hash. Map the last path segment to a page id when it
@@ -191,7 +199,7 @@
           navigate(retiredPages[seg])
           return
         }
-        if (seg && pages.find(p => p.id === seg)) page = seg
+        if (seg && navPages.find(p => p.id === seg)) page = seg
         return
       }
       // A hash that names no screen we have. Falling through here used to
@@ -463,6 +471,21 @@
     </div>
 
 
+    <!-- How much of the product to show. A first-time user met 26 destinations
+         at once, which reads as a lot of work before anything has been done. -->
+    {#if !navCollapsed}
+      <div class="mode-switch" role="group" aria-label="How much to show">
+        <span class="mode-label">Mode</span>
+        <div class="mode-buttons">
+          {#each navLevels as lvl}
+            <button class="mode-btn" class:on={$navLevel === lvl.key}
+                    title={lvl.hint} aria-pressed={$navLevel === lvl.key}
+                    on:click={() => navLevel.set(lvl.key)}>{lvl.label}</button>
+          {/each}
+        </div>
+      </div>
+    {/if}
+
     <nav>
       {#each navGroups as grp}
         {@const groupPages = pages.filter(p => p.group === grp.key)}
@@ -655,17 +678,40 @@
   /* Compact variant used in dense panels (library rows, readiness items). */
   :global(.btn-sm) { padding: 4px 10px; font-size: 12px; font-weight: 600; }
 
-  :global(.btn-primary) {
-    background: #6c63ff; color: #fff;
-    padding: 0.45rem 1.1rem; border-radius: 6px; font-weight: 500;
+  /* Shared surface tokens.
+     The palette was already close to where it should be; what read as dated
+     was the geometry — 6px corners and tight padding on every control, which
+     makes a dark interface look like a control panel rather than something
+     you talk to. Tokens here so a later change is one edit, not twenty-six. */
+  :global(:root) {
+    --sl-accent: #6c63ff;
+    --sl-accent-hover: #5b52ef;
+    --sl-accent-soft: rgba(139, 133, 255, 0.12);
+    --sl-surface: #141626;
+    --sl-surface-raised: #191c2f;
+    --sl-line: #1f2440;
+    --sl-text: #e6e9f5;
+    --sl-text-dim: #a9b0cc;
+    --sl-text-faint: #6b7294;
+    --sl-radius: 10px;
+    --sl-radius-lg: 14px;
   }
-  :global(.btn-primary:hover:not(:disabled)) { background: #5b52ef; }
+
+  :global(.btn-primary) {
+    background: var(--sl-accent); color: #fff;
+    padding: 0.5rem 1.15rem; border-radius: var(--sl-radius); font-weight: 500;
+    transition: background .15s ease, transform .1s ease;
+  }
+  :global(.btn-primary:hover:not(:disabled)) { background: var(--sl-accent-hover); }
+  :global(.btn-primary:active:not(:disabled)) { transform: translateY(1px); }
 
   :global(.btn-secondary) {
-    background: #1c1f35; color: #e8eaf6;
-    border: 1px solid #2a2f4a;
-    padding: 0.45rem 1.1rem; border-radius: 6px;
+    background: var(--sl-surface-raised); color: var(--sl-text);
+    border: 1px solid var(--sl-line);
+    padding: 0.5rem 1.15rem; border-radius: var(--sl-radius);
+    transition: border-color .15s ease;
   }
+  :global(.btn-secondary:hover:not(:disabled)) { border-color: var(--sl-accent); }
   :global(.btn-secondary:hover:not(:disabled)) { background: #252840; }
 
   :global(.btn-danger) {
@@ -815,6 +861,18 @@
 
   nav { flex: 1; padding: 0.5rem 0.5rem; overflow-y: auto; }
   /* Uppercase section header (CAPABILITIES / INTEGRATIONS / …). */
+  /* Mode switch. Small and quiet: it is a preference, not a feature. */
+  .mode-switch { padding: .5rem .75rem .6rem; border-bottom: 1px solid #1a1e36; }
+  .mode-label  { display: block; color: #6b7294; font-size: .62rem; text-transform: uppercase;
+                 letter-spacing: .07em; margin-bottom: .3rem; }
+  .mode-buttons { display: flex; gap: .2rem; }
+  .mode-btn {
+    flex: 1; background: #11131f; border: 1px solid #1a1e36; color: #6b7294;
+    border-radius: 6px; padding: .22rem .1rem; font-size: .66rem; cursor: pointer;
+  }
+  .mode-btn:hover { color: #a9b0cc; }
+  .mode-btn.on { border-color: #8b85ff; color: #e6e9f5; background: rgba(139,133,255,.1); }
+
   .nav-section {
     padding: 0.9rem 0.65rem 0.4rem;
     font-size: 0.66rem; font-weight: 600; letter-spacing: 0.09em;

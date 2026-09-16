@@ -14,6 +14,8 @@
 import { writable, get } from 'svelte/store'
 import { api } from '../api.js'
 import { clampIndex, walkthroughSteps, WALKTHROUGH_VERSION } from './steps.js'
+import { pagesForLevel } from '../nav.js'
+import { navLevel } from '../stores.js'
 
 const LS_KEY = 'soulacy-walkthrough'
 
@@ -139,14 +141,42 @@ export function gotoStep(index) {
   })
 }
 
+/**
+ * Steps whose screen is not in the sidebar right now are skipped.
+ *
+ * The script covers every destination, which is the contract steps.test.js
+ * enforces. The sidebar shows a subset depending on the chosen level, so a
+ * stop for a hidden screen would dim the page and point at nothing. Intro and
+ * outro have no `nav` and are always shown.
+ */
+function stepIsVisible(step) {
+  if (!step || !step.nav) return true
+  try {
+    return pagesForLevel(get(navLevel)).some((p) => p.id === step.nav)
+  } catch {
+    return true
+  }
+}
+
+function seek(from, direction) {
+  let i = from
+  while (i >= 0 && i < walkthroughSteps.length && !stepIsVisible(walkthroughSteps[i])) {
+    i += direction
+  }
+  return i
+}
+
 export function nextStep() {
   const s = get(walkthrough)
-  if (s.index >= walkthroughSteps.length - 1) return finishWalkthrough()
-  gotoStep(s.index + 1)
+  const target = seek(s.index + 1, 1)
+  if (target >= walkthroughSteps.length) return finishWalkthrough()
+  gotoStep(target)
 }
 
 export function prevStep() {
-  gotoStep(get(walkthrough).index - 1)
+  const s = get(walkthrough)
+  const target = seek(s.index - 1, -1)
+  gotoStep(target < 0 ? 0 : target)
 }
 
 /**
@@ -190,7 +220,15 @@ export function finishWalkthrough() {
 
 /** True when the tour should open itself on this load. */
 export function shouldAutoStart(state) {
-  return !!state && state.loaded === true && state.seen !== true && state.active !== true
+  if (!state || state.loaded !== true || state.seen === true || state.active === true) return false
+  // Not on top of the front door. Simple mode exists for someone who has not
+  // used this before, and opening with a guided tour of the furniture — before
+  // they have described a single thing they want — is the overwhelm the levels
+  // were introduced to remove. "Show me around" is still one click away.
+  try {
+    if (get(navLevel) === 'simple') return false
+  } catch { /* fall through to the old behaviour */ }
+  return true
 }
 
 /** Reset — used by tests, and by "start over" in the resume prompt. */
