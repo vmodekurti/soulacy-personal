@@ -72,6 +72,15 @@ type BuildSpec struct {
 	// "sends messages on your behalf") so consent is an informed decision.
 	Security  []string       `json:"security,omitempty"`
 	Questions []SpecQuestion `json:"questions,omitempty"`
+
+	// PhoneSignals are the things only a paired iPhone knows that this intent
+	// asked for ("last night's sleep", "today's calendar"). Named so the spec
+	// panel can prove Studio understood a phone request, and so the planner
+	// selects the device tools rather than inventing a web search.
+	PhoneSignals []string `json:"phone_signals,omitempty"`
+	// DeviceTriggerKind is "location" or "person" when the intent asked to be
+	// woken by a place or by a change in the person, rather than by a clock.
+	DeviceTriggerKind string `json:"device_trigger_kind,omitempty"`
 }
 
 // Ready reports whether the spec has everything required to generate.
@@ -142,6 +151,16 @@ func ExtractBuildSpecFrom(intent string, cat Catalog) BuildSpec {
 	}
 
 	spec.Trigger, spec.Schedule, spec.ScheduleText = extractTrigger(low)
+	// A phone trigger is more specific than anything extractTrigger can see.
+	// "Brief me every morning when I get to the office" is a place, not a
+	// schedule: firing at 8am whether or not they arrived is the wrong agent.
+	if device := DeviceTriggerFor(spec.Intent); device.Kind != "" {
+		spec.Trigger, spec.Schedule, spec.ScheduleText = device.Kind, "", device.Text
+		spec.DeviceTriggerKind = device.Kind
+	}
+	for _, signal := range PhoneSignals(spec.Intent) {
+		spec.PhoneSignals = append(spec.PhoneSignals, signal.Label)
+	}
 	spec.Inputs = extractInputs(spec.Intent, low)
 	spec.Stages = extractStages(low, spec.Intent)
 	spec.Outputs = extractOutputs(low)
@@ -543,6 +562,18 @@ func deriveSecurity(s BuildSpec) []string {
 	if len(s.Integrations) > 0 {
 		out = append(out, "signs in to "+strings.Join(s.Integrations, ", ")+" using stored credentials")
 	}
+	// Phone access is the most personal thing an agent can be given, so it is
+	// stated plainly and names the switches the person will have to turn on.
+	if len(s.PhoneSignals) > 0 {
+		out = append(out, "asks your iPhone for "+strings.Join(s.PhoneSignals, ", ")+
+			", which only works while the app is open and only for capabilities you enable under Settings → Device access")
+	}
+	switch s.DeviceTriggerKind {
+	case "location":
+		out = append(out, "asks your phone to watch one region in the background; the gateway learns only that a boundary you chose was crossed")
+	case "person":
+		out = append(out, "runs when what Soulacy understands about you changes, which needs a sense switched on under About You")
+	}
 	return out
 }
 
@@ -562,6 +593,20 @@ func containsAnyStage(s BuildSpec, names ...string) bool {
 // interrogation, and every question here has to earn its place.
 func deriveQuestions(s BuildSpec, low string, cat Catalog) []SpecQuestion {
 	var qs []SpecQuestion
+
+	// A region cannot be invented. Without a real place and radius the phone
+	// has nothing to monitor, so this blocks rather than defaulting to a
+	// plausible-looking geofence in the wrong city.
+	if s.DeviceTriggerKind == "location" {
+		if place := DeviceTriggerFor(s.Intent).Place; place == "" {
+			qs = append(qs, SpecQuestion{
+				ID: "location.place", Field: "location",
+				Question: "Which place should your phone watch for?",
+				Why:      "A location trigger needs a real point and radius. Coordinates cannot be guessed from the description.",
+				Blocker:  true,
+			})
+		}
+	}
 
 	// A CONVERSATIONAL agent has no compile-time stages, by definition.
 	//

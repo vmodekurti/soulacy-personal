@@ -33,6 +33,17 @@ to follow [Semantic Versioning](https://semver.org/).
   and the workspace login page.
 
 ### Added
+- Studio understands the iPhone. It could already name the device tools, since
+  its catalogue comes from the live engine, but it could not recognise a
+  request for them: "brief me when I get to the office" produced a manually
+  triggered agent with no device access and no region, which fails the moment
+  it runs. Studio now reads phone vocabulary ("how I slept", "today's
+  calendar", "where I am"), infers `location` and `person` triggers from
+  arrival, departure, deadlines, state and routine wording, states the access
+  plainly in the spec panel including the switches the person must enable, and
+  requires the opt-in builtins on the first generation attempt so the saved
+  agent actually carries them. A location trigger with no named place is a
+  blocking question, because coordinates cannot be guessed.
 - **Person triggers**: an agent can run because something about the person
   changed rather than because a clock fired. `trigger: person` with
   `when: state.changed | commitment.due | routine.deviation`. Three guards stop
