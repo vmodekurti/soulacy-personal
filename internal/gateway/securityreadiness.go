@@ -133,10 +133,11 @@ func (s *Server) evaluateSecurityReadiness() securityReadiness {
 		// tier system already marks these Privileged (`internal/tier`
 		// wildcard rules), but this collects them so the report has a
 		// separate "wildcard MCP" bullet the operator can act on.
-		// Genie intentionally discovers the live MCP catalog. Its immutable
-		// http-only/operator boundary is enforced by the runtime, so treating its
-		// built-in wildcard as an operator configuration smell is misleading.
-		if def.ID != runtime.GenieAgentID && hasWildcardMCP(def) {
+		// Genie and System intentionally discover the live MCP catalog, and
+		// their immutable http-only/operator boundary is enforced by the
+		// runtime, so treating a built-in wildcard as an operator
+		// configuration smell is misleading.
+		if !discoversMCPCatalogByDesign(def.ID) && hasWildcardMCP(def) {
 			wildcardMCP = append(wildcardMCP, def.ID)
 		}
 	}
@@ -259,6 +260,24 @@ func collectExposure(
 		rep.Reasons = append(rep.Reasons,
 			label+" binding does not set accept_privileged_exposure: true")
 	}
+}
+
+// discoversMCPCatalogByDesign reports whether an agent's wildcard MCP
+// declaration is a built-in property rather than an operator's choice.
+//
+// The wildcard bullet exists to prompt an action: list the servers
+// explicitly in config. For Genie and System there is no such action. The
+// loader rewrites both definitions on every load, so an operator who edits
+// the wildcard away gets it back on restart. Both are pinned to the http
+// channel by the same rewrite, and the engine refuses System on any other
+// channel outright, so neither can reach the shared external surface this
+// report is about. A warning nobody can act on trains operators to ignore
+// the report, which costs more than it catches.
+//
+// Every other agent — including one an operator names "system-helper" —
+// is still flagged.
+func discoversMCPCatalogByDesign(id string) bool {
+	return id == runtime.GenieAgentID || id == runtime.SystemAgentID
 }
 
 func hasWildcardMCP(def *agent.Definition) bool {

@@ -18,6 +18,20 @@ to follow [Semantic Versioning](https://semver.org/).
   second device stays a viewer.
 
 ### Changed
+- The System agent now knows its own environment as well as Genie does. It
+  could already *list* installed skills, connected MCP tools and peer agents,
+  but not read a skill, call an MCP tool or delegate to a peer — so it could
+  see that a capability existed and still not use it, and it answered "what's
+  installed?" by shelling out to `brew list`. It now holds the same live
+  catalogs Genie does, and its prompt tells it to read them before claiming a
+  capability is present or absent. This widens nothing: System already has
+  `shell_exec`, which subsumes all of it; what changes is that the honest,
+  confirmable tool is now the easier path. Every destructive tool still
+  requires confirmation, and the production security-readiness report treats
+  System's built-in wildcard MCP the way it already treats Genie's — not an
+  operator configuration smell, since the loader restores it on every load
+  and both are pinned to the `http` channel. An operator's own wildcard
+  agent is still flagged.
 - The marketing site carries the whole of this cycle's work: a rewritten
   "what's new" (the person model, Getting to Know You, the Steward, triggers,
   senses and consent, provenance, Apple Watch, on-device photo text), and an

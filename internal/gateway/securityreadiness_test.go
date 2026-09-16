@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/soulacy/soulacy/internal/runtime"
 	"github.com/soulacy/soulacy/pkg/agent"
 )
 
@@ -169,5 +170,56 @@ func TestHasWildcardMCPDetectsWildcard(t *testing.T) {
 	}
 	if hasWildcardMCP(nil) {
 		t.Error("nil def flagged")
+	}
+}
+
+// TestSecurityReadiness_BuiltinWildcardMCPIsNotAnOperatorSmell pins the
+// exemption. Genie and System both declare wildcard MCP by design and the
+// loader restores it on every load, so warning about them is a warning
+// nobody can act on. An operator's own agent is still flagged.
+func TestSecurityReadiness_BuiltinWildcardMCPIsNotAnOperatorSmell(t *testing.T) {
+	s := newTestGateway(t, "secret")
+	s.cfg.Deployment.Profile = "production"
+
+	// The built-ins alone must not raise the bullet.
+	rep := s.evaluateSecurityReadiness()
+	if len(rep.WildcardMCPAgents) != 0 {
+		t.Fatalf("built-ins should not be reported as wildcard smells; got %v", rep.WildcardMCPAgents)
+	}
+	if rep.Status != "ok" {
+		t.Fatalf("a workspace holding only built-ins should be ok; status=%q reasons=%v", rep.Status, rep.Reasons)
+	}
+
+	// Confirm the built-ins really do carry the wildcard, so this test
+	// keeps its meaning if the definitions ever change.
+	for _, id := range []string{runtime.GenieAgentID, runtime.SystemAgentID} {
+		def := s.loader.Get(id)
+		if def == nil {
+			t.Fatalf("%s should be loaded", id)
+		}
+		if !hasWildcardMCP(def) {
+			t.Fatalf("%s no longer declares wildcard MCP; the exemption is now vacuous", id)
+		}
+	}
+
+	// An operator's own agent is still flagged, wildcard is wildcard.
+	star := []string{"*"}
+	if err := s.loader.Upsert(t.TempDir(), &agent.Definition{
+		ID:         "catalog-bot",
+		Name:       "Catalog Bot",
+		Enabled:    true,
+		MCPServers: &star,
+	}); err != nil {
+		t.Fatalf("upsert catalog-bot: %v", err)
+	}
+	rep = s.evaluateSecurityReadiness()
+	if len(rep.WildcardMCPAgents) != 1 || rep.WildcardMCPAgents[0] != "catalog-bot" {
+		t.Fatalf("operator agents must still be flagged; got %v", rep.WildcardMCPAgents)
+	}
+	if rep.Status != "warn" {
+		t.Errorf("wildcard MCP in production should warn; status=%q", rep.Status)
+	}
+	if !rep.Ready {
+		t.Error("a wildcard smell is advisory, not a production blocker")
 	}
 }

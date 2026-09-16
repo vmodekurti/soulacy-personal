@@ -131,6 +131,19 @@ func hardenGenieDefinition(def *agent.Definition) {
 // scripts, install libraries, read and write files, and list directories.
 // It is available immediately on first run — no config or SOUL.yaml needed.
 func builtinSystemAgent() *agent.Definition {
+	// The Soulacy catalogs, on the same terms Genie has them.
+	//
+	// System could already LIST skills, MCP tools and peers — those builtins
+	// are ungated — but could not read a skill, call an MCP tool, or delegate,
+	// so it could see a capability existed and not use it. It answered "what
+	// is installed?" by shelling out to brew and pip, which is both the wrong
+	// answer to that question and a worse way to get it.
+	//
+	// This does not widen the blast radius. System already holds shell_exec,
+	// which trivially subsumes everything below; what changes is that the
+	// honest, confirmable tool is now available, so there is less reason to
+	// reach for a shell.
+	mcpServers := []string{"*"}
 	return &agent.Definition{
 		ID:          SystemAgentID,
 		Name:        "System",
@@ -157,6 +170,13 @@ func builtinSystemAgent() *agent.Definition {
 		// event; the GUI shows an approve/deny dialog before proceeding.
 		ConfirmTools: []string{"package_install", "shell_exec", "run_script", "write_file", "http_request", "download_file", "install_library"},
 		SystemTools:  true,
+		// Live catalogs, not assumptions: read any installed skill, call any
+		// connected MCP tool, and delegate to any peer agent.
+		Skills:                []string{"*"},
+		MCPServers:            &mcpServers,
+		Agents:                []string{"*"},
+		ParallelPeerCalls:     true,
+		StructuredPeerResults: true,
 		Memory: agent.MemoryPolicy{
 			ReadScopes:  []string{"session"},
 			WriteScopes: []string{"session"},
@@ -170,7 +190,7 @@ func builtinSystemAgent() *agent.Definition {
 ## Working method (especially for hard, multi-step tasks)
 Hard instructions are solved by decomposition and verification, not by guessing. For any non-trivial request:
 1. **Plan first.** Before acting, write a short numbered plan of the concrete steps you'll take and the tools each needs. Restate the goal and success criteria in one line so you don't drift.
-2. **Gather facts.** Don't assume the environment. Use sys_info, list_dir, read_file, env_get, and fetch_url to learn the actual state before changing anything.
+2. **Gather facts.** Don't assume the environment — neither the machine nor Soulacy itself. Use sys_info, list_dir, read_file, env_get and fetch_url for the host, and list_skills, list_mcp_tools and list_agents for what this Soulacy install can actually do right now. Those catalogs are live: they reflect skill rescans, MCP hot-adds and agent reloads without a restart, so read them instead of assuming a capability exists or has gone.
 3. **Execute one step at a time.** Run a single tool call, read its full output (stdout/stderr/exit code), and decide the next step from what actually happened — never assume a step succeeded.
 4. **Verify every step.** After each install/config/file change, run an explicit check (version, health endpoint, re-read the file) and confirm it did what you intended before moving on.
 5. **Self-correct.** If a command fails, read the error, diagnose the cause, and try a different approach. Adjust the plan rather than repeating the same failing call. Keep going until the goal is met or you hit a genuine blocker.
@@ -201,6 +221,14 @@ Hard instructions are solved by decomposition and verification, not by guessing.
 - **env_get(name?)** — Read one environment variable by name, or list all if name is omitted.
 - **sys_info()** — Return OS, architecture, hostname, user, home directory, CWD, and PATH.
 
+### The Soulacy install itself
+These read the live runtime, so they are always current and always cheaper and
+safer than shelling out to find the same answer.
+- **list_skills()** — Every installed Agent Skill, with descriptions.
+- **read_skill(name)** / **read_skill_file(name, path)** — Read a skill's instructions before applying it. Read it; do not guess what it does from its name.
+- **list_mcp_tools()** — Connected MCP servers and the tools they currently expose. Credentials are never returned.
+- **list_agents()** — Loaded peer agents and whether each is enabled. You can delegate to any of them, and to several in parallel when the work is independent.
+
 ## How to approach tasks
 
 **"Install a Skill or MCP server from this URL"**
@@ -214,7 +242,10 @@ Hard instructions are solved by decomposition and verification, not by guessing.
 3. Verify the installation and report remaining configuration.
 
 **"What's running / what's installed?"**
-Use sys_info for environment context, shell_exec for process/package listings (ps aux, brew list, pip list, npm list -g, etc.), find_files to locate config files.
+Decide which install is being asked about. For Soulacy's own capabilities — skills, MCP tools, agents — use list_skills, list_mcp_tools and list_agents, never a shell command: the catalogs are authoritative and a package listing is not. For the host, use sys_info for environment context, shell_exec for process and package listings (ps aux, brew list, pip list, npm list -g), and find_files to locate config files. When the question is ambiguous, answer for Soulacy first and say you can also check the machine.
+
+**"Can you do X?"**
+Check before answering. A skill or MCP server may have been added since this conversation started, and one you used earlier may be gone. List, then read the relevant skill, then act — and prefer delegating to a peer agent that already does the job over rebuilding it yourself.
 
 **"Call an API / set up a webhook"**
 Use http_request with the correct method and body. Read API docs with fetch_url first if needed.
