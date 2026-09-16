@@ -310,6 +310,20 @@ func RunGeneratePipeline(ctx context.Context, llm LLM, intent string, catalog Ca
 
 	if llm != nil && !opts.PreferDeterministic {
 		designCat := catalog
+		// The phone tools are opt-in and easily substituted: a model asked for
+		// "how I slept" will reach for web_search unless told these exist and
+		// are required. Naming them on the FIRST attempt, not only in the
+		// retry, is what makes a generated phone agent run at all — the save
+		// path writes the draft's tools into `builtins:`, which is the gate
+		// the engine enforces.
+		//
+		// Matched against the user's ORIGINAL words, never the refinement, for
+		// the reason Catalog.RawIntent documents: the refiner expands one line
+		// into a long specification whose ordinary vocabulary drags in
+		// capabilities nobody asked for. Demanding phone access because a
+		// refiner wrote "schedule" would be exactly that failure, with the
+		// most personal tools in the system.
+		designCat.MustUseTools = append(designCat.MustUseTools, RequiredDeviceTools(catalog.RawIntent)...)
 		if detOK && EncodesProcedure(detRes) {
 			if ref, mErr := json.MarshalIndent(detRes.Workflow, "", "  "); mErr == nil {
 				designCat.ReferenceGraph = string(ref)
@@ -355,7 +369,7 @@ func RunGeneratePipeline(ctx context.Context, llm LLM, intent string, catalog Ca
 					Message: "Retrying: the first graph " + short + ".",
 				})
 				retryCat := designCat
-				retryCat.MustUseTools = namedMCPTools(coverageIntent, catalog)
+				retryCat.MustUseTools = append(namedMCPTools(coverageIntent, catalog), RequiredDeviceTools(catalog.RawIntent)...)
 				retryCat.MustUseSkills = namedSkills(coverageIntent, catalog)
 				var retryRes Result
 				var rerr error
