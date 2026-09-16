@@ -257,6 +257,74 @@
     }
   }
 
+  // ── Local model downloads ──────────────────────────────────────────────
+  // The old empty state here told the user to go and run `ollama pull` in a
+  // terminal. For someone whose only surface is this page that is where the
+  // product stopped: local provider by default, no model present, nothing
+  // able to fetch one.
+  let suggested = {}      // providerId -> { host_ram_gb, models: [] }
+  let pulling = {}        // providerId -> { job, model, status, completed, total, error }
+  let pullTimers = {}
+  let customModel = {}
+
+  async function loadSuggested(providerId) {
+    try {
+      suggested = { ...suggested, [providerId]: await api.providers.suggested(providerId) }
+    } catch {
+      suggested = { ...suggested, [providerId]: null }
+    }
+  }
+
+  async function startPull(providerId, model) {
+    const name = (model || '').trim()
+    if (!name) return
+    pulling = { ...pulling, [providerId]: { model: name, status: 'starting', completed: 0, total: 0, error: '' } }
+    try {
+      const res = await api.providers.pull(providerId, name)
+      pulling = { ...pulling, [providerId]: { ...pulling[providerId], job: res.job_id } }
+      pollPull(providerId)
+    } catch (e) {
+      pulling = { ...pulling, [providerId]: { ...pulling[providerId], error: e.message || 'Download failed to start.', done: true } }
+    }
+  }
+
+  function pollPull(providerId) {
+    clearTimeout(pullTimers[providerId])
+    pullTimers[providerId] = setTimeout(async () => {
+      const cur = pulling[providerId]
+      if (!cur || !cur.job) return
+      try {
+        const j = await api.providers.pullStatus(providerId, cur.job)
+        pulling = { ...pulling, [providerId]: { ...cur, ...j } }
+        if (!j.done) { pollPull(providerId); return }
+        if (!j.error) {
+          // The model exists now, so refresh the list and offer it as the
+          // default — finishing the job the user actually came here to do.
+          await listModels(providerId)
+          chosen = { ...chosen, [providerId]: j.model }
+          await loadSuggested(providerId)
+        }
+      } catch (e) {
+        pulling = { ...pulling, [providerId]: { ...cur, done: true, error: e.message || 'Lost track of the download.' } }
+      }
+    }, 1000)
+  }
+
+  async function cancelPull(providerId) {
+    const cur = pulling[providerId]
+    if (!cur || !cur.job) return
+    try { await api.providers.cancelPull(providerId, cur.job) } catch { /* it may have just finished */ }
+    clearTimeout(pullTimers[providerId])
+    pulling = { ...pulling, [providerId]: { ...cur, done: true, status: 'cancelled' } }
+  }
+
+  function pullPercent(p) {
+    if (!p || !p.total) return null
+    return Math.min(100, Math.round((p.completed / p.total) * 100))
+  }
+
+  function gb(n) { return (Math.round(n * 10) / 10) + ' GB' }
+
   async function saveModel(providerId) {
     const model = chosen[providerId]
     if (!model) return
@@ -522,7 +590,63 @@
 
             {#if models[id]}
               {#if models[id].length === 0}
-                <div class="model-empty">No models found. For Ollama, pull one with <code>ollama pull &lt;name&gt;</code>.</div>
+                <div class="model-empty">
+                  <strong>No models installed yet.</strong>
+                  <span>Soulacy cannot answer anything until one is here. Pick one below and it will download in the background.</span>
+                </div>
+                {#if !suggested[id]}
+                  <button class="linkish" on:click={() => loadSuggested(id)}>Show models I can install</button>
+                {/if}
+
+                {#if pulling[id] && !pulling[id].done}
+                  <div class="pull-live">
+                    <div class="pull-head">
+                      <code>{pulling[id].model}</code>
+                      <button class="linkish" on:click={() => cancelPull(id)}>Cancel</button>
+                    </div>
+                    <div class="pull-bar">
+                      <div class="pull-fill" style={`width:${pullPercent(pulling[id]) ?? 4}%`} class:indeterminate={pullPercent(pulling[id]) === null}></div>
+                    </div>
+                    <div class="pull-sub">
+                      {pulling[id].status || 'starting'}
+                      {#if pullPercent(pulling[id]) !== null}· {pullPercent(pulling[id])}%{/if}
+                      · you can leave this page, the download keeps going
+                    </div>
+                  </div>
+                {:else if pulling[id] && pulling[id].error}
+                  <div class="pull-err">{pulling[id].error}</div>
+                {/if}
+
+                {#if suggested[id] && suggested[id].models}
+                  <div class="suggest">
+                    <span class="pv-label">
+                      Suggested for this machine
+                      {#if suggested[id].host_ram_gb}<em>· {suggested[id].host_ram_gb} GB memory detected</em>{/if}
+                    </span>
+                    {#each suggested[id].models as m}
+                      <div class="suggest-row" class:unfit={!m.fits}>
+                        <div class="suggest-main">
+                          <code>{m.name}</code>
+                          {#if m.default}<span class="tag-rec">recommended</span>{/if}
+                          {#if m.embedding}<span class="tag-emb">for Knowledge search</span>{/if}
+                          <div class="suggest-sum">{m.summary}</div>
+                        </div>
+                        <div class="suggest-side">
+                          <span class="suggest-size">{gb(m.size_gb)}</span>
+                          {#if m.fits}
+                            <button class="btn-secondary btn-sm" disabled={pulling[id] && !pulling[id].done} on:click={() => startPull(id, m.name)}>Install</button>
+                          {:else}
+                            <span class="suggest-no" title={`Needs about ${m.min_ram_gb} GB of memory`}>needs {m.min_ram_gb} GB</span>
+                          {/if}
+                        </div>
+                      </div>
+                    {/each}
+                    <div class="suggest-custom">
+                      <input type="text" placeholder="or type any Ollama model name" bind:value={customModel[id]} />
+                      <button class="btn-secondary btn-sm" disabled={pulling[id] && !pulling[id].done} on:click={() => startPull(id, customModel[id])}>Install</button>
+                    </div>
+                  </div>
+                {/if}
               {:else}
                 <div class="model-list">
                   <span class="pv-label">Select default model</span>
@@ -974,6 +1098,39 @@
 
   .model-empty { font-size: .76rem; color: #6b7294; margin-top: .35rem; }
   .model-empty code { background: #1a1e36; padding: .05rem .3rem; border-radius: 4px; color: #8b85ff; }
+  .model-empty { display: flex; flex-direction: column; gap: .15rem; }
+  .model-empty strong { color: #e8a848; font-size: .8rem; }
+
+  /* Model downloads. Sized to read as a task in progress rather than a
+     settings control, because on a fresh install this IS the task. */
+  .suggest { margin-top: .6rem; display: flex; flex-direction: column; gap: .35rem; }
+  .suggest em { font-style: normal; color: #6b7294; }
+  .suggest-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    padding: .5rem .65rem; border: 1px solid #1a1e36; border-radius: 8px; background: #11131f;
+  }
+  .suggest-row.unfit { opacity: .55; }
+  .suggest-main code { color: #8b85ff; font-size: .8rem; }
+  .suggest-sum { color: #6b7294; font-size: .72rem; margin-top: .15rem; }
+  .suggest-side { display: flex; align-items: center; gap: .6rem; flex-shrink: 0; }
+  .suggest-size { color: #a9b0cc; font-size: .72rem; }
+  .suggest-no { color: #6b7294; font-size: .7rem; }
+  .tag-rec { background: rgba(76,175,130,.16); color: #4caf82; font-size: .62rem; padding: .05rem .35rem; border-radius: 4px; margin-left: .35rem; }
+  .tag-emb { background: rgba(139,133,255,.14); color: #8b85ff; font-size: .62rem; padding: .05rem .35rem; border-radius: 4px; margin-left: .35rem; }
+  .suggest-custom { display: flex; gap: .4rem; margin-top: .2rem; }
+  .suggest-custom input { flex: 1; background: #11131f; border: 1px solid #1a1e36; border-radius: 6px; padding: .35rem .5rem; color: inherit; font-size: .76rem; }
+
+  .pull-live { margin-top: .6rem; padding: .55rem .65rem; border: 1px solid rgba(139,133,255,.3); border-radius: 8px; background: rgba(139,133,255,.06); }
+  .pull-head { display: flex; align-items: center; justify-content: space-between; }
+  .pull-head code { color: #8b85ff; font-size: .8rem; }
+  .pull-bar { height: 5px; background: #1a1e36; border-radius: 3px; overflow: hidden; margin: .4rem 0 .3rem; }
+  .pull-fill { height: 100%; background: #8b85ff; transition: width .3s ease; }
+  /* No byte counts during the manifest and verify phases, so show motion
+     rather than a bar frozen at zero. */
+  .pull-fill.indeterminate { animation: pull-pulse 1.4s ease-in-out infinite; }
+  @keyframes pull-pulse { 0%,100% { opacity: .35; } 50% { opacity: 1; } }
+  .pull-sub { color: #6b7294; font-size: .7rem; }
+  .pull-err { margin-top: .5rem; color: #f06060; font-size: .75rem; }
 
   .model-list { margin-top: .5rem; padding-top: .5rem; border-top: 1px solid #1a1e36; display: flex; flex-direction: column; gap: .4rem; }
   .model-options { display: flex; flex-direction: column; gap: .25rem; max-height: 220px; overflow-y: auto; }

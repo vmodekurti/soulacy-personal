@@ -99,31 +99,34 @@ type Server struct {
 	autopilotClosing bool
 	cfg              *config.Config
 	cfgPath          string // path to config file on disk; empty = unknown
-	app              *fiber.App
-	engine           *runtime.Engine
-	loader           *runtime.Loader
-	llmRouter        *llm.Router
-	channels         *channels.Registry
-	scheduler        *scheduler.Scheduler
-	httpChan         *httpchan.Adapter
-	waChan           *wachan.Adapter          // nil if WhatsApp not configured
-	skillLoader      runtime.SkillLoader      // nil if no skills installed
-	actions          storage.ActionLogBackend // nil if action logging disabled
-	mcp              *mcp.Client              // nil if no MCP servers configured
-	hub              *EventHub
-	liveActivities   *liveActivityTracker
-	authEngine       *auth.Engine // nil until SetAuth() is called
-	authStackCache   atomic.Pointer[fiber.Handler]
-	rbacManager      *rbac.Manager        // nil until SetRBAC() is called
-	credVault        credentials.Vault    // nil until SetCredentialVault() is called
-	builderRegistry  *builder.Registry    // nil until SetBuilderRegistry() is called
-	rateLimiter      *ratelimit.Manager   // nil until SetRateLimiter() is called
-	apiKeyStore      apikeys.Store        // nil until SetAPIKeyStore() is called
-	dlqStore         dlq.Store            // nil until SetDLQStore() is called
-	historyStore     session.HistoryStore // nil until SetHistoryStore() is called
-	resourceStore    session.ResourceStore
-	agentWatcher     healthReporter // nil until SetAgentWatcher() is called (S2.13)
-	log              *zap.Logger
+	// pulls tracks in-flight local model downloads. A value, not a pointer:
+	// it needs no constructor wiring and a zero registry is usable.
+	pulls           pullRegistry
+	app             *fiber.App
+	engine          *runtime.Engine
+	loader          *runtime.Loader
+	llmRouter       *llm.Router
+	channels        *channels.Registry
+	scheduler       *scheduler.Scheduler
+	httpChan        *httpchan.Adapter
+	waChan          *wachan.Adapter          // nil if WhatsApp not configured
+	skillLoader     runtime.SkillLoader      // nil if no skills installed
+	actions         storage.ActionLogBackend // nil if action logging disabled
+	mcp             *mcp.Client              // nil if no MCP servers configured
+	hub             *EventHub
+	liveActivities  *liveActivityTracker
+	authEngine      *auth.Engine // nil until SetAuth() is called
+	authStackCache  atomic.Pointer[fiber.Handler]
+	rbacManager     *rbac.Manager        // nil until SetRBAC() is called
+	credVault       credentials.Vault    // nil until SetCredentialVault() is called
+	builderRegistry *builder.Registry    // nil until SetBuilderRegistry() is called
+	rateLimiter     *ratelimit.Manager   // nil until SetRateLimiter() is called
+	apiKeyStore     apikeys.Store        // nil until SetAPIKeyStore() is called
+	dlqStore        dlq.Store            // nil until SetDLQStore() is called
+	historyStore    session.HistoryStore // nil until SetHistoryStore() is called
+	resourceStore   session.ResourceStore
+	agentWatcher    healthReporter // nil until SetAgentWatcher() is called (S2.13)
+	log             *zap.Logger
 
 	// buildTraces retains recent Studio build traces in a bounded in-memory ring
 	// and, when SOULACY_STUDIO_TRACE_DIR is set, also persists each as a JSONL
@@ -929,6 +932,13 @@ func (s *Server) buildApp() *fiber.App {
 	api.Post("/providers/:id/model", s.rbacMW(rbac.ResourceProviders, rbac.ActionWrite), s.handleSetProviderModel)
 	api.Post("/providers/:id", s.rbacMW(rbac.ResourceProviders, rbac.ActionWrite), s.handleSetProviderCredentials)
 	api.Delete("/providers/:id", s.rbacMW(rbac.ResourceProviders, rbac.ActionWrite), s.handleDeleteProvider)
+	// Pull a local model. Until this existed the product could list models
+	// and set a default but never obtain one, so a browser-only user with
+	// the shipped local default had no way to make anything run.
+	api.Post("/providers/:id/models/pull", s.rbacMW(rbac.ResourceProviders, rbac.ActionWrite), s.handleStartModelPull)
+	api.Get("/providers/:id/models/suggested", s.rbacMW(rbac.ResourceProviders, rbac.ActionRead), s.handleSuggestedModels)
+	api.Get("/providers/:id/models/pull/:job", s.rbacMW(rbac.ResourceProviders, rbac.ActionRead), s.handleModelPullStatus)
+	api.Delete("/providers/:id/models/pull/:job", s.rbacMW(rbac.ResourceProviders, rbac.ActionWrite), s.handleCancelModelPull)
 
 	// Skills (Agent Skills format — agentskills.io)
 	api.Get("/skills", s.rbacMW(rbac.ResourceSkills, rbac.ActionRead), s.handleListSkills)

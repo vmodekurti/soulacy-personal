@@ -621,6 +621,19 @@ export const api = {
     setModel:       (id, model) => apiFetch(`/providers/${id}/model`, { method: 'POST', body: JSON.stringify({ model }) }),
     setCredentials: (id, body)  => apiFetch(`/providers/${id}`,        { method: 'POST', body: JSON.stringify(body) }),
     delete:         (id)        => apiFetch(`/providers/${id}`,        { method: 'DELETE' }),
+
+    /**
+     * Local model downloads. Until these existed the product could list models
+     * and set a default but never obtain one, so a browser-only user with the
+     * shipped local default had no way to make anything run at all.
+     *
+     * A pull takes minutes, so it is a job: start it, then poll. Closing the
+     * tab does not cancel the download.
+     */
+    suggested:  (id)          => apiFetch(`/providers/${id}/models/suggested`),
+    pull:       (id, model)   => apiFetch(`/providers/${id}/models/pull`, { method: 'POST', body: JSON.stringify({ model }) }),
+    pullStatus: (id, job)     => apiFetch(`/providers/${id}/models/pull/${encodeURIComponent(job)}`),
+    cancelPull: (id, job)     => apiFetch(`/providers/${id}/models/pull/${encodeURIComponent(job)}`, { method: 'DELETE' }),
   },
 
   /** Per-page walkthrough: the same outcome, told from the screen you are on. */

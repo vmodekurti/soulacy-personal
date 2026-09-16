@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -402,4 +403,88 @@ var toolCallSeq atomic.Uint64
 func toolCallFromFunc(name string, args map[string]any) message.ToolCall {
 	n := toolCallSeq.Add(1)
 	return message.ToolCall{ID: fmt.Sprintf("call_%s_%d", name, n), Name: name, Arguments: args}
+}
+
+// PullProgress is one step of a model download.
+//
+// Ollama reports Total/Completed only while transferring layers; the earlier
+// manifest and later verify phases carry a status string and nothing else, so
+// a caller must treat zero totals as "no percentage yet" rather than as zero
+// percent done.
+type PullProgress struct {
+	Status    string `json:"status"`
+	Completed int64  `json:"completed"`
+	Total     int64  `json:"total"`
+}
+
+// PullModel downloads a model into the local Ollama instance, reporting
+// progress as it goes.
+//
+// This exists because every layer of the product used to tell the user to go
+// and run `ollama pull` themselves. For someone whose only surface is the
+// dashboard that is a dead end on day one: the default provider is local, no
+// model is present, and nothing in the product can obtain one.
+//
+// The response is a stream of JSON objects, one per line, and it can run for
+// many minutes on a large model. Cancellation is the caller's ctx.
+func (o *OllamaProvider) PullModel(ctx context.Context, model string, onProgress func(PullProgress)) error {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return fmt.Errorf("ollama: pull: no model named")
+	}
+	body, err := json.Marshal(map[string]any{"model": model, "stream": true})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.baseURL+"/api/pull", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	// The shared client carries a completion-sized timeout. A pull is a
+	// download, not an inference call, so it gets its own client with no
+	// deadline and relies on ctx instead.
+	client := &http.Client{Transport: o.client.Transport}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("ollama: pull %s: %w", model, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("ollama: pull %s: %s: %s", model, resp.Status, strings.TrimSpace(string(snippet)))
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	// Progress lines are small, but a manifest error can be long; give the
+	// scanner room so a single long line does not abort an otherwise fine pull.
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var step struct {
+			Status    string `json:"status"`
+			Completed int64  `json:"completed"`
+			Total     int64  `json:"total"`
+			Error     string `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(line), &step); err != nil {
+			continue // a line we don't understand is not a reason to fail the pull
+		}
+		// Ollama reports a failed pull in-band with HTTP 200, so this is the
+		// only place a bad model name surfaces.
+		if step.Error != "" {
+			return fmt.Errorf("ollama: pull %s: %s", model, step.Error)
+		}
+		if onProgress != nil {
+			onProgress(PullProgress{Status: step.Status, Completed: step.Completed, Total: step.Total})
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("ollama: pull %s: %w", model, err)
+	}
+	return nil
 }
