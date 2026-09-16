@@ -16,7 +16,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -104,6 +106,9 @@ func (e *Engine) BuilderChat(ctx context.Context, sessionID, message, provider, 
 	sess.History = append(sess.History, llm.ChatMessage{Role: "user", Content: message})
 	trimBuilderHistoryLocked(sess)
 	msgs := buildBuilderMessages(sess.History)
+	if brief := understandingBrief(sess.Understanding); brief != "" {
+		msgs = append([]llm.ChatMessage{msgs[0], {Role: "system", Content: brief}}, msgs[1:]...)
+	}
 	if catalog != "" {
 		// Inject AFTER the system prompt, BEFORE the conversation history, so
 		// every turn sees the catalog without baking it into stored history.
@@ -123,9 +128,14 @@ func (e *Engine) BuilderChat(ctx context.Context, sessionID, message, provider, 
 	// llama3.3:70b drift away from markers by turn 3-4, leaving the Blueprint
 	// stuck at 0% confidence. JSON-mode is enforced by the provider itself.
 	resp, err := e.llmRouter.Complete(ctx, provider, llm.CompletionRequest{
-		Messages:       msgs,
-		Temperature:    0.6,
-		MaxTokens:      1500,
+		Messages:    msgs,
+		Temperature: 0.6,
+		// 1500 was not enough. A reasoning model spends part of the same budget
+		// thinking before it writes, so the visible JSON was being cut off
+		// mid-object — and a builder reply that does not parse costs the user a
+		// whole exchange. The envelope itself is small; the headroom is for the
+		// model's own preamble.
+		MaxTokens:      4000,
 		ResponseFormat: "json_schema",
 		JSONSchema:     builderResponseSchema,
 	})
@@ -136,13 +146,31 @@ func (e *Engine) BuilderChat(ctx context.Context, sessionID, message, provider, 
 	reply, understanding := parseBuilderResponse(resp.Content)
 
 	sess.mu.Lock()
-	sess.History = append(sess.History, llm.ChatMessage{Role: "assistant", Content: resp.Content})
+	// Store what the assistant actually said, not the raw model output. A
+	// truncated JSON fragment in the history is worse than useless: the model
+	// reads it back next turn and follows it off a cliff.
+	stored := resp.Content
+	if understanding == nil && looksLikeJSON(resp.Content) {
+		stored = reply
+	}
+	sess.History = append(sess.History, llm.ChatMessage{Role: "assistant", Content: stored})
 	trimBuilderHistoryLocked(sess)
 	if understanding != nil {
 		sess.Understanding = understanding
 	}
 	sess.LastActive = time.Now()
 	sess.mu.Unlock()
+
+	// The user may already have answered in plain words. Reading the time out
+	// of what they typed stops the conversation asking again for something
+	// they have said, which is how a builder loses someone's patience.
+	if understanding != nil && understanding.Trigger != nil &&
+		strings.EqualFold(strings.TrimSpace(understanding.Trigger.Type), "cron") &&
+		strings.TrimSpace(understanding.Trigger.Schedule) == "" {
+		if cron := cronFromPlainTime(message); cron != "" {
+			understanding.Trigger.Schedule = cron
+		}
+	}
 
 	// Fold any gap the model did not notice back into `missing`, so the next
 	// turn asks about it. The model reads this field; a gap it cannot see is a
@@ -277,6 +305,67 @@ func buildBuilderMessages(history []llm.ChatMessage) []llm.ChatMessage {
 	msgs = append(msgs, llm.ChatMessage{Role: "system", Content: builderSystemPrompt})
 	msgs = append(msgs, history...)
 	return msgs
+}
+
+// understandingBrief restates what has already been established, as an
+// authoritative system message on every turn.
+//
+// The model's only memory used to be the raw text of its own previous
+// replies. When one of those replies was truncated — which happens — the
+// history it read back was a broken JSON fragment, and it lost the thread:
+// in a real session it collected the purpose, the topic and the destination,
+// then asked for the purpose again as if the conversation had just started.
+//
+// Understanding is accumulated server-side and survives a bad turn, so
+// handing it back each time means a single truncation costs one exchange
+// instead of the whole conversation.
+func understandingBrief(u *BuilderUnderstanding) string {
+	if u == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Already established — do not ask about these again\n")
+	add := func(label, v string) {
+		if strings.TrimSpace(v) != "" {
+			fmt.Fprintf(&b, "- %s: %s\n", label, v)
+		}
+	}
+	add("Agent name", u.Name)
+	add("What it does", u.Purpose)
+	add("Description", u.Description)
+	if u.Trigger != nil {
+		add("Trigger", u.Trigger.Type)
+		add("Schedule (cron)", u.Trigger.Schedule)
+		if len(u.Trigger.Channels) > 0 {
+			add("Channels", strings.Join(u.Trigger.Channels, ", "))
+		}
+	}
+	if len(u.Tools) > 0 {
+		names := make([]string, 0, len(u.Tools))
+		for _, t := range u.Tools {
+			names = append(names, t.Name)
+		}
+		add("Tools", strings.Join(names, ", "))
+	}
+	if len(u.Outputs) > 0 {
+		chans := make([]string, 0, len(u.Outputs))
+		for _, o := range u.Outputs {
+			chans = append(chans, o.Channel)
+		}
+		add("Sends results to", strings.Join(chans, ", "))
+	}
+	if strings.TrimSpace(u.SystemPrompt) != "" {
+		b.WriteString("- The agent's instructions have already been drafted; carry them forward unchanged unless the user asks to change them.\n")
+	}
+	if len(u.Missing) > 0 {
+		fmt.Fprintf(&b, "\nStill needed: %s\n", strings.Join(u.Missing, ", "))
+	}
+	// Only worth sending when something is actually known.
+	if strings.Count(b.String(), "\n") <= 1 {
+		return ""
+	}
+	b.WriteString("\nRepeat every field above in your next `understanding` object. Dropping one loses it.")
+	return b.String()
 }
 
 // ── Response parser ───────────────────────────────────────────────────────────
@@ -741,6 +830,19 @@ The "system_prompt" field is the actual instructions the deployed agent will see
 - Multi-paragraph system_prompts are encouraged when the user described a multi-step procedure. Don't compress.
 - Add a final "Important:" paragraph noting failure modes and constraints you inferred.
 
+## The reply field is spoken to the user
+The reply field is one or two sentences addressed to the person, and nothing
+else. It is never a list of what they have told you, never your working out,
+never a note to yourself about what to check next. If you need to think, do it
+before you write; the user sees only this field.
+
+## Where results go
+Results appear in Soulacy itself unless the user asks for somewhere else. Never
+block on a delivery channel, never ask the user to name a "channel adapter",
+and never treat "show it to me" or "on my phone" as an unanswered question —
+both mean the default. Only record an external channel (Telegram, Slack,
+email) when the user names one themselves.
+
 ## CRITICAL — preserving cron times
 If the user says "7 AM" → "0 7 * * *". "6:30 AM" → "30 6 * * *". "every Monday at 9" → "0 9 * * 1". Never change the time. If you're not sure of the cron syntax, ask.
 
@@ -819,4 +921,53 @@ func looksLikeJSON(content string) bool {
 	t = strings.TrimPrefix(t, "```json")
 	t = strings.TrimPrefix(t, "```")
 	return strings.HasPrefix(strings.TrimSpace(t), "{")
+}
+
+// cronFromPlainTime derives a daily cron from a time the user typed in
+// ordinary words.
+//
+// Asking a model to emit "0 7 * * *" from "7am" works most of the time, and
+// the times it does not the conversation stalls: the user has answered, the
+// field is still empty, and they are asked again. A time of day is a small
+// enough grammar to read directly, so the common case stops depending on the
+// model at all. Anything it does not recognise is left alone for the model.
+func cronFromPlainTime(text string) string {
+	t := strings.ToLower(text)
+	// 7am, 7 am, 7:30am, 07:30, at 7
+	re := regexp.MustCompile(`\b(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b`)
+	m := re.FindStringSubmatch(t)
+	if m == nil {
+		return ""
+	}
+	hour, err := strconv.Atoi(m[1])
+	if err != nil || hour < 0 || hour > 24 {
+		return ""
+	}
+	minute := 0
+	if m[2] != "" {
+		if minute, err = strconv.Atoi(m[2]); err != nil || minute > 59 {
+			return ""
+		}
+	}
+	switch m[3] {
+	case "pm":
+		if hour < 12 {
+			hour += 12
+		}
+	case "am":
+		if hour == 12 {
+			hour = 0
+		}
+	default:
+		// A bare number with no am/pm is only a time if it could be one and the
+		// sentence is about when something runs. Refusing here is safer than
+		// scheduling an agent for an hour the user never said.
+		if !strings.Contains(t, ":") && !strings.Contains(t, "o'clock") {
+			return ""
+		}
+	}
+	if hour > 23 {
+		return ""
+	}
+	return fmt.Sprintf("%d %d * * *", minute, hour)
 }

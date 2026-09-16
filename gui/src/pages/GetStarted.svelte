@@ -47,10 +47,10 @@
   // Deliberately few, and phrased as outcomes rather than capabilities. A
   // blank box is the most expensive thing to put in front of a new user.
   const STARTERS = [
-    { icon: '📰', title: 'Morning briefing',  text: 'Every morning, summarise the news in my industry and send it to me.' },
-    { icon: '📅', title: 'Calendar watch',    text: 'Watch my calendar and warn me when two things clash.' },
-    { icon: '📝', title: 'Weekly summary',    text: 'Each Friday, write a short summary of what I worked on this week.' },
-    { icon: '🔔', title: 'Price watch',       text: 'Check a web page once a day and tell me when the price changes.' },
+    { icon: '📰', chip: 'Daily',     title: 'Morning briefing', text: 'Every morning, summarise the news in my industry and send it to me.' },
+    { icon: '📅', chip: 'Calendar',  title: 'Calendar watch',   text: 'Watch my calendar and warn me when two things clash.' },
+    { icon: '📝', chip: 'Weekly',    title: 'Weekly summary',   text: 'Each Friday, write a short summary of what I worked on this week.' },
+    { icon: '🔔', chip: 'Monitor',   title: 'Price watch',      text: 'Check a web page once a day and tell me when the price changes.' },
   ]
 
   // Setup, handled here rather than by sending someone away.
@@ -95,7 +95,20 @@
     }
   }
 
-  onMount(checkProvider)
+  onMount(() => { checkProvider(); loadAgents() })
+  // Real numbers only. The mockup shows a live agent rail; inventing health
+  // percentages or a spend figure would be lying to the person reading it, so
+  // this rail shows the agents that actually exist and what state they are in.
+  let agents = []
+  let agentsLoaded = false
+  async function loadAgents() {
+    try {
+      const res = await api.agents.list()
+      agents = (res.agents || []).filter((a) => !['genie', 'system'].includes(a.id))
+    } catch { agents = [] } finally { agentsLoaded = true }
+  }
+  $: runningCount = agents.filter((a) => a.enabled).length
+
 
   async function openLocalSetup() {
     setupMode = 'local'
@@ -288,27 +301,30 @@
   })()
 </script>
 
-<div class="page">
-  <div class="page-head"><TourButton /></div>
-  {#if phase === 'ask'}
-    <div class="hero">
-      <h1>Good {partOfDay}. What would you like help with?</h1>
-      <p class="sub">Describe it in your own words. Soulacy works out the rest, shows you the plan, and runs it once before anything is scheduled.</p>
+<div class="console">
+  <div class="console-main">
+    <div class="eyebrow-row">
+      <span class="eyebrow">WORKSPACE</span>
+      {#if agentsLoaded && agents.length}
+        <span class="pill"><span class="dot"></span>{runningCount} of {agents.length} agent{agents.length === 1 ? '' : 's'} running</span>
+      {/if}
+      <div class="head-actions"><TourButton /></div>
+    </div>
+
+    {#if phase === 'ask'}
+      <h1 class="greeting">Good {partOfDay}. What would you like help with?</h1>
 
       {#if !checkingProvider && !providerReady && !setupMode}
-        <div class="banner warn">
-          No model is connected yet. Say what you want anyway and I will set one up first.
-        </div>
+        <div class="notice warn">No model is connected yet. Say what you want anyway and I will set one up first.</div>
       {/if}
 
       {#if setupMode}
-        <div class="setup">
+        <div class="panel setup">
           <h2>First, a model to think with</h2>
-          <p class="setup-sub">
+          <p class="foot-note">
             {#if pendingMessage}Your request is saved. This takes a minute, then it carries on.{:else}Pick one and everything else follows.{/if}
           </p>
-
-          <div class="setup-tabs">
+          <div class="tabs">
             <button class:on={setupMode === 'local'} on:click={openLocalSetup}>On this machine</button>
             <button class:on={setupMode === 'cloud'} on:click={() => { setupMode = 'cloud'; setupError = '' }}>Use a cloud account</button>
           </div>
@@ -317,292 +333,344 @@
             {#if pullJob && !pullJob.done}
               <div class="pull">
                 <div class="pull-row"><code>{pullJob.model}</code><span>{pullJob.status}</span></div>
-                <div class="pull-bar">
-                  <div class="pull-fill" style={`width:${pullJob.total ? Math.round(pullJob.completed / pullJob.total * 100) : 4}%`}></div>
-                </div>
-                <span class="setup-note">Downloading. You can leave this page; it keeps going.</span>
+                <div class="bar"><div class="fill" style={`width:${pullJob.total ? Math.round(pullJob.completed / pullJob.total * 100) : 4}%`}></div></div>
+                <span class="foot-note">Downloading. You can leave this page; it keeps going.</span>
               </div>
             {:else if localModels.length}
-              <p class="setup-note">{hostRamGB ? `${hostRamGB} GB of memory detected.` : ''} Anything too big for this machine is greyed out.</p>
+              <p class="foot-note">{hostRamGB ? `${hostRamGB} GB of memory detected.` : ''} Anything too big for this machine is greyed out.</p>
               {#each localModels as m}
-                <div class="setup-row" class:unfit={!m.fits}>
-                  <div>
-                    <code>{m.name}</code>{#if m.default}<span class="tag">recommended</span>{/if}
-                    <div class="setup-sum">{m.summary}</div>
-                  </div>
-                  <div class="setup-side">
-                    <span class="setup-size">{Math.round(m.size_gb * 10) / 10} GB</span>
+                <div class="row" class:unfit={!m.fits}>
+                  <div><code>{m.name}</code>{#if m.default}<span class="chip ok">recommended</span>{/if}<div class="foot-note">{m.summary}</div></div>
+                  <div class="row-side">
+                    <span class="foot-note">{Math.round(m.size_gb * 10) / 10} GB</span>
                     {#if m.fits}
                       <button class="btn-secondary btn-sm" disabled={setupBusy} on:click={() => installModel(m.name)}>Install</button>
                     {:else}
-                      <span class="setup-no">needs {m.min_ram_gb} GB</span>
+                      <span class="foot-note">needs {m.min_ram_gb} GB</span>
                     {/if}
                   </div>
                 </div>
               {/each}
             {:else}
-              <p class="setup-note">No local model runtime is reachable on this machine. Use a cloud account instead.</p>
+              <p class="foot-note">No local model runtime is reachable on this machine. Use a cloud account instead.</p>
             {/if}
           {:else if setupMode === 'cloud'}
             {#if cloudModels.length}
-              <label class="setup-label" for="cloud-model">Choose a model</label>
-              <select id="cloud-model" bind:value={cloudModel}>
-                {#each cloudModels as m}<option value={m}>{m}</option>{/each}
-              </select>
-              <button class="btn-primary btn-sm setup-go" disabled={!cloudModel || setupBusy} on:click={useCloudModel}>
-                {setupBusy ? 'Saving…' : 'Use this model'}
-              </button>
+              <label class="foot-note" for="cloud-model">Choose a model</label>
+              <select id="cloud-model" bind:value={cloudModel}>{#each cloudModels as m}<option value={m}>{m}</option>{/each}</select>
+              <button class="btn-primary btn-sm" disabled={!cloudModel || setupBusy} on:click={useCloudModel}>{setupBusy ? 'Saving…' : 'Use this model'}</button>
             {:else}
-              <div class="setup-tabs sub">
+              <div class="tabs sub">
                 {#each CLOUD_PROVIDERS as p}
                   <button class:on={cloudProvider === p.id} on:click={() => { cloudProvider = p.id; setupError = '' }}>{p.label}</button>
                 {/each}
               </div>
-              <p class="setup-note">Create a key at {CLOUD_PROVIDERS.find(p => p.id === cloudProvider)?.where}, then paste it here. It is stored encrypted on your gateway and never shown again.</p>
-              <div class="setup-key">
+              <p class="foot-note">Create a key at {CLOUD_PROVIDERS.find(p => p.id === cloudProvider)?.where}, then paste it here. It is stored encrypted on your gateway and never shown again.</p>
+              <div class="key-row">
                 <input type="password" placeholder="Paste the API key" bind:value={cloudKey} on:keydown={(e) => { if (e.key === 'Enter') saveCloudKey() }} />
-                <button class="btn-secondary btn-sm" disabled={!cloudKey.trim() || setupBusy} on:click={saveCloudKey}>
-                  {setupBusy ? 'Checking…' : 'Save'}
-                </button>
+                <button class="btn-secondary btn-sm" disabled={!cloudKey.trim() || setupBusy} on:click={saveCloudKey}>{setupBusy ? 'Checking…' : 'Save'}</button>
               </div>
             {/if}
           {/if}
 
-          {#if setupError}<div class="banner err">{setupError}</div>{/if}
-          <button class="linkish setup-skip" on:click={() => { setupMode = ''; pendingMessage = '' }}>Not now</button>
+          {#if setupError}<div class="notice err">{setupError}</div>{/if}
+          <button class="linkish" on:click={() => { setupMode = ''; pendingMessage = '' }}>Not now</button>
         </div>
       {/if}
 
-      <textarea
-        bind:value={draft}
-        rows="3"
-        placeholder="e.g. Every weekday at 7am, check my calendar and tell me what needs preparing."
-        on:keydown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send() }}
-      ></textarea>
-      <div class="row">
-        <button class="btn-primary" disabled={!draft.trim() || busy} on:click={() => send()}>
-          {busy ? 'Thinking…' : 'Continue'}
-        </button>
-        <span class="hint">or start from one of these</span>
+      <div class="intent-card">
+        <div class="intent-head">
+          <span class="intent-title">Describe what you want</span>
+          <span class="intent-sub">Plain words. Soulacy works out the tools, shows you the plan, and runs it once before anything is scheduled.</span>
+        </div>
+        <textarea
+          bind:value={draft}
+          rows="3"
+          placeholder="e.g. Every weekday at 7am, check my calendar and tell me what needs preparing."
+          on:keydown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send() }}
+        ></textarea>
+        <div class="intent-foot">
+          <span class="kbd-hint">⌘ + Enter</span>
+          <button class="btn-primary" disabled={!draft.trim() || busy} on:click={() => send()}>
+            {busy ? 'Thinking…' : 'Continue'} <span class="arrow">→</span>
+          </button>
+        </div>
       </div>
 
-      <div class="starters">
+      <div class="section-head">
+        <h2>Start from one of these</h2>
+        <button class="linkish" on:click={() => go('templates')}>All templates →</button>
+      </div>
+      <div class="cards">
         {#each STARTERS as s}
-          <button class="starter" on:click={() => send(s.text)}>
-            <span class="starter-icon">{s.icon}</span>
-            <span class="starter-body">
-              <span class="starter-title">{s.title}</span>
-              <span class="starter-text">{s.text}</span>
-            </span>
+          <button class="card" on:click={() => send(s.text)}>
+            <div class="card-top">
+              <span class="tile">{s.icon}</span>
+              <span class="chip">{s.chip}</span>
+            </div>
+            <span class="card-title">{s.title}</span>
+            <span class="card-text">{s.text}</span>
           </button>
         {/each}
       </div>
 
-      <div class="escape">
-        Want full control over tools, branching and code?
-        <button class="linkish" on:click={() => go('studio')}>Open Studio</button>
+      <div class="escape-row">
+        <span>Want full control over tools, branching and code?</span>
+        <button class="btn-secondary btn-sm" on:click={() => go('studio')}>Open Studio</button>
       </div>
-    </div>
-  {:else}
-    <div class="convo">
-      {#each turns as t}
-        <div class="turn {t.role}">
-          <span class="who">{t.role === 'you' ? 'You' : 'Soulacy'}</span>
-          <p>{t.text}</p>
-        </div>
+    {:else}
+      <div class="thread">
+        {#each turns as t}
+          <div class="msg {t.role}">
+            <span class="who">{t.role === 'you' ? 'You' : 'Soulacy'}</span>
+            <div class="bubble">{t.text}</div>
+          </div>
+        {/each}
+
+        {#if phase === 'converse'}
+          <div class="reply-card">
+            <input
+              bind:value={draft}
+              placeholder="Answer, or add more detail…"
+              on:keydown={(e) => { if (e.key === 'Enter') send() }}
+            />
+            <button class="btn-primary btn-sm" disabled={!draft.trim() || busy} on:click={() => send()}>
+              {busy ? '…' : 'Send'}
+            </button>
+          </div>
+          {#if busy}<div class="thinking"><span class="spinner"></span> Working it out…</div>{/if}
+        {/if}
+
+        {#if phase === 'ready'}
+          <div class="panel">
+            <h2>Here's what it will do</h2>
+            <ul class="plan">{#each plan as line}<li>{line}</li>{/each}</ul>
+            {#if understanding?.missing?.length}
+              <div class="notice warn">Not covered: {understanding.missing.join(', ')}</div>
+            {/if}
+            <div class="panel-foot">
+              <button class="btn-primary" disabled={busy} on:click={createAndRun}>Create it and run it now</button>
+              <button class="linkish" on:click={() => { phase = 'converse' }}>Change something</button>
+            </div>
+            <p class="foot-note">It runs once, now, so you can see the result before deciding whether it should run on its own.</p>
+          </div>
+        {/if}
+
+        {#if phase === 'running'}
+          <div class="panel running"><span class="spinner"></span> Running it for the first time…</div>
+        {/if}
+
+        {#if phase === 'result'}
+          <div class="panel">
+            <h2>Here's what it produced</h2>
+            <pre class="output">{output}</pre>
+            {#if deliveryWarning}<div class="notice warn">{deliveryWarning}</div>{/if}
+            {#if scheduled}
+              <div class="notice ok">It will run on its own from now on.</div>
+            {:else if schedulePending}
+              <div class="offer">
+                <span>Want this to happen automatically from now on?</span>
+                <button class="btn-primary btn-sm" disabled={scheduling} on:click={activateSchedule}>
+                  {scheduling ? 'Starting…' : 'Yes, run it on schedule'}
+                </button>
+              </div>
+            {/if}
+            <div class="panel-foot">
+              <button class="linkish" on:click={() => go('agents')}>See it under Deployed</button>
+              <button class="linkish" on:click={restart}>Build another</button>
+            </div>
+          </div>
+        {/if}
+
+        {#if error}<div class="notice err">{error}</div>{/if}
+      </div>
+    {/if}
+  </div>
+
+  {#if agentsLoaded && agents.length}
+    <aside class="rail">
+      <div class="rail-head">
+        <h2>Your agents</h2>
+        <span class="chip">{agents.length}</span>
+      </div>
+      {#each agents.slice(0, 6) as a}
+        <button class="rail-card" on:click={() => go('agents')}>
+          <div class="rail-top">
+            <span class="rail-name">{a.name || a.id}</span>
+            <span class="state {a.enabled ? 'on' : 'off'}">{a.enabled ? 'enabled' : 'off'}</span>
+          </div>
+          {#if a.description}<span class="rail-desc">{a.description}</span>{/if}
+        </button>
       {/each}
-
-      {#if phase === 'converse'}
-        <div class="reply-row">
-          <input
-            bind:value={draft}
-            placeholder="Answer, or add more detail…"
-            on:keydown={(e) => { if (e.key === 'Enter') send() }}
-          />
-          <button class="btn-primary" disabled={!draft.trim() || busy} on:click={() => send()}>
-            {busy ? '…' : 'Send'}
-          </button>
-        </div>
-      {/if}
-
-      {#if phase === 'ready'}
-        <div class="plan">
-          <h2>Here's what it will do</h2>
-          <ul>
-            {#each plan as line}<li>{line}</li>{/each}
-          </ul>
-          {#if understanding?.missing?.length}
-            <div class="missing">
-              Not covered: {understanding.missing.join(', ')}
-            </div>
-          {/if}
-          <div class="row">
-            <button class="btn-primary" disabled={busy} on:click={createAndRun}>Create it and run it now</button>
-            <button class="linkish" on:click={() => { phase = 'converse' }}>Change something</button>
-          </div>
-          <p class="note">It runs once, now, so you can see the result before deciding whether it should run on its own.</p>
-        </div>
-      {/if}
-
-      {#if phase === 'running'}
-        <div class="running">
-          <div class="spinner"></div>
-          <span>Running it for the first time…</span>
-        </div>
-      {/if}
-
-      {#if phase === 'result'}
-        <div class="result">
-          <h2>Here's what it produced</h2>
-          <pre>{output}</pre>
-
-          {#if deliveryWarning}
-            <div class="banner warn">{deliveryWarning}</div>
-          {/if}
-
-          {#if scheduled}
-            <div class="banner ok">It will run on its own from now on.</div>
-          {:else if schedulePending}
-            <div class="schedule-offer">
-              <span>Want this to happen automatically from now on?</span>
-              <button class="btn-primary btn-sm" disabled={scheduling} on:click={activateSchedule}>
-                {scheduling ? 'Starting…' : 'Yes, run it on schedule'}
-              </button>
-            </div>
-          {/if}
-
-          <div class="row">
-            <button class="linkish" on:click={() => go('agents')}>See it under Deployed</button>
-            <button class="linkish" on:click={restart}>Build another</button>
-          </div>
-        </div>
-      {/if}
-
-      {#if error}<div class="banner err">{error}</div>{/if}
-    </div>
+    </aside>
   {/if}
 </div>
 
 <style>
-  .page { max-width: 820px; margin: 0 auto; padding: 2rem 1.25rem 3rem; }
-  .page-head { display: flex; justify-content: flex-end; margin-bottom: .4rem; }
+  /* Built to the console layout: a wide main column with a live rail beside
+     it, cards rather than lists, and one strong action per surface. The
+     numbers in the rail are real — an invented health percentage would be a
+     lie told in a nice font. */
+  .console {
+    display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 1.6rem;
+    max-width: 1180px; margin: 0 auto; padding: 1.6rem 1.25rem 3rem;
+  }
+  @media (max-width: 1000px) { .console { grid-template-columns: 1fr; } .rail { order: -1; } }
 
-  /* Bigger and quieter than a page title. This is the first thing a new user
-     reads, and it should sound like a question, not a header. */
-  .hero h1 { font-size: 2.1rem; line-height: 1.2; font-weight: 600; margin-bottom: .5rem; letter-spacing: -.01em; }
-  .sub { color: var(--sl-text-dim, #a9b0cc); font-size: .95rem; margin-bottom: 1.4rem; max-width: 60ch; }
+  .eyebrow-row { display: flex; align-items: center; gap: .6rem; margin-bottom: .9rem; }
+  .eyebrow { color: var(--sl-text-faint, #6b7294); font-size: .64rem; letter-spacing: .14em; text-transform: uppercase; }
+  .head-actions { margin-left: auto; }
+  .pill {
+    display: inline-flex; align-items: center; gap: .35rem;
+    background: var(--sl-surface, #141626); border: 1px solid var(--sl-line, #1f2440);
+    color: var(--sl-text-dim, #a9b0cc); border-radius: 999px; padding: .2rem .6rem; font-size: .7rem;
+  }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: #4caf82; }
 
-  textarea, input {
-    width: 100%; background: #11131f; border: 1px solid var(--sl-line, #1f2440);
-    border-radius: var(--sl-radius-lg, 14px);
-    padding: 1rem 1.1rem; color: inherit; font: inherit; font-size: .95rem; resize: vertical;
+  .greeting { font-size: 2.15rem; line-height: 1.18; font-weight: 600; letter-spacing: -.015em; margin-bottom: 1.1rem; max-width: 22ch; }
+
+  /* The intent card is the one thing on the page that matters. */
+  .intent-card {
+    background: var(--sl-surface, #141626); border: 1px solid var(--sl-line, #1f2440);
+    border-radius: var(--sl-radius-lg, 14px); padding: 1.1rem 1.15rem; margin-bottom: 1.6rem;
+  }
+  .intent-head { display: flex; flex-direction: column; gap: .15rem; margin-bottom: .7rem; }
+  .intent-title { font-size: .9rem; font-weight: 600; }
+  .intent-sub { color: var(--sl-text-faint, #6b7294); font-size: .78rem; line-height: 1.5; }
+  .intent-card textarea {
+    width: 100%; background: #0f111c; border: 1px solid var(--sl-line, #1f2440);
+    border-radius: var(--sl-radius, 10px); padding: .85rem .95rem; color: inherit;
+    font: inherit; font-size: .92rem; resize: vertical;
     transition: border-color .15s ease, box-shadow .15s ease;
   }
-  textarea:focus, input:focus {
+  .intent-card textarea:focus {
     outline: none; border-color: var(--sl-accent, #6c63ff);
     box-shadow: 0 0 0 3px var(--sl-accent-soft, rgba(139,133,255,.12));
   }
+  .intent-foot { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: .75rem; }
+  .kbd-hint { color: var(--sl-text-faint, #6b7294); font-size: .7rem; }
+  .arrow { margin-left: .2rem; }
 
-  .row { display: flex; align-items: center; gap: .8rem; margin-top: .8rem; flex-wrap: wrap; }
-  .hint { color: #6b7294; font-size: .78rem; }
+  .section-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: .7rem; }
+  .section-head h2 { font-size: .95rem; font-weight: 600; }
 
-  /* Two-up cards rather than four stacked sentences: a grid reads as a menu of
-     things the product can do, a list reads as homework. */
-  .starters {
-    display: grid; gap: .6rem; margin-top: 1.1rem;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  }
-  .starter {
-    display: flex; gap: .7rem; align-items: flex-start; text-align: left;
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: .7rem; }
+  .card {
+    display: flex; flex-direction: column; gap: .35rem; text-align: left; cursor: pointer;
     background: var(--sl-surface, #141626); border: 1px solid var(--sl-line, #1f2440);
-    border-radius: var(--sl-radius-lg, 14px); padding: .85rem .9rem; cursor: pointer;
+    border-radius: var(--sl-radius-lg, 14px); padding: .95rem 1rem;
     transition: border-color .15s ease, background .15s ease, transform .1s ease;
   }
-  .starter:hover { border-color: var(--sl-accent, #6c63ff); background: var(--sl-surface-raised, #191c2f); }
-  .starter:active { transform: translateY(1px); }
-  .starter-icon { font-size: 1.1rem; line-height: 1.2; flex-shrink: 0; }
-  .starter-body { display: flex; flex-direction: column; gap: .15rem; }
-  .starter-title { color: var(--sl-text, #e6e9f5); font-size: .86rem; font-weight: 500; }
-  .starter-text { color: var(--sl-text-faint, #6b7294); font-size: .78rem; line-height: 1.45; }
-
-  .escape { margin-top: 2rem; color: #6b7294; font-size: .78rem; }
-
-  /* Setup, inline. The point is that the person never leaves this screen and
-     never loses the thing they were trying to do. */
-  .setup { border: 1px solid rgba(232,168,72,.35); background: rgba(232,168,72,.06);
-           border-radius: 10px; padding: 1rem 1.1rem; margin-bottom: 1rem; }
-  .setup h2 { font-size: 1rem; font-weight: 600; margin-bottom: .2rem; }
-  .setup-sub { color: #a9b0cc; font-size: .82rem; margin-bottom: .8rem; }
-  .setup-tabs { display: flex; gap: .4rem; margin-bottom: .7rem; flex-wrap: wrap; }
-  .setup-tabs button { background: #11131f; border: 1px solid #1a1e36; color: #a9b0cc;
-                       border-radius: 7px; padding: .35rem .7rem; font-size: .78rem; cursor: pointer; }
-  .setup-tabs button.on { border-color: #8b85ff; color: #e6e9f5; }
-  .setup-tabs.sub button { font-size: .74rem; }
-  .setup-note { color: #6b7294; font-size: .75rem; margin-bottom: .5rem; }
-  .setup-label { display: block; color: #6b7294; font-size: .74rem; margin-bottom: .25rem; }
-  .setup select { width: 100%; background: #11131f; border: 1px solid #1a1e36; border-radius: 7px;
-                  padding: .4rem .5rem; color: inherit; font-size: .8rem; }
-  .setup-go { margin-top: .6rem; }
-  .setup-key { display: flex; gap: .4rem; }
-  .setup-key input { flex: 1; background: #11131f; border: 1px solid #1a1e36; border-radius: 7px;
-                     padding: .4rem .55rem; color: inherit; font-size: .8rem; }
-  .setup-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem;
-               padding: .45rem .6rem; border: 1px solid #1a1e36; border-radius: 8px;
-               background: #11131f; margin-bottom: .3rem; }
-  .setup-row.unfit { opacity: .55; }
-  .setup-row code { color: #8b85ff; font-size: .8rem; }
-  .setup-sum { color: #6b7294; font-size: .72rem; margin-top: .1rem; }
-  .setup-side { display: flex; align-items: center; gap: .5rem; flex-shrink: 0; }
-  .setup-size { color: #a9b0cc; font-size: .72rem; }
-  .setup-no { color: #6b7294; font-size: .7rem; }
-  .tag { background: rgba(76,175,130,.16); color: #4caf82; font-size: .62rem;
-         padding: .05rem .35rem; border-radius: 4px; margin-left: .35rem; }
-  .setup-skip { margin-top: .6rem; }
-  .pull-row { display: flex; justify-content: space-between; font-size: .78rem; }
-  .pull-row code { color: #8b85ff; }
-  .pull-bar { height: 5px; background: #1a1e36; border-radius: 3px; overflow: hidden; margin: .4rem 0 .3rem; }
-  .pull-fill { height: 100%; background: #8b85ff; transition: width .3s ease; }
-
-  .convo { display: flex; flex-direction: column; gap: .9rem; }
-  .turn .who { color: #6b7294; font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; }
-  .turn p { margin-top: .15rem; font-size: .92rem; line-height: 1.5; }
-  .turn.you p { color: #e6e9f5; }
-  .turn.soulacy p { color: #a9b0cc; }
-
-  .reply-row { display: flex; gap: .6rem; margin-top: .4rem; }
-  .reply-row input { flex: 1; }
-
-  .plan {
-    border: 1px solid rgba(139,133,255,.3); background: rgba(139,133,255,.06);
-    border-radius: 10px; padding: 1rem 1.1rem; margin-top: .6rem;
+  .card:hover { border-color: var(--sl-accent, #6c63ff); background: var(--sl-surface-raised, #191c2f); }
+  .card:active { transform: translateY(1px); }
+  .card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: .2rem; }
+  .tile {
+    width: 30px; height: 30px; display: grid; place-items: center; font-size: .95rem;
+    background: var(--sl-accent-soft, rgba(139,133,255,.12)); border-radius: 9px;
   }
-  .plan h2, .result h2 { font-size: 1rem; font-weight: 600; margin-bottom: .5rem; }
-  .plan ul { margin: 0 0 .6rem 1rem; }
-  .plan li { font-size: .88rem; line-height: 1.6; color: #e6e9f5; }
-  .missing { color: #e8a848; font-size: .8rem; margin-bottom: .5rem; }
-  .note { color: #6b7294; font-size: .76rem; margin-top: .6rem; }
-
-  .running { display: flex; align-items: center; gap: .7rem; color: #a9b0cc; font-size: .88rem; padding: 1rem 0; }
-  .spinner {
-    width: 16px; height: 16px; border: 2px solid #1a1e36; border-top-color: #8b85ff;
-    border-radius: 50%; animation: spin .8s linear infinite;
+  .chip {
+    background: #11131f; border: 1px solid var(--sl-line, #1f2440); color: var(--sl-text-faint, #6b7294);
+    border-radius: 6px; padding: .1rem .4rem; font-size: .62rem; text-transform: uppercase; letter-spacing: .06em;
   }
-  @keyframes spin { to { transform: rotate(360deg); } }
+  .chip.ok { background: rgba(76,175,130,.16); border-color: transparent; color: #4caf82; text-transform: none; letter-spacing: 0; }
+  .card-title { font-size: .88rem; font-weight: 500; color: var(--sl-text, #e6e9f5); }
+  .card-text { color: var(--sl-text-faint, #6b7294); font-size: .78rem; line-height: 1.5; }
 
-  .result pre {
-    background: #11131f; border: 1px solid #1a1e36; border-radius: 10px;
+  .escape-row { display: flex; align-items: center; gap: .7rem; margin-top: 1.6rem; color: var(--sl-text-faint, #6b7294); font-size: .78rem; flex-wrap: wrap; }
+
+  /* The follow-up reads as the same product: same card, same spacing. */
+  .thread { display: flex; flex-direction: column; gap: 1rem; }
+  .msg .who { color: var(--sl-text-faint, #6b7294); font-size: .62rem; text-transform: uppercase; letter-spacing: .1em; }
+  .bubble { margin-top: .25rem; font-size: .93rem; line-height: 1.6; }
+  .msg.you .bubble { color: var(--sl-text, #e6e9f5); font-weight: 500; }
+  .msg.soulacy .bubble {
+    color: var(--sl-text-dim, #a9b0cc); background: var(--sl-surface, #141626);
+    border: 1px solid var(--sl-line, #1f2440); border-radius: var(--sl-radius-lg, 14px);
+    padding: .8rem .95rem;
+  }
+
+  .reply-card { display: flex; gap: .5rem; }
+  .reply-card input {
+    flex: 1; background: #0f111c; border: 1px solid var(--sl-line, #1f2440);
+    border-radius: var(--sl-radius, 10px); padding: .7rem .85rem; color: inherit; font: inherit; font-size: .9rem;
+  }
+  .reply-card input:focus { outline: none; border-color: var(--sl-accent, #6c63ff); }
+  .thinking { display: flex; align-items: center; gap: .5rem; color: var(--sl-text-faint, #6b7294); font-size: .8rem; }
+
+  .panel {
+    background: var(--sl-surface, #141626); border: 1px solid var(--sl-line, #1f2440);
+    border-radius: var(--sl-radius-lg, 14px); padding: 1.1rem 1.15rem;
+  }
+  .panel h2 { font-size: .98rem; font-weight: 600; margin-bottom: .55rem; }
+  .panel.running { display: flex; align-items: center; gap: .6rem; color: var(--sl-text-dim, #a9b0cc); font-size: .9rem; }
+  .plan { margin: 0 0 .5rem 1.05rem; }
+  .plan li { font-size: .89rem; line-height: 1.65; color: var(--sl-text, #e6e9f5); }
+  .panel-foot { display: flex; align-items: center; gap: .9rem; margin-top: .8rem; flex-wrap: wrap; }
+  .foot-note { color: var(--sl-text-faint, #6b7294); font-size: .76rem; line-height: 1.5; margin-top: .4rem; }
+  .output {
+    background: #0f111c; border: 1px solid var(--sl-line, #1f2440); border-radius: var(--sl-radius, 10px);
     padding: .9rem 1rem; white-space: pre-wrap; word-break: break-word;
-    font-size: .86rem; line-height: 1.55; color: #e6e9f5; max-height: 420px; overflow: auto;
+    font-size: .85rem; line-height: 1.6; color: var(--sl-text, #e6e9f5); max-height: 420px; overflow: auto;
   }
-
-  .schedule-offer {
+  .offer {
     display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
-    margin-top: .9rem; padding: .7rem .9rem; border: 1px solid #1a1e36; border-radius: 10px; background: #11131f;
+    margin-top: .8rem; padding: .7rem .9rem; border: 1px solid var(--sl-line, #1f2440);
+    border-radius: var(--sl-radius, 10px); background: #0f111c; font-size: .88rem;
   }
-  .schedule-offer span { font-size: .88rem; }
 
-  .banner { padding: .7rem .9rem; border-radius: 8px; font-size: .84rem; margin-top: .8rem; }
+  .notice { padding: .65rem .85rem; border-radius: var(--sl-radius, 10px); font-size: .82rem; margin-top: .7rem; }
   .warn { background: rgba(232,168,72,.1); border: 1px solid rgba(232,168,72,.32); color: #e8a848; }
   .ok   { background: rgba(76,175,130,.1); border: 1px solid rgba(76,175,130,.3); color: #4caf82; }
   .err  { background: rgba(240,96,96,.1); border: 1px solid rgba(240,96,96,.3); color: #f06060; }
+
+  .setup .tabs { display: flex; gap: .35rem; margin: .6rem 0; flex-wrap: wrap; }
+  .setup .tabs button {
+    background: #0f111c; border: 1px solid var(--sl-line, #1f2440); color: var(--sl-text-dim, #a9b0cc);
+    border-radius: 8px; padding: .35rem .7rem; font-size: .78rem; cursor: pointer;
+  }
+  .setup .tabs button.on { border-color: var(--sl-accent, #6c63ff); color: var(--sl-text, #e6e9f5); }
+  .setup select, .key-row input {
+    background: #0f111c; border: 1px solid var(--sl-line, #1f2440); border-radius: 8px;
+    padding: .45rem .6rem; color: inherit; font-size: .82rem;
+  }
+  .setup select { width: 100%; }
+  .key-row { display: flex; gap: .4rem; }
+  .key-row input { flex: 1; }
+  .row {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    padding: .5rem .65rem; border: 1px solid var(--sl-line, #1f2440); border-radius: 9px;
+    background: #0f111c; margin-bottom: .3rem;
+  }
+  .row.unfit { opacity: .55; }
+  .row code { color: #8b85ff; font-size: .82rem; }
+  .row-side { display: flex; align-items: center; gap: .5rem; flex-shrink: 0; }
+  .pull-row { display: flex; justify-content: space-between; font-size: .8rem; }
+  .pull-row code { color: #8b85ff; }
+  .bar { height: 5px; background: #1a1e36; border-radius: 3px; overflow: hidden; margin: .4rem 0 .3rem; }
+  .fill { height: 100%; background: var(--sl-accent, #6c63ff); transition: width .3s ease; }
+
+  /* The rail: what you actually have, not a telemetry feed. */
+  .rail { display: flex; flex-direction: column; gap: .5rem; }
+  .rail-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: .2rem; }
+  .rail-head h2 { font-size: .85rem; font-weight: 600; }
+  .rail-card {
+    text-align: left; cursor: pointer; background: var(--sl-surface, #141626);
+    border: 1px solid var(--sl-line, #1f2440); border-radius: var(--sl-radius, 10px);
+    padding: .65rem .75rem; display: flex; flex-direction: column; gap: .2rem;
+    transition: border-color .15s ease;
+  }
+  .rail-card:hover { border-color: var(--sl-accent, #6c63ff); }
+  .rail-top { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+  .rail-name { font-size: .82rem; color: var(--sl-text, #e6e9f5); }
+  .state { font-size: .62rem; border-radius: 5px; padding: .08rem .35rem; }
+  .state.on { background: rgba(76,175,130,.16); color: #4caf82; }
+  .state.off { background: #11131f; color: var(--sl-text-faint, #6b7294); }
+  .rail-desc { color: var(--sl-text-faint, #6b7294); font-size: .72rem; line-height: 1.45;
+               display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+  .spinner {
+    width: 14px; height: 14px; border: 2px solid #1a1e36; border-top-color: var(--sl-accent, #6c63ff);
+    border-radius: 50%; animation: spin .8s linear infinite; display: inline-block;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
 </style>

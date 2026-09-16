@@ -7,6 +7,22 @@ to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- The builder stops forgetting what you already told it. Its only memory was
+  the raw text of its own previous replies, so one truncated turn poisoned the
+  history: in a real session it collected the purpose, the topic and the
+  destination, then asked for the purpose again as though the conversation had
+  just begun. What has been established is now handed back on every turn as an
+  instruction, unusable output is no longer stored as if the assistant had said
+  it, and the reply budget is large enough that a reasoning model can finish
+  its answer.
+- A time you typed is treated as an answer. Saying "7am" left the schedule
+  empty and the question was asked again; plain times are now read directly
+  rather than depending on the model to emit cron.
+- Delivery no longer blocks a build. A first-run user has no channels
+  configured, so being asked to name a "channel adapter" was a loop with no
+  exit. Results appear in Soulacy unless you ask for somewhere else.
+- The reply shown to you is spoken to you. The model leaked its own working
+  out into the conversation ("The user has now answered everything: 1. …").
 - The Get Started screen sets up a model itself instead of sending you away.
   If nothing usable is connected it holds the request you just typed, offers a
   local model sized to the machine or a cloud key with the place to get one,
@@ -102,6 +118,13 @@ to follow [Semantic Versioning](https://semver.org/).
   and the workspace login page.
 
 ### Added
+- Get Started is built to the console layout: a workspace line with a live
+  count of your agents, the greeting, one card for the thing you want, starter
+  cards with a category, and a rail listing the agents you actually have. The
+  rail shows real state rather than invented health percentages — a fabricated
+  number in a nice font is still a fabricated number. The follow-up screen uses
+  the same cards, spacing and type, so answering a question does not look like
+  a different product, and Open Studio is a button rather than underlined text.
 - The sidebar has a mode: Simple, Standard or Advanced. It listed 26
   destinations and a first-time user met every one of them before doing
   anything, which reads as "this is going to be a lot of work" before the
