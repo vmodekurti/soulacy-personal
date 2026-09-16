@@ -102,6 +102,22 @@ to follow [Semantic Versioning](https://semver.org/).
   and the workspace login page.
 
 ### Added
+- The sidebar has a mode: Simple, Standard or Advanced. It listed 26
+  destinations and a first-time user met every one of them before doing
+  anything, which reads as "this is going to be a lot of work" before the
+  product has done anything for you. Simple shows six — Get Started,
+  Dashboard, Deployed, Templates, Chat and About You — Standard adds the tools
+  of the first week, and Advanced is everything, unchanged. The level is per
+  page, so a new screen cannot be added without deciding who it is for, and
+  deep links to pages above the current level still work; they are simply not
+  listed. The guided tour follows the level too, and no longer opens itself on
+  top of the front door: announcing "Step 1 of 28" to someone whose sidebar
+  lists six screens was both wrong and exactly the impression the levels exist
+  to remove.
+- The Get Started screen opens with a greeting rather than a page title, and
+  the starters are cards with a name and an example rather than four stacked
+  sentences. Shared surface tokens now carry the palette and the corner radii,
+  so the geometry can change in one place instead of twenty-six.
 - Gateway access keys can be seen, created and revoked from the dashboard.
   The API has supported all three since the beginning and only revoke was ever
   wired up, and then only to clean up after a paired phone. So the key you sign

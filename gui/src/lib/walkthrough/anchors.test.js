@@ -25,6 +25,10 @@ beforeEach(async () => {
     headers: { 'content-type': 'application/json' },
   })))
   localStorage.clear()
+  // The tour covers every destination, and the sidebar only lists all of them
+  // at the advanced level. Without this the test would assert that steps for
+  // hidden screens resolve, which is not a promise the product makes.
+  localStorage.setItem('soulacy_nav_level', 'advanced')
 
   const { default: App } = await import('../../App.svelte')
   target = document.createElement('div')
