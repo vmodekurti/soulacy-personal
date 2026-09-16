@@ -556,10 +556,21 @@
   $: editingProtected = isSystemAgent(selected)
   $: selectedTier = selected?.id ? tiers[selected.id] : null
 
+  let disabledReasons = {}
+
   async function load() {
     try {
       const res = await api.agents.list()
       agents = res.agents || []
+      // Why an agent is switched off. Boot validation disables an agent whose
+      // model is missing, and the reason used to exist only as a server log
+      // line — so the dashboard could say "disabled" and nothing else, and the
+      // fix, which the validator words correctly, reached nobody.
+      disabledReasons = Object.fromEntries(
+        Object.entries(res.interfaces || {})
+          .filter(([, meta]) => meta && meta.disabled_reason)
+          .map(([id, meta]) => [id, meta.disabled_reason]),
+      )
       loadTiers(agents)
       error  = null
       if ($editAgent) {
@@ -1505,6 +1516,14 @@ console.log(reply);` : ''
             {agent.enabled ? '●' : '○'}
           </button>
         </div>
+        {#if !agent.enabled && disabledReasons[agent.id]}
+          <div class="disabled-why">
+            <span class="dw-problem">{disabledReasons[agent.id].problem}</span>
+            {#if disabledReasons[agent.id].fix}
+              <span class="dw-fix">{disabledReasons[agent.id].fix}</span>
+            {/if}
+          </div>
+        {/if}
       {/each}
     </div>
 
@@ -3374,6 +3393,17 @@ console.log(reply);` : ''
   .agent-card:hover, .agent-card.active { border-color: #6c63ff; }
   .agent-name  { font-weight: 500; font-size: .875rem; }
   .agent-meta  { color: #6b7294; font-size: .72rem; margin-top: .15rem; }
+  /* Why an agent is off. Boot validation switches an agent off when its
+     model is missing; without this the row says only "disabled" and the fix
+     stays in a log file the user will never open. */
+  .disabled-why {
+    margin: -.2rem .6rem .5rem .6rem; padding: .4rem .55rem;
+    border-left: 2px solid rgba(232,168,72,.5); background: rgba(232,168,72,.07);
+    border-radius: 0 6px 6px 0; display: flex; flex-direction: column; gap: .15rem;
+  }
+  .dw-problem { color: #e8a848; font-size: .72rem; }
+  .dw-fix { color: #a9b0cc; font-size: .7rem; }
+
   .tier-pill {
     display: inline-flex; align-items: center; width: fit-content;
     margin-top: .4rem; padding: .12rem .45rem; border-radius: 999px;

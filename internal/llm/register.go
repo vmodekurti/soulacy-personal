@@ -23,7 +23,11 @@ func init() {
 	registry.MustRegisterProvider("ollama", func(cfg map[string]any) (sdkllm.Provider, error) {
 		return NewOllamaProvider(
 			cfgmap.Str(cfg, "base_url", ""),
-			cfgmap.Str(cfg, "model", "llama3"),
+			// No fallback model name. A hardcoded one is a guess about the
+			// user's machine, and when it is wrong every call 404s with nothing
+			// pointing at the cause. Empty is reported honestly by the readiness
+			// check and fixable from Providers.
+			cfgmap.Str(cfg, "model", ""),
 			cfgmap.Str(cfg, "keep_alive", ""),
 			cfgmap.Map(cfg, "options"),
 		), nil
