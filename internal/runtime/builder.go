@@ -482,14 +482,19 @@ func generateSOULYAML(u *BuilderUnderstanding, provider, model string) string {
 	sysPrompt = agentprompt.EnsureShared(sysPrompt)
 	sysPromptIndented := strings.ReplaceAll(sysPrompt, "\n", "\n  ")
 
+	// Tool names only. This used to write `python_file: tools/<name>.py` for
+	// every tool, whatever kind it was, and no such file was ever created —
+	// so a preview a user could reasonably trust described wiring that did not
+	// exist. The gateway resolves each name against the live catalog at deploy
+	// time, which is the only place that knows what kind of tool it is.
 	toolsBlock := ""
 	if len(u.Tools) > 0 {
 		var sb strings.Builder
-		sb.WriteString("\ntools:")
+		sb.WriteString("\n# Tools chosen for this agent. Resolved to built-ins, MCP tools or")
+		sb.WriteString("\n# Python tools when deployed.")
+		sb.WriteString("\ntool_names:")
 		for _, t := range u.Tools {
-			sb.WriteString(fmt.Sprintf(
-				"\n  - name: %s\n    description: %q\n    python_file: tools/%s.py\n    parameters:\n      type: object\n      properties: {}",
-				t.Name, t.Description, t.Name))
+			sb.WriteString(fmt.Sprintf("\n  - %s", t.Name))
 		}
 		toolsBlock = sb.String()
 	}
@@ -612,20 +617,16 @@ func understandingToAgentMap(u *BuilderUnderstanding, provider, model string) ma
 		// agent.Definition.Schedule is *Schedule{Cron, At, Timeout} — use object form.
 		m["schedule"] = map[string]any{"cron": schedule}
 	}
+	// Names only, for the same reason as the YAML above: this layer does not
+	// know whether a chosen tool is a built-in, an MCP tool or a Python file,
+	// and inventing a path for it produced agents whose tools pointed at
+	// nothing. The gateway resolves these against the live catalog on deploy.
 	if len(u.Tools) > 0 {
-		tools := make([]map[string]any, len(u.Tools))
+		names := make([]string, len(u.Tools))
 		for i, t := range u.Tools {
-			tools[i] = map[string]any{
-				"name":        t.Name,
-				"description": t.Description,
-				"python_file": fmt.Sprintf("tools/%s.py", t.Name),
-				"parameters": map[string]any{
-					"type":       "object",
-					"properties": map[string]any{},
-				},
-			}
+			names[i] = t.Name
 		}
-		m["tools"] = tools
+		m["tool_names"] = names
 	}
 	return m
 }

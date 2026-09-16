@@ -7,6 +7,22 @@ to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- The conversational agent builder produces agents whose tools exist. Its
+  prompt promised that deploy would resolve each chosen tool against the live
+  catalog; deploy instead wrote `tools/<name>.py` for every tool whatever kind
+  it was, with an empty parameter schema and no such file on disk. A built-in
+  the conversation correctly identified arrived as a path to nothing, and
+  because deploy also skipped validation — the only place those paths are
+  checked — nothing caught it. Each name is now sorted into a built-in, an MCP
+  tool or a Python tool with its real path, a name matching nothing is
+  reported rather than guessed at, and the agent goes through the same
+  validator Studio uses before it is written.
+- A conversationally-built agent no longer arms a schedule nobody has seen
+  run. It is saved enabled so it can be run immediately, but its cron is
+  registered only when the caller asks, so the user can watch it work before
+  it acts unattended. Deploy also warns when the agent is set to deliver
+  through a channel that is not connected, which previously reported success
+  and then delivered nothing for as long as it ran.
 - A fresh install can answer its first message. Four defects compounded into
   a product that shipped unable to run. The generated config named a ~40GB
   model nobody has, and the built-in fallbacks named another, so boot

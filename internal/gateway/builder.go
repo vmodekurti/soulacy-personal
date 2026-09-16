@@ -13,10 +13,8 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
-	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -25,9 +23,10 @@ import (
 
 	"github.com/soulacy/soulacy/pkg/agent"
 
+	"github.com/soulacy/soulacy/internal/agentvalidate"
 	"github.com/soulacy/soulacy/internal/auth"
-	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/llm"
+	"github.com/soulacy/soulacy/internal/runtime"
 )
 
 // handleBuilderChat processes one conversational turn of the agent builder.
@@ -97,92 +96,11 @@ func (s *Server) handleBuilderChat(c *fiber.Ctx) error {
 	return c.JSON(resp)
 }
 
-// buildToolCatalogPrompt returns a system-message-friendly summary of every
-// tool an agent could be wired to. Injected into BuilderChat so the LLM picks
-// real names + real file paths instead of inventing them.
+// buildToolCatalogPrompt renders the live tool catalog for the builder's
+// system message. The catalog itself lives in buildercatalog.go, because
+// deploy resolves against the same object — the prompt promises that it will.
 func (s *Server) buildToolCatalogPrompt() string {
-	var sb strings.Builder
-	sb.WriteString("## Available tools\n")
-	sb.WriteString("Pick from these EXACT names + python_file paths when populating `tools[]`. ")
-	sb.WriteString("Do NOT invent tool names. If the user wants a capability not covered here, list it in `missing` and ask whether to skip it or have them install something.\n\n")
-
-	// Python tools — scan ~/.soulacy/tools/ and each configured agent_dir/tools/
-	type pyT struct{ name, path, desc string }
-	seen := map[string]bool{}
-	var pys []pyT
-	scan := func(dir string) {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			return
-		}
-		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".py") {
-				continue
-			}
-			full := filepath.Join(dir, e.Name())
-			if seen[full] {
-				continue
-			}
-			seen[full] = true
-			pys = append(pys, pyT{
-				name: strings.TrimSuffix(e.Name(), ".py"),
-				path: full,
-				desc: extractPythonDocstring(full),
-			})
-		}
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		if wsPaths, werr := config.ResolveWorkspace(); werr == nil {
-			scan(wsPaths.Tools)
-		} else {
-			scan(filepath.Join(home, ".soulacy", "tools"))
-		}
-	}
-	for _, ad := range s.cfg.AgentDirs {
-		scan(filepath.Join(ad, "tools"))
-	}
-	if len(pys) > 0 {
-		sb.WriteString("### Python tools\n")
-		for _, p := range pys {
-			fmt.Fprintf(&sb, "- **%s** (python_file: `%s`) — %s\n", p.name, p.path, firstLine(p.desc))
-		}
-		sb.WriteString("\n")
-	}
-
-	// MCP tools — currently-connected servers
-	if s.mcp != nil {
-		hadAny := false
-		for _, srv := range s.mcp.ServersSnapshot() {
-			if !srv.Connected || len(srv.Tools) == 0 {
-				continue
-			}
-			if !hadAny {
-				sb.WriteString("### MCP server tools (use the full namespaced name verbatim)\n")
-				hadAny = true
-			}
-			for _, t := range srv.Tools {
-				fmt.Fprintf(&sb, "- **%s** — %s\n", t.FullName, firstLine(t.Description))
-			}
-		}
-		if hadAny {
-			sb.WriteString("\n")
-		}
-	}
-
-	// Built-in tools
-	if s.engine != nil {
-		bs := s.engine.Builtins()
-		if len(bs) > 0 {
-			sb.WriteString("### Built-in tools (no python_file needed — engine handles them)\n")
-			for _, b := range bs {
-				fmt.Fprintf(&sb, "- **%s** — %s\n", b.Name, firstLine(b.Description))
-			}
-			sb.WriteString("\n")
-		}
-	}
-
-	sb.WriteString("When you put an entry in `tools[]`, use the tool's exact name. The deploy step will look up the python_file path from this catalog automatically.\n")
-	return sb.String()
+	return s.toolCatalog().BuilderPrompt()
 }
 
 func firstLine(s string) string {
@@ -256,6 +174,10 @@ func (s *Server) handleBuilderDeploy(c *fiber.Ctx) error {
 		SessionID string `json:"session_id"`
 		Provider  string `json:"provider"`
 		Model     string `json:"model"`
+		// ActivateSchedule arms a cron trigger at deploy time. It defaults to
+		// false so the user can run the agent once and watch it work before it
+		// is allowed to act unattended.
+		ActivateSchedule bool `json:"activate_schedule"`
 	}
 	if err := c.BodyParser(&body); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -292,6 +214,37 @@ func (s *Server) handleBuilderDeploy(c *fiber.Ctx) error {
 			"error": "failed to parse agent definition: " + err.Error(),
 		})
 	}
+
+	// Wire the chosen tools to real ones. The builder names tools; it does not
+	// know what kind each is, and it used to be handed a fabricated
+	// `tools/<name>.py` path for every one of them.
+	unknownTools := s.wireBuilderTools(understanding, &def)
+
+	// A name the conversation invented cannot be wired, and shipping an agent
+	// whose tools silently do nothing is the failure this whole path is for.
+	if len(unknownTools) > 0 {
+		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
+			"error":         "some tools could not be matched to anything installed",
+			"unknown_tools": unknownTools,
+			"hint":          "install the missing tool or skill, or rebuild without it",
+		})
+	}
+
+	// Validate before writing. Deploy used to skip this entirely, which is why
+	// a broken python_file path reached disk: validation is the only place
+	// those are checked.
+	if report := s.validateBuilderDefinition(c.Context(), &def); report != nil {
+		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
+			"error":    "the agent did not pass validation",
+			"findings": report,
+		})
+	}
+
+	// A conversationally-built agent is enabled, so the user can run it
+	// immediately and see it work — that moment is the entire point of this
+	// path. Its schedule is a separate decision: arming a cron here meant a
+	// user was told it was set up, never saw it run, and a daily job fired
+	// unattended with no screen on which to see or stop it.
 	def.Enabled = true
 
 	dir := ""
@@ -304,18 +257,114 @@ func (s *Server) handleBuilderDeploy(c *fiber.Ctx) error {
 		})
 	}
 
-	// Register with scheduler if it has a cron trigger
-	_ = s.scheduler.RegisterAgent(&def)
+	scheduled := false
+	if body.ActivateSchedule && def.Schedule != nil {
+		if err := s.scheduler.RegisterAgent(&def); err != nil {
+			s.log.Warn("builder agent saved but its schedule could not be registered",
+				zap.String("agent_id", def.ID), zap.Error(err))
+		} else {
+			scheduled = true
+		}
+	}
 
 	s.log.Info("builder deployed agent",
 		zap.String("agent_id", def.ID),
 		zap.String("builder_session", body.SessionID),
+		zap.Bool("scheduled", scheduled),
 	)
 
-	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+	resp := fiber.Map{
 		"agent_id":  def.ID,
 		"soul_yaml": soulYAML,
-	})
+		"scheduled": scheduled,
+	}
+	// Tell the caller when a schedule exists but is not armed, so the UI can
+	// offer it after the user has watched the agent run once.
+	if def.Schedule != nil && !scheduled {
+		resp["schedule_pending"] = true
+	}
+	// Naming a delivery channel that is not configured is how an agent
+	// reports success and then silently delivers nothing, forever.
+	if warn := s.unconfiguredDeliveryWarning(&def); warn != "" {
+		resp["delivery_warning"] = warn
+	}
+	return c.Status(fiber.StatusCreated).JSON(resp)
+}
+
+// wireBuilderTools replaces the definition's tool wiring with the real thing,
+// returning any names that matched nothing.
+func (s *Server) wireBuilderTools(u *runtime.BuilderUnderstanding, def *agent.Definition) []string {
+	if u == nil || len(u.Tools) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(u.Tools))
+	for _, t := range u.Tools {
+		names = append(names, t.Name)
+	}
+	res := s.toolCatalog().ResolveToolNames(names)
+
+	def.Tools = nil
+	if len(res.Python) > 0 {
+		raw, err := json.Marshal(res.Python)
+		if err == nil {
+			_ = json.Unmarshal(raw, &def.Tools)
+		}
+	}
+	if len(res.Builtins) > 0 {
+		b := append([]string{}, res.Builtins...)
+		def.Builtins = &b
+	}
+	if len(res.MCPTools) > 0 {
+		m := append([]string{}, res.MCPTools...)
+		def.MCPTools = &m
+	}
+	return res.Unknown
+}
+
+// validateBuilderDefinition runs the same validator Studio runs, and returns
+// the blocking findings, or nil when the agent is sound.
+func (s *Server) validateBuilderDefinition(ctx context.Context, def *agent.Definition) []fiber.Map {
+	opts := s.agentValidationOptions(ctx)
+	report := agentvalidate.Definition(def, "", opts, agentvalidate.Report{})
+	if report.Errors == 0 {
+		return nil
+	}
+	out := make([]fiber.Map, 0, report.Errors)
+	for _, f := range report.Findings {
+		if f.Severity != agentvalidate.Error {
+			continue
+		}
+		out = append(out, fiber.Map{
+			"field":   f.Field,
+			"problem": f.Message,
+			"fix":     f.Suggestion,
+		})
+	}
+	return out
+}
+
+// unconfiguredDeliveryWarning reports a schedule that delivers to a channel
+// this install has not set up.
+//
+// Creating a scheduled agent used to validate nothing about where its output
+// goes. Ask for email with no email adapter and it reported success, then
+// delivered nothing for as long as it ran. A user in that state believes they
+// set something up and concludes the product does not work.
+func (s *Server) unconfiguredDeliveryWarning(def *agent.Definition) string {
+	if def.Schedule == nil || def.Schedule.Output == nil {
+		return ""
+	}
+	channel := strings.TrimSpace(def.Schedule.Output.Channel)
+	if channel == "" || strings.EqualFold(channel, "http") {
+		return ""
+	}
+	if s.channels != nil {
+		if st, ok := s.channels.Statuses()[strings.ToLower(channel)]; ok && st.Connected {
+			return ""
+		}
+	}
+	return "This agent is set to deliver through " + channel +
+		", which is not connected yet. Set it up in Delivery, or its results will have nowhere to go."
 }
 
 // handleBuilderDeleteSession discards a builder session from engine memory.
