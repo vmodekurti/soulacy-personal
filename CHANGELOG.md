@@ -86,6 +86,15 @@ to follow [Semantic Versioning](https://semver.org/).
   and the workspace login page.
 
 ### Added
+- Gateway access keys can be seen, created and revoked from the dashboard.
+  The API has supported all three since the beginning and only revoke was ever
+  wired up, and then only to clean up after a paired phone. So the key you sign
+  in with was minted on first run, echoed to a terminal once, and after that
+  there was no way to see which keys existed, add one for a script or a second
+  device, or rotate one without hand-editing config.yaml — and someone who
+  lost it had no route back in. The new key is shown exactly once, because
+  that is the only time the server returns it; listing shows names and
+  prefixes and never a secret.
 - A front door: describe what you want, watch it run. Soulacy's shortest path
   to a working agent ran through a visual graph editor, and a first-time user
   met 25 screens and a dozen decisions before anything produced a result. The

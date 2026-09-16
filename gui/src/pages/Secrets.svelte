@@ -18,6 +18,76 @@
   let customValue = ''
   let addingCustom = false
 
+  // ── Gateway access keys ────────────────────────────────────────────────
+  // The key you sign in with was minted on first run and echoed to a
+  // terminal once. After that there was no way to see which keys existed, to
+  // add one for a script or a second device, or to rotate one — the API had
+  // supported all three since the beginning, and no screen called it. Someone
+  // who lost the key was editing config.yaml by hand.
+  let keys = []
+  let keysError = ''
+  let keysLoading = true
+  let newKeyName = ''
+  let creatingKey = false
+  let revokingKeyId = ''
+  // Shown exactly once, because that is the only time the server returns it.
+  let freshKey = null
+
+  async function loadKeys() {
+    keysLoading = true
+    try {
+      const res = await api.admin.keys.list()
+      keys = res.keys || []
+      keysError = ''
+    } catch (e) {
+      keys = []
+      keysError = e.status === 503
+        ? 'Key management is not available on this gateway.'
+        : (e.message || 'Could not load access keys.')
+    } finally {
+      keysLoading = false
+    }
+  }
+
+  async function createKey() {
+    const name = newKeyName.trim()
+    if (!name || creatingKey) return
+    creatingKey = true
+    keysError = ''
+    try {
+      freshKey = await api.admin.keys.create(name)
+      newKeyName = ''
+      await loadKeys()
+    } catch (e) {
+      keysError = e.message || 'Could not create the key.'
+    } finally {
+      creatingKey = false
+    }
+  }
+
+  async function revokeKey(k) {
+    if (!confirm(`Revoke "${k.name}"? Anything still using this key stops working immediately.`)) return
+    revokingKeyId = k.id
+    keysError = ''
+    try {
+      await api.admin.keys.revoke(k.id)
+      await loadKeys()
+    } catch (e) {
+      keysError = e.message || 'Could not revoke the key.'
+    } finally {
+      revokingKeyId = ''
+    }
+  }
+
+  async function copyFreshKey() {
+    try {
+      await navigator.clipboard.writeText(freshKey.key)
+      notice = 'Key copied to the clipboard.'
+    } catch {
+      keysError = 'Could not copy automatically — select the key and copy it.'
+    }
+  }
+
   // Display order + friendly labels for the known categories. Unknown
   // categories fall through to a generic "Other" section at the end.
   const CATEGORY_META = {
@@ -123,7 +193,7 @@
     return CATEGORY_META[cat] || { label: cat.charAt(0).toUpperCase() + cat.slice(1), icon: '🔑' }
   }
 
-  onMount(load)
+  onMount(() => { load(); loadKeys() })
 </script>
 
 <div class="page">
@@ -142,6 +212,70 @@
 
   {#if error}<div class="banner err">{error}</div>{/if}
   {#if notice}<div class="banner ok">{notice}</div>{/if}
+
+  <!-- Gateway access keys. Above the vault because this is the credential a
+       person is most likely to have lost, and the one they cannot recover
+       from any other screen. -->
+  <div class="section keys-section">
+    <div class="section-head">
+      <h2>🔑 Gateway access keys</h2>
+      <span class="section-sub">Used to sign in here, pair a device, or call the API from a script.</span>
+    </div>
+
+    {#if freshKey}
+      <div class="fresh-key">
+        <div class="fk-head">
+          <strong>Copy this now — it is shown once.</strong>
+          <button class="linkish" on:click={() => { freshKey = null }}>Done</button>
+        </div>
+        <code class="fk-value">{freshKey.key}</code>
+        <button class="btn-secondary btn-sm" on:click={copyFreshKey}>Copy</button>
+      </div>
+    {/if}
+
+    {#if keysError}<div class="banner err">{keysError}</div>{/if}
+
+    {#if keysLoading}
+      <div class="empty">Loading keys…</div>
+    {:else if keys.length === 0 && !keysError}
+      <div class="empty">No keys recorded. The key you are signed in with may predate key management.</div>
+    {:else}
+      <div class="key-list">
+        {#each keys as k (k.id)}
+          <div class="key-row" class:revoked={k.revoked_at}>
+            <div class="key-main">
+              <span class="key-name">{k.name}</span>
+              <code class="key-prefix">{k.prefix}…</code>
+            </div>
+            <div class="key-side">
+              {#if k.revoked_at}
+                <span class="key-revoked">revoked</span>
+              {:else}
+                <button class="linkish danger" disabled={revokingKeyId === k.id} on:click={() => revokeKey(k)}>
+                  {revokingKeyId === k.id ? 'Revoking…' : 'Revoke'}
+                </button>
+              {/if}
+            </div>
+          </div>
+        {/each}
+      </div>
+    {/if}
+
+    <div class="key-add">
+      <input
+        type="text"
+        placeholder="Name it — e.g. Laptop, Phone, Backup script"
+        bind:value={newKeyName}
+        on:keydown={(e) => { if (e.key === 'Enter') createKey() }}
+      />
+      <button class="btn-secondary btn-sm" disabled={!newKeyName.trim() || creatingKey} on:click={createKey}>
+        {creatingKey ? 'Creating…' : 'New key'}
+      </button>
+    </div>
+    <p class="key-note">
+      To rotate: create a new key, switch over to it, then revoke the old one. Revoking is immediate.
+    </p>
+  </div>
 
   {#if loading}
     <div class="empty">Loading secrets…</div>
@@ -235,6 +369,43 @@
 </div>
 
 <style>
+  /* Gateway access keys. */
+  .keys-section { margin-bottom: 1.4rem; }
+  .section-head { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; margin-bottom: .6rem; }
+  .section-head h2 { font-size: .95rem; font-weight: 600; }
+  .section-sub { color: #6b7294; font-size: .76rem; }
+
+  .fresh-key {
+    border: 1px solid rgba(76,175,130,.4); background: rgba(76,175,130,.08);
+    border-radius: 8px; padding: .7rem .85rem; margin-bottom: .7rem;
+    display: flex; flex-direction: column; gap: .45rem; align-items: flex-start;
+  }
+  .fk-head { display: flex; justify-content: space-between; width: 100%; align-items: center; }
+  .fk-head strong { color: #4caf82; font-size: .82rem; }
+  .fk-value {
+    width: 100%; word-break: break-all; background: #11131f; border: 1px solid #1a1e36;
+    border-radius: 6px; padding: .45rem .6rem; font-size: .78rem; color: #e6e9f5;
+  }
+
+  .key-list { display: flex; flex-direction: column; gap: .35rem; }
+  .key-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    padding: .5rem .65rem; border: 1px solid #1a1e36; border-radius: 8px; background: #11131f;
+  }
+  .key-row.revoked { opacity: .5; }
+  .key-main { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; }
+  .key-name { font-size: .85rem; }
+  .key-prefix { color: #6b7294; font-size: .74rem; }
+  .key-revoked { color: #6b7294; font-size: .72rem; }
+  .danger { color: #f06060; }
+
+  .key-add { display: flex; gap: .4rem; margin-top: .6rem; }
+  .key-add input {
+    flex: 1; background: #11131f; border: 1px solid #1a1e36; border-radius: 6px;
+    padding: .4rem .55rem; color: inherit; font-size: .8rem;
+  }
+  .key-note { color: #6b7294; font-size: .72rem; margin-top: .4rem; }
+
   .page        { padding: 1.5rem; display: flex; flex-direction: column; gap: 1.25rem; }
   .page-header { display: flex; align-items: center; justify-content: space-between; }
   .page-header h1 { font-size: 1.2rem; font-weight: 600; }
