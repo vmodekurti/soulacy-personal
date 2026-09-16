@@ -18,6 +18,11 @@ to follow [Semantic Versioning](https://semver.org/).
   second device stays a viewer.
 
 ### Changed
+- The marketing site carries the whole of this cycle's work: a rewritten
+  "what's new" (the person model, Getting to Know You, the Steward, triggers,
+  senses and consent, provenance, Apple Watch, on-device photo text), and an
+  iPhone section reframed as optional with About You, onboarding consent and
+  the watch added.
 - The core narrative now leads with the assistant rather than the runtime.
   Soulacy is "an assistant that actually knows you", and self-hosting is the
   proof rather than the pitch. Learning is explicitly **by asking** — a
