@@ -581,11 +581,23 @@
      it, cards rather than lists, and one strong action per surface. The
      numbers in the rail are real — an invented health percentage would be a
      lie told in a nice font. */
+  /* Fill the window. The previous 1180px cap centred the whole console and
+     left two wide empty margins on a desktop screen, which made the product
+     look like it had nothing to show. The rail gets a fixed column so it stays
+     readable, and the main column takes whatever is left. */
   .console {
-    display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 1.6rem;
-    max-width: 1180px; margin: 0 auto; padding: 1.6rem 1.25rem 3rem;
+    display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 2rem;
+    width: 100%; padding: 1.75rem 2rem 3rem; align-items: start;
   }
-  @media (max-width: 1000px) { .console { grid-template-columns: 1fr; } .rail { order: -1; } }
+  /* On a very wide monitor an unbounded reading column is its own problem, so
+     the text inside the main column stops growing while the rail keeps its
+     place at the edge. */
+  .console-main { max-width: 900px; }
+  @media (max-width: 1100px) {
+    .console { grid-template-columns: 1fr; padding: 1.5rem 1.25rem 3rem; }
+    .console-main { max-width: none; }
+    .rail { order: -1; }
+  }
 
   .eyebrow-row { display: flex; align-items: center; gap: .6rem; margin-bottom: .9rem; }
   .eyebrow { color: var(--sl-text-faint, var(--sl-text-faint)); font-size: .64rem; letter-spacing: .14em; text-transform: uppercase; }
@@ -597,7 +609,7 @@
   }
   .dot { width: 6px; height: 6px; border-radius: 50%; background: #4caf82; }
 
-  .greeting { font-size: 2.15rem; line-height: 1.18; font-weight: 600; letter-spacing: -.015em; margin-bottom: 1.1rem; max-width: 22ch; }
+  .greeting { font-size: 2.5rem; line-height: 1.15; font-weight: 600; letter-spacing: -.02em; margin-bottom: 1.2rem; max-width: 24ch; }
 
   /* The intent card is the one thing on the page that matters. */
   .intent-card {

@@ -16,7 +16,14 @@ import (
 //
 // "system" and "genie" are not here: they are built in (see
 // runtime.Loader.seedBuiltins) and need no file. This list is for agents that
-// should exist as ordinary, editable, deletable YAML.
+// should exist as ordinary, editable YAML.
+//
+// Editable, but not all of them deletable. Steward is core to what Soulacy
+// does, so runtime.IsUndeletableAgent refuses to remove it; it can still be
+// rewritten, renamed and switched off like any other agent. The record below
+// still governs seeding — an installation that deleted Steward before this
+// rule existed keeps it deleted, because silently recreating an agent someone
+// removed would be its own surprise.
 var StarterAgents = []string{"getting-to-know-you", "steward"}
 
 // starterRecord remembers which starters an installation has already been
