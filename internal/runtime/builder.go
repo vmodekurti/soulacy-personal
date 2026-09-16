@@ -135,9 +135,16 @@ func (e *Engine) BuilderChat(ctx context.Context, sessionID, message, provider, 
 		// mid-object — and a builder reply that does not parse costs the user a
 		// whole exchange. The envelope itself is small; the headroom is for the
 		// model's own preamble.
-		MaxTokens:      4000,
-		ResponseFormat: "json_schema",
-		JSONSchema:     builderResponseSchema,
+		MaxTokens: 4000,
+		// Low, deliberately. This turn is elicitation — ask the next useful
+		// question and fill in what was just said — not a problem that rewards
+		// deliberation. A reasoning model left to itself spent the entire
+		// output budget thinking and returned nothing at all, so the user
+		// waited twenty seconds for an empty bubble. Providers that do not
+		// understand the field ignore it.
+		ReasoningEffort: "low",
+		ResponseFormat:  "json_schema",
+		JSONSchema:      builderResponseSchema,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("builder: llm: %w", err)
@@ -149,20 +156,28 @@ func (e *Engine) BuilderChat(ctx context.Context, sessionID, message, provider, 
 	// off. Retry once with room to finish rather than spending the user's turn
 	// on an apology — reasoning models spend part of the budget thinking, and
 	// how much varies with the question.
-	if understanding == nil && looksLikeJSON(resp.Content) {
+	if understanding == nil && needsAnotherAttempt(resp.Content) {
 		e.log.Debug("builder reply truncated; retrying with a larger budget",
 			zap.String("session", sessionID), zap.Int("chars", len(resp.Content)))
 		if retry, rerr := e.llmRouter.Complete(ctx, provider, llm.CompletionRequest{
-			Messages:       msgs,
-			Temperature:    0.6,
-			MaxTokens:      12000,
-			ResponseFormat: "json_schema",
-			JSONSchema:     builderResponseSchema,
+			Messages:        msgs,
+			Temperature:     0.6,
+			MaxTokens:       12000,
+			ReasoningEffort: "low",
+			ResponseFormat:  "json_schema",
+			JSONSchema:      builderResponseSchema,
 		}); rerr == nil {
 			if r2, u2 := parseBuilderResponse(retry.Content); u2 != nil {
 				resp, reply, understanding = retry, r2, u2
 			}
 		}
+	}
+
+	// Whatever happened above, the person gets a sentence. An empty bubble is
+	// the one outcome worse than an apology: it looks like the product simply
+	// stopped, and there is nothing to respond to.
+	if strings.TrimSpace(reply) == "" {
+		reply = "Sorry — I did not manage to get that out. Could you say it again, or add a little more detail?"
 	}
 
 	sess.mu.Lock()
@@ -1000,4 +1015,19 @@ func cronFromPlainTime(text string) string {
 		return ""
 	}
 	return fmt.Sprintf("%d %d * * *", minute, hour)
+}
+
+// needsAnotherAttempt reports whether a turn produced nothing usable and is
+// worth asking again.
+//
+// Two shapes reach here. A reply that meant to be JSON and was cut off
+// mid-object, and a reply that is empty altogether — which is what a reasoning
+// model produces when it spends its whole output budget thinking and never
+// starts writing. The second was missed at first, because an empty string does
+// not look like JSON, so no retry fired and the user was shown a blank bubble.
+func needsAnotherAttempt(content string) bool {
+	if strings.TrimSpace(content) == "" {
+		return true
+	}
+	return looksLikeJSON(content)
 }
