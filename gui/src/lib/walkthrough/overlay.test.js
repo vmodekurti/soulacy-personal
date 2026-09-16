@@ -70,28 +70,34 @@ describe('the overlay', () => {
     expect(navigated).toEqual([])
   })
 
+  // Derived from the script rather than hardcoded. These used to name the
+  // first two screens literally, so adding a page to the sidebar failed a test
+  // about navigation behaviour for a reason that had nothing to do with it.
+  const first = walkthroughSteps[1].nav
+  const second = walkthroughSteps[2].nav
+
   it('drives the app to each screen as the tour reaches it', async () => {
     mount()
     startWalkthrough(0)
     await frames()
     document.querySelector('.wt-btn.primary').click()   // → first nav step
     await frames()
-    expect(navigated).toEqual(['dashboard'])
+    expect(navigated).toEqual([first])
     document.querySelector('.wt-btn.primary').click()
     await frames()
-    expect(navigated).toEqual(['dashboard', 'onboarding'])
+    expect(navigated).toEqual([first, second])
   })
 
   it('goes back without re-navigating in a loop', async () => {
     mount()
-    startWalkthrough(2)          // nav:onboarding
+    startWalkthrough(2)          // the second nav stop
     await frames()
     expect(get(walkthrough).index).toBe(2)
     const back = [...document.querySelectorAll('.wt-btn')].find((b) => b.textContent.trim() === 'Back')
     back.click()
     await frames()
     expect(get(walkthrough).index).toBe(1)
-    expect(navigated).toEqual(['onboarding', 'dashboard'])
+    expect(navigated).toEqual([second, first])
   })
 
   it('closes the tour on the final step', async () => {

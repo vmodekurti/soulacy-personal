@@ -1097,7 +1097,6 @@
   }
 
   .model-empty { font-size: .76rem; color: #6b7294; margin-top: .35rem; }
-  .model-empty code { background: #1a1e36; padding: .05rem .3rem; border-radius: 4px; color: #8b85ff; }
   .model-empty { display: flex; flex-direction: column; gap: .15rem; }
   .model-empty strong { color: #e8a848; font-size: .8rem; }
 

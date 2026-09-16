@@ -18,6 +18,7 @@ import { navPages } from '../lib/nav.js'
 // Mirrors App.svelte's pageLoaders. Static import() specifiers so the bundler
 // can resolve them; steps.test.js already guards the nav list itself.
 const loaders = {
+  start: () => import('./GetStarted.svelte'),
   autopilot: () => import('./Autopilot.svelte'),
   dashboard: () => import('./Dashboard.svelte'),
   onboarding: () => import('./Onboarding.svelte'),

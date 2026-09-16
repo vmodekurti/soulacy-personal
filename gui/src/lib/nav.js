@@ -16,6 +16,7 @@ export const navGroups = [
 
 /** Every built-in destination in the sidebar, in render order. */
 export const navPages = [
+  { id: 'start',     icon: '✦', label: 'Get Started', group: 'main'         },
   { id: 'dashboard', icon: '◈', label: 'Dashboard',   group: 'main'         },
   { id: 'onboarding', icon: '✓', label: 'First Run',   group: 'main'         },
   { id: 'studio',    icon: '🎬', label: 'Studio',      group: 'main'         },

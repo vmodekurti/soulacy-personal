@@ -144,6 +144,21 @@ func (e *Engine) BuilderChat(ctx context.Context, sessionID, message, provider, 
 	sess.LastActive = time.Now()
 	sess.mu.Unlock()
 
+	// Fold any gap the model did not notice back into `missing`, so the next
+	// turn asks about it. The model reads this field; a gap it cannot see is a
+	// gap it will never ask the user to fill.
+	if gaps := buildableGaps(understanding); len(gaps) > 0 && understanding != nil {
+		have := map[string]bool{}
+		for _, m := range understanding.Missing {
+			have[strings.ToLower(strings.TrimSpace(m))] = true
+		}
+		for _, g := range gaps {
+			if !have[strings.ToLower(g)] {
+				understanding.Missing = append(understanding.Missing, g)
+			}
+		}
+	}
+
 	ready := understanding != nil &&
 		understanding.Confidence >= 0.8 &&
 		len(understanding.Missing) == 0
@@ -747,3 +762,44 @@ Update confidence EVERY turn. By turn 2 of a normal conversation you should be a
 
 ## What goes in "tools"
 Add a tool for each external data source the agent needs to access: emails, Slack messages, calendars, databases, web pages, APIs, files, CLI invocations. Use descriptive kebab-case names: "fetch-emails", "search-database", "get-weather", "notebooklm-add-source".`
+
+// buildableGaps returns the things that must be present before an agent can
+// actually be built, regardless of how confident the model says it is.
+//
+// Readiness used to be entirely self-attested: confidence over 0.8 and an
+// empty `missing` list, both written by the model. It would declare a cron
+// agent ready while leaving the cron expression blank — the summary said
+// "every Friday at 4pm" in prose and the field was empty — and deploy then
+// refused it. To the user that is the conversation saying yes and the product
+// saying no, with nothing to do about it.
+//
+// So readiness now also checks the few things a build genuinely cannot do
+// without. A gap found here goes back into the conversation as a question,
+// which is the only place it can be answered.
+func buildableGaps(u *BuilderUnderstanding) []string {
+	if u == nil {
+		return []string{"understanding"}
+	}
+	var gaps []string
+	if strings.TrimSpace(u.Name) == "" {
+		gaps = append(gaps, "agent name")
+	}
+	if strings.TrimSpace(u.SystemPrompt) == "" {
+		gaps = append(gaps, "what the agent should actually do")
+	}
+	if u.Trigger != nil {
+		switch strings.ToLower(strings.TrimSpace(u.Trigger.Type)) {
+		case "cron":
+			// A cron agent with no cron expression is the specific case that
+			// passed the model's own readiness check and failed validation.
+			if strings.TrimSpace(u.Trigger.Schedule) == "" {
+				// Worded as an instruction rather than a topic. A smaller model
+				// will happily write "every Friday at 4pm" into its summary and
+				// leave trigger.schedule empty; naming the field and showing the
+				// shape is what gets it filled in.
+				gaps = append(gaps, "trigger.schedule must be a cron expression, e.g. \"0 16 * * 5\" for Friday at 4pm — set it from the time the user already gave")
+			}
+		}
+	}
+	return gaps
+}

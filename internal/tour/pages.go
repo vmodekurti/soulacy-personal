@@ -119,6 +119,21 @@ var pages = map[string]page{
 		},
 	},
 
+	// The shortest path from "I want X" to an agent that did X. It exists
+	// because the previous shortest path ran through a visual graph editor,
+	// and most people never reached the end of it.
+	"start": {
+		stage: StagePlan, nextAction: "", nextLabel: "",
+		role:         "The front door.",
+		contribution: "Describe what you want in your own words; Soulacy works out the rest and runs it once so you can see the result before deciding anything.",
+		whenEmpty: func(InstallState) string {
+			return "Nothing built yet. Say what you would like handled — a weekly summary, a watch on a page, a morning briefing — and answer a couple of questions. It runs once in front of you before it is allowed to run on its own."
+		},
+		whenUsed: func(s InstallState) string {
+			return "Come back here whenever you want another one. Anything needing branching, custom code or precise tool wiring belongs in Studio instead; this screen is for describing an outcome and getting it."
+		},
+	},
+
 	"dashboard": {
 		stage: StageEyes, nextAction: "", nextLabel: "",
 		role:         "The overnight summary.",
