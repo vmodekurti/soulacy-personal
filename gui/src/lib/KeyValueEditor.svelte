@@ -117,7 +117,7 @@
     color: #e8eaf6; font-size: .82rem; padding: .35rem .55rem;
     font-family: monospace;
   }
-  .kv-row input:focus { border-color: #6c63ff; outline: none; box-shadow: 0 0 0 2px rgba(108,99,255,.15); }
+  .kv-row input:focus { border-color: var(--sl-accent); outline: none; box-shadow: 0 0 0 2px rgba(108,99,255,.15); }
   .kv-remove {
     background: none; border: 1px solid rgba(240,96,96,.3); color: #f06060;
     border-radius: 6px; cursor: pointer; font-size: 1rem; line-height: 1;

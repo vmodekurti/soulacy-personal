@@ -215,8 +215,8 @@
     font-size: 0.8rem; font-weight: 600;
     padding: 0.38rem 0.85rem; border-radius: 8px;
   }
-  .wt-btn:hover { border-color: #6c63ff; }
-  .wt-btn.primary { background: #6c63ff; border-color: #6c63ff; color: #fff; }
+  .wt-btn:hover { border-color: var(--sl-accent); }
+  .wt-btn.primary { background: var(--sl-accent); border-color: var(--sl-accent); color: #fff; }
   .wt-btn.primary:hover { filter: brightness(1.08); }
 
   @media (max-width: 768px) {

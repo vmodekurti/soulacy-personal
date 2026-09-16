@@ -116,7 +116,7 @@
     color: var(--text, #e6e9ef); background: var(--bg, #0f1420);
     border: 1px solid var(--border, #2a3350); border-radius: 6px; font-size: 12px;
   }
-  select:focus, input:focus { outline: none; border-color: var(--accent, #6c63ff); }
+  select:focus, input:focus { outline: none; border-color: var(--accent, var(--sl-accent)); }
   p {
     grid-column: 1 / -1; margin: 0; color: var(--text-muted, #8b93ab);
     font-size: 10.5px; line-height: 1.4;

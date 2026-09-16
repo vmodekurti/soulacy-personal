@@ -7,6 +7,13 @@ to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- The builder stops apologising for its own cut-off replies. It was writing
+  the agent's full instructions into every turn, which filled the response and
+  truncated the JSON before it finished — so on the very first message the user
+  got "Sorry, my answer got cut off" instead of a question. Those instructions
+  are now written once, at the end, when everything needed is known, and a
+  reply that still arrives truncated is retried with room to finish rather than
+  costing the user a turn.
 - Secondary actions look like buttons. The `.linkish` class had no style
   anywhere in the app, so seventeen buttons across six pages rendered as bare
   text on a dark background — "Open Studio" and "Change something" were both
@@ -132,6 +139,16 @@ to follow [Semantic Versioning](https://semver.org/).
   and the workspace login page.
 
 ### Added
+- The first run shows what it is doing. A run takes ten to twenty seconds and
+  the screen said only "Running it for the first time", which reads as a hang.
+  It now lists the steps as they happen — which tool is being used, when the
+  result comes back, when the write-up starts — from events the gateway was
+  already emitting.
+- The palette lives in shared tokens. 594 colour literals across 40 files were
+  replaced with the tokens that hold the same values, so a palette change is
+  one edit rather than hundreds. Only style blocks were touched, because the
+  same hex appears in chart colour arrays in JavaScript where a CSS variable is
+  not a colour.
 - Get Started is built to the console layout: a workspace line with a live
   count of your agents, the greeting, one card for the thing you want, starter
   cards with a category, and a rail listing the agents you actually have. The

@@ -515,14 +515,14 @@
   .page { display: flex; flex-direction: column; gap: 14px; }
   .page-header { display: flex; align-items: center; justify-content: space-between; }
   .section-title { font-size: 1rem; margin: .4rem 0 0; color: #c8cbe8; }
-  .hint { font-size: .8rem; color: #6b7294; }
+  .hint { font-size: .8rem; color: var(--sl-text-faint); }
   .hint code { background: #1c1f35; padding: .08rem .35rem; border-radius: 4px; }
   .banner { padding: .55rem .8rem; border-radius: 8px; font-size: .85rem; }
   .banner.err { background: rgba(240, 96, 96, .12); color: #f08080; }
   .banner.ok { background: rgba(76, 175, 130, .12); color: #5fce9a; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
   .card.tpl { display: flex; flex-direction: column; gap: .5rem; padding: .9rem 1rem;
-              background: #10121f; border: 1px solid #1a1e36; border-radius: 10px; }
+              background: #10121f; border: 1px solid var(--sl-line); border-radius: 10px; }
   .tpl-head { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem; }
   .tpl-head h3 { margin: 0; font-size: .95rem; }
   .badge { font-size: .65rem; padding: .1rem .45rem; border-radius: 999px; text-transform: uppercase; }
@@ -530,7 +530,7 @@
   .badge.user { background: rgba(240, 160, 96, .15); color: #f0a060; }
   .desc { font-size: .78rem; color: #9aa0c3; line-height: 1.5; white-space: pre-line; flex: 1; }
   .tags { display: flex; flex-wrap: wrap; gap: .3rem; }
-  .tag { font-size: .65rem; background: #1c1f35; color: #6b7294; padding: .1rem .45rem; border-radius: 999px; }
+  .tag { font-size: .65rem; background: #1c1f35; color: var(--sl-text-faint); padding: .1rem .45rem; border-radius: 999px; }
   .readiness { display: flex; flex-wrap: wrap; gap: .3rem; }
   .check { font-size: .65rem; border: 1px solid #252a46; background: #15182a; color: #aeb4d7; padding: .12rem .45rem; border-radius: 999px; }
   .check.ready { border-color: rgba(95, 206, 154, .28); color: #72d9aa; background: rgba(76, 175, 130, .08); }

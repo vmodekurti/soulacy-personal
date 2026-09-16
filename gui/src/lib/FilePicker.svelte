@@ -140,7 +140,7 @@
     color: #e8eaf6; font-size: .85rem; padding: .45rem .6rem;
     font-family: monospace;
   }
-  .row input[type="text"]:focus { outline: none; border-color: #6c63ff; }
+  .row input[type="text"]:focus { outline: none; border-color: var(--sl-accent); }
 
   .browse {
     background: rgba(108,99,255,.14); border: 1px solid rgba(108,99,255,.45);
@@ -151,7 +151,7 @@
 
   .dropdown {
     position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 60;
-    background: #141626; border: 1px solid #2a2f4a; border-radius: 8px;
+    background: var(--sl-surface); border: 1px solid #2a2f4a; border-radius: 8px;
     max-height: 300px; overflow-y: auto;
     box-shadow: 0 8px 24px rgba(0,0,0,.45);
     padding: .35rem;
@@ -161,9 +161,9 @@
     background: #0e1020; border: 1px solid #2a2f4a; border-radius: 6px;
     color: #e8eaf6; font-size: .8rem; padding: .35rem .5rem;
   }
-  .search:focus { outline: none; border-color: #6c63ff; }
+  .search:focus { outline: none; border-color: var(--sl-accent); }
 
-  .empty { padding: .5rem .6rem; color: #6b7294; font-size: .8rem; }
+  .empty { padding: .5rem .6rem; color: var(--sl-text-faint); font-size: .8rem; }
 
   .item {
     padding: .4rem .55rem; border-radius: 6px; cursor: pointer;
@@ -172,5 +172,5 @@
   .item:hover, .item.active { background: rgba(108,99,255,.12); }
   .item-label { font-family: monospace; color: #8b85ff; font-size: .82rem; }
   .item-value { color: #9aa0c0; font-size: .72rem; font-family: monospace; }
-  .item-desc  { color: #6b7294; font-size: .72rem; }
+  .item-desc  { color: var(--sl-text-faint); font-size: .72rem; }
 </style>

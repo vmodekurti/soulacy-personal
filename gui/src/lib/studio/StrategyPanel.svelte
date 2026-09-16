@@ -426,10 +426,10 @@
     display: flex; flex-direction: column; gap: 10px;
   }
   .sp-card h4 { margin: 0; font-size: .85rem; }
-  .sp-sub { font-weight: 400; color: var(--text-dim, #6b7294); }
+  .sp-sub { font-weight: 400; color: var(--text-dim, var(--sl-text-faint)); }
 
   .sp-field { display: flex; flex-direction: column; gap: 4px; font-size: .82rem; }
-  .sp-field > span { color: var(--text-dim, #6b7294); }
+  .sp-field > span { color: var(--text-dim, var(--sl-text-faint)); }
   .sp-field.inline { flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; }
   .sp-field.inline input, .sp-field.inline select { width: 120px; }
   .sp-field textarea { width: 100%; box-sizing: border-box; font: inherit; resize: vertical; }
@@ -442,8 +442,8 @@
     font-family: var(--mono, monospace);
     background: color-mix(in srgb, var(--accent, #6d5efc) 14%, transparent);
   }
-  .sp-empty { font-size: .8rem; color: var(--text-dim, #6b7294); }
-  .sp-note { margin: 0; font-size: .82rem; color: var(--text-dim, #6b7294); }
+  .sp-empty { font-size: .8rem; color: var(--text-dim, var(--sl-text-faint)); }
+  .sp-note { margin: 0; font-size: .82rem; color: var(--text-dim, var(--sl-text-faint)); }
 
   /* The loop, drawn vertically so it reads on a narrow panel. */
   .sp-loop { display: flex; flex-direction: column; align-items: center; gap: 2px; }
@@ -451,9 +451,9 @@
     padding: 5px 16px; border-radius: 6px; font-size: .8rem;
     background: color-mix(in srgb, var(--accent, #6d5efc) 16%, transparent);
   }
-  .sp-loop-node.goal { background: color-mix(in srgb, var(--text-dim, #6b7294) 18%, transparent); }
-  .sp-loop-arrow { font-size: .8rem; color: var(--text-dim, #6b7294); }
-  .sp-loop-back { margin-top: 4px; font-size: .75rem; color: var(--text-dim, #6b7294); }
+  .sp-loop-node.goal { background: color-mix(in srgb, var(--text-dim, var(--sl-text-faint)) 18%, transparent); }
+  .sp-loop-arrow { font-size: .8rem; color: var(--text-dim, var(--sl-text-faint)); }
+  .sp-loop-back { margin-top: 4px; font-size: .75rem; color: var(--text-dim, var(--sl-text-faint)); }
 
   .sp-steps { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
   .sp-step {
@@ -462,8 +462,8 @@
   }
   .sp-step.sel { border-color: var(--accent, #6d5efc); }
   .sp-step-title { flex: 1; min-width: 0; font: inherit; font-size: .82rem; }
-  .sp-step-status { font-size: .72rem; color: var(--text-dim, #6b7294); }
-  .sp-step-del { background: transparent; border: 0; cursor: pointer; color: var(--text-dim, #6b7294); font-size: 1rem; }
+  .sp-step-status { font-size: .72rem; color: var(--text-dim, var(--sl-text-faint)); }
+  .sp-step-del { background: transparent; border: 0; cursor: pointer; color: var(--text-dim, var(--sl-text-faint)); font-size: 1rem; }
   .sp-add {
     align-self: flex-start; background: transparent; cursor: pointer;
     border: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
@@ -475,7 +475,7 @@
     padding: 8px 10px; border-radius: 8px;
     border: 1px dashed color-mix(in srgb, var(--accent, #6d5efc) 45%, transparent);
   }
-  .sp-parallel-label { font-size: .75rem; color: var(--text-dim, #6b7294); }
+  .sp-parallel-label { font-size: .75rem; color: var(--text-dim, var(--sl-text-faint)); }
 
   .sp-warnlist {
     margin: 0; padding: 8px 10px 8px 26px; border-radius: 6px; font-size: .8rem;

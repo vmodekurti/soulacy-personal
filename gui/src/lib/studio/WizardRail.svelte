@@ -48,15 +48,15 @@
     display: inline-flex; align-items: center; gap: 7px;
     padding: 5px 12px; border-radius: 999px;
     background: transparent; border: 1px solid transparent;
-    font-size: .84rem; color: var(--text-dim, #6b7294); cursor: pointer;
+    font-size: .84rem; color: var(--text-dim, var(--sl-text-faint)); cursor: pointer;
   }
-  .wr-step:hover:not(:disabled) { background: color-mix(in srgb, var(--text-dim, #6b7294) 10%, transparent); }
+  .wr-step:hover:not(:disabled) { background: color-mix(in srgb, var(--text-dim, var(--sl-text-faint)) 10%, transparent); }
   .wr-step:disabled { cursor: not-allowed; opacity: .5; }
 
   .wr-num {
     width: 20px; height: 20px; border-radius: 50%; flex: none;
     display: grid; place-items: center; font-size: .72rem;
-    background: color-mix(in srgb, var(--text-dim, #6b7294) 22%, transparent);
+    background: color-mix(in srgb, var(--text-dim, var(--sl-text-faint)) 22%, transparent);
     color: var(--text, inherit);
   }
 
@@ -73,7 +73,7 @@
     color: var(--ok, #2ea043);
   }
 
-  .wr-sep { color: var(--text-dim, #6b7294); font-size: .8rem; }
+  .wr-sep { color: var(--text-dim, var(--sl-text-faint)); font-size: .8rem; }
 
   @media (max-width: 720px) {
     /* Numbers alone still convey position; labels are what overflow first. */

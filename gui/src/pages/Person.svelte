@@ -256,7 +256,7 @@
   .progress-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
   .owner { color: #777fa5; font-size: .72rem; white-space: nowrap; }
   .bar { margin-top: .7rem; height: 6px; border-radius: 99px; background: #1a1e33; overflow: hidden; }
-  .bar span { display: block; height: 100%; background: linear-gradient(90deg, #6c63ff, #22d3ee); transition: width .3s ease; }
+  .bar span { display: block; height: 100%; background: linear-gradient(90deg, var(--sl-accent), #22d3ee); transition: width .3s ease; }
   .entries { list-style: none; margin: .75rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .7rem; }
   .entries li { border-top: 1px solid #1b1f36; padding-top: .7rem; }
   .entries li:first-child { border-top: 0; padding-top: 0; }
