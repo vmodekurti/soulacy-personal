@@ -19,6 +19,9 @@
   import TourButton from '../lib/TourButton.svelte'
   import { onMount, onDestroy } from 'svelte'
   import { api, createEventSocket } from '../lib/api.js'
+  import { classifyRequest } from '../lib/intent.js'
+  import { parseMarkdown, richRenderer } from '../lib/markdown.js'
+  import { genieAsk } from '../lib/stores.js'
 
   // The app routes on the URL hash; there is no navigate helper to import.
   const go = (page) => { window.location.hash = page }
@@ -95,7 +98,17 @@
     }
   }
 
-  onMount(() => { checkProvider(); loadAgents() })
+  onMount(() => {
+    checkProvider()
+    loadAgents()
+    // Anything typed into the floating button lands here and is treated
+    // exactly as if it had been typed into the box on this page.
+    const handoff = $genieAsk
+    if (handoff?.text) {
+      genieAsk.set(null)
+      send(handoff.text)
+    }
+  })
   // Real numbers only. The mockup shows a live agent rail; inventing health
   // percentages or a spend figure would be lying to the person reading it, so
   // this rail shows the agents that actually exist and what state they are in.
@@ -202,6 +215,48 @@
     }
   }
 
+  // Answering, rather than building.
+  //
+  // Most of what a person types is a question, and building an agent for it
+  // would leave something behind to maintain for no reason. Genie answers
+  // here, in the same screen, and afterwards the screen offers to make it
+  // recurring — because a routing decision the user cannot correct is one that
+  // will eventually be wrong for them.
+  let asking = false
+  let askedText = ''
+  const GENIE = 'genie'
+
+  async function ask(message) {
+    asking = true
+    error = ''
+    turns = [...turns, { role: 'you', text: message }]
+    askedText = message
+    draft = ''
+    phase = 'answer'
+    try {
+      const res = await api.chat(GENIE, message, 'gui-user', null, sessionId)
+      sessionId = res.session_id || sessionId
+      const answer = res.reply || res.text || '(no answer came back)'
+      turns = [...turns, { role: 'soulacy', text: answer }]
+    } catch (e) {
+      error = e.message || 'Could not reach Genie.'
+    } finally {
+      asking = false
+    }
+  }
+
+  // The person asked once and wants it to keep happening. Hand the original
+  // words to the builder rather than making them type it again.
+  function makeItRecurring() {
+    const seed = askedText
+    turns = []
+    sessionId = ''
+    understanding = null
+    askedText = ''
+    phase = 'ask'
+    send(seed)
+  }
+
   async function send(text) {
     const message = (text ?? draft).trim()
     if (!message || busy) return
@@ -212,6 +267,11 @@
       pendingMessage = message
       draft = ''
       await openLocalSetup()
+      return
+    }
+    // One input, two destinations. Recurrence decides, not vocabulary.
+    if (phase === 'ask' && classifyRequest(message).kind === 'ask') {
+      await ask(message)
       return
     }
     busy = true
@@ -336,7 +396,7 @@
   function restart() {
     phase = 'ask'; draft = ''; sessionId = ''; turns = []; understanding = null
     agentId = ''; output = ''; schedulePending = false; deliveryWarning = ''
-    scheduled = false; error = ''
+    scheduled = false; error = ''; asking = false; askedText = ''
   }
 
   // Plain sentences describing what the agent will do. The user is being asked
@@ -481,10 +541,34 @@
       <div class="thread">
         {#each turns as t}
           <div class="msg {t.role}">
-            <span class="who">{t.role === 'you' ? 'You' : 'Soulacy'}</span>
-            <div class="bubble">{t.text}</div>
+            <span class="who">{t.role === 'you' ? 'You' : 'Genie'}</span>
+            {#if t.role === 'soulacy'}
+              <div class="bubble markdown-body" use:richRenderer={t.text}>{@html parseMarkdown(t.text)}</div>
+            {:else}
+              <div class="bubble">{t.text}</div>
+            {/if}
           </div>
         {/each}
+
+        {#if phase === 'answer'}
+          {#if asking}
+            <div class="thinking"><span class="spinner"></span> Asking Genie…</div>
+          {:else}
+            <div class="reply-card">
+              <input
+                bind:value={draft}
+                placeholder="Ask something else…"
+                on:keydown={(e) => { if (e.key === 'Enter') ask(draft.trim()) }}
+              />
+              <button class="btn-primary btn-sm" disabled={!draft.trim()} on:click={() => ask(draft.trim())}>Send</button>
+            </div>
+            <div class="offer">
+              <span>Want this to happen on its own from now on?</span>
+              <button class="btn-secondary btn-sm" on:click={makeItRecurring}>Make it recurring</button>
+            </div>
+            <button class="btn-secondary btn-sm" on:click={restart}>Start over</button>
+          {/if}
+        {/if}
 
         {#if phase === 'converse'}
           <div class="reply-card">
@@ -596,16 +680,18 @@
   @media (max-width: 1100px) {
     .console { grid-template-columns: 1fr; padding: 1.5rem 1.25rem 3rem; }
     .console-main { max-width: none; }
-    .rail { order: -1; }
+    /* Stacked, the conversation leads. Putting the agent list first pushed
+       the thing the person is actually doing below the fold. */
+    .rail { order: 1; }
   }
 
   .eyebrow-row { display: flex; align-items: center; gap: .6rem; margin-bottom: .9rem; }
-  .eyebrow { color: var(--sl-text-faint, var(--sl-text-faint)); font-size: .64rem; letter-spacing: .14em; text-transform: uppercase; }
+  .eyebrow { color: var(--sl-text-faint); font-size: .64rem; letter-spacing: .14em; text-transform: uppercase; }
   .head-actions { margin-left: auto; }
   .pill {
     display: inline-flex; align-items: center; gap: .35rem;
-    background: var(--sl-surface, var(--sl-surface)); border: 1px solid var(--sl-line, #1f2440);
-    color: var(--sl-text-dim, var(--sl-text-dim)); border-radius: 999px; padding: .2rem .6rem; font-size: .7rem;
+    background: var(--sl-surface); border: 1px solid var(--sl-line, #1f2440);
+    color: var(--sl-text-dim); border-radius: 999px; padding: .2rem .6rem; font-size: .7rem;
   }
   .dot { width: 6px; height: 6px; border-radius: 50%; background: #4caf82; }
 
@@ -613,12 +699,12 @@
 
   /* The intent card is the one thing on the page that matters. */
   .intent-card {
-    background: var(--sl-surface, var(--sl-surface)); border: 1px solid var(--sl-line, #1f2440);
+    background: var(--sl-surface); border: 1px solid var(--sl-line, #1f2440);
     border-radius: var(--sl-radius-lg, 14px); padding: 1.1rem 1.15rem; margin-bottom: 1.6rem;
   }
   .intent-head { display: flex; flex-direction: column; gap: .15rem; margin-bottom: .7rem; }
   .intent-title { font-size: .9rem; font-weight: 600; }
-  .intent-sub { color: var(--sl-text-faint, var(--sl-text-faint)); font-size: .78rem; line-height: 1.5; }
+  .intent-sub { color: var(--sl-text-faint); font-size: .78rem; line-height: 1.5; }
   .intent-card textarea {
     width: 100%; background: #0f111c; border: 1px solid var(--sl-line, #1f2440);
     border-radius: var(--sl-radius, 10px); padding: .85rem .95rem; color: inherit;
@@ -626,11 +712,11 @@
     transition: border-color .15s ease, box-shadow .15s ease;
   }
   .intent-card textarea:focus {
-    outline: none; border-color: var(--sl-accent, var(--sl-accent));
+    outline: none; border-color: var(--sl-accent);
     box-shadow: 0 0 0 3px var(--sl-accent-soft, rgba(139,133,255,.12));
   }
   .intent-foot { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: .75rem; }
-  .kbd-hint { color: var(--sl-text-faint, var(--sl-text-faint)); font-size: .7rem; }
+  .kbd-hint { color: var(--sl-text-faint); font-size: .7rem; }
   .arrow { margin-left: .2rem; }
 
   .section-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: .7rem; }
@@ -639,11 +725,11 @@
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: .7rem; }
   .card {
     display: flex; flex-direction: column; gap: .35rem; text-align: left; cursor: pointer;
-    background: var(--sl-surface, var(--sl-surface)); border: 1px solid var(--sl-line, #1f2440);
+    background: var(--sl-surface); border: 1px solid var(--sl-line, #1f2440);
     border-radius: var(--sl-radius-lg, 14px); padding: .95rem 1rem;
     transition: border-color .15s ease, background .15s ease, transform .1s ease;
   }
-  .card:hover { border-color: var(--sl-accent, var(--sl-accent)); background: var(--sl-surface-raised, #191c2f); }
+  .card:hover { border-color: var(--sl-accent); background: var(--sl-surface-raised, #191c2f); }
   .card:active { transform: translateY(1px); }
   .card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: .2rem; }
   .tile {
@@ -651,58 +737,76 @@
     background: var(--sl-accent-soft, rgba(139,133,255,.12)); border-radius: 9px;
   }
   .chip {
-    background: #11131f; border: 1px solid var(--sl-line, #1f2440); color: var(--sl-text-faint, var(--sl-text-faint));
+    background: #11131f; border: 1px solid var(--sl-line, #1f2440); color: var(--sl-text-faint);
     border-radius: 6px; padding: .1rem .4rem; font-size: .62rem; text-transform: uppercase; letter-spacing: .06em;
   }
   .chip.ok { background: rgba(76,175,130,.16); border-color: transparent; color: #4caf82; text-transform: none; letter-spacing: 0; }
-  .card-title { font-size: .88rem; font-weight: 500; color: var(--sl-text, var(--sl-text)); }
-  .card-text { color: var(--sl-text-faint, var(--sl-text-faint)); font-size: .78rem; line-height: 1.5; }
+  .card-title { font-size: .88rem; font-weight: 500; color: var(--sl-text); }
+  .card-text { color: var(--sl-text-faint); font-size: .78rem; line-height: 1.5; }
 
-  .escape-row { display: flex; align-items: center; gap: .7rem; margin-top: 1.6rem; color: var(--sl-text-faint, var(--sl-text-faint)); font-size: .78rem; flex-wrap: wrap; }
+  .escape-row { display: flex; align-items: center; gap: .7rem; margin-top: 1.6rem; color: var(--sl-text-faint); font-size: .78rem; flex-wrap: wrap; }
 
   /* The follow-up reads as the same product: same card, same spacing. */
   .thread { display: flex; flex-direction: column; gap: 1rem; }
-  .msg .who { color: var(--sl-text-faint, var(--sl-text-faint)); font-size: .62rem; text-transform: uppercase; letter-spacing: .1em; }
+  .msg .who { color: var(--sl-text-faint); font-size: .62rem; text-transform: uppercase; letter-spacing: .1em; }
   .bubble { margin-top: .25rem; font-size: .93rem; line-height: 1.6; }
-  .msg.you .bubble { color: var(--sl-text, var(--sl-text)); font-weight: 500; }
+  .msg.you .bubble { color: var(--sl-text); font-weight: 500; }
   .msg.soulacy .bubble {
-    color: var(--sl-text-dim, var(--sl-text-dim)); background: var(--sl-surface, var(--sl-surface));
+    color: var(--sl-text-dim); background: var(--sl-surface);
     border: 1px solid var(--sl-line, #1f2440); border-radius: var(--sl-radius-lg, 14px);
     padding: .8rem .95rem;
   }
+
+  /* Genie writes in markdown. Rendered as plain text, a structured answer with
+     headings and bullets arrives as one unbroken paragraph, which is exactly
+     how the first version of this screen read. */
+  .msg.soulacy .bubble :global(h1),
+  .msg.soulacy .bubble :global(h2),
+  .msg.soulacy .bubble :global(h3) { font-size: .95rem; font-weight: 600; color: var(--sl-text); margin: .7rem 0 .3rem; }
+  .msg.soulacy .bubble :global(ul),
+  .msg.soulacy .bubble :global(ol) { margin: .4rem 0 .4rem 1.1rem; }
+  .msg.soulacy .bubble :global(li) { margin: .18rem 0; }
+  .msg.soulacy .bubble :global(p) { margin: .45rem 0; }
+  .msg.soulacy .bubble :global(p:first-child) { margin-top: 0; }
+  .msg.soulacy .bubble :global(strong) { color: var(--sl-text); }
+  .msg.soulacy .bubble :global(code) { background: #11131f; padding: .05rem .3rem; border-radius: 4px; font-size: .85em; }
+  .msg.soulacy .bubble :global(pre) { background: #11131f; padding: .6rem .7rem; border-radius: 8px; overflow-x: auto; }
+  .msg.soulacy .bubble :global(table) { width: 100%; border-collapse: collapse; margin: .5rem 0; }
+  .msg.soulacy .bubble :global(th),
+  .msg.soulacy .bubble :global(td) { border: 1px solid var(--sl-line); padding: .3rem .5rem; text-align: left; }
 
   .reply-card { display: flex; gap: .5rem; }
   .reply-card input {
     flex: 1; background: #0f111c; border: 1px solid var(--sl-line, #1f2440);
     border-radius: var(--sl-radius, 10px); padding: .7rem .85rem; color: inherit; font: inherit; font-size: .9rem;
   }
-  .reply-card input:focus { outline: none; border-color: var(--sl-accent, var(--sl-accent)); }
-  .thinking { display: flex; align-items: center; gap: .5rem; color: var(--sl-text-faint, var(--sl-text-faint)); font-size: .8rem; }
+  .reply-card input:focus { outline: none; border-color: var(--sl-accent); }
+  .thinking { display: flex; align-items: center; gap: .5rem; color: var(--sl-text-faint); font-size: .8rem; }
 
   .panel {
-    background: var(--sl-surface, var(--sl-surface)); border: 1px solid var(--sl-line, #1f2440);
+    background: var(--sl-surface); border: 1px solid var(--sl-line, #1f2440);
     border-radius: var(--sl-radius-lg, 14px); padding: 1.1rem 1.15rem;
   }
   .panel h2 { font-size: .98rem; font-weight: 600; margin-bottom: .55rem; }
-  .run-head { display: flex; align-items: center; gap: .6rem; color: var(--sl-text-dim, var(--sl-text-dim)); font-size: .9rem; }
+  .run-head { display: flex; align-items: center; gap: .6rem; color: var(--sl-text-dim); font-size: .9rem; }
   .steps { list-style: none; margin: .7rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; }
   .steps li {
-    color: var(--sl-text-faint, var(--sl-text-faint)); font-size: .8rem; padding-left: 1rem; position: relative;
+    color: var(--sl-text-faint); font-size: .8rem; padding-left: 1rem; position: relative;
   }
   .steps li::before { content: '·'; position: absolute; left: .3rem; }
   /* The newest line is the one that is happening now. */
-  .steps li.current { color: var(--sl-text, var(--sl-text)); }
+  .steps li.current { color: var(--sl-text); }
   .steps li.current::before { content: '→'; left: .1rem; }
 
-  .panel.running { display: flex; align-items: center; gap: .6rem; color: var(--sl-text-dim, var(--sl-text-dim)); font-size: .9rem; }
+  .panel.running { display: flex; align-items: center; gap: .6rem; color: var(--sl-text-dim); font-size: .9rem; }
   .plan { margin: 0 0 .5rem 1.05rem; }
-  .plan li { font-size: .89rem; line-height: 1.65; color: var(--sl-text, var(--sl-text)); }
+  .plan li { font-size: .89rem; line-height: 1.65; color: var(--sl-text); }
   .panel-foot { display: flex; align-items: center; gap: .9rem; margin-top: .8rem; flex-wrap: wrap; }
-  .foot-note { color: var(--sl-text-faint, var(--sl-text-faint)); font-size: .76rem; line-height: 1.5; margin-top: .4rem; }
+  .foot-note { color: var(--sl-text-faint); font-size: .76rem; line-height: 1.5; margin-top: .4rem; }
   .output {
     background: #0f111c; border: 1px solid var(--sl-line, #1f2440); border-radius: var(--sl-radius, 10px);
     padding: .9rem 1rem; white-space: pre-wrap; word-break: break-word;
-    font-size: .85rem; line-height: 1.6; color: var(--sl-text, var(--sl-text)); max-height: 420px; overflow: auto;
+    font-size: .85rem; line-height: 1.6; color: var(--sl-text); max-height: 420px; overflow: auto;
   }
   .offer {
     display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
@@ -717,10 +821,10 @@
 
   .setup .tabs { display: flex; gap: .35rem; margin: .6rem 0; flex-wrap: wrap; }
   .setup .tabs button {
-    background: #0f111c; border: 1px solid var(--sl-line, #1f2440); color: var(--sl-text-dim, var(--sl-text-dim));
+    background: #0f111c; border: 1px solid var(--sl-line, #1f2440); color: var(--sl-text-dim);
     border-radius: 8px; padding: .35rem .7rem; font-size: .78rem; cursor: pointer;
   }
-  .setup .tabs button.on { border-color: var(--sl-accent, var(--sl-accent)); color: var(--sl-text, var(--sl-text)); }
+  .setup .tabs button.on { border-color: var(--sl-accent); color: var(--sl-text); }
   .setup select, .key-row input {
     background: #0f111c; border: 1px solid var(--sl-line, #1f2440); border-radius: 8px;
     padding: .45rem .6rem; color: inherit; font-size: .82rem;
@@ -739,29 +843,29 @@
   .pull-row { display: flex; justify-content: space-between; font-size: .8rem; }
   .pull-row code { color: #8b85ff; }
   .bar { height: 5px; background: var(--sl-line); border-radius: 3px; overflow: hidden; margin: .4rem 0 .3rem; }
-  .fill { height: 100%; background: var(--sl-accent, var(--sl-accent)); transition: width .3s ease; }
+  .fill { height: 100%; background: var(--sl-accent); transition: width .3s ease; }
 
   /* The rail: what you actually have, not a telemetry feed. */
   .rail { display: flex; flex-direction: column; gap: .5rem; }
   .rail-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: .2rem; }
   .rail-head h2 { font-size: .85rem; font-weight: 600; }
   .rail-card {
-    text-align: left; cursor: pointer; background: var(--sl-surface, var(--sl-surface));
+    text-align: left; cursor: pointer; background: var(--sl-surface);
     border: 1px solid var(--sl-line, #1f2440); border-radius: var(--sl-radius, 10px);
     padding: .65rem .75rem; display: flex; flex-direction: column; gap: .2rem;
     transition: border-color .15s ease;
   }
-  .rail-card:hover { border-color: var(--sl-accent, var(--sl-accent)); }
+  .rail-card:hover { border-color: var(--sl-accent); }
   .rail-top { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
-  .rail-name { font-size: .82rem; color: var(--sl-text, var(--sl-text)); }
+  .rail-name { font-size: .82rem; color: var(--sl-text); }
   .state { font-size: .62rem; border-radius: 5px; padding: .08rem .35rem; }
   .state.on { background: rgba(76,175,130,.16); color: #4caf82; }
-  .state.off { background: #11131f; color: var(--sl-text-faint, var(--sl-text-faint)); }
-  .rail-desc { color: var(--sl-text-faint, var(--sl-text-faint)); font-size: .72rem; line-height: 1.45;
+  .state.off { background: #11131f; color: var(--sl-text-faint); }
+  .rail-desc { color: var(--sl-text-faint); font-size: .72rem; line-height: 1.45;
                display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
   .spinner {
-    width: 14px; height: 14px; border: 2px solid var(--sl-line); border-top-color: var(--sl-accent, var(--sl-accent));
+    width: 14px; height: 14px; border: 2px solid var(--sl-line); border-top-color: var(--sl-accent);
     border-radius: 50%; animation: spin .8s linear infinite; display: inline-block;
   }
   @keyframes spin { to { transform: rotate(360deg); } }

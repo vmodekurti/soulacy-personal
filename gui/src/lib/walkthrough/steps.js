@@ -21,8 +21,8 @@ export const navTourCopy = {
     when: 'Review or reverse supported external changes, inspect evidence before promoting an agent, or freeze autonomous work.',
   },
   start: {
-    what: 'The front door. Say what you want handled, answer a couple of questions, and watch it run once before you decide anything.',
-    when: 'Start here for anything new. It covers most of what people actually want; Studio is for the rest.',
+    what: 'Genie. Ask it anything, or say what you want handled and it builds and runs it once before you decide anything.',
+    when: 'Start here for everything. It answers questions directly and only builds something when the request should keep happening.',
   },
   dashboard: {
     what: 'The home screen: gateway health, your agents, and the runs that just happened.',

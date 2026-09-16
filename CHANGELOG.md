@@ -118,6 +118,19 @@ to follow [Semantic Versioning](https://semver.org/).
   second device stays a viewer.
 
 ### Changed
+- Genie is the way in. There were two front doors — one that answered
+  questions and one that built agents — and the person had to choose before
+  they had typed anything. Nobody arrives thinking "I need an agent"; they
+  think "I want a market summary at five", and whether that becomes a saved
+  scheduled agent or a single answer is an implementation detail they should
+  never have to decide. One box now takes the request and routes it: something
+  that should keep happening gets built, shown and run once; anything else
+  Genie answers in place, and the screen then offers to make it recurring, so
+  a routing decision can always be corrected. The routing is deterministic
+  rather than a model call, because asking a model to route would add ten to
+  twenty seconds on the one screen where waiting costs most. The floating
+  button feeds the same screen instead of starting a separate chat thread, and
+  Genie's answers render as markdown rather than as one unbroken paragraph.
 - The System agent now knows its own environment as well as Genie does. It
   could already *list* installed skills, connected MCP tools and peer agents,
   but not read a skill, call an MCP tool or delegate to a peer — so it could

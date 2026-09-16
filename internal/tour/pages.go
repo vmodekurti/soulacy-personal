@@ -124,8 +124,8 @@ var pages = map[string]page{
 	// and most people never reached the end of it.
 	"start": {
 		stage: StagePlan, nextAction: "", nextLabel: "",
-		role:         "The front door.",
-		contribution: "Describe what you want in your own words; Soulacy works out the rest and runs it once so you can see the result before deciding anything.",
+		role:         "Genie — the way in.",
+		contribution: "Ask it anything, or say what you want handled. It answers directly when a question is all you wanted, and builds something only when the request should keep happening.",
 		whenEmpty: func(InstallState) string {
 			return "Nothing built yet. Say what you would like handled — a weekly summary, a watch on a page, a morning briefing — and answer a couple of questions. It runs once in front of you before it is allowed to run on its own."
 		},
