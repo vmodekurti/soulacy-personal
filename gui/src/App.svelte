@@ -712,9 +712,9 @@
      reads as lighter than a button, but it has to read as pressable. */
   :global(.linkish) {
     background: none; border: none; padding: 0;
-    color: var(--sl-accent, var(--sl-accent)); font: inherit; font-size: inherit;
+    color: var(--sl-accent); font: inherit; font-size: inherit;
     cursor: pointer; text-decoration: underline; text-underline-offset: 3px;
-    text-decoration-color: color-mix(in srgb, var(--sl-accent, var(--sl-accent)) 45%, transparent);
+    text-decoration-color: color-mix(in srgb, var(--sl-accent) 45%, transparent);
     transition: color .15s ease, text-decoration-color .15s ease;
   }
   :global(.linkish:hover:not(:disabled)) {

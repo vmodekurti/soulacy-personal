@@ -29,7 +29,8 @@
     genieAsk.set(req)
     text = ''
     open = false
-    dispatch('navigate', 'chat')
+    // The front door, not Chat: one question, one place that answers it.
+    dispatch('navigate', 'start')
   }
 
   function onKey(e) {
