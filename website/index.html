@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Soulacy — Self-hosted AI agents you can inspect</title>
+  <title>Soulacy — the assistant that actually knows you</title>
   <meta name="description" content="AI agents that remember you, forget what stopped being true, and never act without your say-so. Self-hosted on infrastructure you control." />
   <link rel="canonical" href="https://soulacy.io/" />
   <link rel="icon" type="image/png" sizes="32x32" href="/brand/living-core-blue-v1-32.png" />
@@ -143,6 +143,7 @@
         soulacy
       </a>
       <div class="hidden md:flex items-center gap-6 text-sm text-ink-400">
+        <a href="#assistant" class="hover:text-ink-100">What it does</a>
         <a href="#why" class="hover:text-ink-100">Why Soulacy</a>
           <a href="#recent" class="hover:text-ink-100">What's new</a>
         <a href="#iphone" class="hover:text-ink-100">iPhone</a>
@@ -171,22 +172,25 @@
       <div class="max-w-3xl">
         <div class="mb-5 inline-flex items-center gap-2 text-xs">
           <a class="chip chip-green" href="https://github.com/vmodekurti/soulacy-personal/releases/latest">Personal releases</a>
-          <span class="chip">local-first agent OS</span>
+          <span class="chip">runs on your own machine</span>
           <span class="chip">Personal: Apache 2.0</span>
         </div>
         <h1 class="text-4xl md:text-6xl font-extrabold leading-tight tracking-tight">
-          AI agents that remember you, forget what stopped being true,<br class="hidden md:block" />
-          <span class="gradient-text">and never act without your say-so.</span>
+          An assistant that<br class="hidden md:block" />
+          <span class="gradient-text">actually knows you.</span>
         </h1>
         <p class="mt-5 text-lg md:text-xl text-ink-400 leading-relaxed">
-          <strong class="text-ink-100">Agents that work for you, with evidence you can inspect.</strong> Run Soulacy Personal on infrastructure you control. Build agents with Studio, connect tools and knowledge, and see every fact it learns and every step it takes. The installation and footprint details here describe Personal.
+          <strong class="text-ink-100">Soulacy learns how your days work, what you have promised, and who is waiting on you — by asking, not by watching.</strong> It handles what it can and asks before the rest. Run Soulacy Personal on infrastructure you control. Everything it learns about you stays there. The installation and footprint details here describe Personal.
+        </p>
+        <p class="mt-3 text-sm text-ink-400">
+          Honest about setup: Soulacy runs on your own machine or a small VPS. Expect a terminal and about ten minutes. There is no hosted version to sign up for, which is the same reason nobody else holds your data.
         </p>
         <div class="mt-8 flex flex-wrap items-center gap-3">
           <a href="#install" class="inline-flex items-center rounded-xl bg-wire-500 hover:bg-wire-600 text-white px-5 py-3 text-sm font-medium shadow-glow-wire">
             Install Soulacy →
           </a>
           <a href="https://docs.soulacy.io/getting-started/quickstart/" class="inline-flex items-center rounded-xl border border-white/10 hover:border-white/25 text-ink-100 px-5 py-3 text-sm font-medium">
-            Your first useful agent
+            See what it learns about you
           </a>
           <a href="https://github.com/vmodekurti/soulacy-personal" class="inline-flex items-center gap-2 rounded-xl border border-white/10 hover:border-white/25 text-ink-100 px-5 py-3 text-sm font-medium">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5A11.5 11.5 0 0 0 .5 12a11.5 11.5 0 0 0 7.86 10.92c.58.1.79-.25.79-.55v-2c-3.2.7-3.88-1.36-3.88-1.36-.53-1.33-1.28-1.68-1.28-1.68-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.19-3.08-.12-.3-.51-1.47.11-3.07 0 0 .97-.31 3.18 1.18a11.03 11.03 0 0 1 5.79 0c2.21-1.5 3.18-1.18 3.18-1.18.62 1.6.23 2.78.11 3.07.74.8 1.19 1.82 1.19 3.08 0 4.41-2.7 5.39-5.27 5.68.41.36.79 1.06.79 2.14v3.17c0 .31.2.66.8.55A11.5 11.5 0 0 0 23.5 12 11.5 11.5 0 0 0 12 .5z"/></svg>
@@ -294,14 +298,50 @@
     </div>
   </section>
 
+  <!-- ── WHAT IT DOES FOR YOU ──────────────────────────────────────────────── -->
+  <section id="assistant" class="border-t border-white/5 scroll-mt-24">
+    <div class="max-w-6xl mx-auto px-5 py-16 md:py-24">
+      <div class="max-w-3xl">
+        <div class="chip mb-4">what it does for you</div>
+        <h2 class="text-3xl md:text-4xl font-bold tracking-tight">Most assistants answer questions. This one keeps track.</h2>
+        <p class="mt-4 text-ink-300 text-lg leading-relaxed">
+          Ask a chatbot the same thing twice and it has forgotten you in between. Soulacy keeps a structured picture of how your days actually go, and every agent you run reads the same one.
+        </p>
+      </div>
+
+      <div class="mt-8 grid md:grid-cols-2 gap-4">
+        <div class="rounded-xl border border-white/10 p-5">
+          <div class="text-xs text-ink-400 code-font mb-2">it learns you, by asking</div>
+          <p class="text-sm text-ink-100 leading-relaxed">Not a chat history. Your routine, the people who matter, what you owe and when, how you want to be helped. It asks a few questions on your first day and records your answers in your words. This is a conversation in your browser; no phone, no sensors, nothing switched on.</p>
+        </div>
+        <div class="rounded-xl border border-white/10 p-5">
+          <div class="text-xs text-ink-400 code-font mb-2">it can also notice <span class="text-ink-500">— optional</span></div>
+          <p class="text-sm text-ink-100 leading-relaxed">Add the iPhone app and allow a sense, and it keeps up on its own: a deadline moving, a Focus turning on, today not looking like a normal Tuesday. Skip it and Soulacy still works; it just knows only what you told it.</p>
+        </div>
+        <div class="rounded-xl border border-white/10 p-5">
+          <div class="text-xs text-ink-400 code-font mb-2">it stays quiet</div>
+          <p class="text-sm text-ink-100 leading-relaxed">“Nothing needs you today” is a real answer, and the system prefers it. An assistant that finds something urgent every morning is one you stop reading.</p>
+        </div>
+        <div class="rounded-xl border border-white/10 p-5">
+          <div class="text-xs text-ink-400 code-font mb-2">it stays yours</div>
+          <p class="text-sm text-ink-100 leading-relaxed">Every line says where it came from, and you can correct or delete any of it. Nothing is watched until you switch it on, and switching it off erases what it worked out. <a href="https://docs.soulacy.io/using/person-model/" class="text-wire-400 hover:text-wire-300">See the model →</a></p>
+        </div>
+      </div>
+
+      <p class="mt-6 text-sm text-ink-400 max-w-3xl">
+        Everything past the first card is opt-in, one sense at a time, and the phone app is optional throughout. “Private” is a claim anyone can make. Soulacy runs on your own machine, which is why ours is checkable.
+      </p>
+    </div>
+  </section>
+
   <!-- ── WHY SOULACY ───────────────────────────────────────────────────────── -->
   <section id="why" class="border-t border-white/5">
     <div class="max-w-6xl mx-auto px-5 py-16 md:py-24">
       <div class="max-w-3xl">
         <div class="chip mb-4">why soulacy</div>
-        <h2 class="text-3xl md:text-4xl font-bold tracking-tight">Why Soulacy, and not one of the many frameworks?</h2>
+        <h2 class="text-3xl md:text-4xl font-bold tracking-tight">Why not a chatbot, or one of the many frameworks?</h2>
         <p class="mt-4 text-ink-300 text-lg leading-relaxed">
-          Two reasons. With every other option, what an agent may do is something you <em>trust</em>; with Soulacy it is something you can <em>check</em>. And you get a finished, private system that runs your agents and reaches your phone, not a toolkit to build one or a platform to rent one.
+          A chatbot forgets you between questions and cannot act. A framework hands you the parts and leaves the assistant for you to build. With every other option, what an agent may do is something you <em>trust</em>; with Soulacy it is something you can <em>check</em>.
         </p>
       </div>
 
@@ -362,52 +402,57 @@
     <div class="max-w-6xl mx-auto px-5 py-16 md:py-24">
       <div class="max-w-3xl">
         <div class="chip chip-green mb-4">recent platform work</div>
-        <h2 class="text-3xl md:text-4xl font-bold tracking-tight">Memory that adapts. Learning you control. Spend you can bound.</h2>
+        <h2 class="text-3xl md:text-4xl font-bold tracking-tight">It learns you now, and it knows when to stay quiet.</h2>
         <p class="mt-4 text-ink-400 text-lg leading-relaxed">
-          The latest mainline work strengthens Soulacy from model call to operator review: semantic memory survives restarts, every inference path shares one cost governor, and human feedback improves reusable workflow evidence without silently rewriting an agent.
+          The latest work is the part that makes Soulacy an assistant rather than a set of tools: a structured picture of the person that every agent reads, an agent that fills it in by asking, one that decides what is worth your attention today, and triggers that fire because something changed rather than because a clock struck.
         </p>
       </div>
 
       <div class="mt-10 grid md:grid-cols-2 lg:grid-cols-3 gap-4">
         <div class="card p-5 border-signal-500/30">
-          <div class="text-lg mb-2">🧠</div>
-          <h3 class="font-semibold text-ink-100">Adaptive memory</h3>
-          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Agents remember what matters about you and forget what stopped being true. Facts and the relationships between people, places, and projects are distilled from each turn in the background; newer facts supersede stale ones, retractions retire them, and every change is kept in a per-fact history. The most relevant few ride along in every prompt within a 50-token budget. Private per user, runs locally at no cost, and every fact is yours to edit, expire, export, or purge. Prefer an external memory provider? Switch to <strong class="text-ink-200">Mem0</strong>, hosted or self-hosted, with one setting and keep the same controls. <a href="https://docs.soulacy.io/using/adaptive-memory/" class="text-wire-400 hover:text-wire-300">How it works →</a></p>
+          <div class="text-lg mb-2">👤</div>
+          <h3 class="font-semibold text-ink-100">A picture of you every agent reads</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Six parts: who you are, your usual day, how you are right now, the people who matter, open commitments, preferences. Every agent reads the same one instead of working out your context from scratch. What you say outranks what any agent infers or any sensor notices, permanently. <a href="https://docs.soulacy.io/using/person-model/" class="text-wire-400 hover:text-wire-300">How it works →</a></p>
         </div>
-        <div class="card p-5">
-          <div class="text-lg mb-2">🔄</div>
-          <h3 class="font-semibold text-ink-100">Keeps itself current</h3>
-          <p class="mt-2 text-sm text-ink-400 leading-relaxed">A release install checks for new signed releases, verifies the checksum and Sigstore signature, replaces its own binaries, proves the new build starts, and restarts when no agent is mid-task. A failed check rolls back. One toggle turns it into notify-only. <a href="https://docs.soulacy.io/deployment/upgrades/#automatic-updates" class="text-wire-400 hover:text-wire-300">How it works →</a></p>
+        <div class="card p-5 border-signal-500/30">
+          <div class="text-lg mb-2">💬</div>
+          <h3 class="font-semibold text-ink-100">An agent that asks, and quotes you</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Getting to Know You is installed on a new gateway from the first boot. It asks about the gaps, stops after six questions, and records each answer in your own words. An agent can only mark something certain if it quotes what you actually said; invent a quote and the write is refused.</p>
         </div>
-        <div class="card p-5">
-          <div class="text-lg mb-2">🗄️</div>
-          <h3 class="font-semibold text-ink-100">Native sqlite-vec memory</h3>
-          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Agent-scoped semantic records live in the embedded SQLite archive and remain searchable after restart. Production no longer silently falls back to an in-memory vector index.</p>
-        </div>
-        <div class="card p-5">
-          <div class="text-lg mb-2">👍</div>
-          <h3 class="font-semibold text-ink-100">Human feedback learning</h3>
-          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Rate completed Chat responses helpful or unhelpful. Durable, redacted signals boost or suppress matching workflow patterns; written guidance stays pending until reviewed.</p>
-        </div>
-        <div class="card p-5">
+        <div class="card p-5 border-signal-500/30">
           <div class="text-lg mb-2">🧭</div>
-          <h3 class="font-semibold text-ink-100">Studio macro-memory</h3>
-          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Studio distills successful multi-tool runs, learns repeated authoring preferences, retrieves semantically related repair lessons, and warns when a model/strategy pairing is historically unreliable.</p>
+          <h3 class="font-semibold text-ink-100">The Steward</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Reads that picture, works out what is different about today, and proposes at most three things with the reason for each. A commitment counts only if it is overdue, due today, or due tomorrow. "Nothing needs you today" is a complete answer and it prefers one. <a href="https://docs.soulacy.io/use-cases/steward/" class="text-wire-400 hover:text-wire-300">Read the walkthrough →</a></p>
         </div>
         <div class="card p-5">
-          <div class="text-lg mb-2">💳</div>
-          <h3 class="font-semibold text-ink-100">LLM cost admission</h3>
-          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Reserve worst-case spend before calling a provider. Enforce daily, monthly, per-user, and per-agent budgets plus pricing policy, output ceilings, TPM, concurrency, and circuit breakers.</p>
+          <div class="text-lg mb-2">⚡</div>
+          <h3 class="font-semibold text-ink-100">Triggers, not timers</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">An agent can run because a deadline moved, a Focus turned on, or today stopped looking like a normal Tuesday. Three guards stop it firing constantly: it compares before and after rather than reacting to writes, a condition already true stays quiet, and a cooldown absorbs the burst a phone delivers after being offline. <a href="https://docs.soulacy.io/using/person-triggers/" class="text-wire-400 hover:text-wire-300">The conditions →</a></p>
         </div>
         <div class="card p-5">
-          <div class="text-lg mb-2">🔐</div>
-          <h3 class="font-semibold text-ink-100">Hardened runtime boundaries</h3>
-          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Object-scoped RBAC, session ownership, canonical filesystem roots, redirect-aware SSRF protection, privileged execution isolation, redaction, retention, and production readiness checks.</p>
+          <div class="text-lg mb-2">🎚️</div>
+          <h3 class="font-semibold text-ink-100">Senses, off until you allow them</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Small digesters turn phone signals into the picture: how you are now, the usual shape of each weekday, what you are on the hook for. Each is a switch with its purpose written next to it, off by default. Switching one off deletes what it worked out <em>and</em> the raw signals behind it.</p>
         </div>
         <div class="card p-5">
-          <div class="text-lg mb-2">⚙️</div>
-          <h3 class="font-semibold text-ink-100">Go 1.26.6 toolchain</h3>
-          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Source builds, CI, release workflows, containers, and installers are aligned on Go 1.26.6. The prebuilt core needs no Go, Node, or Python installation; platform and optional-tool requirements still apply.</p>
+          <div class="text-lg mb-2">🔍</div>
+          <h3 class="font-semibold text-ink-100">Every line says where it came from</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">About You, on the web and on the phone, shows the whole picture labelled: what you told us, with your words underneath; what an agent guessed; what a sense noticed. Low-confidence lines are marked as guesses. Correct any line, delete any line, or forget everything, which drops the raw signals too.</p>
+        </div>
+        <div class="card p-5">
+          <div class="text-lg mb-2">⌚</div>
+          <h3 class="font-semibold text-ink-100">Apple Watch</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">A complication with the approvals waiting on you and how long the oldest has left, a dictated question read back aloud, and an approvals list. The watch pairs through the phone and then holds a credential of its own, so revoking it signs out the watch alone.</p>
+        </div>
+        <div class="card p-5">
+          <div class="text-lg mb-2">📎</div>
+          <h3 class="font-semibold text-ink-100">Photograph a receipt, ask about it</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Attach a photo or file from anywhere in the iPhone app, including the quick-question sheet. Photos are read on the phone before upload, so a receipt reaches the agent as text rather than an opaque image, and the recognition never leaves the device.</p>
+        </div>
+        <div class="card p-5">
+          <div class="text-lg mb-2">🧠</div>
+          <h3 class="font-semibold text-ink-100">Adaptive memory, still underneath</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Facts distilled from conversations, superseded when they stop being true, with a per-fact history and a 50-token prompt budget. Separate from the person model: memory remembers sentences, the model holds the shape every agent agrees on. Swap in <strong class="text-ink-200">Mem0</strong> with one setting. <a href="https://docs.soulacy.io/using/adaptive-memory/" class="text-wire-400 hover:text-wire-300">How it works →</a></p>
         </div>
       </div>
 
@@ -423,9 +468,9 @@
     <div class="max-w-6xl mx-auto px-5 py-16 md:py-24">
       <div class="max-w-3xl">
         <div class="chip chip-green mb-4">native iPhone companion</div>
-        <h2 class="text-3xl md:text-4xl font-bold tracking-tight">Your agents, on your hardware, with your phone as their hands and eyes.</h2>
+        <h2 class="text-3xl md:text-4xl font-bold tracking-tight">Optional, and the difference between knowing you and keeping up with you.</h2>
         <p class="mt-4 text-ink-400 text-lg leading-relaxed">
-          The gateway is the brain. The iPhone is where an agent asks you for a decision when you are not at a desk, and the only device that knows where you are, what is on your calendar, how you slept, and whether a Focus is on. Every phone capability an agent can touch is a line in its file and a toggle on the phone. Nothing risky happens without you.
+          Soulacy works without a phone: it asks, you answer, agents read what you said. Add the iPhone and it can keep up on its own — where you are, what is on your calendar, how you slept, whether a Focus is on — and it becomes where an agent asks for a decision when you are not at a desk. Every phone capability an agent can touch is a line in its file and a switch on the phone, off until you turn it on.
         </p>
       </div>
 
@@ -474,6 +519,21 @@
           <div class="text-lg mb-2">👪</div>
           <h3 class="font-semibold text-ink-100">One gateway, a household of phones</h3>
           <p class="mt-2 text-sm text-ink-400 leading-relaxed">Pair a phone for someone else with their own identity, inbox and memory, as <strong class="text-ink-200">Can run agents</strong> or <strong class="text-ink-200">View only</strong>. Unpair revokes the phone and keeps their memory on the gateway.</p>
+        </div>
+        <div class="card p-5">
+          <div class="text-lg mb-2">👤</div>
+          <h3 class="font-semibold text-ink-100">About You, in your pocket</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">The whole picture Soulacy holds of you, on the phone, with where every line came from. Something you said shows your own words underneath. Guesses are marked as guesses. Swipe to delete, add a line by hand, or forget everything. The sense switches live on the same screen.</p>
+        </div>
+        <div class="card p-5">
+          <div class="text-lg mb-2">🙋</div>
+          <h3 class="font-semibold text-ink-100">Asked during setup, not after</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Pairing ends with "What may Soulacy notice?", before the finish screen rather than buried in settings afterwards. Everything is off when it opens and "Not now" is a first-class answer. Consent asked after the fact is not consent.</p>
+        </div>
+        <div class="card p-5">
+          <div class="text-lg mb-2">⌚</div>
+          <h3 class="font-semibold text-ink-100">And on your wrist</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">A complication showing approvals waiting and how long the oldest has left, a question you dictate and hear answered, and an approvals list. It pairs through the phone once and then talks to your gateway with a credential of its own.</p>
         </div>
       </div>
 
