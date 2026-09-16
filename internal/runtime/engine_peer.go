@@ -69,6 +69,12 @@ func (e *Engine) resolveAgentRefs(refs []string, callerID string) []*agent.Defin
 	if len(refs) == 0 {
 		return nil
 	}
+	// No loader means no peers to resolve. An engine can legitimately be built
+	// without one (embedding, tests), and every path below dereferences it;
+	// returning nothing is the honest answer and beats a panic mid-run.
+	if e.loader == nil {
+		return nil
+	}
 	wantAll := false
 	for _, r := range refs {
 		if r == "*" || r == "all" {
