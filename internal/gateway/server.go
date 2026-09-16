@@ -756,6 +756,14 @@ func (s *Server) buildApp() *fiber.App {
 	//   curl -H 'Authorization: Bearer <key>' http://gw/api/v1/metrics
 	api.Get("/metrics", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), adaptor.HTTPHandler(metrics.Handler()))
 	api.Post("/admin/restart", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleRestart)
+	// Autostart ("start on login"). Without this the gateway dies with the
+	// terminal that launched it and every scheduled agent stops silently,
+	// so it cannot stay a terminal-only setting.
+	api.Get("/admin/service", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleServiceStatus)
+	api.Post("/admin/service/install", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleServiceInstall)
+	api.Post("/admin/service/uninstall", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleServiceUninstall)
+	api.Post("/admin/service/start", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleServiceStart)
+	api.Post("/admin/service/stop", s.rbacMW(rbac.ResourceConfig, rbac.ActionWrite), s.handleServiceStop)
 	api.Get("/admin/audit", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleAdminAudit)
 	api.Get("/onboarding/status", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleOnboardingStatus)
 	// Per-page walkthrough: the same outcome told from whichever screen you are on.

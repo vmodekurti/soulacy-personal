@@ -373,6 +373,23 @@ export const api = {
   admin: {
     restart: () => apiFetch('/admin/restart', { method: 'POST' }),
     audit: (limit = 50) => apiFetch('/admin/audit?limit=' + encodeURIComponent(limit)),
+
+    /**
+     * Autostart ("start on login"). Without it the gateway stops when the
+     * terminal that launched it closes, and every scheduled agent stops with
+     * it — silently, and usually overnight. Installing it used to require
+     * `sy daemon install`, which a dashboard-only user would never find.
+     *
+     * Every call resolves to {supported, platform, state, unit_path, detail,
+     * warning}; the mutations wrap that as {ok, status}.
+     */
+    service: {
+      status: () => apiFetch('/admin/service'),
+      install: () => apiFetch('/admin/service/install', { method: 'POST' }),
+      uninstall: () => apiFetch('/admin/service/uninstall', { method: 'POST' }),
+      start: () => apiFetch('/admin/service/start', { method: 'POST' }),
+      stop: () => apiFetch('/admin/service/stop', { method: 'POST' }),
+    },
   },
 
   memory: {

@@ -21,8 +21,8 @@ import (
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/credentials"
 	"github.com/soulacy/soulacy/internal/secrets"
+	"github.com/soulacy/soulacy/internal/service"
 	"github.com/soulacy/soulacy/internal/updates"
-
 )
 
 type doctorStatus string
@@ -159,7 +159,6 @@ func checkUpdateManifest() doctorCheck {
 		Remedy: remedy,
 	}
 }
-
 
 // loadDoctorConfig unmarshals the viper-loaded configuration into a typed
 // config.Config for local (non-gateway) inspection. Returns nil on failure.
@@ -306,7 +305,7 @@ func checkRuntimeDir(runtimeDir string) doctorCheck {
 }
 
 func checkInstallLayout() doctorCheck {
-	bin, err := resolveSoulacyBinary()
+	bin, err := service.ResolveBinary()
 	if err != nil {
 		return doctorCheck{
 			Name:   "install",
@@ -372,7 +371,7 @@ func checkInstallLayout() doctorCheck {
 func serviceBinaryConfig() (path, bin string, ok bool) {
 	switch runtime.GOOS {
 	case "darwin":
-		p, err := launchAgentPath()
+		p, err := service.New(syWorkspace()).UnitPath()
 		if err != nil {
 			return "", "", false
 		}
@@ -385,7 +384,7 @@ func serviceBinaryConfig() (path, bin string, ok bool) {
 		}
 		return p, configuredServiceBinary(string(data), runtime.GOOS), true
 	case "linux":
-		p, err := systemdUnitPath()
+		p, err := service.New(syWorkspace()).UnitPath()
 		if err != nil {
 			return "", "", false
 		}

@@ -29,6 +29,13 @@
   let securityReadiness = null
 
   let updateInfo = null
+  // Autostart. Without it the gateway stops when the terminal that started it
+  // closes, and every scheduled agent stops too — overnight, silently. That is
+  // the failure most likely to make someone conclude Soulacy does not work, so
+  // it gets a banner rather than a settings row.
+  let svc = null
+  let svcBusy = false
+  let svcError = ''
   let upgrading = false
   let upgradeMessage = ''
   let upgradeError = ''
@@ -87,6 +94,41 @@
       updateInfo = await api.updates.status()
     } catch {
       updateInfo = null
+    }
+    try {
+      svc = await api.admin.service.status()
+    } catch {
+      // A viewer login cannot read this. Staying silent is right: the banner
+      // asks for an action only an admin could take anyway.
+      svc = null
+    }
+  }
+
+  async function enableAutostart() {
+    svcBusy = true
+    svcError = ''
+    try {
+      const res = await api.admin.service.install()
+      svc = res.status || svc
+    } catch (e) {
+      svcError = e.message || 'Could not enable autostart.'
+      try { svc = await api.admin.service.status() } catch { /* keep the old view */ }
+    } finally {
+      svcBusy = false
+    }
+  }
+
+  async function disableAutostart() {
+    if (!confirm('Stop Soulacy starting automatically? Scheduled agents will not run when the gateway is closed.')) return
+    svcBusy = true
+    svcError = ''
+    try {
+      const res = await api.admin.service.uninstall()
+      svc = res.status || svc
+    } catch (e) {
+      svcError = e.message || 'Could not disable autostart.'
+    } finally {
+      svcBusy = false
     }
   }
 
@@ -311,6 +353,19 @@
     </div>
   {/if}
 
+  {#if svc && svc.supported && svc.state === 'not_installed'}
+    <div class="banner warn autostart-banner">
+      <div class="autostart-text">
+        <strong>Soulacy will not start on its own.</strong>
+        <span>It stops when this gateway process does, and scheduled agents stop with it. Turn on autostart so your agents keep running after you close the window or restart the machine.</span>
+        {#if svcError}<span class="autostart-err">{svcError}</span>{/if}
+      </div>
+      <button class="btn-primary btn-sm" disabled={svcBusy} on:click={enableAutostart}>
+        {svcBusy ? 'Enabling…' : 'Start on login'}
+      </button>
+    </div>
+  {/if}
+
   {#if updateInfo && updateInfo.update_available}
     <div class="update-banner">
       <div class="update-banner-icon">✨</div>
@@ -353,6 +408,20 @@
       <div class="card-value">{agents.length}</div>
       <div class="card-sub">{agents.filter(a => a.enabled).length} enabled</div>
     </div>
+
+    {#if svc && svc.supported}
+      <div class="card" class:card-ok={svc.state === 'running'} data-tooltip={svc.detail || 'Whether Soulacy starts automatically at login'}>
+        <div class="card-label">Autostart</div>
+        <div class="card-value">{svc.state === 'running' ? '● On' : svc.state === 'installed' ? '◐ Installed' : '○ Off'}</div>
+        <div class="card-sub">
+          {#if svc.state === 'not_installed'}
+            <button class="linkish" disabled={svcBusy} on:click={enableAutostart}>Start on login</button>
+          {:else}
+            <button class="linkish" disabled={svcBusy} on:click={disableAutostart}>Turn off</button>
+          {/if}
+        </div>
+      </div>
+    {/if}
 
     <div class="card" data-tooltip="Completed agent execution turns and workflow sessions since dashboard launch">
       <div class="card-label">Runs (session)</div>
@@ -709,6 +778,15 @@
 
   .banner { padding: 0.7rem 1rem; border-radius: 8px; font-size: 0.85rem; }
   .err    { background: rgba(240,96,96,.1); border: 1px solid rgba(240,96,96,.3); color: #f06060; }
+  .warn   { background: rgba(232,168,72,.1); border: 1px solid rgba(232,168,72,.32); color: #e8a848; }
+
+  /* Autostart. Deliberately shaped like the update banner rather than a
+     settings row: the cost of missing it is agents that silently stop. */
+  .autostart-banner { display: flex; align-items: center; gap: 1rem; justify-content: space-between; }
+  .autostart-text   { display: flex; flex-direction: column; gap: .2rem; }
+  .autostart-text span { color: #a9b0cc; font-size: .8rem; }
+  .autostart-err    { color: #f06060 !important; }
+  .autostart-banner button { flex-shrink: 0; }
 
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 1rem; }
   .card  {
