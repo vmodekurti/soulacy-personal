@@ -16,6 +16,7 @@
   // schedule offered, and only then is a cron armed — an agent that fires
   // unattended before anyone has seen it work is how a silent daily failure
   // gets created.
+  import TourButton from '../lib/TourButton.svelte'
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
 
@@ -151,6 +152,7 @@
 </script>
 
 <div class="page">
+  <div class="page-head"><TourButton /></div>
   {#if phase === 'ask'}
     <div class="hero">
       <h1>What would you like help with?</h1>
@@ -268,6 +270,7 @@
 
 <style>
   .page { max-width: 760px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+  .page-head { display: flex; justify-content: flex-end; margin-bottom: .4rem; }
 
   .hero h1 { font-size: 1.8rem; font-weight: 600; margin-bottom: .4rem; }
   .sub { color: #6b7294; font-size: .9rem; margin-bottom: 1.2rem; }
