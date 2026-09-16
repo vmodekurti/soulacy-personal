@@ -792,7 +792,7 @@
 
   .source-bar {
     display: flex; align-items: center; gap: .75rem;
-    padding: .5rem .85rem; background: #0e1020; border: 1px solid #1a1e36;
+    padding: .5rem .85rem; background: #0e1020; border: 1px solid var(--sl-line);
     border-radius: 8px; flex-shrink: 0;
   }
   .source-label { font-size: .7rem; color: #555a7a; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
@@ -800,7 +800,7 @@
   .source-count { font-size: .72rem; color: #555a7a; flex-shrink: 0; }
 
   .run-strip {
-    background: #0e1020; border: 1px solid #1a1e36; border-radius: 10px;
+    background: #0e1020; border: 1px solid var(--sl-line); border-radius: 10px;
     padding: .65rem; display: flex; flex-direction: column; gap: .55rem; flex-shrink: 0;
   }
   .run-strip-head { display: flex; align-items: center; gap: .7rem; }
@@ -817,7 +817,7 @@
   .run-card.failed { border-left: 3px solid #f06060; }
   .run-card.success { border-left: 3px solid #4caf82; }
   .run-status { font-size: .68rem; text-transform: uppercase; letter-spacing: .05em; color: #8b85ff; font-weight: 700; }
-  .run-time { font-size: .66rem; color: #6b7294; justify-self: end; }
+  .run-time { font-size: .66rem; color: var(--sl-text-faint); justify-self: end; }
   .run-trigger, .run-preview, .run-delivery, .run-browser { grid-column: 1 / -1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .run-trigger { color: #e7e8f5; font-size: .76rem; }
   .run-preview, .run-delivery { color: #7b82a8; font-size: .68rem; }
@@ -825,7 +825,7 @@
 
   /* E4c — Running now strip: live snapshot of in-flight sessions with hung callouts. */
   .running-strip {
-    background: #0e1020; border: 1px solid #1a1e36; border-radius: 10px;
+    background: #0e1020; border: 1px solid var(--sl-line); border-radius: 10px;
     padding: .65rem; display: flex; flex-direction: column; gap: .55rem; flex-shrink: 0;
   }
   .running-strip.has-hung { border-color: rgba(240,96,96,.4); }
@@ -852,14 +852,14 @@
   }
   .rc-head { display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; }
   .rc-agent { color: #e7e8f5; font-weight: 600; font-size: .78rem; }
-  .rc-timers { color: #6b7294; font-size: .66rem; }
+  .rc-timers { color: var(--sl-text-faint); font-size: .66rem; }
   .rc-last { color: #8b85ff; font-size: .68rem; text-transform: uppercase; letter-spacing: .04em; }
   .rc-reason { color: #f06060; font-size: .72rem; margin-top: .2rem; }
   .rc-fix    { color: #c8c7ff; font-size: .68rem; }
 
   .log-panel {
     flex: 1; min-height: 0; overflow-y: auto;
-    background: #0a0c17; border: 1px solid #1a1e36; border-radius: 10px;
+    background: #0a0c17; border: 1px solid var(--sl-line); border-radius: 10px;
     font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: .76rem; line-height: 1.5;
   }
   .empty { padding: 3rem 2rem; text-align: center; color: #555a7a; line-height: 1.7; }
@@ -893,7 +893,7 @@
   }
 
   .metrics-row { opacity: .85; }
-  .run-sum { color: #6b7294; }
+  .run-sum { color: var(--sl-text-faint); }
 
   /* F-GUI-1 — Cohort F security signals. Colors match the deployment-profile
      scheme used in Dashboard: info=blue, warn=amber, danger=red. */
@@ -939,7 +939,7 @@
   .sec-reason  { color: #c8cadf; }
   .sec-snippet {
     width: 100%; padding: .3rem .5rem;
-    background: #0a0c17; border: 1px solid #1a1e36; border-radius: 5px;
+    background: #0a0c17; border: 1px solid var(--sl-line); border-radius: 5px;
     color: #7b82a8; font-family: 'JetBrains Mono', 'Fira Code', monospace;
     font-size: .68rem; white-space: pre-wrap; word-break: break-word;
     margin-top: .1rem;
@@ -956,7 +956,7 @@
     overflow-wrap: anywhere;
     word-break: break-word;
     background: #0a0c17;
-    border: 1px solid #1a1e36;
+    border: 1px solid var(--sl-line);
     border-radius: 7px;
     color: #9da3c0;
     padding: .65rem .75rem;

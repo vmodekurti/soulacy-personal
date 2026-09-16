@@ -120,8 +120,8 @@
     background: #1c2038; color: #dfe2ff; border: 1px solid #2f3459;
     font-size: .8rem; font-weight: 600; padding: .45rem .9rem; border-radius: 8px;
   }
-  .pt-btn:hover { border-color: #6c63ff; }
-  .pt-btn.primary { background: #6c63ff; border-color: #6c63ff; color: #fff; }
+  .pt-btn:hover { border-color: var(--sl-accent); }
+  .pt-btn.primary { background: var(--sl-accent); border-color: var(--sl-accent); color: #fff; }
   .pt-btn.primary:hover { filter: brightness(1.08); }
 
   .pt-muted { color: #7d84ae; font-size: .85rem; }

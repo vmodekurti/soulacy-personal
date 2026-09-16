@@ -146,7 +146,7 @@
     padding: 4px 10px; border-radius: 6px 6px 0 0;
     background: transparent; border: 1px solid transparent;
     border-bottom: 2px solid transparent;
-    font-size: .82rem; color: var(--text-dim, #6b7294); cursor: pointer;
+    font-size: .82rem; color: var(--text-dim, var(--sl-text-faint)); cursor: pointer;
   }
   .tl-tab.active {
     color: var(--text, inherit);
@@ -162,11 +162,11 @@
   }
 
   .tl-field { display: flex; flex-direction: column; gap: 4px; font-size: .82rem; }
-  .tl-field > span { color: var(--text-dim, #6b7294); }
+  .tl-field > span { color: var(--text-dim, var(--sl-text-faint)); }
   .tl-field textarea, .tl-field select {
     width: 100%; box-sizing: border-box; font: inherit; resize: vertical;
   }
   .tl-mono { font-family: var(--mono, monospace); font-size: .8rem; }
-  .tl-note { margin: 0; font-size: .8rem; color: var(--text-dim, #6b7294); }
+  .tl-note { margin: 0; font-size: .8rem; color: var(--text-dim, var(--sl-text-faint)); }
   .tl-err { font-size: .78rem; color: var(--danger, #e5484d); }
 </style>

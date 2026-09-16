@@ -191,7 +191,7 @@
 
   .source-bar {
     display: flex; align-items: center; gap: .75rem;
-    padding: .5rem .85rem; background: #0e1020; border: 1px solid #1a1e36;
+    padding: .5rem .85rem; background: #0e1020; border: 1px solid var(--sl-line);
     border-radius: 8px; flex-shrink: 0;
   }
   .source-label { font-size: .7rem; color: #555a7a; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
@@ -200,7 +200,7 @@
 
   .level-tabs {
     display: inline-flex; gap: .25rem; padding: .15rem; flex-shrink: 0; align-self: flex-start;
-    background: #0e1020; border: 1px solid #1a1e36; border-radius: 8px;
+    background: #0e1020; border: 1px solid var(--sl-line); border-radius: 8px;
     flex-wrap: wrap;
   }
   .level-tab {
@@ -212,7 +212,7 @@
 
   .log-panel {
     flex: 1; min-height: 0; overflow-y: auto;
-    background: #0a0c17; border: 1px solid #1a1e36; border-radius: 10px;
+    background: #0a0c17; border: 1px solid var(--sl-line); border-radius: 10px;
     font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: .76rem;
     line-height: 1.55;
   }

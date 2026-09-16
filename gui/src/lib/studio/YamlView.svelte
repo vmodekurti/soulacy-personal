@@ -230,8 +230,8 @@
 
   /* Token colors */
   .yv :global(.y-key)     { color: #7fb4ff; }
-  .yv :global(.y-colon)   { color: #6b7294; }
-  .yv :global(.y-dash)    { color: #6b7294; }
+  .yv :global(.y-colon)   { color: var(--sl-text-faint); }
+  .yv :global(.y-dash)    { color: var(--sl-text-faint); }
   .yv :global(.y-str)     { color: #8ed09a; }
   .yv :global(.y-num)     { color: #e7b765; }
   .yv :global(.y-bool)    { color: #c792ea; }

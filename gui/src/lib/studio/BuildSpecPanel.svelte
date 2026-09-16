@@ -268,8 +268,8 @@
   @media (prefers-reduced-motion: reduce) { .bs-spin { animation: none; } }
   .bs { display: flex; flex-direction: column; gap: 10px; }
   .bs-head h3 { margin: 0; font-size: .95rem; }
-  .bs-sub { margin: 2px 0 0; font-size: .8rem; color: var(--text-dim, #6b7294); }
-  .bs-muted { font-size: .84rem; color: var(--text-dim, #6b7294); }
+  .bs-sub { margin: 2px 0 0; font-size: .8rem; color: var(--text-dim, var(--sl-text-faint)); }
+  .bs-muted { font-size: .84rem; color: var(--text-dim, var(--sl-text-faint)); }
   .bs-error {
     padding: 8px 10px; border-radius: 6px; font-size: .82rem;
     color: var(--danger, #e5484d);
@@ -298,12 +298,12 @@
     background: color-mix(in srgb, var(--accent, #6d5efc) 14%, transparent);
   }
   .bs-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-  .bs-label { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--text-dim, #6b7294); }
+  .bs-label { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--text-dim, var(--sl-text-faint)); }
   .bs-value { font-size: .85rem; overflow-wrap: anywhere; }
-  .bs-detail { font-size: .78rem; color: var(--text-dim, #6b7294); }
+  .bs-detail { font-size: .78rem; color: var(--text-dim, var(--sl-text-faint)); }
   /* "not specified" is deliberately visible rather than hidden. */
-  .bs-none { font-size: .82rem; font-style: italic; color: var(--text-dim, #6b7294); }
-  .bs-row.empty .bs-icon { background: color-mix(in srgb, var(--text-dim, #6b7294) 12%, transparent); }
+  .bs-none { font-size: .82rem; font-style: italic; color: var(--text-dim, var(--sl-text-faint)); }
+  .bs-row.empty .bs-icon { background: color-mix(in srgb, var(--text-dim, var(--sl-text-faint)) 12%, transparent); }
   .bs-stages { margin: 2px 0 0; padding-left: 16px; font-size: .84rem; }
   .bs-stages li { margin: 1px 0; }
 
@@ -314,15 +314,15 @@
     border: 1px solid color-mix(in srgb, var(--warn, #f0ad4e) 35%, transparent);
   }
   .bs-blocker input, .bs-blocker select { width: 100%; box-sizing: border-box; }
-  .bs-why { font-size: .78rem; color: var(--text-dim, #6b7294); }
+  .bs-why { font-size: .78rem; color: var(--text-dim, var(--sl-text-faint)); }
   .bs-manual { font-size: .78rem; }
-  .bs-manual summary { cursor: pointer; color: var(--text-dim, #6b7294); margin-bottom: 4px; }
+  .bs-manual summary { cursor: pointer; color: var(--text-dim, var(--sl-text-faint)); margin-bottom: 4px; }
 
   .bs-questions { font-size: .82rem; }
-  .bs-questions summary { cursor: pointer; color: var(--text-dim, #6b7294); }
+  .bs-questions summary { cursor: pointer; color: var(--text-dim, var(--sl-text-faint)); }
   .bs-question { display: flex; flex-direction: column; gap: 3px; margin: 6px 0; }
   .bs-question input { width: 100%; box-sizing: border-box; }
 
   .bs-actions { display: flex; gap: 8px; justify-content: flex-end; }
-  .bs-gate { margin: 0; font-size: .78rem; color: var(--text-dim, #6b7294); text-align: right; }
+  .bs-gate { margin: 0; font-size: .78rem; color: var(--text-dim, var(--sl-text-faint)); text-align: right; }
 </style>

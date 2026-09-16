@@ -17,8 +17,8 @@
   // unattended before anyone has seen it work is how a silent daily failure
   // gets created.
   import TourButton from '../lib/TourButton.svelte'
-  import { onMount } from 'svelte'
-  import { api } from '../lib/api.js'
+  import { onMount, onDestroy } from 'svelte'
+  import { api, createEventSocket } from '../lib/api.js'
 
   // The app routes on the URL hash; there is no navigate helper to import.
   const go = (page) => { window.location.hash = page }
@@ -232,6 +232,61 @@
     }
   }
 
+  // What the run is doing, while it does it.
+  //
+  // A first run takes ten to twenty seconds on a cloud model, and all the
+  // screen said was "Running it for the first time". Silence that long reads
+  // as a hang, and the person has no idea whether it is working or stuck. The
+  // gateway already streams tool.call, reasoning.step and error events over a
+  // socket; this listens for the ones belonging to the agent just created and
+  // says, in words, what is happening.
+  let runSteps = []
+  let runSocket = null
+
+  function humanTool(name) {
+    const n = String(name || '').trim()
+    if (!n) return 'a tool'
+    // mcp__maverick-mcp__market_data_get_market_overview → market data get market overview
+    const tail = n.includes('__') ? n.split('__').pop() : n
+    return tail.replace(/[._]+/g, ' ').trim()
+  }
+
+  function watchRun(agentId) {
+    stopWatching()
+    try {
+      runSocket = createEventSocket()
+    } catch {
+      runSocket = null
+      return
+    }
+    runSocket.onmessage = (e) => {
+      let ev
+      try { ev = JSON.parse(e.data) } catch { return }
+      if (ev.agent_id && ev.agent_id !== agentId) return
+      const push = (text) => {
+        // Collapse repeats: a model that calls the same tool twice should not
+        // produce two identical lines the user has to read.
+        if (runSteps[runSteps.length - 1]?.text === text) return
+        runSteps = [...runSteps, { text, at: Date.now() }].slice(-6)
+      }
+      switch (ev.type) {
+        case 'tool.call':    push('Using ' + humanTool(ev.payload?.name)); break
+        case 'tool.result':  push('Reading the result'); break
+        case 'reasoning.step': push('Working out the next step'); break
+        case 'message.out':  push('Writing it up'); break
+        case 'error':        push('Hit a problem, trying to recover'); break
+      }
+    }
+    runSocket.onerror = () => stopWatching()
+  }
+
+  function stopWatching() {
+    try { runSocket?.close() } catch { /* already gone */ }
+    runSocket = null
+  }
+
+  onDestroy(stopWatching)
+
   // Create it, then run it once, in front of the user. The schedule is not
   // armed here; that is offered after they have seen the output.
   async function createAndRun() {
@@ -243,12 +298,16 @@
       agentId = dep.agent_id
       schedulePending = !!dep.schedule_pending
       deliveryWarning = dep.delivery_warning || ''
+      runSteps = []
+      watchRun(agentId)
       const run = await api.agents.trigger(agentId)
+      stopWatching()
       // The manual-trigger endpoint returns `result`; the others return
       // `reply`. Accept both rather than depending on which one this is.
       output = run.result || run.reply || run.text || '(the agent produced no text this time)'
       phase = 'result'
     } catch (e) {
+      stopWatching()
       error = e.message || 'Could not create the assistant.'
       phase = understanding ? 'ready' : 'converse'
     } finally {
@@ -457,7 +516,18 @@
         {/if}
 
         {#if phase === 'running'}
-          <div class="panel running"><span class="spinner"></span> Running it for the first time…</div>
+          <div class="panel">
+            <div class="run-head"><span class="spinner"></span> Running it for the first time…</div>
+            {#if runSteps.length}
+              <ul class="steps">
+                {#each runSteps as st, i}
+                  <li class:current={i === runSteps.length - 1}>{st.text}</li>
+                {/each}
+              </ul>
+            {:else}
+              <p class="foot-note">Starting it up.</p>
+            {/if}
+          </div>
         {/if}
 
         {#if phase === 'result'}
@@ -518,12 +588,12 @@
   @media (max-width: 1000px) { .console { grid-template-columns: 1fr; } .rail { order: -1; } }
 
   .eyebrow-row { display: flex; align-items: center; gap: .6rem; margin-bottom: .9rem; }
-  .eyebrow { color: var(--sl-text-faint, #6b7294); font-size: .64rem; letter-spacing: .14em; text-transform: uppercase; }
+  .eyebrow { color: var(--sl-text-faint, var(--sl-text-faint)); font-size: .64rem; letter-spacing: .14em; text-transform: uppercase; }
   .head-actions { margin-left: auto; }
   .pill {
     display: inline-flex; align-items: center; gap: .35rem;
-    background: var(--sl-surface, #141626); border: 1px solid var(--sl-line, #1f2440);
-    color: var(--sl-text-dim, #a9b0cc); border-radius: 999px; padding: .2rem .6rem; font-size: .7rem;
+    background: var(--sl-surface, var(--sl-surface)); border: 1px solid var(--sl-line, #1f2440);
+    color: var(--sl-text-dim, var(--sl-text-dim)); border-radius: 999px; padding: .2rem .6rem; font-size: .7rem;
   }
   .dot { width: 6px; height: 6px; border-radius: 50%; background: #4caf82; }
 
@@ -531,12 +601,12 @@
 
   /* The intent card is the one thing on the page that matters. */
   .intent-card {
-    background: var(--sl-surface, #141626); border: 1px solid var(--sl-line, #1f2440);
+    background: var(--sl-surface, var(--sl-surface)); border: 1px solid var(--sl-line, #1f2440);
     border-radius: var(--sl-radius-lg, 14px); padding: 1.1rem 1.15rem; margin-bottom: 1.6rem;
   }
   .intent-head { display: flex; flex-direction: column; gap: .15rem; margin-bottom: .7rem; }
   .intent-title { font-size: .9rem; font-weight: 600; }
-  .intent-sub { color: var(--sl-text-faint, #6b7294); font-size: .78rem; line-height: 1.5; }
+  .intent-sub { color: var(--sl-text-faint, var(--sl-text-faint)); font-size: .78rem; line-height: 1.5; }
   .intent-card textarea {
     width: 100%; background: #0f111c; border: 1px solid var(--sl-line, #1f2440);
     border-radius: var(--sl-radius, 10px); padding: .85rem .95rem; color: inherit;
@@ -544,11 +614,11 @@
     transition: border-color .15s ease, box-shadow .15s ease;
   }
   .intent-card textarea:focus {
-    outline: none; border-color: var(--sl-accent, #6c63ff);
+    outline: none; border-color: var(--sl-accent, var(--sl-accent));
     box-shadow: 0 0 0 3px var(--sl-accent-soft, rgba(139,133,255,.12));
   }
   .intent-foot { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: .75rem; }
-  .kbd-hint { color: var(--sl-text-faint, #6b7294); font-size: .7rem; }
+  .kbd-hint { color: var(--sl-text-faint, var(--sl-text-faint)); font-size: .7rem; }
   .arrow { margin-left: .2rem; }
 
   .section-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: .7rem; }
@@ -557,11 +627,11 @@
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: .7rem; }
   .card {
     display: flex; flex-direction: column; gap: .35rem; text-align: left; cursor: pointer;
-    background: var(--sl-surface, #141626); border: 1px solid var(--sl-line, #1f2440);
+    background: var(--sl-surface, var(--sl-surface)); border: 1px solid var(--sl-line, #1f2440);
     border-radius: var(--sl-radius-lg, 14px); padding: .95rem 1rem;
     transition: border-color .15s ease, background .15s ease, transform .1s ease;
   }
-  .card:hover { border-color: var(--sl-accent, #6c63ff); background: var(--sl-surface-raised, #191c2f); }
+  .card:hover { border-color: var(--sl-accent, var(--sl-accent)); background: var(--sl-surface-raised, #191c2f); }
   .card:active { transform: translateY(1px); }
   .card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: .2rem; }
   .tile {
@@ -569,22 +639,22 @@
     background: var(--sl-accent-soft, rgba(139,133,255,.12)); border-radius: 9px;
   }
   .chip {
-    background: #11131f; border: 1px solid var(--sl-line, #1f2440); color: var(--sl-text-faint, #6b7294);
+    background: #11131f; border: 1px solid var(--sl-line, #1f2440); color: var(--sl-text-faint, var(--sl-text-faint));
     border-radius: 6px; padding: .1rem .4rem; font-size: .62rem; text-transform: uppercase; letter-spacing: .06em;
   }
   .chip.ok { background: rgba(76,175,130,.16); border-color: transparent; color: #4caf82; text-transform: none; letter-spacing: 0; }
-  .card-title { font-size: .88rem; font-weight: 500; color: var(--sl-text, #e6e9f5); }
-  .card-text { color: var(--sl-text-faint, #6b7294); font-size: .78rem; line-height: 1.5; }
+  .card-title { font-size: .88rem; font-weight: 500; color: var(--sl-text, var(--sl-text)); }
+  .card-text { color: var(--sl-text-faint, var(--sl-text-faint)); font-size: .78rem; line-height: 1.5; }
 
-  .escape-row { display: flex; align-items: center; gap: .7rem; margin-top: 1.6rem; color: var(--sl-text-faint, #6b7294); font-size: .78rem; flex-wrap: wrap; }
+  .escape-row { display: flex; align-items: center; gap: .7rem; margin-top: 1.6rem; color: var(--sl-text-faint, var(--sl-text-faint)); font-size: .78rem; flex-wrap: wrap; }
 
   /* The follow-up reads as the same product: same card, same spacing. */
   .thread { display: flex; flex-direction: column; gap: 1rem; }
-  .msg .who { color: var(--sl-text-faint, #6b7294); font-size: .62rem; text-transform: uppercase; letter-spacing: .1em; }
+  .msg .who { color: var(--sl-text-faint, var(--sl-text-faint)); font-size: .62rem; text-transform: uppercase; letter-spacing: .1em; }
   .bubble { margin-top: .25rem; font-size: .93rem; line-height: 1.6; }
-  .msg.you .bubble { color: var(--sl-text, #e6e9f5); font-weight: 500; }
+  .msg.you .bubble { color: var(--sl-text, var(--sl-text)); font-weight: 500; }
   .msg.soulacy .bubble {
-    color: var(--sl-text-dim, #a9b0cc); background: var(--sl-surface, #141626);
+    color: var(--sl-text-dim, var(--sl-text-dim)); background: var(--sl-surface, var(--sl-surface));
     border: 1px solid var(--sl-line, #1f2440); border-radius: var(--sl-radius-lg, 14px);
     padding: .8rem .95rem;
   }
@@ -594,23 +664,33 @@
     flex: 1; background: #0f111c; border: 1px solid var(--sl-line, #1f2440);
     border-radius: var(--sl-radius, 10px); padding: .7rem .85rem; color: inherit; font: inherit; font-size: .9rem;
   }
-  .reply-card input:focus { outline: none; border-color: var(--sl-accent, #6c63ff); }
-  .thinking { display: flex; align-items: center; gap: .5rem; color: var(--sl-text-faint, #6b7294); font-size: .8rem; }
+  .reply-card input:focus { outline: none; border-color: var(--sl-accent, var(--sl-accent)); }
+  .thinking { display: flex; align-items: center; gap: .5rem; color: var(--sl-text-faint, var(--sl-text-faint)); font-size: .8rem; }
 
   .panel {
-    background: var(--sl-surface, #141626); border: 1px solid var(--sl-line, #1f2440);
+    background: var(--sl-surface, var(--sl-surface)); border: 1px solid var(--sl-line, #1f2440);
     border-radius: var(--sl-radius-lg, 14px); padding: 1.1rem 1.15rem;
   }
   .panel h2 { font-size: .98rem; font-weight: 600; margin-bottom: .55rem; }
-  .panel.running { display: flex; align-items: center; gap: .6rem; color: var(--sl-text-dim, #a9b0cc); font-size: .9rem; }
+  .run-head { display: flex; align-items: center; gap: .6rem; color: var(--sl-text-dim, var(--sl-text-dim)); font-size: .9rem; }
+  .steps { list-style: none; margin: .7rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; }
+  .steps li {
+    color: var(--sl-text-faint, var(--sl-text-faint)); font-size: .8rem; padding-left: 1rem; position: relative;
+  }
+  .steps li::before { content: '·'; position: absolute; left: .3rem; }
+  /* The newest line is the one that is happening now. */
+  .steps li.current { color: var(--sl-text, var(--sl-text)); }
+  .steps li.current::before { content: '→'; left: .1rem; }
+
+  .panel.running { display: flex; align-items: center; gap: .6rem; color: var(--sl-text-dim, var(--sl-text-dim)); font-size: .9rem; }
   .plan { margin: 0 0 .5rem 1.05rem; }
-  .plan li { font-size: .89rem; line-height: 1.65; color: var(--sl-text, #e6e9f5); }
+  .plan li { font-size: .89rem; line-height: 1.65; color: var(--sl-text, var(--sl-text)); }
   .panel-foot { display: flex; align-items: center; gap: .9rem; margin-top: .8rem; flex-wrap: wrap; }
-  .foot-note { color: var(--sl-text-faint, #6b7294); font-size: .76rem; line-height: 1.5; margin-top: .4rem; }
+  .foot-note { color: var(--sl-text-faint, var(--sl-text-faint)); font-size: .76rem; line-height: 1.5; margin-top: .4rem; }
   .output {
     background: #0f111c; border: 1px solid var(--sl-line, #1f2440); border-radius: var(--sl-radius, 10px);
     padding: .9rem 1rem; white-space: pre-wrap; word-break: break-word;
-    font-size: .85rem; line-height: 1.6; color: var(--sl-text, #e6e9f5); max-height: 420px; overflow: auto;
+    font-size: .85rem; line-height: 1.6; color: var(--sl-text, var(--sl-text)); max-height: 420px; overflow: auto;
   }
   .offer {
     display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
@@ -625,10 +705,10 @@
 
   .setup .tabs { display: flex; gap: .35rem; margin: .6rem 0; flex-wrap: wrap; }
   .setup .tabs button {
-    background: #0f111c; border: 1px solid var(--sl-line, #1f2440); color: var(--sl-text-dim, #a9b0cc);
+    background: #0f111c; border: 1px solid var(--sl-line, #1f2440); color: var(--sl-text-dim, var(--sl-text-dim));
     border-radius: 8px; padding: .35rem .7rem; font-size: .78rem; cursor: pointer;
   }
-  .setup .tabs button.on { border-color: var(--sl-accent, #6c63ff); color: var(--sl-text, #e6e9f5); }
+  .setup .tabs button.on { border-color: var(--sl-accent, var(--sl-accent)); color: var(--sl-text, var(--sl-text)); }
   .setup select, .key-row input {
     background: #0f111c; border: 1px solid var(--sl-line, #1f2440); border-radius: 8px;
     padding: .45rem .6rem; color: inherit; font-size: .82rem;
@@ -646,30 +726,30 @@
   .row-side { display: flex; align-items: center; gap: .5rem; flex-shrink: 0; }
   .pull-row { display: flex; justify-content: space-between; font-size: .8rem; }
   .pull-row code { color: #8b85ff; }
-  .bar { height: 5px; background: #1a1e36; border-radius: 3px; overflow: hidden; margin: .4rem 0 .3rem; }
-  .fill { height: 100%; background: var(--sl-accent, #6c63ff); transition: width .3s ease; }
+  .bar { height: 5px; background: var(--sl-line); border-radius: 3px; overflow: hidden; margin: .4rem 0 .3rem; }
+  .fill { height: 100%; background: var(--sl-accent, var(--sl-accent)); transition: width .3s ease; }
 
   /* The rail: what you actually have, not a telemetry feed. */
   .rail { display: flex; flex-direction: column; gap: .5rem; }
   .rail-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: .2rem; }
   .rail-head h2 { font-size: .85rem; font-weight: 600; }
   .rail-card {
-    text-align: left; cursor: pointer; background: var(--sl-surface, #141626);
+    text-align: left; cursor: pointer; background: var(--sl-surface, var(--sl-surface));
     border: 1px solid var(--sl-line, #1f2440); border-radius: var(--sl-radius, 10px);
     padding: .65rem .75rem; display: flex; flex-direction: column; gap: .2rem;
     transition: border-color .15s ease;
   }
-  .rail-card:hover { border-color: var(--sl-accent, #6c63ff); }
+  .rail-card:hover { border-color: var(--sl-accent, var(--sl-accent)); }
   .rail-top { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
-  .rail-name { font-size: .82rem; color: var(--sl-text, #e6e9f5); }
+  .rail-name { font-size: .82rem; color: var(--sl-text, var(--sl-text)); }
   .state { font-size: .62rem; border-radius: 5px; padding: .08rem .35rem; }
   .state.on { background: rgba(76,175,130,.16); color: #4caf82; }
-  .state.off { background: #11131f; color: var(--sl-text-faint, #6b7294); }
-  .rail-desc { color: var(--sl-text-faint, #6b7294); font-size: .72rem; line-height: 1.45;
+  .state.off { background: #11131f; color: var(--sl-text-faint, var(--sl-text-faint)); }
+  .rail-desc { color: var(--sl-text-faint, var(--sl-text-faint)); font-size: .72rem; line-height: 1.45;
                display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
   .spinner {
-    width: 14px; height: 14px; border: 2px solid #1a1e36; border-top-color: var(--sl-accent, #6c63ff);
+    width: 14px; height: 14px; border: 2px solid var(--sl-line); border-top-color: var(--sl-accent, var(--sl-accent));
     border-radius: 50%; animation: spin .8s linear infinite; display: inline-block;
   }
   @keyframes spin { to { transform: rotate(360deg); } }

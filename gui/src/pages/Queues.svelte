@@ -196,7 +196,7 @@
   .create-row input { flex: 1; }
   .queue-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: .6rem; }
   .queue-card { text-align: left; background: #15182a; border: 1px solid #252a46; border-radius: 8px; padding: .8rem; color: #e8eaf6; }
-  .queue-card.active { border-color: #6c63ff; background: rgba(108, 99, 255, .16); }
+  .queue-card.active { border-color: var(--sl-accent); background: rgba(108, 99, 255, .16); }
   .queue-card strong, .queue-card small { display: block; }
   .queue-card small { margin-top: .25rem; color: #8f96bb; }
   .split { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 1rem; }

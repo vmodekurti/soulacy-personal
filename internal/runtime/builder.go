@@ -145,6 +145,26 @@ func (e *Engine) BuilderChat(ctx context.Context, sessionID, message, provider, 
 
 	reply, understanding := parseBuilderResponse(resp.Content)
 
+	// A reply that meant to be JSON and did not parse was almost certainly cut
+	// off. Retry once with room to finish rather than spending the user's turn
+	// on an apology — reasoning models spend part of the budget thinking, and
+	// how much varies with the question.
+	if understanding == nil && looksLikeJSON(resp.Content) {
+		e.log.Debug("builder reply truncated; retrying with a larger budget",
+			zap.String("session", sessionID), zap.Int("chars", len(resp.Content)))
+		if retry, rerr := e.llmRouter.Complete(ctx, provider, llm.CompletionRequest{
+			Messages:       msgs,
+			Temperature:    0.6,
+			MaxTokens:      12000,
+			ResponseFormat: "json_schema",
+			JSONSchema:     builderResponseSchema,
+		}); rerr == nil {
+			if r2, u2 := parseBuilderResponse(retry.Content); u2 != nil {
+				resp, reply, understanding = retry, r2, u2
+			}
+		}
+	}
+
 	sess.mu.Lock()
 	// Store what the assistant actually said, not the raw model output. A
 	// truncated JSON fragment in the history is worse than useless: the model
@@ -833,6 +853,12 @@ The "system_prompt" field is the actual instructions the deployed agent will see
 - If the user said "send to Telegram chat 8546291328", put that exact ID into system_prompt and mention it in the tool's description.
 - Multi-paragraph system_prompts are encouraged when the user described a multi-step procedure. Don't compress.
 - Add a final "Important:" paragraph noting failure modes and constraints you inferred.
+
+## Do not write the agent's instructions until you have what you need
+While you are still asking questions, set system_prompt to null. Writing the
+full instructions on every turn fills your reply, gets it cut off mid-JSON, and
+the user sees nothing. Write system_prompt once, on the turn where confidence
+reaches 0.8 and nothing is missing.
 
 ## The reply field is spoken to the user
 The reply field is one or two sentences addressed to the person, and nothing

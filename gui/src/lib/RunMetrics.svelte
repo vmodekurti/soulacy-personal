@@ -44,7 +44,7 @@
 <style>
   .run-metrics {
     display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.35rem;
-    font-size: 0.7rem; font-family: monospace; color: #6b7294;
+    font-size: 0.7rem; font-family: monospace; color: var(--sl-text-faint);
     line-height: 1.4;
   }
   .sep { color: #3d4360; }

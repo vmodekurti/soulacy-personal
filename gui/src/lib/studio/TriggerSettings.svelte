@@ -226,7 +226,7 @@
     border: 1px solid var(--border, #2a3350); border-radius: 7px;
     font-size: 12px;
   }
-  select:focus, input:focus, textarea:focus { outline: none; border-color: var(--accent, #6c63ff); }
+  select:focus, input:focus, textarea:focus { outline: none; border-color: var(--accent, var(--sl-accent)); }
   textarea { resize: vertical; }
   .hint, .mode-note, .empty { margin: 0; color: var(--text-muted, #8b93ab); font-size: 11px; line-height: 1.45; }
   .mode-note { padding: 7px 9px; border-radius: 7px; background: var(--bg, #0f1420); }

@@ -20,7 +20,7 @@
   .output-node {
     min-width: 120px;
     background: linear-gradient(160deg, #2a2350, #1b2235);
-    border: 1px dashed var(--accent, #6c63ff);
+    border: 1px dashed var(--accent, var(--sl-accent));
     border-radius: 14px 999px 999px 14px;
     padding: 10px 16px;
     text-align: center;
@@ -30,7 +30,7 @@
     font-size: 9px;
     text-transform: uppercase;
     letter-spacing: 1px;
-    color: var(--accent, #6c63ff);
+    color: var(--accent, var(--sl-accent));
   }
   .channels {
     display: flex;
@@ -42,7 +42,7 @@
   .channel {
     font-size: 11px;
     background: var(--accent-dim, rgba(108, 99, 255, 0.18));
-    border: 1px solid var(--accent, #6c63ff);
+    border: 1px solid var(--accent, var(--sl-accent));
     border-radius: 999px;
     padding: 1px 8px;
   }

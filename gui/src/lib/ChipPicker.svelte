@@ -215,7 +215,7 @@
     cursor: text;
     transition: border-color .15s;
   }
-  .chip-picker:focus-within { border-color: #6c63ff; box-shadow: 0 0 0 2px rgba(108, 99, 255, 0.15); }
+  .chip-picker:focus-within { border-color: var(--sl-accent); box-shadow: 0 0 0 2px rgba(108, 99, 255, 0.15); }
   .chip-picker.disabled { opacity: .55; cursor: not-allowed; }
 
   .chips-row {
@@ -253,7 +253,7 @@
 
   .suggestions {
     position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 50;
-    background: #141626; border: 1px solid #2a2f4a; border-radius: 8px;
+    background: var(--sl-surface); border: 1px solid #2a2f4a; border-radius: 8px;
     max-height: 280px; overflow-y: auto;
     box-shadow: 0 8px 24px rgba(0,0,0,.45);
   }
@@ -273,5 +273,5 @@
   }
   .suggestion:hover, .suggestion.active { background: rgba(108,99,255,.12); }
   .suggestion-label { font-family: monospace; color: #8b85ff; flex-shrink: 0; }
-  .suggestion-desc { color: #6b7294; font-size: .75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .suggestion-desc { color: var(--sl-text-faint); font-size: .75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

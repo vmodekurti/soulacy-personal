@@ -626,7 +626,7 @@
   }
   :global(input:focus), :global(textarea:focus), :global(select:focus) {
 
-    border-color: #6c63ff;
+    border-color: var(--sl-accent);
     box-shadow: 0 0 0 2px rgba(108, 99, 255, 0.15);
   }
   :global(input:disabled), :global(textarea:disabled), :global(select:disabled) {
@@ -684,15 +684,15 @@
      makes a dark interface look like a control panel rather than something
      you talk to. Tokens here so a later change is one edit, not twenty-six. */
   :global(:root) {
-    --sl-accent: #6c63ff;
+    --sl-accent: var(--sl-accent);
     --sl-accent-hover: #5b52ef;
     --sl-accent-soft: rgba(139, 133, 255, 0.12);
-    --sl-surface: #141626;
+    --sl-surface: var(--sl-surface);
     --sl-surface-raised: #191c2f;
     --sl-line: #1f2440;
-    --sl-text: #e6e9f5;
-    --sl-text-dim: #a9b0cc;
-    --sl-text-faint: #6b7294;
+    --sl-text: var(--sl-text);
+    --sl-text-dim: var(--sl-text-dim);
+    --sl-text-faint: var(--sl-text-faint);
     --sl-radius: 10px;
     --sl-radius-lg: 14px;
   }
@@ -712,9 +712,9 @@
      reads as lighter than a button, but it has to read as pressable. */
   :global(.linkish) {
     background: none; border: none; padding: 0;
-    color: var(--sl-accent, #6c63ff); font: inherit; font-size: inherit;
+    color: var(--sl-accent, var(--sl-accent)); font: inherit; font-size: inherit;
     cursor: pointer; text-decoration: underline; text-underline-offset: 3px;
-    text-decoration-color: color-mix(in srgb, var(--sl-accent, #6c63ff) 45%, transparent);
+    text-decoration-color: color-mix(in srgb, var(--sl-accent, var(--sl-accent)) 45%, transparent);
     transition: color .15s ease, text-decoration-color .15s ease;
   }
   :global(.linkish:hover:not(:disabled)) {
@@ -750,7 +750,7 @@
   .sidebar {
     width: 210px; flex-shrink: 0;
     background: #0e1020;
-    border-right: 1px solid #1a1e36;
+    border-right: 1px solid var(--sl-line);
     display: flex; flex-direction: column;
     transition: width 0.16s ease;
   }
@@ -770,7 +770,7 @@
 
   .nav-toggle {
     margin-left: auto; background: none; border: none;
-    color: #6b7294; font-size: 0.9rem; line-height: 1;
+    color: var(--sl-text-faint); font-size: 0.9rem; line-height: 1;
     padding: 0.2rem 0.35rem; border-radius: 6px; cursor: pointer;
   }
   .nav-toggle:hover { background: #181b30; color: #c8cadf; }
@@ -788,7 +788,7 @@
       min-height: calc(56px + env(safe-area-inset-top));
       padding: calc(0.4rem + env(safe-area-inset-top)) max(0.65rem, env(safe-area-inset-right)) 0.4rem max(0.65rem, env(safe-area-inset-left));
       background: #0e1020;
-      border-bottom: 1px solid #1a1e36;
+      border-bottom: 1px solid var(--sl-line);
       flex-shrink: 0;
     }
     .hamburger {
@@ -879,16 +879,16 @@
   nav { flex: 1; padding: 0.5rem 0.5rem; overflow-y: auto; }
   /* Uppercase section header (CAPABILITIES / INTEGRATIONS / …). */
   /* Mode switch. Small and quiet: it is a preference, not a feature. */
-  .mode-switch { padding: .5rem .75rem .6rem; border-bottom: 1px solid #1a1e36; }
-  .mode-label  { display: block; color: #6b7294; font-size: .62rem; text-transform: uppercase;
+  .mode-switch { padding: .5rem .75rem .6rem; border-bottom: 1px solid var(--sl-line); }
+  .mode-label  { display: block; color: var(--sl-text-faint); font-size: .62rem; text-transform: uppercase;
                  letter-spacing: .07em; margin-bottom: .3rem; }
   .mode-buttons { display: flex; gap: .2rem; }
   .mode-btn {
-    flex: 1; background: #11131f; border: 1px solid #1a1e36; color: #6b7294;
+    flex: 1; background: #11131f; border: 1px solid var(--sl-line); color: var(--sl-text-faint);
     border-radius: 6px; padding: .22rem .1rem; font-size: .66rem; cursor: pointer;
   }
-  .mode-btn:hover { color: #a9b0cc; }
-  .mode-btn.on { border-color: #8b85ff; color: #e6e9f5; background: rgba(139,133,255,.1); }
+  .mode-btn:hover { color: var(--sl-text-dim); }
+  .mode-btn.on { border-color: #8b85ff; color: var(--sl-text); background: rgba(139,133,255,.1); }
 
   .nav-section {
     padding: 0.9rem 0.65rem 0.4rem;
@@ -936,7 +936,7 @@
   .sidebar-footer {
     display: flex; align-items: center; justify-content: space-between;
     padding: 0.65rem 1rem;
-    border-top: 1px solid #1a1e36;
+    border-top: 1px solid var(--sl-line);
   }
   .conn-dot { font-size: 0.72rem; font-family: monospace; color: #5a3030; }
   .conn-dot.live { color: #4caf82; }
@@ -945,7 +945,7 @@
     font-size: 0.72rem; font-family: monospace; text-align: left;
   }
   .conn-dot.auth-required:hover { color: #ffc08a; text-decoration: underline; }
-  .icon-btn { background: none; color: #6b7294; font-size: 0.85rem; padding: 0.15rem; }
+  .icon-btn { background: none; color: var(--sl-text-faint); font-size: 0.85rem; padding: 0.15rem; }
   .icon-btn:hover { color: #e8eaf6; }
 
   /* ── Main content ────────────────────────────────────────────────── */
@@ -973,7 +973,7 @@
     z-index: 100;
   }
   .modal {
-    background: #141626; border: 1px solid #2a2f4a; border-radius: 12px;
+    background: var(--sl-surface); border: 1px solid #2a2f4a; border-radius: 12px;
     padding: 1.5rem; width: 420px; max-width: 92vw; max-height: 88vh; overflow-y: auto;
     display: flex; flex-direction: column; gap: 1rem;
   }
