@@ -690,8 +690,8 @@ type fakeFailureNotifier struct {
 }
 
 type fakeFailureCall struct {
-	def   *agent.Definition
-	msg   message.Message
+	def    *agent.Definition
+	msg    message.Message
 	errMsg string
 }
 
@@ -746,10 +746,10 @@ func TestHandle_LLMErrorPropagated(t *testing.T) {
 	agentDir := t.TempDir()
 	loader := NewLoader([]string{agentDir})
 	def := &agent.Definition{
-		ID:      "err-llm-agent",
-		Name:    "LLM Error Agent",
-		Enabled: true,
-		LLM:     agent.LLMConfig{Provider: "error-provider", Model: "fail-model"},
+		ID:       "err-llm-agent",
+		Name:     "LLM Error Agent",
+		Enabled:  true,
+		LLM:      agent.LLMConfig{Provider: "error-provider", Model: "fail-model"},
 		MaxTurns: 2,
 		Builtins: strListPtr(),
 	}

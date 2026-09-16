@@ -7,6 +7,20 @@ to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Secondary actions look like buttons. The `.linkish` class had no style
+  anywhere in the app, so seventeen buttons across six pages rendered as bare
+  text on a dark background — "Open Studio" and "Change something" were both
+  reported as not looking like buttons, which was the correct read. The class
+  now has an affordance, and the actions sitting beside a primary button are
+  buttons rather than links.
+- A new agent's first run no longer shows a wall of raw JSON. Tool results
+  reach the model wrapped in an `external_content` envelope that marks where
+  untrusted data begins; that wrapper is scaffolding, and leaving it on also
+  stopped the payload parsing, so the humaniser fell through to raw text and
+  a market-data result was shown to the user as the agent's answer. The
+  wrapper is now stripped before anything is displayed, and a built agent gets
+  25 turns instead of 10 — at ten it ran out before it could write anything,
+  which is what produced the dump.
 - The builder stops forgetting what you already told it. Its only memory was
   the raw text of its own previous replies, so one truncated turn poisoned the
   history: in a real session it collected the purpose, the topic and the

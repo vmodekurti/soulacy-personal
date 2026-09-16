@@ -148,9 +148,9 @@ func (a *fakeArchive) Search(string, string, int) ([]memory.Entry, error) { retu
 func (a *fakeArchive) ReadByScope(string, string, memory.Scope, int) ([]memory.Entry, error) {
 	return nil, nil
 }
-func (a *fakeArchive) ReadGlobal(string, int) ([]memory.Entry, error)  { return nil, nil }
-func (a *fakeArchive) Prune(string, time.Time) (int64, error)          { return 0, nil }
-func (a *fakeArchive) Close() error                                    { return nil }
+func (a *fakeArchive) ReadGlobal(string, int) ([]memory.Entry, error) { return nil, nil }
+func (a *fakeArchive) Prune(string, time.Time) (int64, error)         { return 0, nil }
+func (a *fakeArchive) Close() error                                   { return nil }
 
 var _ storage.MemoryBackend = (*fakeArchive)(nil)
 
