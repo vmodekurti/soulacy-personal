@@ -684,15 +684,15 @@
      makes a dark interface look like a control panel rather than something
      you talk to. Tokens here so a later change is one edit, not twenty-six. */
   :global(:root) {
-    --sl-accent: var(--sl-accent);
+    --sl-accent: #6c63ff;
     --sl-accent-hover: #5b52ef;
     --sl-accent-soft: rgba(139, 133, 255, 0.12);
-    --sl-surface: var(--sl-surface);
+    --sl-surface: #141626;
     --sl-surface-raised: #191c2f;
     --sl-line: #1f2440;
-    --sl-text: var(--sl-text);
-    --sl-text-dim: var(--sl-text-dim);
-    --sl-text-faint: var(--sl-text-faint);
+    --sl-text: #e6e9f5;
+    --sl-text-dim: #a9b0cc;
+    --sl-text-faint: #6b7294;
     --sl-radius: 10px;
     --sl-radius-lg: 14px;
   }

@@ -7,6 +7,14 @@ to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Text is readable again. The bulk conversion of colour literals to design
+  tokens rewrote the token definitions themselves, so each one pointed at
+  itself — `--sl-text-faint: var(--sl-text-faint)` — and resolved to nothing.
+  Card titles and descriptions fell back to the inherited colour and became
+  almost invisible. Nothing caught it: the build succeeded, every test passed,
+  and the page still rendered. A test now fails the build if any token is
+  defined as itself, does not resolve to a concrete value, or is used without
+  being defined.
 - The builder stops apologising for its own cut-off replies. It was writing
   the agent's full instructions into every turn, which filled the response and
   truncated the JSON before it finished — so on the very first message the user
