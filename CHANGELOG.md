@@ -47,6 +47,15 @@ to follow [Semantic Versioning](https://semver.org/).
   and the workspace login page.
 
 ### Added
+- Soulacy can be set to start on login from the dashboard. This was the
+  single most consequential first-day setting hidden behind a terminal: with
+  no autostart the gateway dies with the window that launched it, every
+  scheduled agent stops, and the failure is silent and usually overnight. A
+  dashboard-only user could neither see nor fix it. The dashboard now shows
+  the state, warns when it is off, and turns it on in one click. The launchd
+  and systemd logic moved to `internal/service`, which `sy daemon`, `sy
+  doctor` and the gateway all share, so the terminal and the browser cannot
+  drift apart about what "installed" means.
 - Studio understands the iPhone. It could already name the device tools, since
   its catalogue comes from the live engine, but it could not recognise a
   request for them: "brief me when I get to the office" produced a manually
