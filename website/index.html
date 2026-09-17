@@ -359,7 +359,7 @@
         <div class="rounded-xl border border-white/10 p-5">
           <div class="text-xs text-ink-400 code-font mb-2">how an agent is written</div>
           <p class="text-sm text-ink-400 leading-relaxed"><span class="text-ink-200 font-medium">Others:</span> a program in Python or JavaScript, or boxes on a canvas that export poorly and diff worse.</p>
-          <p class="mt-2 text-sm text-ink-100 leading-relaxed"><span class="text-signal-400 font-medium">Soulacy:</span> one YAML file anyone can read, review in a pull request, and roll back. Studio writes it from plain English.</p>
+          <p class="mt-2 text-sm text-ink-100 leading-relaxed"><span class="text-signal-400 font-medium">Soulacy:</span> one YAML file anyone can read, review in a pull request, and roll back. You get it by asking Genie in plain English.</p>
         </div>
       </div>
 
@@ -718,7 +718,7 @@
         <div class="card p-6">
           <div class="text-xs text-ink-400 code-font mb-2">how you describe an agent</div>
           <h4 class="font-semibold text-ink-100">One readable file</h4>
-          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Not a program you write, not a canvas you drag boxes around. A Soulacy agent is a single YAML file anyone can read, review in a pull request, and roll back. Studio can write it from plain English and repair it when it breaks.</p>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Not a program you write, not a canvas you drag boxes around. A Soulacy agent is a single YAML file anyone can read, review in a pull request, and roll back &mdash; but you do not have to write one. You ask Genie for what you want, and it builds the file. Studio is there when you want to edit it.</p>
         </div>
         <div class="card p-6">
           <div class="text-xs text-ink-400 code-font mb-2">what keeps it safe</div>
@@ -976,6 +976,11 @@
 
       <div class="mt-10 grid md:grid-cols-2 lg:grid-cols-3 gap-4">
         <div class="card p-5">
+          <div class="text-lg mb-2">🪄</div>
+          <h3 class="font-semibold text-ink-100">Genie, the way in</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Ask a question and get an answer; ask for something to be set up and it gets built. Genie hands the request to the same builder behind Studio, which knows what is actually installed on your gateway and asks for what it still needs instead of inventing it. Most people never open anything else.</p>
+        </div>
+        <div class="card p-5">
           <div class="text-lg mb-2">🧭</div>
           <h3 class="font-semibold text-ink-100">Studio</h3>
           <p class="mt-2 text-sm text-ink-400 leading-relaxed">Intent-first agent authoring with authoritative trigger, destination, provider, and model controls. Auto is the default; fixed-graph Workflow stays explicit and experimental. Debug repairs remain diff-previewed and reviewable.</p>
@@ -1076,7 +1081,7 @@
         </div>
         <div class="card p-5">
           <h3 class="font-semibold text-ink-100">Not a low-code node editor.</h3>
-          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Studio helps, but the audience is developers/ops who prefer YAML and Python tools. If you want drag-and-drop nodes, use n8n or Flowise.</p>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">You build by asking Genie, and what comes out is a readable file rather than boxes on a canvas. The file is there when you want it &mdash; to review, diff, or edit in Studio &mdash; not as the price of getting started. If you want drag-and-drop nodes, use n8n or Flowise.</p>
         </div>
         <div class="card p-5">
           <h3 class="font-semibold text-ink-100">Not "just another agent framework."</h3>
@@ -1131,6 +1136,7 @@
           <li><a href="https://docs.soulacy.io" class="hover:text-ink-100">Docs</a></li>
           <li><a href="https://docs.soulacy.io/recent-updates/" class="hover:text-ink-100">Recent updates</a></li>
           <li><a href="https://docs.soulacy.io/getting-started/quickstart/" class="hover:text-ink-100">Quickstart</a></li>
+          <li><a href="https://docs.soulacy.io/using/genie/" class="hover:text-ink-100">Genie</a></li>
           <li><a href="https://docs.soulacy.io/using/studio/" class="hover:text-ink-100">Studio</a></li>
           <li><a href="https://docs.soulacy.io/security/" class="hover:text-ink-100">Security</a></li>
         </ul>

@@ -42,8 +42,10 @@ model, and companion-client requirements.
 | Review and reverse a record change | [Safe Undo: account handoff](use-cases/safe-undo-handoff.md) | A field-by-field preview, safe apply, and conflict-aware undo |
 | Test a revision before live use | [Release a checked agent](use-cases/verified-release.md) | A candidate with explicit checks and a staged promotion decision |
 
-## Four words worth knowing
+## Five words worth knowing
 
+- **Genie:** the agent you talk to. It answers questions, and builds the agents
+  that answer them again later. See [talking to Genie](using/genie.md).
 - **Gateway:** the running Soulacy server. Closing the browser does not stop a
   server, but turning off the computer hosting it does.
 - **Agent:** saved instructions plus a model, permitted tools, and optional
@@ -78,8 +80,12 @@ See [security](security/index.md) and [authentication](configuration/auth.md).
 ## Need a different kind of help?
 
 - **Something failed:** [Find the failing step](troubleshooting/first-checks.md).
-- **Writing YAML:** [first-agent walkthrough](getting-started/first-agent.md) and
+- **Building an agent:** ask [Genie](using/genie.md). If you would rather write
+  it yourself: [first-agent walkthrough](getting-started/first-agent.md) and
   [complete schema](agents/soul-yaml.md).
+- **Working out what your deployment can do:**
+  [capabilities and limits](configuration/deployment.md) — particularly on a
+  platform where you have no shell.
 - **Operating a server:** [configuration](configuration/index.md),
   [cloud setup](deployment/cloud.md), and [upgrades](deployment/upgrades.md).
 - **Contributing:** [documentation and validation checklist](contributing/documentation.md).
