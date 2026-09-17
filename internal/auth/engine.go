@@ -27,6 +27,10 @@ type Config struct {
 	// restart). Set to a stable random hex string in production.
 	JWTSecret string
 
+	// RefreshStorePath is where refresh tokens are kept across restarts.
+	// Empty keeps them in memory, which logs every device out on restart.
+	RefreshStorePath string
+
 	// JWTAccessTTL is the lifetime of access tokens. Default 15m.
 	JWTAccessTTL time.Duration
 
@@ -101,7 +105,7 @@ func New(cfg Config, staticKey string, log *zap.Logger) (*Engine, error) {
 	}
 
 	if cfg.Mode == "jwt" {
-		iss, err := newIssuer(cfg.JWTSecret, cfg.JWTAccessTTL, cfg.JWTRefreshTTL)
+		iss, err := newIssuer(cfg.JWTSecret, cfg.JWTAccessTTL, cfg.JWTRefreshTTL, cfg.RefreshStorePath)
 		if err != nil {
 			return nil, fmt.Errorf("auth jwt issuer: %w", err)
 		}
@@ -110,10 +114,15 @@ func New(cfg Config, staticKey string, log *zap.Logger) (*Engine, error) {
 		if cfg.JWTSecret == "" {
 			secretSource = "ephemeral (not persistent across restarts — set auth.jwt_secret in production)"
 		}
+		sessions := "in memory (every restart signs devices out)"
+		if cfg.RefreshStorePath != "" {
+			sessions = "persisted"
+		}
 		log.Info("auth: JWT mode",
 			zap.Duration("access_ttl", cfg.JWTAccessTTL),
 			zap.Duration("refresh_ttl", cfg.JWTRefreshTTL),
 			zap.String("secret", secretSource),
+			zap.String("sessions", sessions),
 		)
 	}
 

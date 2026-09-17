@@ -51,7 +51,7 @@ import (
 // newTestIssuer creates an Issuer with a fixed secret and the given TTLs.
 func newTestIssuer(t *testing.T, accessTTL, refreshTTL time.Duration) *Issuer {
 	t.Helper()
-	iss, err := newIssuer("test-secret-123", accessTTL, refreshTTL)
+	iss, err := newIssuer("test-secret-123", accessTTL, refreshTTL, "")
 	if err != nil {
 		t.Fatalf("newIssuer: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestIssuerVerifyRejectsWrongSecret(t *testing.T) {
 	issuerB := newTestIssuer(t, 15*time.Minute, time.Hour)
 
 	// Issue from A, try to verify with B's different secret.
-	issuerBDifferent, err := newIssuer("completely-different-secret", 15*time.Minute, time.Hour)
+	issuerBDifferent, err := newIssuer("completely-different-secret", 15*time.Minute, time.Hour, "")
 	if err != nil {
 		t.Fatalf("newIssuer: %v", err)
 	}
@@ -918,7 +918,7 @@ func TestClaimsFromCtxNilWhenAbsent(t *testing.T) {
 // causes newIssuer to generate a random key and that the resulting issuer
 // can sign and verify tokens.
 func TestNewIssuerEphemeralSecret(t *testing.T) {
-	iss, err := newIssuer("", 15*time.Minute, time.Hour)
+	iss, err := newIssuer("", 15*time.Minute, time.Hour, "")
 	if err != nil {
 		t.Fatalf("newIssuer with empty secret: %v", err)
 	}
@@ -1308,7 +1308,7 @@ func TestOIDCValidatorClose(t *testing.T) {
 // TestRefreshStoreExpiredToken verifies that get() rejects an entry whose
 // expiresAt is in the past without panicking.
 func TestRefreshStoreExpiredToken(t *testing.T) {
-	s := newRefreshStore()
+	s := newRefreshStore("")
 	defer s.close()
 
 	// Manually insert an already-expired entry.
@@ -1330,7 +1330,7 @@ func TestRefreshStoreExpiredToken(t *testing.T) {
 
 // TestRefreshStoreSingleUse verifies that a valid token can only be used once.
 func TestRefreshStoreSingleUse(t *testing.T) {
-	s := newRefreshStore()
+	s := newRefreshStore("")
 	defer s.close()
 
 	tok := s.put("alice", "alice@example.com", "admin", time.Now().Add(time.Hour))
