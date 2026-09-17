@@ -47,10 +47,18 @@ services:
       SOULACY_VECTOR_COLLECTION: soulacy_memory
       SOULACY_VECTOR_DIMS: 768
 
-      # LLM — default to Ollama (can be overridden in .env)
-      SOULACY_LLM_DEFAULT_PROVIDER: ${SOULACY_LLM_DEFAULT_PROVIDER:-ollama}
+      # LLM — the container does not pick the provider or the model.
+      #
+      # An env var beats the config file in viper, so a literal default here
+      # ("ollama", "llama3") is not a fallback: it is an override that reasserts
+      # itself on every `docker compose up`, silently undoing whatever the user
+      # chose in the GUI. That is exactly how a working ollama-cloud setup
+      # reverted to a local Ollama that was not running. An empty value is
+      # ignored by viper (AllowEmptyEnv is off), so the file's choice stands,
+      # while an operator who genuinely wants to force one still can in .env.
+      SOULACY_LLM_DEFAULT_PROVIDER: ${SOULACY_LLM_DEFAULT_PROVIDER:-}
       SOULACY_LLM_PROVIDERS_OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      SOULACY_LLM_PROVIDERS_OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3}
+      SOULACY_LLM_PROVIDERS_OLLAMA_MODEL: ${OLLAMA_MODEL:-}
 
       # Bind — 0.0.0.0 so the container's port mapping (ports: 18789:18789) can
       # actually forward host traffic into the gateway. Without this the
