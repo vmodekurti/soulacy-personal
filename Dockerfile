@@ -64,12 +64,27 @@ FROM python:3.12-slim-bookworm AS runtime
 # the lines, so a '#' would comment out every package after it.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libsqlite3-0 ca-certificates gosu \
-        nodejs npm \
         git curl wget unzip zip tar xz-utils \
         build-essential pkg-config \
         jq ripgrep less file procps \
     && rm -rf /var/lib/apt/lists/* \
     && python3 -m pip install --no-cache-dir pipx
+
+# Node 20, taken from the stage that already has it rather than from apt.
+#
+# Debian bookworm's `nodejs` package is 18, and 18 is now below the floor for
+# the MCP servers people actually install: @playwright/mcp refuses to start on
+# it, printing "Playwright requires Node.js 20 or higher" and exiting — which
+# reaches the gateway as "stdio transport closed before response", a message
+# that says nothing about Node and sends you looking at the config instead.
+#
+# /usr/local/bin precedes /usr/bin on PATH, and the GUI stage is the same
+# Debian base, so this is one copy rather than a second package manager.
+COPY --from=gui /usr/local/bin/node /usr/local/bin/node
+COPY --from=gui /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && node --version && npm --version
 
 # Python SDK — agents written in Python work without any extra setup.
 # The SDK is experimental and not yet published to PyPI, so it is NOT installed
