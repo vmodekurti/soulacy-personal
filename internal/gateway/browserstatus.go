@@ -234,13 +234,33 @@ func browserServerHeadless(srv mcp.ServerStatus) bool {
 }
 
 func browserServerMode(srv mcp.ServerStatus) string {
+	// A server pointed at a browser somewhere else is remote however it is
+	// reached. This is checked before headless because --cdp-endpoint is
+	// usually paired with --headless, and the meaningful fact is that there
+	// is no local browser to install, update, or run out of memory: the
+	// deployment needs nothing but the network.
+	if browserServerRemote(srv) {
+		return "remote"
+	}
 	if browserServerHeadless(srv) {
 		return "headless"
 	}
-	if srv.Transport == "http" || srv.URL != "" {
-		return "remote"
-	}
 	return "visible"
+}
+
+// browserServerRemote reports whether this server drives a browser it does not
+// host — an http transport, or a CDP endpoint passed on the command line.
+func browserServerRemote(srv mcp.ServerStatus) bool {
+	if srv.Transport == "http" || srv.URL != "" {
+		return true
+	}
+	for _, a := range srv.Args {
+		switch strings.ToLower(strings.TrimSpace(a)) {
+		case "--cdp-endpoint", "--endpoint":
+			return true
+		}
+	}
+	return false
 }
 
 func agentUsesBrowserAutomation(def *agent.Definition, hasBrowserSidecar bool) bool {

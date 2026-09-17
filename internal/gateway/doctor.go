@@ -51,6 +51,11 @@ func (s *Server) handleDoctor(c *fiber.Ctx) error {
 		"providers": s.providerDoctorChecks(c),
 		"channels":  s.channelDoctorChecks(),
 		"vault":     s.vaultDoctorCheck(c),
+		// What this deployment can and cannot do. A platform without shell
+		// access cannot follow half the install instructions written for a
+		// laptop, and saying so is cheaper than bundling every heavy
+		// dependency into the image on the chance somebody needs it.
+		"deployment": s.deploymentDoctor(),
 	})
 }
 
