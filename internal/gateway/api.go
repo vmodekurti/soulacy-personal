@@ -3117,6 +3117,10 @@ type mcpServerBody struct {
 	Timeout       string            `json:"timeout"`
 	PublicOnly    bool              `json:"-"`
 	ManagedOnly   bool              `json:"-"`
+	// KeepsProcesses exempts the server from the per-call process janitor.
+	// Set it for a server whose child process is its state — a browser server
+	// loses its page to the janitor otherwise.
+	KeepsProcesses bool `json:"keeps_processes"`
 }
 
 type mcpAuthBody struct {
@@ -3218,17 +3222,18 @@ func validateMCPServer(body mcpServerBody) string {
 func mcpBodyToServerConfig(body mcpServerBody) mcp.ServerConfig {
 	timeout, _ := parseMCPTimeout(body.Timeout)
 	return mcp.ServerConfig{
-		Transport:     body.Transport,
-		Command:       body.Command,
-		Args:          body.Args,
-		Env:           body.Env,
-		EnvSecretRefs: body.EnvSecretRefs,
-		URL:           body.URL,
-		Headers:       body.Headers,
-		Query:         body.Query,
-		Auth:          body.Auth.toMCP(),
-		Timeout:       timeout,
-		PublicOnly:    body.PublicOnly,
+		Transport:      body.Transport,
+		Command:        body.Command,
+		Args:           body.Args,
+		Env:            body.Env,
+		EnvSecretRefs:  body.EnvSecretRefs,
+		URL:            body.URL,
+		Headers:        body.Headers,
+		Query:          body.Query,
+		Auth:           body.Auth.toMCP(),
+		Timeout:        timeout,
+		PublicOnly:     body.PublicOnly,
+		KeepsProcesses: body.KeepsProcesses,
 	}
 }
 
@@ -3622,6 +3627,9 @@ func mcpServerToYAML(body mcpServerBody) map[string]any {
 	}
 	if body.ManagedOnly {
 		out["managed_only"] = true
+	}
+	if body.KeepsProcesses {
+		out["keeps_processes"] = true
 	}
 	if t == "stdio" {
 		if body.Command != "" {

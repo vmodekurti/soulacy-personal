@@ -174,8 +174,9 @@ func (a *App) Run(parent context.Context) error {
 				ClientID: sc.Auth.ClientID, ClientSecretRef: sc.Auth.ClientSecretRef,
 				Scopes: sc.Auth.Scopes, Audience: sc.Auth.Audience,
 			},
-			Timeout:    sc.Timeout,
-			PublicOnly: sc.PublicOnly,
+			Timeout:        sc.Timeout,
+			PublicOnly:     sc.PublicOnly,
+			KeepsProcesses: sc.KeepsProcesses,
 		}
 		if sc.ManagedOnly {
 			entry := mcpServers[id]

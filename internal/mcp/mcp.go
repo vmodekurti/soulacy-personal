@@ -50,6 +50,16 @@ type ServerConfig struct {
 	Timeout       time.Duration     // http: per-request timeout
 	PublicOnly    bool              // use NetGuard and reject private/loopback destinations
 	ManagedRoot   string            // stdio: executable must resolve beneath this directory
+
+	// KeepsProcesses exempts this server from the per-call process janitor.
+	//
+	// The janitor kills any child process a tool call leaves behind, which is
+	// right for a tool that shells out and wrong for a server whose child
+	// process IS its state. A browser server is the clear case: the first call
+	// launches a browser, the janitor kills it a second later, and the next
+	// call finds a fresh about:blank — the page navigated to is simply gone,
+	// with nothing in the reply to say why.
+	KeepsProcesses bool
 }
 
 type AuthConfig struct {
@@ -315,7 +325,7 @@ func (c *Client) Call(ctx context.Context, fullName string, args map[string]any)
 	srv.callMu.Lock()
 	defer srv.callMu.Unlock()
 	var janitor *processJanitor
-	if rooter, ok := srv.tx.(processRooter); ok {
+	if rooter, ok := srv.tx.(processRooter); ok && !srv.cfg.KeepsProcesses {
 		janitor = newProcessJanitor(rooter.processRootPID(), c.log.With(
 			zap.String("mcp_server", srv.id),
 			zap.String("mcp_tool", toolName),

@@ -1014,6 +1014,12 @@ type MCPServerConfig struct {
 	Timeout       time.Duration     `mapstructure:"timeout"`         // http: per-request timeout
 	PublicOnly    bool              `mapstructure:"public_only"`     // remote API: enforce public destinations on every request
 	ManagedOnly   bool              `mapstructure:"managed_only"`    // remote API: executable must remain in mcp-servers/
+
+	// KeepsProcesses exempts the server from the per-call process janitor, for
+	// servers whose child process is their state rather than a leak — a
+	// browser server being the clear case. Off by default: a tool that leaves
+	// a process behind is a leak until someone says otherwise.
+	KeepsProcesses bool `mapstructure:"keeps_processes"`
 }
 
 // MCPAuthConfig keeps authentication separate from ordinary request metadata.
