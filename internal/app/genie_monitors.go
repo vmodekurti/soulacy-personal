@@ -195,8 +195,22 @@ func (m *genieMonitorManager) monitorView(def *agent.Definition) map[string]any 
 	return v
 }
 
+// isGenieMonitor reports whether Genie owns this agent, and therefore whether
+// list_monitors, pause_monitor and cancel_monitor may act on it.
+//
+// It used to require kind "monitor". Genie can now also build a full agent
+// through the builder, and an agent the user cannot find again through the
+// same conversation that created it is one they cannot stop — so ownership,
+// not shape, is the test.
 func isGenieMonitor(def *agent.Definition) bool {
-	return def != nil && def.Labels["soulacy.owner"] == runtime.GenieAgentID && def.Labels["soulacy.kind"] == "monitor"
+	if def == nil || def.Labels["soulacy.owner"] != runtime.GenieAgentID {
+		return false
+	}
+	switch def.Labels["soulacy.kind"] {
+	case "monitor", "agent":
+		return true
+	}
+	return false
 }
 
 func genieSlug(prompt string) string {

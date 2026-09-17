@@ -84,6 +84,10 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 	// to the server's tool-catalog cache.
 	srv := gateway.New(cfg, cfgPath, d.engine, d.loader, d.llmRouter, d.chanReg, d.sched, d.httpAdapter, d.waAdapter, d.skillLoader, d.actionBackend, d.mcpClient, d.hub, log)
 	srv.SetAuth(d.authEngine)
+	// Genie builds through the builder rather than improvising an agent of its
+	// own. The server owns the builder pipeline (tool catalog, save gate,
+	// scheduler), so it is the server that Genie calls back into.
+	d.engine.SetGenieAgentBuilder(srv)
 	srv.SetAutopilotStore(d.autopilotStore)
 	srv.SetAdaptiveMemoryRebuilder(d.adaptiveRebuild)
 	srv.SetSafeUndoStore(d.undoStore)
