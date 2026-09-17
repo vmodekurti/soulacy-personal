@@ -174,6 +174,14 @@ to follow [Semantic Versioning](https://semver.org/).
   and the workspace login page.
 
 ### Added
+- Genie has a mark of its own: a solid core, an arc around it, and a spark
+  breaking away. The core is what stays, the arc is presence, the spark is the
+  part that leaves and does something. Not a lamp, which is a joke that stops
+  being funny on the second day; not the four-point sparkle every product now
+  uses; and not the Soulacy droplet, since the brand mark sits just above it in
+  the sidebar and two droplets read as a duplicate. The spark earns its place
+  by making the arc's gap deliberate — without it the ring reads as a loading
+  spinner. Three elements is the ceiling, because the mark has to survive 16px.
 - The first run shows what it is doing. A run takes ten to twenty seconds and
   the screen said only "Running it for the first time", which reads as a hang.
   It now lists the steps as they happen — which tool is being used, when the

@@ -12,6 +12,7 @@
 	import { navPages, navGroups, navAnchor, navLevels, pagesForLevel } from './lib/nav.js'
   import Walkthrough from './lib/walkthrough/Walkthrough.svelte'
   import AskGenie from './lib/AskGenie.svelte'
+  import GenieMark from './lib/GenieMark.svelte'
   import {
     loadWalkthroughState, startWalkthrough, shouldAutoStart,
   } from './lib/walkthrough/store.js'
@@ -494,7 +495,9 @@
           {#each groupPages as p}
             <button class="nav-item" class:active={page === p.id} on:click={() => navigate(p.id)} title={p.label}
                     aria-current={page === p.id ? 'page' : undefined} data-tour={navAnchor(p.id)}>
-              <span class="nav-icon">{p.icon}</span>
+              <span class="nav-icon">
+                {#if p.id === 'start'}<GenieMark size={16} />{:else}{p.icon}{/if}
+              </span>
               <span class="nav-label">{p.label}</span>
             </button>
           {/each}
