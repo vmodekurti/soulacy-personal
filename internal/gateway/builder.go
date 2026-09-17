@@ -13,7 +13,6 @@
 package gateway
 
 import (
-	"context"
 	"encoding/json"
 	"strings"
 
@@ -23,7 +22,7 @@ import (
 
 	"github.com/soulacy/soulacy/pkg/agent"
 
-	"github.com/soulacy/soulacy/internal/agentvalidate"
+	"github.com/soulacy/soulacy/internal/agentsave"
 	"github.com/soulacy/soulacy/internal/auth"
 	"github.com/soulacy/soulacy/internal/llm"
 	"github.com/soulacy/soulacy/internal/runtime"
@@ -178,6 +177,10 @@ func (s *Server) handleBuilderDeploy(c *fiber.Ctx) error {
 		// false so the user can run the agent once and watch it work before it
 		// is allowed to act unattended.
 		ActivateSchedule bool `json:"activate_schedule"`
+		// AcceptPrivilegedExposure records that the person said yes to putting
+		// a privileged agent on a channel. Never defaulted true: the whole
+		// point of the gate is that the decision is theirs.
+		AcceptPrivilegedExposure bool `json:"accept_privileged_exposure"`
 	}
 	if err := c.BodyParser(&body); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -230,13 +233,28 @@ func (s *Server) handleBuilderDeploy(c *fiber.Ctx) error {
 		})
 	}
 
-	// Validate before writing. Deploy used to skip this entirely, which is why
-	// a broken python_file path reached disk: validation is the only place
-	// those are checked.
-	if report := s.validateBuilderDefinition(c.Context(), &def); report != nil {
+	// The same gate Studio uses, and the same one Genie's monitors go through.
+	// Three doors reached disk with three different sets of guarantees, and
+	// the weakest was the one a model could open unattended.
+	decision := agentsave.Gate(c.Context(), &def, agentsave.Options{
+		Validate:                 s.agentValidationOptions(c.Context()),
+		Peer:                     s.loader.Get,
+		AcceptPrivilegedExposure: body.AcceptPrivilegedExposure,
+	})
+	if decision.Refused != "" {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": decision.Refused})
+	}
+	if len(decision.Blockers) > 0 {
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
 			"error":    "the agent did not pass validation",
-			"findings": report,
+			"findings": decision.Blockers,
+		})
+	}
+	if decision.RequiresConsent {
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"error":           "this agent is privileged and would be reachable on a channel; explicit consent required",
+			"requiresConsent": true,
+			"consentItems":    decision.ConsentItems,
 		})
 	}
 
@@ -319,28 +337,6 @@ func (s *Server) wireBuilderTools(u *runtime.BuilderUnderstanding, def *agent.De
 		def.MCPTools = &m
 	}
 	return res.Unknown
-}
-
-// validateBuilderDefinition runs the same validator Studio runs, and returns
-// the blocking findings, or nil when the agent is sound.
-func (s *Server) validateBuilderDefinition(ctx context.Context, def *agent.Definition) []fiber.Map {
-	opts := s.agentValidationOptions(ctx)
-	report := agentvalidate.Definition(def, "", opts, agentvalidate.Report{})
-	if report.Errors == 0 {
-		return nil
-	}
-	out := make([]fiber.Map, 0, report.Errors)
-	for _, f := range report.Findings {
-		if f.Severity != agentvalidate.Error {
-			continue
-		}
-		out = append(out, fiber.Map{
-			"field":   f.Field,
-			"problem": f.Message,
-			"fix":     f.Suggestion,
-		})
-	}
-	return out
 }
 
 // unconfiguredDeliveryWarning reports a schedule that delivers to a channel
