@@ -2,6 +2,8 @@
   import TourButton from '../lib/TourButton.svelte'
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
+  import DeploymentPanel from '../lib/DeploymentPanel.svelte'
+  import { deploymentFrom, blockersFor } from '../lib/deployment.js'
   import KeyValueEditor from '../lib/KeyValueEditor.svelte'
 
   let servers = []
@@ -48,7 +50,23 @@
       loading = false
     }
   }
-  onMount(load)
+  // What this deployment can do. Fetched alongside the list rather than on
+  // demand: the point is to be read before someone fills in a form that
+  // cannot work here, not after it fails. A gateway that does not report it
+  // simply leaves the panel out.
+  let deployment = null
+  async function loadDeployment() {
+    try {
+      deployment = deploymentFrom(await api.providers.doctor())
+    } catch {
+      deployment = null
+    }
+  }
+
+  onMount(() => {
+    load()
+    loadDeployment()
+  })
 
   function toggle(id) { expanded = { ...expanded, [id]: !expanded[id] } }
 
@@ -244,15 +262,37 @@
       id: 'browser',
       label: 'Browser headless',
       command: 'npx',
-      args: ['-y', '@playwright/mcp@latest', '--browser', 'chromium', '--headless'],
+      // Every flag here was a failure first, on a real container:
+      //   --browser chromium  without it the server looks for branded Chrome
+      //                       at /opt/google/chrome/chrome and exits
+      //   --no-sandbox        Chromium cannot sandbox itself in a container
+      //                       and dies with "No usable sandbox!"
+      //   --isolated          keeps the profile in memory rather than on disk
+      // and keeps_processes stops Soulacy's per-call process janitor killing
+      // the browser between tool calls, which returns about:blank on the next
+      // one with nothing to say why.
+      args: ['-y', '@playwright/mcp@latest', '--browser', 'chromium', '--headless', '--isolated', '--no-sandbox'],
+      keeps_processes: true,
+      requires: ['node_runtime', 'browser_automation'],
       note: 'Runs Chromium without opening windows. Use this for scheduled agents and normal background work.',
+    },
+    {
+      id: 'browser_remote',
+      label: 'Browser remote (CDP)',
+      command: 'npx',
+      args: ['-y', '@playwright/mcp@latest', '--headless', '--cdp-endpoint', 'wss://YOUR-BROWSER-ENDPOINT'],
+      keeps_processes: true,
+      requires: ['node_runtime'],
+      note: 'Drives a browser running somewhere else. Nothing is installed here — no Chromium, no system libraries, no download — so this is the one that works on platforms where you have no shell. Replace the endpoint with your browser service URL.',
     },
     {
       id: 'browser_visible',
       label: 'Browser visible',
       command: 'npx',
       args: ['-y', '@playwright/mcp@latest', '--browser', 'chromium'],
-      note: 'Opens a visible Chromium window. Use only when you need to watch or debug browser automation.',
+      keeps_processes: true,
+      requires: ['node_runtime', 'browser_automation'],
+      note: 'Opens a visible Chromium window. Needs a desktop session, so it will not work on a server. Use only when you need to watch or debug browser automation.',
     },
     { id: 'fetch',      label: 'Web Fetch',   command: 'uvx', args: ['mcp-server-fetch'] },
   ]
@@ -264,6 +304,11 @@
       command: tpl.command,
       args: [...tpl.args],
       env: { ...(tpl.env || {}) },
+      // A server whose child process is its state — a browser — must be
+      // exempt from the per-call process janitor. `requires` stays out: it is
+      // how this screen decides what to show, not something the gateway
+      // stores.
+      keeps_processes: !!tpl.keeps_processes,
     }
     testResult = null
   }
@@ -279,6 +324,8 @@
     </div>
         <TourButton />
     </div>
+
+  <DeploymentPanel report={deployment} />
 
   {#if restartNeeded}
     <div class="banner warn">
@@ -384,8 +431,25 @@
         <div class="templates">
           <span class="templates-label">Quick start:</span>
           {#each TEMPLATES as tpl}
-            <button class="template-chip" title={tpl.note || ''} on:click={() => applyTemplate(tpl)}>{tpl.label}</button>
+            {@const blocked = blockersFor(tpl, deployment)}
+            <button
+              class="template-chip"
+              class:blocked={blocked.length > 0}
+              title={blocked.length > 0
+                ? blocked.map(b => b.name + ': ' + b.detail + (b.workaround ? ' — instead: ' + b.workaround : '')).join('\n')
+                : (tpl.note || '')}
+              on:click={() => applyTemplate(tpl)}
+            >{tpl.label}{#if blocked.length > 0}<span class="warn-dot" aria-hidden="true">!</span>{/if}</button>
           {/each}
+          {#if deployment}
+            {@const anyBlocked = TEMPLATES.some(tpl => blockersFor(tpl, deployment).length > 0)}
+            {#if anyBlocked}
+              <p class="template-note">
+                Templates marked <strong>!</strong> need something this deployment does not have — hover to see what, and what to use instead.
+                They can still be saved; they will not run.
+              </p>
+            {/if}
+          {/if}
         </div>
       {/if}
 
@@ -640,6 +704,9 @@
   .page-header h1 { font-size: 1.2rem; font-weight: 600; }
   .header-actions { display: flex; gap: .5rem; }
 
+  .template-chip.blocked { opacity: .65; border-style: dashed; }
+  .warn-dot { margin-left: .3rem; color: orange; font-weight: 700; }
+  .template-note { margin: .4rem 0 0; font-size: .75rem; color: var(--sl-text-faint); flex-basis: 100%; }
   .banner { padding: .7rem 1rem; border-radius: 8px; font-size: .85rem; }
   .banner.warn { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; }
   .err    { background: rgba(240,96,96,.1); border: 1px solid rgba(240,96,96,.3); color: #f06060; }
