@@ -14,7 +14,6 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/soulacy/soulacy/internal/config"
-	"github.com/soulacy/soulacy/internal/mcp"
 	"github.com/soulacy/soulacy/internal/voice"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"go.uber.org/zap"
@@ -748,23 +747,12 @@ func (s *Server) ReloadConfig() error {
 				_ = s.mcp.RemoveServer(cur.ID)
 			}
 		}
-		// Add/Update existing servers
+		// Add/Update existing servers. One conversion, shared with startup and
+		// the HTTP handlers — this loop used to carry its own copy, and the
+		// copy was missing fields, so saving a server reverted them a moment
+		// later when the write triggered this reload.
 		for id, srvCfg := range newCfg.MCP.Servers {
-			hotCfg := mcp.ServerConfig{
-				Transport: srvCfg.Transport, Command: srvCfg.Command, Args: srvCfg.Args,
-				Env: srvCfg.Env, URL: srvCfg.URL, Headers: srvCfg.Headers, Query: srvCfg.Query,
-				Auth: mcp.AuthConfig{
-					Type: srvCfg.Auth.Type, Header: srvCfg.Auth.Header, Scheme: srvCfg.Auth.Scheme,
-					SecretRef: srvCfg.Auth.SecretRef, TokenURL: srvCfg.Auth.TokenURL,
-					ClientID: srvCfg.Auth.ClientID, ClientSecretRef: srvCfg.Auth.ClientSecretRef,
-					Scopes: srvCfg.Auth.Scopes, Audience: srvCfg.Auth.Audience,
-				},
-				Timeout: srvCfg.Timeout, PublicOnly: srvCfg.PublicOnly,
-			}
-			if srvCfg.ManagedOnly {
-				hotCfg.ManagedRoot = filepath.Join(filepath.Dir(s.cfgPath), "mcp-servers")
-			}
-			_ = s.mcp.AddServer(id, hotCfg)
+			_ = s.mcp.AddServer(id, srvCfg.ToMCP(filepath.Dir(s.cfgPath)))
 		}
 	}
 
