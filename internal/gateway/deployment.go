@@ -21,9 +21,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
+
+	"github.com/soulacy/soulacy/internal/config"
+	"github.com/soulacy/soulacy/internal/platform"
 )
 
 // deploymentCapability is one thing this deployment can or cannot do.
@@ -99,35 +101,13 @@ func probeVersion(ctx context.Context, bin string, args ...string) (string, erro
 	return strings.TrimSpace(string(out)), nil
 }
 
-// detectPlatform names the host from the environment variables platforms set
-// for their own tooling. Getting the name right matters: "you are on Railway"
-// tells a user why there is no shell far better than "shell unavailable".
-func detectPlatform(p deploymentProbes) (name, kind string) {
-	switch {
-	case p.env("RAILWAY_ENVIRONMENT") != "" || p.env("RAILWAY_PROJECT_ID") != "":
-		return "Railway", "paas"
-	case p.env("FLY_APP_NAME") != "":
-		return "Fly.io", "paas"
-	case p.env("RENDER") != "" || p.env("RENDER_SERVICE_ID") != "":
-		return "Render", "paas"
-	case p.env("K_SERVICE") != "":
-		return "Google Cloud Run", "paas"
-	case p.env("DYNO") != "":
-		return "Heroku", "paas"
-	case p.env("KUBERNETES_SERVICE_HOST") != "":
-		return "Kubernetes", "container"
-	case p.inDocker():
-		return "Docker", "container"
-	}
-	return "self-hosted (" + runtime.GOOS + ")", "host"
-}
-
 func (s *Server) deploymentDoctor() deploymentReport {
 	return s.deploymentDoctorWith(context.Background(), defaultDeploymentProbes())
 }
 
 func (s *Server) deploymentDoctorWith(ctx context.Context, p deploymentProbes) deploymentReport {
-	name, kind := detectPlatform(p)
+	info := platform.DetectWith(p.env, p.inDocker)
+	name, kind := info.Name, string(info.Kind)
 	workspace := ""
 	if s.cfgPath != "" {
 		workspace = filepath.Dir(s.cfgPath)
@@ -144,6 +124,11 @@ func (s *Server) deploymentDoctorWith(ctx context.Context, p deploymentProbes) d
 	}
 	if shellGranted {
 		shell.Detail = "granted to: " + strings.Join(s.cfg.Runtime.AllowSystemAgents, ", ")
+	} else if reason := config.ShellGrantWithheldReason; reason != "" {
+		// They configured it and it was refused. Saying "no agent holds the
+		// grant" here would be true and useless — they know they set one.
+		shell.Detail = "withheld on this platform"
+		shell.Workaround = reason
 	} else {
 		shell.Detail = "no agent holds the system grant, so shell_exec, run_script and write_file are not offered"
 		shell.Workaround = "install Skills and MCP servers with package_install, which works without the grant and asks for approval each time; or set runtime.allow_system_agents to a list of agent IDs"

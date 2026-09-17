@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/soulacy/soulacy/internal/platform"
 	"github.com/soulacy/soulacy/internal/safeundo"
 
 	"github.com/spf13/viper"
@@ -1288,6 +1289,11 @@ func Load(cfgPath string) (*Config, string, error) {
 	// straight from the YAML file (yaml.v3 preserves case) and overwrite the
 	// lowercased copies. No-op when no file was read (first run, env-only).
 	restoreCaseSensitiveMaps(cfg, resolvedPath)
+
+	// A managed platform does not get the shell grant, whatever the file
+	// says. Applied here so every reader of AllowSystemAgents inherits it
+	// rather than each one having to remember.
+	applyManagedPlatformPolicy(cfg, platform.Detect())
 
 	// Story 5 / S8.1: strict fail-fast validation. A bad duration or an
 	// out-of-range numeric must produce a loud startup error, not a silent
