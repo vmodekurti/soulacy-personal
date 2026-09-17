@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/soulacy/soulacy/internal/browserlibs"
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/platform"
 )
@@ -187,7 +188,8 @@ func (s *Server) deploymentDoctorWith(ctx context.Context, p deploymentProbes) d
 			}
 		}
 	}
-	rep.Capabilities = append(rep.Capabilities, browserCapability(p, root, remote))
+	_, bundle := browserlibs.Installed(workspace)
+	rep.Capabilities = append(rep.Capabilities, browserCapability(p, root, bundle, remote))
 
 	return rep
 }
@@ -227,7 +229,7 @@ func runtimeCapability(ctx context.Context, p deploymentProbes, id, name, bin st
 // browser, however many times it downloads one — and the honest answer is to
 // point at a remote browser over CDP rather than to bundle ~300MB of Chromium
 // into every image on the chance it gets used.
-func browserCapability(p deploymentProbes, root bool, remoteServer string) deploymentCapability {
+func browserCapability(p deploymentProbes, root, bundleInstalled bool, remoteServer string) deploymentCapability {
 	out := deploymentCapability{ID: "browser_automation", Name: "Browser automation"}
 
 	// Already driving a browser elsewhere: nothing local is required, and
@@ -243,13 +245,13 @@ func browserCapability(p deploymentProbes, root bool, remoteServer string) deplo
 	if len(libs) == 0 {
 		libs, _ = p.glob("/usr/lib/libnss3.so*")
 	}
-	if len(libs) == 0 {
-		out.Detail = "the image does not carry Chromium's shared libraries"
-		if root {
-			out.Workaround = "install them with the system package manager, or " + cdp
-		} else {
-			out.Workaround = "they need root, so they must be added to the image — until then, " + cdp
-		}
+	if len(libs) == 0 && !bundleInstalled {
+		// Not a dead end any more: the libraries do not have to be installed
+		// as packages, only found, so a bundle on the volume does the job
+		// without root. The image ships without them because most installs
+		// never drive a browser.
+		out.Detail = "Chromium's shared libraries are not present"
+		out.Workaround = "install the library bundle (about 12MB, onto the volume, so it survives a redeploy), or " + cdp
 		return out
 	}
 

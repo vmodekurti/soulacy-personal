@@ -889,6 +889,11 @@ func (s *Server) buildApp() *fiber.App {
 	api.Get("/browser/trace", s.rbacMW(rbac.ResourceMemory, rbac.ActionRead), s.handleBrowserTrace)
 	api.Get("/browser/artifact", s.rbacMW(rbac.ResourceMemory, rbac.ActionRead), s.handleBrowserArtifact)
 	api.Get("/browser/status", s.rbacMW(rbac.ResourceMemory, rbac.ActionRead), s.handleBrowserStatus)
+	// Installing Chromium's shared libraries is a change to what the gateway
+	// can run, so it is gated like other MCP configuration rather than as a
+	// read.
+	api.Get("/browser/libs", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleBrowserLibsStatus)
+	api.Post("/browser/libs/install", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleBrowserLibsInstall)
 	api.Get("/mobile/status", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleMobileStatus)
 	api.Post("/mobile/devices", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleRegisterMobileDevice)
 	s.registerMobileNodeRoutes(api)

@@ -120,8 +120,10 @@ func TestBrowserWithoutLibrariesPointsAtCDP(t *testing.T) {
 	if !strings.Contains(browser.Workaround, "cdp-endpoint") {
 		t.Errorf("the workaround must name the remote-browser route; got %q", browser.Workaround)
 	}
-	if !strings.Contains(browser.Workaround, "root") && !strings.Contains(browser.Workaround, "image") {
-		t.Errorf("it must also say why a download would not help; got %q", browser.Workaround)
+	// It must offer the route that works without root: the libraries do not
+	// have to be installed as packages, only found.
+	if !strings.Contains(browser.Workaround, "bundle") {
+		t.Errorf("it must offer the downloadable bundle; got %q", browser.Workaround)
 	}
 }
 
@@ -239,7 +241,7 @@ func TestWorkspaceIsReportedAsThePlaceInstallsLand(t *testing.T) {
 // cannot just because there is no Chromium on disk. This is the route a
 // platform without shell access is meant to take.
 func TestRemoteBrowserCountsAsBrowserAutomation(t *testing.T) {
-	out := browserCapability(fakeDeployment{euid: 1000}.probes(), false, "playwright-remote")
+	out := browserCapability(fakeDeployment{euid: 1000}.probes(), false, false, "playwright-remote")
 	if !out.Available {
 		t.Fatal("a configured remote browser means browser automation works")
 	}
@@ -269,5 +271,29 @@ func TestCDPEndpointIsRemoteNotHeadless(t *testing.T) {
 	}
 	if got := browserServerMode(local); got != "headless" {
 		t.Errorf("mode = %q, want headless — this one runs its own browser", got)
+	}
+}
+
+// Libraries can arrive two ways. Once a bundle is installed on the volume, a
+// deployment with none in the image is no longer told it cannot browse.
+func TestAnInstalledBundleCountsAsLibraries(t *testing.T) {
+	probes := fakeDeployment{
+		env: map[string]string{"PLAYWRIGHT_BROWSERS_PATH": "/data/browsers"},
+		files: map[string][]string{
+			"/data/browsers/chromium-*/chrome-linux*/chrome": {"/data/browsers/chromium-1244/chrome-linux64/chrome"},
+		},
+		euid: 1000,
+	}.probes()
+
+	// No system libraries and no bundle: the bundle is offered.
+	out := browserCapability(probes, false, false, "")
+	if out.Available || !strings.Contains(out.Workaround, "bundle") {
+		t.Errorf("without libraries it should offer the bundle: %+v", out)
+	}
+
+	// The same deployment with the bundle installed can drive a browser.
+	out = browserCapability(probes, false, true, "")
+	if !out.Available {
+		t.Errorf("an installed bundle supplies the libraries: %+v", out)
 	}
 }
