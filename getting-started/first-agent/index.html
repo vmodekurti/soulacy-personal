@@ -346,7 +346,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../using/chat/" class="md-tabs__link">
+        <a href="../../using/genie/" class="md-tabs__link">
           
   
   
@@ -983,6 +983,28 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#the-short-way" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The short way
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-long-way" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The long way
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#before-writing-yaml" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1524,6 +1546,34 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../using/genie/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Talking to Genie
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -2683,6 +2733,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../agents/browser-automation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Browser Automation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -3441,6 +3519,34 @@
     
   
     Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    What Your Deployment Can Do
   
 
     
@@ -4950,6 +5056,28 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#the-short-way" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The short way
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-long-way" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The long way
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#before-writing-yaml" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5155,9 +5283,22 @@
 
 
 <h1 id="your-first-agent">Your First Agent<a class="headerlink" href="#your-first-agent" title="Permanent link">&para;</a></h1>
+<h2 id="the-short-way">The short way<a class="headerlink" href="#the-short-way" title="Permanent link">&para;</a></h2>
+<p>Ask for it.</p>
+<blockquote>
+<p>Send me a summary of overnight news every morning at seven.</p>
+</blockquote>
+<p><a href="../../using/genie/">Genie</a> hands that to Soulacy's agent builder, which knows
+what is installed on your gateway, asks for anything it still needs — a time, a
+delivery channel — and saves a real agent. You do not have to know the shape of
+a <code>SOUL.yaml</code> file to get one, and most people never write one by hand.</p>
+<p>The rest of this page is the long way, which is still worth reading once: it is
+what the builder produces, and what you will be looking at when you edit an
+agent later.</p>
+<h2 id="the-long-way">The long way<a class="headerlink" href="#the-long-way" title="Permanent link">&para;</a></h2>
 <p>This guide walks through building and verifying a conversational <code>SOUL.yaml</code>
-agent. If you prefer the GUI, <a href="../../using/studio/">Studio</a> creates the same
-definition, but you should still inspect the resulting YAML.</p>
+agent. <a href="../../using/studio/">Studio</a> creates the same definition through a
+visual editor, and you should still inspect the resulting YAML.</p>
 <h2 id="before-writing-yaml">Before writing YAML<a class="headerlink" href="#before-writing-yaml" title="Permanent link">&para;</a></h2>
 <p>Open <strong>Providers</strong>, configure the provider you intend to use, and select <strong>Test
 connection</strong>. Provider and model names in an agent are references to the
