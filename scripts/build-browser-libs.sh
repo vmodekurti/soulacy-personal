@@ -123,7 +123,14 @@ if ! docker build --platform "$PLATFORM" --build-arg "PLAYWRIGHT_VERSION=$PLAYWR
   exit 1
 fi
 
-SUM="$(shasum -a 256 "$TARBALL" | cut -d' ' -f1)"
+# sha256sum on Linux, shasum on macOS. The script builds release artifacts,
+# so it runs in CI as often as on a laptop, and a tool that exists on only one
+# of them fails after the slow part has already succeeded.
+if command -v sha256sum >/dev/null 2>&1; then
+  SUM="$(sha256sum "$TARBALL" | cut -d' ' -f1)"
+else
+  SUM="$(shasum -a 256 "$TARBALL" | cut -d' ' -f1)"
+fi
 SIZE="$(du -h "$TARBALL" | cut -f1)"
 COUNT="$(tar -tzf "$TARBALL" | grep -c '\.so' || true)"
 
