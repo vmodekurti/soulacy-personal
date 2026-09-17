@@ -437,11 +437,19 @@ func (c *Client) RemoveServer(id string) error {
 	defer c.mu.Unlock()
 	for i, s := range c.servers {
 		if s.id == id {
+			// Children are listed before the parent is closed: afterwards
+			// they are reparented to init and indistinguishable from anything
+			// else running.
+			var orphans []int
+			if rooter, ok := s.tx.(processRooter); ok {
+				orphans = snapshotDescendants(rooter.processRootPID())
+			}
 			if s.tx != nil {
 				_ = s.tx.close()
 			}
 			c.servers = append(c.servers[:i], c.servers[i+1:]...)
 			c.log.Info("mcp: server removed", zap.String("server", id))
+			reapStopped(orphans, c.log.With(zap.String("mcp_server", id)))
 			return nil
 		}
 	}
@@ -453,9 +461,16 @@ func (c *Client) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, s := range c.servers {
+		var orphans []int
+		if rooter, ok := s.tx.(processRooter); ok {
+			orphans = snapshotDescendants(rooter.processRootPID())
+		}
 		if s.tx != nil {
 			_ = s.tx.close()
 		}
+		// A shutdown that leaves browsers running makes the NEXT start fail:
+		// the orphan still holds the runtime directory its replacement wants.
+		reapStopped(orphans, c.log.With(zap.String("mcp_server", s.id)))
 	}
 	return nil
 }
