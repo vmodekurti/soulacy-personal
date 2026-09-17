@@ -76,6 +76,29 @@ RUN mkdir -p /bundle && \
     done | sort -u \
     | grep -vE '/(libc|libm|libdl|libpthread|librt|libstdc\+\+|libgcc_s|ld-linux)[.-]' \
     | while read -r so; do cp -aL "$so" /bundle/ 2>/dev/null || true; done
+
+# And what it dlopens, which ldd cannot see.
+#
+# NSS loads its cryptographic modules by name at runtime. They appear in no
+# binary's dependency list, so a closure built from ldd is complete and still
+# wrong: the browser launches perfectly and aborts the moment anything touches
+# TLS, with
+#
+#   Error initializing NSS with a persistent database:
+#     libsoftokn3.so: cannot open shared object file
+#   FATAL: nss_error=-5925
+#
+# which reaches the user as "the browser closed", not as "a library is
+# missing".
+#
+# Everything the package ships is taken, rather than a list of module names:
+# their location has moved between Debian releases (an nss/ subdirectory once,
+# the library directory itself in bookworm), and asking dpkg cannot go stale
+# the way a path can.
+RUN dpkg -L libnss3 2>/dev/null | grep -E '\.so$' \
+    | while read -r so; do [ -f "$so" ] && cp -aL "$so" /bundle/ || true; done; \
+    test -f /bundle/libsoftokn3.so || { echo "libsoftokn3.so is missing: TLS will abort at runtime" >&2; exit 1; }; \
+    echo "bundle now has $(ls /bundle | wc -l) objects"
 EOF
 
 echo "== building bundle for $PLATFORM (playwright $PLAYWRIGHT_VERSION)"
@@ -109,11 +132,19 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/data/browsers
 ENV LD_LIBRARY_PATH=/data/browser-libs
 RUN npm install -g --prefix /home/soulacy/.npm-global "playwright@${PLAYWRIGHT_VERSION}" --no-audit --no-fund --silent \
     && /home/soulacy/.npm-global/bin/playwright install chromium
+# Fetch a real page over TLS, not a string set into a blank tab.
+#
+# The weaker check is why the first bundle shipped broken: setContent needs no
+# network, so it passed without NSS's dlopened modules while every real
+# navigation aborted. A check that cannot fail the way production fails is not
+# a check.
 RUN node -e "const {chromium}=require('/home/soulacy/.npm-global/lib/node_modules/playwright'); \
   (async () => { const b = await chromium.launch({headless:true, args:['--no-sandbox']}); \
-  const p = await b.newPage(); await p.setContent('<title>bundle-verified</title>'); \
-  if ((await p.title()) !== 'bundle-verified') process.exit(1); \
-  console.log('VERIFIED: Chromium launched using only the bundle'); \
+  const p = await b.newPage(); \
+  await p.goto('https://example.com', {waitUntil:'domcontentloaded', timeout:60000}); \
+  const t = await p.title(); \
+  if (!/Example Domain/.test(t)) { console.error('BUNDLE IS NOT USABLE: unexpected title ' + t); process.exit(1); } \
+  console.log('VERIFIED: Chromium fetched https://example.com using only the bundle'); \
   await b.close(); })().catch(e => { console.error('BUNDLE IS NOT USABLE:', e.message.split('\n')[0]); process.exit(1); });"
 EOF
 if ! docker build --platform "$PLATFORM" --build-arg "PLAYWRIGHT_VERSION=$PLAYWRIGHT_VERSION" \
