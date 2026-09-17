@@ -17,6 +17,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/autopilot"
+	"github.com/soulacy/soulacy/internal/browserlibs"
 	"github.com/soulacy/soulacy/internal/channels"
 	httpchan "github.com/soulacy/soulacy/internal/channels/http"
 	"github.com/soulacy/soulacy/internal/config"
@@ -58,6 +59,18 @@ func (a *App) Run(parent context.Context) error {
 		return fmt.Errorf("resolve workspace: %w", err)
 	}
 	log.Info("workspace", zap.String("root", ws.Root), zap.Bool("legacy", ws.Legacy))
+
+	// A downloaded Chromium library bundle goes on the search path before any
+	// MCP server is started, because a child process inherits the environment
+	// as it was at exec time. Applying it later would leave every server
+	// already running unable to find the libraries, with a linker error that
+	// mentions neither Soulacy nor the bundle.
+	if browserlibs.Apply(ws.Root) {
+		m, _ := browserlibs.Installed(ws.Root)
+		log.Info("browser libraries available from the workspace",
+			zap.String("dir", browserlibs.Dir(ws.Root)),
+			zap.Int("files", m.Files))
+	}
 
 	// Sweep stale per-run scratch dirs (Story E24 shared mounts) left by a
 	// crashed previous run; live ones are recreated by their owners below.

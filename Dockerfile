@@ -70,24 +70,33 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && python3 -m pip install --no-cache-dir pipx
 
-# Chromium's shared libraries, for browser-driving MCP servers (@playwright/mcp
-# and anything else built on playwright-core).
+# Chromium's shared libraries — OFF by default.
 #
-# Without them the server starts, registers its tools, and then fails on the
-# first navigate with a dynamic-linker error — a shape of failure that looks
-# like the tool is broken rather than the image being incomplete. Playwright's
-# own `install --with-deps` cannot fill the gap here: it apt-installs as root,
-# and the gateway runs as an unprivileged user.
+# Most installs never drive a browser, and this is ~30MB on disk they would
+# carry anyway. But the libraries are system packages, so an unprivileged
+# deployment cannot add them later: that is why they were put in the image in
+# the first place.
 #
-# This list was verified by launching Chromium in this exact base image rather
-# than copied from a docs page. It costs about 42MB.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        libasound2 libatk-bridge2.0-0 libatk1.0-0 libatspi2.0-0 \
-        libcairo2 libcups2 libdbus-1-3 libdrm2 libgbm1 libglib2.0-0 \
-        libnspr4 libnss3 libpango-1.0-0 libx11-6 libxcb1 libxcomposite1 \
-        libxdamage1 libxext6 libxfixes3 libxkbcommon0 libxrandr2 \
-        fonts-liberation \
-    && rm -rf /var/lib/apt/lists/*
+# They no longer have to be. The libraries only have to be FOUND, not
+# installed: unpacked into a directory on LD_LIBRARY_PATH they load from the
+# mounted volume exactly as well as from /usr/lib. So a deployment that wants a
+# local browser downloads a ~12MB bundle once (see
+# scripts/build-browser-libs.sh), and it survives redeploys because it lives on
+# the volume.
+#
+# Build with --build-arg WITH_BROWSER_LIBS=1 to bake them in instead — worth it
+# for an image you build yourself and always use for browsing, and pointless
+# for everyone else.
+ARG WITH_BROWSER_LIBS=0
+RUN if [ "$WITH_BROWSER_LIBS" = "1" ]; then \
+        apt-get update && apt-get install -y --no-install-recommends \
+            libasound2 libatk-bridge2.0-0 libatk1.0-0 libatspi2.0-0 \
+            libcairo2 libcups2 libdbus-1-3 libdrm2 libgbm1 libglib2.0-0 \
+            libnspr4 libnss3 libpango-1.0-0 libx11-6 libxcb1 libxcomposite1 \
+            libxdamage1 libxext6 libxfixes3 libxkbcommon0 libxrandr2 libxi6 libexpat1 \
+            fonts-liberation \
+        && rm -rf /var/lib/apt/lists/*; \
+    fi
 
 # Browsers are downloaded, not baked in: they are large, they update on their
 # own cadence, and a browser inside the image would have to be re-downloaded on
