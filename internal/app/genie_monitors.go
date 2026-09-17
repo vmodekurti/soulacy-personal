@@ -1,12 +1,14 @@
 package app
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/soulacy/soulacy/internal/agentsave"
 	"github.com/soulacy/soulacy/internal/runtime"
 	"github.com/soulacy/soulacy/internal/scheduler"
 	"github.com/soulacy/soulacy/pkg/agent"
@@ -29,23 +31,58 @@ func (m *genieMonitorManager) CreateGenieMonitor(prompt, cronExpr, atRaw, channe
 		return nil, fmt.Errorf("create_monitor: supply exactly one of cron or at")
 	}
 
-	base := m.loader.Get(runtime.GenieAgentID)
-	if base == nil {
-		return nil, fmt.Errorf("create_monitor: Genie is unavailable")
-	}
-	def := base.Clone()
 	hash := sha256.Sum256([]byte(prompt + "\x00" + cronExpr + "\x00" + atRaw + time.Now().UTC().Format(time.RFC3339Nano)))
 	slug := genieSlug(prompt)
-	def.ID = fmt.Sprintf("genie-monitor-%s-%x", slug, hash[:3])
-	def.Name = "Genie Monitor · " + strings.Title(strings.ReplaceAll(slug, "-", " ")) //nolint:staticcheck -- display-only title casing
-	def.Description = prompt
-	def.Labels = map[string]string{"soulacy.owner": runtime.GenieAgentID, "soulacy.kind": "monitor"}
-	def.SourcePath = ""
-	def.Enabled = true
-	def.Surfaces = []string{"schedule"}
-	def.Channels = nil
-	def.SystemPrompt += "\n\nThis is a background monitor. Execute this task: " + prompt + "\nIf its alert condition is not met, return an empty response. If it is met, return only a concise, evidence-backed alert suitable for immediate delivery."
-	def.Schedule = &agent.Schedule{}
+
+	// A focused monitor, not a copy of Genie.
+	//
+	// This used to clone the Genie definition wholesale. The result inherited
+	// every one of Genie's twelve tools — including create_monitor, so a
+	// scheduled agent running unattended could mint further scheduled agents —
+	// along with wildcard access to every skill, peer and MCP server, fifty
+	// turns, a thirty-minute budget, and two and a half thousand characters of
+	// "you are the master orchestrator" prompt. For something whose whole job
+	// is to check one condition and say a sentence, all of that is both
+	// wasteful and a wider blast radius than the task needs.
+	//
+	// So the monitor is built for the job instead. It keeps what a background
+	// check genuinely uses: the web, the installed skills, and the ability to
+	// hand work to a specialist peer. It does not get to create more of
+	// itself, and it does not get to message a channel on its own — the
+	// scheduler delivers its output, which is the path the user approved.
+	monitorBuiltins := []string{
+		"web_search", "list_skills", "read_skill", "read_skill_file",
+		"list_mcp_tools", "list_agents",
+	}
+	mcpServers := []string{"*"}
+	def := &agent.Definition{
+		ID:          fmt.Sprintf("genie-monitor-%s-%x", slug, hash[:3]),
+		Name:        "Genie Monitor · " + strings.Title(strings.ReplaceAll(slug, "-", " ")), //nolint:staticcheck -- display-only title casing
+		Description: prompt,
+		Labels:      map[string]string{"soulacy.owner": runtime.GenieAgentID, "soulacy.kind": "monitor"},
+		Enabled:     true,
+		Surfaces:    []string{"schedule"},
+		Builtins:    &monitorBuiltins,
+		MCPServers:  &mcpServers,
+		Skills:      []string{"*"},
+		Agents:      []string{"*"},
+		// Room to look something up and write a sentence, not to run an
+		// open-ended investigation. Fifty turns and half an hour were Genie's
+		// budget for interactive work, and a background check that takes that
+		// long has gone wrong rather than gone deep.
+		MaxTurns:   12,
+		RunTimeout: "5m",
+		LLM:        agent.LLMConfig{Temperature: 0.2, MaxTokens: 2048},
+		Memory:     agent.MemoryPolicy{ReadScopes: []string{"session"}, WriteScopes: []string{"session"}, MaxTokens: 2000},
+		Policy:     agent.ToolPolicyConfig{Enabled: true, Shell: "deny", File: "deny", Network: "allow"},
+		SystemPrompt: "You are a background monitor. You run on a schedule, unattended, and nobody is waiting to answer a question.\n\n" +
+			"Your task: " + prompt + "\n\n" +
+			"Check what you need, using a specialist peer agent when one clearly fits. " +
+			"If the condition you are watching for is not met, return an empty response — silence is the correct answer to \"nothing happened\". " +
+			"If it is met, return only a short, evidence-backed alert, ready to be read as-is. " +
+			"Never claim something happened without the evidence in front of you.",
+		Schedule: &agent.Schedule{},
+	}
 	if cronExpr != "" {
 		def.Trigger = agent.TriggerCron
 		def.Schedule.Cron = cronExpr
@@ -66,6 +103,21 @@ func (m *genieMonitorManager) CreateGenieMonitor(prompt, cronExpr, atRaw, channe
 		}
 		def.Schedule.Output = &agent.ScheduleOutput{Channel: strings.TrimSpace(channel), To: strings.TrimSpace(to)}
 	}
+	// The same gate Studio and the builder use. A monitor is written by a
+	// model, unattended, which is precisely the case that should not have a
+	// weaker path to disk than a person clicking Save.
+	decision := agentsave.Gate(context.Background(), def, agentsave.Options{Peer: m.loader.Get})
+	switch {
+	case decision.Refused != "":
+		return nil, fmt.Errorf("create_monitor: %s", decision.Refused)
+	case len(decision.Blockers) > 0:
+		return nil, fmt.Errorf("create_monitor: %s", decision.Blockers[0].Problem)
+	case decision.RequiresConsent:
+		// Nobody is present to consent, so the answer is no rather than a
+		// silent yes on the user's behalf.
+		return nil, fmt.Errorf("create_monitor: this would put a privileged agent on a channel, which needs your approval — build it from the Genie screen instead")
+	}
+
 	if err := m.loader.Upsert(m.agentDir, def); err != nil {
 		return nil, fmt.Errorf("create_monitor: persist: %w", err)
 	}

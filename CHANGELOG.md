@@ -118,6 +118,26 @@ to follow [Semantic Versioning](https://semver.org/).
   second device stays a viewer.
 
 ### Changed
+- One gate for every agent that reaches disk. There were three ways an agent
+  got written with three different sets of guarantees: Studio validated,
+  refused to overwrite a protected built-in and blocked a privileged agent
+  being put on a channel without consent; the conversational builder validated
+  and nothing else; and Genie's create_monitor did neither. Which gate you got
+  depended on which door you came through, and the weakest door was the one a
+  model could open unattended. The rules now live in `internal/agentsave` and
+  every path asks the same question. Whether an agent arrives enabled, and
+  whether its schedule is armed, stay with the caller: Studio stages new work
+  disabled for review, the front door enables it so you can watch it run once,
+  and both are right.
+- Genie no longer clones itself to make a monitor. It copied its whole
+  definition, so a scheduled agent running unattended inherited all twelve of
+  Genie's tools — `create_monitor` among them, meaning it could mint further
+  scheduled agents — plus wildcard access to every skill, peer and MCP server,
+  fifty turns, a thirty-minute budget and 2,777 characters of orchestrator
+  prompt, to check one condition and write a sentence. A monitor is now built
+  for the job: the web, installed skills and peer delegation, but no ability to
+  create more monitors or message a channel on its own, twelve turns, five
+  minutes, and a prompt about its actual task. Existing monitors are untouched.
 - Chat has left the simple sidebar, which is now five items: Genie,
   Dashboard, Deployed, Templates and About You. Genie is the conversational
   surface; Chat remains at Standard for multi-agent threads, attachments and
