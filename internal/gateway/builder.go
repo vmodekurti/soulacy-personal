@@ -13,7 +13,9 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -202,60 +204,142 @@ func (s *Server) handleBuilderDeploy(c *fiber.Ctx) error {
 		})
 	}
 
-	soulYAML, agentMap := s.engine.BuilderGenerate(understanding, provider, model)
-
-	// Marshal agentMap → JSON → agent.Definition for the loader
-	mapJSON, err := json.Marshal(agentMap)
+	built, err := s.deployFromUnderstanding(c.Context(), understanding, builderDeployOptions{
+		Provider:                 provider,
+		Model:                    model,
+		ActivateSchedule:         body.ActivateSchedule,
+		AcceptPrivilegedExposure: body.AcceptPrivilegedExposure,
+	})
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "failed to serialise agent map: " + err.Error(),
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	// A name the conversation invented cannot be wired, and shipping an agent
+	// whose tools silently do nothing is the failure this whole path is for.
+	if len(built.UnknownTools) > 0 {
+		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
+			"error":         "some tools could not be matched to anything installed",
+			"unknown_tools": built.UnknownTools,
+			"hint":          "install the missing tool or skill, or rebuild without it",
 		})
 	}
-	var def agent.Definition
-	if err := json.Unmarshal(mapJSON, &def); err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "failed to parse agent definition: " + err.Error(),
+	if built.Decision.Refused != "" {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": built.Decision.Refused})
+	}
+	if len(built.Decision.Blockers) > 0 {
+		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
+			"error":    "the agent did not pass validation",
+			"findings": built.Decision.Blockers,
 		})
+	}
+	if built.Decision.RequiresConsent {
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"error":           "this agent is privileged and would be reachable on a channel; explicit consent required",
+			"requiresConsent": true,
+			"consentItems":    built.Decision.ConsentItems,
+		})
+	}
+
+	s.log.Info("builder deployed agent",
+		zap.String("agent_id", built.Def.ID),
+		zap.String("builder_session", body.SessionID),
+		zap.Bool("scheduled", built.Scheduled),
+	)
+
+	resp := fiber.Map{
+		"agent_id":  built.Def.ID,
+		"soul_yaml": built.SoulYAML,
+		"scheduled": built.Scheduled,
+	}
+	// Tell the caller when a schedule exists but is not armed, so the UI can
+	// offer it after the user has watched the agent run once.
+	if built.Def.Schedule != nil && !built.Scheduled {
+		resp["schedule_pending"] = true
+	}
+	// Naming a delivery channel that is not configured is how an agent
+	// reports success and then silently delivers nothing, forever.
+	if built.Delivery != "" {
+		resp["delivery_warning"] = built.Delivery
+	}
+	return c.Status(fiber.StatusCreated).JSON(resp)
+}
+
+// builderDeployOptions carries the decisions the caller owns: which model
+// compiles the understanding, whether a schedule is armed now, and whether a
+// person has already accepted a privileged exposure.
+type builderDeployOptions struct {
+	Provider                 string
+	Model                    string
+	ActivateSchedule         bool
+	AcceptPrivilegedExposure bool
+	// Labels are merged onto the definition before it is gated, so a caller
+	// can mark what it built as its own.
+	Labels map[string]string
+}
+
+// builderDeployment is the outcome of turning a builder understanding into a
+// saved agent.
+//
+// Each field is a different answer, and each caller says it differently: the
+// screen turns them into HTTP statuses, Genie turns them into sentences. What
+// neither gets to do is decide them, which is why this returns the outcome
+// rather than a response.
+type builderDeployment struct {
+	Def          agent.Definition
+	SoulYAML     string
+	Scheduled    bool
+	UnknownTools []string
+	Decision     agentsave.Decision
+	Delivery     string
+}
+
+// deployFromUnderstanding compiles a builder understanding and writes it, with
+// the tool wiring, the save gate and the schedule handled once.
+//
+// It exists because there is now a second way into the builder: Genie's
+// build_agent tool. The last time an agent could reach disk by a second route
+// it reached it with weaker guarantees, so this path is the same path, and an
+// error returned here is a genuine failure rather than a refusal — refusals
+// come back in Decision for the caller to phrase.
+func (s *Server) deployFromUnderstanding(ctx context.Context, u *runtime.BuilderUnderstanding, opts builderDeployOptions) (*builderDeployment, error) {
+	if u == nil {
+		return nil, fmt.Errorf("no understanding to build from")
+	}
+	soulYAML, agentMap := s.engine.BuilderGenerate(u, opts.Provider, opts.Model)
+
+	mapJSON, err := json.Marshal(agentMap)
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialise agent map: %w", err)
+	}
+	out := &builderDeployment{SoulYAML: soulYAML}
+	if err := json.Unmarshal(mapJSON, &out.Def); err != nil {
+		return nil, fmt.Errorf("failed to parse agent definition: %w", err)
+	}
+	for k, v := range opts.Labels {
+		if out.Def.Labels == nil {
+			out.Def.Labels = map[string]string{}
+		}
+		out.Def.Labels[k] = v
 	}
 
 	// Wire the chosen tools to real ones. The builder names tools; it does not
 	// know what kind each is, and it used to be handed a fabricated
 	// `tools/<name>.py` path for every one of them.
-	unknownTools := s.wireBuilderTools(understanding, &def)
-
-	// A name the conversation invented cannot be wired, and shipping an agent
-	// whose tools silently do nothing is the failure this whole path is for.
-	if len(unknownTools) > 0 {
-		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
-			"error":         "some tools could not be matched to anything installed",
-			"unknown_tools": unknownTools,
-			"hint":          "install the missing tool or skill, or rebuild without it",
-		})
+	out.UnknownTools = s.wireBuilderTools(u, &out.Def)
+	if len(out.UnknownTools) > 0 {
+		return out, nil
 	}
 
 	// The same gate Studio uses, and the same one Genie's monitors go through.
 	// Three doors reached disk with three different sets of guarantees, and
 	// the weakest was the one a model could open unattended.
-	decision := agentsave.Gate(c.Context(), &def, agentsave.Options{
-		Validate:                 s.agentValidationOptions(c.Context()),
+	out.Decision = agentsave.Gate(ctx, &out.Def, agentsave.Options{
+		Validate:                 s.agentValidationOptions(ctx),
 		Peer:                     s.loader.Get,
-		AcceptPrivilegedExposure: body.AcceptPrivilegedExposure,
+		AcceptPrivilegedExposure: opts.AcceptPrivilegedExposure,
 	})
-	if decision.Refused != "" {
-		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": decision.Refused})
-	}
-	if len(decision.Blockers) > 0 {
-		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
-			"error":    "the agent did not pass validation",
-			"findings": decision.Blockers,
-		})
-	}
-	if decision.RequiresConsent {
-		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
-			"error":           "this agent is privileged and would be reachable on a channel; explicit consent required",
-			"requiresConsent": true,
-			"consentItems":    decision.ConsentItems,
-		})
+	if !out.Decision.Allowed {
+		return out, nil
 	}
 
 	// A conversationally-built agent is enabled, so the user can run it
@@ -263,50 +347,26 @@ func (s *Server) handleBuilderDeploy(c *fiber.Ctx) error {
 	// path. Its schedule is a separate decision: arming a cron here meant a
 	// user was told it was set up, never saw it run, and a daily job fired
 	// unattended with no screen on which to see or stop it.
-	def.Enabled = true
+	out.Def.Enabled = true
 
 	dir := ""
 	if len(s.cfg.AgentDirs) > 0 {
 		dir = s.cfg.AgentDirs[0]
 	}
-	if err := s.loader.Upsert(dir, &def); err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "deploy failed: " + err.Error(),
-		})
+	if err := s.loader.Upsert(dir, &out.Def); err != nil {
+		return nil, fmt.Errorf("deploy failed: %w", err)
 	}
 
-	scheduled := false
-	if body.ActivateSchedule && def.Schedule != nil {
-		if err := s.scheduler.RegisterAgent(&def); err != nil {
+	if opts.ActivateSchedule && out.Def.Schedule != nil {
+		if err := s.scheduler.RegisterAgent(&out.Def); err != nil {
 			s.log.Warn("builder agent saved but its schedule could not be registered",
-				zap.String("agent_id", def.ID), zap.Error(err))
+				zap.String("agent_id", out.Def.ID), zap.Error(err))
 		} else {
-			scheduled = true
+			out.Scheduled = true
 		}
 	}
-
-	s.log.Info("builder deployed agent",
-		zap.String("agent_id", def.ID),
-		zap.String("builder_session", body.SessionID),
-		zap.Bool("scheduled", scheduled),
-	)
-
-	resp := fiber.Map{
-		"agent_id":  def.ID,
-		"soul_yaml": soulYAML,
-		"scheduled": scheduled,
-	}
-	// Tell the caller when a schedule exists but is not armed, so the UI can
-	// offer it after the user has watched the agent run once.
-	if def.Schedule != nil && !scheduled {
-		resp["schedule_pending"] = true
-	}
-	// Naming a delivery channel that is not configured is how an agent
-	// reports success and then silently delivers nothing, forever.
-	if warn := s.unconfiguredDeliveryWarning(&def); warn != "" {
-		resp["delivery_warning"] = warn
-	}
-	return c.Status(fiber.StatusCreated).JSON(resp)
+	out.Delivery = s.unconfiguredDeliveryWarning(&out.Def)
+	return out, nil
 }
 
 // wireBuilderTools replaces the definition's tool wiring with the real thing,

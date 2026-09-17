@@ -619,7 +619,11 @@ func (e *Engine) allToolSchemasForContext(ctx context.Context, def *agent.Defini
 			if !def.Learning.Enabled || e.LearningNotebook() == nil {
 				continue
 			}
-		case "mobile", "safe_undo", "person":
+		case "mobile", "safe_undo", "person", "genie":
+			// Offered only when the agent names the tool: a wildcard
+			// `builtins:` does not sweep these in. They belong to one agent,
+			// and a tool schema every other agent carries but never calls is
+			// context spent on nothing.
 			if !allow[b.Name] {
 				continue
 			}
