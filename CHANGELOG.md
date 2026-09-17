@@ -118,6 +118,20 @@ to follow [Semantic Versioning](https://semver.org/).
   second device stays a viewer.
 
 ### Changed
+- Chat has left the simple sidebar, which is now five items: Genie,
+  Dashboard, Deployed, Templates and About You. Genie is the conversational
+  surface; Chat remains at Standard for multi-agent threads, attachments and
+  voice. Because that screen is now the only conversation most people will
+  have, it keeps the thread across navigation and reloads rather than emptying
+  itself the moment someone glances at Deployed, and carries a New control to
+  start fresh. The conversation is held in session storage, not local: it is
+  content, and content should not outlive the browser session on a shared
+  machine.
+- Genie knows what Soulacy is. Asked "what is Studio for?" it answered about
+  Adobe, Spotify and Visual Studio, because nothing told it which Studio it
+  lives inside. Its prompt now names the product's parts — agents, Studio,
+  Templates, Delivery, Skills and MCP, Knowledge, About You, Providers —
+  while still reading the live catalogs for what is actually installed.
 - Genie is the way in. There were two front doors — one that answered
   questions and one that built agents — and the person had to choose before
   they had typed anything. Nobody arrives thinking "I need an agent"; they
