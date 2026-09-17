@@ -47,7 +47,7 @@ export const navPages = [
   { id: 'studio',    icon: '🎬', label: 'Studio',      group: 'main', level: 'standard' },
   { id: 'agents',    icon: '⊕', label: 'Deployed',    group: 'main', level: 'simple' },
   { id: 'templates', icon: '📋', label: 'Templates',   group: 'main', level: 'simple' },
-  { id: 'chat',      icon: '◎', label: 'Chat',        group: 'main', level: 'simple' },
+  { id: 'chat',      icon: '◎', label: 'Chat',        group: 'main', level: 'standard' },
   { id: 'autopilot', icon: '◇', label: 'Autopilot',   group: 'main', level: 'advanced' },
   { id: 'person',    icon: '👤', label: 'About You',   group: 'capabilities', level: 'simple' },
   { id: 'memory',    icon: '🧠', label: 'Learning',    group: 'capabilities', level: 'standard' },

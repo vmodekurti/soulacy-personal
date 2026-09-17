@@ -94,3 +94,22 @@ func TestSystemAndGenieHaveTheSameEnvironmentalReach(t *testing.T) {
 		t.Fatal("Genie must not acquire host access from this change")
 	}
 }
+
+// Genie is the way into the product, so it has to know what the product is.
+// Asked "what is Studio for?" it answered about Adobe, Spotify and Visual
+// Studio, because nothing told it which Studio it lives inside.
+func TestGenieKnowsWhatSoulacyIs(t *testing.T) {
+	prompt := builtinGenieAgent().SystemPrompt
+	for _, part := range []string{"Studio", "Templates", "Delivery", "Knowledge", "About You", "Providers"} {
+		if !strings.Contains(prompt, part) {
+			t.Errorf("Genie should know that %q is part of Soulacy", part)
+		}
+	}
+	if !strings.Contains(prompt, "self-hosted") {
+		t.Error("Genie should know Soulacy is something the user runs themselves")
+	}
+	// Knowing the map must not replace reading the live catalogs.
+	if !strings.Contains(prompt, "list_skills") {
+		t.Error("Genie should still read what is actually installed")
+	}
+}

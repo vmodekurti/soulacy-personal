@@ -88,4 +88,33 @@ export const chatMetricsBaseline = writable({})
 // Ask Genie handoff: the floating button anywhere in the app stores the
 // question here and navigates to Chat, which starts a thread with the best
 // agent, sends it, and clears the store. { text, at } or null.
+/**
+ * The Genie conversation, kept across navigation and reloads.
+ *
+ * Chat is no longer in the simple sidebar, so this screen is the only
+ * conversational surface most people will use. A form that empties itself the
+ * moment you glance at Deployed is not a conversation — you would lose the
+ * thread you were halfway through and have to start again.
+ *
+ * Session storage rather than local: a conversation is content, and content
+ * should not outlive the browser session on a shared machine.
+ */
+function sessionJSON(key, initial) {
+  let start = initial
+  try {
+    const raw = sessionStorage.getItem(key)
+    if (raw) start = JSON.parse(raw)
+  } catch { /* corrupt or blocked; fall back to a fresh one */ }
+  const store = writable(start)
+  store.subscribe((v) => {
+    try {
+      if (v && (!Array.isArray(v) ? true : v.length)) sessionStorage.setItem(key, JSON.stringify(v))
+      else sessionStorage.removeItem(key)
+    } catch { /* private window */ }
+  })
+  return store
+}
+
+export const genieConversation = sessionJSON('soulacy_genie_convo', null)
+
 export const genieAsk = writable(null)

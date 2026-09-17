@@ -21,7 +21,7 @@
   import { api, createEventSocket } from '../lib/api.js'
   import { classifyRequest } from '../lib/intent.js'
   import { parseMarkdown, richRenderer } from '../lib/markdown.js'
-  import { genieAsk } from '../lib/stores.js'
+  import { genieAsk, genieConversation } from '../lib/stores.js'
 
   // The app routes on the URL hash; there is no navigate helper to import.
   const go = (page) => { window.location.hash = page }
@@ -98,14 +98,43 @@
     }
   }
 
+  // Pick the conversation back up.
+  //
+  // Chat is no longer in the simple sidebar, so this screen is the only
+  // conversational surface most people will use. A page that empties itself
+  // the moment someone glances at Deployed is not a conversation — they would
+  // lose the thread they were halfway through and have to start again.
+  function restoreConversation() {
+    const saved = $genieConversation
+    if (!saved || !Array.isArray(saved.turns) || !saved.turns.length) return false
+    turns = saved.turns
+    sessionId = saved.sessionId || ''
+    askedText = saved.askedText || ''
+    understanding = saved.understanding || null
+    phase = saved.phase || 'answer'
+    // Never resume mid-flight. A build or a run interrupted by navigating away
+    // is not still happening, and showing its spinner would wait forever.
+    if (phase === 'running') phase = understanding ? 'ready' : 'converse'
+    return true
+  }
+
+  // Saved on every change rather than on unload: a closed tab fires nothing
+  // reliable, and writing a few turns is trivial.
+  $: if (turns.length) {
+    genieConversation.set({ turns, sessionId, askedText, understanding, phase })
+  }
+
   onMount(() => {
+    restoreConversation()
     checkProvider()
     loadAgents()
     // Anything typed into the floating button lands here and is treated
-    // exactly as if it had been typed into the box on this page.
+    // exactly as if it had been typed into the box on this page. It starts a
+    // fresh thread rather than appending to whatever was already open.
     const handoff = $genieAsk
     if (handoff?.text) {
       genieAsk.set(null)
+      restart()
       send(handoff.text)
     }
   })
@@ -397,6 +426,7 @@
     phase = 'ask'; draft = ''; sessionId = ''; turns = []; understanding = null
     agentId = ''; output = ''; schedulePending = false; deliveryWarning = ''
     scheduled = false; error = ''; asking = false; askedText = ''
+    genieConversation.set(null)
   }
 
   // Plain sentences describing what the agent will do. The user is being asked
@@ -427,7 +457,12 @@
       {#if agentsLoaded && agents.length}
         <span class="pill"><span class="dot"></span>{runningCount} of {agents.length} agent{agents.length === 1 ? '' : 's'} running</span>
       {/if}
-      <div class="head-actions"><TourButton /></div>
+      <div class="head-actions">
+        {#if turns.length}
+          <button class="btn-secondary btn-sm" on:click={restart}>New</button>
+        {/if}
+        <TourButton />
+      </div>
     </div>
 
     {#if phase === 'ask'}
@@ -687,7 +722,7 @@
 
   .eyebrow-row { display: flex; align-items: center; gap: .6rem; margin-bottom: .9rem; }
   .eyebrow { color: var(--sl-text-faint); font-size: .64rem; letter-spacing: .14em; text-transform: uppercase; }
-  .head-actions { margin-left: auto; }
+  .head-actions { margin-left: auto; display: flex; align-items: center; gap: .5rem; }
   .pill {
     display: inline-flex; align-items: center; gap: .35rem;
     background: var(--sl-surface); border: 1px solid var(--sl-line, #1f2440);
