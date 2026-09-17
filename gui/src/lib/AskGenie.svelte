@@ -7,6 +7,7 @@
   shows the answer as a normal conversation.
 -->
 <script>
+  import GenieMark from './GenieMark.svelte'
   import { createEventDispatcher, tick } from 'svelte'
   import { genieAsk } from './stores.js'
   import { genieRequest, GENIE_SUGGESTIONS } from './genie.js'
@@ -44,7 +45,7 @@
     <button class="ask-genie-backdrop" aria-label="Close Ask Genie" on:click={close}></button>
     <section class="ask-genie-card" role="dialog" aria-label="Ask Genie">
       <header>
-        <span class="mark" aria-hidden="true">✦</span>
+        <span class="mark" aria-hidden="true"><GenieMark size={18} gradient /></span>
         <div>
           <strong>Genie</strong>
           <span>Ask once. I’ll find the right agent.</span>
@@ -64,7 +65,7 @@
     </section>
   {/if}
   <button class="ask-genie-pill" on:click={toggle} aria-expanded={open} aria-haspopup="dialog" title="Ask Genie">
-    <span aria-hidden="true">✦</span><span class="label">Ask Genie</span>
+    <GenieMark size={18} /><span class="label">Ask Genie</span>
   </button>
 </div>
 
