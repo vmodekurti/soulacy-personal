@@ -154,6 +154,7 @@ nav:
     - Safe Undo Account Handoff: use-cases/safe-undo-handoff.md
     - Release a Checked Agent: use-cases/verified-release.md
   - Using Soulacy:
+    - Talking to Genie: using/genie.md
     - Chat: using/chat.md
     - Verified Autopilot: using/autopilot.md
     - Adaptive Memory: using/adaptive-memory.md
@@ -193,6 +194,7 @@ nav:
     - Workflow Steps: agents/workflow.md
     - Flow Graphs: agents/flows.md
     - Peer Agents & Built-ins: agents/peers-builtins.md
+    - Browser Automation: agents/browser-automation.md
   - Skills & Plugins:
     - Installing Skills: extend/installing-skills.md
     - Skill Sources: extend/skill-sources.md
@@ -217,6 +219,7 @@ nav:
     - Custom Sidecar Channels: channels/sidecars.md
   - Configuration:
     - Overview: configuration/index.md
+    - What Your Deployment Can Do: configuration/deployment.md
     - Workspace Layout: configuration/workspace.md
     - Web GUI: configuration/gui.md
     - Server: configuration/server.md

@@ -1,8 +1,25 @@
 # Your First Agent
 
+## The short way
+
+Ask for it.
+
+> Send me a summary of overnight news every morning at seven.
+
+[Genie](../using/genie.md) hands that to Soulacy's agent builder, which knows
+what is installed on your gateway, asks for anything it still needs — a time, a
+delivery channel — and saves a real agent. You do not have to know the shape of
+a `SOUL.yaml` file to get one, and most people never write one by hand.
+
+The rest of this page is the long way, which is still worth reading once: it is
+what the builder produces, and what you will be looking at when you edit an
+agent later.
+
+## The long way
+
 This guide walks through building and verifying a conversational `SOUL.yaml`
-agent. If you prefer the GUI, [Studio](../using/studio.md) creates the same
-definition, but you should still inspect the resulting YAML.
+agent. [Studio](../using/studio.md) creates the same definition through a
+visual editor, and you should still inspect the resulting YAML.
 
 ## Before writing YAML
 
