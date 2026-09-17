@@ -67,6 +67,17 @@ type GenieMonitorManager interface {
 	CancelGenieMonitor(id string) error
 }
 
+// GenieAgentBuilder is implemented by the gateway so Genie can hand a build to
+// the same conversational builder the Studio screen drives, instead of
+// improvising an agent of its own or telling the user to go elsewhere.
+//
+// It is one turn: either the builder needs a detail and Genie relays the
+// question, or the agent is built. The runtime deliberately knows nothing
+// about which — the map is passed to the model as-is.
+type GenieAgentBuilder interface {
+	BuildAgentForGenie(ctx context.Context, session, request string) (map[string]any, error)
+}
+
 // BuiltinTool is a Go-native tool that runs inside the engine process rather
 // than delegating to a Python subprocess. Built-ins are added alongside the
 // agent's Python tool definitions when building the LLM tool schema.
@@ -115,6 +126,7 @@ type Engine struct {
 	channelDefaults  map[string]agent.ScheduleOutput
 	queueStore       *agentQueueStore
 	genieMonitors    GenieMonitorManager
+	genieBuilder     GenieAgentBuilder
 
 	// ollamaAPIKey is used by the built-in web_search tool (Ollama Web Search API).
 	// Falls back to the OLLAMA_API_KEY env var at call time.
@@ -316,6 +328,11 @@ type Engine struct {
 
 // SetGenieMonitorManager attaches the constrained scheduler facade.
 func (e *Engine) SetGenieMonitorManager(m GenieMonitorManager) { e.genieMonitors = m }
+
+// SetGenieAgentBuilder attaches the builder bridge. Without it, build_agent
+// reports that the builder is unavailable rather than falling back to a
+// weaker way of writing an agent.
+func (e *Engine) SetGenieAgentBuilder(b GenieAgentBuilder) { e.genieBuilder = b }
 
 const (
 	defaultSessionTTL        = 24 * time.Hour

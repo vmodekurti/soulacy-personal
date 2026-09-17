@@ -113,6 +113,37 @@ func (e *Engine) buildBuiltins() []BuiltinTool {
 func (e *Engine) buildGenieMonitorBuiltins() []BuiltinTool {
 	return []BuiltinTool{
 		{
+			// The real build path. create_monitor below still exists for the
+			// narrow case it is good at — check a condition, say a sentence —
+			// but anything that needs a tool, a delivery channel or more than
+			// one step goes through the builder, which knows what is installed
+			// and asks for what is missing.
+			Name: "build_agent", Description: "Build an agent through Soulacy's builder. Use for anything to be set up, automated, or run regularly. Returns either a question to relay (call again with the same session and the answer) or the agent built.",
+			// Offered only to an agent that names it. Every tool schema is
+			// charged against the same context window as the conversation, and
+			// an agent on a model whose window we cannot read is working
+			// against a conservative 8k — where the built-in prompt and the
+			// existing tools already leave very little room. Handing this one
+			// to every agent by default cost each of them context for a tool
+			// only Genie is meant to call.
+			Gate: "genie",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{
+				"request": map[string]any{"type": "string", "description": "What the user wants, in their own words. On a follow-up call, their answer to the builder's question."},
+				"session": map[string]any{"type": "string", "description": "The session returned by a previous build_agent call. Omit to start a new build."},
+			}, "required": []string{"request"}},
+			Handler: func(ctx context.Context, args map[string]any) (string, error) {
+				if e.genieBuilder == nil {
+					return "", fmt.Errorf("build_agent: the agent builder is unavailable")
+				}
+				result, err := e.genieBuilder.BuildAgentForGenie(ctx, argString(args, "session"), argString(args, "request"))
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
 			Name: "create_monitor", Description: "Create a Genie-owned background cron or one-shot monitor. Supply exactly one of cron (five-field expression) or at (RFC3339 timestamp).",
 			Parameters: map[string]any{"type": "object", "properties": map[string]any{
 				"prompt":  map[string]any{"type": "string", "description": "The task and alert condition to evaluate on every run"},
