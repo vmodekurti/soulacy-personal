@@ -827,6 +827,9 @@ func (a *App) wireAuth(stack *closerStack) (*auth.Engine, error) {
 		OIDCIssuer:    cfg.Auth.OIDCIssuer,
 		OIDCAudience:  cfg.Auth.OIDCAudience,
 		OIDCClientID:  cfg.Auth.OIDCClientID,
+		// Sessions live in the workspace, so a restart — a deploy, a reboot,
+		// a config change — does not sign every phone out.
+		RefreshStorePath: refreshStorePath(a.cfg),
 	}, cfg.Server.APIKey, log)
 	if authErr != nil {
 		return nil, fmt.Errorf("auth engine: %w", authErr)
@@ -1292,4 +1295,20 @@ func (a *App) startMessageRouter(ctx context.Context, chanReg *channels.Registry
 			}
 		}()
 	}
+}
+
+// refreshStorePath keeps sessions beside the rest of the workspace state.
+//
+// It returns empty when there is no workspace to write to, which falls back to
+// the old in-memory behaviour rather than failing to start: a gateway that
+// cannot keep sessions is worth having, and one that will not boot is not.
+func refreshStorePath(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	dir := strings.TrimSpace(cfg.Memory.Dir)
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "refresh-tokens.json")
 }
