@@ -255,6 +255,13 @@
   let askedText = ''
   const GENIE = 'genie'
 
+  // Live token buffer for the in-flight Genie answer. Genie relays each reply
+  // token as an `assistant.delta` over the events socket (it streams the final,
+  // tool-free synthesis turn), so the answer appears as it is written instead of
+  // arriving all at once. The POST below is still the authoritative reply and
+  // replaces this preview when it returns.
+  let askStream = ''
+
   async function ask(message) {
     asking = true
     error = ''
@@ -262,6 +269,23 @@
     askedText = message
     draft = ''
     phase = 'answer'
+    askStream = ''
+    let socket = null
+    try { socket = createEventSocket() } catch { socket = null }
+    if (socket) {
+      socket.onmessage = (e) => {
+        let ev
+        try { ev = JSON.parse(e.data) } catch { return }
+        // Only one Genie ask is ever in flight on this screen (the `asking`
+        // guard blocks another), so matching on the agent is enough — no need
+        // to know the session id the server minted for this turn.
+        if (ev.type === 'assistant.delta' && ev.agent_id === GENIE) {
+          const tok = ev.payload?.text || ''
+          if (tok) askStream += tok
+        }
+      }
+      socket.onerror = () => { try { socket.close() } catch { /* already gone */ } }
+    }
     try {
       const res = await api.chat(GENIE, message, 'gui-user', null, sessionId)
       sessionId = res.session_id || sessionId
@@ -270,6 +294,8 @@
     } catch (e) {
       error = e.message || 'Could not reach Genie.'
     } finally {
+      try { socket?.close() } catch { /* already gone */ }
+      askStream = ''
       asking = false
     }
   }
@@ -587,7 +613,14 @@
 
         {#if phase === 'answer'}
           {#if asking}
-            <div class="thinking"><span class="spinner"></span> Asking Genie…</div>
+            {#if askStream}
+              <div class="msg soulacy">
+                <span class="who">Genie</span>
+                <div class="bubble markdown-body streaming" use:richRenderer={askStream}>{@html parseMarkdown(askStream)}</div>
+              </div>
+            {:else}
+              <div class="thinking"><span class="spinner"></span> Asking Genie…</div>
+            {/if}
           {:else}
             <div class="reply-card">
               <input
