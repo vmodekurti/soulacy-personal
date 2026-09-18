@@ -68,8 +68,18 @@ func reportedSupport(present bool) Support {
 func (o *OllamaProvider) ProfileModel(ctx context.Context, model string) (ModelProfile, error) {
 	p := UnknownModelProfile(o.ID(), model)
 	p.Source, p.JSONMode = "adapter", SupportYes // API format support, not a quality score.
-	if configured := o.contextLimit(); configured > 0 {
-		p.ContextTokens, p.ContextSource = configured, "configured"
+	operatorNumCtx := o.contextLimit()
+	switch {
+	case operatorNumCtx > 0:
+		p.ContextTokens, p.ContextSource = operatorNumCtx, "configured"
+	case o.numCtxSet:
+		// Operator set num_ctx to 0 (or a non-positive value): they want Ollama
+		// to choose its own serving window. Do not infer one; leave it unknown.
+	default:
+		// Conservative floor until the model's metadata is read below. It also
+		// stands if the metadata call fails (this function returns early), so a
+		// profile carries a usable window rather than zero.
+		p.ContextTokens, p.ContextSource = ollamaNumCtxFloor, "default"
 	}
 	body, _ := json.Marshal(map[string]string{"model": model})
 	var result struct {
@@ -91,12 +101,23 @@ func (o *OllamaProvider) ProfileModel(ctx context.Context, model string) (ModelP
 	var contextTokens int
 	_ = json.Unmarshal(result.ModelInfo[architecture+".context_length"], &contextTokens)
 	if architecture != "" && contextTokens > 0 && contextTokens <= 16*1024*1024 {
-		if p.ContextTokens > 0 {
-			p.ContextTokens = min(contextTokens, p.ContextTokens)
+		switch {
+		case operatorNumCtx > 0:
+			// Operator pinned num_ctx: the window is the smaller of what they
+			// asked for and what the model can serve.
+			p.ContextTokens = min(contextTokens, operatorNumCtx)
 			p.ContextSource = "provider_and_configured"
+		case o.numCtxSet:
+			// Explicit 0: leave the window to Ollama; do not infer one.
+		default:
+			// Choose the serving window from the model's trained maximum, cache
+			// it for the request path, and report it so the input-budget
+			// preflight matches exactly what will be sent.
+			resolved := chooseNumCtx(contextTokens)
+			o.rememberNumCtx(model, resolved)
+			p.ContextTokens = resolved
+			p.ContextSource = "resolved"
 		}
-		// Without a positive num_ctx the server chooses its serving window.
-		// The model's architectural maximum is not evidence of that choice.
 	}
 	return p, nil
 }

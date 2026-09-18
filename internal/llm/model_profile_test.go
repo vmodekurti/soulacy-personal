@@ -44,7 +44,7 @@ func TestModelProfileOllamaEvidenceAndServingWindow(t *testing.T) {
 		context               int
 		chat, tools, thinking Support
 	}{
-		{"supported", `{"capabilities":["completion","tools","thinking"],"model_info":{"general.architecture":"x","x.context_length":262144}}`, 16384, SupportYes, SupportYes, SupportYes},
+		{"supported", `{"capabilities":["completion","tools","thinking"],"model_info":{"general.architecture":"x","x.context_length":262144}}`, 32768, SupportYes, SupportYes, SupportYes},
 		{"no-tools", `{"capabilities":["completion"],"model_info":{"general.architecture":"x","x.context_length":8192}}`, 8192, SupportYes, SupportNo, SupportNo},
 		{"old-server", `{}`, 16384, SupportUnknown, SupportUnknown, SupportUnknown},
 		{"null-capabilities", `{"capabilities":null}`, 16384, SupportUnknown, SupportUnknown, SupportUnknown},
