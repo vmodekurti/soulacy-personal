@@ -1,0 +1,110 @@
+# Weekly release — cut a patch release if main has moved since the last one.
+#
+# Releases were dispatch-only: a person went to GitHub and typed a version.
+# Nobody did for four days, so every install.sh and every cloud template
+# handed out a build missing that entire week — and nothing anywhere said so.
+# The update checker, the signing, the manifest: all of it worked, pointed at a
+# release nobody had cut.
+#
+# This is the "who starts it" that was missing. Once a week it looks at how far
+# main is past the newest tag. Nothing moved: it says so and stops. Something
+# moved: it bumps the patch number and dispatches create-release.yml, exactly
+# as a person would have. Everything downstream is unchanged — including the
+# macOS signing gate, which still waits for a human to approve it.
+#
+# It never pushes a tag itself and never touches release.yml directly. There
+# is one way to make a release, and this just makes sure it gets used.
+name: Weekly release
+
+on:
+  schedule:
+    # Monday 14:00 UTC — morning in the US, so the signing approval it needs
+    # lands during a working day rather than sitting over a weekend.
+    - cron: "0 14 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report what would be released without releasing it"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  # To dispatch create-release.yml. An explicit workflow_dispatch from
+  # GITHUB_TOKEN is not suppressed, unlike a token push (see release.yml).
+  actions: write
+
+concurrency:
+  group: weekly-release
+  cancel-in-progress: false
+
+jobs:
+  decide:
+    name: Release if main has moved
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          # Tags, and the history to count commits since one.
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Work out whether there is anything to release
+        id: plan
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Newest release tag by version order, not by date: a hotfix tagged
+          # after a larger version must not make the next release go backwards.
+          # Pre-release tags (v1.2.3-rc.1) carry a dash and are excluded: the
+          # next stable patch is computed from the last STABLE release.
+          latest="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | grep -v -e '-' | sort -V | tail -n 1)"
+          if [[ -z "${latest}" ]]; then
+            echo "::error::no release tag found; cut the first release by hand with create-release.yml"
+            exit 1
+          fi
+
+          ahead="$(git rev-list --count "${latest}..main")"
+          echo "latest=${latest}" >> "$GITHUB_OUTPUT"
+          echo "ahead=${ahead}"   >> "$GITHUB_OUTPUT"
+
+          if [[ "${ahead}" -eq 0 ]]; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "main is exactly ${latest}; nothing to release." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Bump the patch. Anything bigger than a patch is a decision for a
+          # person, made by dispatching create-release.yml with the version
+          # they mean.
+          IFS=. read -r major minor patch <<< "${latest#v}"
+          next="v${major}.${minor}.$((patch + 1))"
+
+          echo "release=true"  >> "$GITHUB_OUTPUT"
+          echo "next=${next}"  >> "$GITHUB_OUTPUT"
+          {
+            echo "main is ${ahead} commit(s) past ${latest}; releasing as **${next}**."
+            echo
+            echo "Since ${latest}:"
+            git log --oneline "${latest}..main" | sed 's/^/- /' | head -60
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Dispatch create-release
+        if: ${{ steps.plan.outputs.release == 'true' && !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          next="${{ steps.plan.outputs.next }}"
+          gh workflow run create-release.yml -f "version=${next}" -f "target_ref=main" -f "dry_run=false"
+          echo "create-release.yml dispatched for ${next}. The macOS builds will wait for signing approval as usual." | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Dry run
+        if: ${{ steps.plan.outputs.release == 'true' && inputs.dry_run }}
+        shell: bash
+        run: |
+          echo "Dry run: would have released ${{ steps.plan.outputs.next }}. Nothing dispatched." | tee -a "$GITHUB_STEP_SUMMARY"
