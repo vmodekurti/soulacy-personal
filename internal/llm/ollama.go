@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/soulacy/soulacy/pkg/message"
@@ -24,6 +25,10 @@ type OllamaProvider struct {
 	keepAlive string
 	options   map[string]any
 	client    *http.Client
+
+	numCtxMu    sync.Mutex
+	numCtxCache map[string]int
+	numCtxSet   bool // operator supplied num_ctx (any value, including 0)
 }
 
 const DefaultOllamaKeepAlive = "30m"
@@ -31,18 +36,19 @@ const DefaultOllamaKeepAlive = "30m"
 // DefaultOllamaOptions are applied to every Ollama request unless the operator
 // overrides them in config.
 //
-// num_ctx is 16384 rather than 4096 because 4096 could not hold a Soulacy agent.
-// The shared Operating Contract is ~835 tokens before an agent adds its own role
-// prompt, strategy contract, tool schemas, skills and knowledge — and a single
-// news or search tool result then dwarfs all of it. Real runs were measured at
-// 9.5k and 10.8k prompt tokens, so every one of them was being silently
-// truncated to 4096 and answered from a mangled prompt.
-//
-// The cost is KV-cache memory, which is why this is not set higher: 16384 covers
-// the observed working set with headroom, and an operator running a large model
-// on a small machine can still lower it deliberately.
+// num_ctx is deliberately NOT a static default. A single flat value cannot fit
+// every model: 4096 could not even hold a Soulacy agent (the shared Operating
+// Contract is ~835 tokens before an agent adds its role prompt, strategy
+// contract, tool schemas, skills and knowledge, and a single news or search
+// tool result then dwarfs all of it — real runs measured 9.5k–10.8k prompt
+// tokens), while a flat 16384 clamped a 262k-context model down so far that
+// Genie's output reserve left too little input budget and it failed preflight.
+// Instead num_ctx is resolved per model at request time from the model's
+// trained context_length, capped for memory (see chooseNumCtx), with a floor
+// that always holds a real agent prompt. An operator num_ctx in config still
+// wins, and an explicit num_ctx of 0 is honored as "let Ollama choose". Only
+// num_batch is a constant here.
 var DefaultOllamaOptions = map[string]any{
-	"num_ctx":   16384,
 	"num_batch": 128,
 }
 
@@ -79,10 +85,12 @@ func NewOllamaProvider(baseURL, defaultModel string, keepAlive string, options m
 	if keepAlive == "" {
 		keepAlive = DefaultOllamaKeepAlive
 	}
+	_, numCtxSet := options["num_ctx"]
 	return &OllamaProvider{
 		baseURL:   baseURL,
 		model:     defaultModel,
 		keepAlive: keepAlive,
+		numCtxSet: numCtxSet,
 		options:   ollamaOptionsWithDefaults(options),
 		// No hard HTTP timeout AND no response-header timeout — the engine's
 		// context already governs the upper bound (per-agent run_timeout). Big
@@ -128,6 +136,9 @@ func (o *OllamaProvider) Complete(ctx context.Context, req CompletionRequest) (*
 		body["keep_alive"] = o.keepAlive
 	}
 	options := cloneOptions(o.options)
+	if _, set := options["num_ctx"]; !set {
+		options["num_ctx"] = o.resolveNumCtx(model)
+	}
 	options["temperature"] = req.Temperature
 	if req.TopP > 0 {
 		options["top_p"] = req.TopP
