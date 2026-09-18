@@ -1557,11 +1557,11 @@ func TestOllamaOptionsWithDefaultsOverridesDefault(t *testing.T) {
 // default values are present when not overridden.
 func TestOllamaOptionsWithDefaultsKeepsDefaultWhenNotOverridden(t *testing.T) {
 	out := ollamaOptionsWithDefaults(map[string]any{})
-	// Assert against the declared default rather than a copy of its value: this
-	// test is about the default being APPLIED, and pinning the number here meant
-	// changing the default looked like a regression.
-	if out["num_ctx"] != DefaultOllamaOptions["num_ctx"] {
-		t.Errorf("num_ctx = %v, want %v (default)", out["num_ctx"], DefaultOllamaOptions["num_ctx"])
+	// num_ctx is no longer a static default — it is resolved per model at
+	// request time (see TestDefaultContextWindowFitsAnAgentPrompt), so it is
+	// deliberately absent here. num_batch remains a constant default.
+	if _, set := out["num_ctx"]; set {
+		t.Errorf("num_ctx should not be a static default; got %v", out["num_ctx"])
 	}
 	if out["num_batch"] != DefaultOllamaOptions["num_batch"] {
 		t.Errorf("num_batch = %v, want %v (default)", out["num_batch"], DefaultOllamaOptions["num_batch"])
@@ -1574,15 +1574,19 @@ func TestOllamaOptionsWithDefaultsKeepsDefaultWhenNotOverridden(t *testing.T) {
 // tokens — every one of them silently truncated by Ollama and answered from a
 // mangled prompt, surfacing as "(no final response produced)".
 func TestDefaultContextWindowFitsAnAgentPrompt(t *testing.T) {
-	got, ok := DefaultOllamaOptions["num_ctx"].(int)
-	if !ok {
-		t.Fatalf("num_ctx default is %T, want int", DefaultOllamaOptions["num_ctx"])
-	}
 	const observedWorkingSet = 10823 // measured from a real failing run
-	if got < observedWorkingSet {
-		t.Errorf("default num_ctx = %d, which cannot hold an observed %d-token agent prompt; "+
+	// num_ctx is now resolved per model at request time rather than pinned in
+	// DefaultOllamaOptions. The worst case is a model that has not been profiled
+	// yet, which falls back to the floor — so the floor itself must hold a real
+	// agent prompt, and the request path must actually serve it.
+	if ollamaNumCtxFloor < observedWorkingSet {
+		t.Errorf("num_ctx floor = %d, which cannot hold an observed %d-token agent prompt; "+
 			"Ollama truncates silently, so this fails with an empty answer and no stated cause",
-			got, observedWorkingSet)
+			ollamaNumCtxFloor, observedWorkingSet)
+	}
+	p := NewOllamaProvider("http://ollama.test", "llama3", "", nil)
+	if got := p.resolveNumCtx("llama3"); got < observedWorkingSet {
+		t.Errorf("request-path num_ctx for an unprofiled model = %d, cannot hold an observed %d-token prompt", got, observedWorkingSet)
 	}
 }
 
