@@ -424,7 +424,7 @@ Soulacy includes a suite of Go-native built-in tools that are injected into your
   * `command` (String, Required): Command string to execute.
   * `working_dir` (String, Optional): Target execution directory.
   * `timeout_seconds` (Integer, Optional): Execution timeout limit (default: 60s, max: 600s).
-* **Double Opt-In Requirement**: Requires both `system_tools: true` in the agent's `SOUL.yaml` AND `runtime.allow_system_tools: true` in the gateway's `config.yaml` to execute.
+* **Double Opt-In Requirement**: Requires both `system_tools: true` in the agent's `SOUL.yaml` AND `runtime.allow_system_agents` listing the agent ID in the gateway's `config.yaml` to execute.
 
 ### 5. `read_file`
 * **Description**: Reads a local file's content.

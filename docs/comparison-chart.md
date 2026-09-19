@@ -22,7 +22,7 @@ which line permitted it.
 
 Do not take our word for it. Check it in five minutes on your own machine:
 
-1. **Ask for something risky.** Write a small agent and ask it to delete a file. It cannot: system tools are not even offered until `runtime.allow_system_tools: true` is in your config and the agent declares them.
+1. **Ask for something risky.** Write a small agent and ask it to delete a file. It cannot: system tools are not even offered until the agent ID is listed in `runtime.allow_system_agents` in your config (a per-agent allowlist — stricter than a boolean) and the agent declares the system capability.
 2. **Turn them on and ask again.** Now the agent stops and waits for your approval before the privileged step runs.
 3. **Schedule it for 3 a.m.** The same step is refused because nobody is there to approve it, until the agent's file says `unattended: true`.
 4. **Read the diff.** Every change that made the agent more capable is a line you wrote in a file you can read, review, and roll back. Safe Undo covers the changes it makes.
