@@ -254,6 +254,7 @@ nav:
     - One-click Cloud: deployment/cloud.md
     - Docker: deployment/docker.md
     - macOS: deployment/macos.md
+    - Remote Access From Your Phone: deployment/remote-access.md
     - Linux / VPS: deployment/linux.md
     - Upgrades & Reinstall: deployment/upgrades.md
   - Troubleshooting:

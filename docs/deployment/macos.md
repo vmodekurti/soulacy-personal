@@ -107,6 +107,8 @@ The web GUI **Restart Gateway** button is available after config-changing action
 
 ## Exposing to the internet (for channel webhooks)
 
+> Just want the Soulacy app on your phone to reach this gateway from anywhere? See [Remote Access From Your Phone](remote-access.md) — one command, no ports opened.
+
 Telegram, Slack, Discord, and WhatsApp webhooks require a public HTTPS URL. Options:
 
 - **ngrok** (dev): `ngrok http 18789` — gives you a temporary public URL
