@@ -195,6 +195,54 @@ Do not solve this by making a credential-bearing configuration world-readable.
     versioning `YYYY.MM.DD`, and typed `requires`) before then. Full details
     in [Packaging](../packaging.md).
 
+## Your data survives upgrades (runtime vs data)
+
+Soulacy keeps **runtime** and **data** separate, so replacing the runtime on an
+upgrade never touches what you configured or saved.
+
+- **Runtime** — the binary or container image. Thrown away and replaced on every
+  upgrade.
+- **Data** — everything you configure and Soulacy saves: `config.yaml`, agents,
+  memory, knowledge, secrets, skills, plugins. It lives *outside* the runtime:
+  - **Host installs:** in `~/.soulacy/soulspace/`, separate from the binary.
+  - **Docker/Compose:** named volumes — `soulacy_data` (the workspace),
+    `postgres_data`, `qdrant_data`. `docker compose up -d` with a new image keeps
+    them. **Never run `docker compose down -v`** — the `-v` deletes those volumes.
+  - **Render / Coolify / Azure:** a persistent disk mounted at
+    `/home/soulacy/.soulacy`.
+  - **Railway:** you must attach a volume at `/home/soulacy/.soulacy` yourself —
+    see [deploy/railway](https://github.com/vmodekurti/soulacy-personal/tree/main/deploy/railway).
+
+Because of this, the upgrade flows on this page (self-update, image pull, or
+platform redeploy) preserve everything. Schemas only move forward, so a newer
+version reads your existing data.
+
+### Safety check
+
+On a container or managed platform, Soulacy verifies at startup — and in
+`sy doctor` — that the workspace is on durable storage. If it isn't, it warns:
+
+> workspace is NOT on persistent storage; data will be lost on the next redeploy
+
+That means the workspace is on the container's ephemeral filesystem. Mount a
+persistent volume at `/home/soulacy/.soulacy` and redeploy before relying on it.
+
+### Back up your data
+
+A backup is a copy of the workspace (and the DB volumes, if you use Postgres +
+Qdrant):
+
+```bash
+# Host / bind-mounted workspace
+tar czf soulacy-backup.tgz -C ~/.soulacy soulspace
+
+# Docker named volumes
+docker run --rm -v soulacy_data:/d -v "$PWD":/b alpine tar czf /b/soulacy_data.tgz -C /d .
+```
+
+Restore by extracting back into the same location/volume before starting the new
+version.
+
 ## Why upgrades are safe
 
 Three guard layers protect the normal path:

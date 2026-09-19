@@ -20,6 +20,7 @@ import (
 
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/credentials"
+	"github.com/soulacy/soulacy/internal/platform"
 	"github.com/soulacy/soulacy/internal/secrets"
 	"github.com/soulacy/soulacy/internal/service"
 	"github.com/soulacy/soulacy/internal/updates"
@@ -110,6 +111,7 @@ func collectDoctorReport() doctorReport {
 	add(checkConfig())
 	add(checkRuntimeDir(runtimeDir))
 	add(checkInstallLayout())
+	add(checkWorkspacePersistence())
 	add(checkAgentDirs())
 	add(checkAgentCount())
 	add(checkPort())
@@ -795,6 +797,17 @@ func checkAgentCount() doctorCheck {
 // every running-gateway-on-port-18789 look like "another process".
 // Fixed: reuse `gatewayJSON("/health", ...)` — same code path as
 // checkGatewayHealth, so the two checks now agree.
+func checkWorkspacePersistence() doctorCheck {
+	dir, err := config.DataDir()
+	if err != nil {
+		return doctorCheck{Name: "workspace persistence", Status: doctorOK, Detail: "workspace path not resolved; skipped"}
+	}
+	if durable, reason := platform.WorkspaceDurable(dir); !durable {
+		return doctorCheck{Name: "workspace persistence", Status: doctorWarn, Detail: reason}
+	}
+	return doctorCheck{Name: "workspace persistence", Status: doctorOK, Detail: dir + " is on durable storage"}
+}
+
 func checkPort() doctorCheck {
 	host := viper.GetString("server.host")
 	if host == "" {

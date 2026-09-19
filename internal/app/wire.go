@@ -28,6 +28,7 @@ import (
 	"github.com/soulacy/soulacy/internal/learning"
 	"github.com/soulacy/soulacy/internal/mcp"
 	"github.com/soulacy/soulacy/internal/person"
+	"github.com/soulacy/soulacy/internal/platform"
 	"github.com/soulacy/soulacy/internal/runtime"
 	"github.com/soulacy/soulacy/internal/safeundo"
 	"github.com/soulacy/soulacy/internal/scheduler"
@@ -456,6 +457,15 @@ func (a *App) Run(parent context.Context) error {
 		zap.Int("port", cfg.Server.Port),
 		zap.Bool("gui", cfg.Server.GUIEnabled),
 	)
+
+	// Guard against silent data loss: on a container/managed platform whose
+	// workspace is on the ephemeral container filesystem, the next redeploy
+	// destroys everything. Warn loudly so the operator mounts a volume.
+	if dir, derr := config.DataDir(); derr == nil {
+		if durable, reason := platform.WorkspaceDurable(dir); !durable {
+			log.Warn("workspace is NOT on persistent storage; data will be lost on the next redeploy", zap.String("detail", reason))
+		}
+	}
 
 	return srv.Listen(ctx)
 }
