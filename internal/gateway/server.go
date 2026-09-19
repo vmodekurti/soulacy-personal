@@ -31,6 +31,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -1767,6 +1768,42 @@ func (s *Server) checkAuthBindSafety() error {
 }
 
 // Listen starts the server. Blocks until ctx is cancelled or an error occurs.
+// listenWithRestartHandoff binds addr, retrying briefly while the port is still
+// held by a previous instance. A gateway restart hands 127.0.0.1:PORT from the
+// exiting process to its replacement; the old code called net.Listen once and
+// died with "address already in use" whenever the two overlapped (a slow-exiting
+// parent, or a lingering process from an earlier restart), which is what made
+// restarts "stick". Retrying on EADDRINUSE for a bounded window lets the
+// replacement take over as soon as the socket is released, and still fails fast
+// on any other error or a genuinely occupied port.
+func listenWithRestartHandoff(ctx context.Context, addr string, log *zap.Logger) (net.Listener, error) {
+	const window = 20 * time.Second
+	const gap = 250 * time.Millisecond
+	deadline := time.Now().Add(window)
+	for attempt := 1; ; attempt++ {
+		ln, err := net.Listen("tcp", addr)
+		if err == nil {
+			if attempt > 1 && log != nil {
+				log.Info("gateway port acquired after restart handoff",
+					zap.String("addr", addr), zap.Int("attempts", attempt))
+			}
+			return ln, nil
+		}
+		if !errors.Is(err, syscall.EADDRINUSE) || time.Now().After(deadline) {
+			return nil, err
+		}
+		if log != nil && (attempt == 1 || attempt%8 == 0) {
+			log.Warn("gateway port busy — waiting for the previous instance to release it",
+				zap.String("addr", addr), zap.Duration("retry_in", gap))
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(gap):
+		}
+	}
+}
+
 func (s *Server) Listen(ctx context.Context) error {
 	if err := s.checkAuthBindSafety(); err != nil {
 		return err
@@ -1792,7 +1829,7 @@ func (s *Server) Listen(ctx context.Context) error {
 		}
 		certificate = &loaded
 	}
-	listener, err := net.Listen("tcp", addr)
+	listener, err := listenWithRestartHandoff(ctx, addr, s.log)
 	if err != nil {
 		return fmt.Errorf("gateway listener: %w", err)
 	}
