@@ -5,9 +5,11 @@
 package agent
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/soulacy/soulacy/sdk/reasoning"
+	"gopkg.in/yaml.v3"
 )
 
 // TriggerKind describes how an agent is activated.
@@ -1188,6 +1190,40 @@ type NonNegotiables struct {
 	// "Output constraints" framing — and they remain prompt-level
 	// guidance until the post-LLM validator lands.
 	OutputConstraints *OutputConstraints `yaml:"output_constraints,omitempty" json:"output_constraints,omitempty"`
+}
+
+// UnmarshalYAML accepts the documented map form (`must:` / `must_not:` /
+// `output_constraints:`) and a bare YAML list as shorthand for must_not.
+// Hand-written SOUL.yaml files often guess the list form; Studio writes the
+// map. A list is treated as must_not because that is the usual "never do X"
+// intent of a flat non_negotiables block.
+func (n *NonNegotiables) UnmarshalYAML(node *yaml.Node) error {
+	if n == nil {
+		return fmt.Errorf("non_negotiables: nil receiver")
+	}
+	if node == nil || node.ShortTag() == "!!null" {
+		*n = NonNegotiables{}
+		return nil
+	}
+	switch node.Kind {
+	case yaml.SequenceNode:
+		var items []string
+		if err := node.Decode(&items); err != nil {
+			return fmt.Errorf("non_negotiables takes must:/must_not: lists (a bare list is treated as must_not): %w", err)
+		}
+		*n = NonNegotiables{MustNot: items}
+		return nil
+	case yaml.MappingNode:
+		type raw NonNegotiables
+		var r raw
+		if err := node.Decode(&r); err != nil {
+			return fmt.Errorf("non_negotiables takes must:/must_not: lists: %w", err)
+		}
+		*n = NonNegotiables(r)
+		return nil
+	default:
+		return fmt.Errorf("non_negotiables takes must:/must_not: lists (a bare list is treated as must_not)")
+	}
 }
 
 // OutputConstraints carries mechanical, machine-checkable bounds on the

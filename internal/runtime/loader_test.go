@@ -5,6 +5,7 @@
 package runtime
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -296,6 +297,55 @@ mcp_tools:
 	}
 	if def.MCPTools == nil || len(*def.MCPTools) != 1 || (*def.MCPTools)[0] != "mcp__filesystem__read_file" {
 		t.Errorf("mcp_tools list: got %v", def.MCPTools)
+	}
+}
+
+func TestLoader_LoadAllAcceptsBareNonNegotiablesList(t *testing.T) {
+	dir := t.TempDir()
+	soul := []byte(`id: list-nn
+name: List NN
+trigger: channel
+system_prompt: test
+llm:
+  provider: ollama
+  model: llama3
+enabled: true
+non_negotiables:
+  - never move money
+  - flag a new subscription the week it appears
+`)
+	agentDir := filepath.Join(dir, "list-nn")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "SOUL.yaml"), soul, 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	l := NewLoader([]string{dir})
+	if errs := l.LoadAll(); len(errs) > 0 {
+		t.Fatalf("LoadAll errors: %v", errs)
+	}
+	def := l.Get("list-nn")
+	if def == nil || def.NonNegotiables == nil {
+		t.Fatal("agent or non_negotiables was nil")
+	}
+	got := def.NonNegotiables.MustNot
+	if len(got) != 2 || got[0] != "never move money" {
+		t.Errorf("must_not shorthand: got %v", got)
+	}
+}
+
+func TestYAMLConfigHint(t *testing.T) {
+	kb := yamlConfigHint(fmt.Errorf("yaml: unmarshal errors:\n  line 16: field knowledge_bases not found in type agent.Definition"))
+	if kb != "did you mean `knowledge:`?" {
+		t.Errorf("knowledge_bases hint: got %q", kb)
+	}
+	nn := yamlConfigHint(fmt.Errorf("yaml: unmarshal errors:\n  line 16: cannot unmarshal !!seq into agent.NonNegotiables"))
+	if !strings.Contains(nn, "must_not") {
+		t.Errorf("seq non_negotiables hint: got %q", nn)
+	}
+	if yamlConfigHint(nil) != "" {
+		t.Error("nil err should have empty hint")
 	}
 }
 

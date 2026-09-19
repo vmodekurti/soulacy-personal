@@ -416,14 +416,18 @@ func (l *Loader) parseFile(path string) (*agent.Definition, error) {
 	strictDec.KnownFields(true)
 	var strictCheck agent.Definition
 	if strictErr := strictDec.Decode(&strictCheck); strictErr != nil {
-		l.log.Warn("SOUL.yaml has unrecognised fields (possible typo — agent still loaded)",
-			zap.String("path", path),
-			zap.Error(strictErr),
-		)
+		fields := []zap.Field{zap.String("path", path), zap.Error(strictErr)}
+		if hint := yamlConfigHint(strictErr); hint != "" {
+			fields = append(fields, zap.String("hint", hint))
+		}
+		l.log.Warn("SOUL.yaml has unrecognised fields (possible typo — agent still loaded)", fields...)
 	}
 
 	var def agent.Definition
 	if err := yaml.Unmarshal(data, &def); err != nil {
+		if hint := yamlConfigHint(err); hint != "" {
+			return nil, fmt.Errorf("parse YAML: %w (%s)", err, hint)
+		}
 		return nil, fmt.Errorf("parse YAML: %w", err)
 	}
 	if def.ID == "" {
@@ -432,6 +436,26 @@ func (l *Loader) parseFile(path string) (*agent.Definition, error) {
 
 	def.SourcePath = path
 	return &def, nil
+}
+
+// yamlConfigHint maps common SOUL.yaml mistakes onto a one-line correction.
+// Hand-written files often use a bare list under non_negotiables (now accepted
+// as must_not) or knowledge_bases instead of knowledge.
+func yamlConfigHint(err error) string {
+	if err == nil {
+		return ""
+	}
+	s := err.Error()
+	switch {
+	case strings.Contains(s, "field knowledge_bases not found"):
+		return "did you mean `knowledge:`?"
+	case strings.Contains(s, "cannot unmarshal !!seq into") && strings.Contains(s, "NonNegotiables"):
+		return "`non_negotiables` takes `must:`/`must_not:` lists (a bare list is treated as `must_not`)"
+	case strings.Contains(s, "non_negotiables takes must:"):
+		return "`non_negotiables` takes `must:`/`must_not:` lists (a bare list is treated as `must_not`)"
+	default:
+		return ""
+	}
 }
 
 // IsBuiltin reports whether the agent with the given ID is a built-in seeded
