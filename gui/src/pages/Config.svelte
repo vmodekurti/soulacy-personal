@@ -1,5 +1,6 @@
 <script>
   import TourButton from '../lib/TourButton.svelte'
+  import UpgradeAction from '../lib/UpgradeAction.svelte'
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
   import { rowsFromSettings, settingsPatchFromRows } from '../lib/pluginsettings.js'
@@ -592,9 +593,9 @@
   </div>
   {#if updateInfo}
     <div class="auto-update-row" data-testid="auto-update-row">
-      <label class="checkbox-row" data-tooltip="When on, verified releases are downloaded, installed, and applied automatically at the next idle moment. Turn off to be notified only.">
+      <label class="checkbox-row" data-tooltip={updateInfo.upgrade_strategy === 'instructions' ? 'When on, Soulacy checks for new releases and shows redeploy instructions for this platform.' : 'When on, verified releases are downloaded, installed, and applied automatically at the next idle moment. Turn off to be notified only.'}>
         <input type="checkbox" bind:checked={updatesAuto} disabled={!writable} on:change={save} />
-        Install updates automatically
+        {updateInfo.upgrade_strategy === 'instructions' ? 'Check for updates automatically' : 'Install updates automatically'}
       </label>
       <select bind:value={updatesInterval} disabled={!writable || !updatesAuto} on:change={save} title="How often to check for a release">
         <option value="1h">every hour</option>
@@ -620,7 +621,7 @@
         <span>Soulacy {updateInfo.latest_version} is available! (Current: {updateInfo.current_version}).</span>
       </div>
       <div class="update-banner-actions">
-        <button class="btn-primary btn-sm" on:click={startUpgrade}>Upgrade Now</button>
+        <UpgradeAction info={updateInfo} onUpgrade={startUpgrade} />
         <button class="btn-secondary btn-sm" on:click={() => window.open("https://github.com/vmodekurti/soulacy-personal/releases/latest", "_blank")}>View Release Notes</button>
       </div>
     </div>

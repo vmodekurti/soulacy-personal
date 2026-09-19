@@ -23,6 +23,12 @@ func TestUpdatesStatusEndpointReturnsSaneDefaults(t *testing.T) {
 	if _, ok := body["update_available"].(bool); !ok {
 		t.Fatalf("missing update_available field: %#v", body)
 	}
+	if strategy, ok := body["upgrade_strategy"].(string); !ok || strategy == "" {
+		t.Fatalf("missing upgrade_strategy field: %#v", body)
+	}
+	if helpURL, ok := body["upgrade_help_url"].(string); !ok || helpURL == "" {
+		t.Fatalf("missing upgrade_help_url field: %#v", body)
+	}
 }
 
 func TestTriggerUpdatesCheckMocked(t *testing.T) {

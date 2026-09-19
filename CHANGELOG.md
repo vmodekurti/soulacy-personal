@@ -7,6 +7,11 @@ to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Update banners no longer offer an in-place **Upgrade Now** action on
+  containers and managed platforms where the running binaries cannot be
+  replaced safely. They now show **How to upgrade** with platform-specific
+  redeploy steps and the exact release image; the upgrade API enforces the
+  same capability check.
 - Text is readable again. The bulk conversion of colour literals to design
   tokens rewrote the token definitions themselves, so each one pointed at
   itself — `--sl-text-faint: var(--sl-text-faint)` — and resolved to nothing.

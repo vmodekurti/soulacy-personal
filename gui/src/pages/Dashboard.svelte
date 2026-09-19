@@ -1,5 +1,6 @@
 <script>
   import TourButton from '../lib/TourButton.svelte'
+  import UpgradeAction from '../lib/UpgradeAction.svelte'
   import { onMount, onDestroy } from 'svelte'
   import { connected } from '../lib/stores.js'
   import { api, createEventSocket } from '../lib/api.js'
@@ -374,7 +375,7 @@
         <span>Soulacy {updateInfo.latest_version} is available! (Current: {updateInfo.current_version}).{#if updateInfo.mode === 'install'} It will install automatically at the next idle moment.{:else if updateInfo.mode === 'notify'} {updateInfo.mode_reason}{/if}</span>
       </div>
       <div class="update-banner-actions">
-        <button class="btn-primary btn-sm" on:click={startUpgrade}>Upgrade Now</button>
+        <UpgradeAction info={updateInfo} onUpgrade={startUpgrade} />
         <button class="btn-secondary btn-sm" on:click={() => window.open("https://github.com/vmodekurti/soulacy-personal/releases/latest", "_blank")}>View Release Notes</button>
       </div>
     </div>

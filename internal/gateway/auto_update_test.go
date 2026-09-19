@@ -5,11 +5,13 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/soulacy/soulacy/internal/config"
+	"github.com/soulacy/soulacy/internal/platform"
 	"github.com/soulacy/soulacy/internal/updates"
 )
 
@@ -35,6 +37,37 @@ func TestDecideAutoUpdateModes(t *testing.T) {
 	}
 }
 
+func TestUpgradeGuidanceMatchesDeploymentCapability(t *testing.T) {
+	cases := []struct {
+		name         string
+		env          autoUpdateEnv
+		platform     platform.Info
+		wantStrategy string
+		wantPlatform string
+		wantStep     string
+	}{
+		{"writable host", autoUpdateEnv{Writable: true}, platform.Info{Name: "self-hosted (linux)", Kind: platform.Host}, upgradeStrategyInline, "self-hosted (linux)", ""},
+		{"Railway", autoUpdateEnv{Writable: true}, platform.Info{Name: "Railway", Kind: platform.Managed}, upgradeStrategyInstructions, "Railway", "Redeploy"},
+		{"Render", autoUpdateEnv{InContainer: true, Writable: true}, platform.Info{Name: "Render", Kind: platform.Managed}, upgradeStrategyInstructions, "Render", "Manual Deploy"},
+		{"Kubernetes", autoUpdateEnv{InContainer: true, Writable: true}, platform.Info{Name: "Kubernetes", Kind: platform.Container}, upgradeStrategyInstructions, "Kubernetes", "rollout"},
+		{"read-only host", autoUpdateEnv{}, platform.Info{Name: "self-hosted (linux)", Kind: platform.Host}, upgradeStrategyInstructions, "self-hosted (linux)", "sy update install"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := upgradeGuidanceFor(tc.env, tc.platform, "v1.2.3")
+			if got.Strategy != tc.wantStrategy || got.Platform != tc.wantPlatform {
+				t.Fatalf("guidance = %+v", got)
+			}
+			if tc.platform.Kind != platform.Host && got.TargetImage != "ghcr.io/vmodekurti/soulacy-personal:1.2.3" {
+				t.Fatalf("target image = %q", got.TargetImage)
+			}
+			if tc.wantStep != "" && !strings.Contains(strings.Join(got.Instructions, " "), tc.wantStep) {
+				t.Fatalf("instructions %q do not contain %q", got.Instructions, tc.wantStep)
+			}
+		})
+	}
+}
+
 // autoUpdateFixture wires fakes into the seams and a manifest server that
 // advertises a newer release for this platform.
 type autoUpdateFixture struct {
@@ -51,7 +84,7 @@ func setupAutoUpdate(t *testing.T, s *Server, env autoUpdateEnv) *autoUpdateFixt
 	t.Helper()
 	f := &autoUpdateFixture{installDir: t.TempDir()}
 	oldInstall, oldVerify, oldRestore, oldRestart, oldExit := autoInstall, autoVerifyBinary, autoRestoreBackups, autoRestart, autoExit
-	oldContainer, oldWritable, oldDir := autoInContainer, autoInstallDirWritable, autoInstallDir
+	oldContainer, oldWritable, oldDir, oldPlatform := autoInContainer, autoInstallDirWritable, autoInstallDir, autoPlatform
 	autoInstall = func(_ context.Context, opts updates.UpdateInstallOptions) (updates.UpdateInstallResult, error) {
 		f.installs.Add(1)
 		check, err := updates.CheckForUpdate(context.Background(), opts.ManifestSource, "")
@@ -67,9 +100,16 @@ func setupAutoUpdate(t *testing.T, s *Server, env autoUpdateEnv) *autoUpdateFixt
 	autoInContainer = func() bool { return env.InContainer }
 	autoInstallDirWritable = func(string) bool { return env.Writable }
 	autoInstallDir = func(string) (string, error) { return f.installDir, nil }
+	autoPlatform = func() platform.Info {
+		if env.InContainer {
+			return platform.Info{Name: "Docker", Kind: platform.Container}
+		}
+		return platform.Info{Name: "self-hosted (linux)", Kind: platform.Host}
+	}
 	t.Cleanup(func() {
 		autoInstall, autoVerifyBinary, autoRestoreBackups, autoRestart, autoExit = oldInstall, oldVerify, oldRestore, oldRestart, oldExit
 		autoInContainer, autoInstallDirWritable, autoInstallDir = oldContainer, oldWritable, oldDir
+		autoPlatform = oldPlatform
 		globalUpdates = newUpdatesManager()
 	})
 	globalUpdates = newUpdatesManager()
@@ -178,6 +218,29 @@ func TestAutoUpdateOnlyNotifiesInContainerOrWhenDisabled(t *testing.T) {
 	status, body := gatewayJSON(t, s, http.MethodGet, "/api/v1/system/updates/status", "secret", "")
 	if status != 200 || body["mode"] != updateModeOff || body["auto_enabled"] != false || body["latest_version"] != "99.0.0" {
 		t.Fatalf("status: %d %+v", status, body)
+	}
+}
+
+func TestManualUpgradeReturnsRedeployInstructionsInContainer(t *testing.T) {
+	s, _ := newTestGatewayWithLLM(t, "secret")
+	f := setupAutoUpdate(t, s, autoUpdateEnv{InContainer: true, Writable: true})
+	autoPlatform = func() platform.Info { return platform.Info{Name: "Render", Kind: platform.Managed} }
+	globalUpdates.Lock()
+	globalUpdates.status.LatestVersion = "v1.2.3"
+	globalUpdates.Unlock()
+
+	status, body := gatewayJSON(t, s, http.MethodPost, "/api/v1/system/updates/upgrade", "secret", "")
+	if status != http.StatusConflict {
+		t.Fatalf("upgrade status = %d body=%+v", status, body)
+	}
+	if f.installs.Load() != 0 {
+		t.Fatal("container upgrade endpoint must not replace binaries")
+	}
+	if body["upgrade_strategy"] != upgradeStrategyInstructions || body["deployment_platform"] != "Render" {
+		t.Fatalf("unexpected guidance: %+v", body)
+	}
+	if body["target_image"] != "ghcr.io/vmodekurti/soulacy-personal:1.2.3" {
+		t.Fatalf("unexpected target image: %+v", body)
 	}
 }
 
