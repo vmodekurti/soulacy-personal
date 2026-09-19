@@ -289,6 +289,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write   # keyless cosign signing of the published image
     steps:
       - name: Download digests
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -327,6 +328,26 @@ jobs:
       - name: Inspect published image
         run: |
           docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+
+      - name: Sign the published image (keyless)
+        env:
+          COSIGN_YES: "true"
+        run: |
+          # Sign the multi-arch manifest-list digest keyless (Sigstore/OIDC — no
+          # long-lived keys). Every tag (the version, the 0.x minor, latest)
+          # points at this digest, so one signature covers them all. An operator
+          # verifies before running with:
+          #   cosign verify ghcr.io/${{ env.IMAGE_NAME }}:<tag> \
+          #     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+          #     --certificate-identity-regexp '^https://github.com/${{ env.IMAGE_NAME }}/.github/workflows/release.yml@'
+          DIGEST="$(docker buildx imagetools inspect \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }} \
+            --format '{{ .Manifest.Digest }}')"
+          echo "signing ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${DIGEST}"
+          cosign sign --recursive "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${DIGEST}"
 
   # ── Publish version-pinned cloud deployment templates ───────────────────────
   # The website's Deploy to AWS / Azure buttons read from this bucket. The copies
