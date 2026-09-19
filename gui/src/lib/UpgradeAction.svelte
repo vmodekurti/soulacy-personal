@@ -1,9 +1,12 @@
 <script>
   export let info = null
   export let onUpgrade = () => {}
+  export let onCheck = null
 
   let showingInstructions = false
   let copied = false
+  let checking = false
+  let checkMessage = ''
 
   $: canUpgradeInline = info?.upgrade_strategy === 'inline' ||
     (!info?.upgrade_strategy && info?.mode !== 'notify')
@@ -14,6 +17,7 @@
   function close() {
     showingInstructions = false
     copied = false
+    checkMessage = ''
   }
 
   function handleKeydown(event) {
@@ -32,6 +36,28 @@
       copied = true
     } catch {
       copied = false
+    }
+  }
+
+  async function checkAgain() {
+    if (checking || typeof onCheck !== 'function') return
+    checking = true
+    checkMessage = ''
+    try {
+      const result = await onCheck()
+      if (result?.update_available) {
+        checkMessage = `Still running ${result.current_version || 'the previous release'}. Finish the redeploy, then check again.`
+      } else if (result) {
+        checkMessage = result.current_version
+          ? `Soulacy ${result.current_version} is up to date.`
+          : 'Soulacy is up to date.'
+      } else {
+        checkMessage = 'The gateway did not return version status yet. Wait for the redeploy to finish, then check again.'
+      }
+    } catch {
+      checkMessage = 'The gateway is still restarting or unavailable. Wait a moment, then check again.'
+    } finally {
+      checking = false
     }
   }
 </script>
@@ -64,6 +90,14 @@
         </div>
       {/if}
 
+      {#if info?.current_version && info?.latest_version}
+        <div class="version-move" aria-label="Upgrade version">
+          <span>{info.current_version}</span>
+          <span aria-hidden="true">→</span>
+          <strong>{info.latest_version}</strong>
+        </div>
+      {/if}
+
       <ol>
         {#each instructions as step}
           <li>{step}</li>
@@ -77,8 +111,15 @@
         {#if info?.upgrade_help_url}
           <a class="btn-secondary" href={info.upgrade_help_url} target="_blank" rel="noreferrer">Open upgrade guide</a>
         {/if}
-        <button class="btn-primary" on:click={close}>Done</button>
+        {#if typeof onCheck === 'function'}
+          <button class="btn-primary" disabled={checking} on:click={checkAgain}>
+            {checking ? 'Checking…' : 'I’ve redeployed — check again'}
+          </button>
+        {:else}
+          <button class="btn-primary" on:click={close}>Done</button>
+        {/if}
       </div>
+      {#if checkMessage}<p class="check-message" role="status">{checkMessage}</p>{/if}
     </div>
   </div>
 {/if}
@@ -147,6 +188,21 @@
   .target-image span { color: var(--sl-text-faint, #7b82a8); font-size: 0.72rem; text-transform: uppercase; }
   .target-image code { overflow-wrap: anywhere; color: var(--sl-text, #e8eaf6); }
 
+  .version-move {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    width: fit-content;
+    margin: 0.9rem 0;
+    padding: 0.45rem 0.7rem;
+    border-radius: 999px;
+    background: var(--sl-accent-soft, rgba(139, 133, 255, 0.12));
+    color: var(--sl-text-dim, #a4a9c6);
+    font-size: 0.82rem;
+  }
+
+  .version-move strong { color: var(--sl-text, #e8eaf6); }
+
   ol {
     display: grid;
     gap: 0.75rem;
@@ -166,6 +222,7 @@
   }
 
   .upgrade-modal-actions a { text-decoration: none; }
+  .check-message { margin: 0.85rem 0 0; font-size: 0.82rem; }
 
   @media (max-width: 560px) {
     .upgrade-modal { padding: 1.15rem; }

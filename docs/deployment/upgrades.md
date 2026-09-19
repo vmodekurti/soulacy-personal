@@ -83,6 +83,10 @@ do: `install`, `notify`, or `off`, with the reason. On a host that supports
 in-place replacement, the update banner offers **Upgrade Now**. On a container
 or managed deployment it offers **How to upgrade** and shows the detected
 platform's redeploy steps and exact target image instead.
+After the platform reports a healthy deployment, choose **I've redeployed —
+check again** in that prompt. Soulacy checks the signed release manifest and
+its running version again; if the old instance is still serving, the prompt
+stays open and tells you which version answered.
 
 The gateway only notifies, and never replaces binaries, when:
 

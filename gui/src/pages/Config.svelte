@@ -28,11 +28,12 @@
   $: lastChecked = lastCheckedLabel(updateInfo && updateInfo.last_check_time)
 
   async function recheckUpdates() {
-    if (checkingUpdates) return
+    if (checkingUpdates) return updateInfo
     checkingUpdates = true
     try { await api.updates.check() } catch (_) { /* the status call below reports it */ }
     try { updateInfo = await api.updates.status() } catch { updateInfo = null }
     checkingUpdates = false
+    return updateInfo
   }
 
 
@@ -621,7 +622,7 @@
         <span>Soulacy {updateInfo.latest_version} is available! (Current: {updateInfo.current_version}).</span>
       </div>
       <div class="update-banner-actions">
-        <UpgradeAction info={updateInfo} onUpgrade={startUpgrade} />
+        <UpgradeAction info={updateInfo} onUpgrade={startUpgrade} onCheck={recheckUpdates} />
         <button class="btn-secondary btn-sm" on:click={() => window.open("https://github.com/vmodekurti/soulacy-personal/releases/latest", "_blank")}>View Release Notes</button>
       </div>
     </div>
