@@ -4648,6 +4648,45 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#your-data-survives-upgrades-runtime-vs-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Your data survives upgrades (runtime vs data)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Your data survives upgrades (runtime vs data)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#safety-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Safety check
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#back-up-your-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Back up your data
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#why-upgrades-are-safe" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5190,6 +5229,45 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#your-data-survives-upgrades-runtime-vs-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Your data survives upgrades (runtime vs data)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Your data survives upgrades (runtime vs data)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#safety-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Safety check
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#back-up-your-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Back up your data
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#why-upgrades-are-safe" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5544,6 +5622,45 @@ packages you own to v2 (namespaced ids like <code>owner/name</code>, calendar
 versioning <code>YYYY.MM.DD</code>, and typed <code>requires</code>) before then. Full details
 in <a href="../../packaging/">Packaging</a>.</p>
 </div>
+<h2 id="your-data-survives-upgrades-runtime-vs-data">Your data survives upgrades (runtime vs data)<a class="headerlink" href="#your-data-survives-upgrades-runtime-vs-data" title="Permanent link">&para;</a></h2>
+<p>Soulacy keeps <strong>runtime</strong> and <strong>data</strong> separate, so replacing the runtime on an
+upgrade never touches what you configured or saved.</p>
+<ul>
+<li><strong>Runtime</strong> — the binary or container image. Thrown away and replaced on every
+  upgrade.</li>
+<li><strong>Data</strong> — everything you configure and Soulacy saves: <code>config.yaml</code>, agents,
+  memory, knowledge, secrets, skills, plugins. It lives <em>outside</em> the runtime:</li>
+<li><strong>Host installs:</strong> in <code>~/.soulacy/soulspace/</code>, separate from the binary.</li>
+<li><strong>Docker/Compose:</strong> named volumes — <code>soulacy_data</code> (the workspace),
+    <code>postgres_data</code>, <code>qdrant_data</code>. <code>docker compose up -d</code> with a new image keeps
+    them. <strong>Never run <code>docker compose down -v</code></strong> — the <code>-v</code> deletes those volumes.</li>
+<li><strong>Render / Coolify / Azure:</strong> a persistent disk mounted at
+    <code>/home/soulacy/.soulacy</code>.</li>
+<li><strong>Railway:</strong> you must attach a volume at <code>/home/soulacy/.soulacy</code> yourself —
+    see <a href="https://github.com/vmodekurti/soulacy-personal/tree/main/deploy/railway">deploy/railway</a>.</li>
+</ul>
+<p>Because of this, the upgrade flows on this page (self-update, image pull, or
+platform redeploy) preserve everything. Schemas only move forward, so a newer
+version reads your existing data.</p>
+<h3 id="safety-check">Safety check<a class="headerlink" href="#safety-check" title="Permanent link">&para;</a></h3>
+<p>On a container or managed platform, Soulacy verifies at startup — and in
+<code>sy doctor</code> — that the workspace is on durable storage. If it isn't, it warns:</p>
+<blockquote>
+<p>workspace is NOT on persistent storage; data will be lost on the next redeploy</p>
+</blockquote>
+<p>That means the workspace is on the container's ephemeral filesystem. Mount a
+persistent volume at <code>/home/soulacy/.soulacy</code> and redeploy before relying on it.</p>
+<h3 id="back-up-your-data">Back up your data<a class="headerlink" href="#back-up-your-data" title="Permanent link">&para;</a></h3>
+<p>A backup is a copy of the workspace (and the DB volumes, if you use Postgres +
+Qdrant):</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Host / bind-mounted workspace</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>tar<span class="w"> </span>czf<span class="w"> </span>soulacy-backup.tgz<span class="w"> </span>-C<span class="w"> </span>~/.soulacy<span class="w"> </span>soulspace
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="c1"># Docker named volumes</span>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>-v<span class="w"> </span>soulacy_data:/d<span class="w"> </span>-v<span class="w"> </span><span class="s2">"</span><span class="nv">$PWD</span><span class="s2">"</span>:/b<span class="w"> </span>alpine<span class="w"> </span>tar<span class="w"> </span>czf<span class="w"> </span>/b/soulacy_data.tgz<span class="w"> </span>-C<span class="w"> </span>/d<span class="w"> </span>.
+</span></code></pre></div>
+<p>Restore by extracting back into the same location/volume before starting the new
+version.</p>
 <h2 id="why-upgrades-are-safe">Why upgrades are safe<a class="headerlink" href="#why-upgrades-are-safe" title="Permanent link">&para;</a></h2>
 <p>Three guard layers protect the normal path:</p>
 <h3 id="1-database-schema-versioning-additive-only-never-down">1. Database schema versioning — additive only, never down<a class="headerlink" href="#1-database-schema-versioning-additive-only-never-down" title="Permanent link">&para;</a></h3>
@@ -5585,8 +5702,8 @@ transition.</p>
 </ul>
 <h2 id="back-up-before-major-upgrades">Back up before major upgrades<a class="headerlink" href="#back-up-before-major-upgrades" title="Permanent link">&para;</a></h2>
 <p>All state lives in one place — the workspace:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Stop the gateway first so SQLite files are quiescent, then:</span>
-</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>tar<span class="w"> </span>-czf<span class="w"> </span>soulacy-backup-<span class="k">$(</span>date<span class="w"> </span>+%F<span class="k">)</span>.tar.gz<span class="w"> </span>~/.soulacy
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># Stop the gateway first so SQLite files are quiescent, then:</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>tar<span class="w"> </span>-czf<span class="w"> </span>soulacy-backup-<span class="k">$(</span>date<span class="w"> </span>+%F<span class="k">)</span>.tar.gz<span class="w"> </span>~/.soulacy
 </span></code></pre></div>
 <p>That captures <code>config.yaml</code>, agents, skills, plugins, all databases
 (<code>data/</code>), memory, and the credential vault (<code>secrets/</code>). Restoring is
@@ -5600,7 +5717,7 @@ untarring it back. Verify what your workspace contains with
 <h2 id="full-reinstall-from-scratch">Full reinstall from scratch<a class="headerlink" href="#full-reinstall-from-scratch" title="Permanent link">&para;</a></h2>
 <p>The repo ships <code>reinstall-from-scratch.command</code> (macOS) for when you want
 a genuinely clean slate:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>./reinstall-from-scratch.command
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>./reinstall-from-scratch.command
 </span></code></pre></div>
 <p>What it does, in order:</p>
 <ol>
@@ -5626,9 +5743,9 @@ both the <code>soulacy</code> and <code>sy</code> binaries and the current <code
 recent snapshots are kept (<code>SOULACY_BACKUP_KEEP</code> to change; <code>SOULACY_BACKUP_DIR</code>
 to relocate).</p>
 <p>If a new version misbehaves, roll straight back to the previous one:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>./install.sh<span class="w"> </span>--rollback
-</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="c1"># or from the one-liner:</span>
-</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://raw.githubusercontent.com/vmodekurti/soulacy-personal/main/install.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span>bash<span class="w"> </span>-s<span class="w"> </span>--<span class="w"> </span>--rollback
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>./install.sh<span class="w"> </span>--rollback
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="c1"># or from the one-liner:</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://raw.githubusercontent.com/vmodekurti/soulacy-personal/main/install.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span>bash<span class="w"> </span>-s<span class="w"> </span>--<span class="w"> </span>--rollback
 </span></code></pre></div>
 <p>This restores the previous binaries and their matching <code>config.yaml</code>. Your
 current config is never destroyed — it's saved next to the restored one as
