@@ -234,6 +234,41 @@ func ProfileInputBudget(p ModelProfile, output int) int {
 	return limit
 }
 
+// ReconcileOutputReserve sizes an output-token reserve to the model that will
+// serve it, so the prompt is never starved of room. It is the single place that
+// decides the reserve, used by both the request preflight and the engine's
+// history-trimming, so the budget a request is checked against is exactly the
+// one it is served with.
+//
+// The rules, in order:
+//   - An unset reserve on a model with any evidenced ceiling gets a small,
+//     safe default rather than an unbounded provider default.
+//   - A model with a separate output ceiling (cloud: ContextTokens == 0,
+//     OutputTokens > 0) is capped at that ceiling.
+//   - A shared-context model (Ollama and friends: ContextTokens > 0) caps the
+//     reserve at HALF the serving window. This is the invariant that matters:
+//     the prompt always keeps at least half the window, so a too-large
+//     max_tokens self-corrects into a smaller reply instead of failing
+//     preflight with "prompt exceeds the evidenced input budget". An operator
+//     who wants a larger reply raises the window (num_ctx / a bigger-context
+//     model), which is the honest lever — the reserve then grows with it.
+func ReconcileOutputReserve(p ModelProfile, requested int) int {
+	out := requested
+	if out <= 0 && (p.ContextTokens > 0 || p.OutputTokens > 0) {
+		out = 1024
+	}
+	if p.OutputTokens > 0 && out > p.OutputTokens {
+		out = p.OutputTokens
+	}
+	if p.ContextTokens > 0 {
+		half := max(1, p.ContextTokens/2)
+		if out > half {
+			out = half
+		}
+	}
+	return out
+}
+
 // applyProfileLimits never weakens an output contract or raises a requested
 // budget. Oversized immutable prompts fail before inference rather than losing
 // the user's goal, evidence or system instructions inside a provider adapter.
@@ -250,17 +285,10 @@ func applyProfileLimits(p ModelProfile, req *CompletionRequest) error {
 	if p.JSONMode == SupportNo && strings.TrimSpace(req.ResponseFormat) != "" {
 		return fmt.Errorf("model preflight: requested structured output is unsupported; output contract was not changed")
 	}
-	// With an evidenced ceiling, an unbounded provider default could consume
-	// the entire shared window. Use the runtime's conservative default reserve.
-	if req.MaxTokens <= 0 && (p.ContextTokens > 0 || p.OutputTokens > 0) {
-		req.MaxTokens = 1024
-	}
-	if p.OutputTokens > 0 && req.MaxTokens > p.OutputTokens {
-		req.MaxTokens = p.OutputTokens
-	}
-	if p.ContextTokens > 0 && req.MaxTokens >= p.ContextTokens {
-		req.MaxTokens = max(1, p.ContextTokens/4)
-	}
+	// Size the output reserve to the serving model so it can never consume the
+	// window the prompt needs (see ReconcileOutputReserve). This is what turns a
+	// too-large max_tokens into a smaller reply instead of a preflight failure.
+	req.MaxTokens = ReconcileOutputReserve(p, req.MaxTokens)
 	if budget := ProfileInputBudget(p, req.MaxTokens); budget > 0 && EstimateRequestTokens(*req) > budget {
 		return fmt.Errorf("model preflight: prompt exceeds the evidenced input budget (%d tokens); split the task or reduce context without removing its requirements", budget)
 	}

@@ -653,6 +653,11 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 				reserveOut = remainingOutput
 			}
 		}
+		// Size the reserve to the serving model before budgeting the input, so
+		// history is trimmed to fit exactly the window the request will be
+		// served with (the router applies the same reconciliation before the
+		// call). This keeps a large max_tokens from starving the prompt.
+		reserveOut = llm.ReconcileOutputReserve(preparation.Profile, reserveOut)
 		inputBudget := ctxLimit - reserveOut
 		if evidenced := llm.ProfileInputBudget(preparation.Profile, reserveOut); evidenced > 0 {
 			inputBudget = evidenced
