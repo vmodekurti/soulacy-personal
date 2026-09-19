@@ -5,6 +5,44 @@ API contracts are pinned by tests, and a broken plugin can never take the
 gateway down. This page covers the standard upgrade flow, what guarantees
 back it, and the (destructive) full-reinstall escape hatch.
 
+## The one-command upgrade
+
+Whatever machine your gateway runs on, this figures out how it was deployed and
+does the right thing:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vmodekurti/soulacy-personal/main/upgrade.sh | bash
+```
+
+- **Host install** (binary in `~/.local/bin`, launchd/systemd): self-upgrades with
+  `sy upgrade` and restarts the service.
+- **Docker / Compose**: pulls the newer image (or rebuilds from source if your
+  compose builds locally) and recreates the container.
+- **Source checkout**: `git pull`, rebuilds, restarts.
+- **Managed platform** (Railway / Render / Fly / Cloud Run / Heroku / Kubernetes):
+  there's no shell to act in, so it prints the exact redeploy step for that
+  platform. Run those from the platform's dashboard/CLI.
+
+It never deletes data or touches your workspace/config, and when it can't tell,
+it prints your options instead of guessing.
+
+### Per-platform quick reference
+
+| Deployment | How to upgrade |
+|---|---|
+| Host binary | `sy upgrade` (or auto-update every 6h), then restart the service |
+| Docker/Compose (image) | `docker compose pull soulacy && docker compose up -d soulacy` |
+| Docker/Compose (builds from source) | `git pull && docker compose build soulacy && docker compose up -d soulacy` |
+| Railway | Dashboard → service → **Redeploy** (bump the pinned image tag first if you pin one) |
+| Render | Dashboard → **Manual Deploy → Deploy latest** (or set the image tag) |
+| Fly.io | `fly deploy`, or release a new image tag |
+| Google Cloud Run | `gcloud run deploy <svc> --image ghcr.io/vmodekurti/soulacy-personal:0.1` |
+| Kubernetes | `kubectl set image deploy/soulacy soulacy=ghcr.io/vmodekurti/soulacy-personal:0.1.NEW` |
+| One-click AWS (CloudFormation) | Update the stack's `ImageVersion` parameter to the new tag |
+
+Image: `ghcr.io/vmodekurti/soulacy-personal` — tags: a version (`0.1.23`), the
+minor (`0.1`), or `latest`.
+
 ## Identify how Soulacy was installed
 
 ```bash
