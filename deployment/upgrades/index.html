@@ -5533,7 +5533,10 @@ are put back and the failure is reported.</p>
 </span></code></pre></div>
 <p>The same controls are on <strong>Config → Version</strong> (toggle, interval) and apply
 without a restart. <strong>Config</strong> and the <strong>Dashboard</strong> show what the checker will
-do: <code>install</code>, <code>notify</code>, or <code>off</code>, with the reason.</p>
+do: <code>install</code>, <code>notify</code>, or <code>off</code>, with the reason. On a host that supports
+in-place replacement, the update banner offers <strong>Upgrade Now</strong>. On a container
+or managed deployment it offers <strong>How to upgrade</strong> and shows the detected
+platform's redeploy steps and exact target image instead.</p>
 <p>The gateway only notifies, and never replaces binaries, when:</p>
 <ul>
 <li>it runs in a container (upgrade by pulling a newer image), or</li>
@@ -5544,7 +5547,11 @@ do: <code>install</code>, <code>notify</code>, or <code>off</code>, with the rea
 </ul>
 <p>Every check, install, rollback and restart is logged and appears in Activity
 as a <code>system.update</code> event. <code>GET /api/v1/system/updates/status</code> reports the
-mode, last check, last applied version, and any pending restart.</p>
+mode, last check, last applied version, any pending restart, and structured
+upgrade guidance (<code>upgrade_strategy</code>, <code>deployment_platform</code>,
+<code>upgrade_instructions</code>, and <code>target_image</code>). The manual upgrade endpoint also
+refuses an in-place binary replacement when the reported strategy is
+<code>instructions</code>.</p>
 <h2 id="release-installation-standard-upgrade">Release installation: standard upgrade<a class="headerlink" href="#release-installation-standard-upgrade" title="Permanent link">&para;</a></h2>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>sy<span class="w"> </span>update<span class="w"> </span>check
 </span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>sy<span class="w"> </span>update<span class="w"> </span>install<span class="w"> </span>--dry-run
