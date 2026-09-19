@@ -7,6 +7,10 @@ to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- The managed-deployment upgrade prompt now shows the current-to-target version
+  transition and can verify a redeploy in place. **I've redeployed — check
+  again** refreshes the signed release status and clearly reports when the old
+  instance is still serving.
 - Update banners no longer offer an in-place **Upgrade Now** action on
   containers and managed platforms where the running binaries cannot be
   replaced safely. They now show **How to upgrade** with platform-specific

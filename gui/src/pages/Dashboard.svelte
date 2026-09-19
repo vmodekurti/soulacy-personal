@@ -105,6 +105,12 @@
     }
   }
 
+  async function recheckUpdates() {
+    try { await api.updates.check() } catch (_) { /* status below is authoritative */ }
+    updateInfo = await api.updates.status()
+    return updateInfo
+  }
+
   async function enableAutostart() {
     svcBusy = true
     svcError = ''
@@ -375,7 +381,7 @@
         <span>Soulacy {updateInfo.latest_version} is available! (Current: {updateInfo.current_version}).{#if updateInfo.mode === 'install'} It will install automatically at the next idle moment.{:else if updateInfo.mode === 'notify'} {updateInfo.mode_reason}{/if}</span>
       </div>
       <div class="update-banner-actions">
-        <UpgradeAction info={updateInfo} onUpgrade={startUpgrade} />
+        <UpgradeAction info={updateInfo} onUpgrade={startUpgrade} onCheck={recheckUpdates} />
         <button class="btn-secondary btn-sm" on:click={() => window.open("https://github.com/vmodekurti/soulacy-personal/releases/latest", "_blank")}>View Release Notes</button>
       </div>
     </div>
