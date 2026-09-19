@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/soulacy/soulacy/internal/config"
+	"github.com/soulacy/soulacy/internal/platform"
 	"github.com/soulacy/soulacy/internal/rbac"
 	"github.com/soulacy/soulacy/internal/updates"
 	"github.com/soulacy/soulacy/pkg/message"
@@ -38,6 +39,7 @@ var (
 	autoInContainer        = updates.InContainer
 	autoInstallDirWritable = updates.InstallDirWritable
 	autoInstallDir         = updates.InstallDir
+	autoPlatform           = platform.Detect
 )
 
 // updateMode tells the operator what the checker will do with a new release.
@@ -45,7 +47,21 @@ const (
 	updateModeInstall = "install" // download, verify, replace, restart
 	updateModeNotify  = "notify"  // report only
 	updateModeOff     = "off"     // auto-update disabled in config
+
+	upgradeStrategyInline       = "inline"
+	upgradeStrategyInstructions = "instructions"
 )
+
+const upgradeHelpURL = "https://vmodekurti.github.io/soulacy/deployment/upgrades/"
+
+type upgradeGuidance struct {
+	Strategy     string   `json:"upgrade_strategy"`
+	Platform     string   `json:"deployment_platform"`
+	Reason       string   `json:"upgrade_reason,omitempty"`
+	Instructions []string `json:"upgrade_instructions,omitempty"`
+	TargetImage  string   `json:"target_image,omitempty"`
+	HelpURL      string   `json:"upgrade_help_url"`
+}
 
 type updatesState struct {
 	LastAppliedVersion string    `json:"last_applied_version,omitempty"`
@@ -126,7 +142,7 @@ func decideAutoUpdate(cfg config.UpdateConfig, env autoUpdateEnv) (mode, reason 
 		return updateModeOff, "Automatic installation is off (updates.auto: false); new releases are reported only."
 	}
 	if env.InContainer {
-		return updateModeNotify, "Running in a container: upgrade by pulling a newer image; binaries are not replaced in place."
+		return updateModeNotify, "Running in a container or managed deployment: upgrade by redeploying a newer image; binaries are not replaced in place."
 	}
 	if !env.Writable {
 		return updateModeNotify, "The install directory is not writable by the gateway; run `sudo sy update install --yes` or fix permissions."
@@ -135,7 +151,11 @@ func decideAutoUpdate(cfg config.UpdateConfig, env autoUpdateEnv) (mode, reason 
 }
 
 func (s *Server) autoUpdateEnv() autoUpdateEnv {
-	env := autoUpdateEnv{AutoEnabled: s.cfg.Updates.AutoOn(), InContainer: autoInContainer()}
+	detected := autoPlatform()
+	env := autoUpdateEnv{
+		AutoEnabled: s.cfg.Updates.AutoOn(),
+		InContainer: autoInContainer() || detected.Kind != platform.Host,
+	}
 	if dir, err := autoInstallDir(""); err == nil {
 		env.Writable = autoInstallDirWritable(dir)
 	}
@@ -143,6 +163,84 @@ func (s *Server) autoUpdateEnv() autoUpdateEnv {
 		env.ActiveRuns = s.runReg.Active()
 	}
 	return env
+}
+
+// upgradeGuidanceFor describes whether this process can safely replace its
+// binaries, and gives the GUI concrete redeploy steps when it cannot. The
+// upgrade strategy is independent of updates.auto: disabling unattended
+// updates must not disable an explicitly requested host upgrade.
+func upgradeGuidanceFor(env autoUpdateEnv, detected platform.Info, latest string) upgradeGuidance {
+	g := upgradeGuidance{
+		Strategy: upgradeStrategyInline,
+		Platform: detected.Name,
+		HelpURL:  upgradeHelpURL,
+	}
+	if env.InContainer || detected.Kind != platform.Host {
+		if detected.Kind == platform.Host {
+			detected = platform.Info{Name: "Container", Kind: platform.Container}
+			g.Platform = detected.Name
+		}
+		g.Strategy = upgradeStrategyInstructions
+		g.Reason = "This deployment is image-based, so its running binaries cannot be replaced in place. Redeploy it with the newer image."
+		tag := strings.TrimPrefix(strings.TrimSpace(latest), "v")
+		if tag == "" {
+			tag = "latest"
+		}
+		g.TargetImage = "ghcr.io/vmodekurti/soulacy-personal:" + tag
+		switch detected.Name {
+		case "Railway":
+			g.Instructions = []string{
+				"Open the Soulacy service in Railway.",
+				"If the service pins an image tag, change it to " + g.TargetImage + ".",
+				"Choose Redeploy and wait for the new deployment to become healthy.",
+			}
+		case "Render":
+			g.Instructions = []string{
+				"Open the Soulacy service in Render.",
+				"If this is an image service, set its image to " + g.TargetImage + ".",
+				"Choose Manual Deploy, then Deploy latest, and wait for the health check.",
+			}
+		case "Fly.io":
+			g.Instructions = []string{
+				"Create a new Fly.io release using " + g.TargetImage + " or run fly deploy from the app source.",
+				"Wait for the replacement machines to become healthy.",
+			}
+		case "Google Cloud Run":
+			g.Instructions = []string{
+				"Open the Soulacy Cloud Run service and edit a new revision.",
+				"Set the container image to " + g.TargetImage + ".",
+				"Deploy the revision and send traffic to it after the health check passes.",
+			}
+		case "Heroku":
+			g.Instructions = []string{
+				"Create a new Heroku release from the latest source or " + g.TargetImage + ".",
+				"Wait for the new dyno to start, then verify the Soulacy health endpoint.",
+			}
+		case "Kubernetes":
+			g.Instructions = []string{
+				"Update the Soulacy workload image to " + g.TargetImage + ".",
+				"Apply the workload and wait for the rollout to complete.",
+				"Verify the new pods are healthy before removing the previous replica set.",
+			}
+		default:
+			g.Instructions = []string{
+				"Update the Soulacy service image to " + g.TargetImage + ".",
+				"Pull the image and recreate or redeploy the service.",
+				"Wait for the new container to become healthy.",
+			}
+		}
+		return g
+	}
+	if !env.Writable {
+		g.Strategy = upgradeStrategyInstructions
+		g.Reason = "The gateway cannot write to its install directory, so it cannot replace its own binaries."
+		g.Instructions = []string{
+			"Run sy update install --yes as the account that owns the Soulacy binaries (use sudo only for a root-owned install).",
+			"Restart the Soulacy service.",
+			"Open Soulacy again and verify the version and gateway health.",
+		}
+	}
+	return g
 }
 
 func (s *Server) updatesStatePath() string {
@@ -343,21 +441,34 @@ func (s *Server) handleGetUpdatesStatus(c *fiber.Ctx) error {
 	mode, reason := decideAutoUpdate(s.cfg.Updates, env)
 	globalUpdates.RLock()
 	defer globalUpdates.RUnlock()
+	guidance := upgradeGuidanceFor(env, autoPlatform(), globalUpdates.status.LatestVersion)
 	out := fiber.Map{
-		"last_check_time":  globalUpdates.lastCheckTime.Format(time.RFC3339),
-		"next_check_time":  globalUpdates.nextCheckTime.Format(time.RFC3339),
-		"checking":         globalUpdates.checking,
-		"installing":       globalUpdates.installing,
-		"update_available": globalUpdates.status.UpdateAvailable,
-		"current_version":  globalUpdates.status.CurrentVersion,
-		"latest_version":   globalUpdates.status.LatestVersion,
-		"message":          globalUpdates.status.Message,
-		"auto_enabled":     s.cfg.Updates.AutoOn(),
-		"mode":             mode,
-		"mode_reason":      reason,
-		"check_interval":   s.cfg.Updates.CheckIntervalDuration().String(),
-		"pending_restart":  globalUpdates.pendingRestart,
-		"active_runs":      env.ActiveRuns,
+		"last_check_time":     globalUpdates.lastCheckTime.Format(time.RFC3339),
+		"next_check_time":     globalUpdates.nextCheckTime.Format(time.RFC3339),
+		"checking":            globalUpdates.checking,
+		"installing":          globalUpdates.installing,
+		"update_available":    globalUpdates.status.UpdateAvailable,
+		"current_version":     globalUpdates.status.CurrentVersion,
+		"latest_version":      globalUpdates.status.LatestVersion,
+		"message":             globalUpdates.status.Message,
+		"auto_enabled":        s.cfg.Updates.AutoOn(),
+		"mode":                mode,
+		"mode_reason":         reason,
+		"check_interval":      s.cfg.Updates.CheckIntervalDuration().String(),
+		"pending_restart":     globalUpdates.pendingRestart,
+		"active_runs":         env.ActiveRuns,
+		"upgrade_strategy":    guidance.Strategy,
+		"deployment_platform": guidance.Platform,
+		"upgrade_help_url":    guidance.HelpURL,
+	}
+	if guidance.Reason != "" {
+		out["upgrade_reason"] = guidance.Reason
+	}
+	if len(guidance.Instructions) > 0 {
+		out["upgrade_instructions"] = guidance.Instructions
+	}
+	if guidance.TargetImage != "" {
+		out["target_image"] = guidance.TargetImage
 	}
 	if globalUpdates.state.LastAppliedVersion != "" {
 		out["last_applied_version"] = globalUpdates.state.LastAppliedVersion
@@ -397,6 +508,23 @@ func (s *Server) handleTriggerUpdatesCheck(c *fiber.Ctx) error {
 
 func (s *Server) handleTriggerUpgrade(c *fiber.Ctx) error {
 	s.log.Warn("gateway self-upgrade requested via API", zap.Any("request_id", c.Locals("request_id")))
+	env := s.autoUpdateEnv()
+	globalUpdates.RLock()
+	latest := globalUpdates.status.LatestVersion
+	globalUpdates.RUnlock()
+	guidance := upgradeGuidanceFor(env, autoPlatform(), latest)
+	if guidance.Strategy != upgradeStrategyInline {
+		s.recordAdminAudit(c, "upgrade.request", "gateway", "", "rejected", map[string]any{"reason": guidance.Reason})
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"error":                "inline upgrade is unavailable for this deployment",
+			"upgrade_strategy":     guidance.Strategy,
+			"deployment_platform":  guidance.Platform,
+			"upgrade_reason":       guidance.Reason,
+			"upgrade_instructions": guidance.Instructions,
+			"target_image":         guidance.TargetImage,
+			"upgrade_help_url":     guidance.HelpURL,
+		})
+	}
 
 	res, err := autoInstall(c.Context(), updates.UpdateInstallOptions{ManifestSource: s.cfg.Updates.ManifestURL, Yes: true})
 	if err != nil {

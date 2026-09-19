@@ -79,7 +79,10 @@ updates:
 
 The same controls are on **Config → Version** (toggle, interval) and apply
 without a restart. **Config** and the **Dashboard** show what the checker will
-do: `install`, `notify`, or `off`, with the reason.
+do: `install`, `notify`, or `off`, with the reason. On a host that supports
+in-place replacement, the update banner offers **Upgrade Now**. On a container
+or managed deployment it offers **How to upgrade** and shows the detected
+platform's redeploy steps and exact target image instead.
 
 The gateway only notifies, and never replaces binaries, when:
 
@@ -91,7 +94,11 @@ The gateway only notifies, and never replaces binaries, when:
 
 Every check, install, rollback and restart is logged and appears in Activity
 as a `system.update` event. `GET /api/v1/system/updates/status` reports the
-mode, last check, last applied version, and any pending restart.
+mode, last check, last applied version, any pending restart, and structured
+upgrade guidance (`upgrade_strategy`, `deployment_platform`,
+`upgrade_instructions`, and `target_image`). The manual upgrade endpoint also
+refuses an in-place binary replacement when the reported strategy is
+`instructions`.
 
 ## Release installation: standard upgrade
 
