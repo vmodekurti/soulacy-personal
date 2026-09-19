@@ -5536,7 +5536,11 @@ without a restart. <strong>Config</strong> and the <strong>Dashboard</strong> sh
 do: <code>install</code>, <code>notify</code>, or <code>off</code>, with the reason. On a host that supports
 in-place replacement, the update banner offers <strong>Upgrade Now</strong>. On a container
 or managed deployment it offers <strong>How to upgrade</strong> and shows the detected
-platform's redeploy steps and exact target image instead.</p>
+platform's redeploy steps and exact target image instead.
+After the platform reports a healthy deployment, choose <strong>I've redeployed —
+check again</strong> in that prompt. Soulacy checks the signed release manifest and
+its running version again; if the old instance is still serving, the prompt
+stays open and tells you which version answered.</p>
 <p>The gateway only notifies, and never replaces binaries, when:</p>
 <ul>
 <li>it runs in a container (upgrade by pulling a newer image), or</li>
