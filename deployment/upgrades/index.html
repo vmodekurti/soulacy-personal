@@ -4587,6 +4587,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#upgrading-a-cloud-vm-remotely-no-ssh-needed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading a cloud VM remotely (no SSH needed)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5168,6 +5179,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#upgrading-a-cloud-vm-remotely-no-ssh-needed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading a cloud VM remotely (no SSH needed)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5498,13 +5520,30 @@ it prints your options instead of guessing.</p>
 <td><code>kubectl set image deploy/soulacy soulacy=ghcr.io/vmodekurti/soulacy-personal:0.1.NEW</code></td>
 </tr>
 <tr>
-<td>One-click AWS (CloudFormation)</td>
-<td>Update the stack's <code>ImageVersion</code> parameter to the new tag</td>
+<td>One-click AWS / Azure (container on a VM)</td>
+<td>Run the upgrade <strong>on the VM</strong> with a remote command — see below. <strong>Never</strong> change the stack's <code>ImageVersion</code>/<code>customData</code> on a live instance: that replaces the VM and destroys its data volume.</td>
 </tr>
 </tbody>
 </table>
 <p>Image: <code>ghcr.io/vmodekurti/soulacy-personal</code> — tags: a version (<code>0.1.23</code>), the
 minor (<code>0.1</code>), or <code>latest</code>.</p>
+<h3 id="upgrading-a-cloud-vm-remotely-no-ssh-needed">Upgrading a cloud VM remotely (no SSH needed)<a class="headerlink" href="#upgrading-a-cloud-vm-remotely-no-ssh-needed" title="Permanent link">&para;</a></h3>
+<p>The one-click AWS and Azure deployments run Soulacy as a container on a VM you
+own, with the data in a Docker volume on that VM. Upgrade <strong>on the same
+instance</strong> so the data stays — triggered from your laptop:</p>
+<ul>
+<li><strong>AWS</strong> (the one-click instance has Systems Manager enabled):
+  <code>deploy/aws/upgrade-remote.sh &lt;instance-id&gt; [--profile p] [--region r]</code></li>
+<li><strong>Azure</strong> (Run Command): <code>deploy/azure/upgrade-remote.sh &lt;resource-group&gt; &lt;vm-name&gt;</code></li>
+<li><strong>Any VM with SSH:</strong> <code>ssh &lt;vm&gt; 'curl -fsSL https://raw.githubusercontent.com/vmodekurti/soulacy-personal/main/upgrade.sh | bash'</code></li>
+</ul>
+<p>Each runs <code>upgrade.sh</code> on the VM (<code>docker compose pull &amp;&amp; up -d</code> in <code>/opt/soulacy</code>),
+waits for health, and never touches the volume.</p>
+<p><strong>Warning:</strong> do not "upgrade" by updating the CloudFormation stack's
+<code>ImageVersion</code> or the ARM template's <code>customData</code> on a running instance. Those
+live in the instance's boot script, so the change <strong>replaces the VM</strong>; the root
+disk — and the data volume on it — is deleted with it. <code>ImageVersion</code> is for
+choosing the version of a <em>new</em> deployment only.</p>
 <h2 id="identify-how-soulacy-was-installed">Identify how Soulacy was installed<a class="headerlink" href="#identify-how-soulacy-was-installed" title="Permanent link">&para;</a></h2>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>soulacy<span class="w"> </span>--version
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>sy<span class="w"> </span>version
