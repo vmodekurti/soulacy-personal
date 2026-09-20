@@ -64,6 +64,9 @@
   let pairFor = ''
   let pairRole = 'operator'
   let pairSubject = ''
+  let pairBase = ''        // the address the phone will use (editable)
+  let pairReachable = true
+  let pairHint = ''
   let household = []
   let householdMsg = ''
   let redeemCode = ''
@@ -142,9 +145,14 @@
   async function makePairCode() {
     try {
       const name = pairFor.trim()
-      const res = await api.pairing.createToken(name ? { name, role: pairRole } : undefined)
+      const body = name ? { name, role: pairRole } : {}
+      if (pairBase.trim()) body.base_url = pairBase.trim()
+      const res = await api.pairing.createToken(Object.keys(body).length ? body : undefined)
       pairCode = res.code
       pairUrl = res.pair_url || ''
+      pairBase = res.base_url || pairBase
+      pairReachable = res.reachable !== false
+      pairHint = res.hint || ''
       pairSubject = res.display_name || (res.subject === 'admin' ? 'you' : res.subject || '')
       pairQr = ''
       // Render a scannable QR of the pair URL. qrcode is code-split, so it only
@@ -654,6 +662,11 @@
       <div class="pair-code">{pairCode}</div>
       {#if pairSubject}<div class="device-sub">This code pairs a phone for <strong>{pairSubject}</strong>. It expires in two minutes.</div>{/if}
       {#if pairUrl}<div class="pair-url">{pairUrl}</div>{/if}
+      <div class="device-row redeem-row">
+        <input class="redeem-input" placeholder="Address your phone will use, e.g. http://my-mac.tailnet.ts.net:18789" bind:value={pairBase} aria-label="Address your phone will use" />
+        <button class="btn-secondary small" on:click={makePairCode}>Regenerate</button>
+      </div>
+      {#if !pairReachable}<div class="redeem-msg">⚠ {pairHint || 'Your phone may not be able to reach this address.'}</div>{/if}
     {/if}
 
     <div class="device-row redeem-row">
