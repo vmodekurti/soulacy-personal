@@ -222,8 +222,11 @@ Git source; `--allow-host-build` separately records approval for the gateway to
 build source and create package environments. Team and Scale deployments may
 restrict host builds to their approved catalog even when both flags are set.
 
-The built-in **System** agent uses this same installer when you say “Install
-the Skill/MCP server from this URL.” Existing installations are reported and
+For Skills, the built-in **System** agent uses this installer directly. For an
+MCP URL, it first reads bounded README and manifest evidence, chooses a hosted
+endpoint, gateway process, connected device, or companion service, and invokes
+the installer only when a gateway process fits. Otherwise it returns concrete
+deployment and registration steps. Existing installations are reported and
 left unchanged.
 
 ```bash

@@ -44,6 +44,15 @@ func TestPackageInstallRemainsPrivilegedButUsesManagedExecution(t *testing.T) {
 	}
 }
 
+func TestMCPRemoteRegistrationIsApprovalGatedManagedExecution(t *testing.T) {
+	if !isPrivilegedSystemTool("mcp_register_remote") {
+		t.Fatal("remote MCP registration mutates config and must remain approval gated")
+	}
+	if requiresPrivilegedIsolation("mcp_register_remote") {
+		t.Fatal("remote MCP registration must use its fixed-argv managed execution path")
+	}
+}
+
 // The SAFE partition is what any agent gets by default, so anything in it that
 // can run code or write to the host is a hole. This asserts the whole set, not
 // just the one that was wrong, so the next addition has to be a deliberate act.
@@ -51,7 +60,7 @@ func TestSafePartitionContainsNoCodeExecution(t *testing.T) {
 	e := &Engine{}
 	for _, b := range e.safeSystemTools() {
 		switch b.Name {
-		case "python_eval", "shell_exec", "run_script", "install_library", "package_install", "write_file", "download_file":
+		case "python_eval", "shell_exec", "run_script", "install_library", "package_install", "mcp_register_remote", "write_file", "download_file":
 			t.Errorf("%q is offered to every agent with no capability check", b.Name)
 		}
 	}

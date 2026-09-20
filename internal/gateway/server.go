@@ -976,6 +976,7 @@ func (s *Server) buildApp() *fiber.App {
 	api.Patch("/mcp/:id", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleUpdateMCPServer)
 	api.Delete("/mcp/:id", s.rbacMW(rbac.ResourceMCP, rbac.ActionDelete), s.handleDeleteMCPServer)
 	api.Post("/mcp/test", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleTestMCPServer)
+	api.Post("/mcp/install-guide", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleMCPInstallGuide)
 	api.Post("/mcp/provision-glama", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleProvisionGlama)
 	api.Get("/mcp/registry/search", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleMCPRegistrySearch)
 	api.Post("/mcp/provision-registry", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleProvisionMCPRegistry)

@@ -179,6 +179,9 @@ func TestLoader_ProtectedSystemCannotBeModifiedOrDeleted(t *testing.T) {
 	if !containsExactString(sys.ConfirmTools, "package_install") {
 		t.Fatalf("system confirm_tools = %v, want package_install enforced", sys.ConfirmTools)
 	}
+	if !containsExactString(sys.ConfirmTools, "mcp_register_remote") {
+		t.Fatalf("system confirm_tools = %v, want mcp_register_remote enforced", sys.ConfirmTools)
+	}
 }
 
 func TestLoader_SeedsProtectedNonPrivilegedGenie(t *testing.T) {
