@@ -60,6 +60,7 @@
   let pushState = 'unknown'   // unknown | unsupported | denied | off | on | working
   let pairCode = null
   let pairUrl = ''
+  let pairFingerprint = ''  // set when the QR carries this gateway's own TLS key; the phone pins it
   let pairQr = ''
   let pairFor = ''
   let pairRole = 'operator'
@@ -150,6 +151,7 @@
       const res = await api.pairing.createToken(Object.keys(body).length ? body : undefined)
       pairCode = res.code
       pairUrl = res.pair_url || ''
+      pairFingerprint = res.fingerprint || ''
       pairBase = res.base_url || pairBase
       pairReachable = res.reachable !== false
       pairHint = res.hint || ''
@@ -662,6 +664,7 @@
       <div class="pair-code">{pairCode}</div>
       {#if pairSubject}<div class="device-sub">This code pairs a phone for <strong>{pairSubject}</strong>. It expires in two minutes.</div>{/if}
       {#if pairUrl}<div class="pair-url">{pairUrl}</div>{/if}
+      {#if pairFingerprint}<div class="pair-secure">🔒 Encrypted end to end — the phone pins this gateway's certificate ({pairFingerprint.slice(0, 8)}…). Nothing to install or trust by hand.</div>{/if}
       <div class="device-row redeem-row">
         <input class="redeem-input" placeholder="Address your phone will use, e.g. http://my-mac.tailnet.ts.net:18789" bind:value={pairBase} aria-label="Address your phone will use" />
         <button class="btn-secondary small" on:click={makePairCode}>Regenerate</button>
@@ -1009,6 +1012,7 @@
   .pair-qr { display: block; margin: .5rem auto .2rem; width: 180px; height: 180px; border-radius: 10px; background: #fff; padding: 8px; }
   .pair-code { font-family: ui-monospace, Menlo, monospace; font-size: 1.3rem; letter-spacing: .12em; color: #c5c9e8; text-align: center; padding: .5rem; background: #0e1020; border-radius: 8px; margin-top: .4rem; }
   .pair-url { font-size: .68rem; color: var(--sl-text-faint); text-align: center; margin-top: .3rem; word-break: break-all; }
+  .pair-secure { font-size: .78rem; color: #60f0a0; margin-top: .35rem; max-width: 420px; }
   .redeem-row { gap: .5rem; }
   .redeem-input { flex: 1; background: #0e1020; color: #d7dcf5; border: 1px solid var(--sl-line); border-radius: 7px; padding: .4rem .55rem; font-size: .82rem; }
   .redeem-msg { font-size: .76rem; color: #8a91b8; margin-top: .35rem; }

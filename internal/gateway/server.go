@@ -100,6 +100,11 @@ type Server struct {
 	autopilotClosing bool
 	cfg              *config.Config
 	cfgPath          string // path to config file on disk; empty = unknown
+	// tlsFingerprint is the pin the phone should hold for this gateway's own
+	// (auto) certificate — lowercase hex SHA-256 of the public key, see
+	// publicKeyFingerprint. Empty when TLS is off or operator-supplied: a
+	// CA-issued certificate rotates its key, and a pin would break on renewal.
+	tlsFingerprint string
 	// disabledReasons records why boot validation switched an agent off,
 	// keyed by agent id. The reason used to exist only as a log line, so
 	// the dashboard could say an agent was disabled but never why, and the
@@ -1847,6 +1852,22 @@ func (s *Server) Listen(ctx context.Context) error {
 	defer listener.Close()
 	if certificate != nil {
 		listener = tls.NewListener(listener, &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{*certificate}})
+	} else if s.cfg.Server.TLSAuto {
+		// No operator certificate: mint our own and answer both TLS and plain
+		// HTTP on this port. Never fatal — a gateway that cannot write its
+		// workspace still serves HTTP as before.
+		if dir := autoTLSDir(s.cfgPath); dir == "" {
+			s.log.Info("auto TLS skipped: config path unknown")
+		} else if cert, created, err := loadOrCreateAutoCert(dir, autoTLSHostnames(), localAddresses()); err != nil {
+			s.log.Warn("auto TLS unavailable; serving plain HTTP", zap.Error(err))
+		} else if fp, err := publicKeyFingerprint(cert); err != nil {
+			s.log.Warn("auto TLS unavailable; serving plain HTTP", zap.Error(err))
+		} else {
+			s.tlsFingerprint = fp
+			listener = newMuxListener(listener, autoTLSConfig(cert))
+			s.log.Info("auto TLS enabled: https and http on the same port; phones pin the key at pairing",
+				zap.String("fingerprint", fp), zap.Bool("created", created), zap.String("dir", dir))
+		}
 	}
 	advertiser, err := s.startDiscovery(listener, certificate)
 	if err != nil {
@@ -1875,7 +1896,7 @@ func (s *Server) Listen(ctx context.Context) error {
 	// Start release updates checker
 	s.startUpdatesChecker(serveCtx)
 
-	s.log.Info("gateway listening", zap.String("addr", listener.Addr().String()), zap.Bool("tls", certificate != nil))
+	s.log.Info("gateway listening", zap.String("addr", listener.Addr().String()), zap.Bool("tls", certificate != nil), zap.Bool("auto_tls", s.tlsFingerprint != ""))
 	go func() {
 		defer close(shutdownDone)
 		select {

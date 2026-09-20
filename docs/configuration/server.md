@@ -47,6 +47,14 @@ openssl rand -hex 32
 
 Provide both paths to enable HTTPS. A missing or invalid certificate/key is a startup error, not a fallback to HTTP. Behind a TLS-terminating reverse proxy, leave both empty and restrict access to the backend listener.
 
+### `tls_auto` (default `true`)
+
+When `tls_cert`/`tls_key` are empty, the gateway mints its own certificate on first start (`<workspace>/tls/gateway.crt` + `gateway.key`) and answers **both** HTTPS and plain HTTP on the same port — the browser on `localhost` keeps using `http://`, nothing changes for existing installs.
+
+What it buys you: the pairing QR from **Mobile › Pair a device** carries an `https://` address plus the certificate's key fingerprint. The Soulacy iOS app pins that fingerprint at pairing, so every phone connection — on Wi‑Fi, over Tailscale, anywhere — is encrypted to exactly this gateway, with no certificate authority, no "trust this certificate" prompt, and no setting to find. The QR is read off your own screen, which is what makes the fingerprint trustworthy.
+
+Rotate by deleting the two files and restarting; phones then re-pair. Set `tls_auto: false` to serve plain HTTP only. The fingerprint is only advertised for the auto certificate: an operator-supplied certificate (`tls_cert`) or a `server.public_url` pointing at a proxy uses normal system trust instead.
+
 ## Example: local dev
 
 ```yaml

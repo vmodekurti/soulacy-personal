@@ -85,11 +85,13 @@ func (s *Server) handleCreatePairingToken(c *fiber.Ctx) error {
 	if err != nil {
 		return s.errMsg(c, fiber.StatusBadRequest, err.Error())
 	}
+	base, pairURL, fp := s.pinnedPairURL(pb.URL, tok.Code, body.BaseURL)
 	return c.JSON(fiber.Map{
 		"code":         tok.Code,
 		"expires_at":   tok.ExpiresAt,
-		"pair_url":     pb.URL + "/mobile?pair=" + tok.Code,
-		"base_url":     pb.URL,
+		"pair_url":     pairURL,
+		"base_url":     base,
+		"fingerprint":  fp,
 		"reachable":    pb.Reachable,
 		"hint":         pb.Hint,
 		"candidates":   pb.Candidates,
@@ -97,6 +99,33 @@ func (s *Server) handleCreatePairingToken(c *fiber.Ctx) error {
 		"display_name": tok.DisplayName,
 		"role":         tok.Role,
 	})
+}
+
+// pinnedPairURL turns a reachable base into the address the phone should
+// actually use. When this gateway terminates TLS with its own certificate
+// and the base is a direct address (auto-detected, or typed on the Mobile
+// page for the phone), the QR carries https:// plus the key fingerprint
+// (`fp`), so the phone connects encrypted from the very first request and
+// pins the key. A base that came from server.public_url is left alone: the
+// operator chose it, and an https public URL usually means a proxy holding a
+// different certificate. Returns base, pair URL, fingerprint ("" = none).
+func (s *Server) pinnedPairURL(base, code, typedOverride string) (string, string, string) {
+	pairURL := base + "/mobile?pair=" + code
+	fp := s.tlsFingerprint
+	if fp == "" {
+		return base, pairURL, ""
+	}
+	direct := strings.TrimSpace(s.cfg.Server.PublicURL) == "" || strings.TrimSpace(typedOverride) != ""
+	if !direct {
+		return base, pairURL, ""
+	}
+	if strings.HasPrefix(base, "http://") {
+		base = upgradeToHTTPS(base)
+	}
+	if !strings.HasPrefix(base, "https://") {
+		return base, base + "/mobile?pair=" + code, ""
+	}
+	return base, base + "/mobile?pair=" + code + "&fp=" + fp, fp
 }
 
 func selfPairingRole(callerRole string) string {
@@ -237,6 +266,7 @@ func (s *Server) handleRedeemPairingToken(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
 			"paired":       true,
 			"token":        plaintext,
+			"fingerprint":  s.tlsFingerprint,
 			"key_id":       key.ID,
 			"scopes":       key.Scopes,
 			"subject":      subject,
