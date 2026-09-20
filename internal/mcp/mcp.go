@@ -16,6 +16,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -176,6 +177,7 @@ type server struct {
 type Client struct {
 	log           *zap.Logger
 	servers       []*server
+	addLocks      map[string]*sync.Mutex // per-id AddServer serialization
 	mu            sync.RWMutex
 	resolveSecret func(context.Context, string) (string, error)
 }
@@ -337,6 +339,7 @@ func (c *Client) Call(ctx context.Context, fullName string, args map[string]any)
 		"arguments": args,
 	})
 	if err != nil {
+		c.noteCallOutcome(srv, err.Error())
 		return "", err
 	}
 	var cr struct {
@@ -360,12 +363,49 @@ func (c *Client) Call(ctx context.Context, fullName string, args map[string]any)
 	}
 	text := strings.TrimSpace(sb.String())
 	if cr.IsError {
+		c.noteCallOutcome(srv, text)
 		return "", fmt.Errorf("%s", text)
 	}
+	c.noteCallOutcome(srv, "")
 	if text == "" {
 		text = "(no text content)"
 	}
 	return text, nil
+}
+
+// credentialRejectedPrefix marks a server whose last tool call the remote
+// side refused for want of a valid credential. It is shown on the MCP page in
+// place of the tool count, because "Connected · 117 tools" is exactly what a
+// server that lists tools anonymously but rejects every call looks like.
+const credentialRejectedPrefix = "credential rejected"
+
+// authFailureRe matches what servers say when they did not accept the
+// credential: HTTP 401/403 from the transport, or the usual wording in an
+// isError result.
+var authFailureRe = regexp.MustCompile(`(?i)(^|\b)(http 401|http 403|unauthori[sz]ed|forbidden|missing api key|invalid api key|invalid or expired (access )?token|authentication (failed|required))\b`)
+
+func looksLikeAuthFailure(msg string) bool { return authFailureRe.MatchString(msg) }
+
+// noteCallOutcome updates the server's status line after a tool call: an
+// auth-shaped failure flags the credential, and the next success clears the
+// flag again. Other failures leave the line alone — one bad argument is not a
+// server problem.
+func (c *Client) noteCallOutcome(s *server, failure string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	switch {
+	case failure == "":
+		if strings.HasPrefix(s.detail, credentialRejectedPrefix) {
+			s.detail = fmt.Sprintf("%d tool(s)", len(s.tools))
+		}
+	case looksLikeAuthFailure(failure):
+		msg := strings.TrimSpace(failure)
+		if len(msg) > 160 {
+			msg = msg[:160] + "…"
+		}
+		s.detail = credentialRejectedPrefix + ": " + msg
+		c.log.Warn("mcp: server rejected the credential on a tool call", zap.String("server", s.id), zap.String("error", msg))
+	}
 }
 
 // ServersSnapshot returns the current view of all configured servers for the
@@ -409,6 +449,14 @@ func (c *Client) ServersSnapshot() []ServerStatus {
 // If a server with the same id already exists it is stopped first (update semantics).
 // This allows hot-adding servers after config.yaml is written without a gateway restart.
 func (c *Client) AddServer(id string, cfg ServerConfig) error {
+	// One add at a time per id. start() can take seconds (an HTTP handshake,
+	// or npx fetching a package) and runs with c.mu released; without this,
+	// two overlapping saves of the same server both got past RemoveServer and
+	// both appended, and the GUI listed the server twice.
+	mu := c.addLock(id)
+	mu.Lock()
+	defer mu.Unlock()
+
 	// Stop any existing server with this id.
 	_ = c.RemoveServer(id)
 
@@ -416,19 +464,46 @@ func (c *Client) AddServer(id string, cfg ServerConfig) error {
 	if err := c.start(s); err != nil {
 		s.detail = err.Error()
 		c.log.Warn("mcp: hot-add failed", zap.String("server", id), zap.Error(err))
-		c.mu.Lock()
-		c.servers = append(c.servers, s)
-		c.mu.Unlock()
+		c.put(s)
 		return err
 	}
 	s.connected = true
 	s.detail = fmt.Sprintf("%d tool(s)", len(s.tools))
 	c.log.Info("mcp: server hot-added", zap.String("server", id), zap.Int("tools", len(s.tools)))
-
-	c.mu.Lock()
-	c.servers = append(c.servers, s)
-	c.mu.Unlock()
+	c.put(s)
 	return nil
+}
+
+// addLock returns the per-id mutex that serializes AddServer.
+func (c *Client) addLock(id string) *sync.Mutex {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.addLocks == nil {
+		c.addLocks = map[string]*sync.Mutex{}
+	}
+	mu, ok := c.addLocks[id]
+	if !ok {
+		mu = &sync.Mutex{}
+		c.addLocks[id] = mu
+	}
+	return mu
+}
+
+// put records s in the server list, replacing (and closing) any entry that
+// already carries the same id so an id can never appear twice.
+func (c *Client) put(s *server) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i, existing := range c.servers {
+		if existing.id == s.id {
+			if existing.tx != nil && existing != s {
+				_ = existing.tx.close()
+			}
+			c.servers[i] = s
+			return
+		}
+	}
+	c.servers = append(c.servers, s)
 }
 
 // RemoveServer stops and removes a server by id. Returns nil if not found.

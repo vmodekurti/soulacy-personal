@@ -3638,10 +3638,26 @@ func (s *Server) handleTestMCPServer(c *fiber.Ctx) error {
 		}
 		ctx, cancel := context.WithTimeout(c.Context(), probeTimeout)
 		defer cancel()
-		if err := mcp.ProbeHTTP(ctx, mcpBodyToServerConfig(body), s.mcpSecretResolver(ref, body.AuthSecret)); err != nil {
+		res, err := mcp.ProbeHTTP(ctx, mcpBodyToServerConfig(body), s.mcpSecretResolver(ref, body.AuthSecret))
+		if err != nil {
 			return c.JSON(fiber.Map{"ok": false, "error": err.Error()})
 		}
-		return c.JSON(fiber.Map{"ok": true, "message": "MCP handshake succeeded"})
+		// Say what was actually proven. Many servers accept the handshake and
+		// tools/list anonymously and only check the credential on tools/call,
+		// so a green tick here would otherwise vouch for a key nobody looked at.
+		resp := fiber.Map{"ok": true, "tools": res.Tools}
+		kind := strings.ToLower(strings.TrimSpace(body.Auth.Type))
+		switch {
+		case kind == "" || kind == "none":
+			resp["message"] = fmt.Sprintf("MCP handshake succeeded · %d tools", res.Tools)
+		case res.CredentialChecked:
+			resp["credential_verified"] = true
+			resp["message"] = fmt.Sprintf("MCP handshake succeeded and the credential was accepted · %d tools", res.Tools)
+		default:
+			resp["credential_verified"] = false
+			resp["message"] = fmt.Sprintf("Reachable (%d tools), but this server accepts the handshake without a credential, so yours could not be verified — it is only checked on the first tool call. Make sure the header name is what the server expects (usually Authorization).", res.Tools)
+		}
+		return c.JSON(resp)
 	}
 	return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"ok": false, "error": "unknown transport"})
 }

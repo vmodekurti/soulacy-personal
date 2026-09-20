@@ -128,8 +128,11 @@ func (f *fakeServer) standardTools() {
 func TestProbeHTTPAppliesQueryAndBearerSecret(t *testing.T) {
 	var sawQuery, sawAuth bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sawQuery = r.URL.Query().Get("region") == "us-east-1"
-		sawAuth = r.Header.Get("Authorization") == "Bearer vault-token"
+		// Sticky: ProbeHTTP deliberately ends with an anonymous handshake to
+		// learn whether the server checks credentials at all, so "the header
+		// was sent" must survive that last request.
+		sawQuery = sawQuery || r.URL.Query().Get("region") == "us-east-1"
+		sawAuth = sawAuth || r.Header.Get("Authorization") == "Bearer vault-token"
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{}}}`)
 	}))
@@ -145,7 +148,7 @@ func TestProbeHTTPAppliesQueryAndBearerSecret(t *testing.T) {
 		}
 		return "vault-token", nil
 	}
-	if err := ProbeHTTP(context.Background(), cfg, resolve); err != nil {
+	if _, err := ProbeHTTP(context.Background(), cfg, resolve); err != nil {
 		t.Fatalf("ProbeHTTP: %v", err)
 	}
 	if !sawQuery || !sawAuth {
@@ -184,7 +187,7 @@ func TestProbeHTTPOAuthClientCredentials(t *testing.T) {
 		Type: "oauth_client_credentials", TokenURL: srv.URL + "/token", ClientID: "client-id",
 		ClientSecretRef: "mcp.demo.client_secret", Scopes: []string{"tools.read", "tools.run"}, Audience: "mcp-api",
 	}}
-	if err := ProbeHTTP(context.Background(), cfg, func(context.Context, string) (string, error) { return "client-secret", nil }); err != nil {
+	if _, err := ProbeHTTP(context.Background(), cfg, func(context.Context, string) (string, error) { return "client-secret", nil }); err != nil {
 		t.Fatalf("ProbeHTTP: %v", err)
 	}
 	if tokenCalls != 1 {

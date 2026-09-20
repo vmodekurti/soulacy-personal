@@ -683,6 +683,9 @@
                 <span class="field-label">Header</span>
                 <input type="text" bind:value={editing.auth.header}
                   placeholder={editing.auth.type === 'bearer' ? 'Authorization' : 'X-API-Key'} />
+                {#if editing.auth.type === 'bearer' && (editing.auth.header || '').trim() && (editing.auth.header || '').trim().toLowerCase() !== 'authorization'}
+                  <span class="field-help warn-text">Bearer tokens are almost always sent as <code>Authorization: Bearer …</code>. Only change the header if the server's documentation says so.</span>
+                {/if}
               </div>
               <div class="field">
                 <span class="field-label">Scheme <span class="optional">(optional)</span></span>
@@ -768,9 +771,9 @@
       {/if}
 
       {#if testResult}
-        <div class="test-result" class:ok={testResult.ok}>
+        <div class="test-result" class:ok={testResult.ok && testResult.credential_verified !== false} class:warn={testResult.ok && testResult.credential_verified === false}>
           {#if testResult.ok}
-            ✓ {testResult.message || 'Reachable'}{#if testResult.resolved_command} · resolved to <code>{testResult.resolved_command}</code>{/if}
+            {testResult.credential_verified === false ? '⚠' : '✓'} {testResult.message || 'Reachable'}{#if testResult.resolved_command} · resolved to <code>{testResult.resolved_command}</code>{/if}
           {:else}
             ✗ {testResult.error}
           {/if}
@@ -1042,6 +1045,9 @@
     background: rgba(240,96,96,.08); border: 1px solid rgba(240,96,96,.3); color: #f06060;
   }
   .test-result.ok { background: rgba(96,240,160,.08); border-color: rgba(96,240,160,.3); color: #60f0a0; }
+  .test-result.warn { background: rgba(240,196,96,.08); border-color: rgba(240,196,96,.3); color: #f0c460; }
+  .warn-text { color: #f0c460; }
+  .warn-text code { background: rgba(0,0,0,.25); padding: .05rem .3rem; border-radius: 4px; }
   .test-result code { background: rgba(0,0,0,.25); padding: .05rem .3rem; border-radius: 4px; }
 
   .btn-primary, .btn-secondary, .btn-danger, .btn-glama {
