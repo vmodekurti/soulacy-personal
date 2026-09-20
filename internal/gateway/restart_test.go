@@ -3,7 +3,31 @@ package gateway
 import (
 	"strings"
 	"testing"
+
+	"github.com/soulacy/soulacy/internal/platform"
 )
+
+func TestRestartUsesSupervisor(t *testing.T) {
+	tests := []struct {
+		name        string
+		inContainer bool
+		detected    platform.Info
+		want        bool
+	}{
+		{"host", false, platform.Info{Name: "self-hosted", Kind: platform.Host}, false},
+		{"container marker", true, platform.Info{Name: "self-hosted", Kind: platform.Host}, true},
+		{"managed platform", false, platform.Info{Name: "Railway", Kind: platform.Managed}, true},
+		{"detected container", false, platform.Info{Name: "Kubernetes", Kind: platform.Container}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := restartUsesSupervisor(tt.inContainer, tt.detected); got != tt.want {
+				t.Fatalf("restartUsesSupervisor() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
 
 func TestPlanGatewayRestart(t *testing.T) {
 	tests := []struct {
