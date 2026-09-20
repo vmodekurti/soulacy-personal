@@ -21,7 +21,7 @@ import (
 func buildMCPCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "mcp",
-		Short: "Manage MCP servers",
+		Short: "Manage MCP servers and expose Soulacy to MCP clients",
 	}
 
 	var name, transport, command, pipSpec, serverURL string
@@ -30,8 +30,8 @@ func buildMCPCmd() *cobra.Command {
 
 	addCmd := &cobra.Command{
 		Use:   "add",
-		Short: "Install (optional) and register an MCP server in config.yaml",
-		Long: `Register an MCP server in the live config.yaml under mcp.servers.
+		Short: "Register an MCP server locally or on a remote gateway",
+		Long: `Register an MCP server locally in config.yaml or through a remote gateway API.
 
 With --pip, the package is first installed into an isolated venv UNDER THE
 WORKSPACE (mcp-servers/<name>/venv) so it survives container restarts, and a
@@ -40,7 +40,12 @@ comments and writes 0600 (the file holds secrets).
 
 Examples:
   sy mcp add --name weather --command weather-mcp --transport stdio
-  sy mcp add --name notebooklm --pip notebooklm-mcp-cli --command notebooklm-mcp-cli`,
+  sy mcp add --name notebooklm --pip notebooklm-mcp-cli --command notebooklm-mcp-cli
+
+Register an HTTP MCP server on a managed Soulacy deployment without shell access:
+  sy --gateway https://soul.example.com --api-key "$SOULACY_API_KEY" mcp add \
+    --name company-crm --transport http --url https://mcp.example.com/mcp \
+    --header "Authorization=Bearer $MCP_TOKEN"`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if name == "" {
 				return fmt.Errorf("--name is required")
@@ -74,10 +79,23 @@ Examples:
 				if err != nil {
 					return err
 				}
-				if _, err := apiCallWithTimeout(http.MethodPut, "/mcp/own/"+url.PathEscape(name), body, 2*time.Minute); err != nil {
+				data, err := apiCallWithTimeout(http.MethodPut, "/mcp/own/"+url.PathEscape(name), body, 2*time.Minute)
+				if err != nil {
 					return err
 				}
-				fmt.Printf("✓ [%s] Registered MCP server %q.\n", targetDescription(), name)
+				var response struct {
+					Message      string `json:"message"`
+					ConnectError string `json:"connect_error"`
+				}
+				_ = json.Unmarshal(data, &response)
+				if response.ConnectError != "" {
+					fmt.Printf("⚠ [%s] Registered MCP server %q, but it did not connect: %s\n", targetDescription(), name, response.ConnectError)
+					return nil
+				}
+				if response.Message == "" {
+					response.Message = "Registered and connected."
+				}
+				fmt.Printf("✓ [%s] MCP server %q: %s\n", targetDescription(), name, response.Message)
 				return nil
 			}
 			ws, err := config.ResolveWorkspace()
@@ -181,14 +199,20 @@ func buildMCPServeCmd() *cobra.Command {
 	serveCmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Expose Soulacy agents as an MCP stdio server",
-		Long: `Expose the running Soulacy gateway as a Model Context Protocol server.
+		Long: `Expose the running Soulacy gateway as a Model Context Protocol stdio server.
 
 Each enabled Soulacy agent is listed as a tool, plus a generic soulacy_chat
 tool that accepts agent_id explicitly. Configure this command in Claude,
-Codex, or any MCP client using stdio transport.
+Codex, or any MCP client using stdio transport. Managed deployments also expose
+Streamable HTTP directly at <gateway-url>/mcp, so this compatibility bridge is
+only needed for clients that require stdio.
 
 Example MCP command:
-  sy --gateway http://localhost:18789 mcp serve`,
+  sy --gateway http://localhost:18789 mcp serve
+
+Remote Streamable HTTP endpoint:
+  https://soul.example.com/mcp
+  Authorization: Bearer <SOULACY_API_KEY>`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			allowed := map[string]bool{}
 			for _, id := range agentIDs {

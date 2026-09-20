@@ -584,7 +584,7 @@ func (s *Server) buildApp() *fiber.App {
 	}
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:     strings.Join(origins, ","),
-		AllowHeaders:     "Origin, Content-Type, Authorization",
+		AllowHeaders:     "Origin, Content-Type, Authorization, MCP-Protocol-Version, MCP-Session-Id",
 		AllowMethods:     "GET, POST, PUT, PATCH, DELETE, OPTIONS",
 		AllowCredentials: false,
 	}))
@@ -729,6 +729,16 @@ func (s *Server) buildApp() *fiber.App {
 	// Static plugin UIs — no auth, same policy as the main GUI bundle below.
 	// Mounts are resolved at request time so SetPluginUI can run after New().
 	app.Get("/plugins/:pid/ui/*", s.handlePluginUIAsset)
+
+	// Soulacy's remote MCP server. It lives at the conventional top-level
+	// endpoint so managed deployments can be connected without running
+	// `sy mcp serve` in a shell. Stateless JSON responses are sufficient for
+	// the tools Soulacy exposes; GET/DELETE explicitly report that no standalone
+	// SSE stream or server-managed session is available.
+	remoteMCP := app.Group("/mcp", s.validateMCPOrigin, s.authWithPluginTokens(), s.pluginGateMW(), s.rlUserMW())
+	remoteMCP.Post("/", s.handleMCPServeHTTP)
+	remoteMCP.Get("/", s.handleMCPServeUnsupported)
+	remoteMCP.Delete("/", s.handleMCPServeUnsupported)
 
 	// --- API routes ---
 	// Auth middleware runs first (recognising scoped plugin tokens, E8),

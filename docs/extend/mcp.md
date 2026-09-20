@@ -13,6 +13,37 @@ built-in tools.
 - **As a server.** Soulacy can also expose selected capabilities *as* an MCP
   server for other MCP-aware clients.
 
+## Connect an MCP client to Soulacy
+
+Every Soulacy gateway exposes an authenticated Streamable HTTP endpoint at
+`<gateway-url>/mcp`. It runs inside the gateway, so Railway and other managed
+platforms do not need an interactive shell, sidecar process, or `sy mcp serve`
+session.
+
+For a deployment at `https://beta.soulacy.io`, configure the MCP client with:
+
+```json
+{
+  "url": "https://beta.soulacy.io/mcp",
+  "headers": {
+    "Authorization": "Bearer <SOULACY_API_KEY>"
+  }
+}
+```
+
+The endpoint exposes enabled agents as tools, plus authenticated schedule,
+Workboard, knowledge-base, and queue operations. The API key or JWT keeps its
+normal Soulacy RBAC scopes; MCP does not bypass permissions. The endpoint uses
+stateless JSON responses and returns `405 Method Not Allowed` for the optional
+standalone SSE stream.
+
+Clients that only support local stdio can use the CLI as a compatibility bridge:
+
+```bash
+sy --gateway https://beta.soulacy.io \
+  --api-key "$SOULACY_API_KEY" mcp serve
+```
+
 ## Configuring an MCP server
 
 ### Install from a repository URL
@@ -81,6 +112,11 @@ sy --gateway https://soul.example.com mcp add \
   --command /srv/soulacy/mcp-servers/filesystem/venv/bin/mcp-server-filesystem \
   --args '--root,/srv/soulacy-files' --env 'LOG_LEVEL=info'
 ```
+
+Pass `--api-key "$SOULACY_API_KEY"` when the remote gateway requires
+authentication. This command runs on your computer and writes the MCP
+registration through the gateway API; it does not require shell access on the
+deployment.
 
 `sy` sends remote registrations to `PUT /api/v1/mcp/own/:id`; it does not edit
 the caller's configuration. Team and Scale deployments accept only HTTPS

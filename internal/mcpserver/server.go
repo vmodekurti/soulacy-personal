@@ -13,7 +13,20 @@ import (
 	"unicode"
 )
 
-const protocolVersion = "2024-11-05"
+const protocolVersion = "2025-11-25"
+
+var supportedProtocolVersions = map[string]bool{
+	"2024-11-05": true,
+	"2025-03-26": true,
+	"2025-06-18": true,
+	"2025-11-25": true,
+}
+
+// SupportsProtocolVersion reports whether this server can speak a handshake-era
+// MCP protocol revision.
+func SupportsProtocolVersion(version string) bool {
+	return supportedProtocolVersions[strings.TrimSpace(version)]
+}
 
 type Agent struct {
 	ID          string
@@ -88,7 +101,9 @@ func (s *Server) Serve(ctx context.Context, r io.Reader, w io.Writer) error {
 		}
 		line, err := br.ReadBytes('\n')
 		if len(strings.TrimSpace(string(line))) > 0 {
-			s.handleLine(ctx, line, w)
+			if data, ok := s.Handle(ctx, line); ok {
+				s.writeMessage(w, data)
+			}
 		}
 		if err != nil {
 			if err == io.EOF {
@@ -118,28 +133,42 @@ type rpcError struct {
 	Message string `json:"message"`
 }
 
-func (s *Server) handleLine(ctx context.Context, line []byte, w io.Writer) {
-	var req rpcRequest
-	if err := json.Unmarshal(line, &req); err != nil {
-		s.writeResponse(w, rpcResponse{JSONRPC: "2.0", Error: &rpcError{Code: -32700, Message: "parse error: " + err.Error()}})
-		return
+// Handle processes one MCP JSON-RPC message. The returned bool is false for
+// accepted notifications and responses, which do not receive a JSON-RPC
+// response. Keeping this transport-neutral lets the same MCP implementation
+// serve stdio and Streamable HTTP clients.
+func (s *Server) Handle(ctx context.Context, message []byte) ([]byte, bool) {
+	if s.Client == nil {
+		return marshalResponse(rpcResponse{JSONRPC: "2.0", Error: &rpcError{Code: -32603, Message: "mcp server: client is required"}}), true
 	}
-	if req.ID == nil {
-		return
+	var req rpcRequest
+	if err := json.Unmarshal(message, &req); err != nil {
+		return marshalResponse(rpcResponse{JSONRPC: "2.0", Error: &rpcError{Code: -32700, Message: "parse error: " + err.Error()}}), true
+	}
+	// The server currently never sends requests to clients, so inbound
+	// responses and notifications are accepted without further dispatch.
+	if req.ID == nil || strings.TrimSpace(req.Method) == "" {
+		return nil, false
 	}
 	result, err := s.dispatch(ctx, req)
 	if err != nil {
-		s.writeResponse(w, rpcResponse{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: -32000, Message: err.Error()}})
-		return
+		return marshalResponse(rpcResponse{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: -32000, Message: err.Error()}}), true
 	}
-	s.writeResponse(w, rpcResponse{JSONRPC: "2.0", ID: req.ID, Result: result})
+	return marshalResponse(rpcResponse{JSONRPC: "2.0", ID: req.ID, Result: result}), true
 }
 
 func (s *Server) dispatch(ctx context.Context, req rpcRequest) (any, error) {
 	switch req.Method {
 	case "initialize":
+		version := protocolVersion
+		var params struct {
+			ProtocolVersion string `json:"protocolVersion"`
+		}
+		if json.Unmarshal(req.Params, &params) == nil && supportedProtocolVersions[params.ProtocolVersion] {
+			version = params.ProtocolVersion
+		}
 		return map[string]any{
-			"protocolVersion": protocolVersion,
+			"protocolVersion": version,
 			"capabilities": map[string]any{
 				"tools": map[string]any{},
 			},
@@ -147,6 +176,7 @@ func (s *Server) dispatch(ctx context.Context, req rpcRequest) (any, error) {
 				"name":    defaultString(s.Name, "soulacy"),
 				"version": defaultString(s.Version, "dev"),
 			},
+			"instructions": "Use Soulacy tools to work with the agents and platform resources available to this authenticated account.",
 		}, nil
 	case "ping":
 		return map[string]any{}, nil
@@ -485,8 +515,12 @@ func (s *Server) toolName(agentID string) string {
 	return prefix + safeID(agentID) + "_" + hex.EncodeToString(sum[:])[:8]
 }
 
-func (s *Server) writeResponse(w io.Writer, resp rpcResponse) {
+func marshalResponse(resp rpcResponse) []byte {
 	data, _ := json.Marshal(resp)
+	return data
+}
+
+func (s *Server) writeMessage(w io.Writer, data []byte) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	_, _ = w.Write(append(data, '\n'))

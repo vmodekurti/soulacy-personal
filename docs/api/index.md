@@ -130,6 +130,7 @@ Task CRUD, runs, artifacts (incl. download), comments — see
 | `POST /providers/:id/model` · `POST /providers/:id` | Set model / credentials |
 | `GET/POST /mcp` · `PATCH/DELETE /mcp/:id` · `POST /mcp/test` | Manage MCP servers |
 | `GET /mcp/registry/search` · `POST /mcp/provision-registry` · `POST /mcp/provision-glama` | Discover & provision MCP servers |
+| `POST /mcp` (top-level, outside `/api/v1`) | Use Soulacy as a Streamable HTTP MCP server |
 | `GET /tool-catalog` | Unified catalog: python tools + MCP tools + Go built-ins |
 
 ### Builder & templates
