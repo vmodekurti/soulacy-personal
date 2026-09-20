@@ -49,6 +49,7 @@ import (
 	"github.com/soulacy/soulacy/internal/secrets"
 	"github.com/soulacy/soulacy/internal/templates"
 	"github.com/soulacy/soulacy/internal/tier"
+	"github.com/soulacy/soulacy/internal/updates"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 	"github.com/soulacy/soulacy/pkg/plugin"
@@ -153,21 +154,47 @@ func (s *Server) handleHealth(c *fiber.Ctx) error {
 
 func (s *Server) handleRestart(c *fiber.Ctx) error {
 	s.log.Warn("gateway restart requested via API", zap.Any("request_id", c.Locals("request_id")))
-	if err := startRestartChild(); err != nil {
-		s.log.Error("gateway restart failed to spawn child", zap.Error(err))
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "restart failed: " + err.Error(),
-		})
+	plan := planGatewayRestart(updates.InContainer())
+	if plan.spawnChild {
+		if err := startRestartChild(); err != nil {
+			s.log.Error("gateway restart failed to spawn child", zap.Error(err))
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "restart failed: " + err.Error(),
+			})
+		}
 	}
 	s.recordAdminAudit(c, "restart.request", "gateway", "", "accepted", nil)
 	go func() {
 		time.Sleep(250 * time.Millisecond)
-		os.Exit(0)
+		os.Exit(plan.exitCode)
 	}()
 	return c.Status(fiber.StatusAccepted).JSON(fiber.Map{
 		"ok":      true,
-		"message": "Restart requested. A replacement gateway process is starting.",
+		"message": plan.message,
 	})
+}
+
+type gatewayRestartPlan struct {
+	spawnChild bool
+	exitCode   int
+	message    string
+}
+
+func planGatewayRestart(inContainer bool) gatewayRestartPlan {
+	if inContainer {
+		// A child process cannot outlive PID 1 when a container stops. Exit with
+		// a failure status so On Failure policies on Railway, Docker, Kubernetes,
+		// and similar supervisors start a fresh container.
+		return gatewayRestartPlan{
+			exitCode: 1,
+			message:  "Restart requested. The container supervisor is starting a fresh gateway instance.",
+		}
+	}
+	return gatewayRestartPlan{
+		spawnChild: true,
+		exitCode:   0,
+		message:    "Restart requested. A replacement gateway process is starting.",
+	}
 }
 
 func startRestartChild() error {
