@@ -34,11 +34,12 @@ about Node.
 
 ## Installing things without a shell
 
-You do not need one. `package_install` takes an HTTPS repository URL, works out
-whether it is a Skill or an MCP server, installs it into the workspace,
-registers it, and verifies the result — and it works with no `system` grant at
-all, asking for approval each time. Ask Genie to install something, or use the
-**MCP Servers** page.
+You do not need one. Paste the repository into the **MCP Servers** page, or ask
+the System agent to install it. Soulacy inspects the README and manifests first,
+then chooses a hosted endpoint, gateway process, connected device, or companion
+service. `package_install` is used only for a compatible gateway process; it
+installs into the persistent workspace, registers the server, verifies the
+result, and asks for approval before changing anything.
 
 What a shell would give you beyond that is mostly the ability to break things
 in ways nobody can undo from the GUI.

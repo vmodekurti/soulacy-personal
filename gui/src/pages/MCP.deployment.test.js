@@ -36,6 +36,17 @@ function stubGateway() {
     const u = String(url && url.url ? url.url : url)
     let body = '{}'
     if (u.includes('/doctor')) body = JSON.stringify(REPORT)
+    else if (u.includes('/mcp/install-guide')) body = JSON.stringify({
+      source: 'https://github.com/acme/stateful-mcp',
+      name: 'stateful-mcp',
+      method: 'companion_deployment',
+      title: 'Deploy it as a companion service',
+      summary: 'This server has its own runtime or state dependencies.',
+      reasons: ['The deployment definition contains 3 cooperating services'],
+      steps: ['Create a separate service', 'Attach persistent storage', 'Register its /mcp endpoint'],
+      command: 'sy --gateway <SOULACY_URL> mcp add --name stateful-mcp --transport http --url http://service:8000/mcp',
+      can_install_here: false,
+    })
     else if (u.includes('/mcp')) body = JSON.stringify({ servers: [] })
     return new Response(body, { status: 200, headers: { 'content-type': 'application/json' } })
   }))
@@ -90,6 +101,22 @@ describe('MCP page: what this deployment cannot do', () => {
     expect(text).toContain('Streamable HTTP')
     expect(text).toContain(`sy --gateway ${window.location.origin}`)
     expect(text).toContain('mcp add --name <server-name>')
+  })
+
+  it('shows repository-specific installation directions', async () => {
+    await mountPage()
+    const input = target.querySelector('input[aria-label="MCP server repository URL"]')
+    input.value = 'https://github.com/acme/stateful-mcp'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise(r => setTimeout(r, 10))
+    const button = [...target.querySelectorAll('button')].find(b => /Show install method/i.test(b.textContent))
+    button.click()
+    await new Promise(r => setTimeout(r, 40))
+    const text = target.textContent.replace(/\s+/g, ' ')
+    expect(text).toContain('Companion service')
+    expect(text).toContain('Deploy it as a companion service')
+    expect(text).toContain('3 cooperating services')
+    expect(text).toContain(`sy --gateway ${window.location.origin}`)
   })
 
   // The templates live in the new-server dialog, which is where someone is

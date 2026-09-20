@@ -20,6 +20,14 @@
   let remoteEndpoint = '/mcp'
   let copiedRemote = ''
 
+  // Repository-aware installation guidance. The gateway inspects only
+  // declarative project files and returns the same placement decision used by
+  // the System agent before it attempts an install.
+  let installSource = ''
+  let installGuide = null
+  let installGuideLoading = false
+  let installGuideError = ''
+
   $: remoteClientConfig = JSON.stringify({
     url: remoteEndpoint,
     headers: { Authorization: 'Bearer <SOULACY_API_KEY>' },
@@ -90,6 +98,33 @@
     } catch {
       copiedRemote = ''
     }
+  }
+
+  async function inspectInstallMethod() {
+    const source = installSource.trim()
+    if (!source) return
+    installGuideLoading = true
+    installGuideError = ''
+    installGuide = null
+    try {
+      installGuide = await api.mcp.installGuide(source)
+    } catch (e) {
+      installGuideError = e.message
+    } finally {
+      installGuideLoading = false
+    }
+  }
+
+  function guideCommand(command) {
+    return (command || '').replaceAll('<SOULACY_URL>', gatewayOrigin || '<SOULACY_URL>')
+  }
+
+  const METHOD_LABEL = {
+    remote: 'Hosted endpoint',
+    gateway_process: 'Gateway managed',
+    connected_runner: 'Connected device',
+    companion_deployment: 'Companion service',
+    manual_review: 'Manual review',
   }
 
   function toggle(id) { expanded = { ...expanded, [id]: !expanded[id] } }
@@ -350,6 +385,69 @@
     </div>
 
   <DeploymentPanel report={deployment} />
+
+  <section class="install-card" aria-labelledby="install-guide-title">
+    <div class="install-heading">
+      <div>
+        <span class="eyebrow">Install an MCP server</span>
+        <h2 id="install-guide-title">Use the right method for this server</h2>
+        <p>Paste a public Git repository. Soulacy checks its manifests and deployment files, then recommends a hosted connection, gateway process, connected device, or companion service.</p>
+      </div>
+      <span class="read-only-badge">Read-only inspection</span>
+    </div>
+    <div class="install-input-row">
+      <input
+        type="url"
+        bind:value={installSource}
+        placeholder="https://github.com/owner/mcp-server"
+        aria-label="MCP server repository URL"
+        on:keydown={(e) => e.key === 'Enter' && inspectInstallMethod()}
+      />
+      <button class="btn-primary" on:click={inspectInstallMethod} disabled={installGuideLoading || !installSource.trim()}>
+        {installGuideLoading ? 'Inspecting…' : 'Show install method'}
+      </button>
+    </div>
+    <p class="install-agent-hint">You can also tell the <strong>System</strong> agent: <code>Install this MCP server — &lt;repository URL&gt;</code>. It reads this inspection and the bounded README, then chooses the final method before making changes.</p>
+
+    {#if installGuideError}
+      <div class="banner err">{installGuideError}</div>
+    {/if}
+
+    {#if installGuide}
+      <div class="guide-result" data-method={installGuide.method}>
+        <div class="guide-title-row">
+          <div>
+            <span class="method-badge">{METHOD_LABEL[installGuide.method] || installGuide.method}</span>
+            <h3>{installGuide.title}</h3>
+          </div>
+          {#if installGuide.can_install_here}<span class="available-here">● Supported here</span>{/if}
+        </div>
+        <p class="guide-summary">{installGuide.summary}</p>
+        {#if installGuide.reasons?.length}
+          <div class="guide-block">
+            <strong>Why</strong>
+            <ul>{#each installGuide.reasons as reason}<li>{reason}</li>{/each}</ul>
+          </div>
+        {/if}
+        {#if installGuide.steps?.length}
+          <div class="guide-block">
+            <strong>Steps</strong>
+            <ol>{#each installGuide.steps as step}<li>{step}</li>{/each}</ol>
+          </div>
+        {/if}
+        {#if installGuide.command}
+          <div class="guide-command">
+            <span>Command</span>
+            <pre>{guideCommand(installGuide.command)}</pre>
+            <button class="btn-secondary tiny" on:click={() => copyRemote(guideCommand(installGuide.command), 'guide-command')}>
+              {copiedRemote === 'guide-command' ? 'Copied' : 'Copy command'}
+            </button>
+          </div>
+        {/if}
+        {#if installGuide.alternative}<p class="guide-alternative"><strong>Alternative:</strong> {installGuide.alternative}</p>{/if}
+      </div>
+    {/if}
+  </section>
 
   <section class="remote-card" aria-labelledby="remote-mcp-title">
     <div class="remote-heading">
@@ -769,6 +867,34 @@
   .page-header h1 { font-size: 1.2rem; font-weight: 600; }
   .header-actions { display: flex; gap: .5rem; }
 
+  .install-card {
+    background: var(--sl-surface); border: 1px solid var(--sl-line); border-radius: 12px;
+    padding: 1.15rem 1.25rem; display: flex; flex-direction: column; gap: .9rem;
+  }
+  .install-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+  .install-heading h2 { margin: .15rem 0 .35rem; font-size: 1rem; color: #eef0ff; }
+  .install-heading p, .install-agent-hint { margin: 0; color: #8f96b8; font-size: .78rem; line-height: 1.55; }
+  .read-only-badge { color: #8b85ff; border: 1px solid rgba(139,133,255,.35); border-radius: 999px; padding: .25rem .55rem; font-size: .68rem; white-space: nowrap; }
+  .install-input-row { display: grid; grid-template-columns: 1fr auto; gap: .55rem; }
+  .install-input-row input {
+    min-width: 0; background: #0e1020; border: 1px solid #2a2f4a; border-radius: 7px;
+    color: #e8eaf6; font: .82rem monospace; padding: .55rem .7rem;
+  }
+  .install-agent-hint code { color: #aaa5ff; background: #1c1f35; border-radius: 4px; padding: .08rem .3rem; }
+  .guide-result { border: 1px solid rgba(139,133,255,.3); border-radius: 10px; padding: 1rem; background: rgba(9,11,24,.55); display: flex; flex-direction: column; gap: .8rem; }
+  .guide-title-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+  .guide-title-row h3 { margin: .3rem 0 0; color: #eef0ff; font-size: .95rem; }
+  .method-badge { color: #aaa5ff; font-size: .67rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+  .available-here { color: #60f0a0; font-size: .7rem; white-space: nowrap; }
+  .guide-summary, .guide-alternative { margin: 0; color: #a2a8c7; font-size: .8rem; line-height: 1.55; }
+  .guide-block { color: #c9cce0; font-size: .78rem; }
+  .guide-block strong { color: #70779c; text-transform: uppercase; letter-spacing: .06em; font-size: .67rem; }
+  .guide-block ul, .guide-block ol { margin: .4rem 0 0; padding-left: 1.2rem; color: #a2a8c7; line-height: 1.55; }
+  .guide-command { display: grid; grid-template-columns: 1fr auto; gap: .45rem; align-items: end; }
+  .guide-command > span { grid-column: 1 / -1; color: #70779c; text-transform: uppercase; letter-spacing: .06em; font-size: .67rem; font-weight: 700; }
+  .guide-command pre { min-width: 0; margin: 0; background: #090b18; border-radius: 7px; padding: .65rem; color: #c8c5ff; font: .7rem/1.5 monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .guide-alternative { border-top: 1px solid #252a45; padding-top: .7rem; }
+
   .remote-card {
     background: linear-gradient(135deg, rgba(82,72,180,.14), rgba(15,18,39,.92));
     border: 1px solid rgba(139,133,255,.35); border-radius: 12px;
@@ -790,6 +916,8 @@
   .remote-grid p code, .remote-footnote code { color: #aaa5ff; }
 
   @media (max-width: 820px) {
+    .install-heading { flex-direction: column; }
+    .install-input-row, .guide-command { grid-template-columns: 1fr; }
     .remote-grid { grid-template-columns: 1fr; }
     .remote-heading { flex-direction: column; }
     .copy-row { align-items: stretch; flex-direction: column; }

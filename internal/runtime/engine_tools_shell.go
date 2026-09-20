@@ -9,14 +9,21 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
+	"github.com/soulacy/soulacy/internal/mcp"
+	"github.com/soulacy/soulacy/internal/mcpinstall"
+	"github.com/soulacy/soulacy/internal/netguard"
 	"github.com/soulacy/soulacy/internal/sandbox"
 )
+
+var managedMCPIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 
 // SetAgentShellEnv sets extra KEY=VALUE entries exposed to shell_exec /
 // run_script subprocesses (canonical install-path hints). Called at boot.
@@ -51,9 +58,84 @@ func (e *Engine) shellEnviron() []string {
 func (e *Engine) buildShellTools() []BuiltinTool {
 	return []BuiltinTool{
 		{
+			Name:        "mcp_install_inspect",
+			Gate:        "",
+			Description: "Inspect an MCP server repository before choosing how to install it. Reads bounded README and manifest content without executing repository code, then returns deployment evidence and a baseline recommendation. Always call this first for an MCP installation URL; reason over the evidence before installing or giving directions.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"source_url": map[string]any{
+						"type":        "string",
+						"description": "Public HTTPS Git repository URL containing an MCP server",
+					},
+				},
+				"required": []string{"source_url"},
+			},
+			Handler: func(ctx context.Context, args map[string]any) (string, error) {
+				sourceURL := strings.TrimSpace(argString(args, "source_url"))
+				if sourceURL == "" {
+					return "", fmt.Errorf("mcp_install_inspect: source_url is required")
+				}
+				recommendation, err := mcpinstall.AnalyzeRepository(ctx, sourceURL)
+				if err != nil {
+					return "", fmt.Errorf("mcp_install_inspect: %w", err)
+				}
+				return recommendation.PlanningText(), nil
+			},
+		},
+		{
+			Name:        "mcp_register_remote",
+			Gate:        "",
+			Description: "Register a provider-hosted HTTPS MCP endpoint that does not require credentials. Use it after repository inspection confirms remote connection is best. This typed config change requires operator approval. If authentication, URL variables, or the final endpoint are unresolved, provide setup directions instead.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]any{
+						"type":        "string",
+						"description": "Stable Soulacy server id containing letters, numbers, hyphens, or underscores",
+					},
+					"url": map[string]any{
+						"type":        "string",
+						"description": "Final public HTTPS Streamable HTTP MCP endpoint",
+					},
+				},
+				"required": []string{"name", "url"},
+			},
+			Handler: func(ctx context.Context, args map[string]any) (string, error) {
+				name := strings.TrimSpace(argString(args, "name"))
+				if !managedMCPIDPattern.MatchString(name) {
+					return "", fmt.Errorf("mcp_register_remote: name must be 1-64 letters, numbers, hyphens, or underscores")
+				}
+				endpoint := strings.TrimSpace(argString(args, "url"))
+				u, err := url.ParseRequestURI(endpoint)
+				if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
+					return "", fmt.Errorf("mcp_register_remote: url must be a public HTTPS endpoint without embedded credentials")
+				}
+				if err := netguard.CheckPublic(endpoint); err != nil {
+					return "", fmt.Errorf("mcp_register_remote: endpoint failed the public-network check: %w", err)
+				}
+				result, err := e.runManagedMCPRegistration(ctx, name, endpoint)
+				if err != nil {
+					return "", fmt.Errorf("mcp_register_remote: %w", err)
+				}
+				if e.mcpClient != nil {
+					if err := e.mcpClient.AddServer(name, mcp.ServerConfig{Transport: "http", URL: endpoint}); err != nil {
+						return "", fmt.Errorf("mcp_register_remote: saved registration, but connection verification failed: %w", err)
+					}
+					for _, server := range e.mcpClient.ServersSnapshot() {
+						if server.ID == name {
+							result += fmt.Sprintf("\nVerified live connection: %s.", server.Detail)
+							break
+						}
+					}
+				}
+				return result, nil
+			},
+		},
+		{
 			Name:        "package_install",
 			Gate:        "",
-			Description: "Install and register a Soulacy Skill or MCP server from an HTTPS Git repository URL. Use this tool directly whenever the operator asks to install a Skill or MCP server from a URL. The installer detects the package type, performs safety inspection, uses persistent workspace paths, updates config when needed, avoids reinstalling an existing package, and verifies the result. Never substitute shell_exec or narrate CLI commands for this task.",
+			Description: "Install and register a Soulacy Skill or a gateway-compatible MCP server from an HTTPS Git repository URL. For MCP requests, call mcp_install_inspect first and use this tool only when the evidence supports a self-contained gateway process. The installer performs safety inspection, uses persistent workspace paths, updates config, and verifies the result. Never substitute shell_exec for this task.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -321,6 +403,28 @@ func (e *Engine) runManagedPackageInstaller(ctx context.Context, sourceURL, kind
 			result = runErr.Error()
 		}
 		return "", fmt.Errorf("installer failed: %s", result)
+	}
+	return result, nil
+}
+
+func (e *Engine) runManagedMCPRegistration(ctx context.Context, name, endpoint string) (string, error) {
+	syPath, err := exec.LookPath("sy")
+	if err != nil {
+		return "", fmt.Errorf("soulacy CLI 'sy' was not found in PATH: %w", err)
+	}
+	argv := []string{"mcp", "add", "--name", name, "--transport", "http", "--url", endpoint}
+	cmd := exec.CommandContext(ctx, syPath, argv...)
+	cmd.Env = e.shellEnviron()
+	out, runErr := cmd.CombinedOutput()
+	result := strings.TrimSpace(string(out))
+	if len(result) > 8000 {
+		result = result[len(result)-8000:]
+	}
+	if runErr != nil {
+		if result == "" {
+			result = runErr.Error()
+		}
+		return "", fmt.Errorf("registration failed: %s", result)
 	}
 	return result, nil
 }

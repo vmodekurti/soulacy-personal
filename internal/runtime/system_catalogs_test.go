@@ -3,6 +3,8 @@ package runtime
 import (
 	"strings"
 	"testing"
+
+	"github.com/soulacy/soulacy/pkg/agent"
 )
 
 // The System agent is the one with shell and file access, so what it can see
@@ -51,9 +53,35 @@ func TestSystemAgentStillConfirmsEveryDestructiveTool(t *testing.T) {
 	for _, tool := range system.ConfirmTools {
 		confirm[tool] = true
 	}
-	for _, tool := range []string{"shell_exec", "run_script", "write_file", "install_library", "package_install", "download_file", "http_request"} {
+	for _, tool := range []string{"shell_exec", "run_script", "write_file", "install_library", "package_install", "mcp_register_remote", "download_file", "http_request"} {
 		if !confirm[tool] {
 			t.Fatalf("%s must still require confirmation", tool)
+		}
+	}
+}
+
+func TestSystemAgentGetsRepositoryAwareMCPInstallationPlanning(t *testing.T) {
+	e := &Engine{}
+	system := builtinSystemAgent()
+	names := map[string]bool{}
+	for _, tool := range e.systemToolsFor(system) {
+		names[tool.Name] = true
+	}
+	if !names["mcp_install_inspect"] || !names["package_install"] || !names["mcp_register_remote"] {
+		t.Fatalf("system MCP installation tools = %v", names)
+	}
+
+	custom := &agent.Definition{ID: "custom", Capabilities: []string{"system"}}
+	for _, tool := range e.systemToolsFor(custom) {
+		if tool.Name == "mcp_install_inspect" {
+			t.Fatal("repository installation planner should be reserved for the built-in System agent")
+		}
+	}
+
+	prompt := system.SystemPrompt + mcpInstallationPlanningGuide
+	for _, want := range []string{"mcp_install_inspect", "hosted endpoint", "connected device", "companion service", "If no method works"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("System MCP installation guidance missing %q", want)
 		}
 	}
 }
