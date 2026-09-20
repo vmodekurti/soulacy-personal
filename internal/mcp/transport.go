@@ -573,13 +573,58 @@ func (t *httpTx) notify(method string, params any) error {
 
 func (t *httpTx) close() error { return nil }
 
-// ProbeHTTP performs the real MCP initialize handshake with the supplied HTTP
-// connection settings. It is used by the GUI's Test connection action so a
-// successful result proves that query parameters and authentication work, not
-// merely that the host answers HEAD requests.
-func ProbeHTTP(ctx context.Context, cfg ServerConfig, resolveSecret func(context.Context, string) (string, error)) error {
+// ProbeResult is what the GUI's Test connection learns from ProbeHTTP.
+type ProbeResult struct {
+	// Tools is how many tools the server listed.
+	Tools int
+	// CredentialChecked is true when the server refused the same handshake
+	// without the credential — the credential was really exercised. It is
+	// false when no authentication is configured, and, more importantly, when
+	// the server accepts initialize anonymously: many servers (Equibles, for
+	// one) only look at the credential on tools/call, so a green handshake
+	// says nothing about the key and the GUI must not pretend otherwise.
+	CredentialChecked bool
+}
+
+// ProbeHTTP performs the real MCP initialize handshake and tools/list with the
+// supplied HTTP connection settings. It is used by the GUI's Test connection
+// action so a successful result proves that query parameters and the transport
+// work, not merely that the host answers HEAD requests. When authentication is
+// configured it also repeats the handshake anonymously to find out whether the
+// server checks credentials at this stage at all (see ProbeResult).
+func ProbeHTTP(ctx context.Context, cfg ServerConfig, resolveSecret func(context.Context, string) (string, error)) (ProbeResult, error) {
+	var res ProbeResult
 	t := newHTTP(cfg, resolveSecret)
 	defer t.close()
+	if err := probeInitialize(ctx, t); err != nil {
+		return res, err
+	}
+	_ = t.notify("notifications/initialized", nil)
+	raw, err := t.request(ctx, "tools/list", nil)
+	if err != nil {
+		return res, fmt.Errorf("tools/list: %w", err)
+	}
+	var lr struct {
+		Tools []json.RawMessage `json:"tools"`
+	}
+	if err := json.Unmarshal(raw, &lr); err != nil {
+		return res, fmt.Errorf("decode tools: %w", err)
+	}
+	res.Tools = len(lr.Tools)
+
+	if kind := strings.ToLower(strings.TrimSpace(cfg.Auth.Type)); kind != "" && kind != "none" {
+		anon := cfg
+		anon.Auth = AuthConfig{}
+		at := newHTTP(anon, resolveSecret)
+		defer at.close()
+		// A rejection here is the good outcome: it means the credential on the
+		// first handshake was what made the difference.
+		res.CredentialChecked = probeInitialize(ctx, at) != nil
+	}
+	return res, nil
+}
+
+func probeInitialize(ctx context.Context, t *httpTx) error {
 	_, err := t.request(ctx, "initialize", map[string]any{
 		"protocolVersion": ProtocolVersion,
 		"capabilities":    map[string]any{},
