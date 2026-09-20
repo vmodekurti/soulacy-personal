@@ -41,6 +41,7 @@ import (
 	"github.com/soulacy/soulacy/internal/mcp"
 	"github.com/soulacy/soulacy/internal/netguard"
 	"github.com/soulacy/soulacy/internal/pkgregistry"
+	"github.com/soulacy/soulacy/internal/platform"
 	"github.com/soulacy/soulacy/internal/plugininstall"
 	"github.com/soulacy/soulacy/internal/policy"
 	"github.com/soulacy/soulacy/internal/redact"
@@ -154,7 +155,7 @@ func (s *Server) handleHealth(c *fiber.Ctx) error {
 
 func (s *Server) handleRestart(c *fiber.Ctx) error {
 	s.log.Warn("gateway restart requested via API", zap.Any("request_id", c.Locals("request_id")))
-	plan := planGatewayRestart(updates.InContainer())
+	plan := planGatewayRestart(restartUsesSupervisor(updates.InContainer(), platform.Detect()))
 	if plan.spawnChild {
 		if err := startRestartChild(); err != nil {
 			s.log.Error("gateway restart failed to spawn child", zap.Error(err))
@@ -172,6 +173,10 @@ func (s *Server) handleRestart(c *fiber.Ctx) error {
 		"ok":      true,
 		"message": plan.message,
 	})
+}
+
+func restartUsesSupervisor(inContainer bool, detected platform.Info) bool {
+	return inContainer || detected.Kind != platform.Host
 }
 
 type gatewayRestartPlan struct {
