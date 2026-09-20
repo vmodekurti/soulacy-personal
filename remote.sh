@@ -102,11 +102,26 @@ fi
 
 # ── 3. Publish the gateway into the tailnet ──────────────────────────────────
 hdr "Step 4: Publish the gateway to your tailnet"
-# `tailscale serve --http=<port>` proxies tailnet:<port> -> localhost:<port>,
-# reachable only by your own tailnet devices over the encrypted WireGuard mesh.
-# --bg keeps it running after this script exits.
-if tailscale serve --bg --http="${PORT}" "http://127.0.0.1:${PORT}" 2>/tmp/soulacy-serve.err; then
-  ok "Publishing tailnet port ${PORT} → gateway on localhost"
+# `tailscale serve` proxies tailnet:<port> -> localhost:<port>, reachable only
+# by your own tailnet devices over the encrypted WireGuard mesh. --bg keeps it
+# running after this script exits.
+#
+# HTTPS when the tailnet can issue certificates (DNS › HTTPS Certificates in
+# the Tailscale admin console): Tailscale then terminates TLS with a real
+# Let's Encrypt certificate for this machine's MagicDNS name, so phones get an
+# https:// address with nothing to trust manually. Otherwise plain http — the
+# WireGuard tunnel still encrypts it end to end, and the Soulacy iOS app
+# accepts http for self-hosted gateways. The user does not have to choose.
+SCHEME="http"
+if tailscale status --json 2>/dev/null | grep -q '"CertDomains"[[:space:]]*:[[:space:]]*\['; then
+  SCHEME="https"
+fi
+# Any previous publish on this port is replaced so switching schemes is clean.
+tailscale serve --http="${PORT}" off >/dev/null 2>&1 || true
+tailscale serve --https="${PORT}" off >/dev/null 2>&1 || true
+if tailscale serve --bg --"${SCHEME}"="${PORT}" "http://127.0.0.1:${PORT}" 2>/tmp/soulacy-serve.err; then
+  ok "Publishing tailnet ${SCHEME}://…:${PORT} → gateway on localhost"
+  [ "$SCHEME" = "http" ] && printf "  (https is used automatically once HTTPS certificates are enabled for your tailnet)\n"
 else
   # Older CLIs use a different `serve` grammar; surface the real error rather
   # than guessing, so the operator can act on it.
@@ -119,7 +134,9 @@ fi
 DNSNAME="$(tailscale status --json 2>/dev/null | sed -n 's/.*"DNSName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
 DNSNAME="${DNSNAME%.}" # strip trailing dot
 TSIP="$(tailscale ip -4 2>/dev/null | head -1)"
-[ -n "$DNSNAME" ] && ADDR="http://${DNSNAME}:${PORT}" || ADDR="http://${TSIP}:${PORT}"
+# A certificate is issued for the MagicDNS name only, so https needs the name;
+# the raw IP stays http.
+if [ -n "$DNSNAME" ]; then ADDR="${SCHEME}://${DNSNAME}:${PORT}"; else ADDR="http://${TSIP}:${PORT}"; fi
 
 # The gateway key is the `sy_`-prefixed api_key in config.yaml (provider keys
 # have other formats, so match on the sy_ prefix rather than position, and
@@ -159,6 +176,6 @@ On your iPhone (one time):
 It now works from anywhere your phone has internet — no Wi-Fi, ports, or domain
 needed. Traffic is encrypted end to end by Tailscale.
 
-To stop publishing later:  tailscale serve --http=${PORT} off
+To stop publishing later:  tailscale serve --${SCHEME}=${PORT} off
 To leave the tailnet:       sudo tailscale down
 EOF
