@@ -36,8 +36,9 @@ func getPairingStore() *pairing.Store {
 // memory, approvals and inbox with the person's web login.
 func (s *Server) handleCreatePairingToken(c *fiber.Ctx) error {
 	var body struct {
-		Name string `json:"name"`
-		Role string `json:"role"`
+		Name    string `json:"name"`
+		Role    string `json:"role"`
+		BaseURL string `json:"base_url"` // the address the phone will use; optional
 	}
 	if len(c.Body()) > 0 {
 		if err := c.BodyParser(&body); err != nil {
@@ -77,11 +78,21 @@ func (s *Server) handleCreatePairingToken(c *fiber.Ctx) error {
 		return s.errMsg(c, fiber.StatusInternalServerError, err.Error())
 	}
 	metrics.PairingTokensTotal.WithLabelValues("issued").Inc()
-	base := strings.TrimRight(c.BaseURL(), "/")
+	// The QR must carry an address the PHONE can reach — never just the
+	// browser's own origin (opening the GUI at localhost baked
+	// http://localhost:18789 into the code, which a phone resolves to itself).
+	pb, err := resolvePairBase(c.Context(), s.cfg.Server.PublicURL, c.BaseURL(), s.cfg.Server.Port, body.BaseURL, boundedProbe(pairProbe, min(s.httpRequestTimeout(), pairProbeBudget)))
+	if err != nil {
+		return s.errMsg(c, fiber.StatusBadRequest, err.Error())
+	}
 	return c.JSON(fiber.Map{
 		"code":         tok.Code,
 		"expires_at":   tok.ExpiresAt,
-		"pair_url":     base + "/mobile?pair=" + tok.Code,
+		"pair_url":     pb.URL + "/mobile?pair=" + tok.Code,
+		"base_url":     pb.URL,
+		"reachable":    pb.Reachable,
+		"hint":         pb.Hint,
+		"candidates":   pb.Candidates,
 		"subject":      tok.Subject,
 		"display_name": tok.DisplayName,
 		"role":         tok.Role,

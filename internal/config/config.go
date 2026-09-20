@@ -410,7 +410,11 @@ type CredentialsConfig struct {
 }
 
 type ServerConfig struct {
-	Host         string          `mapstructure:"host"`
+	Host string `mapstructure:"host"`
+	// PublicURL is the address OTHER devices use to reach this gateway, e.g.
+	// https://soulacy.example.com or http://my-mac.tailnet.ts.net:18789. It is
+	// embedded in pairing QR codes. Empty = detect a reachable address.
+	PublicURL    string          `mapstructure:"public_url"`
 	Port         int             `mapstructure:"port"`
 	GUIEnabled   bool            `mapstructure:"gui_enabled"`
 	GUIStaticDir string          `mapstructure:"gui_static_dir"`
@@ -1075,6 +1079,7 @@ func Load(cfgPath string) (*Config, string, error) {
 	// address with no API key set.
 	v.SetDefault("server.host", "127.0.0.1")
 	v.SetDefault("server.port", 18789)
+	v.SetDefault("server.public_url", "")
 	v.SetDefault("server.gui_enabled", true)
 	v.SetDefault("server.discovery.enabled", false)
 	v.SetDefault("server.discovery.interface", "")
