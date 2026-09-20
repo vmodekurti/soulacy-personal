@@ -56,7 +56,7 @@ compose_cmd() { if docker compose version >/dev/null 2>&1; then echo "docker com
 
 find_compose_dir() {
 	# Explicit override wins; else the common install location; else cwd.
-	for d in "${SOULACY_UPGRADE_DIR:-}" /opt/soulacy-personal "$PWD"; do
+	for d in "${SOULACY_UPGRADE_DIR:-}" /opt/soulacy /opt/soulacy-personal "$PWD"; do
 		[ -n "$d" ] || continue
 		for f in docker-compose.yml docker-compose.yaml compose.yml; do
 			[ -f "$d/$f" ] && grep -qE "^[[:space:]]*soulacy:" "$d/$f" 2>/dev/null && { echo "$d/$f"; return 0; }
@@ -110,7 +110,7 @@ upgrade_docker() {
 
 # ── 3. Source checkout (git repo, no compose) ────────────────────────────────
 find_source_dir() {
-	for d in "${SOULACY_UPGRADE_DIR:-}" "$PWD" /opt/soulacy-personal; do
+	for d in "${SOULACY_UPGRADE_DIR:-}" "$PWD" /opt/soulacy /opt/soulacy-personal; do
 		[ -n "$d" ] || continue
 		[ -d "$d/.git" ] && [ -f "$d/go.mod" ] && grep -q "soulacy/soulacy" "$d/go.mod" 2>/dev/null && { echo "$d"; return 0; }
 	done

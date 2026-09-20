@@ -38,10 +38,30 @@ it prints your options instead of guessing.
 | Fly.io | `fly deploy`, or release a new image tag |
 | Google Cloud Run | `gcloud run deploy <svc> --image ghcr.io/vmodekurti/soulacy-personal:0.1` |
 | Kubernetes | `kubectl set image deploy/soulacy soulacy=ghcr.io/vmodekurti/soulacy-personal:0.1.NEW` |
-| One-click AWS (CloudFormation) | Update the stack's `ImageVersion` parameter to the new tag |
+| One-click AWS / Azure (container on a VM) | Run the upgrade **on the VM** with a remote command — see below. **Never** change the stack's `ImageVersion`/`customData` on a live instance: that replaces the VM and destroys its data volume. |
 
 Image: `ghcr.io/vmodekurti/soulacy-personal` — tags: a version (`0.1.23`), the
 minor (`0.1`), or `latest`.
+
+### Upgrading a cloud VM remotely (no SSH needed)
+
+The one-click AWS and Azure deployments run Soulacy as a container on a VM you
+own, with the data in a Docker volume on that VM. Upgrade **on the same
+instance** so the data stays — triggered from your laptop:
+
+- **AWS** (the one-click instance has Systems Manager enabled):
+  `deploy/aws/upgrade-remote.sh <instance-id> [--profile p] [--region r]`
+- **Azure** (Run Command): `deploy/azure/upgrade-remote.sh <resource-group> <vm-name>`
+- **Any VM with SSH:** `ssh <vm> 'curl -fsSL https://raw.githubusercontent.com/vmodekurti/soulacy-personal/main/upgrade.sh | bash'`
+
+Each runs `upgrade.sh` on the VM (`docker compose pull && up -d` in `/opt/soulacy`),
+waits for health, and never touches the volume.
+
+**Warning:** do not "upgrade" by updating the CloudFormation stack's
+`ImageVersion` or the ARM template's `customData` on a running instance. Those
+live in the instance's boot script, so the change **replaces the VM**; the root
+disk — and the data volume on it — is deleted with it. `ImageVersion` is for
+choosing the version of a *new* deployment only.
 
 ## Identify how Soulacy was installed
 
