@@ -5576,8 +5576,11 @@ its progress until completion. <code>--allow-unverified</code> records approval 
 Git source; <code>--allow-host-build</code> separately records approval for the gateway to
 build source and create package environments. Team and Scale deployments may
 restrict host builds to their approved catalog even when both flags are set.</p>
-<p>The built-in <strong>System</strong> agent uses this same installer when you say “Install
-the Skill/MCP server from this URL.” Existing installations are reported and
+<p>For Skills, the built-in <strong>System</strong> agent uses this installer directly. For an
+MCP URL, it first reads bounded README and manifest evidence, chooses a hosted
+endpoint, gateway process, connected device, or companion service, and invokes
+the installer only when a gateway process fits. Otherwise it returns concrete
+deployment and registration steps. Existing installations are reported and
 left unchanged.</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>sy<span class="w"> </span>skill<span class="w"> </span>list
 </span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>sy<span class="w"> </span>skill<span class="w"> </span>get<span class="w"> </span>pdf-tools

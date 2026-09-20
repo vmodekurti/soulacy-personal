@@ -5139,11 +5139,12 @@ Node 18 runtime exits before the handshake, and the gateway sees only a closed
 pipe: <code>initialize: stdio transport closed before response</code>, which says nothing
 about Node.</p>
 <h2 id="installing-things-without-a-shell">Installing things without a shell<a class="headerlink" href="#installing-things-without-a-shell" title="Permanent link">&para;</a></h2>
-<p>You do not need one. <code>package_install</code> takes an HTTPS repository URL, works out
-whether it is a Skill or an MCP server, installs it into the workspace,
-registers it, and verifies the result — and it works with no <code>system</code> grant at
-all, asking for approval each time. Ask Genie to install something, or use the
-<strong>MCP Servers</strong> page.</p>
+<p>You do not need one. Paste the repository into the <strong>MCP Servers</strong> page, or ask
+the System agent to install it. Soulacy inspects the README and manifests first,
+then chooses a hosted endpoint, gateway process, connected device, or companion
+service. <code>package_install</code> is used only for a compatible gateway process; it
+installs into the persistent workspace, registers the server, verifies the
+result, and asks for approval before changing anything.</p>
 <p>What a shell would give you beyond that is mostly the ability to break things
 in ways nobody can undo from the GUI.</p>
 <h2 id="shell-on-a-cloud-platform">Shell on a cloud platform<a class="headerlink" href="#shell-on-a-cloud-platform" title="Permanent link">&para;</a></h2>

@@ -5209,10 +5209,31 @@ standalone SSE stream.</p>
 <blockquote>
 <p>Install the MCP server from https://github.com/owner/repository</p>
 </blockquote>
-<p>Soulacy uses a typed installer tool and presents <strong>Approve / Deny</strong> before it
-changes anything. After approval it detects the package runtime, performs the
-safety scan, installs into <code>mcp-servers/</code>, updates the live config, and verifies
-the registered command. It does not ask the model to construct shell commands.</p>
+<p>The System agent first uses a read-only inspection tool. It reads a bounded
+README excerpt and machine-readable evidence such as <code>server.json</code>, package
+manifests, Dockerfiles, Compose services, container images, hosted endpoints,
+runtime requirements, and persistence signals. The LLM then chooses the best
+placement:</p>
+<ul>
+<li>connect to a provider-hosted MCP endpoint;</li>
+<li>install a self-contained Python or Node process in the Soulacy gateway;</li>
+<li>run a device-bound server on its device (through a connected Soulacy Runner
+  when runner installation is available, or through a secured HTTP endpoint
+  today); or</li>
+<li>deploy a stateful, containerized, or multi-service server as a companion.</li>
+</ul>
+<p>Repository documentation is treated as untrusted evidence and its commands are
+never copied into a shell automatically. When the gateway-process method fits,
+the typed installer presents <strong>Approve / Deny</strong>, performs the safety scan,
+installs into <code>mcp-servers/</code>, updates the live config, and verifies the command.
+For a verified provider-hosted endpoint that needs no credentials, the agent
+can register the endpoint through a typed, approval-gated action. Authenticated
+endpoints receive exact Secrets and MCP-page directions so credentials never
+enter model tool arguments. For companion and device methods, the agent returns
+concrete deployment and <code>sy mcp add</code> steps until that external endpoint exists.
+If it cannot find a viable method, it must identify the files it inspected, the
+blocking requirement, why the plausible placements do not fit, and what would
+make the server installable.</p>
 <p>This managed installer remains available when <code>runtime.allow_system_agents</code> is
 empty. You do not need to enable arbitrary shell access just to install an MCP
 server. The installer is limited to HTTPS Git URLs, preserves an explicit MCP
