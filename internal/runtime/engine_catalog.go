@@ -371,6 +371,9 @@ func (e *Engine) deterministicGuardrail(ctx context.Context, def *agent.Definiti
 	case "package_install":
 		return GuardrailActionConfirm, fmt.Sprintf("Installing a Skill or MCP server from %s requires confirmation.", argString(call.Arguments, "source_url")), nil
 
+	case "mcp_register_remote":
+		return GuardrailActionConfirm, fmt.Sprintf("Registering remote MCP server %s at %s requires confirmation.", argString(call.Arguments, "name"), argString(call.Arguments, "url")), nil
+
 	case "shell_exec":
 		// Arbitrary shell commands are too risky to blindly allow without a strict whitelist.
 		// Always prompt the user for confirmation.

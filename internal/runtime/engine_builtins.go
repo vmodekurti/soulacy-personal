@@ -616,14 +616,18 @@ func (e *Engine) systemToolsFor(def *agent.Definition) []BuiltinTool {
 	allowPrivileged := e.IsSystemAgentAllowed(def) && def.HasCapability("system")
 	out := make([]BuiltinTool, 0, len(all))
 	for _, b := range all {
-		// package_install is deliberately narrower than arbitrary system tools:
-		// it accepts one HTTPS repository URL, executes a fixed argv (never a
-		// model-authored shell command), and always passes through the dynamic
-		// approval guardrail. Keep it available to Soulacy's built-in System
-		// agent even when arbitrary shell access is disabled server-wide. This
-		// gives operators a safe install path without requiring them to enable
-		// shell_exec, write_file, or other unrestricted host capabilities.
-		managedInstall := b.Name == "package_install" && def != nil &&
+		// Repository installation planning is part of the built-in System
+		// agent's managed workflow. Keeping it out of every ordinary agent's
+		// schema avoids spending context on a capability they should not invoke.
+		if (b.Name == "mcp_install_inspect" || b.Name == "mcp_register_remote") && (def == nil || def.ID != SystemAgentID) {
+			continue
+		}
+		// The managed installer and remote MCP registrar are narrower than
+		// arbitrary system tools: each validates structured inputs, executes a
+		// fixed argv, and passes through the approval guardrail. Keep them
+		// available to Soulacy's built-in System agent when arbitrary shell access
+		// is disabled server-wide.
+		managedInstall := (b.Name == "package_install" || b.Name == "mcp_register_remote") && def != nil &&
 			def.ID == SystemAgentID && def.HasCapability("system")
 		if isPrivilegedSystemTool(b.Name) && !allowPrivileged && !managedInstall {
 			continue

@@ -73,11 +73,12 @@ type Lookup func(id string) *agent.Definition
 // builtin that can spawn processes / write to disk / install packages
 // belongs here.
 var privilegedBuiltins = map[string]bool{
-	"shell_exec":      true,
-	"run_script":      true,
-	"install_library": true,
-	"package_install": true,
-	"write_file":      true,
+	"shell_exec":          true,
+	"run_script":          true,
+	"install_library":     true,
+	"mcp_register_remote": true,
+	"package_install":     true,
+	"write_file":          true,
 }
 
 // activeBuiltins are read/inspect-class builtins that escalate ReadOnly

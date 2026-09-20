@@ -1091,15 +1091,14 @@ func (e *Engine) Builtins() []BuiltinTool {
 	// Builder can display them — they are available to every http-channel
 	// agent regardless of capability (SEC-3).
 	out = append(out, e.safeSystemTools()...)
-	// The constrained URL package installer is always advertised for the
-	// built-in System agent. Unlike arbitrary system tools, it remains usable
-	// when allow_system_agents is empty because it has a fixed command shape
-	// and obtains explicit approval for every installation.
+	// Managed package installation and remote MCP registration are always
+	// advertised for the built-in System agent. Unlike arbitrary system tools,
+	// they remain usable when allow_system_agents is empty because they have
+	// fixed command shapes and obtain explicit approval for every mutation.
 	if len(e.allowSystemAgents) == 0 {
 		for _, b := range e.buildSystemTools() {
-			if b.Name == "package_install" {
+			if b.Name == "package_install" || b.Name == "mcp_register_remote" {
 				out = append(out, b)
-				break
 			}
 		}
 	}

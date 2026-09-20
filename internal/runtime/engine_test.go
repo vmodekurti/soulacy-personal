@@ -513,6 +513,9 @@ func TestSystemAgentGetsManagedPackageInstallerWithoutArbitrarySystemTools(t *te
 	if !names["package_install"] {
 		t.Fatalf("built-in System agent should receive package_install; schemas=%v", sortedSchemaNames(names))
 	}
+	if !names["mcp_install_inspect"] || !names["mcp_register_remote"] {
+		t.Fatalf("built-in System agent should receive managed MCP planning tools; schemas=%v", sortedSchemaNames(names))
+	}
 	for _, forbidden := range []string{"shell_exec", "run_script", "write_file", "download_file", "install_library"} {
 		if names[forbidden] {
 			t.Fatalf("%s must remain disabled when allow_system_agents is empty", forbidden)
@@ -524,8 +527,12 @@ func TestSystemAgentGetsManagedPackageInstallerWithoutArbitrarySystemTools(t *te
 	if customNames["package_install"] {
 		t.Fatal("managed installer exception must be limited to the built-in System agent")
 	}
-	if toolSchemaNameSet(e.allToolSchemas(builtinSystemAgent(), "telegram"))["package_install"] {
-		t.Fatal("managed installer must remain unavailable outside the local HTTP channel")
+	if customNames["mcp_register_remote"] || customNames["mcp_install_inspect"] {
+		t.Fatal("managed MCP planning tools must be limited to the built-in System agent")
+	}
+	telegramNames := toolSchemaNameSet(e.allToolSchemas(builtinSystemAgent(), "telegram"))
+	if telegramNames["package_install"] || telegramNames["mcp_register_remote"] || telegramNames["mcp_install_inspect"] {
+		t.Fatal("managed MCP installation tools must remain unavailable outside the local HTTP channel")
 	}
 }
 

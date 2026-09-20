@@ -52,10 +52,31 @@ In Chat, select the built-in **System** agent and ask:
 
 > Install the MCP server from https://github.com/owner/repository
 
-Soulacy uses a typed installer tool and presents **Approve / Deny** before it
-changes anything. After approval it detects the package runtime, performs the
-safety scan, installs into `mcp-servers/`, updates the live config, and verifies
-the registered command. It does not ask the model to construct shell commands.
+The System agent first uses a read-only inspection tool. It reads a bounded
+README excerpt and machine-readable evidence such as `server.json`, package
+manifests, Dockerfiles, Compose services, container images, hosted endpoints,
+runtime requirements, and persistence signals. The LLM then chooses the best
+placement:
+
+- connect to a provider-hosted MCP endpoint;
+- install a self-contained Python or Node process in the Soulacy gateway;
+- run a device-bound server on its device (through a connected Soulacy Runner
+  when runner installation is available, or through a secured HTTP endpoint
+  today); or
+- deploy a stateful, containerized, or multi-service server as a companion.
+
+Repository documentation is treated as untrusted evidence and its commands are
+never copied into a shell automatically. When the gateway-process method fits,
+the typed installer presents **Approve / Deny**, performs the safety scan,
+installs into `mcp-servers/`, updates the live config, and verifies the command.
+For a verified provider-hosted endpoint that needs no credentials, the agent
+can register the endpoint through a typed, approval-gated action. Authenticated
+endpoints receive exact Secrets and MCP-page directions so credentials never
+enter model tool arguments. For companion and device methods, the agent returns
+concrete deployment and `sy mcp add` steps until that external endpoint exists.
+If it cannot find a viable method, it must identify the files it inspected, the
+blocking requirement, why the plausible placements do not fit, and what would
+make the server installable.
 
 This managed installer remains available when `runtime.allow_system_agents` is
 empty. You do not need to enable arbitrary shell access just to install an MCP
