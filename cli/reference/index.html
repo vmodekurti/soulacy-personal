@@ -4374,6 +4374,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#mcp-servers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP servers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#skills-registries" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5156,6 +5167,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#mcp-servers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP servers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#skills-registries" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5522,16 +5544,32 @@ pass/fail/skip counts plus latency and token summaries when available.</p>
 </span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>sy<span class="w"> </span>channel<span class="w"> </span>whatsapp-web<span class="w"> </span>pair<span class="w"> </span>--agent<span class="w"> </span>assistant<span class="w"> </span>--trigger<span class="w"> </span><span class="s1">'!ask'</span><span class="w"> </span>--allow-groups
 </span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>sy<span class="w"> </span>channel<span class="w"> </span>whatsapp-web<span class="w"> </span>status<span class="w">                            </span><span class="c1"># connection state + QR payload</span>
 </span></code></pre></div>
+<h2 id="mcp-servers">MCP servers<a class="headerlink" href="#mcp-servers" title="Permanent link">&para;</a></h2>
+<p>Register an HTTP MCP server on a remote Soulacy deployment from any computer
+that has <code>sy</code> installed:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>sy<span class="w"> </span>--gateway<span class="w"> </span>https://beta.soulacy.io<span class="w"> </span>--api-key<span class="w"> </span><span class="s2">"</span><span class="nv">$SOULACY_API_KEY</span><span class="s2">"</span><span class="w"> </span>mcp<span class="w"> </span>add<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span>--name<span class="w"> </span>company-crm<span class="w"> </span>--transport<span class="w"> </span>http<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span>--url<span class="w"> </span>https://mcp.example.com/mcp<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">  </span>--header<span class="w"> </span><span class="s2">"Authorization=Bearer </span><span class="nv">$MCP_TOKEN</span><span class="s2">"</span>
+</span></code></pre></div>
+<p>The command calls the remote gateway API and does not edit local configuration
+or require shell access on the deployment. Local stdio registrations are also
+supported by Personal deployments when the target host has the required
+runtime; managed editions can restrict them by policy.</p>
+<p>Soulacy itself is available to remote MCP clients over Streamable HTTP at
+<code>&lt;gateway-url&gt;/mcp</code>, authenticated with <code>Authorization: Bearer
+&lt;SOULACY_API_KEY&gt;</code>. Use <code>sy --gateway &lt;url&gt; mcp serve</code> only as a local stdio
+bridge for clients that cannot connect to HTTP MCP servers.</p>
 <h2 id="skills-registries">Skills &amp; registries<a class="headerlink" href="#skills-registries" title="Permanent link">&para;</a></h2>
 <p>For a Git URL, the unified installer detects whether the repository contains a
 Skill or MCP server, shows the safety/approval step, installs it persistently,
 and registers MCP servers automatically:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>sy<span class="w"> </span>package<span class="w"> </span>install<span class="w"> </span>https://github.com/owner/repository<span class="w"> </span>--allow-unverified
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
-</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="c1"># Delegate cloning, scanning, building, registration, and activation to a remote gateway.</span>
-</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>sy<span class="w"> </span>--gateway<span class="w"> </span>https://soul.example.com<span class="w"> </span>package<span class="w"> </span>install<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">  </span>https://github.com/owner/repository<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">  </span>--allow-unverified<span class="w"> </span>--allow-host-build
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>sy<span class="w"> </span>package<span class="w"> </span>install<span class="w"> </span>https://github.com/owner/repository<span class="w"> </span>--allow-unverified
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="c1"># Delegate cloning, scanning, building, registration, and activation to a remote gateway.</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>sy<span class="w"> </span>--gateway<span class="w"> </span>https://soul.example.com<span class="w"> </span>package<span class="w"> </span>install<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">  </span>https://github.com/owner/repository<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">  </span>--allow-unverified<span class="w"> </span>--allow-host-build
 </span></code></pre></div>
 <p>Remote package installation creates an asynchronous gateway job and reports
 its progress until completion. <code>--allow-unverified</code> records approval of the raw
@@ -5541,12 +5579,12 @@ restrict host builds to their approved catalog even when both flags are set.</p>
 <p>The built-in <strong>System</strong> agent uses this same installer when you say “Install
 the Skill/MCP server from this URL.” Existing installations are reported and
 left unchanged.</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>sy<span class="w"> </span>skill<span class="w"> </span>list
-</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>sy<span class="w"> </span>skill<span class="w"> </span>get<span class="w"> </span>pdf-tools
-</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>sy<span class="w"> </span>skill<span class="w"> </span>install<span class="w"> </span>./my-skill<span class="w">                      </span><span class="c1"># local directory</span>
-</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>sy<span class="w"> </span>skill<span class="w"> </span>install<span class="w"> </span>self-improving-agent<span class="w">            </span><span class="c1"># registry slug</span>
-</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>sy<span class="w"> </span>skill<span class="w"> </span>install<span class="w"> </span>github.com/user/my-skill<span class="w">        </span><span class="c1"># git source</span>
-</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>sy<span class="w"> </span>skill<span class="w"> </span>install<span class="w"> </span>some-skill<span class="w"> </span>--yes<span class="w">                </span><span class="c1"># skip consent prompt</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>sy<span class="w"> </span>skill<span class="w"> </span>list
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>sy<span class="w"> </span>skill<span class="w"> </span>get<span class="w"> </span>pdf-tools
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>sy<span class="w"> </span>skill<span class="w"> </span>install<span class="w"> </span>./my-skill<span class="w">                      </span><span class="c1"># local directory</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>sy<span class="w"> </span>skill<span class="w"> </span>install<span class="w"> </span>self-improving-agent<span class="w">            </span><span class="c1"># registry slug</span>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>sy<span class="w"> </span>skill<span class="w"> </span>install<span class="w"> </span>github.com/user/my-skill<span class="w">        </span><span class="c1"># git source</span>
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>sy<span class="w"> </span>skill<span class="w"> </span>install<span class="w"> </span>some-skill<span class="w"> </span>--yes<span class="w">                </span><span class="c1"># skip consent prompt</span>
 </span></code></pre></div>
 <p>Local installs resolve through the <code>registries:</code> config block (falling back to
 a bare git provider), run the safety introspection pipeline (static scan +
@@ -5560,25 +5598,25 @@ or installed on the client by mistake.</p>
 verdict always requires an interactive yes.</p>
 </div>
 <p>Manage skill sources:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>sy<span class="w"> </span>registry<span class="w"> </span>list<span class="w">                                  </span><span class="c1"># configured sources</span>
-</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>sy<span class="w"> </span>registry<span class="w"> </span>probe<span class="w"> </span>https://www.skills.sh/<span class="w">          </span><span class="c1"># review what a URL is</span>
-</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>sy<span class="w"> </span>registry<span class="w"> </span>add<span class="w"> </span>https://www.skills.sh/<span class="w">            </span><span class="c1"># probe + consent + save</span>
-</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>sy<span class="w"> </span>registry<span class="w"> </span>add<span class="w"> </span>https://reg.example.com<span class="w"> </span>--id<span class="w"> </span>main<span class="w"> </span>--priority<span class="w"> </span><span class="m">10</span><span class="w"> </span>-y
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>sy<span class="w"> </span>registry<span class="w"> </span>list<span class="w">                                  </span><span class="c1"># configured sources</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>sy<span class="w"> </span>registry<span class="w"> </span>probe<span class="w"> </span>https://www.skills.sh/<span class="w">          </span><span class="c1"># review what a URL is</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>sy<span class="w"> </span>registry<span class="w"> </span>add<span class="w"> </span>https://www.skills.sh/<span class="w">            </span><span class="c1"># probe + consent + save</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>sy<span class="w"> </span>registry<span class="w"> </span>add<span class="w"> </span>https://reg.example.com<span class="w"> </span>--id<span class="w"> </span>main<span class="w"> </span>--priority<span class="w"> </span><span class="m">10</span><span class="w"> </span>-y
 </span></code></pre></div>
 <p><code>probe</code> runs client-side (no gateway needed). <code>add</code> saves through the gateway
 API for a remote target. A remote API or network failure is returned to the
 caller and never falls back to editing the client's <code>config.yaml</code>.</p>
 <h2 id="mcp-registration">MCP registration<a class="headerlink" href="#mcp-registration" title="Permanent link">&para;</a></h2>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># Remote HTTP/SSE-compatible endpoint. Repeat --header as needed.</span>
-</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>sy<span class="w"> </span>--context<span class="w"> </span>personal<span class="w"> </span>mcp<span class="w"> </span>add<span class="w"> </span>--name<span class="w"> </span>company-crm<span class="w"> </span>--transport<span class="w"> </span>http<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">  </span>--url<span class="w"> </span>https://mcp.example.com/mcp<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="w">  </span>--header<span class="w"> </span><span class="s1">'Authorization=Bearer ${CRM_TOKEN}'</span>
-</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>
-</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="c1"># Personal edition can register a stdio process on the remote gateway host.</span>
-</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>sy<span class="w"> </span>--context<span class="w"> </span>personal<span class="w"> </span>mcp<span class="w"> </span>add<span class="w"> </span>--name<span class="w"> </span>filesystem<span class="w"> </span>--transport<span class="w"> </span>stdio<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="w">  </span>--command<span class="w"> </span>/srv/soulacy/mcp-servers/filesystem/venv/bin/mcp-server-filesystem<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="w">  </span>--args<span class="w"> </span><span class="s1">'--root,/srv/soulacy/files'</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-11-10"><a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="w">  </span>--env<span class="w"> </span><span class="s1">'LOG_LEVEL=info'</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># Remote HTTP/SSE-compatible endpoint. Repeat --header as needed.</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>sy<span class="w"> </span>--context<span class="w"> </span>personal<span class="w"> </span>mcp<span class="w"> </span>add<span class="w"> </span>--name<span class="w"> </span>company-crm<span class="w"> </span>--transport<span class="w"> </span>http<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">  </span>--url<span class="w"> </span>https://mcp.example.com/mcp<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="w">  </span>--header<span class="w"> </span><span class="s1">'Authorization=Bearer ${CRM_TOKEN}'</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="c1"># Personal edition can register a stdio process on the remote gateway host.</span>
+</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>sy<span class="w"> </span>--context<span class="w"> </span>personal<span class="w"> </span>mcp<span class="w"> </span>add<span class="w"> </span>--name<span class="w"> </span>filesystem<span class="w"> </span>--transport<span class="w"> </span>stdio<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="w">  </span>--command<span class="w"> </span>/srv/soulacy/mcp-servers/filesystem/venv/bin/mcp-server-filesystem<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-12-9"><a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="w">  </span>--args<span class="w"> </span><span class="s1">'--root,/srv/soulacy/files'</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-12-10"><a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="w">  </span>--env<span class="w"> </span><span class="s1">'LOG_LEVEL=info'</span>
 </span></code></pre></div>
 <p>Remote registration uses an idempotent <code>PUT /api/v1/mcp/own/:id</code>; repeating the
 same command updates that server. Arguments and environment variables apply to
@@ -5589,24 +5627,24 @@ Personal stdio registration does not search the host <code>PATH</code>: its exec
 must already exist under that gateway workspace's managed <code>mcp-servers/</code>
 directory. Symlinks are resolved before the path-boundary check.</p>
 <h2 id="memory-schedule-logs">Memory, schedule &amp; logs<a class="headerlink" href="#memory-schedule-logs" title="Permanent link">&para;</a></h2>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>sy<span class="w"> </span>memory<span class="w"> </span>list<span class="w"> </span>--agent<span class="w"> </span>support-bot<span class="w">     </span><span class="c1"># session memory entries</span>
-</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>sy<span class="w"> </span>schedule<span class="w"> </span>list<span class="w">                       </span><span class="c1"># scheduled agent entries</span>
-</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>sy<span class="w"> </span>logs<span class="w"> </span>--follow<span class="w">                       </span><span class="c1"># stream live events</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>sy<span class="w"> </span>memory<span class="w"> </span>list<span class="w"> </span>--agent<span class="w"> </span>support-bot<span class="w">     </span><span class="c1"># session memory entries</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>sy<span class="w"> </span>schedule<span class="w"> </span>list<span class="w">                       </span><span class="c1"># scheduled agent entries</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>sy<span class="w"> </span>logs<span class="w"> </span>--follow<span class="w">                       </span><span class="c1"># stream live events</span>
 </span></code></pre></div>
 <h2 id="workspace">Workspace<a class="headerlink" href="#workspace" title="Permanent link">&para;</a></h2>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>sy<span class="w"> </span>workspace<span class="w"> </span>info<span class="w">                  </span><span class="c1"># resolved layout (soulspace vs legacy) + every path</span>
-</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>sy<span class="w"> </span>workspace<span class="w"> </span>migrate<span class="w"> </span>--dry-run<span class="w">     </span><span class="c1"># print the migration plan, move nothing</span>
-</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>sy<span class="w"> </span>workspace<span class="w"> </span>migrate<span class="w">               </span><span class="c1"># migrate legacy ~/.soulacy → soulspace (confirm; -y to skip)</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>sy<span class="w"> </span>workspace<span class="w"> </span>info<span class="w">                  </span><span class="c1"># resolved layout (soulspace vs legacy) + every path</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>sy<span class="w"> </span>workspace<span class="w"> </span>migrate<span class="w"> </span>--dry-run<span class="w">     </span><span class="c1"># print the migration plan, move nothing</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>sy<span class="w"> </span>workspace<span class="w"> </span>migrate<span class="w">               </span><span class="c1"># migrate legacy ~/.soulacy → soulspace (confirm; -y to skip)</span>
 </span></code></pre></div>
 <p>Stop the gateway before <code>migrate</code> — databases move as files. See
 <a href="../../configuration/workspace/">Workspace Layout</a>.</p>
 <h2 id="gateway-control">Gateway control<a class="headerlink" href="#gateway-control" title="Permanent link">&para;</a></h2>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>sy<span class="w"> </span>server<span class="w"> </span>status<span class="w">     </span><span class="c1"># GET /health against the gateway</span>
-</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>sy<span class="w"> </span>server<span class="w"> </span>start<span class="w">      </span><span class="c1"># convenience hint — run the `soulacy` binary for production</span>
-</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>sy<span class="w"> </span>update<span class="w"> </span>check<span class="w"> </span>--manifest<span class="w"> </span>./release-manifest.json
-</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>sy<span class="w"> </span>update<span class="w"> </span>install<span class="w"> </span>--manifest<span class="w"> </span>./release-manifest.json<span class="w"> </span>--dry-run
-</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>sy<span class="w"> </span>update<span class="w"> </span>install<span class="w"> </span>--manifest<span class="w"> </span>./release-manifest.json<span class="w"> </span>--yes
-</span><span id="__span-14-6"><a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>sy<span class="w"> </span>version<span class="w">           </span><span class="c1"># CLI version + resolved gateway URL</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>sy<span class="w"> </span>server<span class="w"> </span>status<span class="w">     </span><span class="c1"># GET /health against the gateway</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>sy<span class="w"> </span>server<span class="w"> </span>start<span class="w">      </span><span class="c1"># convenience hint — run the `soulacy` binary for production</span>
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>sy<span class="w"> </span>update<span class="w"> </span>check<span class="w"> </span>--manifest<span class="w"> </span>./release-manifest.json
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>sy<span class="w"> </span>update<span class="w"> </span>install<span class="w"> </span>--manifest<span class="w"> </span>./release-manifest.json<span class="w"> </span>--dry-run
+</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>sy<span class="w"> </span>update<span class="w"> </span>install<span class="w"> </span>--manifest<span class="w"> </span>./release-manifest.json<span class="w"> </span>--yes
+</span><span id="__span-15-6"><a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a>sy<span class="w"> </span>version<span class="w">           </span><span class="c1"># CLI version + resolved gateway URL</span>
 </span></code></pre></div>
 <p>When <code>updates.manifest_url</code> is configured in <code>config.yaml</code> or
 <code>SOULACY_UPDATE_MANIFEST</code>, <code>sy update check</code> and <code>sy update install</code> use it by
@@ -5617,13 +5655,13 @@ configured.</p>
 <p>Running <code>soulacy</code> with no subcommand starts the gateway in the
 foreground, loading config from <code>SOULACY_CONFIG_PATH</code> or the
 <a href="../../configuration/workspace/">workspace</a>:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>soulacy<span class="w">                                          </span><span class="c1"># start the gateway</span>
-</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="nv">SOULACY_CONFIG_PATH</span><span class="o">=</span>/etc/soulacy/config.yaml<span class="w"> </span>soulacy
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>soulacy<span class="w">                                          </span><span class="c1"># start the gateway</span>
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="nv">SOULACY_CONFIG_PATH</span><span class="o">=</span>/etc/soulacy/config.yaml<span class="w"> </span>soulacy
 </span></code></pre></div>
 <h3 id="soulacy-build"><code>soulacy build</code><a class="headerlink" href="#soulacy-build" title="Permanent link">&para;</a></h3>
 <p>Build a flavored binary with extra driver modules compiled in
 (see <a href="../../extend/custom-distributions/">Custom Distributions</a>):</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>soulacy<span class="w"> </span>build<span class="w"> </span>--with<span class="w"> </span>github.com/acme/soulacy-matrix@v1.2.0<span class="w"> </span>-o<span class="w"> </span>bin/soulacy-matrix
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>soulacy<span class="w"> </span>build<span class="w"> </span>--with<span class="w"> </span>github.com/acme/soulacy-matrix@v1.2.0<span class="w"> </span>-o<span class="w"> </span>bin/soulacy-matrix
 </span></code></pre></div>
 <table>
 <thead>
@@ -5659,12 +5697,12 @@ foreground, loading config from <code>SOULACY_CONFIG_PATH</code> or the
 <h3 id="soulacy-registry-serve-keygen"><code>soulacy registry serve</code> / <code>keygen</code><a class="headerlink" href="#soulacy-registry-serve-keygen" title="Permanent link">&para;</a></h3>
 <p>Host your own package registry
 (see <a href="../../extend/registries/">Package Registries</a>):</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="c1"># Generate a signing keypair (private key written 0600; public key printed)</span>
-</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>soulacy<span class="w"> </span>registry<span class="w"> </span>keygen<span class="w"> </span>--out<span class="w"> </span>~/.soulacy/registry-signing.key
-</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>
-</span><span id="__span-17-4"><a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="c1"># Serve &lt;slug&gt;-&lt;version&gt;.tar.gz archives, signed</span>
-</span><span id="__span-17-5"><a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>soulacy<span class="w"> </span>registry<span class="w"> </span>serve<span class="w"> </span>--dir<span class="w"> </span>./packages<span class="w"> </span>--addr<span class="w"> </span><span class="m">127</span>.0.0.1:18790<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-17-6"><a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="w">    </span>--signing-key-file<span class="w"> </span>~/.soulacy/registry-signing.key
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="c1"># Generate a signing keypair (private key written 0600; public key printed)</span>
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>soulacy<span class="w"> </span>registry<span class="w"> </span>keygen<span class="w"> </span>--out<span class="w"> </span>~/.soulacy/registry-signing.key
+</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>
+</span><span id="__span-18-4"><a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="c1"># Serve &lt;slug&gt;-&lt;version&gt;.tar.gz archives, signed</span>
+</span><span id="__span-18-5"><a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>soulacy<span class="w"> </span>registry<span class="w"> </span>serve<span class="w"> </span>--dir<span class="w"> </span>./packages<span class="w"> </span>--addr<span class="w"> </span><span class="m">127</span>.0.0.1:18790<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-18-6"><a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="w">    </span>--signing-key-file<span class="w"> </span>~/.soulacy/registry-signing.key
 </span></code></pre></div>
 <p>Consumers put the printed <strong>public</strong> key in their <code>registries:</code> entry as
 <code>signing_key</code> — unsigned or tampered packages are then refused.</p>
