@@ -179,6 +179,28 @@ sy channel whatsapp-web pair --agent assistant --trigger '!ask' --allow-groups
 sy channel whatsapp-web status                            # connection state + QR payload
 ```
 
+## MCP servers
+
+Register an HTTP MCP server on a remote Soulacy deployment from any computer
+that has `sy` installed:
+
+```bash
+sy --gateway https://beta.soulacy.io --api-key "$SOULACY_API_KEY" mcp add \
+  --name company-crm --transport http \
+  --url https://mcp.example.com/mcp \
+  --header "Authorization=Bearer $MCP_TOKEN"
+```
+
+The command calls the remote gateway API and does not edit local configuration
+or require shell access on the deployment. Local stdio registrations are also
+supported by Personal deployments when the target host has the required
+runtime; managed editions can restrict them by policy.
+
+Soulacy itself is available to remote MCP clients over Streamable HTTP at
+`<gateway-url>/mcp`, authenticated with `Authorization: Bearer
+<SOULACY_API_KEY>`. Use `sy --gateway <url> mcp serve` only as a local stdio
+bridge for clients that cannot connect to HTTP MCP servers.
+
 ## Skills & registries
 
 For a Git URL, the unified installer detects whether the repository contains a

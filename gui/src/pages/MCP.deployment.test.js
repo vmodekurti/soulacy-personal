@@ -83,6 +83,15 @@ describe('MCP page: what this deployment cannot do', () => {
     expect(text).toContain('Railway')
   })
 
+  it('shows the shell-free MCP endpoint and remote CLI registration command', async () => {
+    const text = await mountPage()
+    expect(text).toContain('Connect without shell access')
+    expect(text).toContain(`${window.location.origin}/mcp`)
+    expect(text).toContain('Streamable HTTP')
+    expect(text).toContain(`sy --gateway ${window.location.origin}`)
+    expect(text).toContain('mcp add --name <server-name>')
+  })
+
   // The templates live in the new-server dialog, which is where someone is
   // about to choose one — so that is where the warning has to be.
   it('warns, in the dialog, that some templates will not run here', async () => {

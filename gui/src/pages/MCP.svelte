@@ -14,6 +14,18 @@
   let restartNeeded = false
   let restarting = false
 
+  // Soulacy can also be the MCP server. The endpoint is hosted by the gateway,
+  // so managed deployments need no sidecar process or shell session.
+  let gatewayOrigin = ''
+  let remoteEndpoint = '/mcp'
+  let copiedRemote = ''
+
+  $: remoteClientConfig = JSON.stringify({
+    url: remoteEndpoint,
+    headers: { Authorization: 'Bearer <SOULACY_API_KEY>' },
+  }, null, 2)
+  $: remoteAddCommand = `sy --gateway ${gatewayOrigin || '<SOULACY_URL>'} --api-key <SOULACY_API_KEY> mcp add --name <server-name> --transport http --url https://mcp.example.com/mcp --header 'Authorization=Bearer <MCP_TOKEN>'`
+
   // Edit / create modal state. `editing` is null when the modal is closed.
   // When `editing.id` is set AND matches a row in `servers`, we're editing;
   // otherwise we're creating.
@@ -64,9 +76,21 @@
   }
 
   onMount(() => {
+    gatewayOrigin = window.location.origin
+    remoteEndpoint = `${gatewayOrigin}/mcp`
     load()
     loadDeployment()
   })
+
+  async function copyRemote(value, label) {
+    try {
+      await navigator.clipboard.writeText(value)
+      copiedRemote = label
+      setTimeout(() => { if (copiedRemote === label) copiedRemote = '' }, 1800)
+    } catch {
+      copiedRemote = ''
+    }
+  }
 
   function toggle(id) { expanded = { ...expanded, [id]: !expanded[id] } }
 
@@ -326,6 +350,47 @@
     </div>
 
   <DeploymentPanel report={deployment} />
+
+  <section class="remote-card" aria-labelledby="remote-mcp-title">
+    <div class="remote-heading">
+      <div>
+        <span class="eyebrow">Soulacy as an MCP server</span>
+        <h2 id="remote-mcp-title">Connect without shell access</h2>
+        <p>Use this Streamable HTTP endpoint from an MCP client. The gateway runs it directly, including on Railway and other managed platforms.</p>
+      </div>
+      <span class="remote-badge">● Available</span>
+    </div>
+
+    <div class="remote-field">
+      <span>Endpoint</span>
+      <div class="copy-row">
+        <code>{remoteEndpoint}</code>
+        <button class="btn-secondary tiny" on:click={() => copyRemote(remoteEndpoint, 'endpoint')}>
+          {copiedRemote === 'endpoint' ? 'Copied' : 'Copy URL'}
+        </button>
+      </div>
+    </div>
+
+    <div class="remote-grid">
+      <div>
+        <h3>Connect an MCP client</h3>
+        <p>Choose Streamable HTTP and send your Soulacy key as a Bearer token.</p>
+        <pre>{remoteClientConfig}</pre>
+        <button class="btn-secondary tiny" on:click={() => copyRemote(remoteClientConfig, 'config')}>
+          {copiedRemote === 'config' ? 'Copied' : 'Copy config'}
+        </button>
+      </div>
+      <div>
+        <h3>Add a server to this deployment</h3>
+        <p>Run this from any computer with <code>sy</code>. The server is registered on the remote gateway; no host shell is used.</p>
+        <pre>{remoteAddCommand}</pre>
+        <button class="btn-secondary tiny" on:click={() => copyRemote(remoteAddCommand, 'command')}>
+          {copiedRemote === 'command' ? 'Copied' : 'Copy CLI command'}
+        </button>
+      </div>
+    </div>
+    <p class="remote-footnote">Clients that only support local stdio can still use <code>sy --gateway {gatewayOrigin || '<SOULACY_URL>'} mcp serve</code> as a compatibility bridge.</p>
+  </section>
 
   {#if restartNeeded}
     <div class="banner warn">
@@ -703,6 +768,32 @@
   .page-header { display: flex; align-items: center; justify-content: space-between; }
   .page-header h1 { font-size: 1.2rem; font-weight: 600; }
   .header-actions { display: flex; gap: .5rem; }
+
+  .remote-card {
+    background: linear-gradient(135deg, rgba(82,72,180,.14), rgba(15,18,39,.92));
+    border: 1px solid rgba(139,133,255,.35); border-radius: 12px;
+    padding: 1.15rem 1.25rem; display: flex; flex-direction: column; gap: 1rem;
+  }
+  .remote-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+  .remote-heading h2 { margin: .15rem 0 .35rem; font-size: 1rem; color: #eef0ff; }
+  .remote-heading p, .remote-grid p, .remote-footnote { margin: 0; color: #8f96b8; font-size: .78rem; line-height: 1.55; }
+  .eyebrow { color: #8b85ff; font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+  .remote-badge { color: #60f0a0; font-size: .72rem; font-weight: 600; white-space: nowrap; }
+  .remote-field { display: flex; flex-direction: column; gap: .35rem; }
+  .remote-field > span { color: #686f94; font-size: .67rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+  .copy-row { display: flex; align-items: center; gap: .5rem; }
+  .copy-row code { flex: 1; min-width: 0; overflow-x: auto; background: #0b0e1d; border: 1px solid #252a45; border-radius: 7px; padding: .55rem .7rem; color: #c8c5ff; font-size: .78rem; }
+  .remote-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; }
+  .remote-grid > div { min-width: 0; background: rgba(8,10,24,.5); border: 1px solid #252a45; border-radius: 9px; padding: .85rem; display: flex; flex-direction: column; align-items: flex-start; gap: .55rem; }
+  .remote-grid h3 { margin: 0; color: #dfe2f5; font-size: .82rem; }
+  .remote-grid pre { box-sizing: border-box; width: 100%; margin: 0; padding: .65rem; border-radius: 7px; background: #090b18; color: #b9bde0; font: .7rem/1.5 monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .remote-grid p code, .remote-footnote code { color: #aaa5ff; }
+
+  @media (max-width: 820px) {
+    .remote-grid { grid-template-columns: 1fr; }
+    .remote-heading { flex-direction: column; }
+    .copy-row { align-items: stretch; flex-direction: column; }
+  }
 
   .template-chip.blocked { opacity: .65; border-style: dashed; }
   .warn-dot { margin-left: .3rem; color: orange; font-weight: 700; }
