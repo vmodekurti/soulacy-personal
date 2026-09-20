@@ -27,9 +27,21 @@ type pairBaseProbe func(ctx context.Context, base string) bool
 // touches the network.
 var pairProbe pairBaseProbe = httpPairBaseProbe
 
+// pairProbeBudget bounds one candidate probe. A wrong address must fail fast
+// — the resolver tries several in a row while the Mobile page waits — so the
+// handler caps each probe at min(runtime.timeouts.http, this).
+const pairProbeBudget = 1500 * time.Millisecond
+
+// boundedProbe wraps probe so every call gets its own deadline of d.
+func boundedProbe(probe pairBaseProbe, d time.Duration) pairBaseProbe {
+	return func(ctx context.Context, base string) bool {
+		ctx, cancel := context.WithTimeout(ctx, d)
+		defer cancel()
+		return probe(ctx, base)
+	}
+}
+
 func httpPairBaseProbe(ctx context.Context, base string) bool {
-	ctx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
-	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+"/healthz", nil)
 	if err != nil {
 		return false
