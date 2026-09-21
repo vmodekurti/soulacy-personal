@@ -414,14 +414,20 @@ type ServerConfig struct {
 	// PublicURL is the address OTHER devices use to reach this gateway, e.g.
 	// https://soulacy.example.com or http://my-mac.tailnet.ts.net:18789. It is
 	// embedded in pairing QR codes. Empty = detect a reachable address.
-	PublicURL    string          `mapstructure:"public_url"`
-	Port         int             `mapstructure:"port"`
-	GUIEnabled   bool            `mapstructure:"gui_enabled"`
-	GUIStaticDir string          `mapstructure:"gui_static_dir"`
-	APIKey       string          `mapstructure:"api_key"` // gateway auth key; empty = no auth
-	TLSCert      string          `mapstructure:"tls_cert"`
-	TLSKey       string          `mapstructure:"tls_key"`
-	Discovery    DiscoveryConfig `mapstructure:"discovery"`
+	PublicURL    string `mapstructure:"public_url"`
+	Port         int    `mapstructure:"port"`
+	GUIEnabled   bool   `mapstructure:"gui_enabled"`
+	GUIStaticDir string `mapstructure:"gui_static_dir"`
+	APIKey       string `mapstructure:"api_key"` // gateway auth key; empty = no auth
+	TLSCert      string `mapstructure:"tls_cert"`
+	TLSKey       string `mapstructure:"tls_key"`
+	// TLSAuto (default true) makes the gateway mint its own certificate when
+	// tls_cert/tls_key are not set and answer HTTPS on the same port as HTTP.
+	// The pairing QR carries the key's fingerprint, which the phone pins — real
+	// encryption to every phone with no user steps. Set false to serve plain
+	// HTTP only (e.g. behind a TLS-terminating proxy that dislikes it).
+	TLSAuto   bool            `mapstructure:"tls_auto"`
+	Discovery DiscoveryConfig `mapstructure:"discovery"`
 	// PublishedFiles explicitly shares dedicated output folders, read-only.
 	// Never point these at the soulspace, home, or credential/config directories.
 	PublishedFiles []PublishedFilesConfig `mapstructure:"published_files"`
@@ -1080,6 +1086,7 @@ func Load(cfgPath string) (*Config, string, error) {
 	v.SetDefault("server.host", "127.0.0.1")
 	v.SetDefault("server.port", 18789)
 	v.SetDefault("server.public_url", "")
+	v.SetDefault("server.tls_auto", true)
 	v.SetDefault("server.gui_enabled", true)
 	v.SetDefault("server.discovery.enabled", false)
 	v.SetDefault("server.discovery.interface", "")

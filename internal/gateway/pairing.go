@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"strings"
 	"sync"
 	"time"
@@ -85,11 +86,16 @@ func (s *Server) handleCreatePairingToken(c *fiber.Ctx) error {
 	if err != nil {
 		return s.errMsg(c, fiber.StatusBadRequest, err.Error())
 	}
+	// Bounded like the reachability probes: a wrong guess must fail fast.
+	pctx, cancel := context.WithTimeout(c.Context(), min(s.httpRequestTimeout(), pairProbeBudget))
+	defer cancel()
+	base, pairURL, fp := s.pinnedPairURL(pctx, pb.URL, tok.Code, body.BaseURL)
 	return c.JSON(fiber.Map{
 		"code":         tok.Code,
 		"expires_at":   tok.ExpiresAt,
-		"pair_url":     pb.URL + "/mobile?pair=" + tok.Code,
-		"base_url":     pb.URL,
+		"pair_url":     pairURL,
+		"base_url":     base,
+		"fingerprint":  fp,
 		"reachable":    pb.Reachable,
 		"hint":         pb.Hint,
 		"candidates":   pb.Candidates,
@@ -97,6 +103,39 @@ func (s *Server) handleCreatePairingToken(c *fiber.Ctx) error {
 		"display_name": tok.DisplayName,
 		"role":         tok.Role,
 	})
+}
+
+// pinnedPairURL turns a reachable base into the address the phone should
+// actually use. When this gateway terminates TLS with its own certificate
+// and the base is a direct address (auto-detected, or typed on the Mobile
+// page for the phone), the QR carries https:// plus the key fingerprint
+// (`fp`), so the phone connects encrypted from the very first request and
+// pins the key. Two guards keep that claim honest (#171):
+//   - an https:// base is left alone — something else already terminates TLS
+//     there (a proxy, tailscale serve --https) with its own certificate, and
+//     the phone's system trust is the right check for it;
+//   - an http:// base is upgraded only after actually connecting to
+//     https://<base>/ping with the pin. tailscale serve --http owns the
+//     tailnet address and does not speak TLS; upgrading blindly would point
+//     the phone at a port that refuses the handshake.
+//
+// A base from server.public_url is never rewritten: the operator chose it.
+// Returns base, pair URL, fingerprint ("" = none).
+func (s *Server) pinnedPairURL(ctx context.Context, base, code, typedOverride string) (string, string, string) {
+	pairURL := base + "/mobile?pair=" + code
+	fp := s.tlsFingerprint
+	if fp == "" || !strings.HasPrefix(base, "http://") {
+		return base, pairURL, ""
+	}
+	direct := strings.TrimSpace(s.cfg.Server.PublicURL) == "" || strings.TrimSpace(typedOverride) != ""
+	if !direct {
+		return base, pairURL, ""
+	}
+	if !pairTLSProbe(ctx, base, fp) {
+		return base, pairURL, ""
+	}
+	base = upgradeToHTTPS(base)
+	return base, base + "/mobile?pair=" + code + "&fp=" + fp, fp
 }
 
 func selfPairingRole(callerRole string) string {
@@ -237,6 +276,7 @@ func (s *Server) handleRedeemPairingToken(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
 			"paired":       true,
 			"token":        plaintext,
+			"fingerprint":  s.tlsFingerprint,
 			"key_id":       key.ID,
 			"scopes":       key.Scopes,
 			"subject":      subject,
