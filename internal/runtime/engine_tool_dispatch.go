@@ -564,7 +564,7 @@ func (e *Engine) runPythonToolOnce(tctx, auditCtx context.Context, def *agent.De
 // channel is the inbound message's Channel field ("http", "telegram", etc.).
 // System tools (shell_exec, run_script, …) are only offered when ALL three
 // conditions hold:
-//  1. runtime.allow_system_tools = true  (server-level permit)
+//  1. agent ID in runtime.allow_system_agents  (server-level permit)
 //  2. def.SystemTools = true             (per-agent opt-in)
 //  3. channel == "http"                  (local web GUI only — never on bot channels)
 func (e *Engine) allToolSchemas(def *agent.Definition, channel string) []llm.ToolSchema {
@@ -680,7 +680,7 @@ func (e *Engine) allToolSchemasForContext(ctx context.Context, def *agent.Defini
 	//     fetch_url, http_request, env_get, sys_info — are always offered.
 	//   - SYSTEM (privileged) built-ins — shell_exec, run_script,
 	//     install_library, write_file, download_file — are offered ONLY when
-	//     the server permits (runtime.allow_system_tools) AND the agent
+	//     the server permits (agent ID in runtime.allow_system_agents) AND the agent
 	//     declares the "system" capability (capabilities: [system], or the
 	//     legacy system_tools: true alias).
 	//

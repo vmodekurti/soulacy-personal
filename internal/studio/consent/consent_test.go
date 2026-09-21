@@ -31,7 +31,7 @@ func TestAuthorize_FailClosed(t *testing.T) {
 
 	// Ceiling off -> refused even with consent.
 	if err := Authorize(pyNode(sysCode, good), false); err == nil {
-		t.Fatal("system code must be refused when allow_system_tools is off")
+		t.Fatal("system code must be refused when the agent is not in allow_system_agents")
 	}
 
 	// Stale hash (code edited after consent) -> refused.

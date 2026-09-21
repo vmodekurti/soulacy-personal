@@ -56,7 +56,7 @@ type Grant struct {
 //     match the current code, and its Capabilities to cover everything the code
 //     needs. Missing/stale/insufficient → refused.
 //   - system-class code additionally requires the operator ceiling
-//     (allow_system_tools) to be on.
+//     (the agent named in runtime.allow_system_agents) to be on.
 func Authorize(node sdkr.FlowNode, allowSystem bool) error {
 	cls := codeclass.Classify(node.Code)
 	if !cls.Beyond() {
@@ -75,7 +75,7 @@ func Authorize(node sdkr.FlowNode, allowSystem bool) error {
 		}
 	}
 	if contains(cls.Requires, codeclass.CapSystem) && !allowSystem {
-		return fmt.Errorf("consent: node %q needs host execution but the server ceiling is off (runtime.allow_system_tools=false)", node.ID)
+		return fmt.Errorf("consent: node %q needs host execution but the server ceiling is off (the agent is not listed in runtime.allow_system_agents)", node.ID)
 	}
 	return nil
 }

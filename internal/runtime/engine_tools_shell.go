@@ -3,7 +3,7 @@
 // ARCH-2: mechanically extracted from engine.go (no behaviour change). These
 // are the privileged "SYSTEM" tools (see privilegedSystemTools in engine.go):
 // shell_exec, run_script, install_library. Offered only via the SEC-3 double
-// opt-in (runtime.allow_system_tools + capabilities: [system]).
+// opt-in (agent ID in runtime.allow_system_agents + capabilities: [system]).
 package runtime
 
 import (

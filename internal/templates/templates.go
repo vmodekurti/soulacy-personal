@@ -292,7 +292,7 @@ func deriveSetup(def *agent.Definition) ([]SetupItem, []RequiredSecret, string, 
 	}
 
 	if def.SystemTools || def.AllowShell || def.HasCapability("system") {
-		setup = append(setup, SetupItem{Key: "system", Label: "System access", Status: "needs_setup", Detail: "Requires runtime.allow_system_tools and explicit operator review."})
+		setup = append(setup, SetupItem{Key: "system", Label: "System access", Status: "needs_setup", Detail: "Requires the agent ID in runtime.allow_system_agents and explicit operator review."})
 	}
 
 	// web_search needs a search provider credential regardless of provider — the
