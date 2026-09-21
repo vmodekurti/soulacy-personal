@@ -266,6 +266,43 @@ func pairTLSConfig(fp string, systemToo bool) *tls.Config {
 	}
 }
 
+// tailscaleDNS is MagicDNS: Tailscale's resolver, reachable from any node
+// on the tailnet. Asking it directly sidesteps the fact that macOS often does
+// not route *.ts.net lookups to it for the machine's own name.
+const tailscaleDNS = "100.100.100.100:53"
+
+func tailscaleResolver() *net.Resolver {
+	return &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, "udp", tailscaleDNS)
+	}}
+}
+
+// tailnetNameLookup answers "what is this machine's MagicDNS name?" — the
+// PTR record of our Tailscale IPv4 at MagicDNS — or "" when we are not on a
+// tailnet or it does not answer. Injectable so the suite never touches the
+// network.
+var tailnetNameLookup = lookupTailnetName
+
+func lookupTailnetName(ctx context.Context) string {
+	for _, ip := range localAddresses() {
+		if !isTailscaleIP(ip) {
+			continue
+		}
+		names, err := tailscaleResolver().LookupAddr(ctx, ip.String())
+		if err != nil {
+			return ""
+		}
+		for _, n := range names {
+			n = strings.TrimSuffix(strings.ToLower(n), ".")
+			if strings.HasSuffix(n, ".ts.net") {
+				return n
+			}
+		}
+	}
+	return ""
+}
+
 // pairDialContext dials normally, with one exception: a host that does not
 // resolve here but is this machine's own tailnet (MagicDNS) name is dialed
 // at our own Tailscale address instead. macOS often cannot resolve its own
@@ -282,12 +319,19 @@ func pairDialContext(ctx context.Context, network, addr string) (net.Conn, error
 		return nil, err
 	}
 	host, port, splitErr := net.SplitHostPort(addr)
-	if splitErr != nil || !isOwnTailnetName(host) {
+	if splitErr != nil || !strings.HasSuffix(strings.ToLower(host), ".ts.net") {
 		return nil, err
 	}
-	for _, ip := range localAddresses() {
-		if isTailscaleIP(ip) {
-			return d.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+	// Ask MagicDNS itself; it knows every tailnet name, including ours.
+	if ips, lerr := tailscaleResolver().LookupIPAddr(ctx, host); lerr == nil && len(ips) > 0 {
+		return d.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+	}
+	// MagicDNS unreachable: at least our own name maps to our own address.
+	if isOwnTailnetName(host) {
+		for _, ip := range localAddresses() {
+			if isTailscaleIP(ip) {
+				return d.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+			}
 		}
 	}
 	return nil, err

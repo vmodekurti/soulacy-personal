@@ -72,15 +72,18 @@ const loopbackHint = "This address only works on this computer. Enter the addres
 // Precedence: an explicit override typed on the Mobile page, then
 // server.public_url, then the first candidate that actually answers /healthz —
 // the request's own origin when it is not loopback (the name the operator is
-// already using), then Tailscale (100.64/10), then private LAN addresses. When nothing answers, the request origin is returned with
+// already using), then this machine's Tailscale name (https://<name>, then
+// <name>:<port>), then Tailscale (100.64/10) and private LAN addresses. When
+// nothing answers, the request origin is returned with
 // Reachable=false and a hint so the page can warn instead of minting a code
 // the phone cannot use.
-func resolvePairBase(ctx context.Context, publicURL, requestBase string, port int, override string, probe pairBaseProbe) (pairBase, error) {
+func resolvePairBase(ctx context.Context, publicURL, requestBase string, port int, override string, probe pairBaseProbe, tailnetName string) (pairBase, error) {
 	if b := strings.TrimSpace(override); b != "" {
-		// "my-mac.tailnet.ts.net:18789" is what people type; treat it as http —
-		// the pairing step upgrades it to https itself when the address answers
-		// this gateway's TLS.
-		if !strings.Contains(b, "://") {
+		// "my-mac.tailnet.ts.net" is what people type. Without a scheme, try
+		// https first (port 443 is what remote.sh forwards, and the probe
+		// accepts this gateway's own certificate), then http.
+		schemeless := !strings.Contains(b, "://")
+		if schemeless {
 			b = "http://" + b
 		}
 		u, err := url.Parse(b)
@@ -88,6 +91,10 @@ func resolvePairBase(ctx context.Context, publicURL, requestBase string, port in
 			return pairBase{}, fmt.Errorf("base_url must be an http(s) URL with a host")
 		}
 		base := u.Scheme + "://" + u.Host
+		if schemeless && !isLoopbackPairHost(u.Hostname()) && probe(ctx, "https://"+u.Host) {
+			base = "https://" + u.Host
+			return pairBase{URL: base, Reachable: true}, nil
+		}
 		pb := pairBase{URL: base, Reachable: probe(ctx, base)}
 		if isLoopbackPairHost(u.Hostname()) {
 			pb.Reachable, pb.Hint = false, loopbackHint
@@ -114,6 +121,12 @@ func resolvePairBase(ctx context.Context, publicURL, requestBase string, port in
 	// already known to work for them. Then Tailscale, then LAN.
 	if reqHost != "" && !isLoopbackPairHost(reqHost) {
 		candidates = append(candidates, reqBase)
+	}
+	// This machine's Tailscale name, before any IP: https://<name> when the
+	// tailnet forwards 443 to us (remote.sh does), else the name with our
+	// port. A name is readable and gives nothing away; an IP:port does. (#178)
+	if tailnetName != "" {
+		candidates = append(candidates, "https://"+tailnetName, "http://"+net.JoinHostPort(tailnetName, strconv.Itoa(port)))
 	}
 	for _, ip := range localAddresses() {
 		candidates = append(candidates, scheme+"://"+net.JoinHostPort(ip.String(), strconv.Itoa(port)))

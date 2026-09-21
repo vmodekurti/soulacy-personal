@@ -9,4 +9,5 @@ import "context"
 func init() {
 	pairProbeFor = func(string) pairBaseProbe { return func(context.Context, string) bool { return false } }
 	pairTLSProbe = func(context.Context, string, string) bool { return false }
+	tailnetNameLookup = func(context.Context) string { return "" }
 }

@@ -82,7 +82,10 @@ func (s *Server) handleCreatePairingToken(c *fiber.Ctx) error {
 	// The QR must carry an address the PHONE can reach — never just the
 	// browser's own origin (opening the GUI at localhost baked
 	// http://localhost:18789 into the code, which a phone resolves to itself).
-	pb, err := resolvePairBase(c.Context(), s.cfg.Server.PublicURL, c.BaseURL(), s.cfg.Server.Port, body.BaseURL, boundedProbe(pairProbeFor(s.tlsFingerprint), min(s.httpRequestTimeout(), pairProbeBudget)))
+	nctx, ncancel := context.WithTimeout(c.Context(), min(s.httpRequestTimeout(), pairProbeBudget))
+	tailnet := tailnetNameLookup(nctx)
+	ncancel()
+	pb, err := resolvePairBase(c.Context(), s.cfg.Server.PublicURL, c.BaseURL(), s.cfg.Server.Port, body.BaseURL, boundedProbe(pairProbeFor(s.tlsFingerprint), min(s.httpRequestTimeout(), pairProbeBudget)), tailnet)
 	if err != nil {
 		return s.errMsg(c, fiber.StatusBadRequest, err.Error())
 	}
