@@ -99,6 +99,12 @@ type Config struct {
 	// Skill directories to scan (in addition to the default ~/.soulacy/skills/ and ~/.agents/skills/)
 	SkillDirs []string `mapstructure:"skill_dirs"`
 
+	// BuiltinSkills (default true) seeds Soulacy's own skill catalog into
+	// <workspace>/skills on startup. Seeded skills are ordinary directories
+	// the person may edit or delete; an edited one is never overwritten by
+	// an upgrade. Set false to ship none.
+	BuiltinSkills bool `mapstructure:"builtin_skills"`
+
 	// UI holds GUI-side preferences that belong to the install rather than to
 	// one browser. See UIConfig.
 	UI UIConfig `mapstructure:"ui"`
@@ -1089,6 +1095,7 @@ func Load(cfgPath string) (*Config, string, error) {
 	v.SetDefault("server.port", 18789)
 	v.SetDefault("server.public_url", "")
 	v.SetDefault("server.tls_auto", true)
+	v.SetDefault("builtin_skills", true)
 	v.SetDefault("server.gui_enabled", true)
 	v.SetDefault("server.discovery.enabled", false)
 	v.SetDefault("server.discovery.interface", "")

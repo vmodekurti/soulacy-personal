@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	builtinskills "github.com/soulacy/soulacy/internal/skills/builtin"
 	"io"
 	"net/http"
 	"net/url"
@@ -4772,6 +4773,9 @@ func (s *Server) handleListSkills(c *fiber.Ctx) error {
 		Metadata      map[string]string `json:"metadata,omitempty"`
 		Dir           string            `json:"dir"`
 		Resources     []string          `json:"resources"`
+		// Builtin marks a skill seeded from Soulacy's own catalog (editable;
+		// an edited copy is never overwritten by upgrades).
+		Builtin bool `json:"builtin"`
 	}
 	out := make([]skillSummary, len(all))
 	for i, sk := range all {
@@ -4783,6 +4787,7 @@ func (s *Server) handleListSkills(c *fiber.Ctx) error {
 			Metadata:      sk.Metadata,
 			Dir:           sk.Dir,
 			Resources:     sk.ResourceFiles(),
+			Builtin:       builtinskills.IsBuiltin(sk.Dir),
 		}
 	}
 	return c.JSON(fiber.Map{"skills": out, "count": len(out)})
