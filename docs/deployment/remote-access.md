@@ -1,9 +1,51 @@
 # Remote Access From Your Phone
 
-Your gateway listens on `127.0.0.1` (localhost), and home networks sit behind
-NAT — so the Soulacy app on your phone can reach it on the same Wi-Fi (once you
-allow LAN access) but **not** when you are away. This page sets up secure remote
-access so your own gateway works from anywhere.
+A gateway listening on `127.0.0.1` (localhost) is reachable only from the host
+Mac. An iPhone cannot reach that listener over Wi-Fi. Choose one of these paths:
+
+- keep the gateway on localhost and publish it through Tailscale (recommended
+  when the phone should work both at home and away); or
+- bind the gateway to a private address for direct access on a trusted home LAN.
+
+Never forward the gateway's port directly from your router to the internet.
+
+## Home-LAN-only access
+
+Use this path when the Mac Studio and iPhone will communicate only while they
+are on the same trusted network. Reserve a private address for the Mac in the
+router's DHCP settings, then configure the gateway with that address:
+
+```yaml
+server:
+  host: 192.168.1.20       # the Mac's reserved private address
+  port: 18789
+  api_key: "sy_<strong-random-value>"
+  tls_auto: true
+  discovery:
+    enabled: true
+    interface: en0         # use the Mac's active Ethernet or Wi-Fi interface
+    hostname: soulacy-studio.local
+    name: Mac Studio
+```
+
+Restart Soulacy and allow incoming connections if the macOS firewall asks. The
+phone must be on the same non-guest network; guest Wi-Fi and client-isolation
+settings commonly block device-to-device traffic. Bonjour additionally needs
+multicast UDP 5353, and the gateway needs TCP 18789.
+
+Open **Mobile → Pair a phone** on the Mac and scan the QR in the iOS app. Leave
+`server.public_url` empty for this direct path so the pairing page can select
+and verify the reachable private address. With automatic TLS active, the QR
+carries the gateway key fingerprint; iOS pins it and stores the issued device
+credential in Keychain. **Find nearby gateways** can fill in the address, but
+Bonjour is discovery only and does not authenticate or pair the phone. See
+[Nearby gateways on iOS](../configuration/server.md#nearby-gateways-on-ios-bonjour)
+for interface and hostname requirements.
+
+This LAN listener is visible to other devices on that network, so keep the API
+key enabled and use a trusted, access-controlled Wi-Fi network.
+
+## Access at home and away
 
 ## One command (recommended: Tailscale)
 
