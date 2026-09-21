@@ -23,6 +23,11 @@ func TestResolvePairBase(t *testing.T) {
 		if err != nil || pb.URL != "http://mac.tailnet.ts.net:18789" || !pb.Reachable {
 			t.Fatalf("%+v %v", pb, err)
 		}
+		// Typed without a scheme, as people do: treated as http (#174).
+		pb, err = resolvePairBase(ctx, "", loopback, 18789, "mac.tailnet.ts.net:18789", answers("http://mac.tailnet.ts.net:18789"))
+		if err != nil || pb.URL != "http://mac.tailnet.ts.net:18789" || !pb.Reachable {
+			t.Fatalf("scheme-less override: %+v err=%v", pb, err)
+		}
 		if _, err := resolvePairBase(ctx, "", loopback, 18789, "not a url", answers()); err == nil {
 			t.Fatal("an invalid base_url must be rejected")
 		}

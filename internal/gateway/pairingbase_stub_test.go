@@ -7,6 +7,6 @@ import "context"
 // unchanged, exactly the pre-#160 pair_url. Resolver tests pass their own
 // probe explicitly and are unaffected.
 func init() {
-	pairProbe = func(context.Context, string) bool { return false }
+	pairProbeFor = func(string) pairBaseProbe { return func(context.Context, string) bool { return false } }
 	pairTLSProbe = func(context.Context, string, string) bool { return false }
 }

@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -218,23 +219,8 @@ var pairTLSProbe = httpsPinProbe
 
 func httpsPinProbe(ctx context.Context, base, fp string) bool {
 	client := &http.Client{Transport: &http.Transport{
-		TLSClientConfig: &tls.Config{
-			MinVersion:         tls.VersionTLS12,
-			InsecureSkipVerify: true, // trust comes from the pin, exactly as on the phone
-			VerifyConnection: func(cs tls.ConnectionState) error {
-				if len(cs.PeerCertificates) == 0 {
-					return errors.New("no certificate")
-				}
-				got, err := publicKeyFingerprint(tls.Certificate{Certificate: [][]byte{cs.PeerCertificates[0].Raw}})
-				if err != nil {
-					return err
-				}
-				if got != fp {
-					return errors.New("certificate is not this gateway's")
-				}
-				return nil
-			},
-		},
+		TLSClientConfig: pairTLSConfig(fp, false),
+		DialContext:     pairDialContext,
 	}}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upgradeToHTTPS(base)+"/ping", nil)
 	if err != nil {
@@ -246,6 +232,97 @@ func httpsPinProbe(ctx context.Context, base, fp string) bool {
 	}
 	_ = resp.Body.Close()
 	return resp.StatusCode == http.StatusOK
+}
+
+// pairTLSConfig trusts a server whose key fingerprint is fp — the gateway's
+// own auto certificate — and, when systemToo is set, any certificate the OS
+// trusts (a proxy's Let's Encrypt cert). The reachability probe wants both;
+// the pin probe wants only the fingerprint, because its whole question is
+// "is this OUR certificate?". Hostname checks still apply to the system path.
+func pairTLSConfig(fp string, systemToo bool) *tls.Config {
+	return &tls.Config{
+		MinVersion:         tls.VersionTLS12,
+		InsecureSkipVerify: true, // verification happens in VerifyConnection
+		VerifyConnection: func(cs tls.ConnectionState) error {
+			if len(cs.PeerCertificates) == 0 {
+				return errors.New("no certificate")
+			}
+			if fp != "" {
+				got, err := publicKeyFingerprint(tls.Certificate{Certificate: [][]byte{cs.PeerCertificates[0].Raw}})
+				if err == nil && got == fp {
+					return nil
+				}
+			}
+			if !systemToo {
+				return errors.New("certificate is not this gateway's")
+			}
+			opts := x509.VerifyOptions{DNSName: cs.ServerName, Intermediates: x509.NewCertPool()}
+			for _, c := range cs.PeerCertificates[1:] {
+				opts.Intermediates.AddCert(c)
+			}
+			_, err := cs.PeerCertificates[0].Verify(opts)
+			return err
+		},
+	}
+}
+
+// pairDialContext dials normally, with one exception: a host that does not
+// resolve here but is this machine's own tailnet (MagicDNS) name is dialed
+// at our own Tailscale address instead. macOS often cannot resolve its own
+// MagicDNS name even though every phone on the tailnet can; without this the
+// operator's typed name could never be probed. TLS still sees the real name.
+func pairDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	var d net.Dialer
+	conn, err := d.DialContext(ctx, network, addr)
+	if err == nil {
+		return conn, nil
+	}
+	var dnsErr *net.DNSError
+	if !errors.As(err, &dnsErr) {
+		return nil, err
+	}
+	host, port, splitErr := net.SplitHostPort(addr)
+	if splitErr != nil || !isOwnTailnetName(host) {
+		return nil, err
+	}
+	for _, ip := range localAddresses() {
+		if isTailscaleIP(ip) {
+			return d.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+		}
+	}
+	return nil, err
+}
+
+// isOwnTailnetName reports whether host looks like THIS machine's MagicDNS
+// name: <hostname-slug>.<tailnet>.ts.net, where the slug is the lowercase
+// hostname with anything but letters and digits turned into '-'.
+func isOwnTailnetName(host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	if !strings.HasSuffix(host, ".ts.net") {
+		return false
+	}
+	first, _, ok := strings.Cut(host, ".")
+	if !ok {
+		return false
+	}
+	h, err := os.Hostname()
+	if err != nil || h == "" {
+		return false
+	}
+	return first == tailnetSlug(h)
+}
+
+func tailnetSlug(hostname string) string {
+	hostname = strings.ToLower(strings.TrimSuffix(hostname, ".local"))
+	var b strings.Builder
+	for _, r := range hostname {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('-')
+		}
+	}
+	return strings.Trim(b.String(), "-")
 }
 
 // upgradeToHTTPS rewrites an http:// base to https:// (host and port kept).
