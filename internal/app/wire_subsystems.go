@@ -48,6 +48,7 @@ import (
 	"github.com/soulacy/soulacy/internal/sandbox"
 	"github.com/soulacy/soulacy/internal/secrets"
 	"github.com/soulacy/soulacy/internal/skills"
+	builtinskills "github.com/soulacy/soulacy/internal/skills/builtin"
 	"github.com/soulacy/soulacy/internal/storage"
 	storagepg "github.com/soulacy/soulacy/internal/storage/postgres"
 	storagesqlite "github.com/soulacy/soulacy/internal/storage/sqlite"
@@ -305,6 +306,15 @@ func (a *App) wireLoaders(ws config.Paths) (*runtime.Loader, *plugins.Loader, *s
 	// Scans ~/.soulacy/skills/, ~/.agents/skills/, ./.agents/skills/, etc.
 	// Extra skill dirs come from config.skill_dirs and manifest-v2 plugins (E7).
 	workDir, _ := os.Getwd()
+	// Ship Soulacy's own skills: seed the embedded catalog into the workspace
+	// so the loader finds them like any other skill. Never fatal.
+	if cfg.BuiltinSkills {
+		if res, err := builtinskills.Seed(ws.Skills, log); err != nil {
+			log.Warn("built-in skills could not be seeded", zap.String("dir", ws.Skills), zap.Error(err))
+		} else if len(res.Written) > 0 {
+			log.Info("built-in skills seeded", zap.Strings("written", res.Written), zap.Strings("kept", res.Kept))
+		}
+	}
 	skillDirs := append([]string{}, cfg.SkillDirs...)
 	for _, lp := range pluginLoader.All() {
 		skillDirs = append(skillDirs, lp.SkillDirs()...)
