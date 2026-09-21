@@ -24,7 +24,7 @@
 # On your phone (once): install Tailscale, sign into the SAME account, then open
 # Soulacy → Settings → add gateway, and paste the address + API key shown below.
 #
-# Undo:  tailscale serve --tcp=<port> off      (stop publishing)
+# Undo:  tailscale serve --tcp=443 off; tailscale serve --tcp=<port> off
 #        sudo tailscale down                    (leave the tailnet)
 #
 # Environment overrides:
@@ -46,7 +46,7 @@ OS="$(uname -s)"
 
 # ── 0. Is the gateway actually up on this machine? ───────────────────────────
 hdr "Step 1: Check the local gateway"
-if curl -fsS --max-time 4 "http://127.0.0.1:${PORT}/api/v1/health" >/dev/null 2>&1; then
+if curl -fsS --max-time 4 "http://127.0.0.1:${PORT}/ping" >/dev/null 2>&1; then
   ok "Gateway is responding on 127.0.0.1:${PORT}"
 else
   warn "No gateway answered on 127.0.0.1:${PORT}."
@@ -115,8 +115,21 @@ hdr "Step 4: Publish the gateway to your tailnet"
 tailscale serve --http="${PORT}" off >/dev/null 2>&1 || true
 tailscale serve --https="${PORT}" off >/dev/null 2>&1 || true
 tailscale serve --tcp="${PORT}" off >/dev/null 2>&1 || true
-if tailscale serve --bg --tcp="${PORT}" "tcp://127.0.0.1:${PORT}" 2>/tmp/soulacy-serve.err; then
-  ok "Forwarding tailnet port ${PORT} → gateway on localhost (TLS passes through end to end)"
+tailscale serve --tcp=443 off >/dev/null 2>&1 || true
+# Port 443 first: the phone then pairs with https://<name> — no IP, no port
+# number in the QR. The gateway's own port is forwarded too, for codes and
+# profiles that still carry it.
+PUBLISHED_443=0
+if tailscale serve --bg --tcp=443 "tcp://127.0.0.1:${PORT}" 2>/tmp/soulacy-serve.err; then
+  PUBLISHED_443=1
+fi
+if tailscale serve --bg --tcp="${PORT}" "tcp://127.0.0.1:${PORT}" 2>>/tmp/soulacy-serve.err; then
+  if [ "$PUBLISHED_443" = "1" ]; then
+    ok "Forwarding tailnet ports 443 and ${PORT} → gateway on localhost (TLS passes through end to end)"
+  else
+    warn "Port 443 could not be forwarded (already in use?); the address will carry :${PORT}."
+    ok "Forwarding tailnet port ${PORT} → gateway on localhost (TLS passes through end to end)"
+  fi
 elif tailscale serve --bg --http="${PORT}" "http://127.0.0.1:${PORT}" 2>>/tmp/soulacy-serve.err; then
   # Older CLI without --tcp: the http proxy still works inside WireGuard,
   # but the gateway's certificate cannot reach the phone through it.
@@ -132,10 +145,12 @@ fi
 DNSNAME="$(tailscale status --json 2>/dev/null | sed -n 's/.*"DNSName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
 DNSNAME="${DNSNAME%.}" # strip trailing dot
 TSIP="$(tailscale ip -4 2>/dev/null | head -1)"
-# Printed as http://; the pairing QR from Mobile › Pair a device upgrades it
-# to https:// + the gateway's key fingerprint by itself, after checking that
-# the address really answers TLS.
-if [ -n "$DNSNAME" ]; then ADDR="http://${DNSNAME}:${PORT}"; else ADDR="http://${TSIP}:${PORT}"; fi
+# The name, with no port when 443 is forwarded. The pairing QR from Mobile ›
+# Pair a device picks the same address by itself and adds the gateway's key
+# fingerprint after checking that it really answers TLS.
+if [ -n "$DNSNAME" ] && [ "${PUBLISHED_443:-0}" = "1" ]; then ADDR="https://${DNSNAME}"
+elif [ -n "$DNSNAME" ]; then ADDR="http://${DNSNAME}:${PORT}"
+else ADDR="http://${TSIP}:${PORT}"; fi
 
 # The gateway key is the `sy_`-prefixed api_key in config.yaml (provider keys
 # have other formats, so match on the sy_ prefix rather than position, and
@@ -154,7 +169,7 @@ done
 # ── 5. Tell the operator exactly what to do on the phone ─────────────────────
 hdr "Done — your gateway is reachable over Tailscale"
 printf "  Address:  ${BOLD}%s${NC}\n" "$ADDR"
-[ -n "$TSIP" ] && printf "  (or:      ${BOLD}http://%s:%s${NC})\n" "$TSIP" "$PORT"
+[ -n "$TSIP" ] && [ "${PUBLISHED_443:-0}" != "1" ] && printf "  (or:      ${BOLD}http://%s:%s${NC})\n" "$TSIP" "$PORT"
 if [ -n "$API_KEY" ]; then
   printf "  API key:  ${BOLD}%s${NC}\n" "$API_KEY"
 else
@@ -175,6 +190,6 @@ On your iPhone (one time):
 It now works from anywhere your phone has internet — no Wi-Fi, ports, or domain
 needed. Traffic is encrypted end to end by Tailscale.
 
-To stop publishing later:  tailscale serve --tcp=${PORT} off
+To stop publishing later:  tailscale serve --tcp=443 off; tailscale serve --tcp=${PORT} off
 To leave the tailnet:       sudo tailscale down
 EOF
