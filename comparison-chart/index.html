@@ -5209,7 +5209,7 @@ agent ever takes, you can answer one of two questions: who approved it, or
 which line permitted it.</p>
 <p>Do not take our word for it. Check it in five minutes on your own machine:</p>
 <ol>
-<li><strong>Ask for something risky.</strong> Write a small agent and ask it to delete a file. It cannot: system tools are not even offered until <code>runtime.allow_system_tools: true</code> is in your config and the agent declares them.</li>
+<li><strong>Ask for something risky.</strong> Write a small agent and ask it to delete a file. It cannot: system tools are not even offered until the agent's ID is listed in <code>runtime.allow_system_agents</code> in your config <strong>and</strong> the agent declares <code>capabilities: [system]</code>. It is a per-agent list, not a yes/no switch — stricter than a boolean, on purpose.</li>
 <li><strong>Turn them on and ask again.</strong> Now the agent stops and waits for your approval before the privileged step runs.</li>
 <li><strong>Schedule it for 3 a.m.</strong> The same step is refused because nobody is there to approve it, until the agent's file says <code>unattended: true</code>.</li>
 <li><strong>Read the diff.</strong> Every change that made the agent more capable is a line you wrote in a file you can read, review, and roll back. Safe Undo covers the changes it makes.</li>
