@@ -3548,6 +3548,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#tls_auto-default-true" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        tls_auto (default true)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5112,6 +5123,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#tls_auto-default-true" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        tls_auto (default true)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5266,6 +5288,10 @@ conditional-write resources are explicitly configured.</p>
 </span></code></pre></div>
 <h3 id="tls_cert-tls_key"><code>tls_cert</code> / <code>tls_key</code><a class="headerlink" href="#tls_cert-tls_key" title="Permanent link">&para;</a></h3>
 <p>Provide both paths to enable HTTPS. A missing or invalid certificate/key is a startup error, not a fallback to HTTP. Behind a TLS-terminating reverse proxy, leave both empty and restrict access to the backend listener.</p>
+<h3 id="tls_auto-default-true"><code>tls_auto</code> (default <code>true</code>)<a class="headerlink" href="#tls_auto-default-true" title="Permanent link">&para;</a></h3>
+<p>When <code>tls_cert</code>/<code>tls_key</code> are empty, the gateway mints its own certificate on first start (<code>&lt;workspace&gt;/tls/gateway.crt</code> + <code>gateway.key</code>) and answers <strong>both</strong> HTTPS and plain HTTP on the same port — the browser on <code>localhost</code> keeps using <code>http://</code>, nothing changes for existing installs.</p>
+<p>What it buys you: the pairing QR from <strong>Mobile › Pair a device</strong> carries an <code>https://</code> address plus the certificate's key fingerprint. The Soulacy iOS app pins that fingerprint at pairing, so every phone connection — on Wi‑Fi, over Tailscale, anywhere — is encrypted to exactly this gateway, with no certificate authority, no "trust this certificate" prompt, and no setting to find. The QR is read off your own screen, which is what makes the fingerprint trustworthy.</p>
+<p>Rotate by deleting the two files and restarting; phones then re-pair. Set <code>tls_auto: false</code> to serve plain HTTP only. The fingerprint is only advertised for the auto certificate: an operator-supplied certificate (<code>tls_cert</code>) or a <code>server.public_url</code> pointing at a proxy uses normal system trust instead.</p>
 <h2 id="example-local-dev">Example: local dev<a class="headerlink" href="#example-local-dev" title="Permanent link">&para;</a></h2>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">server</span><span class="p">:</span>
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">127.0.0.1</span>
