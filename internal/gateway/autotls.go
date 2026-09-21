@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bufio"
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -16,6 +17,7 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -205,6 +207,45 @@ func autoTLSDir(cfgPath string) string {
 		return ""
 	}
 	return filepath.Join(filepath.Dir(cfgPath), autoTLSDirName)
+}
+
+// pairTLSProbe reports whether https://<base>/ping answers 200 with a
+// certificate whose key fingerprint is fp — i.e. whether the phone, arriving
+// at that address with that pin, would actually reach THIS gateway's TLS.
+// It is false when a proxy (tailscale serve --http, nginx) owns the address.
+// Injectable so tests never open sockets.
+var pairTLSProbe = httpsPinProbe
+
+func httpsPinProbe(ctx context.Context, base, fp string) bool {
+	client := &http.Client{Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{
+			MinVersion:         tls.VersionTLS12,
+			InsecureSkipVerify: true, // trust comes from the pin, exactly as on the phone
+			VerifyConnection: func(cs tls.ConnectionState) error {
+				if len(cs.PeerCertificates) == 0 {
+					return errors.New("no certificate")
+				}
+				got, err := publicKeyFingerprint(tls.Certificate{Certificate: [][]byte{cs.PeerCertificates[0].Raw}})
+				if err != nil {
+					return err
+				}
+				if got != fp {
+					return errors.New("certificate is not this gateway's")
+				}
+				return nil
+			},
+		},
+	}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upgradeToHTTPS(base)+"/ping", nil)
+	if err != nil {
+		return false
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	_ = resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
 
 // upgradeToHTTPS rewrites an http:// base to https:// (host and port kept).

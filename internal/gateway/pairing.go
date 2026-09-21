@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"strings"
 	"sync"
 	"time"
@@ -85,7 +86,10 @@ func (s *Server) handleCreatePairingToken(c *fiber.Ctx) error {
 	if err != nil {
 		return s.errMsg(c, fiber.StatusBadRequest, err.Error())
 	}
-	base, pairURL, fp := s.pinnedPairURL(pb.URL, tok.Code, body.BaseURL)
+	// Bounded like the reachability probes: a wrong guess must fail fast.
+	pctx, cancel := context.WithTimeout(c.Context(), min(s.httpRequestTimeout(), pairProbeBudget))
+	defer cancel()
+	base, pairURL, fp := s.pinnedPairURL(pctx, pb.URL, tok.Code, body.BaseURL)
 	return c.JSON(fiber.Map{
 		"code":         tok.Code,
 		"expires_at":   tok.ExpiresAt,
@@ -106,25 +110,31 @@ func (s *Server) handleCreatePairingToken(c *fiber.Ctx) error {
 // and the base is a direct address (auto-detected, or typed on the Mobile
 // page for the phone), the QR carries https:// plus the key fingerprint
 // (`fp`), so the phone connects encrypted from the very first request and
-// pins the key. A base that came from server.public_url is left alone: the
-// operator chose it, and an https public URL usually means a proxy holding a
-// different certificate. Returns base, pair URL, fingerprint ("" = none).
-func (s *Server) pinnedPairURL(base, code, typedOverride string) (string, string, string) {
+// pins the key. Two guards keep that claim honest (#171):
+//   - an https:// base is left alone — something else already terminates TLS
+//     there (a proxy, tailscale serve --https) with its own certificate, and
+//     the phone's system trust is the right check for it;
+//   - an http:// base is upgraded only after actually connecting to
+//     https://<base>/ping with the pin. tailscale serve --http owns the
+//     tailnet address and does not speak TLS; upgrading blindly would point
+//     the phone at a port that refuses the handshake.
+//
+// A base from server.public_url is never rewritten: the operator chose it.
+// Returns base, pair URL, fingerprint ("" = none).
+func (s *Server) pinnedPairURL(ctx context.Context, base, code, typedOverride string) (string, string, string) {
 	pairURL := base + "/mobile?pair=" + code
 	fp := s.tlsFingerprint
-	if fp == "" {
+	if fp == "" || !strings.HasPrefix(base, "http://") {
 		return base, pairURL, ""
 	}
 	direct := strings.TrimSpace(s.cfg.Server.PublicURL) == "" || strings.TrimSpace(typedOverride) != ""
 	if !direct {
 		return base, pairURL, ""
 	}
-	if strings.HasPrefix(base, "http://") {
-		base = upgradeToHTTPS(base)
+	if !pairTLSProbe(ctx, base, fp) {
+		return base, pairURL, ""
 	}
-	if !strings.HasPrefix(base, "https://") {
-		return base, base + "/mobile?pair=" + code, ""
-	}
+	base = upgradeToHTTPS(base)
 	return base, base + "/mobile?pair=" + code + "&fp=" + fp, fp
 }
 

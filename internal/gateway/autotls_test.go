@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/sha256"
 	"crypto/tls"
@@ -112,29 +113,83 @@ func TestMuxListener_ServesBothOnOnePort(t *testing.T) {
 	}
 }
 
-// The QR upgrades a direct http base to https and carries the fingerprint;
-// an operator-chosen public URL is left alone; no fingerprint, no change.
+// withTLSProbe swaps the pinned-https probe for the duration of a test.
+func withTLSProbe(t *testing.T, ok bool) {
+	t.Helper()
+	prev := pairTLSProbe
+	pairTLSProbe = func(context.Context, string, string) bool { return ok }
+	t.Cleanup(func() { pairTLSProbe = prev })
+}
+
+// The QR is upgraded to https + fingerprint only when a pinned https probe
+// of the phone's address succeeds; an https base or an operator public_url is
+// never rewritten; no auto TLS, no change. (#169, #171)
 func TestPinnedPairURL(t *testing.T) {
+	ctx := context.Background()
 	s := newTestGateway(t, "secret")
-	base, url, fp := s.pinnedPairURL("http://100.95.206.60:18789", "ABCD", "")
+	withTLSProbe(t, true)
+	base, url, fp := s.pinnedPairURL(ctx, "http://100.95.206.60:18789", "ABCD", "")
 	if fp != "" || base != "http://100.95.206.60:18789" || url != "http://100.95.206.60:18789/mobile?pair=ABCD" {
 		t.Fatalf("no auto TLS: %s %s %q", base, url, fp)
 	}
 	s.tlsFingerprint = "deadbeef"
-	base, url, fp = s.pinnedPairURL("http://100.95.206.60:18789", "ABCD", "")
+	base, url, fp = s.pinnedPairURL(ctx, "http://100.95.206.60:18789", "ABCD", "")
 	if base != "https://100.95.206.60:18789" || url != "https://100.95.206.60:18789/mobile?pair=ABCD&fp=deadbeef" || fp != "deadbeef" {
-		t.Fatalf("direct base: %s %s %q", base, url, fp)
+		t.Fatalf("direct base, probe ok: %s %s %q", base, url, fp)
 	}
 	// Typed on the Mobile page for the phone: also direct.
-	base, _, fp = s.pinnedPairURL("http://mac.tailnet.ts.net:18789", "ABCD", "http://mac.tailnet.ts.net:18789")
+	base, _, fp = s.pinnedPairURL(ctx, "http://mac.tailnet.ts.net:18789", "ABCD", "http://mac.tailnet.ts.net:18789")
 	if base != "https://mac.tailnet.ts.net:18789" || fp == "" {
 		t.Fatalf("typed override: %s %q", base, fp)
 	}
-	// Operator's public_url (likely a proxy): untouched, no pin.
-	s.cfg.Server.PublicURL = "https://soul.example.com"
-	base, url, fp = s.pinnedPairURL("https://soul.example.com", "ABCD", "")
+	// Already https (proxy / tailscale serve --https): someone else's
+	// certificate — never pin ours to it.
+	base, url, fp = s.pinnedPairURL(ctx, "https://soul.example.com", "ABCD", "")
 	if base != "https://soul.example.com" || url != "https://soul.example.com/mobile?pair=ABCD" || fp != "" {
-		t.Fatalf("public_url: %s %s %q", base, url, fp)
+		t.Fatalf("https base: %s %s %q", base, url, fp)
+	}
+	// tailscale serve --http owns the address and refuses TLS: stay on http.
+	withTLSProbe(t, false)
+	base, url, fp = s.pinnedPairURL(ctx, "http://mac.tailnet.ts.net:18789", "ABCD", "")
+	if base != "http://mac.tailnet.ts.net:18789" || url != "http://mac.tailnet.ts.net:18789/mobile?pair=ABCD" || fp != "" {
+		t.Fatalf("probe refused: %s %s %q", base, url, fp)
+	}
+	// Operator's public_url: untouched, no pin, even with a willing probe.
+	withTLSProbe(t, true)
+	s.cfg.Server.PublicURL = "http://mac.tailnet.ts.net:18789"
+	base, _, fp = s.pinnedPairURL(ctx, "http://mac.tailnet.ts.net:18789", "ABCD", "")
+	if base != "http://mac.tailnet.ts.net:18789" || fp != "" {
+		t.Fatalf("public_url: %s %q", base, fp)
+	}
+}
+
+// The real probe against the real mux: accepts our key, rejects another.
+func TestHTTPSPinProbe(t *testing.T) {
+	cert, _, err := loadOrCreateAutoCert(filepath.Join(t.TempDir(), "tls"), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fp, _ := publicKeyFingerprint(cert)
+	inner, _ := net.Listen("tcp", "127.0.0.1:0")
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })}
+	go func() { _ = srv.Serve(newMuxListener(inner, autoTLSConfig(cert))) }()
+	defer srv.Close()
+	base := "http://" + inner.Addr().String()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if !httpsPinProbe(ctx, base, fp) {
+		t.Fatal("probe must accept the gateway's own key")
+	}
+	if httpsPinProbe(ctx, base, "00"+fp[2:]) {
+		t.Fatal("probe must reject a different pin")
+	}
+	plain, _ := net.Listen("tcp", "127.0.0.1:0") // an http-only port, like tailscale serve --http
+	go func() {
+		_ = http.Serve(plain, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }))
+	}()
+	defer plain.Close()
+	if httpsPinProbe(ctx, "http://"+plain.Addr().String(), fp) {
+		t.Fatal("probe must fail where nothing speaks TLS")
 	}
 }
 
@@ -143,6 +198,7 @@ func TestPinnedPairURL(t *testing.T) {
 func TestPairingTokenCarriesFingerprint(t *testing.T) {
 	srv := newTestGateway(t, "secret")
 	srv.tlsFingerprint = "cafebabe"
+	withTLSProbe(t, true)
 	status, body := gatewayJSON(t, srv, http.MethodPost, "/api/v1/pairing/tokens", "secret", `{"base_url":"http://mac.tailnet.ts.net:18789"}`)
 	if status != http.StatusOK {
 		t.Fatalf("status %d: %v", status, body)
