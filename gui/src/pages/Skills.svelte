@@ -546,6 +546,7 @@
           <button class="skill-row" class:active={selected?.name === sk.name} on:click={() => select(sk)}>
             <div class="skill-row-top">
               <span class="skill-name">{sk.name}</span>
+              {#if sk.builtin}<span class="skill-builtin" title="Ships with Soulacy. Edit it freely — an edited copy is never overwritten by upgrades.">built-in</span>{/if}
               {#if sk.license}
                 <span class="skill-license">{sk.license}</span>
               {/if}
@@ -747,6 +748,7 @@
   .skill-row-top    { display: flex; align-items: center; justify-content: space-between; }
   .skill-name    { font-weight: 600; font-size: .87rem; font-family: monospace; color: #8b85ff; }
   .skill-license { font-size: .68rem; color: #555a7a; }
+  .skill-builtin { font-size: .65rem; padding: .05rem .4rem; border-radius: 999px; background: rgba(96,240,160,.12); color: #60f0a0; border: 1px solid rgba(96,240,160,.3); margin-left: .4rem; }
   .skill-desc    { font-size: .78rem; color: #7b82a8; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .skill-res     { font-size: .7rem; color: var(--sl-accent); }
 

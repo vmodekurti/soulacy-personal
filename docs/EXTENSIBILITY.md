@@ -69,7 +69,7 @@ tool execution).
 | LLM providers | `llm.Provider` interface + `Router.Register`; any `api_key`+`base_url` config auto-wraps as OpenAI-compatible | New native providers, yes; OpenAI-compatible, **no** |
 | Channels | `channels.Adapter` interface + `Registry.Register`; hot-replace via `StartAdapter` | Yes (hardcoded in `main.go`) |
 | Agent tools | SOUL.yaml `tools:` (python_file / inline), MCP servers, plugin Python tools | **No** |
-| Skills | SKILL.md dirs (agentskills.io spec), catalog injected into prompts | **No** |
+| Skills | SKILL.md (a catalog of [built-in skills](skills/builtin.md) ships with the binary) dirs (agentskills.io spec), catalog injected into prompts | **No** |
 | Plugins | `plugin.yaml` manifest → Python tools only today; `pkg/plugin.Registry` declares `RegisterChannel/RegisterProvider/RegisterToolLibrary` but is **never wired** | **No** (but only tools work) |
 | Events | EventHub → WebSocket `/ws/events` only; queue backend wired but **unconsumed**; no outbound webhooks | n/a |
 
