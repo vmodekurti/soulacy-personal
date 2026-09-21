@@ -57,7 +57,7 @@ func TestPairingTokenBaseURL(t *testing.T) {
 	})
 
 	t.Run("an invalid base_url is rejected", func(t *testing.T) {
-		status, _ := gatewayJSON(t, srv, http.MethodPost, "/api/v1/pairing/tokens", "secret", `{"base_url":"nope"}`)
+		status, _ := gatewayJSON(t, srv, http.MethodPost, "/api/v1/pairing/tokens", "secret", `{"base_url":"http://"}`)
 		if status != http.StatusBadRequest {
 			t.Fatalf("expected 400, got %d", status)
 		}

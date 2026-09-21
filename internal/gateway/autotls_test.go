@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -142,12 +143,20 @@ func TestPinnedPairURL(t *testing.T) {
 	if base != "https://mac.tailnet.ts.net:18789" || fp == "" {
 		t.Fatalf("typed override: %s %q", base, fp)
 	}
-	// Already https (proxy / tailscale serve --https): someone else's
-	// certificate — never pin ours to it.
+	// Already https and answered by OUR certificate (the operator re-typed
+	// the QR address): pin it. (#174)
+	base, url, fp = s.pinnedPairURL(ctx, "https://100.95.206.60:18789", "ABCD", "https://100.95.206.60:18789")
+	if base != "https://100.95.206.60:18789" || url != "https://100.95.206.60:18789/mobile?pair=ABCD&fp=deadbeef" || fp != "deadbeef" {
+		t.Fatalf("https base, ours: %s %s %q", base, url, fp)
+	}
+	// Already https but someone else's certificate (proxy, tailscale serve
+	// --https): never pin ours to it.
+	withTLSProbe(t, false)
 	base, url, fp = s.pinnedPairURL(ctx, "https://soul.example.com", "ABCD", "")
 	if base != "https://soul.example.com" || url != "https://soul.example.com/mobile?pair=ABCD" || fp != "" {
-		t.Fatalf("https base: %s %s %q", base, url, fp)
+		t.Fatalf("https base, proxy: %s %s %q", base, url, fp)
 	}
+	withTLSProbe(t, true)
 	// tailscale serve --http owns the address and refuses TLS: stay on http.
 	withTLSProbe(t, false)
 	base, url, fp = s.pinnedPairURL(ctx, "http://mac.tailnet.ts.net:18789", "ABCD", "")
@@ -160,6 +169,54 @@ func TestPinnedPairURL(t *testing.T) {
 	base, _, fp = s.pinnedPairURL(ctx, "http://mac.tailnet.ts.net:18789", "ABCD", "")
 	if base != "http://mac.tailnet.ts.net:18789" || fp != "" {
 		t.Fatalf("public_url: %s %q", base, fp)
+	}
+}
+
+// The reachability probe accepts the gateway's own certificate over https
+// (it is self-signed, so system trust alone would refuse it), plain http, and
+// still refuses a self-signed certificate that is not ours. (#174)
+func TestPairReachProbe_AcceptsOwnCert(t *testing.T) {
+	cert, _, err := loadOrCreateAutoCert(filepath.Join(t.TempDir(), "tls"), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fp, _ := publicKeyFingerprint(cert)
+	inner, _ := net.Listen("tcp", "127.0.0.1:0")
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/ping" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})}
+	go func() { _ = srv.Serve(newMuxListener(inner, autoTLSConfig(cert))) }()
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	addr := inner.Addr().String()
+	if !pairReachProbe(fp)(ctx, "https://"+addr) {
+		t.Fatal("must accept our own certificate over https")
+	}
+	if !pairReachProbe(fp)(ctx, "http://"+addr) {
+		t.Fatal("must accept plain http")
+	}
+	if pairReachProbe("00"+fp[2:])(ctx, "https://"+addr) {
+		t.Fatal("must refuse a self-signed certificate that is not ours")
+	}
+}
+
+func TestTailnetSlugAndOwnName(t *testing.T) {
+	for in, want := range map[string]string{"Vasus-Mac-Studio": "vasus-mac-studio", "Vasus-Mac-Studio.local": "vasus-mac-studio", "my mac (2)": "my-mac--2"} {
+		if got := tailnetSlug(in); got != want {
+			t.Errorf("tailnetSlug(%q) = %q, want %q", in, got, want)
+		}
+	}
+	h, _ := os.Hostname()
+	if h != "" && !isOwnTailnetName(tailnetSlug(h)+".tailabc.ts.net") {
+		t.Errorf("own name not recognised for hostname %q", h)
+	}
+	if isOwnTailnetName("other-box.tailabc.ts.net") || isOwnTailnetName("example.com") {
+		t.Error("foreign names must not be treated as our own")
 	}
 }
 

@@ -82,7 +82,10 @@ func (s *Server) handleCreatePairingToken(c *fiber.Ctx) error {
 	// The QR must carry an address the PHONE can reach — never just the
 	// browser's own origin (opening the GUI at localhost baked
 	// http://localhost:18789 into the code, which a phone resolves to itself).
-	pb, err := resolvePairBase(c.Context(), s.cfg.Server.PublicURL, c.BaseURL(), s.cfg.Server.Port, body.BaseURL, boundedProbe(pairProbe, min(s.httpRequestTimeout(), pairProbeBudget)))
+	nctx, ncancel := context.WithTimeout(c.Context(), min(s.httpRequestTimeout(), pairProbeBudget))
+	tailnet := tailnetNameLookup(nctx)
+	ncancel()
+	pb, err := resolvePairBase(c.Context(), s.cfg.Server.PublicURL, c.BaseURL(), s.cfg.Server.Port, body.BaseURL, boundedProbe(pairProbeFor(s.tlsFingerprint), min(s.httpRequestTimeout(), pairProbeBudget)), tailnet)
 	if err != nil {
 		return s.errMsg(c, fiber.StatusBadRequest, err.Error())
 	}
@@ -111,9 +114,10 @@ func (s *Server) handleCreatePairingToken(c *fiber.Ctx) error {
 // page for the phone), the QR carries https:// plus the key fingerprint
 // (`fp`), so the phone connects encrypted from the very first request and
 // pins the key. Two guards keep that claim honest (#171):
-//   - an https:// base is left alone — something else already terminates TLS
-//     there (a proxy, tailscale serve --https) with its own certificate, and
-//     the phone's system trust is the right check for it;
+//   - an https:// base gets the pin only when the pinned probe proves the
+//     certificate there is ours (an operator re-typing the QR address); a
+//     proxy's certificate (nginx, tailscale serve --https) leaves it alone and
+//     the phone's system trust is the right check for it (#174);
 //   - an http:// base is upgraded only after actually connecting to
 //     https://<base>/ping with the pin. tailscale serve --http owns the
 //     tailnet address and does not speak TLS; upgrading blindly would point
@@ -124,17 +128,28 @@ func (s *Server) handleCreatePairingToken(c *fiber.Ctx) error {
 func (s *Server) pinnedPairURL(ctx context.Context, base, code, typedOverride string) (string, string, string) {
 	pairURL := base + "/mobile?pair=" + code
 	fp := s.tlsFingerprint
-	if fp == "" || !strings.HasPrefix(base, "http://") {
+	if fp == "" {
 		return base, pairURL, ""
 	}
 	direct := strings.TrimSpace(s.cfg.Server.PublicURL) == "" || strings.TrimSpace(typedOverride) != ""
 	if !direct {
 		return base, pairURL, ""
 	}
-	if !pairTLSProbe(ctx, base, fp) {
+	switch {
+	case strings.HasPrefix(base, "https://"):
+		// Already https: ours (typed by the operator, or a re-typed QR
+		// address) gets the pin; a proxy's certificate does not.
+		if !pairTLSProbe(ctx, base, fp) {
+			return base, pairURL, ""
+		}
+	case strings.HasPrefix(base, "http://"):
+		if !pairTLSProbe(ctx, base, fp) {
+			return base, pairURL, ""
+		}
+		base = upgradeToHTTPS(base)
+	default:
 		return base, pairURL, ""
 	}
-	base = upgradeToHTTPS(base)
 	return base, base + "/mobile?pair=" + code + "&fp=" + fp, fp
 }
 
