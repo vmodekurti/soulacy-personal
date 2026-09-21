@@ -4509,6 +4509,28 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#home-lan-only-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Home-LAN-only access
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#access-at-home-and-away" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Access at home and away
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#one-command-recommended-tailscale" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4963,6 +4985,28 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#home-lan-only-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Home-LAN-only access
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#access-at-home-and-away" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Access at home and away
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#one-command-recommended-tailscale" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5069,13 +5113,47 @@
 
 
 <h1 id="remote-access-from-your-phone">Remote Access From Your Phone<a class="headerlink" href="#remote-access-from-your-phone" title="Permanent link">&para;</a></h1>
-<p>Your gateway listens on <code>127.0.0.1</code> (localhost), and home networks sit behind
-NAT — so the Soulacy app on your phone can reach it on the same Wi-Fi (once you
-allow LAN access) but <strong>not</strong> when you are away. This page sets up secure remote
-access so your own gateway works from anywhere.</p>
+<p>A gateway listening on <code>127.0.0.1</code> (localhost) is reachable only from the host
+Mac. An iPhone cannot reach that listener over Wi-Fi. Choose one of these paths:</p>
+<ul>
+<li>keep the gateway on localhost and publish it through Tailscale (recommended
+  when the phone should work both at home and away); or</li>
+<li>bind the gateway to a private address for direct access on a trusted home LAN.</li>
+</ul>
+<p>Never forward the gateway's port directly from your router to the internet.</p>
+<h2 id="home-lan-only-access">Home-LAN-only access<a class="headerlink" href="#home-lan-only-access" title="Permanent link">&para;</a></h2>
+<p>Use this path when the Mac Studio and iPhone will communicate only while they
+are on the same trusted network. Reserve a private address for the Mac in the
+router's DHCP settings, then configure the gateway with that address:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">server</span><span class="p">:</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">192.168.1.20</span><span class="w">       </span><span class="c1"># the Mac's reserved private address</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="nt">port</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">18789</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="nt">api_key</span><span class="p">:</span><span class="w"> </span><span class="s">"sy_&lt;strong-random-value&gt;"</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span><span class="nt">tls_auto</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span><span class="nt">discovery</span><span class="p">:</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">    </span><span class="nt">interface</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">en0</span><span class="w">         </span><span class="c1"># use the Mac's active Ethernet or Wi-Fi interface</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">    </span><span class="nt">hostname</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">soulacy-studio.local</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Mac Studio</span>
+</span></code></pre></div>
+<p>Restart Soulacy and allow incoming connections if the macOS firewall asks. The
+phone must be on the same non-guest network; guest Wi-Fi and client-isolation
+settings commonly block device-to-device traffic. Bonjour additionally needs
+multicast UDP 5353, and the gateway needs TCP 18789.</p>
+<p>Open <strong>Mobile → Pair a phone</strong> on the Mac and scan the QR in the iOS app. Leave
+<code>server.public_url</code> empty for this direct path so the pairing page can select
+and verify the reachable private address. With automatic TLS active, the QR
+carries the gateway key fingerprint; iOS pins it and stores the issued device
+credential in Keychain. <strong>Find nearby gateways</strong> can fill in the address, but
+Bonjour is discovery only and does not authenticate or pair the phone. See
+<a href="../../configuration/server/#nearby-gateways-on-ios-bonjour">Nearby gateways on iOS</a>
+for interface and hostname requirements.</p>
+<p>This LAN listener is visible to other devices on that network, so keep the API
+key enabled and use a trusted, access-controlled Wi-Fi network.</p>
+<h2 id="access-at-home-and-away">Access at home and away<a class="headerlink" href="#access-at-home-and-away" title="Permanent link">&para;</a></h2>
 <h2 id="one-command-recommended-tailscale">One command (recommended: Tailscale)<a class="headerlink" href="#one-command-recommended-tailscale" title="Permanent link">&para;</a></h2>
 <p>Run this on the machine that hosts the gateway:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://raw.githubusercontent.com/vmodekurti/soulacy-personal/main/remote.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span>bash
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://raw.githubusercontent.com/vmodekurti/soulacy-personal/main/remote.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span>bash
 </span></code></pre></div>
 <p>It:</p>
 <ol>
@@ -5094,8 +5172,8 @@ key the script printed. It now works anywhere your phone has internet.</p>
 address, encrypts traffic end to end, and is free for personal use. Only your
 own signed-in devices can reach the gateway.</p>
 <p>To undo:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>tailscale<span class="w"> </span>serve<span class="w"> </span>--http<span class="o">=</span><span class="m">18789</span><span class="w"> </span>off<span class="w">   </span><span class="c1"># stop publishing the gateway</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>sudo<span class="w"> </span>tailscale<span class="w"> </span>down<span class="w">                </span><span class="c1"># leave the tailnet</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>tailscale<span class="w"> </span>serve<span class="w"> </span>--http<span class="o">=</span><span class="m">18789</span><span class="w"> </span>off<span class="w">   </span><span class="c1"># stop publishing the gateway</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>sudo<span class="w"> </span>tailscale<span class="w"> </span>down<span class="w">                </span><span class="c1"># leave the tailnet</span>
 </span></code></pre></div>
 <h2 id="alternatives">Alternatives<a class="headerlink" href="#alternatives" title="Permanent link">&para;</a></h2>
 <table>
