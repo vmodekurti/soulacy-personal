@@ -14,7 +14,8 @@
 #   tailnet with `tailscale serve`:
 #     1. Installs Tailscale if it is missing.
 #     2. Signs this machine into your tailnet (opens a browser once).
-#     3. `tailscale serve` proxies your tailnet to the gateway on localhost.
+#     3. `tailscale serve --tcp` forwards your tailnet port to the gateway on
+#        localhost, byte for byte, so the gateway's own TLS reaches the phone.
 #        The gateway stays bound to 127.0.0.1 — nothing is opened on your LAN or
 #        the public internet, and no router port-forwarding is needed. Only your
 #        own devices, signed into the same tailnet, can reach it.
@@ -23,7 +24,7 @@
 # On your phone (once): install Tailscale, sign into the SAME account, then open
 # Soulacy → Settings → add gateway, and paste the address + API key shown below.
 #
-# Undo:  tailscale serve --http=<port> off     (stop publishing)
+# Undo:  tailscale serve --tcp=443 off; tailscale serve --tcp=<port> off
 #        sudo tailscale down                    (leave the tailnet)
 #
 # Environment overrides:
@@ -45,7 +46,7 @@ OS="$(uname -s)"
 
 # ── 0. Is the gateway actually up on this machine? ───────────────────────────
 hdr "Step 1: Check the local gateway"
-if curl -fsS --max-time 4 "http://127.0.0.1:${PORT}/api/v1/health" >/dev/null 2>&1; then
+if curl -fsS --max-time 4 "http://127.0.0.1:${PORT}/ping" >/dev/null 2>&1; then
   ok "Gateway is responding on 127.0.0.1:${PORT}"
 else
   warn "No gateway answered on 127.0.0.1:${PORT}."
@@ -102,29 +103,39 @@ fi
 
 # ── 3. Publish the gateway into the tailnet ──────────────────────────────────
 hdr "Step 4: Publish the gateway to your tailnet"
-# `tailscale serve` proxies tailnet:<port> -> localhost:<port>, reachable only
-# by your own tailnet devices over the encrypted WireGuard mesh. --bg keeps it
-# running after this script exits.
-#
-# HTTPS when the tailnet can issue certificates (DNS › HTTPS Certificates in
-# the Tailscale admin console): Tailscale then terminates TLS with a real
-# Let's Encrypt certificate for this machine's MagicDNS name, so phones get an
-# https:// address with nothing to trust manually. Otherwise plain http — the
-# WireGuard tunnel still encrypts it end to end, and the Soulacy iOS app
-# accepts http for self-hosted gateways. The user does not have to choose.
-SCHEME="http"
-if tailscale status --json 2>/dev/null | grep -q '"CertDomains"[[:space:]]*:[[:space:]]*\['; then
-  SCHEME="https"
-fi
-# Any previous publish on this port is replaced so switching schemes is clean.
+# Raw TCP forwarding: tailnet:<port> -> 127.0.0.1:<port>, byte for byte. The
+# gateway's own listener answers the phone directly, so its TLS (the
+# certificate it mints itself, pinned through the pairing QR) reaches the
+# phone end to end — plus WireGuard around it. An HTTP proxy (--http/--https)
+# would terminate the connection at Tailscale instead: the phone would see
+# Tailscale's certificate or none, the pin could never apply, and the proxy
+# answers 404 when addressed by IP. --bg keeps it running after this script.
+# Reachable only by your own tailnet devices; nothing is opened on the LAN or
+# the public internet.
 tailscale serve --http="${PORT}" off >/dev/null 2>&1 || true
 tailscale serve --https="${PORT}" off >/dev/null 2>&1 || true
-if tailscale serve --bg --"${SCHEME}"="${PORT}" "http://127.0.0.1:${PORT}" 2>/tmp/soulacy-serve.err; then
-  ok "Publishing tailnet ${SCHEME}://…:${PORT} → gateway on localhost"
-  [ "$SCHEME" = "http" ] && printf "  (https is used automatically once HTTPS certificates are enabled for your tailnet)\n"
+tailscale serve --tcp="${PORT}" off >/dev/null 2>&1 || true
+tailscale serve --tcp=443 off >/dev/null 2>&1 || true
+# Port 443 first: the phone then pairs with https://<name> — no IP, no port
+# number in the QR. The gateway's own port is forwarded too, for codes and
+# profiles that still carry it.
+PUBLISHED_443=0
+if tailscale serve --bg --tcp=443 "tcp://127.0.0.1:${PORT}" 2>/tmp/soulacy-serve.err; then
+  PUBLISHED_443=1
+fi
+if tailscale serve --bg --tcp="${PORT}" "tcp://127.0.0.1:${PORT}" 2>>/tmp/soulacy-serve.err; then
+  if [ "$PUBLISHED_443" = "1" ]; then
+    ok "Forwarding tailnet ports 443 and ${PORT} → gateway on localhost (TLS passes through end to end)"
+  else
+    warn "Port 443 could not be forwarded (already in use?); the address will carry :${PORT}."
+    ok "Forwarding tailnet port ${PORT} → gateway on localhost (TLS passes through end to end)"
+  fi
+elif tailscale serve --bg --http="${PORT}" "http://127.0.0.1:${PORT}" 2>>/tmp/soulacy-serve.err; then
+  # Older CLI without --tcp: the http proxy still works inside WireGuard,
+  # but the gateway's certificate cannot reach the phone through it.
+  warn "This Tailscale CLI has no --tcp forwarding; using its http proxy instead (update Tailscale to get pinned TLS)."
 else
-  # Older CLIs use a different `serve` grammar; surface the real error rather
-  # than guessing, so the operator can act on it.
+  # Surface the real error rather than guessing, so the operator can act on it.
   err "'tailscale serve' failed:"
   sed 's/^/    /' /tmp/soulacy-serve.err >&2 || true
   die "Update Tailscale (brew upgrade tailscale) and re-run, or see 'tailscale serve --help'."
@@ -134,9 +145,12 @@ fi
 DNSNAME="$(tailscale status --json 2>/dev/null | sed -n 's/.*"DNSName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
 DNSNAME="${DNSNAME%.}" # strip trailing dot
 TSIP="$(tailscale ip -4 2>/dev/null | head -1)"
-# A certificate is issued for the MagicDNS name only, so https needs the name;
-# the raw IP stays http.
-if [ -n "$DNSNAME" ]; then ADDR="${SCHEME}://${DNSNAME}:${PORT}"; else ADDR="http://${TSIP}:${PORT}"; fi
+# The name, with no port when 443 is forwarded. The pairing QR from Mobile ›
+# Pair a device picks the same address by itself and adds the gateway's key
+# fingerprint after checking that it really answers TLS.
+if [ -n "$DNSNAME" ] && [ "${PUBLISHED_443:-0}" = "1" ]; then ADDR="https://${DNSNAME}"
+elif [ -n "$DNSNAME" ]; then ADDR="http://${DNSNAME}:${PORT}"
+else ADDR="http://${TSIP}:${PORT}"; fi
 
 # The gateway key is the `sy_`-prefixed api_key in config.yaml (provider keys
 # have other formats, so match on the sy_ prefix rather than position, and
@@ -155,7 +169,7 @@ done
 # ── 5. Tell the operator exactly what to do on the phone ─────────────────────
 hdr "Done — your gateway is reachable over Tailscale"
 printf "  Address:  ${BOLD}%s${NC}\n" "$ADDR"
-[ -n "$TSIP" ] && printf "  (or:      ${BOLD}http://%s:%s${NC})\n" "$TSIP" "$PORT"
+[ -n "$TSIP" ] && [ "${PUBLISHED_443:-0}" != "1" ] && printf "  (or:      ${BOLD}http://%s:%s${NC})\n" "$TSIP" "$PORT"
 if [ -n "$API_KEY" ]; then
   printf "  API key:  ${BOLD}%s${NC}\n" "$API_KEY"
 else
@@ -176,6 +190,6 @@ On your iPhone (one time):
 It now works from anywhere your phone has internet — no Wi-Fi, ports, or domain
 needed. Traffic is encrypted end to end by Tailscale.
 
-To stop publishing later:  tailscale serve --${SCHEME}=${PORT} off
+To stop publishing later:  tailscale serve --tcp=443 off; tailscale serve --tcp=${PORT} off
 To leave the tailnet:       sudo tailscale down
 EOF
