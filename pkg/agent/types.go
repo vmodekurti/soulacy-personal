@@ -593,8 +593,8 @@ type Definition struct {
 
 	// SystemTools, when true, opts this agent into the OS-level built-in tool set
 	// (shell_exec, run_script, install_library, write_file, download_file, …).
-	// ALSO requires runtime.allow_system_tools: true in config.yaml — both must
-	// be set. This double opt-in prevents accidental exposure of system access.
+	// ALSO requires the agent's ID in runtime.allow_system_agents in config.yaml —
+	// both must be set. This double opt-in prevents accidental exposure of system access.
 	//
 	// SEC-3: SystemTools is retained for backward compatibility and is treated
 	// as equivalent to declaring the "system" capability (see Capabilities).
@@ -614,7 +614,7 @@ type Definition struct {
 	//
 	//   "system" — admits the destructive OS-level built-ins (shell_exec,
 	//              run_script, install_library, write_file, download_file).
-	//              Still requires runtime.allow_system_tools: true at the
+	//              Still requires the agent's ID in runtime.allow_system_agents at the
 	//              server level — both gates must pass.
 	//
 	// The legacy `system_tools: true` flag is honoured as an alias for
@@ -644,7 +644,7 @@ type Definition struct {
 	// it, so a scheduled agent that needs a privileged step fails every run.
 	// Default false: the safe behavior (deny when nobody can approve) is
 	// preserved; an operator opts into unattended execution explicitly. It does
-	// NOT widen what tools are offered (allow_system_tools still gates that) — it
+	// NOT widen what tools are offered (runtime.allow_system_agents still gates that) — it
 	// only resolves the confirmation gate non-interactively.
 	Unattended bool `yaml:"unattended,omitempty" json:"unattended,omitempty"`
 

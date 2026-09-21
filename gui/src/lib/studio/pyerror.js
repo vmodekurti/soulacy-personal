@@ -82,10 +82,10 @@ const PLATFORM_RULES = [
   },
   {
     // The server ceiling — NOT resolvable from Studio, so no action button.
-    match: /allow_system_tools|needs host execution but the server ceiling is off|requires the 'system' capability/,
+    match: /allow_system_agents|allow_system_tools|needs host execution but the server ceiling is off|requires the 'system' capability/,
     build: (m, text) => ({
       summary: `This workflow wants to run commands on the host machine${nodeFromError(text) ? ` (step “${nodeFromError(text)}”)` : ''}, which the server has switched off.`,
-      fix: 'This one isn’t fixable from Studio: an operator must set runtime.allow_system_tools: true in config.yaml and restart the gateway. Safer alternative — use a built-in tool instead of shelling out.',
+      fix: 'This one isn’t fixable from Studio: an operator must add this agent’s ID to the runtime.allow_system_agents list in config.yaml (a per-agent allowlist, not a switch) and restart the gateway. Safer alternative — use a built-in tool instead of shelling out.',
     }),
   },
   {

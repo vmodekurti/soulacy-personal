@@ -84,7 +84,7 @@ stakes, so:
    node's `requires`, and feeds `tier.Explain` so saving the workflow hits the
    existing consent gate. Reuse the tier machinery; extend it to read code nodes.
 2. **Capabilities stay default-deny.** Same as today: `system` needs the server
-   flag (`runtime.allow_system_tools`) AND the agent capability; `network` is
+   allowlist (`runtime.allow_system_agents`, which must name the agent) AND the agent capability; `network` is
    allow-listed. A code node that wants them is refused unless the operator has
    granted them — and the consent dialog names exactly why.
 3. **Secrets via the vault, never inline.** Generated code reads creds (CLI auth,
@@ -266,7 +266,7 @@ e.g. a `system`-requiring node contributes a privileged-builtin marker (or sets
 `capabilities:[system]`), pushing the workflow to **Privileged**. The existing
 `plan.go` path then sets `requiresConsent` for privileged+channel workflows and
 the current consent dialog fires verbatim. Runtime stays default-deny: a
-`system` code node only executes when `runtime.allow_system_tools` + the agent
+`system` code node only executes when the agent is named in `runtime.allow_system_agents` + the agent
 capability are present, exactly like `shell_exec`.
 
 _Test (here): a workflow with a `subprocess` python node classifies Privileged
@@ -398,7 +398,7 @@ warning and explicit user consent — never by a single blanket switch.**
 
 ### 13.2 What "per-case" means
 
-- **Not a global grant.** `runtime.allow_system_tools` is a *ceiling* the
+- **Not a global grant.** `runtime.allow_system_agents` is a per-agent *ceiling* the
   operator can lower to off — it is **not** a blanket "yes." Even with it on,
   every beyond-guardrail node still needs its own approval. Approving one node
   never auto-approves another.

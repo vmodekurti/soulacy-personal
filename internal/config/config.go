@@ -513,7 +513,9 @@ type RuntimeConfig struct {
 
 	// AllowSystemAgents is the SERVER-LEVEL permit for the destructive OS-level
 	// "system" built-ins (shell_exec, run_script, install_library, write_file,
-	// download_file). This now defaults to ["*"] to rely on the agent-level opt-in.
+	// download_file). It is a list of agent IDs and defaults to EMPTY: no agent
+	// gets system tools until an operator names it here. There is no global
+	// boolean (runtime.allow_system_tools is not a key and the schema rejects it).
 	// Even when an agent is listed here, it only receives system tools if it ALSO declares
 	// the "system" capability (capabilities: [system] in SOUL.yaml). The two
 	// gates are independent: the server permits, the agent opts in.

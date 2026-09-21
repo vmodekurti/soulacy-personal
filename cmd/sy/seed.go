@@ -120,7 +120,7 @@ func runSeedExamples(from string, force bool) error {
 			needs = append(needs, "MCP server(s) configured (MCP page or `sy mcp`)")
 		}
 		if strings.Contains(text, "system_tools: true") || strings.Contains(text, "allow_shell: true") {
-			needs = append(needs, "runtime.allow_system_tools + operator review")
+			needs = append(needs, "agent ID in runtime.allow_system_agents + operator review")
 		}
 		if prov := firstProvider(text); prov != "" && prov != "ollama" {
 			needs = append(needs, "API key for provider "+prov)

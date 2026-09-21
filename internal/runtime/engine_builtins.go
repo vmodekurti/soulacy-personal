@@ -558,7 +558,7 @@ func (e *Engine) buildSemanticMemoryBuiltin() BuiltinTool {
 
 // privilegedSystemTools is the set of OS-level built-ins that can mutate the
 // host or execute arbitrary code (SEC-3 "SYSTEM" partition). These are offered
-// ONLY when the server permits (runtime.allow_system_tools) AND the agent
+// ONLY when the server permits (agent ID in runtime.allow_system_agents) AND the agent
 // declares the "system" capability. Everything else returned by
 // buildSystemTools is treated as a read-only "SAFE" tool, always available.
 //
@@ -580,7 +580,7 @@ func (e *Engine) buildSemanticMemoryBuiltin() BuiltinTool {
 func isPrivilegedSystemTool(name string) bool { return toolSecurityClasses[name].Privileged }
 
 // safeSystemTools returns only the read-only OS-level built-ins (the SAFE
-// partition). Always available regardless of allow_system_tools / capabilities.
+// partition). Always available regardless of allow_system_agents / capabilities.
 func (e *Engine) safeSystemTools() []BuiltinTool {
 	all := e.buildSystemTools()
 	out := all[:0:0]

@@ -3668,7 +3668,7 @@ Use null for fields that are not present.`
   // Deliberately does NOT save: the whole point is to keep iterating in the
   // workbench. This is not a security shortcut — the engine re-validates every
   // stamp against the code it actually receives (hash binding), and the
-  // allow_system_tools ceiling is enforced server-side regardless, so a grant
+  // allow_system_agents ceiling is enforced server-side regardless, so a grant
   // made here can never widen what the server permits.
   async function grantAndRerun() {
     if (!consent || !workflow) return

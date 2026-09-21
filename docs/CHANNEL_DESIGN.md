@@ -36,7 +36,7 @@ func externalChannelAgentAllowed(adapterID, agentID string, log *zap.Logger) boo
 
 If a config tries to bind the System agent to Telegram/Discord/Slack/WhatsApp, the adapter is silently dropped at startup with a warn log. The single-bot legacy path and the multi-bot `bots:` lists both call this guard.
 
-**`system_tools: true` is also gated at config level** (`pkg/agent/types.go:275-279`): "ALSO requires runtime.allow_system_tools: true in config.yaml — both must" be present. So even the agent's own opt-in to shell_exec requires a process-level second toggle.
+**`system_tools: true` (alias of `capabilities: [system]`) is also gated at config level** (`pkg/agent/types.go`, `SystemTools`): the agent's ID must also appear in the `runtime.allow_system_agents` list in `config.yaml` — both must be present. So even the agent's own opt-in to shell_exec requires a per-agent, server-side second gate.
 
 ---
 
