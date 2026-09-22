@@ -29,7 +29,9 @@
       if (!inst) inst = echarts.init(node, null, { renderer: 'canvas' })
       const c = block.chart || {}
       const palette = [tokenColor(node, '--sl-accent', '#3fd1db'), tokenColor(node, '--sl-mango', '#ffb020'), tokenColor(node, '--sl-coral', '#ff5c72'), tokenColor(node, '--sl-leaf', '#37b46a')]
-      inst.setOption(themeEChartsOption({
+      // The shared theme paints series with its own gradient after the fact;
+      // apply it, then put the tropical palette back on top.
+      const themed = themeEChartsOption({
         color: palette,
         grid: { left: 8, right: 8, top: 28, bottom: 8, containLabel: true },
         tooltip: { trigger: 'axis' },
@@ -38,7 +40,14 @@
         yAxis: { type: 'value', scale: true },
         series: (c.series || []).map((s, i) => ({ name: s.name, type: c.type === 'line' ? 'line' : 'bar', data: s.values, smooth: true, barMaxWidth: 34,
           itemStyle: { color: palette[i % palette.length], borderRadius: c.type === 'line' ? 0 : [4, 4, 0, 0] }, lineStyle: { color: palette[i % palette.length] } })),
-      }))
+      })
+      themed.color = palette
+      ;(themed.series || []).forEach((s, i) => {
+        s.itemStyle = { ...(s.itemStyle || {}), color: palette[i % palette.length] }
+        s.lineStyle = { ...(s.lineStyle || {}), color: palette[i % palette.length] }
+        if (s.areaStyle) s.areaStyle = { ...s.areaStyle, color: palette[i % palette.length], opacity: 0.15 }
+      })
+      inst.setOption(themed, true)
       inst.resize()
     }
     draw()
