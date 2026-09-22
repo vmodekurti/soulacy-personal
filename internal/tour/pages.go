@@ -134,6 +134,21 @@ var pages = map[string]page{
 		},
 	},
 
+	// Your agents as a feed. Inbox asked "what needs me?"; this asks "what
+	// happened?", and puts the two in one scrolling place.
+	"feed": {
+		stage: StageEyes, nextAction: "", nextLabel: "",
+		role:         "Everything your agents did, found, or sent — newest first.",
+		contribution: "Anything that needs your yes sits at the top; everything else scrolls, like a feed you already know how to read.",
+		whenEmpty: func(InstallState) string {
+			return "Empty until an agent finishes something. Run one from Genie or a template and its result appears here as a card you can save, reply to, or share."
+		},
+		whenUsed: func(s InstallState) string {
+			return fmt.Sprintf("%s so far. Double-tap a card to save it, reply to pick the conversation up in Chat, and tap a face in the rail to watch that agent live.",
+				plural(s.Runs, "result", "results"))
+		},
+	},
+
 	"dashboard": {
 		stage: StageEyes, nextAction: "", nextLabel: "",
 		role:         "The overnight summary.",
