@@ -171,9 +171,9 @@
   .header-actions { display: flex; gap: .5rem; }
   .banner { padding: .65rem 1rem; border-radius: 8px; font-size: .82rem; flex-shrink: 0; }
   .err  { background: rgba(240,96,96,.1); border: 1px solid rgba(240,96,96,.3); color: #f06060; }
-  .info { background: rgba(108,99,255,.08); border: 1px solid rgba(108,99,255,.2); color: #8b85ff; }
+  .info { background: color-mix(in srgb, var(--sl-accent) 8%, transparent); border: 1px solid color-mix(in srgb, var(--sl-accent) 20%, transparent); color: var(--sl-accent-hover); }
 
-  .active { background: rgba(108,99,255,.15) !important; color: #8b85ff !important; border-color: rgba(108,99,255,.4) !important; }
+  .active { background: color-mix(in srgb, var(--sl-accent) 15%, transparent) !important; color: var(--sl-accent-hover) !important; border-color: color-mix(in srgb, var(--sl-accent) 40%, transparent) !important; }
 
   .toolbar {
     display: flex; gap: .5rem; align-items: center; flex-shrink: 0; flex-wrap: wrap;

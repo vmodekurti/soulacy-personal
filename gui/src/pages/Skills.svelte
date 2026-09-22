@@ -715,7 +715,7 @@
   }
   .empty-icon { font-size: 2rem; }
   .hint { font-size: .78rem; }
-  .hint code { background: #1c1f35; padding: .1rem .3rem; border-radius: 4px; color: #8b85ff; }
+  .hint code { background: #1c1f35; padding: .1rem .3rem; border-radius: 4px; color: var(--sl-accent-hover); }
 
   /* Filter over installed skills. Sticky so it stays reachable while the list
      scrolls — the list is the thing you are searching. */
@@ -744,9 +744,9 @@
     display: flex; flex-direction: column; gap: .3rem;
   }
   .skill-row:hover  { background: var(--sl-surface); }
-  .skill-row.active { background: rgba(108,99,255,.12); }
+  .skill-row.active { background: color-mix(in srgb, var(--sl-accent) 12%, transparent); }
   .skill-row-top    { display: flex; align-items: center; justify-content: space-between; }
-  .skill-name    { font-weight: 600; font-size: .87rem; font-family: monospace; color: #8b85ff; }
+  .skill-name    { font-weight: 600; font-size: .87rem; font-family: monospace; color: var(--sl-accent-hover); }
   .skill-license { font-size: .68rem; color: #555a7a; }
   .skill-builtin { font-size: .65rem; padding: .05rem .4rem; border-radius: 999px; background: rgba(96,240,160,.12); color: #60f0a0; border: 1px solid rgba(96,240,160,.3); margin-left: .4rem; }
   .skill-desc    { font-size: .78rem; color: #7b82a8; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
@@ -765,7 +765,7 @@
   .detail-empty-icon { font-size: 2.5rem; }
 
   .detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
-  .detail-name   { font-size: 1.1rem; font-weight: 700; font-family: monospace; color: #8b85ff; }
+  .detail-name   { font-size: 1.1rem; font-weight: 700; font-family: monospace; color: var(--sl-accent-hover); }
   .detail-compat { font-size: .78rem; color: #555a7a; margin-top: .2rem; }
   .detail-meta   { display: flex; flex-wrap: wrap; gap: .35rem; }
   .meta-chip {
@@ -801,7 +801,7 @@
   }
   .info-card h3 { font-size: .875rem; font-weight: 600; }
   .info-card p  { font-size: .82rem; color: #7b82a8; line-height: 1.6; }
-  .info-card code { background: #1c1f35; padding: .1rem .35rem; border-radius: 4px; font-size: .78rem; color: #8b85ff; }
+  .info-card code { background: #1c1f35; padding: .1rem .35rem; border-radius: 4px; font-size: .78rem; color: var(--sl-accent-hover); }
   .code-block {
     background: #0e1020; border: 1px solid var(--sl-line); border-radius: 6px;
     padding: .75rem 1rem; font-family: monospace; font-size: .8rem;
@@ -821,9 +821,9 @@
     background: #0e1020; border: 1px solid #2a2f4a; border-radius: 6px;
     padding: .35rem .6rem; font-size: .8rem;
   }
-  .src-id { font-family: monospace; color: #8b85ff; }
+  .src-id { font-family: monospace; color: var(--sl-accent-hover); }
   .src-type {
-    background: rgba(108,99,255,.15); border-radius: 999px;
+    background: color-mix(in srgb, var(--sl-accent) 15%, transparent); border-radius: 999px;
     padding: .05rem .5rem; font-size: .7rem; color: #ada8ff;
   }
   .src-url { color: var(--sl-text-faint); font-size: .75rem; overflow: hidden; text-overflow: ellipsis; }
@@ -853,7 +853,7 @@
   .src-warnings p:last-child { margin-bottom: 0; }
   .src-suggestions {
     margin-bottom: .6rem; padding: .55rem .65rem; border-radius: 7px;
-    border: 1px solid rgba(108,99,255,.35); background: rgba(108,99,255,.1);
+    border: 1px solid color-mix(in srgb, var(--sl-accent) 35%, transparent); background: color-mix(in srgb, var(--sl-accent) 10%, transparent);
     color: #ada8ff; font-size: .78rem; line-height: 1.45;
   }
   .src-suggestions p { margin: 0 0 .35rem; }
@@ -876,7 +876,7 @@
     padding: .3rem 0; border-bottom: 1px solid #1c2038; font-size: .8rem;
   }
   .find-row-main { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
-  .find-row-main > code { color: #8b85ff; }
+  .find-row-main > code { color: var(--sl-accent-hover); }
   .install-feedback {
     width: 100%; box-sizing: border-box; margin-top: .45rem; padding: .5rem .6rem;
     border-radius: 6px; line-height: 1.4; overflow-wrap: anywhere;
@@ -888,22 +888,22 @@
     margin-top: .65rem; padding-top: .65rem; border-top: 1px solid #1c2038;
   }
   .direct-install code {
-    color: #8b85ff; background: rgba(108,99,255,.1);
-    border: 1px solid rgba(108,99,255,.2); border-radius: 5px;
+    color: var(--sl-accent-hover); background: color-mix(in srgb, var(--sl-accent) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--sl-accent) 20%, transparent); border-radius: 5px;
     padding: .18rem .45rem; word-break: break-all;
   }
   .find-desc { color: #9aa0c0; flex: 1; min-width: 12rem; }
   .find-install { color: var(--sl-text-faint); font-size: .72rem; }
   .find-install.installed { color: #4caf82; font-weight: 650; }
   .btn-install {
-    border: 1px solid rgba(108,99,255,.45); background: rgba(108,99,255,.14);
+    border: 1px solid color-mix(in srgb, var(--sl-accent) 45%, transparent); background: color-mix(in srgb, var(--sl-accent) 14%, transparent);
     color: #c8c5ff; border-radius: 6px; padding: .28rem .6rem;
     font-size: .74rem; font-weight: 700; cursor: pointer;
   }
-  .btn-install:hover { background: rgba(108,99,255,.22); }
+  .btn-install:hover { background: color-mix(in srgb, var(--sl-accent) 22%, transparent); }
   .btn-install:disabled { opacity: .55; cursor: not-allowed; }
   .src-samples code {
-    background: rgba(108,99,255,.12); border-radius: 4px;
+    background: color-mix(in srgb, var(--sl-accent) 12%, transparent); border-radius: 4px;
     padding: .1rem .4rem; font-size: .72rem; color: #ada8ff;
   }
 </style>

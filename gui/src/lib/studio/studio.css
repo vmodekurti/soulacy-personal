@@ -18,8 +18,8 @@
   --border: #262e44;
   --text: #e6e9f2;
   --text-muted: #8b93ab;
-  --accent: #6c63ff;
-  --accent-dim: rgba(108, 99, 255, 0.18);
+  --accent: var(--sl-accent);
+  --accent-dim: color-mix(in srgb, var(--sl-accent) 18%, transparent);
   --ok: #36d399;
   --warn: #f5c542;
   --error: #ff6b81;

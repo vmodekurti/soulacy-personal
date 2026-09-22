@@ -328,7 +328,7 @@ let chartSeq = 0
 // labels, axes structure, and title are preserved; visuals are themed.
 
 // Vibrant palette anchored on the app accent.
-const CHART_PALETTE = ['#6c63ff', '#22d3ee', '#34d399', '#fbbf24', '#fb7185', '#a78bfa', '#38bdf8']
+const CHART_PALETTE = ['var(--sl-accent)', '#22d3ee', '#34d399', '#fbbf24', '#fb7185', '#a78bfa', '#38bdf8']
 
 // Convert a #hex (3 or 6 digit) to an rgba() string with the given alpha.
 function hexA(hex, a) {
@@ -353,7 +353,7 @@ function readTheme() {
   const root = getComputedStyle(document.documentElement)
   const v = (n, f) => root.getPropertyValue(n).trim() || f
   _theme = {
-    accent: v('--accent', '#6c63ff'),
+    accent: v('--accent', 'var(--sl-accent)'),
     text: v('--text', '#e6e9f2'),
     tick: v('--text-muted', '#8b93ab'),
     grid: 'rgba(255,255,255,0.06)',

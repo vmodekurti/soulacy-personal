@@ -428,7 +428,7 @@
 </aside>
 
 <style>
-  .item-loading { font-size: 10px; color: var(--accent, #8b85ff); margin-left: 6px; }
+  .item-loading { font-size: 10px; color: var(--accent, var(--sl-accent-hover)); margin-left: 6px; }
   .item.openable:disabled { opacity: .55; cursor: progress; }
   .palette {
     flex: 0 0 260px;

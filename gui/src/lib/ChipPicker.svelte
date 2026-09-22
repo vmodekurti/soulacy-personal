@@ -215,7 +215,7 @@
     cursor: text;
     transition: border-color .15s;
   }
-  .chip-picker:focus-within { border-color: var(--sl-accent); box-shadow: 0 0 0 2px rgba(108, 99, 255, 0.15); }
+  .chip-picker:focus-within { border-color: var(--sl-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--sl-accent) 15%, transparent); }
   .chip-picker.disabled { opacity: .55; cursor: not-allowed; }
 
   .chips-row {
@@ -225,14 +225,14 @@
   }
   .chip {
     display: inline-flex; align-items: center; gap: .25rem;
-    background: rgba(108,99,255,.18); border: 1px solid rgba(108,99,255,.4);
+    background: color-mix(in srgb, var(--sl-accent) 18%, transparent); border: 1px solid color-mix(in srgb, var(--sl-accent) 40%, transparent);
     color: #c8cadf; font-size: .8rem;
     padding: .12rem .5rem .12rem .55rem;
     border-radius: 999px; font-family: monospace;
   }
   .chip-label { white-space: nowrap; }
   .chip-x {
-    background: none; border: none; color: #8b85ff;
+    background: none; border: none; color: var(--sl-accent-hover);
     cursor: pointer; padding: 0 0 0 .15rem; font-size: 1rem; line-height: 1;
   }
   .chip-x:hover { color: #f06060; }
@@ -245,11 +245,11 @@
 
   .browse-btn {
     margin-left: auto; flex-shrink: 0;
-    background: rgba(108,99,255,.14); border: 1px solid rgba(108,99,255,.45);
+    background: color-mix(in srgb, var(--sl-accent) 14%, transparent); border: 1px solid color-mix(in srgb, var(--sl-accent) 45%, transparent);
     color: #ada8ff; border-radius: 6px; cursor: pointer;
     font-size: .8rem; line-height: 1; padding: .25rem .5rem;
   }
-  .browse-btn:hover { background: rgba(108,99,255,.25); }
+  .browse-btn:hover { background: color-mix(in srgb, var(--sl-accent) 25%, transparent); }
 
   .suggestions {
     position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 50;
@@ -271,7 +271,7 @@
     display: flex; align-items: baseline; gap: .6rem;
     font-size: .82rem; color: #c8cadf;
   }
-  .suggestion:hover, .suggestion.active { background: rgba(108,99,255,.12); }
-  .suggestion-label { font-family: monospace; color: #8b85ff; flex-shrink: 0; }
+  .suggestion:hover, .suggestion.active { background: color-mix(in srgb, var(--sl-accent) 12%, transparent); }
+  .suggestion-label { font-family: monospace; color: var(--sl-accent-hover); flex-shrink: 0; }
   .suggestion-desc { color: var(--sl-text-faint); font-size: .75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

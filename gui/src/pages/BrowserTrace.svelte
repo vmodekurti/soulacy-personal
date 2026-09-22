@@ -395,7 +395,7 @@
     border: 1px solid #252a46; background: #15182a; color: #c5c9e8;
     border-radius: 7px; padding: .36rem .55rem; font-size: .74rem; cursor: pointer;
   }
-  .filter-group button.on { border-color: var(--sl-accent); background: rgba(108,99,255,.16); color: #e8eaf6; }
+  .filter-group button.on { border-color: var(--sl-accent); background: color-mix(in srgb, var(--sl-accent) 16%, transparent); color: #e8eaf6; }
   .trace-actions button:disabled { opacity: .5; cursor: not-allowed; }
   .shot-gallery { margin-bottom: 1rem; background: #111426; border: 1px solid #20243d; border-radius: 9px; padding: .75rem; }
   .gallery-head { display: flex; align-items: baseline; justify-content: space-between; gap: .75rem; margin-bottom: .65rem; }

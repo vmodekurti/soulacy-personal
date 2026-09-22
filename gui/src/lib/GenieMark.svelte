@@ -37,7 +37,7 @@
   {#if gradient}
     <defs>
       <linearGradient id={uid} x1="4" y1="22" x2="20" y2="2" gradientUnits="userSpaceOnUse">
-        <stop offset="0" stop-color="#8b85ff" />
+        <stop offset="0" stop-color="var(--sl-accent-hover)" />
         <stop offset="1" stop-color="#4ad6c4" />
       </linearGradient>
     </defs>

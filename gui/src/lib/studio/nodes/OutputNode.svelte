@@ -41,7 +41,7 @@
   }
   .channel {
     font-size: 11px;
-    background: var(--accent-dim, rgba(108, 99, 255, 0.18));
+    background: var(--accent-dim, color-mix(in srgb, var(--sl-accent) 18%, transparent));
     border: 1px solid var(--accent, var(--sl-accent));
     border-radius: 999px;
     padding: 1px 8px;
