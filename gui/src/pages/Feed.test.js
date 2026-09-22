@@ -90,3 +90,15 @@ describe('Feed stories', () => {
     expect(target.querySelector('.viewer')).toBeNull()
   })
 })
+
+describe('Feed cards read like posts', () => {
+  beforeEach(stubGateway)
+  afterEach(() => { if (cmp) cmp.$destroy(); if (target) target.remove(); cmp = null; target = null; vi.unstubAllGlobals() })
+
+  it('shows a headline from the first sentence and keeps the caption short', async () => {
+    await mount()
+    const card = [...target.querySelectorAll('article.card')].find(c => c.textContent.includes('best fares'))
+    expect(card.querySelector('.title').textContent).toContain('Here are the')
+    expect(card.querySelector('.body').textContent).not.toContain('Here are the')
+  })
+})

@@ -95,9 +95,46 @@
     if (now - prev < 350) { toggleSave(card); burst(card.id) }
   }
   let bursting = ''
+  // A post, not a transcript: a headline (first heading or first sentence) and
+  // a short caption. Redaction markers are hidden; a table whose separator row
+  // the gateway redacted (#197) is repaired so it renders as a table.
+  function headlineOf(body) {
+    for (const raw of String(body || '').split('\n')) {
+      const line = raw.trim()
+      if (!line || line.startsWith('|') || line.startsWith('```') || line.startsWith('[REDACTED')) continue
+      if (line.startsWith('#')) return line.replace(/^#+\s*/, '').slice(0, 110)
+      const plain = line.replace(/\*\*|__|`/g, '')
+      const m = plain.match(/^(.{25,}?[.!?])(\s|$)/)
+      return (m ? m[1] : plain).slice(0, 110)
+    }
+    return ''
+  }
+  function captionOf(body, headline) {
+    let lines = String(body || '').split('\n')
+    if (headline) {
+      const i = lines.findIndex(l => l.trim().replace(/^#+\s*/, '').replace(/\*\*|__|`/g, '').startsWith(headline.slice(0, 20)))
+      if (i >= 0) {
+        const t = lines[i].trim()
+        const plain = t.replace(/^#+\s*/, '').replace(/\*\*|__|`/g, '')
+        if (t.startsWith('#') || plain.length <= headline.length + 2) lines.splice(i, 1)
+        else lines[i] = plain.slice(headline.length).trim()
+      }
+    }
+    const out = []
+    for (let i = 0; i < lines.length; i++) {
+      const t = lines[i].trim()
+      if (t.startsWith('|') && i + 1 < lines.length && lines[i + 1].trim().startsWith('[REDACTED')) {
+        const cols = Math.max(1, t.split('|').length - 2)
+        out.push(lines[i], '|---'.repeat(cols) + '|'); i += 1; continue
+      }
+      out.push(lines[i])
+    }
+    return out.join('\n').replace(/\s*\[REDACTED:[0-9a-f]+\]/g, '').trim()
+  }
   // Long outputs are clamped like a caption; 'more' opens the whole thing.
   let expanded = new Set()
-  function isLong(card) { return (card.body || '').length > 900 || ((card.body || '').match(/\n/g) || []).length > 14 }
+  function captionFor(card) { return captionOf(card.body, card.title ? '' : headlineOf(card.body)) }
+  function isLong(card) { const c = captionFor(card); return c.length > 320 || (c.match(/\n/g) || []).length > 5 }
   function toggleMore(card) { if (expanded.has(card.id)) expanded.delete(card.id); else expanded.add(card.id); expanded = new Set(expanded) }
   function burst(id) { bursting = id; setTimeout(() => { if (bursting === id) bursting = '' }, 700) }
 
@@ -211,8 +248,8 @@
             </div>
           </div>
         {:else}
-          {#if card.title}<div class="title">{card.title}</div>{/if}
-          <div class="body markdown-body" class:clamped={isLong(card) && !expanded.has(card.id)} use:richRenderer={card.body}>{@html parseMarkdown(card.body)}</div>
+          {#if card.title || headlineOf(card.body)}<div class="title">{card.title || headlineOf(card.body)}</div>{/if}
+          <div class="body markdown-body" class:clamped={isLong(card) && !expanded.has(card.id)} use:richRenderer={captionFor(card)}>{@html parseMarkdown(captionFor(card))}</div>
           {#if isLong(card)}
             <button class="more" on:click|stopPropagation={() => toggleMore(card)}>{expanded.has(card.id) ? 'less' : 'more'}</button>
           {/if}
@@ -276,9 +313,9 @@
   .chip { margin-left: auto; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
   .chip.bad { background: color-mix(in srgb, var(--f-coral) 12%, transparent); color: var(--f-coral); }
   .chip.new { background: var(--sl-accent-soft); color: var(--f-accent-ink); }
-  .title { padding: 0 16px 6px; font-weight: 700; font-size: 15px; }
-  .body { padding: 4px 16px 6px; font-size: 14px; line-height: 1.5; color: var(--f-ink); overflow-wrap: anywhere; }
-  .body.clamped { max-height: 340px; overflow: hidden; -webkit-mask-image: linear-gradient(#000 78%, transparent); mask-image: linear-gradient(#000 78%, transparent); }
+  .title { padding: 0 16px 4px; font-weight: 600; font-size: 15px; line-height: 1.3; }
+  .body { padding: 2px 16px 6px; font-size: 13.5px; line-height: 1.45; color: var(--f-ink-2); overflow-wrap: anywhere; }
+  .body.clamped { max-height: 120px; overflow: hidden; -webkit-mask-image: linear-gradient(#000 78%, transparent); mask-image: linear-gradient(#000 78%, transparent); }
   .more { background: none; border: 0; color: var(--f-ink-3); font: inherit; font-size: 13px; padding: 0 16px 6px; cursor: pointer; }
   .more:hover { color: var(--f-accent-ink); }
   .body :global(p) { margin: 0 0 .6em; }
