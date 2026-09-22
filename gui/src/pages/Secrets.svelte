@@ -412,10 +412,10 @@
   .header-actions { display: flex; gap: .5rem; }
 
   .note-card {
-    background: rgba(108,99,255,.06); border: 1px solid rgba(108,99,255,.18);
+    background: color-mix(in srgb, var(--sl-accent) 6%, transparent); border: 1px solid color-mix(in srgb, var(--sl-accent) 18%, transparent);
     border-radius: 8px; padding: .7rem 1rem; font-size: .82rem; color: #9b96e8; line-height: 1.6;
   }
-  .note-card code { background: #1c1f35; padding: .08rem .35rem; border-radius: 4px; font-size: .76rem; color: #8b85ff; }
+  .note-card code { background: #1c1f35; padding: .08rem .35rem; border-radius: 4px; font-size: .76rem; color: var(--sl-accent-hover); }
 
   .banner { padding: .7rem 1rem; border-radius: 8px; font-size: .85rem; }
   .err { background: rgba(240,96,96,.1); border: 1px solid rgba(240,96,96,.3); color: #f06060; }
@@ -439,7 +439,7 @@
   }
   .secret-info { display: flex; flex-direction: column; gap: .3rem; min-width: 0; flex: 1; }
   .secret-head { display: flex; align-items: center; gap: .55rem; flex-wrap: wrap; }
-  .secret-name { font-family: monospace; font-size: .82rem; color: #8b85ff; overflow-wrap: anywhere; }
+  .secret-name { font-family: monospace; font-size: .82rem; color: var(--sl-accent-hover); overflow-wrap: anywhere; }
   .secret-desc { font-size: .8rem; color: #c8cadf; line-height: 1.5; }
   .secret-env  { font-size: .72rem; color: var(--sl-text-faint); }
   .secret-env code { background: #1c1f35; padding: .05rem .3rem; border-radius: 4px; color: #7b82a8; }
@@ -456,7 +456,7 @@
   .small-btn { padding: .35rem .8rem; font-size: .78rem; border-radius: 6px; white-space: nowrap; }
 
   .hint { font-size: .78rem; color: var(--sl-text-faint); line-height: 1.6; }
-  .hint code { background: #1c1f35; padding: .08rem .35rem; border-radius: 4px; font-size: .72rem; color: #8b85ff; }
+  .hint code { background: #1c1f35; padding: .08rem .35rem; border-radius: 4px; font-size: .72rem; color: var(--sl-accent-hover); }
 
   .custom-row { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
   .custom-name  { flex: 0 0 220px; font-family: monospace; font-size: .8rem; }

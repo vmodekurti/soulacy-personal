@@ -1428,7 +1428,7 @@
   .field { display: flex; flex-direction: column; gap: .35rem; }
   .field label { font-size: .78rem; color: #7b82a8; font-weight: 500; }
   .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
-  .inline-status { margin-left: .35rem; color: #8b85ff; font-size: .72rem; font-weight: 500; }
+  .inline-status { margin-left: .35rem; color: var(--sl-accent-hover); font-size: .72rem; font-weight: 500; }
   .inline-error { margin-left: .35rem; color: #f0a060; font-size: .72rem; font-weight: 500; cursor: help; }
   .tiny-btn { font-size: .72rem; padding: .25rem .55rem; }
   .mini-warn { padding: .5rem .65rem; border-radius: 8px; background: rgba(240,160,96,.1); border: 1px solid rgba(240,160,96,.25); color: #f0a060; font-size: .75rem; }
@@ -1440,10 +1440,10 @@
   .executor-card.fail { border-color: rgba(240,96,96,.4); }
   .executor-top { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
   .executor-top strong { font-size: .78rem; color: #c5c8e8; }
-  .executor-top span { font-size: .65rem; text-transform: uppercase; letter-spacing: .05em; color: #8b85ff; }
+  .executor-top span { font-size: .65rem; text-transform: uppercase; letter-spacing: .05em; color: var(--sl-accent-hover); }
   .executor-card p { margin: 0; color: #9aa1c6; font-size: .74rem; line-height: 1.45; }
   .executor-card small { color: var(--sl-text-faint); font-size: .7rem; line-height: 1.35; }
-  .executor-card code { margin-top: auto; background: #0b0d19; border: 1px solid var(--sl-line); padding: .35rem; border-radius: 6px; color: #8b85ff; font-size: .68rem; overflow-wrap: anywhere; }
+  .executor-card code { margin-top: auto; background: #0b0d19; border: 1px solid var(--sl-line); padding: .35rem; border-radius: 6px; color: var(--sl-accent-hover); font-size: .68rem; overflow-wrap: anywhere; }
   .audit-list { display: flex; flex-direction: column; gap: .5rem; }
   .audit-row { border: 1px solid #202542; border-radius: 8px; background: #10121f; padding: .65rem .75rem; display: flex; flex-direction: column; gap: .35rem; }
   .audit-main { display: flex; align-items: baseline; justify-content: space-between; gap: .75rem; }
@@ -1451,7 +1451,7 @@
   .audit-main span { color: #7b82a8; font-size: .75rem; text-align: right; }
   .audit-meta { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; color: #68709a; font-size: .72rem; }
   .audit-status { padding: .08rem .35rem; border-radius: 999px; background: rgba(76,175,130,.12); color: #4caf82; }
-  .audit-status.accepted { background: rgba(139,133,255,.14); color: #aaa5ff; }
+  .audit-status.accepted { background: color-mix(in srgb, var(--sl-accent-hover) 14%, transparent); color: #aaa5ff; }
   .audit-row small { color: #8a91b8; font-size: .72rem; line-height: 1.35; }
 
   /* JSON column */
@@ -1475,7 +1475,7 @@
   .hint code { background: #1c1f35; padding: .08rem .35rem; border-radius: 4px; font-size: .72rem; }
   .hook-row { display: flex; flex-direction: column; gap: .15rem; padding: .5rem .65rem;
               background: #10121f; border: 1px solid var(--sl-line); border-radius: 8px; }
-  .hook-url { font-size: .78rem; color: #8b85ff; overflow-wrap: anywhere; }
+  .hook-url { font-size: .78rem; color: var(--sl-accent-hover); overflow-wrap: anywhere; }
   .hook-meta { font-size: .7rem; font-family: monospace; color: var(--sl-text-faint); }
   .plugin-settings { display: flex; flex-direction: column; gap: .35rem; padding: .5rem .65rem;
                      background: #10121f; border: 1px solid var(--sl-line); border-radius: 8px;
@@ -1539,7 +1539,7 @@
   }
   .intent-gate-radio > label:hover { border-color: #2a2f4a; }
   .intent-gate-radio > label.on {
-    background: rgba(108,99,255,.08); border-color: rgba(108,99,255,.4);
+    background: color-mix(in srgb, var(--sl-accent) 8%, transparent); border-color: color-mix(in srgb, var(--sl-accent) 40%, transparent);
   }
   .intent-gate-radio input[type=radio] { margin-top: .25rem; }
   .intent-gate-radio strong { color: #e7e8f5; font-size: .84rem; display: block; margin-bottom: .15rem; }

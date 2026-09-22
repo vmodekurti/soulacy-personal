@@ -226,7 +226,7 @@
     outline: none;
     z-index: 2;
   }
-  .yv-ta::selection { background: rgba(108,99,255,.35); }
+  .yv-ta::selection { background: color-mix(in srgb, var(--sl-accent) 35%, transparent); }
 
   /* Token colors */
   .yv :global(.y-key)     { color: #7fb4ff; }

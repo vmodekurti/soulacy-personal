@@ -72,5 +72,5 @@
     font-size: .78rem; font-weight: 500;
     padding: .34rem .7rem; white-space: nowrap;
   }
-  .tour-btn:hover { color: #b3adff; border-color: var(--sl-accent); background: rgba(108, 99, 255, 0.1); }
+  .tour-btn:hover { color: var(--sl-accent-ink); border-color: var(--sl-accent); background: color-mix(in srgb, var(--sl-accent) 10%, transparent); }
 </style>

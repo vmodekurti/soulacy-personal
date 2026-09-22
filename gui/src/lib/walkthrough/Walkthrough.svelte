@@ -167,7 +167,7 @@
   .wt-spot {
     position: fixed; z-index: 901;
     border-radius: 11px;
-    border: 1px solid rgba(139, 133, 255, 0.9);
+    border: 1px solid color-mix(in srgb, var(--sl-accent-hover) 90%, transparent);
     box-shadow: 0 0 0 9999px rgba(6, 8, 18, 0.72), 0 0 18px rgba(126, 92, 255, 0.55);
     pointer-events: none;
     transition: top 0.16s ease, left 0.16s ease, width 0.16s ease, height 0.16s ease;

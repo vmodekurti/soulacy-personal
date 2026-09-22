@@ -135,8 +135,8 @@
 
     // Wire edges into LLM
     es.push({ id: 'e-trig-llm', source: 'trigger', target: 'llm',
-              markerEnd: { type: MarkerType.ArrowClosed, color: '#8b85ff' },
-              style: 'stroke: #8b85ff' })
+              markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--sl-accent-hover)' },
+              style: 'stroke: var(--sl-accent-hover)' })
     es.push({ id: 'e-prompt-llm', source: 'prompt', target: 'llm',
               markerEnd: { type: MarkerType.ArrowClosed, color: '#f0c060' },
               style: 'stroke: #f0c060' })
@@ -145,8 +145,8 @@
               style: 'stroke: #7b82a8' })
     es.push({ id: 'e-llm-out', source: 'llm', target: 'output',
               animated: true,
-              markerEnd: { type: MarkerType.ArrowClosed, color: '#6c63ff' },
-              style: 'stroke: #6c63ff; stroke-width: 2' })
+              markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--sl-accent)' },
+              style: 'stroke: var(--sl-accent); stroke-width: 2' })
 
     return { ns, es }
   }
@@ -188,8 +188,8 @@
     const entry = wf.entry || wf.nodes[0].id
     es.push({
       id: 'e-trig-entry', source: 'trigger', target: `wf-${entry}`,
-      markerEnd: { type: MarkerType.ArrowClosed, color: '#8b85ff' },
-      style: 'stroke: #8b85ff',
+      markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--sl-accent-hover)' },
+      style: 'stroke: var(--sl-accent-hover)',
     })
 
     ns.push({
@@ -543,7 +543,7 @@
                padding: .55rem .7rem; text-align: left; cursor: pointer;
                display: flex; flex-direction: column; gap: .15rem; transition: border-color .12s; }
   .rail-item:hover { border-color: #2a2f4a; }
-  .rail-item.active { border-color: var(--sl-accent); background: rgba(108,99,255,.08); }
+  .rail-item.active { border-color: var(--sl-accent); background: color-mix(in srgb, var(--sl-accent) 8%, transparent); }
   .ri-name  { font-weight: 600; font-size: .82rem; }
   .ri-meta  { color: var(--sl-text-faint); font-size: .68rem; }
 
@@ -574,7 +574,7 @@
   :global(.cs-trigger) { border-color: var(--sl-accent) !important; }
   :global(.cs-prompt)  { border-color: #f0c060 !important; }
   :global(.cs-memory)  { border-color: #555a7a !important; }
-  :global(.cs-llm)     { border-color: var(--sl-accent) !important; background: linear-gradient(180deg, var(--sl-line) 0%, var(--sl-surface) 100%) !important; box-shadow: 0 0 24px rgba(108,99,255,.18) !important; }
+  :global(.cs-llm)     { border-color: var(--sl-accent) !important; background: linear-gradient(180deg, var(--sl-line) 0%, var(--sl-surface) 100%) !important; box-shadow: 0 0 24px color-mix(in srgb, var(--sl-accent) 18%, transparent) !important; }
   :global(.cs-tool)    { border-color: #4caf82 !important; }
   :global(.cs-output)  { border-color: var(--sl-accent) !important; }
   :global(.cs-empty)   { border-color: #2a2f4a !important; color: var(--sl-text-faint) !important; font-style: italic; }

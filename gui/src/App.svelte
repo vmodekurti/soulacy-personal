@@ -17,7 +17,7 @@
     loadWalkthroughState, startWalkthrough, shouldAutoStart,
   } from './lib/walkthrough/store.js'
 
-  let page = 'dashboard'
+  let page = 'feed'
   let shareToken = ''   // set from #share/<token> — renders the public read-only view
   let pluginPages = []   // nav entries for mounted plugin UIs (E8)
   let showKeyModal = false
@@ -35,6 +35,23 @@
   let pageLoadError = ''
   let pageLoadStale = false
   let pageLoadSeq = 0
+
+  // Day or night. Dark stays the default the product has always had; the
+  // choice is remembered per browser and applied before first paint via
+  // data-theme on <html> (see the tokens in the style block).
+  let theme = 'dark'
+  try { theme = localStorage.getItem('soulacy-theme') === 'light' ? 'light' : 'dark' } catch (_) {}
+  function applyTheme() {
+    if (typeof document === 'undefined') return
+    if (theme === 'light') document.documentElement.setAttribute('data-theme', 'light')
+    else document.documentElement.removeAttribute('data-theme')
+  }
+  applyTheme()
+  function toggleTheme() {
+    theme = theme === 'light' ? 'dark' : 'light'
+    try { localStorage.setItem('soulacy-theme', theme) } catch (_) {}
+    applyTheme()
+  }
 
   function toggleNav() {
     navCollapsed = !navCollapsed
@@ -60,7 +77,7 @@
   $: currentPageEntry = navPages.find(p => p.id === page) || pluginPages.find(p => p.id === page)
   $: currentPageLabel = currentPageEntry?.label || 'Soulacy'
   const currentWorkspaceLabel = 'Personal'
-  $: mobilePrimaryPages = navPages.filter(p => ['dashboard', 'studio', 'agents', 'chat'].includes(p.id))
+  $: mobilePrimaryPages = navPages.filter(p => ['feed', 'chat', 'studio', 'agents'].includes(p.id))
   $: mobileMoreActive = !mobilePrimaryPages.some(p => p.id === page)
 
   // `builder` used to alias to Studio: the one route name that should have
@@ -215,7 +232,7 @@
       //
       // replaceState, not pushState: the broken URL should not become a place
       // the back button can return to.
-      page = 'dashboard'
+      page = 'feed'
       sidebarOpen = false
       history.replaceState({}, '', '#dashboard')
     }
@@ -235,7 +252,7 @@
     let onboardingDecided = Promise.resolve()
     try {
       const seen = localStorage.getItem('soulacy-onboarding-seen') === '1'
-      if (!seen && !location.hash && page === 'dashboard') {
+      if (!seen && !location.hash && (page === 'feed' || page === 'dashboard')) {
         onboardingDecided = api.onboarding.status()
           .then((st) => {
             const provider = (st?.steps || []).find(s => s.key === 'provider')
@@ -532,6 +549,7 @@
           {$connected ? '● Live' : '○ Offline'}
         </span>
       {/if}
+      <button class="icon-btn" on:click={toggleTheme} title={theme === 'light' ? 'Switch to night' : 'Switch to day'} aria-label="Toggle light and dark">{theme === 'light' ? '☾' : '☀︎'}</button>
       <button class="icon-btn" on:click={openKeyModal} title="Change browser login">🔑</button>
     </div>
   </aside>
@@ -592,8 +610,8 @@
   :global(html, body) { height: 100%; }
   :global(html) { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   :global(body) {
-    background: #0c0e1a;
-    color: #e8eaf6;
+    background: var(--sl-bg);
+    color: var(--sl-text);
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     font-size: 14px;
     line-height: 1.5;
@@ -606,16 +624,16 @@
     align-items: center;
     justify-content: center;
     gap: 0.85rem;
-    color: #a9afcf;
-    background: radial-gradient(circle at 50% 35%, rgba(92, 79, 196, 0.14), transparent 34%), #0c0e1a;
+    color: var(--sl-text-dim);
+    background: radial-gradient(circle at 50% 35%, var(--sl-accent-soft), transparent 34%), var(--sl-bg);
   }
 
   /* ── Form elements ──────────────────────────────────────────────── */
   :global(input:not([type="radio"]):not([type="checkbox"])), :global(textarea), :global(select) {
-    background: #1c1f35;
-    border: 1px solid #2a2f4a;
+    background: var(--sl-surface-raised);
+    border: 1px solid var(--sl-line);
     border-radius: 6px;
-    color: #e8eaf6;
+    color: var(--sl-text);
     font-size: 14px;
     padding: 0.45rem 0.75rem;
     outline: none;
@@ -631,7 +649,7 @@
   :global(input:focus), :global(textarea:focus), :global(select:focus) {
 
     border-color: var(--sl-accent);
-    box-shadow: 0 0 0 2px rgba(108, 99, 255, 0.15);
+    box-shadow: 0 0 0 2px var(--sl-accent-soft);
   }
   :global(input:disabled), :global(textarea:disabled), :global(select:disabled) {
     opacity: 0.5; cursor: not-allowed;
@@ -688,17 +706,44 @@
      makes a dark interface look like a control panel rather than something
      you talk to. Tokens here so a later change is one edit, not twenty-six. */
   :global(:root) {
-    --sl-accent: #6c63ff;
-    --sl-accent-hover: #5b52ef;
-    --sl-accent-soft: rgba(139, 133, 255, 0.12);
-    --sl-surface: #141626;
-    --sl-surface-raised: #191c2f;
-    --sl-line: #1f2440;
-    --sl-text: #e6e9f5;
-    --sl-text-dim: #a9b0cc;
-    --sl-text-faint: #6b7294;
+    /* Soulacy look (#191, phase 1): one token set for every screen. Tropical —
+       sea and sand by day, a summer night after dark. The product has been
+       dark-only, so dark is still the default; data-theme="light" on <html>
+       switches the whole shell (toggle in the sidebar footer). */
+    --sl-accent: #3fd1db;
+    --sl-accent-hover: #6fe0e8;
+    --sl-accent-ink: #a7ecf1;
+    --sl-accent-soft: rgba(63, 209, 219, 0.14);
+    --sl-accent-soft-strong: rgba(63, 209, 219, 0.28);
+    --sl-coral: #ff5c72;
+    --sl-mango: #ffb020;
+    --sl-leaf: #37b46a;
+    --sl-bg: #0b1b2b;
+    --sl-surface: #10233a;
+    --sl-surface-raised: #163049;
+    --sl-line: #1f3347;
+    --sl-text: #f3eee6;
+    --sl-text-dim: #b8c0c9;
+    --sl-text-faint: #8a97a6;
     --sl-radius: 10px;
     --sl-radius-lg: 14px;
+  }
+  /* Gradients are not colours; the token test wants every token in the block
+     above to be a concrete colour, so the story ring lives here. */
+  :global(:root) { --story-ring: conic-gradient(from 200deg, #3fd1db, #37b46a, #ffb020, #ff5c72, #3fd1db); }
+  :global(:root[data-theme="light"]) {
+    --sl-accent: #0fb5a5;
+    --sl-accent-hover: #0a8f83;
+    --sl-accent-ink: #0a8f83;
+    --sl-accent-soft: rgba(15, 181, 165, 0.12);
+    --sl-accent-soft-strong: rgba(15, 181, 165, 0.24);
+    --sl-bg: #ffffff;
+    --sl-surface: #f6fbf9;
+    --sl-surface-raised: #ffffff;
+    --sl-line: #e2efeb;
+    --sl-text: #10312e;
+    --sl-text-dim: #4f6a66;
+    --sl-text-faint: #8aa19c;
   }
 
   :global(.btn-primary) {
@@ -722,7 +767,7 @@
     transition: color .15s ease, text-decoration-color .15s ease;
   }
   :global(.linkish:hover:not(:disabled)) {
-    color: #8b85ff; text-decoration-color: #8b85ff;
+    color: var(--sl-accent-hover); text-decoration-color: var(--sl-accent-hover);
   }
   :global(.linkish:disabled) { opacity: .5; cursor: default; text-decoration: none; }
 
@@ -733,7 +778,7 @@
     transition: border-color .15s ease;
   }
   :global(.btn-secondary:hover:not(:disabled)) { border-color: var(--sl-accent); }
-  :global(.btn-secondary:hover:not(:disabled)) { background: #252840; }
+  :global(.btn-secondary:hover:not(:disabled)) { background: var(--sl-line); }
 
   :global(.btn-danger) {
     background: #7f2020; color: #fff;
@@ -753,7 +798,7 @@
   /* ── Sidebar ─────────────────────────────────────────────────────── */
   .sidebar {
     width: 210px; flex-shrink: 0;
-    background: #0e1020;
+    background: var(--sl-surface);
     border-right: 1px solid var(--sl-line);
     display: flex; flex-direction: column;
     transition: width 0.16s ease;
@@ -777,7 +822,7 @@
     color: var(--sl-text-faint); font-size: 0.9rem; line-height: 1;
     padding: 0.2rem 0.35rem; border-radius: 6px; cursor: pointer;
   }
-  .nav-toggle:hover { background: #181b30; color: #c8cadf; }
+  .nav-toggle:hover { background: var(--sl-surface-raised); color: var(--sl-text); }
 
   @media (max-width: 768px) {
     .layout { flex-direction: column; }
@@ -791,19 +836,19 @@
       display: flex; align-items: center; gap: 0.55rem;
       min-height: calc(56px + env(safe-area-inset-top));
       padding: calc(0.4rem + env(safe-area-inset-top)) max(0.65rem, env(safe-area-inset-right)) 0.4rem max(0.65rem, env(safe-area-inset-left));
-      background: #0e1020;
+      background: var(--sl-surface);
       border-bottom: 1px solid var(--sl-line);
       flex-shrink: 0;
     }
     .hamburger {
-      background: none; color: #c8cadf;
+      background: none; color: var(--sl-text);
       width: 44px; height: 44px; display: grid; place-items: center;
       font-size: 1.35rem; line-height: 1; padding: 0; border-radius: 11px;
     }
-    .hamburger:hover { background: #181b30; }
+    .hamburger:hover { background: var(--sl-surface-raised); }
     .mobile-context { min-width: 0; display: grid; flex: 1; line-height: 1.2; }
-    .mobile-context strong { overflow: hidden; color: #f2f3fb; font-size: .9rem; text-overflow: ellipsis; white-space: nowrap; }
-    .mobile-context span { overflow: hidden; color: #737c9e; font-size: .66rem; text-overflow: ellipsis; white-space: nowrap; }
+    .mobile-context strong { overflow: hidden; color: var(--sl-text); font-size: .9rem; text-overflow: ellipsis; white-space: nowrap; }
+    .mobile-context span { overflow: hidden; color: var(--sl-text-faint); font-size: .66rem; text-overflow: ellipsis; white-space: nowrap; }
     .mobile-connection { width: 8px; height: 8px; flex: 0 0 8px; margin-right: .25rem; border-radius: 50%; background: #9d5260; box-shadow: 0 0 0 4px rgba(157,82,96,.1); }
     .mobile-connection.live { background: #59d7b0; box-shadow: 0 0 0 4px rgba(89,215,176,.1); }
 
@@ -847,13 +892,13 @@
       display: grid; grid-template-columns: repeat(auto-fit, minmax(54px, 1fr)); flex: 0 0 auto;
       min-height: calc(58px + env(safe-area-inset-bottom));
       padding: .3rem max(.35rem, env(safe-area-inset-right)) calc(.3rem + env(safe-area-inset-bottom)) max(.35rem, env(safe-area-inset-left));
-      border-top: 1px solid rgba(98,108,148,.2); background: rgba(12,15,29,.92);
+      border-top: 1px solid var(--sl-line); background: color-mix(in srgb, var(--sl-surface) 92%, transparent);
       box-shadow: 0 -10px 30px rgba(2,5,14,.24); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
     }
-    .mobile-tabs button { min-width: 0; min-height: 48px; display: grid; place-items: center; align-content: center; gap: .12rem; border-radius: 10px; color: #777f9f; background: transparent; }
+    .mobile-tabs button { min-width: 0; min-height: 48px; display: grid; place-items: center; align-content: center; gap: .12rem; border-radius: 10px; color: var(--sl-text-faint); background: transparent; }
     .mobile-tabs button > span { font-size: 1.05rem; line-height: 1; }
     .mobile-tabs small { max-width: 100%; overflow: hidden; font-size: .62rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-    .mobile-tabs button.active { color: #c4c0ff; background: rgba(108,99,255,.12); }
+    .mobile-tabs button.active { color: var(--sl-accent-ink); background: var(--sl-accent-soft); }
 
     :global(input:not([type="radio"]):not([type="checkbox"])), :global(textarea), :global(select) { font-size: 16px !important; }
     :global(.modal-bg), :global(.dialog-backdrop) { padding: max(.75rem, env(safe-area-inset-top)) max(.75rem, env(safe-area-inset-right)) max(.75rem, env(safe-area-inset-bottom)) max(.75rem, env(safe-area-inset-left)); }
@@ -892,7 +937,7 @@
     border-radius: 6px; padding: .22rem .1rem; font-size: .66rem; cursor: pointer;
   }
   .mode-btn:hover { color: var(--sl-text-dim); }
-  .mode-btn.on { border-color: #8b85ff; color: var(--sl-text); background: rgba(139,133,255,.1); }
+  .mode-btn.on { border-color: var(--sl-accent-hover); color: var(--sl-text); background: color-mix(in srgb, var(--sl-accent-hover) 10%, transparent); }
 
   .nav-section {
     padding: 0.9rem 0.65rem 0.4rem;
@@ -908,7 +953,7 @@
     transition: background 0.1s, color 0.1s;
   }
   .nav-item:hover  { background: #181b30; color: #d4d7ea; }
-  .nav-item.active { background: rgba(108, 99, 255, 0.16); color: #b3adff; }
+  .nav-item.active { background: color-mix(in srgb, var(--sl-accent) 16%, transparent); color: var(--sl-accent-ink); }
   .nav-icon { font-size: 1rem; width: 1.2rem; text-align: center; }
 
   /* Action item (not a page): restart the gateway — pinned at the bottom. */
@@ -932,7 +977,7 @@
   .restart-card p { margin: 0.6rem 0 0.25rem; font-weight: 500; }
   .restart-card small { color: #8b8fa8; }
   .restart-spinner {
-    display: inline-block; font-size: 1.8rem; color: #8b85ff;
+    display: inline-block; font-size: 1.8rem; color: var(--sl-accent-hover);
     animation: restart-spin 1s linear infinite;
   }
   @keyframes restart-spin { to { transform: rotate(360deg); } }

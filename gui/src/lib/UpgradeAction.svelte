@@ -196,7 +196,7 @@
     margin: 0.9rem 0;
     padding: 0.45rem 0.7rem;
     border-radius: 999px;
-    background: var(--sl-accent-soft, rgba(139, 133, 255, 0.12));
+    background: var(--sl-accent-soft, color-mix(in srgb, var(--sl-accent-hover) 12%, transparent));
     color: var(--sl-text-dim, #a4a9c6);
     font-size: 0.82rem;
   }

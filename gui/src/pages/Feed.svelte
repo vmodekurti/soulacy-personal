@@ -8,6 +8,7 @@
   import { parseMarkdown, richRenderer } from '../lib/markdown.js'
   import { activityAgent } from '../lib/stores.js'
   import TourButton from '../lib/TourButton.svelte'
+  import StoryViewer from '../lib/StoryViewer.svelte'
 
   let agents = []
   let cards = []
@@ -135,6 +136,16 @@
   onMount(() => { load(); connect(); refreshTimer = setInterval(() => load({ quiet: true }), 60000) })
   onDestroy(() => { if (socket) socket.close(); if (refreshTimer) clearInterval(refreshTimer) })
 
+  // Stories: Today = the newest results across agents; each agent = its own
+  // newest results. Opened from the rail.
+  let storyOpen = null
+  function slidesFor(agentId) {
+    const pick = cards.filter(c => c.kind !== 'approval' && (agentId === 'today' || c.agent === agentId)).slice(0, 6)
+    return pick.map(c => ({ id: c.id, at: c.at, title: c.title || '', body: c.body }))
+  }
+  $: storyList = stories.map(s => ({ id: s.id, label: s.label, glyph: s.glyph, hue: s.id === 'today' ? 28 : hue(s.id), slides: slidesFor(s.id) }))
+  function openStory(id) { storyOpen = Math.max(0, storyList.findIndex(s => s.id === id)) }
+
   $: stories = [
     { id: 'today', label: 'Today', glyph: '☀︎', live: false, seen: false },
     ...agents.filter(a => a.enabled !== false).map(a => ({ id: a.id, label: a.name || a.id, glyph: initials(a.id), live: running.has(a.id), seen: !cards.some(c => c.agent === a.id) })),
@@ -154,7 +165,7 @@
   <div class="stories" role="list" aria-label="Stories">
     {#each stories as s (s.id)}
       <button class="story" role="listitem" class:live={s.live} class:seen={s.seen} title={s.live ? `${s.label} is running now` : s.label}
-        on:click={() => { if (s.id !== 'today') { activityAgent.set(s.id); location.hash = '#activity' } }}>
+        on:click={() => openStory(s.id)}>
         <span class="ring"><span class="av" style="--h:{s.id === 'today' ? 28 : hue(s.id)}">{s.glyph}</span></span>
         <span class="label">{s.label}</span>
       </button>
@@ -219,14 +230,20 @@
   </div>
 
   {#if toast}<div class="toast">{toast}</div>{/if}
+  {#if storyOpen !== null}
+    <StoryViewer stories={storyList} index={storyOpen} on:close={() => storyOpen = null}
+      on:reply={(e) => { storyOpen = null; const a = e.detail.story?.id; activityAgent.set(a && a !== 'today' ? a : ''); location.hash = '#chat' }} />
+  {/if}
 </div>
 
 <style>
   /* Tropical tokens, scoped to the feed until the shell adopts them (#191 phase 1). */
   .feed {
-    --f-bg: #ffffff; --f-bg-2: #f6fbf9; --f-ink: #10312e; --f-ink-2: #4f6a66; --f-ink-3: #8aa19c;
-    --f-line: #e2efeb; --f-accent: #0fb5a5; --f-accent-ink: #0a8f83; --f-coral: #ff5c72; --f-mango: #ffb020; --f-leaf: #37b46a;
-    --f-ring: conic-gradient(from 200deg, #0fb5a5, #37b46a, #ffb020, #ff5c72, #0fb5a5);
+    /* Aliases onto the shell's tokens (App.svelte): the feed follows day/night
+       with everything else. */
+    --f-bg: var(--sl-bg); --f-bg-2: var(--sl-surface); --f-ink: var(--sl-text); --f-ink-2: var(--sl-text-dim); --f-ink-3: var(--sl-text-faint);
+    --f-line: var(--sl-line); --f-accent: var(--sl-accent); --f-accent-ink: var(--sl-accent-ink); --f-coral: var(--sl-coral); --f-mango: var(--sl-mango); --f-leaf: var(--sl-leaf);
+    --f-ring: var(--story-ring);
     background: var(--f-bg); color: var(--f-ink); margin: -1rem; padding: 0 0 4rem;
     /* The shell's content area is a column flexbox: grow with the cards, never
        cap at the viewport, or the white surface stops and text runs onto the
@@ -247,7 +264,7 @@
   .av { width: 100%; height: 100%; border-radius: 50%; border: 2.5px solid var(--f-bg); display: grid; place-items: center; font-weight: 700; color: #fff; background: linear-gradient(135deg, hsl(var(--h) 70% 45%), hsl(calc(var(--h) + 30) 80% 62%)); }
   .story .av { font-size: 17px; }
   @keyframes pulse { 0%,100% { filter: saturate(1); } 50% { filter: saturate(1.6) brightness(1.08); } }
-  .pill { position: sticky; top: 58px; z-index: 2; margin: 10px auto 0; display: block; background: var(--f-accent); color: #fff; border: 0; border-radius: 999px; padding: 6px 14px; font-weight: 600; cursor: pointer; box-shadow: 0 6px 18px rgba(15,181,165,.35); }
+  .pill { position: sticky; top: 58px; z-index: 2; margin: 10px auto 0; display: block; background: var(--f-accent); color: #fff; border: 0; border-radius: 999px; padding: 6px 14px; font-weight: 600; cursor: pointer; box-shadow: 0 6px 18px var(--sl-accent-soft-strong); }
   .cards { display: grid; justify-items: center; }
   .card { width: 100%; max-width: 560px; border-bottom: 1px solid var(--f-line); padding: 6px 0 8px; outline: none; }
   .card.needs { border: 1px solid var(--f-coral); border-radius: 12px; margin: 12px 16px 6px; width: calc(100% - 32px); }
@@ -257,8 +274,8 @@
   .who b { font-weight: 700; }
   .meta { color: var(--f-ink-3); font-size: 12px; }
   .chip { margin-left: auto; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
-  .chip.bad { background: rgba(255,92,114,.12); color: var(--f-coral); }
-  .chip.new { background: rgba(15,181,165,.12); color: var(--f-accent-ink); }
+  .chip.bad { background: color-mix(in srgb, var(--f-coral) 12%, transparent); color: var(--f-coral); }
+  .chip.new { background: var(--sl-accent-soft); color: var(--f-accent-ink); }
   .title { padding: 0 16px 6px; font-weight: 700; font-size: 15px; }
   .body { padding: 4px 16px 6px; font-size: 14px; line-height: 1.5; color: var(--f-ink); overflow-wrap: anywhere; }
   .body.clamped { max-height: 340px; overflow: hidden; -webkit-mask-image: linear-gradient(#000 78%, transparent); mask-image: linear-gradient(#000 78%, transparent); }
@@ -284,6 +301,6 @@
   .dur { color: var(--f-ink-3); font-size: 12px; font-variant-numeric: tabular-nums; padding-right: 8px; }
   .empty { padding: 40px 20px; text-align: center; color: var(--f-ink-2); }
   .empty.err { color: var(--f-coral); }
-  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--f-ink); color: #fff; padding: 8px 14px; border-radius: 999px; font-size: 13px; }
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--f-ink); color: var(--f-bg); padding: 8px 14px; border-radius: 999px; font-size: 13px; }
   @media (prefers-reduced-motion: reduce) { .story.live .ring, .act.heart.burst { animation: none; } }
 </style>

@@ -535,7 +535,7 @@
     font-size: 0.76rem; color: #7b82a8; line-height: 1.45;
     display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
   }
-  .task-agent { font-size: 0.7rem; font-family: monospace; color: #8b85ff; }
+  .task-agent { font-size: 0.7rem; font-family: monospace; color: var(--sl-accent-hover); }
 
   .task-actions {
     display: flex; gap: 0.25rem; justify-content: flex-end;
@@ -548,8 +548,8 @@
   }
   .mini:hover:not(:disabled) { background: #1c1f35; color: #e8eaf6; }
   .mini.danger:hover:not(:disabled) { background: rgba(159, 40, 40, 0.25); color: #ff9a9a; }
-  .mini.run { color: #8b85ff; font-weight: 500; }
-  .mini.run:hover:not(:disabled) { background: rgba(108, 99, 255, 0.15); color: #a8a3ff; }
+  .mini.run { color: var(--sl-accent-hover); font-weight: 500; }
+  .mini.run:hover:not(:disabled) { background: color-mix(in srgb, var(--sl-accent) 15%, transparent); color: #a8a3ff; }
   .spacer { flex: 1; }
 
   /* ── Run history (modal) ────────────────────────────────────────── */
@@ -566,7 +566,7 @@
     font-size: 0.68rem; font-weight: 600; text-transform: uppercase;
     padding: 0.08rem 0.5rem; border-radius: 999px;
   }
-  .run-badge.run-running { background: rgba(108, 99, 255, 0.18); color: #8b85ff; }
+  .run-badge.run-running { background: color-mix(in srgb, var(--sl-accent) 18%, transparent); color: var(--sl-accent-hover); }
   .run-badge.run-done    { background: rgba(76, 175, 130, 0.18); color: #4caf82; }
   .run-badge.run-failed  { background: rgba(199, 80, 80, 0.18);  color: #ff9a9a; }
   .run-time { font-size: 0.72rem; color: var(--sl-text-faint); }
