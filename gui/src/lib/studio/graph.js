@@ -37,7 +37,7 @@ import { blockReadiness } from './blockmeta.js'
 
 const KIND_META = {
   tool:   { color: '#2bb3a3', label: 'Tool',   shape: 'card' },
-  agent:  { color: '#6c63ff', label: 'Agent',  shape: 'peer' },
+  agent:  { color: 'var(--sl-accent)', label: 'Agent',  shape: 'peer' },
   branch: { color: '#f5a742', label: 'Branch', shape: 'decision' },
   python: { color: '#e06c9f', label: 'Python', shape: 'card' },
   llm:    { color: '#9b7cff', label: 'LLM',    shape: 'card' },

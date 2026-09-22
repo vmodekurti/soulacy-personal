@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"fmt"
+	"github.com/soulacy/soulacy/internal/presentation"
 	"sort"
 	"strings"
 	"time"
@@ -36,6 +37,10 @@ type runLedgerRow struct {
 	BrowserEvents   int       `json:"browserEvents,omitempty"`
 	EventCount      int       `json:"eventCount,omitempty"`
 	DurationMS      int64     `json:"durationMs,omitempty"`
+	// Presentation is how a client should show Output: typed blocks decided
+	// once here so the web feed and the phone agree (#199). Nil when there is
+	// no output.
+	Presentation *presentation.Presentation `json:"presentation,omitempty"`
 }
 
 // handleRunLedger exposes one durable run ledger for Schedule, Activity, and
@@ -251,6 +256,7 @@ func (s *Server) buildRunLedger(events []message.Event, limit int) []runLedgerRo
 		if !row.StartedAt.IsZero() && !row.UpdatedAt.IsZero() {
 			row.DurationMS = row.UpdatedAt.Sub(row.StartedAt).Milliseconds()
 		}
+		row.Presentation = presentOutput(row.Output)
 		rows = append(rows, row)
 	}
 	sort.Slice(rows, func(i, j int) bool {
@@ -321,6 +327,7 @@ func (s *Server) flowRunLedgerRows(agentID string) []runLedgerRow {
 			if !row.StartedAt.IsZero() && !row.UpdatedAt.IsZero() {
 				row.DurationMS = row.UpdatedAt.Sub(row.StartedAt).Milliseconds()
 			}
+			row.Presentation = presentOutput(row.Output)
 			rows = append(rows, row)
 		}
 	}
@@ -446,4 +453,13 @@ func runLedgerContainsString(vals []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// presentOutput decides the visual for a result, or nil when there is none.
+func presentOutput(output string) *presentation.Presentation {
+	if strings.TrimSpace(output) == "" {
+		return nil
+	}
+	p := presentation.Present(output)
+	return &p
 }

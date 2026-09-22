@@ -77,10 +77,10 @@
     padding: .7rem 1.15rem; border: none; border-radius: 999px; cursor: pointer;
     color: #fff; font-weight: 700; font-size: .95rem; letter-spacing: -.01em;
     background: linear-gradient(135deg, #7c6cff 0%, #4fd1ff 100%);
-    box-shadow: 0 10px 30px rgba(108,99,255,.35), 0 2px 8px rgba(0,0,0,.35);
+    box-shadow: 0 10px 30px color-mix(in srgb, var(--sl-accent) 35%, transparent), 0 2px 8px rgba(0,0,0,.35);
     transition: transform .15s ease, box-shadow .15s ease;
   }
-  .ask-genie-pill:hover { transform: translateY(-1px); box-shadow: 0 14px 34px rgba(108,99,255,.45), 0 2px 8px rgba(0,0,0,.35); }
+  .ask-genie-pill:hover { transform: translateY(-1px); box-shadow: 0 14px 34px color-mix(in srgb, var(--sl-accent) 45%, transparent), 0 2px 8px rgba(0,0,0,.35); }
   .ask-genie-pill:active { transform: translateY(0); }
   .ask-genie-pill > span:first-child { font-size: 1.05rem; line-height: 1; }
 
@@ -99,7 +99,7 @@
   header .mark {
     width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%;
     background: linear-gradient(135deg, #7c6cff, #4fd1ff); color: #fff; font-size: 1.1rem;
-    box-shadow: 0 8px 20px rgba(108,99,255,.35);
+    box-shadow: 0 8px 20px color-mix(in srgb, var(--sl-accent) 35%, transparent);
   }
   header div { display: flex; flex-direction: column; gap: .1rem; min-width: 0; }
   header strong { font-size: 1.05rem; }

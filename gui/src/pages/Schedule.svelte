@@ -1061,7 +1061,7 @@ schedule:
   .err    { background: rgba(240,96,96,.1); border: 1px solid rgba(240,96,96,.3); color: #f06060; }
   .ok     { background: rgba(76,175,130,.1); border: 1px solid rgba(76,175,130,.3); color: #4caf82; }
   .empty  { padding: 2rem 1.25rem; color: var(--sl-text-faint); font-size: .85rem; }
-  .empty code { background: #1c1f35; padding: .1rem .35rem; border-radius: 4px; font-size: .78rem; color: #8b85ff; }
+  .empty code { background: #1c1f35; padding: .1rem .35rem; border-radius: 4px; font-size: .78rem; color: var(--sl-accent-hover); }
 
   .section     { background: var(--sl-surface); border: 1px solid var(--sl-line); border-radius: 10px; overflow: hidden; }
   .section-hdr {
@@ -1111,7 +1111,7 @@ schedule:
   .row-degraded td { background: rgba(245,167,66,.035); }
 
   .td-name   { font-weight: 500; }
-  .td-mono   { font-family: monospace; font-size: .8rem; color: #8b85ff; }
+  .td-mono   { font-family: monospace; font-size: .8rem; color: var(--sl-accent-hover); }
   .td-hint   { color: #555a7a; font-size: .78rem; }
   .catchup        { white-space: nowrap; cursor: help; }
   .catchup.on     { color: #6fbf8f; }
@@ -1131,8 +1131,8 @@ schedule:
   .missed-help    { margin-top: .5rem; max-width: 70ch; }
   .td-action { text-align: right; }
   .history-actions { display: flex; justify-content: flex-end; gap: .35rem; white-space: nowrap; }
-  .result-row td { padding: 0 1.25rem 1rem; background: rgba(108,99,255,.035); }
-  .result-row:hover td { background: rgba(108,99,255,.035); }
+  .result-row td { padding: 0 1.25rem 1rem; background: color-mix(in srgb, var(--sl-accent) 4%, transparent); }
+  .result-row:hover td { background: color-mix(in srgb, var(--sl-accent) 4%, transparent); }
   .history-result {
     padding: .8rem 1rem; border: 1px solid #252a48; border-radius: 8px;
     background: #0e1020;
@@ -1174,7 +1174,7 @@ schedule:
   }
   .info-card h3 { font-size: .875rem; font-weight: 600; }
   .info-card p  { font-size: .82rem; color: #7b82a8; line-height: 1.6; }
-  .info-card code { background: #1c1f35; padding: .1rem .35rem; border-radius: 4px; font-size: .78rem; color: #8b85ff; }
+  .info-card code { background: #1c1f35; padding: .1rem .35rem; border-radius: 4px; font-size: .78rem; color: var(--sl-accent-hover); }
   .code-block {
     background: #0e1020; border: 1px solid var(--sl-line); border-radius: 6px;
     padding: .85rem 1rem; font-family: monospace; font-size: .8rem;
@@ -1209,7 +1209,7 @@ schedule:
   .panel-empty.err { color: #f06060; }
   .history-note {
     margin: .8rem 1.25rem .35rem; padding: .45rem .6rem; border-radius: 7px;
-    background: rgba(108,99,255,.08); border: 1px solid rgba(108,99,255,.22);
+    background: color-mix(in srgb, var(--sl-accent) 8%, transparent); border: 1px solid color-mix(in srgb, var(--sl-accent) 22%, transparent);
     color: #aeb3dc; font-size: .72rem; line-height: 1.35;
   }
 
@@ -1262,15 +1262,15 @@ schedule:
   }
   .activity-link {
     margin: 0 0 .55rem;
-    background: rgba(108,99,255,.12);
-    border: 1px solid rgba(108,99,255,.35);
+    background: color-mix(in srgb, var(--sl-accent) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--sl-accent) 35%, transparent);
     color: #ada8ff;
     border-radius: 6px;
     padding: .25rem .55rem;
     font-size: .72rem;
     cursor: pointer;
   }
-  .activity-link:hover { background: rgba(108,99,255,.2); }
+  .activity-link:hover { background: color-mix(in srgb, var(--sl-accent) 20%, transparent); }
   .run-output pre {
     font-family: monospace; font-size: .78rem; color: #b0b5d8;
     line-height: 1.65; white-space: pre-wrap; word-break: break-word; margin: 0;
@@ -1292,7 +1292,7 @@ schedule:
   }
   .field textarea { resize: vertical; min-height: 4.5rem; font-family: inherit; line-height: 1.45; }
   .field-help { font-size: .72rem; color: #555a7a; }
-  .field-help code { background: #1c1f35; padding: .05rem .3rem; border-radius: 4px; color: #8b85ff; }
+  .field-help code { background: #1c1f35; padding: .05rem .3rem; border-radius: 4px; color: var(--sl-accent-hover); }
   .output-editor {
     border: 1px solid var(--sl-line); border-radius: 8px; background: #101323;
     padding: .85rem; display: flex; flex-direction: column; gap: .8rem;

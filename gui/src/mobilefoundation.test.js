@@ -20,7 +20,7 @@ describe('mobile-first application foundation', () => {
     expect(app).toContain('height: 100dvh')
     expect(app).toContain('env(safe-area-inset-top)')
     expect(app).toContain('env(safe-area-inset-bottom)')
-    expect(app).toContain("['dashboard', 'studio', 'agents', 'chat']")
+    expect(app).toContain("['feed', 'chat', 'studio', 'agents']") // Feed is home (#191)
   })
 
   it('provides touch-sized controls and prevents iOS form zoom', () => {

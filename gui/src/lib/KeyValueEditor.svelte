@@ -117,7 +117,7 @@
     color: #e8eaf6; font-size: .82rem; padding: .35rem .55rem;
     font-family: monospace;
   }
-  .kv-row input:focus { border-color: var(--sl-accent); outline: none; box-shadow: 0 0 0 2px rgba(108,99,255,.15); }
+  .kv-row input:focus { border-color: var(--sl-accent); outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--sl-accent) 15%, transparent); }
   .kv-remove {
     background: none; border: 1px solid rgba(240,96,96,.3); color: #f06060;
     border-radius: 6px; cursor: pointer; font-size: 1rem; line-height: 1;
@@ -126,10 +126,10 @@
   .kv-remove:hover { background: rgba(240,96,96,.1); }
 
   .kv-add {
-    align-self: flex-start; background: rgba(108,99,255,.12); color: #8b85ff;
-    border: 1px solid rgba(108,99,255,.35); padding: .25rem .6rem;
+    align-self: flex-start; background: color-mix(in srgb, var(--sl-accent) 12%, transparent); color: var(--sl-accent-hover);
+    border: 1px solid color-mix(in srgb, var(--sl-accent) 35%, transparent); padding: .25rem .6rem;
     border-radius: 6px; font-size: .72rem; font-weight: 600; cursor: pointer;
     margin-top: .15rem;
   }
-  .kv-add:hover { background: rgba(108,99,255,.2); }
+  .kv-add:hover { background: color-mix(in srgb, var(--sl-accent) 20%, transparent); }
 </style>

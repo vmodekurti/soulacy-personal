@@ -200,7 +200,7 @@
   function eventColor(type = '') {
     if (type.includes('error'))                        return '#f06060'
     if (type.includes('complete') || type.includes('reply')) return '#4caf82'
-    if (type.includes('trigger') || type.includes('start'))  return '#6c63ff'
+    if (type.includes('trigger') || type.includes('start'))  return 'var(--sl-accent)'
     if (type.includes('tool'))                         return '#f0a060'
     return '#6b7294'
   }

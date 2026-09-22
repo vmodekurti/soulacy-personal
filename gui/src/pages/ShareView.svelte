@@ -90,11 +90,11 @@
   .bubble { font-size: .9rem; line-height: 1.5; word-break: break-word; }
   .atts { margin-top: 8px; color: #8f96bb; font-size: .74rem; }
   .share-footer { margin-top: 24px; padding-top: 14px; border-top: 1px solid #232743; color: #8f96bb; font-size: .78rem; }
-  .share-footer a { color: #8b85ff; }
+  .share-footer a { color: var(--sl-accent-hover); }
   /* Basic markdown element spacing for the read-only bubble. */
   .bubble.md :global(pre) { background: #0d0f1c; padding: 10px 12px; border-radius: 8px; overflow-x: auto; }
   .bubble.md :global(code) { font-family: ui-monospace, Menlo, monospace; font-size: .82em; }
-  .bubble.md :global(a) { color: #8b85ff; }
+  .bubble.md :global(a) { color: var(--sl-accent-hover); }
   .bubble.md :global(table) { border-collapse: collapse; }
   .bubble.md :global(td), .bubble.md :global(th) { border: 1px solid #2a2f52; padding: 4px 8px; }
 </style>

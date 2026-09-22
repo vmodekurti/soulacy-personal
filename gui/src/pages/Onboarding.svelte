@@ -483,7 +483,7 @@
   .banner { padding: .6rem .75rem; border-radius: 8px; font-size: .82rem; }
   .banner.err { color: #ff9a9a; background: rgba(255,90,90,.12); }
   .banner.ok { color: #72d9aa; background: rgba(76,175,130,.12); }
-  .link { background: none; border: none; color: #8b85ff; cursor: pointer; font-size: .82rem; padding: 0; }
+  .link { background: none; border: none; color: var(--sl-accent-hover); cursor: pointer; font-size: .82rem; padding: 0; }
   .tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
   .focus-row { display: flex; gap: 8px; flex-wrap: wrap; }
   .focus-row button { border: 1px solid #2a2f52; background: #0d0f1c; color: #b7bce0; border-radius: 999px; padding: .4rem .65rem; cursor: pointer; font-size: .78rem; }

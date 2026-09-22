@@ -143,11 +143,11 @@
   .row input[type="text"]:focus { outline: none; border-color: var(--sl-accent); }
 
   .browse {
-    background: rgba(108,99,255,.14); border: 1px solid rgba(108,99,255,.45);
+    background: color-mix(in srgb, var(--sl-accent) 14%, transparent); border: 1px solid color-mix(in srgb, var(--sl-accent) 45%, transparent);
     color: #ada8ff; border-radius: 6px; cursor: pointer;
     font-size: .78rem; padding: 0 .7rem; white-space: nowrap;
   }
-  .browse:hover { background: rgba(108,99,255,.25); }
+  .browse:hover { background: color-mix(in srgb, var(--sl-accent) 25%, transparent); }
 
   .dropdown {
     position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 60;
@@ -169,8 +169,8 @@
     padding: .4rem .55rem; border-radius: 6px; cursor: pointer;
     display: flex; flex-direction: column; gap: .1rem;
   }
-  .item:hover, .item.active { background: rgba(108,99,255,.12); }
-  .item-label { font-family: monospace; color: #8b85ff; font-size: .82rem; }
+  .item:hover, .item.active { background: color-mix(in srgb, var(--sl-accent) 12%, transparent); }
+  .item-label { font-family: monospace; color: var(--sl-accent-hover); font-size: .82rem; }
   .item-value { color: #9aa0c0; font-size: .72rem; font-family: monospace; }
   .item-desc  { color: var(--sl-text-faint); font-size: .72rem; }
 </style>

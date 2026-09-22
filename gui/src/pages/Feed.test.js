@@ -68,3 +68,37 @@ describe('Feed', () => {
     expect(card.querySelector('.heart').classList.contains('on')).toBe(false)
   })
 })
+
+describe('Feed stories', () => {
+  beforeEach(stubGateway)
+  afterEach(() => { if (cmp) cmp.$destroy(); if (target) target.remove(); cmp = null; target = null; vi.unstubAllGlobals() })
+
+  it('opens a full-screen story for an agent with its results as slides, and closes on Escape', async () => {
+    await mount()
+    const genie = [...target.querySelectorAll('.story')].find(b => b.textContent.includes('Genie'))
+    genie.click(); await tick(30)
+    const viewer = target.querySelector('.viewer')
+    expect(viewer).toBeTruthy()
+    expect(viewer.textContent).toContain('Genie')
+    expect(viewer.querySelectorAll('.progress i').length).toBe(2) // delivery (newest) + run
+    expect(viewer.textContent).toContain('Morning brief')
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }))
+    await tick(20)
+    expect(viewer.textContent).toContain('best fares')
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await tick(20)
+    expect(target.querySelector('.viewer')).toBeNull()
+  })
+})
+
+describe('Feed cards read like posts', () => {
+  beforeEach(stubGateway)
+  afterEach(() => { if (cmp) cmp.$destroy(); if (target) target.remove(); cmp = null; target = null; vi.unstubAllGlobals() })
+
+  it('shows a headline from the first sentence and keeps the caption short', async () => {
+    await mount()
+    const card = [...target.querySelectorAll('article.card')].find(c => c.textContent.includes('best fares'))
+    expect(card.querySelector('.title').textContent).toContain('Here are the')
+    expect(card.querySelector('.body').textContent).not.toContain('Here are the')
+  })
+})

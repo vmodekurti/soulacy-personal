@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"github.com/soulacy/soulacy/internal/presentation"
 	"strconv"
 	"strings"
 
@@ -152,7 +153,14 @@ func (s *Server) handleListMobileDeliveries(c *fiber.Ctx) error {
 			unread++
 		}
 	}
-	return c.JSON(fiber.Map{"deliveries": visible, "unread_count": unread})
+	// Each delivery carries how to show it (#199): the same typed blocks the
+	// run ledger emits, so a brief pushed to the phone and the same brief in
+	// the web feed look alike.
+	out := make([]presentedDelivery, 0, len(visible))
+	for _, d := range visible {
+		out = append(out, presentedDelivery{Delivery: d, Presentation: presentOutput(d.Body)})
+	}
+	return c.JSON(fiber.Map{"deliveries": out, "unread_count": unread})
 }
 
 func (s *Server) handleGetMobileDelivery(c *fiber.Ctx) error {
@@ -213,4 +221,10 @@ func (s *Server) handleReadMobileDelivery(c *fiber.Ctx) error {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
 	return c.JSON(fiber.Map{"read": true})
+}
+
+// presentedDelivery is a delivery plus its presentation.
+type presentedDelivery struct {
+	mobilechan.Delivery
+	Presentation *presentation.Presentation `json:"presentation,omitempty"`
 }

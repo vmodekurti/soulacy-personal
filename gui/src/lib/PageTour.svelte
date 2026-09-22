@@ -104,7 +104,7 @@
 
   .pt-outcome {
     font-size: .82rem; line-height: 1.5; color: #b6bbdb;
-    background: rgba(108, 99, 255, 0.1); border: 1px solid #2f3459;
+    background: color-mix(in srgb, var(--sl-accent) 10%, transparent); border: 1px solid #2f3459;
     border-radius: 10px; padding: .6rem .75rem;
   }
   .pt-outcome span { display: block; color: #7d84ae; font-size: .72rem; margin-bottom: .15rem; }
