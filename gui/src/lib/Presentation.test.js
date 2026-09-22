@@ -51,4 +51,12 @@ describe('Presentation', () => {
     expect(target.querySelector('table.cmp')).toBeTruthy()
     expect(target.querySelector('.timeline')).toBeTruthy()
   })
+
+  it('a compact grid keeps the first text column and the numbers', async () => {
+    const wide = { kind: 'comparison', columns: ['#', 'Airline', 'Outbound', 'Return', 'Stops', 'Price'], numeric: ['Price'], best: { column: 'Price', row: 0 },
+      rows: [['1', 'BA', '4:29pm', '4:44pm', '1', '$770'], ['2', 'AA', '5:55pm', '1:10pm', '0', '$839']] }
+    await mount({ blocks: [wide], compact: true })
+    expect([...target.querySelectorAll('table.cmp th')].map(t => t.textContent)).toEqual(['Airline', 'Price'])
+    expect(target.querySelector('table.cmp tr.best td.num').textContent).toContain('$770')
+  })
 })

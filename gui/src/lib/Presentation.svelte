@@ -28,7 +28,9 @@
       if (!echarts) echarts = await import('echarts')
       if (!inst) inst = echarts.init(node, null, { renderer: 'canvas' })
       const c = block.chart || {}
+      const palette = [tokenColor(node, '--sl-accent', '#3fd1db'), tokenColor(node, '--sl-mango', '#ffb020'), tokenColor(node, '--sl-coral', '#ff5c72'), tokenColor(node, '--sl-leaf', '#37b46a')]
       inst.setOption(themeEChartsOption({
+        color: palette,
         grid: { left: 8, right: 8, top: 28, bottom: 8, containLabel: true },
         tooltip: { trigger: 'axis' },
         legend: (c.series || []).length > 1 ? { top: 0 } : undefined,
@@ -44,6 +46,22 @@
     return { update(b) { block = b; draw() }, destroy() { ro && ro.disconnect(); inst && inst.dispose() } }
   }
   function isNumeric(block, col) { return (block.numeric || []).includes(col) }
+  // On a card there is no room for six columns: keep the first text column
+  // (the thing being compared) and the numbers; everything is there once
+  // the card is opened.
+  function visibleColumns(block) {
+    const cols = block.columns || []
+    if (!compact || cols.length <= 3) return cols.map((c, i) => i)
+    const idx = []
+    const firstText = cols.findIndex((c, i) => !isNumeric(block, c) && !/^(#|no\.?|rank|option)$/i.test(c.trim()))
+    if (firstText >= 0) idx.push(firstText)
+    cols.forEach((c, i) => { if (isNumeric(block, c) && !idx.includes(i)) idx.push(i) })
+    if (idx.length < 2) cols.forEach((c, i) => { if (idx.length < 3 && !idx.includes(i)) idx.push(i) })
+    return idx.sort((a, b) => a - b)
+  }
+  function tokenColor(node, name, fallback) {
+    try { const v = getComputedStyle(node).getPropertyValue(name).trim(); return v || fallback } catch { return fallback }
+  }
   function host(u) { try { return new URL(u).hostname.replace(/^www\./, '') } catch { return u } }
 </script>
 
@@ -58,11 +76,11 @@
     {:else if b.kind === 'comparison'}
       {#if b.title}<div class="bt">{b.title}</div>{/if}
       <div class="grid-scroll"><table class="cmp">
-        <thead><tr>{#each b.columns as c}<th class:num={isNumeric(b, c)}>{c}</th>{/each}</tr></thead>
+        <thead><tr>{#each visibleColumns(b) as ci}<th class:num={isNumeric(b, b.columns[ci])}>{b.columns[ci]}</th>{/each}</tr></thead>
         <tbody>
           {#each b.rows as r, ri}
             <tr class:best={b.best && b.best.row === ri}>
-              {#each r as cell, ci}<td class:num={isNumeric(b, b.columns[ci])}>{cell}{#if b.best && b.best.row === ri && b.columns[ci] === b.best.column}<span class="pick"> ✓</span>{/if}</td>{/each}
+              {#each visibleColumns(b) as ci}<td class:num={isNumeric(b, b.columns[ci])}>{r[ci]}{#if b.best && b.best.row === ri && b.columns[ci] === b.best.column}<span class="pick"> ✓</span>{/if}</td>{/each}
             </tr>
           {/each}
         </tbody>
