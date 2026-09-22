@@ -65,11 +65,13 @@ type Series struct {
 }
 
 var (
-	headingRe   = regexp.MustCompile(`^(#{1,6})\s+(.*)$`)
-	bulletRe    = regexp.MustCompile(`^\s*(?:[-*+]|\d+[.)])\s+(.*)$`)
-	checkRe     = regexp.MustCompile(`^\[([ xX])\]\s*(.*)$`)
-	linkRe      = regexp.MustCompile(`\[([^\]]+)\]\((https?://[^)\s]+)\)`)
-	boldNumRe   = regexp.MustCompile(`\*\*([^*]*\d[^*]*)\*\*`)
+	headingRe = regexp.MustCompile(`^(#{1,6})\s+(.*)$`)
+	bulletRe  = regexp.MustCompile(`^\s*(?:[-*+]|\d+[.)])\s+(.*)$`)
+	checkRe   = regexp.MustCompile(`^\[([ xX])\]\s*(.*)$`)
+	linkRe    = regexp.MustCompile(`\[([^\]]+)\]\((https?://[^)\s]+)\)`)
+	boldNumRe = regexp.MustCompile(`\*\*([^*]*\d[^*]*)\*\*`)
+	// A metric value is number-led and short: $839 · 3 of 3 · 12% · 71°/58° · 1.2 GB.
+	metricValRe = regexp.MustCompile(`^[~≈]?[-+]?[$€£]?\d[\d,.]*(?:\s*(?:%|°[CF]?|/\d[\d,.]*°?|of\s+\d+|[kKmMbB]|[A-Za-z]{1,4}))?$`)
 	timeLeadRe  = regexp.MustCompile(`^((?:[01]?\d|2[0-3]):[0-5]\d\s*(?:[ap]m)?|(?:[1-9]|1[0-2])\s*[ap]m|(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\.?\s+\d{1,2}(?:\s+[A-Z][a-z]{2})?|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}|\d{4}-\d{2}-\d{2})\b[\s:—–-]*(.*)$`)
 	numRe       = regexp.MustCompile(`^[~≈]?\s*[-+]?\$?\s*\d[\d,]*(?:\.\d+)?\s*(?:%|°[CF]?|[kKmMbB])?$`)
 	durRe       = regexp.MustCompile(`^(?:(\d+)\s*h)?\s*(?:(\d+)\s*m(?:in)?)?$`)
@@ -86,7 +88,23 @@ func Present(markdown string) Presentation {
 	p.Headline, p.Summary = headlineAndSummary(lines)
 
 	var md []string
-	flush := func() {
+	// flush emits the buffered prose as a markdown block. Before a typed
+	// block that took the last heading as its title, that heading line is
+	// dropped so it is not shown twice; the headline line is dropped from
+	// the first block for the same reason.
+	headlineDropped := false
+	flush := func(titled bool) {
+		if titled {
+			for len(md) > 0 && strings.TrimSpace(md[len(md)-1]) == "" {
+				md = md[:len(md)-1]
+			}
+			if len(md) > 0 && headingRe.MatchString(strings.TrimSpace(md[len(md)-1])) {
+				md = md[:len(md)-1]
+			}
+		}
+		if !headlineDropped && p.Headline != "" {
+			md, headlineDropped = dropHeadline(md, p.Headline)
+		}
 		text := strings.TrimSpace(strings.Join(md, "\n"))
 		md = md[:0]
 		if text != "" {
@@ -114,7 +132,7 @@ func Present(markdown string) Presentation {
 				j++
 			}
 			if len(rows) >= 2 {
-				flush()
+				flush(title != "")
 				p.Blocks = append(p.Blocks, comparison(title, cols, rows)...)
 				title = ""
 				i = j
@@ -134,7 +152,7 @@ func Present(markdown string) Presentation {
 				j++
 			}
 			if b, ok := typedList(title, items); ok {
-				flush()
+				flush(title != "")
 				p.Blocks = append(p.Blocks, b)
 				title = ""
 				i = j
@@ -147,7 +165,20 @@ func Present(markdown string) Presentation {
 		md = append(md, lines[i])
 		i++
 	}
-	flush()
+	flush(false)
+
+	// The summary is shown on its own; do not open the prose with it too.
+	if p.Summary != "" && len(p.Blocks) > 0 && p.Blocks[0].Kind == "markdown" {
+		key := strings.TrimSuffix(p.Summary, "…")
+		if t := strings.TrimSpace(p.Blocks[0].Text); strings.HasPrefix(t, key) {
+			rest := strings.TrimSpace(strings.TrimPrefix(t, key))
+			if rest == "" {
+				p.Blocks = p.Blocks[1:]
+			} else {
+				p.Blocks[0].Text = rest
+			}
+		}
+	}
 
 	if m := metrics(markdown); len(m.Items) > 0 {
 		// Metrics lead: they are the point of the result.
@@ -157,6 +188,38 @@ func Present(markdown string) Presentation {
 		p.Blocks = []Block{{Kind: "markdown", Text: strings.TrimSpace(markdown)}}
 	}
 	return p
+}
+
+// dropHeadline removes the line the headline was taken from (a heading, or
+// a first sentence — in which case only that sentence is removed).
+func dropHeadline(md []string, headline string) ([]string, bool) {
+	key := strings.TrimSuffix(headline, "…")
+	if len(key) > 24 {
+		key = key[:24]
+	}
+	for i, raw := range md {
+		l := strings.TrimSpace(raw)
+		if l == "" || strings.HasPrefix(l, "|") || redactedRe.MatchString(l) {
+			continue
+		}
+		if m := headingRe.FindStringSubmatch(l); m != nil {
+			if strings.HasPrefix(strings.TrimSpace(m[2]), key) {
+				return append(md[:i:i], md[i+1:]...), true
+			}
+			return md, true
+		}
+		plain := stripInline(l)
+		if !strings.HasPrefix(plain, key) {
+			return md, true
+		}
+		if loc := sentenceEnd.FindStringIndex(plain); loc != nil && loc[0] > 24 && len(plain) > loc[1]+1 {
+			out := append([]string{}, md[:i]...)
+			out = append(out, strings.TrimSpace(plain[loc[1]:]))
+			return append(out, md[i+1:]...), true
+		}
+		return append(md[:i:i], md[i+1:]...), true
+	}
+	return md, false
 }
 
 func headlineAndSummary(lines []string) (string, string) {
@@ -337,7 +400,7 @@ func metrics(markdown string) Block {
 		}
 		for _, m := range boldNumRe.FindAllStringSubmatchIndex(line, -1) {
 			value := strings.TrimSpace(line[m[2]:m[3]])
-			if len(value) > 28 || seen[value] {
+			if len(value) > 20 || seen[value] || !metricValRe.MatchString(value) {
 				continue
 			}
 			// Label: the words just before, or just after, the number.

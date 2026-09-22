@@ -44,4 +44,11 @@ describe('Presentation', () => {
     expect(target.querySelector('.timeline')).toBeNull()
     expect(target.querySelector('.more-hint').textContent).toContain('+4 more')
   })
+
+  it('compact prefers typed blocks over prose', async () => {
+    await mount({ blocks: [{ kind: 'markdown', text: 'intro' }, blocks[1], blocks[2], { kind: 'markdown', text: 'outro' }], compact: true })
+    expect(target.querySelector('.md')).toBeNull()
+    expect(target.querySelector('table.cmp')).toBeTruthy()
+    expect(target.querySelector('.timeline')).toBeTruthy()
+  })
 })

@@ -78,6 +78,26 @@ func TestFares(t *testing.T) {
 	if m := find(p, "metrics"); m != nil {
 		t.Fatalf("unexpected metrics = %+v", m.Items)
 	}
+	// The headline is not repeated in the prose, and the heading that titles
+	// the grid is not shown twice.
+	// Prose neither repeats the headline or the summary nor shows the
+	// heading that titles the grid; here nothing is left before the grid.
+	if p.Blocks[0].Kind != "comparison" {
+		t.Fatalf("blocks = %s (first markdown = %q)", kinds(p), p.Blocks[0].Text)
+	}
+}
+
+func TestNoFalseMetrics(t *testing.T) {
+	p := Present("Option 1 has a **1-stop return** and a **2h layover**; total **$770** for **2 adults**.")
+	m := find(p, "metrics")
+	if m == nil {
+		t.Fatal("expected the $770 metric")
+	}
+	for _, it := range m.Items {
+		if it.Value != "$770" && it.Value != "2h layover" {
+			t.Errorf("false metric %q", it.Value)
+		}
+	}
 }
 
 func TestReport(t *testing.T) {

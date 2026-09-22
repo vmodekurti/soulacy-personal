@@ -9,7 +9,14 @@
   export let blocks = []
   export let compact = false
 
-  $: shown = compact ? blocks.slice(0, 2) : blocks
+  // Compact = a card: the two most telling blocks, typed ones first (a grid
+  // and its chart beat a paragraph), in their original order.
+  function pick(bs) {
+    const typed = bs.filter(b => b.kind !== 'markdown')
+    const chosen = (typed.length ? typed : bs).slice(0, 2)
+    return bs.filter(b => chosen.includes(b))
+  }
+  $: shown = compact ? pick(blocks) : blocks
   $: hidden = compact ? Math.max(0, blocks.length - shown.length) : 0
 
   // Charts draw with ECharts, themed like the rest of the app.
