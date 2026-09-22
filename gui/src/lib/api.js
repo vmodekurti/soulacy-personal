@@ -484,6 +484,7 @@ export const api = {
 
   mobile: {
     status: () => apiFetch('/mobile/status'),
+    deliveries: (limit = 40) => apiFetch(`/mobile/deliveries?limit=${limit}`),
   },
 
   browserTrace: (agentId, sessionId = '') => {

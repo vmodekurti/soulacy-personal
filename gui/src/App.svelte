@@ -72,6 +72,7 @@
   }
 
   const pageLoaders = {
+    feed: () => import('./pages/Feed.svelte'),
     start: () => import('./pages/GetStarted.svelte'),
     autopilot: () => import('./pages/Autopilot.svelte'),
     dashboard: () => import('./pages/Dashboard.svelte'),
