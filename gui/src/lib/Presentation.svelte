@@ -36,7 +36,8 @@
         legend: (c.series || []).length > 1 ? { top: 0 } : undefined,
         xAxis: { type: 'category', data: c.x || [], axisLabel: { interval: 0, rotate: (c.x || []).some(x => String(x).length > 8) ? 20 : 0 } },
         yAxis: { type: 'value', scale: true },
-        series: (c.series || []).map(s => ({ name: s.name, type: c.type === 'line' ? 'line' : 'bar', data: s.values, smooth: true, barMaxWidth: 34 })),
+        series: (c.series || []).map((s, i) => ({ name: s.name, type: c.type === 'line' ? 'line' : 'bar', data: s.values, smooth: true, barMaxWidth: 34,
+          itemStyle: { color: palette[i % palette.length], borderRadius: c.type === 'line' ? 0 : [4, 4, 0, 0] }, lineStyle: { color: palette[i % palette.length] } })),
       }))
       inst.resize()
     }

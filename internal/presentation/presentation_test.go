@@ -11,7 +11,7 @@ const fares = `Here are the best round-trip fares for **Chicago (ORD) → London
 
 | # | Airline | Outbound (Oct 2) | Return (Oct 9) | Stops | Price |
 [REDACTED:73cfe0f9ad8c]
-| 1 | British Airways | 4:29pm → 6:49am+1 (8h 20m) | 4:44pm → 11:37pm (1 stop) | 0 out / 1 back | $770 |
+| 1 | British Airways | 4:29pm → 6:49am+1 (8h 20m) | 4:44pm → 11:37pm (1 stop) | 0 out / 1 back | **$770** |
 | 2 | American Airlines | 5:55pm → 7:40am+1 (7h 45m) | 1:10pm → 3:55pm (8h 45m) | Nonstop both ways | $839 |
 | 3 | British Airways | 8:50pm → 10:50am+1 (8h 00m) | 1:10pm → 3:55pm (8h 45m) | Nonstop both ways | $848 |
 | 4 | British Airways | 5:00pm → 6:50am+1 (7h 50m) | 1:10pm → 3:55pm (8h 45m) | Nonstop both ways | $858 |
@@ -56,6 +56,9 @@ func TestFares(t *testing.T) {
 	}
 	if c.Title != "Top options" || len(c.Rows) != 4 || len(c.Columns) != 6 {
 		t.Fatalf("comparison = %+v", *c)
+	}
+	if c.Rows[0][5] != "$770" {
+		t.Fatalf("cell kept inline markdown: %q", c.Rows[0][5])
 	}
 	if strings.Join(c.Numeric, ",") != "Price" {
 		t.Fatalf("numeric columns = %v (the # index column must not count)", c.Numeric)

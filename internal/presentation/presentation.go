@@ -441,11 +441,13 @@ func isTableSeparator(l string) bool {
 	return t != "" && strings.Trim(t, "-:| ") == ""
 }
 
+// cells splits a table row; inline emphasis is dropped because a grid cell
+// is already typographically distinct and "**$770**" is not a value.
 func cells(l string) []string {
 	parts := strings.Split(strings.Trim(l, "|"), "|")
 	out := make([]string, 0, len(parts))
 	for _, p := range parts {
-		out = append(out, strings.TrimSpace(p))
+		out = append(out, strings.TrimSpace(stripInline(p)))
 	}
 	return out
 }
