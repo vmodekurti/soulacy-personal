@@ -16,6 +16,10 @@ export const WALKTHROUGH_VERSION = 1
 
 /** What each destination is, and when you'd come here. */
 export const navTourCopy = {
+  feed: {
+    what: 'Your agents as a feed: everything they finished, found, or sent to your phone, newest first — and anything that needs your yes at the top.',
+    when: 'Open the app here. Double-tap a card to save it, reply to pick the conversation up in Chat, and tap a face in the rail to see what that agent is doing right now.',
+  },
   autopilot: {
     what: 'Verified runs, Safe Undo receipts, immutable releases, reviewed regression checks, and bounded goal teams.',
     when: 'Review or reverse supported external changes, inspect evidence before promoting an agent, or freeze autonomous work.',
