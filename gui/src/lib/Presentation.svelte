@@ -1,3 +1,23 @@
+<script context="module">
+  // Compact = a card on a phone: one block, the most telling one. Metric
+  // tiles or a comparison beat a chart of the same numbers; a chart beats a
+  // list; prose comes last. The rest waits behind "more" (#58).
+  const RANK = { metrics: 0, comparison: 1, chart: 2, timeline: 3, checklist: 3, links: 4, markdown: 5 }
+  export function pick(bs) {
+    let best = null
+    bs.forEach((b, i) => { const r = RANK[b.kind] ?? 5; if (!best || r < best.r) best = { b, r, i } })
+    return best ? [best.b] : []
+  }
+
+  // Horizontal bars when the categories are words (an airline, a plan): each
+  // label gets its own line instead of colliding on the x axis, and the chart
+  // is as tall as it has rows (#57).
+  export function drawsHorizontal(c) {
+    const x = (c && c.x) || []
+    return (c || {}).type !== 'line' && x.length <= 12 && x.some(l => String(l).length > 6)
+  }
+</script>
+
 <script>
   // Renders the gateway's presentation blocks (#199): the right element for
   // the content — metric tiles, a comparison grid with the best row marked, a
@@ -9,15 +29,8 @@
   export let blocks = []
   export let compact = false
 
-  // Compact = a card: the two most telling blocks, typed ones first (a grid
-  // and its chart beat a paragraph), in their original order.
-  function pick(bs) {
-    const typed = bs.filter(b => b.kind !== 'markdown')
-    const chosen = (typed.length ? typed : bs).slice(0, 2)
-    return bs.filter(b => chosen.includes(b))
-  }
   $: shown = compact ? pick(blocks) : blocks
-  $: hidden = compact ? Math.max(0, blocks.length - shown.length) : 0
+
 
   // Charts draw with ECharts, themed like the rest of the app.
   let charts = new Map()
@@ -28,6 +41,8 @@
       if (!echarts) echarts = await import('echarts')
       if (!inst) inst = echarts.init(node, null, { renderer: 'canvas' })
       const c = block.chart || {}
+      const horizontal = drawsHorizontal(c)
+      node.style.height = horizontal ? `${(c.x || []).length * 30 + 28 + ((c.series || []).length > 1 ? 20 : 0)}px` : ''
       const palette = [tokenColor(node, '--sl-accent', '#3fd1db'), tokenColor(node, '--sl-mango', '#ffb020'), tokenColor(node, '--sl-coral', '#ff5c72'), tokenColor(node, '--sl-leaf', '#37b46a')]
       // The shared theme paints series with its own gradient after the fact;
       // apply it, then put the tropical palette back on top.
@@ -36,10 +51,12 @@
         grid: { left: 8, right: 8, top: 28, bottom: 8, containLabel: true },
         tooltip: { trigger: 'axis' },
         legend: (c.series || []).length > 1 ? { top: 0 } : undefined,
-        xAxis: { type: 'category', data: c.x || [], axisLabel: { interval: 0, rotate: (c.x || []).some(x => String(x).length > 8) ? 20 : 0 } },
-        yAxis: { type: 'value', scale: true },
-        series: (c.series || []).map((s, i) => ({ name: s.name, type: c.type === 'line' ? 'line' : 'bar', data: s.values, smooth: true, barMaxWidth: 34,
-          itemStyle: { color: palette[i % palette.length], borderRadius: c.type === 'line' ? 0 : [4, 4, 0, 0] }, lineStyle: { color: palette[i % palette.length] } })),
+        // Bars start at zero — a value axis that starts near the smallest bar
+        // turns a 10% gap into an empty-versus-full picture. Lines may float.
+        xAxis: horizontal ? { type: 'value' } : { type: 'category', data: c.x || [], axisLabel: { interval: 0, rotate: (c.x || []).some(x => String(x).length > 8) ? 20 : 0 } },
+        yAxis: horizontal ? { type: 'category', data: c.x || [], inverse: true, axisLabel: { interval: 0, width: 110, overflow: 'truncate' } } : { type: 'value', scale: c.type === 'line' },
+        series: (c.series || []).map((s, i) => ({ name: s.name, type: c.type === 'line' ? 'line' : 'bar', data: s.values, smooth: true, barMaxWidth: horizontal ? 14 : 22,
+          itemStyle: { color: palette[i % palette.length], borderRadius: c.type === 'line' ? 0 : horizontal ? [0, 4, 4, 0] : [4, 4, 0, 0] }, lineStyle: { color: palette[i % palette.length] } })),
       })
       themed.color = palette
       ;(themed.series || []).forEach((s, i) => {
@@ -96,7 +113,7 @@
         </tbody>
       </table></div>
     {:else if b.kind === 'chart'}
-      {#if b.title && !compact}<div class="bt">{b.title}</div>{/if}
+      {#if b.title && !compact && !(i > 0 && shown[i - 1].title === b.title)}<div class="bt">{b.title}</div>{/if}
       <div class="chart" use:chart={b} aria-label="{b.title || 'chart'}"></div>
     {:else if b.kind === 'timeline'}
       {#if b.title}<div class="bt">{b.title}</div>{/if}
@@ -111,7 +128,6 @@
       <div class="markdown-body md" use:richRenderer={b.text}>{@html parseMarkdown(b.text || '')}</div>
     {/if}
   {/each}
-  {#if hidden > 0}<div class="more-hint">+{hidden} more</div>{/if}
 </div>
 
 <style>

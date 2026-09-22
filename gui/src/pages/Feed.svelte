@@ -139,7 +139,7 @@
   // the local headline/caption split is the fallback for older gateways.
   function titleFor(card) { return card.title || (card.presentation && card.presentation.headline) || headlineOf(card.body) }
   function blocksFor(card) { return card.presentation && Array.isArray(card.presentation.blocks) ? card.presentation.blocks : null }
-  function isLong(card) { if (blocksFor(card)) return blocksFor(card).length > 2 || (card.presentation.summary || '').length > 200; const c = captionFor(card); return c.length > 320 || (c.match(/\n/g) || []).length > 5 }
+  function isLong(card) { if (blocksFor(card)) return blocksFor(card).length > 1 || (card.presentation.summary || '').length > 160; const c = captionFor(card); return c.length > 320 || (c.match(/\n/g) || []).length > 5 }
   function toggleMore(card) { if (expanded.has(card.id)) expanded.delete(card.id); else expanded.add(card.id); expanded = new Set(expanded) }
   function burst(id) { bursting = id; setTimeout(() => { if (bursting === id) bursting = '' }, 700) }
 
@@ -255,7 +255,7 @@
         {:else}
           {#if titleFor(card)}<div class="title">{titleFor(card)}</div>{/if}
           {#if blocksFor(card)}
-            {#if card.presentation.summary}<div class="summary">{card.presentation.summary}</div>{/if}
+            {#if card.presentation.summary}<div class="summary" class:clamped={!expanded.has(card.id)}>{card.presentation.summary}</div>{/if}
             <div class="blocks"><Presentation blocks={blocksFor(card)} compact={!expanded.has(card.id)} /></div>
           {:else}
             <div class="body markdown-body" class:clamped={isLong(card) && !expanded.has(card.id)} use:richRenderer={captionFor(card)}>{@html parseMarkdown(captionFor(card))}</div>
@@ -299,7 +299,8 @@
     font-family: -apple-system, "SF Pro Text", "Helvetica Neue", "Segoe UI", Arial, sans-serif;
   }
   .top { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px 8px; position: sticky; top: 0; background: var(--f-bg); z-index: 2; border-bottom: 1px solid var(--f-line); }
-  .wordmark { font-weight: 800; font-size: 22px; letter-spacing: -.03em; line-height: 1; color: var(--f-ink); }
+  /* The logotype: Grand Hotel, the script from the brand — nowhere else. */
+  .wordmark { font-family: 'Grand Hotel', 'Snell Roundhand', cursive; font-weight: 400; font-size: 30px; letter-spacing: 0; line-height: 1; color: var(--f-ink); }
   .top-actions { display: flex; gap: 14px; }
   .icon { background: none; border: 0; color: var(--f-ink); font-size: 20px; cursor: pointer; text-decoration: none; padding: 2px 4px; }
   .stories { display: flex; gap: 14px; padding: 12px 16px; overflow-x: auto; border-bottom: 1px solid var(--f-line); scrollbar-width: none; }
@@ -325,6 +326,7 @@
   .chip.new { background: var(--sl-accent-soft); color: var(--f-accent-ink); }
   .title { padding: 0 16px 4px; font-weight: 600; font-size: 15px; line-height: 1.3; }
   .summary { padding: 0 16px 6px; font-size: 13.5px; color: var(--f-ink-2); line-height: 1.45; }
+  .summary.clamped { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .blocks { padding: 2px 16px 6px; }
   .body { padding: 2px 16px 6px; font-size: 13.5px; line-height: 1.45; color: var(--f-ink-2); overflow-wrap: anywhere; }
   .body.clamped { max-height: 120px; overflow: hidden; -webkit-mask-image: linear-gradient(#000 78%, transparent); mask-image: linear-gradient(#000 78%, transparent); }

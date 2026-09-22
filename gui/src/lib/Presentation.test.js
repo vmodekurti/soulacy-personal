@@ -37,19 +37,25 @@ describe('Presentation', () => {
     expect(target.querySelector('.md strong').textContent).toBe('prose')
   })
 
-  it('compact shows the first two blocks and says how many more', async () => {
+  it('compact shows one block: the metrics, nothing else (#58)', async () => {
     await mount({ blocks, compact: true })
     expect(target.querySelectorAll('.metric').length).toBe(2)
-    expect(target.querySelector('table.cmp')).toBeTruthy()
+    expect(target.querySelector('table.cmp')).toBeNull()
     expect(target.querySelector('.timeline')).toBeNull()
-    expect(target.querySelector('.more-hint').textContent).toContain('+4 more')
+    expect(target.querySelector('.more-hint')).toBeNull()
   })
 
-  it('compact prefers typed blocks over prose', async () => {
-    await mount({ blocks: [{ kind: 'markdown', text: 'intro' }, blocks[1], blocks[2], { kind: 'markdown', text: 'outro' }], compact: true })
+  it('compact prefers a grid over a chart of the same numbers, and both over prose', async () => {
+    const chart = { kind: 'chart', chart: { type: 'bar', x: ['British Airways', 'American Airlines'], series: [{ name: 'Price', values: [770, 839] }] } }
+    await mount({ blocks: [{ kind: 'markdown', text: 'intro' }, chart, blocks[1], { kind: 'markdown', text: 'outro' }], compact: true })
     expect(target.querySelector('.md')).toBeNull()
+    expect(target.querySelector('.chart')).toBeNull()
     expect(target.querySelector('table.cmp')).toBeTruthy()
-    expect(target.querySelector('.timeline')).toBeTruthy()
+    const { pick, drawsHorizontal } = await import('./Presentation.svelte')
+    expect(pick([{ kind: 'markdown', text: 'only' }]).map(b => b.kind)).toEqual(['markdown'])
+    expect(drawsHorizontal(chart.chart)).toBe(true)
+    expect(drawsHorizontal({ type: 'bar', x: ['Mon', 'Tue'] })).toBe(false)
+    expect(drawsHorizontal({ type: 'line', x: ['January 2026'] })).toBe(false)
   })
 
   it('a compact grid keeps the first text column and the numbers', async () => {
