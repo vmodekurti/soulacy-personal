@@ -50,3 +50,21 @@ func TestSecretKeyNameIsTheSharedCredentialPredicate(t *testing.T) {
 		}
 	}
 }
+
+// #197 — a wide markdown table separator is not a secret; real keys still are.
+func TestTextKeepsTableSeparators(t *testing.T) {
+	table := "| # | Airline | Outbound | Return | Stops | Price |\n|---|---------|------------------|-----------------|-------|-------|\n| 1 | BA | 4:29pm | 6:49am | 1 | $770 |"
+	if got := Text(table); got != table {
+		t.Fatalf("table separator was redacted:\n%s", got)
+	}
+	// Fake shapes for the scanner's benefit: not real keys. gitleaks:allow
+	for _, secret := range []string{
+		"sk-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJ", // gitleaks:allow
+		"ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0",      // gitleaks:allow
+		"a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+	} {
+		if got := Text("token " + secret + " here"); got == "token "+secret+" here" {
+			t.Errorf("secret survived: %s", secret)
+		}
+	}
+}
