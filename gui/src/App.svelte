@@ -922,7 +922,7 @@
     width: 30px; height: 30px; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
   }
-  .brand-name { font-weight: 750; font-size: 1.15rem; letter-spacing: -0.04em; color: #f2f3fb; }
+  .brand-name { font-family: 'Grand Hotel', 'Snell Roundhand', cursive; font-weight: 400; font-size: 1.6rem; letter-spacing: 0; line-height: 1; color: #f2f3fb; }
 
 
   nav { flex: 1; padding: 0.5rem 0.5rem; overflow-y: auto; }

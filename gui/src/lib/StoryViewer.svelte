@@ -5,6 +5,7 @@
   // hovered or held. (soulacy-personal #191, phase 3)
   import { createEventDispatcher, onMount, onDestroy } from 'svelte'
   import { parseMarkdown, richRenderer } from './markdown.js'
+  import Presentation from './Presentation.svelte'
   export let stories = []      // [{ id, label, glyph, hue, slides: [{ id, at, body, title }] }]
   export let index = 0         // which story
   export let slideMs = 7000
@@ -71,7 +72,12 @@
   <div class="body" on:click={tap} role="presentation">
     {#if current}
       {#if current.title}<div class="title">{current.title}</div>{/if}
-      <div class="md markdown-body" use:richRenderer={current.body}>{@html parseMarkdown(current.body)}</div>
+      {#if current.presentation && current.presentation.blocks}
+        {#if current.presentation.summary}<p class="sum">{current.presentation.summary}</p>{/if}
+        <div class="pblocks"><Presentation blocks={current.presentation.blocks} /></div>
+      {:else}
+        <div class="md markdown-body" use:richRenderer={current.body}>{@html parseMarkdown(current.body)}</div>
+      {/if}
     {:else}
       <div class="empty">Nothing from {story.label} yet.</div>
     {/if}
@@ -106,6 +112,8 @@
   .md :global(table) { font-size: 14px; }
   .md :global(pre) { overflow-x: auto; }
   .md :global(img) { max-width: 100%; }
+  .sum { font-size: 16px; color: rgba(255,255,255,.8); max-width: 60ch; margin: 0 0 10px; }
+  .pblocks { --sl-surface: rgba(255,255,255,.08); --sl-line: rgba(255,255,255,.2); --sl-text: #fff; --sl-text-dim: rgba(255,255,255,.8); --sl-text-faint: rgba(255,255,255,.6); --sl-accent-soft: rgba(255,255,255,.14); --sl-accent-ink: #a7ecf1; --sl-accent: #3fd1db; }
   .empty { color: rgba(255,255,255,.7); padding: 40px 0; text-align: center; }
   .foot { padding: 10px 14px calc(14px + env(safe-area-inset-bottom)); }
   .pill { width: 100%; border: 1px solid rgba(255,255,255,.45); background: rgba(255,255,255,.08); color: #fff; border-radius: 999px; padding: 10px 14px; font: inherit; font-size: 14px; cursor: pointer; }
