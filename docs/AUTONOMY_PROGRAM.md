@@ -9,6 +9,28 @@ approved it, or which line permitted it.
 It is written to be executed slice by slice. Each slice is usable on its own
 and leaves the runtime safer than it found it.
 
+## What counts as an effect
+
+An effect is anything an agent does that the world remembers. Seven classes,
+each with its own reversibility profile and its own budget unit. The whole
+program is framed around this table; nothing here is specific to shopping.
+
+| Class | Examples | Typically | Budget unit |
+|---|---|---|---|
+| **Communicate** | send a message, email, reply, post, calendar invite | compensable at best — people saw it | messages |
+| **Commit** | book, reserve, RSVP, schedule with someone else | compensable (cancel) | commitments |
+| **Spend** | purchase, transfer, subscribe | irreversible | currency |
+| **Mutate** | write, update or delete a file, record, document | reversible with a receipt | writes, deletes |
+| **Configure** | change a setting, install, grant access, rotate a key | often irreversible, wide blast radius | config changes |
+| **Actuate** | unlock a door, set a thermostat, start a car | irreversible in the moment, safety-critical | actuations |
+| **Compute** | run code, shell, spawn a process | depends entirely on what it does | already covered by capability tiers |
+
+For a personal assistant **Communicate is the class that matters most**, not
+Spend. An agent that sends a message in your name, to the wrong person, saying
+something you would not have said, has done more damage than one that buys the
+wrong thing: money comes back and a message does not. Effectors, approvals and
+budgets are designed around that first.
+
 ## Principles
 
 1. **Autonomous up to the last irreversible step.** Research, compare, draft,
@@ -71,7 +93,7 @@ safe to leave alone overnight.
 
 | Story | Runtime | Surface |
 |---|---|---|
-| **A4 Semantic approval payload** | Approvals carry a structured summary the agent must produce: action, target, amount, recipient, and a one-line plain-English description, beside the raw arguments. Malformed or missing summary on an irreversible call fails closed. | Web, iPhone, and watch render the summary first and the arguments on demand. |
+| **A4 Semantic approval payload** | Approvals carry a structured summary the agent must produce. `action`, `target` and a one-line plain-English `summary` are required for every class; the rest is class-specific (`amount` for Spend, `recipient` and `visibility` for Communicate, `count` and `scope` for Mutate, `duration` for Actuate). Malformed or missing summary on an irreversible call fails closed. | Web, iPhone, and watch render the summary first and the arguments on demand. |
 | **A5 Batch review** | The broker groups pending approvals by agent and run so a day of staged work can be reviewed together, approved or denied as a set, with per-item override. | Inbox gains a grouped view; one Face ID for a reviewed batch. |
 | **A6 Expiry that fails safe** | Every approval already has a deadline. Make the timeout policy explicit per tool: expire-deny (default) or expire-skip, recorded in the proof either way. | Deadline and policy shown on the approval. |
 
@@ -82,8 +104,9 @@ reversibility class and its budget cost.
 
 | Story | Runtime | Surface |
 |---|---|---|
-| **A7 Browser effector, documented end to end** | A vetted `@playwright/mcp` configuration, a persistent profile the owner logs into by hand (the gateway never holds the password), and a worked "fill the cart, stop before checkout" example agent. | Template + docs page; the profile's login state is visible and resettable. |
-| **A8 First-party effectors where an API exists** | Calendar write, message send, file write to a chosen store — each with a reversibility class and a compensating action where one exists. | Skills/MCP pages list them with what they can and cannot undo. |
+| **A7 One effector, worked end to end: send a message** | The first effector is Communicate, because it is the one people reach for first and the one with the least forgiving failure. A drafted reply is staged, the approval shows recipient, channel and full text, and nothing leaves until a human says so. Establishes the pattern every later effector follows. | A worked example agent plus the docs page for it. |
+| **A8 Effectors where a real API exists** | Calendar write (Commit), file and record write (Mutate), settings and access changes (Configure) — each arriving with its reversibility class, its budget unit, and a compensating action where one exists. | Skills/MCP pages list each effector with what it can and cannot undo. |
+| **A8b Browser effector for sites with no API** | A vetted `@playwright/mcp` configuration and a persistent profile the owner logs into by hand, so the gateway never holds the password and an expired session fails by stopping. The worked example fills a cart and stops before checkout. | Template + docs page; the profile's login state is visible and resettable. |
 | **A9 Compensating actions** | `compensable` tools register how to reverse themselves (cancel the order, delete the message, restore the file). Safe Undo's receipt model extends to cover them. | Safe Undo lists compensable effects alongside today's two resource kinds. |
 
 ### Slice 4 — Keep going without going silent
@@ -92,7 +115,7 @@ reversibility class and its budget cost.
 |---|---|---|
 | **A10 Retry policy and circuit breakers** | Per-tool retry with backoff; a flapping tool opens a circuit and the run reports rather than spins. Budget is consumed by attempts, so a retry storm ends by construction. | Run trace shows attempts, backoff, and open circuits. |
 | **A11 Stuck escalation** | A run that cannot progress raises an inbox item naming what it tried, what it is waiting on, and what it would do with permission. | Inbox: "stuck" is a first-class decision type beside approvals. |
-| **A12 Standing goals** | A goal that outlives a run: success criteria as a mission contract, re-evaluated when the person model or a watched signal changes, able to wait days and resume. | Autopilot gains goals that persist, with their last evaluation visible. |
+| **A12 Standing goals** | A goal that outlives a run ("nobody I owe a reply to waits more than two days", "every renewal gets flagged a week out"): success criteria as a mission contract, re-evaluated when the person model or a watched signal changes, able to wait days and resume. | Autopilot gains goals that persist, with their last evaluation visible. |
 
 ### Slice 5 — A second opinion
 
@@ -108,6 +131,10 @@ reversibility class and its budget cost.
 - **Storing payment credentials.** The gateway holds no card numbers. An
   effector uses a payment method already saved with the merchant, or it does
   not run.
+- **Physical-world actuation.** Locks, vehicles, thermostats and anything else
+  where a wrong action is a safety question rather than a money question. The
+  Actuate class is named here so the budget and reversibility work accounts for
+  it, but shipping actuators needs its own program and its own review.
 - **A general-purpose autonomous web agent.** Browser automation is for sites
   with no API, scoped per agent, not a licence to roam.
 - **Autonomy that cannot be explained afterwards.** Any capability that would
