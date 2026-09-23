@@ -89,3 +89,47 @@ func TestMobileDeliveryAPIRegistersScopesAndRetainsGenie(t *testing.T) {
 		t.Fatalf("unregistered device status = %d, want 403", status)
 	}
 }
+
+// The web feed has no device id. The list route answers with the owner's
+// view across their devices instead of a 400 (#209), which also failed the
+// release render smoke once the feed became the landing page.
+func TestMobileDeliveriesListWithoutDeviceIsTheOwnersView(t *testing.T) {
+	store, err := mobilechan.Open(filepath.Join(t.TempDir(), "mobile.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mobilechan.SetDefaultStore(store)
+	t.Cleanup(func() {
+		mobilechan.SetDefaultStore(nil)
+		_ = store.Close()
+	})
+	s := newTestGateway(t, "secret")
+	status, _ := gatewayJSON(t, s, http.MethodPost, "/api/v1/mobile/devices", "secret", `{"id":"phone","name":"Owner's iPhone"}`)
+	if status != http.StatusCreated {
+		t.Fatalf("register status=%d", status)
+	}
+	ctx := context.Background()
+	for _, delivery := range []mobilechan.Delivery{
+		{ID: "everyone", Destination: "all", AgentID: "reporter", Body: "report"},
+		{ID: "this-phone", Destination: "device:phone", AgentID: "reporter", Body: "for the phone"},
+		{ID: "someone-else", Destination: "device:other", AgentID: "reporter", Body: "not ours"},
+		{ID: "system", Destination: "all", AgentID: "system", Body: "internal"},
+	} {
+		if err := store.Add(ctx, "personal", delivery); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	status, body := gatewayJSON(t, s, http.MethodGet, "/api/v1/mobile/deliveries?limit=40", "secret", "")
+	if status != http.StatusOK {
+		t.Fatalf("list without device: status=%d body=%v, want 200", status, body)
+	}
+	items, _ := body["deliveries"].([]any)
+	ids := map[string]bool{}
+	for _, item := range items {
+		ids[item.(map[string]any)["id"].(string)] = true
+	}
+	if !ids["everyone"] || !ids["this-phone"] || ids["someone-else"] || ids["system"] {
+		t.Fatalf("owner's view ids = %v, want everyone + this-phone only", ids)
+	}
+}

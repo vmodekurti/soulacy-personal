@@ -130,12 +130,16 @@ func (s *Server) handleListMobileDeliveries(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	deviceID, err := mobileDeviceID(c)
-	if err != nil {
-		return err
-	}
+	deviceID := strings.TrimSpace(c.Query("device_id"))
 	limit, _ := strconv.Atoi(c.Query("limit", "100"))
-	deliveries, err := store.List(c.UserContext(), workspaceID, deviceID, userID, limit)
+	var deliveries []mobilechan.Delivery
+	if deviceID == "" {
+		// No device: the web feed. Show the owner what went to any of their
+		// devices instead of refusing (#209).
+		deliveries, err = store.ListForUser(c.UserContext(), workspaceID, userID, limit)
+	} else {
+		deliveries, err = store.List(c.UserContext(), workspaceID, deviceID, userID, limit)
+	}
 	if errors.Is(err, mobilechan.ErrDeviceOwnership) {
 		return s.errMsg(c, fiber.StatusForbidden, "device is not registered to this user")
 	}
