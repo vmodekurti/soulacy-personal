@@ -403,19 +403,20 @@ func metrics(markdown string) Block {
 			if len(value) > 20 || seen[value] || !metricValRe.MatchString(value) {
 				continue
 			}
-			// Label: the words just before, or just after, the number.
+			// A tile needs a real label. "Treasury: climbed back to **5.00%**"
+			// is one (label Treasury); "returning to target until **2029**"
+			// is a sentence with a year in it, not a metric (#212).
 			before := strings.TrimSpace(stripInline(line[:m[0]]))
 			after := strings.TrimSpace(stripInline(line[m[1]:]))
-			label := lastWords(before, 4)
-			if label == "" || strings.HasSuffix(before, ":") {
-				label = firstWords(after, 4)
-			}
-			label = strings.Trim(label, " ,:;—–-()")
+			label, hint := metricLabel(before, after, value)
 			if label == "" {
 				continue
 			}
+			if hint == "" {
+				hint = firstWords(after, 6)
+			}
 			seen[value] = true
-			b.Items = append(b.Items, Item{Label: clip(label, 32), Value: value, Hint: clip(firstWords(after, 6), 40)})
+			b.Items = append(b.Items, Item{Label: clip(label, 32), Value: value, Hint: clip(hint, 40)})
 			if len(b.Items) == 4 {
 				return b
 			}
@@ -423,6 +424,80 @@ func metrics(markdown string) Block {
 	}
 	return b
 }
+
+// metricLabel decides whether a bold number is a metric and what to call
+// it. Accepted: "Label: … **value**" (the label is what precedes the colon,
+// with at most three words between colon and value, which become the hint);
+// "**value** — label" / "label — **value**" with a dash; or a value that
+// carries a unit (currency, percent, degrees, k/M/B) next to a short label.
+// A bare number — a year, a count in a sentence — with no label form is not
+// a metric.
+func metricLabel(before, after, value string) (label, hint string) {
+	// Only the clause around the number counts: an earlier sentence on the
+	// same line is not this metric's label.
+	before = clauseTail(before)
+	after = clauseHead(after)
+	if i := strings.LastIndex(before, ":"); i >= 0 {
+		between := strings.TrimSpace(before[i+1:])
+		if len(strings.Fields(between)) <= 3 {
+			return strings.Trim(lastWords(strings.TrimSpace(before[:i]), 4), " ,;—–-()"), between
+		}
+	}
+	dashed := func(s string) string { return strings.Trim(s, " ,:;—–-()") }
+	if strings.HasSuffix(strings.TrimSpace(before), "—") || strings.HasSuffix(strings.TrimSpace(before), "–") || strings.HasSuffix(strings.TrimSpace(before), " -") {
+		if l := dashed(lastWords(before, 4)); l != "" {
+			return l, ""
+		}
+	}
+	if strings.HasPrefix(after, "—") || strings.HasPrefix(after, "–") || strings.HasPrefix(after, "- ") {
+		if l := dashed(firstWords(after, 4)); l != "" {
+			return l, ""
+		}
+	}
+	if metricUnitRe.MatchString(value) {
+		// "All **3 of 3** targets completed": a one-word lead-in is not the
+		// label; the words after the number are.
+		if len(strings.Fields(before)) > 1 && !strings.HasSuffix(before, ",") {
+			if l := dashed(lastWords(before, 3)); l != "" {
+				return l, ""
+			}
+		}
+		if l := dashed(firstWords(after, 3)); l != "" {
+			return l, ""
+		}
+		if l := dashed(before); l != "" {
+			return l, ""
+		}
+	}
+	return "", ""
+}
+
+// clauseTail keeps what follows the last sentence break in s.
+func clauseTail(s string) string {
+	cut := -1
+	for _, sep := range []string{". ", "; ", "! ", "? ", " | "} {
+		if i := strings.LastIndex(s, sep); i > cut {
+			cut = i + len(sep) - 1
+		}
+	}
+	if cut >= 0 && cut < len(s) {
+		return strings.TrimSpace(s[cut:])
+	}
+	return strings.TrimSpace(s)
+}
+
+// clauseHead keeps what precedes the first sentence break in s.
+func clauseHead(s string) string {
+	cut := len(s)
+	for _, sep := range []string{". ", "; ", "! ", "? ", " | "} {
+		if i := strings.Index(s, sep); i >= 0 && i < cut {
+			cut = i
+		}
+	}
+	return strings.TrimSpace(strings.TrimSuffix(s[:cut], "."))
+}
+
+var metricUnitRe = regexp.MustCompile(`^[~≈]?[-+]?(?:[$€£]\d|\d[\d,.]*\s*(?:%|°|of\s+\d+|[kKmMbB]\b|[A-Za-z]{1,4}$))`)
 
 // ── helpers ─────────────────────────────────────────────────────────────
 

@@ -88,8 +88,14 @@
 </div>
 
 <style>
+  /* A story is a phone-shaped column whatever the window: on a wide desktop
+     it stands centred on a dimmed backdrop instead of spreading the slide
+     across the whole screen (#211). */
   .viewer { position: fixed; inset: 0; z-index: 200; display: grid; grid-template-rows: auto auto 1fr auto; color: #fff;
+    width: min(100vw, 480px); height: 100%; margin: 0 auto; left: 0; right: 0;
     background: linear-gradient(180deg, #0b1b2b, #123a52 60%, #1c5a6e); }
+  .viewer::before { content: ''; position: fixed; inset: 0; z-index: -1; background: rgba(4, 12, 20, .78); }
+  .body { display: flex; flex-direction: column; align-items: stretch; }
   .progress { display: flex; gap: 4px; padding: 12px 10px 0; }
   .progress i { flex: 1; height: 2.5px; background: rgba(255,255,255,.3); border-radius: 2px; overflow: hidden; }
   .progress i b { display: block; height: 100%; width: 0; background: #fff; }

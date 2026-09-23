@@ -151,3 +151,28 @@ func TestNumbers(t *testing.T) {
 		}
 	}
 }
+
+// A bold number inside a sentence is not a metric; a labelled one is (#212).
+func TestMetricsNeedALabel(t *testing.T) {
+	p := Present("Here's the market picture:\n\nThe Fed sees rates returning to target until **2029**. The 10-year Treasury: climbed back to **5.00%**. Bitcoin: topped **$80,000** this week.")
+	var m *Block
+	for i := range p.Blocks {
+		if p.Blocks[i].Kind == "metrics" {
+			m = &p.Blocks[i]
+		}
+	}
+	if m == nil {
+		t.Fatalf("expected a metrics block, got %+v", p.Blocks)
+	}
+	var labels []string
+	for _, it := range m.Items {
+		labels = append(labels, it.Label+"="+it.Value)
+	}
+	got := strings.Join(labels, "|")
+	if strings.Contains(got, "2029") {
+		t.Fatalf("a year in a sentence became a metric: %s", got)
+	}
+	if !strings.Contains(got, "Treasury=5.00%") || !strings.Contains(got, "Bitcoin=$80,000") {
+		t.Fatalf("labelled values missing: %s", got)
+	}
+}

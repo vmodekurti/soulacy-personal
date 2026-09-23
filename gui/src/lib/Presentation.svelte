@@ -125,7 +125,7 @@
       {#if b.title}<div class="bt">{b.title}</div>{/if}
       <ul class="checks">{#each b.items as it}<li class:done={it.done}><span class="box">{it.done ? '✓' : ''}</span>{it.label}</li>{/each}</ul>
     {:else}
-      <div class="markdown-body md" use:richRenderer={b.text}>{@html parseMarkdown(b.text || '')}</div>
+      <div class="markdown-body md" class:clamped={compact} use:richRenderer={b.text}>{@html parseMarkdown(b.text || '')}</div>
     {/if}
   {/each}
 </div>
@@ -162,6 +162,8 @@
   .checks li.done .box { background: var(--sl-leaf); border-color: var(--sl-leaf); color: #fff; }
   .checks li.done { color: var(--sl-text-dim); }
   .md { color: var(--sl-text-dim); line-height: 1.45; }
+  /* A prose result on a card reads like a caption: a few lines, then "more" (soulacy-ios #61). */
+  .md.clamped { max-height: 120px; overflow: hidden; -webkit-mask-image: linear-gradient(#000 70%, transparent); mask-image: linear-gradient(#000 70%, transparent); }
   .md :global(p) { margin: 0 0 .5em; }
   .md :global(pre) { overflow-x: auto; }
   .more-hint { color: var(--sl-text-faint); font-size: 12px; }
