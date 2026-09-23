@@ -1217,12 +1217,9 @@ func (s *Server) buildApp() *fiber.App {
 	api.Get("/runs/ops-summary", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.handleOpsSummary)
 	api.Get("/reports/operations", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.handleOperationsReport)
 	api.Get("/runs/slo-status", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.handleSLOStatus)
-	api.Get("/runs/ledger", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.handleRunLedger)
+	s.mountRunHistory(api)
 	api.Get("/runs/events", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.handleRunEvents)
 	api.Get("/runs/:session_id/metrics", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.requirePathSessionMW("session_id", ""), s.handleRunMetrics)
-	// E4c — hung-session tracker snapshot for the Activity page's "Running now"
-	// strip. Read-only, cheap, safe to poll every couple of seconds.
-	api.Get("/activity/running", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.handleActivityRunning)
 
 	// --- Workboard (Story 5) ---
 	// s.workboardStore is checked at request time so SetWorkboardStore() can
@@ -2036,4 +2033,15 @@ func (s *Server) watchConfig(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// mountRunHistory registers what an agent did — the run ledger and the
+// "running now" strip. That is history, not cost: readable by every role
+// that can read logs, so a paired phone (operator) gets its feed (#214).
+// Costs, ops summaries and Prometheus metrics stay behind metrics:read.
+func (s *Server) mountRunHistory(api fiber.Router) {
+	api.Get("/runs/ledger", s.rbacMW(rbac.ResourceLogs, rbac.ActionRead), s.handleRunLedger)
+	// E4c — hung-session tracker snapshot for the Activity page's "Running now"
+	// strip. Read-only, cheap, safe to poll every couple of seconds.
+	api.Get("/activity/running", s.rbacMW(rbac.ResourceLogs, rbac.ActionRead), s.handleActivityRunning)
 }
