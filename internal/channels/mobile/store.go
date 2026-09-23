@@ -161,6 +161,40 @@ func (s *Store) List(ctx context.Context, workspaceID, deviceID, userID string, 
 	return out, rows.Err()
 }
 
+// ListForUser is List without a device: the owner's view. It returns what
+// went to everyone, to this user, to any device the user registered, or to
+// no device in particular, and counts a delivery read once any of the
+// user's devices read it. The web feed has no device id (#209).
+func (s *Store) ListForUser(ctx context.Context, workspaceID, userID string, limit int) ([]Delivery, error) {
+	workspaceID = normalizeWorkspaceID(workspaceID)
+	userID = strings.TrimSpace(userID)
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT d.id,d.destination,d.agent_id,d.session_id,d.title,d.body,d.parts_json,d.metadata_json,d.created_at,
+      (SELECT MAX(r.read_at) FROM mobile_delivery_receipts r
+         JOIN mobile_devices v ON v.workspace_id=r.workspace_id AND v.id=r.device_id
+         WHERE r.workspace_id=d.workspace_id AND r.delivery_id=d.id AND v.user_id=?)
+    FROM mobile_deliveries d WHERE d.workspace_id=? AND
+      (destination='all' OR destination=? OR
+       destination IN (SELECT 'device:'||id FROM mobile_devices WHERE workspace_id=d.workspace_id AND user_id=?) OR
+       (destination NOT LIKE 'device:%' AND destination NOT LIKE 'user:%'))
+	ORDER BY created_at DESC,d.id DESC LIMIT ?`, userID, workspaceID, "user:"+userID, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Delivery
+	for rows.Next() {
+		d, err := scanDelivery(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) Get(ctx context.Context, workspaceID, deliveryID, deviceID, userID string) (Delivery, error) {
 	if err := s.requireDeviceOwner(ctx, normalizeWorkspaceID(workspaceID), deviceID, userID); err != nil {
 		return Delivery{}, err
