@@ -925,6 +925,9 @@ func (s *Server) buildApp() *fiber.App {
 	// someone else. chat:read is the one permission every role holds.
 	api.Post("/pairing/tokens", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.handleCreatePairingToken)
 	api.Get("/pairing/members", s.rbacMW(rbac.ResourceConfig, rbac.ActionRead), s.handleListHouseholdMembers)
+	// One device per person (#216): is my phone paired, and clear it.
+	api.Get("/pairing/status", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.handlePairingStatus)
+	api.Post("/pairing/unpair", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.handleUnpair)
 	api.Get("/approvals", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleListApprovals)
 	api.Post("/approvals/:id/approve", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleResolveApproval(true))
 	api.Post("/approvals/:id/deny", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleResolveApproval(false))

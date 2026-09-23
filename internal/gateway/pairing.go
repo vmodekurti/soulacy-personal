@@ -2,6 +2,9 @@ package gateway
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	mobilechan "github.com/soulacy/soulacy/internal/channels/mobile"
 	"strings"
 	"sync"
 	"time"
@@ -73,6 +76,16 @@ func (s *Server) handleCreatePairingToken(c *fiber.Ctx) error {
 			return s.errMsg(c, fiber.StatusBadRequest, "role must be operator or viewer")
 		}
 		meta = pairing.Token{Subject: subject, DisplayName: name, Role: role}
+	}
+	// One paired device per person (#216): a second phone is refused until
+	// the first is unpaired, so a lost or replaced phone is an explicit act.
+	if pd, err := s.pairedDeviceFor(c.Context(), meta.Subject); err != nil {
+		return s.errJSON(c, fiber.StatusInternalServerError, err)
+	} else if pd != nil {
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"error":  alreadyPairedMessage(pd),
+			"paired": pd,
+		})
 	}
 	tok, err := getPairingStore().CreateFor(0, meta)
 	if err != nil {
@@ -270,6 +283,14 @@ func (s *Server) handleRedeemPairingToken(c *fiber.Ctx) error {
 		if subject == "" {
 			subject, role = "admin", "operator"
 		}
+		// The code may have been minted before another phone finished
+		// pairing; the rule holds at redeem too (#216).
+		if pd, err := s.pairedDeviceFor(c.Context(), subject); err != nil {
+			return s.errJSON(c, fiber.StatusInternalServerError, err)
+		} else if pd != nil {
+			metrics.PairingTokensTotal.WithLabelValues("rejected").Inc()
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"paired": false, "reason": alreadyPairedMessage(pd), "device": pd})
+		}
 		name := companionKeyName
 		if display != "" {
 			name = companionKeyName + " (" + display + ")"
@@ -302,4 +323,154 @@ func (s *Server) handleRedeemPairingToken(c *fiber.Ctx) error {
 	}
 	// No managed key store (auth disabled): pairing still succeeds, no token needed.
 	return c.JSON(fiber.Map{"paired": true, "token": "", "message": "Gateway auth is disabled; no token required."})
+}
+
+// pairedDevice is the one phone a person has paired (#216).
+type pairedDevice struct {
+	Subject     string     `json:"subject"`
+	DisplayName string     `json:"display_name"`
+	DeviceName  string     `json:"device_name,omitempty"`
+	PairedAt    time.Time  `json:"paired_at"`
+	LastSeenAt  *time.Time `json:"last_seen_at,omitempty"`
+	KeyIDs      []string   `json:"key_ids"`
+	Owner       bool       `json:"owner"`
+}
+
+func alreadyPairedMessage(pd *pairedDevice) string {
+	who := "you"
+	if !pd.Owner {
+		who = pd.DisplayName
+	}
+	device := pd.DeviceName
+	if device == "" {
+		device = "a phone"
+	}
+	return fmt.Sprintf("%s already paired on %s. Unpair it first to pair a different device.", device, pd.PairedAt.Format("Jan 2")) +
+		func() string {
+			if who == "you" {
+				return ""
+			}
+			return " (" + who + ")"
+		}()
+}
+
+// pairedDeviceFor reports the phone paired for subject, or nil. A phone is
+// a live companion credential minted for that person; the device name comes
+// from the phone's push registration when it made one.
+func (s *Server) pairedDeviceFor(ctx context.Context, subject string) (*pairedDevice, error) {
+	if s.apiKeyStore == nil {
+		return nil, nil
+	}
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		subject = "admin"
+	}
+	keys, err := s.apiKeyStore.List(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	var pd *pairedDevice
+	for _, k := range keys {
+		if k.Name != companionKeyName && !strings.HasPrefix(k.Name, companionKeyName+" ") {
+			continue
+		}
+		cl := auth.ClaimsForAPIKey(k)
+		if cl.Subject != subject {
+			continue
+		}
+		if pd == nil {
+			display := strings.Trim(strings.TrimSpace(strings.TrimPrefix(k.Name, companionKeyName)), " ()")
+			if display == "" {
+				display = subject
+			}
+			pd = &pairedDevice{Subject: subject, DisplayName: display, PairedAt: k.CreatedAt, Owner: subject == "admin"}
+		}
+		pd.KeyIDs = append(pd.KeyIDs, k.ID)
+		if k.CreatedAt.Before(pd.PairedAt) {
+			pd.PairedAt = k.CreatedAt
+		}
+		if k.LastUsedAt != nil && (pd.LastSeenAt == nil || k.LastUsedAt.After(*pd.LastSeenAt)) {
+			t := *k.LastUsedAt
+			pd.LastSeenAt = &t
+		}
+	}
+	if pd == nil {
+		return nil, nil
+	}
+	if store := mobilechan.DefaultStore(); store != nil {
+		if devices, err := store.DevicesForUser(ctx, "", subject); err == nil && len(devices) > 0 {
+			pd.DeviceName = devices[0].Name
+		}
+	}
+	return pd, nil
+}
+
+// handlePairingStatus: is a phone paired for me? Admins may ask about
+// anyone with ?subject=.
+func (s *Server) handlePairingStatus(c *fiber.Ctx) error {
+	c.Set(fiber.HeaderCacheControl, "no-store")
+	principal, _ := requestPrincipal(c)
+	subject := strings.TrimSpace(principal.Subject)
+	if subject == "" {
+		subject = "admin"
+	}
+	if other := strings.TrimSpace(c.Query("subject")); other != "" && other != subject {
+		if !strings.EqualFold(principal.Role, rbac.RoleAdmin) {
+			return s.errMsg(c, fiber.StatusForbidden, "only an admin can look up someone else's phone")
+		}
+		subject = other
+	}
+	pd, err := s.pairedDeviceFor(c.Context(), subject)
+	if err != nil {
+		return s.errJSON(c, fiber.StatusInternalServerError, err)
+	}
+	if pd == nil {
+		return c.JSON(fiber.Map{"paired": false, "subject": subject})
+	}
+	return c.JSON(fiber.Map{"paired": true, "subject": subject, "device": pd})
+}
+
+// handleUnpair clears a person's paired phone: every companion credential
+// for them is revoked and their push registrations are forgotten, so a
+// different device can pair. Oneself, or anyone for an admin (#216).
+func (s *Server) handleUnpair(c *fiber.Ctx) error {
+	var body struct {
+		Subject string `json:"subject"`
+	}
+	if len(c.Body()) > 0 {
+		if err := c.BodyParser(&body); err != nil {
+			return s.errMsg(c, fiber.StatusBadRequest, "invalid JSON body")
+		}
+	}
+	principal, _ := requestPrincipal(c)
+	subject := strings.TrimSpace(principal.Subject)
+	if subject == "" {
+		subject = "admin"
+	}
+	if other := strings.TrimSpace(body.Subject); other != "" && other != subject {
+		if !strings.EqualFold(principal.Role, rbac.RoleAdmin) {
+			return s.errMsg(c, fiber.StatusForbidden, "only an admin can unpair someone else's phone")
+		}
+		subject = other
+	}
+	pd, err := s.pairedDeviceFor(c.Context(), subject)
+	if err != nil {
+		return s.errJSON(c, fiber.StatusInternalServerError, err)
+	}
+	revoked := 0
+	if pd != nil {
+		for _, id := range pd.KeyIDs {
+			if err := s.apiKeyStore.Revoke(c.Context(), id); err != nil && !errors.Is(err, apikeys.ErrNotFound) {
+				return s.errJSON(c, fiber.StatusInternalServerError, err)
+			}
+			revoked++
+		}
+	}
+	devices := 0
+	if store := mobilechan.DefaultStore(); store != nil {
+		if n, err := store.ClearDevicesForUser(c.Context(), "", subject); err == nil {
+			devices = n
+		}
+	}
+	return c.JSON(fiber.Map{"unpaired": true, "subject": subject, "revoked": revoked, "devices": devices})
 }

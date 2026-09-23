@@ -465,6 +465,8 @@ export const api = {
   pairing: {
     createToken: (body) => apiFetch('/pairing/tokens', { method: 'POST', body: body ? JSON.stringify(body) : undefined }),
     members: () => apiFetch('/pairing/members'),
+    status: () => apiFetch('/pairing/status'),
+    unpair: (subject) => apiFetch('/pairing/unpair', { method: 'POST', body: JSON.stringify(subject ? { subject } : {}) }),
     revokeKey: (id) => apiFetch(`/admin/api-keys/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     redeem: (code) => apiFetch('/pairing/redeem', { method: 'POST', body: JSON.stringify({ code }) }),
   },

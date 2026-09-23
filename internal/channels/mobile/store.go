@@ -288,6 +288,44 @@ func (s *Store) UpsertDevice(ctx context.Context, workspaceID, userID string, d 
 	return nil
 }
 
+// DevicesForUser lists the devices a person registered, newest first.
+func (s *Store) DevicesForUser(ctx context.Context, workspaceID, userID string) ([]Device, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id,user_id,name,push_token,push_environment,bundle_id,notifications_enabled,created_at,updated_at
+    FROM mobile_devices WHERE workspace_id=? AND user_id=? ORDER BY updated_at DESC`, normalizeWorkspaceID(workspaceID), strings.TrimSpace(userID))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Device
+	for rows.Next() {
+		var d Device
+		var enabled int
+		var created, updated string
+		if err := rows.Scan(&d.ID, &d.UserID, &d.Name, &d.PushToken, &d.PushEnvironment, &d.BundleID, &enabled, &created, &updated); err != nil {
+			return nil, err
+		}
+		d.NotificationsEnabled = enabled == 1
+		d.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
+		d.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// ClearDevicesForUser forgets every device a person registered: unpairing.
+func (s *Store) ClearDevicesForUser(ctx context.Context, workspaceID, userID string) (int, error) {
+	devices, err := s.DevicesForUser(ctx, workspaceID, userID)
+	if err != nil {
+		return 0, err
+	}
+	for _, d := range devices {
+		if err := s.DeleteDevice(ctx, workspaceID, userID, d.ID); err != nil {
+			return 0, err
+		}
+	}
+	return len(devices), nil
+}
+
 func (s *Store) DeleteDevice(ctx context.Context, workspaceID, userID, deviceID string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

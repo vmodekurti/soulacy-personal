@@ -134,12 +134,30 @@
     try { household = (await api.pairing.members()).members || [] } catch { household = [] }
   }
 
-  async function revokeMember(m) {
-    if (!confirm(`Unpair every phone for ${m.display_name}? Their memory stays on the gateway.`)) return
+  // One device per person (#216): the page says whether your phone is
+  // paired, and pairing a different one starts with unpairing this one.
+  let pairedSelf = null
+  async function loadPairedStatus() {
+    try { const st = await api.pairing.status(); pairedSelf = st.paired ? st.device : null } catch { pairedSelf = null }
+  }
+  async function unpairSelf() {
+    const name = (pairedSelf && pairedSelf.device_name) || 'your phone'
+    if (!confirm(`Unpair ${name}? It will sign out; your memory and history stay on the gateway.`)) return
     try {
-      for (const id of m.key_ids || []) await api.pairing.revokeKey(id)
+      await api.pairing.unpair()
+      pairedSelf = null; pairCode = ''; pairQr = ''; pairUrl = ''
+      companionMsg = 'Unpaired. You can pair a different phone now.'
+      await loadHousehold()
+    } catch (e) { companionMsg = e.message }
+  }
+
+  async function revokeMember(m) {
+    if (!confirm(`Unpair ${m.display_name}'s phone? Their memory stays on the gateway.`)) return
+    try {
+      await api.pairing.unpair(m.subject)
       householdMsg = `${m.display_name} unpaired.`
       await loadHousehold()
+      if (m.owner) await loadPairedStatus()
     } catch (e) { householdMsg = e.message }
   }
 
@@ -156,6 +174,7 @@
       pairReachable = res.reachable !== false
       pairHint = res.hint || ''
       pairSubject = res.display_name || (res.subject === 'admin' ? 'you' : res.subject || '')
+      companionMsg = ''
       pairQr = ''
       // Render a scannable QR of the pair URL. qrcode is code-split, so it only
       // loads the first time someone pairs a device.
@@ -172,6 +191,7 @@
     try {
       const res = await api.pairing.redeem(redeemCode.trim())
       redeemMsg = res.paired ? '✓ Paired.' + (res.token ? ' Token issued.' : '') : 'Pairing failed.'
+      loadPairedStatus(); loadHousehold()
       if (res.token) { try { sessionStorage.setItem('soulacy-mobile-token', res.token); localStorage.removeItem('soulacy-mobile-token') } catch (_) {} }
       redeemCode = ''
     } catch (e) { redeemMsg = e.message }
@@ -470,6 +490,7 @@
   }
 
   onMount(() => {
+    loadPairedStatus()
     load()
     loadApprovals()
     loadActiveRuns()
@@ -645,15 +666,24 @@
       {/if}
     </div>
 
+    {#if pairedSelf}
+      <div class="device-row paired-row">
+        <div>
+          <div class="device-label">Your phone is paired</div>
+          <div class="device-sub">{pairedSelf.device_name || 'iPhone'} · paired {new Date(pairedSelf.paired_at).toLocaleDateString()}{#if pairedSelf.last_seen_at} · last seen {new Date(pairedSelf.last_seen_at).toLocaleString()}{/if}. One device per person: unpair it to pair a different phone.</div>
+        </div>
+        <button class="btn-secondary small" on:click={unpairSelf}>Unpair</button>
+      </div>
+    {/if}
     <div class="device-row">
       <div>
-        <div class="device-label">Pair a phone</div>
-        <div class="device-sub">Your own phone: leave the name empty. Someone else in your household: enter their name so their phone gets its own memory, inbox and approvals.</div>
+        <div class="device-label">{pairedSelf ? 'Pair a phone for someone else' : 'Pair a phone'}</div>
+        <div class="device-sub">{#if pairedSelf}Enter their name so their phone gets its own memory, inbox and approvals.{:else}Your own phone: leave the name empty. Someone else in your household: enter their name so their phone gets its own memory, inbox and approvals.{/if}</div>
       </div>
-      <button class="btn-secondary small" on:click={makePairCode}>Get code</button>
+      <button class="btn-secondary small" on:click={makePairCode} disabled={pairedSelf && !pairFor.trim()}>Get code</button>
     </div>
     <div class="device-row redeem-row">
-      <input class="redeem-input" placeholder="Name (leave empty for your own phone)" bind:value={pairFor} maxlength="60" />
+      <input class="redeem-input" placeholder={pairedSelf ? 'Name of the person to pair' : 'Name (leave empty for your own phone)'} bind:value={pairFor} maxlength="60" />
       <select class="redeem-input" bind:value={pairRole} disabled={!pairFor.trim()} aria-label="Role for this person">
         <option value="operator">Can run agents</option>
         <option value="viewer">View only</option>
