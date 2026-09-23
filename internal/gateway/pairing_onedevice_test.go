@@ -3,6 +3,7 @@ package gateway
 import (
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/soulacy/soulacy/internal/auth/apikeys"
@@ -43,6 +44,9 @@ func TestOneDevicePerPerson(t *testing.T) {
 	code, second := doJSON(t, admin, http.MethodPost, "/api/v1/pairing/tokens", "")
 	if code != http.StatusConflict || second["paired"] == nil {
 		t.Fatalf("second token should be 409 with the paired device, got %d %+v", code, second)
+	}
+	if msg, _ := second["error"].(string); !strings.HasPrefix(msg, "Your phone is already paired (since ") || !strings.Contains(msg, "Unpair it first") {
+		t.Fatalf("refusal should name the phone and the way out, got %q", msg)
 	}
 	code, body = doJSON(t, admin, http.MethodGet, "/api/v1/pairing/status", "")
 	if code != http.StatusOK || body["paired"] != true || body["device"].(map[string]any)["owner"] != true {

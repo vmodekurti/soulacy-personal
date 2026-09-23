@@ -337,21 +337,18 @@ type pairedDevice struct {
 }
 
 func alreadyPairedMessage(pd *pairedDevice) string {
-	who := "you"
+	whose := "Your phone"
 	if !pd.Owner {
-		who = pd.DisplayName
+		whose = pd.DisplayName + "'s phone"
 	}
-	device := pd.DeviceName
-	if device == "" {
-		device = "a phone"
+	if pd.DeviceName != "" {
+		whose += " (" + pd.DeviceName + ")"
 	}
-	return fmt.Sprintf("%s already paired on %s. Unpair it first to pair a different device.", device, pd.PairedAt.Format("Jan 2")) +
-		func() string {
-			if who == "you" {
-				return ""
-			}
-			return " (" + who + ")"
-		}()
+	when := "since " + pd.PairedAt.Format("Jan 2")
+	if pd.LastSeenAt != nil {
+		when += ", last seen " + pd.LastSeenAt.Format("Jan 2")
+	}
+	return fmt.Sprintf("%s is already paired (%s). Unpair it first to pair a different device.", whose, when)
 }
 
 // pairedDeviceFor reports the phone paired for subject, or nil. A phone is
