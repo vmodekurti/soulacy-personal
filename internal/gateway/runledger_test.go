@@ -1,6 +1,11 @@
 package gateway
 
 import (
+	"github.com/gofiber/fiber/v2"
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/soulacy/soulacy/internal/auth"
+	"github.com/soulacy/soulacy/internal/rbac"
+	"go.uber.org/zap"
 	"net/http"
 	"testing"
 	"time"
@@ -237,5 +242,33 @@ func TestRunLedgerRejectsUnknownScope(t *testing.T) {
 	status, body := gatewayJSON(t, s, http.MethodGet, "/api/v1/runs/ledger?scope=other", "secret", "")
 	if status != http.StatusBadRequest {
 		t.Fatalf("unknown scope status = %d body=%v", status, body)
+	}
+}
+
+// A paired phone authenticates as the owner with the operator role. The feed
+// reads the run ledger, which used to sit behind the admin-only metrics
+// resource and answered "Your role (operator) can't metrics:read" (#214).
+func TestRunLedgerReadableByOperatorAndViewer(t *testing.T) {
+	s := newTestGatewayWithMetrics(t)
+	s.rbacManager = rbac.NewManager(rbac.NoopStore{}, zap.NewNop())
+	for _, role := range []string{"operator", "viewer"} {
+		app := fiber.New()
+		app.Use(func(c *fiber.Ctx) error {
+			auth.SetClaims(c, &auth.Claims{Role: role, Kind: "access", RegisteredClaims: jwt.RegisteredClaims{Subject: "admin"}})
+			return c.Next()
+		})
+		api := app.Group("/api/v1")
+		s.mountRunHistory(api)
+		api.Get("/costs", s.rbacMW(rbac.ResourceMetrics, rbac.ActionRead), s.handleGetCosts)
+		if code, body := doJSON(t, app, http.MethodGet, "/api/v1/runs/ledger?limit=5", ""); code != http.StatusOK {
+			t.Fatalf("%s reading runs/ledger: %d %+v", role, code, body)
+		}
+		if code, body := doJSON(t, app, http.MethodGet, "/api/v1/activity/running", ""); code != http.StatusOK {
+			t.Fatalf("%s reading activity/running: %d %+v", role, code, body)
+		}
+		// Costs stay admin-only.
+		if code, _ := doJSON(t, app, http.MethodGet, "/api/v1/costs", ""); code != http.StatusForbidden {
+			t.Fatalf("%s must not read costs, got %d", role, code)
+		}
 	}
 }
