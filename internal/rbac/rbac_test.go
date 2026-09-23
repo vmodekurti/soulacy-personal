@@ -992,3 +992,16 @@ func TestKnownRolesContainsAllThree(t *testing.T) {
 		}
 	}
 }
+
+// Run history is readable by every role (#220); the system log and metrics
+// keep their own rules.
+func TestHasPermissionRunsReadForEveryRole(t *testing.T) {
+	for _, role := range []string{RoleAdmin, RoleOperator, RoleViewer} {
+		if !HasPermission(role, ResourceRuns, ActionRead) {
+			t.Errorf("%s should read runs", role)
+		}
+		if HasPermission(role, ResourceRuns, ActionWrite) {
+			t.Errorf("%s should not write runs", role)
+		}
+	}
+}

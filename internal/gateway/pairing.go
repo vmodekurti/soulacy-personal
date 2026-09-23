@@ -198,6 +198,14 @@ func householdSubject(name string) string {
 // key's subject says whose phone it is.
 const companionKeyName = "mobile-companion"
 
+// companionScopes is what a paired phone may do: chat, read the agent
+// directory, its memory and config, and see what its agents did (#220).
+// Phones paired before a scope existed are widened at startup
+// (apikeys.SQLiteStore.EnsureScopes) so they need no re-pairing.
+func companionScopes() []string {
+	return []string{"chat", "agents:read", "memory", "config", "runs:read"}
+}
+
 // handleListHouseholdMembers lists who has a paired phone: one row per
 // subject, with how many phones and when one was last seen. Admin only.
 func (s *Server) handleListHouseholdMembers(c *fiber.Ctx) error {
@@ -295,7 +303,7 @@ func (s *Server) handleRedeemPairingToken(c *fiber.Ctx) error {
 		if display != "" {
 			name = companionKeyName + " (" + display + ")"
 		}
-		scopes := []string{"chat", "agents:read", "memory", "config"}
+		scopes := companionScopes()
 		var (
 			plaintext string
 			key       apikeys.APIKey

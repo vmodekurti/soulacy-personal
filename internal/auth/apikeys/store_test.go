@@ -748,3 +748,42 @@ func TestCreateForStoresIdentityAndLegacyRowsSurviveMigration(t *testing.T) {
 		s2.Close()
 	}
 }
+
+// A release can widen an already-paired phone's scopes in place (#220).
+func TestEnsureScopesWidensCompanionKeysOnce(t *testing.T) {
+	store, err := NewSQLiteStore(t.TempDir() + "/keys.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if _, _, err := store.Create(ctx, "mobile-companion", []string{"chat", "config"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.Create(ctx, "mobile-companion (Priya)", []string{"chat"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.Create(ctx, "ci-deploy", []string{"chat"}); err != nil {
+		t.Fatal(err)
+	}
+	n, err := store.EnsureScopes(ctx, "mobile-companion", []string{"runs:read"})
+	if err != nil || n != 2 {
+		t.Fatalf("EnsureScopes = %d, %v; want 2 companion keys widened", n, err)
+	}
+	n, err = store.EnsureScopes(ctx, "mobile-companion", []string{"runs:read"})
+	if err != nil || n != 0 {
+		t.Fatalf("second EnsureScopes = %d, %v; want nothing to do", n, err)
+	}
+	keys, _ := store.List(ctx, false)
+	for _, k := range keys {
+		has := false
+		for _, sc := range k.Scopes {
+			if sc == "runs:read" {
+				has = true
+			}
+		}
+		if (k.Name == "ci-deploy") == has {
+			t.Fatalf("scopes wrong for %s: %v", k.Name, k.Scopes)
+		}
+	}
+}

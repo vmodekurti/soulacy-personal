@@ -8,6 +8,7 @@ package app
 // Behavior is preserved verbatim from the original inline block.
 
 import (
+	"context"
 	"os"
 	"time"
 
@@ -267,6 +268,13 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 		srv.SetAPIKeyStore(akStore)
 		d.authEngine.SetAPIKeyStore(akStore) // wire into auth middleware (sk_ prefix validation)
 		log.Info("api key store ready", zap.String("path", apiKeyPath))
+		// Phones paired by an earlier release carry fewer scopes than the app
+		// now needs; widen them in place rather than asking for a re-pair (#220).
+		if n, err := akStore.EnsureScopes(context.Background(), "mobile-companion", []string{"runs:read"}); err != nil {
+			log.Warn("companion scopes not widened", zap.Error(err))
+		} else if n > 0 {
+			log.Info("companion credentials widened", zap.Int("keys", n), zap.Strings("added", []string{"runs:read"}))
+		}
 	}
 
 	// ── Dead-Letter Queue ─────────────────────────────────────────────────────

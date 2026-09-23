@@ -52,18 +52,22 @@ func IsKnownRole(role string) bool {
 // ---------------------------------------------------------------------------
 
 const (
-	ResourceAgents      = "agents"
-	ResourceChat        = "chat"
-	ResourceMemory      = "memory"
-	ResourceChannels    = "channels"
-	ResourceProviders   = "providers"
-	ResourceSkills      = "skills"
-	ResourceMCP         = "mcp"
-	ResourceKnowledge   = "knowledge"
-	ResourceBuilder     = "builder"
-	ResourceTemplates   = "templates"
-	ResourceConfig      = "config"
-	ResourceLogs        = "logs"
+	ResourceAgents    = "agents"
+	ResourceChat      = "chat"
+	ResourceMemory    = "memory"
+	ResourceChannels  = "channels"
+	ResourceProviders = "providers"
+	ResourceSkills    = "skills"
+	ResourceMCP       = "mcp"
+	ResourceKnowledge = "knowledge"
+	ResourceBuilder   = "builder"
+	ResourceTemplates = "templates"
+	ResourceConfig    = "config"
+	ResourceLogs      = "logs"
+	// Runs is what an agent did — the run ledger, the "running now" strip.
+	// History, not cost (metrics) and not the system log (logs): every role
+	// reads it, and a paired phone's credential carries runs:read (#220).
+	ResourceRuns        = "runs"
 	ResourceMetrics     = "metrics"
 	ResourceSchedule    = "schedule"
 	ResourceRBAC        = "rbac"
@@ -111,6 +115,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 		ResourceTemplates:   {ActionRead: true, ActionWrite: true},
 		ResourceConfig:      {ActionRead: true, ActionWrite: true},
 		ResourceLogs:        {ActionRead: true},
+		ResourceRuns:        {ActionRead: true},
 		ResourceMetrics:     {ActionRead: true},
 		ResourceSchedule:    {ActionRead: true, ActionWrite: true},
 		ResourceRBAC:        {ActionRead: true, ActionWrite: true, ActionDelete: true},
@@ -130,6 +135,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 		ResourceTemplates:   {ActionRead: true, ActionWrite: true},
 		ResourceConfig:      {ActionRead: true},
 		ResourceLogs:        {ActionRead: true},
+		ResourceRuns:        {ActionRead: true},
 		ResourceMetrics:     {},
 		ResourceSchedule:    {ActionRead: true, ActionWrite: true},
 		ResourceRBAC:        {},
@@ -149,6 +155,7 @@ var defaultPolicy = map[string]map[string]map[string]bool{
 		ResourceTemplates:   {ActionRead: true},
 		ResourceConfig:      {},
 		ResourceLogs:        {ActionRead: true},
+		ResourceRuns:        {ActionRead: true},
 		ResourceMetrics:     {},
 		ResourceSchedule:    {ActionRead: true},
 		ResourceRBAC:        {},
