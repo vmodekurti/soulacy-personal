@@ -53,7 +53,7 @@ marked.use(
   markedKatex({
     throwOnError: false, // a bad equation renders a small error, never crashes the message
     output: 'html', // HTML-only output is simpler + safer to sanitize than MathML
-    nonStandard: true, // also accept single-$ inline math
+    nonStandard: false, // $…$ is not math: agents write prices ($770, $2,169.50/person) far more often than equations (#193); \(…\) and $$…$$ still are
   }),
 )
 

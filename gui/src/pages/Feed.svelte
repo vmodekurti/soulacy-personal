@@ -139,7 +139,7 @@
   // the local headline/caption split is the fallback for older gateways.
   function titleFor(card) { return card.title || (card.presentation && card.presentation.headline) || headlineOf(card.body) }
   function blocksFor(card) { return card.presentation && Array.isArray(card.presentation.blocks) ? card.presentation.blocks : null }
-  function isLong(card) { if (blocksFor(card)) return blocksFor(card).length > 1 || (card.presentation.summary || '').length > 160; const c = captionFor(card); return c.length > 320 || (c.match(/\n/g) || []).length > 5 }
+  function isLong(card) { if (blocksFor(card)) { const bs = blocksFor(card); return bs.length > 1 || (card.presentation.summary || '').length > 160 || bs.some(b => b.kind === 'markdown' && (b.text || '').length > 280) } const c = captionFor(card); return c.length > 320 || (c.match(/\n/g) || []).length > 5 }
   function toggleMore(card) { if (expanded.has(card.id)) expanded.delete(card.id); else expanded.add(card.id); expanded = new Set(expanded) }
   function burst(id) { bursting = id; setTimeout(() => { if (bursting === id) bursting = '' }, 700) }
 
