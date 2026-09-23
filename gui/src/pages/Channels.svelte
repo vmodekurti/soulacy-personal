@@ -38,6 +38,29 @@
   let mobilePairingQR = ''
   let mobilePairingLoading = false
   let mobilePairingError = ''
+  // One device per person (#216): the card says whether your phone is paired
+  // and offers Unpair here, on the server's page — a lost or reset phone
+  // cannot unpair itself (#218).
+  let mobilePaired = null
+  let mobileUnpairing = false
+  async function loadMobilePaired() {
+    try { const st = await api.pairing.status(); mobilePaired = st.paired ? st.device : null } catch { mobilePaired = null }
+  }
+  async function unpairMobile() {
+    const name = mobilePaired?.device_name || 'your phone'
+    if (!confirm(`Unpair ${name}? It will sign out; your memory and history stay on the gateway.`)) return
+    mobileUnpairing = true
+    mobilePairingError = ''
+    try {
+      await api.pairing.unpair()
+      mobilePaired = null
+      mobilePairing = null
+      mobilePairingQR = ''
+    } catch (e) { mobilePairingError = e.message || 'Could not unpair.' }
+    finally { mobileUnpairing = false }
+  }
+  function pairedSince(d) { try { return new Date(d.paired_at).toLocaleDateString() } catch { return '' } }
+  function pairedSeen(d) { try { return d.last_seen_at ? new Date(d.last_seen_at).toLocaleString() : '' } catch { return '' } }
   let mobilePairingCopied = false
 
   function toggleCardDetails(id) {
@@ -78,6 +101,8 @@
     } catch (e) {
       mobilePairing = null
       mobilePairingQR = ''
+      // The gateway refuses a second phone and says which one is paired.
+      if (e.status === 409 && e.body?.paired) mobilePaired = e.body.paired
       mobilePairingError = e.message || 'Could not create a pairing code.'
     } finally {
       mobilePairingLoading = false
@@ -293,7 +318,7 @@
     }
   }
 
-  onMount(load)
+  onMount(() => { load(); loadMobilePaired() })
 
   function statusColor(ch) {
     if (ch.status?.connected || connectedInteractiveBots(ch).length > 0) return '#4caf82'
@@ -642,7 +667,17 @@
             {#if ch.id === 'mobile'}
               <div class="settings mobile-pairing">
                 <span class="settings-title">Pair an iPhone</span>
-                {#if mobilePairing && mobilePairingQR}
+                {#if mobilePaired}
+                  <div class="mobile-paired" aria-live="polite">
+                    <div>
+                      <strong>Your phone is paired</strong>
+                      <p class="mobile-pairing-intro">{mobilePaired.device_name || 'iPhone'} · since {pairedSince(mobilePaired)}{#if pairedSeen(mobilePaired)} · last seen {pairedSeen(mobilePaired)}{/if}. One device per person: unpair it to pair a different phone.</p>
+                    </div>
+                    <button class="btn-secondary small-btn" type="button" on:click={unpairMobile} disabled={mobileUnpairing}>
+                      {mobileUnpairing ? 'Unpairing…' : 'Unpair'}
+                    </button>
+                  </div>
+                {:else if mobilePairing && mobilePairingQR}
                   <div class="mobile-pairing-ready" aria-live="polite">
                     <img src={mobilePairingQR} alt="Soulacy iOS pairing QR code" />
                     <div class="mobile-pairing-copy">
@@ -1178,6 +1213,8 @@
   .no-settings { color: #555a7a; font-style: italic; }
 
   .mobile-pairing { gap: .65rem; }
+  .mobile-paired { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+  .mobile-paired strong { font-size: .8rem; }
   .mobile-pairing-intro { margin: 0; color: #8f95b8; font-size: .76rem; line-height: 1.45; }
   .pair-device { align-self: flex-start; }
   .mobile-pairing-ready {
