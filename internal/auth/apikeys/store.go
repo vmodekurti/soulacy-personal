@@ -273,6 +273,41 @@ func (s *SQLiteStore) Revoke(ctx context.Context, id string) error {
 }
 
 // List returns all API keys, optionally including revoked ones.
+// EnsureScopes adds the given scopes to every live key named namePrefix or
+// "namePrefix (…)" that lacks them, and reports how many keys changed. It
+// lets a release widen what an already-paired phone may do without asking
+// its owner to pair again (#220).
+func (s *SQLiteStore) EnsureScopes(ctx context.Context, namePrefix string, scopes []string) (int, error) {
+	keys, err := s.List(ctx, false)
+	if err != nil {
+		return 0, err
+	}
+	changed := 0
+	for _, k := range keys {
+		if k.Name != namePrefix && !strings.HasPrefix(k.Name, namePrefix+" ") {
+			continue
+		}
+		have := map[string]bool{}
+		for _, sc := range k.Scopes {
+			have[strings.TrimSpace(sc)] = true
+		}
+		merged := append([]string{}, k.Scopes...)
+		for _, sc := range scopes {
+			if !have[sc] {
+				merged = append(merged, sc)
+			}
+		}
+		if len(merged) == len(k.Scopes) {
+			continue
+		}
+		if _, err := s.db.ExecContext(ctx, `UPDATE api_keys SET scopes = ? WHERE id = ?`, strings.Join(merged, ","), k.ID); err != nil {
+			return changed, err
+		}
+		changed++
+	}
+	return changed, nil
+}
+
 func (s *SQLiteStore) List(ctx context.Context, includeRevoked bool) ([]APIKey, error) {
 	query := `SELECT id, name, prefix, scopes, created_at, last_used_at, revoked_at, subject, role FROM api_keys`
 	if !includeRevoked {

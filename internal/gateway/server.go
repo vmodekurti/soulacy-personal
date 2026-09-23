@@ -2039,12 +2039,12 @@ func (s *Server) watchConfig(ctx context.Context) {
 }
 
 // mountRunHistory registers what an agent did — the run ledger and the
-// "running now" strip. That is history, not cost: readable by every role
-// that can read logs, so a paired phone (operator) gets its feed (#214).
-// Costs, ops summaries and Prometheus metrics stay behind metrics:read.
+// "running now" strip — behind runs:read, a permission every role holds and
+// a paired phone's credential carries (#214, #220). Costs, ops summaries and
+// Prometheus metrics stay behind metrics:read; the system log behind logs.
 func (s *Server) mountRunHistory(api fiber.Router) {
-	api.Get("/runs/ledger", s.rbacMW(rbac.ResourceLogs, rbac.ActionRead), s.handleRunLedger)
+	api.Get("/runs/ledger", s.rbacMW(rbac.ResourceRuns, rbac.ActionRead), s.handleRunLedger)
 	// E4c — hung-session tracker snapshot for the Activity page's "Running now"
 	// strip. Read-only, cheap, safe to poll every couple of seconds.
-	api.Get("/activity/running", s.rbacMW(rbac.ResourceLogs, rbac.ActionRead), s.handleActivityRunning)
+	api.Get("/activity/running", s.rbacMW(rbac.ResourceRuns, rbac.ActionRead), s.handleActivityRunning)
 }

@@ -254,7 +254,8 @@ func TestRunLedgerReadableByOperatorAndViewer(t *testing.T) {
 	for _, role := range []string{"operator", "viewer"} {
 		app := fiber.New()
 		app.Use(func(c *fiber.Ctx) error {
-			auth.SetClaims(c, &auth.Claims{Role: role, Kind: "access", RegisteredClaims: jwt.RegisteredClaims{Subject: "admin"}})
+			// A paired phone: its role and the scopes pairing mints (#220).
+			auth.SetClaims(c, &auth.Claims{Role: role, Kind: "access", Scopes: companionScopes(), RegisteredClaims: jwt.RegisteredClaims{Subject: "admin"}})
 			return c.Next()
 		})
 		api := app.Group("/api/v1")
@@ -270,5 +271,22 @@ func TestRunLedgerReadableByOperatorAndViewer(t *testing.T) {
 		if code, _ := doJSON(t, app, http.MethodGet, "/api/v1/costs", ""); code != http.StatusForbidden {
 			t.Fatalf("%s must not read costs, got %d", role, code)
 		}
+	}
+}
+
+// A phone paired before runs:read existed is refused until its credential is
+// widened; the startup migration does exactly that (#220).
+func TestRunLedgerNeedsTheRunsScope(t *testing.T) {
+	s := newTestGatewayWithMetrics(t)
+	s.rbacManager = rbac.NewManager(rbac.NoopStore{}, zap.NewNop())
+	app := fiber.New()
+	app.Use(func(c *fiber.Ctx) error {
+		auth.SetClaims(c, &auth.Claims{Role: "operator", Kind: "access", Scopes: []string{"chat", "agents:read", "memory", "config"}, RegisteredClaims: jwt.RegisteredClaims{Subject: "admin"}})
+		return c.Next()
+	})
+	api := app.Group("/api/v1")
+	s.mountRunHistory(api)
+	if code, body := doJSON(t, app, http.MethodGet, "/api/v1/runs/ledger?limit=5", ""); code != http.StatusForbidden || body["required"] != "runs:read" {
+		t.Fatalf("old companion scopes should be refused with runs:read named, got %d %+v", code, body)
 	}
 }
