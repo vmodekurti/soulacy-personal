@@ -6,6 +6,7 @@ package runtime
 import (
 	"bytes"
 	"fmt"
+	"github.com/soulacy/soulacy/internal/agentprompt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -102,7 +103,7 @@ func (l *Loader) SetLogger(log *zap.Logger) {
 func (l *Loader) seedBuiltins() {
 	system := builtinSystemAgent()
 	l.agents[system.ID] = system
-	genie := builtinGenieAgent()
+	genie := genieWithContract()
 	l.agents[genie.ID] = genie
 }
 
@@ -114,6 +115,10 @@ func builtinGenieAgent() *agent.Definition {
 		Description: "Master orchestrator — discovers live capabilities, delegates to specialist agents, and coordinates multi-step work.",
 		Trigger:     agent.TriggerChannel, Channels: []string{"http"}, Surfaces: []string{"chat"},
 		Enabled: true, StreamReply: true, MaxTurns: 50, RunTimeout: "30m",
+		// Without its own budget Genie inherited the engine default of 20 model
+		// calls while being allowed 50 turns, so a tool-heavy request died on a
+		// ceiling it was never told about. The budget now matches the turns.
+		Budget: &agent.BudgetConfig{MaxTokens: 400000, MaxLLMCalls: 50},
 		Skills: []string{"*"}, Agents: []string{"*"}, ParallelPeerCalls: true, StructuredPeerResults: true,
 		Builtins: &builtins, MCPServers: &mcpServers, ConfirmTools: []string{"cancel_monitor", "channel.send"},
 		LLM:    agent.LLMConfig{Temperature: 0.2, MaxTokens: 8192, ReasoningEffort: "high"},
@@ -127,9 +132,19 @@ You are the way into Soulacy, so know what it is. Soulacy is a self-hosted perso
 
 When someone asks for something to be set up, automated, or run without them, build it with build_agent. That is Soulacy's agent builder — the same one behind Studio — so it knows what is installed, asks for anything it still needs, and saves a real agent. If it comes back with a question, ask the user that question in your own words and call build_agent again with the same session and their answer. Use create_monitor only for the narrow job it fits: check a condition on a schedule and report a sentence, needing no tools and no delivery beyond the report. Never send someone to Studio for something you can build here — Studio is where they go to change what already exists, or to approve an agent that would be reachable on a channel.
 
-You operate as an operator, never as a deployment administrator. You cannot change gateway configuration, restart or upgrade the service, access host credentials, run shell commands, write host files, or bypass confirmations. If work requires an unavailable or administrative capability, explain the exact boundary and ask an administrator to perform that step. Never claim a delegated action succeeded until its returned evidence shows that it did.`,
+You operate as an operator, never as a deployment administrator. You cannot change gateway configuration, restart or upgrade the service, access host credentials, run shell commands, write host files, or bypass confirmations. If work requires an unavailable or administrative capability, explain the exact boundary and ask an administrator to perform that step. Never claim a delegated action succeeded until its returned evidence shows that it did.
+
+Say what is true about your own work, even when it disappoints. Announcing an intention is not doing the thing: never say you are installing, creating, sending, scheduling or fixing something unless a tool has already done it and returned evidence that it worked. If you cannot do what was asked, say so in the same reply you discovered it — name the specific boundary you hit, say what you did manage, and give the person the step that would actually work. Never promise to continue after this message; this reply is the last thing you will say in this turn, so anything you leave as a promise simply will not happen. A person who is told plainly that something is impossible is better served than one who is told it is under way.`,
 		SourcePath: builtinSourcePath,
 	}
+}
+
+// builtinGenieAgent's prompt, under the shared contract. Kept as a separate
+// step so the raw role text above stays readable.
+func genieWithContract() *agent.Definition {
+	def := builtinGenieAgent()
+	def.SystemPrompt = agentprompt.EnsureShared(def.SystemPrompt)
+	return def
 }
 
 func hardenGenieDefinition(def *agent.Definition) {
@@ -152,6 +167,13 @@ func hardenGenieDefinition(def *agent.Definition) {
 	}
 	if strings.TrimSpace(def.LLM.ReasoningEffort) == "" {
 		def.LLM.ReasoningEffort = "high"
+	}
+	// Genie writes the shared operating contract into every agent it builds.
+	// It has to live under it too (#234) — that contract is where "never
+	// assume an action succeeded unless a tool confirms it" is written down.
+	def.SystemPrompt = agentprompt.EnsureShared(def.SystemPrompt)
+	if def.Budget == nil {
+		def.Budget = base.Budget
 	}
 }
 
