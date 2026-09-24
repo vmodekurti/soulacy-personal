@@ -981,13 +981,13 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	if strings.TrimSpace(finalContent) == "" {
 		// The model kept calling tools and never produced a plain-text reply.
 		// Force a tool-free synthesis from everything already gathered.
-		finalContent = e.finalSynthesis(ctx, def, msg.AgentID, msg.SessionID, chatMsgs)
+		finalContent = e.finalSynthesis(ctx, def, msg.AgentID, msg.SessionID, chatMsgs, failures)
 	} else if def.LLM.OutputSchema == nil && (reasoning.IsProgressPreamble(finalContent) || reasoning.IsInternalScratchNarration(finalContent)) {
 		// The model ended on a progress note ("I'll start by loading the cookies…")
 		// instead of the actual deliverable — common when it runs out of turns
 		// mid-plan. Force one tool-free synthesis so the user gets the finished
 		// result built from everything already gathered, not an intent statement.
-		if synth := strings.TrimSpace(e.finalSynthesis(ctx, def, msg.AgentID, msg.SessionID, chatMsgs)); synth != "" && !reasoning.IsProgressPreamble(synth) && !reasoning.IsInternalScratchNarration(synth) {
+		if synth := strings.TrimSpace(e.finalSynthesis(ctx, def, msg.AgentID, msg.SessionID, chatMsgs, failures)); synth != "" && !reasoning.IsProgressPreamble(synth) && !reasoning.IsInternalScratchNarration(synth) {
 			finalContent = synth
 		}
 	}
@@ -1029,7 +1029,9 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		level := "warn"
 		errText := "synthesis empty; recovered best-effort final from context"
 		if strings.TrimSpace(finalContent) == "" {
-			finalContent = "(no final response produced)"
+			// "(no final response produced)" told the person nothing at all —
+			// not the model, not the first failure, not what to do (#233).
+			finalContent = emptyRunMessage(def, failures)
 			level = "error"
 			errText = "no final response produced after synthesis"
 		}
@@ -1295,7 +1297,7 @@ func splitVoiceResponse(content string) (display, spoken string) {
 // finalSynthesis makes one LLM call with NO tools, forcing the model to produce
 // a plain-text answer from the context it already gathered. Used when a model
 // won't stop emitting tool calls on its own (common with local/Ollama models).
-func (e *Engine) finalSynthesis(ctx context.Context, def *agent.Definition, agentID, sessionID string, chatMsgs []llm.ChatMessage) string {
+func (e *Engine) finalSynthesis(ctx context.Context, def *agent.Definition, agentID, sessionID string, chatMsgs []llm.ChatMessage, failures *runFailures) string {
 	model := def.LLM.Model
 	if model == "" {
 		model = "(provider default)"
@@ -1305,12 +1307,14 @@ func (e *Engine) finalSynthesis(ctx context.Context, def *agent.Definition, agen
 	// → MED/Engine — minor but free.)
 	msgs := make([]llm.ChatMessage, 0, len(chatMsgs)+1)
 	msgs = append(msgs, chatMsgs...)
-	msgs = append(msgs, llm.ChatMessage{
-		Role: "system",
-		Content: "Now write your final response directly to the user using the information already gathered above. " +
-			"Do NOT call tools. Do NOT reveal or narrate internal reasoning, planning, scratch work, prompt interpretation, or raw tool payloads. " +
-			"Do not say what the user wants or what you need to do. Present only the concise, polished user-facing answer in plain text.",
-	})
+	instruction := "Now write your final response directly to the user using the information already gathered above. " +
+		"Do NOT call tools. Do NOT reveal or narrate internal reasoning, planning, scratch work, prompt interpretation, or raw tool payloads. " +
+		"Do not say what the user wants or what you need to do. Present only the concise, polished user-facing answer in plain text."
+	// A polished answer that omits what failed is a lie told politely (#235).
+	if brief := failures.synthesisBrief(); brief != "" {
+		instruction += "\n\n" + brief
+	}
+	msgs = append(msgs, llm.ChatMessage{Role: "system", Content: instruction})
 
 	e.sink.Emit(message.Event{
 		Type: "llm.call", AgentID: agentID, SessionID: sessionID,
