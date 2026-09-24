@@ -1,7 +1,11 @@
 package gateway
 
 import (
+	"github.com/gofiber/fiber/v2"
+	"github.com/soulacy/soulacy/internal/httptestutil"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -89,5 +93,55 @@ func TestOneDevicePerPerson(t *testing.T) {
 	}
 	if code, r := doJSON(t, admin, http.MethodPost, "/api/v1/pairing/redeem", `{"code":"`+stale2["code"].(string)+`"}`); code != http.StatusConflict || r["paired"] != false {
 		t.Fatalf("Kai's second phone must be refused at redeem: %d %+v", code, r)
+	}
+}
+
+// A phone must never be handed a TLS pin it cannot satisfy (#225). Behind a
+// proxy or a published address the certificate the phone sees belongs to that
+// hop, not to this gateway; pinning ours made every later request fail
+// client-side and the app sat on "Connecting" while the origin saw nothing.
+func TestRedeemWithholdsThePinBehindAProxy(t *testing.T) {
+	s, _ := newTestGatewayWithLLM(t, "secret")
+	s.tlsFingerprint = "b2b0bc1fae233604fc90cdd053b7248761a581ec00000000000000000000beef"
+
+	app := fiber.New()
+	app.Post("/fp", func(c *fiber.Ctx) error { return c.SendString(s.redeemFingerprint(c)) })
+	call := func(t *testing.T, headers map[string]string) string {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/fp", nil)
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		resp, err := app.Test(httptestutil.WithHost(req))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		return string(body)
+	}
+
+	// Directly on our own TLS: the pin is the whole point of auto-TLS.
+	s.cfg.Server.PublicURL = ""
+	if got := call(t, map[string]string{"X-Forwarded-Proto": "https"}); got != "" {
+		t.Fatalf("a proxied redeem must not carry a pin, got %q", got)
+	}
+	for _, header := range []string{"X-Forwarded-Host", "X-Forwarded-For", "Forwarded", "CF-Connecting-IP"} {
+		if got := call(t, map[string]string{header: "example.com"}); got != "" {
+			t.Fatalf("%s means a hop in front of us; pin must be withheld, got %q", header, got)
+		}
+	}
+
+	// A published address terminates TLS elsewhere, headers or not.
+	s.cfg.Server.PublicURL = "https://soul.example.com"
+	if got := call(t, nil); got != "" {
+		t.Fatalf("with server.public_url set the pin must be withheld, got %q", got)
+	}
+
+	// No proxy, no published address, no fingerprint configured: nothing to give.
+	s.cfg.Server.PublicURL = ""
+	s.tlsFingerprint = ""
+	if got := call(t, nil); got != "" {
+		t.Fatalf("without auto-TLS there is no pin, got %q", got)
 	}
 }
