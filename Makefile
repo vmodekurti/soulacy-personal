@@ -387,6 +387,9 @@ release-package:
 	VERSION=$(VERSION) RELEASE_DIR=$(RELEASE_DIR) bash scripts/package-release.sh
 
 ## Create a release tag from origin/main and push it to trigger GitHub Actions.
+## Bump the VERSION file to the same version and merge that FIRST: it is what a
+## source build reports when the platform cannot pass a build arg (Railway,
+## Render, Coolify), and this target refuses to tag while the two disagree.
 release-create:
 	VERSION=$(VERSION) bash scripts/create-release.sh
 
