@@ -66,6 +66,25 @@ if git ls-remote --exit-code --tags "${remote}" "refs/tags/${version}" >/dev/nul
   exit 1
 fi
 
+# The VERSION file is what a source build reports when nobody passes a build
+# arg — Railway, Render and Coolify cannot pass one, so it is the only thing
+# standing between them and calling themselves "dev" (#227). It has to match
+# the tag being cut, and it lives on main, so the bump goes through a PR like
+# any other change rather than being committed by this script.
+file_version="$(git show "${commit}:VERSION" 2>/dev/null | tr -d '[:space:]' || true)"
+if [[ -z "${file_version}" ]]; then
+  echo "error: ${release_ref} (${short_commit}) has no VERSION file." >&2
+  echo "       Add one containing '${version}' and merge it before tagging." >&2
+  exit 1
+fi
+if [[ "${file_version}" != "${version}" ]]; then
+  echo "error: VERSION at ${release_ref} (${short_commit}) says '${file_version}', but you are tagging '${version}'." >&2
+  echo "       A source build of this commit would report the wrong release." >&2
+  echo "       Update VERSION to '${version}' and merge that before tagging." >&2
+  exit 1
+fi
+echo "→ VERSION file agrees: ${file_version}"
+
 if [[ "${dry_run}" == "1" || "${dry_run}" == "true" ]]; then
   echo "✓ Dry run only. Would create tag '${version}' at ${release_ref} (${short_commit}) and push it to ${remote}."
   exit 0
