@@ -320,7 +320,7 @@ func (s *Server) handleRedeemPairingToken(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
 			"paired":       true,
 			"token":        plaintext,
-			"fingerprint":  s.tlsFingerprint,
+			"fingerprint":  s.redeemFingerprint(c),
 			"key_id":       key.ID,
 			"scopes":       key.Scopes,
 			"subject":      subject,
@@ -478,4 +478,41 @@ func (s *Server) handleUnpair(c *fiber.Ctx) error {
 		}
 	}
 	return c.JSON(fiber.Map{"unpaired": true, "subject": subject, "revoked": revoked, "devices": devices})
+}
+
+// redeemFingerprint is the TLS key the phone should pin, or "" when it must
+// not pin at all (#225).
+//
+// A pin is only meaningful when the phone will be talking to THIS gateway's
+// own certificate. Behind a reverse proxy or a CDN — Caddy, Cloudflare,
+// `tailscale serve --https` — the phone sees that hop's certificate instead,
+// and pinning the gateway's self-signed key makes every later request fail
+// the check client-side. The origin then sees nothing at all while the app
+// sits on "Connecting" forever, which is exactly what happened on
+// soul.soulacy.io.
+//
+// `pinnedPairURL` already applies this rule to the QR code; the redeem reply
+// has to agree with it, because the app falls back to this value whenever the
+// QR carried no `fp`.
+func (s *Server) redeemFingerprint(c *fiber.Ctx) string {
+	if s.tlsFingerprint == "" {
+		return ""
+	}
+	// The operator published an address for other devices: that address
+	// terminates TLS somewhere else, so its certificate is not ours.
+	if strings.TrimSpace(s.cfg.Server.PublicURL) != "" {
+		return ""
+	}
+	// A proxy in front of us announces itself. Trust the absence of these
+	// headers, not their contents: a forged header only costs a pin.
+	for _, h := range []string{"X-Forwarded-Proto", "X-Forwarded-Host", "X-Forwarded-For", "Forwarded", "CF-Connecting-IP"} {
+		if strings.TrimSpace(c.Get(h)) != "" {
+			return ""
+		}
+	}
+	// Redeemed over plain http: there is no certificate of ours in play.
+	if !c.Secure() && !strings.EqualFold(c.Protocol(), "https") {
+		return ""
+	}
+	return s.tlsFingerprint
 }
