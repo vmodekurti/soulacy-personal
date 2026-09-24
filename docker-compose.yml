@@ -21,7 +21,9 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        VERSION: ${VERSION:-dev}
+        # Empty when unset so the build falls back to the repo VERSION file
+        # rather than stamping "dev" over it (#227).
+        VERSION: ${VERSION:-}
     image: soulacy:${VERSION:-latest}
     container_name: soulacy
     restart: unless-stopped

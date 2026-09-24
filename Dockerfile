@@ -23,7 +23,9 @@ RUN npm run build
 
 # ── Stage 2: Go binary ───────────────────────────────────────────────────────
 FROM golang:1.26.6-bookworm AS gobuild
-ARG VERSION=dev
+# Empty, not "dev": an unset build arg falls through to the VERSION file in the
+# repo below, so a build that nobody parameterised still knows what it is.
+ARG VERSION=
 WORKDIR /src
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -44,7 +46,20 @@ COPY . .
 COPY --from=gui /src/internal/webui/dist /src/internal/webui/dist
 
 ENV CGO_ENABLED=1
-RUN go build \
+# Where the version comes from, in order:
+#   1. --build-arg VERSION=…      (docker compose and deploy-main.sh pass
+#                                  `git describe`, so a host build is exact)
+#   2. the VERSION file in the repo (a platform that cannot pass build args —
+#                                  Railway, Render, Coolify — still reports the
+#                                  release it was built from, instead of "dev")
+#   3. "dev"                       (someone building an unreleased tree)
+#
+# Without step 2 every managed-platform image self-reported "dev", the update
+# checker skipped it as an incomparable dev build, and a redeploy that worked
+# looked exactly like one that never happened (#227).
+RUN VERSION="${VERSION:-$(cat VERSION 2>/dev/null || echo dev)}" \
+    && echo "building version ${VERSION}" \
+    && go build \
         -ldflags "-X github.com/soulacy/soulacy/internal/config.Version=${VERSION}" \
         -o /out/soulacy ./cmd/soulacy \
     && go build \

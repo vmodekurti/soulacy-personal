@@ -31,7 +31,9 @@ echo "== log $LOG"
 # unset, so production called itself "dev" and the updater could only say
 # "versions are not comparable".
 git fetch -q --tags origin || true
-VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
+# Empty rather than "dev" on failure: the Dockerfile then reads the repo
+# VERSION file, which is still better than claiming to be an unreleased build.
+VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo "")"
 echo "== deploying $(git log -1 --format='%h %s') as version $VERSION"
 
 # Something to go back to.
