@@ -582,6 +582,9 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	// system steer telling the model it already has enough from that tool.
 	toolNameCount := make(map[string]int)
 	const repeatToolNudgeAt = 3
+	// What actually went wrong, so a ceiling never reads as the cause (#229)
+	// and a run that only collects refusals stops early (#230).
+	failures := &runFailures{}
 
 	var finalContent string
 	for turn := 0; turn < maxTurns; turn++ {
@@ -765,6 +768,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 			} else if errors.Is(err, context.DeadlineExceeded) {
 				outErr = fmt.Errorf("engine: llm timeout for provider %q model %q after %s: %w", llmProviderLabel, model, e.effectiveLLMTimeout(), err)
 			}
+			outErr = failures.annotate(outErr)
 			e.sink.Emit(message.Event{
 				Type: "error", AgentID: msg.AgentID, SessionID: msg.SessionID,
 				Payload:   map[string]any{"stage": "llm", "error": outErr.Error()},
@@ -907,7 +911,8 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		// the first time one crosses the threshold, steer the model off it. This
 		// catches the "reworded same search 10 times" failure that the exact-args
 		// dedup can't, without ever blocking a legitimately varied tool sequence.
-		var nudges []string
+		// A durable refusal is worth saying once and acting on; see engine_blocked.go.
+		nudges := failures.observe(toolResults)
 		for _, tc := range resp.ToolCalls {
 			name := normalizeToolCallName(tc.Name)
 			if name == "shell_exec" || name == "run_script" || name == "http_request" {
@@ -943,6 +948,22 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		}
 		e.appendHistoryLocked(sess, turns...)
 		sess.mu.Unlock()
+
+		// Enough different doors are locked that no further turn can succeed.
+		// Answering now costs one prompt; carrying on costs one per turn until
+		// a ceiling fires and buries the reason (#230).
+		if failures.shouldStop() {
+			finalContent = failures.stopMessage()
+			e.sink.Emit(message.Event{
+				Type: "error", AgentID: msg.AgentID, SessionID: msg.SessionID,
+				Payload: map[string]any{
+					"stage": "tools", "error": "run stopped: tools refused by policy",
+					"blocked": failures.blockedNames(),
+				},
+				Timestamp: time.Now().UTC(),
+			})
+			break
+		}
 
 		// An explicit install-from-URL request is a deterministic operator action,
 		// not an open-ended research task. The installer result is authoritative:

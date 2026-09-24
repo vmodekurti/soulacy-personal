@@ -80,6 +80,8 @@ func (e *Engine) buildShellTools() []BuiltinTool {
 				if err != nil {
 					return "", fmt.Errorf("mcp_install_inspect: %w", err)
 				}
+				// package_install consults this instead of cloning again (#231).
+				rememberMCPAdvice(sourceURL, recommendation)
 				return recommendation.PlanningText(), nil
 			},
 		},
@@ -148,6 +150,10 @@ func (e *Engine) buildShellTools() []BuiltinTool {
 						"enum":        []string{"auto", "skill", "mcp"},
 						"description": "Package type. Use auto unless the operator explicitly identifies it (default: auto)",
 					},
+					"force": map[string]any{
+						"type":        "boolean",
+						"description": "Install an MCP server here even though inspection judged it unsuitable for the gateway. Only ever set this when the operator has asked for it in so many words after being told the recommendation.",
+					},
 				},
 				"required": []string{"source_url"},
 			},
@@ -165,6 +171,14 @@ func (e *Engine) buildShellTools() []BuiltinTool {
 				}
 				if kind != "auto" && kind != "skill" && kind != "mcp" {
 					return "", fmt.Errorf("package_install: kind must be auto, skill, or mcp")
+				}
+				// Inspection already decided whether this can live in the
+				// gateway. Honour it before paying for a clone and a safety
+				// introspection that will reach the same answer (#231).
+				if kind == "mcp" {
+					if refusal := mcpInstallRefusal(ctx, sourceURL, argBool(args, "force")); refusal != "" {
+						return "", fmt.Errorf("package_install: %s", refusal)
+					}
 				}
 				result, err := e.runManagedPackageInstaller(ctx, sourceURL, kind)
 				if err != nil {
