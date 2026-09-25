@@ -652,11 +652,13 @@ func (e *Engine) allToolSchemasForContext(ctx context.Context, def *agent.Defini
 	}
 	if e.authConnectionResolver != nil && len(def.Connections) > 0 && callerAllowsTool(ctx, authenticatedFetchTool) {
 		connections := e.authConnectionResolver.Describe(ctx, WorkspaceFromContext(ctx), SubjectFromContext(ctx), def.ID, def.Connections)
-		schemas = append(schemas, llm.ToolSchema{
-			Name:        authenticatedFetchTool,
-			Description: "Read a page using a user-approved saved website session. Cookies stay inside Soulacy and are never returned. Use only a connection_id listed in this agent's authenticated connections.",
-			Parameters:  authenticatedFetchSchema(connections),
-		})
+		if len(connections) > 0 {
+			schemas = append(schemas, llm.ToolSchema{
+				Name:        authenticatedFetchTool,
+				Description: "Read a page using a user-approved saved website session. Cookies stay inside Soulacy and are never returned. Use only a connection_id listed in this agent's authenticated connections.",
+				Parameters:  authenticatedFetchSchema(connections),
+			})
+		}
 	}
 
 	// MCP tools from connected servers are offered according to the agent's

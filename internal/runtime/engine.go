@@ -130,7 +130,7 @@ type Engine struct {
 	genieBuilder     GenieAgentBuilder
 
 	// authConnectionResolver is the only component allowed to decrypt a
-	// user's saved website session. The returned state is consumed by the
+	// saved website session. The returned state is consumed by the
 	// authenticated_fetch transport and is never added to prompts or logs.
 	authConnectionResolver *authconnections.Resolver
 

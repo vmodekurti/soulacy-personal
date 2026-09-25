@@ -13,7 +13,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/soulacy/soulacy/internal/sqlitex"
-	"github.com/soulacy/soulacy/internal/workspacepurge"
 )
 
 const (
@@ -236,34 +235,6 @@ func (s *Store) Delete(ctx context.Context, workspaceID, id string) error {
 		return ErrNotFound
 	}
 	return nil
-}
-
-// PurgeWorkspace removes all secret-free connection metadata and grants for a
-// deleted workspace. Encrypted browser state and OAuth material are erased by
-// the credential vault's workspace purger in the same deletion workflow.
-func (s *Store) PurgeWorkspace(ctx context.Context, workspaceID string) (workspacepurge.Removed, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return workspacepurge.Removed{}, err
-	}
-	defer tx.Rollback() //nolint:errcheck
-	grants, err := tx.ExecContext(ctx, `DELETE FROM authenticated_connection_grants WHERE workspace_id=?`, workspaceID)
-	if err != nil {
-		return workspacepurge.Removed{}, err
-	}
-	connections, err := tx.ExecContext(ctx, `DELETE FROM authenticated_connections WHERE workspace_id=?`, workspaceID)
-	if err != nil {
-		return workspacepurge.Removed{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return workspacepurge.Removed{}, err
-	}
-	grantRows, _ := grants.RowsAffected()
-	connectionRows, _ := connections.RowsAffected()
-	return workspacepurge.Removed{
-		Rows: grantRows + connectionRows,
-		Note: "authenticated connection metadata and agent grants",
-	}, nil
 }
 
 func (s *Store) ReplaceAgentGrants(ctx context.Context, workspaceID, id string, agentIDs []string) error {

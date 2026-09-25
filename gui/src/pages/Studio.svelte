@@ -83,10 +83,32 @@
 
   // ── Palette (Wave 1) ──────────────────────────────────────────────────────
   let catalog = null
+  let authenticatedConnections = []
+  let authenticatedConnectionsError = ''
   let paletteStatus = 'Loading capabilities…'
   let paletteStatusKind = ''
   let paletteError = ''
   let lastGoodCatalog = null
+  $: selectedConnectionIDs = new Set((workflow && workflow.connections) || [])
+
+  async function loadAuthenticatedConnections() {
+    authenticatedConnectionsError = ''
+    try {
+      const response = await api.connections.list()
+      authenticatedConnections = response.connections || []
+    } catch (e) {
+      authenticatedConnections = []
+      authenticatedConnectionsError = e.message || 'Could not load website sign-ins.'
+    }
+  }
+
+  function toggleAuthenticatedConnection(connection) {
+    if (!workflow) return
+    const next = new Set(workflow.connections || [])
+    if (next.has(connection.id)) next.delete(connection.id)
+    else next.add(connection.id)
+    workflow = { ...workflow, connections: [...next] }
+  }
 
   // Map each connected MCP tool's full name → its published param hint
   // ("title*:string, …"), so the Inspector can show a tool node's allowed
@@ -562,6 +584,7 @@ Use null for fields that are not present.`
       name: 'Untitled workflow',
       trigger: { type: 'manual' },
       channels: [],
+      connections: [],
       flow: { nodes: [], edges: [], entry: '' },
     }
   }
@@ -4711,6 +4734,7 @@ Use null for fields that are not present.`
   }
 
   onMount(loadCatalog)
+  onMount(loadAuthenticatedConnections)
   onMount(loadSecrets)
   onMount(refreshPaletteDrafts)
 
@@ -5670,6 +5694,28 @@ Use null for fields that are not present.`
               value={(workflow.skills || []).join('\n')}
               on:input={(e) => { workflow = { ...workflow, skills: e.target.value.split('\n') } }}
             ></textarea>
+
+            <div class="agent-connections-head">
+              <div>
+                <span class="agent-field-label">Website sign-ins</span>
+                <p class="agent-field-note">Grant this agent selected encrypted sessions. Cookie values stay outside the model context.</p>
+              </div>
+              <button type="button" class="btn" on:click={() => { window.location.hash = '#websites' }}>Manage sign-ins</button>
+            </div>
+            {#if authenticatedConnectionsError}
+              <p class="agent-field-note err">{authenticatedConnectionsError}</p>
+            {:else if authenticatedConnections.length === 0}
+              <p class="agent-field-note">No website sign-ins are available. Add one from Website Access.</p>
+            {:else}
+              <div class="agent-connections">
+                {#each authenticatedConnections as connection (connection.id)}
+                  <label class:needs-auth={connection.status !== 'ready'}>
+                    <input type="checkbox" checked={selectedConnectionIDs.has(connection.id)} on:change={() => toggleAuthenticatedConnection(connection)} />
+                    <span><strong>{connection.name}</strong><small>{connection.status === 'ready' ? connection.allowed_domains?.join(', ') : 'Reconnect required'}</small></span>
+                  </label>
+                {/each}
+              </div>
+            {/if}
 
             <div class="agent-spec-meta">
               {#if workflow.knowledge && workflow.knowledge.length}<span><strong>Knowledge:</strong> {workflow.knowledge.join(', ')}</span>{/if}

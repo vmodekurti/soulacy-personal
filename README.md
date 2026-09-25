@@ -283,10 +283,10 @@ The compose file publishes `${SOULACY_PORT:-18789}` on the host — set
 `SOULACY_PORT` in `.env` to change it. Open
 [http://localhost:18789](http://localhost:18789) (or your chosen port).
 
-Agents that need a member's authorized subscription content can use encrypted,
+Agents that need authorized subscription content can use encrypted,
 explicitly granted [authenticated website connections](docs/agents/authenticated-connections.md).
-Private sessions remain user-scoped; workspace sessions require an owner or
-administrator and are intended for dedicated service accounts.
+Capture works from the Website Access page without shell access, with a remote
+CLI capture flow available as a fallback.
 
 ### Running CLI commands against a container
 

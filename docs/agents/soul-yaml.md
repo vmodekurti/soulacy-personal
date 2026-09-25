@@ -211,14 +211,14 @@ These are covered in depth on their own pages:
 - [Agent Tools](tools.md) — `tools:` (Python), `builtins:`, `mcp_servers:`/`mcp_tools:`, `system_tools:`, `confirm_tools:`.
 - [Skills](skills.md) — `skills:` names, or `["*"]` for all installed.
 - [Peer Agents & Built-ins](peers-builtins.md) — `agents:` peer list and built-ins modes.
-- [Authenticated Website Connections](authenticated-connections.md) — encrypted, user- or workspace-scoped sign-in sessions for interactive and scheduled agents.
+- [Authenticated Website Connections](authenticated-connections.md) — encrypted, owner-scoped sign-in sessions for interactive and scheduled agents.
 
 `knowledge:` lists knowledge base names this agent may search via the built-in
 `kb_search` tool. Empty means no KB catalog is injected at all.
 
 `connections:` lists opaque authenticated-connection IDs selected in Studio.
 The runtime also requires a matching metadata grant for this agent, so copying
-an ID into `SOUL.yaml` cannot release another member's saved session.
+an ID into `SOUL.yaml` cannot release another person's saved session.
 
 ## Memory
 

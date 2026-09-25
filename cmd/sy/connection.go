@@ -53,7 +53,7 @@ func buildConnectionListCmd() *cobra.Command {
 }
 
 func buildConnectionCaptureCmd() *cobra.Command {
-	var name, scope, domainsCSV, agentsCSV, chromePath, connectionID string
+	var name, domainsCSV, agentsCSV, chromePath, connectionID string
 	var wait time.Duration
 	cmd := &cobra.Command{
 		Use:   "capture <login-url>",
@@ -74,7 +74,7 @@ func buildConnectionCaptureCmd() *cobra.Command {
 			createdNew := strings.TrimSpace(connectionID) == ""
 			if createdNew {
 				createBody, _ := json.Marshal(map[string]any{
-					"name": name, "scope": scope, "kind": "browser_session", "base_url": loginURL,
+					"name": name, "scope": "user", "kind": "browser_session", "base_url": loginURL,
 					"allowed_domains": domains, "agent_ids": splitCSV(agentsCSV),
 				})
 				createdRaw, err := apiCall(http.MethodPost, "/authenticated-connections", createBody)
@@ -103,7 +103,6 @@ func buildConnectionCaptureCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&name, "name", "", "Display name (default: login domain)")
-	cmd.Flags().StringVar(&scope, "scope", "user", "Connection scope: user or workspace")
 	cmd.Flags().StringVar(&domainsCSV, "domains", "", "Comma-separated approved cookie domains (default: login domain)")
 	cmd.Flags().StringVar(&agentsCSV, "agents", "", "Comma-separated agent IDs allowed to use this connection")
 	cmd.Flags().StringVar(&chromePath, "chrome", "", "Chrome/Chromium executable path")

@@ -103,7 +103,7 @@ func (r *Resolver) Resolve(ctx context.Context, workspaceID, subject, agentID, c
 	if connection.Kind == KindOAuth {
 		key = "oauth_refresh_token"
 	}
-	secret, err := r.vault.ReadBlob(ctx, workspaceID, vaultNamespace(connection.ID), key)
+	secret, err := r.vault.ReadBlob(ctx, vaultNamespace(connection.ID), key)
 	if err != nil {
 		return Lease{}, fmt.Errorf("authenticated connection secret: %w", err)
 	}

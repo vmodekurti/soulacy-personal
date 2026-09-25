@@ -53,6 +53,7 @@ import (
 	"github.com/soulacy/soulacy/internal/agentvalidate"
 	"github.com/soulacy/soulacy/internal/auth"
 	"github.com/soulacy/soulacy/internal/auth/apikeys"
+	"github.com/soulacy/soulacy/internal/authconnections"
 	"github.com/soulacy/soulacy/internal/autopilot"
 	"github.com/soulacy/soulacy/internal/builder"
 	"github.com/soulacy/soulacy/internal/caps"
@@ -77,6 +78,7 @@ import (
 	"github.com/soulacy/soulacy/internal/safeundo"
 	"github.com/soulacy/soulacy/internal/scheduler"
 	"github.com/soulacy/soulacy/internal/session"
+	"github.com/soulacy/soulacy/internal/sessioncapturecompanion"
 	"github.com/soulacy/soulacy/internal/storage"
 	"github.com/soulacy/soulacy/internal/studio"
 	"github.com/soulacy/soulacy/internal/voice"
@@ -128,13 +130,14 @@ type Server struct {
 	liveActivities  *liveActivityTracker
 	authEngine      *auth.Engine // nil until SetAuth() is called
 	authStackCache  atomic.Pointer[fiber.Handler]
-	rbacManager     *rbac.Manager        // nil until SetRBAC() is called
-	credVault       credentials.Vault    // nil until SetCredentialVault() is called
-	builderRegistry *builder.Registry    // nil until SetBuilderRegistry() is called
-	rateLimiter     *ratelimit.Manager   // nil until SetRateLimiter() is called
-	apiKeyStore     apikeys.Store        // nil until SetAPIKeyStore() is called
-	dlqStore        dlq.Store            // nil until SetDLQStore() is called
-	historyStore    session.HistoryStore // nil until SetHistoryStore() is called
+	rbacManager     *rbac.Manager          // nil until SetRBAC() is called
+	credVault       credentials.Vault      // nil until SetCredentialVault() is called
+	authConnections *authconnections.Store // secret-free metadata; values remain in credVault
+	builderRegistry *builder.Registry      // nil until SetBuilderRegistry() is called
+	rateLimiter     *ratelimit.Manager     // nil until SetRateLimiter() is called
+	apiKeyStore     apikeys.Store          // nil until SetAPIKeyStore() is called
+	dlqStore        dlq.Store              // nil until SetDLQStore() is called
+	historyStore    session.HistoryStore   // nil until SetHistoryStore() is called
 	resourceStore   session.ResourceStore
 	agentWatcher    healthReporter // nil until SetAgentWatcher() is called (S2.13)
 	log             *zap.Logger
@@ -331,6 +334,12 @@ func (s *Server) SetRBAC(m *rbac.Manager) {
 // first request is served. When nil, credential routes return 503.
 func (s *Server) SetCredentialVault(v credentials.Vault) {
 	s.credVault = v
+}
+
+// SetAuthenticatedConnectionStore wires secret-free connection metadata and
+// agent grants. Authentication state remains exclusively in the credential vault.
+func (s *Server) SetAuthenticatedConnectionStore(store *authconnections.Store) {
+	s.authConnections = store
 }
 
 // CredentialVault returns the current Vault (may be nil). Satisfies
@@ -709,6 +718,19 @@ func (s *Server) buildApp() *fiber.App {
 			"mode":   authMode,
 			"status": "ok",
 		})
+	})
+	// The companion contains source only and no deployment configuration or
+	// secrets. It is public so hosted installations can set up capture without
+	// requiring shell access on the gateway host.
+	app.Get("/downloads/soulacy-session-capture.zip", func(c *fiber.Ctx) error {
+		archive, err := sessioncapturecompanion.Archive()
+		if err != nil {
+			return s.errMsg(c, fiber.StatusInternalServerError, "session capture companion could not be packaged")
+		}
+		c.Set(fiber.HeaderContentType, "application/zip")
+		c.Set(fiber.HeaderContentDisposition, `attachment; filename="soulacy-session-capture.zip"`)
+		c.Set(fiber.HeaderCacheControl, "public, max-age=3600")
+		return c.Send(archive)
 	})
 
 	// --- Auth endpoints (public — no auth middleware) ---
@@ -1255,6 +1277,16 @@ func (s *Server) buildApp() *fiber.App {
 	// Listing key NAMES stays on read; fetching a VALUE requires write.
 	api.Get("/credentials/:agentID/:key", s.credentialAudit("credential.reveal"), s.denyGlobalCredentialScope, s.rbacAgentFromMW(rbac.ResourceCredentials, rbac.ActionReveal, rbac.AgentIDSource{PathParam: "agentID"}), s.requireCredentialRevealConfirmation, credAPI.HandleGet)
 	api.Delete("/credentials/:agentID/:key", s.credentialAudit("credential.delete"), s.denyGlobalCredentialScope, s.rbacAgentFromMW(rbac.ResourceCredentials, rbac.ActionDelete, rbac.AgentIDSource{PathParam: "agentID"}), credAPI.HandleDelete)
+
+	// Authenticated website state is write-only at the API boundary. Listing
+	// returns secret-free metadata, while session capture is encrypted directly
+	// into the credential vault.
+	api.Get("/authenticated-connections", s.rbacMW(rbac.ResourceCredentials, rbac.ActionList), s.handleListAuthenticatedConnections)
+	api.Post("/authenticated-connections", s.rbacMW(rbac.ResourceCredentials, rbac.ActionSet), s.handleCreateAuthenticatedConnection)
+	api.Put("/authenticated-connections/:id/session", s.credentialAudit("authenticated_connection.session.set"), s.rbacMW(rbac.ResourceCredentials, rbac.ActionSet), s.handleSetAuthenticatedConnectionSession)
+	api.Put("/authenticated-connections/:id/grants", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleSetAuthenticatedConnectionGrants)
+	api.Post("/authenticated-connections/:id/revoke", s.credentialAudit("authenticated_connection.revoke"), s.rbacMW(rbac.ResourceCredentials, rbac.ActionDelete), s.handleRevokeAuthenticatedConnection)
+	api.Delete("/authenticated-connections/:id", s.credentialAudit("authenticated_connection.delete"), s.rbacMW(rbac.ResourceCredentials, rbac.ActionDelete), s.handleDeleteAuthenticatedConnection)
 	// Credential rotation (type-assert to VersionedVault at request time)
 	api.Post("/credentials/:agentID/:key/rotate", s.credentialAudit("credential.rotate"), s.denyGlobalCredentialScope, s.rbacAgentFromMW(rbac.ResourceCredentials, rbac.ActionRotate, rbac.AgentIDSource{PathParam: "agentID"}), func(c *fiber.Ctx) error {
 		if s.credVault == nil {

@@ -43,7 +43,7 @@ func TestVisibilityAndExplicitGrant(t *testing.T) {
 	}
 	defer vault.Close()
 	state := []byte(`{"cookies":[{"name":"session","value":"secret","domain":"hbr.org"}],"origins":[]}`)
-	if err := vault.WriteBlob(ctx, "ws", vaultNamespace(private.ID), "browser_storage_state", state); err != nil {
+	if err := vault.WriteBlob(ctx, vaultNamespace(private.ID), "browser_storage_state", state); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.MarkSecret(ctx, "ws", private.ID, nil); err != nil {
@@ -103,45 +103,6 @@ func TestSyncAgentSelectionPreservesOtherAgents(t *testing.T) {
 	}
 	if err := store.SyncAgentSelection(ctx, "ws", "", []string{first.ID}, nil); err == nil {
 		t.Fatal("empty agent id must fail closed")
-	}
-}
-
-func TestPurgeWorkspaceRemovesOnlyTargetWorkspace(t *testing.T) {
-	store, err := Open(t.TempDir() + "/connections.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
-	ctx := context.Background()
-	for _, workspaceID := range []string{"ws_delete", "ws_keep"} {
-		connection, err := store.Create(ctx, CreateInput{
-			ID:             "shared-id",
-			WorkspaceID:    workspaceID,
-			OwnerSubject:   "user-1",
-			Scope:          ScopeUser,
-			Kind:           KindBrowser,
-			Name:           "Research login",
-			AllowedDomains: []string{"example.com"},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := store.ReplaceAgentGrants(ctx, workspaceID, connection.ID, []string{"agent-1"}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	removed, err := store.PurgeWorkspace(ctx, "ws_delete")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if removed.Rows != 2 {
-		t.Fatalf("removed rows = %d, want connection plus grant", removed.Rows)
-	}
-	if _, err := store.Get(ctx, "ws_delete", "shared-id"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("deleted workspace connection still visible: %v", err)
-	}
-	if _, err := store.Get(ctx, "ws_keep", "shared-id"); err != nil {
-		t.Fatalf("neighbour workspace was affected: %v", err)
 	}
 }
 

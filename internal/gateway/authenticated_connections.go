@@ -15,7 +15,6 @@ import (
 	"github.com/soulacy/soulacy/internal/credentials"
 	"github.com/soulacy/soulacy/internal/rbac"
 	"github.com/soulacy/soulacy/internal/runtime"
-	"github.com/soulacy/soulacy/internal/tenancy"
 )
 
 const (
@@ -58,20 +57,17 @@ func (s *Server) handleCreateAuthenticatedConnection(c *fiber.Ctx) error {
 	if err := c.BodyParser(&body); err != nil {
 		return s.errMsg(c, fiber.StatusBadRequest, "invalid request body")
 	}
-	workspaceID, subject, role := authenticatedConnectionActor(c)
+	workspaceID, subject, _ := authenticatedConnectionActor(c)
 	body.Scope = strings.ToLower(strings.TrimSpace(body.Scope))
 	if body.Scope == "" {
 		body.Scope = authconnections.ScopeUser
 	}
-	if body.Scope != authconnections.ScopeUser && body.Scope != authconnections.ScopeWorkspace {
-		return s.errMsg(c, fiber.StatusBadRequest, "scope must be user or workspace")
-	}
-	if body.Scope == authconnections.ScopeWorkspace && !isWorkspaceAdministrator(role) {
-		return s.errMsg(c, fiber.StatusForbidden, "workspace connections require a workspace owner or admin")
+	if body.Scope != authconnections.ScopeUser {
+		return s.errMsg(c, fiber.StatusBadRequest, "Soulacy Personal supports user-scoped connections")
 	}
 	body.Kind = strings.ToLower(strings.TrimSpace(body.Kind))
-	if body.Kind != authconnections.KindBrowser && body.Kind != authconnections.KindOAuth {
-		return s.errMsg(c, fiber.StatusBadRequest, "kind must be browser_session or oauth")
+	if body.Kind != authconnections.KindBrowser {
+		return s.errMsg(c, fiber.StatusBadRequest, "kind must be browser_session")
 	}
 	body.Name = strings.TrimSpace(body.Name)
 	if body.Name == "" || len(body.Name) > 120 {
@@ -81,12 +77,8 @@ func (s *Server) handleCreateAuthenticatedConnection(c *fiber.Ctx) error {
 	if err != nil {
 		return s.errMsg(c, fiber.StatusBadRequest, err.Error())
 	}
-	owner := subject
-	if body.Scope == authconnections.ScopeWorkspace {
-		owner = ""
-	}
 	connection, err := s.authConnections.Create(c.UserContext(), authconnections.CreateInput{
-		WorkspaceID: workspaceID, OwnerSubject: owner, Scope: body.Scope, Kind: body.Kind,
+		WorkspaceID: workspaceID, OwnerSubject: subject, Scope: body.Scope, Kind: body.Kind,
 		Name: body.Name, BaseURL: baseURL, AllowedDomains: domains, ExpiresAt: body.ExpiresAt,
 	})
 	if err != nil {
@@ -137,17 +129,17 @@ func (s *Server) handleSetAuthenticatedConnectionSession(c *fiber.Ctx) error {
 			return s.errMsg(c, fiber.StatusBadRequest, "refresh_token is required for an OAuth connection")
 		}
 	}
-	if err := s.credVault.WriteBlob(c.UserContext(), workspaceID, authConnectionVaultNamespace(connection.ID), key, secret); err != nil {
+	if err := s.credVault.WriteBlob(c.UserContext(), authConnectionVaultNamespace(connection.ID), key, secret); err != nil {
 		return s.errMsg(c, fiber.StatusInternalServerError, "encrypted session could not be stored")
 	}
 	if connection.Kind == authconnections.KindOAuth && strings.TrimSpace(body.ClientSecret) != "" {
-		if err := s.credVault.Set(c.UserContext(), workspaceID, authConnectionVaultNamespace(connection.ID), authConnectionClientKey, []byte(body.ClientSecret)); err != nil {
-			_ = s.credVault.Delete(c.UserContext(), workspaceID, authConnectionVaultNamespace(connection.ID), key)
+		if err := s.credVault.Set(c.UserContext(), authConnectionVaultNamespace(connection.ID), authConnectionClientKey, []byte(body.ClientSecret)); err != nil {
+			_ = s.credVault.Delete(c.UserContext(), authConnectionVaultNamespace(connection.ID), key)
 			return s.errMsg(c, fiber.StatusInternalServerError, "OAuth client secret could not be stored")
 		}
 	}
 	if err := s.authConnections.MarkSecret(c.UserContext(), workspaceID, connection.ID, body.ExpiresAt); err != nil {
-		_ = s.credVault.Delete(c.UserContext(), workspaceID, authConnectionVaultNamespace(connection.ID), key)
+		_ = s.credVault.Delete(c.UserContext(), authConnectionVaultNamespace(connection.ID), key)
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
 	updated, _ := s.authConnections.Get(c.UserContext(), workspaceID, connection.ID)
@@ -230,21 +222,17 @@ func (s *Server) authorizeAuthenticatedConnection(c *fiber.Ctx, workspaceID, id,
 }
 
 func authenticatedConnectionActor(c *fiber.Ctx) (workspaceID, subject, role string) {
-	workspaceID, subject, role = runtime.PersonalWorkspaceID, "usr_local_owner", tenancy.RoleOwner
-	if identity, ok := requestIdentity(c); ok {
-		workspaceID = runtime.NormalizeWorkspace(identity.WorkspaceID())
-		if strings.TrimSpace(identity.Subject()) != "" {
-			subject = strings.TrimSpace(identity.Subject())
-		}
-		if strings.TrimSpace(identity.Role()) != "" {
-			role = strings.TrimSpace(identity.Role())
+	workspaceID, subject, role = runtime.PersonalWorkspaceID, "admin", rbac.RoleAdmin
+	if principal, ok := requestPrincipal(c); ok {
+		if strings.TrimSpace(principal.Role) != "" {
+			role = strings.TrimSpace(principal.Role)
 		}
 	}
 	return
 }
 
 func isWorkspaceAdministrator(role string) bool {
-	return role == tenancy.RoleOwner || role == tenancy.RoleAdmin || role == rbac.RoleOwner || role == rbac.RoleAdmin
+	return role == rbac.RoleAdmin
 }
 
 func authConnectionVaultNamespace(id string) string {
@@ -252,8 +240,9 @@ func authConnectionVaultNamespace(id string) string {
 }
 
 func deleteAuthenticatedConnectionSecrets(c *fiber.Ctx, vault credentials.Vault, workspaceID, id string) {
+	_ = workspaceID // Personal has one vault; metadata still carries its workspace boundary.
 	for _, key := range []string{authConnectionSessionKey, authConnectionRefreshKey, authConnectionClientKey} {
-		_ = vault.Delete(c.UserContext(), workspaceID, authConnectionVaultNamespace(id), key)
+		_ = vault.Delete(c.UserContext(), authConnectionVaultNamespace(id), key)
 	}
 }
 
