@@ -30,12 +30,31 @@ and approved domain before it decrypts any session state.
 
 1. Open **Connected Apps → Authenticated Websites → Add website sign-in**.
 2. Enter the sign-in URL and optionally narrow the approved domains and agents.
-3. Copy the generated `sy connection capture` command to a trusted computer
-   with Chrome or Chromium installed.
-4. If this is the first CLI use against a Team or Scale gateway, run `sy login`
-   first.
-5. Sign in inside the isolated Chrome window. Return to Terminal and press
-   Enter only after the website shows the authenticated account.
+3. If prompted, download the Soulacy Session Capture companion, unzip it, then
+   open `chrome://extensions`, enable **Developer mode**, and select
+   **Load unpacked**. Managed Team/Scale deployments can push the same pinned
+   companion to members through Chrome enterprise policy.
+4. Select **Open secure sign-in**. Chrome asks for access only to the approved
+   website domain and opens its normal login page.
+5. Complete the website's normal sign-in, including password-manager, MFA,
+   CAPTCHA, or WebAuthn steps. Return to Soulacy and select
+   **Save signed-in session**.
+
+The companion reads cookies (including HttpOnly cookies) and local storage only
+inside the approved domain boundary. It sends that state directly to the
+signed-in Soulacy page, which writes it through the authenticated API to the
+encrypted workspace vault. The extension does not read passwords and does not
+persist captured session state locally.
+
+The built-in bridge activates automatically on `*.soulacy.io`, `localhost`,
+and `127.0.0.1`. Administrators using a custom Soulacy hostname must add that
+exact origin to the companion's `content_scripts.matches` before distributing
+the managed extension. Broad unrelated-site bridge permissions are not safe.
+
+### Personal-mode CLI fallback
+
+Personal mode also exposes the local CLI capture command for users who prefer
+an isolated temporary Chrome profile:
 
 Example:
 
@@ -47,7 +66,7 @@ sy --gateway https://team.example.com connection capture https://hbr.org/login \
   --agents daily-research
 ```
 
-The CLI launches Chrome with a temporary profile, captures only cookies and
+The CLI fallback launches Chrome with a temporary profile, captures only cookies and
 origin storage inside the approved domain boundary, uploads that state over the
 authenticated API, and removes the profile. The API encrypts the opaque state
 in the workspace credential vault; it is never returned by list or get APIs.
@@ -89,8 +108,8 @@ again before they can use a private connection.
 
 If the upstream website returns HTTP 401 or 403, Soulacy marks the connection
 as **expired** and fails with an actionable reconnect message. In Connected
-Apps, choose **Reconnect**, run the copied command, and sign in again. The
-connection ID and its agent grants remain unchanged.
+Apps, choose **Reconnect**, complete the secure browser sign-in, and save the
+session again. The connection ID and its agent grants remain unchanged.
 
 Deleting or revoking a connection immediately prevents new leases. Removing it
 from an agent also removes that agent's metadata grant without affecting grants
