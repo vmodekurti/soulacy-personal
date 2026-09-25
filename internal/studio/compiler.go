@@ -273,6 +273,10 @@ type Draft struct {
 	Strategy string   `json:"strategy,omitempty"`
 	Tools    []string `json:"tools,omitempty"`
 	Skills   []string `json:"skills,omitempty"`
+	// Connections names authenticated website/OAuth sessions this agent is
+	// allowed to request at runtime. The connection store independently checks
+	// its per-agent grant, so a draft reference alone never releases a secret.
+	Connections []string `json:"connections,omitempty"`
 	// Policy carries the per-strategy contract the Studio Build step edits: the
 	// agent's goal and completion criteria, the ReAct loop's stop/recovery rules,
 	// and the Plan-Execute planner's steps and approval gates.
