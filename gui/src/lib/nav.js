@@ -58,6 +58,7 @@ export const navPages = [
   { id: 'channels',  icon: '📡', label: 'Delivery',    group: 'integrations', level: 'standard' },
   { id: 'schedule',  icon: '⏱', label: 'Automations', group: 'integrations', level: 'standard' },
   { id: 'skills',    icon: '🧩', label: 'Skills',      group: 'integrations', level: 'standard' },
+  { id: 'websites',  icon: '🔐', label: 'Website Access', group: 'integrations', level: 'standard' },
   { id: 'mcp',       icon: '🔌', label: 'MCP',         group: 'integrations', level: 'advanced' },
   { id: 'pluginmgr', icon: '🧱', label: 'Plugins',     group: 'integrations', level: 'advanced' },
   { id: 'providers', icon: '⚙', label: 'Providers',   group: 'integrations', level: 'standard' },

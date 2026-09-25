@@ -17,6 +17,7 @@ import (
 	"github.com/soulacy/soulacy/internal/audit"
 	"github.com/soulacy/soulacy/internal/auth"
 	"github.com/soulacy/soulacy/internal/auth/apikeys"
+	"github.com/soulacy/soulacy/internal/authconnections"
 	"github.com/soulacy/soulacy/internal/autopilot"
 	"github.com/soulacy/soulacy/internal/builder"
 	"github.com/soulacy/soulacy/internal/caps"
@@ -102,6 +103,17 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 	srv.SetRBAC(d.rbacManager)
 	if d.credVault != nil {
 		srv.SetCredentialVault(d.credVault)
+	}
+	connectionStore, connectionErr := authconnections.Open(ws.DB("authenticated_connections"))
+	if connectionErr != nil {
+		log.Warn("authenticated website connections unavailable", zap.Error(connectionErr))
+	} else {
+		stack.pushClose("authenticated-connections", connectionStore)
+		srv.SetAuthenticatedConnectionStore(connectionStore)
+		if d.credVault != nil {
+			d.engine.SetAuthenticatedConnectionResolver(authconnections.NewResolver(connectionStore, d.credVault))
+		}
+		log.Info("authenticated website connections ready")
 	}
 
 	// Plugin GUI mounts + capability enforcement for scoped plugin tokens
