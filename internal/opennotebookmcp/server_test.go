@@ -120,7 +120,7 @@ func TestAPIFailureIsBoundedAndSanitized(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected API error")
 	}
-	if got := err.Error(); got != "Open Notebook returned HTTP 422: bad input" {
+	if got := err.Error(); got != "the Open Notebook API returned HTTP 422: bad input" {
 		t.Fatalf("error = %q", got)
 	}
 }

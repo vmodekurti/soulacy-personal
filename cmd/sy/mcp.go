@@ -199,7 +199,7 @@ restricted to localhost/loopback so this command does not expose notebooks to
 the internet. Running the command again updates the existing registration.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if isRemoteGateway() {
-				return fmt.Errorf("Open Notebook is a host-local integration; run this command on the machine that runs the Soulacy gateway")
+				return fmt.Errorf("the Open Notebook integration is host-local; run this command on the machine that runs the Soulacy gateway")
 			}
 			u, err := opennotebookmcp.ValidateBaseURL(baseURL)
 			if err != nil {

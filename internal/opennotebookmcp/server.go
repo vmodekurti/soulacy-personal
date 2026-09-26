@@ -67,15 +67,15 @@ func ValidateBaseURL(raw string) (*url.URL, error) {
 	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") {
-		return nil, fmt.Errorf("Open Notebook URL must be a valid http:// or https:// URL")
+		return nil, fmt.Errorf("the Open Notebook URL must be a valid http:// or https:// URL")
 	}
 	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return nil, fmt.Errorf("Open Notebook URL must not contain credentials, query parameters, or a fragment")
+		return nil, fmt.Errorf("the Open Notebook URL must not contain credentials, query parameters, or a fragment")
 	}
 	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
 	ip := net.ParseIP(host)
 	if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
-		return nil, fmt.Errorf("Open Notebook URL must use localhost or a loopback IP address")
+		return nil, fmt.Errorf("the Open Notebook URL must use localhost or a loopback IP address")
 	}
 	u.Path = strings.TrimRight(u.Path, "/")
 	return u, nil
@@ -331,7 +331,7 @@ func (s *Server) request(ctx context.Context, method, endpoint string, q url.Val
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("Open Notebook is unavailable at %s: %s", s.baseURL.String(), safeNetworkError(err))
+		return nil, fmt.Errorf("the Open Notebook API is unavailable at %s: %s", s.baseURL.String(), safeNetworkError(err))
 	}
 	defer resp.Body.Close()
 	limited := io.LimitReader(resp.Body, maxResponseBytes+1)
@@ -340,16 +340,16 @@ func (s *Server) request(ctx context.Context, method, endpoint string, q url.Val
 		return nil, fmt.Errorf("read Open Notebook response: %w", err)
 	}
 	if len(data) > maxResponseBytes {
-		return nil, fmt.Errorf("Open Notebook response exceeds %d bytes", maxResponseBytes)
+		return nil, fmt.Errorf("the Open Notebook response exceeds %d bytes", maxResponseBytes)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("Open Notebook returned HTTP %d%s", resp.StatusCode, safeAPIDetail(data))
+		return nil, fmt.Errorf("the Open Notebook API returned HTTP %d%s", resp.StatusCode, safeAPIDetail(data))
 	}
 	if len(bytes.TrimSpace(data)) == 0 {
 		return json.RawMessage(`{}`), nil
 	}
 	if !json.Valid(data) {
-		return nil, fmt.Errorf("Open Notebook returned an invalid JSON response")
+		return nil, fmt.Errorf("the Open Notebook API returned an invalid JSON response")
 	}
 	return json.RawMessage(data), nil
 }
