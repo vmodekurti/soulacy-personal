@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -105,7 +106,11 @@ func resolvePairBase(ctx context.Context, publicURL, requestBase string, port in
 	}
 	if b := strings.TrimSpace(publicURL); b != "" {
 		base := strings.TrimRight(b, "/")
-		return pairBase{URL: base, Reachable: probe(ctx, base)}, nil
+		pb := pairBase{URL: base, Reachable: probe(ctx, base)}
+		if !pb.Reachable {
+			pb.Hint = selfProbeHint(base)
+		}
+		return pb, nil
 	}
 	reqBase := strings.TrimRight(requestBase, "/")
 	scheme, reqHost := "http", ""
@@ -121,6 +126,18 @@ func resolvePairBase(ctx context.Context, publicURL, requestBase string, port in
 	// already known to work for them. Then Tailscale, then LAN.
 	if reqHost != "" && !isLoopbackPairHost(reqHost) {
 		candidates = append(candidates, reqBase)
+	}
+	// A public name over https is the address, full stop. The gateway may
+	// not be able to call it itself — behind Cloudflare the edge refuses
+	// the box's own requests — and falling through to this machine's
+	// addresses handed a phone the Docker bridge IP (172.18.0.4) that only
+	// the container can reach (#222). Say so instead of guessing.
+	if scheme == "https" && reqHost != "" && !isLoopbackPairHost(reqHost) && net.ParseIP(reqHost) == nil {
+		pb := pairBase{URL: reqBase, Reachable: probe(ctx, reqBase), Candidates: candidates}
+		if !pb.Reachable {
+			pb.Hint = selfProbeHint(reqBase)
+		}
+		return pb, nil
 	}
 	// This machine's Tailscale name, before any IP: https://<name> when the
 	// tailnet forwards 443 to us (remote.sh does), else the name with our
@@ -150,9 +167,22 @@ func isLoopbackPairHost(h string) bool {
 	return false
 }
 
+// selfProbeHint explains a public address the gateway cannot call itself.
+func selfProbeHint(base string) string {
+	return "This gateway could not reach " + base + " itself (a proxy or CDN may refuse its own calls); a phone can, if the address is the one you use."
+}
+
+// inContainer reports a Docker container, where this machine's "LAN"
+// addresses are the bridge network nobody outside can reach (#222).
+func inContainer() bool {
+	_, err := os.Stat("/.dockerenv")
+	return err == nil
+}
+
 // localAddresses lists this machine's IPv4 addresses a phone could plausibly
 // reach: Tailscale's CGNAT range (100.64/10) first, then private LAN
-// addresses. Loopback, link-local and public addresses are skipped.
+// addresses. Loopback, link-local and public addresses are skipped, and so
+// are private addresses inside a container: they are the bridge network.
 func localAddresses() []net.IP {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
@@ -172,6 +202,9 @@ func localAddresses() []net.IP {
 		case isTailscaleIP(ip):
 			ts = append(ts, ip)
 		case ip.IsPrivate():
+			if inContainer() {
+				continue
+			}
 			lan = append(lan, ip)
 		}
 	}
