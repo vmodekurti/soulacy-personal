@@ -719,6 +719,8 @@ export const api = {
     delete: (id)      => apiFetch(`/mcp/${encodeURIComponent(id)}`,            { method: 'DELETE' }),
     test:           (body)    => apiFetch('/mcp/test',             { method: 'POST', body: JSON.stringify(body) }),
 	installGuide:    (sourceURL) => apiFetch('/mcp/install-guide',   { method: 'POST', body: JSON.stringify({ source_url: sourceURL }) }),
+    openNotebookStatus:  ()     => apiFetch('/mcp/open-notebook/status'),
+    installOpenNotebook: (body = {}) => apiFetch('/mcp/open-notebook/install', { method: 'POST', body: JSON.stringify(body) }),
     provisionGlama:    (body)         => apiFetch('/mcp/provision-glama',    { method: 'POST', body: JSON.stringify(body) }),
   },
 

@@ -41,6 +41,7 @@ import (
 	"github.com/soulacy/soulacy/internal/llm"
 	"github.com/soulacy/soulacy/internal/mcp"
 	"github.com/soulacy/soulacy/internal/netguard"
+	"github.com/soulacy/soulacy/internal/opennotebookmcp"
 	"github.com/soulacy/soulacy/internal/pkgregistry"
 	"github.com/soulacy/soulacy/internal/platform"
 	"github.com/soulacy/soulacy/internal/plugininstall"
@@ -3090,6 +3091,136 @@ func (s *Server) handleListMCP(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"servers": []any{}, "note": "MCP not initialised"})
 	}
 	return c.JSON(fiber.Map{"servers": redactMCPServers(s.mcp.ServersSnapshot())})
+}
+
+const openNotebookMCPID = "open-notebook"
+
+// handleOpenNotebookStatus reports the two independent parts of the local
+// integration: whether the Open Notebook REST API is reachable and whether
+// its built-in MCP bridge is registered with Soulacy.
+func (s *Server) handleOpenNotebookStatus(c *fiber.Ctx) error {
+	baseURL := strings.TrimSpace(c.Query("base_url", opennotebookmcp.DefaultBaseURL))
+	u, err := opennotebookmcp.ValidateBaseURL(baseURL)
+	if err != nil {
+		return s.errMsg(c, fiber.StatusBadRequest, err.Error())
+	}
+	registered, connected, detail := false, false, ""
+	if s.mcp != nil {
+		for _, srv := range s.mcp.ServersSnapshot() {
+			if srv.ID == openNotebookMCPID {
+				registered, connected, detail = true, srv.Connected, srv.Detail
+				if configured := openNotebookURLFromArgs(srv.Args); configured != "" {
+					u, _ = opennotebookmcp.ValidateBaseURL(configured)
+				}
+				break
+			}
+		}
+	}
+	available, healthDetail := probeOpenNotebook(c.UserContext(), u.String(), s.httpRequestTimeout())
+	return c.JSON(fiber.Map{
+		"base_url":           u.String(),
+		"available":          available,
+		"health_detail":      healthDetail,
+		"registered":         registered,
+		"connected":          connected,
+		"connection_detail":  detail,
+		"same_host_required": true,
+	})
+}
+
+type openNotebookInstallBody struct {
+	BaseURL string `json:"base_url"`
+}
+
+// handleInstallOpenNotebook persists and hot-connects the built-in bridge.
+// os.Executable gives the child an absolute, restart-safe command without any
+// dependency on PATH, npm, Python, or an interactive shell.
+func (s *Server) handleInstallOpenNotebook(c *fiber.Ctx) error {
+	if s.cfgPath == "" {
+		return s.errMsg(c, fiber.StatusServiceUnavailable, "config file path unknown — cannot persist")
+	}
+	var request openNotebookInstallBody
+	if len(c.Body()) > 0 {
+		if err := c.BodyParser(&request); err != nil {
+			return s.errJSON(c, fiber.StatusBadRequest, err)
+		}
+	}
+	u, err := opennotebookmcp.ValidateBaseURL(request.BaseURL)
+	if err != nil {
+		return s.errMsg(c, fiber.StatusBadRequest, err.Error())
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return s.errMsg(c, fiber.StatusInternalServerError, "could not locate the Soulacy gateway binary")
+	}
+	body := mcpServerBody{
+		ID:        openNotebookMCPID,
+		Transport: "stdio",
+		Command:   executable,
+		Args:      []string{"open-notebook-mcp", "--base-url", u.String()},
+	}
+	raw, err := readRawConfig(s.cfgPath)
+	if err != nil {
+		return s.errJSON(c, fiber.StatusInternalServerError, err)
+	}
+	servers := getOrCreateMap(getOrCreateMap(raw, "mcp"), "servers")
+	_, existed := servers[openNotebookMCPID]
+	servers[openNotebookMCPID] = mcpServerToYAML(body)
+	if err := writeRawConfig(s.cfgPath, raw); err != nil {
+		return s.errJSON(c, fiber.StatusInternalServerError, err)
+	}
+	connectErr := ""
+	if s.mcp != nil {
+		if err := s.mcp.AddServer(openNotebookMCPID, mcpBodyToServerConfig(body)); err != nil {
+			connectErr = err.Error()
+		}
+	}
+	available, healthDetail := probeOpenNotebook(c.UserContext(), u.String(), s.httpRequestTimeout())
+	message := "Open Notebook connected."
+	if !available {
+		message = "The MCP bridge was saved, but Open Notebook is not reachable yet: " + healthDetail
+	}
+	if connectErr != "" {
+		message = "The MCP bridge was saved, but it did not connect: " + connectErr
+	}
+	return c.JSON(fiber.Map{
+		"ok": true, "created": !existed, "id": openNotebookMCPID,
+		"base_url": u.String(), "available": available, "message": message,
+		"connect_error": connectErr, "restart_needed": false,
+	})
+}
+
+func openNotebookURLFromArgs(args []string) string {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--base-url" {
+			return strings.TrimSpace(args[i+1])
+		}
+	}
+	return ""
+}
+
+func probeOpenNotebook(ctx context.Context, baseURL string, timeout time.Duration) (bool, string) {
+	if timeout <= 0 || timeout > 5*time.Second {
+		timeout = 5 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/health", nil)
+	if err != nil {
+		return false, "invalid health-check request"
+	}
+	resp, err := (&http.Client{Timeout: timeout}).Do(req)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return false, "health check timed out"
+		}
+		return false, "connection failed"
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return false, fmt.Sprintf("health check returned HTTP %d", resp.StatusCode)
+	}
+	return true, "healthy"
 }
 
 // redactMCPServers masks the credential-bearing fields of an MCP server before

@@ -21,6 +21,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -425,6 +427,47 @@ func TestGatewayHandleTestMCPServer_HTTPInvalidURL(t *testing.T) {
 	// Handler returns ok=false and an error string.
 	if body["ok"] != false {
 		t.Fatalf("expected ok=false for invalid URL, body=%v", body)
+	}
+}
+
+func TestOpenNotebookStatusProbesLoopbackAPI(t *testing.T) {
+	openNotebook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"status":"healthy"}`))
+	}))
+	defer openNotebook.Close()
+	s := newTestGateway(t, "secret")
+	status, body := gatewayJSON(t, s, http.MethodGet, "/api/v1/mcp/open-notebook/status?base_url="+url.QueryEscape(openNotebook.URL), "secret", "")
+	if status != http.StatusOK {
+		t.Fatalf("status=%d body=%v", status, body)
+	}
+	if body["available"] != true || body["same_host_required"] != true {
+		t.Fatalf("body=%v", body)
+	}
+}
+
+func TestInstallOpenNotebookWritesBuiltInBridgeConfig(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("schema_version: 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := newTestGatewayWithCfgPath(t, "secret", cfgPath)
+	s.mcp = nil // Persist only; do not spawn the Go test binary as an MCP child.
+	status, body := gatewayJSON(t, s, http.MethodPost, "/api/v1/mcp/open-notebook/install", "secret", `{}`)
+	if status != http.StatusOK || body["ok"] != true {
+		t.Fatalf("status=%d body=%v", status, body)
+	}
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{"open-notebook:", "open-notebook-mcp", "http://127.0.0.1:5055"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("config missing %q:\n%s", want, text)
+		}
 	}
 }
 

@@ -199,6 +199,7 @@ nav:
     - Installing Skills: extend/installing-skills.md
     - Skill Sources: extend/skill-sources.md
     - MCP Servers: extend/mcp.md
+    - Open Notebook: integrations/open-notebook.md
     - Plugins: extend/plugins.md
     - Plugin Security Model: extend/plugin-security.md
     - Safety Introspection: extend/safety.md

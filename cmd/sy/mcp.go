@@ -14,6 +14,7 @@ import (
 
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/mcpserver"
+	"github.com/soulacy/soulacy/internal/opennotebookmcp"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -180,8 +181,96 @@ Register an HTTP MCP server on a managed Soulacy deployment without shell access
 	addCmd.Flags().StringVar(&pipSpec, "pip", "", "Optional pip package/spec to install into a persistent venv before registering")
 
 	cmd.AddCommand(addCmd)
+	cmd.AddCommand(buildOpenNotebookAddCmd())
+	cmd.AddCommand(buildOpenNotebookServeCmd())
 	cmd.AddCommand(buildMCPServeCmd())
 	return cmd
+}
+
+func buildOpenNotebookAddCmd() *cobra.Command {
+	var baseURL, name, tokenSecretRef string
+	addCmd := &cobra.Command{
+		Use:   "add-open-notebook",
+		Short: "Connect this Soulacy host to its local Open Notebook",
+		Long: `Register Soulacy's built-in Open Notebook MCP bridge.
+
+Open Notebook must run on the same machine as the Soulacy gateway. The URL is
+restricted to localhost/loopback so this command does not expose notebooks to
+the internet. Running the command again updates the existing registration.`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if isRemoteGateway() {
+				return fmt.Errorf("Open Notebook is a host-local integration; run this command on the machine that runs the Soulacy gateway")
+			}
+			u, err := opennotebookmcp.ValidateBaseURL(baseURL)
+			if err != nil {
+				return err
+			}
+			gatewayBinary, err := findSoulacyBinary()
+			if err != nil {
+				return err
+			}
+			ws, err := config.ResolveWorkspace()
+			if err != nil {
+				return fmt.Errorf("resolve workspace: %w", err)
+			}
+			doc, root, err := loadConfigDoc(ws.ConfigFile)
+			if err != nil {
+				return fmt.Errorf("read config: %w", err)
+			}
+			servers := ensureMapping(ensureMapping(root, "mcp"), "servers")
+			srv := ensureMapping(servers, name)
+			setScalar(srv, "transport", "stdio", 0)
+			setScalar(srv, "command", gatewayBinary, yaml.DoubleQuotedStyle)
+			setSequence(srv, "args", []string{"open-notebook-mcp", "--base-url", u.String()})
+			if tokenSecretRef != "" {
+				setStringMap(srv, "env_secret_refs", map[string]string{"OPEN_NOTEBOOK_TOKEN": tokenSecretRef})
+			}
+			if err := saveConfigDoc(ws.ConfigFile, doc); err != nil {
+				return fmt.Errorf("write config: %w", err)
+			}
+			fmt.Printf("✓ [%s] Connected MCP server %q to Open Notebook at %s\n", targetDescription(), name, u.String())
+			fmt.Println("  The gateway will connect it on config reload.")
+			return nil
+		},
+	}
+	addCmd.Flags().StringVar(&baseURL, "url", opennotebookmcp.DefaultBaseURL, "Local Open Notebook API URL")
+	addCmd.Flags().StringVar(&name, "name", "open-notebook", "MCP server ID")
+	addCmd.Flags().StringVar(&tokenSecretRef, "token-secret-ref", "", "Vault secret containing an optional Open Notebook bearer token")
+	return addCmd
+}
+
+func findSoulacyBinary() (string, error) {
+	if found, err := exec.LookPath("soulacy"); err == nil {
+		if absolute, err := filepath.Abs(found); err == nil {
+			return absolute, nil
+		}
+	}
+	self, err := os.Executable()
+	if err == nil {
+		candidate := filepath.Join(filepath.Dir(self), "soulacy")
+		if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("soulacy gateway binary was not found; install Soulacy before registering Open Notebook")
+}
+
+func buildOpenNotebookServeCmd() *cobra.Command {
+	var baseURL string
+	serveCmd := &cobra.Command{
+		Use:    "open-notebook-serve",
+		Short:  "Run the built-in Open Notebook MCP bridge",
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			srv, err := opennotebookmcp.New(baseURL, os.Getenv("OPEN_NOTEBOOK_TOKEN"), config.Version, nil)
+			if err != nil {
+				return err
+			}
+			return srv.Serve(cmd.Context(), os.Stdin, os.Stdout)
+		},
+	}
+	serveCmd.Flags().StringVar(&baseURL, "base-url", opennotebookmcp.DefaultBaseURL, "Local Open Notebook API URL")
+	return serveCmd
 }
 
 func setStringMap(parent *yaml.Node, key string, values map[string]string) {
