@@ -283,6 +283,11 @@ The compose file publishes `${SOULACY_PORT:-18789}` on the host — set
 `SOULACY_PORT` in `.env` to change it. Open
 [http://localhost:18789](http://localhost:18789) (or your chosen port).
 
+Agents that need authorized subscription content can use encrypted,
+explicitly granted [authenticated website connections](docs/agents/authenticated-connections.md).
+Capture works from the Website Access page without shell access, with a remote
+CLI capture flow available as a fallback.
+
 ### Running CLI commands against a container
 
 The image bundles the `sy` CLI. There's no SSH — use `docker exec`:

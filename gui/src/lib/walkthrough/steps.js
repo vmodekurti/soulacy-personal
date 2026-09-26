@@ -84,6 +84,10 @@ export const navTourCopy = {
     what: 'Reusable capability packs an agent can load, installed locally or pulled from a skill source.',
     when: 'Add a skill when several agents need the same know-how and you would rather not repeat it in each prompt.',
   },
+  websites: {
+    what: 'Encrypted website sign-ins that selected agents can use to read subscription and account-only pages.',
+    when: 'Add or refresh a sign-in here, then grant it to an agent in Studio without exposing cookies to the model.',
+  },
   mcp: {
     what: 'External tool servers. Anything you connect here appears in the Studio tool palette.',
     when: 'This is how an agent gets to act on the outside world beyond the built-in tools.',

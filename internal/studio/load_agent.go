@@ -44,6 +44,7 @@ func FromAgentDefinition(def agent.Definition) Draft {
 		Memory:       cloneMemoryPolicy(def.Memory),
 		ConfirmTools: append([]string(nil), def.ConfirmTools...),
 		Security:     cloneSecurityConfig(def.Security),
+		Connections:  append([]string(nil), def.Connections...),
 	}
 	if d.Name == "" {
 		d.Name = def.ID
