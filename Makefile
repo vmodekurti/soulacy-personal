@@ -1,10 +1,11 @@
 BINARY_GATEWAY := soulacy
 BINARY_CLI     := sy
+BINARY_OPEN_NOTEBOOK_MCP := open-notebook-mcp
 VERSION        ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS        := -ldflags "-X github.com/soulacy/soulacy/internal/config.Version=$(VERSION)"
 PLAYWRIGHT_RUNNER ?= $(shell if [ -e .cache ] && [ ! -d .cache ]; then echo tmp/playwright-runner; else echo .cache/playwright-runner; fi)
 
-.PHONY: all build build-gateway build-cli gui up install which test regression uat uat-public uat-full uat-credential docs-build docs-screenshots release-smoke production-parity channel-golden-smoke browser-mcp-smoke lint dev run-dev sdk-install tidy \
+.PHONY: all build build-gateway build-cli build-open-notebook-mcp install-open-notebook-mcp gui up install which test regression uat uat-public uat-full uat-credential docs-build docs-screenshots release-smoke production-parity channel-golden-smoke browser-mcp-smoke lint dev run-dev sdk-install tidy \
         docker-up docker-down docker-up-lite docker-build docker-push \
         release release-linux release-linux-amd64 release-linux-arm64 \
         release-darwin release-darwin-arm64 release-darwin-amd64 release-package release-create release-create-github \
@@ -58,6 +59,20 @@ build-gateway:
 build-cli:
 	@echo "→ Building CLI..."
 	CGO_ENABLED=1 go build $(LDFLAGS) -o bin/$(BINARY_CLI) ./cmd/sy
+
+## Build the optional Open Notebook MCP adapter. This binary is intentionally
+## excluded from `all`, `install`, release archives, and Soulacy deployments.
+build-open-notebook-mcp: deps
+	@echo "→ Building optional Open Notebook MCP adapter..."
+	CGO_ENABLED=0 go build $(LDFLAGS) -o bin/$(BINARY_OPEN_NOTEBOOK_MCP) ./cmd/open-notebook-mcp
+
+## Install only the optional adapter. Put it beside soulacy so a daemon with a
+## restricted PATH can still discover it after a reboot.
+install-open-notebook-mcp: build-open-notebook-mcp
+	@mkdir -p "$(BINDIR)"
+	@cp bin/$(BINARY_OPEN_NOTEBOOK_MCP) "$(BINDIR)/$(BINARY_OPEN_NOTEBOOK_MCP)"
+	@chmod 0755 "$(BINDIR)/$(BINARY_OPEN_NOTEBOOK_MCP)"
+	@echo "✓ Installed optional adapter to $(BINDIR)/$(BINARY_OPEN_NOTEBOOK_MCP)"
 
 ## Install both binaries to the directory that ALREADY wins on your PATH, so an
 ## update always replaces the copy that actually runs (this avoids the classic

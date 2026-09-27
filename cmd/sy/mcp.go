@@ -14,6 +14,7 @@ import (
 
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/mcpserver"
+	"github.com/soulacy/soulacy/internal/opennotebook"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -180,8 +181,74 @@ Register an HTTP MCP server on a managed Soulacy deployment without shell access
 	addCmd.Flags().StringVar(&pipSpec, "pip", "", "Optional pip package/spec to install into a persistent venv before registering")
 
 	cmd.AddCommand(addCmd)
+	cmd.AddCommand(buildOpenNotebookAddCmd())
 	cmd.AddCommand(buildMCPServeCmd())
 	return cmd
+}
+
+func buildOpenNotebookAddCmd() *cobra.Command {
+	var baseURL, name, tokenSecretRef, adapterCommand string
+	addCmd := &cobra.Command{
+		Use:   "add-open-notebook",
+		Short: "Connect this Soulacy host to its local Open Notebook",
+		Long: `Register the optional standalone Open Notebook MCP adapter.
+
+Open Notebook must run on the same machine as the Soulacy gateway. The URL is
+restricted to localhost/loopback so this command does not expose notebooks to
+the internet. Install open-notebook-mcp separately before running this command.
+Running the command again updates the existing registration.`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if isRemoteGateway() {
+				return fmt.Errorf("the Open Notebook integration is host-local; run this command on the machine that runs the Soulacy gateway")
+			}
+			u, err := opennotebook.ValidateBaseURL(baseURL)
+			if err != nil {
+				return err
+			}
+			if strings.TrimSpace(adapterCommand) == "" {
+				adapterCommand, err = opennotebook.FindExecutable()
+				if err != nil {
+					return err
+				}
+			} else if !filepath.IsAbs(adapterCommand) {
+				found, lookErr := exec.LookPath(adapterCommand)
+				if lookErr != nil {
+					return fmt.Errorf("locate Open Notebook MCP adapter %q: %w", adapterCommand, lookErr)
+				}
+				adapterCommand, err = filepath.Abs(found)
+				if err != nil {
+					return err
+				}
+			}
+			ws, err := config.ResolveWorkspace()
+			if err != nil {
+				return fmt.Errorf("resolve workspace: %w", err)
+			}
+			doc, root, err := loadConfigDoc(ws.ConfigFile)
+			if err != nil {
+				return fmt.Errorf("read config: %w", err)
+			}
+			servers := ensureMapping(ensureMapping(root, "mcp"), "servers")
+			srv := ensureMapping(servers, name)
+			setScalar(srv, "transport", "stdio", 0)
+			setScalar(srv, "command", adapterCommand, yaml.DoubleQuotedStyle)
+			setSequence(srv, "args", []string{"--base-url", u.String()})
+			if tokenSecretRef != "" {
+				setStringMap(srv, "env_secret_refs", map[string]string{"OPEN_NOTEBOOK_TOKEN": tokenSecretRef})
+			}
+			if err := saveConfigDoc(ws.ConfigFile, doc); err != nil {
+				return fmt.Errorf("write config: %w", err)
+			}
+			fmt.Printf("✓ [%s] Connected MCP server %q to Open Notebook at %s\n", targetDescription(), name, u.String())
+			fmt.Println("  The gateway will connect it on config reload.")
+			return nil
+		},
+	}
+	addCmd.Flags().StringVar(&baseURL, "url", opennotebook.DefaultBaseURL, "Local Open Notebook API URL")
+	addCmd.Flags().StringVar(&name, "name", "open-notebook", "MCP server ID")
+	addCmd.Flags().StringVar(&tokenSecretRef, "token-secret-ref", "", "Vault secret containing an optional Open Notebook bearer token")
+	addCmd.Flags().StringVar(&adapterCommand, "command", "", "Path to the standalone open-notebook-mcp executable")
+	return addCmd
 }
 
 func setStringMap(parent *yaml.Node, key string, values map[string]string) {

@@ -168,7 +168,7 @@ Browse installed Agent Skills (SKILL.md instruction packs), read their full inst
 
 ## MCP (ops)
 
-Manage MCP servers: **+ New Server** for manual stdio/HTTP specs (command, args, env, headers) with a connection test, or the **Glama** provisioner to import a server spec from a Glama URL.
+Manage MCP servers: connect a detected local **Open Notebook**, use **+ New Server** for manual stdio/HTTP specs (command, args, env, headers) with a connection test, or use the **Glama** provisioner to import a server spec from a Glama URL.
 
 **Try first:** expand an existing server row to see its tools and status.
 
