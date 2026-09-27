@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -73,6 +74,23 @@ func TestResolvePairBase(t *testing.T) {
 		pb, err := resolvePairBase(ctx, "", loopback, 18789, "", answers(), "")
 		if err != nil || pb.Reachable || pb.URL != loopback || pb.Hint == "" {
 			t.Fatalf("%+v %v", pb, err)
+		}
+	})
+	t.Run("a public https origin is the address even when the gateway cannot probe it (#222)", func(t *testing.T) {
+		// Behind Cloudflare the box cannot call its own public name; only the
+		// container's bridge address answers. The phone still gets the name.
+		pb, err := resolvePairBase(ctx, "", "https://soul.example.com", 18789, "", answers("http://172.18.0.4:18789"), "")
+		if err != nil || pb.URL != "https://soul.example.com" || pb.Reachable || !strings.Contains(pb.Hint, "could not reach https://soul.example.com itself") {
+			t.Fatalf("%+v %v", pb, err)
+		}
+		pb, _ = resolvePairBase(ctx, "", "https://soul.example.com", 18789, "", answers("https://soul.example.com"), "")
+		if pb.URL != "https://soul.example.com" || !pb.Reachable || pb.Hint != "" {
+			t.Fatalf("reachable public origin: %+v", pb)
+		}
+		// server.public_url that the box cannot call itself is still the address.
+		pb, _ = resolvePairBase(ctx, "https://soul.example.com", loopback, 18789, "", answers(), "")
+		if pb.URL != "https://soul.example.com" || pb.Reachable || pb.Hint == "" {
+			t.Fatalf("public_url unprobeable: %+v", pb)
 		}
 	})
 	t.Run("a non-loopback origin is a candidate", func(t *testing.T) {
