@@ -24,6 +24,86 @@ func TestValidateBaseURLLoopbackBoundary(t *testing.T) {
 	}
 }
 
+func TestValidateAudioConfiguration(t *testing.T) {
+	for _, raw := range []string{"https://mac.tailnet.ts.net:8443", "http://192.168.1.8:18791/media"} {
+		if _, err := ValidateAudioBaseURL(raw); err != nil {
+			t.Errorf("ValidateAudioBaseURL(%q): %v", raw, err)
+		}
+	}
+	for _, raw := range []string{"file:///tmp/audio", "https://user:pass@example.com", "https://example.com?token=secret"} {
+		if _, err := ValidateAudioBaseURL(raw); err == nil {
+			t.Errorf("ValidateAudioBaseURL(%q) unexpectedly succeeded", raw)
+		}
+	}
+	for _, address := range []string{"127.0.0.1:18791", "localhost:18791", "[::1]:18791"} {
+		if err := ValidateAudioListenAddress(address); err != nil {
+			t.Errorf("ValidateAudioListenAddress(%q): %v", address, err)
+		}
+	}
+	for _, address := range []string{"0.0.0.0:18791", ":18791", "192.168.1.8:18791", "bad"} {
+		if err := ValidateAudioListenAddress(address); err == nil {
+			t.Errorf("ValidateAudioListenAddress(%q) unexpectedly succeeded", address)
+		}
+	}
+}
+
+func TestPodcastAudioUsesClientFacingBaseURL(t *testing.T) {
+	srv, err := NewWithAudioBaseURL(DefaultBaseURL, "https://mac.tailnet.ts.net:8443/media", "", "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := srv.execute(context.Background(), "open_notebook_get_podcast_audio", map[string]any{"episode_id": "episode:abc"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(result, []byte(`"audio_url":"https://mac.tailnet.ts.net:8443/media/api/podcasts/episodes/episode:abc/audio"`)) {
+		t.Fatalf("result = %s", result)
+	}
+}
+
+func TestAudioHandlerOnlyProxiesPodcastAudio(t *testing.T) {
+	var gotMethod, gotRange, gotAuthorization string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotRange = r.Header.Get("Range")
+		gotAuthorization = r.Header.Get("Authorization")
+		if r.URL.Path != "/api/podcasts/episodes/episode:abc/audio" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "audio/mpeg")
+		w.Header().Set("Content-Range", "bytes 0-3/8")
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write([]byte("test"))
+	}))
+	defer api.Close()
+	srv, err := NewWithAudioBaseURL(api.URL, "https://mac.tailnet.ts.net:8443", "secret", "test", api.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/podcasts/episodes/episode:abc/audio", nil)
+	req.Header.Set("Range", "bytes=0-3")
+	rec := httptest.NewRecorder()
+	srv.AudioHandler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusPartialContent || rec.Body.String() != "test" {
+		t.Fatalf("response = %d %q", rec.Code, rec.Body.String())
+	}
+	if gotMethod != http.MethodGet || gotRange != "bytes=0-3" || gotAuthorization != "Bearer secret" {
+		t.Fatalf("upstream request = method %q range %q auth %q", gotMethod, gotRange, gotAuthorization)
+	}
+	if rec.Header().Get("Content-Type") != "audio/mpeg" || rec.Header().Get("Content-Range") != "bytes 0-3/8" {
+		t.Fatalf("headers = %#v", rec.Header())
+	}
+
+	for _, requestPath := range []string{"/health", "/api/notebooks", "/api/podcasts/episodes/episode:abc", "/api/podcasts/episodes/x/y/audio"} {
+		rec := httptest.NewRecorder()
+		srv.AudioHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, requestPath, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s status = %d, want 404", requestPath, rec.Code)
+		}
+	}
+}
+
 func TestMCPInitializeAndToolDiscovery(t *testing.T) {
 	srv, err := New(DefaultBaseURL, "", "v-test", nil)
 	if err != nil {

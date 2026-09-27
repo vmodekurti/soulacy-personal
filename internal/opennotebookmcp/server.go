@@ -38,26 +38,63 @@ var supportedProtocols = map[string]bool{
 
 // Server is an MCP stdio adapter for Open Notebook.
 type Server struct {
-	baseURL *url.URL
-	token   string
-	client  *http.Client
-	version string
-	writeMu sync.Mutex
+	baseURL      *url.URL
+	audioBaseURL *url.URL
+	token        string
+	client       *http.Client
+	audioClient  *http.Client
+	version      string
+	writeMu      sync.Mutex
 }
 
 // New validates the local boundary and constructs a server.
 func New(baseURL, token, version string, client *http.Client) (*Server, error) {
+	return NewWithAudioBaseURL(baseURL, "", token, version, client)
+}
+
+// NewWithAudioBaseURL constructs a server whose podcast links can point at a
+// client-reachable, media-only proxy while all Open Notebook API calls remain
+// on loopback.
+func NewWithAudioBaseURL(baseURL, audioBaseURL, token, version string, client *http.Client) (*Server, error) {
 	u, err := opennotebook.ValidateBaseURL(baseURL)
+	if err != nil {
+		return nil, err
+	}
+	audioURL, err := ValidateAudioBaseURL(audioBaseURL)
 	if err != nil {
 		return nil, err
 	}
 	if client == nil {
 		client = &http.Client{Timeout: defaultRequestTimout}
 	}
+	audioClient := *client
+	audioClient.Timeout = 0
+	audioClient.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
 	if strings.TrimSpace(version) == "" {
 		version = "dev"
 	}
-	return &Server{baseURL: u, token: strings.TrimSpace(token), client: client, version: version}, nil
+	return &Server{baseURL: u, audioBaseURL: audioURL, token: strings.TrimSpace(token), client: client, audioClient: &audioClient, version: version}, nil
+}
+
+// ValidateAudioBaseURL validates the URL placed in podcast tool responses.
+// Unlike the API URL, this URL is deliberately allowed to be remote because
+// it is consumed by phones and other clients rather than by the adapter.
+func ValidateAudioBaseURL(raw string) (*url.URL, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return nil, fmt.Errorf("audio base URL must be an absolute http:// or https:// URL")
+	}
+	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return nil, fmt.Errorf("audio base URL must not contain credentials, a query, or a fragment")
+	}
+	u.Path = strings.TrimRight(u.Path, "/")
+	return u, nil
 }
 
 // ValidateBaseURL remains exported here for adapter callers while the shared
@@ -292,8 +329,13 @@ func (s *Server) execute(ctx context.Context, name string, a map[string]any) (js
 			return nil, fmt.Errorf("episode_id is required")
 		}
 		u := *s.baseURL
+		note := "This URL is reachable only on the Soulacy host."
+		if s.audioBaseURL != nil {
+			u = *s.audioBaseURL
+			note = "This URL uses the configured client-facing podcast audio endpoint."
+		}
 		u.Path = joinURLPath(u.Path, "/api/podcasts/episodes/"+pathEscape(id)+"/audio")
-		return json.Marshal(map[string]any{"episode_id": id, "audio_url": u.String(), "note": "This URL is reachable only on the Soulacy host."})
+		return json.Marshal(map[string]any{"episode_id": id, "audio_url": u.String(), "note": note})
 	default:
 		return nil, fmt.Errorf("unknown Open Notebook MCP tool %q", name)
 	}

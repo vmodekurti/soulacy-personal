@@ -42,6 +42,7 @@ import (
 	"github.com/soulacy/soulacy/internal/mcp"
 	"github.com/soulacy/soulacy/internal/netguard"
 	"github.com/soulacy/soulacy/internal/opennotebook"
+	"github.com/soulacy/soulacy/internal/opennotebookmcp"
 	"github.com/soulacy/soulacy/internal/pkgregistry"
 	"github.com/soulacy/soulacy/internal/platform"
 	"github.com/soulacy/soulacy/internal/plugininstall"
@@ -3100,6 +3101,7 @@ const openNotebookMCPID = "open-notebook"
 // optional standalone adapter is installed, and whether it is registered.
 func (s *Server) handleOpenNotebookStatus(c *fiber.Ctx) error {
 	baseURL := strings.TrimSpace(c.Query("base_url", opennotebook.DefaultBaseURL))
+	audioBaseURL, audioListen := "", ""
 	u, err := opennotebook.ValidateBaseURL(baseURL)
 	if err != nil {
 		return s.errMsg(c, fiber.StatusBadRequest, err.Error())
@@ -3109,9 +3111,11 @@ func (s *Server) handleOpenNotebookStatus(c *fiber.Ctx) error {
 		for _, srv := range s.mcp.ServersSnapshot() {
 			if srv.ID == openNotebookMCPID {
 				registered, connected, detail = true, srv.Connected, srv.Detail
-				if configured := openNotebookURLFromArgs(srv.Args); configured != "" {
+				if configured := openNotebookArgFromArgs(srv.Args, "--base-url"); configured != "" {
 					u, _ = opennotebook.ValidateBaseURL(configured)
 				}
+				audioBaseURL = openNotebookArgFromArgs(srv.Args, "--audio-base-url")
+				audioListen = openNotebookArgFromArgs(srv.Args, "--audio-listen")
 				break
 			}
 		}
@@ -3133,12 +3137,16 @@ func (s *Server) handleOpenNotebookStatus(c *fiber.Ctx) error {
 		"adapter_path":       adapterPath,
 		"adapter_detail":     adapterDetail,
 		"same_host_required": true,
+		"audio_base_url":     audioBaseURL,
+		"audio_listen":       audioListen,
 	})
 }
 
 type openNotebookInstallBody struct {
-	BaseURL string `json:"base_url"`
-	Command string `json:"command"`
+	BaseURL      string `json:"base_url"`
+	Command      string `json:"command"`
+	AudioBaseURL string `json:"audio_base_url"`
+	AudioListen  string `json:"audio_listen"`
 }
 
 // handleInstallOpenNotebook persists and hot-connects the optional standalone
@@ -3157,6 +3165,19 @@ func (s *Server) handleInstallOpenNotebook(c *fiber.Ctx) error {
 	if err != nil {
 		return s.errMsg(c, fiber.StatusBadRequest, err.Error())
 	}
+	audioURL, err := opennotebookmcp.ValidateAudioBaseURL(request.AudioBaseURL)
+	if err != nil {
+		return s.errMsg(c, fiber.StatusBadRequest, err.Error())
+	}
+	audioListen := strings.TrimSpace(request.AudioListen)
+	if audioListen != "" {
+		if audioURL == nil {
+			return s.errMsg(c, fiber.StatusBadRequest, "audio_listen requires audio_base_url")
+		}
+		if err := opennotebookmcp.ValidateAudioListenAddress(audioListen); err != nil {
+			return s.errMsg(c, fiber.StatusBadRequest, err.Error())
+		}
+	}
 	adapterCommand := strings.TrimSpace(request.Command)
 	if adapterCommand == "" {
 		adapterCommand, err = opennotebook.FindExecutable()
@@ -3170,11 +3191,18 @@ func (s *Server) handleInstallOpenNotebook(c *fiber.Ctx) error {
 		}
 		adapterCommand, _ = filepath.Abs(adapterCommand)
 	}
+	adapterArgs := []string{"--base-url", u.String()}
+	if audioURL != nil {
+		adapterArgs = append(adapterArgs, "--audio-base-url", audioURL.String())
+	}
+	if audioListen != "" {
+		adapterArgs = append(adapterArgs, "--audio-listen", audioListen)
+	}
 	body := mcpServerBody{
 		ID:        openNotebookMCPID,
 		Transport: "stdio",
 		Command:   adapterCommand,
-		Args:      []string{"--base-url", u.String()},
+		Args:      adapterArgs,
 	}
 	raw, err := readRawConfig(s.cfgPath)
 	if err != nil {
@@ -3203,13 +3231,14 @@ func (s *Server) handleInstallOpenNotebook(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"ok": true, "created": !existed, "id": openNotebookMCPID,
 		"base_url": u.String(), "available": available, "message": message,
+		"audio_base_url": request.AudioBaseURL, "audio_listen": audioListen,
 		"connect_error": connectErr, "restart_needed": false,
 	})
 }
 
-func openNotebookURLFromArgs(args []string) string {
+func openNotebookArgFromArgs(args []string, name string) string {
 	for i := 0; i+1 < len(args); i++ {
-		if args[i] == "--base-url" {
+		if args[i] == name {
 			return strings.TrimSpace(args[i+1])
 		}
 	}

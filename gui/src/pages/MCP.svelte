@@ -20,6 +20,8 @@
   let openNotebookLoading = true
   let openNotebookInstalling = false
   let openNotebookError = ''
+  let openNotebookAudioBaseURL = ''
+  let openNotebookAudioListen = '127.0.0.1:18791'
 
   // Soulacy can also be the MCP server. The endpoint is hosted by the gateway,
   // so managed deployments need no sidecar process or shell session.
@@ -95,6 +97,8 @@
     openNotebookError = ''
     try {
       openNotebookStatus = await api.mcp.openNotebookStatus()
+      openNotebookAudioBaseURL = openNotebookStatus.audio_base_url || openNotebookAudioBaseURL
+      openNotebookAudioListen = openNotebookStatus.audio_listen || openNotebookAudioListen
     } catch (e) {
       openNotebookStatus = null
       openNotebookError = e.message
@@ -108,7 +112,11 @@
     openNotebookError = ''
     error = ''; info = ''
     try {
-      const res = await api.mcp.installOpenNotebook({ base_url: openNotebookStatus?.base_url })
+      const res = await api.mcp.installOpenNotebook({
+        base_url: openNotebookStatus?.base_url,
+        audio_base_url: openNotebookAudioBaseURL.trim(),
+        audio_listen: openNotebookAudioBaseURL.trim() ? openNotebookAudioListen.trim() : '',
+      })
       info = res.message || 'Open Notebook connected.'
       await Promise.all([loadOpenNotebookStatus(), load()])
     } catch (e) {
@@ -452,6 +460,7 @@
         <div><small>Open Notebook</small><strong class:good={openNotebookStatus.available}>{openNotebookStatus.available ? 'Healthy' : openNotebookStatus.health_detail}</strong></div>
         <div><small>Standalone adapter</small><strong class:good={openNotebookStatus.adapter_available}>{openNotebookStatus.adapter_available ? 'Installed' : 'Not installed'}</strong></div>
         <div><small>Soulacy connection</small><strong class:good={openNotebookStatus.registered && openNotebookStatus.connected}>{openNotebookStatus.registered ? (openNotebookStatus.connected ? 'Connected' : 'Registered') : 'Not registered'}</strong></div>
+        <div><small>Podcast links</small><strong class:good={openNotebookStatus.audio_base_url}>{openNotebookStatus.audio_base_url || 'Host only'}</strong></div>
       </div>
       {#if !openNotebookStatus.available}
         <p class="notebook-help">Start Open Notebook on this same machine, with its API listening on <code>127.0.0.1:5055</code>, then refresh this check. The adapter only accepts loopback addresses.</p>
@@ -459,14 +468,28 @@
         <p class="notebook-help">Install the optional adapter separately on the Soulacy host: <code>make install-open-notebook-mcp</code> from the source checkout, or <code>go install github.com/soulacy/soulacy/cmd/open-notebook-mcp@latest</code>. Put it on the gateway PATH or beside the <code>soulacy</code> executable, then check again.</p>
       {:else if !openNotebookStatus.registered || !openNotebookStatus.connected}
         <p class="notebook-help">Open Notebook and its standalone adapter are ready. Connect them to give Soulacy agents access to the tools.</p>
+      {:else if openNotebookStatus.audio_base_url}
+        <p class="notebook-help">Podcast links use the configured private media endpoint. The adapter proxies only generated episode audio; the rest of Open Notebook remains local.</p>
       {:else}
-        <p class="notebook-help">Agents can now use tools named <code>mcp__open_notebook__open_notebook_…</code>. No Open Notebook port is exposed outside this host.</p>
+        <p class="notebook-help">Agents can use Open Notebook, but podcast links are host-only. Add a Tailscale HTTPS URL below so phones on your tailnet can play them.</p>
       {/if}
     {/if}
 
+    <div class="notebook-audio-config">
+      <label>
+        <span>Client-facing podcast URL</span>
+        <input type="url" bind:value={openNotebookAudioBaseURL} placeholder="https://your-mac.your-tailnet.ts.net:8443" />
+      </label>
+      <label>
+        <span>Local media proxy</span>
+        <input type="text" bind:value={openNotebookAudioListen} placeholder="127.0.0.1:18791" />
+      </label>
+    </div>
+    <p class="notebook-help">Use a tailnet-only Tailscale Serve URL. Keep the listener on loopback; the adapter rejects LAN and wildcard binds.</p>
+
     <div class="notebook-actions">
       <button class="btn-secondary" on:click={loadOpenNotebookStatus} disabled={openNotebookLoading}>↺ Check again</button>
-      <button class="btn-primary" on:click={installOpenNotebook} disabled={openNotebookInstalling || !openNotebookStatus?.available || !openNotebookStatus?.adapter_available || (openNotebookStatus?.registered && openNotebookStatus?.connected)}>
+      <button class="btn-primary" on:click={installOpenNotebook} disabled={openNotebookInstalling || !openNotebookStatus?.available || !openNotebookStatus?.adapter_available}>
         {openNotebookInstalling ? 'Connecting…' : (openNotebookStatus?.registered ? 'Reconnect' : 'Connect Open Notebook')}
       </button>
     </div>
@@ -973,11 +996,14 @@
   .notebook-flow { display: flex; gap: .45rem; align-items: center; flex-wrap: wrap; color: #aeb4d1; font-size: .74rem; }
   .notebook-flow span { background: rgba(8,10,24,.55); border: 1px solid #2a3850; border-radius: 999px; padding: .32rem .6rem; }
   .notebook-flow b { color: #58caaa; }
-  .notebook-details { display: grid; grid-template-columns: 1.2fr .8fr .8fr; gap: .6rem; }
+  .notebook-details { display: grid; grid-template-columns: 1.2fr .8fr .8fr 1.2fr; gap: .6rem; }
   .notebook-details > div { min-width: 0; display: flex; flex-direction: column; gap: .28rem; background: rgba(8,10,24,.5); border: 1px solid #25344a; border-radius: 8px; padding: .65rem .75rem; }
   .notebook-details small { color: #687293; font-size: .65rem; text-transform: uppercase; letter-spacing: .06em; }
   .notebook-details code, .notebook-details strong { color: #c6cade; font: .74rem monospace; overflow-wrap: anywhere; }
   .notebook-help code, .notebook-cli code { color: #7ce0c0; background: #14242b; border-radius: 4px; padding: .08rem .3rem; }
+  .notebook-audio-config { display: grid; grid-template-columns: 1.4fr .8fr; gap: .6rem; }
+  .notebook-audio-config label { display: flex; flex-direction: column; gap: .3rem; color: #8f96b8; font-size: .7rem; }
+  .notebook-audio-config input { min-width: 0; background: #0e1020; border: 1px solid #2a2f4a; border-radius: 7px; color: #e8eaf6; font: .78rem monospace; padding: .5rem .65rem; }
   .notebook-actions { display: flex; gap: .5rem; }
 
   .install-card {
@@ -1031,6 +1057,7 @@
   @media (max-width: 820px) {
     .notebook-heading { flex-direction: column; }
     .notebook-details { grid-template-columns: 1fr; }
+    .notebook-audio-config { grid-template-columns: 1fr; }
     .install-heading { flex-direction: column; }
     .install-input-row, .guide-command { grid-template-columns: 1fr; }
     .remote-grid { grid-template-columns: 1fr; }

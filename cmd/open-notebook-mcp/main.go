@@ -7,8 +7,11 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/opennotebook"
@@ -17,13 +20,32 @@ import (
 
 func main() {
 	baseURL := flag.String("base-url", envDefault("OPEN_NOTEBOOK_URL", opennotebook.DefaultBaseURL), "local Open Notebook API URL")
+	audioBaseURL := flag.String("audio-base-url", envDefault("OPEN_NOTEBOOK_AUDIO_URL", ""), "client-facing podcast audio base URL")
+	audioListen := flag.String("audio-listen", envDefault("OPEN_NOTEBOOK_AUDIO_LISTEN", ""), "loopback address for the podcast audio proxy")
 	showVersion := flag.Bool("version", false, "print the version")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println(config.Version)
 		return
 	}
-	srv, err := opennotebookmcp.New(*baseURL, os.Getenv("OPEN_NOTEBOOK_TOKEN"), config.Version, nil)
+	srv, err := opennotebookmcp.NewWithAudioBaseURL(*baseURL, *audioBaseURL, os.Getenv("OPEN_NOTEBOOK_TOKEN"), config.Version, nil)
+	var listener net.Listener
+	if err == nil && strings.TrimSpace(*audioListen) != "" {
+		if strings.TrimSpace(*audioBaseURL) == "" {
+			err = fmt.Errorf("--audio-listen requires --audio-base-url")
+		} else if err = opennotebookmcp.ValidateAudioListenAddress(*audioListen); err == nil {
+			listener, err = net.Listen("tcp", *audioListen)
+		}
+		if err == nil {
+			server := &http.Server{Handler: srv.AudioHandler(), ReadHeaderTimeout: 10 * time.Second}
+			go func() {
+				if serveErr := server.Serve(listener); serveErr != nil && serveErr != http.ErrServerClosed {
+					fmt.Fprintf(os.Stderr, "open-notebook-mcp audio proxy: %v\n", serveErr)
+				}
+			}()
+			defer server.Close()
+		}
+	}
 	if err == nil {
 		err = srv.Serve(context.Background(), os.Stdin, os.Stdout)
 	}

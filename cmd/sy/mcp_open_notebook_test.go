@@ -22,7 +22,11 @@ func TestAddOpenNotebookCommandWritesStandaloneAdapter(t *testing.T) {
 	gatewayURL = ""
 
 	cmd := buildOpenNotebookAddCmd()
-	cmd.SetArgs([]string{"--url", "http://localhost:5055"})
+	cmd.SetArgs([]string{
+		"--url", "http://localhost:5055",
+		"--audio-base-url", "https://mac.tailnet.ts.net:8443",
+		"--audio-listen", "127.0.0.1:18791",
+	})
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +35,7 @@ func TestAddOpenNotebookCommandWritesStandaloneAdapter(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	for _, want := range []string{"open-notebook:", adapter, "http://localhost:5055"} {
+	for _, want := range []string{"open-notebook:", adapter, "http://localhost:5055", "--audio-base-url", "https://mac.tailnet.ts.net:8443", "--audio-listen", "127.0.0.1:18791"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("config missing %q:\n%s", want, text)
 		}
