@@ -435,12 +435,12 @@ func TestAllToolSchemasBuiltinsGate(t *testing.T) {
 	}
 }
 
-// TestAllToolSchemasSystemToolsRequireDoubleOptInAndHTTP pins SEC-3 gating.
+// TestAllToolSchemasSystemToolsRequireDoubleOptInAndTrustedChannel pins SEC-3 gating.
 // The PRIVILEGED (SYSTEM-partition) tools — shell_exec, write_file — require
 // BOTH the server permit (allowSystemAgents) AND the agent "system" capability,
-// and are never offered off the http channel. The SAFE read-only tools —
-// read_file — are offered on http regardless of capability.
-func TestAllToolSchemasSystemToolsRequireDoubleOptInAndHTTP(t *testing.T) {
+// and are never offered off the http channel. SAFE tools are available on http
+// and trusted internal scheduler/peer runs, but not shared external channels.
+func TestAllToolSchemasSystemToolsRequireDoubleOptInAndTrustedChannel(t *testing.T) {
 	cases := []struct {
 		name              string
 		allowSystemAgents []string
@@ -474,7 +474,15 @@ func TestAllToolSchemasSystemToolsRequireDoubleOptInAndHTTP(t *testing.T) {
 			wantSafe:          true,
 		},
 		{
-			name:              "bot channel blocks everything system",
+			name:              "trusted internal channel exposes safe only",
+			allowSystemAgents: []string{"*"},
+			defSystemTools:    true,
+			channel:           "internal",
+			wantPrivileged:    false,
+			wantSafe:          true,
+		},
+		{
+			name:              "shared external channel blocks everything system",
 			allowSystemAgents: []string{"*"},
 			defSystemTools:    true,
 			channel:           "telegram",
@@ -502,6 +510,52 @@ func TestAllToolSchemasSystemToolsRequireDoubleOptInAndHTTP(t *testing.T) {
 					names["read_file"], tc.wantSafe, sortedSchemaNames(names))
 			}
 		})
+	}
+}
+
+func TestSystemToolAllowedOnChannel(t *testing.T) {
+	for _, tc := range []struct {
+		tool, channel string
+		want          bool
+	}{
+		{"read_file", "http", true},
+		{"shell_exec", "http", true},
+		{"read_file", "internal", true},
+		{"http_request", "internal", true},
+		{"shell_exec", "internal", false},
+		{"read_file", "telegram", false},
+		{"http_request", "slack", false},
+		{"read_file", "", false},
+	} {
+		if got := systemToolAllowedOnChannel(tc.tool, tc.channel); got != tc.want {
+			t.Errorf("systemToolAllowedOnChannel(%q, %q) = %v, want %v", tc.tool, tc.channel, got, tc.want)
+		}
+	}
+}
+
+func TestInternalRunGetsExplicitlyAllowedSafeBuiltins(t *testing.T) {
+	allowed := []string{"read_file", "http_request", "channel.send"}
+	e := &Engine{}
+	e.builtins = e.buildBuiltins()
+	def := &agent.Definition{ID: "inbox-triage", Builtins: &allowed}
+
+	internal := toolSchemaNameSet(e.allToolSchemas(def, "internal"))
+	for _, name := range []string{"read_file", "http_request", "channel.send"} {
+		if !internal[name] {
+			t.Errorf("internal run missing explicitly allowed tool %q; schemas=%v", name, sortedSchemaNames(internal))
+		}
+	}
+	for _, name := range []string{"list_dir", "shell_exec", "write_file"} {
+		if internal[name] {
+			t.Errorf("internal run unexpectedly received %q; schemas=%v", name, sortedSchemaNames(internal))
+		}
+	}
+
+	external := toolSchemaNameSet(e.allToolSchemas(def, "telegram"))
+	for _, name := range []string{"read_file", "http_request"} {
+		if external[name] {
+			t.Errorf("external run unexpectedly received host tool %q; schemas=%v", name, sortedSchemaNames(external))
+		}
 	}
 }
 
@@ -1118,7 +1172,7 @@ func TestHandlePeerAgentDelegation(t *testing.T) {
 		SystemPrompt: "Answer research questions.",
 		LLM:          agent.LLMConfig{Provider: "test", Model: "fake-model"},
 		MaxTurns:     2,
-		Builtins:     strListPtr(),
+		Builtins:     strListPtr("read_file", "http_request"),
 	}
 	for _, d := range []*agent.Definition{callerDef, peerDef} {
 		if err := loader.Upsert(agentDir, d); err != nil {
@@ -1161,6 +1215,17 @@ func TestHandlePeerAgentDelegation(t *testing.T) {
 	reqs := provider.requestsSnapshot()
 	if len(reqs) != 3 {
 		t.Fatalf("expected 3 provider calls (caller turn1, peer, caller turn2), got %d", len(reqs))
+	}
+	peerTools := toolSchemaNameSet(reqs[1].Tools)
+	for _, name := range []string{"read_file", "http_request"} {
+		if !peerTools[name] {
+			t.Errorf("internal peer request missing configured safe tool %q; tools=%v", name, sortedSchemaNames(peerTools))
+		}
+	}
+	for _, name := range []string{"shell_exec", "write_file"} {
+		if peerTools[name] {
+			t.Errorf("internal peer request unexpectedly received privileged tool %q; tools=%v", name, sortedSchemaNames(peerTools))
+		}
 	}
 	// Caller's synthesis turn must see the peer's answer as a tool result.
 	if !chatMessagesContain(reqs[2].Messages, "tool", "Paris") {

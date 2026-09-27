@@ -476,8 +476,14 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	chatMsgs := e.buildContext(def, sess, msg)
 
 	// Build tool schemas for this agent (Python tools + opt-in Go built-ins).
-	// Pass the inbound channel so system tools are gated to HTTP-only.
+	// Pass the inbound channel so host-facing tools are gated by their channel
+	// partition. Keep the names for the run trace: this distinguishes a model
+	// that declined an offered tool from a runtime that withheld it.
 	tools := e.allToolSchemasForContext(ctx, def, msg.Channel)
+	toolNames := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		toolNames = append(toolNames, tool.Name)
+	}
 	packageInstallReq, hasURLPackageRequest := parseURLPackageInstallRequest(flattenParts(msg.Parts))
 	hasURLPackageRequest = hasURLPackageRequest && def.ID == SystemAgentID
 	forceMCPInspection := hasURLPackageRequest && packageInstallReq.Kind == "mcp" &&
@@ -712,7 +718,13 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 
 		e.sink.Emit(message.Event{
 			Type: "llm.call", AgentID: msg.AgentID, SessionID: msg.SessionID,
-			Payload:   map[string]any{"provider": def.LLM.Provider, "model": model, "turn": turn + 1},
+			Payload: map[string]any{
+				"provider":   def.LLM.Provider,
+				"model":      model,
+				"turn":       turn + 1,
+				"tool_count": len(toolNames),
+				"tool_names": append([]string(nil), toolNames...),
+			},
 			Timestamp: time.Now().UTC(),
 		})
 		usedCalls++
