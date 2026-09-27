@@ -15,6 +15,7 @@ import (
 	"github.com/soulacy/soulacy/internal/config"
 	"github.com/soulacy/soulacy/internal/mcpserver"
 	"github.com/soulacy/soulacy/internal/opennotebook"
+	"github.com/soulacy/soulacy/internal/opennotebookmcp"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -187,7 +188,7 @@ Register an HTTP MCP server on a managed Soulacy deployment without shell access
 }
 
 func buildOpenNotebookAddCmd() *cobra.Command {
-	var baseURL, name, tokenSecretRef, adapterCommand string
+	var baseURL, audioBaseURL, audioListen, name, tokenSecretRef, adapterCommand string
 	addCmd := &cobra.Command{
 		Use:   "add-open-notebook",
 		Short: "Connect this Soulacy host to its local Open Notebook",
@@ -196,7 +197,11 @@ func buildOpenNotebookAddCmd() *cobra.Command {
 Open Notebook must run on the same machine as the Soulacy gateway. The URL is
 restricted to localhost/loopback so this command does not expose notebooks to
 the internet. Install open-notebook-mcp separately before running this command.
-Running the command again updates the existing registration.`,
+Running the command again updates the existing registration.
+
+To return podcast links that a phone on your tailnet can open, configure a
+client-facing Tailscale Serve URL and a loopback media-only listener:
+  sy mcp add-open-notebook --audio-base-url https://your-mac.your-tailnet.ts.net:8443 --audio-listen 127.0.0.1:18791`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if isRemoteGateway() {
 				return fmt.Errorf("the Open Notebook integration is host-local; run this command on the machine that runs the Soulacy gateway")
@@ -204,6 +209,18 @@ Running the command again updates the existing registration.`,
 			u, err := opennotebook.ValidateBaseURL(baseURL)
 			if err != nil {
 				return err
+			}
+			audioURL, err := opennotebookmcp.ValidateAudioBaseURL(audioBaseURL)
+			if err != nil {
+				return err
+			}
+			if strings.TrimSpace(audioListen) != "" {
+				if audioURL == nil {
+					return fmt.Errorf("--audio-listen requires --audio-base-url")
+				}
+				if err := opennotebookmcp.ValidateAudioListenAddress(audioListen); err != nil {
+					return err
+				}
 			}
 			if strings.TrimSpace(adapterCommand) == "" {
 				adapterCommand, err = opennotebook.FindExecutable()
@@ -232,7 +249,14 @@ Running the command again updates the existing registration.`,
 			srv := ensureMapping(servers, name)
 			setScalar(srv, "transport", "stdio", 0)
 			setScalar(srv, "command", adapterCommand, yaml.DoubleQuotedStyle)
-			setSequence(srv, "args", []string{"--base-url", u.String()})
+			adapterArgs := []string{"--base-url", u.String()}
+			if audioURL != nil {
+				adapterArgs = append(adapterArgs, "--audio-base-url", audioURL.String())
+			}
+			if strings.TrimSpace(audioListen) != "" {
+				adapterArgs = append(adapterArgs, "--audio-listen", strings.TrimSpace(audioListen))
+			}
+			setSequence(srv, "args", adapterArgs)
 			if tokenSecretRef != "" {
 				setStringMap(srv, "env_secret_refs", map[string]string{"OPEN_NOTEBOOK_TOKEN": tokenSecretRef})
 			}
@@ -245,6 +269,8 @@ Running the command again updates the existing registration.`,
 		},
 	}
 	addCmd.Flags().StringVar(&baseURL, "url", opennotebook.DefaultBaseURL, "Local Open Notebook API URL")
+	addCmd.Flags().StringVar(&audioBaseURL, "audio-base-url", "", "Client-facing podcast audio base URL")
+	addCmd.Flags().StringVar(&audioListen, "audio-listen", "", "Loopback address for the media-only audio proxy")
 	addCmd.Flags().StringVar(&name, "name", "open-notebook", "MCP server ID")
 	addCmd.Flags().StringVar(&tokenSecretRef, "token-secret-ref", "", "Vault secret containing an optional Open Notebook bearer token")
 	addCmd.Flags().StringVar(&adapterCommand, "command", "", "Path to the standalone open-notebook-mcp executable")

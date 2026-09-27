@@ -31,7 +31,7 @@ func toolSpecs() []map[string]any {
 		tool("open_notebook_get_podcast_job", "Get podcast generation job status.", map[string]any{"job_id": stringProp("Podcast job ID.")}, []string{"job_id"}),
 		tool("open_notebook_list_podcast_episodes", "List generated podcast episodes.", nil, nil),
 		tool("open_notebook_get_podcast_episode", "Get podcast episode metadata, transcript, outline, status, and error details.", map[string]any{"episode_id": stringProp("Episode ID.")}, []string{"episode_id"}),
-		tool("open_notebook_get_podcast_audio", "Return the host-local audio download URL for a podcast episode.", map[string]any{"episode_id": stringProp("Episode ID.")}, []string{"episode_id"}),
+		tool("open_notebook_get_podcast_audio", "Return the configured audio download URL for a podcast episode.", map[string]any{"episode_id": stringProp("Episode ID.")}, []string{"episode_id"}),
 	}
 }
 

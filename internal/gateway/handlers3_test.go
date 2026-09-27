@@ -465,7 +465,7 @@ func TestInstallOpenNotebookWritesStandaloneAdapterConfig(t *testing.T) {
 	if err := os.WriteFile(adapter, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	status, body := gatewayJSON(t, s, http.MethodPost, "/api/v1/mcp/open-notebook/install", "secret", fmt.Sprintf(`{"command":%q}`, adapter))
+	status, body := gatewayJSON(t, s, http.MethodPost, "/api/v1/mcp/open-notebook/install", "secret", fmt.Sprintf(`{"command":%q,"audio_base_url":"https://mac.tailnet.ts.net:8443","audio_listen":"127.0.0.1:18791"}`, adapter))
 	if status != http.StatusOK || body["ok"] != true {
 		t.Fatalf("status=%d body=%v", status, body)
 	}
@@ -474,7 +474,7 @@ func TestInstallOpenNotebookWritesStandaloneAdapterConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	for _, want := range []string{"open-notebook:", adapter, "http://127.0.0.1:5055"} {
+	for _, want := range []string{"open-notebook:", adapter, "http://127.0.0.1:5055", "--audio-base-url", "https://mac.tailnet.ts.net:8443", "--audio-listen", "127.0.0.1:18791"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("config missing %q:\n%s", want, text)
 		}

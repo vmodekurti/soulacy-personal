@@ -46,6 +46,31 @@ sy mcp add-open-notebook --url http://127.0.0.1:5056
 
 The command stores an absolute path to `open-notebook-mcp`. Soulacy starts that executable as a standard stdio MCP process when it connects and after gateway restarts. The adapter remains an independently installed optional component.
 
+## Play podcasts on an iPhone
+
+By default, `open_notebook_get_podcast_audio` returns a loopback URL because the Open Notebook API is private. For a phone connected to the same Tailscale tailnet, run the adapter's media-only proxy on loopback and publish that listener with Tailscale Serve:
+
+```bash
+tailscale serve --bg --https=8443 http://127.0.0.1:18791
+
+sy mcp add-open-notebook \
+  --audio-base-url https://your-mac.your-tailnet.ts.net:8443 \
+  --audio-listen 127.0.0.1:18791
+```
+
+Use the MagicDNS hostname shown by `tailscale status`. The same values can be saved from the Open Notebook card on the **MCP Servers** page.
+
+This creates two separate paths:
+
+```text
+Soulacy → 127.0.0.1:5055                 full Open Notebook API
+iPhone  → Tailscale HTTPS → 127.0.0.1:18791  podcast audio only
+```
+
+The media proxy accepts only `GET` and `HEAD` requests for generated podcast audio and forwards byte-range headers for playback and seeking. It returns 404 for notebooks, sources, generation, health, and all other API routes. The listener rejects wildcard, LAN, and public bind addresses.
+
+Keep the iPhone connected to Tailscale. Use `tailscale serve`, which is tailnet-only; do not use `tailscale funnel`, which publishes the endpoint to the public internet. Open Notebook itself can remain bound to `127.0.0.1:5055`.
+
 ## Give an agent access
 
 The server ID is `open-notebook`. Add it to an agent's explicit MCP allowlist:
@@ -78,7 +103,7 @@ A typical run is:
 4. Poll `open_notebook_get_source_status` when asynchronous processing is enabled.
 5. Search or ask questions. Call `open_notebook_list_models` first when model IDs are unknown.
 6. Call the episode-profile and speaker-profile list tools, then `open_notebook_generate_podcast`.
-7. Poll `open_notebook_get_podcast_job` and read the finished episode metadata or its host-local audio URL.
+7. Poll `open_notebook_get_podcast_job` and read the finished episode metadata or its configured audio URL.
 
 For public webpages, `open_notebook_add_url_source` can ask Open Notebook to fetch the page directly. The adapter blocks private, loopback, link-local, and cloud-metadata source URLs.
 
@@ -89,4 +114,5 @@ For public webpages, `open_notebook_add_url_source` can ask Open Notebook to fet
 - **Registered but disconnected:** use **Check again**, then inspect the `open-notebook` row on the MCP page. Reconnect from the card after updating either component.
 - **Ask requires model IDs:** call `open_notebook_list_models` and use IDs whose type is `language`.
 - **Podcast requires profile IDs:** call `open_notebook_list_episode_profiles` and `open_notebook_list_speaker_profiles` first.
+- **Podcast opens `127.0.0.1` on a phone:** configure `--audio-base-url` and `--audio-listen`, then point tailnet-only Tailscale Serve at the listener as shown above.
 - **Authenticated page fetch fails:** verify the domain grant on the authenticated website connection. Send retrieved text to Open Notebook rather than giving it cookies.
