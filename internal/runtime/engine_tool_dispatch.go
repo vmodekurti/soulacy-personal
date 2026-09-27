@@ -249,6 +249,9 @@ print(result if isinstance(result, str) else json.dumps(result))
 		if b.Name != call.Name {
 			continue
 		}
+		if inbound, ok := ctx.Value(inboundMsgKey{}).(message.Message); ok && !systemToolAllowedOnChannel(b.Name, inbound.Channel) {
+			return "", fmt.Errorf("tool %q is not permitted on channel %q", call.Name, inbound.Channel)
+		}
 
 		// Deterministic path-based guardrail for privileged system tools
 		guardrailConfirmed := false
@@ -566,17 +569,35 @@ func (e *Engine) runPythonToolOnce(tctx, auditCtx context.Context, def *agent.De
 	return strings.TrimSpace(stdout.String()), nil
 }
 
+// systemToolAllowedOnChannel is the runtime boundary for host-facing tools.
+// Internal messages originate from Soulacy's scheduler or an authorized peer
+// call, so they may use the SAFE partition. Privileged tools remain local-web
+// only even when an internal caller has the system capability.
+func systemToolAllowedOnChannel(toolName, channel string) bool {
+	switch strings.TrimSpace(channel) {
+	case "http":
+		return true
+	case "internal":
+		return !isPrivilegedSystemTool(toolName)
+	default:
+		return false
+	}
+}
+
 // allToolSchemas combines the agent's Python tools with the engine's built-in
 // Go tools. The skill built-ins (read_skill, read_skill_file) are only offered
 // when the agent has opted into skills (def.Skills non-empty), so agents that
 // don't use skills aren't tempted to call them.
 //
 // channel is the inbound message's Channel field ("http", "telegram", etc.).
-// System tools (shell_exec, run_script, …) are only offered when ALL three
-// conditions hold:
+// Privileged system tools (shell_exec, run_script, …) are only offered when
+// all three conditions hold:
 //  1. agent ID in runtime.allow_system_agents  (server-level permit)
 //  2. def.SystemTools = true             (per-agent opt-in)
 //  3. channel == "http"                  (local web GUI only — never on bot channels)
+//
+// Safe host tools may also be offered to trusted internal scheduler and peer
+// invocations. Shared external channels receive neither partition.
 func (e *Engine) allToolSchemas(def *agent.Definition, channel string) []llm.ToolSchema {
 	return e.allToolSchemasForContext(context.Background(), def, channel)
 }
@@ -691,11 +712,12 @@ func (e *Engine) allToolSchemasForContext(ctx context.Context, def *agent.Defini
 		}
 	}
 
-	// System tools (SEC-3 partition). Bot channels (telegram, discord, slack,
-	// whatsapp) are ALWAYS excluded — only the local HTTP/web channel may use
-	// OS-level built-ins, and this cannot be overridden by agent config alone.
+	// System tools (SEC-3 partition). Shared external channels (telegram,
+	// discord, slack, whatsapp) are always excluded. The local HTTP/web channel
+	// may use both partitions, while trusted internal scheduler and peer-agent
+	// runs may use only the SAFE partition.
 	//
-	// Within the http channel, systemToolsFor applies the SEC-3 gating:
+	// systemToolsFor applies the SEC-3 gating:
 	//   - SAFE (read-only) built-ins — read_file, list_dir, find_files,
 	//     fetch_url, http_request, env_get, sys_info — are always offered.
 	//   - SYSTEM (privileged) built-ins — shell_exec, run_script,
@@ -712,24 +734,22 @@ func (e *Engine) allToolSchemasForContext(ctx context.Context, def *agent.Defini
 	// NOT suppressed by builtins: [] — the explicit privileged opt-in wins.
 	// A named allowlist (`builtins: [read_file]`) admits only those names.
 	suppressSafe := def.Builtins != nil && len(*def.Builtins) == 0
-	if channel == "http" {
-		for _, st := range e.systemToolsFor(def) {
-			if !callerAllowsTool(ctx, st.Name) {
+	for _, st := range e.systemToolsFor(def) {
+		if !callerAllowsTool(ctx, st.Name) || !systemToolAllowedOnChannel(st.Name, channel) {
+			continue
+		}
+		priv := isPrivilegedSystemTool(st.Name)
+		if !priv {
+			// SAFE tool: respect builtins: [] and any named allowlist.
+			if suppressSafe || (!wildcardBuiltins && !allow[st.Name]) {
 				continue
 			}
-			priv := isPrivilegedSystemTool(st.Name)
-			if !priv {
-				// SAFE tool: respect builtins: [] and any named allowlist.
-				if suppressSafe || (!wildcardBuiltins && !allow[st.Name]) {
-					continue
-				}
-			}
-			schemas = append(schemas, llm.ToolSchema{
-				Name:        st.Name,
-				Description: st.Description,
-				Parameters:  st.Parameters,
-			})
 		}
+		schemas = append(schemas, llm.ToolSchema{
+			Name:        st.Name,
+			Description: st.Description,
+			Parameters:  st.Parameters,
+		})
 	}
 
 	// Peer agents exposed as tools (namespaced as agent__<id>). Built
