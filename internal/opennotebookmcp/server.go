@@ -283,6 +283,20 @@ func (s *Server) execute(ctx context.Context, name string, a map[string]any) (js
 				return nil, err
 			}
 		}
+		// Open Notebook's profile-list endpoints expose record IDs, but its
+		// podcast generation endpoint looks profiles up by name. Accept either
+		// form at the MCP boundary so agents can safely pass the IDs returned by
+		// the discovery tools.
+		episodeProfile, err := s.resolvePodcastProfileName(ctx, "/api/episode-profiles", "episode_profile", stringValue(body["episode_profile"]))
+		if err != nil {
+			return nil, err
+		}
+		speakerProfile, err := s.resolvePodcastProfileName(ctx, "/api/speaker-profiles", "speaker_profile", stringValue(body["speaker_profile"]))
+		if err != nil {
+			return nil, err
+		}
+		body["episode_profile"] = episodeProfile
+		body["speaker_profile"] = speakerProfile
 	case "open_notebook_get_podcast_job":
 		method, endpoint = http.MethodGet, "/api/podcasts/jobs/"+pathEscape(requiredString(a, "job_id"))
 	case "open_notebook_list_podcast_episodes":
@@ -304,6 +318,31 @@ func (s *Server) execute(ctx context.Context, name string, a map[string]any) (js
 		return nil, fmt.Errorf("a required identifier is missing")
 	}
 	return s.request(ctx, method, endpoint, q, body)
+}
+
+func (s *Server) resolvePodcastProfileName(ctx context.Context, endpoint, recordPrefix, ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	if !strings.HasPrefix(ref, recordPrefix+":") {
+		return ref, nil
+	}
+
+	data, err := s.request(ctx, http.MethodGet, endpoint, nil, nil)
+	if err != nil {
+		return "", fmt.Errorf("resolve Open Notebook %s %q: %w", recordPrefix, ref, err)
+	}
+	var profiles []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(data, &profiles); err != nil {
+		return "", fmt.Errorf("resolve Open Notebook %s %q: invalid profile list", recordPrefix, ref)
+	}
+	for _, profile := range profiles {
+		if profile.ID == ref && strings.TrimSpace(profile.Name) != "" {
+			return profile.Name, nil
+		}
+	}
+	return "", fmt.Errorf("%s %q was not found in Open Notebook", recordPrefix, ref)
 }
 
 func (s *Server) request(ctx context.Context, method, endpoint string, q url.Values, body map[string]any) (json.RawMessage, error) {

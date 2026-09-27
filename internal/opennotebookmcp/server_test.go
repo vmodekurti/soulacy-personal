@@ -109,6 +109,50 @@ func TestRepresentativeOpenNotebookCalls(t *testing.T) {
 	}
 }
 
+func TestGeneratePodcastResolvesProfileIDsToNames(t *testing.T) {
+	var submitted map[string]any
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/episode-profiles":
+			_, _ = w.Write([]byte(`[{"id":"episode_profile:episode-1","name":"Tech Discussion"}]`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/speaker-profiles":
+			_, _ = w.Write([]byte(`[{"id":"speaker_profile:speaker-1","name":"Solo Expert"}]`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/podcasts/generate":
+			if err := json.NewDecoder(r.Body).Decode(&submitted); err != nil {
+				t.Errorf("decode podcast request: %v", err)
+			}
+			_, _ = w.Write([]byte(`{"job_id":"command:1","status":"submitted"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer api.Close()
+
+	srv, err := New(api.URL, "", "test", api.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := srv.execute(context.Background(), "open_notebook_generate_podcast", map[string]any{
+		"episode_profile": "episode_profile:episode-1",
+		"speaker_profile": "speaker_profile:speaker-1",
+		"episode_name":    "MCP Test",
+		"content":         "Source content",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(result, []byte(`"job_id":"command:1"`)) {
+		t.Fatalf("result = %s", result)
+	}
+	if got := stringValue(submitted["episode_profile"]); got != "Tech Discussion" {
+		t.Fatalf("episode_profile = %q, want %q", got, "Tech Discussion")
+	}
+	if got := stringValue(submitted["speaker_profile"]); got != "Solo Expert" {
+		t.Fatalf("speaker_profile = %q, want %q", got, "Solo Expert")
+	}
+}
+
 func TestAPIFailureIsBoundedAndSanitized(t *testing.T) {
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnprocessableEntity)
