@@ -2783,6 +2783,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#play-podcasts-on-an-iphone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Play podcasts on an iPhone
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#give-an-agent-access" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5013,6 +5024,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#play-podcasts-on-an-iphone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Play podcasts on an iPhone
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#give-an-agent-access" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5144,16 +5166,31 @@
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>sy<span class="w"> </span>mcp<span class="w"> </span>add-open-notebook<span class="w"> </span>--url<span class="w"> </span>http://127.0.0.1:5056
 </span></code></pre></div>
 <p>The command stores an absolute path to <code>open-notebook-mcp</code>. Soulacy starts that executable as a standard stdio MCP process when it connects and after gateway restarts. The adapter remains an independently installed optional component.</p>
+<h2 id="play-podcasts-on-an-iphone">Play podcasts on an iPhone<a class="headerlink" href="#play-podcasts-on-an-iphone" title="Permanent link">&para;</a></h2>
+<p>By default, <code>open_notebook_get_podcast_audio</code> returns a loopback URL because the Open Notebook API is private. For a phone connected to the same Tailscale tailnet, run the adapter's media-only proxy on loopback and publish that listener with Tailscale Serve:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>tailscale<span class="w"> </span>serve<span class="w"> </span>--bg<span class="w"> </span>--https<span class="o">=</span><span class="m">8443</span><span class="w"> </span>http://127.0.0.1:18791
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>sy<span class="w"> </span>mcp<span class="w"> </span>add-open-notebook<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span>--audio-base-url<span class="w"> </span>https://your-mac.your-tailnet.ts.net:8443<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">  </span>--audio-listen<span class="w"> </span><span class="m">127</span>.0.0.1:18791
+</span></code></pre></div>
+<p>Use the MagicDNS hostname shown by <code>tailscale status</code>. The same values can be saved from the Open Notebook card on the <strong>MCP Servers</strong> page.</p>
+<p>This creates two separate paths:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Soulacy → 127.0.0.1:5055                 full Open Notebook API
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>iPhone  → Tailscale HTTPS → 127.0.0.1:18791  podcast audio only
+</span></code></pre></div>
+<p>The media proxy accepts only <code>GET</code> and <code>HEAD</code> requests for generated podcast audio and forwards byte-range headers for playback and seeking. It returns 404 for notebooks, sources, generation, health, and all other API routes. The listener rejects wildcard, LAN, and public bind addresses.</p>
+<p>Keep the iPhone connected to Tailscale. Use <code>tailscale serve</code>, which is tailnet-only; do not use <code>tailscale funnel</code>, which publishes the endpoint to the public internet. Open Notebook itself can remain bound to <code>127.0.0.1:5055</code>.</p>
 <h2 id="give-an-agent-access">Give an agent access<a class="headerlink" href="#give-an-agent-access" title="Permanent link">&para;</a></h2>
 <p>The server ID is <code>open-notebook</code>. Add it to an agent's explicit MCP allowlist:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">mcp_servers</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">open-notebook</span><span class="p p-Indicator">]</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">mcp_servers</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">open-notebook</span><span class="p p-Indicator">]</span>
 </span></code></pre></div>
 <p>For tighter access, allow individual tools instead:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">mcp_tools</span><span class="p">:</span>
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mcp__open_notebook__open_notebook_list_notebooks</span>
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mcp__open_notebook__open_notebook_add_text_source</span>
-</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mcp__open_notebook__open_notebook_search</span>
-</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mcp__open_notebook__open_notebook_generate_podcast</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">mcp_tools</span><span class="p">:</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mcp__open_notebook__open_notebook_list_notebooks</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mcp__open_notebook__open_notebook_add_text_source</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mcp__open_notebook__open_notebook_search</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mcp__open_notebook__open_notebook_generate_podcast</span>
 </span></code></pre></div>
 <p>The first release does not expose delete operations.</p>
 <h2 id="authenticated-website-to-podcast">Authenticated website to podcast<a class="headerlink" href="#authenticated-website-to-podcast" title="Permanent link">&para;</a></h2>
@@ -5166,7 +5203,7 @@
 <li>Poll <code>open_notebook_get_source_status</code> when asynchronous processing is enabled.</li>
 <li>Search or ask questions. Call <code>open_notebook_list_models</code> first when model IDs are unknown.</li>
 <li>Call the episode-profile and speaker-profile list tools, then <code>open_notebook_generate_podcast</code>.</li>
-<li>Poll <code>open_notebook_get_podcast_job</code> and read the finished episode metadata or its host-local audio URL.</li>
+<li>Poll <code>open_notebook_get_podcast_job</code> and read the finished episode metadata or its configured audio URL.</li>
 </ol>
 <p>For public webpages, <code>open_notebook_add_url_source</code> can ask Open Notebook to fetch the page directly. The adapter blocks private, loopback, link-local, and cloud-metadata source URLs.</p>
 <h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
@@ -5176,6 +5213,7 @@
 <li><strong>Registered but disconnected:</strong> use <strong>Check again</strong>, then inspect the <code>open-notebook</code> row on the MCP page. Reconnect from the card after updating either component.</li>
 <li><strong>Ask requires model IDs:</strong> call <code>open_notebook_list_models</code> and use IDs whose type is <code>language</code>.</li>
 <li><strong>Podcast requires profile IDs:</strong> call <code>open_notebook_list_episode_profiles</code> and <code>open_notebook_list_speaker_profiles</code> first.</li>
+<li><strong>Podcast opens <code>127.0.0.1</code> on a phone:</strong> configure <code>--audio-base-url</code> and <code>--audio-listen</code>, then point tailnet-only Tailscale Serve at the listener as shown above.</li>
 <li><strong>Authenticated page fetch fails:</strong> verify the domain grant on the authenticated website connection. Send retrieved text to Open Notebook rather than giving it cookies.</li>
 </ul>
 
