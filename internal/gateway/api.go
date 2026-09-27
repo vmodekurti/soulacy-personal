@@ -41,7 +41,7 @@ import (
 	"github.com/soulacy/soulacy/internal/llm"
 	"github.com/soulacy/soulacy/internal/mcp"
 	"github.com/soulacy/soulacy/internal/netguard"
-	"github.com/soulacy/soulacy/internal/opennotebookmcp"
+	"github.com/soulacy/soulacy/internal/opennotebook"
 	"github.com/soulacy/soulacy/internal/pkgregistry"
 	"github.com/soulacy/soulacy/internal/platform"
 	"github.com/soulacy/soulacy/internal/plugininstall"
@@ -3096,11 +3096,11 @@ func (s *Server) handleListMCP(c *fiber.Ctx) error {
 const openNotebookMCPID = "open-notebook"
 
 // handleOpenNotebookStatus reports the two independent parts of the local
-// integration: whether the Open Notebook REST API is reachable and whether
-// its built-in MCP bridge is registered with Soulacy.
+// integration: whether the Open Notebook REST API is reachable, whether the
+// optional standalone adapter is installed, and whether it is registered.
 func (s *Server) handleOpenNotebookStatus(c *fiber.Ctx) error {
-	baseURL := strings.TrimSpace(c.Query("base_url", opennotebookmcp.DefaultBaseURL))
-	u, err := opennotebookmcp.ValidateBaseURL(baseURL)
+	baseURL := strings.TrimSpace(c.Query("base_url", opennotebook.DefaultBaseURL))
+	u, err := opennotebook.ValidateBaseURL(baseURL)
 	if err != nil {
 		return s.errMsg(c, fiber.StatusBadRequest, err.Error())
 	}
@@ -3110,13 +3110,18 @@ func (s *Server) handleOpenNotebookStatus(c *fiber.Ctx) error {
 			if srv.ID == openNotebookMCPID {
 				registered, connected, detail = true, srv.Connected, srv.Detail
 				if configured := openNotebookURLFromArgs(srv.Args); configured != "" {
-					u, _ = opennotebookmcp.ValidateBaseURL(configured)
+					u, _ = opennotebook.ValidateBaseURL(configured)
 				}
 				break
 			}
 		}
 	}
 	available, healthDetail := probeOpenNotebook(c.UserContext(), u.String(), s.httpRequestTimeout())
+	adapterPath, adapterErr := opennotebook.FindExecutable()
+	adapterDetail := ""
+	if adapterErr != nil {
+		adapterDetail = adapterErr.Error()
+	}
 	return c.JSON(fiber.Map{
 		"base_url":           u.String(),
 		"available":          available,
@@ -3124,17 +3129,20 @@ func (s *Server) handleOpenNotebookStatus(c *fiber.Ctx) error {
 		"registered":         registered,
 		"connected":          connected,
 		"connection_detail":  detail,
+		"adapter_available":  adapterErr == nil,
+		"adapter_path":       adapterPath,
+		"adapter_detail":     adapterDetail,
 		"same_host_required": true,
 	})
 }
 
 type openNotebookInstallBody struct {
 	BaseURL string `json:"base_url"`
+	Command string `json:"command"`
 }
 
-// handleInstallOpenNotebook persists and hot-connects the built-in bridge.
-// os.Executable gives the child an absolute, restart-safe command without any
-// dependency on PATH, npm, Python, or an interactive shell.
+// handleInstallOpenNotebook persists and hot-connects the optional standalone
+// adapter. Soulacy owns only its registration, not its installation or release.
 func (s *Server) handleInstallOpenNotebook(c *fiber.Ctx) error {
 	if s.cfgPath == "" {
 		return s.errMsg(c, fiber.StatusServiceUnavailable, "config file path unknown — cannot persist")
@@ -3145,19 +3153,28 @@ func (s *Server) handleInstallOpenNotebook(c *fiber.Ctx) error {
 			return s.errJSON(c, fiber.StatusBadRequest, err)
 		}
 	}
-	u, err := opennotebookmcp.ValidateBaseURL(request.BaseURL)
+	u, err := opennotebook.ValidateBaseURL(request.BaseURL)
 	if err != nil {
 		return s.errMsg(c, fiber.StatusBadRequest, err.Error())
 	}
-	executable, err := os.Executable()
-	if err != nil {
-		return s.errMsg(c, fiber.StatusInternalServerError, "could not locate the Soulacy gateway binary")
+	adapterCommand := strings.TrimSpace(request.Command)
+	if adapterCommand == "" {
+		adapterCommand, err = opennotebook.FindExecutable()
+		if err != nil {
+			return s.errMsg(c, fiber.StatusPreconditionFailed, err.Error())
+		}
+	} else if !filepath.IsAbs(adapterCommand) {
+		adapterCommand, err = exec.LookPath(adapterCommand)
+		if err != nil {
+			return s.errMsg(c, fiber.StatusPreconditionFailed, "could not locate the standalone Open Notebook MCP adapter")
+		}
+		adapterCommand, _ = filepath.Abs(adapterCommand)
 	}
 	body := mcpServerBody{
 		ID:        openNotebookMCPID,
 		Transport: "stdio",
-		Command:   executable,
-		Args:      []string{"open-notebook-mcp", "--base-url", u.String()},
+		Command:   adapterCommand,
+		Args:      []string{"--base-url", u.String()},
 	}
 	raw, err := readRawConfig(s.cfgPath)
 	if err != nil {

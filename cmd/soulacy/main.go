@@ -16,7 +16,6 @@ import (
 	"github.com/soulacy/soulacy/internal/app"
 	"github.com/soulacy/soulacy/internal/buildtool"
 	"github.com/soulacy/soulacy/internal/config"
-	"github.com/soulacy/soulacy/internal/opennotebookmcp"
 	"github.com/soulacy/soulacy/internal/sandbox"
 )
 
@@ -67,17 +66,6 @@ func main() {
 		return
 	}
 
-	// `soulacy open-notebook-mcp` is the built-in local bridge used by the
-	// gateway's MCP client. It starts before config loading because it is a
-	// standalone stdio protocol process, not another gateway instance.
-	if len(os.Args) > 1 && os.Args[1] == "open-notebook-mcp" {
-		if err := runOpenNotebookMCP(os.Args[2:]); err != nil {
-			fmt.Fprintf(os.Stderr, "soulacy open-notebook-mcp: %v\n", err)
-			os.Exit(1)
-		}
-		return
-	}
-
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "soulacy: %v\n", err)
 		os.Exit(1)
@@ -95,7 +83,6 @@ USAGE
   soulacy serve               start the gateway explicitly
   soulacy build [flags]       build a custom-flavored binary with extra drivers
   soulacy registry [args]     run the reference package registry
-  soulacy open-notebook-mcp   run the local Open Notebook MCP bridge (stdio)
   soulacy --help              show this message
   soulacy --version           print the version string
 
@@ -111,26 +98,6 @@ CLI COMPANION
 VERSION
   %s
 `, config.Version)
-}
-
-func runOpenNotebookMCP(args []string) error {
-	fs := flag.NewFlagSet("open-notebook-mcp", flag.ContinueOnError)
-	baseURL := fs.String("base-url", envDefault("OPEN_NOTEBOOK_URL", opennotebookmcp.DefaultBaseURL), "local Open Notebook API URL")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	srv, err := opennotebookmcp.New(*baseURL, os.Getenv("OPEN_NOTEBOOK_TOKEN"), config.Version, nil)
-	if err != nil {
-		return err
-	}
-	return srv.Serve(context.Background(), os.Stdin, os.Stdout)
-}
-
-func envDefault(name, fallback string) string {
-	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
-		return value
-	}
-	return fallback
 }
 
 // runBuild parses `soulacy build` flags and delegates to internal/buildtool.

@@ -431,6 +431,12 @@ func TestGatewayHandleTestMCPServer_HTTPInvalidURL(t *testing.T) {
 }
 
 func TestOpenNotebookStatusProbesLoopbackAPI(t *testing.T) {
+	binDir := t.TempDir()
+	adapter := filepath.Join(binDir, "open-notebook-mcp")
+	if err := os.WriteFile(adapter, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
 	openNotebook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/health" {
 			t.Errorf("path = %q", r.URL.Path)
@@ -443,19 +449,23 @@ func TestOpenNotebookStatusProbesLoopbackAPI(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("status=%d body=%v", status, body)
 	}
-	if body["available"] != true || body["same_host_required"] != true {
+	if body["available"] != true || body["adapter_available"] != true || body["adapter_path"] != adapter || body["same_host_required"] != true {
 		t.Fatalf("body=%v", body)
 	}
 }
 
-func TestInstallOpenNotebookWritesBuiltInBridgeConfig(t *testing.T) {
+func TestInstallOpenNotebookWritesStandaloneAdapterConfig(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(cfgPath, []byte("schema_version: 1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	s := newTestGatewayWithCfgPath(t, "secret", cfgPath)
 	s.mcp = nil // Persist only; do not spawn the Go test binary as an MCP child.
-	status, body := gatewayJSON(t, s, http.MethodPost, "/api/v1/mcp/open-notebook/install", "secret", `{}`)
+	adapter := filepath.Join(t.TempDir(), "open-notebook-mcp")
+	if err := os.WriteFile(adapter, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	status, body := gatewayJSON(t, s, http.MethodPost, "/api/v1/mcp/open-notebook/install", "secret", fmt.Sprintf(`{"command":%q}`, adapter))
 	if status != http.StatusOK || body["ok"] != true {
 		t.Fatalf("status=%d body=%v", status, body)
 	}
@@ -464,10 +474,24 @@ func TestInstallOpenNotebookWritesBuiltInBridgeConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	for _, want := range []string{"open-notebook:", "open-notebook-mcp", "http://127.0.0.1:5055"} {
+	for _, want := range []string{"open-notebook:", adapter, "http://127.0.0.1:5055"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("config missing %q:\n%s", want, text)
 		}
+	}
+}
+
+func TestInstallOpenNotebookRequiresStandaloneAdapter(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("schema_version: 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", t.TempDir())
+	s := newTestGatewayWithCfgPath(t, "secret", cfgPath)
+	s.mcp = nil
+	status, body := gatewayJSON(t, s, http.MethodPost, "/api/v1/mcp/open-notebook/install", "secret", `{}`)
+	if status != http.StatusPreconditionFailed || !strings.Contains(fmt.Sprint(body["error"]), "optional standalone adapter") {
+		t.Fatalf("status=%d body=%v", status, body)
 	}
 }
 

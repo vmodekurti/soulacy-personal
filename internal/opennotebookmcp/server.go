@@ -20,10 +20,11 @@ import (
 	"time"
 
 	"github.com/soulacy/soulacy/internal/netguard"
+	"github.com/soulacy/soulacy/internal/opennotebook"
 )
 
 const (
-	DefaultBaseURL       = "http://127.0.0.1:5055"
+	DefaultBaseURL       = opennotebook.DefaultBaseURL
 	defaultProtocol      = "2025-11-25"
 	maxRequestBytes      = 1 << 20
 	maxResponseBytes     = 8 << 20
@@ -46,7 +47,7 @@ type Server struct {
 
 // New validates the local boundary and constructs a server.
 func New(baseURL, token, version string, client *http.Client) (*Server, error) {
-	u, err := ValidateBaseURL(baseURL)
+	u, err := opennotebook.ValidateBaseURL(baseURL)
 	if err != nil {
 		return nil, err
 	}
@@ -59,27 +60,9 @@ func New(baseURL, token, version string, client *http.Client) (*Server, error) {
 	return &Server{baseURL: u, token: strings.TrimSpace(token), client: client, version: version}, nil
 }
 
-// ValidateBaseURL accepts only a root HTTP(S) URL on a loopback host.
-func ValidateBaseURL(raw string) (*url.URL, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		raw = DefaultBaseURL
-	}
-	u, err := url.Parse(raw)
-	if err != nil || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") {
-		return nil, fmt.Errorf("the Open Notebook URL must be a valid http:// or https:// URL")
-	}
-	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return nil, fmt.Errorf("the Open Notebook URL must not contain credentials, query parameters, or a fragment")
-	}
-	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
-	ip := net.ParseIP(host)
-	if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
-		return nil, fmt.Errorf("the Open Notebook URL must use localhost or a loopback IP address")
-	}
-	u.Path = strings.TrimRight(u.Path, "/")
-	return u, nil
-}
+// ValidateBaseURL remains exported here for adapter callers while the shared
+// connection policy lives outside the MCP server implementation.
+var ValidateBaseURL = opennotebook.ValidateBaseURL
 
 type rpcRequest struct {
 	JSONRPC string          `json:"jsonrpc"`

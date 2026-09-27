@@ -14,8 +14,8 @@
   let restartNeeded = false
   let restarting = false
 
-  // First-party local Open Notebook integration. Reachability and MCP
-  // registration are separate so the page can explain exactly what remains.
+  // Optional local Open Notebook integration. API reachability, standalone
+  // adapter availability, and MCP registration are reported independently.
   let openNotebookStatus = null
   let openNotebookLoading = true
   let openNotebookInstalling = false
@@ -450,12 +450,15 @@
       <div class="notebook-details">
         <div><small>Local API</small><code>{openNotebookStatus.base_url}</code></div>
         <div><small>Open Notebook</small><strong class:good={openNotebookStatus.available}>{openNotebookStatus.available ? 'Healthy' : openNotebookStatus.health_detail}</strong></div>
-        <div><small>Soulacy bridge</small><strong class:good={openNotebookStatus.registered && openNotebookStatus.connected}>{openNotebookStatus.registered ? (openNotebookStatus.connected ? 'Connected' : 'Registered') : 'Not registered'}</strong></div>
+        <div><small>Standalone adapter</small><strong class:good={openNotebookStatus.adapter_available}>{openNotebookStatus.adapter_available ? 'Installed' : 'Not installed'}</strong></div>
+        <div><small>Soulacy connection</small><strong class:good={openNotebookStatus.registered && openNotebookStatus.connected}>{openNotebookStatus.registered ? (openNotebookStatus.connected ? 'Connected' : 'Registered') : 'Not registered'}</strong></div>
       </div>
       {#if !openNotebookStatus.available}
         <p class="notebook-help">Start Open Notebook on this same machine, with its API listening on <code>127.0.0.1:5055</code>, then refresh this check. The adapter only accepts loopback addresses.</p>
+      {:else if !openNotebookStatus.adapter_available}
+        <p class="notebook-help">Install the optional adapter separately on the Soulacy host: <code>make install-open-notebook-mcp</code> from the source checkout, or <code>go install github.com/soulacy/soulacy/cmd/open-notebook-mcp@latest</code>. Put it on the gateway PATH or beside the <code>soulacy</code> executable, then check again.</p>
       {:else if !openNotebookStatus.registered || !openNotebookStatus.connected}
-        <p class="notebook-help">Open Notebook is healthy. Connect the built-in bridge to give Soulacy agents its tools.</p>
+        <p class="notebook-help">Open Notebook and its standalone adapter are ready. Connect them to give Soulacy agents access to the tools.</p>
       {:else}
         <p class="notebook-help">Agents can now use tools named <code>mcp__open_notebook__open_notebook_…</code>. No Open Notebook port is exposed outside this host.</p>
       {/if}
@@ -463,7 +466,7 @@
 
     <div class="notebook-actions">
       <button class="btn-secondary" on:click={loadOpenNotebookStatus} disabled={openNotebookLoading}>↺ Check again</button>
-      <button class="btn-primary" on:click={installOpenNotebook} disabled={openNotebookInstalling || !openNotebookStatus?.available || (openNotebookStatus?.registered && openNotebookStatus?.connected)}>
+      <button class="btn-primary" on:click={installOpenNotebook} disabled={openNotebookInstalling || !openNotebookStatus?.available || !openNotebookStatus?.adapter_available || (openNotebookStatus?.registered && openNotebookStatus?.connected)}>
         {openNotebookInstalling ? 'Connecting…' : (openNotebookStatus?.registered ? 'Reconnect' : 'Connect Open Notebook')}
       </button>
     </div>

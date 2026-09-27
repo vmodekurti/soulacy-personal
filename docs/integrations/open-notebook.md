@@ -12,11 +12,25 @@ iPhone / Chat / Schedule
  Open Notebook API on 127.0.0.1:5055
 ```
 
-The built-in adapter rejects non-loopback Open Notebook URLs. You can reach Soulacy from another device through your normal private-network setup, while Open Notebook's API remains bound to the Mac.
+The optional standalone adapter rejects non-loopback Open Notebook URLs. It is installed and upgraded separately from Soulacy, and it does not need to be included in a Soulacy deployment. You can reach Soulacy from another device through your normal private-network setup, while Open Notebook's API remains bound to the Mac.
 
 ## Connect it
 
-Open **MCP Servers** in the Soulacy GUI. The Open Notebook card checks `http://127.0.0.1:5055` and shows whether the API and MCP bridge are ready. When Open Notebook is healthy, click **Connect Open Notebook**.
+First install the standalone adapter on the machine that runs the Soulacy gateway. From this repository:
+
+```bash
+make install-open-notebook-mcp
+```
+
+You can also install it directly with Go:
+
+```bash
+go install github.com/soulacy/soulacy/cmd/open-notebook-mcp@latest
+```
+
+Make the resulting executable available on the gateway's `PATH`, or place it beside the `soulacy` executable. The normal `make install`, installer, container image, and Soulacy release archives do not include it.
+
+Then open **MCP Servers** in the Soulacy GUI. The Open Notebook card checks `http://127.0.0.1:5055` and reports the API, standalone adapter, and Soulacy connection independently. When both local components are healthy, click **Connect Open Notebook**.
 
 The CLI performs the same registration:
 
@@ -30,7 +44,7 @@ Use a different loopback port when needed:
 sy mcp add-open-notebook --url http://127.0.0.1:5056
 ```
 
-The command stores an absolute path to the installed `soulacy` binary and runs its embedded adapter. It does not install a Python or Node package and does not require a persistent shell.
+The command stores an absolute path to `open-notebook-mcp`. Soulacy starts that executable as a standard stdio MCP process when it connects and after gateway restarts. The adapter remains an independently installed optional component.
 
 ## Give an agent access
 
@@ -71,7 +85,8 @@ For public webpages, `open_notebook_add_url_source` can ask Open Notebook to fet
 ## Troubleshooting
 
 - **Open Notebook not detected:** confirm its health endpoint responds at `http://127.0.0.1:5055/health` on the Soulacy machine.
-- **Registered but disconnected:** use **Check again**, then inspect the `open-notebook` row on the MCP page. Reconnect from the card after updating Soulacy.
+- **Adapter not installed:** install `open-notebook-mcp` separately and place it on the gateway `PATH` or beside the `soulacy` executable.
+- **Registered but disconnected:** use **Check again**, then inspect the `open-notebook` row on the MCP page. Reconnect from the card after updating either component.
 - **Ask requires model IDs:** call `open_notebook_list_models` and use IDs whose type is `language`.
 - **Podcast requires profile IDs:** call `open_notebook_list_episode_profiles` and `open_notebook_list_speaker_profiles` first.
 - **Authenticated page fetch fails:** verify the domain grant on the authenticated website connection. Send retrieved text to Open Notebook rather than giving it cookies.

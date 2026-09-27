@@ -207,7 +207,7 @@ a Playwright MCP sidecar and exposes navigation/click/type/snapshot tools to
 agents. See [Browser Automation](browser-automation.md).
 
 For local research, the MCP page also detects and connects **Open Notebook**
-without installing a separate adapter package. See [Open Notebook](../integrations/open-notebook.md)
+through its optional standalone adapter. See [Open Notebook](../integrations/open-notebook.md)
 for setup and the authenticated-website-to-podcast workflow.
 
 ## Peer-Agent Tools
