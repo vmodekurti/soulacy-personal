@@ -21,6 +21,9 @@
   import { api, createEventSocket } from '../lib/api.js'
   import { classifyRequest } from '../lib/intent.js'
   import { parseMarkdown, richRenderer } from '../lib/markdown.js'
+  import RunActivity from '../lib/RunActivity.svelte'
+  import Presentation from '../lib/Presentation.svelte'
+  import { isRunEvent } from '../lib/runevents.js'
   import { genieAsk, genieConversation } from '../lib/stores.js'
 
   // The app routes on the URL hash; there is no navigate helper to import.
@@ -261,6 +264,11 @@
   // arriving all at once. The POST below is still the authoritative reply and
   // replaces this preview when it returns.
   let askStream = ''
+  // The run's own account of what it did: live while asking, retained on
+  // failure so the error is never the only thing left on screen.
+  let askEvents = []
+  let failedEvents = []
+  let outputPresentation = null
 
   async function ask(message) {
     asking = true
@@ -270,6 +278,8 @@
     draft = ''
     phase = 'answer'
     askStream = ''
+    askEvents = []
+    failedEvents = []
     let socket = null
     try { socket = createEventSocket() } catch { socket = null }
     if (socket) {
@@ -279,10 +289,16 @@
         // Only one Genie ask is ever in flight on this screen (the `asking`
         // guard blocks another), so matching on the agent is enough — no need
         // to know the session id the server minted for this turn.
-        if (ev.type === 'assistant.delta' && ev.agent_id === GENIE) {
+        if (ev.agent_id && ev.agent_id !== GENIE) return
+        if (ev.type === 'assistant.delta') {
           const tok = ev.payload?.text || ''
           if (tok) askStream += tok
+          return
         }
+        // Everything else used to be thrown away, which is why this screen
+        // showed a spinner and then a wall of text. Keep the run's own
+        // account of what it is doing, bounded so it cannot grow the page.
+        if (isRunEvent(ev)) askEvents = [...askEvents, ev].slice(-120)
       }
       socket.onerror = () => { try { socket.close() } catch { /* already gone */ } }
     }
@@ -293,9 +309,16 @@
       turns = [...turns, { role: 'soulacy', text: answer }]
     } catch (e) {
       error = e.message || 'Could not reach Genie.'
+      // Whatever Genie managed before it failed is evidence, not rubbish.
+      // Clearing it left a one-line banner and no trace of the work, which is
+      // what "it silently died" looked like from the outside.
+      const partial = askStream.trim()
+      if (partial) turns = [...turns, { role: 'soulacy', text: partial, partial: true }]
+      failedEvents = askEvents
     } finally {
       try { socket?.close() } catch { /* already gone */ }
       askStream = ''
+      askEvents = []
       asking = false
     }
   }
@@ -420,6 +443,8 @@
       // The manual-trigger endpoint returns `result`; the others return
       // `reply`. Accept both rather than depending on which one this is.
       output = run.result || run.reply || run.text || '(the agent produced no text this time)'
+      // The gateway decides the right visual for a result (#199); use it.
+      outputPresentation = run.presentation?.blocks?.length ? run.presentation.blocks : null
       phase = 'result'
     } catch (e) {
       stopWatching()
@@ -604,7 +629,8 @@
           <div class="msg {t.role}">
             <span class="who">{t.role === 'you' ? 'You' : 'Genie'}</span>
             {#if t.role === 'soulacy'}
-              <div class="bubble markdown-body" use:richRenderer={t.text}>{@html parseMarkdown(t.text)}</div>
+              {#if t.partial}<div class="partial-note">This is as far as it got before the error below.</div>{/if}
+              <div class="bubble markdown-body" class:partial={t.partial} use:richRenderer={t.text}>{@html parseMarkdown(t.text)}</div>
             {:else}
               <div class="bubble">{t.text}</div>
             {/if}
@@ -613,12 +639,15 @@
 
         {#if phase === 'answer'}
           {#if asking}
+            <!-- Show the work while it happens. Before this the screen had a
+                 spinner and nothing else until the final text arrived. -->
+            <RunActivity events={askEvents} live={true} />
             {#if askStream}
               <div class="msg soulacy">
                 <span class="who">Genie</span>
                 <div class="bubble markdown-body streaming" use:richRenderer={askStream}>{@html parseMarkdown(askStream)}</div>
               </div>
-            {:else}
+            {:else if !askEvents.length}
               <div class="thinking"><span class="spinner"></span> Asking Genie…</div>
             {/if}
           {:else}
@@ -685,7 +714,13 @@
         {#if phase === 'result'}
           <div class="panel">
             <h2>Here's what it produced</h2>
-            <pre class="output">{output}</pre>
+            <!-- Was a <pre> dump. The same typed blocks the Feed renders read
+                 far better, and fall back to markdown for plain prose. -->
+            {#if outputPresentation}
+              <Presentation blocks={outputPresentation} />
+            {:else}
+              <div class="output markdown-body" use:richRenderer={output}>{@html parseMarkdown(output)}</div>
+            {/if}
             {#if deliveryWarning}<div class="notice warn">{deliveryWarning}</div>{/if}
             {#if scheduled}
               <div class="notice ok">It will run on its own from now on.</div>
@@ -704,7 +739,11 @@
           </div>
         {/if}
 
-        {#if error}<div class="notice err">{error}</div>{/if}
+        {#if error}
+          <div class="notice err">{error}</div>
+          <!-- The trace is what turns "it failed" into "here is where". -->
+          {#if failedEvents.length}<RunActivity events={failedEvents} live={false} open={true} doneTitle="What it managed before this" />{/if}
+        {/if}
       </div>
     {/if}
   </div>

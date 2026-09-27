@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"fmt"
+	"github.com/soulacy/soulacy/pkg/agent"
 	"strings"
 
 	"github.com/soulacy/soulacy/pkg/message"
@@ -49,8 +50,10 @@ var durableBlocks = []struct {
 	match  string
 	reason string
 }{
-	{"capability in the agent's", "the agent has not been granted that capability"},
+	// Most specific first: "the system capability" is actionable, "that
+	// capability" leaves the reader to work out which one.
 	{"requires the 'system' capability", "the agent has not been granted the system capability"},
+	{"capability in the agent's", "the agent has not been granted that capability"},
 	{"outside configured workspace roots", "that path is outside the workspace this agent may read"},
 	{"filesystem access denied", "that path is outside the workspace this agent may read"},
 	{"ssrf:", "the network policy refuses that address"},
@@ -195,4 +198,54 @@ func (f *runFailures) blockedNames() []string {
 		out = append(out, b.name)
 	}
 	return out
+}
+
+// synthesisBrief is what the final answer must account for: what failed, and
+// what was refused outright. Empty when the run met nothing worth mentioning.
+//
+// Without this, the terminal synthesis step is told only to be concise and
+// polished, and a run that hit a wall and then ran out of budget produces a
+// confident answer that never mentions the wall (#235). The engine knows
+// better than the model here — it has the tool ledger — so it says so.
+func (f *runFailures) synthesisBrief() string {
+	if f == nil || (f.first == "" && len(f.blocked) == 0) {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Before you answer: this run did not go cleanly, and the person must not be told otherwise.\n")
+	if f.first != "" {
+		fmt.Fprintf(&b, "- The first thing that failed was %s\n", f.first)
+	}
+	for _, blk := range f.blocked {
+		fmt.Fprintf(&b, "- %s was refused for this run: %s\n", blk.name, blk.reason)
+	}
+	b.WriteString("\nSay plainly what you could NOT do and why, in your own words. ")
+	b.WriteString("Do not describe an action you attempted as one you completed. ")
+	b.WriteString("Do not say you will do something later in this answer — this is the last thing you will say. ")
+	b.WriteString("Report only results a tool actually returned, and give the person the next step that would work.")
+	return b.String()
+}
+
+// emptyRunMessage replaces the old "(no final response produced)" — a string
+// that named nothing: not the model, not what failed, not what to do next
+// (#233). A run that produces no answer is exactly the moment a person most
+// needs to be told why.
+func emptyRunMessage(def *agent.Definition, f *runFailures) string {
+	var b strings.Builder
+	b.WriteString("I could not produce an answer for this one.")
+	if f != nil && f.first != "" {
+		fmt.Fprintf(&b, " The first thing that failed was %s.", f.first)
+	}
+	if f != nil && len(f.blocked) > 0 {
+		b.WriteString(" These were refused outright for this run:")
+		for _, blk := range f.blocked {
+			fmt.Fprintf(&b, "\n- `%s` — %s", blk.name, blk.reason)
+		}
+		b.WriteString("\n")
+	}
+	if def != nil && def.LLM.Model != "" {
+		fmt.Fprintf(&b, " The model was %s.", def.LLM.Model)
+	}
+	b.WriteString(" Nothing was changed on your behalf. Ask again with more detail, or ask me for something narrower.")
+	return b.String()
 }

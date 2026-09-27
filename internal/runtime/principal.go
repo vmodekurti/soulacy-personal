@@ -7,6 +7,11 @@ import (
 	"github.com/soulacy/soulacy/pkg/agent"
 )
 
+// PersonalWorkspaceID is the fixed metadata boundary for a Personal install.
+// Keeping it explicit lets shared runtime components retain the same fail-closed
+// connection lookup contract as hosted editions without adding tenancy here.
+const PersonalWorkspaceID = "personal"
+
 // Principal is the immutable authentication identity supplied by the gateway.
 // Message.UserID/Username are user content and are never authority inputs.
 type Principal struct {
@@ -28,6 +33,13 @@ func PrincipalFromContext(ctx context.Context) (Principal, bool) {
 	p, ok := ctx.Value(principalContextKey{}).(Principal)
 	return p, ok
 }
+
+// WorkspaceFromContext returns Personal's single workspace boundary.
+func WorkspaceFromContext(context.Context) string { return PersonalWorkspaceID }
+
+// SubjectFromContext returns Personal's stable installation owner. Scheduled
+// and interactive runs share this identity, while agent grants remain explicit.
+func SubjectFromContext(context.Context) string { return "admin" }
 
 // applyAgentPrincipalBoundary prevents a protected non-admin agent from
 // inheriting elevated authority from either an administrator's chat session or

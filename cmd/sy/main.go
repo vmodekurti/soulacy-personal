@@ -165,6 +165,7 @@ Quick start:
 		buildEvalCmd(),         // sy eval — evaluation framework
 		buildRegistryCmd(),     // sy registry — review + manage skill sources (E26)
 		buildSecretsCmd(),      // sy secrets — manage the gateway-global secrets store
+		buildConnectionCmd(),   // sy connection — capture and manage authenticated website sessions
 		buildMCPCmd(),          // sy mcp — manage MCP servers
 		buildLaunchCmd(),       // sy launch — production readiness checks
 		buildUpdateCmd(),       // sy update — release update checks

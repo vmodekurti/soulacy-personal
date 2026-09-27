@@ -3486,6 +3486,10 @@ func (s *Server) handleStudioSaveYAML(c *fiber.Ctx) error {
 	if isProtectedSystemAgent(def.ID) {
 		return protectedSystemAgentResponse(c)
 	}
+	connectionSelection, connectionErr := s.prepareAuthenticatedConnectionSelection(c, def.ID, def.Connections)
+	if connectionErr != nil {
+		return connectionErr
+	}
 
 	report := agentvalidate.Definition(&def, "", s.agentValidationOptions(c.Context()), agentvalidate.Report{})
 	if report.Errors > 0 {
@@ -3526,6 +3530,9 @@ func (s *Server) handleStudioSaveYAML(c *fiber.Ctx) error {
 	}
 	if err := s.loader.Upsert(dir, &def); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
+	}
+	if err := s.applyAuthenticatedConnectionSelection(c, def.ID, connectionSelection); err != nil {
+		return err
 	}
 	s.scheduler.DeregisterAgent(def.ID)
 	if err := s.scheduler.RegisterAgent(&def); err != nil {
@@ -3891,6 +3898,10 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 	if isProtectedSystemAgent(def.ID) {
 		return protectedSystemAgentResponse(c)
 	}
+	connectionSelection, connectionErr := s.prepareAuthenticatedConnectionSelection(c, def.ID, def.Connections)
+	if connectionErr != nil {
+		return connectionErr
+	}
 
 	// Record the tool contracts this workflow was built against (P0-3). Captured
 	// HERE rather than in ToAgentDefinition because the live catalog is the
@@ -3975,6 +3986,9 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 
 	if err := s.loader.Upsert(dir, &def); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
+	}
+	if err := s.applyAuthenticatedConnectionSelection(c, def.ID, connectionSelection); err != nil {
+		return err
 	}
 	if req.InitialWorkflow != nil && s.verifyGenerationProof(studioLearningOwner(c), *req.InitialWorkflow) {
 		s.minePreferences(studioLearningOwner(c), def.ID, *req.InitialWorkflow, req.Workflow)

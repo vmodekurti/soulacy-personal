@@ -65,6 +65,20 @@ func TestFormatPackageInstallReplyBoundsLongErrors(t *testing.T) {
 	}
 }
 
+func TestFormatPackageInstallReplyFindsInstallerResultInMixedToolBatch(t *testing.T) {
+	results := []message.ToolResult{
+		{Name: "env_get", Content: "HOME=/workspace"},
+		{Name: "package_install", IsError: true, Content: "error: package_install: Python >=3.12 is required"},
+	}
+	if !hasPackageInstallResult(results) {
+		t.Fatal("package_install result was not detected")
+	}
+	want := "MCP server installation failed.\n\nPython >=3.12 is required"
+	if got := formatPackageInstallReply(results); got != want {
+		t.Fatalf("formatPackageInstallReply() = %q, want %q", got, want)
+	}
+}
+
 func TestParseURLPackageInstallRequestPreservesExplicitKind(t *testing.T) {
 	tests := []struct {
 		text string

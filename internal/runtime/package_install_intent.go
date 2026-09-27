@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/soulacy/soulacy/internal/llm"
+	"github.com/soulacy/soulacy/pkg/message"
 )
 
 type urlPackageInstallRequest struct {
@@ -74,6 +75,46 @@ func parseURLPackageInstallRequest(text string) (urlPackageInstallRequest, bool)
 func toolSchemaExists(tools []llm.ToolSchema, name string) bool {
 	for _, tool := range tools {
 		if tool.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func formatPackageInstallReply(results []message.ToolResult) string {
+	var result *message.ToolResult
+	for i := range results {
+		if normalizeToolCallName(results[i].Name) == "package_install" {
+			if result != nil {
+				return "MCP server installation failed because the installer returned an unexpected result. Check the run details and retry."
+			}
+			result = &results[i]
+		}
+	}
+	if result == nil {
+		return "MCP server installation failed because the installer returned an unexpected result. Check the run details and retry."
+	}
+	detail := strings.TrimSpace(result.Content)
+	detail = strings.TrimPrefix(detail, "error: package_install: ")
+	detail = strings.TrimPrefix(detail, "error: ")
+	if len(detail) > 4000 {
+		detail = "…" + detail[len(detail)-4000:]
+	}
+	if result.IsError {
+		if detail == "" {
+			detail = "The package installer did not provide an error message."
+		}
+		return "MCP server installation failed.\n\n" + detail
+	}
+	if detail == "" {
+		detail = "The MCP server was installed and registered successfully."
+	}
+	return "MCP server installation completed.\n\n" + detail
+}
+
+func hasPackageInstallResult(results []message.ToolResult) bool {
+	for _, result := range results {
+		if normalizeToolCallName(result.Name) == "package_install" {
 			return true
 		}
 	}

@@ -187,6 +187,18 @@ var pages = map[string]page{
 		},
 	},
 
+	"websites": {
+		stage: StageMaterial, nextAction: "", nextLabel: "",
+		role:         "A safe bridge into websites that already know you.",
+		contribution: "It lets an agent read account-only pages without putting your password or cookies in its prompt.",
+		whenEmpty: func(InstallState) string {
+			return "No website sign-ins are saved. Add one when an agent needs a subscription or account-only source, then grant it only to that agent in Studio."
+		},
+		whenUsed: func(InstallState) string {
+			return "Saved sessions are encrypted and restricted to approved domains. Refresh one here when a site expires it, and review each agent grant in Studio."
+		},
+	},
+
 	"mcp": {
 		stage: StageMaterial, nextAction: "open_mcp", nextLabel: "Connect a server",
 		role:         "How an agent reaches the world outside this box.",

@@ -1,4 +1,5 @@
 <script>
+  import { isPinnedToBottom } from '../lib/runevents.js'
   import TourButton from '../lib/TourButton.svelte'
   import BrandMark from '../lib/BrandMark.svelte'
   import { onDestroy, onMount, tick } from 'svelte'
@@ -334,7 +335,7 @@
       backfillAllThinking(id, t.agentId, t.sessionId)
     }
     if (mobileViewport) chatListHidden = true
-    scrollBottom()
+    scrollBottom(true)
   }
 
   function startThread(agentId = '') {
@@ -343,7 +344,7 @@
     chatActiveThreadId.set(thread.id)
     if (mobileViewport) chatListHidden = true
     metricsRefresh++
-    scrollBottom()
+    scrollBottom(true)
     return thread
   }
 
@@ -431,7 +432,7 @@
       messages: msgs || [],
     }))
     metricsRefresh++
-    await scrollBottom()
+    await scrollBottom(true) // switched branch
   }
 
   let agents    = []
@@ -629,7 +630,7 @@
       streamText: '',       // reset the live-streaming buffer for this turn
       activeRunKey: runKey,
     }))
-    await scrollBottom()
+    await scrollBottom(true) // the reader just sent this
 
     // Pre-turn metrics snapshot for the token delta (Story 9). Cached per
     // session; the first turn fetches (404 → null baseline = "all new").
@@ -702,7 +703,7 @@
     }
     updateThread(threadId, t => ({ ...t, sending: false, thinking: null, streamText: '', activeRunKey: '' }))
     metricsRefresh++   // re-fetch the session metrics strip (Story 7)
-    await scrollBottom()
+    await scrollBottom(true) // the turn finished
 	return responseMode === 'voice' ? (spokenReply || replyText) : replyText
   }
 
@@ -1028,15 +1029,26 @@
       if (openedThread?.id && openedThread?.agentId) {
         await backfillAllThinking(openedThread.id, openedThread.agentId, openedThread.sessionId)
       }
-      await scrollBottom()
+      await scrollBottom(true) // opened a thread
     } catch (e) {
       historySearchError = e.message || 'Could not open session'
     }
   }
 
-  async function scrollBottom() {
+  // Follow the conversation only while the reader is already at the bottom.
+  //
+  // This used to scroll unconditionally on every arriving event and every
+  // streamed token, so trying to read an earlier step while a run was live
+  // yanked the view away within the second — the "it just keeps running to
+  // the bottom" complaint. Scrolling up is a deliberate act and now wins
+  // until the reader comes back down.
+  //
+  // `force` is for the cases where the reader caused the move themselves:
+  // sending a message, or opening a thread.
+  async function scrollBottom(force = false) {
+    const wasPinned = force || isPinnedToBottom(msgListEl)
     await tick()
-    if (msgListEl) msgListEl.scrollTop = msgListEl.scrollHeight
+    if (msgListEl && wasPinned) msgListEl.scrollTop = msgListEl.scrollHeight
   }
 
   // ── inline "/" skill picker ──────────────────────────────────────────
@@ -1692,7 +1704,7 @@
       idx = t.messages.length
       return { ...t, messages: [...t.messages, { role, text, voice: true, ts: new Date(), ...opts }] }
     })
-    scrollBottom()
+    scrollBottom(true)
     return idx
   }
 
@@ -1723,7 +1735,7 @@
         })
       }
       voiceDraftIdx = -1
-      scrollBottom()
+      scrollBottom(true)
     } else if (e.kind === 'usage') {
       voiceUsage = addUsage(voiceUsage, e.usage)
     }

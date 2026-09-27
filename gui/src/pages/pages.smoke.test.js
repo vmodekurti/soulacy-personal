@@ -35,6 +35,7 @@ const loaders = {
   channels: () => import('./Channels.svelte'),
   schedule: () => import('./Schedule.svelte'),
   skills: () => import('./Skills.svelte'),
+  websites: () => import('./WebsiteAccess.svelte'),
   mcp: () => import('./MCP.svelte'),
   pluginmgr: () => import('./PluginManager.svelte'),
   providers: () => import('./Providers.svelte'),
