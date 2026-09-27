@@ -16,7 +16,7 @@
         <link rel="prev" href="../skill-sources/">
       
       
-        <link rel="next" href="../plugins/">
+        <link rel="next" href="../../integrations/open-notebook/">
       
       
         
@@ -2778,6 +2778,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#open-notebook" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Open Notebook
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#install-from-a-repository-url" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2830,6 +2841,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integrations/open-notebook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Open Notebook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -5047,6 +5086,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#open-notebook" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Open Notebook
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#install-from-a-repository-url" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5204,6 +5254,15 @@ standalone SSE stream.</p>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>--api-key<span class="w"> </span><span class="s2">"</span><span class="nv">$SOULACY_API_KEY</span><span class="s2">"</span><span class="w"> </span>mcp<span class="w"> </span>serve
 </span></code></pre></div>
 <h2 id="configuring-an-mcp-server">Configuring an MCP server<a class="headerlink" href="#configuring-an-mcp-server" title="Permanent link">&para;</a></h2>
+<h3 id="open-notebook">Open Notebook<a class="headerlink" href="#open-notebook" title="Permanent link">&para;</a></h3>
+<p>The MCP page has a first-party card for a local Open Notebook instance. It
+checks the loopback API and connects the separately installed
+<code>open-notebook-mcp</code> adapter. The adapter is not included in the Soulacy
+deployment or normal release archive. You can also run:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sy<span class="w"> </span>mcp<span class="w"> </span>add-open-notebook
+</span></code></pre></div>
+<p>See <a href="../../integrations/open-notebook/">Open Notebook</a> for the available tools,
+agent allowlists, and the authenticated-website-to-podcast workflow.</p>
 <h3 id="install-from-a-repository-url">Install from a repository URL<a class="headerlink" href="#install-from-a-repository-url" title="Permanent link">&para;</a></h3>
 <p>In Chat, select the built-in <strong>System</strong> agent and ask:</p>
 <blockquote>
@@ -5239,44 +5298,44 @@ empty. You do not need to enable arbitrary shell access just to install an MCP
 server. The installer is limited to HTTPS Git URLs, preserves an explicit MCP
 choice from the request, and still requires approval for every installation.</p>
 <p>The equivalent CLI command is:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sy<span class="w"> </span>package<span class="w"> </span>install<span class="w"> </span>https://github.com/owner/repository<span class="w"> </span>--kind<span class="w"> </span>mcp<span class="w"> </span>--allow-unverified
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1"># Run the complete installation on a remote Personal gateway host.</span>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>sy<span class="w"> </span>--gateway<span class="w"> </span>https://soul.example.com<span class="w"> </span>package<span class="w"> </span>install<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span>https://github.com/owner/repository<span class="w"> </span>--kind<span class="w"> </span>mcp<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span>--allow-unverified<span class="w"> </span>--allow-host-build
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>sy<span class="w"> </span>package<span class="w"> </span>install<span class="w"> </span>https://github.com/owner/repository<span class="w"> </span>--kind<span class="w"> </span>mcp<span class="w"> </span>--allow-unverified
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="c1"># Run the complete installation on a remote Personal gateway host.</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>sy<span class="w"> </span>--gateway<span class="w"> </span>https://soul.example.com<span class="w"> </span>package<span class="w"> </span>install<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span>https://github.com/owner/repository<span class="w"> </span>--kind<span class="w"> </span>mcp<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">  </span>--allow-unverified<span class="w"> </span>--allow-host-build
 </span></code></pre></div>
 <p>Raw Git repositories are unsigned, so direct CLI use requires
 <code>--allow-unverified</code>. In Chat, approving the exact URL provides that explicit
 consent. Repeating the request does not reinstall an already registered server.</p>
 <p>MCP servers are declared in your Soulacy config (or contributed by a plugin).
 Each server has a transport — a local subprocess over stdio, or a remote URL.</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">mcp</span><span class="p">:</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">servers</span><span class="p">:</span>
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">filesystem</span>
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">      </span><span class="nt">transport</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">stdio</span>
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"mcp-server-filesystem"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"--root"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"~/soulacy-files"</span><span class="p p-Indicator">]</span>
-</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">company-crm</span>
-</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">      </span><span class="nt">transport</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">http</span>
-</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">      </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://mcp.internal.example.com</span>
-</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">      </span><span class="c1"># Secrets are referenced by name from the vault, never inlined.</span>
-</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">      </span><span class="nt">auth</span><span class="p">:</span>
-</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="w">        </span><span class="nt">bearer_token</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${secret:CRM_MCP_TOKEN}</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">mcp</span><span class="p">:</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">servers</span><span class="p">:</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">filesystem</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">      </span><span class="nt">transport</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">stdio</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"mcp-server-filesystem"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"--root"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"~/soulacy-files"</span><span class="p p-Indicator">]</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">company-crm</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">      </span><span class="nt">transport</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">http</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">      </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://mcp.internal.example.com</span>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">      </span><span class="c1"># Secrets are referenced by name from the vault, never inlined.</span>
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">      </span><span class="nt">auth</span><span class="p">:</span>
+</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="w">        </span><span class="nt">bearer_token</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${secret:CRM_MCP_TOKEN}</span>
 </span></code></pre></div>
 <p>After adding a server, restart the gateway (or reload config) so the tools are
 discovered.</p>
 <p>The same definitions can be registered without editing the gateway host:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># Idempotently create or update an HTTP MCP server on a remote gateway.</span>
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>sy<span class="w"> </span>--gateway<span class="w"> </span>https://soul.example.com<span class="w"> </span>mcp<span class="w"> </span>add<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span>--name<span class="w"> </span>company-crm<span class="w"> </span>--transport<span class="w"> </span>http<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span>--url<span class="w"> </span>https://mcp.internal.example.com/mcp<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span>--header<span class="w"> </span><span class="s1">'Authorization=Bearer ${CRM_MCP_TOKEN}'</span>
-</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
-</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="c1"># Personal edition only: launch a stdio server on the remote gateway host.</span>
-</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>sy<span class="w"> </span>--gateway<span class="w"> </span>https://soul.example.com<span class="w"> </span>mcp<span class="w"> </span>add<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">  </span>--name<span class="w"> </span>filesystem<span class="w"> </span>--transport<span class="w"> </span>stdio<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">  </span>--command<span class="w"> </span>/srv/soulacy/mcp-servers/filesystem/venv/bin/mcp-server-filesystem<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="w">  </span>--args<span class="w"> </span><span class="s1">'--root,/srv/soulacy-files'</span><span class="w"> </span>--env<span class="w"> </span><span class="s1">'LOG_LEVEL=info'</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># Idempotently create or update an HTTP MCP server on a remote gateway.</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>sy<span class="w"> </span>--gateway<span class="w"> </span>https://soul.example.com<span class="w"> </span>mcp<span class="w"> </span>add<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span>--name<span class="w"> </span>company-crm<span class="w"> </span>--transport<span class="w"> </span>http<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span>--url<span class="w"> </span>https://mcp.internal.example.com/mcp<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">  </span>--header<span class="w"> </span><span class="s1">'Authorization=Bearer ${CRM_MCP_TOKEN}'</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="c1"># Personal edition only: launch a stdio server on the remote gateway host.</span>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>sy<span class="w"> </span>--gateway<span class="w"> </span>https://soul.example.com<span class="w"> </span>mcp<span class="w"> </span>add<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">  </span>--name<span class="w"> </span>filesystem<span class="w"> </span>--transport<span class="w"> </span>stdio<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="w">  </span>--command<span class="w"> </span>/srv/soulacy/mcp-servers/filesystem/venv/bin/mcp-server-filesystem<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="w">  </span>--args<span class="w"> </span><span class="s1">'--root,/srv/soulacy-files'</span><span class="w"> </span>--env<span class="w"> </span><span class="s1">'LOG_LEVEL=info'</span>
 </span></code></pre></div>
 <p>Pass <code>--api-key "$SOULACY_API_KEY"</code> when the remote gateway requires
 authentication. This command runs on your computer and writes the MCP
@@ -5289,11 +5348,11 @@ that needs cloning or a build environment, use remote <code>sy package install</
 instead; raw source builds can be limited to an administrator-approved catalog.</p>
 <h2 id="using-mcp-tools-in-an-agent">Using MCP tools in an agent<a class="headerlink" href="#using-mcp-tools-in-an-agent" title="Permanent link">&para;</a></h2>
 <p>Reference the discovered tool names in a SOUL.yaml <code>tools:</code> block:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">crm-assistant</span>
-</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="nt">tools</span><span class="p">:</span>
-</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">company-crm.search_contacts</span>
-</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">company-crm.create_note</span>
-</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">filesystem.read_file</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">crm-assistant</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nt">tools</span><span class="p">:</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">company-crm.search_contacts</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">company-crm.create_note</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">filesystem.read_file</span>
 </span></code></pre></div>
 <p>MCP tools carry the same <strong>risk tiers</strong> and policy controls as any other tool
 (see <a href="../safety/">Safety Introspection</a>). A privileged or network-capable MCP tool
@@ -5391,13 +5450,13 @@ ready until the server is reachable and its secrets are set. See
         
         
           
-          <a href="../plugins/" class="md-footer__link md-footer__link--next" aria-label="Next: Plugins">
+          <a href="../../integrations/open-notebook/" class="md-footer__link md-footer__link--next" aria-label="Next: Open Notebook">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Plugins
+                Open Notebook
               </div>
             </div>
             <div class="md-footer__button md-icon">
