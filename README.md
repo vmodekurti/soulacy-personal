@@ -204,7 +204,7 @@ SOULACY_PREFIX=/usr/local curl -fsSL https://raw.githubusercontent.com/vmodekurt
 
 ```bash
 git clone https://github.com/vmodekurti/soulacy-personal
-cd soulacy
+cd soulacy-personal
 ./install.sh                  # same behavior; will offer LaunchAgent setup on macOS
 ```
 
@@ -217,7 +217,7 @@ interactively, passed as a flag, or set via an environment variable.
 
 ```bash
 git clone https://github.com/vmodekurti/soulacy-personal
-cd soulacy
+cd soulacy-personal
 ./scripts/docker-deploy.sh                       # interactive — prompts for each setting
 ./scripts/docker-deploy.sh --yes                 # accept defaults, no prompts
 ./scripts/docker-deploy.sh --host-port 9000      # publish on a different host port
@@ -421,7 +421,7 @@ That's it. No boilerplate, no decorators, no SDK imports. Drop the file in, and 
 
 ```bash
 git clone https://github.com/vmodekurti/soulacy-personal
-cd soulacy
+cd soulacy-personal
 make all          # builds GUI + Go binaries
 make install      # installs to /usr/local/bin
 make test         # runs Go tests
