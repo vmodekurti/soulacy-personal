@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Step-by-step guides for self-hosted agents, iPhone setup, reviewed learning, Safe Undo, and verified automation.">
+        <meta name="description" content="Self-hosted AI agents with iPhone approvals, explicit permissions, reviewed learning, Safe Undo, and verified automation.">
       
       
       
@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#an-assistant-that-knows-you-on-a-gateway-you-control" class="md-skip">
+        <a href="#run-ai-agents-on-hardware-you-own" class="md-skip">
           Skip to content
         </a>
       
@@ -730,6 +730,17 @@
       Table of contents
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-trust-rule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The trust rule
+      
+    </span>
+  </a>
+  
+</li>
       
         <li class="md-nav__item">
   <a href="#choose-your-starting-point" class="md-nav__link">
@@ -5008,6 +5019,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#the-trust-rule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The trust rule
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#choose-your-starting-point" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5095,23 +5117,27 @@
   
 
 
-<h1 id="an-assistant-that-knows-you-on-a-gateway-you-control">An assistant that knows you, on a gateway you control<a class="headerlink" href="#an-assistant-that-knows-you-on-a-gateway-you-control" title="Permanent link">&para;</a></h1>
-<p>Soulacy keeps a structured picture of how your days go — your routine, the
-people who matter, what you owe and when — and every agent you run reads the
-same one. A model supplies the reasoning; Soulacy supplies the picture, the
-tools, the permissions, the scheduling, and the record of what happened.</p>
-<p>It learns <strong>by asking</strong>. A few questions in the web workspace on your first
-day are enough for agents to stop starting from nothing. The iPhone companion
-is optional: pair it and allow a sense, and Soulacy keeps up on its own;
-skip it and everything still works from what you have told it.</p>
+<h1 id="run-ai-agents-on-hardware-you-own">Run AI agents on hardware you own<a class="headerlink" href="#run-ai-agents-on-hardware-you-own" title="Permanent link">&para;</a></h1>
+<p><strong>Approve risky actions from your iPhone, or authorize unattended work through
+configuration you can inspect.</strong></p>
+<p>Soulacy Personal is a complete self-hosted agent system. A model supplies the
+reasoning; Soulacy supplies the tools, permissions, schedules, delivery,
+memory, and the record of what happened. A privileged action proceeds only
+after a recorded approval or an explicit agent and gateway policy grant.</p>
+<p>Soulacy also keeps a structured picture of how your days go — your routine,
+the people who matter, what you owe and when — and every agent you run reads
+the same one. It learns <strong>by asking</strong>. The iPhone companion is optional: pair
+it and allow a sense, and Soulacy can keep up with calendar, Focus, location,
+or health signals; skip it and everything still works from what you have told
+it.</p>
 <p>Start with a small, read-only task. Make it reliable before giving it more access.</p>
 <p>These guides cover <strong>Soulacy Personal</strong>, the open-source, self-hosted edition.
 See <a href="personal/">how your Personal setup works</a> to understand the gateway,
 model, and companion-client requirements.</p>
 <p><a class="md-button md-button--primary" href="getting-started/quickstart/">Start here: your first successful run</a>
-<a class="md-button" href="using/person-model/">What it learns about you</a>
-<a class="md-button" href="use-cases/">Pick a worked use case</a>
-<a class="md-button" href="iphone/">See what your iPhone adds</a></p>
+<a class="md-button" href="getting-started/iphone/">Connect your iPhone</a>
+<a class="md-button" href="security/">Read the security model</a>
+<a class="md-button" href="use-cases/">Pick a worked use case</a></p>
 <div class="admonition info">
 <p class="admonition-title">Match these guides to your installation</p>
 <p>These docs follow the Personal repository's <code>main</code> branch. Your installed
@@ -5120,6 +5146,33 @@ and the version in the iPhone app before expecting a new screen. Source
 availability is not evidence that your server has been upgraded.
 See <a href="recent-updates/">recent changes</a> and <a href="deployment/upgrades/">safe upgrades</a>.</p>
 </div>
+<h2 id="the-trust-rule">The trust rule<a class="headerlink" href="#the-trust-rule" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>You are present and a privileged tool needs approval</td>
+<td>Soulacy pauses and records your decision. A paired iPhone can show the request on the lock screen.</td>
+</tr>
+<tr>
+<td>A scheduled or otherwise unattended run requests the same action</td>
+<td>It is refused unless the agent and gateway carry the required explicit unattended grants. The run never approves itself.</td>
+</tr>
+<tr>
+<td>A website, document, message, or MCP result contains new instructions</td>
+<td>Soulacy treats that content as untrusted evidence. It cannot authorize a tool or expand the agent's permissions.</td>
+</tr>
+</tbody>
+</table>
+<p>The agent file, gateway policy, approval record, and run evidence let you trace
+why an action was allowed. Start with read-only work and add authority only
+when the task needs it. See the <a href="security/">security model</a> for the
+complete enforcement path.</p>
 <h2 id="choose-your-starting-point">Choose your starting point<a class="headerlink" href="#choose-your-starting-point" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
