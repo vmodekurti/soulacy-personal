@@ -5229,7 +5229,15 @@
 
 
 <h1 id="channels-overview">Channels Overview<a class="headerlink" href="#channels-overview" title="Permanent link">&para;</a></h1>
-<p>Channels are adapters that connect agents to messaging platforms. Each channel handles platform authentication, inbound message normalization, outbound replies, and live connection status.</p>
+<p>Channels are first class routes into the Soulacy gateway. They connect agents
+to messaging platforms, APIs, and custom adapters. Each channel handles
+platform authentication, inbound message normalization, outbound replies, and
+live connection status.</p>
+<p>Genie provides the native iPhone conversation and operating experience. Other
+channels connect directly to the same gateway and agents. A request arriving
+from WhatsApp or Telegram does not pass through Genie, and a scheduled result
+can be delivered to any configured outbound channel. The runtime applies the
+same agent permissions, memory, schedules, and run history to every route.</p>
 <h2 id="supported-channels">Supported channels<a class="headerlink" href="#supported-channels" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
