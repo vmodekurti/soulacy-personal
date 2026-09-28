@@ -1,7 +1,13 @@
 # Talking to Genie
 
-Genie is the way in. You ask for something in your own words, and Genie either
-answers it or builds the thing that will keep answering it.
+Genie is the native iPhone way in. You ask for something in your own words, and
+Genie either answers it or builds the thing that will keep answering it.
+
+Soulacy does not require every request to pass through Genie. WhatsApp,
+Telegram, Slack, Discord, email, HTTP, and custom adapters are first class
+channels into the same gateway. An agent can receive a request and reply on the
+channel that triggered it, and scheduled work can be delivered there directly.
+The runtime applies the same permissions, memory, and run records everywhere.
 
 Most of Soulacy (Studio, the agent list, schedules, delivery channels) is
 still there, and you will want it eventually. You do not need any of it to

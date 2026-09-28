@@ -12,6 +12,12 @@ one-off task, or a recurring automation. Run agents, follow their progress,
 receive results, and pause or cancel what Genie built from the same phone.
 When a privileged step needs you, the approval arrives there too.
 
+Genie is the native iPhone entry point to the gateway. WhatsApp, Telegram,
+Slack, Discord, email, HTTP, and custom adapters are first class channels too.
+Agents can receive requests, reply, and deliver scheduled work through any
+configured channel. Every route uses the same runtime permissions, memory,
+schedules, and run history.
+
 Soulacy also keeps a structured picture of how your days go: your routine,
 the people who matter, and what you owe. Every agent you run reads the same
 picture. It learns **by asking**. The iPhone companion is optional: pair
@@ -57,6 +63,7 @@ complete enforcement path.
 |---|---|---|
 | Try Soulacy for the first time | [First successful run](getting-started/quickstart.md) | A model connection and a response you can check yourself |
 | Build and manage automation by conversation | [Talk to Genie](using/genie.md) | A saved agent or schedule you can inspect, pause, or cancel |
+| Reach agents from a messaging platform or API | [Connect a channel](channels/index.md) | A first class route to the same gateway and agents |
 | Use your gateway from an iPhone | [Connect your iPhone](getting-started/iphone.md) | A paired phone and a verified round-trip chat |
 | Let agents use your phone's signals | [Soulacy on iPhone](iphone.md) | Lock-screen approvals, declared device tools, Siri and CarPlay, and a brief built from health, calendar, and Focus |
 | Turn messy notes into something useful | [Notes → action plan](use-cases/notes-to-action-plan.md) | Owners, next actions, and explicit unknowns without sending anything |
