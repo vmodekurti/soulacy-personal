@@ -6,7 +6,9 @@ const footprint = readFileSync(new URL('../../../docs/deployment/footprint.md', 
 
 describe('public website claims', () => {
   it('keeps public messaging focused on self-hosted Personal', () => {
-    expect(website).toContain('Run Soulacy Personal on infrastructure you control.')
+    expect(website).toContain('Soulacy Personal is a complete self-hosted agent system.')
+    expect(website).toContain('Approve risky actions from your iPhone.')
+    expect(website).toContain('explicit agent and gateway policy')
     expect(website).toContain('https://docs.soulacy.io/personal/')
     expect(website).not.toMatch(/\bcommercial\b/i)
     expect(readFileSync(new URL('../../../README.md', import.meta.url), 'utf8')).not.toMatch(/Soulacy Commercial/i)

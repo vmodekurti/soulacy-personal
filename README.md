@@ -2,30 +2,27 @@
 
 <img src="docs/assets/living-core-blue-v1.png" width="64" height="64" alt="Soulacy Blue Living Core logo" />
 
-**An assistant that actually knows you — running on a machine you own.**
+**Run AI agents on hardware you own. Approve risky actions from your iPhone.**
 
-Most assistants answer questions and forget you in between. Soulacy keeps a
-structured picture of how your days actually go: your routine, the people who
-matter, what you owe and when, how you want to be helped. Every agent you run
-reads the same picture, so none of them start from nothing.
+Soulacy Personal is a complete self-hosted agent system: one binary, agents as
+readable YAML, a web workspace, schedules, chat channels, adaptive memory, and
+support for local or cloud models. It runs on a laptop, home server, Raspberry
+Pi, or small VPS.
 
-**It learns by asking.** A few questions on your first day, answered in a
-browser, and it records what you said in your own words. No phone, no sensors,
-nothing switched on. You can read every line it holds, see where each came
-from, and correct or delete any of it.
+**Every privileged action has an answer.** It either waits for a recorded
+approval or follows explicit agent and gateway policy you can inspect. A
+scheduled run cannot approve itself, and text fetched from a website or MCP
+server cannot grant itself more authority.
 
-**It can also notice, if you let it.** Pair the iPhone app and switch on a
-sense, and it keeps up on its own — a deadline moving, a Focus turning on,
-today not looking like a normal Tuesday. Every sense is off until you allow
-it, and switching one off erases what it worked out. Skip the app entirely and
-Soulacy still works; it just knows only what you told it.
+```bash
+curl -fsSL https://soulacy.io/install.sh | bash
+```
 
-Underneath is a complete agent runtime you own: one binary, agents as YAML (or
-generated from plain English in Studio), any LLM (Ollama, OpenAI, Anthropic,
-Groq, or anything OpenAI-compatible), channels to Telegram / Slack / Discord /
-WhatsApp / email / Teams / Google Chat / HTTP, scheduling, approvals you can
-check, and adaptive memory. It runs from a terminal or a $5 VPS with no cloud
-dependency.
+Then it gets personal. Soulacy keeps a structured picture of how your days
+actually go: your routine, the people who matter, what you owe and when, and
+how you want to be helped. It learns by asking in the browser. Pair the iPhone
+app and enable a sense when you want it to keep up with calendar, Focus,
+location, or health signals. Every sense is off until you allow it.
 
 **Honest about setup:** there is no hosted version to sign up for. You need a
 machine you can run a server on and about ten minutes in a terminal. That is
@@ -119,10 +116,10 @@ Do not take our word for it. Check it in five minutes on your own machine:
 3. **Schedule it for 3 a.m.** The same step is refused because nobody is there to approve it, until the agent's file says `unattended: true`.
 4. **Read the diff.** Every change that made the agent more capable is a line you wrote in a file you can read, review, and roll back. Safe Undo covers the changes it makes.
 
-**The simple version.** Soulacy is a private system that runs your AI
-agents. You describe an agent in one file. It runs on a computer you control.
-You reach it from your phone or your chat apps. It cannot do anything risky
-without your say-so.
+**The simple version.** Soulacy is a private system that runs your AI agents.
+You describe an agent in one file. It runs on a computer you control. You reach
+it from your phone or your chat apps. A privileged action needs a recorded
+approval or an explicit configuration grant.
 
 - **Yours, on your hardware.** Code frameworks leave you to build and host the
   application. Visual builders need a server stack. Hosted agent services keep

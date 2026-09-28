@@ -1,5 +1,5 @@
 site_name: soulacy
-site_description: Step-by-step guides for self-hosted agents, iPhone setup, reviewed learning, Safe Undo, and verified automation.
+site_description: Self-hosted AI agents with iPhone approvals, explicit permissions, reviewed learning, Safe Undo, and verified automation.
 site_url: https://docs.soulacy.io
 repo_url: https://github.com/vmodekurti/soulacy-personal
 repo_name: vmodekurti/soulacy-personal
@@ -60,6 +60,7 @@ exclude_docs: |
   AGENT_DESIGN.md
   SESSION_HANDOFF.md
   STUDIO_*.md
+  history/audits/**
   BACKLOG.md
   CHANNEL_DESIGN.md
   CLEAN_RUNTIME_UAT_REPORT_*.md
