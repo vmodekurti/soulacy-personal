@@ -43,7 +43,7 @@ Any static server works. There's no build step.
 5. Under the deployed project → Custom domains → Set up custom domain → `soulacy.io` and `www.soulacy.io`.
 6. Wait for Cloudflare to verify the domains and provision their HTTPS certificates.
 
-**Current production setup (verified September 28, 2026):** the Pages project is named `soulacy` and its Git connection points at `vmodekurti/soulacy-personal`, production branch `main`, build output `website`, no build command. A push to `main` triggers a Pages deployment through Cloudflare's Git integration; check the project's Deployments tab for the commit. The GitHub website workflow only deploys when its Cloudflare credentials are configured; otherwise it logs a deferral, and a green deferral job is not proof that the website deployed.
+**Current production setup (verified September 28, 2026):** the Pages project is named `soulacy` and its Git connection points at `vmodekurti/soulacy-personal`, production branch `main`, build output `website`, no build command. A push to `main` triggers a Pages deployment through Cloudflare's Git integration. The GitHub website workflow uses Cloudflare's maintained Wrangler action when its Cloudflare credentials are configured; otherwise it logs a deferral to the Git integration. In either path, check the deployment commit and production HTML rather than treating a green deferral job as proof that the website deployed.
 
 ### Publish through the existing project
 
