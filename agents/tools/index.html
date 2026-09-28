@@ -5304,7 +5304,7 @@
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="c1"># do work, return a string or anything JSON-serializable</span>
 </span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="k">return</span> <span class="p">{</span><span class="s2">"location"</span><span class="p">:</span> <span class="n">location</span><span class="p">,</span> <span class="s2">"temp_c"</span><span class="p">:</span> <span class="mi">21</span><span class="p">}</span>
 </span></code></pre></div>
-<p>The runtime builds each agent's catalog from five sources — Python tools from
+<p>The runtime builds each agent's catalog from five sources: Python tools from
 <code>SOUL.yaml</code>, Go-native built-ins, MCP tools, peer agents (<code>agent__&lt;id&gt;</code>), and
 plugin tools. The model only ever sees tools admitted by the agent definition
 and gateway config.</p>
@@ -5356,9 +5356,9 @@ and gateway config.</p>
 <ol>
 <li>The engine serializes the model's arguments to JSON and passes them on
    <strong>stdin</strong>; your function is called as <code>get_weather(**args)</code>.</li>
-<li>The function's return value becomes the tool result — strings pass through,
+<li>The function's return value becomes the tool result: strings pass through,
    anything else is JSON-encoded.</li>
-<li><code>print()</code> inside your tool goes to stderr, not the result — and every
+<li><code>print()</code> inside your tool goes to stderr, not the result. Every
    stderr line streams live into the Activity log as a <code>tool.log</code> event, so
    long-running tools can report progress with
    <code>print("step 2/5…", file=sys.stderr, flush=True)</code>.</li>
@@ -5377,7 +5377,7 @@ tools that send messages, write durable records, place orders, or perform
 any side effect that would be harmful if repeated.</p>
 </div>
 <h2 id="the-sandbox">The Sandbox<a class="headerlink" href="#the-sandbox" title="Permanent link">&para;</a></h2>
-<p>Python tools run inside a resource sandbox — the soulacy binary re-execs
+<p>Python tools run inside a resource sandbox: the soulacy binary re-execs
 itself as a hidden wrapper that applies syscall-level rlimits before running
 your script. Default caps:</p>
 <table>
@@ -5422,15 +5422,15 @@ arbitrary host files.</p>
 <tbody>
 <tr>
 <td>Field absent</td>
-<td><strong>Default</strong> — gated built-ins are auto-injected when their prerequisites are met.</td>
+<td><strong>Default</strong>: gated built-ins are auto-injected when their prerequisites are met.</td>
 </tr>
 <tr>
 <td><code>builtins: []</code></td>
-<td><strong>None</strong> — no built-ins. Right choice for peer-only orchestrators.</td>
+<td><strong>None</strong>: no built-ins. Right choice for peer-only orchestrators.</td>
 </tr>
 <tr>
 <td><code>builtins: [web_search, kb_search]</code></td>
-<td><strong>Restricted</strong> — only the listed built-ins, still subject to their gates.</td>
+<td><strong>Restricted</strong>: only the listed built-ins, still subject to their gates.</td>
 </tr>
 <tr>
 <td><code>builtins: ["*"]</code> or <code>["all"]</code></td>
@@ -5473,7 +5473,7 @@ arbitrary host files.</p>
 </tr>
 <tr>
 <td><code>shell_exec</code>, <code>run_script</code>, <code>read_file</code>, <code>write_file</code>, <code>list_dir</code>, <code>install_library</code></td>
-<td>System tools — double opt-in (below).</td>
+<td>System tools: double opt-in (below).</td>
 </tr>
 </tbody>
 </table>
@@ -5538,11 +5538,11 @@ before executing:</p>
 <p>When the model calls a gated tool, the engine emits a <code>tool_confirm</code> event,
 shows an approval card in the Chat page, and waits for your decision before
 proceeding. <code>confirm_tools: ["*"]</code> gates every built-in call. Gates apply to
-built-in and system tools (Python and MCP tools run without a gate — restrict
+built-in and system tools (Python and MCP tools run without a gate: restrict
 those via allowlists instead).</p>
 <h2 id="mcp-tools">MCP Tools<a class="headerlink" href="#mcp-tools" title="Permanent link">&para;</a></h2>
 <p>Tools from connected MCP servers are auto-injected under the name
-<code>mcp__&lt;server&gt;__&lt;tool&gt;</code> — e.g. <code>mcp__github__search_repositories</code>. With no
+<code>mcp__&lt;server&gt;__&lt;tool&gt;</code>: e.g. <code>mcp__github__search_repositories</code>. With no
 allowlist configured, agents see every connected MCP tool. Once either field
 below is present, MCP becomes deny-by-default:</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">mcp_servers</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">github</span><span class="p p-Indicator">]</span><span class="w">                           </span><span class="c1"># allow whole servers…</span>
@@ -5561,7 +5561,7 @@ for setup and the authenticated-website-to-podcast workflow.</p>
 <a href="../peers-builtins/">Peer Agents &amp; Built-ins</a> for delegation patterns and
 <code>llm.tool_choice</code> forcing.</p>
 <h2 id="editing-tools-in-the-gui">Editing Tools in the GUI<a class="headerlink" href="#editing-tools-in-the-gui" title="Permanent link">&para;</a></h2>
-<p>The Agents page editor has a full tool builder — no YAML required:</p>
+<p>The Agents page editor has a full tool builder: no YAML required:</p>
 <ul>
 <li><strong>+ Add tool</strong> creates a tool card with name, description, timeout, and a
   JSON parameters-schema editor.</li>

@@ -5072,7 +5072,7 @@ on its own:</p>
 <td>Reasoning loop (ReAct / Plan-Execute)</td>
 <td><code>internal/reasoning.DefaultBackendFor</code></td>
 <td>builds its <strong>own</strong> backend from <code>def.LLM.BaseURL</code></td>
-<td><strong>no</strong> — empty agent base_url → <code>localhost:11434</code></td>
+<td><strong>no</strong>: empty agent base_url → <code>localhost:11434</code></td>
 </tr>
 <tr>
 <td>Studio compiler / agent builders</td>
@@ -5091,12 +5091,12 @@ on its own:</p>
 <p>Because these are separate, fixing the provider in <code>config.yaml</code> fixes one path
 but not the others. Concrete failures observed:</p>
 <ul>
-<li><strong>ReAct "loop produced empty output"</strong> — the reasoning backend called
+<li><strong>ReAct "loop produced empty output"</strong>: the reasoning backend called
   <code>http://localhost:11434</code> inside the container (agent <code>base_url</code> was empty, so
   <code>DefaultBackendFor</code> fell back to <code>defaultOllamaBase</code>). The classic loop worked
   because it used the registered provider with <code>host.docker.internal</code>. Same
   model, different code path, different result.</li>
-<li><strong>Studio inventing tool names / ReAct empty output on small models</strong> — the
+<li><strong>Studio inventing tool names / ReAct empty output on small models</strong>: the
   compiler and reasoning planner ran on whatever the agent used (e.g. a small
   local model), which is unreliable at structured-JSON / planning tasks. These
   tasks need a stronger model than the one that <em>runs</em> the agent.</li>
@@ -5105,8 +5105,8 @@ but not the others. Concrete failures observed:</p>
 the task it's selecting for.</strong></p>
 <h2 id="2-goals">2. Goals<a class="headerlink" href="#2-goals" title="Permanent link">&para;</a></h2>
 <ol>
-<li>One central resolver that every code path uses to obtain a model client —
-   always applying the configured provider's <code>base_url</code>, key, and options. This
+<li>One central resolver that every code path uses to obtain a model client.
+   It always applies the configured provider's <code>base_url</code>, key, and options. This
    makes the localhost-style bug structurally impossible.</li>
 <li><strong>Task-aware roles</strong>: the model that <em>builds</em> an agent (Studio) or <em>plans</em>
    for it (reasoning) is chosen independently of the model that <em>runs</em> it.</li>
@@ -5151,7 +5151,7 @@ to <code>{provider, model, base_url?, options?}</code>:</p>
 </table>
 <p>Resolution order for any role (first hit wins):</p>
 <ol>
-<li><strong>Per-agent override</strong> (SOUL.yaml <code>llm:</code> / <code>reasoning:</code> block) — only for
+<li><strong>Per-agent override</strong> (SOUL.yaml <code>llm:</code> / <code>reasoning:</code> block): only for
    <code>chat</code>/<code>reasoner</code> where an agent legitimately overrides.</li>
 <li><strong>Explicit role config</strong> in <code>config.yaml</code> (<code>llm.roles.&lt;role&gt;</code>).</li>
 <li><strong>Role default</strong> derived by detection (§5).</li>
@@ -5194,7 +5194,7 @@ users never configure anything:</p>
   reliability. <strong>Never</strong> silently fall back to an unreachable local default.</li>
 </ul>
 <p>Rationale, from observed failures: run agents on cheap local models if you
-want, but compile/plan with your strongest model — the build-time model and the
+want, but compile/plan with your strongest model: the build-time model and the
 run-time model have different requirements.</p>
 <h2 id="6-config-schema">6. Config schema<a class="headerlink" href="#6-config-schema" title="Permanent link">&para;</a></h2>
 <p>Additive and backward-compatible (<code>llm.default_provider</code> keeps working as the
@@ -5204,33 +5204,33 @@ run-time model have different requirements.</p>
 </span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">providers</span><span class="p">:</span>
 </span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span><span class="nt">ollama</span><span class="p">:</span><span class="w">   </span><span class="p p-Indicator">{</span><span class="nt"> base_url</span><span class="p">:</span><span class="w"> </span><span class="s">"http://host.docker.internal:11434"</span><span class="p p-Indicator">,</span><span class="nt"> model</span><span class="p">:</span><span class="w"> </span><span class="s">"llama3:70b"</span><span class="w"> </span><span class="p p-Indicator">}</span>
 </span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">    </span><span class="nt">google</span><span class="p">:</span><span class="w">   </span><span class="p p-Indicator">{</span><span class="nt"> api_key</span><span class="p">:</span><span class="w"> </span><span class="s">"..."</span><span class="p p-Indicator">,</span><span class="nt"> model</span><span class="p">:</span><span class="w"> </span><span class="s">"gemini-2.5-pro"</span><span class="w"> </span><span class="p p-Indicator">}</span>
-</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">                            </span><span class="c1"># NEW — all optional; detection fills the gaps</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">                            </span><span class="c1"># NEW, all optional; detection fills the gaps</span>
 </span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="nt">reasoner</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> provider</span><span class="p">:</span><span class="w"> </span><span class="nv">google</span><span class="p p-Indicator">,</span><span class="nt"> model</span><span class="p">:</span><span class="w"> </span><span class="s">"gemini-2.5-pro"</span><span class="w"> </span><span class="p p-Indicator">}</span>
 </span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">    </span><span class="nt">studio</span><span class="p">:</span><span class="w">   </span><span class="p p-Indicator">{</span><span class="nt"> provider</span><span class="p">:</span><span class="w"> </span><span class="nv">google</span><span class="p p-Indicator">,</span><span class="nt"> model</span><span class="p">:</span><span class="w"> </span><span class="s">"gemini-2.5-pro"</span><span class="w"> </span><span class="p p-Indicator">}</span>
 </span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">    </span><span class="c1"># chat / embedder omitted -&gt; defaults</span>
 </span></code></pre></div>
 <h2 id="7-guidance-smart-surfaced-override">7. Guidance: smart → surfaced → override<a class="headerlink" href="#7-guidance-smart-surfaced-override" title="Permanent link">&para;</a></h2>
 <ol>
-<li><strong>Auto</strong> — detection picks per-role defaults; most users do nothing.</li>
-<li><strong>Surfaced</strong> — show the choice. Extends the Studio recommendation banner
+<li><strong>Auto</strong>: detection picks per-role defaults; most users do nothing.</li>
+<li><strong>Surfaced</strong>: show the choice. Extends the Studio recommendation banner
    ("compiling with gemini-2.5-pro; agent runs on llama3:70b") and a per-run
    note in chat/reasoning.</li>
-<li><strong>Override</strong> — <code>llm.roles.*</code> in config, per-agent in SOUL.yaml.</li>
+<li><strong>Override</strong>: <code>llm.roles.*</code> in config, per-agent in SOUL.yaml.</li>
 </ol>
 <h2 id="8-gui-cli-surfaces">8. GUI &amp; CLI surfaces<a class="headerlink" href="#8-gui-cli-surfaces" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>GUI</strong> — a "Models" section on the Config page (same pattern as the new
+<li><strong>GUI</strong>: a "Models" section on the Config page (same pattern as the new
   web-search control and the default-provider dropdown): one row per role →
   provider dropdown + model dropdown, validated against registered providers /
   pulled models. Backend: add <code>Roles</code> to <code>PatchableConfig</code> + <code>applyPatch</code>, and
   expose <code>llm.roles</code> in <code>safeConfigView</code>.</li>
-<li><strong>CLI</strong> — an <code>sy onboard</code> step ("Which model should build agents and do
+<li><strong>CLI</strong>: an <code>sy onboard</code> step ("Which model should build agents and do
   reasoning?") and <code>sy config set llm.roles.&lt;role&gt;.{provider,model} …</code> for
   scripting.</li>
-<li><strong>Per-agent</strong> — the Agents page already exposes provider/model/strategy; add
+<li><strong>Per-agent</strong>: the Agents page already exposes provider/model/strategy; add
   <code>base_url</code> so an agent can't silently fall back to localhost, and a warning
   when an agent has both a <code>workflow:</code> and a <code>reasoning.strategy</code> (the workflow
-  silently wins — see the Studio mode-recommendation work).</li>
+  silently wins: see the Studio mode-recommendation work).</li>
 </ul>
 <h2 id="9-phased-rollout">9. Phased rollout<a class="headerlink" href="#9-phased-rollout" title="Permanent link">&para;</a></h2>
 <ol>
@@ -5238,11 +5238,11 @@ run-time model have different requirements.</p>
    fixes the ReAct localhost bug <em>and</em> routes Studio/agent-building to the
    strongest available model. Delete <code>DefaultBackendFor</code>'s hand-rolled Ollama
    path; route <code>studioLLM()</code> and the reasoning loop through <code>Resolve</code>.</li>
-<li><strong><code>llm.roles</code> config schema + detection</strong> — make defaults explicit and
+<li><strong><code>llm.roles</code> config schema + detection</strong>: make defaults explicit and
    overridable in <code>config.yaml</code>.</li>
-<li><strong>GUI Models section</strong> — provider/model dropdowns per role on the Config
+<li><strong>GUI Models section</strong>: provider/model dropdowns per role on the Config
    page (backend <code>Roles</code> patch support + a Config.svelte panel).</li>
-<li><strong>CLI</strong> — <code>sy onboard</code> step + <code>sy config set llm.roles.*</code>.</li>
+<li><strong>CLI</strong>: <code>sy onboard</code> step + <code>sy config set llm.roles.*</code>.</li>
 <li><strong>Per-agent base_url + workflow/strategy conflict warning.</strong></li>
 </ol>
 <h2 id="10-risks-notes">10. Risks &amp; notes<a class="headerlink" href="#10-risks-notes" title="Permanent link">&para;</a></h2>
@@ -5254,7 +5254,7 @@ run-time model have different requirements.</p>
   reachable/pulled (boot probe already exists for agents) and degrade with a
   loud log rather than a silent empty-output failure.</li>
 <li><strong>Cost surprise</strong>: defaulting studio/reasoner to a cloud model when a key
-  exists could surprise cost-sensitive users — hence "surfaced" guidance and an
+  exists could surprise cost-sensitive users: hence "surfaced" guidance and an
   easy override.</li>
 </ul>
 

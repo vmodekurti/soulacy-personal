@@ -5241,7 +5241,7 @@
 
 
 <h1 id="safety-introspection">Safety Introspection<a class="headerlink" href="#safety-introspection" title="Permanent link">&para;</a></h1>
-<p>Every plugin staged through the install API and every remote skill resolved by <code>sy skill install</code> runs through a three-check safety pipeline <em>before</em> you are asked to approve anything — and a check that cannot run degrades to a visible finding, never a silent gap.</p>
+<p>Every plugin staged through the install API and every remote skill resolved by <code>sy skill install</code> runs through a three-check safety pipeline <em>before</em> you are asked to approve anything. A check that cannot run becomes a visible finding, never a silent gap.</p>
 <h2 id="tool-risk-tiers">Tool risk tiers<a class="headerlink" href="#tool-risk-tiers" title="Permanent link">&para;</a></h2>
 <p>Every tool is classified into one of five risk tiers so you can see a tool's blast
 radius before an agent that uses it is bound to a channel:</p>
@@ -5285,27 +5285,27 @@ radius before an agent that uses it is bound to a channel:</p>
 (<code>risk</code> field). The top two tiers (<code>privileged</code>, <code>shell_system</code>) are treated as
 high-risk and require confirmation before running unless the agent explicitly
 allows them (see <code>confirm_tools</code> in the SOUL.yaml reference).</p>
-<p>When you approve or deny a gated tool, the decision — <strong>who approved what, at
-which risk tier</strong> — is recorded in the action log (a <code>tool.approval</code> event) so
+<p>When you approve or deny a gated tool, the decision records <strong>who approved what
+and at which risk tier</strong> in the action log (a <code>tool.approval</code> event), so
 the Activity view shows an accountable trail.</p>
 <h2 id="quick-look">Quick look<a class="headerlink" href="#quick-look" title="Permanent link">&para;</a></h2>
 <p>Install something and the report appears automatically:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>sy<span class="w"> </span>skill<span class="w"> </span>install<span class="w"> </span>github.com/user/my-skill
 </span></code></pre></div>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Safety introspection: ⚠ caution — review findings
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Safety introspection: ⚠ caution, review findings
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  WARNING (static) [tools/fetch.py:12]: suspicious import: socket
 </span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>  INFO (audit): audit skipped: no LLM provider configured
 </span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>Install my-skill@1.2.0? [y/N]
 </span></code></pre></div>
-<p>No command or setting is needed to enable it — the pipeline runs on every
+<p>No command or setting is needed to enable it: the pipeline runs on every
 install, regardless of which registry or source the package came from.</p>
 <h2 id="the-three-checks">The three checks<a class="headerlink" href="#the-three-checks" title="Permanent link">&para;</a></h2>
 <h3 id="1-static-scan">1. Static scan<a class="headerlink" href="#1-static-scan" title="Permanent link">&para;</a></h3>
 <p>Every <code>.py</code> file is searched line-by-line (comments skipped) for:</p>
 <ul>
-<li>dangerous calls — <code>eval</code>/<code>exec</code>/<code>subprocess.*</code>/<code>os.system</code>/<code>os.popen</code>/
+<li>dangerous calls: <code>eval</code>/<code>exec</code>/<code>subprocess.*</code>/<code>os.system</code>/<code>os.popen</code>/
   <code>__import__</code>/<code>ctypes</code>;</li>
-<li>suspicious imports — <code>subprocess</code>, <code>socket</code>, <code>ctypes</code>, base64-decoded
+<li>suspicious imports: <code>subprocess</code>, <code>socket</code>, <code>ctypes</code>, base64-decoded
   payloads;</li>
 <li>path-traversal strings (<code>../</code>).</li>
 </ul>
@@ -5315,14 +5315,14 @@ instructions", role reassignment, concealment instructions.</p>
 <h3 id="2-llm-prompt-code-audit">2. LLM prompt &amp; code audit<a class="headerlink" href="#2-llm-prompt-code-audit" title="Permanent link">&para;</a></h3>
 <p>An internal auditor agent reads the package documents through the LLM
 router (default provider), looking for prompt injection and
-behaviour/manifest mismatches — e.g. a "weather" skill requesting vault
+behaviour/manifest mismatches: e.g. a "weather" skill requesting vault
 credentials. The model answers with a structured findings list; unknown
 severities clamp to <em>warning</em>.</p>
 <p>This check <strong>degrades gracefully</strong>: no provider configured, a transport
 error, or an unparseable response produces a single info finding
 (<code>audit skipped: …</code>) instead of blocking the install or silently passing.
 The CLI runs without a router, so CLI installs always report the LLM audit
-as skipped — the static scan and dry-run still run in full.</p>
+as skipped: the static scan and dry-run still run in full.</p>
 <h3 id="3-sandboxed-dry-run">3. Sandboxed dry-run<a class="headerlink" href="#3-sandboxed-dry-run" title="Permanent link">&para;</a></h3>
 <p>Declared startup hooks (manifest v2 sidecar commands) execute briefly
 inside the staging directory under the rlimit sandbox wrapper (when
@@ -5330,12 +5330,12 @@ sandboxing is enabled), with HTTP egress pointed at a dead loopback proxy
 (<code>127.0.0.1:9</code>) so well-behaved clients cannot phone home. Recorded per
 hook:</p>
 <ul>
-<li>exit status and runtime — info on a clean exit, warning on a crash, info
+<li>exit status and runtime: info on a clean exit, warning on a crash, info
   for daemon-style sidecars that simply outlive the 5 s timeout;</li>
 <li><strong>file writes</strong>, detected by a before/after snapshot diff of the staging
   directory.</li>
 </ul>
-<p>Raw-socket escapes are deliberately the static scan's job to flag — the
+<p>Raw-socket escapes are deliberately the static scan's job to flag: the
 dry-run's dead proxy only blackholes HTTP-proxy-respecting clients.</p>
 <h2 id="reading-the-report">Reading the report<a class="headerlink" href="#reading-the-report" title="Permanent link">&para;</a></h2>
 <p>The report's <code>severity</code> is the maximum across findings and maps to a
@@ -5356,25 +5356,25 @@ verdict:</p>
 </tr>
 <tr>
 <td><code>caution</code></td>
-<td><code>⚠ caution — review findings</code></td>
-<td>warnings present — read them</td>
+<td><code>⚠ caution: review findings</code></td>
+<td>warnings present; read them</td>
 </tr>
 <tr>
 <td><code>danger</code></td>
-<td><code>✗ DANGER — critical findings</code></td>
+<td><code>✗ DANGER: critical findings</code></td>
 <td>at least one critical finding</td>
 </tr>
 </tbody>
 </table>
 <p>What to do with findings:</p>
 <ul>
-<li><strong>pass</strong> — install normally. The pipeline is heuristic, not a guarantee;
+<li><strong>pass</strong>: install normally. The pipeline is heuristic, not a guarantee;
   the <a href="../plugin-security/">capability model</a> is what actually contains a
   plugin at runtime.</li>
-<li><strong>caution</strong> — read each warning. A <code>socket</code> import in a chat-channel
+<li><strong>caution</strong>: read each warning. A <code>socket</code> import in a chat-channel
   sidecar is expected; the same import in a "markdown formatter" skill is
   not. Check that the findings match what the package claims to do.</li>
-<li><strong>danger</strong> — stop. Critical findings (e.g. <code>eval()</code> on fetched data,
+<li><strong>danger</strong>: stop. Critical findings (e.g. <code>eval()</code> on fetched data,
   prompt-injection text in <code>SKILL.md</code>) mean you should inspect the staged
   source yourself or walk away.</li>
 </ul>
@@ -5382,32 +5382,32 @@ verdict:</p>
 <p class="admonition-title">Danger verdicts always require an interactive yes</p>
 <p><code>sy skill install --yes</code> skips the consent prompt for pass/caution
 verdicts only. A <strong>danger</strong> verdict always demands an explicit
-interactive confirmation — in scripts and CI it aborts the install.
+interactive confirmation: in scripts and CI it aborts the install.
 There is no flag that bypasses it.</p>
 </div>
 <h2 id="where-the-report-appears">Where the report appears<a class="headerlink" href="#where-the-report-appears" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>CLI</strong> — <code>sy skill install</code> prints the verdict badge and every finding
+<li><strong>CLI</strong>: <code>sy skill install</code> prints the verdict badge and every finding
   (severity, check, file:line, message) immediately before the consent
   prompt.</li>
-<li><strong>GUI</strong> — the plugin approval modal renders a <em>Safety introspection</em>
+<li><strong>GUI</strong>: the plugin approval modal renders a <em>Safety introspection</em>
   verdict badge and the findings list <strong>above</strong> the requested permission
   grants, so you read the risk before the asks. The same report ships in
   the <code>security</code> field of the staging API response
   (<code>POST /api/v1/plugins/install</code>).</li>
 </ul>
 <p>Sources that publish partner security audits (e.g. skills.sh) have those
-audits surfaced at consent as additional signal — Soulacy's own pipeline
+audits surfaced at consent as additional signal: Soulacy's own pipeline
 still runs on every install.</p>
 <h2 id="limits-worth-knowing">Limits worth knowing<a class="headerlink" href="#limits-worth-knowing" title="Permanent link">&para;</a></h2>
 <ul>
 <li>The static scan covers Python and package documents; it does not execute
   code or analyse compiled artifacts.</li>
-<li>The LLM audit is advisory and skippable by circumstance — treat
+<li>The LLM audit is advisory and skippable by circumstance: treat
   <code>audit skipped</code> findings as "one fewer check ran", not as a pass.</li>
 <li>The dry-run observes only declared startup hooks for a few seconds.</li>
 <li>None of this replaces the install-time permission review or the runtime
-  default-deny enforcement — it is a pre-filter, the trust decisions remain
+  default-deny enforcement: it is a pre-filter, the trust decisions remain
   yours.</li>
 </ul>
 

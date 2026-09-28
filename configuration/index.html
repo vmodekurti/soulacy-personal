@@ -5142,7 +5142,7 @@
 
 <h1 id="configuration-overview">Configuration Overview<a class="headerlink" href="#configuration-overview" title="Permanent link">&para;</a></h1>
 <p>Soulacy is configured by a single <code>config.yaml</code> in the
-<a href="workspace/">workspace</a> — <code>~/.soulacy/soulspace/config.yaml</code> for new
+<a href="workspace/">workspace</a>: <code>~/.soulacy/soulspace/config.yaml</code> for new
 installations (legacy installs keep <code>~/.soulacy/config.yaml</code>). The gateway
 also honours <code>SOULACY_CONFIG_PATH</code>:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nv">SOULACY_CONFIG_PATH</span><span class="o">=</span>/etc/soulacy/config.yaml<span class="w"> </span>soulacy
@@ -5277,12 +5277,12 @@ also honours <code>SOULACY_CONFIG_PATH</code>:</p>
 <tr>
 <td><code>log</code></td>
 <td>Level (<code>debug</code>/<code>info</code>/<code>warn</code>/<code>error</code>), format (<code>json</code>/<code>console</code>), optional file</td>
-<td>—</td>
+<td>none</td>
 </tr>
 </tbody>
 </table>
 <h2 id="minimal-working-config">Minimal working config<a class="headerlink" href="#minimal-working-config" title="Permanent link">&para;</a></h2>
-<p>Everything has sane defaults — a fresh install runs with no config file
+<p>Everything has sane defaults: a fresh install runs with no config file
 at all (loopback only, Ollama provider). A typical small config:</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">server</span><span class="p">:</span>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">127.0.0.1</span>
@@ -5311,7 +5311,7 @@ at all (loopback only, Ollama provider). A typical small config:</p>
 <div class="admonition tip">
 <p class="admonition-title">Use absolute paths</p>
 <p>Relative paths in <code>agent_dirs</code> and similar keys resolve from the
-working directory at startup — unpredictable under LaunchAgent or
+working directory at startup: unpredictable under LaunchAgent or
 systemd. Always use absolute paths.</p>
 </div>
 <h2 id="environment-variable-overrides">Environment variable overrides<a class="headerlink" href="#environment-variable-overrides" title="Permanent link">&para;</a></h2>
@@ -5324,8 +5324,8 @@ systemd. Always use absolute paths.</p>
 </span></code></pre></div>
 <p>Two related env vars are not config overrides:</p>
 <ul>
-<li><code>SOULACY_CONFIG_PATH</code> — explicit config file path.</li>
-<li><code>SOULACY_WORKSPACE</code> — explicit workspace root (see
+<li><code>SOULACY_CONFIG_PATH</code>: explicit config file path.</li>
+<li><code>SOULACY_WORKSPACE</code>: explicit workspace root (see
   <a href="workspace/">Workspace Layout</a>).</li>
 </ul>
 <h2 id="config-file-discovery">Config file discovery<a class="headerlink" href="#config-file-discovery" title="Permanent link">&para;</a></h2>

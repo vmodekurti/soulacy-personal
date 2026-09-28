@@ -5329,7 +5329,7 @@
 
 
 <h1 id="soulyaml-reference">SOUL.yaml Reference<a class="headerlink" href="#soulyaml-reference" title="Permanent link">&para;</a></h1>
-<p>One <code>SOUL.yaml</code> file fully defines an agent — its identity, trigger, model, tools, memory, and behavior — and Soulacy hot-loads it the moment you save.</p>
+<p>One <code>SOUL.yaml</code> file fully defines an agent (its identity, trigger, model, tools, memory, and behavior) and Soulacy hot-loads it the moment you save.</p>
 <h2 id="quick-start">Quick Start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
 <div class="language-yaml highlight"><span class="filename">agents/assistant/SOUL.yaml</span><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">assistant</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Assistant</span>
@@ -5380,7 +5380,7 @@
 </span><span id="__span-2-24"><a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a><span class="w">  </span><span class="no">Produce a short brief. Cite sources when available.</span>
 </span><span id="__span-2-25"><a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>
 </span><span id="__span-2-26"><a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a><span class="c1"># ── Tools ─────────────────────────────────────────────────</span>
-</span><span id="__span-2-27"><a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a><span class="nt">tools</span><span class="p">:</span><span class="w">                       </span><span class="c1"># agent-local Python tools — see Agent Tools page</span>
+</span><span id="__span-2-27"><a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a><span class="nt">tools</span><span class="p">:</span><span class="w">                       </span><span class="c1"># agent-local Python tools, see Agent Tools page</span>
 </span><span id="__span-2-28"><a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">summarize_csv</span>
 </span><span id="__span-2-29"><a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a><span class="w">    </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Summarize a CSV file and return compact JSON.</span>
 </span><span id="__span-2-30"><a id="__codelineno-2-30" name="__codelineno-2-30" href="#__codelineno-2-30"></a><span class="w">    </span><span class="nt">python_file</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tools/summarize_csv.py</span>
@@ -5511,7 +5511,7 @@
 </tbody>
 </table>
 <p><code>channels</code> binds the agent to channel adapter IDs. Platform credentials and
-inbound routing live in <code>config.yaml</code> — the agent only declares which adapters
+inbound routing live in <code>config.yaml</code>: the agent only declares which adapters
 it serves.</p>
 <p><code>surfaces</code> controls where the same agent is visible or invokable. Leave it
 empty for Soulacy to derive a conservative default from <code>trigger</code> and
@@ -5539,7 +5539,7 @@ delivered to the phone that fired it.</p>
 </span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Office</span><span class="w">            </span><span class="c1"># shown on the phone; defaults to the agent name</span>
 </span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span><span class="nt">latitude</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">47.6205</span>
 </span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span><span class="nt">longitude</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">-122.3493</span>
-</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">  </span><span class="nt">radius_m</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">250</span><span class="w">           </span><span class="c1"># 100–5000 metres</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">  </span><span class="nt">radius_m</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">250</span><span class="w">           </span><span class="c1"># 100-5000 metres</span>
 </span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">  </span><span class="nt">on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">enter</span><span class="w">               </span><span class="c1"># enter | exit</span>
 </span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">  </span><span class="nt">cooldown</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">45m</span><span class="w">           </span><span class="c1"># ignore repeat crossings for this long (default 30m)</span>
 </span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">  </span><span class="c1"># device: &lt;installation-id&gt;   # optional: only this phone watches the place</span>
@@ -5586,10 +5586,10 @@ stream and in the phone's Location triggers screen with its outcome.</p>
 <h2 id="tools-skills-knowledge-peers">Tools, Skills, Knowledge, Peers<a class="headerlink" href="#tools-skills-knowledge-peers" title="Permanent link">&para;</a></h2>
 <p>These are covered in depth on their own pages:</p>
 <ul>
-<li><a href="../tools/">Agent Tools</a> — <code>tools:</code> (Python), <code>builtins:</code>, <code>mcp_servers:</code>/<code>mcp_tools:</code>, <code>system_tools:</code>, <code>confirm_tools:</code>.</li>
-<li><a href="../skills/">Skills</a> — <code>skills:</code> names, or <code>["*"]</code> for all installed.</li>
-<li><a href="../peers-builtins/">Peer Agents &amp; Built-ins</a> — <code>agents:</code> peer list and built-ins modes.</li>
-<li><a href="../authenticated-connections/">Authenticated Website Connections</a> — encrypted, owner-scoped sign-in sessions for interactive and scheduled agents.</li>
+<li><a href="../tools/">Agent Tools</a>: <code>tools:</code> (Python), <code>builtins:</code>, <code>mcp_servers:</code>/<code>mcp_tools:</code>, <code>system_tools:</code>, <code>confirm_tools:</code>.</li>
+<li><a href="../skills/">Skills</a>: <code>skills:</code> names, or <code>["*"]</code> for all installed.</li>
+<li><a href="../peers-builtins/">Peer Agents &amp; Built-ins</a>: <code>agents:</code> peer list and built-ins modes.</li>
+<li><a href="../authenticated-connections/">Authenticated Website Connections</a>: encrypted, owner-scoped sign-in sessions for interactive and scheduled agents.</li>
 </ul>
 <p><code>knowledge:</code> lists knowledge base names this agent may search via the built-in
 <code>kb_search</code> tool. Empty means no KB catalog is injected at all.</p>
@@ -5599,7 +5599,7 @@ an ID into <code>SOUL.yaml</code> cannot release another person's saved session.
 <h2 id="memory">Memory<a class="headerlink" href="#memory" title="Permanent link">&para;</a></h2>
 <p><code>memory</code> controls classic session/cross-session memory injection
 (<code>read_scopes</code>, <code>write_scopes</code>, <code>max_tokens</code>).</p>
-<p><code>brain_memory</code> controls the long-term layers — see
+<p><code>brain_memory</code> controls the long-term layers: see
 <a href="../../using/memory/">Agent Memory &amp; Rulebooks</a>:</p>
 <table>
 <thead>
@@ -5629,7 +5629,7 @@ an ID into <code>SOUL.yaml</code> cannot release another person's saved session.
 </table>
 <h2 id="reasoning">Reasoning<a class="headerlink" href="#reasoning" title="Permanent link">&para;</a></h2>
 <p>The <code>reasoning:</code> block switches the agent from a single LLM call to a
-multi-step loop — see <a href="../reasoning/">Reasoning Strategies</a>:</p>
+multi-step loop: see <a href="../reasoning/">Reasoning Strategies</a>:</p>
 <table>
 <thead>
 <tr>
@@ -5666,15 +5666,15 @@ multi-step loop — see <a href="../reasoning/">Reasoning Strategies</a>:</p>
 </tr>
 </tbody>
 </table>
-<p>The reasoning backend is derived automatically from <code>llm.provider</code> — there is
+<p>The reasoning backend is derived automatically from <code>llm.provider</code>: there is
 nothing extra to configure.</p>
 <h2 id="workflow">Workflow<a class="headerlink" href="#workflow" title="Permanent link">&para;</a></h2>
 <p><code>workflow:</code> replaces the free-form LLM loop with a checkpointed pipeline. Two
 shapes are supported:</p>
 <ul>
-<li><strong>Linear steps</strong> (<code>workflow.steps</code>) — see <a href="../workflow/">Workflow Steps</a>.</li>
+<li><strong>Linear steps</strong> (<code>workflow.steps</code>): see <a href="../workflow/">Workflow Steps</a>.</li>
 <li><strong>Cyclic graphs</strong> (<code>workflow.nodes</code> / <code>edges</code> / <code>entry</code> / <code>max_node_executions</code>)
-  with conditional routing and bounded loops — see <a href="../flows/">Flow Graphs</a>.
+  with conditional routing and bounded loops: see <a href="../flows/">Flow Graphs</a>.
   When nodes are declared they take precedence over steps.</li>
 </ul>
 <h2 id="schedule">Schedule<a class="headerlink" href="#schedule" title="Permanent link">&para;</a></h2>
@@ -5690,8 +5690,8 @@ shapes are supported:</p>
 </span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">    </span><span class="nt">template</span><span class="p">:</span><span class="w"> </span><span class="s">"{reply}"</span>
 </span></code></pre></div>
 <p>When <code>run_missed_on_startup</code> is <code>true</code>, Soulacy replays at most <strong>one</strong> missed
-fire per startup — the latest one inside <code>missed_startup_window</code> (default
-<code>24h</code>) — so a long outage never floods downstream channels.</p>
+fire per startup. It chooses the latest one inside <code>missed_startup_window</code>
+(default <code>24h</code>), so a long outage never floods downstream channels.</p>
 <p>Use <code>notify_on_failure</code> to route errors somewhere a human will see them.
 Channel-triggered runs reply with errors automatically; cron and manual runs
 fail silently unless this block is set.</p>
@@ -5738,7 +5738,7 @@ the challenge message.</p>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>
 <p>The GUI agent editor (Agents page) round-trips every field on this page,
-including the tri-state <code>builtins</code> modes and per-tool timeouts — you never
+including the tri-state <code>builtins</code> modes and per-tool timeouts: you never
 have to hand-edit YAML unless you prefer to.</p>
 </div>
 

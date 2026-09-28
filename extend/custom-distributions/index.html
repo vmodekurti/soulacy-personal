@@ -2959,7 +2959,7 @@
   <a href="#flavored-binary-vs-plugin-which-one" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Flavored binary vs. plugin — which one?
+        Flavored binary vs. plugin: which one?
       
     </span>
   </a>
@@ -5060,7 +5060,7 @@
   <a href="#flavored-binary-vs-plugin-which-one" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Flavored binary vs. plugin — which one?
+        Flavored binary vs. plugin: which one?
       
     </span>
   </a>
@@ -5141,7 +5141,7 @@
 
 
 <h1 id="custom-distributions">Custom Distributions<a class="headerlink" href="#custom-distributions" title="Permanent link">&para;</a></h1>
-<p>A flavored binary is a standard single static <code>soulacy</code> build with extra drivers compiled in — the same security and deployment model as stock, verified by conformance gates before it ships.</p>
+<p>A flavored binary is a standard single static <code>soulacy</code> build with extra drivers compiled in: the same security and deployment model as stock, verified by conformance gates before it ships.</p>
 <h2 id="quick-start">Quick start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
 <p>From the repository root:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>soulacy<span class="w"> </span>build<span class="w"> </span>--with<span class="w"> </span>github.com/acme/soulacy-matrix@v1.2.0<span class="w"> </span>-o<span class="w"> </span>bin/soulacy-matrix
@@ -5151,7 +5151,7 @@ working from source without a built <code>soulacy</code>.)</p>
 <p>The result is one static binary containing the extra driver, with all
 registries proven populated before the build is accepted.</p>
 <h2 id="how-it-works">How it works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h2>
-<p>Drivers self-register with the SDK factory registries from <code>init()</code> —
+<p>Drivers self-register with the SDK factory registries from <code>init()</code>.
 channels, LLM providers, queues, vectors, reasoning strategies, plugin DB
 migrations, and package-registry providers all use the same mechanism.
 Compiling a driver in is therefore exactly one blank import plus a module
@@ -5159,13 +5159,13 @@ requirement, which is what the build tool automates:</p>
 <ol>
 <li><code>go get</code> each <code>--with</code> module at the requested version (<code>latest</code> when
    the <code>@version</code> suffix is omitted) into <code>go.mod</code>/<code>go.sum</code>.</li>
-<li>Write <code>cmd/soulacy/builtins_extra.go</code> — a generated blank-import file
+<li>Write <code>cmd/soulacy/builtins_extra.go</code>: a generated blank-import file
    linking each module's <code>init()</code> registrations into the binary.</li>
 <li><strong>Verification gates</strong>: the conformance kits (<code>TestConformance*</code> for
    providers and channel adapters, the sidecar protocol runner against the
    reference sidecars) plus <code>TestAllBuiltinsRegistered</code>, proving the
    registries are fully populated in <em>this</em> build.</li>
-<li><code>go build -trimpath -o &lt;out&gt; ./cmd/soulacy</code> — one static binary.</li>
+<li><code>go build -trimpath -o &lt;out&gt; ./cmd/soulacy</code>: one static binary.</li>
 </ol>
 <p>Flags:</p>
 <table>
@@ -5190,7 +5190,7 @@ requirement, which is what the build tool automates:</p>
 </tr>
 <tr>
 <td><code>--keep</code></td>
-<td>keep <code>builtins_extra.go</code> after the build (default true — required for rebuilds)</td>
+<td>keep <code>builtins_extra.go</code> after the build (default true: required for rebuilds)</td>
 </tr>
 </tbody>
 </table>
@@ -5199,7 +5199,7 @@ requirement, which is what the build tool automates:</p>
 <p class="admonition-title">Think twice before <code>--skip-verify</code></p>
 <p>The gates exist so a flavored binary cannot ship with a driver that
 half-implements its contract. Skipping them is for fast local
-iteration only — never for a binary you hand to others. In a
+iteration only: never for a binary you hand to others. In a
 distribution fork, keep the generated <code>builtins_extra.go</code> committed so
 rebuilds are reproducible.</p>
 </div>
@@ -5220,7 +5220,7 @@ factory in <code>init()</code>:</p>
 </span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">    </span><span class="p">})</span>
 </span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="p">}</span>
 </span></code></pre></div>
-<p>The same pattern covers every extension point — for example a custom
+<p>The same pattern covers every extension point: for example a custom
 package-registry provider:</p>
 <div class="language-go highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kd">func</span><span class="w"> </span><span class="nx">init</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">    </span><span class="nx">registry</span><span class="p">.</span><span class="nx">MustRegisterPkgRegistry</span><span class="p">(</span><span class="s">"s3"</span><span class="p">,</span><span class="w"> </span><span class="kd">func</span><span class="p">(</span><span class="nx">cfg</span><span class="w"> </span><span class="kt">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">any</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">pkgregistry</span><span class="p">.</span><span class="nx">Provider</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
@@ -5249,7 +5249,7 @@ package-registry provider:</p>
 </span></code></pre></div>
 </li>
 <li>
-<p><strong>Configure</strong> — unrecognised <code>channels.&lt;key&gt;</code> blocks are wired through
+<p><strong>Configure</strong>: unrecognised <code>channels.&lt;key&gt;</code> blocks are wired through
    the factory registry under that key, so the new driver configures
    exactly like a built-in:</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># config.yaml</span>
@@ -5266,10 +5266,10 @@ package-registry provider:</p>
 </li>
 <li>
 <p><strong>Run</strong> <code>bin/soulacy-matrix</code>. Keys without a registered factory warn
-   and skip — the gateway always boots, even with a typo'd block.</p>
+   and skip: the gateway always boots, even with a typo'd block.</p>
 </li>
 </ol>
-<h2 id="flavored-binary-vs-plugin-which-one">Flavored binary vs. plugin — which one?<a class="headerlink" href="#flavored-binary-vs-plugin-which-one" title="Permanent link">&para;</a></h2>
+<h2 id="flavored-binary-vs-plugin-which-one">Flavored binary vs. plugin: which one?<a class="headerlink" href="#flavored-binary-vs-plugin-which-one" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
@@ -5292,7 +5292,7 @@ package-registry provider:</p>
 <tr>
 <td>Trust model</td>
 <td>default-deny principal, install approval</td>
-<td>compiled in — full trust, reviewed at build time</td>
+<td>compiled in: full trust, reviewed at build time</td>
 </tr>
 <tr>
 <td>Best for</td>

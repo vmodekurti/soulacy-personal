@@ -5266,9 +5266,9 @@
 <p>Connect agents to WhatsApp using the WhatsApp Business Platform (Meta Cloud API).</p>
 <p>Soulacy has two distinct WhatsApp paths:</p>
 <ul>
-<li><code>channels.whatsapp</code> — official Meta WhatsApp Business Cloud API. Use this for
+<li><code>channels.whatsapp</code>: official Meta WhatsApp Business Cloud API. Use this for
   production/customer traffic.</li>
-<li><code>channels.whatsapp_web</code> — experimental WhatsApp Web linked-device sidecar.
+<li><code>channels.whatsapp_web</code>: experimental WhatsApp Web linked-device sidecar.
   This uses QR pairing through Baileys and is not an official WhatsApp Business
   API integration. Use only for personal/local automation.</li>
 </ul>
@@ -5279,7 +5279,7 @@
 <li>A phone number approved for WhatsApp Business API</li>
 </ul>
 <blockquote>
-<p><strong>Note:</strong> WhatsApp Business API is not free — it is billed per conversation. See <a href="https://developers.facebook.com/docs/whatsapp/pricing">Meta's pricing</a>.</p>
+<p><strong>Note:</strong> WhatsApp Business API is not free: it is billed per conversation. See <a href="https://developers.facebook.com/docs/whatsapp/pricing">Meta's pricing</a>.</p>
 </blockquote>
 <h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
 <h3 id="1-create-a-meta-app">1. Create a Meta App<a class="headerlink" href="#1-create-a-meta-app" title="Permanent link">&para;</a></h3>
@@ -5292,9 +5292,9 @@
 <p>In the WhatsApp section of your app, add and verify your business phone number.</p>
 <h3 id="3-get-credentials">3. Get credentials<a class="headerlink" href="#3-get-credentials" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong>Access Token</strong> — permanent token from Meta Business Suite</li>
-<li><strong>Phone Number ID</strong> — the ID of your WhatsApp phone number</li>
-<li><strong>Webhook Verify Token</strong> — any secret string you choose</li>
+<li><strong>Access Token</strong>: permanent token from Meta Business Suite</li>
+<li><strong>Phone Number ID</strong>: the ID of your WhatsApp phone number</li>
+<li><strong>Webhook Verify Token</strong>: any secret string you choose</li>
 </ul>
 <h3 id="4-configure-soulacy">4. Configure Soulacy<a class="headerlink" href="#4-configure-soulacy" title="Permanent link">&para;</a></h3>
 <div class="language-yaml highlight"><span class="filename">config.yaml</span><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">channels</span><span class="p">:</span>
@@ -5352,7 +5352,7 @@
 <hr />
 <h2 id="limitations">Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h2>
 <ul>
-<li>WhatsApp does not support markdown, bold, or links in outgoing messages — responses are sent as plain text</li>
+<li>WhatsApp does not support markdown, bold, or links in outgoing messages: responses are sent as plain text</li>
 <li>The business phone number cannot receive regular WhatsApp messages once it's on the API</li>
 <li>24-hour conversation window applies: you can only reply within 24 hours of the last user message (or use approved message templates)</li>
 </ul>

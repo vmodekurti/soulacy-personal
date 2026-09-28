@@ -5167,7 +5167,7 @@
 <h2 id="quick-start">Quick start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
 <ol>
 <li>Open <strong>📚 Knowledge</strong> in the GUI and click <strong>+ New KB</strong>. Name it (e.g. <code>product-docs</code>), keep the default embedding settings, <strong>Create</strong>.</li>
-<li>Click <strong>+ Add document</strong> and pick one or more files (<code>.md</code>, <code>.txt</code>, <code>.pdf</code>, <code>.docx</code>) — or paste text. Files embed one at a time so a local Ollama isn't overwhelmed.</li>
+<li>Click <strong>+ Add document</strong> and pick one or more files (<code>.md</code>, <code>.txt</code>, <code>.pdf</code>, <code>.docx</code>), or paste text. Files embed one at a time so a local Ollama isn't overwhelmed.</li>
 <li>Use <strong>Test search</strong> at the bottom of the KB view to confirm a query returns the right chunks.</li>
 <li>Wire it to an agent: <strong>Agents</strong> → your agent → <strong>Knowledge bases</strong> → pick the KB → <strong>Save</strong>.</li>
 </ol>
@@ -5188,12 +5188,12 @@
 </span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"query":"refund policy","top_k":5}'</span>
 </span></code></pre></div>
 <h2 id="embedding-model-configuration">Embedding model configuration<a class="headerlink" href="#embedding-model-configuration" title="Permanent link">&para;</a></h2>
-<p>Each KB is bound to one embedding provider + model, chosen at creation (defaults come from the server, typically <code>ollama</code> / <code>nomic-embed-text</code>). The vector dimension is probed automatically from the embedder when the KB is created — you never set it by hand. The KB header shows the binding:</p>
+<p>Each KB is bound to one embedding provider + model, chosen at creation (defaults come from the server, typically <code>ollama</code> / <code>nomic-embed-text</code>). The vector dimension is probed automatically from the embedder when the KB is created: you never set it by hand. The KB header shows the binding:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>ollama/nomic-embed-text · dim 768 · chunks 256/32
 </span></code></pre></div>
 <div class="admonition warning">
 <p class="admonition-title">Warning</p>
-<p>The embedding model cannot change after creation — all stored vectors were produced with it. To switch models, create a new KB and re-ingest.</p>
+<p>The embedding model cannot change after creation: all stored vectors were produced with it. To switch models, create a new KB and re-ingest.</p>
 </div>
 <p>If the page shows <em>"Knowledge store is disabled"</em>, set <code>knowledge.db_path</code> in <code>config.yaml</code> and restart the gateway.</p>
 <h2 id="managing-documents">Managing documents<a class="headerlink" href="#managing-documents" title="Permanent link">&para;</a></h2>
@@ -5201,9 +5201,9 @@
 <ul>
 <li><strong>Delete</strong> removes one document (and its chunks/vectors).</li>
 <li>Checkboxes + the bulk bar delete many at once.</li>
-<li>Re-ingesting under the same title creates a new document — delete the stale one if you are refreshing content.</li>
+<li>Re-ingesting under the same title creates a new document: delete the stale one if you are refreshing content.</li>
 </ul>
-<p>Under the hood, ingestion chunks text on sentence boundaries with a parent-child scheme: small chunks are embedded for precise matching, but searches return the larger surrounding parent chunk so the agent gets coherent context. Search itself is hybrid — vector similarity fused with full-text (BM25) ranking — so exact terms like IDs and names score well too.</p>
+<p>Under the hood, ingestion chunks text on sentence boundaries with a parent-child scheme: small chunks are embedded for precise matching, but searches return the larger surrounding parent chunk so the agent gets coherent context. Search itself is hybrid (vector similarity fused with full-text (BM25) ranking) so exact terms like IDs and names score well too.</p>
 <h2 id="wiring-kbs-to-agents-kb_search">Wiring KBs to agents (<code>kb_search</code>)<a class="headerlink" href="#wiring-kbs-to-agents-kb_search" title="Permanent link">&para;</a></h2>
 <p>Declare which KBs an agent may search in its SOUL.yaml:</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">knowledge</span><span class="p">:</span>
@@ -5214,9 +5214,9 @@
 <p>The agent then gets the built-in <code>kb_search</code> tool and calls it on its own:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>kb_search(kb="product-docs", query="warranty period for model X")
 </span></code></pre></div>
-<p>Results come back in well under a second from the local store. Make the agent use it reliably by saying so in the system prompt — e.g. the shipped Document Compliance Auditor template instructs: <em>"Search before judging — never audit from memory."</em></p>
+<p>Results come back in well under a second from the local store. Make the agent use it reliably by saying so in the system prompt. For example, the shipped Document Compliance Auditor template says: <em>"Search before judging. Never audit from memory."</em></p>
 <h2 id="test-search">Test search<a class="headerlink" href="#test-search" title="Permanent link">&para;</a></h2>
-<p>The <strong>Test search</strong> box at the bottom of every KB view runs the exact same search the agent's <code>kb_search</code> performs — query, <code>top_k</code>, ranked hits with the source document title, distance score, and the chunk content. Use it to sanity-check retrieval before blaming the agent's prompt.</p>
+<p>The <strong>Test search</strong> box at the bottom of every KB view runs the exact same search the agent's <code>kb_search</code> performs: query, <code>top_k</code>, ranked hits with the source document title, distance score, and the chunk content. Use it to sanity-check retrieval before blaming the agent's prompt.</p>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>
 <p>If a query you care about doesn't surface the right chunk in Test search, the agent won't find it either. Fix it at the data layer first: better document titles, smaller focused documents, or re-phrasing key sections.</p>

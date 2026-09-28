@@ -5243,12 +5243,12 @@
 <tr>
 <td><a href="http/">HTTP</a></td>
 <td>✅ Stable</td>
-<td>— (always active)</td>
+<td>Always active</td>
 </tr>
 <tr>
 <td><a href="mobile/">Soulacy Mobile</a></td>
 <td>✅ Stable outbound</td>
-<td>— (always active)</td>
+<td>Always active</td>
 </tr>
 <tr>
 <td><a href="webhook/">Generic Webhooks</a></td>
@@ -5427,9 +5427,9 @@ WhatsApp Web. HTTP is always active because callers explicitly invoke its API.</
   Failed tests return the same structured diagnosis used in Activity and support
   bundles, so <code>chat not found</code>, <code>missing scope</code>, bad webhook URLs, and rate
   limits are visible before a cron job depends on them. Email adds
-  SMTP-specific categories — authentication failed, STARTTLS required,
-  relay denied / SPF, recipient rejected, quota, message rejected, TLS
-  handshake — so raw <code>535 5.7.8</code> / <code>550 5.1.1</code> codes don't bubble up as
+  SMTP-specific categories: authentication failed, STARTTLS required,
+  relay denied / SPF, recipient rejected, quota, message rejected, and TLS
+  handshake. Raw <code>535 5.7.8</code> / <code>550 5.1.1</code> codes do not bubble up as
   "unknown".</li>
 <li>Click <strong>Edit</strong> on Telegram, Slack, or Discord to manage <strong>Bot mappings</strong>.</li>
 <li>Bot mapping rows record a friendly bot name and provide an agent ID dropdown populated from your installed agents.</li>
@@ -5502,11 +5502,11 @@ report to a team channel.</p>
 <h2 id="channel-specific-formatting">Channel-specific formatting<a class="headerlink" href="#channel-specific-formatting" title="Permanent link">&para;</a></h2>
 <p>Each channel adapter handles platform-specific formatting automatically:</p>
 <ul>
-<li><strong>Telegram</strong> — Markdown → MarkdownV2 escaping, inline buttons</li>
-<li><strong>Slack</strong> — Markdown → Block Kit, thread replies</li>
-<li><strong>Discord</strong> — Markdown → Discord markdown, embed cards</li>
-<li><strong>WhatsApp</strong> — Plain text (WhatsApp does not support rich formatting)</li>
-<li><strong>HTTP</strong> — Raw text or JSON, caller decides rendering</li>
+<li><strong>Telegram</strong>: Markdown → MarkdownV2 escaping, inline buttons</li>
+<li><strong>Slack</strong>: Markdown → Block Kit, thread replies</li>
+<li><strong>Discord</strong>: Markdown → Discord markdown, embed cards</li>
+<li><strong>WhatsApp</strong>: Plain text (WhatsApp does not support rich formatting)</li>
+<li><strong>HTTP</strong>: Raw text or JSON, caller decides rendering</li>
 </ul>
 
 

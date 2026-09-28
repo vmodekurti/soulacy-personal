@@ -5183,7 +5183,7 @@ deployment report says so. Three things are true there at once: the gateway is
 usually reachable from the internet, you have no shell of your own to repair
 what an agent breaks, and the container is rebuilt from an image you may not
 control.</p>
-<p>A container you run yourself — Docker, Kubernetes — keeps the decision. The
+<p>A container you run yourself (Docker, Kubernetes) keeps the decision. The
 line is whether you can get in and undo a mistake, not whether the machine
 happens to be in a data centre.</p>
 <h2 id="things-that-need-root">Things that need root<a class="headerlink" href="#things-that-need-root" title="Permanent link">&para;</a></h2>
@@ -5191,8 +5191,8 @@ happens to be in a data centre.</p>
 without root. When the report says a system package is missing, the answer is
 always the image: add it to the Dockerfile and redeploy. The report says that
 rather than suggesting a command that cannot work.</p>
-<p>The exception is anything that only needs to be <em>found</em> rather than installed —
-see <a href="../../agents/browser-automation/">browser automation</a>, which turns ~30MB of image
+<p>The exception is anything that only needs to be <em>found</em> rather than installed.
+See <a href="../../agents/browser-automation/">browser automation</a>, which turns ~30MB of image
 weight into a download you make only if you need it.</p>
 
 

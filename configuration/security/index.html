@@ -5365,7 +5365,7 @@ packages; install needed libraries in the image or remote environment.</p>
 <ul>
 <li><strong>SAFE</strong> (read-only, always available on the local <code>http</code> channel):
   <code>read_file</code>, <code>list_dir</code>, <code>find_files</code>, <code>fetch_url</code>, <code>http_request</code>,
-  <code>env_get</code>, <code>sys_info</code>. These require no special grant — an agent reachable
+  <code>env_get</code>, <code>sys_info</code>. These require no special grant: an agent reachable
   on the local web channel can use them (suppress them with <code>builtins: []</code>).</li>
 <li>
 <p><strong>SYSTEM</strong> (privileged): <code>shell_exec</code>, <code>run_script</code>, <code>install_library</code>,
@@ -5391,7 +5391,7 @@ channels. When system tools are necessary, add confirmations:</p>
 </span></code></pre></div>
 <h3 id="tool-environment-allowlist-sec-5">Tool environment allowlist (SEC-5)<a class="headerlink" href="#tool-environment-allowlist-sec-5" title="Permanent link">&para;</a></h3>
 <p>Python tool subprocesses no longer inherit the gateway's full environment.
-They receive only a base allowlist — <code>PATH</code>, <code>HOME</code>, <code>LANG</code>, <code>TMPDIR</code> — plus
+They receive only a base allowlist (<code>PATH</code>, <code>HOME</code>, <code>LANG</code>, <code>TMPDIR</code>) plus
 any variable <strong>names</strong> you declare per agent:</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">env</span><span class="p">:</span>
 </span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GITHUB_TOKEN</span>

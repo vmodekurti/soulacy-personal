@@ -5295,7 +5295,7 @@ the Workboard GUI does goes through these endpoints.</p>
 </span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="nt">"statuses"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"todo"</span><span class="p">,</span><span class="w"> </span><span class="s2">"running"</span><span class="p">,</span><span class="w"> </span><span class="s2">"needs_review"</span><span class="p">,</span><span class="w"> </span><span class="s2">"done"</span><span class="p">,</span><span class="w"> </span><span class="s2">"failed"</span><span class="p">]</span>
 </span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="p">}</span>
 </span></code></pre></div>
-<p>(The <code>statuses</code> array is the server's authoritative status list — render
+<p>(The <code>statuses</code> array is the server's authoritative status list: render
 columns from it rather than hard-coding.)</p>
 <h2 id="runs">Runs<a class="headerlink" href="#runs" title="Permanent link">&para;</a></h2>
 <table>
@@ -5398,7 +5398,7 @@ attachment</code> header. It returns <code>404</code> for an unknown artifact an
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:18789/api/v1/workboard/tasks/12/comments<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$SOULACY_API_KEY</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
 </span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">"Content-Type: application/json"</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"author": "vasu", "body": "Looks good — ship it.", "kind": "review"}'</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"author": "vasu", "body": "Looks good, ship it.", "kind": "review"}'</span>
 </span></code></pre></div>
 <h2 id="error-shapes">Error shapes<a class="headerlink" href="#error-shapes" title="Permanent link">&para;</a></h2>
 <table>

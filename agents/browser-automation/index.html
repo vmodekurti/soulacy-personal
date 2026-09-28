@@ -5238,7 +5238,7 @@ plus its libraries is several hundred megabytes that would otherwise sit in
 every image. You choose one of two routes.</p>
 <h2 id="route-1-a-remote-browser-no-local-install">Route 1: a remote browser (no local install)<a class="headerlink" href="#route-1-a-remote-browser-no-local-install" title="Permanent link">&para;</a></h2>
 <p>Point the server at a browser running somewhere else. Nothing is installed on
-your gateway — no Chromium, no system libraries, no download — so this works on
+your gateway (no Chromium, no system libraries, no download) so this works on
 platforms where you have no shell.</p>
 <p>On the <strong>MCP Servers</strong> page, choose the <strong>Browser remote (CDP)</strong> template and
 replace the endpoint with your browser service URL:</p>
@@ -5272,7 +5272,7 @@ search path they load from your volume exactly as well as from <code>/usr/lib</c
 <p>The checksum is required, not optional: these files are loaded into the browser
 process, so a bundle that is not the one you meant is code execution rather
 than a corrupt download. The bundle lands on the mounted volume, so it survives
-a redeploy. <strong>Restart the gateway afterwards</strong> — a server already running
+a redeploy. <strong>Restart the gateway afterwards.</strong> A server already running
 inherited the old environment and cannot see the new directory.</p>
 <p><strong>The browser itself.</strong> Once the libraries are in place:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>npx<span class="w"> </span>playwright<span class="w"> </span>install<span class="w"> </span>chromium
@@ -5332,7 +5332,7 @@ upgrade.</p>
 <tbody>
 <tr>
 <td><code>initialize: stdio transport closed before response</code></td>
-<td>the server exited at startup — usually Node is too old (Playwright needs 20+)</td>
+<td>the server exited at startup: usually Node is too old (Playwright needs 20+)</td>
 </tr>
 <tr>
 <td><code>Chromium distribution 'chrome' is not found</code></td>
@@ -5348,7 +5348,7 @@ upgrade.</p>
 </tr>
 <tr>
 <td><em>"the browser had closed"</em> on every navigation</td>
-<td>the same thing as above — NSS aborts as soon as a page uses TLS</td>
+<td>the same thing as above: NSS aborts as soon as a page uses TLS</td>
 </tr>
 <tr>
 <td><code>Target page, context or browser has been closed</code> on a fresh start</td>
@@ -5356,7 +5356,7 @@ upgrade.</p>
 </tr>
 <tr>
 <td><code>EACCES … /tmp/pw-*/browser/…sock</code></td>
-<td>that directory is owned by another user — usually created by running the server as root while the gateway runs unprivileged</td>
+<td>that directory is owned by another user: usually created by running the server as root while the gateway runs unprivileged</td>
 </tr>
 </tbody>
 </table>
@@ -5371,7 +5371,7 @@ for: its child process is not a leak, it is the page you navigated to. Without
 the flag the browser is killed a second after <code>browser_navigate</code> returns, and
 the next call reports <code>about:blank</code> with nothing to say why.</p>
 <p>The exemption ends when the server stops. Whatever it left running is reaped
-then — on a restart, or when the server is removed — because nothing owns those
+then (on a restart, or when the server is removed) because nothing owns those
 processes any more, and an orphaned browser holds the runtime directory its
 replacement needs.</p>
 <h2 id="agent-allowlist">Agent Allowlist<a class="headerlink" href="#agent-allowlist" title="Permanent link">&para;</a></h2>

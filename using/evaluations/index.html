@@ -5289,8 +5289,8 @@ and <code>--tag</code> for focused release checks:</p>
 <p>A case that needs credentials lists them in <code>requires_secret</code>. If any named
 environment variable is unset, the case is <strong>skipped with a clear reason</strong>
 (<code>missing required secret(s): SLACK_BOT_TOKEN</code>) rather than failing. This lets CI
-run the non-secret subset automatically while local runs execute the full set —
-and the skip reason documents exactly what to set.</p>
+run the non-secret subset automatically while local runs execute the full set.
+The skip reason documents exactly what to set.</p>
 <h2 id="golden-suites">Golden suites<a class="headerlink" href="#golden-suites" title="Permanent link">&para;</a></h2>
 <p>The bundled golden suites cover the flagship surfaces:</p>
 <p><code>weather</code>, <code>stock-screener</code>, <code>deal-finder</code>, <code>research-librarian</code>,
@@ -5299,7 +5299,7 @@ and the skip reason documents exactly what to set.</p>
 <p>The channel suites (<code>telegram</code>, <code>slack</code>, <code>discord</code>) and live-data cases are
 secret-backed and skip cleanly when their tokens aren't present.</p>
 <h2 id="in-ci">In CI<a class="headerlink" href="#in-ci" title="Permanent link">&para;</a></h2>
-<p>Run the non-secret subset on every push — cases needing secrets skip themselves,
+<p>Run the non-secret subset on every push: cases needing secrets skip themselves,
 so no configuration is required:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>sy<span class="w"> </span><span class="nb">eval</span><span class="w"> </span>--agent<span class="w"> </span>ci-smoke<span class="w"> </span>--suite<span class="w"> </span>evals/golden<span class="w"> </span>--json
 </span></code></pre></div>

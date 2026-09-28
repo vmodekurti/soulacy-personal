@@ -5197,7 +5197,7 @@
 
 
 <h1 id="schedules">Schedules<a class="headerlink" href="#schedules" title="Permanent link">&para;</a></h1>
-<p>Cron agents run on a schedule you define — daily briefings, weekly monitors, periodic syncs — and the Schedule page is where you watch, trigger, and tune them.</p>
+<p>Cron agents run on a schedule you define (daily briefings, weekly monitors, periodic syncs) and the Schedule page is where you watch, trigger, and tune them.</p>
 <h2 id="quick-start">Quick start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
 <p>Give an agent a cron trigger in its SOUL.yaml (or set Trigger to <code>cron</code> in the Agents editor):</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">trigger</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cron</span>
@@ -5209,7 +5209,7 @@
 </span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">    </span><span class="nt">bot_name</span><span class="p">:</span><span class="w"> </span><span class="s">"Finance</span><span class="nv"> </span><span class="s">Bot"</span>
 </span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 </span></code></pre></div>
-<p>Then open <strong>⏱ Schedule</strong> in the GUI — the agent appears under <strong>Cron agents</strong> with a countdown to its next fire. Click <strong>▶ Run</strong> to trigger it immediately.</p>
+<p>Then open <strong>⏱ Schedule</strong> in the GUI: the agent appears under <strong>Cron agents</strong> with a countdown to its next fire. Click <strong>▶ Run</strong> to trigger it immediately.</p>
 <p>CLI / API:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>sy<span class="w"> </span>schedule<span class="w"> </span>list<span class="w">                       </span><span class="c1"># all scheduled entries</span>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>sy<span class="w"> </span>schedule<span class="w"> </span>trigger<span class="w"> </span>&lt;agent-id&gt;<span class="w">         </span><span class="c1"># run now</span>
@@ -5230,7 +5230,7 @@
 <tbody>
 <tr>
 <td><strong>Agent</strong></td>
-<td>The agent's display name. A small orange <code>⟳ auto-replayed</code> chip appears when the gateway missed a fire and replayed it at startup — hover for the missed / replayed timestamps and how much late the run was</td>
+<td>The agent's display name. A small orange <code>⟳ auto-replayed</code> chip appears when the gateway missed a fire and replayed it at startup: hover for the missed / replayed timestamps and how much late the run was</td>
 </tr>
 <tr>
 <td><strong>Next run</strong></td>
@@ -5238,7 +5238,7 @@
 </tr>
 <tr>
 <td><strong>Last run</strong></td>
-<td>The previous fire time ("—" if it has never run)</td>
+<td>The previous fire time (blank if it has never run)</td>
 </tr>
 <tr>
 <td><strong>Missed runs</strong></td>
@@ -5249,21 +5249,21 @@
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>Save fails at the edit modal if <code>schedule.cron</code> is not a valid cron
-expression — the same parser the scheduler uses at registration time runs
+expression: the same parser the scheduler uses at registration time runs
 at Save time, so <code>* * *</code>, <code>hello world</code>, or <code>60 * * * *</code> are refused with
 the parser's own explanation ("expected exactly 5 fields, found 3").
 Previously an invalid string saved cleanly and the "Next run" column
 silently stayed blank forever.</p>
 </div>
 <h3 id="cron-agents-table">Cron agents table<a class="headerlink" href="#cron-agents-table" title="Permanent link">&para;</a></h3>
-<p>Every agent with <code>trigger: cron</code>, manageable in place: ID, name, cron expression, output bot, enabled state, and a live <strong>Status</strong> cell — <strong>Running…</strong> with a pulse while executing, <strong>⏰ runs in 4m 12s</strong> when a fire is imminent (within 15 minutes), or a plain countdown.</p>
+<p>Every agent with <code>trigger: cron</code>, manageable in place: ID, name, cron expression, output bot, enabled state, and a live <strong>Status</strong> cell: <strong>Running…</strong> with a pulse while executing, <strong>⏰ runs in 4m 12s</strong> when a fire is imminent (within 15 minutes), or a plain countdown.</p>
 <p>Per-row actions:</p>
 <ul>
-<li><strong>▶ Run</strong> — manual trigger. If the next scheduled fire is imminent, a prompt asks whether to run now or wait (so you don't double-run). A running job can't be started again, and a scheduled fire is skipped while one is in progress.</li>
-<li><strong>Test output</strong> — sends a clearly marked smoke-test message through the configured <code>schedule.output</code> channel without invoking the LLM. Use it after adding or rotating a Telegram/Slack/Discord/WhatsApp destination.</li>
-<li><strong>📋 History</strong> — slide-out panel of past runs, each with a ✓ success / ✗ failed badge, timestamp, trigger source, delivery status, expandable full output, and token/cost metrics. A run counts as failed if any tool returned an error, even when the agent still produced a reply.</li>
-<li><strong>👁 Watch</strong> — jumps to the Activity page with live polling already on.</li>
-<li><strong>Edit / Clone / Delete</strong> — clone creates a disabled copy; delete removes the SOUL.yaml from disk.</li>
+<li><strong>▶ Run</strong>: manual trigger. If the next scheduled fire is imminent, a prompt asks whether to run now or wait (so you don't double-run). A running job can't be started again, and a scheduled fire is skipped while one is in progress.</li>
+<li><strong>Test output</strong>: sends a clearly marked smoke-test message through the configured <code>schedule.output</code> channel without invoking the LLM. Use it after adding or rotating a Telegram/Slack/Discord/WhatsApp destination.</li>
+<li><strong>📋 History</strong>: slide-out panel of past runs, each with a ✓ success / ✗ failed badge, timestamp, trigger source, delivery status, expandable full output, and token/cost metrics. A run counts as failed if any tool returned an error, even when the agent still produced a reply.</li>
+<li><strong>👁 Watch</strong>: jumps to the Activity page with live polling already on.</li>
+<li><strong>Edit / Clone / Delete</strong>: clone creates a disabled copy; delete removes the SOUL.yaml from disk.</li>
 </ul>
 <h2 id="missed-run-catch-up">Missed-run catch-up<a class="headerlink" href="#missed-run-catch-up" title="Permanent link">&para;</a></h2>
 <p>If the gateway is down (or asleep) at an agent's scheduled time, the default is to <strong>skip</strong> the missed fire. Agents that should make up for downtime opt in:</p>
@@ -5279,19 +5279,19 @@ silently stayed blank forever.</p>
 <li>Older missed fires are never replayed.</li>
 <li>Completed fires are remembered across restarts, so nothing runs twice.</li>
 </ul>
-<p>The schedule API reports the policy per entry as <code>catch_up</code> and <code>catch_up_window</code> — that is what the <strong>Missed runs</strong> column displays.</p>
+<p>The schedule API reports the policy per entry as <code>catch_up</code> and <code>catch_up_window</code>: that is what the <strong>Missed runs</strong> column displays.</p>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>
-<p>A daily-briefing agent is the classic candidate: with <code>run_missed_on_startup: true</code> and a <code>24h</code> window, booting your machine at 9:30 still gets you the 7:00 briefing — exactly once.</p>
+<p>A daily-briefing agent is the classic candidate: with <code>run_missed_on_startup: true</code> and a <code>24h</code> window, booting your machine at 9:30 still gets you the 7:00 briefing: exactly once.</p>
 </div>
 <p>When a startup catch-up actually fires, the scheduler emits a
 <code>schedule.missed_run_backfilled</code> event carrying <code>{missed_at, replayed_at,
-late_by, window}</code> — visible on the Activity page's event stream, on the
+late_by, window}</code>: visible on the Activity page's event stream, on the
 Automations row as the orange <code>⟳ auto-replayed</code> chip described above, and via
 the <code>backfills</code> map returned by <code>GET /api/v1/schedule/status</code>. This closes
 what used to be a silent "why did this fire at 03:04?" surprise.</p>
 <h2 id="scheduled-output">Scheduled output<a class="headerlink" href="#scheduled-output" title="Permanent link">&para;</a></h2>
-<p>By default a cron run's result stays internal (visible in History/Activity). To deliver it somewhere, configure <code>schedule.output</code> — in the Edit modal pick a <strong>Bot</strong> (any configured Telegram/Slack/Discord/WhatsApp bot), set the <strong>Destination ID</strong> (chat/channel/user ID), and optionally a <strong>Template</strong>:</p>
+<p>By default a cron run's result stays internal (visible in History/Activity). To deliver it somewhere, configure <code>schedule.output</code>: in the Edit modal pick a <strong>Bot</strong> (any configured Telegram/Slack/Discord/WhatsApp bot), set the <strong>Destination ID</strong> (chat/channel/user ID), and optionally a <strong>Template</strong>:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>{reply}            the agent's reply (default template)
 </span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>{agent_id} {agent_name} {trigger} {timestamp}
 </span></code></pre></div>

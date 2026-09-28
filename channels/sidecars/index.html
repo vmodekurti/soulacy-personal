@@ -5209,7 +5209,7 @@
 <h1 id="custom-sidecar-channels">Custom Sidecar Channels<a class="headerlink" href="#custom-sidecar-channels" title="Permanent link">&para;</a></h1>
 <p>Add any chat platform to Soulacy in any language, without recompiling the gateway: a <em>sidecar</em> is a subprocess that talks to the platform and exchanges newline-delimited JSON frames with the gateway over stdin/stdout.</p>
 <h2 id="quick-start">Quick start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
-<p>A minimal sidecar in any language does three things — say hello, report
+<p>A minimal sidecar in any language does three things: say hello, report
 status, and relay messages:</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="ch">#!/usr/bin/env python3</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">json</span><span class="o">,</span><span class="w"> </span><span class="nn">sys</span>
@@ -5228,7 +5228,7 @@ status, and relay messages:</p>
 </span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>        <span class="k">pass</span>  <span class="c1"># deliver frame["text"] to chat frame["to"] on your platform</span>
 </span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>    <span class="k">elif</span> <span class="n">frame</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"type"</span><span class="p">)</span> <span class="o">==</span> <span class="s2">"shutdown"</span><span class="p">:</span>
 </span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>        <span class="k">break</span>
-</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>    <span class="c1"># unknown frame types: ignore — that's how the protocol grows</span>
+</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>    <span class="c1"># unknown frame types: ignore them so the protocol can grow</span>
 </span></code></pre></div>
 <p>A full reference implementation ships in the repo:
 <code>scripts/reference-channel-sidecar.py</code>.</p>
@@ -5238,7 +5238,7 @@ status, and relay messages:</p>
 <ul>
 <li>One JSON object per line (NDJSON), UTF-8.</li>
 <li>Sidecar stdout → gateway; gateway → sidecar stdin.</li>
-<li>stderr is captured into the gateway log — use it for debugging, never
+<li>stderr is captured into the gateway log: use it for debugging, never
   for secrets.</li>
 <li><strong>Unknown frame types must be ignored by both sides.</strong></li>
 </ul>
@@ -5258,7 +5258,7 @@ status, and relay messages:</p>
 </span></code></pre></div>
 <p><code>shared_dir</code> (optional) is a per-run scratch directory the gateway
 provisioned for this sidecar: large attachments move as files under
-it — referenced by relative path — instead of inline frame payloads.
+it (referenced by relative path) instead of inline frame payloads.
 Absent or empty means no shared dir; sidecars must tolerate both.</p>
 </li>
 </ol>
@@ -5309,19 +5309,19 @@ timeout"; missing <code>protocol</code> or <code>name</code> → "protocol negot
 </tr>
 <tr>
 <td><code>shutdown</code></td>
-<td>graceful stop — exit promptly</td>
-<td>—</td>
+<td>graceful stop (exit promptly)</td>
+<td>none</td>
 </tr>
 </tbody>
 </table>
 <p>After <code>shutdown</code> (or stdin EOF) the sidecar has a 3-second grace period
 before SIGKILL. Inbound messages are filtered by the channel's activation
 policy and dispatched to the configured agent with session id
-<code>&lt;channel-id&gt;-&lt;chat_id&gt;</code> — one conversation per chat.</p>
+<code>&lt;channel-id&gt;-&lt;chat_id&gt;</code>: one conversation per chat.</p>
 <h2 id="supervision">Supervision<a class="headerlink" href="#supervision" title="Permanent link">&para;</a></h2>
 <p>Sidecars declared via a plugin run <strong>supervised</strong>: crashes restart with
 backoff, rlimit sandbox limits apply, and the declared vault credentials
-are re-resolved and injected into the environment <strong>on every spawn</strong> — a
+are re-resolved and injected into the environment <strong>on every spawn</strong>: a
 credential rotation triggers a restart so the sidecar always holds current
 values. See <a href="../../extend/plugin-security/">Plugin Security Model</a>.</p>
 <h2 id="conformance-kit">Conformance kit<a class="headerlink" href="#conformance-kit" title="Permanent link">&para;</a></h2>
@@ -5340,7 +5340,7 @@ frame doesn't crash it; and it exits within 5 s of <code>shutdown</code>. The sa
 kit runs against the reference sidecars in the host's CI, so the contract
 and implementations cannot drift.</p>
 <h2 id="shipping-it-declare-the-channel-in-a-plugin">Shipping it: declare the channel in a plugin<a class="headerlink" href="#shipping-it-declare-the-channel-in-a-plugin" title="Permanent link">&para;</a></h2>
-<p>Users install your channel like any plugin — no core config edits:</p>
+<p>Users install your channel like any plugin: no core config edits:</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># plugin.yaml</span>
 </span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">matrix-suite</span>
 </span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Matrix Suite</span>
@@ -5365,14 +5365,14 @@ and implementations cannot drift.</p>
 <div class="admonition warning">
 <p class="admonition-title">Sidecars receive only what they declare</p>
 <p>The sidecar's environment is built from a minimal allowlist plus
-exactly the declared <code>credentials:</code> — the gateway's own environment
+exactly the declared <code>credentials:</code>. The gateway's own environment
 and API keys are never inherited. Never print credentials to stderr:
 it lands in the gateway log.</p>
 </div>
 <h2 id="versioning">Versioning<a class="headerlink" href="#versioning" title="Permanent link">&para;</a></h2>
 <p>The protocol version is an integer negotiated at handshake; the gateway
 supports the current and previous major version for at least two releases.
-New optional fields and new frame types are <strong>not</strong> version bumps — ignore
+New optional fields and new frame types are <strong>not</strong> version bumps: ignore
 what you don't know. Renaming/removing fields or changing semantics bumps
 the version.</p>
 <p>Full specification: <a href="https://github.com/vmodekurti/soulacy-personal/blob/main/docs/EXTERNAL_CHANNEL_PROTOCOL.md">External Channel Protocol</a>.</p>

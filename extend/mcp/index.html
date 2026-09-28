@@ -5220,7 +5220,7 @@
 
 <h1 id="mcp-servers">MCP Servers<a class="headerlink" href="#mcp-servers" title="Permanent link">&para;</a></h1>
 <p>Soulacy speaks the <a href="https://modelcontextprotocol.io">Model Context Protocol</a>
-(MCP), so any MCP server — first-party or third-party — can expose its tools to
+(MCP), so any MCP server (first-party or third-party) can expose its tools to
 your agents. An MCP server might wrap a database, a SaaS API, a filesystem, or a
 company-internal service; once connected, its tools appear to agents exactly like
 built-in tools.</p>
@@ -5309,7 +5309,7 @@ choice from the request, and still requires approval for every installation.</p>
 <code>--allow-unverified</code>. In Chat, approving the exact URL provides that explicit
 consent. Repeating the request does not reinstall an already registered server.</p>
 <p>MCP servers are declared in your Soulacy config (or contributed by a plugin).
-Each server has a transport — a local subprocess over stdio, or a remote URL.</p>
+Each server has a transport: a local subprocess over stdio, or a remote URL.</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">mcp</span><span class="p">:</span>
 </span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">servers</span><span class="p">:</span>
 </span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">filesystem</span>

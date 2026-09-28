@@ -5197,9 +5197,9 @@
 
 
 <h1 id="skill-sources">Skill Sources<a class="headerlink" href="#skill-sources" title="Permanent link">&para;</a></h1>
-<p>Point Soulacy at any URL — a skill directory like skills.sh, a Soulacy registry, or a git host — and it identifies what it is, shows you what it found, and adds it as an install source only after you consent.</p>
+<p>Point Soulacy at any URL (a skill directory like skills.sh, a Soulacy registry, or a git host) and it identifies what it is, shows you what it found, and adds it as an install source only after you consent.</p>
 <h2 id="quick-start">Quick start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>sy<span class="w"> </span>registry<span class="w"> </span>probe<span class="w"> </span>https://www.skills.sh/<span class="w">    </span><span class="c1"># review only — changes nothing</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>sy<span class="w"> </span>registry<span class="w"> </span>probe<span class="w"> </span>https://www.skills.sh/<span class="w">    </span><span class="c1"># review only, changes nothing</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>sy<span class="w"> </span>registry<span class="w"> </span>add<span class="w">   </span>https://www.skills.sh/<span class="w">    </span><span class="c1"># review + consent + save to config.yaml</span>
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>sy<span class="w"> </span>registry<span class="w"> </span>list<span class="w">                            </span><span class="c1"># configured sources</span>
 </span></code></pre></div>
@@ -5247,7 +5247,7 @@ your config. The report shows:</p>
 <tr>
 <td><code>unknown</code></td>
 <td>plain web page</td>
-<td>Not a registry — but the report lists any GitHub repos the page links, each installable directly as a git source</td>
+<td>Not a registry. The report lists any GitHub repos the page links, each installable directly as a git source.</td>
 </tr>
 </tbody>
 </table>
@@ -5311,7 +5311,7 @@ hot-loads the skill on approval.</p>
 <li>Click <strong>➕ Skill sources</strong>.</li>
 <li>The modal lists your configured sources (id, type, URL, and a 🔑 marker
    when auth headers are configured).</li>
-<li>Paste a URL and click <strong>🔍 Review</strong> — the probe report renders inline:
+<li>Paste a URL and click <strong>🔍 Review</strong>: the probe report renders inline:
    the detected kind, a review summary, sample skills/repos, and whether the
    source publishes third-party security audits.</li>
 <li>If the URL is a recognisable registry, click <strong>➕ Add "…" as a source</strong>.</li>
@@ -5327,7 +5327,7 @@ hot-loads the skill on approval.</p>
 </span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">    </span><span class="nt">base_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://www.skills.sh</span>
 </span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">    </span><span class="nt">priority</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50</span>
 </span></code></pre></div>
-<p>Sources are queried in ascending <code>priority</code> order with fallback — the first
+<p>Sources are queried in ascending <code>priority</code> order with fallback: the first
 registry that resolves a slug wins. For the full config grammar (auth
 headers, ed25519 signing keys, running your own registry) see
 <a href="../registries/">Package Registries</a>.</p>
@@ -5336,7 +5336,7 @@ headers, ed25519 signing keys, running your own registry) see
 <p>Anyone who controls a configured source can offer packages under any
 slug it serves. Keep priorities such that your most-trusted registries
 resolve first, pin <code>signing_key</code> on <code>http</code> registries you operate, and
-rely on the per-install security report — it runs no matter where a
+rely on the per-install security report: it runs no matter where a
 package came from.</p>
 </div>
 

@@ -5281,15 +5281,15 @@
 <h2 id="the-four-shipped-workflows">The four shipped workflows<a class="headerlink" href="#the-four-shipped-workflows" title="Permanent link">&para;</a></h2>
 <p>These ship embedded in the binary and are tagged <code>workflow</code>:</p>
 <h3 id="meeting-minutes-action-items">Meeting Minutes &amp; Action Items<a class="headerlink" href="#meeting-minutes-action-items" title="Permanent link">&para;</a></h3>
-<p>Paste (or forward via any channel) a raw meeting transcript — Zoom/Meet export, dictation, hand notes — and get structured minutes: attendees, decisions, and a numbered action-item list with owners and due dates, formatted to paste straight into the Workboard or any task tracker.</p>
+<p>Paste (or forward via any channel) a raw meeting transcript (Zoom/Meet export, dictation, hand notes) and get structured minutes: attendees, decisions, and a numbered action-item list with owners and due dates, formatted to paste straight into the Workboard or any task tracker.</p>
 <h3 id="smart-inbox-triage">Smart Inbox Triage<a class="headerlink" href="#smart-inbox-triage" title="Permanent link">&para;</a></h3>
-<p>Forward emails or messages (or paste a batch into Chat): each item is classified <strong>URGENT / NEEDS REPLY / FYI / NOISE</strong> with a one-line reason, and everything in needs-reply gets a ready-to-edit draft in your voice. Nothing is ever sent automatically — every draft is for human review.</p>
+<p>Forward emails or messages (or paste a batch into Chat): each item is classified <strong>URGENT / NEEDS REPLY / FYI / NOISE</strong> with a one-line reason, and everything in needs-reply gets a ready-to-edit draft in your voice. Nothing is ever sent automatically: every draft is for human review.</p>
 <h3 id="competitor-market-monitor">Competitor &amp; Market Monitor<a class="headerlink" href="#competitor-market-monitor" title="Permanent link">&para;</a></h3>
-<p>A cron agent (<code>0 8 * * 1</code>, Mondays 8 AM) that tracks the companies and topics in its WATCHLIST using web search and page fetches, reporting <strong>deltas, not noise</strong>. It is created <strong>disabled</strong> on purpose — edit the system prompt's WATCHLIST first, then enable it and optionally point <code>schedule.output</code> at a chat bot (see <a href="../schedules/">Schedules</a>).</p>
+<p>A cron agent (<code>0 8 * * 1</code>, Mondays 8 AM) that tracks the companies and topics in its WATCHLIST using web search and page fetches, reporting <strong>deltas, not noise</strong>. It is created <strong>disabled</strong> on purpose: edit the system prompt's WATCHLIST first, then enable it and optionally point <code>schedule.output</code> at a chat bot (see <a href="../schedules/">Schedules</a>).</p>
 <h3 id="document-compliance-auditor">Document Compliance Auditor<a class="headerlink" href="#document-compliance-auditor" title="Permanent link">&para;</a></h3>
 <p>Audits draft text against your reference policies using a knowledge base (RAG). Setup: create a KB on the Knowledge page, upload your policies/style guides/contracts, set the agent's <strong>Knowledge bases</strong> field to that KB, then paste any draft into Chat for a clause-by-clause compliance report with citations to the exact policy passages. See <a href="../knowledge/">Knowledge bases</a>.</p>
 <h2 id="starters">Starters<a class="headerlink" href="#starters" title="Permanent link">&para;</a></h2>
-<p>Below the workflows sit simpler starting points — including <strong>Basic Chat</strong> (one LLM, one prompt, no tools), <strong>RAG over your docs</strong>, <strong>Scheduled briefing</strong> (daily cron at 7 AM), and <strong>Web researcher</strong>. Use them as skeletons for your own agents.</p>
+<p>Below the workflows sit simpler starting points: including <strong>Basic Chat</strong> (one LLM, one prompt, no tools), <strong>RAG over your docs</strong>, <strong>Scheduled briefing</strong> (daily cron at 7 AM), and <strong>Web researcher</strong>. Use them as skeletons for your own agents.</p>
 <h2 id="guided-install">Guided Install<a class="headerlink" href="#guided-install" title="Permanent link">&para;</a></h2>
 <p><strong>Install</strong> opens a guided wizard instead of writing YAML immediately. The wizard:</p>
 <ul>
@@ -5301,12 +5301,12 @@
 </ul>
 <p>Each template card shows a source badge:</p>
 <ul>
-<li><code>embedded</code> — ships with the gateway,</li>
-<li><code>user</code> — your own template from <code>~/.soulacy/templates/</code>.</li>
+<li><code>embedded</code>: ships with the gateway,</li>
+<li><code>user</code>: your own template from <code>~/.soulacy/templates/</code>.</li>
 </ul>
 <p>The same catalog is reachable from the Agents page via <strong>📋 From template…</strong>, which additionally opens the new agent straight in the editor.</p>
 <h2 id="customizing-afterwards">Customizing afterwards<a class="headerlink" href="#customizing-afterwards" title="Permanent link">&para;</a></h2>
-<p>A template-created agent is a completely normal agent — nothing stays linked to the template:</p>
+<p>A template-created agent is a completely normal agent: nothing stays linked to the template:</p>
 <ul>
 <li><strong>Agents</strong> page → edit the system prompt (e.g. the Market Monitor's WATCHLIST, the Inbox Triage classification rules), swap the LLM provider/model, attach knowledge bases, tools, or channels.</li>
 <li><strong>Schedule</strong> page → change cron expressions, set the output bot, enable/disable, and send a delivery smoke test.</li>
@@ -5318,13 +5318,13 @@
 </div>
 <p>Typical post-creation checklist:</p>
 <ol>
-<li>Open the agent on the <strong>Agents</strong> page and skim its system prompt — every shipped template documents its own behavior there.</li>
+<li>Open the agent on the <strong>Agents</strong> page and skim its system prompt: every shipped template documents its own behavior there.</li>
 <li>Replace placeholder content (watchlists, tone-of-voice notes) with yours.</li>
 <li>Attach what it needs: a KB for RAG templates, an output bot for cron templates.</li>
 <li><strong>Validate</strong>, <strong>Save</strong>, then test it in the inline <strong>💬 Test</strong> playground before pointing real traffic at it.</li>
 </ol>
 <h2 id="adding-your-own-templates">Adding your own templates<a class="headerlink" href="#adding-your-own-templates" title="Permanent link">&para;</a></h2>
-<p>Drop agent-definition <code>*.yaml</code> files into <code>~/.soulacy/templates/</code> — they appear in the catalog with a <code>user</code> badge. Tag one <code>workflow</code> to have it listed in the Agentic workflows section.</p>
+<p>Drop agent-definition <code>*.yaml</code> files into <code>~/.soulacy/templates/</code>: they appear in the catalog with a <code>user</code> badge. Tag one <code>workflow</code> to have it listed in the Agentic workflows section.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>Templates and <strong>Studio</strong> solve different problems: Templates install a known-good design; Studio generates or repairs a bespoke workflow from intent. Start with a template when one is close to what you need, and use Studio when the automation needs custom steps.</p>

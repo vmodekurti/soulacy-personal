@@ -5148,7 +5148,7 @@ counting rules, cost caveats, and Markdown/CSV/JSON downloads.</p>
 <h2 id="quick-start">Quick start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
 <ol>
 <li>Open <strong>Dashboard</strong> (<code>http://localhost:18789</code> → ◈ Dashboard).</li>
-<li>Trigger anything — send a chat, run a scheduled agent — and watch events scroll in under <strong>Live Event Log</strong>.</li>
+<li>Trigger anything (send a chat, run a scheduled agent) and watch events scroll in under <strong>Live Event Log</strong>.</li>
 <li>Switch to <strong>📈 Activity</strong>, pick the agent, and see the same run as a structured, persistent log.</li>
 </ol>
 <p>CLI/API equivalents:</p>
@@ -5163,9 +5163,9 @@ counting rules, cost caveats, and Markdown/CSV/JSON downloads.</p>
 <h2 id="dashboard">Dashboard<a class="headerlink" href="#dashboard" title="Permanent link">&para;</a></h2>
 <p>Three status cards up top:</p>
 <ul>
-<li><strong>Gateway</strong> — online/offline and version (from the unauthenticated <code>/health</code> endpoint).</li>
-<li><strong>Agents</strong> — total loaded and how many are enabled.</li>
-<li><strong>Events (session)</strong> — how many events this browser tab has received, and whether the stream is live.</li>
+<li><strong>Gateway</strong>: online/offline and version (from the unauthenticated <code>/health</code> endpoint).</li>
+<li><strong>Agents</strong>: total loaded and how many are enabled.</li>
+<li><strong>Events (session)</strong>: how many events this browser tab has received, and whether the stream is live.</li>
 </ul>
 <p>Below them, the <strong>Live Event Log</strong> shows every event as it is published, newest first (last 300 kept). Filter presets narrow the view without dropping the buffer:</p>
 <table>
@@ -5200,12 +5200,12 @@ counting rules, cost caveats, and Markdown/CSV/JSON downloads.</p>
 </table>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>The Dashboard log is a live view only — it starts empty on page load and is cleared with the <strong>Clear</strong> button. For history, use Activity.</p>
+<p>The Dashboard log is a live view only: it starts empty on page load and is cleared with the <strong>Clear</strong> button. For history, use Activity.</p>
 </div>
 <h2 id="activity">Activity<a class="headerlink" href="#activity" title="Permanent link">&para;</a></h2>
 <p>Activity reads the durable action log (SQLite), so it survives restarts and shows complete past runs. Pick an agent, then:</p>
 <ul>
-<li><strong>▶ Watch (2s)</strong> polls continuously — handy while a long run is executing (the Schedule page's <strong>👁 Watch</strong> button deep-links here with watching already on).</li>
+<li><strong>▶ Watch (2s)</strong> polls continuously: handy while a long run is executing (the Schedule page's <strong>👁 Watch</strong> button deep-links here with watching already on).</li>
 <li>Filter chips: <code>all</code>, <code>run</code> (message in/out), <code>llm</code>, <code>tools</code>, <code>errors</code>.</li>
 <li>After each completed run (<code>message.out</code> or <code>error</code>), a <strong>Σ run</strong> row shows that session's token and cost totals.</li>
 <li>The source bar shows which log file backs the view and how many events match.</li>
@@ -5222,7 +5222,7 @@ counting rules, cost caveats, and Markdown/CSV/JSON downloads.</p>
 <tbody>
 <tr>
 <td><code>message.in</code></td>
-<td>A run started — an inbound message, cron fire, or manual trigger reached the agent</td>
+<td>A run started: an inbound message, cron fire, or manual trigger reached the agent</td>
 </tr>
 <tr>
 <td><code>message.out</code></td>
@@ -5234,11 +5234,11 @@ counting rules, cost caveats, and Markdown/CSV/JSON downloads.</p>
 </tr>
 <tr>
 <td><code>tool.call</code></td>
-<td>The LLM asked to run a tool — name and arguments</td>
+<td>The LLM asked to run a tool: name and arguments</td>
 </tr>
 <tr>
 <td><code>tool.result</code></td>
-<td>The tool returned — content plus an <code>is_error</code> flag (the Schedule history uses this to mark runs failed even when the LLM still produced a reply)</td>
+<td>The tool returned: content plus an <code>is_error</code> flag (the Schedule history uses this to mark runs failed even when the LLM still produced a reply)</td>
 </tr>
 <tr>
 <td><code>reasoning.start</code> / <code>reasoning.step</code> / <code>reasoning.result</code></td>
@@ -5250,7 +5250,7 @@ counting rules, cost caveats, and Markdown/CSV/JSON downloads.</p>
 </tr>
 <tr>
 <td><code>run.artifact</code></td>
-<td>A run produced a file — path, size, and which tool wrote it; it appears in the task's Artifacts panel</td>
+<td>A run produced a file: path, size, and which tool wrote it; it appears in the task's Artifacts panel</td>
 </tr>
 <tr>
 <td><code>rulebook.updated</code></td>
@@ -5258,7 +5258,7 @@ counting rules, cost caveats, and Markdown/CSV/JSON downloads.</p>
 </tr>
 <tr>
 <td><code>error</code></td>
-<td>A run errored — the payload names the failing stage</td>
+<td>A run errored: the payload names the failing stage</td>
 </tr>
 </tbody>
 </table>
@@ -5266,12 +5266,12 @@ counting rules, cost caveats, and Markdown/CSV/JSON downloads.</p>
 <h2 id="beyond-the-gui">Beyond the GUI<a class="headerlink" href="#beyond-the-gui" title="Permanent link">&para;</a></h2>
 <p>The same events feed external consumers:</p>
 <ul>
-<li><strong>Queue subjects</strong> — <code>soulacy.events.&lt;type&gt;</code> on the configured queue backend (<code>queue.backend: nats</code> for cross-process consumers; wildcards like <code>soulacy.events.run.*</code> work).</li>
-<li><strong>Webhooks</strong> — declare <code>hooks:</code> in <code>config.yaml</code> to have matching envelopes POSTed to your endpoint with an HMAC signature.</li>
+<li><strong>Queue subjects</strong>: <code>soulacy.events.&lt;type&gt;</code> on the configured queue backend (<code>queue.backend: nats</code> for cross-process consumers; wildcards like <code>soulacy.events.run.*</code> work).</li>
+<li><strong>Webhooks</strong>: declare <code>hooks:</code> in <code>config.yaml</code> to have matching envelopes POSTed to your endpoint with an HMAC signature.</li>
 </ul>
 <div class="admonition warning">
 <p class="admonition-title">Warning</p>
-<p>Event delivery is best-effort and non-blocking. Anything you must not lose (auditing, billing) should read the durable stores — the action log and costs DB — not the live stream.</p>
+<p>Event delivery is best-effort and non-blocking. Anything you must not lose (auditing, billing) should read the durable stores (the action log and costs DB) not the live stream.</p>
 </div>
 
 

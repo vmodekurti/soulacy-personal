@@ -5194,7 +5194,7 @@
 </span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span><span class="nt">total_timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3m</span>
 </span></code></pre></div>
 <p>Agents <strong>without</strong> a <code>reasoning:</code> block keep the classic single-call behavior
-untouched — the loop is strictly opt-in.</p>
+untouched: the loop is strictly opt-in.</p>
 <h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -5232,7 +5232,7 @@ untouched — the loop is strictly opt-in.</p>
 </tr>
 </tbody>
 </table>
-<p>The LLM backend is derived automatically from <code>llm.provider</code> — Ollama,
+<p>The LLM backend is derived automatically from <code>llm.provider</code>: Ollama,
 Anthropic, OpenAI (and OpenAI-compatible endpoints such as Groq, Together, or
 vLLM) are supported, with Ollama as the fallback. There is exactly one place
 to configure the model: the agent's <code>llm</code> block.</p>
@@ -5254,7 +5254,7 @@ to configure the model: the agent's <code>llm</code> block.</p>
 <tr>
 <td><code>plan_execute</code></td>
 <td>Decomposes the task into a plan up front (capped by <code>max_plan_steps</code>), executes the steps, then reflects.</td>
-<td>Tasks with a knowable shape — gather X, compute Y, write Z.</td>
+<td>Tasks with a knowable shape: gather X, compute Y, write Z.</td>
 </tr>
 <tr>
 <td><code>auto</code></td>
@@ -5263,19 +5263,19 @@ to configure the model: the agent's <code>llm</code> block.</p>
 </tr>
 <tr>
 <td><code>flow</code></td>
-<td>Walks a declarative graph you define under <code>workflow.nodes</code>/<code>edges</code> — deterministic routing with bounded cycles. See <a href="../flows/">Flow Graphs</a>.</td>
+<td>Walks a declarative graph you define under <code>workflow.nodes</code>/<code>edges</code>: deterministic routing with bounded cycles. See <a href="../flows/">Flow Graphs</a>.</td>
 <td>The path should be authored, not improvised.</td>
 </tr>
 </tbody>
 </table>
 <p>Custom strategies registered through the SDK (<code>sdk/reasoning</code> +
-<code>registry.RegisterReasoningStrategy</code>) are selected the same way — put their
+<code>registry.RegisterReasoningStrategy</code>) are selected the same way: put their
 registered name in <code>strategy:</code>. See
 <a href="https://github.com/vmodekurti/soulacy-personal/blob/main/docs/REASONING_STRATEGIES.md"><code>docs/REASONING_STRATEGIES.md</code></a> in the repo for
 the author-side contract.</p>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>
-<p>A typo'd or unregistered strategy name never bricks an agent — the engine
+<p>A typo'd or unregistered strategy name never bricks an agent: the engine
 falls back to ReAct and the run completes with the default loop.</p>
 </div>
 <h2 id="tool-access-inside-the-loop">Tool Access Inside the Loop<a class="headerlink" href="#tool-access-inside-the-loop" title="Permanent link">&para;</a></h2>
@@ -5284,13 +5284,13 @@ built-ins, MCP tools, plugin tools, and peer agents. Every call is bridged
 through the same dispatch path as the classic loop, so the Python sandbox,
 audit log, <a href="../tools/#confirmation-gates">confirmation gates</a>, and MCP/plugin
 allowlists all apply unchanged. Tool failures become observations the loop
-can react to — they never abort the run.</p>
+can react to. They never abort the run.</p>
 <h2 id="watching-it-think">Watching It Think<a class="headerlink" href="#watching-it-think" title="Permanent link">&para;</a></h2>
 <p>Reasoning runs are fully observable:</p>
 <ul>
-<li><strong>Chat</strong> — the thinking section above the reply expands to show each step's
+<li><strong>Chat</strong>: the thinking section above the reply expands to show each step's
   thought, the tool it chose, and a preview of the observation.</li>
-<li><strong>Activity</strong> — the run emits engine events you can follow live or audit
+<li><strong>Activity</strong>: the run emits engine events you can follow live or audit
   later:</li>
 </ul>
 <table>
@@ -5335,7 +5335,7 @@ itself still succeeds). See
 <p class="admonition-title">Warning</p>
 <p><code>auto_update: true</code> lets an agent rewrite its own instructions after each
 run. Versioning makes drift visible and reversible, but review the
-history periodically — or lock the rulebook once behavior is where you
+history periodically, or lock the rulebook once behavior is where you
 want it.</p>
 </div>
 <h2 id="example-a-researcher-that-plans">Example: A Researcher That Plans<a class="headerlink" href="#example-a-researcher-that-plans" title="Permanent link">&para;</a></h2>

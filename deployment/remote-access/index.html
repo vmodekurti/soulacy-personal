@@ -5185,11 +5185,11 @@ key enabled and use a trusted, access-controlled Wi-Fi network.</p>
 </span></code></pre></div>
 <p>It:</p>
 <ol>
-<li>installs <a href="https://tailscale.com">Tailscale</a> — a private, WireGuard-encrypted
-   mesh VPN — if it is missing;</li>
+<li>installs <a href="https://tailscale.com">Tailscale</a>: a private, WireGuard-encrypted
+   mesh VPN: if it is missing;</li>
 <li>signs the machine into your tailnet (opens a browser once);</li>
 <li>publishes the gateway into your tailnet with <code>tailscale serve</code>. <strong>The gateway
-   stays bound to <code>127.0.0.1</code></strong> — nothing is opened on your LAN or the public
+   stays bound to <code>127.0.0.1</code></strong>: nothing is opened on your LAN or the public
    internet, and no router port-forwarding is needed;</li>
 <li>prints the address and API key to pair your phone with.</li>
 </ol>
@@ -5245,7 +5245,7 @@ own signed-in devices can reach the gateway.</p>
 <li>Never expose port <code>18789</code> directly to the internet. Tailscale (private) and
   Cloudflare Tunnel (TLS, no open ports) both avoid that.</li>
 <li>The gateway requires an API key on any non-loopback path, and each paired
-  device holds its own scoped, expiring credential — re-pair from the host to
+  device holds its own scoped, expiring credential: re-pair from the host to
   renew it.</li>
 </ul>
 

@@ -5212,7 +5212,7 @@
 </span></code></pre></div>
 <h2 id="token-budget-tracking">Token budget tracking<a class="headerlink" href="#token-budget-tracking" title="Permanent link">&para;</a></h2>
 <p>Soulacy tracks LLM token consumption per user and per agent. Token counts are reported by the LLM provider and stored in the cost records table.</p>
-<p>Token limits work alongside request limits — a single request with a very large context can exhaust the token budget even if the request count limit has not been reached.</p>
+<p>Token limits work alongside request limits: a single request with a very large context can exhaust the token budget even if the request count limit has not been reached.</p>
 <h2 id="distributed-rate-limiting">Distributed rate limiting<a class="headerlink" href="#distributed-rate-limiting" title="Permanent link">&para;</a></h2>
 <p>When running multiple Soulacy replicas, configure Redis so all nodes share the same counters:</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">storage</span><span class="p">:</span>

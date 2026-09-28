@@ -5241,13 +5241,13 @@
 
 
 <h1 id="storage-backends">Storage &amp; Backends<a class="headerlink" href="#storage-backends" title="Permanent link">&para;</a></h1>
-<p>Soulacy persists everything locally by default — zero external
+<p>Soulacy persists everything locally by default: zero external
 dependencies. When you outgrow a single node, each layer (durable storage,
 vector search, message queue) can be swapped independently via
 <code>config.yaml</code>, including out-of-process <strong>sidecar</strong> backends that speak the
 External Storage Protocol.</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">storage</span><span class="p">:</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">backend</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sqlite</span><span class="w">        </span><span class="c1"># default — nothing else needed</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">backend</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sqlite</span><span class="w">        </span><span class="c1"># default, nothing else needed</span>
 </span></code></pre></div>
 <h2 id="durable-storage-storage">Durable storage (<code>storage:</code>)<a class="headerlink" href="#durable-storage-storage" title="Permanent link">&para;</a></h2>
 <p>The durable event-log and memory-archive backend.</p>
@@ -5267,7 +5267,7 @@ External Storage Protocol.</p>
 </tr>
 <tr>
 <td><code>postgres_dsn</code></td>
-<td>—</td>
+<td>none</td>
 <td>libpq connection string (postgres only)</td>
 </tr>
 <tr>
@@ -5277,12 +5277,12 @@ External Storage Protocol.</p>
 </tr>
 <tr>
 <td><code>command</code></td>
-<td>—</td>
+<td>none</td>
 <td>Sidecar executable (external only)</td>
 </tr>
 <tr>
 <td><code>args</code></td>
-<td>—</td>
+<td>none</td>
 <td>Sidecar arguments (external only)</td>
 </tr>
 </tbody>
@@ -5290,7 +5290,7 @@ External Storage Protocol.</p>
 <h3 id="sqlite-default">SQLite (default)<a class="headerlink" href="#sqlite-default" title="Permanent link">&para;</a></h3>
 <p>Embedded, zero-dependency, ideal for single-node deployments. Databases
 live under the workspace <code>data/</code> directory (see
-<a href="../workspace/">Workspace Layout</a>) — <code>actions.db</code>, <code>archive.db</code>,
+<a href="../workspace/">Workspace Layout</a>): <code>actions.db</code>, <code>archive.db</code>,
 <code>knowledge.db</code>, <code>costs.db</code>, <code>workboard.db</code>, and friends.</p>
 <h3 id="postgresql">PostgreSQL<a class="headerlink" href="#postgresql" title="Permanent link">&para;</a></h3>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">storage</span><span class="p">:</span>
@@ -5318,27 +5318,27 @@ live under the workspace <code>data/</code> directory (see
 </tr>
 <tr>
 <td><code>url</code></td>
-<td>—</td>
+<td>none</td>
 <td>Qdrant base URL, e.g. <code>http://localhost:6333</code></td>
 </tr>
 <tr>
 <td><code>collection</code></td>
-<td>—</td>
+<td>none</td>
 <td>Qdrant collection name, e.g. <code>soulacy_memory</code></td>
 </tr>
 <tr>
 <td><code>api_key</code></td>
-<td>—</td>
+<td>none</td>
 <td>Qdrant API key (optional)</td>
 </tr>
 <tr>
 <td><code>dims</code></td>
 <td><code>768</code></td>
-<td>Embedding dimensionality — must match your embedder</td>
+<td>Embedding dimensionality. It must match your embedder.</td>
 </tr>
 <tr>
 <td><code>command</code> / <code>args</code></td>
-<td>—</td>
+<td>none</td>
 <td>Sidecar process (external only)</td>
 </tr>
 </tbody>
@@ -5357,8 +5357,8 @@ live under the workspace <code>data/</code> directory (see
 <div class="admonition warning">
 <p class="admonition-title">Qdrant is experimental</p>
 <p>The <code>qdrant</code> vector backend has <strong>no automated tests and no known
-production users</strong>. Enabling it logs a startup WARN. It is unsupported —
-prefer <code>sqlite-vec</code> (the default) or an external sidecar for anything you
+production users</strong>. Enabling it logs a startup WARN. It is unsupported.
+Prefer <code>sqlite-vec</code> (the default) or an external sidecar for anything you
 depend on.</p>
 </div>
 <h2 id="message-queue-queue">Message queue (<code>queue:</code>)<a class="headerlink" href="#message-queue-queue" title="Permanent link">&para;</a></h2>
@@ -5404,7 +5404,7 @@ depend on.</p>
 </tr>
 <tr>
 <td><code>command</code> / <code>args</code></td>
-<td>—</td>
+<td>none</td>
 <td>Sidecar process (external only)</td>
 </tr>
 </tbody>
@@ -5421,13 +5421,13 @@ from other processes or machines.</p>
 <div class="admonition warning">
 <p class="admonition-title">NATS is experimental</p>
 <p>The <code>nats</code> queue backend has <strong>no automated tests and no known production
-users</strong>. Enabling it logs a startup WARN. It is unsupported — the default
+users</strong>. Enabling it logs a startup WARN. It is unsupported: the default
 in-memory queue is the supported path; use an external sidecar if you need
 cross-process durability.</p>
 </div>
 <h2 id="external-sidecars-external-storage-protocol">External sidecars (External Storage Protocol)<a class="headerlink" href="#external-sidecars-external-storage-protocol" title="Permanent link">&para;</a></h2>
 <p>Vector and queue backends can be served by a <strong>sidecar process</strong> speaking
-the External Storage Protocol — JSON-RPC 2.0 over stdio — so third-party
+the External Storage Protocol (JSON-RPC 2.0 over stdio) so third-party
 database drivers plug in at runtime in any language, without recompiling
 Soulacy. The gateway spawns the sidecar, negotiates capabilities, and
 provisions a per-run shared scratch directory (<code>data/scratch/…</code>) so large
@@ -5445,7 +5445,7 @@ conformance kit (<code>sdk/extstorage/storagetest</code>): see
 </span></code></pre></div>
 <div class="admonition note">
 <p class="admonition-title">Sidecar crash behaviour</p>
-<p>Storage sidecars are not auto-respawned in v1 — a crashed sidecar
+<p>Storage sidecars are not auto-respawned in v1: a crashed sidecar
 fails calls with a clear error. Restart the gateway (or fix the
 sidecar) to recover.</p>
 </div>

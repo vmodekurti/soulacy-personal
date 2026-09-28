@@ -5163,12 +5163,12 @@
 
 
 <h1 id="plugins">Plugins<a class="headerlink" href="#plugins" title="Permanent link">&para;</a></h1>
-<p>Plugins extend Soulacy with new tools, chat channels, LLM providers, skills, and GUI panels — installed from the web GUI with an explicit review of everything they request before anything activates.</p>
+<p>Plugins extend Soulacy with new tools, chat channels, LLM providers, skills, and GUI panels: installed from the web GUI with an explicit review of everything they request before anything activates.</p>
 <h2 id="quick-start">Quick start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
 <ol>
 <li>Open the <strong>Plugins</strong> page in the GUI.</li>
-<li>Paste a source — a git URL, a sha256-checksummed archive
-   (<code>.tar.gz</code>/<code>.zip</code>), or a local directory path — and click
+<li>Paste a source, such as a git URL, a sha256-checksummed archive
+   (<code>.tar.gz</code>/<code>.zip</code>), or a local directory path, and click
    <strong>⤓ Clone &amp; review</strong> (or <strong>⤓ Fetch &amp; review</strong>).</li>
 <li>Review the approval dialog: safety verdict, requested capabilities,
    credentials, schema migrations, sidecar channels, providers.</li>
@@ -5215,35 +5215,35 @@ schema 2 it can declare:</p>
 <p>The flow is <strong>stage → approve → restart</strong>:</p>
 <ol>
 <li>
-<p><strong>Stage</strong> — the source is fetched into a <code>.staging</code> area and never
+<p><strong>Stage</strong>: the source is fetched into a <code>.staging</code> area and never
    loaded. Archives require a sha256 checksum, verified before extraction;
    git URLs are shallow-cloned with history stripped; extraction is
    hardened against path traversal and decompression bombs.</p>
 </li>
 <li>
-<p><strong>Approve</strong> — the dialog shows <em>everything</em> the manifest requests:</p>
+<p><strong>Approve</strong>: the dialog shows <em>everything</em> the manifest requests:</p>
 <ul>
-<li><strong>Safety introspection</strong> — verdict badge and findings from the
+<li><strong>Safety introspection</strong>: verdict badge and findings from the
   <a href="../safety/">pre-install safety pipeline</a>;</li>
-<li><strong>Requested capabilities</strong> — with scopes; unscoped grants are flagged
+<li><strong>Requested capabilities</strong>: with scopes; unscoped grants are flagged
   loudly;</li>
-<li><strong>Requested credentials</strong> — which vault secrets the plugin's sidecars
+<li><strong>Requested credentials</strong>: which vault secrets the plugin's sidecars
   will receive;</li>
-<li><strong>Declared schema migrations</strong> — so you approve schema alongside
+<li><strong>Declared schema migrations</strong>: so you approve schema alongside
   permissions;</li>
 <li><strong>Sidecar channels</strong> and <strong>LLM providers</strong> it will register.</li>
 </ul>
-<p>Approving records a <em>permission fingerprint</em> — a canonical,
-order-insensitive hash of the approved permissions and credentials —
-in <code>.soulacy-install.json</code> next to the plugin.</p>
+<p>Approving records a <em>permission fingerprint</em>: a canonical,
+order-insensitive hash of the approved permissions and credentials. It is
+stored in <code>.soulacy-install.json</code> next to the plugin.</p>
 </li>
 <li>
-<p><strong>Load</strong> — at the next gateway restart the loader's install gate admits
+<p><strong>Load</strong>: at the next gateway restart the loader's install gate admits
    the plugin. Every install response carries the restart note.</p>
 </li>
 </ol>
 <div class="admonition warning">
-<p class="admonition-title">Nothing is active until you approve — and approval is precise</p>
+<p class="admonition-title">Nothing is active until you approve, and approval is precise</p>
 <p>Staged plugins are never loaded. Approval covers exactly the grants you
 saw. If a later update adds, widens, or re-scopes any permission or
 credential, the fingerprint no longer matches and the plugin <strong>stops
@@ -5253,22 +5253,22 @@ loading</strong> until you explicitly re-approve it.</p>
 <p>The Plugins page lists every installer-managed plugin with its status,
 source, and granted permissions:</p>
 <ul>
-<li><strong>Enable / Disable</strong> — flips the load gate without touching files
+<li><strong>Enable / Disable</strong>: flips the load gate without touching files
   (<code>POST /api/v1/plugins/:id/enable|disable</code>).</li>
-<li><strong>Re-approve</strong> — appears when an update changed the requested
+<li><strong>Re-approve</strong>: appears when an update changed the requested
   permissions; shows as <em>needs re-approval</em> and logs
   <code>plugins: plugin skipped by install state</code> until you act
   (<code>POST /api/v1/plugins/:id/reapprove</code>).</li>
-<li><strong>Remove</strong> — deletes the plugin from disk (<code>DELETE /api/v1/plugins/:id</code>).</li>
+<li><strong>Remove</strong>: deletes the plugin from disk (<code>DELETE /api/v1/plugins/:id</code>).</li>
 </ul>
 <p>All plugin-management routes require config-level RBAC. <strong>Hand-installed
 plugins</strong> (directories placed in a plugin dir without install metadata) are
-implicitly approved and invisible to the installer — putting files on disk
+implicitly approved and invisible to the installer: putting files on disk
 already required operator access.</p>
 <h2 id="plugin-settings-plugins_config">Plugin settings: <code>plugins_config</code><a class="headerlink" href="#plugin-settings-plugins_config" title="Permanent link">&para;</a></h2>
 <p>Plugins read their own settings from a <code>plugins_config:</code> block in
 <code>config.yaml</code>, keyed by plugin ID. The shape under each key is owned by the
-plugin — the core parser never validates it:</p>
+plugin: the core parser never validates it:</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">plugins_config</span><span class="p">:</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">weather-bot</span><span class="p">:</span>
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nt">units</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">metric</span>
@@ -5277,7 +5277,7 @@ plugin — the core parser never validates it:</p>
 <p>The <strong>Config</strong> GUI page has a <em>Plugin settings</em> editor for these sections.
 Secret-looking keys (<code>token</code>, <code>secret</code>, <code>password</code>, <code>api_key</code>,
 <code>credential</code> in the name) are redacted as <code>***</code> in the config API, so they
-never reach the browser — and the server skips <code>***</code> placeholders when
+never reach the browser. The server skips <code>***</code> placeholders when
 saving, so editing other settings never clobbers real secrets on disk.</p>
 <h2 id="authoring-manifest-v2-overview">Authoring: manifest v2 overview<a class="headerlink" href="#authoring-manifest-v2-overview" title="Permanent link">&para;</a></h2>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">matrix-suite</span>
@@ -5309,7 +5309,7 @@ saving, so editing other settings never clobbers real secrets on disk.</p>
 </span><span id="__span-1-27"><a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a><span class="w">  </span><span class="nt">nav</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> label</span><span class="p">:</span><span class="w"> </span><span class="s">"Matrix"</span><span class="p p-Indicator">,</span><span class="nt"> icon</span><span class="p">:</span><span class="w"> </span><span class="s">"💬"</span><span class="w"> </span><span class="p p-Indicator">}</span>
 </span><span id="__span-1-28"><a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a><span class="w">  </span><span class="nt">static</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ui</span><span class="w">                    </span><span class="c1"># directory must exist</span>
 </span><span id="__span-1-29"><a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a>
-</span><span id="__span-1-30"><a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a><span class="nt">permissions</span><span class="p">:</span><span class="w">                    </span><span class="c1"># capabilities — default-deny without them</span>
+</span><span id="__span-1-30"><a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a><span class="nt">permissions</span><span class="p">:</span><span class="w">                    </span><span class="c1"># capabilities, default-deny without them</span>
 </span><span id="__span-1-31"><a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">cap</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">channel.send</span>
 </span><span id="__span-1-32"><a id="__codelineno-1-32" name="__codelineno-1-32" href="#__codelineno-1-32"></a><span class="w">    </span><span class="nt">channels</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">matrix</span><span class="p p-Indicator">]</span>
 </span><span id="__span-1-33"><a id="__codelineno-1-33" name="__codelineno-1-33" href="#__codelineno-1-33"></a>
@@ -5323,14 +5323,14 @@ saving, so editing other settings never clobbers real secrets on disk.</p>
 </span></code></pre></div>
 <p>Rules worth knowing as an author:</p>
 <ul>
-<li>Legacy v1 manifests (no <code>manifest_schema</code>, or 1) keep loading forever —
-  tools only; v2-only blocks in a v1 manifest are skipped with a warning.</li>
+<li>Legacy v1 manifests (no <code>manifest_schema</code>, or 1) keep loading forever for
+  tools only. V2-only blocks in a v1 manifest are skipped with a warning.</li>
 <li>A v2 manifest with a malformed contribution is refused with a precise
   error; unknown future schemas (<code>&gt; 2</code>) are skipped, never guessed at.</li>
 <li>Migration table names must be prefixed <code>plugin_&lt;id&gt;_</code>; <code>ATTACH</code>,
-  <code>PRAGMA</code>, and friends are refused; applied steps are checksummed — add a
+  <code>PRAGMA</code>, and friends are refused; applied steps are checksummed: add a
   new step instead of editing an old one.</li>
-<li>Capabilities and credentials are the heart of the trust model — read
+<li>Capabilities and credentials are the heart of the trust model: read
   <a href="../plugin-security/">Plugin Security Model</a> before publishing.</li>
 </ul>
 <p>Full references: <a href="https://github.com/vmodekurti/soulacy-personal/blob/main/docs/PLUGIN_MANIFEST.md">plugin manifest</a>,

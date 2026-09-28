@@ -5106,14 +5106,14 @@ purposes and have very different guarantees. <strong>Know which one is authorita
   <code>&lt;agent-id&gt;.log</code> JSON-Lines file that the GUI Logs page tails.</li>
 <li><strong>Always on.</strong> It is part of the core storage backend
   (<code>storage.backend: sqlite</code> by default; also available via Postgres) and is
-  wired unconditionally at startup — there is no config switch to turn it off.</li>
+  wired unconditionally at startup: there is no config switch to turn it off.</li>
 <li><strong>Durable and queryable.</strong> Survives restarts, supports cross-agent queries,
   and is written by a single buffered async writer that batches and fsyncs.</li>
 <li>Records the full lifecycle of every run: run start, LLM calls, tool
   calls/results, replies, and errors, flowing through the gateway EventHub.</li>
 </ul>
-<p>When you need to reconstruct what an agent did — for an incident review,
-forensic timeline, or audit — <strong>this is the source of truth.</strong></p>
+<p>When you need to reconstruct what an agent did: for an incident review,
+forensic timeline, or audit: <strong>this is the source of truth.</strong></p>
 <p>Location: <code>&lt;workspace&gt;/logs/</code> for the per-agent JSONL mirror and
 <code>&lt;workspace&gt;/data/actions.db</code> (SQLite) for the durable store. With
 <code>storage.backend: postgres</code>, the durable store lives in Postgres instead.</p>
@@ -5128,7 +5128,7 @@ forensic timeline, or audit — <strong>this is the source of truth.</strong></p
   exists as a convenience tail for quick <code>grep</code>/<code>tail -f</code> inspection during
   development, not as a system of record.</li>
 <li><strong>Best-effort.</strong> Write failures are swallowed silently so they never crash an
-  agent run — which is exactly why it must not be relied upon for incident
+  agent run. That is exactly why it must not be relied upon for incident
   reconstruction.</li>
 </ul>
 <p>To enable it (for example during debugging), set an explicit directory:</p>
@@ -5150,7 +5150,7 @@ looking argument values (<code>api_key</code>, <code>password</code>, <code>secr
 <tbody>
 <tr>
 <td>Authority</td>
-<td><strong>Authoritative</strong> — system of record</td>
+<td><strong>Authoritative</strong>: system of record</td>
 <td>Optional convenience copy</td>
 </tr>
 <tr>
@@ -5171,7 +5171,7 @@ looking argument values (<code>api_key</code>, <code>password</code>, <code>secr
 <tr>
 <td>Use for incident reconstruction</td>
 <td><strong>Yes</strong></td>
-<td>No — use the action log</td>
+<td>No: use the action log</td>
 </tr>
 </tbody>
 </table>

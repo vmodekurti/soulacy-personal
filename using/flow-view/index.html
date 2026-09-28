@@ -5163,12 +5163,12 @@
 
 
 <h1 id="flow-view">Flow view<a class="headerlink" href="#flow-view" title="Permanent link">&para;</a></h1>
-<p>The Flow page draws every agent as a visual graph — classic agents get an editable anatomy view (trigger → prompt/memory → LLM → tools → output), and graph-form workflow agents get a faithful read-only render of their declared nodes and edges.</p>
+<p>The Flow page draws every agent as a visual graph: classic agents get an editable anatomy view (trigger → prompt/memory → LLM → tools → output), and graph-form workflow agents get a faithful read-only render of their declared nodes and edges.</p>
 <h2 id="quick-start">Quick start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
 <ol>
 <li>Open <strong>⌘ Flow</strong> in the GUI.</li>
 <li>Pick an agent in the left rail (each entry shows its trigger, provider, and tool count).</li>
-<li>Click any node — an inspector opens on the right. For classic agents you can edit there and click <strong>Save Flow</strong>.</li>
+<li>Click any node: an inspector opens on the right. For classic agents you can edit there and click <strong>Save Flow</strong>.</li>
 </ol>
 <h2 id="classic-agents-the-anatomy-view">Classic agents: the anatomy view<a class="headerlink" href="#classic-agents-the-anatomy-view" title="Permanent link">&para;</a></h2>
 <p>A classic agent (no <code>workflow.nodes</code>) renders as its functional anatomy:</p>
@@ -5183,7 +5183,7 @@
 <tbody>
 <tr>
 <td><strong>Trigger</strong></td>
-<td><code>⏱ Cron — 0 8 * * *</code> or <code>📡 Channel — http, telegram</code></td>
+<td><code>⏱ Cron: 0 8 * * *</code> or <code>📡 Channel: http, telegram</code></td>
 <td>Trigger type, cron expression, channels</td>
 </tr>
 <tr>
@@ -5214,7 +5214,7 @@
 </tbody>
 </table>
 <p>Animated green edges mark the LLM↔tool wiring; a dashed "⚙ No tools wired" placeholder appears for tool-less agents.</p>
-<p>Editing here uses the same agent-update API as the Agents page — <strong>Save Flow</strong> persists to the agent's SOUL.yaml and re-renders the graph. The <strong>Edit agent →</strong> button jumps to the full editor for everything the inspector doesn't cover.</p>
+<p>Editing here uses the same agent-update API as the Agents page: <strong>Save Flow</strong> persists to the agent's SOUL.yaml and re-renders the graph. The <strong>Edit agent →</strong> button jumps to the full editor for everything the inspector doesn't cover.</p>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>
 <p>The Flow view is the fastest way to audit an unfamiliar agent: one glance shows what triggers it, which model thinks, which tools it can reach, and where replies go.</p>
@@ -5239,26 +5239,26 @@
 </span></code></pre></div>
 <p>How to read the render:</p>
 <ul>
-<li><strong>Layout</strong> — nodes are placed in columns by BFS depth from the entry node, so execution generally flows left → right.</li>
-<li><strong>Entry</strong> — the agent's trigger node is wired into the workflow's <code>entry</code> node (first node if <code>entry</code> is unset).</li>
-<li><strong>Node icons</strong> — <code>⚙</code> tool nodes, <code>🤝</code> agent nodes (invoke a peer agent), <code>◇</code> branch nodes (pure routing, no action).</li>
-<li><strong>Edge labels</strong> — each edge shows its <code>if</code> predicate (truncated) and, when its traversal budget exceeds 1, a <code>↺×N</code> cycle-budget label (e.g. <code>{{not .verdict.ok}}  ↺×5</code>).</li>
-<li><strong>Amber edges</strong> — back-edges that close a cycle (refine→judge→refine loops) are highlighted amber and animated, so bounded loops are visible at a glance. Forward edges are green.</li>
-<li><strong>Termination</strong> — edges to <code>end</code> (or with no target) are wired into the <strong>📤 Output</strong> node. Flows without an explicit terminal edge get dashed hint-wires from their deepest column to Output, since such flows end wherever no edge matches.</li>
+<li><strong>Layout</strong>: nodes are placed in columns by BFS depth from the entry node, so execution generally flows left → right.</li>
+<li><strong>Entry</strong>: the agent's trigger node is wired into the workflow's <code>entry</code> node (first node if <code>entry</code> is unset).</li>
+<li><strong>Node icons</strong>: <code>⚙</code> tool nodes, <code>🤝</code> agent nodes (invoke a peer agent), <code>◇</code> branch nodes (pure routing, no action).</li>
+<li><strong>Edge labels</strong>: each edge shows its <code>if</code> predicate (truncated) and, when its traversal budget exceeds 1, a <code>↺×N</code> cycle-budget label (e.g. <code>{{not .verdict.ok}}  ↺×5</code>).</li>
+<li><strong>Amber edges</strong>: back-edges that close a cycle (refine→judge→refine loops) are highlighted amber and animated, so bounded loops are visible at a glance. Forward edges are green.</li>
+<li><strong>Termination</strong>: edges to <code>end</code> (or with no target) are wired into the <strong>📤 Output</strong> node. Flows without an explicit terminal edge get dashed hint-wires from their deepest column to Output, since such flows end wherever no edge matches.</li>
 </ul>
-<p>Clicking nodes shows their details, but graph-form workflows are <strong>not editable</strong> on this page yet — change the YAML under <code>workflow:</code> instead (full semantics in <code>docs/FLOW_GRAPHS.md</code>).</p>
+<p>Clicking nodes shows their details, but graph-form workflows are <strong>not editable</strong> on this page yet: change the YAML under <code>workflow:</code> instead (full semantics in <code>docs/FLOW_GRAPHS.md</code>).</p>
 <h2 id="validating-a-graph-before-it-runs">Validating a graph before it runs<a class="headerlink" href="#validating-a-graph-before-it-runs" title="Permanent link">&para;</a></h2>
-<p>Graphs are validated at compile time — duplicate or missing node IDs, edges pointing at unknown nodes, bad node kinds, and an unknown <code>entry</code> are all refused with precise errors. Catch them before deploying:</p>
+<p>Graphs are validated at compile time: duplicate or missing node IDs, edges pointing at unknown nodes, bad node kinds, and an unknown <code>entry</code> are all refused with precise errors. Catch them before deploying:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>sy<span class="w"> </span>agent<span class="w"> </span>validate<span class="w"> </span>path/to/SOUL.yaml
 </span></code></pre></div>
 <p>The same checks run behind the <strong>Validate</strong> button in the Agents editor (<code>POST /api/v1/agents/validate</code>), so you can iterate on the YAML and re-check without restarting anything.</p>
 <h2 id="resume-after-a-crash">Resume after a crash<a class="headerlink" href="#resume-after-a-crash" title="Permanent link">&para;</a></h2>
-<p>Each node visit in a workflow run is checkpointed. Re-running a crashed run restores completed visits — including their output variables — and recomputes the same deterministic path, so only the unfinished work executes. You don't need to do anything to get this; it is how the executor always runs graphs.</p>
+<p>Each node visit in a workflow run is checkpointed. Re-running a crashed run restores completed visits (including their output variables) and recomputes the same deterministic path, so only the unfinished work executes. You don't need to do anything to get this; it is how the executor always runs graphs.</p>
 <h2 id="why-the-budgets-matter">Why the budgets matter<a class="headerlink" href="#why-the-budgets-matter" title="Permanent link">&para;</a></h2>
-<p>Every edge in a workflow graph carries <code>max_iterations</code> (default <strong>1</strong>), so cycles terminate by construction — a loop only repeats as many times as its back edge's budget allows, and <code>max_node_executions</code> (default 100) backstops the whole run. The <code>↺×N</code> labels on the Flow page are exactly those budgets, which makes runaway-loop review a visual check rather than a YAML audit.</p>
+<p>Every edge in a workflow graph carries <code>max_iterations</code> (default <strong>1</strong>), so cycles terminate by construction: a loop only repeats as many times as its back edge's budget allows, and <code>max_node_executions</code> (default 100) backstops the whole run. The <code>↺×N</code> labels on the Flow page are exactly those budgets, which makes runaway-loop review a visual check rather than a YAML audit.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>The same graph runs in two places: as a scheduled workflow run, and in chat when the agent sets <code>reasoning.strategy: flow</code> — chat steps surface as the usual <code>reasoning.step</code> events in the Thinking panel and Activity log.</p>
+<p>The same graph runs in two places: as a scheduled workflow run, and in chat when the agent sets <code>reasoning.strategy: flow</code>: chat steps surface as the usual <code>reasoning.step</code> events in the Thinking panel and Activity log.</p>
 </div>
 
 

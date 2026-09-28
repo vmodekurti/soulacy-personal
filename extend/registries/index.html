@@ -2921,7 +2921,7 @@
   <a href="#http-soulacy-package-registry" class="md-nav__link">
     <span class="md-ellipsis">
       
-        http — Soulacy package registry
+        http: Soulacy package registry
       
     </span>
   </a>
@@ -2932,7 +2932,7 @@
   <a href="#git-git-hosts" class="md-nav__link">
     <span class="md-ellipsis">
       
-        git — git hosts
+        git: git hosts
       
     </span>
   </a>
@@ -2943,7 +2943,7 @@
   <a href="#skillssh-skill-directories" class="md-nav__link">
     <span class="md-ellipsis">
       
-        skillssh — skill directories
+        skillssh: skill directories
       
     </span>
   </a>
@@ -5100,7 +5100,7 @@
   <a href="#http-soulacy-package-registry" class="md-nav__link">
     <span class="md-ellipsis">
       
-        http — Soulacy package registry
+        http: Soulacy package registry
       
     </span>
   </a>
@@ -5111,7 +5111,7 @@
   <a href="#git-git-hosts" class="md-nav__link">
     <span class="md-ellipsis">
       
-        git — git hosts
+        git: git hosts
       
     </span>
   </a>
@@ -5122,7 +5122,7 @@
   <a href="#skillssh-skill-directories" class="md-nav__link">
     <span class="md-ellipsis">
       
-        skillssh — skill directories
+        skillssh: skill directories
       
     </span>
   </a>
@@ -5241,7 +5241,7 @@
 
 
 <h1 id="package-registries">Package Registries<a class="headerlink" href="#package-registries" title="Permanent link">&para;</a></h1>
-<p>Skill and plugin installs resolve through a pluggable multi-registry engine you control entirely from <code>config.yaml</code> — including running your own registry with one subcommand.</p>
+<p>Skill and plugin installs resolve through a pluggable multi-registry engine you control entirely from <code>config.yaml</code>: including running your own registry with one subcommand.</p>
 <h2 id="quick-start">Quick start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># config.yaml</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nt">registries</span><span class="p">:</span>
@@ -5272,10 +5272,10 @@ config order). Resolve returns the first hit; <em>not found</em> <strong>and</st
 errors both fall through to the next registry, so one broken registry never
 blocks installs from the others. Search aggregates every registry and
 dedupes by slug, keeping the highest-priority result.</p>
-<p>Unknown <code>type:</code> values are warned and skipped at boot — a typo never bricks
+<p>Unknown <code>type:</code> values are warned and skipped at boot: a typo never bricks
 the gateway.</p>
 <h2 id="built-in-registry-types">Built-in registry types<a class="headerlink" href="#built-in-registry-types" title="Permanent link">&para;</a></h2>
-<h3 id="http-soulacy-package-registry"><code>http</code> — Soulacy package registry<a class="headerlink" href="#http-soulacy-package-registry" title="Permanent link">&para;</a></h3>
+<h3 id="http-soulacy-package-registry"><code>http</code>: Soulacy package registry<a class="headerlink" href="#http-soulacy-package-registry" title="Permanent link">&para;</a></h3>
 <p>Speaks the registry protocol:</p>
 <table>
 <thead>
@@ -5299,18 +5299,18 @@ the gateway.</p>
 </tr>
 </tbody>
 </table>
-<p><code>auth_headers</code> are sent verbatim on every request — use them for bearer
+<p><code>auth_headers</code> are sent verbatim on every request: use them for bearer
 tokens against private registries. A sha256 checksum is <strong>required</strong> for
 every archive; unverifiable archives are refused. Extraction goes through
 the same hardened path as plugin installs (path-traversal and
 decompression-bomb guards).</p>
-<h3 id="git-git-hosts"><code>git</code> — git hosts<a class="headerlink" href="#git-git-hosts" title="Permanent link">&para;</a></h3>
+<h3 id="git-git-hosts"><code>git</code>: git hosts<a class="headerlink" href="#git-git-hosts" title="Permanent link">&para;</a></h3>
 <p>Resolves <em>addressed</em> sources only: <code>github.com/user/my-skill</code>, full
 <code>https://…</code> URLs, or <code>git@…</code> remotes. Plain slugs fall through to real
 registries. Fetch is a shallow clone with <code>.git</code> stripped (120 s timeout);
 integrity comes from the clone, so there is no checksum. Search returns
-nothing — git hosts are not an index.</p>
-<h3 id="skillssh-skill-directories"><code>skillssh</code> — skill directories<a class="headerlink" href="#skillssh-skill-directories" title="Permanent link">&para;</a></h3>
+nothing: git hosts are not an index.</p>
+<h3 id="skillssh-skill-directories"><code>skillssh</code>: skill directories<a class="headerlink" href="#skillssh-skill-directories" title="Permanent link">&para;</a></h3>
 <p>Speaks the skills.sh directory API: search, full file trees inline, and
 partner security audits (<code>GET /api/v1/skills/audit/{id}</code>) that are surfaced
 in the install consent prompt. Slugs are skills.sh ids
@@ -5332,7 +5332,7 @@ base64-encoded. Consumers pin the operator's 32-byte public key
 <div class="admonition warning">
 <p class="admonition-title">Pin <code>signing_key</code> on every http registry you can</p>
 <p>With <code>signing_key</code> set, <strong>every</strong> package from that registry must carry
-a valid signature — unsigned or tampered packages are refused at fetch,
+a valid signature: unsigned or tampered packages are refused at fetch,
 before extraction. Without it, integrity rests on the sha256 checksum
 alone and the CLI marks signatures as <code>UNVERIFIED</code> in the install
 output. Malformed keys fail at boot, not at first fetch.</p>
@@ -5355,7 +5355,7 @@ config:</p>
   returns.</li>
 <li>Checksums are computed at index time; every package is signed when a key
   is configured.</li>
-<li>Archive serving is traversal-guarded — only indexed basenames are
+<li>Archive serving is traversal-guarded: only indexed basenames are
   reachable.</li>
 </ul>
 <p>Hand the printed public key to consumers as the <code>signing_key</code> for their
@@ -5370,7 +5370,7 @@ registry entry, then point them at it:</p>
 <h2 id="custom-registry-providers">Custom registry providers<a class="headerlink" href="#custom-registry-providers" title="Permanent link">&para;</a></h2>
 <p>Flavored binaries can ship additional registry types (S3, IPFS, your
 artifact store) by registering a factory with the SDK and selecting it via
-<code>type:</code> in a <code>registries:</code> entry — see
+<code>type:</code> in a <code>registries:</code> entry: see
 <a href="../custom-distributions/">Custom Distributions</a>. The full provider
 contract lives in <a href="https://github.com/vmodekurti/soulacy-personal/blob/main/docs/PACKAGE_REGISTRIES.md">the registry spec</a>.</p>
 

@@ -5175,8 +5175,8 @@
 
 
 <h1 id="workspace-layout-soulspace">Workspace Layout (soulspace)<a class="headerlink" href="#workspace-layout-soulspace" title="Permanent link">&para;</a></h1>
-<p>Everything Soulacy owns lives in <strong>one organized workspace</strong> — the
-<em>soulspace</em> — instead of files scattered across a flat dot-directory. You
+<p>Everything Soulacy owns lives in <strong>one organized workspace</strong>: the
+<em>soulspace</em>: instead of files scattered across a flat dot-directory. You
 get predictable paths for backups, a single <code>config.yaml</code>, and a clean
 separation between data, logs, and secrets.</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>~/.soulacy/soulspace/
@@ -5209,7 +5209,7 @@ separation between data, logs, and secrets.</p>
 </span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>  ...
 </span></code></pre></div>
 <p>On a pre-soulspace installation the layout line reads
-<code>legacy (flat ~/.soulacy — run 'sy workspace migrate' to organize)</code>.</p>
+<code>legacy (flat ~/.soulacy: run 'sy workspace migrate' to organize)</code>.</p>
 <h2 id="resolution-order">Resolution order<a class="headerlink" href="#resolution-order" title="Permanent link">&para;</a></h2>
 <p>Soulacy decides where the workspace lives at startup, in this order:</p>
 <table>
@@ -5234,7 +5234,7 @@ separation between data, logs, and secrets.</p>
 <tr>
 <td>3</td>
 <td><code>~/.soulacy</code> has legacy content (<code>config.yaml</code>, <code>agents/</code>, <code>actions.db</code>, or <code>skills</code>)</td>
-<td><strong>Legacy flat layout</strong> — every path resolves to its historical location, bit-for-bit unchanged</td>
+<td><strong>Legacy flat layout</strong>: every path resolves to its historical location, bit-for-bit unchanged</td>
 </tr>
 <tr>
 <td>4</td>
@@ -5248,7 +5248,7 @@ separation between data, logs, and secrets.</p>
 <p>The legacy auto-detection means pre-soulspace installations need no
 action at all. Databases stay flat in <code>~/.soulacy/</code>, and explicitly
 configured paths (<code>agent_dirs</code>, <code>memory.dir</code>, …) always win over
-workspace defaults — in both layouts.</p>
+workspace defaults: in both layouts.</p>
 </div>
 <h3 id="relocating-the-workspace">Relocating the workspace<a class="headerlink" href="#relocating-the-workspace" title="Permanent link">&para;</a></h3>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SOULACY_WORKSPACE</span><span class="o">=</span>/srv/soulacy
@@ -5266,15 +5266,15 @@ preview first:</p>
 </span></code></pre></div>
 <p>What the migration does:</p>
 <ul>
-<li>Moves every known directory and database into the organized layout —
-  databases go to <code>data/</code>, the credential vault to <code>secrets/</code>, and
+<li>Moves every known directory and database into the organized layout.
+  Databases go to <code>data/</code>, the credential vault to <code>secrets/</code>, and
   WAL/SHM siblings travel with their database.</li>
 <li>Rewrites absolute legacy paths inside <code>config.yaml</code> so configured
   locations follow their files. Comments and unknown blocks are preserved
   byte-for-byte.</li>
 <li>Leaves anything it does not recognise exactly where it was, and lists
   it in the plan output so you can move it manually if needed.</li>
-<li>Every move is an atomic rename — soulspace lives inside <code>~/.soulacy</code>,
+<li>Every move is an atomic rename: soulspace lives inside <code>~/.soulacy</code>,
   so source and destination are on the same filesystem by construction.</li>
 </ul>
 <p>After migration the resolver picks the soulspace automatically. Restart
@@ -5296,14 +5296,14 @@ then restart.</p>
    <em>is</em> legacy).</li>
 </ol>
 <p>Any config key can also be overridden by environment variables with the
-<code>SOULACY_</code> prefix — dots become underscores:</p>
+<code>SOULACY_</code> prefix: dots become underscores:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SOULACY_SERVER_API_KEY</span><span class="o">=</span><span class="s2">"sy_..."</span><span class="w">   </span><span class="c1"># overrides server.api_key</span>
 </span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SOULACY_SERVER_PORT</span><span class="o">=</span><span class="m">18789</span><span class="w">          </span><span class="c1"># overrides server.port</span>
 </span></code></pre></div>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../">Configuration overview</a> — every top-level config key</li>
-<li><a href="../storage/">Storage &amp; backends</a> — what lives in <code>data/</code></li>
+<li><a href="../">Configuration overview</a>: every top-level config key</li>
+<li><a href="../storage/">Storage &amp; backends</a>: what lives in <code>data/</code></li>
 <li>In-repo spec: <a href="https://github.com/vmodekurti/soulacy-personal/blob/main/docs/WORKSPACE.md"><code>docs/WORKSPACE.md</code></a></li>
 </ul>
 

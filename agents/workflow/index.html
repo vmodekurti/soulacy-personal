@@ -5163,7 +5163,7 @@
 
 
 <h1 id="workflow-steps">Workflow Steps<a class="headerlink" href="#workflow-steps" title="Permanent link">&para;</a></h1>
-<p>A <code>workflow:</code> block turns an agent into a checkpointed tool pipeline — deterministic steps that survive crashes and resume where they left off.</p>
+<p>A <code>workflow:</code> block turns an agent into a checkpointed tool pipeline: deterministic steps that survive crashes and resume where they left off.</p>
 <h2 id="quick-start">Quick Start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
 <div class="language-yaml highlight"><span class="filename">agents/report-writer/SOUL.yaml</span><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">report-writer</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Report Writer</span>
@@ -5197,8 +5197,8 @@ last completed step.</p>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>
 <p>Linear steps run strictly in order. If you need conditional routing,
-loops (refine→judge), or fan-out, use the graph form —
-<a href="../flows/">Flow Graphs</a> — which lives under the same <code>workflow:</code> key.</p>
+loops (refine→judge), or fan-out, use the graph form described in
+<a href="../flows/">Flow Graphs</a>, which lives under the same <code>workflow:</code> key.</p>
 </div>
 <h2 id="step-fields">Step Fields<a class="headerlink" href="#step-fields" title="Permanent link">&para;</a></h2>
 <table>
@@ -5215,7 +5215,7 @@ loops (refine→judge), or fan-out, use the graph form —
 </tr>
 <tr>
 <td><code>tool</code></td>
-<td>Tool name to invoke — any tool the agent can normally call.</td>
+<td>Tool name to invoke: any tool the agent can normally call.</td>
 </tr>
 <tr>
 <td><code>prompt</code></td>
@@ -5309,8 +5309,8 @@ run died.</p>
 <li>On failure: marked <code>failed</code>.</li>
 </ol>
 <p>When a run is <strong>resumed with the same run ID</strong> (after a crash or restart),
-completed steps are skipped entirely — their saved output is restored into
-the template variable map — and execution continues from the first
+completed steps are skipped entirely. Their saved output is restored into
+the template variable map, and execution continues from the first
 non-completed step. Side effects of completed steps are never repeated.</p>
 <div class="admonition warning">
 <p class="admonition-title">Warning</p>

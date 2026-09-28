@@ -5427,7 +5427,7 @@
 
 
 <h1 id="gui-tour">GUI Tour<a class="headerlink" href="#gui-tour" title="Permanent link">&para;</a></h1>
-<p>The built-in web GUI gives you a full control panel for every part of Soulacy — agents, chat, schedules, memory, knowledge, and operations — without touching a single YAML file.</p>
+<p>The built-in web GUI gives you a full control panel for every part of Soulacy (agents, chat, schedules, memory, knowledge, and operations) without touching a single YAML file.</p>
 <p>Open it at:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>http://localhost:18789
 </span></code></pre></div>
@@ -5443,8 +5443,8 @@ sidebar footer and paste <code>server.api_key</code> from
 (providers, secrets, channels, Studio contracts, schedules, deployment, ops
 alerts, SLOs, release, docs) and shows blocker / warning counts with
 click-through to the offending page. The <code>schedules_ready</code> first-class check
-reports total / enabled / delivering / overdue with actionable next-steps —
-so an agent that saved cleanly but never fires (because e.g. no default
+reports total / enabled / delivering / overdue with actionable next steps.
+An agent that saved cleanly but never fires (because e.g. no default
 outbound bot is configured) shows up here instead of in silence.</p>
 <p><strong>Try first:</strong> send a chat message in another tab and watch the events appear live.</p>
 <h2 id="first-run">First Run<a class="headerlink" href="#first-run" title="Permanent link">&para;</a></h2>
@@ -5477,13 +5477,13 @@ explicit warning acknowledgement.</p>
 <li><strong>Contract panel</strong> for reasoning agents runs blocker/warning checks on the
   system prompt, tool allowlist, peer graph, prompt hygiene, step budget,
   channel delivery, LLM fit, capability scope, persona consistency, and
-  builtin scope — issues surface before Save.</li>
+  builtin scope: issues surface before Save.</li>
 <li><strong>Debug in Studio</strong> on a failed run in Activity pre-fills the failing
   input into the test bench, loads the structured run trace, and routes any
   heal result through an <strong>Apply this fix / Cancel</strong> diff panel; the canvas
   only changes on confirm.</li>
 <li><strong>Build until it works</strong> now surfaces two sections above the attempt log:
-  <strong>Needs your input</strong> (external blockers Studio can't fix — bad credential,
+  <strong>Needs your input</strong> (external blockers Studio can't fix: bad credential,
   bot not invited, rate limit, invalid destination) and <strong>What Studio
   changed</strong> (plain-language rollup of each attempt's edits).</li>
 </ul>
@@ -5494,11 +5494,11 @@ then run <strong>Dry run</strong> and inspect its contract and YAML.</p>
 <p><img alt="Agent Configuration Overview" src="../../assets/screenshots/agent_config.png" /></p>
 <p>The full agent editor: identity, trigger, system prompt, LLM provider/model (with live model lists), memory scopes, reasoning strategy, brain memory layers, channels, tools, skills, knowledge bases, and peer agents.</p>
 <ul>
-<li>Tool <strong>Python file</strong> fields have a <strong>📂 Browse</strong> picker that lists every script in the tool catalog — pick instead of typing paths.</li>
+<li>Tool <strong>Python file</strong> fields have a <strong>📂 Browse</strong> picker that lists every script in the tool catalog: pick instead of typing paths.</li>
 <li>Chip-picker fields (channels, skills, knowledge bases, peer agents, built-ins) have a <strong>▾ browse</strong> dropdown populated from what actually exists, so typos are impossible.</li>
 <li><strong>Validate</strong> runs the same checks as <code>sy agent validate</code> and shows findings inline. Invalid <code>schedule.cron</code> strings are refused at Save with the parser's own explanation (5-field, 6-field-with-seconds, and <code>@descriptor</code> shapes are accepted).</li>
 <li><strong>💬 Test</strong> opens an inline playground; <strong>&lt;/&gt; API</strong> shows copy-paste cURL/Python/JS snippets for the agent.</li>
-<li><strong>Capability audit modal</strong> — a save that would escalate an agent's tier (ReadOnly → Active → Privileged) while it has interactive channel bindings pops a blocking modal listing the tier diff, warnings, and affected bindings. Confirming re-submits with an acknowledgement header; cancelling leaves the previous shape in place.</li>
+<li><strong>Capability audit modal</strong>: a save that would escalate an agent's tier (ReadOnly → Active → Privileged) while it has interactive channel bindings pops a blocking modal listing the tier diff, warnings, and affected bindings. Confirming re-submits with an acknowledgement header; cancelling leaves the previous shape in place.</li>
 </ul>
 <p><strong>Try first:</strong> select an agent, click <strong>Validate</strong>, then <strong>💬 Test</strong> and send it a message.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
@@ -5508,7 +5508,7 @@ then run <strong>Dry run</strong> and inspect its contract and YAML.</p>
 <p>The Chat Tester: pick an agent, send messages, and watch the <strong>Thinking</strong> panel narrate every LLM call, tool call, and reasoning step live. Each reply carries a per-turn token/cost delta. Hover any bubble to reveal <strong>⑂ Fork</strong> and branch the conversation from that point; the <strong>🎤</strong> button starts a realtime voice session. See <a href="../../using/chat/">Chat</a> and <a href="../../using/voice/">Voice</a>.</p>
 <p><strong>Try first:</strong> ask anything, then expand <strong>Thinking</strong> under the reply.</p>
 <h2 id="brain-mem">Brain Mem<a class="headerlink" href="#brain-mem" title="Permanent link">&para;</a></h2>
-<p>The Brain Memory explorer for long-term agent memory: an <strong>Episodic</strong> timeline (search, write, clear), a <strong>Procedural</strong> rulebook editor with markdown preview — including version <strong>History</strong>, line-level <strong>Diff vs current</strong>, one-click <strong>Roll back</strong>, and a <strong>🔒 Lock</strong> toggle that freezes the rules — and a <strong>Context Preview</strong> tab showing exactly what gets injected into the system prompt. See <a href="../../using/memory/">Memory</a>.</p>
+<p>The Brain Memory explorer for long-term agent memory: an <strong>Episodic</strong> timeline (search, write, clear), a <strong>Procedural</strong> rulebook editor with markdown preview (including version <strong>History</strong>, line-level <strong>Diff vs current</strong>, one-click <strong>Roll back</strong>, and a <strong>🔒 Lock</strong> toggle that freezes the rules) and a <strong>Context Preview</strong> tab showing exactly what gets injected into the system prompt. See <a href="../../using/memory/">Memory</a>.</p>
 <p><strong>Try first:</strong> open the Procedural tab and click <strong>⧗ History</strong>.</p>
 <h2 id="knowledge">Knowledge<a class="headerlink" href="#knowledge" title="Permanent link">&para;</a></h2>
 <p>Create and manage RAG knowledge bases: upload <code>.md</code>/<code>.txt</code>/<code>.pdf</code>/<code>.docx</code> files or paste text, inspect chunk counts, and run a <strong>Test search</strong> against any KB before wiring it to an agent. See <a href="../../using/knowledge/">Knowledge bases</a>.</p>
@@ -5517,10 +5517,10 @@ then run <strong>Dry run</strong> and inspect its contract and YAML.</p>
 <p>A kanban board (Todo → Running → Needs Review → Done → Failed) where each task can be assigned to an agent and run with <strong>▶</strong>. Tasks carry owner, priority, tags, and due dates; the editor shows run history, downloadable artifacts, and comments/review notes. See <a href="../../using/workboard/">Workboard</a>.</p>
 <p><strong>Try first:</strong> create a task, assign an agent, click <strong>▶ Run</strong>.</p>
 <h2 id="channels-ops">Channels (ops)<a class="headerlink" href="#channels-ops" title="Permanent link">&para;</a></h2>
-<p>Status and configuration for every channel adapter — Telegram, Discord, Slack, WhatsApp, WhatsApp Web (with QR pairing), email (SMTP), Microsoft Teams, Google Chat, generic webhooks, and the always-on HTTP channel. Edit credentials, map bots to agents (multi-bot supported), and enable/disable adapters; a restart banner appears when changes need a gateway restart.</p>
+<p>Status and configuration for every channel adapter: Telegram, Discord, Slack, WhatsApp, WhatsApp Web (with QR pairing), email (SMTP), Microsoft Teams, Google Chat, generic webhooks, and the always-on HTTP channel. Edit credentials, map bots to agents (multi-bot supported), and enable/disable adapters; a restart banner appears when changes need a gateway restart.</p>
 <ul>
 <li><strong>Guided setup cards</strong> for Telegram / Slack / Discord / WhatsApp /
-  WhatsApp Web / email / Teams / Google Chat / HTTP — step-by-step with
+  WhatsApp Web / email / Teams / Google Chat / HTTP: step-by-step with
   per-field hints keyed off the actual adapter config keys, and a Test
   delivery button at the bottom.</li>
 <li><strong>Diagnose</strong> on any mapping returns a plain-language category and fix:
@@ -5541,24 +5541,24 @@ then run <strong>Dry run</strong> and inspect its contract and YAML.</p>
   missed a scheduled fire and replayed it at startup (within the
   <code>missed_startup_window</code>); hover for the missed/replayed timestamps and
   how much late the run was.</li>
-<li><strong>Save-time cron validation</strong> — the Edit modal refuses invalid expressions
+<li><strong>Save-time cron validation</strong>: the Edit modal refuses invalid expressions
   with the parser's own message ("expected exactly 5 fields, found 3")
   instead of silently succeeding and leaving the "Next run" column blank.</li>
 </ul>
 <p><strong>Try first:</strong> click <strong>📋 History</strong> on any cron agent.</p>
 <h2 id="skills-ops">Skills (ops)<a class="headerlink" href="#skills-ops" title="Permanent link">&para;</a></h2>
-<p>Browse installed Agent Skills (SKILL.md instruction packs), read their full instructions and resources, and install new ones — <strong>⚡ From AgenticSkills</strong> installs directly from an agenticskills.io URL, and <strong>➕ Skill sources</strong> lets you paste any URL (a skills.sh-style directory, a Soulacy package registry, or a Git host), have it reviewed and identified, then add it as a registry source.</p>
+<p>Browse installed Agent Skills (SKILL.md instruction packs), read their full instructions and resources, and install new ones: <strong>⚡ From AgenticSkills</strong> installs directly from an agenticskills.io URL, and <strong>➕ Skill sources</strong> lets you paste any URL (a skills.sh-style directory, a Soulacy package registry, or a Git host), have it reviewed and identified, then add it as a registry source.</p>
 <p><strong>Try first:</strong> click <strong>➕ Skill sources</strong>, paste <code>https://www.skills.sh/</code>, and hit <strong>🔍 Review</strong>.</p>
 <h2 id="mcp-ops">MCP (ops)<a class="headerlink" href="#mcp-ops" title="Permanent link">&para;</a></h2>
 <p>Manage MCP servers: connect a detected local <strong>Open Notebook</strong>, use <strong>+ New Server</strong> for manual stdio/HTTP specs (command, args, env, headers) with a connection test, or use the <strong>Glama</strong> provisioner to import a server spec from a Glama URL.</p>
 <p><strong>Try first:</strong> expand an existing server row to see its tools and status.</p>
 <h2 id="plugins-ops">Plugins (ops)<a class="headerlink" href="#plugins-ops" title="Permanent link">&para;</a></h2>
-<p>Install plugins from a git URL, a sha256-checksummed archive, or a local directory. Every install is staged first — you review the requested permissions, credentials, and security findings before approving.</p>
+<p>Install plugins from a git URL, a sha256-checksummed archive, or a local directory. Every install is staged first: you review the requested permissions, credentials, and security findings before approving.</p>
 <p>The <strong>Agents → Import</strong> modal (for agent packages) surfaces the new v2
 schema: namespaced ids (<code>owner/name</code>), calendar versioning (<code>YYYY.MM.DD</code>),
 and an install-time requirements gate that refuses import when a required
 provider / channel / secret / MCP server is missing, with a red <strong>Missing
-requirements</strong> banner and an <strong>I understand — import anyway</strong> checkbox for
+requirements</strong> banner and an <strong>I understand: import anyway</strong> checkbox for
 local experiments. Legacy v1 packages import with a deprecation warning
 until the <code>2027-06-01</code> cutoff. See <a href="../../packaging/">Packaging</a>.</p>
 <p><strong>Try first:</strong> paste a plugin source and click <strong>Clone &amp; review</strong> (nothing activates until you approve).</p>
@@ -5577,10 +5577,10 @@ for the full category → fix table.</p>
 <h2 id="activity-system">Activity (system)<a class="headerlink" href="#activity-system" title="Permanent link">&para;</a></h2>
 <p>The per-agent action log from the SQLite action store: every run, LLM call, tool call/result, reasoning step, reply, and error with timestamps and summaries. Filter by type, enable <strong>▶ Watch (2s)</strong> for live polling, and see per-run token/cost totals. See <a href="../../using/dashboard/">Dashboard &amp; Activity</a>.</p>
 <p>The <strong>Running now</strong> strip at the top polls <code>/activity/running</code> every 3s and
-renders one card per in-flight session — agent name, <code>Xm Ys in flight</code>,
+renders one card per in-flight session: agent name, <code>Xm Ys in flight</code>,
 <code>silent Ys</code>, <code>last: &lt;event_type&gt;</code>. A session that hasn't emitted anything
 for more than 5 minutes turns red and shows a per-last-event-type reason +
-fix ("waiting on the LLM provider for 6m 12s — check Providers for
+fix ("waiting on the LLM provider for 6m 12s: check Providers for
 rate-limit/overload"). Click a card to deep-link into that agent/session's
 event stream.</p>
 <p><strong>Try first:</strong> select your busiest agent and click <strong>▶ Watch (2s)</strong>.</p>
@@ -5588,8 +5588,8 @@ event stream.</p>
 <p>Edit the live runtime configuration: log level/format, Python interpreter, tool timeout, max turns, max concurrent sessions, default LLM provider, agent/skill directories, and per-plugin settings. After saving, a banner offers a one-click <strong>Restart Gateway</strong>.</p>
 <p><strong>Try first:</strong> check that <code>python_bin</code> points at the interpreter where your tool dependencies are installed.</p>
 <h2 id="logs-system">Logs (system)<a class="headerlink" href="#logs-system" title="Permanent link">&para;</a></h2>
-<p>The gateway log tail: last 100–5000 lines, free-text filter, severity filter (error/warn/info/debug) with per-level counts, line wrap toggle, and 3-second auto-refresh.</p>
-<p><strong>Try first:</strong> filter on <code>error</code> after anything misbehaves — it is usually the fastest diagnosis.</p>
+<p>The gateway log tail: last 100-5000 lines, free-text filter, severity filter (error/warn/info/debug) with per-level counts, line wrap toggle, and 3-second auto-refresh.</p>
+<p><strong>Try first:</strong> filter on <code>error</code> after anything misbehaves: it is usually the fastest diagnosis.</p>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>
 <p>Everything in the GUI is also scriptable: the CLI (<code>sy</code>) and REST API (<code>/api/v1/...</code>) drive the same endpoints the pages use. Run <code>sy doctor</code> if any page shows unexpected errors.</p>

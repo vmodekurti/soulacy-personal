@@ -5163,7 +5163,7 @@
 
 
 <h1 id="skills">Skills<a class="headerlink" href="#skills" title="Permanent link">&para;</a></h1>
-<p>Skills are reusable instruction packs — a <code>SKILL.md</code> plus supporting files — that any agent can load on demand instead of bloating its system prompt.</p>
+<p>Skills are reusable instruction packs (a <code>SKILL.md</code> plus supporting files) that any agent can load on demand instead of bloating its system prompt.</p>
 <h2 id="quick-start">Quick Start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
 <p>Create a skill directory and attach it to an agent:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>~/.soulacy/skills/
@@ -5184,7 +5184,7 @@
 <div class="language-yaml highlight"><span class="filename">SOUL.yaml (excerpt)</span><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">skills</span><span class="p">:</span>
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">csv-analysis</span>
 </span></code></pre></div>
-<p>That's it — the agent now sees the skill in its catalog and can read the full
+<p>That's it: the agent now sees the skill in its catalog and can read the full
 instructions when a task calls for it.</p>
 <h2 id="how-skills-work">How Skills Work<a class="headerlink" href="#how-skills-work" title="Permanent link">&para;</a></h2>
 <p>Skills are <strong>not</strong> YAML fragments merged into the agent. Soulacy injects only
@@ -5208,7 +5208,7 @@ When the model decides a skill is relevant, it calls:</p>
 </tr>
 </tbody>
 </table>
-<p>These built-ins are only injected when the agent declares <code>skills:</code> — agents
+<p>These built-ins are only injected when the agent declares <code>skills:</code>: agents
 without skills pay zero context cost and never waste turns on skill lookups.</p>
 <h2 id="attaching-skills-to-an-agent">Attaching Skills to an Agent<a class="headerlink" href="#attaching-skills-to-an-agent" title="Permanent link">&para;</a></h2>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">skills</span><span class="p">:</span>
@@ -5227,16 +5227,16 @@ without skills pay zero context cost and never waste turns on skill lookups.</p>
 <p>The loader scans these locations, in priority order (later wins on name
 collision):</p>
 <ol>
-<li><code>~/.agents/skills/</code> — user-level, cross-client convention</li>
-<li>The workspace <code>skills/</code> directory — Soulacy-native (defaults to <code>~/.soulacy/skills/</code>)</li>
-<li><code>&lt;workdir&gt;/.agents/skills/</code> — project-level, cross-client</li>
-<li><code>&lt;workdir&gt;/.soulacy/skills/</code> — project-level, Soulacy-native</li>
-<li>Extra directories from <code>config.yaml</code> — highest priority</li>
+<li><code>~/.agents/skills/</code>: user-level, cross-client convention</li>
+<li>The workspace <code>skills/</code> directory: Soulacy-native (defaults to <code>~/.soulacy/skills/</code>)</li>
+<li><code>&lt;workdir&gt;/.agents/skills/</code>: project-level, cross-client</li>
+<li><code>&lt;workdir&gt;/.soulacy/skills/</code>: project-level, Soulacy-native</li>
+<li>Extra directories from <code>config.yaml</code>: highest priority</li>
 </ol>
 <p>So a project-level skill overrides a user-level skill of the same name, and
 explicitly configured directories override both.</p>
 <h2 id="hot-loading">Hot-Loading<a class="headerlink" href="#hot-loading" title="Permanent link">&para;</a></h2>
-<p>Skills are scanned at startup and rescanned on demand — no restart needed.
+<p>Skills are scanned at startup and rescanned on demand: no restart needed.
 Installing a skill through the GUI or the API triggers a rescan
 automatically; you can also force one:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:18789/api/v1/skills/rescan<span class="w"> </span><span class="se">\</span>
@@ -5248,10 +5248,10 @@ automatically; you can also force one:</p>
 <h2 id="best-practices">Best Practices<a class="headerlink" href="#best-practices" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Make the frontmatter <code>description</code> specific.</strong> It is the only thing the
-  model sees before deciding whether to call <code>read_skill</code> — "Analyze CSV
+  model sees before deciding whether to call <code>read_skill</code>: "Analyze CSV
   files and produce compact summaries" beats "Data helper".</li>
-<li><strong>Keep supporting files beside <code>SKILL.md</code></strong> — scripts, templates, reference
-  examples — and mention them in the instructions so the model knows to fetch
+<li><strong>Keep supporting files beside <code>SKILL.md</code></strong>: scripts, templates, and reference
+  examples. Mention them in the instructions so the model knows to fetch
   them with <code>read_skill_file</code>.</li>
 <li><strong>Skills for procedure, tools for capability.</strong> A skill teaches the model
   <em>how</em> to do something with what it already has; a

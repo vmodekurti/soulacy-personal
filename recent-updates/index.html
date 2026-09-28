@@ -5175,7 +5175,7 @@ Autopilot is distinct from private Notebook lessons.</p>
 <p>Agent semantic memory now uses Soulacy's embedded <strong>sqlite-vec</strong> backend in
 production instead of an in-process vector store. Semantic entries survive a
 gateway restart, searches are isolated by agent, and startup fails visibly if
-the semantic backend cannot be attached—there is no silent downgrade to
+the semantic backend cannot be attached, there is no silent downgrade to
 keyword-only behavior.</p>
 <p>The effective default is:</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">vector</span><span class="p">:</span>
@@ -5209,8 +5209,8 @@ changes an agent rulebook without review. See <a href="../using/chat/">Chat</a>,
 destination, provider, and model controls are authoritative and should be
 verified in the resulting <code>SOUL.yaml</code>. See <a href="../using/studio/">Using Studio</a>.</p>
 <h2 id="llm-usage-is-admitted-before-it-is-spent">LLM usage is admitted before it is spent<a class="headerlink" href="#llm-usage-is-admitted-before-it-is-spent" title="Permanent link">&para;</a></h2>
-<p>All governed inference paths—including Chat, reasoning, Studio, workflows,
-repair, synthesis, and embeddings—share one controller. It can:</p>
+<p>All governed inference paths, including Chat, reasoning, Studio, workflows,
+repair, synthesis, and embeddings, share one controller. It can:</p>
 <ul>
 <li>enforce provider/model/data-region policy;</li>
 <li>reserve worst-case cost and tokens before a call;</li>

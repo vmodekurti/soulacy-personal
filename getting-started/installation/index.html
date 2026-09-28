@@ -913,7 +913,7 @@
   <a href="#one-command-macos-linux-recommended" class="md-nav__link">
     <span class="md-ellipsis">
       
-        One command (macOS / Linux — recommended)
+        One command (macOS / Linux: recommended)
       
     </span>
   </a>
@@ -5071,7 +5071,7 @@
   <a href="#one-command-macos-linux-recommended" class="md-nav__link">
     <span class="md-ellipsis">
       
-        One command (macOS / Linux — recommended)
+        One command (macOS / Linux: recommended)
       
     </span>
   </a>
@@ -5229,7 +5229,7 @@
 
 
 <h1 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h1>
-<p>The fastest path is the one-command installer — it brings its own dependencies.</p>
+<p>The fastest path is the one-command installer: it brings its own dependencies.</p>
 <h2 id="one-click-cloud">One-click cloud<a class="headerlink" href="#one-click-cloud" title="Permanent link">&para;</a></h2>
 <p>Prefer a hosted VM? Launch the complete Postgres + Qdrant stack from the
 <strong>Deploy to AWS</strong> or <strong>Deploy to Azure</strong> buttons on
@@ -5237,13 +5237,13 @@
 without exposing SSH or the data services. See the
 <a href="../../deployment/cloud/">cloud deployment guide</a> for the exact resources and
 operating model.</p>
-<h2 id="one-command-macos-linux-recommended">One command (macOS / Linux — recommended)<a class="headerlink" href="#one-command-macos-linux-recommended" title="Permanent link">&para;</a></h2>
+<h2 id="one-command-macos-linux-recommended">One command (macOS / Linux: recommended)<a class="headerlink" href="#one-command-macos-linux-recommended" title="Permanent link">&para;</a></h2>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://soulacy.io/install.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span>bash
 </span></code></pre></div>
 <p>What it does:</p>
 <ol>
 <li>Detects your OS/architecture (macOS &amp; Linux, amd64 &amp; arm64).</li>
-<li>Downloads the latest release binaries — or, if no release is published yet,
+<li>Downloads the latest release binaries or, if no release is published yet,
    <strong>builds from source automatically</strong>, fetching private copies of Go and
    Node into <code>~/.soulacy/toolchain</code> when they're missing (no Homebrew, no
    system package changes).</li>
@@ -5322,7 +5322,7 @@ when sources change. The gateway embeds the web UI at compile time.</p>
 <p>Releases also include <code>release-manifest.json</code>, which records the release
 version, source commit, generation time, and every artifact's OS, architecture,
 byte size, and SHA-256 digest for installer and CI checks.</p>
-<p>If the releases page is empty, use the one-command installer above — it
+<p>If the releases page is empty, use the one-command installer above: it
 falls back to a source build automatically.</p>
 <h2 id="verify">Verify<a class="headerlink" href="#verify" title="Permanent link">&para;</a></h2>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>soulacy<span class="w"> </span>--version<span class="w">  </span><span class="c1"># gateway version</span>
@@ -5348,7 +5348,7 @@ foreground gateway accepts an API key but systemd does not, follow the
 <a href="../../deployment/linux/#5-prove-the-service-loaded-the-intended-config">Linux/VPS service configuration checklist</a>.</p>
 <h2 id="whats-next">What's next?<a class="headerlink" href="#whats-next" title="Permanent link">&para;</a></h2>
 <ol>
-<li><code>sy onboard</code> — the guided first-run path for provider, search, starter agent, update manifest, and auto-start.</li>
+<li><code>sy onboard</code>: the guided first-run path for provider, search, starter agent, update manifest, and auto-start.</li>
 <li>Follow the <a href="../quickstart/">Quick Start</a>, then take the <a href="../gui-tour/">GUI tour</a>.</li>
 </ol>
 

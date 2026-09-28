@@ -5163,7 +5163,7 @@
 
 
 <h1 id="auth-security">Auth &amp; Security<a class="headerlink" href="#auth-security" title="Permanent link">&para;</a></h1>
-<p>Soulacy has a layered authentication system: static bearer tokens, managed API keys, and JWTs — all checked in sequence by the auth middleware.</p>
+<p>Soulacy has a layered authentication system. The auth middleware checks static bearer tokens, managed API keys, and JWTs in sequence.</p>
 <h2 id="reference">Reference<a class="headerlink" href="#reference" title="Permanent link">&para;</a></h2>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">auth</span><span class="p">:</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="c1"># JWT signing secret (HS256)</span>
@@ -5192,15 +5192,15 @@
 <p>Requests are authenticated in this order:</p>
 <ol>
 <li>
-<p><strong>Static server API key</strong> — <code>Authorization: Bearer sy_...</code><br />
+<p><strong>Static server API key</strong>: <code>Authorization: Bearer sy_...</code>
    Full admin access. Matches <code>server.api_key</code> exactly.</p>
 </li>
 <li>
-<p><strong>Managed API key</strong> — <code>Authorization: Bearer sk_...</code><br />
+<p><strong>Managed API key</strong>: <code>Authorization: Bearer sk_...</code>
    Scoped keys stored in the database. Role is assigned at key creation time.</p>
 </li>
 <li>
-<p><strong>JWT</strong> — <code>Authorization: Bearer eyJ...</code><br />
+<p><strong>JWT</strong>: <code>Authorization: Bearer eyJ...</code>
    Short-lived tokens issued by <code>POST /api/v1/auth/token</code>. Carry user identity, email, and role.</p>
 </li>
 </ol>
@@ -5215,7 +5215,7 @@
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>openssl<span class="w"> </span>rand<span class="w"> </span>-hex<span class="w"> </span><span class="m">32</span>
 </span></code></pre></div>
 <h2 id="managed-api-keys">Managed API keys<a class="headerlink" href="#managed-api-keys" title="Permanent link">&para;</a></h2>
-<p>Managed API keys (<code>sk_</code> prefix) are created via the admin API and stored as bcrypt hashes — the plaintext is shown only once at creation time.</p>
+<p>Managed API keys (<code>sk_</code> prefix) are created via the admin API and stored as bcrypt hashes: the plaintext is shown only once at creation time.</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Create a key with operator role</span>
 </span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:18789/api/v1/admin/api-keys<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer sy_your-server-key"</span><span class="w"> </span><span class="se">\</span>

@@ -5241,7 +5241,7 @@
 
 
 <h1 id="installing-skills">Installing Skills<a class="headerlink" href="#installing-skills" title="Permanent link">&para;</a></h1>
-<p>Install Agent Skills from a local directory, a registry slug, or a git source — every remote install is checksummed, security-scanned, and consented before it touches your agents.</p>
+<p>Install Agent Skills from a local directory, a registry slug, or a git source: every remote install is checksummed, security-scanned, and consented before it touches your agents.</p>
 <h2 id="quick-start">Quick start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
 <p>For a repository URL, you can use the unified installer and let Soulacy detect
 the package type:</p>
@@ -5271,7 +5271,7 @@ list and inspect skills with:</p>
 <h2 id="local-directory-installs">Local directory installs<a class="headerlink" href="#local-directory-installs" title="Permanent link">&para;</a></h2>
 <p><code>sy skill install ./my-skill</code> validates that the directory contains a
 <code>SKILL.md</code> and copies it into <code>~/.soulacy/skills/&lt;name&gt;/</code>. Nothing else
-happens — placing files on your own disk is your call. You can equally just
+happens: placing files on your own disk is your call. You can equally just
 copy a skill directory into <code>~/.soulacy/skills/</code> by hand.</p>
 <h2 id="remote-installs-the-full-flow">Remote installs: the full flow<a class="headerlink" href="#remote-installs-the-full-flow" title="Permanent link">&para;</a></h2>
 <p>When the argument is <em>not</em> a local directory, it is treated as a package slug
@@ -5282,41 +5282,41 @@ With no registries configured, a bare git provider is used as fallback, so
 <p>Every remote install walks the same pipeline:</p>
 <ol>
 <li>
-<p><strong>Resolve</strong> — registries are queried in priority order with fallback. The
+<p><strong>Resolve</strong>: registries are queried in priority order with fallback. The
    CLI prints what it found: <code>Resolved &lt;slug&gt;@&lt;version&gt; via registry "&lt;id&gt;"</code>,
    the description, the archive sha256, and the signature provenance:</p>
 <ul>
 <li><code>signature: ed25519, verified against registry "&lt;id&gt;"'s signing_key during fetch</code></li>
-<li><code>signature: present but UNVERIFIED — set signing_key on registry "&lt;id&gt;" to enforce verification</code></li>
+<li><code>signature: present but UNVERIFIED: set signing_key on registry "&lt;id&gt;" to enforce verification</code></li>
 <li><code>signature: none (unsigned package)</code></li>
 </ul>
 </li>
 <li>
-<p><strong>Staged fetch</strong> — the package downloads into a temporary
+<p><strong>Staged fetch</strong>: the package downloads into a temporary
    <code>.staging-…</code> directory under your skills root. Archives are
    sha256-verified before extraction; git sources derive integrity from the
    clone. A package without <code>SKILL.md</code> at its root is rejected here. The
    staging directory never survives a failed or aborted install.</p>
 </li>
 <li>
-<p><strong>Security report</strong> — the <a href="../safety/">safety introspection pipeline</a> runs
+<p><strong>Security report</strong>: the <a href="../safety/">safety introspection pipeline</a> runs
    over the staged files and prints its verdict and findings:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Safety introspection: ✓ passed safety checks
 </span></code></pre></div>
 <p>or, for example:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Safety introspection: ✗ DANGER — critical findings
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Safety introspection: ✗ DANGER, critical findings
 </span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>  CRITICAL (static) [tool.py:3]: dangerous call: eval() …
 </span></code></pre></div>
 </li>
 <li>
-<p><strong>Consent prompt</strong> — the CLI summarises the package (skill heading, tool
+<p><strong>Consent prompt</strong>: the CLI summarises the package (skill heading, tool
    libraries, declared schema migrations, requested capabilities, requested
    credentials) and asks:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Install &lt;slug&gt;@&lt;version&gt;? [y/N]
 </span></code></pre></div>
 </li>
 <li>
-<p><strong>Activate &amp; hot-load</strong> — on consent the staging directory moves to
+<p><strong>Activate &amp; hot-load</strong>: on consent the staging directory moves to
    <code>~/.soulacy/skills/&lt;name&gt;</code> and the CLI calls the gateway's
    <code>POST /api/v1/skills/rescan</code> so the skill is live immediately. If the
    gateway is unreachable, the skill loads on the next gateway restart.</p>
@@ -5332,10 +5332,10 @@ a message telling you to remove the existing directory first.</p>
 <p class="admonition-title"><code>--yes</code> never bypasses a danger verdict</p>
 <p>When the safety report's verdict is <strong>danger</strong>, the CLI always demands an
 interactive confirmation:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>⚠ CRITICAL findings — explicit confirmation required (--yes does not apply).
+<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>⚠ CRITICAL findings. Explicit confirmation required (--yes does not apply).
 </span></code></pre></div>
 <p>In a non-interactive context (CI, scripts) a danger verdict therefore
-always aborts the install. This is by design — review the findings
+always aborts the install. This is by design: review the findings
 yourself before installing anything flagged critical.</p>
 </div>
 <h2 id="unverified-installs-allow-unverified">Unverified installs: <code>--allow-unverified</code><a class="headerlink" href="#unverified-installs-allow-unverified" title="Permanent link">&para;</a></h2>
@@ -5359,7 +5359,7 @@ authenticated:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>sy<span class="w"> </span>skill<span class="w"> </span>install<span class="w"> </span>github.com/user/my-skill<span class="w"> </span>--allow-unverified
 </span></code></pre></div>
 <p>The CLI then prints a loud warning and proceeds:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>⚠ WARNING: installing UNVERIFIED package my-skill@HEAD — authenticity could
+<div class="language-text highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>⚠ WARNING: installing UNVERIFIED package my-skill@HEAD. Authenticity could
 </span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>not be verified (--allow-unverified).
 </span></code></pre></div>
 <p><code>--allow-unverified</code> only relaxes the authenticity gate. The safety
@@ -5382,14 +5382,14 @@ See <a href="../registries/">Package Registries</a> for the full registry config
 <h2 id="installing-from-the-gui">Installing from the GUI<a class="headerlink" href="#installing-from-the-gui" title="Permanent link">&para;</a></h2>
 <p>The <strong>Skills</strong> page in the web GUI offers:</p>
 <ul>
-<li><strong>⚡ From AgenticSkills</strong> — paste an <code>agenticskills.io</code> skill URL; the
+<li><strong>⚡ From AgenticSkills</strong>: paste an <code>agenticskills.io</code> skill URL; the
   <code>SKILL.md</code> is downloaded and hot-loaded with no restart.</li>
-<li><strong>➕ Skill sources</strong> — review and add registries (skill directories like
+<li><strong>➕ Skill sources</strong>: review and add registries (skill directories like
   skills.sh, Soulacy registries, git hosts) so slugs resolve for installs.
   See <a href="../skill-sources/">Skill Sources</a>.</li>
 </ul>
 <p>Slug-based GUI installs go through the same registry engine and the same
-safety pipeline as the CLI — the security report and permission grants are
+safety pipeline as the CLI: the security report and permission grants are
 shown in the approval dialog before anything activates.</p>
 <h2 id="where-skills-live">Where skills live<a class="headerlink" href="#where-skills-live" title="Permanent link">&para;</a></h2>
 <table>
@@ -5406,7 +5406,7 @@ shown in the approval dialog before anything activates.</p>
 </tr>
 <tr>
 <td><code>SKILL.md</code></td>
-<td>required at the package root — frontmatter + instructions</td>
+<td>required at the package root: frontmatter + instructions</td>
 </tr>
 </tbody>
 </table>
@@ -5415,19 +5415,19 @@ shown in the approval dialog before anything activates.</p>
 <a href="../../agents/skills/">Skills</a> for enabling skills per agent.</p>
 <h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong><code>"&lt;arg&gt;" is not a local directory and no configured registry resolves it</code></strong>
-  — the slug was not found by any registry. Check <code>sy registry list</code>, or use
+<li><strong><code>"&lt;arg&gt;" is not a local directory and no configured registry resolves it</code></strong>:
+  the slug was not found by any registry. Check <code>sy registry list</code>, or use
   an addressed git source (<code>github.com/user/repo</code>).</li>
-<li><strong><code>package "&lt;slug&gt;" has no SKILL.md at its root</code></strong> — the source is not a
+<li><strong><code>package "&lt;slug&gt;" has no SKILL.md at its root</code></strong>: the source is not a
   skill package. Plugins install through the Plugins GUI page instead; see
   <a href="../plugins/">Plugins</a>.</li>
-<li><strong><code>refusing to install … its authenticity cannot be verified</code></strong> — the
+<li><strong><code>refusing to install … its authenticity cannot be verified</code></strong>: the
   package is unsigned, the registry has no <code>signing_key</code>, or it's a raw git
   source. Configure a <code>signing_key</code> on the registry to verify automatically,
   or re-run with <code>--allow-unverified</code> to accept the risk. See
   <a href="#unverified-installs-allow-unverified">Unverified installs</a>.</li>
-<li><strong><code>Gateway rescan failed … the skill loads on the next gateway restart</code></strong> —
-  the install succeeded; only the hot-load was skipped because the gateway
+<li><strong><code>Gateway rescan failed … the skill loads on the next gateway restart</code></strong>:
+  the install succeeded. Only the hot-load was skipped because the gateway
   was unreachable.</li>
 </ul>
 

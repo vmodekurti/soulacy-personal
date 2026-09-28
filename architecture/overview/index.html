@@ -5177,12 +5177,12 @@ core binary stays static while the edges stay flexible.</p>
 </span><span id="__span-0-51"><a id="__codelineno-0-51" name="__codelineno-0-51" href="#__codelineno-0-51"></a>    Ext -. "install / extend" .-&gt; Engine
 </span></code></pre></div>
 <h2 id="components">Components<a class="headerlink" href="#components" title="Permanent link">&para;</a></h2>
-<p><strong>Gateway + GUI</strong> — the only externally visible surface. A Fiber HTTP
+<p><strong>Gateway + GUI</strong>: the only externally visible surface. A Fiber HTTP
 server owns the <a href="../../api/">REST API</a>, CORS, rate limiting, auth
 (static key → JWT → OIDC), the WebSocket event stream, and the embedded
-Svelte GUI served from the same port. It contains no agent logic — it is
+Svelte GUI served from the same port. It contains no agent logic: it is
 a thin adapter over the engine, loader, scheduler, and channels.</p>
-<p><strong>Channels</strong> — each adapter implements a small interface
+<p><strong>Channels</strong>: each adapter implements a small interface
 (<code>Start</code>/<code>Send</code>/<code>Stop</code>/<code>Status</code>): Telegram (long-poll), Slack (Socket
 Mode), Discord (gateway WebSocket), WhatsApp (Meta Cloud webhook with
 HMAC verification), and the always-on HTTP channel behind <code>POST /chat</code>.
@@ -5190,45 +5190,45 @@ Out-of-process channels (e.g. WhatsApp Web, voice bridges) run as
 supervised stdio <strong>sidecars</strong> speaking the
 <a href="https://github.com/vmodekurti/soulacy-personal/blob/main/docs/EXTERNAL_CHANNEL_PROTOCOL.md">External Channel Protocol</a>, with crash
 backoff and restart contained by the supervisor.</p>
-<p><strong>Runtime engine</strong> — the heart. For each inbound message it builds
+<p><strong>Runtime engine</strong>: the heart. For each inbound message it builds
 context (memory + knowledge + skills catalog), assembles the per-agent
 tool list, calls the LLM, executes tool calls, and repeats up to
 <code>max_turns</code>. It is reentrant: a peer agent invoked as a tool is just
 another engine call on a fresh, depth-limited session. SOUL.yaml files
 hot-reload via a file watcher.</p>
-<p><strong>LLM router</strong> — a neutral <code>CompletionRequest</code> dispatched to the
+<p><strong>LLM router</strong>: a neutral <code>CompletionRequest</code> dispatched to the
 configured provider: Anthropic, Gemini, Ollama, or any OpenAI-compatible
 endpoint (OpenAI, Groq, OpenRouter, vLLM…). Embedders are registered
 separately so each knowledge base can pin its own embedding
 provider/model. See <a href="../../configuration/llm/">LLM Providers</a>.</p>
-<p><strong>Memory layers</strong> — session history (hot, capped by
+<p><strong>Memory layers</strong>: session history (hot, capped by
 <code>memory.max_history</code>), a durable SQLite archive, and the three-layer
 <em>brain memory</em> (episodic / semantic / procedural) exposed via the
 brain-memory API. Procedural memory is versioned as
 <a href="https://github.com/vmodekurti/soulacy-personal/blob/main/docs/RULEBOOKS.md">rulebooks</a> with history, rollback, and locking.
 Semantic search runs on the configured
 <a href="../../configuration/storage/">vector backend</a>.</p>
-<p><strong>Queue &amp; events</strong> — every notable action becomes a schema-v1 envelope on
+<p><strong>Queue &amp; events</strong>: every notable action becomes a schema-v1 envelope on
 <code>soulacy.events.&lt;type&gt;</code>, carried by the configured queue (in-process by
 default, NATS JetStream for multi-process). The same stream feeds the
 GUI's WebSocket, <a href="../../configuration/events/">signed webhooks</a>, and any
 external subscriber. Contract: <a href="https://github.com/vmodekurti/soulacy-personal/blob/main/docs/EVENTS.md"><code>docs/EVENTS.md</code></a>.</p>
-<p><strong>Plugins &amp; capabilities</strong> — plugins ship a signed
+<p><strong>Plugins &amp; capabilities</strong>: plugins ship a signed
 <a href="https://github.com/vmodekurti/soulacy-personal/blob/main/docs/PLUGIN_MANIFEST.md">manifest</a> declaring the
 <a href="https://github.com/vmodekurti/soulacy-personal/blob/main/docs/PLUGIN_CAPABILITIES.md">capabilities</a> they need (events, credentials,
 GUI mounts…). Installation is stage → safety introspection → explicit
 approval (<a href="https://github.com/vmodekurti/soulacy-personal/blob/main/docs/PLUGIN_INSTALL.md"><code>PLUGIN_INSTALL.md</code></a>); a failing plugin
 is skipped with a diagnostic, never a crash. Plugin GUIs mount as
 sandboxed iframes with scoped tokens.</p>
-<p><strong>Registries</strong> — skills and plugins resolve by slug through configured
+<p><strong>Registries</strong>: skills and plugins resolve by slug through configured
 <a href="https://github.com/vmodekurti/soulacy-personal/blob/main/docs/PACKAGE_REGISTRIES.md">package registries</a> (HTTP or git), queried in
 priority order with optional ed25519 package signing. The reference
 registry server ships in the binary (<code>soulacy registry serve</code>).</p>
-<p><strong>Reasoning</strong> — agents can opt into
+<p><strong>Reasoning</strong>: agents can opt into
 <a href="https://github.com/vmodekurti/soulacy-personal/blob/main/docs/REASONING_STRATEGIES.md">reasoning strategies</a> (plan-act loops and
 friends) that emit <code>reasoning.start/step/result</code> events and can update
 the agent's rulebook (<code>rulebook.updated</code>).</p>
-<p><strong>Workflows &amp; flows</strong> — multi-step agent pipelines: declarative workflow
+<p><strong>Workflows &amp; flows</strong>: multi-step agent pipelines: declarative workflow
 steps in SOUL.yaml and <a href="https://github.com/vmodekurti/soulacy-personal/blob/main/docs/FLOW_GRAPHS.md">flow graphs</a> rendered live in
 the GUI's Flow View.</p>
 <h2 id="request-lifecycle-http-chat">Request lifecycle (HTTP chat)<a class="headerlink" href="#request-lifecycle-http-chat" title="Permanent link">&para;</a></h2>
@@ -5242,13 +5242,13 @@ the GUI's Flow View.</p>
    agent/session.</li>
 </ol>
 <p>Scheduler triggers and Workboard runs enter at step 2 with synthetic
-messages — same path, same observability.</p>
+messages: same path, same observability.</p>
 <h2 id="where-to-go-deeper">Where to go deeper<a class="headerlink" href="#where-to-go-deeper" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../specs/">Specs &amp; Deep Dives</a> — annotated index of every in-repo spec</li>
-<li><a href="../../configuration/">Configuration overview</a> — every knob</li>
-<li><a href="../../api/">API Reference</a> — the full route catalog</li>
-<li><a href="https://github.com/vmodekurti/soulacy-personal/blob/main/docs/FRAMEWORK_OVERVIEW.md"><code>docs/FRAMEWORK_OVERVIEW.md</code></a> — code-level
+<li><a href="../specs/">Specs &amp; Deep Dives</a>: annotated index of every in-repo spec</li>
+<li><a href="../../configuration/">Configuration overview</a>: every knob</li>
+<li><a href="../../api/">API Reference</a>: the full route catalog</li>
+<li><a href="https://github.com/vmodekurti/soulacy-personal/blob/main/docs/FRAMEWORK_OVERVIEW.md"><code>docs/FRAMEWORK_OVERVIEW.md</code></a>: code-level
   walkthrough with file/line cite points</li>
 </ul>
 

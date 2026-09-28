@@ -5180,19 +5180,19 @@
 </span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="w">  </span><span class="no">agent__writer. Synthesize their replies into one answer.</span>
 </span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>
 </span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="nt">agents</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">researcher</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">writer</span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># exposes agent__researcher, agent__writer</span>
-</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="nt">builtins</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[]</span><span class="w">                   </span><span class="c1"># peers only — no raw built-ins to bypass them</span>
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="nt">builtins</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[]</span><span class="w">                   </span><span class="c1"># peers only, no raw built-ins to bypass them</span>
 </span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>
 </span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 </span></code></pre></div>
 <h2 id="peer-agents">Peer Agents<a class="headerlink" href="#peer-agents" title="Permanent link">&para;</a></h2>
 <p><code>agents:</code> lists the IDs of other agents this agent may invoke. The engine
 registers one tool per peer, named <code>agent__&lt;id&gt;</code>, whose description comes
-from the target agent's own <code>description</code> field — so write peer descriptions
+from the target agent's own <code>description</code> field. Write peer descriptions
 for a model audience.</p>
 <p>Semantics:</p>
 <ul>
-<li>Each call runs the peer as a <strong>fresh session</strong> — no shared history with the
-  caller — using the peer's own model, tools, memory, knowledge, and
+<li>Each call runs the peer as a <strong>fresh session</strong> with no shared history with the
+  caller. It uses the peer's own model, tools, memory, knowledge, and
   timeouts. The peer's final reply is the tool result.</li>
 <li><code>agents: ["*"]</code> (or <code>["all"]</code>) exposes every other loaded agent.</li>
 <li>Self-references are silently skipped.</li>
@@ -5220,24 +5220,24 @@ nothing.</p>
 <tbody>
 <tr>
 <td>Field absent</td>
-<td><strong>default</strong> — every built-in whose gate passes is auto-injected.</td>
+<td><strong>default</strong>: every built-in whose gate passes is auto-injected.</td>
 <td>Standalone agents that should use everything available.</td>
 </tr>
 <tr>
 <td><code>builtins: []</code></td>
-<td><strong>none</strong> — no built-ins at all.</td>
+<td><strong>none</strong>: no built-ins at all.</td>
 <td>Orchestrators. Without this, an agent with <code>agents: [web-researcher]</code> <em>also</em> sees the raw <code>web_search</code> built-in and may bypass the peer.</td>
 </tr>
 <tr>
 <td><code>builtins: [web_search]</code></td>
-<td><strong>restricted</strong> — only the named built-ins, still subject to their gates.</td>
+<td><strong>restricted</strong>: only the named built-ins, still subject to their gates.</td>
 <td>Agents that need one or two capabilities and nothing else.</td>
 </tr>
 </tbody>
 </table>
 <p><code>["*"]</code> / <code>["all"]</code> are synonyms for the default mode. The GUI editor exposes
 the same three modes as a radio: <em>Default</em>, <em>None (peer-only orchestrator)</em>,
-<em>Restricted</em>. Note that listing a gated built-in does not bypass its gate —
+<em>Restricted</em>. Listing a gated built-in does not bypass its gate. For example,
 <code>kb_search</code> without a <code>knowledge:</code> list is still a no-op.</p>
 <h2 id="forcing-delegation-with-tool_choice">Forcing Delegation with <code>tool_choice</code><a class="headerlink" href="#forcing-delegation-with-tool_choice" title="Permanent link">&para;</a></h2>
 <p>Local models often skip tool calls and answer from training data. When a
@@ -5270,7 +5270,7 @@ workflow <em>requires</em> delegation, pin the first turn:</p>
 </tr>
 <tr>
 <td><code>&lt;tool name&gt;</code></td>
-<td>Model must call exactly this tool — use the full name, e.g. <code>agent__researcher</code>.</td>
+<td>Model must call exactly this tool: use the full name, e.g. <code>agent__researcher</code>.</td>
 </tr>
 </tbody>
 </table>
@@ -5280,7 +5280,7 @@ model can synthesize the final answer from the tool results.</p>
 <p>Reach for peer agents when:</p>
 <ul>
 <li><strong>Specialists need different models.</strong> A heavy reasoning model coordinates;
-  cheap local models do the legwork — each peer has its own <code>llm</code> block.</li>
+  cheap local models do the legwork: each peer has its own <code>llm</code> block.</li>
 <li><strong>Tool surfaces should be isolated.</strong> The researcher gets <code>web_search</code>, the
   publisher gets the Slack MCP tools, and neither sees the other's tools.</li>
 <li><strong>Prompts conflict.</strong> A skeptical critic and an enthusiastic drafter can't
@@ -5288,7 +5288,7 @@ model can synthesize the final answer from the tool results.</p>
 <li><strong>You want reuse.</strong> The same <code>researcher</code> serves the coordinator, a cron
   digest agent, and direct chat.</li>
 </ul>
-<p>Skip the orchestra when one agent with a few tools would do — every peer hop
+<p>Skip the orchestra when one agent with a few tools would do: every peer hop
 adds a full agent run of latency and tokens.</p>
 <h2 id="a-complete-trio">A Complete Trio<a class="headerlink" href="#a-complete-trio" title="Permanent link">&para;</a></h2>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># agents/researcher/SOUL.yaml</span>
@@ -5310,7 +5310,7 @@ adds a full agent run of latency and tokens.</p>
 </span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 </span></code></pre></div>
 <p>The <code>coordinator</code> from the quick start ties them together. <code>trigger:
-internal</code> keeps the specialists out of your channel routing — they exist only
+internal</code> keeps the specialists out of your channel routing: they exist only
 to be called.</p>
 
 

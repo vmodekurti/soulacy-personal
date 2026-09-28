@@ -4741,7 +4741,7 @@
   <a href="#1-database-schema-versioning-additive-only-never-down" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. Database schema versioning — additive only, never down
+        1. Database schema versioning: additive only, never down
       
     </span>
   </a>
@@ -5333,7 +5333,7 @@
   <a href="#1-database-schema-versioning-additive-only-never-down" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. Database schema versioning — additive only, never down
+        1. Database schema versioning: additive only, never down
       
     </span>
   </a>
@@ -5549,16 +5549,16 @@ it prints your options instead of guessing.</p>
 </tr>
 <tr>
 <td>One-click AWS / Azure (container on a VM)</td>
-<td>Run the upgrade <strong>on the VM</strong> with a remote command — see below. <strong>Never</strong> change the stack's <code>ImageVersion</code>/<code>customData</code> on a live instance: that replaces the VM and destroys its data volume.</td>
+<td>Run the upgrade <strong>on the VM</strong> with a remote command: see below. <strong>Never</strong> change the stack's <code>ImageVersion</code>/<code>customData</code> on a live instance: that replaces the VM and destroys its data volume.</td>
 </tr>
 </tbody>
 </table>
-<p>Image: <code>ghcr.io/vmodekurti/soulacy-personal</code> — tags: a version (<code>0.1.23</code>), the
+<p>Image: <code>ghcr.io/vmodekurti/soulacy-personal</code>: tags: a version (<code>0.1.23</code>), the
 minor (<code>0.1</code>), or <code>latest</code>.</p>
 <h3 id="upgrading-a-cloud-vm-remotely-no-ssh-needed">Upgrading a cloud VM remotely (no SSH needed)<a class="headerlink" href="#upgrading-a-cloud-vm-remotely-no-ssh-needed" title="Permanent link">&para;</a></h3>
 <p>The one-click AWS and Azure deployments run Soulacy as a container on a VM you
 own, with the data in a Docker volume on that VM. Upgrade <strong>on the same
-instance</strong> so the data stays — triggered from your laptop:</p>
+instance</strong> so the data stays: triggered from your laptop:</p>
 <ul>
 <li><strong>AWS</strong> (the one-click instance has Systems Manager enabled):
   <code>deploy/aws/upgrade-remote.sh &lt;instance-id&gt; [--profile p] [--region r]</code></li>
@@ -5570,7 +5570,7 @@ waits for health, and never touches the volume.</p>
 <p><strong>Warning:</strong> do not "upgrade" by updating the CloudFormation stack's
 <code>ImageVersion</code> or the ARM template's <code>customData</code> on a running instance. Those
 live in the instance's boot script, so the change <strong>replaces the VM</strong>; the root
-disk — and the data volume on it — is deleted with it. <code>ImageVersion</code> is for
+disk (and the data volume on it) is deleted with it. <code>ImageVersion</code> is for
 choosing the version of a <em>new</em> deployment only.</p>
 <h2 id="identify-how-soulacy-was-installed">Identify how Soulacy was installed<a class="headerlink" href="#identify-how-soulacy-was-installed" title="Permanent link">&para;</a></h2>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>soulacy<span class="w"> </span>--version
@@ -5604,7 +5604,7 @@ do: <code>install</code>, <code>notify</code>, or <code>off</code>, with the rea
 in-place replacement, the update banner offers <strong>Upgrade Now</strong>. On a container
 or managed deployment it offers <strong>How to upgrade</strong> and shows the detected
 platform's redeploy steps and exact target image instead.
-After the platform reports a healthy deployment, choose <strong>I've redeployed —
+After the platform reports a healthy deployment, choose <strong>I've redeployed,
 check again</strong> in that prompt. Soulacy checks the signed release manifest and
 its running version again; if the old instance is still serving, the prompt
 stays open and tells you which version answered.</p>
@@ -5704,25 +5704,25 @@ in <a href="../../packaging/">Packaging</a>.</p>
 <p>Soulacy keeps <strong>runtime</strong> and <strong>data</strong> separate, so replacing the runtime on an
 upgrade never touches what you configured or saved.</p>
 <ul>
-<li><strong>Runtime</strong> — the binary or container image. Thrown away and replaced on every
+<li><strong>Runtime</strong>: the binary or container image. Thrown away and replaced on every
   upgrade.</li>
-<li><strong>Data</strong> — everything you configure and Soulacy saves: <code>config.yaml</code>, agents,
+<li><strong>Data</strong>: everything you configure and Soulacy saves: <code>config.yaml</code>, agents,
   memory, knowledge, secrets, skills, plugins. It lives <em>outside</em> the runtime:</li>
 <li><strong>Host installs:</strong> in <code>~/.soulacy/soulspace/</code>, separate from the binary.</li>
-<li><strong>Docker/Compose:</strong> named volumes — <code>soulacy_data</code> (the workspace),
+<li><strong>Docker/Compose:</strong> named volumes: <code>soulacy_data</code> (the workspace),
     <code>postgres_data</code>, <code>qdrant_data</code>. <code>docker compose up -d</code> with a new image keeps
-    them. <strong>Never run <code>docker compose down -v</code></strong> — the <code>-v</code> deletes those volumes.</li>
+    them. <strong>Never run <code>docker compose down -v</code></strong>: the <code>-v</code> deletes those volumes.</li>
 <li><strong>Render / Coolify / Azure:</strong> a persistent disk mounted at
     <code>/home/soulacy/.soulacy</code>.</li>
-<li><strong>Railway:</strong> you must attach a volume at <code>/home/soulacy/.soulacy</code> yourself —
-    see <a href="https://github.com/vmodekurti/soulacy-personal/tree/main/deploy/railway">deploy/railway</a>.</li>
+<li><strong>Railway:</strong> you must attach a volume at <code>/home/soulacy/.soulacy</code> yourself.
+    See <a href="https://github.com/vmodekurti/soulacy-personal/tree/main/deploy/railway">deploy/railway</a>.</li>
 </ul>
 <p>Because of this, the upgrade flows on this page (self-update, image pull, or
 platform redeploy) preserve everything. Schemas only move forward, so a newer
 version reads your existing data.</p>
 <h3 id="safety-check">Safety check<a class="headerlink" href="#safety-check" title="Permanent link">&para;</a></h3>
-<p>On a container or managed platform, Soulacy verifies at startup — and in
-<code>sy doctor</code> — that the workspace is on durable storage. If it isn't, it warns:</p>
+<p>On a container or managed platform, Soulacy verifies at startup and through
+<code>sy doctor</code> that the workspace is on durable storage. If it isn't, it warns:</p>
 <blockquote>
 <p>workspace is NOT on persistent storage; data will be lost on the next redeploy</p>
 </blockquote>
@@ -5741,7 +5741,7 @@ Qdrant):</p>
 version.</p>
 <h2 id="why-upgrades-are-safe">Why upgrades are safe<a class="headerlink" href="#why-upgrades-are-safe" title="Permanent link">&para;</a></h2>
 <p>Three guard layers protect the normal path:</p>
-<h3 id="1-database-schema-versioning-additive-only-never-down">1. Database schema versioning — additive only, never down<a class="headerlink" href="#1-database-schema-versioning-additive-only-never-down" title="Permanent link">&para;</a></h3>
+<h3 id="1-database-schema-versioning-additive-only-never-down">1. Database schema versioning: additive only, never down<a class="headerlink" href="#1-database-schema-versioning-additive-only-never-down" title="Permanent link">&para;</a></h3>
 <ul>
 <li>Every SQLite store (workboard, costs, rbac, apikeys, dlq, checkpoints,
   memory archive, action log, knowledge) records its schema version in a
@@ -5749,7 +5749,7 @@ version.</p>
 <li>Schema changes run through a shared migration helper: one transaction
   per step, versions ≤ current are skipped, and a failed step rolls back
   cleanly.</li>
-<li>Migrations are <strong>additive-only by default</strong> — <code>DROP</code>/<code>RENAME</code>
+<li>Migrations are <strong>additive-only by default</strong>: <code>DROP</code>/<code>RENAME</code>
   statements are refused unless a step explicitly opts in as destructive
   (reserved for deprecation cycles).</li>
 <li>Versions <strong>never downgrade</strong>. A database touched by a newer build keeps
@@ -5769,7 +5769,7 @@ transition.</p>
 <ul>
 <li>Plugin manifests may declare <code>sdk_major: &lt;n&gt;</code>. A plugin built against a
   <strong>newer</strong> SDK major than the host is refused at load with an upgrade
-  hint — it never crashes the gateway.</li>
+  hint: it never crashes the gateway.</li>
 <li>The loader warns-and-skips broken manifests, future schemas,
   capability/credential violations, and stale install approvals. Every
   refused plugin is published as a boot event (<code>type: error</code>,
@@ -5779,7 +5779,7 @@ transition.</p>
   restarts); the gateway keeps serving.</li>
 </ul>
 <h2 id="back-up-before-major-upgrades">Back up before major upgrades<a class="headerlink" href="#back-up-before-major-upgrades" title="Permanent link">&para;</a></h2>
-<p>All state lives in one place — the workspace:</p>
+<p>All state lives in one place: the workspace:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># Stop the gateway first so SQLite files are quiescent, then:</span>
 </span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>tar<span class="w"> </span>-czf<span class="w"> </span>soulacy-backup-<span class="k">$(</span>date<span class="w"> </span>+%F<span class="k">)</span>.tar.gz<span class="w"> </span>~/.soulacy
 </span></code></pre></div>
@@ -5799,24 +5799,24 @@ a genuinely clean slate:</p>
 </span></code></pre></div>
 <p>What it does, in order:</p>
 <ol>
-<li>Prompts for a <strong>typed confirmation</strong> — you must literally type <code>wipe</code>.</li>
+<li>Prompts for a <strong>typed confirmation</strong>: you must literally type <code>wipe</code>.</li>
 <li>Stops the gateway (port 18789, plus any launchd service).</li>
-<li><strong>Deletes <code>~/.soulacy</code> entirely — agents, memories, the encrypted
+<li><strong>Deletes <code>~/.soulacy</code> entirely: agents, memories, the encrypted
    credential vault, config.yaml. No backup is taken.</strong></li>
 <li>Rebuilds the GUI dist and binaries from the checkout (<code>make all</code>).</li>
 <li>Boots once so a fresh soulspace workspace is created, prints
    <code>sy workspace info</code>, and offers the <code>sy setup</code> wizard.</li>
 </ol>
 <div class="admonition danger">
-<p class="admonition-title">Destructive — everything under ~/.soulacy is gone</p>
+<p class="admonition-title">Destructive: everything under ~/.soulacy is gone</p>
 <p>This is a wipe, not an upgrade. If there is any chance you'll want
 your agents, conversation history, or vault back, take the backup
 above <em>first</em>. For a normal version bump, use the standard upgrade
-flow — never the reinstall script.</p>
+flow: never the reinstall script.</p>
 </div>
 <h2 id="rollback">Rollback<a class="headerlink" href="#rollback" title="Permanent link">&para;</a></h2>
-<p>Every upgrade run by <code>install.sh</code> first <strong>snapshots the outgoing install</strong> —
-both the <code>soulacy</code> and <code>sy</code> binaries and the current <code>config.yaml</code> — into
+<p>Every upgrade run by <code>install.sh</code> first <strong>snapshots the outgoing install</strong>,
+including the <code>soulacy</code> and <code>sy</code> binaries and the current <code>config.yaml</code>, into
 <code>~/.soulacy/backups/&lt;timestamp&gt;/</code> before overwriting anything. The five most
 recent snapshots are kept (<code>SOULACY_BACKUP_KEEP</code> to change; <code>SOULACY_BACKUP_DIR</code>
 to relocate).</p>
@@ -5826,7 +5826,7 @@ to relocate).</p>
 </span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://raw.githubusercontent.com/vmodekurti/soulacy-personal/main/install.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span>bash<span class="w"> </span>-s<span class="w"> </span>--<span class="w"> </span>--rollback
 </span></code></pre></div>
 <p>This restores the previous binaries and their matching <code>config.yaml</code>. Your
-current config is never destroyed — it's saved next to the restored one as
+current config is never destroyed: it's saved next to the restored one as
 <code>config.yaml.pre-rollback.&lt;epoch&gt;</code> first. Restart the gateway afterward
 (<code>soulacy serve</code>, or <code>sy daemon stop &amp;&amp; sy daemon start</code>).</p>
 <div class="admonition note">
@@ -5838,7 +5838,7 @@ consistent previous state.</p>
 </div>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../../configuration/workspace/">Workspace Layout</a> — what to back up</li>
+<li><a href="../../configuration/workspace/">Workspace Layout</a>: what to back up</li>
 <li><a href="../macos/">macOS deployment</a> · <a href="../linux/">Linux / VPS</a> · <a href="../docker/">Docker</a></li>
 </ul>
 

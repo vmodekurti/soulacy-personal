@@ -5264,8 +5264,8 @@
 
 <h1 id="the-person-model">The person model<a class="headerlink" href="#the-person-model" title="Permanent link">&para;</a></h1>
 <p>Adaptive memory remembers sentences. The person model is different: it is
-the structured understanding Soulacy keeps of <em>you</em> — your usual day, how
-you are right now, who matters, what you owe people, what you prefer — in a
+the structured understanding Soulacy keeps of <em>you</em>: your usual day, how
+you are right now, who matters, what you owe people, what you prefer: in a
 shape every agent reads the same way.</p>
 <p>It exists so an agent does not have to ask your phone twelve questions and
 work out from raw samples what kind of day you are having. Small observers
@@ -5312,9 +5312,9 @@ saying it is worse than one that says nothing.</p>
 <h2 id="who-may-write-what">Who may write what<a class="headerlink" href="#who-may-write-what" title="Permanent link">&para;</a></h2>
 <p>Three kinds of source, and they rank:</p>
 <ol>
-<li><code>manual</code> — you said it, in the app or on the web.</li>
-<li><code>agent:&lt;id&gt;</code> — an agent inferred it during a run.</li>
-<li><code>sense:&lt;name&gt;</code> — an observer digested it from a device signal.</li>
+<li><code>manual</code>: you said it, in the app or on the web.</li>
+<li><code>agent:&lt;id&gt;</code>: an agent inferred it during a run.</li>
+<li><code>sense:&lt;name&gt;</code>: an observer digested it from a device signal.</li>
 </ol>
 <p><strong>Higher always wins.</strong> A location sense may not overwrite the home address
 you typed; an agent may not either. When a lower source tries, the write is
@@ -5361,7 +5361,7 @@ person actually said in the message being answered.</p>
 passes. A sentence nobody said does not.</p>
 <p><code>person.observe</code> records something the agent learned. Use a stable key so
 repeated observations update rather than pile up, and be honest about
-confidence — anything below 0.7 is rendered as a guess.</p>
+confidence: anything below 0.7 is rendered as a guess.</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>person.observe(section: "identity", key: "home", summary: "Lives in Oak Park",
 </span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>               quote: "I live in Oak Park", confidence: 1)
 </span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>person.observe(section: "preferences", key: "meetings",
@@ -5406,7 +5406,7 @@ silence.</p>
 model; only an admin may pass <code>?owner=</code> to inspect another member, and that
 is audited. A correction through <code>PUT</code> is a manual entry, so it outranks
 every observer from then on. <code>PUT</code> answers <strong>409</strong> with the entry that
-stands when a lower source tried to overwrite a higher one — not an error,
+stands when a lower source tried to overwrite a higher one. This is not an error,
 just the truth about who wins.</p>
 <p>The change feed has the same shape as <code>/memory/facts/sync</code>, so a phone or
 watch holds a local copy and catches up incrementally; <code>reset: true</code> means
@@ -5470,7 +5470,7 @@ have an opinion and no longer.</p>
 <p>It is a store, not a behaviour: an agent that does not list the builtins
 never sees it, and <code>DELETE /person/model?confirm=true</code> forgets everything.
 Observers (which write the <code>sense:</code> entries) are being added slice by slice
-and each one is a separate consent switch — see
+and each one is a separate consent switch: see
 <code>docs/PERSONAL_ASSISTANT_PROGRAM.md</code>.</p>
 
 

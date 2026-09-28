@@ -5030,7 +5030,7 @@
 
 <h1 id="agent-package-format">Agent Package Format<a class="headerlink" href="#agent-package-format" title="Permanent link">&para;</a></h1>
 <p>Soulacy exports and imports agents as self-contained <code>.soulacy-agent.json</code>
-packages — a redacted <code>SOUL.yaml</code>, a machine-readable manifest listing every
+packages: a redacted <code>SOUL.yaml</code>, a machine-readable manifest listing every
 provider / channel / skill / peer / secret the agent depends on, integrity
 metadata, and any supporting files (Python tools, evals, prompts, samples).</p>
 <p>This page is the reference for the format and the CLI. For the design
@@ -5092,10 +5092,10 @@ than Soulacy release numbers.</p>
 their own namespace and register a key at push time (bucket 7B).</p>
 <h2 id="sy-package-commands-available-today"><code>sy package</code> commands (available today)<a class="headerlink" href="#sy-package-commands-available-today" title="Permanent link">&para;</a></h2>
 <ul>
-<li><code>sy package export &lt;agent-id&gt; [--out FILE] [--signing-key-file FILE]</code> — export a saved agent.</li>
-<li><code>sy package inspect &lt;package.json&gt;</code> — hit the gateway to preview requirements against your workspace.</li>
-<li><code>sy package import &lt;package.json&gt; [--overwrite] [--enable] [--id NEW-ID] [--acknowledge-missing]</code> — import.</li>
-<li><code>sy package validate &lt;package.json&gt;</code> — <strong>new in 7A</strong> — local-only structural check (schema, calendar version, namespaced id). No gateway hit; useful for publishers.</li>
+<li><code>sy package export &lt;agent-id&gt; [--out FILE] [--signing-key-file FILE]</code>: export a saved agent.</li>
+<li><code>sy package inspect &lt;package.json&gt;</code>: hit the gateway to preview requirements against your workspace.</li>
+<li><code>sy package import &lt;package.json&gt; [--overwrite] [--enable] [--id NEW-ID] [--acknowledge-missing]</code>: import.</li>
+<li><code>sy package validate &lt;package.json&gt;</code> (<strong>new in 7A</strong>) local-only structural check (schema, calendar version, namespaced id). No gateway hit; useful for publishers.</li>
 </ul>
 <h2 id="requirements-gate-7a">Requirements gate (7A)<a class="headerlink" href="#requirements-gate-7a" title="Permanent link">&para;</a></h2>
 <p>When a v2 package declares a <code>requires</code> block, the import handler classifies
@@ -5138,7 +5138,7 @@ workspace:</p>
 <p>Importing a v2 package with any <code>missing</code> requirement returns 409 unless the
 request carries <code>acknowledge_missing: true</code>. The CLI exposes this as
 <code>--acknowledge-missing</code>; the GUI import modal shows the missing entries in a
-red banner with an "I understand — import anyway" checkbox.</p>
+red banner with an "I understand: import anyway" checkbox.</p>
 <p>v1 packages don't have a <code>requires</code> block, so nothing gates them structurally
 (beyond the existing schema + SOUL.yaml validation).</p>
 <h2 id="soulacy-packagejson-sidecar"><code>.soulacy-package.json</code> sidecar<a class="headerlink" href="#soulacy-packagejson-sidecar" title="Permanent link">&para;</a></h2>

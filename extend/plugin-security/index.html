@@ -5219,7 +5219,7 @@
 
 
 <h1 id="plugin-security-model">Plugin Security Model<a class="headerlink" href="#plugin-security-model" title="Permanent link">&para;</a></h1>
-<p>Plugins are security principals, not trusted code: everything a plugin may do is declared in its manifest, granted by you at install, enforced at the host-API boundary, and audited — the default is deny.</p>
+<p>Plugins are security principals, not trusted code: everything a plugin may do is declared in its manifest, granted by you at install, enforced at the host-API boundary, and audited: the default is deny.</p>
 <h2 id="the-model-at-a-glance">The model at a glance<a class="headerlink" href="#the-model-at-a-glance" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -5308,12 +5308,12 @@ Which scope kind applies is fixed per capability:</p>
 </table>
 <p>Initial capability set: <code>vector.search</code> (scoped by agents),
 <code>channel.send</code> (channels), <code>events.subscribe</code> (event types). Capability
-names are append-only — they are never renamed or removed under a given
+names are append-only: they are never renamed or removed under a given
 manifest schema.</p>
 <div class="admonition warning">
 <p class="admonition-title">Review unscoped grants carefully</p>
 <p>An empty scope list or <code>"*"</code> means <em>any</em> agent, channel, or event type.
-The install approval dialog flags unscoped grants loudly — prefer
+The install approval dialog flags unscoped grants loudly: prefer
 plugins that scope every capability to exactly what they need.</p>
 </div>
 <h2 id="scoped-plugin-tokens-splg_">Scoped plugin tokens (<code>splg_</code>)<a class="headerlink" href="#scoped-plugin-tokens-splg_" title="Permanent link">&para;</a></h2>
@@ -5322,11 +5322,11 @@ plugins that scope every capability to exactly what they need.</p>
 <code>plugin:&lt;id&gt;</code>. At the API a plugin token passes through a route policy
 table: anything unlisted is 403, and listed routes still go through the
 capability check. The WebSocket event stream (<code>/ws/events</code>) accepts
-<code>splg_</code> tokens only when the manifest grants <code>events.subscribe</code> — a bare
+<code>splg_</code> tokens only when the manifest grants <code>events.subscribe</code>: a bare
 valid token is never enough, because the feed carries prompts and tool I/O.</p>
 <h2 id="sandboxed-gui-panels">Sandboxed GUI panels<a class="headerlink" href="#sandboxed-gui-panels" title="Permanent link">&para;</a></h2>
 <p>A plugin's <code>gui:</code> mount is served at <code>/plugins/&lt;id&gt;/ui/</code> inside an iframe
-sandboxed with <code>allow-scripts allow-forms</code> — <strong>no same-origin</strong>. The shell
+sandboxed with <code>allow-scripts allow-forms</code>: <strong>no same-origin</strong>. The shell
 fetches a scoped plugin token and passes it in the iframe URL fragment; the
 panel uses it as its bearer token. The panel therefore cannot read your
 session, your cookies, or any API the plugin was not granted.</p>
@@ -5338,7 +5338,7 @@ declare exactly the secrets they need:</p>
 </span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="nt">from</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">matrix-suite/token</span><span class="w">   </span><span class="c1"># vault path: &lt;namespace&gt;/&lt;key&gt;</span>
 </span></code></pre></div>
 <ul>
-<li>The <code>from:</code> namespace <strong>must equal the plugin's own ID</strong> — referencing
+<li>The <code>from:</code> namespace <strong>must equal the plugin's own ID</strong>: referencing
   another plugin's or an agent's secrets is structurally impossible, not
   just denied.</li>
 <li>Plugin secrets live in the encrypted vault (AES-256-GCM) under the
@@ -5347,7 +5347,7 @@ declare exactly the secrets they need:</p>
   <code>agent_id = "plugin:&lt;id&gt;"</code>.</li>
 <li>At spawn the sidecar receives a minimal allowlisted base environment
   (<code>PATH</code>, <code>HOME</code>, <code>TMPDIR</code>, <code>LANG</code>, <code>TZ</code>, …) <strong>plus exactly the declared
-  secrets</strong> — the gateway's own API keys are never inherited.</li>
+  secrets</strong>: the gateway's own API keys are never inherited.</li>
 <li>A declared-but-missing secret fails the spawn (retried through the
   supervisor's backoff) rather than starting a sidecar that cannot
   authenticate.</li>
@@ -5355,19 +5355,19 @@ declare exactly the secrets they need:</p>
 <h3 id="rotation-restarts-the-sidecar">Rotation restarts the sidecar<a class="headerlink" href="#rotation-restarts-the-sidecar" title="Permanent link">&para;</a></h3>
 <p>The vault versions secrets. A watcher polls a SHA-256 fingerprint of each
 plugin's declared secrets (values are hashed, never retained or logged) and
-restarts the sidecar on any change — rotation, replacement, addition, or
-removal — so every respawn picks up current values.</p>
+restarts the sidecar on any change, including rotation, replacement, addition,
+or removal. Every respawn picks up current values.</p>
 <div class="admonition warning">
 <p class="admonition-title">Environment-variable transport has known limits</p>
 <p>Secrets are injected as environment variables: visible in
 <code>/proc/&lt;pid&gt;/environ</code> to same-UID processes on shared hosts, fixed at
 spawn (hence the rotation restart), and inherited by the sidecar's
 children unless it is careful. Run Soulacy under its own user on shared
-machines, and treat sidecar stderr as logs — sidecars must never print
+machines, and treat sidecar stderr as logs: sidecars must never print
 their own credentials.</p>
 </div>
 <h2 id="audit-trail">Audit trail<a class="headerlink" href="#audit-trail" title="Permanent link">&para;</a></h2>
-<p>Every capability decision — allow and deny — is written to the audit log
+<p>Every capability decision (allow and deny) is written to the audit log
 with <code>SessionID = "plugin:&lt;id&gt;"</code> (one audit file per plugin per day),
 <code>Tool = "cap:&lt;capability&gt;"</code>, the scope in the arguments, and the denial
 reason on refusal. Denies are additionally logged via the structured
@@ -5380,7 +5380,7 @@ path, not the content.</p>
 <li>Updates that request more are blocked until you re-approve
   (see <a href="../plugins/">Plugins</a>).</li>
 <li>Schema access is namespaced too: plugin migrations can only touch
-  <code>plugin_&lt;id&gt;_*</code> tables in a dedicated database — never core tables.</li>
+  <code>plugin_&lt;id&gt;_*</code> tables in a dedicated database: never core tables.</li>
 <li>If something looks wrong later, the per-plugin audit files show exactly
   which capabilities were exercised, when, and what was refused.</li>
 </ul>

@@ -5207,7 +5207,7 @@
 
 
 <h1 id="flow-graphs">Flow Graphs<a class="headerlink" href="#flow-graphs" title="Permanent link">&para;</a></h1>
-<p>Flow graphs let you author the agent's path explicitly — conditional routing and bounded loops (refine→judge, retry-until-pass, escalation) declared as nodes and edges under the same <code>workflow:</code> key, with crash-safe checkpointing built in.</p>
+<p>Flow graphs let you author the agent's path explicitly: conditional routing and bounded loops (refine→judge, retry-until-pass, escalation) declared as nodes and edges under the same <code>workflow:</code> key, with crash-safe checkpointing built in.</p>
 <h2 id="quick-start-refine-judge-ship">Quick Start: Refine → Judge → Ship<a class="headerlink" href="#quick-start-refine-judge-ship" title="Permanent link">&para;</a></h2>
 <p>A writing pipeline that drafts, gets judged, loops back to refine until the
 judge approves (at most 5 times), then ships:</p>
@@ -5244,7 +5244,7 @@ judge approves (at most 5 times), then ships:</p>
 </span><span id="__span-0-31"><a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a><span class="w">  </span><span class="nt">edges</span><span class="p">:</span>
 </span><span id="__span-0-32"><a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">from</span><span class="p">:</span><span class="w"> </span><span class="nv">refine</span><span class="p p-Indicator">,</span><span class="nt"> to</span><span class="p">:</span><span class="w"> </span><span class="nv">judge</span><span class="p p-Indicator">,</span><span class="nt"> max_iterations</span><span class="p">:</span><span class="w"> </span><span class="nv">6</span><span class="p p-Indicator">}</span>
 </span><span id="__span-0-33"><a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">from</span><span class="p">:</span><span class="w"> </span><span class="nv">judge</span><span class="p p-Indicator">,</span><span class="nt"> to</span><span class="p">:</span><span class="w"> </span><span class="nv">refine</span><span class="p p-Indicator">,</span><span class="nt"> if</span><span class="p">:</span><span class="w"> </span><span class="s">'{{not</span><span class="nv"> </span><span class="s">.verdict.ok}}'</span><span class="p p-Indicator">,</span><span class="nt"> max_iterations</span><span class="p">:</span><span class="w"> </span><span class="nv">5</span><span class="p p-Indicator">}</span>
-</span><span id="__span-0-34"><a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">from</span><span class="p">:</span><span class="w"> </span><span class="nv">judge</span><span class="p p-Indicator">,</span><span class="nt"> to</span><span class="p">:</span><span class="w"> </span><span class="nv">ship</span><span class="p p-Indicator">}</span><span class="w">    </span><span class="c1"># fallback — order matters</span>
+</span><span id="__span-0-34"><a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">from</span><span class="p">:</span><span class="w"> </span><span class="nv">judge</span><span class="p p-Indicator">,</span><span class="nt"> to</span><span class="p">:</span><span class="w"> </span><span class="nv">ship</span><span class="p p-Indicator">}</span><span class="w">    </span><span class="c1"># fallback, order matters</span>
 </span><span id="__span-0-35"><a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">from</span><span class="p">:</span><span class="w"> </span><span class="nv">ship</span><span class="p p-Indicator">,</span><span class="nt"> to</span><span class="p">:</span><span class="w"> </span><span class="nv">end</span><span class="p p-Indicator">}</span><span class="w">      </span><span class="c1"># "end" (or no edge) terminates</span>
 </span><span id="__span-0-36"><a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a>
 </span><span id="__span-0-37"><a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
@@ -5276,7 +5276,7 @@ out), the fallback edge ships the draft.</p>
 </tr>
 <tr>
 <td><code>agent</code></td>
-<td>Peer agent to invoke as <code>agent__&lt;id&gt;</code> — declare it in the agent's <code>agents:</code> list.</td>
+<td>Peer agent to invoke as <code>agent__&lt;id&gt;</code>: declare it in the agent's <code>agents:</code> list.</td>
 </tr>
 <tr>
 <td><code>input</code></td>
@@ -5292,7 +5292,7 @@ out), the fallback edge ships the draft.</p>
 </tr>
 </tbody>
 </table>
-<p><code>branch</code> nodes do no work — they exist purely to fan edges out from one
+<p><code>branch</code> nodes do no work: they exist purely to fan edges out from one
 decision point.</p>
 <h2 id="edges-and-predicates">Edges and Predicates<a class="headerlink" href="#edges-and-predicates" title="Permanent link">&para;</a></h2>
 <p>Edges leaving a node are evaluated <strong>in declaration order</strong>; the first edge
@@ -5326,7 +5326,7 @@ can address fields (<code>{{.verdict.ok}}</code>); plain text stays a string.</p
 <h2 id="bounded-cycles">Bounded Cycles<a class="headerlink" href="#bounded-cycles" title="Permanent link">&para;</a></h2>
 <p>Cycles terminate by construction:</p>
 <ul>
-<li>Every edge defaults to <code>max_iterations: 1</code> — a back edge must explicitly
+<li>Every edge defaults to <code>max_iterations: 1</code>: a back edge must explicitly
   raise its budget to loop (<code>max_iterations: 5</code> above).</li>
 <li><code>max_node_executions</code> (default 100) backstops the entire run; exceeding it
   aborts the flow.</li>
@@ -5334,13 +5334,13 @@ can address fields (<code>{{.verdict.ok}}</code>); plain text stays a string.</p
 <div class="admonition warning">
 <p class="admonition-title">Warning</p>
 <p>Remember to raise <code>max_iterations</code> on the <em>forward</em> edge into a looped
-node too — in the example, <code>refine → judge</code> carries <code>max_iterations: 6</code>
+node too: in the example, <code>refine → judge</code> carries <code>max_iterations: 6</code>
 because it is traversed once per refinement pass.</p>
 </div>
 <h2 id="checkpointing-and-resume">Checkpointing and Resume<a class="headerlink" href="#checkpointing-and-resume" title="Permanent link">&para;</a></h2>
 <p>Each node visit checkpoints under <code>&lt;node&gt;#&lt;visit&gt;</code> in the same store as
 <a href="../workflow/">linear workflows</a>. Resuming a crashed run ID restores completed
-visits — flow variables included — and recomputes the same deterministic
+visits (flow variables included) and recomputes the same deterministic
 path, so only unfinished work executes. Side effects are never repeated.</p>
 <p>Graphs are validated at load time: duplicate or missing node IDs, unknown
 edge endpoints, bad kinds, and unknown entry nodes are refused with precise
@@ -5348,13 +5348,13 @@ errors before the agent ever runs.</p>
 <h2 id="two-ways-to-run-a-flow">Two Ways to Run a Flow<a class="headerlink" href="#two-ways-to-run-a-flow" title="Permanent link">&para;</a></h2>
 <p>The same graph serves two entry points:</p>
 <ul>
-<li><strong>Workflow runs</strong> — cron/scheduled or triggered runs execute the graph
+<li><strong>Workflow runs</strong>: cron/scheduled or triggered runs execute the graph
   through the checkpointing workflow executor (the example above).</li>
-<li><strong>Chat runs</strong> — set <code>reasoning.strategy: flow</code> and chat messages route
+<li><strong>Chat runs</strong>: set <code>reasoning.strategy: flow</code> and chat messages route
   through the graph as a reasoning strategy. Node actions go through the
   engine's standard tool-policy bridge (sandbox, allowlists, confirmation
   gates), and each node visit surfaces as a <code>reasoning.step</code> event in the
-  Chat thinking section and Activity feed — see
+  Chat thinking section and Activity feed: see
   <a href="../reasoning/">Reasoning Strategies</a>.</li>
 </ul>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">reasoning</span><span class="p">:</span>

@@ -4768,7 +4768,7 @@
   <a href="#activity-the-running-now-strip" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Activity — the "Running now" strip
+        Activity: the "Running now" strip
       
     </span>
   </a>
@@ -5093,7 +5093,7 @@
   <a href="#activity-the-running-now-strip" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Activity — the "Running now" strip
+        Activity: the "Running now" strip
       
     </span>
   </a>
@@ -5188,7 +5188,7 @@
 <p>This page maps the errors you're most likely to hit to their cause and the exact
 fix. Soulacy tries to surface these as actionable messages in the GUI and in
 <code>sy doctor</code>; this is the reference behind them.</p>
-<p>Run <code>sy doctor</code> first — it checks the vault, provider auth, ports, adapters, and
+<p>Run <code>sy doctor</code> first: it checks the vault, provider auth, ports, adapters, and
 recent error rate, and prints a specific remedy for each failed check.</p>
 <h2 id="install-startup">Install &amp; startup<a class="headerlink" href="#install-startup" title="Permanent link">&para;</a></h2>
 <table>
@@ -5245,7 +5245,7 @@ recent error rate, and prints a specific remedy for each failed check.</p>
 <h2 id="llm-providers-provider-doctor">LLM providers (Provider Doctor)<a class="headerlink" href="#llm-providers-provider-doctor" title="Permanent link">&para;</a></h2>
 <p>Click <strong>Test connection</strong> on any card on the <strong>Providers</strong> page (or call <code>GET
 /api/v1/providers/:id/models</code>). When the call fails, the response includes a
-structured <code>diagnosis</code> — <code>{category, reason, fix, detail}</code> — and the GUI
+structured <code>diagnosis</code> (<code>{category, reason, fix, detail}</code>) and the GUI
 renders <code>reason</code> (bold), <code>fix</code> (secondary line), and a <strong>Show raw error</strong>
 toggle for the underlying provider response.</p>
 <p>The diagnosis categories mirror what OpenAI / Anthropic / Google / Groq /
@@ -5334,7 +5334,7 @@ category to the doctor.</p>
 <h2 id="channel-delivery-delivery-doctor">Channel delivery (Delivery Doctor)<a class="headerlink" href="#channel-delivery-delivery-doctor" title="Permanent link">&para;</a></h2>
 <p>Each channel mapping has a <strong>Diagnose</strong> button (backed by
 <code>POST /api/v1/channels/:id/diagnose</code>) that runs these checks and reports the
-specific reason in plain language — what happened and how to fix it. Pass
+specific reason in plain language: what happened and how to fix it. Pass
 <code>{"dry": true}</code> to check readiness (destination set? adapter registered and
 connected?) without sending a real message. Common results:</p>
 <table>
@@ -5489,7 +5489,7 @@ before wiring it into a schedule or workflow.</p>
 </tr>
 <tr>
 <td>"Next run" is blank after Save</td>
-<td>Rare — the runtime rejected the expression after Save (pre-validation missed a case)</td>
+<td>Rare: the runtime rejected the expression after Save (pre-validation missed a case)</td>
 <td>Check the gateway logs for <code>scheduler re-registration failed</code>; open the issue tracker with the cron string</td>
 </tr>
 <tr>
@@ -5509,7 +5509,7 @@ before wiring it into a schedule or workflow.</p>
 </tr>
 <tr>
 <td>An unexpected run fired at boot with an <code>⟳ auto-replayed</code> chip on the Automations row</td>
-<td><code>schedule.missed_run_backfilled</code> — the gateway was down when a scheduled fire came due, and the most recent missed fire in the <code>missed_startup_window</code> (default <code>24h</code>) was replayed once at startup</td>
+<td><code>schedule.missed_run_backfilled</code>: the gateway was down when a scheduled fire came due, and the most recent missed fire in the <code>missed_startup_window</code> (default <code>24h</code>) was replayed once at startup</td>
 <td>Normal after an outage. If the same agent backfills every restart, either widen <code>schedule.missed_startup_window</code> (older fires stop qualifying) or check whether the gateway is crashing between runs</td>
 </tr>
 <tr>
@@ -5519,18 +5519,18 @@ before wiring it into a schedule or workflow.</p>
 </tr>
 </tbody>
 </table>
-<h2 id="activity-the-running-now-strip">Activity — the "Running now" strip<a class="headerlink" href="#activity-the-running-now-strip" title="Permanent link">&para;</a></h2>
+<h2 id="activity-the-running-now-strip">Activity: the "Running now" strip<a class="headerlink" href="#activity-the-running-now-strip" title="Permanent link">&para;</a></h2>
 <p>The <strong>Activity</strong> page polls <code>/activity/running</code> every 3s and renders a card per
 in-flight session with elapsed time, silent-for, and the last event type. When
 a session's silent window crosses 5 minutes the card turns red with a
-per-last-event-type reason + fix — for example, an <code>llm.call</code> last event says
-"waiting on the LLM provider for X — check Providers for rate-limit/overload",
+per-last-event-type reason + fix: for example, an <code>llm.call</code> last event says
+"waiting on the LLM provider for X: check Providers for rate-limit/overload",
 while a <code>tool.call</code> last event points at MCP/subprocess wedges. Click any
 hung card to jump into the per-session Activity view and inspect the tail.</p>
 <h2 id="when-youre-stuck-support-bundle">When you're stuck: support bundle<a class="headerlink" href="#when-youre-stuck-support-bundle" title="Permanent link">&para;</a></h2>
-<p><code>sy support bundle</code> produces a redacted support bundle — config with secrets
+<p><code>sy support bundle</code> produces a redacted support bundle: config with secrets
 stripped, recent logs, <code>doctor</code> output, release/update metadata, versions,
-recent failures, admin audit events, and a merged run ledger — safe to share
+recent failures, admin audit events, and a merged run ledger: safe to share
 when asking for help. The live gateway bundle includes:</p>
 <ul>
 <li><code>doctor.json</code>: provider and channel readiness, including delivery checks.</li>

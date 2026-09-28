@@ -5220,7 +5220,7 @@
 </tr>
 <tr>
 <td>Agent</td>
-<td>Which agent runs it; "— none —" makes it a plain tracking card</td>
+<td>Which agent runs it. Choose "none" for a plain tracking card.</td>
 </tr>
 <tr>
 <td>Status</td>
@@ -5228,11 +5228,11 @@
 </tr>
 <tr>
 <td>Owner</td>
-<td>Who reviews this — shown as an <code>@owner</code> badge on the card</td>
+<td>Who reviews this: shown as an <code>@owner</code> badge on the card</td>
 </tr>
 <tr>
 <td>Priority</td>
-<td><code>low</code> · <code>normal</code> · <code>high</code> · <code>urgent</code> (badges: ▽ · — · ▲ · ‼)</td>
+<td><code>low</code> · <code>normal</code> · <code>high</code> · <code>urgent</code> (badges: ▽ · ◆ · ▲ · ‼)</td>
 </tr>
 <tr>
 <td>Tags</td>
@@ -5240,19 +5240,19 @@
 </tr>
 <tr>
 <td>Due date</td>
-<td>Cards show "due today / due tomorrow / overdue (…)" — overdue turns red</td>
+<td>Cards show "due today / due tomorrow / overdue (…)": overdue turns red</td>
 </tr>
 </tbody>
 </table>
 <h2 id="running-tasks-and-retries">Running tasks and retries<a class="headerlink" href="#running-tasks-and-retries" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>▶ Run</strong> starts a new attempt through the assigned agent. A task that ended in <strong>Failed</strong> shows <strong>▶ Retry</strong> instead — retrying starts attempt #2, #3, … while preserving all prior attempts in the history.</li>
+<li><strong>▶ Run</strong> starts a new attempt through the assigned agent. A task that ended in <strong>Failed</strong> shows <strong>▶ Retry</strong> instead: retrying starts attempt #2, #3, … while preserving all prior attempts in the history.</li>
 <li>The server rejects duplicate concurrent runs of the same task (409), so double-clicking is safe.</li>
 <li>Each attempt appears in the editor's <strong>Run history</strong> with its attempt number, status badge, start/end time, session token/cost metrics, the result text, the failure reason (if any), and the session/action-log identifiers for deeper digging.</li>
 </ul>
-<p>Run lifecycle events (<code>run.started</code>, <code>run.finished</code>, <code>run.failed</code>) are published to the event stream, so you can wire failure webhooks — see <a href="../dashboard/">Dashboard &amp; Activity</a>.</p>
+<p>Run lifecycle events (<code>run.started</code>, <code>run.finished</code>, <code>run.failed</code>) are published to the event stream, so you can wire failure webhooks: see <a href="../dashboard/">Dashboard &amp; Activity</a>.</p>
 <h2 id="artifacts">Artifacts<a class="headerlink" href="#artifacts" title="Permanent link">&para;</a></h2>
-<p>Files the agent writes during a run are captured automatically and listed in the task editor's <strong>Artifacts</strong> panel — name, size, when it was created, which tool produced it, and which run. Click <strong>⬇ Download</strong> to fetch the file.</p>
+<p>Files the agent writes during a run are captured automatically and listed in the task editor's <strong>Artifacts</strong> panel: name, size, when it was created, which tool produced it, and which run. Click <strong>⬇ Download</strong> to fetch the file.</p>
 <p>API:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>curl<span class="w"> </span><span class="s2">"http://localhost:18789/api/v1/workboard/tasks/&lt;id&gt;/artifacts"</span><span class="w"> </span><span class="se">\</span>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$SOULACY_API_KEY</span><span class="s2">"</span>
@@ -5264,8 +5264,8 @@
 <h2 id="comments-review-notes">Comments &amp; review notes<a class="headerlink" href="#comments-review-notes" title="Permanent link">&para;</a></h2>
 <p>Each task has a discussion thread in the editor. Two kinds of entries:</p>
 <ul>
-<li><strong>💬 comment</strong> — ordinary notes.</li>
-<li><strong>🔍 review note</strong> — visually highlighted, for reviewer feedback (pairs naturally with the <strong>Needs Review</strong> column and the <strong>Owner</strong> field).</li>
+<li><strong>💬 comment</strong>: ordinary notes.</li>
+<li><strong>🔍 review note</strong>: visually highlighted, for reviewer feedback (pairs naturally with the <strong>Needs Review</strong> column and the <strong>Owner</strong> field).</li>
 </ul>
 <p>Type in the compose row, pick the kind, press <strong>Enter</strong> or <strong>Add</strong>. Entries record author and timestamp and can be deleted individually.</p>
 <h2 id="when-runs-fail-hard">When runs fail hard<a class="headerlink" href="#when-runs-fail-hard" title="Permanent link">&para;</a></h2>
@@ -5276,14 +5276,14 @@
 <p><strong>The dead-letter queue.</strong> When a run fails at the engine level, the failed message is pushed to the DLQ so nothing is silently lost. Inspect and clean it via the admin API:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>curl<span class="w"> </span><span class="s2">"http://localhost:18789/api/v1/admin/dlq?queue=&lt;agent-id&gt;"</span><span class="w"> </span><span class="se">\</span>
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$SOULACY_API_KEY</span><span class="s2">"</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1"># GET  /api/v1/admin/dlq/&lt;id&gt;      — one item with payload, error, attempts</span>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># DELETE /api/v1/admin/dlq/&lt;id&gt;    — discard after handling</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1"># GET  /api/v1/admin/dlq/&lt;id&gt;      returns one item with payload, error, attempts</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># DELETE /api/v1/admin/dlq/&lt;id&gt;    discards it after handling</span>
 </span></code></pre></div>
 </li>
 </ol>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>
-<p>Use <strong>Needs Review</strong> as the agent→human handoff: have agents do the work, then a human owner checks the run output and artifacts, leaves a 🔍 review note, and moves the card to <strong>Done</strong>.</p>
+<p>Use <strong>Needs Review</strong> for the agent-to-human handoff. Agents do the work, then a human owner checks the run output and artifacts, leaves a 🔍 review note, and moves the card to <strong>Done</strong>.</p>
 </div>
 
 

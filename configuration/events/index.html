@@ -5163,16 +5163,16 @@
 
 
 <h1 id="events-webhooks">Events &amp; Webhooks<a class="headerlink" href="#events-webhooks" title="Permanent link">&para;</a></h1>
-<p>Every notable action inside Soulacy — messages, tool calls, workboard
-runs, reasoning steps — is published as a versioned JSON envelope. Hook
+<p>Every notable action inside Soulacy, including messages, tool calls, workboard
+runs, and reasoning steps, is published as a versioned JSON envelope. Hook
 your dashboards, alerting, and log shippers into the stream instead of
 polling the API.</p>
 <p>Three ways to consume events:</p>
 <ol>
-<li><strong>Signed webhooks</strong> (<code>hooks:</code> in config.yaml) — easiest, works with the
+<li><strong>Signed webhooks</strong> (<code>hooks:</code> in config.yaml): easiest, works with the
    default in-process queue.</li>
-<li><strong>WebSocket</strong> <code>/ws/events</code> — what the GUI uses; great for live tooling.</li>
-<li><strong>NATS subjects</strong> — set <code>queue.backend: nats</code> and subscribe from any
+<li><strong>WebSocket</strong> <code>/ws/events</code>: what the GUI uses; great for live tooling.</li>
+<li><strong>NATS subjects</strong>: set <code>queue.backend: nats</code> and subscribe from any
    process or machine.</li>
 </ol>
 <h2 id="the-envelope-schema-v1">The envelope (schema v1)<a class="headerlink" href="#the-envelope-schema-v1" title="Permanent link">&para;</a></h2>
@@ -5186,7 +5186,7 @@ polling the API.</p>
 </span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">  </span><span class="nt">"data"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"task_id"</span><span class="p">:</span><span class="w"> </span><span class="mi">12</span><span class="p">,</span><span class="w"> </span><span class="nt">"run_id"</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="nt">"attempt"</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="nt">"failure_reason"</span><span class="p">:</span><span class="w"> </span><span class="s2">"…"</span><span class="w"> </span><span class="p">}</span>
 </span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="p">}</span>
 </span></code></pre></div>
-<p><code>data</code> carries the type-specific payload verbatim — an object, a string,
+<p><code>data</code> carries the type-specific payload verbatim: an object, a string,
 or null. New event types and fields may be added at any time; consumers
 <strong>must ignore unknown types and fields</strong>. Renaming or removing a field
 bumps <code>schema</code>, with the previous schema dual-published for at least two
@@ -5280,9 +5280,9 @@ releases. Full contract: <a href="https://github.com/vmodekurti/soulacy-personal
 </span></code></pre></div>
 <p>Subscribe with NATS wildcards:</p>
 <ul>
-<li><code>soulacy.events.&gt;</code> — everything</li>
-<li><code>soulacy.events.run.*</code> — workboard run lifecycle only</li>
-<li><code>soulacy.events.tool.*</code> — tool activity only</li>
+<li><code>soulacy.events.&gt;</code>: everything</li>
+<li><code>soulacy.events.run.*</code>: workboard run lifecycle only</li>
+<li><code>soulacy.events.tool.*</code>: tool activity only</li>
 </ul>
 <p>With the default <code>memory</code> backend, subjects exist in-process only (used
 by the webhook dispatcher). Set <code>queue.backend: nats</code> to consume events
@@ -5343,7 +5343,7 @@ rather than the event stream.</p>
 </div>
 <h2 id="websocket-stream-wsevents">WebSocket stream (<code>/ws/events</code>)<a class="headerlink" href="#websocket-stream-wsevents" title="Permanent link">&para;</a></h2>
 <p>The same events the GUI renders, available to your own tools:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># wscat example — browser WebSockets can't set headers, so the</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># wscat example: browser WebSockets can't set headers, so the</span>
 </span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="c1"># credential may be passed as a query parameter:</span>
 </span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>wscat<span class="w"> </span>-c<span class="w"> </span><span class="s2">"ws://localhost:18789/ws/events?api_key=sy_..."</span>
 </span></code></pre></div>
@@ -5354,9 +5354,9 @@ are accepted only when the plugin's manifest grants the
 dropped for that client rather than stalling the agent engine.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="https://github.com/vmodekurti/soulacy-personal/blob/main/docs/EVENTS.md"><code>docs/EVENTS.md</code></a> — the full schema contract</li>
-<li><a href="../storage/">Storage &amp; backends</a> — queue backend configuration</li>
-<li><a href="../../api/">API overview</a> — REST routes including <code>/ws/events</code></li>
+<li><a href="https://github.com/vmodekurti/soulacy-personal/blob/main/docs/EVENTS.md"><code>docs/EVENTS.md</code></a>: the full schema contract</li>
+<li><a href="../storage/">Storage &amp; backends</a>: queue backend configuration</li>
+<li><a href="../../api/">API overview</a>: REST routes including <code>/ws/events</code></li>
 </ul>
 
 
