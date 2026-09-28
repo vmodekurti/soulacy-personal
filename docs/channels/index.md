@@ -1,6 +1,15 @@
 # Channels Overview
 
-Channels are adapters that connect agents to messaging platforms. Each channel handles platform authentication, inbound message normalization, outbound replies, and live connection status.
+Channels are first class routes into the Soulacy gateway. They connect agents
+to messaging platforms, APIs, and custom adapters. Each channel handles
+platform authentication, inbound message normalization, outbound replies, and
+live connection status.
+
+Genie provides the native iPhone conversation and operating experience. Other
+channels connect directly to the same gateway and agents. A request arriving
+from WhatsApp or Telegram does not pass through Genie, and a scheduled result
+can be delivered to any configured outbound channel. The runtime applies the
+same agent permissions, memory, schedules, and run history to every route.
 
 ## Supported channels
 

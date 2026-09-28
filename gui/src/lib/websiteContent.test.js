@@ -9,6 +9,8 @@ const websiteReadme = readFileSync(new URL('../../../website/README.md', import.
 describe('public website claims', () => {
   it('keeps public messaging focused on Genie, iPhone, and self-hosted Personal', () => {
     expect(website).toContain('Ask Genie from your iPhone.')
+    expect(website).toContain('WhatsApp, Telegram, Slack, Discord, email, HTTP, and custom adapters are first class channels.')
+    expect(website).toContain('Genie does not sit between your other channels and the gateway.')
     expect(website).toContain('Your gateway remains on infrastructure you control.')
     expect(website).toContain('Genie cannot approve itself.')
     expect(website).toContain('explicit agent and gateway policy')

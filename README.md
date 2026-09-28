@@ -16,6 +16,11 @@ the result, inspect what Genie built, and pause or cancel it from the same
 conversation. Your phone is the command center; your gateway remains the
 runtime.
 
+Genie is the native iPhone entry point to that gateway. WhatsApp, Telegram,
+Slack, Discord, email, HTTP, and custom adapters are first class channels too.
+An agent can receive a request, reply, or deliver scheduled work through any
+configured channel, with the same permissions, memory, and run history.
+
 **Every privileged action has an answer.** It either waits for a recorded
 approval or follows explicit agent and gateway policy you can inspect. A
 scheduled run cannot approve itself, and text fetched from a website or MCP
@@ -69,7 +74,8 @@ Apache-2.0 licensed; the project name and logos follow the separate
   a vetted template. Soulacy drafts the plan, generates the workflow, and checks
   it end-to-end before you save.
 - **Run it**: deploy the agent to Soulacy Mobile, Telegram, Slack, Discord, WhatsApp, HTTP, or a
-  schedule. One binary, no cloud required.
+  schedule. These are first class gateway channels, so agents can receive
+  requests and return work where you already communicate. One binary, no cloud required.
 - **Fix and learn**: when a run fails, Debug in Studio explains it in plain
   English and proposes a fix you can preview. Successful repairs become
   regression tests, and Soulacy shows you what it's learned over time.
