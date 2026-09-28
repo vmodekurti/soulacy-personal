@@ -1,9 +1,11 @@
 # Soulacy on iPhone
 
 The gateway is the brain. It runs your agents, holds their memory, and enforces
-every permission. The iPhone is the extension: the place an agent asks you for
-a decision when you are not at a desk, and the only device that knows where you
-are, what is on your calendar, how you slept, and whether a Focus is on.
+every permission. The iPhone is your automation command center: talk to Genie,
+run agents, follow their work, receive results, and manage what Genie created
+without returning to a desk. It is also the place an agent asks you for a
+decision and the only device that knows where you are, what is on your calendar,
+how you slept, and whether a Focus is on.
 
 That combination is what makes the iPhone integration different from an
 assistant app. Your own agents, running on hardware you control, can reach the
@@ -11,6 +13,7 @@ phone's sensors through permissions you can read in a file, and every risky
 step waits for you on the lock screen.
 
 [Connect your iPhone](getting-started/iphone.md){ .md-button .md-button--primary }
+[Talk to Genie](using/genie.md){ .md-button }
 [Build a brief from your phone's signals](use-cases/phone-brief.md){ .md-button }
 
 !!! info "Two independent versions"
@@ -30,6 +33,12 @@ step waits for you on the lock screen.
 | **Hands-free in the car** | "Talk to Planner in Soulacy" works with Siri, AirPods, and CarPlay. Replies are read back. Approvals always wait for the phone. | Voice is a channel into the same runtime, not a separate assistant with its own rules. |
 
 ## Everything the iPhone app does today
+
+**Ask Genie and automate.** Ask a question, delegate a one-off task, or describe
+something that should happen repeatedly. Genie can build a saved agent from
+the skills, MCP servers, and delivery channels on your gateway. **Agents** and
+**Activity** keep the resulting automation and its runs visible, with controls
+to pause an agent or cancel an active run.
 
 **Decide anywhere.** A single Inbox of time-boxed decisions: tool approvals,
 failed runs, tasks waiting for review, and learning proposals. Approvals also

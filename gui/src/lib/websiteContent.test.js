@@ -5,9 +5,10 @@ const website = readFileSync(new URL('../../../website/index.html', import.meta.
 const footprint = readFileSync(new URL('../../../docs/deployment/footprint.md', import.meta.url), 'utf8')
 
 describe('public website claims', () => {
-  it('keeps public messaging focused on self-hosted Personal', () => {
-    expect(website).toContain('Soulacy Personal is a complete self-hosted agent system.')
-    expect(website).toContain('Approve risky actions from your iPhone.')
+  it('keeps public messaging focused on Genie, iPhone, and self-hosted Personal', () => {
+    expect(website).toContain('Ask Genie from your iPhone.')
+    expect(website).toContain('Your gateway remains on infrastructure you control.')
+    expect(website).toContain('Genie cannot approve itself.')
     expect(website).toContain('explicit agent and gateway policy')
     expect(website).toContain('https://docs.soulacy.io/personal/')
     expect(website).not.toMatch(/\bcommercial\b/i)

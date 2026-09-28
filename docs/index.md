@@ -1,12 +1,16 @@
-# Run AI agents on hardware you own
+# Run private automation from your iPhone
 
-**Approve risky actions from your iPhone, or authorize unattended work through
-configuration you can inspect.**
+**Tell Genie what you need. Soulacy builds and runs it on hardware you own.**
 
 Soulacy Personal is a complete self-hosted agent system. A model supplies the
 reasoning; Soulacy supplies the tools, permissions, schedules, delivery,
 memory, and the record of what happened. A privileged action proceeds only
 after a recorded approval or an explicit agent and gateway policy grant.
+
+The iPhone app is the everyday control surface. Ask Genie for an answer, a
+one-off task, or a recurring automation. Run agents, follow their progress,
+receive results, and pause or cancel what Genie built from the same phone.
+When a privileged step needs you, the approval arrives there too.
 
 Soulacy also keeps a structured picture of how your days go — your routine,
 the people who matter, what you owe and when — and every agent you run reads
@@ -23,6 +27,7 @@ model, and companion-client requirements.
 
 [Start here: your first successful run](getting-started/quickstart.md){ .md-button .md-button--primary }
 [Connect your iPhone](getting-started/iphone.md){ .md-button }
+[Use Genie](using/genie.md){ .md-button }
 [Read the security model](security/index.md){ .md-button }
 [Pick a worked use case](use-cases/index.md){ .md-button }
 
@@ -51,6 +56,7 @@ complete enforcement path.
 | You want to… | Follow this guide | What you will have at the end |
 |---|---|---|
 | Try Soulacy for the first time | [First successful run](getting-started/quickstart.md) | A model connection and a response you can check yourself |
+| Build and manage automation by conversation | [Talk to Genie](using/genie.md) | A saved agent or schedule you can inspect, pause, or cancel |
 | Use your gateway from an iPhone | [Connect your iPhone](getting-started/iphone.md) | A paired phone and a verified round-trip chat |
 | Let agents use your phone's signals | [Soulacy on iPhone](iphone.md) | Lock-screen approvals, declared device tools, Siri and CarPlay, and a brief built from health, calendar, and Focus |
 | Turn messy notes into something useful | [Notes → action plan](use-cases/notes-to-action-plan.md) | Owners, next actions, and explicit unknowns without sending anything |

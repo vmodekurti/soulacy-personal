@@ -2,12 +2,19 @@
 
 <img src="docs/assets/living-core-blue-v1.png" width="64" height="64" alt="Soulacy Blue Living Core logo" />
 
-**Run AI agents on hardware you own. Approve risky actions from your iPhone.**
+**Tell Genie what you need from your iPhone. Soulacy runs the automation on
+hardware you own.**
 
 Soulacy Personal is a complete self-hosted agent system: one binary, agents as
 readable YAML, a web workspace, schedules, chat channels, adaptive memory, and
 support for local or cloud models. It runs on a laptop, home server, Raspberry
 Pi, or small VPS.
+
+From the iPhone app, ask Genie to research a topic, prepare a morning brief,
+watch for a change, or turn a repeated request into a scheduled agent. Check
+the result, inspect what Genie built, and pause or cancel it from the same
+conversation. Your phone is the command center; your gateway remains the
+runtime.
 
 **Every privileged action has an answer.** It either waits for a recorded
 approval or follows explicit agent and gateway policy you can inspect. A
@@ -72,12 +79,18 @@ Apache-2.0 licensed; the project name and logos follow the separate
 [![Docker](https://img.shields.io/badge/ghcr.io-vmodekurti%2Fsoulacy--personal-blue?logo=docker)](https://github.com/vmodekurti/soulacy-personal/pkgs/container/soulacy)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-## Your iPhone is part of the runtime
+## Genie puts your automation in your pocket
 
-The native iPhone app is not a shrunk-down web GUI. It is the place an agent
-asks you for a decision when you are away from your desk, and the only device
-that knows where you are, what is on your calendar, how you slept, and whether
-a Focus is on. What that makes possible, and where it is different:
+The native iPhone app is where you talk to Genie, run agents, follow their
+progress, receive their work, and make decisions when you are away from your
+desk. It is also the only device that knows where you are, what is on your
+calendar, how you slept, and whether a Focus is on. What that makes possible:
+
+- **Ask once or automate it.** Ask Genie for an answer now, or ask it to build
+  a recurring agent. Genie uses the skills, MCP servers, and delivery channels
+  actually installed on your gateway and tells you when something is missing.
+- **Keep control in the conversation.** See the agents and monitors Genie
+  created, inspect their recent work, and pause or cancel them from your phone.
 
 - **Approve on the lock screen.** A run that needs your yes shows up as a Live
   Activity with Approve and Deny, with Face ID for high-risk tools. The approval
