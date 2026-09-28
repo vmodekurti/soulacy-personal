@@ -13,7 +13,7 @@ reasoning:
 ```
 
 Agents **without** a `reasoning:` block keep the classic single-call behavior
-untouched — the loop is strictly opt-in.
+untouched: the loop is strictly opt-in.
 
 ## Configuration
 
@@ -25,7 +25,7 @@ untouched — the loop is strictly opt-in.
 | `step_timeout` | `30s` | Context deadline for each individual step. |
 | `total_timeout` | `180s` | Deadline for the whole task. |
 
-The LLM backend is derived automatically from `llm.provider` — Ollama,
+The LLM backend is derived automatically from `llm.provider`: Ollama,
 Anthropic, OpenAI (and OpenAI-compatible endpoints such as Groq, Together, or
 vLLM) are supported, with Ollama as the fallback. There is exactly one place
 to configure the model: the agent's `llm` block.
@@ -35,18 +35,18 @@ to configure the model: the agent's `llm` block.
 | Strategy | How it works | Reach for it when |
 |----------|--------------|-------------------|
 | `react` | Iterative loop: think → pick a tool → observe → repeat until done, then reflect into a final answer. | Exploratory tasks where each step depends on the last result. |
-| `plan_execute` | Decomposes the task into a plan up front (capped by `max_plan_steps`), executes the steps, then reflects. | Tasks with a knowable shape — gather X, compute Y, write Z. |
+| `plan_execute` | Decomposes the task into a plan up front (capped by `max_plan_steps`), executes the steps, then reflects. | Tasks with a knowable shape: gather X, compute Y, write Z. |
 | `auto` | A keyword heuristic picks `react` or `plan_execute` per task. | You don't want to decide. |
-| `flow` | Walks a declarative graph you define under `workflow.nodes`/`edges` — deterministic routing with bounded cycles. See [Flow Graphs](flows.md). | The path should be authored, not improvised. |
+| `flow` | Walks a declarative graph you define under `workflow.nodes`/`edges`: deterministic routing with bounded cycles. See [Flow Graphs](flows.md). | The path should be authored, not improvised. |
 
 Custom strategies registered through the SDK (`sdk/reasoning` +
-`registry.RegisterReasoningStrategy`) are selected the same way — put their
+`registry.RegisterReasoningStrategy`) are selected the same way: put their
 registered name in `strategy:`. See
 [`docs/REASONING_STRATEGIES.md`](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/REASONING_STRATEGIES.md) in the repo for
 the author-side contract.
 
 !!! tip
-    A typo'd or unregistered strategy name never bricks an agent — the engine
+    A typo'd or unregistered strategy name never bricks an agent: the engine
     falls back to ReAct and the run completes with the default loop.
 
 ## Tool Access Inside the Loop
@@ -56,15 +56,15 @@ built-ins, MCP tools, plugin tools, and peer agents. Every call is bridged
 through the same dispatch path as the classic loop, so the Python sandbox,
 audit log, [confirmation gates](tools.md#confirmation-gates), and MCP/plugin
 allowlists all apply unchanged. Tool failures become observations the loop
-can react to — they never abort the run.
+can react to. They never abort the run.
 
 ## Watching It Think
 
 Reasoning runs are fully observable:
 
-- **Chat** — the thinking section above the reply expands to show each step's
+- **Chat**: the thinking section above the reply expands to show each step's
   thought, the tool it chose, and a preview of the observation.
-- **Activity** — the run emits engine events you can follow live or audit
+- **Activity**: the run emits engine events you can follow live or audit
   later:
 
 | Event | Payload |
@@ -98,7 +98,7 @@ itself still succeeds). See
 !!! warning
     `auto_update: true` lets an agent rewrite its own instructions after each
     run. Versioning makes drift visible and reversible, but review the
-    history periodically — or lock the rulebook once behavior is where you
+    history periodically, or lock the rulebook once behavior is where you
     want it.
 
 ## Example: A Researcher That Plans

@@ -12,7 +12,7 @@ every image. You choose one of two routes.
 ## Route 1: a remote browser (no local install)
 
 Point the server at a browser running somewhere else. Nothing is installed on
-your gateway — no Chromium, no system libraries, no download — so this works on
+your gateway (no Chromium, no system libraries, no download) so this works on
 platforms where you have no shell.
 
 On the **MCP Servers** page, choose the **Browser remote (CDP)** template and
@@ -58,7 +58,7 @@ curl -X POST http://localhost:18789/api/v1/browser/libs/install \
 The checksum is required, not optional: these files are loaded into the browser
 process, so a bundle that is not the one you meant is code execution rather
 than a corrupt download. The bundle lands on the mounted volume, so it survives
-a redeploy. **Restart the gateway afterwards** — a server already running
+a redeploy. **Restart the gateway afterwards.** A server already running
 inherited the old environment and cannot see the new directory.
 
 **The browser itself.** Once the libraries are in place:
@@ -104,13 +104,13 @@ The failures here rarely name the thing that is broken.
 
 | What you see | What it means |
 | --- | --- |
-| `initialize: stdio transport closed before response` | the server exited at startup — usually Node is too old (Playwright needs 20+) |
+| `initialize: stdio transport closed before response` | the server exited at startup: usually Node is too old (Playwright needs 20+) |
 | `Chromium distribution 'chrome' is not found` | `--browser chromium` is missing |
 | `No usable sandbox!` | `--no-sandbox` is missing |
 | `libsoftokn3.so: cannot open shared object file` | the library bundle is incomplete; rebuild it with the current script |
-| *"the browser had closed"* on every navigation | the same thing as above — NSS aborts as soon as a page uses TLS |
+| *"the browser had closed"* on every navigation | the same thing as above: NSS aborts as soon as a page uses TLS |
 | `Target page, context or browser has been closed` on a fresh start | an orphaned browser from a previous run still holds Playwright's runtime directory |
-| `EACCES … /tmp/pw-*/browser/…sock` | that directory is owned by another user — usually created by running the server as root while the gateway runs unprivileged |
+| `EACCES … /tmp/pw-*/browser/…sock` | that directory is owned by another user: usually created by running the server as root while the gateway runs unprivileged |
 
 The deployment report on the **MCP Servers** page tells you which route your
 deployment can take before you pick one. See
@@ -127,7 +127,7 @@ the flag the browser is killed a second after `browser_navigate` returns, and
 the next call reports `about:blank` with nothing to say why.
 
 The exemption ends when the server stops. Whatever it left running is reaped
-then — on a restart, or when the server is removed — because nothing owns those
+then (on a restart, or when the server is removed) because nothing owns those
 processes any more, and an orphaned browser holds the runtime directory its
 replacement needs.
 

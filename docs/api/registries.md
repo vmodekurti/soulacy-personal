@@ -1,7 +1,7 @@
 # Registries & Skills API
 
 These endpoints manage **skill sources** (package registries), review
-candidate URLs before trusting them, and hot-load skills — the API behind
+candidate URLs before trusting them, and hot-load skills: the API behind
 the GUI's "Add source" / "Install skill" flows and the
 `sy registry` / `sy skill install` CLI commands.
 
@@ -35,7 +35,7 @@ curl -H "Authorization: Bearer $SOULACY_API_KEY" \
 }
 ```
 
-`auth_headers` values never leave the server — only the `has_auth` flag
+`auth_headers` values never leave the server: only the `has_auth` flag
 is exposed. `signing_key` is the registry's *public* ed25519 key, so it
 is returned as-is.
 
@@ -78,7 +78,7 @@ Body fields:
 | `id` | no (defaults to `type`) | Operator-chosen name shown in consent dialogs |
 | `type` | no (default `http`) | `http` or `git` (plus any types a flavored binary registers) |
 | `base_url` | for non-`git` types | Registry root URL |
-| `priority` | no | Resolution order — **lower runs first** |
+| `priority` | no | Resolution order: **lower runs first** |
 | `signing_key` | no | Hex ed25519 public key; when set, unsigned/tampered packages from this source are refused |
 
 Responses: `200 {"ok": true, "message": "…"}` on success, `400` for an
@@ -124,7 +124,7 @@ flow and payloads.
 
 When you install by slug (`sy skill install self-improving-agent` or the
 GUI flow), configured registries are queried in ascending `priority`
-order with fallback — the first registry that resolves the slug wins.
+order with fallback: the first registry that resolves the slug wins.
 With no registries configured, a bare `git` provider still resolves
 `github.com/user/my-skill` sources. Every remote install runs the safety
 introspection pipeline and requires consent before files land in the
@@ -132,6 +132,6 @@ workspace `skills/` directory.
 
 ## See also
 
-- [Skill Sources](../extend/skill-sources.md) — concepts and GUI flow
-- [Package Registries](../extend/registries.md) — running your own registry
-- [CLI Reference](../cli/reference.md) — `sy registry`, `sy skill install`
+- [Skill Sources](../extend/skill-sources.md): concepts and GUI flow
+- [Package Registries](../extend/registries.md): running your own registry
+- [CLI Reference](../cli/reference.md): `sy registry`, `sy skill install`

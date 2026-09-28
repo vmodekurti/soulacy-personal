@@ -134,7 +134,7 @@ The OS-level built-ins are split into two partitions:
 
 - **SAFE** (read-only, always available on the local `http` channel):
   `read_file`, `list_dir`, `find_files`, `fetch_url`, `http_request`,
-  `env_get`, `sys_info`. These require no special grant — an agent reachable
+  `env_get`, `sys_info`. These require no special grant: an agent reachable
   on the local web channel can use them (suppress them with `builtins: []`).
 - **SYSTEM** (privileged): `shell_exec`, `run_script`, `install_library`,
   `write_file`, `download_file`. These can mutate the host or run arbitrary
@@ -162,7 +162,7 @@ confirm_tools:
 ### Tool environment allowlist (SEC-5)
 
 Python tool subprocesses no longer inherit the gateway's full environment.
-They receive only a base allowlist — `PATH`, `HOME`, `LANG`, `TMPDIR` — plus
+They receive only a base allowlist (`PATH`, `HOME`, `LANG`, `TMPDIR`) plus
 any variable **names** you declare per agent:
 
 ```yaml

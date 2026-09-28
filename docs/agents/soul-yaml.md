@@ -1,6 +1,6 @@
 # SOUL.yaml Reference
 
-One `SOUL.yaml` file fully defines an agent — its identity, trigger, model, tools, memory, and behavior — and Soulacy hot-loads it the moment you save.
+One `SOUL.yaml` file fully defines an agent (its identity, trigger, model, tools, memory, and behavior) and Soulacy hot-loads it the moment you save.
 
 ## Quick Start
 
@@ -60,7 +60,7 @@ system_prompt: |
   Produce a short brief. Cite sources when available.
 
 # ── Tools ─────────────────────────────────────────────────
-tools:                       # agent-local Python tools — see Agent Tools page
+tools:                       # agent-local Python tools, see Agent Tools page
   - name: summarize_csv
     description: Summarize a CSV file and return compact JSON.
     python_file: tools/summarize_csv.py
@@ -146,7 +146,7 @@ run_timeout: 10m             # whole-run wall-clock cap (default 15m)
 | `location` | Runs when a paired iPhone enters or leaves a place. Requires a `location` block (below). |
 
 `channels` binds the agent to channel adapter IDs. Platform credentials and
-inbound routing live in `config.yaml` — the agent only declares which adapters
+inbound routing live in `config.yaml`: the agent only declares which adapters
 it serves.
 
 `surfaces` controls where the same agent is visible or invokable. Leave it
@@ -182,7 +182,7 @@ location:
   name: Office            # shown on the phone; defaults to the agent name
   latitude: 47.6205
   longitude: -122.3493
-  radius_m: 250           # 100–5000 metres
+  radius_m: 250           # 100-5000 metres
   on: enter               # enter | exit
   cooldown: 45m           # ignore repeat crossings for this long (default 30m)
   # device: <installation-id>   # optional: only this phone watches the place
@@ -208,10 +208,10 @@ stream and in the phone's Location triggers screen with its outcome.
 
 These are covered in depth on their own pages:
 
-- [Agent Tools](tools.md) — `tools:` (Python), `builtins:`, `mcp_servers:`/`mcp_tools:`, `system_tools:`, `confirm_tools:`.
-- [Skills](skills.md) — `skills:` names, or `["*"]` for all installed.
-- [Peer Agents & Built-ins](peers-builtins.md) — `agents:` peer list and built-ins modes.
-- [Authenticated Website Connections](authenticated-connections.md) — encrypted, owner-scoped sign-in sessions for interactive and scheduled agents.
+- [Agent Tools](tools.md): `tools:` (Python), `builtins:`, `mcp_servers:`/`mcp_tools:`, `system_tools:`, `confirm_tools:`.
+- [Skills](skills.md): `skills:` names, or `["*"]` for all installed.
+- [Peer Agents & Built-ins](peers-builtins.md): `agents:` peer list and built-ins modes.
+- [Authenticated Website Connections](authenticated-connections.md): encrypted, owner-scoped sign-in sessions for interactive and scheduled agents.
 
 `knowledge:` lists knowledge base names this agent may search via the built-in
 `kb_search` tool. Empty means no KB catalog is injected at all.
@@ -225,7 +225,7 @@ an ID into `SOUL.yaml` cannot release another person's saved session.
 `memory` controls classic session/cross-session memory injection
 (`read_scopes`, `write_scopes`, `max_tokens`).
 
-`brain_memory` controls the long-term layers — see
+`brain_memory` controls the long-term layers: see
 [Agent Memory & Rulebooks](../using/memory.md):
 
 | Layer | Keys | Effect |
@@ -237,7 +237,7 @@ an ID into `SOUL.yaml` cannot release another person's saved session.
 ## Reasoning
 
 The `reasoning:` block switches the agent from a single LLM call to a
-multi-step loop — see [Reasoning Strategies](reasoning.md):
+multi-step loop: see [Reasoning Strategies](reasoning.md):
 
 | Key | Default | Meaning |
 |-----|---------|---------|
@@ -247,7 +247,7 @@ multi-step loop — see [Reasoning Strategies](reasoning.md):
 | `step_timeout` | 30s | Per-step deadline. |
 | `total_timeout` | 180s | Whole-task deadline. |
 
-The reasoning backend is derived automatically from `llm.provider` — there is
+The reasoning backend is derived automatically from `llm.provider`: there is
 nothing extra to configure.
 
 ## Workflow
@@ -255,9 +255,9 @@ nothing extra to configure.
 `workflow:` replaces the free-form LLM loop with a checkpointed pipeline. Two
 shapes are supported:
 
-- **Linear steps** (`workflow.steps`) — see [Workflow Steps](workflow.md).
+- **Linear steps** (`workflow.steps`): see [Workflow Steps](workflow.md).
 - **Cyclic graphs** (`workflow.nodes` / `edges` / `entry` / `max_node_executions`)
-  with conditional routing and bounded loops — see [Flow Graphs](flows.md).
+  with conditional routing and bounded loops: see [Flow Graphs](flows.md).
   When nodes are declared they take precedence over steps.
 
 ## Schedule
@@ -277,8 +277,8 @@ schedule:
 ```
 
 When `run_missed_on_startup` is `true`, Soulacy replays at most **one** missed
-fire per startup — the latest one inside `missed_startup_window` (default
-`24h`) — so a long outage never floods downstream channels.
+fire per startup. It chooses the latest one inside `missed_startup_window`
+(default `24h`), so a long outage never floods downstream channels.
 
 Use `notify_on_failure` to route errors somewhere a human will see them.
 Channel-triggered runs reply with errors automatically; cron and manual runs
@@ -312,5 +312,5 @@ the challenge message.
 
 !!! tip
     The GUI agent editor (Agents page) round-trips every field on this page,
-    including the tri-state `builtins` modes and per-tool timeouts — you never
+    including the tri-state `builtins` modes and per-tool timeouts: you never
     have to hand-edit YAML unless you prefer to.

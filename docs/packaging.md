@@ -1,7 +1,7 @@
 # Agent Package Format
 
 Soulacy exports and imports agents as self-contained `.soulacy-agent.json`
-packages — a redacted `SOUL.yaml`, a machine-readable manifest listing every
+packages: a redacted `SOUL.yaml`, a machine-readable manifest listing every
 provider / channel / skill / peer / secret the agent depends on, integrity
 metadata, and any supporting files (Python tools, evals, prompts, samples).
 
@@ -59,10 +59,10 @@ their own namespace and register a key at push time (bucket 7B).
 
 ## `sy package` commands (available today)
 
-- `sy package export <agent-id> [--out FILE] [--signing-key-file FILE]` — export a saved agent.
-- `sy package inspect <package.json>` — hit the gateway to preview requirements against your workspace.
-- `sy package import <package.json> [--overwrite] [--enable] [--id NEW-ID] [--acknowledge-missing]` — import.
-- `sy package validate <package.json>` — **new in 7A** — local-only structural check (schema, calendar version, namespaced id). No gateway hit; useful for publishers.
+- `sy package export <agent-id> [--out FILE] [--signing-key-file FILE]`: export a saved agent.
+- `sy package inspect <package.json>`: hit the gateway to preview requirements against your workspace.
+- `sy package import <package.json> [--overwrite] [--enable] [--id NEW-ID] [--acknowledge-missing]`: import.
+- `sy package validate <package.json>` (**new in 7A**) local-only structural check (schema, calendar version, namespaced id). No gateway hit; useful for publishers.
 
 ## Requirements gate (7A)
 
@@ -82,7 +82,7 @@ workspace:
 Importing a v2 package with any `missing` requirement returns 409 unless the
 request carries `acknowledge_missing: true`. The CLI exposes this as
 `--acknowledge-missing`; the GUI import modal shows the missing entries in a
-red banner with an "I understand — import anyway" checkbox.
+red banner with an "I understand: import anyway" checkbox.
 
 v1 packages don't have a `requires` block, so nothing gates them structurally
 (beyond the existing schema + SOUL.yaml validation).

@@ -3,7 +3,7 @@
 Genie is the way in. You ask for something in your own words, and Genie either
 answers it or builds the thing that will keep answering it.
 
-Most of Soulacy — Studio, the agent list, schedules, delivery channels — is
+Most of Soulacy (Studio, the agent list, schedules, delivery channels) is
 still there, and you will want it eventually. You do not need any of it to
 start.
 
@@ -37,8 +37,8 @@ Two kinds of request land differently, and you do not have to say which:
   news every morning at seven."
 
 The second is the interesting one. Genie hands it to the same builder that sits
-behind Studio, which knows what is installed on your gateway — which skills,
-which MCP servers, which delivery channels — and will not invent a tool you do
+behind Studio. It knows which skills, MCP servers, and delivery channels are
+installed on your gateway, and it will not invent a tool you do
 not have.
 
 ## It will ask you things
@@ -71,7 +71,7 @@ Reach for [Studio](studio.md) when you want to:
 - change an agent that already exists;
 - see or edit the YAML directly;
 - build something with branching, loops, or custom code;
-- approve an agent that would be reachable on a channel — that consent lives on
+- approve an agent that would be reachable on a channel: that consent lives on
   screen, deliberately, and Genie cannot give it on your behalf.
 
 ## What Genie will not do

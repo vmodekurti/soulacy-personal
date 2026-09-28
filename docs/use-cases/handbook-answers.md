@@ -14,10 +14,10 @@ Open **Knowledge → + New KB**, name it `demo-handbook`, and select an embeddin
 provider/model that is actually available. Record the ID shown by the gateway;
 it may not be identical to the display name.
 
-Add a text document titled **Demo equipment policy — revision 1**:
+Add a text document titled **Demo equipment policy: revision 1**:
 
 ```text
-FICTIONAL TRAINING POLICY — NOT A REAL COMPANY POLICY
+FICTIONAL TRAINING POLICY: NOT A REAL COMPANY POLICY
 Standard replacement keyboards may be requested after 24 months of use.
 The request must include the asset ID and the team lead's approval.
 Urgent hardware failures should be reported to the help desk.

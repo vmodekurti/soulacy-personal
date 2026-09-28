@@ -1,6 +1,6 @@
 # Installation
 
-The fastest path is the one-command installer — it brings its own dependencies.
+The fastest path is the one-command installer: it brings its own dependencies.
 
 ## One-click cloud
 
@@ -11,7 +11,7 @@ without exposing SSH or the data services. See the
 [cloud deployment guide](../deployment/cloud.md) for the exact resources and
 operating model.
 
-## One command (macOS / Linux — recommended)
+## One command (macOS / Linux: recommended)
 
 ```bash
 curl -fsSL https://soulacy.io/install.sh | bash
@@ -20,7 +20,7 @@ curl -fsSL https://soulacy.io/install.sh | bash
 What it does:
 
 1. Detects your OS/architecture (macOS & Linux, amd64 & arm64).
-2. Downloads the latest release binaries — or, if no release is published yet,
+2. Downloads the latest release binaries or, if no release is published yet,
    **builds from source automatically**, fetching private copies of Go and
    Node into `~/.soulacy/toolchain` when they're missing (no Homebrew, no
    system package changes).
@@ -99,7 +99,7 @@ Releases also include `release-manifest.json`, which records the release
 version, source commit, generation time, and every artifact's OS, architecture,
 byte size, and SHA-256 digest for installer and CI checks.
 
-If the releases page is empty, use the one-command installer above — it
+If the releases page is empty, use the one-command installer above: it
 falls back to a source build automatically.
 
 ## Verify
@@ -135,5 +135,5 @@ foreground gateway accepts an API key but systemd does not, follow the
 
 ## What's next?
 
-1. `sy onboard` — the guided first-run path for provider, search, starter agent, update manifest, and auto-start.
+1. `sy onboard`: the guided first-run path for provider, search, starter agent, update manifest, and auto-start.
 2. Follow the [Quick Start](quickstart.md), then take the [GUI tour](gui-tour.md).

@@ -43,13 +43,13 @@ a transactional cross-database snapshot.
 
 ## Understand the counts
 
-| Metric | What it means—and what it does not mean |
+| Metric | What it means, and what it does not mean |
 | --- | --- |
 | Incoming requests | Persisted `message.in` events in the period. Not model calls. |
 | Sessions | Distinct agent + conversation IDs with an incoming request in the period. Several requests can share a session. Events without a session ID do not invent one. |
 | Reply-complete sessions | Replies cover incoming requests and no error/dead-letter event was recorded in the period. This does **not** verify answer quality, tool success, or delivery to an external recipient. |
 | Sessions with errors | At least one error or dead-letter event. An error may subsequently have recovered; inspect the underlying run before retrying. |
-| Unresolved sessions | Other started sessions with fewer replies than requests. Could be active, interrupted, or cross a time boundary—not automatically failed or hung. |
+| Unresolved sessions | Other started sessions with fewer replies than requests. Could be active, interrupted, or cross a time boundary, not automatically failed or hung. |
 | Model requests | Cost-ledger records, including requests rejected before execution. One incoming request can lead to several model requests. |
 | Provider attempts | Recorded provider attempts, including retries. Do not add this to model requests; it is a different measure. |
 | Failed / rejected model requests | Failed recorded outcomes and pre-execution rejections are separate. Older records without a status are not assumed to have failed. |

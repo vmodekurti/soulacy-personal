@@ -36,7 +36,7 @@ learning:
   max_proposals: 2
 ```
 
-`max_proposals` limits newly created drafts per run, clamped to 1–3 (omitted:
+`max_proposals` limits newly created drafts per run, clamped to 1-3 (omitted:
 1). `auto_propose: false` asks the agent to propose only on your request;
 approved guidance can still be used. `min_chars` remains readable for old
 configurations but no longer drives excerpt generation.

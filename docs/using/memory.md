@@ -1,6 +1,6 @@
 # Memory
 
-Soulacy agents remember on two levels: conversation memory (scopes) keeps recent context flowing between turns, and brain memory (episodic / semantic / procedural layers) lets an agent learn across tasks — including a versioned, lockable rulebook it can update itself.
+Soulacy agents remember on two levels: conversation memory (scopes) keeps recent context flowing between turns, and brain memory (episodic / semantic / procedural layers) lets an agent learn across tasks: including a versioned, lockable rulebook it can update itself.
 
 For facts about *you* that update themselves as your situation changes
 (where you live, how you like answers, the people and projects you mention),
@@ -37,7 +37,7 @@ Each agent declares which memory tiers it reads from and writes to:
 
 | Scope | Meaning |
 |---|---|
-| `session` | Per-conversation history — forgotten when the session ends |
+| `session` | Per-conversation history: forgotten when the session ends |
 | `agent` | Shared across all sessions of this agent |
 | `global` | Persistent across conversations, visible beyond one agent |
 
@@ -51,13 +51,13 @@ sy memory list --agent <agent-id>
 
 Brain memory is long-term, structured memory with three independent layers (toggle each in the agent editor's **Brain memory** cards):
 
-- **🕐 Episodic** — a record of past tasks and their outcomes, injected as "Recent task history". Written automatically after each reply; you can also write records by hand.
-- **🔍 Semantic** — agent-scoped records retrieved by persistent native
+- **🕐 Episodic**: a record of past tasks and their outcomes, injected as "Recent task history". Written automatically after each reply; you can also write records by hand.
+- **🔍 Semantic**: agent-scoped records retrieved by persistent native
   sqlite-vec similarity search. Production does not silently fall back to an
   in-process vector index.
-- **📋 Procedural** — a markdown rulebook of operating rules, injected into the system prompt as `## Operating rules`.
+- **📋 Procedural**: a markdown rulebook of operating rules, injected into the system prompt as `## Operating rules`.
 
-Each layer has a `max_inject` knob (how many items to inject per task). Brain memory requires a memory directory — if the Brain Mem page warns it isn't enabled, set the `SOULACY_MEMORY_DIR` environment variable and restart.
+Each layer has a `max_inject` knob (how many items to inject per task). Brain memory requires a memory directory: if the Brain Mem page warns it isn't enabled, set the `SOULACY_MEMORY_DIR` environment variable and restart.
 
 ### Semantic storage and embeddings
 
@@ -87,9 +87,9 @@ to match and rebuild or reindex affected semantic content. See
 
 **🧠 Brain Mem** shows, per agent: episodic record count, whether procedural rules are active, and last activity. Three tabs:
 
-- **🕐 Episodic** — searchable timeline of records with tags; **+ Write** adds a manual record, **Clear all** wipes them.
-- **📋 Procedural** — the rulebook editor (markdown, with 👁 live preview), plus locking and version history (below).
-- **🔍 Context Preview** — type a hypothetical task and see the **exact** memory block that would be injected into the system prompt, with per-layer counts and a token estimate.
+- **🕐 Episodic**: searchable timeline of records with tags; **+ Write** adds a manual record, **Clear all** wipes them.
+- **📋 Procedural**: the rulebook editor (markdown, with 👁 live preview), plus locking and version history (below).
+- **🔍 Context Preview**: type a hypothetical task and see the **exact** memory block that would be injected into the system prompt, with per-layer counts and a token estimate.
 
 API base: `/api/v1/brain-memory/...` (stats, episodic and procedural CRUD, context preview).
 
@@ -106,15 +106,15 @@ brain_memory:
     auto_update: true
 ```
 
-Only with `auto_update: true` does the reasoning loop persist its learned rule changes after a run — each write emits a `rulebook.updated` event (visible in Activity). Without the opt-in, proposed updates are discarded and the rulebook only changes when you edit it.
+Only with `auto_update: true` does the reasoning loop persist its learned rule changes after a run: each write emits a `rulebook.updated` event (visible in Activity). Without the opt-in, proposed updates are discarded and the rulebook only changes when you edit it.
 
 ### Version history & diff
 
 On the Procedural tab, **⧗ History** lists every version with:
 
-- a provenance badge — `auto` (the reasoning loop), `manual` (your edits), or `rollback`,
+- a provenance badge: `auto` (the reasoning loop), `manual` (your edits), or `rollback`,
 - timestamp and size,
-- **Diff vs current** — a line-level add/remove view against the live rules,
+- **Diff vs current**: a line-level add/remove view against the live rules,
 - **Roll back**.
 
 API:
@@ -130,7 +130,7 @@ GET /api/v1/brain-memory/<agent>/rulebook/<version>
 
 ### Rollback never rewrites history
 
-Rolling back to v3 re-applies v3's text as a **new** version with source `rollback` — the audit trail stays append-only.
+Rolling back to v3 re-applies v3's text as a **new** version with source `rollback`: the audit trail stays append-only.
 
 ```bash
 curl -X POST http://localhost:18789/api/v1/brain-memory/<agent>/rulebook/rollback \
@@ -140,7 +140,7 @@ curl -X POST http://localhost:18789/api/v1/brain-memory/<agent>/rulebook/rollbac
 
 ### Locking freezes the rules entirely
 
-The **🔒 Lock** toggle freezes the rulebook: auto-updates from the reasoning loop **and** manual edits are refused (the API returns HTTP 423) until you unlock. The agent's runs still succeed — only the rule write is refused, and a warning event records it. Rollback also requires unlocking first.
+The **🔒 Lock** toggle freezes the rulebook: auto-updates from the reasoning loop **and** manual edits are refused (the API returns HTTP 423) until you unlock. The agent's runs still succeed: only the rule write is refused, and a warning event records it. Rollback also requires unlocking first.
 
 ```bash
 curl -X POST http://localhost:18789/api/v1/brain-memory/<agent>/rulebook/lock \

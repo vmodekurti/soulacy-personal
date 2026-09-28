@@ -12,9 +12,9 @@ one-off task, or a recurring automation. Run agents, follow their progress,
 receive results, and pause or cancel what Genie built from the same phone.
 When a privileged step needs you, the approval arrives there too.
 
-Soulacy also keeps a structured picture of how your days go — your routine,
-the people who matter, what you owe and when — and every agent you run reads
-the same one. It learns **by asking**. The iPhone companion is optional: pair
+Soulacy also keeps a structured picture of how your days go: your routine,
+the people who matter, and what you owe. Every agent you run reads the same
+picture. It learns **by asking**. The iPhone companion is optional: pair
 it and allow a sense, and Soulacy can keep up with calendar, Focus, location,
 or health signals; skip it and everything still works from what you have told
 it.
@@ -108,7 +108,7 @@ See [security](security/index.md) and [authentication](configuration/auth.md).
   it yourself: [first-agent walkthrough](getting-started/first-agent.md) and
   [complete schema](agents/soul-yaml.md).
 - **Working out what your deployment can do:**
-  [capabilities and limits](configuration/deployment.md) — particularly on a
+  [capabilities and limits](configuration/deployment.md): particularly on a
   platform where you have no shell.
 - **Operating a server:** [configuration](configuration/index.md),
   [cloud setup](deployment/cloud.md), and [upgrades](deployment/upgrades.md).

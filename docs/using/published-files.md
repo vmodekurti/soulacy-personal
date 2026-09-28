@@ -12,7 +12,7 @@ edit files, or create a public sharing link.
 1. Create a dedicated local output directory, owned/controlled by the operator.
    Do not use a home directory, workspace/config root, or a credentials folder.
 2. Create an innocuous `welcome.txt` there using your normal editor with the
-   content `Published output test — no private data`.
+   content `Published output test: no private data`.
 3. Add the following to the existing server configuration, using a real agent
    ID and the absolute directory path on the **server**:
 
