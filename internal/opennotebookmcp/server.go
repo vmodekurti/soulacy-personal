@@ -45,6 +45,8 @@ type Server struct {
 	audioClient  *http.Client
 	version      string
 	writeMu      sync.Mutex
+	now          func() time.Time
+	sleep        func(context.Context, time.Duration) error
 }
 
 // New validates the local boundary and constructs a server.
@@ -75,7 +77,21 @@ func NewWithAudioBaseURL(baseURL, audioBaseURL, token, version string, client *h
 	if strings.TrimSpace(version) == "" {
 		version = "dev"
 	}
-	return &Server{baseURL: u, audioBaseURL: audioURL, token: strings.TrimSpace(token), client: client, audioClient: &audioClient, version: version}, nil
+	return &Server{
+		baseURL: u, audioBaseURL: audioURL, token: strings.TrimSpace(token),
+		client: client, audioClient: &audioClient, version: version,
+		now: time.Now,
+		sleep: func(ctx context.Context, delay time.Duration) error {
+			timer := time.NewTimer(delay)
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-timer.C:
+				return nil
+			}
+		},
+	}, nil
 }
 
 // ValidateAudioBaseURL validates the URL placed in podcast tool responses.
@@ -318,9 +334,33 @@ func (s *Server) execute(ctx context.Context, name string, a map[string]any) (js
 		body["episode_profile"] = episodeProfile
 		body["speaker_profile"] = speakerProfile
 	case "open_notebook_get_podcast_job":
-		method, endpoint = http.MethodGet, "/api/podcasts/jobs/"+pathEscape(requiredString(a, "job_id"))
+		id := requiredString(a, "job_id")
+		if id == "" {
+			return nil, fmt.Errorf("job_id is required")
+		}
+		endpoint = "/api/podcasts/jobs/" + pathEscape(id)
+		waitSeconds, err := optionalInt(a, "wait_seconds", 0, 300)
+		if err != nil {
+			return nil, err
+		}
+		if waitSeconds == 0 {
+			data, err := s.request(ctx, http.MethodGet, endpoint, nil, nil)
+			if err != nil {
+				return nil, err
+			}
+			return compactPodcastJob(data)
+		}
+		pollSeconds, err := optionalInt(a, "poll_interval_seconds", 2, 30)
+		if err != nil {
+			return nil, err
+		}
+		return s.waitForPodcastJob(ctx, endpoint, time.Duration(waitSeconds)*time.Second, time.Duration(pollSeconds)*time.Second)
 	case "open_notebook_list_podcast_episodes":
-		method, endpoint = http.MethodGet, "/api/podcasts/episodes"
+		data, err := s.request(ctx, http.MethodGet, "/api/podcasts/episodes", nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		return compactPodcastEpisodes(data)
 	case "open_notebook_get_podcast_episode":
 		method, endpoint = http.MethodGet, "/api/podcasts/episodes/"+pathEscape(requiredString(a, "episode_id"))
 	case "open_notebook_get_podcast_audio":
@@ -343,6 +383,137 @@ func (s *Server) execute(ctx context.Context, name string, a map[string]any) (js
 		return nil, fmt.Errorf("a required identifier is missing")
 	}
 	return s.request(ctx, method, endpoint, q, body)
+}
+
+func (s *Server) waitForPodcastJob(ctx context.Context, endpoint string, wait, interval time.Duration) (json.RawMessage, error) {
+	deadline := s.now().Add(wait)
+	for {
+		data, err := s.request(ctx, http.MethodGet, endpoint, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		status, err := podcastJobStatus(data)
+		if err != nil {
+			return nil, err
+		}
+		if podcastJobTerminal(status) {
+			return compactPodcastJob(data)
+		}
+		remaining := deadline.Sub(s.now())
+		if remaining <= 0 {
+			return markPodcastWaitTimedOut(data, wait)
+		}
+		if interval > remaining {
+			interval = remaining
+		}
+		if err := s.sleep(ctx, interval); err != nil {
+			return nil, err
+		}
+	}
+}
+
+func compactPodcastEpisodes(data json.RawMessage) (json.RawMessage, error) {
+	var episodes []map[string]any
+	if err := json.Unmarshal(data, &episodes); err != nil {
+		return nil, fmt.Errorf("the Open Notebook API returned an invalid podcast episode list")
+	}
+	compact := make([]map[string]any, 0, len(episodes))
+	for _, episode := range episodes {
+		item := map[string]any{}
+		for _, key := range []string{"id", "name", "created", "job_status", "error_message"} {
+			if value, ok := episode[key]; ok {
+				item[key] = value
+			}
+		}
+		item["audio_available"] = strings.TrimSpace(stringValue(episode["audio_file"])) != "" || strings.TrimSpace(stringValue(episode["audio_url"])) != ""
+		compact = append(compact, item)
+	}
+	return json.Marshal(compact)
+}
+
+func compactPodcastJob(data json.RawMessage) (json.RawMessage, error) {
+	var job map[string]any
+	if err := json.Unmarshal(data, &job); err != nil {
+		return nil, fmt.Errorf("the Open Notebook API returned an invalid podcast job")
+	}
+	compact := map[string]any{}
+	for _, key := range []string{"job_id", "status", "error_message", "created", "updated", "progress"} {
+		if value, ok := job[key]; ok {
+			compact[key] = value
+		}
+	}
+	if result, ok := job["result"].(map[string]any); ok {
+		compactResult := map[string]any{}
+		for _, key := range []string{"episode_id", "audio_file_path", "success", "execution_time", "processing_time", "command_id"} {
+			if value, ok := result[key]; ok {
+				compactResult[key] = value
+			}
+		}
+		compact["result"] = compactResult
+	}
+	return json.Marshal(compact)
+}
+
+func podcastJobStatus(data json.RawMessage) (string, error) {
+	var job struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(data, &job); err != nil {
+		return "", fmt.Errorf("the Open Notebook API returned an invalid podcast job")
+	}
+	return strings.ToLower(strings.TrimSpace(job.Status)), nil
+}
+
+func podcastJobTerminal(status string) bool {
+	switch status {
+	case "completed", "failed", "error", "cancelled", "canceled":
+		return true
+	default:
+		return false
+	}
+}
+
+func markPodcastWaitTimedOut(data json.RawMessage, wait time.Duration) (json.RawMessage, error) {
+	compact, err := compactPodcastJob(data)
+	if err != nil {
+		return nil, err
+	}
+	var job map[string]any
+	if err := json.Unmarshal(compact, &job); err != nil {
+		return nil, err
+	}
+	job["wait_timed_out"] = true
+	job["waited_seconds"] = int(wait / time.Second)
+	return json.Marshal(job)
+}
+
+func optionalInt(values map[string]any, key string, fallback, maximum int) (int, error) {
+	value, ok := values[key]
+	if !ok || value == nil {
+		return fallback, nil
+	}
+	var parsed int
+	switch typed := value.(type) {
+	case int:
+		parsed = typed
+	case float64:
+		if typed != float64(int(typed)) {
+			return 0, fmt.Errorf("%s must be an integer", key)
+		}
+		parsed = int(typed)
+	case json.Number:
+		converted, err := strconv.Atoi(typed.String())
+		if err != nil {
+			return 0, fmt.Errorf("%s must be an integer", key)
+		}
+		parsed = converted
+	default:
+		return 0, fmt.Errorf("%s must be an integer", key)
+	}
+	if parsed < 1 || parsed > maximum {
+		return 0, fmt.Errorf("%s must be between 1 and %d", key, maximum)
+	}
+	return parsed, nil
 }
 
 func (s *Server) resolvePodcastProfileName(ctx context.Context, endpoint, recordPrefix, ref string) (string, error) {

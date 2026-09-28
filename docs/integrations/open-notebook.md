@@ -91,6 +91,11 @@ mcp_tools:
 
 The first release does not expose delete operations.
 
+Scheduled agents that add sources run without an approval screen. After limiting
+the agent to the required Open Notebook tools, set `unattended: true` so those
+known writes can pass the confirmation guardrail. Keep interactive or broadly
+privileged agents attended.
+
 ## Authenticated website to podcast
 
 Use a Soulacy authenticated website connection for pages that require a login. The agent should retrieve only content covered by its connection grant, then pass the resulting text to `open_notebook_add_text_source`. Open Notebook does not receive browser cookies.
@@ -103,7 +108,11 @@ A typical run is:
 4. Poll `open_notebook_get_source_status` when asynchronous processing is enabled.
 5. Search or ask questions. Call `open_notebook_list_models` first when model IDs are unknown.
 6. Call the episode-profile and speaker-profile list tools, then `open_notebook_generate_podcast`.
-7. Poll `open_notebook_get_podcast_job` and read the finished episode metadata or its configured audio URL.
+7. Call `open_notebook_get_podcast_job` with `wait_seconds` (up to 300) to wait for completion in one bounded tool call, then read the compact finished-job metadata or its configured audio URL. Calls without `wait_seconds` remain immediate status checks. Full transcripts and outlines stay behind `open_notebook_get_podcast_episode` so routine polling does not consume the agent's context.
+
+`open_notebook_list_podcast_episodes` returns compact episode metadata for
+date/name/status checks. Use `open_notebook_get_podcast_episode` only when the
+full transcript, outline, or expanded profile data is needed.
 
 For public webpages, `open_notebook_add_url_source` can ask Open Notebook to fetch the page directly. The adapter blocks private, loopback, link-local, and cloud-metadata source URLs.
 

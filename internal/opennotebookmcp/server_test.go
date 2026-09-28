@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestValidateBaseURLLoopbackBoundary(t *testing.T) {
@@ -230,6 +232,139 @@ func TestGeneratePodcastResolvesProfileIDsToNames(t *testing.T) {
 	}
 	if got := stringValue(submitted["speaker_profile"]); got != "Solo Expert" {
 		t.Fatalf("speaker_profile = %q, want %q", got, "Solo Expert")
+	}
+}
+
+func TestListPodcastEpisodesReturnsCompactMetadata(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/podcasts/episodes" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{
+			"id":"episode:1","name":"Daily Brief","created":"2026-09-28T12:00:00Z",
+			"job_status":"completed","error_message":"","audio_file":"episodes/1/audio.mp3",
+			"transcript":{"transcript":[{"speaker":"Host","dialogue":"large transcript"}]},
+			"outline":{"segments":[{"name":"large outline"}]},
+			"episode_profile":{"name":"Tech Discussion"},"speaker_profile":{"name":"Tech Discussion"}
+		}]`))
+	}))
+	defer api.Close()
+
+	srv, err := New(api.URL, "", "test", api.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := srv.execute(context.Background(), "open_notebook_list_podcast_episodes", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(result, []byte("transcript")) || bytes.Contains(result, []byte("outline")) || bytes.Contains(result, []byte("episode_profile")) {
+		t.Fatalf("compact list leaked expanded episode data: %s", result)
+	}
+	for _, want := range [][]byte{[]byte(`"id":"episode:1"`), []byte(`"job_status":"completed"`), []byte(`"audio_available":true`)} {
+		if !bytes.Contains(result, want) {
+			t.Fatalf("compact list %s does not contain %s", result, want)
+		}
+	}
+}
+
+func TestGetPodcastJobWaitsForTerminalStatus(t *testing.T) {
+	statuses := []string{"running", "running", "completed"}
+	requests := 0
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/podcasts/jobs/command:1" {
+			http.NotFound(w, r)
+			return
+		}
+		status := statuses[requests]
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"job_id":"command:1","status":%q,"result":{"episode_id":"episode:1","transcript":{"transcript":[{"dialogue":"large transcript"}]},"outline":{"segments":[{"name":"large outline"}]}}}`, status)
+	}))
+	defer api.Close()
+
+	srv, err := New(api.URL, "", "test", api.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(0, 0)
+	srv.now = func() time.Time { return now }
+	srv.sleep = func(_ context.Context, delay time.Duration) error {
+		now = now.Add(delay)
+		return nil
+	}
+	result, err := srv.execute(context.Background(), "open_notebook_get_podcast_job", map[string]any{
+		"job_id": "command:1", "wait_seconds": float64(10), "poll_interval_seconds": float64(2),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 3 || !bytes.Contains(result, []byte(`"status":"completed"`)) {
+		t.Fatalf("requests = %d, result = %s", requests, result)
+	}
+	if bytes.Contains(result, []byte("transcript")) || bytes.Contains(result, []byte("outline")) {
+		t.Fatalf("compact job leaked expanded episode data: %s", result)
+	}
+}
+
+func TestGetPodcastJobReturnsFailedImmediately(t *testing.T) {
+	requests := 0
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(`{"job_id":"command:1","status":"failed","error_message":"voice failed"}`))
+	}))
+	defer api.Close()
+	srv, _ := New(api.URL, "", "test", api.Client())
+	result, err := srv.execute(context.Background(), "open_notebook_get_podcast_job", map[string]any{"job_id": "command:1", "wait_seconds": float64(30)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 1 || !bytes.Contains(result, []byte(`"status":"failed"`)) {
+		t.Fatalf("requests = %d, result = %s", requests, result)
+	}
+}
+
+func TestGetPodcastJobMarksWaitTimeout(t *testing.T) {
+	requests := 0
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(`{"job_id":"command:1","status":"running"}`))
+	}))
+	defer api.Close()
+	srv, _ := New(api.URL, "", "test", api.Client())
+	now := time.Unix(0, 0)
+	srv.now = func() time.Time { return now }
+	srv.sleep = func(_ context.Context, delay time.Duration) error {
+		now = now.Add(delay)
+		return nil
+	}
+	result, err := srv.execute(context.Background(), "open_notebook_get_podcast_job", map[string]any{
+		"job_id": "command:1", "wait_seconds": float64(5), "poll_interval_seconds": float64(2),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 4 || !bytes.Contains(result, []byte(`"wait_timed_out":true`)) || !bytes.Contains(result, []byte(`"waited_seconds":5`)) {
+		t.Fatalf("requests = %d, result = %s", requests, result)
+	}
+}
+
+func TestGetPodcastJobWaitHonorsCancellation(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"job_id":"command:1","status":"running"}`))
+	}))
+	defer api.Close()
+	srv, _ := New(api.URL, "", "test", api.Client())
+	ctx, cancel := context.WithCancel(context.Background())
+	srv.sleep = func(ctx context.Context, _ time.Duration) error {
+		cancel()
+		return ctx.Err()
+	}
+	_, err := srv.execute(ctx, "open_notebook_get_podcast_job", map[string]any{"job_id": "command:1", "wait_seconds": float64(30)})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
 	}
 }
 
