@@ -4,7 +4,7 @@ This page maps the errors you're most likely to hit to their cause and the exact
 fix. Soulacy tries to surface these as actionable messages in the GUI and in
 `sy doctor`; this is the reference behind them.
 
-Run `sy doctor` first — it checks the vault, provider auth, ports, adapters, and
+Run `sy doctor` first: it checks the vault, provider auth, ports, adapters, and
 recent error rate, and prints a specific remedy for each failed check.
 
 ## Install & startup
@@ -24,7 +24,7 @@ recent error rate, and prints a specific remedy for each failed check.
 
 Click **Test connection** on any card on the **Providers** page (or call `GET
 /api/v1/providers/:id/models`). When the call fails, the response includes a
-structured `diagnosis` — `{category, reason, fix, detail}` — and the GUI
+structured `diagnosis` (`{category, reason, fix, detail}`) and the GUI
 renders `reason` (bold), `fix` (secondary line), and a **Show raw error**
 toggle for the underlying provider response.
 
@@ -58,7 +58,7 @@ category to the doctor.
 
 Each channel mapping has a **Diagnose** button (backed by
 `POST /api/v1/channels/:id/diagnose`) that runs these checks and reports the
-specific reason in plain language — what happened and how to fix it. Pass
+specific reason in plain language: what happened and how to fix it. Pass
 `{"dry": true}` to check readiness (destination set? adapter registered and
 connected?) without sending a real message. Common results:
 
@@ -105,28 +105,28 @@ before wiring it into a schedule or workflow.
 | --- | --- | --- |
 | Save fails with `schedule.cron: "* * *" is not a valid cron expression` | Save-time cron validation caught a malformed expression (wrong field count, out-of-range value, gibberish) | Use 5 fields (`0 9 * * 1-5`), an @descriptor (`@daily`, `@hourly`), or an optional 6-field form (`0 */30 * * * *`) |
 | Scheduled run never fires | Daemon not running | `sy daemon status`; install/start it |
-| "Next run" is blank after Save | Rare — the runtime rejected the expression after Save (pre-validation missed a case) | Check the gateway logs for `scheduler re-registration failed`; open the issue tracker with the cron string |
+| "Next run" is blank after Save | Rare: the runtime rejected the expression after Save (pre-validation missed a case) | Check the gateway logs for `scheduler re-registration failed`; open the issue tracker with the cron string |
 | Scheduled output not delivered | No default outbound bot and no per-schedule destination | Set a default outbound bot, or a destination on the schedule |
 | History panel shows fewer runs than expected | Older runs came from another trigger path or the durable event scan hit its cap | Open **Schedule → History** and check the source/truncation note; download a support bundle for the merged action-log + workflow ledger |
 | Manual run works but cron delivery fails | The agent can answer, but scheduled output cannot resolve a destination | Use **Test output** on the schedule row; fix the channel diagnosis before waiting for cron |
-| An unexpected run fired at boot with an `⟳ auto-replayed` chip on the Automations row | `schedule.missed_run_backfilled` — the gateway was down when a scheduled fire came due, and the most recent missed fire in the `missed_startup_window` (default `24h`) was replayed once at startup | Normal after an outage. If the same agent backfills every restart, either widen `schedule.missed_startup_window` (older fires stop qualifying) or check whether the gateway is crashing between runs |
+| An unexpected run fired at boot with an `⟳ auto-replayed` chip on the Automations row | `schedule.missed_run_backfilled`: the gateway was down when a scheduled fire came due, and the most recent missed fire in the `missed_startup_window` (default `24h`) was replayed once at startup | Normal after an outage. If the same agent backfills every restart, either widen `schedule.missed_startup_window` (older fires stop qualifying) or check whether the gateway is crashing between runs |
 | Cron fires twice after a restart | Missed-run catch-up and manual testing overlapped | Disable `run_missed_on_startup` or keep the catch-up window narrow for agents you also trigger manually |
 
-## Activity — the "Running now" strip
+## Activity: the "Running now" strip
 
 The **Activity** page polls `/activity/running` every 3s and renders a card per
 in-flight session with elapsed time, silent-for, and the last event type. When
 a session's silent window crosses 5 minutes the card turns red with a
-per-last-event-type reason + fix — for example, an `llm.call` last event says
-"waiting on the LLM provider for X — check Providers for rate-limit/overload",
+per-last-event-type reason + fix: for example, an `llm.call` last event says
+"waiting on the LLM provider for X: check Providers for rate-limit/overload",
 while a `tool.call` last event points at MCP/subprocess wedges. Click any
 hung card to jump into the per-session Activity view and inspect the tail.
 
 ## When you're stuck: support bundle
 
-`sy support bundle` produces a redacted support bundle — config with secrets
+`sy support bundle` produces a redacted support bundle: config with secrets
 stripped, recent logs, `doctor` output, release/update metadata, versions,
-recent failures, admin audit events, and a merged run ledger — safe to share
+recent failures, admin audit events, and a merged run ledger: safe to share
 when asking for help. The live gateway bundle includes:
 
 - `doctor.json`: provider and channel readiness, including delivery checks.

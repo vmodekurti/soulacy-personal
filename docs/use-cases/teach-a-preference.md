@@ -1,7 +1,7 @@
 # Teach an agent your report format
 
 **Useful for:** avoiding the same formatting correction in every conversation.
-This is reviewed guidance stored for an agent and authenticated owner—not
+This is reviewed guidance stored for an agent and authenticated owner, not
 model training, and not a promise the model will always follow it.
 
 **Before starting:** use a learning-capable gateway, a saved agent with a working
@@ -44,7 +44,7 @@ cost money. It can also return no suitable lesson; nothing is auto-approved.
 ## 3. Review the draft, not just its title
 
 In **Needs review**, open the lesson. Check its content, type, source quote,
-and limitations. It should be a preference about this format—not a “fact” that
+and limitations. It should be a preference about this format, not a “fact” that
 all reports have no risks, or permission to send reports automatically.
 
 Tick **I reviewed this lesson, its sources and limitations**, then choose

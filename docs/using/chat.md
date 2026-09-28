@@ -34,7 +34,7 @@ While a reply is being generated, a **Thinking** panel appears under the message
 | `reasoning.start` / `reasoning.step` / `reasoning.result` | Loop strategy, each step's thought and tool, final step count and confidence |
 | `error` | The failing stage and error text |
 
-The panel stays attached to the reply afterwards — collapse or expand it any time. The summary line counts events ("6 events · 2 LLM · 3 tools").
+The panel stays attached to the reply afterwards: collapse or expand it any time. The summary line counts events ("6 events · 2 LLM · 3 tools").
 
 !!! note
     Thinking events only appear for runs started from this page while the event stream is connected (the sidebar shows **● Live**).
@@ -52,7 +52,7 @@ helpful evidence raises its retrieval rank. Ratings do not rewrite the agent's
 prompt or procedural rulebook.
 
 The API also accepts an optional written comment. Comments are redacted and
-stored as pending learning proposals for operator review—they are never applied
+stored as pending learning proposals for operator review, they are never applied
 automatically. See [Studio learning & memory](../studio-learning-memory.md) and
 [Response feedback API](../api/agents.md#response-feedback).
 
@@ -70,9 +70,9 @@ It is computed by diffing the session's cumulative metrics before and after the 
 
 You can fork the conversation from **any** user or assistant message:
 
-1. Hover a message bubble — a **⑂** fork button appears in its corner.
+1. Hover a message bubble: a **⑂** fork button appears in its corner.
 2. Click it. Soulacy copies the session history up to that message into a new session.
-3. Branch chips appear above the conversation; the original becomes **main** and each fork gets its own chip. Click a chip to switch branches — every branch keeps its own messages and metrics.
+3. Branch chips appear above the conversation; the original becomes **main** and each fork gets its own chip. Click a chip to switch branches: every branch keeps its own messages and metrics.
 
 This is ideal for "what if I had asked it differently?" exploration: branch, rephrase, compare, and switch back without losing anything.
 
@@ -127,7 +127,7 @@ A denial fails that tool call (the agent is told it was denied); an approval let
 
 The **Share** button in the Chat header creates a read-only link to the current
 conversation. Soulacy stores a snapshot server-side and returns a link of the
-form `<your-host>/#share/<token>` — copied to your clipboard automatically.
+form `<your-host>/#share/<token>`: copied to your clipboard automatically.
 
 Anyone with the link can open a clean, read-only view of the conversation
 **without an API key** (the unguessable token is the access capability). The
@@ -136,4 +136,4 @@ shared view renders markdown, code, and tables just like Chat. Use **Export** or
 
 ## Voice
 
-The **🎤** button in the Chat header starts a realtime voice conversation whose transcripts land in the same session — see [Voice](voice.md).
+The **🎤** button in the Chat header starts a realtime voice conversation whose transcripts land in the same session: see [Voice](voice.md).

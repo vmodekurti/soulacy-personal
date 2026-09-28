@@ -48,7 +48,7 @@ also the reason nobody else holds your data.
 
 Guides track `main`; an installed gateway or iOS build may lag the source.
 Safe Undo requires compatible configured resources, learning requires review,
-and verification means the configured checks passed—not that every fact is true.
+and verification means the configured checks passed, not that every fact is true.
 
 ## Personal edition
 
@@ -65,12 +65,12 @@ Apache-2.0 licensed; the project name and logos follow the separate
 
 **Build it. Run it. Fix and learn.**
 
-- **Build it** — describe the automation in plain English in Studio, or start from
+- **Build it**: describe the automation in plain English in Studio, or start from
   a vetted template. Soulacy drafts the plan, generates the workflow, and checks
   it end-to-end before you save.
-- **Run it** — deploy the agent to Soulacy Mobile, Telegram, Slack, Discord, WhatsApp, HTTP, or a
+- **Run it**: deploy the agent to Soulacy Mobile, Telegram, Slack, Discord, WhatsApp, HTTP, or a
   schedule. One binary, no cloud required.
-- **Fix and learn** — when a run fails, Debug in Studio explains it in plain
+- **Fix and learn**: when a run fails, Debug in Studio explains it in plain
   English and proposes a fix you can preview. Successful repairs become
   regression tests, and Soulacy shows you what it's learned over time.
 
@@ -91,7 +91,6 @@ calendar, how you slept, and whether a Focus is on. What that makes possible:
   actually installed on your gateway and tells you when something is missing.
 - **Keep control in the conversation.** See the agents and monitors Genie
   created, inspect their recent work, and pause or cancel them from your phone.
-
 - **Approve on the lock screen.** A run that needs your yes shows up as a Live
   Activity with Approve and Deny, with Face ID for high-risk tools. The approval
   is a durable record on your gateway, not a prompt inside someone's cloud.
@@ -124,7 +123,7 @@ which line permitted it.
 
 Do not take our word for it. Check it in five minutes on your own machine:
 
-1. **Ask for something risky.** Write a small agent and ask it to delete a file. It cannot: system tools are not even offered until the agent's ID is listed in `runtime.allow_system_agents` in your config **and** the agent declares `capabilities: [system]`. It is a per-agent list, not a yes/no switch — stricter than a boolean, on purpose.
+1. **Ask for something risky.** Write a small agent and ask it to delete a file. It cannot: system tools are not even offered until the agent's ID is listed in `runtime.allow_system_agents` in your config **and** the agent declares `capabilities: [system]`. It is a per-agent list, not a yes/no switch: stricter than a boolean, on purpose.
 2. **Turn them on and ask again.** Now the agent stops and waits for your approval before the privileged step runs.
 3. **Schedule it for 3 a.m.** The same step is refused because nobody is there to approve it, until the agent's file says `unattended: true`.
 4. **Read the diff.** Every change that made the agent more capable is a line you wrote in a file you can read, review, and roll back. Safe Undo covers the changes it makes.
@@ -159,10 +158,10 @@ around them. See the [full comparison](docs/comparison-chart.md).
 | **Deploy** | Gateway with embedded UI; [requirements vary](docs/deployment/footprint.md) | Docker + Postgres + Redis | Python package |
 | **Config** | One YAML file per agent | Visual editor (brittle exports) | Code |
 | **Runs on** | Laptop, VPS, Raspberry Pi | Needs a server stack | Dev machine |
-| **LLM** | Any — local or cloud | Mostly cloud | Any |
+| **LLM** | Any: local or cloud | Mostly cloud | Any |
 | **No-code** | GUI included in binary | Yes | No |
 
-The field is crowded with frameworks that assume you want to write Python and deploy to the cloud. Soulacy is for people who want agents that just run — the same way you `ollama run llama3`.
+The field is crowded with frameworks that assume you want to write Python and deploy to the cloud. Soulacy is for people who want agents that run as simply as `ollama run llama3`.
 
 ---
 
@@ -185,7 +184,7 @@ Each cloud path ends the same way: open the HTTPS URL with the deployment's
 login key, choose **Mobile → Pair a device**, and scan the short-lived QR code
 from Soulacy for iOS. The permanent gateway key is never placed in the QR code.
 
-### One line — macOS & Linux
+### One line: macOS & Linux
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vmodekurti/soulacy-personal/main/install.sh | bash
@@ -198,7 +197,7 @@ What it does, with zero questions asked:
 3. Installs both binaries into `~/.local/bin` (no `sudo`).
 4. Prints clear next steps + offers to launch the gateway on the spot.
 
-When you run `soulacy serve` (either right away or later), the gateway prints a one-time banner with the URL and a freshly-generated API key. Then open <http://127.0.0.1:18789>, paste the key, and you're in. The runtime workspace (`~/.soulacy/soulspace/`), config file, starter agent, and API key are all created automatically on first launch — you never have to touch a config file.
+When you run `soulacy serve` (either right away or later), the gateway prints a one-time banner with the URL and a freshly-generated API key. Then open <http://127.0.0.1:18789>, paste the key, and you're in. The runtime workspace (`~/.soulacy/soulspace/`), config file, starter agent, and API key are all created automatically on first launch. You never have to touch a config file.
 
 Overrides:
 
@@ -218,7 +217,7 @@ cd soulacy-personal
 ./install.sh                  # same behavior; will offer LaunchAgent setup on macOS
 ```
 
-### Docker — guided deploy script (recommended)
+### Docker: guided deploy script (recommended)
 
 From a checkout, [`scripts/docker-deploy.sh`](scripts/docker-deploy.sh) builds the image, runs
 the container, publishes a host port, waits for the gateway to become healthy,
@@ -228,7 +227,7 @@ interactively, passed as a flag, or set via an environment variable.
 ```bash
 git clone https://github.com/vmodekurti/soulacy-personal
 cd soulacy-personal
-./scripts/docker-deploy.sh                       # interactive — prompts for each setting
+./scripts/docker-deploy.sh                       # interactive, prompts for each setting
 ./scripts/docker-deploy.sh --yes                 # accept defaults, no prompts
 ./scripts/docker-deploy.sh --host-port 9000      # publish on a different host port
 ```
@@ -248,7 +247,7 @@ Useful flags: `--host-port`, `--container-port`, `--name`, `--data-dir`,
 `--api-key`, `--no-build`, `--yes`. Run `./scripts/docker-deploy.sh --help` for the
 full list.
 
-### Docker — embedded storage (no separate database service)
+### Docker: embedded storage (no separate database service)
 
 Build the image, then run it. Note two requirements: bind to `0.0.0.0` inside
 the container (otherwise the published port can't reach the gateway), and choose
@@ -269,7 +268,7 @@ docker run -d --name soulacy \
 > `localhost:11434` from the gateway's view. Point it at the host with
 > `SOULACY_LLM_PROVIDERS_OLLAMA_BASE_URL=http://host.docker.internal:11434`
 > (shown above). On Linux also add `--add-host host.docker.internal:host-gateway`.
-> Cloud LLM providers (OpenAI, Anthropic, etc.) need none of this — outbound
+> Cloud LLM providers (OpenAI, Anthropic, etc.) need none of this: outbound
 > internet works by default. `scripts/docker-deploy.sh` handles all of this via
 > its `--ollama-host` flag (defaulting to `host.docker.internal:11434`).
 
@@ -280,7 +279,7 @@ key on first run and stores it in the mounted config; read it back with:
 docker exec soulacy sh -c 'grep api_key ~/.soulacy/config.yaml'
 ```
 
-### Docker — full stack (Postgres + Qdrant + GUI)
+### Docker: full stack (Postgres + Qdrant + GUI)
 
 ```bash
 curl -O https://raw.githubusercontent.com/vmodekurti/soulacy-personal/main/docker-compose.yml
@@ -289,7 +288,7 @@ cp .env.example .env   # set POSTGRES_PASSWORD, your LLM key, and SOULACY_PORT
 docker compose up
 ```
 
-The compose file publishes `${SOULACY_PORT:-18789}` on the host — set
+The compose file publishes `${SOULACY_PORT:-18789}` on the host: set
 `SOULACY_PORT` in `.env` to change it. Open
 [http://localhost:18789](http://localhost:18789) (or your chosen port).
 
@@ -300,7 +299,7 @@ CLI capture flow available as a fallback.
 
 ### Running CLI commands against a container
 
-The image bundles the `sy` CLI. There's no SSH — use `docker exec`:
+The image bundles the `sy` CLI. There's no SSH: use `docker exec`:
 
 ```bash
 docker exec -it soulacy bash        # interactive shell inside the container
@@ -444,4 +443,4 @@ See [docs/FRAMEWORK_OVERVIEW.md](docs/FRAMEWORK_OVERVIEW.md) for architecture de
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+Apache 2.0: see [LICENSE](LICENSE).

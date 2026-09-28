@@ -1,4 +1,4 @@
-# iPhone as the extension of Soulacy — program
+# iPhone as the extension of Soulacy: program
 
 The gateway is the brain: it runs agents, holds memory, enforces every gate.
 The iPhone is the extension: the hands, the eyes, the inbox, and the place a
@@ -34,7 +34,7 @@ device-node command set agents can call: `device.info`, `location.current`,
 
 ## Slices
 
-### Slice 1 — Decide anywhere, agents that know where you are
+### Slice 1: Decide anywhere, agents that know where you are
 
 | Story | Gateway | App |
 |---|---|---|
@@ -43,7 +43,7 @@ device-node command set agents can call: `device.info`, `location.current`,
 | **E52 Siri & Shortcuts** | None beyond the chat and memory APIs. | App Intents: **Ask an agent**, **Remember this**, **Approve the pending action**, **Run an agent**. Shortcut phrases so agents work from Siri, the Action button, Focus automations and CarPlay. |
 | **E53 Memory on the phone** | Existing `/memory/facts` API. | **What it remembers** screen: search, edit, delete, add, history; share-sheet **Remember this**. |
 
-### Slice 2 — The phone as the agent's senses
+### Slice 2: The phone as the agent's senses
 
 | Story | Gateway | App |
 |---|---|---|
@@ -52,7 +52,7 @@ device-node command set agents can call: `device.info`, `location.current`,
 | **E56 Capture into knowledge** (shipped) | Knowledge ingest accepts a `caption` and, for files the gateway cannot read (photos, scans), `extracted_text` produced on the phone, ingested in place of the bytes. | Share sheet is real: pick a knowledge base or an agent, add a caption, and send files, photos (with on-device text recognition), links and text. Profiles live in the app group so the extension shares the paired credential. |
 | **E57 Voice in hand** (shipped) | Existing voice pipeline and chat API. | Push-to-talk in chat. CarPlay Communication app (entitlement granted by Apple on 2026-09-14, Case-ID 22213896): the car shows the user's agents as conversations; Siri's messaging intents send a question by voice and the agent's reply comes back as a communication notification Siri reads aloud. Approvals are never offered in the car. |
 
-### Slice 3 — First-class node
+### Slice 3: First-class node
 
 | Story | Gateway | App |
 |---|---|---|

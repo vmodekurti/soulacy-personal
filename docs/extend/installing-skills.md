@@ -1,6 +1,6 @@
 # Installing Skills
 
-Install Agent Skills from a local directory, a registry slug, or a git source — every remote install is checksummed, security-scanned, and consented before it touches your agents.
+Install Agent Skills from a local directory, a registry slug, or a git source: every remote install is checksummed, security-scanned, and consented before it touches your agents.
 
 ## Quick start
 
@@ -43,7 +43,7 @@ sy skill get <name>
 
 `sy skill install ./my-skill` validates that the directory contains a
 `SKILL.md` and copies it into `~/.soulacy/skills/<name>/`. Nothing else
-happens — placing files on your own disk is your call. You can equally just
+happens: placing files on your own disk is your call. You can equally just
 copy a skill directory into `~/.soulacy/skills/` by hand.
 
 ## Remote installs: the full flow
@@ -56,21 +56,21 @@ With no registries configured, a bare git provider is used as fallback, so
 
 Every remote install walks the same pipeline:
 
-1. **Resolve** — registries are queried in priority order with fallback. The
+1. **Resolve**: registries are queried in priority order with fallback. The
    CLI prints what it found: `Resolved <slug>@<version> via registry "<id>"`,
    the description, the archive sha256, and the signature provenance:
 
     - `signature: ed25519, verified against registry "<id>"'s signing_key during fetch`
-    - `signature: present but UNVERIFIED — set signing_key on registry "<id>" to enforce verification`
+    - `signature: present but UNVERIFIED: set signing_key on registry "<id>" to enforce verification`
     - `signature: none (unsigned package)`
 
-2. **Staged fetch** — the package downloads into a temporary
+2. **Staged fetch**: the package downloads into a temporary
    `.staging-…` directory under your skills root. Archives are
    sha256-verified before extraction; git sources derive integrity from the
    clone. A package without `SKILL.md` at its root is rejected here. The
    staging directory never survives a failed or aborted install.
 
-3. **Security report** — the [safety introspection pipeline](safety.md) runs
+3. **Security report**: the [safety introspection pipeline](safety.md) runs
    over the staged files and prints its verdict and findings:
 
     ```text
@@ -80,11 +80,11 @@ Every remote install walks the same pipeline:
     or, for example:
 
     ```text
-    Safety introspection: ✗ DANGER — critical findings
+    Safety introspection: ✗ DANGER, critical findings
       CRITICAL (static) [tool.py:3]: dangerous call: eval() …
     ```
 
-4. **Consent prompt** — the CLI summarises the package (skill heading, tool
+4. **Consent prompt**: the CLI summarises the package (skill heading, tool
    libraries, declared schema migrations, requested capabilities, requested
    credentials) and asks:
 
@@ -92,7 +92,7 @@ Every remote install walks the same pipeline:
     Install <slug>@<version>? [y/N]
     ```
 
-5. **Activate & hot-load** — on consent the staging directory moves to
+5. **Activate & hot-load**: on consent the staging directory moves to
    `~/.soulacy/skills/<name>` and the CLI calls the gateway's
    `POST /api/v1/skills/rescan` so the skill is live immediately. If the
    gateway is unreachable, the skill loads on the next gateway restart.
@@ -113,11 +113,11 @@ sy skill install github.com/user/my-skill --yes
     interactive confirmation:
 
     ```text
-    ⚠ CRITICAL findings — explicit confirmation required (--yes does not apply).
+    ⚠ CRITICAL findings. Explicit confirmation required (--yes does not apply).
     ```
 
     In a non-interactive context (CI, scripts) a danger verdict therefore
-    always aborts the install. This is by design — review the findings
+    always aborts the install. This is by design: review the findings
     yourself before installing anything flagged critical.
 
 ## Unverified installs: `--allow-unverified`
@@ -150,7 +150,7 @@ sy skill install github.com/user/my-skill --allow-unverified
 The CLI then prints a loud warning and proceeds:
 
 ```text
-⚠ WARNING: installing UNVERIFIED package my-skill@HEAD — authenticity could
+⚠ WARNING: installing UNVERIFIED package my-skill@HEAD. Authenticity could
 not be verified (--allow-unverified).
 ```
 
@@ -181,14 +181,14 @@ See [Package Registries](registries.md) for the full registry configuration.
 
 The **Skills** page in the web GUI offers:
 
-- **⚡ From AgenticSkills** — paste an `agenticskills.io` skill URL; the
+- **⚡ From AgenticSkills**: paste an `agenticskills.io` skill URL; the
   `SKILL.md` is downloaded and hot-loaded with no restart.
-- **➕ Skill sources** — review and add registries (skill directories like
+- **➕ Skill sources**: review and add registries (skill directories like
   skills.sh, Soulacy registries, git hosts) so slugs resolve for installs.
   See [Skill Sources](skill-sources.md).
 
 Slug-based GUI installs go through the same registry engine and the same
-safety pipeline as the CLI — the security report and permission grants are
+safety pipeline as the CLI: the security report and permission grants are
 shown in the approval dialog before anything activates.
 
 ## Where skills live
@@ -196,7 +196,7 @@ shown in the approval dialog before anything activates.
 | Path | Purpose |
 |---|---|
 | `~/.soulacy/skills/<name>/` | install root used by `sy skill install` |
-| `SKILL.md` | required at the package root — frontmatter + instructions |
+| `SKILL.md` | required at the package root: frontmatter + instructions |
 
 Skills are exposed to agents as an `available_skills` catalog; agents call
 `read_skill` to load the full instructions on demand. See
@@ -204,17 +204,17 @@ Skills are exposed to agents as an `available_skills` catalog; agents call
 
 ## Troubleshooting
 
-- **`"<arg>" is not a local directory and no configured registry resolves it`**
-  — the slug was not found by any registry. Check `sy registry list`, or use
+- **`"<arg>" is not a local directory and no configured registry resolves it`**:
+  the slug was not found by any registry. Check `sy registry list`, or use
   an addressed git source (`github.com/user/repo`).
-- **`package "<slug>" has no SKILL.md at its root`** — the source is not a
+- **`package "<slug>" has no SKILL.md at its root`**: the source is not a
   skill package. Plugins install through the Plugins GUI page instead; see
   [Plugins](plugins.md).
-- **`refusing to install … its authenticity cannot be verified`** — the
+- **`refusing to install … its authenticity cannot be verified`**: the
   package is unsigned, the registry has no `signing_key`, or it's a raw git
   source. Configure a `signing_key` on the registry to verify automatically,
   or re-run with `--allow-unverified` to accept the risk. See
   [Unverified installs](#unverified-installs-allow-unverified).
-- **`Gateway rescan failed … the skill loads on the next gateway restart`** —
-  the install succeeded; only the hot-load was skipped because the gateway
+- **`Gateway rescan failed … the skill loads on the next gateway restart`**:
+  the install succeeded. Only the hot-load was skipped because the gateway
   was unreachable.

@@ -1,7 +1,7 @@
 # Workspace Layout (soulspace)
 
-Everything Soulacy owns lives in **one organized workspace** — the
-*soulspace* — instead of files scattered across a flat dot-directory. You
+Everything Soulacy owns lives in **one organized workspace**: the
+*soulspace*: instead of files scattered across a flat dot-directory. You
 get predictable paths for backups, a single `config.yaml`, and a clean
 separation between data, logs, and secrets.
 
@@ -42,7 +42,7 @@ Layout:    soulspace
 ```
 
 On a pre-soulspace installation the layout line reads
-`legacy (flat ~/.soulacy — run 'sy workspace migrate' to organize)`.
+`legacy (flat ~/.soulacy: run 'sy workspace migrate' to organize)`.
 
 ## Resolution order
 
@@ -52,14 +52,14 @@ Soulacy decides where the workspace lives at startup, in this order:
 |----------|-----------|--------|
 | 1 | `SOULACY_WORKSPACE` env var is set | That directory, soulspace layout |
 | 2 | `~/.soulacy/soulspace` exists | Soulspace layout (fresh install or post-migration) |
-| 3 | `~/.soulacy` has legacy content (`config.yaml`, `agents/`, `actions.db`, or `skills`) | **Legacy flat layout** — every path resolves to its historical location, bit-for-bit unchanged |
+| 3 | `~/.soulacy` has legacy content (`config.yaml`, `agents/`, `actions.db`, or `skills`) | **Legacy flat layout**: every path resolves to its historical location, bit-for-bit unchanged |
 | 4 | Nothing exists | A fresh `~/.soulacy/soulspace` is created on first run |
 
 !!! note "Legacy installations keep working"
     The legacy auto-detection means pre-soulspace installations need no
     action at all. Databases stay flat in `~/.soulacy/`, and explicitly
     configured paths (`agent_dirs`, `memory.dir`, …) always win over
-    workspace defaults — in both layouts.
+    workspace defaults: in both layouts.
 
 ### Relocating the workspace
 
@@ -88,15 +88,15 @@ sy workspace migrate -y          # skip the confirmation prompt
 
 What the migration does:
 
-- Moves every known directory and database into the organized layout —
-  databases go to `data/`, the credential vault to `secrets/`, and
+- Moves every known directory and database into the organized layout.
+  Databases go to `data/`, the credential vault to `secrets/`, and
   WAL/SHM siblings travel with their database.
 - Rewrites absolute legacy paths inside `config.yaml` so configured
   locations follow their files. Comments and unknown blocks are preserved
   byte-for-byte.
 - Leaves anything it does not recognise exactly where it was, and lists
   it in the plan output so you can move it manually if needed.
-- Every move is an atomic rename — soulspace lives inside `~/.soulacy`,
+- Every move is an atomic rename: soulspace lives inside `~/.soulacy`,
   so source and destination are on the same filesystem by construction.
 
 After migration the resolver picks the soulspace automatically. Restart
@@ -119,7 +119,7 @@ The gateway and CLI search for `config.yaml` in this order:
    *is* legacy).
 
 Any config key can also be overridden by environment variables with the
-`SOULACY_` prefix — dots become underscores:
+`SOULACY_` prefix: dots become underscores:
 
 ```bash
 export SOULACY_SERVER_API_KEY="sy_..."   # overrides server.api_key
@@ -128,6 +128,6 @@ export SOULACY_SERVER_PORT=18789          # overrides server.port
 
 ## See also
 
-- [Configuration overview](index.md) — every top-level config key
-- [Storage & backends](storage.md) — what lives in `data/`
+- [Configuration overview](index.md): every top-level config key
+- [Storage & backends](storage.md): what lives in `data/`
 - In-repo spec: [`docs/WORKSPACE.md`](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/WORKSPACE.md)

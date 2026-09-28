@@ -1,6 +1,6 @@
 # Auth & Security
 
-Soulacy has a layered authentication system: static bearer tokens, managed API keys, and JWTs — all checked in sequence by the auth middleware.
+Soulacy has a layered authentication system. The auth middleware checks static bearer tokens, managed API keys, and JWTs in sequence.
 
 ## Reference
 
@@ -33,13 +33,13 @@ auth:
 
 Requests are authenticated in this order:
 
-1. **Static server API key** — `Authorization: Bearer sy_...`  
+1. **Static server API key**: `Authorization: Bearer sy_...`
    Full admin access. Matches `server.api_key` exactly.
 
-2. **Managed API key** — `Authorization: Bearer sk_...`  
+2. **Managed API key**: `Authorization: Bearer sk_...`
    Scoped keys stored in the database. Role is assigned at key creation time.
 
-3. **JWT** — `Authorization: Bearer eyJ...`  
+3. **JWT**: `Authorization: Bearer eyJ...`
    Short-lived tokens issued by `POST /api/v1/auth/token`. Carry user identity, email, and role.
 
 If none match, the request is rejected with `401 Unauthorized`.
@@ -62,7 +62,7 @@ openssl rand -hex 32
 
 ## Managed API keys
 
-Managed API keys (`sk_` prefix) are created via the admin API and stored as bcrypt hashes — the plaintext is shown only once at creation time.
+Managed API keys (`sk_` prefix) are created via the admin API and stored as bcrypt hashes: the plaintext is shown only once at creation time.
 
 ```bash
 # Create a key with operator role

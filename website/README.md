@@ -28,7 +28,7 @@ python3 -m http.server 4321 --bind 127.0.0.1
 
 Any static server works. There's no build step.
 
-## Deploy — Cloudflare Pages (recommended)
+## Deploy: Cloudflare Pages (recommended)
 
 **One-time setup:**
 
@@ -59,10 +59,10 @@ npx wrangler@4.131.1 pages deploy website --project-name soulacy --branch main \
 
 The explicit project and directory target the existing public site, not the running agent gateway. Wait for a deployment URL, then verify the production homepage, its new logo, and documentation links. Keep the deployment commit/URL in the release receipt. Do not change account permissions or replace a Pages project merely to publish a content update.
 
-## Deploy — alternatives (if you're not using Cloudflare)
+## Deploy: alternatives (if you're not using Cloudflare)
 
 - **Vercel:** import the repo, set output directory to `website`, done.
-- **Netlify:** same — `website` as the publish directory.
+- **Netlify:** same: `website` as the publish directory.
 - **GitHub Pages:** less ideal (already serves docs at docs.soulacy.io); you'd have to set up a second Pages source. Not recommended.
 
 ## Refreshing install.sh
@@ -79,8 +79,8 @@ Review and commit both files together. Do not add a workflow that commits back t
 
 - Tailwind is loaded via CDN, which yells in the console. Fine for launch. Post-signal, convert to Astro or ship a built Tailwind bundle.
 - Recheck the copy buttons, navigation, phone-width layout, and external documentation links after editing. Do not publish loading-time claims without a dated, reproducible measurement.
-- If you add a blog, convert to Astro or 11ty — plain HTML gets painful past ~5 pages.
-- Colors are declared in the inline Tailwind config in `index.html` — search `tailwind.config` to tweak.
+- If you add a blog, convert to Astro or 11ty: plain HTML gets painful past ~5 pages.
+- Colors are declared in the inline Tailwind config in `index.html`: search `tailwind.config` to tweak.
 
 ## Content sources
 

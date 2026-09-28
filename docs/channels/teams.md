@@ -7,7 +7,7 @@ non-interactive agent output.
 !!! tip "Guided setup in the GUI"
     The GUI's **Channels → Teams → Configure** card walks through creating an
     Incoming Webhook (or Workflow) in the target channel and pasting the URL
-    back in — plus a **Test delivery** button. Use this reference page when
+    back in: plus a **Test delivery** button. Use this reference page when
     editing `config.yaml` directly.
 
 ## Configure

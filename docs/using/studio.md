@@ -1,4 +1,4 @@
-# Studio — Intent-First Agent Builder
+# Studio: Intent-First Agent Builder
 
 ![Studio agent builder](../assets/screenshots/studio_workflow.png)
 
@@ -128,8 +128,8 @@ guarantee.
 
 Studio has two separate model choices:
 
-- **Studio model** — the configured provider/model used to refine and generate.
-- **Model this agent runs on** — written to the saved agent's `SOUL.yaml`.
+- **Studio model**: the configured provider/model used to refine and generate.
+- **Model this agent runs on**: written to the saved agent's `SOUL.yaml`.
 
 Open the model picker to set the execution provider and model from the
 gateway's registered catalog. Leaving provider blank inherits the configured
@@ -143,9 +143,9 @@ accept a provider or model merely because it appeared in refined prose.
 
 For reasoning agents, the **Agent contract** explains the generated behavior:
 
-- **Goal** — the observable outcome of a successful run;
-- **Instructions** — behavioral rules and execution constraints;
-- **Available capabilities** — the actual tools, MCP calls, peers, skills, and
+- **Goal**: the observable outcome of a successful run;
+- **Instructions**: behavioral rules and execution constraints;
+- **Available capabilities**: the actual tools, MCP calls, peers, skills, and
   knowledge resources the agent may use.
 
 Studio fills Goal and Instructions deterministically when model output omits
@@ -194,9 +194,9 @@ controls or the saved strategy.
 
 The Studio model dialog includes timeout/budget presets:
 
-- **Fast local** — tighter budgets for quick local iteration.
-- **Reliable local** — more patient timeouts for slower local models.
-- **Cloud quality** — generous budgets for long or complex cloud-backed runs.
+- **Fast local**: tighter budgets for quick local iteration.
+- **Reliable local**: more patient timeouts for slower local models.
+- **Cloud quality**: generous budgets for long or complex cloud-backed runs.
 
 The preset informs runtime budgets; it does not replace provider/model
 selection or make an unsuitable model reliable.

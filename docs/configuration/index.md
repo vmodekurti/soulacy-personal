@@ -1,7 +1,7 @@
 # Configuration Overview
 
 Soulacy is configured by a single `config.yaml` in the
-[workspace](workspace.md) — `~/.soulacy/soulspace/config.yaml` for new
+[workspace](workspace.md): `~/.soulacy/soulspace/config.yaml` for new
 installations (legacy installs keep `~/.soulacy/config.yaml`). The gateway
 also honours `SOULACY_CONFIG_PATH`:
 
@@ -39,11 +39,11 @@ Start from the annotated example at the repo root:
 | `agent_dirs` | Directories scanned for SOUL.yaml agent definitions | [SOUL.yaml Reference](../agents/soul-yaml.md) |
 | `skill_dirs` | Extra skill directories (in addition to the workspace `skills/`) | [Installing Skills](../extend/installing-skills.md) |
 | `plugin_dirs` | Plugin directories to scan | [Plugins](../extend/plugins.md) |
-| `log` | Level (`debug`/`info`/`warn`/`error`), format (`json`/`console`), optional file | — |
+| `log` | Level (`debug`/`info`/`warn`/`error`), format (`json`/`console`), optional file | none |
 
 ## Minimal working config
 
-Everything has sane defaults — a fresh install runs with no config file
+Everything has sane defaults: a fresh install runs with no config file
 at all (loopback only, Ollama provider). A typical small config:
 
 ```yaml
@@ -74,7 +74,7 @@ log:
 
 !!! tip "Use absolute paths"
     Relative paths in `agent_dirs` and similar keys resolve from the
-    working directory at startup — unpredictable under LaunchAgent or
+    working directory at startup: unpredictable under LaunchAgent or
     systemd. Always use absolute paths.
 
 ## Environment variable overrides
@@ -91,8 +91,8 @@ export SOULACY_UPDATE_MANIFEST="https://example.com/release-manifest.json"
 
 Two related env vars are not config overrides:
 
-- `SOULACY_CONFIG_PATH` — explicit config file path.
-- `SOULACY_WORKSPACE` — explicit workspace root (see
+- `SOULACY_CONFIG_PATH`: explicit config file path.
+- `SOULACY_WORKSPACE`: explicit workspace root (see
   [Workspace Layout](workspace.md)).
 
 ## Config file discovery

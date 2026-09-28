@@ -1,6 +1,6 @@
 # Storage & Backends
 
-Soulacy persists everything locally by default — zero external
+Soulacy persists everything locally by default: zero external
 dependencies. When you outgrow a single node, each layer (durable storage,
 vector search, message queue) can be swapped independently via
 `config.yaml`, including out-of-process **sidecar** backends that speak the
@@ -8,7 +8,7 @@ External Storage Protocol.
 
 ```yaml
 storage:
-  backend: sqlite        # default — nothing else needed
+  backend: sqlite        # default, nothing else needed
 ```
 
 ## Durable storage (`storage:`)
@@ -18,16 +18,16 @@ The durable event-log and memory-archive backend.
 | Key | Default | Description |
 |-----|---------|-------------|
 | `backend` | `sqlite` | `sqlite`, `postgres`, or `external` |
-| `postgres_dsn` | — | libpq connection string (postgres only) |
+| `postgres_dsn` | none | libpq connection string (postgres only) |
 | `postgres_log_dir` | `memory.dir` | Directory for per-agent `.log` mirror files (postgres only) |
-| `command` | — | Sidecar executable (external only) |
-| `args` | — | Sidecar arguments (external only) |
+| `command` | none | Sidecar executable (external only) |
+| `args` | none | Sidecar arguments (external only) |
 
 ### SQLite (default)
 
 Embedded, zero-dependency, ideal for single-node deployments. Databases
 live under the workspace `data/` directory (see
-[Workspace Layout](workspace.md)) — `actions.db`, `archive.db`,
+[Workspace Layout](workspace.md)): `actions.db`, `archive.db`,
 `knowledge.db`, `costs.db`, `workboard.db`, and friends.
 
 ### PostgreSQL
@@ -48,11 +48,11 @@ Semantic memory search. When `vector.backend` and the legacy
 | Key | Default | Description |
 |-----|---------|-------------|
 | `backend` | `sqlite-vec` (effective runtime default) | `sqlite-vec`, `qdrant`, or `external` |
-| `url` | — | Qdrant base URL, e.g. `http://localhost:6333` |
-| `collection` | — | Qdrant collection name, e.g. `soulacy_memory` |
-| `api_key` | — | Qdrant API key (optional) |
-| `dims` | `768` | Embedding dimensionality — must match your embedder |
-| `command` / `args` | — | Sidecar process (external only) |
+| `url` | none | Qdrant base URL, e.g. `http://localhost:6333` |
+| `collection` | none | Qdrant collection name, e.g. `soulacy_memory` |
+| `api_key` | none | Qdrant API key (optional) |
+| `dims` | `768` | Embedding dimensionality. It must match your embedder. |
+| `command` / `args` | none | Sidecar process (external only) |
 
 ```yaml
 # Built-in and recommended default
@@ -69,8 +69,8 @@ vector:
 
 !!! warning "Qdrant is experimental"
     The `qdrant` vector backend has **no automated tests and no known
-    production users**. Enabling it logs a startup WARN. It is unsupported —
-    prefer `sqlite-vec` (the default) or an external sidecar for anything you
+    production users**. Enabling it logs a startup WARN. It is unsupported.
+    Prefer `sqlite-vec` (the default) or an external sidecar for anything you
     depend on.
 
 ## Message queue (`queue:`)
@@ -85,7 +85,7 @@ Carries the [event stream](events.md) and internal work distribution.
 | `nats_subject_prefix` | `""` (= `<stream>.>`) | Subject filter applied to the stream |
 | `nats_ack_wait` | `30s` | How long JetStream waits for an Ack before redelivering |
 | `nats_max_deliver` | `0` | Max delivery attempts per message; `0` = unlimited |
-| `command` / `args` | — | Sidecar process (external only) |
+| `command` / `args` | none | Sidecar process (external only) |
 
 ```yaml
 queue:
@@ -101,14 +101,14 @@ from other processes or machines.
 
 !!! warning "NATS is experimental"
     The `nats` queue backend has **no automated tests and no known production
-    users**. Enabling it logs a startup WARN. It is unsupported — the default
+    users**. Enabling it logs a startup WARN. It is unsupported: the default
     in-memory queue is the supported path; use an external sidecar if you need
     cross-process durability.
 
 ## External sidecars (External Storage Protocol)
 
 Vector and queue backends can be served by a **sidecar process** speaking
-the External Storage Protocol — JSON-RPC 2.0 over stdio — so third-party
+the External Storage Protocol (JSON-RPC 2.0 over stdio) so third-party
 database drivers plug in at runtime in any language, without recompiling
 Soulacy. The gateway spawns the sidecar, negotiates capabilities, and
 provisions a per-run shared scratch directory (`data/scratch/…`) so large
@@ -128,7 +128,7 @@ queue:
 ```
 
 !!! note "Sidecar crash behaviour"
-    Storage sidecars are not auto-respawned in v1 — a crashed sidecar
+    Storage sidecars are not auto-respawned in v1: a crashed sidecar
     fails calls with a clear error. Restart the gateway (or fix the
     sidecar) to recover.
 

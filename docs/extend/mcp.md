@@ -1,7 +1,7 @@
 # MCP Servers
 
 Soulacy speaks the [Model Context Protocol](https://modelcontextprotocol.io)
-(MCP), so any MCP server — first-party or third-party — can expose its tools to
+(MCP), so any MCP server (first-party or third-party) can expose its tools to
 your agents. An MCP server might wrap a database, a SaaS API, a filesystem, or a
 company-internal service; once connected, its tools appear to agents exactly like
 built-in tools.
@@ -113,7 +113,7 @@ Raw Git repositories are unsigned, so direct CLI use requires
 consent. Repeating the request does not reinstall an already registered server.
 
 MCP servers are declared in your Soulacy config (or contributed by a plugin).
-Each server has a transport — a local subprocess over stdio, or a remote URL.
+Each server has a transport: a local subprocess over stdio, or a remote URL.
 
 ```yaml
 mcp:

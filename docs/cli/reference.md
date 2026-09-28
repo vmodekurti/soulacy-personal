@@ -2,9 +2,9 @@
 
 Two binaries:
 
-- **`sy`** — the CLI client. Every GUI action is available here; commands
+- **`sy`**: the CLI client. Every GUI action is available here; commands
   talk to a running gateway over its REST API.
-- **`soulacy`** — the gateway server itself, plus the build tool and the
+- **`soulacy`**: the gateway server itself, plus the build tool and the
   reference package registry.
 
 ## Global `sy` flags
@@ -75,7 +75,7 @@ no local files were changed.
 
 ```bash
 sy setup            # interactive wizard: providers, channels, writes config.yaml
-sy doctor           # local diagnostics — config, dirs, Python, Ollama, gateway, MCP
+sy doctor           # local diagnostics: config, dirs, Python, Ollama, gateway, MCP
 sy doctor --json    # machine-readable report
 ```
 
@@ -109,7 +109,7 @@ sy agent package import support-bot.soulacy-agent.json --enable --overwrite
 ```
 
 `sy agent validate` checks YAML fields, trigger/schedule consistency,
-provider and model availability, tool paths, and MCP references — errors
+provider and model availability, tool paths, and MCP references: errors
 return nonzero, making it CI-friendly.
 
 Agent packages are portable `.soulacy-agent.json` bundles. They include
@@ -302,14 +302,14 @@ sy workspace migrate --dry-run     # print the migration plan, move nothing
 sy workspace migrate               # migrate legacy ~/.soulacy → soulspace (confirm; -y to skip)
 ```
 
-Stop the gateway before `migrate` — databases move as files. See
+Stop the gateway before `migrate`: databases move as files. See
 [Workspace Layout](../configuration/workspace.md).
 
 ## Gateway control
 
 ```bash
 sy server status     # GET /health against the gateway
-sy server start      # convenience hint — run the `soulacy` binary for production
+sy server start      # convenience hint: run the `soulacy` binary for production
 sy update check --manifest ./release-manifest.json
 sy update install --manifest ./release-manifest.json --dry-run
 sy update install --manifest ./release-manifest.json --yes
@@ -345,7 +345,7 @@ soulacy build --with github.com/acme/soulacy-matrix@v1.2.0 -o bin/soulacy-matrix
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--with` | — | Extra driver module, `module[@version]` (repeatable) |
+| `--with` | none | Extra driver module, `module[@version]` (repeatable) |
 | `-o` | `bin/soulacy` | Output binary path |
 | `--skip-verify` | `false` | Skip conformance/registry test gates |
 | `--keep` | `true` | Keep the generated `builtins_extra.go` (required for rebuilds) |
@@ -365,10 +365,10 @@ soulacy registry serve --dir ./packages --addr 127.0.0.1:18790 \
 ```
 
 Consumers put the printed **public** key in their `registries:` entry as
-`signing_key` — unsigned or tampered packages are then refused.
+`signing_key`: unsigned or tampered packages are then refused.
 
 | `serve` flag | Default | Description |
 |--------------|---------|-------------|
 | `--dir` | `packages` | Directory of `<slug>-<version>.tar.gz` archives |
 | `--addr` | `127.0.0.1:18790` | Listen address |
-| `--signing-key-file` | — | Hex ed25519 private key; when set, every package is signed |
+| `--signing-key-file` | none | Hex ed25519 private key; when set, every package is signed |

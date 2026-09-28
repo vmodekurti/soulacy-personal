@@ -1,8 +1,8 @@
 # Specs & Deep Dives
 
 The repo carries detailed design and contract documents under `docs/`.
-These are the authoritative specs the implementation is tested against —
-read them when you are building on top of Soulacy (plugins, sidecars,
+These are the authoritative specs the implementation is tested against.
+Read them when you are building on top of Soulacy (plugins, sidecars,
 registries, event consumers) or want the full rationale behind a
 subsystem.
 
@@ -11,15 +11,15 @@ subsystem.
 | Spec | One-liner |
 |------|-----------|
 | [EVENTS.md](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/EVENTS.md) | The schema-v1 event envelope, event types, `soulacy.events.*` queue subjects, signed-webhook delivery and compatibility rules |
-| [EXTERNAL_CHANNEL_PROTOCOL.md](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/EXTERNAL_CHANNEL_PROTOCOL.md) | Run a channel adapter as a stdio sidecar in any language — frame format, handshake, supervision contract |
-| [EXTERNAL_STORAGE_PROTOCOL.md](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/EXTERNAL_STORAGE_PROTOCOL.md) | Vector/queue backends as JSON-RPC 2.0 stdio sidecars — negotiate, method tables, shared scratch-dir semantics |
+| [EXTERNAL_CHANNEL_PROTOCOL.md](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/EXTERNAL_CHANNEL_PROTOCOL.md) | Run a channel adapter as a stdio sidecar in any language: frame format, handshake, supervision contract |
+| [EXTERNAL_STORAGE_PROTOCOL.md](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/EXTERNAL_STORAGE_PROTOCOL.md) | Vector/queue backends as JSON-RPC 2.0 stdio sidecars: negotiate, method tables, shared scratch-dir semantics |
 
 ## Plugins
 
 | Spec | One-liner |
 |------|-----------|
 | [PLUGIN_MANIFEST.md](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/PLUGIN_MANIFEST.md) | The plugin manifest grammar: identity, entry points, declared capabilities, `sdk_major`, schema evolution rules |
-| [PLUGIN_CAPABILITIES.md](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/PLUGIN_CAPABILITIES.md) | The capability model — what a plugin may touch (events, config, GUI mounts) and how grants are enforced at runtime |
+| [PLUGIN_CAPABILITIES.md](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/PLUGIN_CAPABILITIES.md) | The capability model: what a plugin may touch (events, config, GUI mounts) and how grants are enforced at runtime |
 | [PLUGIN_CREDENTIALS.md](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/PLUGIN_CREDENTIALS.md) | How plugins declare and receive secrets from the encrypted vault, with rotation → restart semantics |
 | [PLUGIN_MIGRATIONS.md](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/PLUGIN_MIGRATIONS.md) | Transactional, checksummed, namespaced database migrations for plugin-owned schemas |
 | [PLUGIN_INSTALL.md](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/PLUGIN_INSTALL.md) | The stage → introspect → approve install lifecycle, staging directories, and approval fingerprints |
@@ -30,7 +30,7 @@ subsystem.
 | Spec | One-liner |
 |------|-----------|
 | [PACKAGE_REGISTRIES.md](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/PACKAGE_REGISTRIES.md) | The registry provider model (http/git), priority-ordered resolution, the `/v1/search` + `/v1/packages/{slug}` API, ed25519 package signing |
-| [CUSTOM_DISTRIBUTIONS.md](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/CUSTOM_DISTRIBUTIONS.md) | Building flavored binaries with `soulacy build --with` — compiling third-party drivers into your own distribution |
+| [CUSTOM_DISTRIBUTIONS.md](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/CUSTOM_DISTRIBUTIONS.md) | Building flavored binaries with `soulacy build --with`: compiling third-party drivers into your own distribution |
 | [IPHONE_EXTENSION_PROGRAM.md](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/IPHONE_EXTENSION_PROGRAM.md) | The plan for the iPhone as Soulacy's extension: lock-screen approvals, location triggers, Siri actions, memory on the phone, and the slices that follow |
 | [EXTENSIBILITY.md](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/EXTENSIBILITY.md) | The umbrella extensibility design: factory registries, SDK seams, and how every extension point fits together |
 
@@ -40,7 +40,7 @@ subsystem.
 |------|-----------|
 | [REASONING_STRATEGIES.md](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/REASONING_STRATEGIES.md) | Pluggable reasoning strategies (plan-act and friends), their event trail (`reasoning.*`), and SOUL.yaml opt-in |
 | [RULEBOOKS.md](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/RULEBOOKS.md) | Versioned procedural memory: how agents learn rules, plus history, rollback, and locking via the brain-memory API |
-| [FLOW_GRAPHS.md](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/FLOW_GRAPHS.md) | Graph-structured multi-agent workflows — node/edge semantics and the live Flow View |
+| [FLOW_GRAPHS.md](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/FLOW_GRAPHS.md) | Graph-structured multi-agent workflows: node/edge semantics and the live Flow View |
 
 ## Operations
 
@@ -55,7 +55,7 @@ Not contracts, but useful context alongside the specs:
 
 | Document | One-liner |
 |----------|-----------|
-| [FRAMEWORK_OVERVIEW.md](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/FRAMEWORK_OVERVIEW.md) | Code-level walkthrough of every subsystem with file/line cite points — the best map of the source tree |
+| [FRAMEWORK_OVERVIEW.md](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/FRAMEWORK_OVERVIEW.md) | Code-level walkthrough of every subsystem with file/line cite points: the best map of the source tree |
 | [VOICE_SPIKE.md](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/VOICE_SPIKE.md) | The realtime-voice provider comparison and the sidecar-bridge architecture decision behind the [Voice](../configuration/voice.md) feature |
 | [TUTORIAL.md](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/TUTORIAL.md) | End-to-end hands-on tutorial for building and operating agents |
 
@@ -74,6 +74,6 @@ Not contracts, but useful context alongside the specs:
 !!! note "Specs vs user docs"
     These documents are contracts: they describe exact wire formats and
     invariants, and tests pin them. The user-facing pages in this site
-    (Configuration, API, CLI) are the friendlier layer on top — when the
+    (Configuration, API, CLI) are the friendlier layer on top: when the
     two seem to disagree, the spec wins and the user docs have a bug
     (please report it).

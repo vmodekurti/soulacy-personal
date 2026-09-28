@@ -22,6 +22,13 @@ Use fictional fixtures. Do not publish production keys, account/host identifiers
 private release receipts, workspace paths from an operator's machine, or raw
 database/log dumps. Generated operational reports belong outside the public site.
 
+## Write in a natural voice
+
+Use plain punctuation and direct sentences. Prefer periods, commas, parentheses,
+or colons to long dashes. Read changed copy aloud and rewrite any sentence that
+sounds mechanical after a punctuation edit. The docs build checks every published
+page and rejects both en dashes and em dashes.
+
 ## Run the checks
 
 From the Personal repository root:

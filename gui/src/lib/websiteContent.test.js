@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 
 const website = readFileSync(new URL('../../../website/index.html', import.meta.url), 'utf8')
 const footprint = readFileSync(new URL('../../../docs/deployment/footprint.md', import.meta.url), 'utf8')
+const rootReadme = readFileSync(new URL('../../../README.md', import.meta.url), 'utf8')
+const websiteReadme = readFileSync(new URL('../../../website/README.md', import.meta.url), 'utf8')
 
 describe('public website claims', () => {
   it('keeps public messaging focused on Genie, iPhone, and self-hosted Personal', () => {
@@ -30,5 +32,11 @@ describe('public website claims', () => {
       expect(readFileSync(new URL(`../../../docs/use-cases/${slug}.md`, import.meta.url), 'utf8')).toMatch(/^# /)
     }
     expect(website).toContain('https://docs.soulacy.io/deployment/footprint/')
+  })
+  it('uses plain punctuation in public website copy', () => {
+    const longDash = /[\u2013\u2014]|&(?:m|n)dash;/i
+    expect(website).not.toMatch(longDash)
+    expect(rootReadme).not.toMatch(longDash)
+    expect(websiteReadme).not.toMatch(longDash)
   })
 })

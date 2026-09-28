@@ -193,7 +193,7 @@ sudo -u soulacy env \
 ```
 
 If the browser rejects a key that works in a foreground process, do not rotate
-keys yet. First compare these paths and environments—the usual cause is two
+keys yet. First compare these paths and environments, the usual cause is two
 different `config.yaml` files.
 
 ## 6. Put Caddy in front of Soulacy
@@ -292,6 +292,6 @@ See [Upgrades and reinstall](upgrades.md) for rollback and migration behavior.
 | Service cannot read config | `sudo -u soulacy test -r ...` | Set owner `root:soulacy` and mode `0640` |
 | Service cannot create databases/logs | Test workspace write access | `sudo chown -R soulacy:soulacy /var/lib/soulacy` |
 | Service uses no agents | Inspect `SOULACY_WORKSPACE` and `agent_dirs` | Put agents under the selected workspace or configure absolute agent directories |
-| Browser gets 401 after config change | Service was not restarted or browser retained an old key | Restart, then enter the key from the service's config—not the login user's config |
+| Browser gets 401 after config change | Service was not restarted or browser retained an old key | Restart, then enter the key from the service's config, not the login user's config |
 | Caddy buffers responses | Missing streaming proxy setting | Add `flush_interval -1` and reload Caddy |
 | Update says versions are not comparable | Current binary is identified by a commit rather than a release version | Install a tagged release bundle explicitly |
