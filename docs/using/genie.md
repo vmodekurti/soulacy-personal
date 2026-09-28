@@ -7,6 +7,27 @@ Most of Soulacy — Studio, the agent list, schedules, delivery channels — is
 still there, and you will want it eventually. You do not need any of it to
 start.
 
+Genie is also the main way to operate Soulacy from the iPhone app. You can ask
+for work, turn a repeated request into an automation, watch its progress, and
+manage what Genie created without returning to a desktop. The gateway still
+runs the agents and enforces their permissions.
+
+## Use Genie from your iPhone
+
+Open Genie in the Soulacy app and ask in ordinary language. For example:
+
+- “Brief me on overnight AI news every weekday at 7.”
+- “Watch this page and tell me when the pricing changes.”
+- “Research these three companies and put the comparison in my inbox.”
+- “What automations have you created for me?”
+- “Pause the weekday briefing.”
+
+A one-off request can run immediately. A recurring request becomes a saved
+agent with a schedule, permissions, and a visible owner. Genie shows what it
+is doing, and completed work lands in the phone's durable inbox. If a risky
+step needs an attended decision, Soulacy pauses and asks on the phone; Genie
+cannot approve its own request.
+
 ## Ask for something
 
 Two kinds of request land differently, and you do not have to say which:

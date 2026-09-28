@@ -1,6 +1,6 @@
 # soulacy.io marketing site
 
-Single-page landing site for [soulacy.io](https://soulacy.io/). Plain HTML + Tailwind (via CDN), with no local build step. The page introduces self-hosted Soulacy Personal and links to practical installation and usage guides.
+Single-page landing site for [soulacy.io](https://soulacy.io/). Plain HTML + Tailwind (via CDN), with no local build step. The page introduces Genie as the iPhone control surface for automation running on self-hosted Soulacy Personal, then links to practical installation and usage guides.
 
 Docs (mkdocs Material) live separately at [docs.soulacy.io](https://docs.soulacy.io/).
 
@@ -86,7 +86,7 @@ Review and commit both files together. Do not add a workflow that commits back t
 
 Every headline claim maps back to:
 
-- Primary positioning: `README.md`, `docs/index.md`, and the attended/unattended rules in `docs/security/`
+- Primary positioning: `README.md`, `docs/index.md`, `docs/using/genie.md`, `docs/iphone.md`, and the attended/unattended rules in `docs/security/`
 - Security stack: `docs/PRODUCTIZATION_REVIEW.md` §Cohort F (`internal/trust/`, `internal/injection/`, `internal/intent/`, `internal/securitydoctor/`)
 - Recent platform work: `docs/recent-updates.md`, `docs/studio-learning-memory.md`, `docs/LLM_COST_CONTROLS.md`, and the linked operational pages
 - Persistent semantic memory: `internal/app/adapters.go`, `internal/memory/vector.go`, and `internal/agentmemory/store.go`
