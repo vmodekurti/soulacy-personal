@@ -550,8 +550,15 @@ func (s *Server) handleCreateAgent(c *fiber.Ctx) error {
 	if peek.RequiresAck && !hasCapabilityAck(c) {
 		return s.respondCapabilityAckRequired(c, peek)
 	}
+	connectionSelection, connectionErr := s.prepareAuthenticatedConnectionSelection(c, def.ID, def.Connections)
+	if connectionErr != nil {
+		return connectionErr
+	}
 	if err := s.loader.Upsert(dir, &def); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
+	}
+	if err := s.applyAuthenticatedConnectionSelection(c, def.ID, connectionSelection); err != nil {
+		return err
 	}
 	audit := s.auditAgentCapabilityChange(nil, &def)
 
@@ -583,6 +590,10 @@ func (s *Server) handleUpdateAgent(c *fiber.Ctx) error {
 	updates.LoadedAt = existing.LoadedAt
 
 	preserveHiddenAgentUpdateFields(&updates, existing)
+	connectionSelection, connectionErr := s.prepareAuthenticatedConnectionSelection(c, id, updates.Connections)
+	if connectionErr != nil {
+		return connectionErr
+	}
 
 	if isProtectedSystemAgent(id) {
 		updates.Enabled = true
@@ -607,6 +618,9 @@ func (s *Server) handleUpdateAgent(c *fiber.Ctx) error {
 	}
 	if err := s.loader.Upsert(dir, &updates); err != nil {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
+	}
+	if err := s.applyAuthenticatedConnectionSelection(c, id, connectionSelection); err != nil {
+		return err
 	}
 	audit := s.auditAgentCapabilityChange(existing, &updates)
 

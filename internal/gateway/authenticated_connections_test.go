@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,65 @@ import (
 
 	"github.com/soulacy/soulacy/internal/authconnections"
 )
+
+func TestAgentCreateAndUpdateSynchronizeAuthenticatedConnectionGrant(t *testing.T) {
+	s := newTestGateway(t, "secret")
+	store, err := authconnections.Open(filepath.Join(t.TempDir(), "connections.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	s.SetAuthenticatedConnectionStore(store)
+	s.SetCredentialVault(newMemVault())
+
+	status, created := gatewayJSON(t, s, http.MethodPost, "/api/v1/authenticated-connections", "secret", `{
+		"name":"Research portal","scope":"user","kind":"browser_session",
+		"base_url":"https://members.example.com/login","allowed_domains":["example.com"]
+	}`)
+	if status != http.StatusCreated {
+		t.Fatalf("create connection status=%d body=%v", status, created)
+	}
+	id := created["connection"].(map[string]any)["id"].(string)
+
+	agentBody := fmt.Sprintf(`{
+		"id":"research-agent","name":"Research Agent","enabled":true,
+		"trigger":"channel","system_prompt":"Research.","connections":[%q],
+		"llm":{"provider":"openai","model":"gpt-4o-mini"},
+		"memory":{"read_scopes":["session"],"write_scopes":["session"],"max_tokens":20},
+		"max_turns":5
+	}`, id)
+	status, body := gatewayJSON(t, s, http.MethodPost, "/api/v1/agents", "secret", agentBody)
+	if status != http.StatusCreated {
+		t.Fatalf("create agent status=%d body=%v", status, body)
+	}
+	connection, err := store.Get(t.Context(), "personal", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(connection.AgentIDs) != 1 || connection.AgentIDs[0] != "research-agent" {
+		t.Fatalf("agent grants after create = %v", connection.AgentIDs)
+	}
+
+	agentWithoutConnection := `{
+		"id":"research-agent","name":"Research Agent","enabled":true,
+		"trigger":"channel","system_prompt":"Research.",
+		"llm":{"provider":"openai","model":"gpt-4o-mini"},
+		"memory":{"read_scopes":["session"],"write_scopes":["session"],"max_tokens":20},
+		"max_turns":5
+	}`
+	status, body = gatewayJSON(t, s, http.MethodPut, "/api/v1/agents/research-agent", "secret", agentWithoutConnection)
+	if status != http.StatusOK {
+		t.Fatalf("update agent status=%d body=%v", status, body)
+	}
+
+	connection, err = store.Get(t.Context(), "personal", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(connection.AgentIDs) != 0 {
+		t.Fatalf("agent grants after update = %v", connection.AgentIDs)
+	}
+}
 
 func TestAuthenticatedConnectionAPILifecycleNeverReturnsCookieValues(t *testing.T) {
 	s := newTestGateway(t, "secret")
