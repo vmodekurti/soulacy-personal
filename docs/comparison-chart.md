@@ -31,7 +31,8 @@ Do not take our word for it. Check it in five minutes on your own machine:
 
 Soulacy is a private system that runs your AI agents. You describe an agent in
 one file. It runs on a computer you control. You reach it from your phone or
-your chat apps. It cannot do anything risky without your say-so.
+your chat apps. A privileged action needs a recorded approval or an explicit
+agent and gateway policy grant.
 
 | | Everywhere else | Soulacy |
 | --- | --- | --- |

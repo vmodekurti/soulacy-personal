@@ -1,14 +1,19 @@
-# An assistant that knows you, on a gateway you control
+# Run AI agents on hardware you own
 
-Soulacy keeps a structured picture of how your days go — your routine, the
-people who matter, what you owe and when — and every agent you run reads the
-same one. A model supplies the reasoning; Soulacy supplies the picture, the
-tools, the permissions, the scheduling, and the record of what happened.
+**Approve risky actions from your iPhone, or authorize unattended work through
+configuration you can inspect.**
 
-It learns **by asking**. A few questions in the web workspace on your first
-day are enough for agents to stop starting from nothing. The iPhone companion
-is optional: pair it and allow a sense, and Soulacy keeps up on its own;
-skip it and everything still works from what you have told it.
+Soulacy Personal is a complete self-hosted agent system. A model supplies the
+reasoning; Soulacy supplies the tools, permissions, schedules, delivery,
+memory, and the record of what happened. A privileged action proceeds only
+after a recorded approval or an explicit agent and gateway policy grant.
+
+Soulacy also keeps a structured picture of how your days go — your routine,
+the people who matter, what you owe and when — and every agent you run reads
+the same one. It learns **by asking**. The iPhone companion is optional: pair
+it and allow a sense, and Soulacy can keep up with calendar, Focus, location,
+or health signals; skip it and everything still works from what you have told
+it.
 
 Start with a small, read-only task. Make it reliable before giving it more access.
 
@@ -17,9 +22,9 @@ See [how your Personal setup works](personal.md) to understand the gateway,
 model, and companion-client requirements.
 
 [Start here: your first successful run](getting-started/quickstart.md){ .md-button .md-button--primary }
-[What it learns about you](using/person-model.md){ .md-button }
+[Connect your iPhone](getting-started/iphone.md){ .md-button }
+[Read the security model](security/index.md){ .md-button }
 [Pick a worked use case](use-cases/index.md){ .md-button }
-[See what your iPhone adds](iphone.md){ .md-button }
 
 !!! info "Match these guides to your installation"
     These docs follow the Personal repository's `main` branch. Your installed
@@ -27,6 +32,19 @@ model, and companion-client requirements.
     and the version in the iPhone app before expecting a new screen. Source
     availability is not evidence that your server has been upgraded.
     See [recent changes](recent-updates.md) and [safe upgrades](deployment/upgrades.md).
+
+## The trust rule
+
+| Situation | What happens |
+|---|---|
+| You are present and a privileged tool needs approval | Soulacy pauses and records your decision. A paired iPhone can show the request on the lock screen. |
+| A scheduled or otherwise unattended run requests the same action | It is refused unless the agent and gateway carry the required explicit unattended grants. The run never approves itself. |
+| A website, document, message, or MCP result contains new instructions | Soulacy treats that content as untrusted evidence. It cannot authorize a tool or expand the agent's permissions. |
+
+The agent file, gateway policy, approval record, and run evidence let you trace
+why an action was allowed. Start with read-only work and add authority only
+when the task needs it. See the [security model](security/index.md) for the
+complete enforcement path.
 
 ## Choose your starting point
 

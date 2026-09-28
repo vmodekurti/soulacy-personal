@@ -43,7 +43,7 @@ Any static server works. There's no build step.
 5. Under the deployed project → Custom domains → Set up custom domain → `soulacy.io` and `www.soulacy.io`.
 6. Wait for Cloudflare to verify the domains and provision their HTTPS certificates.
 
-**Current production setup (verified September 13, 2026):** the Pages project is named `soulacy` and its Git connection points at `vmodekurti/soulacy-personal`, production branch `main`, build output `website`, no build command. A push to `main` triggers a Pages deployment through Cloudflare's Git integration; check the project's Deployments tab for the commit. The GitHub website workflow only deploys when its Cloudflare credentials are configured; otherwise it logs a deferral, and a green deferral job is not proof that the website deployed.
+**Current production setup (verified September 28, 2026):** the Pages project is named `soulacy` and its Git connection points at `vmodekurti/soulacy-personal`, production branch `main`, build output `website`, no build command. A push to `main` triggers a Pages deployment through Cloudflare's Git integration; check the project's Deployments tab for the commit. The GitHub website workflow only deploys when its Cloudflare credentials are configured; otherwise it logs a deferral, and a green deferral job is not proof that the website deployed.
 
 ### Publish through the existing project
 
@@ -86,6 +86,7 @@ Review and commit both files together. Do not add a workflow that commits back t
 
 Every headline claim maps back to:
 
+- Primary positioning: `README.md`, `docs/index.md`, and the attended/unattended rules in `docs/security/`
 - Security stack: `docs/PRODUCTIZATION_REVIEW.md` §Cohort F (`internal/trust/`, `internal/injection/`, `internal/intent/`, `internal/securitydoctor/`)
 - Recent platform work: `docs/recent-updates.md`, `docs/studio-learning-memory.md`, `docs/LLM_COST_CONTROLS.md`, and the linked operational pages
 - Persistent semantic memory: `internal/app/adapters.go`, `internal/memory/vector.go`, and `internal/agentmemory/store.go`
