@@ -26,6 +26,28 @@
   let strategyManualOverride = false
   let strategyAutoNotice = ''
   let lastAutoStrategyKey = ''
+  let authenticatedConnections = []
+  let authenticatedConnectionsError = ''
+
+  async function loadAuthenticatedConnections() {
+    authenticatedConnectionsError = ''
+    try {
+      const response = await api.connections.list()
+      authenticatedConnections = response.connections || []
+    } catch (e) {
+      authenticatedConnections = []
+      authenticatedConnectionsError = e.message || 'Could not load website sign-ins.'
+    }
+  }
+
+  function toggleAuthenticatedConnection(connection) {
+    if (!editing || !connection?.id) return
+    const next = new Set(editing.connections || [])
+    if (next.has(connection.id)) next.delete(connection.id)
+    else next.add(connection.id)
+    editing.connections = [...next]
+    editing = editing
+  }
 
   // Capability-ack modal state. When the backend returns 409 with
   // {needs_ack: true, capability_audit}, we open a blocking modal that shows
@@ -985,6 +1007,9 @@
     editing.structured_peer_results = !!editing.structured_peer_results
     editing.channels  = editing.channels  || []
     editing.confirm_tools = editing.confirm_tools || []
+    editing.connections = editing.connections || authenticatedConnections
+      .filter(connection => (connection.agent_ids || []).includes(editing.id))
+      .map(connection => connection.id)
     editing.unattended = !!editing.unattended
     saveMsg = ''
     saveAudit = null
@@ -1452,6 +1477,7 @@ console.log(reply);` : ''
   }
 
   onMount(async () => {
+    await loadAuthenticatedConnections()
     await load()
     checkDoctorHash()
     loadCatalog()
@@ -1749,6 +1775,28 @@ console.log(reply);` : ''
               <span class="field-label">System Prompt</span>
               <textarea bind:value={editing.system_prompt} rows="7"
                         placeholder="You are a helpful Soulacy agent…"></textarea>
+            </div>
+
+            <div class="sep">Website sign-ins</div>
+            <div class="website-grants">
+              <div class="website-grants-head">
+                <span>Grant this agent selected encrypted website sessions. Cookie values stay outside the model context.</span>
+                <button type="button" class="btn-secondary small" on:click={() => { window.location.hash = '#websites' }}>Manage sign-ins</button>
+              </div>
+              {#if authenticatedConnectionsError}
+                <p class="error-text">{authenticatedConnectionsError}</p>
+              {:else if authenticatedConnections.length === 0}
+                <p class="muted">No website sign-ins are available. Add one from Website Access.</p>
+              {:else}
+                <div class="website-grant-list">
+                  {#each authenticatedConnections as connection (connection.id)}
+                    <label class:needs-auth={connection.status !== 'ready'}>
+                      <input type="checkbox" checked={(editing.connections || []).includes(connection.id)} on:change={() => toggleAuthenticatedConnection(connection)} />
+                      <span><strong>{connection.name}</strong><small>{connection.status === 'ready' ? connection.allowed_domains?.join(', ') : 'Reconnect required'}</small></span>
+                    </label>
+                  {/each}
+                </div>
+              {/if}
             </div>
 
             <!-- ── Persona blocks (identity / personality / non-negotiables) ───────
@@ -4119,6 +4167,33 @@ console.log(reply);` : ''
     align-items: center;
     gap: .42rem;
   }
+  .website-grants {
+    border: 1px solid var(--sl-line);
+    border-radius: 8px;
+    padding: .75rem;
+    background: rgba(255,255,255,.02);
+  }
+  .website-grants-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    color: #aeb4d2;
+    font-size: .76rem;
+  }
+  .website-grant-list { display: grid; gap: .45rem; margin-top: .7rem; }
+  .website-grant-list label {
+    display: flex;
+    align-items: center;
+    gap: .55rem;
+    padding: .55rem .65rem;
+    border: 1px solid var(--sl-line);
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .website-grant-list label.needs-auth { opacity: .65; }
+  .website-grant-list span { display: flex; flex-direction: column; gap: .1rem; }
+  .website-grant-list small { color: #7b82a8; }
 
   /* F-GUI-2 — Security Doctor modal styling. Colors mirror the deployment
      severity palette (info/warn/danger) already used across the dashboard. */

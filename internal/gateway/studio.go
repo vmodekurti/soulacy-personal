@@ -4033,8 +4033,9 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 }
 
 // handleStudioListAgents implements GET /api/v1/studio/agents. It returns every
-// agent Studio can RE-OPEN, as lightweight summaries for the "My Workflows" list
-// and the Describe step's "continue existing work".
+// deployed definition as a lightweight summary for "My Workflows". Editable
+// definitions open on the Studio canvas; classic definitions remain visible but
+// route to the lossless Deployed Agent editor.
 //
 // The filter used to be HasWorkflow alone, which silently excluded every
 // REASONING agent Studio itself had built: an Auto/ReAct/Plan-Execute agent has
@@ -4042,9 +4043,9 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 // anywhere in Studio afterwards — it existed, ran, and was invisible to the tool
 // that made it.
 //
-// So an agent qualifies if Studio can edit it: it has a workflow graph, OR it
-// carries a reasoning strategy, OR it was authored here (StudioIntent). The last
-// clause is what catches a Studio agent whose strategy was later cleared by hand.
+// Editable means it has a workflow graph, carries a supported reasoning
+// strategy, or was authored here (StudioIntent). Classic definitions are not
+// coerced into Drafts because that would drop fields Studio does not own.
 func (s *Server) handleStudioListAgents(c *fiber.Ctx) error {
 	type agentSummary struct {
 		ID          string `json:"id"`
@@ -4056,6 +4057,10 @@ func (s *Server) handleStudioListAgents(c *fiber.Ctx) error {
 		// Strategy distinguishes a fixed workflow from a reasoning agent in the
 		// list, so the two are not presented as interchangeable.
 		Strategy string `json:"strategy,omitempty"`
+		// Editable is false for classic/hand-authored definitions that Studio's
+		// Draft mapper cannot round-trip without losing custom tool definitions.
+		Editable  bool `json:"editable"`
+		Protected bool `json:"protected,omitempty"`
 	}
 	out := []agentSummary{}
 	for _, d := range s.loader.All() {
@@ -4066,11 +4071,9 @@ func (s *Server) handleStudioListAgents(c *fiber.Ctx) error {
 		// The loop strategy lives on the Reasoning block, not on Definition
 		// itself — Definition.Strategy does not exist.
 		strategy := strings.TrimSpace(d.Reasoning.Strategy)
-		reasoning := strategy != ""
-		authored := strings.TrimSpace(d.StudioIntent) != ""
-		if !hasFlow && !reasoning && !authored {
-			continue
-		}
+		strategyName := strings.ToLower(strategy)
+		reasoningEditable := strategyName == "auto" || strategyName == "react" || strategyName == "plan_execute"
+		editable := hasFlow || reasoningEditable || strings.TrimSpace(d.StudioIntent) != ""
 		nodes := 0
 		if hasFlow {
 			nodes = len(d.Workflow.Nodes)
@@ -4083,6 +4086,8 @@ func (s *Server) handleStudioListAgents(c *fiber.Ctx) error {
 			Trigger:     string(d.Trigger),
 			Nodes:       nodes,
 			Strategy:    strategy,
+			Editable:    editable,
+			Protected:   isProtectedSystemAgent(d.ID),
 		})
 	}
 	return c.JSON(fiber.Map{"agents": out})
@@ -4130,7 +4135,7 @@ func (s *Server) handleStudioLoadAgent(c *fiber.Ctx) error {
 	// FromAgentDefinition now round-trips the agent form losslessly, let those
 	// through too.
 	strat := strings.ToLower(strings.TrimSpace(def.Reasoning.Strategy))
-	isReasoningAgent := strat == "react" || strat == "plan_execute"
+	isReasoningAgent := strat == "auto" || strat == "react" || strat == "plan_execute"
 	// Studio-authored agents (studio_intent set) are openable even with an empty
 	// graph — e.g. a 0-step build the user needs to inspect, fix, or switch to an
 	// agent. Only truly external/library agents with nothing Studio can edit are
