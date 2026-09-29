@@ -712,6 +712,16 @@ export const api = {
     status: () => apiFetch('/marketplace/status'),
   },
 
+  connectors: {
+    list: (query = '', category = '') => {
+      const params = new URLSearchParams()
+      if (query) params.set('q', query)
+      if (category && category !== 'all') params.set('category', category)
+      const suffix = params.toString()
+      return apiFetch('/connectors' + (suffix ? `?${suffix}` : ''))
+    },
+  },
+
   mcp: {
     list:   ()        => apiFetch('/mcp'),
     create: (body)    => apiFetch('/mcp',                                       { method: 'POST',   body: JSON.stringify(body) }),

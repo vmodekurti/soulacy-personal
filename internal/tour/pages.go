@@ -212,6 +212,18 @@ var pages = map[string]page{
 		},
 	},
 
+	"connectors": {
+		stage: StageMaterial, nextAction: "open_mcp", nextLabel: "Connect an adapter",
+		role:         "The service catalog for capabilities your agents can use through reviewed adapters.",
+		contribution: "It explains official APIs, credentials, deployment support, risk, and setup before you choose MCP or a plugin.",
+		whenEmpty: func(InstallState) string {
+			return "Start with the outcome you need, such as comparing products or finding events. Each recipe names the official provider path and the boundary that keeps checkout in your hands."
+		},
+		whenUsed: func(InstallState) string {
+			return "Use these recipes to add another provider without inventing its security model. A recipe becomes usable only after its adapter is connected, tested, and granted to selected agents."
+		},
+	},
+
 	"chat": {
 		stage: StagePlan, nextAction: "", nextLabel: "",
 		role:         "A direct line to any agent you have built.",

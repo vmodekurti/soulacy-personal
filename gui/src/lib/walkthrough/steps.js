@@ -80,6 +80,10 @@ export const navTourCopy = {
     what: 'Recurring and triggered runs: the clock side of Soulacy.',
     when: 'Once an agent works when you press the button, come here to stop pressing the button.',
   },
+  connectors: {
+    what: 'A catalog of service integrations with official API links, credential requirements, deployment support, capabilities, and risk boundaries.',
+    when: 'Start here when you want an agent to shop, find events, or work with another service and need the supported setup path.',
+  },
   skills: {
     what: 'Reusable capability packs an agent can load, installed locally or pulled from a skill source.',
     when: 'Add a skill when several agents need the same know-how and you would rather not repeat it in each prompt.',

@@ -15,6 +15,9 @@ marker, and the Skills page shows them with a **built-in** badge.
 | `inbox-triage` | needs-you / FYI / noise, deadlines and commitments, replies drafted in your voice |
 | `calendar-scheduler` | free slots, conflicts, invites: honouring your working hours and habits |
 | `memory-curator` | see what Soulacy believes about you, where it came from, correct or forget it |
+| `shopping-research` | compare products across connected shopping services and hand checkout to the person |
+| `event-finder` | find and compare events through connected event services, then open provider ticket selection |
+| `food-product-check` | explain barcode, ingredient, nutrition, allergen and label data with uncertainty |
 
 Every skill has a `references/eval.md` with a handful of prompts and the
 expected behaviour, so it can be checked by hand (and, later, automatically).
