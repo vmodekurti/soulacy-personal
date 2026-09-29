@@ -1000,6 +1000,7 @@ func (s *Server) buildApp() *fiber.App {
 	api.Get("/marketplace/status", s.rbacMW(rbac.ResourceSkills, rbac.ActionRead), s.handleMarketplaceStatus)
 
 	// MCP (Model Context Protocol) — configured external servers + their tools
+	api.Get("/connectors", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleListConnectors)
 	api.Get("/mcp", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleListMCP)
 	api.Post("/mcp", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleCreateMCPServer)
 	api.Put("/mcp/own/:id", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handlePutOwnedMCPServer)

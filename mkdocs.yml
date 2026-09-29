@@ -197,6 +197,7 @@ nav:
     - Peer Agents & Built-ins: agents/peers-builtins.md
     - Browser Automation: agents/browser-automation.md
   - Skills & Plugins:
+    - Connectors: extend/connectors.md
     - Installing Skills: extend/installing-skills.md
     - Skill Sources: extend/skill-sources.md
     - MCP Servers: extend/mcp.md

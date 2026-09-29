@@ -34,6 +34,7 @@ const loaders = {
   workboard: () => import('./Workboard.svelte'),
   channels: () => import('./Channels.svelte'),
   schedule: () => import('./Schedule.svelte'),
+  connectors: () => import('./Connectors.svelte'),
   skills: () => import('./Skills.svelte'),
   websites: () => import('./WebsiteAccess.svelte'),
   mcp: () => import('./MCP.svelte'),
