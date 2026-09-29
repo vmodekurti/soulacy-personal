@@ -47,6 +47,7 @@ type Definition struct {
 	SignupURL         string       `json:"signup_url,omitempty"`
 	AdapterKinds      []string     `json:"adapter_kinds"`
 	DeploymentTargets []string     `json:"deployment_targets"`
+	RecommendedSkills []string     `json:"recommended_skills,omitempty"`
 	Credentials       []Credential `json:"credentials"`
 	Capabilities      []Capability `json:"capabilities"`
 	SetupSteps        []string     `json:"setup_steps"`
@@ -114,6 +115,7 @@ var catalog = []Definition{
 		DocsURL:      "https://developer.ebay.com/api-docs/buy/api-browse.html",
 		SignupURL:    "https://developer.ebay.com/signin",
 		AdapterKinds: []string{"mcp", "plugin"}, DeploymentTargets: []string{"local", "managed"},
+		RecommendedSkills: []string{"shopping-research"},
 		Credentials: []Credential{
 			{Name: "EBAY_CLIENT_ID", Label: "Client ID", Required: true},
 			{Name: "EBAY_CLIENT_SECRET", Label: "Client secret", Required: true},
@@ -134,7 +136,8 @@ var catalog = []Definition{
 		DocsURL:      "https://bestbuyapis.github.io/api-documentation/",
 		SignupURL:    "https://developer.bestbuy.com/",
 		AdapterKinds: []string{"mcp", "plugin"}, DeploymentTargets: []string{"local", "managed"},
-		Credentials: []Credential{{Name: "BESTBUY_API_KEY", Label: "API key", Required: true}},
+		RecommendedSkills: []string{"shopping-research"},
+		Credentials:       []Credential{{Name: "BESTBUY_API_KEY", Label: "API key", Required: true}},
 		Capabilities: []Capability{
 			{ID: "search_products", Label: "Search products", Description: "Search the product catalog and compare current prices and attributes.", Effect: EffectRead},
 			{ID: "get_product", Label: "Get product details", Description: "Read specifications, descriptions, images, reviews, and provider links.", Effect: EffectRead},
@@ -151,6 +154,7 @@ var catalog = []Definition{
 		DocsURL:      "https://developers.etsy.com/documentation/",
 		SignupURL:    "https://www.etsy.com/developers/register",
 		AdapterKinds: []string{"mcp", "plugin"}, DeploymentTargets: []string{"local", "managed"},
+		RecommendedSkills: []string{"shopping-research"},
 		Credentials: []Credential{
 			{Name: "ETSY_API_KEY", Label: "API key", Required: true},
 			{Name: "ETSY_SHARED_SECRET", Label: "Shared secret", Required: true},
@@ -171,7 +175,8 @@ var catalog = []Definition{
 		DocsURL:      "https://developer.ticketmaster.com/products-and-docs/apis/discovery-api/v2/",
 		SignupURL:    "https://developer.ticketmaster.com/",
 		AdapterKinds: []string{"mcp", "plugin"}, DeploymentTargets: []string{"local", "managed"},
-		Credentials: []Credential{{Name: "TICKETMASTER_API_KEY", Label: "Consumer key", Required: true}},
+		RecommendedSkills: []string{"event-finder"},
+		Credentials:       []Credential{{Name: "TICKETMASTER_API_KEY", Label: "Consumer key", Required: true}},
 		Capabilities: []Capability{
 			{ID: "search_events", Label: "Search events", Description: "Find events by location, date, attraction, venue, genre, or keyword.", Effect: EffectRead},
 			{ID: "get_event", Label: "Get event details", Description: "Read event, venue, location, image, status, and purchase-link details.", Effect: EffectRead},
@@ -188,7 +193,8 @@ var catalog = []Definition{
 		DocsURL:      "https://www.eventbrite.com/platform/new/api",
 		SignupURL:    "https://www.eventbrite.com/platform/",
 		AdapterKinds: []string{"mcp", "plugin"}, DeploymentTargets: []string{"local", "managed"},
-		Credentials: []Credential{{Name: "EVENTBRITE_PRIVATE_TOKEN", Label: "Private token", Required: true}},
+		RecommendedSkills: []string{"event-finder"},
+		Credentials:       []Credential{{Name: "EVENTBRITE_PRIVATE_TOKEN", Label: "Private token", Required: true}},
 		Capabilities: []Capability{
 			{ID: "list_events", Label: "List organizer events", Description: "Read events owned by an authorized organization or user.", Effect: EffectRead},
 			{ID: "get_event", Label: "Get event details", Description: "Read event, venue, format, category, and ticket-class details.", Effect: EffectRead},
@@ -204,6 +210,7 @@ var catalog = []Definition{
 		Status:  StatusRecipe, AuthType: "No key for read access",
 		DocsURL:      "https://openfoodfacts.github.io/openfoodfacts-server/api/",
 		AdapterKinds: []string{"mcp", "plugin"}, DeploymentTargets: []string{"local", "managed"},
+		RecommendedSkills: []string{"food-product-check"},
 		Capabilities: []Capability{
 			{ID: "get_product", Label: "Look up a barcode", Description: "Read product, ingredient, nutrition, allergen, and label data.", Effect: EffectRead},
 			{ID: "search_products", Label: "Search foods", Description: "Find products using the documented product search API.", Effect: EffectRead},

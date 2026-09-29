@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import TourButton from '../lib/TourButton.svelte'
   import { api } from '../lib/api.js'
-  import { connectorCategories, connectorList, effectSummary, filterConnectors } from '../lib/connectors.js'
+  import { connectorCategories, connectorList, connectorSkillStatus, effectSummary, filterConnectors, installedSkillNames } from '../lib/connectors.js'
 
   let connectors = []
   let loading = true
@@ -10,6 +10,7 @@
   let query = ''
   let category = 'all'
   let expanded = ''
+  let installedSkills = new Set()
 
   $: categories = connectorCategories(connectors)
   $: visible = filterConnectors(connectors, query, category)
@@ -18,7 +19,12 @@
     loading = true
     error = ''
     try {
-      connectors = connectorList(await api.connectors.list())
+      const [connectorPayload, skillPayload] = await Promise.all([
+        api.connectors.list(),
+        api.skills.list(),
+      ])
+      connectors = connectorList(connectorPayload)
+      installedSkills = installedSkillNames(skillPayload)
     } catch (e) {
       error = e?.message || 'Could not load the connector catalog.'
     } finally {
@@ -133,6 +139,20 @@
                 {/if}
               </div>
               <div class="setup-column full">
+                <h3>Recommended skills</h3>
+                <div class="skill-list">
+                  {#each connectorSkillStatus(connector, installedSkills) as skill}
+                    <span class:installed={skill.installed}>
+                      <strong>{skill.name}</strong>
+                      {skill.installed ? 'Installed' : 'Not installed'}
+                    </span>
+                  {/each}
+                </div>
+                <div class="setup-actions skill-actions">
+                  <button class="btn-secondary" on:click={() => go('skills')}>Open Skills</button>
+                  <button class="btn-secondary" on:click={() => go('agents')}>Assign to an agent</button>
+                </div>
+
                 <h3>How agents use it</h3>
                 <p>Connect a reviewed MCP server or plugin, test it, then grant its individual tools to the agents that need them.</p>
                 <div class="setup-actions">
@@ -197,6 +217,11 @@
   .setup-column.full { grid-column: 1 / -1; }
   .credential-list { list-style: none; padding: 0 !important; margin-bottom: 10px !important; }
   .credential-list li { display: flex; flex-direction: column; margin-bottom: 7px; }
+  .skill-list { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 8px; }
+  .skill-list span { display: flex; flex-direction: column; gap: 2px; border: 1px solid #604451; border-radius: 8px; padding: 7px 9px; color: #d9a9b4; font-size: .7rem; }
+  .skill-list span.installed { border-color: #31654f; color: #91dfb5; background: rgba(49, 101, 79, .12); }
+  .skill-list strong { color: inherit; font-size: .76rem; }
+  .skill-actions { margin-bottom: 16px; }
   code { color: #e8c982; font-size: .75rem; }
   .checkout { margin-top: 12px; color: #b9c1d2; font-size: .8rem; }
   .limitations { margin-top: 8px !important; }

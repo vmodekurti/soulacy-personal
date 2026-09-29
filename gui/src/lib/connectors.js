@@ -24,3 +24,15 @@ export function effectSummary(capabilities) {
   const writes = (capabilities || []).filter((capability) => capability?.effect === 'write').length
   return writes > 0 ? `${writes} write ${writes === 1 ? 'action' : 'actions'}` : 'Read only'
 }
+
+export function installedSkillNames(payload) {
+  return new Set((payload?.skills || []).map((skill) => skill?.name).filter(Boolean))
+}
+
+export function connectorSkillStatus(connector, installedNames) {
+  const installed = installedNames instanceof Set ? installedNames : new Set(installedNames || [])
+  return (connector?.recommended_skills || []).map((name) => ({
+    name,
+    installed: installed.has(name),
+  }))
+}

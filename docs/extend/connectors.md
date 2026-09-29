@@ -10,6 +10,7 @@ A connector is a product definition around an execution adapter. It describes:
 - local and managed deployment compatibility
 - read and write effects
 - setup, testing, and agent assignment
+- recommended skills that teach agents how to use compatible tools
 - checkout or handoff behavior
 
 The adapter still runs through Soulacy's existing tool systems. Connectors do not add another execution protocol.
@@ -18,14 +19,14 @@ The adapter still runs through Soulacy's existing tool systems. Connectors do no
 
 The first catalog includes recipes for:
 
-| Connector | Category | Authentication | Initial boundary |
+| Connector | Category | Recommended skill | Initial boundary |
 |---|---|---|---|
-| eBay Shopping | Shopping | OAuth 2 client credentials | Search, compare, inspect, then open the provider checkout link |
-| Best Buy Products | Shopping | API key | Search products and stores, then open the provider checkout link |
-| Etsy Marketplace | Shopping | OAuth 2 authorization code | Search listings and shops, then open the provider listing |
-| Ticketmaster Events | Events | API key | Search events and venues, then open Ticketmaster for ticket selection |
-| Eventbrite Organizer | Events | OAuth 2 or private token | Read authorized organizer data and open public event links |
-| Open Food Facts | Shopping | No key for read access | Read barcode, ingredient, nutrition, and allergen data |
+| eBay Shopping | Shopping | `shopping-research` | Search, compare, inspect, then open the provider checkout link |
+| Best Buy Products | Shopping | `shopping-research` | Search products and stores, then open the provider checkout link |
+| Etsy Marketplace | Shopping | `shopping-research` | Search listings and shops, then open the provider listing |
+| Ticketmaster Events | Events | `event-finder` | Search events and venues, then open Ticketmaster for ticket selection |
+| Eventbrite Organizer | Events | `event-finder` | Read authorized organizer data and open public event links |
+| Open Food Facts | Shopping | `food-product-check` | Read barcode, ingredient, nutrition, and allergen data |
 
 `Recipe ready` means Soulacy knows the supported setup path. It does not mean the service is connected. The connector becomes usable by an agent only after an MCP server or plugin is connected, tested, and granted to that agent.
 
@@ -37,6 +38,7 @@ The first catalog includes recipes for:
 4. Connect a reviewed MCP server or plugin.
 5. Test the adapter from its setup page.
 6. Grant individual tools to selected agents in Studio or the agent editor.
+7. Assign the recommended skill so the agent knows how to select tools, compare results, and explain missing capabilities.
 
 This sequence works on local and managed deployments when the adapter is remote. A local stdio adapter still requires a deployment with a persistent runtime and permission to launch it.
 
@@ -61,6 +63,16 @@ Definitions live in `internal/connectors/catalog.go`. A definition needs:
 Add catalog metadata only after verifying that the provider offers a documented integration method. Do not catalog scraped consumer pages, unofficial private APIs, or adapters that require credentials to appear in model-visible arguments.
 
 The connector definition and execution adapter may ship separately. Keep the UI status honest while the adapter is unavailable, and never report an integration as connected solely because its credential exists.
+
+## Connector skills
+
+Soulacy ships three outcome skills for the initial catalog:
+
+- `shopping-research` compares products across available shopping tools and keeps checkout on the provider website.
+- `event-finder` searches connected event tools, deduplicates results, and compares dates, locations, availability, and known costs.
+- `food-product-check` explains barcode, ingredient, nutrition, allergen, and label data while preserving uncertainty.
+
+The skills do not provide network access or credentials. They inspect the live MCP tool catalog, use only tools granted to the agent, and explain how to finish setup when no compatible adapter is available.
 
 ## Connector, MCP, plugin, or skill
 

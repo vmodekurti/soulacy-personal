@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { connectorCategories, connectorList, effectSummary, filterConnectors } from './connectors.js'
+import { connectorCategories, connectorList, connectorSkillStatus, effectSummary, filterConnectors, installedSkillNames } from './connectors.js'
 
 const items = [
   { id: 'shop', name: 'Shop', provider: 'Vendor', category: 'shopping', summary: 'Find products', capabilities: [{ label: 'Compare prices', effect: 'read' }] },
@@ -22,5 +22,13 @@ describe('connector catalog helpers', () => {
     expect(connectorCategories(items)).toEqual(['events', 'shopping'])
     expect(effectSummary(items[0].capabilities)).toBe('Read only')
     expect(effectSummary(items[1].capabilities)).toBe('1 write action')
+  })
+
+  it('reports whether recommended skills are installed', () => {
+    const installed = installedSkillNames({ skills: [{ name: 'shopping-research' }] })
+    expect(connectorSkillStatus({ recommended_skills: ['shopping-research', 'event-finder'] }, installed)).toEqual([
+      { name: 'shopping-research', installed: true },
+      { name: 'event-finder', installed: false },
+    ])
   })
 })

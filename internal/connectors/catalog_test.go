@@ -3,6 +3,8 @@ package connectors
 import (
 	"strings"
 	"testing"
+
+	builtinskills "github.com/soulacy/soulacy/internal/skills/builtin"
 )
 
 func TestCatalogDefinitionsAreSafeAndWellFormed(t *testing.T) {
@@ -20,6 +22,9 @@ func TestCatalogDefinitionsAreSafeAndWellFormed(t *testing.T) {
 		}
 		if len(d.Capabilities) == 0 || len(d.SetupSteps) == 0 {
 			t.Errorf("%s needs capabilities and setup steps", d.ID)
+		}
+		if len(d.RecommendedSkills) == 0 {
+			t.Errorf("%s needs at least one recommended skill", d.ID)
 		}
 		for _, c := range d.Capabilities {
 			if c.Effect != EffectRead && c.Effect != EffectWrite {
@@ -53,5 +58,19 @@ func TestCatalogReturnsIndependentSlice(t *testing.T) {
 	first[0].Name = "changed"
 	if Catalog()[0].Name == "changed" {
 		t.Fatal("Catalog returned its backing slice")
+	}
+}
+
+func TestRecommendedSkillsExistInBuiltinCatalog(t *testing.T) {
+	available := map[string]bool{}
+	for _, name := range builtinskills.Names() {
+		available[name] = true
+	}
+	for _, connector := range Catalog() {
+		for _, name := range connector.RecommendedSkills {
+			if !available[name] {
+				t.Errorf("%s recommends unknown built-in skill %q", connector.ID, name)
+			}
+		}
 	}
 }
