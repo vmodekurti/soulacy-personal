@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { connectorCategories, connectorList, connectorSkillStatus, effectSummary, filterConnectors, installedSkillNames } from './connectors.js'
+import { authenticationSummary, connectorCategories, connectorList, connectorSkillStatus, effectSummary, filterConnectors, installedSkillNames } from './connectors.js'
 
 const items = [
   { id: 'shop', name: 'Shop', provider: 'Vendor', category: 'shopping', summary: 'Find products', capabilities: [{ label: 'Compare prices', effect: 'read' }] },
@@ -22,6 +22,13 @@ describe('connector catalog helpers', () => {
     expect(connectorCategories(items)).toEqual(['events', 'shopping'])
     expect(effectSummary(items[0].capabilities)).toBe('Read only')
     expect(effectSummary(items[1].capabilities)).toBe('1 write action')
+  })
+
+  it('shows whether provider authentication is needed', () => {
+    expect(authenticationSummary({ auth_requirement: 'none', auth_type: 'No provider account' })).toBe('None')
+    expect(authenticationSummary({ auth_requirement: 'optional' })).toBe('Optional')
+    expect(authenticationSummary({ auth_requirement: 'required' })).toBe('Required')
+    expect(authenticationSummary({ auth_type: 'Legacy API key' })).toBe('Legacy API key')
   })
 
   it('reports whether recommended skills are installed', () => {
