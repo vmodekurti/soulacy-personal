@@ -406,10 +406,77 @@ func (s *Server) PlanActionForGenie(ctx context.Context, goal, missionID string,
 	if err != nil {
 		return nil, err
 	}
+	// The administrative execution-plan API retains unavailable capability
+	// diagnostics. Genie only needs routes it can act on; exposing every absent
+	// tool caused smaller models to narrate internal inventory and reject the
+	// request before asking for ordinary trip details.
+	available := make([]missions.ExecutionCapability, 0, len(plan.Capabilities))
+	for _, capability := range plan.Capabilities {
+		if capability.Available {
+			available = append(available, capability)
+		}
+	}
+	plan.Capabilities = available
+	routes := make([]missions.ExecutionRoute, 0, len(plan.Routes))
+	for _, route := range plan.Routes {
+		if route.Status != "not_selected" {
+			routes = append(routes, route)
+		}
+	}
+	plan.Routes = routes
+	questions := make([]missions.ExecutionRequirement, 0, 2)
+	for _, requirement := range plan.RequiredInputs {
+		if requirement.Status == "needed" && !requirement.Sensitive {
+			questions = append(questions, requirement)
+			if len(questions) == 2 {
+				break
+			}
+		}
+	}
 	return map[string]any{
-		"execution_plan": plan,
-		"next":           "Ask only for requirements marked needed. Use prepare_website_access for secure_setup when the user agrees. Never collect credentials or payment numbers in chat.",
+		"execution_plan":    plan,
+		"questions":         questions,
+		"suggested_reply":   genieActionSuggestedReply(goal, questions),
+		"response_contract": "Say you can use the provider's website. Ask only the questions listed in questions, phrased naturally for the user's request. Do not discuss capabilities, connectors, MCP, browser automation, payment, sign-in, or setup in this reply.",
+		"next":              "Use the selected route and keep the others as fallbacks. After the listed questions are answered, collect any remaining non-sensitive requirements in another short turn. Later, use prepare_website_access for secure_setup and never collect credentials or payment numbers in chat.",
 	}, nil
+}
+
+func genieActionSuggestedReply(goal string, questions []missions.ExecutionRequirement) string {
+	if len(questions) == 0 {
+		return ""
+	}
+	provider := "the provider"
+	lowerGoal := strings.ToLower(goal)
+	for _, candidate := range []string{"Uber", "Lyft", "OpenTable", "Resy", "Airbnb"} {
+		if strings.Contains(lowerGoal, strings.ToLower(candidate)) {
+			provider = candidate
+			break
+		}
+	}
+	var reply strings.Builder
+	detailLabel := "details"
+	if len(questions) == 1 {
+		detailLabel = "detail"
+	}
+	fmt.Fprintf(&reply, "I can help with that on %s's website. I need %d %s first:\n", provider, len(questions), detailLabel)
+	for i, question := range questions {
+		fmt.Fprintf(&reply, "\n%d. %s", i+1, genieRequirementQuestion(question))
+	}
+	return reply.String()
+}
+
+func genieRequirementQuestion(requirement missions.ExecutionRequirement) string {
+	switch requirement.Key {
+	case "pickup":
+		return "What is the exact pickup location?"
+	case "destination":
+		return "What is the destination address?"
+	case "ride_time":
+		return "When do you need the pickup, right now or at a scheduled date and time?"
+	default:
+		return "What should I use for " + strings.ToLower(requirement.Label) + "?"
+	}
 }
 
 func (s *Server) PrepareWebsiteAccessForGenie(ctx context.Context, name, baseURL string) (map[string]any, error) {

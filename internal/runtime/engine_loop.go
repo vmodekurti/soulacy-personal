@@ -490,6 +490,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		toolSchemaExists(tools, "mcp_install_inspect")
 	forcePackageInstall := hasURLPackageRequest && packageInstallReq.Kind != "mcp" &&
 		toolSchemaExists(tools, "package_install")
+	forceGenieActionPlan := shouldForceGenieActionPlan(def.ID, rawGoal, tools)
 
 	// Auto-delegate: when SOUL.yaml sets `llm.tool_choice: agent__<id>` and
 	// `<id>` is one of the declared peers, do the peer call HERE before the
@@ -715,6 +716,9 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		if turn == 0 && !autoDelegated && forcePackageInstall {
 			req.ToolChoice = "package_install"
 		}
+		if turn == 0 && !autoDelegated && forceGenieActionPlan {
+			req.ToolChoice = "plan_action"
+		}
 
 		e.sink.Emit(message.Event{
 			Type: "llm.call", AgentID: msg.AgentID, SessionID: msg.SessionID,
@@ -855,6 +859,16 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 				},
 			}}
 		}
+		// A real-world action must begin with the execution planner. Some local
+		// and open-weight models ignore tool_choice and answer from the visible
+		// tool inventory, which previously turned an absent provider connector
+		// into an immediate refusal. Force the same safe built-in call the prompt
+		// requested so the next turn sees the ordered API, website, and official
+		// alternative routes.
+		if turn == 0 && !autoDelegated && forceGenieActionPlan {
+			resp.Content = ""
+			resp.ToolCalls = []message.ToolCall{genieActionPlanCall(rawGoal)}
+		}
 		// Usage for streams is final only after the provider channel closes.
 		// Recording and run-budget accumulation therefore happen after draining.
 		if resp.InputTokens > 0 {
@@ -960,6 +974,11 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		}
 		e.appendHistoryLocked(sess, turns...)
 		sess.mu.Unlock()
+
+		if plannedReply := initialGenieActionReply(turn, forceGenieActionPlan, toolResults); plannedReply != "" {
+			finalContent = plannedReply
+			break
+		}
 
 		// An explicit install-from-URL request is a deterministic operator action,
 		// not an open-ended research task. MCP requests inspect first, so their

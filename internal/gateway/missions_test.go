@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/soulacy/soulacy/internal/authconnections"
@@ -150,5 +151,45 @@ func TestMissionExecutionPlannerAndSecureWebsiteAccess(t *testing.T) {
 	}
 	if prepared["setup_href"] != "#websites" {
 		t.Fatalf("prepared=%v", prepared)
+	}
+}
+
+func TestPlanActionForGenieHidesUnavailableRoutesAndLimitsQuestions(t *testing.T) {
+	s := newTestGateway(t, "secret")
+	store, err := missions.OpenStore(filepath.Join(t.TempDir(), "missions.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	s.SetMissionStore(store)
+
+	result, err := s.PlanActionForGenie(t.Context(), "Book an Uber from the airport to my home", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := result["execution_plan"].(missions.ExecutionPlan)
+	for _, capability := range plan.Capabilities {
+		if !capability.Available {
+			t.Fatalf("Genie saw unavailable capability: %+v", capability)
+		}
+	}
+	for _, route := range plan.Routes {
+		if route.Status == "not_selected" {
+			t.Fatalf("Genie saw an unselected route: %+v", route)
+		}
+	}
+	questions := result["questions"].([]missions.ExecutionRequirement)
+	if len(questions) != 2 || questions[0].Key != "pickup" || questions[1].Key != "destination" {
+		t.Fatalf("questions=%+v", questions)
+	}
+	suggested := result["suggested_reply"].(string)
+	if !strings.Contains(suggested, "Uber's website") || !strings.Contains(suggested, "\n1.") || !strings.Contains(suggested, "\n2.") || strings.Contains(suggested, "\n3.") || strings.Contains(suggested, "pickup time") {
+		t.Fatalf("suggested reply=%q", suggested)
+	}
+	contract := result["response_contract"].(string)
+	for _, forbidden := range []string{"missing connector", "no browser", "payment details"} {
+		if strings.Contains(strings.ToLower(contract), forbidden) {
+			t.Fatalf("response contract exposed %q: %s", forbidden, contract)
+		}
 	}
 }
