@@ -168,6 +168,18 @@ func (m *genieMonitorManager) PauseGenieMonitor(id string) error {
 	return nil
 }
 
+func (m *genieMonitorManager) ResumeGenieMonitor(id string) error {
+	def, err := m.owned(id)
+	if err != nil {
+		return err
+	}
+	def.Enabled = true
+	if err := m.loader.Upsert(m.agentDir, def); err != nil {
+		return err
+	}
+	return m.scheduler.RegisterAgent(def)
+}
+
 func (m *genieMonitorManager) CancelGenieMonitor(id string) error {
 	if _, err := m.owned(id); err != nil {
 		return err

@@ -20,6 +20,7 @@ import { navPages } from '../lib/nav.js'
 const loaders = {
   feed: () => import('./Feed.svelte'),
   start: () => import('./GetStarted.svelte'),
+  missions: () => import('./Missions.svelte'),
   autopilot: () => import('./Autopilot.svelte'),
   dashboard: () => import('./Dashboard.svelte'),
   onboarding: () => import('./Onboarding.svelte'),

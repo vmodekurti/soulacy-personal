@@ -34,6 +34,33 @@ is doing, and completed work lands in the phone's durable inbox. If a risky
 step needs an attended decision, Soulacy pauses and asks on the phone; Genie
 cannot approve its own request.
 
+## Give Genie an ongoing mission
+
+A mission is a standing responsibility with a visible contract. It records:
+
+- the outcome Genie owns;
+- the finish line;
+- the recurring or one-time schedule;
+- optional delivery details;
+- current progress and any blocker;
+- the next action;
+- the background runner doing the work.
+
+Ask Genie to plan the mission first. Confirm the finish line and schedule, then
+activate it. You can inspect every mission on the **Missions** page and pause,
+resume, complete, or cancel it at any time. Mission records survive a gateway
+restart, while the linked scheduled runner resumes from the saved agent
+definition and scheduler state.
+
+A mission is not a new permission. Its runner receives the same bounded tools
+as a Genie monitor, and risky actions still go through the existing grant and
+approval policy. Mission records contain no API keys, cookies, or website
+session material.
+
+Use a mission when you care about an ongoing outcome and want visible progress.
+Use a monitor for a narrow condition such as a price crossing a threshold. Use
+an agent when you need a reusable worker with a defined workflow.
+
 ## Ask for something
 
 Two kinds of request land differently, and you do not have to say which:

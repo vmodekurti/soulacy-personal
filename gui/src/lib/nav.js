@@ -43,6 +43,7 @@ export const navGroups = [
 export const navPages = [
   { id: 'feed',      icon: '⌂', label: 'Feed',        group: 'main', level: 'simple' },
   { id: 'start',     icon: '✦', label: 'Genie',       group: 'main', level: 'simple' },
+  { id: 'missions',  icon: '◉', label: 'Missions',    group: 'main', level: 'simple' },
   { id: 'dashboard', icon: '◈', label: 'Dashboard',   group: 'main', level: 'simple' },
   { id: 'onboarding', icon: '✓', label: 'First Run',   group: 'main', level: 'standard' },
   { id: 'studio',    icon: '🎬', label: 'Studio',      group: 'main', level: 'standard' },
