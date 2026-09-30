@@ -1,85 +1,100 @@
 # Connectors
 
-Connectors give people one place to discover and set up service integrations without first deciding whether the underlying implementation is MCP, a plugin, or a built-in tool.
+A connector is a user-created integration built around an outcome. It is not a fixed provider entry and it is not another tool protocol.
 
-A connector is a product definition around an execution adapter. It describes:
+Someone can ask for a connector in plain language:
 
-- the provider and its public website or official documentation
-- supported use cases and individual capabilities
-- whether provider authentication is needed
-- local and managed deployment compatibility
-- read and write effects
-- setup, testing, and agent assignment
-- recommended skills that teach agents how to use compatible tools
-- checkout or handoff behavior
+> Compare products across Amazon, eBay, Etsy, and any stores I add later.
 
-The adapter still runs through Soulacy's existing tool systems. Connectors do not add another execution protocol.
+Soulacy turns that intent into an editable plan. It suggests relevant websites, lets the person choose the exact set, enables public access, writes an Agent Skill, and offers optional Website Access for account-only capabilities.
 
-## Catalog status
+## Public access first
 
-The first catalog includes recipes for:
+Every website starts with public search and retrieval. A provider account, developer application, or API key is not required for public pages.
 
-| Connector | Category | Recommended skill | Initial boundary |
-|---|---|---|---|
-| eBay Shopping | Shopping | `shopping-research` | Search, compare, inspect, then open the provider checkout link |
-| Best Buy Products | Shopping | `shopping-research` | Search products and stores, then open the provider checkout link |
-| Etsy Marketplace | Shopping | `shopping-research` | Search listings and shops, then open the provider listing |
-| Ticketmaster Events | Events | `event-finder` | Search events and venues, then open Ticketmaster for ticket selection |
-| Eventbrite Events | Events | `event-finder` | Search public events and open registration links |
-| Open Food Facts | Shopping | `food-product-check` | Read barcode, ingredient, nutrition, and allergen data |
+The generated skill tells agents to:
 
-`Recipe ready` means Soulacy knows the supported access path. The initial catalog uses public provider pages and public data, so these connectors do not require provider accounts, developer applications, or API keys. A reviewed MCP server or plugin remains an optional way to add structured or account-specific capabilities.
+1. Search and read approved public websites first.
+2. Cite the exact pages used.
+3. Report blocked or unverifiable content clearly.
+4. Use an authenticated website session only when the requested task needs subscribed, personalized, saved, or account-only information.
+5. Keep purchases, registrations, bookings, cancellations, messages, and other side effects behind the normal approval policy.
 
-## Setup flow
+## Optional access per website
 
-1. Open **Connectors** and choose a provider.
-2. Grant `fetch_url` to the selected agent. `web_search` is optional for broader discovery. Open Food Facts barcode lookup needs only `fetch_url`.
-3. Assign the recommended skill so the agent knows how to search, verify, compare, and explain missing data.
-4. Ask the agent to search the provider, or give it a public product, event, or barcode URL.
-5. Optionally connect a reviewed MCP server or plugin when a task needs structured API data or account-specific capabilities.
-6. If optional account access is added, store its credentials under **Secrets**, test the adapter, and grant only the individual tools the agent needs.
+Authentication belongs to a website, not to the whole connector. A shopping connector can use public access for every store while adding Website Access only for a store where the person wants member prices, wish lists, or order details.
 
-Public web access works on local and managed deployments. A local stdio adapter still requires a deployment with a persistent runtime and permission to launch it.
+Choosing **Add sign-in** creates a pending Website Access record with these boundaries:
 
-## Shopping and ticket safety
+- one user owns it
+- one approved domain is allowed
+- browser session state is encrypted in the credential vault
+- cookies and tokens never enter the connector record or generated skill
+- the API returns status metadata but never returns secret values
+- agents receive access only after an explicit grant
 
-The initial connector recipes are read-only. Agents may search, compare, and retrieve details. Purchase and ticket checkout stays on the provider website.
+The person completes the normal website login in the Soulacy Session Capture companion. Password managers, MFA, CAPTCHA, and passkeys continue to work on the real website.
 
-Future cart, reservation, purchase, cancellation, refund, or account-change capabilities must be declared as write effects. Before a purchase can be approved, Soulacy should show the provider, item or event, total price, fees, quantity, and destination. A generic tool approval is not enough evidence for a purchase.
+## Connector composer
 
-## Adding a connector
+The GUI flow has four steps:
 
-Definitions live in `internal/connectors/catalog.go`. A definition needs:
+1. Describe the desired outcome.
+2. Review Soulacy's category and website suggestions.
+3. Select suggestions or add any public HTTPS website.
+4. Build the connector.
 
-- a stable lowercase ID
-- an official HTTPS provider or documentation URL
-- an explicit authentication requirement of `none`, `optional`, or `required`
-- at least one capability with an explicit `read` or `write` effect
-- supported adapter kinds and deployment targets
-- concrete setup steps
-- a clear checkout or completion boundary
+Building creates:
 
-Prefer public provider pages and documented public endpoints for read-only discovery. Respect provider terms, rate limits, robots policy, and access failures. Never use unofficial private APIs or put credentials in model-visible arguments.
+- a persistent connector definition
+- a normalized site list
+- public and optional advanced capability descriptions
+- a generated Agent Skill scoped to those sites
+- an audit event
 
-The connector definition and execution adapter may ship separately. Keep the UI status honest while the adapter is unavailable, and never report an integration as connected solely because its credential exists.
+The connector can then be edited, assigned to an agent through its generated skill, or deleted. Deleting a connector removes the generated skill. Saved website sessions remain in Website Access until the person explicitly removes them.
 
-## Connector skills
+## Genie
 
-Soulacy ships three outcome skills for the initial catalog:
+Genie has the same constrained composer through three tools:
 
-- `shopping-research` compares products across available shopping tools and keeps checkout on the provider website.
-- `event-finder` searches connected event tools, deduplicates results, and compares dates, locations, availability, and known costs.
-- `food-product-check` explains barcode, ingredient, nutrition, allergen, and label data while preserving uncertainty.
+- `plan_connector` turns a goal into a proposed website set and access plan
+- `create_connector` saves the agreed connector and generates its skill
+- `list_connectors` reports current connectors and access status
 
-The skills do not provide network access or credentials. They use only web and MCP tools already granted to the agent. Missing MCP tools do not block public research, and the skills do not request provider credentials unless the person asks for an account-specific capability.
+Genie should show the proposed websites before creating a connector unless the person already supplied an exact list. Genie never requests passwords, cookies, browser storage, or API keys in chat. It directs the person to Website Access only when account access is useful.
 
-## Connector, MCP, plugin, or skill
+## Storage model
+
+Connector records contain safe metadata:
+
+- name, intent, and category
+- approved websites and domains
+- public and advanced capability descriptions
+- generated skill name
+- optional Website Access connection IDs
+- creation and update timestamps
+
+Authentication material remains in the encrypted credential vault. A connection ID is a reference, not a credential.
+
+## Security boundaries
+
+- Only public HTTPS websites on the standard port may be added.
+- Loopback, local, link-local, and private network targets are rejected.
+- Duplicate domains are rejected within a connector.
+- Generated skills contain site URLs and operating rules, never authentication material.
+- Website sessions are domain restricted and user scoped.
+- Page content is untrusted data and cannot redefine the generated skill or approval policy.
+- Write actions continue to use Soulacy's existing tool permissions and approval controls.
+
+## Connector, MCP, plugin, Website Access, or skill
 
 | Concept | Purpose |
 |---|---|
-| Connector | User-facing service identity, public access path, optional account setup, capability effects, and status |
-| MCP server | Standard tool protocol for local or remote execution |
-| Plugin | Soulacy package that can contribute tools, channels, providers, and UI |
-| Skill | Instructions that teach an agent when and how to use available tools |
+| Connector | A user-owned outcome, website set, capability plan, and access status |
+| MCP server | A standard protocol for local or remote structured tools |
+| Plugin | A package that can add tools, channels, providers, and UI |
+| Website Access | An encrypted, domain-restricted browser session for account-only pages |
+| Skill | Instructions that teach an agent how to use the connector safely |
 
-A complete service integration may include all four. The connector is the entry point people see.
+A connector can use public web tools alone. MCP and plugins are optional enhancements when a structured tool offers clear value.

@@ -79,6 +79,14 @@ type GenieAgentBuilder interface {
 	BuildAgentForGenie(ctx context.Context, session, request string) (map[string]any, error)
 }
 
+// GenieConnectorManager lets Genie use the same constrained connector composer
+// as the GUI without exposing database, filesystem, or credential primitives.
+type GenieConnectorManager interface {
+	PlanConnectorForGenie(intent string) (map[string]any, error)
+	CreateConnectorForGenie(ctx context.Context, intent, name string, sites []string) (map[string]any, error)
+	ListConnectorsForGenie(ctx context.Context) (map[string]any, error)
+}
+
 // BuiltinTool is a Go-native tool that runs inside the engine process rather
 // than delegating to a Python subprocess. Built-ins are added alongside the
 // agent's Python tool definitions when building the LLM tool schema.
@@ -128,6 +136,7 @@ type Engine struct {
 	queueStore       *agentQueueStore
 	genieMonitors    GenieMonitorManager
 	genieBuilder     GenieAgentBuilder
+	genieConnectors  GenieConnectorManager
 
 	// authConnectionResolver is the only component allowed to decrypt a
 	// saved website session. The returned state is consumed by the
@@ -339,6 +348,9 @@ func (e *Engine) SetGenieMonitorManager(m GenieMonitorManager) { e.genieMonitors
 // reports that the builder is unavailable rather than falling back to a
 // weaker way of writing an agent.
 func (e *Engine) SetGenieAgentBuilder(b GenieAgentBuilder) { e.genieBuilder = b }
+
+// SetGenieConnectorManager attaches the narrow connector composer used by Genie.
+func (e *Engine) SetGenieConnectorManager(m GenieConnectorManager) { e.genieConnectors = m }
 
 const (
 	defaultSessionTTL        = 24 * time.Hour

@@ -720,6 +720,19 @@ export const api = {
       const suffix = params.toString()
       return apiFetch('/connectors' + (suffix ? `?${suffix}` : ''))
     },
+    plan: (intent) => apiFetch('/connectors/plan', {
+      method: 'POST', body: JSON.stringify({ intent }),
+    }),
+    create: (body) => apiFetch('/connectors', {
+      method: 'POST', body: JSON.stringify(body),
+    }),
+    update: (id, body) => apiFetch(`/connectors/${encodeURIComponent(id)}`, {
+      method: 'PUT', body: JSON.stringify(body),
+    }),
+    delete: (id) => apiFetch(`/connectors/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    websiteAccess: (id, siteID) => apiFetch(`/connectors/${encodeURIComponent(id)}/sites/${encodeURIComponent(siteID)}/website-access`, {
+      method: 'POST', body: '{}',
+    }),
   },
 
   mcp: {

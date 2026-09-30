@@ -144,6 +144,60 @@ func (e *Engine) buildGenieMonitorBuiltins() []BuiltinTool {
 			},
 		},
 		{
+			Name: "plan_connector", Description: "Turn a goal into an editable connector proposal with suggested websites, public capabilities, optional account capabilities, and security boundaries. Use before create_connector unless the user already supplied an exact site list.",
+			Gate: "genie",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{
+				"intent": map[string]any{"type": "string", "description": "What the connector should help the user accomplish"},
+			}, "required": []string{"intent"}},
+			Handler: func(_ context.Context, args map[string]any) (string, error) {
+				if e.genieConnectors == nil {
+					return "", fmt.Errorf("plan_connector: the connector composer is unavailable")
+				}
+				result, err := e.genieConnectors.PlanConnectorForGenie(argString(args, "intent"))
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
+			Name: "create_connector", Description: "Create a user-owned connector and its agent skill from an agreed intent and website list. Public access is enabled immediately. Authentication is never collected by this tool; optional account access is completed through Website Access.",
+			Gate: "genie",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{
+				"intent": map[string]any{"type": "string", "description": "The agreed purpose and expected result"},
+				"name":   map[string]any{"type": "string", "description": "Optional friendly connector name"},
+				"sites": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
+					"description": "Exact website names, domains, or HTTPS URLs selected by the user"},
+			}, "required": []string{"intent", "sites"}},
+			Handler: func(ctx context.Context, args map[string]any) (string, error) {
+				if e.genieConnectors == nil {
+					return "", fmt.Errorf("create_connector: the connector composer is unavailable")
+				}
+				result, err := e.genieConnectors.CreateConnectorForGenie(ctx, argString(args, "intent"), argString(args, "name"), argStringSlice(args, "sites"))
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
+			Name: "list_connectors", Description: "List the user's current connectors, websites, generated skills, and whether optional Website Access has been linked.",
+			Gate: "genie", Parameters: map[string]any{"type": "object", "properties": map[string]any{}},
+			Handler: func(ctx context.Context, _ map[string]any) (string, error) {
+				if e.genieConnectors == nil {
+					return "", fmt.Errorf("list_connectors: the connector composer is unavailable")
+				}
+				result, err := e.genieConnectors.ListConnectorsForGenie(ctx)
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
 			Name: "create_monitor", Description: "Create a Genie-owned background cron or one-shot monitor. Supply exactly one of cron (five-field expression) or at (RFC3339 timestamp).",
 			Parameters: map[string]any{"type": "object", "properties": map[string]any{
 				"prompt":  map[string]any{"type": "string", "description": "The task and alert condition to evaluate on every run"},

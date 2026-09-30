@@ -1,41 +1,43 @@
 import { describe, expect, it } from 'vitest'
-import { authenticationSummary, connectorCategories, connectorList, connectorSkillStatus, effectSummary, filterConnectors, installedSkillNames } from './connectors.js'
+import { advancedCapabilityCount, connectorCategories, connectorExamples, connectorList, connectorPayload, filterConnectors, selectedPlanSites, siteAccessLabel } from './connectors.js'
 
 const items = [
-  { id: 'shop', name: 'Shop', provider: 'Vendor', category: 'shopping', summary: 'Find products', capabilities: [{ label: 'Compare prices', effect: 'read' }] },
-  { id: 'event', name: 'Events', provider: 'Tickets', category: 'events', summary: 'Find concerts', capabilities: [{ label: 'Reserve', effect: 'write' }] },
+  { id: 'shop', name: 'My stores', intent: 'Compare products', category: 'shopping', sites: [{ name: 'Etsy', domain: 'etsy.com' }] },
+  { id: 'event', name: 'Weekend events', intent: 'Find concerts', category: 'events', sites: [{ name: 'Meetup', domain: 'meetup.com' }] },
 ]
 
-describe('connector catalog helpers', () => {
+describe('connector composer helpers', () => {
   it('normalizes malformed API payloads', () => {
     expect(connectorList({})).toEqual([])
     expect(connectorList({ connectors: items })).toEqual(items)
+    expect(connectorExamples({})).toEqual([])
   })
 
-  it('filters by category and capability text', () => {
+  it('filters user connectors by category, intent, and website', () => {
     expect(filterConnectors(items, '', 'events').map((item) => item.id)).toEqual(['event'])
-    expect(filterConnectors(items, 'compare', 'all').map((item) => item.id)).toEqual(['shop'])
+    expect(filterConnectors(items, 'etsy', 'all').map((item) => item.id)).toEqual(['shop'])
     expect(filterConnectors(items, 'concert', 'shopping')).toEqual([])
   })
 
-  it('derives categories and risk summaries', () => {
+  it('builds a create payload from selected suggestions only', () => {
+    const plan = {
+      name: 'Shopping connector', intent: 'Compare products', category: 'shopping',
+      sites: [
+        { id: 'a', name: 'A', base_url: 'https://a.com', selected: true, reason: 'Suggested' },
+        { id: 'b', name: 'B', base_url: 'https://b.com', selected: false },
+      ],
+    }
+    expect(selectedPlanSites(plan).map((site) => site.id)).toEqual(['a'])
+    expect(connectorPayload(plan)).toEqual({
+      name: 'Shopping connector', intent: 'Compare products', category: 'shopping',
+      sites: [{ id: 'a', name: 'A', base_url: 'https://a.com' }],
+    })
+  })
+
+  it('summarizes categories, access, and advanced capabilities', () => {
     expect(connectorCategories(items)).toEqual(['events', 'shopping'])
-    expect(effectSummary(items[0].capabilities)).toBe('Read only')
-    expect(effectSummary(items[1].capabilities)).toBe('1 write action')
-  })
-
-  it('shows whether provider authentication is needed', () => {
-    expect(authenticationSummary({ auth_requirement: 'none', auth_type: 'No provider account' })).toBe('None')
-    expect(authenticationSummary({ auth_requirement: 'optional' })).toBe('Optional')
-    expect(authenticationSummary({ auth_requirement: 'required' })).toBe('Required')
-    expect(authenticationSummary({ auth_type: 'Legacy API key' })).toBe('Legacy API key')
-  })
-
-  it('reports whether recommended skills are installed', () => {
-    const installed = installedSkillNames({ skills: [{ name: 'shopping-research' }] })
-    expect(connectorSkillStatus({ recommended_skills: ['shopping-research', 'event-finder'] }, installed)).toEqual([
-      { name: 'shopping-research', installed: true },
-      { name: 'event-finder', installed: false },
-    ])
+    expect(siteAccessLabel({})).toBe('Public access ready')
+    expect(siteAccessLabel({ auth_connection_id: 'conn_1' })).toBe('Website sign-in connected')
+    expect(advancedCapabilityCount({ sites: [{ advanced_capabilities: [{}, {}] }, { advanced_capabilities: [{}] }] })).toBe(3)
   })
 })
