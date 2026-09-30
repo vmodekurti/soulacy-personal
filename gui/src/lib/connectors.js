@@ -25,6 +25,14 @@ export function effectSummary(capabilities) {
   return writes > 0 ? `${writes} write ${writes === 1 ? 'action' : 'actions'}` : 'Read only'
 }
 
+export function authenticationSummary(connector) {
+  const requirement = String(connector?.auth_requirement || '').toLowerCase()
+  if (requirement === 'none') return 'None'
+  if (requirement === 'optional') return 'Optional'
+  if (requirement === 'required') return 'Required'
+  return connector?.auth_type || 'Unknown'
+}
+
 export function installedSkillNames(payload) {
   return new Set((payload?.skills || []).map((skill) => skill?.name).filter(Boolean))
 }

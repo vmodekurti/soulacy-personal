@@ -26,7 +26,7 @@ func TestHandleListConnectorsFiltersAndNeverReturnsSecretValues(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Count != 1 || body.Connectors[0]["id"] != "ticketmaster-discovery" {
+	if body.Count != 1 || body.Connectors[0]["id"] != "ticketmaster-public" {
 		t.Fatalf("unexpected response: %+v", body)
 	}
 	raw, _ := json.Marshal(body)

@@ -26,6 +26,9 @@ func TestCatalogDefinitionsAreSafeAndWellFormed(t *testing.T) {
 		if len(d.RecommendedSkills) == 0 {
 			t.Errorf("%s needs at least one recommended skill", d.ID)
 		}
+		if d.AuthRequirement != AuthNone && d.AuthRequirement != AuthOptional && d.AuthRequirement != AuthRequired {
+			t.Errorf("%s has unknown auth requirement %q", d.ID, d.AuthRequirement)
+		}
 		for _, c := range d.Capabilities {
 			if c.Effect != EffectRead && c.Effect != EffectWrite {
 				t.Errorf("%s capability %s has unknown effect %q", d.ID, c.ID, c.Effect)
@@ -37,6 +40,31 @@ func TestCatalogDefinitionsAreSafeAndWellFormed(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestPublicConnectorRecipesDoNotRequireProviderAuthentication(t *testing.T) {
+	for _, d := range Catalog() {
+		if d.AuthRequirement != AuthNone {
+			t.Errorf("%s auth requirement = %q, want %q", d.ID, d.AuthRequirement, AuthNone)
+		}
+		for _, credential := range d.Credentials {
+			if credential.Required {
+				t.Errorf("%s requires provider credential %q", d.ID, credential.Name)
+			}
+		}
+		if !contains(d.AdapterKinds, "web") {
+			t.Errorf("%s does not expose the public web access path", d.ID)
+		}
+	}
+}
+
+func contains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestFilterMatchesCategoryProviderAndCapabilities(t *testing.T) {

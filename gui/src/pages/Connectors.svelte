@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import TourButton from '../lib/TourButton.svelte'
   import { api } from '../lib/api.js'
-  import { connectorCategories, connectorList, connectorSkillStatus, effectSummary, filterConnectors, installedSkillNames } from '../lib/connectors.js'
+  import { authenticationSummary, connectorCategories, connectorList, connectorSkillStatus, effectSummary, filterConnectors, installedSkillNames } from '../lib/connectors.js'
 
   let connectors = []
   let loading = true
@@ -55,7 +55,7 @@
     <div>
       <span class="eyebrow">One catalog, existing guardrails</span>
       <h2>Connect services without learning the plumbing</h2>
-      <p>A connector recipe tells you which official API to use, which credentials it needs, where it can run, and what an agent may do. Execution still goes through MCP or a Soulacy plugin, so normal tool grants and approvals continue to apply.</p>
+      <p>A connector recipe tells an agent how to use a public service with the web tools it already has. Provider accounts and API keys are optional extensions for capabilities that actually need them. MCP and plugins remain available for structured or account-specific access.</p>
     </div>
     <div class="boundary">
       <strong>Shopping boundary</strong>
@@ -101,7 +101,7 @@
           <p class="summary">{connector.summary}</p>
 
           <div class="facts">
-            <span><strong>Auth</strong>{connector.auth_type}</span>
+            <span><strong>Provider login</strong>{authenticationSummary(connector)}</span>
             <span><strong>Risk</strong>{effectSummary(connector.capabilities)}</span>
             <span><strong>Runs on</strong>{(connector.deployment_targets || []).join(', ')}</span>
           </div>
@@ -116,7 +116,7 @@
             <button class="btn-primary" on:click={() => expanded = expanded === connector.id ? '' : connector.id} aria-expanded={expanded === connector.id}>
               {expanded === connector.id ? 'Hide setup' : 'View setup'}
             </button>
-            <a class="btn-link" href={connector.docs_url} target="_blank" rel="noopener">Official API docs ↗</a>
+            <a class="btn-link" href={connector.docs_url} target="_blank" rel="noopener">Provider website ↗</a>
           </div>
 
           {#if expanded === connector.id}
@@ -126,7 +126,7 @@
                 <ol>{#each connector.setup_steps || [] as step}<li>{step}</li>{/each}</ol>
               </div>
               <div class="setup-column">
-                <h3>Credentials</h3>
+                <h3>Access</h3>
                 {#if connector.credentials?.length}
                   <ul class="credential-list">
                     {#each connector.credentials as credential}
@@ -135,7 +135,7 @@
                   </ul>
                   <button class="btn-secondary" on:click={() => go('secrets')}>Open Secrets</button>
                 {:else}
-                  <p>No secret is required for read access.</p>
+                  <p>No provider account or API key is required for public search and retrieval.</p>
                 {/if}
               </div>
               <div class="setup-column full">
@@ -154,7 +154,7 @@
                 </div>
 
                 <h3>How agents use it</h3>
-                <p>Connect a reviewed MCP server or plugin, test it, then grant its individual tools to the agents that need them.</p>
+                <p>Grant URL retrieval to the agent, then assign the recommended skill. Web search can improve discovery but is optional. Add a reviewed MCP server or plugin only when you need structured or account-specific capabilities.</p>
                 <div class="setup-actions">
                   <button class="btn-secondary" on:click={() => go('mcp')}>Open MCP</button>
                   <button class="btn-secondary" on:click={() => go('pluginmgr')}>Open Plugins</button>

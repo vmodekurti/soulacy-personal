@@ -4,9 +4,9 @@ Connectors give people one place to discover and set up service integrations wit
 
 A connector is a product definition around an execution adapter. It describes:
 
-- the provider and official API documentation
+- the provider and its public website or official documentation
 - supported use cases and individual capabilities
-- authentication and secret slots
+- whether provider authentication is needed
 - local and managed deployment compatibility
 - read and write effects
 - setup, testing, and agent assignment
@@ -25,22 +25,21 @@ The first catalog includes recipes for:
 | Best Buy Products | Shopping | `shopping-research` | Search products and stores, then open the provider checkout link |
 | Etsy Marketplace | Shopping | `shopping-research` | Search listings and shops, then open the provider listing |
 | Ticketmaster Events | Events | `event-finder` | Search events and venues, then open Ticketmaster for ticket selection |
-| Eventbrite Organizer | Events | `event-finder` | Read authorized organizer data and open public event links |
+| Eventbrite Events | Events | `event-finder` | Search public events and open registration links |
 | Open Food Facts | Shopping | `food-product-check` | Read barcode, ingredient, nutrition, and allergen data |
 
-`Recipe ready` means Soulacy knows the supported setup path. It does not mean the service is connected. The connector becomes usable by an agent only after an MCP server or plugin is connected, tested, and granted to that agent.
+`Recipe ready` means Soulacy knows the supported access path. The initial catalog uses public provider pages and public data, so these connectors do not require provider accounts, developer applications, or API keys. A reviewed MCP server or plugin remains an optional way to add structured or account-specific capabilities.
 
 ## Setup flow
 
 1. Open **Connectors** and choose a provider.
-2. Follow the official provider link to create an application or API key.
-3. Store each named credential under **Secrets**. The catalog returns secret names and status only. It never returns secret values.
-4. Connect a reviewed MCP server or plugin.
-5. Test the adapter from its setup page.
-6. Grant individual tools to selected agents in Studio or the agent editor.
-7. Assign the recommended skill so the agent knows how to select tools, compare results, and explain missing capabilities.
+2. Grant `fetch_url` to the selected agent. `web_search` is optional for broader discovery. Open Food Facts barcode lookup needs only `fetch_url`.
+3. Assign the recommended skill so the agent knows how to search, verify, compare, and explain missing data.
+4. Ask the agent to search the provider, or give it a public product, event, or barcode URL.
+5. Optionally connect a reviewed MCP server or plugin when a task needs structured API data or account-specific capabilities.
+6. If optional account access is added, store its credentials under **Secrets**, test the adapter, and grant only the individual tools the agent needs.
 
-This sequence works on local and managed deployments when the adapter is remote. A local stdio adapter still requires a deployment with a persistent runtime and permission to launch it.
+Public web access works on local and managed deployments. A local stdio adapter still requires a deployment with a persistent runtime and permission to launch it.
 
 ## Shopping and ticket safety
 
@@ -53,14 +52,14 @@ Future cart, reservation, purchase, cancellation, refund, or account-change capa
 Definitions live in `internal/connectors/catalog.go`. A definition needs:
 
 - a stable lowercase ID
-- an official HTTPS documentation URL
-- an authentication type and secret names
+- an official HTTPS provider or documentation URL
+- an explicit authentication requirement of `none`, `optional`, or `required`
 - at least one capability with an explicit `read` or `write` effect
 - supported adapter kinds and deployment targets
 - concrete setup steps
 - a clear checkout or completion boundary
 
-Add catalog metadata only after verifying that the provider offers a documented integration method. Do not catalog scraped consumer pages, unofficial private APIs, or adapters that require credentials to appear in model-visible arguments.
+Prefer public provider pages and documented public endpoints for read-only discovery. Respect provider terms, rate limits, robots policy, and access failures. Never use unofficial private APIs or put credentials in model-visible arguments.
 
 The connector definition and execution adapter may ship separately. Keep the UI status honest while the adapter is unavailable, and never report an integration as connected solely because its credential exists.
 
@@ -72,13 +71,13 @@ Soulacy ships three outcome skills for the initial catalog:
 - `event-finder` searches connected event tools, deduplicates results, and compares dates, locations, availability, and known costs.
 - `food-product-check` explains barcode, ingredient, nutrition, allergen, and label data while preserving uncertainty.
 
-The skills do not provide network access or credentials. They inspect the live MCP tool catalog, use only tools granted to the agent, and explain how to finish setup when no compatible adapter is available.
+The skills do not provide network access or credentials. They use only web and MCP tools already granted to the agent. Missing MCP tools do not block public research, and the skills do not request provider credentials unless the person asks for an account-specific capability.
 
 ## Connector, MCP, plugin, or skill
 
 | Concept | Purpose |
 |---|---|
-| Connector | User-facing service identity, setup, credentials, capability effects, and status |
+| Connector | User-facing service identity, public access path, optional account setup, capability effects, and status |
 | MCP server | Standard tool protocol for local or remote execution |
 | Plugin | Soulacy package that can contribute tools, channels, providers, and UI |
 | Skill | Instructions that teach an agent when and how to use available tools |
