@@ -735,6 +735,20 @@ export const api = {
     }),
   },
 
+  missions: {
+    list: () => apiFetch('/missions'),
+    get: (id) => apiFetch(`/missions/${encodeURIComponent(id)}`),
+    plan: (objective) => apiFetch('/missions/plan', {
+      method: 'POST', body: JSON.stringify({ objective }),
+    }),
+    create: (body) => apiFetch('/missions', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id, body) => apiFetch(`/missions/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    pause: (id) => apiFetch(`/missions/${encodeURIComponent(id)}/pause`, { method: 'POST', body: '{}' }),
+    resume: (id) => apiFetch(`/missions/${encodeURIComponent(id)}/resume`, { method: 'POST', body: '{}' }),
+    complete: (id, progress = '') => apiFetch(`/missions/${encodeURIComponent(id)}/complete`, { method: 'POST', body: JSON.stringify({ progress }) }),
+    cancel: (id) => apiFetch(`/missions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  },
+
   mcp: {
     list:   ()        => apiFetch('/mcp'),
     create: (body)    => apiFetch('/mcp',                                       { method: 'POST',   body: JSON.stringify(body) }),

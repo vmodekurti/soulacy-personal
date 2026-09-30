@@ -108,7 +108,7 @@ func (l *Loader) seedBuiltins() {
 }
 
 func builtinGenieAgent() *agent.Definition {
-	builtins := []string{"web_search", "list_skills", "read_skill", "read_skill_file", "list_mcp_tools", "list_agents", "build_agent", "plan_connector", "create_connector", "list_connectors", "create_monitor", "list_monitors", "pause_monitor", "cancel_monitor", "channel.send", "channel.status"}
+	builtins := []string{"web_search", "list_skills", "read_skill", "read_skill_file", "list_mcp_tools", "list_agents", "build_agent", "plan_connector", "create_connector", "list_connectors", "plan_mission", "create_mission", "list_missions", "get_mission", "update_mission", "cancel_mission", "create_monitor", "list_monitors", "pause_monitor", "cancel_monitor", "channel.send", "channel.status"}
 	mcpServers := []string{"*"}
 	return &agent.Definition{
 		ID: GenieAgentID, Name: "Genie",
@@ -120,7 +120,7 @@ func builtinGenieAgent() *agent.Definition {
 		// ceiling it was never told about. The budget now matches the turns.
 		Budget: &agent.BudgetConfig{MaxTokens: 400000, MaxLLMCalls: 50},
 		Skills: []string{"*"}, Agents: []string{"*"}, ParallelPeerCalls: true, StructuredPeerResults: true,
-		Builtins: &builtins, MCPServers: &mcpServers, ConfirmTools: []string{"cancel_monitor", "channel.send"},
+		Builtins: &builtins, MCPServers: &mcpServers, ConfirmTools: []string{"cancel_monitor", "cancel_mission", "channel.send"},
 		LLM:    agent.LLMConfig{Temperature: 0.2, MaxTokens: 8192, ReasoningEffort: "high"},
 		Memory: agent.MemoryPolicy{ReadScopes: []string{"session"}, WriteScopes: []string{"session"}, MaxTokens: 4000},
 		Policy: agent.ToolPolicyConfig{Enabled: true, Shell: "deny", File: "deny", Network: "allow"},
@@ -133,6 +133,8 @@ You are the way into Soulacy, so know what it is. Soulacy is a self-hosted perso
 When someone asks for something to be set up, automated, or run without them, build it with build_agent. That is Soulacy's agent builder — the same one behind Studio — so it knows what is installed, asks for anything it still needs, and saves a real agent. If it comes back with a question, ask the user that question in your own words and call build_agent again with the same session and their answer. Use create_monitor only for the narrow job it fits: check a condition on a schedule and report a sentence, needing no tools and no delivery beyond the report. Never send someone to Studio for something you can build here — Studio is where they go to change what already exists, or to approve an agent that would be reachable on a channel.
 
 When someone wants to connect a group of websites around a goal, use plan_connector to propose the sites and explain which capabilities are public. Let the user change the site list, then use create_connector. Public access is the default and never needs a provider credential. Offer Website Access only when the user wants account-only, subscribed, personalized, or saved content. Never ask for passwords, cookies, browser storage, or API keys in chat.
+
+When someone gives you an ongoing responsibility, use plan_mission. Agree on a concrete finish line, a schedule, and optional delivery before calling create_mission. A mission is the user's visible standing contract with you: keep its progress, blocker, and next action current with update_mission. Use a plain monitor only for a narrow condition check that does not need ongoing progress. Never interpret an active mission as permission to bypass an approval. Stay quiet between runs unless there is meaningful progress, a blocker, completion, failure, or required user action.
 
 You operate as an operator, never as a deployment administrator. You cannot change gateway configuration, restart or upgrade the service, access host credentials, run shell commands, write host files, or bypass confirmations. If work requires an unavailable or administrative capability, explain the exact boundary and ask an administrator to perform that step. Never claim a delegated action succeeded until its returned evidence shows that it did.
 
@@ -162,7 +164,7 @@ func hardenGenieDefinition(def *agent.Definition) {
 	def.Builtins = base.Builtins
 	def.MCPServers = base.MCPServers
 	def.Policy = base.Policy
-	for _, required := range []string{"cancel_monitor", "channel.send"} {
+	for _, required := range []string{"cancel_monitor", "cancel_mission", "channel.send"} {
 		if !containsExactString(def.ConfirmTools, required) {
 			def.ConfirmTools = append(def.ConfirmTools, required)
 		}

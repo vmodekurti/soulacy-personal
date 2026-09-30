@@ -198,6 +198,116 @@ func (e *Engine) buildGenieMonitorBuiltins() []BuiltinTool {
 			},
 		},
 		{
+			Name: "plan_mission", Description: "Turn an ongoing responsibility into a reviewable standing mission proposal. Use this before create_mission to agree on the finish line, schedule, and optional delivery destination.", Gate: "genie",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{"objective": map[string]any{"type": "string", "description": "The ongoing outcome Genie should own"}}, "required": []string{"objective"}},
+			Handler: func(_ context.Context, args map[string]any) (string, error) {
+				if e.genieMissions == nil {
+					return "", fmt.Errorf("plan_mission: mission service is unavailable")
+				}
+				result, err := e.genieMissions.PlanMissionForGenie(argString(args, "objective"))
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
+			Name: "create_mission", Description: "Activate an agreed standing mission with an explicit finish line and exactly one recurring cron schedule or one-time RFC3339 timestamp. Optional delivery requires both channel and destination.", Gate: "genie",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{
+				"title": map[string]any{"type": "string"}, "objective": map[string]any{"type": "string"}, "finish_line": map[string]any{"type": "string"},
+				"cron": map[string]any{"type": "string"}, "at": map[string]any{"type": "string"}, "channel": map[string]any{"type": "string"}, "to": map[string]any{"type": "string"},
+			}, "required": []string{"title", "objective", "finish_line"}},
+			Handler: func(ctx context.Context, args map[string]any) (string, error) {
+				if e.genieMissions == nil {
+					return "", fmt.Errorf("create_mission: mission service is unavailable")
+				}
+				result, err := e.genieMissions.CreateMissionForGenie(ctx, argString(args, "title"), argString(args, "objective"), argString(args, "finish_line"), argString(args, "cron"), argString(args, "at"), argString(args, "channel"), argString(args, "to"))
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
+			Name: "list_missions", Description: "List the user's standing missions with state, progress, blocker, next action, schedule, and runner health.", Gate: "genie", Parameters: map[string]any{"type": "object", "properties": map[string]any{}},
+			Handler: func(ctx context.Context, _ map[string]any) (string, error) {
+				if e.genieMissions == nil {
+					return "", fmt.Errorf("list_missions: mission service is unavailable")
+				}
+				result, err := e.genieMissions.ListMissionsForGenie(ctx)
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
+			Name: "get_mission", Description: "Inspect one standing mission, including its finish line, progress, blocker, next action, and linked runner.", Gate: "genie",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"type": "string"}}, "required": []string{"id"}},
+			Handler: func(ctx context.Context, args map[string]any) (string, error) {
+				if e.genieMissions == nil {
+					return "", fmt.Errorf("get_mission: mission service is unavailable")
+				}
+				result, err := e.genieMissions.GetMissionForGenie(ctx, argString(args, "id"))
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
+			Name: "update_mission", Description: "Record progress or a blocker, pause or resume a mission, or mark it complete. Actions: progress, pause, resume, complete.", Gate: "genie",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{
+				"id": map[string]any{"type": "string"}, "action": map[string]any{"type": "string", "enum": []string{"progress", "pause", "resume", "complete"}},
+				"status": map[string]any{"type": "string", "enum": []string{"active", "blocked"}}, "progress": map[string]any{"type": "string"},
+				"next_action": map[string]any{"type": "string"}, "blocker": map[string]any{"type": "string"},
+			}, "required": []string{"id", "action"}},
+			Handler: func(ctx context.Context, args map[string]any) (string, error) {
+				if e.genieMissions == nil {
+					return "", fmt.Errorf("update_mission: mission service is unavailable")
+				}
+				id, action := argString(args, "id"), argString(args, "action")
+				var result map[string]any
+				var err error
+				switch action {
+				case "pause":
+					result, err = e.genieMissions.PauseMissionForGenie(ctx, id)
+				case "resume":
+					result, err = e.genieMissions.ResumeMissionForGenie(ctx, id)
+				case "complete":
+					result, err = e.genieMissions.CompleteMissionForGenie(ctx, id, argString(args, "progress"))
+				case "progress":
+					result, err = e.genieMissions.UpdateMissionForGenie(ctx, id, argString(args, "status"), argString(args, "progress"), argString(args, "next_action"), argString(args, "blocker"))
+				default:
+					return "", fmt.Errorf("update_mission: unsupported action %q", action)
+				}
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
+			Name: "cancel_mission", Description: "Permanently stop a standing mission while preserving its history. Requires interactive confirmation.", Gate: "genie",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"type": "string"}}, "required": []string{"id"}},
+			Handler: func(ctx context.Context, args map[string]any) (string, error) {
+				if e.genieMissions == nil {
+					return "", fmt.Errorf("cancel_mission: mission service is unavailable")
+				}
+				result, err := e.genieMissions.CancelMissionForGenie(ctx, argString(args, "id"))
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
 			Name: "create_monitor", Description: "Create a Genie-owned background cron or one-shot monitor. Supply exactly one of cron (five-field expression) or at (RFC3339 timestamp).",
 			Parameters: map[string]any{"type": "object", "properties": map[string]any{
 				"prompt":  map[string]any{"type": "string", "description": "The task and alert condition to evaluate on every run"},

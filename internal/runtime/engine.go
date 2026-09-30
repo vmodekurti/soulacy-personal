@@ -65,7 +65,22 @@ type GenieMonitorManager interface {
 	CreateGenieMonitor(prompt, cron, at, channel, to string) (map[string]any, error)
 	ListGenieMonitors() []map[string]any
 	PauseGenieMonitor(id string) error
+	ResumeGenieMonitor(id string) error
 	CancelGenieMonitor(id string) error
+}
+
+// GenieMissionManager exposes persistent standing goals without granting Genie
+// direct database, scheduler, or agent-file access.
+type GenieMissionManager interface {
+	PlanMissionForGenie(objective string) (map[string]any, error)
+	CreateMissionForGenie(ctx context.Context, title, objective, finishLine, cron, at, channel, to string) (map[string]any, error)
+	ListMissionsForGenie(ctx context.Context) (map[string]any, error)
+	GetMissionForGenie(ctx context.Context, id string) (map[string]any, error)
+	UpdateMissionForGenie(ctx context.Context, id, status, progress, nextAction, blocker string) (map[string]any, error)
+	PauseMissionForGenie(ctx context.Context, id string) (map[string]any, error)
+	ResumeMissionForGenie(ctx context.Context, id string) (map[string]any, error)
+	CompleteMissionForGenie(ctx context.Context, id, progress string) (map[string]any, error)
+	CancelMissionForGenie(ctx context.Context, id string) (map[string]any, error)
 }
 
 // GenieAgentBuilder is implemented by the gateway so Genie can hand a build to
@@ -137,6 +152,7 @@ type Engine struct {
 	genieMonitors    GenieMonitorManager
 	genieBuilder     GenieAgentBuilder
 	genieConnectors  GenieConnectorManager
+	genieMissions    GenieMissionManager
 
 	// authConnectionResolver is the only component allowed to decrypt a
 	// saved website session. The returned state is consumed by the
@@ -343,6 +359,9 @@ type Engine struct {
 
 // SetGenieMonitorManager attaches the constrained scheduler facade.
 func (e *Engine) SetGenieMonitorManager(m GenieMonitorManager) { e.genieMonitors = m }
+
+// SetGenieMissionManager attaches the constrained standing-goal facade.
+func (e *Engine) SetGenieMissionManager(m GenieMissionManager) { e.genieMissions = m }
 
 // SetGenieAgentBuilder attaches the builder bridge. Without it, build_agent
 // reports that the builder is unavailable rather than falling back to a

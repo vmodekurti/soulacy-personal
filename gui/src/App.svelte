@@ -91,6 +91,7 @@
   const pageLoaders = {
     feed: () => import('./pages/Feed.svelte'),
     start: () => import('./pages/GetStarted.svelte'),
+    missions: () => import('./pages/Missions.svelte'),
     autopilot: () => import('./pages/Autopilot.svelte'),
     dashboard: () => import('./pages/Dashboard.svelte'),
     onboarding: () => import('./pages/Onboarding.svelte'),

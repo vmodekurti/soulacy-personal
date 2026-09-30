@@ -28,6 +28,10 @@ export const navTourCopy = {
     what: 'Genie. Ask it anything, or say what you want handled and it builds and runs it once before you decide anything.',
     when: 'Start here for everything. It answers questions directly and only builds something when the request should keep happening.',
   },
+  missions: {
+    what: 'The standing responsibilities Genie owns for you, with a finish line, schedule, progress, blocker, next action, and background runner.',
+    when: 'Come here to see what Genie is handling while you are away, or to pause, resume, complete, or cancel an ongoing goal.',
+  },
   dashboard: {
     what: 'The home screen: gateway health, your agents, and the runs that just happened.',
     when: 'Glance here first — if something broke overnight, it shows up here before anywhere else.',

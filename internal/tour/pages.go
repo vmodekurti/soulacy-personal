@@ -134,6 +134,18 @@ var pages = map[string]page{
 		},
 	},
 
+	"missions": {
+		stage: StageClock, nextAction: "", nextLabel: "",
+		role:         "The standing responsibilities Genie owns while you are away.",
+		contribution: "Each mission keeps its finish line, schedule, progress, blocker, next action and stop controls together, so ongoing work never disappears into a chat transcript.",
+		whenEmpty: func(InstallState) string {
+			return "Nothing is in Genie's care yet. Start with one ongoing outcome, agree on its finish line and schedule, then activate it from Genie or this page."
+		},
+		whenUsed: func(InstallState) string {
+			return "Review progress and blockers here. Pause work when timing changes, resume it when ready, and complete or cancel anything Genie should stop carrying."
+		},
+	},
+
 	// Your agents as a feed. Inbox asked "what needs me?"; this asks "what
 	// happened?", and puts the two in one scrolling place.
 	"feed": {
