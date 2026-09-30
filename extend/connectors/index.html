@@ -5194,9 +5194,9 @@
 <p>Connectors give people one place to discover and set up service integrations without first deciding whether the underlying implementation is MCP, a plugin, or a built-in tool.</p>
 <p>A connector is a product definition around an execution adapter. It describes:</p>
 <ul>
-<li>the provider and official API documentation</li>
+<li>the provider and its public website or official documentation</li>
 <li>supported use cases and individual capabilities</li>
-<li>authentication and secret slots</li>
+<li>whether provider authentication is needed</li>
 <li>local and managed deployment compatibility</li>
 <li>read and write effects</li>
 <li>setup, testing, and agent assignment</li>
@@ -5241,10 +5241,10 @@
 <td>Search events and venues, then open Ticketmaster for ticket selection</td>
 </tr>
 <tr>
-<td>Eventbrite Organizer</td>
+<td>Eventbrite Events</td>
 <td>Events</td>
 <td><code>event-finder</code></td>
-<td>Read authorized organizer data and open public event links</td>
+<td>Search public events and open registration links</td>
 </tr>
 <tr>
 <td>Open Food Facts</td>
@@ -5254,18 +5254,17 @@
 </tr>
 </tbody>
 </table>
-<p><code>Recipe ready</code> means Soulacy knows the supported setup path. It does not mean the service is connected. The connector becomes usable by an agent only after an MCP server or plugin is connected, tested, and granted to that agent.</p>
+<p><code>Recipe ready</code> means Soulacy knows the supported access path. The initial catalog uses public provider pages and public data, so these connectors do not require provider accounts, developer applications, or API keys. A reviewed MCP server or plugin remains an optional way to add structured or account-specific capabilities.</p>
 <h2 id="setup-flow">Setup flow<a class="headerlink" href="#setup-flow" title="Permanent link">&para;</a></h2>
 <ol>
 <li>Open <strong>Connectors</strong> and choose a provider.</li>
-<li>Follow the official provider link to create an application or API key.</li>
-<li>Store each named credential under <strong>Secrets</strong>. The catalog returns secret names and status only. It never returns secret values.</li>
-<li>Connect a reviewed MCP server or plugin.</li>
-<li>Test the adapter from its setup page.</li>
-<li>Grant individual tools to selected agents in Studio or the agent editor.</li>
-<li>Assign the recommended skill so the agent knows how to select tools, compare results, and explain missing capabilities.</li>
+<li>Grant <code>fetch_url</code> to the selected agent. <code>web_search</code> is optional for broader discovery. Open Food Facts barcode lookup needs only <code>fetch_url</code>.</li>
+<li>Assign the recommended skill so the agent knows how to search, verify, compare, and explain missing data.</li>
+<li>Ask the agent to search the provider, or give it a public product, event, or barcode URL.</li>
+<li>Optionally connect a reviewed MCP server or plugin when a task needs structured API data or account-specific capabilities.</li>
+<li>If optional account access is added, store its credentials under <strong>Secrets</strong>, test the adapter, and grant only the individual tools the agent needs.</li>
 </ol>
-<p>This sequence works on local and managed deployments when the adapter is remote. A local stdio adapter still requires a deployment with a persistent runtime and permission to launch it.</p>
+<p>Public web access works on local and managed deployments. A local stdio adapter still requires a deployment with a persistent runtime and permission to launch it.</p>
 <h2 id="shopping-and-ticket-safety">Shopping and ticket safety<a class="headerlink" href="#shopping-and-ticket-safety" title="Permanent link">&para;</a></h2>
 <p>The initial connector recipes are read-only. Agents may search, compare, and retrieve details. Purchase and ticket checkout stays on the provider website.</p>
 <p>Future cart, reservation, purchase, cancellation, refund, or account-change capabilities must be declared as write effects. Before a purchase can be approved, Soulacy should show the provider, item or event, total price, fees, quantity, and destination. A generic tool approval is not enough evidence for a purchase.</p>
@@ -5273,14 +5272,14 @@
 <p>Definitions live in <code>internal/connectors/catalog.go</code>. A definition needs:</p>
 <ul>
 <li>a stable lowercase ID</li>
-<li>an official HTTPS documentation URL</li>
-<li>an authentication type and secret names</li>
+<li>an official HTTPS provider or documentation URL</li>
+<li>an explicit authentication requirement of <code>none</code>, <code>optional</code>, or <code>required</code></li>
 <li>at least one capability with an explicit <code>read</code> or <code>write</code> effect</li>
 <li>supported adapter kinds and deployment targets</li>
 <li>concrete setup steps</li>
 <li>a clear checkout or completion boundary</li>
 </ul>
-<p>Add catalog metadata only after verifying that the provider offers a documented integration method. Do not catalog scraped consumer pages, unofficial private APIs, or adapters that require credentials to appear in model-visible arguments.</p>
+<p>Prefer public provider pages and documented public endpoints for read-only discovery. Respect provider terms, rate limits, robots policy, and access failures. Never use unofficial private APIs or put credentials in model-visible arguments.</p>
 <p>The connector definition and execution adapter may ship separately. Keep the UI status honest while the adapter is unavailable, and never report an integration as connected solely because its credential exists.</p>
 <h2 id="connector-skills">Connector skills<a class="headerlink" href="#connector-skills" title="Permanent link">&para;</a></h2>
 <p>Soulacy ships three outcome skills for the initial catalog:</p>
@@ -5289,7 +5288,7 @@
 <li><code>event-finder</code> searches connected event tools, deduplicates results, and compares dates, locations, availability, and known costs.</li>
 <li><code>food-product-check</code> explains barcode, ingredient, nutrition, allergen, and label data while preserving uncertainty.</li>
 </ul>
-<p>The skills do not provide network access or credentials. They inspect the live MCP tool catalog, use only tools granted to the agent, and explain how to finish setup when no compatible adapter is available.</p>
+<p>The skills do not provide network access or credentials. They use only web and MCP tools already granted to the agent. Missing MCP tools do not block public research, and the skills do not request provider credentials unless the person asks for an account-specific capability.</p>
 <h2 id="connector-mcp-plugin-or-skill">Connector, MCP, plugin, or skill<a class="headerlink" href="#connector-mcp-plugin-or-skill" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -5301,7 +5300,7 @@
 <tbody>
 <tr>
 <td>Connector</td>
-<td>User-facing service identity, setup, credentials, capability effects, and status</td>
+<td>User-facing service identity, public access path, optional account setup, capability effects, and status</td>
 </tr>
 <tr>
 <td>MCP server</td>
