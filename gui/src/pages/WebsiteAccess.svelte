@@ -17,6 +17,7 @@
   let captureOpened = false
   let companionReady = false
   let companionVersion = ''
+  let deepLinkHandled = false
 
   $: captureCommand = loginURL.trim()
     ? `sy --gateway ${window.location.origin} connection capture ${shellQuote(loginURL.trim())}${name.trim() ? ` --name ${shellQuote(name.trim())}` : ''}${domains.trim() ? ` --domains ${shellQuote(domains.trim())}` : ''}${agentIDs.trim() ? ` --agents ${shellQuote(agentIDs.trim())}` : ''}`
@@ -28,6 +29,13 @@
     try {
       const response = await api.connections.list()
       connections = response.connections || []
+      if (!deepLinkHandled) {
+        deepLinkHandled = true
+        const query = new URLSearchParams((location.hash.split('?')[1] || ''))
+        const connectionID = query.get('connection')
+        const requested = connections.find((connection) => connection.id === connectionID)
+        if (requested) openCapture(requested)
+      }
     } catch (e) {
       error = e.message || 'Could not load website sign-ins.'
     } finally {

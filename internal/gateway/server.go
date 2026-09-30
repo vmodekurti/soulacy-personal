@@ -62,6 +62,7 @@ import (
 	mobilechan "github.com/soulacy/soulacy/internal/channels/mobile"
 	wachan "github.com/soulacy/soulacy/internal/channels/whatsapp"
 	"github.com/soulacy/soulacy/internal/config"
+	"github.com/soulacy/soulacy/internal/connectors"
 	"github.com/soulacy/soulacy/internal/costs"
 	"github.com/soulacy/soulacy/internal/credentials"
 	"github.com/soulacy/soulacy/internal/introspect"
@@ -133,6 +134,7 @@ type Server struct {
 	rbacManager     *rbac.Manager          // nil until SetRBAC() is called
 	credVault       credentials.Vault      // nil until SetCredentialVault() is called
 	authConnections *authconnections.Store // secret-free metadata; values remain in credVault
+	connectorStore  *connectors.Store      // user connector definitions; contains no secret values
 	builderRegistry *builder.Registry      // nil until SetBuilderRegistry() is called
 	rateLimiter     *ratelimit.Manager     // nil until SetRateLimiter() is called
 	apiKeyStore     apikeys.Store          // nil until SetAPIKeyStore() is called
@@ -340,6 +342,12 @@ func (s *Server) SetCredentialVault(v credentials.Vault) {
 // agent grants. Authentication state remains exclusively in the credential vault.
 func (s *Server) SetAuthenticatedConnectionStore(store *authconnections.Store) {
 	s.authConnections = store
+}
+
+// SetConnectorStore wires user-created connector definitions. Website session
+// secrets remain in the credential vault and are referenced only by ID.
+func (s *Server) SetConnectorStore(store *connectors.Store) {
+	s.connectorStore = store
 }
 
 // CredentialVault returns the current Vault (may be nil). Satisfies
@@ -1001,6 +1009,11 @@ func (s *Server) buildApp() *fiber.App {
 
 	// MCP (Model Context Protocol) — configured external servers + their tools
 	api.Get("/connectors", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleListConnectors)
+	api.Post("/connectors/plan", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handlePlanConnector)
+	api.Post("/connectors", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleCreateConnector)
+	api.Put("/connectors/:id", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleUpdateConnector)
+	api.Delete("/connectors/:id", s.rbacMW(rbac.ResourceMCP, rbac.ActionDelete), s.handleDeleteConnector)
+	api.Post("/connectors/:id/sites/:siteID/website-access", s.credentialAudit("connector.website_access.create"), s.rbacMW(rbac.ResourceCredentials, rbac.ActionSet), s.handleConnectorWebsiteAccess)
 	api.Get("/mcp", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleListMCP)
 	api.Post("/mcp", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleCreateMCPServer)
 	api.Put("/mcp/own/:id", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handlePutOwnedMCPServer)

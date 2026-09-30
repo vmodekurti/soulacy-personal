@@ -25,6 +25,7 @@ import (
 	httpchan "github.com/soulacy/soulacy/internal/channels/http"
 	wachan "github.com/soulacy/soulacy/internal/channels/whatsapp"
 	"github.com/soulacy/soulacy/internal/config"
+	"github.com/soulacy/soulacy/internal/connectors"
 	"github.com/soulacy/soulacy/internal/costs"
 	"github.com/soulacy/soulacy/internal/credentials"
 	"github.com/soulacy/soulacy/internal/gateway"
@@ -90,6 +91,7 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 	// own. The server owns the builder pipeline (tool catalog, save gate,
 	// scheduler), so it is the server that Genie calls back into.
 	d.engine.SetGenieAgentBuilder(srv)
+	d.engine.SetGenieConnectorManager(srv)
 	srv.SetAutopilotStore(d.autopilotStore)
 	srv.SetAdaptiveMemoryRebuilder(d.adaptiveRebuild)
 	srv.SetSafeUndoStore(d.undoStore)
@@ -114,6 +116,14 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 			d.engine.SetAuthenticatedConnectionResolver(authconnections.NewResolver(connectionStore, d.credVault))
 		}
 		log.Info("authenticated website connections ready")
+	}
+	connectorStore, connectorErr := connectors.OpenStore(ws.DB("connectors"))
+	if connectorErr != nil {
+		log.Warn("user connectors unavailable", zap.Error(connectorErr))
+	} else {
+		stack.pushClose("connectors", connectorStore)
+		srv.SetConnectorStore(connectorStore)
+		log.Info("user connector composer ready")
 	}
 
 	// Plugin GUI mounts + capability enforcement for scoped plugin tokens
