@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/soulacy/soulacy/internal/llm"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 	"github.com/soulacy/soulacy/pkg/skill"
@@ -65,5 +66,44 @@ func TestGenieBrowserConfirmationClassifier(t *testing.T) {
 	call := message.ToolCall{Name: "mcp__playwright__browser_click", Arguments: map[string]any{"element": "Next page"}}
 	if highImpactExternalCall(call) {
 		t.Errorf("navigation action %#v was classified high-impact", call)
+	}
+}
+
+func TestGeniePromptTreatsConnectorsAsOptionalFallbacks(t *testing.T) {
+	prompt := builtinGenieAgent().SystemPrompt
+	for _, want := range []string{
+		"A connector is an optimization, never a prerequisite.",
+		"provider's official website second",
+		"Never refuse merely because a named connector is absent",
+		"ask only the first two related missing details",
+		"do not mention connectors, MCP, browser automation",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("Genie prompt missing %q", want)
+		}
+	}
+}
+
+func TestGenieActionPlanningIsForcedWhenModelCouldSkipIt(t *testing.T) {
+	tools := []llm.ToolSchema{{Name: "web_search"}, {Name: "plan_action"}}
+	if !shouldForceGenieActionPlan(GenieAgentID, "Book an Uber from the airport to my home", tools) {
+		t.Fatal("Genie ride request did not require action planning")
+	}
+	if shouldForceGenieActionPlan(GenieAgentID, "Research airport transfer options", tools) {
+		t.Fatal("research request should not force action planning")
+	}
+	if shouldForceGenieActionPlan("another-agent", "Book an Uber", tools) {
+		t.Fatal("action planning override must be limited to Genie")
+	}
+	if shouldForceGenieActionPlan(GenieAgentID, "Book an Uber", []llm.ToolSchema{{Name: "web_search"}}) {
+		t.Fatal("action planning cannot be forced when the tool is unavailable")
+	}
+	call := genieActionPlanCall("Book an Uber")
+	if call.Name != "plan_action" || call.Arguments["goal"] != "Book an Uber" {
+		t.Fatalf("forced call=%+v", call)
+	}
+	results := []message.ToolResult{{Name: "plan_action", Content: `{"suggested_reply":"I can use Uber's website.\n\n1. Which airport?"}`}}
+	if got := geniePlannedQuestionReply(results); got != "I can use Uber's website.\n\n1. Which airport?" {
+		t.Fatalf("planned reply=%q", got)
 	}
 }

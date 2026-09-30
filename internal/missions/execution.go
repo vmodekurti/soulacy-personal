@@ -23,6 +23,7 @@ type ExecutionPlan struct {
 	Status              string                 `json:"status"`
 	Summary             string                 `json:"summary"`
 	Route               string                 `json:"route"`
+	Routes              []ExecutionRoute       `json:"routes"`
 	Capabilities        []ExecutionCapability  `json:"capabilities"`
 	RequiredInputs      []ExecutionRequirement `json:"required_inputs"`
 	Steps               []ExecutionStep        `json:"steps"`
@@ -30,6 +31,19 @@ type ExecutionPlan struct {
 	ApprovalCheckpoints []string               `json:"approval_checkpoints"`
 	CompletionEvidence  []string               `json:"completion_evidence"`
 	GeneratedAt         time.Time              `json:"generated_at"`
+}
+
+// ExecutionRoute records the ordered ways Genie can try to complete an
+// action. A missing preferred route does not make the goal impossible when a
+// provider website or another official channel remains available.
+type ExecutionRoute struct {
+	Priority     int    `json:"priority"`
+	ID           string `json:"id"`
+	Label        string `json:"label"`
+	Kind         string `json:"kind"`
+	Status       string `json:"status"`
+	Detail       string `json:"detail"`
+	CapabilityID string `json:"capability_id,omitempty"`
 }
 
 type ExecutionCapability struct {
@@ -97,6 +111,17 @@ type planProfile struct {
 
 type inputSpec struct{ key, label, why string }
 
+// LooksLikeActionGoal reports whether the goal needs an external action rather
+// than a research-only answer. The runtime uses this to ensure Genie consults
+// the action planner even when a smaller model ignores the prompt instruction.
+func LooksLikeActionGoal(goal string) bool {
+	goal = strings.ToLower(strings.TrimSpace(goal))
+	return containsAny(goal,
+		"book ", "reserve ", "buy ", "purchase ", "order ", "schedule ",
+		"make an appointment", "send a ", "send an ", "text ", "notify ",
+		"get me an uber", "want an uber", "need an uber", "call a taxi")
+}
+
 // BuildExecutionPlan combines intent with the capabilities installed right
 // now. Genie supplies knownInputs as labels and non-secret values; only their
 // presence is recorded in the resulting plan.
@@ -116,7 +141,7 @@ func BuildExecutionPlan(goal string, knownInputs map[string]string, inventory Ca
 	plan := ExecutionPlan{
 		Goal: goal, Category: profile.category, GeneratedAt: time.Now().UTC(),
 		Capabilities: []ExecutionCapability{}, RequiredInputs: []ExecutionRequirement{},
-		Steps: []ExecutionStep{}, CapabilityGaps: []string{}, ApprovalCheckpoints: []string{},
+		Steps: []ExecutionStep{}, Routes: []ExecutionRoute{}, CapabilityGaps: []string{}, ApprovalCheckpoints: []string{},
 		CompletionEvidence: append([]string{}, profile.evidence...),
 	}
 
@@ -128,7 +153,7 @@ func BuildExecutionPlan(goal string, knownInputs map[string]string, inventory Ca
 	connector := matchingConnector(profile, inventory.Connectors)
 	if connector != nil {
 		plan.Capabilities = append(plan.Capabilities, ExecutionCapability{ID: "connector", Label: connector.Name, Kind: "connector", Available: true,
-			Detail: "A user-owned connector can guide discovery across " + strings.Join(connector.Domains, ", ") + "."})
+			Detail: "A user-owned connector can guide discovery across " + strings.Join(connector.Domains, ", ") + ". An action still uses a compatible tool or the provider website."})
 	}
 
 	actionTool := matchingActionTool(profile, inventory.Tools)
@@ -140,10 +165,11 @@ func BuildExecutionPlan(goal string, knownInputs map[string]string, inventory Ca
 	if profile.action {
 		detail := inventory.BrowserDetail
 		if detail == "" {
-			detail = availableDetail(browserAvailable, "A browser automation route is installed.", "No browser automation route is installed.")
+			detail = availableDetail(browserAvailable, "A browser automation route is installed.", "The provider website route will be prepared after the required details are collected.")
 		}
 		plan.Capabilities = append(plan.Capabilities, ExecutionCapability{ID: "browser", Label: "Browser automation", Kind: "browser", Available: browserAvailable,
 			Detail: detail, SetupHref: "#mcp"})
+		plan.Routes = executionRoutes(profile, actionTool, browserAvailable)
 	}
 
 	for _, spec := range profile.inputs {
@@ -202,16 +228,14 @@ func BuildExecutionPlan(goal string, knownInputs map[string]string, inventory Ca
 	}
 
 	if profile.action {
-		executionStatus := "blocked"
+		executionStatus := "preparation_needed"
 		capabilityID := "browser"
-		detail := "Use browser automation to prepare the action and stop before the final commitment."
+		detail := "Use the provider's official website to prepare the action and stop before the final commitment. Soulacy should prepare browser execution after the required details are known."
 		if actionTool != "" {
 			executionStatus, capabilityID = "ready", "action_tool"
 			detail = "Use the installed direct action tool to prepare the request."
 		} else if browserAvailable {
 			executionStatus = "ready"
-		} else {
-			plan.CapabilityGaps = append(plan.CapabilityGaps, "Install or connect a browser automation MCP server, or add a provider API that can perform this action.")
 		}
 		plan.Steps = append(plan.Steps, ExecutionStep{ID: "execute", Kind: "execute", Label: "Prepare the action", Detail: detail,
 			Status: executionStatus, CapabilityID: capabilityID})
@@ -227,16 +251,17 @@ func BuildExecutionPlan(goal string, knownInputs map[string]string, inventory Ca
 	}
 
 	missingInputs, secureSetup := requirementCounts(plan.RequiredInputs)
+	runtimeSetup := profile.action && actionTool == "" && !browserAvailable
 	switch {
-	case len(plan.CapabilityGaps) > 0 || secureSetup > 0:
-		plan.Status = PlanNeedsSetup
 	case missingInputs > 0:
 		plan.Status = PlanNeedsInput
+	case secureSetup > 0 || runtimeSetup:
+		plan.Status = PlanNeedsSetup
 	default:
 		plan.Status = PlanReady
 	}
-	plan.Route = executionRoute(profile.action, actionTool, browserAvailable)
-	plan.Summary = executionSummary(profile, plan, missingInputs, secureSetup)
+	plan.Route = executionRoute(profile.action, actionTool)
+	plan.Summary = executionSummary(profile, plan, missingInputs, secureSetup, runtimeSetup)
 	return plan, nil
 }
 
@@ -268,7 +293,7 @@ func executionProfile(goal string) planProfile {
 	}
 	if containsAny(goal, "uber", "lyft", "book a ride", "order a ride", "call a taxi", "ride to ") {
 		return planProfile{category: "ride", label: "ride booking", domains: []string{"uber.com", "lyft.com"}, action: true, auth: "required", payment: true,
-			inputs:    []inputSpec{{"pickup", "Pickup location", "The provider needs a precise pickup point."}, {"destination", "Destination", "The provider needs a destination."}, {"ride_time", "Pickup time", "Choose now or a scheduled time."}, {"ride_preferences", "Ride preferences", "Specify ride type, accessibility needs, or other constraints."}, {"spend_limit", "Maximum acceptable price", "Genie needs a limit before presenting the final option."}},
+			inputs:    []inputSpec{{"pickup", "Pickup location", "The provider needs a precise pickup point."}, {"destination", "Destination", "The provider needs a destination."}, {"ride_time", "Pickup time", "Choose now or a scheduled time."}},
 			toolTerms: []string{"uber", "lyft", "ride", "taxi"}, evidence: []string{"Provider confirmation or trip ID", "Final quoted price", "Pickup time and location"}}
 	}
 	if containsAny(goal, "reserve a table", "book a table", "restaurant reservation", "opentable", "resy", "dinner reservation") {
@@ -374,25 +399,60 @@ func authStepStatus(mode string, ready bool) string {
 	return "waiting"
 }
 
-func executionRoute(action bool, tool string, browser bool) string {
+func executionRoute(action bool, tool string) string {
 	if !action {
 		return "public_web"
 	}
 	if tool != "" {
 		return "direct_tool"
 	}
-	if browser {
-		return "browser_automation"
-	}
-	return "capability_required"
+	return "provider_website"
 }
 
-func executionSummary(profile planProfile, plan ExecutionPlan, missing, setup int) string {
+func executionRoutes(profile planProfile, tool string, browser bool) []ExecutionRoute {
+	directStatus := "not_selected"
+	directDetail := "Use the provider website for this request."
+	if tool != "" {
+		directStatus = "selected"
+		directDetail = "Use " + tool + " as the fastest supported route."
+	}
+	websiteStatus := "fallback"
+	if tool == "" {
+		websiteStatus = "selected"
+	}
+	websiteDetail := "Use the provider's official website in a secure managed browser."
+	return []ExecutionRoute{
+		{Priority: 1, ID: "direct_integration", Label: "Connector or native API", Kind: "direct_tool", Status: directStatus, Detail: directDetail, CapabilityID: "action_tool"},
+		{Priority: 2, ID: "provider_website", Label: "Provider website", Kind: "browser", Status: websiteStatus, Detail: websiteDetail, CapabilityID: "browser"},
+		{Priority: 3, ID: "official_alternative", Label: "Another official route", Kind: "alternative", Status: "fallback", Detail: alternativeRouteDetail(profile)},
+	}
+}
+
+func alternativeRouteDetail(profile planProfile) string {
+	switch profile.category {
+	case "ride":
+		return "If the requested provider cannot complete the ride, find another licensed ride or taxi service and ask before switching providers."
+	case "restaurant":
+		return "If online booking fails, look for the restaurant's official phone or contact route and ask before using it."
+	case "shopping", "travel", "appointment":
+		return "If the first website cannot complete the request, find another official seller, provider, or contact route and ask before switching."
+	default:
+		return "Find another official channel that can complete the action and ask before changing providers or terms."
+	}
+}
+
+func executionSummary(profile planProfile, plan ExecutionPlan, missing, setup int, runtimeSetup bool) string {
 	if plan.Status == PlanReady {
 		if profile.action {
 			return "Genie has a workable route. It can prepare the action, show the final terms, ask for approval, and verify the confirmation."
 		}
 		return "Genie can complete this with the capabilities available now."
+	}
+	if profile.action && missing > 0 {
+		return fmt.Sprintf("Genie has selected the best available route and needs %d detail(s) from the user. Ask for those details first, then prepare secure sign-in and the action route. Do not send the user away to complete the task.", missing)
+	}
+	if profile.action && (setup > 0 || runtimeSetup) {
+		return "The provider website is the selected route. Prepare secure sign-in and browser execution, then show the final terms for approval. Do not tell the user that a connector is required."
 	}
 	parts := []string{}
 	if missing > 0 {

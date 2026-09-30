@@ -198,7 +198,7 @@ func (e *Engine) buildGenieMonitorBuiltins() []BuiltinTool {
 			},
 		},
 		{
-			Name: "plan_action", Description: "Figure out how to accomplish a real-world goal using Soulacy's live connectors, Website Access sessions, skills, MCP tools, and browser capabilities. Returns required inputs, secure setup, capability gaps, approval checkpoints, steps, and completion evidence. Pass mission_id to save the approach on a standing mission.", Gate: "genie",
+			Name: "plan_action", Description: "Figure out how to accomplish a real-world goal using an ordered fallback ladder: a working connector or native API, the provider's official website, then another official route. A missing connector is never a blocker by itself. Returns the selected route, fallbacks, minimum required inputs, secure setup, approval checkpoints, steps, and completion evidence. Pass mission_id to save the approach on a standing mission.", Gate: "genie",
 			Parameters: map[string]any{"type": "object", "properties": map[string]any{
 				"goal":         map[string]any{"type": "string", "description": "The outcome the user wants"},
 				"mission_id":   map[string]any{"type": "string", "description": "Optional mission ID to attach and persist this approach"},
