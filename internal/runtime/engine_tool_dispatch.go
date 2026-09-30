@@ -115,7 +115,7 @@ func (e *Engine) runToolDispatch(ctx context.Context, def *agent.Definition, ses
 	// immutable blueprint cannot enumerate every future write tool in
 	// ConfirmTools. Apply a conservative semantic gate to action-like external
 	// tools while leaving read/search/list operations autonomous.
-	if isGenieDefinition(def) && highImpactExternalTool(call.Name) {
+	if isGenieDefinition(def) && highImpactExternalCall(call) {
 		if err := e.dynamicConfirm(ctx, def, call, "Genie is requesting a potentially high-impact external write action"); err != nil {
 			return "", err
 		}
@@ -440,8 +440,30 @@ func highImpactExternalTool(name string) bool {
 	}
 	parts := strings.Split(strings.ToLower(name), "__")
 	action := parts[len(parts)-1]
-	for _, word := range []string{"create", "add", "update", "set", "write", "send", "post", "put", "patch", "delete", "remove", "cancel", "transfer", "purchase", "buy", "sell", "execute", "deploy", "install", "invite", "publish"} {
+	for _, word := range []string{"create", "add", "update", "set", "write", "send", "post", "put", "patch", "delete", "remove", "cancel", "transfer", "purchase", "buy", "sell", "execute", "deploy", "install", "invite", "publish", "request", "book", "reserve", "order", "schedule"} {
 		if action == word || strings.HasPrefix(action, word+"_") || strings.Contains(action, "_"+word+"_") || strings.HasSuffix(action, "_"+word) {
+			return true
+		}
+	}
+	return false
+}
+
+func highImpactExternalCall(call message.ToolCall) bool {
+	if highImpactExternalTool(call.Name) {
+		return true
+	}
+	lowerName := strings.ToLower(call.Name)
+	if !strings.HasPrefix(lowerName, mcp.FullNamePrefix) ||
+		(!strings.Contains(lowerName, "browser_click") && !strings.Contains(lowerName, "browser_press") && !strings.Contains(lowerName, "browser_submit")) {
+		return false
+	}
+	encoded, err := json.Marshal(call.Arguments)
+	if err != nil {
+		return false
+	}
+	arguments := strings.ToLower(string(encoded))
+	for _, phrase := range []string{"confirm", "book", "reserve", "place order", "place your order", "submit order", "buy now", "purchase", "checkout", "submit payment", "pay now", "request ride", "schedule", "cancel", "send", "finalize"} {
+		if strings.Contains(arguments, phrase) {
 			return true
 		}
 	}

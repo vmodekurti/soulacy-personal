@@ -6,7 +6,9 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/soulacy/soulacy/internal/authconnections"
 	"github.com/soulacy/soulacy/internal/missions"
+	"github.com/soulacy/soulacy/internal/runtime"
 )
 
 type fakeMissionMonitor struct {
@@ -79,6 +81,9 @@ func TestMissionLifecycleAPIAndGenieShareOneStore(t *testing.T) {
 	if monitor.items[monitorID] == nil {
 		t.Fatalf("runner %q was not created", monitorID)
 	}
+	if mission["execution_plan"] == nil {
+		t.Fatal("new mission did not receive an execution plan")
+	}
 
 	status, paused := gatewayJSON(t, s, http.MethodPost, "/api/v1/missions/"+id+"/pause", "secret", `{}`)
 	if status != http.StatusOK || paused["mission"].(map[string]any)["status"] != missions.StatusPaused {
@@ -104,5 +109,46 @@ func TestMissionLifecycleAPIAndGenieShareOneStore(t *testing.T) {
 	}
 	if monitor.items[monitorID] != nil {
 		t.Fatal("completed mission runner still exists")
+	}
+}
+
+func TestMissionExecutionPlannerAndSecureWebsiteAccess(t *testing.T) {
+	s := newTestGateway(t, "secret")
+	store, err := missions.OpenStore(filepath.Join(t.TempDir(), "missions.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	s.SetMissionStore(store)
+	connections, err := authconnections.Open(filepath.Join(t.TempDir(), "connections.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = connections.Close() })
+	s.SetAuthenticatedConnectionStore(connections)
+	s.SetCredentialVault(newMemVault())
+
+	status, planned := gatewayJSON(t, s, http.MethodPost, "/api/v1/missions/execution-plan", "secret", `{
+		"goal":"Book me an Uber to the airport tomorrow morning",
+		"known_inputs":{"pickup":"Home","destination":"Airport","ride_time":"7 AM"}
+	}`)
+	if status != http.StatusOK {
+		t.Fatalf("plan status=%d body=%v", status, planned)
+	}
+	plan := planned["execution_plan"].(map[string]any)
+	if plan["category"] != "ride" || plan["status"] != missions.PlanNeedsSetup {
+		t.Fatalf("execution plan=%v", plan)
+	}
+
+	prepared, err := s.PrepareWebsiteAccessForGenie(t.Context(), "Uber", "https://www.uber.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection := prepared["connection"].(authconnections.Connection)
+	if connection.Status != authconnections.StatusPending || len(connection.AgentIDs) != 1 || connection.AgentIDs[0] != runtime.GenieAgentID {
+		t.Fatalf("connection=%+v", connection)
+	}
+	if prepared["setup_href"] != "#websites" {
+		t.Fatalf("prepared=%v", prepared)
 	}
 }

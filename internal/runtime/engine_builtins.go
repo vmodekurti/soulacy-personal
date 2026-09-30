@@ -198,6 +198,43 @@ func (e *Engine) buildGenieMonitorBuiltins() []BuiltinTool {
 			},
 		},
 		{
+			Name: "plan_action", Description: "Figure out how to accomplish a real-world goal using Soulacy's live connectors, Website Access sessions, skills, MCP tools, and browser capabilities. Returns required inputs, secure setup, capability gaps, approval checkpoints, steps, and completion evidence. Pass mission_id to save the approach on a standing mission.", Gate: "genie",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{
+				"goal":         map[string]any{"type": "string", "description": "The outcome the user wants"},
+				"mission_id":   map[string]any{"type": "string", "description": "Optional mission ID to attach and persist this approach"},
+				"known_inputs": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Non-secret details already provided, keyed by the requirement names returned by a prior plan. Never include passwords, cookies, tokens, or payment numbers."},
+			}, "required": []string{"goal"}},
+			Handler: func(ctx context.Context, args map[string]any) (string, error) {
+				if e.genieMissions == nil {
+					return "", fmt.Errorf("plan_action: mission service is unavailable")
+				}
+				result, err := e.genieMissions.PlanActionForGenie(ctx, argString(args, "goal"), argString(args, "mission_id"), argStringMap(args, "known_inputs"))
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
+			Name: "prepare_website_access", Description: "Prepare a domain-restricted Website Access connection when an execution plan requires provider sign-in. This creates secret-free metadata only and returns the GUI destination where the user signs in directly. Never ask for or pass credentials, cookies, tokens, browser state, or card details.", Gate: "genie",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{
+				"name":     map[string]any{"type": "string", "description": "Friendly provider name"},
+				"base_url": map[string]any{"type": "string", "description": "HTTPS provider URL whose domain will be allowed"},
+			}, "required": []string{"base_url"}},
+			Handler: func(ctx context.Context, args map[string]any) (string, error) {
+				if e.genieMissions == nil {
+					return "", fmt.Errorf("prepare_website_access: website access service is unavailable")
+				}
+				result, err := e.genieMissions.PrepareWebsiteAccessForGenie(ctx, argString(args, "name"), argString(args, "base_url"))
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
 			Name: "plan_mission", Description: "Turn an ongoing responsibility into a reviewable standing mission proposal. Use this before create_mission to agree on the finish line, schedule, and optional delivery destination.", Gate: "genie",
 			Parameters: map[string]any{"type": "object", "properties": map[string]any{"objective": map[string]any{"type": "string", "description": "The ongoing outcome Genie should own"}}, "required": []string{"objective"}},
 			Handler: func(_ context.Context, args map[string]any) (string, error) {

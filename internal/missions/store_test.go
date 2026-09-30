@@ -35,12 +35,33 @@ func TestMissionStoreSurvivesReopen(t *testing.T) {
 	if got.MonitorID != "genie-monitor-1" || got.Status != StatusActive {
 		t.Fatalf("mission=%+v", got)
 	}
+	plan, err := BuildExecutionPlan(got.Objective, map[string]string{"constraints": "five items"}, CapabilityInventory{PublicWeb: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err = store.SaveExecutionPlan(t.Context(), "personal", "admin", got.ID, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ExecutionPlan == nil || got.ExecutionPlan.Route != "public_web" {
+		t.Fatalf("saved execution plan=%+v", got.ExecutionPlan)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err = OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	got, err = store.UpdateState(t.Context(), "personal", "admin", got.ID, StatusBlocked, "Two sources checked", "Refresh website access", "Subscription expired")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.Status != StatusBlocked || got.LastProgressAt == nil {
 		t.Fatalf("updated=%+v", got)
+	}
+	if got.ExecutionPlan == nil {
+		t.Fatal("progress update discarded execution plan")
 	}
 }
 

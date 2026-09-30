@@ -741,6 +741,12 @@ export const api = {
     plan: (objective) => apiFetch('/missions/plan', {
       method: 'POST', body: JSON.stringify({ objective }),
     }),
+    planExecution: (goal, knownInputs = {}) => apiFetch('/missions/execution-plan', {
+      method: 'POST', body: JSON.stringify({ goal, known_inputs: knownInputs }),
+    }),
+    planMissionExecution: (id, knownInputs = {}) => apiFetch(`/missions/${encodeURIComponent(id)}/execution-plan`, {
+      method: 'POST', body: JSON.stringify({ known_inputs: knownInputs }),
+    }),
     create: (body) => apiFetch('/missions', { method: 'POST', body: JSON.stringify(body) }),
     update: (id, body) => apiFetch(`/missions/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
     pause: (id) => apiFetch(`/missions/${encodeURIComponent(id)}/pause`, { method: 'POST', body: '{}' }),

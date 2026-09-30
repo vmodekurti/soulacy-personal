@@ -3,6 +3,7 @@ package missions
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -24,24 +25,25 @@ const (
 var ErrNotFound = errors.New("mission not found")
 
 type Mission struct {
-	ID             string     `json:"id"`
-	WorkspaceID    string     `json:"workspace_id"`
-	OwnerSubject   string     `json:"owner_subject,omitempty"`
-	Title          string     `json:"title"`
-	Objective      string     `json:"objective"`
-	FinishLine     string     `json:"finish_line"`
-	Cron           string     `json:"cron,omitempty"`
-	At             string     `json:"at,omitempty"`
-	Channel        string     `json:"channel,omitempty"`
-	To             string     `json:"to,omitempty"`
-	MonitorID      string     `json:"monitor_id,omitempty"`
-	Status         string     `json:"status"`
-	Progress       string     `json:"progress,omitempty"`
-	NextAction     string     `json:"next_action,omitempty"`
-	Blocker        string     `json:"blocker,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
-	LastProgressAt *time.Time `json:"last_progress_at,omitempty"`
+	ID             string         `json:"id"`
+	WorkspaceID    string         `json:"workspace_id"`
+	OwnerSubject   string         `json:"owner_subject,omitempty"`
+	Title          string         `json:"title"`
+	Objective      string         `json:"objective"`
+	FinishLine     string         `json:"finish_line"`
+	Cron           string         `json:"cron,omitempty"`
+	At             string         `json:"at,omitempty"`
+	Channel        string         `json:"channel,omitempty"`
+	To             string         `json:"to,omitempty"`
+	MonitorID      string         `json:"monitor_id,omitempty"`
+	Status         string         `json:"status"`
+	Progress       string         `json:"progress,omitempty"`
+	NextAction     string         `json:"next_action,omitempty"`
+	Blocker        string         `json:"blocker,omitempty"`
+	CreatedAt      time.Time      `json:"created_at"`
+	UpdatedAt      time.Time      `json:"updated_at"`
+	LastProgressAt *time.Time     `json:"last_progress_at,omitempty"`
+	ExecutionPlan  *ExecutionPlan `json:"execution_plan,omitempty"`
 }
 
 type Plan struct {
@@ -80,6 +82,16 @@ CREATE TABLE IF NOT EXISTS genie_missions (
 );
 CREATE INDEX IF NOT EXISTS genie_missions_updated
   ON genie_missions(workspace_id, owner_subject, updated_at DESC);
+CREATE TABLE IF NOT EXISTS genie_mission_execution_plans (
+  workspace_id TEXT NOT NULL,
+  owner_subject TEXT NOT NULL DEFAULT '',
+  mission_id TEXT NOT NULL,
+  plan_json TEXT NOT NULL,
+  updated_at TIMESTAMP NOT NULL,
+  PRIMARY KEY (workspace_id, owner_subject, mission_id),
+  FOREIGN KEY (workspace_id, owner_subject, mission_id)
+    REFERENCES genie_missions(workspace_id, owner_subject, id) ON DELETE CASCADE
+);
 `
 
 func OpenStore(path string) (*Store, error) {
@@ -194,16 +206,28 @@ func (s *Store) List(ctx context.Context, workspaceID, subject string) ([]Missio
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	out := []Mission{}
 	for rows.Next() {
 		item, err := scan(rows)
 		if err != nil {
+			_ = rows.Close()
 			return nil, err
 		}
 		out = append(out, item)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if err := s.loadExecutionPlan(ctx, &out[i]); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 func (s *Store) Get(ctx context.Context, workspaceID, subject, id string) (Mission, error) {
@@ -212,7 +236,52 @@ func (s *Store) Get(ctx context.Context, workspaceID, subject, id string) (Missi
 	if errors.Is(err, sql.ErrNoRows) {
 		return Mission{}, ErrNotFound
 	}
-	return item, err
+	if err != nil {
+		return item, err
+	}
+	if err := s.loadExecutionPlan(ctx, &item); err != nil {
+		return Mission{}, err
+	}
+	return item, nil
+}
+
+func (s *Store) SaveExecutionPlan(ctx context.Context, workspaceID, subject, id string, plan ExecutionPlan) (Mission, error) {
+	if _, err := s.Get(ctx, workspaceID, subject, id); err != nil {
+		return Mission{}, err
+	}
+	encoded, err := json.Marshal(plan)
+	if err != nil {
+		return Mission{}, fmt.Errorf("missions: encode execution plan: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO genie_mission_execution_plans
+      (workspace_id,owner_subject,mission_id,plan_json,updated_at) VALUES(?,?,?,?,?)
+      ON CONFLICT(workspace_id,owner_subject,mission_id) DO UPDATE SET
+      plan_json=excluded.plan_json,updated_at=excluded.updated_at`, workspaceID, subject, id, string(encoded), time.Now().UTC())
+	if err != nil {
+		return Mission{}, fmt.Errorf("missions: save execution plan: %w", err)
+	}
+	return s.Get(ctx, workspaceID, subject, id)
+}
+
+func (s *Store) loadExecutionPlan(ctx context.Context, item *Mission) error {
+	if item == nil {
+		return nil
+	}
+	var encoded string
+	err := s.db.QueryRowContext(ctx, `SELECT plan_json FROM genie_mission_execution_plans
+      WHERE workspace_id=? AND owner_subject=? AND mission_id=?`, item.WorkspaceID, item.OwnerSubject, item.ID).Scan(&encoded)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var plan ExecutionPlan
+	if err := json.Unmarshal([]byte(encoded), &plan); err != nil {
+		return fmt.Errorf("missions: decode execution plan: %w", err)
+	}
+	item.ExecutionPlan = &plan
+	return nil
 }
 
 func (s *Store) UpdateState(ctx context.Context, workspaceID, subject, id, status, progress, nextAction, blocker string) (Mission, error) {
