@@ -61,6 +61,42 @@ Use a mission when you care about an ongoing outcome and want visible progress.
 Use a monitor for a narrow condition such as a price crossing a threshold. Use
 an agent when you need a reusable worker with a defined workflow.
 
+## Let Genie figure out the approach
+
+For a real-world goal, Genie now checks what Soulacy can actually use before it
+claims the work is possible. The approach can combine public web research,
+user-created connectors, installed skills, MCP tools, browser automation, and
+saved Website Access sessions.
+
+For example, “reserve a table for four on Friday evening” produces an approach
+that identifies the missing location, time range, and restaurant preferences.
+It then checks for a restaurant booking tool or browser automation, explains
+whether provider sign-in is needed, and adds an approval checkpoint before the
+reservation is submitted. The finish line is a provider confirmation with the
+restaurant, date, time, party size, and cancellation terms.
+
+“Book me a ride to the airport tomorrow morning” works the same way. Genie asks
+for the pickup point, destination, pickup time, ride preferences, and maximum
+price. It checks for a direct provider tool first and browser automation second.
+If sign-in is needed, Genie can prepare a domain-restricted Website Access
+connection. You complete the sign-in on the provider page, then Genie can
+continue with the approved session.
+
+Passwords, passcodes, cookies, tokens, browser state, card numbers, and security
+codes do not belong in Genie chat or a mission record. Enter them directly in
+Website Access or the provider's secure checkout. Genie may ask whether a saved
+payment method is available, but it does not ask for the payment details.
+
+Before a booking, purchase, cancellation, message, or similar action, Genie
+must show the exact provider, time, terms, and total cost and wait for approval.
+After approval, it verifies the provider confirmation before reporting success.
+
+The Missions page keeps the approach in a collapsed section so the main view
+stays quiet. Open it to see missing details, secure setup, capability gaps,
+planned steps, approval checkpoints, and the evidence Genie will use to decide
+the work is complete. You can ask Genie to review the approach again after
+installing a tool or completing Website Access.
+
 ## Ask for something
 
 Two kinds of request land differently, and you do not have to say which:

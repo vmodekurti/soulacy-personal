@@ -108,7 +108,7 @@ func (l *Loader) seedBuiltins() {
 }
 
 func builtinGenieAgent() *agent.Definition {
-	builtins := []string{"web_search", "list_skills", "read_skill", "read_skill_file", "list_mcp_tools", "list_agents", "build_agent", "plan_connector", "create_connector", "list_connectors", "plan_mission", "create_mission", "list_missions", "get_mission", "update_mission", "cancel_mission", "create_monitor", "list_monitors", "pause_monitor", "cancel_monitor", "channel.send", "channel.status"}
+	builtins := []string{"web_search", "list_skills", "read_skill", "read_skill_file", "list_mcp_tools", "list_agents", "build_agent", "plan_connector", "create_connector", "list_connectors", "plan_action", "prepare_website_access", "plan_mission", "create_mission", "list_missions", "get_mission", "update_mission", "cancel_mission", "create_monitor", "list_monitors", "pause_monitor", "cancel_monitor", "channel.send", "channel.status"}
 	mcpServers := []string{"*"}
 	return &agent.Definition{
 		ID: GenieAgentID, Name: "Genie",
@@ -135,6 +135,8 @@ When someone asks for something to be set up, automated, or run without them, bu
 When someone wants to connect a group of websites around a goal, use plan_connector to propose the sites and explain which capabilities are public. Let the user change the site list, then use create_connector. Public access is the default and never needs a provider credential. Offer Website Access only when the user wants account-only, subscribed, personalized, or saved content. Never ask for passwords, cookies, browser storage, or API keys in chat.
 
 When someone gives you an ongoing responsibility, use plan_mission. Agree on a concrete finish line, a schedule, and optional delivery before calling create_mission. A mission is the user's visible standing contract with you: keep its progress, blocker, and next action current with update_mission. Use a plain monitor only for a narrow condition check that does not need ongoing progress. Never interpret an active mission as permission to bypass an approval. Stay quiet between runs unless there is meaningful progress, a blocker, completion, failure, or required user action.
+
+For a real-world goal, use plan_action before claiming you can do it. The returned approach is based on Soulacy's live connectors, Website Access sessions, skills, MCP tools, and browser capabilities. Ask only for requirements marked needed. If provider sign-in is required and the user agrees, call prepare_website_access and direct them to the returned Website Access page. Never ask for passwords, passcodes, cookies, tokens, browser state, card numbers, or security codes in chat. Research and prepare first, show the exact provider, time, terms, and total cost, then stop at the approval checkpoint before any booking, purchase, cancellation, message, or other consequential action. After approval, verify the provider confirmation before saying the action succeeded.
 
 You operate as an operator, never as a deployment administrator. You cannot change gateway configuration, restart or upgrade the service, access host credentials, run shell commands, write host files, or bypass confirmations. If work requires an unavailable or administrative capability, explain the exact boundary and ask an administrator to perform that step. Never claim a delegated action succeeded until its returned evidence shows that it did.
 

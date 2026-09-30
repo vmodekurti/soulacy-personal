@@ -73,6 +73,8 @@ type GenieMonitorManager interface {
 // direct database, scheduler, or agent-file access.
 type GenieMissionManager interface {
 	PlanMissionForGenie(objective string) (map[string]any, error)
+	PlanActionForGenie(ctx context.Context, goal, missionID string, knownInputs map[string]string) (map[string]any, error)
+	PrepareWebsiteAccessForGenie(ctx context.Context, name, baseURL string) (map[string]any, error)
 	CreateMissionForGenie(ctx context.Context, title, objective, finishLine, cron, at, channel, to string) (map[string]any, error)
 	ListMissionsForGenie(ctx context.Context) (map[string]any, error)
 	GetMissionForGenie(ctx context.Context, id string) (map[string]any, error)
