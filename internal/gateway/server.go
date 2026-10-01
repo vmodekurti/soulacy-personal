@@ -68,6 +68,7 @@ import (
 	"github.com/soulacy/soulacy/internal/introspect"
 	"github.com/soulacy/soulacy/internal/knowledge"
 	"github.com/soulacy/soulacy/internal/llm"
+	"github.com/soulacy/soulacy/internal/managedbrowser"
 	"github.com/soulacy/soulacy/internal/mcp"
 	"github.com/soulacy/soulacy/internal/metrics"
 	"github.com/soulacy/soulacy/internal/missions"
@@ -135,6 +136,7 @@ type Server struct {
 	rbacManager     *rbac.Manager               // nil until SetRBAC() is called
 	credVault       credentials.Vault           // nil until SetCredentialVault() is called
 	authConnections *authconnections.Store      // secret-free metadata; values remain in credVault
+	managedBrowser  *managedbrowser.Manager     // gateway-owned, domain-bound website action runtime
 	connectorStore  *connectors.Store           // user connector definitions; contains no secret values
 	missionStore    *missions.Store             // persistent user-owned standing goals
 	missionMonitor  runtime.GenieMonitorManager // constrained scheduled runner lifecycle
@@ -346,6 +348,9 @@ func (s *Server) SetCredentialVault(v credentials.Vault) {
 func (s *Server) SetAuthenticatedConnectionStore(store *authconnections.Store) {
 	s.authConnections = store
 }
+
+// SetManagedBrowser wires the isolated website action runtime used by Genie.
+func (s *Server) SetManagedBrowser(manager *managedbrowser.Manager) { s.managedBrowser = manager }
 
 // SetConnectorStore wires user-created connector definitions. Website session
 // secrets remain in the credential vault and are referenced only by ID.

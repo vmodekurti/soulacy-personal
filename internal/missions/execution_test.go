@@ -55,7 +55,7 @@ func TestBuildExecutionPlanRideRequestsMinimumDetailsBeforeSetup(t *testing.T) {
 func TestBuildExecutionPlanPrefersDirectActionTool(t *testing.T) {
 	plan, err := BuildExecutionPlan("Book an Uber for me", map[string]string{
 		"pickup": "Home", "destination": "Airport", "ride_time": "Now", "payment_method": "saved",
-	}, CapabilityInventory{PublicWeb: true, Tools: []string{"mcp__uber__request_ride"}, WebsiteAccess: []InventoryWebsiteAccess{{Name: "Uber", Domains: []string{"uber.com"}, Ready: true}}})
+	}, CapabilityInventory{PublicWeb: true, Tools: []string{"mcp__uber__request_ride"}, WebsiteAccess: []InventoryWebsiteAccess{{ID: "conn_uber", Name: "Uber", Domains: []string{"uber.com"}, Ready: true}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,6 +64,11 @@ func TestBuildExecutionPlanPrefersDirectActionTool(t *testing.T) {
 	}
 	assertRouteStatus(t, plan, "direct_integration", "selected")
 	assertRouteStatus(t, plan, "provider_website", "fallback")
+	for _, requirement := range plan.RequiredInputs {
+		if requirement.Key == "website_access" && requirement.ConnectionID != "conn_uber" {
+			t.Fatalf("ready Website Access did not expose its secret-free connection ID: %+v", requirement)
+		}
+	}
 }
 
 func TestBuildExecutionPlanRestaurantReadyThroughBrowser(t *testing.T) {

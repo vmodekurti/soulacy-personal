@@ -1,19 +1,39 @@
 # Browser Automation
 
-An agent can drive a real browser through an MCP server such as
-[`@playwright/mcp`](https://github.com/microsoft/playwright-mcp): navigate,
-read the page, click, fill forms. It is how an agent reaches things that have
-no API.
+Soulacy's supported Docker image includes a gateway-managed Chromium runtime.
+Genie can use a provider website on a fresh Railway or Docker deployment
+without shell access and without installing an MCP server.
 
-Soulacy does not ship a browser. Most installs never drive one, and a browser
-plus its libraries is several hundred megabytes that would otherwise sit in
-every image. You choose one of two routes.
+The managed path is deliberately smaller than a general browser scripting
+API. Genie can:
 
-## Route 1: a remote browser (no local install)
+1. Open one official provider domain in an isolated temporary profile.
+2. Replay a granted Website Access session inside that profile.
+3. Inspect visible page text and stable element references.
+4. Click, fill, select, and press ordinary controls.
+5. Stop before booking, buying, sending, cancelling, or submitting.
+6. Show the provider, action, item, time, terms, and exact total in an approval.
+7. Submit only after approval, then return the provider page as confirmation
+   evidence.
 
-Point the server at a browser running somewhere else. Nothing is installed on
-your gateway (no Chromium, no system libraries, no download) so this works on
-platforms where you have no shell.
+Passwords, passcodes, cookies, browser storage, payment numbers, and security
+codes are never returned to Genie. Password and payment fields cannot be filled
+through the model-facing action tool. Users complete sign-in, passkeys, MFA,
+CAPTCHA, and payment setup directly on the provider website through Website
+Access.
+
+Managed sessions expire after 20 minutes, have a bounded process count, and
+remove their temporary profile when closed. A session is tied to Genie and the
+installation owner. Navigation outside the approved provider domain closes the
+session and returns the attempted route plus an official fallback. All browser
+traffic passes through a per-session guarded proxy that resolves and pins public
+addresses and rejects localhost, private networks, CGNAT, link-local ranges,
+and cloud metadata endpoints.
+
+## Optional route: a remote browser
+
+Use a remote browser when you intentionally need custom Playwright MCP tools or
+browser capacity outside the gateway. Nothing is installed on the gateway.
 
 On the **MCP Servers** page, choose the **Browser remote (CDP)** template and
 replace the endpoint with your browser service URL:
@@ -29,48 +49,16 @@ mcp:
       keeps_processes: true
 ```
 
-## Route 2: a local browser
+## Optional route: a custom local browser MCP server
 
-Two things are needed, and only one of them can be installed at runtime.
+The managed runtime already covers Genie's provider website actions. The steps
+below apply only when an agent needs a separate, general-purpose browser MCP
+server.
 
-**The libraries.** Chromium links against system packages, and system packages
-need root. Either build the image with them:
-
-```bash
-docker build --build-arg WITH_BROWSER_LIBS=1 -t soulacy .
-```
-
-…or install the bundle, which needs no root at all. The libraries do not have
-to be *installed*, only *found*: unpacked into a directory on the library
-search path they load from your volume exactly as well as from `/usr/lib`.
-
-```bash
-# Build the bundle (~13MB). It refuses to emit one that cannot browse.
-scripts/build-browser-libs.sh --platform linux/amd64 --out dist
-
-# Install it, with the checksum the script printed
-curl -X POST http://localhost:18789/api/v1/browser/libs/install \
-  -H "Authorization: Bearer $SOULACY_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"url":"https://…/browser-libs-amd64.tar.gz","sha256":"…"}'
-```
-
-The checksum is required, not optional: these files are loaded into the browser
-process, so a bundle that is not the one you meant is code execution rather
-than a corrupt download. The bundle lands on the mounted volume, so it survives
-a redeploy. **Restart the gateway afterwards.** A server already running
-inherited the old environment and cannot see the new directory.
-
-**The browser itself.** Once the libraries are in place:
-
-```bash
-npx playwright install chromium
-```
-
-Point `PLAYWRIGHT_BROWSERS_PATH` at a directory on your volume (the supplied
-`docker-compose.yml` already does) so it survives a redeploy too.
-
-Then use the **Browser headless** template:
+The supported Docker image already contains `/usr/bin/chromium` and its system
+libraries. A host install can use Chrome or Chromium already present on the
+machine. Point the optional MCP server at that executable so it does not need a
+second browser download:
 
 ```yaml
 mcp:
@@ -78,7 +66,7 @@ mcp:
     playwright-mcp:
       transport: stdio
       command: npx
-      args: ["-y", "@playwright/mcp@latest", "--browser", "chromium",
+      args: ["-y", "@playwright/mcp@latest", "--executable-path", "/usr/bin/chromium",
              "--headless", "--isolated", "--no-sandbox"]
       keeps_processes: true
 ```
@@ -89,14 +77,13 @@ Every one of them was a failure first.
 
 | Setting | Without it |
 | --- | --- |
-| `--browser chromium` | the server looks for branded Chrome at `/opt/google/chrome/chrome` and exits |
+| `--executable-path /usr/bin/chromium` | the server may look for branded Chrome or download another browser |
 | `--headless` | it tries to open a window; there is no display on a server |
 | `--no-sandbox` | Chromium cannot sandbox itself in a container: *"No usable sandbox!"* |
 | `keeps_processes: true` | Soulacy's per-call process janitor kills the browser between tool calls, and the next call returns `about:blank` |
 
-`--browser chromium` also means Playwright resolves its own browser, so you do
-not hard-code a path containing a build number that changes on the next
-upgrade.
+Use the browser path reported on the **Browser Trace** page when the deployment
+does not use the supported Docker image.
 
 ## When it goes wrong
 
@@ -105,10 +92,10 @@ The failures here rarely name the thing that is broken.
 | What you see | What it means |
 | --- | --- |
 | `initialize: stdio transport closed before response` | the server exited at startup: usually Node is too old (Playwright needs 20+) |
-| `Chromium distribution 'chrome' is not found` | `--browser chromium` is missing |
+| `Chromium distribution 'chrome' is not found` | the optional MCP server was not pointed at the installed browser executable |
 | `No usable sandbox!` | `--no-sandbox` is missing |
-| `libsoftokn3.so: cannot open shared object file` | the library bundle is incomplete; rebuild it with the current script |
-| *"the browser had closed"* on every navigation | the same thing as above: NSS aborts as soon as a page uses TLS |
+| `libsoftokn3.so: cannot open shared object file` | the custom image does not include Chromium's runtime libraries |
+| *"the browser had closed"* on every navigation | the custom browser or its runtime libraries are incomplete |
 | `Target page, context or browser has been closed` on a fresh start | an orphaned browser from a previous run still holds Playwright's runtime directory |
 | `EACCES … /tmp/pw-*/browser/…sock` | that directory is owned by another user: usually created by running the server as root while the gateway runs unprivileged |
 
@@ -131,7 +118,7 @@ then (on a restart, or when the server is removed) because nothing owns those
 processes any more, and an orphaned browser holds the runtime directory its
 replacement needs.
 
-## Agent Allowlist
+## Agent Allowlist for optional MCP servers
 
 For a narrow browser-enabled agent, explicitly allow the browser server:
 
@@ -150,7 +137,7 @@ mcp_tools:
 
 Avoid wildcard MCP access for public or shared agents.
 
-## Per-Agent Domain Policy
+## Per-Agent Domain Policy for optional MCP servers
 
 Browser MCP tools are treated as network tools by Soulacy's policy engine. Add a
 `policy:` block to the agent so navigation is limited to the sites that workflow
@@ -176,7 +163,8 @@ stuck waiting for a human.
 
 ## Trace And Artifacts
 
-Every browser MCP tool call is captured in the action log. Open **Browser** in
+Every managed website action and browser MCP tool call is captured in the
+action log. Open **Browser** in
 the sidebar to replay an agent's browser steps by agent and optional session:
 
 - navigate/click/type/extract/screenshot steps
@@ -191,5 +179,7 @@ for the page-level sequence that led to it.
 ## Safety Notes
 
 Browser automation can click, type, and submit forms. Treat it as an active tool
-surface. Prefer dedicated browser profiles/accounts, domain-specific agents, and
-human approval for workflows that spend money, send messages, or mutate records.
+surface. The managed runtime enforces isolated profiles, domain boundaries, and
+approval for final actions. For optional MCP servers, prefer dedicated browser
+profiles, domain-specific agents, and human approval for workflows that spend
+money, send messages, or mutate records.
