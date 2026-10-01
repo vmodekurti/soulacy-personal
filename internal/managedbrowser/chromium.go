@@ -168,7 +168,7 @@ func (f *ChromiumFactory) executablePath() (string, error) {
 			return path, nil
 		}
 	}
-	return "", errors.New("Chromium or Google Chrome was not found; set SOULACY_BROWSER_EXECUTABLE")
+	return "", errors.New("chromium or Google Chrome was not found; set SOULACY_BROWSER_EXECUTABLE")
 }
 
 type chromiumBrowser struct {
