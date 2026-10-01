@@ -149,7 +149,7 @@ func TestMissionExecutionPlannerAndSecureWebsiteAccess(t *testing.T) {
 	if connection.Status != authconnections.StatusPending || len(connection.AgentIDs) != 1 || connection.AgentIDs[0] != runtime.GenieAgentID {
 		t.Fatalf("connection=%+v", connection)
 	}
-	if prepared["setup_href"] != "#websites" {
+	if prepared["setup_href"] != "#websites?connection="+connection.ID || prepared["mobile_setup_href"] != "soulacy://website-access/"+connection.ID {
 		t.Fatalf("prepared=%v", prepared)
 	}
 	if err := connections.ReplaceAgentGrants(t.Context(), runtime.PersonalWorkspaceID, connection.ID, []string{"researcher"}); err != nil {
