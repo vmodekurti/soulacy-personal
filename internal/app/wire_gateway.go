@@ -31,6 +31,7 @@ import (
 	"github.com/soulacy/soulacy/internal/gateway"
 	"github.com/soulacy/soulacy/internal/introspect"
 	"github.com/soulacy/soulacy/internal/llm"
+	"github.com/soulacy/soulacy/internal/managedbrowser"
 	"github.com/soulacy/soulacy/internal/mcp"
 	"github.com/soulacy/soulacy/internal/missions"
 	"github.com/soulacy/soulacy/internal/person"
@@ -116,7 +117,16 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 		stack.pushClose("authenticated-connections", connectionStore)
 		srv.SetAuthenticatedConnectionStore(connectionStore)
 		if d.credVault != nil {
-			d.engine.SetAuthenticatedConnectionResolver(authconnections.NewResolver(connectionStore, d.credVault))
+			resolver := authconnections.NewResolver(connectionStore, d.credVault)
+			d.engine.SetAuthenticatedConnectionResolver(resolver)
+			browser := managedbrowser.New(resolver, nil)
+			srv.SetManagedBrowser(browser)
+			stack.pushClose("managed-browser", browser)
+			if ok, detail := browser.Available(); ok {
+				log.Info("managed browser ready", zap.String("detail", detail))
+			} else {
+				log.Warn("managed browser unavailable", zap.String("detail", detail))
+			}
 		}
 		log.Info("authenticated website connections ready")
 	}

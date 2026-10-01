@@ -203,6 +203,12 @@ to follow [Semantic Versioning](https://semver.org/).
   and the workspace login page.
 
 ### Added
+- Genie can now carry out provider website actions through a gateway-managed
+  Chromium session when no connector exists. The supported Docker image ships
+  with Chromium, so fresh Railway and container deployments need no shell setup
+  or browser MCP server. Sessions use isolated temporary profiles, public-only
+  network routing, provider-domain boundaries, protected credential and payment
+  fields, short expiry, and explicit approval for the final external action.
 - Genie has a mark of its own: a solid core, an arc around it, and a spark
   breaking away. The core is what stays, the arc is presence, the spark is the
   part that leaves and does something. Not a lamp, which is a joke that stops

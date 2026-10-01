@@ -64,10 +64,12 @@ connections:
   - conn_0123456789abcdef
 ```
 
-When a ready, granted connection is present, the engine offers the agent
-`authenticated_fetch`. Its description exposes only the connection display
-name, ID, and approved domains. Cookies and tokens never enter the model prompt,
-tool arguments, action log, or result.
+When a ready, granted connection is present, the engine offers a read-only
+`authenticated_fetch` path. Genie can also hand the same opaque lease to the
+gateway-managed Chromium runtime for pages that need JavaScript and interaction.
+The model sees only the connection display name, ID, and approved domains.
+Cookies and tokens never enter the model prompt, tool arguments, action log, or
+result.
 
 The tool performs a read-only HTTPS GET using a cookie jar. It rejects embedded
 credentials, private-network destinations, unapproved domains, and redirects
@@ -94,9 +96,8 @@ from an agent removes that agent's grant without affecting other agents.
 
 - Cookie-authenticated, server-rendered pages work through
   `authenticated_fetch` today.
-- Origin local storage is captured for forward compatibility. Pages that
-  require client-side JavaScript or local-storage token injection need an
-  isolated browser executor rather than HTTP fetch.
+- Origin local storage is replayed only inside the isolated managed browser for
+  pages that require client-side JavaScript or interaction.
 - CAPTCHA, passkeys, and MFA may require a fresh interactive sign-in. Soulacy
   does not bypass them.
 - Hosted deployments must persist the authenticated-connection metadata

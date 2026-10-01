@@ -302,7 +302,7 @@ func (s *Server) buildExecutionPlan(ctx context.Context, workspaceID, subject, g
 			return missions.ExecutionPlan{}, err
 		}
 		for _, connection := range connections {
-			inventory.WebsiteAccess = append(inventory.WebsiteAccess, missions.InventoryWebsiteAccess{Name: connection.Name, Domains: connection.AllowedDomains,
+			inventory.WebsiteAccess = append(inventory.WebsiteAccess, missions.InventoryWebsiteAccess{ID: connection.ID, Name: connection.Name, Domains: connection.AllowedDomains,
 				Ready: connection.Status == authconnections.StatusReady && connection.HasSecret})
 		}
 	}
@@ -316,7 +316,12 @@ func (s *Server) buildExecutionPlan(ctx context.Context, workspaceID, subject, g
 			inventory.Skills = append(inventory.Skills, skill.Name)
 		}
 	}
-	inventory.BrowserAutomation, inventory.BrowserDetail = missions.DetectBrowserAutomation(inventory.Tools)
+	if s.managedBrowser != nil {
+		inventory.BrowserAutomation, inventory.BrowserDetail = s.managedBrowser.Available()
+	}
+	if !inventory.BrowserAutomation {
+		inventory.BrowserAutomation, inventory.BrowserDetail = missions.DetectBrowserAutomation(inventory.Tools)
+	}
 	return missions.BuildExecutionPlan(goal, knownInputs, inventory)
 }
 
@@ -494,6 +499,14 @@ func (s *Server) PrepareWebsiteAccessForGenie(ctx context.Context, name, baseURL
 	for _, connection := range connections {
 		for _, existingDomain := range connection.AllowedDomains {
 			if existingDomain == domains[0] {
+				grants := append([]string(nil), connection.AgentIDs...)
+				if !missionContainsString(grants, runtime.GenieAgentID) {
+					grants = append(grants, runtime.GenieAgentID)
+					if err := s.authConnections.ReplaceAgentGrants(ctx, runtime.PersonalWorkspaceID, connection.ID, grants); err != nil {
+						return nil, err
+					}
+					connection, _ = s.authConnections.Get(ctx, runtime.PersonalWorkspaceID, connection.ID)
+				}
 				return map[string]any{
 					"connection": connection, "setup_href": "#websites",
 					"message": "Website Access already has a domain-restricted connection for this site. Open Website Access to sign in or refresh it.",
@@ -524,6 +537,15 @@ func (s *Server) PrepareWebsiteAccessForGenie(ctx context.Context, name, baseURL
 		"connection": connection, "setup_href": "#websites",
 		"message": "A domain-restricted Website Access connection is ready. Open Website Access and sign in directly on the provider's page. Do not send credentials to Genie.",
 	}, nil
+}
+
+func missionContainsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) CreateMissionForGenie(ctx context.Context, title, objective, finishLine, cron, at, channel, to string) (map[string]any, error) {

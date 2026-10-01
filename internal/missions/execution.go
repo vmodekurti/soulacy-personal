@@ -56,12 +56,13 @@ type ExecutionCapability struct {
 }
 
 type ExecutionRequirement struct {
-	Key       string `json:"key"`
-	Label     string `json:"label"`
-	Why       string `json:"why"`
-	Status    string `json:"status"`
-	Sensitive bool   `json:"sensitive,omitempty"`
-	SetupHref string `json:"setup_href,omitempty"`
+	Key          string `json:"key"`
+	Label        string `json:"label"`
+	Why          string `json:"why"`
+	Status       string `json:"status"`
+	Sensitive    bool   `json:"sensitive,omitempty"`
+	SetupHref    string `json:"setup_href,omitempty"`
+	ConnectionID string `json:"connection_id,omitempty"`
 }
 
 type ExecutionStep struct {
@@ -81,6 +82,7 @@ type InventoryConnector struct {
 }
 
 type InventoryWebsiteAccess struct {
+	ID      string   `json:"id,omitempty"`
 	Name    string   `json:"name"`
 	Domains []string `json:"domains"`
 	Ready   bool     `json:"ready"`
@@ -180,7 +182,7 @@ func BuildExecutionPlan(goal string, knownInputs map[string]string, inventory Ca
 		plan.RequiredInputs = append(plan.RequiredInputs, ExecutionRequirement{Key: spec.key, Label: spec.label, Why: spec.why, Status: status})
 	}
 
-	authReady, authName := matchingWebsiteAccess(profile.domains, inventory.WebsiteAccess)
+	authReady, authName, authConnectionID := matchingWebsiteAccess(profile.domains, inventory.WebsiteAccess)
 	if profile.auth != "none" {
 		status := "optional"
 		if authReady {
@@ -193,7 +195,7 @@ func BuildExecutionPlan(goal string, knownInputs map[string]string, inventory Ca
 			detail = "Encrypted Website Access is ready through " + authName + "."
 		}
 		plan.RequiredInputs = append(plan.RequiredInputs, ExecutionRequirement{Key: "website_access", Label: "Provider sign-in", Why: detail,
-			Status: status, Sensitive: true, SetupHref: "#websites"})
+			Status: status, Sensitive: true, SetupHref: "#websites", ConnectionID: authConnectionID})
 	}
 	if profile.payment {
 		status := "secure_setup"
@@ -335,13 +337,13 @@ func matchingConnector(profile planProfile, connectors []InventoryConnector) *In
 	return nil
 }
 
-func matchingWebsiteAccess(domains []string, connections []InventoryWebsiteAccess) (bool, string) {
+func matchingWebsiteAccess(domains []string, connections []InventoryWebsiteAccess) (bool, string, string) {
 	for _, connection := range connections {
 		if connection.Ready && (len(domains) == 0 || domainsOverlap(domains, connection.Domains)) {
-			return true, connection.Name
+			return true, connection.Name, connection.ID
 		}
 	}
-	return false, ""
+	return false, "", ""
 }
 
 func matchingActionTool(profile planProfile, tools []string) string {

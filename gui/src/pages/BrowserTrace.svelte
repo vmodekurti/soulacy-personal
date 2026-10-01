@@ -138,7 +138,7 @@
     </div>
 
   <p class="intro">
-    Replay an agent's browser automation — every navigate, click, type, extract and
+    Replay an agent's browser automation: every navigate, click, type, extract and
     screenshot, reconstructed from the action log. Per-domain navigation is enforced
     by each agent's tool policy.
   </p>
@@ -149,7 +149,7 @@
         <div class="ready-score">{status.score}</div>
         <div>
           <strong>Automation readiness</strong>
-          <p>{status.ready}/{status.total} checks ready. {status.sidecars?.length || 0} browser sidecar{(status.sidecars?.length || 0) === 1 ? '' : 's'} detected.</p>
+          <p>{status.ready}/{status.total} checks ready. {status.managed?.available ? 'Managed Chromium is available.' : `${status.sidecars?.length || 0} browser sidecar${(status.sidecars?.length || 0) === 1 ? '' : 's'} detected.`}</p>
         </div>
       </div>
       <div class="ready-checks">
@@ -172,7 +172,18 @@
         {/if}
       </div>
       <div class="ops-card">
-        <div class="ops-label">Sidecars</div>
+        <div class="ops-label">Managed Runtime</div>
+        <strong>{status.managed?.available ? 'Ready' : 'Unavailable'}</strong>
+        <p>{status.managed?.detail || 'Managed browser status is unavailable.'}</p>
+        {#if status.managed?.available}
+          <div class="mini-stats">
+            <span>{status.managed?.active_sessions || 0} active</span>
+            <span>{status.managed?.session_ttl_minutes || 20} minute expiry</span>
+          </div>
+        {/if}
+      </div>
+      <div class="ops-card">
+        <div class="ops-label">Optional Sidecars</div>
         <strong>{status.sidecars?.length || 0} detected</strong>
         {#if status.sidecars?.length}
           <div class="sidecar-list">
@@ -185,7 +196,7 @@
             {/each}
           </div>
         {:else}
-          <p>No Playwright/Puppeteer/browser MCP sidecar is connected yet.</p>
+          <p>No optional browser MCP sidecar is connected. Genie can use the managed runtime when it is ready.</p>
         {/if}
       </div>
     </section>

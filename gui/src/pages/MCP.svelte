@@ -308,7 +308,7 @@
     try {
       const res = await api.mcp.provisionGlama({ glama_url: glamaURL.trim(), env: {} })
       if (res.ok) {
-        // No env required — already saved!
+        // No env required. It is already saved.
         info = res.message || 'Installed from Glama.'
         if (res.restart_needed) restartNeeded = true
         closeGlamaModal()
@@ -386,7 +386,7 @@
       args: ['-y', '@playwright/mcp@latest', '--headless', '--cdp-endpoint', 'wss://YOUR-BROWSER-ENDPOINT'],
       keeps_processes: true,
       requires: ['node_runtime'],
-      note: 'Drives a browser running somewhere else. Nothing is installed here — no Chromium, no system libraries, no download — so this is the one that works on platforms where you have no shell. Replace the endpoint with your browser service URL.',
+      note: 'Drives a browser running somewhere else. Nothing is installed here, so it also works on platforms where you have no shell. Replace the endpoint with your browser service URL.',
     },
     {
       id: 'browser_visible',
@@ -407,7 +407,7 @@
       command: tpl.command,
       args: [...tpl.args],
       env: { ...(tpl.env || {}) },
-      // A server whose child process is its state — a browser — must be
+      // A server whose child process is its state, such as a browser, must be
       // exempt from the per-call process janitor. `requires` stays out: it is
       // how this screen decides what to show, not something the gateway
       // stores.
@@ -517,7 +517,7 @@
         {installGuideLoading ? 'Inspecting…' : 'Show install method'}
       </button>
     </div>
-    <p class="install-agent-hint">You can also tell the <strong>System</strong> agent: <code>Install this MCP server — &lt;repository URL&gt;</code>. It reads this inspection and the bounded README, then chooses the final method before making changes.</p>
+    <p class="install-agent-hint">You can also tell the <strong>System</strong> agent: <code>Install this MCP server: &lt;repository URL&gt;</code>. It reads this inspection and the bounded README, then chooses the final method before making changes.</p>
 
     {#if installGuideError}
       <div class="banner err">{installGuideError}</div>
@@ -619,7 +619,7 @@
     <div class="empty-card">
       <div class="empty-icon">🔌</div>
       <p>No MCP servers configured.</p>
-      <p class="hint">Click <strong>+ New Server</strong> to add one — choose from a template or define your own.</p>
+      <p class="hint">Click <strong>+ New Server</strong> to add one. Choose from a template or define your own.</p>
     </div>
   {:else}
     <div class="server-list">
@@ -675,13 +675,13 @@
     <h3>About MCP</h3>
     <p>
       MCP (<a href="https://spec.modelcontextprotocol.io/" target="_blank" rel="noopener">Model Context Protocol</a>)
-      lets Soulacy consume tools from external servers — filesystem, GitHub, Slack, Postgres, web fetch, and many others.
+      lets Soulacy consume tools from external servers: filesystem, GitHub, Slack, Postgres, web fetch, and many others.
       Tools from connected servers are <strong>auto-injected into every agent</strong> with namespaced names
       (<code>mcp__&lt;server&gt;__&lt;tool&gt;</code>) and routed transparently by the engine.
     </p>
     <p>
-      Browser automation should usually use the <strong>Browser headless</strong> quick-start. Soulacy also runs
-      a process janitor around MCP tool calls so short-lived browser children are cleaned up after the call returns.
+      Genie already has a gateway-managed browser for secure provider website actions, including domain boundaries
+      and final-action approval. Add a browser MCP server only when a custom agent needs general browser tools.
       Use <strong>Browser visible</strong> only for live debugging.
     </p>
     <p>Changes here are written to <code>config.yaml</code>; the gateway must be restarted to pick them up.</p>
@@ -709,7 +709,7 @@
               class="template-chip"
               class:blocked={blocked.length > 0}
               title={blocked.length > 0
-                ? blocked.map(b => b.name + ': ' + b.detail + (b.workaround ? ' — instead: ' + b.workaround : '')).join('\n')
+                ? blocked.map(b => b.name + ': ' + b.detail + (b.workaround ? '. Instead: ' + b.workaround : '')).join('\n')
                 : (tpl.note || '')}
               on:click={() => applyTemplate(tpl)}
             >{tpl.label}{#if blocked.length > 0}<span class="warn-dot" aria-hidden="true">!</span>{/if}</button>
@@ -718,7 +718,7 @@
             {@const anyBlocked = TEMPLATES.some(tpl => blockersFor(tpl, deployment).length > 0)}
             {#if anyBlocked}
               <p class="template-note">
-                Templates marked <strong>!</strong> need something this deployment does not have — hover to see what, and what to use instead.
+                Templates marked <strong>!</strong> need something this deployment does not have. Hover to see what and what to use instead.
                 They can still be saved; they will not run.
               </p>
             {/if}
@@ -806,7 +806,7 @@
             <div class="field">
               <span class="field-label">Credential</span>
               <input type="password" bind:value={editing.auth_secret}
-                placeholder={editing.auth.secret_ref ? 'Saved — enter only to replace' : 'Paste token or API key'} />
+                placeholder={editing.auth.secret_ref ? 'Saved. Enter only to replace' : 'Paste token or API key'} />
             </div>
             <div class="field">
               <span class="field-label">Saved secret name <span class="optional">(advanced)</span></span>
@@ -826,7 +826,7 @@
               <div class="field">
                 <span class="field-label">Client secret <span class="req">*</span></span>
                 <input type="password" bind:value={editing.auth_secret}
-                  placeholder={editing.auth.client_secret_ref ? 'Saved — enter only to replace' : 'Paste client secret'} />
+                  placeholder={editing.auth.client_secret_ref ? 'Saved. Enter only to replace' : 'Paste client secret'} />
               </div>
             </div>
             <div class="row-2">

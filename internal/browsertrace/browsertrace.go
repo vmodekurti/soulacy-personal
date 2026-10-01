@@ -47,6 +47,9 @@ type Trace struct {
 // automation sidecar. Tolerant of naming across MCP servers.
 func isBrowserTool(name string) bool {
 	n := strings.ToLower(name)
+	if strings.Contains(n, "website_action") || strings.Contains(n, "act_on_website") {
+		return true
+	}
 	if strings.HasPrefix(n, "mcp__") && (strings.Contains(n, "browser") || strings.Contains(n, "playwright") || strings.Contains(n, "puppeteer") || strings.Contains(n, "computer")) {
 		return true
 	}
@@ -61,6 +64,14 @@ func isBrowserTool(name string) bool {
 func actionOf(name string) string {
 	n := strings.ToLower(name)
 	switch {
+	case strings.Contains(n, "start_website_action"):
+		return "navigate"
+	case strings.Contains(n, "inspect_website_action"):
+		return "extract"
+	case strings.Contains(n, "commit_website_action"):
+		return "click"
+	case strings.Contains(n, "act_on_website"):
+		return "other"
 	case strings.Contains(n, "navigate") || strings.Contains(n, "goto"):
 		return "navigate"
 	case strings.Contains(n, "screenshot") || strings.Contains(n, "capture"):

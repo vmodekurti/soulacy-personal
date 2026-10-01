@@ -17,7 +17,7 @@ func TestGenieToolSurfaceIsDynamicAndNonPrivileged(t *testing.T) {
 	e.builtins = e.buildBuiltins()
 	genie := e.loader.Get(GenieAgentID)
 	names := toolSchemaNameSet(e.allToolSchemasForContext(WithPrincipal(context.Background(), Principal{Role: "admin"}), genie, "http"))
-	for _, want := range []string{"list_skills", "read_skill", "list_mcp_tools", "list_agents", "plan_action", "prepare_website_access", "plan_mission", "create_mission", "list_missions", "get_mission", "update_mission", "cancel_mission", "create_monitor", "list_monitors", "pause_monitor", "cancel_monitor"} {
+	for _, want := range []string{"list_skills", "read_skill", "list_mcp_tools", "list_agents", "plan_action", "prepare_website_access", "start_website_action", "inspect_website_action", "act_on_website", "commit_website_action", "close_website_action", "plan_mission", "create_mission", "list_missions", "get_mission", "update_mission", "cancel_mission", "create_monitor", "list_monitors", "pause_monitor", "cancel_monitor"} {
 		if !names[want] {
 			t.Errorf("Genie missing %s", want)
 		}
@@ -36,6 +36,18 @@ func TestGenieToolSurfaceIsDynamicAndNonPrivileged(t *testing.T) {
 	agentsOut, err := builtinByName(t, e.builtins, "list_agents").Handler(context.Background(), nil)
 	if err != nil || !strings.Contains(agentsOut, "researcher") {
 		t.Fatalf("live agents = %q, %v", agentsOut, err)
+	}
+}
+
+func TestGenieManagedBrowserCommitAlwaysRequiresApproval(t *testing.T) {
+	genie := builtinGenieAgent()
+	if !containsExactString(genie.ConfirmTools, "commit_website_action") {
+		t.Fatal("managed browser final submission is not in Genie's confirmation gate")
+	}
+	for _, tool := range []string{"start_website_action", "inspect_website_action", "act_on_website", "close_website_action"} {
+		if containsExactString(genie.ConfirmTools, tool) {
+			t.Fatalf("ordinary preparation tool %q should not require final-action approval", tool)
+		}
 	}
 }
 
