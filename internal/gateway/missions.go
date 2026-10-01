@@ -508,8 +508,10 @@ func (s *Server) PrepareWebsiteAccessForGenie(ctx context.Context, name, baseURL
 					connection, _ = s.authConnections.Get(ctx, runtime.PersonalWorkspaceID, connection.ID)
 				}
 				return map[string]any{
-					"connection": connection, "setup_href": "#websites",
-					"message": "Website Access already has a domain-restricted connection for this site. Open Website Access to sign in or refresh it.",
+					"connection":        connection,
+					"setup_href":        "#websites?connection=" + connection.ID,
+					"mobile_setup_href": "soulacy://website-access/" + connection.ID,
+					"message":           "Website Access already has a domain-restricted connection for this site. Open Website Access to sign in or refresh it.",
 				}, nil
 			}
 		}
@@ -534,8 +536,10 @@ func (s *Server) PrepareWebsiteAccessForGenie(ctx context.Context, name, baseURL
 	}
 	connection, _ = s.authConnections.Get(ctx, runtime.PersonalWorkspaceID, connection.ID)
 	return map[string]any{
-		"connection": connection, "setup_href": "#websites",
-		"message": "A domain-restricted Website Access connection is ready. Open Website Access and sign in directly on the provider's page. Do not send credentials to Genie.",
+		"connection":        connection,
+		"setup_href":        "#websites?connection=" + connection.ID,
+		"mobile_setup_href": "soulacy://website-access/" + connection.ID,
+		"message":           "A domain-restricted Website Access connection is ready. Open Website Access and sign in directly on the provider's page. Do not send credentials to Genie.",
 	}, nil
 }
 
