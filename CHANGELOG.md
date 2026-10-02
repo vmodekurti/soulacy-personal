@@ -127,6 +127,12 @@ to follow [Semantic Versioning](https://semver.org/).
   second device stays a viewer.
 
 ### Changed
+- Genie now keeps the current mission and composer in focus. Mission history,
+  agent selection, run metrics, artifacts, automations, and model controls are
+  still one action away in History or Details. Older turns stay collapsed
+  until requested. Feed now separates unread, saved, and archived results,
+  synchronizes those choices through the gateway, and carries result context
+  into Genie when work continues.
 - One gate for every agent that reaches disk. There were three ways an agent
   got written with three different sets of guarantees: Studio validated,
   refused to overwrite a protected built-in and blocked a privileged agent

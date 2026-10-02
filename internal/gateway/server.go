@@ -964,6 +964,8 @@ func (s *Server) buildApp() *fiber.App {
 	api.Get("/mobile/deliveries", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleListMobileDeliveries)
 	api.Get("/mobile/deliveries/:id", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleGetMobileDelivery)
 	api.Post("/mobile/deliveries/:id/read", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleReadMobileDelivery)
+	api.Get("/mobile/feed-state", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleListMobileFeedState)
+	api.Post("/mobile/feed-state", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handlePutMobileFeedState)
 	// Any signed-in person may pair another device of their own (a phone
 	// pairing its watch); the handler itself insists on admin for pairing
 	// someone else. chat:read is the one permission every role holds.

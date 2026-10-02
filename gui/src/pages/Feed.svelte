@@ -6,7 +6,8 @@
   import { onMount, onDestroy } from 'svelte'
   import { api, createEventSocket } from '../lib/api.js'
   import { parseMarkdown, richRenderer } from '../lib/markdown.js'
-  import { activityAgent } from '../lib/stores.js'
+  import { activityAgent, genieAsk } from '../lib/stores.js'
+  import { applyRemoteFeedState, continuationPrompt, filterFeedCards, initialReadState } from '../lib/feedstate.js'
   import TourButton from '../lib/TourButton.svelte'
   import StoryViewer from '../lib/StoryViewer.svelte'
   import Presentation from '../lib/Presentation.svelte'
@@ -18,11 +19,19 @@
   let error = ''
   let pending = 0          // results that arrived while reading
   let saved = new Set()
+  let read = new Set()
+  let archived = new Set()
+  let scope = 'feed'
   let socket = null
   let refreshTimer = null
 
   const SAVED_KEY = 'soulacy.feed.saved'
+  const READ_KEY = 'soulacy.feed.read'
+  const ARCHIVED_KEY = 'soulacy.feed.archived'
+  const READ_INITIALIZED_KEY = 'soulacy.feed.read.initialized'
   try { saved = new Set(JSON.parse(localStorage.getItem(SAVED_KEY) || '[]')) } catch { saved = new Set() }
+  try { read = new Set(JSON.parse(localStorage.getItem(READ_KEY) || '[]')) } catch { read = new Set() }
+  try { archived = new Set(JSON.parse(localStorage.getItem(ARCHIVED_KEY) || '[]')) } catch { archived = new Set() }
 
   function agentName(id) { return agents.find(a => a.id === id)?.name || id || 'Soulacy' }
   function initials(id) { const n = agentName(id); return n.split(/[\s-]+/).map(w => w[0]).join('').slice(0, 2).toUpperCase() }
@@ -64,17 +73,42 @@
   async function load({ quiet = false } = {}) {
     if (!quiet) { loading = true; error = '' }
     try {
-      const [ag, ledger, del, app, run] = await Promise.all([
+      const [ag, ledger, del, app, run, remoteState] = await Promise.all([
         api.agents.list().catch(() => ({ agents: [] })),
         api.runs.ledger({ limit: 60 }).catch(() => ({ runs: [] })),
         api.mobile.deliveries(40).catch(() => ({ deliveries: [] })),
         api.approvals.list().catch(() => ({ approvals: [] })),
         api.activity.running().catch(() => ({ sessions: [] })),
+        api.mobile.feedState().catch(() => null),
       ])
       agents = ag.agents || []
       running = new Set((run.sessions || []).map(s => s.agent_id))
       const deliveries = del.deliveries || []
       cards = buildCards({ runs: ledger.runs || [], deliveries, approvals: app.approvals || [] })
+      try {
+        const rows = remoteState?.cards || []
+        const hasLocalState = !!localStorage.getItem(READ_INITIALIZED_KEY)
+        if (rows.length > 0) {
+          const state = applyRemoteFeedState(cards, rows)
+          read = state.read
+          saved = state.saved
+          archived = state.archived
+          saveLocalState()
+        } else if (!hasLocalState) {
+          read = initialReadState(cards)
+          saveLocalState()
+        } else if (remoteState) {
+          // First load after upgrading: preserve meaningful browser state and
+          // copy it to the account so the next client sees the same Feed.
+          const defaults = initialReadState(cards)
+          for (const card of cards) {
+            if (card.kind === 'approval') continue
+            if (saved.has(card.id) || archived.has(card.id) || read.has(card.id) !== defaults.has(card.id)) {
+              persistCardState(card)
+            }
+          }
+        }
+      } catch {}
       pending = 0
     } catch (e) {
       error = e.message || String(e)
@@ -83,17 +117,67 @@
     }
   }
 
+  function saveLocalState() {
+    try {
+      localStorage.setItem(SAVED_KEY, JSON.stringify([...saved]))
+      localStorage.setItem(READ_KEY, JSON.stringify([...read]))
+      localStorage.setItem(ARCHIVED_KEY, JSON.stringify([...archived]))
+      localStorage.setItem(READ_INITIALIZED_KEY, '1')
+    } catch {}
+  }
+
+  function persistCardState(card) {
+    if (!card || card.kind === 'approval') return
+    api.mobile.saveFeedState({
+      card_id: card.id,
+      read: read.has(card.id),
+      saved: saved.has(card.id),
+      archived: archived.has(card.id),
+    }).catch(() => {})
+  }
+
   function toggleSave(card) {
     if (saved.has(card.id)) saved.delete(card.id); else saved.add(card.id)
     saved = new Set(saved)
-    try { localStorage.setItem(SAVED_KEY, JSON.stringify([...saved])) } catch {}
+    saveLocalState()
+    persistCardState(card)
+  }
+  function setRead(card, value, persist = true) {
+    if (card.kind === 'approval') return
+    if (value) read.add(card.id); else read.delete(card.id)
+    read = new Set(read)
+    saveLocalState()
+    if (persist) persistCardState(card)
+  }
+  function toggleRead(card) {
+    const next = !read.has(card.id)
+    setRead(card, next)
+    toast = next ? 'Marked read' : 'Marked unread'
+    setTimeout(() => (toast = ''), 1500)
+  }
+  function archive(card) {
+    if (card.kind === 'approval') return
+    archived.add(card.id)
+    setRead(card, true, false)
+    archived = new Set(archived)
+    saveLocalState()
+    persistCardState(card)
+    toast = 'Archived'
+    setTimeout(() => (toast = ''), 1500)
+  }
+  function restore(card) {
+    archived.delete(card.id)
+    archived = new Set(archived)
+    saveLocalState()
+    persistCardState(card)
+    toast = 'Restored'
+    setTimeout(() => (toast = ''), 1500)
   }
   let lastTap = new Map()
   function tap(card) {
-    // Double-tap (or double-click) saves — the one gesture everyone knows.
-    const now = Date.now(), prev = lastTap.get(card.id) || 0
+    const now = Date.now(), previous = lastTap.get(card.id) || 0
     lastTap.set(card.id, now)
-    if (now - prev < 350) { toggleSave(card); burst(card.id) }
+    if (now - previous < 350) { toggleSave(card); burst(card.id) }
   }
   let bursting = ''
   // A post, not a transcript: a headline (first heading or first sentence) and
@@ -144,7 +228,7 @@
   function burst(id) { bursting = id; setTimeout(() => { if (bursting === id) bursting = '' }, 700) }
 
   function reply(card) {
-    activityAgent.set(card.agent || '')
+    genieAsk.set({ text: continuationPrompt({ ...card, title: titleFor(card) }, agentName(card.agent)), at: Date.now() })
     location.hash = '#chat'
   }
   async function share(card) {
@@ -192,6 +276,10 @@
     { id: 'today', label: 'Today', glyph: '☀︎', live: false, seen: false },
     ...agents.filter(a => a.enabled !== false).map(a => ({ id: a.id, label: a.name || a.id, glyph: initials(a.id), live: running.has(a.id), seen: !cards.some(c => c.agent === a.id) })),
   ]
+  $: displayedCards = filterFeedCards(cards, scope, { read, saved, archived })
+  $: unreadCount = filterFeedCards(cards, 'unread', { read, saved, archived }).length
+  $: archivedCount = filterFeedCards(cards, 'archived', { read, saved, archived }).length
+  $: savedCount = filterFeedCards(cards, 'saved', { read, saved, archived }).length
 </script>
 
 <div class="feed">
@@ -214,6 +302,13 @@
     {/each}
   </div>
 
+  <nav class="scopes" aria-label="Feed views">
+    <button class:active={scope === 'feed'} on:click={() => scope = 'feed'}>Feed</button>
+    <button class:active={scope === 'unread'} on:click={() => scope = 'unread'}>Unread{#if unreadCount}<span>{unreadCount}</span>{/if}</button>
+    <button class:active={scope === 'saved'} on:click={() => scope = 'saved'}>Saved{#if savedCount}<span>{savedCount}</span>{/if}</button>
+    <button class:active={scope === 'archived'} on:click={() => scope = 'archived'}>Archive{#if archivedCount}<span>{archivedCount}</span>{/if}</button>
+  </nav>
+
   {#if pending > 0}
     <button class="pill" on:click={() => load()}>{pending} new result{pending === 1 ? '' : 's'} ↑</button>
   {/if}
@@ -222,13 +317,18 @@
     <div class="empty">Loading your feed…</div>
   {:else if error}
     <div class="empty err">{error}</div>
-  {:else if cards.length === 0}
-    <div class="empty">Nothing yet. When an agent finishes work or sends something to your phone, it shows up here.</div>
+  {:else if displayedCards.length === 0}
+    <div class="empty">{scope === 'archived' ? 'No archived cards.' : scope === 'unread' ? 'You are all caught up.' : scope === 'saved' ? 'Save a card to keep it here.' : 'Nothing yet. When an agent finishes work or sends something to your phone, it shows up here.'}</div>
   {/if}
 
   <div class="cards">
-    {#each cards as card (card.id)}
-      <article class="card" class:needs={card.kind === 'approval'} on:click={() => tap(card)} on:keydown={(e) => e.key === 'Enter' && toggleSave(card)} tabindex="0" aria-label="{agentName(card.agent)} · {card.kind}">
+    {#each displayedCards as card (card.id)}
+      <!-- The card keeps the familiar double-click save gesture and exposes
+           the same action to keyboard users through Enter. -->
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex a11y_no_noninteractive_element_interactions -->
+      <article class="card" class:needs={card.kind === 'approval'} class:unread={card.kind !== 'approval' && !read.has(card.id)}
+        on:click={() => tap(card)} on:keydown={(event) => event.key === 'Enter' && toggleSave(card)} tabindex="0"
+        aria-label="{agentName(card.agent)} · {card.kind}">
         <div class="head">
           <span class="av" style="--h:{hue(card.agent)}">{initials(card.agent)}</span>
           <div class="who">
@@ -239,7 +339,7 @@
             </span>
           </div>
           {#if card.kind === 'run' && !card.ok}<span class="chip bad">failed</span>{/if}
-          {#if card.kind === 'delivery' && card.unread}<span class="chip new">new</span>{/if}
+          {#if card.kind !== 'approval' && !read.has(card.id)}<span class="unread-dot" aria-label="Unread"></span>{/if}
         </div>
 
         {#if card.kind === 'approval'}
@@ -267,8 +367,12 @@
 
         <div class="actions">
           <button class="act heart" class:on={saved.has(card.id)} class:burst={bursting === card.id} title="Save" aria-label="Save" on:click|stopPropagation={() => { toggleSave(card); burst(card.id) }}>♥</button>
-          <button class="act" title="Reply in Chat" aria-label="Reply" on:click|stopPropagation={() => reply(card)}>◎</button>
+          <button class="act" title="Continue in Genie" aria-label="Continue in Genie" on:click|stopPropagation={() => reply(card)}>◎</button>
           <button class="act" title="Copy" aria-label="Copy" on:click|stopPropagation={() => share(card)}>↗</button>
+          {#if card.kind !== 'approval'}
+            <button class="act state" title={read.has(card.id) ? 'Mark unread' : 'Mark read'} aria-label={read.has(card.id) ? 'Mark unread' : 'Mark read'} on:click|stopPropagation={() => toggleRead(card)}>{read.has(card.id) ? '◉' : '○'}</button>
+            <button class="act state" title={scope === 'archived' ? 'Restore' : 'Archive'} aria-label={scope === 'archived' ? 'Restore' : 'Archive'} on:click|stopPropagation={() => scope === 'archived' ? restore(card) : archive(card)}>{scope === 'archived' ? '↩' : '⌑'}</button>
+          {/if}
           <span class="spacer"></span>
           {#if card.ms}<span class="dur">{(card.ms / 1000).toFixed(card.ms < 10000 ? 1 : 0)}s</span>{/if}
         </div>
@@ -304,6 +408,10 @@
   .top-actions { display: flex; gap: 14px; }
   .icon { background: none; border: 0; color: var(--f-ink); font-size: 20px; cursor: pointer; text-decoration: none; padding: 2px 4px; }
   .stories { display: flex; gap: 14px; padding: 12px 16px; overflow-x: auto; border-bottom: 1px solid var(--f-line); scrollbar-width: none; }
+  .scopes { display: flex; gap: 6px; padding: 10px 16px; max-width: 592px; margin: 0 auto; overflow-x: auto; scrollbar-width: none; }
+  .scopes button { border: 1px solid var(--f-line); background: transparent; color: var(--f-ink-2); border-radius: 999px; padding: 7px 12px; font: inherit; font-size: 12px; font-weight: 650; cursor: pointer; white-space: nowrap; }
+  .scopes button.active { background: var(--f-ink); border-color: var(--f-ink); color: var(--f-bg); }
+  .scopes span { display: inline-grid; place-items: center; min-width: 17px; height: 17px; margin-left: 5px; padding: 0 3px; border-radius: 999px; background: var(--sl-accent-soft); color: var(--f-accent-ink); font-size: 10px; }
   .story { background: none; border: 0; padding: 0; display: grid; justify-items: center; gap: 5px; width: 68px; flex: none; color: var(--f-ink); font: inherit; font-size: 11px; cursor: pointer; }
   .story .ring { width: 62px; height: 62px; border-radius: 50%; padding: 2.5px; background: var(--f-ring); display: block; }
   .story.seen .ring { background: var(--f-line); }
@@ -315,6 +423,7 @@
   .pill { position: sticky; top: 58px; z-index: 2; margin: 10px auto 0; display: block; background: var(--f-accent); color: #fff; border: 0; border-radius: 999px; padding: 6px 14px; font-weight: 600; cursor: pointer; box-shadow: 0 6px 18px var(--sl-accent-soft-strong); }
   .cards { display: grid; justify-items: center; }
   .card { width: 100%; max-width: 560px; border-bottom: 1px solid var(--f-line); padding: 6px 0 8px; outline: none; }
+  .card.unread { background: linear-gradient(90deg, var(--sl-accent-soft), transparent 36%); }
   .card.needs { border: 1px solid var(--f-coral); border-radius: 12px; margin: 12px 16px 6px; width: calc(100% - 32px); }
   .head { display: flex; align-items: center; gap: 10px; padding: 8px 16px; }
   .head .av { width: 32px; height: 32px; border: 0; font-size: 12px; flex: none; }
@@ -323,7 +432,7 @@
   .meta { color: var(--f-ink-3); font-size: 12px; }
   .chip { margin-left: auto; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
   .chip.bad { background: color-mix(in srgb, var(--f-coral) 12%, transparent); color: var(--f-coral); }
-  .chip.new { background: var(--sl-accent-soft); color: var(--f-accent-ink); }
+  .unread-dot { margin-left: auto; width: 8px; height: 8px; border-radius: 50%; background: var(--f-accent); box-shadow: 0 0 0 3px var(--sl-accent-soft); }
   .title { padding: 0 16px 4px; font-weight: 600; font-size: 15px; line-height: 1.3; }
   .summary { padding: 0 16px 6px; font-size: 13.5px; color: var(--f-ink-2); line-height: 1.45; }
   .summary.clamped { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -347,6 +456,7 @@
   .act { background: none; border: 0; font-size: 20px; color: var(--f-ink); cursor: pointer; padding: 4px 6px; line-height: 1; }
   .act.heart.on { color: var(--f-coral); }
   .act.heart.burst { animation: burst .6s ease-out; }
+  .act.state { font-size: 18px; color: var(--f-ink-3); }
   @keyframes burst { 0% { transform: scale(1); } 35% { transform: scale(1.5); } 100% { transform: scale(1); } }
   .spacer { flex: 1; }
   .dur { color: var(--f-ink-3); font-size: 12px; font-variant-numeric: tabular-nums; padding-right: 8px; }

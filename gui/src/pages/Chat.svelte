@@ -41,6 +41,8 @@
   let syncMobileViewport = null
   let controlsOpen = false
   let chatMoreOpen = false
+  let missionDetailsOpen = false
+  let showEarlierTurns = false
   let chatListHidden = false   // collapse the chat sub-menu (thread list)
   function toggleChatList() {
     chatListHidden = !chatListHidden
@@ -95,6 +97,7 @@
   $: activeThread = $chatActiveThreadId ? ($chatThreads[$chatActiveThreadId] || null) : null
   $: threads = filterThreads(Object.values($chatThreads), threadSearch, showArchived, agentName)
   $: visibleMessages = activeThread?.messages || []
+  $: hiddenMessageCount = showEarlierTurns ? 0 : Math.max(0, visibleMessages.length - 6)
   $: isSending = !!activeThread?.sending
   $: currentArtifacts = activeThread ? (artifactsByThread[activeThread.id] || []) : []
   $: enabledProviders = providers.filter(p => p.registered)
@@ -328,6 +331,7 @@
   function selectThread(id) {
     if (!id || !$chatThreads[id]) return
     chatActiveThreadId.set(id)
+    showEarlierTurns = false
     metricsRefresh++
     const t = $chatThreads[id]
     if (t?.agentId && t?.sessionId) {
@@ -342,6 +346,7 @@
     const thread = newThread(agentId || activeThread?.agentId || defaultAgentId())
     upsertThread(thread)
     chatActiveThreadId.set(thread.id)
+    showEarlierTurns = false
     if (mobileViewport) chatListHidden = true
     metricsRefresh++
     scrollBottom(true)
@@ -2087,8 +2092,8 @@
     mobileMedia.addEventListener?.('change', syncMobileViewport)
     try {
       const savedChatList = localStorage.getItem('soulacy-chatlist-hidden')
-      chatListHidden = savedChatList == null ? mobileViewport : savedChatList === '1'
-    } catch (_) { chatListHidden = mobileViewport }
+      chatListHidden = savedChatList == null ? true : savedChatList === '1'
+    } catch (_) { chatListHidden = true }
     // The shared store survives SPA navigation and may contain an active run.
     // Only restore disk state on a genuine cold load; replacing a populated
     // store here can erase an answer that completed while Chat was unmounted.
@@ -2331,22 +2336,14 @@
 <div class="page modern-chat">
   <div class="page-header">
     <div class="chat-brand">
-      <button class="chat-list-toggle" on:click={toggleChatList} title={chatListHidden ? 'Show conversations' : 'Hide conversations'} aria-pressed={chatListHidden}>{chatListHidden ? '☰' : '‹'}</button>
-      <div><h1>Soulacy Chat</h1><span>Work with your agents</span></div>
+      <button class="chat-list-toggle history-toggle" on:click={toggleChatList} title={chatListHidden ? 'Show mission history' : 'Hide mission history'} aria-pressed={!chatListHidden}>◷ <span>History</span></button>
+      <div><h1>Genie</h1><span>{activeThread?.messages?.length ? (isSending ? 'Working on your mission' : 'Mission ready for a follow-up') : 'What should we get done?'}</span></div>
     </div>
     <div class="controls primary-controls">
-      {#if activeThread}<RunMetrics sessionId={activeThread.sessionId} agentId={activeThread.agentId} refreshKey={metricsRefresh} />{/if}
-      <label class="agent-picker"><span class="agent-presence"></span>
-        <select value={activeThread?.agentId || ''} on:change={(e) => setActiveAgent(e.currentTarget.value)} disabled={!agents.length} aria-label="Active agent">
-          {#if !agents.length}<option value="">No enabled agents</option>{:else}{#each agents as a}<option value={a.id}>{a.name || a.id}</option>{/each}{/if}
-        </select>
-      </label>
-		{#if activeThread?.agentId === 'genie'}
-			<button class="genie-status" on:click={() => { genieDrawerOpen = !genieDrawerOpen; if (genieDrawerOpen) loadGenieActivity() }} aria-expanded={genieDrawerOpen}>✦ <span>Automations &amp; Subagents</span></button>
-		{/if}
       <button class="top-icon top-search" class:active={historySearchOpen} on:click={() => historySearchOpen = !historySearchOpen} title="Search conversations" aria-label="Search conversations">⌘ K</button>
       <button class="voice-btn {voiceState}" on:click={() => { if (voiceState === 'live' || sidecarProcessing || voicePlaybackState !== 'idle') voiceSessionOpen = true; else voiceClick() }} title={voiceHint(voiceState, voiceDetail)} aria-label="Open voice conversation">🎤</button>
-      <button class="new-chat-btn" on:click={() => startThread()} disabled={!agents.length}>＋ New chat</button>
+      <button class="new-chat-btn" on:click={() => startThread()} disabled={!agents.length}>＋ New mission</button>
+      <button class="details-btn" class:active={missionDetailsOpen} on:click={() => missionDetailsOpen = !missionDetailsOpen} aria-expanded={missionDetailsOpen}>Details</button>
       <div class="header-tour"><TourButton /></div>
       <div class="chat-more-wrap">
         <button class="top-icon" class:active={chatMoreOpen} on:click={() => chatMoreOpen = !chatMoreOpen} title="More chat actions" aria-label="More chat actions">•••</button>
@@ -2365,6 +2362,25 @@
       </div>
     </div>
   </div>
+
+  {#if missionDetailsOpen}
+    <section class="mission-details" aria-label="Mission details" transition:slide|local={{ duration: 160 }}>
+      <div class="mission-identity">
+        <span class="detail-label">Working with</span>
+        <label class="agent-picker"><span class="agent-presence"></span>
+          <select value={activeThread?.agentId || ''} on:change={(e) => setActiveAgent(e.currentTarget.value)} disabled={!agents.length} aria-label="Active agent">
+            {#if !agents.length}<option value="">No enabled agents</option>{:else}{#each agents as a}<option value={a.id}>{a.name || a.id}</option>{/each}{/if}
+          </select>
+        </label>
+      </div>
+      {#if activeThread}<RunMetrics sessionId={activeThread.sessionId} agentId={activeThread.agentId} refreshKey={metricsRefresh} />{/if}
+      {#if activeThread?.agentId === 'genie'}
+        <button class="genie-status" on:click={() => { genieDrawerOpen = !genieDrawerOpen; if (genieDrawerOpen) loadGenieActivity() }} aria-expanded={genieDrawerOpen}>✦ Automations and delegated work</button>
+      {/if}
+      <button class="details-advanced" on:click={() => controlsOpen = !controlsOpen}>Model controls</button>
+      <button class="details-advanced" on:click={() => { artifactPanelOpen = !artifactPanelOpen; if (artifactPanelOpen && activeThread) loadArtifacts(activeThread.id, activeThread.agentId, activeThread.sessionId) }}>Artifacts {currentArtifacts.length ? `(${currentArtifacts.length})` : ''}</button>
+    </section>
+  {/if}
 
 	{#if genieDrawerOpen && activeThread?.agentId === 'genie'}
 		<div class="genie-backdrop" on:click={() => genieDrawerOpen = false} role="presentation"></div>
@@ -2484,12 +2500,12 @@
     <button class="chat-sidebar-backdrop" on:click={toggleChatList} aria-label="Close conversations"></button>
     <aside class="chat-sidebar">
     <div class="chat-sidebar-head">
-      <div><strong>Conversations</strong><span>Continue recent work</span></div>
-      <button class="sidebar-new" on:click={() => startThread()} title="New chat" aria-label="New chat">＋</button>
+      <div><strong>Mission history</strong><span>Continue recent work</span></div>
+      <button class="sidebar-new" on:click={() => startThread()} title="New mission" aria-label="New mission">＋</button>
     </div>
     <div class="thread-bar">
       <input class="thread-search" type="search" bind:this={searchEl}
-             bind:value={threadSearch} placeholder="Search chats… (⌘K)" aria-label="Search chats" />
+             bind:value={threadSearch} placeholder="Search missions… (⌘K)" aria-label="Search missions" />
       <button class="ghost-btn" class:on={showArchived} on:click={() => showArchived = !showArchived}
               title="Show archived chats">{showArchived ? 'Hide archived' : 'Archived'}</button>
     </div>
@@ -2519,7 +2535,7 @@
         </div>
       {/each}
       {#if threads.length === 0}
-        <span class="thread-empty">No chats match “{threadSearch}”.</span>
+        <span class="thread-empty">No missions match “{threadSearch}”.</span>
       {/if}
     </div>
     </aside>
@@ -2547,8 +2563,8 @@
         <div class="empty">
           {#if activeThread?.agentId}
             <div class="empty-avatar" aria-hidden="true">✦</div>
-            <h2 class="empty-title">Chat with {agentName(activeThread.agentId)}</h2>
-            <p class="empty-sub">Ask anything, or start with one of these:</p>
+            <h2 class="empty-title">What should we get done?</h2>
+            <p class="empty-sub">Describe the outcome. Genie can choose an agent, use a connector, or work through the browser.</p>
             <div class="suggestions">
               {#each promptsFor(activeThread.agentId) as s}
                 <button class="suggestion" on:click={() => useSuggestion(s)}>{s}</button>
@@ -2561,7 +2577,11 @@
           {/if}
         </div>
       {:else}
+        {#if hiddenMessageCount > 0}
+          <button class="earlier-turns" on:click={() => showEarlierTurns = true}>Show {hiddenMessageCount} earlier message{hiddenMessageCount === 1 ? '' : 's'}</button>
+        {/if}
         {#each visibleMessages as msg, mi}
+          {#if mi >= hiddenMessageCount}
           {@const k = msgKey(mi)}
           {@const long = msg.role === 'assistant' && isLongOutput(msg.text) && !expanded[k]}
           {@const resolvedFailure = isHistoricalFailureResolved(visibleMessages, mi)}
@@ -2733,6 +2753,7 @@
               {#if msg.feedbackError}<div class="feedback-error">⚠ {msg.feedbackError}</div>{/if}
             </div>
           </div>
+          {/if}
         {/each}
         {#if isSending}
           <div class="msg-row">
@@ -4025,6 +4046,8 @@
     background: transparent; cursor: pointer; font-family: inherit;
   }
   .chat-list-toggle { width: 30px; height: 30px; border-radius: 8px; font-size: 1.1rem; }
+  .chat-list-toggle.history-toggle { width: auto; padding: 0 .6rem; display: flex; gap: .35rem; font-size: .76rem; font-weight: 700; }
+  .chat-list-toggle.history-toggle span { margin: 0; color: inherit; font-size: inherit; }
   .chat-list-toggle:hover, .top-icon:hover, .top-icon.active { color: #fff; background: #19213a; border-color: #2b3657; }
   .primary-controls { justify-content: flex-end; gap: .45rem; flex-wrap: nowrap; }
   .agent-picker {
@@ -4042,6 +4065,19 @@
   }
   .new-chat-btn:hover:not(:disabled) { background: #cbc9ff; }
   .new-chat-btn:disabled { opacity: .45; }
+	.details-btn, .details-advanced {
+		height: 36px; padding: 0 .7rem; border: 1px solid #303b5d; border-radius: 9px;
+		color: #b9c0da; background: #151d34; cursor: pointer; font: inherit; font-size: .72rem; font-weight: 700;
+	}
+	.details-btn:hover, .details-btn.active, .details-advanced:hover { color: #fff; border-color: #5b6290; background: #222c49; }
+	.mission-details {
+		display: flex; align-items: center; gap: .7rem; min-height: 52px; padding: .5rem 1.1rem;
+		border-bottom: 1px solid #202943; background: #0e162a;
+	}
+	.mission-identity { display: flex; align-items: center; gap: .55rem; }
+	.detail-label { color: #7883a4; font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+	.mission-details .agent-picker { height: 34px; }
+	.mission-details :global(.run-metrics) { margin-left: auto; }
 	.genie-status { height: 36px; display: flex; align-items: center; gap: .35rem; padding: 0 .65rem; border: 1px solid #49447d; border-radius: 9px; color: #d5d2ff; background: #1c1d42; cursor: pointer; font-size: .72rem; font-weight: 700; }
 	.genie-status:hover, .genie-status[aria-expanded="true"] { background: #29275b; border-color: #7770d4; }
 	.genie-backdrop { position: fixed; z-index: 68; inset: 0; background: rgba(2,5,14,.48); backdrop-filter: blur(2px); }
@@ -4102,6 +4138,11 @@
   .modern-chat .chat-workspace { gap: 0; }
   .modern-chat .chat-wrap { border: 0; border-radius: 0; background: transparent; }
   .modern-chat .messages { padding: 2.2rem 0 1rem; gap: 1.15rem; }
+  .earlier-turns {
+    align-self: center; margin: 0 auto .25rem; padding: .48rem .8rem; border: 1px solid #2d3858;
+    border-radius: 999px; color: #9aa5c6; background: #111a30; cursor: pointer; font: inherit; font-size: .72rem;
+  }
+  .earlier-turns:hover { color: #fff; border-color: #545f8a; }
   /* Use the desktop canvas. Rich answers need enough room for financial tables
      and artifacts on ultrawide displays; prose keeps its own readable measure. */
   .modern-chat .msg-row {
@@ -4182,6 +4223,14 @@
     }
     .chat-brand { min-width: auto; }
     .chat-brand > div, .primary-controls :global(.run-metrics), .new-chat-btn, .header-tour, .agent-picker .agent-presence, .top-search { display: none; }
+		.chat-list-toggle.history-toggle { width: 44px; padding: 0; justify-content: center; }
+		.chat-list-toggle.history-toggle span { display: none; }
+		.details-btn { width: 44px; height: 44px; padding: 0; font-size: 0; }
+		.details-btn::before { content: '•••'; font-size: .9rem; }
+		.mission-details { flex-wrap: wrap; padding: .65rem; }
+		.mission-identity { flex: 1 1 100%; }
+		.mission-details .agent-picker { flex: 1; border: 1px solid #283250; background: #111a30; }
+		.mission-details :global(.run-metrics) { margin-left: 0; }
 		.genie-status { width: 44px; height: 44px; flex: 0 0 44px; padding: 0; justify-content: center; border-radius: 12px; }
 		.genie-status span { display: none; }
 		.genie-drawer { top: env(safe-area-inset-top); bottom: calc(64px + env(safe-area-inset-bottom)); width: 100%; max-width: none; border-left: 0; }
