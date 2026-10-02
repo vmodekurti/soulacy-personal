@@ -5224,6 +5224,16 @@ tool list, calls the LLM, executes tool calls, and repeats up to
 <code>max_turns</code>. It is reentrant: a peer agent invoked as a tool is just
 another engine call on a fresh, depth-limited session. SOUL.yaml files
 hot-reload via a file watcher.</p>
+<p>Every engine call also creates a versioned task contract. The contract
+normalizes the inbound message into a bounded perception record, carries the
+run budget and completion criteria, records redacted tool evidence, and tracks
+replanning. The runtime, rather than model prose, assigns the terminal outcome:
+<code>direct_answer</code>, <code>evidence_based</code>, <code>attempted</code>, <code>needs_input</code>,
+<code>verified_action</code>, <code>blocked</code>, or <code>failed</code>. External actions require explicit
+runtime evidence before they can be recorded as verified. A failed route gets
+at most two capability-level replans through connectors or APIs, an authorized
+website action, an official alternative, and finally a request for the minimum
+missing human input.</p>
 <p><strong>LLM router</strong>: a neutral <code>CompletionRequest</code> dispatched to the
 configured provider: Anthropic, Gemini, Ollama, or any OpenAI-compatible
 endpoint (OpenAI, Groq, OpenRouter, vLLM…). Embedders are registered
@@ -5263,7 +5273,8 @@ the GUI's Flow View.</p>
 <ol>
 <li><code>POST /api/v1/chat</code> hits auth → RBAC → rate-limit middleware.</li>
 <li>The HTTP channel hands the message to the engine synchronously.</li>
-<li>The engine assembles context, loops LLM ↔ tools, persists memory.</li>
+<li>The engine creates a task contract, assembles context, loops LLM ↔ tools,
+   evaluates completion evidence, and persists memory.</li>
 <li>Every step emits events: action log (durable JSONL + SQLite), the
    WebSocket hub, and the queue publisher (webhooks, NATS).</li>
 <li>The reply returns in the HTTP response; costs are recorded per
