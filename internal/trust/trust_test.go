@@ -10,6 +10,7 @@ import (
 func TestToolTrustClassifiesExternalTools(t *testing.T) {
 	untrustedTools := []string{
 		"fetch_url", "http_request", "download_file", "web_search",
+		"start_website_action", "inspect_website_action", "act_on_website", "commit_website_action",
 		"read_file", "list_dir", "find_files",
 		"kb_search",
 		"queue_take", "queue_list",

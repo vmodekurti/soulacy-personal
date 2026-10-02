@@ -34,6 +34,15 @@ import (
 func (e *Engine) runTool(ctx context.Context, def *agent.Definition, sessionID string, call message.ToolCall) (string, error) {
 	out, err := e.runToolDispatch(ctx, def, sessionID, call)
 	e.observeLearningTool(ctx, def, call, out, err)
+	evidence := out
+	if err != nil {
+		evidence = err.Error()
+	}
+	agentID := ""
+	if def != nil {
+		agentID = def.ID
+	}
+	e.observeTaskTool(ctx, agentID, sessionID, call, evidence, err != nil)
 	if obs := toolObserverFrom(ctx); obs != nil {
 		obs(call, out, err != nil)
 	}

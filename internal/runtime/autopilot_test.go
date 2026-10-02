@@ -10,6 +10,7 @@ import (
 
 	"github.com/soulacy/soulacy/internal/autopilot"
 	"github.com/soulacy/soulacy/internal/llm"
+	"github.com/soulacy/soulacy/internal/taskcontract"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 )
@@ -24,6 +25,47 @@ func managedTestEngine(t *testing.T, def *agent.Definition) (*Engine, *fakeHandl
 	t.Cleanup(func() { _ = store.Close() })
 	e.SetAutopilot(store, nil)
 	return e, p, store
+}
+
+func TestManagedRunIncludesUniversalTaskContract(t *testing.T) {
+	def := checkedDefinition()
+	e, p, _ := managedTestEngine(t, def)
+	sink := &captureSink6{}
+	e.sink = sink
+	p.responses = []llm.CompletionResponse{{Content: "VERIFIED"}}
+
+	if _, err := e.Handle(context.Background(), testUserMessage(def.ID, "managed-contract", "Return evidence")); err != nil {
+		t.Fatal(err)
+	}
+	runs := eventsByType(sink.events, "run.completed")
+	if len(runs) != 1 {
+		t.Fatalf("run.completed events = %d, want 1", len(runs))
+	}
+	payload, ok := runs[0].Payload.(map[string]any)
+	if !ok || payload["task_outcome"] != taskcontract.OutcomeDirectAnswer {
+		t.Fatalf("managed run lacks task contract: %#v", runs[0].Payload)
+	}
+	if _, ok := payload["task_contract"].(taskcontract.Snapshot); !ok {
+		t.Fatalf("managed task contract type = %T", payload["task_contract"])
+	}
+}
+
+func TestManagedExternalActionRequiresVerifiedRuntimeEvidence(t *testing.T) {
+	def := checkedDefinition()
+	e, p, store := managedTestEngine(t, def)
+	p.responses = []llm.CompletionResponse{{Content: "VERIFIED"}}
+	msg := testUserMessage(def.ID, "managed-action", "Book the ride")
+
+	if _, err := e.Handle(context.Background(), msg); err == nil || !strings.Contains(err.Error(), "without verified external-action evidence") {
+		t.Fatalf("unsupported external action error = %v", err)
+	}
+	proof, err := store.GetProof(context.Background(), "admin", msg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proof.Outcome != autopilot.ProofFailed {
+		t.Fatalf("unsupported action proof outcome = %q", proof.Outcome)
+	}
 }
 func checkedDefinition() *agent.Definition {
 	return &agent.Definition{ID: "verified", Name: "Verified", Enabled: true, LLM: agent.LLMConfig{Provider: "test", Model: "fake-model"}, MaxTurns: 3, Builtins: strListPtr(), Mission: &agent.MissionContract{ID: "mission", Goal: "Return evidence", Acceptance: []agent.MissionCheck{{ID: "receipt", Type: agent.MissionCheckOutputContains, Value: "VERIFIED"}}}}
