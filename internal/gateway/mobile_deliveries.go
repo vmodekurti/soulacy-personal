@@ -227,6 +227,48 @@ func (s *Server) handleReadMobileDelivery(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"read": true})
 }
 
+func (s *Server) handleListMobileFeedState(c *fiber.Ctx) error {
+	store, err := mobileStore(c)
+	if err != nil {
+		return err
+	}
+	workspaceID, userID, err := mobileIdentity(c)
+	if err != nil {
+		return err
+	}
+	states, err := store.ListFeedState(c.UserContext(), workspaceID, userID)
+	if err != nil {
+		return s.errJSON(c, fiber.StatusInternalServerError, err)
+	}
+	if states == nil {
+		states = []mobilechan.FeedCardState{}
+	}
+	return c.JSON(fiber.Map{"cards": states})
+}
+
+func (s *Server) handlePutMobileFeedState(c *fiber.Ctx) error {
+	store, err := mobileStore(c)
+	if err != nil {
+		return err
+	}
+	workspaceID, userID, err := mobileIdentity(c)
+	if err != nil {
+		return err
+	}
+	var state mobilechan.FeedCardState
+	if err := c.BodyParser(&state); err != nil {
+		return s.errJSON(c, fiber.StatusBadRequest, err)
+	}
+	state.CardID = strings.TrimSpace(state.CardID)
+	if len(state.CardID) > 256 || (!strings.HasPrefix(state.CardID, "run:") && !strings.HasPrefix(state.CardID, "delivery:")) {
+		return s.errMsg(c, fiber.StatusBadRequest, "card_id must identify a run or delivery")
+	}
+	if err := store.PutFeedState(c.UserContext(), workspaceID, userID, state); err != nil {
+		return s.errJSON(c, fiber.StatusInternalServerError, err)
+	}
+	return c.JSON(fiber.Map{"saved": true, "card": state})
+}
+
 // presentedDelivery is a delivery plus its presentation.
 type presentedDelivery struct {
 	mobilechan.Delivery

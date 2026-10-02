@@ -55,6 +55,18 @@ CREATE TABLE IF NOT EXISTS mobile_delivery_receipts (
   read_at TEXT NOT NULL,
   PRIMARY KEY (workspace_id, delivery_id, device_id)
 );
+CREATE TABLE IF NOT EXISTS mobile_feed_state (
+  workspace_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  card_id TEXT NOT NULL,
+  is_read INTEGER NOT NULL DEFAULT 0,
+  is_saved INTEGER NOT NULL DEFAULT 0,
+  is_archived INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, user_id, card_id)
+);
+CREATE INDEX IF NOT EXISTS idx_mobile_feed_state_owner_updated
+  ON mobile_feed_state(workspace_id, user_id, updated_at DESC);
 `
 
 type Delivery struct {
@@ -84,6 +96,17 @@ type Device struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
+// FeedCardState is the person's durable organization of a result card. Card
+// content remains in its source ledger or delivery table; this stores only
+// the small, user-scoped view state shared by web and companion clients.
+type FeedCardState struct {
+	CardID    string    `json:"card_id"`
+	Read      bool      `json:"read"`
+	Saved     bool      `json:"saved"`
+	Archived  bool      `json:"archived"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type Store struct{ db *sql.DB }
 
 func Open(path string) (*Store, error) {
@@ -100,6 +123,10 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	if err := sqlitex.RecordSchemaVersion(db, "mobile_nodes", 1); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := sqlitex.RecordSchemaVersion(db, "mobile_feed_state", 1); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -230,6 +257,50 @@ func (s *Store) MarkRead(ctx context.Context, workspaceID, deliveryID, deviceID,
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+// ListFeedState returns one person's card organization across every client.
+func (s *Store) ListFeedState(ctx context.Context, workspaceID, userID string) ([]FeedCardState, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT card_id,is_read,is_saved,is_archived,updated_at
+    FROM mobile_feed_state WHERE workspace_id=? AND user_id=? ORDER BY updated_at DESC`,
+		normalizeWorkspaceID(workspaceID), strings.TrimSpace(userID))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FeedCardState
+	for rows.Next() {
+		var state FeedCardState
+		var read, saved, archived int
+		var updated string
+		if err := rows.Scan(&state.CardID, &read, &saved, &archived, &updated); err != nil {
+			return nil, err
+		}
+		state.Read, state.Saved, state.Archived = read == 1, saved == 1, archived == 1
+		state.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
+		out = append(out, state)
+	}
+	return out, rows.Err()
+}
+
+// PutFeedState replaces the complete view state for one card. Replacing all
+// booleans in one write prevents racing read and archive updates from leaving
+// a card in an impossible intermediate state.
+func (s *Store) PutFeedState(ctx context.Context, workspaceID, userID string, state FeedCardState) error {
+	state.CardID = strings.TrimSpace(state.CardID)
+	userID = strings.TrimSpace(userID)
+	if state.CardID == "" || userID == "" {
+		return errors.New("feed state requires card_id and authenticated user")
+	}
+	state.UpdatedAt = time.Now().UTC()
+	_, err := s.db.ExecContext(ctx, `INSERT INTO mobile_feed_state
+    (workspace_id,user_id,card_id,is_read,is_saved,is_archived,updated_at)
+    VALUES(?,?,?,?,?,?,?)
+    ON CONFLICT(workspace_id,user_id,card_id) DO UPDATE SET
+      is_read=excluded.is_read,is_saved=excluded.is_saved,is_archived=excluded.is_archived,
+      updated_at=excluded.updated_at`, normalizeWorkspaceID(workspaceID), userID, state.CardID,
+		state.Read, state.Saved, state.Archived, state.UpdatedAt.Format(time.RFC3339Nano))
+	return err
 }
 
 type scanner interface{ Scan(...any) error }

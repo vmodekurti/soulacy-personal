@@ -18,7 +18,7 @@ export const WALKTHROUGH_VERSION = 1
 export const navTourCopy = {
   feed: {
     what: 'Your agents as a feed: everything they finished, found, or sent to your phone, newest first — and anything that needs your yes at the top.',
-    when: 'Open the app here. Double-tap a card to save it, reply to pick the conversation up in Chat, and tap a face in the rail to see what that agent is doing right now.',
+    when: 'Open the app here. Save, archive, or mark a card read with its actions. Continue a result in Genie, or tap a face in the rail to see what that agent is doing right now.',
   },
   autopilot: {
     what: 'Verified runs, Safe Undo receipts, immutable releases, reviewed regression checks, and bounded goal teams.',

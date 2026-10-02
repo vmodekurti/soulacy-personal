@@ -487,6 +487,10 @@ export const api = {
   mobile: {
     status: () => apiFetch('/mobile/status'),
     deliveries: (limit = 40) => apiFetch(`/mobile/deliveries?limit=${limit}`),
+    feedState: () => apiFetch('/mobile/feed-state'),
+    saveFeedState: (state) => apiFetch('/mobile/feed-state', {
+      method: 'POST', body: JSON.stringify(state),
+    }),
   },
 
   browserTrace: (agentId, sessionId = '') => {
