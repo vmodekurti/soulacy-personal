@@ -30,6 +30,10 @@ verbatim). It may be an object, a string, or null.
 | `message.out` | the agent replies | full reply message |
 | `tool.call` | the LLM requests a tool | `name`, `arguments` |
 | `tool.result` | a tool returns | `name`, `content`, `is_error` |
+| `task.contract.started` | the runtime has normalized a run goal | perception, budget, completion criteria, fallback routes |
+| `task.contract.replanning` | a failed route triggers a bounded fallback | current state, attempts, evidence, replan count |
+| `task.contract.completed` | the runtime assigns a terminal task outcome | outcome, evidence, blocker, completion time |
+| `run.completed` | an agent run reaches its terminal boundary | `run_id`, operational `success`, `task_outcome`, `task_contract` |
 | `error` | a run errors | `stage`, `error` |
 | `llm.result` | one LLM turn completes | `model`, `input_tokens`, `output_tokens`, `duration_ms`, `tool_calls` |
 | `run.started` | a Workboard run begins | `task_id`, `task_title`, `run_id`, `attempt` |

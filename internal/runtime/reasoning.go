@@ -256,7 +256,7 @@ func (x reasoningToolExecutor) toolErrorObservation(call message.ToolCall, err e
 	if strings.TrimSpace(hint) == "" {
 		return msg
 	}
-	return msg + "\n\nExpected arguments for " + call.Name + ": " + hint + ". Retry once with corrected arguments, choose another available tool, or finish with the useful result already gathered."
+	return msg + "\n\nExpected arguments for " + call.Name + ": " + hint + ". Retry once with corrected arguments when that is the cause. Otherwise, replan without repeating the failed route. Try an available connector or native API, then an authorized website or browser action, then an official alternative. If none can work, request only the missing human input or state the blocker clearly."
 }
 
 func toolSchemaHint(schema llm.ToolSchema) string {
