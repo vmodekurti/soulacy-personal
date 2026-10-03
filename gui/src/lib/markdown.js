@@ -93,6 +93,20 @@ function isSameOrigin(href) {
   }
 }
 
+// Open Notebook serves generated episodes from an extensionless /audio route.
+// Treat only the documented episode path as playable so an unrelated page that
+// happens to end in /audio keeps behaving like a normal link.
+function isPodcastAudioURL(href) {
+  try {
+    const u = new URL(href)
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return false
+    const parts = u.pathname.toLowerCase().split('/').filter(Boolean)
+    return parts.at(-1) === 'audio' && parts.includes('episodes')
+  } catch (_) {
+    return false
+  }
+}
+
 DOMPurify.addHook('uponSanitizeElement', (node, data) => {
   if (data.tagName !== 'iframe') return
   const src = (node.getAttribute && node.getAttribute('src')) || ''
@@ -215,13 +229,24 @@ function embedVideos(html) {
       a.replaceWith(wrap)
       return
     }
-    if (AUDIO_FILE_RE.test(href)) {
+    const podcastAudio = isPodcastAudioURL(href)
+    if (AUDIO_FILE_RE.test(href) || podcastAudio) {
+      const wrap = doc.createElement('div')
+      wrap.className = 'md-audio-card'
+      if (podcastAudio) {
+        const link = doc.createElement('a')
+        link.setAttribute('href', href)
+        link.textContent = 'Listen to episode'
+        link.className = 'md-audio-link'
+        wrap.appendChild(link)
+      }
       const au = doc.createElement('audio')
       au.setAttribute('controls', '')
       au.setAttribute('preload', 'metadata')
       au.setAttribute('src', href)
       au.className = 'md-audio'
-      a.replaceWith(au)
+      wrap.appendChild(au)
+      a.replaceWith(wrap)
       return
     }
     const mapEmbed = toMapEmbedURL(href)

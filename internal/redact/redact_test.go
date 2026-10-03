@@ -68,3 +68,31 @@ func TestTextKeepsTableSeparators(t *testing.T) {
 		}
 	}
 }
+
+func TestTextKeepsSafeMediaURLs(t *testing.T) {
+	link := "https://vasus-mac-studio.tail79ada.ts.net:8443/api/podcasts/episodes/episode:jztbyxo2bw4nut50zfvp/audio"
+	message := "Listen here: " + link
+	if got := Text(message); got != message {
+		t.Fatalf("safe media URL was redacted: %q", got)
+	}
+}
+
+func TestTextDoesNotExemptArbitraryOpaqueURLPaths(t *testing.T) {
+	secret := "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMN" // gitleaks:allow
+	link := "https://example.com/reset/" + secret
+	if got := Text("Open: " + link); strings.Contains(got, secret) {
+		t.Fatalf("opaque URL path survived: %q", got)
+	}
+}
+
+func TestTextStillRedactsCredentialsInURLs(t *testing.T) {
+	for _, link := range []string{
+		"https://user:private-password@example.com/audio",                             // gitleaks:allow
+		"https://example.com/audio?access_token=abcdefghijklmnopqrstuvwxyz0123456789", // gitleaks:allow
+		"https://example.com/audio?signature=abcdefghijklmnopqrstuvwxyz0123456789",    // gitleaks:allow
+	} {
+		if got := Text("Listen: " + link); strings.Contains(got, link) {
+			t.Errorf("credential-bearing URL survived: %q", got)
+		}
+	}
+}
