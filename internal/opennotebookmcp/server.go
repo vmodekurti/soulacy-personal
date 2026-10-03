@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/soulacy/soulacy/internal/netguard"
 	"github.com/soulacy/soulacy/internal/opennotebook"
@@ -277,7 +278,19 @@ func (s *Server) execute(ctx context.Context, name string, a map[string]any) (js
 			return nil, fmt.Errorf("content exceeds %d bytes", maxTextContentBytes)
 		}
 	case "open_notebook_get_source_status":
-		method, endpoint = http.MethodGet, "/api/sources/"+pathEscape(requiredString(a, "source_id"))+"/status"
+		id := requiredString(a, "source_id")
+		if id == "" {
+			return nil, fmt.Errorf("source_id is required")
+		}
+		waitSeconds, err := optionalInt(a, "wait_seconds", 0, 300)
+		if err != nil {
+			return nil, err
+		}
+		pollSeconds, err := optionalInt(a, "poll_interval_seconds", 2, 30)
+		if err != nil {
+			return nil, err
+		}
+		return s.sourceStatus(ctx, id, time.Duration(waitSeconds)*time.Second, time.Duration(pollSeconds)*time.Second)
 	case "open_notebook_search":
 		method, endpoint = http.MethodPost, "/api/search"
 		body = pick(a, "query", "type", "limit", "search_sources", "search_notes", "minimum_score")
@@ -383,6 +396,86 @@ func (s *Server) execute(ctx context.Context, name string, a map[string]any) (js
 		return nil, fmt.Errorf("a required identifier is missing")
 	}
 	return s.request(ctx, method, endpoint, q, body)
+}
+
+// minUsableSourceChars separates real articles from the stub that a blocked or
+// paywalled page leaves behind (a "URL Source:" header of roughly 100-350
+// characters). Open Notebook reports those stubs as completed.
+const minUsableSourceChars = 600
+
+// sourceStatus reports a source's processing status. With a positive wait it
+// polls until the source reaches a terminal status or the wait elapses, so a
+// scheduled agent does not have to loop on its own. A source that finished
+// processing but stored only a stub is reported as failed.
+func (s *Server) sourceStatus(ctx context.Context, id string, wait, interval time.Duration) (json.RawMessage, error) {
+	endpoint := "/api/sources/" + pathEscape(id) + "/status"
+	deadline := s.now().Add(wait)
+	for {
+		data, err := s.request(ctx, http.MethodGet, endpoint, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		status, err := podcastJobStatus(data)
+		if err != nil {
+			return nil, fmt.Errorf("the Open Notebook API returned an invalid source status")
+		}
+		if podcastJobTerminal(status) {
+			return s.finalizeSourceStatus(ctx, id, status, data)
+		}
+		remaining := deadline.Sub(s.now())
+		if wait <= 0 {
+			return data, nil
+		}
+		if remaining <= 0 {
+			return markSourceWaitTimedOut(data, wait)
+		}
+		if interval > remaining {
+			interval = remaining
+		}
+		if err := s.sleep(ctx, interval); err != nil {
+			return nil, err
+		}
+	}
+}
+
+func (s *Server) finalizeSourceStatus(ctx context.Context, id, status string, data json.RawMessage) (json.RawMessage, error) {
+	if status != "completed" {
+		return data, nil
+	}
+	source, err := s.request(ctx, http.MethodGet, "/api/sources/"+pathEscape(id), nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	var doc struct {
+		FullText string `json:"full_text"`
+	}
+	if err := json.Unmarshal(source, &doc); err != nil {
+		return nil, fmt.Errorf("the Open Notebook API returned an invalid source")
+	}
+	var out map[string]any
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("the Open Notebook API returned an invalid source status")
+	}
+	chars := utf8.RuneCountInString(strings.TrimSpace(doc.FullText))
+	out["content_chars"] = chars
+	out["usable"] = chars >= minUsableSourceChars
+	if chars < minUsableSourceChars {
+		out["processing_status"] = out["status"]
+		out["status"] = "failed"
+		out["failure_reason"] = "thin_content"
+		out["message"] = fmt.Sprintf("Source processed but stored only %d characters, so the page was likely blocked or paywalled. Skip it, or add the article text with open_notebook_add_text_source.", chars)
+	}
+	return json.Marshal(out)
+}
+
+func markSourceWaitTimedOut(data json.RawMessage, wait time.Duration) (json.RawMessage, error) {
+	var out map[string]any
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("the Open Notebook API returned an invalid source status")
+	}
+	out["wait_timed_out"] = true
+	out["waited_seconds"] = int(wait / time.Second)
+	return json.Marshal(out)
 }
 
 func (s *Server) waitForPodcastJob(ctx context.Context, endpoint string, wait, interval time.Duration) (json.RawMessage, error) {

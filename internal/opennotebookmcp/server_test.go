@@ -403,3 +403,95 @@ func TestServeUsesNewlineDelimitedJSONRPC(t *testing.T) {
 		t.Fatalf("output = %q", got)
 	}
 }
+
+func sourceAPI(statuses []string, fullText string, statusRequests *int) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/sources/source:1/status":
+			i := *statusRequests
+			if i >= len(statuses) {
+				i = len(statuses) - 1
+			}
+			*statusRequests++
+			_, _ = fmt.Fprintf(w, `{"status":%q,"message":"Source processing status"}`, statuses[i])
+		case "/api/sources/source:1":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "source:1", "full_text": fullText})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+func fakeClock(srv *Server) {
+	now := time.Unix(0, 0)
+	srv.now = func() time.Time { return now }
+	srv.sleep = func(_ context.Context, delay time.Duration) error {
+		now = now.Add(delay)
+		return nil
+	}
+}
+
+func TestGetSourceStatusWaitsForCompletedArticle(t *testing.T) {
+	requests := 0
+	api := sourceAPI([]string{"new", "running", "completed"}, strings.Repeat("real article text ", 100), &requests)
+	defer api.Close()
+	srv, _ := New(api.URL, "", "test", api.Client())
+	fakeClock(srv)
+	result, err := srv.execute(context.Background(), "open_notebook_get_source_status", map[string]any{
+		"source_id": "source:1", "wait_seconds": float64(30), "poll_interval_seconds": float64(2),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 3 || !bytes.Contains(result, []byte(`"status":"completed"`)) || !bytes.Contains(result, []byte(`"usable":true`)) {
+		t.Fatalf("requests = %d, result = %s", requests, result)
+	}
+}
+
+func TestGetSourceStatusReportsStubPageAsFailed(t *testing.T) {
+	requests := 0
+	api := sourceAPI([]string{"completed"}, "URL Source: https://example.com/a\n\nMarkdown Content:\n\n", &requests)
+	defer api.Close()
+	srv, _ := New(api.URL, "", "test", api.Client())
+	result, err := srv.execute(context.Background(), "open_notebook_get_source_status", map[string]any{"source_id": "source:1", "wait_seconds": float64(30)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"status":"failed"`, `"failure_reason":"thin_content"`, `"usable":false`, `"processing_status":"completed"`} {
+		if !bytes.Contains(result, []byte(want)) {
+			t.Fatalf("missing %s in %s", want, result)
+		}
+	}
+}
+
+func TestGetSourceStatusMarksWaitTimeout(t *testing.T) {
+	requests := 0
+	api := sourceAPI([]string{"new"}, "", &requests)
+	defer api.Close()
+	srv, _ := New(api.URL, "", "test", api.Client())
+	fakeClock(srv)
+	result, err := srv.execute(context.Background(), "open_notebook_get_source_status", map[string]any{
+		"source_id": "source:1", "wait_seconds": float64(6), "poll_interval_seconds": float64(2),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(result, []byte(`"wait_timed_out":true`)) || !bytes.Contains(result, []byte(`"status":"new"`)) {
+		t.Fatalf("result = %s", result)
+	}
+}
+
+func TestGetSourceStatusWithoutWaitReturnsImmediately(t *testing.T) {
+	requests := 0
+	api := sourceAPI([]string{"running", "completed"}, "", &requests)
+	defer api.Close()
+	srv, _ := New(api.URL, "", "test", api.Client())
+	result, err := srv.execute(context.Background(), "open_notebook_get_source_status", map[string]any{"source_id": "source:1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 1 || !bytes.Contains(result, []byte(`"status":"running"`)) || bytes.Contains(result, []byte("wait_timed_out")) {
+		t.Fatalf("requests = %d, result = %s", requests, result)
+	}
+}
