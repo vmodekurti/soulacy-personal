@@ -15,6 +15,7 @@
   import { searchSkills, parseSlashQuery, applySkillChoice } from '../lib/skillsearch.js'
   import { modelAvailability } from '../lib/agentmodel.js'
   import { isChatTransportError, recoverDetachedChat } from '../lib/chatrecovery.js'
+  import { continuationPrompt } from '../lib/feedstate.js'
   import {
     filterThreads, suggestedPrompts, buildOverrides,
     lastUserText, truncateForRerun, isLongOutput, isHistoricalFailureResolved,
@@ -189,6 +190,7 @@
       branches: [],
       branchMessages: {},
       metricsBaseline: {},
+      handoffContext: '',
       thinking: null,
       activeRunKey: '',
       createdAt: now,
@@ -215,6 +217,7 @@
           pinned: !!t.pinned, archived: !!t.archived,
           createdAt: t.createdAt, updatedAt: t.updatedAt,
           branches: t.branches || [],
+          handoffContext: t.handoffContext || '',
           messages: (t.messages || []).map(m => ({
             role: m.role, text: m.text, via: m.via || '', agentId: m.agentId || '',
             ts: m.ts instanceof Date ? m.ts.toISOString() : m.ts,
@@ -222,6 +225,7 @@
             parts: m.parts || null,
             attachments: m.attachments || null,
             runId: m.runId || '', responseId: m.responseId || '', feedback: m.feedback || 0,
+            sourceResult: !!m.sourceResult,
             // Keep the per-turn activity record with the message. Closed is the
             // durable/default presentation; opening a trace is transient UI.
             thinking: m.thinking ? { ...m.thinking, open: false } : null,
@@ -247,6 +251,7 @@
           pinned: !!t.pinned, archived: !!t.archived,
           createdAt: t.createdAt || Date.now(), updatedAt: t.updatedAt || Date.now(),
           branches: t.branches || [],
+          handoffContext: t.handoffContext || '',
           messages: (t.messages || []).map(m => ({
             ...m,
             ts: m.ts ? new Date(m.ts) : new Date(),
@@ -546,10 +551,34 @@
     const req = pendingGenieAsk
     if (!req) return
     pendingGenieAsk = null
-    const agent = pickGenieAgent(agents, req.text)
+    const result = req.type === 'result' ? req.context : null
+    const routingText = result ? `${result.title || ''} ${result.body || ''}` : req.text
+    // Result follow-ups always open in Genie. The source agent may be a
+    // schedule-only worker and the selected result must not be routed into
+    // whichever specialist happens to score highest.
+    const agent = result
+      ? (agents.find(a => a.id === 'genie') || pickGenieAgent(agents, routingText))
+      : pickGenieAgent(agents, routingText)
     if (!agent) { error = 'No chat-capable agent is available to answer that.'; return }
     const thread = startThread(agent.id)
     await tick()
+    if (result) {
+      const source = result.sourceAgent || 'Soulacy'
+      const title = result.title || `Result from ${source}`
+      const body = String(result.body || '').trim()
+      updateThread(thread.id, t => ({
+        ...t,
+        title: title.slice(0, 60),
+        handoffContext: continuationPrompt({ kind: 'result', title, body }, source),
+        messages: [{
+          role: 'assistant',
+          text: `## From Results\n\n**${source}**\n\n### ${title}\n\n${body}`,
+          sourceResult: true,
+          ts: new Date(),
+        }],
+      }))
+      return
+    }
     await send(req.text, undefined, '', thread)
   }
 
@@ -618,6 +647,9 @@
     const route = resolveMention(text)
     const runAgentId = route ? route.agentId : thread.agentId
     const sendText = route ? route.cleanText : text
+    const requestText = thread.handoffContext
+      ? `${thread.handoffContext}\n\nUser follow-up:\n${sendText}`
+      : sendText
     const viaName = route ? route.name : ''
     const runKey = `${runAgentId}|${runSessionId}`
     const turnAttachments = hasExplicitText ? [] : pendingAttachments
@@ -630,6 +662,7 @@
       ...t,
       title: t.messages.length ? t.title : snippet(text, 36),
       messages: [...t.messages, { role: 'user', text, attachments: turnAttachments, ts: new Date() }],
+      handoffContext: '',
       sending: true,
       thinking,
       streamText: '',       // reset the live-streaming buffer for this turn
@@ -647,7 +680,7 @@
     let replyText = ''
     let spokenReply = ''
     try {
-      const res = await api.chat(runAgentId, sendText, 'gui-user', overrides, runSessionId, attachmentIds, responseMode)
+      const res = await api.chat(runAgentId, requestText, 'gui-user', overrides, runSessionId, attachmentIds, responseMode)
 	  replyText = res.reply || ''
 	  spokenReply = res.spoken_reply || ''
       const curr = await api.runs.metrics(runSessionId, runAgentId).catch(() => null)
@@ -672,7 +705,7 @@
         }))
         const recovered = await recoverDetachedChat({
           agentId: runAgentId,
-          sentText: sendText,
+          sentText: requestText,
           startedAt: runStartedAt,
           loadHistory: () => api.history.get(runSessionId),
           loadEvents: () => api.agents.actions(runAgentId, 500, THINKING_EVENT_TYPES, { durable: true }),
