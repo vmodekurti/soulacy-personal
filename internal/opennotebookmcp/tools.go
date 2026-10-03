@@ -28,8 +28,12 @@ func toolSpecs() []map[string]any {
 		tool("open_notebook_list_episode_profiles", "List podcast episode profiles with their names and IDs.", nil, nil),
 		tool("open_notebook_list_speaker_profiles", "List podcast speaker profiles with their names and IDs.", nil, nil),
 		tool("open_notebook_generate_podcast", "Start podcast generation from notebook sources or supplied content.", map[string]any{"episode_profile": stringProp("Episode profile name or ID."), "speaker_profile": stringProp("Speaker profile name or ID."), "episode_name": stringProp("Episode name."), "content": stringProp("Optional source content."), "notebook_id": stringProp("Optional notebook ID."), "briefing_suffix": stringProp("Optional extra production direction.")}, []string{"episode_profile", "speaker_profile", "episode_name"}),
-		tool("open_notebook_get_podcast_job", "Get podcast generation job status.", map[string]any{"job_id": stringProp("Podcast job ID.")}, []string{"job_id"}),
-		tool("open_notebook_list_podcast_episodes", "List generated podcast episodes.", nil, nil),
+		tool("open_notebook_get_podcast_job", "Get compact podcast generation job status. Optionally wait for the job to complete or fail. Full transcripts and outlines are available from open_notebook_get_podcast_episode.", map[string]any{
+			"job_id":                stringProp("Podcast job ID."),
+			"wait_seconds":          map[string]any{"type": "integer", "minimum": 1, "maximum": 300, "description": "Optional maximum time to wait for a terminal status."},
+			"poll_interval_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": 30, "description": "Polling interval while waiting. Defaults to 2 seconds."},
+		}, []string{"job_id"}),
+		tool("open_notebook_list_podcast_episodes", "List compact generated podcast episode metadata. Use open_notebook_get_podcast_episode for transcripts, outlines, and profiles.", nil, nil),
 		tool("open_notebook_get_podcast_episode", "Get podcast episode metadata, transcript, outline, status, and error details.", map[string]any{"episode_id": stringProp("Episode ID.")}, []string{"episode_id"}),
 		tool("open_notebook_get_podcast_audio", "Return the configured audio download URL for a podcast episode.", map[string]any{"episode_id": stringProp("Episode ID.")}, []string{"episode_id"}),
 	}
