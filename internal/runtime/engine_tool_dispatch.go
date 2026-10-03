@@ -336,14 +336,7 @@ print(result if isinstance(result, str) else json.dumps(result))
 	if toolDef.Inline != "" {
 		script = toolDef.Inline
 	} else if toolDef.PythonFile != "" {
-		// Expand a leading ~ to the home directory — Python's importlib does NOT
-		// do this, so an unexpanded "~/..." path would fail to load.
-		pyFile := toolDef.PythonFile
-		if strings.HasPrefix(pyFile, "~/") {
-			if home, err := os.UserHomeDir(); err == nil {
-				pyFile = filepath.Join(home, pyFile[2:])
-			}
-		}
+		pyFile := resolvePythonFile(def, toolDef.PythonFile)
 		// Privilege boundary: reject paths outside the configured allowlist.
 		// This prevents a crafted SOUL.yaml from executing arbitrary host files.
 		// The check is skipped when AllowedToolDirs is empty (default single-user
@@ -437,6 +430,24 @@ print(result if isinstance(result, str) else json.dumps(result))
 		lastErr = err
 	}
 	return "", lastErr
+}
+
+// resolvePythonFile applies the path semantics documented for python_file.
+// Relative paths belong to the agent package, so resolve them from the
+// directory containing SOUL.yaml instead of the gateway process working
+// directory. Definitions created directly in tests or by embedders may not
+// have a SourcePath; preserve the historical process-relative behavior there.
+func resolvePythonFile(def *agent.Definition, configured string) string {
+	path := strings.TrimSpace(configured)
+	if strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			path = filepath.Join(home, path[2:])
+		}
+	}
+	if filepath.IsAbs(path) || def == nil || strings.TrimSpace(def.SourcePath) == "" || def.SourcePath == builtinSourcePath {
+		return filepath.Clean(path)
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(def.SourcePath), path))
 }
 
 func isGenieDefinition(def *agent.Definition) bool {
