@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/soulacy/soulacy/internal/credentials"
@@ -116,4 +118,63 @@ func equalStrings(got, want []string) bool {
 		}
 	}
 	return true
+}
+
+func TestUpdateBrowserStateIsSerializedAndSkipsUnchanged(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(filepath.Join(t.TempDir(), "connections.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	conn, err := store.Create(ctx, CreateInput{WorkspaceID: "ws", OwnerSubject: "alice", Scope: ScopeUser, Kind: KindBrowser, Name: "Gartner", BaseURL: "https://gartner.com", AllowedDomains: []string{"gartner.com"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	kms, err := credentials.NewLocalKMS()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vault, err := credentials.NewSQLiteVault(filepath.Join(t.TempDir(), "vault.db"), kms)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vault.Close()
+	if err := vault.WriteBlob(ctx, vaultNamespace(conn.ID), browserStateKey, []byte("0")); err != nil {
+		t.Fatal(err)
+	}
+	resolver := NewResolver(store, vault)
+	// Not ready until the secret is marked: the update must refuse.
+	if err := resolver.UpdateBrowserState(ctx, "ws", conn.ID, func(c []byte) ([]byte, bool, error) { return []byte("1"), true, nil }); !errors.Is(err, ErrNotReady) {
+		t.Fatalf("want ErrNotReady before the secret is marked, got %v", err)
+	}
+	if err := store.MarkSecret(ctx, "ws", conn.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	const workers = 20
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := resolver.UpdateBrowserState(ctx, "ws", conn.ID, func(c []byte) ([]byte, bool, error) {
+				n, _ := strconv.Atoi(string(c))
+				return []byte(strconv.Itoa(n + 1)), true, nil
+			})
+			if err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	got, _ := vault.ReadBlob(ctx, vaultNamespace(conn.ID), browserStateKey)
+	if string(got) != strconv.Itoa(workers) {
+		t.Fatalf("lost updates: state = %s, want %d", got, workers)
+	}
+	if err := resolver.UpdateBrowserState(ctx, "ws", conn.ID, func(c []byte) ([]byte, bool, error) { return []byte("999"), false, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := vault.ReadBlob(ctx, vaultNamespace(conn.ID), browserStateKey); string(again) != strconv.Itoa(workers) {
+		t.Fatalf("an unchanged update must not write, got %s", again)
+	}
 }

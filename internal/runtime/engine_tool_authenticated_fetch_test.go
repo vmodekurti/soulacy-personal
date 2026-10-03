@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/cookiejar"
 	"net/url"
 	"strings"
@@ -80,5 +81,85 @@ func TestAuthenticatedFetchSchemaContainsOnlySecretFreeMetadata(t *testing.T) {
 		if strings.Contains(strings.ToLower(text), forbidden) {
 			t.Fatalf("schema unexpectedly contains %q: %s", forbidden, text)
 		}
+	}
+}
+
+func mergeForTest(t *testing.T, state map[string]any, observed []observedCookie) (map[string]any, bool) {
+	t.Helper()
+	raw, _ := json.Marshal(state)
+	out, changed, err := mergeRenewedCookies(raw, observed, []string{"gartner.com"}, time.Unix(1_000_000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		return nil, false
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatal(err)
+	}
+	return got, true
+}
+
+func savedSession() map[string]any {
+	return map[string]any{
+		"cookies": []map[string]any{{"name": "sid", "value": "old", "domain": ".gartner.com", "path": "/", "expires": float64(1_000_100), "httpOnly": true, "secure": true, "sameSite": "Lax"}},
+		"origins": []map[string]any{{"origin": "https://www.gartner.com", "localStorage": []any{}}},
+	}
+}
+
+func TestMergeRenewedCookiesExtendsExpiryAndKeepsOtherState(t *testing.T) {
+	got, changed := mergeForTest(t, savedSession(), []observedCookie{{
+		host:   "www.gartner.com",
+		cookie: &http.Cookie{Name: "sid", Value: "old", Domain: "gartner.com", Path: "/", MaxAge: 172800},
+	}})
+	if !changed {
+		t.Fatal("expected the extended expiry to be saved")
+	}
+	cookie := got["cookies"].([]any)[0].(map[string]any)
+	if cookie["expires"].(float64) != float64(1_000_000+172800) || cookie["httpOnly"] != true {
+		t.Fatalf("cookie = %#v", cookie)
+	}
+	if _, ok := got["origins"]; !ok {
+		t.Fatal("origins were dropped")
+	}
+}
+
+func TestMergeRenewedCookiesIgnoresForeignDomainAndNoChange(t *testing.T) {
+	_, changed := mergeForTest(t, savedSession(), []observedCookie{
+		{host: "www.gartner.com", cookie: &http.Cookie{Name: "track", Value: "x", Domain: "evil.test", Path: "/"}},
+		{host: "ads.evil.test", cookie: &http.Cookie{Name: "track", Value: "x", Path: "/"}},
+		{host: "www.gartner.com", cookie: &http.Cookie{Name: "sid", Value: "old", Domain: "gartner.com", Path: "/"}},
+	})
+	if changed {
+		t.Fatal("foreign cookies or an unchanged session must not rewrite the state")
+	}
+}
+
+func TestMergeRenewedCookiesRotatesValueDeletesAndAdds(t *testing.T) {
+	got, changed := mergeForTest(t, savedSession(), []observedCookie{
+		{host: "www.gartner.com", cookie: &http.Cookie{Name: "sid", Value: "rotated", Domain: "gartner.com", Path: "/"}},
+		{host: "www.gartner.com", cookie: &http.Cookie{Name: "fresh", Value: "n", Path: "/", MaxAge: 60}},
+	})
+	if !changed {
+		t.Fatal("expected a change")
+	}
+	cookies := got["cookies"].([]any)
+	if len(cookies) != 2 {
+		t.Fatalf("cookies = %#v", cookies)
+	}
+	first := cookies[0].(map[string]any)
+	if first["value"] != "rotated" || first["expires"].(float64) != 1_000_100 {
+		t.Fatalf("rotation must change the value and keep the saved expiry: %#v", first)
+	}
+	second := cookies[1].(map[string]any)
+	if second["name"] != "fresh" || second["domain"] != "www.gartner.com" {
+		t.Fatalf("host-only cookie = %#v", second)
+	}
+	got, changed = mergeForTest(t, savedSession(), []observedCookie{{
+		host: "www.gartner.com", cookie: &http.Cookie{Name: "sid", Domain: "gartner.com", Path: "/", MaxAge: -1},
+	}})
+	if !changed || len(got["cookies"].([]any)) != 0 {
+		t.Fatalf("expired cookie must be removed: %#v", got)
 	}
 }
