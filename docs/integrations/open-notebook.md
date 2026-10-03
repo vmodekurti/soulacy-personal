@@ -105,7 +105,7 @@ A typical run is:
 1. Retrieve the permitted HBR article through the agent's authenticated `hbr.org` connection.
 2. Call `open_notebook_list_notebooks` and select or create the research notebook.
 3. Call `open_notebook_add_text_source` with the article text, title, and notebook ID.
-4. Poll `open_notebook_get_source_status` when asynchronous processing is enabled.
+4. Call `open_notebook_get_source_status` with `wait_seconds` (up to 300) when asynchronous processing is enabled, so one bounded call waits for the source to finish. Calls without `wait_seconds` remain immediate status checks. Open Notebook reports a blocked or paywalled page as `completed` even though it stored only a short stub; the adapter checks the stored text and returns `status: failed` with `failure_reason: thin_content` (plus `content_chars` and `usable`) for a source under 600 characters, so the agent skips it or adds the article text with `open_notebook_add_text_source`.
 5. Search or ask questions. Call `open_notebook_list_models` first when model IDs are unknown.
 6. Call the episode-profile and speaker-profile list tools, then `open_notebook_generate_podcast`.
 7. Call `open_notebook_get_podcast_job` with `wait_seconds` (up to 300) to wait for completion in one bounded tool call, then read the compact finished-job metadata or its configured audio URL. Calls without `wait_seconds` remain immediate status checks. Full transcripts and outlines stay behind `open_notebook_get_podcast_episode` so routine polling does not consume the agent's context.
