@@ -5221,6 +5221,10 @@
 </span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mcp__open_notebook__open_notebook_generate_podcast</span>
 </span></code></pre></div>
 <p>The first release does not expose delete operations.</p>
+<p>Scheduled agents that add sources run without an approval screen. After limiting
+the agent to the required Open Notebook tools, set <code>unattended: true</code> so those
+known writes can pass the confirmation guardrail. Keep interactive or broadly
+privileged agents attended.</p>
 <h2 id="authenticated-website-to-podcast">Authenticated website to podcast<a class="headerlink" href="#authenticated-website-to-podcast" title="Permanent link">&para;</a></h2>
 <p>Use a Soulacy authenticated website connection for pages that require a login. The agent should retrieve only content covered by its connection grant, then pass the resulting text to <code>open_notebook_add_text_source</code>. Open Notebook does not receive browser cookies.</p>
 <p>A typical run is:</p>
@@ -5231,8 +5235,11 @@
 <li>Poll <code>open_notebook_get_source_status</code> when asynchronous processing is enabled.</li>
 <li>Search or ask questions. Call <code>open_notebook_list_models</code> first when model IDs are unknown.</li>
 <li>Call the episode-profile and speaker-profile list tools, then <code>open_notebook_generate_podcast</code>.</li>
-<li>Poll <code>open_notebook_get_podcast_job</code> and read the finished episode metadata or its configured audio URL.</li>
+<li>Call <code>open_notebook_get_podcast_job</code> with <code>wait_seconds</code> (up to 300) to wait for completion in one bounded tool call, then read the compact finished-job metadata or its configured audio URL. Calls without <code>wait_seconds</code> remain immediate status checks. Full transcripts and outlines stay behind <code>open_notebook_get_podcast_episode</code> so routine polling does not consume the agent's context.</li>
 </ol>
+<p><code>open_notebook_list_podcast_episodes</code> returns compact episode metadata for
+date/name/status checks. Use <code>open_notebook_get_podcast_episode</code> only when the
+full transcript, outline, or expanded profile data is needed.</p>
 <p>For public webpages, <code>open_notebook_add_url_source</code> can ask Open Notebook to fetch the page directly. The adapter blocks private, loopback, link-local, and cloud-metadata source URLs.</p>
 <h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
 <ul>
