@@ -3,10 +3,17 @@ import { describe, expect, it } from 'vitest'
 
 const website = readFileSync(new URL('../../../website/index.html', import.meta.url), 'utf8')
 const footprint = readFileSync(new URL('../../../docs/deployment/footprint.md', import.meta.url), 'utf8')
+const rootReadme = readFileSync(new URL('../../../README.md', import.meta.url), 'utf8')
+const websiteReadme = readFileSync(new URL('../../../website/README.md', import.meta.url), 'utf8')
 
 describe('public website claims', () => {
-  it('keeps public messaging focused on self-hosted Personal', () => {
-    expect(website).toContain('Run Soulacy Personal on infrastructure you control.')
+  it('keeps public messaging focused on Genie, iPhone, and self-hosted Personal', () => {
+    expect(website).toContain('Ask Genie from your iPhone.')
+    expect(website).toContain('WhatsApp, Telegram, Slack, Discord, email, HTTP, and custom adapters are first class channels.')
+    expect(website).toContain('Genie does not sit between your other channels and the gateway.')
+    expect(website).toContain('Your gateway remains on infrastructure you control.')
+    expect(website).toContain('Genie cannot approve itself.')
+    expect(website).toContain('explicit agent and gateway policy')
     expect(website).toContain('https://docs.soulacy.io/personal/')
     expect(website).not.toMatch(/\bcommercial\b/i)
     expect(readFileSync(new URL('../../../README.md', import.meta.url), 'utf8')).not.toMatch(/Soulacy Commercial/i)
@@ -27,5 +34,11 @@ describe('public website claims', () => {
       expect(readFileSync(new URL(`../../../docs/use-cases/${slug}.md`, import.meta.url), 'utf8')).toMatch(/^# /)
     }
     expect(website).toContain('https://docs.soulacy.io/deployment/footprint/')
+  })
+  it('uses plain punctuation in public website copy', () => {
+    const longDash = /[\u2013\u2014]|&(?:m|n)dash;/i
+    expect(website).not.toMatch(longDash)
+    expect(rootReadme).not.toMatch(longDash)
+    expect(websiteReadme).not.toMatch(longDash)
   })
 })

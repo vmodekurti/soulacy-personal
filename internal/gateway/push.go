@@ -64,7 +64,10 @@ func (s *Server) wirePushNotifications() {
 	})
 	s.engine.Broker().SetOnRegister(func(p runtime.PendingApproval) {
 		s.notifyPhonesOfApproval(p)
-		if s.liveActivities != nil {
+		// A website transaction must be reviewed in the app where provider,
+		// item, schedule, terms and total are all visible. Lock-screen Live
+		// Activity buttons do not provide enough context for that decision.
+		if s.liveActivities != nil && p.Tool != "commit_website_action" {
 			s.liveActivities.ApprovalPending(p)
 		}
 		if svc == nil || svc.Count() == 0 {
@@ -162,14 +165,26 @@ func (s *Server) notifyPhonesOfApproval(p runtime.PendingApproval) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), s.httpRequestTimeout())
 	defer cancel()
+	category := mobilechan.CategoryApproval
+	title := "Approval needed"
+	data := map[string]string{"call_id": p.CallID, "agent_id": p.AgentID, "session_id": p.SessionID, "tool": p.Tool}
+	if p.Tool == "commit_website_action" {
+		category = mobilechan.CategoryWebsiteActionReview
+		title = "Review website action"
+		for _, key := range []string{"provider", "action", "item", "schedule", "terms", "total"} {
+			if value, ok := p.Args[key].(string); ok && strings.TrimSpace(value) != "" {
+				data[key] = strings.TrimSpace(value)
+			}
+		}
+	}
 	n := mobilechan.Notification{
-		Title:         "Approval needed",
+		Title:         title,
 		Body:          approvalBody(p),
-		Category:      mobilechan.CategoryApproval,
+		Category:      category,
 		ThreadID:      "approval-" + p.AgentID,
 		DeepLink:      "soulacy://approval/" + p.CallID,
 		TimeSensitive: true,
-		Data:          map[string]string{"call_id": p.CallID, "agent_id": p.AgentID, "session_id": p.SessionID, "tool": p.Tool},
+		Data:          data,
 	}
 	if err := adapter.Notify(ctx, "personal", approvalDestination(p.Principal), n); err != nil {
 		s.log.Warn("approval push to phones failed", zap.String("call_id", p.CallID), zap.Error(err))

@@ -264,6 +264,12 @@ var untrustedExternal = map[string]bool{
 	"http_request":  true, // engine_tools_http.go — arbitrary HTTP
 	"download_file": true, // engine_tools_http.go — downloads to disk, returns path/preview
 	"web_search":    true, // engine.go — search result snippets are user-generated
+	// Managed browser observations contain provider-controlled page text. The
+	// framework controls the browser and action boundary, not the page bytes.
+	"start_website_action":   true,
+	"inspect_website_action": true,
+	"act_on_website":         true,
+	"commit_website_action":  true,
 	// Filesystem
 	"read_file":  true, // files can be attacker-uploaded (see channel adapters)
 	"list_dir":   true, // directory listings can include attacker-chosen filenames

@@ -18,7 +18,7 @@ personalized investment advice.
 
 1. Review the readiness checklist; add the market-data tool and
    `STOCK_DATA_API_KEY`.
-2. Run the **mock test** ("screen large-cap tech") — no live call.
+2. Run the **mock test** ("screen large-cap tech"): no live call.
 3. Add the secret, run the **real test** (e.g. latest price for AAPL).
 4. (Optional) Schedule a daily screen to a channel.
 5. Install.

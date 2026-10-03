@@ -52,7 +52,7 @@ For knowledge retrieval, use **Test search** before changing the model.
 
 If a tool needs approval but the run has no interactive confirmation channel,
 the default is to deny. `unattended: true` is an explicit operator opt-in with
-different consequences—not a routine troubleshooting fix.
+different consequences, not a routine troubleshooting fix.
 
 ## 5. Was the result generated but not delivered?
 

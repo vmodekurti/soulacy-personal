@@ -91,6 +91,7 @@
   const pageLoaders = {
     feed: () => import('./pages/Feed.svelte'),
     start: () => import('./pages/GetStarted.svelte'),
+    missions: () => import('./pages/Missions.svelte'),
     autopilot: () => import('./pages/Autopilot.svelte'),
     dashboard: () => import('./pages/Dashboard.svelte'),
     onboarding: () => import('./pages/Onboarding.svelte'),
@@ -105,6 +106,7 @@
     workboard: () => import('./pages/Workboard.svelte'),
     channels: () => import('./pages/Channels.svelte'),
     schedule: () => import('./pages/Schedule.svelte'),
+    connectors: () => import('./pages/Connectors.svelte'),
     skills: () => import('./pages/Skills.svelte'),
     websites: () => import('./pages/WebsiteAccess.svelte'),
     mcp: () => import('./pages/MCP.svelte'),

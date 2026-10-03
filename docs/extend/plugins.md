@@ -1,12 +1,12 @@
 # Plugins
 
-Plugins extend Soulacy with new tools, chat channels, LLM providers, skills, and GUI panels — installed from the web GUI with an explicit review of everything they request before anything activates.
+Plugins extend Soulacy with new tools, chat channels, LLM providers, skills, and GUI panels: installed from the web GUI with an explicit review of everything they request before anything activates.
 
 ## Quick start
 
 1. Open the **Plugins** page in the GUI.
-2. Paste a source — a git URL, a sha256-checksummed archive
-   (`.tar.gz`/`.zip`), or a local directory path — and click
+2. Paste a source, such as a git URL, a sha256-checksummed archive
+   (`.tar.gz`/`.zip`), or a local directory path, and click
    **⤓ Clone & review** (or **⤓ Fetch & review**).
 3. Review the approval dialog: safety verdict, requested capabilities,
    credentials, schema migrations, sidecar channels, providers.
@@ -30,31 +30,31 @@ schema 2 it can declare:
 
 The flow is **stage → approve → restart**:
 
-1. **Stage** — the source is fetched into a `.staging` area and never
+1. **Stage**: the source is fetched into a `.staging` area and never
    loaded. Archives require a sha256 checksum, verified before extraction;
    git URLs are shallow-cloned with history stripped; extraction is
    hardened against path traversal and decompression bombs.
 
-2. **Approve** — the dialog shows *everything* the manifest requests:
+2. **Approve**: the dialog shows *everything* the manifest requests:
 
-    - **Safety introspection** — verdict badge and findings from the
+    - **Safety introspection**: verdict badge and findings from the
       [pre-install safety pipeline](safety.md);
-    - **Requested capabilities** — with scopes; unscoped grants are flagged
+    - **Requested capabilities**: with scopes; unscoped grants are flagged
       loudly;
-    - **Requested credentials** — which vault secrets the plugin's sidecars
+    - **Requested credentials**: which vault secrets the plugin's sidecars
       will receive;
-    - **Declared schema migrations** — so you approve schema alongside
+    - **Declared schema migrations**: so you approve schema alongside
       permissions;
     - **Sidecar channels** and **LLM providers** it will register.
 
-    Approving records a *permission fingerprint* — a canonical,
-    order-insensitive hash of the approved permissions and credentials —
-    in `.soulacy-install.json` next to the plugin.
+    Approving records a *permission fingerprint*: a canonical,
+    order-insensitive hash of the approved permissions and credentials. It is
+    stored in `.soulacy-install.json` next to the plugin.
 
-3. **Load** — at the next gateway restart the loader's install gate admits
+3. **Load**: at the next gateway restart the loader's install gate admits
    the plugin. Every install response carries the restart note.
 
-!!! warning "Nothing is active until you approve — and approval is precise"
+!!! warning "Nothing is active until you approve, and approval is precise"
     Staged plugins are never loaded. Approval covers exactly the grants you
     saw. If a later update adds, widens, or re-scopes any permission or
     credential, the fingerprint no longer matches and the plugin **stops
@@ -65,24 +65,24 @@ The flow is **stage → approve → restart**:
 The Plugins page lists every installer-managed plugin with its status,
 source, and granted permissions:
 
-- **Enable / Disable** — flips the load gate without touching files
+- **Enable / Disable**: flips the load gate without touching files
   (`POST /api/v1/plugins/:id/enable|disable`).
-- **Re-approve** — appears when an update changed the requested
+- **Re-approve**: appears when an update changed the requested
   permissions; shows as *needs re-approval* and logs
   `plugins: plugin skipped by install state` until you act
   (`POST /api/v1/plugins/:id/reapprove`).
-- **Remove** — deletes the plugin from disk (`DELETE /api/v1/plugins/:id`).
+- **Remove**: deletes the plugin from disk (`DELETE /api/v1/plugins/:id`).
 
 All plugin-management routes require config-level RBAC. **Hand-installed
 plugins** (directories placed in a plugin dir without install metadata) are
-implicitly approved and invisible to the installer — putting files on disk
+implicitly approved and invisible to the installer: putting files on disk
 already required operator access.
 
 ## Plugin settings: `plugins_config`
 
 Plugins read their own settings from a `plugins_config:` block in
 `config.yaml`, keyed by plugin ID. The shape under each key is owned by the
-plugin — the core parser never validates it:
+plugin: the core parser never validates it:
 
 ```yaml
 plugins_config:
@@ -94,7 +94,7 @@ plugins_config:
 The **Config** GUI page has a *Plugin settings* editor for these sections.
 Secret-looking keys (`token`, `secret`, `password`, `api_key`,
 `credential` in the name) are redacted as `***` in the config API, so they
-never reach the browser — and the server skips `***` placeholders when
+never reach the browser. The server skips `***` placeholders when
 saving, so editing other settings never clobbers real secrets on disk.
 
 ## Authoring: manifest v2 overview
@@ -129,7 +129,7 @@ gui:                            # static UI mount, sandboxed iframe
   nav: { label: "Matrix", icon: "💬" }
   static: ui                    # directory must exist
 
-permissions:                    # capabilities — default-deny without them
+permissions:                    # capabilities, default-deny without them
   - cap: channel.send
     channels: [matrix]
 
@@ -144,14 +144,14 @@ migrations:                     # plugin-namespaced SQLite schema
 
 Rules worth knowing as an author:
 
-- Legacy v1 manifests (no `manifest_schema`, or 1) keep loading forever —
-  tools only; v2-only blocks in a v1 manifest are skipped with a warning.
+- Legacy v1 manifests (no `manifest_schema`, or 1) keep loading forever for
+  tools only. V2-only blocks in a v1 manifest are skipped with a warning.
 - A v2 manifest with a malformed contribution is refused with a precise
   error; unknown future schemas (`> 2`) are skipped, never guessed at.
 - Migration table names must be prefixed `plugin_<id>_`; `ATTACH`,
-  `PRAGMA`, and friends are refused; applied steps are checksummed — add a
+  `PRAGMA`, and friends are refused; applied steps are checksummed: add a
   new step instead of editing an old one.
-- Capabilities and credentials are the heart of the trust model — read
+- Capabilities and credentials are the heart of the trust model: read
   [Plugin Security Model](plugin-security.md) before publishing.
 
 Full references: [plugin manifest](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/PLUGIN_MANIFEST.md),

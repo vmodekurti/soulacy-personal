@@ -7,8 +7,8 @@ Ask for it.
 > Send me a summary of overnight news every morning at seven.
 
 [Genie](../using/genie.md) hands that to Soulacy's agent builder, which knows
-what is installed on your gateway, asks for anything it still needs — a time, a
-delivery channel — and saves a real agent. You do not have to know the shape of
+what is installed on your gateway, asks for anything it still needs, such as a
+time or delivery channel, and saves a real agent. You do not have to know the shape of
 a `SOUL.yaml` file to get one, and most people never write one by hand.
 
 The rest of this page is the long way, which is still worth reading once: it is
@@ -237,7 +237,7 @@ normal chat agent merely to display the final answer.
 
 ## Next Steps
 
-- [SOUL.yaml Reference](../agents/soul-yaml.md) — complete schema documentation
-- [Agent Tools](../agents/tools.md) — built-ins, Python tools, MCP, and peers
-- [Workflow Steps](../agents/workflow.md) — checkpointed tool workflows
-- [Configuration](../configuration/index.md) — server, LLM, and storage options
+- [SOUL.yaml Reference](../agents/soul-yaml.md): complete schema documentation
+- [Agent Tools](../agents/tools.md): built-ins, Python tools, MCP, and peers
+- [Workflow Steps](../agents/workflow.md): checkpointed tool workflows
+- [Configuration](../configuration/index.md): server, LLM, and storage options

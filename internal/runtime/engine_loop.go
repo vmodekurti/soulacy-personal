@@ -24,6 +24,7 @@ import (
 	"github.com/soulacy/soulacy/internal/metrics"
 	"github.com/soulacy/soulacy/internal/reasoning"
 	"github.com/soulacy/soulacy/internal/session"
+	"github.com/soulacy/soulacy/internal/taskcontract"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 )
@@ -76,22 +77,43 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		metadata.RunID = runID
 		ctx = llm.WithCallMetadata(ctx, metadata)
 	}
+	contract := taskcontract.New(runID, msg, runStart.UTC())
+	ctx = withTaskContract(ctx, contract)
+	if e.sink != nil {
+		e.sink.Emit(message.Event{
+			Type: "task.contract.started", AgentID: msg.AgentID, SessionID: msg.SessionID,
+			Payload: contract.Snapshot(), Timestamp: time.Now().UTC(),
+		})
+	}
 	var runProvider, runModel, runStrategy string
 	defer func() {
 		degraded := reply.Metadata != nil && strings.EqualFold(reply.Metadata[message.MetaReasoningDegraded], "true")
-		success := err == nil && runOutcome == "success" && !degraded
+		contractSnapshot := contract.Complete(err, runOutcome == "success", degraded, time.Now().UTC())
+		if collector := taskContractCollectorFrom(ctx); collector != nil {
+			*collector = contractSnapshot
+		}
+		success := err == nil && runOutcome == "success" && !degraded &&
+			contractSnapshot.Outcome != taskcontract.OutcomeBlocked &&
+			contractSnapshot.Outcome != taskcontract.OutcomeFailed
 		metrics.AgentRunDuration.WithLabelValues(msg.AgentID).Observe(time.Since(runStart).Seconds())
 		metrics.AgentRunsTotal.WithLabelValues(msg.AgentID, runOutcome).Inc()
 		// A single explicit terminal event gives learning/telemetry consumers an
 		// authoritative run boundary. Session IDs are conversational and may span
 		// hundreds of turns; error events may be recovered. Neither is a run ID.
+		if e.sink != nil {
+			e.sink.Emit(message.Event{
+				Type: "task.contract.completed", AgentID: msg.AgentID, SessionID: msg.SessionID,
+				Payload: contractSnapshot, Timestamp: time.Now().UTC(),
+			})
+		}
 		if e.sink != nil && !autopilotManaged(ctx) {
 			e.sink.Emit(message.Event{
 				Type: "run.completed", AgentID: msg.AgentID, SessionID: msg.SessionID,
 				Payload: map[string]any{
 					"run_id": runID, "provider": runProvider, "model": runModel,
 					"strategy": runStrategy, "success": success, "degraded": degraded,
-					"outcome": runOutcome,
+					"outcome": runOutcome, "task_outcome": contractSnapshot.Outcome,
+					"task_contract": contractSnapshot,
 				},
 				Timestamp: time.Now().UTC(),
 			})
@@ -183,6 +205,8 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		metadata.DataClassification = strings.TrimSpace(def.LLM.DataClassification)
 		ctx = llm.WithCallMetadata(ctx, metadata)
 	}
+	budgetTokens, budgetCalls := e.effectiveRunBudget(def)
+	contract.Configure(runStrategy, def.MaxTurns, budgetTokens, budgetCalls)
 	if !def.Enabled {
 		return message.Message{}, fmt.Errorf("engine: agent %q is disabled", msg.AgentID)
 	}
@@ -201,7 +225,11 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	// Defined as a method so router-specific logic (rule matching, trace
 	// events) lives alongside the dispatcher without bloating Handle.
 	if def.Kind == "router" {
-		return e.dispatchRouter(ctx, def, msg)
+		reply, err = e.dispatchRouter(ctx, def, msg)
+		if err == nil {
+			runOutcome = "success"
+		}
+		return reply, err
 	}
 	if resolveErr := e.resolveExecutionModel(def); resolveErr != nil {
 		return message.Message{}, fmt.Errorf("model preflight: %w", resolveErr)
@@ -255,6 +283,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		return message.Message{}, fmt.Errorf("model preflight: %w", prepareErr)
 	}
 	runStrategy = preparation.Strategy
+	contract.Configure(runStrategy, def.MaxTurns, budgetTokens, budgetCalls)
 	e.sink.Emit(message.Event{
 		Type: "agent.prepared", AgentID: msg.AgentID, SessionID: msg.SessionID,
 		Payload: preparation, Timestamp: time.Now().UTC(),
@@ -320,6 +349,9 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 			if outcomeReport.Summary != "" {
 				reply.Metadata[message.MetaOutcomeSummary] = outcomeReport.Summary
 			}
+		}
+		if def.Outcome.HasAssertions() && outcomeReport.Met {
+			contract.MarkVerified("workflow_outcome_contract", "all declared outcome assertions passed")
 		}
 		e.sink.Emit(message.Event{
 			Type: "message.out", AgentID: msg.AgentID, SessionID: msg.SessionID,
@@ -490,6 +522,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		toolSchemaExists(tools, "mcp_install_inspect")
 	forcePackageInstall := hasURLPackageRequest && packageInstallReq.Kind != "mcp" &&
 		toolSchemaExists(tools, "package_install")
+	forceGenieActionPlan := shouldForceGenieActionPlan(def.ID, rawGoal, tools)
 
 	// Auto-delegate: when SOUL.yaml sets `llm.tool_choice: agent__<id>` and
 	// `<id>` is one of the declared peers, do the peer call HERE before the
@@ -512,19 +545,20 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		if isPeer {
 			userText := flattenParts(msg.Parts)
 			peerArgs := map[string]any{"message": userText}
+			peerCallID := "auto-" + uuidShort()
+			peerCall := message.ToolCall{ID: peerCallID, Name: tc, Arguments: peerArgs}
 			e.sink.Emit(message.Event{
 				Type: "tool.call", AgentID: msg.AgentID, SessionID: msg.SessionID,
-				Payload: message.ToolCall{
-					ID: "auto-" + uuidShort(), Name: tc, Arguments: peerArgs,
-				},
+				Payload:   peerCall,
 				Timestamp: time.Now().UTC(),
 			})
 			peerResp, perr := e.runAgentCall(ctx, def, tc, peerArgs)
-			peerCallID := "auto-" + uuidShort()
 			if perr != nil {
+				e.observeTaskTool(ctx, msg.AgentID, msg.SessionID, peerCall, perr.Error(), true)
 				e.log.Warn("auto-delegate failed; falling through to normal LLM loop",
 					zap.String("agent", def.ID), zap.String("peer", peerID), zap.Error(perr))
 			} else {
+				e.observeTaskTool(ctx, msg.AgentID, msg.SessionID, peerCall, peerResp, false)
 				autoDelegated = true
 				// Synthetic assistant message recording the (forced) tool call
 				// + the tool-role message carrying the peer's reply. The LLM
@@ -566,7 +600,8 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	// a terminal reply the moment the next call would exceed the cap. This is
 	// the only thing standing between a runaway loop / prompt injection / deep
 	// peer recursion and a surprise bill.
-	budgetTokens, budgetCalls := e.effectiveRunBudget(def)
+	budgetTokens, budgetCalls = e.effectiveRunBudget(def)
+	contract.Configure(runStrategy, maxTurns, budgetTokens, budgetCalls)
 	var usedTokens, usedCalls int
 
 	model := def.LLM.Model
@@ -715,6 +750,9 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		if turn == 0 && !autoDelegated && forcePackageInstall {
 			req.ToolChoice = "package_install"
 		}
+		if turn == 0 && !autoDelegated && forceGenieActionPlan {
+			req.ToolChoice = "plan_action"
+		}
 
 		e.sink.Emit(message.Event{
 			Type: "llm.call", AgentID: msg.AgentID, SessionID: msg.SessionID,
@@ -855,6 +893,16 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 				},
 			}}
 		}
+		// A real-world action must begin with the execution planner. Some local
+		// and open-weight models ignore tool_choice and answer from the visible
+		// tool inventory, which previously turned an absent provider connector
+		// into an immediate refusal. Force the same safe built-in call the prompt
+		// requested so the next turn sees the ordered API, website, and official
+		// alternative routes.
+		if turn == 0 && !autoDelegated && forceGenieActionPlan {
+			resp.Content = ""
+			resp.ToolCalls = []message.ToolCall{genieActionPlanCall(rawGoal)}
+		}
 		// Usage for streams is final only after the provider channel closes.
 		// Recording and run-budget accumulation therefore happen after draining.
 		if resp.InputTokens > 0 {
@@ -925,6 +973,9 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		// dedup can't, without ever blocking a legitimately varied tool sequence.
 		// A durable refusal is worth saying once and acting on; see engine_blocked.go.
 		nudges := failures.observe(toolResults)
+		if replan := contract.ReplanDirective(); replan != "" {
+			nudges = append(nudges, replan)
+		}
 		for _, tc := range resp.ToolCalls {
 			name := normalizeToolCallName(tc.Name)
 			if name == "shell_exec" || name == "run_script" || name == "http_request" {
@@ -945,21 +996,25 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		// sess.mu itself, and Go mutexes are not reentrant, so holding it here
 		// would deadlock the agent on its second turn (any tool-using agent).
 		sess.mu.Lock()
-		turns := []llm.ChatMessage{
-			{Role: "assistant", Content: resp.Content, ToolCalls: resp.ToolCalls},
+		turns := make([]llm.ChatMessage, 0, len(nudges)+len(toolResults)+1)
+		// Put replanning guidance before the assistant/tool pair. This preserves
+		// the provider-required adjacency of a tool call and its results.
+		for _, n := range nudges {
+			turns = append(turns, llm.ChatMessage{Role: "system", Content: n})
 		}
+		turns = append(turns, llm.ChatMessage{Role: "assistant", Content: resp.Content, ToolCalls: resp.ToolCalls})
 		for _, tr := range toolResults {
 			turns = append(turns, llm.ChatMessage{
 				Role: "tool", Content: tr.Content, ToolCallID: tr.CallID, Name: tr.Name,
 			})
 		}
-		// A loop-guard steer (if any) rides along as a system turn so the model
-		// sees it on the very next iteration.
-		for _, n := range nudges {
-			turns = append(turns, llm.ChatMessage{Role: "system", Content: n})
-		}
 		e.appendHistoryLocked(sess, turns...)
 		sess.mu.Unlock()
+
+		if plannedReply := initialGenieActionReply(turn, forceGenieActionPlan, toolResults); plannedReply != "" {
+			finalContent = plannedReply
+			break
+		}
 
 		// An explicit install-from-URL request is a deterministic operator action,
 		// not an open-ended research task. MCP requests inspect first, so their
@@ -974,6 +1029,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		// Answering now costs one prompt; carrying on costs one per turn until
 		// a ceiling fires and buries the reason (#230).
 		if failures.shouldStop() {
+			contract.MarkBlocked("the available tool routes were refused by policy or deployment capability")
 			finalContent = failures.stopMessage()
 			e.sink.Emit(message.Event{
 				Type: "error", AgentID: msg.AgentID, SessionID: msg.SessionID,
@@ -1057,76 +1113,6 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 
 	runOutcome = "success" // flips the deferred AgentRunsTotal counter from "error"
 	return reply, nil
-}
-
-// flowHistoryMaxMsgs caps how many recent chat messages a workflow run pulls
-// in for conversation continuity (~6 turns = 12 user/assistant messages).
-const flowHistoryMaxMsgs = 12
-
-// flowHistoryTranscript returns a compact "User:/Assistant:" transcript of the
-// last maxMsgs messages for the session, used to give a workflow's entry agent
-// the prior turns so follow-ups resolve without the user restating context.
-// Empty when there's no history yet.
-func (e *Engine) flowHistoryTranscript(sessionID, agentID string, maxMsgs int) string {
-	if sessionID == "" {
-		return ""
-	}
-	sess := e.getOrCreateSession(sessionID, agentID)
-	sess.mu.Lock()
-	hist := sess.History
-	if maxMsgs > 0 && len(hist) > maxMsgs {
-		hist = hist[len(hist)-maxMsgs:]
-	}
-	cp := make([]llm.ChatMessage, len(hist))
-	copy(cp, hist)
-	sess.mu.Unlock()
-
-	var b strings.Builder
-	for _, m := range cp {
-		content := strings.TrimSpace(m.Content)
-		if content == "" {
-			continue
-		}
-		role := "User"
-		if m.Role == "assistant" {
-			role = "Assistant"
-		} else if m.Role != "user" {
-			continue // skip system/tool turns in the user-facing transcript
-		}
-		b.WriteString(role)
-		b.WriteString(": ")
-		b.WriteString(content)
-		b.WriteString("\n")
-	}
-	return strings.TrimSpace(b.String())
-}
-
-// recordWorkflowTurn persists a workflow agent's user+assistant turn to the
-// in-memory session history (so the next turn's flowHistoryTranscript sees it)
-// and the durable conversation store. Workflow agents bypass finalizeReply, so
-// without this they'd never accumulate conversational context.
-func (e *Engine) recordWorkflowTurn(ctx context.Context, msg message.Message, replyText string) {
-	userText := flattenParts(msg.Parts)
-	sess := e.getOrCreateSession(msg.SessionID, msg.AgentID)
-	sess.mu.Lock()
-	e.appendHistoryLocked(sess,
-		llm.ChatMessage{Role: "user", Content: userText},
-		llm.ChatMessage{Role: "assistant", Content: replyText},
-	)
-	sess.mu.Unlock()
-
-	if e.historyStore != nil {
-		if err := e.historyStore.Append(ctx, session.ConversationEntry{
-			SessionID: msg.SessionID, AgentID: msg.AgentID, Role: "user", Content: userText,
-		}); err != nil {
-			e.log.Warn("history store: append workflow user turn failed", zap.Error(err))
-		}
-		if err := e.historyStore.Append(ctx, session.ConversationEntry{
-			SessionID: msg.SessionID, AgentID: msg.AgentID, Role: "assistant", Content: replyText,
-		}); err != nil {
-			e.log.Warn("history store: append workflow assistant turn failed", zap.Error(err))
-		}
-	}
 }
 
 // writeEpisodic persists a task→reply pair as an episodic brain memory record.

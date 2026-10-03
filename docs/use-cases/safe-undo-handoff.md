@@ -70,7 +70,7 @@ Expected body:
 ```
 
 A network timeout does not prove nothing happened. If the receipt is uncertain,
-stop here and follow the uncertainty procedure below—do not prepare a duplicate.
+stop here and follow the uncertainty procedure below, do not prepare a duplicate.
 
 ## 4. Try an unrelated edit, then undo
 
@@ -108,7 +108,7 @@ prove the original request succeeded, or undo a hidden side effect. Confirm it
 only after you understand the observation. Do not delete the ledger or blindly
 retry to make a warning disappear.
 
-## Where this is a good fit—and where it is not
+## Where this is a good fit, and where it is not
 
 Good fit: a reviewed top-level field change in a compatible internal record
 service, or an existing small UTF-8 document on a conditional WebDAV service.

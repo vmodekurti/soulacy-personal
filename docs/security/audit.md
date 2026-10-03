@@ -11,14 +11,14 @@ purposes and have very different guarantees. **Know which one is authoritative.*
   `<agent-id>.log` JSON-Lines file that the GUI Logs page tails.
 - **Always on.** It is part of the core storage backend
   (`storage.backend: sqlite` by default; also available via Postgres) and is
-  wired unconditionally at startup — there is no config switch to turn it off.
+  wired unconditionally at startup: there is no config switch to turn it off.
 - **Durable and queryable.** Survives restarts, supports cross-agent queries,
   and is written by a single buffered async writer that batches and fsyncs.
 - Records the full lifecycle of every run: run start, LLM calls, tool
   calls/results, replies, and errors, flowing through the gateway EventHub.
 
-When you need to reconstruct what an agent did — for an incident review,
-forensic timeline, or audit — **this is the source of truth.**
+When you need to reconstruct what an agent did: for an incident review,
+forensic timeline, or audit: **this is the source of truth.**
 
 Location: `<workspace>/logs/` for the per-agent JSONL mirror and
 `<workspace>/data/actions.db` (SQLite) for the durable store. With
@@ -36,7 +36,7 @@ Location: `<workspace>/logs/` for the per-agent JSONL mirror and
   exists as a convenience tail for quick `grep`/`tail -f` inspection during
   development, not as a system of record.
 - **Best-effort.** Write failures are swallowed silently so they never crash an
-  agent run — which is exactly why it must not be relied upon for incident
+  agent run. That is exactly why it must not be relied upon for incident
   reconstruction.
 
 To enable it (for example during debugging), set an explicit directory:
@@ -54,8 +54,8 @@ looking argument values (`api_key`, `password`, `secret`, `token`,
 
 | | SQLite action log (`internal/actionlog`) | JSONL audit log (`internal/audit`) |
 |---|---|---|
-| Authority | **Authoritative** — system of record | Optional convenience copy |
+| Authority | **Authoritative**: system of record | Optional convenience copy |
 | Default state | Always on (cannot be disabled) | **Off** (`audit_dir: ""`) |
 | Storage | SQLite (+ GUI JSONL mirror) / Postgres | Per-session JSONL files |
 | Durability | Durable, queryable, async-batched | Best-effort, failures swallowed |
-| Use for incident reconstruction | **Yes** | No — use the action log |
+| Use for incident reconstruction | **Yes** | No: use the action log |

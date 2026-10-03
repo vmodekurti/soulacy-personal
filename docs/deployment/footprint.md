@@ -75,7 +75,7 @@ whole-stack claim.
 ### Startup and readiness
 
 Time process launch to successful application health/readiness checks for the
-configured services—not `--version`, first log output, or merely opening a TCP
+configured services, not `--version`, first log output, or merely opening a TCP
 socket. State whether the measurement includes container launch, migrations,
 warm/cold disk cache, model loading, and external services. Repeat cold and warm
 runs; report sample count and range/percentiles.

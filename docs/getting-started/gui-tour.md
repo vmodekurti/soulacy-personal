@@ -1,6 +1,6 @@
 # GUI Tour
 
-The built-in web GUI gives you a full control panel for every part of Soulacy — agents, chat, schedules, memory, knowledge, and operations — without touching a single YAML file.
+The built-in web GUI gives you a full control panel for every part of Soulacy (agents, chat, schedules, memory, knowledge, and operations) without touching a single YAML file.
 
 Open it at:
 
@@ -26,8 +26,8 @@ The **Launch Readiness** panel scores every load-bearing capability
 (providers, secrets, channels, Studio contracts, schedules, deployment, ops
 alerts, SLOs, release, docs) and shows blocker / warning counts with
 click-through to the offending page. The `schedules_ready` first-class check
-reports total / enabled / delivering / overdue with actionable next-steps —
-so an agent that saved cleanly but never fires (because e.g. no default
+reports total / enabled / delivering / overdue with actionable next steps.
+An agent that saved cleanly but never fires (because e.g. no default
 outbound bot is configured) shows up here instead of in silence.
 
 **Try first:** send a chat message in another tab and watch the events appear live.
@@ -67,13 +67,13 @@ explicit warning acknowledgement.
 - **Contract panel** for reasoning agents runs blocker/warning checks on the
   system prompt, tool allowlist, peer graph, prompt hygiene, step budget,
   channel delivery, LLM fit, capability scope, persona consistency, and
-  builtin scope — issues surface before Save.
+  builtin scope: issues surface before Save.
 - **Debug in Studio** on a failed run in Activity pre-fills the failing
   input into the test bench, loads the structured run trace, and routes any
   heal result through an **Apply this fix / Cancel** diff panel; the canvas
   only changes on confirm.
 - **Build until it works** now surfaces two sections above the attempt log:
-  **Needs your input** (external blockers Studio can't fix — bad credential,
+  **Needs your input** (external blockers Studio can't fix: bad credential,
   bot not invited, rate limit, invalid destination) and **What Studio
   changed** (plain-language rollup of each attempt's edits).
 
@@ -88,11 +88,11 @@ then run **Dry run** and inspect its contract and YAML.
 The full agent editor: identity, trigger, system prompt, LLM provider/model (with live model lists), memory scopes, reasoning strategy, brain memory layers, channels, tools, skills, knowledge bases, and peer agents.
 
 
-- Tool **Python file** fields have a **📂 Browse** picker that lists every script in the tool catalog — pick instead of typing paths.
+- Tool **Python file** fields have a **📂 Browse** picker that lists every script in the tool catalog: pick instead of typing paths.
 - Chip-picker fields (channels, skills, knowledge bases, peer agents, built-ins) have a **▾ browse** dropdown populated from what actually exists, so typos are impossible.
 - **Validate** runs the same checks as `sy agent validate` and shows findings inline. Invalid `schedule.cron` strings are refused at Save with the parser's own explanation (5-field, 6-field-with-seconds, and `@descriptor` shapes are accepted).
 - **💬 Test** opens an inline playground; **&lt;/&gt; API** shows copy-paste cURL/Python/JS snippets for the agent.
-- **Capability audit modal** — a save that would escalate an agent's tier (ReadOnly → Active → Privileged) while it has interactive channel bindings pops a blocking modal listing the tier diff, warnings, and affected bindings. Confirming re-submits with an acknowledgement header; cancelling leaves the previous shape in place.
+- **Capability audit modal**: a save that would escalate an agent's tier (ReadOnly → Active → Privileged) while it has interactive channel bindings pops a blocking modal listing the tier diff, warnings, and affected bindings. Confirming re-submits with an acknowledgement header; cancelling leaves the previous shape in place.
 
 **Try first:** select an agent, click **Validate**, then **💬 Test** and send it a message.
 
@@ -110,7 +110,7 @@ The Chat Tester: pick an agent, send messages, and watch the **Thinking** panel 
 
 ## Brain Mem
 
-The Brain Memory explorer for long-term agent memory: an **Episodic** timeline (search, write, clear), a **Procedural** rulebook editor with markdown preview — including version **History**, line-level **Diff vs current**, one-click **Roll back**, and a **🔒 Lock** toggle that freezes the rules — and a **Context Preview** tab showing exactly what gets injected into the system prompt. See [Memory](../using/memory.md).
+The Brain Memory explorer for long-term agent memory: an **Episodic** timeline (search, write, clear), a **Procedural** rulebook editor with markdown preview (including version **History**, line-level **Diff vs current**, one-click **Roll back**, and a **🔒 Lock** toggle that freezes the rules) and a **Context Preview** tab showing exactly what gets injected into the system prompt. See [Memory](../using/memory.md).
 
 **Try first:** open the Procedural tab and click **⧗ History**.
 
@@ -128,10 +128,10 @@ A kanban board (Todo → Running → Needs Review → Done → Failed) where eac
 
 ## Channels (ops)
 
-Status and configuration for every channel adapter — Telegram, Discord, Slack, WhatsApp, WhatsApp Web (with QR pairing), email (SMTP), Microsoft Teams, Google Chat, generic webhooks, and the always-on HTTP channel. Edit credentials, map bots to agents (multi-bot supported), and enable/disable adapters; a restart banner appears when changes need a gateway restart.
+Status and configuration for every channel adapter: Telegram, Discord, Slack, WhatsApp, WhatsApp Web (with QR pairing), email (SMTP), Microsoft Teams, Google Chat, generic webhooks, and the always-on HTTP channel. Edit credentials, map bots to agents (multi-bot supported), and enable/disable adapters; a restart banner appears when changes need a gateway restart.
 
 - **Guided setup cards** for Telegram / Slack / Discord / WhatsApp /
-  WhatsApp Web / email / Teams / Google Chat / HTTP — step-by-step with
+  WhatsApp Web / email / Teams / Google Chat / HTTP: step-by-step with
   per-field hints keyed off the actual adapter config keys, and a Test
   delivery button at the bottom.
 - **Diagnose** on any mapping returns a plain-language category and fix:
@@ -154,7 +154,7 @@ All cron agents in one table: next run, last run, missed-run policy, live "Runni
   missed a scheduled fire and replayed it at startup (within the
   `missed_startup_window`); hover for the missed/replayed timestamps and
   how much late the run was.
-- **Save-time cron validation** — the Edit modal refuses invalid expressions
+- **Save-time cron validation**: the Edit modal refuses invalid expressions
   with the parser's own message ("expected exactly 5 fields, found 3")
   instead of silently succeeding and leaving the "Next run" column blank.
 
@@ -162,7 +162,7 @@ All cron agents in one table: next run, last run, missed-run policy, live "Runni
 
 ## Skills (ops)
 
-Browse installed Agent Skills (SKILL.md instruction packs), read their full instructions and resources, and install new ones — **⚡ From AgenticSkills** installs directly from an agenticskills.io URL, and **➕ Skill sources** lets you paste any URL (a skills.sh-style directory, a Soulacy package registry, or a Git host), have it reviewed and identified, then add it as a registry source.
+Browse installed Agent Skills (SKILL.md instruction packs), read their full instructions and resources, and install new ones: **⚡ From AgenticSkills** installs directly from an agenticskills.io URL, and **➕ Skill sources** lets you paste any URL (a skills.sh-style directory, a Soulacy package registry, or a Git host), have it reviewed and identified, then add it as a registry source.
 
 **Try first:** click **➕ Skill sources**, paste `https://www.skills.sh/`, and hit **🔍 Review**.
 
@@ -174,13 +174,13 @@ Manage MCP servers: connect a detected local **Open Notebook**, use **+ New Serv
 
 ## Plugins (ops)
 
-Install plugins from a git URL, a sha256-checksummed archive, or a local directory. Every install is staged first — you review the requested permissions, credentials, and security findings before approving.
+Install plugins from a git URL, a sha256-checksummed archive, or a local directory. Every install is staged first: you review the requested permissions, credentials, and security findings before approving.
 
 The **Agents → Import** modal (for agent packages) surfaces the new v2
 schema: namespaced ids (`owner/name`), calendar versioning (`YYYY.MM.DD`),
 and an install-time requirements gate that refuses import when a required
 provider / channel / secret / MCP server is missing, with a red **Missing
-requirements** banner and an **I understand — import anyway** checkbox for
+requirements** banner and an **I understand: import anyway** checkbox for
 local experiments. Legacy v1 packages import with a deprecation warning
 until the `2027-06-01` cutoff. See [Packaging](../packaging.md).
 
@@ -207,10 +207,10 @@ for the full category → fix table.
 The per-agent action log from the SQLite action store: every run, LLM call, tool call/result, reasoning step, reply, and error with timestamps and summaries. Filter by type, enable **▶ Watch (2s)** for live polling, and see per-run token/cost totals. See [Dashboard & Activity](../using/dashboard.md).
 
 The **Running now** strip at the top polls `/activity/running` every 3s and
-renders one card per in-flight session — agent name, `Xm Ys in flight`,
+renders one card per in-flight session: agent name, `Xm Ys in flight`,
 `silent Ys`, `last: <event_type>`. A session that hasn't emitted anything
 for more than 5 minutes turns red and shows a per-last-event-type reason +
-fix ("waiting on the LLM provider for 6m 12s — check Providers for
+fix ("waiting on the LLM provider for 6m 12s: check Providers for
 rate-limit/overload"). Click a card to deep-link into that agent/session's
 event stream.
 
@@ -224,9 +224,9 @@ Edit the live runtime configuration: log level/format, Python interpreter, tool 
 
 ## Logs (system)
 
-The gateway log tail: last 100–5000 lines, free-text filter, severity filter (error/warn/info/debug) with per-level counts, line wrap toggle, and 3-second auto-refresh.
+The gateway log tail: last 100-5000 lines, free-text filter, severity filter (error/warn/info/debug) with per-level counts, line wrap toggle, and 3-second auto-refresh.
 
-**Try first:** filter on `error` after anything misbehaves — it is usually the fastest diagnosis.
+**Try first:** filter on `error` after anything misbehaves: it is usually the fastest diagnosis.
 
 !!! tip
     Everything in the GUI is also scriptable: the CLI (`sy`) and REST API (`/api/v1/...`) drive the same endpoints the pages use. Run `sy doctor` if any page shows unexpected errors.

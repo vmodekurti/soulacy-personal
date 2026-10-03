@@ -1,11 +1,11 @@
 # Skill Sources
 
-Point Soulacy at any URL — a skill directory like skills.sh, a Soulacy registry, or a git host — and it identifies what it is, shows you what it found, and adds it as an install source only after you consent.
+Point Soulacy at any URL (a skill directory like skills.sh, a Soulacy registry, or a git host) and it identifies what it is, shows you what it found, and adds it as an install source only after you consent.
 
 ## Quick start
 
 ```bash
-sy registry probe https://www.skills.sh/    # review only — changes nothing
+sy registry probe https://www.skills.sh/    # review only, changes nothing
 sy registry add   https://www.skills.sh/    # review + consent + save to config.yaml
 sy registry list                            # configured sources
 ```
@@ -41,7 +41,7 @@ Pass the CLI's global `--json` flag to get the raw probe report instead.
 | `skillssh` | skills.sh-compatible directory API | A skill directory; slugs are skills.sh ids `owner/repo/skill` |
 | `http` | Soulacy package registry (`/v1/search` shape) | A registry serving versioned, checksummed packages |
 | `git` | known git host | Addressed installs: `sy skill install github.com/owner/repo` |
-| `unknown` | plain web page | Not a registry — but the report lists any GitHub repos the page links, each installable directly as a git source |
+| `unknown` | plain web page | Not a registry. The report lists any GitHub repos the page links, each installable directly as a git source. |
 
 When a source publishes partner security audits (skills.sh does), the probe
 report flags it, and those audits are surfaced again in the install consent
@@ -101,7 +101,7 @@ On the **Skills** page:
 1. Click **➕ Skill sources**.
 2. The modal lists your configured sources (id, type, URL, and a 🔑 marker
    when auth headers are configured).
-3. Paste a URL and click **🔍 Review** — the probe report renders inline:
+3. Paste a URL and click **🔍 Review**: the probe report renders inline:
    the detected kind, a review summary, sample skills/repos, and whether the
    source publishes third-party security audits.
 4. If the URL is a recognisable registry, click **➕ Add "…" as a source**.
@@ -122,7 +122,7 @@ registries:
     priority: 50
 ```
 
-Sources are queried in ascending `priority` order with fallback — the first
+Sources are queried in ascending `priority` order with fallback: the first
 registry that resolves a slug wins. For the full config grammar (auth
 headers, ed25519 signing keys, running your own registry) see
 [Package Registries](registries.md).
@@ -131,5 +131,5 @@ headers, ed25519 signing keys, running your own registry) see
     Anyone who controls a configured source can offer packages under any
     slug it serves. Keep priorities such that your most-trusted registries
     resolve first, pin `signing_key` on `http` registries you operate, and
-    rely on the per-install security report — it runs no matter where a
+    rely on the per-install security report: it runs no matter where a
     package came from.

@@ -25,7 +25,7 @@ def get_weather(location):
     return {"location": location, "temp_c": 21}
 ```
 
-The runtime builds each agent's catalog from five sources — Python tools from
+The runtime builds each agent's catalog from five sources: Python tools from
 `SOUL.yaml`, Go-native built-ins, MCP tools, peer agents (`agent__<id>`), and
 plugin tools. The model only ever sees tools admitted by the agent definition
 and gateway config.
@@ -49,9 +49,9 @@ How a call executes:
 
 1. The engine serializes the model's arguments to JSON and passes them on
    **stdin**; your function is called as `get_weather(**args)`.
-2. The function's return value becomes the tool result — strings pass through,
+2. The function's return value becomes the tool result: strings pass through,
    anything else is JSON-encoded.
-3. `print()` inside your tool goes to stderr, not the result — and every
+3. `print()` inside your tool goes to stderr, not the result. Every
    stderr line streams live into the Activity log as a `tool.log` event, so
    long-running tools can report progress with
    `print("step 2/5…", file=sys.stderr, flush=True)`.
@@ -69,7 +69,7 @@ How a call executes:
 
 ## The Sandbox
 
-Python tools run inside a resource sandbox — the soulacy binary re-execs
+Python tools run inside a resource sandbox: the soulacy binary re-execs
 itself as a hidden wrapper that applies syscall-level rlimits before running
 your script. Default caps:
 
@@ -91,9 +91,9 @@ arbitrary host files.
 
 | YAML | Mode |
 |------|------|
-| Field absent | **Default** — gated built-ins are auto-injected when their prerequisites are met. |
-| `builtins: []` | **None** — no built-ins. Right choice for peer-only orchestrators. |
-| `builtins: [web_search, kb_search]` | **Restricted** — only the listed built-ins, still subject to their gates. |
+| Field absent | **Default**: gated built-ins are auto-injected when their prerequisites are met. |
+| `builtins: []` | **None**: no built-ins. Right choice for peer-only orchestrators. |
+| `builtins: [web_search, kb_search]` | **Restricted**: only the listed built-ins, still subject to their gates. |
 | `builtins: ["*"]` or `["all"]` | Same as default, written explicitly. |
 
 Common built-ins and their gates:
@@ -106,7 +106,7 @@ Common built-ins and their gates:
 | `queue_create`, `queue_names`, `queue_put`, `queue_take`, `queue_list`, `queue_clear` | Always available unless `builtins` restricts them. |
 | `channel.send` | Channel registry configured. |
 | `read_skill`, `read_skill_file` | Agent declares `skills:`. |
-| `shell_exec`, `run_script`, `read_file`, `write_file`, `list_dir`, `install_library` | System tools — double opt-in (below). |
+| `shell_exec`, `run_script`, `read_file`, `write_file`, `list_dir`, `install_library` | System tools: double opt-in (below). |
 
 ### Ephemeral Queues
 
@@ -184,13 +184,13 @@ confirm_tools:
 When the model calls a gated tool, the engine emits a `tool_confirm` event,
 shows an approval card in the Chat page, and waits for your decision before
 proceeding. `confirm_tools: ["*"]` gates every built-in call. Gates apply to
-built-in and system tools (Python and MCP tools run without a gate — restrict
+built-in and system tools (Python and MCP tools run without a gate: restrict
 those via allowlists instead).
 
 ## MCP Tools
 
 Tools from connected MCP servers are auto-injected under the name
-`mcp__<server>__<tool>` — e.g. `mcp__github__search_repositories`. With no
+`mcp__<server>__<tool>`: e.g. `mcp__github__search_repositories`. With no
 allowlist configured, agents see every connected MCP tool. Once either field
 below is present, MCP becomes deny-by-default:
 
@@ -218,7 +218,7 @@ for setup and the authenticated-website-to-podcast workflow.
 
 ## Editing Tools in the GUI
 
-The Agents page editor has a full tool builder — no YAML required:
+The Agents page editor has a full tool builder: no YAML required:
 
 - **+ Add tool** creates a tool card with name, description, timeout, and a
   JSON parameters-schema editor.

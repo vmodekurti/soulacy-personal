@@ -487,6 +487,10 @@ export const api = {
   mobile: {
     status: () => apiFetch('/mobile/status'),
     deliveries: (limit = 40) => apiFetch(`/mobile/deliveries?limit=${limit}`),
+    feedState: () => apiFetch('/mobile/feed-state'),
+    saveFeedState: (state) => apiFetch('/mobile/feed-state', {
+      method: 'POST', body: JSON.stringify(state),
+    }),
   },
 
   browserTrace: (agentId, sessionId = '') => {
@@ -710,6 +714,49 @@ export const api = {
   },
   marketplace: {
     status: () => apiFetch('/marketplace/status'),
+  },
+
+  connectors: {
+    list: (query = '', category = '') => {
+      const params = new URLSearchParams()
+      if (query) params.set('q', query)
+      if (category && category !== 'all') params.set('category', category)
+      const suffix = params.toString()
+      return apiFetch('/connectors' + (suffix ? `?${suffix}` : ''))
+    },
+    plan: (intent) => apiFetch('/connectors/plan', {
+      method: 'POST', body: JSON.stringify({ intent }),
+    }),
+    create: (body) => apiFetch('/connectors', {
+      method: 'POST', body: JSON.stringify(body),
+    }),
+    update: (id, body) => apiFetch(`/connectors/${encodeURIComponent(id)}`, {
+      method: 'PUT', body: JSON.stringify(body),
+    }),
+    delete: (id) => apiFetch(`/connectors/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    websiteAccess: (id, siteID) => apiFetch(`/connectors/${encodeURIComponent(id)}/sites/${encodeURIComponent(siteID)}/website-access`, {
+      method: 'POST', body: '{}',
+    }),
+  },
+
+  missions: {
+    list: () => apiFetch('/missions'),
+    get: (id) => apiFetch(`/missions/${encodeURIComponent(id)}`),
+    plan: (objective) => apiFetch('/missions/plan', {
+      method: 'POST', body: JSON.stringify({ objective }),
+    }),
+    planExecution: (goal, knownInputs = {}) => apiFetch('/missions/execution-plan', {
+      method: 'POST', body: JSON.stringify({ goal, known_inputs: knownInputs }),
+    }),
+    planMissionExecution: (id, knownInputs = {}) => apiFetch(`/missions/${encodeURIComponent(id)}/execution-plan`, {
+      method: 'POST', body: JSON.stringify({ known_inputs: knownInputs }),
+    }),
+    create: (body) => apiFetch('/missions', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id, body) => apiFetch(`/missions/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    pause: (id) => apiFetch(`/missions/${encodeURIComponent(id)}/pause`, { method: 'POST', body: '{}' }),
+    resume: (id) => apiFetch(`/missions/${encodeURIComponent(id)}/resume`, { method: 'POST', body: '{}' }),
+    complete: (id, progress = '') => apiFetch(`/missions/${encodeURIComponent(id)}/complete`, { method: 'POST', body: JSON.stringify({ progress }) }),
+    cancel: (id) => apiFetch(`/missions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
 
   mcp: {

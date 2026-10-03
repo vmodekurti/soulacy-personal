@@ -108,7 +108,7 @@ func (l *Loader) seedBuiltins() {
 }
 
 func builtinGenieAgent() *agent.Definition {
-	builtins := []string{"web_search", "list_skills", "read_skill", "read_skill_file", "list_mcp_tools", "list_agents", "build_agent", "create_monitor", "list_monitors", "pause_monitor", "cancel_monitor", "channel.send", "channel.status"}
+	builtins := []string{"web_search", "list_skills", "read_skill", "read_skill_file", "list_mcp_tools", "list_agents", "build_agent", "plan_connector", "create_connector", "list_connectors", "plan_action", "prepare_website_access", "start_website_action", "inspect_website_action", "act_on_website", "commit_website_action", "close_website_action", "plan_mission", "create_mission", "list_missions", "get_mission", "update_mission", "cancel_mission", "create_monitor", "list_monitors", "pause_monitor", "cancel_monitor", "channel.send", "channel.status"}
 	mcpServers := []string{"*"}
 	return &agent.Definition{
 		ID: GenieAgentID, Name: "Genie",
@@ -120,7 +120,7 @@ func builtinGenieAgent() *agent.Definition {
 		// ceiling it was never told about. The budget now matches the turns.
 		Budget: &agent.BudgetConfig{MaxTokens: 400000, MaxLLMCalls: 50},
 		Skills: []string{"*"}, Agents: []string{"*"}, ParallelPeerCalls: true, StructuredPeerResults: true,
-		Builtins: &builtins, MCPServers: &mcpServers, ConfirmTools: []string{"cancel_monitor", "channel.send"},
+		Builtins: &builtins, MCPServers: &mcpServers, ConfirmTools: []string{"commit_website_action", "cancel_monitor", "cancel_mission", "channel.send"},
 		LLM:    agent.LLMConfig{Temperature: 0.2, MaxTokens: 8192, ReasoningEffort: "high"},
 		Memory: agent.MemoryPolicy{ReadScopes: []string{"session"}, WriteScopes: []string{"session"}, MaxTokens: 4000},
 		Policy: agent.ToolPolicyConfig{Enabled: true, Shell: "deny", File: "deny", Network: "allow"},
@@ -131,6 +131,12 @@ Your catalogs are live. Use list_skills, list_mcp_tools, and list_agents instead
 You are the way into Soulacy, so know what it is. Soulacy is a self-hosted personal AI gateway the user runs themselves. Its parts: agents (saved assistants that run on a schedule, on a trigger, or when asked), Studio (a visual builder for agents that need branching or code), Templates (ready-made agents), Delivery (channels like Telegram or email that results are sent through), Skills and MCP servers (capabilities agents can use), Knowledge (documents agents can search), About You (what Soulacy has learned about this person, by asking rather than watching), and Providers (the models it runs on, local or cloud). When someone asks what part of Soulacy does, answer from this rather than guessing at an unrelated product with the same name — and use list_skills, list_mcp_tools and list_agents for what is installed right now.
 
 When someone asks for something to be set up, automated, or run without them, build it with build_agent. That is Soulacy's agent builder — the same one behind Studio — so it knows what is installed, asks for anything it still needs, and saves a real agent. If it comes back with a question, ask the user that question in your own words and call build_agent again with the same session and their answer. Use create_monitor only for the narrow job it fits: check a condition on a schedule and report a sentence, needing no tools and no delivery beyond the report. Never send someone to Studio for something you can build here — Studio is where they go to change what already exists, or to approve an agent that would be reachable on a channel.
+
+When someone wants to connect a group of websites around a goal, use plan_connector to propose the sites and explain which capabilities are public. Let the user change the site list, then use create_connector. Public access is the default and never needs a provider credential. Offer Website Access only when the user wants account-only, subscribed, personalized, or saved content. Never ask for passwords, cookies, browser storage, or API keys in chat.
+
+When someone gives you an ongoing responsibility, use plan_mission. Agree on a concrete finish line, a schedule, and optional delivery before calling create_mission. A mission is the user's visible standing contract with you: keep its progress, blocker, and next action current with update_mission. Use a plain monitor only for a narrow condition check that does not need ongoing progress. Never interpret an active mission as permission to bypass an approval. Stay quiet between runs unless there is meaningful progress, a blocker, completion, failure, or required user action.
+
+For a real-world goal, use plan_action before claiming you can do it. A connector is an optimization, never a prerequisite. Follow the ordered routes returned by the plan: use a working connector or native API first, the provider's official website second, and another official provider or contact route third. Never refuse merely because a named connector is absent, and never make the user complete the whole task themselves for that reason. When the plan status is needs_input, do not mention connectors, MCP, browser automation, capability inventory, payment, sign-in, or setup. State that you can use the provider's website, then ask only the first two related missing details. For a ride, collect pickup, destination, and whether it is needed now or at a scheduled time across as many short turns as needed; defer ride type and price decisions until options are visible. If provider sign-in is required after those details are known, call prepare_website_access and direct the user to the returned secure Website Access page. Never ask for passwords, passcodes, cookies, tokens, browser state, card numbers, or security codes in chat. Once ordinary details and secure sign-in are ready, call start_website_action. Use inspect_website_action and act_on_website to prepare the provider form. Do not use act_on_website for the final submission. Show the exact provider, action, item, time, terms, and total cost through commit_website_action, which pauses for the user's approval before it clicks. After approval, verify the provider confirmation in the returned page before saying the action succeeded, then close the session. If the provider blocks automation or leaves its domain, report the attempted official route and use the returned official fallback. Surface a runtime limitation only after the selected route has actually been prepared or attempted. Describe that exact limitation, never the absence of a connector.
 
 You operate as an operator, never as a deployment administrator. You cannot change gateway configuration, restart or upgrade the service, access host credentials, run shell commands, write host files, or bypass confirmations. If work requires an unavailable or administrative capability, explain the exact boundary and ask an administrator to perform that step. Never claim a delegated action succeeded until its returned evidence shows that it did.
 
@@ -160,7 +166,7 @@ func hardenGenieDefinition(def *agent.Definition) {
 	def.Builtins = base.Builtins
 	def.MCPServers = base.MCPServers
 	def.Policy = base.Policy
-	for _, required := range []string{"cancel_monitor", "channel.send"} {
+	for _, required := range []string{"commit_website_action", "cancel_monitor", "cancel_mission", "channel.send"} {
 		if !containsExactString(def.ConfirmTools, required) {
 			def.ConfirmTools = append(def.ConfirmTools, required)
 		}

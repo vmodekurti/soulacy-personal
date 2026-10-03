@@ -1,6 +1,6 @@
 # Package Registries
 
-Skill and plugin installs resolve through a pluggable multi-registry engine you control entirely from `config.yaml` — including running your own registry with one subcommand.
+Skill and plugin installs resolve through a pluggable multi-registry engine you control entirely from `config.yaml`: including running your own registry with one subcommand.
 
 ## Quick start
 
@@ -40,12 +40,12 @@ errors both fall through to the next registry, so one broken registry never
 blocks installs from the others. Search aggregates every registry and
 dedupes by slug, keeping the highest-priority result.
 
-Unknown `type:` values are warned and skipped at boot — a typo never bricks
+Unknown `type:` values are warned and skipped at boot: a typo never bricks
 the gateway.
 
 ## Built-in registry types
 
-### `http` — Soulacy package registry
+### `http`: Soulacy package registry
 
 Speaks the registry protocol:
 
@@ -55,21 +55,21 @@ Speaks the registry protocol:
 | `GET {base}/v1/packages/{slug}` | package metadata with checksum + source (404 = unknown) |
 | `GET {pkg.source}` | the archive (tar.gz/zip), sha256-verified, ≤ 256 MiB |
 
-`auth_headers` are sent verbatim on every request — use them for bearer
+`auth_headers` are sent verbatim on every request: use them for bearer
 tokens against private registries. A sha256 checksum is **required** for
 every archive; unverifiable archives are refused. Extraction goes through
 the same hardened path as plugin installs (path-traversal and
 decompression-bomb guards).
 
-### `git` — git hosts
+### `git`: git hosts
 
 Resolves *addressed* sources only: `github.com/user/my-skill`, full
 `https://…` URLs, or `git@…` remotes. Plain slugs fall through to real
 registries. Fetch is a shallow clone with `.git` stripped (120 s timeout);
 integrity comes from the clone, so there is no checksum. Search returns
-nothing — git hosts are not an index.
+nothing: git hosts are not an index.
 
-### `skillssh` — skill directories
+### `skillssh`: skill directories
 
 Speaks the skills.sh directory API: search, full file trees inline, and
 partner security audits (`GET /api/v1/skills/audit/{id}`) that are surfaced
@@ -97,7 +97,7 @@ registries:
 
 !!! warning "Pin `signing_key` on every http registry you can"
     With `signing_key` set, **every** package from that registry must carry
-    a valid signature — unsigned or tampered packages are refused at fetch,
+    a valid signature: unsigned or tampered packages are refused at fetch,
     before extraction. Without it, integrity rests on the sha256 checksum
     alone and the CLI marks signatures as `UNVERIFIED` in the install
     output. Malformed keys fail at boot, not at first fetch.
@@ -126,7 +126,7 @@ packages/
   returns.
 - Checksums are computed at index time; every package is signed when a key
   is configured.
-- Archive serving is traversal-guarded — only indexed basenames are
+- Archive serving is traversal-guarded: only indexed basenames are
   reachable.
 
 Hand the printed public key to consumers as the `signing_key` for their
@@ -145,6 +145,6 @@ registries:
 
 Flavored binaries can ship additional registry types (S3, IPFS, your
 artifact store) by registering a factory with the SDK and selecting it via
-`type:` in a `registries:` entry — see
+`type:` in a `registries:` entry: see
 [Custom Distributions](custom-distributions.md). The full provider
 contract lives in [the registry spec](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/PACKAGE_REGISTRIES.md).

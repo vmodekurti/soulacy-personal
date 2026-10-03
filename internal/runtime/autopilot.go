@@ -16,6 +16,7 @@ import (
 	"github.com/soulacy/soulacy/internal/autopilot"
 	"github.com/soulacy/soulacy/internal/llm"
 	"github.com/soulacy/soulacy/internal/redact"
+	"github.com/soulacy/soulacy/internal/taskcontract"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 )
@@ -243,8 +244,13 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 			previousObserver(call, result, failed)
 		}
 	})
+	var taskSnapshot taskcontract.Snapshot
 	if runErr == nil {
+		ctx = withTaskContractCollector(ctx, &taskSnapshot)
 		reply, runErr = e.handle(ctx, msg)
+		if runErr == nil && taskSnapshot.Mode == "external_action" && taskSnapshot.Outcome != taskcontract.OutcomeVerified {
+			runErr = fmt.Errorf("task contract ended %s without verified external-action evidence: %s", taskSnapshot.Outcome, taskSnapshot.Blocker)
+		}
 	}
 	duration := time.Since(started)
 	durationMS := duration.Milliseconds()
@@ -346,7 +352,12 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 		reply.Metadata[message.MetaReasoningDegraded] = "true"
 	}
 	if e.sink != nil {
-		e.sink.Emit(message.Event{Type: "run.completed", AgentID: msg.AgentID, SessionID: msg.SessionID, Timestamp: time.Now().UTC(), Payload: map[string]any{"run_id": runID, "success": runErr == nil && outcome == autopilot.ProofSucceeded, "outcome": outcome, "proof_id": proof.ID, "verification": evaluation.Verification, "simulation": simulation}})
+		completedPayload := map[string]any{"run_id": runID, "success": runErr == nil && outcome == autopilot.ProofSucceeded, "outcome": outcome, "proof_id": proof.ID, "verification": evaluation.Verification, "simulation": simulation}
+		if taskSnapshot.Version != "" {
+			completedPayload["task_outcome"] = taskSnapshot.Outcome
+			completedPayload["task_contract"] = taskSnapshot
+		}
+		e.sink.Emit(message.Event{Type: "run.completed", AgentID: msg.AgentID, SessionID: msg.SessionID, Timestamp: time.Now().UTC(), Payload: completedPayload})
 		if proofErr == nil {
 			e.sink.Emit(message.Event{Type: "autopilot.proof", AgentID: msg.AgentID, SessionID: msg.SessionID, Timestamp: proof.CompletedAt, Payload: proof})
 		}

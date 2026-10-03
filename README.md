@@ -2,30 +2,39 @@
 
 <img src="docs/assets/living-core-blue-v1.png" width="64" height="64" alt="Soulacy Blue Living Core logo" />
 
-**An assistant that actually knows you — running on a machine you own.**
+**Tell Genie what you need from your iPhone. Soulacy runs the automation on
+hardware you own.**
 
-Most assistants answer questions and forget you in between. Soulacy keeps a
-structured picture of how your days actually go: your routine, the people who
-matter, what you owe and when, how you want to be helped. Every agent you run
-reads the same picture, so none of them start from nothing.
+Soulacy Personal is a complete self-hosted agent system: one binary, agents as
+readable YAML, a web workspace, schedules, chat channels, adaptive memory, and
+support for local or cloud models. It runs on a laptop, home server, Raspberry
+Pi, or small VPS.
 
-**It learns by asking.** A few questions on your first day, answered in a
-browser, and it records what you said in your own words. No phone, no sensors,
-nothing switched on. You can read every line it holds, see where each came
-from, and correct or delete any of it.
+From the iPhone app, ask Genie to research a topic, prepare a morning brief,
+watch for a change, or turn a repeated request into a scheduled agent. Check
+the result, inspect what Genie built, and pause or cancel it from the same
+conversation. Your phone is the command center; your gateway remains the
+runtime.
 
-**It can also notice, if you let it.** Pair the iPhone app and switch on a
-sense, and it keeps up on its own — a deadline moving, a Focus turning on,
-today not looking like a normal Tuesday. Every sense is off until you allow
-it, and switching one off erases what it worked out. Skip the app entirely and
-Soulacy still works; it just knows only what you told it.
+Genie is the native iPhone entry point to that gateway. WhatsApp, Telegram,
+Slack, Discord, email, HTTP, and custom adapters are first class channels too.
+An agent can receive a request, reply, or deliver scheduled work through any
+configured channel, with the same permissions, memory, and run history.
 
-Underneath is a complete agent runtime you own: one binary, agents as YAML (or
-generated from plain English in Studio), any LLM (Ollama, OpenAI, Anthropic,
-Groq, or anything OpenAI-compatible), channels to Telegram / Slack / Discord /
-WhatsApp / email / Teams / Google Chat / HTTP, scheduling, approvals you can
-check, and adaptive memory. It runs from a terminal or a $5 VPS with no cloud
-dependency.
+**Every privileged action has an answer.** It either waits for a recorded
+approval or follows explicit agent and gateway policy you can inspect. A
+scheduled run cannot approve itself, and text fetched from a website or MCP
+server cannot grant itself more authority.
+
+```bash
+curl -fsSL https://soulacy.io/install.sh | bash
+```
+
+Then it gets personal. Soulacy keeps a structured picture of how your days
+actually go: your routine, the people who matter, what you owe and when, and
+how you want to be helped. It learns by asking in the browser. Pair the iPhone
+app and enable a sense when you want it to keep up with calendar, Focus,
+location, or health signals. Every sense is off until you allow it.
 
 **Honest about setup:** there is no hosted version to sign up for. You need a
 machine you can run a server on and about ten minutes in a terminal. That is
@@ -44,7 +53,7 @@ also the reason nobody else holds your data.
 
 Guides track `main`; an installed gateway or iOS build may lag the source.
 Safe Undo requires compatible configured resources, learning requires review,
-and verification means the configured checks passed—not that every fact is true.
+and verification means the configured checks passed, not that every fact is true.
 
 ## Personal edition
 
@@ -61,12 +70,13 @@ Apache-2.0 licensed; the project name and logos follow the separate
 
 **Build it. Run it. Fix and learn.**
 
-- **Build it** — describe the automation in plain English in Studio, or start from
+- **Build it**: describe the automation in plain English in Studio, or start from
   a vetted template. Soulacy drafts the plan, generates the workflow, and checks
   it end-to-end before you save.
-- **Run it** — deploy the agent to Soulacy Mobile, Telegram, Slack, Discord, WhatsApp, HTTP, or a
-  schedule. One binary, no cloud required.
-- **Fix and learn** — when a run fails, Debug in Studio explains it in plain
+- **Run it**: deploy the agent to Soulacy Mobile, Telegram, Slack, Discord, WhatsApp, HTTP, or a
+  schedule. These are first class gateway channels, so agents can receive
+  requests and return work where you already communicate. One binary, no cloud required.
+- **Fix and learn**: when a run fails, Debug in Studio explains it in plain
   English and proposes a fix you can preview. Successful repairs become
   regression tests, and Soulacy shows you what it's learned over time.
 
@@ -75,13 +85,18 @@ Apache-2.0 licensed; the project name and logos follow the separate
 [![Docker](https://img.shields.io/badge/ghcr.io-vmodekurti%2Fsoulacy--personal-blue?logo=docker)](https://github.com/vmodekurti/soulacy-personal/pkgs/container/soulacy)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-## Your iPhone is part of the runtime
+## Genie puts your automation in your pocket
 
-The native iPhone app is not a shrunk-down web GUI. It is the place an agent
-asks you for a decision when you are away from your desk, and the only device
-that knows where you are, what is on your calendar, how you slept, and whether
-a Focus is on. What that makes possible, and where it is different:
+The native iPhone app is where you talk to Genie, run agents, follow their
+progress, receive their work, and make decisions when you are away from your
+desk. It is also the only device that knows where you are, what is on your
+calendar, how you slept, and whether a Focus is on. What that makes possible:
 
+- **Ask once or automate it.** Ask Genie for an answer now, or ask it to build
+  a recurring agent. Genie uses the skills, MCP servers, and delivery channels
+  actually installed on your gateway and tells you when something is missing.
+- **Keep control in the conversation.** See the agents and monitors Genie
+  created, inspect their recent work, and pause or cancel them from your phone.
 - **Approve on the lock screen.** A run that needs your yes shows up as a Live
   Activity with Approve and Deny, with Face ID for high-risk tools. The approval
   is a durable record on your gateway, not a prompt inside someone's cloud.
@@ -114,15 +129,15 @@ which line permitted it.
 
 Do not take our word for it. Check it in five minutes on your own machine:
 
-1. **Ask for something risky.** Write a small agent and ask it to delete a file. It cannot: system tools are not even offered until the agent's ID is listed in `runtime.allow_system_agents` in your config **and** the agent declares `capabilities: [system]`. It is a per-agent list, not a yes/no switch — stricter than a boolean, on purpose.
+1. **Ask for something risky.** Write a small agent and ask it to delete a file. It cannot: system tools are not even offered until the agent's ID is listed in `runtime.allow_system_agents` in your config **and** the agent declares `capabilities: [system]`. It is a per-agent list, not a yes/no switch: stricter than a boolean, on purpose.
 2. **Turn them on and ask again.** Now the agent stops and waits for your approval before the privileged step runs.
 3. **Schedule it for 3 a.m.** The same step is refused because nobody is there to approve it, until the agent's file says `unattended: true`.
 4. **Read the diff.** Every change that made the agent more capable is a line you wrote in a file you can read, review, and roll back. Safe Undo covers the changes it makes.
 
-**The simple version.** Soulacy is a private system that runs your AI
-agents. You describe an agent in one file. It runs on a computer you control.
-You reach it from your phone or your chat apps. It cannot do anything risky
-without your say-so.
+**The simple version.** Soulacy is a private system that runs your AI agents.
+You describe an agent in one file. It runs on a computer you control. You reach
+it from your phone or your chat apps. A privileged action needs a recorded
+approval or an explicit configuration grant.
 
 - **Yours, on your hardware.** Code frameworks leave you to build and host the
   application. Visual builders need a server stack. Hosted agent services keep
@@ -149,10 +164,10 @@ around them. See the [full comparison](docs/comparison-chart.md).
 | **Deploy** | Gateway with embedded UI; [requirements vary](docs/deployment/footprint.md) | Docker + Postgres + Redis | Python package |
 | **Config** | One YAML file per agent | Visual editor (brittle exports) | Code |
 | **Runs on** | Laptop, VPS, Raspberry Pi | Needs a server stack | Dev machine |
-| **LLM** | Any — local or cloud | Mostly cloud | Any |
+| **LLM** | Any: local or cloud | Mostly cloud | Any |
 | **No-code** | GUI included in binary | Yes | No |
 
-The field is crowded with frameworks that assume you want to write Python and deploy to the cloud. Soulacy is for people who want agents that just run — the same way you `ollama run llama3`.
+The field is crowded with frameworks that assume you want to write Python and deploy to the cloud. Soulacy is for people who want agents that run as simply as `ollama run llama3`.
 
 ---
 
@@ -175,7 +190,7 @@ Each cloud path ends the same way: open the HTTPS URL with the deployment's
 login key, choose **Mobile → Pair a device**, and scan the short-lived QR code
 from Soulacy for iOS. The permanent gateway key is never placed in the QR code.
 
-### One line — macOS & Linux
+### One line: macOS & Linux
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vmodekurti/soulacy-personal/main/install.sh | bash
@@ -188,7 +203,7 @@ What it does, with zero questions asked:
 3. Installs both binaries into `~/.local/bin` (no `sudo`).
 4. Prints clear next steps + offers to launch the gateway on the spot.
 
-When you run `soulacy serve` (either right away or later), the gateway prints a one-time banner with the URL and a freshly-generated API key. Then open <http://127.0.0.1:18789>, paste the key, and you're in. The runtime workspace (`~/.soulacy/soulspace/`), config file, starter agent, and API key are all created automatically on first launch — you never have to touch a config file.
+When you run `soulacy serve` (either right away or later), the gateway prints a one-time banner with the URL and a freshly-generated API key. Then open <http://127.0.0.1:18789>, paste the key, and you're in. The runtime workspace (`~/.soulacy/soulspace/`), config file, starter agent, and API key are all created automatically on first launch. You never have to touch a config file.
 
 Overrides:
 
@@ -204,11 +219,11 @@ SOULACY_PREFIX=/usr/local curl -fsSL https://raw.githubusercontent.com/vmodekurt
 
 ```bash
 git clone https://github.com/vmodekurti/soulacy-personal
-cd soulacy
+cd soulacy-personal
 ./install.sh                  # same behavior; will offer LaunchAgent setup on macOS
 ```
 
-### Docker — guided deploy script (recommended)
+### Docker: guided deploy script (recommended)
 
 From a checkout, [`scripts/docker-deploy.sh`](scripts/docker-deploy.sh) builds the image, runs
 the container, publishes a host port, waits for the gateway to become healthy,
@@ -217,8 +232,8 @@ interactively, passed as a flag, or set via an environment variable.
 
 ```bash
 git clone https://github.com/vmodekurti/soulacy-personal
-cd soulacy
-./scripts/docker-deploy.sh                       # interactive — prompts for each setting
+cd soulacy-personal
+./scripts/docker-deploy.sh                       # interactive, prompts for each setting
 ./scripts/docker-deploy.sh --yes                 # accept defaults, no prompts
 ./scripts/docker-deploy.sh --host-port 9000      # publish on a different host port
 ```
@@ -238,7 +253,7 @@ Useful flags: `--host-port`, `--container-port`, `--name`, `--data-dir`,
 `--api-key`, `--no-build`, `--yes`. Run `./scripts/docker-deploy.sh --help` for the
 full list.
 
-### Docker — embedded storage (no separate database service)
+### Docker: embedded storage (no separate database service)
 
 Build the image, then run it. Note two requirements: bind to `0.0.0.0` inside
 the container (otherwise the published port can't reach the gateway), and choose
@@ -259,7 +274,7 @@ docker run -d --name soulacy \
 > `localhost:11434` from the gateway's view. Point it at the host with
 > `SOULACY_LLM_PROVIDERS_OLLAMA_BASE_URL=http://host.docker.internal:11434`
 > (shown above). On Linux also add `--add-host host.docker.internal:host-gateway`.
-> Cloud LLM providers (OpenAI, Anthropic, etc.) need none of this — outbound
+> Cloud LLM providers (OpenAI, Anthropic, etc.) need none of this: outbound
 > internet works by default. `scripts/docker-deploy.sh` handles all of this via
 > its `--ollama-host` flag (defaulting to `host.docker.internal:11434`).
 
@@ -270,7 +285,7 @@ key on first run and stores it in the mounted config; read it back with:
 docker exec soulacy sh -c 'grep api_key ~/.soulacy/config.yaml'
 ```
 
-### Docker — full stack (Postgres + Qdrant + GUI)
+### Docker: full stack (Postgres + Qdrant + GUI)
 
 ```bash
 curl -O https://raw.githubusercontent.com/vmodekurti/soulacy-personal/main/docker-compose.yml
@@ -279,7 +294,7 @@ cp .env.example .env   # set POSTGRES_PASSWORD, your LLM key, and SOULACY_PORT
 docker compose up
 ```
 
-The compose file publishes `${SOULACY_PORT:-18789}` on the host — set
+The compose file publishes `${SOULACY_PORT:-18789}` on the host: set
 `SOULACY_PORT` in `.env` to change it. Open
 [http://localhost:18789](http://localhost:18789) (or your chosen port).
 
@@ -290,7 +305,7 @@ CLI capture flow available as a fallback.
 
 ### Running CLI commands against a container
 
-The image bundles the `sy` CLI. There's no SSH — use `docker exec`:
+The image bundles the `sy` CLI. There's no SSH: use `docker exec`:
 
 ```bash
 docker exec -it soulacy bash        # interactive shell inside the container
@@ -421,7 +436,7 @@ That's it. No boilerplate, no decorators, no SDK imports. Drop the file in, and 
 
 ```bash
 git clone https://github.com/vmodekurti/soulacy-personal
-cd soulacy
+cd soulacy-personal
 make all          # builds GUI + Go binaries
 make install      # installs to /usr/local/bin
 make test         # runs Go tests
@@ -434,4 +449,4 @@ See [docs/FRAMEWORK_OVERVIEW.md](docs/FRAMEWORK_OVERVIEW.md) for architecture de
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+Apache 2.0: see [LICENSE](LICENSE).

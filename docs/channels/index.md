@@ -1,13 +1,22 @@
 # Channels Overview
 
-Channels are adapters that connect agents to messaging platforms. Each channel handles platform authentication, inbound message normalization, outbound replies, and live connection status.
+Channels are first class routes into the Soulacy gateway. They connect agents
+to messaging platforms, APIs, and custom adapters. Each channel handles
+platform authentication, inbound message normalization, outbound replies, and
+live connection status.
+
+Genie provides the native iPhone conversation and operating experience. Other
+channels connect directly to the same gateway and agents. A request arriving
+from WhatsApp or Telegram does not pass through Genie, and a scheduled result
+can be delivered to any configured outbound channel. The runtime applies the
+same agent permissions, memory, schedules, and run history to every route.
 
 ## Supported channels
 
 | Channel | Status | Config key |
 |---------|--------|-----------|
-| [HTTP](http.md) | ✅ Stable | — (always active) |
-| [Soulacy Mobile](mobile.md) | ✅ Stable outbound | — (always active) |
+| [HTTP](http.md) | ✅ Stable | Always active |
+| [Soulacy Mobile](mobile.md) | ✅ Stable outbound | Always active |
 | [Generic Webhooks](webhook.md) | ✅ Stable | agent `trigger: webhook` |
 | [Telegram](telegram.md) | ✅ Stable | `channels.telegram` |
 | [Slack](slack.md) | ✅ Stable | `channels.slack` |
@@ -131,9 +140,9 @@ Open **Channels** in the web UI:
   Failed tests return the same structured diagnosis used in Activity and support
   bundles, so `chat not found`, `missing scope`, bad webhook URLs, and rate
   limits are visible before a cron job depends on them. Email adds
-  SMTP-specific categories — authentication failed, STARTTLS required,
-  relay denied / SPF, recipient rejected, quota, message rejected, TLS
-  handshake — so raw `535 5.7.8` / `550 5.1.1` codes don't bubble up as
+  SMTP-specific categories: authentication failed, STARTTLS required,
+  relay denied / SPF, recipient rejected, quota, message rejected, and TLS
+  handshake. Raw `535 5.7.8` / `550 5.1.1` codes do not bubble up as
   "unknown".
 - Click **Edit** on Telegram, Slack, or Discord to manage **Bot mappings**.
 - Bot mapping rows record a friendly bot name and provide an agent ID dropdown populated from your installed agents.
@@ -227,8 +236,8 @@ The channel must also be configured in `config.yaml`; the agent-side list alone 
 
 Each channel adapter handles platform-specific formatting automatically:
 
-- **Telegram** — Markdown → MarkdownV2 escaping, inline buttons
-- **Slack** — Markdown → Block Kit, thread replies
-- **Discord** — Markdown → Discord markdown, embed cards
-- **WhatsApp** — Plain text (WhatsApp does not support rich formatting)
-- **HTTP** — Raw text or JSON, caller decides rendering
+- **Telegram**: Markdown → MarkdownV2 escaping, inline buttons
+- **Slack**: Markdown → Block Kit, thread replies
+- **Discord**: Markdown → Discord markdown, embed cards
+- **WhatsApp**: Plain text (WhatsApp does not support rich formatting)
+- **HTTP**: Raw text or JSON, caller decides rendering

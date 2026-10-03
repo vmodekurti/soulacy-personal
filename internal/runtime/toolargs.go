@@ -229,6 +229,30 @@ func argStringSlice(args map[string]any, key string) []string {
 	return nil
 }
 
+// argStringMap extracts a small object whose values are strings. Tool-call
+// JSON normally decodes as map[string]any, while tests and internal callers may
+// provide map[string]string directly.
+func argStringMap(args map[string]any, key string) map[string]string {
+	value, ok := args[key]
+	if !ok || value == nil {
+		return map[string]string{}
+	}
+	out := map[string]string{}
+	switch typed := value.(type) {
+	case map[string]string:
+		for k, v := range typed {
+			out[k] = v
+		}
+	case map[string]any:
+		for k, v := range typed {
+			if text, ok := v.(string); ok {
+				out[k] = text
+			}
+		}
+	}
+	return out
+}
+
 // splitCSV splits on commas, trimming surrounding whitespace from each part.
 func splitCSV(s string) []string {
 	var parts []string

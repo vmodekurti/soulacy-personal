@@ -1,14 +1,29 @@
-# An assistant that knows you, on a gateway you control
+# Run private automation from your iPhone
 
-Soulacy keeps a structured picture of how your days go — your routine, the
-people who matter, what you owe and when — and every agent you run reads the
-same one. A model supplies the reasoning; Soulacy supplies the picture, the
-tools, the permissions, the scheduling, and the record of what happened.
+**Tell Genie what you need. Soulacy builds and runs it on hardware you own.**
 
-It learns **by asking**. A few questions in the web workspace on your first
-day are enough for agents to stop starting from nothing. The iPhone companion
-is optional: pair it and allow a sense, and Soulacy keeps up on its own;
-skip it and everything still works from what you have told it.
+Soulacy Personal is a complete self-hosted agent system. A model supplies the
+reasoning; Soulacy supplies the tools, permissions, schedules, delivery,
+memory, and the record of what happened. A privileged action proceeds only
+after a recorded approval or an explicit agent and gateway policy grant.
+
+The iPhone app is the everyday control surface. Ask Genie for an answer, a
+one-off task, or a recurring automation. Run agents, follow their progress,
+receive results, and pause or cancel what Genie built from the same phone.
+When a privileged step needs you, the approval arrives there too.
+
+Genie is the native iPhone entry point to the gateway. WhatsApp, Telegram,
+Slack, Discord, email, HTTP, and custom adapters are first class channels too.
+Agents can receive requests, reply, and deliver scheduled work through any
+configured channel. Every route uses the same runtime permissions, memory,
+schedules, and run history.
+
+Soulacy also keeps a structured picture of how your days go: your routine,
+the people who matter, and what you owe. Every agent you run reads the same
+picture. It learns **by asking**. The iPhone companion is optional: pair
+it and allow a sense, and Soulacy can keep up with calendar, Focus, location,
+or health signals; skip it and everything still works from what you have told
+it.
 
 Start with a small, read-only task. Make it reliable before giving it more access.
 
@@ -17,9 +32,10 @@ See [how your Personal setup works](personal.md) to understand the gateway,
 model, and companion-client requirements.
 
 [Start here: your first successful run](getting-started/quickstart.md){ .md-button .md-button--primary }
-[What it learns about you](using/person-model.md){ .md-button }
+[Connect your iPhone](getting-started/iphone.md){ .md-button }
+[Use Genie](using/genie.md){ .md-button }
+[Read the security model](security/index.md){ .md-button }
 [Pick a worked use case](use-cases/index.md){ .md-button }
-[See what your iPhone adds](iphone.md){ .md-button }
 
 !!! info "Match these guides to your installation"
     These docs follow the Personal repository's `main` branch. Your installed
@@ -28,11 +44,26 @@ model, and companion-client requirements.
     availability is not evidence that your server has been upgraded.
     See [recent changes](recent-updates.md) and [safe upgrades](deployment/upgrades.md).
 
+## The trust rule
+
+| Situation | What happens |
+|---|---|
+| You are present and a privileged tool needs approval | Soulacy pauses and records your decision. A paired iPhone can show the request on the lock screen. |
+| A scheduled or otherwise unattended run requests the same action | It is refused unless the agent and gateway carry the required explicit unattended grants. The run never approves itself. |
+| A website, document, message, or MCP result contains new instructions | Soulacy treats that content as untrusted evidence. It cannot authorize a tool or expand the agent's permissions. |
+
+The agent file, gateway policy, approval record, and run evidence let you trace
+why an action was allowed. Start with read-only work and add authority only
+when the task needs it. See the [security model](security/index.md) for the
+complete enforcement path.
+
 ## Choose your starting point
 
 | You want to… | Follow this guide | What you will have at the end |
 |---|---|---|
 | Try Soulacy for the first time | [First successful run](getting-started/quickstart.md) | A model connection and a response you can check yourself |
+| Build and manage automation by conversation | [Talk to Genie](using/genie.md) | A saved agent or schedule you can inspect, pause, or cancel |
+| Reach agents from a messaging platform or API | [Connect a channel](channels/index.md) | A first class route to the same gateway and agents |
 | Use your gateway from an iPhone | [Connect your iPhone](getting-started/iphone.md) | A paired phone and a verified round-trip chat |
 | Let agents use your phone's signals | [Soulacy on iPhone](iphone.md) | Lock-screen approvals, declared device tools, Siri and CarPlay, and a brief built from health, calendar, and Focus |
 | Turn messy notes into something useful | [Notes → action plan](use-cases/notes-to-action-plan.md) | Owners, next actions, and explicit unknowns without sending anything |
@@ -84,7 +115,7 @@ See [security](security/index.md) and [authentication](configuration/auth.md).
   it yourself: [first-agent walkthrough](getting-started/first-agent.md) and
   [complete schema](agents/soul-yaml.md).
 - **Working out what your deployment can do:**
-  [capabilities and limits](configuration/deployment.md) — particularly on a
+  [capabilities and limits](configuration/deployment.md): particularly on a
   platform where you have no shell.
 - **Operating a server:** [configuration](configuration/index.md),
   [cloud setup](deployment/cloud.md), and [upgrades](deployment/upgrades.md).

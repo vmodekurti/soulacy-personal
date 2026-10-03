@@ -64,7 +64,7 @@ curl -H "Authorization: Bearer $SOULACY_API_KEY" \
 }
 ```
 
-(The `statuses` array is the server's authoritative status list — render
+(The `statuses` array is the server's authoritative status list: render
 columns from it rather than hard-coding.)
 
 ## Runs
@@ -130,7 +130,7 @@ attachment` header. It returns `404` for an unknown artifact and
 curl -X POST http://localhost:18789/api/v1/workboard/tasks/12/comments \
   -H "Authorization: Bearer $SOULACY_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"author": "vasu", "body": "Looks good — ship it.", "kind": "review"}'
+  -d '{"author": "vasu", "body": "Looks good, ship it.", "kind": "review"}'
 ```
 
 ## Error shapes

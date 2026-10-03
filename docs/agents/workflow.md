@@ -1,6 +1,6 @@
 # Workflow Steps
 
-A `workflow:` block turns an agent into a checkpointed tool pipeline — deterministic steps that survive crashes and resume where they left off.
+A `workflow:` block turns an agent into a checkpointed tool pipeline: deterministic steps that survive crashes and resume where they left off.
 
 ## Quick Start
 
@@ -38,15 +38,15 @@ last completed step.
 
 !!! tip
     Linear steps run strictly in order. If you need conditional routing,
-    loops (refine→judge), or fan-out, use the graph form —
-    [Flow Graphs](flows.md) — which lives under the same `workflow:` key.
+    loops (refine→judge), or fan-out, use the graph form described in
+    [Flow Graphs](flows.md), which lives under the same `workflow:` key.
 
 ## Step Fields
 
 | Field | Description |
 |-------|-------------|
 | `id` | Unique within the workflow. Used as the checkpoint key. |
-| `tool` | Tool name to invoke — any tool the agent can normally call. |
+| `tool` | Tool name to invoke: any tool the agent can normally call. |
 | `prompt` | Optional prompt text reserved for LLM-assisted step behavior. |
 | `if` | Go template condition; the step is skipped when it renders empty, `false`, or `0`. |
 | `on_error` | `abort` (default), `retry`, or `skip`. |
@@ -105,8 +105,8 @@ The executor checkpoints around every step:
 3. On failure: marked `failed`.
 
 When a run is **resumed with the same run ID** (after a crash or restart),
-completed steps are skipped entirely — their saved output is restored into
-the template variable map — and execution continues from the first
+completed steps are skipped entirely. Their saved output is restored into
+the template variable map, and execution continues from the first
 non-completed step. Side effects of completed steps are never repeated.
 
 !!! warning

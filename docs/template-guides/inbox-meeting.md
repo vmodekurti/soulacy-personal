@@ -17,7 +17,7 @@ meeting minutes (decisions, action items, owners) from a transcript or notes.
 ## Install
 
 1. Connect the email/calendar tool or MCP server (see [MCP Servers](../extend/mcp.md)).
-2. Review the readiness checklist — it flags a missing MCP server or token.
+2. Review the readiness checklist: it flags a missing MCP server or token.
 3. Run the **mock test** on sample content (no real mailbox access).
 4. Add tokens, run the **real test** against your account.
 5. (Optional) Schedule a morning summary to a channel.
@@ -33,7 +33,7 @@ sy eval --agent inbox-assistant --suite evals/golden
 
 ## Notes
 
-Reading a mailbox is a network/privileged capability — the agent's capability
+Reading a mailbox is a network/privileged capability: the agent's capability
 tier is shown before you bind it to a channel. See
 [Policy & Safety](../extend/safety.md) and
 [Common failures](../troubleshooting/common-failures.md).

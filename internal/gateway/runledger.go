@@ -428,6 +428,8 @@ func runLedgerIsBrowserEvent(ev message.Event) bool {
 	}
 	name := strings.ToLower(runLedgerPayloadString(ev.Payload, "name"))
 	return strings.Contains(name, "browser") ||
+		strings.Contains(name, "website_action") ||
+		strings.Contains(name, "act_on_website") ||
 		strings.Contains(name, "playwright") ||
 		strings.Contains(name, "puppeteer") ||
 		strings.Contains(name, "computer") ||

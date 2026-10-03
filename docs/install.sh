@@ -601,6 +601,16 @@ if [ -n "$API_KEY" ]; then
     printf "${YELLOW}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n\n"
 fi
 
+# ── Reach it from your phone off your network (optional) ──────────────────────
+# This is a local install: the gateway binds to 127.0.0.1 on this machine, so the
+# phone app can reach it on the same Wi-Fi but not when you're away. Offer the
+# GitHub-hosted remote-access helper (private Tailscale mesh — no ports opened).
+printf "  ${BOLD}Use Soulacy from your phone on any network${NC} ${YELLOW}(optional)${NC}:\n"
+printf "     Your gateway is local to this machine. To reach it when you're away,\n"
+printf "     set up private remote access (Tailscale — nothing exposed publicly):\n"
+printf "       ${YELLOW}curl -fsSL https://raw.githubusercontent.com/${REPO}/main/remote.sh | bash${NC}\n"
+printf "     Details: https://github.com/${REPO}/blob/main/docs/deployment/remote-access.md\n\n"
+
 # Offer to launch right now whenever a terminal is reachable (incl. curl | bash,
 # reading the answer from /dev/tty). Truly non-interactive shells just get the
 # hint.

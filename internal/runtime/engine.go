@@ -65,7 +65,29 @@ type GenieMonitorManager interface {
 	CreateGenieMonitor(prompt, cron, at, channel, to string) (map[string]any, error)
 	ListGenieMonitors() []map[string]any
 	PauseGenieMonitor(id string) error
+	ResumeGenieMonitor(id string) error
 	CancelGenieMonitor(id string) error
+}
+
+// GenieMissionManager exposes persistent standing goals without granting Genie
+// direct database, scheduler, or agent-file access.
+type GenieMissionManager interface {
+	PlanMissionForGenie(objective string) (map[string]any, error)
+	PlanActionForGenie(ctx context.Context, goal, missionID string, knownInputs map[string]string) (map[string]any, error)
+	PrepareWebsiteAccessForGenie(ctx context.Context, name, baseURL string) (map[string]any, error)
+	StartWebsiteActionForGenie(ctx context.Context, rawURL, connectionID string) (map[string]any, error)
+	InspectWebsiteActionForGenie(ctx context.Context, sessionID string) (map[string]any, error)
+	ActOnWebsiteForGenie(ctx context.Context, sessionID, action, ref, value string) (map[string]any, error)
+	CommitWebsiteActionForGenie(ctx context.Context, sessionID, ref, provider, action, item, schedule, terms, total string) (map[string]any, error)
+	CloseWebsiteActionForGenie(ctx context.Context, sessionID string) (map[string]any, error)
+	CreateMissionForGenie(ctx context.Context, title, objective, finishLine, cron, at, channel, to string) (map[string]any, error)
+	ListMissionsForGenie(ctx context.Context) (map[string]any, error)
+	GetMissionForGenie(ctx context.Context, id string) (map[string]any, error)
+	UpdateMissionForGenie(ctx context.Context, id, status, progress, nextAction, blocker string) (map[string]any, error)
+	PauseMissionForGenie(ctx context.Context, id string) (map[string]any, error)
+	ResumeMissionForGenie(ctx context.Context, id string) (map[string]any, error)
+	CompleteMissionForGenie(ctx context.Context, id, progress string) (map[string]any, error)
+	CancelMissionForGenie(ctx context.Context, id string) (map[string]any, error)
 }
 
 // GenieAgentBuilder is implemented by the gateway so Genie can hand a build to
@@ -77,6 +99,14 @@ type GenieMonitorManager interface {
 // about which — the map is passed to the model as-is.
 type GenieAgentBuilder interface {
 	BuildAgentForGenie(ctx context.Context, session, request string) (map[string]any, error)
+}
+
+// GenieConnectorManager lets Genie use the same constrained connector composer
+// as the GUI without exposing database, filesystem, or credential primitives.
+type GenieConnectorManager interface {
+	PlanConnectorForGenie(intent string) (map[string]any, error)
+	CreateConnectorForGenie(ctx context.Context, intent, name string, sites []string) (map[string]any, error)
+	ListConnectorsForGenie(ctx context.Context) (map[string]any, error)
 }
 
 // BuiltinTool is a Go-native tool that runs inside the engine process rather
@@ -128,6 +158,8 @@ type Engine struct {
 	queueStore       *agentQueueStore
 	genieMonitors    GenieMonitorManager
 	genieBuilder     GenieAgentBuilder
+	genieConnectors  GenieConnectorManager
+	genieMissions    GenieMissionManager
 
 	// authConnectionResolver is the only component allowed to decrypt a
 	// saved website session. The returned state is consumed by the
@@ -335,10 +367,16 @@ type Engine struct {
 // SetGenieMonitorManager attaches the constrained scheduler facade.
 func (e *Engine) SetGenieMonitorManager(m GenieMonitorManager) { e.genieMonitors = m }
 
+// SetGenieMissionManager attaches the constrained standing-goal facade.
+func (e *Engine) SetGenieMissionManager(m GenieMissionManager) { e.genieMissions = m }
+
 // SetGenieAgentBuilder attaches the builder bridge. Without it, build_agent
 // reports that the builder is unavailable rather than falling back to a
 // weaker way of writing an agent.
 func (e *Engine) SetGenieAgentBuilder(b GenieAgentBuilder) { e.genieBuilder = b }
+
+// SetGenieConnectorManager attaches the narrow connector composer used by Genie.
+func (e *Engine) SetGenieConnectorManager(m GenieConnectorManager) { e.genieConnectors = m }
 
 const (
 	defaultSessionTTL        = 24 * time.Hour

@@ -68,9 +68,10 @@ func DefaultAdapter() *Adapter {
 
 // Notification categories the iOS app registers actions for.
 const (
-	CategoryApproval = "SOULACY_APPROVAL" // Approve / Deny actions
-	CategoryDelivery = "SOULACY_DELIVERY" // open the delivery
-	CategoryTrigger  = "SOULACY_TRIGGER"  // a location run completed
+	CategoryApproval            = "SOULACY_APPROVAL"              // Approve / Deny actions
+	CategoryWebsiteActionReview = "SOULACY_WEBSITE_ACTION_REVIEW" // open the full transaction review
+	CategoryDelivery            = "SOULACY_DELIVERY"              // open the delivery
+	CategoryTrigger             = "SOULACY_TRIGGER"               // a location run completed
 )
 
 // Notification is a push a gateway feature wants a phone to show. Category

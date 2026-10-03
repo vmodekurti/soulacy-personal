@@ -26,12 +26,12 @@ certificate, network, and server instead.
    honestly: local network, VPN/tunnel, or reachable from anywhere.
 
 Pairing codes are short-lived and single-use. Generate a fresh code if one has
-expired or was redeemed. Treat the QR as a temporary credential: do not post it
+expired or was redeemed. Treat the QR as a temporary credential. Do not post it
 in a ticket or share it publicly. The resulting credential is stored in iOS
 Keychain; it does not grant every permission on the phone.
 
 **Checkpoint:** Settings shows the expected gateway address and server version.
-Open Agents and verify the expected agent list—not just a successful scan.
+Open Agents and verify the expected agent list, not just a successful scan.
 
 ## 1a. Pair a phone for someone else in your household
 

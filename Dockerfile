@@ -82,42 +82,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git curl wget unzip zip tar xz-utils \
         build-essential pkg-config \
         jq ripgrep less file procps \
+        chromium fonts-liberation \
     && rm -rf /var/lib/apt/lists/* \
     && python3 -m pip install --no-cache-dir pipx
 
-# Chromium's shared libraries — OFF by default.
-#
-# Most installs never drive a browser, and this is ~30MB on disk they would
-# carry anyway. But the libraries are system packages, so an unprivileged
-# deployment cannot add them later: that is why they were put in the image in
-# the first place.
-#
-# They no longer have to be. The libraries only have to be FOUND, not
-# installed: unpacked into a directory on LD_LIBRARY_PATH they load from the
-# mounted volume exactly as well as from /usr/lib. So a deployment that wants a
-# local browser downloads a ~12MB bundle once (see
-# scripts/build-browser-libs.sh), and it survives redeploys because it lives on
-# the volume.
-#
-# Build with --build-arg WITH_BROWSER_LIBS=1 to bake them in instead — worth it
-# for an image you build yourself and always use for browsing, and pointless
-# for everyone else.
-ARG WITH_BROWSER_LIBS=0
-RUN if [ "$WITH_BROWSER_LIBS" = "1" ]; then \
-        apt-get update && apt-get install -y --no-install-recommends \
-            libasound2 libatk-bridge2.0-0 libatk1.0-0 libatspi2.0-0 \
-            libcairo2 libcups2 libdbus-1-3 libdrm2 libgbm1 libglib2.0-0 \
-            libnspr4 libnss3 libpango-1.0-0 libx11-6 libxcb1 libxcomposite1 \
-            libxdamage1 libxext6 libxfixes3 libxkbcommon0 libxrandr2 libxi6 libexpat1 \
-            fonts-liberation \
-        && rm -rf /var/lib/apt/lists/*; \
-    fi
-
-# Browsers are downloaded, not baked in: they are large, they update on their
-# own cadence, and a browser inside the image would have to be re-downloaded on
-# every rebuild. This path is on the mounted volume (see docker-compose.yml),
-# so one install survives every deploy.
-ENV PLAYWRIGHT_BROWSERS_PATH=/home/soulacy/.soulacy/playwright-browsers
+# Chromium is part of the supported runtime. Genie can therefore prepare a
+# provider website action on a fresh Railway or Docker deployment without
+# shell access, a browser MCP server, or a first-run package download. The
+# process still runs as the unprivileged soulacy user and every session gets a
+# temporary isolated profile.
+ENV SOULACY_BROWSER_EXECUTABLE=/usr/bin/chromium \
+    PLAYWRIGHT_BROWSERS_PATH=/home/soulacy/.soulacy/playwright-browsers
 
 # Node 20, taken from the stage that already has it rather than from apt.
 #

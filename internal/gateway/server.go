@@ -62,13 +62,16 @@ import (
 	mobilechan "github.com/soulacy/soulacy/internal/channels/mobile"
 	wachan "github.com/soulacy/soulacy/internal/channels/whatsapp"
 	"github.com/soulacy/soulacy/internal/config"
+	"github.com/soulacy/soulacy/internal/connectors"
 	"github.com/soulacy/soulacy/internal/costs"
 	"github.com/soulacy/soulacy/internal/credentials"
 	"github.com/soulacy/soulacy/internal/introspect"
 	"github.com/soulacy/soulacy/internal/knowledge"
 	"github.com/soulacy/soulacy/internal/llm"
+	"github.com/soulacy/soulacy/internal/managedbrowser"
 	"github.com/soulacy/soulacy/internal/mcp"
 	"github.com/soulacy/soulacy/internal/metrics"
+	"github.com/soulacy/soulacy/internal/missions"
 	"github.com/soulacy/soulacy/internal/person"
 	"github.com/soulacy/soulacy/internal/plugininstall"
 	"github.com/soulacy/soulacy/internal/queue/dlq"
@@ -130,14 +133,18 @@ type Server struct {
 	liveActivities  *liveActivityTracker
 	authEngine      *auth.Engine // nil until SetAuth() is called
 	authStackCache  atomic.Pointer[fiber.Handler]
-	rbacManager     *rbac.Manager          // nil until SetRBAC() is called
-	credVault       credentials.Vault      // nil until SetCredentialVault() is called
-	authConnections *authconnections.Store // secret-free metadata; values remain in credVault
-	builderRegistry *builder.Registry      // nil until SetBuilderRegistry() is called
-	rateLimiter     *ratelimit.Manager     // nil until SetRateLimiter() is called
-	apiKeyStore     apikeys.Store          // nil until SetAPIKeyStore() is called
-	dlqStore        dlq.Store              // nil until SetDLQStore() is called
-	historyStore    session.HistoryStore   // nil until SetHistoryStore() is called
+	rbacManager     *rbac.Manager               // nil until SetRBAC() is called
+	credVault       credentials.Vault           // nil until SetCredentialVault() is called
+	authConnections *authconnections.Store      // secret-free metadata; values remain in credVault
+	managedBrowser  *managedbrowser.Manager     // gateway-owned, domain-bound website action runtime
+	connectorStore  *connectors.Store           // user connector definitions; contains no secret values
+	missionStore    *missions.Store             // persistent user-owned standing goals
+	missionMonitor  runtime.GenieMonitorManager // constrained scheduled runner lifecycle
+	builderRegistry *builder.Registry           // nil until SetBuilderRegistry() is called
+	rateLimiter     *ratelimit.Manager          // nil until SetRateLimiter() is called
+	apiKeyStore     apikeys.Store               // nil until SetAPIKeyStore() is called
+	dlqStore        dlq.Store                   // nil until SetDLQStore() is called
+	historyStore    session.HistoryStore        // nil until SetHistoryStore() is called
 	resourceStore   session.ResourceStore
 	agentWatcher    healthReporter // nil until SetAgentWatcher() is called (S2.13)
 	log             *zap.Logger
@@ -341,6 +348,21 @@ func (s *Server) SetCredentialVault(v credentials.Vault) {
 func (s *Server) SetAuthenticatedConnectionStore(store *authconnections.Store) {
 	s.authConnections = store
 }
+
+// SetManagedBrowser wires the isolated website action runtime used by Genie.
+func (s *Server) SetManagedBrowser(manager *managedbrowser.Manager) { s.managedBrowser = manager }
+
+// SetConnectorStore wires user-created connector definitions. Website session
+// secrets remain in the credential vault and are referenced only by ID.
+func (s *Server) SetConnectorStore(store *connectors.Store) {
+	s.connectorStore = store
+}
+
+// SetMissionStore wires persistent Genie mission metadata.
+func (s *Server) SetMissionStore(store *missions.Store) { s.missionStore = store }
+
+// SetMissionMonitor wires the scheduler facade used to execute missions.
+func (s *Server) SetMissionMonitor(m runtime.GenieMonitorManager) { s.missionMonitor = m }
 
 // CredentialVault returns the current Vault (may be nil). Satisfies
 // credentials.VaultProvider so the API can resolve the vault at request time.
@@ -942,6 +964,8 @@ func (s *Server) buildApp() *fiber.App {
 	api.Get("/mobile/deliveries", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleListMobileDeliveries)
 	api.Get("/mobile/deliveries/:id", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleGetMobileDelivery)
 	api.Post("/mobile/deliveries/:id/read", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleReadMobileDelivery)
+	api.Get("/mobile/feed-state", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handleListMobileFeedState)
+	api.Post("/mobile/feed-state", s.rbacMW(rbac.ResourceChat, rbac.ActionChat), s.handlePutMobileFeedState)
 	// Any signed-in person may pair another device of their own (a phone
 	// pairing its watch); the handler itself insists on admin for pairing
 	// someone else. chat:read is the one permission every role holds.
@@ -1000,6 +1024,23 @@ func (s *Server) buildApp() *fiber.App {
 	api.Get("/marketplace/status", s.rbacMW(rbac.ResourceSkills, rbac.ActionRead), s.handleMarketplaceStatus)
 
 	// MCP (Model Context Protocol) — configured external servers + their tools
+	api.Get("/connectors", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleListConnectors)
+	api.Post("/connectors/plan", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handlePlanConnector)
+	api.Post("/connectors", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleCreateConnector)
+	api.Put("/connectors/:id", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleUpdateConnector)
+	api.Delete("/connectors/:id", s.rbacMW(rbac.ResourceMCP, rbac.ActionDelete), s.handleDeleteConnector)
+	api.Post("/connectors/:id/sites/:siteID/website-access", s.credentialAudit("connector.website_access.create"), s.rbacMW(rbac.ResourceCredentials, rbac.ActionSet), s.handleConnectorWebsiteAccess)
+	api.Get("/missions", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleListMissions)
+	api.Post("/missions/plan", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handlePlanMission)
+	api.Post("/missions/execution-plan", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handlePlanExecution)
+	api.Post("/missions", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleCreateMission)
+	api.Get("/missions/:id", s.rbacMW(rbac.ResourceAgents, rbac.ActionRead), s.handleGetMission)
+	api.Patch("/missions/:id", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleUpdateMission)
+	api.Post("/missions/:id/execution-plan", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handlePlanMissionExecution)
+	api.Post("/missions/:id/pause", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handlePauseMission)
+	api.Post("/missions/:id/resume", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleResumeMission)
+	api.Post("/missions/:id/complete", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleCompleteMission)
+	api.Delete("/missions/:id", s.rbacMW(rbac.ResourceAgents, rbac.ActionDelete), s.handleCancelMission)
 	api.Get("/mcp", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleListMCP)
 	api.Post("/mcp", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleCreateMCPServer)
 	api.Put("/mcp/own/:id", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handlePutOwnedMCPServer)

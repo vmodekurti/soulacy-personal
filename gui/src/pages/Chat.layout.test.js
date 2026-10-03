@@ -11,6 +11,10 @@ describe('focused Chat workspace', () => {
     expect(chat).toContain('Model &amp; generation controls')
     expect(chat).toContain('Export Markdown')
     expect(chat).toContain('Share conversation')
+    expect(chat).toContain('＋ New mission')
+    expect(chat).toContain('class="mission-details"')
+    expect(chat).toContain('Show {hiddenMessageCount} earlier message')
+    expect(chat).toContain('savedChatList == null ? true')
   })
 
   it('provides the immersive voice session controls', () => {

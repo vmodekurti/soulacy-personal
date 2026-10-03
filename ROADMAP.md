@@ -1,6 +1,6 @@
 # Soulacy — Post-Audit Roadmap & Story Backlog
 
-*Derived from AUDIT_REPORT.md (2026-06-10) + owner decisions. Stories are sized S (<2h), M (half-day), L (1–2 days). Work milestones in order; within a milestone, stories without dependencies can run in any order. Story IDs use theme prefixes: SEC (security), HYG (hygiene), CI, TEST, ARCH, PERF, DOC, DEP, REL, SDK.*
+*Derived from docs/history/audits/AUDIT_REPORT.md (2026-06-10) + owner decisions. Stories are sized S (<2h), M (half-day), L (1–2 days). Work milestones in order; within a milestone, stories without dependencies can run in any order. Story IDs use theme prefixes: SEC (security), HYG (hygiene), CI, TEST, ARCH, PERF, DOC, DEP, REL, SDK.*
 
 **Suggested first week:** SEC-1 → SEC-2/HYG-1 → CI-1..CI-4 → SEC-4 → ARCH-1 (everything else builds on a clean, gated repo).
 

@@ -25,12 +25,15 @@ import (
 	httpchan "github.com/soulacy/soulacy/internal/channels/http"
 	wachan "github.com/soulacy/soulacy/internal/channels/whatsapp"
 	"github.com/soulacy/soulacy/internal/config"
+	"github.com/soulacy/soulacy/internal/connectors"
 	"github.com/soulacy/soulacy/internal/costs"
 	"github.com/soulacy/soulacy/internal/credentials"
 	"github.com/soulacy/soulacy/internal/gateway"
 	"github.com/soulacy/soulacy/internal/introspect"
 	"github.com/soulacy/soulacy/internal/llm"
+	"github.com/soulacy/soulacy/internal/managedbrowser"
 	"github.com/soulacy/soulacy/internal/mcp"
+	"github.com/soulacy/soulacy/internal/missions"
 	"github.com/soulacy/soulacy/internal/person"
 	"github.com/soulacy/soulacy/internal/pkgregistry"
 	"github.com/soulacy/soulacy/internal/plugininstall"
@@ -70,6 +73,7 @@ type gatewayDeps struct {
 	pluginLoader    *plugins.Loader
 	openedCostStore *costs.Store
 	autopilotStore  *autopilot.Store
+	genieMonitors   runtime.GenieMonitorManager
 	undoStore       *safeundo.Store
 	personStore     person.Store
 	adaptiveRebuild gateway.AdaptiveMemoryRebuilder
@@ -90,6 +94,8 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 	// own. The server owns the builder pipeline (tool catalog, save gate,
 	// scheduler), so it is the server that Genie calls back into.
 	d.engine.SetGenieAgentBuilder(srv)
+	d.engine.SetGenieConnectorManager(srv)
+	srv.SetMissionMonitor(d.genieMonitors)
 	srv.SetAutopilotStore(d.autopilotStore)
 	srv.SetAdaptiveMemoryRebuilder(d.adaptiveRebuild)
 	srv.SetSafeUndoStore(d.undoStore)
@@ -111,9 +117,35 @@ func (a *App) wireGateway(d gatewayDeps, stack *closerStack) *gateway.Server {
 		stack.pushClose("authenticated-connections", connectionStore)
 		srv.SetAuthenticatedConnectionStore(connectionStore)
 		if d.credVault != nil {
-			d.engine.SetAuthenticatedConnectionResolver(authconnections.NewResolver(connectionStore, d.credVault))
+			resolver := authconnections.NewResolver(connectionStore, d.credVault)
+			d.engine.SetAuthenticatedConnectionResolver(resolver)
+			browser := managedbrowser.New(resolver, nil)
+			srv.SetManagedBrowser(browser)
+			stack.pushClose("managed-browser", browser)
+			if ok, detail := browser.Available(); ok {
+				log.Info("managed browser ready", zap.String("detail", detail))
+			} else {
+				log.Warn("managed browser unavailable", zap.String("detail", detail))
+			}
 		}
 		log.Info("authenticated website connections ready")
+	}
+	connectorStore, connectorErr := connectors.OpenStore(ws.DB("connectors"))
+	if connectorErr != nil {
+		log.Warn("user connectors unavailable", zap.Error(connectorErr))
+	} else {
+		stack.pushClose("connectors", connectorStore)
+		srv.SetConnectorStore(connectorStore)
+		log.Info("user connector composer ready")
+	}
+	missionStore, missionErr := missions.OpenStore(ws.DB("genie_missions"))
+	if missionErr != nil {
+		log.Warn("Genie missions unavailable", zap.Error(missionErr))
+	} else {
+		stack.pushClose("genie-missions", missionStore)
+		srv.SetMissionStore(missionStore)
+		d.engine.SetGenieMissionManager(srv)
+		log.Info("Genie missions ready")
 	}
 
 	// Plugin GUI mounts + capability enforcement for scoped plugin tokens

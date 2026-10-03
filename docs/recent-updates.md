@@ -36,7 +36,7 @@ Autopilot is distinct from private Notebook lessons.
 Agent semantic memory now uses Soulacy's embedded **sqlite-vec** backend in
 production instead of an in-process vector store. Semantic entries survive a
 gateway restart, searches are isolated by agent, and startup fails visibly if
-the semantic backend cannot be attached—there is no silent downgrade to
+the semantic backend cannot be attached, there is no silent downgrade to
 keyword-only behavior.
 
 The effective default is:
@@ -81,8 +81,8 @@ verified in the resulting `SOUL.yaml`. See [Using Studio](using/studio.md).
 
 ## LLM usage is admitted before it is spent
 
-All governed inference paths—including Chat, reasoning, Studio, workflows,
-repair, synthesis, and embeddings—share one controller. It can:
+All governed inference paths, including Chat, reasoning, Studio, workflows,
+repair, synthesis, and embeddings, share one controller. It can:
 
 - enforce provider/model/data-region policy;
 - reserve worst-case cost and tokens before a call;

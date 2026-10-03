@@ -38,16 +38,16 @@ it prints your options instead of guessing.
 | Fly.io | `fly deploy`, or release a new image tag |
 | Google Cloud Run | `gcloud run deploy <svc> --image ghcr.io/vmodekurti/soulacy-personal:0.1` |
 | Kubernetes | `kubectl set image deploy/soulacy soulacy=ghcr.io/vmodekurti/soulacy-personal:0.1.NEW` |
-| One-click AWS / Azure (container on a VM) | Run the upgrade **on the VM** with a remote command — see below. **Never** change the stack's `ImageVersion`/`customData` on a live instance: that replaces the VM and destroys its data volume. |
+| One-click AWS / Azure (container on a VM) | Run the upgrade **on the VM** with a remote command: see below. **Never** change the stack's `ImageVersion`/`customData` on a live instance: that replaces the VM and destroys its data volume. |
 
-Image: `ghcr.io/vmodekurti/soulacy-personal` — tags: a version (`0.1.23`), the
+Image: `ghcr.io/vmodekurti/soulacy-personal`: tags: a version (`0.1.23`), the
 minor (`0.1`), or `latest`.
 
 ### Upgrading a cloud VM remotely (no SSH needed)
 
 The one-click AWS and Azure deployments run Soulacy as a container on a VM you
 own, with the data in a Docker volume on that VM. Upgrade **on the same
-instance** so the data stays — triggered from your laptop:
+instance** so the data stays: triggered from your laptop:
 
 - **AWS** (the one-click instance has Systems Manager enabled):
   `deploy/aws/upgrade-remote.sh <instance-id> [--profile p] [--region r]`
@@ -60,7 +60,7 @@ waits for health, and never touches the volume.
 **Warning:** do not "upgrade" by updating the CloudFormation stack's
 `ImageVersion` or the ARM template's `customData` on a running instance. Those
 live in the instance's boot script, so the change **replaces the VM**; the root
-disk — and the data volume on it — is deleted with it. `ImageVersion` is for
+disk (and the data volume on it) is deleted with it. `ImageVersion` is for
 choosing the version of a *new* deployment only.
 
 ## Identify how Soulacy was installed
@@ -103,7 +103,7 @@ do: `install`, `notify`, or `off`, with the reason. On a host that supports
 in-place replacement, the update banner offers **Upgrade Now**. On a container
 or managed deployment it offers **How to upgrade** and shows the detected
 platform's redeploy steps and exact target image instead.
-After the platform reports a healthy deployment, choose **I've redeployed —
+After the platform reports a healthy deployment, choose **I've redeployed,
 check again** in that prompt. Soulacy checks the signed release manifest and
 its running version again; if the old instance is still serving, the prompt
 stays open and tells you which version answered.
@@ -231,18 +231,18 @@ Do not solve this by making a credential-bearing configuration world-readable.
 Soulacy keeps **runtime** and **data** separate, so replacing the runtime on an
 upgrade never touches what you configured or saved.
 
-- **Runtime** — the binary or container image. Thrown away and replaced on every
+- **Runtime**: the binary or container image. Thrown away and replaced on every
   upgrade.
-- **Data** — everything you configure and Soulacy saves: `config.yaml`, agents,
+- **Data**: everything you configure and Soulacy saves: `config.yaml`, agents,
   memory, knowledge, secrets, skills, plugins. It lives *outside* the runtime:
   - **Host installs:** in `~/.soulacy/soulspace/`, separate from the binary.
-  - **Docker/Compose:** named volumes — `soulacy_data` (the workspace),
+  - **Docker/Compose:** named volumes: `soulacy_data` (the workspace),
     `postgres_data`, `qdrant_data`. `docker compose up -d` with a new image keeps
-    them. **Never run `docker compose down -v`** — the `-v` deletes those volumes.
+    them. **Never run `docker compose down -v`**: the `-v` deletes those volumes.
   - **Render / Coolify / Azure:** a persistent disk mounted at
     `/home/soulacy/.soulacy`.
-  - **Railway:** you must attach a volume at `/home/soulacy/.soulacy` yourself —
-    see [deploy/railway](https://github.com/vmodekurti/soulacy-personal/tree/main/deploy/railway).
+  - **Railway:** you must attach a volume at `/home/soulacy/.soulacy` yourself.
+    See [deploy/railway](https://github.com/vmodekurti/soulacy-personal/tree/main/deploy/railway).
 
 Because of this, the upgrade flows on this page (self-update, image pull, or
 platform redeploy) preserve everything. Schemas only move forward, so a newer
@@ -250,8 +250,8 @@ version reads your existing data.
 
 ### Safety check
 
-On a container or managed platform, Soulacy verifies at startup — and in
-`sy doctor` — that the workspace is on durable storage. If it isn't, it warns:
+On a container or managed platform, Soulacy verifies at startup and through
+`sy doctor` that the workspace is on durable storage. If it isn't, it warns:
 
 > workspace is NOT on persistent storage; data will be lost on the next redeploy
 
@@ -278,7 +278,7 @@ version.
 
 Three guard layers protect the normal path:
 
-### 1. Database schema versioning — additive only, never down
+### 1. Database schema versioning: additive only, never down
 
 - Every SQLite store (workboard, costs, rbac, apikeys, dlq, checkpoints,
   memory archive, action log, knowledge) records its schema version in a
@@ -286,7 +286,7 @@ Three guard layers protect the normal path:
 - Schema changes run through a shared migration helper: one transaction
   per step, versions ≤ current are skipped, and a failed step rolls back
   cleanly.
-- Migrations are **additive-only by default** — `DROP`/`RENAME`
+- Migrations are **additive-only by default**: `DROP`/`RENAME`
   statements are refused unless a step explicitly opts in as destructive
   (reserved for deprecation cycles).
 - Versions **never downgrade**. A database touched by a newer build keeps
@@ -308,7 +308,7 @@ transition.
 
 - Plugin manifests may declare `sdk_major: <n>`. A plugin built against a
   **newer** SDK major than the host is refused at load with an upgrade
-  hint — it never crashes the gateway.
+  hint: it never crashes the gateway.
 - The loader warns-and-skips broken manifests, future schemas,
   capability/credential violations, and stale install approvals. Every
   refused plugin is published as a boot event (`type: error`,
@@ -319,7 +319,7 @@ transition.
 
 ## Back up before major upgrades
 
-All state lives in one place — the workspace:
+All state lives in one place: the workspace:
 
 ```bash
 # Stop the gateway first so SQLite files are quiescent, then:
@@ -346,24 +346,24 @@ a genuinely clean slate:
 
 What it does, in order:
 
-1. Prompts for a **typed confirmation** — you must literally type `wipe`.
+1. Prompts for a **typed confirmation**: you must literally type `wipe`.
 2. Stops the gateway (port 18789, plus any launchd service).
-3. **Deletes `~/.soulacy` entirely — agents, memories, the encrypted
+3. **Deletes `~/.soulacy` entirely: agents, memories, the encrypted
    credential vault, config.yaml. No backup is taken.**
 4. Rebuilds the GUI dist and binaries from the checkout (`make all`).
 5. Boots once so a fresh soulspace workspace is created, prints
    `sy workspace info`, and offers the `sy setup` wizard.
 
-!!! danger "Destructive — everything under ~/.soulacy is gone"
+!!! danger "Destructive: everything under ~/.soulacy is gone"
     This is a wipe, not an upgrade. If there is any chance you'll want
     your agents, conversation history, or vault back, take the backup
     above *first*. For a normal version bump, use the standard upgrade
-    flow — never the reinstall script.
+    flow: never the reinstall script.
 
 ## Rollback
 
-Every upgrade run by `install.sh` first **snapshots the outgoing install** —
-both the `soulacy` and `sy` binaries and the current `config.yaml` — into
+Every upgrade run by `install.sh` first **snapshots the outgoing install**,
+including the `soulacy` and `sy` binaries and the current `config.yaml`, into
 `~/.soulacy/backups/<timestamp>/` before overwriting anything. The five most
 recent snapshots are kept (`SOULACY_BACKUP_KEEP` to change; `SOULACY_BACKUP_DIR`
 to relocate).
@@ -377,7 +377,7 @@ curl -fsSL https://raw.githubusercontent.com/vmodekurti/soulacy-personal/main/in
 ```
 
 This restores the previous binaries and their matching `config.yaml`. Your
-current config is never destroyed — it's saved next to the restored one as
+current config is never destroyed: it's saved next to the restored one as
 `config.yaml.pre-rollback.<epoch>` first. Restart the gateway afterward
 (`soulacy serve`, or `sy daemon stop && sy daemon start`).
 
@@ -389,5 +389,5 @@ current config is never destroyed — it's saved next to the restored one as
 
 ## See also
 
-- [Workspace Layout](../configuration/workspace.md) — what to back up
+- [Workspace Layout](../configuration/workspace.md): what to back up
 - [macOS deployment](macos.md) · [Linux / VPS](linux.md) · [Docker](docker.md)
