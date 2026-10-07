@@ -9,6 +9,11 @@ function hostAllowed(host, domains) {
   return domains.some(domain => host === domain || host.endsWith(`.${domain}`))
 }
 
+function cookieAppliesToApprovedHost(cookieDomain, domains) {
+  cookieDomain = cleanDomain(cookieDomain)
+  return domains.some(domain => domain === cookieDomain || domain.endsWith(`.${cookieDomain}`))
+}
+
 function normalizeBoundary(payload) {
   const base = new URL(payload.baseUrl)
   if (base.protocol !== 'https:') throw new Error('Only HTTPS sign-in URLs are supported.')
@@ -53,8 +58,18 @@ async function captureSession(payload) {
   const current = new URL(tab.url || '')
   if (!hostAllowed(current.hostname, domains)) throw new Error('Return the sign-in tab to the approved website before saving the session.')
 
-  const cookieSets = await Promise.all(domains.map(domain => chrome.cookies.getAll({ domain })))
-  const cookies = cookieSets.flat().filter(cookie => hostAllowed(cookie.domain, domains)).map(cookie => ({
+  // Query by URL so Chrome returns every cookie the approved host would
+  // actually receive, including SSO cookies scoped to a parent domain. This
+  // does not grant navigation to that parent domain.
+  const cookieURLs = [...new Set([base.href, ...domains.map(domain => `https://${domain}/`)])]
+  const cookieSets = await Promise.all(cookieURLs.map(url => chrome.cookies.getAll({ url })))
+  const seenCookies = new Set()
+  const cookies = cookieSets.flat().filter(cookie => {
+    const key = `${cookie.domain}\n${cookie.path || '/'}\n${cookie.name}`
+    if (seenCookies.has(key) || !cookieAppliesToApprovedHost(cookie.domain, domains)) return false
+    seenCookies.add(key)
+    return true
+  }).map(cookie => ({
     name: cookie.name,
     value: cookie.value,
     domain: cookie.domain,

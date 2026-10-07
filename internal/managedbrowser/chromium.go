@@ -209,7 +209,7 @@ func (b *chromiumBrowser) seed(ctx context.Context, raw []byte, allowed []string
 	}
 	cookies := make([]*network.CookieParam, 0, len(state.Cookies))
 	for _, cookie := range state.Cookies {
-		if !hostAllowed(cookie.Domain, allowed) {
+		if !cookieDomainAllowed(cookie.Domain, allowed) {
 			return ErrOutsideBoundary
 		}
 		path := cookie.Path

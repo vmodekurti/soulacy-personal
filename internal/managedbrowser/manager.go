@@ -475,6 +475,20 @@ func hostAllowed(host string, allowed []string) bool {
 	return false
 }
 
+func cookieDomainAllowed(cookieDomain string, allowed []string) bool {
+	cookieDomain = strings.ToLower(strings.Trim(strings.TrimSpace(cookieDomain), "."))
+	if cookieDomain == "" {
+		return false
+	}
+	for _, domain := range allowed {
+		domain = strings.ToLower(strings.Trim(strings.TrimSpace(domain), "."))
+		if domain == cookieDomain || strings.HasSuffix(domain, "."+cookieDomain) {
+			return true
+		}
+	}
+	return false
+}
+
 func validateReview(review CommitReview) error {
 	if strings.TrimSpace(review.Provider) == "" || strings.TrimSpace(review.Action) == "" || strings.TrimSpace(review.Item) == "" || strings.TrimSpace(review.Total) == "" {
 		return errors.New("final approval requires provider, action, item, and total")

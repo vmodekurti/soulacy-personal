@@ -15,10 +15,11 @@ func (s *Server) StartWebsiteActionForGenie(ctx context.Context, rawURL, connect
 	if s.managedBrowser == nil {
 		return nil, errors.New("managed website actions are unavailable on this deployment")
 	}
+	agentID := managedBrowserAgentID(ctx)
 	result, err := s.managedBrowser.Start(ctx, managedbrowser.StartRequest{
 		WorkspaceID:  runtime.PersonalWorkspaceID,
-		Subject:      "admin",
-		AgentID:      runtime.GenieAgentID,
+		Subject:      runtime.SubjectFromContext(ctx),
+		AgentID:      agentID,
 		URL:          strings.TrimSpace(rawURL),
 		ConnectionID: strings.TrimSpace(connectionID),
 	})
@@ -29,7 +30,7 @@ func (s *Server) InspectWebsiteActionForGenie(ctx context.Context, sessionID str
 	if s.managedBrowser == nil {
 		return nil, errors.New("managed website actions are unavailable on this deployment")
 	}
-	result, err := s.managedBrowser.Observe(ctx, strings.TrimSpace(sessionID), runtime.GenieAgentID, "admin")
+	result, err := s.managedBrowser.Observe(ctx, strings.TrimSpace(sessionID), managedBrowserAgentID(ctx), runtime.SubjectFromContext(ctx))
 	return managedBrowserResult("inspect the provider website", "", result, err)
 }
 
@@ -37,7 +38,7 @@ func (s *Server) ActOnWebsiteForGenie(ctx context.Context, sessionID, action, re
 	if s.managedBrowser == nil {
 		return nil, errors.New("managed website actions are unavailable on this deployment")
 	}
-	result, err := s.managedBrowser.Act(ctx, strings.TrimSpace(sessionID), runtime.GenieAgentID, "admin", managedbrowser.Action{
+	result, err := s.managedBrowser.Act(ctx, strings.TrimSpace(sessionID), managedBrowserAgentID(ctx), runtime.SubjectFromContext(ctx), managedbrowser.Action{
 		Kind: strings.TrimSpace(action), Ref: strings.TrimSpace(ref), Value: value,
 	})
 	return managedBrowserResult("prepare the provider action", "", result, err)
@@ -47,20 +48,28 @@ func (s *Server) CommitWebsiteActionForGenie(ctx context.Context, sessionID, ref
 	if s.managedBrowser == nil {
 		return nil, errors.New("managed website actions are unavailable on this deployment")
 	}
-	result, err := s.managedBrowser.Commit(ctx, strings.TrimSpace(sessionID), runtime.GenieAgentID, "admin", strings.TrimSpace(ref), managedbrowser.CommitReview{
+	result, err := s.managedBrowser.Commit(ctx, strings.TrimSpace(sessionID), managedBrowserAgentID(ctx), runtime.SubjectFromContext(ctx), strings.TrimSpace(ref), managedbrowser.CommitReview{
 		Provider: provider, Action: action, Item: item, Schedule: schedule, Terms: terms, Total: total,
 	})
 	return managedBrowserResult("submit the approved provider action", "", result, err)
 }
 
-func (s *Server) CloseWebsiteActionForGenie(_ context.Context, sessionID string) (map[string]any, error) {
+func (s *Server) CloseWebsiteActionForGenie(ctx context.Context, sessionID string) (map[string]any, error) {
 	if s.managedBrowser == nil {
 		return nil, errors.New("managed website actions are unavailable on this deployment")
 	}
-	if err := s.managedBrowser.CloseSession(strings.TrimSpace(sessionID), runtime.GenieAgentID, "admin"); err != nil {
+	if err := s.managedBrowser.CloseSession(strings.TrimSpace(sessionID), managedBrowserAgentID(ctx), runtime.SubjectFromContext(ctx)); err != nil {
 		return nil, err
 	}
 	return map[string]any{"ok": true, "status": "closed", "message": "Managed browser session closed and its temporary profile was removed."}, nil
+}
+
+func managedBrowserAgentID(ctx context.Context) string {
+	if agentID := runtime.ActiveAgentFromContext(ctx); agentID != "" {
+		return agentID
+	}
+	// Direct gateway calls predate active-agent context and belong to Genie.
+	return runtime.GenieAgentID
 }
 
 func managedBrowserResult(operation, attempted string, result managedbrowser.Result, err error) (map[string]any, error) {

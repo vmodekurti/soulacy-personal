@@ -49,6 +49,12 @@
     editing = editing
   }
 
+  function referencedUngrantedConnections() {
+    const prompt = editing?.system_prompt || ''
+    const granted = new Set(editing?.connections || [])
+    return authenticatedConnections.filter(connection => prompt.includes(connection.id) && !granted.has(connection.id))
+  }
+
   // Capability-ack modal state. When the backend returns 409 with
   // {needs_ack: true, capability_audit}, we open a blocking modal that shows
   // the tier change + affected channel bindings. Confirming retries the save
@@ -1796,6 +1802,11 @@ console.log(reply);` : ''
                     </label>
                   {/each}
                 </div>
+                {#if referencedUngrantedConnections().length > 0}
+                  <div class="website-grant-warning" role="alert">
+                    This prompt references {referencedUngrantedConnections().map(connection => connection.name).join(', ')}, but the sign-in is not granted to this agent. Select it before running the agent.
+                  </div>
+                {/if}
               {/if}
             </div>
 
@@ -4194,6 +4205,16 @@ console.log(reply);` : ''
   .website-grant-list label.needs-auth { opacity: .65; }
   .website-grant-list span { display: flex; flex-direction: column; gap: .1rem; }
   .website-grant-list small { color: #7b82a8; }
+  .website-grant-warning {
+    margin-top: .7rem;
+    padding: .55rem .65rem;
+    border: 1px solid rgba(245,167,66,.35);
+    border-radius: 6px;
+    background: rgba(245,167,66,.1);
+    color: #f5bd67;
+    font-size: .76rem;
+    line-height: 1.45;
+  }
 
   /* F-GUI-2 — Security Doctor modal styling. Colors mirror the deployment
      severity palette (info/warn/danger) already used across the dashboard. */
