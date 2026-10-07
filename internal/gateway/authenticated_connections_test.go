@@ -149,6 +149,10 @@ func TestValidateBrowserStorageStateDomainConfinement(t *testing.T) {
 	if err := validateBrowserStorageState(valid, []string{"hbr.org"}); err != nil {
 		t.Fatalf("valid state rejected: %v", err)
 	}
+	parentDomainSSO := json.RawMessage(`{"cookies":[{"name":"SID","value":"opaque","domain":".google.com","path":"/"}],"origins":[]}`)
+	if err := validateBrowserStorageState(parentDomainSSO, []string{"notebook.google.com"}); err != nil {
+		t.Fatalf("parent-domain SSO cookie rejected: %v", err)
+	}
 	foreignCookie := json.RawMessage(`{"cookies":[{"name":"session","value":"opaque","domain":"evil.test"}],"origins":[]}`)
 	if err := validateBrowserStorageState(foreignCookie, []string{"hbr.org"}); err == nil || !strings.Contains(err.Error(), "outside") {
 		t.Fatalf("foreign cookie error = %v", err)

@@ -98,6 +98,19 @@ func TestSavedSessionStaysInsideBrowserAndResult(t *testing.T) {
 	}
 }
 
+func TestParentDomainCookieDoesNotExpandNavigationBoundary(t *testing.T) {
+	allowed := []string{"notebook.google.com"}
+	if !cookieDomainAllowed(".google.com", allowed) {
+		t.Fatal("parent-domain cookie that applies to approved host was rejected")
+	}
+	if cookieDomainAllowed("evil.test", allowed) {
+		t.Fatal("foreign cookie domain was accepted")
+	}
+	if hostAllowed("accounts.google.com", allowed) {
+		t.Fatal("parent-domain cookie expanded the browser navigation boundary")
+	}
+}
+
 func TestSessionClosesWhenProviderLeavesDomain(t *testing.T) {
 	browser := &fakeBrowser{observations: []Observation{
 		{URL: "https://www.opentable.com/search", Elements: []Element{{Ref: "s1", Label: "Next"}}},

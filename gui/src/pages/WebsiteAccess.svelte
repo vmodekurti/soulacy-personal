@@ -17,7 +17,9 @@
   let captureOpened = false
   let companionReady = false
   let companionVersion = ''
+  let companionOutdated = false
   let deepLinkHandled = false
+  const minimumCompanionVersion = '1.1.0'
 
   $: captureCommand = loginURL.trim()
     ? `sy --gateway ${window.location.origin} connection capture ${shellQuote(loginURL.trim())}${name.trim() ? ` --name ${shellQuote(name.trim())}` : ''}${domains.trim() ? ` --domains ${shellQuote(domains.trim())}` : ''}${agentIDs.trim() ? ` --agents ${shellQuote(agentIDs.trim())}` : ''}`
@@ -77,12 +79,24 @@
   async function detectCompanion() {
     try {
       const result = await companionRequest('ping', {}, 600)
-      companionReady = true
       companionVersion = result.version || ''
+      companionOutdated = !versionAtLeast(companionVersion, minimumCompanionVersion)
+      companionReady = !companionOutdated
     } catch (_) {
       companionReady = false
       companionVersion = ''
+      companionOutdated = false
     }
+  }
+
+  function versionAtLeast(version, minimum) {
+    const current = String(version || '').split('.').map(value => Number.parseInt(value, 10) || 0)
+    const required = String(minimum || '').split('.').map(value => Number.parseInt(value, 10) || 0)
+    for (let i = 0; i < Math.max(current.length, required.length); i += 1) {
+      if ((current[i] || 0) > (required[i] || 0)) return true
+      if ((current[i] || 0) < (required[i] || 0)) return false
+    }
+    return true
   }
 
   function openCapture(connection = null) {
@@ -247,10 +261,10 @@
       {#if !captureConnection}<label>Agent IDs (optional)<input bind:value={agentIDs} placeholder="research-agent, daily-briefing" /></label>{/if}
 
       <div class:ready={companionReady} class="companion">
-        <strong>{companionReady ? `Session Capture companion ready${companionVersion ? ` · v${companionVersion}` : ''}` : 'Session Capture companion not detected'}</strong>
+        <strong>{companionReady ? `Session Capture companion ready${companionVersion ? ` · v${companionVersion}` : ''}` : companionOutdated ? `Session Capture companion update required · v${companionVersion}` : 'Session Capture companion not detected'}</strong>
         {#if !companionReady}
-          <span>Download and unzip it. In Chrome, open <code>chrome://extensions</code>, enable Developer mode, and choose <strong>Load unpacked</strong>.</span>
-          <div class="actions"><a href="/downloads/soulacy-session-capture.zip">Download companion</a><button type="button" class="compact" on:click={detectCompanion}>Check again</button></div>
+          <span>{companionOutdated ? 'Download the updated companion and replace the existing unpacked extension.' : 'Download and unzip it. In Chrome, open chrome://extensions, enable Developer mode, and choose Load unpacked.'}</span>
+          <div class="actions"><a href="/downloads/soulacy-session-capture.zip">{companionOutdated ? 'Download update' : 'Download companion'}</a><button type="button" class="compact" on:click={detectCompanion}>Check again</button></div>
         {/if}
       </div>
 

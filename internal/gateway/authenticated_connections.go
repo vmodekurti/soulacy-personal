@@ -390,7 +390,7 @@ func validateBrowserStorageState(raw json.RawMessage, allowed []string) error {
 		return errors.New("storage_state contains too many records")
 	}
 	for _, cookie := range state.Cookies {
-		if strings.TrimSpace(cookie.Name) == "" || !domainAllowed(cookie.Domain, allowed) {
+		if strings.TrimSpace(cookie.Name) == "" || !cookieDomainAllowed(cookie.Domain, allowed) {
 			return errors.New("storage_state contains a cookie outside allowed_domains")
 		}
 	}
@@ -401,6 +401,20 @@ func validateBrowserStorageState(raw json.RawMessage, allowed []string) error {
 		}
 	}
 	return nil
+}
+
+// cookieDomainAllowed accepts a parent-domain cookie only when it would be
+// sent to an explicitly approved host. It does not expand the navigation
+// boundary. For example, a .google.com cookie may be restored for
+// notebook.google.com, while accounts.google.com remains unreachable.
+func cookieDomainAllowed(cookieDomain string, allowed []string) bool {
+	cookieDomain = normalizeDomain(cookieDomain)
+	for _, boundary := range allowed {
+		if hostWithinBoundary(normalizeDomain(boundary), cookieDomain) {
+			return true
+		}
+	}
+	return false
 }
 
 func domainAllowed(host string, allowed []string) bool {
