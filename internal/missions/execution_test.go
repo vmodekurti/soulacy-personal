@@ -73,7 +73,7 @@ func TestBuildExecutionPlanPrefersDirectActionTool(t *testing.T) {
 
 func TestBuildExecutionPlanRestaurantReadyThroughBrowser(t *testing.T) {
 	plan, err := BuildExecutionPlan("Reserve a table at a restaurant", map[string]string{
-		"location": "Chicago", "date": "Friday", "time": "7 PM", "party_size": "4", "preferences": "Italian",
+		"location": "Chicago", "date": "Friday", "time": "7 PM", "party_size": "4",
 	}, CapabilityInventory{PublicWeb: true, BrowserAutomation: true, BrowserDetail: "Playwright is connected"})
 	if err != nil {
 		t.Fatal(err)
@@ -84,6 +84,7 @@ func TestBuildExecutionPlanRestaurantReadyThroughBrowser(t *testing.T) {
 	if len(plan.ApprovalCheckpoints) != 1 {
 		t.Fatalf("reservation must stop for approval: %+v", plan)
 	}
+	assertRequirementStatus(t, plan, "preferences", "optional")
 }
 
 func assertRouteStatus(t *testing.T, plan ExecutionPlan, id, want string) {
@@ -100,13 +101,14 @@ func assertRouteStatus(t *testing.T, plan ExecutionPlan, id, want string) {
 }
 
 func TestBuildExecutionPlanResearchUsesPublicAccess(t *testing.T) {
-	plan, err := BuildExecutionPlan("Research the best home energy rebates", map[string]string{"constraints": "Illinois programs"}, CapabilityInventory{PublicWeb: true})
+	plan, err := BuildExecutionPlan("Research the best home energy rebates in Illinois", nil, CapabilityInventory{PublicWeb: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if plan.Category != "research" || plan.Status != PlanReady || plan.Route != "public_web" || len(plan.ApprovalCheckpoints) != 0 {
 		t.Fatalf("plan=%+v", plan)
 	}
+	assertRequirementStatus(t, plan, "constraints", "optional")
 }
 
 func TestBuildExecutionPlanUnsupportedPhysicalTaskProvidesHandoff(t *testing.T) {
