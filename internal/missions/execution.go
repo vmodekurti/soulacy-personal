@@ -111,7 +111,18 @@ type planProfile struct {
 	evidence  []string
 }
 
-type inputSpec struct{ key, label, why string }
+type inputSpec struct {
+	key, label, why string
+	optional        bool
+}
+
+func requiredInput(key, label, why string) inputSpec {
+	return inputSpec{key: key, label: label, why: why}
+}
+
+func optionalInput(key, label, why string) inputSpec {
+	return inputSpec{key: key, label: label, why: why, optional: true}
+}
 
 // LooksLikeActionGoal reports whether the goal needs an external action rather
 // than a research-only answer. The runtime uses this to ensure Genie consults
@@ -176,6 +187,9 @@ func BuildExecutionPlan(goal string, knownInputs map[string]string, inventory Ca
 
 	for _, spec := range profile.inputs {
 		status := "needed"
+		if spec.optional {
+			status = "optional"
+		}
 		if strings.TrimSpace(known[spec.key]) != "" {
 			status = "provided"
 		}
@@ -295,36 +309,66 @@ func executionProfile(goal string) planProfile {
 	}
 	if containsAny(goal, "uber", "lyft", "book a ride", "order a ride", "call a taxi", "ride to ") {
 		return planProfile{category: "ride", label: "ride booking", domains: []string{"uber.com", "lyft.com"}, action: true, auth: "required", payment: true,
-			inputs:    []inputSpec{{"pickup", "Pickup location", "The provider needs a precise pickup point."}, {"destination", "Destination", "The provider needs a destination."}, {"ride_time", "Pickup time", "Choose now or a scheduled time."}},
+			inputs: []inputSpec{
+				requiredInput("pickup", "Pickup location", "The provider needs a precise pickup point."),
+				requiredInput("destination", "Destination", "The provider needs a destination."),
+				requiredInput("ride_time", "Pickup time", "Choose now or a scheduled time."),
+			},
 			toolTerms: []string{"uber", "lyft", "ride", "taxi"}, evidence: []string{"Provider confirmation or trip ID", "Final quoted price", "Pickup time and location"}}
 	}
 	if containsAny(goal, "reserve a table", "book a table", "restaurant reservation", "opentable", "resy", "dinner reservation") {
 		return planProfile{category: "restaurant", label: "restaurant reservation", domains: []string{"opentable.com", "resy.com"}, action: true, auth: "optional",
-			inputs:    []inputSpec{{"location", "Location or restaurant", "Genie needs the search area or preferred restaurant."}, {"date", "Date", "The reservation date is required."}, {"time", "Time or acceptable range", "A time or range is required to check availability."}, {"party_size", "Party size", "Availability depends on the number of guests."}, {"preferences", "Preferences", "Cuisine, budget, seating, and accessibility preferences improve the result."}},
+			inputs: []inputSpec{
+				requiredInput("location", "Location or restaurant", "Genie needs the search area or preferred restaurant."),
+				requiredInput("date", "Date", "The reservation date is required."),
+				requiredInput("time", "Time or acceptable range", "A time or range is required to check availability."),
+				requiredInput("party_size", "Party size", "Availability depends on the number of guests."),
+				optionalInput("preferences", "Preferences", "Cuisine, budget, seating, and accessibility preferences improve the result."),
+			},
 			toolTerms: []string{"restaurant", "reservation", "opentable", "resy"}, evidence: []string{"Reservation confirmation", "Restaurant, date, time, and party size", "Cancellation terms"}}
 	}
 	if containsAny(goal, "buy ", "purchase ", "order ", "shopping", "shop for") {
 		return planProfile{category: "shopping", label: "purchase", action: true, auth: "required", payment: true,
-			inputs:    []inputSpec{{"item", "Item", "Describe what to buy."}, {"constraints", "Product constraints", "Brand, size, color, quality, or delivery constraints."}, {"spend_limit", "Maximum total price", "Genie needs a firm limit before checkout."}, {"delivery", "Delivery destination or timing", "Confirm delivery requirements without sharing payment details."}},
+			inputs: []inputSpec{
+				requiredInput("item", "Item", "Describe what to buy."),
+				optionalInput("constraints", "Product constraints", "Brand, size, color, quality, or delivery constraints."),
+				requiredInput("spend_limit", "Maximum total price", "Genie needs a firm limit before checkout."),
+				requiredInput("delivery", "Delivery destination or timing", "Confirm delivery requirements without sharing payment details."),
+			},
 			toolTerms: []string{"cart", "checkout", "purchase", "order"}, evidence: []string{"Order confirmation", "Final total and delivery estimate", "Cancellation or return terms"}}
 	}
 	if containsAny(goal, "book a flight", "book a hotel", "reserve a hotel", "travel booking", "airbnb") {
 		return planProfile{category: "travel", label: "travel booking", action: true, auth: "required", payment: true,
-			inputs:    []inputSpec{{"destination", "Destination", "The destination is required."}, {"dates", "Dates", "Travel dates or a flexible range are required."}, {"travelers", "Travelers", "Traveler count and needs affect availability."}, {"constraints", "Travel preferences", "Budget, schedule, room, baggage, and accessibility constraints."}, {"spend_limit", "Maximum total price", "Genie needs a firm limit before booking."}},
+			inputs: []inputSpec{
+				requiredInput("destination", "Destination", "The destination is required."),
+				requiredInput("dates", "Dates", "Travel dates or a flexible range are required."),
+				requiredInput("travelers", "Travelers", "Traveler count and needs affect availability."),
+				optionalInput("constraints", "Travel preferences", "Budget, schedule, room, baggage, and accessibility constraints."),
+				requiredInput("spend_limit", "Maximum total price", "Genie needs a firm limit before booking."),
+			},
 			toolTerms: []string{"flight", "hotel", "booking", "travel"}, evidence: []string{"Booking confirmation", "Final itinerary and total", "Change and cancellation terms"}}
 	}
 	if containsAny(goal, "schedule an appointment", "book an appointment", "make an appointment") {
 		return planProfile{category: "appointment", label: "appointment", action: true, auth: "optional",
-			inputs:    []inputSpec{{"provider", "Provider or service", "Identify the person, business, or service."}, {"date_range", "Acceptable dates and times", "Genie needs a scheduling window."}, {"location", "Location or format", "Choose in-person, phone, or video when relevant."}, {"constraints", "Other requirements", "Include duration, insurance, accessibility, or service details."}},
+			inputs: []inputSpec{
+				requiredInput("provider", "Provider or service", "Identify the person, business, or service."),
+				requiredInput("date_range", "Acceptable dates and times", "Genie needs a scheduling window."),
+				requiredInput("location", "Location or format", "Choose in-person, phone, or video when relevant."),
+				optionalInput("constraints", "Other requirements", "Include duration, insurance, accessibility, or service details."),
+			},
 			toolTerms: []string{"appointment", "calendar", "schedule"}, evidence: []string{"Appointment confirmation", "Date, time, provider, and location", "Rescheduling instructions"}}
 	}
 	if containsAny(goal, "send a message", "send an email", "text ", "notify ") {
 		return planProfile{category: "communication", label: "message", action: true, auth: "none",
-			inputs:    []inputSpec{{"recipient", "Recipient", "Identify who should receive it."}, {"content", "Message content", "Confirm the message or the points Genie should draft."}, {"channel", "Channel", "Choose email, SMS, WhatsApp, Telegram, or another available channel."}},
+			inputs: []inputSpec{
+				requiredInput("recipient", "Recipient", "Identify who should receive it."),
+				requiredInput("content", "Message content", "Confirm the message or the points Genie should draft."),
+				requiredInput("channel", "Channel", "Choose email, SMS, WhatsApp, Telegram, or another available channel."),
+			},
 			toolTerms: []string{"send", "email", "message", "whatsapp", "telegram"}, evidence: []string{"Delivery result from the selected channel"}}
 	}
 	return planProfile{category: "research", label: "research result", auth: "none",
-		inputs:   []inputSpec{{"constraints", "Success criteria or constraints", "Tell Genie what makes the result useful."}},
+		inputs:   []inputSpec{optionalInput("constraints", "Success criteria or constraints", "Tell Genie what makes the result useful.")},
 		evidence: []string{"Cited result", "Any uncertainty or unavailable source is stated"}}
 }
 
