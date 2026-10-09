@@ -5186,7 +5186,7 @@
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>go<span class="w"> </span>install<span class="w"> </span>github.com/soulacy/soulacy/cmd/open-notebook-mcp@latest
 </span></code></pre></div>
 <p>Make the resulting executable available on the gateway's <code>PATH</code>, or place it beside the <code>soulacy</code> executable. The normal <code>make install</code>, installer, container image, and Soulacy release archives do not include it.</p>
-<p>Then open <strong>MCP Servers</strong> in the Soulacy GUI. The Open Notebook card checks <code>http://127.0.0.1:5055</code> and reports the API, standalone adapter, and Soulacy connection independently. When both local components are healthy, click <strong>Connect Open Notebook</strong>.</p>
+<p>Then open <strong>MCP Servers</strong> in the Soulacy GUI, select <strong>Add server</strong>, and choose <strong>Connect Open Notebook</strong>. Soulacy checks <code>http://127.0.0.1:5055</code> and reports the API, standalone adapter, and Soulacy connection independently. When both local components are healthy, click <strong>Connect</strong>.</p>
 <p>The CLI performs the same registration:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>sy<span class="w"> </span>mcp<span class="w"> </span>add-open-notebook
 </span></code></pre></div>
@@ -5202,7 +5202,7 @@
 </span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span>--audio-base-url<span class="w"> </span>https://your-mac.your-tailnet.ts.net:8443<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">  </span>--audio-listen<span class="w"> </span><span class="m">127</span>.0.0.1:18791
 </span></code></pre></div>
-<p>Use the MagicDNS hostname shown by <code>tailscale status</code>. The same values can be saved from the Open Notebook card on the <strong>MCP Servers</strong> page.</p>
+<p>Use the MagicDNS hostname shown by <code>tailscale status</code>. The same values can be saved from <strong>Add server</strong> &gt; <strong>Connect Open Notebook</strong> on the <strong>MCP Servers</strong> page.</p>
 <p>This creates two separate paths:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Soulacy → 127.0.0.1:5055                 full Open Notebook API
 </span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>iPhone  → Tailscale HTTPS → 127.0.0.1:18791  podcast audio only
