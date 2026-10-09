@@ -2,7 +2,9 @@ package gateway
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/soulacy/soulacy/internal/authconnections"
 	"github.com/soulacy/soulacy/internal/managedbrowser"
@@ -54,11 +56,62 @@ func TestBrowserStatusReportsManagedRuntime(t *testing.T) {
 	}
 }
 
-type recordingConnectionResolver struct{ agentID string }
+type recordingConnectionResolver struct {
+	agentID      string
+	connectionID string
+}
 
-func (r *recordingConnectionResolver) Resolve(_ context.Context, _, _, agentID, _ string) (authconnections.Lease, error) {
+func (r *recordingConnectionResolver) Resolve(_ context.Context, _, _, agentID, connectionID string) (authconnections.Lease, error) {
 	r.agentID = agentID
+	r.connectionID = connectionID
 	return authconnections.Lease{Kind: authconnections.KindBrowser, AllowedDomains: []string{"example.com"}, BrowserState: []byte(`{"cookies":[]}`)}, nil
+}
+
+func TestManagedBrowserAutomaticallySelectsReadyGrantedWebsiteAccess(t *testing.T) {
+	store, err := authconnections.Open(filepath.Join(t.TempDir(), "connections.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	connection, err := store.Create(t.Context(), authconnections.CreateInput{
+		WorkspaceID: runtime.PersonalWorkspaceID, OwnerSubject: "admin", Scope: authconnections.ScopeUser,
+		Kind: authconnections.KindBrowser, Name: "Example", BaseURL: "https://example.com", AllowedDomains: []string{"example.com"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkSecret(t.Context(), runtime.PersonalWorkspaceID, connection.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReplaceAgentGrants(t.Context(), runtime.PersonalWorkspaceID, connection.ID, []string{"morning-podcast-digest"}); err != nil {
+		t.Fatal(err)
+	}
+	resolver := &recordingConnectionResolver{}
+	s := &Server{authConnections: store, managedBrowser: managedbrowser.New(resolver, staticManagedBrowserFactory{})}
+	ctx := runtime.WithActiveAgent(t.Context(), "morning-podcast-digest")
+
+	result, err := s.StartWebsiteActionForGenie(ctx, "https://example.com/account", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolver.connectionID != connection.ID || result["route"] != "website_access" || result["connection_id"] != connection.ID {
+		t.Fatalf("automatic route = %#v, resolved connection = %q", result, resolver.connectionID)
+	}
+}
+
+func TestMatchingReadyWebsiteConnectionHonorsGrantExpiryAndSpecificity(t *testing.T) {
+	now := time.Now()
+	expired := now.Add(-time.Minute)
+	connections := []authconnections.Connection{
+		{ID: "broad", Kind: authconnections.KindBrowser, Status: authconnections.StatusReady, HasSecret: true, AllowedDomains: []string{"google.com"}, AgentIDs: []string{"agent"}},
+		{ID: "specific", Kind: authconnections.KindBrowser, Status: authconnections.StatusReady, HasSecret: true, AllowedDomains: []string{"notebooklm.google.com"}, AgentIDs: []string{"agent"}},
+		{ID: "ungranted", Kind: authconnections.KindBrowser, Status: authconnections.StatusReady, HasSecret: true, AllowedDomains: []string{"notebooklm.google.com"}},
+		{ID: "expired", Kind: authconnections.KindBrowser, Status: authconnections.StatusReady, HasSecret: true, ExpiresAt: &expired, AllowedDomains: []string{"notebooklm.google.com"}, AgentIDs: []string{"agent"}},
+	}
+	selected, ok := matchingReadyWebsiteConnection(connections, "agent", "notebooklm.google.com", now)
+	if !ok || selected.ID != "specific" {
+		t.Fatalf("selected = %+v, ok=%v", selected, ok)
+	}
 }
 func (r *recordingConnectionResolver) UpdateBrowserState(_ context.Context, _, _ string, update func([]byte) ([]byte, bool, error)) error {
 	_, _, err := update([]byte(`{"cookies":[]}`))

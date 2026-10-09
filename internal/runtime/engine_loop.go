@@ -444,6 +444,9 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	// hot-reload between user messages picks up the new def's catalogs.
 	// (PRODUCTION_AUDIT → MED/Engine.)
 	sysPrefix := e.buildSystemPrefix(def)
+	if guide := e.websiteAccessRoutingGuide(ctx, def); guide != "" {
+		sysPrefix += "\n\n" + guide
+	}
 	if modePrompt := responseModeSystemPrompt(msg.Metadata); modePrompt != "" {
 		sysPrefix += "\n\n" + modePrompt
 	}
@@ -627,6 +630,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	// What actually went wrong, so a ceiling never reads as the cause (#229)
 	// and a run that only collects refusals stops early (#230).
 	failures := &runFailures{}
+	websiteAccessFallbackOffered := false
 
 	var finalContent string
 	for turn := 0; turn < maxTurns; turn++ {
@@ -988,6 +992,12 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		// dedup can't, without ever blocking a legitimately varied tool sequence.
 		// A durable refusal is worth saying once and acting on; see engine_blocked.go.
 		nudges := failures.observe(toolResults)
+		if !websiteAccessFallbackOffered {
+			if nudge := websiteAccessFallbackNudge(toolResults, len(e.readyWebsiteConnections(ctx, def)) > 0, def.ID == GenieAgentID); nudge != "" {
+				nudges = append(nudges, nudge)
+				websiteAccessFallbackOffered = true
+			}
+		}
 		if replan := contract.ReplanDirective(); replan != "" {
 			nudges = append(nudges, replan)
 		}

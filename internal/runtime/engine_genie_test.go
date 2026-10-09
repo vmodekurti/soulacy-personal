@@ -85,6 +85,8 @@ func TestGeniePromptTreatsConnectorsAsOptionalFallbacks(t *testing.T) {
 	prompt := builtinGenieAgent().SystemPrompt
 	for _, want := range []string{
 		"A connector is an optimization, never a prerequisite.",
+		"Maintain a current map of your surroundings",
+		"repair any reversible setup that your tools allow",
 		"provider's official website second",
 		"Never refuse merely because a named connector is absent",
 		"ask only the first two related missing details",

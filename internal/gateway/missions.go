@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/soulacy/soulacy/internal/authconnections"
@@ -498,7 +499,7 @@ func (s *Server) PrepareWebsiteAccessForGenie(ctx context.Context, name, baseURL
 	}
 	for _, connection := range connections {
 		for _, existingDomain := range connection.AllowedDomains {
-			if existingDomain == domains[0] {
+			if hostWithinBoundary(domains[0], normalizeDomain(existingDomain)) || hostWithinBoundary(normalizeDomain(existingDomain), domains[0]) {
 				grants := append([]string(nil), connection.AgentIDs...)
 				if !missionContainsString(grants, runtime.GenieAgentID) {
 					grants = append(grants, runtime.GenieAgentID)
@@ -507,12 +508,21 @@ func (s *Server) PrepareWebsiteAccessForGenie(ctx context.Context, name, baseURL
 					}
 					connection, _ = s.authConnections.Get(ctx, runtime.PersonalWorkspaceID, connection.ID)
 				}
-				return map[string]any{
+				result := map[string]any{
 					"connection":        connection,
+					"connection_id":     connection.ID,
 					"setup_href":        "#websites?connection=" + connection.ID,
 					"mobile_setup_href": "soulacy://website-access/" + connection.ID,
-					"message":           "Website Access already has a domain-restricted connection for this site. Open Website Access to sign in or refresh it.",
-				}, nil
+				}
+				if connection.Status == authconnections.StatusReady && connection.HasSecret &&
+					(connection.ExpiresAt == nil || connection.ExpiresAt.After(time.Now())) {
+					result["status"] = "ready"
+					result["message"] = "Website Access is ready for this site. Continue with start_website_action; no sign-in is needed."
+				} else {
+					result["status"] = "needs_sign_in"
+					result["message"] = "Website Access has a connection for this site, but it needs sign-in or a refresh. Open Website Access to continue."
+				}
+				return result, nil
 			}
 		}
 	}
@@ -537,9 +547,11 @@ func (s *Server) PrepareWebsiteAccessForGenie(ctx context.Context, name, baseURL
 	connection, _ = s.authConnections.Get(ctx, runtime.PersonalWorkspaceID, connection.ID)
 	return map[string]any{
 		"connection":        connection,
+		"connection_id":     connection.ID,
+		"status":            "needs_sign_in",
 		"setup_href":        "#websites?connection=" + connection.ID,
 		"mobile_setup_href": "soulacy://website-access/" + connection.ID,
-		"message":           "A domain-restricted Website Access connection is ready. Open Website Access and sign in directly on the provider's page. Do not send credentials to Genie.",
+		"message":           "A domain-restricted Website Access connection has been created. Open Website Access and sign in directly on the provider's page. Do not send credentials to Genie.",
 	}, nil
 }
 
