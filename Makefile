@@ -324,8 +324,8 @@ service-uninstall:
 ## Build, install, and restart the gateway service
 deploy: install
 	@echo "→ Restarting user-scoped Soulacy service..."
-	@$(BINARY_CLI) daemon stop || true
-	@$(BINARY_CLI) daemon start
+	@"$(BINDIR)/$(BINARY_CLI)" daemon stop || true
+	@"$(BINDIR)/$(BINARY_CLI)" daemon start
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Release pipeline — produces platform-tagged binaries under bin/release/.
