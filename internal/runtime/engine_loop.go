@@ -1023,6 +1023,9 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		// result is authoritative and no fallback probing can improve it.
 		if hasURLPackageRequest && !autoDelegated && hasPackageInstallResult(toolResults) {
 			finalContent = formatPackageInstallReply(toolResults)
+			if detail := packageInstallFailureDetail(toolResults); detail != "" {
+				contract.MarkBlocked(detail)
+			}
 			break
 		}
 

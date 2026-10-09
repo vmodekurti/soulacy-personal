@@ -724,8 +724,16 @@ func installMCPRuntime(ctx context.Context, dest, sourceDir, discoveredEntrypoin
 		}
 		installCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 		defer cancel()
-		if out, err := exec.CommandContext(installCtx, "npm", "install", "--omit=dev", "--prefix", sourceDir).CombinedOutput(); err != nil {
+		// TypeScript MCP packages commonly compile from a prepare hook while
+		// keeping the compiler in devDependencies. Install those build tools for
+		// the lifecycle step, then prune them without running prepare a second
+		// time. The resulting managed runtime still contains production packages
+		// only.
+		if out, err := exec.CommandContext(installCtx, "npm", "install", "--include=dev", "--prefix", sourceDir).CombinedOutput(); err != nil {
 			return "", nil, fmt.Errorf("install Node MCP dependencies: %v: %s", err, tailText(string(out), 4000))
+		}
+		if out, err := exec.CommandContext(installCtx, "npm", "prune", "--omit=dev", "--ignore-scripts", "--prefix", sourceDir).CombinedOutput(); err != nil {
+			return "", nil, fmt.Errorf("prune Node MCP build dependencies: %v: %s", err, tailText(string(out), 4000))
 		}
 		if bin := firstNodeBin(project.Bin); bin != "" {
 			launcher, err := writeManagedMCPLauncher(dest, "node", `exec node "$@"`)

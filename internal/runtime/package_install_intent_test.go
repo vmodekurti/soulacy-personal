@@ -3,8 +3,10 @@ package runtime
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/soulacy/soulacy/internal/llm"
+	"github.com/soulacy/soulacy/internal/taskcontract"
 	"github.com/soulacy/soulacy/pkg/message"
 )
 
@@ -38,7 +40,7 @@ func TestFormatPackageInstallReply(t *testing.T) {
 	}{
 		{
 			name:   "success",
-			result: message.ToolResult{Name: "package_install", Content: "Installed and registered maverick-mcp."},
+			result: message.ToolResult{Name: "package_install", Content: verifiedManagedActionResult("Installed and registered maverick-mcp.")},
 			want:   "MCP server installation completed.\n\nInstalled and registered maverick-mcp.",
 		},
 		{
@@ -53,6 +55,29 @@ func TestFormatPackageInstallReply(t *testing.T) {
 				t.Fatalf("formatPackageInstallReply() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestVerifiedManagedActionResultSatisfiesTaskContract(t *testing.T) {
+	now := time.Now().UTC()
+	c := taskcontract.New("run", message.Message{
+		ID: "message", AgentID: "system", SessionID: "session", Channel: "http",
+		Role: message.RoleUser, Parts: message.Text("Install this MCP server"), CreatedAt: now,
+	}, now)
+	c.ObserveTool(message.ToolCall{Name: "package_install"}, verifiedManagedActionResult("Installed and registered."), false)
+	got := c.Complete(nil, true, false, now.Add(time.Second))
+	if got.Outcome != taskcontract.OutcomeVerified {
+		t.Fatalf("package install outcome = %q, want %q", got.Outcome, taskcontract.OutcomeVerified)
+	}
+}
+
+func TestPackageInstallFailureDetail(t *testing.T) {
+	results := []message.ToolResult{{
+		Name: "package_install", IsError: true,
+		Content: "error: package_install: installer failed: tsc: not found",
+	}}
+	if got := packageInstallFailureDetail(results); got != "installer failed: tsc: not found" {
+		t.Fatalf("failure detail = %q", got)
 	}
 }
 
