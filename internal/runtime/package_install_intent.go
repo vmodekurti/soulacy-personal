@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"strings"
 
 	"github.com/soulacy/soulacy/internal/llm"
@@ -10,6 +11,32 @@ import (
 type urlPackageInstallRequest struct {
 	SourceURL string
 	Kind      string
+}
+
+func deterministicMCPInstallFollowup(ctx context.Context, request urlPackageInstallRequest, results []message.ToolResult) (*message.ToolCall, string) {
+	if request.Kind != "mcp" || !hasSuccessfulToolResult(results, "mcp_install_inspect") {
+		return nil, ""
+	}
+	if refusal := mcpInstallRefusal(ctx, request.SourceURL, false); refusal != "" {
+		return nil, "MCP server installation was not attempted.\n\n" + refusal
+	}
+	return &message.ToolCall{
+		ID:   "package-install-" + uuidShort(),
+		Name: "package_install",
+		Arguments: map[string]any{
+			"source_url": request.SourceURL,
+			"kind":       request.Kind,
+		},
+	}, ""
+}
+
+func hasSuccessfulToolResult(results []message.ToolResult, name string) bool {
+	for _, result := range results {
+		if normalizeToolCallName(result.Name) == name && !result.IsError {
+			return true
+		}
+	}
+	return false
 }
 
 // isURLPackageInstallRequest recognizes only an explicit operator request to

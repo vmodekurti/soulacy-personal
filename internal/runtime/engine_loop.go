@@ -967,6 +967,20 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 
 		// Execute each tool call
 		toolResults := e.executeToolCalls(ctx, def, msg.SessionID, resp.ToolCalls, seen, &seenMu)
+		stopAfterInspection := false
+		if turn == 0 && !autoDelegated && forceMCPInspection {
+			installCall, refusal := deterministicMCPInstallFollowup(ctx, packageInstallReq, toolResults)
+			switch {
+			case refusal != "":
+				finalContent = refusal
+				contract.MarkBlocked(refusal)
+				stopAfterInspection = true
+			case installCall != nil:
+				installResults := e.executeToolCalls(ctx, def, msg.SessionID, []message.ToolCall{*installCall}, seen, &seenMu)
+				resp.ToolCalls = append(resp.ToolCalls, *installCall)
+				toolResults = append(toolResults, installResults...)
+			}
+		}
 
 		// Loop guard: count repeats of each (non-stateful) tool across the run and,
 		// the first time one crosses the threshold, steer the model off it. This
@@ -1011,6 +1025,9 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		}
 		e.appendHistoryLocked(sess, turns...)
 		sess.mu.Unlock()
+		if stopAfterInspection {
+			break
+		}
 
 		if plannedReply := initialGenieActionReply(turn, forceGenieActionPlan, toolResults); plannedReply != "" {
 			finalContent = plannedReply

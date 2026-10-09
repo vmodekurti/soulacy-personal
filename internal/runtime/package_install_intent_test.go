@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/soulacy/soulacy/internal/llm"
+	"github.com/soulacy/soulacy/internal/mcpinstall"
 	"github.com/soulacy/soulacy/internal/taskcontract"
 	"github.com/soulacy/soulacy/pkg/message"
 )
@@ -78,6 +79,43 @@ func TestPackageInstallFailureDetail(t *testing.T) {
 	}}
 	if got := packageInstallFailureDetail(results); got != "installer failed: tsc: not found" {
 		t.Fatalf("failure detail = %q", got)
+	}
+}
+
+func TestDeterministicMCPInstallFollowup(t *testing.T) {
+	request := urlPackageInstallRequest{SourceURL: "https://github.com/acme/compatible-mcp", Kind: "mcp"}
+	rememberMCPAdvice(request.SourceURL, mcpinstall.Recommendation{Source: request.SourceURL, CanInstallHere: true})
+	results := []message.ToolResult{{Name: "mcp_install_inspect", Content: "Install in the gateway"}}
+
+	call, final := deterministicMCPInstallFollowup(t.Context(), request, results)
+	if final != "" || call == nil || call.Name != "package_install" {
+		t.Fatalf("followup call = %#v, final = %q", call, final)
+	}
+	if call.Arguments["source_url"] != request.SourceURL || call.Arguments["kind"] != "mcp" {
+		t.Fatalf("followup arguments = %#v", call.Arguments)
+	}
+}
+
+func TestDeterministicMCPInstallFollowupReturnsTypedRefusal(t *testing.T) {
+	request := urlPackageInstallRequest{SourceURL: "https://github.com/acme/companion-mcp", Kind: "mcp"}
+	rememberMCPAdvice(request.SourceURL, mcpinstall.Recommendation{
+		Source: request.SourceURL, CanInstallHere: false,
+		Title: "Run as a companion service", Summary: "requires a separate browser host",
+	})
+	results := []message.ToolResult{{Name: "mcp_install_inspect", Content: "Use a companion service"}}
+
+	call, final := deterministicMCPInstallFollowup(t.Context(), request, results)
+	if call != nil || !strings.Contains(final, "was not attempted") || !strings.Contains(final, "companion service") {
+		t.Fatalf("followup call = %#v, final = %q", call, final)
+	}
+}
+
+func TestDeterministicMCPInstallFollowupStopsWhenInspectionFails(t *testing.T) {
+	request := urlPackageInstallRequest{SourceURL: "https://github.com/acme/broken-mcp", Kind: "mcp"}
+	results := []message.ToolResult{{Name: "mcp_install_inspect", IsError: true, Content: "repository unavailable"}}
+	call, final := deterministicMCPInstallFollowup(t.Context(), request, results)
+	if call != nil || final != "" {
+		t.Fatalf("followup call = %#v, final = %q", call, final)
 	}
 }
 
