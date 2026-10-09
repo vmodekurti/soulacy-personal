@@ -155,6 +155,9 @@ func TestMissionExecutionPlannerAndSecureWebsiteAccess(t *testing.T) {
 	if err := connections.ReplaceAgentGrants(t.Context(), runtime.PersonalWorkspaceID, connection.ID, []string{"researcher"}); err != nil {
 		t.Fatal(err)
 	}
+	if err := connections.MarkSecret(t.Context(), runtime.PersonalWorkspaceID, connection.ID, nil); err != nil {
+		t.Fatal(err)
+	}
 	prepared, err = s.PrepareWebsiteAccessForGenie(t.Context(), "Uber", "https://www.uber.com")
 	if err != nil {
 		t.Fatal(err)
@@ -162,6 +165,9 @@ func TestMissionExecutionPlannerAndSecureWebsiteAccess(t *testing.T) {
 	connection = prepared["connection"].(authconnections.Connection)
 	if len(connection.AgentIDs) != 2 || !missionContainsString(connection.AgentIDs, "researcher") || !missionContainsString(connection.AgentIDs, runtime.GenieAgentID) {
 		t.Fatalf("existing connection grants were not preserved: %+v", connection.AgentIDs)
+	}
+	if prepared["status"] != "ready" || !strings.Contains(prepared["message"].(string), "no sign-in is needed") {
+		t.Fatalf("ready connection was not reused: %v", prepared)
 	}
 }
 

@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
+	"time"
 
+	"github.com/soulacy/soulacy/internal/authconnections"
 	"github.com/soulacy/soulacy/internal/managedbrowser"
 	"github.com/soulacy/soulacy/internal/runtime"
 )
@@ -16,14 +19,63 @@ func (s *Server) StartWebsiteActionForGenie(ctx context.Context, rawURL, connect
 		return nil, errors.New("managed website actions are unavailable on this deployment")
 	}
 	agentID := managedBrowserAgentID(ctx)
+	connectionID = strings.TrimSpace(connectionID)
+	var selected *authconnections.Connection
+	if connectionID == "" && s.authConnections != nil {
+		parsed, err := url.Parse(strings.TrimSpace(rawURL))
+		if err == nil {
+			connections, listErr := s.authConnections.ListVisible(ctx, runtime.PersonalWorkspaceID, runtime.SubjectFromContext(ctx))
+			if listErr != nil {
+				return nil, listErr
+			}
+			if connection, ok := matchingReadyWebsiteConnection(connections, agentID, parsed.Hostname(), time.Now()); ok {
+				connectionID = connection.ID
+				selected = &connection
+			}
+		}
+	}
 	result, err := s.managedBrowser.Start(ctx, managedbrowser.StartRequest{
 		WorkspaceID:  runtime.PersonalWorkspaceID,
 		Subject:      runtime.SubjectFromContext(ctx),
 		AgentID:      agentID,
 		URL:          strings.TrimSpace(rawURL),
-		ConnectionID: strings.TrimSpace(connectionID),
+		ConnectionID: connectionID,
 	})
-	return managedBrowserResult("open the provider website", rawURL, result, err)
+	out, err := managedBrowserResult("open the provider website", rawURL, result, err)
+	if err == nil && selected != nil {
+		out["route"] = "website_access"
+		out["connection_id"] = selected.ID
+		out["connection_name"] = selected.Name
+		out["selection_reason"] = "matched a ready Website Access connection for this domain"
+	}
+	return out, err
+}
+
+func matchingReadyWebsiteConnection(connections []authconnections.Connection, agentID, host string, now time.Time) (authconnections.Connection, bool) {
+	host = normalizeDomain(host)
+	bestScore := -1
+	var best authconnections.Connection
+	for _, connection := range connections {
+		if connection.Kind != authconnections.KindBrowser || connection.Status != authconnections.StatusReady || !connection.HasSecret ||
+			(connection.ExpiresAt != nil && !connection.ExpiresAt.After(now)) || !missionContainsString(connection.AgentIDs, agentID) {
+			continue
+		}
+		for _, boundary := range connection.AllowedDomains {
+			boundary = normalizeDomain(boundary)
+			if !hostWithinBoundary(host, boundary) {
+				continue
+			}
+			score := len(boundary)
+			if host == boundary {
+				score += 10000
+			}
+			if score > bestScore {
+				bestScore = score
+				best = connection
+			}
+		}
+	}
+	return best, bestScore >= 0
 }
 
 func (s *Server) InspectWebsiteActionForGenie(ctx context.Context, sessionID string) (map[string]any, error) {

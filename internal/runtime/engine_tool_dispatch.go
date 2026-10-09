@@ -21,6 +21,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/soulacy/soulacy/internal/authconnections"
 	"github.com/soulacy/soulacy/internal/intent"
 	"github.com/soulacy/soulacy/internal/llm"
 	"github.com/soulacy/soulacy/internal/mcp"
@@ -215,6 +216,12 @@ print(result if isinstance(result, str) else json.dumps(result))
 	for _, b := range e.builtins {
 		if b.Name != call.Name {
 			continue
+		}
+		if b.Gate == "genie" && (def == nil || def.ID != GenieAgentID) {
+			explicitlyEnabled := def != nil && def.Builtins != nil && containsExactString(*def.Builtins, b.Name)
+			if !explicitlyEnabled && (!safeWebsiteRouteTool(b.Name) || len(e.readyWebsiteConnections(ctx, def)) == 0) {
+				return "", fmt.Errorf("agent has not explicitly enabled tool %q", b.Name)
+			}
 		}
 		if (b.Gate == "mobile" || b.Gate == "safe_undo" || b.Gate == "person") && (def == nil || def.Builtins == nil || !containsExactString(*def.Builtins, b.Name)) {
 			return "", fmt.Errorf("agent has not explicitly enabled tool %q", b.Name)
@@ -635,6 +642,7 @@ func (e *Engine) allToolSchemas(def *agent.Definition, channel string) []llm.Too
 
 func (e *Engine) allToolSchemasForContext(ctx context.Context, def *agent.Definition, channel string) []llm.ToolSchema {
 	schemas := make([]llm.ToolSchema, 0, len(def.Tools)+len(e.builtins))
+	websiteConnections := e.readyWebsiteConnections(ctx, def)
 
 	// Python tools defined in the agent's SOUL.yaml
 	for _, t := range def.Tools {
@@ -672,8 +680,10 @@ func (e *Engine) allToolSchemasForContext(ctx context.Context, def *agent.Defini
 		if !callerAllowsTool(ctx, b.Name) {
 			continue
 		}
-		// Allowlist filter first (cheap reject).
-		if !wildcardBuiltins && !allow[b.Name] {
+		websiteRouteTool := len(websiteConnections) > 0 && safeWebsiteRouteTool(b.Name)
+		// Allowlist filter first (cheap reject). Agents with a ready, explicitly
+		// granted Website Access connection also receive the safe browser route.
+		if !wildcardBuiltins && !allow[b.Name] && !websiteRouteTool {
 			continue
 		}
 		switch b.Gate {
@@ -686,7 +696,7 @@ func (e *Engine) allToolSchemasForContext(ctx context.Context, def *agent.Defini
 			// `builtins:` does not sweep these in. They belong to one agent,
 			// and a tool schema every other agent carries but never calls is
 			// context spent on nothing.
-			if !allow[b.Name] {
+			if !allow[b.Name] && !websiteRouteTool {
 				continue
 			}
 		case "skills":
@@ -702,15 +712,12 @@ func (e *Engine) allToolSchemasForContext(ctx context.Context, def *agent.Defini
 			Name: b.Name, Description: b.Description, Parameters: b.Parameters,
 		})
 	}
-	if e.authConnectionResolver != nil && len(def.Connections) > 0 && callerAllowsTool(ctx, authenticatedFetchTool) {
-		connections := e.authConnectionResolver.Describe(ctx, WorkspaceFromContext(ctx), SubjectFromContext(ctx), def.ID, def.Connections)
-		if len(connections) > 0 {
-			schemas = append(schemas, llm.ToolSchema{
-				Name:        authenticatedFetchTool,
-				Description: "Read a page using a user-approved saved website session. Cookies stay inside Soulacy and are never returned. Use only a connection_id listed in this agent's authenticated connections.",
-				Parameters:  authenticatedFetchSchema(connections),
-			})
-		}
+	if len(websiteConnections) > 0 && callerAllowsTool(ctx, authenticatedFetchTool) {
+		schemas = append(schemas, llm.ToolSchema{
+			Name:        authenticatedFetchTool,
+			Description: "Read a page using a user-approved saved website session. Cookies stay inside Soulacy and are never returned. Use only a connection_id listed in this agent's authenticated connections.",
+			Parameters:  authenticatedFetchSchema(websiteConnections),
+		})
 	}
 
 	// MCP tools from connected servers are offered according to the agent's
@@ -790,6 +797,29 @@ func (e *Engine) allToolSchemasForContext(ctx context.Context, def *agent.Defini
 	schemas = append(schemas, e.buildAgentCallSchemas(def)...)
 
 	return schemas
+}
+
+func (e *Engine) readyWebsiteConnections(ctx context.Context, def *agent.Definition) []authconnections.Connection {
+	if e.authConnectionResolver == nil || def == nil || len(def.Connections) == 0 {
+		return nil
+	}
+	described := e.authConnectionResolver.Describe(ctx, WorkspaceFromContext(ctx), SubjectFromContext(ctx), def.ID, def.Connections)
+	connections := make([]authconnections.Connection, 0, len(described))
+	for _, connection := range described {
+		if connection.Kind == authconnections.KindBrowser {
+			connections = append(connections, connection)
+		}
+	}
+	return connections
+}
+
+func safeWebsiteRouteTool(name string) bool {
+	switch name {
+	case "start_website_action", "inspect_website_action", "act_on_website", "close_website_action":
+		return true
+	default:
+		return false
+	}
 }
 
 // mcpToolAllowed reports whether an agent may see/call a namespaced MCP tool.
