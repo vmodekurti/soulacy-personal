@@ -132,7 +132,7 @@ func (e *Engine) buildShellTools() []BuiltinTool {
 						}
 					}
 				}
-				return result, nil
+				return verifiedManagedActionResult(result), nil
 			},
 		},
 		{
@@ -185,7 +185,7 @@ func (e *Engine) buildShellTools() []BuiltinTool {
 				if err != nil {
 					return "", fmt.Errorf("package_install: %w", err)
 				}
-				return result, nil
+				return verifiedManagedActionResult(result), nil
 			},
 		},
 		{

@@ -94,7 +94,7 @@ func formatPackageInstallReply(results []message.ToolResult) string {
 	if result == nil {
 		return "MCP server installation failed because the installer returned an unexpected result. Check the run details and retry."
 	}
-	detail := strings.TrimSpace(result.Content)
+	detail := managedActionResultDetail(result.Content)
 	detail = strings.TrimPrefix(detail, "error: package_install: ")
 	detail = strings.TrimPrefix(detail, "error: ")
 	if len(detail) > 4000 {
@@ -110,6 +110,22 @@ func formatPackageInstallReply(results []message.ToolResult) string {
 		detail = "The MCP server was installed and registered successfully."
 	}
 	return "MCP server installation completed.\n\n" + detail
+}
+
+func packageInstallFailureDetail(results []message.ToolResult) string {
+	for _, result := range results {
+		if normalizeToolCallName(result.Name) != "package_install" || !result.IsError {
+			continue
+		}
+		detail := strings.TrimSpace(result.Content)
+		detail = strings.TrimPrefix(detail, "error: package_install: ")
+		detail = strings.TrimPrefix(detail, "error: ")
+		if detail == "" {
+			return "The package installer did not provide an error message."
+		}
+		return detail
+	}
+	return ""
 }
 
 func hasPackageInstallResult(results []message.ToolResult) bool {

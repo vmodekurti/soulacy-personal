@@ -249,7 +249,7 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 		ctx = withTaskContractCollector(ctx, &taskSnapshot)
 		reply, runErr = e.handle(ctx, msg)
 		if runErr == nil && taskSnapshot.Mode == "external_action" && taskSnapshot.Outcome != taskcontract.OutcomeVerified {
-			runErr = fmt.Errorf("task contract ended %s without verified external-action evidence: %s", taskSnapshot.Outcome, taskSnapshot.Blocker)
+			runErr = externalActionContractError(taskSnapshot)
 		}
 	}
 	duration := time.Since(started)
@@ -363,6 +363,13 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 		}
 	}
 	return reply, runErr
+}
+
+func externalActionContractError(snapshot taskcontract.Snapshot) error {
+	if blocker := strings.TrimSpace(snapshot.Blocker); snapshot.Attempts > 0 && blocker != "" {
+		return errors.New(blocker)
+	}
+	return fmt.Errorf("task contract ended %s without verified external-action evidence: %s", snapshot.Outcome, snapshot.Blocker)
 }
 
 func truncateAutopilotText(value string, max int) string {

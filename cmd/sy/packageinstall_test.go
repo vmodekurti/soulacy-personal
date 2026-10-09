@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -176,6 +178,49 @@ func TestLegacyManagedLauncherKind(t *testing.T) {
 	}
 	if got := legacyManagedLauncherKind(dest, "/tmp/unmanaged/python"); got != "" {
 		t.Fatalf("unmanaged command was eligible for repair: %q", got)
+	}
+}
+
+func TestInstallNodeMCPBuildsBeforePruningDevDependencies(t *testing.T) {
+	binDir := t.TempDir()
+	callsFile := filepath.Join(t.TempDir(), "npm-calls")
+	npm := filepath.Join(binDir, "npm")
+	if err := os.WriteFile(npm, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$NPM_CALLS\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+	t.Setenv("NPM_CALLS", callsFile)
+
+	sourceDir := t.TempDir()
+	manifest := `{"name":"typescript-mcp","bin":{"typescript-mcp":"dist/index.js"},"scripts":{"prepare":"npm run build"},"devDependencies":{"typescript":"^5.3.3"}}`
+	if err := os.WriteFile(filepath.Join(sourceDir, "package.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(t.TempDir(), "typescript-mcp")
+	command, args, err := installMCPRuntime(context.Background(), dest, sourceDir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Dir(command) != filepath.Join(dest, "bin") || len(args) != 1 || args[0] != filepath.Join(sourceDir, "dist/index.js") {
+		t.Fatalf("launcher = %q %v", command, args)
+	}
+
+	b, err := os.ReadFile(callsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := strings.Split(strings.TrimSpace(string(b)), "\n")
+	want := []string{
+		"install --include=dev --prefix " + sourceDir,
+		"prune --omit=dev --ignore-scripts --prefix " + sourceDir,
+	}
+	if len(calls) != len(want) {
+		t.Fatalf("npm calls = %q", calls)
+	}
+	for i := range want {
+		if calls[i] != want[i] {
+			t.Fatalf("npm call %d = %q, want %q", i+1, calls[i], want[i])
+		}
 	}
 }
 

@@ -67,6 +67,17 @@ func TestManagedExternalActionRequiresVerifiedRuntimeEvidence(t *testing.T) {
 		t.Fatalf("unsupported action proof outcome = %q", proof.Outcome)
 	}
 }
+
+func TestExternalActionContractErrorPreservesAttemptBlocker(t *testing.T) {
+	snapshot := taskcontract.Snapshot{
+		Mode: "external_action", Outcome: taskcontract.OutcomeBlocked, Attempts: 2,
+		Blocker: "installer failed: tsc: not found",
+	}
+	if got := externalActionContractError(snapshot); got == nil || got.Error() != snapshot.Blocker {
+		t.Fatalf("external action error = %v", got)
+	}
+}
+
 func checkedDefinition() *agent.Definition {
 	return &agent.Definition{ID: "verified", Name: "Verified", Enabled: true, LLM: agent.LLMConfig{Provider: "test", Model: "fake-model"}, MaxTurns: 3, Builtins: strListPtr(), Mission: &agent.MissionContract{ID: "mission", Goal: "Return evidence", Acceptance: []agent.MissionCheck{{ID: "receipt", Type: agent.MissionCheckOutputContains, Value: "VERIFIED"}}}}
 }
