@@ -17,7 +17,7 @@
   // Optional local Open Notebook integration. API reachability, standalone
   // adapter availability, and MCP registration are reported independently.
   let openNotebookStatus = null
-  let openNotebookLoading = true
+  let openNotebookLoading = false
   let openNotebookInstalling = false
   let openNotebookError = ''
   let openNotebookAudioBaseURL = ''
@@ -36,6 +36,12 @@
   let installGuide = null
   let installGuideLoading = false
   let installGuideError = ''
+
+  // Keep the default page focused on configured servers. Installation and
+  // operational details stay available through explicit secondary actions.
+  let addMenuOpen = false
+  let installModal = false
+  let openNotebookModal = false
 
   $: remoteClientConfig = JSON.stringify({
     url: remoteEndpoint,
@@ -131,8 +137,25 @@
     remoteEndpoint = `${gatewayOrigin}/mcp`
     load()
     loadDeployment()
-    loadOpenNotebookStatus()
   })
+
+  function openAddMenu() { addMenuOpen = true }
+  function closeAddMenu() { addMenuOpen = false }
+  function openManualSetup() {
+    closeAddMenu()
+    openNew()
+  }
+  function openInstallGuide() {
+    closeAddMenu()
+    installModal = true
+  }
+  function closeInstallGuide() { installModal = false }
+  function openOpenNotebookSetup() {
+    closeAddMenu()
+    openNotebookModal = true
+    loadOpenNotebookStatus()
+  }
+  function closeOpenNotebookSetup() { openNotebookModal = false }
 
   async function copyRemote(value, label) {
     try {
@@ -286,6 +309,7 @@
 
   // ── Glama provisioner ─────────────────────────────────────────────────────
   function openGlamaModal() {
+    closeAddMenu()
     glamaModal = true
     glamaURL = ''
     glamaSpec = null
@@ -419,186 +443,16 @@
 
 <div class="page">
   <div class="page-header">
-    <h1>MCP Servers</h1>
+    <div>
+      <h1>MCP Servers</h1>
+      <p>Tools connected to this Soulacy gateway.</p>
+    </div>
     <div class="header-actions">
-      <button class="btn-secondary" on:click={load} disabled={loading}>↺ Refresh</button>
-      <button class="btn-glama"     on:click={openGlamaModal}>⚡ Glama</button>
-      <button class="btn-primary"   on:click={openNew}>+ New Server</button>
+      <button class="icon-button" on:click={load} disabled={loading} aria-label="Refresh installed MCP servers" title="Refresh">↻</button>
+      <button class="btn-primary" on:click={openAddMenu}>+ Add server</button>
     </div>
-        <TourButton />
-    </div>
-
-  <DeploymentPanel report={deployment} />
-
-  <section class="notebook-card" aria-labelledby="open-notebook-title">
-    <div class="notebook-heading">
-      <div>
-        <span class="eyebrow">First-party local integration</span>
-        <h2 id="open-notebook-title">Open Notebook</h2>
-        <p>Let agents add researched web content to notebooks, search and ask questions, create notes, and generate podcasts.</p>
-      </div>
-      {#if openNotebookLoading}
-        <span class="notebook-state neutral">Checking…</span>
-      {:else if openNotebookStatus?.available && openNotebookStatus?.registered && openNotebookStatus?.connected}
-        <span class="notebook-state ready">● Ready</span>
-      {:else if openNotebookStatus?.available}
-        <span class="notebook-state partial">● Open Notebook detected</span>
-      {:else}
-        <span class="notebook-state down">○ Not detected</span>
-      {/if}
-    </div>
-
-    <div class="notebook-flow" aria-label="Open Notebook workflow">
-      <span>Authenticated website</span><b>→</b><span>Soulacy agent</span><b>→</b><span>Open Notebook</span><b>→</b><span>Podcast or research</span>
-    </div>
-
-    {#if openNotebookError}
-      <div class="banner err">{openNotebookError}</div>
-    {:else if openNotebookStatus}
-      <div class="notebook-details">
-        <div><small>Local API</small><code>{openNotebookStatus.base_url}</code></div>
-        <div><small>Open Notebook</small><strong class:good={openNotebookStatus.available}>{openNotebookStatus.available ? 'Healthy' : openNotebookStatus.health_detail}</strong></div>
-        <div><small>Standalone adapter</small><strong class:good={openNotebookStatus.adapter_available}>{openNotebookStatus.adapter_available ? 'Installed' : 'Not installed'}</strong></div>
-        <div><small>Soulacy connection</small><strong class:good={openNotebookStatus.registered && openNotebookStatus.connected}>{openNotebookStatus.registered ? (openNotebookStatus.connected ? 'Connected' : 'Registered') : 'Not registered'}</strong></div>
-        <div><small>Podcast links</small><strong class:good={openNotebookStatus.audio_base_url}>{openNotebookStatus.audio_base_url || 'Host only'}</strong></div>
-      </div>
-      {#if !openNotebookStatus.available}
-        <p class="notebook-help">Start Open Notebook on this same machine, with its API listening on <code>127.0.0.1:5055</code>, then refresh this check. The adapter only accepts loopback addresses.</p>
-      {:else if !openNotebookStatus.adapter_available}
-        <p class="notebook-help">Install the optional adapter separately on the Soulacy host: <code>make install-open-notebook-mcp</code> from the source checkout, or <code>go install github.com/soulacy/soulacy/cmd/open-notebook-mcp@latest</code>. Put it on the gateway PATH or beside the <code>soulacy</code> executable, then check again.</p>
-      {:else if !openNotebookStatus.registered || !openNotebookStatus.connected}
-        <p class="notebook-help">Open Notebook and its standalone adapter are ready. Connect them to give Soulacy agents access to the tools.</p>
-      {:else if openNotebookStatus.audio_base_url}
-        <p class="notebook-help">Podcast links use the configured private media endpoint. The adapter proxies only generated episode audio; the rest of Open Notebook remains local.</p>
-      {:else}
-        <p class="notebook-help">Agents can use Open Notebook, but podcast links are host-only. Add a Tailscale HTTPS URL below so phones on your tailnet can play them.</p>
-      {/if}
-    {/if}
-
-    <div class="notebook-audio-config">
-      <label>
-        <span>Client-facing podcast URL</span>
-        <input type="url" bind:value={openNotebookAudioBaseURL} placeholder="https://your-mac.your-tailnet.ts.net:8443" />
-      </label>
-      <label>
-        <span>Local media proxy</span>
-        <input type="text" bind:value={openNotebookAudioListen} placeholder="127.0.0.1:18791" />
-      </label>
-    </div>
-    <p class="notebook-help">Use a tailnet-only Tailscale Serve URL. Keep the listener on loopback; the adapter rejects LAN and wildcard binds.</p>
-
-    <div class="notebook-actions">
-      <button class="btn-secondary" on:click={loadOpenNotebookStatus} disabled={openNotebookLoading}>↺ Check again</button>
-      <button class="btn-primary" on:click={installOpenNotebook} disabled={openNotebookInstalling || !openNotebookStatus?.available || !openNotebookStatus?.adapter_available}>
-        {openNotebookInstalling ? 'Connecting…' : (openNotebookStatus?.registered ? 'Reconnect' : 'Connect Open Notebook')}
-      </button>
-    </div>
-    <p class="notebook-cli">CLI: <code>sy mcp add-open-notebook</code></p>
-  </section>
-
-  <section class="install-card" aria-labelledby="install-guide-title">
-    <div class="install-heading">
-      <div>
-        <span class="eyebrow">Install an MCP server</span>
-        <h2 id="install-guide-title">Use the right method for this server</h2>
-        <p>Paste a public Git repository. Soulacy checks its manifests and deployment files, then recommends a hosted connection, gateway process, connected device, or companion service.</p>
-      </div>
-      <span class="read-only-badge">Read-only inspection</span>
-    </div>
-    <div class="install-input-row">
-      <input
-        type="url"
-        bind:value={installSource}
-        placeholder="https://github.com/owner/mcp-server"
-        aria-label="MCP server repository URL"
-        on:keydown={(e) => e.key === 'Enter' && inspectInstallMethod()}
-      />
-      <button class="btn-primary" on:click={inspectInstallMethod} disabled={installGuideLoading || !installSource.trim()}>
-        {installGuideLoading ? 'Inspecting…' : 'Show install method'}
-      </button>
-    </div>
-    <p class="install-agent-hint">You can also tell the <strong>System</strong> agent: <code>Install this MCP server: &lt;repository URL&gt;</code>. It reads this inspection and the bounded README, then chooses the final method before making changes.</p>
-
-    {#if installGuideError}
-      <div class="banner err">{installGuideError}</div>
-    {/if}
-
-    {#if installGuide}
-      <div class="guide-result" data-method={installGuide.method}>
-        <div class="guide-title-row">
-          <div>
-            <span class="method-badge">{METHOD_LABEL[installGuide.method] || installGuide.method}</span>
-            <h3>{installGuide.title}</h3>
-          </div>
-          {#if installGuide.can_install_here}<span class="available-here">● Supported here</span>{/if}
-        </div>
-        <p class="guide-summary">{installGuide.summary}</p>
-        {#if installGuide.reasons?.length}
-          <div class="guide-block">
-            <strong>Why</strong>
-            <ul>{#each installGuide.reasons as reason}<li>{reason}</li>{/each}</ul>
-          </div>
-        {/if}
-        {#if installGuide.steps?.length}
-          <div class="guide-block">
-            <strong>Steps</strong>
-            <ol>{#each installGuide.steps as step}<li>{step}</li>{/each}</ol>
-          </div>
-        {/if}
-        {#if installGuide.command}
-          <div class="guide-command">
-            <span>Command</span>
-            <pre>{guideCommand(installGuide.command)}</pre>
-            <button class="btn-secondary tiny" on:click={() => copyRemote(guideCommand(installGuide.command), 'guide-command')}>
-              {copiedRemote === 'guide-command' ? 'Copied' : 'Copy command'}
-            </button>
-          </div>
-        {/if}
-        {#if installGuide.alternative}<p class="guide-alternative"><strong>Alternative:</strong> {installGuide.alternative}</p>{/if}
-      </div>
-    {/if}
-  </section>
-
-  <section class="remote-card" aria-labelledby="remote-mcp-title">
-    <div class="remote-heading">
-      <div>
-        <span class="eyebrow">Soulacy as an MCP server</span>
-        <h2 id="remote-mcp-title">Connect without shell access</h2>
-        <p>Use this Streamable HTTP endpoint from an MCP client. The gateway runs it directly, including on Railway and other managed platforms.</p>
-      </div>
-      <span class="remote-badge">● Available</span>
-    </div>
-
-    <div class="remote-field">
-      <span>Endpoint</span>
-      <div class="copy-row">
-        <code>{remoteEndpoint}</code>
-        <button class="btn-secondary tiny" on:click={() => copyRemote(remoteEndpoint, 'endpoint')}>
-          {copiedRemote === 'endpoint' ? 'Copied' : 'Copy URL'}
-        </button>
-      </div>
-    </div>
-
-    <div class="remote-grid">
-      <div>
-        <h3>Connect an MCP client</h3>
-        <p>Choose Streamable HTTP and send your Soulacy key as a Bearer token.</p>
-        <pre>{remoteClientConfig}</pre>
-        <button class="btn-secondary tiny" on:click={() => copyRemote(remoteClientConfig, 'config')}>
-          {copiedRemote === 'config' ? 'Copied' : 'Copy config'}
-        </button>
-      </div>
-      <div>
-        <h3>Add a server to this deployment</h3>
-        <p>Run this from any computer with <code>sy</code>. The server is registered on the remote gateway; no host shell is used.</p>
-        <pre>{remoteAddCommand}</pre>
-        <button class="btn-secondary tiny" on:click={() => copyRemote(remoteAddCommand, 'command')}>
-          {copiedRemote === 'command' ? 'Copied' : 'Copy CLI command'}
-        </button>
-      </div>
-    </div>
-    <p class="remote-footnote">Clients that only support local stdio can still use <code>sy --gateway {gatewayOrigin || '<SOULACY_URL>'} mcp serve</code> as a compatibility bridge.</p>
-  </section>
+    <TourButton />
+  </div>
 
   {#if restartNeeded}
     <div class="banner warn">
@@ -613,13 +467,21 @@
   {#if error}<div class="banner err">{error}</div>{/if}
   {#if info}<div class="banner ok">{info}</div>{/if}
 
+  <div class="list-heading">
+    <div>
+      <h2>Installed servers</h2>
+      <p>{servers.length} configured on this gateway</p>
+    </div>
+  </div>
+
   {#if loading && servers.length === 0}
-    <div class="empty">Loading…</div>
+    <div class="empty">Loading installed servers…</div>
   {:else if servers.length === 0}
     <div class="empty-card">
-      <div class="empty-icon">🔌</div>
-      <p>No MCP servers configured.</p>
-      <p class="hint">Click <strong>+ New Server</strong> to add one. Choose from a template or define your own.</p>
+      <div class="empty-icon">◇</div>
+      <h3>No MCP servers installed</h3>
+      <p class="hint">Add a remote endpoint, inspect a repository, or configure a server manually.</p>
+      <button class="btn-primary" on:click={openAddMenu}>Add your first server</button>
     </div>
   {:else}
     <div class="server-list">
@@ -637,6 +499,9 @@
               <span class="srv-chevron">{expanded[s.id] ? '▾' : '▸'}</span>
             </button>
             <div class="srv-actions">
+              {#if s.id === 'open-notebook'}
+                <button class="btn-secondary tiny" on:click={openOpenNotebookSetup}>Manage</button>
+              {/if}
               <button class="btn-secondary tiny" on:click={() => openEdit(s)}>Edit</button>
               <button class="btn-danger tiny"    on:click={() => remove(s)}>Delete</button>
             </div>
@@ -671,22 +536,183 @@
     </div>
   {/if}
 
-  <div class="info-card">
-    <h3>About MCP</h3>
-    <p>
-      MCP (<a href="https://spec.modelcontextprotocol.io/" target="_blank" rel="noopener">Model Context Protocol</a>)
-      lets Soulacy consume tools from external servers: filesystem, GitHub, Slack, Postgres, web fetch, and many others.
-      Tools from connected servers are <strong>auto-injected into every agent</strong> with namespaced names
-      (<code>mcp__&lt;server&gt;__&lt;tool&gt;</code>) and routed transparently by the engine.
-    </p>
-    <p>
-      Genie already has a gateway-managed browser for secure provider website actions, including domain boundaries
-      and final-action approval. Add a browser MCP server only when a custom agent needs general browser tools.
-      Use <strong>Browser visible</strong> only for live debugging.
-    </p>
-    <p>Changes here are written to <code>config.yaml</code>; the gateway must be restarted to pick them up.</p>
-  </div>
+  <details class="support-details">
+    <summary>
+      <span>
+        <strong>Connection and deployment details</strong>
+        <small>Soulacy endpoint, platform limits, and MCP guidance</small>
+      </span>
+      <span aria-hidden="true">⌄</span>
+    </summary>
+    <div class="support-content">
+      <DeploymentPanel report={deployment} />
+
+      <section class="remote-card" aria-labelledby="remote-mcp-title">
+        <div class="remote-heading">
+          <div>
+            <span class="eyebrow">Soulacy as an MCP server</span>
+            <h2 id="remote-mcp-title">Connect without shell access</h2>
+            <p>Use this Streamable HTTP endpoint from an MCP client. The gateway runs it directly, including on managed platforms.</p>
+          </div>
+          <span class="remote-badge">● Available</span>
+        </div>
+        <div class="remote-field">
+          <span>Endpoint</span>
+          <div class="copy-row">
+            <code>{remoteEndpoint}</code>
+            <button class="btn-secondary tiny" on:click={() => copyRemote(remoteEndpoint, 'endpoint')}>
+              {copiedRemote === 'endpoint' ? 'Copied' : 'Copy URL'}
+            </button>
+          </div>
+        </div>
+        <div class="remote-grid">
+          <div>
+            <h3>Connect an MCP client</h3>
+            <p>Choose Streamable HTTP and send your Soulacy key as a Bearer token.</p>
+            <pre>{remoteClientConfig}</pre>
+            <button class="btn-secondary tiny" on:click={() => copyRemote(remoteClientConfig, 'config')}>{copiedRemote === 'config' ? 'Copied' : 'Copy config'}</button>
+          </div>
+          <div>
+            <h3>Add a server remotely</h3>
+            <p>Run this from any computer with <code>sy</code>. No host shell is used.</p>
+            <pre>{remoteAddCommand}</pre>
+            <button class="btn-secondary tiny" on:click={() => copyRemote(remoteAddCommand, 'command')}>{copiedRemote === 'command' ? 'Copied' : 'Copy CLI command'}</button>
+          </div>
+        </div>
+        <p class="remote-footnote">Clients that only support local stdio can use <code>sy --gateway {gatewayOrigin || '<SOULACY_URL>'} mcp serve</code> as a compatibility bridge.</p>
+      </section>
+
+      <div class="info-card">
+        <h3>About MCP</h3>
+        <p>MCP lets Soulacy use tools from external servers. Connected tools are namespaced and made available to agents according to their permissions.</p>
+        <p>Genie already has a secure browser for provider website actions. Add a browser MCP server only when a custom agent needs general browser tools.</p>
+        <p>Changes are written to <code>config.yaml</code>. Soulacy will tell you when a restart is required.</p>
+      </div>
+    </div>
+  </details>
 </div>
+
+{#if addMenuOpen}
+  <div class="modal-bg" role="button" tabindex="0" aria-label="Close add MCP server menu" on:click|self={closeAddMenu} on:keydown={(e) => e.key === 'Escape' && closeAddMenu()}>
+    <div class="modal add-dialog" role="dialog" aria-modal="true" aria-labelledby="add-server-title">
+      <div class="dialog-heading">
+        <div>
+          <h2 id="add-server-title">Add an MCP server</h2>
+          <p>Choose how you want to connect it.</p>
+        </div>
+        <button class="close-button" on:click={closeAddMenu} aria-label="Close">×</button>
+      </div>
+      <div class="add-options">
+        <button on:click={openManualSetup}>
+          <span class="option-icon">＋</span>
+          <span><strong>Configure a server</strong><small>Enter a remote endpoint or local command.</small></span>
+          <b>›</b>
+        </button>
+        <button on:click={openInstallGuide}>
+          <span class="option-icon">⌕</span>
+          <span><strong>Inspect a repository</strong><small>Let Soulacy recommend the safest installation method.</small></span>
+          <b>›</b>
+        </button>
+        <button on:click={openGlamaModal}>
+          <span class="option-icon">⚡</span>
+          <span><strong>Install from Glama</strong><small>Import a published MCP server configuration.</small></span>
+          <b>›</b>
+        </button>
+        <button on:click={openOpenNotebookSetup}>
+          <span class="option-icon">▤</span>
+          <span><strong>Connect Open Notebook</strong><small>Optional integration for notebooks, research, and podcasts.</small></span>
+          <b>›</b>
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if installModal}
+  <div class="modal-bg" role="button" tabindex="0" aria-label="Close repository inspector" on:click|self={closeInstallGuide} on:keydown={(e) => e.key === 'Escape' && closeInstallGuide()}>
+    <div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="install-guide-title">
+      <div class="dialog-heading">
+        <div>
+          <span class="eyebrow">Repository inspector</span>
+          <h2 id="install-guide-title">Find the right installation method</h2>
+          <p>Soulacy reads public manifests and deployment files, then recommends where this server should run.</p>
+        </div>
+        <button class="close-button" on:click={closeInstallGuide} aria-label="Close">×</button>
+      </div>
+      <span class="read-only-badge">Read-only inspection</span>
+      <div class="install-input-row">
+        <input type="url" bind:value={installSource} placeholder="https://github.com/owner/mcp-server" aria-label="MCP server repository URL" on:keydown={(e) => e.key === 'Enter' && inspectInstallMethod()} />
+        <button class="btn-primary" on:click={inspectInstallMethod} disabled={installGuideLoading || !installSource.trim()}>{installGuideLoading ? 'Inspecting…' : 'Inspect'}</button>
+      </div>
+      <p class="install-agent-hint">You can also tell the <strong>System</strong> agent: <code>Install this MCP server: &lt;repository URL&gt;</code>.</p>
+      {#if installGuideError}<div class="banner err">{installGuideError}</div>{/if}
+      {#if installGuide}
+        <div class="guide-result" data-method={installGuide.method}>
+          <div class="guide-title-row">
+            <div><span class="method-badge">{METHOD_LABEL[installGuide.method] || installGuide.method}</span><h3>{installGuide.title}</h3></div>
+            {#if installGuide.can_install_here}<span class="available-here">● Supported here</span>{/if}
+          </div>
+          <p class="guide-summary">{installGuide.summary}</p>
+          {#if installGuide.reasons?.length}<div class="guide-block"><strong>Why</strong><ul>{#each installGuide.reasons as reason}<li>{reason}</li>{/each}</ul></div>{/if}
+          {#if installGuide.steps?.length}<div class="guide-block"><strong>Steps</strong><ol>{#each installGuide.steps as step}<li>{step}</li>{/each}</ol></div>{/if}
+          {#if installGuide.command}
+            <div class="guide-command">
+              <span>Command</span><pre>{guideCommand(installGuide.command)}</pre>
+              <button class="btn-secondary tiny" on:click={() => copyRemote(guideCommand(installGuide.command), 'guide-command')}>{copiedRemote === 'guide-command' ? 'Copied' : 'Copy command'}</button>
+            </div>
+          {/if}
+          {#if installGuide.alternative}<p class="guide-alternative"><strong>Alternative:</strong> {installGuide.alternative}</p>{/if}
+        </div>
+      {/if}
+    </div>
+  </div>
+{/if}
+
+{#if openNotebookModal}
+  <div class="modal-bg" role="button" tabindex="0" aria-label="Close Open Notebook setup" on:click|self={closeOpenNotebookSetup} on:keydown={(e) => e.key === 'Escape' && closeOpenNotebookSetup()}>
+    <div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="open-notebook-title">
+      <div class="dialog-heading">
+        <div>
+          <span class="eyebrow">Optional integration</span>
+          <h2 id="open-notebook-title">Open Notebook</h2>
+          <p>Connect an existing Open Notebook installation for research, notes, and podcasts.</p>
+        </div>
+        <button class="close-button" on:click={closeOpenNotebookSetup} aria-label="Close">×</button>
+      </div>
+      {#if openNotebookLoading}
+        <div class="empty compact">Checking this machine…</div>
+      {:else if openNotebookError}
+        <div class="banner err">{openNotebookError}</div>
+      {:else if openNotebookStatus}
+        <div class="notebook-details">
+          <div><small>Local API</small><code>{openNotebookStatus.base_url}</code></div>
+          <div><small>Open Notebook</small><strong class:good={openNotebookStatus.available}>{openNotebookStatus.available ? 'Healthy' : openNotebookStatus.health_detail}</strong></div>
+          <div><small>Adapter</small><strong class:good={openNotebookStatus.adapter_available}>{openNotebookStatus.adapter_available ? 'Installed' : 'Not installed'}</strong></div>
+          <div><small>Soulacy</small><strong class:good={openNotebookStatus.registered && openNotebookStatus.connected}>{openNotebookStatus.registered ? (openNotebookStatus.connected ? 'Connected' : 'Registered') : 'Not connected'}</strong></div>
+        </div>
+        {#if !openNotebookStatus.available}
+          <p class="notebook-help">Open Notebook is not running on this machine. Nothing will be installed automatically.</p>
+        {:else if !openNotebookStatus.adapter_available}
+          <p class="notebook-help">The optional standalone adapter is not installed. Install it on the Soulacy host before connecting.</p>
+        {:else if !openNotebookStatus.registered || !openNotebookStatus.connected}
+          <p class="notebook-help">Open Notebook and its adapter are ready to connect.</p>
+        {:else}
+          <p class="notebook-help">Open Notebook is connected. You can update its private podcast address below.</p>
+        {/if}
+        <div class="notebook-audio-config">
+          <label><span>Client-facing podcast URL</span><input type="url" bind:value={openNotebookAudioBaseURL} placeholder="https://your-mac.your-tailnet.ts.net:8443" /></label>
+          <label><span>Local media proxy</span><input type="text" bind:value={openNotebookAudioListen} placeholder="127.0.0.1:18791" /></label>
+        </div>
+      {/if}
+      <div class="modal-row">
+        <button class="btn-secondary" on:click={loadOpenNotebookStatus} disabled={openNotebookLoading}>Check again</button>
+        <button class="btn-primary" on:click={installOpenNotebook} disabled={openNotebookInstalling || !openNotebookStatus?.available || !openNotebookStatus?.adapter_available}>
+          {openNotebookInstalling ? 'Connecting…' : (openNotebookStatus?.registered ? 'Reconnect' : 'Connect')}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 {#if editing}
   <div
@@ -975,44 +1001,28 @@
 {/if}
 
 <style>
-  .page        { padding: 1.5rem; display: flex; flex-direction: column; gap: 1rem; }
-  .page-header { display: flex; align-items: center; justify-content: space-between; }
-  .page-header h1 { font-size: 1.2rem; font-weight: 600; }
-  .header-actions { display: flex; gap: .5rem; }
+  .page        { padding: 1.5rem; display: flex; flex-direction: column; gap: 1rem; max-width: 1120px; margin: 0 auto; }
+  .page-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+  .page-header h1 { font-size: 1.2rem; font-weight: 600; margin: 0; }
+  .page-header p { margin: .2rem 0 0; color: var(--sl-text-faint); font-size: .8rem; }
+  .header-actions { display: flex; align-items: center; gap: .5rem; margin-left: auto; }
+  .icon-button { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 8px; border: 1px solid var(--sl-line); background: var(--sl-surface); color: var(--sl-text-dim); cursor: pointer; font-size: 1rem; }
+  .icon-button:disabled { opacity: .5; cursor: wait; }
 
-  .notebook-card {
-    background: linear-gradient(135deg, rgba(35,127,106,.16), rgba(15,18,39,.94));
-    border: 1px solid rgba(96,240,190,.28); border-radius: 12px;
-    padding: 1.15rem 1.25rem; display: flex; flex-direction: column; gap: .85rem;
-  }
-  .notebook-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
-  .notebook-heading h2 { margin: .15rem 0 .35rem; font-size: 1rem; color: #eef0ff; }
-  .notebook-heading p, .notebook-help, .notebook-cli { margin: 0; color: #8f96b8; font-size: .78rem; line-height: 1.55; }
-  .notebook-state { font-size: .72rem; font-weight: 600; white-space: nowrap; }
-  .notebook-state.ready, .notebook-details .good { color: #60f0a0; }
-  .notebook-state.partial { color: #f0c460; }
-  .notebook-state.down { color: #f08080; }
-  .notebook-state.neutral { color: #8f96b8; }
-  .notebook-flow { display: flex; gap: .45rem; align-items: center; flex-wrap: wrap; color: #aeb4d1; font-size: .74rem; }
-  .notebook-flow span { background: rgba(8,10,24,.55); border: 1px solid #2a3850; border-radius: 999px; padding: .32rem .6rem; }
-  .notebook-flow b { color: #58caaa; }
+  .list-heading { display: flex; align-items: end; justify-content: space-between; margin-top: .25rem; }
+  .list-heading h2 { margin: 0; font-size: .92rem; color: var(--sl-text); }
+  .list-heading p { margin: .18rem 0 0; color: var(--sl-text-faint); font-size: .74rem; }
+
+  .notebook-help { margin: 0; color: #8f96b8; font-size: .78rem; line-height: 1.55; }
   .notebook-details { display: grid; grid-template-columns: 1.2fr .8fr .8fr 1.2fr; gap: .6rem; }
   .notebook-details > div { min-width: 0; display: flex; flex-direction: column; gap: .28rem; background: rgba(8,10,24,.5); border: 1px solid #25344a; border-radius: 8px; padding: .65rem .75rem; }
   .notebook-details small { color: #687293; font-size: .65rem; text-transform: uppercase; letter-spacing: .06em; }
   .notebook-details code, .notebook-details strong { color: #c6cade; font: .74rem monospace; overflow-wrap: anywhere; }
-  .notebook-help code, .notebook-cli code { color: #7ce0c0; background: #14242b; border-radius: 4px; padding: .08rem .3rem; }
+  .notebook-details .good { color: #60f0a0; }
   .notebook-audio-config { display: grid; grid-template-columns: 1.4fr .8fr; gap: .6rem; }
   .notebook-audio-config label { display: flex; flex-direction: column; gap: .3rem; color: #8f96b8; font-size: .7rem; }
   .notebook-audio-config input { min-width: 0; background: #0e1020; border: 1px solid #2a2f4a; border-radius: 7px; color: #e8eaf6; font: .78rem monospace; padding: .5rem .65rem; }
-  .notebook-actions { display: flex; gap: .5rem; }
-
-  .install-card {
-    background: var(--sl-surface); border: 1px solid var(--sl-line); border-radius: 12px;
-    padding: 1.15rem 1.25rem; display: flex; flex-direction: column; gap: .9rem;
-  }
-  .install-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
-  .install-heading h2 { margin: .15rem 0 .35rem; font-size: 1rem; color: #eef0ff; }
-  .install-heading p, .install-agent-hint { margin: 0; color: #8f96b8; font-size: .78rem; line-height: 1.55; }
+  .install-agent-hint { margin: 0; color: #8f96b8; font-size: .78rem; line-height: 1.55; }
   .read-only-badge { color: var(--sl-accent-hover); border: 1px solid color-mix(in srgb, var(--sl-accent-hover) 35%, transparent); border-radius: 999px; padding: .25rem .55rem; font-size: .68rem; white-space: nowrap; }
   .install-input-row { display: grid; grid-template-columns: 1fr auto; gap: .55rem; }
   .install-input-row input {
@@ -1054,11 +1064,18 @@
   .remote-grid pre { box-sizing: border-box; width: 100%; margin: 0; padding: .65rem; border-radius: 7px; background: #090b18; color: #b9bde0; font: .7rem/1.5 monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
   .remote-grid p code, .remote-footnote code { color: #aaa5ff; }
 
+  .support-details { border: 1px solid var(--sl-line); border-radius: 10px; background: color-mix(in srgb, var(--sl-surface) 72%, transparent); overflow: hidden; }
+  .support-details > summary { list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .85rem 1rem; cursor: pointer; color: var(--sl-text-dim); }
+  .support-details > summary::-webkit-details-marker { display: none; }
+  .support-details > summary span:first-child { display: flex; flex-direction: column; gap: .12rem; }
+  .support-details > summary strong { color: var(--sl-text); font-size: .82rem; }
+  .support-details > summary small { color: var(--sl-text-faint); font-size: .7rem; }
+  .support-details[open] > summary { border-bottom: 1px solid var(--sl-line); }
+  .support-content { padding: 1rem; display: flex; flex-direction: column; gap: 1rem; }
+
   @media (max-width: 820px) {
-    .notebook-heading { flex-direction: column; }
     .notebook-details { grid-template-columns: 1fr; }
     .notebook-audio-config { grid-template-columns: 1fr; }
-    .install-heading { flex-direction: column; }
     .install-input-row, .guide-command { grid-template-columns: 1fr; }
     .remote-grid { grid-template-columns: 1fr; }
     .remote-heading { flex-direction: column; }
@@ -1082,7 +1099,9 @@
     align-items: center; gap: .75rem; color: var(--sl-text-faint);
   }
   .empty-icon { font-size: 2.5rem; }
+  .empty-card h3 { margin: 0; color: var(--sl-text); font-size: .95rem; }
   .hint { font-size: .82rem; max-width: 540px; }
+  .empty.compact { padding: 1.5rem; }
 
   .server-list { display: flex; flex-direction: column; gap: .65rem; }
   .srv { background: var(--sl-surface); border: 1px solid var(--sl-line); border-radius: 10px; overflow: hidden; }
@@ -1129,7 +1148,6 @@
   }
   .info-card h3 { font-size: .875rem; font-weight: 600; }
   .info-card p  { font-size: .82rem; color: #7b82a8; line-height: 1.6; }
-  .info-card a  { color: var(--sl-accent-hover); }
   .info-card code { background: #1c1f35; padding: .1rem .35rem; border-radius: 4px; font-size: .78rem; color: var(--sl-accent-hover); }
 
   /* Modal */
@@ -1144,6 +1162,19 @@
   }
   .modal.wide { width: 680px; }
   .modal h2 { font-size: 1.05rem; font-weight: 600; margin-bottom: .25rem; }
+  .dialog-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+  .dialog-heading h2 { margin: .15rem 0 .25rem; }
+  .dialog-heading p { margin: 0; color: var(--sl-text-faint); font-size: .8rem; line-height: 1.5; }
+  .close-button { width: 32px; height: 32px; flex: 0 0 auto; display: grid; place-items: center; border: 1px solid var(--sl-line); border-radius: 8px; background: transparent; color: var(--sl-text-dim); font-size: 1.2rem; cursor: pointer; }
+  .add-dialog { width: 600px; }
+  .add-options { display: grid; grid-template-columns: 1fr 1fr; gap: .65rem; }
+  .add-options button { min-width: 0; min-height: 92px; display: grid; grid-template-columns: 38px 1fr 16px; align-items: center; gap: .7rem; padding: .85rem; text-align: left; border: 1px solid var(--sl-line); border-radius: 10px; background: rgba(8,10,24,.42); color: var(--sl-text); cursor: pointer; }
+  .add-options button:hover { border-color: color-mix(in srgb, var(--sl-accent-hover) 45%, var(--sl-line)); background: color-mix(in srgb, var(--sl-accent) 8%, transparent); }
+  .add-options button > span:nth-child(2) { min-width: 0; display: flex; flex-direction: column; gap: .25rem; }
+  .add-options strong { font-size: .82rem; }
+  .add-options small { color: var(--sl-text-faint); font-size: .72rem; line-height: 1.4; }
+  .add-options b { color: var(--sl-text-faint); font-size: 1rem; }
+  .option-icon { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 9px; background: color-mix(in srgb, var(--sl-accent) 14%, transparent); color: var(--sl-accent-hover); font-size: 1rem; }
   .modal-row {
     display: flex; justify-content: flex-end; gap: .5rem; margin-top: .5rem;
     position: sticky; bottom: 0; z-index: 5;
@@ -1218,6 +1249,14 @@
   }
 
   @media (max-width: 640px) {
+    .page { padding: 1rem; }
+    .page-header { align-items: flex-start; flex-wrap: wrap; }
+    .page-header :global(.tour-button) { order: 3; }
+    .srv-head { align-items: stretch; }
+    .srv-expand { grid-template-columns: 24px 1fr 20px; gap: .55rem; }
+    .srv-tools-count, .srv-badge { grid-column: 2; text-align: left; }
+    .srv-chevron { grid-column: 3; grid-row: 1 / span 3; }
+    .srv-actions { flex-direction: column; justify-content: center; padding: .55rem .55rem .55rem 0; }
     .modal-bg { align-items: flex-end; }
     .modal, .modal.wide {
       width: 100%; max-width: 100vw; max-height: 92dvh; border-radius: 16px 16px 0 0;
@@ -1228,5 +1267,6 @@
     .modal-row { display: grid; grid-template-columns: 1fr 1fr; }
     .modal-row .btn-primary, .modal-row .btn-glama { grid-column: 1 / -1; grid-row: 1; }
     .modal-row button { min-height: 44px; }
+    .add-options { grid-template-columns: 1fr; }
   }
 </style>

@@ -47,8 +47,11 @@ function setInput(input, value) {
 const text = () => target.textContent.replace(/\s+/g, ' ')
 
 async function openBearerDialog() {
-  const btn = [...target.querySelectorAll('button')].find(b => /New Server/i.test(b.textContent))
-  btn.click()
+  const add = [...target.querySelectorAll('button')].find(b => /Add server/i.test(b.textContent))
+  add.click()
+  await tick()
+  const configure = [...target.querySelectorAll('button')].find(b => /Configure a server/i.test(b.textContent))
+  configure.click()
   await tick()
   const selects = [...target.querySelectorAll('select')]
   setSelect(selects.find(s => [...s.options].some(o => o.value === 'http')), 'http')
