@@ -527,9 +527,9 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	forcePackageInstall := hasURLPackageRequest && packageInstallReq.Kind != "mcp" &&
 		toolSchemaExists(tools, "package_install")
 	forceGenieActionPlan := shouldForceGenieActionPlan(def.ID, rawGoal, tools)
-
-	// Auto-delegate: when SOUL.yaml sets `llm.tool_choice: agent__<id>` and
-	// `<id>` is one of the declared peers, do the peer call HERE before the
+	missionContract := effectiveBuilderMissionContract(def)
+	ctx, missionProgress := attachMissionProgress(ctx, missionContract)
+	// Auto-delegate when SOUL.yaml selects a declared `agent__<id>` peer before the
 	// LLM ever runs. Reason: local models (qwen2.5:72b in particular) routinely
 	// ignore Ollama's tool_choice constraint and answer from training data
 	// instead of delegating. We bypass model cooperation by running the peer
@@ -633,6 +633,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	websiteAccessFallbackOffered := false
 
 	var finalContent string
+	missionCompletionRetries := 0
 	for turn := 0; turn < maxTurns; turn++ {
 		// S3.1 — budget gate. Check BEFORE issuing the call so we never spend
 		// past the cap. When exceeded we stop the loop and let the
@@ -934,6 +935,11 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 
 		// No tool calls → we have a final answer
 		if len(resp.ToolCalls) == 0 {
+			if repairedContext, repaired := e.repairIncompleteBuilderMission(def, missionContract, sess, msg, resp.Content,
+				missionProgress, &missionCompletionRetries, turn, maxTurns); repaired {
+				chatMsgs = repairedContext
+				continue
+			}
 			finalContent = resp.Content
 			break
 		}
@@ -1089,7 +1095,6 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 			finalContent = synth
 		}
 	}
-
 	// Safety net: never surface leaked reasoning control JSON (thought/action/
 	// is_done) as the reply, even on the classic (non-loop) path where a model
 	// primed with a ReAct-style prompt emits its step object as text. Skipped
@@ -1097,7 +1102,6 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	if def.LLM.OutputSchema == nil && strings.TrimSpace(finalContent) != "" {
 		finalContent = reasoning.SanitizeFinalOutput(finalContent, nil)
 	}
-
 	// Structured output enforcement: if the agent has an output_schema, validate
 	// the final reply parses as JSON. On failure, do ONE corrective retry that
 	// asks the model to fix its output (with response_format=json_schema). If
@@ -1115,7 +1119,6 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 			}
 		}
 	}
-
 	if strings.TrimSpace(finalContent) == "" {
 		// Synthesis still produced nothing usable. Rather than throw away a
 		// completed run's work, fall back to the best content we already have:
@@ -1140,7 +1143,10 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		})
 	}
 
-	reply = e.finalizeReply(ctx, def, sess, msg, finalContent)
+	reply, missionIncomplete := e.finalizeBuilderMissionReply(ctx, def, missionContract, sess, msg, contract, missionProgress, finalContent)
+	if missionIncomplete {
+		return reply, nil
+	}
 
 	runOutcome = "success" // flips the deferred AgentRunsTotal counter from "error"
 	return reply, nil

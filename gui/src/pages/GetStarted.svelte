@@ -494,6 +494,11 @@
     if (understanding.tools?.length) {
       out.push('Uses: ' + understanding.tools.map(x => x.name).join(', ') + '.')
     }
+    if (understanding.connections?.length) {
+      out.push('Uses Website Access: ' + understanding.connections.map(connection =>
+        `${connection.name}${connection.ready ? '' : ' (sign-in needed)'}`
+      ).join(', ') + '.')
+    }
     if (understanding.outputs?.length) {
       out.push('Sends results to: ' + understanding.outputs.map(o => o.channel).join(', ') + '.')
     }
