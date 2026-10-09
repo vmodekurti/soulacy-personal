@@ -52,13 +52,28 @@ function stubGateway() {
   }))
 }
 
-/** Click "+ New Server" and return what the dialog shows. */
+/** Open the manual server editor and return what the dialog shows. */
 async function openNewServerDialog() {
-  const btn = [...target.querySelectorAll('button')].find(b => /New Server/i.test(b.textContent))
-  if (!btn) throw new Error('no "New Server" button on the page')
-  btn.click()
+  const add = [...target.querySelectorAll('button')].find(b => /Add server/i.test(b.textContent))
+  if (!add) throw new Error('no "Add server" button on the page')
+  add.click()
+  await new Promise(r => setTimeout(r, 10))
+  const configure = [...target.querySelectorAll('button')].find(b => /Configure a server/i.test(b.textContent))
+  if (!configure) throw new Error('no "Configure a server" option in the add dialog')
+  configure.click()
   await new Promise(r => setTimeout(r, 30))
   return target.textContent.replace(/\s+/g, ' ')
+}
+
+async function openRepositoryInspector() {
+  const add = [...target.querySelectorAll('button')].find(b => /Add server/i.test(b.textContent))
+  if (!add) throw new Error('no "Add server" button on the page')
+  add.click()
+  await new Promise(r => setTimeout(r, 10))
+  const inspect = [...target.querySelectorAll('button')].find(b => /Inspect a repository/i.test(b.textContent))
+  if (!inspect) throw new Error('no repository inspector in the add dialog')
+  inspect.click()
+  await new Promise(r => setTimeout(r, 30))
 }
 
 async function mountPage() {
@@ -105,11 +120,12 @@ describe('MCP page: what this deployment cannot do', () => {
 
   it('shows repository-specific installation directions', async () => {
     await mountPage()
+    await openRepositoryInspector()
     const input = target.querySelector('input[aria-label="MCP server repository URL"]')
     input.value = 'https://github.com/acme/stateful-mcp'
     input.dispatchEvent(new Event('input', { bubbles: true }))
     await new Promise(r => setTimeout(r, 10))
-    const button = [...target.querySelectorAll('button')].find(b => /Show install method/i.test(b.textContent))
+    const button = [...target.querySelectorAll('button')].find(b => /^Inspect$/i.test(b.textContent.trim()))
     button.click()
     await new Promise(r => setTimeout(r, 40))
     const text = target.textContent.replace(/\s+/g, ' ')
