@@ -5,6 +5,7 @@
 package managedbrowser
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -39,6 +40,8 @@ var (
 // passed straight to the browser backend and is never included in a Result.
 type Resolver interface {
 	Resolve(ctx context.Context, workspaceID, subject, agentID, connectionID string) (authconnections.Lease, error)
+	UpdateBrowserState(ctx context.Context, workspaceID, connectionID string, update func(current []byte) ([]byte, bool, error)) error
+	MarkNeedsAuthentication(ctx context.Context, workspaceID, connectionID string)
 }
 
 // Factory creates one isolated browser process per managed session.
@@ -50,6 +53,7 @@ type Factory interface {
 type Browser interface {
 	Observe(ctx context.Context) (Observation, error)
 	Act(ctx context.Context, action Action) (Observation, error)
+	StorageState(ctx context.Context) ([]byte, error)
 	Close() error
 }
 
@@ -110,14 +114,16 @@ type CommitReview struct {
 }
 
 type session struct {
-	opMu      sync.Mutex
-	id        string
-	agentID   string
-	subject   string
-	allowed   []string
-	browser   Browser
-	updatedAt time.Time
-	busy      int
+	opMu         sync.Mutex
+	id           string
+	workspace    string
+	connectionID string
+	agentID      string
+	subject      string
+	allowed      []string
+	browser      Browser
+	updatedAt    time.Time
+	busy         int
 }
 
 type Manager struct {
@@ -172,6 +178,9 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (Result, error) {
 	}
 	browser, err := m.factory.Open(ctx, OpenRequest{URL: target.String(), AllowedDomains: allowed, StorageState: state})
 	if err != nil {
+		if req.ConnectionID != "" && errors.Is(err, ErrOutsideBoundary) {
+			m.resolver.MarkNeedsAuthentication(ctx, req.WorkspaceID, req.ConnectionID)
+		}
 		if errors.Is(err, ErrOutsideBoundary) {
 			return boundaryResult(target.String(), err)
 		}
@@ -184,15 +193,22 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (Result, error) {
 	}
 	if err := validateObservation(ctx, obs, allowed); err != nil {
 		_ = browser.Close()
+		if req.ConnectionID != "" {
+			m.resolver.MarkNeedsAuthentication(ctx, req.WorkspaceID, req.ConnectionID)
+		}
 		return boundaryResult(target.String(), err)
 	}
 	if strings.TrimSpace(obs.Blocker) != "" {
 		_ = browser.Close()
+		if req.ConnectionID != "" {
+			m.resolver.MarkNeedsAuthentication(ctx, req.WorkspaceID, req.ConnectionID)
+		}
 		return providerBlockedResult(obs)
 	}
 
 	now := m.now().UTC()
-	s := &session{id: "web_" + strings.ReplaceAll(uuid.NewString(), "-", ""), agentID: req.AgentID, subject: req.Subject, allowed: allowed, browser: browser, updatedAt: now}
+	s := &session{id: "web_" + strings.ReplaceAll(uuid.NewString(), "-", ""), workspace: req.WorkspaceID, connectionID: req.ConnectionID, agentID: req.AgentID, subject: req.Subject, allowed: allowed, browser: browser, updatedAt: now}
+	m.persistSession(ctx, s)
 	m.mu.Lock()
 	m.evictLocked(now)
 	for len(m.sessions) >= m.maxSessions {
@@ -221,12 +237,15 @@ func (m *Manager) Observe(ctx context.Context, sessionID, agentID, subject strin
 	}
 	if err := validateObservation(ctx, obs, s.allowed); err != nil {
 		m.drop(sessionID)
+		m.markNeedsAuthentication(ctx, s)
 		return boundaryResult(obs.URL, err)
 	}
 	if strings.TrimSpace(obs.Blocker) != "" {
 		m.drop(sessionID)
+		m.markNeedsAuthentication(ctx, s)
 		return providerBlockedResult(obs)
 	}
+	m.persistSession(ctx, s)
 	return resultFor(s, obs, "ready", "Current provider page inspected."), nil
 }
 
@@ -256,10 +275,12 @@ func (m *Manager) Act(ctx context.Context, sessionID, agentID, subject string, a
 		}
 		if err := validateObservation(ctx, obs, s.allowed); err != nil {
 			m.drop(sessionID)
+			m.markNeedsAuthentication(ctx, s)
 			return boundaryResult(obs.URL, err)
 		}
 		if strings.TrimSpace(obs.Blocker) != "" {
 			m.drop(sessionID)
+			m.markNeedsAuthentication(ctx, s)
 			return providerBlockedResult(obs)
 		}
 		for _, element := range obs.Elements {
@@ -272,18 +293,22 @@ func (m *Manager) Act(ctx context.Context, sessionID, agentID, subject string, a
 	if err != nil {
 		if errors.Is(err, ErrOutsideBoundary) {
 			m.drop(sessionID)
+			m.markNeedsAuthentication(ctx, s)
 			return boundaryResult(obs.URL, err)
 		}
 		return Result{}, err
 	}
 	if err := validateObservation(ctx, obs, s.allowed); err != nil {
 		m.drop(sessionID)
+		m.markNeedsAuthentication(ctx, s)
 		return boundaryResult(obs.URL, err)
 	}
 	if strings.TrimSpace(obs.Blocker) != "" {
 		m.drop(sessionID)
+		m.markNeedsAuthentication(ctx, s)
 		return providerBlockedResult(obs)
 	}
+	m.persistSession(ctx, s)
 	return resultFor(s, obs, "ready", "Provider page updated. Continue until the exact final action is visible."), nil
 }
 
@@ -308,10 +333,12 @@ func (m *Manager) Commit(ctx context.Context, sessionID, agentID, subject, ref s
 	}
 	if err := validateObservation(ctx, current, s.allowed); err != nil {
 		m.drop(sessionID)
+		m.markNeedsAuthentication(ctx, s)
 		return boundaryResult(current.URL, err)
 	}
 	if strings.TrimSpace(current.Blocker) != "" {
 		m.drop(sessionID)
+		m.markNeedsAuthentication(ctx, s)
 		return providerBlockedResult(current)
 	}
 	consequentialRef := false
@@ -328,18 +355,22 @@ func (m *Manager) Commit(ctx context.Context, sessionID, agentID, subject, ref s
 	if err != nil {
 		if errors.Is(err, ErrOutsideBoundary) {
 			m.drop(sessionID)
+			m.markNeedsAuthentication(ctx, s)
 			return boundaryResult(obs.URL, err)
 		}
 		return Result{}, err
 	}
 	if err := validateObservation(ctx, obs, s.allowed); err != nil {
 		m.drop(sessionID)
+		m.markNeedsAuthentication(ctx, s)
 		return boundaryResult(obs.URL, err)
 	}
 	if strings.TrimSpace(obs.Blocker) != "" {
 		m.drop(sessionID)
+		m.markNeedsAuthentication(ctx, s)
 		return providerBlockedResult(obs)
 	}
+	m.persistSession(ctx, s)
 	return resultFor(s, obs, "submitted", "The approved action was submitted. Verify the provider confirmation shown in this observation before reporting success."), nil
 }
 
@@ -354,6 +385,9 @@ func (m *Manager) CloseSession(sessionID, agentID, subject string) error {
 	m.mu.Lock()
 	delete(m.sessions, s.id)
 	m.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	m.persistSession(ctx, s)
 	return s.browser.Close()
 }
 
@@ -371,6 +405,9 @@ func (m *Manager) Close() error {
 	var first error
 	for _, s := range sessions {
 		s.opMu.Lock()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		m.persistSession(ctx, s)
+		cancel()
 		err := s.browser.Close()
 		s.opMu.Unlock()
 		if err != nil && first == nil {
@@ -410,11 +447,34 @@ func (m *Manager) drop(id string) {
 	}
 }
 
+func (m *Manager) persistSession(ctx context.Context, s *session) {
+	if m == nil || m.resolver == nil || s == nil || strings.TrimSpace(s.connectionID) == "" {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	state, err := s.browser.StorageState(ctx)
+	if err != nil || len(state) == 0 {
+		return
+	}
+	_ = m.resolver.UpdateBrowserState(ctx, s.workspace, s.connectionID, func(current []byte) ([]byte, bool, error) {
+		return state, !bytes.Equal(current, state), nil
+	})
+}
+
+func (m *Manager) markNeedsAuthentication(ctx context.Context, s *session) {
+	if m == nil || m.resolver == nil || s == nil || strings.TrimSpace(s.connectionID) == "" {
+		return
+	}
+	m.resolver.MarkNeedsAuthentication(ctx, s.workspace, s.connectionID)
+}
+
 func (m *Manager) evictLocked(now time.Time) {
 	for id, s := range m.sessions {
 		if s.busy == 0 && now.Sub(s.updatedAt) > m.ttl {
 			delete(m.sessions, id)
-			go s.browser.Close()
+			go m.persistAndClose(s)
 		}
 	}
 }
@@ -431,10 +491,22 @@ func (m *Manager) evictOldestLocked() bool {
 	}
 	if oldest != nil {
 		delete(m.sessions, oldest.id)
-		go oldest.browser.Close()
+		go m.persistAndClose(oldest)
 		return true
 	}
 	return false
+}
+
+func (m *Manager) persistAndClose(s *session) {
+	if s == nil {
+		return
+	}
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	m.persistSession(ctx, s)
+	_ = s.browser.Close()
 }
 
 func normalizeTarget(ctx context.Context, raw string) (*url.URL, []string, error) {

@@ -51,7 +51,7 @@ async function loadSession(connectionId) {
 }
 
 async function captureSession(payload) {
-  const { domains } = normalizeBoundary(payload)
+	const { base, domains } = normalizeBoundary(payload)
   const session = await loadSession(payload.connectionId)
   if (!session?.tabId) throw new Error('The secure sign-in tab is no longer open. Select Open secure sign-in again.')
   const tab = await chrome.tabs.get(session.tabId)

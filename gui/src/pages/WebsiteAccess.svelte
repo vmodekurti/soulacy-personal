@@ -19,7 +19,7 @@
   let companionVersion = ''
   let companionOutdated = false
   let deepLinkHandled = false
-  const minimumCompanionVersion = '1.1.0'
+  const minimumCompanionVersion = '1.1.1'
 
   $: captureCommand = loginURL.trim()
     ? `sy --gateway ${window.location.origin} connection capture ${shellQuote(loginURL.trim())}${name.trim() ? ` --name ${shellQuote(name.trim())}` : ''}${domains.trim() ? ` --domains ${shellQuote(domains.trim())}` : ''}${agentIDs.trim() ? ` --agents ${shellQuote(agentIDs.trim())}` : ''}`
@@ -97,6 +97,20 @@
       if ((current[i] || 0) < (required[i] || 0)) return false
     }
     return true
+  }
+
+  function checkedLabel(value) {
+    if (!value) return 'Not checked yet'
+    const checked = new Date(value)
+    if (Number.isNaN(checked.getTime())) return 'Last checked recently'
+    const seconds = Math.max(0, Math.round((Date.now() - checked.getTime()) / 1000))
+    if (seconds < 60) return 'Last checked just now'
+    const minutes = Math.floor(seconds / 60)
+    if (minutes < 60) return `Last checked ${minutes}m ago`
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return `Last checked ${hours}h ago`
+    const days = Math.floor(hours / 24)
+    return `Last checked ${days}d ago`
   }
 
   function openCapture(connection = null) {
@@ -194,7 +208,7 @@
   onMount(load)
 </script>
 
-<svelte:head><title>Website Access — Soulacy</title></svelte:head>
+<svelte:head><title>Website Access | Soulacy</title></svelte:head>
 
 <main class="page">
   <header>
@@ -212,7 +226,7 @@
   <section class="card intro">
     <div>
       <h2>Saved website sign-ins</h2>
-      <p>Soulacy opens the real website login in Chrome, where password managers, MFA, CAPTCHA, and passkeys continue to work. It saves only the approved site’s session state, encrypts it locally, and replays the cookies inside a restricted read-only fetch tool.</p>
+      <p>Soulacy opens the real website login in Chrome, where password managers, MFA, CAPTCHA, and passkeys continue to work. It saves only the approved site’s session state, encrypts it locally, and renews rotated cookies and browser storage after successful use.</p>
     </div>
     <button class="primary" on:click={() => openCapture()}>+ Add website sign-in</button>
   </section>
@@ -231,6 +245,8 @@
               <span>{connection.allowed_domains?.join(', ')}</span>
               <span>{connection.agent_ids?.length || 0} agent grant(s)</span>
               <span>Encrypted</span>
+              <span>Auto-renew on use</span>
+              <span>{checkedLabel(connection.last_validated_at)}</span>
             </div>
           </div>
           <span class:ready={connection.status === 'ready'} class="status">{connection.status}</span>
@@ -245,7 +261,7 @@
 
   <section class="guardrail">
     <strong>Session boundary</strong>
-    <span>Soulacy accepts HTTPS pages only, blocks private-network targets and off-domain redirects, and marks the sign-in expired when the site returns 401 or 403. Cookie values never enter prompts, tool arguments, logs, or API responses.</span>
+    <span>Soulacy accepts HTTPS pages only, blocks private-network targets and off-domain redirects, saves approved session updates after successful use, and marks the sign-in expired when the provider requires a new login. Cookie values never enter prompts, tool arguments, logs, or API responses.</span>
   </section>
 </main>
 

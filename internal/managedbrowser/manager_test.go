@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/soulacy/soulacy/internal/authconnections"
@@ -33,12 +34,37 @@ func TestManagedChromiumSmoke(t *testing.T) {
 }
 
 type fakeResolver struct {
-	lease authconnections.Lease
-	err   error
+	mu             sync.Mutex
+	lease          authconnections.Lease
+	err            error
+	updatedState   []byte
+	updateCalls    int
+	needsAuthCalls int
 }
 
-func (r fakeResolver) Resolve(context.Context, string, string, string, string) (authconnections.Lease, error) {
+func (r *fakeResolver) Resolve(context.Context, string, string, string, string) (authconnections.Lease, error) {
 	return r.lease, r.err
+}
+
+func (r *fakeResolver) UpdateBrowserState(_ context.Context, _, _ string, update func([]byte) ([]byte, bool, error)) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	next, changed, err := update(r.lease.BrowserState)
+	if err != nil {
+		return err
+	}
+	r.updateCalls++
+	if changed {
+		r.updatedState = append([]byte(nil), next...)
+		r.lease.BrowserState = append([]byte(nil), next...)
+	}
+	return nil
+}
+
+func (r *fakeResolver) MarkNeedsAuthentication(context.Context, string, string) {
+	r.mu.Lock()
+	r.needsAuthCalls++
+	r.mu.Unlock()
 }
 
 type fakeFactory struct {
@@ -55,6 +81,7 @@ func (f *fakeFactory) Open(_ context.Context, req OpenRequest) (Browser, error) 
 type fakeBrowser struct {
 	observations []Observation
 	actions      []Action
+	storageState []byte
 	closed       bool
 }
 
@@ -73,15 +100,21 @@ func (b *fakeBrowser) Act(_ context.Context, action Action) (Observation, error)
 	return b.observations[0], nil
 }
 
+func (b *fakeBrowser) StorageState(context.Context) ([]byte, error) {
+	return append([]byte(nil), b.storageState...), nil
+}
+
 func (b *fakeBrowser) Close() error { b.closed = true; return nil }
 
 func TestSavedSessionStaysInsideBrowserAndResult(t *testing.T) {
 	const secret = "cookie-value-must-never-reach-model"
-	browser := &fakeBrowser{observations: []Observation{{URL: "https://m.uber.com/go", Title: "Uber", Text: "Choose a ride", Elements: []Element{}}}}
+	const renewed = `{"cookies":[{"name":"session","value":"rotated"}],"origins":[]}`
+	browser := &fakeBrowser{observations: []Observation{{URL: "https://m.uber.com/go", Title: "Uber", Text: "Choose a ride", Elements: []Element{}}}, storageState: []byte(renewed)}
 	factory := &fakeFactory{browser: browser}
-	manager := New(fakeResolver{lease: authconnections.Lease{
+	resolver := &fakeResolver{lease: authconnections.Lease{
 		ConnectionID: "conn", Kind: authconnections.KindBrowser, AllowedDomains: []string{"uber.com"}, BrowserState: []byte(secret),
-	}}, factory)
+	}}
+	manager := New(resolver, factory)
 
 	result, err := manager.Start(t.Context(), StartRequest{WorkspaceID: "personal", Subject: "admin", AgentID: "genie", URL: "https://m.uber.com/go", ConnectionID: "conn"})
 	if err != nil {
@@ -95,6 +128,12 @@ func TestSavedSessionStaysInsideBrowserAndResult(t *testing.T) {
 	}
 	if len(result.AllowedDomains) != 1 || result.AllowedDomains[0] != "uber.com" {
 		t.Fatalf("allowed domains = %v", result.AllowedDomains)
+	}
+	if resolver.updateCalls != 1 || string(resolver.updatedState) != renewed {
+		t.Fatalf("renewed state was not saved: calls=%d state=%q", resolver.updateCalls, resolver.updatedState)
+	}
+	if strings.Contains(result.Message+result.Observation.Text+result.Observation.Title, "rotated") {
+		t.Fatal("renewed browser session leaked in model-facing result")
 	}
 }
 
@@ -240,13 +279,19 @@ func TestNavigationBoundaryOnlyAllowsApprovedHTTPSDomain(t *testing.T) {
 
 func TestProviderSecurityBlockClosesSession(t *testing.T) {
 	browser := &fakeBrowser{observations: []Observation{{URL: "https://m.uber.com/go", Blocker: "Verify you are human", Elements: []Element{}}}}
-	manager := New(nil, &fakeFactory{browser: browser})
-	result, err := manager.Start(t.Context(), StartRequest{Subject: "admin", AgentID: "genie", URL: "https://m.uber.com/go"})
+	resolver := &fakeResolver{lease: authconnections.Lease{
+		ConnectionID: "conn", Kind: authconnections.KindBrowser, AllowedDomains: []string{"uber.com"}, BrowserState: []byte(`{"cookies":[]}`),
+	}}
+	manager := New(resolver, &fakeFactory{browser: browser})
+	result, err := manager.Start(t.Context(), StartRequest{WorkspaceID: "personal", Subject: "admin", AgentID: "genie", URL: "https://m.uber.com/go", ConnectionID: "conn"})
 	if !errors.Is(err, ErrProviderBlocked) {
 		t.Fatalf("error = %v, want provider blocked", err)
 	}
 	if result.Status != "blocked" || result.Fallback == "" || !browser.closed {
 		t.Fatalf("result = %+v, closed=%v", result, browser.closed)
+	}
+	if resolver.needsAuthCalls != 1 {
+		t.Fatalf("needs-authentication calls = %d, want 1", resolver.needsAuthCalls)
 	}
 }
 

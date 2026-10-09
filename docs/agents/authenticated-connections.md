@@ -76,6 +76,24 @@ credentials, private-network destinations, unapproved domains, and redirects
 that leave the approved domain. HTML is converted to readable text and scripts
 and styles are discarded.
 
+## Automatic session renewal
+
+Soulacy saves provider-approved session updates after successful use. The
+read-only fetch path keeps rotated cookies returned by the website. The managed
+browser keeps approved-domain cookies and local storage when it finishes an
+interaction or closes an idle session. These updates go directly back to the
+encrypted vault and never enter the model context.
+
+Website Access shows when a connection was last checked. A successful request
+marks it ready even when the provider did not rotate a cookie. If a login wall,
+security check, or off-domain redirect appears, Soulacy stops the browser and
+marks the connection for reauthentication.
+
+Soulacy does not send artificial background traffic solely to keep an account
+open. Such traffic can violate provider policies and cannot extend a server-side
+session that the provider has revoked. Regular scheduled work naturally renews
+rotating sessions, while the provider remains in control of the actual expiry.
+
 ## Scheduled runs
 
 Grant the connection to the scheduled agent. Scheduled and interactive runs use
@@ -88,6 +106,11 @@ If the website returns HTTP 401 or 403, Soulacy marks the connection as
 **expired** and returns an actionable reconnect message. In Website Access,
 choose **Reconnect**, sign in again, and save the session. The connection ID and
 agent grants remain unchanged.
+
+Hosted users can reauthenticate from any computer that has Chrome and the
+Session Capture companion. The refreshed state is sent to the hosted gateway,
+so shell access to the deployment is not required. The remote CLI capture flow
+remains available as a fallback.
 
 Deleting or revoking a connection immediately prevents new leases. Removing it
 from an agent removes that agent's grant without affecting other agents.
