@@ -62,8 +62,9 @@ func (r *Resolver) connectionLock(id string) *sync.Mutex {
 // into the encrypted session, so sessions that renew on activity stay alive. The
 // read-modify-write is serialized per connection so concurrent fetches cannot
 // overwrite each other's update. update receives the current state and returns
-// the new state and whether it changed; unchanged state is not rewritten. The
-// connection's status and approved domains are untouched.
+// the new state and whether it changed; unchanged state is not rewritten. A
+// successful update refreshes the connection health while approved domains and
+// provider-controlled expiry remain untouched.
 func (r *Resolver) UpdateBrowserState(ctx context.Context, workspaceID, connectionID string, update func(current []byte) ([]byte, bool, error)) error {
 	if r == nil || r.store == nil || r.vault == nil {
 		return ErrNotReady
@@ -83,13 +84,18 @@ func (r *Resolver) UpdateBrowserState(ctx context.Context, workspaceID, connecti
 		return fmt.Errorf("authenticated connection secret: %w", err)
 	}
 	next, changed, err := update(current)
-	if err != nil || !changed {
+	if err != nil {
 		return err
 	}
-	if len(next) == 0 || len(next) > maxBrowserStateBytes {
-		return fmt.Errorf("updated session state has an invalid size")
+	if changed {
+		if len(next) == 0 || len(next) > maxBrowserStateBytes {
+			return fmt.Errorf("updated session state has an invalid size")
+		}
+		if err := r.vault.WriteBlob(ctx, vaultNamespace(connectionID), browserStateKey, next); err != nil {
+			return err
+		}
 	}
-	return r.vault.WriteBlob(ctx, vaultNamespace(connectionID), browserStateKey, next)
+	return r.store.MarkValidated(ctx, workspaceID, connectionID)
 }
 
 // Describe returns only secret-free metadata for declared, granted
@@ -122,6 +128,9 @@ func (r *Resolver) MarkNeedsAuthentication(ctx context.Context, workspaceID, con
 	if r == nil || r.store == nil {
 		return
 	}
+	lock := r.connectionLock(connectionID)
+	lock.Lock()
+	defer lock.Unlock()
 	_ = r.store.SetStatus(ctx, workspaceID, connectionID, StatusExpired)
 }
 

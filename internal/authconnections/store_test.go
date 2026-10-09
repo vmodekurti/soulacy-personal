@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/soulacy/soulacy/internal/credentials"
 )
@@ -171,10 +172,25 @@ func TestUpdateBrowserStateIsSerializedAndSkipsUnchanged(t *testing.T) {
 	if string(got) != strconv.Itoa(workers) {
 		t.Fatalf("lost updates: state = %s, want %d", got, workers)
 	}
+	before, err := store.Get(ctx, "ws", conn.ID)
+	if err != nil || before.LastValidatedAt == nil {
+		t.Fatalf("connection before unchanged update = %+v, err=%v", before, err)
+	}
+	time.Sleep(2 * time.Millisecond)
 	if err := resolver.UpdateBrowserState(ctx, "ws", conn.ID, func(c []byte) ([]byte, bool, error) { return []byte("999"), false, nil }); err != nil {
 		t.Fatal(err)
 	}
 	if again, _ := vault.ReadBlob(ctx, vaultNamespace(conn.ID), browserStateKey); string(again) != strconv.Itoa(workers) {
 		t.Fatalf("an unchanged update must not write, got %s", again)
+	}
+	after, err := store.Get(ctx, "ws", conn.ID)
+	if err != nil || after.LastValidatedAt == nil || !after.LastValidatedAt.After(*before.LastValidatedAt) {
+		t.Fatalf("successful unchanged update did not refresh health: before=%v after=%v err=%v", before.LastValidatedAt, after.LastValidatedAt, err)
+	}
+	if err := store.SetStatus(ctx, "ws", conn.ID, StatusExpired); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkValidated(ctx, "ws", conn.ID); !errors.Is(err, ErrNotReady) {
+		t.Fatalf("expired connection was revived by a late validation: %v", err)
 	}
 }

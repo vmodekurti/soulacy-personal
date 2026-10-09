@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/chromedp/cdproto/fetch"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
+	cdpstorage "github.com/chromedp/cdproto/storage"
 	"github.com/chromedp/chromedp"
 
 	"github.com/soulacy/soulacy/internal/netguard"
@@ -180,23 +182,34 @@ type chromiumBrowser struct {
 	allowed []string
 	blockMu sync.Mutex
 	blocked string
+	stateMu sync.Mutex
+	state   storageState
+}
+
+type storageEntry struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+type storageCookie struct {
+	Name     string  `json:"name"`
+	Value    string  `json:"value"`
+	Domain   string  `json:"domain"`
+	Path     string  `json:"path"`
+	Expires  float64 `json:"expires"`
+	HTTPOnly bool    `json:"httpOnly"`
+	Secure   bool    `json:"secure"`
+	SameSite string  `json:"sameSite"`
+}
+
+type storageOrigin struct {
+	Origin       string         `json:"origin"`
+	LocalStorage []storageEntry `json:"localStorage"`
 }
 
 type storageState struct {
-	Cookies []struct {
-		Name, Value, Domain, Path string
-		Expires                   float64 `json:"expires"`
-		HTTPOnly                  bool    `json:"httpOnly"`
-		Secure                    bool    `json:"secure"`
-		SameSite                  string  `json:"sameSite"`
-	} `json:"cookies"`
-	Origins []struct {
-		Origin       string `json:"origin"`
-		LocalStorage []struct {
-			Name  string `json:"name"`
-			Value string `json:"value"`
-		} `json:"localStorage"`
-	} `json:"origins"`
+	Cookies []storageCookie `json:"cookies"`
+	Origins []storageOrigin `json:"origins"`
 }
 
 func (b *chromiumBrowser) seed(ctx context.Context, raw []byte, allowed []string) error {
@@ -240,7 +253,97 @@ func (b *chromiumBrowser) seed(ctx context.Context, raw []byte, allowed []string
 			return fmt.Errorf("restore saved local storage: %w", err)
 		}
 	}
+	b.stateMu.Lock()
+	b.state = state
+	b.stateMu.Unlock()
 	return nil
+}
+
+// StorageState exports only authentication state that applies to the approved
+// website boundary. It combines Chromium's current cookies with local storage
+// from the current approved origin and preserves previously captured approved
+// origins. The returned bytes go directly to the encrypted vault and are never
+// included in model-visible results.
+func (b *chromiumBrowser) StorageState(parent context.Context) ([]byte, error) {
+	runCtx, cancel := b.operationContext(parent)
+	defer cancel()
+	var cookies []*network.Cookie
+	var current storageOrigin
+	if err := chromedp.Run(runCtx,
+		chromedp.ActionFunc(func(c context.Context) error {
+			var err error
+			cookies, err = cdpstorage.GetCookies().Do(c)
+			return err
+		}),
+		chromedp.Evaluate(`(() => ({ origin: location.origin, localStorage: Object.entries(localStorage).map(([name,value]) => ({name,value})) }))()`, &current),
+	); err != nil {
+		return nil, fmt.Errorf("capture renewed website session: %w", err)
+	}
+	parsed, err := url.Parse(strings.TrimSpace(current.Origin))
+	if err != nil || parsed.Scheme != "https" || parsed.User != nil || !hostAllowed(parsed.Hostname(), b.allowed) {
+		return nil, ErrOutsideBoundary
+	}
+	if err := netguard.CheckPublicContext(runCtx, parsed.String()); err != nil {
+		return nil, fmt.Errorf("renewed website origin is not public: %w", err)
+	}
+
+	nextCookies := make([]storageCookie, 0, len(cookies))
+	for _, cookie := range cookies {
+		if cookie == nil || cookie.Name == "" || !cookieDomainAllowed(cookie.Domain, b.allowed) {
+			continue
+		}
+		expires := cookie.Expires
+		if cookie.Session {
+			expires = -1
+		}
+		path := cookie.Path
+		if path == "" {
+			path = "/"
+		}
+		nextCookies = append(nextCookies, storageCookie{
+			Name: cookie.Name, Value: cookie.Value, Domain: cookie.Domain, Path: path,
+			Expires: expires, HTTPOnly: cookie.HTTPOnly, Secure: cookie.Secure, SameSite: string(cookie.SameSite),
+		})
+	}
+	sort.Slice(nextCookies, func(i, j int) bool {
+		left, right := nextCookies[i], nextCookies[j]
+		if left.Domain != right.Domain {
+			return left.Domain < right.Domain
+		}
+		if left.Path != right.Path {
+			return left.Path < right.Path
+		}
+		return left.Name < right.Name
+	})
+	sort.Slice(current.LocalStorage, func(i, j int) bool { return current.LocalStorage[i].Name < current.LocalStorage[j].Name })
+
+	b.stateMu.Lock()
+	next := b.state
+	next.Cookies = nextCookies
+	found := false
+	for i := range next.Origins {
+		if next.Origins[i].Origin != current.Origin {
+			continue
+		}
+		found = true
+		if len(current.LocalStorage) == 0 {
+			next.Origins = append(next.Origins[:i], next.Origins[i+1:]...)
+		} else {
+			next.Origins[i] = current
+		}
+		break
+	}
+	if !found && len(current.LocalStorage) > 0 {
+		next.Origins = append(next.Origins, current)
+	}
+	sort.Slice(next.Origins, func(i, j int) bool { return next.Origins[i].Origin < next.Origins[j].Origin })
+	b.state = next
+	out, err := json.Marshal(next)
+	b.stateMu.Unlock()
+	if err != nil {
+		return nil, fmt.Errorf("encode renewed website session: %w", err)
+	}
+	return out, nil
 }
 
 func (b *chromiumBrowser) Observe(ctx context.Context) (Observation, error) {

@@ -60,6 +60,11 @@ func (r *recordingConnectionResolver) Resolve(_ context.Context, _, _, agentID, 
 	r.agentID = agentID
 	return authconnections.Lease{Kind: authconnections.KindBrowser, AllowedDomains: []string{"example.com"}, BrowserState: []byte(`{"cookies":[]}`)}, nil
 }
+func (r *recordingConnectionResolver) UpdateBrowserState(_ context.Context, _, _ string, update func([]byte) ([]byte, bool, error)) error {
+	_, _, err := update([]byte(`{"cookies":[]}`))
+	return err
+}
+func (*recordingConnectionResolver) MarkNeedsAuthentication(context.Context, string, string) {}
 
 type staticManagedBrowser struct{}
 
@@ -68,6 +73,9 @@ func (staticManagedBrowser) Observe(context.Context) (managedbrowser.Observation
 }
 func (staticManagedBrowser) Act(context.Context, managedbrowser.Action) (managedbrowser.Observation, error) {
 	return managedbrowser.Observation{URL: "https://example.com/", Elements: []managedbrowser.Element{}}, nil
+}
+func (staticManagedBrowser) StorageState(context.Context) ([]byte, error) {
+	return []byte(`{"cookies":[]}`), nil
 }
 func (staticManagedBrowser) Close() error { return nil }
 
