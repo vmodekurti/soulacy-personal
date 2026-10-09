@@ -35,16 +35,17 @@ import (
 // BuilderUnderstanding is the structured spec the builder LLM builds up over
 // the course of a conversation. It maps directly to a SOUL.yaml on generation.
 type BuilderUnderstanding struct {
-	Name         string          `json:"name"`
-	Description  string          `json:"description"`
-	Confidence   float64         `json:"confidence"`
-	Trigger      *BuilderTrigger `json:"trigger"`
-	Purpose      string          `json:"purpose"`
-	SystemPrompt string          `json:"system_prompt"`
-	Tools        []BuilderTool   `json:"tools"`
-	Memory       *BuilderMemory  `json:"memory"`
-	Outputs      []BuilderOutput `json:"outputs"`
-	Missing      []string        `json:"missing"`
+	Name         string              `json:"name"`
+	Description  string              `json:"description"`
+	Confidence   float64             `json:"confidence"`
+	Trigger      *BuilderTrigger     `json:"trigger"`
+	Purpose      string              `json:"purpose"`
+	SystemPrompt string              `json:"system_prompt"`
+	Tools        []BuilderTool       `json:"tools"`
+	Connections  []BuilderConnection `json:"connections"`
+	Memory       *BuilderMemory      `json:"memory"`
+	Outputs      []BuilderOutput     `json:"outputs"`
+	Missing      []string            `json:"missing"`
 }
 
 // BuilderTrigger describes how the agent is activated.
@@ -58,6 +59,25 @@ type BuilderTrigger struct {
 type BuilderTool struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+}
+
+// BuilderConnection is a secret-free Website Access choice. The connection ID
+// is persisted in the agent definition, while cookies and tokens remain in the
+// encrypted credential vault.
+type BuilderConnection struct {
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	Domains []string `json:"domains"`
+	Ready   bool     `json:"ready"`
+}
+
+// BuilderEnvironment describes the capabilities visible while drafting. The
+// prompt is human-readable guidance for the model; WebsiteConnections are also
+// supplied structurally so explicit user routing choices can be enforced after
+// generation instead of trusting the model to preserve them.
+type BuilderEnvironment struct {
+	Prompt             string
+	WebsiteConnections []BuilderConnection
 }
 
 // BuilderMemory describes the agent's memory requirements.
@@ -99,20 +119,21 @@ type builderSession struct {
 // agents (python files in ~/.soulacy/tools/, MCP server tools, built-ins).
 // When non-empty, it's injected as an extra system message so the Builder LLM
 // picks REAL tool names instead of inventing mcp__* placeholders.
-func (e *Engine) BuilderChat(ctx context.Context, sessionID, message, provider, catalog string) (*BuilderResponse, error) {
+func (e *Engine) BuilderChat(ctx context.Context, sessionID, message, provider string, environment BuilderEnvironment) (*BuilderResponse, error) {
 	sess := e.getOrCreateBuilderSession(sessionID)
 
 	sess.mu.Lock()
 	sess.History = append(sess.History, llm.ChatMessage{Role: "user", Content: message})
 	trimBuilderHistoryLocked(sess)
+	history := append([]llm.ChatMessage(nil), sess.History...)
 	msgs := buildBuilderMessages(sess.History)
 	if brief := understandingBrief(sess.Understanding); brief != "" {
 		msgs = append([]llm.ChatMessage{msgs[0], {Role: "system", Content: brief}}, msgs[1:]...)
 	}
-	if catalog != "" {
+	if environment.Prompt != "" {
 		// Inject AFTER the system prompt, BEFORE the conversation history, so
 		// every turn sees the catalog without baking it into stored history.
-		header := llm.ChatMessage{Role: "system", Content: catalog}
+		header := llm.ChatMessage{Role: "system", Content: environment.Prompt}
 		msgs = append([]llm.ChatMessage{msgs[0], header}, msgs[1:]...)
 	}
 	sess.mu.Unlock()
@@ -179,6 +200,12 @@ func (e *Engine) BuilderChat(ctx context.Context, sessionID, message, provider, 
 	if strings.TrimSpace(reply) == "" {
 		reply = "Sorry — I did not manage to get that out. Could you say it again, or add a little more detail?"
 	}
+
+	// A user's explicit choice of Website Access is a constraint, not a hint.
+	// Ground it against the live secret-free connection catalog after every
+	// model turn so clarification cannot silently replace it with web search,
+	// direct fetches, or an MCP server with a separate signed-out browser.
+	applyWebsiteAccessIntent(understanding, history, environment.WebsiteConnections)
 
 	sess.mu.Lock()
 	// Store what the assistant actually said, not the raw model output. A
@@ -382,6 +409,17 @@ func understandingBrief(u *BuilderUnderstanding) string {
 		}
 		add("Tools", strings.Join(names, ", "))
 	}
+	if len(u.Connections) > 0 {
+		names := make([]string, 0, len(u.Connections))
+		for _, connection := range u.Connections {
+			status := "ready"
+			if !connection.Ready {
+				status = "needs sign-in"
+			}
+			names = append(names, connection.Name+" ("+status+")")
+		}
+		add("Website Access", strings.Join(names, ", "))
+	}
 	if len(u.Outputs) > 0 {
 		chans := make([]string, 0, len(u.Outputs))
 		for _, o := range u.Outputs {
@@ -489,6 +527,19 @@ var builderResponseSchema = map[string]any{
 							"description": map[string]any{"type": "string"},
 						},
 						"required": []string{"name", "description"},
+					},
+				},
+				"connections": map[string]any{
+					"type": "array",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"id":      map[string]any{"type": "string"},
+							"name":    map[string]any{"type": "string"},
+							"domains": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+							"ready":   map[string]any{"type": "boolean"},
+						},
+						"required": []string{"id", "name", "domains", "ready"},
 					},
 				},
 				"memory": map[string]any{
@@ -644,6 +695,18 @@ func generateSOULYAML(u *BuilderUnderstanding, provider, model string) string {
 		}
 		toolsBlock = sb.String()
 	}
+	connectionsBlock := ""
+	if len(u.Connections) > 0 {
+		var sb strings.Builder
+		sb.WriteString("\n# Approved Website Access sessions. Secret state remains encrypted.")
+		sb.WriteString("\nconnections:")
+		for _, connection := range u.Connections {
+			if strings.TrimSpace(connection.ID) != "" {
+				sb.WriteString(fmt.Sprintf("\n  - %s", connection.ID))
+			}
+		}
+		connectionsBlock = sb.String()
+	}
 
 	readScopes := "[session]"
 	writeScopes := "[session]"
@@ -680,11 +743,18 @@ func generateSOULYAML(u *BuilderUnderstanding, provider, model string) string {
 		out.WriteString(toolsBlock)
 		out.WriteString("\n")
 	}
+	if connectionsBlock != "" {
+		out.WriteString(connectionsBlock)
+		out.WriteString("\n")
+	}
+	if missionBlock := missionYAML(builderMissionContract(u, id)); missionBlock != "" {
+		out.WriteString(missionBlock)
+	}
 	out.WriteString("\nmemory:\n")
 	out.WriteString(fmt.Sprintf("  read_scopes: %s\n", readScopes))
 	out.WriteString(fmt.Sprintf("  write_scopes: %s\n", writeScopes))
 	out.WriteString("  max_tokens: 50\n")
-	out.WriteString("\nmax_turns: 10\n")
+	out.WriteString("\nmax_turns: 25\n")
 	out.WriteString("enabled: true\n")
 
 	return out.String()
@@ -760,6 +830,9 @@ func understandingToAgentMap(u *BuilderUnderstanding, provider, model string) ma
 		"max_turns": 25,
 		"enabled":   true,
 	}
+	if mission := builderMissionContract(u, id); mission != nil {
+		m["mission"] = mission
+	}
 	if trigger == "channel" && len(channels) > 0 {
 		m["channels"] = channels
 	}
@@ -777,6 +850,17 @@ func understandingToAgentMap(u *BuilderUnderstanding, provider, model string) ma
 			names[i] = t.Name
 		}
 		m["tool_names"] = names
+	}
+	if len(u.Connections) > 0 {
+		ids := make([]string, 0, len(u.Connections))
+		for _, connection := range u.Connections {
+			if id := strings.TrimSpace(connection.ID); id != "" {
+				ids = append(ids, id)
+			}
+		}
+		if len(ids) > 0 {
+			m["connections"] = ids
+		}
 	}
 	return m
 }
@@ -854,6 +938,7 @@ Return ONLY this JSON object. No prose before or after. No code fences. No markd
     "channels": ["http", "telegram", ...]
   } | null,
   "tools":   [{"name": "kebab-case", "description": "..."}],
+  "connections": [{"id": "exact connection id", "name": "display name", "domains": ["example.com"], "ready": true}],
   "memory":  {"needs": true | false | null, "scope": "session" | "global" | null} | null,
   "outputs": [{"channel": "telegram | http | ...", "description": "..."}],
   "missing": ["short label for each thing still unclear"]
@@ -868,6 +953,15 @@ The "system_prompt" field is the actual instructions the deployed agent will see
 - If the user said "send to Telegram chat 8546291328", put that exact ID into system_prompt and mention it in the tool's description.
 - Multi-paragraph system_prompts are encouraged when the user described a multi-step procedure. Don't compress.
 - Add a final "Important:" paragraph noting failure modes and constraints you inferred.
+
+## Website Access is a binding route
+Website Access connections are listed separately from tools in the live environment. They represent encrypted browser sessions already approved by the user.
+- When the user names a site that has a matching Website Access connection, select it in "connections[]" using its exact ID. The user does not need to ask for Website Access by name.
+- If the user explicitly says to use Website Access, preserve that direction as a binding route. Do not replace selected connections with web_search, fetch_url, http_request, or an MCP server.
+- Prefer an existing ready connection. Do not ask the user to sign in again when it is ready.
+- If a matching connection exists but is not ready, keep it in "connections[]" and add a refresh item to "missing".
+- State the selected connection names in the confirmation summary so the user can verify the route before creation.
+- For Website Access agents, instruct the agent to use authenticated_fetch for readable subscription pages and the managed website action tools for interactive work.
 
 ## Do not write the agent's instructions until you have what you need
 While you are still asking questions, set system_prompt to null. Writing the

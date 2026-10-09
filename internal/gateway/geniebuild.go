@@ -59,7 +59,8 @@ func (s *Server) BuildAgentForGenie(ctx context.Context, session, request string
 	}
 
 	provider, model := s.resolveProviderModel("", "")
-	resp, err := s.engine.BuilderChat(ctx, session, request, provider, s.buildToolCatalogPrompt())
+	environment := s.buildBuilderEnvironment(ctx, runtime.PersonalWorkspaceID, "admin")
+	resp, err := s.engine.BuilderChat(ctx, session, request, provider, environment)
 	if err != nil {
 		return nil, fmt.Errorf("build_agent: %w", err)
 	}
@@ -99,6 +100,9 @@ func (s *Server) BuildAgentForGenie(ctx context.Context, session, request string
 		Provider:         provider,
 		Model:            model,
 		ActivateSchedule: scheduleWanted,
+		WorkspaceID:      runtime.PersonalWorkspaceID,
+		Subject:          "admin",
+		Role:             "admin",
 		// Marked as Genie's, so list_monitors shows it and pause_monitor and
 		// cancel_monitor can act on it. Something the user cannot find again
 		// is not something they can stop.
