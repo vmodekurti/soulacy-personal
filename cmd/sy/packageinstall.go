@@ -68,9 +68,11 @@ type pythonVersion struct {
 }
 
 type nodeProject struct {
-	Name    string            `json:"name"`
-	Bin     json.RawMessage   `json:"bin"`
-	Scripts map[string]string `json:"scripts"`
+	Name                 string            `json:"name"`
+	Bin                  json.RawMessage   `json:"bin"`
+	Scripts              map[string]string `json:"scripts"`
+	Dependencies         map[string]string `json:"dependencies"`
+	OptionalDependencies map[string]string `json:"optionalDependencies"`
 }
 
 // mcpPackage is one independently runnable server inside a Git repository.
@@ -99,7 +101,7 @@ func buildPackageCmd() *cobra.Command {
 
 The installer detects SKILL.md or MCP package manifests, runs safety
 introspection, installs into the persistent Soulacy workspace, registers MCP
-servers in the live config, and skips packages that are already installed.
+servers in the live config, and repairs managed runtime assets when repeated.
 Raw Git sources are not cryptographically signed, so non-interactive callers
 must explicitly pass --allow-unverified.`,
 		Args: cobra.ExactArgs(1),
@@ -499,6 +501,7 @@ func installMCPFromRepository(ctx context.Context, source, probe string, assumeY
 		dest           string
 		envRefs        map[string]string
 		repairLauncher string
+		repairRuntime  bool
 	}
 	seenIDs := map[string]string{}
 	var plans []installPlan
@@ -520,8 +523,11 @@ func installMCPFromRepository(ctx context.Context, source, probe string, assumeY
 			if commandNode := yamlMapValue(existing, "command"); commandNode != nil {
 				command = commandNode.Value
 			}
-			if kind := legacyManagedLauncherKind(dest, command); kind != "" {
-				plans = append(plans, installPlan{pkg: pkg, id: id, dest: dest, repairLauncher: kind})
+			kind := legacyManagedLauncherKind(dest, command)
+			if kind != "" || managedMCPInstallOwned(dest, command) {
+				plans = append(plans, installPlan{
+					pkg: pkg, id: id, dest: dest, repairLauncher: kind, repairRuntime: true,
+				})
 				continue
 			}
 			fmt.Printf("✓ MCP server %q is already registered; skipping it.\n", id)
@@ -583,17 +589,26 @@ func installMCPFromRepository(ctx context.Context, source, probe string, assumeY
 	}()
 
 	for _, plan := range plans {
-		if plan.repairLauncher != "" {
-			line := `exec "${0%/*}/../venv/bin/python" "$@"`
-			if plan.repairLauncher != "python" {
-				line = `exec ` + plan.repairLauncher + ` "$@"`
-			}
-			launcher, repairErr := writeManagedMCPLauncher(plan.dest, plan.repairLauncher, line)
+		if plan.repairRuntime {
+			browser, repairErr := ensureMCPBrowserRuntime(ctx, filepath.Join(plan.dest, "source"), filepath.Join(plan.dest, "venv"))
 			if repairErr != nil {
-				return fmt.Errorf("repair MCP server %q launcher: %w", plan.id, repairErr)
+				return fmt.Errorf("repair MCP server %q runtime: %w", plan.id, repairErr)
 			}
-			createdFiles = append(createdFiles, launcher)
-			setScalar(yamlMapValue(servers, plan.id), "command", launcher, yaml.DoubleQuotedStyle)
+			if browser != "" {
+				fmt.Printf("✓ Browser runtime for MCP server %q is ready (%s).\n", plan.id, browser)
+			}
+			if plan.repairLauncher != "" {
+				line := `exec "${0%/*}/../venv/bin/python" "$@"`
+				if plan.repairLauncher != "python" {
+					line = `exec ` + plan.repairLauncher + ` "$@"`
+				}
+				launcher, repairErr := writeManagedMCPLauncher(plan.dest, plan.repairLauncher, line)
+				if repairErr != nil {
+					return fmt.Errorf("repair MCP server %q launcher: %w", plan.id, repairErr)
+				}
+				createdFiles = append(createdFiles, launcher)
+				setScalar(yamlMapValue(servers, plan.id), "command", launcher, yaml.DoubleQuotedStyle)
+			}
 			continue
 		}
 		sourceDir := filepath.Join(plan.dest, "source")
@@ -608,6 +623,13 @@ func installMCPFromRepository(ctx context.Context, source, probe string, assumeY
 		command, args, installErr := installMCPRuntime(ctx, plan.dest, sourceDir, plan.pkg.Entrypoint)
 		if installErr != nil {
 			return fmt.Errorf("install MCP server %q from %s: %w", plan.id, plan.pkg.RelDir, installErr)
+		}
+		browser, browserErr := ensureMCPBrowserRuntime(ctx, sourceDir, filepath.Join(plan.dest, "venv"))
+		if browserErr != nil {
+			return fmt.Errorf("install MCP server %q browser runtime: %w", plan.id, browserErr)
+		}
+		if browser != "" {
+			fmt.Printf("✓ Browser runtime for MCP server %q is ready (%s).\n", plan.id, browser)
 		}
 		if plan.pkg.Entrypoint != "" {
 			if verifyErr := verifyScriptMCPStartup(ctx, command, args); verifyErr != nil {
@@ -638,6 +660,10 @@ func installMCPFromRepository(ctx context.Context, source, probe string, assumeY
 			fmt.Printf("✓ Repaired managed launcher for MCP server %q.\n", plan.id)
 			continue
 		}
+		if plan.repairRuntime {
+			fmt.Printf("✓ Checked managed runtime for MCP server %q.\n", plan.id)
+			continue
+		}
 		fmt.Printf("✓ Installed and registered MCP server %q from %s.\n", plan.id, plan.pkg.RelDir)
 		if len(plan.envRefs) > 0 {
 			fmt.Printf("  Vault-backed environment; configure missing values in Secrets: %s\n", strings.Join(sortedKeys(plan.envRefs), ", "))
@@ -646,6 +672,100 @@ func installMCPFromRepository(ctx context.Context, source, probe string, assumeY
 	fmt.Printf("✓ Registered %d MCP server(s) atomically in %s.\n", len(plans), ws.ConfigFile)
 	fmt.Println("✓ Config was written atomically; the gateway will hot-reload it.")
 	return nil
+}
+
+func managedMCPInstallOwned(dest, command string) bool {
+	if !fileExists(filepath.Join(dest, "source", "package.json")) &&
+		!fileExists(filepath.Join(dest, "source", "pyproject.toml")) &&
+		!fileExists(filepath.Join(dest, "source", "mcp_server.py")) {
+		return false
+	}
+	if command == "" || !filepath.IsAbs(command) {
+		return false
+	}
+	rel, err := filepath.Rel(dest, filepath.Clean(command))
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// ensureMCPBrowserRuntime installs the exact Chromium revision required by an
+// MCP package's browser automation library. npm and pip install the library,
+// but Playwright-compatible projects intentionally leave browser payloads to a
+// separate command. Running the package-local command is version-safe and
+// idempotent, and PLAYWRIGHT_BROWSERS_PATH keeps the payload on Soulacy's
+// persistent volume in managed deployments.
+func ensureMCPBrowserRuntime(ctx context.Context, sourceDir, venv string) (string, error) {
+	manager := ""
+	command := ""
+	var args []string
+
+	if manifest := filepath.Join(sourceDir, "package.json"); fileExists(manifest) {
+		var project nodeProject
+		b, err := os.ReadFile(manifest)
+		if err != nil || json.Unmarshal(b, &project) != nil {
+			return "", fmt.Errorf("read package.json while checking browser runtime")
+		}
+		for _, candidate := range []string{"patchright", "playwright"} {
+			if _, ok := project.Dependencies[candidate]; !ok {
+				if _, optional := project.OptionalDependencies[candidate]; !optional {
+					continue
+				}
+			}
+			manager = candidate
+			command = filepath.Join(sourceDir, "node_modules", ".bin", candidate)
+			args = []string{"install", "chromium"}
+			break
+		}
+	} else if manifest := filepath.Join(sourceDir, "pyproject.toml"); fileExists(manifest) {
+		var project pythonProject
+		b, err := os.ReadFile(manifest)
+		if err != nil || toml.Unmarshal(b, &project) != nil {
+			return "", fmt.Errorf("read pyproject.toml while checking browser runtime")
+		}
+		for _, dependency := range project.Project.Dependencies {
+			name := pythonDependencyName(dependency)
+			if name == "patchright" || name == "playwright" {
+				manager = name
+				command = filepath.Join(venv, "bin", "python")
+				args = []string{"-m", name, "install", "chromium"}
+				break
+			}
+		}
+	} else if requirements := filepath.Join(sourceDir, "requirements.txt"); fileExists(requirements) {
+		b, err := os.ReadFile(requirements)
+		if err != nil {
+			return "", fmt.Errorf("read requirements.txt while checking browser runtime: %w", err)
+		}
+		for _, dependency := range strings.Fields(string(b)) {
+			name := pythonDependencyName(dependency)
+			if name == "patchright" || name == "playwright" {
+				manager = name
+				command = filepath.Join(venv, "bin", "python")
+				args = []string{"-m", name, "install", "chromium"}
+				break
+			}
+		}
+	}
+	if manager == "" {
+		return "", nil
+	}
+	if !fileExists(command) {
+		return "", fmt.Errorf("%s is declared but its package-local installer is missing at %s", manager, command)
+	}
+	installCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	out, err := exec.CommandContext(installCtx, command, args...).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("install %s Chromium payload: %v: %s", manager, err, tailText(string(out), 4000))
+	}
+	return manager + " Chromium", nil
+}
+
+func pythonDependencyName(requirement string) string {
+	requirement = strings.ToLower(strings.TrimSpace(requirement))
+	if cut := strings.IndexAny(requirement, "[<>=!~; "); cut >= 0 {
+		requirement = requirement[:cut]
+	}
+	return strings.ReplaceAll(requirement, "_", "-")
 }
 
 // legacyManagedLauncherKind identifies registrations written by older package
