@@ -48,10 +48,11 @@ sy --gateway https://beta.soulacy.io \
 
 ### Open Notebook
 
-The MCP page has a first-party card for a local Open Notebook instance. It
-checks the loopback API and connects the separately installed
-`open-notebook-mcp` adapter. The adapter is not included in the Soulacy
-deployment or normal release archive. You can also run:
+Open Notebook is an optional integration. On the MCP page, select **Add
+server**, then choose **Connect Open Notebook** to check the loopback API and
+connect the separately installed `open-notebook-mcp` adapter. The adapter is
+not included in the Soulacy deployment or normal release archive. You can also
+run:
 
 ```bash
 sy mcp add-open-notebook

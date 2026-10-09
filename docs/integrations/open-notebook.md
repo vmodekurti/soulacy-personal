@@ -30,7 +30,7 @@ go install github.com/soulacy/soulacy/cmd/open-notebook-mcp@latest
 
 Make the resulting executable available on the gateway's `PATH`, or place it beside the `soulacy` executable. The normal `make install`, installer, container image, and Soulacy release archives do not include it.
 
-Then open **MCP Servers** in the Soulacy GUI. The Open Notebook card checks `http://127.0.0.1:5055` and reports the API, standalone adapter, and Soulacy connection independently. When both local components are healthy, click **Connect Open Notebook**.
+Then open **MCP Servers** in the Soulacy GUI, select **Add server**, and choose **Connect Open Notebook**. Soulacy checks `http://127.0.0.1:5055` and reports the API, standalone adapter, and Soulacy connection independently. When both local components are healthy, click **Connect**.
 
 The CLI performs the same registration:
 
@@ -58,7 +58,7 @@ sy mcp add-open-notebook \
   --audio-listen 127.0.0.1:18791
 ```
 
-Use the MagicDNS hostname shown by `tailscale status`. The same values can be saved from the Open Notebook card on the **MCP Servers** page.
+Use the MagicDNS hostname shown by `tailscale status`. The same values can be saved from **Add server** > **Connect Open Notebook** on the **MCP Servers** page.
 
 This creates two separate paths:
 
