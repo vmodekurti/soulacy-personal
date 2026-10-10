@@ -35,18 +35,26 @@ func completeTaskContract(contract *taskcontract.Contract, reply *message.Messag
 }
 
 func (e *Engine) continuePrematureFinal(def *agent.Definition, sess *Session, msg message.Message, contract *taskcontract.Contract, content string, turn, maxTurns int) ([]llm.ChatMessage, bool) {
-	if def.LLM.OutputSchema != nil || (!reasoning.IsProgressPreamble(content) && !reasoning.IsInternalScratchNarration(content)) {
+	empty := strings.TrimSpace(content) == ""
+	if !empty && (def.LLM.OutputSchema != nil || (!reasoning.IsProgressPreamble(content) && !reasoning.IsInternalScratchNarration(content))) {
 		return nil, false
 	}
 	if turn+1 >= maxTurns {
-		contract.MarkIncomplete("the agent ended by describing work it had not performed")
+		if !empty {
+			contract.MarkIncomplete("the agent ended by describing work it had not performed")
+		}
 		return nil, false
 	}
+	directive := "That response describes unfinished work. Continue the current run now. Use the available tools for the next concrete action. Return a final answer only after the work is complete, or report a specific blocker if it cannot be completed."
+	turns := make([]llm.ChatMessage, 0, 2)
+	if empty {
+		directive = "You returned no answer and the current run is not complete. Continue the same run now. Use the available tools for the next concrete action. Return a final answer only after the goal is complete, or report a specific blocker if no approved route can finish it."
+	} else {
+		turns = append(turns, llm.ChatMessage{Role: "assistant", Content: content})
+	}
+	turns = append(turns, llm.ChatMessage{Role: "system", Content: directive})
 	sess.mu.Lock()
-	e.appendHistoryLocked(sess,
-		llm.ChatMessage{Role: "assistant", Content: content},
-		llm.ChatMessage{Role: "system", Content: "That response describes unfinished work. Continue the current run now. Use the available tools for the next concrete action. Return a final answer only after the work is complete, or report a specific blocker if it cannot be completed."},
-	)
+	e.appendHistoryLocked(sess, turns...)
 	sess.mu.Unlock()
 	return e.buildContext(def, sess, msg), true
 }

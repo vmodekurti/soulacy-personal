@@ -952,6 +952,71 @@ func TestHandleContinuesAfterForwardLookingSearchProgress(t *testing.T) {
 	}
 }
 
+func TestHandleContinuesAfterEmptyTurnInsteadOfSynthesizingEarly(t *testing.T) {
+	e, provider := newHandleTestEngine(t, &agent.Definition{
+		ID: "scheduled-podcast", Name: "Scheduled Podcast", Enabled: true,
+		LLM: agent.LLMConfig{Provider: "test", Model: "fake-model"}, MaxTurns: 3,
+		Builtins: strListPtr("web_search"),
+	})
+	e.builtins = []BuiltinTool{{Name: "web_search", Parameters: map[string]any{"type": "object"}, Handler: func(context.Context, map[string]any) (string, error) {
+		return `{"results":["article one"]}`, nil
+	}}}
+	provider.responses = []llm.CompletionResponse{
+		{
+			Content:   "I'll start today's podcast curation by searching for trending articles.",
+			ToolCalls: []message.ToolCall{{ID: "search-1", Name: "web_search", Arguments: map[string]any{"query": "AI"}}},
+		},
+		{Content: ""},
+		{Content: "The podcast workflow completed and the verified listening link was delivered."},
+	}
+
+	reply, err := e.Handle(context.Background(), testUserMessage("scheduled-podcast", "scheduled-empty-turn", "Create today's podcast"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := flattenParts(reply.Parts); !strings.HasPrefix(got, "The podcast workflow completed") {
+		t.Fatalf("reply = %q", got)
+	}
+	requests := provider.requestsSnapshot()
+	if len(requests) != 3 || len(requests[2].Tools) == 0 {
+		t.Fatalf("empty execution turn triggered early synthesis instead of another tool-capable turn: %#v", requests)
+	}
+	if !chatMessagesContain(requests[2].Messages, "system", "returned no answer") {
+		t.Fatalf("continuation turn lacks the empty-response recovery directive: %#v", requests[2].Messages)
+	}
+}
+
+func TestHandleMarksRecoveredPlanningSentenceIncomplete(t *testing.T) {
+	e, provider := newHandleTestEngine(t, &agent.Definition{
+		ID: "scheduled-podcast", Name: "Scheduled Podcast", Enabled: true,
+		LLM: agent.LLMConfig{Provider: "test", Model: "fake-model"}, MaxTurns: 2,
+		Builtins: strListPtr("web_search"),
+	})
+	e.builtins = []BuiltinTool{{Name: "web_search", Parameters: map[string]any{"type": "object"}, Handler: func(context.Context, map[string]any) (string, error) {
+		return `{"results":["article one"]}`, nil
+	}}}
+	provider.responses = []llm.CompletionResponse{
+		{
+			Content:   "I'll start today's podcast curation by searching for trending articles from the three sources. Let me run several searches in parallel.",
+			ToolCalls: []message.ToolCall{{ID: "search-1", Name: "web_search", Arguments: map[string]any{"query": "AI"}}},
+		},
+		{Content: ""},
+		{Content: "", OutputTokens: 100},
+		{Content: "", OutputTokens: 100},
+	}
+
+	reply, err := e.Handle(context.Background(), testUserMessage("scheduled-podcast", "scheduled-recovered-plan", "Create today's podcast"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reply.Metadata[message.MetaTaskState] != "incomplete" || reply.Metadata[message.MetaTaskOutcome] != taskcontract.OutcomeIncomplete {
+		t.Fatalf("recovered planning text was recorded as success: %#v", reply.Metadata)
+	}
+	if !strings.Contains(flattenParts(reply.Parts), "This run is incomplete") {
+		t.Fatalf("reply does not disclose incomplete recovery: %q", flattenParts(reply.Parts))
+	}
+}
+
 func TestHandleMarksExhaustedProgressIncomplete(t *testing.T) {
 	e, provider := newHandleTestEngine(t, &agent.Definition{
 		ID: "scheduled-research", Name: "Scheduled Research", Enabled: true,
