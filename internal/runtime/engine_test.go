@@ -15,6 +15,7 @@ import (
 	"github.com/soulacy/soulacy/internal/knowledge"
 	"github.com/soulacy/soulacy/internal/llm"
 	"github.com/soulacy/soulacy/internal/memory"
+	"github.com/soulacy/soulacy/internal/taskcontract"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 	"github.com/soulacy/soulacy/pkg/skill"
@@ -915,8 +916,62 @@ func TestHandleRejectsInternalScratchNarrationAndSynthesizesAnswer(t *testing.T)
 		t.Fatalf("internal scratch narration leaked: %q", got)
 	}
 	reqs := provider.requestsSnapshot()
-	if len(reqs) != 3 || len(reqs[2].Tools) != 0 {
-		t.Fatalf("expected a third, tool-free synthesis request; requests=%d", len(reqs))
+	if len(reqs) != 3 || len(reqs[2].Tools) == 0 {
+		t.Fatalf("expected a third tool-capable execution turn; requests=%d", len(reqs))
+	}
+	if !chatMessagesContain(reqs[2].Messages, "system", "unfinished work") {
+		t.Fatalf("continuation turn lacks the runtime completion directive: %#v", reqs[2].Messages)
+	}
+}
+
+func TestHandleContinuesAfterForwardLookingSearchProgress(t *testing.T) {
+	e, provider := newHandleTestEngine(t, &agent.Definition{
+		ID: "scheduled-research", Name: "Scheduled Research", Enabled: true,
+		LLM: agent.LLMConfig{Provider: "test", Model: "fake-model"}, MaxTurns: 3,
+		Builtins: strListPtr("web_search"),
+	})
+	e.builtins = []BuiltinTool{{Name: "web_search", Parameters: map[string]any{"type": "object"}, Handler: func(context.Context, map[string]any) (string, error) {
+		return `{"results":["article one"]}`, nil
+	}}}
+	provider.responses = []llm.CompletionResponse{
+		{ToolCalls: []message.ToolCall{{ID: "search-1", Name: "web_search", Arguments: map[string]any{"query": "AI"}}}},
+		{Content: "Good results. Today appears to be around October 9, 2026. Let me search for a few more specific topics to make sure I select the best articles."},
+		{Content: "I selected three current articles and summarized their findings."},
+	}
+
+	reply, err := e.Handle(context.Background(), testUserMessage("scheduled-research", "scheduled-progress", "Find today's articles"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := flattenParts(reply.Parts); !strings.HasPrefix(got, "I selected three current articles") {
+		t.Fatalf("reply = %q", got)
+	}
+	requests := provider.requestsSnapshot()
+	if len(requests) != 3 || len(requests[2].Tools) == 0 {
+		t.Fatalf("progress response ended the run instead of continuing: %#v", requests)
+	}
+}
+
+func TestHandleMarksExhaustedProgressIncomplete(t *testing.T) {
+	e, provider := newHandleTestEngine(t, &agent.Definition{
+		ID: "scheduled-research", Name: "Scheduled Research", Enabled: true,
+		LLM: agent.LLMConfig{Provider: "test", Model: "fake-model"}, MaxTurns: 1,
+		Builtins: strListPtr("web_search"),
+	})
+	provider.responses = []llm.CompletionResponse{{Content: "Let me search for a few more specific topics."}}
+
+	reply, err := e.Handle(context.Background(), testUserMessage("scheduled-research", "scheduled-incomplete", "Find today's articles"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reply.Metadata[message.MetaTaskState] != "incomplete" || reply.Metadata[message.MetaTaskOutcome] != taskcontract.OutcomeIncomplete {
+		t.Fatalf("task metadata = %#v", reply.Metadata)
+	}
+	if reply.Metadata[message.MetaReasoningDegraded] != "true" {
+		t.Fatalf("incomplete result must be marked degraded: %#v", reply.Metadata)
+	}
+	if !strings.Contains(flattenParts(reply.Parts), "This run is incomplete") {
+		t.Fatalf("reply does not explain the terminal state: %q", flattenParts(reply.Parts))
 	}
 }
 func TestHandleRetriesInvalidStructuredOutput(t *testing.T) {

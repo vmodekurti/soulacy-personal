@@ -534,21 +534,31 @@ func (s *Scheduler) fireAt(agentID, triggerType string, scheduledAt time.Time) {
 		}
 		return
 	}
+	completed, incompleteReason := scheduledRunCompleted(reply.Metadata)
 	if isCron {
-		s.recordFireResult(agentID, true) // success resets the failure streak
-		s.markScheduleCompleted(agentID, scheduledAt)
-		// Push a heads-up that the scheduled run completed (Epic 8). Best-effort,
-		// no-op when push isn't configured.
 		schedAgentName := agentID
 		if def != nil && def.Name != "" {
 			schedAgentName = def.Name
 		}
-		webpush.NotifyDefault(webpush.Notification{
-			Title: "Scheduled run completed",
-			Body:  schedAgentName + " finished its scheduled run.",
-			URL:   "/#mobile",
-			Tag:   "sched-" + agentID,
-		})
+		if completed {
+			s.recordFireResult(agentID, true)
+			s.markScheduleCompleted(agentID, scheduledAt)
+			webpush.NotifyDefault(webpush.Notification{
+				Title: "Scheduled run completed",
+				Body:  schedAgentName + " finished its scheduled run.",
+				URL:   "/#mobile",
+				Tag:   "sched-" + agentID,
+			})
+		} else {
+			disabled, failures := s.recordFireResult(agentID, false)
+			s.reportRunIncomplete(def, msg, triggerType, incompleteReason, elapsed, failures, disabled)
+			webpush.NotifyDefault(webpush.Notification{
+				Title: "Scheduled run needs attention",
+				Body:  schedAgentName + " stopped before completing its goal.",
+				URL:   "/#mobile",
+				Tag:   "sched-" + agentID,
+			})
+		}
 	}
 	replyText := ""
 	for _, p := range reply.Parts {
@@ -570,6 +580,35 @@ func (s *Scheduler) fireAt(agentID, triggerType string, scheduledAt time.Time) {
 			return replyText
 		}()),
 	)
+}
+
+// scheduledRunCompleted interprets the runtime's authoritative task contract.
+// Replies from older runtimes have no task metadata, so their historical
+// non-degraded behavior remains compatible during rolling upgrades.
+func scheduledRunCompleted(meta map[string]string) (bool, string) {
+	if meta == nil {
+		return true, ""
+	}
+	state := strings.TrimSpace(meta[message.MetaTaskState])
+	if state == "" {
+		if strings.EqualFold(meta[message.MetaReasoningDegraded], "true") {
+			return false, firstNonEmpty(meta[message.MetaOutcomeSummary], "the run ended without a verified completion")
+		}
+		return true, ""
+	}
+	if state == "completed" {
+		return true, ""
+	}
+	return false, firstNonEmpty(meta[message.MetaTaskBlocker], meta[message.MetaOutcomeSummary], "runtime state is "+state)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (s *Scheduler) reportRunFailure(def *agent.Definition, source message.Message, triggerType string, runErr error, elapsed time.Duration, consecutiveFailures int, autoDisabled bool) {
@@ -610,6 +649,27 @@ func (s *Scheduler) reportRunFailure(def *agent.Definition, source message.Messa
 				"runbook":              "The scheduler quarantined this cron agent after repeated failures. Fix the agent, then re-enable it from Studio or Agents.",
 			},
 		})
+	}
+}
+
+func (s *Scheduler) reportRunIncomplete(def *agent.Definition, source message.Message, triggerType, reason string, elapsed time.Duration, consecutiveFailures int, autoDisabled bool) {
+	if def == nil {
+		return
+	}
+	s.mu.Lock()
+	sink := s.sink
+	s.mu.Unlock()
+	if sink == nil {
+		return
+	}
+	payload := map[string]any{
+		"trigger": triggerType, "reason": reason, "elapsed_ms": elapsed.Milliseconds(),
+		"consecutive_failures": consecutiveFailures, "auto_disabled": autoDisabled,
+		"runbook": "Open Activity to review the missing completion evidence, then adjust the agent or its access before rerunning it.",
+	}
+	sink.Emit(message.Event{Type: "schedule.run_incomplete", AgentID: def.ID, SessionID: source.SessionID, Timestamp: time.Now().UTC(), Payload: payload})
+	if autoDisabled {
+		sink.Emit(message.Event{Type: "schedule.auto_disabled", AgentID: def.ID, SessionID: source.SessionID, Timestamp: time.Now().UTC(), Payload: payload})
 	}
 }
 
@@ -872,11 +932,23 @@ const degradedNotice = "⚠️ This run did not complete cleanly — a tool fail
 // unchanged for confident runs (and for replies carrying no such metadata, so
 // non-reasoning agents are untouched).
 func MarkDegradedReply(replyText string, meta map[string]string) (string, bool) {
-	if meta == nil || meta[message.MetaReasoningDegraded] != "true" {
+	if meta == nil {
+		return replyText, false
+	}
+	degraded := strings.EqualFold(meta[message.MetaReasoningDegraded], "true")
+	taskState := strings.TrimSpace(meta[message.MetaTaskState])
+	if !degraded && (taskState == "" || taskState == "completed") {
 		return replyText, false
 	}
 	if strings.TrimSpace(replyText) == "" {
 		return replyText, true
+	}
+	if taskState != "" && taskState != "completed" {
+		notice := "⚠️ This run stopped before completing its goal."
+		if blocker := strings.TrimSpace(meta[message.MetaTaskBlocker]); blocker != "" {
+			notice += " " + blocker + "."
+		}
+		return notice + "\n\n" + replyText, true
 	}
 	// A run that failed its BUSINESS-OUTCOME contract gets a specific notice
 	// naming what went unmet, rather than the generic "didn't complete cleanly".

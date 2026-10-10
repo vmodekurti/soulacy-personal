@@ -21,8 +21,10 @@ func builderMissionContract(u *BuilderUnderstanding, agentID string) *agent.Miss
 	}
 	text := strings.ToLower(strings.Join([]string{u.Purpose, u.Description, u.SystemPrompt}, "\n"))
 	checks := make([]agent.MissionCheck, 0, 5)
+	usesWebsiteAccess := len(u.Connections) > 0 || containsAnyBuilderPhrase(text,
+		"website access", "saved website", "authenticated session", "authenticated content")
 
-	if len(u.Connections) > 0 && containsAnyBuilderPhrase(text,
+	if usesWebsiteAccess && containsAnyBuilderPhrase(text,
 		"article", "research", "read ", "source", "trending", "subscription") {
 		checks = append(checks, agent.MissionCheck{
 			ID:          "website-content-read",
@@ -70,7 +72,7 @@ func effectiveBuilderMissionContract(def *agent.Definition) *agent.MissionContra
 		}
 		return def.Mission
 	}
-	if def.Labels["soulacy.owner"] != GenieAgentID || len(def.Connections) == 0 {
+	if def.Labels["soulacy.owner"] != GenieAgentID {
 		return nil
 	}
 	connections := make([]BuilderConnection, 0, len(def.Connections))
@@ -84,14 +86,15 @@ func effectiveBuilderMissionContract(def *agent.Definition) *agent.MissionContra
 }
 
 func builderNeedsInteractiveWebsite(u *BuilderUnderstanding, text string) bool {
-	if len(u.Connections) == 0 {
-		return false
-	}
 	for _, connection := range u.Connections {
 		identity := strings.ToLower(connection.Name + " " + strings.Join(connection.Domains, " "))
 		if strings.Contains(identity, "notebooklm") || strings.Contains(identity, "notebook.google") {
 			return true
 		}
+	}
+	if containsAnyBuilderPhrase(text, "notebooklm", "notebook.google", "website access") &&
+		containsAnyBuilderPhrase(text, "create a notebook", "add them to", "generate podcast", "generate audio") {
+		return true
 	}
 	return containsAnyBuilderPhrase(text,
 		"create a notebook", "add them to", "generate podcast", "generate audio",

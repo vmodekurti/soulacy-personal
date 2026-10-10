@@ -107,6 +107,28 @@ func TestExistingGenieAgentReceivesCompletionContractAfterUpgrade(t *testing.T) 
 	}
 }
 
+func TestExistingGenieAgentDerivesWebsiteMissionWithoutPinnedConnections(t *testing.T) {
+	def := &agent.Definition{
+		ID: "daily-tech-podcast", Description: "Read trending HBR articles using Website Access, add them to NotebookLM, generate a podcast, and return its audio link.",
+		Labels: map[string]string{"soulacy.owner": GenieAgentID},
+	}
+	contract := effectiveBuilderMissionContract(def)
+	if contract == nil {
+		t.Fatal("expected a compatibility mission for an automatically discovered Website Access route")
+	}
+	want := map[string]bool{"authenticated_fetch": false, "start_website_action": false, "inspect_website_action": false, "act_on_website": false}
+	for _, check := range contract.Acceptance {
+		if _, ok := want[check.Tool]; ok {
+			want[check.Tool] = true
+		}
+	}
+	for tool, found := range want {
+		if !found {
+			t.Errorf("mission is missing required tool check %q: %#v", tool, contract.Acceptance)
+		}
+	}
+}
+
 func TestBuilderMissionRetriesThenCompletes(t *testing.T) {
 	def := &agent.Definition{
 		ID: "podcast", Name: "Podcast", Enabled: true,

@@ -27,6 +27,7 @@ const (
 	OutcomeDirectAnswer = "direct_answer"
 	OutcomeEvidence     = "evidence_based"
 	OutcomeAttempted    = "attempted"
+	OutcomeIncomplete   = "incomplete"
 	OutcomeNeedsInput   = "needs_input"
 	OutcomeVerified     = "verified_action"
 	OutcomeBlocked      = "blocked"
@@ -173,6 +174,30 @@ func (c *Contract) Configure(strategy string, maxTurns, maxTokens, maxCalls int)
 	}
 }
 
+// Define replaces the transport-level trigger with the agent's actual goal and
+// completion criteria. Scheduled runs enter through a synthetic cron message,
+// so leaving the contract goal as "__trigger:cron__" makes the contract unable
+// to describe or enforce what the job was created to achieve.
+func (c *Contract) Define(goal string, criteria []string) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if goal = strings.TrimSpace(goal); goal != "" {
+		c.snapshot.Goal = bounded(redact.Text(goal), maxSummaryRunes)
+	}
+	clean := make([]string, 0, len(criteria))
+	for _, criterion := range criteria {
+		if criterion = strings.TrimSpace(criterion); criterion != "" {
+			clean = append(clean, bounded(redact.Text(criterion), maxSummaryRunes))
+		}
+	}
+	if len(clean) > 0 {
+		c.snapshot.CompletionCriteria = clean
+	}
+}
+
 // ObserveTool adds runtime evidence and schedules a bounded replan after a
 // failed route. A model's prose never calls this method.
 func (c *Contract) ObserveTool(call message.ToolCall, result string, failed bool) {
@@ -264,6 +289,20 @@ func (c *Contract) MarkBlocked(reason string) {
 	c.snapshot.Blocker = bounded(redact.Text(reason), maxSummaryRunes)
 }
 
+// MarkIncomplete records a terminal run that still describes work to be done.
+// It is intentionally distinct from a process failure and from a clean partial
+// business result: the runtime ended, but the agent did not reach a finish line.
+func (c *Contract) MarkIncomplete(reason string) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.snapshot.State = "incomplete"
+	c.snapshot.Outcome = OutcomeIncomplete
+	c.snapshot.Blocker = bounded(redact.Text(reason), maxSummaryRunes)
+}
+
 // Complete derives the terminal class from evidence observed by the runtime.
 func (c *Contract) Complete(runErr error, successful, degraded bool, now time.Time) Snapshot {
 	if c == nil {
@@ -277,8 +316,9 @@ func (c *Contract) Complete(runErr error, successful, degraded bool, now time.Ti
 		if runErr != nil {
 			c.snapshot.Blocker = bounded(redact.Text(runErr.Error()), maxSummaryRunes)
 		}
-	} else if c.snapshot.Outcome == OutcomeBlocked {
-		c.snapshot.State = "blocked"
+	} else if c.snapshot.Outcome == OutcomeBlocked || c.snapshot.Outcome == OutcomeIncomplete {
+		// Preserve an explicit terminal verdict set by deterministic runtime
+		// checks. A successful Go return must not overwrite it with completed.
 	} else {
 		c.snapshot.State = "completed"
 		switch {

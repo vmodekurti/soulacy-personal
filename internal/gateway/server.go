@@ -1324,12 +1324,12 @@ func (s *Server) buildApp() *fiber.App {
 	// Authenticated website state is write-only at the API boundary. Listing
 	// returns secret-free metadata, while session capture is encrypted directly
 	// into the credential vault.
-	api.Get("/authenticated-connections", s.rbacMW(rbac.ResourceCredentials, rbac.ActionList), s.handleListAuthenticatedConnections)
-	api.Post("/authenticated-connections", s.rbacMW(rbac.ResourceCredentials, rbac.ActionSet), s.handleCreateAuthenticatedConnection)
-	api.Put("/authenticated-connections/:id/session", s.credentialAudit("authenticated_connection.session.set"), s.rbacMW(rbac.ResourceCredentials, rbac.ActionSet), s.handleSetAuthenticatedConnectionSession)
+	api.Get("/authenticated-connections", s.rbacMW(rbac.ResourceWebsiteAccess, rbac.ActionList), s.handleListAuthenticatedConnections)
+	api.Post("/authenticated-connections", s.rbacMW(rbac.ResourceWebsiteAccess, rbac.ActionSet), s.handleCreateAuthenticatedConnection)
+	api.Put("/authenticated-connections/:id/session", s.credentialAudit("authenticated_connection.session.set"), s.rbacMW(rbac.ResourceWebsiteAccess, rbac.ActionSet), s.handleSetAuthenticatedConnectionSession)
 	api.Put("/authenticated-connections/:id/grants", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleSetAuthenticatedConnectionGrants)
-	api.Post("/authenticated-connections/:id/revoke", s.credentialAudit("authenticated_connection.revoke"), s.rbacMW(rbac.ResourceCredentials, rbac.ActionDelete), s.handleRevokeAuthenticatedConnection)
-	api.Delete("/authenticated-connections/:id", s.credentialAudit("authenticated_connection.delete"), s.rbacMW(rbac.ResourceCredentials, rbac.ActionDelete), s.handleDeleteAuthenticatedConnection)
+	api.Post("/authenticated-connections/:id/revoke", s.credentialAudit("authenticated_connection.revoke"), s.rbacMW(rbac.ResourceWebsiteAccess, rbac.ActionDelete), s.handleRevokeAuthenticatedConnection)
+	api.Delete("/authenticated-connections/:id", s.credentialAudit("authenticated_connection.delete"), s.rbacMW(rbac.ResourceWebsiteAccess, rbac.ActionDelete), s.handleDeleteAuthenticatedConnection)
 	// Credential rotation (type-assert to VersionedVault at request time)
 	api.Post("/credentials/:agentID/:key/rotate", s.credentialAudit("credential.rotate"), s.denyGlobalCredentialScope, s.rbacAgentFromMW(rbac.ResourceCredentials, rbac.ActionRotate, rbac.AgentIDSource{PathParam: "agentID"}), func(c *fiber.Ctx) error {
 		if s.credVault == nil {
