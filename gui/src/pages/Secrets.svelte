@@ -291,7 +291,9 @@
               <div class="secret-info">
                 <div class="secret-head">
                   <code class="secret-name">{s.name}</code>
-                  {#if s.set}
+                  {#if s.error}
+                    <span class="badge broken">Needs re-entry</span>
+                  {:else if s.set}
                     <span class="badge set">Set ✓</span>
                   {:else}
                     <span class="badge unset">Not set</span>
@@ -299,6 +301,9 @@
                 </div>
                 {#if s.description}
                   <p class="secret-desc">{s.description}</p>
+                {/if}
+                {#if s.error}
+                  <p class="secret-error">{s.error}</p>
                 {/if}
                 {#if s.env_var}
                   <p class="secret-env">
@@ -312,7 +317,7 @@
                   class="secret-input"
                   autocomplete="off"
                   bind:value={values[s.name]}
-                  placeholder={s.set ? '••••••  (leave blank to keep current)' : 'Enter value…'}
+                  placeholder={s.error ? 'Enter the value again' : (s.set ? '••••••  (leave blank to keep current)' : 'Enter value…')}
                 />
                 <button
                   class="btn-primary small-btn"
@@ -441,11 +446,13 @@
   .secret-head { display: flex; align-items: center; gap: .55rem; flex-wrap: wrap; }
   .secret-name { font-family: monospace; font-size: .82rem; color: var(--sl-accent-hover); overflow-wrap: anywhere; }
   .secret-desc { font-size: .8rem; color: #c8cadf; line-height: 1.5; }
+  .secret-error { font-size: .76rem; color: #f0a060; line-height: 1.45; }
   .secret-env  { font-size: .72rem; color: var(--sl-text-faint); }
   .secret-env code { background: #1c1f35; padding: .05rem .3rem; border-radius: 4px; color: #7b82a8; }
 
   .badge { font-size: .65rem; padding: .12rem .5rem; border-radius: 999px; font-weight: 600; }
   .badge.set   { background: rgba(76,175,130,.18); color: #4caf82; }
+  .badge.broken { background: rgba(240,160,96,.16); color: #f0a060; }
   .badge.unset { background: #1c1f35; color: var(--sl-text-faint); }
 
   .secret-actions {

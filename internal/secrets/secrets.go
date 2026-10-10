@@ -17,6 +17,7 @@ package secrets
 
 import (
 	"context"
+	"errors"
 	"os"
 	"sort"
 	"strings"
@@ -61,6 +62,10 @@ type Descriptor struct {
 	// plaintext config", which is a real difference the secrets UI should keep
 	// showing — and is what the migration prompt keys on.
 	Source string `json:"source,omitempty"`
+	// Error contains a safe, value-free recovery message when a vault entry
+	// exists but cannot be decrypted. This keeps the UI from claiming that an
+	// unusable credential is ready.
+	Error string `json:"error,omitempty"`
 }
 
 // Secret sources, in resolution order.
@@ -97,14 +102,25 @@ func (m *Manager) Set(ctx context.Context, name, value string) error {
 
 // Get returns the secret value and whether it was present.
 func (m *Manager) Get(ctx context.Context, name string) (string, bool) {
+	v, ok, _ := m.GetWithError(ctx, name)
+	return v, ok
+}
+
+// GetWithError returns the secret value, whether it was present, and any
+// vault read or decryption failure. Callers that need to distinguish a missing
+// credential from an unreadable stored credential should use this method.
+func (m *Manager) GetWithError(ctx context.Context, name string) (string, bool, error) {
 	if !m.Enabled() {
-		return "", false
+		return "", false, nil
 	}
 	b, err := m.vault.Get(ctx, GlobalScope, name)
 	if err != nil {
-		return "", false
+		if errors.Is(err, credentials.ErrNotFound) || errors.Is(err, os.ErrNotExist) {
+			return "", false, nil
+		}
+		return "", false, err
 	}
-	return string(b), true
+	return string(b), true, nil
 }
 
 // Delete removes a secret. Deleting an absent secret is not an error.
@@ -152,9 +168,15 @@ func (m *Manager) Catalog(ctx context.Context, cfg *config.Config) []Descriptor 
 			return
 		}
 		seen[d.Name] = true
+		if stored[d.Name] {
+			if value, ok, err := m.GetWithError(ctx, d.Name); err != nil {
+				d.Error = "Stored value cannot be decrypted. Enter it again once to restore access."
+			} else if ok && strings.TrimSpace(value) != "" {
+				d.Set, d.Source = true, SourceVault
+			}
+		}
 		switch {
-		case stored[d.Name]:
-			d.Set, d.Source = true, SourceVault
+		case d.Set:
 		case d.EnvVar != "" && strings.TrimSpace(os.Getenv(d.EnvVar)) != "":
 			d.Set, d.Source = true, SourceEnv
 		case strings.TrimSpace(cfgVals[d.Name]) != "":
