@@ -631,6 +631,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 
 	var finalContent string
 	missionCompletionRetries := 0
+	nextToolChoice := ""
 	for turn := 0; turn < maxTurns; turn++ {
 		// S3.1 — budget gate. Check BEFORE issuing the call so we never spend
 		// past the cap. When exceeded we stop the loop and let the
@@ -758,6 +759,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		if turn == 0 && !autoDelegated && forceGenieActionPlan {
 			req.ToolChoice = "plan_action"
 		}
+		applyNextMissionToolChoice(&req, &nextToolChoice, len(tools))
 
 		e.sink.Emit(message.Event{
 			Type: "llm.call", AgentID: msg.AgentID, SessionID: msg.SessionID,
@@ -934,9 +936,9 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 
 		// No tool calls → we have a final answer
 		if len(resp.ToolCalls) == 0 {
-			if repairedContext, repaired := e.repairIncompleteBuilderMission(def, missionContract, sess, msg, resp.Content,
-				missionProgress, &missionCompletionRetries, turn, maxTurns); repaired {
-				chatMsgs = repairedContext
+			if repairedContext, requiredTool, repaired := e.repairIncompleteBuilderMission(def, missionContract, sess, msg, resp.Content,
+				missionProgress, &missionCompletionRetries, toolNames, turn, maxTurns); repaired {
+				chatMsgs, nextToolChoice = repairedContext, requiredTool
 				continue
 			}
 			if repairedContext, repaired := e.continuePrematureFinal(def, sess, msg, contract, resp.Content, turn, maxTurns); repaired {

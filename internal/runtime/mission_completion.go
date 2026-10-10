@@ -78,6 +78,29 @@ func failedMissionSummary(evaluation autopilot.MissionEvaluation) string {
 	return strings.Join(missing, "; ")
 }
 
+func missingRequiredMissionTool(evaluation autopilot.MissionEvaluation, availableTools []string) string {
+	available := make(map[string]string, len(availableTools))
+	for _, name := range availableTools {
+		available[normalizeToolCallName(name)] = name
+	}
+	for _, check := range evaluation.Checks {
+		if check.Type != agent.MissionCheckRequiredTool || check.Status != autopilot.CheckFail {
+			continue
+		}
+		if name, ok := available[normalizeToolCallName(check.Expected)]; ok {
+			return name
+		}
+	}
+	return ""
+}
+
+func applyNextMissionToolChoice(req *llm.CompletionRequest, choice *string, toolCount int) {
+	if req == nil || choice == nil || *choice == "" || toolCount == 0 {
+		return
+	}
+	req.ToolChoice, *choice = *choice, ""
+}
+
 func missionRepairDirective(summary string, attempt int) string {
 	return fmt.Sprintf(`The proposed final answer does not yet satisfy the mission contract. Missing: %s.
 
@@ -96,15 +119,18 @@ func (e *Engine) repairIncompleteBuilderMission(
 	content string,
 	progress *missionProgress,
 	retries *int,
+	availableTools []string,
 	turn, maxTurns int,
-) ([]llm.ChatMessage, bool) {
+) ([]llm.ChatMessage, string, bool) {
 	if !isBuilderMission(mission) || *retries >= maxMissionCompletionRetries || turn+1 >= maxTurns {
-		return nil, false
+		return nil, "", false
 	}
-	summary := failedMissionSummary(progress.evaluate(mission, content))
+	evaluation := progress.evaluate(mission, content)
+	summary := failedMissionSummary(evaluation)
 	if summary == "" {
-		return nil, false
+		return nil, "", false
 	}
+	requiredTool := missingRequiredMissionTool(evaluation, availableTools)
 	*retries++
 	e.sink.Emit(message.Event{
 		Type: "warn", AgentID: msg.AgentID, SessionID: msg.SessionID,
@@ -118,7 +144,7 @@ func (e *Engine) repairIncompleteBuilderMission(
 	sess.mu.Lock()
 	e.appendHistoryLocked(sess, turns...)
 	sess.mu.Unlock()
-	return e.buildContext(def, sess, msg), true
+	return e.buildContext(def, sess, msg), requiredTool, true
 }
 
 func builderMissionFailureSummary(mission *agent.MissionContract, progress *missionProgress, output string) string {
