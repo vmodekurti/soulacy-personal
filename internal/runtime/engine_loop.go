@@ -759,7 +759,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		if turn == 0 && !autoDelegated && forceGenieActionPlan {
 			req.ToolChoice = "plan_action"
 		}
-		applyNextMissionToolChoice(&req, &nextToolChoice, len(tools))
+		applyNextMissionToolChoice(&req, &nextToolChoice)
 
 		e.sink.Emit(message.Event{
 			Type: "llm.call", AgentID: msg.AgentID, SessionID: msg.SessionID,
@@ -767,8 +767,8 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 				"provider":   def.LLM.Provider,
 				"model":      model,
 				"turn":       turn + 1,
-				"tool_count": len(toolNames),
-				"tool_names": append([]string(nil), toolNames...),
+				"tool_count": len(req.Tools),
+				"tool_names": toolSchemaNames(req.Tools),
 			},
 			Timestamp: time.Now().UTC(),
 		})

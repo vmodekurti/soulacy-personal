@@ -94,11 +94,32 @@ func missingRequiredMissionTool(evaluation autopilot.MissionEvaluation, availabl
 	return ""
 }
 
-func applyNextMissionToolChoice(req *llm.CompletionRequest, choice *string, toolCount int) {
-	if req == nil || choice == nil || *choice == "" || toolCount == 0 {
+func applyNextMissionToolChoice(req *llm.CompletionRequest, choice *string) {
+	if req == nil || choice == nil || *choice == "" || len(req.Tools) == 0 {
 		return
 	}
-	req.ToolChoice, *choice = *choice, ""
+	required := normalizeToolCallName(*choice)
+	*choice = ""
+	for _, tool := range req.Tools {
+		if normalizeToolCallName(tool.Name) != required {
+			continue
+		}
+		// Some OpenAI-compatible hosted models ignore a named tool_choice when
+		// the request also carries a large catalog. Give the repair turn one
+		// possible action and use the broadly supported `required` constraint.
+		// The next turn rebuilds the request from the full catalog.
+		req.Tools = []llm.ToolSchema{tool}
+		req.ToolChoice = "required"
+		return
+	}
+}
+
+func toolSchemaNames(tools []llm.ToolSchema) []string {
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		names = append(names, tool.Name)
+	}
+	return names
 }
 
 func missionRepairDirective(summary string, attempt int) string {
