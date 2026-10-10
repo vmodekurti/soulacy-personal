@@ -69,3 +69,30 @@ func TestSummarizeActionEvents_StillReportsACleanRunAsSuccess(t *testing.T) {
 		t.Fatalf("a clean run was filed as ok=%v status=%q", row.Ok, row.Status)
 	}
 }
+
+func TestSummarizeActionEvents_IncompleteDeliveredMissionRemainsFailed(t *testing.T) {
+	events := []message.Event{
+		{Type: "message.in", Timestamp: at(1), Payload: map[string]any{"text": "make today's podcast"}},
+		{Type: "message.out", Timestamp: at(2), Payload: map[string]any{
+			"parts": []any{map[string]any{"type": "text", "text": "I found articles but did not create the podcast."}}}},
+		{Type: "task.contract.completed", Timestamp: at(3), Payload: map[string]any{
+			"state": "blocked", "outcome": "blocked", "blocker": "podcast was not generated"}},
+		{Type: "run.completed", Timestamp: at(4), Payload: map[string]any{
+			"success": false, "degraded": false, "outcome": "incomplete", "task_outcome": "blocked"}},
+		{Type: "schedule.output", Timestamp: at(5), Payload: map[string]any{
+			"delivered": true, "channel": "mobile", "to": "all", "trigger": "manual"}},
+	}
+	row, ok := summarizeActionEvents("r3", "s3", events)
+	if !ok {
+		t.Fatal("no row produced")
+	}
+	if row.Ok || row.Status != "failed" {
+		t.Fatalf("incomplete delivered mission filed as ok=%v status=%q", row.Ok, row.Status)
+	}
+	if row.DeliveryStatus != "delivered" {
+		t.Fatalf("delivery status = %q, want delivered", row.DeliveryStatus)
+	}
+	if row.Error != "podcast was not generated" {
+		t.Fatalf("error = %q, want mission blocker", row.Error)
+	}
+}

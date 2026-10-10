@@ -65,6 +65,63 @@ func TestVisibilityAndExplicitGrant(t *testing.T) {
 	}
 }
 
+func TestUnreadableSessionExpiresConnection(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	store, err := Open(filepath.Join(dir, "connections.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	conn, err := store.Create(ctx, CreateInput{
+		WorkspaceID: "ws", OwnerSubject: "alice", Scope: ScopeUser,
+		Kind: KindBrowser, Name: "HBR", BaseURL: "https://hbr.org",
+		AllowedDomains: []string{"hbr.org"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReplaceAgentGrants(ctx, "ws", conn.ID, []string{"research"}); err != nil {
+		t.Fatal(err)
+	}
+	firstKMS, _ := credentials.NewPassthroughKMS([]byte("11111111111111111111111111111111"))
+	vaultPath := filepath.Join(dir, "vault.db")
+	firstVault, err := credentials.NewSQLiteVault(vaultPath, firstKMS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := firstVault.WriteBlob(ctx, vaultNamespace(conn.ID), browserStateKey, []byte(`{"cookies":[]}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkSecret(ctx, "ws", conn.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := firstVault.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	secondKMS, _ := credentials.NewPassthroughKMS([]byte("22222222222222222222222222222222"))
+	secondVault, err := credentials.NewSQLiteVault(vaultPath, secondKMS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer secondVault.Close()
+	resolver := NewResolver(store, secondVault)
+	if _, err := resolver.Resolve(ctx, "ws", "alice", "research", conn.ID); !errors.Is(err, ErrSessionUnreadable) {
+		t.Fatalf("Resolve error = %v, want ErrSessionUnreadable", err)
+	}
+	got, err := store.Get(ctx, "ws", conn.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != StatusExpired {
+		t.Fatalf("connection status = %q, want %q", got.Status, StatusExpired)
+	}
+	if visible := resolver.Describe(ctx, "ws", "alice", "research", []string{conn.ID}); len(visible) != 0 {
+		t.Fatalf("unreadable connection remains available to agents: %+v", visible)
+	}
+}
+
 func TestSyncAgentSelectionPreservesOtherAgents(t *testing.T) {
 	ctx := context.Background()
 	store, err := Open(filepath.Join(t.TempDir(), "connections.db"))
