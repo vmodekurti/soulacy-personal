@@ -210,8 +210,8 @@ func TestBuilderMissionRetriesThenCompletes(t *testing.T) {
 	if len(requests) != 3 || !chatMessagesContain(requests[1].Messages, "system", "completion repair attempt 1") {
 		t.Fatalf("requests did not contain repair guidance: %#v", requests)
 	}
-	if requests[1].ToolChoice != "required" {
-		t.Fatalf("repair tool choice = %q, want required", requests[1].ToolChoice)
+	if requests[1].ToolChoice != "produce_audio" {
+		t.Fatalf("repair tool choice = %q, want produce_audio", requests[1].ToolChoice)
 	}
 	if len(requests[1].Tools) != 1 || requests[1].Tools[0].Name != "produce_audio" {
 		t.Fatalf("repair tools = %#v, want only produce_audio", requests[1].Tools)
@@ -247,8 +247,8 @@ func TestBuilderMissionEmptyResponseRepairDoesNotStoreEmptyAssistantTurn(t *test
 	if len(requests) < 2 {
 		t.Fatalf("requests = %d, want repair turn", len(requests))
 	}
-	if requests[1].ToolChoice != "required" {
-		t.Fatalf("repair tool choice = %q, want required", requests[1].ToolChoice)
+	if requests[1].ToolChoice != "produce_audio" {
+		t.Fatalf("repair tool choice = %q, want produce_audio", requests[1].ToolChoice)
 	}
 	if len(requests[1].Tools) != 1 || requests[1].Tools[0].Name != "produce_audio" {
 		t.Fatalf("repair tools = %#v, want only produce_audio", requests[1].Tools)
@@ -263,7 +263,7 @@ func TestBuilderMissionEmptyResponseRepairDoesNotStoreEmptyAssistantTurn(t *test
 func TestBuilderMissionStopsAsPartialAfterBoundedRepairs(t *testing.T) {
 	def := &agent.Definition{
 		ID: "podcast", Name: "Podcast", Enabled: true,
-		LLM: agent.LLMConfig{Provider: "test", Model: "fake-model"}, MaxTurns: 3,
+		LLM: agent.LLMConfig{Provider: "test", Model: "fake-model"}, MaxTurns: 25,
 		Builtins: strListPtr("produce_audio"),
 		Mission: &agent.MissionContract{ID: "builder-podcast", Acceptance: []agent.MissionCheck{{
 			ID: "produce", Type: agent.MissionCheckRequiredTool, Tool: "produce_audio", Description: "Produce the audio",
@@ -286,7 +286,7 @@ func TestBuilderMissionStopsAsPartialAfterBoundedRepairs(t *testing.T) {
 		t.Fatalf("reply = %q", got)
 	}
 	if len(provider.requestsSnapshot()) != 3 {
-		t.Fatalf("provider calls = %d, want bounded three", len(provider.requestsSnapshot()))
+		t.Fatalf("provider calls = %d, want bounded three despite max_turns 25", len(provider.requestsSnapshot()))
 	}
 	records, err := brain.EpisodicRecords(def.ID, 0)
 	if err != nil {
@@ -300,5 +300,29 @@ func TestBuilderMissionStopsAsPartialAfterBoundedRepairs(t *testing.T) {
 	}
 	if !learned {
 		t.Fatalf("completion failure lesson was not persisted: %#v", records)
+	}
+}
+
+func TestBuilderMissionEmptyRepairDoesNotFallThroughToMaxTurns(t *testing.T) {
+	def := &agent.Definition{
+		ID: "podcast", Name: "Podcast", Enabled: true,
+		LLM: agent.LLMConfig{Provider: "test", Model: "fake-model"}, MaxTurns: 25,
+		Builtins: strListPtr("produce_audio"),
+		Mission: &agent.MissionContract{ID: "builder-podcast", Acceptance: []agent.MissionCheck{{
+			ID: "produce", Type: agent.MissionCheckRequiredTool, Tool: "produce_audio", Description: "Produce the audio",
+		}}},
+	}
+	e, provider := newHandleTestEngine(t, def)
+	provider.responses = []llm.CompletionResponse{{}, {}, {}, {}}
+
+	reply, err := e.Handle(context.Background(), testUserMessage(def.ID, "empty-repair-stop", "Make the podcast"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(provider.requestsSnapshot()); got != 3 {
+		t.Fatalf("provider calls = %d, want one initial call and two bounded repairs", got)
+	}
+	if reply.Metadata[message.MetaOutcome] != "partial" || !strings.Contains(flattenParts(reply.Parts), "This run is incomplete") {
+		t.Fatalf("reply did not expose incomplete mission: %#v %q", reply.Metadata, flattenParts(reply.Parts))
 	}
 }
