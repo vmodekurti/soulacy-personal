@@ -175,16 +175,21 @@ func TestBuilderMissionRetriesThenCompletes(t *testing.T) {
 	def := &agent.Definition{
 		ID: "podcast", Name: "Podcast", Enabled: true,
 		LLM: agent.LLMConfig{Provider: "test", Model: "fake-model"}, MaxTurns: 5,
-		Builtins: strListPtr("produce_audio"),
+		Builtins: strListPtr("produce_audio", "irrelevant_search"),
 		Mission: &agent.MissionContract{ID: "builder-podcast", Acceptance: []agent.MissionCheck{
 			{ID: "produce", Type: agent.MissionCheckRequiredTool, Tool: "produce_audio", Description: "Produce the audio"},
 			{ID: "link", Type: agent.MissionCheckOutputRegex, Value: `https://.+/audio`, Description: "Return the audio link"},
 		}},
 	}
 	e, provider := newHandleTestEngine(t, def)
-	e.builtins = []BuiltinTool{{Name: "produce_audio", Handler: func(context.Context, map[string]any) (string, error) {
-		return `{"url":"https://audio.example/episode/audio"}`, nil
-	}}}
+	e.builtins = []BuiltinTool{
+		{Name: "produce_audio", Handler: func(context.Context, map[string]any) (string, error) {
+			return `{"url":"https://audio.example/episode/audio"}`, nil
+		}},
+		{Name: "irrelevant_search", Handler: func(context.Context, map[string]any) (string, error) {
+			return "unused", nil
+		}},
+	}
 	provider.responses = []llm.CompletionResponse{
 		{Content: "I found several articles."},
 		{ToolCalls: []message.ToolCall{{ID: "audio-1", Name: "produce_audio", Arguments: map[string]any{}}}},
@@ -205,8 +210,14 @@ func TestBuilderMissionRetriesThenCompletes(t *testing.T) {
 	if len(requests) != 3 || !chatMessagesContain(requests[1].Messages, "system", "completion repair attempt 1") {
 		t.Fatalf("requests did not contain repair guidance: %#v", requests)
 	}
-	if requests[1].ToolChoice != "produce_audio" {
-		t.Fatalf("repair tool choice = %q, want produce_audio", requests[1].ToolChoice)
+	if requests[1].ToolChoice != "required" {
+		t.Fatalf("repair tool choice = %q, want required", requests[1].ToolChoice)
+	}
+	if len(requests[1].Tools) != 1 || requests[1].Tools[0].Name != "produce_audio" {
+		t.Fatalf("repair tools = %#v, want only produce_audio", requests[1].Tools)
+	}
+	if len(requests[0].Tools) != 2 || len(requests[2].Tools) != 2 {
+		t.Fatalf("normal tool catalogs were not restored: first=%#v final=%#v", requests[0].Tools, requests[2].Tools)
 	}
 }
 
@@ -236,8 +247,11 @@ func TestBuilderMissionEmptyResponseRepairDoesNotStoreEmptyAssistantTurn(t *test
 	if len(requests) < 2 {
 		t.Fatalf("requests = %d, want repair turn", len(requests))
 	}
-	if requests[1].ToolChoice != "produce_audio" {
-		t.Fatalf("repair tool choice = %q, want produce_audio", requests[1].ToolChoice)
+	if requests[1].ToolChoice != "required" {
+		t.Fatalf("repair tool choice = %q, want required", requests[1].ToolChoice)
+	}
+	if len(requests[1].Tools) != 1 || requests[1].Tools[0].Name != "produce_audio" {
+		t.Fatalf("repair tools = %#v, want only produce_audio", requests[1].Tools)
 	}
 	for _, m := range requests[1].Messages {
 		if m.Role == "assistant" && strings.TrimSpace(m.Content) == "" && len(m.ToolCalls) == 0 {
