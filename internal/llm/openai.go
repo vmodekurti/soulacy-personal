@@ -80,8 +80,10 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req CompletionRequest) (*
 	msgs := make([]map[string]any, 0, len(req.Messages))
 	for _, m := range req.Messages {
 		om := map[string]any{"role": m.Role}
-		// Content can be empty when an assistant message carries only tool_calls.
-		if m.Content != "" || (m.Role != "assistant") {
+		// Content can be null only when an assistant message carries tool_calls.
+		// Some OpenAI-compatible providers reject null on ordinary assistant
+		// messages, so preserve an explicit empty string for those turns.
+		if m.Content != "" || m.Role != "assistant" || len(m.ToolCalls) == 0 {
 			om["content"] = m.Content
 		} else {
 			om["content"] = nil
