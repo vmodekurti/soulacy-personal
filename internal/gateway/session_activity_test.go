@@ -12,7 +12,7 @@ import (
 // TestSessionActivityTracker pins the E4c behaviours:
 //   - message.in starts a session with StartedAt = event ts
 //   - subsequent llm/tool events bump LastEventAt
-//   - message.out / error evict the session
+//   - recoverable errors keep the session visible until a terminal event
 //   - a session silent past the threshold is flagged Hung with a reason
 //   - a very old session (last event > 1h ago) is swept on Snapshot()
 //   - events without a session_id are ignored (connected, etc.)
@@ -69,6 +69,16 @@ func TestSessionActivityTracker(t *testing.T) {
 	// Reason must reference the LLM (last event was llm.call).
 	if !containsSubstring(snap[0].HungReason, "LLM") {
 		t.Fatalf("hung reason should mention LLM for llm.call last-event, got %q", snap[0].HungReason)
+	}
+
+	// A runtime error may be an observation that the reasoning loop recovers
+	// from. It must not make an active job disappear from Running now.
+	tr.Note(message.Event{
+		Type: "error", AgentID: "briefer", SessionID: "s1", Timestamp: now,
+		Payload: map[string]any{"error": "origin returned 403"},
+	})
+	if got := tr.Snapshot(); len(got) != 1 || got[0].SessionID != "s1" {
+		t.Fatalf("recoverable error evicted active session: %+v", got)
 	}
 
 	// Terminal message.out evicts.

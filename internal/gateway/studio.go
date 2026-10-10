@@ -2247,7 +2247,17 @@ func summarizeActionEvents(runID, sessionID string, events []message.Event) (stu
 		UpdatedAt: events[len(events)-1].Timestamp,
 		Status:    "unknown",
 	}
-	var outParts []string
+	var (
+		outParts             []string
+		transientError       string
+		contractError        string
+		contractCompleted    bool
+		contractFailed       bool
+		runCompleted         bool
+		legacyReplyCompleted bool
+		scheduleCompleted    bool
+		scheduleFailed       bool
+	)
 	for _, ev := range events {
 		switch ev.Type {
 		case "message.in":
@@ -2259,59 +2269,45 @@ func summarizeActionEvents(runID, sessionID string, events []message.Event) (stu
 			if txt := messagePayloadText(ev.Payload); txt != "" {
 				outParts = append(outParts, txt)
 			}
-			// A reply sent AFTER a failure does not undo the failure.
-			//
-			// Events are replayed in timestamp order, and this arm used to set
-			// success unconditionally — so any run that errored and then still
-			// emitted something was filed as successful. That is the normal shape
-			// of a degraded run, not an exotic one: the loop gives up, the
-			// framework sends the last thing it has, and the run is recorded
-			// ok: true, status: "success", error: "context deadline exceeded" —
-			// all three at once, which cannot all be right.
-			//
-			// It is not cosmetic. Failed runs, the dead-letter queue and the
-			// scheduler's consecutive-failure auto-disable all read this. An agent
-			// that timed out every morning and replied with a fragment would never
-			// appear in any of them.
-			if row.Status != "failed" {
-				row.Status = "success"
-				row.Ok = true
-			}
+			// Modern runs finish with run.completed. Retain message.out as a
+			// terminal fallback for old action logs that predate that event.
+			legacyReplyCompleted = true
 		case "error":
-			row.Status = "failed"
-			row.Ok = false
-			row.Error = studioFirstNonEmpty(row.Error, payloadErrorText(ev.Payload))
+			// Runtime error events and failed tool observations can be recovered
+			// inside the reasoning loop. Keep the evidence, but do not publish a
+			// terminal verdict while the engine is still running.
+			transientError = studioFirstNonEmpty(transientError, payloadErrorText(ev.Payload))
 		case "tool.result":
 			row.Steps++
 			if isToolError(ev.Payload) {
-				row.Status = "failed"
-				row.Ok = false
-				row.Error = studioFirstNonEmpty(row.Error, payloadErrorText(ev.Payload))
+				transientError = studioFirstNonEmpty(transientError, payloadErrorText(ev.Payload))
 			}
 		case "task.contract.completed":
 			m := payloadMap(ev.Payload)
 			state := strings.ToLower(strings.TrimSpace(stringField(m, "state")))
 			outcome := strings.ToLower(strings.TrimSpace(stringField(m, "outcome")))
+			contractCompleted = true
 			if state == "blocked" || state == "incomplete" || state == "waiting_for_input" ||
 				outcome == "blocked" || outcome == "incomplete" || outcome == "needs_input" || outcome == "failed" {
-				row.Status = "failed"
-				row.Ok = false
-				row.Error = studioFirstNonEmpty(row.Error, stringField(m, "blocker"), "the run did not complete its goal")
+				contractFailed = true
+				contractError = studioFirstNonEmpty(stringField(m, "blocker"), stringField(m, "error"), "the run did not complete its goal")
 			}
 		case "run.completed":
 			m := payloadMap(ev.Payload)
+			runCompleted = true
 			success, hasSuccess := m["success"].(bool)
 			degraded, _ := m["degraded"].(bool)
 			outcome := strings.ToLower(strings.TrimSpace(stringField(m, "outcome")))
 			taskOutcome := strings.ToLower(strings.TrimSpace(stringField(m, "task_outcome")))
-			if (hasSuccess && !success) || degraded || outcome == "failed" || outcome == "incomplete" ||
+			if contractFailed || (hasSuccess && !success) || degraded || outcome == "failed" || outcome == "incomplete" ||
 				taskOutcome == "blocked" || taskOutcome == "incomplete" || taskOutcome == "needs_input" || taskOutcome == "failed" {
 				row.Status = "failed"
 				row.Ok = false
-				row.Error = studioFirstNonEmpty(row.Error, "the run did not complete its goal")
-			} else if success && row.Status != "failed" {
+				row.Error = studioFirstNonEmpty(contractError, runCompletedError(m), transientError, "the run did not complete its goal")
+			} else if success {
 				row.Status = "success"
 				row.Ok = true
+				row.Error = ""
 			}
 		case "schedule.output":
 			ch, to, delivered, fallback, reason, preview, trigger := scheduleOutputSummary(ev.Payload)
@@ -2322,26 +2318,57 @@ func summarizeActionEvents(runID, sessionID string, events []message.Event) (stu
 				outParts = append(outParts, preview)
 			}
 			if delivered {
+				scheduleCompleted = true
 				if fallback {
 					row.DeliveryStatus = "delivered via fallback"
 				} else {
 					row.DeliveryStatus = "delivered"
 				}
-				if row.Status == "unknown" || row.Status == "pending" {
-					row.Status = "success"
-					row.Ok = true
-				}
 			} else {
+				scheduleFailed = true
 				row.DeliveryStatus = "failed"
 				row.DeliveryError = studioFirstNonEmpty(row.DeliveryError, reason)
 				row.Status = "failed"
 				row.Ok = false
+				row.Error = studioFirstNonEmpty(row.DeliveryError, transientError)
 			}
 		case "schedule.run_failed":
 			row.Trigger = studioFirstNonEmpty(row.Trigger, runLedgerPayloadString(ev.Payload, "trigger"), "cron")
+			scheduleFailed = true
 			row.Status = "failed"
 			row.Ok = false
-			row.Error = studioFirstNonEmpty(row.Error, payloadErrorText(ev.Payload))
+			row.Error = studioFirstNonEmpty(payloadErrorText(ev.Payload), transientError)
+		}
+	}
+	// A run has one authoritative outcome. Intermediate failures are trace
+	// evidence only. This prevents a recoverable 403, timeout, or malformed tool
+	// call from making an in-flight job appear finished before the engine emits
+	// run.completed (#365).
+	if !runCompleted && !scheduleFailed {
+		switch {
+		case contractCompleted && contractFailed:
+			row.Status = "failed"
+			row.Ok = false
+			row.Error = studioFirstNonEmpty(contractError, transientError, "the run did not complete its goal")
+		case contractCompleted:
+			row.Status = "success"
+			row.Ok = true
+			row.Error = ""
+		case legacyReplyCompleted:
+			if transientError != "" {
+				row.Status = "failed"
+				row.Ok = false
+				row.Error = transientError
+			} else {
+				row.Status = "success"
+				row.Ok = true
+			}
+		case scheduleCompleted:
+			row.Status = "success"
+			row.Ok = true
+		default:
+			row.Status = "pending"
+			row.Ok = false
 		}
 	}
 	if len(outParts) > 0 {
@@ -2354,6 +2381,17 @@ func summarizeActionEvents(runID, sessionID string, events []message.Event) (stu
 		row.Status = "pending"
 	}
 	return row, true
+}
+
+func runCompletedError(payload map[string]any) string {
+	if payload == nil {
+		return ""
+	}
+	if direct := studioFirstNonEmpty(stringField(payload, "blocker"), stringField(payload, "error"), stringField(payload, "reason")); direct != "" {
+		return direct
+	}
+	contract := payloadMap(payload["task_contract"])
+	return studioFirstNonEmpty(stringField(contract, "blocker"), stringField(contract, "error"))
 }
 
 func studioUniqueStrings(vals []string) []string {
