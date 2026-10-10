@@ -107,8 +107,8 @@ func (t *sessionActivityTracker) SetHungThreshold(d time.Duration) {
 // system-level (connected, scheduler heartbeats) rather than per-run.
 //
 // message.in is treated as a session start (sets StartedAt). Runtime and
-// Autopilot terminal events evict the entry. Everything else (llm.*, tool.*,
-// reasoning.*) just bumps LastEventAt.
+// Autopilot terminal events evict the entry. Everything else, including
+// recoverable error events, just bumps LastEventAt.
 func (t *sessionActivityTracker) Note(ev message.Event) {
 	if ev.SessionID == "" {
 		return
@@ -121,14 +121,12 @@ func (t *sessionActivityTracker) Note(ev message.Event) {
 	defer t.mu.Unlock()
 
 	switch ev.Type {
-	case "message.out", "error", "run.completed", "autopilot.proof":
-		// Terminal for the run — drop it from the map. `error` is not always
-		// terminal in the runtime (a ReAct loop can produce an intermediate
-		// error and continue) but for the "hung session" surface this is the
-		// right conservative choice: once we've seen an error we don't want to
-		// keep highlighting it in the "still running" list. `autopilot.proof`
-		// follows `run.completed`; treating it as terminal prevents that final
-		// proof event from recreating the session we just removed.
+	case "message.out", "run.completed", "schedule.run_failed", "autopilot.proof":
+		// Terminal for the run, so drop it from the map. An `error` event is
+		// deliberately absent: the reasoning loop can recover and continue after
+		// one, so evicting it would hide a job that is still running.
+		// `autopilot.proof` follows `run.completed`; treating it as terminal
+		// prevents that final proof event from recreating the session we removed.
 		delete(t.sessions, ev.SessionID)
 		return
 	case "message.in":

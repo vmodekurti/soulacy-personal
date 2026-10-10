@@ -96,3 +96,64 @@ func TestSummarizeActionEvents_IncompleteDeliveredMissionRemainsFailed(t *testin
 		t.Fatalf("error = %q, want mission blocker", row.Error)
 	}
 }
+
+func TestSummarizeActionEvents_IntermediateToolFailureDoesNotFinishRun(t *testing.T) {
+	events := []message.Event{
+		{Type: "message.in", Timestamp: at(1), Payload: map[string]any{"text": "make today's podcast"}},
+		{Type: "tool.result", Timestamp: at(2), Payload: map[string]any{
+			"name": "fetch_url", "is_error": true, "content": "error: HTTP 403"}},
+		{Type: "llm.call", Timestamp: at(3), Payload: map[string]any{"turn": 3}},
+	}
+	row, ok := summarizeActionEvents("r4", "s4", events)
+	if !ok {
+		t.Fatal("no row produced")
+	}
+	if row.Ok || row.Status != "pending" || row.Error != "" {
+		t.Fatalf("in-flight recovery was finalized: ok=%v status=%q error=%q", row.Ok, row.Status, row.Error)
+	}
+}
+
+func TestSummarizeActionEvents_FinalContractOverridesIntermediateToolFailure(t *testing.T) {
+	events := []message.Event{
+		{Type: "message.in", Timestamp: at(1), Payload: map[string]any{"text": "make today's podcast"}},
+		{Type: "tool.result", Timestamp: at(2), Payload: map[string]any{
+			"name": "fetch_url", "is_error": true, "content": "error: HTTP 403"}},
+		{Type: "tool.result", Timestamp: at(3), Payload: map[string]any{
+			"name": "authenticated_fetch", "is_error": true, "content": "saved session needs refresh"}},
+		{Type: "task.contract.completed", Timestamp: at(4), Payload: map[string]any{
+			"state": "blocked", "outcome": "blocked", "blocker": "refresh the Gartner Website Access sign-in"}},
+		{Type: "run.completed", Timestamp: at(5), Payload: map[string]any{
+			"success": false, "outcome": "incomplete", "task_outcome": "blocked"}},
+	}
+	row, ok := summarizeActionEvents("r5", "s5", events)
+	if !ok {
+		t.Fatal("no row produced")
+	}
+	if row.Ok || row.Status != "failed" {
+		t.Fatalf("blocked run filed as ok=%v status=%q", row.Ok, row.Status)
+	}
+	if row.Error != "refresh the Gartner Website Access sign-in" {
+		t.Fatalf("error = %q, want final contract blocker", row.Error)
+	}
+}
+
+func TestSummarizeActionEvents_RecoveredToolFailureCanFinishSuccessfully(t *testing.T) {
+	events := []message.Event{
+		{Type: "message.in", Timestamp: at(1), Payload: map[string]any{"text": "make today's podcast"}},
+		{Type: "tool.result", Timestamp: at(2), Payload: map[string]any{
+			"name": "fetch_url", "is_error": true, "content": "error: HTTP 403"}},
+		{Type: "tool.result", Timestamp: at(3), Payload: map[string]any{
+			"name": "authenticated_fetch", "is_error": false, "content": "article body"}},
+		{Type: "run.completed", Timestamp: at(4), Payload: map[string]any{
+			"success": true, "outcome": "success", "task_outcome": "evidence_based"}},
+		{Type: "message.out", Timestamp: at(5), Payload: map[string]any{
+			"parts": []any{map[string]any{"type": "text", "text": "Podcast ready"}}}},
+	}
+	row, ok := summarizeActionEvents("r6", "s6", events)
+	if !ok {
+		t.Fatal("no row produced")
+	}
+	if !row.Ok || row.Status != "success" || row.Error != "" {
+		t.Fatalf("recovered run filed as ok=%v status=%q error=%q", row.Ok, row.Status, row.Error)
+	}
+}
