@@ -205,6 +205,9 @@ func TestBuilderMissionRetriesThenCompletes(t *testing.T) {
 	if len(requests) != 3 || !chatMessagesContain(requests[1].Messages, "system", "completion repair attempt 1") {
 		t.Fatalf("requests did not contain repair guidance: %#v", requests)
 	}
+	if requests[1].ToolChoice != "produce_audio" {
+		t.Fatalf("repair tool choice = %q, want produce_audio", requests[1].ToolChoice)
+	}
 }
 
 func TestBuilderMissionEmptyResponseRepairDoesNotStoreEmptyAssistantTurn(t *testing.T) {
@@ -232,6 +235,9 @@ func TestBuilderMissionEmptyResponseRepairDoesNotStoreEmptyAssistantTurn(t *test
 	requests := provider.requestsSnapshot()
 	if len(requests) < 2 {
 		t.Fatalf("requests = %d, want repair turn", len(requests))
+	}
+	if requests[1].ToolChoice != "produce_audio" {
+		t.Fatalf("repair tool choice = %q, want produce_audio", requests[1].ToolChoice)
 	}
 	for _, m := range requests[1].Messages {
 		if m.Role == "assistant" && strings.TrimSpace(m.Content) == "" && len(m.ToolCalls) == 0 {
