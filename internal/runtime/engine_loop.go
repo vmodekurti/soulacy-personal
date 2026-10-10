@@ -1090,7 +1090,6 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		// Force a tool-free synthesis from everything already gathered.
 		finalContent = e.finalSynthesis(ctx, def, msg.AgentID, msg.SessionID, chatMsgs, failures)
 	}
-	finalContent = finishPrematureContent(def, contract, finalContent)
 	// Safety net: never surface leaked reasoning control JSON (thought/action/
 	// is_done) as the reply, even on the classic (non-loop) path where a model
 	// primed with a ReAct-style prompt emits its step object as text. Skipped
@@ -1138,7 +1137,8 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 			Timestamp: time.Now().UTC(),
 		})
 	}
-
+	// Apply the completion guard after every recovery path, including best-effort context recovery.
+	finalContent = finishPrematureContent(def, contract, finalContent)
 	reply, missionIncomplete := e.finalizeBuilderMissionReply(ctx, def, missionContract, sess, msg, contract, missionProgress, finalContent)
 	if missionIncomplete {
 		runOutcome = "success"

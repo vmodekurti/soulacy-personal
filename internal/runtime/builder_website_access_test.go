@@ -107,6 +107,48 @@ func TestExistingGenieAgentReceivesCompletionContractAfterUpgrade(t *testing.T) 
 	}
 }
 
+func TestLegacyScheduledWebsiteAgentReceivesCompletionContractWithoutOwnerLabel(t *testing.T) {
+	def := &agent.Definition{
+		ID:           "daily-tech-podcast",
+		Trigger:      agent.TriggerCron,
+		Description:  "Create a daily podcast from trending articles using Website Access.",
+		SystemPrompt: "Read authenticated articles, add them to NotebookLM, generate the podcast, and return its audio link.",
+		Connections:  []string{"conn_hbr", "conn_notebook"},
+	}
+	contract := effectiveBuilderMissionContract(def)
+	if contract == nil || !strings.HasPrefix(contract.ID, "builder-") {
+		t.Fatalf("scheduled website agent did not receive a compatibility mission: %#v", contract)
+	}
+	wantTools := map[string]bool{
+		"authenticated_fetch":    false,
+		"start_website_action":   false,
+		"inspect_website_action": false,
+		"act_on_website":         false,
+	}
+	for _, check := range contract.Acceptance {
+		if _, ok := wantTools[check.Tool]; ok {
+			wantTools[check.Tool] = true
+		}
+	}
+	for tool, found := range wantTools {
+		if !found {
+			t.Errorf("compatibility mission is missing required tool %q: %#v", tool, contract.Acceptance)
+		}
+	}
+}
+
+func TestOrdinaryUnownedAgentDoesNotReceiveBuilderMission(t *testing.T) {
+	def := &agent.Definition{
+		ID:          "interactive-reader",
+		Trigger:     agent.TriggerChannel,
+		Description: "Read authenticated content using Website Access.",
+		Connections: []string{"conn_hbr"},
+	}
+	if contract := effectiveBuilderMissionContract(def); contract != nil {
+		t.Fatalf("ordinary unowned agent received compatibility mission: %#v", contract)
+	}
+}
+
 func TestExistingGenieAgentDerivesWebsiteMissionWithoutPinnedConnections(t *testing.T) {
 	def := &agent.Definition{
 		ID: "daily-tech-podcast", Description: "Read trending HBR articles using Website Access, add them to NotebookLM, generate a podcast, and return its audio link.",

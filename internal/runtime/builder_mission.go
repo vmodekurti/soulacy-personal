@@ -72,7 +72,12 @@ func effectiveBuilderMissionContract(def *agent.Definition) *agent.MissionContra
 		}
 		return def.Mission
 	}
-	if def.Labels["soulacy.owner"] != GenieAgentID {
+	ownedByGenie := def.Labels["soulacy.owner"] == GenieAgentID
+	legacyScheduledWebsiteAgent := (def.Trigger == agent.TriggerCron || def.Trigger == agent.TriggerOneShot) &&
+		len(def.Connections) > 0 &&
+		containsAnyBuilderPhrase(strings.ToLower(def.Description+"\n"+def.SystemPrompt),
+			"website access", "saved website", "authenticated session", "authenticated content")
+	if !ownedByGenie && !legacyScheduledWebsiteAgent {
 		return nil
 	}
 	connections := make([]BuilderConnection, 0, len(def.Connections))
