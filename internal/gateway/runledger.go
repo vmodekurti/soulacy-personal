@@ -135,15 +135,17 @@ func (s *Server) handleRunLedger(c *fiber.Ctx) error {
 
 func runLedgerEventTypes() map[string]bool {
 	return map[string]bool{
-		"message.in":          true,
-		"message.out":         true,
-		"error":               true,
-		"tool.call":           true,
-		"tool.result":         true,
-		"reasoning.step":      true,
-		"reasoning.result":    true,
-		"schedule.output":     true,
-		"schedule.run_failed": true,
+		"message.in":              true,
+		"message.out":             true,
+		"error":                   true,
+		"tool.call":               true,
+		"tool.result":             true,
+		"reasoning.step":          true,
+		"reasoning.result":        true,
+		"task.contract.completed": true,
+		"run.completed":           true,
+		"schedule.output":         true,
+		"schedule.run_failed":     true,
 	}
 }
 

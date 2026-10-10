@@ -11,9 +11,10 @@ import (
 )
 
 var (
-	ErrNotGranted = errors.New("authenticated connection is not granted to this agent")
-	ErrWrongOwner = errors.New("private authenticated connection belongs to another user")
-	ErrNotReady   = errors.New("authenticated connection requires sign-in")
+	ErrNotGranted        = errors.New("authenticated connection is not granted to this agent")
+	ErrWrongOwner        = errors.New("private authenticated connection belongs to another user")
+	ErrNotReady          = errors.New("authenticated connection requires sign-in")
+	ErrSessionUnreadable = errors.New("saved website session cannot be opened; refresh its sign-in in Website Access")
 )
 
 // Lease is handed only to a trusted execution adapter. State must never be
@@ -81,6 +82,10 @@ func (r *Resolver) UpdateBrowserState(ctx context.Context, workspaceID, connecti
 	}
 	current, err := r.vault.ReadBlob(ctx, vaultNamespace(connectionID), browserStateKey)
 	if err != nil {
+		if unusableStoredSession(err) {
+			_ = r.store.SetStatus(ctx, workspaceID, connectionID, StatusExpired)
+			return ErrSessionUnreadable
+		}
 		return fmt.Errorf("authenticated connection secret: %w", err)
 	}
 	next, changed, err := update(current)
@@ -172,6 +177,14 @@ func (r *Resolver) Resolve(ctx context.Context, workspaceID, subject, agentID, c
 	}
 	secret, err := r.vault.ReadBlob(ctx, vaultNamespace(connection.ID), key)
 	if err != nil {
+		// Metadata and encrypted material can outlive the key that protected it
+		// when a deployment previously used an ephemeral container identity. The
+		// ciphertext cannot be recovered safely. Stop advertising the connection
+		// as ready and direct the user to replace it with a fresh sign-in.
+		if unusableStoredSession(err) {
+			_ = r.store.SetStatus(ctx, workspaceID, connectionID, StatusExpired)
+			return Lease{}, ErrSessionUnreadable
+		}
 		return Lease{}, fmt.Errorf("authenticated connection secret: %w", err)
 	}
 	if connection.Kind == KindOAuth {
@@ -183,6 +196,10 @@ func (r *Resolver) Resolve(ctx context.Context, workspaceID, subject, agentID, c
 }
 
 func vaultNamespace(id string) string { return "authenticated_connection_" + id }
+
+func unusableStoredSession(err error) bool {
+	return errors.Is(err, credentials.ErrDecrypt) || errors.Is(err, credentials.ErrNotFound)
+}
 
 func contains(values []string, want string) bool {
 	for _, value := range values {

@@ -2154,11 +2154,13 @@ func (s *Server) durableRunHistory(agentID string) []studioRunHistoryRow {
 		return nil
 	}
 	allowed := map[string]bool{
-		"message.in":      true,
-		"message.out":     true,
-		"error":           true,
-		"tool.result":     true,
-		"schedule.output": true,
+		"message.in":              true,
+		"message.out":             true,
+		"error":                   true,
+		"tool.result":             true,
+		"task.contract.completed": true,
+		"run.completed":           true,
+		"schedule.output":         true,
 	}
 	var events []message.Event
 	var err error
@@ -2285,6 +2287,31 @@ func summarizeActionEvents(runID, sessionID string, events []message.Event) (stu
 				row.Status = "failed"
 				row.Ok = false
 				row.Error = studioFirstNonEmpty(row.Error, payloadErrorText(ev.Payload))
+			}
+		case "task.contract.completed":
+			m := payloadMap(ev.Payload)
+			state := strings.ToLower(strings.TrimSpace(stringField(m, "state")))
+			outcome := strings.ToLower(strings.TrimSpace(stringField(m, "outcome")))
+			if state == "blocked" || state == "incomplete" || state == "waiting_for_input" ||
+				outcome == "blocked" || outcome == "incomplete" || outcome == "needs_input" || outcome == "failed" {
+				row.Status = "failed"
+				row.Ok = false
+				row.Error = studioFirstNonEmpty(row.Error, stringField(m, "blocker"), "the run did not complete its goal")
+			}
+		case "run.completed":
+			m := payloadMap(ev.Payload)
+			success, hasSuccess := m["success"].(bool)
+			degraded, _ := m["degraded"].(bool)
+			outcome := strings.ToLower(strings.TrimSpace(stringField(m, "outcome")))
+			taskOutcome := strings.ToLower(strings.TrimSpace(stringField(m, "task_outcome")))
+			if (hasSuccess && !success) || degraded || outcome == "failed" || outcome == "incomplete" ||
+				taskOutcome == "blocked" || taskOutcome == "incomplete" || taskOutcome == "needs_input" || taskOutcome == "failed" {
+				row.Status = "failed"
+				row.Ok = false
+				row.Error = studioFirstNonEmpty(row.Error, "the run did not complete its goal")
+			} else if success && row.Status != "failed" {
+				row.Status = "success"
+				row.Ok = true
 			}
 		case "schedule.output":
 			ch, to, delivered, fallback, reason, preview, trigger := scheduleOutputSummary(ev.Payload)
