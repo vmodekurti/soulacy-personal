@@ -110,11 +110,13 @@ func (e *Engine) repairIncompleteBuilderMission(
 		Type: "warn", AgentID: msg.AgentID, SessionID: msg.SessionID,
 		Payload: map[string]any{"stage": "mission-completion", "missing": summary, "retry": *retries},
 	})
+	turns := make([]llm.ChatMessage, 0, 2)
+	if strings.TrimSpace(content) != "" {
+		turns = append(turns, llm.ChatMessage{Role: "assistant", Content: content})
+	}
+	turns = append(turns, llm.ChatMessage{Role: "system", Content: missionRepairDirective(summary, *retries)})
 	sess.mu.Lock()
-	e.appendHistoryLocked(sess,
-		llm.ChatMessage{Role: "assistant", Content: content},
-		llm.ChatMessage{Role: "system", Content: missionRepairDirective(summary, *retries)},
-	)
+	e.appendHistoryLocked(sess, turns...)
 	sess.mu.Unlock()
 	return e.buildContext(def, sess, msg), true
 }

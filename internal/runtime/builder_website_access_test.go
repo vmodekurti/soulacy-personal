@@ -207,6 +207,39 @@ func TestBuilderMissionRetriesThenCompletes(t *testing.T) {
 	}
 }
 
+func TestBuilderMissionEmptyResponseRepairDoesNotStoreEmptyAssistantTurn(t *testing.T) {
+	def := &agent.Definition{
+		ID: "podcast", Name: "Podcast", Enabled: true,
+		LLM: agent.LLMConfig{Provider: "test", Model: "fake-model"}, MaxTurns: 3,
+		Builtins: strListPtr("produce_audio"),
+		Mission: &agent.MissionContract{ID: "builder-podcast", Acceptance: []agent.MissionCheck{{
+			ID: "produce", Type: agent.MissionCheckRequiredTool, Tool: "produce_audio", Description: "Produce the audio",
+		}}},
+	}
+	e, provider := newHandleTestEngine(t, def)
+	e.builtins = []BuiltinTool{{Name: "produce_audio", Handler: func(context.Context, map[string]any) (string, error) {
+		return `{"url":"https://audio.example/episode/audio"}`, nil
+	}}}
+	provider.responses = []llm.CompletionResponse{
+		{Content: ""},
+		{ToolCalls: []message.ToolCall{{ID: "audio-1", Name: "produce_audio", Arguments: map[string]any{}}}},
+		{Content: "Podcast ready."},
+	}
+
+	if _, err := e.Handle(context.Background(), testUserMessage(def.ID, "empty-mission-repair", "Make the podcast")); err != nil {
+		t.Fatal(err)
+	}
+	requests := provider.requestsSnapshot()
+	if len(requests) < 2 {
+		t.Fatalf("requests = %d, want repair turn", len(requests))
+	}
+	for _, m := range requests[1].Messages {
+		if m.Role == "assistant" && strings.TrimSpace(m.Content) == "" && len(m.ToolCalls) == 0 {
+			t.Fatalf("repair request contains empty assistant turn: %#v", requests[1].Messages)
+		}
+	}
+}
+
 func TestBuilderMissionStopsAsPartialAfterBoundedRepairs(t *testing.T) {
 	def := &agent.Definition{
 		ID: "podcast", Name: "Podcast", Enabled: true,
