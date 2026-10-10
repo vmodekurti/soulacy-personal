@@ -326,3 +326,101 @@ func TestBuilderMissionEmptyRepairDoesNotFallThroughToMaxTurns(t *testing.T) {
 		t.Fatalf("reply did not expose incomplete mission: %#v %q", reply.Metadata, flattenParts(reply.Parts))
 	}
 }
+
+func TestBuilderMissionRecoversRequiredToolArgumentsWhenProviderIgnoresToolChoice(t *testing.T) {
+	def := &agent.Definition{
+		ID: "publisher", Name: "Publisher", Enabled: true,
+		LLM: agent.LLMConfig{Provider: "test", Model: "fake-model"}, MaxTurns: 4,
+		Builtins: strListPtr("publish_report"),
+		Mission: &agent.MissionContract{ID: "builder-publisher", Acceptance: []agent.MissionCheck{{
+			ID: "publish", Type: agent.MissionCheckRequiredTool, Tool: "publish_report", Description: "Publish the report",
+		}}},
+	}
+	e, provider := newHandleTestEngine(t, def)
+	var publishedURL string
+	e.builtins = []BuiltinTool{{
+		Name: "publish_report",
+		Parameters: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{"url": map[string]any{"type": "string"}},
+			"required":   []string{"url"},
+		},
+		Handler: func(_ context.Context, args map[string]any) (string, error) {
+			publishedURL, _ = args["url"].(string)
+			return `{"published":true}`, nil
+		},
+	}}
+	provider.responses = []llm.CompletionResponse{
+		{Content: "I found the report."},
+		{},
+		{Content: `{"url":"https://reports.example/daily"}`},
+		{Content: "The report was published."},
+	}
+
+	reply, err := e.Handle(context.Background(), testUserMessage(def.ID, "required-tool-recovery", "Publish today's report"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if publishedURL != "https://reports.example/daily" {
+		t.Fatalf("published URL = %q", publishedURL)
+	}
+	if reply.Metadata != nil && reply.Metadata[message.MetaReasoningDegraded] == "true" {
+		t.Fatalf("recovered mission marked degraded: %#v", reply.Metadata)
+	}
+	requests := provider.requestsSnapshot()
+	if len(requests) != 4 {
+		t.Fatalf("provider calls = %d, want initial, repair, argument recovery, and final", len(requests))
+	}
+	if requests[1].ToolChoice != "publish_report" || len(requests[1].Tools) != 1 {
+		t.Fatalf("native repair request = %#v", requests[1])
+	}
+	if requests[2].ResponseFormat != "json_schema" || requests[2].JSONSchema == nil || len(requests[2].Tools) != 0 {
+		t.Fatalf("argument recovery request = %#v", requests[2])
+	}
+}
+
+func TestBuilderMissionRejectsInvalidRecoveredToolArgumentsAndStopsBoundedly(t *testing.T) {
+	def := &agent.Definition{
+		ID: "publisher", Name: "Publisher", Enabled: true,
+		LLM: agent.LLMConfig{Provider: "test", Model: "fake-model"}, MaxTurns: 25,
+		Builtins: strListPtr("publish_report"),
+		Mission: &agent.MissionContract{ID: "builder-publisher", Acceptance: []agent.MissionCheck{{
+			ID: "publish", Type: agent.MissionCheckRequiredTool, Tool: "publish_report", Description: "Publish the report",
+		}}},
+	}
+	e, provider := newHandleTestEngine(t, def)
+	executions := 0
+	e.builtins = []BuiltinTool{{
+		Name: "publish_report",
+		Parameters: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{"url": map[string]any{"type": "string"}},
+			"required":   []string{"url"},
+		},
+		Handler: func(context.Context, map[string]any) (string, error) {
+			executions++
+			return "unexpected", nil
+		},
+	}}
+	provider.responses = []llm.CompletionResponse{
+		{Content: "I found the report."},
+		{},
+		{Content: `{"wrong":"https://reports.example/daily"}`},
+		{},
+		{Content: `{}`},
+	}
+
+	reply, err := e.Handle(context.Background(), testUserMessage(def.ID, "invalid-required-tool-recovery", "Publish today's report"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executions != 0 {
+		t.Fatalf("invalid recovered arguments executed tool %d times", executions)
+	}
+	if got := len(provider.requestsSnapshot()); got != 5 {
+		t.Fatalf("provider calls = %d, want bounded five despite max_turns 25", got)
+	}
+	if reply.Metadata[message.MetaOutcome] != "partial" || !strings.Contains(flattenParts(reply.Parts), "This run is incomplete") {
+		t.Fatalf("reply did not expose incomplete mission: %#v %q", reply.Metadata, flattenParts(reply.Parts))
+	}
+}

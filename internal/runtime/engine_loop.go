@@ -759,7 +759,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		if turn == 0 && !autoDelegated && forceGenieActionPlan {
 			req.ToolChoice = "plan_action"
 		}
-		applyNextMissionToolChoice(&req, &nextToolChoice)
+		missionRepairTool := applyNextMissionToolChoice(&req, &nextToolChoice)
 
 		e.sink.Emit(message.Event{
 			Type: "llm.call", AgentID: msg.AgentID, SessionID: msg.SessionID,
@@ -874,6 +874,15 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 			if recovered, ok := recoverXMLToolCalls(resp.Content, tools); ok {
 				resp.Content = ""
 				resp.ToolCalls = recovered
+			}
+		}
+		recoveryMaxTokens := requiredToolRecoveryTokenBudget(budgetTokens, usedTokens, resp)
+		if len(resp.ToolCalls) == 0 && missionRepairTool != "" && (budgetCalls == 0 || usedCalls < budgetCalls) && recoveryMaxTokens > 0 {
+			recovery := e.recoverRequiredMissionTool(ctx, def, msg, req, missionRepairTool, resp.Content, recoveryMaxTokens)
+			usedCalls += recovery.Calls
+			usedTokens += recovery.Tokens
+			if recovery.Call != nil {
+				resp.Content, resp.ToolCalls = "", []message.ToolCall{*recovery.Call}
 			}
 		}
 		// Do not let provider quirks skip inspection or change the operator's URL.
@@ -1465,35 +1474,4 @@ func (e *Engine) finalSynthesisStructured(ctx context.Context, def *agent.Defini
 		return ""
 	}
 	return strings.TrimSpace(resp.Content)
-}
-
-// parseJSONLoose accepts either a bare JSON value or one wrapped in ```json ... ```
-// code fences (a common LLM habit). Returns the parsed value (or an error if
-// neither shape parses).
-func parseJSONLoose(s string) (any, error) {
-	s = strings.TrimSpace(s)
-	// Strip surrounding code fences if present.
-	if strings.HasPrefix(s, "```") {
-		// Remove the leading ``` (and optional "json" tag) and the trailing ```.
-		s = strings.TrimPrefix(s, "```json")
-		s = strings.TrimPrefix(s, "```")
-		s = strings.TrimSuffix(s, "```")
-		s = strings.TrimSpace(s)
-	}
-	// Try to find the first { or [ — handles prefatory chatter the model leaks.
-	first := -1
-	for i, r := range s {
-		if r == '{' || r == '[' {
-			first = i
-			break
-		}
-	}
-	if first > 0 {
-		s = s[first:]
-	}
-	var v any
-	if err := json.Unmarshal([]byte(s), &v); err != nil {
-		return nil, fmt.Errorf("invalid JSON: %w", err)
-	}
-	return v, nil
 }

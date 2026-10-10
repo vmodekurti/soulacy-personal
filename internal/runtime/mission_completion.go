@@ -94,9 +94,9 @@ func missingRequiredMissionTool(evaluation autopilot.MissionEvaluation, availabl
 	return ""
 }
 
-func applyNextMissionToolChoice(req *llm.CompletionRequest, choice *string) {
+func applyNextMissionToolChoice(req *llm.CompletionRequest, choice *string) string {
 	if req == nil || choice == nil || *choice == "" || len(req.Tools) == 0 {
-		return
+		return ""
 	}
 	required := normalizeToolCallName(*choice)
 	*choice = ""
@@ -111,8 +111,9 @@ func applyNextMissionToolChoice(req *llm.CompletionRequest, choice *string) {
 		// next turn rebuilds the request from the full catalog.
 		req.Tools = []llm.ToolSchema{tool}
 		req.ToolChoice = tool.Name
-		return
+		return tool.Name
 	}
+	return ""
 }
 
 func toolSchemaNames(tools []llm.ToolSchema) []string {
