@@ -8,7 +8,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gofiber/fiber/v2"
+	"github.com/golang-jwt/jwt/v5"
+	"go.uber.org/zap"
+
+	"github.com/soulacy/soulacy/internal/auth"
 	"github.com/soulacy/soulacy/internal/authconnections"
+	"github.com/soulacy/soulacy/internal/rbac"
 )
 
 func TestAgentCreateAndUpdateSynchronizeAuthenticatedConnectionGrant(t *testing.T) {
@@ -112,6 +118,54 @@ func TestAuthenticatedConnectionAPILifecycleNeverReturnsCookieValues(t *testing.
 	stored, err := vault.ReadBlob(t.Context(), authConnectionVaultNamespace(id), authConnectionSessionKey)
 	if err != nil || !strings.Contains(string(stored), cookieValue) {
 		t.Fatalf("encrypted-vault write missing: value=%s err=%v", stored, err)
+	}
+}
+
+func TestPairedPhoneCanListAndRefreshWebsiteAccessWithoutCredentialAccess(t *testing.T) {
+	s := newTestGateway(t, "secret")
+	store, err := authconnections.Open(filepath.Join(t.TempDir(), "connections.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	s.SetAuthenticatedConnectionStore(store)
+	s.SetCredentialVault(newMemVault())
+	s.rbacManager = rbac.NewManager(rbac.NoopStore{}, zap.NewNop())
+
+	status, created := gatewayJSON(t, s, http.MethodPost, "/api/v1/authenticated-connections", "secret", `{
+		"name":"Research portal","scope":"user","kind":"browser_session",
+		"base_url":"https://members.example.com/login","allowed_domains":["example.com"]
+	}`)
+	if status != http.StatusCreated {
+		t.Fatalf("create status=%d body=%v", status, created)
+	}
+	id := created["connection"].(map[string]any)["id"].(string)
+
+	app := fiber.New()
+	app.Use(func(c *fiber.Ctx) error {
+		auth.SetClaims(c, &auth.Claims{
+			Role: "operator", Kind: "access", Scopes: companionScopes(),
+			RegisteredClaims: jwt.RegisteredClaims{Subject: "admin"},
+		})
+		return c.Next()
+	})
+	api := app.Group("/api/v1")
+	api.Get("/authenticated-connections", s.rbacMW(rbac.ResourceWebsiteAccess, rbac.ActionList), s.handleListAuthenticatedConnections)
+	api.Put("/authenticated-connections/:id/session", s.rbacMW(rbac.ResourceWebsiteAccess, rbac.ActionSet), s.handleSetAuthenticatedConnectionSession)
+	api.Delete("/authenticated-connections/:id", s.rbacMW(rbac.ResourceWebsiteAccess, rbac.ActionDelete), s.handleDeleteAuthenticatedConnection)
+
+	if code, body := doJSON(t, app, http.MethodGet, "/api/v1/authenticated-connections", ""); code != http.StatusOK {
+		t.Fatalf("paired phone list: %d %+v", code, body)
+	}
+	state := `{"storage_state":{"cookies":[{"name":"session","value":"opaque","domain":".example.com","path":"/","secure":true}],"origins":[]}}`
+	if code, body := doJSON(t, app, http.MethodPut, "/api/v1/authenticated-connections/"+id+"/session", state); code != http.StatusOK {
+		t.Fatalf("paired phone refresh: %d %+v", code, body)
+	}
+	if code, body := doJSON(t, app, http.MethodDelete, "/api/v1/authenticated-connections/"+id, ""); code != http.StatusForbidden || body["required"] != "website_access:delete" {
+		t.Fatalf("paired phone delete should remain denied: %d %+v", code, body)
+	}
+	if (&auth.Claims{Role: "operator", Scopes: companionScopes()}).Allows(rbac.ResourceCredentials, rbac.ActionList) {
+		t.Fatal("paired phone website access scopes exposed general credentials")
 	}
 }
 

@@ -87,16 +87,12 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	}
 	var runProvider, runModel, runStrategy string
 	defer func() {
-		degraded := reply.Metadata != nil && strings.EqualFold(reply.Metadata[message.MetaReasoningDegraded], "true")
-		contractSnapshot := contract.Complete(err, runOutcome == "success", degraded, time.Now().UTC())
+		contractSnapshot, recordedOutcome, success, degraded := completeTaskContract(contract, &reply, err, runOutcome)
 		if collector := taskContractCollectorFrom(ctx); collector != nil {
 			*collector = contractSnapshot
 		}
-		success := err == nil && runOutcome == "success" && !degraded &&
-			contractSnapshot.Outcome != taskcontract.OutcomeBlocked &&
-			contractSnapshot.Outcome != taskcontract.OutcomeFailed
 		metrics.AgentRunDuration.WithLabelValues(msg.AgentID).Observe(time.Since(runStart).Seconds())
-		metrics.AgentRunsTotal.WithLabelValues(msg.AgentID, runOutcome).Inc()
+		metrics.AgentRunsTotal.WithLabelValues(msg.AgentID, recordedOutcome).Inc()
 		// A single explicit terminal event gives learning/telemetry consumers an
 		// authoritative run boundary. Session IDs are conversational and may span
 		// hundreds of turns; error events may be recovered. Neither is a run ID.
@@ -112,7 +108,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 				Payload: map[string]any{
 					"run_id": runID, "provider": runProvider, "model": runModel,
 					"strategy": runStrategy, "success": success, "degraded": degraded,
-					"outcome": runOutcome, "task_outcome": contractSnapshot.Outcome,
+					"outcome": recordedOutcome, "task_outcome": contractSnapshot.Outcome,
 					"task_contract": contractSnapshot,
 				},
 				Timestamp: time.Now().UTC(),
@@ -191,6 +187,8 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		return message.Message{}, fmt.Errorf("engine: unknown agent %q", msg.AgentID)
 	}
 	def = def.Clone()
+	missionContract := effectiveBuilderMissionContract(def)
+	defineScheduledTaskContract(contract, def, missionContract, msg)
 	ctx = WithActiveAgent(ctx, def.ID)
 	ctx = applyAgentPrincipalBoundary(ctx, def)
 	applyPlaygroundOverrides(def, msg.Metadata)
@@ -527,7 +525,6 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	forcePackageInstall := hasURLPackageRequest && packageInstallReq.Kind != "mcp" &&
 		toolSchemaExists(tools, "package_install")
 	forceGenieActionPlan := shouldForceGenieActionPlan(def.ID, rawGoal, tools)
-	missionContract := effectiveBuilderMissionContract(def)
 	ctx, missionProgress := attachMissionProgress(ctx, missionContract)
 	// Auto-delegate when SOUL.yaml selects a declared `agent__<id>` peer before the
 	// LLM ever runs. Reason: local models (qwen2.5:72b in particular) routinely
@@ -640,6 +637,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		// final-synthesis / current finalContent path return what we have,
 		// with a clear terminal note appended below.
 		if reason := budgetExceeded(budgetTokens, usedTokens, budgetCalls, usedCalls); reason != "" {
+			contract.MarkIncomplete(reason)
 			e.log.Warn("engine: run budget exceeded — halting",
 				zap.String("agent", msg.AgentID),
 				zap.String("reason", reason),
@@ -694,6 +692,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		if budgetTokens > 0 {
 			remainingOutput := budgetTokens - usedTokens - estimateTokens(chatMsgs, tools)
 			if remainingOutput <= 0 {
+				contract.MarkIncomplete("the token budget could not fit the next model call")
 				finalContent = strings.TrimSpace(bestEffortFinal(chatMsgs))
 				if finalContent != "" {
 					finalContent += "\n\n"
@@ -940,6 +939,10 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 				chatMsgs = repairedContext
 				continue
 			}
+			if repairedContext, repaired := e.continuePrematureFinal(def, sess, msg, contract, resp.Content, turn, maxTurns); repaired {
+				chatMsgs = repairedContext
+				continue
+			}
 			finalContent = resp.Content
 			break
 		}
@@ -1086,15 +1089,8 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		// The model kept calling tools and never produced a plain-text reply.
 		// Force a tool-free synthesis from everything already gathered.
 		finalContent = e.finalSynthesis(ctx, def, msg.AgentID, msg.SessionID, chatMsgs, failures)
-	} else if def.LLM.OutputSchema == nil && (reasoning.IsProgressPreamble(finalContent) || reasoning.IsInternalScratchNarration(finalContent)) {
-		// The model ended on a progress note ("I'll start by loading the cookies…")
-		// instead of the actual deliverable — common when it runs out of turns
-		// mid-plan. Force one tool-free synthesis so the user gets the finished
-		// result built from everything already gathered, not an intent statement.
-		if synth := strings.TrimSpace(e.finalSynthesis(ctx, def, msg.AgentID, msg.SessionID, chatMsgs, failures)); synth != "" && !reasoning.IsProgressPreamble(synth) && !reasoning.IsInternalScratchNarration(synth) {
-			finalContent = synth
-		}
 	}
+	finalContent = finishPrematureContent(def, contract, finalContent)
 	// Safety net: never surface leaked reasoning control JSON (thought/action/
 	// is_done) as the reply, even on the classic (non-loop) path where a model
 	// primed with a ReAct-style prompt emits its step object as text. Skipped
@@ -1145,8 +1141,10 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 
 	reply, missionIncomplete := e.finalizeBuilderMissionReply(ctx, def, missionContract, sess, msg, contract, missionProgress, finalContent)
 	if missionIncomplete {
+		runOutcome = "success"
 		return reply, nil
 	}
+	markIncompleteReplyMetadata(&reply, contract)
 
 	runOutcome = "success" // flips the deferred AgentRunsTotal counter from "error"
 	return reply, nil

@@ -144,6 +144,25 @@ func TestDedicatedSecretAndCredentialPolicy(t *testing.T) {
 	}
 }
 
+func TestWebsiteAccessPolicyIsSeparateFromCredentials(t *testing.T) {
+	for _, role := range []string{RoleAdmin, RoleOperator} {
+		for _, action := range []string{ActionList, ActionSet, ActionDelete} {
+			if !HasPermission(role, ResourceWebsiteAccess, action) {
+				t.Fatalf("%s missing website_access:%s", role, action)
+			}
+		}
+	}
+	if !HasPermission(RoleViewer, ResourceWebsiteAccess, ActionList) {
+		t.Fatal("viewer cannot list website access metadata")
+	}
+	if HasPermission(RoleViewer, ResourceWebsiteAccess, ActionSet) || HasPermission(RoleViewer, ResourceWebsiteAccess, ActionDelete) {
+		t.Fatal("viewer can modify website access")
+	}
+	if HasPermission(RoleViewer, ResourceCredentials, ActionList) {
+		t.Fatal("website access permission widened general credential access")
+	}
+}
+
 func TestNewSQLiteStoreBadPath(t *testing.T) {
 	_, err := NewSQLiteStore("/no/such/dir/rbac.db")
 	if err == nil {

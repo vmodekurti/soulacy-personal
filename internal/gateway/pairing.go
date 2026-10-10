@@ -203,7 +203,10 @@ const companionKeyName = "mobile-companion"
 // Phones paired before a scope existed are widened at startup
 // (apikeys.SQLiteStore.EnsureScopes) so they need no re-pairing.
 func companionScopes() []string {
-	return []string{"chat", "agents:read", "memory", "config", "runs:read"}
+	return []string{
+		"chat", "agents:read", "memory", "config", "runs:read",
+		"website_access:list", "website_access:set",
+	}
 }
 
 // handleListHouseholdMembers lists who has a paired phone: one row per
