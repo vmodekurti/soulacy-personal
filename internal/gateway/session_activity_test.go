@@ -119,6 +119,25 @@ func TestSessionActivitySortByStart(t *testing.T) {
 	}
 }
 
+func TestSessionActivityAutopilotTerminalEventsDoNotRecreateRun(t *testing.T) {
+	tr := newSessionActivityTracker()
+	now := time.Date(2026, 10, 10, 13, 43, 0, 0, time.UTC)
+	tr.nowFn = func() time.Time { return now }
+
+	tr.Note(message.Event{Type: "message.in", SessionID: "autopilot-run", AgentID: "podcast", Timestamp: now})
+	tr.Note(message.Event{Type: "run.completed", SessionID: "autopilot-run", AgentID: "podcast", Timestamp: now.Add(time.Second)})
+	if got := tr.Snapshot(); len(got) != 0 {
+		t.Fatalf("run.completed should evict the session, got %+v", got)
+	}
+
+	// Autopilot writes its durable proof after run.completed. This final event
+	// must remain terminal rather than bootstrapping a fresh phantom session.
+	tr.Note(message.Event{Type: "autopilot.proof", SessionID: "autopilot-run", AgentID: "podcast", Timestamp: now.Add(2 * time.Second)})
+	if got := tr.Snapshot(); len(got) != 0 {
+		t.Fatalf("autopilot.proof recreated a completed session: %+v", got)
+	}
+}
+
 // TestEventHubEmitFeedsTracker verifies the wiring — a raw Emit() must show up
 // in the tracker snapshot. This is the E4c regression fence: if a future
 // refactor pulls the Note() call out of Emit(), this test breaks.

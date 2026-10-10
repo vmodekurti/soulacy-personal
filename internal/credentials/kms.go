@@ -5,7 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -56,29 +56,58 @@ func NewLocalKMS() (*LocalKMS, error) {
 	return &LocalKMS{masterSecret: secret}, nil
 }
 
-// NewLocalKMSWithStore creates a LocalKMS that survives restarts even without a
-// hardware machine id (the common case inside containers, where /etc/machine-id
-// is absent or empty). Resolution order:
+// NewLocalKMSWithStore creates a LocalKMS that survives restarts and container
+// replacement. Resolution order:
 //
-//  1. Platform hardware id (IOPlatformUUID on macOS, /etc/machine-id on Linux).
-//  2. A persisted random secret stored at storeDir/.machine-secret. Created on
-//     first run and reused thereafter, so credentials encrypted with it can be
-//     decrypted across restarts as long as storeDir persists (it lives next to
-//     the credential vault, which is already on the data volume).
-//  3. As a last resort, an ephemeral random secret (credentials won't survive
-//     a restart) — only when storeDir can't be read or written.
+//  1. The persisted secret at storeDir/.machine-secret. It lives next to the
+//     credential vault on the data volume, so a replacement container keeps
+//     the same encryption key even when /etc/machine-id changes.
+//  2. On the first run, the platform hardware id (IOPlatformUUID on macOS,
+//     /etc/machine-id on Linux) is persisted and used. Persisting the exact
+//     bytes preserves compatibility with vaults encrypted by older releases,
+//     which used the platform id directly.
+//  3. If no platform id is available, a random secret is persisted.
+//  4. As a last resort, an ephemeral random secret. Credentials will not
+//     survive a restart when no store directory is supplied.
 //
 // storeDir is typically the directory containing the credential vault DB. An
-// empty storeDir skips step 2 and matches the legacy NewLocalKMS behaviour.
+// empty storeDir skips persistence and matches the legacy NewLocalKMS behavior.
 func NewLocalKMSWithStore(storeDir string) (*LocalKMS, error) {
-	if secret, err := platformSecret(); err == nil {
-		return &LocalKMS{masterSecret: secret}, nil
-	}
+	return newLocalKMSWithStore(storeDir, platformSecret)
+}
+
+func newLocalKMSWithStore(storeDir string, platform func() ([]byte, error)) (*LocalKMS, error) {
 	if storeDir != "" {
-		if secret, err := loadOrCreatePersistedSecret(storeDir); err == nil {
-			fmt.Fprintln(os.Stderr, "soulacy/credentials: no hardware machine id; using a persisted key file under the workspace. Credentials will survive restarts as long as the data volume persists.")
+		if secret, err := readPersistedSecret(storeDir); err == nil {
 			return &LocalKMS{masterSecret: secret}, nil
+		} else if !os.IsNotExist(err) {
+			return nil, err
 		}
+
+		// Older releases encrypted existing vaults directly with the platform
+		// id. Persist those exact bytes before opening the vault so the current
+		// process remains compatible and every later container reuses them.
+		if secret, err := platform(); err == nil && len(bytes.TrimSpace(secret)) >= 16 {
+			persisted, perr := persistSecret(storeDir, bytes.TrimSpace(secret))
+			if perr != nil {
+				return nil, perr
+			}
+			return &LocalKMS{masterSecret: persisted}, nil
+		}
+
+		secret := make([]byte, 32)
+		if _, err := io.ReadFull(rand.Reader, secret); err != nil {
+			return nil, fmt.Errorf("credentials: generate persisted secret: %w", err)
+		}
+		persisted, err := persistSecret(storeDir, secret)
+		if err != nil {
+			return nil, err
+		}
+		return &LocalKMS{masterSecret: persisted}, nil
+	}
+
+	if secret, err := platform(); err == nil {
+		return &LocalKMS{masterSecret: secret}, nil
 	}
 	fmt.Fprintln(os.Stderr, "soulacy/credentials: WARNING — could not derive or persist a machine secret; using ephemeral random key. Credentials will not survive process restarts.")
 	secret := make([]byte, 32)
@@ -88,30 +117,50 @@ func NewLocalKMSWithStore(storeDir string) (*LocalKMS, error) {
 	return &LocalKMS{masterSecret: secret}, nil
 }
 
-// loadOrCreatePersistedSecret returns the hex-encoded master secret stored in
-// dir, creating a fresh random one (0600) on first use. The returned bytes are
-// the file contents verbatim, so reads and writes are byte-identical and HKDF
-// derivation stays stable across restarts.
-func loadOrCreatePersistedSecret(dir string) ([]byte, error) {
+// readPersistedSecret returns the master secret exactly as stored. Older
+// releases wrote a 64-byte hex string and used those encoded bytes as the HKDF
+// input, so the value must never be decoded or normalized during an upgrade.
+func readPersistedSecret(dir string) ([]byte, error) {
 	path := filepath.Join(dir, machineSecretFile)
-	if data, err := os.ReadFile(path); err == nil {
-		if s := bytes.TrimSpace(data); len(s) >= 64 {
-			return s, nil
-		}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
 	}
-	raw := make([]byte, 32)
-	if _, err := io.ReadFull(rand.Reader, raw); err != nil {
-		return nil, fmt.Errorf("credentials: generate persisted secret: %w", err)
+	secret := bytes.TrimSpace(data)
+	if len(secret) < 16 {
+		return nil, fmt.Errorf("credentials: persisted machine secret at %s is invalid", path)
 	}
-	enc := make([]byte, hex.EncodedLen(len(raw)))
-	hex.Encode(enc, raw)
+	return append([]byte(nil), secret...), nil
+}
+
+// persistSecret creates the stable workspace key without replacing an
+// existing one. O_EXCL closes the startup race when two gateway processes are
+// briefly launched together; the loser reads and uses the winner's value.
+func persistSecret(dir string, secret []byte) ([]byte, error) {
+	if len(bytes.TrimSpace(secret)) < 16 {
+		return nil, fmt.Errorf("credentials: machine secret is too short")
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("credentials: create secret dir: %w", err)
 	}
-	if err := os.WriteFile(path, enc, 0o600); err != nil {
+	path := filepath.Join(dir, machineSecretFile)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		return readPersistedSecret(dir)
+	}
+	if err != nil {
 		return nil, fmt.Errorf("credentials: write persisted secret: %w", err)
 	}
-	return enc, nil
+	if _, err := f.Write(bytes.TrimSpace(secret)); err != nil {
+		_ = f.Close()
+		_ = os.Remove(path)
+		return nil, fmt.Errorf("credentials: write persisted secret: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
+		return nil, fmt.Errorf("credentials: close persisted secret: %w", err)
+	}
+	return append([]byte(nil), bytes.TrimSpace(secret)...), nil
 }
 
 // DeriveKey returns a 32-byte AES-256 key for the given agentID via HKDF-SHA256.

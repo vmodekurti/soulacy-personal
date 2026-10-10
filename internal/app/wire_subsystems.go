@@ -780,8 +780,13 @@ func (a *App) wireSecrets(vault credentials.Vault) {
 				zap.Int("count", n), zap.String("config", a.cfgPath))
 		}
 	}
-	if n := mgr.Overlay(ctx, a.cfg); n > 0 {
+	n, readErrors := mgr.OverlayWithErrors(ctx, a.cfg)
+	if n > 0 {
 		a.log.Info("applied secrets from vault", zap.Int("count", n))
+	}
+	for name, err := range readErrors {
+		a.log.Error("stored secret could not be restored; enter it again in Secrets",
+			zap.String("name", name), zap.Error(err))
 	}
 }
 
