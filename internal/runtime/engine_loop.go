@@ -941,11 +941,11 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 				chatMsgs, nextToolChoice = repairedContext, requiredTool
 				continue
 			}
-			if repairedContext, repaired := e.continuePrematureFinal(def, sess, msg, contract, resp.Content, turn, maxTurns); repaired {
+			if repairedContext, repaired := e.continuePrematureFinal(def, sess, msg, contract, resp.Content, missionCompletionRetries < maxMissionCompletionRetries, turn, maxTurns); repaired {
 				chatMsgs = repairedContext
 				continue
 			}
-			finalContent = resp.Content
+			finalContent = terminalBuilderMissionContent(missionContract, missionProgress, resp.Content, missionCompletionRetries)
 			break
 		}
 

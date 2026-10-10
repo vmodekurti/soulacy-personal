@@ -34,7 +34,10 @@ func completeTaskContract(contract *taskcontract.Contract, reply *message.Messag
 	return snapshot, recordedOutcome, success, degraded
 }
 
-func (e *Engine) continuePrematureFinal(def *agent.Definition, sess *Session, msg message.Message, contract *taskcontract.Contract, content string, turn, maxTurns int) ([]llm.ChatMessage, bool) {
+func (e *Engine) continuePrematureFinal(def *agent.Definition, sess *Session, msg message.Message, contract *taskcontract.Contract, content string, allow bool, turn, maxTurns int) ([]llm.ChatMessage, bool) {
+	if !allow {
+		return nil, false
+	}
 	empty := strings.TrimSpace(content) == ""
 	if !empty && (def.LLM.OutputSchema != nil || (!reasoning.IsProgressPreamble(content) && !reasoning.IsInternalScratchNarration(content))) {
 		return nil, false

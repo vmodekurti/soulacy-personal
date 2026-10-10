@@ -104,12 +104,13 @@ func applyNextMissionToolChoice(req *llm.CompletionRequest, choice *string) {
 		if normalizeToolCallName(tool.Name) != required {
 			continue
 		}
-		// Some OpenAI-compatible hosted models ignore a named tool_choice when
-		// the request also carries a large catalog. Give the repair turn one
-		// possible action and use the broadly supported `required` constraint.
-		// The next turn rebuilds the request from the full catalog.
+		// Give the repair turn one possible action and name it explicitly. Some
+		// hosted Ollama-compatible models treat the generic `required` value as
+		// advisory and still return prose, while the named OpenAI-compatible
+		// constraint reliably identifies the function that must be called. The
+		// next turn rebuilds the request from the full catalog.
 		req.Tools = []llm.ToolSchema{tool}
-		req.ToolChoice = "required"
+		req.ToolChoice = tool.Name
 		return
 	}
 }
@@ -120,6 +121,13 @@ func toolSchemaNames(tools []llm.ToolSchema) []string {
 		names = append(names, tool.Name)
 	}
 	return names
+}
+
+func terminalBuilderMissionContent(mission *agent.MissionContract, progress *missionProgress, content string, retries int) string {
+	if strings.TrimSpace(content) != "" || !isBuilderMission(mission) || retries < maxMissionCompletionRetries || builderMissionFailureSummary(mission, progress, content) == "" {
+		return content
+	}
+	return "I could not complete the mission after the allowed recovery attempts."
 }
 
 func missionRepairDirective(summary string, attempt int) string {
