@@ -2,7 +2,9 @@ package config
 
 import (
 	"os"
+	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -31,6 +33,57 @@ func TestVersionFileIsPresentAndTagShaped(t *testing.T) {
 	if !regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$`).MatchString(got) {
 		t.Fatalf("VERSION %q is not a release tag like v1.2.3", got)
 	}
+}
+
+func TestVersionFileIsNotOlderThanLatestReleaseTag(t *testing.T) {
+	raw, err := os.ReadFile("../../VERSION")
+	if err != nil {
+		t.Fatalf("read VERSION: %v", err)
+	}
+	fileVersion := strings.TrimSpace(string(raw))
+
+	out, err := exec.Command("git", "tag", "--merged", "HEAD", "--list", "v[0-9]*").Output()
+	if err != nil {
+		t.Skipf("git tags are unavailable in this source tree: %v", err)
+	}
+	latest := ""
+	for _, tag := range strings.Fields(string(out)) {
+		if strings.Contains(tag, "-") {
+			continue
+		}
+		if latest == "" || compareReleaseVersions(tag, latest) > 0 {
+			latest = tag
+		}
+	}
+	if latest == "" {
+		t.Skip("no stable release tags are available")
+	}
+	if compareReleaseVersions(fileVersion, latest) < 0 {
+		t.Fatalf("VERSION says %s but the repository already contains newer release %s", fileVersion, latest)
+	}
+}
+
+func compareReleaseVersions(a, b string) int {
+	parse := func(value string) [3]int {
+		value = strings.TrimPrefix(value, "v")
+		value = strings.SplitN(value, "-", 2)[0]
+		parts := strings.Split(value, ".")
+		var result [3]int
+		for i := 0; i < len(result) && i < len(parts); i++ {
+			result[i], _ = strconv.Atoi(parts[i])
+		}
+		return result
+	}
+	left, right := parse(a), parse(b)
+	for i := range left {
+		if left[i] < right[i] {
+			return -1
+		}
+		if left[i] > right[i] {
+			return 1
+		}
+	}
+	return 0
 }
 
 // The compiled-in default stays "dev" — that is how an unstamped local `go
