@@ -21,6 +21,7 @@
   let archived = new Set()
   let scope = 'home'
   let agentFilter = ''
+  let homePrompt = ''
   let socket = null
   let refreshTimer = null
 
@@ -217,6 +218,18 @@
     })
     location.hash = '#chat'
   }
+
+  function startWithGenie() {
+    const text = homePrompt.trim()
+    if (!text) return
+    genieAsk.set({ type: 'request', text, context: {}, at: Date.now() })
+    location.hash = '#chat'
+  }
+
+  function focusAttention() {
+    scope = 'home'
+    setTimeout(() => document.querySelector('.card.needs')?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+  }
   async function share(card) {
     const text = card.body || card.title || ''
     try { await navigator.clipboard.writeText(text); toast = 'Copied' } catch { toast = 'Could not copy' }
@@ -253,38 +266,77 @@
   $: resultCount = filterFeedCards(cards, 'results', { read, saved, archived }).length
   $: archivedCount = filterFeedCards(cards, 'archived', { read, saved, archived }).length
   $: savedCount = filterFeedCards(cards, 'saved', { read, saved, archived }).length
+  $: attentionCount = cards.filter(card => card.kind === 'approval').length
+  $: activeAgents = agents.filter(agent => agent.enabled).length
+  $: recentResults = cards.filter(card => card.kind !== 'approval').slice(0, 4)
+  const greeting = new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 18 ? 'Good afternoon' : 'Good evening'
 </script>
 
 <div class="feed">
-  <header class="top">
-    <div class="wordmark">soulacy</div>
-    <div class="top-actions">
+  <header class="workspace-header">
+    <div>
+      <span class="eyebrow">Personal workspace</span>
+      <h1>{greeting}.</h1>
+      <p>Here is what is happening across your AI workspace today.</p>
+    </div>
+    <div class="header-actions">
       <TourButton page="feed" />
-      <button class="icon" title="Refresh" on:click={() => load()} aria-label="Refresh">↻</button>
-      <a class="icon" href="#chat" title="Chat" aria-label="Chat">◎</a>
+      <button class="icon-button" title="Refresh" on:click={() => load()} aria-label="Refresh workspace">↻</button>
     </div>
   </header>
 
-  <nav class="scopes" aria-label="Feed views">
-    <button class:active={scope === 'home'} on:click={() => { scope = 'home'; agentFilter = '' }}>Home{#if unreadCount}<span>{unreadCount}</span>{/if}</button>
-    <button class:active={scope === 'results' || scope === 'unread'} on:click={() => scope = 'results'}>Results{#if resultCount}<span>{resultCount}</span>{/if}</button>
-    <button class:active={scope === 'saved'} on:click={() => scope = 'saved'}>Saved{#if savedCount}<span>{savedCount}</span>{/if}</button>
-    <button class:active={scope === 'archived'} on:click={() => scope = 'archived'}>Archive{#if archivedCount}<span>{archivedCount}</span>{/if}</button>
+  {#if scope === 'home'}
+    <section class="overview" aria-label="Workspace overview">
+      <a href="#agents" class="metric">
+        <span class="metric-icon violet">◎</span>
+        <span><small>Active agents</small><strong>{activeAgents}</strong></span>
+        <em>Manage</em>
+      </a>
+      <button class="metric" on:click={() => scope = 'results'}>
+        <span class="metric-icon blue">▤</span>
+        <span><small>Agent results</small><strong>{resultCount}</strong></span>
+        <em>{unreadCount} new</em>
+      </button>
+      <button class="metric" on:click={focusAttention}>
+        <span class="metric-icon amber">✓</span>
+        <span><small>Needs attention</small><strong>{attentionCount}</strong></span>
+        <em>{attentionCount ? 'Review' : 'Clear'}</em>
+      </button>
+      <button class="metric" on:click={() => scope = 'saved'}>
+        <span class="metric-icon green">♡</span>
+        <span><small>Saved for later</small><strong>{savedCount}</strong></span>
+        <em>Open</em>
+      </button>
+    </section>
+  {/if}
+
+  <nav class="view-tabs" aria-label="Feed views">
+    <button class:active={scope === 'home'} on:click={() => { scope = 'home'; agentFilter = '' }}>For you</button>
+    <button class:active={scope === 'results' || scope === 'unread'} on:click={() => scope = 'results'}>Results <span>{resultCount}</span></button>
+    <button class:active={scope === 'saved'} on:click={() => scope = 'saved'}>Saved <span>{savedCount}</span></button>
+    <button class:active={scope === 'archived'} on:click={() => scope = 'archived'}>Archive <span>{archivedCount}</span></button>
   </nav>
 
   {#if scope === 'home'}
-    <section class="results-summary">
-      <button on:click={() => scope = 'results'}>
-        <span class="summary-icon">▤</span>
-        <span><b>Agent results</b><small>{resultCount} results from {resultGroups.length} agents</small></span>
-        {#if unreadCount}<strong>{unreadCount} new</strong>{/if}
-        <i>›</i>
+    <section class="action-grid" aria-label="Common actions">
+      <button on:click={() => { homePrompt = 'Research a topic deeply and give me a cited summary'; startWithGenie() }}>
+        <span class="action-icon violet">⌕</span><span><strong>Deep research</strong><small>Research and synthesize with sources</small></span><em>→</em>
       </button>
+      <button on:click={() => scope = 'results'}>
+        <span class="action-icon green">▤</span><span><strong>Review results</strong><small>See completed work from your agents</small></span><em>→</em>
+      </button>
+      <a href="#missions">
+        <span class="action-icon blue">⌘</span><span><strong>Create a workflow</strong><small>Automate a repeatable task</small></span><em>→</em>
+      </a>
+      <a href="#connectors">
+        <span class="action-icon amber">⌁</span><span><strong>Connect a source</strong><small>Add a service or website</small></span><em>→</em>
+      </a>
     </section>
-    <div class="section-heading"><b>New for you</b><span>{unreadCount || 'Caught up'}</span></div>
-  {:else if scope === 'results' || scope === 'unread'}
-    <section class="results-head">
-      <div><h2>{scope === 'unread' ? 'Unread results' : 'All results'}</h2><p>Scheduled work, organized by agent</p></div>
+  {/if}
+
+  {#if scope === 'results' || scope === 'unread'}
+    <section class="library-header">
+      <div><h2>{scope === 'unread' ? 'Unread results' : 'All agent results'}</h2><p>Finished work from scheduled and manual runs.</p></div>
       <button class="filter-toggle" on:click={() => scope = scope === 'unread' ? 'results' : 'unread'}>{scope === 'unread' ? 'Show all' : `Unread ${unreadCount || ''}`}</button>
     </section>
     <div class="agent-filters" aria-label="Filter results by agent">
@@ -299,171 +351,288 @@
   {/if}
 
   {#if pending > 0}
-    <button class="pill" on:click={() => load()}>{pending} new result{pending === 1 ? '' : 's'} ↑</button>
+    <button class="new-results" on:click={() => load()}>{pending} new result{pending === 1 ? '' : 's'} ready</button>
   {/if}
 
-  {#if loading && cards.length === 0}
-    <div class="empty">Loading your feed…</div>
-  {:else if error}
-    <div class="empty err">{error}</div>
-  {:else if visibleResults.length === 0}
-    <div class="empty">{scope === 'archived' ? 'No archived results.' : scope === 'unread' ? 'You are all caught up.' : scope === 'saved' ? 'Save a result to keep it here.' : scope === 'home' ? 'You are caught up. New results will appear here.' : 'No results yet.'}</div>
-  {/if}
+  <div class:home-grid={scope === 'home'} class:library-grid={scope !== 'home'}>
+    <main class="work-stream">
+      {#if scope === 'home'}
+        <header class="section-title">
+          <div><span>Live workspace</span><h2>Current work</h2></div>
+          <button on:click={() => scope = 'results'}>View all <span>→</span></button>
+        </header>
+      {/if}
 
-  <div class="cards">
-    {#each visibleResults as card (card.id)}
-      <!-- The card keeps the familiar double-click save gesture and exposes
-           the same action to keyboard users through Enter. -->
-      <!-- svelte-ignore a11y_no_noninteractive_tabindex a11y_no_noninteractive_element_interactions -->
-      <article class="card" class:needs={card.kind === 'approval'} class:unread={card.kind !== 'approval' && !read.has(card.id)} class:result-row={card.kind !== 'approval'}
-        on:click={() => tap(card)} on:keydown={(event) => event.key === 'Enter' && toggleSave(card)} tabindex="0"
-        aria-label="{agentName(card.agent)} · {card.kind}">
-        <div class="head">
-          <span class="av" style="--h:{hue(card.agent)}">{initials(card.agent)}</span>
-          <div class="who">
-            <b>{agentName(card.agent)}</b>
-            <span class="meta">
-              {#if card.kind === 'approval'}needs you{:else}{card.trigger === 'cron' ? 'scheduled' : (card.trigger || 'finished')}{#if card.steps} · {card.steps} steps{/if}{/if}
-              {#if card.at} · {relative(card.at)}{/if}
-            </span>
-          </div>
-          {#if card.kind === 'run' && !card.ok}<span class="chip bad">failed</span>{/if}
-          {#if card.kind !== 'approval' && !read.has(card.id)}<span class="unread-dot" aria-label="Unread"></span>{/if}
+      {#if loading && cards.length === 0}
+        <div class="empty">Loading your workspace...</div>
+      {:else if error}
+        <div class="empty err">{error}</div>
+      {:else if visibleResults.length === 0}
+        <div class="empty-state">
+          <span>✓</span>
+          <h3>{scope === 'home' || scope === 'unread' ? 'You are all caught up' : scope === 'archived' ? 'No archived results' : scope === 'saved' ? 'Nothing saved yet' : 'No results yet'}</h3>
+          <p>{scope === 'saved' ? 'Save useful results and they will stay easy to find here.' : 'New agent work will appear here when it is ready.'}</p>
         </div>
+      {/if}
 
-        {#if card.kind === 'approval'}
-          <div class="body approval">
-            <div class="tag">Needs you</div>
-            <p>Wants to run <code>{card.tool}</code>{#if card.reason} — {card.reason}{/if}</p>
-            {#if Object.keys(card.args).length}<pre class="args">{JSON.stringify(card.args, null, 2)}</pre>{/if}
-            <div class="btns">
-              <button class="btn" on:click|stopPropagation={() => decide(card, false)}>Deny</button>
-              <button class="btn primary" on:click|stopPropagation={() => decide(card, true)}>Approve</button>
+      <div class="cards" class:library={scope !== 'home'}>
+        {#each visibleResults as card (card.id)}
+          <!-- svelte-ignore a11y_no_noninteractive_tabindex a11y_no_noninteractive_element_interactions -->
+          <article class="card" class:needs={card.kind === 'approval'} class:unread={card.kind !== 'approval' && !read.has(card.id)}
+            on:click={() => tap(card)} on:keydown={(event) => event.key === 'Enter' && toggleSave(card)} tabindex="0"
+            aria-label="{agentName(card.agent)} · {card.kind}">
+            <div class="head">
+              <span class="av" style="--h:{hue(card.agent)}">{initials(card.agent)}</span>
+              <div class="who">
+                <b>{agentName(card.agent)}</b>
+                <span class="meta">
+                  {#if card.kind === 'approval'}needs you{:else}{card.trigger === 'cron' ? 'Scheduled run' : (card.trigger || 'Finished')}{#if card.steps} · {card.steps} steps{/if}{/if}
+                  {#if card.at} · {relative(card.at)}{/if}
+                </span>
+              </div>
+              {#if card.kind === 'run' && !card.ok}<span class="chip bad">Failed</span>{/if}
+              {#if card.kind !== 'approval' && !read.has(card.id)}<span class="unread-dot" aria-label="Unread"></span>{/if}
             </div>
-          </div>
-        {:else}
-          {#if titleFor(card)}<div class="title">{titleFor(card)}</div>{/if}
-          {#if expanded.has(card.id) && blocksFor(card)}
-            {#if card.presentation.summary}<div class="summary" class:clamped={!expanded.has(card.id)}>{card.presentation.summary}</div>{/if}
-            <div class="blocks"><Presentation blocks={blocksFor(card)} compact={!expanded.has(card.id)} /></div>
-          {:else if expanded.has(card.id)}
-            <div class="body markdown-body" use:richRenderer={captionFor(card)}>{@html parseMarkdown(captionFor(card))}</div>
-          {:else}
-            <div class="preview">{captionFor(card).replace(/[#*_`>|\n]+/g, ' ').trim()}</div>
-          {/if}
-          <button class="more" on:click|stopPropagation={() => toggleMore(card)}>{expanded.has(card.id) ? 'Close result' : 'Open result'}</button>
-        {/if}
 
-        <div class="actions">
-          <button class="act heart" class:on={saved.has(card.id)} class:burst={bursting === card.id} title="Save" aria-label="Save" on:click|stopPropagation={() => { toggleSave(card); burst(card.id) }}>♥</button>
-          <button class="continue" title="Continue in Genie" aria-label="Continue in Genie" on:click|stopPropagation={() => reply(card)}>Continue in Genie</button>
-          <button class="act" title="Copy" aria-label="Copy" on:click|stopPropagation={() => share(card)}>↗</button>
-          {#if card.kind !== 'approval'}
-            <button class="act state" title={read.has(card.id) ? 'Mark unread' : 'Mark read'} aria-label={read.has(card.id) ? 'Mark unread' : 'Mark read'} on:click|stopPropagation={() => toggleRead(card)}>{read.has(card.id) ? '◉' : '○'}</button>
-            <button class="act state" title={scope === 'archived' ? 'Restore' : 'Archive'} aria-label={scope === 'archived' ? 'Restore' : 'Archive'} on:click|stopPropagation={() => scope === 'archived' ? restore(card) : archive(card)}>{scope === 'archived' ? '↩' : '⌑'}</button>
-          {/if}
-          <span class="spacer"></span>
-          {#if card.ms}<span class="dur">{(card.ms / 1000).toFixed(card.ms < 10000 ? 1 : 0)}s</span>{/if}
-        </div>
-      </article>
-    {/each}
+            {#if card.kind === 'approval'}
+              <div class="body approval">
+                <div class="tag">Needs your approval</div>
+                <p>Wants to run <code>{card.tool}</code>{#if card.reason}: {card.reason}{/if}</p>
+                {#if Object.keys(card.args).length}<pre class="args">{JSON.stringify(card.args, null, 2)}</pre>{/if}
+                <div class="btns">
+                  <button class="btn" on:click|stopPropagation={() => decide(card, false)}>Deny</button>
+                  <button class="btn primary" on:click|stopPropagation={() => decide(card, true)}>Approve</button>
+                </div>
+              </div>
+            {:else}
+              {#if titleFor(card)}<div class="title">{titleFor(card)}</div>{/if}
+              {#if expanded.has(card.id) && blocksFor(card)}
+                {#if card.presentation.summary}<div class="summary">{card.presentation.summary}</div>{/if}
+                <div class="blocks"><Presentation blocks={blocksFor(card)} compact={false} /></div>
+              {:else if expanded.has(card.id)}
+                <div class="body markdown-body" use:richRenderer={captionFor(card)}>{@html parseMarkdown(captionFor(card))}</div>
+              {:else}
+                <div class="preview">{captionFor(card).replace(/[#*_`>|\n]+/g, ' ').trim()}</div>
+              {/if}
+              <button class="more" on:click|stopPropagation={() => toggleMore(card)}>{expanded.has(card.id) ? 'Close result' : 'Open result'}</button>
+            {/if}
+
+            <div class="actions">
+              <button class="act heart" class:on={saved.has(card.id)} class:burst={bursting === card.id} title="Save" aria-label="Save" on:click|stopPropagation={() => { toggleSave(card); burst(card.id) }}>♥</button>
+              <button class="continue" title="Continue in Genie" aria-label="Continue in Genie" on:click|stopPropagation={() => reply(card)}>Continue in Genie</button>
+              <button class="act" title="Copy" aria-label="Copy" on:click|stopPropagation={() => share(card)}>↗</button>
+              {#if card.kind !== 'approval'}
+                <button class="act state" title={read.has(card.id) ? 'Mark unread' : 'Mark read'} aria-label={read.has(card.id) ? 'Mark unread' : 'Mark read'} on:click|stopPropagation={() => toggleRead(card)}>{read.has(card.id) ? '◉' : '○'}</button>
+                <button class="act state" title={scope === 'archived' ? 'Restore' : 'Archive'} aria-label={scope === 'archived' ? 'Restore' : 'Archive'} on:click|stopPropagation={() => scope === 'archived' ? restore(card) : archive(card)}>{scope === 'archived' ? '↩' : '⌑'}</button>
+              {/if}
+              <span class="spacer"></span>
+              {#if card.ms}<span class="dur">{(card.ms / 1000).toFixed(card.ms < 10000 ? 1 : 0)}s</span>{/if}
+            </div>
+          </article>
+        {/each}
+      </div>
+    </main>
+
+    {#if scope === 'home'}
+      <aside class="context-rail" aria-label="Workspace context">
+        <section class="side-panel agents-panel">
+          <header><div><span>Agents</span><h2>Your team</h2></div><a href="#agents">Manage</a></header>
+          <div class="agent-list">
+            {#each agents.filter(agent => agent.enabled).slice(0, 6) as agent (agent.id)}
+              <a href="#agents" class="agent-row">
+                <span class="mini-av large" style="--h:{hue(agent.id)}">{initials(agent.id)}</span>
+                <span><b>{agent.name || agent.id}</b><small>{agent.trigger === 'cron' ? 'Scheduled' : 'Ready'}</small></span>
+                <i class:scheduled={agent.trigger === 'cron'}></i>
+              </a>
+            {/each}
+            {#if activeAgents === 0}<p class="side-empty">No active agents yet.</p>{/if}
+          </div>
+        </section>
+
+        <section class="side-panel activity-panel">
+          <header><div><span>Recent activity</span><h2>What just happened</h2></div><button on:click={() => scope = 'results'}>View all</button></header>
+          <div class="activity-list">
+            {#each recentResults as item (item.id)}
+              <button on:click={() => { scope = 'results'; agentFilter = item.agent }}>
+                <span class="activity-icon">{item.ok === false ? '!' : '✓'}</span>
+                <span><b>{titleFor(item) || `Result from ${agentName(item.agent)}`}</b><small>{agentName(item.agent)} · {relative(item.at)}</small></span>
+              </button>
+            {/each}
+            {#if recentResults.length === 0}<p class="side-empty">No recent activity.</p>{/if}
+          </div>
+        </section>
+
+        <section class="quick-links" aria-label="Quick links">
+          <a href="#schedule"><span>⌁</span>Automations</a>
+          <a href="#websites"><span>◎</span>Website access</a>
+          <a href="#agents"><span>✦</span>Create an agent</a>
+        </section>
+      </aside>
+    {/if}
   </div>
 
   {#if toast}<div class="toast">{toast}</div>{/if}
 </div>
 
 <style>
-  /* Tropical tokens, scoped to the feed until the shell adopts them (#191 phase 1). */
   .feed {
-    /* Aliases onto the shell's tokens (App.svelte): the feed follows day/night
-       with everything else. */
-    --f-bg: var(--sl-bg); --f-bg-2: var(--sl-surface); --f-ink: var(--sl-text); --f-ink-2: var(--sl-text-dim); --f-ink-3: var(--sl-text-faint);
-    --f-line: var(--sl-line); --f-accent: var(--sl-accent); --f-accent-ink: var(--sl-accent-ink); --f-coral: var(--sl-coral); --f-mango: var(--sl-mango); --f-leaf: var(--sl-leaf);
-    --f-ring: var(--story-ring);
-    background: var(--f-bg); color: var(--f-ink); margin: 0; padding: 0 0 4rem;
-    /* The shell's content area is a column flexbox: grow with the cards, never
-       cap at the viewport, or the white surface stops and text runs onto the
-       dark shell. */
-    flex: 1 0 auto; min-height: 100%;
+    --f-bg: var(--sl-bg); --f-surface: var(--sl-surface); --f-raised: var(--sl-surface-raised);
+    --f-ink: var(--sl-text); --f-dim: var(--sl-text-dim); --f-faint: var(--sl-text-faint);
+    --f-line: var(--sl-line); --f-accent: var(--sl-accent); --f-accent-ink: var(--sl-accent-ink);
+    min-height: 100%; flex: 1 0 auto; padding: 0 0 4rem; color: var(--f-ink); background: var(--f-surface);
     font-family: -apple-system, "SF Pro Text", "Helvetica Neue", "Segoe UI", Arial, sans-serif;
   }
-  .top { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px 8px; position: sticky; top: 0; background: var(--f-bg); z-index: 2; border-bottom: 1px solid var(--f-line); }
-  /* The logotype: Grand Hotel, the script from the brand — nowhere else. */
-  .wordmark { font-family: 'Grand Hotel', 'Snell Roundhand', cursive; font-weight: 400; font-size: 30px; letter-spacing: 0; line-height: 1; color: var(--f-ink); }
-  .top-actions { display: flex; gap: 14px; }
-  .icon { background: none; border: 0; color: var(--f-ink); font-size: 20px; cursor: pointer; text-decoration: none; padding: 2px 4px; }
-  .scopes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; width: min(560px, calc(100% - 32px)); padding: 10px 0; margin: 0 auto; }
-  .scopes button { min-width: 0; display: flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid var(--f-line); background: transparent; color: var(--f-ink-2); border-radius: 999px; padding: 7px 10px; font: inherit; font-size: 12px; font-weight: 650; cursor: pointer; white-space: nowrap; }
-  .scopes button.active { background: var(--f-ink); border-color: var(--f-ink); color: var(--f-bg); }
-  .scopes span { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 3px; border-radius: 999px; background: var(--sl-accent-soft); color: var(--f-accent-ink); font-size: 10px; }
-  .av { width: 100%; height: 100%; border-radius: 50%; border: 2.5px solid var(--f-bg); display: grid; place-items: center; font-weight: 700; color: #fff; background: linear-gradient(135deg, hsl(var(--h) 70% 45%), hsl(calc(var(--h) + 30) 80% 62%)); }
-  .results-summary, .results-head, .agent-filters, .section-heading { width: min(560px, calc(100% - 32px)); margin-inline: auto; }
-  .results-summary button { width: 100%; display: flex; align-items: center; gap: 12px; padding: 14px; border: 1px solid var(--f-line); border-radius: 16px; background: var(--f-bg-2); color: var(--f-ink); text-align: left; cursor: pointer; }
-  .results-summary button > span:nth-child(2) { display: grid; gap: 2px; flex: 1; min-width: 0; }
-  .results-summary small { color: var(--f-ink-2); font-size: 12px; }
-  .results-summary strong { flex: none; color: var(--f-accent-ink); font-size: 12px; }
-  .results-summary i { color: var(--f-ink-3); font-size: 24px; font-style: normal; }
-  .summary-icon { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 50%; background: var(--sl-accent-soft); color: var(--f-accent-ink); font-size: 20px; }
-  .section-heading { display: flex; justify-content: space-between; padding: 18px 2px 8px; }
-  .section-heading span { color: var(--f-ink-3); font-size: 12px; }
-  .results-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 0 8px; }
-  .results-head h2 { margin: 0; font-size: 18px; }
-  .results-head p { margin: 3px 0 0; color: var(--f-ink-2); font-size: 12px; }
-  .filter-toggle { border: 1px solid var(--f-line); border-radius: 999px; background: transparent; color: var(--f-ink); padding: 7px 11px; cursor: pointer; }
-  .agent-filters { display: flex; flex-wrap: wrap; gap: 7px; padding-bottom: 10px; }
-  .agent-filters button { min-width: 0; max-width: 100%; display: flex; align-items: center; gap: 6px; border: 1px solid var(--f-line); border-radius: 999px; background: transparent; color: var(--f-ink-2); padding: 5px 10px; cursor: pointer; overflow-wrap: anywhere; text-align: left; }
-  .agent-filters button.active { border-color: var(--f-accent); color: var(--f-ink); background: var(--sl-accent-soft); }
-  .mini-av { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; color: #fff; font-size: 9px; font-weight: 700; background: linear-gradient(135deg, hsl(var(--h) 70% 45%), hsl(calc(var(--h) + 30) 80% 62%)); }
-  .agent-filters em { min-width: 16px; height: 16px; display: grid; place-items: center; border-radius: 999px; background: var(--f-accent); color: #fff; font-size: 9px; font-style: normal; }
-  .pill { position: sticky; top: 58px; z-index: 2; margin: 10px auto 0; display: block; background: var(--f-accent); color: #fff; border: 0; border-radius: 999px; padding: 6px 14px; font-weight: 600; cursor: pointer; box-shadow: 0 6px 18px var(--sl-accent-soft-strong); }
-  .cards { display: grid; justify-items: center; }
-  .card { width: 100%; max-width: 560px; border-bottom: 1px solid var(--f-line); padding: 6px 0 8px; outline: none; }
-  .card.result-row { margin: 5px 16px; width: calc(100% - 32px); border: 1px solid var(--f-line); border-radius: 14px; background: var(--f-bg-2); }
-  .card.unread { background: linear-gradient(90deg, var(--sl-accent-soft), transparent 36%); }
-  .card.needs { border: 1px solid var(--f-coral); border-radius: 12px; margin: 12px 16px 6px; width: calc(100% - 32px); }
-  .head { display: flex; align-items: center; gap: 10px; padding: 8px 16px; }
-  .head .av { width: 32px; height: 32px; border: 0; font-size: 12px; flex: none; }
-  .who { display: grid; line-height: 1.25; min-width: 0; }
-  .who b { font-weight: 700; }
-  .meta { color: var(--f-ink-3); font-size: 12px; }
-  .chip { margin-left: auto; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
-  .chip.bad { background: color-mix(in srgb, var(--f-coral) 12%, transparent); color: var(--f-coral); }
-  .unread-dot { margin-left: auto; width: 8px; height: 8px; border-radius: 50%; background: var(--f-accent); box-shadow: 0 0 0 3px var(--sl-accent-soft); }
-  .title { padding: 0 16px 4px; font-weight: 600; font-size: 15px; line-height: 1.3; }
-  .summary { padding: 0 16px 6px; font-size: 13.5px; color: var(--f-ink-2); line-height: 1.45; }
-  .summary.clamped { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .preview { display: -webkit-box; padding: 0 16px 4px; color: var(--f-ink-2); font-size: 13px; line-height: 1.4; white-space: normal; overflow: hidden; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-  .blocks { padding: 2px 16px 6px; }
-  .body { padding: 2px 16px 6px; font-size: 13.5px; line-height: 1.45; color: var(--f-ink-2); overflow-wrap: anywhere; }
-  .more { background: none; border: 0; color: var(--f-ink-3); font: inherit; font-size: 13px; padding: 0 16px 6px; cursor: pointer; }
-  .more:hover { color: var(--f-accent-ink); }
-  .body :global(p) { margin: 0 0 .6em; }
+  .workspace-header, .overview, .view-tabs, .action-grid, .library-header, .agent-filters, .home-grid, .library-grid {
+    width: min(1440px, calc(100% - 48px)); margin-inline: auto;
+  }
+  .workspace-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 2rem; padding: 24px 0 16px; }
+  .eyebrow, .section-title > div > span, .side-panel header span { color: var(--f-accent-ink); font-size: .7rem; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+  .workspace-header h1 { margin: .15rem 0 .12rem; font-size: clamp(1.55rem, 2vw, 2rem); line-height: 1.1; letter-spacing: -.035em; }
+  .workspace-header p { margin: 0; color: var(--f-dim); font-size: .82rem; }
+  .header-actions { display: flex; align-items: center; gap: .6rem; }
+  .icon-button { width: 42px; height: 42px; border: 1px solid var(--f-line); border-radius: 13px; color: var(--f-dim); background: var(--f-surface); box-shadow: var(--sl-shadow-sm); font-size: 1.2rem; cursor: pointer; }
+
+  .overview { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; padding: 4px 0 2px; }
+  .metric { min-width: 0; display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: .65rem; padding: 11px 12px; border: 1px solid var(--f-line); border-radius: 10px; color: var(--f-ink); background: var(--f-surface); box-shadow: none; text-align: left; text-decoration: none; cursor: pointer; }
+  .metric-icon { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; font-size: 1rem; font-style: normal; }
+  .metric-icon.violet { color: var(--f-accent-ink); background: var(--sl-accent-soft); }
+  .metric-icon.blue { color: #1769aa; background: color-mix(in srgb, #45a9f5 15%, transparent); }
+  .metric-icon.amber { color: #9a5b00; background: color-mix(in srgb, #f7b84b 18%, transparent); }
+  .metric-icon.green { color: #087b52; background: color-mix(in srgb, #26b77a 15%, transparent); }
+  :global(:root[data-theme="dark"]) .metric-icon.blue { color: #83c8ff; }
+  :global(:root[data-theme="dark"]) .metric-icon.amber { color: #ffd083; }
+  :global(:root[data-theme="dark"]) .metric-icon.green { color: #7ee2b8; }
+  .metric > span:nth-child(2) { min-width: 0; display: grid; }
+  .metric small { color: var(--f-faint); font-size: .72rem; font-weight: 650; }
+  .metric strong { margin-top: .08rem; font-size: 1.08rem; }
+  .metric em { color: var(--f-accent-ink); font-size: .72rem; font-style: normal; font-weight: 750; }
+
+  .view-tabs { display: flex; align-items: center; gap: 1.25rem; margin-top: 15px; padding: 0; border-bottom: 1px solid var(--f-line); }
+  .view-tabs button { display: flex; align-items: center; gap: .4rem; padding: .6rem .12rem .55rem; border: 0; border-bottom: 2px solid transparent; border-radius: 0; color: var(--f-faint); background: transparent; font: inherit; font-size: .75rem; font-weight: 650; cursor: pointer; }
+  .view-tabs button.active { color: var(--f-accent-ink); border-bottom-color: var(--f-accent); background: transparent; }
+  .view-tabs span { min-width: 19px; padding: .12rem .3rem; border-radius: 999px; color: inherit; background: color-mix(in srgb, currentColor 10%, transparent); font-size: .65rem; text-align: center; }
+
+  .action-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; padding-top: 16px; }
+  .action-grid > button, .action-grid > a { min-width: 0; display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: .65rem; padding: 12px; border: 1px solid var(--f-line); border-radius: 10px; color: var(--f-ink); background: var(--f-surface); text-align: left; text-decoration: none; }
+  .action-grid > button:hover, .action-grid > a:hover { border-color: color-mix(in srgb, var(--f-accent) 30%, var(--f-line)); box-shadow: var(--sl-shadow-sm); }
+  .action-grid > :is(button, a) > span:nth-child(2) { min-width: 0; display: grid; gap: .12rem; }
+  .action-grid strong { font-size: .76rem; }
+  .action-grid small { overflow: hidden; color: var(--f-faint); font-size: .64rem; text-overflow: ellipsis; white-space: nowrap; }
+  .action-grid em { color: var(--f-accent-ink); font-size: .85rem; font-style: normal; }
+  .action-icon { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 10px; font-size: 1rem; }
+  .action-icon.violet { color: var(--f-accent-ink); background: var(--sl-accent-soft); }
+  .action-icon.green { color: #087b52; background: rgba(38,183,122,.12); }
+  .action-icon.blue { color: #1769aa; background: rgba(69,169,245,.13); }
+  .action-icon.amber { color: #9a5b00; background: rgba(247,184,75,.16); }
+  .home-grid { display: grid; grid-template-columns: minmax(0, 1fr) 292px; align-items: start; gap: 16px; padding-top: 16px; }
+  .library-grid { padding-top: 20px; }
+  .work-stream { min-width: 0; }
+  .section-title { display: flex; align-items: end; justify-content: space-between; gap: 1rem; margin-bottom: 12px; }
+  .section-title h2, .side-panel h2, .library-header h2 { margin: .18rem 0 0; font-size: 1.15rem; letter-spacing: -.02em; }
+  .section-title > button, .side-panel header > a, .side-panel header > button { display: flex; align-items: center; gap: .4rem; padding: .35rem; border: 0; color: var(--f-accent-ink); background: transparent; font: inherit; font-size: .75rem; font-weight: 750; text-decoration: none; cursor: pointer; }
+  .cards { display: grid; grid-template-columns: 1fr; gap: 0; overflow: hidden; border: 1px solid var(--f-line); border-radius: 10px; background: var(--f-surface); }
+  .cards.library { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .cards.library { overflow: visible; border: 0; border-radius: 0; background: transparent; }
+
+  .card { min-width: 0; overflow: hidden; border: 0; border-bottom: 1px solid var(--f-line); border-radius: 0; outline: none; background: var(--f-surface); box-shadow: none; }
+  .card:last-child { border-bottom: 0; }
+  .card:hover { background: var(--f-raised); box-shadow: none; }
+  .cards.library .card { border: 1px solid var(--f-line); border-radius: 12px; box-shadow: var(--sl-shadow-sm); }
+  .card.unread { box-shadow: inset 3px 0 var(--f-accent), var(--sl-shadow-sm); }
+  .card.needs { border-color: color-mix(in srgb, var(--sl-coral) 65%, var(--f-line)); }
+  .head { display: flex; align-items: center; gap: 10px; padding: 15px 16px 10px; }
+  .av, .mini-av { display: grid; place-items: center; flex: none; border-radius: 50%; color: #fff; font-weight: 800; background: linear-gradient(135deg, hsl(var(--h) 70% 43%), hsl(calc(var(--h) + 30) 76% 60%)); }
+  .head .av { width: 36px; height: 36px; font-size: .72rem; }
+  .mini-av { width: 23px; height: 23px; font-size: .58rem; }
+  .mini-av.large { width: 34px; height: 34px; font-size: .66rem; }
+  .who { min-width: 0; display: grid; gap: .05rem; line-height: 1.25; }
+  .who b { overflow: hidden; font-size: .86rem; text-overflow: ellipsis; white-space: nowrap; }
+  .meta { color: var(--f-faint); font-size: .7rem; }
+  .chip { margin-left: auto; padding: .2rem .5rem; border-radius: 999px; font-size: .64rem; font-weight: 800; }
+  .chip.bad { color: var(--sl-coral); background: color-mix(in srgb, var(--sl-coral) 12%, transparent); }
+  .unread-dot { width: 8px; height: 8px; margin-left: auto; border-radius: 50%; background: var(--f-accent); box-shadow: 0 0 0 4px var(--sl-accent-soft); }
+  .title { padding: 0 16px 5px; font-size: 1rem; font-weight: 750; line-height: 1.35; }
+  .preview { display: -webkit-box; padding: 0 16px 8px; overflow: hidden; color: var(--f-dim); font-size: .84rem; line-height: 1.5; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .summary, .body, .blocks { padding: 0 16px 8px; color: var(--f-dim); font-size: .86rem; line-height: 1.55; overflow-wrap: anywhere; }
+  .body :global(p) { margin: 0 0 .65em; }
   .body :global(pre) { overflow-x: auto; }
-  .body :global(img), .body :global(video) { max-width: calc(100% + 32px); margin: 6px -16px; display: block; }
   .body :global(a) { color: var(--f-accent-ink); }
-  .body :global(table) { font-size: 13px; }
-  .approval .tag { color: var(--f-coral); font-weight: 700; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 4px; }
-  .approval code { background: var(--f-bg-2); padding: 1px 5px; border-radius: 4px; }
-  .args { background: var(--f-bg-2); border: 1px solid var(--f-line); border-radius: 8px; padding: 8px 10px; font-size: 12px; max-height: 160px; overflow: auto; }
-  .btns { display: flex; gap: 8px; margin-top: 8px; }
-  .btn { flex: 1; padding: 8px 0; border-radius: 8px; font-weight: 600; font-size: 13px; border: 1px solid var(--f-line); background: var(--f-bg); color: var(--f-ink); cursor: pointer; }
-  .btn.primary { background: var(--f-accent); border-color: var(--f-accent); color: #fff; }
-  .actions { display: flex; align-items: center; gap: 4px; padding: 2px 10px 0; }
-  .act { background: none; border: 0; font-size: 20px; color: var(--f-ink); cursor: pointer; padding: 4px 6px; line-height: 1; }
-  .act.heart.on { color: var(--f-coral); }
+  .more { padding: 0 16px 10px; border: 0; color: var(--f-accent-ink); background: transparent; font: inherit; font-size: .73rem; font-weight: 700; cursor: pointer; }
+  .approval .tag { margin-bottom: .3rem; color: var(--sl-coral); font-size: .66rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+  .approval code { padding: .1rem .35rem; border-radius: 5px; background: var(--f-raised); }
+  .args { max-height: 160px; overflow: auto; padding: .6rem; border: 1px solid var(--f-line); border-radius: 9px; background: var(--f-raised); font-size: .72rem; }
+  .btns { display: flex; gap: .5rem; margin-top: .7rem; }
+  .btn { flex: 1; padding: .55rem; border: 1px solid var(--f-line); border-radius: 9px; color: var(--f-ink); background: var(--f-raised); font-weight: 700; cursor: pointer; }
+  .btn.primary { color: var(--sl-on-accent); border-color: var(--sl-accent-fill); background: var(--sl-accent-fill); }
+  .actions { display: flex; align-items: center; gap: .2rem; padding: 4px 10px 10px; border-top: 1px solid color-mix(in srgb, var(--f-line) 70%, transparent); }
+  .act, .continue { border: 0; background: transparent; cursor: pointer; }
+  .act { padding: .4rem; color: var(--f-faint); font-size: 1rem; }
+  .act.heart.on { color: var(--sl-coral); }
   .act.heart.burst { animation: burst .6s ease-out; }
-  .act.state { font-size: 18px; color: var(--f-ink-3); }
-  .continue { border: 0; background: transparent; color: var(--f-accent-ink); padding: 5px 8px; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
-  @keyframes burst { 0% { transform: scale(1); } 35% { transform: scale(1.5); } 100% { transform: scale(1); } }
+  .continue { padding: .4rem .5rem; color: var(--f-accent-ink); font-size: .72rem; font-weight: 750; }
   .spacer { flex: 1; }
-  .dur { color: var(--f-ink-3); font-size: 12px; font-variant-numeric: tabular-nums; padding-right: 8px; }
-  .empty { padding: 40px 20px; text-align: center; color: var(--f-ink-2); }
-  .empty.err { color: var(--f-coral); }
-  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--f-ink); color: var(--f-bg); padding: 8px 14px; border-radius: 999px; font-size: 13px; }
+  .dur { padding-right: .35rem; color: var(--f-faint); font-size: .68rem; font-variant-numeric: tabular-nums; }
+  @keyframes burst { 0% { transform: scale(1); } 35% { transform: scale(1.5); } 100% { transform: scale(1); } }
+
+  .context-rail { display: grid; gap: 14px; position: sticky; top: 18px; }
+  .side-panel, .quick-links { overflow: hidden; border: 1px solid var(--f-line); border-radius: 10px; background: var(--f-surface); box-shadow: none; }
+  .side-panel > header { display: flex; align-items: end; justify-content: space-between; gap: .5rem; padding: 15px 15px 10px; }
+  .agent-list, .activity-list { display: grid; padding: 0 8px 8px; }
+  .agent-row, .activity-list button { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: .65rem; padding: .62rem .55rem; border: 0; border-radius: 11px; color: var(--f-ink); background: transparent; text-align: left; text-decoration: none; cursor: pointer; }
+  .agent-row:hover, .activity-list button:hover { background: var(--f-raised); }
+  .agent-row > span:nth-child(2), .activity-list button > span:nth-child(2) { min-width: 0; display: grid; gap: .12rem; }
+  .agent-row b, .activity-list b { overflow: hidden; font-size: .77rem; text-overflow: ellipsis; white-space: nowrap; }
+  .agent-row small, .activity-list small { color: var(--f-faint); font-size: .65rem; }
+  .agent-row i { width: 8px; height: 8px; border-radius: 50%; background: var(--sl-leaf); }
+  .agent-row i.scheduled { background: var(--f-accent); }
+  .activity-icon { width: 29px; height: 29px; display: grid; place-items: center; border-radius: 9px; color: var(--f-accent-ink); background: var(--sl-accent-soft); font-size: .72rem; font-weight: 800; }
+  .quick-links { display: grid; grid-template-columns: repeat(3, 1fr); padding: 8px; }
+  .quick-links a { display: grid; place-items: center; gap: .3rem; min-width: 0; padding: .65rem .25rem; border-radius: 10px; color: var(--f-dim); font-size: .65rem; font-weight: 650; text-align: center; text-decoration: none; }
+  .quick-links a:hover { color: var(--f-accent-ink); background: var(--sl-accent-soft); }
+  .quick-links span { color: var(--f-accent-ink); font-size: 1rem; }
+  .side-empty { margin: .6rem; color: var(--f-faint); font-size: .75rem; }
+
+  .library-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 24px 0 10px; }
+  .library-header p { margin: .25rem 0 0; color: var(--f-dim); font-size: .8rem; }
+  .filter-toggle { padding: .5rem .75rem; border: 1px solid var(--f-line); border-radius: 999px; color: var(--f-ink); background: var(--f-surface); cursor: pointer; }
+  .agent-filters { display: flex; flex-wrap: wrap; gap: .45rem; padding-bottom: 2px; }
+  .agent-filters button { display: flex; align-items: center; gap: .4rem; padding: .35rem .65rem; border: 1px solid var(--f-line); border-radius: 999px; color: var(--f-dim); background: var(--f-surface); cursor: pointer; }
+  .agent-filters button.active { color: var(--f-accent-ink); border-color: color-mix(in srgb, var(--f-accent) 40%, var(--f-line)); background: var(--sl-accent-soft); }
+  .agent-filters em { min-width: 17px; height: 17px; display: grid; place-items: center; border-radius: 999px; color: var(--sl-on-accent); background: var(--sl-accent-fill); font-size: .57rem; font-style: normal; }
+  .new-results { position: sticky; top: 16px; z-index: 2; display: block; margin: 12px auto 0; padding: .45rem .8rem; border: 0; border-radius: 999px; color: var(--sl-on-accent); background: var(--sl-accent-fill); box-shadow: var(--sl-shadow-lg); font-weight: 750; cursor: pointer; }
+  .empty, .empty-state { padding: 60px 20px; color: var(--f-dim); text-align: center; }
+  .empty.err { color: var(--sl-coral); }
+  .empty-state { border: 1px dashed var(--f-line); border-radius: 18px; background: var(--f-surface); }
+  .empty-state > span { width: 40px; height: 40px; display: grid; place-items: center; margin: 0 auto .7rem; border-radius: 50%; color: #087b52; background: color-mix(in srgb, #26b77a 15%, transparent); }
+  .empty-state h3 { margin: 0; font-size: 1rem; }
+  .empty-state p { margin: .35rem 0 0; color: var(--f-faint); font-size: .8rem; }
+  .toast { position: fixed; z-index: 20; bottom: 24px; left: 50%; transform: translateX(-50%); padding: .55rem .9rem; border-radius: 999px; color: var(--f-bg); background: var(--f-ink); font-size: .78rem; }
+
   @media (prefers-reduced-motion: reduce) { .act.heart.burst { animation: none; } }
-  @media (max-width: 520px) {
-    .scopes { grid-template-columns: repeat(2, 1fr); }
-    .results-head { align-items: flex-start; }
-    .card.result-row { margin-inline: 12px; width: calc(100% - 24px); }
+  @media (max-width: 1220px) {
+    .overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .action-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .home-grid { grid-template-columns: minmax(0, 1fr) 300px; }
+  }
+  @media (max-width: 920px) {
+    .workspace-header, .overview, .view-tabs, .action-grid, .library-header, .agent-filters, .home-grid, .library-grid { width: min(100% - 32px, 760px); }
+    .home-grid { grid-template-columns: 1fr; }
+    .context-rail { position: static; grid-template-columns: 1fr 1fr; }
+    .quick-links { grid-column: 1 / -1; }
+    .cards.library { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 620px) {
+    .workspace-header { padding-top: 24px; }
+    .workspace-header h1 { font-size: 1.75rem; }
+    .workspace-header p { display: none; }
+    .action-grid { grid-template-columns: 1fr; }
+    .overview { grid-template-columns: 1fr 1fr; gap: 8px; }
+    .metric { grid-template-columns: 36px minmax(0, 1fr); padding: 10px; }
+    .metric-icon { width: 36px; height: 36px; }
+    .metric em { display: none; }
+    .view-tabs { overflow-x: auto; }
+    .context-rail { grid-template-columns: 1fr; }
+    .quick-links { grid-column: auto; }
+    .actions .act.state { display: none; }
   }
 </style>

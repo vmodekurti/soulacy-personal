@@ -1,4 +1,5 @@
 import App from './App.svelte'
+import './theme.css'
 import { installPrompt, appInstalled } from './lib/stores.js'
 import { clearStaleAssetRecoveryMarker, looksLikeStaleAssetError, recoverFromStaleAssets } from './lib/stalerecovery.js'
 

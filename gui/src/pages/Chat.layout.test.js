@@ -25,11 +25,17 @@ describe('focused Chat workspace', () => {
     expect(chat).toContain('Stop this response')
   })
 
-  it('uses the available desktop width for rich responses and the composer', () => {
-    expect(chat).toContain('width: min(1800px, calc(100% - 4rem))')
+  it('keeps conversations readable while leaving room for the agent roster', () => {
+    expect(chat).toContain('width: min(1040px, calc(100% - 3rem))')
+    expect(chat).toContain('grid-template-columns: minmax(0, 1120px) minmax(280px, 340px)')
+    expect(chat).toContain('border: 0; border-radius: 0; background: transparent; box-shadow: none')
+    expect(chat).toContain('max-height: calc(100vh - 188px)')
+    expect(chat).toContain('white-space: normal')
     expect(chat).toContain('width: 100%; max-width: 100%; padding: 1rem 1.15rem')
-    expect(chat).toContain('width: min(1500px, calc(100% - 4rem))')
     expect(chat).toContain('max-width: 92ch')
+    expect(chat).toContain('class="agent-roster"')
+    expect(chat).toContain('placeholder="Find an agent"')
+    expect(chat).toContain("class:active={agent.id === activeThread?.agentId}")
   })
 
   it('submits the composer text from the send button instead of the click event', () => {

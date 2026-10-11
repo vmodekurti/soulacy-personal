@@ -305,4 +305,30 @@
 
 <style>
   .page{padding:24px;max-width:1180px;margin:0 auto;color:var(--text,#eef)}header{display:flex;justify-content:space-between;gap:24px;align-items:start;margin-bottom:24px}h1{margin:2px 0 6px;font-size:28px}h2{margin:0;font-size:18px}.eyebrow{color:#8c7cff;font-size:11px;font-weight:800;letter-spacing:.12em;margin:0}.lede,.card p,.modal>p,.guardrail span{color:var(--muted,#9ba3c4)}.lede{margin:0;max-width:760px}.card,.connection,.guardrail{background:var(--panel,#121628);border:1px solid var(--border,#2a3152);border-radius:12px}.intro{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:20px}.intro p{max-width:780px;margin:8px 0 0;line-height:1.55}.list{display:grid;gap:10px;margin:16px 0}.connection{display:flex;align-items:center;gap:12px;padding:14px}.lock{font-size:22px}.copy{display:grid;gap:4px;min-width:0;flex:1}.copy>span{color:var(--muted,#9ba3c4);font-size:12px;overflow:hidden;text-overflow:ellipsis}.facts{display:flex;gap:7px;flex-wrap:wrap;margin-top:4px}.facts span{background:#1c2239;border-radius:999px;padding:4px 8px;font-size:10px}.status{padding:5px 9px;border-radius:999px;background:#2a2030;color:#f0b85c;font-size:11px;font-weight:700;text-transform:capitalize}.status.ready{background:#12352d;color:#65e3a7}.empty{margin:16px 0;padding:30px;border:1px dashed #343b5d;border-radius:10px;color:#929bbb;text-align:center}.guardrail{display:grid;gap:6px;margin-top:16px;padding:16px;border-left:3px solid #7868ff}.guardrail span{font-size:12px;line-height:1.5}button,.actions a{border:1px solid #343b60;background:#20263e;color:#eef;border-radius:7px;padding:9px 13px;cursor:pointer;text-decoration:none;font-size:13px}.primary{background:#6959f7;border-color:#6959f7}.danger{color:#ff8d98;border-color:#703943;background:#2d1c27}.compact{padding:6px 9px}.notice{padding:11px 14px;border-radius:8px;margin-bottom:16px}.notice.error{color:#ff8995;background:#341d29}.notice.success{color:#62dfa1;background:#12342c}.backdrop{position:fixed;inset:0;background:#050714c9;display:grid;place-items:center;z-index:100;padding:20px}.modal{width:min(620px,100%);max-height:90vh;overflow:auto;background:#14182b;border:1px solid #394161;border-radius:12px;padding:22px;box-shadow:0 20px 80px #0008}.modal label{display:grid;gap:7px;margin:15px 0;font-size:12px;color:#bbc3e2}.modal input{background:#0f1324;color:#eef;border:1px solid #343b5b;border-radius:7px;padding:10px}.modal input:disabled{opacity:.7}.companion{display:grid;gap:8px;margin:14px 0;padding:12px;border:1px solid #70434b;border-radius:8px;background:#2b1b26;color:#ff9ca6;font-size:12px}.companion.ready{border-color:#245c4d;background:#112e28;color:#65e3a7}.companion span,details p,ol{color:#b8c0dc;line-height:1.45}.actions{display:flex;gap:8px;align-items:center}.modal details{margin-top:14px;border:1px solid #303757;border-radius:8px;padding:11px}.modal summary{cursor:pointer;color:#c8c1ff;font-size:12px;font-weight:700}.modal pre{white-space:pre-wrap;word-break:break-all;background:#090d1b;border-radius:7px;padding:10px;color:#b9f3dc;font-size:11px}.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}@media(max-width:720px){.page{padding:16px}.intro,.connection{align-items:stretch;flex-direction:column}.status{width:max-content}}
+
+  /* The integration screen follows the shared day/night palette. Keep the
+     legacy declarations above as structural defaults, then map every visible
+     surface and label onto audited semantic tokens here. */
+  .page { color: var(--sl-text); }
+  .eyebrow { color: var(--sl-accent-ink); }
+  .lede, .card p, .modal > p, .guardrail span, .copy > span { color: var(--sl-text-dim); }
+  .card, .connection, .guardrail, .modal {
+    color: var(--sl-text); background: var(--sl-surface); border-color: var(--sl-line);
+    box-shadow: var(--sl-shadow-sm);
+  }
+  .facts span { color: var(--sl-text-dim); background: var(--sl-surface-raised); border: 1px solid var(--sl-line); }
+  .status { color: var(--sl-text); background: color-mix(in srgb, var(--sl-mango) 14%, var(--sl-surface)); border: 1px solid color-mix(in srgb, var(--sl-mango) 34%, var(--sl-line)); }
+  .status.ready { color: var(--sl-text); background: color-mix(in srgb, var(--sl-leaf) 14%, var(--sl-surface)); border-color: color-mix(in srgb, var(--sl-leaf) 34%, var(--sl-line)); }
+  .empty { color: var(--sl-text-dim); border-color: var(--sl-line-strong); }
+  .guardrail { border-left-color: var(--sl-accent); }
+  button, .actions a { color: var(--sl-text); background: var(--sl-surface-raised); border-color: var(--sl-line-strong); }
+  .primary { color: var(--sl-on-accent); background: var(--sl-accent-fill); border-color: var(--sl-accent-fill); }
+  .primary:hover { background: var(--sl-accent-fill-hover); border-color: var(--sl-accent-fill-hover); }
+  .danger { color: var(--sl-text); background: color-mix(in srgb, var(--sl-coral) 10%, var(--sl-surface)); border-color: var(--sl-coral); }
+  .modal label, .companion span, details p, ol { color: var(--sl-text-dim); }
+  .modal input { color: var(--sl-text); background: var(--sl-surface); border-color: var(--sl-line-strong); }
+  .companion, .companion.ready { color: var(--sl-text); background: var(--sl-surface-raised); border-color: var(--sl-line-strong); }
+  .modal details { border-color: var(--sl-line); }
+  .modal summary { color: var(--sl-accent-ink); }
+  .modal pre { color: var(--sl-text); background: var(--sl-surface-raised); }
 </style>
