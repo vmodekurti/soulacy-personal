@@ -164,10 +164,10 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req CompletionRequest) (*
 		}
 	}
 
-	// Streaming mode: enabled when caller opts in and no tools are present
-	// (tool-call reassembly from delta chunks is complex; we use non-streaming
-	// for tool turns and stream only on the final synthesis turn).
-	if req.Stream && len(req.Tools) == 0 {
+	// Streaming mode. OpenAI-compatible APIs stream function calls as indexed
+	// argument fragments. Reassemble those fragments while forwarding ordinary
+	// text so tool-capable agents do not lose live replies.
+	if req.Stream {
 		body["stream"] = true
 		// Native OpenAI supports a final usage chunk. Compatibility providers vary;
 		// the router's tokenizer fallback accounts for those streams safely.
@@ -201,6 +201,13 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req CompletionRequest) (*
 		go func() {
 			defer close(ch)
 			defer streamResp.Body.Close()
+			type toolCallDelta struct {
+				ID               string
+				Name             string
+				Arguments        strings.Builder
+				ThoughtSignature string
+			}
+			toolCalls := map[int]*toolCallDelta{}
 			scanner := bufio.NewScanner(streamResp.Body)
 			for scanner.Scan() {
 				line := scanner.Text()
@@ -209,12 +216,24 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req CompletionRequest) (*
 				}
 				data := strings.TrimPrefix(line, "data: ")
 				if data == "[DONE]" {
-					return
+					break
 				}
 				var chunk struct {
 					Choices []struct {
 						Delta struct {
-							Content string `json:"content"`
+							Content   string `json:"content"`
+							ToolCalls []struct {
+								Index                 int    `json:"index"`
+								ID                    string `json:"id"`
+								ThoughtSignature      string `json:"thought_signature"`
+								ThoughtSignatureCamel string `json:"thoughtSignature"`
+								Function              struct {
+									Name                  string `json:"name"`
+									Arguments             string `json:"arguments"`
+									ThoughtSignature      string `json:"thought_signature"`
+									ThoughtSignatureCamel string `json:"thoughtSignature"`
+								} `json:"function"`
+							} `json:"tool_calls"`
 						} `json:"delta"`
 						FinishReason string `json:"finish_reason"`
 					} `json:"choices"`
@@ -233,8 +252,31 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req CompletionRequest) (*
 				if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 					continue
 				}
-				if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
-					ch <- chunk.Choices[0].Delta.Content
+				if len(chunk.Choices) > 0 {
+					delta := chunk.Choices[0].Delta
+					if delta.Content != "" {
+						ch <- delta.Content
+					}
+					for _, tc := range delta.ToolCalls {
+						acc := toolCalls[tc.Index]
+						if acc == nil {
+							acc = &toolCallDelta{}
+							toolCalls[tc.Index] = acc
+						}
+						if tc.ID != "" {
+							acc.ID = tc.ID
+						}
+						if tc.Function.Name != "" {
+							acc.Name += tc.Function.Name
+						}
+						acc.Arguments.WriteString(tc.Function.Arguments)
+						for _, sig := range []string{tc.ThoughtSignature, tc.ThoughtSignatureCamel, tc.Function.ThoughtSignature, tc.Function.ThoughtSignatureCamel} {
+							if sig != "" {
+								acc.ThoughtSignature = sig
+								break
+							}
+						}
+					}
 				}
 				if chunk.Usage != nil {
 					result.CacheReadTokens = chunk.Usage.PromptDetails.CachedTokens
@@ -243,6 +285,16 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req CompletionRequest) (*
 					result.TotalTokens = chunk.Usage.TotalTokens
 					result.ReasoningTokens = chunk.Usage.CompletionDetails.ReasoningTokens
 				}
+			}
+			for i := 0; i < len(toolCalls); i++ {
+				acc := toolCalls[i]
+				if acc == nil || acc.Name == "" {
+					continue
+				}
+				args := map[string]any{}
+				_ = json.Unmarshal([]byte(acc.Arguments.String()), &args)
+				result.ToolCalls = append(result.ToolCalls,
+					toolCallWithIDAndThoughtSignature(acc.ID, acc.Name, args, acc.ThoughtSignature))
 			}
 		}()
 		result.Stream = ch
