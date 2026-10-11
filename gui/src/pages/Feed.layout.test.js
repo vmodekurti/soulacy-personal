@@ -5,19 +5,21 @@ import { fileURLToPath } from 'node:url'
 const feed = readFileSync(fileURLToPath(new URL('./Feed.svelte', import.meta.url)), 'utf8')
 
 describe('workspace home layout', () => {
-  it('starts with Genie and a compact daily overview', () => {
-    expect(feed).toContain('What would you like to get done?')
+  it('starts with a compact daily overview and common actions', () => {
+    expect(feed).toContain('Here is what is happening across your AI workspace today.')
     expect(feed).toContain('class="overview"')
+    expect(feed).toContain('class="action-grid"')
     expect(feed).toContain('Active agents')
     expect(feed).toContain('Needs attention')
     expect(feed).toContain('Saved for later')
   })
 
   it('uses a focused work stream and useful context rail', () => {
-    expect(feed).toContain('grid-template-columns: minmax(0, 1fr) 330px')
+    expect(feed).toContain('grid-template-columns: minmax(0, 1fr) 292px')
     expect(feed).toContain('class="context-rail"')
     expect(feed).toContain('Your team')
     expect(feed).toContain('What just happened')
+    expect(feed).toContain('Current work')
     expect(feed).not.toContain('min(2200px')
     expect(feed).not.toContain('repeat(auto-fit, minmax(440px')
   })

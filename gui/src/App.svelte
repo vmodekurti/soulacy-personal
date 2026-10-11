@@ -73,8 +73,16 @@
   const currentWorkspaceLabel = 'Personal'
   $: mobilePrimaryPages = navPages.filter(p => ['feed', 'chat', 'studio', 'agents'].includes(p.id))
   $: mobileMoreActive = !mobilePrimaryPages.some(p => p.id === page)
-  const railIds = ['feed', 'chat', 'missions', 'schedule', 'agents']
-  $: railPages = navPages.filter(p => railIds.includes(p.id))
+  const railIds = ['feed', 'chat', 'agents', 'missions', 'schedule', 'connectors', 'knowledge', 'templates', 'reports', 'config']
+  $: railPages = railIds.map(id => navPages.find(p => p.id === id)).filter(Boolean)
+  const railPresentation = {
+    feed: ['⌂', 'Home'], chat: ['◯', 'Chat'], agents: ['◇', 'Agents'],
+    missions: ['⌘', 'Workflows'], schedule: ['◷', 'Automations'],
+    connectors: ['⌁', 'Connectors'], knowledge: ['▤', 'Knowledge'],
+    templates: ['▣', 'Library'], reports: ['▥', 'Analytics'], config: ['⚙', 'Admin'],
+  }
+  const railIcon = (id, fallback) => railPresentation[id]?.[0] || fallback
+  const railLabel = (id, fallback) => railPresentation[id]?.[1] || fallback
   $: launcherPages = pages.filter((p) => {
     const q = appSearch.trim().toLowerCase()
     return !q || p.label.toLowerCase().includes(q) || p.group.toLowerCase().includes(q)
@@ -468,7 +476,7 @@
   <header class="desktop-topbar">
     <button class="topbar-brand" on:click={() => navigate('feed')} aria-label="Open Soulacy feed">
       <span class="topbar-mark"><BrandMark size={28} /></span>
-      <span class="topbar-wordmark">soulacy</span>
+      <span class="topbar-wordmark">Soulacy</span>
     </button>
     <span class="topbar-divider" aria-hidden="true"></span>
     <div class="topbar-context">
@@ -476,7 +484,7 @@
       <strong>{currentPageLabel}</strong>
     </div>
     <div class="topbar-actions">
-      <button class="topbar-search" on:click={openLauncher} aria-label="Find a Soulacy screen"><span>⌕</span> Find anything</button>
+      <button class="topbar-search" on:click={openLauncher} aria-label="Find a Soulacy screen"><span>⌕</span> Search anything... <kbd>⌘K</kbd></button>
       <span class="topbar-connection" class:live={$connected}>
         <i></i>{$connected ? 'Connected' : 'Reconnecting'}
       </span>
@@ -512,7 +520,7 @@
       <span class="brand-logo" aria-hidden="true">
         <BrandMark size={30} />
       </span>
-      <span class="brand-name">soulacy</span>
+      <span class="brand-name">Soulacy</span>
       <button class="drawer-close" on:click={() => sidebarOpen = false} aria-label="Close navigation">×</button>
     </div>
 
@@ -521,14 +529,19 @@
       {#each railPages as p}
         <button class="rail-item" class:active={page === p.id} on:click={() => navigate(p.id)} title={p.label}
                 aria-current={page === p.id ? 'page' : undefined}>
-          <span>{p.id === 'chat' ? '✦' : p.id === 'schedule' ? '◷' : p.id === 'agents' ? '◉' : p.icon}</span>
-          <small>{p.id === 'chat' ? 'Genie' : p.id === 'schedule' ? 'Automate' : p.id === 'agents' ? 'Agents' : p.label}</small>
+          <span>{railIcon(p.id, p.icon)}</span>
+          <small>{railLabel(p.id, p.label)}</small>
         </button>
       {/each}
-      <button class="rail-item" class:active={!railIds.includes(page)} on:click={openLauncher} title="All tools" aria-expanded={appLauncherOpen}>
+      <button class="rail-item rail-more" class:active={!railIds.includes(page)} on:click={openLauncher} title="All tools" aria-expanded={appLauncherOpen}>
         <span>•••</span><small>More</small>
       </button>
     </nav>
+
+    <button class="trust-card" on:click={openLauncher} aria-label="Open security and controls">
+      <span>✓</span>
+      <span><strong>Personal and private</strong><small>Your approvals stay in control.</small></span>
+    </button>
 
     <div class="drawer-navigation">
     <div class="mode-switch" role="group" aria-label="How much to show">
@@ -881,8 +894,8 @@
   /* ── Layout ─────────────────────────────────────────────────────── */
   .layout {
     display: grid;
-    grid-template-columns: 220px minmax(0, 1fr);
-    grid-template-rows: 68px minmax(0, 1fr);
+    grid-template-columns: 214px minmax(0, 1fr);
+    grid-template-rows: 58px minmax(0, 1fr);
     height: 100vh; height: 100dvh; min-width: 0; overflow: hidden;
     background: var(--sl-bg);
   }
@@ -890,7 +903,7 @@
   .desktop-topbar {
     grid-column: 2; grid-row: 1;
     display: flex; align-items: center; gap: 1rem;
-    min-width: 0; padding: 0 1.25rem;
+    min-width: 0; padding: 0 1.4rem;
     background: color-mix(in srgb, var(--sl-surface) 94%, transparent);
     border-bottom: 1px solid var(--sl-line);
     box-shadow: 0 1px 0 rgba(31,38,54,.02);
@@ -906,9 +919,10 @@
   .topbar-context strong { overflow: hidden; color: var(--sl-text); font-size: .92rem; text-overflow: ellipsis; white-space: nowrap; }
   .topbar-actions { margin-left: auto; display: flex; align-items: center; gap: .65rem; }
   .topbar-search {
-    width: min(320px, 24vw); min-height: 38px; display: flex; align-items: center; gap: .55rem; padding: 0 .7rem;
-    border: 1px solid var(--sl-line); border-radius: 12px; color: var(--sl-text-faint); background: var(--sl-surface-raised); text-align: left;
+    width: min(300px, 24vw); min-height: 36px; display: flex; align-items: center; gap: .55rem; padding: 0 .75rem;
+    border: 1px solid transparent; border-radius: 12px; color: var(--sl-text-faint); background: var(--sl-surface-raised); text-align: left;
   }
+  .topbar-search kbd { margin-left: auto; color: var(--sl-text-faint); font: inherit; font-size: .67rem; }
   .topbar-search > span { color: var(--sl-text-dim); font-size: 1rem; }
   .topbar-search:hover { color: var(--sl-text-dim); border-color: color-mix(in srgb, var(--sl-accent) 28%, var(--sl-line)); background: var(--sl-surface); }
   .topbar-connection { display: flex; align-items: center; gap: .35rem; padding: .35rem .55rem; color: var(--sl-text-faint); font-size: .65rem; font-weight: 650; }
@@ -927,7 +941,7 @@
   /* ── Sidebar ─────────────────────────────────────────────────────── */
   .sidebar {
     grid-column: 1; grid-row: 1 / -1;
-    width: 220px; min-height: 0; flex-shrink: 0;
+    width: 214px; min-height: 0; flex-shrink: 0;
     background: var(--sl-surface);
     border-right: 1px solid var(--sl-line);
     display: flex; flex-direction: column;
@@ -936,16 +950,25 @@
 
   .rail-nav {
     flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: stretch; gap: .28rem;
-    padding: .55rem .75rem; overflow-y: auto;
+    padding: .55rem .7rem; overflow-y: auto;
   }
   .rail-item {
-    width: 100%; min-height: 44px; display: flex; align-items: center; gap: .75rem;
-    padding: .55rem .75rem; border: 1px solid transparent; border-radius: 11px; color: var(--sl-text-dim); background: transparent; text-align: left;
+    width: 100%; min-height: 38px; display: flex; align-items: center; gap: .68rem;
+    padding: .42rem .65rem; border: 1px solid transparent; border-radius: 8px; color: var(--sl-text-dim); background: transparent; text-align: left;
   }
-  .rail-item > span { display: grid; place-items: center; width: 24px; height: 24px; flex: 0 0 24px; color: var(--sl-accent-ink); font-size: 1rem; line-height: 1; }
-  .rail-item small { max-width: 100%; overflow: hidden; font-size: .78rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+  .rail-item > span { display: grid; place-items: center; width: 22px; height: 22px; flex: 0 0 22px; color: var(--sl-accent-ink); font-size: .92rem; line-height: 1; }
+  .rail-item small { max-width: 100%; overflow: hidden; font-size: .76rem; font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
   .rail-item:hover { color: var(--sl-text); background: var(--sl-surface-raised); }
   .rail-item.active { color: var(--sl-accent-ink); border-color: color-mix(in srgb, var(--sl-accent) 16%, var(--sl-line)); background: var(--sl-accent-soft); }
+  .rail-more { margin-top: .2rem; }
+  .trust-card {
+    margin: .65rem .7rem .4rem; display: grid; grid-template-columns: 32px minmax(0, 1fr); align-items: center; gap: .6rem;
+    padding: .7rem; border: 1px solid var(--sl-line); border-radius: 11px; color: var(--sl-text); background: var(--sl-surface-raised); text-align: left;
+  }
+  .trust-card > span:first-child { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; color: #087b52; background: rgba(38,183,122,.12); font-weight: 800; }
+  .trust-card > span:last-child { min-width: 0; display: grid; gap: .08rem; }
+  .trust-card strong { font-size: .68rem; }
+  .trust-card small { color: var(--sl-text-faint); font-size: .58rem; line-height: 1.3; }
   .drawer-navigation { display: none; }
 
   @media (max-width: 768px) {
@@ -1038,9 +1061,9 @@
     padding: 1.15rem 1.1rem;
   }
   @media (min-width: 769px) {
-    .brand { min-height: 68px; display: flex; padding: 0 1.15rem; border-bottom: 1px solid var(--sl-line); }
+    .brand { min-height: 58px; display: flex; padding: 0 1rem; border-bottom: 1px solid var(--sl-line); }
     .brand-logo { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 11px; background: var(--sl-accent-soft); }
-    .brand-name { font-size: 1.72rem; }
+    .brand-name { font-size: 1.05rem; }
     .mode-switch, .nav-action { display: none; }
   }
   /* The same Living Core artwork used by the native app. */
@@ -1048,7 +1071,7 @@
     width: 30px; height: 30px; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
   }
-  .brand-name { font-family: 'Grand Hotel', 'Snell Roundhand', cursive; font-weight: 400; font-size: 1.6rem; letter-spacing: 0; line-height: 1; color: var(--sl-text); }
+  .brand-name { font-family: 'Inter', system-ui, sans-serif; font-weight: 760; font-size: 1.05rem; letter-spacing: -.02em; line-height: 1; color: var(--sl-text); }
 
 
   nav { flex: 1; padding: 0.5rem 0.5rem; overflow-y: auto; }

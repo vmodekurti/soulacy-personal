@@ -5,12 +5,13 @@ import { fileURLToPath } from 'node:url'
 const app = readFileSync(fileURLToPath(new URL('./App.svelte', import.meta.url)), 'utf8')
 
 describe('workspace shell', () => {
-  it('keeps the everyday navigation short and moves the complete map into a launcher', () => {
-    expect(app).toContain("const railIds = ['feed', 'chat', 'missions', 'schedule', 'agents']")
+  it('keeps the everyday workspace visible and moves the complete map into a launcher', () => {
+    expect(app).toContain("const railIds = ['feed', 'chat', 'agents', 'missions', 'schedule', 'connectors', 'knowledge', 'templates', 'reports', 'config']")
     expect(app).toContain('aria-label="Primary workspace navigation"')
     expect(app).toContain('aria-label="All Soulacy tools"')
     expect(app).toContain('placeholder="Find a screen"')
-    expect(app).toContain('grid-template-columns: 220px minmax(0, 1fr)')
+    expect(app).toContain('grid-template-columns: 214px minmax(0, 1fr)')
+    expect(app).toContain("feed: ['⌂', 'Home']")
   })
 
   it('ships day and night themes from the same semantic tokens', () => {

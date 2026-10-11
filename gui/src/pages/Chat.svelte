@@ -2612,8 +2612,8 @@
         <div class="empty">
           {#if activeThread?.agentId}
             <div class="empty-avatar" aria-hidden="true">✦</div>
-            <h2 class="empty-title">What should we get done?</h2>
-            <p class="empty-sub">Describe the outcome. Genie can choose an agent, use a connector, or work through the browser.</p>
+            <h2 class="empty-title">Your AI gateway for <span>real work.</span></h2>
+            <p class="empty-sub">Access your agents, your data, and the web in one secure workspace.</p>
             <div class="suggestions">
               {#each promptsFor(activeThread.agentId) as s}
                 <button class="suggestion" on:click={() => useSuggestion(s)}>{s}</button>
@@ -4349,9 +4349,31 @@
   .suggestion { color: var(--sl-text-dim); border-color: var(--sl-line); background: var(--sl-surface); box-shadow: var(--sl-shadow-sm); }
   .suggestion:hover { color: var(--sl-accent-ink); border-color: var(--sl-accent); }
 
+  /* The empty Genie screen mirrors the product home reference: one clear
+     promise, one command surface, then a visible choice of agents. */
+  .modern-chat .chat-wrap:has(.messages .empty) { justify-content: flex-start; }
+  .modern-chat .chat-wrap:has(.messages .empty) .messages {
+    flex: 0 0 auto; min-height: 0; padding: clamp(2.4rem, 7vh, 5.4rem) 1.5rem 0; overflow: visible;
+  }
+  .modern-chat .chat-wrap:has(.messages .empty) .empty { min-height: 0; padding: 0; }
+  .modern-chat .chat-wrap:has(.messages .empty) .empty-avatar { width: 46px; height: 46px; margin-bottom: 1rem; border-radius: 14px; color: var(--sl-on-accent); background: var(--sl-accent-fill); box-shadow: 0 10px 28px var(--sl-accent-soft-strong); }
+  .modern-chat .chat-wrap:has(.messages .empty) .empty-title {
+    max-width: 760px; margin: 0 auto; color: var(--sl-text); font-size: clamp(2rem, 3.5vw, 3.35rem); font-weight: 760; line-height: 1.05; letter-spacing: -.055em;
+  }
+  .modern-chat .chat-wrap:has(.messages .empty) .empty-title span {
+    color: var(--sl-accent-fill); background: linear-gradient(90deg, #4f65ef, #7b4ff0); background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .modern-chat .chat-wrap:has(.messages .empty) .empty-sub { max-width: 650px; margin: .8rem auto 0; font-size: .93rem; }
+  .modern-chat .chat-wrap:has(.messages .empty) .suggestions { max-width: 900px; margin: 1.15rem auto 0; display: flex; flex-wrap: wrap; justify-content: center; gap: .55rem; }
+  .modern-chat .chat-wrap:has(.messages .empty) .suggestion { padding: .55rem .8rem; border-radius: 10px; font-size: .72rem; box-shadow: none; }
+  .modern-chat .chat-wrap:has(.messages .empty) .input-row {
+    min-height: 88px; align-items: flex-end; margin-top: 1.35rem; padding: .7rem; border-radius: 14px; box-shadow: 0 14px 40px rgba(31,38,54,.09);
+  }
+  .modern-chat .chat-wrap:has(.messages .empty) .input-row textarea { min-height: 60px; padding-top: .5rem; font-size: .9rem; }
+
   .agent-roster {
     align-self: start; max-height: calc(100vh - 188px); min-width: 0; display: flex; flex-direction: column; gap: .8rem;
-    padding: 1rem; overflow: hidden; border: 1px solid var(--sl-line); border-radius: 18px; background: var(--sl-surface); box-shadow: var(--sl-shadow-sm);
+    padding: .85rem; overflow: hidden; border: 1px solid var(--sl-line); border-radius: 11px; background: var(--sl-surface); box-shadow: none;
   }
   .agent-roster-head { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
   .agent-roster-head > div { min-width: 0; display: grid; gap: .12rem; }
@@ -4366,7 +4388,7 @@
   .agent-list { min-height: 0; display: flex; flex-direction: column; gap: .35rem; overflow-y: auto; }
   .agent-card {
     width: 100%; min-width: 0; display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: .6rem;
-    padding: .65rem; border: 1px solid transparent; border-radius: 12px; color: var(--sl-text); background: transparent; text-align: left; cursor: pointer;
+    padding: .58rem; border: 1px solid transparent; border-radius: 9px; color: var(--sl-text); background: transparent; text-align: left; cursor: pointer;
   }
   .agent-card:hover { border-color: var(--sl-line); background: var(--sl-surface-raised); }
   .agent-card.active { border-color: color-mix(in srgb, var(--sl-accent) 25%, var(--sl-line)); background: var(--sl-accent-soft); }

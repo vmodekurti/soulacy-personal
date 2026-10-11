@@ -276,8 +276,8 @@
   <header class="workspace-header">
     <div>
       <span class="eyebrow">Personal workspace</span>
-      <h1>{greeting}</h1>
-      <p>Your agents, results, and next actions in one calm place.</p>
+      <h1>{greeting}.</h1>
+      <p>Here is what is happening across your AI workspace today.</p>
     </div>
     <div class="header-actions">
       <TourButton page="feed" />
@@ -286,24 +286,6 @@
   </header>
 
   {#if scope === 'home'}
-    <section class="genie-launcher" aria-labelledby="genie-launcher-title">
-      <div class="genie-mark" aria-hidden="true">✦</div>
-      <div class="launcher-copy">
-        <span>Genie</span>
-        <h2 id="genie-launcher-title">What would you like to get done?</h2>
-        <p>Ask a question, start a task, or hand off something that needs several steps.</p>
-      </div>
-      <form class="launcher-composer" on:submit|preventDefault={startWithGenie}>
-        <input bind:value={homePrompt} aria-label="Ask Genie" placeholder="Tell Genie what you want to accomplish" />
-        <button type="submit" disabled={!homePrompt.trim()}>Ask Genie <span>→</span></button>
-      </form>
-      <div class="launcher-suggestions" aria-label="Suggested requests">
-        <button type="button" on:click={() => homePrompt = 'Help me plan my day'}>Plan my day</button>
-        <button type="button" on:click={() => homePrompt = 'Summarize what my agents completed recently'}>Catch me up</button>
-        <button type="button" on:click={() => homePrompt = 'Create a new automation'}>Create an automation</button>
-      </div>
-    </section>
-
     <section class="overview" aria-label="Workspace overview">
       <a href="#agents" class="metric">
         <span class="metric-icon violet">◎</span>
@@ -335,6 +317,23 @@
     <button class:active={scope === 'archived'} on:click={() => scope = 'archived'}>Archive <span>{archivedCount}</span></button>
   </nav>
 
+  {#if scope === 'home'}
+    <section class="action-grid" aria-label="Common actions">
+      <button on:click={() => { homePrompt = 'Research a topic deeply and give me a cited summary'; startWithGenie() }}>
+        <span class="action-icon violet">⌕</span><span><strong>Deep research</strong><small>Research and synthesize with sources</small></span><em>→</em>
+      </button>
+      <button on:click={() => scope = 'results'}>
+        <span class="action-icon green">▤</span><span><strong>Review results</strong><small>See completed work from your agents</small></span><em>→</em>
+      </button>
+      <a href="#missions">
+        <span class="action-icon blue">⌘</span><span><strong>Create a workflow</strong><small>Automate a repeatable task</small></span><em>→</em>
+      </a>
+      <a href="#connectors">
+        <span class="action-icon amber">⌁</span><span><strong>Connect a source</strong><small>Add a service or website</small></span><em>→</em>
+      </a>
+    </section>
+  {/if}
+
   {#if scope === 'results' || scope === 'unread'}
     <section class="library-header">
       <div><h2>{scope === 'unread' ? 'Unread results' : 'All agent results'}</h2><p>Finished work from scheduled and manual runs.</p></div>
@@ -359,7 +358,7 @@
     <main class="work-stream">
       {#if scope === 'home'}
         <header class="section-title">
-          <div><span>For you</span><h2>Latest from your agents</h2></div>
+          <div><span>Live workspace</span><h2>Current work</h2></div>
           <button on:click={() => scope = 'results'}>View all <span>→</span></button>
         </header>
       {/if}
@@ -480,34 +479,22 @@
     --f-bg: var(--sl-bg); --f-surface: var(--sl-surface); --f-raised: var(--sl-surface-raised);
     --f-ink: var(--sl-text); --f-dim: var(--sl-text-dim); --f-faint: var(--sl-text-faint);
     --f-line: var(--sl-line); --f-accent: var(--sl-accent); --f-accent-ink: var(--sl-accent-ink);
-    min-height: 100%; flex: 1 0 auto; padding: 0 0 5rem; color: var(--f-ink); background: var(--f-bg);
+    min-height: 100%; flex: 1 0 auto; padding: 0 0 4rem; color: var(--f-ink); background: var(--f-surface);
     font-family: -apple-system, "SF Pro Text", "Helvetica Neue", "Segoe UI", Arial, sans-serif;
   }
-  .workspace-header, .genie-launcher, .overview, .view-tabs, .library-header, .agent-filters, .home-grid, .library-grid {
-    width: min(1660px, calc(100% - 64px)); margin-inline: auto;
+  .workspace-header, .overview, .view-tabs, .action-grid, .library-header, .agent-filters, .home-grid, .library-grid {
+    width: min(1440px, calc(100% - 48px)); margin-inline: auto;
   }
-  .workspace-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 2rem; padding: 38px 0 24px; }
-  .eyebrow, .launcher-copy > span, .section-title > div > span, .side-panel header span { color: var(--f-accent-ink); font-size: .7rem; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
-  .workspace-header h1 { margin: .2rem 0 .25rem; font-size: clamp(2rem, 2.7vw, 3rem); line-height: 1.05; letter-spacing: -.045em; }
-  .workspace-header p { margin: 0; color: var(--f-dim); font-size: 1rem; }
+  .workspace-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 2rem; padding: 24px 0 16px; }
+  .eyebrow, .section-title > div > span, .side-panel header span { color: var(--f-accent-ink); font-size: .7rem; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+  .workspace-header h1 { margin: .15rem 0 .12rem; font-size: clamp(1.55rem, 2vw, 2rem); line-height: 1.1; letter-spacing: -.035em; }
+  .workspace-header p { margin: 0; color: var(--f-dim); font-size: .82rem; }
   .header-actions { display: flex; align-items: center; gap: .6rem; }
   .icon-button { width: 42px; height: 42px; border: 1px solid var(--f-line); border-radius: 13px; color: var(--f-dim); background: var(--f-surface); box-shadow: var(--sl-shadow-sm); font-size: 1.2rem; cursor: pointer; }
 
-  .genie-launcher { display: grid; grid-template-columns: auto minmax(220px, .7fr) minmax(420px, 1.3fr); align-items: center; gap: 20px; padding: 26px 28px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--f-accent) 22%, var(--f-line)); border-radius: 24px; background: radial-gradient(circle at 90% -20%, var(--sl-accent-soft-strong), transparent 42%), var(--f-surface); box-shadow: var(--sl-shadow-lg); }
-  .genie-mark { width: 58px; height: 58px; display: grid; place-items: center; border-radius: 18px; color: var(--sl-on-accent); background: linear-gradient(145deg, var(--sl-accent-fill), var(--sl-accent-fill-hover)); box-shadow: 0 12px 28px var(--sl-accent-soft-strong); font-size: 1.7rem; }
-  .launcher-copy h2 { margin: .25rem 0 .3rem; font-size: clamp(1.35rem, 1.65vw, 1.8rem); letter-spacing: -.025em; }
-  .launcher-copy p { margin: 0; color: var(--f-dim); font-size: .9rem; line-height: 1.45; }
-  .launcher-composer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .65rem; padding: .55rem; border: 1px solid var(--f-line); border-radius: 17px; background: var(--f-raised); }
-  .launcher-composer input { min-width: 0; padding: .65rem .75rem; border: 0; outline: 0; color: var(--f-ink); background: transparent; font: inherit; font-size: .96rem; }
-  .launcher-composer button { display: flex; align-items: center; gap: .5rem; padding: .72rem 1rem; border: 0; border-radius: 12px; color: var(--sl-on-accent); background: var(--sl-accent-fill); font-weight: 750; cursor: pointer; }
-  .launcher-composer button:disabled { opacity: .48; cursor: default; }
-  .launcher-suggestions { grid-column: 3; display: flex; flex-wrap: wrap; gap: .45rem; }
-  .launcher-suggestions button { padding: .38rem .7rem; border: 1px solid var(--f-line); border-radius: 999px; color: var(--f-dim); background: var(--f-surface); font-size: .75rem; cursor: pointer; }
-  .launcher-suggestions button:hover { color: var(--f-accent-ink); border-color: color-mix(in srgb, var(--f-accent) 42%, var(--f-line)); }
-
-  .overview { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 18px 0 6px; }
-  .metric { min-width: 0; display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: .75rem; padding: 14px 15px; border: 1px solid var(--f-line); border-radius: 17px; color: var(--f-ink); background: var(--f-surface); box-shadow: var(--sl-shadow-sm); text-align: left; text-decoration: none; cursor: pointer; }
-  .metric-icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 13px; font-size: 1.1rem; font-style: normal; }
+  .overview { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; padding: 4px 0 2px; }
+  .metric { min-width: 0; display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: .65rem; padding: 11px 12px; border: 1px solid var(--f-line); border-radius: 10px; color: var(--f-ink); background: var(--f-surface); box-shadow: none; text-align: left; text-decoration: none; cursor: pointer; }
+  .metric-icon { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; font-size: 1rem; font-style: normal; }
   .metric-icon.violet { color: var(--f-accent-ink); background: var(--sl-accent-soft); }
   .metric-icon.blue { color: #1769aa; background: color-mix(in srgb, #45a9f5 15%, transparent); }
   .metric-icon.amber { color: #9a5b00; background: color-mix(in srgb, #f7b84b 18%, transparent); }
@@ -517,25 +504,40 @@
   :global(:root[data-theme="dark"]) .metric-icon.green { color: #7ee2b8; }
   .metric > span:nth-child(2) { min-width: 0; display: grid; }
   .metric small { color: var(--f-faint); font-size: .72rem; font-weight: 650; }
-  .metric strong { margin-top: .15rem; font-size: 1.25rem; }
+  .metric strong { margin-top: .08rem; font-size: 1.08rem; }
   .metric em { color: var(--f-accent-ink); font-size: .72rem; font-style: normal; font-weight: 750; }
 
-  .view-tabs { display: flex; align-items: center; gap: .3rem; margin-top: 24px; padding: 0 0 9px; border-bottom: 1px solid var(--f-line); }
-  .view-tabs button { display: flex; align-items: center; gap: .4rem; padding: .55rem .8rem; border: 0; border-radius: 10px; color: var(--f-faint); background: transparent; font: inherit; font-size: .82rem; font-weight: 700; cursor: pointer; }
-  .view-tabs button.active { color: var(--f-accent-ink); background: var(--sl-accent-soft); }
+  .view-tabs { display: flex; align-items: center; gap: 1.25rem; margin-top: 15px; padding: 0; border-bottom: 1px solid var(--f-line); }
+  .view-tabs button { display: flex; align-items: center; gap: .4rem; padding: .6rem .12rem .55rem; border: 0; border-bottom: 2px solid transparent; border-radius: 0; color: var(--f-faint); background: transparent; font: inherit; font-size: .75rem; font-weight: 650; cursor: pointer; }
+  .view-tabs button.active { color: var(--f-accent-ink); border-bottom-color: var(--f-accent); background: transparent; }
   .view-tabs span { min-width: 19px; padding: .12rem .3rem; border-radius: 999px; color: inherit; background: color-mix(in srgb, currentColor 10%, transparent); font-size: .65rem; text-align: center; }
 
-  .home-grid { display: grid; grid-template-columns: minmax(0, 1fr) 330px; align-items: start; gap: 22px; padding-top: 20px; }
+  .action-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; padding-top: 16px; }
+  .action-grid > button, .action-grid > a { min-width: 0; display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: .65rem; padding: 12px; border: 1px solid var(--f-line); border-radius: 10px; color: var(--f-ink); background: var(--f-surface); text-align: left; text-decoration: none; }
+  .action-grid > button:hover, .action-grid > a:hover { border-color: color-mix(in srgb, var(--f-accent) 30%, var(--f-line)); box-shadow: var(--sl-shadow-sm); }
+  .action-grid > :is(button, a) > span:nth-child(2) { min-width: 0; display: grid; gap: .12rem; }
+  .action-grid strong { font-size: .76rem; }
+  .action-grid small { overflow: hidden; color: var(--f-faint); font-size: .64rem; text-overflow: ellipsis; white-space: nowrap; }
+  .action-grid em { color: var(--f-accent-ink); font-size: .85rem; font-style: normal; }
+  .action-icon { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 10px; font-size: 1rem; }
+  .action-icon.violet { color: var(--f-accent-ink); background: var(--sl-accent-soft); }
+  .action-icon.green { color: #087b52; background: rgba(38,183,122,.12); }
+  .action-icon.blue { color: #1769aa; background: rgba(69,169,245,.13); }
+  .action-icon.amber { color: #9a5b00; background: rgba(247,184,75,.16); }
+  .home-grid { display: grid; grid-template-columns: minmax(0, 1fr) 292px; align-items: start; gap: 16px; padding-top: 16px; }
   .library-grid { padding-top: 20px; }
   .work-stream { min-width: 0; }
   .section-title { display: flex; align-items: end; justify-content: space-between; gap: 1rem; margin-bottom: 12px; }
   .section-title h2, .side-panel h2, .library-header h2 { margin: .18rem 0 0; font-size: 1.15rem; letter-spacing: -.02em; }
   .section-title > button, .side-panel header > a, .side-panel header > button { display: flex; align-items: center; gap: .4rem; padding: .35rem; border: 0; color: var(--f-accent-ink); background: transparent; font: inherit; font-size: .75rem; font-weight: 750; text-decoration: none; cursor: pointer; }
-  .cards { display: grid; grid-template-columns: 1fr; gap: 12px; }
+  .cards { display: grid; grid-template-columns: 1fr; gap: 0; overflow: hidden; border: 1px solid var(--f-line); border-radius: 10px; background: var(--f-surface); }
   .cards.library { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .cards.library { overflow: visible; border: 0; border-radius: 0; background: transparent; }
 
-  .card { min-width: 0; overflow: hidden; border: 1px solid var(--f-line); border-radius: 18px; outline: none; background: var(--f-surface); box-shadow: var(--sl-shadow-sm); }
-  .card:hover { border-color: color-mix(in srgb, var(--f-accent) 26%, var(--f-line)); box-shadow: 0 10px 26px color-mix(in srgb, var(--f-ink) 7%, transparent); }
+  .card { min-width: 0; overflow: hidden; border: 0; border-bottom: 1px solid var(--f-line); border-radius: 0; outline: none; background: var(--f-surface); box-shadow: none; }
+  .card:last-child { border-bottom: 0; }
+  .card:hover { background: var(--f-raised); box-shadow: none; }
+  .cards.library .card { border: 1px solid var(--f-line); border-radius: 12px; box-shadow: var(--sl-shadow-sm); }
   .card.unread { box-shadow: inset 3px 0 var(--f-accent), var(--sl-shadow-sm); }
   .card.needs { border-color: color-mix(in srgb, var(--sl-coral) 65%, var(--f-line)); }
   .head { display: flex; align-items: center; gap: 10px; padding: 15px 16px 10px; }
@@ -573,7 +575,7 @@
   @keyframes burst { 0% { transform: scale(1); } 35% { transform: scale(1.5); } 100% { transform: scale(1); } }
 
   .context-rail { display: grid; gap: 14px; position: sticky; top: 18px; }
-  .side-panel, .quick-links { overflow: hidden; border: 1px solid var(--f-line); border-radius: 18px; background: var(--f-surface); box-shadow: var(--sl-shadow-sm); }
+  .side-panel, .quick-links { overflow: hidden; border: 1px solid var(--f-line); border-radius: 10px; background: var(--f-surface); box-shadow: none; }
   .side-panel > header { display: flex; align-items: end; justify-content: space-between; gap: .5rem; padding: 15px 15px 10px; }
   .agent-list, .activity-list { display: grid; padding: 0 8px 8px; }
   .agent-row, .activity-list button { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: .65rem; padding: .62rem .55rem; border: 0; border-radius: 11px; color: var(--f-ink); background: transparent; text-align: left; text-decoration: none; cursor: pointer; }
@@ -608,13 +610,12 @@
 
   @media (prefers-reduced-motion: reduce) { .act.heart.burst { animation: none; } }
   @media (max-width: 1220px) {
-    .genie-launcher { grid-template-columns: auto 1fr; }
-    .launcher-composer, .launcher-suggestions { grid-column: 1 / -1; }
     .overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .action-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .home-grid { grid-template-columns: minmax(0, 1fr) 300px; }
   }
   @media (max-width: 920px) {
-    .workspace-header, .genie-launcher, .overview, .view-tabs, .library-header, .agent-filters, .home-grid, .library-grid { width: min(100% - 32px, 760px); }
+    .workspace-header, .overview, .view-tabs, .action-grid, .library-header, .agent-filters, .home-grid, .library-grid { width: min(100% - 32px, 760px); }
     .home-grid { grid-template-columns: 1fr; }
     .context-rail { position: static; grid-template-columns: 1fr 1fr; }
     .quick-links { grid-column: 1 / -1; }
@@ -624,12 +625,7 @@
     .workspace-header { padding-top: 24px; }
     .workspace-header h1 { font-size: 1.75rem; }
     .workspace-header p { display: none; }
-    .genie-launcher { grid-template-columns: auto minmax(0, 1fr); padding: 20px; border-radius: 20px; }
-    .genie-mark { width: 48px; height: 48px; border-radius: 15px; }
-    .launcher-copy p { display: none; }
-    .launcher-composer { grid-template-columns: 1fr; }
-    .launcher-composer button { justify-content: center; }
-    .launcher-suggestions { flex-wrap: nowrap; overflow-x: auto; }
+    .action-grid { grid-template-columns: 1fr; }
     .overview { grid-template-columns: 1fr 1fr; gap: 8px; }
     .metric { grid-template-columns: 36px minmax(0, 1fr); padding: 10px; }
     .metric-icon { width: 36px; height: 36px; }
