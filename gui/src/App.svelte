@@ -25,7 +25,8 @@
   let keyError = ''
   let keySaving = false
   let sidebarOpen = false   // mobile drawer state (≤768px)
-  let navCollapsed = false   // desktop: collapse the left nav to an icon rail
+  let appLauncherOpen = false
+  let appSearch = ''
   let PageComponent = null
   let loadedPage = ''
   // Authentication is asynchronous. Do not mount a page behind the login
@@ -36,26 +37,19 @@
   let pageLoadStale = false
   let pageLoadSeq = 0
 
-  // Day or night. Dark stays the default the product has always had; the
-  // choice is remembered per browser and applied before first paint via
-  // data-theme on <html> (see the tokens in the style block).
-  let theme = 'dark'
-  try { theme = localStorage.getItem('soulacy-theme') === 'light' ? 'light' : 'dark' } catch (_) {}
+  // Soulacy opens in the bright workspace. People can still opt into the dark
+  // theme, and that explicit choice is remembered per browser.
+  let theme = 'light'
+  try { theme = localStorage.getItem('soulacy-theme-v2') === 'dark' ? 'dark' : 'light' } catch (_) {}
   function applyTheme() {
     if (typeof document === 'undefined') return
-    if (theme === 'light') document.documentElement.setAttribute('data-theme', 'light')
-    else document.documentElement.removeAttribute('data-theme')
+    document.documentElement.setAttribute('data-theme', theme)
   }
   applyTheme()
   function toggleTheme() {
     theme = theme === 'light' ? 'dark' : 'light'
-    try { localStorage.setItem('soulacy-theme', theme) } catch (_) {}
+    try { localStorage.setItem('soulacy-theme-v2', theme) } catch (_) {}
     applyTheme()
-  }
-
-  function toggleNav() {
-    navCollapsed = !navCollapsed
-    try { localStorage.setItem('soulacy-nav-collapsed', navCollapsed ? '1' : '0') } catch (_) {}
   }
 
   // Gateway restart (main-menu action): confirm modal + a blocking overlay
@@ -79,6 +73,22 @@
   const currentWorkspaceLabel = 'Personal'
   $: mobilePrimaryPages = navPages.filter(p => ['feed', 'chat', 'studio', 'agents'].includes(p.id))
   $: mobileMoreActive = !mobilePrimaryPages.some(p => p.id === page)
+  const railIds = ['feed', 'chat', 'missions', 'schedule', 'agents']
+  $: railPages = navPages.filter(p => railIds.includes(p.id))
+  $: launcherPages = pages.filter((p) => {
+    const q = appSearch.trim().toLowerCase()
+    return !q || p.label.toLowerCase().includes(q) || p.group.toLowerCase().includes(q)
+  })
+
+  function openLauncher() {
+    appSearch = ''
+    appLauncherOpen = true
+  }
+
+  function navigateFromLauncher(id) {
+    appLauncherOpen = false
+    navigate(id)
+  }
 
   // `builder` used to alias to Studio: the one route name that should have
   // opened a conversation opened the graph editor instead, which is why the
@@ -240,7 +250,6 @@
       history.replaceState({}, '', '#dashboard')
     }
     applyHash()
-    try { navCollapsed = localStorage.getItem('soulacy-nav-collapsed') === '1' } catch (_) {}
     window.addEventListener('popstate', applyHash)
     window.addEventListener('hashchange', applyHash)
 
@@ -280,7 +289,6 @@
         // so a tour started here would drive navigation behind a modal the user
         // cannot see past.
         if (!setupWizardOpened && !$authRequired && shouldAutoStart(state)) {
-          navCollapsed = false
           startWalkthrough(0)
         }
       })
@@ -457,6 +465,27 @@
 
 {#if !shareToken && sessionChecked && !$authRequired}
 <div class="layout" class:chat-route={page === 'chat'}>
+  <header class="desktop-topbar">
+    <button class="topbar-brand" on:click={() => navigate('feed')} aria-label="Open Soulacy feed">
+      <span class="topbar-mark"><BrandMark size={28} /></span>
+      <span class="topbar-wordmark">soulacy</span>
+    </button>
+    <span class="topbar-divider" aria-hidden="true"></span>
+    <div class="topbar-context">
+      <span>{currentWorkspaceLabel}</span>
+      <strong>{currentPageLabel}</strong>
+    </div>
+    <div class="topbar-actions">
+      <button class="topbar-search" on:click={openLauncher} aria-label="Find a Soulacy screen"><span>⌕</span> Find anything</button>
+      <span class="topbar-connection" class:live={$connected}>
+        <i></i>{$connected ? 'Connected' : 'Reconnecting'}
+      </span>
+      <button class="topbar-action" on:click={toggleTheme}
+              title={theme === 'light' ? 'Switch to night' : 'Switch to day'}
+              aria-label="Toggle light and dark">{theme === 'light' ? '☾' : '☀︎'}</button>
+      <button class="topbar-avatar" on:click={openKeyModal} title="Account and browser login" aria-label="Account and browser login">V</button>
+    </div>
+  </header>
   <!-- Mobile command bar. The current destination and workspace remain visible
        even when the full navigation is off canvas. -->
   <header class="topbar">
@@ -478,37 +507,41 @@
   {/if}
 
   <!-- Sidebar -->
-  <aside class="sidebar" class:open={sidebarOpen} class:collapsed={navCollapsed}>
+  <aside class="sidebar" class:open={sidebarOpen}>
     <div class="brand">
       <span class="brand-logo" aria-hidden="true">
         <BrandMark size={30} />
       </span>
       <span class="brand-name">soulacy</span>
-      <button class="nav-toggle" on:click={toggleNav}
-              title={navCollapsed ? 'Expand menu' : 'Collapse menu'}
-              aria-label={navCollapsed ? 'Expand menu' : 'Collapse menu'}>
-        {navCollapsed ? '»' : '«'}
-      </button>
       <button class="drawer-close" on:click={() => sidebarOpen = false} aria-label="Close navigation">×</button>
     </div>
 
 
-    <!-- How much of the product to show. A first-time user met 26 destinations
-         at once, which reads as a lot of work before anything has been done. -->
-    {#if !navCollapsed}
-      <div class="mode-switch" role="group" aria-label="How much to show">
-        <span class="mode-label">Mode</span>
-        <div class="mode-buttons">
-          {#each navLevels as lvl}
-            <button class="mode-btn" class:on={$navLevel === lvl.key}
-                    title={lvl.hint} aria-pressed={$navLevel === lvl.key}
-                    on:click={() => navLevel.set(lvl.key)}>{lvl.label}</button>
-          {/each}
-        </div>
-      </div>
-    {/if}
+    <nav class="rail-nav" aria-label="Primary workspace navigation">
+      {#each railPages as p}
+        <button class="rail-item" class:active={page === p.id} on:click={() => navigate(p.id)} title={p.label}
+                aria-current={page === p.id ? 'page' : undefined}>
+          <span>{p.id === 'chat' ? '✦' : p.id === 'schedule' ? '◷' : p.id === 'agents' ? '◉' : p.icon}</span>
+          <small>{p.id === 'chat' ? 'Genie' : p.id === 'schedule' ? 'Automate' : p.id === 'agents' ? 'Agents' : p.label}</small>
+        </button>
+      {/each}
+      <button class="rail-item" class:active={!railIds.includes(page)} on:click={openLauncher} title="All tools" aria-expanded={appLauncherOpen}>
+        <span>•••</span><small>More</small>
+      </button>
+    </nav>
 
-    <nav>
+    <div class="drawer-navigation">
+    <div class="mode-switch" role="group" aria-label="How much to show">
+      <span class="mode-label">Show</span>
+      <div class="mode-buttons">
+        {#each navLevels as lvl}
+          <button class="mode-btn" class:on={$navLevel === lvl.key}
+                  title={lvl.hint} aria-pressed={$navLevel === lvl.key}
+                  on:click={() => navLevel.set(lvl.key)}>{lvl.label}</button>
+        {/each}
+      </div>
+    </div>
+    <nav class="full-nav">
       {#each navGroups as grp}
         {@const groupPages = pages.filter(p => p.group === grp.key)}
         {#if groupPages.length}
@@ -534,6 +567,7 @@
         {/each}
       {/if}
     </nav>
+    </div>
 
     <button class="nav-item nav-action" on:click={openRestartModal}
             title="Restart the gateway server">
@@ -556,6 +590,38 @@
       <button class="icon-btn" on:click={openKeyModal} title="Change browser login">🔑</button>
     </div>
   </aside>
+
+  {#if appLauncherOpen}
+    <button class="launcher-backdrop" on:click={() => appLauncherOpen = false} aria-label="Close all tools"></button>
+    <div class="app-launcher" role="dialog" aria-modal="true" aria-label="All Soulacy tools">
+      <header>
+        <div><strong>All tools</strong><span>Jump anywhere in Soulacy</span></div>
+        <button on:click={() => appLauncherOpen = false} aria-label="Close all tools">×</button>
+      </header>
+      <label class="launcher-search"><span>⌕</span><input bind:value={appSearch} placeholder="Find a screen" /></label>
+      <div class="launcher-modes" role="group" aria-label="How much to show">
+        {#each navLevels as lvl}
+          <button class:on={$navLevel === lvl.key} aria-pressed={$navLevel === lvl.key} on:click={() => navLevel.set(lvl.key)}>{lvl.label}</button>
+        {/each}
+      </div>
+      <div class="launcher-grid">
+        {#each navGroups as grp}
+          {@const groupPages = launcherPages.filter(p => p.group === grp.key)}
+          {#if groupPages.length}
+            <div class="launcher-group">
+              <h2>{grp.label || 'Workspace'}</h2>
+              {#each groupPages as p}
+                <button class:active={page === p.id} on:click={() => navigateFromLauncher(p.id)}>
+                  <span class="launcher-icon">{p.id === 'start' ? '✦' : p.icon}</span>
+                  <span><strong>{p.label}</strong><small>{p.level}</small></span>
+                </button>
+              {/each}
+            </div>
+          {/if}
+        {/each}
+      </div>
+    </div>
+  {/if}
 
   {#if !$authRequired}
     <Walkthrough on:navigate={(e) => navigate(e.detail)} />
@@ -697,64 +763,87 @@
     transition: border-color 0.12s ease, background 0.12s ease;
   }
   :global(.btn:hover:not(:disabled)) { border-color: var(--accent); }
-  :global(.btn.primary) { background: var(--accent); border-color: var(--accent); color: #fff; }
+  :global(.btn.primary) { background: var(--sl-accent-fill); border-color: var(--sl-accent-fill); color: var(--sl-on-accent); }
   :global(.btn.primary:hover:not(:disabled)) { filter: brightness(1.08); }
   :global(.btn:disabled) { opacity: 0.5; cursor: not-allowed; }
   /* Compact variant used in dense panels (library rows, readiness items). */
   :global(.btn-sm) { padding: 4px 10px; font-size: 12px; font-weight: 600; }
 
-  /* Shared surface tokens.
-     The palette was already close to where it should be; what read as dated
-     was the geometry — 6px corners and tight padding on every control, which
-     makes a dark interface look like a control panel rather than something
-     you talk to. Tokens here so a later change is one edit, not twenty-six. */
+  /* Shared surface tokens. Bright is the product default. Every page consumes
+     these tokens, so theme changes remain coherent as the product grows. */
   :global(:root) {
-    /* Soulacy look (#191, phase 1): one token set for every screen. Tropical —
-       sea and sand by day, a summer night after dark. The product has been
-       dark-only, so dark is still the default; data-theme="light" on <html>
-       switches the whole shell (toggle in the sidebar footer). */
-    --sl-accent: #3fd1db;
-    --sl-accent-hover: #6fe0e8;
-    --sl-accent-ink: #a7ecf1;
-    --sl-accent-soft: rgba(63, 209, 219, 0.14);
-    --sl-accent-soft-strong: rgba(63, 209, 219, 0.28);
-    --sl-coral: #ff5c72;
-    --sl-mango: #ffb020;
-    --sl-leaf: #37b46a;
-    --sl-bg: #0b1b2b;
-    --sl-surface: #10233a;
-    --sl-surface-raised: #163049;
-    --sl-line: #1f3347;
-    --sl-text: #f3eee6;
-    --sl-text-dim: #b8c0c9;
-    --sl-text-faint: #8a97a6;
-    --sl-radius: 10px;
-    --sl-radius-lg: 14px;
+    color-scheme: light;
+    --sl-accent: #5b5ce2;
+    --sl-accent-hover: #4647c7;
+    --sl-accent-ink: #3f41b8;
+    --sl-accent-fill: #5b5ce2;
+    --sl-accent-fill-hover: #4647c7;
+    --sl-on-accent: #ffffff;
+    --sl-accent-soft: rgba(91, 92, 226, 0.09);
+    --sl-accent-soft-strong: rgba(91, 92, 226, 0.18);
+    --sl-coral: #e85d75;
+    --sl-mango: #d89524;
+    --sl-leaf: #23966f;
+    --sl-bg: #f5f7fb;
+    --sl-surface: #ffffff;
+    --sl-surface-raised: #f8f9fd;
+    --sl-line: #e5e8f0;
+    --sl-line-strong: #8793a7;
+    --sl-text: #202636;
+    --sl-text-dim: #596277;
+    --sl-text-faint: #697386;
+    --sl-radius: 12px;
+    --sl-radius-lg: 18px;
+    --sl-shadow-sm: 0 1px 2px rgba(31, 38, 54, .05), 0 6px 18px rgba(31, 38, 54, .04);
+    --sl-shadow-lg: 0 18px 55px rgba(31, 38, 54, .11);
+    --bg: #f5f7fb;
+    --bg-elev-1: #ffffff;
+    --bg-elev-2: #f8f9fd;
+    --border: #e5e8f0;
+    --text: #202636;
+    --muted: #8b94a8;
+    --accent: #5b5ce2;
+    --radius: 12px;
   }
   /* Gradients are not colours; the token test wants every token in the block
      above to be a concrete colour, so the story ring lives here. */
   :global(:root) { --story-ring: conic-gradient(from 200deg, #3fd1db, #37b46a, #ffb020, #ff5c72, #3fd1db); }
-  :global(:root[data-theme="light"]) {
-    --sl-accent: #0fb5a5;
-    --sl-accent-hover: #0a8f83;
-    --sl-accent-ink: #0a8f83;
-    --sl-accent-soft: rgba(15, 181, 165, 0.12);
-    --sl-accent-soft-strong: rgba(15, 181, 165, 0.24);
-    --sl-bg: #ffffff;
-    --sl-surface: #f6fbf9;
-    --sl-surface-raised: #ffffff;
-    --sl-line: #e2efeb;
-    --sl-text: #10312e;
-    --sl-text-dim: #4f6a66;
-    --sl-text-faint: #8aa19c;
+  :global(:root[data-theme="dark"]) {
+    color-scheme: dark;
+    --sl-accent: #818cf8;
+    --sl-accent-hover: #a5b4fc;
+    --sl-accent-ink: #c7d2fe;
+    --sl-accent-fill: #5b5ce2;
+    --sl-accent-fill-hover: #4647c7;
+    --sl-on-accent: #ffffff;
+    --sl-accent-soft: rgba(129, 140, 248, 0.13);
+    --sl-accent-soft-strong: rgba(129, 140, 248, 0.25);
+    --sl-bg: #111522;
+    --sl-surface: #191f2f;
+    --sl-surface-raised: #22293b;
+    --sl-line: #30384c;
+    --sl-line-strong: #5e6a86;
+    --sl-text: #f4f6fb;
+    --sl-text-dim: #b8c0d0;
+    --sl-text-faint: #8892a8;
+    --sl-shadow-sm: 0 8px 22px rgba(0,0,0,.14);
+    --sl-shadow-lg: 0 22px 62px rgba(0,0,0,.28);
+    --bg: #111522;
+    --bg-elev-1: #191f2f;
+    --bg-elev-2: #22293b;
+    --border: #30384c;
+    --text: #f4f6fb;
+    --muted: #8892a8;
+    --accent: #818cf8;
+    --radius: 12px;
   }
 
   :global(.btn-primary) {
-    background: var(--sl-accent); color: #fff;
+    background: var(--sl-accent-fill); color: var(--sl-on-accent);
     padding: 0.5rem 1.15rem; border-radius: var(--sl-radius); font-weight: 500;
     transition: background .15s ease, transform .1s ease;
   }
-  :global(.btn-primary:hover:not(:disabled)) { background: var(--sl-accent-hover); }
+  :global(.btn-primary:hover:not(:disabled)) { background: var(--sl-accent-fill-hover); }
   :global(.btn-primary:active:not(:disabled)) { transform: translateY(1px); }
 
   /* .linkish had no style anywhere in the app. Seventeen buttons across six
@@ -790,7 +879,44 @@
   :global(.btn-danger:hover:not(:disabled)) { background: #9f2828; }
 
   /* ── Layout ─────────────────────────────────────────────────────── */
-  .layout { display: flex; height: 100vh; height: 100dvh; min-width: 0; overflow: hidden; }
+  .layout {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    grid-template-rows: 68px minmax(0, 1fr);
+    height: 100vh; height: 100dvh; min-width: 0; overflow: hidden;
+    background: var(--sl-bg);
+  }
+
+  .desktop-topbar {
+    grid-column: 2; grid-row: 1;
+    display: flex; align-items: center; gap: 1rem;
+    min-width: 0; padding: 0 1.25rem;
+    background: color-mix(in srgb, var(--sl-surface) 94%, transparent);
+    border-bottom: 1px solid var(--sl-line);
+    box-shadow: 0 1px 0 rgba(31,38,54,.02);
+    backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+    z-index: 40;
+  }
+  .topbar-brand, .topbar-divider { display: none; }
+  .topbar-mark { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 11px; background: linear-gradient(145deg, #eef0ff, #f8fbff); box-shadow: inset 0 0 0 1px rgba(91,92,226,.12); }
+  .topbar-wordmark { font-family: 'Grand Hotel', 'Snell Roundhand', cursive; font-size: 1.72rem; line-height: 1; }
+  .topbar-divider { width: 1px; height: 26px; background: var(--sl-line); }
+  .topbar-context { min-width: 0; display: grid; line-height: 1.15; }
+  .topbar-context span { color: var(--sl-text-faint); font-size: .65rem; font-weight: 650; text-transform: uppercase; letter-spacing: .08em; }
+  .topbar-context strong { overflow: hidden; color: var(--sl-text); font-size: .92rem; text-overflow: ellipsis; white-space: nowrap; }
+  .topbar-actions { margin-left: auto; display: flex; align-items: center; gap: .65rem; }
+  .topbar-search {
+    width: min(320px, 24vw); min-height: 38px; display: flex; align-items: center; gap: .55rem; padding: 0 .7rem;
+    border: 1px solid var(--sl-line); border-radius: 12px; color: var(--sl-text-faint); background: var(--sl-surface-raised); text-align: left;
+  }
+  .topbar-search > span { color: var(--sl-text-dim); font-size: 1rem; }
+  .topbar-search:hover { color: var(--sl-text-dim); border-color: color-mix(in srgb, var(--sl-accent) 28%, var(--sl-line)); background: var(--sl-surface); }
+  .topbar-connection { display: flex; align-items: center; gap: .35rem; padding: .35rem .55rem; color: var(--sl-text-faint); font-size: .65rem; font-weight: 650; }
+  .topbar-connection i { width: 7px; height: 7px; border-radius: 50%; background: #d06d7e; }
+  .topbar-connection.live i { background: #2fa47c; box-shadow: 0 0 0 4px rgba(47,164,124,.09); }
+  .topbar-action, .topbar-avatar { width: 36px; height: 36px; display: grid; place-items: center; padding: 0; border: 1px solid var(--sl-line); border-radius: 11px; color: var(--sl-text-dim); background: var(--sl-surface); box-shadow: var(--sl-shadow-sm); }
+  .topbar-action:hover, .topbar-avatar:hover { color: var(--sl-accent-ink); border-color: color-mix(in srgb, var(--sl-accent) 32%, var(--sl-line)); }
+  .topbar-avatar { border-radius: 50%; color: var(--sl-on-accent); border-color: transparent; background: linear-gradient(145deg, var(--sl-accent-fill), var(--sl-accent-fill-hover)); font-size: .72rem; font-weight: 800; }
 
   /* ── Mobile top bar + drawer (≤768px) ───────────────────────────── */
   .topbar { display: none; }
@@ -800,35 +926,31 @@
 
   /* ── Sidebar ─────────────────────────────────────────────────────── */
   .sidebar {
-    width: 210px; flex-shrink: 0;
+    grid-column: 1; grid-row: 1 / -1;
+    width: 220px; min-height: 0; flex-shrink: 0;
     background: var(--sl-surface);
     border-right: 1px solid var(--sl-line);
     display: flex; flex-direction: column;
     transition: width 0.16s ease;
   }
 
-  /* Collapsed icon rail (desktop): labels hidden, icons centered. */
-  .sidebar.collapsed { width: 56px; }
-  .sidebar.collapsed .brand-name,
-  .sidebar.collapsed .nav-label,
-  .sidebar.collapsed .conn-dot,
-  .sidebar.collapsed .nav-section { display: none; }
-  .sidebar.collapsed .brand { justify-content: center; padding: 1.1rem 0; gap: 0; position: relative; }
-  .sidebar.collapsed .nav-item { justify-content: center; padding: 0.6rem 0; gap: 0; }
-  .sidebar.collapsed .nav-icon { width: auto; }
-  .sidebar.collapsed .sidebar-footer { justify-content: center; padding: 0.65rem 0; }
-  /* When collapsed, the toggle sits under the logo as a small centered pill. */
-  .sidebar.collapsed .nav-toggle { position: absolute; bottom: -6px; right: 6px; }
-
-  .nav-toggle {
-    margin-left: auto; background: none; border: none;
-    color: var(--sl-text-faint); font-size: 0.9rem; line-height: 1;
-    padding: 0.2rem 0.35rem; border-radius: 6px; cursor: pointer;
+  .rail-nav {
+    flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: stretch; gap: .28rem;
+    padding: .55rem .75rem; overflow-y: auto;
   }
-  .nav-toggle:hover { background: var(--sl-surface-raised); color: var(--sl-text); }
+  .rail-item {
+    width: 100%; min-height: 44px; display: flex; align-items: center; gap: .75rem;
+    padding: .55rem .75rem; border: 1px solid transparent; border-radius: 11px; color: var(--sl-text-dim); background: transparent; text-align: left;
+  }
+  .rail-item > span { display: grid; place-items: center; width: 24px; height: 24px; flex: 0 0 24px; color: var(--sl-accent-ink); font-size: 1rem; line-height: 1; }
+  .rail-item small { max-width: 100%; overflow: hidden; font-size: .78rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+  .rail-item:hover { color: var(--sl-text); background: var(--sl-surface-raised); }
+  .rail-item.active { color: var(--sl-accent-ink); border-color: color-mix(in srgb, var(--sl-accent) 16%, var(--sl-line)); background: var(--sl-accent-soft); }
+  .drawer-navigation { display: none; }
 
   @media (max-width: 768px) {
-    .layout { flex-direction: column; }
+    .layout { display: flex; flex-direction: column; }
+    .desktop-topbar { display: none; }
 
     /* Chat owns its navigation bar on phones. Keeping the shell command bar as
        well produced a web-dashboard-style double header; the More tab remains
@@ -866,15 +988,10 @@
       z-index: 90;
       box-shadow: 4px 0 24px rgba(0, 0, 0, 0.5);
     }
+    .rail-nav { display: none; }
+    .drawer-navigation { min-height: 0; display: flex; flex: 1; flex-direction: column; }
+    .full-nav { min-height: 0; }
     .sidebar.open { transform: translateX(0); }
-    .sidebar.collapsed { width: min(320px, 88vw); }
-    .sidebar.collapsed .brand-name, .sidebar.collapsed .nav-label, .sidebar.collapsed .conn-dot,
-    .sidebar.collapsed .logout-label, .sidebar.collapsed .nav-section { display: initial; }
-    .sidebar.collapsed .brand { justify-content: initial; padding: 1.15rem 1.1rem; gap: .7rem; }
-    .sidebar.collapsed .nav-item { padding: .75rem 1rem; gap: .75rem; }
-    .sidebar.collapsed .nav-icon { width: 1.2rem; }
-    .sidebar.collapsed .sidebar-footer { justify-content: space-between; padding: .65rem 1rem; }
-    .nav-toggle { display: none; }
     .drawer-close { display: grid; place-items: center; width: 44px; height: 44px; margin-left: auto; border-radius: 11px; color: #9ca4c4; background: transparent; font-size: 1.5rem; }
     .drawer-close:hover { color: #fff; background: #181b30; }
 
@@ -920,12 +1037,18 @@
     display: flex; align-items: center; gap: 0.7rem;
     padding: 1.15rem 1.1rem;
   }
+  @media (min-width: 769px) {
+    .brand { min-height: 68px; display: flex; padding: 0 1.15rem; border-bottom: 1px solid var(--sl-line); }
+    .brand-logo { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 11px; background: var(--sl-accent-soft); }
+    .brand-name { font-size: 1.72rem; }
+    .mode-switch, .nav-action { display: none; }
+  }
   /* The same Living Core artwork used by the native app. */
   .brand-logo {
     width: 30px; height: 30px; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
   }
-  .brand-name { font-family: 'Grand Hotel', 'Snell Roundhand', cursive; font-weight: 400; font-size: 1.6rem; letter-spacing: 0; line-height: 1; color: #f2f3fb; }
+  .brand-name { font-family: 'Grand Hotel', 'Snell Roundhand', cursive; font-weight: 400; font-size: 1.6rem; letter-spacing: 0; line-height: 1; color: var(--sl-text); }
 
 
   nav { flex: 1; padding: 0.5rem 0.5rem; overflow-y: auto; }
@@ -936,7 +1059,7 @@
                  letter-spacing: .07em; margin-bottom: .3rem; }
   .mode-buttons { display: flex; gap: .2rem; }
   .mode-btn {
-    flex: 1; background: #11131f; border: 1px solid var(--sl-line); color: var(--sl-text-faint);
+    flex: 1; background: var(--sl-surface-raised); border: 1px solid var(--sl-line); color: var(--sl-text-faint);
     border-radius: 6px; padding: .22rem .1rem; font-size: .66rem; cursor: pointer;
   }
   .mode-btn:hover { color: var(--sl-text-dim); }
@@ -945,24 +1068,25 @@
   .nav-section {
     padding: 0.9rem 0.65rem 0.4rem;
     font-size: 0.66rem; font-weight: 600; letter-spacing: 0.09em;
-    text-transform: uppercase; color: #565c82;
+    text-transform: uppercase; color: var(--sl-text-faint);
   }
   .nav-item {
     display: flex; align-items: center; gap: 0.75rem;
     width: 100%; padding: 0.55rem 0.65rem; margin: 0.05rem 0;
-    background: none; color: #8188ad;
+    background: none; color: var(--sl-text-dim);
     font-size: 0.9rem; font-weight: 500;
     text-align: left; border-radius: 9px;
     transition: background 0.1s, color 0.1s;
   }
-  .nav-item:hover  { background: #181b30; color: #d4d7ea; }
-  .nav-item.active { background: color-mix(in srgb, var(--sl-accent) 16%, transparent); color: var(--sl-accent-ink); }
+  .nav-item:hover  { background: var(--sl-surface-raised); color: var(--sl-text); }
+  .nav-item.active { background: var(--sl-accent-soft); color: var(--sl-accent-ink); box-shadow: inset 3px 0 var(--sl-accent); }
   .nav-icon { font-size: 1rem; width: 1.2rem; text-align: center; }
 
   /* Action item (not a page): restart the gateway — pinned at the bottom. */
   .nav-action { margin: 0.35rem 0.5rem 0.6rem; width: auto; color: #d98a8a; border-radius: 9px; }
   .nav-action:hover { background: rgba(127, 32, 32, 0.18); color: #ff9d9d; }
   .restart-dot { color: #e06666; font-size: 0.7rem; }
+  @media (min-width: 769px) { .nav-action { display: none !important; } }
 
   /* Blocking overlay shown while the gateway re-execs. */
   .restart-overlay {
@@ -986,9 +1110,14 @@
   @keyframes restart-spin { to { transform: rotate(360deg); } }
 
   .sidebar-footer {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 0.65rem 1rem;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 48px; padding: .5rem;
     border-top: 1px solid var(--sl-line);
+  }
+  @media (min-width: 769px) {
+    .sidebar-footer .conn-dot { width: 9px; height: 9px; overflow: hidden; color: transparent; border-radius: 50%; background: #d06d7e; }
+    .sidebar-footer .conn-dot.live { background: #2fa47c; box-shadow: 0 0 0 4px rgba(47,164,124,.09); }
+    .sidebar-footer .icon-btn { display: none; }
   }
   .conn-dot { font-size: 0.72rem; font-family: monospace; color: #5a3030; }
   .conn-dot.live { color: #4caf82; }
@@ -1000,8 +1129,38 @@
   .icon-btn { background: none; color: var(--sl-text-faint); font-size: 0.85rem; padding: 0.15rem; }
   .icon-btn:hover { color: #e8eaf6; }
 
+  .launcher-backdrop {
+    position: fixed; inset: 0; z-index: 70; width: 100%; border-radius: 0; background: rgba(49,57,76,.24);
+    backdrop-filter: blur(9px); -webkit-backdrop-filter: blur(9px);
+  }
+  .app-launcher {
+    position: fixed; z-index: 71; top: 82px; left: 236px; width: min(760px, calc(100vw - 268px)); max-height: calc(100vh - 106px);
+    display: flex; flex-direction: column; gap: 1rem; padding: 1.2rem; overflow: hidden;
+    border: 1px solid var(--sl-line); border-radius: 22px; color: var(--sl-text); background: color-mix(in srgb, var(--sl-surface) 97%, transparent); box-shadow: var(--sl-shadow-lg);
+  }
+  .app-launcher > header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+  .app-launcher > header > div { display: grid; gap: .12rem; }
+  .app-launcher > header strong { font-size: 1.05rem; }
+  .app-launcher > header span { color: var(--sl-text-faint); font-size: .72rem; }
+  .app-launcher > header button { width: 34px; height: 34px; border-radius: 10px; color: var(--sl-text-dim); background: var(--sl-surface-raised); }
+  .launcher-search { display: flex; align-items: center; gap: .55rem; padding: 0 .8rem; border: 1px solid var(--sl-line); border-radius: 13px; background: var(--sl-surface-raised); }
+  .launcher-search > span { color: var(--sl-text-faint); }
+  .launcher-search input { min-height: 44px; padding-inline: 0; border: 0 !important; background: transparent !important; box-shadow: none !important; }
+  .launcher-modes { display: flex; align-items: center; gap: .3rem; }
+  .launcher-modes button { padding: .38rem .7rem; border-radius: 9px; color: var(--sl-text-faint); background: transparent; font-size: .68rem; font-weight: 700; }
+  .launcher-modes button.on { color: var(--sl-accent-ink); background: var(--sl-accent-soft); }
+  .launcher-grid { min-height: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; overflow-y: auto; }
+  .launcher-group { display: flex; flex-direction: column; gap: .3rem; }
+  .launcher-group h2 { margin: .25rem .4rem; color: var(--sl-text-faint); font-size: .64rem; text-transform: uppercase; letter-spacing: .09em; }
+  .launcher-group button { display: grid; grid-template-columns: 36px minmax(0,1fr); align-items: center; gap: .65rem; padding: .55rem; border-radius: 12px; color: var(--sl-text); background: transparent; text-align: left; }
+  .launcher-group button:hover, .launcher-group button.active { background: var(--sl-accent-soft); }
+  .launcher-icon { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 11px; color: var(--sl-accent-ink); background: var(--sl-surface-raised); }
+  .launcher-group button > span:last-child { min-width: 0; display: grid; }
+  .launcher-group strong { overflow: hidden; font-size: .78rem; text-overflow: ellipsis; white-space: nowrap; }
+  .launcher-group small { color: var(--sl-text-faint); font-size: .61rem; text-transform: capitalize; }
+
   /* ── Main content ────────────────────────────────────────────────── */
-  .content { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
+  .content { min-width: 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; background: var(--sl-bg); }
   .page-loading {
     flex: 1;
     display: flex;

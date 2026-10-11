@@ -1,0 +1,171 @@
+/* Shared visual language for every dynamically loaded Soulacy screen. Page
+   styles still own their layout; this file provides a bright, consistent
+   surface system and neutralizes legacy dark-only color literals. */
+
+html[data-theme="light"],
+html[data-theme="light"] body,
+html[data-theme="light"] #app {
+  background: var(--sl-bg);
+}
+
+html[data-theme="light"] ::selection {
+  color: #202636;
+  background: rgba(91, 92, 226, .18);
+}
+
+html[data-theme="light"] * { scrollbar-color: #cfd5e2 transparent; }
+html[data-theme="light"] *::-webkit-scrollbar { width: 10px; height: 10px; }
+html[data-theme="light"] *::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 999px; background: #cfd5e2; background-clip: padding-box; }
+html[data-theme="light"] *::-webkit-scrollbar-track { background: transparent; }
+
+html[data-theme="light"] :is(code, pre) { color: #35405a; }
+
+html[data-theme="light"] :is(.page-header, .panel-header, .section-head, .card-head) h1,
+html[data-theme="light"] :is(.page-header, .panel-header, .section-head, .card-head) h2,
+html[data-theme="light"] :is(.page-header, .panel-header, .section-head, .card-head) h3 {
+  color: var(--sl-text) !important;
+  letter-spacing: -.018em;
+}
+
+html[data-theme="light"] :is(.page-header, .panel-header, .section-head, .card-head) p,
+html[data-theme="light"] :is(.page-header, .panel-header, .section-head, .card-head) span {
+  color: var(--sl-text-dim);
+}
+
+html[data-theme="light"] :is(.empty, .empty-state, .empty-panel) {
+  color: var(--sl-text-faint) !important;
+}
+
+html[data-theme="light"] :is(.modal-bg, .dialog-backdrop, .confirm-modal-backdrop, .palette-backdrop) {
+  background: rgba(44, 52, 70, .28) !important;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+html[data-theme="light"] :is(.modal, .dialog, .confirm-modal, .palette) {
+  color: var(--sl-text) !important;
+  background: var(--sl-surface) !important;
+  border-color: var(--sl-line) !important;
+  box-shadow: var(--sl-shadow-lg) !important;
+}
+
+html[data-theme="light"] table { color: var(--sl-text); }
+html[data-theme="light"] th { color: var(--sl-text-dim) !important; background: #f3f5fa !important; }
+html[data-theme="light"] :is(td, th) { border-color: var(--sl-line) !important; }
+
+html[data-theme="light"] :is(.banner, .notice, .callout, .hint-box) {
+  border-color: var(--sl-line) !important;
+  box-shadow: none !important;
+}
+
+/* Legacy screens used their own navy literals. These semantic selectors let
+   them join the shared theme while their layouts are migrated incrementally. */
+html[data-theme="light"] :is(input, select, textarea) {
+  color: var(--sl-text) !important;
+  background: var(--sl-surface) !important;
+  border-color: var(--sl-line-strong) !important;
+  box-shadow: none;
+}
+html[data-theme="light"] :is(input, select, textarea):focus {
+  border-color: color-mix(in srgb, var(--sl-accent) 55%, var(--sl-line)) !important;
+  box-shadow: 0 0 0 3px var(--sl-accent-soft) !important;
+  outline: 0;
+}
+html[data-theme="light"] :is(input, textarea)::placeholder { color: var(--sl-text-faint); }
+
+html[data-theme="light"] :is(
+  .card, .panel, .section, .tile, .hero, .composer, .modal,
+  .ops-panel, .release-card, .doctor-card, .persona-block,
+  .connector-card, .website-card, .connection-card, .mcp-card,
+  .schedule-card, .automation-card, .run-card, .report-card,
+  .detail-card, .summary-card, .config-card, .settings-card
+) {
+  color: var(--sl-text) !important;
+  background: var(--sl-surface) !important;
+  border-color: var(--sl-line) !important;
+  box-shadow: var(--sl-shadow-sm) !important;
+}
+
+html[data-theme="light"] :is(
+  .card-row, .site-row, .ops-row, .slo-row, .doctor-kv, .check-row,
+  .radio-opt, .option, .tpl, .suggestion, .fact, .stat,
+  .context-block, .proposal-content, .learning-evidence,
+  .notebook-help, .security-plan, .skill-note, .connector-facts span
+) {
+  color: var(--sl-text-dim) !important;
+  background: var(--sl-surface-raised) !important;
+  border-color: var(--sl-line) !important;
+}
+
+html[data-theme="light"] :is(
+  .btn-secondary, .secondary, .compact, .ghost-btn, .tiny-btn,
+  .filter-btn, .tab, .pill, .chip
+) {
+  color: var(--sl-text-dim) !important;
+  background: var(--sl-surface) !important;
+  border-color: var(--sl-line) !important;
+}
+html[data-theme="light"] :is(.btn-secondary, .secondary, .compact, .ghost-btn, .tiny-btn, .filter-btn, .tab):hover {
+  color: var(--sl-accent-ink) !important;
+  background: var(--sl-accent-soft) !important;
+  border-color: color-mix(in srgb, var(--sl-accent) 32%, var(--sl-line)) !important;
+}
+
+html[data-theme="light"] :is(
+  .muted, .hint, .field-hint, .field-help, .card-sub, .card-label,
+  .eyebrow, .meta, .description, .subtitle, .optional
+) { color: var(--sl-text-faint) !important; }
+
+html[data-theme="light"] :is(.backdrop, .drawer-backdrop, .sheet-backdrop) {
+  background: rgba(44, 52, 70, .26) !important;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+html[data-theme="light"] :is(.drawer, .side-panel, .detail-panel, .history-panel) {
+  color: var(--sl-text) !important;
+  background: var(--sl-surface) !important;
+  border-color: var(--sl-line) !important;
+  box-shadow: var(--sl-shadow-lg) !important;
+}
+
+html[data-theme="light"] :is(a, .linkish) { color: var(--sl-accent-ink); }
+html[data-theme="light"] hr { border-color: var(--sl-line); }
+
+@media (min-width: 769px) {
+  .content > .page:not(.modern-chat) {
+    width: 100%;
+    max-width: 1480px;
+    margin: 0 auto;
+    padding: clamp(24px, 3vw, 46px) clamp(24px, 4vw, 64px) 64px !important;
+  }
+  .content > .page:not(.modern-chat) > .page-header:first-child {
+    margin-bottom: 24px;
+  }
+  .content > .page:not(.modern-chat) > .page-header:first-child h1 {
+    font-size: clamp(1.5rem, 2vw, 2.1rem);
+    font-weight: 720;
+  }
+}
+
+html[data-theme="light"] :is(.page-header, .section-hdr, .section-head) {
+  border-color: var(--sl-line) !important;
+}
+
+html[data-theme="light"] :is(.btn-primary, .primary) {
+  border-color: transparent !important;
+  color: var(--sl-on-accent) !important;
+  background: var(--sl-accent-fill) !important;
+  box-shadow: 0 6px 18px rgba(91, 92, 226, .16);
+}
+html[data-theme="light"] :is(.btn-primary, .primary):hover {
+  background: var(--sl-accent-fill-hover) !important;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .content > * { animation: soulacy-page-in .2s ease-out; }
+  @keyframes soulacy-page-in {
+    from { opacity: 0; transform: translateY(3px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+}

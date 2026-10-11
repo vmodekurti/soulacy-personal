@@ -287,6 +287,15 @@
     return a?.name || id || 'No agent'
   }
 
+  function agentInitials(agent) {
+    const label = agent?.name || agent?.id || 'Agent'
+    return label.split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]?.toUpperCase()).join('') || 'A'
+  }
+
+  function agentSummary(agent) {
+    return agent?.description || agent?.summary || 'Ready for a new mission'
+  }
+
   async function rateResponse(msg, rating) {
     const thread = activeThread
     const runId = msg?.runId || ''
@@ -446,6 +455,7 @@
   }
 
   let agents    = []
+  let agentSearch = ''
   let input     = ''
   let error     = null
   let shareBusy = false
@@ -453,6 +463,12 @@
   let shareErr  = ''
   let toolRetry = {}      // toolKey(ev) → { busy, ok, output, error, durationMs }
   let msgListEl
+
+  $: visibleAgents = agents.filter((agent) => {
+    const query = agentSearch.trim().toLowerCase()
+    if (!query) return true
+    return `${agent.name || ''} ${agent.id || ''} ${agent.description || ''}`.toLowerCase().includes(query)
+  })
 
   // Command palette + saved prompts.
   let paletteOpen = false
@@ -2370,7 +2386,7 @@
   <div class="page-header">
     <div class="chat-brand">
       <button class="chat-list-toggle history-toggle" on:click={toggleChatList} title={chatListHidden ? 'Show mission history' : 'Hide mission history'} aria-pressed={!chatListHidden}>◷ <span>History</span></button>
-      <div><h1>Genie</h1><span>{activeThread?.messages?.length ? (isSending ? 'Working on your mission' : 'Mission ready for a follow-up') : 'What should we get done?'}</span></div>
+      <div><h1>{activeThread?.agentId ? agentName(activeThread.agentId) : 'Genie'}</h1><span>{activeThread?.messages?.length ? (isSending ? 'Working on your mission' : 'Mission ready for a follow-up') : 'What should we get done?'}</span></div>
     </div>
     <div class="controls primary-controls">
       <button class="top-icon top-search" class:active={historySearchOpen} on:click={() => historySearchOpen = !historySearchOpen} title="Search conversations" aria-label="Search conversations">⌘ K</button>
@@ -2919,6 +2935,31 @@
       {/if}
     </div>
   </div>
+  <aside class="agent-roster" aria-label="Available agents">
+    <div class="agent-roster-head">
+      <div><strong>Your agents</strong><span>{agents.length} available</span></div>
+      <button on:click={() => startThread()} disabled={!agents.length} title="Start a new mission" aria-label="Start a new mission">＋</button>
+    </div>
+    <label class="agent-search">
+      <span aria-hidden="true">⌕</span>
+      <input type="search" bind:value={agentSearch} placeholder="Find an agent" aria-label="Find an agent" />
+    </label>
+    <div class="agent-list">
+      {#each visibleAgents as agent (agent.id)}
+        <button class="agent-card" class:active={agent.id === activeThread?.agentId}
+                on:click={() => setActiveAgent(agent.id)} aria-pressed={agent.id === activeThread?.agentId}>
+          <span class="agent-avatar">{agentInitials(agent)}</span>
+          <span class="agent-copy">
+            <strong>{agent.name || agent.id}</strong>
+            <small>{agentSummary(agent)}</small>
+          </span>
+          <span class="agent-ready"><i></i>{agent.id === activeThread?.agentId ? 'Active' : 'Ready'}</span>
+        </button>
+      {:else}
+        <p class="agent-empty">No agents match “{agentSearch}”.</p>
+      {/each}
+    </div>
+  </aside>
   {#if artifactPanelOpen}
     <aside class="artifact-panel" transition:slide|local={{ duration: 160 }} aria-label="Chat artifacts">
       <div class="artifact-head">
@@ -4047,7 +4088,7 @@
     padding: .3rem .6rem; border-radius: 7px; font-size: .78rem; cursor: pointer;
   }
   .mini-btn:hover { border-color: color-mix(in srgb, var(--sl-accent) 50%, transparent); color: #fff; }
-  .mini-btn.primary { background: var(--sl-accent-hover); border-color: transparent; color: #fff; }
+  .mini-btn.primary { background: var(--sl-accent-fill); border-color: transparent; color: var(--sl-on-accent); }
 
   /* Code-block copy button (from richRenderer) */
   :global(.code-copy-btn) {
@@ -4211,6 +4252,133 @@
   .composer-voice:hover:not(:disabled) { color: #fff; background: #354261; }
   .modern-chat .send-btn { width: 38px; height: 38px; padding: 0; border-radius: 50%; }
 
+  /* Bright workspace. The conversation stays visually quiet while the agent
+     roster remains close enough to switch missions without leaving Chat. */
+  .modern-chat {
+    color: var(--sl-text);
+    background: var(--sl-bg);
+  }
+  .modern-chat .page-header {
+    background: color-mix(in srgb, var(--sl-surface) 94%, transparent);
+    border-color: var(--sl-line);
+    box-shadow: 0 1px 0 rgba(31, 38, 54, .02);
+    padding-inline: max(1.1rem, calc((100% - 1480px) / 2 + 1.5rem));
+  }
+  .chat-brand span,
+  .detail-label,
+  .modern-chat .thread-agent,
+  .modern-chat .bmeta { color: var(--sl-text-faint); }
+  .chat-list-toggle, .top-icon, .sidebar-new, .voice-minimize { color: var(--sl-text-dim); }
+  .chat-list-toggle:hover, .top-icon:hover, .top-icon.active {
+    color: var(--sl-accent-ink); background: var(--sl-accent-soft); border-color: var(--sl-line);
+  }
+  .agent-picker,
+  .details-btn,
+  .details-advanced,
+  .modern-chat .voice-btn {
+    color: var(--sl-text-dim); background: var(--sl-surface); border-color: var(--sl-line);
+  }
+  .agent-picker select { color: var(--sl-text); }
+  .new-chat-btn { color: var(--sl-on-accent); border-color: transparent; background: var(--sl-accent-fill); box-shadow: var(--sl-shadow-sm); }
+  .new-chat-btn:hover:not(:disabled) { background: var(--sl-accent-fill-hover); }
+  .details-btn:hover, .details-btn.active, .details-advanced:hover {
+    color: var(--sl-accent-ink); border-color: color-mix(in srgb, var(--sl-accent) 30%, var(--sl-line)); background: var(--sl-accent-soft);
+  }
+  .mission-details { border-color: var(--sl-line); background: var(--sl-surface-raised); }
+  .genie-status { color: var(--sl-accent-ink); border-color: color-mix(in srgb, var(--sl-accent) 25%, var(--sl-line)); background: var(--sl-accent-soft); }
+  .genie-status:hover, .genie-status[aria-expanded="true"] { background: var(--sl-accent-soft-strong); border-color: var(--sl-accent); }
+  .genie-backdrop { background: rgba(44, 52, 70, .25); backdrop-filter: blur(8px); }
+  .genie-drawer { color: var(--sl-text); border-color: var(--sl-line); background: var(--sl-surface); box-shadow: var(--sl-shadow-lg); }
+  .genie-drawer > header { border-color: var(--sl-line); }
+  .genie-drawer > header span, .genie-row span { color: var(--sl-text-faint); }
+  .genie-drawer button { color: var(--sl-text-dim); border-color: var(--sl-line); background: var(--sl-surface-raised); }
+  .genie-drawer h3 { color: var(--sl-accent-ink); }
+  .genie-row { border-color: var(--sl-line); background: var(--sl-surface-raised); }
+  .genie-row.clickable:hover { border-color: var(--sl-accent); }
+  .genie-empty { color: var(--sl-text-faint); border-color: var(--sl-line-strong); }
+  .genie-transcript pre { color: var(--sl-text-dim); background: var(--sl-surface-raised); }
+  .chat-more-menu { border-color: var(--sl-line); background: var(--sl-surface); box-shadow: var(--sl-shadow-lg); }
+  .chat-more-menu button { color: var(--sl-text-dim); }
+  .chat-more-menu button:hover:not(:disabled) { color: var(--sl-text); background: var(--sl-surface-raised); }
+
+  .modern-chat .chat-body,
+  .modern-chat .chat-main { background: var(--sl-bg); }
+  .modern-chat .chat-workspace {
+    width: 100%; display: grid; grid-template-columns: minmax(0, 1120px) minmax(280px, 340px);
+    justify-content: center; box-sizing: border-box; margin: 0; padding: 1.25rem 1.5rem; gap: 1.1rem;
+  }
+  .modern-chat .chat-wrap {
+    border: 0; border-radius: 0; background: transparent; box-shadow: none;
+  }
+  .modern-chat .chat-sidebar {
+    border-color: var(--sl-line); background: var(--sl-surface);
+  }
+  .chat-sidebar-head strong, .modern-chat .thread-title { color: var(--sl-text); }
+  .chat-sidebar-head span { color: var(--sl-text-faint); }
+  .sidebar-new { color: var(--sl-accent-ink); border-color: var(--sl-line); background: var(--sl-accent-soft); }
+  .modern-chat .thread-search { color: var(--sl-text); border-color: var(--sl-line); background: var(--sl-surface-raised); }
+  .modern-chat .thread-chip:hover:not(.active) { background: var(--sl-surface-raised); border-color: var(--sl-line); }
+  .modern-chat .thread-chip.active { background: var(--sl-accent-soft); border-color: color-mix(in srgb, var(--sl-accent) 25%, var(--sl-line)); box-shadow: inset 3px 0 var(--sl-accent); }
+  .earlier-turns { color: var(--sl-text-dim); border-color: var(--sl-line); background: var(--sl-surface); }
+  .earlier-turns:hover { color: var(--sl-accent-ink); border-color: var(--sl-accent); }
+  .modern-chat .msg-row { width: min(1040px, calc(100% - 3rem)); }
+  .modern-chat .bubble { color: var(--sl-text); background: var(--sl-surface); border-color: var(--sl-line); box-shadow: var(--sl-shadow-sm); }
+  .modern-chat .msg-row:not(.user):not(.sys) .bubble {
+    color: var(--sl-text); border-color: var(--sl-line); background: var(--sl-surface); box-shadow: var(--sl-shadow-sm);
+  }
+  .modern-chat .msg-row.user .bubble { color: var(--sl-on-accent); background: var(--sl-accent-fill); border-color: var(--sl-accent-fill); box-shadow: 0 8px 24px rgba(91,92,226,.16); }
+  .modern-chat .msg-row.user .bmeta, .modern-chat .msg-row.user .act { color: var(--sl-on-accent); }
+  .modern-chat :global(.btext.markdown-body) { color: var(--sl-text); white-space: normal; }
+  .modern-chat :global(.btext.markdown-body h1),
+  .modern-chat :global(.btext.markdown-body h2),
+  .modern-chat :global(.btext.markdown-body h3),
+  .modern-chat :global(.btext.markdown-body strong) { color: var(--sl-text); }
+  .modern-chat :global(.btext.markdown-body code) { color: var(--sl-accent-ink); background: var(--sl-accent-soft); }
+  .modern-chat :global(.btext.markdown-body th) { color: var(--sl-text-dim); border-color: var(--sl-line); }
+  .modern-chat :global(.btext.markdown-body td) { border-color: var(--sl-line); }
+  .modern-chat :global(.btext.markdown-body blockquote) { color: var(--sl-text-dim); border-color: var(--sl-accent); }
+  .modern-chat .pending-attachments { width: min(1040px, calc(100% - 3rem)); }
+  .modern-chat .input-row {
+    width: min(1040px, calc(100% - 3rem)); border-color: var(--sl-line); background: var(--sl-surface); box-shadow: 0 12px 38px rgba(31,38,54,.09);
+  }
+  .modern-chat .input-row textarea { color: var(--sl-text); }
+  .composer-voice { color: var(--sl-text-dim); background: var(--sl-surface-raised); }
+  .composer-voice:hover:not(:disabled) { color: var(--sl-accent-ink); background: var(--sl-accent-soft); }
+  .empty-title { color: var(--sl-text); }
+  .empty-sub { color: var(--sl-text-dim); }
+  .suggestion { color: var(--sl-text-dim); border-color: var(--sl-line); background: var(--sl-surface); box-shadow: var(--sl-shadow-sm); }
+  .suggestion:hover { color: var(--sl-accent-ink); border-color: var(--sl-accent); }
+
+  .agent-roster {
+    align-self: start; max-height: calc(100vh - 188px); min-width: 0; display: flex; flex-direction: column; gap: .8rem;
+    padding: 1rem; overflow: hidden; border: 1px solid var(--sl-line); border-radius: 18px; background: var(--sl-surface); box-shadow: var(--sl-shadow-sm);
+  }
+  .agent-roster-head { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+  .agent-roster-head > div { min-width: 0; display: grid; gap: .12rem; }
+  .agent-roster-head strong { color: var(--sl-text); font-size: .84rem; }
+  .agent-roster-head span { color: var(--sl-text-faint); font-size: .65rem; }
+  .agent-roster-head button {
+    width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border: 1px solid var(--sl-line); border-radius: 9px;
+    color: var(--sl-accent-ink); background: var(--sl-accent-soft); cursor: pointer;
+  }
+  .agent-search { display: flex; align-items: center; gap: .45rem; padding: 0 .65rem; border: 1px solid var(--sl-line); border-radius: 10px; background: var(--sl-surface-raised); color: var(--sl-text-faint); }
+  .agent-search input { width: 100%; min-width: 0; padding: .6rem 0; border: 0; outline: 0; color: var(--sl-text); background: transparent; font: inherit; font-size: .75rem; }
+  .agent-list { min-height: 0; display: flex; flex-direction: column; gap: .35rem; overflow-y: auto; }
+  .agent-card {
+    width: 100%; min-width: 0; display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: .6rem;
+    padding: .65rem; border: 1px solid transparent; border-radius: 12px; color: var(--sl-text); background: transparent; text-align: left; cursor: pointer;
+  }
+  .agent-card:hover { border-color: var(--sl-line); background: var(--sl-surface-raised); }
+  .agent-card.active { border-color: color-mix(in srgb, var(--sl-accent) 25%, var(--sl-line)); background: var(--sl-accent-soft); }
+  .agent-avatar { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 11px; color: var(--sl-accent-ink); background: var(--sl-accent-soft-strong); font-size: .7rem; font-weight: 800; }
+  .agent-copy { min-width: 0; display: grid; gap: .15rem; }
+  .agent-copy strong, .agent-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .agent-copy strong { font-size: .74rem; }
+  .agent-copy small { color: var(--sl-text-faint); font-size: .63rem; }
+  .agent-ready { display: flex; align-items: center; gap: .25rem; color: var(--sl-text-faint); font-size: .57rem; font-weight: 650; }
+  .agent-ready i { width: 6px; height: 6px; border-radius: 50%; background: #2fa47c; }
+  .agent-empty { margin: .5rem; color: var(--sl-text-faint); font-size: .72rem; line-height: 1.45; }
+
   /* Immersive voice mode. It overlays Chat but can be minimized without ending the turn. */
   .voice-session {
     position: fixed; inset: 0; z-index: 90; display: flex; flex-direction: column; overflow: hidden;
@@ -4251,7 +4419,7 @@
     .modern-chat .page-header {
       min-height: 58px; padding: .4rem max(.55rem, env(safe-area-inset-right)) .4rem max(.55rem, env(safe-area-inset-left));
       flex-direction: row; flex-wrap: nowrap; align-items: center; gap: .35rem;
-      background: rgba(9,15,32,.94); box-shadow: 0 8px 24px rgba(2,5,14,.18);
+      background: color-mix(in srgb, var(--sl-surface) 94%, transparent); box-shadow: 0 8px 24px rgba(31,38,54,.08);
       backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
     }
     .chat-brand { min-width: auto; }
@@ -4262,7 +4430,7 @@
 		.details-btn::before { content: '•••'; font-size: .9rem; }
 		.mission-details { flex-wrap: wrap; padding: .65rem; }
 		.mission-identity { flex: 1 1 100%; }
-		.mission-details .agent-picker { flex: 1; border: 1px solid #283250; background: #111a30; }
+		.mission-details .agent-picker { flex: 1; border: 1px solid var(--sl-line); background: var(--sl-surface); }
 		.mission-details :global(.run-metrics) { margin-left: 0; }
 		.genie-status { width: 44px; height: 44px; flex: 0 0 44px; padding: 0; justify-content: center; border-radius: 12px; }
 		.genie-status span { display: none; }
@@ -4272,8 +4440,8 @@
     .agent-picker { min-width: 0; max-width: none; height: 44px; flex: 1; border: 0; background: transparent; }
     .agent-picker select { font-size: 16px; }
     .modern-chat .chat-body, .modern-chat .chat-main, .modern-chat .chat-workspace, .modern-chat .chat-wrap { position: relative; min-width: 0; max-width: 100%; overflow-x: hidden; }
-    .chat-sidebar-backdrop { display: block; position: absolute; z-index: 29; inset: 0; width: 100%; border: 0; border-radius: 0; background: rgba(3,7,17,.62); backdrop-filter: blur(2px); }
-    .modern-chat .chat-sidebar { position: absolute; z-index: 30; top: 0; bottom: 0; left: 0; width: min(360px, 94vw); padding: 1rem; box-shadow: 18px 0 48px rgba(0,0,0,.45); }
+    .chat-sidebar-backdrop { display: block; position: absolute; z-index: 29; inset: 0; width: 100%; border: 0; border-radius: 0; background: rgba(44,52,70,.26); backdrop-filter: blur(4px); }
+    .modern-chat .chat-sidebar { position: absolute; z-index: 30; top: 0; bottom: 0; left: 0; width: min(360px, 94vw); padding: 1rem; box-shadow: var(--sl-shadow-lg); }
     .modern-chat .msg-row { width: 100%; min-width: 0; padding: 0 1rem; }
     .modern-chat .messages { padding: 1rem 0 .45rem; gap: 1rem; overflow-x: hidden; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; scroll-padding-bottom: 84px; }
     .modern-chat .msg-row.user .bubble { max-width: 88%; padding: .7rem .9rem; border-radius: 18px 18px 5px 18px; }
@@ -4283,7 +4451,7 @@
     .modern-chat :global(.markdown-body) { min-width: 0; max-width: 100%; overflow-x: hidden; }
     .modern-chat :global(.markdown-body table) {
       display: block; width: 100%; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain;
-      border: 1px solid #263250; border-radius: 12px; background: #121b30;
+      border: 1px solid var(--sl-line); border-radius: 12px; background: var(--sl-surface);
       -webkit-overflow-scrolling: touch;
     }
     .modern-chat :global(.markdown-body th), .modern-chat :global(.markdown-body td) { min-width: 132px; padding: .65rem .7rem; vertical-align: top; }
@@ -4294,11 +4462,11 @@
       position: fixed; z-index: 55; top: calc(58px + env(safe-area-inset-top));
       right: 0; bottom: calc(64px + env(safe-area-inset-bottom)); left: 0;
       width: 100%; max-width: none; border: 0; border-radius: 0;
-      background: rgba(15, 22, 40, .98);
+      background: color-mix(in srgb, var(--sl-surface) 98%, transparent);
     }
     .modern-chat .input-row {
       width: auto; min-height: 58px; margin: .35rem .65rem .55rem; padding: .38rem; gap: .35rem; border-radius: 20px;
-      background: rgba(25,35,59,.96); box-shadow: 0 10px 30px rgba(1,4,12,.28); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+      background: color-mix(in srgb, var(--sl-surface) 96%, transparent); box-shadow: 0 10px 30px rgba(31,38,54,.12); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
     }
     .modern-chat .input-row textarea { min-width: 0; min-height: 44px; max-height: 124px; padding: .7rem .3rem; font-size: 16px; line-height: 1.35; }
     .modern-chat .attach-btn, .modern-chat .send-btn { width: 44px; height: 44px; flex: 0 0 44px; padding: 0; }
@@ -4316,5 +4484,15 @@
     .cp-field input, .cp-field select, .cp-field .model-custom, .cp-field input[type=number] { width: 100%; }
     .cp-field { flex: 1 1 100%; }
     .thread-search { max-width: none; }
+    .modern-chat .chat-workspace { display: flex; flex-direction: column; padding: 0; }
+    .agent-roster {
+      order: -1; flex: 0 0 auto; width: 100%; padding: .45rem .6rem; border-left: 0; border-bottom: 1px solid var(--sl-line); background: var(--sl-surface);
+    }
+    .agent-roster-head, .agent-search { display: none; }
+    .agent-list { flex-direction: row; gap: .4rem; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+    .agent-list::-webkit-scrollbar { display: none; }
+    .agent-card { min-width: 156px; grid-template-columns: 32px minmax(0, 1fr); padding: .45rem .55rem; }
+    .agent-avatar { width: 32px; height: 32px; border-radius: 10px; }
+    .agent-copy small, .agent-ready { display: none; }
   }
 </style>
