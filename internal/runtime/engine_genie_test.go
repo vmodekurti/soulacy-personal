@@ -121,3 +121,23 @@ func TestGenieActionPlanningIsForcedWhenModelCouldSkipIt(t *testing.T) {
 		t.Fatalf("planned reply=%q", got)
 	}
 }
+
+func TestGenieFastChatOnlySelectsClearlyConversationalTurns(t *testing.T) {
+	for _, prompt := range []string{
+		"Hello", "Thanks!", "What is quantum entanglement?", "Why do leaves change color?", "Explain recursion",
+	} {
+		if !shouldUseFastGenieChat(GenieAgentID, prompt) {
+			t.Errorf("expected fast chat for %q", prompt)
+		}
+	}
+	for _, prompt := range []string{
+		"What is the weather today?", "Why did my agent fail?", "Search for recent AI news", "Book an Uber", "Explain this document",
+	} {
+		if shouldUseFastGenieChat(GenieAgentID, prompt) {
+			t.Errorf("unexpected fast chat for %q", prompt)
+		}
+	}
+	if shouldUseFastGenieChat("researcher", "Hello") {
+		t.Fatal("fast chat must be limited to Genie")
+	}
+}

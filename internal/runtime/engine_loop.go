@@ -438,17 +438,24 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		e.log.Warn("memory write failed (inbound)", zap.String("agent", msg.AgentID), zap.Error(err))
 	}
 
+	rawGoal := flattenParts(msg.Parts)
+	fastGenieChat := shouldUseFastGenieChat(def.ID, rawGoal)
+
 	// Prime the prefix cache for this Handle. Cleared on exit so a
 	// hot-reload between user messages picks up the new def's catalogs.
 	// (PRODUCTION_AUDIT → MED/Engine.)
 	sysPrefix := e.buildSystemPrefix(def)
-	if guide := e.websiteAccessRoutingGuide(ctx, def); guide != "" {
-		sysPrefix += "\n\n" + guide
+	if fastGenieChat {
+		sysPrefix = buildFastGenieSystemPrefix(def)
+	}
+	if !fastGenieChat {
+		if guide := e.websiteAccessRoutingGuide(ctx, def); guide != "" {
+			sysPrefix += "\n\n" + guide
+		}
 	}
 	if modePrompt := responseModeSystemPrompt(msg.Metadata); modePrompt != "" {
 		sysPrefix += "\n\n" + modePrompt
 	}
-	rawGoal := flattenParts(msg.Parts)
 	sess.mu.Lock()
 	// S1 (Cohort F) — annotate inbound text from shared external
 	// channels so the model treats the sender identity conservatively.
@@ -514,6 +521,13 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	// partition. Keep the names for the run trace: this distinguishes a model
 	// that declined an offered tool from a runtime that withheld it.
 	tools := e.allToolSchemasForContext(ctx, def, msg.Channel)
+	if fastGenieChat {
+		// A clearly conversational turn does not need the capability catalog.
+		// Omitting tools keeps the prompt small and lets the provider stream the
+		// answer immediately. Action, live-data, and workspace questions stay on
+		// the full orchestration path.
+		tools = nil
+	}
 	toolNames := make([]string, 0, len(tools))
 	for _, tool := range tools {
 		toolNames = append(toolNames, tool.Name)
@@ -664,19 +678,12 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 			}
 			break
 		}
-		// Enable streaming on the final-turn request when the agent opted in
-		// AND the caller attached a token callback. We only stream when there
-		// are no tools (streaming + tool calls requires careful merging that
-		// providers handle differently; the non-streaming path is authoritative
-		// for tool-call turns). Providers set resp.Stream = nil when they fall
-		// through to the non-streaming code path, so the drain below is a no-op.
+		// Ask providers to stream whenever the agent opted in. Providers that
+		// support streamed tool-call assembly return tool calls after the stream
+		// closes; providers that do not support it may still return a normal
+		// response. The engine drain below handles both paths.
 		streamCB := streamCallback(ctx)
-		// Stream the final-turn reply when the agent opts in and there are no
-		// tools on this turn. We no longer require a stream callback: even
-		// without one (the plain /chat path), we now relay tokens to the event
-		// sink as `assistant.delta` events so the web UI can render the answer
-		// live over the existing /ws/events socket.
-		wantStream := def.StreamReply && len(tools) == 0
+		wantStream := def.StreamReply
 
 		// Story 4 / S5.1 — proactively keep the prompt within the model's
 		// context window. Reserve room for the completion, then trim the oldest
@@ -724,6 +731,10 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 				zap.Int("input_budget_tokens", inputBudget))
 		}
 
+		reasoningEffort := def.LLM.ReasoningEffort
+		if fastGenieChat {
+			reasoningEffort = "low"
+		}
 		req := llm.CompletionRequest{
 			Model:            def.LLM.Model,
 			Messages:         chatMsgs,
@@ -733,7 +744,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 			MaxTokens:        reserveOut,
 			Stream:           wantStream,
 			ResponseFormat:   def.LLM.ResponseFormat,
-			ReasoningEffort:  def.LLM.ReasoningEffort,
+			ReasoningEffort:  reasoningEffort,
 			PresencePenalty:  def.LLM.PresencePenalty,
 			FrequencyPenalty: def.LLM.FrequencyPenalty,
 		}
@@ -839,30 +850,11 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		// didn't open a stream (non-streaming path or tool-call turn),
 		// resp.Stream is nil and this block is a no-op.
 		if resp.Stream != nil {
-			var sb strings.Builder
-			for token := range resp.Stream {
-				if streamCB != nil {
-					streamCB(token)
-				}
-				// Relay each token to the event sink so the web UI can render
-				// the reply as it arrives. Best-effort: the hub drops events for
-				// slow clients, and the authoritative full reply is returned by
-				// Handle regardless, so a dropped delta only affects the live
-				// preview, never the final message.
-				e.sink.Emit(message.Event{
-					Type: "assistant.delta", AgentID: msg.AgentID, SessionID: msg.SessionID,
-					Payload:   map[string]any{"text": token},
-					Timestamp: time.Now().UTC(),
-				})
-				sb.WriteString(token)
-			}
-			resp.Content = sb.String()
-			streamErr := llmCtx.Err()
+			streamErr := e.collectCompletionStream(llmCtx, resp, msg.AgentID, msg.SessionID, streamCB)
 			llmCancel()
 			if streamErr != nil {
-				outErr := fmt.Errorf("engine: streaming model response interrupted: %w", streamErr)
-				e.sink.Emit(message.Event{Type: "error", AgentID: msg.AgentID, SessionID: msg.SessionID, Payload: map[string]any{"stage": "llm_stream", "error": outErr.Error()}, Timestamp: time.Now().UTC()})
-				return message.Message{}, outErr
+				e.sink.Emit(message.Event{Type: "error", AgentID: msg.AgentID, SessionID: msg.SessionID, Payload: map[string]any{"stage": "llm_stream", "error": streamErr.Error()}, Timestamp: time.Now().UTC()})
+				return message.Message{}, streamErr
 			}
 		}
 		// A few open-weight models advertise native tool calling but emit a
@@ -1350,6 +1342,7 @@ func (e *Engine) finalSynthesis(ctx context.Context, def *agent.Definition, agen
 		ReasoningEffort:  def.LLM.ReasoningEffort,
 		PresencePenalty:  def.LLM.PresencePenalty,
 		FrequencyPenalty: def.LLM.FrequencyPenalty,
+		Stream:           def.StreamReply,
 		// Tools intentionally omitted so the model must answer in text.
 	})
 	if err != nil {
@@ -1358,6 +1351,9 @@ func (e *Engine) finalSynthesis(ctx context.Context, def *agent.Definition, agen
 			Payload:   map[string]any{"stage": "final-synthesis", "error": err.Error()},
 			Timestamp: time.Now().UTC(),
 		})
+		return ""
+	}
+	if e.collectCompletionStream(ctx, resp, agentID, sessionID, streamCallback(ctx)) != nil {
 		return ""
 	}
 	e.sink.Emit(message.Event{

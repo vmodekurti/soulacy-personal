@@ -1566,7 +1566,7 @@ console.log(reply);` : ''
       {:else}
         <div class="editor">
           <div class="editor-hdr">
-            <span>{selected ? 'Editing: ' + selected.id : 'New Agent'}</span>
+            <span class="editor-title" title={selected ? 'Editing: ' + selected.id : 'New Agent'}>{selected ? 'Editing: ' + selected.id : 'New Agent'}</span>
             <div class="hdr-actions editor-actions">
               {#if selected}
                 <button class="btn-secondary" on:click={() => showFiles = !showFiles} aria-expanded={showFiles}>Published files</button>
@@ -3527,10 +3527,21 @@ console.log(reply);` : ''
   .editor      { background: var(--sl-surface); border: 1px solid var(--sl-line); border-radius: 10px; overflow: hidden; }
   .editor-hdr  {
     display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: .65rem 1rem;
     padding: .8rem 1rem; border-bottom: 1px solid var(--sl-line);
     font-weight: 600; font-size: .875rem; flex-shrink: 0;
   }
   .hdr-actions { display: flex; align-items: center; gap: .65rem; }
+  .editor-title {
+    flex: 1 1 14rem; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .editor-actions {
+    flex: 1 1 34rem; min-width: 0;
+    justify-content: flex-end; flex-wrap: wrap; gap: .45rem;
+  }
+  .editor-actions > button,
+  .editor-actions .save-msg { white-space: nowrap; }
   .save-msg    { font-size: .8rem; color: #f06060; }
   .save-msg.ok { color: #4caf82; }
 

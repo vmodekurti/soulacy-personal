@@ -173,11 +173,9 @@ func (o *OllamaProvider) Complete(ctx context.Context, req CompletionRequest) (*
 		applyOpenAIToolChoice(body, req.ToolChoice)
 	}
 
-	// Streaming mode: only when the caller requests it AND there are no tools
-	// (streaming + tool_calls requires careful reassembly; we use the
-	// non-streaming path for tool turns and fall through to streaming only on
-	// the final synthesis turn when the caller opts in).
-	if req.Stream && len(req.Tools) == 0 {
+	// Streaming mode. Recent Ollama versions include complete function calls in
+	// streamed message chunks, so preserve them while forwarding text tokens.
+	if req.Stream {
 		body["stream"] = true
 		streamPayload, _ := json.Marshal(body)
 		streamReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
@@ -207,7 +205,13 @@ func (o *OllamaProvider) Complete(ctx context.Context, req CompletionRequest) (*
 				}
 				var chunk struct {
 					Message struct {
-						Content string `json:"content"`
+						Content   string `json:"content"`
+						ToolCalls []struct {
+							Function struct {
+								Name      string         `json:"name"`
+								Arguments map[string]any `json:"arguments"`
+							} `json:"function"`
+						} `json:"tool_calls"`
 					} `json:"message"`
 					Done            bool `json:"done"`
 					EvalCount       int  `json:"eval_count"`
@@ -218,6 +222,9 @@ func (o *OllamaProvider) Complete(ctx context.Context, req CompletionRequest) (*
 				}
 				if chunk.Message.Content != "" {
 					ch <- chunk.Message.Content
+				}
+				for _, tc := range chunk.Message.ToolCalls {
+					result.ToolCalls = append(result.ToolCalls, toolCallFromFunc(tc.Function.Name, tc.Function.Arguments))
 				}
 				if chunk.Done {
 					result.InputTokens = chunk.PromptEvalCount
