@@ -483,7 +483,7 @@
     font-family: -apple-system, "SF Pro Text", "Helvetica Neue", "Segoe UI", Arial, sans-serif;
   }
   .workspace-header, .overview, .view-tabs, .action-grid, .library-header, .agent-filters, .home-grid, .library-grid {
-    width: min(1440px, calc(100% - 48px)); margin-inline: auto;
+    width: auto; margin-inline: clamp(20px, 1.75vw, 42px);
   }
   .workspace-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 2rem; padding: 24px 0 16px; }
   .eyebrow, .section-title > div > span, .side-panel header span { color: var(--f-accent-ink); font-size: .7rem; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
@@ -615,7 +615,7 @@
     .home-grid { grid-template-columns: minmax(0, 1fr) 300px; }
   }
   @media (max-width: 920px) {
-    .workspace-header, .overview, .view-tabs, .action-grid, .library-header, .agent-filters, .home-grid, .library-grid { width: min(100% - 32px, 760px); }
+    .workspace-header, .overview, .view-tabs, .action-grid, .library-header, .agent-filters, .home-grid, .library-grid { width: min(100% - 32px, 760px); margin-inline: auto; }
     .home-grid { grid-template-columns: 1fr; }
     .context-rail { position: static; grid-template-columns: 1fr 1fr; }
     .quick-links { grid-column: 1 / -1; }

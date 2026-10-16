@@ -132,12 +132,28 @@ html[data-theme="light"] :is(.drawer, .side-panel, .detail-panel, .history-panel
 html[data-theme="light"] :is(a, .linkish) { color: var(--sl-accent-ink); }
 html[data-theme="light"] hr { border-color: var(--sl-line); }
 
+/* Workspace pages should follow the available viewport, including ultrawide
+   displays. A fixed content ceiling made data-dense screens occupy less than
+   half of a large monitor. The gutter scales gently and then stops growing so
+   the usable canvas continues to expand with the window. */
+:root {
+  --sl-workspace-gutter: clamp(20px, 1.75vw, 42px);
+}
+
 @media (min-width: 769px) {
   .content > .page:not(.modern-chat) {
     width: 100%;
-    max-width: 1480px;
-    margin: 0 auto;
-    padding: clamp(24px, 3vw, 46px) clamp(24px, 4vw, 64px) 64px !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: clamp(24px, 2.2vw, 40px) var(--sl-workspace-gutter) 64px !important;
+    box-sizing: border-box;
+  }
+  .content > :is(.reports, .autopilot) {
+    width: 100%;
+    max-width: none !important;
+    margin-inline: 0 !important;
+    padding-inline: var(--sl-workspace-gutter) !important;
+    box-sizing: border-box;
   }
   .content > .page:not(.modern-chat) > .page-header:first-child {
     margin-bottom: 24px;
