@@ -20,6 +20,7 @@ package reasoning
 import (
 	"context"
 	"fmt"
+	"github.com/soulacy/soulacy/pkg/agent"
 	htmlpkg "html"
 	"regexp"
 	"strings"
@@ -99,17 +100,17 @@ type Loop struct {
 
 // New creates a Loop. Both llm and executor must be non-nil.
 func New(cfg LoopConfig, llm LLMBackend, executor ToolExecutor) *Loop {
-	if cfg.MaxSteps <= 0 {
-		cfg.MaxSteps = 8
+	if cfg.MaxSteps == 0 {
+		cfg.MaxSteps = agent.DefaultMaxTurns
 	}
 	if cfg.MaxPlanSteps <= 0 {
-		cfg.MaxPlanSteps = 6
+		cfg.MaxPlanSteps = agent.DefaultMaxPlanSteps
 	}
 	if cfg.StepTimeout <= 0 {
-		cfg.StepTimeout = 30 * time.Second
+		cfg.StepTimeout = agent.DefaultStepTimeout
 	}
 	if cfg.TotalTimeout <= 0 {
-		cfg.TotalTimeout = 180 * time.Second
+		cfg.TotalTimeout = agent.DefaultRunTimeout
 	}
 	return &Loop{cfg: cfg, llm: llm, executor: executor}
 }

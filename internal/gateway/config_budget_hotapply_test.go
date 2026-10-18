@@ -76,3 +76,36 @@ func TestReloadConfig_RunBudgetsHotApplied(t *testing.T) {
 		t.Fatalf("engine max budget after reload = %v, want 5000000/500", ceil)
 	}
 }
+
+func TestPatchConfigCanClearTurnLimitsAndExposeCeiling(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	s := newTestGatewayWithCfgPath(t, "secret", cfgPath)
+	for _, values := range []string{
+		`{"runtime":{"default_max_turns":500,"max_turns_ceiling":900}}`,
+		`{"runtime":{"default_max_turns":0,"max_turns_ceiling":0}}`,
+	} {
+		status, body := gatewayJSON(t, s, http.MethodPatch, "/api/v1/config", "secret", values)
+		if status != http.StatusOK {
+			t.Fatalf("PATCH status=%d body=%v", status, body)
+		}
+		status, body = gatewayJSON(t, s, http.MethodGet, "/api/v1/config", "secret", "")
+		if status != http.StatusOK {
+			t.Fatalf("GET status=%d body=%v", status, body)
+		}
+		rt := body["runtime"].(map[string]any)
+		if int(rt["max_turns_ceiling"].(float64)) != s.cfg.Runtime.MaxTurnsCeiling {
+			t.Fatal("GET does not expose the configured ceiling")
+		}
+	}
+	if s.cfg.Runtime.DefaultMaxTurns != 0 || s.cfg.Runtime.MaxTurnsCeiling != 0 {
+		t.Fatal("zero was treated as omitted")
+	}
+	disk, err := readRawConfig(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := disk["runtime"].(map[string]any)
+	if rt["default_max_turns"] != 0 || rt["max_turns_ceiling"] != 0 {
+		t.Fatalf("unlimited settings not saved: %v", rt)
+	}
+}

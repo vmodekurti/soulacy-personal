@@ -20,6 +20,7 @@ package memory
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -93,8 +94,8 @@ type groupKey struct{ pattern, group string }
 // Backend is the in-process queue backend.
 type Backend struct {
 	mu       sync.RWMutex
-	subs     []*subscriber                    // all active subscribers
-	groupIdx map[groupKey]*atomic.Uint64      // round-robin counter per (pattern,group)
+	subs     []*subscriber               // all active subscribers
+	groupIdx map[groupKey]*atomic.Uint64 // round-robin counter per (pattern,group)
 	quit     chan struct{}
 	once     sync.Once
 }
@@ -113,7 +114,15 @@ func New() *Backend {
 //
 // Publish never blocks the caller: if a subscriber's buffer is full the
 // message is silently discarded for that subscriber.
-func (b *Backend) Publish(_ context.Context, subject string, data []byte) error {
+func (b *Backend) Publish(ctx context.Context, subject string, data []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case <-b.quit:
+		return fmt.Errorf("queue is closed")
+	default:
+	}
 	// Snapshot subscribers and group counters under a single read lock.
 	b.mu.RLock()
 	subs := make([]*subscriber, len(b.subs))
@@ -172,7 +181,7 @@ func (b *Backend) send(s *subscriber, subject string, data []byte) {
 		return
 	default:
 	}
-	msg := queue.NewMessage(subject, data, nil) // ack is a no-op for memory backend
+	msg := queue.NewMessage(subject, append([]byte(nil), data...), nil) // ack is a no-op for memory backend
 	select {
 	case s.ch <- msg:
 	default:
@@ -183,10 +192,22 @@ func (b *Backend) send(s *subscriber, subject string, data []byte) {
 // Subscribe registers handler to receive messages matching subject.
 // A goroutine is launched for each subscriber; it runs until Unsubscribe is
 // called or the Backend is closed.
-func (b *Backend) Subscribe(_ context.Context, subject, group string, handler func(*queue.Message)) (queue.Subscription, error) {
+func (b *Backend) Subscribe(ctx context.Context, subject, group string, handler func(*queue.Message)) (queue.Subscription, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if handler == nil {
+		return nil, fmt.Errorf("queue handler is required")
+	}
 	s := newSubscriber(subject, group)
 
 	b.mu.Lock()
+	select {
+	case <-b.quit:
+		b.mu.Unlock()
+		return nil, fmt.Errorf("queue is closed")
+	default:
+	}
 	b.subs = append(b.subs, s)
 	if group != "" {
 		k := groupKey{subject, group}
@@ -198,8 +219,12 @@ func (b *Backend) Subscribe(_ context.Context, subject, group string, handler fu
 
 	// Dispatch goroutine: forwards messages to the handler.
 	go func() {
+		defer b.remove(s.id)
+		defer s.stop()
 		for {
 			select {
+			case <-ctx.Done():
+				return
 			case <-b.quit:
 				return
 			case <-s.quit:
@@ -267,8 +292,8 @@ func (b *Backend) Close() error {
 //
 // Supported wildcards:
 //
-//	*  — matches exactly one dot-delimited token
-//	>  — matches one or more trailing tokens (must be the last token)
+//   - — matches exactly one dot-delimited token
+//     >  — matches one or more trailing tokens (must be the last token)
 func matchSubject(pattern, subject string) bool {
 	if pattern == subject {
 		return true
@@ -295,4 +320,3 @@ func matchSubject(pattern, subject string) bool {
 	}
 	return len(pp) == len(sp)
 }
-

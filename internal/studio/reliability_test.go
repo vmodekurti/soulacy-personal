@@ -95,13 +95,13 @@ func TestReasoningAgentRaisesBudgetsForNotebookPodcastWork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToAgentDefinition: %v", err)
 	}
-	if def.Reasoning.MaxSteps < 24 {
+	if def.Reasoning.MaxSteps != 0 {
 		t.Fatalf("complex podcast agent should get a larger max_steps budget, got %d", def.Reasoning.MaxSteps)
 	}
-	if def.Reasoning.MaxPlanSteps < 12 {
+	if def.Reasoning.MaxPlanSteps != 0 {
 		t.Fatalf("complex podcast agent should get a larger max_plan_steps budget, got %d", def.Reasoning.MaxPlanSteps)
 	}
-	if def.RunTimeout != "15m0s" {
+	if def.RunTimeout != "600s" {
 		t.Fatalf("run_timeout should be raised to match reasoning total timeout, got %q", def.RunTimeout)
 	}
 }

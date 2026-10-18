@@ -815,3 +815,17 @@ func TestCompileFlow_PythonKind(t *testing.T) {
 		t.Fatalf("python node with neither code nor tool should error")
 	}
 }
+
+func TestFlowDoesNotExecuteAfterCheckpointHookCancels(t *testing.T) {
+	g, err := CompileFlow(sdkr.FlowSpec{Nodes: []sdkr.FlowNode{{ID: "action", Tool: "send"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runner := &recRunner{}
+	_, err = RunFlow(ctx, g, nil, runner.run, FlowHooks{Started: func(string, sdkr.FlowNode) { cancel() }})
+	if err == nil || len(runner.calls) != 0 {
+		t.Fatalf("action executed without a durable start checkpoint: calls=%v err=%v", runner.calls, err)
+	}
+}

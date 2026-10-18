@@ -24,6 +24,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/soulacy/soulacy/pkg/agent"
 	"strings"
 	"time"
 
@@ -83,7 +84,7 @@ const (
 // tools that may take tens of seconds) while still bounding the worst case: an
 // unattended loop that keeps "making progress" forever holds an LLM budget, a
 // gateway request and — under SideEffectsReal — a live tool connection open.
-const DefaultMaxElapsed = 10 * time.Minute
+const DefaultMaxElapsed = agent.DefaultRunTimeout
 
 // VerifyOutcome is the result of executing a draft once. OK reports success;
 // when false, Error is the runtime failure to repair against. Trace is a short
@@ -348,8 +349,8 @@ type BuildReport struct {
 // model or verifier — failures degrade to a report explaining what's still wrong.
 func BuildUntilWorks(ctx context.Context, llm LLM, draft Draft, cat Catalog, opts BuildOptions) BuildReport {
 	max := opts.MaxAttempts
-	if max <= 0 {
-		max = 6
+	if max == 0 {
+		max = 32
 	}
 	maxElapsed := opts.MaxElapsed
 	if maxElapsed <= 0 {
@@ -431,7 +432,7 @@ func BuildUntilWorks(ctx context.Context, llm LLM, draft Draft, cat Catalog, opt
 	// loop isn't converging — stop rather than re-repairing the same problems.
 	seenProblemSets := map[string]bool{}
 
-	for n := 1; n <= max; n++ {
+	for n := 1; max < 0 || n <= max; n++ {
 		// Budgets are checked BEFORE committing to another attempt: an attempt is
 		// the expensive unit (an LLM repair plus a full verify run), so the only
 		// useful place to stop is at its boundary. Stopping here is a clean,

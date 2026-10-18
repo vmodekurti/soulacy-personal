@@ -129,15 +129,17 @@ func DoWithRetry(ctx context.Context, client *http.Client, req *http.Request, cf
 			return resp, err
 		}
 
+		// Return the final response intact so callers can read the provider's
+		// error body. Ownership transfers to the caller on the last attempt.
+		if attempt == cfg.MaxAttempts {
+			return resp, err
+		}
+
 		// Drain and close the body before retrying so the connection can be
 		// returned to the pool (net/http won't reuse a conn with an unread body).
 		if resp != nil {
 			_, _ = io.Copy(io.Discard, resp.Body)
 			_ = resp.Body.Close()
-		}
-
-		if attempt == cfg.MaxAttempts {
-			break
 		}
 
 		// Sleep with jitter. Honour Retry-After when present.

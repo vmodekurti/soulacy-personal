@@ -5,7 +5,7 @@
 // This backend connects to a NATS server, ensures the configured JetStream
 // stream exists, and then uses push-based durable consumers for delivery.
 // Each call to Subscribe creates or reuses a durable consumer named after the
-// group (or a per-subscription UUID for group-less subscriptions).
+// group. Group-less subscriptions use ephemeral consumers.
 //
 // # Delivery guarantees
 //
@@ -35,12 +35,12 @@ package nats
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	natsgo "github.com/nats-io/nats.go"
 	"github.com/soulacy/soulacy/internal/queue"
 )
@@ -96,11 +96,26 @@ func (c *Config) applyDefaults() {
 // ---------------------------------------------------------------------------
 
 type natsSub struct {
-	sub *natsgo.Subscription
+	sub     *natsgo.Subscription
+	backend *Backend
+	done    chan struct{}
+	once    sync.Once
+	err     error
 }
 
 func (s *natsSub) Unsubscribe() error {
-	return s.sub.Unsubscribe()
+	s.once.Do(func() {
+		close(s.done)
+		s.err = s.sub.Unsubscribe()
+		// The NATS context option can unsubscribe before our cleanup runs.
+		if errors.Is(s.err, natsgo.ErrBadSubscription) || errors.Is(s.err, natsgo.ErrConsumerNotFound) {
+			s.err = nil
+		}
+		s.backend.mu.Lock()
+		delete(s.backend.subs, s)
+		s.backend.mu.Unlock()
+	})
+	return s.err
 }
 
 // ---------------------------------------------------------------------------
@@ -109,12 +124,13 @@ func (s *natsSub) Unsubscribe() error {
 
 // Backend is the NATS JetStream queue backend.
 type Backend struct {
-	nc   *natsgo.Conn
-	js   natsgo.JetStreamContext
-	cfg  Config
-	mu   sync.Mutex
-	subs []*natsgo.Subscription
-	once sync.Once
+	nc     *natsgo.Conn
+	js     natsgo.JetStreamContext
+	cfg    Config
+	mu     sync.Mutex
+	subs   map[*natsSub]struct{}
+	closed bool
+	once   sync.Once
 }
 
 // New connects to NATS and ensures the JetStream stream exists.
@@ -124,7 +140,7 @@ func New(cfg Config) (*Backend, error) {
 
 	opts := append([]natsgo.Option{
 		natsgo.Name("soulacy-gateway"),
-		natsgo.MaxReconnects(-1),       // reconnect forever
+		natsgo.MaxReconnects(-1), // reconnect forever
 		natsgo.ReconnectWait(2 * time.Second),
 	}, cfg.NATSOptions...)
 
@@ -191,7 +207,19 @@ func (b *Backend) Publish(ctx context.Context, subject string, data []byte) erro
 //
 // handler is invoked from the NATS client's internal goroutine; it must be
 // non-blocking or hand off work to its own goroutine.
-func (b *Backend) Subscribe(_ context.Context, subject, group string, handler func(*queue.Message)) (queue.Subscription, error) {
+func (b *Backend) Subscribe(ctx context.Context, subject, group string, handler func(*queue.Message)) (queue.Subscription, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if handler == nil {
+		return nil, fmt.Errorf("nats subscribe: handler is required")
+	}
+	b.mu.Lock()
+	closed := b.closed
+	b.mu.Unlock()
+	if closed {
+		return nil, fmt.Errorf("nats subscribe: backend is closed")
+	}
 	msgHandler := func(m *natsgo.Msg) {
 		msg := queue.NewMessage(m.Subject, m.Data, func() error {
 			return m.Ack()
@@ -210,6 +238,7 @@ func (b *Backend) Subscribe(_ context.Context, subject, group string, handler fu
 		opts := []natsgo.SubOpt{
 			natsgo.Durable(group),
 			natsgo.ManualAck(),
+			natsgo.Context(ctx),
 			natsgo.AckWait(ackWait),
 		}
 		if maxDeliver > 0 {
@@ -218,11 +247,9 @@ func (b *Backend) Subscribe(_ context.Context, subject, group string, handler fu
 		sub, err = b.js.QueueSubscribe(subject, group, msgHandler, opts...)
 	} else {
 		// Ephemeral subscription — every subscriber gets every message.
-		// Use a unique durable name so replays work across restarts.
-		durName := "ephemeral-" + uuid.NewString()
 		opts := []natsgo.SubOpt{
-			natsgo.Durable(durName),
 			natsgo.ManualAck(),
+			natsgo.Context(ctx),
 			natsgo.AckWait(ackWait),
 		}
 		if maxDeliver > 0 {
@@ -234,11 +261,31 @@ func (b *Backend) Subscribe(_ context.Context, subject, group string, handler fu
 		return nil, fmt.Errorf("nats subscribe %s (group=%q): %w", subject, group, err)
 	}
 
+	wrapped := &natsSub{sub: sub, backend: b, done: make(chan struct{})}
 	b.mu.Lock()
-	b.subs = append(b.subs, sub)
+	if b.closed || ctx.Err() != nil {
+		b.mu.Unlock()
+		_ = sub.Unsubscribe()
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("nats subscribe: backend is closed")
+	}
+	if b.subs == nil {
+		b.subs = make(map[*natsSub]struct{})
+	}
+	b.subs[wrapped] = struct{}{}
 	b.mu.Unlock()
-
-	return &natsSub{sub: sub}, nil
+	if ctx.Done() != nil {
+		go func() {
+			select {
+			case <-ctx.Done():
+				_ = wrapped.Unsubscribe()
+			case <-wrapped.done:
+			}
+		}()
+	}
+	return wrapped, nil
 }
 
 // Close drains the NATS connection (flushes pending publish acks) and closes
@@ -247,9 +294,11 @@ func (b *Backend) Close() error {
 	var firstErr error
 	b.once.Do(func() {
 		b.mu.Lock()
-		subs := make([]*natsgo.Subscription, len(b.subs))
-		copy(subs, b.subs)
-		b.subs = b.subs[:0]
+		b.closed = true
+		subs := make([]*natsSub, 0, len(b.subs))
+		for sub := range b.subs {
+			subs = append(subs, sub)
+		}
 		b.mu.Unlock()
 
 		for _, s := range subs {

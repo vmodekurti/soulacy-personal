@@ -14,6 +14,7 @@ import (
 // or an unmeasured intelligence score. The same preparation powers run events
 // and the read-only preview shown by both clients.
 type ModelPreparation struct {
+	Limits          ExecutionLimits  `json:"limits"`
 	AgentID         string           `json:"agent_id"`
 	Profile         llm.ModelProfile `json:"profile"`
 	Strategy        string           `json:"strategy"`
@@ -68,7 +69,9 @@ func (e *Engine) PrepareAgentModel(ctx context.Context, def *agent.Definition) (
 		return ModelPreparation{AgentID: cp.ID, Profile: llm.UnknownModelProfile("", ""), Strategy: "router", Approach: []string{"Routes messages without a model; the receiving agent prepares its own model."}, Warnings: []string{}, GoalPreserved: true}, nil
 	}
 	if cp.Workflow != nil {
-		return workflowModelPreparation(cp), nil
+		result := workflowModelPreparation(cp)
+		result.Limits = e.executionLimits(cp)
+		return result, nil
 	}
 	if err := e.resolveExecutionModel(cp); err != nil {
 		return ModelPreparation{}, err
@@ -84,7 +87,9 @@ func (e *Engine) PrepareAgentModel(ctx context.Context, def *agent.Definition) (
 // or provider descriptions (which can contain prompt injection).
 func (e *Engine) prepareModelDefinition(ctx context.Context, def *agent.Definition) (ModelPreparation, error) {
 	if def.Workflow != nil {
-		return workflowModelPreparation(def), nil
+		result := workflowModelPreparation(def)
+		result.Limits = e.executionLimits(def)
+		return result, nil
 	}
 	p := llm.UnknownModelProfile(def.LLM.Provider, def.LLM.Model)
 	if e.llmRouter != nil && e.llmRouter.Provider(def.LLM.Provider) != nil {
@@ -94,7 +99,7 @@ func (e *Engine) prepareModelDefinition(ctx context.Context, def *agent.Definiti
 			return ModelPreparation{}, err
 		}
 	}
-	result := ModelPreparation{AgentID: def.ID, Profile: p, GoalPreserved: true, Warnings: []string{}, Approach: []string{
+	result := ModelPreparation{Limits: e.executionLimits(def), AgentID: def.ID, Profile: p, GoalPreserved: true, Warnings: []string{}, Approach: []string{
 		"Keep the original goal, completion checks, permissions and spending limits unchanged.",
 		"Verify results against evidence; stop and explain blockers instead of claiming unverified success.",
 	}}
@@ -126,17 +131,16 @@ func (e *Engine) prepareModelDefinition(ctx context.Context, def *agent.Definiti
 	if p.NativeTools == llm.SupportNo && auto {
 		// A protocol switch must not activate previously-unused phase defaults
 		// with larger turn/output allowances than the classic loop had.
-		turns := def.MaxTurns
-		if turns <= 0 {
-			turns = 10
-		}
-		turns = min(turns, e.turnsCeiling())
-		if def.Reasoning.MaxSteps <= 0 || def.Reasoning.MaxSteps > turns {
+		turns := e.effectiveMaxTurns(def)
+		if def.Reasoning.MaxSteps == 0 || (turns > 0 && (def.Reasoning.MaxSteps < 0 || def.Reasoning.MaxSteps > turns)) {
 			def.Reasoning.MaxSteps = turns
+			if turns == 0 {
+				def.Reasoning.MaxSteps = -1
+			}
 		}
 		output := def.LLM.MaxTokens
 		if output <= 0 {
-			output = 1024
+			output = agent.DefaultMaxOutputTokens
 		}
 		for _, phase := range []*agent.ReasoningPhaseConfig{&def.Reasoning.Think, &def.Reasoning.Plan, &def.Reasoning.Reflect} {
 			if phase.MaxTokens <= 0 || phase.MaxTokens > output {

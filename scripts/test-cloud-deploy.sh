@@ -8,7 +8,7 @@ bash -n deploy/common/bootstrap.sh
 sh -n deploy/common/docker-entrypoint.sh
 jq empty deploy/azure/azuredeploy.json
 jq empty railway.json
-grep -q '^FROM golang:1.26.6-bookworm AS gobuild$' Dockerfile
+grep -q '^FROM golang:1.26.9-bookworm AS gobuild$' Dockerfile
 
 # Railway's Metal builder requires a service-specific cacheKey prefix, which a
 # reusable repository cannot know in advance. Rely on normal Docker layer

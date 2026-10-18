@@ -195,7 +195,7 @@ func TestDefaultOutputsFromChannelConfigReadsBotDefault(t *testing.T) {
 	}
 }
 
-func TestRunningLockPreventsOverlapAndAllowsStaleReplacement(t *testing.T) {
+func TestRunningLockPreventsOverlapUntilOwnerFinishes(t *testing.T) {
 	s := New(nil, nil, zap.NewNop(), context.Background())
 
 	if !s.TryStartRun("agent") {
@@ -208,12 +208,12 @@ func TestRunningLockPreventsOverlapAndAllowsStaleReplacement(t *testing.T) {
 		t.Fatal("agent should be running")
 	}
 
-	s.running["agent"] = time.Now().Add(-(maxRunDuration + time.Minute))
-	if !s.TryStartRun("agent") {
-		t.Fatal("stale running marker should be replaced")
+	s.running["agent"] = time.Now().Add(-72 * time.Hour)
+	if s.TryStartRun("agent") {
+		t.Fatal("long-running owner must not be replaced")
 	}
 	if !s.IsRunning("agent") {
-		t.Fatal("agent should be running after stale replacement")
+		t.Fatal("long-running agent must remain visible")
 	}
 
 	s.FinishRun("agent")
@@ -534,15 +534,15 @@ func TestRunningSnapshot(t *testing.T) {
 	s.TryStartRun("active-agent")
 	// Insert a stale entry directly.
 	s.runMu.Lock()
-	s.running["stale-agent"] = time.Now().Add(-2 * maxRunDuration)
+	s.running["stale-agent"] = time.Now().Add(-72 * time.Hour)
 	s.runMu.Unlock()
 
 	snap := s.RunningSnapshot()
 	if _, ok := snap["active-agent"]; !ok {
 		t.Error("active-agent should be in snapshot")
 	}
-	if _, ok := snap["stale-agent"]; ok {
-		t.Error("stale-agent should be excluded from snapshot")
+	if _, ok := snap["stale-agent"]; !ok {
+		t.Error("long-running agent should remain in snapshot")
 	}
 }
 

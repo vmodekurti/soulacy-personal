@@ -28,7 +28,7 @@ surfaces: [chat]
 builtins: [person.model, person.observe, list_agents]
 agents: ["*"]
 
-max_turns: 24
+max_turns: 0 # inherit the workspace execution policy
 
 memory:
   adaptive: true

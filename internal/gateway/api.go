@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -1066,8 +1067,8 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 	// Register the run under its session id so a client can cancel a slow
 	// (local-model) run via POST /chat/cancel {run_id: <session_id>} (Story #22).
 	if s.runReg != nil {
-		s.runReg.Register(sessionID, cancel)
-		defer s.runReg.Done(sessionID)
+		done := s.runReg.Register(sessionID, cancel)
+		defer done()
 	}
 
 	// Per-request dry-run: header lets a client preview an agent without side
@@ -1123,7 +1124,7 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 	if responseID == "" {
 		responseID = uuid.NewString()
 	}
-	payload := fiber.Map{"reply": replyText, "parts": reply.Parts, "session_id": sessionID, "run_id": msg.ID, "response_id": responseID}
+	payload := fiber.Map{"reply": replyText, "parts": reply.Parts, "session_id": sessionID, "run_id": msg.ID, "response_id": responseID, "metadata": reply.Metadata}
 	if spoken := strings.TrimSpace(reply.Metadata["response.spoken"]); spoken != "" {
 		payload["spoken_reply"] = spoken
 	}
@@ -1195,6 +1196,7 @@ func (s *Server) handleChatStream(c *fiber.Ctx) error {
 	// Accept both POST (JSON body) and GET (query params) for EventSource compat.
 	var req struct {
 		AgentID     string `json:"agent_id"`
+		SessionID   string `json:"session_id"`
 		UserID      string `json:"user_id"`
 		Username    string `json:"username"`
 		Text        string `json:"text"`
@@ -1206,6 +1208,7 @@ func (s *Server) handleChatStream(c *fiber.Ctx) error {
 		}
 	} else {
 		req.AgentID = c.Query("agent_id")
+		req.SessionID = c.Query("session_id")
 		req.UserID = c.Query("user_id")
 		req.Username = c.Query("username")
 		req.Text = c.Query("text")
@@ -1222,7 +1225,10 @@ func (s *Server) handleChatStream(c *fiber.Ctx) error {
 	if req.Username == "" {
 		req.Username = req.UserID
 	}
-	sessionID := "http-" + uuid.NewString()
+	sessionID := strings.TrimSpace(req.SessionID)
+	if sessionID == "" {
+		sessionID = "http-" + uuid.NewString()
+	}
 	if err := s.claimSession(c, req.AgentID, sessionID); err != nil {
 		return err
 	}
@@ -1283,8 +1289,12 @@ func (s *Server) handleChatStream(c *fiber.Ctx) error {
 	// Buffered so the engine goroutine doesn't block on slow writers.
 	events := make(chan sseEvent, 256)
 
+	var streamed atomic.Bool
 	// Stream callback delivers LLM tokens as default SSE message events.
 	streamCtx := runtime.WithStreamCallback(runCtx, func(token string) {
+		if token != "" {
+			streamed.Store(true)
+		}
 		select {
 		case events <- sseEvent{Data: strings.ReplaceAll(token, "\n", "\\n")}:
 		case <-runCtx.Done():
@@ -1322,13 +1332,32 @@ func (s *Server) handleChatStream(c *fiber.Ctx) error {
 			}
 		}()
 		defer close(events)
-		_, err := s.engine.Handle(streamCtx, msg)
+		reply, err := s.engine.Handle(streamCtx, msg)
 		if err != nil {
 			select {
 			case events <- sseEvent{Event: "error", Data: err.Error()}:
 			case <-runCtx.Done():
 			}
 		} else {
+			var replyText string
+			for _, part := range reply.Parts {
+				if part.Type == message.ContentText {
+					replyText += part.Text
+				}
+			}
+			// Workflow and non-streaming providers still have a final answer.
+			// The named result also carries authoritative status for all clients.
+			if !streamed.Load() {
+				select {
+				case events <- sseEvent{Data: strings.ReplaceAll(replyText, "\n", "\\n")}:
+				case <-runCtx.Done():
+				}
+			}
+			result, _ := json.Marshal(fiber.Map{"reply": replyText, "parts": reply.Parts, "metadata": reply.Metadata, "session_id": sessionID, "run_id": runID})
+			select {
+			case events <- sseEvent{Event: "result", Data: string(result)}:
+			case <-runCtx.Done():
+			}
 			select {
 			case events <- sseEvent{Data: "[DONE]"}:
 			case <-runCtx.Done():
@@ -2785,18 +2814,15 @@ func (s *Server) handleTestScheduledOutput(c *fiber.Ctx) error {
 
 // resolveRunTimeout returns the max wall-clock duration for one agent run.
 // Honors agent.RunTimeout (Go duration string) when set, else falls back to
-// the gateway default (15 minutes — enough for chains involving slow tools
-// like NotebookLM audio generation).
+// the shared generous runtime default.
 func resolveRunTimeout(def *agent.Definition) time.Duration {
-	return def.ResolvedRunTimeout(15 * time.Minute)
+	return def.ResolvedRunTimeout(agent.DefaultRunTimeout)
 }
 
 func (s *Server) resolveRunTimeout(def *agent.Definition) time.Duration {
-	fallback := 15 * time.Minute
+	fallback := agent.DefaultRunTimeout
 	if s != nil && s.cfg != nil {
-		if d, err := time.ParseDuration(s.cfg.Runtime.Timeouts.Run); err == nil && d > 0 {
-			fallback = d
-		}
+		fallback = agent.ParseExecutionTimeout(s.cfg.Runtime.Timeouts.Run, fallback)
 	}
 	return def.ResolvedRunTimeout(fallback)
 }

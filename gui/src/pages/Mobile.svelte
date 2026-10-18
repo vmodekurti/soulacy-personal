@@ -1,4 +1,6 @@
 <script>
+  import RunNotice from '../lib/RunNotice.svelte'
+  import { responseNotice } from '../lib/runStatus.js'
   import TourButton from '../lib/TourButton.svelte'
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
@@ -30,6 +32,7 @@
   let pocketText = ''
   let pocketBusy = false
   let pocketReply = ''
+  let pocketMetadata = null
   let pocketError = ''
   let pocketSessionId = ''
 
@@ -362,12 +365,14 @@
     pocketBusy = true
     pocketError = ''
     pocketReply = ''
+    pocketMetadata = null
     try {
       const res = await api.chat(pocketAgentId, text, 'mobile-user', null, pocketSessionId)
-      pocketReply = res?.reply || 'Done.'
+      pocketReply = res?.reply || 'No answer was returned.'
+      pocketMetadata = res?.metadata || null
       pocketSessionId = res?.session_id || pocketSessionId
       pocketText = ''
-      companionMsg = 'Pocket chat finished.'
+      companionMsg = responseNotice(pocketMetadata)?.title || 'Pocket chat finished.'
       await Promise.all([loadActiveRuns(), loadRecentRuns(agents)])
     } catch (e) {
       pocketError = e.message || String(e)
@@ -596,6 +601,7 @@
           <small>{pocketError}</small>
         </button>
       {:else if pocketReply}
+        <RunNotice metadata={pocketMetadata} />
         <button class="pocket-result" type="button" on:click={() => openChat(pocketAgentId)}>
           <strong>Latest reply</strong>
           <small>{pocketReply}</small>

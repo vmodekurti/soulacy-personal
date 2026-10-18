@@ -114,14 +114,11 @@ func builtinGenieAgent() *agent.Definition {
 		ID: GenieAgentID, Name: "Genie",
 		Description: "Master orchestrator — discovers live capabilities, delegates to specialist agents, and coordinates multi-step work.",
 		Trigger:     agent.TriggerChannel, Channels: []string{"http"}, Surfaces: []string{"chat"},
-		Enabled: true, StreamReply: true, MaxTurns: 50, RunTimeout: "30m",
-		// Without its own budget Genie inherited the engine default of 20 model
-		// calls while being allowed 50 turns, so a tool-heavy request died on a
-		// ceiling it was never told about. The budget now matches the turns.
-		Budget: &agent.BudgetConfig{MaxTokens: 400000, MaxLLMCalls: 50},
+		Enabled: true, StreamReply: true,
+		// Execution limits inherit the workspace policy unless explicitly configured.
 		Skills: []string{"*"}, Agents: []string{"*"}, ParallelPeerCalls: true, StructuredPeerResults: true,
 		Builtins: &builtins, MCPServers: &mcpServers, ConfirmTools: []string{"cancel_monitor", "channel.send"},
-		LLM:    agent.LLMConfig{Temperature: 0.2, MaxTokens: 8192, ReasoningEffort: "high"},
+		LLM:    agent.LLMConfig{Temperature: 0.2, MaxTokens: agent.DefaultMaxOutputTokens, ReasoningEffort: "high"},
 		Memory: agent.MemoryPolicy{ReadScopes: []string{"session"}, WriteScopes: []string{"session"}, MaxTokens: 4000},
 		Policy: agent.ToolPolicyConfig{Enabled: true, Shell: "deny", File: "deny", Network: "allow"},
 		SystemPrompt: `You are Genie, Soulacy's master orchestration agent. Turn a user's goal into a concise plan, discover the capabilities that are available right now, delegate specialist work to peer agents, and synthesize a verified result.
@@ -206,15 +203,15 @@ func builtinSystemAgent() *agent.Definition {
 		// Tuned for hard, multi-step instructions: more tool-call iterations
 		// (MaxTurns), a longer overall budget (RunTimeout), and larger per-call
 		// output (MaxTokens) so complex plans and answers aren't truncated.
-		MaxTurns:   40,
-		RunTimeout: "30m",
+		MaxTurns:   0,
+		RunTimeout: "",
 		// LLM intentionally left empty so the engine falls back to the
 		// configured default provider and model (llm.default_provider in
 		// config.yaml). This means the system agent works out of the box
 		// regardless of which LLM provider the user has set up.
 		LLM: agent.LLMConfig{
 			Temperature: 0.2,
-			MaxTokens:   8192,
+			MaxTokens:   agent.DefaultMaxOutputTokens,
 		},
 		// Require user confirmation before running any potentially destructive
 		// or irreversible built-in tool. The SSE stream emits a tool_confirm

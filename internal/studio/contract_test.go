@@ -154,8 +154,8 @@ func TestAssessContract_ReasoningAgent_WarnsOnUnboundedReactLoop(t *testing.T) {
 	r := AssessContract(d, Catalog{Tools: []string{"web_search"}}, PreflightInput{
 		Catalog: Catalog{Tools: []string{"web_search"}},
 	})
-	if !hasContractCheck(r, "agent.step_budget", "warn") {
-		t.Fatalf("expected agent.step_budget warn for unbounded loop, got %+v", r.Checks)
+	if hasContractCheck(r, "agent.step_budget", "warn") {
+		t.Fatalf("inherited workspace limits must not be called unbounded, got %+v", r.Checks)
 	}
 }
 

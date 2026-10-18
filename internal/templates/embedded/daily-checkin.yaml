@@ -44,7 +44,7 @@ llm:
     provider: ollama
     model: llama3.3:70b
     temperature: 0.5
-    max_tokens: 1024
+    max_tokens: 0 # inherit the workspace output allowance
 memory:
     read_scopes:
         - session
@@ -52,7 +52,7 @@ memory:
     write_scopes:
         - session
     max_tokens: 40
-max_turns: 6
+max_turns: 0 # inherit the workspace execution policy
 stream_reply: false
 enabled: false
 run_timeout: 5m

@@ -184,3 +184,18 @@ func readSSEOverRealSocket(t *testing.T, s *Server, path, body string) string {
 	}
 	return out.String()
 }
+
+func TestChatStreamReturnsNonStreamingAnswerAndSession(t *testing.T) {
+	s, _ := newTestGatewayWithLLM(t, "secret")
+	s.llmRouter.Register(&slowLLMProvider{id: "plain", content: "The completed answer."})
+	create := `{"id":"plain-agent","name":"Plain","trigger":"channel","channels":["http"],"llm":{"provider":"plain","model":"plain"},"builtins":[],"system_prompt":"Reply.","enabled":true}`
+	if status, body := gatewayJSON(t, s, http.MethodPost, "/api/v1/agents", "secret", create); status != http.StatusCreated {
+		t.Fatalf("create: %d %v", status, body)
+	}
+	raw := readSSEOverRealSocket(t, s, "/api/v1/chat/stream", `{"agent_id":"plain-agent","user_id":"user-1","session_id":"existing-conversation","text":"hello"}`)
+	for _, want := range []string{"data: The completed answer.", "event: result", `"session_id":"existing-conversation"`, `"metadata":`, "[DONE]"} {
+		if !strings.Contains(raw, want) {
+			t.Fatalf("missing %q in %s", want, raw)
+		}
+	}
+}

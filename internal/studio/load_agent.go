@@ -40,11 +40,13 @@ func FromAgentDefinition(def agent.Definition) Draft {
 		// Read back on BOTH branches. The agent branch already carried MaxTurns;
 		// the workflow branch carried neither it nor Memory, so opening a
 		// workflow and re-saving reset both to Studio's constants.
-		MaxTurns:     def.MaxTurns,
-		Memory:       cloneMemoryPolicy(def.Memory),
-		ConfirmTools: append([]string(nil), def.ConfirmTools...),
-		Security:     cloneSecurityConfig(def.Security),
-		Connections:  append([]string(nil), def.Connections...),
+		MaxTurns:        def.MaxTurns,
+		Budget:          cloneExecutionBudget(def.Budget),
+		NoProgressLimit: cloneExecutionInt(def.NoProgressLimit),
+		Memory:          cloneMemoryPolicy(def.Memory),
+		ConfirmTools:    append([]string(nil), def.ConfirmTools...),
+		Security:        cloneSecurityConfig(def.Security),
+		Connections:     append([]string(nil), def.Connections...),
 	}
 	if d.Name == "" {
 		d.Name = def.ID

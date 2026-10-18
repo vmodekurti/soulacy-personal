@@ -46,7 +46,7 @@ type routerCompleter struct {
 
 func (rc routerCompleter) Complete(ctx context.Context, model, system, user string, params reasoning.PhaseParams) (string, error) {
 	if params.MaxTokens <= 0 {
-		params.MaxTokens = 1024
+		params.MaxTokens = agent.DefaultMaxOutputTokens
 	}
 	responseFormat := strings.TrimSpace(params.ResponseFormat)
 	if responseFormat == "" {
@@ -413,21 +413,10 @@ func (e *Engine) handleWithReasoning(ctx context.Context, def *agent.Definition,
 		})
 	}
 
-	reply := e.finalizeReply(ctx, def, sess, msg, finalContent)
-
-	// Carry the run's confidence forward on the reply. Until now Confident was
-	// pure telemetry — emitted on reasoning.result and then dropped — so a run
-	// that ended "degraded / not confident" was handed to channel delivery
-	// indistinguishable from a clean one, and a half-finished narration landed
-	// in the user's inbox looking like a finished deliverable. Downstream
-	// delivery (see scheduler.sendScheduledOutput) reads this to decide how to
-	// present the result; interactive callers may ignore it.
+	var finalMetadata map[string]string
 	if !result.Confident {
-		if reply.Metadata == nil {
-			reply.Metadata = map[string]string{}
-		}
-		reply.Metadata[message.MetaReasoningDegraded] = "true"
-		reply.Metadata[message.MetaReasoningSteps] = strconv.Itoa(len(result.Steps))
+		finalMetadata = map[string]string{message.MetaReasoningDegraded: "true", message.MetaReasoningSteps: strconv.Itoa(len(result.Steps)), message.MetaOutcome: "incomplete"}
 	}
+	reply := e.finalizeReply(ctx, def, sess, msg, finalContent, finalMetadata)
 	return reply, nil
 }

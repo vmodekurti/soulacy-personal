@@ -186,7 +186,10 @@ func (s *Store) prepareProof(input ProofInput) (ProofRecord, []byte, error) {
 		len(input.SessionID) > 1024 || len(input.MissionID) > 512 || len(input.RevisionHash) > 512 {
 		return ProofRecord{}, nil, fmt.Errorf("%w: proof identifiers are too large", ErrInvalid)
 	}
-	if len(input.Checks) > 512 || len(input.Evidence) > 256 || len(input.Tools) > 1024 || len(input.ExternalChanges) > 256 {
+	// Receipts grow with completed work. Limiting their count here creates a
+	// hidden execution budget that fails only AFTER the tool effects occurred.
+	// Keep every tool/evidence receipt; individual text fields remain bounded.
+	if len(input.Checks) > 512 || len(input.ExternalChanges) > 256 {
 		return ProofRecord{}, nil, fmt.Errorf("%w: proof collection exceeds its bounded size", ErrInvalid)
 	}
 	switch input.Outcome {

@@ -24,6 +24,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"github.com/soulacy/soulacy/pkg/agent"
 	"io/fs"
 	"net"
 	"net/http"
@@ -1472,11 +1473,9 @@ func (s *Server) buildApp() *fiber.App {
 
 func (s *Server) httpRequestTimeout() time.Duration {
 	if s != nil && s.cfg != nil {
-		if d, err := time.ParseDuration(s.cfg.Runtime.Timeouts.HTTP); err == nil && d > 0 {
-			return d
-		}
+		return agent.ParseExecutionTimeout(s.cfg.Runtime.Timeouts.HTTP, agent.DefaultRunTimeout+time.Minute)
 	}
-	return 16 * time.Minute
+	return agent.DefaultRunTimeout + time.Minute
 }
 
 // mountStaticGUI serves the built GUI with the cache policy an upgradeable SPA

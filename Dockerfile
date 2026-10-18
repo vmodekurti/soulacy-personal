@@ -22,7 +22,7 @@ RUN npm run build
 # Output: /src/gui/dist  (copied to /src/internal/webui/dist in gobuild)
 
 # ── Stage 2: Go binary ───────────────────────────────────────────────────────
-FROM golang:1.26.6-bookworm AS gobuild
+FROM golang:1.26.9-bookworm AS gobuild
 # Empty, not "dev": an unset build arg falls through to the VERSION file in the
 # repo below, so a build that nobody parameterised still knows what it is.
 ARG VERSION=

@@ -12,8 +12,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/soulacy/soulacy/internal/processutil"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -32,7 +32,16 @@ import (
 
 // EventSink receives structured events as they happen during agent execution.
 func (e *Engine) runTool(ctx context.Context, def *agent.Definition, sessionID string, call message.ToolCall) (string, error) {
+	if err := progressGuardFrom(ctx).failure(); err != nil {
+		return "", err
+	}
 	out, err := e.runToolDispatch(ctx, def, sessionID, call)
+	evidence := out
+	if err != nil {
+		evidence = err.Error()
+	}
+	progressGuardFrom(ctx).observe(call, evidence, err != nil)
+
 	e.observeLearningTool(ctx, def, call, out, err)
 	if obs := toolObserverFrom(ctx); obs != nil {
 		obs(call, out, err != nil)
@@ -182,7 +191,7 @@ print(result if isinstance(result, str) else json.dumps(result))
 			argv := sandbox.Wrap(e.selfPath, limits, []string{e.pythonBin, "-c", script})
 			tctx, cancel := context.WithTimeout(ctx, e.effectiveToolTimeout(ctx))
 			defer cancel()
-			cmd := exec.CommandContext(tctx, argv[0], argv[1:]...)
+			cmd := processutil.CommandContext(tctx, argv[0], argv[1:]...)
 			cmd.Stdin = bytes.NewReader(argsJSON)
 			cmd.Env = sandbox.FilteredEnv(os.Environ(), def.Env)
 			out, err := cmd.Output()
@@ -207,10 +216,7 @@ print(result if isinstance(result, str) else json.dumps(result))
 		if b.Name != call.Name {
 			continue
 		}
-		if (b.Gate == "mobile" || b.Gate == "safe_undo" || b.Gate == "person") && (def == nil || def.Builtins == nil || !containsExactString(*def.Builtins, b.Name)) {
-			return "", fmt.Errorf("agent has not explicitly enabled tool %q", b.Name)
-		}
-		if b.Gate == "learning" && (def == nil || !def.Learning.Enabled || (def.Builtins != nil && !containsExactString(*def.Builtins, b.Name) && !containsExactString(*def.Builtins, "*") && !containsExactString(*def.Builtins, "all"))) {
+		if !e.builtinAllowed(def, b) {
 			return "", fmt.Errorf("agent has not enabled tool %q", b.Name)
 		}
 
@@ -248,6 +254,10 @@ print(result if isinstance(result, str) else json.dumps(result))
 	for _, b := range e.systemToolsFor(def) {
 		if b.Name != call.Name {
 			continue
+		}
+
+		if !isPrivilegedSystemTool(b.Name) && !builtinNameAllowed(def, b.Name) {
+			return "", fmt.Errorf("agent has not enabled tool %q", b.Name)
 		}
 
 		// Deterministic path-based guardrail for privileged system tools
@@ -476,7 +486,7 @@ func (e *Engine) runPythonToolOnce(tctx, auditCtx context.Context, def *agent.De
 	limits := e.sandboxLimits
 	limits.EnvAllow = def.Env
 	argv := sandbox.Wrap(e.selfPath, limits, []string{e.pythonBin, "-c", script})
-	cmd := exec.CommandContext(tctx, argv[0], argv[1:]...)
+	cmd := processutil.CommandContext(tctx, argv[0], argv[1:]...)
 	cmd.Stdin = bytes.NewReader(argsJSON)
 	cmd.Env = sandbox.FilteredEnv(os.Environ(), def.Env)
 
@@ -604,47 +614,12 @@ func (e *Engine) allToolSchemasForContext(ctx context.Context, def *agent.Defini
 	//   - ""          always offered (e.g. web_search — provider-agnostic)
 	//   - "skills"    only when the agent opted into skills (def.Skills)
 	//   - "knowledge" only when the agent declared at least one KB (def.Knowledge)
-	var allow map[string]bool
-	wildcardBuiltins := def.Builtins == nil
-	if def.Builtins != nil {
-		allow = make(map[string]bool, len(*def.Builtins))
-		for _, n := range *def.Builtins {
-			if n == "*" || n == "all" {
-				wildcardBuiltins = true
-				continue
-			}
-			allow[n] = true
-		}
-	}
 	for _, b := range e.builtins {
 		if !callerAllowsTool(ctx, b.Name) {
 			continue
 		}
-		// Allowlist filter first (cheap reject).
-		if !wildcardBuiltins && !allow[b.Name] {
+		if !e.builtinAllowed(def, b) {
 			continue
-		}
-		switch b.Gate {
-		case "learning":
-			if !def.Learning.Enabled || e.LearningNotebook() == nil {
-				continue
-			}
-		case "mobile", "safe_undo", "person", "genie":
-			// Offered only when the agent names the tool: a wildcard
-			// `builtins:` does not sweep these in. They belong to one agent,
-			// and a tool schema every other agent carries but never calls is
-			// context spent on nothing.
-			if !allow[b.Name] {
-				continue
-			}
-		case "skills":
-			if len(e.effectiveSkillNames(def)) == 0 {
-				continue
-			}
-		case "knowledge":
-			if len(def.Knowledge) == 0 {
-				continue
-			}
 		}
 		schemas = append(schemas, llm.ToolSchema{
 			Name: b.Name, Description: b.Description, Parameters: b.Parameters,
@@ -711,7 +686,6 @@ func (e *Engine) allToolSchemasForContext(ctx context.Context, def *agent.Defini
 	// a deliberate `capabilities: [system]` (or system_tools) grant, so it is
 	// NOT suppressed by builtins: [] — the explicit privileged opt-in wins.
 	// A named allowlist (`builtins: [read_file]`) admits only those names.
-	suppressSafe := def.Builtins != nil && len(*def.Builtins) == 0
 	if channel == "http" {
 		for _, st := range e.systemToolsFor(def) {
 			if !callerAllowsTool(ctx, st.Name) {
@@ -720,7 +694,7 @@ func (e *Engine) allToolSchemasForContext(ctx context.Context, def *agent.Defini
 			priv := isPrivilegedSystemTool(st.Name)
 			if !priv {
 				// SAFE tool: respect builtins: [] and any named allowlist.
-				if suppressSafe || (!wildcardBuiltins && !allow[st.Name]) {
+				if !builtinNameAllowed(def, st.Name) {
 					continue
 				}
 			}

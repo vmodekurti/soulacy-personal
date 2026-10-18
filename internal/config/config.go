@@ -6,6 +6,7 @@ package config
 
 import (
 	"fmt"
+	"github.com/soulacy/soulacy/pkg/agent"
 	"os"
 	"path/filepath"
 	"strings"
@@ -495,7 +496,7 @@ type RuntimeConfig struct {
 	// depth × max_turns × tool-calls LLM requests; without a ceiling a
 	// misconfigured agent (max_turns: 10000) is a cost/runaway foot-gun.
 	// The engine clamps each agent's effective max_turns to this value.
-	// Zero/negative defaults to 50.
+	// Zero disables the workspace ceiling.
 	MaxTurnsCeiling int `mapstructure:"max_turns_ceiling"`
 
 	// MaxAgentCallDepth bounds recursive peer-agent chains such as
@@ -900,9 +901,11 @@ type StudioLLMConfig struct {
 	// that pauses between each of the 5 phases (clarify → strategy → build
 	// → validate → repair) for the operator to review. Per-generation
 	// override is available via the Generate button toggle.
-	BuildUX         string  `mapstructure:"build_ux"`
-	MaxBuildTokens  int     `mapstructure:"max_build_tokens"`
-	MaxBuildCostUSD float64 `mapstructure:"max_build_cost_usd"`
+	BuildUX          string  `mapstructure:"build_ux"`
+	MaxBuildAttempts int     `mapstructure:"max_build_attempts"`
+	MaxBuildElapsed  string  `mapstructure:"max_build_elapsed"`
+	MaxBuildTokens   int     `mapstructure:"max_build_tokens"`
+	MaxBuildCostUSD  float64 `mapstructure:"max_build_cost_usd"`
 }
 
 // PackagesConfig configures agent-package versioning (Story 7, Cohort C).
@@ -1102,8 +1105,8 @@ func Load(cfgPath string) (*Config, string, error) {
 	v.SetDefault("server.discovery.name", "")
 	v.SetDefault("server.discovery.hostname", "")
 	v.SetDefault("runtime.max_concurrent_sessions", 100)
-	v.SetDefault("runtime.default_max_turns", 20)
-	v.SetDefault("runtime.max_turns_ceiling", 50)
+	v.SetDefault("runtime.default_max_turns", agent.DefaultMaxTurns)
+	v.SetDefault("runtime.max_turns_ceiling", 0)
 	v.SetDefault("runtime.max_agent_call_depth", 5)
 	v.SetDefault("runtime.python_bin", "python3")
 	// PRODUCTION_AUDIT → LOW/Config: NotebookLM-style tools regularly take
@@ -1132,12 +1135,12 @@ func Load(cfgPath string) (*Config, string, error) {
 	// Multi-step agents repeatedly submit their growing history and tool schemas.
 	// The old 100k/20 defaults could stop a capable tool-heavy agent after only a
 	// few turns. Keep a finite runaway guard, but make ordinary research and MCP
-	// workflows practical. Operators can set either dimension to 0 for unlimited
-	// execution while usage monitoring remains active.
-	v.SetDefault("runtime.default_budget.max_tokens", 500000)
-	v.SetDefault("runtime.default_budget.max_llm_calls", 50)
-	v.SetDefault("runtime.max_budget.max_tokens", 2000000)
-	v.SetDefault("runtime.max_budget.max_llm_calls", 200)
+	// workflows practical. Budgets are now opt-in: zero is unlimited while
+	// usage monitoring remains active. Explicit existing limits are preserved.
+	v.SetDefault("runtime.default_budget.max_tokens", 0)
+	v.SetDefault("runtime.default_budget.max_llm_calls", 0)
+	v.SetDefault("runtime.max_budget.max_tokens", 0)
+	v.SetDefault("runtime.max_budget.max_llm_calls", 0)
 	// PRODUCTION_AUDIT → F1: sandbox defaults ON with conservative caps
 	// suitable for typical agent tools. Disable per-deployment by setting
 	// runtime.sandbox.enabled=false. Limits = 0 means "no cap for that knob"
@@ -1206,12 +1209,14 @@ func Load(cfgPath string) (*Config, string, error) {
 	// model is reported honestly as not-configured and can be fixed from
 	// Providers. First run writes whatever is actually installed here.
 	v.SetDefault("llm.providers.ollama.model", "")
-	v.SetDefault("llm.studio.max_build_tokens", 100000)
-	v.SetDefault("llm.studio.max_build_cost_usd", 5.0)
+	v.SetDefault("llm.studio.max_build_tokens", 0)
+	v.SetDefault("llm.studio.max_build_cost_usd", 0)
+	v.SetDefault("llm.studio.max_build_attempts", 32)
+	v.SetDefault("llm.studio.max_build_elapsed", agent.DefaultRunTimeout.String())
 	v.SetDefault("costs.enforcement_mode", "soft")
 	v.SetDefault("costs.unknown_pricing", "allow")
-	v.SetDefault("costs.default_max_output_tokens", 4096)
-	v.SetDefault("costs.max_output_tokens_ceiling", 32768)
+	v.SetDefault("costs.default_max_output_tokens", agent.DefaultMaxOutputTokens)
+	v.SetDefault("costs.max_output_tokens_ceiling", 0)
 	v.SetDefault("costs.confirmation_threshold_usd", 0)
 	v.SetDefault("costs.reservation_ttl", "15m")
 	v.SetDefault("costs.max_concurrent_per_provider", 8)

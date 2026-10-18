@@ -192,6 +192,10 @@ func NewStore(path string) (*Store, error) {
 	}
 	opts := sqlitex.DefaultOptions()
 	opts.ForeignKeys = true
+	// Proof finalization and deployment/goal transitions read before writing.
+	// Reserve the writer before reading so concurrent runs queue instead of
+	// failing when a deferred transaction tries to promote a stale snapshot.
+	opts.ImmediateTransactions = true
 	db, err := sqlitex.Open(path, opts)
 	if err != nil {
 		return nil, fmt.Errorf("autopilot: open database: %w", err)

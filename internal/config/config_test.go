@@ -207,8 +207,8 @@ func TestLoadNoConfigFileUsesDefaults(t *testing.T) {
 	if cfg.Runtime.MaxConcurrentSessions != 100 {
 		t.Errorf("runtime.max_concurrent_sessions = %d, want 100", cfg.Runtime.MaxConcurrentSessions)
 	}
-	if cfg.Runtime.DefaultMaxTurns != 20 {
-		t.Errorf("runtime.default_max_turns = %d, want 20", cfg.Runtime.DefaultMaxTurns)
+	if cfg.Runtime.DefaultMaxTurns != 256 {
+		t.Errorf("runtime.default_max_turns = %d, want 256", cfg.Runtime.DefaultMaxTurns)
 	}
 	if cfg.Runtime.MaxAgentCallDepth != 5 {
 		t.Errorf("runtime.max_agent_call_depth = %d, want 5", cfg.Runtime.MaxAgentCallDepth)

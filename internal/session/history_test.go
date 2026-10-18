@@ -3,6 +3,7 @@ package session
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
@@ -640,5 +641,45 @@ func TestTruncate(t *testing.T) {
 	}
 	if got := truncate("exact", 5); got != "exact" {
 		t.Errorf("truncate exact fit: got %q, want 'exact'", got)
+	}
+}
+
+func TestHistoryMigratesAndPreservesCompletionMetadata(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(historySchema); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`INSERT INTO conversation_history(session_id,agent_id,role,content,created_at) VALUES ('s','a','user','original question',CURRENT_TIMESTAMP)`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	s, err := NewSQLiteHistoryStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err = s.Append(ctx, ConversationEntry{SessionID: "s", AgentID: "a", Role: "assistant", Content: "partial result", Metadata: map[string]string{"outcome": "incomplete"}}); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	s, err = NewSQLiteHistoryStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	entries, err := s.Load(ctx, "s", 10)
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("load: %v %v", entries, err)
+	}
+	if entries[0].Content != "original question" || entries[1].Metadata["outcome"] != "incomplete" {
+		t.Fatalf("lost history/status: %+v", entries)
+	}
+	hits, err := s.Search(ctx, "a", "partial", 10)
+	if err != nil || len(hits) != 1 || hits[0].Metadata["outcome"] != "incomplete" {
+		t.Fatalf("search: %v %v", hits, err)
 	}
 }

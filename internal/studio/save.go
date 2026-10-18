@@ -112,13 +112,15 @@ func ToAgentDefinition(draft Draft, acceptPrivilegedExposure bool) (agent.Defini
 		StudioTriggerMode:  normalizeStudioTriggerMode(draft.Trigger.Type),
 		// Disabled by construction: a Studio save stages an agent for the
 		// operator to review and enable.
-		Enabled:      false,
-		MaxTurns:     maxTurnsOr(draft.MaxTurns, 15),
-		Memory:       memoryOr(draft.Memory),
-		LLM:          llmConfigFor(draft),
-		RunTimeout:   strings.TrimSpace(draft.RunTimeout),
-		ConfirmTools: dedupeNonEmpty(draft.ConfirmTools),
-		Security:     cloneSecurityConfig(draft.Security),
+		Enabled:         false,
+		MaxTurns:        draft.MaxTurns,
+		Budget:          cloneExecutionBudget(draft.Budget),
+		NoProgressLimit: cloneExecutionInt(draft.NoProgressLimit),
+		Memory:          memoryOr(draft.Memory),
+		LLM:             llmConfigFor(draft),
+		RunTimeout:      strings.TrimSpace(draft.RunTimeout),
+		ConfirmTools:    dedupeNonEmpty(draft.ConfirmTools),
+		Security:        cloneSecurityConfig(draft.Security),
 	}
 
 	// Only attach a workflow block when there's an actual graph. A 0-node draft
@@ -240,7 +242,9 @@ func toReActAgentDefinition(draft Draft, id string, acceptPrivilegedExposure boo
 		StudioDeliveryMode: normalizeStudioDeliveryMode(draft.DeliveryMode),
 		StudioTriggerMode:  normalizeStudioTriggerMode(draft.Trigger.Type),
 		Enabled:            false, // staged for review, like every Studio save
-		MaxTurns:           maxTurnsOr(draft.MaxTurns, 15),
+		MaxTurns:           draft.MaxTurns,
+		Budget:             cloneExecutionBudget(draft.Budget),
+		NoProgressLimit:    cloneExecutionInt(draft.NoProgressLimit),
 		Memory:             memoryOr(draft.Memory),
 		LLM:                llmConfigFor(draft),
 		RunTimeout:         runTimeout,
@@ -498,17 +502,8 @@ func dedupeParagraph(text, para string) string {
 // steps, so it gets a larger total budget. Values are deliberately generous but
 // bounded; the user can override any of them in SOUL.yaml.
 func defaultReasoningConfig(draft Draft, strategy string) agent.ReasoningConfig {
-	maxSteps, maxPlanSteps := defaultReasoningBudgets(draft, strategy)
-	cfg := agent.ReasoningConfig{
-		Strategy:     strategy,
-		MaxSteps:     maxSteps,
-		MaxPlanSteps: maxPlanSteps,
-		StepTimeout:  "120s",
-		TotalTimeout: "600s",
-	}
-	if strings.EqualFold(strategy, "plan_execute") {
-		cfg.TotalTimeout = "900s"
-	}
+	cfg := agent.ReasoningConfig{Strategy: strategy}
+
 	return cfg
 }
 
@@ -524,7 +519,7 @@ func reasoningConfigFor(draft Draft, strategy string) agent.ReasoningConfig {
 	if t := strings.TrimSpace(draft.TotalTimeout); t != "" {
 		cfg.TotalTimeout = t
 	}
-	if draft.MaxSteps > 0 {
+	if draft.MaxSteps != 0 {
 		cfg.MaxSteps = draft.MaxSteps
 	}
 	if draft.MaxPlanSteps > 0 {
@@ -590,6 +585,9 @@ func highComplexityReasoningTask(draft Draft) bool {
 
 func normalizedRunTimeout(runTimeout, reasoningTotal string) string {
 	runTimeout = strings.TrimSpace(runTimeout)
+	if d, err := time.ParseDuration(runTimeout); err == nil && d == 0 {
+		return runTimeout // Explicit unlimited must survive a Studio round-trip.
+	}
 	total := parsePositiveDuration(reasoningTotal)
 	run := parsePositiveDuration(runTimeout)
 	if total <= 0 {
@@ -1011,4 +1009,19 @@ func flowHasHostExecution(flow Flow) bool {
 		}
 	}
 	return false
+}
+
+func cloneExecutionBudget(b *agent.BudgetConfig) *agent.BudgetConfig {
+	if b == nil {
+		return nil
+	}
+	cp := *b
+	return &cp
+}
+func cloneExecutionInt(n *int) *int {
+	if n == nil {
+		return nil
+	}
+	cp := *n
+	return &cp
 }

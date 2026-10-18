@@ -1,6 +1,9 @@
 package config
 
-import "time"
+import (
+	"github.com/soulacy/soulacy/pkg/agent"
+	"time"
+)
 
 // TimeoutDurations is the parsed, ordered request timeout hierarchy.
 type TimeoutDurations struct {
@@ -16,9 +19,9 @@ type TimeoutDurations struct {
 // defaults from drifting into an impossible request path.
 func DefaultTimeoutHierarchy() TimeoutDurations {
 	tool := 2 * time.Minute
-	llm := tool + time.Minute
-	step := llm + time.Minute
-	run := step + 11*time.Minute
+	llm := agent.DefaultLLMTimeout
+	step := agent.DefaultStepTimeout
+	run := agent.DefaultRunTimeout
 	httpRequest := run + time.Minute
 	return TimeoutDurations{Tool: tool, LLM: llm, Step: step, Run: run, HTTP: httpRequest}
 }

@@ -536,16 +536,8 @@ func assessReasoningAgentRules(draft Draft, opts contractOpts, add func(id, titl
 			"run_timeout \""+draft.RunTimeout+"\" could not be parsed as a duration.",
 			"Use Go duration syntax (e.g. \"10m\", \"1h\").")
 	}
-	if strategy == "react" && draft.MaxTurns > 40 {
-		add("agent.step_budget", "Step budget", "block", "",
-			fmt.Sprintf("max_turns is %d — a ReAct loop this deep is nearly guaranteed to blow the token budget or spin.", draft.MaxTurns),
-			"Set `max_turns` to 20 or fewer in the SOUL.yaml view (the `</>` tab above the canvas). It caps how many thinking steps a run may take; 15 is a good default. A higher number mostly lets a stuck agent keep spending.")
-	}
-	if strategy == "react" && draft.MaxTurns == 0 && totalTimeoutDur <= 0 && runTimeoutDur <= 0 {
-		add("agent.step_budget", "Step budget", "warn", "",
-			"ReAct loop has no max_turns and no total_timeout / run_timeout — a stuck loop cannot self-terminate.",
-			"Nothing currently stops this agent if it gets stuck in a loop. In the SOUL.yaml view (the `</>` tab above the canvas) set at least one limit: `max_turns` (how many thinking steps), `total_timeout`, or `run_timeout`.")
-	}
+	// Unspecified limits inherit runtime policy. Long, useful runs are valid;
+	// an arbitrary step count is not evidence that an agent is stuck.
 	if stepTimeoutDur > 0 && totalTimeoutDur > 0 && draft.MaxTurns > 0 {
 		if totalTimeoutDur < time.Duration(draft.MaxTurns)*stepTimeoutDur {
 			add("agent.step_budget", "Step budget", "warn", "",

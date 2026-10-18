@@ -220,6 +220,12 @@ func validateDefinitionShape(report *Report, def *agent.Definition, path string)
 		}
 	}
 	validateDuration(report, "run_timeout", def.RunTimeout)
+	if def.MaxTurns < -1 {
+		report.add(Error, "max_turns", "must be -1 (unlimited), zero (inherit), or positive", "", nil)
+	}
+	if def.NoProgressLimit != nil && *def.NoProgressLimit < 0 {
+		report.add(Error, "no_progress_limit", "must be zero (disabled) or positive", "", nil)
+	}
 	if def.LLM.MaxTokens < 0 {
 		report.add(Error, "llm.max_tokens", "must be zero or positive", "", nil)
 	}

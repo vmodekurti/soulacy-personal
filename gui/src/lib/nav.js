@@ -66,7 +66,7 @@ export const navPages = [
   { id: 'activity',  icon: '📈', label: 'Runs',        group: 'system', level: 'standard' },
   { id: 'reports',   icon: '▤', label: 'Reports',     group: 'system', level: 'advanced' },
   { id: 'browser',   icon: '🕸', label: 'Browser',     group: 'system', level: 'advanced' },
-  { id: 'config',    icon: '≡', label: 'Config',      group: 'system', level: 'advanced' },
+  { id: 'config',    icon: '≡', label: 'Settings',    group: 'system', level: 'simple' },
   { id: 'mobile',    icon: '▣', label: 'Mobile',      group: 'system', level: 'advanced' },
   { id: 'logs',      icon: '📋', label: 'Logs',        group: 'system', level: 'advanced' },
 ]

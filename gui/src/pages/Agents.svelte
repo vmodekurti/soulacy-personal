@@ -1,4 +1,8 @@
 <script>
+  import SettingsMode from '../lib/SettingsMode.svelte'
+  let advanced = false
+  let workspaceProvider = 'ollama'
+  import RunNotice from '../lib/RunNotice.svelte'
   import TourButton from '../lib/TourButton.svelte'
   import { onMount, tick } from 'svelte'
   import { api } from '../lib/api.js'
@@ -451,10 +455,10 @@
     executionProfile: 'Applies a tested bundle of model and reasoning settings. Use it as a starting point, then edit individual fields.',
     provider: 'Which configured LLM provider this agent uses by default.',
     model: 'Which model this agent calls. The list is loaded from the selected provider when possible.',
-    maxTokens: 'Caps each model response. Raise for long reports or synthesis; lower to reduce cost, latency, and rambling.',
+    maxTokens: '0 inherits the workspace output allowance. Provider capacity still applies. Caps each model response. Raise for long reports or synthesis; lower to reduce cost, latency, and rambling.',
     temperature: 'Controls randomness. Use lower values for reliable tool use and extraction; higher values for creative or exploratory answers.',
     topP: 'Nucleus sampling. Lower values restrict the token pool for stability; higher values allow more varied phrasing.',
-    maxTurns: 'Maximum LLM/tool turns before the agent stops. Raise for complex tool workflows; lower to prevent runaway loops.',
+    maxTurns: '0 inherits the workspace default; -1 requests unlimited turns, subject to workspace ceilings. Maximum LLM/tool turns before the agent stops. Raise for complex tool workflows; lower to prevent runaway loops.',
     responseFormat: 'Requests structured output when supported. JSON helps extraction, routing, and downstream tool inputs.',
     reasoningEffort: 'Hints how much hidden reasoning budget to spend on supported models. Higher can improve hard tasks but increases cost/latency.',
     presencePenalty: 'Positive values encourage new ideas instead of reusing already-mentioned concepts.',
@@ -482,47 +486,47 @@
   const executionProfiles = {
     balanced: {
       label: 'Balanced agent',
-      llm: { temperature: 0.7, top_p: 0.9, max_tokens: 1024, response_format: '' },
+      llm: { temperature: 0.7, top_p: 0.9, max_tokens: 0, response_format: '' },
       reasoning: {
-        think: { temperature: 0.1, top_p: 0.9, max_tokens: 1024, response_format: 'json' },
-        plan: { temperature: 0.1, top_p: 0.9, max_tokens: 1024, response_format: 'json' },
-        reflect: { temperature: 0.2, top_p: 0.9, max_tokens: 2048, response_format: 'json' },
+        think: { temperature: 0.1, top_p: 0.9, max_tokens: 0, response_format: 'json' },
+        plan: { temperature: 0.1, top_p: 0.9, max_tokens: 0, response_format: 'json' },
+        reflect: { temperature: 0.2, top_p: 0.9, max_tokens: 0, response_format: 'json' },
       },
     },
     tool_loop: {
       label: 'Reliable tool loop',
-      llm: { temperature: 0.2, top_p: 0.8, max_tokens: 1024, response_format: '' },
+      llm: { temperature: 0.2, top_p: 0.8, max_tokens: 0, response_format: '' },
       reasoning: {
-        think: { temperature: 0.1, top_p: 0.7, max_tokens: 1024, response_format: 'json' },
-        plan: { temperature: 0.1, top_p: 0.7, max_tokens: 1024, response_format: 'json' },
-        reflect: { temperature: 0.15, top_p: 0.8, max_tokens: 2048, response_format: 'json' },
+        think: { temperature: 0.1, top_p: 0.7, max_tokens: 0, response_format: 'json' },
+        plan: { temperature: 0.1, top_p: 0.7, max_tokens: 0, response_format: 'json' },
+        reflect: { temperature: 0.15, top_p: 0.8, max_tokens: 0, response_format: 'json' },
       },
     },
     research: {
       label: 'Deep research',
-      llm: { temperature: 0.35, top_p: 0.9, max_tokens: 4096, response_format: '' },
+      llm: { temperature: 0.35, top_p: 0.9, max_tokens: 0, response_format: '' },
       reasoning: {
-        think: { temperature: 0.15, top_p: 0.85, max_tokens: 1536, response_format: 'json' },
-        plan: { temperature: 0.2, top_p: 0.9, max_tokens: 1536, response_format: 'json' },
-        reflect: { temperature: 0.25, top_p: 0.9, max_tokens: 4096, response_format: 'json' },
+        think: { temperature: 0.15, top_p: 0.85, max_tokens: 0, response_format: 'json' },
+        plan: { temperature: 0.2, top_p: 0.9, max_tokens: 0, response_format: 'json' },
+        reflect: { temperature: 0.25, top_p: 0.9, max_tokens: 0, response_format: 'json' },
       },
     },
     extractor: {
       label: 'JSON extractor',
-      llm: { temperature: 0.05, top_p: 0.5, max_tokens: 2048, response_format: 'json' },
+      llm: { temperature: 0.05, top_p: 0.5, max_tokens: 0, response_format: 'json' },
       reasoning: {
-        think: { temperature: 0.05, top_p: 0.5, max_tokens: 1024, response_format: 'json' },
-        plan: { temperature: 0.05, top_p: 0.5, max_tokens: 1024, response_format: 'json' },
-        reflect: { temperature: 0.05, top_p: 0.5, max_tokens: 2048, response_format: 'json' },
+        think: { temperature: 0.05, top_p: 0.5, max_tokens: 0, response_format: 'json' },
+        plan: { temperature: 0.05, top_p: 0.5, max_tokens: 0, response_format: 'json' },
+        reflect: { temperature: 0.05, top_p: 0.5, max_tokens: 0, response_format: 'json' },
       },
     },
     creative: {
       label: 'Creative writer',
-      llm: { temperature: 0.9, top_p: 0.95, max_tokens: 2048, response_format: '' },
+      llm: { temperature: 0.9, top_p: 0.95, max_tokens: 0, response_format: '' },
       reasoning: {
-        think: { temperature: 0.2, top_p: 0.85, max_tokens: 1024, response_format: 'json' },
-        plan: { temperature: 0.4, top_p: 0.9, max_tokens: 1024, response_format: 'json' },
-        reflect: { temperature: 0.75, top_p: 0.95, max_tokens: 3072, response_format: 'json' },
+        think: { temperature: 0.2, top_p: 0.85, max_tokens: 0, response_format: 'json' },
+        plan: { temperature: 0.4, top_p: 0.9, max_tokens: 0, response_format: 'json' },
+        reflect: { temperature: 0.75, top_p: 0.95, max_tokens: 0, response_format: 'json' },
       },
     },
   }
@@ -543,10 +547,10 @@
     trigger: 'channel', channels: ['http'], schedule: { cron: '' },
     webhook: { text_path: '', user_id_path: '', username_path: '', session_id_path: '', thread_id_path: '', include_raw: false },
     system_prompt: '',
-    llm: { provider: 'ollama', model: '', temperature: 0.7, top_p: 0.9, max_tokens: 512 },
+    llm: { provider: workspaceProvider, model: providers.find(p => p.id === workspaceProvider)?.defaultModel || '', temperature: 0.7, max_tokens: 0 },
     memory: { read_scopes: ['session'], write_scopes: ['session'], max_tokens: 20 },
     learning: { enabled: false, min_chars: 160, max_proposals: 3 },
-    tools: [], skills: [], knowledge: [], agents: [], parallel_peer_calls: false, structured_peer_results: false, confirm_tools: [], unattended: false, max_turns: 5, stream_reply: false, enabled: true,
+    tools: [], skills: [], knowledge: [], agents: [], parallel_peer_calls: false, structured_peer_results: false, confirm_tools: [], unattended: false, max_turns: 0, stream_reply: false, enabled: true,
   })
 
   function isSystemAgent(agent) {
@@ -634,6 +638,7 @@
   async function loadProviders() {
     try {
       const res  = await api.providers.list()
+      workspaceProvider = res.default_provider || 'ollama'
       const regs = res.registered || []      // currently registered with the live router
       const ids  = new Set([...regs, ...(res.known || []), ...Object.keys(res.providers || {})])
       providers  = [...ids].map(id => ({
@@ -973,7 +978,7 @@
     selected = agent
     editing  = JSON.parse(JSON.stringify(agent))
     // Ensure nested objects always exist in the editor copy
-    editing.llm      = editing.llm      || { provider: 'ollama', model: '', temperature: 0.7, max_tokens: 512 }
+    editing.llm      = editing.llm      || BLANK().llm
     editing.memory   = editing.memory   || { read_scopes: ['session'], write_scopes: ['session'], max_tokens: 20 }
     editing.schedule = editing.schedule || { cron: '' }
     editing.webhook  = editing.webhook  || { text_path: '', user_id_path: '', username_path: '', session_id_path: '', thread_id_path: '', include_raw: false }
@@ -995,7 +1000,8 @@
     lastAutoStrategyKey = ''
   }
 
-  function newAgent() {
+  async function newAgent() {
+    if (providers.length === 0) await loadProviders()
     selected = null
     editing  = BLANK()
     saveMsg  = ''
@@ -1168,7 +1174,7 @@
     await scrollPlayBottom()
     try {
       const res = await api.chat(agentId, text, 'gui-playground', playgroundOverrides())
-      appendPlayMsg(agentId, { role: 'assistant', text: res.reply, ts: new Date() })
+      appendPlayMsg(agentId, { role: 'assistant', text: res.reply, metadata: res.metadata, ts: new Date() })
     } catch (e) {
       playError = e.message
       appendPlayMsg(agentId, { role: 'system', text: '⚠ ' + e.message, ts: new Date() })
@@ -1195,7 +1201,7 @@
     if (playTemperature !== '' && !Number.isNaN(Number(playTemperature))) overrides.temperature = Number(playTemperature)
     if (playTopP !== '' && Number(playTopP) > 0) overrides.top_p = Number(playTopP)
     if (playMaxTokens !== '' && Number(playMaxTokens) > 0) overrides.max_tokens = Number(playMaxTokens)
-    if (playMaxTurns !== '' && Number(playMaxTurns) > 0) overrides.max_turns = Number(playMaxTurns)
+    if (playMaxTurns !== '' && Number.isInteger(Number(playMaxTurns)) && Number(playMaxTurns) >= -1) overrides.max_turns = Number(playMaxTurns)
     if (playResponseFormat.trim()) overrides.response_format = playResponseFormat.trim()
     if (playReasoningEffort.trim()) overrides.reasoning_effort = playReasoningEffort.trim()
     if (playPresencePenalty !== '' && !Number.isNaN(Number(playPresencePenalty))) overrides.presence_penalty = Number(playPresencePenalty)
@@ -1582,6 +1588,7 @@ console.log(reply);` : ''
             {#key selected.id}<PublishedFiles agentID={selected.id} />{/key}
           {/if}
           <div class="fields">
+            <SettingsMode bind:advanced description="Choose your agent’s purpose, model, tools, and permissions. Advanced adds model tuning and execution controls. Saved custom settings stay active in either view." />
             {#if saveAudit?.warnings?.length}
               <div class="save-audit" class:danger={saveAudit.requires_ack}>
                 <strong>{saveAudit.requires_ack ? 'Review channel exposure' : 'Capability tier changed'}</strong>
@@ -1751,6 +1758,7 @@ console.log(reply);` : ''
                         placeholder="You are a helpful Soulacy agent…"></textarea>
             </div>
 
+            {#if advanced}
             <!-- ── Persona blocks (identity / personality / non-negotiables) ───────
                  Optional structured sections that are wrapped into the
                  system prompt with consistent framing across every agent.
@@ -1921,7 +1929,10 @@ console.log(reply);` : ''
               </div>
             </details>
 
-            <div class="sep">LLM</div>
+            {/if}
+            <div class="sep">AI model</div>
+
+            {#if advanced}
 
             <div class="field">
               <span class="field-label" data-tooltip={llmTips.executionProfile}>Execution profile <span class="optional">(applies a tuned starting point; fields remain editable)</span></span>
@@ -1933,7 +1944,8 @@ console.log(reply);` : ''
               </select>
             </div>
 
-            <div class="row-3">
+            {/if}
+            <div class="row-2">
               <div class="field">
                 <span class="field-label" data-tooltip={llmTips.provider}>Provider</span>
                 <select bind:value={editing.llm.provider} on:change={onProviderChange} data-tooltip={llmTips.provider}>
@@ -1999,12 +2011,14 @@ console.log(reply);` : ''
                   </div>
                 {/if}
               </div>
-              <div class="field">
-                <span class="field-label" data-tooltip={llmTips.maxTokens}>Max tokens</span>
-                <input type="number" bind:value={editing.llm.max_tokens} min="64" max="8192" data-tooltip={llmTips.maxTokens} />
-              </div>
+
             </div>
 
+            {#if advanced}
+              <div class="field">
+                <span class="field-label" data-tooltip={llmTips.maxTokens}>Max tokens</span>
+                <input type="number" bind:value={editing.llm.max_tokens} min="0" data-tooltip={llmTips.maxTokens} />
+              </div>
             {#if selected}
               {#key selected}<ModelPreparation agentID={selected.id} />{/key}
             {/if}
@@ -2022,7 +2036,7 @@ console.log(reply);` : ''
               </div>
               <div class="field">
                 <span class="field-label" data-tooltip={llmTips.maxTurns}>Max turns</span>
-                <input type="number" bind:value={editing.max_turns} min="1" max="50" data-tooltip={llmTips.maxTurns} />
+                <input type="number" bind:value={editing.max_turns} min="-1" data-tooltip={llmTips.maxTurns} />
               </div>
             </div>
 
@@ -2133,31 +2147,31 @@ console.log(reply);` : ''
             {#if editing.reasoning?.strategy}
               <div class="field-row">
                 <div class="field">
-                  <span class="field-label" data-tooltip={llmTips.maxSteps}>Max steps <span class="optional">(default 8)</span></span>
-                  <input type="number" min="1" max="50"
+                  <span class="field-label" data-tooltip={llmTips.maxSteps}>Max steps <span class="optional">(0 = inherit, -1 = unlimited)</span></span>
+                  <input type="number" min="-1"
                     value={editing.reasoning?.max_steps || ''}
                     data-tooltip={llmTips.maxSteps}
                     on:input={e => { editing.reasoning = editing.reasoning||{}; editing.reasoning.max_steps = Number(e.target.value)||0 }} />
                 </div>
                 {#if editing.reasoning?.strategy === 'plan_execute'}
                   <div class="field">
-                    <span class="field-label" data-tooltip={llmTips.maxPlanSteps}>Max plan steps <span class="optional">(default 6)</span></span>
-                    <input type="number" min="1" max="20"
+                    <span class="field-label" data-tooltip={llmTips.maxPlanSteps}>Max plan steps <span class="optional">(0 = default 64)</span></span>
+                    <input type="number" min="0"
                       value={editing.reasoning?.max_plan_steps || ''}
                       data-tooltip={llmTips.maxPlanSteps}
                       on:input={e => { editing.reasoning = editing.reasoning||{}; editing.reasoning.max_plan_steps = Number(e.target.value)||0 }} />
                   </div>
                 {/if}
                 <div class="field">
-                  <span class="field-label" data-tooltip={llmTips.stepTimeout}>Step timeout <span class="optional">(e.g. 30s)</span></span>
-                  <input type="text" placeholder="30s"
+                  <span class="field-label" data-tooltip={llmTips.stepTimeout}>Step timeout <span class="optional">(default 10m)</span></span>
+                  <input type="text" placeholder="10m"
                     value={editing.reasoning?.step_timeout || ''}
                     data-tooltip={llmTips.stepTimeout}
                     on:input={e => { editing.reasoning = editing.reasoning||{}; editing.reasoning.step_timeout = e.target.value }} />
                 </div>
                 <div class="field">
-                  <span class="field-label" data-tooltip={llmTips.totalTimeout}>Total timeout <span class="optional">(e.g. 180s)</span></span>
-                  <input type="text" placeholder="180s"
+                  <span class="field-label" data-tooltip={llmTips.totalTimeout}>Total timeout <span class="optional">(inherits run time)</span></span>
+                  <input type="text" placeholder="48h or unlimited"
                     value={editing.reasoning?.total_timeout || ''}
                     data-tooltip={llmTips.totalTimeout}
                     on:input={e => { editing.reasoning = editing.reasoning||{}; editing.reasoning.total_timeout = e.target.value }} />
@@ -2199,7 +2213,7 @@ console.log(reply);` : ''
                       </div>
                       <div class="field">
                         <span class="field-label" data-tooltip={llmTips.phaseMaxTokens}>Max tokens</span>
-                        <input type="number" min="64" max="8192"
+                        <input type="number" min="0"
                           value={cfg.max_tokens || ''}
                           data-tooltip={llmTips.phaseMaxTokens}
                           on:input={e => {
@@ -2291,6 +2305,8 @@ console.log(reply);` : ''
                 </div>
               {/each}
             </div>
+
+            {/if}
 
             <div class="sep">Learning notebook <span class="optional">(private, source-backed lessons)</span></div>
             <div class="learning-card {editing.learning?.enabled ? 'enabled' : ''}">
@@ -2463,6 +2479,7 @@ console.log(reply);` : ''
               />
             </div>
 
+            {#if advanced}
             <div class="sep">Peer agents</div>
             <div class="field">
               <span class="field-label">Other agents this agent may invoke as <code>agent__&lt;id&gt;</code> tools — pick from loaded agents</span>
@@ -2517,6 +2534,8 @@ console.log(reply);` : ''
                 />
               {/if}
             </div>
+
+            {/if}
 
             <div class="sep">Safety policy <span class="optional">(confirm before risky actions)</span></div>
             <div class="safety-card">
@@ -2609,7 +2628,7 @@ console.log(reply);` : ''
               </label>
               <label data-tooltip={llmTips.maxTurns}>
                 <span>Max turns</span>
-                <input type="number" min="1" max="100" bind:value={playMaxTurns} placeholder="unchanged" disabled={!playUseOverrides} data-tooltip={llmTips.maxTurns} />
+                <input type="number" min="-1" bind:value={playMaxTurns} placeholder="unchanged" disabled={!playUseOverrides} data-tooltip={llmTips.maxTurns} />
               </label>
               <label data-tooltip={llmTips.responseFormat}>
                 <span>Format</span>
@@ -2657,6 +2676,7 @@ console.log(reply);` : ''
                   {#if msg.role === 'user'}
                     <div class="btext">{msg.text}</div>
                   {:else}
+                    <RunNotice metadata={msg.metadata} />
                     <div class="btext markdown-body" use:richRenderer={msg.text}>{@html parseMarkdown(msg.text)}</div>
                   {/if}
                   <div class="btime">{fmtTime(msg.ts)}</div>
@@ -4262,9 +4282,10 @@ console.log(reply);` : ''
     }
     .editor { overflow: visible; }
     .editor-hdr {
-      position: sticky;
-      top: 0;
-      z-index: 12;
+      /* The multi-row action panel must not cover the form on small screens. */
+      position: static;
+      top: auto;
+      z-index: auto;
       align-items: stretch;
       flex-direction: column;
       gap: .7rem;

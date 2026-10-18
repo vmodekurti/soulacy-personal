@@ -289,11 +289,13 @@ type Draft struct {
 	// Reasoning-loop budgets for an agent draft. Preserved across the canvas/YAML
 	// round-trip so a user who tuned them in SOUL.yaml doesn't have them reset to
 	// defaults on re-save. Empty/zero means "use Studio's sensible default".
-	StepTimeout  string `json:"step_timeout,omitempty"`
-	TotalTimeout string `json:"total_timeout,omitempty"`
-	MaxSteps     int    `json:"max_steps,omitempty"`
-	MaxPlanSteps int    `json:"max_plan_steps,omitempty"`
-	MaxTurns     int    `json:"max_turns,omitempty"`
+	StepTimeout     string              `json:"step_timeout,omitempty"`
+	TotalTimeout    string              `json:"total_timeout,omitempty"`
+	MaxSteps        int                 `json:"max_steps,omitempty"`
+	MaxPlanSteps    int                 `json:"max_plan_steps,omitempty"`
+	MaxTurns        int                 `json:"max_turns,omitempty"`
+	Budget          *agent.BudgetConfig `json:"budget,omitempty"`
+	NoProgressLimit *int                `json:"no_progress_limit,omitempty"`
 	// Memory is the agent's memory policy (scopes + token budget), carried so a
 	// Studio round-trip does not reset it.
 	//

@@ -106,8 +106,8 @@ func TestResolvedRunTimeoutInvalid(t *testing.T) {
 func TestResolvedRunTimeoutZero(t *testing.T) {
 	d := &Definition{RunTimeout: "0s"}
 	got := d.ResolvedRunTimeout(3 * time.Minute)
-	if got != 3*time.Minute {
-		t.Errorf("0s: got %v, want 3m fallback", got)
+	if got != time.Duration(1<<63-1) {
+		t.Errorf("0s: got %v, want unlimited sentinel", got)
 	}
 }
 

@@ -206,7 +206,22 @@ memory:
 
 # ── Runtime ───────────────────────────────────────────────────────────────────
 runtime:
-    default_max_turns: 30
+    # Generous defaults; all workspace turn/token/call ceilings are optional.
+    # See docs/EXECUTION_POLICY.md for inheritance and per-agent overrides.
+    default_max_turns: 256      # 0 = unlimited
+    max_turns_ceiling: 0        # 0 = no workspace ceiling
+    default_budget:
+        max_tokens: 0          # cumulative per-run tokens; 0 = unlimited
+        max_llm_calls: 0        # 0 = unlimited
+    max_budget:
+        max_tokens: 0
+        max_llm_calls: 0
+    timeouts:
+        tool: 2m
+        llm: 5m
+        step: 10m
+        run: 48h               # "0" = unlimited, subject to caller cancellation
+        http: 48h1m            # must accommodate run; use "0" with unlimited run
     max_concurrent_sessions: 100
 
     # Python interpreter used for all python_file tools.
@@ -215,7 +230,7 @@ runtime:
     # Avoid plain "python3" — on macOS it maps to the system 3.9 which has no packages.
     python_bin: python3.11
 
-    tool_timeout: 30s
+    tool_timeout: 2m
 
     # adaptive_nodes (default: true): when a workflow node hits an unexpected data
     # shape at run time — it errors, or "succeeds" but its output reports an error

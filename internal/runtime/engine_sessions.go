@@ -227,22 +227,39 @@ func (e *Engine) historyCap() int {
 	return e.maxHistoryTurns
 }
 
-// SetMaxTurnsCeiling configures the hard server-side cap on any agent's
-// effective max_turns (Story 1 / S3.2). n<=0 falls back to
-// defaultMaxTurnsCeiling (50). Safe to call once at startup.
-func (e *Engine) SetMaxTurnsCeiling(n int) {
-	if n <= 0 {
-		n = defaultMaxTurnsCeiling
-	}
-	e.maxTurnsCeiling = n
+// SetTurnLimits atomically applies inherited turns and the optional ceiling.
+// Zero is unlimited. Agent max_turns: 0 inherits; -1 requests unlimited.
+func (e *Engine) SetTurnLimits(defaults, ceiling int) {
+	e.budgetMu.Lock()
+	defer e.budgetMu.Unlock()
+	e.defaultMaxTurns, e.maxTurnsCeiling = max(0, defaults), max(0, ceiling)
+	e.turnLimitsConfigured = true
 }
 
-// turnsCeiling returns the effective max_turns ceiling.
+func (e *Engine) SetMaxTurnsCeiling(n int) {
+	e.budgetMu.Lock()
+	defer e.budgetMu.Unlock()
+	e.maxTurnsCeiling = max(0, n)
+}
+
 func (e *Engine) turnsCeiling() int {
-	if e.maxTurnsCeiling <= 0 {
-		return defaultMaxTurnsCeiling
-	}
+	e.budgetMu.RLock()
+	defer e.budgetMu.RUnlock()
 	return e.maxTurnsCeiling
+}
+
+func (e *Engine) effectiveMaxTurns(def *agent.Definition) int {
+	e.budgetMu.RLock()
+	defaults, ceiling := agent.DefaultMaxTurns, e.maxTurnsCeiling
+	if e.turnLimitsConfigured {
+		defaults = e.defaultMaxTurns
+	}
+	e.budgetMu.RUnlock()
+	requested := 0
+	if def != nil {
+		requested = def.MaxTurns
+	}
+	return agent.ResolveTurns(requested, defaults, ceiling)
 }
 
 // SetMaxAgentCallDepth configures the recursion guard for peer-agent calls.
@@ -297,10 +314,10 @@ func (e *Engine) effectiveRunBudget(def *agent.Definition) (tokens, calls int) {
 	if def != nil && def.Budget != nil {
 		tokens, calls = def.Budget.MaxTokens, def.Budget.MaxLLMCalls
 	}
-	if maximum.MaxTokens > 0 && tokens > maximum.MaxTokens {
+	if maximum.MaxTokens > 0 && (tokens == 0 || tokens > maximum.MaxTokens) {
 		tokens = maximum.MaxTokens
 	}
-	if maximum.MaxLLMCalls > 0 && calls > maximum.MaxLLMCalls {
+	if maximum.MaxLLMCalls > 0 && (calls == 0 || calls > maximum.MaxLLMCalls) {
 		calls = maximum.MaxLLMCalls
 	}
 	return tokens, calls
@@ -322,6 +339,10 @@ func (e *Engine) effectiveStepTimeout() time.Duration {
 	}
 	return defaultStepTimeout
 }
+func (e *Engine) RunTimeout(def *agent.Definition) time.Duration {
+	return def.ResolvedRunTimeout(e.effectiveRunTimeout())
+}
+
 func (e *Engine) effectiveRunTimeout() time.Duration {
 	if e.runTimeout > 0 {
 		return e.runTimeout
@@ -660,8 +681,20 @@ func (e *Engine) buildContext(def *agent.Definition, sess *Session, incoming mes
 		msgs = append(msgs, llm.ChatMessage{Role: "system", Content: recall})
 	}
 
-	// Session history
+	// Session history. The current goal is immutable across every model turn,
+	// even when message-count retention has removed its original history row.
 	sess.mu.Lock()
+	goal := flattenParts(incoming.Parts)
+	present := false
+	for _, m := range sess.History {
+		if m.Role == "user" && m.Content == goal {
+			present = true
+			break
+		}
+	}
+	if !present && strings.TrimSpace(goal) != "" {
+		msgs = append(msgs, llm.ChatMessage{Role: "user", Content: goal})
+	}
 	msgs = append(msgs, sess.History...)
 	sess.mu.Unlock()
 
@@ -722,3 +755,21 @@ func (e *Engine) pastConversationRecall(def *agent.Definition, sessionID string,
 // executeToolCalls runs each tool in a sandboxed Python subprocess.
 // Each tool definition points to a Python file; we call the named function
 // with the tool's arguments as keyword arguments, capture stdout as the result.
+
+// ExecutionLimits reports resolved policy; zero token/call/turn limits mean unlimited.
+type ExecutionLimits struct {
+	MaxTurns    int    `json:"max_turns"`
+	MaxTokens   int    `json:"max_tokens"`
+	MaxLLMCalls int    `json:"max_llm_calls"`
+	RunTimeout  string `json:"run_timeout"`
+}
+
+func (e *Engine) executionLimits(def *agent.Definition) ExecutionLimits {
+	tokens, calls := e.effectiveRunBudget(def)
+	timeout := e.RunTimeout(def)
+	label := timeout.String()
+	if timeout == time.Duration(1<<63-1) {
+		label = "unlimited"
+	}
+	return ExecutionLimits{MaxTurns: e.effectiveMaxTurns(def), MaxTokens: tokens, MaxLLMCalls: calls, RunTimeout: label}
+}

@@ -8,6 +8,7 @@ package session
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -19,13 +20,14 @@ import (
 
 // ConversationEntry is one turn in a conversation.
 type ConversationEntry struct {
-	ID        int64     `json:"id"`
-	SessionID string    `json:"session_id"`
-	AgentID   string    `json:"agent_id"`
-	Role      string    `json:"role"` // "user" | "assistant" | "system"
-	Content   string    `json:"content"`
-	Tokens    int       `json:"tokens"` // 0 if unknown
-	CreatedAt time.Time `json:"created_at"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
+	ID        int64             `json:"id"`
+	SessionID string            `json:"session_id"`
+	AgentID   string            `json:"agent_id"`
+	Role      string            `json:"role"` // "user" | "assistant" | "system"
+	Content   string            `json:"content"`
+	Tokens    int               `json:"tokens"` // 0 if unknown
+	CreatedAt time.Time         `json:"created_at"`
 }
 
 // SearchHit is one matched conversation-history entry with a compact snippet
@@ -54,6 +56,27 @@ type HistoryStore interface {
 
 	// Close releases resources.
 	Close() error
+}
+
+// RunMetadataStore is optional for backends that support final verification
+// arriving after the assistant text. Match a run, never merely the latest row.
+type RunMetadataStore interface {
+	UpdateRunMetadata(context.Context, string, string, string, map[string]string) error
+}
+
+func (s *SQLiteHistoryStore) UpdateRunMetadata(ctx context.Context, sessionID, agentID, runID string, metadata map[string]string) error {
+	if runID == "" {
+		return fmt.Errorf("session/history: run id is required")
+	}
+	payload, err := json.Marshal(metadata)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `UPDATE conversation_history
+		SET metadata = json_patch(COALESCE(NULLIF(metadata, 'null'), '{}'), ?)
+		WHERE session_id = ? AND agent_id = ? AND role = 'assistant'
+		AND json_extract(metadata, '$.run_id') = ?`, string(payload), sessionID, agentID, runID)
+	return err
 }
 
 // ---------------------------------------------------------------------------
@@ -133,6 +156,19 @@ func NewSQLiteHistoryStore(path string, opts ...HistoryOption) (*SQLiteHistorySt
 		}
 	}
 
+	// Add status metadata without rewriting or discarding existing conversations.
+	var metadataColumn int
+	if err := db.QueryRow(`SELECT count(*) FROM pragma_table_info('conversation_history') WHERE name = 'metadata'`).Scan(&metadataColumn); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("session/history: inspect metadata migration: %w", err)
+	}
+	if metadataColumn == 0 {
+		if _, err := db.Exec(`ALTER TABLE conversation_history ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}'`); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("session/history: metadata migration: %w", err)
+		}
+	}
+
 	s := &SQLiteHistoryStore{
 		db:        db,
 		stopCh:    make(chan struct{}),
@@ -170,11 +206,15 @@ func (s *SQLiteHistoryStore) pruneLoop() {
 // Append inserts a new conversation entry with created_at set to now (UTC).
 func (s *SQLiteHistoryStore) Append(ctx context.Context, e ConversationEntry) error {
 	createdAt := time.Now().UTC().Format("2006-01-02 15:04:05")
-	_, err := s.db.ExecContext(ctx,
+	metadata, err := json.Marshal(e.Metadata)
+	if err != nil {
+		return fmt.Errorf("session/history: encode metadata: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO conversation_history
-		    (session_id, agent_id, role, content, tokens, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		e.SessionID, e.AgentID, e.Role, e.Content, e.Tokens, createdAt,
+		    (session_id, agent_id, role, content, tokens, created_at, metadata)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		e.SessionID, e.AgentID, e.Role, e.Content, e.Tokens, createdAt, string(metadata),
 	)
 	if err != nil {
 		return fmt.Errorf("session/history: append: %w", err)
@@ -192,7 +232,7 @@ func (s *SQLiteHistoryStore) Load(ctx context.Context, sessionID string, limit i
 	)
 	if limit <= 0 {
 		rows, err = s.db.QueryContext(ctx,
-			`SELECT id, session_id, agent_id, role, content, tokens, created_at
+			`SELECT id, session_id, agent_id, role, content, tokens, created_at, metadata
 			 FROM conversation_history
 			 WHERE session_id = ?
 			 ORDER BY id ASC`,
@@ -200,9 +240,9 @@ func (s *SQLiteHistoryStore) Load(ctx context.Context, sessionID string, limit i
 		)
 	} else {
 		rows, err = s.db.QueryContext(ctx,
-			`SELECT id, session_id, agent_id, role, content, tokens, created_at
+			`SELECT id, session_id, agent_id, role, content, tokens, created_at, metadata
 			 FROM (
-			     SELECT id, session_id, agent_id, role, content, tokens, created_at
+			     SELECT id, session_id, agent_id, role, content, tokens, created_at, metadata
 			     FROM conversation_history
 			     WHERE session_id = ?
 			     ORDER BY id DESC
@@ -227,7 +267,7 @@ func (s *SQLiteHistoryStore) LoadForAgent(ctx context.Context, agentID string, l
 		limit = 1000
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, session_id, agent_id, role, content, tokens, created_at
+		`SELECT id, session_id, agent_id, role, content, tokens, created_at, metadata
 		 FROM conversation_history
 		 WHERE agent_id = ?
 		 ORDER BY id DESC
@@ -265,7 +305,7 @@ func (s *SQLiteHistoryStore) Search(ctx context.Context, agentID, query string, 
 	}
 	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, session_id, agent_id, role, content, tokens, created_at
+		`SELECT id, session_id, agent_id, role, content, tokens, created_at, metadata
 		 FROM conversation_history
 		 WHERE `+strings.Join(where, " AND ")+`
 		 ORDER BY id DESC
@@ -317,15 +357,19 @@ func scanEntries(rows *sql.Rows) ([]ConversationEntry, error) {
 	var out []ConversationEntry
 	for rows.Next() {
 		var e ConversationEntry
+		var metadata string
 		// Scan created_at directly into time.Time so the mattn/go-sqlite3 driver
 		// handles the format conversion — the same fix as internal/auth/apikeys.
 		// Scanning into string and parsing "2006-01-02 15:04:05" breaks because
 		// the driver reformats DATETIME columns as RFC3339 when the scan target
 		// is a string.
 		if err := rows.Scan(
-			&e.ID, &e.SessionID, &e.AgentID, &e.Role, &e.Content, &e.Tokens, &e.CreatedAt,
+			&e.ID, &e.SessionID, &e.AgentID, &e.Role, &e.Content, &e.Tokens, &e.CreatedAt, &metadata,
 		); err != nil {
 			return nil, fmt.Errorf("session/history: scan row: %w", err)
+		}
+		if err := json.Unmarshal([]byte(metadata), &e.Metadata); err != nil {
+			return nil, fmt.Errorf("session/history: decode metadata: %w", err)
 		}
 		out = append(out, e)
 	}

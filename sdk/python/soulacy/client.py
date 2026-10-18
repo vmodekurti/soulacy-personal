@@ -10,6 +10,7 @@ import json
 import os
 from typing import Any, Optional
 from urllib import request, error
+from urllib.parse import quote
 
 
 class SoulacyClient:
@@ -44,14 +45,16 @@ class SoulacyClient:
         self,
         gateway_url: Optional[str] = None,
         api_key: Optional[str] = None,
-        timeout: int = 30,
+        timeout: Optional[float] = 48 * 60 * 60 + 60,
     ) -> None:
         self.gateway_url = (
             gateway_url
             or os.environ.get("SOULACY_GATEWAY", "http://localhost:18789")
         ).rstrip("/")
         self.api_key = api_key or os.environ.get("SOULACY_API_KEY", "")
-        self.timeout = timeout
+        if timeout is not None and timeout < 0:
+            raise ValueError("timeout must be nonnegative, or None for unlimited")
+        self.timeout = None if timeout == 0 else timeout
 
     # ── Agents ────────────────────────────────────────────────────────────────
 
@@ -59,25 +62,25 @@ class SoulacyClient:
         return self._get("/agents").get("agents", [])
 
     def get_agent(self, agent_id: str) -> dict:
-        return self._get(f"/agents/{agent_id}")
+        return self._get(f"/agents/{quote(agent_id, safe='')}")
 
     def create_agent(self, definition: dict) -> dict:
         return self._post("/agents", definition)
 
     def update_agent(self, agent_id: str, definition: dict) -> dict:
-        return self._request("PUT", f"/agents/{agent_id}", definition)
+        return self._request("PUT", f"/agents/{quote(agent_id, safe='')}", definition)
 
     def delete_agent(self, agent_id: str) -> None:
-        self._request("DELETE", f"/agents/{agent_id}")
+        self._request("DELETE", f"/agents/{quote(agent_id, safe='')}")
 
     def enable_agent(self, agent_id: str) -> dict:
-        return self._post(f"/agents/{agent_id}/enable")
+        return self._post(f"/agents/{quote(agent_id, safe='')}/enable")
 
     def disable_agent(self, agent_id: str) -> dict:
-        return self._post(f"/agents/{agent_id}/disable")
+        return self._post(f"/agents/{quote(agent_id, safe='')}/disable")
 
     def trigger_agent(self, agent_id: str) -> dict:
-        return self._post(f"/agents/{agent_id}/trigger")
+        return self._post(f"/agents/{quote(agent_id, safe='')}/trigger")
 
     # ── Chat ─────────────────────────────────────────────────────────────────
 
@@ -87,14 +90,22 @@ class SoulacyClient:
         text: str,
         user_id: str = "sdk-user",
         username: str = "sdk-user",
+        session_id: Optional[str] = None,
     ) -> str:
-        result = self._post("/chat", {
-            "agent_id": agent_id,
-            "user_id": user_id,
-            "username": username,
-            "text": text,
-        })
-        return result.get("reply", "")
+        return self.chat_response(agent_id, text, user_id, username, session_id).get("reply", "")
+
+    def chat_response(
+        self, agent_id: str, text: str, user_id: str = "sdk-user",
+        username: str = "sdk-user", session_id: Optional[str] = None,
+    ) -> dict:
+        """Return the answer, session/run IDs, and completion metadata.
+
+        Pass the returned session_id on the next turn to continue a conversation.
+        """
+        body = {"agent_id": agent_id, "user_id": user_id, "username": username, "text": text}
+        if session_id is not None:
+            body["session_id"] = session_id
+        return self._post("/chat", body)
 
     # ── Channels ──────────────────────────────────────────────────────────────
 
@@ -109,7 +120,7 @@ class SoulacyClient:
     # ── Memory ────────────────────────────────────────────────────────────────
 
     def list_memory(self, agent_id: str) -> dict:
-        return self._get(f"/memory/{agent_id}")
+        return self._get(f"/memory/{quote(agent_id, safe='')}")
 
     # ── Health ────────────────────────────────────────────────────────────────
 

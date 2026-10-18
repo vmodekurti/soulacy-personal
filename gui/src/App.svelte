@@ -494,8 +494,8 @@
     <!-- How much of the product to show. A first-time user met 26 destinations
          at once, which reads as a lot of work before anything has been done. -->
     {#if !navCollapsed}
-      <div class="mode-switch" role="group" aria-label="How much to show">
-        <span class="mode-label">Mode</span>
+      <div class="mode-switch" role="group" aria-label="Pages shown in the menu">
+        <span class="mode-label">Menu detail</span>
         <div class="mode-buttons">
           {#each navLevels as lvl}
             <button class="mode-btn" class:on={$navLevel === lvl.key}

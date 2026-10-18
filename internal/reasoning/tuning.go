@@ -1,9 +1,11 @@
 package reasoning
 
+import "github.com/soulacy/soulacy/pkg/agent"
+
 func phaseParamsWithDefaults(in PhaseParams, maxTokens int, temperature float64, responseFormat string) PhaseParams {
 	out := in
 	if out.MaxTokens <= 0 {
-		out.MaxTokens = maxTokens
+		out.MaxTokens = max(maxTokens, agent.DefaultMaxOutputTokens)
 	}
 	if out.Temperature <= 0 && out.TopP <= 0 {
 		out.Temperature = temperature

@@ -72,6 +72,11 @@ func (e *Engine) executeOneToolCall(ctx context.Context, def *agent.Definition, 
 	// to move on.
 	argsJSON, _ := json.Marshal(tc.Arguments)
 	key := tc.Name + "|" + string(argsJSON)
+	// A distinct provider call ID is a new invocation: polling or re-reading
+	// after a write must observe current state. Retried IDs still coalesce.
+	if tc.ID != "" {
+		key = tc.ID + "|" + key
+	}
 	seenMu.Lock()
 	prev, dup := seen[key]
 	if !dup {
@@ -93,6 +98,8 @@ func (e *Engine) executeOneToolCall(ctx context.Context, def *agent.Definition, 
 	var result string
 	isErr := false
 	if dup {
+		isErr = strings.HasPrefix(prev, "error:")
+		progressGuardFrom(ctx).observe(tc, prev, isErr)
 		result = fmt.Sprintf(
 			"NOTE: you already called %s with these arguments this run; do not call it again. "+
 				"Use the result below and proceed to the next step.\n\n%s", tc.Name, prev)
@@ -379,6 +386,11 @@ func shouldParallelizePeerCalls(def *agent.Definition, calls []message.ToolCall)
 		tc := normalizeToolCall(raw)
 		argsJSON, _ := json.Marshal(tc.Arguments)
 		key := tc.Name + "|" + string(argsJSON)
+		// A distinct provider call ID is a new invocation: polling or re-reading
+		// after a write must observe current state. Retried IDs still coalesce.
+		if tc.ID != "" {
+			key = tc.ID + "|" + key
+		}
 		if seenBatch[key] {
 			return false
 		}

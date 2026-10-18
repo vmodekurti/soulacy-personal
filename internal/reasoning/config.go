@@ -303,7 +303,7 @@ func LoopConfigFromDefinition(def *agent.Definition, systemPrompt string, suppor
 	}
 
 	cfg.MaxSteps = rc.MaxSteps
-	if cfg.MaxSteps <= 0 {
+	if cfg.MaxSteps == 0 {
 		cfg.MaxSteps = defaultMaxSteps(def, cfg.Strategy)
 	}
 
@@ -318,21 +318,17 @@ func LoopConfigFromDefinition(def *agent.Definition, systemPrompt string, suppor
 	}
 
 	if rc.StepTimeout != "" {
-		if d, err := time.ParseDuration(rc.StepTimeout); err == nil && d > 0 {
-			cfg.StepTimeout = d
-		}
+		cfg.StepTimeout = agent.ParseExecutionTimeout(rc.StepTimeout, agent.DefaultStepTimeout)
 	}
 	if cfg.StepTimeout <= 0 {
-		cfg.StepTimeout = 30 * time.Second
+		cfg.StepTimeout = agent.DefaultStepTimeout
 	}
 
 	if rc.TotalTimeout != "" {
-		if d, err := time.ParseDuration(rc.TotalTimeout); err == nil && d > 0 {
-			cfg.TotalTimeout = d
-		}
+		cfg.TotalTimeout = agent.ParseExecutionTimeout(rc.TotalTimeout, agent.DefaultRunTimeout)
 	}
 	if cfg.TotalTimeout <= 0 {
-		cfg.TotalTimeout = 180 * time.Second
+		cfg.TotalTimeout = agent.DefaultRunTimeout
 	}
 
 	// Collect tool names from the agent's tool definitions (RL-08).
@@ -349,26 +345,14 @@ func LoopConfigFromDefinition(def *agent.Definition, systemPrompt string, suppor
 }
 
 func defaultMaxSteps(def *agent.Definition, strategy LoopStrategy) int {
-	if strategy == StrategyPlanExecute {
-		if complexReasoningDefinition(def) {
-			return 24
-		}
-		return 16
+	if def != nil && def.MaxTurns != 0 {
+		return def.MaxTurns
 	}
-	if complexReasoningDefinition(def) {
-		return 18
-	}
-	return 8
+	return agent.DefaultMaxTurns
 }
 
 func defaultMaxPlanSteps(def *agent.Definition, strategy LoopStrategy) int {
-	if strategy == StrategyPlanExecute {
-		if complexReasoningDefinition(def) {
-			return 12
-		}
-		return 8
-	}
-	return 6
+	return agent.DefaultMaxPlanSteps
 }
 
 func complexReasoningDefinition(def *agent.Definition) bool {

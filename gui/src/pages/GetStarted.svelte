@@ -1,4 +1,5 @@
 <script>
+  import RunNotice from '../lib/RunNotice.svelte'
   // GetStarted — describe what you want, watch it run.
   //
   // The dashboard has 25 pages and the shortest path to a working agent ran
@@ -306,7 +307,7 @@
       const res = await api.chat(GENIE, message, 'gui-user', null, sessionId)
       sessionId = res.session_id || sessionId
       const answer = res.reply || res.text || '(no answer came back)'
-      turns = [...turns, { role: 'soulacy', text: answer }]
+      turns = [...turns, { role: 'soulacy', text: answer, metadata: res.metadata }]
     } catch (e) {
       error = e.message || 'Could not reach Genie.'
       // Whatever Genie managed before it failed is evidence, not rubbish.
@@ -630,6 +631,7 @@
             <span class="who">{t.role === 'you' ? 'You' : 'Genie'}</span>
             {#if t.role === 'soulacy'}
               {#if t.partial}<div class="partial-note">This is as far as it got before the error below.</div>{/if}
+              <RunNotice metadata={t.metadata} />
               <div class="bubble markdown-body" class:partial={t.partial} use:richRenderer={t.text}>{@html parseMarkdown(t.text)}</div>
             {:else}
               <div class="bubble">{t.text}</div>

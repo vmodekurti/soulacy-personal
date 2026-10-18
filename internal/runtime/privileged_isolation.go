@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os/exec"
+	"github.com/soulacy/soulacy/internal/processutil"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -47,7 +47,7 @@ func (HostPrivilegedRunner) Run(ctx context.Context, req PrivilegedCommand) (str
 	if len(req.Argv) == 0 {
 		return "", fmt.Errorf("empty privileged command")
 	}
-	cmd := exec.CommandContext(ctx, req.Argv[0], req.Argv[1:]...)
+	cmd := processutil.CommandContext(ctx, req.Argv[0], req.Argv[1:]...)
 	cmd.Dir, cmd.Env = req.WorkingDir, req.Env
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
@@ -75,7 +75,7 @@ func (r DockerPrivilegedRunner) Ready(ctx context.Context) error {
 	}
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if err := exec.CommandContext(checkCtx, binary, "version", "--format", "{{.Server.Version}}").Run(); err != nil {
+	if err := processutil.CommandContext(checkCtx, binary, "version", "--format", "{{.Server.Version}}").Run(); err != nil {
 		return fmt.Errorf("docker isolation unavailable (no host fallback): %w", err)
 	}
 	return nil
@@ -152,7 +152,7 @@ func (r DockerPrivilegedRunner) Run(ctx context.Context, req PrivilegedCommand) 
 	if binary == "" {
 		binary = "docker"
 	}
-	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd := processutil.CommandContext(ctx, binary, args...)
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := cmd.Run(); err != nil {

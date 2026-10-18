@@ -52,7 +52,7 @@ func bestEffortFinal(chatMsgs []llm.ChatMessage) string {
 		collected[l], collected[r] = collected[r], collected[l]
 	}
 	var b strings.Builder
-	b.WriteString("I ran out of steps before I could write this up properly. Here is what I gathered:\n\n")
+	b.WriteString("The run stopped before producing a final answer. Here is what I gathered:\n\n")
 	b.WriteString(strings.Join(collected, "\n\n"))
 	return b.String()
 }

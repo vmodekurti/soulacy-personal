@@ -37,5 +37,5 @@ export function nextBranchLabel(branches) {
 export function entriesToMessages(entries) {
   return (entries || [])
     .filter(e => e.role === 'user' || e.role === 'assistant')
-    .map(e => ({ role: e.role, text: e.content, ts: e.created_at ? new Date(e.created_at) : new Date() }))
+    .map(e => ({ role: e.role, text: e.content, ...(e.metadata ? { metadata: e.metadata } : {}), ts: e.created_at ? new Date(e.created_at) : new Date() }))
 }

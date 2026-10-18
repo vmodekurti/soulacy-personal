@@ -2,8 +2,12 @@ package scheduler
 
 import (
 	"context"
+	"github.com/soulacy/soulacy/internal/llm"
+	"github.com/soulacy/soulacy/internal/memory"
+	"github.com/soulacy/soulacy/internal/runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -150,4 +154,40 @@ func TestMarkDegradedReply_OutcomeSpecificNotice(t *testing.T) {
 	if !strings.Contains(generic, "did not complete cleanly") {
 		t.Errorf("a non-outcome degraded run keeps the generic notice: %q", generic)
 	}
+}
+
+type incompleteProvider struct{}
+
+func (incompleteProvider) ID() string                               { return "incomplete" }
+func (incompleteProvider) Models(context.Context) ([]string, error) { return []string{"test"}, nil }
+func (incompleteProvider) Complete(context.Context, llm.CompletionRequest) (*llm.CompletionResponse, error) {
+	return &llm.CompletionResponse{ToolCalls: []message.ToolCall{{ID: "unavailable", Name: "unavailable"}}}, nil
+}
+func TestIncompleteCronDoesNotRecordSuccessfulCompletion(t *testing.T) {
+	def := digestAgent(true)
+	def.MaxTurns = 1
+	def.LLM = agent.LLMConfig{Provider: "incomplete", Model: "test"}
+	s, loader := schedulerWithAgent(t, def)
+	router := llm.NewRouter("incomplete")
+	router.Register(incompleteProvider{})
+	mem, err := memory.NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.engine = runtime.NewEngine(loader, router, mem, nil, "", time.Second, zap.NewNop(), nil, nil, "", nil, nil, nil, nil, nil)
+	sink := &captureSink{}
+	s.SetEventSink(sink)
+	s.fireAt(def.ID, "cron", time.Now().UTC())
+	if !s.state.LastCompleted[def.ID].IsZero() {
+		t.Fatal("incomplete cron was recorded as completed")
+	}
+	if s.failCounts[def.ID] != 1 {
+		t.Fatalf("failure count = %d", s.failCounts[def.ID])
+	}
+	for _, ev := range sink.events {
+		if ev.Type == "schedule.run_failed" {
+			return
+		}
+	}
+	t.Fatal("incomplete cron did not publish a failure event")
 }

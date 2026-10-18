@@ -17,11 +17,11 @@ func contract(enforce string, as ...agent.OutcomeAssertion) *agent.OutcomeContra
 	return &agent.OutcomeContract{Assertions: as, Enforce: enforce}
 }
 
-func TestEvaluateOutcome_NoContractIsAlwaysMet(t *testing.T) {
+func TestEvaluateOutcome_NoContractIsUnverified(t *testing.T) {
 	for _, c := range []*agent.OutcomeContract{nil, {}, {Assertions: nil}} {
 		r := EvaluateOutcome(c, json.RawMessage(`{}`), nil)
-		if !r.Met || r.Outcome != OutcomeComplete {
-			t.Errorf("an agent with no contract must be unaffected: %+v", r)
+		if !r.Met || r.Outcome != OutcomeUnverified {
+			t.Errorf("an agent with no contract must stay unverified: %+v", r)
 		}
 	}
 }

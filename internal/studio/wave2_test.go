@@ -148,8 +148,8 @@ func TestToAgentDefinition_CarriesFieldsDisabled(t *testing.T) {
 	if def.Workflow.Entry != "fetch" {
 		t.Errorf("workflow entry = %q, want fetch", def.Workflow.Entry)
 	}
-	if def.MaxTurns != 15 {
-		t.Errorf("max_turns = %d, want 15", def.MaxTurns)
+	if def.MaxTurns != 0 {
+		t.Errorf("max_turns = %d, want 0 (inherit)", def.MaxTurns)
 	}
 	if def.Memory.MaxTokens != 8000 {
 		t.Errorf("memory max_tokens = %d, want 8000", def.Memory.MaxTokens)

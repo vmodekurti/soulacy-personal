@@ -135,15 +135,6 @@ func TestWorkflowExecutorSkipAndAbortErrorHandling(t *testing.T) {
 
 func TestWorkflowExecutorResumeSkipsCompletedStepsAndRestoresOutput(t *testing.T) {
 	store := newTestCheckpointStore(t)
-	if err := store.Upsert(context.Background(), Checkpoint{
-		AgentID: "workflow-agent",
-		RunID:   "run-resume",
-		StepID:  "first",
-		Status:  CheckpointCompleted,
-		State:   json.RawMessage(`"cached"`),
-	}); err != nil {
-		t.Fatalf("seed checkpoint: %v", err)
-	}
 
 	e := &Engine{}
 	var firstCalled bool
@@ -161,6 +152,21 @@ func TestWorkflowExecutorResumeSkipsCompletedStepsAndRestoresOutput(t *testing.T
 		{ID: "first", Tool: "first", Input: `{}`, Output: "first_out"},
 		{ID: "second", Tool: "second", Input: `{"prev":"{{.first_out}}"}`, Output: "second_out"},
 	}}, e, store, zap.NewNop())
+
+	release, err := w.bindRun(context.Background(), workflowTestMessage("go"), "run-resume")
+	if err != nil {
+		t.Fatal(err)
+	}
+	release()
+	if err := store.Upsert(context.Background(), Checkpoint{
+		AgentID: "workflow-agent",
+		RunID:   "run-resume",
+		StepID:  "first",
+		Status:  CheckpointCompleted,
+		State:   json.RawMessage(`"cached"`),
+	}); err != nil {
+		t.Fatalf("seed checkpoint: %v", err)
+	}
 
 	out, err := w.Run(context.Background(), workflowTestMessage("go"), "run-resume")
 	if err != nil {

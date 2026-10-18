@@ -79,6 +79,9 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	var runProvider, runModel, runStrategy string
 	defer func() {
 		degraded := reply.Metadata != nil && strings.EqualFold(reply.Metadata[message.MetaReasoningDegraded], "true")
+		if degraded && runOutcome == "success" {
+			runOutcome = "incomplete"
+		}
 		success := err == nil && runOutcome == "success" && !degraded
 		metrics.AgentRunDuration.WithLabelValues(msg.AgentID).Observe(time.Since(runStart).Seconds())
 		metrics.AgentRunsTotal.WithLabelValues(msg.AgentID, runOutcome).Inc()
@@ -91,7 +94,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 				Payload: map[string]any{
 					"run_id": runID, "provider": runProvider, "model": runModel,
 					"strategy": runStrategy, "success": success, "degraded": degraded,
-					"outcome": runOutcome,
+					"outcome": runOutcome, "metadata": reply.Metadata, "summary": reply.Metadata[message.MetaOutcomeSummary],
 				},
 				Timestamp: time.Now().UTC(),
 			})
@@ -193,6 +196,10 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	}
 	preflightTokens, preflightCalls := e.effectiveRunBudget(def)
 	ctx = llm.WithExecutionBudget(ctx, preflightTokens, preflightCalls)
+	ctx = withProgressGuard(ctx, def)
+	if e.sink != nil {
+		e.sink.Emit(message.Event{Type: "run.limits", AgentID: msg.AgentID, SessionID: msg.SessionID, Payload: e.executionLimits(def), Timestamp: time.Now().UTC()})
+	}
 
 	// Router short-circuit. Kind=="router" agents have no LLM loop — they
 	// match the inbound text against def.Routes and forward to the first
@@ -277,7 +284,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		// reply degraded below (P0-4/P0-6).
 		var outcomeReport OutcomeReport
 		wfCtx := WithOutcomeCollector(ctx, &outcomeReport)
-		wfResult, wfErr := we.Run(wfCtx, msg, "")
+		wfResult, wfErr := we.Run(wfCtx, msg, runID)
 		if wfErr != nil {
 			e.sink.Emit(message.Event{
 				Type: "error", AgentID: msg.AgentID, SessionID: msg.SessionID,
@@ -311,6 +318,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		// scheduler's degraded-delivery path labels it rather than presenting an
 		// empty brief as a finished one (P0-6: confidence incorporates
 		// completion contracts, not merely tool errors).
+		reply.Metadata = map[string]string{message.MetaOutcome: outcomeReport.Outcome, message.MetaOutcomeSummary: outcomeReport.Summary}
 		if def.Outcome.HasAssertions() && !outcomeReport.Met {
 			if reply.Metadata == nil {
 				reply.Metadata = map[string]string{}
@@ -331,7 +339,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		e.writeEpisodic(def, msg.AgentID, flattenParts(msg.Parts), replyText, true)
 		// Record the turn so follow-ups in this session carry conversation
 		// context (flowHistoryTranscript reads it on the next run).
-		e.recordWorkflowTurn(ctx, msg, replyText)
+		e.recordWorkflowTurn(ctx, msg, replyText, reply.Metadata)
 		runOutcome = "success"
 		return reply, nil
 	}
@@ -351,6 +359,14 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		sess.lastAccess = time.Now().UTC()
 		sess.mu.Unlock()
 	}()
+
+	// A turn includes every model/tool exchange. Locking individual history
+	// writes alone lets simultaneous requests overwrite each other's goal.
+	ctx, releaseTurn, lockErr := sess.acquireTurn(ctx)
+	if lockErr != nil {
+		return reply, lockErr
+	}
+	defer releaseTurn()
 
 	// ── Passphrase gate ───────────────────────────────────────────────────────
 	// Enforced in Go before the LLM is ever invoked. The model cannot bypass
@@ -452,6 +468,16 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	// and fail. In that case we degrade to the classic tool loop, which works
 	// with every provider.
 	if loopCfg, ok := reasoning.LoopConfigFromDefinition(def, sysPrefix, preparation.Profile.NativeTools != llm.SupportNo); ok {
+		requested := def.Reasoning.MaxSteps
+		if requested == 0 {
+			loopCfg.MaxSteps = e.effectiveMaxTurns(def)
+		} else {
+			loopCfg.MaxSteps = agent.ResolveTurns(requested, e.effectiveMaxTurns(def), e.turnsCeiling())
+		}
+		if loopCfg.MaxSteps == 0 {
+			loopCfg.MaxSteps = -1
+		}
+
 		if strings.TrimSpace(def.Reasoning.StepTimeout) == "" {
 			loopCfg.StepTimeout = e.effectiveStepTimeout()
 		}
@@ -460,6 +486,9 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		}
 		if e.reasoningBackendAvailable(def) {
 			reply, rerr := e.handleWithReasoning(ctx, def, sess, msg, loopCfg)
+			if stalled := progressGuardFrom(ctx).failure(); stalled != nil {
+				return reply, stalled
+			}
 			if rerr == nil {
 				runOutcome = "success"
 			}
@@ -541,19 +570,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		}
 	}
 	// Agentic loop: LLM → tool calls → LLM → … → final reply
-	maxTurns := def.MaxTurns
-	if maxTurns <= 0 {
-		maxTurns = 10
-	}
-	// S3.2 — clamp to the server-side ceiling so a misconfigured agent
-	// (max_turns: 10000) can't self-authorise a runaway, cost-heavy loop.
-	if ceiling := e.turnsCeiling(); maxTurns > ceiling {
-		e.log.Warn("engine: clamping max_turns to server ceiling",
-			zap.String("agent", msg.AgentID),
-			zap.Int("requested", maxTurns),
-			zap.Int("ceiling", ceiling))
-		maxTurns = ceiling
-	}
+	maxTurns := e.effectiveMaxTurns(def)
 
 	// S3.1 — per-run token/cost budget. We accumulate token usage and call
 	// count as the loop runs and check them BEFORE each LLM call, halting with
@@ -575,24 +592,28 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	seen := make(map[string]string)
 	var seenMu sync.Mutex
 
-	// Per-tool repeat counter (loop guard for weak models). The exact-args dedup
-	// above misses a model that RE-WORDS its arguments every turn (e.g. gemma
-	// reissuing web_search with slightly different queries). When a non-stateful
-	// tool is called more than repeatToolNudgeAt times, we inject a one-time
-	// system steer telling the model it already has enough from that tool.
-	toolNameCount := make(map[string]int)
-	const repeatToolNudgeAt = 3
 	// What actually went wrong, so a ceiling never reads as the cause (#229)
 	// and a run that only collects refusals stops early (#230).
 	failures := &runFailures{}
 
 	var finalContent string
-	for turn := 0; turn < maxTurns; turn++ {
+	completed := false
+	stopReason := "configured turn limit reached before completion"
+	prematureFinals := 0
+	for turn := 0; maxTurns == 0 || turn < maxTurns; turn++ {
+		if stalled := progressGuardFrom(ctx).failure(); stalled != nil {
+			stopReason = stalled.Error()
+			break
+		}
+		if err := ctx.Err(); err != nil {
+			return message.Message{}, err
+		}
 		// S3.1 — budget gate. Check BEFORE issuing the call so we never spend
 		// past the cap. When exceeded we stop the loop and let the
 		// final-synthesis / current finalContent path return what we have,
 		// with a clear terminal note appended below.
 		if reason := budgetExceeded(budgetTokens, usedTokens, budgetCalls, usedCalls); reason != "" {
+			stopReason = reason
 			e.log.Warn("engine: run budget exceeded — halting",
 				zap.String("agent", msg.AgentID),
 				zap.String("reason", reason),
@@ -639,7 +660,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		ctxLimit := modelContextLimit(def.LLM.Provider, def.LLM.Model)
 		reserveOut := def.LLM.MaxTokens
 		if reserveOut <= 0 {
-			reserveOut = 1024
+			reserveOut = agent.DefaultMaxOutputTokens
 		}
 		// Reserve the estimated prompt plus maximum output before dialing the
 		// provider. This prevents a run with one token remaining from starting a
@@ -647,6 +668,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		if budgetTokens > 0 {
 			remainingOutput := budgetTokens - usedTokens - estimateTokens(chatMsgs, tools)
 			if remainingOutput <= 0 {
+				stopReason = "token budget cannot fit the next prompt"
 				finalContent = strings.TrimSpace(bestEffortFinal(chatMsgs))
 				if finalContent != "" {
 					finalContent += "\n\n"
@@ -664,11 +686,17 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		// served with (the router applies the same reconciliation before the
 		// call). This keeps a large max_tokens from starving the prompt.
 		reserveOut = llm.ReconcileOutputReserve(preparation.Profile, reserveOut)
-		inputBudget := ctxLimit - reserveOut
-		if evidenced := llm.ProfileInputBudget(preparation.Profile, reserveOut); evidenced > 0 {
-			inputBudget = evidenced
+		inputBudget := llm.ProfileInputBudget(preparation.Profile, reserveOut)
+		if inputBudget <= 0 {
+			// Unknown model profiles still need a positive input allowance. A
+			// generous output default must not disable context management when
+			// it exceeds the conservative fallback window.
+			if reserveOut >= ctxLimit {
+				reserveOut = max(1, ctxLimit/2)
+			}
+			inputBudget = ctxLimit - reserveOut
 		}
-		if trimmed, dropped := trimMessagesToFit(chatMsgs, tools, inputBudget); dropped > 0 {
+		if trimmed, dropped := compactMessagesToFit(chatMsgs, tools, inputBudget); dropped > 0 {
 			chatMsgs = trimmed
 			e.log.Warn("engine: trimmed history to fit context window",
 				zap.String("agent", msg.AgentID),
@@ -729,7 +757,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		// window is smaller than our table), aggressively halve the non-system
 		// history and retry ONCE before giving up.
 		if err != nil && isContextExceededErr(err) && ctx.Err() == nil && (budgetCalls == 0 || usedCalls < budgetCalls) {
-			if shrunk, dropped := trimMessagesToFit(chatMsgs, tools, estimateTokens(chatMsgs, tools)/2); dropped > 0 {
+			if shrunk, dropped := compactMessagesToFit(chatMsgs, tools, estimateTokens(chatMsgs, tools)/2); dropped > 0 {
 				e.log.Warn("engine: provider reported context exceeded — retrying with trimmed history",
 					zap.String("agent", msg.AgentID), zap.Int("dropped_messages", dropped))
 				chatMsgs = shrunk
@@ -869,7 +897,25 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 
 		// No tool calls → we have a final answer
 		if len(resp.ToolCalls) == 0 {
+			invalidToolCall := def.LLM.OutputSchema == nil && len(tools) > 0 && isUnrecoveredToolInvocation(resp.Content)
+			unfinished := invalidToolCall || strings.TrimSpace(resp.Content) == "" || (def.LLM.OutputSchema == nil && (reasoning.IsProgressPreamble(resp.Content) || reasoning.IsInternalScratchNarration(resp.Content)))
+			if unfinished && prematureFinals < 3 && (maxTurns == 0 || turn+1 < maxTurns) {
+				prematureFinals++
+				sess.mu.Lock()
+				e.appendHistoryLocked(sess, llm.ChatMessage{Role: "assistant", Content: resp.Content}, llm.ChatMessage{Role: "system", Content: "The task is unfinished. Continue with the next concrete action. Use native tool calls; do not write tool invocation markup as an answer. Return a final answer only when the requested work is complete, or explain a specific blocker."})
+				sess.mu.Unlock()
+				chatMsgs = e.buildContext(def, sess, msg)
+				continue
+			}
+			completed = !unfinished
+			if unfinished {
+				stopReason = "the model repeatedly described unfinished work"
+			}
 			finalContent = resp.Content
+			if invalidToolCall {
+				stopReason = "the model returned tool-call text that could not be executed"
+				finalContent = "The model could not produce a valid tool call, so the requested work is incomplete."
+			}
 			break
 		}
 
@@ -877,33 +923,6 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		// same arguments, the model is stuck repeating itself (some models emit a
 		// spurious tool call alongside their real answer every turn). Stop here and
 		// use the model's text as the final answer instead of burning all turns.
-		allDup := len(resp.ToolCalls) > 0
-		for _, tc := range resp.ToolCalls {
-			aj, _ := json.Marshal(tc.Arguments)
-			name := normalizeToolCallName(tc.Name)
-
-			// Stateful tools should not trigger the loop breaker since their
-			// execution environment or underlying files may have changed.
-			if name == "shell_exec" || name == "run_script" || name == "http_request" {
-				allDup = false
-				break
-			}
-
-			seenMu.Lock()
-			_, ok := seen[name+"|"+string(aj)]
-			seenMu.Unlock()
-			if !ok {
-				allDup = false
-				break
-			}
-		}
-		if allDup {
-			// Model is repeating tools instead of answering. Stop the tool loop;
-			// the post-loop synthesis step will force a plain-text final answer.
-			finalContent = resp.Content // usually empty for these models
-			break
-		}
-
 		// Execute each tool call
 		toolResults := e.executeToolCalls(ctx, def, msg.SessionID, resp.ToolCalls, seen, &seenMu)
 
@@ -913,20 +932,6 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		// dedup can't, without ever blocking a legitimately varied tool sequence.
 		// A durable refusal is worth saying once and acting on; see engine_blocked.go.
 		nudges := failures.observe(toolResults)
-		for _, tc := range resp.ToolCalls {
-			name := normalizeToolCallName(tc.Name)
-			if name == "shell_exec" || name == "run_script" || name == "http_request" {
-				continue
-			}
-			toolNameCount[name]++
-			if toolNameCount[name] == repeatToolNudgeAt+1 {
-				nudges = append(nudges, fmt.Sprintf(
-					"You have called %q %d times already and have enough from it. Do NOT call %q again — "+
-						"use a DIFFERENT skill/tool to get the data you still need (e.g. read_skill for a specialized skill), "+
-						"or write your final answer now from what you already have. Do not fabricate data you did not retrieve.",
-					name, toolNameCount[name], name))
-			}
-		}
 
 		// Append assistant + tool result turns for next loop iteration.
 		// NOTE: release sess.mu BEFORE calling buildContext — buildContext locks
@@ -953,6 +958,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		// Answering now costs one prompt; carrying on costs one per turn until
 		// a ceiling fires and buries the reason (#230).
 		if failures.shouldStop() {
+			stopReason = "required tools were refused by policy"
 			finalContent = failures.stopMessage()
 			e.sink.Emit(message.Event{
 				Type: "error", AgentID: msg.AgentID, SessionID: msg.SessionID,
@@ -972,6 +978,10 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		// hides the actionable installer error.
 		if turn == 0 && !autoDelegated && forcePackageInstall {
 			finalContent = formatPackageInstallReply(toolResults)
+			completed = len(toolResults) == 1 && !toolResults[0].IsError
+			if !completed {
+				stopReason = "package installation failed"
+			}
 			break
 		}
 
@@ -1042,7 +1052,11 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		})
 	}
 
-	reply = e.finalizeReply(ctx, def, sess, msg, finalContent)
+	var finalMetadata map[string]string
+	if !completed {
+		finalMetadata = map[string]string{message.MetaReasoningDegraded: "true", message.MetaOutcome: "incomplete", message.MetaOutcomeSummary: stopReason}
+	}
+	reply = e.finalizeReply(ctx, def, sess, msg, finalContent, finalMetadata)
 
 	runOutcome = "success" // flips the deferred AgentRunsTotal counter from "error"
 	return reply, nil
@@ -1118,30 +1132,6 @@ func (e *Engine) flowHistoryTranscript(sessionID, agentID string, maxMsgs int) s
 // in-memory session history (so the next turn's flowHistoryTranscript sees it)
 // and the durable conversation store. Workflow agents bypass finalizeReply, so
 // without this they'd never accumulate conversational context.
-func (e *Engine) recordWorkflowTurn(ctx context.Context, msg message.Message, replyText string) {
-	userText := flattenParts(msg.Parts)
-	sess := e.getOrCreateSession(msg.SessionID, msg.AgentID)
-	sess.mu.Lock()
-	e.appendHistoryLocked(sess,
-		llm.ChatMessage{Role: "user", Content: userText},
-		llm.ChatMessage{Role: "assistant", Content: replyText},
-	)
-	sess.mu.Unlock()
-
-	if e.historyStore != nil {
-		if err := e.historyStore.Append(ctx, session.ConversationEntry{
-			SessionID: msg.SessionID, AgentID: msg.AgentID, Role: "user", Content: userText,
-		}); err != nil {
-			e.log.Warn("history store: append workflow user turn failed", zap.Error(err))
-		}
-		if err := e.historyStore.Append(ctx, session.ConversationEntry{
-			SessionID: msg.SessionID, AgentID: msg.AgentID, Role: "assistant", Content: replyText,
-		}); err != nil {
-			e.log.Warn("history store: append workflow assistant turn failed", zap.Error(err))
-		}
-	}
-}
-
 // writeEpisodic persists a task→reply pair as an episodic brain memory record.
 // It fires when the brain store is wired AND episodic memory is "on" for the
 // agent: either episodic is explicitly enabled, or NO brain_memory block was
@@ -1169,7 +1159,7 @@ func (e *Engine) writeEpisodic(def *agent.Definition, agentID, taskInput, finalC
 // identical: append the assistant turn to in-memory session history, persist
 // to session memory, write the episodic brain record, build the reply,
 // emit message.out, and append both turns to the durable history store.
-func (e *Engine) finalizeReply(ctx context.Context, def *agent.Definition, sess *Session, msg message.Message, finalContent string) message.Message {
+func (e *Engine) finalizeReply(ctx context.Context, def *agent.Definition, sess *Session, msg message.Message, finalContent string, finalMetadata ...map[string]string) message.Message {
 	// Last line of defense before persistence and channel delivery: no runtime
 	// path should surface ReAct/control JSON or provider answer envelopes as the
 	// assistant's visible reply. SanitizeFinalOutput preserves legitimate JSON
@@ -1212,6 +1202,7 @@ func (e *Engine) finalizeReply(ctx context.Context, def *agent.Definition, sess 
 
 	reply := message.Message{
 		ID:        msg.ID, // correlate reply to request
+		Metadata:  map[string]string{"run_id": msg.ID},
 		SessionID: msg.SessionID,
 		AgentID:   msg.AgentID,
 		Channel:   msg.Channel,
@@ -1220,8 +1211,19 @@ func (e *Engine) finalizeReply(ctx context.Context, def *agent.Definition, sess 
 		Parts:     message.Text(finalContent),
 		CreatedAt: time.Now().UTC(),
 	}
+	for _, metadata := range finalMetadata {
+		for key, value := range metadata {
+			if reply.Metadata == nil {
+				reply.Metadata = map[string]string{}
+			}
+			reply.Metadata[key] = value
+		}
+	}
 	if spokenContent != "" {
-		reply.Metadata = map[string]string{"response.spoken": spokenContent}
+		if reply.Metadata == nil {
+			reply.Metadata = map[string]string{}
+		}
+		reply.Metadata["response.spoken"] = spokenContent
 	}
 
 	e.sink.Emit(message.Event{
@@ -1242,7 +1244,7 @@ func (e *Engine) finalizeReply(ctx context.Context, def *agent.Definition, sess 
 		}
 		if err := e.historyStore.Append(ctx, session.ConversationEntry{
 			SessionID: msg.SessionID, AgentID: msg.AgentID,
-			Role: "assistant", Content: finalContent,
+			Role: "assistant", Content: finalContent, Metadata: reply.Metadata,
 		}); err != nil {
 			e.log.Warn("history store: append assistant turn failed", zap.Error(err))
 		}

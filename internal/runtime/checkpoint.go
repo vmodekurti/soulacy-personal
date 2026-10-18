@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"sync"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -29,7 +30,11 @@ type Checkpoint struct {
 }
 
 // CheckpointStore persists workflow checkpoints to SQLite.
-type CheckpointStore struct{ db *sql.DB }
+type CheckpointStore struct {
+	db       *sql.DB
+	runLocks map[string]*workflowRunLock
+	runMu    sync.Mutex
+}
 
 // NewCheckpointStore opens (or creates) the checkpoint database at path.
 func NewCheckpointStore(path string) (*CheckpointStore, error) {
@@ -62,6 +67,7 @@ CREATE TABLE IF NOT EXISTS workflow_checkpoints (
     PRIMARY KEY (agent_id, run_id, step_id)
 );
 CREATE INDEX IF NOT EXISTS idx_wf_status ON workflow_checkpoints(status);
+CREATE TABLE IF NOT EXISTS workflow_run_identity(agent_id TEXT NOT NULL, run_id TEXT NOT NULL, identity TEXT NOT NULL, PRIMARY KEY(agent_id,run_id));
 `)
 	return err
 }

@@ -10,7 +10,8 @@ describe('deployed agents mobile layout', () => {
     expect(src).toContain('class="hdr-actions editor-actions"')
     expect(src).toContain('class="btn-primary save-action"')
     expect(src).toContain('.editor-actions .save-action')
-    expect(src).toContain('position: sticky;')
+    // Keep the action header in flow so it cannot cover fields on phones.
+    expect(src).toMatch(/\.editor-hdr\s*\{[^}]*position: static;/)
     expect(src).toContain('grid-column: 1 / -1;')
   })
 
