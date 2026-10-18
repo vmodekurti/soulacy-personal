@@ -1,7 +1,7 @@
 # Document Ingestion
 
-Builds a knowledge base from your documents (PDF, Markdown, text) and answers
-questions grounded in them, citing the source document — and says when something
+Builds a knowledge base from your documents (PDF, Markdown, text), answers
+questions grounded in them with citations to the source document, and says when something
 isn't in the knowledge base.
 
 ## Requirements
@@ -18,7 +18,7 @@ isn't in the knowledge base.
 
 1. Create or select a knowledge base and ingest your documents (see
    [Knowledge Bases](../using/knowledge.md)).
-2. Review the readiness checklist — it confirms the KB is populated.
+2. Review the readiness checklist: it confirms the KB is populated.
 3. Run the **mock test** with a question you know the answer to.
 4. Run the **real test** against the ingested corpus.
 5. Install.

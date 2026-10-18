@@ -55,7 +55,7 @@ usually reachable from the internet, you have no shell of your own to repair
 what an agent breaks, and the container is rebuilt from an image you may not
 control.
 
-A container you run yourself — Docker, Kubernetes — keeps the decision. The
+A container you run yourself (Docker, Kubernetes) keeps the decision. The
 line is whether you can get in and undo a mistake, not whether the machine
 happens to be in a data centre.
 
@@ -66,6 +66,6 @@ without root. When the report says a system package is missing, the answer is
 always the image: add it to the Dockerfile and redeploy. The report says that
 rather than suggesting a command that cannot work.
 
-The exception is anything that only needs to be *found* rather than installed —
-see [browser automation](../agents/browser-automation.md), which turns ~30MB of image
+The exception is anything that only needs to be *found* rather than installed.
+See [browser automation](../agents/browser-automation.md), which turns ~30MB of image
 weight into a download you make only if you need it.

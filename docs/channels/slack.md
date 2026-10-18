@@ -33,9 +33,9 @@ Under **Event Subscriptions**, enable and subscribe to:
 
 ### 5. Install to workspace and copy tokens
 
-- **Bot Token** (`xoxb-...`) — from OAuth & Permissions
-- **App-Level Token** (`xapp-...`) — from Socket Mode (if using socket mode)
-- **Signing Secret** — from Basic Information
+- **Bot Token** (`xoxb-...`): from OAuth & Permissions
+- **App-Level Token** (`xapp-...`): from Socket Mode (if using socket mode)
+- **Signing Secret**: from Basic Information
 
 ### 6. Configure Soulacy
 

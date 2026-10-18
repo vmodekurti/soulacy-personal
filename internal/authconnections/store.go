@@ -212,6 +212,27 @@ func (s *Store) MarkSecret(ctx context.Context, workspaceID, id string, expiresA
 	return nil
 }
 
+// MarkValidated records that the encrypted session successfully reached its
+// approved website. It deliberately leaves the provider-controlled expiry
+// untouched: a successful request proves the session works now, but does not
+// let Soulacy invent a longer lifetime than the provider granted.
+func (s *Store) MarkValidated(ctx context.Context, workspaceID, id string) error {
+	now := time.Now().UTC()
+	result, err := s.db.ExecContext(ctx, `UPDATE authenticated_connections SET
+		last_validated_at=?,updated_at=? WHERE workspace_id=? AND id=? AND status=?`, now, now, workspaceID, id, StatusReady)
+	if err != nil {
+		return err
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		if _, getErr := s.Get(ctx, workspaceID, id); getErr != nil {
+			return getErr
+		}
+		return ErrNotReady
+	}
+	return nil
+}
+
 func (s *Store) SetStatus(ctx context.Context, workspaceID, id, status string) error {
 	result, err := s.db.ExecContext(ctx, `UPDATE authenticated_connections SET status=?,updated_at=?
       WHERE workspace_id=? AND id=?`, status, time.Now().UTC(), workspaceID, id)

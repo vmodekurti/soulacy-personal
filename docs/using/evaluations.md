@@ -79,8 +79,8 @@ sy eval --agent weather --suite evals/golden/weather.yaml --tag weather --repeat
 A case that needs credentials lists them in `requires_secret`. If any named
 environment variable is unset, the case is **skipped with a clear reason**
 (`missing required secret(s): SLACK_BOT_TOKEN`) rather than failing. This lets CI
-run the non-secret subset automatically while local runs execute the full set —
-and the skip reason documents exactly what to set.
+run the non-secret subset automatically while local runs execute the full set.
+The skip reason documents exactly what to set.
 
 ## Golden suites
 
@@ -95,7 +95,7 @@ secret-backed and skip cleanly when their tokens aren't present.
 
 ## In CI
 
-Run the non-secret subset on every push — cases needing secrets skip themselves,
+Run the non-secret subset on every push: cases needing secrets skip themselves,
 so no configuration is required:
 
 ```bash

@@ -60,7 +60,7 @@ Retry-After: 15          ← only on 429 responses
 
 Soulacy tracks LLM token consumption per user and per agent. Token counts are reported by the LLM provider and stored in the cost records table.
 
-Token limits work alongside request limits — a single request with a very large context can exhaust the token budget even if the request count limit has not been reached.
+Token limits work alongside request limits: a single request with a very large context can exhaust the token budget even if the request count limit has not been reached.
 
 ## Distributed rate limiting
 

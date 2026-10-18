@@ -17,6 +17,9 @@
   let captureOpened = false
   let companionReady = false
   let companionVersion = ''
+  let companionOutdated = false
+  let deepLinkHandled = false
+  const minimumCompanionVersion = '1.1.1'
 
   $: captureCommand = loginURL.trim()
     ? `sy --gateway ${window.location.origin} connection capture ${shellQuote(loginURL.trim())}${name.trim() ? ` --name ${shellQuote(name.trim())}` : ''}${domains.trim() ? ` --domains ${shellQuote(domains.trim())}` : ''}${agentIDs.trim() ? ` --agents ${shellQuote(agentIDs.trim())}` : ''}`
@@ -28,6 +31,13 @@
     try {
       const response = await api.connections.list()
       connections = response.connections || []
+      if (!deepLinkHandled) {
+        deepLinkHandled = true
+        const query = new URLSearchParams((location.hash.split('?')[1] || ''))
+        const connectionID = query.get('connection')
+        const requested = connections.find((connection) => connection.id === connectionID)
+        if (requested) openCapture(requested)
+      }
     } catch (e) {
       error = e.message || 'Could not load website sign-ins.'
     } finally {
@@ -69,12 +79,38 @@
   async function detectCompanion() {
     try {
       const result = await companionRequest('ping', {}, 600)
-      companionReady = true
       companionVersion = result.version || ''
+      companionOutdated = !versionAtLeast(companionVersion, minimumCompanionVersion)
+      companionReady = !companionOutdated
     } catch (_) {
       companionReady = false
       companionVersion = ''
+      companionOutdated = false
     }
+  }
+
+  function versionAtLeast(version, minimum) {
+    const current = String(version || '').split('.').map(value => Number.parseInt(value, 10) || 0)
+    const required = String(minimum || '').split('.').map(value => Number.parseInt(value, 10) || 0)
+    for (let i = 0; i < Math.max(current.length, required.length); i += 1) {
+      if ((current[i] || 0) > (required[i] || 0)) return true
+      if ((current[i] || 0) < (required[i] || 0)) return false
+    }
+    return true
+  }
+
+  function checkedLabel(value) {
+    if (!value) return 'Not checked yet'
+    const checked = new Date(value)
+    if (Number.isNaN(checked.getTime())) return 'Last checked recently'
+    const seconds = Math.max(0, Math.round((Date.now() - checked.getTime()) / 1000))
+    if (seconds < 60) return 'Last checked just now'
+    const minutes = Math.floor(seconds / 60)
+    if (minutes < 60) return `Last checked ${minutes}m ago`
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return `Last checked ${hours}h ago`
+    const days = Math.floor(hours / 24)
+    return `Last checked ${days}d ago`
   }
 
   function openCapture(connection = null) {
@@ -172,7 +208,7 @@
   onMount(load)
 </script>
 
-<svelte:head><title>Website Access — Soulacy</title></svelte:head>
+<svelte:head><title>Website Access | Soulacy</title></svelte:head>
 
 <main class="page">
   <header>
@@ -190,7 +226,7 @@
   <section class="card intro">
     <div>
       <h2>Saved website sign-ins</h2>
-      <p>Soulacy opens the real website login in Chrome, where password managers, MFA, CAPTCHA, and passkeys continue to work. It saves only the approved site’s session state, encrypts it locally, and replays the cookies inside a restricted read-only fetch tool.</p>
+      <p>Soulacy opens the real website login in Chrome, where password managers, MFA, CAPTCHA, and passkeys continue to work. It saves only the approved site’s session state, encrypts it locally, and renews rotated cookies and browser storage after successful use.</p>
     </div>
     <button class="primary" on:click={() => openCapture()}>+ Add website sign-in</button>
   </section>
@@ -209,6 +245,8 @@
               <span>{connection.allowed_domains?.join(', ')}</span>
               <span>{connection.agent_ids?.length || 0} agent grant(s)</span>
               <span>Encrypted</span>
+              <span>Auto-renew on use</span>
+              <span>{checkedLabel(connection.last_validated_at)}</span>
             </div>
           </div>
           <span class:ready={connection.status === 'ready'} class="status">{connection.status}</span>
@@ -223,7 +261,7 @@
 
   <section class="guardrail">
     <strong>Session boundary</strong>
-    <span>Soulacy accepts HTTPS pages only, blocks private-network targets and off-domain redirects, and marks the sign-in expired when the site returns 401 or 403. Cookie values never enter prompts, tool arguments, logs, or API responses.</span>
+    <span>Soulacy accepts HTTPS pages only, blocks private-network targets and off-domain redirects, saves approved session updates after successful use, and marks the sign-in expired when the provider requires a new login. Cookie values never enter prompts, tool arguments, logs, or API responses.</span>
   </section>
 </main>
 
@@ -239,10 +277,10 @@
       {#if !captureConnection}<label>Agent IDs (optional)<input bind:value={agentIDs} placeholder="research-agent, daily-briefing" /></label>{/if}
 
       <div class:ready={companionReady} class="companion">
-        <strong>{companionReady ? `Session Capture companion ready${companionVersion ? ` · v${companionVersion}` : ''}` : 'Session Capture companion not detected'}</strong>
+        <strong>{companionReady ? `Session Capture companion ready${companionVersion ? ` · v${companionVersion}` : ''}` : companionOutdated ? `Session Capture companion update required · v${companionVersion}` : 'Session Capture companion not detected'}</strong>
         {#if !companionReady}
-          <span>Download and unzip it. In Chrome, open <code>chrome://extensions</code>, enable Developer mode, and choose <strong>Load unpacked</strong>.</span>
-          <div class="actions"><a href="/downloads/soulacy-session-capture.zip">Download companion</a><button type="button" class="compact" on:click={detectCompanion}>Check again</button></div>
+          <span>{companionOutdated ? 'Download the updated companion and replace the existing unpacked extension.' : 'Download and unzip it. In Chrome, open chrome://extensions, enable Developer mode, and choose Load unpacked.'}</span>
+          <div class="actions"><a href="/downloads/soulacy-session-capture.zip">{companionOutdated ? 'Download update' : 'Download companion'}</a><button type="button" class="compact" on:click={detectCompanion}>Check again</button></div>
         {/if}
       </div>
 
@@ -267,4 +305,30 @@
 
 <style>
   .page{padding:24px;max-width:1180px;margin:0 auto;color:var(--text,#eef)}header{display:flex;justify-content:space-between;gap:24px;align-items:start;margin-bottom:24px}h1{margin:2px 0 6px;font-size:28px}h2{margin:0;font-size:18px}.eyebrow{color:#8c7cff;font-size:11px;font-weight:800;letter-spacing:.12em;margin:0}.lede,.card p,.modal>p,.guardrail span{color:var(--muted,#9ba3c4)}.lede{margin:0;max-width:760px}.card,.connection,.guardrail{background:var(--panel,#121628);border:1px solid var(--border,#2a3152);border-radius:12px}.intro{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:20px}.intro p{max-width:780px;margin:8px 0 0;line-height:1.55}.list{display:grid;gap:10px;margin:16px 0}.connection{display:flex;align-items:center;gap:12px;padding:14px}.lock{font-size:22px}.copy{display:grid;gap:4px;min-width:0;flex:1}.copy>span{color:var(--muted,#9ba3c4);font-size:12px;overflow:hidden;text-overflow:ellipsis}.facts{display:flex;gap:7px;flex-wrap:wrap;margin-top:4px}.facts span{background:#1c2239;border-radius:999px;padding:4px 8px;font-size:10px}.status{padding:5px 9px;border-radius:999px;background:#2a2030;color:#f0b85c;font-size:11px;font-weight:700;text-transform:capitalize}.status.ready{background:#12352d;color:#65e3a7}.empty{margin:16px 0;padding:30px;border:1px dashed #343b5d;border-radius:10px;color:#929bbb;text-align:center}.guardrail{display:grid;gap:6px;margin-top:16px;padding:16px;border-left:3px solid #7868ff}.guardrail span{font-size:12px;line-height:1.5}button,.actions a{border:1px solid #343b60;background:#20263e;color:#eef;border-radius:7px;padding:9px 13px;cursor:pointer;text-decoration:none;font-size:13px}.primary{background:#6959f7;border-color:#6959f7}.danger{color:#ff8d98;border-color:#703943;background:#2d1c27}.compact{padding:6px 9px}.notice{padding:11px 14px;border-radius:8px;margin-bottom:16px}.notice.error{color:#ff8995;background:#341d29}.notice.success{color:#62dfa1;background:#12342c}.backdrop{position:fixed;inset:0;background:#050714c9;display:grid;place-items:center;z-index:100;padding:20px}.modal{width:min(620px,100%);max-height:90vh;overflow:auto;background:#14182b;border:1px solid #394161;border-radius:12px;padding:22px;box-shadow:0 20px 80px #0008}.modal label{display:grid;gap:7px;margin:15px 0;font-size:12px;color:#bbc3e2}.modal input{background:#0f1324;color:#eef;border:1px solid #343b5b;border-radius:7px;padding:10px}.modal input:disabled{opacity:.7}.companion{display:grid;gap:8px;margin:14px 0;padding:12px;border:1px solid #70434b;border-radius:8px;background:#2b1b26;color:#ff9ca6;font-size:12px}.companion.ready{border-color:#245c4d;background:#112e28;color:#65e3a7}.companion span,details p,ol{color:#b8c0dc;line-height:1.45}.actions{display:flex;gap:8px;align-items:center}.modal details{margin-top:14px;border:1px solid #303757;border-radius:8px;padding:11px}.modal summary{cursor:pointer;color:#c8c1ff;font-size:12px;font-weight:700}.modal pre{white-space:pre-wrap;word-break:break-all;background:#090d1b;border-radius:7px;padding:10px;color:#b9f3dc;font-size:11px}.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}@media(max-width:720px){.page{padding:16px}.intro,.connection{align-items:stretch;flex-direction:column}.status{width:max-content}}
+
+  /* The integration screen follows the shared day/night palette. Keep the
+     legacy declarations above as structural defaults, then map every visible
+     surface and label onto audited semantic tokens here. */
+  .page { color: var(--sl-text); }
+  .eyebrow { color: var(--sl-accent-ink); }
+  .lede, .card p, .modal > p, .guardrail span, .copy > span { color: var(--sl-text-dim); }
+  .card, .connection, .guardrail, .modal {
+    color: var(--sl-text); background: var(--sl-surface); border-color: var(--sl-line);
+    box-shadow: var(--sl-shadow-sm);
+  }
+  .facts span { color: var(--sl-text-dim); background: var(--sl-surface-raised); border: 1px solid var(--sl-line); }
+  .status { color: var(--sl-text); background: color-mix(in srgb, var(--sl-mango) 14%, var(--sl-surface)); border: 1px solid color-mix(in srgb, var(--sl-mango) 34%, var(--sl-line)); }
+  .status.ready { color: var(--sl-text); background: color-mix(in srgb, var(--sl-leaf) 14%, var(--sl-surface)); border-color: color-mix(in srgb, var(--sl-leaf) 34%, var(--sl-line)); }
+  .empty { color: var(--sl-text-dim); border-color: var(--sl-line-strong); }
+  .guardrail { border-left-color: var(--sl-accent); }
+  button, .actions a { color: var(--sl-text); background: var(--sl-surface-raised); border-color: var(--sl-line-strong); }
+  .primary { color: var(--sl-on-accent); background: var(--sl-accent-fill); border-color: var(--sl-accent-fill); }
+  .primary:hover { background: var(--sl-accent-fill-hover); border-color: var(--sl-accent-fill-hover); }
+  .danger { color: var(--sl-text); background: color-mix(in srgb, var(--sl-coral) 10%, var(--sl-surface)); border-color: var(--sl-coral); }
+  .modal label, .companion span, details p, ol { color: var(--sl-text-dim); }
+  .modal input { color: var(--sl-text); background: var(--sl-surface); border-color: var(--sl-line-strong); }
+  .companion, .companion.ready { color: var(--sl-text); background: var(--sl-surface-raised); border-color: var(--sl-line-strong); }
+  .modal details { border-color: var(--sl-line); }
+  .modal summary { color: var(--sl-accent-ink); }
+  .modal pre { color: var(--sl-text); background: var(--sl-surface-raised); }
 </style>

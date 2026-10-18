@@ -71,6 +71,12 @@ const (
 	// ("three sources were added — 0 items"), for display where the full
 	// assertion list would be too much.
 	MetaOutcomeSummary = "outcome_summary"
+	// MetaTaskState and MetaTaskOutcome carry the runtime's authoritative
+	// terminal contract across the Engine boundary. Consumers such as the
+	// scheduler must use these fields instead of inferring completion from prose.
+	MetaTaskState   = "task_state"
+	MetaTaskOutcome = "task_outcome"
+	MetaTaskBlocker = "task_blocker"
 )
 
 // Text is a convenience constructor for a plain-text message.

@@ -63,13 +63,13 @@ flowchart TB
 
 ## Components
 
-**Gateway + GUI** — the only externally visible surface. A Fiber HTTP
+**Gateway + GUI**: the only externally visible surface. A Fiber HTTP
 server owns the [REST API](../api/index.md), CORS, rate limiting, auth
 (static key → JWT → OIDC), the WebSocket event stream, and the embedded
-Svelte GUI served from the same port. It contains no agent logic — it is
+Svelte GUI served from the same port. It contains no agent logic: it is
 a thin adapter over the engine, loader, scheduler, and channels.
 
-**Channels** — each adapter implements a small interface
+**Channels**: each adapter implements a small interface
 (`Start`/`Send`/`Stop`/`Status`): Telegram (long-poll), Slack (Socket
 Mode), Discord (gateway WebSocket), WhatsApp (Meta Cloud webhook with
 HMAC verification), and the always-on HTTP channel behind `POST /chat`.
@@ -78,20 +78,31 @@ supervised stdio **sidecars** speaking the
 [External Channel Protocol](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/EXTERNAL_CHANNEL_PROTOCOL.md), with crash
 backoff and restart contained by the supervisor.
 
-**Runtime engine** — the heart. For each inbound message it builds
+**Runtime engine**: the heart. For each inbound message it builds
 context (memory + knowledge + skills catalog), assembles the per-agent
 tool list, calls the LLM, executes tool calls, and repeats up to
 `max_turns`. It is reentrant: a peer agent invoked as a tool is just
 another engine call on a fresh, depth-limited session. SOUL.yaml files
 hot-reload via a file watcher.
 
-**LLM router** — a neutral `CompletionRequest` dispatched to the
+Every engine call also creates a versioned task contract. The contract
+normalizes the inbound message into a bounded perception record, carries the
+run budget and completion criteria, records redacted tool evidence, and tracks
+replanning. The runtime, rather than model prose, assigns the terminal outcome:
+`direct_answer`, `evidence_based`, `attempted`, `needs_input`,
+`verified_action`, `blocked`, or `failed`. External actions require explicit
+runtime evidence before they can be recorded as verified. A failed route gets
+at most two capability-level replans through connectors or APIs, an authorized
+website action, an official alternative, and finally a request for the minimum
+missing human input.
+
+**LLM router**: a neutral `CompletionRequest` dispatched to the
 configured provider: Anthropic, Gemini, Ollama, or any OpenAI-compatible
 endpoint (OpenAI, Groq, OpenRouter, vLLM…). Embedders are registered
 separately so each knowledge base can pin its own embedding
 provider/model. See [LLM Providers](../configuration/llm.md).
 
-**Memory layers** — session history (hot, capped by
+**Memory layers**: session history (hot, capped by
 `memory.max_history`), a durable SQLite archive, and the three-layer
 *brain memory* (episodic / semantic / procedural) exposed via the
 brain-memory API. Procedural memory is versioned as
@@ -99,13 +110,13 @@ brain-memory API. Procedural memory is versioned as
 Semantic search runs on the configured
 [vector backend](../configuration/storage.md).
 
-**Queue & events** — every notable action becomes a schema-v1 envelope on
+**Queue & events**: every notable action becomes a schema-v1 envelope on
 `soulacy.events.<type>`, carried by the configured queue (in-process by
 default, NATS JetStream for multi-process). The same stream feeds the
 GUI's WebSocket, [signed webhooks](../configuration/events.md), and any
 external subscriber. Contract: [`docs/EVENTS.md`](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/EVENTS.md).
 
-**Plugins & capabilities** — plugins ship a signed
+**Plugins & capabilities**: plugins ship a signed
 [manifest](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/PLUGIN_MANIFEST.md) declaring the
 [capabilities](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/PLUGIN_CAPABILITIES.md) they need (events, credentials,
 GUI mounts…). Installation is stage → safety introspection → explicit
@@ -113,17 +124,17 @@ approval ([`PLUGIN_INSTALL.md`](https://github.com/vmodekurti/soulacy-personal/b
 is skipped with a diagnostic, never a crash. Plugin GUIs mount as
 sandboxed iframes with scoped tokens.
 
-**Registries** — skills and plugins resolve by slug through configured
+**Registries**: skills and plugins resolve by slug through configured
 [package registries](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/PACKAGE_REGISTRIES.md) (HTTP or git), queried in
 priority order with optional ed25519 package signing. The reference
 registry server ships in the binary (`soulacy registry serve`).
 
-**Reasoning** — agents can opt into
+**Reasoning**: agents can opt into
 [reasoning strategies](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/REASONING_STRATEGIES.md) (plan-act loops and
 friends) that emit `reasoning.start/step/result` events and can update
 the agent's rulebook (`rulebook.updated`).
 
-**Workflows & flows** — multi-step agent pipelines: declarative workflow
+**Workflows & flows**: multi-step agent pipelines: declarative workflow
 steps in SOUL.yaml and [flow graphs](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/FLOW_GRAPHS.md) rendered live in
 the GUI's Flow View.
 
@@ -131,19 +142,20 @@ the GUI's Flow View.
 
 1. `POST /api/v1/chat` hits auth → RBAC → rate-limit middleware.
 2. The HTTP channel hands the message to the engine synchronously.
-3. The engine assembles context, loops LLM ↔ tools, persists memory.
+3. The engine creates a task contract, assembles context, loops LLM ↔ tools,
+   evaluates completion evidence, and persists memory.
 4. Every step emits events: action log (durable JSONL + SQLite), the
    WebSocket hub, and the queue publisher (webhooks, NATS).
 5. The reply returns in the HTTP response; costs are recorded per
    agent/session.
 
 Scheduler triggers and Workboard runs enter at step 2 with synthetic
-messages — same path, same observability.
+messages: same path, same observability.
 
 ## Where to go deeper
 
-- [Specs & Deep Dives](specs.md) — annotated index of every in-repo spec
-- [Configuration overview](../configuration/index.md) — every knob
-- [API Reference](../api/index.md) — the full route catalog
-- [`docs/FRAMEWORK_OVERVIEW.md`](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/FRAMEWORK_OVERVIEW.md) — code-level
+- [Specs & Deep Dives](specs.md): annotated index of every in-repo spec
+- [Configuration overview](../configuration/index.md): every knob
+- [API Reference](../api/index.md): the full route catalog
+- [`docs/FRAMEWORK_OVERVIEW.md`](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/FRAMEWORK_OVERVIEW.md): code-level
   walkthrough with file/line cite points

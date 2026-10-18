@@ -324,7 +324,8 @@ func (a *App) Run(parent context.Context) error {
 	if len(cfg.AgentDirs) > 0 {
 		agentDir = cfg.AgentDirs[0]
 	}
-	engine.SetGenieMonitorManager(&genieMonitorManager{loader: loader, scheduler: sched, agentDir: agentDir})
+	genieMonitors := &genieMonitorManager{loader: loader, scheduler: sched, agentDir: agentDir}
+	engine.SetGenieMonitorManager(genieMonitors)
 	sched.SetStatePath(filepath.Join(cfg.Memory.Dir, "scheduler-state.json"))
 	sched.SetEventSink(hub) // record scheduled-delivery outcomes in Activity
 	// Readiness gate (ST-16): a Studio-deployed agent may only fire on a
@@ -423,6 +424,7 @@ func (a *App) Run(parent context.Context) error {
 		pluginLoader:    pluginLoader,
 		openedCostStore: openedCostStore,
 		autopilotStore:  autopilotStore,
+		genieMonitors:   genieMonitors,
 		undoStore:       undoStore,
 		personStore:     personStore,
 	}, stack)

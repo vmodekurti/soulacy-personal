@@ -16,6 +16,7 @@
   import { modelAvailability } from '../lib/agentmodel.js'
   import { isChatTransportError, recoverDetachedChat } from '../lib/chatrecovery.js'
   import { responseNotice } from '../lib/runStatus.js'
+  import { continuationPrompt } from '../lib/feedstate.js'
   import {
     filterThreads, suggestedPrompts, buildOverrides,
     lastUserText, truncateForRerun, isLongOutput, isHistoricalFailureResolved,
@@ -42,6 +43,8 @@
   let syncMobileViewport = null
   let controlsOpen = false
   let chatMoreOpen = false
+  let missionDetailsOpen = false
+  let showEarlierTurns = false
   let chatListHidden = false   // collapse the chat sub-menu (thread list)
   function toggleChatList() {
     chatListHidden = !chatListHidden
@@ -96,6 +99,7 @@
   $: activeThread = $chatActiveThreadId ? ($chatThreads[$chatActiveThreadId] || null) : null
   $: threads = filterThreads(Object.values($chatThreads), threadSearch, showArchived, agentName)
   $: visibleMessages = activeThread?.messages || []
+  $: hiddenMessageCount = showEarlierTurns ? 0 : Math.max(0, visibleMessages.length - 6)
   $: isSending = !!activeThread?.sending
   $: currentArtifacts = activeThread ? (artifactsByThread[activeThread.id] || []) : []
   $: enabledProviders = providers.filter(p => p.registered)
@@ -187,6 +191,7 @@
       branches: [],
       branchMessages: {},
       metricsBaseline: {},
+      handoffContext: '',
       thinking: null,
       activeRunKey: '',
       createdAt: now,
@@ -213,6 +218,7 @@
           pinned: !!t.pinned, archived: !!t.archived,
           createdAt: t.createdAt, updatedAt: t.updatedAt,
           branches: t.branches || [],
+          handoffContext: t.handoffContext || '',
           messages: (t.messages || []).map(m => ({
             role: m.role, text: m.text, via: m.via || '', agentId: m.agentId || '',
             ts: m.ts instanceof Date ? m.ts.toISOString() : m.ts,
@@ -221,6 +227,7 @@
             parts: m.parts || null,
             attachments: m.attachments || null,
             runId: m.runId || '', responseId: m.responseId || '', feedback: m.feedback || 0,
+            sourceResult: !!m.sourceResult,
             // Keep the per-turn activity record with the message. Closed is the
             // durable/default presentation; opening a trace is transient UI.
             thinking: m.thinking ? { ...m.thinking, open: false } : null,
@@ -246,6 +253,7 @@
           pinned: !!t.pinned, archived: !!t.archived,
           createdAt: t.createdAt || Date.now(), updatedAt: t.updatedAt || Date.now(),
           branches: t.branches || [],
+          handoffContext: t.handoffContext || '',
           messages: (t.messages || []).map(m => ({
             ...m,
             ts: m.ts ? new Date(m.ts) : new Date(),
@@ -279,6 +287,15 @@
   function agentName(id) {
     const a = agents.find(x => x.id === id)
     return a?.name || id || 'No agent'
+  }
+
+  function agentInitials(agent) {
+    const label = agent?.name || agent?.id || 'Agent'
+    return label.split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]?.toUpperCase()).join('') || 'A'
+  }
+
+  function agentSummary(agent) {
+    return agent?.description || agent?.summary || 'Ready for a new mission'
   }
 
   async function rateResponse(msg, rating) {
@@ -330,6 +347,7 @@
   function selectThread(id) {
     if (!id || !$chatThreads[id]) return
     chatActiveThreadId.set(id)
+    showEarlierTurns = false
     metricsRefresh++
     const t = $chatThreads[id]
     if (t?.agentId && t?.sessionId) {
@@ -344,6 +362,7 @@
     const thread = newThread(agentId || activeThread?.agentId || defaultAgentId())
     upsertThread(thread)
     chatActiveThreadId.set(thread.id)
+    showEarlierTurns = false
     if (mobileViewport) chatListHidden = true
     metricsRefresh++
     scrollBottom(true)
@@ -438,6 +457,7 @@
   }
 
   let agents    = []
+  let agentSearch = ''
   let input     = ''
   let error     = null
   let shareBusy = false
@@ -445,6 +465,12 @@
   let shareErr  = ''
   let toolRetry = {}      // toolKey(ev) → { busy, ok, output, error, durationMs }
   let msgListEl
+
+  $: visibleAgents = agents.filter((agent) => {
+    const query = agentSearch.trim().toLowerCase()
+    if (!query) return true
+    return `${agent.name || ''} ${agent.id || ''} ${agent.description || ''}`.toLowerCase().includes(query)
+  })
 
   // Command palette + saved prompts.
   let paletteOpen = false
@@ -543,10 +569,34 @@
     const req = pendingGenieAsk
     if (!req) return
     pendingGenieAsk = null
-    const agent = pickGenieAgent(agents, req.text)
+    const result = req.type === 'result' ? req.context : null
+    const routingText = result ? `${result.title || ''} ${result.body || ''}` : req.text
+    // Result follow-ups always open in Genie. The source agent may be a
+    // schedule-only worker and the selected result must not be routed into
+    // whichever specialist happens to score highest.
+    const agent = result
+      ? (agents.find(a => a.id === 'genie') || pickGenieAgent(agents, routingText))
+      : pickGenieAgent(agents, routingText)
     if (!agent) { error = 'No chat-capable agent is available to answer that.'; return }
     const thread = startThread(agent.id)
     await tick()
+    if (result) {
+      const source = result.sourceAgent || 'Soulacy'
+      const title = result.title || `Result from ${source}`
+      const body = String(result.body || '').trim()
+      updateThread(thread.id, t => ({
+        ...t,
+        title: title.slice(0, 60),
+        handoffContext: continuationPrompt({ kind: 'result', title, body }, source),
+        messages: [{
+          role: 'assistant',
+          text: `## From Results\n\n**${source}**\n\n### ${title}\n\n${body}`,
+          sourceResult: true,
+          ts: new Date(),
+        }],
+      }))
+      return
+    }
     await send(req.text, undefined, '', thread)
   }
 
@@ -615,6 +665,9 @@
     const route = resolveMention(text)
     const runAgentId = route ? route.agentId : thread.agentId
     const sendText = route ? route.cleanText : text
+    const requestText = thread.handoffContext
+      ? `${thread.handoffContext}\n\nUser follow-up:\n${sendText}`
+      : sendText
     const viaName = route ? route.name : ''
     const runKey = `${runAgentId}|${runSessionId}`
     const turnAttachments = hasExplicitText ? [] : pendingAttachments
@@ -627,6 +680,7 @@
       ...t,
       title: t.messages.length ? t.title : snippet(text, 36),
       messages: [...t.messages, { role: 'user', text, attachments: turnAttachments, ts: new Date() }],
+      handoffContext: '',
       sending: true,
       thinking,
       streamText: '',       // reset the live-streaming buffer for this turn
@@ -649,7 +703,7 @@
     let replyText = ''
     let spokenReply = ''
     try {
-      const res = await api.chat(runAgentId, sendText, 'gui-user', overrides, runSessionId, attachmentIds, responseMode)
+      const res = await api.chat(runAgentId, requestText, 'gui-user', overrides, runSessionId, attachmentIds, responseMode)
 	  replyText = res.reply || ''
 	  spokenReply = res.spoken_reply || ''
       const curr = await api.runs.metrics(runSessionId, runAgentId).catch(() => null)
@@ -674,7 +728,7 @@
         }))
         const recovered = await recoverDetachedChat({
           agentId: runAgentId,
-          sentText: sendText,
+          sentText: requestText,
           startedAt: runStartedAt,
           sessionId: runSessionId,
           baselineEntryIds: recoveryBaseline,
@@ -2096,8 +2150,8 @@
     mobileMedia.addEventListener?.('change', syncMobileViewport)
     try {
       const savedChatList = localStorage.getItem('soulacy-chatlist-hidden')
-      chatListHidden = savedChatList == null ? mobileViewport : savedChatList === '1'
-    } catch (_) { chatListHidden = mobileViewport }
+      chatListHidden = savedChatList == null ? true : savedChatList === '1'
+    } catch (_) { chatListHidden = true }
     // The shared store survives SPA navigation and may contain an active run.
     // Only restore disk state on a genuine cold load; replacing a populated
     // store here can erase an answer that completed while Chat was unmounted.
@@ -2340,22 +2394,14 @@
 <div class="page modern-chat">
   <div class="page-header">
     <div class="chat-brand">
-      <button class="chat-list-toggle" on:click={toggleChatList} title={chatListHidden ? 'Show conversations' : 'Hide conversations'} aria-pressed={chatListHidden}>{chatListHidden ? '☰' : '‹'}</button>
-      <div><h1>Soulacy Chat</h1><span>Work with your agents</span></div>
+      <button class="chat-list-toggle history-toggle" on:click={toggleChatList} title={chatListHidden ? 'Show mission history' : 'Hide mission history'} aria-pressed={!chatListHidden}>◷ <span>History</span></button>
+      <div><h1>{activeThread?.agentId ? agentName(activeThread.agentId) : 'Genie'}</h1><span>{activeThread?.messages?.length ? (isSending ? 'Working on your mission' : 'Mission ready for a follow-up') : 'What should we get done?'}</span></div>
     </div>
     <div class="controls primary-controls">
-      {#if activeThread}<RunMetrics sessionId={activeThread.sessionId} agentId={activeThread.agentId} refreshKey={metricsRefresh} />{/if}
-      <label class="agent-picker"><span class="agent-presence"></span>
-        <select value={activeThread?.agentId || ''} on:change={(e) => setActiveAgent(e.currentTarget.value)} disabled={!agents.length} aria-label="Active agent">
-          {#if !agents.length}<option value="">No enabled agents</option>{:else}{#each agents as a}<option value={a.id}>{a.name || a.id}</option>{/each}{/if}
-        </select>
-      </label>
-		{#if activeThread?.agentId === 'genie'}
-			<button class="genie-status" on:click={() => { genieDrawerOpen = !genieDrawerOpen; if (genieDrawerOpen) loadGenieActivity() }} aria-expanded={genieDrawerOpen}>✦ <span>Automations &amp; Subagents</span></button>
-		{/if}
       <button class="top-icon top-search" class:active={historySearchOpen} on:click={() => historySearchOpen = !historySearchOpen} title="Search conversations" aria-label="Search conversations">⌘ K</button>
       <button class="voice-btn {voiceState}" on:click={() => { if (voiceState === 'live' || sidecarProcessing || voicePlaybackState !== 'idle') voiceSessionOpen = true; else voiceClick() }} title={voiceHint(voiceState, voiceDetail)} aria-label="Open voice conversation">🎤</button>
-      <button class="new-chat-btn" on:click={() => startThread()} disabled={!agents.length}>＋ New chat</button>
+      <button class="new-chat-btn" on:click={() => startThread()} disabled={!agents.length}>＋ New mission</button>
+      <button class="details-btn" class:active={missionDetailsOpen} on:click={() => missionDetailsOpen = !missionDetailsOpen} aria-expanded={missionDetailsOpen}>Details</button>
       <div class="header-tour"><TourButton /></div>
       <div class="chat-more-wrap">
         <button class="top-icon" class:active={chatMoreOpen} on:click={() => chatMoreOpen = !chatMoreOpen} title="More chat actions" aria-label="More chat actions">•••</button>
@@ -2374,6 +2420,25 @@
       </div>
     </div>
   </div>
+
+  {#if missionDetailsOpen}
+    <section class="mission-details" aria-label="Mission details" transition:slide|local={{ duration: 160 }}>
+      <div class="mission-identity">
+        <span class="detail-label">Working with</span>
+        <label class="agent-picker"><span class="agent-presence"></span>
+          <select value={activeThread?.agentId || ''} on:change={(e) => setActiveAgent(e.currentTarget.value)} disabled={!agents.length} aria-label="Active agent">
+            {#if !agents.length}<option value="">No enabled agents</option>{:else}{#each agents as a}<option value={a.id}>{a.name || a.id}</option>{/each}{/if}
+          </select>
+        </label>
+      </div>
+      {#if activeThread}<RunMetrics sessionId={activeThread.sessionId} agentId={activeThread.agentId} refreshKey={metricsRefresh} />{/if}
+      {#if activeThread?.agentId === 'genie'}
+        <button class="genie-status" on:click={() => { genieDrawerOpen = !genieDrawerOpen; if (genieDrawerOpen) loadGenieActivity() }} aria-expanded={genieDrawerOpen}>✦ Automations and delegated work</button>
+      {/if}
+      <button class="details-advanced" on:click={() => controlsOpen = !controlsOpen}>Model controls</button>
+      <button class="details-advanced" on:click={() => { artifactPanelOpen = !artifactPanelOpen; if (artifactPanelOpen && activeThread) loadArtifacts(activeThread.id, activeThread.agentId, activeThread.sessionId) }}>Artifacts {currentArtifacts.length ? `(${currentArtifacts.length})` : ''}</button>
+    </section>
+  {/if}
 
 	{#if genieDrawerOpen && activeThread?.agentId === 'genie'}
 		<div class="genie-backdrop" on:click={() => genieDrawerOpen = false} role="presentation"></div>
@@ -2493,12 +2558,12 @@
     <button class="chat-sidebar-backdrop" on:click={toggleChatList} aria-label="Close conversations"></button>
     <aside class="chat-sidebar">
     <div class="chat-sidebar-head">
-      <div><strong>Conversations</strong><span>Continue recent work</span></div>
-      <button class="sidebar-new" on:click={() => startThread()} title="New chat" aria-label="New chat">＋</button>
+      <div><strong>Mission history</strong><span>Continue recent work</span></div>
+      <button class="sidebar-new" on:click={() => startThread()} title="New mission" aria-label="New mission">＋</button>
     </div>
     <div class="thread-bar">
       <input class="thread-search" type="search" bind:this={searchEl}
-             bind:value={threadSearch} placeholder="Search chats… (⌘K)" aria-label="Search chats" />
+             bind:value={threadSearch} placeholder="Search missions… (⌘K)" aria-label="Search missions" />
       <button class="ghost-btn" class:on={showArchived} on:click={() => showArchived = !showArchived}
               title="Show archived chats">{showArchived ? 'Hide archived' : 'Archived'}</button>
     </div>
@@ -2528,7 +2593,7 @@
         </div>
       {/each}
       {#if threads.length === 0}
-        <span class="thread-empty">No chats match “{threadSearch}”.</span>
+        <span class="thread-empty">No missions match “{threadSearch}”.</span>
       {/if}
     </div>
     </aside>
@@ -2556,8 +2621,8 @@
         <div class="empty">
           {#if activeThread?.agentId}
             <div class="empty-avatar" aria-hidden="true">✦</div>
-            <h2 class="empty-title">Chat with {agentName(activeThread.agentId)}</h2>
-            <p class="empty-sub">Ask anything, or start with one of these:</p>
+            <h2 class="empty-title">Your AI gateway for <span>real work.</span></h2>
+            <p class="empty-sub">Access your agents, your data, and the web in one secure workspace.</p>
             <div class="suggestions">
               {#each promptsFor(activeThread.agentId) as s}
                 <button class="suggestion" on:click={() => useSuggestion(s)}>{s}</button>
@@ -2579,7 +2644,11 @@
           {/if}
         </div>
       {:else}
+        {#if hiddenMessageCount > 0}
+          <button class="earlier-turns" on:click={() => showEarlierTurns = true}>Show {hiddenMessageCount} earlier message{hiddenMessageCount === 1 ? '' : 's'}</button>
+        {/if}
         {#each visibleMessages as msg, mi}
+          {#if mi >= hiddenMessageCount}
           {@const k = msgKey(mi)}
           {@const long = msg.role === 'assistant' && isLongOutput(msg.text) && !expanded[k]}
           {@const resolvedFailure = isHistoricalFailureResolved(visibleMessages, mi)}
@@ -2757,6 +2826,7 @@
               {#if msg.feedbackError}<div class="feedback-error">⚠ {msg.feedbackError}</div>{/if}
             </div>
           </div>
+          {/if}
         {/each}
         {#if isSending}
           <div class="msg-row">
@@ -2889,6 +2959,31 @@
       {/if}
     </div>
   </div>
+  <aside class="agent-roster" aria-label="Available agents">
+    <div class="agent-roster-head">
+      <div><strong>Your agents</strong><span>{agents.length} available</span></div>
+      <button on:click={() => startThread()} disabled={!agents.length} title="Start a new mission" aria-label="Start a new mission">＋</button>
+    </div>
+    <label class="agent-search">
+      <span aria-hidden="true">⌕</span>
+      <input type="search" bind:value={agentSearch} placeholder="Find an agent" aria-label="Find an agent" />
+    </label>
+    <div class="agent-list">
+      {#each visibleAgents as agent (agent.id)}
+        <button class="agent-card" class:active={agent.id === activeThread?.agentId}
+                on:click={() => setActiveAgent(agent.id)} aria-pressed={agent.id === activeThread?.agentId}>
+          <span class="agent-avatar">{agentInitials(agent)}</span>
+          <span class="agent-copy">
+            <strong>{agent.name || agent.id}</strong>
+            <small>{agentSummary(agent)}</small>
+          </span>
+          <span class="agent-ready"><i></i>{agent.id === activeThread?.agentId ? 'Active' : 'Ready'}</span>
+        </button>
+      {:else}
+        <p class="agent-empty">No agents match “{agentSearch}”.</p>
+      {/each}
+    </div>
+  </aside>
   {#if artifactPanelOpen}
     <aside class="artifact-panel" transition:slide|local={{ duration: 160 }} aria-label="Chat artifacts">
       <div class="artifact-head">
@@ -4020,7 +4115,7 @@
     padding: .3rem .6rem; border-radius: 7px; font-size: .78rem; cursor: pointer;
   }
   .mini-btn:hover { border-color: color-mix(in srgb, var(--sl-accent) 50%, transparent); color: #fff; }
-  .mini-btn.primary { background: var(--sl-accent-hover); border-color: transparent; color: #fff; }
+  .mini-btn.primary { background: var(--sl-accent-fill); border-color: transparent; color: var(--sl-on-accent); }
 
   /* Code-block copy button (from richRenderer) */
   :global(.code-copy-btn) {
@@ -4052,6 +4147,8 @@
     background: transparent; cursor: pointer; font-family: inherit;
   }
   .chat-list-toggle { width: 30px; height: 30px; border-radius: 8px; font-size: 1.1rem; }
+  .chat-list-toggle.history-toggle { width: auto; padding: 0 .6rem; display: flex; gap: .35rem; font-size: .76rem; font-weight: 700; }
+  .chat-list-toggle.history-toggle span { margin: 0; color: inherit; font-size: inherit; }
   .chat-list-toggle:hover, .top-icon:hover, .top-icon.active { color: #fff; background: #19213a; border-color: #2b3657; }
   .primary-controls { justify-content: flex-end; gap: .45rem; flex-wrap: nowrap; }
   .agent-picker {
@@ -4069,6 +4166,19 @@
   }
   .new-chat-btn:hover:not(:disabled) { background: #cbc9ff; }
   .new-chat-btn:disabled { opacity: .45; }
+	.details-btn, .details-advanced {
+		height: 36px; padding: 0 .7rem; border: 1px solid #303b5d; border-radius: 9px;
+		color: #b9c0da; background: #151d34; cursor: pointer; font: inherit; font-size: .72rem; font-weight: 700;
+	}
+	.details-btn:hover, .details-btn.active, .details-advanced:hover { color: #fff; border-color: #5b6290; background: #222c49; }
+	.mission-details {
+		display: flex; align-items: center; gap: .7rem; min-height: 52px; padding: .5rem 1.1rem;
+		border-bottom: 1px solid #202943; background: #0e162a;
+	}
+	.mission-identity { display: flex; align-items: center; gap: .55rem; }
+	.detail-label { color: #7883a4; font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+	.mission-details .agent-picker { height: 34px; }
+	.mission-details :global(.run-metrics) { margin-left: auto; }
 	.genie-status { height: 36px; display: flex; align-items: center; gap: .35rem; padding: 0 .65rem; border: 1px solid #49447d; border-radius: 9px; color: #d5d2ff; background: #1c1d42; cursor: pointer; font-size: .72rem; font-weight: 700; }
 	.genie-status:hover, .genie-status[aria-expanded="true"] { background: #29275b; border-color: #7770d4; }
 	.genie-backdrop { position: fixed; z-index: 68; inset: 0; background: rgba(2,5,14,.48); backdrop-filter: blur(2px); }
@@ -4129,6 +4239,11 @@
   .modern-chat .chat-workspace { gap: 0; }
   .modern-chat .chat-wrap { border: 0; border-radius: 0; background: transparent; }
   .modern-chat .messages { padding: 2.2rem 0 1rem; gap: 1.15rem; }
+  .earlier-turns {
+    align-self: center; margin: 0 auto .25rem; padding: .48rem .8rem; border: 1px solid #2d3858;
+    border-radius: 999px; color: #9aa5c6; background: #111a30; cursor: pointer; font: inherit; font-size: .72rem;
+  }
+  .earlier-turns:hover { color: #fff; border-color: #545f8a; }
   /* Use the desktop canvas. Rich answers need enough room for financial tables
      and artifacts on ultrawide displays; prose keeps its own readable measure. */
   .modern-chat .msg-row {
@@ -4163,6 +4278,155 @@
   .composer-voice { width: 35px; height: 35px; flex: 0 0 35px; border: 0; border-radius: 50%; color: #cbd0e8; background: #28334f; cursor: pointer; }
   .composer-voice:hover:not(:disabled) { color: #fff; background: #354261; }
   .modern-chat .send-btn { width: 38px; height: 38px; padding: 0; border-radius: 50%; }
+
+  /* Bright workspace. The conversation stays visually quiet while the agent
+     roster remains close enough to switch missions without leaving Chat. */
+  .modern-chat {
+    color: var(--sl-text);
+    background: var(--sl-bg);
+  }
+  .modern-chat .page-header {
+    background: color-mix(in srgb, var(--sl-surface) 94%, transparent);
+    border-color: var(--sl-line);
+    box-shadow: 0 1px 0 rgba(31, 38, 54, .02);
+    padding-inline: max(1.1rem, calc((100% - 1480px) / 2 + 1.5rem));
+  }
+  .chat-brand span,
+  .detail-label,
+  .modern-chat .thread-agent,
+  .modern-chat .bmeta { color: var(--sl-text-faint); }
+  .chat-list-toggle, .top-icon, .sidebar-new, .voice-minimize { color: var(--sl-text-dim); }
+  .chat-list-toggle:hover, .top-icon:hover, .top-icon.active {
+    color: var(--sl-accent-ink); background: var(--sl-accent-soft); border-color: var(--sl-line);
+  }
+  .agent-picker,
+  .details-btn,
+  .details-advanced,
+  .modern-chat .voice-btn {
+    color: var(--sl-text-dim); background: var(--sl-surface); border-color: var(--sl-line);
+  }
+  .agent-picker select { color: var(--sl-text); }
+  .new-chat-btn { color: var(--sl-on-accent); border-color: transparent; background: var(--sl-accent-fill); box-shadow: var(--sl-shadow-sm); }
+  .new-chat-btn:hover:not(:disabled) { background: var(--sl-accent-fill-hover); }
+  .details-btn:hover, .details-btn.active, .details-advanced:hover {
+    color: var(--sl-accent-ink); border-color: color-mix(in srgb, var(--sl-accent) 30%, var(--sl-line)); background: var(--sl-accent-soft);
+  }
+  .mission-details { border-color: var(--sl-line); background: var(--sl-surface-raised); }
+  .genie-status { color: var(--sl-accent-ink); border-color: color-mix(in srgb, var(--sl-accent) 25%, var(--sl-line)); background: var(--sl-accent-soft); }
+  .genie-status:hover, .genie-status[aria-expanded="true"] { background: var(--sl-accent-soft-strong); border-color: var(--sl-accent); }
+  .genie-backdrop { background: rgba(44, 52, 70, .25); backdrop-filter: blur(8px); }
+  .genie-drawer { color: var(--sl-text); border-color: var(--sl-line); background: var(--sl-surface); box-shadow: var(--sl-shadow-lg); }
+  .genie-drawer > header { border-color: var(--sl-line); }
+  .genie-drawer > header span, .genie-row span { color: var(--sl-text-faint); }
+  .genie-drawer button { color: var(--sl-text-dim); border-color: var(--sl-line); background: var(--sl-surface-raised); }
+  .genie-drawer h3 { color: var(--sl-accent-ink); }
+  .genie-row { border-color: var(--sl-line); background: var(--sl-surface-raised); }
+  .genie-row.clickable:hover { border-color: var(--sl-accent); }
+  .genie-empty { color: var(--sl-text-faint); border-color: var(--sl-line-strong); }
+  .genie-transcript pre { color: var(--sl-text-dim); background: var(--sl-surface-raised); }
+  .chat-more-menu { border-color: var(--sl-line); background: var(--sl-surface); box-shadow: var(--sl-shadow-lg); }
+  .chat-more-menu button { color: var(--sl-text-dim); }
+  .chat-more-menu button:hover:not(:disabled) { color: var(--sl-text); background: var(--sl-surface-raised); }
+
+  .modern-chat .chat-body,
+  .modern-chat .chat-main { background: var(--sl-bg); }
+  .modern-chat .chat-workspace {
+    width: 100%; display: grid; grid-template-columns: minmax(0, 1120px) minmax(280px, 340px);
+    justify-content: center; box-sizing: border-box; margin: 0; padding: 1.25rem 1.5rem; gap: 1.1rem;
+  }
+  .modern-chat .chat-wrap {
+    border: 0; border-radius: 0; background: transparent; box-shadow: none;
+  }
+  .modern-chat .chat-sidebar {
+    border-color: var(--sl-line); background: var(--sl-surface);
+  }
+  .chat-sidebar-head strong, .modern-chat .thread-title { color: var(--sl-text); }
+  .chat-sidebar-head span { color: var(--sl-text-faint); }
+  .sidebar-new { color: var(--sl-accent-ink); border-color: var(--sl-line); background: var(--sl-accent-soft); }
+  .modern-chat .thread-search { color: var(--sl-text); border-color: var(--sl-line); background: var(--sl-surface-raised); }
+  .modern-chat .thread-chip:hover:not(.active) { background: var(--sl-surface-raised); border-color: var(--sl-line); }
+  .modern-chat .thread-chip.active { background: var(--sl-accent-soft); border-color: color-mix(in srgb, var(--sl-accent) 25%, var(--sl-line)); box-shadow: inset 3px 0 var(--sl-accent); }
+  .earlier-turns { color: var(--sl-text-dim); border-color: var(--sl-line); background: var(--sl-surface); }
+  .earlier-turns:hover { color: var(--sl-accent-ink); border-color: var(--sl-accent); }
+  .modern-chat .msg-row { width: min(1040px, calc(100% - 3rem)); }
+  .modern-chat .bubble { color: var(--sl-text); background: var(--sl-surface); border-color: var(--sl-line); box-shadow: var(--sl-shadow-sm); }
+  .modern-chat .msg-row:not(.user):not(.sys) .bubble {
+    color: var(--sl-text); border-color: var(--sl-line); background: var(--sl-surface); box-shadow: var(--sl-shadow-sm);
+  }
+  .modern-chat .msg-row.user .bubble { color: var(--sl-on-accent); background: var(--sl-accent-fill); border-color: var(--sl-accent-fill); box-shadow: 0 8px 24px rgba(91,92,226,.16); }
+  .modern-chat .msg-row.user .bmeta, .modern-chat .msg-row.user .act { color: var(--sl-on-accent); }
+  .modern-chat :global(.btext.markdown-body) { color: var(--sl-text); white-space: normal; }
+  .modern-chat :global(.btext.markdown-body h1),
+  .modern-chat :global(.btext.markdown-body h2),
+  .modern-chat :global(.btext.markdown-body h3),
+  .modern-chat :global(.btext.markdown-body strong) { color: var(--sl-text); }
+  .modern-chat :global(.btext.markdown-body code) { color: var(--sl-accent-ink); background: var(--sl-accent-soft); }
+  .modern-chat :global(.btext.markdown-body th) { color: var(--sl-text-dim); border-color: var(--sl-line); }
+  .modern-chat :global(.btext.markdown-body td) { border-color: var(--sl-line); }
+  .modern-chat :global(.btext.markdown-body blockquote) { color: var(--sl-text-dim); border-color: var(--sl-accent); }
+  .modern-chat .pending-attachments { width: min(1040px, calc(100% - 3rem)); }
+  .modern-chat .input-row {
+    width: min(1040px, calc(100% - 3rem)); border-color: var(--sl-line); background: var(--sl-surface); box-shadow: 0 12px 38px rgba(31,38,54,.09);
+  }
+  .modern-chat .input-row textarea { color: var(--sl-text); }
+  .composer-voice { color: var(--sl-text-dim); background: var(--sl-surface-raised); }
+  .composer-voice:hover:not(:disabled) { color: var(--sl-accent-ink); background: var(--sl-accent-soft); }
+  .empty-title { color: var(--sl-text); }
+  .empty-sub { color: var(--sl-text-dim); }
+  .suggestion { color: var(--sl-text-dim); border-color: var(--sl-line); background: var(--sl-surface); box-shadow: var(--sl-shadow-sm); }
+  .suggestion:hover { color: var(--sl-accent-ink); border-color: var(--sl-accent); }
+
+  /* The empty Genie screen mirrors the product home reference: one clear
+     promise, one command surface, then a visible choice of agents. */
+  .modern-chat .chat-wrap:has(.messages .empty) { justify-content: flex-start; }
+  .modern-chat .chat-wrap:has(.messages .empty) .messages {
+    flex: 0 0 auto; min-height: 0; padding: clamp(2.4rem, 7vh, 5.4rem) 1.5rem 0; overflow: visible;
+  }
+  .modern-chat .chat-wrap:has(.messages .empty) .empty { min-height: 0; padding: 0; }
+  .modern-chat .chat-wrap:has(.messages .empty) .empty-avatar { width: 46px; height: 46px; margin-bottom: 1rem; border-radius: 14px; color: var(--sl-on-accent); background: var(--sl-accent-fill); box-shadow: 0 10px 28px var(--sl-accent-soft-strong); }
+  .modern-chat .chat-wrap:has(.messages .empty) .empty-title {
+    max-width: 760px; margin: 0 auto; color: var(--sl-text); font-size: clamp(2rem, 3.5vw, 3.35rem); font-weight: 760; line-height: 1.05; letter-spacing: -.055em;
+  }
+  .modern-chat .chat-wrap:has(.messages .empty) .empty-title span {
+    color: var(--sl-accent-fill); background: linear-gradient(90deg, #4f65ef, #7b4ff0); background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .modern-chat .chat-wrap:has(.messages .empty) .empty-sub { max-width: 650px; margin: .8rem auto 0; font-size: .93rem; }
+  .modern-chat .chat-wrap:has(.messages .empty) .suggestions { max-width: 900px; margin: 1.15rem auto 0; display: flex; flex-wrap: wrap; justify-content: center; gap: .55rem; }
+  .modern-chat .chat-wrap:has(.messages .empty) .suggestion { padding: .55rem .8rem; border-radius: 10px; font-size: .72rem; box-shadow: none; }
+  .modern-chat .chat-wrap:has(.messages .empty) .input-row {
+    min-height: 88px; align-items: flex-end; margin-top: 1.35rem; padding: .7rem; border-radius: 14px; box-shadow: 0 14px 40px rgba(31,38,54,.09);
+  }
+  .modern-chat .chat-wrap:has(.messages .empty) .input-row textarea { min-height: 60px; padding-top: .5rem; font-size: .9rem; }
+
+  .agent-roster {
+    align-self: start; max-height: calc(100vh - 188px); min-width: 0; display: flex; flex-direction: column; gap: .8rem;
+    padding: .85rem; overflow: hidden; border: 1px solid var(--sl-line); border-radius: 11px; background: var(--sl-surface); box-shadow: none;
+  }
+  .agent-roster-head { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+  .agent-roster-head > div { min-width: 0; display: grid; gap: .12rem; }
+  .agent-roster-head strong { color: var(--sl-text); font-size: .84rem; }
+  .agent-roster-head span { color: var(--sl-text-faint); font-size: .65rem; }
+  .agent-roster-head button {
+    width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border: 1px solid var(--sl-line); border-radius: 9px;
+    color: var(--sl-accent-ink); background: var(--sl-accent-soft); cursor: pointer;
+  }
+  .agent-search { display: flex; align-items: center; gap: .45rem; padding: 0 .65rem; border: 1px solid var(--sl-line); border-radius: 10px; background: var(--sl-surface-raised); color: var(--sl-text-faint); }
+  .agent-search input { width: 100%; min-width: 0; padding: .6rem 0; border: 0; outline: 0; color: var(--sl-text); background: transparent; font: inherit; font-size: .75rem; }
+  .agent-list { min-height: 0; display: flex; flex-direction: column; gap: .35rem; overflow-y: auto; }
+  .agent-card {
+    width: 100%; min-width: 0; display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: .6rem;
+    padding: .58rem; border: 1px solid transparent; border-radius: 9px; color: var(--sl-text); background: transparent; text-align: left; cursor: pointer;
+  }
+  .agent-card:hover { border-color: var(--sl-line); background: var(--sl-surface-raised); }
+  .agent-card.active { border-color: color-mix(in srgb, var(--sl-accent) 25%, var(--sl-line)); background: var(--sl-accent-soft); }
+  .agent-avatar { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 11px; color: var(--sl-accent-ink); background: var(--sl-accent-soft-strong); font-size: .7rem; font-weight: 800; }
+  .agent-copy { min-width: 0; display: grid; gap: .15rem; }
+  .agent-copy strong, .agent-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .agent-copy strong { font-size: .74rem; }
+  .agent-copy small { color: var(--sl-text-faint); font-size: .63rem; }
+  .agent-ready { display: flex; align-items: center; gap: .25rem; color: var(--sl-text-faint); font-size: .57rem; font-weight: 650; }
+  .agent-ready i { width: 6px; height: 6px; border-radius: 50%; background: #2fa47c; }
+  .agent-empty { margin: .5rem; color: var(--sl-text-faint); font-size: .72rem; line-height: 1.45; }
 
   /* Immersive voice mode. It overlays Chat but can be minimized without ending the turn. */
   .voice-session {
@@ -4204,11 +4468,19 @@
     .modern-chat .page-header {
       min-height: 58px; padding: .4rem max(.55rem, env(safe-area-inset-right)) .4rem max(.55rem, env(safe-area-inset-left));
       flex-direction: row; flex-wrap: nowrap; align-items: center; gap: .35rem;
-      background: rgba(9,15,32,.94); box-shadow: 0 8px 24px rgba(2,5,14,.18);
+      background: color-mix(in srgb, var(--sl-surface) 94%, transparent); box-shadow: 0 8px 24px rgba(31,38,54,.08);
       backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
     }
     .chat-brand { min-width: auto; }
     .chat-brand > div, .primary-controls :global(.run-metrics), .new-chat-btn, .header-tour, .agent-picker .agent-presence, .top-search { display: none; }
+		.chat-list-toggle.history-toggle { width: 44px; padding: 0; justify-content: center; }
+		.chat-list-toggle.history-toggle span { display: none; }
+		.details-btn { width: 44px; height: 44px; padding: 0; font-size: 0; }
+		.details-btn::before { content: '•••'; font-size: .9rem; }
+		.mission-details { flex-wrap: wrap; padding: .65rem; }
+		.mission-identity { flex: 1 1 100%; }
+		.mission-details .agent-picker { flex: 1; border: 1px solid var(--sl-line); background: var(--sl-surface); }
+		.mission-details :global(.run-metrics) { margin-left: 0; }
 		.genie-status { width: 44px; height: 44px; flex: 0 0 44px; padding: 0; justify-content: center; border-radius: 12px; }
 		.genie-status span { display: none; }
 		.genie-drawer { top: env(safe-area-inset-top); bottom: calc(64px + env(safe-area-inset-bottom)); width: 100%; max-width: none; border-left: 0; }
@@ -4217,8 +4489,8 @@
     .agent-picker { min-width: 0; max-width: none; height: 44px; flex: 1; border: 0; background: transparent; }
     .agent-picker select { font-size: 16px; }
     .modern-chat .chat-body, .modern-chat .chat-main, .modern-chat .chat-workspace, .modern-chat .chat-wrap { position: relative; min-width: 0; max-width: 100%; overflow-x: hidden; }
-    .chat-sidebar-backdrop { display: block; position: absolute; z-index: 29; inset: 0; width: 100%; border: 0; border-radius: 0; background: rgba(3,7,17,.62); backdrop-filter: blur(2px); }
-    .modern-chat .chat-sidebar { position: absolute; z-index: 30; top: 0; bottom: 0; left: 0; width: min(360px, 94vw); padding: 1rem; box-shadow: 18px 0 48px rgba(0,0,0,.45); }
+    .chat-sidebar-backdrop { display: block; position: absolute; z-index: 29; inset: 0; width: 100%; border: 0; border-radius: 0; background: rgba(44,52,70,.26); backdrop-filter: blur(4px); }
+    .modern-chat .chat-sidebar { position: absolute; z-index: 30; top: 0; bottom: 0; left: 0; width: min(360px, 94vw); padding: 1rem; box-shadow: var(--sl-shadow-lg); }
     .modern-chat .msg-row { width: 100%; min-width: 0; padding: 0 1rem; }
     .modern-chat .messages { padding: 1rem 0 .45rem; gap: 1rem; overflow-x: hidden; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; scroll-padding-bottom: 84px; }
     .modern-chat .msg-row.user .bubble { max-width: 88%; padding: .7rem .9rem; border-radius: 18px 18px 5px 18px; }
@@ -4228,7 +4500,7 @@
     .modern-chat :global(.markdown-body) { min-width: 0; max-width: 100%; overflow-x: hidden; }
     .modern-chat :global(.markdown-body table) {
       display: block; width: 100%; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain;
-      border: 1px solid #263250; border-radius: 12px; background: #121b30;
+      border: 1px solid var(--sl-line); border-radius: 12px; background: var(--sl-surface);
       -webkit-overflow-scrolling: touch;
     }
     .modern-chat :global(.markdown-body th), .modern-chat :global(.markdown-body td) { min-width: 132px; padding: .65rem .7rem; vertical-align: top; }
@@ -4239,11 +4511,11 @@
       position: fixed; z-index: 55; top: calc(58px + env(safe-area-inset-top));
       right: 0; bottom: calc(64px + env(safe-area-inset-bottom)); left: 0;
       width: 100%; max-width: none; border: 0; border-radius: 0;
-      background: rgba(15, 22, 40, .98);
+      background: color-mix(in srgb, var(--sl-surface) 98%, transparent);
     }
     .modern-chat .input-row {
       width: auto; min-height: 58px; margin: .35rem .65rem .55rem; padding: .38rem; gap: .35rem; border-radius: 20px;
-      background: rgba(25,35,59,.96); box-shadow: 0 10px 30px rgba(1,4,12,.28); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+      background: color-mix(in srgb, var(--sl-surface) 96%, transparent); box-shadow: 0 10px 30px rgba(31,38,54,.12); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
     }
     .modern-chat .input-row textarea { min-width: 0; min-height: 44px; max-height: 124px; padding: .7rem .3rem; font-size: 16px; line-height: 1.35; }
     .modern-chat .attach-btn, .modern-chat .send-btn { width: 44px; height: 44px; flex: 0 0 44px; padding: 0; }
@@ -4261,5 +4533,15 @@
     .cp-field input, .cp-field select, .cp-field .model-custom, .cp-field input[type=number] { width: 100%; }
     .cp-field { flex: 1 1 100%; }
     .thread-search { max-width: none; }
+    .modern-chat .chat-workspace { display: flex; flex-direction: column; padding: 0; }
+    .agent-roster {
+      order: -1; flex: 0 0 auto; width: 100%; padding: .45rem .6rem; border-left: 0; border-bottom: 1px solid var(--sl-line); background: var(--sl-surface);
+    }
+    .agent-roster-head, .agent-search { display: none; }
+    .agent-list { flex-direction: row; gap: .4rem; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+    .agent-list::-webkit-scrollbar { display: none; }
+    .agent-card { min-width: 156px; grid-template-columns: 32px minmax(0, 1fr); padding: .45rem .55rem; }
+    .agent-avatar { width: 32px; height: 32px; border-radius: 10px; }
+    .agent-copy small, .agent-ready { display: none; }
   }
 </style>

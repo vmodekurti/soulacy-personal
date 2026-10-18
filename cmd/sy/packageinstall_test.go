@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -176,6 +178,133 @@ func TestLegacyManagedLauncherKind(t *testing.T) {
 	}
 	if got := legacyManagedLauncherKind(dest, "/tmp/unmanaged/python"); got != "" {
 		t.Fatalf("unmanaged command was eligible for repair: %q", got)
+	}
+}
+
+func TestInstallNodeMCPBuildsBeforePruningDevDependencies(t *testing.T) {
+	binDir := t.TempDir()
+	callsFile := filepath.Join(t.TempDir(), "npm-calls")
+	npm := filepath.Join(binDir, "npm")
+	if err := os.WriteFile(npm, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$NPM_CALLS\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+	t.Setenv("NPM_CALLS", callsFile)
+
+	sourceDir := t.TempDir()
+	manifest := `{"name":"typescript-mcp","bin":{"typescript-mcp":"dist/index.js"},"scripts":{"prepare":"npm run build"},"devDependencies":{"typescript":"^5.3.3"}}`
+	if err := os.WriteFile(filepath.Join(sourceDir, "package.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(t.TempDir(), "typescript-mcp")
+	command, args, err := installMCPRuntime(context.Background(), dest, sourceDir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Dir(command) != filepath.Join(dest, "bin") || len(args) != 1 || args[0] != filepath.Join(sourceDir, "dist/index.js") {
+		t.Fatalf("launcher = %q %v", command, args)
+	}
+
+	b, err := os.ReadFile(callsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := strings.Split(strings.TrimSpace(string(b)), "\n")
+	want := []string{
+		"install --include=dev --prefix " + sourceDir,
+		"prune --omit=dev --ignore-scripts --prefix " + sourceDir,
+	}
+	if len(calls) != len(want) {
+		t.Fatalf("npm calls = %q", calls)
+	}
+	for i := range want {
+		if calls[i] != want[i] {
+			t.Fatalf("npm call %d = %q, want %q", i+1, calls[i], want[i])
+		}
+	}
+}
+
+func TestEnsureMCPBrowserRuntimeInstallsNodePatchrightChromium(t *testing.T) {
+	sourceDir := t.TempDir()
+	manifest := `{"name":"notebooklm-mcp","dependencies":{"patchright":"^1.56.0"}}`
+	if err := os.WriteFile(filepath.Join(sourceDir, "package.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	binDir := filepath.Join(sourceDir, "node_modules", ".bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	callsFile := filepath.Join(t.TempDir(), "browser-calls")
+	installer := "#!/bin/sh\nprintf '%s|%s\\n' \"$*\" \"$PLAYWRIGHT_BROWSERS_PATH\" >> \"$BROWSER_CALLS\"\n"
+	if err := os.WriteFile(filepath.Join(binDir, "patchright"), []byte(installer), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BROWSER_CALLS", callsFile)
+	t.Setenv("PLAYWRIGHT_BROWSERS_PATH", filepath.Join(t.TempDir(), "browsers"))
+
+	got, err := ensureMCPBrowserRuntime(context.Background(), sourceDir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "patchright Chromium" {
+		t.Fatalf("browser runtime = %q", got)
+	}
+	b, err := os.ReadFile(callsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "install chromium|" + os.Getenv("PLAYWRIGHT_BROWSERS_PATH"); strings.TrimSpace(string(b)) != want {
+		t.Fatalf("installer call = %q, want %q", strings.TrimSpace(string(b)), want)
+	}
+}
+
+func TestEnsureMCPBrowserRuntimeInstallsPythonPlaywrightChromium(t *testing.T) {
+	sourceDir := t.TempDir()
+	pyproject := "[project]\nname = \"browser-mcp\"\ndependencies = [\"playwright>=1.56\"]\n"
+	if err := os.WriteFile(filepath.Join(sourceDir, "pyproject.toml"), []byte(pyproject), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	venv := t.TempDir()
+	binDir := filepath.Join(venv, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	callsFile := filepath.Join(t.TempDir(), "browser-calls")
+	python := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$BROWSER_CALLS\"\n"
+	if err := os.WriteFile(filepath.Join(binDir, "python"), []byte(python), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BROWSER_CALLS", callsFile)
+
+	got, err := ensureMCPBrowserRuntime(context.Background(), sourceDir, venv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "playwright Chromium" {
+		t.Fatalf("browser runtime = %q", got)
+	}
+	b, err := os.ReadFile(callsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "-m playwright install chromium"; strings.TrimSpace(string(b)) != want {
+		t.Fatalf("installer call = %q, want %q", strings.TrimSpace(string(b)), want)
+	}
+}
+
+func TestManagedMCPInstallOwned(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "mcp-servers", "notebooklm-mcp")
+	if err := os.MkdirAll(filepath.Join(dest, "source"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dest, "source", "package.json"), []byte(`{"name":"notebooklm-mcp"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !managedMCPInstallOwned(dest, filepath.Join(dest, "bin", "soulacy-mcp-node")) {
+		t.Fatal("installer-owned MCP package was not recognized")
+	}
+	if managedMCPInstallOwned(dest, "/tmp/unmanaged-mcp") {
+		t.Fatal("command outside the managed package was accepted")
 	}
 }
 

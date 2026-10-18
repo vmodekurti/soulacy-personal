@@ -1,6 +1,6 @@
 # Deal Finder
 
-Finds and ranks deals — flights, travel, or shopping — from your criteria,
+Finds and ranks deals (flights, travel, or shopping) from your criteria,
 sorted cheapest first, with prices and a currency.
 
 ## Requirements
@@ -17,7 +17,7 @@ sorted cheapest first, with prices and a currency.
 
 1. Review the readiness checklist; add the search tool and
    `TRAVEL_SEARCH_API_KEY`.
-2. Run the **mock test** ("cheap flights NYC → London") — no live call.
+2. Run the **mock test** ("cheap flights NYC → London"): no live call.
 3. Add the secret, run the **real test**.
 4. (Optional) Schedule a recurring watch to a channel.
 5. Install.

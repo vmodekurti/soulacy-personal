@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,10 +13,13 @@ import (
 
 // fakeVault is an in-memory credentials.Vault for tests.
 type fakeVault struct {
-	data map[string]map[string][]byte // agentID -> key -> value
+	data      map[string]map[string][]byte // agentID -> key -> value
+	getErrors map[string]error
 }
 
-func newFakeVault() *fakeVault { return &fakeVault{data: map[string]map[string][]byte{}} }
+func newFakeVault() *fakeVault {
+	return &fakeVault{data: map[string]map[string][]byte{}, getErrors: map[string]error{}}
+}
 
 func (f *fakeVault) Set(_ context.Context, agentID, key string, value []byte) error {
 	if f.data[agentID] == nil {
@@ -25,6 +29,9 @@ func (f *fakeVault) Set(_ context.Context, agentID, key string, value []byte) er
 	return nil
 }
 func (f *fakeVault) Get(_ context.Context, agentID, key string) ([]byte, error) {
+	if err := f.getErrors[key]; err != nil {
+		return nil, err
+	}
 	if v, ok := f.data[agentID][key]; ok {
 		return v, nil
 	}
@@ -144,6 +151,29 @@ func TestOverlay(t *testing.T) {
 	}
 }
 
+func TestOverlayReportsUnreadableStoredSecret(t *testing.T) {
+	ctx := context.Background()
+	vault := newFakeVault()
+	vault.data[GlobalScope] = map[string][]byte{
+		"llm.providers.anthropic.api_key": []byte("encrypted"),
+	}
+	vault.getErrors["llm.providers.anthropic.api_key"] = errors.New("cipher: message authentication failed")
+	m := New(vault)
+
+	cfg := sampleConfig()
+	cfg.LLM.Providers["anthropic"] = config.ProviderConfig{}
+	n, readErrors := m.OverlayWithErrors(ctx, cfg)
+	if n != 0 {
+		t.Fatalf("overlaid %d secrets, want 0", n)
+	}
+	if readErrors["llm.providers.anthropic.api_key"] == nil {
+		t.Fatal("expected unreadable provider key to be reported")
+	}
+	if cfg.LLM.Providers["anthropic"].APIKey != "" {
+		t.Fatal("unreadable provider key must not be applied")
+	}
+}
+
 func TestCatalog(t *testing.T) {
 	ctx := context.Background()
 	m := New(newFakeVault())
@@ -182,6 +212,35 @@ func TestCatalog(t *testing.T) {
 			t.Errorf("set descriptor %q does not say where the value came from", d.Name)
 		}
 	}
+}
+
+func TestCatalogMarksUnreadableVaultSecretForReentry(t *testing.T) {
+	ctx := context.Background()
+	vault := newFakeVault()
+	vault.data[GlobalScope] = map[string][]byte{
+		"llm.providers.anthropic.api_key": []byte("encrypted"),
+	}
+	vault.getErrors["llm.providers.anthropic.api_key"] = errors.New("cipher: message authentication failed")
+	m := New(vault)
+
+	cfg := sampleConfig()
+	cfg.LLM.Providers["anthropic"] = config.ProviderConfig{}
+	for _, d := range m.Catalog(ctx, cfg) {
+		if d.Name != "llm.providers.anthropic.api_key" {
+			continue
+		}
+		if d.Set {
+			t.Fatal("unreadable secret must not be marked set")
+		}
+		if d.Error == "" {
+			t.Fatal("unreadable secret must include a recovery message")
+		}
+		if strings.Contains(d.Error, "cipher") {
+			t.Fatalf("catalog exposed internal decryption error: %q", d.Error)
+		}
+		return
+	}
+	t.Fatal("anthropic descriptor not found")
 }
 
 // The environment leg of the documented vault → env → config precedence.

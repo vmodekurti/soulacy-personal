@@ -41,6 +41,37 @@ type resolver interface {
 
 type dialContextFunc func(context.Context, string, string) (net.Conn, error)
 
+// DialPublicContext resolves and pins one public destination before dialing it.
+// It is used by browser CONNECT proxies, where net/http cannot perform the
+// final TLS dial on our behalf. Private, loopback, link-local, CGNAT, metadata,
+// and mixed public/private DNS answers fail closed.
+func DialPublicContext(ctx context.Context, network, address string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || strings.TrimSpace(host) == "" || strings.TrimSpace(port) == "" {
+		return nil, fmt.Errorf("ssrf: invalid dial address %q", address)
+	}
+	u := &url.URL{Scheme: "https", Host: net.JoinHostPort(host, port)}
+	ips, err := resolveAllowed(ctx, u, true, nil, net.DefaultResolver)
+	if err != nil {
+		return nil, err
+	}
+	for _, ip := range ips {
+		if ip.IsLoopback() || ip.IsUnspecified() {
+			return nil, fmt.Errorf("ssrf: request to %s (%s) is blocked because browser destinations must be public", host, ip)
+		}
+	}
+	dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
+	var lastErr error
+	for _, ip := range ips {
+		conn, dialErr := dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+		if dialErr == nil {
+			return conn, nil
+		}
+		lastErr = dialErr
+	}
+	return nil, fmt.Errorf("ssrf: dial validated addresses: %w", lastErr)
+}
+
 // GuardedTransport validates and pins DNS exactly once for each outbound
 // request. Redirects pass through RoundTrip again and therefore receive their
 // own independently validated, pinned address.
@@ -175,11 +206,17 @@ func Check(rawURL string, blockPrivate bool, allowedHosts []string) error {
 // transport must still use GuardedTransport so rebinding and redirects are
 // checked again when requests are made.
 func CheckPublic(rawURL string) error {
+	return CheckPublicContext(context.Background(), rawURL)
+}
+
+// CheckPublicContext is CheckPublic with caller-controlled cancellation for
+// request paths such as managed browser startup and proxy validation.
+func CheckPublicContext(ctx context.Context, rawURL string) error {
 	u, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
 		return fmt.Errorf("ssrf: invalid URL: %w", err)
 	}
-	ips, err := resolveAllowed(context.Background(), u, true, nil, net.DefaultResolver)
+	ips, err := resolveAllowed(ctx, u, true, nil, net.DefaultResolver)
 	if err != nil {
 		return err
 	}

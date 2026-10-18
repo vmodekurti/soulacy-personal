@@ -24,6 +24,7 @@ import (
 	"github.com/soulacy/soulacy/internal/metrics"
 	"github.com/soulacy/soulacy/internal/reasoning"
 	"github.com/soulacy/soulacy/internal/session"
+	"github.com/soulacy/soulacy/internal/taskcontract"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 )
@@ -76,25 +77,40 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		metadata.RunID = runID
 		ctx = llm.WithCallMetadata(ctx, metadata)
 	}
+	contract := taskcontract.New(runID, msg, runStart.UTC())
+	ctx = withTaskContract(ctx, contract)
+	if e.sink != nil {
+		e.sink.Emit(message.Event{
+			Type: "task.contract.started", AgentID: msg.AgentID, SessionID: msg.SessionID,
+			Payload: contract.Snapshot(), Timestamp: time.Now().UTC(),
+		})
+	}
 	var runProvider, runModel, runStrategy string
 	defer func() {
-		degraded := reply.Metadata != nil && strings.EqualFold(reply.Metadata[message.MetaReasoningDegraded], "true")
-		if degraded && runOutcome == "success" {
-			runOutcome = "incomplete"
+		contractSnapshot, recordedOutcome, success, degraded := completeTaskContract(contract, &reply, err, runOutcome)
+		if collector := taskContractCollectorFrom(ctx); collector != nil {
+			*collector = contractSnapshot
 		}
-		success := err == nil && runOutcome == "success" && !degraded
 		metrics.AgentRunDuration.WithLabelValues(msg.AgentID).Observe(time.Since(runStart).Seconds())
-		metrics.AgentRunsTotal.WithLabelValues(msg.AgentID, runOutcome).Inc()
+		metrics.AgentRunsTotal.WithLabelValues(msg.AgentID, recordedOutcome).Inc()
 		// A single explicit terminal event gives learning/telemetry consumers an
 		// authoritative run boundary. Session IDs are conversational and may span
 		// hundreds of turns; error events may be recovered. Neither is a run ID.
+		if e.sink != nil {
+			e.sink.Emit(message.Event{
+				Type: "task.contract.completed", AgentID: msg.AgentID, SessionID: msg.SessionID,
+				Payload: contractSnapshot, Timestamp: time.Now().UTC(),
+			})
+		}
 		if e.sink != nil && !autopilotManaged(ctx) {
 			e.sink.Emit(message.Event{
 				Type: "run.completed", AgentID: msg.AgentID, SessionID: msg.SessionID,
 				Payload: map[string]any{
 					"run_id": runID, "provider": runProvider, "model": runModel,
 					"strategy": runStrategy, "success": success, "degraded": degraded,
-					"outcome": runOutcome, "metadata": reply.Metadata, "summary": reply.Metadata[message.MetaOutcomeSummary],
+					"outcome": recordedOutcome, "task_outcome": contractSnapshot.Outcome,
+					"task_contract": contractSnapshot,
+					"metadata":      reply.Metadata, "summary": reply.Metadata[message.MetaOutcomeSummary],
 				},
 				Timestamp: time.Now().UTC(),
 			})
@@ -172,6 +188,9 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		return message.Message{}, fmt.Errorf("engine: unknown agent %q", msg.AgentID)
 	}
 	def = def.Clone()
+	missionContract := effectiveBuilderMissionContract(def)
+	defineScheduledTaskContract(contract, def, missionContract, msg)
+	ctx = WithActiveAgent(ctx, def.ID)
 	ctx = applyAgentPrincipalBoundary(ctx, def)
 	applyPlaygroundOverrides(def, msg.Metadata)
 	runProvider = strings.TrimSpace(def.LLM.Provider)
@@ -186,6 +205,8 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		metadata.DataClassification = strings.TrimSpace(def.LLM.DataClassification)
 		ctx = llm.WithCallMetadata(ctx, metadata)
 	}
+	budgetTokens, budgetCalls := e.effectiveRunBudget(def)
+	contract.Configure(runStrategy, def.MaxTurns, budgetTokens, budgetCalls)
 	if !def.Enabled {
 		return message.Message{}, fmt.Errorf("engine: agent %q is disabled", msg.AgentID)
 	}
@@ -208,7 +229,11 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	// Defined as a method so router-specific logic (rule matching, trace
 	// events) lives alongside the dispatcher without bloating Handle.
 	if def.Kind == "router" {
-		return e.dispatchRouter(ctx, def, msg)
+		reply, err = e.dispatchRouter(ctx, def, msg)
+		if err == nil {
+			runOutcome = "success"
+		}
+		return reply, err
 	}
 	if resolveErr := e.resolveExecutionModel(def); resolveErr != nil {
 		return message.Message{}, fmt.Errorf("model preflight: %w", resolveErr)
@@ -262,6 +287,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		return message.Message{}, fmt.Errorf("model preflight: %w", prepareErr)
 	}
 	runStrategy = preparation.Strategy
+	contract.Configure(runStrategy, def.MaxTurns, budgetTokens, budgetCalls)
 	e.sink.Emit(message.Event{
 		Type: "agent.prepared", AgentID: msg.AgentID, SessionID: msg.SessionID,
 		Payload: preparation, Timestamp: time.Now().UTC(),
@@ -328,6 +354,9 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 			if outcomeReport.Summary != "" {
 				reply.Metadata[message.MetaOutcomeSummary] = outcomeReport.Summary
 			}
+		}
+		if def.Outcome.HasAssertions() && outcomeReport.Met {
+			contract.MarkVerified("workflow_outcome_contract", "all declared outcome assertions passed")
 		}
 		e.sink.Emit(message.Event{
 			Type: "message.out", AgentID: msg.AgentID, SessionID: msg.SessionID,
@@ -423,14 +452,24 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		e.log.Warn("memory write failed (inbound)", zap.String("agent", msg.AgentID), zap.Error(err))
 	}
 
+	rawGoal := flattenParts(msg.Parts)
+	fastGenieChat := shouldUseFastGenieChat(def.ID, rawGoal)
+
 	// Prime the prefix cache for this Handle. Cleared on exit so a
 	// hot-reload between user messages picks up the new def's catalogs.
 	// (PRODUCTION_AUDIT → MED/Engine.)
 	sysPrefix := e.buildSystemPrefix(def)
+	if fastGenieChat {
+		sysPrefix = buildFastGenieSystemPrefix(def)
+	}
+	if !fastGenieChat {
+		if guide := e.websiteAccessRoutingGuide(ctx, def); guide != "" {
+			sysPrefix += "\n\n" + guide
+		}
+	}
 	if modePrompt := responseModeSystemPrompt(msg.Metadata); modePrompt != "" {
 		sysPrefix += "\n\n" + modePrompt
 	}
-	rawGoal := flattenParts(msg.Parts)
 	sess.mu.Lock()
 	// S1 (Cohort F) — annotate inbound text from shared external
 	// channels so the model treats the sender identity conservatively.
@@ -505,17 +544,30 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	chatMsgs := e.buildContext(def, sess, msg)
 
 	// Build tool schemas for this agent (Python tools + opt-in Go built-ins).
-	// Pass the inbound channel so system tools are gated to HTTP-only.
+	// Pass the inbound channel so host-facing tools are gated by their channel
+	// partition. Keep the names for the run trace: this distinguishes a model
+	// that declined an offered tool from a runtime that withheld it.
 	tools := e.allToolSchemasForContext(ctx, def, msg.Channel)
+	if fastGenieChat {
+		// A clearly conversational turn does not need the capability catalog.
+		// Omitting tools keeps the prompt small and lets the provider stream the
+		// answer immediately. Action, live-data, and workspace questions stay on
+		// the full orchestration path.
+		tools = nil
+	}
+	toolNames := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		toolNames = append(toolNames, tool.Name)
+	}
 	packageInstallReq, hasURLPackageRequest := parseURLPackageInstallRequest(flattenParts(msg.Parts))
 	hasURLPackageRequest = hasURLPackageRequest && def.ID == SystemAgentID
 	forceMCPInspection := hasURLPackageRequest && packageInstallReq.Kind == "mcp" &&
 		toolSchemaExists(tools, "mcp_install_inspect")
 	forcePackageInstall := hasURLPackageRequest && packageInstallReq.Kind != "mcp" &&
 		toolSchemaExists(tools, "package_install")
-
-	// Auto-delegate: when SOUL.yaml sets `llm.tool_choice: agent__<id>` and
-	// `<id>` is one of the declared peers, do the peer call HERE before the
+	forceGenieActionPlan := shouldForceGenieActionPlan(def.ID, rawGoal, tools)
+	ctx, missionProgress := attachMissionProgress(ctx, missionContract)
+	// Auto-delegate when SOUL.yaml selects a declared `agent__<id>` peer before the
 	// LLM ever runs. Reason: local models (qwen2.5:72b in particular) routinely
 	// ignore Ollama's tool_choice constraint and answer from training data
 	// instead of delegating. We bypass model cooperation by running the peer
@@ -535,19 +587,20 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		if isPeer {
 			userText := flattenParts(msg.Parts)
 			peerArgs := map[string]any{"message": userText}
+			peerCallID := "auto-" + uuidShort()
+			peerCall := message.ToolCall{ID: peerCallID, Name: tc, Arguments: peerArgs}
 			e.sink.Emit(message.Event{
 				Type: "tool.call", AgentID: msg.AgentID, SessionID: msg.SessionID,
-				Payload: message.ToolCall{
-					ID: "auto-" + uuidShort(), Name: tc, Arguments: peerArgs,
-				},
+				Payload:   peerCall,
 				Timestamp: time.Now().UTC(),
 			})
 			peerResp, perr := e.runAgentCall(ctx, def, tc, peerArgs)
-			peerCallID := "auto-" + uuidShort()
 			if perr != nil {
+				e.observeTaskTool(ctx, msg.AgentID, msg.SessionID, peerCall, perr.Error(), true)
 				e.log.Warn("auto-delegate failed; falling through to normal LLM loop",
 					zap.String("agent", def.ID), zap.String("peer", peerID), zap.Error(perr))
 			} else {
+				e.observeTaskTool(ctx, msg.AgentID, msg.SessionID, peerCall, peerResp, false)
 				autoDelegated = true
 				// Synthetic assistant message recording the (forced) tool call
 				// + the tool-role message carrying the peer's reply. The LLM
@@ -577,7 +630,8 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	// a terminal reply the moment the next call would exceed the cap. This is
 	// the only thing standing between a runaway loop / prompt injection / deep
 	// peer recursion and a surprise bill.
-	budgetTokens, budgetCalls := e.effectiveRunBudget(def)
+	budgetTokens, budgetCalls = e.effectiveRunBudget(def)
+	contract.Configure(runStrategy, maxTurns, budgetTokens, budgetCalls)
 	var usedTokens, usedCalls int
 
 	model := def.LLM.Model
@@ -595,14 +649,19 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	// What actually went wrong, so a ceiling never reads as the cause (#229)
 	// and a run that only collects refusals stops early (#230).
 	failures := &runFailures{}
+	websiteAccessFallbackOffered := false
 
 	var finalContent string
-	completed := false
-	stopReason := "configured turn limit reached before completion"
+	missionCompletionRetries := 0
+	nextToolChoice := ""
+	// prematureFinals bounds how often a progress preamble, empty reply, or
+	// unexecutable tool-call text is sent back for another turn. With an
+	// unlimited turn allowance (maxTurns == 0) the turn ceiling no longer
+	// does that.
 	prematureFinals := 0
 	for turn := 0; maxTurns == 0 || turn < maxTurns; turn++ {
 		if stalled := progressGuardFrom(ctx).failure(); stalled != nil {
-			stopReason = stalled.Error()
+			contract.MarkIncomplete(stalled.Error())
 			break
 		}
 		if err := ctx.Err(); err != nil {
@@ -613,7 +672,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		// final-synthesis / current finalContent path return what we have,
 		// with a clear terminal note appended below.
 		if reason := budgetExceeded(budgetTokens, usedTokens, budgetCalls, usedCalls); reason != "" {
-			stopReason = reason
+			contract.MarkIncomplete(reason)
 			e.log.Warn("engine: run budget exceeded — halting",
 				zap.String("agent", msg.AgentID),
 				zap.String("reason", reason),
@@ -639,19 +698,12 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 			}
 			break
 		}
-		// Enable streaming on the final-turn request when the agent opted in
-		// AND the caller attached a token callback. We only stream when there
-		// are no tools (streaming + tool calls requires careful merging that
-		// providers handle differently; the non-streaming path is authoritative
-		// for tool-call turns). Providers set resp.Stream = nil when they fall
-		// through to the non-streaming code path, so the drain below is a no-op.
+		// Ask providers to stream whenever the agent opted in. Providers that
+		// support streamed tool-call assembly return tool calls after the stream
+		// closes; providers that do not support it may still return a normal
+		// response. The engine drain below handles both paths.
 		streamCB := streamCallback(ctx)
-		// Stream the final-turn reply when the agent opts in and there are no
-		// tools on this turn. We no longer require a stream callback: even
-		// without one (the plain /chat path), we now relay tokens to the event
-		// sink as `assistant.delta` events so the web UI can render the answer
-		// live over the existing /ws/events socket.
-		wantStream := def.StreamReply && len(tools) == 0
+		wantStream := def.StreamReply
 
 		// Story 4 / S5.1 — proactively keep the prompt within the model's
 		// context window. Reserve room for the completion, then trim the oldest
@@ -668,7 +720,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		if budgetTokens > 0 {
 			remainingOutput := budgetTokens - usedTokens - estimateTokens(chatMsgs, tools)
 			if remainingOutput <= 0 {
-				stopReason = "token budget cannot fit the next prompt"
+				contract.MarkIncomplete("the token budget could not fit the next model call")
 				finalContent = strings.TrimSpace(bestEffortFinal(chatMsgs))
 				if finalContent != "" {
 					finalContent += "\n\n"
@@ -705,6 +757,10 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 				zap.Int("input_budget_tokens", inputBudget))
 		}
 
+		reasoningEffort := def.LLM.ReasoningEffort
+		if fastGenieChat {
+			reasoningEffort = "low"
+		}
 		req := llm.CompletionRequest{
 			Model:            def.LLM.Model,
 			Messages:         chatMsgs,
@@ -714,7 +770,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 			MaxTokens:        reserveOut,
 			Stream:           wantStream,
 			ResponseFormat:   def.LLM.ResponseFormat,
-			ReasoningEffort:  def.LLM.ReasoningEffort,
+			ReasoningEffort:  reasoningEffort,
 			PresencePenalty:  def.LLM.PresencePenalty,
 			FrequencyPenalty: def.LLM.FrequencyPenalty,
 		}
@@ -737,10 +793,20 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		if turn == 0 && !autoDelegated && forcePackageInstall {
 			req.ToolChoice = "package_install"
 		}
+		if turn == 0 && !autoDelegated && forceGenieActionPlan {
+			req.ToolChoice = "plan_action"
+		}
+		missionRepairTool := applyNextMissionToolChoice(&req, &nextToolChoice)
 
 		e.sink.Emit(message.Event{
 			Type: "llm.call", AgentID: msg.AgentID, SessionID: msg.SessionID,
-			Payload:   map[string]any{"provider": def.LLM.Provider, "model": model, "turn": turn + 1},
+			Payload: map[string]any{
+				"provider":   def.LLM.Provider,
+				"model":      model,
+				"turn":       turn + 1,
+				"tool_count": len(req.Tools),
+				"tool_names": toolSchemaNames(req.Tools),
+			},
 			Timestamp: time.Now().UTC(),
 		})
 		usedCalls++
@@ -810,30 +876,11 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		// didn't open a stream (non-streaming path or tool-call turn),
 		// resp.Stream is nil and this block is a no-op.
 		if resp.Stream != nil {
-			var sb strings.Builder
-			for token := range resp.Stream {
-				if streamCB != nil {
-					streamCB(token)
-				}
-				// Relay each token to the event sink so the web UI can render
-				// the reply as it arrives. Best-effort: the hub drops events for
-				// slow clients, and the authoritative full reply is returned by
-				// Handle regardless, so a dropped delta only affects the live
-				// preview, never the final message.
-				e.sink.Emit(message.Event{
-					Type: "assistant.delta", AgentID: msg.AgentID, SessionID: msg.SessionID,
-					Payload:   map[string]any{"text": token},
-					Timestamp: time.Now().UTC(),
-				})
-				sb.WriteString(token)
-			}
-			resp.Content = sb.String()
-			streamErr := llmCtx.Err()
+			streamErr := e.collectCompletionStream(llmCtx, resp, msg.AgentID, msg.SessionID, streamCB)
 			llmCancel()
 			if streamErr != nil {
-				outErr := fmt.Errorf("engine: streaming model response interrupted: %w", streamErr)
-				e.sink.Emit(message.Event{Type: "error", AgentID: msg.AgentID, SessionID: msg.SessionID, Payload: map[string]any{"stage": "llm_stream", "error": outErr.Error()}, Timestamp: time.Now().UTC()})
-				return message.Message{}, outErr
+				e.sink.Emit(message.Event{Type: "error", AgentID: msg.AgentID, SessionID: msg.SessionID, Payload: map[string]any{"stage": "llm_stream", "error": streamErr.Error()}, Timestamp: time.Now().UTC()})
+				return message.Message{}, streamErr
 			}
 		}
 		// A few open-weight models advertise native tool calling but emit a
@@ -845,6 +892,15 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 			if recovered, ok := recoverXMLToolCalls(resp.Content, tools); ok {
 				resp.Content = ""
 				resp.ToolCalls = recovered
+			}
+		}
+		recoveryMaxTokens := requiredToolRecoveryTokenBudget(budgetTokens, usedTokens, resp)
+		if len(resp.ToolCalls) == 0 && missionRepairTool != "" && (budgetCalls == 0 || usedCalls < budgetCalls) && recoveryMaxTokens > 0 {
+			recovery := e.recoverRequiredMissionTool(ctx, def, msg, req, missionRepairTool, resp.Content, recoveryMaxTokens)
+			usedCalls += recovery.Calls
+			usedTokens += recovery.Tokens
+			if recovery.Call != nil {
+				resp.Content, resp.ToolCalls = "", []message.ToolCall{*recovery.Call}
 			}
 		}
 		// Do not let provider quirks skip inspection or change the operator's URL.
@@ -870,6 +926,16 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 					"kind":       packageInstallReq.Kind,
 				},
 			}}
+		}
+		// A real-world action must begin with the execution planner. Some local
+		// and open-weight models ignore tool_choice and answer from the visible
+		// tool inventory, which previously turned an absent provider connector
+		// into an immediate refusal. Force the same safe built-in call the prompt
+		// requested so the next turn sees the ordered API, website, and official
+		// alternative routes.
+		if turn == 0 && !autoDelegated && forceGenieActionPlan {
+			resp.Content = ""
+			resp.ToolCalls = []message.ToolCall{genieActionPlanCall(rawGoal)}
 		}
 		// Usage for streams is final only after the provider channel closes.
 		// Recording and run-budget accumulation therefore happen after draining.
@@ -897,25 +963,31 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 
 		// No tool calls → we have a final answer
 		if len(resp.ToolCalls) == 0 {
-			invalidToolCall := def.LLM.OutputSchema == nil && len(tools) > 0 && isUnrecoveredToolInvocation(resp.Content)
-			unfinished := invalidToolCall || strings.TrimSpace(resp.Content) == "" || (def.LLM.OutputSchema == nil && (reasoning.IsProgressPreamble(resp.Content) || reasoning.IsInternalScratchNarration(resp.Content)))
-			if unfinished && prematureFinals < 3 && (maxTurns == 0 || turn+1 < maxTurns) {
-				prematureFinals++
-				sess.mu.Lock()
-				e.appendHistoryLocked(sess, llm.ChatMessage{Role: "assistant", Content: resp.Content}, llm.ChatMessage{Role: "system", Content: "The task is unfinished. Continue with the next concrete action. Use native tool calls; do not write tool invocation markup as an answer. Return a final answer only when the requested work is complete, or explain a specific blocker."})
-				sess.mu.Unlock()
-				chatMsgs = e.buildContext(def, sess, msg)
+			if repairedContext, requiredTool, repaired := e.repairIncompleteBuilderMission(def, missionContract, sess, msg, resp.Content,
+				missionProgress, &missionCompletionRetries, toolNames, turn, maxTurns); repaired {
+				chatMsgs, nextToolChoice = repairedContext, requiredTool
 				continue
 			}
-			completed = !unfinished
-			if unfinished {
-				stopReason = "the model repeatedly described unfinished work"
-			}
-			finalContent = resp.Content
-			if invalidToolCall {
-				stopReason = "the model returned tool-call text that could not be executed"
+			if def.LLM.OutputSchema == nil && len(tools) > 0 && isUnrecoveredToolInvocation(resp.Content) {
+				if prematureFinals < maxPrematureFinals && (maxTurns == 0 || turn+1 < maxTurns) {
+					prematureFinals++
+					sess.mu.Lock()
+					e.appendHistoryLocked(sess, llm.ChatMessage{Role: "assistant", Content: resp.Content}, llm.ChatMessage{Role: "system", Content: "That response wrote tool-call markup as text, so nothing ran. Use native tool calls for the next concrete action. Return a final answer only when the requested work is complete, or explain a specific blocker."})
+					sess.mu.Unlock()
+					chatMsgs = e.buildContext(def, sess, msg)
+					continue
+				}
+				contract.MarkIncomplete("the model returned tool-call text that could not be executed")
 				finalContent = "The model could not produce a valid tool call, so the requested work is incomplete."
+				break
 			}
+			allowContinue := missionCompletionRetries < maxMissionCompletionRetries && prematureFinals < maxPrematureFinals
+			if repairedContext, repaired := e.continuePrematureFinal(def, sess, msg, contract, resp.Content, allowContinue, turn, maxTurns); repaired {
+				prematureFinals++
+				chatMsgs = repairedContext
+				continue
+			}
+			finalContent = terminalBuilderMissionContent(missionContract, missionProgress, resp.Content, missionCompletionRetries)
 			break
 		}
 
@@ -925,6 +997,20 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		// use the model's text as the final answer instead of burning all turns.
 		// Execute each tool call
 		toolResults := e.executeToolCalls(ctx, def, msg.SessionID, resp.ToolCalls, seen, &seenMu)
+		stopAfterInspection := false
+		if turn == 0 && !autoDelegated && forceMCPInspection {
+			installCall, refusal := deterministicMCPInstallFollowup(ctx, packageInstallReq, toolResults)
+			switch {
+			case refusal != "":
+				finalContent = refusal
+				contract.MarkBlocked(refusal)
+				stopAfterInspection = true
+			case installCall != nil:
+				installResults := e.executeToolCalls(ctx, def, msg.SessionID, []message.ToolCall{*installCall}, seen, &seenMu)
+				resp.ToolCalls = append(resp.ToolCalls, *installCall)
+				toolResults = append(toolResults, installResults...)
+			}
+		}
 
 		// Loop guard: count repeats of each (non-stateful) tool across the run and,
 		// the first time one crosses the threshold, steer the model off it. This
@@ -932,33 +1018,61 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		// dedup can't, without ever blocking a legitimately varied tool sequence.
 		// A durable refusal is worth saying once and acting on; see engine_blocked.go.
 		nudges := failures.observe(toolResults)
+		if !websiteAccessFallbackOffered {
+			if nudge := websiteAccessFallbackNudge(toolResults, len(e.readyWebsiteConnections(ctx, def)) > 0, def.ID == GenieAgentID); nudge != "" {
+				nudges = append(nudges, nudge)
+				websiteAccessFallbackOffered = true
+			}
+		}
+		if replan := contract.ReplanDirective(); replan != "" {
+			nudges = append(nudges, replan)
+		}
 
 		// Append assistant + tool result turns for next loop iteration.
 		// NOTE: release sess.mu BEFORE calling buildContext — buildContext locks
 		// sess.mu itself, and Go mutexes are not reentrant, so holding it here
 		// would deadlock the agent on its second turn (any tool-using agent).
 		sess.mu.Lock()
-		turns := []llm.ChatMessage{
-			{Role: "assistant", Content: resp.Content, ToolCalls: resp.ToolCalls},
+		turns := make([]llm.ChatMessage, 0, len(nudges)+len(toolResults)+1)
+		// Put replanning guidance before the assistant/tool pair. This preserves
+		// the provider-required adjacency of a tool call and its results.
+		for _, n := range nudges {
+			turns = append(turns, llm.ChatMessage{Role: "system", Content: n})
 		}
+		turns = append(turns, llm.ChatMessage{Role: "assistant", Content: resp.Content, ToolCalls: resp.ToolCalls})
 		for _, tr := range toolResults {
 			turns = append(turns, llm.ChatMessage{
 				Role: "tool", Content: tr.Content, ToolCallID: tr.CallID, Name: tr.Name,
 			})
 		}
-		// A loop-guard steer (if any) rides along as a system turn so the model
-		// sees it on the very next iteration.
-		for _, n := range nudges {
-			turns = append(turns, llm.ChatMessage{Role: "system", Content: n})
-		}
 		e.appendHistoryLocked(sess, turns...)
 		sess.mu.Unlock()
+		if stopAfterInspection {
+			break
+		}
+
+		if plannedReply := initialGenieActionReply(turn, forceGenieActionPlan, toolResults); plannedReply != "" {
+			finalContent = plannedReply
+			break
+		}
+
+		// An explicit install-from-URL request is a deterministic operator action,
+		// not an open-ended research task. MCP requests inspect first, so their
+		// installer may run on a later turn. Once package_install has returned, its
+		// result is authoritative and no fallback probing can improve it.
+		if hasURLPackageRequest && !autoDelegated && hasPackageInstallResult(toolResults) {
+			finalContent = formatPackageInstallReply(toolResults)
+			if detail := packageInstallFailureDetail(toolResults); detail != "" {
+				contract.MarkBlocked(detail)
+			}
+			break
+		}
 
 		// Enough different doors are locked that no further turn can succeed.
 		// Answering now costs one prompt; carrying on costs one per turn until
 		// a ceiling fires and buries the reason (#230).
 		if failures.shouldStop() {
-			stopReason = "required tools were refused by policy"
+			contract.MarkBlocked("the available tool routes were refused by policy or deployment capability")
 			finalContent = failures.stopMessage()
 			e.sink.Emit(message.Event{
 				Type: "error", AgentID: msg.AgentID, SessionID: msg.SessionID,
@@ -971,37 +1085,20 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 			break
 		}
 
-		// An explicit install-from-URL request is a deterministic operator action,
-		// not an open-ended research task. The installer result is authoritative:
-		// return it directly instead of asking the model to interpret it and risk
-		// another tool loop, a budget overrun, or a generic provider failure that
-		// hides the actionable installer error.
-		if turn == 0 && !autoDelegated && forcePackageInstall {
-			finalContent = formatPackageInstallReply(toolResults)
-			completed = len(toolResults) == 1 && !toolResults[0].IsError
-			if !completed {
-				stopReason = "package installation failed"
-			}
-			break
-		}
-
 		chatMsgs = e.buildContext(def, sess, msg) // rebuild with tool results
 	}
 
 	if strings.TrimSpace(finalContent) == "" {
 		// The model kept calling tools and never produced a plain-text reply.
-		// Force a tool-free synthesis from everything already gathered.
-		finalContent = e.finalSynthesis(ctx, def, msg.AgentID, msg.SessionID, chatMsgs, failures)
-	} else if def.LLM.OutputSchema == nil && (reasoning.IsProgressPreamble(finalContent) || reasoning.IsInternalScratchNarration(finalContent)) {
-		// The model ended on a progress note ("I'll start by loading the cookies…")
-		// instead of the actual deliverable — common when it runs out of turns
-		// mid-plan. Force one tool-free synthesis so the user gets the finished
-		// result built from everything already gathered, not an intent statement.
-		if synth := strings.TrimSpace(e.finalSynthesis(ctx, def, msg.AgentID, msg.SessionID, chatMsgs, failures)); synth != "" && !reasoning.IsProgressPreamble(synth) && !reasoning.IsInternalScratchNarration(synth) {
-			finalContent = synth
+		// Force a tool-free synthesis from everything already gathered. That
+		// summary of partial work is never a completed run: a turn or budget
+		// stop must not be reported as success. A more specific blocker
+		// recorded earlier in the run is kept.
+		if snap := contract.Snapshot(); snap.Outcome != taskcontract.OutcomeBlocked && snap.Outcome != taskcontract.OutcomeIncomplete {
+			contract.MarkIncomplete("the run ended before the agent produced a final answer")
 		}
+		finalContent = e.finalSynthesis(ctx, def, msg.AgentID, msg.SessionID, chatMsgs, failures)
 	}
-
 	// Safety net: never surface leaked reasoning control JSON (thought/action/
 	// is_done) as the reply, even on the classic (non-loop) path where a model
 	// primed with a ReAct-style prompt emits its step object as text. Skipped
@@ -1009,7 +1106,6 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	if def.LLM.OutputSchema == nil && strings.TrimSpace(finalContent) != "" {
 		finalContent = reasoning.SanitizeFinalOutput(finalContent, nil)
 	}
-
 	// Structured output enforcement: if the agent has an output_schema, validate
 	// the final reply parses as JSON. On failure, do ONE corrective retry that
 	// asks the model to fix its output (with response_format=json_schema). If
@@ -1027,7 +1123,6 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 			}
 		}
 	}
-
 	if strings.TrimSpace(finalContent) == "" {
 		// Synthesis still produced nothing usable. Rather than throw away a
 		// completed run's work, fall back to the best content we already have:
@@ -1051,87 +1146,19 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 			Timestamp: time.Now().UTC(),
 		})
 	}
-
-	var finalMetadata map[string]string
-	if !completed {
-		finalMetadata = map[string]string{message.MetaReasoningDegraded: "true", message.MetaOutcome: "incomplete", message.MetaOutcomeSummary: stopReason}
+	// Apply the completion guard after every recovery path, including best-effort context recovery.
+	finalContent = finishPrematureContent(def, contract, finalContent)
+	reply, missionIncomplete := e.finalizeBuilderMissionReply(ctx, def, missionContract, sess, msg, contract, missionProgress, finalContent)
+	if missionIncomplete {
+		runOutcome = "success"
+		return reply, nil
 	}
-	reply = e.finalizeReply(ctx, def, sess, msg, finalContent, finalMetadata)
+	markIncompleteReplyMetadata(&reply, contract)
 
 	runOutcome = "success" // flips the deferred AgentRunsTotal counter from "error"
 	return reply, nil
 }
 
-func formatPackageInstallReply(results []message.ToolResult) string {
-	if len(results) != 1 {
-		return "MCP server installation failed because the installer returned an unexpected result. Check the run details and retry."
-	}
-	result := results[0]
-	detail := strings.TrimSpace(result.Content)
-	detail = strings.TrimPrefix(detail, "error: package_install: ")
-	detail = strings.TrimPrefix(detail, "error: ")
-	if len(detail) > 4000 {
-		detail = detail[len(detail)-4000:]
-		detail = "…" + detail
-	}
-	if result.IsError {
-		if detail == "" {
-			detail = "The package installer did not provide an error message."
-		}
-		return "MCP server installation failed.\n\n" + detail
-	}
-	if detail == "" {
-		detail = "The MCP server was installed and registered successfully."
-	}
-	return "MCP server installation completed.\n\n" + detail
-}
-
-// flowHistoryMaxMsgs caps how many recent chat messages a workflow run pulls
-// in for conversation continuity (~6 turns = 12 user/assistant messages).
-const flowHistoryMaxMsgs = 12
-
-// flowHistoryTranscript returns a compact "User:/Assistant:" transcript of the
-// last maxMsgs messages for the session, used to give a workflow's entry agent
-// the prior turns so follow-ups resolve without the user restating context.
-// Empty when there's no history yet.
-func (e *Engine) flowHistoryTranscript(sessionID, agentID string, maxMsgs int) string {
-	if sessionID == "" {
-		return ""
-	}
-	sess := e.getOrCreateSession(sessionID, agentID)
-	sess.mu.Lock()
-	hist := sess.History
-	if maxMsgs > 0 && len(hist) > maxMsgs {
-		hist = hist[len(hist)-maxMsgs:]
-	}
-	cp := make([]llm.ChatMessage, len(hist))
-	copy(cp, hist)
-	sess.mu.Unlock()
-
-	var b strings.Builder
-	for _, m := range cp {
-		content := strings.TrimSpace(m.Content)
-		if content == "" {
-			continue
-		}
-		role := "User"
-		if m.Role == "assistant" {
-			role = "Assistant"
-		} else if m.Role != "user" {
-			continue // skip system/tool turns in the user-facing transcript
-		}
-		b.WriteString(role)
-		b.WriteString(": ")
-		b.WriteString(content)
-		b.WriteString("\n")
-	}
-	return strings.TrimSpace(b.String())
-}
-
-// recordWorkflowTurn persists a workflow agent's user+assistant turn to the
-// in-memory session history (so the next turn's flowHistoryTranscript sees it)
-// and the durable conversation store. Workflow agents bypass finalizeReply, so
-// without this they'd never accumulate conversational context.
 // writeEpisodic persists a task→reply pair as an episodic brain memory record.
 // It fires when the brain store is wired AND episodic memory is "on" for the
 // agent: either episodic is explicitly enabled, or NO brain_memory block was
@@ -1333,6 +1360,7 @@ func (e *Engine) finalSynthesis(ctx context.Context, def *agent.Definition, agen
 		ReasoningEffort:  def.LLM.ReasoningEffort,
 		PresencePenalty:  def.LLM.PresencePenalty,
 		FrequencyPenalty: def.LLM.FrequencyPenalty,
+		Stream:           def.StreamReply,
 		// Tools intentionally omitted so the model must answer in text.
 	})
 	if err != nil {
@@ -1341,6 +1369,9 @@ func (e *Engine) finalSynthesis(ctx context.Context, def *agent.Definition, agen
 			Payload:   map[string]any{"stage": "final-synthesis", "error": err.Error()},
 			Timestamp: time.Now().UTC(),
 		})
+		return ""
+	}
+	if e.collectCompletionStream(ctx, resp, agentID, sessionID, streamCallback(ctx)) != nil {
 		return ""
 	}
 	e.sink.Emit(message.Event{
@@ -1457,35 +1488,4 @@ func (e *Engine) finalSynthesisStructured(ctx context.Context, def *agent.Defini
 		return ""
 	}
 	return strings.TrimSpace(resp.Content)
-}
-
-// parseJSONLoose accepts either a bare JSON value or one wrapped in ```json ... ```
-// code fences (a common LLM habit). Returns the parsed value (or an error if
-// neither shape parses).
-func parseJSONLoose(s string) (any, error) {
-	s = strings.TrimSpace(s)
-	// Strip surrounding code fences if present.
-	if strings.HasPrefix(s, "```") {
-		// Remove the leading ``` (and optional "json" tag) and the trailing ```.
-		s = strings.TrimPrefix(s, "```json")
-		s = strings.TrimPrefix(s, "```")
-		s = strings.TrimSuffix(s, "```")
-		s = strings.TrimSpace(s)
-	}
-	// Try to find the first { or [ — handles prefatory chatter the model leaks.
-	first := -1
-	for i, r := range s {
-		if r == '{' || r == '[' {
-			first = i
-			break
-		}
-	}
-	if first > 0 {
-		s = s[first:]
-	}
-	var v any
-	if err := json.Unmarshal([]byte(s), &v); err != nil {
-		return nil, fmt.Errorf("invalid JSON: %w", err)
-	}
-	return v, nil
 }

@@ -64,15 +64,35 @@ connections:
   - conn_0123456789abcdef
 ```
 
-When a ready, granted connection is present, the engine offers the agent
-`authenticated_fetch`. Its description exposes only the connection display
-name, ID, and approved domains. Cookies and tokens never enter the model prompt,
-tool arguments, action log, or result.
+When a ready, granted connection is present, the engine offers a read-only
+`authenticated_fetch` path. Genie can also hand the same opaque lease to the
+gateway-managed Chromium runtime for pages that need JavaScript and interaction.
+The model sees only the connection display name, ID, and approved domains.
+Cookies and tokens never enter the model prompt, tool arguments, action log, or
+result.
 
 The tool performs a read-only HTTPS GET using a cookie jar. It rejects embedded
 credentials, private-network destinations, unapproved domains, and redirects
 that leave the approved domain. HTML is converted to readable text and scripts
 and styles are discarded.
+
+## Automatic session renewal
+
+Soulacy saves provider-approved session updates after successful use. The
+read-only fetch path keeps rotated cookies returned by the website. The managed
+browser keeps approved-domain cookies and local storage when it finishes an
+interaction or closes an idle session. These updates go directly back to the
+encrypted vault and never enter the model context.
+
+Website Access shows when a connection was last checked. A successful request
+marks it ready even when the provider did not rotate a cookie. If a login wall,
+security check, or off-domain redirect appears, Soulacy stops the browser and
+marks the connection for reauthentication.
+
+Soulacy does not send artificial background traffic solely to keep an account
+open. Such traffic can violate provider policies and cannot extend a server-side
+session that the provider has revoked. Regular scheduled work naturally renews
+rotating sessions, while the provider remains in control of the actual expiry.
 
 ## Scheduled runs
 
@@ -87,6 +107,11 @@ If the website returns HTTP 401 or 403, Soulacy marks the connection as
 choose **Reconnect**, sign in again, and save the session. The connection ID and
 agent grants remain unchanged.
 
+Hosted users can reauthenticate from any computer that has Chrome and the
+Session Capture companion. The refreshed state is sent to the hosted gateway,
+so shell access to the deployment is not required. The remote CLI capture flow
+remains available as a fallback.
+
 Deleting or revoking a connection immediately prevents new leases. Removing it
 from an agent removes that agent's grant without affecting other agents.
 
@@ -94,9 +119,8 @@ from an agent removes that agent's grant without affecting other agents.
 
 - Cookie-authenticated, server-rendered pages work through
   `authenticated_fetch` today.
-- Origin local storage is captured for forward compatibility. Pages that
-  require client-side JavaScript or local-storage token injection need an
-  isolated browser executor rather than HTTP fetch.
+- Origin local storage is replayed only inside the isolated managed browser for
+  pages that require client-side JavaScript or interaction.
 - CAPTCHA, passkeys, and MFA may require a fresh interactive sign-in. Soulacy
   does not bypass them.
 - Hosted deployments must persist the authenticated-connection metadata

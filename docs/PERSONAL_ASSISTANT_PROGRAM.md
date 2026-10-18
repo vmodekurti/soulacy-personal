@@ -1,4 +1,4 @@
-# Soulacy as a true personal assistant — program
+# Soulacy as a true personal assistant: program
 
 The vision: Soulacy builds its understanding of a person through every
 available sense and manages their life for them. This document turns that
@@ -50,7 +50,7 @@ text; household identities; scheduled agents; the Phone brief template.
 
 ## Slices
 
-### Slice 1 — The person model
+### Slice 1: The person model
 
 The centre of the loop. A structured, owner-scoped store next to adaptive
 memory, with a fixed shape so agents and observers agree on it.
@@ -86,7 +86,7 @@ day look like and what am I forgetting" without calling a device command;
 the person can see every entry and where it came from; turning a sense off
 stops that section updating within one cycle.
 
-### Slice 2 — Triggers from perception
+### Slice 2: Triggers from perception
 
 | Story | Gateway | Clients |
 |---|---|---|
@@ -94,21 +94,21 @@ stops that section updating within one cycle.
 | **P6 Channel senses** | Email and messaging channels become perception inputs, not only chat surfaces: an observer reads new mail/messages for commitments and relationship updates (with the person's consent per channel). | Web: per-channel "let Soulacy read this for commitments" switch. |
 | **P7 Quiet by design** (gateway shipped) | A run started by a trigger that finds nothing worth saying produces no notification, only an audit entry. Notification budget per day, per person, tunable. | Settings: "How often may Soulacy interrupt?" |
 
-### Slice 3 — The life loop agent
+### Slice 3: The life loop agent
 
 | Story | Gateway | Clients |
 |---|---|---|
 | **P8 Steward template** (shipped) | One agent template, `steward`, that owns the model: on each trigger it reads the model, reconciles commitments, and proposes at most three actions as approvals or a canvas checklist. It delegates to specialist agents (Planner, Receipt Keeper, Meeting Prep) rather than doing their work. | Phone brief becomes a view of the steward's morning pass; CarPlay and watch read its short form. |
 | **P9 Explain itself** (prompt-level, shipped) | Every proposal carries "because": the model rows it used. | Tap "why" on a proposal to see the rows; correcting a row re-runs the proposal. |
 
-### Slice 4 — Trust that grows
+### Slice 4: Trust that grows
 
 | Story | Gateway | Clients |
 |---|---|---|
 | **P10 Decision learning** | The policy engine reads `person.decisions`: after N consistent approvals of the same tool+args fingerprint by this person, the tier drops one step (ask → notify-after) for that fingerprint; any rejection resets it. Visible, reversible. | Settings: "What Soulacy does without asking" list with a reset per row; the phone's approval card shows "this will stop asking after 2 more". |
 | **P11 Household trust** | Trust is per person; a viewer's approvals never lower anyone's tier. | Household page shows each person's earned autonomy. |
 
-### Slice 5 — More senses, chosen by the model's gaps
+### Slice 5: More senses, chosen by the model's gaps
 
 Only when the model shows a gap that a sense would fill: wearable sleep and
 workouts in detail, the car (CarPlay context), the home (HomeKit scenes as

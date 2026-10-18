@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -139,6 +140,31 @@ func TestGetMissingKeyReturnsErrNotFound(t *testing.T) {
 	_, err := v.Get(ctx, "no-such-agent", "no-such-key")
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("Get missing key: got %v, want ErrNotFound", err)
+	}
+}
+
+func TestGetWithWrongKeyReturnsErrDecrypt(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "credentials.db")
+	firstKMS, _ := NewPassthroughKMS(bytes.Repeat([]byte{1}, 32))
+	first, err := NewSQLiteVault(path, firstKMS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Set(context.Background(), "agent", "session", []byte("secret")); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	secondKMS, _ := NewPassthroughKMS(bytes.Repeat([]byte{2}, 32))
+	second, err := NewSQLiteVault(path, secondKMS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	if _, err := second.Get(context.Background(), "agent", "session"); !errors.Is(err, ErrDecrypt) {
+		t.Fatalf("Get with wrong key error = %v, want ErrDecrypt", err)
 	}
 }
 

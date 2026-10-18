@@ -27,6 +27,13 @@ func TestPrincipalContextIsImmutableAndMessageIndependent(t *testing.T) {
 	}
 }
 
+func TestActiveAgentContext(t *testing.T) {
+	ctx := WithActiveAgent(context.Background(), " morning-podcast-digest ")
+	if got := ActiveAgentFromContext(ctx); got != "morning-podcast-digest" {
+		t.Fatalf("active agent = %q", got)
+	}
+}
+
 func TestGeniePrincipalIsAlwaysCappedAtOperator(t *testing.T) {
 	genie := &agent.Definition{ID: GenieAgentID}
 	ctx := applyAgentPrincipalBoundary(WithPrincipal(context.Background(), Principal{Subject: "admin-1", Role: "admin"}), genie)

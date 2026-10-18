@@ -21,6 +21,7 @@ type Principal struct {
 }
 
 type principalContextKey struct{}
+type activeAgentContextKey struct{}
 
 func WithPrincipal(ctx context.Context, p Principal) context.Context {
 	p.Subject = strings.Clone(strings.TrimSpace(p.Subject))
@@ -32,6 +33,20 @@ func WithPrincipal(ctx context.Context, p Principal) context.Context {
 func PrincipalFromContext(ctx context.Context) (Principal, bool) {
 	p, ok := ctx.Value(principalContextKey{}).(Principal)
 	return p, ok
+}
+
+// WithActiveAgent records the agent whose tool call is currently executing.
+// Trusted runtime adapters use this identity to enforce per-agent grants.
+func WithActiveAgent(ctx context.Context, agentID string) context.Context {
+	return context.WithValue(ctx, activeAgentContextKey{}, strings.Clone(strings.TrimSpace(agentID)))
+}
+
+// ActiveAgentFromContext returns the agent whose tool call is currently
+// executing. It is deliberately separate from the authenticated user
+// principal because agent grants and user authority are different boundaries.
+func ActiveAgentFromContext(ctx context.Context) string {
+	agentID, _ := ctx.Value(activeAgentContextKey{}).(string)
+	return strings.TrimSpace(agentID)
 }
 
 // WorkspaceFromContext returns Personal's single workspace boundary.

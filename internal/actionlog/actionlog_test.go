@@ -252,23 +252,19 @@ func TestQueryFilteredReadsDurableHistory(t *testing.T) {
 		})
 	}
 	deadline := time.Now().Add(2 * time.Second)
+	var got []message.Event
 	for {
-		evs, err := l.Tail("durable-agent", 10)
+		got, err = l.QueryFiltered("durable-agent", 10, map[string]bool{"message.in": true})
 		if err != nil {
-			t.Fatalf("Tail: %v", err)
+			t.Fatalf("QueryFiltered: %v", err)
 		}
-		if len(evs) >= 6 {
+		if len(got) == 3 {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for actionlog flush, saw %d events", len(evs))
+			t.Fatalf("timed out waiting for durable actionlog flush, saw %d events", len(got))
 		}
 		time.Sleep(20 * time.Millisecond)
-	}
-
-	got, err := l.QueryFiltered("durable-agent", 10, map[string]bool{"message.in": true})
-	if err != nil {
-		t.Fatalf("QueryFiltered: %v", err)
 	}
 	if len(got) != 3 {
 		t.Fatalf("events = %d, want 3", len(got))

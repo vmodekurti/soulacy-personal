@@ -251,6 +251,32 @@ func TestOpenAICompleteSerializesToolStateAndParsesToolCalls(t *testing.T) {
 	}
 }
 
+func TestOpenAICompleteSerializesEmptyAssistantContentWithoutToolsAsString(t *testing.T) {
+	var got map[string]any
+	provider := NewOpenAIProvider("ollama-cloud", "http://openai.test", "key", "glm")
+	provider.client = clientWithRoundTripper(func(r *http.Request) (*http.Response, error) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		return jsonResponse(200, `{"choices":[{"message":{"content":"continued"}}],"usage":{}}`), nil
+	})
+
+	_, err := provider.Complete(context.Background(), CompletionRequest{
+		Messages: []ChatMessage{
+			{Role: "user", Content: "finish the task"},
+			{Role: "assistant", Content: ""},
+			{Role: "system", Content: "continue"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	messages := got["messages"].([]any)
+	if content, ok := messages[1].(map[string]any)["content"].(string); !ok || content != "" {
+		t.Fatalf("empty assistant content = %#v, want explicit empty string", messages[1])
+	}
+}
+
 func TestOpenAICompleteStreamsSSEWhenNoTools(t *testing.T) {
 	var accept string
 	provider := NewOpenAIProvider("openai", "http://openai.test", "", "gpt")

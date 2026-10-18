@@ -90,7 +90,9 @@ func (e *Engine) runAuthenticatedFetch(ctx context.Context, def *agent.Definitio
 	client := e.ssrfHTTPClient(30 * time.Second)
 	client.Jar = jar
 	guardRedirect := client.CheckRedirect
+	var renewed []observedCookie
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		renewed = appendObservedCookies(renewed, req.Response)
 		if !authenticatedHostAllowed(req.URL.Hostname(), lease.AllowedDomains) {
 			return fmt.Errorf("authenticated_fetch: redirect left the approved domain")
 		}
@@ -116,6 +118,16 @@ func (e *Engine) runAuthenticatedFetch(ctx context.Context, def *agent.Definitio
 	}
 	if resp.StatusCode >= 400 {
 		return "", fmt.Errorf("authenticated_fetch: website returned HTTP %d", resp.StatusCode)
+	}
+	// Keep the saved session alive: fold cookies the site renewed back into the
+	// encrypted state. Only after a successful response, and a failure to save
+	// never fails the read.
+	renewed = appendObservedCookies(renewed, resp)
+	if len(renewed) > 0 {
+		now := time.Now()
+		_ = e.authConnectionResolver.UpdateBrowserState(ctx, WorkspaceFromContext(ctx), connectionID, func(current []byte) ([]byte, bool, error) {
+			return mergeRenewedCookies(current, renewed, lease.AllowedDomains, now)
+		})
 	}
 	maxBytes := argInt(args, "max_bytes", 512*1024)
 	if maxBytes <= 0 {
@@ -262,4 +274,132 @@ func readableHTML(raw string) string {
 		}
 	}
 	return strings.Join(clean, "\n")
+}
+
+// observedCookie is a Set-Cookie header together with the host that sent it.
+type observedCookie struct {
+	host   string
+	cookie *http.Cookie
+}
+
+func appendObservedCookies(into []observedCookie, resp *http.Response) []observedCookie {
+	if resp == nil || resp.Request == nil || resp.Request.URL == nil {
+		return into
+	}
+	host := strings.ToLower(resp.Request.URL.Hostname())
+	for _, c := range resp.Cookies() {
+		into = append(into, observedCookie{host: host, cookie: c})
+	}
+	return into
+}
+
+// mergeRenewedCookies applies cookies a website set during an authenticated
+// fetch to the saved Playwright-style session state. Unknown fields in the state
+// (origins, local storage, extra cookie attributes) are preserved. Cookies for
+// domains outside the approved list are ignored, and a cookie the site expired
+// or deleted is removed. It reports whether the state changed.
+func mergeRenewedCookies(raw []byte, observed []observedCookie, allowed []string, now time.Time) ([]byte, bool, error) {
+	var state map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return nil, false, fmt.Errorf("authenticated_fetch: saved browser session is invalid")
+	}
+	var cookies []map[string]any
+	if rawCookies, ok := state["cookies"]; ok {
+		if err := json.Unmarshal(rawCookies, &cookies); err != nil {
+			return nil, false, fmt.Errorf("authenticated_fetch: saved browser session is invalid")
+		}
+	}
+	trim := func(d string) string { return strings.TrimPrefix(strings.ToLower(strings.TrimSpace(d)), ".") }
+	changed := false
+	for _, o := range observed {
+		c := o.cookie
+		if c == nil || c.Name == "" {
+			continue
+		}
+		domain, domainAttr := trim(c.Domain), c.Domain != ""
+		if !domainAttr {
+			domain = trim(o.host)
+		}
+		if domain == "" || !authenticatedHostAllowed(domain, allowed) || !authenticatedHostAllowed(o.host, allowed) {
+			continue
+		}
+		path := c.Path
+		if path == "" {
+			path = "/"
+		}
+		expires, removed := float64(-1), false
+		switch {
+		case c.MaxAge < 0:
+			removed = true
+		case c.MaxAge > 0:
+			expires = float64(now.Add(time.Duration(c.MaxAge) * time.Second).Unix())
+		case !c.Expires.IsZero():
+			if !c.Expires.After(now) {
+				removed = true
+			} else {
+				expires = float64(c.Expires.Unix())
+			}
+		}
+		match := -1
+		for i, saved := range cookies {
+			name, _ := saved["name"].(string)
+			savedDomain, _ := saved["domain"].(string)
+			savedPath, _ := saved["path"].(string)
+			if savedPath == "" {
+				savedPath = "/"
+			}
+			if name == c.Name && trim(savedDomain) == domain && savedPath == path {
+				match = i
+				break
+			}
+		}
+		switch {
+		case removed && match >= 0:
+			cookies = append(cookies[:match], cookies[match+1:]...)
+			changed = true
+		case removed:
+		case match >= 0:
+			saved := cookies[match]
+			if v, _ := saved["value"].(string); v != c.Value {
+				saved["value"] = c.Value
+				changed = true
+			}
+			// A cookie renewed without an expiry keeps the expiry already saved.
+			if expires > 0 {
+				if old, _ := saved["expires"].(float64); old != expires {
+					saved["expires"] = expires
+					changed = true
+				}
+			}
+		default:
+			entry := map[string]any{"name": c.Name, "value": c.Value, "path": path, "expires": expires,
+				"httpOnly": c.HttpOnly, "secure": c.Secure, "sameSite": "Lax"}
+			if domainAttr {
+				entry["domain"] = "." + domain
+			} else {
+				entry["domain"] = domain
+			}
+			switch c.SameSite {
+			case http.SameSiteStrictMode:
+				entry["sameSite"] = "Strict"
+			case http.SameSiteNoneMode:
+				entry["sameSite"] = "None"
+			}
+			cookies = append(cookies, entry)
+			changed = true
+		}
+	}
+	if !changed {
+		return nil, false, nil
+	}
+	encoded, err := json.Marshal(cookies)
+	if err != nil {
+		return nil, false, err
+	}
+	state["cookies"] = encoded
+	out, err := json.Marshal(state)
+	if err != nil {
+		return nil, false, err
+	}
+	return out, true, nil
 }

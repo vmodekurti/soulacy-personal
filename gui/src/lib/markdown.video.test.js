@@ -79,6 +79,22 @@ describe('parseMarkdown audio support', () => {
     expect(html).toContain('b.m4a?token=xyz#t=30')
   })
 
+  it('makes an extensionless podcast episode playable and clickable', () => {
+    const url = 'https://host.example/api/podcasts/episodes/episode:abc123/audio'
+    const html = parseMarkdown(`🎧 Listen here: ${url}`)
+    expect(html).toContain('<audio')
+    expect(html).toContain(`src="${url}"`)
+    expect(html).toContain(`href="${url}"`)
+    expect(html).toContain('Listen to episode')
+    expect(html).not.toContain(`>${url}</a>`)
+  })
+
+  it('does not treat an unrelated audio page as a podcast episode', () => {
+    const html = parseMarkdown('https://example.com/settings/audio')
+    expect(html).not.toContain('<audio')
+    expect(html).toContain('<a')
+  })
+
   // .ogg is ambiguous by extension. Video is checked first, so a video/ogg file
   // keeps its picture rather than becoming an audio-only player.
   it('keeps .ogg as video rather than silently dropping the picture', () => {

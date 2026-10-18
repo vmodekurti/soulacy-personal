@@ -20,7 +20,7 @@ system_prompt: |
   agent__writer. Synthesize their replies into one answer.
 
 agents: [researcher, writer]   # exposes agent__researcher, agent__writer
-builtins: []                   # peers only — no raw built-ins to bypass them
+builtins: []                   # peers only, no raw built-ins to bypass them
 
 enabled: true
 ```
@@ -29,13 +29,13 @@ enabled: true
 
 `agents:` lists the IDs of other agents this agent may invoke. The engine
 registers one tool per peer, named `agent__<id>`, whose description comes
-from the target agent's own `description` field — so write peer descriptions
+from the target agent's own `description` field. Write peer descriptions
 for a model audience.
 
 Semantics:
 
-- Each call runs the peer as a **fresh session** — no shared history with the
-  caller — using the peer's own model, tools, memory, knowledge, and
+- Each call runs the peer as a **fresh session** with no shared history with the
+  caller. It uses the peer's own model, tools, memory, knowledge, and
   timeouts. The peer's final reply is the tool result.
 - `agents: ["*"]` (or `["all"]`) exposes every other loaded agent.
 - Self-references are silently skipped.
@@ -55,13 +55,13 @@ Semantics:
 
 | YAML | Mode | Use it for |
 |------|------|-----------|
-| Field absent | **default** — every built-in whose gate passes is auto-injected. | Standalone agents that should use everything available. |
-| `builtins: []` | **none** — no built-ins at all. | Orchestrators. Without this, an agent with `agents: [web-researcher]` *also* sees the raw `web_search` built-in and may bypass the peer. |
-| `builtins: [web_search]` | **restricted** — only the named built-ins, still subject to their gates. | Agents that need one or two capabilities and nothing else. |
+| Field absent | **default**: every built-in whose gate passes is auto-injected. | Standalone agents that should use everything available. |
+| `builtins: []` | **none**: no built-ins at all. | Orchestrators. Without this, an agent with `agents: [web-researcher]` *also* sees the raw `web_search` built-in and may bypass the peer. |
+| `builtins: [web_search]` | **restricted**: only the named built-ins, still subject to their gates. | Agents that need one or two capabilities and nothing else. |
 
 `["*"]` / `["all"]` are synonyms for the default mode. The GUI editor exposes
 the same three modes as a radio: *Default*, *None (peer-only orchestrator)*,
-*Restricted*. Note that listing a gated built-in does not bypass its gate —
+*Restricted*. Listing a gated built-in does not bypass its gate. For example,
 `kb_search` without a `knowledge:` list is still a no-op.
 
 ## Forcing Delegation with `tool_choice`
@@ -83,7 +83,7 @@ Accepted values:
 | empty / `auto` | Model decides freely. |
 | `none` | Model must not call any tool. |
 | `required` | Model must call at least one tool. |
-| `<tool name>` | Model must call exactly this tool — use the full name, e.g. `agent__researcher`. |
+| `<tool name>` | Model must call exactly this tool: use the full name, e.g. `agent__researcher`. |
 
 Only the **first** turn is constrained; later turns revert to `auto` so the
 model can synthesize the final answer from the tool results.
@@ -93,7 +93,7 @@ model can synthesize the final answer from the tool results.
 Reach for peer agents when:
 
 - **Specialists need different models.** A heavy reasoning model coordinates;
-  cheap local models do the legwork — each peer has its own `llm` block.
+  cheap local models do the legwork: each peer has its own `llm` block.
 - **Tool surfaces should be isolated.** The researcher gets `web_search`, the
   publisher gets the Slack MCP tools, and neither sees the other's tools.
 - **Prompts conflict.** A skeptical critic and an enthusiastic drafter can't
@@ -101,7 +101,7 @@ Reach for peer agents when:
 - **You want reuse.** The same `researcher` serves the coordinator, a cron
   digest agent, and direct chat.
 
-Skip the orchestra when one agent with a few tools would do — every peer hop
+Skip the orchestra when one agent with a few tools would do: every peer hop
 adds a full agent run of latency and tokens.
 
 ## A Complete Trio
@@ -129,5 +129,5 @@ enabled: true
 ```
 
 The `coordinator` from the quick start ties them together. `trigger:
-internal` keeps the specialists out of your channel routing — they exist only
+internal` keeps the specialists out of your channel routing: they exist only
 to be called.

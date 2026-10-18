@@ -46,6 +46,19 @@
 }
 .markdown-body a:hover { border-bottom-color: var(--accent); }
 
+.markdown-body .md-audio-card {
+  display: grid;
+  gap: 8px;
+  margin: 0.65em 0;
+}
+.markdown-body .md-audio-link {
+  width: fit-content;
+  font-weight: 650;
+}
+.markdown-body .md-audio-card audio {
+  width: min(100%, 420px);
+}
+
 /* Lists */
 .markdown-body ul,
 .markdown-body ol { margin: 0.55em 0; padding-left: 1.5em; }

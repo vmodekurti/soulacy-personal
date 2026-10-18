@@ -25,15 +25,15 @@ These ship embedded in the binary and are tagged `workflow`:
 
 ### Meeting Minutes & Action Items
 
-Paste (or forward via any channel) a raw meeting transcript — Zoom/Meet export, dictation, hand notes — and get structured minutes: attendees, decisions, and a numbered action-item list with owners and due dates, formatted to paste straight into the Workboard or any task tracker.
+Paste (or forward via any channel) a raw meeting transcript (Zoom/Meet export, dictation, hand notes) and get structured minutes: attendees, decisions, and a numbered action-item list with owners and due dates, formatted to paste straight into the Workboard or any task tracker.
 
 ### Smart Inbox Triage
 
-Forward emails or messages (or paste a batch into Chat): each item is classified **URGENT / NEEDS REPLY / FYI / NOISE** with a one-line reason, and everything in needs-reply gets a ready-to-edit draft in your voice. Nothing is ever sent automatically — every draft is for human review.
+Forward emails or messages (or paste a batch into Chat): each item is classified **URGENT / NEEDS REPLY / FYI / NOISE** with a one-line reason, and everything in needs-reply gets a ready-to-edit draft in your voice. Nothing is ever sent automatically: every draft is for human review.
 
 ### Competitor & Market Monitor
 
-A cron agent (`0 8 * * 1`, Mondays 8 AM) that tracks the companies and topics in its WATCHLIST using web search and page fetches, reporting **deltas, not noise**. It is created **disabled** on purpose — edit the system prompt's WATCHLIST first, then enable it and optionally point `schedule.output` at a chat bot (see [Schedules](schedules.md)).
+A cron agent (`0 8 * * 1`, Mondays 8 AM) that tracks the companies and topics in its WATCHLIST using web search and page fetches, reporting **deltas, not noise**. It is created **disabled** on purpose: edit the system prompt's WATCHLIST first, then enable it and optionally point `schedule.output` at a chat bot (see [Schedules](schedules.md)).
 
 ### Document Compliance Auditor
 
@@ -41,7 +41,7 @@ Audits draft text against your reference policies using a knowledge base (RAG). 
 
 ## Starters
 
-Below the workflows sit simpler starting points — including **Basic Chat** (one LLM, one prompt, no tools), **RAG over your docs**, **Scheduled briefing** (daily cron at 7 AM), and **Web researcher**. Use them as skeletons for your own agents.
+Below the workflows sit simpler starting points: including **Basic Chat** (one LLM, one prompt, no tools), **RAG over your docs**, **Scheduled briefing** (daily cron at 7 AM), and **Web researcher**. Use them as skeletons for your own agents.
 
 ## Guided Install
 
@@ -55,14 +55,14 @@ Below the workflows sit simpler starting points — including **Basic Chat** (on
 
 Each template card shows a source badge:
 
-- `embedded` — ships with the gateway,
-- `user` — your own template from `~/.soulacy/templates/`.
+- `embedded`: ships with the gateway,
+- `user`: your own template from `~/.soulacy/templates/`.
 
 The same catalog is reachable from the Agents page via **📋 From template…**, which additionally opens the new agent straight in the editor.
 
 ## Customizing afterwards
 
-A template-created agent is a completely normal agent — nothing stays linked to the template:
+A template-created agent is a completely normal agent: nothing stays linked to the template:
 
 - **Agents** page → edit the system prompt (e.g. the Market Monitor's WATCHLIST, the Inbox Triage classification rules), swap the LLM provider/model, attach knowledge bases, tools, or channels.
 - **Schedule** page → change cron expressions, set the output bot, enable/disable, and send a delivery smoke test.
@@ -73,14 +73,14 @@ A template-created agent is a completely normal agent — nothing stays linked t
 
 Typical post-creation checklist:
 
-1. Open the agent on the **Agents** page and skim its system prompt — every shipped template documents its own behavior there.
+1. Open the agent on the **Agents** page and skim its system prompt: every shipped template documents its own behavior there.
 2. Replace placeholder content (watchlists, tone-of-voice notes) with yours.
 3. Attach what it needs: a KB for RAG templates, an output bot for cron templates.
 4. **Validate**, **Save**, then test it in the inline **💬 Test** playground before pointing real traffic at it.
 
 ## Adding your own templates
 
-Drop agent-definition `*.yaml` files into `~/.soulacy/templates/` — they appear in the catalog with a `user` badge. Tag one `workflow` to have it listed in the Agentic workflows section.
+Drop agent-definition `*.yaml` files into `~/.soulacy/templates/`: they appear in the catalog with a `user` badge. Tag one `workflow` to have it listed in the Agentic workflows section.
 
 !!! note
     Templates and **Studio** solve different problems: Templates install a known-good design; Studio generates or repairs a bespoke workflow from intent. Start with a template when one is close to what you need, and use Studio when the automation needs custom steps.

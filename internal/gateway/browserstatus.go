@@ -17,6 +17,7 @@ type browserAutomationReadiness struct {
 	Checks      []browserAutomationCheck  `json:"checks"`
 	Sidecars    []browserAutomationServer `json:"sidecars"`
 	Policy      browserPolicyPosture      `json:"policy"`
+	Managed     map[string]any            `json:"managed"`
 	NextActions []executorAction          `json:"next_actions,omitempty"`
 }
 
@@ -54,6 +55,12 @@ func (s *Server) browserAutomationReadiness() browserAutomationReadiness {
 	servers := s.browserAutomationServers()
 	policyPosture := s.browserPolicyPosture(servers)
 	hasSidecar, connectedSidecar, hasHeadless, hasTools := false, false, false, false
+	managed := map[string]any{"available": false, "detail": "gateway-managed browser is not configured"}
+	managedReady := false
+	if s != nil && s.managedBrowser != nil {
+		managed = s.managedBrowser.Status()
+		managedReady, _ = managed["available"].(bool)
+	}
 	for _, srv := range servers {
 		hasSidecar = true
 		if srv.Status == "ok" {
@@ -69,25 +76,25 @@ func (s *Server) browserAutomationReadiness() browserAutomationReadiness {
 	actionLog := s != nil && s.actions != nil
 	checks := []browserAutomationCheck{
 		{
-			Key:    "sidecar",
-			Label:  "MCP sidecar",
-			Status: statusIf(hasSidecar, "ok", "warn"),
-			Detail: nextIf(hasSidecar, "A browser-capable MCP server is configured.", "Add the Browser headless MCP quick-start from the MCP page."),
-			Href:   "#mcp",
+			Key:    "runtime",
+			Label:  "Managed runtime",
+			Status: statusIf(managedReady || hasSidecar, "ok", "warn"),
+			Detail: nextIf(managedReady, "Gateway-managed Chromium is ready without an MCP install.", nextIf(hasSidecar, "A browser-capable MCP server is configured.", "Install Chromium in the deployment image or configure a remote browser MCP server.")),
+			Href:   "#browser",
 		},
 		{
 			Key:    "connected",
-			Label:  "Connected tools",
-			Status: statusIf(connectedSidecar && hasTools, "ok", "warn"),
-			Detail: nextIf(connectedSidecar && hasTools, "Browser tools are connected and available to agents.", "Restart the gateway or fix the MCP server until browser tools connect."),
-			Href:   "#mcp",
+			Label:  "Action tools",
+			Status: statusIf(managedReady || (connectedSidecar && hasTools), "ok", "warn"),
+			Detail: nextIf(managedReady, "Genie has constrained inspect, act, and approved commit tools.", nextIf(connectedSidecar && hasTools, "Browser MCP tools are connected and available to agents.", "Restart the gateway or fix the browser runtime until action tools connect.")),
+			Href:   "#browser",
 		},
 		{
 			Key:    "headless",
 			Label:  "Headless default",
-			Status: statusIf(hasHeadless, "ok", "warn"),
-			Detail: nextIf(hasHeadless, "At least one browser sidecar runs headless for scheduled/background agents.", "Use the Browser headless quick-start for unattended agents; keep visible browser only for debugging."),
-			Href:   "#mcp",
+			Status: statusIf(managedReady || hasHeadless, "ok", "warn"),
+			Detail: nextIf(managedReady, "Managed sessions run headless in isolated temporary profiles.", nextIf(hasHeadless, "At least one browser sidecar runs headless for scheduled/background agents.", "Configure a headless browser runtime for background agents.")),
+			Href:   "#browser",
 		},
 		{
 			Key:    "trace",
@@ -132,6 +139,7 @@ func (s *Server) browserAutomationReadiness() browserAutomationReadiness {
 		Checks:      checks,
 		Sidecars:    servers,
 		Policy:      policyPosture,
+		Managed:     managed,
 		NextActions: actions,
 	}
 }
@@ -141,9 +149,15 @@ func (s *Server) browserPolicyPosture(servers []browserAutomationServer) browser
 		return browserPolicyPosture{Status: "warn", Detail: "Agent loader is unavailable, so browser policy coverage could not be verified."}
 	}
 	hasBrowserSidecar := len(servers) > 0
+	hasManagedBrowser := false
+	if s.managedBrowser != nil {
+		if ok, _ := s.managedBrowser.Available(); ok {
+			hasManagedBrowser = true
+		}
+	}
 	managed, unmanaged := 0, make([]string, 0)
 	for _, def := range s.loader.All() {
-		if def == nil || !agentUsesBrowserAutomation(def, hasBrowserSidecar) {
+		if def == nil || !agentUsesBrowserAutomation(def, hasBrowserSidecar, hasManagedBrowser) {
 			continue
 		}
 		if hasExplicitBrowserPolicy(def) {
@@ -263,11 +277,14 @@ func browserServerRemote(srv mcp.ServerStatus) bool {
 	return false
 }
 
-func agentUsesBrowserAutomation(def *agent.Definition, hasBrowserSidecar bool) bool {
+func agentUsesBrowserAutomation(def *agent.Definition, hasBrowserSidecar, hasManagedBrowser bool) bool {
 	if def == nil {
 		return false
 	}
 	if strPtrHasBrowser(def.MCPServers) || strPtrHasBrowser(def.MCPTools) {
+		return true
+	}
+	if hasManagedBrowser && strPtrHasBrowser(def.Builtins) {
 		return true
 	}
 	if strPtrHasWildcard(def.MCPServers) || strPtrHasWildcard(def.MCPTools) {
@@ -297,7 +314,7 @@ func strPtrHasBrowser(values *[]string) bool {
 	}
 	for _, v := range *values {
 		hay := strings.ToLower(strings.TrimSpace(v))
-		if strings.Contains(hay, "browser") || strings.Contains(hay, "playwright") || strings.Contains(hay, "puppeteer") || strings.Contains(hay, "screenshot") || strings.Contains(hay, "navigate") {
+		if strings.Contains(hay, "browser") || strings.Contains(hay, "website_action") || strings.Contains(hay, "act_on_website") || strings.Contains(hay, "playwright") || strings.Contains(hay, "puppeteer") || strings.Contains(hay, "screenshot") || strings.Contains(hay, "navigate") {
 			return true
 		}
 	}

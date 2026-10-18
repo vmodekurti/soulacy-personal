@@ -2156,11 +2156,13 @@ func (s *Server) durableRunHistory(agentID string) []studioRunHistoryRow {
 		return nil
 	}
 	allowed := map[string]bool{
-		"message.in":      true,
-		"message.out":     true,
-		"error":           true,
-		"tool.result":     true,
-		"schedule.output": true,
+		"message.in":              true,
+		"message.out":             true,
+		"error":                   true,
+		"tool.result":             true,
+		"task.contract.completed": true,
+		"run.completed":           true,
+		"schedule.output":         true,
 	}
 	var events []message.Event
 	var err error
@@ -2247,7 +2249,17 @@ func summarizeActionEvents(runID, sessionID string, events []message.Event) (stu
 		UpdatedAt: events[len(events)-1].Timestamp,
 		Status:    "unknown",
 	}
-	var outParts []string
+	var (
+		outParts             []string
+		transientError       string
+		contractError        string
+		contractCompleted    bool
+		contractFailed       bool
+		runCompleted         bool
+		legacyReplyCompleted bool
+		scheduleCompleted    bool
+		scheduleFailed       bool
+	)
 	for _, ev := range events {
 		switch ev.Type {
 		case "message.in":
@@ -2259,34 +2271,45 @@ func summarizeActionEvents(runID, sessionID string, events []message.Event) (stu
 			if txt := messagePayloadText(ev.Payload); txt != "" {
 				outParts = append(outParts, txt)
 			}
-			// A reply sent AFTER a failure does not undo the failure.
-			//
-			// Events are replayed in timestamp order, and this arm used to set
-			// success unconditionally — so any run that errored and then still
-			// emitted something was filed as successful. That is the normal shape
-			// of a degraded run, not an exotic one: the loop gives up, the
-			// framework sends the last thing it has, and the run is recorded
-			// ok: true, status: "success", error: "context deadline exceeded" —
-			// all three at once, which cannot all be right.
-			//
-			// It is not cosmetic. Failed runs, the dead-letter queue and the
-			// scheduler's consecutive-failure auto-disable all read this. An agent
-			// that timed out every morning and replied with a fragment would never
-			// appear in any of them.
-			if row.Status != "failed" {
-				row.Status = "success"
-				row.Ok = true
-			}
+			// Modern runs finish with run.completed. Retain message.out as a
+			// terminal fallback for old action logs that predate that event.
+			legacyReplyCompleted = true
 		case "error":
-			row.Status = "failed"
-			row.Ok = false
-			row.Error = studioFirstNonEmpty(row.Error, payloadErrorText(ev.Payload))
+			// Runtime error events and failed tool observations can be recovered
+			// inside the reasoning loop. Keep the evidence, but do not publish a
+			// terminal verdict while the engine is still running.
+			transientError = studioFirstNonEmpty(transientError, payloadErrorText(ev.Payload))
 		case "tool.result":
 			row.Steps++
 			if isToolError(ev.Payload) {
+				transientError = studioFirstNonEmpty(transientError, payloadErrorText(ev.Payload))
+			}
+		case "task.contract.completed":
+			m := payloadMap(ev.Payload)
+			state := strings.ToLower(strings.TrimSpace(stringField(m, "state")))
+			outcome := strings.ToLower(strings.TrimSpace(stringField(m, "outcome")))
+			contractCompleted = true
+			if state == "blocked" || state == "incomplete" || state == "waiting_for_input" ||
+				outcome == "blocked" || outcome == "incomplete" || outcome == "needs_input" || outcome == "failed" {
+				contractFailed = true
+				contractError = studioFirstNonEmpty(stringField(m, "blocker"), stringField(m, "error"), "the run did not complete its goal")
+			}
+		case "run.completed":
+			m := payloadMap(ev.Payload)
+			runCompleted = true
+			success, hasSuccess := m["success"].(bool)
+			degraded, _ := m["degraded"].(bool)
+			outcome := strings.ToLower(strings.TrimSpace(stringField(m, "outcome")))
+			taskOutcome := strings.ToLower(strings.TrimSpace(stringField(m, "task_outcome")))
+			if contractFailed || (hasSuccess && !success) || degraded || outcome == "failed" || outcome == "incomplete" ||
+				taskOutcome == "blocked" || taskOutcome == "incomplete" || taskOutcome == "needs_input" || taskOutcome == "failed" {
 				row.Status = "failed"
 				row.Ok = false
-				row.Error = studioFirstNonEmpty(row.Error, payloadErrorText(ev.Payload))
+				row.Error = studioFirstNonEmpty(contractError, runCompletedError(m), transientError, "the run did not complete its goal")
+			} else if success {
+				row.Status = "success"
+				row.Ok = true
+				row.Error = ""
 			}
 		case "schedule.output":
 			ch, to, delivered, fallback, reason, preview, trigger := scheduleOutputSummary(ev.Payload)
@@ -2297,26 +2320,57 @@ func summarizeActionEvents(runID, sessionID string, events []message.Event) (stu
 				outParts = append(outParts, preview)
 			}
 			if delivered {
+				scheduleCompleted = true
 				if fallback {
 					row.DeliveryStatus = "delivered via fallback"
 				} else {
 					row.DeliveryStatus = "delivered"
 				}
-				if row.Status == "unknown" || row.Status == "pending" {
-					row.Status = "success"
-					row.Ok = true
-				}
 			} else {
+				scheduleFailed = true
 				row.DeliveryStatus = "failed"
 				row.DeliveryError = studioFirstNonEmpty(row.DeliveryError, reason)
 				row.Status = "failed"
 				row.Ok = false
+				row.Error = studioFirstNonEmpty(row.DeliveryError, transientError)
 			}
 		case "schedule.run_failed":
 			row.Trigger = studioFirstNonEmpty(row.Trigger, runLedgerPayloadString(ev.Payload, "trigger"), "cron")
+			scheduleFailed = true
 			row.Status = "failed"
 			row.Ok = false
-			row.Error = studioFirstNonEmpty(row.Error, payloadErrorText(ev.Payload))
+			row.Error = studioFirstNonEmpty(payloadErrorText(ev.Payload), transientError)
+		}
+	}
+	// A run has one authoritative outcome. Intermediate failures are trace
+	// evidence only. This prevents a recoverable 403, timeout, or malformed tool
+	// call from making an in-flight job appear finished before the engine emits
+	// run.completed (#365).
+	if !runCompleted && !scheduleFailed {
+		switch {
+		case contractCompleted && contractFailed:
+			row.Status = "failed"
+			row.Ok = false
+			row.Error = studioFirstNonEmpty(contractError, transientError, "the run did not complete its goal")
+		case contractCompleted:
+			row.Status = "success"
+			row.Ok = true
+			row.Error = ""
+		case legacyReplyCompleted:
+			if transientError != "" {
+				row.Status = "failed"
+				row.Ok = false
+				row.Error = transientError
+			} else {
+				row.Status = "success"
+				row.Ok = true
+			}
+		case scheduleCompleted:
+			row.Status = "success"
+			row.Ok = true
+		default:
+			row.Status = "pending"
+			row.Ok = false
 		}
 	}
 	if len(outParts) > 0 {
@@ -2329,6 +2383,17 @@ func summarizeActionEvents(runID, sessionID string, events []message.Event) (stu
 		row.Status = "pending"
 	}
 	return row, true
+}
+
+func runCompletedError(payload map[string]any) string {
+	if payload == nil {
+		return ""
+	}
+	if direct := studioFirstNonEmpty(stringField(payload, "blocker"), stringField(payload, "error"), stringField(payload, "reason")); direct != "" {
+		return direct
+	}
+	contract := payloadMap(payload["task_contract"])
+	return studioFirstNonEmpty(stringField(contract, "blocker"), stringField(contract, "error"))
 }
 
 func studioUniqueStrings(vals []string) []string {
@@ -4037,8 +4102,9 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 }
 
 // handleStudioListAgents implements GET /api/v1/studio/agents. It returns every
-// agent Studio can RE-OPEN, as lightweight summaries for the "My Workflows" list
-// and the Describe step's "continue existing work".
+// deployed definition as a lightweight summary for "My Workflows". Editable
+// definitions open on the Studio canvas; classic definitions remain visible but
+// route to the lossless Deployed Agent editor.
 //
 // The filter used to be HasWorkflow alone, which silently excluded every
 // REASONING agent Studio itself had built: an Auto/ReAct/Plan-Execute agent has
@@ -4046,9 +4112,9 @@ func (s *Server) handleStudioSave(c *fiber.Ctx) error {
 // anywhere in Studio afterwards — it existed, ran, and was invisible to the tool
 // that made it.
 //
-// So an agent qualifies if Studio can edit it: it has a workflow graph, OR it
-// carries a reasoning strategy, OR it was authored here (StudioIntent). The last
-// clause is what catches a Studio agent whose strategy was later cleared by hand.
+// Editable means it has a workflow graph, carries a supported reasoning
+// strategy, or was authored here (StudioIntent). Classic definitions are not
+// coerced into Drafts because that would drop fields Studio does not own.
 func (s *Server) handleStudioListAgents(c *fiber.Ctx) error {
 	type agentSummary struct {
 		ID          string `json:"id"`
@@ -4060,6 +4126,10 @@ func (s *Server) handleStudioListAgents(c *fiber.Ctx) error {
 		// Strategy distinguishes a fixed workflow from a reasoning agent in the
 		// list, so the two are not presented as interchangeable.
 		Strategy string `json:"strategy,omitempty"`
+		// Editable is false for classic/hand-authored definitions that Studio's
+		// Draft mapper cannot round-trip without losing custom tool definitions.
+		Editable  bool `json:"editable"`
+		Protected bool `json:"protected,omitempty"`
 	}
 	out := []agentSummary{}
 	for _, d := range s.loader.All() {
@@ -4070,11 +4140,9 @@ func (s *Server) handleStudioListAgents(c *fiber.Ctx) error {
 		// The loop strategy lives on the Reasoning block, not on Definition
 		// itself — Definition.Strategy does not exist.
 		strategy := strings.TrimSpace(d.Reasoning.Strategy)
-		reasoning := strategy != ""
-		authored := strings.TrimSpace(d.StudioIntent) != ""
-		if !hasFlow && !reasoning && !authored {
-			continue
-		}
+		strategyName := strings.ToLower(strategy)
+		reasoningEditable := strategyName == "auto" || strategyName == "react" || strategyName == "plan_execute"
+		editable := hasFlow || reasoningEditable || strings.TrimSpace(d.StudioIntent) != ""
 		nodes := 0
 		if hasFlow {
 			nodes = len(d.Workflow.Nodes)
@@ -4087,6 +4155,8 @@ func (s *Server) handleStudioListAgents(c *fiber.Ctx) error {
 			Trigger:     string(d.Trigger),
 			Nodes:       nodes,
 			Strategy:    strategy,
+			Editable:    editable,
+			Protected:   isProtectedSystemAgent(d.ID),
 		})
 	}
 	return c.JSON(fiber.Map{"agents": out})
@@ -4134,7 +4204,7 @@ func (s *Server) handleStudioLoadAgent(c *fiber.Ctx) error {
 	// FromAgentDefinition now round-trips the agent form losslessly, let those
 	// through too.
 	strat := strings.ToLower(strings.TrimSpace(def.Reasoning.Strategy))
-	isReasoningAgent := strat == "react" || strat == "plan_execute"
+	isReasoningAgent := strat == "auto" || strat == "react" || strat == "plan_execute"
 	// Studio-authored agents (studio_intent set) are openable even with an empty
 	// graph — e.g. a 0-step build the user needs to inspect, fix, or switch to an
 	// agent. Only truly external/library agents with nothing Studio can edit are

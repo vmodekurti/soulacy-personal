@@ -18,8 +18,14 @@ import (
 	"github.com/soulacy/soulacy/internal/sqlitex"
 )
 
-// ErrNotFound is returned when a requested credential does not exist.
-var ErrNotFound = errors.New("credential not found")
+var (
+	// ErrNotFound is returned when a requested credential does not exist.
+	ErrNotFound = errors.New("credential not found")
+	// ErrDecrypt identifies ciphertext that cannot be opened with the active
+	// key. Callers can distinguish this permanent record failure from a
+	// temporary database or context error without parsing provider text.
+	ErrDecrypt = errors.New("credential cannot be decrypted")
+)
 
 // Vault stores and retrieves encrypted agent credentials.
 type Vault interface {
@@ -116,7 +122,7 @@ func (v *SQLiteVault) Get(ctx context.Context, agentID, key string) ([]byte, err
 	}
 	plaintext, err := decrypt(encKey, ct)
 	if err != nil {
-		return nil, fmt.Errorf("credentials: decrypt: %w", err)
+		return nil, fmt.Errorf("credentials: decrypt: %w: %v", ErrDecrypt, err)
 	}
 	return plaintext, nil
 }

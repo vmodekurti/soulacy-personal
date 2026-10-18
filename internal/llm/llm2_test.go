@@ -380,15 +380,14 @@ func TestOllamaCompleteToolChoiceAutoSentAsString(t *testing.T) {
 	}
 }
 
-// TestOllamaCompleteStreamWithToolsDoesNotStream verifies that when both
-// Stream=true and tools are present the request falls through to the
-// non-streaming path (stream:false in the request body).
-func TestOllamaCompleteStreamWithToolsDoesNotStream(t *testing.T) {
+// TestOllamaCompleteStreamWithTools verifies that text and tool calls survive
+// Ollama's streamed response format.
+func TestOllamaCompleteStreamWithTools(t *testing.T) {
 	var got map[string]any
 	p := NewOllamaProvider("http://ollama.test", "llama3", "", nil)
 	p.client = clientWithRoundTripper(func(r *http.Request) (*http.Response, error) {
 		_ = json.NewDecoder(r.Body).Decode(&got)
-		return jsonResponse(200, `{"message":{"role":"assistant","content":"ok"}}`), nil
+		return jsonResponse(200, "{\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"function\":{\"name\":\"t\",\"arguments\":{\"q\":\"x\"}}}]},\"done\":false}\n{\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"done\":true}\n"), nil
 	})
 	resp, err := p.Complete(context.Background(), CompletionRequest{
 		Stream:   true,
@@ -398,12 +397,13 @@ func TestOllamaCompleteStreamWithToolsDoesNotStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
-	// Non-streaming path returns nil Stream channel.
-	if resp.Stream != nil {
-		t.Error("Stream channel should be nil when tools are present (non-streaming path)")
+	for range resp.Stream {
 	}
-	if got["stream"] == true {
-		t.Error("stream:true should not be sent when tools are present")
+	if got["stream"] != true {
+		t.Error("stream:true should be sent when tools are present")
+	}
+	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].Name != "t" || resp.ToolCalls[0].Arguments["q"] != "x" {
+		t.Fatalf("tool calls = %#v", resp.ToolCalls)
 	}
 }
 
@@ -637,14 +637,18 @@ func TestOpenAICompleteJSONSchemaLenientSetsStrictFalse(t *testing.T) {
 	}
 }
 
-// TestOpenAICompleteStreamWithToolsDoesNotStream verifies that stream+tools
-// takes the non-streaming path (same as Ollama).
-func TestOpenAICompleteStreamWithToolsDoesNotStream(t *testing.T) {
+// TestOpenAICompleteStreamWithTools verifies indexed argument fragments are
+// reassembled without delaying ordinary text streams.
+func TestOpenAICompleteStreamWithTools(t *testing.T) {
 	var got map[string]any
 	p := NewOpenAIProvider("openai", "http://openai.test", "key", "gpt")
 	p.client = clientWithRoundTripper(func(r *http.Request) (*http.Response, error) {
 		_ = json.NewDecoder(r.Body).Decode(&got)
-		return jsonResponse(200, `{"choices":[{"message":{"content":"ok"}}],"usage":{}}`), nil
+		return jsonResponse(200, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"t","arguments":"{\"q\":\"x\"}"}}]}}]}
+
+data: [DONE]
+
+`), nil
 	})
 	resp, err := p.Complete(context.Background(), CompletionRequest{
 		Stream:   true,
@@ -654,8 +658,13 @@ func TestOpenAICompleteStreamWithToolsDoesNotStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
-	if resp.Stream != nil {
-		t.Error("Stream channel should be nil when tools are present")
+	for range resp.Stream {
+	}
+	if got["stream"] != true {
+		t.Error("stream:true should be sent when tools are present")
+	}
+	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].ID != "call_1" || resp.ToolCalls[0].Name != "t" || resp.ToolCalls[0].Arguments["q"] != "x" {
+		t.Fatalf("tool calls = %#v", resp.ToolCalls)
 	}
 }
 

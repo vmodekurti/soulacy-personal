@@ -21,6 +21,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/soulacy/soulacy/internal/authconnections"
 	"github.com/soulacy/soulacy/internal/intent"
 	"github.com/soulacy/soulacy/internal/llm"
 	"github.com/soulacy/soulacy/internal/mcp"
@@ -43,6 +44,11 @@ func (e *Engine) runTool(ctx context.Context, def *agent.Definition, sessionID s
 	progressGuardFrom(ctx).observe(call, evidence, err != nil)
 
 	e.observeLearningTool(ctx, def, call, out, err)
+	agentID := ""
+	if def != nil {
+		agentID = def.ID
+	}
+	e.observeTaskTool(ctx, agentID, sessionID, call, evidence, err != nil)
 	if obs := toolObserverFrom(ctx); obs != nil {
 		obs(call, out, err != nil)
 	}
@@ -124,7 +130,7 @@ func (e *Engine) runToolDispatch(ctx context.Context, def *agent.Definition, ses
 	// immutable blueprint cannot enumerate every future write tool in
 	// ConfirmTools. Apply a conservative semantic gate to action-like external
 	// tools while leaving read/search/list operations autonomous.
-	if isGenieDefinition(def) && highImpactExternalTool(call.Name) {
+	if isGenieDefinition(def) && highImpactExternalCall(call) {
 		if err := e.dynamicConfirm(ctx, def, call, "Genie is requesting a potentially high-impact external write action"); err != nil {
 			return "", err
 		}
@@ -216,7 +222,8 @@ print(result if isinstance(result, str) else json.dumps(result))
 		if b.Name != call.Name {
 			continue
 		}
-		if !e.builtinAllowed(def, b) {
+		websiteRoute := safeWebsiteRouteTool(b.Name) && len(e.readyWebsiteConnections(ctx, def)) > 0
+		if !e.builtinAllowed(def, b, websiteRoute) {
 			return "", fmt.Errorf("agent has not enabled tool %q", b.Name)
 		}
 
@@ -254,6 +261,9 @@ print(result if isinstance(result, str) else json.dumps(result))
 	for _, b := range e.systemToolsFor(def) {
 		if b.Name != call.Name {
 			continue
+		}
+		if inbound, ok := ctx.Value(inboundMsgKey{}).(message.Message); ok && !systemToolAllowedOnChannel(b.Name, inbound.Channel) {
+			return "", fmt.Errorf("tool %q is not permitted on channel %q", call.Name, inbound.Channel)
 		}
 
 		if !isPrivilegedSystemTool(b.Name) && !builtinNameAllowed(def, b.Name) {
@@ -447,8 +457,30 @@ func highImpactExternalTool(name string) bool {
 	}
 	parts := strings.Split(strings.ToLower(name), "__")
 	action := parts[len(parts)-1]
-	for _, word := range []string{"create", "add", "update", "set", "write", "send", "post", "put", "patch", "delete", "remove", "cancel", "transfer", "purchase", "buy", "sell", "execute", "deploy", "install", "invite", "publish"} {
+	for _, word := range []string{"create", "add", "update", "set", "write", "send", "post", "put", "patch", "delete", "remove", "cancel", "transfer", "purchase", "buy", "sell", "execute", "deploy", "install", "invite", "publish", "request", "book", "reserve", "order", "schedule"} {
 		if action == word || strings.HasPrefix(action, word+"_") || strings.Contains(action, "_"+word+"_") || strings.HasSuffix(action, "_"+word) {
+			return true
+		}
+	}
+	return false
+}
+
+func highImpactExternalCall(call message.ToolCall) bool {
+	if highImpactExternalTool(call.Name) {
+		return true
+	}
+	lowerName := strings.ToLower(call.Name)
+	if !strings.HasPrefix(lowerName, mcp.FullNamePrefix) ||
+		(!strings.Contains(lowerName, "browser_click") && !strings.Contains(lowerName, "browser_press") && !strings.Contains(lowerName, "browser_submit")) {
+		return false
+	}
+	encoded, err := json.Marshal(call.Arguments)
+	if err != nil {
+		return false
+	}
+	arguments := strings.ToLower(string(encoded))
+	for _, phrase := range []string{"confirm", "book", "reserve", "place order", "place your order", "submit order", "buy now", "purchase", "checkout", "submit payment", "pay now", "request ride", "schedule", "cancel", "send", "finalize"} {
+		if strings.Contains(arguments, phrase) {
 			return true
 		}
 	}
@@ -576,23 +608,42 @@ func (e *Engine) runPythonToolOnce(tctx, auditCtx context.Context, def *agent.De
 	return strings.TrimSpace(stdout.String()), nil
 }
 
+// systemToolAllowedOnChannel is the runtime boundary for host-facing tools.
+// Internal messages originate from Soulacy's scheduler or an authorized peer
+// call, so they may use the SAFE partition. Privileged tools remain local-web
+// only even when an internal caller has the system capability.
+func systemToolAllowedOnChannel(toolName, channel string) bool {
+	switch strings.TrimSpace(channel) {
+	case "http":
+		return true
+	case "internal":
+		return !isPrivilegedSystemTool(toolName)
+	default:
+		return false
+	}
+}
+
 // allToolSchemas combines the agent's Python tools with the engine's built-in
 // Go tools. The skill built-ins (read_skill, read_skill_file) are only offered
 // when the agent has opted into skills (def.Skills non-empty), so agents that
 // don't use skills aren't tempted to call them.
 //
 // channel is the inbound message's Channel field ("http", "telegram", etc.).
-// System tools (shell_exec, run_script, …) are only offered when ALL three
-// conditions hold:
+// Privileged system tools (shell_exec, run_script, …) are only offered when
+// all three conditions hold:
 //  1. agent ID in runtime.allow_system_agents  (server-level permit)
 //  2. def.SystemTools = true             (per-agent opt-in)
 //  3. channel == "http"                  (local web GUI only — never on bot channels)
+//
+// Safe host tools may also be offered to trusted internal scheduler and peer
+// invocations. Shared external channels receive neither partition.
 func (e *Engine) allToolSchemas(def *agent.Definition, channel string) []llm.ToolSchema {
 	return e.allToolSchemasForContext(context.Background(), def, channel)
 }
 
 func (e *Engine) allToolSchemasForContext(ctx context.Context, def *agent.Definition, channel string) []llm.ToolSchema {
 	schemas := make([]llm.ToolSchema, 0, len(def.Tools)+len(e.builtins))
+	websiteConnections := e.readyWebsiteConnections(ctx, def)
 
 	// Python tools defined in the agent's SOUL.yaml
 	for _, t := range def.Tools {
@@ -618,22 +669,22 @@ func (e *Engine) allToolSchemasForContext(ctx context.Context, def *agent.Defini
 		if !callerAllowsTool(ctx, b.Name) {
 			continue
 		}
-		if !e.builtinAllowed(def, b) {
+		// Agents with a ready, explicitly granted Website Access connection
+		// also receive the safe browser route.
+		websiteRoute := len(websiteConnections) > 0 && safeWebsiteRouteTool(b.Name)
+		if !e.builtinAllowed(def, b, websiteRoute) {
 			continue
 		}
 		schemas = append(schemas, llm.ToolSchema{
 			Name: b.Name, Description: b.Description, Parameters: b.Parameters,
 		})
 	}
-	if e.authConnectionResolver != nil && len(def.Connections) > 0 && callerAllowsTool(ctx, authenticatedFetchTool) {
-		connections := e.authConnectionResolver.Describe(ctx, WorkspaceFromContext(ctx), SubjectFromContext(ctx), def.ID, def.Connections)
-		if len(connections) > 0 {
-			schemas = append(schemas, llm.ToolSchema{
-				Name:        authenticatedFetchTool,
-				Description: "Read a page using a user-approved saved website session. Cookies stay inside Soulacy and are never returned. Use only a connection_id listed in this agent's authenticated connections.",
-				Parameters:  authenticatedFetchSchema(connections),
-			})
-		}
+	if len(websiteConnections) > 0 && callerAllowsTool(ctx, authenticatedFetchTool) {
+		schemas = append(schemas, llm.ToolSchema{
+			Name:        authenticatedFetchTool,
+			Description: "Read a page using a user-approved saved website session. Cookies stay inside Soulacy and are never returned. Use only a connection_id listed in this agent's authenticated connections.",
+			Parameters:  authenticatedFetchSchema(websiteConnections),
+		})
 	}
 
 	// MCP tools from connected servers are offered according to the agent's
@@ -666,11 +717,12 @@ func (e *Engine) allToolSchemasForContext(ctx context.Context, def *agent.Defini
 		}
 	}
 
-	// System tools (SEC-3 partition). Bot channels (telegram, discord, slack,
-	// whatsapp) are ALWAYS excluded — only the local HTTP/web channel may use
-	// OS-level built-ins, and this cannot be overridden by agent config alone.
+	// System tools (SEC-3 partition). Shared external channels (telegram,
+	// discord, slack, whatsapp) are always excluded. The local HTTP/web channel
+	// may use both partitions, while trusted internal scheduler and peer-agent
+	// runs may use only the SAFE partition.
 	//
-	// Within the http channel, systemToolsFor applies the SEC-3 gating:
+	// systemToolsFor applies the SEC-3 gating:
 	//   - SAFE (read-only) built-ins — read_file, list_dir, find_files,
 	//     fetch_url, http_request, env_get, sys_info — are always offered.
 	//   - SYSTEM (privileged) built-ins — shell_exec, run_script,
@@ -686,24 +738,22 @@ func (e *Engine) allToolSchemasForContext(ctx context.Context, def *agent.Defini
 	// a deliberate `capabilities: [system]` (or system_tools) grant, so it is
 	// NOT suppressed by builtins: [] — the explicit privileged opt-in wins.
 	// A named allowlist (`builtins: [read_file]`) admits only those names.
-	if channel == "http" {
-		for _, st := range e.systemToolsFor(def) {
-			if !callerAllowsTool(ctx, st.Name) {
+	for _, st := range e.systemToolsFor(def) {
+		if !callerAllowsTool(ctx, st.Name) || !systemToolAllowedOnChannel(st.Name, channel) {
+			continue
+		}
+		priv := isPrivilegedSystemTool(st.Name)
+		if !priv {
+			// SAFE tool: respect builtins: [] and any named allowlist.
+			if !builtinNameAllowed(def, st.Name) {
 				continue
 			}
-			priv := isPrivilegedSystemTool(st.Name)
-			if !priv {
-				// SAFE tool: respect builtins: [] and any named allowlist.
-				if !builtinNameAllowed(def, st.Name) {
-					continue
-				}
-			}
-			schemas = append(schemas, llm.ToolSchema{
-				Name:        st.Name,
-				Description: st.Description,
-				Parameters:  st.Parameters,
-			})
 		}
+		schemas = append(schemas, llm.ToolSchema{
+			Name:        st.Name,
+			Description: st.Description,
+			Parameters:  st.Parameters,
+		})
 	}
 
 	// Peer agents exposed as tools (namespaced as agent__<id>). Built
@@ -713,6 +763,29 @@ func (e *Engine) allToolSchemasForContext(ctx context.Context, def *agent.Defini
 	schemas = append(schemas, e.buildAgentCallSchemas(def)...)
 
 	return schemas
+}
+
+func (e *Engine) readyWebsiteConnections(ctx context.Context, def *agent.Definition) []authconnections.Connection {
+	if e.authConnectionResolver == nil || def == nil || len(def.Connections) == 0 {
+		return nil
+	}
+	described := e.authConnectionResolver.Describe(ctx, WorkspaceFromContext(ctx), SubjectFromContext(ctx), def.ID, def.Connections)
+	connections := make([]authconnections.Connection, 0, len(described))
+	for _, connection := range described {
+		if connection.Kind == authconnections.KindBrowser {
+			connections = append(connections, connection)
+		}
+	}
+	return connections
+}
+
+func safeWebsiteRouteTool(name string) bool {
+	switch name {
+	case "start_website_action", "inspect_website_action", "act_on_website", "close_website_action":
+		return true
+	default:
+		return false
+	}
 }
 
 // mcpToolAllowed reports whether an agent may see/call a namespaced MCP tool.

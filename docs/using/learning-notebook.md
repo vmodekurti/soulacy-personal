@@ -18,7 +18,7 @@ saved agent first. Learning-related reads and writes require authorized access.
 3. **Approve:** only approved guidance becomes eligible for future use.
 4. **Test:** start a fresh chat with the same agent/owner; inspect the result.
 5. **Disable or refine:** remove unhelpful guidance from future runs. Restoration
-   is another draft and another review—not instant reactivation.
+   is another draft and another review, not instant reactivation.
 
 Preference/fact guidance can be supplied to a future run; procedural skills
 can be retrieved on demand. Retrieval is bounded, not a promise to load every

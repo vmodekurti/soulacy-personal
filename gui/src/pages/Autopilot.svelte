@@ -665,9 +665,9 @@
 
 <style>
   .autopilot {
-    max-width: 1320px;
-    margin: 0 auto;
+    width: 100%;
     padding: 32px 30px 64px;
+    box-sizing: border-box;
     color: var(--text);
   }
   header,

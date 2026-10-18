@@ -12,7 +12,7 @@ import (
 // TestSessionActivityTracker pins the E4c behaviours:
 //   - message.in starts a session with StartedAt = event ts
 //   - subsequent llm/tool events bump LastEventAt
-//   - message.out / error evict the session
+//   - recoverable errors keep the session visible until a terminal event
 //   - a session silent past the threshold is flagged Hung with a reason
 //   - a very old session (last event > 1h ago) is swept on Snapshot()
 //   - events without a session_id are ignored (connected, etc.)
@@ -71,6 +71,16 @@ func TestSessionActivityTracker(t *testing.T) {
 		t.Fatalf("hung reason should mention LLM for llm.call last-event, got %q", snap[0].HungReason)
 	}
 
+	// A runtime error may be an observation that the reasoning loop recovers
+	// from. It must not make an active job disappear from Running now.
+	tr.Note(message.Event{
+		Type: "error", AgentID: "briefer", SessionID: "s1", Timestamp: now,
+		Payload: map[string]any{"error": "origin returned 403"},
+	})
+	if got := tr.Snapshot(); len(got) != 1 || got[0].SessionID != "s1" {
+		t.Fatalf("recoverable error evicted active session: %+v", got)
+	}
+
 	// Terminal message.out evicts.
 	tr.Note(message.Event{
 		Type: "message.out", AgentID: "briefer", SessionID: "s1", Timestamp: now,
@@ -116,6 +126,25 @@ func TestSessionActivitySortByStart(t *testing.T) {
 	}
 	if snap[0].SessionID != "newer" {
 		t.Fatalf("newest first: expected newer, got %q", snap[0].SessionID)
+	}
+}
+
+func TestSessionActivityAutopilotTerminalEventsDoNotRecreateRun(t *testing.T) {
+	tr := newSessionActivityTracker()
+	now := time.Date(2026, 10, 10, 13, 43, 0, 0, time.UTC)
+	tr.nowFn = func() time.Time { return now }
+
+	tr.Note(message.Event{Type: "message.in", SessionID: "autopilot-run", AgentID: "podcast", Timestamp: now})
+	tr.Note(message.Event{Type: "run.completed", SessionID: "autopilot-run", AgentID: "podcast", Timestamp: now.Add(time.Second)})
+	if got := tr.Snapshot(); len(got) != 0 {
+		t.Fatalf("run.completed should evict the session, got %+v", got)
+	}
+
+	// Autopilot writes its durable proof after run.completed. This final event
+	// must remain terminal rather than bootstrapping a fresh phantom session.
+	tr.Note(message.Event{Type: "autopilot.proof", SessionID: "autopilot-run", AgentID: "podcast", Timestamp: now.Add(2 * time.Second)})
+	if got := tr.Snapshot(); len(got) != 0 {
+		t.Fatalf("autopilot.proof recreated a completed session: %+v", got)
 	}
 }
 

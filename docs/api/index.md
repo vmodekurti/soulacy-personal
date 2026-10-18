@@ -1,6 +1,6 @@
 # API Reference
 
-Everything the GUI can do, the REST API can do — the GUI is just a client.
+Everything the GUI can do, the REST API can do: the GUI is just a client.
 The API lives under `/api/v1` on the gateway port.
 
 ## Base URL
@@ -83,7 +83,7 @@ credential as `?api_key=` on `/ws/events`.
 
 ### Workboard
 
-Task CRUD, runs, artifacts (incl. download), comments — see
+Task CRUD, runs, artifacts (incl. download), comments: see
 [Workboard API](workboard.md). Base paths: `/workboard/tasks`,
 `/workboard/artifacts/:id/download`, `/workboard/comments/:id`.
 
@@ -111,7 +111,7 @@ Task CRUD, runs, artifacts (incl. download), comments — see
 
 `GET /skills`, `GET /skills/:name`, `POST /skills/rescan`,
 `POST /skills/provision-agenticskills`; `GET/POST /registries`,
-`POST /registries/probe` — see [Registries & Skills](registries.md).
+`POST /registries/probe`: see [Registries & Skills](registries.md).
 
 ### Plugins
 
@@ -173,8 +173,8 @@ Task CRUD, runs, artifacts (incl. download), comments — see
 ### Credentials
 
 `POST/GET /credentials/:agentID`, `GET/DELETE /credentials/:agentID/:key`,
-`POST …/:key/rotate`, `GET …/:key/versions` —
-see [Credentials](credentials.md).
+`POST …/:key/rotate`, and `GET …/:key/versions`. See
+[Credentials](credentials.md).
 
 ### RBAC & admin
 

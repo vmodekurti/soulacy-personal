@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/soulacy/soulacy/internal/binpath"
 	"github.com/soulacy/soulacy/internal/mcp"
 	"github.com/soulacy/soulacy/internal/mcpinstall"
 	"github.com/soulacy/soulacy/internal/netguard"
@@ -131,7 +132,7 @@ func (e *Engine) buildShellTools() []BuiltinTool {
 						}
 					}
 				}
-				return result, nil
+				return verifiedManagedActionResult(result), nil
 			},
 		},
 		{
@@ -184,7 +185,7 @@ func (e *Engine) buildShellTools() []BuiltinTool {
 				if err != nil {
 					return "", fmt.Errorf("package_install: %w", err)
 				}
-				return result, nil
+				return verifiedManagedActionResult(result), nil
 			},
 		},
 		{
@@ -396,9 +397,9 @@ func (e *Engine) buildShellTools() []BuiltinTool {
 // inspection, and the mandatory runtime approval gate. No model-controlled
 // value is interpreted by a shell.
 func (e *Engine) runManagedPackageInstaller(ctx context.Context, sourceURL, kind string) (string, error) {
-	syPath, err := exec.LookPath("sy")
+	syPath, err := binpath.Find("sy")
 	if err != nil {
-		return "", fmt.Errorf("soulacy CLI 'sy' was not found in PATH: %w", err)
+		return "", fmt.Errorf("soulacy CLI is unavailable: %w", err)
 	}
 	cmd := exec.CommandContext(ctx, syPath,
 		"package", "install", sourceURL,
@@ -422,9 +423,9 @@ func (e *Engine) runManagedPackageInstaller(ctx context.Context, sourceURL, kind
 }
 
 func (e *Engine) runManagedMCPRegistration(ctx context.Context, name, endpoint string) (string, error) {
-	syPath, err := exec.LookPath("sy")
+	syPath, err := binpath.Find("sy")
 	if err != nil {
-		return "", fmt.Errorf("soulacy CLI 'sy' was not found in PATH: %w", err)
+		return "", fmt.Errorf("soulacy CLI is unavailable: %w", err)
 	}
 	argv := []string{"mcp", "add", "--name", name, "--transport", "http", "--url", endpoint}
 	cmd := exec.CommandContext(ctx, syPath, argv...)

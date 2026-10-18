@@ -77,13 +77,14 @@ func (s *Server) handleBuilderChat(c *fiber.Ctx) error {
 		subject = claims.Subject
 	}
 
-	catalog := s.buildToolCatalogPrompt()
+	workspaceID, connectionSubject, _ := authenticatedConnectionActor(c)
+	environment := s.buildBuilderEnvironment(c.UserContext(), workspaceID, connectionSubject)
 
 	ctx := llm.WithCallMetadata(c.Context(), llm.CallMetadata{
 		Subject: subject, SessionID: body.SessionID, RunID: uuid.New().String(),
 		Source: "builder", CostConfirmed: body.ConfirmCost || isTruthy(c.Get("X-Soulacy-Cost-Confirmed")), OverrideAuthorized: canOverrideModel(claims),
 	})
-	resp, err := s.engine.BuilderChat(ctx, body.SessionID, body.Message, provider, catalog)
+	resp, err := s.engine.BuilderChat(ctx, body.SessionID, body.Message, provider, environment)
 	if err != nil {
 		s.log.Error("builder chat failed",
 			zap.String("session", body.SessionID),
@@ -95,13 +96,6 @@ func (s *Server) handleBuilderChat(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(resp)
-}
-
-// buildToolCatalogPrompt renders the live tool catalog for the builder's
-// system message. The catalog itself lives in buildercatalog.go, because
-// deploy resolves against the same object — the prompt promises that it will.
-func (s *Server) buildToolCatalogPrompt() string {
-	return s.toolCatalog().BuilderPrompt()
 }
 
 func firstLine(s string) string {
@@ -203,12 +197,16 @@ func (s *Server) handleBuilderDeploy(c *fiber.Ctx) error {
 			"error": "builder session not found or has no understanding yet",
 		})
 	}
+	workspaceID, connectionSubject, role := authenticatedConnectionActor(c)
 
 	built, err := s.deployFromUnderstanding(c.Context(), understanding, builderDeployOptions{
 		Provider:                 provider,
 		Model:                    model,
 		ActivateSchedule:         body.ActivateSchedule,
 		AcceptPrivilegedExposure: body.AcceptPrivilegedExposure,
+		WorkspaceID:              workspaceID,
+		Subject:                  connectionSubject,
+		Role:                     role,
 	})
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
@@ -272,6 +270,9 @@ type builderDeployOptions struct {
 	Model                    string
 	ActivateSchedule         bool
 	AcceptPrivilegedExposure bool
+	WorkspaceID              string
+	Subject                  string
+	Role                     string
 	// Labels are merged onto the definition before it is gated, so a caller
 	// can mark what it built as its own.
 	Labels map[string]string
@@ -321,6 +322,10 @@ func (s *Server) deployFromUnderstanding(ctx context.Context, u *runtime.Builder
 		}
 		out.Def.Labels[k] = v
 	}
+	connectionSelection, err := s.prepareBuilderConnectionSelection(ctx, out.Def.ID, out.Def.Connections, opts)
+	if err != nil {
+		return nil, err
+	}
 
 	// Wire the chosen tools to real ones. The builder names tools; it does not
 	// know what kind each is, and it used to be handed a fabricated
@@ -355,6 +360,12 @@ func (s *Server) deployFromUnderstanding(ctx context.Context, u *runtime.Builder
 	}
 	if err := s.loader.Upsert(dir, &out.Def); err != nil {
 		return nil, fmt.Errorf("deploy failed: %w", err)
+	}
+	if s.authConnections != nil {
+		if err := s.authConnections.SyncAgentSelection(ctx, connectionSelection.workspaceID, out.Def.ID,
+			connectionSelection.manageableIDs, connectionSelection.selectedIDs); err != nil {
+			return nil, fmt.Errorf("grant Website Access connections: %w", err)
+		}
 	}
 
 	if opts.ActivateSchedule && out.Def.Schedule != nil {

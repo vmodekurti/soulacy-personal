@@ -32,24 +32,24 @@ Open any card to edit:
 | Field | Notes |
 |---|---|
 | Title / Description | The description is what the agent receives as its task |
-| Agent | Which agent runs it; "— none —" makes it a plain tracking card |
+| Agent | Which agent runs it. Choose "none" for a plain tracking card. |
 | Status | One of the five columns |
-| Owner | Who reviews this — shown as an `@owner` badge on the card |
-| Priority | `low` · `normal` · `high` · `urgent` (badges: ▽ · — · ▲ · ‼) |
+| Owner | Who reviews this: shown as an `@owner` badge on the card |
+| Priority | `low` · `normal` · `high` · `urgent` (badges: ▽ · ◆ · ▲ · ‼) |
 | Tags | Comma-separated labels |
-| Due date | Cards show "due today / due tomorrow / overdue (…)" — overdue turns red |
+| Due date | Cards show "due today / due tomorrow / overdue (…)": overdue turns red |
 
 ## Running tasks and retries
 
-- **▶ Run** starts a new attempt through the assigned agent. A task that ended in **Failed** shows **▶ Retry** instead — retrying starts attempt #2, #3, … while preserving all prior attempts in the history.
+- **▶ Run** starts a new attempt through the assigned agent. A task that ended in **Failed** shows **▶ Retry** instead: retrying starts attempt #2, #3, … while preserving all prior attempts in the history.
 - The server rejects duplicate concurrent runs of the same task (409), so double-clicking is safe.
 - Each attempt appears in the editor's **Run history** with its attempt number, status badge, start/end time, session token/cost metrics, the result text, the failure reason (if any), and the session/action-log identifiers for deeper digging.
 
-Run lifecycle events (`run.started`, `run.finished`, `run.failed`) are published to the event stream, so you can wire failure webhooks — see [Dashboard & Activity](dashboard.md).
+Run lifecycle events (`run.started`, `run.finished`, `run.failed`) are published to the event stream, so you can wire failure webhooks: see [Dashboard & Activity](dashboard.md).
 
 ## Artifacts
 
-Files the agent writes during a run are captured automatically and listed in the task editor's **Artifacts** panel — name, size, when it was created, which tool produced it, and which run. Click **⬇ Download** to fetch the file.
+Files the agent writes during a run are captured automatically and listed in the task editor's **Artifacts** panel: name, size, when it was created, which tool produced it, and which run. Click **⬇ Download** to fetch the file.
 
 API:
 
@@ -67,8 +67,8 @@ Every captured file also emits a `run.artifact` event with its path, size, and p
 
 Each task has a discussion thread in the editor. Two kinds of entries:
 
-- **💬 comment** — ordinary notes.
-- **🔍 review note** — visually highlighted, for reviewer feedback (pairs naturally with the **Needs Review** column and the **Owner** field).
+- **💬 comment**: ordinary notes.
+- **🔍 review note**: visually highlighted, for reviewer feedback (pairs naturally with the **Needs Review** column and the **Owner** field).
 
 Type in the compose row, pick the kind, press **Enter** or **Add**. Entries record author and timestamp and can be deleted individually.
 
@@ -82,9 +82,9 @@ Two safety nets catch failures:
     ```bash
     curl "http://localhost:18789/api/v1/admin/dlq?queue=<agent-id>" \
       -H "Authorization: Bearer $SOULACY_API_KEY"
-    # GET  /api/v1/admin/dlq/<id>      — one item with payload, error, attempts
-    # DELETE /api/v1/admin/dlq/<id>    — discard after handling
+    # GET  /api/v1/admin/dlq/<id>      returns one item with payload, error, attempts
+    # DELETE /api/v1/admin/dlq/<id>    discards it after handling
     ```
 
 !!! tip
-    Use **Needs Review** as the agent→human handoff: have agents do the work, then a human owner checks the run output and artifacts, leaves a 🔍 review note, and moves the card to **Done**.
+    Use **Needs Review** for the agent-to-human handoff. Agents do the work, then a human owner checks the run output and artifacts, leaves a 🔍 review note, and moves the card to **Done**.

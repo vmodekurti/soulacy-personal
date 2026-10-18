@@ -57,11 +57,11 @@ curl -fsSL https://raw.githubusercontent.com/vmodekurti/soulacy-personal/main/re
 
 It:
 
-1. installs [Tailscale](https://tailscale.com) — a private, WireGuard-encrypted
-   mesh VPN — if it is missing;
+1. installs [Tailscale](https://tailscale.com): a private, WireGuard-encrypted
+   mesh VPN: if it is missing;
 2. signs the machine into your tailnet (opens a browser once);
 3. publishes the gateway into your tailnet with `tailscale serve`. **The gateway
-   stays bound to `127.0.0.1`** — nothing is opened on your LAN or the public
+   stays bound to `127.0.0.1`**: nothing is opened on your LAN or the public
    internet, and no router port-forwarding is needed;
 4. prints the address and API key to pair your phone with.
 
@@ -94,5 +94,5 @@ sudo tailscale down                # leave the tailnet
 - Never expose port `18789` directly to the internet. Tailscale (private) and
   Cloudflare Tunnel (TLS, no open ports) both avoid that.
 - The gateway requires an API key on any non-loopback path, and each paired
-  device holds its own scoped, expiring credential — re-pair from the host to
+  device holds its own scoped, expiring credential: re-pair from the host to
   renew it.

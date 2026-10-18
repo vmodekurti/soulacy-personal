@@ -6,7 +6,7 @@ non-interactive agent output.
 
 !!! tip "Guided setup in the GUI"
     The GUI's **Channels → Google Chat → Configure** card walks through creating
-    an Incoming Webhook in the target space and pasting the URL back in — plus
+    an Incoming Webhook in the target space and pasting the URL back in: plus
     a **Test delivery** button. Use this reference page when editing
     `config.yaml` directly.
 

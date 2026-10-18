@@ -96,14 +96,26 @@ func (m *Manager) Resolve(ctx context.Context, name, envVar, fallback string) st
 // adapters) see vault values without each needing vault awareness. Returns the
 // number of fields overlaid.
 func (m *Manager) Overlay(ctx context.Context, cfg *config.Config) int {
+	n, _ := m.OverlayWithErrors(ctx, cfg)
+	return n
+}
+
+// OverlayWithErrors applies readable vault values and reports stored entries
+// that could not be decrypted. Error keys are canonical secret names; values
+// never contain credential plaintext.
+func (m *Manager) OverlayWithErrors(ctx context.Context, cfg *config.Config) (int, map[string]error) {
 	if !m.Enabled() || cfg == nil {
-		return 0
+		return 0, nil
 	}
 	n := 0
+	readErrors := map[string]error{}
 
 	// LLM provider api_keys.
 	for id, pc := range cfg.LLM.Providers {
-		if v, ok := m.Get(ctx, llmKey(id)); ok && v != "" {
+		name := llmKey(id)
+		if v, ok, err := m.GetWithError(ctx, name); err != nil {
+			readErrors[name] = err
+		} else if ok && v != "" {
 			pc.APIKey = v
 			cfg.LLM.Providers[id] = pc // map value is a struct; reassign
 			n++
@@ -116,7 +128,10 @@ func (m *Manager) Overlay(ctx context.Context, cfg *config.Config) int {
 			continue
 		}
 		for _, k := range channelTokenKeys {
-			if v, ok := m.Get(ctx, channelKey(id, k)); ok && v != "" {
+			name := channelKey(id, k)
+			if v, ok, err := m.GetWithError(ctx, name); err != nil {
+				readErrors[name] = err
+			} else if ok && v != "" {
 				settings[k] = v
 				n++
 			}
@@ -124,7 +139,7 @@ func (m *Manager) Overlay(ctx context.Context, cfg *config.Config) int {
 	}
 
 	// server.api_key is intentionally NOT overlaid — see structuredDescriptors.
-	return n
+	return n, readErrors
 }
 
 // secretValuesInConfig collects the non-empty plaintext secret values currently

@@ -43,6 +43,14 @@ func TestStudioRunHistoryMergesFlowAndDurableRuns(t *testing.T) {
 			Payload: map[string]any{"name": "fetch_url", "is_error": true, "content": "fetch failed"},
 		},
 		{
+			Type: "task.contract.completed", AgentID: "history-agent", SessionID: "slack-fail", Timestamp: base.Add(5500 * time.Millisecond),
+			Payload: map[string]any{"state": "failed", "outcome": "failed", "blocker": "fetch failed"},
+		},
+		{
+			Type: "run.completed", AgentID: "history-agent", SessionID: "slack-fail", Timestamp: base.Add(5750 * time.Millisecond),
+			Payload: map[string]any{"success": false, "outcome": "failed", "task_outcome": "failed"},
+		},
+		{
 			Type: "schedule.output", AgentID: "history-agent", SessionID: "delivery-only", Timestamp: base.Add(6 * time.Second),
 			Payload: map[string]any{
 				"delivered":     true,

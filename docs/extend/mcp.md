@@ -1,7 +1,7 @@
 # MCP Servers
 
 Soulacy speaks the [Model Context Protocol](https://modelcontextprotocol.io)
-(MCP), so any MCP server — first-party or third-party — can expose its tools to
+(MCP), so any MCP server (first-party or third-party) can expose its tools to
 your agents. An MCP server might wrap a database, a SaaS API, a filesystem, or a
 company-internal service; once connected, its tools appear to agents exactly like
 built-in tools.
@@ -45,6 +45,21 @@ sy --gateway https://beta.soulacy.io \
 ```
 
 ## Configuring an MCP server
+
+### Open Notebook
+
+Open Notebook is an optional integration. On the MCP page, select **Add
+server**, then choose **Connect Open Notebook** to check the loopback API and
+connect the separately installed `open-notebook-mcp` adapter. The adapter is
+not included in the Soulacy deployment or normal release archive. You can also
+run:
+
+```bash
+sy mcp add-open-notebook
+```
+
+See [Open Notebook](../integrations/open-notebook.md) for the available tools,
+agent allowlists, and the authenticated-website-to-podcast workflow.
 
 ### Install from a repository URL
 
@@ -99,7 +114,7 @@ Raw Git repositories are unsigned, so direct CLI use requires
 consent. Repeating the request does not reinstall an already registered server.
 
 MCP servers are declared in your Soulacy config (or contributed by a plugin).
-Each server has a transport — a local subprocess over stdio, or a remote URL.
+Each server has a transport: a local subprocess over stdio, or a remote URL.
 
 ```yaml
 mcp:

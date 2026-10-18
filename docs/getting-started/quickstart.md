@@ -54,7 +54,7 @@ model you actually have access to. A **gateway API key** signs you into Soulacy;
 a **provider API key** authenticates with the model service. Store both privately.
 
 `sy onboard` updates an existing workspace without replacing unrelated settings.
-`sy setup` is the separate, fresh-config path—do not use it casually to repair
+`sy setup` is the separate, fresh-config path, do not use it casually to repair
 an existing installation.
 
 If you did not start a background service during onboarding:

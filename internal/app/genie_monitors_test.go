@@ -35,6 +35,12 @@ func TestGenieMonitorLifecycleIsScopedAndPersistent(t *testing.T) {
 	if loader.Get(id).Enabled {
 		t.Fatal("paused monitor remained enabled")
 	}
+	if err := mgr.ResumeGenieMonitor(id); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if !loader.Get(id).Enabled {
+		t.Fatal("resumed monitor remained disabled")
+	}
 	if err := mgr.CancelGenieMonitor(id); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}

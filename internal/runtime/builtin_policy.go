@@ -8,7 +8,14 @@ func builtinNameAllowed(def *agent.Definition, name string) bool {
 	return def == nil || def.Builtins == nil || containsExactString(*def.Builtins, name) || containsExactString(*def.Builtins, "*") || containsExactString(*def.Builtins, "all")
 }
 
-func (e *Engine) builtinAllowed(def *agent.Definition, tool BuiltinTool) bool {
+// builtinAllowed reports whether def may see and call tool. websiteRoute is
+// true for one of the safe browser-route tools when the agent holds a ready,
+// explicitly granted Website Access connection: that grant stands in for
+// naming the tool in `builtins:`.
+func (e *Engine) builtinAllowed(def *agent.Definition, tool BuiltinTool, websiteRoute bool) bool {
+	if websiteRoute {
+		return true
+	}
 	if !builtinNameAllowed(def, tool.Name) {
 		return false
 	}

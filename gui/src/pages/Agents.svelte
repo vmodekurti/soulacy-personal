@@ -30,6 +30,34 @@
   let strategyManualOverride = false
   let strategyAutoNotice = ''
   let lastAutoStrategyKey = ''
+  let authenticatedConnections = []
+  let authenticatedConnectionsError = ''
+
+  async function loadAuthenticatedConnections() {
+    authenticatedConnectionsError = ''
+    try {
+      const response = await api.connections.list()
+      authenticatedConnections = response.connections || []
+    } catch (e) {
+      authenticatedConnections = []
+      authenticatedConnectionsError = e.message || 'Could not load website sign-ins.'
+    }
+  }
+
+  function toggleAuthenticatedConnection(connection) {
+    if (!editing || !connection?.id) return
+    const next = new Set(editing.connections || [])
+    if (next.has(connection.id)) next.delete(connection.id)
+    else next.add(connection.id)
+    editing.connections = [...next]
+    editing = editing
+  }
+
+  function referencedUngrantedConnections() {
+    const prompt = editing?.system_prompt || ''
+    const granted = new Set(editing?.connections || [])
+    return authenticatedConnections.filter(connection => prompt.includes(connection.id) && !granted.has(connection.id))
+  }
 
   // Capability-ack modal state. When the backend returns 409 with
   // {needs_ack: true, capability_audit}, we open a blocking modal that shows
@@ -990,6 +1018,9 @@
     editing.structured_peer_results = !!editing.structured_peer_results
     editing.channels  = editing.channels  || []
     editing.confirm_tools = editing.confirm_tools || []
+    editing.connections = editing.connections || authenticatedConnections
+      .filter(connection => (connection.agent_ids || []).includes(editing.id))
+      .map(connection => connection.id)
     editing.unattended = !!editing.unattended
     saveMsg = ''
     saveAudit = null
@@ -1458,6 +1489,7 @@ console.log(reply);` : ''
   }
 
   onMount(async () => {
+    await loadAuthenticatedConnections()
     await load()
     checkDoctorHash()
     loadCatalog()
@@ -1540,7 +1572,7 @@ console.log(reply);` : ''
       {:else}
         <div class="editor">
           <div class="editor-hdr">
-            <span>{selected ? 'Editing: ' + selected.id : 'New Agent'}</span>
+            <span class="editor-title" title={selected ? 'Editing: ' + selected.id : 'New Agent'}>{selected ? 'Editing: ' + selected.id : 'New Agent'}</span>
             <div class="hdr-actions editor-actions">
               {#if selected}
                 <button class="btn-secondary" on:click={() => showFiles = !showFiles} aria-expanded={showFiles}>Published files</button>
@@ -1756,6 +1788,33 @@ console.log(reply);` : ''
               <span class="field-label">System Prompt</span>
               <textarea bind:value={editing.system_prompt} rows="7"
                         placeholder="You are a helpful Soulacy agent…"></textarea>
+            </div>
+
+            <div class="sep">Website sign-ins</div>
+            <div class="website-grants">
+              <div class="website-grants-head">
+                <span>Grant this agent selected encrypted website sessions. Cookie values stay outside the model context.</span>
+                <button type="button" class="btn-secondary small" on:click={() => { window.location.hash = '#websites' }}>Manage sign-ins</button>
+              </div>
+              {#if authenticatedConnectionsError}
+                <p class="error-text">{authenticatedConnectionsError}</p>
+              {:else if authenticatedConnections.length === 0}
+                <p class="muted">No website sign-ins are available. Add one from Website Access.</p>
+              {:else}
+                <div class="website-grant-list">
+                  {#each authenticatedConnections as connection (connection.id)}
+                    <label class:needs-auth={connection.status !== 'ready'}>
+                      <input type="checkbox" checked={(editing.connections || []).includes(connection.id)} on:change={() => toggleAuthenticatedConnection(connection)} />
+                      <span><strong>{connection.name}</strong><small>{connection.status === 'ready' ? connection.allowed_domains?.join(', ') : 'Reconnect required'}</small></span>
+                    </label>
+                  {/each}
+                </div>
+                {#if referencedUngrantedConnections().length > 0}
+                  <div class="website-grant-warning" role="alert">
+                    This prompt references {referencedUngrantedConnections().map(connection => connection.name).join(', ')}, but the sign-in is not granted to this agent. Select it before running the agent.
+                  </div>
+                {/if}
+              {/if}
             </div>
 
             {#if advanced}
@@ -3488,10 +3547,21 @@ console.log(reply);` : ''
   .editor      { background: var(--sl-surface); border: 1px solid var(--sl-line); border-radius: 10px; overflow: hidden; }
   .editor-hdr  {
     display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: .65rem 1rem;
     padding: .8rem 1rem; border-bottom: 1px solid var(--sl-line);
     font-weight: 600; font-size: .875rem; flex-shrink: 0;
   }
   .hdr-actions { display: flex; align-items: center; gap: .65rem; }
+  .editor-title {
+    flex: 1 1 14rem; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .editor-actions {
+    flex: 1 1 34rem; min-width: 0;
+    justify-content: flex-end; flex-wrap: wrap; gap: .45rem;
+  }
+  .editor-actions > button,
+  .editor-actions .save-msg { white-space: nowrap; }
   .save-msg    { font-size: .8rem; color: #f06060; }
   .save-msg.ok { color: #4caf82; }
 
@@ -4138,6 +4208,43 @@ console.log(reply);` : ''
     display: flex;
     align-items: center;
     gap: .42rem;
+  }
+  .website-grants {
+    border: 1px solid var(--sl-line);
+    border-radius: 8px;
+    padding: .75rem;
+    background: rgba(255,255,255,.02);
+  }
+  .website-grants-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    color: #aeb4d2;
+    font-size: .76rem;
+  }
+  .website-grant-list { display: grid; gap: .45rem; margin-top: .7rem; }
+  .website-grant-list label {
+    display: flex;
+    align-items: center;
+    gap: .55rem;
+    padding: .55rem .65rem;
+    border: 1px solid var(--sl-line);
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .website-grant-list label.needs-auth { opacity: .65; }
+  .website-grant-list span { display: flex; flex-direction: column; gap: .1rem; }
+  .website-grant-list small { color: #7b82a8; }
+  .website-grant-warning {
+    margin-top: .7rem;
+    padding: .55rem .65rem;
+    border: 1px solid rgba(245,167,66,.35);
+    border-radius: 6px;
+    background: rgba(245,167,66,.1);
+    color: #f5bd67;
+    font-size: .76rem;
+    line-height: 1.45;
   }
 
   /* F-GUI-2 — Security Doctor modal styling. Colors mirror the deployment

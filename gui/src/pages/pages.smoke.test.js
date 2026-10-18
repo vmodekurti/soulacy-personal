@@ -20,6 +20,7 @@ import { navPages } from '../lib/nav.js'
 const loaders = {
   feed: () => import('./Feed.svelte'),
   start: () => import('./GetStarted.svelte'),
+  missions: () => import('./Missions.svelte'),
   autopilot: () => import('./Autopilot.svelte'),
   dashboard: () => import('./Dashboard.svelte'),
   onboarding: () => import('./Onboarding.svelte'),
@@ -34,6 +35,7 @@ const loaders = {
   workboard: () => import('./Workboard.svelte'),
   channels: () => import('./Channels.svelte'),
   schedule: () => import('./Schedule.svelte'),
+  connectors: () => import('./Connectors.svelte'),
   skills: () => import('./Skills.svelte'),
   websites: () => import('./WebsiteAccess.svelte'),
   mcp: () => import('./MCP.svelte'),

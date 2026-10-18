@@ -4201,6 +4201,15 @@ Use null for fields that are not present.`
     }
   }
 
+  // Classic SOUL.yaml agents may contain fields Studio's workflow Draft does
+  // not own. Keep them visible here, but edit them in the lossless agent form.
+  function manageClassicAgent(a) {
+    if (!a?.id) return
+    $editAgent = a.id
+    closeLibrary()
+    window.location.hash = '#agents'
+  }
+
   async function deleteAgentWorkflow(a) {
     if (!a || !a.id || library.busyId) return
     let ok = true
@@ -7105,7 +7114,7 @@ Use null for fields that are not present.`
             <ul class="picker-list">
               {#each libDeployed as a (a.id)}
                 <li class="picker-item lib-item">
-                  <button class="picker-main" type="button" on:click={() => loadAgentForEdit(a)} disabled={!!library.busyId} title="Edit this workflow">
+                  <button class="picker-main" type="button" on:click={() => a.editable === false ? manageClassicAgent(a) : loadAgentForEdit(a)} disabled={!!library.busyId} title={a.editable === false ? 'Manage this deployed agent' : 'Edit this workflow'}>
                     <span class="picker-name">
                       {a.name || a.id}
                       <span class="agent-badge on">deployed</span>
@@ -7115,14 +7124,20 @@ Use null for fields that are not present.`
                       : (a.trigger + ' · ' + a.nodes + ' step' + (a.nodes === 1 ? '' : 's')))}</span>
                   </button>
                   <div class="lib-actions">
-                    <button class="btn btn-sm" type="button" on:click={() => loadAgentForEdit(a)} disabled={!!library.busyId}>
-                      {library.busyId === a.id ? '…' : 'Edit'}
-                    </button>
-                    <button class="btn btn-sm" type="button" on:click={() => cloneFromLibrary(a)} disabled={!!library.busyId} title="Open a copy under a new name">Clone</button>
-                    <button class="btn btn-sm" type="button" on:click={() => testFromLibrary(a)} disabled={!!library.busyId} title="Load it and run the test bench">Test</button>
+                    {#if a.editable === false}
+                      <button class="btn btn-sm" type="button" on:click={() => manageClassicAgent(a)} disabled={!!library.busyId}>Manage</button>
+                    {:else}
+                      <button class="btn btn-sm" type="button" on:click={() => loadAgentForEdit(a)} disabled={!!library.busyId}>
+                        {library.busyId === a.id ? '…' : 'Edit'}
+                      </button>
+                      <button class="btn btn-sm" type="button" on:click={() => cloneFromLibrary(a)} disabled={!!library.busyId} title="Open a copy under a new name">Clone</button>
+                      <button class="btn btn-sm" type="button" on:click={() => testFromLibrary(a)} disabled={!!library.busyId} title="Load it and run the test bench">Test</button>
+                    {/if}
                     <button class="btn btn-sm" type="button" on:click={() => exportFromLibrary(a)} disabled={!!library.busyId} title="Download its SOUL.yaml">Export</button>
-                    <button class="btn btn-sm" type="button" on:click={() => setDeployed(a, false)} disabled={!!library.busyId} title="Stop it running on its trigger">Undeploy</button>
-                    <button class="btn btn-sm" type="button" on:click={() => deleteAgentWorkflow(a)} disabled={!!library.busyId} title="Delete this agent">Delete</button>
+                    {#if !a.protected}
+                      <button class="btn btn-sm" type="button" on:click={() => setDeployed(a, false)} disabled={!!library.busyId} title="Stop it running on its trigger">Undeploy</button>
+                      <button class="btn btn-sm" type="button" on:click={() => deleteAgentWorkflow(a)} disabled={!!library.busyId} title="Delete this agent">Delete</button>
+                    {/if}
                   </div>
                 </li>
               {/each}
@@ -7135,7 +7150,7 @@ Use null for fields that are not present.`
             <ul class="picker-list">
               {#each libSaved as a (a.id)}
                 <li class="picker-item lib-item">
-                  <button class="picker-main" type="button" on:click={() => loadAgentForEdit(a)} disabled={!!library.busyId} title="Edit this workflow">
+                  <button class="picker-main" type="button" on:click={() => a.editable === false ? manageClassicAgent(a) : loadAgentForEdit(a)} disabled={!!library.busyId} title={a.editable === false ? 'Manage this saved agent' : 'Edit this workflow'}>
                     <span class="picker-name">
                       {a.name || a.id}
                       <span class="agent-badge off">not deployed</span>
@@ -7145,11 +7160,15 @@ Use null for fields that are not present.`
                       : (a.trigger + ' · ' + a.nodes + ' step' + (a.nodes === 1 ? '' : 's')))}</span>
                   </button>
                   <div class="lib-actions">
-                    <button class="btn btn-sm" type="button" on:click={() => loadAgentForEdit(a)} disabled={!!library.busyId}>
-                      {library.busyId === a.id ? '…' : 'Edit'}
-                    </button>
-                    <button class="btn btn-sm" type="button" on:click={() => cloneFromLibrary(a)} disabled={!!library.busyId}>Clone</button>
-                    <button class="btn btn-sm" type="button" on:click={() => testFromLibrary(a)} disabled={!!library.busyId}>Test</button>
+                    {#if a.editable === false}
+                      <button class="btn btn-sm" type="button" on:click={() => manageClassicAgent(a)} disabled={!!library.busyId}>Manage</button>
+                    {:else}
+                      <button class="btn btn-sm" type="button" on:click={() => loadAgentForEdit(a)} disabled={!!library.busyId}>
+                        {library.busyId === a.id ? '…' : 'Edit'}
+                      </button>
+                      <button class="btn btn-sm" type="button" on:click={() => cloneFromLibrary(a)} disabled={!!library.busyId}>Clone</button>
+                      <button class="btn btn-sm" type="button" on:click={() => testFromLibrary(a)} disabled={!!library.busyId}>Test</button>
+                    {/if}
                     <button class="btn btn-sm" type="button" on:click={() => exportFromLibrary(a)} disabled={!!library.busyId}>Export</button>
                     <button class="btn btn-sm primary" type="button" on:click={() => setDeployed(a, true)} disabled={!!library.busyId} title="Start running it on its trigger">Deploy</button>
                     <button class="btn btn-sm" type="button" on:click={() => deleteAgentWorkflow(a)} disabled={!!library.busyId}>Delete</button>

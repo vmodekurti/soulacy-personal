@@ -16,7 +16,7 @@ on demand in Chat or on a schedule to a channel.
 ## Install
 
 1. Open the template in the **Template Install Wizard** and review the readiness
-   checklist — it flags a missing provider or `WEATHER_API_KEY`.
+   checklist: it flags a missing provider or `WEATHER_API_KEY`.
 2. Run the **mock test** ("weather in London") to confirm the workflow shape with
    no external call.
 3. Add `WEATHER_API_KEY`, then run the **real test**.

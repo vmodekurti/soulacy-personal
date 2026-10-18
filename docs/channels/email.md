@@ -73,7 +73,7 @@ Then call:
 - `no recipient`: set `to` in `schedule.output`, pass `to` to `channel.send`, or
   configure `default_output_to`.
 
-For any live delivery failure, click **Diagnose** on the channel mapping —
+For any live delivery failure, click **Diagnose** on the channel mapping.
 Soulacy's delivery doctor maps SMTP status codes to plain-language reasons
 (bad credentials, relay denied, recipient rejected, quota exceeded, starttls
 required, message rejected). See `internal/channels/deliverydoctor.go` for

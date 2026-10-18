@@ -133,3 +133,39 @@ func TestMobileDeliveriesListWithoutDeviceIsTheOwnersView(t *testing.T) {
 		t.Fatalf("owner's view ids = %v, want everyone + this-phone only", ids)
 	}
 }
+
+func TestMobileFeedStateAPIStoresAccountScopedCardOrganization(t *testing.T) {
+	store, err := mobilechan.Open(filepath.Join(t.TempDir(), "mobile.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mobilechan.SetDefaultStore(store)
+	t.Cleanup(func() {
+		mobilechan.SetDefaultStore(nil)
+		_ = store.Close()
+	})
+	s := newTestGateway(t, "secret")
+
+	status, body := gatewayJSON(t, s, http.MethodPost, "/api/v1/mobile/feed-state", "secret",
+		`{"card_id":"run:daily-brief","read":true,"saved":true,"archived":false}`)
+	if status != http.StatusOK || body["saved"] != true {
+		t.Fatalf("save feed state status=%d body=%v", status, body)
+	}
+	status, body = gatewayJSON(t, s, http.MethodGet, "/api/v1/mobile/feed-state", "secret", "")
+	if status != http.StatusOK {
+		t.Fatalf("list feed state status=%d body=%v", status, body)
+	}
+	cards, ok := body["cards"].([]any)
+	if !ok || len(cards) != 1 {
+		t.Fatalf("feed state cards = %#v", body["cards"])
+	}
+	card := cards[0].(map[string]any)
+	if card["card_id"] != "run:daily-brief" || card["read"] != true || card["saved"] != true {
+		t.Fatalf("feed state card = %#v", card)
+	}
+	status, _ = gatewayJSON(t, s, http.MethodPost, "/api/v1/mobile/feed-state", "secret",
+		`{"card_id":"approval:not-mutable","read":true}`)
+	if status != http.StatusBadRequest {
+		t.Fatalf("approval feed state status=%d, want 400", status)
+	}
+}

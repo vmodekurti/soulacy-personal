@@ -15,6 +15,7 @@ import (
 	"github.com/soulacy/soulacy/internal/knowledge"
 	"github.com/soulacy/soulacy/internal/llm"
 	"github.com/soulacy/soulacy/internal/memory"
+	"github.com/soulacy/soulacy/internal/taskcontract"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 	"github.com/soulacy/soulacy/pkg/skill"
@@ -435,12 +436,12 @@ func TestAllToolSchemasBuiltinsGate(t *testing.T) {
 	}
 }
 
-// TestAllToolSchemasSystemToolsRequireDoubleOptInAndHTTP pins SEC-3 gating.
+// TestAllToolSchemasSystemToolsRequireDoubleOptInAndTrustedChannel pins SEC-3 gating.
 // The PRIVILEGED (SYSTEM-partition) tools — shell_exec, write_file — require
 // BOTH the server permit (allowSystemAgents) AND the agent "system" capability,
-// and are never offered off the http channel. The SAFE read-only tools —
-// read_file — are offered on http regardless of capability.
-func TestAllToolSchemasSystemToolsRequireDoubleOptInAndHTTP(t *testing.T) {
+// and are never offered off the http channel. SAFE tools are available on http
+// and trusted internal scheduler/peer runs, but not shared external channels.
+func TestAllToolSchemasSystemToolsRequireDoubleOptInAndTrustedChannel(t *testing.T) {
 	cases := []struct {
 		name              string
 		allowSystemAgents []string
@@ -474,7 +475,15 @@ func TestAllToolSchemasSystemToolsRequireDoubleOptInAndHTTP(t *testing.T) {
 			wantSafe:          true,
 		},
 		{
-			name:              "bot channel blocks everything system",
+			name:              "trusted internal channel exposes safe only",
+			allowSystemAgents: []string{"*"},
+			defSystemTools:    true,
+			channel:           "internal",
+			wantPrivileged:    false,
+			wantSafe:          true,
+		},
+		{
+			name:              "shared external channel blocks everything system",
 			allowSystemAgents: []string{"*"},
 			defSystemTools:    true,
 			channel:           "telegram",
@@ -502,6 +511,52 @@ func TestAllToolSchemasSystemToolsRequireDoubleOptInAndHTTP(t *testing.T) {
 					names["read_file"], tc.wantSafe, sortedSchemaNames(names))
 			}
 		})
+	}
+}
+
+func TestSystemToolAllowedOnChannel(t *testing.T) {
+	for _, tc := range []struct {
+		tool, channel string
+		want          bool
+	}{
+		{"read_file", "http", true},
+		{"shell_exec", "http", true},
+		{"read_file", "internal", true},
+		{"http_request", "internal", true},
+		{"shell_exec", "internal", false},
+		{"read_file", "telegram", false},
+		{"http_request", "slack", false},
+		{"read_file", "", false},
+	} {
+		if got := systemToolAllowedOnChannel(tc.tool, tc.channel); got != tc.want {
+			t.Errorf("systemToolAllowedOnChannel(%q, %q) = %v, want %v", tc.tool, tc.channel, got, tc.want)
+		}
+	}
+}
+
+func TestInternalRunGetsExplicitlyAllowedSafeBuiltins(t *testing.T) {
+	allowed := []string{"read_file", "http_request", "channel.send"}
+	e := &Engine{}
+	e.builtins = e.buildBuiltins()
+	def := &agent.Definition{ID: "inbox-triage", Builtins: &allowed}
+
+	internal := toolSchemaNameSet(e.allToolSchemas(def, "internal"))
+	for _, name := range []string{"read_file", "http_request", "channel.send"} {
+		if !internal[name] {
+			t.Errorf("internal run missing explicitly allowed tool %q; schemas=%v", name, sortedSchemaNames(internal))
+		}
+	}
+	for _, name := range []string{"list_dir", "shell_exec", "write_file"} {
+		if internal[name] {
+			t.Errorf("internal run unexpectedly received %q; schemas=%v", name, sortedSchemaNames(internal))
+		}
+	}
+
+	external := toolSchemaNameSet(e.allToolSchemas(def, "telegram"))
+	for _, name := range []string{"read_file", "http_request"} {
+		if external[name] {
+			t.Errorf("external run unexpectedly received host tool %q; schemas=%v", name, sortedSchemaNames(external))
+		}
 	}
 }
 
@@ -859,7 +914,126 @@ func TestHandleRejectsInternalScratchNarrationAndSynthesizesAnswer(t *testing.T)
 	}
 	reqs := provider.requestsSnapshot()
 	if len(reqs) != 3 || len(reqs[2].Tools) == 0 {
-		t.Fatalf("expected a third continuation request with tools; requests=%d", len(reqs))
+		t.Fatalf("expected a third tool-capable execution turn; requests=%d", len(reqs))
+	}
+	if !chatMessagesContain(reqs[2].Messages, "system", "unfinished work") {
+		t.Fatalf("continuation turn lacks the runtime completion directive: %#v", reqs[2].Messages)
+	}
+}
+
+func TestHandleContinuesAfterForwardLookingSearchProgress(t *testing.T) {
+	e, provider := newHandleTestEngine(t, &agent.Definition{
+		ID: "scheduled-research", Name: "Scheduled Research", Enabled: true,
+		LLM: agent.LLMConfig{Provider: "test", Model: "fake-model"}, MaxTurns: 3,
+		Builtins: strListPtr("web_search"),
+	})
+	e.builtins = []BuiltinTool{{Name: "web_search", Parameters: map[string]any{"type": "object"}, Handler: func(context.Context, map[string]any) (string, error) {
+		return `{"results":["article one"]}`, nil
+	}}}
+	provider.responses = []llm.CompletionResponse{
+		{ToolCalls: []message.ToolCall{{ID: "search-1", Name: "web_search", Arguments: map[string]any{"query": "AI"}}}},
+		{Content: "Good results. Today appears to be around October 9, 2026. Let me search for a few more specific topics to make sure I select the best articles."},
+		{Content: "I selected three current articles and summarized their findings."},
+	}
+
+	reply, err := e.Handle(context.Background(), testUserMessage("scheduled-research", "scheduled-progress", "Find today's articles"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := flattenParts(reply.Parts); !strings.HasPrefix(got, "I selected three current articles") {
+		t.Fatalf("reply = %q", got)
+	}
+	requests := provider.requestsSnapshot()
+	if len(requests) != 3 || len(requests[2].Tools) == 0 {
+		t.Fatalf("progress response ended the run instead of continuing: %#v", requests)
+	}
+}
+
+func TestHandleContinuesAfterEmptyTurnInsteadOfSynthesizingEarly(t *testing.T) {
+	e, provider := newHandleTestEngine(t, &agent.Definition{
+		ID: "scheduled-podcast", Name: "Scheduled Podcast", Enabled: true,
+		LLM: agent.LLMConfig{Provider: "test", Model: "fake-model"}, MaxTurns: 3,
+		Builtins: strListPtr("web_search"),
+	})
+	e.builtins = []BuiltinTool{{Name: "web_search", Parameters: map[string]any{"type": "object"}, Handler: func(context.Context, map[string]any) (string, error) {
+		return `{"results":["article one"]}`, nil
+	}}}
+	provider.responses = []llm.CompletionResponse{
+		{
+			Content:   "I'll start today's podcast curation by searching for trending articles.",
+			ToolCalls: []message.ToolCall{{ID: "search-1", Name: "web_search", Arguments: map[string]any{"query": "AI"}}},
+		},
+		{Content: ""},
+		{Content: "The podcast workflow completed and the verified listening link was delivered."},
+	}
+
+	reply, err := e.Handle(context.Background(), testUserMessage("scheduled-podcast", "scheduled-empty-turn", "Create today's podcast"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := flattenParts(reply.Parts); !strings.HasPrefix(got, "The podcast workflow completed") {
+		t.Fatalf("reply = %q", got)
+	}
+	requests := provider.requestsSnapshot()
+	if len(requests) != 3 || len(requests[2].Tools) == 0 {
+		t.Fatalf("empty execution turn triggered early synthesis instead of another tool-capable turn: %#v", requests)
+	}
+	if !chatMessagesContain(requests[2].Messages, "system", "returned no answer") {
+		t.Fatalf("continuation turn lacks the empty-response recovery directive: %#v", requests[2].Messages)
+	}
+}
+
+func TestHandleMarksRecoveredPlanningSentenceIncomplete(t *testing.T) {
+	e, provider := newHandleTestEngine(t, &agent.Definition{
+		ID: "scheduled-podcast", Name: "Scheduled Podcast", Enabled: true,
+		LLM: agent.LLMConfig{Provider: "test", Model: "fake-model"}, MaxTurns: 2,
+		Builtins: strListPtr("web_search"),
+	})
+	e.builtins = []BuiltinTool{{Name: "web_search", Parameters: map[string]any{"type": "object"}, Handler: func(context.Context, map[string]any) (string, error) {
+		return `{"results":["article one"]}`, nil
+	}}}
+	provider.responses = []llm.CompletionResponse{
+		{
+			Content:   "I'll start today's podcast curation by searching for trending articles from the three sources. Let me run several searches in parallel.",
+			ToolCalls: []message.ToolCall{{ID: "search-1", Name: "web_search", Arguments: map[string]any{"query": "AI"}}},
+		},
+		{Content: ""},
+		{Content: "", OutputTokens: 100},
+		{Content: "", OutputTokens: 100},
+	}
+
+	reply, err := e.Handle(context.Background(), testUserMessage("scheduled-podcast", "scheduled-recovered-plan", "Create today's podcast"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reply.Metadata[message.MetaTaskState] != "incomplete" || reply.Metadata[message.MetaTaskOutcome] != taskcontract.OutcomeIncomplete {
+		t.Fatalf("recovered planning text was recorded as success: %#v", reply.Metadata)
+	}
+	if !strings.Contains(flattenParts(reply.Parts), "This run is incomplete") {
+		t.Fatalf("reply does not disclose incomplete recovery: %q", flattenParts(reply.Parts))
+	}
+}
+
+func TestHandleMarksExhaustedProgressIncomplete(t *testing.T) {
+	e, provider := newHandleTestEngine(t, &agent.Definition{
+		ID: "scheduled-research", Name: "Scheduled Research", Enabled: true,
+		LLM: agent.LLMConfig{Provider: "test", Model: "fake-model"}, MaxTurns: 1,
+		Builtins: strListPtr("web_search"),
+	})
+	provider.responses = []llm.CompletionResponse{{Content: "Let me search for a few more specific topics."}}
+
+	reply, err := e.Handle(context.Background(), testUserMessage("scheduled-research", "scheduled-incomplete", "Find today's articles"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reply.Metadata[message.MetaTaskState] != "incomplete" || reply.Metadata[message.MetaTaskOutcome] != taskcontract.OutcomeIncomplete {
+		t.Fatalf("task metadata = %#v", reply.Metadata)
+	}
+	if reply.Metadata[message.MetaReasoningDegraded] != "true" {
+		t.Fatalf("incomplete result must be marked degraded: %#v", reply.Metadata)
+	}
+	if !strings.Contains(flattenParts(reply.Parts), "This run is incomplete") {
+		t.Fatalf("reply does not explain the terminal state: %q", flattenParts(reply.Parts))
 	}
 }
 func TestHandleRetriesInvalidStructuredOutput(t *testing.T) {
@@ -1115,7 +1289,7 @@ func TestHandlePeerAgentDelegation(t *testing.T) {
 		SystemPrompt: "Answer research questions.",
 		LLM:          agent.LLMConfig{Provider: "test", Model: "fake-model"},
 		MaxTurns:     2,
-		Builtins:     strListPtr(),
+		Builtins:     strListPtr("read_file", "http_request"),
 	}
 	for _, d := range []*agent.Definition{callerDef, peerDef} {
 		if err := loader.Upsert(agentDir, d); err != nil {
@@ -1158,6 +1332,17 @@ func TestHandlePeerAgentDelegation(t *testing.T) {
 	reqs := provider.requestsSnapshot()
 	if len(reqs) != 3 {
 		t.Fatalf("expected 3 provider calls (caller turn1, peer, caller turn2), got %d", len(reqs))
+	}
+	peerTools := toolSchemaNameSet(reqs[1].Tools)
+	for _, name := range []string{"read_file", "http_request"} {
+		if !peerTools[name] {
+			t.Errorf("internal peer request missing configured safe tool %q; tools=%v", name, sortedSchemaNames(peerTools))
+		}
+	}
+	for _, name := range []string{"shell_exec", "write_file"} {
+		if peerTools[name] {
+			t.Errorf("internal peer request unexpectedly received privileged tool %q; tools=%v", name, sortedSchemaNames(peerTools))
+		}
 	}
 	// Caller's synthesis turn must see the peer's answer as a tool result.
 	if !chatMessagesContain(reqs[2].Messages, "tool", "Paris") {

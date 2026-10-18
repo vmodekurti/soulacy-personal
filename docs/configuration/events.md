@@ -1,16 +1,16 @@
 # Events & Webhooks
 
-Every notable action inside Soulacy — messages, tool calls, workboard
-runs, reasoning steps — is published as a versioned JSON envelope. Hook
+Every notable action inside Soulacy, including messages, tool calls, workboard
+runs, and reasoning steps, is published as a versioned JSON envelope. Hook
 your dashboards, alerting, and log shippers into the stream instead of
 polling the API.
 
 Three ways to consume events:
 
-1. **Signed webhooks** (`hooks:` in config.yaml) — easiest, works with the
+1. **Signed webhooks** (`hooks:` in config.yaml): easiest, works with the
    default in-process queue.
-2. **WebSocket** `/ws/events` — what the GUI uses; great for live tooling.
-3. **NATS subjects** — set `queue.backend: nats` and subscribe from any
+2. **WebSocket** `/ws/events`: what the GUI uses; great for live tooling.
+3. **NATS subjects**: set `queue.backend: nats` and subscribe from any
    process or machine.
 
 ## The envelope (schema v1)
@@ -27,7 +27,7 @@ Three ways to consume events:
 }
 ```
 
-`data` carries the type-specific payload verbatim — an object, a string,
+`data` carries the type-specific payload verbatim: an object, a string,
 or null. New event types and fields may be added at any time; consumers
 **must ignore unknown types and fields**. Renaming or removing a field
 bumps `schema`, with the previous schema dual-published for at least two
@@ -63,9 +63,9 @@ soulacy.events.<type>        e.g. soulacy.events.run.failed
 
 Subscribe with NATS wildcards:
 
-- `soulacy.events.>` — everything
-- `soulacy.events.run.*` — workboard run lifecycle only
-- `soulacy.events.tool.*` — tool activity only
+- `soulacy.events.>`: everything
+- `soulacy.events.run.*`: workboard run lifecycle only
+- `soulacy.events.tool.*`: tool activity only
 
 With the default `memory` backend, subjects exist in-process only (used
 by the webhook dispatcher). Set `queue.backend: nats` to consume events
@@ -119,7 +119,7 @@ the delivery is dropped and a `webhook.dead` warning is logged.
 The same events the GUI renders, available to your own tools:
 
 ```bash
-# wscat example — browser WebSockets can't set headers, so the
+# wscat example: browser WebSockets can't set headers, so the
 # credential may be passed as a query parameter:
 wscat -c "ws://localhost:18789/ws/events?api_key=sy_..."
 ```
@@ -133,6 +133,6 @@ dropped for that client rather than stalling the agent engine.
 
 ## See also
 
-- [`docs/EVENTS.md`](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/EVENTS.md) — the full schema contract
-- [Storage & backends](storage.md) — queue backend configuration
-- [API overview](../api/index.md) — REST routes including `/ws/events`
+- [`docs/EVENTS.md`](https://github.com/vmodekurti/soulacy-personal/blob/main/docs/EVENTS.md): the full schema contract
+- [Storage & backends](storage.md): queue backend configuration
+- [API overview](../api/index.md): REST routes including `/ws/events`

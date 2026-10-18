@@ -1,8 +1,8 @@
 # The person model
 
 Adaptive memory remembers sentences. The person model is different: it is
-the structured understanding Soulacy keeps of *you* — your usual day, how
-you are right now, who matters, what you owe people, what you prefer — in a
+the structured understanding Soulacy keeps of *you*: your usual day, how
+you are right now, who matters, what you owe people, what you prefer: in a
 shape every agent reads the same way.
 
 It exists so an agent does not have to ask your phone twelve questions and
@@ -29,9 +29,9 @@ saying it is worse than one that says nothing.
 
 Three kinds of source, and they rank:
 
-1. `manual` — you said it, in the app or on the web.
-2. `agent:<id>` — an agent inferred it during a run.
-3. `sense:<name>` — an observer digested it from a device signal.
+1. `manual`: you said it, in the app or on the web.
+2. `agent:<id>`: an agent inferred it during a run.
+3. `sense:<name>`: an observer digested it from a device signal.
 
 **Higher always wins.** A location sense may not overwrite the home address
 you typed; an agent may not either. When a lower source tries, the write is
@@ -92,7 +92,7 @@ passes. A sentence nobody said does not.
 
 `person.observe` records something the agent learned. Use a stable key so
 repeated observations update rather than pile up, and be honest about
-confidence — anything below 0.7 is rendered as a guess.
+confidence: anything below 0.7 is rendered as a guess.
 
 ```
 person.observe(section: "identity", key: "home", summary: "Lives in Oak Park",
@@ -151,7 +151,7 @@ Everything is scoped to you. A household shares one gateway but never one
 model; only an admin may pass `?owner=` to inspect another member, and that
 is audited. A correction through `PUT` is a manual entry, so it outranks
 every observer from then on. `PUT` answers **409** with the entry that
-stands when a lower source tried to overwrite a higher one — not an error,
+stands when a lower source tried to overwrite a higher one. This is not an error,
 just the truth about who wins.
 
 The change feed has the same shape as `/memory/facts/sync`, so a phone or
@@ -215,5 +215,5 @@ have an opinion and no longer.
 It is a store, not a behaviour: an agent that does not list the builtins
 never sees it, and `DELETE /person/model?confirm=true` forgets everything.
 Observers (which write the `sense:` entries) are being added slice by slice
-and each one is a separate consent switch — see
+and each one is a separate consent switch: see
 `docs/PERSONAL_ASSISTANT_PROGRAM.md`.

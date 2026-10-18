@@ -3,6 +3,8 @@ package sessioncapturecompanion
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -25,5 +27,28 @@ func TestArchiveContainsCompanion(t *testing.T) {
 		if !found {
 			t.Errorf("archive missing %s", name)
 		}
+	}
+}
+
+func TestCaptureCompanionVersionIncludesRefreshFix(t *testing.T) {
+	manifest, err := files.ReadFile("extension/manifest.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(manifest, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Version != "1.1.1" {
+		t.Fatalf("version = %q, want 1.1.1", parsed.Version)
+	}
+	worker, err := files.ReadFile("extension/service-worker.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(worker), "const { base, domains } = normalizeBoundary(payload)") {
+		t.Fatal("capture refresh does not retain the normalized base URL")
 	}
 }

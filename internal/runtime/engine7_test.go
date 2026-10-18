@@ -1003,9 +1003,9 @@ func TestSkillCatalogFor_NamedSkillFound(t *testing.T) {
 // Handle: stream reply flag without callback (already covered, but with tool calls)
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestHandle_StreamReplyFlagIgnoredWithTools verifies that the streaming flag is
-// suppressed when the LLM offers tools (streaming + tool calls is non-trivial).
-func TestHandle_StreamReplyFlagIgnoredWithTools(t *testing.T) {
+// TestHandle_StreamReplyFlagPreservedWithTools verifies tool-capable agents ask
+// providers for streaming on both the tool turn and final response turn.
+func TestHandle_StreamReplyFlagPreservedWithTools(t *testing.T) {
 	e, provider := newHandleTestEngine(t, &agent.Definition{
 		ID:           "stream-tools-bot",
 		Name:         "Stream Tools Bot",
@@ -1029,12 +1029,16 @@ func TestHandle_StreamReplyFlagIgnoredWithTools(t *testing.T) {
 		{Content: "final after tool"},
 	}
 
-	// No stream callback in context → streaming should be a no-op.
 	reply, err := e.Handle(context.Background(), testUserMessage("stream-tools-bot", "sess-stream-tools", "look something up"))
 	if err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
 	if got := flattenParts(reply.Parts); got != "final after tool" {
 		t.Fatalf("reply = %q, want 'final after tool'", got)
+	}
+	for i, req := range provider.requestsSnapshot() {
+		if !req.Stream {
+			t.Fatalf("request %d did not preserve stream_reply", i+1)
+		}
 	}
 }

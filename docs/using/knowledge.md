@@ -5,7 +5,7 @@ Knowledge bases give your agents retrieval-augmented generation (RAG): upload yo
 ## Quick start
 
 1. Open **📚 Knowledge** in the GUI and click **+ New KB**. Name it (e.g. `product-docs`), keep the default embedding settings, **Create**.
-2. Click **+ Add document** and pick one or more files (`.md`, `.txt`, `.pdf`, `.docx`) — or paste text. Files embed one at a time so a local Ollama isn't overwhelmed.
+2. Click **+ Add document** and pick one or more files (`.md`, `.txt`, `.pdf`, `.docx`), or paste text. Files embed one at a time so a local Ollama isn't overwhelmed.
 3. Use **Test search** at the bottom of the KB view to confirm a query returns the right chunks.
 4. Wire it to an agent: **Agents** → your agent → **Knowledge bases** → pick the KB → **Save**.
 
@@ -30,14 +30,14 @@ curl -X POST http://localhost:18789/api/v1/knowledge/product-docs/search \
 
 ## Embedding model configuration
 
-Each KB is bound to one embedding provider + model, chosen at creation (defaults come from the server, typically `ollama` / `nomic-embed-text`). The vector dimension is probed automatically from the embedder when the KB is created — you never set it by hand. The KB header shows the binding:
+Each KB is bound to one embedding provider + model, chosen at creation (defaults come from the server, typically `ollama` / `nomic-embed-text`). The vector dimension is probed automatically from the embedder when the KB is created: you never set it by hand. The KB header shows the binding:
 
 ```
 ollama/nomic-embed-text · dim 768 · chunks 256/32
 ```
 
 !!! warning
-    The embedding model cannot change after creation — all stored vectors were produced with it. To switch models, create a new KB and re-ingest.
+    The embedding model cannot change after creation: all stored vectors were produced with it. To switch models, create a new KB and re-ingest.
 
 If the page shows *"Knowledge store is disabled"*, set `knowledge.db_path` in `config.yaml` and restart the gateway.
 
@@ -47,9 +47,9 @@ The KB detail view lists every document with title, source, chunk count, size, a
 
 - **Delete** removes one document (and its chunks/vectors).
 - Checkboxes + the bulk bar delete many at once.
-- Re-ingesting under the same title creates a new document — delete the stale one if you are refreshing content.
+- Re-ingesting under the same title creates a new document: delete the stale one if you are refreshing content.
 
-Under the hood, ingestion chunks text on sentence boundaries with a parent-child scheme: small chunks are embedded for precise matching, but searches return the larger surrounding parent chunk so the agent gets coherent context. Search itself is hybrid — vector similarity fused with full-text (BM25) ranking — so exact terms like IDs and names score well too.
+Under the hood, ingestion chunks text on sentence boundaries with a parent-child scheme: small chunks are embedded for precise matching, but searches return the larger surrounding parent chunk so the agent gets coherent context. Search itself is hybrid (vector similarity fused with full-text (BM25) ranking) so exact terms like IDs and names score well too.
 
 ## Wiring KBs to agents (`kb_search`)
 
@@ -69,11 +69,11 @@ The agent then gets the built-in `kb_search` tool and calls it on its own:
 kb_search(kb="product-docs", query="warranty period for model X")
 ```
 
-Results come back in well under a second from the local store. Make the agent use it reliably by saying so in the system prompt — e.g. the shipped Document Compliance Auditor template instructs: *"Search before judging — never audit from memory."*
+Results come back in well under a second from the local store. Make the agent use it reliably by saying so in the system prompt. For example, the shipped Document Compliance Auditor template says: *"Search before judging. Never audit from memory."*
 
 ## Test search
 
-The **Test search** box at the bottom of every KB view runs the exact same search the agent's `kb_search` performs — query, `top_k`, ranked hits with the source document title, distance score, and the chunk content. Use it to sanity-check retrieval before blaming the agent's prompt.
+The **Test search** box at the bottom of every KB view runs the exact same search the agent's `kb_search` performs: query, `top_k`, ranked hits with the source document title, distance score, and the chunk content. Use it to sanity-check retrieval before blaming the agent's prompt.
 
 !!! tip
     If a query you care about doesn't surface the right chunk in Test search, the agent won't find it either. Fix it at the data layer first: better document titles, smaller focused documents, or re-phrasing key sections.

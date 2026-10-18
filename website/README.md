@@ -1,6 +1,6 @@
 # soulacy.io marketing site
 
-Single-page landing site for [soulacy.io](https://soulacy.io/). Plain HTML + Tailwind (via CDN), with no local build step. The page introduces self-hosted Soulacy Personal and links to practical installation and usage guides.
+Single-page landing site for [soulacy.io](https://soulacy.io/). Plain HTML + Tailwind (via CDN), with no local build step. The page introduces Genie as the iPhone control surface for automation running on self-hosted Soulacy Personal, then links to practical installation and usage guides.
 
 Docs (mkdocs Material) live separately at [docs.soulacy.io](https://docs.soulacy.io/).
 
@@ -28,7 +28,7 @@ python3 -m http.server 4321 --bind 127.0.0.1
 
 Any static server works. There's no build step.
 
-## Deploy — Cloudflare Pages (recommended)
+## Deploy: Cloudflare Pages (recommended)
 
 **One-time setup:**
 
@@ -43,7 +43,7 @@ Any static server works. There's no build step.
 5. Under the deployed project → Custom domains → Set up custom domain → `soulacy.io` and `www.soulacy.io`.
 6. Wait for Cloudflare to verify the domains and provision their HTTPS certificates.
 
-**Current production setup (verified September 13, 2026):** the Pages project is named `soulacy` and its Git connection points at `vmodekurti/soulacy-personal`, production branch `main`, build output `website`, no build command. A push to `main` triggers a Pages deployment through Cloudflare's Git integration; check the project's Deployments tab for the commit. The GitHub website workflow only deploys when its Cloudflare credentials are configured; otherwise it logs a deferral, and a green deferral job is not proof that the website deployed.
+**Current production setup (verified September 28, 2026):** the Pages project is named `soulacy` and its Git connection points at `vmodekurti/soulacy-personal`, production branch `main`, build output `website`, no build command. A push to `main` triggers a Pages deployment through Cloudflare's Git integration. The GitHub website workflow uses Cloudflare's maintained Wrangler action when its Cloudflare credentials are configured; otherwise it logs a deferral to the Git integration. In either path, check the deployment commit and production HTML rather than treating a green deferral job as proof that the website deployed.
 
 ### Publish through the existing project
 
@@ -59,10 +59,10 @@ npx wrangler@4.131.1 pages deploy website --project-name soulacy --branch main \
 
 The explicit project and directory target the existing public site, not the running agent gateway. Wait for a deployment URL, then verify the production homepage, its new logo, and documentation links. Keep the deployment commit/URL in the release receipt. Do not change account permissions or replace a Pages project merely to publish a content update.
 
-## Deploy — alternatives (if you're not using Cloudflare)
+## Deploy: alternatives (if you're not using Cloudflare)
 
 - **Vercel:** import the repo, set output directory to `website`, done.
-- **Netlify:** same — `website` as the publish directory.
+- **Netlify:** same: `website` as the publish directory.
 - **GitHub Pages:** less ideal (already serves docs at docs.soulacy.io); you'd have to set up a second Pages source. Not recommended.
 
 ## Refreshing install.sh
@@ -79,13 +79,14 @@ Review and commit both files together. Do not add a workflow that commits back t
 
 - Tailwind is loaded via CDN, which yells in the console. Fine for launch. Post-signal, convert to Astro or ship a built Tailwind bundle.
 - Recheck the copy buttons, navigation, phone-width layout, and external documentation links after editing. Do not publish loading-time claims without a dated, reproducible measurement.
-- If you add a blog, convert to Astro or 11ty — plain HTML gets painful past ~5 pages.
-- Colors are declared in the inline Tailwind config in `index.html` — search `tailwind.config` to tweak.
+- If you add a blog, convert to Astro or 11ty: plain HTML gets painful past ~5 pages.
+- Colors are declared in the inline Tailwind config in `index.html`: search `tailwind.config` to tweak.
 
 ## Content sources
 
 Every headline claim maps back to:
 
+- Primary positioning: `README.md`, `docs/index.md`, `docs/using/genie.md`, `docs/iphone.md`, and the attended/unattended rules in `docs/security/`
 - Security stack: `docs/PRODUCTIZATION_REVIEW.md` §Cohort F (`internal/trust/`, `internal/injection/`, `internal/intent/`, `internal/securitydoctor/`)
 - Recent platform work: `docs/recent-updates.md`, `docs/studio-learning-memory.md`, `docs/LLM_COST_CONTROLS.md`, and the linked operational pages
 - Persistent semantic memory: `internal/app/adapters.go`, `internal/memory/vector.go`, and `internal/agentmemory/store.go`

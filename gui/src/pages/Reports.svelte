@@ -100,7 +100,7 @@
 </section>
 
 <style>
-  .reports { padding:28px; width:100%; box-sizing:border-box; max-width:1440px; margin:0 auto; min-width:0; }
+  .reports { padding:28px; width:100%; box-sizing:border-box; min-width:0; }
   header,.controls,.exports,.links { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
   header { justify-content:space-between; margin-bottom:24px; } h1 { font-size:1.65rem; margin:0 0 8px; }
   h2 { font-size:1rem; margin:0 0 12px; } h3 { font-size:.9rem; margin:22px 0 10px; }

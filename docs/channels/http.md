@@ -61,7 +61,7 @@ Sessions persist conversation history. Use the same `session_id` across requests
 curl -X POST .../api/v1/chat \
   -d '{"agent_id":"assistant","user_id":"alice-session","text":"My name is Alice"}'
 
-# Turn 2 — agent remembers the name
+# Turn 2, agent remembers the name
 curl -X POST .../api/v1/chat \
   -d '{"agent_id":"assistant","user_id":"alice-session","text":"What is my name?"}'
 # Response: "Your name is Alice."

@@ -144,6 +144,296 @@ func (e *Engine) buildGenieMonitorBuiltins() []BuiltinTool {
 			},
 		},
 		{
+			Name: "plan_connector", Description: "Turn a goal into an editable connector proposal with suggested websites, public capabilities, optional account capabilities, and security boundaries. Use before create_connector unless the user already supplied an exact site list.",
+			Gate: "genie",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{
+				"intent": map[string]any{"type": "string", "description": "What the connector should help the user accomplish"},
+			}, "required": []string{"intent"}},
+			Handler: func(_ context.Context, args map[string]any) (string, error) {
+				if e.genieConnectors == nil {
+					return "", fmt.Errorf("plan_connector: the connector composer is unavailable")
+				}
+				result, err := e.genieConnectors.PlanConnectorForGenie(argString(args, "intent"))
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
+			Name: "create_connector", Description: "Create a user-owned connector and its agent skill from an agreed intent and website list. Public access is enabled immediately. Authentication is never collected by this tool; optional account access is completed through Website Access.",
+			Gate: "genie",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{
+				"intent": map[string]any{"type": "string", "description": "The agreed purpose and expected result"},
+				"name":   map[string]any{"type": "string", "description": "Optional friendly connector name"},
+				"sites": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
+					"description": "Exact website names, domains, or HTTPS URLs selected by the user"},
+			}, "required": []string{"intent", "sites"}},
+			Handler: func(ctx context.Context, args map[string]any) (string, error) {
+				if e.genieConnectors == nil {
+					return "", fmt.Errorf("create_connector: the connector composer is unavailable")
+				}
+				result, err := e.genieConnectors.CreateConnectorForGenie(ctx, argString(args, "intent"), argString(args, "name"), argStringSlice(args, "sites"))
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
+			Name: "list_connectors", Description: "List the user's current connectors, websites, generated skills, and whether optional Website Access has been linked.",
+			Gate: "genie", Parameters: map[string]any{"type": "object", "properties": map[string]any{}},
+			Handler: func(ctx context.Context, _ map[string]any) (string, error) {
+				if e.genieConnectors == nil {
+					return "", fmt.Errorf("list_connectors: the connector composer is unavailable")
+				}
+				result, err := e.genieConnectors.ListConnectorsForGenie(ctx)
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
+			Name: "plan_action", Description: "Figure out how to accomplish a real-world goal using an ordered fallback ladder: a working connector or native API, the provider's official website, then another official route. A missing connector is never a blocker by itself. Returns the selected route, fallbacks, minimum required inputs, secure setup, approval checkpoints, steps, and completion evidence. Pass mission_id to save the approach on a standing mission.", Gate: "genie",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{
+				"goal":         map[string]any{"type": "string", "description": "The outcome the user wants"},
+				"mission_id":   map[string]any{"type": "string", "description": "Optional mission ID to attach and persist this approach"},
+				"known_inputs": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Non-secret details already provided, keyed by the requirement names returned by a prior plan. Never include passwords, cookies, tokens, or payment numbers."},
+			}, "required": []string{"goal"}},
+			Handler: func(ctx context.Context, args map[string]any) (string, error) {
+				if e.genieMissions == nil {
+					return "", fmt.Errorf("plan_action: mission service is unavailable")
+				}
+				result, err := e.genieMissions.PlanActionForGenie(ctx, argString(args, "goal"), argString(args, "mission_id"), argStringMap(args, "known_inputs"))
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
+			Name: "prepare_website_access", Description: "Prepare a domain-restricted Website Access connection when an execution plan requires provider sign-in. This creates secret-free metadata only and returns the GUI destination where the user signs in directly. Never ask for or pass credentials, cookies, tokens, browser state, or card details.", Gate: "genie",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{
+				"name":     map[string]any{"type": "string", "description": "Friendly provider name"},
+				"base_url": map[string]any{"type": "string", "description": "HTTPS provider URL whose domain will be allowed"},
+			}, "required": []string{"base_url"}},
+			Handler: func(ctx context.Context, args map[string]any) (string, error) {
+				if e.genieMissions == nil {
+					return "", fmt.Errorf("prepare_website_access: website access service is unavailable")
+				}
+				result, err := e.genieMissions.PrepareWebsiteAccessForGenie(ctx, argString(args, "name"), argString(args, "base_url"))
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
+			Name: "start_website_action", Description: "Open a provider website in Soulacy's isolated managed browser. Use after ordinary requirements are known. Pass connection_id only when Website Access has returned a ready connection. The browser replays encrypted session state internally and never exposes it to you.", Gate: "genie",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{
+				"url":           map[string]any{"type": "string", "description": "Official HTTPS provider page to open"},
+				"connection_id": map[string]any{"type": "string", "description": "Optional ready Website Access connection ID for this provider"},
+			}, "required": []string{"url"}},
+			Handler: func(ctx context.Context, args map[string]any) (string, error) {
+				if e.genieMissions == nil {
+					return "", fmt.Errorf("start_website_action: managed website actions are unavailable")
+				}
+				result, err := e.genieMissions.StartWebsiteActionForGenie(ctx, argString(args, "url"), argString(args, "connection_id"))
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
+			Name: "inspect_website_action", Description: "Inspect the current provider page in a managed browser session. Returns readable text and stable element refs, never cookies, browser storage, passwords, or payment fields.", Gate: "genie",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{
+				"session_id": map[string]any{"type": "string", "description": "Managed browser session ID"},
+			}, "required": []string{"session_id"}},
+			Handler: func(ctx context.Context, args map[string]any) (string, error) {
+				if e.genieMissions == nil {
+					return "", fmt.Errorf("inspect_website_action: managed website actions are unavailable")
+				}
+				result, err := e.genieMissions.InspectWebsiteActionForGenie(ctx, argString(args, "session_id"))
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
+			Name: "act_on_website", Description: "Perform one ordinary step on the current provider page using an element ref from the latest inspection. Supports click, fill, select, and press. It refuses credential/payment fields and final booking, purchase, send, cancel, or submission controls.", Gate: "genie",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{
+				"session_id": map[string]any{"type": "string"},
+				"action":     map[string]any{"type": "string", "enum": []string{"click", "fill", "select", "press"}},
+				"ref":        map[string]any{"type": "string", "description": "Element ref returned by the latest inspection"},
+				"value":      map[string]any{"type": "string", "description": "Non-secret value for fill/select, or an allowed key for press"},
+			}, "required": []string{"session_id", "action", "ref"}},
+			Handler: func(ctx context.Context, args map[string]any) (string, error) {
+				if e.genieMissions == nil {
+					return "", fmt.Errorf("act_on_website: managed website actions are unavailable")
+				}
+				result, err := e.genieMissions.ActOnWebsiteForGenie(ctx, argString(args, "session_id"), argString(args, "action"), argString(args, "ref"), argString(args, "value"))
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
+			Name: "commit_website_action", Description: "Submit exactly one consequential provider action after showing the complete review to the user. This tool always pauses for approval. It returns the resulting provider page as confirmation evidence; do not claim success unless that page confirms it.", Gate: "genie",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{
+				"session_id": map[string]any{"type": "string"}, "ref": map[string]any{"type": "string", "description": "Final provider control from the latest inspection"},
+				"provider": map[string]any{"type": "string"}, "action": map[string]any{"type": "string"}, "item": map[string]any{"type": "string"},
+				"schedule": map[string]any{"type": "string"}, "terms": map[string]any{"type": "string"}, "total": map[string]any{"type": "string", "description": "Exact total cost, or $0 when there is no charge"},
+			}, "required": []string{"session_id", "ref", "provider", "action", "item", "total"}},
+			Handler: func(ctx context.Context, args map[string]any) (string, error) {
+				if e.genieMissions == nil {
+					return "", fmt.Errorf("commit_website_action: managed website actions are unavailable")
+				}
+				result, err := e.genieMissions.CommitWebsiteActionForGenie(ctx, argString(args, "session_id"), argString(args, "ref"), argString(args, "provider"), argString(args, "action"), argString(args, "item"), argString(args, "schedule"), argString(args, "terms"), argString(args, "total"))
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
+			Name: "close_website_action", Description: "Close an isolated managed browser session as soon as the action is complete, blocked, or abandoned.", Gate: "genie",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{"session_id": map[string]any{"type": "string"}}, "required": []string{"session_id"}},
+			Handler: func(ctx context.Context, args map[string]any) (string, error) {
+				if e.genieMissions == nil {
+					return "", fmt.Errorf("close_website_action: managed website actions are unavailable")
+				}
+				result, err := e.genieMissions.CloseWebsiteActionForGenie(ctx, argString(args, "session_id"))
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
+			Name: "plan_mission", Description: "Turn an ongoing responsibility into a reviewable standing mission proposal. Use this before create_mission to agree on the finish line, schedule, and optional delivery destination.", Gate: "genie",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{"objective": map[string]any{"type": "string", "description": "The ongoing outcome Genie should own"}}, "required": []string{"objective"}},
+			Handler: func(_ context.Context, args map[string]any) (string, error) {
+				if e.genieMissions == nil {
+					return "", fmt.Errorf("plan_mission: mission service is unavailable")
+				}
+				result, err := e.genieMissions.PlanMissionForGenie(argString(args, "objective"))
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
+			Name: "create_mission", Description: "Activate an agreed standing mission with an explicit finish line and exactly one recurring cron schedule or one-time RFC3339 timestamp. Optional delivery requires both channel and destination.", Gate: "genie",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{
+				"title": map[string]any{"type": "string"}, "objective": map[string]any{"type": "string"}, "finish_line": map[string]any{"type": "string"},
+				"cron": map[string]any{"type": "string"}, "at": map[string]any{"type": "string"}, "channel": map[string]any{"type": "string"}, "to": map[string]any{"type": "string"},
+			}, "required": []string{"title", "objective", "finish_line"}},
+			Handler: func(ctx context.Context, args map[string]any) (string, error) {
+				if e.genieMissions == nil {
+					return "", fmt.Errorf("create_mission: mission service is unavailable")
+				}
+				result, err := e.genieMissions.CreateMissionForGenie(ctx, argString(args, "title"), argString(args, "objective"), argString(args, "finish_line"), argString(args, "cron"), argString(args, "at"), argString(args, "channel"), argString(args, "to"))
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
+			Name: "list_missions", Description: "List the user's standing missions with state, progress, blocker, next action, schedule, and runner health.", Gate: "genie", Parameters: map[string]any{"type": "object", "properties": map[string]any{}},
+			Handler: func(ctx context.Context, _ map[string]any) (string, error) {
+				if e.genieMissions == nil {
+					return "", fmt.Errorf("list_missions: mission service is unavailable")
+				}
+				result, err := e.genieMissions.ListMissionsForGenie(ctx)
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
+			Name: "get_mission", Description: "Inspect one standing mission, including its finish line, progress, blocker, next action, and linked runner.", Gate: "genie",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"type": "string"}}, "required": []string{"id"}},
+			Handler: func(ctx context.Context, args map[string]any) (string, error) {
+				if e.genieMissions == nil {
+					return "", fmt.Errorf("get_mission: mission service is unavailable")
+				}
+				result, err := e.genieMissions.GetMissionForGenie(ctx, argString(args, "id"))
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
+			Name: "update_mission", Description: "Record progress or a blocker, pause or resume a mission, or mark it complete. Actions: progress, pause, resume, complete.", Gate: "genie",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{
+				"id": map[string]any{"type": "string"}, "action": map[string]any{"type": "string", "enum": []string{"progress", "pause", "resume", "complete"}},
+				"status": map[string]any{"type": "string", "enum": []string{"active", "blocked"}}, "progress": map[string]any{"type": "string"},
+				"next_action": map[string]any{"type": "string"}, "blocker": map[string]any{"type": "string"},
+			}, "required": []string{"id", "action"}},
+			Handler: func(ctx context.Context, args map[string]any) (string, error) {
+				if e.genieMissions == nil {
+					return "", fmt.Errorf("update_mission: mission service is unavailable")
+				}
+				id, action := argString(args, "id"), argString(args, "action")
+				var result map[string]any
+				var err error
+				switch action {
+				case "pause":
+					result, err = e.genieMissions.PauseMissionForGenie(ctx, id)
+				case "resume":
+					result, err = e.genieMissions.ResumeMissionForGenie(ctx, id)
+				case "complete":
+					result, err = e.genieMissions.CompleteMissionForGenie(ctx, id, argString(args, "progress"))
+				case "progress":
+					result, err = e.genieMissions.UpdateMissionForGenie(ctx, id, argString(args, "status"), argString(args, "progress"), argString(args, "next_action"), argString(args, "blocker"))
+				default:
+					return "", fmt.Errorf("update_mission: unsupported action %q", action)
+				}
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
+			Name: "cancel_mission", Description: "Permanently stop a standing mission while preserving its history. Requires interactive confirmation.", Gate: "genie",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"type": "string"}}, "required": []string{"id"}},
+			Handler: func(ctx context.Context, args map[string]any) (string, error) {
+				if e.genieMissions == nil {
+					return "", fmt.Errorf("cancel_mission: mission service is unavailable")
+				}
+				result, err := e.genieMissions.CancelMissionForGenie(ctx, argString(args, "id"))
+				if err != nil {
+					return "", err
+				}
+				b, err := json.Marshal(result)
+				return string(b), err
+			},
+		},
+		{
 			Name: "create_monitor", Description: "Create a Genie-owned background cron or one-shot monitor. Supply exactly one of cron (five-field expression) or at (RFC3339 timestamp).",
 			Parameters: map[string]any{"type": "object", "properties": map[string]any{
 				"prompt":  map[string]any{"type": "string", "description": "The task and alert condition to evaluate on every run"},

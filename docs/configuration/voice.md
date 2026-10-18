@@ -13,7 +13,7 @@ whisper.cpp binary:
 ```bash
 sy voice providers
 brew install ffmpeg                         # macOS prerequisite
-brew install python@3.12                    # required if Python 3.10–3.12 is absent
+brew install python@3.12                    # required if Python 3.10-3.12 is absent
 sy voice enable --recipe auto               # install, configure, and run in background
 # restart Soulacy
 sy voice test

@@ -134,6 +134,18 @@ var pages = map[string]page{
 		},
 	},
 
+	"missions": {
+		stage: StageClock, nextAction: "", nextLabel: "",
+		role:         "The standing responsibilities Genie owns while you are away.",
+		contribution: "Each mission keeps its finish line, schedule, progress, blocker, next action and stop controls together, so ongoing work never disappears into a chat transcript.",
+		whenEmpty: func(InstallState) string {
+			return "Nothing is in Genie's care yet. Start with one ongoing outcome, agree on its finish line and schedule, then activate it from Genie or this page."
+		},
+		whenUsed: func(InstallState) string {
+			return "Review progress and blockers here. Pause work when timing changes, resume it when ready, and complete or cancel anything Genie should stop carrying."
+		},
+	},
+
 	// Your agents as a feed. Inbox asked "what needs me?"; this asks "what
 	// happened?", and puts the two in one scrolling place.
 	"feed": {
@@ -209,6 +221,18 @@ var pages = map[string]page{
 		whenUsed: func(s InstallState) string {
 			return fmt.Sprintf("%s connected; their tools appear in Studio's palette automatically. Worth remembering when a workflow feels like it needs custom code — often a tool already does it, with argument names that are known to be right.",
 				plural(s.MCPServers, "server", "servers"))
+		},
+	},
+
+	"connectors": {
+		stage: StageMaterial, nextAction: "open_mcp", nextLabel: "Connect an adapter",
+		role:         "The service catalog for capabilities your agents can use through reviewed adapters.",
+		contribution: "It explains official APIs, credentials, deployment support, risk, and setup before you choose MCP or a plugin.",
+		whenEmpty: func(InstallState) string {
+			return "Start with the outcome you need, such as comparing products or finding events. Each recipe names the official provider path and the boundary that keeps checkout in your hands."
+		},
+		whenUsed: func(InstallState) string {
+			return "Use these recipes to add another provider without inventing its security model. A recipe becomes usable only after its adapter is connected, tested, and granted to selected agents."
 		},
 	},
 

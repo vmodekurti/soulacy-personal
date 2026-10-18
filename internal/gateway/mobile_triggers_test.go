@@ -160,6 +160,40 @@ func TestApprovalRegistrationPushesActionableNotificationToPhones(t *testing.T) 
 	}
 }
 
+func TestWebsiteActionApprovalRequiresFullReviewOnPhone(t *testing.T) {
+	s, _ := newTestGatewayWithLLM(t, "secret")
+	_, pushes := mobileFixture(t, s)
+	s.wirePushNotifications()
+	_ = s.engine.Broker().RegisterRequestForPrincipal(runtime.ConfirmRequest{
+		CallID: "call-web", Tool: "commit_website_action", Reason: "ready to place the order",
+		Args: map[string]any{"provider": "Uber", "action": "Book ride", "item": "Home to airport", "schedule": "7:00 AM", "terms": "Cancellation fee may apply", "total": "$42.10", "password": "must-not-leave"},
+	}, "genie", "sess-web", "admin")
+	deadline := time.Now().Add(3 * time.Second)
+	var sent []map[string]any
+	for time.Now().Before(deadline) {
+		if sent = pushes.all(); len(sent) > 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if len(sent) != 1 {
+		t.Fatalf("expected one review push, got %d", len(sent))
+	}
+	n := sent[0]
+	data, _ := n["data"].(map[string]any)
+	if n["category"] != mobilechan.CategoryWebsiteActionReview || n["deep_link"] != "soulacy://approval/call-web" {
+		t.Fatalf("website review push malformed: %+v", n)
+	}
+	for _, key := range []string{"provider", "action", "item", "schedule", "terms", "total"} {
+		if data[key] == nil {
+			t.Fatalf("missing review field %q: %+v", key, data)
+		}
+	}
+	if data["password"] != nil {
+		t.Fatalf("secret-shaped field escaped review payload: %+v", data)
+	}
+}
+
 // TestApprovalPushIsScopedToTheApprovingUsersPhones pins the identity
 // mapping the lock-screen flow relies on: the mobile-companion credential's
 // subject is the web owner's subject, so an approval raised by one principal

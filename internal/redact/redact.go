@@ -125,7 +125,7 @@ func Text(s string) string {
 	s = bearer.ReplaceAllString(s, "$1 "+Marker)
 	for _, field := range strings.Fields(s) {
 		trimmed := strings.Trim(field, `"'(),[]{}<>`)
-		if credentialURL(trimmed) || looksOpaque(trimmed) {
+		if credentialURL(trimmed) || (looksOpaque(trimmed) && !safeMediaURL(trimmed)) {
 			s = strings.ReplaceAll(s, trimmed, hashMarker(trimmed))
 		}
 	}
@@ -134,11 +134,58 @@ func Text(s string) string {
 
 func credentialURL(s string) bool {
 	u, err := url.Parse(s)
-	if err != nil || u.User == nil {
+	if err != nil {
 		return false
 	}
-	_, hasPassword := u.User.Password()
-	return hasPassword
+	if u.User != nil {
+		if _, hasPassword := u.User.Password(); hasPassword {
+			return true
+		}
+	}
+	for key, values := range u.Query() {
+		if SecretKeyName(key) || secretURLParameter(key) {
+			return true
+		}
+		for _, value := range values {
+			if looksOpaque(value) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// safeMediaURL distinguishes Open Notebook's documented episode route from an
+// opaque credential. The exemption stays narrow because an arbitrary URL path
+// can itself contain a secret. Credentials in userinfo or query parameters are
+// rejected by credentialURL before this exemption is considered.
+func safeMediaURL(s string) bool {
+	u, err := url.Parse(s)
+	if err != nil || u.Host == "" || u.User != nil {
+		return false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	parts := strings.Split(strings.Trim(strings.ToLower(u.Path), "/"), "/")
+	if len(parts) < 4 || parts[len(parts)-1] != "audio" {
+		return false
+	}
+	for i := 0; i+2 < len(parts); i++ {
+		if parts[i] == "podcasts" && parts[i+1] == "episodes" && parts[i+2] != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func secretURLParameter(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "auth", "code", "key", "sig", "signature", "signed", "session", "session_id":
+		return true
+	default:
+		return false
+	}
 }
 
 func looksOpaque(s string) bool {

@@ -180,6 +180,12 @@ func (s *Server) deploymentDoctorWith(ctx context.Context, p deploymentProbes) d
 	// A remote browser answers this question as well as a local one, and a
 	// deployment already using one should not be told it cannot browse.
 	remote := ""
+	if s.managedBrowser != nil {
+		if ok, detail := s.managedBrowser.Available(); ok {
+			rep.Capabilities = append(rep.Capabilities, deploymentCapability{ID: "browser_automation", Name: "Browser automation", Available: true, Detail: detail + "; no shell or MCP install is required"})
+			return rep
+		}
+	}
 	if s.mcp != nil {
 		for _, b := range s.browserAutomationServers() {
 			if b.Mode == "remote" {

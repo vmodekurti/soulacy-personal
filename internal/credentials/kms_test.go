@@ -8,6 +8,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -138,5 +141,89 @@ func TestLocalKMSDeriveKeyIs32Bytes(t *testing.T) {
 	}
 	if len(d) != 32 {
 		t.Errorf("derived key length = %d, want 32", len(d))
+	}
+}
+
+func TestLocalKMSPersistedSecretSurvivesContainerMachineIDChange(t *testing.T) {
+	dir := t.TempDir()
+	firstMachineID := []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	secondMachineID := []byte("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+
+	first, err := newLocalKMSWithStore(dir, func() ([]byte, error) {
+		return firstMachineID, nil
+	})
+	if err != nil {
+		t.Fatalf("first KMS: %v", err)
+	}
+	if !bytes.Equal(first.masterSecret, firstMachineID) {
+		t.Fatalf("first master secret = %q, want first machine id", first.masterSecret)
+	}
+
+	vaultPath := filepath.Join(dir, "credentials.db")
+	vault, err := NewSQLiteVault(vaultPath, first)
+	if err != nil {
+		t.Fatalf("first vault: %v", err)
+	}
+	ctx := context.Background()
+	if err := vault.Set(ctx, "__global__", "llm.providers.ollama-cloud.api_key", []byte("secret-key")); err != nil {
+		t.Fatalf("store provider key: %v", err)
+	}
+	if err := vault.Close(); err != nil {
+		t.Fatalf("close first vault: %v", err)
+	}
+
+	second, err := newLocalKMSWithStore(dir, func() ([]byte, error) {
+		return secondMachineID, nil
+	})
+	if err != nil {
+		t.Fatalf("replacement-container KMS: %v", err)
+	}
+	if !bytes.Equal(second.masterSecret, firstMachineID) {
+		t.Fatalf("replacement container used %q, want persisted %q", second.masterSecret, firstMachineID)
+	}
+
+	reopened, err := NewSQLiteVault(vaultPath, second)
+	if err != nil {
+		t.Fatalf("reopen vault: %v", err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	got, err := reopened.Get(ctx, "__global__", "llm.providers.ollama-cloud.api_key")
+	if err != nil {
+		t.Fatalf("read key after container replacement: %v", err)
+	}
+	if string(got) != "secret-key" {
+		t.Fatalf("provider key = %q, want secret-key", got)
+	}
+}
+
+func TestLocalKMSKeepsLegacyPersistedBytes(t *testing.T) {
+	dir := t.TempDir()
+	legacy := bytes.Repeat([]byte("a"), 64)
+	if err := os.WriteFile(filepath.Join(dir, machineSecretFile), legacy, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	kms, err := newLocalKMSWithStore(dir, func() ([]byte, error) {
+		return []byte("different-machine-id-value-123456"), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(kms.masterSecret, legacy) {
+		t.Fatal("legacy persisted secret was transformed")
+	}
+}
+
+func TestLocalKMSRejectsTruncatedPersistedSecret(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, machineSecretFile), []byte("short"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := newLocalKMSWithStore(dir, func() ([]byte, error) {
+		return nil, errors.New("no platform id")
+	})
+	if err == nil {
+		t.Fatal("expected truncated persisted secret to fail closed")
 	}
 }

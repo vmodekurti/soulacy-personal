@@ -22,9 +22,9 @@ Content-Type: application/json
 |-------|------|----------|-------------|
 | `agent_id` | string | ✅ | Agent to invoke |
 | `text` | string | ✅ | User message text |
-| `user_id` | string | — | Stable user/session key. Defaults to `api-user`. |
-| `username` | string | — | Display name. Defaults to `user_id`. |
-| `overrides` | object | — | One-run playground/test overrides. Does not mutate `SOUL.yaml`. |
+| `user_id` | string | no | Stable user/session key. Defaults to `api-user`. |
+| `username` | string | no | Display name. Defaults to `user_id`. |
+| `overrides` | object | no | One-run playground/test overrides. Does not mutate `SOUL.yaml`. |
 
 ### One-run overrides
 

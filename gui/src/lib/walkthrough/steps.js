@@ -18,7 +18,7 @@ export const WALKTHROUGH_VERSION = 1
 export const navTourCopy = {
   feed: {
     what: 'Your agents as a feed: everything they finished, found, or sent to your phone, newest first — and anything that needs your yes at the top.',
-    when: 'Open the app here. Double-tap a card to save it, reply to pick the conversation up in Chat, and tap a face in the rail to see what that agent is doing right now.',
+    when: 'Open the app here. Save, archive, or mark a card read with its actions. Continue a result in Genie, or tap a face in the rail to see what that agent is doing right now.',
   },
   autopilot: {
     what: 'Verified runs, Safe Undo receipts, immutable releases, reviewed regression checks, and bounded goal teams.',
@@ -27,6 +27,10 @@ export const navTourCopy = {
   start: {
     what: 'Genie. Ask it anything, or say what you want handled and it builds and runs it once before you decide anything.',
     when: 'Start here for everything. It answers questions directly and only builds something when the request should keep happening.',
+  },
+  missions: {
+    what: 'The standing responsibilities Genie owns for you, with a finish line, schedule, progress, blocker, next action, and background runner.',
+    when: 'Come here to see what Genie is handling while you are away, or to pause, resume, complete, or cancel an ongoing goal.',
   },
   dashboard: {
     what: 'The home screen: gateway health, your agents, and the runs that just happened.',
@@ -79,6 +83,10 @@ export const navTourCopy = {
   schedule: {
     what: 'Recurring and triggered runs: the clock side of Soulacy.',
     when: 'Once an agent works when you press the button, come here to stop pressing the button.',
+  },
+  connectors: {
+    what: 'A catalog of service integrations with official API links, credential requirements, deployment support, capabilities, and risk boundaries.',
+    when: 'Start here when you want an agent to shop, find events, or work with another service and need the supported setup path.',
   },
   skills: {
     what: 'Reusable capability packs an agent can load, installed locally or pulled from a skill source.',

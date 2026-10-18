@@ -8,13 +8,13 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/soulacy/soulacy/internal/binpath"
 	"github.com/soulacy/soulacy/internal/netguard"
 )
 
@@ -149,17 +149,9 @@ func (s *Server) handlePackageInstallStatus(c *fiber.Ctx) error {
 }
 
 func (s *Server) runPackageInstallCLI(ctx context.Context, req PackageInstallRequest, progress func(string)) error {
-	syPath, err := exec.LookPath("sy")
+	syPath, err := binpath.Find("sy")
 	if err != nil {
-		if current, currentErr := os.Executable(); currentErr == nil {
-			candidate := filepath.Join(filepath.Dir(current), "sy")
-			if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
-				syPath, err = candidate, nil
-			}
-		}
-	}
-	if err != nil {
-		return fmt.Errorf("remote package installer is unavailable: sy executable not found")
+		return fmt.Errorf("remote package installer is unavailable: %w", err)
 	}
 	port := 18789
 	if s.cfg != nil && s.cfg.Server.Port > 0 {

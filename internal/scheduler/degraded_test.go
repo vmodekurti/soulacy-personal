@@ -48,6 +48,24 @@ func TestMarkDegradedReply(t *testing.T) {
 	}
 }
 
+func TestScheduledRunCompletedUsesTaskContractState(t *testing.T) {
+	if complete, _ := scheduledRunCompleted(map[string]string{message.MetaTaskState: "completed"}); !complete {
+		t.Fatal("completed task contract was rejected")
+	}
+	complete, reason := scheduledRunCompleted(map[string]string{
+		message.MetaTaskState: "incomplete", message.MetaTaskBlocker: "the agent described unfinished work",
+	})
+	if complete || !strings.Contains(reason, "unfinished work") {
+		t.Fatalf("incomplete task contract = complete:%v reason:%q", complete, reason)
+	}
+	marked, degraded := MarkDegradedReply("Let me search again.", map[string]string{
+		message.MetaTaskState: "incomplete", message.MetaTaskBlocker: "search was not performed",
+	})
+	if !degraded || !strings.Contains(marked, "stopped before completing") || !strings.Contains(marked, "search was not performed") {
+		t.Fatalf("incomplete delivery was not labeled: %q", marked)
+	}
+}
+
 func TestScheduledDelivery_MarksDegradedRun(t *testing.T) {
 	reg := channels.NewRegistry(1)
 	adapter := &captureAdapter{id: "telegram"}
@@ -185,9 +203,9 @@ func TestIncompleteCronDoesNotRecordSuccessfulCompletion(t *testing.T) {
 		t.Fatalf("failure count = %d", s.failCounts[def.ID])
 	}
 	for _, ev := range sink.events {
-		if ev.Type == "schedule.run_failed" {
+		if ev.Type == "schedule.run_incomplete" {
 			return
 		}
 	}
-	t.Fatal("incomplete cron did not publish a failure event")
+	t.Fatal("incomplete cron did not publish a schedule.run_incomplete event")
 }

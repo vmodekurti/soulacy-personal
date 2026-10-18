@@ -95,3 +95,35 @@ func TestUnqualifiedDeliveryDestinationsRemainFetchable(t *testing.T) {
 		t.Fatalf("mark legacy unqualified delivery read: %v", err)
 	}
 }
+
+func TestFeedStateIsDurableAndScopedToItsOwner(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "mobile.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	ctx := context.Background()
+	state := FeedCardState{CardID: "run:morning", Read: true, Saved: true, Archived: false}
+	if err := store.PutFeedState(ctx, "home", "alex", state); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.ListFeedState(ctx, "home", "alex")
+	if err != nil || len(got) != 1 {
+		t.Fatalf("alex feed state = %#v, err=%v", got, err)
+	}
+	if got[0].CardID != state.CardID || !got[0].Read || !got[0].Saved || got[0].Archived || got[0].UpdatedAt.IsZero() {
+		t.Fatalf("stored feed state = %#v", got[0])
+	}
+	other, err := store.ListFeedState(ctx, "home", "blair")
+	if err != nil || len(other) != 0 {
+		t.Fatalf("feed state leaked to another user: %#v, err=%v", other, err)
+	}
+	state.Saved, state.Archived = false, true
+	if err := store.PutFeedState(ctx, "home", "alex", state); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = store.ListFeedState(ctx, "home", "alex")
+	if len(got) != 1 || got[0].Saved || !got[0].Archived {
+		t.Fatalf("replacement feed state = %#v", got)
+	}
+}

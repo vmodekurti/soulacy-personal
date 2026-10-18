@@ -42,7 +42,8 @@ export const navGroups = [
 /** Every built-in destination in the sidebar, in render order. */
 export const navPages = [
   { id: 'feed',      icon: '⌂', label: 'Feed',        group: 'main', level: 'simple' },
-  { id: 'start',     icon: '✦', label: 'Genie',       group: 'main', level: 'simple' },
+  { id: 'start',     icon: '✦', label: 'Agent Builder', group: 'main', level: 'simple' },
+  { id: 'missions',  icon: '◉', label: 'Missions',    group: 'main', level: 'simple' },
   { id: 'dashboard', icon: '◈', label: 'Dashboard',   group: 'main', level: 'simple' },
   { id: 'onboarding', icon: '✓', label: 'First Run',   group: 'main', level: 'standard' },
   { id: 'studio',    icon: '🎬', label: 'Studio',      group: 'main', level: 'standard' },
@@ -57,6 +58,7 @@ export const navPages = [
   { id: 'workboard', icon: '▦', label: 'Workboard',   group: 'capabilities', level: 'advanced' },
   { id: 'channels',  icon: '📡', label: 'Delivery',    group: 'integrations', level: 'standard' },
   { id: 'schedule',  icon: '⏱', label: 'Automations', group: 'integrations', level: 'standard' },
+  { id: 'connectors', icon: '🔗', label: 'Connectors',  group: 'integrations', level: 'standard' },
   { id: 'skills',    icon: '🧩', label: 'Skills',      group: 'integrations', level: 'standard' },
   { id: 'websites',  icon: '🔐', label: 'Website Access', group: 'integrations', level: 'standard' },
   { id: 'mcp',       icon: '🔌', label: 'MCP',         group: 'integrations', level: 'advanced' },

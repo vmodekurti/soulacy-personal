@@ -11,9 +11,13 @@ class Page(HTMLParser):
         super().__init__()
         self.ids = set()
         self.links = []
+        self.long_dash_text = []
+        self.ignored_text_depth = 0
         self.feed(text)
 
     def handle_starttag(self, tag, attrs):
+        if tag in ("script", "style"):
+            self.ignored_text_depth += 1
         attrs = dict(attrs)
         if attrs.get("id"):
             self.ids.add(attrs["id"])
@@ -22,6 +26,16 @@ class Page(HTMLParser):
         for key in ("href", "src"):
             if attrs.get(key):
                 self.links.append(attrs[key])
+
+    def handle_endtag(self, tag):
+        if tag in ("script", "style") and self.ignored_text_depth:
+            self.ignored_text_depth -= 1
+
+    def handle_data(self, data):
+        if self.ignored_text_depth:
+            return
+        if "\u2013" in data or "\u2014" in data:
+            self.long_dash_text.append(" ".join(data.split()))
 
 
 def check(root):
@@ -39,6 +53,10 @@ def check(root):
     for source, page in pages.items():
         if "soulacy commercial" in source.read_text(encoding="utf-8").casefold():
             errors.add(f"Unannounced product reference published: {source.relative_to(root)}")
+        for snippet in page.long_dash_text:
+            errors.add(
+                f"{source.relative_to(root)}: long dash in published text: {snippet[:100]}"
+            )
         for link in page.links:
             url = urlsplit(link)
             if url.scheme or url.netloc:

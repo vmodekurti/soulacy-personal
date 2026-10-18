@@ -64,7 +64,7 @@ a passing simulation and at least one successful verified real sample. Do not
 press it while other people rely on the test agent.
 
 **Promote stable** requires the canary stage and five successful verified real
-samples. Collect varied representative samples—not five identical requests
+samples. Collect varied representative samples, not five identical requests
 solely to satisfy the counter. The gateway is the authority on gate status and
 may reject promotion; read the stated reasons.
 

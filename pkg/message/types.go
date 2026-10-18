@@ -38,6 +38,9 @@ const (
 	MetaReasoningSteps    = sdkmsg.MetaReasoningSteps
 	MetaOutcome           = sdkmsg.MetaOutcome
 	MetaOutcomeSummary    = sdkmsg.MetaOutcomeSummary
+	MetaTaskState         = sdkmsg.MetaTaskState
+	MetaTaskOutcome       = sdkmsg.MetaTaskOutcome
+	MetaTaskBlocker       = sdkmsg.MetaTaskBlocker
 )
 
 // Text builds a single-text-part content slice.

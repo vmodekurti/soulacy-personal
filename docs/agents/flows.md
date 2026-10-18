@@ -1,6 +1,6 @@
 # Flow Graphs
 
-Flow graphs let you author the agent's path explicitly — conditional routing and bounded loops (refine→judge, retry-until-pass, escalation) declared as nodes and edges under the same `workflow:` key, with crash-safe checkpointing built in.
+Flow graphs let you author the agent's path explicitly: conditional routing and bounded loops (refine→judge, retry-until-pass, escalation) declared as nodes and edges under the same `workflow:` key, with crash-safe checkpointing built in.
 
 ## Quick Start: Refine → Judge → Ship
 
@@ -41,7 +41,7 @@ workflow:
   edges:
     - {from: refine, to: judge, max_iterations: 6}
     - {from: judge, to: refine, if: '{{not .verdict.ok}}', max_iterations: 5}
-    - {from: judge, to: ship}    # fallback — order matters
+    - {from: judge, to: ship}    # fallback, order matters
     - {from: ship, to: end}      # "end" (or no edge) terminates
 
 enabled: true
@@ -59,12 +59,12 @@ out), the fallback edge ships the draft.
 | `id` | Unique within the flow; checkpoint keys derive from it. |
 | `kind` | `tool` \| `agent` \| `branch`. Usually inferred: `tool:` set → tool, `agent:` set → agent, neither → branch. |
 | `tool` | Tool to invoke (any tool the agent can normally call). |
-| `agent` | Peer agent to invoke as `agent__<id>` — declare it in the agent's `agents:` list. |
+| `agent` | Peer agent to invoke as `agent__<id>`: declare it in the agent's `agents:` list. |
 | `input` | Go template over flow vars producing the node's input. |
 | `output` | Flow variable that stores this node's result. |
 | `on_error` | `abort` (default) \| `skip` \| `retry`. |
 
-`branch` nodes do no work — they exist purely to fan edges out from one
+`branch` nodes do no work: they exist purely to fan edges out from one
 decision point.
 
 ## Edges and Predicates
@@ -87,21 +87,21 @@ can address fields (`{{.verdict.ok}}`); plain text stays a string.
 
 Cycles terminate by construction:
 
-- Every edge defaults to `max_iterations: 1` — a back edge must explicitly
+- Every edge defaults to `max_iterations: 1`: a back edge must explicitly
   raise its budget to loop (`max_iterations: 5` above).
 - `max_node_executions` (default 100) backstops the entire run; exceeding it
   aborts the flow.
 
 !!! warning
     Remember to raise `max_iterations` on the *forward* edge into a looped
-    node too — in the example, `refine → judge` carries `max_iterations: 6`
+    node too: in the example, `refine → judge` carries `max_iterations: 6`
     because it is traversed once per refinement pass.
 
 ## Checkpointing and Resume
 
 Each node visit checkpoints under `<node>#<visit>` in the same store as
 [linear workflows](workflow.md). Resuming a crashed run ID restores completed
-visits — flow variables included — and recomputes the same deterministic
+visits (flow variables included) and recomputes the same deterministic
 path, so only unfinished work executes. Side effects are never repeated.
 
 Graphs are validated at load time: duplicate or missing node IDs, unknown
@@ -112,13 +112,13 @@ errors before the agent ever runs.
 
 The same graph serves two entry points:
 
-- **Workflow runs** — cron/scheduled or triggered runs execute the graph
+- **Workflow runs**: cron/scheduled or triggered runs execute the graph
   through the checkpointing workflow executor (the example above).
-- **Chat runs** — set `reasoning.strategy: flow` and chat messages route
+- **Chat runs**: set `reasoning.strategy: flow` and chat messages route
   through the graph as a reasoning strategy. Node actions go through the
   engine's standard tool-policy bridge (sandbox, allowlists, confirmation
   gates), and each node visit surfaces as a `reasoning.step` event in the
-  Chat thinking section and Activity feed — see
+  Chat thinking section and Activity feed: see
   [Reasoning Strategies](reasoning.md).
 
 ```yaml

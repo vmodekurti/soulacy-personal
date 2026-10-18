@@ -45,6 +45,22 @@ func TestBuild_ReconstructsBrowserSteps(t *testing.T) {
 	}
 }
 
+func TestBuild_ReconstructsManagedWebsiteActions(t *testing.T) {
+	events := []message.Event{
+		call("genie", "s1", "start_website_action", "c1", map[string]any{"url": "https://www.opentable.com"}),
+		call("genie", "s1", "inspect_website_action", "c2", map[string]any{"session_id": "web_1"}),
+		call("genie", "s1", "act_on_website", "c3", map[string]any{"session_id": "web_1", "action": "fill", "ref": "s2"}),
+		call("genie", "s1", "commit_website_action", "c4", map[string]any{"session_id": "web_1", "ref": "s8", "provider": "OpenTable"}),
+	}
+	trace := Build("genie", "s1", events)
+	if len(trace.Steps) != 4 || trace.Navigations != 1 || trace.LastURL != "https://www.opentable.com" {
+		t.Fatalf("managed website trace = %+v", trace)
+	}
+	if trace.Steps[0].Action != "navigate" || trace.Steps[1].Action != "extract" || trace.Steps[3].Action != "click" {
+		t.Fatalf("managed actions were misclassified: %+v", trace.Steps)
+	}
+}
+
 func TestBuild_MarksErrorSteps(t *testing.T) {
 	events := []message.Event{
 		call("a", "s1", "mcp__browser__navigate", "c1", map[string]any{"url": "https://x.test"}),

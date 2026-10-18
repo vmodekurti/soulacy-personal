@@ -70,7 +70,7 @@ telemetry:
     exporter: stdout
 ```
 
-Prints trace JSON to the server log — useful for debugging without a collector.
+Prints trace JSON to the server log: useful for debugging without a collector.
 
 ## Metrics
 

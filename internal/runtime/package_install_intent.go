@@ -1,14 +1,42 @@
 package runtime
 
 import (
+	"context"
 	"strings"
 
 	"github.com/soulacy/soulacy/internal/llm"
+	"github.com/soulacy/soulacy/pkg/message"
 )
 
 type urlPackageInstallRequest struct {
 	SourceURL string
 	Kind      string
+}
+
+func deterministicMCPInstallFollowup(ctx context.Context, request urlPackageInstallRequest, results []message.ToolResult) (*message.ToolCall, string) {
+	if request.Kind != "mcp" || !hasSuccessfulToolResult(results, "mcp_install_inspect") {
+		return nil, ""
+	}
+	if refusal := mcpInstallRefusal(ctx, request.SourceURL, false); refusal != "" {
+		return nil, "MCP server installation was not attempted.\n\n" + refusal
+	}
+	return &message.ToolCall{
+		ID:   "package-install-" + uuidShort(),
+		Name: "package_install",
+		Arguments: map[string]any{
+			"source_url": request.SourceURL,
+			"kind":       request.Kind,
+		},
+	}, ""
+}
+
+func hasSuccessfulToolResult(results []message.ToolResult, name string) bool {
+	for _, result := range results {
+		if normalizeToolCallName(result.Name) == name && !result.IsError {
+			return true
+		}
+	}
+	return false
 }
 
 // isURLPackageInstallRequest recognizes only an explicit operator request to
@@ -74,6 +102,62 @@ func parseURLPackageInstallRequest(text string) (urlPackageInstallRequest, bool)
 func toolSchemaExists(tools []llm.ToolSchema, name string) bool {
 	for _, tool := range tools {
 		if tool.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func formatPackageInstallReply(results []message.ToolResult) string {
+	var result *message.ToolResult
+	for i := range results {
+		if normalizeToolCallName(results[i].Name) == "package_install" {
+			if result != nil {
+				return "MCP server installation failed because the installer returned an unexpected result. Check the run details and retry."
+			}
+			result = &results[i]
+		}
+	}
+	if result == nil {
+		return "MCP server installation failed because the installer returned an unexpected result. Check the run details and retry."
+	}
+	detail := managedActionResultDetail(result.Content)
+	detail = strings.TrimPrefix(detail, "error: package_install: ")
+	detail = strings.TrimPrefix(detail, "error: ")
+	if len(detail) > 4000 {
+		detail = "…" + detail[len(detail)-4000:]
+	}
+	if result.IsError {
+		if detail == "" {
+			detail = "The package installer did not provide an error message."
+		}
+		return "MCP server installation failed.\n\n" + detail
+	}
+	if detail == "" {
+		detail = "The MCP server was installed and registered successfully."
+	}
+	return "MCP server installation completed.\n\n" + detail
+}
+
+func packageInstallFailureDetail(results []message.ToolResult) string {
+	for _, result := range results {
+		if normalizeToolCallName(result.Name) != "package_install" || !result.IsError {
+			continue
+		}
+		detail := strings.TrimSpace(result.Content)
+		detail = strings.TrimPrefix(detail, "error: package_install: ")
+		detail = strings.TrimPrefix(detail, "error: ")
+		if detail == "" {
+			return "The package installer did not provide an error message."
+		}
+		return detail
+	}
+	return ""
+}
+
+func hasPackageInstallResult(results []message.ToolResult) bool {
+	for _, result := range results {
+		if normalizeToolCallName(result.Name) == "package_install" {
 			return true
 		}
 	}
