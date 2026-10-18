@@ -76,6 +76,7 @@ func (e *Engine) buildBuiltins() []BuiltinTool {
 	tools = append(tools, e.buildQueueBuiltins()...)
 	tools = append(tools, e.buildIntrospectionBuiltins()...)
 	tools = append(tools, e.buildGenieMonitorBuiltins()...)
+	tools = append(tools, e.buildPortalBuiltins()...)
 	tools = append(tools, e.buildMobileBuiltins()...)
 	tools = append(tools, e.buildPersonBuiltins()...)
 	tools = append(tools, e.buildSafeUndoBuiltins()...)

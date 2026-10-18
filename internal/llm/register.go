@@ -35,11 +35,11 @@ func init() {
 
 	// openai — also serves any OpenAI-compatible endpoint (OpenRouter /
 	// Together / Groq / vLLM) under a custom "id".
-	// Keys: id (default "openai"), api_key (required), base_url (default
+	// Keys: id (default "openai"), api_key (required except loopback endpoints), base_url (default
 	// https://api.openai.com/v1), model, organization, parallel_tool_calls.
 	registry.MustRegisterProvider("openai", func(cfg map[string]any) (sdkllm.Provider, error) {
 		apiKey := cfgmap.Str(cfg, "api_key", "")
-		if apiKey == "" {
+		if apiKey == "" && !AllowsUnauthenticatedOpenAIEndpoint(cfgmap.Str(cfg, "base_url", "")) {
 			return nil, fmt.Errorf("openai: config key %q is required", "api_key")
 		}
 		p := NewOpenAIProviderWithOptions(

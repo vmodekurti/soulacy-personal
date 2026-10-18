@@ -58,6 +58,12 @@
 .markdown-body .md-audio-card audio {
   width: min(100%, 420px);
 }
+.markdown-body .md-audio-original,
+.markdown-body .md-audio-status {
+  font-size: 0.85em;
+  opacity: 0.75;
+}
+.markdown-body .md-audio-status:empty { display: none; }
 
 /* Lists */
 .markdown-body ul,

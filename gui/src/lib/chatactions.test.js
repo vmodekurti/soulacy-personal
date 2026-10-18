@@ -96,3 +96,13 @@ describe('isHistoricalFailureResolved', () => {
     expect(isHistoricalFailureResolved(messages, 3)).toBe(false)
   })
 })
+
+it('gives Genie concrete portal examples while preserving custom suggestions', () => {
+  expect(suggestedPrompts({ id: 'genie' })).toEqual([
+    'Show me the latest result from my scheduled jobs',
+    'Find the link to my latest podcast',
+    'Help me change an agent’s settings',
+    'Help me add a new model provider',
+  ])
+  expect(suggestedPrompts({ id: 'genie', suggestions: ['My custom example'] })).toEqual(['My custom example'])
+})

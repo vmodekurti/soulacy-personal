@@ -20,6 +20,7 @@ import (
 
 	"github.com/soulacy/soulacy/internal/llm"
 	"github.com/soulacy/soulacy/internal/reasoning"
+	"github.com/soulacy/soulacy/internal/tier"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 )
@@ -300,6 +301,9 @@ func (e *Engine) runAgentCall(ctx context.Context, callerDef *agent.Definition, 
 	target := e.loader.Get(targetID)
 	if target == nil {
 		return "", fmt.Errorf("agent call: %q not loaded", targetID)
+	}
+	if genieOperationBoundary(ctx) && tier.Compute(target, e.loader.Get) == tier.Privileged {
+		return "", fmt.Errorf("genie cannot delegate host administration; manage core operational settings directly in the Portal")
 	}
 	if !target.Enabled {
 		return "", fmt.Errorf("agent call: %q is disabled", targetID)

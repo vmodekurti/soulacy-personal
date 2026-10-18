@@ -62,3 +62,9 @@ describe('explainConfirmRequest', () => {
     expect(explainConfirmRequest(null)).toEqual({ summary: '', steps: [] });
   });
 });
+
+it('explains portal execution approvals in plain language', () => {
+  const out = explainConfirmRequest({ tool: 'portal_confirm', args: { action: 'agents.run', params: { id: 'daily-podcast' } } })
+  expect(out.summary).toBe('Run this agent now: daily-podcast.')
+  expect(out.steps[0]).toMatch(/deliver/)
+})

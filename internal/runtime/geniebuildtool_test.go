@@ -47,7 +47,7 @@ func TestGenieBuiltinListMatchesRealTools(t *testing.T) {
 		switch name {
 		// Both of these depend on something a bare engine has not got: a
 		// channel registry, and at least one installed skill to read.
-		case "channel.send", "channel.status", "read_skill", "read_skill_file":
+		case "channel.send", "channel.status", "read_skill", "read_skill_file", "portal_actions", "portal_read", "portal_update", "portal_confirm":
 			continue
 		}
 		if !offered[name] {

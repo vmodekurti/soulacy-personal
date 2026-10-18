@@ -521,7 +521,7 @@ func (s *Server) handleValidateAgent(c *fiber.Ctx) error {
 }
 
 func (s *Server) handleCreateAgent(c *fiber.Ctx) error {
-	var def agent.Definition
+	def := agent.Definition{Enabled: true}
 	if err := c.BodyParser(&def); err != nil {
 		return s.errJSON(c, fiber.StatusBadRequest, err)
 	}
@@ -536,7 +536,6 @@ func (s *Server) handleCreateAgent(c *fiber.Ctx) error {
 	if def.LLM.Provider == "" {
 		def.LLM.Provider = s.cfg.LLM.DefaultProvider
 	}
-	def.Enabled = true
 
 	// Write to first agent dir
 	dir := ""
@@ -1078,6 +1077,7 @@ func (s *Server) handleChat(c *fiber.Ctx) error {
 	defer cancel()
 	if principal, ok := requestPrincipal(c); ok {
 		ctx = runtime.WithPrincipal(ctx, principal)
+		ctx = s.withPortalAccess(c, ctx, def.ID)
 	}
 
 	// Register the run under its session id so a client can cancel a slow
@@ -1280,6 +1280,7 @@ func (s *Server) handleChatStream(c *fiber.Ctx) error {
 	runCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Context()), s.resolveRunTimeout(def))
 	if principal, ok := requestPrincipal(c); ok {
 		runCtx = runtime.WithPrincipal(runCtx, principal)
+		runCtx = s.withPortalAccess(c, runCtx, req.AgentID)
 	}
 
 	// Register this run so it can be cancelled mid-flight (Story #22). The id is
@@ -4743,7 +4744,7 @@ func (s *Server) handleSetProviderCredentials(c *fiber.Ctx) error {
 		BaseURL                 string         `json:"base_url"`
 		APIKey                  string         `json:"api_key"`
 		Model                   string         `json:"model"`
-		KeepAlive               string         `json:"keep_alive"`
+		KeepAlive               *string        `json:"keep_alive"`
 		Options                 map[string]any `json:"options"`
 		PromptCaching           *bool          `json:"prompt_caching"`      // pointer: omitted ≠ false
 		ThinkingBudget          *int           `json:"thinking_budget"`     // Google/Anthropic: 0=off, -1=auto, N=tokens
@@ -4797,8 +4798,8 @@ func (s *Server) handleSetProviderCredentials(c *fiber.Ctx) error {
 	if req.Model != "" {
 		provMap["model"] = req.Model
 	}
-	if id == "ollama" {
-		provMap["keep_alive"] = req.KeepAlive
+	if id == "ollama" && req.KeepAlive != nil {
+		provMap["keep_alive"] = *req.KeepAlive
 	}
 	if req.PromptCaching != nil {
 		provMap["prompt_caching"] = *req.PromptCaching
@@ -4862,8 +4863,8 @@ func (s *Server) handleSetProviderCredentials(c *fiber.Ctx) error {
 	if req.Model != "" {
 		pc.Model = req.Model
 	}
-	if id == "ollama" {
-		pc.KeepAlive = req.KeepAlive
+	if id == "ollama" && req.KeepAlive != nil {
+		pc.KeepAlive = *req.KeepAlive
 	}
 	if req.PromptCaching != nil {
 		pc.PromptCaching = *req.PromptCaching
@@ -4906,6 +4907,7 @@ func (s *Server) handleSetProviderCredentials(c *fiber.Ctx) error {
 	}
 	s.cfg.LLM.Providers[id] = pc
 
+	registered := false
 	if s.llmRouter != nil {
 		m := providerCfgMap(pc)
 		m["id"] = id
@@ -4917,6 +4919,7 @@ func (s *Server) handleSetProviderCredentials(c *fiber.Ctx) error {
 		}
 		if perr == nil && p != nil {
 			s.llmRouter.Register(p)
+			registered = true
 			s.log.Info("provider dynamically registered in llm router", zap.String("provider", id))
 		} else {
 			s.log.Warn("failed to dynamically register provider in llm router", zap.String("provider", id), zap.Error(perr))
@@ -4930,8 +4933,10 @@ func (s *Server) handleSetProviderCredentials(c *fiber.Ctx) error {
 	s.log.Info("provider credentials updated", zap.String("provider", id))
 	s.recordAdminAudit(c, "provider.credentials.update", "provider", id, "ok", map[string]any{"credential_changed": hasNewAPIKey})
 	return c.JSON(fiber.Map{
-		"ok":      true,
-		"message": "Saved.",
+		"ok":             true,
+		"message":        "Saved.",
+		"registered":     registered,
+		"setup_required": !registered,
 	})
 }
 
@@ -4967,6 +4972,9 @@ func (s *Server) handleDeleteProvider(c *fiber.Ctx) error {
 	// Mirror to live config
 	if s.cfg.LLM.Providers != nil {
 		delete(s.cfg.LLM.Providers, id)
+	}
+	if s.llmRouter != nil {
+		s.llmRouter.Unregister(id)
 	}
 	s.recordAdminAudit(c, "provider.delete", "provider", id, "ok", nil)
 

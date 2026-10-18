@@ -4,6 +4,7 @@
   import { api } from '../lib/api.js'
   import { activityAgent } from '../lib/stores.js'
   import RunMetrics from '../lib/RunMetrics.svelte'
+  import RunFailure from '../lib/RunFailure.svelte'
   import { catchupLabel, catchupTitle } from '../lib/schedutils.js'
 
   function watchAgent(id, sessionId = '') {
@@ -194,6 +195,8 @@
       updatedAt: r.updatedAt,
       status: r.status || (r.ok ? 'success' : 'unknown'),
       output: r.output || r.error || '',
+      error: r.error || '',
+      failure: r.failure || null,
       channel: r.channel || r.trigger || '',
       source: r.source || 'action-log',
       steps: r.steps || 0,
@@ -756,7 +759,10 @@
                           {#if run.durationMs}<span>{(run.durationMs / 1000).toFixed(1)}s</span>{/if}
                           {#if run.eventCount}<span>{run.eventCount} log event{run.eventCount === 1 ? '' : 's'}</span>{/if}
                         </div>
-                        {#if run.output}
+                        <RunFailure failure={run.failure} error={run.status === 'failed' ? run.error : ''} />
+                        {#if run.failure && run.output}
+                          <details class="run-response"><summary>Agent response</summary><pre>{run.output}</pre></details>
+                        {:else if run.output}
                           <pre>{run.output}</pre>
                         {:else if run.status === 'failed'}
                           <div class="no-output">The run failed before producing a result. Open logs for the recorded failure and tool activity.</div>
@@ -1012,7 +1018,10 @@ schedule:
                       {#if run.deliveryError} — {run.deliveryError}{/if}
                     </div>
                   {/if}
-                  {#if run.output}
+                  <RunFailure failure={run.failure} error={run.status === 'failed' ? run.error : ''} />
+                  {#if run.failure && run.output}
+                    <details class="run-response"><summary>Agent response</summary><pre>{run.output}</pre></details>
+                  {:else if run.output}
                     <pre>{run.output}</pre>
                   {:else}
                     <span class="no-output">No output captured.</span>
@@ -1134,12 +1143,12 @@ schedule:
   .result-row td { padding: 0 1.25rem 1rem; background: color-mix(in srgb, var(--sl-accent) 4%, transparent); }
   .result-row:hover td { background: color-mix(in srgb, var(--sl-accent) 4%, transparent); }
   .history-result {
-    padding: .8rem 1rem; border: 1px solid #252a48; border-radius: 8px;
-    background: #0e1020;
+    padding: .8rem 1rem; border: 1px solid var(--sl-line); border-radius: 8px;
+    background: var(--sl-surface); color: var(--sl-text);
   }
   .result-meta { display: flex; flex-wrap: wrap; gap: .6rem; margin-bottom: .6rem; color: var(--sl-text-faint); font: .7rem monospace; }
   .history-result pre {
-    margin: 0; color: #c8cadf; font: .78rem/1.6 monospace;
+    margin: 0; color: var(--sl-text); font: .78rem/1.6 monospace;
     white-space: pre-wrap; overflow-wrap: anywhere;
   }
   .actions   { display: flex; gap: .35rem; justify-content: flex-end; flex-wrap: wrap; }
@@ -1198,7 +1207,7 @@ schedule:
   .panel-title { display: flex; flex-direction: column; gap: .2rem; }
   .panel-actions { display: flex; align-items: center; gap: .5rem; }
   .panel-label { font-size: .68rem; text-transform: uppercase; letter-spacing: .07em; color: #555a7a; font-weight: 600; }
-  .panel-agent { font-size: .95rem; font-weight: 600; color: #e0e1f0; }
+  .panel-agent { font-size: .95rem; font-weight: 600; color: var(--sl-text); }
   .close-btn {
     background: none; border: none; color: #555a7a; font-size: 1rem;
     cursor: pointer; padding: .25rem .5rem; border-radius: 6px;
@@ -1210,7 +1219,7 @@ schedule:
   .history-note {
     margin: .8rem 1.25rem .35rem; padding: .45rem .6rem; border-radius: 7px;
     background: color-mix(in srgb, var(--sl-accent) 8%, transparent); border: 1px solid color-mix(in srgb, var(--sl-accent) 22%, transparent);
-    color: #aeb3dc; font-size: .72rem; line-height: 1.35;
+    color: var(--sl-text-dim); font-size: .72rem; line-height: 1.35;
   }
 
   .run { border-bottom: 1px solid var(--sl-line); }
@@ -1252,11 +1261,11 @@ schedule:
   .run-channel.delivery-fail, .delivery-line.delivery-fail { color: #ff9292; }
   .run-chevron { font-size: .65rem; color: #555a7a; margin-left: auto; }
   .run-output {
-    padding: .75rem 1.25rem 1rem; background: #0e1020;
+    padding: .75rem 1.25rem 1rem; background: var(--sl-surface); color: var(--sl-text);
     border-top: 1px solid var(--sl-line);
   }
   .delivery-line {
-    color: #9aa2d8;
+    color: var(--sl-text-dim);
     font-size: .76rem;
     margin-bottom: .5rem;
   }
@@ -1264,7 +1273,7 @@ schedule:
     margin: 0 0 .55rem;
     background: color-mix(in srgb, var(--sl-accent) 12%, transparent);
     border: 1px solid color-mix(in srgb, var(--sl-accent) 35%, transparent);
-    color: #ada8ff;
+    color: var(--sl-accent-ink);
     border-radius: 6px;
     padding: .25rem .55rem;
     font-size: .72rem;
@@ -1272,9 +1281,11 @@ schedule:
   }
   .activity-link:hover { background: color-mix(in srgb, var(--sl-accent) 20%, transparent); }
   .run-output pre {
-    font-family: monospace; font-size: .78rem; color: #b0b5d8;
+    font-family: monospace; font-size: .78rem; color: var(--sl-text);
     line-height: 1.65; white-space: pre-wrap; word-break: break-word; margin: 0;
   }
+  .run-response { margin-top: .75rem; font-size: .8rem; color: var(--sl-text-dim); }
+  .run-response summary { cursor: pointer; margin-bottom: .5rem; }
   .no-output { font-size: .78rem; color: #555a7a; font-style: italic; }
 
   /* Modal */

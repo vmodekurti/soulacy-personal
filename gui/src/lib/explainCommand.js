@@ -108,6 +108,19 @@ export function explainConfirmRequest(req) {
   const tool = String(req.tool || '')
   const args = req.args || {}
 
+  if (tool === 'portal_confirm') {
+    const labels = {
+      'agents.delete': 'Delete this agent', 'agents.run': 'Run this agent now',
+      'providers.delete': 'Remove this unused model provider', 'providers.pull': 'Download this model',
+      'schedule.delete': 'Cancel this monitor', 'knowledge.delete': 'Delete this knowledge base',
+      'knowledge.delete_document': 'Delete this document', 'workboard.run': 'Run this task',
+      'workboard.delete': 'Delete this task', 'memory.delete': 'Forget this saved fact',
+    }
+    const target = args.params?.id || args.params?.kb || ''
+    const label = labels[args.action] || 'Perform this portal action'
+    return { summary: `${label}${target ? `: ${target}` : ''}.`, steps: args.action === 'agents.run' || args.action === 'workboard.run' ? ['The run may deliver its result through the configured channel.'] : [] }
+  }
+
   if (SHELL_TOOLS.has(tool)) {
     const cmd = args.command ?? args.cmd ?? args.script ?? ''
     const steps = explainShellCommand(cmd)

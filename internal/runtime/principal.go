@@ -22,6 +22,12 @@ type Principal struct {
 
 type principalContextKey struct{}
 type activeAgentContextKey struct{}
+type genieOperationBoundaryKey struct{}
+
+func genieOperationBoundary(ctx context.Context) bool {
+	v, _ := ctx.Value(genieOperationBoundaryKey{}).(bool)
+	return v
+}
 
 func WithPrincipal(ctx context.Context, p Principal) context.Context {
 	p.Subject = strings.Clone(strings.TrimSpace(p.Subject))
@@ -61,6 +67,13 @@ func SubjectFromContext(context.Context) string { return "admin" }
 // a trusted internal/scheduler invocation. Viewer stays viewer; every stronger
 // or absent role is capped at operator.
 func applyAgentPrincipalBoundary(ctx context.Context, def *agent.Definition) context.Context {
+	if def != nil && (def.ID == GenieAgentID || def.Labels["soulacy.owner"] == GenieAgentID) {
+		ctx = context.WithValue(ctx, genieOperationBoundaryKey{}, true)
+	}
+	// A delegated peer must never inherit or relay the interactive portal grant.
+	if def == nil || def.ID != GenieAgentID {
+		ctx = WithPortalAccess(ctx, nil)
+	}
 	if def == nil || (strings.TrimSpace(def.ID) != GenieAgentID && def.Labels["soulacy.owner"] != GenieAgentID) {
 		return ctx
 	}
@@ -75,6 +88,9 @@ func applyAgentPrincipalBoundary(ctx context.Context, def *agent.Definition) con
 }
 
 func callerAllowsTool(ctx context.Context, toolName string) bool {
+	if genieOperationBoundary(ctx) && (isPrivilegedSystemTool(toolName) || toolName == "http_request") {
+		return false
+	}
 	p, ok := PrincipalFromContext(ctx)
 	if !ok {
 		return true // scheduler/channel/internal invocations are trusted services

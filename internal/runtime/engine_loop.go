@@ -639,10 +639,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		model = "(provider default)"
 	}
 
-	// Anti-loop guard: remember tool calls already executed in this run (keyed by
-	// name + arguments). If the model re-issues an identical call, we return the
-	// cached result with a nudge to move on instead of re-running it — this stops
-	// weaker models from burning every turn re-calling the same tool.
+	// Cache tool calls by name and arguments to stop repeated execution.
 	seen := make(map[string]string)
 	var seenMu sync.Mutex
 
@@ -654,13 +651,13 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	var finalContent string
 	missionCompletionRetries := 0
 	nextToolChoice := ""
-	// prematureFinals bounds how often a progress preamble, empty reply, or
-	// unexecutable tool-call text is sent back for another turn. With an
-	// unlimited turn allowance (maxTurns == 0) the turn ceiling no longer
-	// does that.
+	completed := false
+	stopReason := "configured turn limit reached before completion"
+	// Keep progress preambles and malformed tool text bounded even with unlimited turns.
 	prematureFinals := 0
 	for turn := 0; maxTurns == 0 || turn < maxTurns; turn++ {
 		if stalled := progressGuardFrom(ctx).failure(); stalled != nil {
+			stopReason = stalled.Error()
 			contract.MarkIncomplete(stalled.Error())
 			break
 		}
@@ -673,6 +670,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		// with a clear terminal note appended below.
 		if reason := budgetExceeded(budgetTokens, usedTokens, budgetCalls, usedCalls); reason != "" {
 			contract.MarkIncomplete(reason)
+			stopReason = reason
 			e.log.Warn("engine: run budget exceeded — halting",
 				zap.String("agent", msg.AgentID),
 				zap.String("reason", reason),
@@ -721,6 +719,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 			remainingOutput := budgetTokens - usedTokens - estimateTokens(chatMsgs, tools)
 			if remainingOutput <= 0 {
 				contract.MarkIncomplete("the token budget could not fit the next model call")
+				stopReason = "token budget cannot fit the next prompt"
 				finalContent = strings.TrimSpace(bestEffortFinal(chatMsgs))
 				if finalContent != "" {
 					finalContent += "\n\n"
@@ -963,23 +962,25 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 
 		// No tool calls → we have a final answer
 		if len(resp.ToolCalls) == 0 {
-			if repairedContext, requiredTool, repaired := e.repairIncompleteBuilderMission(def, missionContract, sess, msg, resp.Content,
-				missionProgress, &missionCompletionRetries, toolNames, turn, maxTurns); repaired {
-				chatMsgs, nextToolChoice = repairedContext, requiredTool
-				continue
-			}
-			if def.LLM.OutputSchema == nil && len(tools) > 0 && isUnrecoveredToolInvocation(resp.Content) {
-				if prematureFinals < maxPrematureFinals && (maxTurns == 0 || turn+1 < maxTurns) {
+			invalidToolCall := def.LLM.OutputSchema == nil && len(tools) > 0 && isUnrecoveredToolInvocation(resp.Content)
+			if invalidToolCall {
+				if prematureFinals < 3 && (maxTurns == 0 || turn+1 < maxTurns) {
 					prematureFinals++
 					sess.mu.Lock()
-					e.appendHistoryLocked(sess, llm.ChatMessage{Role: "assistant", Content: resp.Content}, llm.ChatMessage{Role: "system", Content: "That response wrote tool-call markup as text, so nothing ran. Use native tool calls for the next concrete action. Return a final answer only when the requested work is complete, or explain a specific blocker."})
+					e.appendHistoryLocked(sess, llm.ChatMessage{Role: "assistant", Content: resp.Content}, llm.ChatMessage{Role: "system", Content: "The task is unfinished. Use native tool calls; do not write tool invocation markup as an answer."})
 					sess.mu.Unlock()
 					chatMsgs = e.buildContext(def, sess, msg)
 					continue
 				}
-				contract.MarkIncomplete("the model returned tool-call text that could not be executed")
+				stopReason = "the model returned tool-call text that could not be executed"
+				contract.MarkIncomplete(stopReason)
 				finalContent = "The model could not produce a valid tool call, so the requested work is incomplete."
 				break
+			}
+			if repairedContext, requiredTool, repaired := e.repairIncompleteBuilderMission(def, missionContract, sess, msg, resp.Content,
+				missionProgress, &missionCompletionRetries, toolNames, turn, maxTurns); repaired {
+				chatMsgs, nextToolChoice = repairedContext, requiredTool
+				continue
 			}
 			allowContinue := missionCompletionRetries < maxMissionCompletionRetries && prematureFinals < maxPrematureFinals
 			if repairedContext, repaired := e.continuePrematureFinal(def, sess, msg, contract, resp.Content, allowContinue, turn, maxTurns); repaired {
@@ -988,6 +989,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 				continue
 			}
 			finalContent = terminalBuilderMissionContent(missionContract, missionProgress, resp.Content, missionCompletionRetries)
+			completed = true
 			break
 		}
 
@@ -1048,11 +1050,13 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		e.appendHistoryLocked(sess, turns...)
 		sess.mu.Unlock()
 		if stopAfterInspection {
+			completed = true
 			break
 		}
 
 		if plannedReply := initialGenieActionReply(turn, forceGenieActionPlan, toolResults); plannedReply != "" {
 			finalContent = plannedReply
+			completed = true
 			break
 		}
 
@@ -1062,6 +1066,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		// result is authoritative and no fallback probing can improve it.
 		if hasURLPackageRequest && !autoDelegated && hasPackageInstallResult(toolResults) {
 			finalContent = formatPackageInstallReply(toolResults)
+			completed = packageInstallFailureDetail(toolResults) == ""
 			if detail := packageInstallFailureDetail(toolResults); detail != "" {
 				contract.MarkBlocked(detail)
 			}
@@ -1073,6 +1078,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		// a ceiling fires and buries the reason (#230).
 		if failures.shouldStop() {
 			contract.MarkBlocked("the available tool routes were refused by policy or deployment capability")
+			stopReason = "required tools were refused by policy"
 			finalContent = failures.stopMessage()
 			e.sink.Emit(message.Event{
 				Type: "error", AgentID: msg.AgentID, SessionID: msg.SessionID,
@@ -1124,11 +1130,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		}
 	}
 	if strings.TrimSpace(finalContent) == "" {
-		// Synthesis still produced nothing usable. Rather than throw away a
-		// completed run's work, fall back to the best content we already have:
-		// the last substantive assistant message, else a concise digest of the
-		// gathered tool results. Keep the warning event for observability but
-		// make the reply useful to the user.
+		// Recover the best substantive assistant or tool content already gathered.
 		finalContent = bestEffortFinal(chatMsgs)
 		stage := "loop"
 		level := "warn"
@@ -1145,6 +1147,9 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 			Payload:   map[string]any{"stage": stage, "error": errText},
 			Timestamp: time.Now().UTC(),
 		})
+	}
+	if !completed {
+		contract.MarkIncomplete(stopReason)
 	}
 	// Apply the completion guard after every recovery path, including best-effort context recovery.
 	finalContent = finishPrematureContent(def, contract, finalContent)
