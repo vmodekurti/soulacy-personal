@@ -3594,10 +3594,21 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#recommended-production-configuration" class="md-nav__link">
+  <a href="#defaults-and-optional-limits" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Recommended production configuration
+        Defaults and optional limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#example-for-an-explicitly-budgeted-deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example for an explicitly budgeted deployment
       
     </span>
   </a>
@@ -5052,10 +5063,21 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#recommended-production-configuration" class="md-nav__link">
+  <a href="#defaults-and-optional-limits" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Recommended production configuration
+        Defaults and optional limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#example-for-an-explicitly-budgeted-deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example for an explicitly budgeted deployment
       
     </span>
   </a>
@@ -5195,7 +5217,14 @@
 and embedding inference through one admission and accounting controller. The
 controller reserves worst-case capacity before a provider request and records
 actual or estimated usage when it finishes.</p>
-<h2 id="recommended-production-configuration">Recommended production configuration<a class="headerlink" href="#recommended-production-configuration" title="Permanent link">&para;</a></h2>
+<h2 id="defaults-and-optional-limits">Defaults and optional limits<a class="headerlink" href="#defaults-and-optional-limits" title="Permanent link">&para;</a></h2>
+<p>New configurations have no cumulative per-run token/call cap, Studio build
+spend cap, or workspace output-token ceiling. Response allowance defaults to
+16,384 tokens, subject to the selected model's capacity. Existing explicit
+settings remain in effect. See <a href="../EXECUTION_POLICY/">Execution policy</a> for
+turns, timeouts, inheritance, progress detection, and recovery.</p>
+<h2 id="example-for-an-explicitly-budgeted-deployment">Example for an explicitly budgeted deployment<a class="headerlink" href="#example-for-an-explicitly-budgeted-deployment" title="Permanent link">&para;</a></h2>
+<p>The following limits are opt-in examples, not the shipped defaults.</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">llm</span><span class="p">:</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">default_provider</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">openai</span>
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="nt">allowed_providers</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">openai</span><span class="p p-Indicator">]</span>

@@ -5322,7 +5322,7 @@ There is no blanket RAM/startup guarantee.</p>
 </span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>make<span class="w"> </span>all<span class="w">          </span><span class="c1"># GUI + gateway + CLI → ./bin/soulacy and ./bin/sy</span>
 </span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>sudo<span class="w"> </span>install<span class="w"> </span>-m755<span class="w"> </span>bin/soulacy<span class="w"> </span>bin/sy<span class="w"> </span>/usr/local/bin/
 </span></code></pre></div>
-<p><code>make all</code> needs Go 1.26.6+, Node/npm, and the platform's C/SQLite development
+<p><code>make all</code> needs Go 1.26.9+, Node/npm, and the platform's C/SQLite development
 requirements. It forces a GUI rebuild; <code>make build</code> rebuilds it incrementally
 when sources change. The gateway embeds the web UI at compile time.</p>
 <h2 id="docker">Docker<a class="headerlink" href="#docker" title="Permanent link">&para;</a></h2>
