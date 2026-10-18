@@ -5,7 +5,7 @@ HTTP/SSE, Python subprocesses, SQLite, and isolated workspaces. All business dat
 and private-file canaries are synthetic. No paid inference, live agents, saved
 settings, or external channel delivery were used.
 
-**Final combined run: 18/18 passed — five real Qwen scenarios and thirteen
+**Final combined run: 18/18 passed: five real Qwen scenarios and thirteen
 controlled gateway scenarios.** This final run explicitly uses workspace-relative
 paths. GLM also passed the four core scenarios after its compatibility repair
 and passed the relative-path document variant separately. Original absolute-path

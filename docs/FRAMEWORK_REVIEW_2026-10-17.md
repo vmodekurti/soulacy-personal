@@ -1,4 +1,4 @@
-# Framework and gateway portal review — October 17, 2026
+# Framework and gateway portal review, October 17, 2026
 
 This review follows execution from configuration and agent creation through
 interactive chat, reasoning, workflows, scheduling, tool dispatch, local
