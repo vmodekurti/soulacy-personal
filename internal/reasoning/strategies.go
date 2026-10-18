@@ -53,7 +53,7 @@ func (reactStrategy) Run(ctx context.Context, env Env, taskInput string) ([]Step
 	lastFailedToolKey := ""
 	repeatedFailedToolCalls := 0
 
-	for i := 0; i < env.Config.MaxSteps; i++ {
+	for i := 0; env.Config.MaxSteps < 0 || i < env.Config.MaxSteps; i++ {
 		if ctx.Err() != nil {
 			break
 		}
@@ -112,7 +112,7 @@ func (reactStrategy) Run(ctx context.Context, env Env, taskInput string) ([]Step
 				cancel()
 				continue
 			}
-			if isPrematureFinalAnswer(think.FinalAnswer) && i < env.Config.MaxSteps-1 {
+			if isPrematureFinalAnswer(think.FinalAnswer) && (env.Config.MaxSteps < 0 || i < env.Config.MaxSteps-1) {
 				steps = append(steps, Step{
 					ID:      fmt.Sprintf("step-%d", i+1),
 					Thought: firstNonEmpty(think.Thought, "The model returned a progress note instead of a final answer."),
@@ -149,7 +149,7 @@ func (reactStrategy) Run(ctx context.Context, env Env, taskInput string) ([]Step
 				})
 				continue
 			}
-			if isPrematureFinalAnswer(resp.Output) && i < env.Config.MaxSteps-1 {
+			if isPrematureFinalAnswer(resp.Output) && (env.Config.MaxSteps < 0 || i < env.Config.MaxSteps-1) {
 				steps = append(steps, Step{
 					ID:      fmt.Sprintf("step-%d", i+1),
 					Thought: firstNonEmpty(think.Thought, "The model reflected a progress note instead of a final answer."),

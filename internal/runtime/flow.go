@@ -10,6 +10,7 @@ package runtime
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -129,21 +130,38 @@ func (w *WorkflowExecutor) runFlow(ctx context.Context, msg message.Message, run
 			},
 		})
 	}
+	checkpointCtx, checkpointCancel := context.WithCancelCause(ctx)
+	defer checkpointCancel(nil)
+	ctx = checkpointCtx
 	if w.store != nil {
 		hooks.Restore = func(visitKey string) (json.RawMessage, bool) {
 			cp, gerr := w.store.Get(ctx, agentID, runID, visitKey)
+			if gerr != nil && gerr != sql.ErrNoRows {
+				checkpointCancel(fmt.Errorf("read workflow checkpoint: %w", gerr))
+			}
 			if gerr != nil || cp.Status != CheckpointCompleted {
 				return nil, false
 			}
 			w.log.Debug("flow visit already completed, restoring",
 				zap.String("run_id", runID), zap.String("visit", visitKey))
+			hookMu.Lock()
+			for _, node := range spec.Nodes {
+				if strings.HasPrefix(visitKey, node.ID+"#") {
+					outcomeTrace = append(outcomeTrace, reasoning.FlowNodeRun{NodeID: node.ID, Output: cp.State})
+					break
+				}
+			}
+			hookMu.Unlock()
 			return cp.State, true
 		}
 		hooks.Started = func(visitKey string, node sdkr.FlowNode) {
-			_ = w.store.Upsert(ctx, Checkpoint{
+			if err := w.store.Upsert(ctx, Checkpoint{
 				AgentID: agentID, RunID: runID, StepID: visitKey,
 				Status: CheckpointInProgress, UpdatedAt: time.Now().UTC(),
-			})
+			}); err != nil {
+				checkpointCancel(fmt.Errorf("persist workflow checkpoint: %w", err))
+				return
+			}
 			if w.engine.sink != nil {
 				w.engine.sink.Emit(message.Event{
 					Type:      "flow.node.started",
@@ -161,16 +179,20 @@ func (w *WorkflowExecutor) runFlow(ctx context.Context, msg message.Message, run
 			}
 		}
 		hooks.Completed = func(visitKey string, state json.RawMessage) {
-			_ = w.store.Upsert(ctx, Checkpoint{
+			if err := w.store.Upsert(ctx, Checkpoint{
 				AgentID: agentID, RunID: runID, StepID: visitKey,
 				Status: CheckpointCompleted, State: state, UpdatedAt: time.Now().UTC(),
-			})
+			}); err != nil {
+				checkpointCancel(fmt.Errorf("save completed workflow checkpoint; verify before retrying: %w", err))
+			}
 		}
 		hooks.Failed = func(visitKey string, ferr error) {
-			_ = w.store.Upsert(ctx, Checkpoint{
+			if err := w.store.Upsert(ctx, Checkpoint{
 				AgentID: agentID, RunID: runID, StepID: visitKey,
 				Status: CheckpointFailed, UpdatedAt: time.Now().UTC(),
-			})
+			}); err != nil {
+				checkpointCancel(fmt.Errorf("save failed workflow checkpoint: %w", err))
+			}
 		}
 	}
 
@@ -410,6 +432,9 @@ func (w *WorkflowExecutor) runFlow(ctx context.Context, msg message.Message, run
 	}
 
 	out, err := reasoning.RunFlow(ctx, g, vars, runNode, hooks)
+	if cause := context.Cause(ctx); cause != nil {
+		err = cause
+	}
 	// Durably persist the finished run (success OR failure) to the run history, so
 	// it survives a gateway restart and a failed run is still inspectable.
 	w.engine.PersistFlowRun(agentID, runID)
@@ -442,25 +467,8 @@ func (w *WorkflowExecutor) runFlow(ctx context.Context, msg message.Message, run
 	// audio, an empty message delivered on schedule. Judge the contract against
 	// the REAL outputs, record the verdict, and — when the agent opted into
 	// enforcement — fail the run so an empty result cannot present as success.
-	if def := w.engine.loaderDefinition(msg.AgentID); def != nil && def.Outcome.HasAssertions() {
-		report := EvaluateOutcome(def.Outcome, final, outcomeTrace)
-		w.engine.emitOutcomeReport(msg, runID, report)
-		// Hand the verdict to the caller building the reply, so an unmet
-		// contract makes the run not-confident (P0-6) and the existing
-		// degraded-delivery marking applies — a scheduled empty brief then
-		// arrives labelled instead of looking finished.
-		if slot := outcomeCollectorFrom(ctx); slot != nil {
-			*slot = report
-		}
-		if !report.Met {
-			w.log.Warn("workflow outcome contract not met",
-				zap.String("run_id", runID),
-				zap.String("outcome", report.Outcome),
-				zap.String("summary", report.Summary))
-			if def.Outcome.EnforcementMode() == agent.EnforceFail {
-				return nil, fmt.Errorf("outcome contract not met (%s): %s", report.Outcome, report.Summary)
-			}
-		}
+	if err := w.evaluateOutcome(ctx, msg, runID, final, outcomeTrace); err != nil {
+		return nil, err
 	}
 
 	// A workflow that terminates in channel.send yields a delivery RECEIPT, not

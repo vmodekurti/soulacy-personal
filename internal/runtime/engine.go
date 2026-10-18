@@ -346,7 +346,9 @@ type Engine struct {
 	// maxTurnsCeiling is a hard server-side cap on any agent's effective
 	// max_turns (Story 1 / S3.2). Set via SetMaxTurnsCeiling; <=0 falls back
 	// to defaultMaxTurnsCeiling.
-	maxTurnsCeiling int
+	maxTurnsCeiling      int
+	defaultMaxTurns      int
+	turnLimitsConfigured bool
 
 	// maxAgentCallDepth bounds recursive peer-agent delegation chains. Set via
 	// SetMaxAgentCallDepth; <=0 falls back to defaultMaxAgentCallDepth.
@@ -382,15 +384,15 @@ const (
 	defaultSessionTTL        = 24 * time.Hour
 	defaultMaxSessions       = 10000
 	defaultMaxHistoryTurns   = 100
-	defaultMaxTurnsCeiling   = 50
+	defaultMaxTurnsCeiling   = 0
 	defaultMaxAgentCallDepth = 5
-	defaultRunBudgetTokens   = 100000
-	defaultRunBudgetCalls    = 20
-	defaultMaxBudgetTokens   = 1000000
-	defaultMaxBudgetCalls    = 100
-	defaultLLMTimeout        = 3 * time.Minute
-	defaultStepTimeout       = 4 * time.Minute
-	defaultRunTimeout        = 15 * time.Minute
+	defaultRunBudgetTokens   = 0
+	defaultRunBudgetCalls    = 0
+	defaultMaxBudgetTokens   = 0
+	defaultMaxBudgetCalls    = 0
+	defaultLLMTimeout        = agent.DefaultLLMTimeout
+	defaultStepTimeout       = agent.DefaultStepTimeout
+	defaultRunTimeout        = agent.DefaultRunTimeout
 )
 
 // PluginToolProvider is satisfied by *plugins.Loader. Defined locally to
@@ -460,6 +462,7 @@ func (e *Engine) SetSandbox(selfPath string, limits sandbox.Limits) {
 
 // Session tracks per-conversation state.
 type Session struct {
+	turnGate  chan struct{} // protects whole conversational turns, not individual history writes
 	ID        string
 	AgentID   string
 	History   []llm.ChatMessage
@@ -502,7 +505,8 @@ type Session struct {
 	// been recorded. Guarded by mu.
 	injectionLastSource string
 	// lastEvidenceUntrusted flips true whenever a tool result carried
-	// trust=untrusted, and back to false on the next trusted result.
+	// trust=untrusted and stays true until the next user turn — a
+	// trusted result in between must not launder the taint.
 	// Consumed by the S3 intent gate to decide whether a followup
 	// privileged tool call is plausibly steered by untrusted content.
 	// Guarded by mu.

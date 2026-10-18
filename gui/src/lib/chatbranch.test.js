@@ -77,3 +77,8 @@ describe('entriesToMessages', () => {
     expect(entriesToMessages(null)).toEqual([])
   })
 })
+
+it('keeps completion metadata when reopening durable history', () => {
+  const messages = entriesToMessages([{ role: 'assistant', content: 'Partial result', metadata: { outcome: 'incomplete' } }])
+  expect(messages[0].metadata.outcome).toBe('incomplete')
+})

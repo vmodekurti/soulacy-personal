@@ -125,8 +125,8 @@ export const navTourCopy = {
     when: 'Review the last day, week, or month, then download the same snapshot as Markdown, CSV, or JSON. Missing data is explicitly marked.',
   },
   config: {
-    what: 'The gateway configuration, edited safely from the UI instead of by hand.',
-    when: 'For settings that have no dedicated screen — and to see exactly what is on disk.',
+    what: 'Everyday settings for your AI provider, search, memory, and updates.',
+    when: 'Start with the defaults. Open Advanced when you need execution limits, model tuning, or server settings.',
   },
   mobile: {
     what: 'A phone-sized control surface: approvals waiting on you, and quick run controls.',

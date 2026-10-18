@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/soulacy/soulacy/pkg/agent"
 	"regexp"
 	"sort"
 	"strconv"
@@ -156,7 +157,7 @@ func (e *Engine) BuilderChat(ctx context.Context, sessionID, message, provider s
 		// mid-object — and a builder reply that does not parse costs the user a
 		// whole exchange. The envelope itself is small; the headroom is for the
 		// model's own preamble.
-		MaxTokens: 4000,
+		MaxTokens: agent.DefaultMaxOutputTokens,
 		// Low, deliberately. This turn is elicitation — ask the next useful
 		// question and fill in what was just said — not a problem that rewards
 		// deliberation. A reasoning model left to itself spent the entire
@@ -183,7 +184,7 @@ func (e *Engine) BuilderChat(ctx context.Context, sessionID, message, provider s
 		if retry, rerr := e.llmRouter.Complete(ctx, provider, llm.CompletionRequest{
 			Messages:        msgs,
 			Temperature:     0.6,
-			MaxTokens:       12000,
+			MaxTokens:       2 * agent.DefaultMaxOutputTokens,
 			ReasoningEffort: "low",
 			ResponseFormat:  "json_schema",
 			JSONSchema:      builderResponseSchema,

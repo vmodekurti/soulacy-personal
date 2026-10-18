@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/soulacy/soulacy/pkg/agent"
 	"strings"
 	"sync"
 	"time"
@@ -77,11 +78,9 @@ func (g *Governor) SupportsRunCostBudgets() bool { return g != nil && g.store !=
 
 func NewGovernor(store *Store, prices PriceTable, cfg GovernanceConfig) *Governor {
 	if cfg.DefaultMaxOutput <= 0 {
-		cfg.DefaultMaxOutput = 4096
+		cfg.DefaultMaxOutput = agent.DefaultMaxOutputTokens
 	}
-	if cfg.MaxOutputCeiling <= 0 {
-		cfg.MaxOutputCeiling = 32768
-	}
+	// A zero output ceiling leaves the model/provider limit authoritative.
 	if cfg.ReservationTTL <= 0 {
 		cfg.ReservationTTL = 15 * time.Minute
 	}
@@ -109,7 +108,7 @@ func (g *Governor) Before(ctx context.Context, provider string, req *llm.Complet
 	if req.MaxTokens <= 0 && req.Operation != "embedding" {
 		req.MaxTokens = g.cfg.DefaultMaxOutput
 	}
-	if req.MaxTokens > g.cfg.MaxOutputCeiling {
+	if g.cfg.MaxOutputCeiling > 0 && req.MaxTokens > g.cfg.MaxOutputCeiling {
 		req.MaxTokens = g.cfg.MaxOutputCeiling
 	}
 	if !allowedValue(g.cfg.AllowedProviders, provider) {

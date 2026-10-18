@@ -14,7 +14,7 @@ func TestBestEffortFinalWritesToolResultsForAPerson(t *testing.T) {
 		{Role: "tool", Name: "mobile.command_status", Content: `{"id":"8672f00b","status":"completed","result":{"steps":8421,"sleep_hours":6.5,"workouts":[{"type":"running","duration_minutes":32}],"available":true}}`},
 	}
 	out := bestEffortFinal(msgs)
-	if !strings.HasPrefix(out, "I ran out of steps") {
+	if !strings.HasPrefix(out, "The run stopped before producing a final answer.") {
 		t.Fatalf("missing honest preface: %q", out)
 	}
 	for _, want := range []string{"**mobile invoke**", "command: health.summary", "status: completed", "steps: 8421", "sleep hours: 6.50", "workouts: running", "available: yes"} {

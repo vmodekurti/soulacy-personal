@@ -1,4 +1,6 @@
 <script>
+  import SettingsMode from '../lib/SettingsMode.svelte'
+  import { changedSettings } from '../lib/configchanges.js'
   import TourButton from '../lib/TourButton.svelte'
   import UpgradeAction from '../lib/UpgradeAction.svelte'
   import { onMount } from 'svelte'
@@ -7,6 +9,9 @@
   import { waitForGateway, waitingMessage, timeoutMessage, UPGRADE_BUDGET } from '../lib/gatewaywait.js'
   import { versionSummary, lastCheckedLabel } from '../lib/versioninfo.js'
 
+  let advanced = false
+  let formBaseline = {}
+  let showRawConfig = false
   let config   = null
   let loading  = true
   let saving   = false
@@ -42,7 +47,7 @@
   let logFormat = 'console'
   let logFile   = ''
   let pythonBin = 'python3'
-  let toolTimeout = '30s'
+  let toolTimeout = '2m'
   let executorBackend = 'process'
   let executorWorkers = 4
   let dockerImage = 'python:3.12-slim'
@@ -59,13 +64,14 @@
   let executorReadiness = null
   let executorError = ''
   let executorLoading = false
-  let maxTurns    = 20
+  let maxTurns    = 256
   let maxSessions = 100
   let maxAgentCallDepth = 5
-  let defaultBudgetTokens = 500000
-  let defaultBudgetCalls = 50
-  let maxBudgetTokens = 2000000
-  let maxBudgetCalls = 200
+  let maxTurnsCeiling = 0
+  let defaultBudgetTokens = 0
+  let defaultBudgetCalls = 0
+  let maxBudgetTokens = 0
+  let maxBudgetCalls = 0
   let defaultProvider = ''
   let providerOptions = []   // configured llm.providers names (for the dropdown)
   let providerDefaults = {}   // provider id -> configured default model
@@ -177,6 +183,7 @@
       const selector = (row.selector || '').trim()
       if (!selector) continue
       pricing[selector] = {
+        ...config?.costs?.pricing?.[selector],
         input_per_mtok: Number(row.input || 0),
         output_per_mtok: Number(row.output || 0),
       }
@@ -279,7 +286,7 @@
       logFormat       = config.log?.format     || 'console'
       logFile         = config.log?.file       || ''
       pythonBin       = config.runtime?.python_bin    || 'python3'
-      toolTimeout     = config.runtime?.tool_timeout  || '30s'
+      toolTimeout     = config.runtime?.tool_timeout  || '2m'
       executorBackend = config.executor?.backend || 'process'
       executorWorkers = config.executor?.workers || 4
       dockerImage     = config.executor?.docker_image || 'python:3.12-slim'
@@ -293,13 +300,14 @@
       cloudPreset     = config.executor?.cloud_preset || ''
       cloudTarget     = config.executor?.cloud_target || ''
       cloudCLI        = config.executor?.cloud_cli || ''
-      maxTurns        = config.runtime?.default_max_turns       || 20
+      maxTurns        = config.runtime?.default_max_turns       ?? 256
       maxSessions     = config.runtime?.max_concurrent_sessions || 100
       maxAgentCallDepth = config.runtime?.max_agent_call_depth || 5
-      defaultBudgetTokens = config.runtime?.default_budget?.max_tokens ?? 500000
-      defaultBudgetCalls = config.runtime?.default_budget?.max_llm_calls ?? 50
-      maxBudgetTokens = config.runtime?.max_budget?.max_tokens ?? 2000000
-      maxBudgetCalls = config.runtime?.max_budget?.max_llm_calls ?? 200
+      maxTurnsCeiling = config.runtime?.max_turns_ceiling ?? 0
+      defaultBudgetTokens = config.runtime?.default_budget?.max_tokens ?? 0
+      defaultBudgetCalls = config.runtime?.default_budget?.max_llm_calls ?? 0
+      maxBudgetTokens = config.runtime?.max_budget?.max_tokens ?? 0
+      maxBudgetCalls = config.runtime?.max_budget?.max_llm_calls ?? 0
       defaultProvider = config.llm?.default_provider || ''
       providerOptions = Object.keys(config.llm?.providers || {})
       // Make sure the current value is selectable even if it isn't a
@@ -322,7 +330,7 @@
         adaptiveModelProvider = ad.model_provider || ''
         adaptiveModel = ad.model || ''
         adaptiveMaxFacts = ad.max_prompt_facts ?? 5
-        adaptiveTokenBudget = ad.prompt_token_budget ?? 50
+        adaptiveTokenBudget = ad.prompt_token_budget ?? 0
         adaptiveMinConfidence = ad.min_confidence ?? 0.5
         adaptiveSimilarity = ad.similarity_threshold ?? 0.85
         mem0BaseURL = ad.mem0?.base_url || ''
@@ -334,14 +342,14 @@
         adaptiveCustomCategories = (ad.custom_categories || []).join(', ')
         adaptiveGraph = ad.graph_enabled ?? true
         updatesAuto = config.updates?.auto ?? true
-        updatesInterval = config.updates?.check_interval || '6h'
+        updatesInterval = ({ "1h0m0s": "1h", "6h0m0s": "6h", "24h0m0s": "24h", "168h0m0s": "168h" })[config.updates?.check_interval] || config.updates?.check_interval || '6h'
         updatesManifestURL = config.updates?.manifest_url || ''
       }
       monthlyBudgetUSD = config.costs?.monthly_budget_usd || ''
-      costAlertThreshold = config.costs?.alert_threshold || 0.8
+      costAlertThreshold = config.costs?.alert_threshold ?? 0.8
       sloWindow = config.ops?.slo_window || '24h'
-      sloMaxFailureRate = config.ops?.max_failure_rate || 0.1
-      sloMaxIncompleteRate = config.ops?.max_incomplete_rate || 0.05
+      sloMaxFailureRate = config.ops?.max_failure_rate ?? 0.1
+      sloMaxIncompleteRate = config.ops?.max_incomplete_rate ?? 0.05
       sloMaxP95RunDuration = config.ops?.max_p95_run_duration || '5m'
       sloMinRunsForSignal = config.ops?.min_runs_for_signal || 3
       opsAlertChannel = config.ops?.alert_channel || ''
@@ -356,7 +364,10 @@
       agentDirs       = (config.agent_dirs || []).join('\n')
       skillDirs       = (config.skill_dirs || []).join('\n')
       seedPluginEditor(config.plugins_config)
-      await Promise.all([loadExecutors(), loadAdminAudit()])
+      formBaseline = formValues()
+      // Readiness checks can be slow; keep the configuration editable.
+      void loadExecutors()
+      void loadAdminAudit()
     } catch (e) {
       error = e.message
     } finally {
@@ -397,107 +408,117 @@
   }
 
 
+  function formValues() {
+    const patch = {
+      runtime: {
+        python_bin:              pythonBin,
+        tool_timeout:            toolTimeout,
+        default_max_turns:       Number(maxTurns),
+        max_turns_ceiling: Number(maxTurnsCeiling || 0),
+        max_concurrent_sessions: Number(maxSessions),
+        max_agent_call_depth:    Number(maxAgentCallDepth),
+        default_budget: {
+          max_tokens: Number(defaultBudgetTokens || 0),
+          max_llm_calls: Number(defaultBudgetCalls || 0),
+        },
+        max_budget: {
+          max_tokens: Number(maxBudgetTokens || 0),
+          max_llm_calls: Number(maxBudgetCalls || 0),
+        },
+      },
+      executor: {
+        backend: executorBackend,
+        workers: Number(executorWorkers || 0),
+        docker_image: dockerImage,
+        docker_network: dockerNetwork,
+        docker_volumes: dockerVolumes.split('\n').map(s => s.trim()).filter(Boolean),
+        ssh_host: sshHost,
+        ssh_user: sshUser,
+        ssh_python_bin: sshPythonBin,
+        ssh_identity: sshIdentity,
+        ssh_identity_credential: sshIdentityCredential,
+        cloud_preset: cloudPreset,
+        cloud_target: cloudTarget,
+        cloud_cli: cloudCLI,
+      },
+      llm: {
+        default_provider: defaultProvider,
+        // Empty provider/model = fall back to the default (server-side).
+        studio:   { provider: studioProvider,   model: studioModel },
+        reasoner: { provider: reasonerProvider, model: reasonerModel },
+      },
+      // api_key of '***' (redacted placeholder) is skipped server-side, so
+      // saving without retyping the key never clobbers the real one on disk.
+      search: { provider: searchProvider, api_key: searchApiKey },
+      costs: costsPatch(),
+      updates: {
+        auto: !!updatesAuto,
+        check_interval: updatesInterval,
+        manifest_url: updatesManifestURL.trim(),
+      },
+      memory: {
+        adaptive: {
+          enabled: !!adaptiveEnabled,
+          provider: adaptiveProvider || 'local',
+          model_provider: adaptiveModelProvider,
+          model: adaptiveModel === '__custom__' ? '' : adaptiveModel,
+          max_prompt_facts: Number(adaptiveMaxFacts ?? 5),
+          prompt_token_budget: Number(adaptiveTokenBudget ?? 50),
+          min_confidence: Number(adaptiveMinConfidence ?? 0.5),
+          similarity_threshold: Number(adaptiveSimilarity ?? 0.85),
+          instructions: adaptiveInstructions.trim().slice(0, 240),
+          custom_categories: adaptiveCustomCategories.split(',').map(s => s.trim().toLowerCase()).filter(Boolean),
+          graph_enabled: !!adaptiveGraph,
+          mem0: {
+            base_url: mem0BaseURL,
+            api_key: mem0ApiKey,
+            enable_graph: !!mem0Graph,
+            api_style: mem0Style,
+          },
+        },
+      },
+      ops: {
+        slo_window: sloWindow,
+        max_failure_rate: Number(sloMaxFailureRate || 0),
+        max_incomplete_rate: Number(sloMaxIncompleteRate || 0),
+        max_p95_run_duration: sloMaxP95RunDuration,
+        min_runs_for_signal: Number(sloMinRunsForSignal || 0),
+        alert_channel: opsAlertChannel,
+        alert_to: opsAlertTo,
+        alert_min_status: opsAlertMinStatus,
+      },
+      deployment: {
+        profile: deploymentProfile,
+        owner: deploymentOwner,
+        region: deploymentRegion,
+        notes: deploymentNotes,
+      },
+      // F-GUI-6 — Cohort F workspace-default intent-gate mode. Cohort F
+      // backend enforcement reads Security.IntentGate per agent; this key
+      // records the workspace policy the operator wants to apply and is
+      // consumed by future backend work + the doctor's advisory copy.
+      security: { intent_gate: securityIntentGate || '' },
+      log: { level: logLevel, format: logFormat, file: logFile },
+      agent_dirs: agentDirs.split('\n').map(s => s.trim()).filter(Boolean),
+      skill_dirs: skillDirs.split('\n').map(s => s.trim()).filter(Boolean),
+    }
+    const pcPatch = pluginsConfigPatch()
+    if (Object.keys(pcPatch).length > 0) patch.plugins_config = pcPatch
+    return patch
+  }
+
   async function save() {
+    if (saving || loading || !writable) return
     saving = true
     error  = ''
     saved  = false
     try {
-      const patch = {
-        runtime: {
-          python_bin:              pythonBin,
-          tool_timeout:            toolTimeout,
-          default_max_turns:       Number(maxTurns),
-          max_concurrent_sessions: Number(maxSessions),
-          max_agent_call_depth:    Number(maxAgentCallDepth),
-          default_budget: {
-            max_tokens: Number(defaultBudgetTokens || 0),
-            max_llm_calls: Number(defaultBudgetCalls || 0),
-          },
-          max_budget: {
-            max_tokens: Number(maxBudgetTokens || 0),
-            max_llm_calls: Number(maxBudgetCalls || 0),
-          },
-        },
-        executor: {
-          backend: executorBackend,
-          workers: Number(executorWorkers || 0),
-          docker_image: dockerImage,
-          docker_network: dockerNetwork,
-          docker_volumes: dockerVolumes.split('\n').map(s => s.trim()).filter(Boolean),
-          ssh_host: sshHost,
-          ssh_user: sshUser,
-          ssh_python_bin: sshPythonBin,
-          ssh_identity: sshIdentity,
-          ssh_identity_credential: sshIdentityCredential,
-          cloud_preset: cloudPreset,
-          cloud_target: cloudTarget,
-          cloud_cli: cloudCLI,
-        },
-        llm: {
-          default_provider: defaultProvider,
-          // Empty provider/model = fall back to the default (server-side).
-          studio:   { provider: studioProvider,   model: studioModel },
-          reasoner: { provider: reasonerProvider, model: reasonerModel },
-        },
-        // api_key of '***' (redacted placeholder) is skipped server-side, so
-        // saving without retyping the key never clobbers the real one on disk.
-        search: { provider: searchProvider, api_key: searchApiKey },
-        costs: costsPatch(),
-        updates: {
-          auto: !!updatesAuto,
-          check_interval: updatesInterval,
-          manifest_url: updatesManifestURL.trim(),
-        },
-        memory: {
-          adaptive: {
-            enabled: !!adaptiveEnabled,
-            provider: adaptiveProvider || 'local',
-            model_provider: adaptiveModelProvider,
-            model: adaptiveModel === '__custom__' ? '' : adaptiveModel,
-            max_prompt_facts: Number(adaptiveMaxFacts || 5),
-            prompt_token_budget: Number(adaptiveTokenBudget || 50),
-            min_confidence: Number(adaptiveMinConfidence || 0.5),
-            similarity_threshold: Number(adaptiveSimilarity || 0.85),
-            instructions: adaptiveInstructions.trim().slice(0, 240),
-            custom_categories: adaptiveCustomCategories.split(',').map(s => s.trim().toLowerCase()).filter(Boolean),
-            graph_enabled: !!adaptiveGraph,
-            mem0: {
-              base_url: mem0BaseURL,
-              api_key: mem0ApiKey,
-              enable_graph: !!mem0Graph,
-              api_style: mem0Style,
-            },
-          },
-        },
-        ops: {
-          slo_window: sloWindow,
-          max_failure_rate: Number(sloMaxFailureRate || 0),
-          max_incomplete_rate: Number(sloMaxIncompleteRate || 0),
-          max_p95_run_duration: sloMaxP95RunDuration,
-          min_runs_for_signal: Number(sloMinRunsForSignal || 0),
-          alert_channel: opsAlertChannel,
-          alert_to: opsAlertTo,
-          alert_min_status: opsAlertMinStatus,
-        },
-        deployment: {
-          profile: deploymentProfile,
-          owner: deploymentOwner,
-          region: deploymentRegion,
-          notes: deploymentNotes,
-        },
-        // F-GUI-6 — Cohort F workspace-default intent-gate mode. Cohort F
-        // backend enforcement reads Security.IntentGate per agent; this key
-        // records the workspace policy the operator wants to apply and is
-        // consumed by future backend work + the doctor's advisory copy.
-        security: { intent_gate: securityIntentGate || '' },
-        log: { level: logLevel, format: logFormat, file: logFile },
-        agent_dirs: agentDirs.split('\n').map(s => s.trim()).filter(Boolean),
-        skill_dirs: skillDirs.split('\n').map(s => s.trim()).filter(Boolean),
-      }
-      const pcPatch = pluginsConfigPatch()
-      if (Object.keys(pcPatch).length > 0) patch.plugins_config = pcPatch
+      const submitted = formValues()
+      const patch = changedSettings(formBaseline, submitted, config)
+      if (Object.keys(patch).length === 0) return
       const res = await api.config.patch(patch)
       config = res.config
+      formBaseline = submitted
       seedPluginEditor(config.plugins_config)
       await loadExecutors()
       await loadAdminAudit()
@@ -569,8 +590,9 @@
 
 <div class="page">
   <div class="page-header">
-    <h1>Configuration</h1>
+    <h1>Settings</h1>
     <div class="header-actions">
+      {#if advanced}<button class="btn-secondary" on:click={() => showRawConfig = !showRawConfig} aria-expanded={showRawConfig}>{showRawConfig ? 'Hide technical details' : 'Show technical details'}</button>{/if}
       <button class="btn-secondary" on:click={load} disabled={loading}>↺ Refresh</button>
       {#if writable}
         <button class="btn-primary" on:click={save} disabled={saving || loading}>
@@ -580,6 +602,8 @@
     </div>
         <TourButton />
     </div>
+
+  <SettingsMode bind:advanced />
 
   <div class="version-row" data-testid="version-row">
     <span class="version-label">Version</span>
@@ -598,7 +622,8 @@
         <input type="checkbox" bind:checked={updatesAuto} disabled={!writable} on:change={save} />
         {updateInfo.upgrade_strategy === 'instructions' ? 'Check for updates automatically' : 'Install updates automatically'}
       </label>
-      <select bind:value={updatesInterval} disabled={!writable || !updatesAuto} on:change={save} title="How often to check for a release">
+      <select bind:value={updatesInterval} disabled={!writable || !updatesAuto} on:change={save} title="How often to check for a release" aria-label="Update check frequency">
+        {#if !['1h', '6h', '24h', '168h'].includes(updatesInterval)}<option value={updatesInterval}>Custom ({updatesInterval})</option>{/if}
         <option value="1h">every hour</option>
         <option value="6h">every 6 hours</option>
         <option value="24h">daily</option>
@@ -663,12 +688,12 @@
   {#if loading}
     <div class="empty">Loading configuration…</div>
   {:else if config}
-    <div class="config-layout">
+    <div class="config-layout" class:show-raw={advanced && showRawConfig}>
       <!-- Left: editable form -->
       <div class="form-col">
 
         <div class="section">
-          <h2 class="section-title">LLM</h2>
+          <h2 class="section-title">AI provider</h2>
           <div class="field">
             <label for="default-provider">Default provider</label>
             {#if providerOptions.length}
@@ -682,6 +707,7 @@
             {/if}
           </div>
 
+          {#if advanced}
           <p class="hint">
             Task-specific model roles. Run agents on a cheap model but build &amp; reason with a
             stronger one. Leave a role blank to fall back to the default provider. A restart is
@@ -753,6 +779,7 @@
               {/if}
             </div>
           </div>
+          {/if}
         </div>
 
         <div class="section">
@@ -776,27 +803,26 @@
         </div>
 
         <div class="section">
-          <h2 class="section-title">Adaptive memory</h2>
+          <h2 class="section-title">Memory</h2>
           <p class="hint">
-            Soulacy distils durable facts about each signed-in user from their conversations
-            (preferences, identity, constraints, entities), reconciles newer facts against older
-            ones, and adds the few most relevant to every prompt. Changes here apply to the next
-            turn without a restart. Users manage what is remembered on the Learning page.
+            Remember useful preferences and details from conversations to make future replies more relevant.
+            Manage what is remembered on the <a href="#memory">Learning page</a>. Changes apply to the next conversation turn.
           </p>
           <div class="field-row">
             <div class="field">
               <label class="checkbox-row">
                 <input type="checkbox" bind:checked={adaptiveEnabled} disabled={!writable} />
-                Enable adaptive memory
+                Remember useful details from conversations
               </label>
             </div>
             <div class="field">
               <label class="checkbox-row" data-tooltip="Also extract relationships between entities (User → works at → Acme) and recall the relevant ones alongside facts.">
                 <input type="checkbox" bind:checked={adaptiveGraph} disabled={!writable || !adaptiveEnabled} />
-                Remember relationships (graph memory)
+                Remember connections between people and projects
               </label>
             </div>
           </div>
+          {#if advanced}
           <div class="field-row">
             <div class="field">
               <label for="adaptive-instructions" data-tooltip="Short guidance appended to the extraction prompt, for example what else to capture or what to ignore. Max 240 characters.">Extraction instructions</label>
@@ -821,7 +847,7 @@
             </div>
             <div class="field">
               <label for="adaptive-token-budget" data-tooltip="Maximum estimated tokens the memory block may add to a prompt.">Prompt token budget</label>
-              <input id="adaptive-token-budget" type="number" min="10" max="400" bind:value={adaptiveTokenBudget} disabled={!writable || !adaptiveEnabled} />
+              <input id="adaptive-token-budget" type="number" min="0" max="400" bind:value={adaptiveTokenBudget} disabled={!writable || !adaptiveEnabled} />
             </div>
           </div>
           {#if adaptiveProvider === 'local'}
@@ -873,8 +899,10 @@
             </div>
             <p class="hint">If the provider is not configured or cannot be reached at startup, Soulacy falls back to the built-in local engine.</p>
           {/if}
+          {/if}
         </div>
 
+        {#if advanced}
         <div class="section">
           <h2 class="section-title">Cost estimation</h2>
           <p class="hint">
@@ -1074,13 +1102,17 @@
             </div>
             <div class="field">
               <label for="tool-timeout">Tool timeout</label>
-              <input id="tool-timeout" bind:value={toolTimeout} placeholder="30s" disabled={!writable} />
+              <input id="tool-timeout" bind:value={toolTimeout} placeholder="2m" disabled={!writable} />
             </div>
           </div>
           <div class="field-row">
             <div class="field">
-              <label for="max-turns">Default max turns</label>
-              <input id="max-turns" type="number" bind:value={maxTurns} min="1" max="100" disabled={!writable} />
+              <label for="max-turns">Default turns (0 = unlimited)</label>
+              <input id="max-turns" type="number" bind:value={maxTurns} min="0" disabled={!writable} />
+            </div>
+            <div class="field">
+              <label for="turn-ceiling">Turn ceiling (0 = none)</label>
+              <input id="turn-ceiling" type="number" bind:value={maxTurnsCeiling} min="0" disabled={!writable} />
             </div>
             <div class="field">
               <label for="max-sessions">Max concurrent sessions</label>
@@ -1318,6 +1350,8 @@
           {/if}
         </div>
 
+        {/if}
+
         <div class="section">
           <h2 class="section-title">Support</h2>
           <p class="hint">
@@ -1329,6 +1363,7 @@
           </button>
         </div>
 
+        {#if advanced}
         <div class="section">
           <div class="section-heading">
             <h2 class="section-title">Admin audit</h2>
@@ -1379,9 +1414,11 @@
                       placeholder="~/.soulacy/skills" disabled={!writable}></textarea>
           </div>
         </div>
+        {/if}
       </div>
 
-      <!-- Right: read-only full JSON view -->
+      <!-- Optional diagnostic view. -->
+      {#if advanced && showRawConfig}
       <div class="json-col">
         <div class="json-header">
           <span class="json-label">Current config (read-only view)</span>
@@ -1391,15 +1428,16 @@
         </div>
         <pre class="json-view">{JSON.stringify(config, null, 2)}</pre>
       </div>
+      {/if}
     </div>
   {/if}
 </div>
 
 <style>
   .page        { padding: 1.5rem; display: flex; flex-direction: column; gap: 1.25rem; }
-  .page-header { display: flex; align-items: center; justify-content: space-between; }
+  .page-header { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; }
   .page-header h1 { font-size: 1.2rem; font-weight: 600; }
-  .header-actions { display: flex; gap: .5rem; }
+  .header-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
   .banner { padding: .7rem 1rem; border-radius: 8px; font-size: .85rem; }
   .restart-banner { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; }
   .err  { background: rgba(240,96,96,.1); border: 1px solid rgba(240,96,96,.3); color: #f06060; }
@@ -1408,14 +1446,15 @@
   .warn code { background: #1c1f35; padding: .1rem .35rem; border-radius: 4px; font-size: .78rem; }
   .empty { padding: 3rem; text-align: center; color: var(--sl-text-faint); }
 
-  .config-layout { display: grid; grid-template-columns: 1fr 380px; gap: 1.25rem; align-items: start; }
+  .config-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.25rem; align-items: start; }
 
+  .config-layout.show-raw { grid-template-columns: minmax(0, 1fr) 380px; }
   @media (max-width: 900px) {
-    .config-layout { grid-template-columns: 1fr; }
+    .config-layout, .config-layout.show-raw { grid-template-columns: minmax(0, 1fr); }
     .json-col { position: static; }
   }
   @media (max-width: 640px) {
-    .field-row { grid-template-columns: 1fr; }
+    .form-col .field-row { grid-template-columns: minmax(0, 1fr); }
   }
 
   /* Form column */

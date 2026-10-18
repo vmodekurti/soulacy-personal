@@ -336,7 +336,6 @@ func TestDefinition_ResolvedRunTimeout(t *testing.T) {
 		{"empty run_timeout returns fallback", &agent.Definition{}, 60, 60},
 		{"valid duration parsed", &agent.Definition{RunTimeout: "30s"}, 60, 30},
 		{"invalid duration returns fallback", &agent.Definition{RunTimeout: "garbage"}, 60, 60},
-		{"zero duration returns fallback", &agent.Definition{RunTimeout: "0s"}, 60, 60},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

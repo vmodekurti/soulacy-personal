@@ -12,7 +12,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os/exec"
+	"github.com/soulacy/soulacy/internal/processutil"
 	"strings"
 
 	"github.com/google/uuid"
@@ -77,7 +77,7 @@ func (e *Executor) Run(ctx context.Context, pyFile, funcName, inline string, arg
 	}
 	runID := uuid.New().String()
 	argv := buildArgv(e.runner, e.pythonBin, script)
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd := processutil.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Stdin = bytes.NewReader(argsJSON)
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {

@@ -23,13 +23,14 @@ import (
 
 	"github.com/soulacy/soulacy/internal/reasoning"
 	"github.com/soulacy/soulacy/pkg/agent"
+	"github.com/soulacy/soulacy/pkg/message"
 )
 
 // outcomeCollectorKey carries a slot the flow run writes its contract verdict
 // into, so the caller that BUILDS the reply (Engine.Handle) can mark it
 // degraded. A context collector rather than a return-value change because
 // WorkflowExecutor.Run's signature is shared by the step-based executor, which
-// has no contract concept — mirrors WithFlowNodeObserver.
+// shares the same contract checks — mirrors WithFlowNodeObserver.
 type outcomeCollectorKey struct{}
 
 // WithOutcomeCollector returns a context whose flow run records its outcome
@@ -50,10 +51,11 @@ func outcomeCollectorFrom(ctx context.Context) *OutcomeReport {
 // strings rather than imported because internal/studio is a BUILD-time package
 // and the runtime must not depend on it.
 const (
-	OutcomeComplete = "complete"
-	OutcomePartial  = "partial"
-	OutcomeEmpty    = "empty"
-	OutcomeFailed   = "failed"
+	OutcomeComplete   = "complete"
+	OutcomeUnverified = "unverified"
+	OutcomePartial    = "partial"
+	OutcomeEmpty      = "empty"
+	OutcomeFailed     = "failed"
 )
 
 // OutcomeAssertionResult is one evaluated assertion from a production run.
@@ -82,11 +84,11 @@ type OutcomeReport struct {
 //
 // final is the flow's final output; trace supplies each node's output so an
 // assertion can target a specific step (e.g. the add_source_pack node) rather
-// than only the run's last value. A nil/empty contract returns a zero report
-// with Met=true — no contract means nothing to fail.
+// than only the run's last value. A nil/empty contract is unverified, with
+// Met=true because no contract means there is nothing to enforce.
 func EvaluateOutcome(contract *agent.OutcomeContract, final json.RawMessage, trace []reasoning.FlowNodeRun) OutcomeReport {
 	if !contract.HasAssertions() {
-		return OutcomeReport{Outcome: OutcomeComplete, Met: true}
+		return OutcomeReport{Outcome: OutcomeUnverified, Met: true, Summary: "No outcome assertions were configured; task completion was not independently verified."}
 	}
 	byNode := make(map[string]json.RawMessage, len(trace))
 	for _, rec := range trace {
@@ -454,4 +456,21 @@ func outcomeTerminalStatus(s string) bool {
 	default:
 		return true
 	}
+}
+
+// Both graph and step workflows evaluate the same declared completion checks.
+func (w *WorkflowExecutor) evaluateOutcome(ctx context.Context, msg message.Message, runID string, final json.RawMessage, trace []reasoning.FlowNodeRun) error {
+	var contract *agent.OutcomeContract
+	if def := w.engine.loaderDefinition(msg.AgentID); def != nil {
+		contract = def.Outcome
+	}
+	report := EvaluateOutcome(contract, final, trace)
+	if slot := outcomeCollectorFrom(ctx); slot != nil {
+		*slot = report
+	}
+	w.engine.emitOutcomeReport(msg, runID, report)
+	if !report.Met && contract.EnforcementMode() == agent.EnforceFail {
+		return fmt.Errorf("outcome contract not met (%s): %s", report.Outcome, report.Summary)
+	}
+	return nil
 }

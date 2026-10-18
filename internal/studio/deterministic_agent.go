@@ -29,7 +29,7 @@ func CompileDeterministicAgent(intent string, cat Catalog, strategy string, answ
 		StepTimeout:  "120s",
 		TotalTimeout: "900s",
 		MaxSteps:     deterministicMaxSteps(intent),
-		MaxTurns:     15,
+		MaxTurns:     0,
 	}
 	normalizeTrigger(&draft, intent)
 	if cron, ok := draft.Trigger.Config["cron"].(string); ok && strings.TrimSpace(cron) != "" {

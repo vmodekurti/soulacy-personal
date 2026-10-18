@@ -59,7 +59,7 @@ func (c *Config) Validate() error {
 	for i := 1; i < len(ordered); i++ {
 		prev, e1 := time.ParseDuration(ordered[i-1].raw)
 		next, e2 := time.ParseDuration(ordered[i].raw)
-		if e1 == nil && e2 == nil && prev >= next {
+		if e1 == nil && e2 == nil && next > 0 && (prev == 0 || prev >= next) {
 			errs = append(errs, fmt.Errorf("runtime timeout hierarchy requires %s < %s (got %s >= %s)", ordered[i-1].name, ordered[i].name, prev, next))
 		}
 	}
@@ -93,14 +93,22 @@ func (c *Config) Validate() error {
 		errs = append(errs, fmt.Errorf("voice.provider: unsupported value %q", c.Voice.Provider))
 	}
 
+	if c.LLM.Studio.MaxBuildAttempts < -1 {
+		errs = append(errs, fmt.Errorf("llm.studio.max_build_attempts must be -1 (unlimited), zero (default), or positive"))
+	}
+	if raw := strings.TrimSpace(c.LLM.Studio.MaxBuildElapsed); raw != "" {
+		if d, err := time.ParseDuration(raw); err != nil || d < 0 {
+			errs = append(errs, fmt.Errorf("llm.studio.max_build_elapsed must be a nonnegative Go duration"))
+		}
+	}
+
 	// --- Runtime numeric bounds ---
 	// max_concurrent_sessions sizes the worker pool; <=0 would mean "no workers"
 	// and silently drop every channel message.
 	if c.Runtime.MaxConcurrentSessions < 0 {
 		errs = append(errs, fmt.Errorf("runtime.max_concurrent_sessions: %d must not be negative", c.Runtime.MaxConcurrentSessions))
 	}
-	// default_max_turns bounds the agentic loop. Negative is nonsensical; an
-	// absurdly high value is a cost/runaway foot-gun (see Story 1).
+	// default_max_turns is optional: zero removes the workspace turn limit.
 	if c.Runtime.DefaultMaxTurns < 0 {
 		errs = append(errs, fmt.Errorf("runtime.default_max_turns: %d must not be negative", c.Runtime.DefaultMaxTurns))
 	}

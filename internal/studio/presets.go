@@ -21,10 +21,10 @@ type ModelPreset struct {
 func LocalPresetFor(model string) ModelPreset {
 	if isSmallModel(model) && !isStrongModel(model) {
 		// Small local model: be patient.
-		return ModelPreset{MaxTurns: 10, RunTimeout: "900s", StepTimeout: "180s", TotalTimeout: "900s"}
+		return ModelPreset{MaxTurns: 0, StepTimeout: "600s"}
 	}
 	// Any other local model: a solid, generous-but-bounded default.
-	return ModelPreset{MaxTurns: 15, RunTimeout: "600s", StepTimeout: "120s", TotalTimeout: "600s"}
+	return ModelPreset{MaxTurns: 0, StepTimeout: "600s"}
 }
 
 // LocalPresetName is a short, human label for the preset a model maps to, for
@@ -75,7 +75,7 @@ func ListIntentPresets() []IntentPreset {
 			Name:    IntentPresetReliableLocal,
 			Label:   "Reliable local",
 			Detail:  "Balanced for local models — same generous defaults Studio uses today, so tools have time to finish and repair loops can converge.",
-			Preset:  ModelPreset{MaxTurns: 15, RunTimeout: "600s", StepTimeout: "120s", TotalTimeout: "600s"},
+			Preset:  ModelPreset{MaxTurns: 0, StepTimeout: "600s"},
 			Default: true,
 		},
 		{

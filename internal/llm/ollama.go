@@ -184,13 +184,14 @@ func (o *OllamaProvider) Complete(ctx context.Context, req CompletionRequest) (*
 			return nil, fmt.Errorf("ollama: build stream request: %w", err)
 		}
 		streamReq.Header.Set("Content-Type", "application/json")
-		streamResp, err := o.client.Do(streamReq)
+		streamResp, err := DoWithRetry(ctx, o.client, streamReq, RetryConfig{})
 		if err != nil {
 			return nil, fmt.Errorf("ollama: stream request failed: %w", err)
 		}
 		if streamResp.StatusCode != http.StatusOK {
+			detail, _ := io.ReadAll(io.LimitReader(streamResp.Body, 16384))
 			streamResp.Body.Close()
-			return nil, fmt.Errorf("ollama: stream unexpected status %d", streamResp.StatusCode)
+			return nil, fmt.Errorf("ollama: stream unexpected status %d: %s", streamResp.StatusCode, strings.TrimSpace(string(detail)))
 		}
 		ch := make(chan string, 64)
 		result := &CompletionResponse{}
@@ -250,14 +251,15 @@ func (o *OllamaProvider) Complete(ctx context.Context, req CompletionRequest) (*
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := o.client.Do(httpReq)
+	resp, err := DoWithRetry(ctx, o.client, httpReq, RetryConfig{})
 	if err != nil {
 		return nil, fmt.Errorf("ollama: request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("ollama: unexpected status %d", resp.StatusCode)
+		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 16384))
+		return nil, fmt.Errorf("ollama: unexpected status %d: %s", resp.StatusCode, strings.TrimSpace(string(detail)))
 	}
 
 	var result struct {

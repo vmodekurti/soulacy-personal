@@ -5,7 +5,10 @@
 // Compatibility: Backend is FROZEN per SDK major version; see the SDK README.
 package queue
 
-import "context"
+import (
+	"context"
+	"sync"
+)
 
 // Message is a single queue message delivered to a subscriber.
 // Handlers must call Ack() after successful processing to prevent redelivery
@@ -19,15 +22,25 @@ type Message struct {
 
 	// ack is the backend-specific acknowledgement function.
 	// Callers invoke Ack() rather than calling this directly.
-	ack func() error
+	ack   func() error
+	ackMu sync.Mutex
+	acked bool
 }
 
 // Ack signals the broker that delivery succeeded and the message must not be
 // redelivered. Safe to call more than once; subsequent calls are no-ops.
 func (m *Message) Ack() error {
-	if m.ack != nil {
-		return m.ack()
+	m.ackMu.Lock()
+	defer m.ackMu.Unlock()
+	if m.acked {
+		return nil
 	}
+	if m.ack != nil {
+		if err := m.ack(); err != nil {
+			return err
+		}
+	}
+	m.acked = true
 	return nil
 }
 

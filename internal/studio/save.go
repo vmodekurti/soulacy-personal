@@ -112,13 +112,15 @@ func ToAgentDefinition(draft Draft, acceptPrivilegedExposure bool) (agent.Defini
 		StudioTriggerMode:  normalizeStudioTriggerMode(draft.Trigger.Type),
 		// Disabled by construction: a Studio save stages an agent for the
 		// operator to review and enable.
-		Enabled:      false,
-		MaxTurns:     maxTurnsOr(draft.MaxTurns, 15),
-		Memory:       memoryOr(draft.Memory),
-		LLM:          llmConfigFor(draft),
-		RunTimeout:   strings.TrimSpace(draft.RunTimeout),
-		ConfirmTools: dedupeNonEmpty(draft.ConfirmTools),
-		Security:     cloneSecurityConfig(draft.Security),
+		Enabled:         false,
+		MaxTurns:        draft.MaxTurns,
+		Budget:          cloneExecutionBudget(draft.Budget),
+		NoProgressLimit: cloneExecutionInt(draft.NoProgressLimit),
+		Memory:          memoryOr(draft.Memory),
+		LLM:             llmConfigFor(draft),
+		RunTimeout:      strings.TrimSpace(draft.RunTimeout),
+		ConfirmTools:    dedupeNonEmpty(draft.ConfirmTools),
+		Security:        cloneSecurityConfig(draft.Security),
 	}
 
 	// Only attach a workflow block when there's an actual graph. A 0-node draft
@@ -240,7 +242,9 @@ func toReActAgentDefinition(draft Draft, id string, acceptPrivilegedExposure boo
 		StudioDeliveryMode: normalizeStudioDeliveryMode(draft.DeliveryMode),
 		StudioTriggerMode:  normalizeStudioTriggerMode(draft.Trigger.Type),
 		Enabled:            false, // staged for review, like every Studio save
-		MaxTurns:           maxTurnsOr(draft.MaxTurns, 15),
+		MaxTurns:           draft.MaxTurns,
+		Budget:             cloneExecutionBudget(draft.Budget),
+		NoProgressLimit:    cloneExecutionInt(draft.NoProgressLimit),
 		Memory:             memoryOr(draft.Memory),
 		LLM:                llmConfigFor(draft),
 		RunTimeout:         runTimeout,
@@ -498,17 +502,8 @@ func dedupeParagraph(text, para string) string {
 // steps, so it gets a larger total budget. Values are deliberately generous but
 // bounded; the user can override any of them in SOUL.yaml.
 func defaultReasoningConfig(draft Draft, strategy string) agent.ReasoningConfig {
-	maxSteps, maxPlanSteps := defaultReasoningBudgets(draft, strategy)
-	cfg := agent.ReasoningConfig{
-		Strategy:     strategy,
-		MaxSteps:     maxSteps,
-		MaxPlanSteps: maxPlanSteps,
-		StepTimeout:  "120s",
-		TotalTimeout: "600s",
-	}
-	if strings.EqualFold(strategy, "plan_execute") {
-		cfg.TotalTimeout = "900s"
-	}
+	cfg := agent.ReasoningConfig{Strategy: strategy}
+
 	return cfg
 }
 
@@ -524,7 +519,7 @@ func reasoningConfigFor(draft Draft, strategy string) agent.ReasoningConfig {
 	if t := strings.TrimSpace(draft.TotalTimeout); t != "" {
 		cfg.TotalTimeout = t
 	}
-	if draft.MaxSteps > 0 {
+	if draft.MaxSteps != 0 {
 		cfg.MaxSteps = draft.MaxSteps
 	}
 	if draft.MaxPlanSteps > 0 {
@@ -543,53 +538,11 @@ func reasoningConfigFor(draft Draft, strategy string) agent.ReasoningConfig {
 	return cfg
 }
 
-func defaultReasoningBudgets(draft Draft, strategy string) (int, int) {
-	if strings.EqualFold(strategy, "plan_execute") {
-		if highComplexityReasoningTask(draft) {
-			return 24, 12
-		}
-		return 16, 8
-	}
-	if highComplexityReasoningTask(draft) {
-		return 18, 8
-	}
-	return 8, 6
-}
-
-func highComplexityReasoningTask(draft Draft) bool {
-	text := strings.ToLower(strings.Join([]string{
-		draft.Intent,
-		draft.RawIntent,
-		draft.SystemPrompt,
-		strings.Join(draft.Tools, " "),
-	}, " "))
-	if strings.Contains(text, "notebooklm") || strings.Contains(text, "notebook lm") ||
-		strings.Contains(text, "podcast") || strings.Contains(text, "audio overview") {
-		return true
-	}
-	hits := 0
-	for _, word := range []string{
-		"search", "find", "fetch", "read", "rank", "filter", "summarize",
-		"create", "generate", "poll", "wait", "store", "ingest", "send", "deliver",
-	} {
-		if strings.Contains(text, word) {
-			hits++
-		}
-	}
-	if hits >= 4 {
-		return true
-	}
-	mcpCount := 0
-	for _, tool := range draft.Tools {
-		if strings.HasPrefix(strings.TrimSpace(tool), "mcp__") {
-			mcpCount++
-		}
-	}
-	return len(draft.Tools) >= 8 || mcpCount >= 4
-}
-
 func normalizedRunTimeout(runTimeout, reasoningTotal string) string {
 	runTimeout = strings.TrimSpace(runTimeout)
+	if d, err := time.ParseDuration(runTimeout); err == nil && d == 0 {
+		return runTimeout // Explicit unlimited must survive a Studio round-trip.
+	}
 	total := parsePositiveDuration(reasoningTotal)
 	run := parsePositiveDuration(runTimeout)
 	if total <= 0 {
@@ -615,8 +568,6 @@ func parsePositiveDuration(s string) time.Duration {
 	return d
 }
 
-// maxTurnsOr returns v when positive, else the fallback — so a user-tuned
-// max_turns survives the round-trip while an unset draft gets the default.
 // memoryOr returns the draft's memory policy, or Studio's default when the
 // draft carries none. Overwriting a policy the user tuned in SOUL.yaml with a
 // constant is the same class of loss as resetting max_turns.
@@ -631,13 +582,6 @@ func memoryOr(m *agent.MemoryPolicy) agent.MemoryPolicy {
 	out.ReadScopes = append([]string(nil), m.ReadScopes...)
 	out.WriteScopes = append([]string(nil), m.WriteScopes...)
 	return out
-}
-
-func maxTurnsOr(v, fallback int) int {
-	if v > 0 {
-		return v
-	}
-	return fallback
 }
 
 func reactDescription(draft Draft) string {
@@ -1011,4 +955,19 @@ func flowHasHostExecution(flow Flow) bool {
 		}
 	}
 	return false
+}
+
+func cloneExecutionBudget(b *agent.BudgetConfig) *agent.BudgetConfig {
+	if b == nil {
+		return nil
+	}
+	cp := *b
+	return &cp
+}
+func cloneExecutionInt(n *int) *int {
+	if n == nil {
+		return nil
+	}
+	cp := *n
+	return &cp
 }

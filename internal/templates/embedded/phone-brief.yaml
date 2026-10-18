@@ -25,7 +25,7 @@ builtins: [mobile.list_nodes, mobile.invoke, mobile.command_status]
 
 # One phone listing, three device commands, three waited status reads and a
 # card already exceed the default of 10 turns; leave room for a retry.
-max_turns: 20
+max_turns: 0 # inherit the workspace execution policy
 
 memory:
   adaptive: true

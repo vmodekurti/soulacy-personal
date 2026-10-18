@@ -12,6 +12,7 @@ package reasoning
 import (
 	"context"
 	"fmt"
+	"github.com/soulacy/soulacy/pkg/agent"
 	"strings"
 )
 
@@ -52,7 +53,7 @@ func (b *RouterBackend) Think(ctx context.Context, req ThinkRequest) (ThinkRespo
 
 	params := b.ThinkParams
 	if params.MaxTokens <= 0 {
-		params.MaxTokens = 1024
+		params.MaxTokens = agent.DefaultMaxOutputTokens
 	}
 	raw, err := b.comp.Complete(ctx, b.ThinkModel, system, user, params)
 	if err != nil {
@@ -74,7 +75,7 @@ func (b *RouterBackend) Plan(ctx context.Context, systemPrompt, taskInput string
 	system := systemPrompt + fmt.Sprintf(openaiPlanInstructions, maxSteps)
 	params := b.PlanParams
 	if params.MaxTokens <= 0 {
-		params.MaxTokens = 1024
+		params.MaxTokens = agent.DefaultMaxOutputTokens
 	}
 	raw, err := b.comp.Complete(ctx, b.PlanReflectModel, system, "Task: "+taskInput, params)
 	if err != nil {

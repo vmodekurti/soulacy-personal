@@ -15,6 +15,7 @@
   import { searchSkills, parseSlashQuery, applySkillChoice } from '../lib/skillsearch.js'
   import { modelAvailability } from '../lib/agentmodel.js'
   import { isChatTransportError, recoverDetachedChat } from '../lib/chatrecovery.js'
+  import { responseNotice } from '../lib/runStatus.js'
   import { continuationPrompt } from '../lib/feedstate.js'
   import {
     filterThreads, suggestedPrompts, buildOverrides,
@@ -222,6 +223,7 @@
             role: m.role, text: m.text, via: m.via || '', agentId: m.agentId || '',
             ts: m.ts instanceof Date ? m.ts.toISOString() : m.ts,
             metrics: m.metrics || null,
+            metadata: m.metadata || null,
             parts: m.parts || null,
             attachments: m.attachments || null,
             runId: m.runId || '', responseId: m.responseId || '', feedback: m.feedback || 0,
@@ -693,6 +695,11 @@
       preTurn = await api.runs.metrics(runSessionId, runAgentId).catch(() => null)
     }
 
+    // Capture the persisted boundary before sending, so repeating the same
+    // question cannot recover an older answer after a connection loss.
+    const recoveryBaseline = await api.history.get(runSessionId)
+      .then(history => (history.entries || []).map(entry => entry.id).filter(Boolean))
+      .catch(() => null)
     let replyText = ''
     let spokenReply = ''
     try {
@@ -706,7 +713,7 @@
         // Don't pollute the thread agent's metrics baseline with a routed turn.
         metricsBaseline: (curr && !route) ? { ...(t.metricsBaseline || {}), [runSessionId]: curr } : (t.metricsBaseline || {}),
         streamText: '',   // final reply is authoritative; drop the live preview
-        messages: [...t.messages, { role: 'assistant', text: res.reply, via: viaName, agentId: runAgentId, runId: res.run_id || '', responseId: res.response_id || '', feedback: 0, parts: (res.parts || []).filter(p => p && p.type && p.type !== 'text'), ts: new Date(), thinking: t.thinking || thinking, metrics: route ? null : delta }],
+        messages: [...t.messages, { role: 'assistant', text: res.reply, via: viaName, agentId: runAgentId, runId: res.run_id || '', responseId: res.response_id || '', metadata: res.metadata || {}, feedback: 0, parts: (res.parts || []).filter(p => p && p.type && p.type !== 'text'), ts: new Date(), thinking: t.thinking || thinking, metrics: route ? null : delta }],
       }))
       await loadArtifacts(threadId, runAgentId, runSessionId)
     } catch (e) {
@@ -723,6 +730,8 @@
           agentId: runAgentId,
           sentText: requestText,
           startedAt: runStartedAt,
+          sessionId: runSessionId,
+          baselineEntryIds: recoveryBaseline,
           loadHistory: () => api.history.get(runSessionId),
           loadEvents: () => api.agents.actions(runAgentId, 500, THINKING_EVENT_TYPES, { durable: true }),
         })
@@ -732,7 +741,7 @@
             ...t,
             streamText: '',
             messages: [...t.messages, {
-              role: 'assistant', text: replyText, via: viaName, agentId: runAgentId,
+              role: 'assistant', text: replyText, via: viaName, agentId: runAgentId, metadata: recovered.metadata || {},
               ts: recovered.entry?.created_at ? new Date(recovered.entry.created_at) : new Date(),
               thinking: t.thinking || thinking,
             }],
@@ -741,7 +750,7 @@
         } else {
           const detail = recovered.status === 'error'
             ? recovered.error
-            : 'The connection was interrupted and no completed server response was found. Please try again.'
+            : 'The connection was interrupted. The server may still be working. Check Activity before sending the request again.'
           updateThread(threadId, t => ({
             ...t,
             streamText: '',
@@ -1399,7 +1408,7 @@
             'reasoning.start', 'reasoning.step', 'reasoning.result'].includes(ev.type || '')
   }
 
-  const THINKING_EVENT_TYPES = 'llm.call,llm.result,tool.call,tool.result,tool.log,error,reasoning.start,reasoning.step,reasoning.result'
+  const THINKING_EVENT_TYPES = 'llm.call,llm.result,tool.call,tool.result,tool.log,error,reasoning.start,reasoning.step,reasoning.result,run.completed'
 
   function thinkingEventKey(ev) {
     return `${ev.type || ''}|${ev.timestamp || ''}|${ev.payload?.call_id || ''}|${ev.payload?.name || ''}`
@@ -2621,8 +2630,17 @@
             </div>
           {:else}
             <div class="empty-avatar" aria-hidden="true">✦</div>
-            <h2 class="empty-title">Select an agent to start</h2>
-            <p class="empty-sub">Choose an agent from the menu above.</p>
+            {#if agents.length}
+              <h2 class="empty-title">Select an agent to start</h2>
+              <p class="empty-sub">Choose an agent from the menu above.</p>
+            {:else}
+              <h2 class="empty-title">Set up your first chat agent</h2>
+              <p class="empty-sub">Create an agent, or enable chat for one you already have.</p>
+              <div class="suggestions">
+                <a class="suggestion" href="#studio">Create an agent</a>
+                <a class="suggestion" href="#agents">Manage agents</a>
+              </div>
+            {/if}
           {/if}
         </div>
       {:else}
@@ -2678,6 +2696,12 @@
                     <div class="btext">{msg.text}</div>
                   </details>
                 {:else}
+                  {@const notice = responseNotice(msg.metadata)}
+                  {#if notice}
+                    <div class="run-notice" class:warning={notice.tone === 'warning'} role="status">
+                      <strong>{notice.title}</strong><span>{notice.detail}</span>
+                    </div>
+                  {/if}
                   <div class="btext markdown-body" class:clamped={long} use:richRenderer={msg.text}>{@html parseMarkdown(msg.text)}</div>
                   {#if msg.role === 'assistant' && isLongOutput(msg.text)}
                     <button class="show-more" on:click={() => toggleExpand(mi)}>{expanded[k] ? 'Show less ▲' : 'Show more ▼'}</button>
@@ -3042,6 +3066,9 @@
 {/if}
 
 <style>
+  .run-notice { display: grid; gap: .25rem; margin: 0 0 .75rem; padding: .65rem .8rem; border: 1px solid var(--border, #46516a); border-radius: 8px; font-size: .85rem; line-height: 1.45; }
+  .run-notice.warning { border-color: #a77a2d; background: rgba(167, 122, 45, .12); }
+
   .page        { padding: 1.5rem; display: flex; flex-direction: column; gap: 1.25rem; height: 100%; }
   .share-toast { position: fixed; right: 20px; bottom: 20px; z-index: 60; max-width: 420px;
     background: #12162a; border: 1px solid #2a2f52; border-radius: 10px; padding: 12px 14px;

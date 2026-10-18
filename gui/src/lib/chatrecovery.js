@@ -12,33 +12,39 @@ export function isChatTransportError(error) {
   return TRANSPORT_FAILURE.test(String(error.message || error))
 }
 
-export function detachedChatOutcome(entries, events, { agentId = '', sentText = '', startedAt = 0 } = {}) {
+export function detachedChatOutcome(entries, events, { agentId = '', sessionId = '', sentText = '', startedAt = 0, baselineEntryIds = null } = {}) {
   const history = Array.isArray(entries) ? entries : []
-  // Successful runs persist the user and assistant entries together. Matching
-  // the submitted text avoids relying on a mobile device's potentially skewed
-  // clock and prevents an older answer in the same session being recovered.
+  const excluded = baselineEntryIds == null ? null : new Set(baselineEntryIds)
+  // A terminal run event is authoritative. Tool/provider errors can recover,
+  // and another conversation's events must never terminate this one.
+  const terminal = (Array.isArray(events) ? events : [])
+    .filter(event => event?.type === 'run.completed'
+      && (!agentId || event.agent_id === agentId)
+      && (!sessionId || event.session_id === sessionId)
+      && (!startedAt || Date.parse(event.timestamp || '') >= startedAt - 2000))
+    .sort((a, b) => Date.parse(b.timestamp || '') - Date.parse(a.timestamp || ''))[0]
+  const payload = terminal?.payload || {}
+  const metadata = payload.degraded || payload.success === false
+    ? { ...(payload.metadata || {}), reasoning_degraded: 'true', outcome: payload.outcome || 'incomplete', outcome_summary: payload.summary || payload.error || 'This run did not finish successfully.' }
+    : (payload.metadata || {})
   for (let i = history.length - 1; i >= 0; i--) {
     const entry = history[i]
     if (entry?.role !== 'user' || (agentId && entry.agent_id && entry.agent_id !== agentId)) continue
+    if (sessionId && entry.session_id && entry.session_id !== sessionId) continue
+    if (excluded?.has(entry.id)) continue
+    // When available, the pre-send history boundary also handles clock skew.
+    const at = Date.parse(entry.created_at || '')
+    if (!excluded && startedAt && Number.isFinite(at) && at < startedAt - 2000) continue
     if (sentText && String(entry.content || '').trim() !== String(sentText).trim()) continue
-    const answer = history.slice(i + 1).find(candidate =>
-      candidate?.role === 'assistant' && (!agentId || !candidate.agent_id || candidate.agent_id === agentId))
-    if (answer) return { status: 'success', reply: answer.content || '', entry: answer }
+    let answer = null
+    for (let j = i + 1; j < history.length; j++) {
+      if (history[j]?.role === 'user') break
+      if (history[j]?.role === 'assistant' && (!agentId || !history[j].agent_id || history[j].agent_id === agentId)) { answer = history[j]; break }
+    }
+    if (answer && !excluded?.has(answer.id)) return { status: 'success', reply: answer.content || '', entry: answer, metadata: { ...(answer.metadata || {}), ...metadata } }
     break
   }
-
-  const terminal = (Array.isArray(events) ? events : [])
-    .filter(event => {
-      if (event?.type !== 'error') return false
-      if (agentId && event.agent_id && event.agent_id !== agentId) return false
-      const at = Date.parse(event.timestamp || '')
-      return !startedAt || !Number.isFinite(at) || at >= startedAt - 2000
-    })
-    .sort((a, b) => Date.parse(b.timestamp || '') - Date.parse(a.timestamp || ''))[0]
-  if (terminal) {
-    const payload = terminal.payload || {}
-    return { status: 'error', error: payload.error || payload.message || 'The server-side run failed.' }
-  }
+  if (terminal && payload.success === false) return { status: 'error', error: payload.summary || payload.error || 'The server-side run did not finish successfully.' }
   return { status: 'pending' }
 }
 
@@ -48,7 +54,9 @@ export async function recoverDetachedChat({
   agentId,
   sentText,
   startedAt,
-  timeoutMs = 300000,
+  sessionId,
+  baselineEntryIds,
+  timeoutMs = 48 * 60 * 60 * 1000,
   pollMs = 2500,
   now = () => Date.now(),
   sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
@@ -58,7 +66,7 @@ export async function recoverDetachedChat({
     const [historyResult, eventsResult] = await Promise.allSettled([loadHistory(), loadEvents()])
     const entries = historyResult.status === 'fulfilled' ? (historyResult.value?.entries || []) : []
     const events = eventsResult.status === 'fulfilled' ? (eventsResult.value?.events || []) : []
-    const outcome = detachedChatOutcome(entries, events, { agentId, sentText, startedAt })
+    const outcome = detachedChatOutcome(entries, events, { agentId, sessionId, sentText, startedAt, baselineEntryIds })
     if (outcome.status !== 'pending') return outcome
     if (now() >= deadline) break
     await sleep(Math.min(pollMs, Math.max(0, deadline - now())))

@@ -10,21 +10,36 @@ import (
 // that id to the client; a POST /chat/cancel then cancels it. Concurrency-safe.
 type runRegistry struct {
 	mu   sync.Mutex
-	runs map[string]context.CancelFunc
+	next uint64
+	runs map[string]map[uint64]context.CancelFunc
 }
 
 func newRunRegistry() *runRegistry {
-	return &runRegistry{runs: make(map[string]context.CancelFunc)}
+	return &runRegistry{runs: make(map[string]map[uint64]context.CancelFunc)}
 }
 
-// Register stores cancel under id (overwriting any prior run with that id).
-func (r *runRegistry) Register(id string, cancel context.CancelFunc) {
+// Register returns cleanup for this specific run. Synchronous requests share
+// a session alias; finishing one must not deregister another queued request.
+func (r *runRegistry) Register(id string, cancel context.CancelFunc) func() {
 	if id == "" || cancel == nil {
-		return
+		return func() {}
 	}
 	r.mu.Lock()
-	r.runs[id] = cancel
+	r.next++
+	ticket := r.next
+	if r.runs[id] == nil {
+		r.runs[id] = make(map[uint64]context.CancelFunc)
+	}
+	r.runs[id][ticket] = cancel
 	r.mu.Unlock()
+	return func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		delete(r.runs[id], ticket)
+		if len(r.runs[id]) == 0 {
+			delete(r.runs, id)
+		}
+	}
 }
 
 // Done removes id from the registry (call on run completion).
@@ -39,19 +54,25 @@ func (r *runRegistry) Done(id string) {
 func (r *runRegistry) Active() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return len(r.runs)
+	count := 0
+	for _, runs := range r.runs {
+		count += len(runs)
+	}
+	return count
 }
 
-// Cancel cancels the run with id and removes it. Returns true if found.
+// Cancel stops the run, or every request sharing a legacy session alias.
 func (r *runRegistry) Cancel(id string) bool {
 	r.mu.Lock()
-	cancel, ok := r.runs[id]
+	runs, ok := r.runs[id]
 	if ok {
 		delete(r.runs, id)
 	}
 	r.mu.Unlock()
 	if ok {
-		cancel()
+		for _, cancel := range runs {
+			cancel()
+		}
 	}
 	return ok
 }

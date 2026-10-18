@@ -17,8 +17,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/soulacy/soulacy/internal/processutil"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/google/uuid"
@@ -73,7 +73,7 @@ func (e *Executor) Run(ctx context.Context, pyFile, funcName, inline string, arg
 
 	runID := uuid.New().String()
 
-	cmd := exec.CommandContext(ctx, e.pythonBin, "-c", script)
+	cmd := processutil.CommandContext(ctx, e.pythonBin, "-c", script)
 	cmd.Stdin = bytes.NewReader(argsJSON)
 	// SEC-5: scrub the environment to the base allowlist so tool code spawned
 	// via this backend cannot read gateway secrets (ANTHROPIC_API_KEY, …).
@@ -110,7 +110,7 @@ func (e *Executor) Run(ctx context.Context, pyFile, funcName, inline string, arg
 		outputLines = append(outputLines, line)
 	}
 	if scanErr := sc.Err(); scanErr != nil {
-		_ = cmd.Process.Kill()
+		_ = cmd.Cancel()
 		_ = cmd.Wait()
 		return "", fmt.Errorf("python tool: read stdout: %w", scanErr)
 	}

@@ -95,11 +95,11 @@ func TestAMonitorIsBuiltForTheJobNotClonedFromGenie(t *testing.T) {
 	}
 
 	// Scoped to the job rather than to an open-ended investigation.
-	if def.MaxTurns == 0 || def.MaxTurns > 20 {
-		t.Errorf("max_turns = %d; a background check should be bounded", def.MaxTurns)
+	if def.MaxTurns != 0 {
+		t.Errorf("max_turns = %d; a background check should inherit workspace turn policy", def.MaxTurns)
 	}
-	if def.RunTimeout == "" || def.RunTimeout == "30m" {
-		t.Errorf("run_timeout = %q; Genie's interactive budget is wrong for a scheduled check", def.RunTimeout)
+	if def.RunTimeout != "" {
+		t.Errorf("run_timeout = %q; scheduled checks should inherit workspace timeout policy", def.RunTimeout)
 	}
 
 	// It is still a monitor: owned, scheduled, and off every chat surface.

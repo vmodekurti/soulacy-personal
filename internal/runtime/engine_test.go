@@ -779,11 +779,8 @@ func TestHandleDuplicateToolCallRunsToolOnlyOnceThenSynthesizes(t *testing.T) {
 	if len(reqs) != 3 {
 		t.Fatalf("provider calls = %d, want 3", len(reqs))
 	}
-	if len(reqs[2].Tools) != 0 {
-		t.Fatalf("final synthesis tools = %#v, want none", reqs[2].Tools)
-	}
-	if !chatMessagesContain(reqs[2].Messages, "system", "Now write your final response") {
-		t.Fatalf("third request missing final synthesis prompt: %#v", reqs[2].Messages)
+	if len(reqs[2].Tools) == 0 {
+		t.Fatal("one duplicate must not remove all tools or force premature completion")
 	}
 }
 
@@ -800,7 +797,7 @@ func TestHandleSynthesisEmptyContentRecoversReply(t *testing.T) {
 		Enabled:      true,
 		SystemPrompt: "Use tools.",
 		LLM:          agent.LLMConfig{Provider: "test", Model: "fake-model"},
-		MaxTurns:     3,
+		MaxTurns:     2,
 		Builtins:     strListPtr("lookup"),
 	})
 	e.builtins = []BuiltinTool{{
@@ -844,7 +841,7 @@ func TestHandleSynthesisRetryRecoversReply(t *testing.T) {
 		Enabled:      true,
 		SystemPrompt: "Use tools.",
 		LLM:          agent.LLMConfig{Provider: "test", Model: "fake-model"},
-		MaxTurns:     3,
+		MaxTurns:     2,
 		Builtins:     strListPtr("lookup"),
 	})
 	e.builtins = []BuiltinTool{{

@@ -34,6 +34,10 @@ func completeTaskContract(contract *taskcontract.Contract, reply *message.Messag
 	return snapshot, recordedOutcome, success, degraded
 }
 
+// maxPrematureFinals caps how many unfinished-looking final answers one run
+// sends back to the model for another turn.
+const maxPrematureFinals = 3
+
 func (e *Engine) continuePrematureFinal(def *agent.Definition, sess *Session, msg message.Message, contract *taskcontract.Contract, content string, allow bool, turn, maxTurns int) ([]llm.ChatMessage, bool) {
 	if !allow {
 		return nil, false
@@ -42,7 +46,7 @@ func (e *Engine) continuePrematureFinal(def *agent.Definition, sess *Session, ms
 	if !empty && (def.LLM.OutputSchema != nil || (!reasoning.IsProgressPreamble(content) && !reasoning.IsInternalScratchNarration(content))) {
 		return nil, false
 	}
-	if turn+1 >= maxTurns {
+	if maxTurns > 0 && turn+1 >= maxTurns {
 		if !empty {
 			contract.MarkIncomplete("the agent ended by describing work it had not performed")
 		}

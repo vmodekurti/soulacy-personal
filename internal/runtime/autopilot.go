@@ -16,9 +16,11 @@ import (
 	"github.com/soulacy/soulacy/internal/autopilot"
 	"github.com/soulacy/soulacy/internal/llm"
 	"github.com/soulacy/soulacy/internal/redact"
+	"github.com/soulacy/soulacy/internal/session"
 	"github.com/soulacy/soulacy/internal/taskcontract"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
+	"go.uber.org/zap"
 )
 
 type autopilotRuntime struct {
@@ -121,6 +123,8 @@ func (e *Engine) AutopilotPersistenceTimeout() time.Duration {
 // ingress paths and nested peer runs use the same wrapper.
 func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message.Message, runErr error) {
 	if e.autopilot == nil {
+		ctx, cancel := context.WithTimeout(ctx, e.RunTimeout(e.loader.Get(msg.AgentID)))
+		defer cancel()
 		return e.handle(ctx, msg)
 	}
 	if e.autopilot.store == nil {
@@ -350,9 +354,19 @@ func (e *Engine) Handle(ctx context.Context, msg message.Message) (reply message
 	}
 	if runErr != nil {
 		reply.Metadata[message.MetaReasoningDegraded] = "true"
+		reply.Metadata[message.MetaOutcome] = "incomplete"
+		reply.Metadata[message.MetaOutcomeSummary] = truncateAutopilotText(redact.Text(runErr.Error()), 2048)
+	}
+	if history, ok := e.historyStore.(session.RunMetadataStore); ok {
+		historyCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), e.AutopilotPersistenceTimeout())
+		err := history.UpdateRunMetadata(historyCtx, msg.SessionID, msg.AgentID, msg.ID, reply.Metadata)
+		cancel()
+		if err != nil {
+			e.log.Warn("history store: final run metadata update failed", zap.Error(err))
+		}
 	}
 	if e.sink != nil {
-		completedPayload := map[string]any{"run_id": runID, "success": runErr == nil && outcome == autopilot.ProofSucceeded, "outcome": outcome, "proof_id": proof.ID, "verification": evaluation.Verification, "simulation": simulation}
+		completedPayload := map[string]any{"run_id": runID, "success": runErr == nil && outcome == autopilot.ProofSucceeded, "outcome": outcome, "proof_id": proof.ID, "verification": evaluation.Verification, "simulation": simulation, "metadata": reply.Metadata, "summary": reply.Metadata[message.MetaOutcomeSummary]}
 		if taskSnapshot.Version != "" {
 			completedPayload["task_outcome"] = taskSnapshot.Outcome
 			completedPayload["task_contract"] = taskSnapshot

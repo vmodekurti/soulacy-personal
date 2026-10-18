@@ -32,6 +32,12 @@ import (
 // reads, occasional batched writes from the actionlog/RAG ingest path).
 // Override only if you have a measured reason.
 type Options struct {
+	// ImmediateTransactions reserves the writer at BEGIN, before any reads.
+	// Use for stores whose transactions read state and then update it: a WAL
+	// snapshot cannot be promoted after a concurrent writer commits, and the
+	// busy timeout cannot repair that stale snapshot (SQLITE_BUSY_SNAPSHOT).
+	ImmediateTransactions bool
+
 	// ForeignKeys enables foreign-key constraint enforcement. The
 	// knowledge store relies on it for cascade deletes; the other stores
 	// don't need it. Default: false.
@@ -93,6 +99,9 @@ func DSN(path string, opts Options) string {
 	q.Set("_synchronous", "NORMAL")
 	q.Set("_cache_size", "-20000")
 	q.Set("_temp_store", "MEMORY")
+	if opts.ImmediateTransactions {
+		q.Set("_txlock", "immediate")
+	}
 
 	bt := opts.BusyTimeout
 	if bt <= 0 {

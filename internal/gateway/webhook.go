@@ -107,8 +107,8 @@ func (s *Server) handleGenericWebhook(c *fiber.Ctx) error {
 	defer cancel()
 	ctx = withRequestPrincipal(c, ctx)
 	if s.runReg != nil {
-		s.runReg.Register(sessionID, cancel)
-		defer s.runReg.Done(sessionID)
+		done := s.runReg.Register(sessionID, cancel)
+		defer done()
 	}
 	reply, err := s.engine.Handle(ctx, msg)
 	if err != nil {

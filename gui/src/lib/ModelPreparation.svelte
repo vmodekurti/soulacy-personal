@@ -1,5 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
+  import { executionLimitRows } from './runStatus.js'
   import { apiFetch } from './api.js'
   import { apiKey } from './stores.js'
   import { validatePreparation, supportLabel, strategyLabel } from './modelPreparation.js'
@@ -31,6 +32,13 @@
   {#if result}
     <div class="identity">{#if result.strategy === 'workflow'}Models selected per workflow step{:else if result.strategy === 'router'}No model needed for message routing{:else}{result.profile.provider || 'No provider'} · {result.profile.model || 'Provider chooses at runtime'}{/if}</div>
     <p>{strategyLabel(result.strategy)} · Your goal, permissions and spending limits stay unchanged.</p>
+    {#if executionLimitRows(result.limits).length}
+      <div class="execution-policy" aria-label="Run allowances">
+        <strong>Run allowances</strong>
+        <dl>{#each executionLimitRows(result.limits) as [label, value]}<dt>{label}</dt><dd>{value}</dd>{/each}</dl>
+        <p>Inherited workspace settings and this agent's overrides. Model capacity and cancellation still apply.</p>
+      </div>
+    {/if}
     {#if result.blocked_reason}<p role="alert">{result.blocked_reason}</p>{/if}
     <details><summary>Capabilities and working approach</summary>
       <dl>

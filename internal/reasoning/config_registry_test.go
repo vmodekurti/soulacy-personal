@@ -5,7 +5,6 @@ package reasoning_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/soulacy/soulacy/internal/reasoning"
 	"github.com/soulacy/soulacy/pkg/agent"
@@ -273,16 +272,16 @@ func TestLoopConfigFromDefinition_DefaultValues(t *testing.T) {
 	if !ok {
 		t.Fatal("expected ok=true")
 	}
-	if cfg.MaxSteps != 8 {
+	if cfg.MaxSteps != agent.DefaultMaxTurns {
 		t.Errorf("expected default MaxSteps=8, got %d", cfg.MaxSteps)
 	}
-	if cfg.MaxPlanSteps != 6 {
+	if cfg.MaxPlanSteps != agent.DefaultMaxPlanSteps {
 		t.Errorf("expected default MaxPlanSteps=6, got %d", cfg.MaxPlanSteps)
 	}
-	if cfg.StepTimeout != 30*time.Second {
+	if cfg.StepTimeout != agent.DefaultStepTimeout {
 		t.Errorf("expected default StepTimeout=30s, got %s", cfg.StepTimeout)
 	}
-	if cfg.TotalTimeout != 180*time.Second {
+	if cfg.TotalTimeout != agent.DefaultRunTimeout {
 		t.Errorf("expected default TotalTimeout=180s, got %s", cfg.TotalTimeout)
 	}
 }
@@ -327,10 +326,10 @@ func TestLoopConfigFromDefinition_InvalidDurations(t *testing.T) {
 	if !ok {
 		t.Fatal("expected ok=true")
 	}
-	if cfg.StepTimeout != 30*time.Second {
+	if cfg.StepTimeout != agent.DefaultStepTimeout {
 		t.Errorf("expected default StepTimeout=30s, got %s", cfg.StepTimeout)
 	}
-	if cfg.TotalTimeout != 180*time.Second {
+	if cfg.TotalTimeout != agent.DefaultRunTimeout {
 		t.Errorf("expected default TotalTimeout=180s, got %s", cfg.TotalTimeout)
 	}
 }

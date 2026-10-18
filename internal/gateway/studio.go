@@ -1000,9 +1000,10 @@ func (s *Server) handleStudioBuild(c *fiber.Ctx) error {
 		// Bound the whole loop explicitly. Under SideEffectsReal an unbounded
 		// "still making progress" loop would hold a live tool connection and an
 		// LLM budget open indefinitely.
-		MaxElapsed: studio.DefaultMaxElapsed,
-		MaxTokens:  s.cfg.LLM.Studio.MaxBuildTokens,
-		MaxCostUSD: s.cfg.LLM.Studio.MaxBuildCostUSD,
+		MaxElapsed:  agent.ParseExecutionTimeout(s.cfg.LLM.Studio.MaxBuildElapsed, studio.DefaultMaxElapsed),
+		MaxAttempts: s.cfg.LLM.Studio.MaxBuildAttempts,
+		MaxTokens:   s.cfg.LLM.Studio.MaxBuildTokens,
+		MaxCostUSD:  s.cfg.LLM.Studio.MaxBuildCostUSD,
 	}
 
 	rep := studio.BuildUntilWorks(c.Context(), model, req.Workflow, cat, opts)
@@ -1120,7 +1121,8 @@ func (s *Server) handleStudioBuildStream(c *fiber.Ctx) error {
 			In: in, Tests: tests, Trace: tr, ExtraProblems: s.pythonBuildProblems,
 			SideEffects: policy,
 			Verifier:    studio.VerifierFor(policy, s.studioRealRunner()),
-			MaxElapsed:  studio.DefaultMaxElapsed,
+			MaxElapsed:  agent.ParseExecutionTimeout(s.cfg.LLM.Studio.MaxBuildElapsed, studio.DefaultMaxElapsed),
+			MaxAttempts: s.cfg.LLM.Studio.MaxBuildAttempts,
 			MaxTokens:   s.cfg.LLM.Studio.MaxBuildTokens,
 			MaxCostUSD:  s.cfg.LLM.Studio.MaxBuildCostUSD,
 		}
@@ -1865,7 +1867,7 @@ func (s *Server) ensurePeerAgents(dir string, def *agent.Definition, newAgents [
 			Description:  na.Description,
 			SystemPrompt: na.SystemPrompt,
 			Enabled:      true,
-			MaxTurns:     15,
+			MaxTurns:     0,
 			Memory:       agent.MemoryPolicy{MaxTokens: 8000},
 			LLM: agent.LLMConfig{
 				Provider:    s.cfg.LLM.DefaultProvider,
@@ -1932,7 +1934,7 @@ func (s *Server) registerEphemeralPeers(def *agent.Definition, newAgents []studi
 			// THROUGH a synthesized peer and have it auto-approved, because the
 			// stub — not the parent — is what the runtime consults for that call.
 			Unattended: def.Unattended,
-			MaxTurns:   15,
+			MaxTurns:   0,
 			Memory:     agent.MemoryPolicy{MaxTokens: 8000},
 			LLM: agent.LLMConfig{
 				Provider:    s.cfg.LLM.DefaultProvider,
@@ -2639,7 +2641,8 @@ func (s *Server) handleStudioDiagnoseRun(c *fiber.Ctx) error {
 		SideEffects:   studio.SideEffectsReal,
 		Verifier:      studio.VerifierFor(studio.SideEffectsReal, s.studioRealRunner()),
 		ExtraProblems: s.pythonBuildProblems,
-		MaxElapsed:    studio.DefaultMaxElapsed,
+		MaxElapsed:    agent.ParseExecutionTimeout(s.cfg.LLM.Studio.MaxBuildElapsed, studio.DefaultMaxElapsed),
+		MaxAttempts:   s.cfg.LLM.Studio.MaxBuildAttempts,
 		MaxTokens:     s.cfg.LLM.Studio.MaxBuildTokens,
 		MaxCostUSD:    s.cfg.LLM.Studio.MaxBuildCostUSD,
 	})
@@ -2731,7 +2734,8 @@ func (s *Server) handleStudioDiagnoseSession(c *fiber.Ctx) error {
 		SideEffects:   studio.SideEffectsReal,
 		Verifier:      studio.VerifierFor(studio.SideEffectsReal, s.studioRealRunner()),
 		ExtraProblems: s.pythonBuildProblems,
-		MaxElapsed:    studio.DefaultMaxElapsed,
+		MaxElapsed:    agent.ParseExecutionTimeout(s.cfg.LLM.Studio.MaxBuildElapsed, studio.DefaultMaxElapsed),
+		MaxAttempts:   s.cfg.LLM.Studio.MaxBuildAttempts,
 		MaxTokens:     s.cfg.LLM.Studio.MaxBuildTokens,
 		MaxCostUSD:    s.cfg.LLM.Studio.MaxBuildCostUSD,
 	})

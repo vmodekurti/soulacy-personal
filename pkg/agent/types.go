@@ -696,9 +696,11 @@ type Definition struct {
 	Hooks []ContextHook `yaml:"hooks,omitempty" json:"hooks,omitempty"`
 
 	// --- Runtime ---
-	MaxTurns    int  `yaml:"max_turns"    json:"max_turns"`
-	StreamReply bool `yaml:"stream_reply" json:"stream_reply"`
-	Enabled     bool `yaml:"enabled"      json:"enabled"`
+	MaxTurns int `yaml:"max_turns"    json:"max_turns"`
+	// NoProgressLimit counts repeated tool outcomes, not total work. Nil = 20; 0 disables.
+	NoProgressLimit *int `yaml:"no_progress_limit,omitempty" json:"no_progress_limit,omitempty"`
+	StreamReply     bool `yaml:"stream_reply" json:"stream_reply"`
+	Enabled         bool `yaml:"enabled"      json:"enabled"`
 
 	// Budget caps token (and, by extension, cost) consumption for a single
 	// run (Story 1 / S3.1). The engine checks cumulative usage against this
@@ -882,6 +884,10 @@ func (d *Definition) Clone() *Definition {
 		return nil
 	}
 	cp := *d // copy scalar fields
+	if d.NoProgressLimit != nil {
+		n := *d.NoProgressLimit
+		cp.NoProgressLimit = &n
+	}
 
 	// Slices — each gets its own backing array.
 	cp.Tags = cloneStrSlice(d.Tags)
@@ -1070,12 +1076,12 @@ func (d *Definition) ResolvedRunTimeout(fallback time.Duration) time.Duration {
 	resolved := fallback
 	if d == nil || d.RunTimeout == "" {
 		resolved = fallback
-	} else if t, err := time.ParseDuration(d.RunTimeout); err == nil && t > 0 {
-		resolved = t
+	} else {
+		resolved = ParseExecutionTimeout(d.RunTimeout, fallback)
 	}
 
 	if d != nil && d.Reasoning.TotalTimeout != "" {
-		if rt, err := time.ParseDuration(d.Reasoning.TotalTimeout); err == nil && rt > resolved {
+		if rt := ParseExecutionTimeout(d.Reasoning.TotalTimeout, 0); rt > resolved {
 			return rt
 		}
 	}

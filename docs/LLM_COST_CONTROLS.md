@@ -5,7 +5,17 @@ and embedding inference through one admission and accounting controller. The
 controller reserves worst-case capacity before a provider request and records
 actual or estimated usage when it finishes.
 
-## Recommended production configuration
+## Defaults and optional limits
+
+New configurations have no cumulative per-run token/call cap, Studio build
+spend cap, or workspace output-token ceiling. Response allowance defaults to
+16,384 tokens, subject to the selected model's capacity. Existing explicit
+settings remain in effect. See [Execution policy](EXECUTION_POLICY.md) for
+turns, timeouts, inheritance, progress detection, and recovery.
+
+## Example for an explicitly budgeted deployment
+
+The following limits are opt-in examples, not the shipped defaults.
 
 ```yaml
 llm:

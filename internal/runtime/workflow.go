@@ -3,6 +3,7 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/soulacy/soulacy/internal/reasoning"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 	"go.uber.org/zap"
@@ -47,6 +49,12 @@ func (w *WorkflowExecutor) Run(ctx context.Context, msg message.Message, resumeR
 		runID = uuid.New().String()
 	}
 
+	release, err := w.bindRun(ctx, msg, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
 	if len(w.spec.Nodes) > 0 {
 		return w.runFlow(ctx, msg, runID)
 	}
@@ -59,13 +67,18 @@ func (w *WorkflowExecutor) Run(ctx context.Context, msg message.Message, resumeR
 	}
 
 	var lastResult json.RawMessage
+	var outcomeTrace []reasoning.FlowNodeRun
 
 	// 3. Iterate steps.
 	for _, step := range w.spec.Steps {
 		// 3a. Load checkpoint; if completed, load state into vars and skip.
 		if w.store != nil {
 			existing, err := w.store.Get(ctx, agentID, runID, step.ID)
+			if err != nil && err != sql.ErrNoRows {
+				return nil, fmt.Errorf("read workflow checkpoint: %w", err)
+			}
 			if err == nil && existing.Status == CheckpointCompleted {
+				outcomeTrace = append(outcomeTrace, reasoning.FlowNodeRun{NodeID: step.ID, Output: existing.State})
 				w.log.Debug("workflow step already completed, skipping",
 					zap.String("run_id", runID),
 					zap.String("step_id", step.ID),
@@ -92,8 +105,7 @@ func (w *WorkflowExecutor) Run(ctx context.Context, msg message.Message, resumeR
 				Status:    CheckpointInProgress,
 				UpdatedAt: time.Now().UTC(),
 			}); err != nil {
-				w.log.Warn("workflow checkpoint upsert failed",
-					zap.String("step_id", step.ID), zap.Error(err))
+				return nil, fmt.Errorf("persist workflow step before execution: %w", err)
 			}
 		}
 
@@ -133,7 +145,7 @@ func (w *WorkflowExecutor) Run(ctx context.Context, msg message.Message, resumeR
 		}
 
 		// 3e. Call RunTool.
-		result, toolErr := w.engine.RunTool(ctx, step.Tool, renderedInput)
+		result, toolErr := w.runStepTool(ctx, msg, step.Tool, renderedInput)
 
 		if toolErr != nil {
 			var retryErr error
@@ -154,7 +166,7 @@ func (w *WorkflowExecutor) Run(ctx context.Context, msg message.Message, resumeR
 				continue
 			case "retry":
 				// Retry once.
-				result, retryErr = w.engine.RunTool(ctx, step.Tool, renderedInput)
+				result, retryErr = w.runStepTool(ctx, msg, step.Tool, renderedInput)
 				if retryErr != nil {
 					return w.handleStepError(ctx, agentID, runID, step, nil, fmt.Errorf("step %q: retry failed: %w", step.ID, retryErr))
 				}
@@ -174,20 +186,26 @@ func (w *WorkflowExecutor) Run(ctx context.Context, msg message.Message, resumeR
 			}
 		}
 		lastResult = result
+		outcomeTrace = append(outcomeTrace, reasoning.FlowNodeRun{NodeID: step.ID, Output: result})
 
 		// 3g. Upsert checkpoint with status = completed.
 		if w.store != nil {
-			_ = w.store.Upsert(ctx, Checkpoint{
+			if err := w.store.Upsert(ctx, Checkpoint{
 				AgentID:   agentID,
 				RunID:     runID,
 				StepID:    step.ID,
 				Status:    CheckpointCompleted,
 				State:     result,
 				UpdatedAt: time.Now().UTC(),
-			})
+			}); err != nil {
+				return nil, fmt.Errorf("workflow step executed but its checkpoint could not be saved; verify before retrying: %w", err)
+			}
 		}
 	}
 
+	if err := w.evaluateOutcome(ctx, msg, runID, lastResult, outcomeTrace); err != nil {
+		return nil, err
+	}
 	// 4. Return the output of the last completed step.
 	return lastResult, nil
 }
@@ -223,4 +241,31 @@ func renderTemplate(tmplStr string, vars map[string]interface{}) (string, error)
 		return "", fmt.Errorf("execute template: %w", err)
 	}
 	return buf.String(), nil
+}
+
+// Linear workflows must use the same permissions, confirmations, timeout and
+// observation path as graph workflows and chat. Bare embedded executors retain
+// the trusted RunTool API when no agent loader has been supplied.
+func (w *WorkflowExecutor) runStepTool(ctx context.Context, msg message.Message, name, input string) (json.RawMessage, error) {
+	if w.engine.loader == nil {
+		return w.engine.RunTool(ctx, name, input)
+	}
+	def := w.engine.definitionForContext(ctx, msg.AgentID)
+	if def == nil {
+		return nil, fmt.Errorf("workflow agent %q is unavailable", msg.AgentID)
+	}
+	args := map[string]any{}
+	if strings.TrimSpace(input) != "" {
+		if err := json.Unmarshal([]byte(input), &args); err != nil {
+			return nil, fmt.Errorf("decode workflow tool arguments: %w", err)
+		}
+	}
+	out, err := w.engine.runTool(ctx, def, msg.SessionID, message.ToolCall{ID: uuid.NewString(), Name: name, Arguments: args})
+	if err != nil {
+		return nil, err
+	}
+	if json.Valid([]byte(out)) {
+		return json.RawMessage(out), nil
+	}
+	return json.Marshal(out)
 }

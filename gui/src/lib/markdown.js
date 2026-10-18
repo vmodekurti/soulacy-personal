@@ -323,6 +323,10 @@ function ensureMermaid() {
   mermaid.initialize({
     startOnLoad: false,
     securityLevel: 'strict',
+    // Keep labels in SVG text; HTML labels are correctly stripped by the
+    // post-render sanitizer along with all other foreignObject content.
+    htmlLabels: false,
+    flowchart: { htmlLabels: false },
     theme: 'dark',
     fontFamily: 'inherit',
     // Throw on bad diagrams instead of injecting Mermaid's raw "Syntax error in

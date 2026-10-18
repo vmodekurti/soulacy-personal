@@ -27,7 +27,7 @@ import (
 
 // DefaultFlowBudget is the global node-execution ceiling when the spec
 // doesn't set MaxNodeExecutions.
-const DefaultFlowBudget = 100
+const DefaultFlowBudget = 10000
 
 const maxFlowParallelism = 32
 const maxFlowMapItems = 1000
@@ -691,7 +691,7 @@ func (s *flowRunState) charge() (int, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.executions++
-	return s.executions, s.executions <= s.budget
+	return s.executions, s.budget < 0 || s.executions <= s.budget
 }
 
 // edgeAvailable is the cheap pre-check before rendering a predicate.
@@ -765,7 +765,7 @@ func RunFlow(ctx context.Context, g *FlowGraph, vars map[string]any, run FlowRun
 		vars = map[string]any{}
 	}
 	budget := g.spec.MaxNodeExecutions
-	if budget <= 0 {
+	if budget == 0 {
 		budget = DefaultFlowBudget
 	}
 	state := &flowRunState{
@@ -799,7 +799,7 @@ func RunFlowFrom(ctx context.Context, g *FlowGraph, from string, vars map[string
 		vars = map[string]any{}
 	}
 	budget := g.spec.MaxNodeExecutions
-	if budget <= 0 {
+	if budget == 0 {
 		budget = DefaultFlowBudget
 	}
 	state := &flowRunState{
@@ -866,6 +866,9 @@ func walkFlow(
 			if hooks.Started != nil {
 				hooks.Started(visitKey, node)
 			}
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			aggregate, perr := runFlowParallel(ctx, g, state, vars, current, visitKey, node, run, hooks)
 			if perr != nil {
 				switch {
@@ -925,6 +928,9 @@ func walkFlow(
 			if !restored {
 				if hooks.Started != nil {
 					hooks.Started(visitKey, node)
+				}
+				if err := ctx.Err(); err != nil {
+					return nil, err
 				}
 				var execution flowNodeExecution
 				if node.ForEach != "" {

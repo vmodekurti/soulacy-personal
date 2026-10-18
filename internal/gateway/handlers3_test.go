@@ -746,7 +746,7 @@ func TestGatewayHandleOnboardingStatus(t *testing.T) {
 func TestResolveRunTimeout_DefaultFallback(t *testing.T) {
 	def := &agent.Definition{}
 	got := resolveRunTimeout(def)
-	if got != 15*time.Minute {
+	if got != agent.DefaultRunTimeout {
 		t.Fatalf("resolveRunTimeout (no RunTimeout) = %v, want 15m", got)
 	}
 }
@@ -763,7 +763,7 @@ func TestResolveRunTimeout_InvalidIgnored(t *testing.T) {
 	def := &agent.Definition{RunTimeout: "not-a-duration"}
 	got := resolveRunTimeout(def)
 	// Falls back to default.
-	if got != 15*time.Minute {
+	if got != agent.DefaultRunTimeout {
 		t.Fatalf("resolveRunTimeout (invalid) = %v, want 15m default", got)
 	}
 }

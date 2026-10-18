@@ -69,8 +69,8 @@ func TestHardeningRestoresTheContractAndBudget(t *testing.T) {
 	if !strings.Contains(custom.SystemPrompt, "replacement Genie") {
 		t.Error("hardening must keep the operator's own role text")
 	}
-	if custom.Budget == nil || custom.Budget.MaxLLMCalls != 50 {
-		t.Fatalf("hardening must restore a budget matching Genie's turns, got %+v", custom.Budget)
+	if custom.Budget != nil {
+		t.Fatalf("hardening must preserve workspace budget inheritance, got %+v", custom.Budget)
 	}
 
 	// Hardening twice must not stack two copies of the contract.
@@ -82,19 +82,15 @@ func TestHardeningRestoresTheContractAndBudget(t *testing.T) {
 
 // Genie was allowed 50 turns but inherited a 20-call budget, so a tool-heavy
 // request died on a ceiling nobody had told it about.
-func TestGenieBudgetMatchesItsTurns(t *testing.T) {
+func TestGenieInheritsWorkspaceLimits(t *testing.T) {
 	genie := builtinGenieAgent()
-	if genie.Budget == nil {
-		t.Fatal("Genie must carry its own budget rather than inherit the engine default of 20 calls")
+	if genie.Budget != nil || genie.MaxTurns != 0 || genie.RunTimeout != "" {
+		t.Fatalf("Genie must inherit workspace execution policy: %+v", genie)
 	}
-	if genie.Budget.MaxLLMCalls < genie.MaxTurns {
-		t.Errorf("budget allows %d model calls but the agent may take %d turns",
-			genie.Budget.MaxLLMCalls, genie.MaxTurns)
-	}
-	// Still inside what the engine will grant, or it is silently clamped.
-	if genie.Budget.MaxLLMCalls > defaultMaxBudgetCalls || genie.Budget.MaxTokens > defaultMaxBudgetTokens {
-		t.Errorf("budget %+v exceeds the engine ceiling (%d calls / %d tokens)",
-			genie.Budget, defaultMaxBudgetCalls, defaultMaxBudgetTokens)
+	custom := &agent.Definition{ID: GenieAgentID, Budget: &agent.BudgetConfig{MaxTokens: 12345, MaxLLMCalls: 99}}
+	hardenGenieDefinition(custom)
+	if custom.Budget.MaxTokens != 12345 || custom.Budget.MaxLLMCalls != 99 {
+		t.Fatal("explicit operator budget changed")
 	}
 }
 

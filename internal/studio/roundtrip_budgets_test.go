@@ -79,8 +79,8 @@ func TestWorkflowRoundTrip_StillDefaultsWhatWasNeverSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	if back.MaxTurns != 15 {
-		t.Errorf("max_turns default = %d, want 15", back.MaxTurns)
+	if back.MaxTurns != 0 {
+		t.Errorf("max_turns default = %d, want 0 (inherit)", back.MaxTurns)
 	}
 	if back.Memory.MaxTokens != 8000 {
 		t.Errorf("memory.max_tokens default = %d, want 8000", back.Memory.MaxTokens)
@@ -122,5 +122,36 @@ func TestFromAgentDefinition_CopiesTheMemoryScopes(t *testing.T) {
 	d.Memory.ReadScopes[0] = "mutated"
 	if def.Memory.ReadScopes[0] != "session" {
 		t.Error("editing the draft reached back into the loaded definition")
+	}
+}
+
+func TestExecutionPolicyRoundTripPreservesExplicitUnlimited(t *testing.T) {
+	for _, workflow := range []bool{false, true} {
+		t.Run(map[bool]string{false: "reasoning", true: "workflow"}[workflow], func(t *testing.T) {
+			def := tunedWorkflowAgent()
+			if !workflow {
+				def.Workflow = nil
+				def.SystemPrompt = "Complete the requested research."
+				def.Reasoning = agent.ReasoningConfig{Strategy: "react", TotalTimeout: "20m"}
+			}
+			zero := 0
+			def.MaxTurns = -1
+			def.RunTimeout = "0"
+			def.NoProgressLimit = &zero
+			def.Budget = &agent.BudgetConfig{}
+			draft := FromAgentDefinition(def)
+			back, err := ToAgentDefinition(draft, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if back.MaxTurns != -1 || back.RunTimeout != "0" || back.NoProgressLimit == nil || *back.NoProgressLimit != 0 || back.Budget == nil || *back.Budget != (agent.BudgetConfig{}) {
+				t.Fatalf("explicit unlimited policy was lost: turns=%d timeout=%s progress=%v budget=%v", back.MaxTurns, back.RunTimeout, back.NoProgressLimit, back.Budget)
+			}
+			draft.Budget.MaxTokens = 123
+			*draft.NoProgressLimit = 7
+			if def.Budget.MaxTokens != 0 || *def.NoProgressLimit != 0 || back.Budget.MaxTokens != 0 || *back.NoProgressLimit != 0 {
+				t.Fatal("editing the draft changed the loaded or saved policy")
+			}
+		})
 	}
 }

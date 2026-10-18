@@ -25,7 +25,7 @@ surfaces: [chat]
 builtins: [person.model, person.observe]
 
 # A short interview plus a write per answer.
-max_turns: 20
+max_turns: 0 # inherit the workspace execution policy
 
 memory:
   adaptive: false

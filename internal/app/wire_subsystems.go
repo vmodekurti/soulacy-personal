@@ -1210,8 +1210,8 @@ func (a *App) wireEngine(d engineDeps) *runtime.Engine {
 	engine.SetMaxHistoryTurns(cfg.Runtime.MaxHistoryTurns)
 
 	// S3.2: hard ceiling on any agent's effective max_turns.
-	engine.SetMaxTurnsCeiling(cfg.Runtime.MaxTurnsCeiling)
-	parseTimeout := func(raw string) time.Duration { d, _ := time.ParseDuration(raw); return d }
+	engine.SetTurnLimits(cfg.Runtime.DefaultMaxTurns, cfg.Runtime.MaxTurnsCeiling)
+	parseTimeout := func(raw string) time.Duration { return agent.ParseExecutionTimeout(raw, 0) }
 	engine.SetTimeoutHierarchy(
 		parseTimeout(cfg.Runtime.Timeouts.Tool), parseTimeout(cfg.Runtime.Timeouts.LLM),
 		parseTimeout(cfg.Runtime.Timeouts.Step), parseTimeout(cfg.Runtime.Timeouts.Run),
@@ -1221,11 +1221,11 @@ func (a *App) wireEngine(d engineDeps) *runtime.Engine {
 		agent.BudgetConfig{MaxTokens: cfg.Runtime.MaxBudget.MaxTokens, MaxLLMCalls: cfg.Runtime.MaxBudget.MaxLLMCalls},
 	)
 	if cfg.Runtime.DefaultBudget.MaxTokens == 0 || cfg.Runtime.DefaultBudget.MaxLLMCalls == 0 {
-		log.Warn("runtime default run budget contains an unlimited dimension",
+		log.Debug("runtime default run budget contains an unlimited dimension",
 			zap.Int("max_tokens", cfg.Runtime.DefaultBudget.MaxTokens), zap.Int("max_llm_calls", cfg.Runtime.DefaultBudget.MaxLLMCalls))
 	}
 	if cfg.Runtime.MaxBudget.MaxTokens == 0 || cfg.Runtime.MaxBudget.MaxLLMCalls == 0 {
-		log.Warn("runtime maximum run budget contains an unlimited ceiling",
+		log.Debug("runtime maximum run budget contains an unlimited ceiling",
 			zap.Int("max_tokens", cfg.Runtime.MaxBudget.MaxTokens), zap.Int("max_llm_calls", cfg.Runtime.MaxBudget.MaxLLMCalls))
 	}
 

@@ -303,7 +303,7 @@ func LoopConfigFromDefinition(def *agent.Definition, systemPrompt string, suppor
 	}
 
 	cfg.MaxSteps = rc.MaxSteps
-	if cfg.MaxSteps <= 0 {
+	if cfg.MaxSteps == 0 {
 		cfg.MaxSteps = defaultMaxSteps(def, cfg.Strategy)
 	}
 
@@ -318,21 +318,17 @@ func LoopConfigFromDefinition(def *agent.Definition, systemPrompt string, suppor
 	}
 
 	if rc.StepTimeout != "" {
-		if d, err := time.ParseDuration(rc.StepTimeout); err == nil && d > 0 {
-			cfg.StepTimeout = d
-		}
+		cfg.StepTimeout = agent.ParseExecutionTimeout(rc.StepTimeout, agent.DefaultStepTimeout)
 	}
 	if cfg.StepTimeout <= 0 {
-		cfg.StepTimeout = 30 * time.Second
+		cfg.StepTimeout = agent.DefaultStepTimeout
 	}
 
 	if rc.TotalTimeout != "" {
-		if d, err := time.ParseDuration(rc.TotalTimeout); err == nil && d > 0 {
-			cfg.TotalTimeout = d
-		}
+		cfg.TotalTimeout = agent.ParseExecutionTimeout(rc.TotalTimeout, agent.DefaultRunTimeout)
 	}
 	if cfg.TotalTimeout <= 0 {
-		cfg.TotalTimeout = 180 * time.Second
+		cfg.TotalTimeout = agent.DefaultRunTimeout
 	}
 
 	// Collect tool names from the agent's tool definitions (RL-08).
@@ -349,78 +345,12 @@ func LoopConfigFromDefinition(def *agent.Definition, systemPrompt string, suppor
 }
 
 func defaultMaxSteps(def *agent.Definition, strategy LoopStrategy) int {
-	if strategy == StrategyPlanExecute {
-		if complexReasoningDefinition(def) {
-			return 24
-		}
-		return 16
+	if def != nil && def.MaxTurns != 0 {
+		return def.MaxTurns
 	}
-	if complexReasoningDefinition(def) {
-		return 18
-	}
-	return 8
+	return agent.DefaultMaxTurns
 }
 
 func defaultMaxPlanSteps(def *agent.Definition, strategy LoopStrategy) int {
-	if strategy == StrategyPlanExecute {
-		if complexReasoningDefinition(def) {
-			return 12
-		}
-		return 8
-	}
-	return 6
-}
-
-func complexReasoningDefinition(def *agent.Definition) bool {
-	if def == nil {
-		return false
-	}
-	text := strings.ToLower(strings.Join([]string{
-		def.StudioIntent,
-		def.StudioRawIntent,
-		def.SystemPrompt,
-		strings.Join(toolNamesFromDefinition(def), " "),
-	}, " "))
-	if strings.Contains(text, "notebooklm") || strings.Contains(text, "notebook lm") ||
-		strings.Contains(text, "podcast") || strings.Contains(text, "audio overview") {
-		return true
-	}
-	hits := 0
-	for _, word := range []string{
-		"search", "find", "fetch", "read", "rank", "filter", "summarize",
-		"create", "generate", "poll", "wait", "store", "ingest", "send", "deliver",
-	} {
-		if strings.Contains(text, word) {
-			hits++
-		}
-	}
-	if hits >= 4 {
-		return true
-	}
-	mcpCount := 0
-	for _, name := range toolNamesFromDefinition(def) {
-		if strings.HasPrefix(strings.TrimSpace(name), "mcp__") {
-			mcpCount++
-		}
-	}
-	return len(toolNamesFromDefinition(def)) >= 8 || mcpCount >= 4
-}
-
-func toolNamesFromDefinition(def *agent.Definition) []string {
-	if def == nil {
-		return nil
-	}
-	var names []string
-	for _, t := range def.Tools {
-		if strings.TrimSpace(t.Name) != "" {
-			names = append(names, t.Name)
-		}
-	}
-	if def.Builtins != nil {
-		names = append(names, *def.Builtins...)
-	}
-	if def.MCPTools != nil {
-		names = append(names, *def.MCPTools...)
-	}
-	return names
+	return agent.DefaultMaxPlanSteps
 }

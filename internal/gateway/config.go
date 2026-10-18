@@ -89,6 +89,7 @@ func (s *Server) safeConfigView() fiber.Map {
 		"runtime": fiber.Map{
 			"max_concurrent_sessions": cfg.Runtime.MaxConcurrentSessions,
 			"default_max_turns":       cfg.Runtime.DefaultMaxTurns,
+			"max_turns_ceiling":       cfg.Runtime.MaxTurnsCeiling,
 			"max_agent_call_depth":    cfg.Runtime.MaxAgentCallDepth,
 			"python_bin":              cfg.Runtime.PythonBin,
 			"tool_timeout":            cfg.Runtime.ToolTimeout,
@@ -306,7 +307,8 @@ type PatchableConfig struct {
 
 	Runtime *struct {
 		MaxConcurrentSessions int    `json:"max_concurrent_sessions" yaml:"max_concurrent_sessions"`
-		DefaultMaxTurns       int    `json:"default_max_turns" yaml:"default_max_turns"`
+		DefaultMaxTurns       *int   `json:"default_max_turns" yaml:"default_max_turns"`
+		MaxTurnsCeiling       *int   `json:"max_turns_ceiling" yaml:"max_turns_ceiling"`
 		MaxAgentCallDepth     int    `json:"max_agent_call_depth" yaml:"max_agent_call_depth"`
 		PythonBin             string `json:"python_bin" yaml:"python_bin"`
 		ToolTimeout           string `json:"tool_timeout" yaml:"tool_timeout"`
@@ -562,6 +564,14 @@ func (s *Server) handlePatchConfig(c *fiber.Ctx) error {
 	// at run start, so they can take effect on the next run without a restart.
 	if patch.Runtime != nil && s.cfg != nil {
 		budgetsPatched := false
+		if patch.Runtime.DefaultMaxTurns != nil {
+			s.cfg.Runtime.DefaultMaxTurns = max(0, *patch.Runtime.DefaultMaxTurns)
+			budgetsPatched = true
+		}
+		if patch.Runtime.MaxTurnsCeiling != nil {
+			s.cfg.Runtime.MaxTurnsCeiling = max(0, *patch.Runtime.MaxTurnsCeiling)
+			budgetsPatched = true
+		}
 		if b := patch.Runtime.DefaultBudget; b != nil {
 			if b.MaxTokens != nil {
 				s.cfg.Runtime.DefaultBudget.MaxTokens = max(0, *b.MaxTokens)
@@ -634,6 +644,7 @@ func (s *Server) hotApplyRunBudgets() {
 	if s == nil || s.engine == nil || s.cfg == nil {
 		return
 	}
+	s.engine.SetTurnLimits(s.cfg.Runtime.DefaultMaxTurns, s.cfg.Runtime.MaxTurnsCeiling)
 	s.engine.SetRunBudgets(
 		agent.BudgetConfig{
 			MaxTokens:   s.cfg.Runtime.DefaultBudget.MaxTokens,
@@ -872,8 +883,11 @@ func applyPatch(dst map[string]any, patch PatchableConfig) {
 		if patch.Runtime.MaxConcurrentSessions != 0 {
 			rt["max_concurrent_sessions"] = patch.Runtime.MaxConcurrentSessions
 		}
-		if patch.Runtime.DefaultMaxTurns != 0 {
-			rt["default_max_turns"] = patch.Runtime.DefaultMaxTurns
+		if patch.Runtime.DefaultMaxTurns != nil {
+			rt["default_max_turns"] = max(0, *patch.Runtime.DefaultMaxTurns)
+		}
+		if patch.Runtime.MaxTurnsCeiling != nil {
+			rt["max_turns_ceiling"] = max(0, *patch.Runtime.MaxTurnsCeiling)
 		}
 		if patch.Runtime.MaxAgentCallDepth != 0 {
 			rt["max_agent_call_depth"] = patch.Runtime.MaxAgentCallDepth

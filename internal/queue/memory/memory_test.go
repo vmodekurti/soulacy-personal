@@ -485,7 +485,7 @@ func TestMatchSubject_GreaterThanWildcard(t *testing.T) {
 		{"foo.>", "foo.bar", true},
 		{"foo.>", "foo.bar.baz", true},
 		{"foo.>", "foo.bar.baz.qux", true},
-		{"foo.>", "foo", false},  // > requires at least one more token
+		{"foo.>", "foo", false}, // > requires at least one more token
 		{"foo.>", "bar.baz", false},
 		{"foo.bar.>", "foo.bar.baz", true},
 		{"foo.bar.>", "foo.bar.baz.qux", true},
@@ -698,7 +698,7 @@ func TestConcurrent_SubscribeUnsubscribe(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Publish after Close — should not panic (message dropped)
+// Publish after Close reports that delivery is unavailable.
 // ---------------------------------------------------------------------------
 
 func TestPublishAfterClose_NoPanic(t *testing.T) {
@@ -706,8 +706,8 @@ func TestPublishAfterClose_NoPanic(t *testing.T) {
 	b.Close()
 
 	// Publish to a closed backend; all subscribers are gone, no-op
-	if err := b.Publish(ctx(), "after.close", []byte("x")); err != nil {
-		t.Errorf("Publish after Close returned error: %v", err)
+	if err := b.Publish(ctx(), "after.close", []byte("x")); err == nil {
+		t.Error("Publish after Close must report unavailable delivery")
 	}
 }
 
@@ -715,26 +715,11 @@ func TestPublishAfterClose_NoPanic(t *testing.T) {
 // Subscribe after Close — goroutine should exit immediately via b.quit
 // ---------------------------------------------------------------------------
 
-func TestSubscribeAfterClose_GoroutineExits(t *testing.T) {
+func TestSubscribeAfterCloseIsRejected(t *testing.T) {
 	b := New()
 	b.Close()
-
-	received := make(chan *queue.Message, 1)
-	_, err := b.Subscribe(ctx(), "post.close", "", func(m *queue.Message) {
-		received <- m
-	})
-	if err != nil {
-		t.Fatalf("Subscribe: %v", err)
-	}
-
-	// Publish — quit channel closed, so dispatcher will exit and not call handler
-	b.Publish(ctx(), "post.close", []byte("x"))
-
-	select {
-	case <-received:
-		// might or might not arrive depending on goroutine scheduling
-	case <-time.After(200 * time.Millisecond):
-		// acceptable — dispatch goroutine exited
+	if _, err := b.Subscribe(ctx(), "post.close", "", func(*queue.Message) { t.Error("closed subscription delivered a message") }); err == nil {
+		t.Fatal("closed queue accepted a subscription")
 	}
 }
 
@@ -787,4 +772,54 @@ func TestMultipleGroups_SameSubject(t *testing.T) {
 	if g2Count.Load() != n {
 		t.Errorf("group2: expected %d deliveries, got %d", n, g2Count.Load())
 	}
+}
+
+func TestPublishCopiesPayloadForEachSubscriber(t *testing.T) {
+	b := New()
+	defer b.Close()
+	gate := make(chan struct{})
+	received := make(chan string, 2)
+	for i := 0; i < 2; i++ {
+		_, err := b.Subscribe(ctx(), "data", "", func(m *queue.Message) { <-gate; received <- string(m.Data); m.Data[0] = 'z' })
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	payload := []byte("abc")
+	if err := b.Publish(ctx(), "data", payload); err != nil {
+		t.Fatal(err)
+	}
+	payload[0] = 'x'
+	close(gate)
+	for i := 0; i < 2; i++ {
+		select {
+		case got := <-received:
+			if got != "abc" {
+				t.Fatalf("shared mutable payload: %s", got)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("delivery timed out")
+		}
+	}
+}
+func TestCancelledSubscriptionReleasesResources(t *testing.T) {
+	b := New()
+	defer b.Close()
+	c, cancel := context.WithCancel(ctx())
+	_, err := b.Subscribe(c, "data", "group", func(*queue.Message) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		b.mu.RLock()
+		empty := len(b.subs) == 0 && len(b.groupIdx) == 0
+		b.mu.RUnlock()
+		if empty {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("cancelled subscription retained subscribers or group state")
 }

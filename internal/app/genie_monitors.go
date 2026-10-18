@@ -66,15 +66,11 @@ func (m *genieMonitorManager) CreateGenieMonitor(prompt, cronExpr, atRaw, channe
 		MCPServers:  &mcpServers,
 		Skills:      []string{"*"},
 		Agents:      []string{"*"},
-		// Room to look something up and write a sentence, not to run an
-		// open-ended investigation. Fifty turns and half an hour were Genie's
-		// budget for interactive work, and a background check that takes that
-		// long has gone wrong rather than gone deep.
-		MaxTurns:   12,
-		RunTimeout: "5m",
-		LLM:        agent.LLMConfig{Temperature: 0.2, MaxTokens: 2048},
-		Memory:     agent.MemoryPolicy{ReadScopes: []string{"session"}, WriteScopes: []string{"session"}, MaxTokens: 2000},
-		Policy:     agent.ToolPolicyConfig{Enabled: true, Shell: "deny", File: "deny", Network: "allow"},
+		// Scheduled work inherits the same execution policy as interactive work.
+		MaxTurns: 0,
+		LLM:      agent.LLMConfig{Temperature: 0.2, MaxTokens: agent.DefaultMaxOutputTokens},
+		Memory:   agent.MemoryPolicy{ReadScopes: []string{"session"}, WriteScopes: []string{"session"}, MaxTokens: 2000},
+		Policy:   agent.ToolPolicyConfig{Enabled: true, Shell: "deny", File: "deny", Network: "allow"},
 		SystemPrompt: "You are a background monitor. You run on a schedule, unattended, and nobody is waiting to answer a question.\n\n" +
 			"Your task: " + prompt + "\n\n" +
 			"Check what you need, using a specialist peer agent when one clearly fits. " +

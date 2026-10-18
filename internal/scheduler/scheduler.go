@@ -239,20 +239,12 @@ func (s *Scheduler) SetChannelRegistry(reg *channels.Registry) {
 	s.channels = reg
 }
 
-// maxRunDuration is the safety cap on the run-lock staleness check. It needs
-// to be at least as long as the slowest agent's run_timeout, otherwise a
-// legitimately long run would be treated as "stale" and a concurrent run
-// would start while it's still active. 1 hour covers the audio-generation
-// chains; individual agents can still declare shorter run_timeout values.
-const maxRunDuration = 1 * time.Hour
-
-// TryStartRun marks an agent as running. Returns false if it is already running
-// (within maxRunDuration), so callers can prevent overlapping/duplicate executions.
-// A stale run past maxRunDuration is overwritten so the agent isn't locked forever.
+// Run ownership lasts until FinishRun. An elapsed clock cannot prove that a
+// long or unlimited run has stopped; expiring a live lock starts duplicate work.
 func (s *Scheduler) TryStartRun(agentID string) bool {
 	s.runMu.Lock()
 	defer s.runMu.Unlock()
-	if started, ok := s.running[agentID]; ok && time.Since(started) < maxRunDuration {
+	if _, ok := s.running[agentID]; ok {
 		return false
 	}
 	s.running[agentID] = time.Now()
@@ -266,24 +258,22 @@ func (s *Scheduler) FinishRun(agentID string) {
 	delete(s.running, agentID)
 }
 
-// IsRunning reports whether an agent is currently executing (and not stale).
+// IsRunning reports whether an agent owns an active run.
 func (s *Scheduler) IsRunning(agentID string) bool {
 	s.runMu.Lock()
 	defer s.runMu.Unlock()
-	started, ok := s.running[agentID]
-	return ok && time.Since(started) < maxRunDuration
+	_, ok := s.running[agentID]
+	return ok
 }
 
 // RunningSnapshot returns a copy of currently-running agents and their start
-// times, excluding stale entries past maxRunDuration.
+// times. Locks are released by their owners, not by elapsed wall time.
 func (s *Scheduler) RunningSnapshot() map[string]time.Time {
 	s.runMu.Lock()
 	defer s.runMu.Unlock()
 	out := make(map[string]time.Time, len(s.running))
 	for k, v := range s.running {
-		if time.Since(v) < maxRunDuration {
-			out[k] = v
-		}
+		out[k] = v
 	}
 	return out
 }
@@ -502,7 +492,7 @@ func (s *Scheduler) fireAt(agentID, triggerType string, scheduledAt time.Time) {
 	}
 
 	// Honor the agent's declared run_timeout (e.g. NotebookLM pipelines need
-	// 30-45m). Fall back to a generous 15-min default for agents that don't
+	// 30-45m). Inherit the shared workspace policy for agents that do not
 	// override it. Derived from s.appCtx so SIGTERM cancels in-flight runs
 	// (PRODUCTION_AUDIT → HIGH/Concurrency: previously context.Background()
 	// here meant graceful shutdown could hang for the full run_timeout).
@@ -511,7 +501,7 @@ func (s *Scheduler) fireAt(agentID, triggerType string, scheduledAt time.Time) {
 		s.log.Error("scheduled agent definition missing", zap.String("agent", agentID))
 		return
 	}
-	timeout := def.ResolvedRunTimeout(15 * time.Minute)
+	timeout := s.engine.RunTimeout(def)
 	ctx, cancel := context.WithTimeout(s.appCtx, timeout)
 	defer cancel()
 
@@ -568,7 +558,7 @@ func (s *Scheduler) fireAt(agentID, triggerType string, scheduledAt time.Time) {
 		}
 	}
 	s.sendScheduledOutput(ctx, def, msg, replyText, triggerType, reply.Metadata)
-	s.log.Info("scheduled agent completed",
+	s.log.Info("scheduled agent finished",
 		zap.String("agent", agentID),
 		zap.String("trigger", triggerType),
 		zap.Duration("elapsed", elapsed),

@@ -78,7 +78,7 @@ func TestEffectiveRunBudgetInheritanceOverridesAndCeilings(t *testing.T) {
 		{"lower override", &agent.BudgetConfig{MaxTokens: 500, MaxLLMCalls: 5}, 500, 5},
 		{"higher within ceiling", &agent.BudgetConfig{MaxTokens: 1500, MaxLLMCalls: 15}, 1500, 15},
 		{"clamped", &agent.BudgetConfig{MaxTokens: 9000, MaxLLMCalls: 90}, 2000, 20},
-		{"explicit unlimited", &agent.BudgetConfig{MaxTokens: 0, MaxLLMCalls: 0}, 0, 0},
+		{"unlimited still respects operator ceiling", &agent.BudgetConfig{MaxTokens: 0, MaxLLMCalls: 0}, 2000, 20},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			gotT, gotC := e.effectiveRunBudget(&agent.Definition{Budget: tc.budget})
