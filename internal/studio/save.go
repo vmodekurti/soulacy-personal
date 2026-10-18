@@ -538,51 +538,6 @@ func reasoningConfigFor(draft Draft, strategy string) agent.ReasoningConfig {
 	return cfg
 }
 
-func defaultReasoningBudgets(draft Draft, strategy string) (int, int) {
-	if strings.EqualFold(strategy, "plan_execute") {
-		if highComplexityReasoningTask(draft) {
-			return 24, 12
-		}
-		return 16, 8
-	}
-	if highComplexityReasoningTask(draft) {
-		return 18, 8
-	}
-	return 8, 6
-}
-
-func highComplexityReasoningTask(draft Draft) bool {
-	text := strings.ToLower(strings.Join([]string{
-		draft.Intent,
-		draft.RawIntent,
-		draft.SystemPrompt,
-		strings.Join(draft.Tools, " "),
-	}, " "))
-	if strings.Contains(text, "notebooklm") || strings.Contains(text, "notebook lm") ||
-		strings.Contains(text, "podcast") || strings.Contains(text, "audio overview") {
-		return true
-	}
-	hits := 0
-	for _, word := range []string{
-		"search", "find", "fetch", "read", "rank", "filter", "summarize",
-		"create", "generate", "poll", "wait", "store", "ingest", "send", "deliver",
-	} {
-		if strings.Contains(text, word) {
-			hits++
-		}
-	}
-	if hits >= 4 {
-		return true
-	}
-	mcpCount := 0
-	for _, tool := range draft.Tools {
-		if strings.HasPrefix(strings.TrimSpace(tool), "mcp__") {
-			mcpCount++
-		}
-	}
-	return len(draft.Tools) >= 8 || mcpCount >= 4
-}
-
 func normalizedRunTimeout(runTimeout, reasoningTotal string) string {
 	runTimeout = strings.TrimSpace(runTimeout)
 	if d, err := time.ParseDuration(runTimeout); err == nil && d == 0 {
@@ -613,8 +568,6 @@ func parsePositiveDuration(s string) time.Duration {
 	return d
 }
 
-// maxTurnsOr returns v when positive, else the fallback — so a user-tuned
-// max_turns survives the round-trip while an unset draft gets the default.
 // memoryOr returns the draft's memory policy, or Studio's default when the
 // draft carries none. Overwriting a policy the user tuned in SOUL.yaml with a
 // constant is the same class of loss as resetting max_turns.
@@ -629,13 +582,6 @@ func memoryOr(m *agent.MemoryPolicy) agent.MemoryPolicy {
 	out.ReadScopes = append([]string(nil), m.ReadScopes...)
 	out.WriteScopes = append([]string(nil), m.WriteScopes...)
 	return out
-}
-
-func maxTurnsOr(v, fallback int) int {
-	if v > 0 {
-		return v
-	}
-	return fallback
 }
 
 func reactDescription(draft Draft) string {

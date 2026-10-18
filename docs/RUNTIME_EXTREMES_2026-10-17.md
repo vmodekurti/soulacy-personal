@@ -107,7 +107,7 @@ copy arbitrary filesystem paths should be inferred from a single successful run.
 
 ## Evidence and reproduction
 
-The reusable runner is [`scripts/runtime-extremes.py`](../scripts/runtime-extremes.py).
+The reusable runner is `scripts/runtime-extremes.py` at the repository root.
 It records results, failures, gateway logs, tool calls, provider requests for the
 scripted lane, SSE output, and the isolated databases. New runs also record the
 binary SHA-256 and installed model digest. `--output` must name a new directory.
