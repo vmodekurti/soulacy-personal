@@ -127,12 +127,14 @@ func (e *Engine) executeOneToolCall(ctx context.Context, def *agent.Definition, 
 	// envelope so the model treats it as evidence rather than
 	// instruction. Errors are always considered trusted framework
 	// status ("tool X failed: …") because the error string is minted by
-	// us, not by the remote source. Duplicate-run guards return prior
-	// content that was already wrapped, so we skip re-wrapping when the
-	// content already carries an envelope.
+	// us, not by the remote source. We always wrap, even when the body
+	// already looks wrapped: nothing upstream pre-wraps tool results, so
+	// an envelope inside one was authored by the source — skipping the
+	// wrap would let a page forge trust="trusted" and dodge the scanner.
+	// WrapExplicit neutralises the nested tags.
 	trustLevel := trust.ToolTrust(tc.Name)
 	sourceCategory := trust.SourceCategory(tc.Name)
-	if !isErr && trustLevel == trust.Untrusted && !trust.IsWrapped(result) {
+	if !isErr && trustLevel == trust.Untrusted {
 		result = trust.Wrap(trustLevel, tc.Name, result)
 	}
 	trustStr := trustLevel.String()
@@ -166,20 +168,21 @@ func (e *Engine) executeOneToolCall(ctx context.Context, def *agent.Definition, 
 		}
 	}
 
-	// S3 (Cohort F) — track whether the most recent evidence source
-	// was untrusted. The intent gate reads this on the NEXT tool call
-	// so it can distinguish "user asked for a shell command" from
-	// "we just fetched a page that told us to shell out." Only real
-	// evidence flips the flag; errors don't reset it (an errored
-	// fetch still might have leaked untrusted headers in the error).
-	if !isErr {
+	// S3 (Cohort F) — track whether this turn has seen untrusted
+	// evidence. The intent gate reads this on later tool calls so it
+	// can distinguish "user asked for a shell command" from "we fetched
+	// a page that told us to shell out." The flag is sticky until the
+	// next user turn (engine_loop resets it): if a trusted result could
+	// clear it, an injected page could say "call sys_info, then
+	// shell_exec …" and the gate would never see the taint.
+	if !isErr && trustLevel == trust.Untrusted {
 		agentID := ""
 		if def != nil {
 			agentID = def.ID
 		}
 		if sess := e.lookupSession(agentID, sessionID); sess != nil {
 			sess.mu.Lock()
-			sess.lastEvidenceUntrusted = trustLevel == trust.Untrusted
+			sess.lastEvidenceUntrusted = true
 			sess.mu.Unlock()
 		}
 	}

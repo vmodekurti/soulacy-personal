@@ -467,7 +467,8 @@ type Session struct {
 	// been recorded. Guarded by mu.
 	injectionLastSource string
 	// lastEvidenceUntrusted flips true whenever a tool result carried
-	// trust=untrusted, and back to false on the next trusted result.
+	// trust=untrusted and stays true until the next user turn — a
+	// trusted result in between must not launder the taint.
 	// Consumed by the S3 intent gate to decide whether a followup
 	// privileged tool call is plausibly steered by untrusted content.
 	// Guarded by mu.

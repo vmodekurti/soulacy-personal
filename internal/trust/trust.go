@@ -100,6 +100,14 @@ const (
 // model quoting the envelope back at itself in a reply).
 var envelopeRe = regexp.MustCompile(`(?s)<external_content\s+([^>]*?)>\s*(.*?)\s*</external_content>`)
 
+// nestedOpenRe / nestedCloseRe find envelope-shaped tags in untrusted
+// bodies regardless of case or interior whitespace. The `\b` keeps an
+// already-neutralised "<external_content_nested" from being re-suffixed.
+var (
+	nestedOpenRe  = regexp.MustCompile(`(?i)<\s*external_content\b`)
+	nestedCloseRe = regexp.MustCompile(`(?i)<\s*/\s*external_content\s*>`)
+)
+
 // attrRe extracts a single key="value" pair from an envelope's attribute
 // list. Values are single-line so no need for cross-line matching here.
 var attrRe = regexp.MustCompile(`(\w+)="([^"]*)"`)
@@ -139,11 +147,12 @@ func WrapExplicit(level Level, source, body string) string {
 	if source == "" {
 		source = "unknown"
 	}
-	// Extremely defensive: strip a nested opening tag from the body so
-	// we can't accidentally build an envelope that closes on the wrong
-	// tag when the model echoes our own wrapping back at us.
-	body = strings.ReplaceAll(body, envelopeOpen, "<external_content_nested")
-	body = strings.ReplaceAll(body, envelopeClose, "</external_content_nested>")
+	// Neutralise any envelope tags inside the body so attacker bytes
+	// can't close our envelope early (or forge a trusted one). Matching
+	// is case- and whitespace-insensitive because the model reads
+	// "</EXTERNAL_CONTENT >" as a closing tag just as readily.
+	body = nestedCloseRe.ReplaceAllString(body, "</external_content_nested>")
+	body = nestedOpenRe.ReplaceAllString(body, "<external_content_nested")
 	return fmt.Sprintf("%s trust=%q source=%q>\n%s\n%s",
 		envelopeOpen, level.String(), source, body, envelopeClose)
 }
@@ -202,11 +211,11 @@ func parseEnvelope(attrsRaw, body string) Envelope {
 }
 
 // ToolTrust classifies a builtin/MCP/plugin tool name into its default
-// trust level. The classifier is CLOSED — anything not on either the
-// trusted-host list or the untrusted-external list defaults to Trusted
-// (so a new builtin doesn't accidentally get its results marked
-// untrusted, which would then influence S3's intent gate). Builtins
-// that fetch external content MUST be listed on untrustedExternal.
+// trust level. Builtins not on untrustedExternal default to Trusted so
+// framework status results stay unwrapped and Studio preflight doesn't
+// flag every agent; that makes the list load-bearing — any builtin whose
+// output can carry bytes the framework did not mint (network, files,
+// recalled memory, process stdout) MUST be listed there.
 //
 // The philosophy: "everything from the outside world is untrusted
 // unless the framework proves otherwise" applies to CONTENT, not to
@@ -283,6 +292,26 @@ var untrustedExternal = map[string]bool{
 	// Session-history search across peers — content came from prior
 	// runs which processed untrusted channel inputs.
 	"session_search": true,
+	// Long-term memory and KB aliases — recalled text was distilled from
+	// earlier sessions that read untrusted content.
+	"semantic_memory_search": true,
+	"search_kb":              true,
+	"kb.search":              true,
+	"knowledge_search":       true,
+	"knowledge.search":       true,
+	"rag_search":             true,
+	"rag.search":             true,
+	// Execution output — stdout of `curl`, a script that reads a file, or
+	// python that fetches a page carries attacker bytes just like
+	// fetch_url does. Leaving these trusted let a shell call launder an
+	// injection past the S3 gate.
+	"shell_exec":  true,
+	"run_script":  true,
+	"python_eval": true,
+	// Browser and remote-MCP inspection return remotely authored text
+	// (page bodies, tool descriptions).
+	"browser_open":        true,
+	"mcp_install_inspect": true,
 }
 
 // SourceRegistry describes a tool's category for the trace annotation.

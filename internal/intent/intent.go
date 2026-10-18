@@ -35,6 +35,8 @@ package intent
 
 import (
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/soulacy/soulacy/internal/injection"
 )
@@ -103,8 +105,9 @@ type Input struct {
 	// Arguments carries a shallow copy of the requested tool's args
 	// so we can extract a target (url, command, path, channel, …).
 	Arguments map[string]any
-	// LastEvidenceUntrusted is true when the immediately-preceding
-	// tool result had trust=untrusted per the S1 classifier.
+	// LastEvidenceUntrusted is true when any tool result since the
+	// operator's latest message had trust=untrusted per the S1
+	// classifier (the name predates the turn-scoped semantics).
 	LastEvidenceUntrusted bool
 	// InjectionSeverity is the highest injection finding recorded on
 	// the session so far (per S2's SessionInjectionState).
@@ -289,11 +292,11 @@ func goalPlausiblyAskedFor(goal, toolName string, args map[string]any) bool {
 	// Tool-name / aliases match. Split on '_' so "run_script" also
 	// triggers on "run a script"; check the full name too.
 	lowered := strings.ToLower(toolName)
-	if lowered != "" && strings.Contains(goal, lowered) {
+	if lowered != "" && containsToken(goal, lowered) {
 		return true
 	}
 	for _, alias := range toolAliases[lowered] {
-		if strings.Contains(goal, alias) {
+		if containsToken(goal, alias) {
 			return true
 		}
 	}
@@ -304,18 +307,20 @@ func goalPlausiblyAskedFor(goal, toolName string, args map[string]any) bool {
 			// Require two consecutive tokens to appear in the goal
 			// (not just "write" alone; that's too permissive).
 			joined := parts[i] + " " + parts[i+1]
-			if strings.Contains(goal, joined) {
+			if containsToken(goal, joined) {
 				return true
 			}
 		}
 	}
 	// Target-argument match — check the raw arguments the model
 	// wants to pass. If the goal names the same URL/path/channel/
-	// command, the operator has already scoped the action.
+	// command, the operator has already scoped the action. Values
+	// shorter than minArgMatchLen ("/", "a", "ls") appear in nearly any
+	// goal, so they never count as the operator naming the target.
 	for _, key := range []string{"url", "path", "file", "filename", "channel", "to", "command", "cmd", "script", "text", "message"} {
 		if v, ok := args[key]; ok {
 			s := strings.ToLower(strings.TrimSpace(anyToString(v)))
-			if s != "" && strings.Contains(goal, s) {
+			if len([]rune(s)) >= minArgMatchLen && containsToken(goal, s) {
 				return true
 			}
 		}
@@ -339,6 +344,64 @@ var toolAliases = map[string][]string{
 	"channel.send":    {"send a message", "send message", "message @", "post to slack", "post to discord", "reply on telegram", "send to whatsapp", "notify"},
 	"python_eval":     {"eval python", "run python", "python script", "compute in python"},
 	"kb_write":        {"add to knowledge base", "ingest into kb", "write to kb"},
+}
+
+// minArgMatchLen is the shortest argument value that can satisfy the
+// target-argument match.
+const minArgMatchLen = 4
+
+// containsToken reports whether needle occurs in haystack on token
+// boundaries: the characters either side of the match must not be
+// letters or digits. "shell" therefore matches "open a shell" but not
+// "in a nutshell", and "/tmp" does not match inside "/tmp2".
+func containsToken(haystack, needle string) bool {
+	if needle == "" {
+		return false
+	}
+	for from := 0; ; {
+		i := strings.Index(haystack[from:], needle)
+		if i < 0 {
+			return false
+		}
+		start := from + i
+		end := start + len(needle)
+		if !isWordRuneBefore(haystack, start, needle) && !isWordRuneAfter(haystack, end, needle) {
+			return true
+		}
+		from = start + 1
+	}
+}
+
+// isWordRuneBefore reports whether the rune just before index i is a
+// letter/digit that would glue onto the needle's first rune. Needles
+// that begin with punctuation (a URL scheme, "/path", "@user") carry
+// their own boundary, so only a word-shaped needle edge is checked.
+func isWordRuneBefore(s string, i int, needle string) bool {
+	if i == 0 {
+		return false
+	}
+	first, _ := utf8.DecodeRuneInString(needle)
+	if !isWordRune(first) {
+		return false
+	}
+	r, _ := utf8.DecodeLastRuneInString(s[:i])
+	return isWordRune(r)
+}
+
+func isWordRuneAfter(s string, i int, needle string) bool {
+	if i >= len(s) {
+		return false
+	}
+	last, _ := utf8.DecodeLastRuneInString(needle)
+	if !isWordRune(last) {
+		return false
+	}
+	r, _ := utf8.DecodeRuneInString(s[i:])
+	return isWordRune(r)
+}
+
+func isWordRune(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
 func anyToString(v any) string {
