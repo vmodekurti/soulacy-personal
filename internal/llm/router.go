@@ -98,6 +98,15 @@ func (r *Router) Register(p Provider) {
 	r.profileGeneration++
 }
 
+// Unregister removes a deleted provider from live routing as well as invalidating
+// cached model profiles. Configuration deletion must not leave it callable.
+func (r *Router) Unregister(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.providers, id)
+	r.profileGeneration++
+}
+
 // Complete routes a request to the named provider (or the default if providerID is "").
 func (r *Router) Complete(ctx context.Context, providerID string, req CompletionRequest) (*CompletionResponse, error) {
 	p, key, controller, snapshotErr := r.modelSnapshot(providerID, req.Model)

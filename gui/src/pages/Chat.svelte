@@ -1282,8 +1282,8 @@
   }
 
   // ── suggested prompts (per-agent empty state) ────────────────────────
-  function promptsFor(agentId) {
-    return suggestedPrompts(agents.find(a => a.id === agentId), 4)
+  function promptsFor(agentId, availableAgents) {
+    return suggestedPrompts(availableAgents.find(a => a.id === agentId), 4)
   }
   function useSuggestion(s) { input = s; composerEl?.focus() }
 
@@ -2622,9 +2622,9 @@
           {#if activeThread?.agentId}
             <div class="empty-avatar" aria-hidden="true">✦</div>
             <h2 class="empty-title">Your AI gateway for <span>real work.</span></h2>
-            <p class="empty-sub">Access your agents, your data, and the web in one secure workspace.</p>
+            <p class="empty-sub">{activeThread.agentId === 'genie' ? 'Find job results, retrieve podcast links, and manage your agents. Core operational settings stay protected.' : 'Access your agents, your data, and the web in one secure workspace.'}</p>
             <div class="suggestions">
-              {#each promptsFor(activeThread.agentId) as s}
+              {#each promptsFor(activeThread.agentId, agents) as s}
                 <button class="suggestion" on:click={() => useSuggestion(s)}>{s}</button>
               {/each}
             </div>

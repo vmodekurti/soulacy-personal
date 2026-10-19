@@ -39,6 +39,7 @@ import { marked } from 'marked'
 import markedKatex from 'marked-katex-extension'
 import DOMPurify from 'dompurify'
 import { tableFromFence } from './datatable.js'
+import { podcastAudioRenderer } from './podcastAudio.js'
 import hljs from 'highlight.js'
 import mermaid from 'mermaid'
 import * as echarts from 'echarts'
@@ -100,8 +101,7 @@ function isPodcastAudioURL(href) {
   try {
     const u = new URL(href)
     if (u.protocol !== 'https:' && u.protocol !== 'http:') return false
-    const parts = u.pathname.toLowerCase().split('/').filter(Boolean)
-    return parts.at(-1) === 'audio' && parts.includes('episodes')
+    return /\/api\/podcasts\/episodes\/[^/]+\/audio$/.test(u.pathname)
   } catch (_) {
     return false
   }
@@ -208,7 +208,8 @@ function embedVideos(html) {
     // link the author deliberately wrapped around words.
     const href = a.getAttribute('href') || ''
     const bare = (a.textContent || '').trim() === href.trim()
-    if (!bare) return
+    const podcastAudio = isPodcastAudioURL(href)
+    if (!bare && !podcastAudio) return
     if (VIDEO_FILE_RE.test(href)) {
       const v = doc.createElement('video')
       v.setAttribute('controls', '')
@@ -229,23 +230,30 @@ function embedVideos(html) {
       a.replaceWith(wrap)
       return
     }
-    const podcastAudio = isPodcastAudioURL(href)
     if (AUDIO_FILE_RE.test(href) || podcastAudio) {
       const wrap = doc.createElement('div')
       wrap.className = 'md-audio-card'
       if (podcastAudio) {
         const link = doc.createElement('a')
         link.setAttribute('href', href)
-        link.textContent = 'Listen to episode'
+        link.textContent = bare ? 'Listen to episode' : a.textContent
         link.className = 'md-audio-link'
         wrap.appendChild(link)
       }
       const au = doc.createElement('audio')
       au.setAttribute('controls', '')
       au.setAttribute('preload', 'metadata')
-      au.setAttribute('src', href)
+      if (podcastAudio) au.setAttribute('data-podcast-url', href)
+      else au.setAttribute('src', href)
       au.className = 'md-audio'
       wrap.appendChild(au)
+      if (podcastAudio) {
+        const original = doc.createElement('a')
+        original.href = href
+        original.textContent = 'Original link'
+        original.className = 'md-audio-original'
+        wrap.appendChild(original)
+      }
       a.replaceWith(wrap)
       return
     }
@@ -655,6 +663,7 @@ function addCodeCopyButton(codeEl) {
  * renders ```chart fences to interactive ECharts charts.
  */
 export function richRenderer(node, value = '') {
+  const podcasts = podcastAudioRenderer(node)
   // ECharts instances (+ their ResizeObservers) to tear down on re-render/destroy.
   const liveCharts = []
   let lastValue = value == null ? '' : String(value)
@@ -803,6 +812,7 @@ export function richRenderer(node, value = '') {
 
   function run() {
     disposeCharts()
+    podcasts.update()
 
     // (1) Syntax-highlight fenced code — skip the blocks we render specially.
     node.querySelectorAll('pre code').forEach((el) => {
@@ -938,6 +948,7 @@ export function richRenderer(node, value = '') {
     },
     destroy() {
       runToken++
+      podcasts.destroy()
       disposeCharts()
     },
   }

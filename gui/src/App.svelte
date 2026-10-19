@@ -544,8 +544,8 @@
     </button>
 
     <div class="drawer-navigation">
-    <div class="mode-switch" role="group" aria-label="How much to show">
-      <span class="mode-label">Show</span>
+    <div class="mode-switch" role="group" aria-label="Pages shown in the menu">
+      <span class="mode-label">Menu detail</span>
       <div class="mode-buttons">
         {#each navLevels as lvl}
           <button class="mode-btn" class:on={$navLevel === lvl.key}
@@ -612,7 +612,7 @@
         <button on:click={() => appLauncherOpen = false} aria-label="Close all tools">×</button>
       </header>
       <label class="launcher-search"><span>⌕</span><input bind:value={appSearch} placeholder="Find a screen" /></label>
-      <div class="launcher-modes" role="group" aria-label="How much to show">
+      <div class="launcher-modes" role="group" aria-label="Pages shown in the menu">
         {#each navLevels as lvl}
           <button class:on={$navLevel === lvl.key} aria-pressed={$navLevel === lvl.key} on:click={() => navLevel.set(lvl.key)}>{lvl.label}</button>
         {/each}

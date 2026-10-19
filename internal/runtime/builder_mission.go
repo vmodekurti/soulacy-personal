@@ -21,10 +21,18 @@ func builderMissionContract(u *BuilderUnderstanding, agentID string) *agent.Miss
 	}
 	text := strings.ToLower(strings.Join([]string{u.Purpose, u.Description, u.SystemPrompt}, "\n"))
 	checks := make([]agent.MissionCheck, 0, 5)
+	// An API podcast workflow may reuse an existing episode or public sources.
+	// Saved logins are available routes, not mandatory actions on every run.
+	nativePodcast := containsAnyBuilderPhrase(text, "open_notebook_generate_podcast", "open_notebook_get_podcast_audio")
+	for _, tool := range u.Tools {
+		if strings.Contains(tool.Name, "open_notebook_generate_podcast") || strings.Contains(tool.Name, "open_notebook_get_podcast_audio") {
+			nativePodcast = true
+		}
+	}
 	usesWebsiteAccess := len(u.Connections) > 0 || containsAnyBuilderPhrase(text,
 		"website access", "saved website", "authenticated session", "authenticated content")
 
-	if usesWebsiteAccess && containsAnyBuilderPhrase(text,
+	if !nativePodcast && usesWebsiteAccess && containsAnyBuilderPhrase(text,
 		"article", "research", "read ", "source", "trending", "subscription") {
 		checks = append(checks, agent.MissionCheck{
 			ID:          "website-content-read",
@@ -84,26 +92,36 @@ func effectiveBuilderMissionContract(def *agent.Definition) *agent.MissionContra
 	for _, id := range def.Connections {
 		connections = append(connections, BuilderConnection{ID: id, Name: id, Ready: true})
 	}
+	var tools []BuilderTool
+	if def.MCPTools != nil {
+		for _, name := range *def.MCPTools {
+			tools = append(tools, BuilderTool{Name: name})
+		}
+	}
 	return builderMissionContract(&BuilderUnderstanding{
 		Name: def.ID, Description: def.Description, Purpose: def.Description,
-		SystemPrompt: def.SystemPrompt, Connections: connections,
+		SystemPrompt: def.SystemPrompt, Connections: connections, Tools: tools,
 	}, def.ID)
 }
 
 func builderNeedsInteractiveWebsite(u *BuilderUnderstanding, text string) bool {
+	if containsAnyBuilderPhrase(text, "start_website_action", "inspect_website_action", "act_on_website") {
+		return true
+	}
 	for _, connection := range u.Connections {
 		identity := strings.ToLower(connection.Name + " " + strings.Join(connection.Domains, " "))
 		if strings.Contains(identity, "notebooklm") || strings.Contains(identity, "notebook.google") {
 			return true
 		}
 	}
-	if containsAnyBuilderPhrase(text, "notebooklm", "notebook.google", "website access") &&
+	if containsAnyBuilderPhrase(text, "notebooklm", "notebook.google") &&
 		containsAnyBuilderPhrase(text, "create a notebook", "add them to", "generate podcast", "generate audio") {
 		return true
 	}
-	return containsAnyBuilderPhrase(text,
-		"create a notebook", "add them to", "generate podcast", "generate audio",
-		"book ", "reserve ", "purchase ", "submit ", "fill out")
+	// Verbs like "add", "generate", and "submit" also describe API work.
+	// Require an explicit browser route before demanding browser-only tools.
+	return containsAnyBuilderPhrase(text, "in the browser", "on the website", "website form", "web form") &&
+		containsAnyBuilderPhrase(text, "book ", "reserve ", "purchase ", "submit ", "fill out", "click ")
 }
 
 func containsAnyBuilderPhrase(text string, phrases ...string) bool {

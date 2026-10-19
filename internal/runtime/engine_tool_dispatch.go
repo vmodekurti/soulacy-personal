@@ -222,8 +222,7 @@ print(result if isinstance(result, str) else json.dumps(result))
 		if b.Name != call.Name {
 			continue
 		}
-		websiteRoute := safeWebsiteRouteTool(b.Name) && len(e.readyWebsiteConnections(ctx, def)) > 0
-		if !e.builtinAllowed(def, b, websiteRoute) {
+		if !e.builtinAllowed(ctx, def, b) {
 			return "", fmt.Errorf("agent has not enabled tool %q", b.Name)
 		}
 
@@ -669,10 +668,7 @@ func (e *Engine) allToolSchemasForContext(ctx context.Context, def *agent.Defini
 		if !callerAllowsTool(ctx, b.Name) {
 			continue
 		}
-		// Agents with a ready, explicitly granted Website Access connection
-		// also receive the safe browser route.
-		websiteRoute := len(websiteConnections) > 0 && safeWebsiteRouteTool(b.Name)
-		if !e.builtinAllowed(def, b, websiteRoute) {
+		if !e.builtinAllowed(ctx, def, b) {
 			continue
 		}
 		schemas = append(schemas, llm.ToolSchema{

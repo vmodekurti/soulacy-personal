@@ -149,6 +149,28 @@ func TestOrdinaryUnownedAgentDoesNotReceiveBuilderMission(t *testing.T) {
 	}
 }
 
+func TestOpenNotebookPodcastDoesNotRequireBrowserActionsOrRefetch(t *testing.T) {
+	def := &agent.Definition{
+		ID: "daily-ai-leadership-podcast", Trigger: agent.TriggerCron,
+		Description:  "Pull the latest articles, add them to a dedicated Open Notebook, generate a podcast, and send a listening link.",
+		SystemPrompt: "Use authenticated access when needed; skip failed sources and continue. Reuse today's completed episode when present.",
+		MCPTools:     strListPtr("mcp__open-notebook__open_notebook_generate_podcast", "mcp__open-notebook__open_notebook_get_podcast_audio"),
+		Connections:  []string{"hbr", "gartner"},
+		Labels:       map[string]string{"soulacy.owner": GenieAgentID},
+	}
+	contract := effectiveBuilderMissionContract(def)
+	if contract == nil || len(contract.Acceptance) != 1 || contract.Acceptance[0].ID != "audio-link-produced" {
+		t.Fatalf("API podcast must allow existing episodes and public-source fallbacks: %#v", contract)
+	}
+	progress := &missionProgress{}
+	if got := builderMissionFailureSummary(contract, progress, "Podcast audio: https://phone.example/api/podcasts/episodes/abc/audio"); got != "" {
+		t.Fatal(got)
+	}
+	if got := builderMissionFailureSummary(contract, progress, "I searched for articles."); got == "" {
+		t.Fatal("missing audio incorrectly passed")
+	}
+}
+
 func TestExistingGenieAgentDerivesWebsiteMissionWithoutPinnedConnections(t *testing.T) {
 	def := &agent.Definition{
 		ID: "daily-tech-podcast", Description: "Read trending HBR articles using Website Access, add them to NotebookLM, generate a podcast, and return its audio link.",
@@ -416,6 +438,9 @@ func TestBuilderMissionRejectsInvalidRecoveredToolArgumentsAndStopsBoundedly(t *
 	}
 	if executions != 0 {
 		t.Fatalf("invalid recovered arguments executed tool %d times", executions)
+	}
+	if content := flattenParts(reply.Parts); !strings.Contains(content, "missing required argument") || !strings.Contains(content, "What to do:") || !strings.Contains(content, "publish_report") {
+		t.Fatalf("failure did not explain the failing step and next action: %s", content)
 	}
 	if got := len(provider.requestsSnapshot()); got != 5 {
 		t.Fatalf("provider calls = %d, want bounded five despite max_turns 25", got)

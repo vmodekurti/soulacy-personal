@@ -121,7 +121,7 @@ func (e *Engine) recoverRequiredMissionTool(
 		if err != nil {
 			detail = err.Error()
 		}
-		e.emitRequiredToolRecoveryWarning(msg, schema.Name, detail)
+		e.emitRequiredToolRecoveryWarning(ctx, msg, schema.Name, detail)
 		return result
 	}
 
@@ -151,18 +151,23 @@ func (e *Engine) recoverRequiredMissionTool(
 		if parseErr != nil {
 			detail = parseErr.Error()
 		}
-		e.emitRequiredToolRecoveryWarning(msg, schema.Name, detail)
+		e.emitRequiredToolRecoveryWarning(ctx, msg, schema.Name, detail)
 		return result
 	}
 	if err := validateRecoveredToolArguments(schema.Parameters, args); err != nil {
-		e.emitRequiredToolRecoveryWarning(msg, schema.Name, err.Error())
+		e.emitRequiredToolRecoveryWarning(ctx, msg, schema.Name, err.Error())
 		return result
 	}
 	result.Call = &message.ToolCall{ID: "mission-recovery-" + uuidShort(), Name: schema.Name, Arguments: args}
 	return result
 }
 
-func (e *Engine) emitRequiredToolRecoveryWarning(msg message.Message, toolName, detail string) {
+func (e *Engine) emitRequiredToolRecoveryWarning(ctx context.Context, msg message.Message, toolName, detail string) {
+	if progress, ok := ctx.Value(missionProgressKey{}).(*missionProgress); ok {
+		progress.mu.Lock()
+		progress.failures.Observe(normalizeToolCallName(toolName), "could not derive schema-valid arguments: "+detail)
+		progress.mu.Unlock()
+	}
 	e.sink.Emit(message.Event{
 		Type: "warn", AgentID: msg.AgentID, SessionID: msg.SessionID,
 		Payload: map[string]any{

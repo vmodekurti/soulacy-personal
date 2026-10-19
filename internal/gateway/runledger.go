@@ -3,6 +3,7 @@ package gateway
 import (
 	"fmt"
 	"github.com/soulacy/soulacy/internal/presentation"
+	"github.com/soulacy/soulacy/internal/runfailure"
 	"sort"
 	"strings"
 	"time"
@@ -14,29 +15,30 @@ import (
 )
 
 type runLedgerRow struct {
-	RunID           string    `json:"runId"`
-	ID              string    `json:"id"`
-	AgentID         string    `json:"agentId,omitempty"`
-	AgentName       string    `json:"agentName,omitempty"`
-	SessionID       string    `json:"sessionId,omitempty"`
-	Trigger         string    `json:"trigger,omitempty"`
-	Channel         string    `json:"channel,omitempty"`
-	Source          string    `json:"source,omitempty"`
-	StartedAt       time.Time `json:"startedAt"`
-	UpdatedAt       time.Time `json:"updatedAt,omitempty"`
-	Steps           int       `json:"steps,omitempty"`
-	Ok              bool      `json:"ok"`
-	Status          string    `json:"status"`
-	Error           string    `json:"error,omitempty"`
-	Output          string    `json:"output,omitempty"`
-	DeliveryChannel string    `json:"deliveryChannel,omitempty"`
-	DeliveryTo      string    `json:"deliveryTo,omitempty"`
-	DeliveryStatus  string    `json:"deliveryStatus,omitempty"`
-	DeliveryError   string    `json:"deliveryError,omitempty"`
-	HasBrowserTrace bool      `json:"hasBrowserTrace,omitempty"`
-	BrowserEvents   int       `json:"browserEvents,omitempty"`
-	EventCount      int       `json:"eventCount,omitempty"`
-	DurationMS      int64     `json:"durationMs,omitempty"`
+	Failure         *runfailure.Diagnosis `json:"failure,omitempty"`
+	RunID           string                `json:"runId"`
+	ID              string                `json:"id"`
+	AgentID         string                `json:"agentId,omitempty"`
+	AgentName       string                `json:"agentName,omitempty"`
+	SessionID       string                `json:"sessionId,omitempty"`
+	Trigger         string                `json:"trigger,omitempty"`
+	Channel         string                `json:"channel,omitempty"`
+	Source          string                `json:"source,omitempty"`
+	StartedAt       time.Time             `json:"startedAt"`
+	UpdatedAt       time.Time             `json:"updatedAt,omitempty"`
+	Steps           int                   `json:"steps,omitempty"`
+	Ok              bool                  `json:"ok"`
+	Status          string                `json:"status"`
+	Error           string                `json:"error,omitempty"`
+	Output          string                `json:"output,omitempty"`
+	DeliveryChannel string                `json:"deliveryChannel,omitempty"`
+	DeliveryTo      string                `json:"deliveryTo,omitempty"`
+	DeliveryStatus  string                `json:"deliveryStatus,omitempty"`
+	DeliveryError   string                `json:"deliveryError,omitempty"`
+	HasBrowserTrace bool                  `json:"hasBrowserTrace,omitempty"`
+	BrowserEvents   int                   `json:"browserEvents,omitempty"`
+	EventCount      int                   `json:"eventCount,omitempty"`
+	DurationMS      int64                 `json:"durationMs,omitempty"`
 	// Presentation is how a client should show Output: typed blocks decided
 	// once here so the web feed and the phone agree (#199). Nil when there is
 	// no output.
@@ -116,10 +118,26 @@ func (s *Server) handleRunLedger(c *fiber.Ctx) error {
 	if scope == "automation" {
 		rows = s.automationRunLedgerRows(rows)
 	}
+	filtered, err := filterRunLedger(c, rows)
+	if err != nil {
+		return s.errJSON(c, fiber.StatusBadRequest, err)
+	}
+	matched := len(filtered)
+	offset := c.QueryInt("offset", 0)
+	if offset < 0 {
+		return s.errMsg(c, fiber.StatusBadRequest, "offset must be non-negative")
+	}
+	if offset > matched {
+		offset = matched
+	}
+	rows = filtered[offset:]
 	if len(rows) > limit {
 		rows = rows[:limit]
 	}
 	return c.JSON(fiber.Map{
+		"matched":         matched,
+		"offset":          offset,
+		"has_more":        offset+len(rows) < matched,
 		"agent_id":        agentID,
 		"session_id":      sessionID,
 		"runs":            rows,
@@ -138,6 +156,7 @@ func runLedgerEventTypes() map[string]bool {
 		"message.in":              true,
 		"message.out":             true,
 		"error":                   true,
+		"warn":                    true,
 		"tool.call":               true,
 		"tool.result":             true,
 		"reasoning.step":          true,
@@ -259,6 +278,7 @@ func (s *Server) buildRunLedger(events []message.Event, limit int) []runLedgerRo
 			row.DurationMS = row.UpdatedAt.Sub(row.StartedAt).Milliseconds()
 		}
 		row.Presentation = presentOutput(row.Output)
+		row.Failure = diagnoseRunFailure(byRun[runID], row.Status, row.Error, row.DeliveryError)
 		rows = append(rows, row)
 	}
 	sort.Slice(rows, func(i, j int) bool {
@@ -393,6 +413,9 @@ func mergeRunLedgerRow(a, b runLedgerRow) runLedgerRow {
 	}
 	out.Output = studioFirstNonEmpty(out.Output, b.Output)
 	out.Error = studioFirstNonEmpty(out.Error, b.Error)
+	if out.Failure == nil {
+		out.Failure = b.Failure
+	}
 	out.DeliveryChannel = studioFirstNonEmpty(out.DeliveryChannel, b.DeliveryChannel)
 	out.DeliveryTo = studioFirstNonEmpty(out.DeliveryTo, b.DeliveryTo)
 	out.DeliveryStatus = studioFirstNonEmpty(out.DeliveryStatus, b.DeliveryStatus)

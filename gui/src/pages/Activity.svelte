@@ -5,6 +5,7 @@
   import { api } from '../lib/api.js'
   import { activityAgent, studioDebugRun } from '../lib/stores.js'
   import RunMetrics from '../lib/RunMetrics.svelte'
+  import RunFailure from '../lib/RunFailure.svelte'
 
   let agents     = []
   let selectedId = ''
@@ -321,6 +322,7 @@
       steps: r.steps || 0,
       output: r.output || r.error || '',
       error: r.error || '',
+      failure: r.failure || null,
       deliveryStatus: r.deliveryStatus || '',
       deliveryChannel: r.deliveryChannel || '',
       deliveryTo: r.deliveryTo || '',
@@ -358,7 +360,7 @@
   }
 
   function runPreview(run) {
-    return snippet(run.error || run.output || run.deliveryError || run.id, 110)
+    return snippet(run.failure?.summary || run.error || run.output || run.deliveryError || run.id, 110)
   }
 
   function partsText(p) {
@@ -633,6 +635,7 @@
         <button class="row-action browser" on:click={() => openRunBrowserTrace(runFilter)}>Browser trace</button>
       {/if}
     </div>
+    <RunFailure failure={runFilter.failure} error={runFilter.status === 'failed' ? runFilter.error : ''} />
   {/if}
 
   {#if path}

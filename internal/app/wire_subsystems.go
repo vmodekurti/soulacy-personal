@@ -352,7 +352,7 @@ func (a *App) wireLLMRouter() *llm.Router {
 	// the generic OpenAI-compatible adapter (OpenRouter / Together / Groq /
 	// vLLM under a custom id, no code changes).
 	for id, pcfg := range cfg.LLM.Providers {
-		if id == "ollama" || pcfg.APIKey == "" {
+		if id == "ollama" || (pcfg.APIKey == "" && !llm.AllowsUnauthenticatedOpenAIEndpoint(pcfg.BaseURL)) {
 			continue
 		}
 		m := providerCfgMap(pcfg)

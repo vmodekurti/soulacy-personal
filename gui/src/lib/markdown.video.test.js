@@ -83,7 +83,8 @@ describe('parseMarkdown audio support', () => {
     const url = 'https://host.example/api/podcasts/episodes/episode:abc123/audio'
     const html = parseMarkdown(`🎧 Listen here: ${url}`)
     expect(html).toContain('<audio')
-    expect(html).toContain(`src="${url}"`)
+    expect(html).toContain(`data-podcast-url="${url}"`)
+    expect(html).not.toContain(`src="${url}"`)
     expect(html).toContain(`href="${url}"`)
     expect(html).toContain('Listen to episode')
     expect(html).not.toContain(`>${url}</a>`)
@@ -93,6 +94,13 @@ describe('parseMarkdown audio support', () => {
     const html = parseMarkdown('https://example.com/settings/audio')
     expect(html).not.toContain('<audio')
     expect(html).toContain('<a')
+  })
+
+  it('makes named podcast links playable while retaining their label', () => {
+    const html = parseMarkdown('[Today’s briefing](https://host.example/api/podcasts/episodes/episode:abc/audio)')
+    expect(html).toContain('<audio')
+    expect(html).toContain('Today’s briefing')
+    expect(html).toContain('Original link')
   })
 
   // .ogg is ambiguous by extension. Video is checked first, so a video/ogg file
