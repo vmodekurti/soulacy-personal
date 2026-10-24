@@ -181,6 +181,26 @@ their own schemas at boot; there is no separate migration command.
 Source builds now require **Go 1.26.9 or newer**. Binary release installs do
 not require a local Go toolchain.
 
+## Confirm the new build is running
+
+Every build of the gateway has a codename, such as `lively-lynx`, derived from a
+hash of the running binary. It changes whenever the code changes, so after a
+redeploy you only need to check that the name is different.
+
+- **Portal:** the badge in the top bar shows the current codename, marked
+  **new** for 15 minutes after the runtime starts. Click it for the build ID,
+  version, commit, and start time. When the runtime changes while the portal is
+  open, a banner names the new and previous builds; reload to load the matching
+  interface. A restart of the same build keeps the name and is reported as a
+  restart.
+- **CLI:** `sy version` prints the running build and its details.
+- **API:** `GET /api/v1/health` includes a `build` object with `label`,
+  `build_id`, `version`, `commit`, `started_at`, and `instance_id`.
+- **Logs:** the `Soulacy starting` line records `build` and `build_id`.
+
+Rebuilding identical source produces an identical binary, so it keeps the same
+codename.
+
 ## Verify a systemd service uses the intended config
 
 An interactive `soulacy serve` runs as your shell user; a system service often

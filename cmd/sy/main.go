@@ -1427,10 +1427,10 @@ func resolveGatewayBinary(explicit string) (string, error) {
 func buildVersionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
-		Short: "Print version information",
+		Short: "Print the CLI version and the build the gateway is running",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("Soulacy CLI — dev build")
-			fmt.Printf("Gateway: %s\n", gatewayURL)
+			body, err := apiCallWithTimeout("GET", "/health", nil, 3*time.Second)
+			fmt.Print(renderVersionReport(config.Version, gatewayURL, body, err, time.Now()))
 		},
 	}
 }
