@@ -57,7 +57,7 @@ make all          # GUI + gateway + CLI → ./bin/soulacy and ./bin/sy
 sudo install -m755 bin/soulacy bin/sy /usr/local/bin/
 ```
 
-`make all` needs Go 1.26.9+, Node/npm, and the platform's C/SQLite development
+`make all` needs Go 1.26.10+, Node/npm, and the platform's C/SQLite development
 requirements. It forces a GUI rebuild; `make build` rebuilds it incrementally
 when sources change. The gateway embeds the web UI at compile time.
 
