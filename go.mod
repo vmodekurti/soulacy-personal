@@ -1,6 +1,6 @@
 module github.com/soulacy/soulacy
 
-go 1.26.9
+go 1.26.10
 
 require github.com/soulacy/soulacy/sdk v0.1.0
 
