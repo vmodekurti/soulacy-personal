@@ -18,6 +18,11 @@ marker, and the Skills page shows them with a **built-in** badge.
 | `shopping-research` | compare products across connected shopping services and hand checkout to the person |
 | `event-finder` | find and compare events through connected event services, then open provider ticket selection |
 | `food-product-check` | explain barcode, ingredient, nutrition, allergen and label data with uncertainty |
+| `reminders-and-commitments` | what you owe and are owed, deadlines and follow-ups, with one-time nudges outside quiet hours |
+| `watch-for-changes` | "tell me when": a background monitor for prices, stock, page sections, status pages or new results |
+| `travel-planner` | options, itinerary, official entry requirements and day-of reminders; booking stays with the provider |
+| `money-check-in` | read-only spending, subscriptions and unusual charges from a finance adapter or exported statement |
+| `meeting-prep` | who you are meeting, where things were left, what is owed, and what to ask |
 
 Every skill has a `references/eval.md` with a handful of prompts and the
 expected behaviour, so it can be checked by hand (and, later, automatically).
