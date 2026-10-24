@@ -1076,7 +1076,7 @@ func (e *Engine) dynamicConfirm(ctx context.Context, def *agent.Definition, call
 }
 
 func isSideEffectingTool(name string) bool {
-	if name == "learning.propose" || name == "safe_undo.prepare" || toolSecurityClasses[name].SideEffecting {
+	if name == "portal_update" || name == "portal_confirm" || name == "learning.propose" || name == "safe_undo.prepare" || toolSecurityClasses[name].SideEffecting {
 		return true
 	}
 	return strings.HasPrefix(name, "mcp__") || strings.HasPrefix(name, "plugin__")

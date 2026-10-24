@@ -39,15 +39,18 @@ func completeTaskContract(contract *taskcontract.Contract, reply *message.Messag
 const maxPrematureFinals = 3
 
 func (e *Engine) continuePrematureFinal(def *agent.Definition, sess *Session, msg message.Message, contract *taskcontract.Contract, content string, allow bool, turn, maxTurns int) ([]llm.ChatMessage, bool) {
-	if !allow {
-		return nil, false
-	}
 	empty := strings.TrimSpace(content) == ""
 	if !empty && (def.LLM.OutputSchema != nil || (!reasoning.IsProgressPreamble(content) && !reasoning.IsInternalScratchNarration(content))) {
 		return nil, false
 	}
+	if !allow {
+		contract.MarkIncomplete("the agent ended without completing its work")
+		return nil, false
+	}
 	if maxTurns > 0 && turn+1 >= maxTurns {
-		if !empty {
+		if empty {
+			contract.MarkIncomplete("the agent ended without completing its work")
+		} else {
 			contract.MarkIncomplete("the agent ended by describing work it had not performed")
 		}
 		return nil, false

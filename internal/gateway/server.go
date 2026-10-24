@@ -96,6 +96,7 @@ import (
 
 // Server is the Soulacy gateway server.
 type Server struct {
+	podcastTickets   podcastTickets
 	autopilotStore   *autopilot.Store
 	personModel      person.Store
 	undoStore        *safeundo.Store
@@ -774,6 +775,8 @@ func (s *Server) buildApp() *fiber.App {
 	// API key just like the static GUI does. Registered before the /api/v1
 	// group so it isn't caught by the auth middleware.
 	app.Get("/api/v1/shared/:token", s.handleShareView)
+	// Audio capabilities are validated by the handler before any upstream access.
+	app.Get("/api/v1/media/podcast", s.handlePodcastAudio)
 
 	// --- Plugin GUI mounts (Story E8) ---
 	// Static plugin UIs — no auth, same policy as the main GUI bundle below.
@@ -865,6 +868,7 @@ func (s *Server) buildApp() *fiber.App {
 	api.Post("/agents/:id/rollback", s.rbacAgentMW(rbac.ActionWrite), s.handleRollbackAgent)
 	api.Get("/agents/:id/tier", s.rbacAgentMW(rbac.ActionRead), s.handleGetAgentTier)
 	api.Post("/agents", s.rbacMW(rbac.ResourceAgents, rbac.ActionWrite), s.handleCreateAgent)
+	api.Patch("/agents/:id", s.rbacAgentMW(rbac.ActionWrite), s.handlePatchAgent)
 	api.Put("/agents/:id", s.rbacAgentMW(rbac.ActionWrite), s.handleUpdateAgent)
 	api.Delete("/agents/:id", s.rbacAgentMW(rbac.ActionDelete), s.handleDeleteAgent)
 	api.Post("/agents/:id/enable", s.rbacAgentMW(rbac.ActionEnable), s.handleEnableAgent)
@@ -881,6 +885,7 @@ func (s *Server) buildApp() *fiber.App {
 
 	// Chat — token-quota (user + agent) + per-agent RPM checks applied on top of user RPM.
 	api.Get("/chat/status", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.handleChatStatus)
+	api.Post("/media/podcast/ticket", s.rbacMW(rbac.ResourceChat, rbac.ActionRead), s.handlePodcastTicket)
 	api.Post("/chat", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{BodyField: "agent_id"}), s.rlTokenMW(), s.rlAgentTokenMW(), s.rlAgentMW(), s.handleChat)
 	api.Post("/chat/feedback", s.rbacAgentFromMW(rbac.ResourceChat, rbac.ActionChat, rbac.AgentIDSource{BodyField: "agent_id"}), s.handleChatFeedback)
 	api.Get("/learning/feedback", s.rbacMW(rbac.ResourceMemory, rbac.ActionRead), s.handleListChatFeedback)

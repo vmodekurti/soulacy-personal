@@ -37,6 +37,12 @@ export function suggestedPrompts(agent, limit = 4) {
       }
     }
   }
+  if (out.length === 0 && agent?.id === 'genie') {
+    push('Show me the latest result from my scheduled jobs')
+    push('Find the link to my latest podcast')
+    push('Help me change an agent’s settings')
+    push('Help me add a new model provider')
+  }
   if (out.length === 0) {
     push('What can you help me with?')
     push('Summarize what you can do.')

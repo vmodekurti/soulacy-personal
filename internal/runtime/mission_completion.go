@@ -9,6 +9,7 @@ import (
 	"github.com/soulacy/soulacy/internal/agentmemory"
 	"github.com/soulacy/soulacy/internal/autopilot"
 	"github.com/soulacy/soulacy/internal/llm"
+	"github.com/soulacy/soulacy/internal/runfailure"
 	"github.com/soulacy/soulacy/internal/taskcontract"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
@@ -18,9 +19,12 @@ import (
 const maxMissionCompletionRetries = 2
 
 type missionProgress struct {
-	mu    sync.Mutex
-	tools []autopilot.ToolUse
+	mu       sync.Mutex
+	tools    []autopilot.ToolUse
+	failures runfailure.Recorder
 }
+
+type missionProgressKey struct{}
 
 func attachMissionProgress(ctx context.Context, contract *agent.MissionContract) (context.Context, *missionProgress) {
 	progress := &missionProgress{}
@@ -28,12 +32,15 @@ func attachMissionProgress(ctx context.Context, contract *agent.MissionContract)
 		return ctx, progress
 	}
 	previous := toolObserverFrom(ctx)
+	ctx = context.WithValue(ctx, missionProgressKey{}, progress)
 	ctx = WithToolObserver(ctx, func(call message.ToolCall, result string, failed bool) {
+		detail := runfailure.ToolError(result, failed)
 		status := "succeeded"
 		if failed {
 			status = "failed"
 		}
 		progress.mu.Lock()
+		progress.failures.Observe(normalizeToolCallName(call.Name), detail)
 		progress.tools = append(progress.tools, autopilot.ToolUse{
 			Name:   normalizeToolCallName(call.Name),
 			CallID: call.ID,
@@ -71,6 +78,9 @@ func failedMissionSummary(evaluation autopilot.MissionEvaluation) string {
 			label = string(check.Type)
 		}
 		if detail := strings.TrimSpace(check.Detail); detail != "" {
+			if check.Type == agent.MissionCheckRequiredTool {
+				label += " (" + check.Expected + ")"
+			}
 			label += ": " + detail
 		}
 		missing = append(missing, label)
@@ -152,7 +162,7 @@ func (e *Engine) repairIncompleteBuilderMission(
 	availableTools []string,
 	turn, maxTurns int,
 ) ([]llm.ChatMessage, string, bool) {
-	if !isBuilderMission(mission) || *retries >= maxMissionCompletionRetries || turn+1 >= maxTurns {
+	if !isBuilderMission(mission) || *retries >= maxMissionCompletionRetries || (maxTurns > 0 && turn+1 >= maxTurns) {
 		return nil, "", false
 	}
 	evaluation := progress.evaluate(mission, content)
@@ -200,8 +210,20 @@ func (e *Engine) finalizeBuilderMissionReply(
 	}
 	contract.MarkBlocked("mission acceptance checks failed: " + summary)
 	e.writeMissionCompletionLesson(def, msg.AgentID, flattenParts(msg.Parts), summary)
-	if strings.TrimSpace(content) != "" {
-		content = strings.TrimSpace(content) + "\n\nThis run is incomplete. I could not verify: " + summary + "."
+	diagnosis := runfailure.Incomplete(summary)
+	if progress != nil {
+		progress.mu.Lock()
+		diagnosis = progress.failures.Diagnosis(summary)
+		progress.mu.Unlock()
+	}
+	// Put the observed failure before the checklist and any model prose. Empty
+	// model responses must still leave the person an actionable explanation.
+	previousContent := strings.TrimSpace(content)
+	content = "This run is incomplete. " + diagnosis.Summary + "\n\n" +
+		diagnosis.Detail + "\n\nWhat to do: " + diagnosis.NextAction +
+		"\n\nMissing completion checks:\n- " + strings.ReplaceAll(summary, "; ", "\n- ")
+	if previousContent != "" && previousContent != "I could not complete the mission after the allowed recovery attempts." {
+		content += "\n\nAgent response:\n" + previousContent
 	}
 	reply := e.finalizeReply(ctx, def, sess, msg, content)
 	if reply.Metadata == nil {
@@ -209,7 +231,7 @@ func (e *Engine) finalizeBuilderMissionReply(
 	}
 	reply.Metadata[message.MetaReasoningDegraded] = "true"
 	reply.Metadata[message.MetaOutcome] = "partial"
-	reply.Metadata[message.MetaOutcomeSummary] = summary
+	reply.Metadata[message.MetaOutcomeSummary] = diagnosis.Summary + " " + diagnosis.Detail
 	return reply, true
 }
 

@@ -322,6 +322,16 @@ func (s *Server) deployFromUnderstanding(ctx context.Context, u *runtime.Builder
 		}
 		out.Def.Labels[k] = v
 	}
+	if opts.Labels["soulacy.owner"] == runtime.GenieAgentID {
+		for _, saved := range s.loader.All() {
+			if strings.EqualFold(saved.ID, out.Def.ID) {
+				return nil, fmt.Errorf("genie builder cannot replace existing agents; use portal agent edits for ordinary settings")
+			}
+		}
+		if strings.EqualFold(out.Def.ID, runtime.GenieAgentID) || strings.EqualFold(out.Def.ID, runtime.SystemAgentID) || s.loader.Get(out.Def.ID) != nil {
+			return nil, fmt.Errorf("genie builder cannot replace existing or protected agents; use portal agent edits for ordinary settings")
+		}
+	}
 	connectionSelection, err := s.prepareBuilderConnectionSelection(ctx, out.Def.ID, out.Def.Connections, opts)
 	if err != nil {
 		return nil, err
@@ -333,6 +343,10 @@ func (s *Server) deployFromUnderstanding(ctx context.Context, u *runtime.Builder
 	out.UnknownTools = s.wireBuilderTools(u, &out.Def)
 	if len(out.UnknownTools) > 0 {
 		return out, nil
+	}
+
+	if opts.Labels["soulacy.owner"] == runtime.GenieAgentID && out.Def.HasCapability("system") {
+		return nil, fmt.Errorf("genie cannot grant host administration access; configure privileged agents directly in the Portal")
 	}
 
 	// The same gate Studio uses, and the same one Genie's monitors go through.

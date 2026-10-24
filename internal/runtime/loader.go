@@ -108,7 +108,7 @@ func (l *Loader) seedBuiltins() {
 }
 
 func builtinGenieAgent() *agent.Definition {
-	builtins := []string{"web_search", "list_skills", "read_skill", "read_skill_file", "list_mcp_tools", "list_agents", "build_agent", "plan_connector", "create_connector", "list_connectors", "plan_action", "prepare_website_access", "start_website_action", "inspect_website_action", "act_on_website", "commit_website_action", "close_website_action", "plan_mission", "create_mission", "list_missions", "get_mission", "update_mission", "cancel_mission", "create_monitor", "list_monitors", "pause_monitor", "cancel_monitor", "channel.send", "channel.status"}
+	builtins := []string{"portal_actions", "portal_read", "portal_update", "portal_confirm", "web_search", "list_skills", "read_skill", "read_skill_file", "list_mcp_tools", "list_agents", "build_agent", "plan_connector", "create_connector", "list_connectors", "plan_action", "prepare_website_access", "start_website_action", "inspect_website_action", "act_on_website", "commit_website_action", "close_website_action", "plan_mission", "create_mission", "list_missions", "get_mission", "update_mission", "cancel_mission", "create_monitor", "list_monitors", "pause_monitor", "cancel_monitor", "channel.send", "channel.status"}
 	mcpServers := []string{"*"}
 	return &agent.Definition{
 		ID: GenieAgentID, Name: "Genie",
@@ -117,7 +117,7 @@ func builtinGenieAgent() *agent.Definition {
 		Enabled: true, StreamReply: true,
 		// Execution limits inherit the workspace policy unless explicitly configured.
 		Skills: []string{"*"}, Agents: []string{"*"}, ParallelPeerCalls: true, StructuredPeerResults: true,
-		Builtins: &builtins, MCPServers: &mcpServers, ConfirmTools: []string{"commit_website_action", "cancel_monitor", "cancel_mission", "channel.send"},
+		Builtins: &builtins, MCPServers: &mcpServers, ConfirmTools: []string{"portal_confirm", "commit_website_action", "cancel_monitor", "cancel_mission", "channel.send"},
 		LLM:    agent.LLMConfig{Temperature: 0.2, MaxTokens: agent.DefaultMaxOutputTokens, ReasoningEffort: "high"},
 		Memory: agent.MemoryPolicy{ReadScopes: []string{"session"}, WriteScopes: []string{"session"}, MaxTokens: 4000},
 		Policy: agent.ToolPolicyConfig{Enabled: true, Shell: "deny", File: "deny", Network: "allow"},
@@ -148,7 +148,7 @@ Say what is true about your own work, even when it disappoints. Announcing an in
 // step so the raw role text above stays readable.
 func genieWithContract() *agent.Definition {
 	def := builtinGenieAgent()
-	def.SystemPrompt = agentprompt.EnsureShared(def.SystemPrompt)
+	def.SystemPrompt = agentprompt.EnsureShared(ensureGeniePortalInstructions(def.SystemPrompt))
 	return def
 }
 
@@ -165,7 +165,7 @@ func hardenGenieDefinition(def *agent.Definition) {
 	def.Builtins = base.Builtins
 	def.MCPServers = base.MCPServers
 	def.Policy = base.Policy
-	for _, required := range []string{"commit_website_action", "cancel_monitor", "cancel_mission", "channel.send"} {
+	for _, required := range []string{"portal_confirm", "commit_website_action", "cancel_monitor", "cancel_mission", "channel.send"} {
 		if !containsExactString(def.ConfirmTools, required) {
 			def.ConfirmTools = append(def.ConfirmTools, required)
 		}
@@ -176,7 +176,7 @@ func hardenGenieDefinition(def *agent.Definition) {
 	// Genie writes the shared operating contract into every agent it builds.
 	// It has to live under it too (#234) — that contract is where "never
 	// assume an action succeeded unless a tool confirms it" is written down.
-	def.SystemPrompt = agentprompt.EnsureShared(def.SystemPrompt)
+	def.SystemPrompt = agentprompt.EnsureShared(ensureGeniePortalInstructions(def.SystemPrompt))
 	if def.Budget == nil {
 		def.Budget = base.Budget
 	}
