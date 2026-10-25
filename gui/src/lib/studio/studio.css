@@ -12,21 +12,21 @@
  * already provides them (gui/src/App.svelte). */
 
 #studio-app {
-  --bg: #0c0f1a;
-  --bg-elev: #141927;
-  --bg-elev-2: #1b2235;
-  --border: #262e44;
-  --text: #e6e9f2;
-  --text-muted: #8b93ab;
+  --bg: var(--sl-bg);
+  --bg-elev: var(--sl-surface);
+  --bg-elev-2: var(--sl-surface-raised);
+  --border: var(--sl-line);
+  --text: var(--sl-text);
+  --text-muted: var(--sl-text-faint);
   --accent: var(--sl-accent);
   --accent-dim: color-mix(in srgb, var(--sl-accent) 18%, transparent);
-  --ok: #36d399;
-  --warn: #f5c542;
-  --error: #ff6b81;
+  --ok: var(--sl-success);
+  --warn: var(--sl-warning);
+  --error: var(--sl-danger);
   --radius: 10px;
   --gap: 14px;
 
-  /* @xyflow/svelte dark-mode overrides (its base.css ships a light palette). */
+  /* @xyflow/svelte follows the same semantic palette as the portal. */
   --xy-background-color: var(--bg);
   --xy-edge-stroke: #4a5170;
   --xy-edge-stroke-selected: var(--accent);
@@ -38,7 +38,7 @@
   --xy-controls-button-color-hover: var(--accent);
   --xy-controls-button-border-color: var(--border);
   --xy-minimap-background-color: var(--bg-elev);
-  --xy-minimap-mask-background-color: rgba(12, 15, 26, 0.7);
+  --xy-minimap-mask-background-color: color-mix(in srgb, var(--sl-surface-inset) 72%, transparent);
   --xy-node-color: var(--text);
   --xy-node-border: 1px solid var(--border);
   --xy-node-background-color: var(--bg-elev-2);

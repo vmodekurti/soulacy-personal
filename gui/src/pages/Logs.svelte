@@ -170,7 +170,7 @@
   .page-header h1 { font-size: 1.2rem; font-weight: 600; }
   .header-actions { display: flex; gap: .5rem; }
   .banner { padding: .65rem 1rem; border-radius: 8px; font-size: .82rem; flex-shrink: 0; }
-  .err  { background: rgba(240,96,96,.1); border: 1px solid rgba(240,96,96,.3); color: #f06060; }
+  .err  { background: color-mix(in srgb, var(--sl-danger) 10%, transparent); border: 1px solid color-mix(in srgb, var(--sl-danger) 30%, transparent); color: var(--sl-danger); }
   .info { background: color-mix(in srgb, var(--sl-accent) 8%, transparent); border: 1px solid color-mix(in srgb, var(--sl-accent) 20%, transparent); color: var(--sl-accent-hover); }
 
   .active { background: color-mix(in srgb, var(--sl-accent) 15%, transparent) !important; color: var(--sl-accent-hover) !important; border-color: color-mix(in srgb, var(--sl-accent) 40%, transparent) !important; }
@@ -182,37 +182,37 @@
   .filter-input { width: 100%; padding-right: 2rem; }
   .clear-filter {
     position: absolute; right: .4rem; top: 50%; transform: translateY(-50%);
-    background: none; font-size: .75rem; color: #555a7a; padding: 0;
+    background: none; font-size: .75rem; color: var(--sl-text-faint); padding: 0;
     line-height: 1;
   }
-  .clear-filter:hover { color: #e8eaf6; }
+  .clear-filter:hover { color: var(--sl-text); }
   .lines-select { width: 160px; flex-shrink: 0; }
   .small-btn { padding: .4rem .75rem; font-size: .78rem; border-radius: 6px; flex-shrink: 0; }
 
   .source-bar {
     display: flex; align-items: center; gap: .75rem;
-    padding: .5rem .85rem; background: #0e1020; border: 1px solid var(--sl-line);
+    padding: .5rem .85rem; background: var(--sl-surface-inset); border: 1px solid var(--sl-line);
     border-radius: 8px; flex-shrink: 0;
   }
-  .source-label { font-size: .7rem; color: #555a7a; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
-  .source-path  { font-size: .78rem; color: #7b82a8; flex: 1; word-break: break-all; }
-  .source-count { font-size: .72rem; color: #555a7a; flex-shrink: 0; }
+  .source-label { font-size: .7rem; color: var(--sl-text-faint); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+  .source-path  { font-size: .78rem; color: var(--sl-text-faint); flex: 1; word-break: break-all; }
+  .source-count { font-size: .72rem; color: var(--sl-text-faint); flex-shrink: 0; }
 
   .level-tabs {
     display: inline-flex; gap: .25rem; padding: .15rem; flex-shrink: 0; align-self: flex-start;
-    background: #0e1020; border: 1px solid var(--sl-line); border-radius: 8px;
+    background: var(--sl-surface-inset); border: 1px solid var(--sl-line); border-radius: 8px;
     flex-wrap: wrap;
   }
   .level-tab {
-    background: transparent; color: #7b82a8; border: 0; border-radius: 6px;
+    background: transparent; color: var(--sl-text-faint); border: 0; border-radius: 6px;
     padding: .25rem .6rem; font-size: .72rem; font-family: monospace; cursor: pointer;
   }
-  .level-tab:hover { color: #f0f2ff; }
-  .level-tab.lt-active { background: #262b4c; color: #f0f2ff; }
+  .level-tab:hover { color: var(--sl-text); }
+  .level-tab.lt-active { background: #262b4c; color: var(--sl-text); }
 
   .log-panel {
     flex: 1; min-height: 0; overflow-y: auto;
-    background: #0a0c17; border: 1px solid var(--sl-line); border-radius: 10px;
+    background: var(--sl-surface-inset); border: 1px solid var(--sl-line); border-radius: 10px;
     font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: .76rem;
     line-height: 1.55;
   }
@@ -220,9 +220,9 @@
   .log-panel.nowrap .log-line { width: max-content; min-width: 100%; }
   .log-panel.nowrap .log-text { white-space: pre; }
   .empty {
-    padding: 3rem 2rem; text-align: center; color: #555a7a; font-family: inherit;
+    padding: 3rem 2rem; text-align: center; color: var(--sl-text-faint); font-family: inherit;
   }
-  .empty code { background: #1c1f35; padding: .1rem .35rem; border-radius: 4px; }
+  .empty code { background: var(--sl-surface-muted); padding: .1rem .35rem; border-radius: 4px; }
 
   .log-line {
     display: flex; align-items: flex-start; gap: .6rem;

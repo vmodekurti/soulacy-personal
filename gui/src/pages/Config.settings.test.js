@@ -79,4 +79,10 @@ describe('everyday and advanced settings', () => {
     await click('Save changes')
     expect(patches[0].costs).toMatchObject({ per_user_daily_budget_usd: 3, default_max_output_tokens: 32768, pricing: { 'a/b': { input_per_mtok: 7, cached_input_per_mtok: 1, source: 'manual' } } })
   })
+  it('bounds smart-routing recovery values before sending them', async () => {
+    await click('Advanced')
+    await input('#routing-failure-threshold', '999')
+    await click('Save changes')
+    expect(patches[0].llm.routing.failure_threshold).toBe(100)
+  })
 })

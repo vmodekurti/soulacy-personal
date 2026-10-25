@@ -227,6 +227,7 @@ nav:
     - Web GUI: configuration/gui.md
     - Server: configuration/server.md
     - LLM Providers: configuration/llm.md
+    - Model Routing & Observability: configuration/model-routing.md
     - LLM Cost Controls: LLM_COST_CONTROLS.md
     - Request Timeouts: configuration/timeouts.md
     - Storage & Backends: configuration/storage.md

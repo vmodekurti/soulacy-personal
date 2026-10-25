@@ -4540,11 +4540,16 @@ func (s *Server) handleListProviders(c *fiber.Ctx) error {
 	// Known provider IDs the GUI should always offer (even when not yet
 	// configured), so users can pick them from a dropdown to add credentials.
 	known := []string{"ollama", "openai", "anthropic", "google", "groq", "mistral", "openrouter", "deepseek", "together"}
+	routingHealth := []map[string]any{}
+	if s.llmRouter != nil {
+		routingHealth = s.llmRouter.RoutingHealth()
+	}
 	return c.JSON(fiber.Map{
 		"providers":        providers,
 		"default_provider": s.cfg.LLM.DefaultProvider,
 		"known":            known,
 		"registered":       s.llmRouter.ProviderIDs(),
+		"routing_health":   routingHealth,
 	})
 }
 

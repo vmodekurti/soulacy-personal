@@ -256,7 +256,7 @@
 
 <style>
   .bs-working {
-    margin: 8px 0 0; font-size: 12px; color: var(--text-muted, #8b93ab);
+    margin: 8px 0 0; font-size: 12px; color: var(--text-muted, var(--sl-text-faint));
   }
   .bs-spin {
     display: inline-block; width: 11px; height: 11px; margin-right: 7px;
@@ -272,9 +272,9 @@
   .bs-muted { font-size: .84rem; color: var(--text-dim, var(--sl-text-faint)); }
   .bs-error {
     padding: 8px 10px; border-radius: 6px; font-size: .82rem;
-    color: var(--danger, #e5484d);
-    background: color-mix(in srgb, var(--danger, #e5484d) 10%, transparent);
-    border: 1px solid color-mix(in srgb, var(--danger, #e5484d) 32%, transparent);
+    color: var(--danger, var(--sl-danger));
+    background: color-mix(in srgb, var(--danger, var(--sl-danger)) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--danger, var(--sl-danger)) 32%, transparent);
   }
 
   .bs-change {
@@ -288,7 +288,7 @@
   .bs-change ul { margin: 6px 0 0; padding-left: 18px; }
   .bs-cfield { font-family: var(--mono, monospace); margin-right: 6px; }
   .bs-add { color: var(--ok, #2ea043); }
-  .bs-rm { color: var(--danger, #e5484d); text-decoration: line-through; }
+  .bs-rm { color: var(--danger, var(--sl-danger)); text-decoration: line-through; }
 
   .bs-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
   .bs-row { display: flex; gap: 10px; align-items: flex-start; }

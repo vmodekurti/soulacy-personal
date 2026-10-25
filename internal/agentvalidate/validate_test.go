@@ -81,6 +81,23 @@ func TestDefinitionFailsUnregisteredProvider(t *testing.T) {
 	}
 }
 
+func TestDefinitionFailsUnsupportedRoutingMode(t *testing.T) {
+	def := &agent.Definition{
+		ID:      "agent",
+		Trigger: agent.TriggerChannel,
+		LLM: agent.LLMConfig{
+			Provider: "ollama",
+			Model:    "qwen2.5:72b",
+			Routing:  "cheapest-at-all-costs",
+		},
+	}
+	report := Definition(def, "", Options{}, Report{})
+
+	if report.Valid || !hasFinding(report, "unsupported model routing mode") {
+		t.Fatalf("expected invalid routing mode to fail validation, got %+v", report)
+	}
+}
+
 func TestDefinitionWarnsWeakToolModel(t *testing.T) {
 	def := &agent.Definition{
 		ID:      "tool-agent",

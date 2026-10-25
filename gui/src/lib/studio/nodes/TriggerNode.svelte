@@ -18,7 +18,7 @@
     border-radius: 999px 14px 14px 999px;
     padding: 10px 16px;
     text-align: center;
-    color: var(--text, #e6e9f2);
+    color: var(--text, var(--sl-text));
   }
   .trigger-chip {
     font-size: 9px;

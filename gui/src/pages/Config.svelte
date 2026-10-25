@@ -82,6 +82,17 @@
   let studioModel = ''
   let reasonerProvider = ''  // fallback for reasoning agents without an assignment
   let reasonerModel = ''
+  let routingEnabled = false
+  let routingPreset = 'balanced'
+  let routingDefaultMode = 'auto'
+  let routingMaxFailovers = 2
+  let routingFailureThreshold = 3
+  let routingCooldown = '30s'
+  let fastRouteProvider = '', fastRouteModel = ''
+  let standardRouteProvider = '', standardRouteModel = ''
+  let strongRouteProvider = '', strongRouteModel = ''
+  let fallbackRouteProvider = '', fallbackRouteModel = ''
+  let routingRouteTails = { simple: [], standard: [], complex: [] }, fallbackRouteTail = []
   let searchProvider = 'ollama'
   let searchApiKey = ''
   let dailyBudgetUSD = ''
@@ -118,6 +129,8 @@
   //   'prompt' — (default) confirm risky calls under High-severity injection
   //   'deny'   — hard-deny risky calls under injection influence (production)
   let securityIntentGate = ''
+  let captureLLMContent = false
+  let maxObservedContentBytes = 262144
 
   // Plugin settings editor (Story 18): pid → editable rows; originals kept
   // for type-safe round-trips. Secrets arrive redacted as '***' and the
@@ -194,6 +207,25 @@
       alert_threshold: Number(costAlertThreshold || 0),
       pricing,
     }
+  }
+
+  function boundedInteger(value, fallback, min, max) {
+    const parsed = Number(value)
+    if (!Number.isFinite(parsed)) return fallback
+    return Math.min(max, Math.max(min, Math.round(parsed)))
+  }
+
+  function friendlyConfigError(message) {
+    if ((message || '').includes('llm.routing.failure_threshold')) {
+      return 'Smart routing needs “Failures before temporary pause” set between 1 and 100.'
+    }
+    return message
+  }
+
+  async function repairRoutingThreshold() {
+    routingFailureThreshold = 3
+    error = ''
+    await save()
   }
 
   async function loadProviderRegistry(configured = []) {
@@ -319,6 +351,31 @@
       studioModel      = config.llm?.studio?.model || ''
       reasonerProvider = config.llm?.reasoner?.provider || ''
       reasonerModel    = config.llm?.reasoner?.model || ''
+      {
+        const routing = config.llm?.routing || {}
+        const first = (name) => (routing.routes?.[name] || [])[0] || {}
+        const fallback = (routing.fallbacks || [])[0] || {}
+        routingEnabled = routing.enabled ?? false
+        routingPreset = routing.preset || 'balanced'
+        routingDefaultMode = routing.default_mode || 'auto'
+        routingMaxFailovers = routing.max_failovers ?? 2
+        routingFailureThreshold = routing.failure_threshold ?? 3
+        routingCooldown = routing.cooldown || '30s'
+        fastRouteProvider = first('simple').provider || ''
+        fastRouteModel = first('simple').model || ''
+        standardRouteProvider = first('standard').provider || ''
+        standardRouteModel = first('standard').model || ''
+        strongRouteProvider = first('complex').provider || ''
+        strongRouteModel = first('complex').model || ''
+        fallbackRouteProvider = fallback.provider || ''
+        fallbackRouteModel = fallback.model || ''
+        routingRouteTails = {
+          simple: (routing.routes?.simple || []).slice(1),
+          standard: (routing.routes?.standard || []).slice(1),
+          complex: (routing.routes?.complex || []).slice(1),
+        }
+        fallbackRouteTail = (routing.fallbacks || []).slice(1)
+      }
       await loadProviderRegistry(providerOptions)
       searchProvider  = config.search?.provider || 'ollama'
       searchApiKey    = config.search?.api_key || ''
@@ -360,6 +417,8 @@
       deploymentRegion = config.deployment?.region || ''
       deploymentNotes = config.deployment?.notes || ''
       securityIntentGate = config.security?.intent_gate || ''
+      captureLLMContent = config.observability?.capture_llm_content ?? false
+      maxObservedContentBytes = config.observability?.max_content_bytes ?? 262144
       seedCostEditor(config.costs?.pricing)
       agentDirs       = (config.agent_dirs || []).join('\n')
       skillDirs       = (config.skill_dirs || []).join('\n')
@@ -446,6 +505,24 @@
         // Empty provider/model = fall back to the default (server-side).
         studio:   { provider: studioProvider,   model: studioModel },
         reasoner: { provider: reasonerProvider, model: reasonerModel },
+        routing: {
+          enabled: routingEnabled,
+          default_mode: routingDefaultMode,
+          preset: routingPreset,
+          max_failovers: boundedInteger(routingMaxFailovers, 2, 0, 5),
+          failure_threshold: boundedInteger(routingFailureThreshold, 3, 1, 100),
+          cooldown: routingCooldown,
+          routes: {
+            simple: [...(fastRouteProvider ? [{ provider: fastRouteProvider, model: fastRouteModel }] : []), ...routingRouteTails.simple],
+            standard: [...(standardRouteProvider ? [{ provider: standardRouteProvider, model: standardRouteModel }] : []), ...routingRouteTails.standard],
+            complex: [...(strongRouteProvider ? [{ provider: strongRouteProvider, model: strongRouteModel }] : []), ...routingRouteTails.complex],
+          },
+          fallbacks: [...(fallbackRouteProvider ? [{ provider: fallbackRouteProvider, model: fallbackRouteModel }] : []), ...fallbackRouteTail],
+        },
+      },
+      observability: {
+        capture_llm_content: captureLLMContent,
+        max_content_bytes: Number(maxObservedContentBytes || 0),
       },
       // api_key of '***' (redacted placeholder) is skipped server-side, so
       // saving without retyping the key never clobbers the real one on disk.
@@ -589,6 +666,7 @@
 </script>
 
 <div class="page">
+  <div class="settings-shell" class:wide={advanced && showRawConfig}>
   <div class="page-header">
     <h1>Settings</h1>
     <div class="header-actions">
@@ -669,7 +747,12 @@
   {/if}
 
   {#if error}
-    <div class="banner err">{error}</div>
+    <div class="banner err actionable-error">
+      <span>{friendlyConfigError(error)}</span>
+      {#if error.includes('llm.routing.failure_threshold')}
+        <button class="btn-secondary btn-sm" on:click={repairRoutingThreshold}>Use recommended value (3)</button>
+      {/if}
+    </div>
   {/if}
   {#if saved}
     <div class="banner ok restart-banner">
@@ -704,6 +787,33 @@
               </select>
             {:else}
               <input id="default-provider" bind:value={defaultProvider} placeholder="ollama" disabled={!writable} />
+            {/if}
+          </div>
+
+          <div class="routing-card">
+            <label class="checkbox-row" for="smart-routing">
+              <input id="smart-routing" type="checkbox" bind:checked={routingEnabled} disabled={!writable} />
+              <span><strong>Smart model routing</strong><small>Use the right model for each step and switch providers when one is unavailable.</small></span>
+            </label>
+            {#if routingEnabled}
+              <div class="field">
+                <label for="routing-preset">Preference</label>
+                <select id="routing-preset" bind:value={routingPreset} disabled={!writable}>
+                  <option value="balanced">Balanced</option>
+                  <option value="fast">Faster and lower cost</option>
+                  <option value="quality">Best quality</option>
+                  <option value="local">Local and private</option>
+                </select>
+              </div>
+              <p class="hint route-summary">
+                {#if !fastRouteProvider && !standardRouteProvider && !strongRouteProvider && !fallbackRouteProvider}
+                  Soulacy will rank the default models of your configured providers automatically. You can override the route in Advanced settings.
+                {:else}
+                  Simple work: {fastRouteProvider || defaultProvider || 'default provider'}{fastRouteModel ? ` / ${fastRouteModel}` : ''}<br />
+                  Complex work: {strongRouteProvider || defaultProvider || 'default provider'}{strongRouteModel ? ` / ${strongRouteModel}` : ''}<br />
+                  {fallbackRouteProvider ? `Fallback: ${fallbackRouteProvider}${fallbackRouteModel ? ` / ${fallbackRouteModel}` : ''}` : 'Fallback: the agent’s assigned model'}
+                {/if}
+              </p>
             {/if}
           </div>
 
@@ -777,6 +887,70 @@
               {#if reasonerModel === '__custom__'}
                 <input bind:value={reasonerModel} placeholder="Enter exact model id" on:focus={() => reasonerModel = ''} disabled={!writable} />
               {/if}
+            </div>
+          </div>
+
+          <h3 class="subsection-title">Smart routing details</h3>
+          <p class="hint">Ordered routing is applied only when Smart model routing is enabled. Empty model fields use that provider’s default model. Agent allowlists always remain authoritative.</p>
+          <div class="field-row">
+            <div class="field">
+              <label for="fast-route-provider">Simple steps</label>
+              <select id="fast-route-provider" bind:value={fastRouteProvider} disabled={!writable}>
+                <option value="">— assigned provider —</option>
+                {#each providerOptions as p}<option value={p}>{p}</option>{/each}
+              </select>
+              <input bind:value={fastRouteModel} placeholder="Provider default model" disabled={!writable || !fastRouteProvider} />
+            </div>
+            <div class="field">
+              <label for="standard-route-provider">Standard steps</label>
+              <select id="standard-route-provider" bind:value={standardRouteProvider} disabled={!writable}>
+                <option value="">— assigned provider —</option>
+                {#each providerOptions as p}<option value={p}>{p}</option>{/each}
+              </select>
+              <input bind:value={standardRouteModel} placeholder="Provider default model" disabled={!writable || !standardRouteProvider} />
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="strong-route-provider">Complex steps</label>
+              <select id="strong-route-provider" bind:value={strongRouteProvider} disabled={!writable}>
+                <option value="">— assigned provider —</option>
+                {#each providerOptions as p}<option value={p}>{p}</option>{/each}
+              </select>
+              <input bind:value={strongRouteModel} placeholder="Provider default model" disabled={!writable || !strongRouteProvider} />
+            </div>
+            <div class="field">
+              <label for="fallback-route-provider">Provider fallback</label>
+              <select id="fallback-route-provider" bind:value={fallbackRouteProvider} disabled={!writable}>
+                <option value="">— assigned provider —</option>
+                {#each providerOptions as p}<option value={p}>{p}</option>{/each}
+              </select>
+              <input bind:value={fallbackRouteModel} placeholder="Provider default model" disabled={!writable || !fallbackRouteProvider} />
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="routing-default-mode">Default agent behavior</label>
+              <select id="routing-default-mode" bind:value={routingDefaultMode} disabled={!writable}>
+                <option value="auto">Choose automatically</option>
+                <option value="fast">Prefer fast model</option>
+                <option value="strong">Prefer strong model</option>
+                <option value="pinned">Keep assigned model</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="routing-max-failovers">Maximum provider switches</label>
+              <input id="routing-max-failovers" type="number" min="0" max="5" bind:value={routingMaxFailovers} disabled={!writable} />
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="routing-failure-threshold">Failures before temporary pause</label>
+              <input id="routing-failure-threshold" type="number" min="1" max="20" bind:value={routingFailureThreshold} disabled={!writable} />
+            </div>
+            <div class="field">
+              <label for="routing-cooldown">Provider pause duration</label>
+              <input id="routing-cooldown" bind:value={routingCooldown} placeholder="30s" disabled={!writable} />
             </div>
           </div>
           {/if}
@@ -1280,6 +1454,22 @@
           </div>
         </div>
 
+        {#if advanced}
+        <div class="section">
+          <h2 class="section-title">LLM observability</h2>
+          <p class="hint">Every model call records provider, model, route decision, retries, token counts, latency, tool names, and prompt/response hashes. Content capture adds the full redacted prompt and response to the durable Activity ledger.</p>
+          <label class="checkbox-row">
+            <input type="checkbox" bind:checked={captureLLMContent} disabled={!writable} />
+            <span><strong>Capture prompt and response content</strong><small>Use only when your retention and access controls permit storing conversation content.</small></span>
+          </label>
+          <div class="field">
+            <label for="observability-max-content">Maximum captured bytes per prompt or response</label>
+            <input id="observability-max-content" type="number" min="0" max="4194304" step="4096" bind:value={maxObservedContentBytes} disabled={!writable || !captureLLMContent} />
+            <p class="hint">0 uses the safe 256 KiB default. Larger payloads are marked as truncated; hashes always cover the complete value.</p>
+          </div>
+        </div>
+        {/if}
+
         <div class="section">
           <h2 class="section-title">Webhooks</h2>
           {#if (config?.hooks || []).length === 0}
@@ -1431,19 +1621,36 @@
       {/if}
     </div>
   {/if}
+  </div>
 </div>
 
 <style>
-  .page        { padding: 1.5rem; display: flex; flex-direction: column; gap: 1.25rem; }
+	.routing-card {
+		margin-top: 1rem;
+		padding: .9rem 1rem;
+		border: 1px solid color-mix(in srgb, var(--sl-accent) 24%, var(--sl-line));
+		border-radius: 12px;
+		background: color-mix(in srgb, var(--sl-accent) 5%, transparent);
+	}
+	.routing-card .checkbox-row { align-items: flex-start; }
+	.routing-card .checkbox-row span { display: flex; flex-direction: column; gap: .18rem; }
+	.routing-card .checkbox-row small { color: var(--sl-text-faint); font-weight: 400; line-height: 1.4; }
+	.routing-card .field { margin-top: .8rem; }
+	.route-summary { margin: .65rem 0 0; line-height: 1.6; }
+	.subsection-title { margin: 1.2rem 0 .35rem; font-size: .92rem; color: var(--sl-text); }
+  .page        { padding: 1.5rem; min-width: 0; overflow-x: clip; }
+  .settings-shell { width: min(100%, 1440px); margin: 0 auto; display: flex; flex-direction: column; gap: 1.25rem; }
+  .settings-shell.wide { width: min(100%, 1720px); }
   .page-header { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; }
   .page-header h1 { font-size: 1.2rem; font-weight: 600; }
   .header-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
-  .banner { padding: .7rem 1rem; border-radius: 8px; font-size: .85rem; }
+  .banner { padding: .8rem 1rem; border-radius: 10px; font-size: .85rem; }
+  .actionable-error { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
   .restart-banner { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; }
-  .err  { background: rgba(240,96,96,.1); border: 1px solid rgba(240,96,96,.3); color: #f06060; }
-  .ok   { background: rgba(76,175,130,.1); border: 1px solid rgba(76,175,130,.3); color: #4caf82; }
-  .warn { background: rgba(240,160,96,.1); border: 1px solid rgba(240,160,96,.3); color: #f0a060; }
-  .warn code { background: #1c1f35; padding: .1rem .35rem; border-radius: 4px; font-size: .78rem; }
+  .err  { background: color-mix(in srgb, var(--sl-danger) 10%, transparent); border: 1px solid color-mix(in srgb, var(--sl-danger) 30%, transparent); color: var(--sl-danger); }
+  .ok   { background: color-mix(in srgb, var(--sl-success) 10%, transparent); border: 1px solid color-mix(in srgb, var(--sl-success) 30%, transparent); color: var(--sl-success); }
+  .warn { background: rgba(240,160,96,.1); border: 1px solid rgba(240,160,96,.3); color: var(--sl-warning); }
+  .warn code { background: var(--sl-surface-muted); padding: .1rem .35rem; border-radius: 4px; font-size: .78rem; }
   .empty { padding: 3rem; text-align: center; color: var(--sl-text-faint); }
 
   .config-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.25rem; align-items: start; }
@@ -1460,64 +1667,64 @@
   /* Form column */
   .form-col { display: flex; flex-direction: column; gap: 1rem; }
 
-  .section { background: var(--sl-surface); border: 1px solid var(--sl-line); border-radius: 10px; padding: 1.1rem 1.25rem; display: flex; flex-direction: column; gap: .85rem; }
+  .section { background: var(--sl-surface); border: 1px solid var(--sl-line); border-radius: 14px; padding: 1.3rem 1.4rem; display: flex; flex-direction: column; gap: 1rem; box-shadow: var(--sl-shadow-sm); }
   .section-heading { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
-  .section-title { font-size: .78rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: #555a7a; margin-bottom: .1rem; }
+  .section-title { font-size: .82rem; font-weight: 750; text-transform: uppercase; letter-spacing: .065em; color: var(--sl-text-dim); margin-bottom: .1rem; }
 
-  .field { display: flex; flex-direction: column; gap: .35rem; }
-  .field label { font-size: .78rem; color: #7b82a8; font-weight: 500; }
-  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+  .field { display: flex; flex-direction: column; gap: .45rem; min-width: 0; }
+  .field label { font-size: .8rem; color: var(--sl-text-dim); font-weight: 600; }
+  .field-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .9rem; }
   .inline-status { margin-left: .35rem; color: var(--sl-accent-hover); font-size: .72rem; font-weight: 500; }
-  .inline-error { margin-left: .35rem; color: #f0a060; font-size: .72rem; font-weight: 500; cursor: help; }
+  .inline-error { margin-left: .35rem; color: var(--sl-warning); font-size: .72rem; font-weight: 500; cursor: help; }
   .tiny-btn { font-size: .72rem; padding: .25rem .55rem; }
-  .mini-warn { padding: .5rem .65rem; border-radius: 8px; background: rgba(240,160,96,.1); border: 1px solid rgba(240,160,96,.25); color: #f0a060; font-size: .75rem; }
+  .mini-warn { padding: .5rem .65rem; border-radius: 8px; background: rgba(240,160,96,.1); border: 1px solid rgba(240,160,96,.25); color: var(--sl-warning); font-size: .75rem; }
   .executor-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: .55rem; }
-  .executor-card { padding: .65rem; border: 1px solid #202542; border-radius: 8px; background: #10121f; display: flex; flex-direction: column; gap: .4rem; min-height: 132px; }
+  .executor-card { padding: .65rem; border: 1px solid var(--sl-line); border-radius: 8px; background: var(--sl-surface-muted); display: flex; flex-direction: column; gap: .4rem; min-height: 132px; }
   .executor-card.active { border-color: #7567ff; box-shadow: 0 0 0 1px rgba(117,103,255,.25); }
-  .executor-card.ok { border-color: rgba(76,175,130,.32); }
+  .executor-card.ok { border-color: color-mix(in srgb, var(--sl-success) 32%, transparent); }
   .executor-card.warn { border-color: rgba(240,160,96,.35); }
-  .executor-card.fail { border-color: rgba(240,96,96,.4); }
+  .executor-card.fail { border-color: color-mix(in srgb, var(--sl-danger) 40%, transparent); }
   .executor-top { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
-  .executor-top strong { font-size: .78rem; color: #c5c8e8; }
+  .executor-top strong { font-size: .78rem; color: var(--sl-text); }
   .executor-top span { font-size: .65rem; text-transform: uppercase; letter-spacing: .05em; color: var(--sl-accent-hover); }
-  .executor-card p { margin: 0; color: #9aa1c6; font-size: .74rem; line-height: 1.45; }
+  .executor-card p { margin: 0; color: var(--sl-text-dim); font-size: .74rem; line-height: 1.45; }
   .executor-card small { color: var(--sl-text-faint); font-size: .7rem; line-height: 1.35; }
-  .executor-card code { margin-top: auto; background: #0b0d19; border: 1px solid var(--sl-line); padding: .35rem; border-radius: 6px; color: var(--sl-accent-hover); font-size: .68rem; overflow-wrap: anywhere; }
+  .executor-card code { margin-top: auto; background: var(--sl-code-bg); border: 1px solid var(--sl-line); padding: .35rem; border-radius: 6px; color: var(--sl-code-text); font-size: .68rem; overflow-wrap: anywhere; }
   .audit-list { display: flex; flex-direction: column; gap: .5rem; }
-  .audit-row { border: 1px solid #202542; border-radius: 8px; background: #10121f; padding: .65rem .75rem; display: flex; flex-direction: column; gap: .35rem; }
+  .audit-row { border: 1px solid var(--sl-line); border-radius: 8px; background: var(--sl-surface-muted); padding: .65rem .75rem; display: flex; flex-direction: column; gap: .35rem; }
   .audit-main { display: flex; align-items: baseline; justify-content: space-between; gap: .75rem; }
-  .audit-main strong { color: #e5e7ff; font-size: .82rem; }
-  .audit-main span { color: #7b82a8; font-size: .75rem; text-align: right; }
+  .audit-main strong { color: var(--sl-text); font-size: .82rem; }
+  .audit-main span { color: var(--sl-text-faint); font-size: .75rem; text-align: right; }
   .audit-meta { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; color: #68709a; font-size: .72rem; }
-  .audit-status { padding: .08rem .35rem; border-radius: 999px; background: rgba(76,175,130,.12); color: #4caf82; }
-  .audit-status.accepted { background: color-mix(in srgb, var(--sl-accent-hover) 14%, transparent); color: #aaa5ff; }
-  .audit-row small { color: #8a91b8; font-size: .72rem; line-height: 1.35; }
+  .audit-status { padding: .08rem .35rem; border-radius: 999px; background: color-mix(in srgb, var(--sl-success) 12%, transparent); color: var(--sl-success); }
+  .audit-status.accepted { background: color-mix(in srgb, var(--sl-accent-hover) 14%, transparent); color: var(--sl-accent-ink); }
+  .audit-row small { color: var(--sl-text-faint); font-size: .72rem; line-height: 1.35; }
 
   /* JSON column */
   .json-col {
-    background: #0e1020; border: 1px solid var(--sl-line); border-radius: 10px;
+    background: var(--sl-surface-inset); border: 1px solid var(--sl-line); border-radius: 10px;
     overflow: hidden; position: sticky; top: 1.5rem;
   }
   .json-header {
     padding: .65rem 1rem; border-bottom: 1px solid var(--sl-line);
     display: flex; flex-direction: column; gap: .2rem;
   }
-  .json-label { font-size: .72rem; color: #555a7a; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
-  .json-path  { font-size: .72rem; color: #7b82a8; word-break: break-all; }
+  .json-label { font-size: .72rem; color: var(--sl-text-faint); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+  .json-path  { font-size: .72rem; color: var(--sl-text-faint); word-break: break-all; }
   .json-view  {
     font-family: monospace; font-size: .75rem; line-height: 1.6;
-    color: #7b82a8; padding: 1rem; overflow-x: auto;
+    color: var(--sl-text-faint); padding: 1rem; overflow-x: auto;
     white-space: pre; max-height: 600px; overflow-y: auto;
   }
 
   .hint { font-size: .78rem; color: var(--sl-text-faint); line-height: 1.6; }
-  .hint code { background: #1c1f35; padding: .08rem .35rem; border-radius: 4px; font-size: .72rem; }
+  .hint code { background: var(--sl-surface-muted); padding: .08rem .35rem; border-radius: 4px; font-size: .72rem; }
   .hook-row { display: flex; flex-direction: column; gap: .15rem; padding: .5rem .65rem;
-              background: #10121f; border: 1px solid var(--sl-line); border-radius: 8px; }
+              background: var(--sl-surface-muted); border: 1px solid var(--sl-line); border-radius: 8px; }
   .hook-url { font-size: .78rem; color: var(--sl-accent-hover); overflow-wrap: anywhere; }
   .hook-meta { font-size: .7rem; font-family: monospace; color: var(--sl-text-faint); }
   .plugin-settings { display: flex; flex-direction: column; gap: .35rem; padding: .5rem .65rem;
-                     background: #10121f; border: 1px solid var(--sl-line); border-radius: 8px;
+                     background: var(--sl-surface-muted); border: 1px solid var(--sl-line); border-radius: 8px;
                      margin-bottom: .5rem; }
   .support-download { align-self: flex-start; }
   .kv-row { display: flex; gap: .4rem; align-items: center; }
@@ -1531,7 +1738,7 @@
     gap: .5rem;
     align-items: end;
     padding: .55rem .65rem;
-    background: #10121f;
+    background: var(--sl-surface-muted);
     border: 1px solid var(--sl-line);
     border-radius: 8px;
   }
@@ -1572,25 +1779,25 @@
     display: grid; grid-template-columns: auto 1fr;
     align-items: flex-start; gap: .55rem;
     padding: .55rem .7rem;
-    background: #0e1020; border: 1px solid var(--sl-line); border-radius: 8px;
-    color: #c8cadf; cursor: pointer;
+    background: var(--sl-surface-inset); border: 1px solid var(--sl-line); border-radius: 8px;
+    color: var(--sl-text); cursor: pointer;
     transition: border-color .15s ease;
   }
-  .intent-gate-radio > label:hover { border-color: #2a2f4a; }
+  .intent-gate-radio > label:hover { border-color: var(--sl-line); }
   .intent-gate-radio > label.on {
     background: color-mix(in srgb, var(--sl-accent) 8%, transparent); border-color: color-mix(in srgb, var(--sl-accent) 40%, transparent);
   }
   .intent-gate-radio input[type=radio] { margin-top: .25rem; }
-  .intent-gate-radio strong { color: #e7e8f5; font-size: .84rem; display: block; margin-bottom: .15rem; }
-  .intent-gate-radio span { color: #7b82a8; font-size: .76rem; line-height: 1.5; display: block; }
+  .intent-gate-radio strong { color: var(--sl-text); font-size: .84rem; display: block; margin-bottom: .15rem; }
+  .intent-gate-radio span { color: var(--sl-text-faint); font-size: .76rem; line-height: 1.5; display: block; }
   .intent-gate-radio .pill {
     display: inline-block; margin-left: .35rem;
     padding: .05rem .4rem; border-radius: 999px;
     font-size: .62rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
-    background: rgba(139,220,255,.15); color: #8bdcff;
+    background: color-mix(in srgb, var(--sl-info) 15%, transparent); color: var(--sl-info);
   }
   .intent-gate-radio .pill.pill-prod {
-    background: rgba(240,96,96,.18); color: #f06060;
+    background: color-mix(in srgb, var(--sl-danger) 18%, transparent); color: var(--sl-danger);
   }
   .update-banner {
     display: flex;
@@ -1653,7 +1860,7 @@
     width: 60px;
     height: 60px;
     border: 4px solid rgba(255, 255, 255, 0.1);
-    border-top: 4px solid #7e5cff;
+    border-top: 4px solid var(--sl-accent-ink);
     border-radius: 50%;
     animation: spin 0.9s linear infinite;
     margin-bottom: 24px;
@@ -1670,7 +1877,7 @@
   }
   .upgrading-subtext {
     font-size: 13px;
-    color: #8a91b8;
+    color: var(--sl-text-faint);
   }
   .upgrade-err {
     display: flex;
@@ -1695,15 +1902,17 @@
     gap: .6rem;
     flex-wrap: wrap;
     padding: .55rem .9rem;
-    border: 1px solid rgba(255,255,255,.08);
-    border-radius: 8px;
+    border: 1px solid var(--sl-line);
+    border-radius: 10px;
+    background: var(--sl-surface);
+    box-shadow: var(--sl-shadow-sm);
     font-size: .85rem;
   }
   .version-label { opacity: .65; }
   .version-value { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   .version-detail { opacity: .75; }
   .version-detail.behind { color: #e0b341; opacity: 1; }
-  .version-detail.unknown { color: #f06060; opacity: 1; }
+  .version-detail.unknown { color: var(--sl-danger); opacity: 1; }
   .version-checked { opacity: .45; font-size: .78rem; }
   .version-recheck { margin-left: auto; }
 </style>

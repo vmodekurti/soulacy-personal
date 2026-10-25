@@ -19,12 +19,12 @@
 <style>
   .output-node {
     min-width: 120px;
-    background: linear-gradient(160deg, #2a2350, #1b2235);
+    background: linear-gradient(160deg, #2a2350, var(--sl-surface-muted));
     border: 1px dashed var(--accent, var(--sl-accent));
     border-radius: 14px 999px 999px 14px;
     padding: 10px 16px;
     text-align: center;
-    color: var(--text, #e6e9f2);
+    color: var(--text, var(--sl-text));
   }
   .output-chip {
     font-size: 9px;
@@ -47,7 +47,7 @@
     padding: 1px 8px;
   }
   .channel.muted {
-    color: var(--text-muted, #8b93ab);
+    color: var(--text-muted, var(--sl-text-faint));
     border-color: var(--border, #262e44);
     background: transparent;
   }

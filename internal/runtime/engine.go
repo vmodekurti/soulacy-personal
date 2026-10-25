@@ -37,6 +37,7 @@ import (
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 	"github.com/soulacy/soulacy/pkg/skill"
+	sdkhooks "github.com/soulacy/soulacy/sdk/hooks"
 )
 
 // EventSink receives structured events as they happen during agent execution.
@@ -126,16 +127,17 @@ type BuiltinTool struct {
 
 // Engine orchestrates agent execution.
 type Engine struct {
-	notebook    atomic.Pointer[notebookRuntime]
-	safeUndo    atomic.Pointer[safeUndoRuntime]
-	adaptive    adaptiveField
-	autopilot   *autopilotRuntime
-	loader      *Loader
-	llmRouter   *llm.Router
-	memory      memory.Store
-	archive     storage.MemoryBackend
-	pythonBin   string
-	toolTimeout time.Duration
+	lifecycleHooks *sdkhooks.Registry
+	notebook       atomic.Pointer[notebookRuntime]
+	safeUndo       atomic.Pointer[safeUndoRuntime]
+	adaptive       adaptiveField
+	autopilot      *autopilotRuntime
+	loader         *Loader
+	llmRouter      *llm.Router
+	memory         memory.Store
+	archive        storage.MemoryBackend
+	pythonBin      string
+	toolTimeout    time.Duration
 	// adaptiveNodes is the global default for runtime LLM salvage of shape
 	// surprises (see FlowNode.Adaptive). Off by default in the zero engine so
 	// tests are unaffected; the app wires it from cfg.Runtime.AdaptiveNodes.
@@ -288,7 +290,10 @@ type Engine struct {
 
 	// tracer is the optional telemetry tracer (Task #32). When nil, no spans
 	// are emitted. Set via SetTracer after construction.
-	tracer telemetryTracer
+	tracer                  telemetryTracer
+	observabilityMu         sync.RWMutex
+	captureLLMContent       bool
+	maxObservedContentBytes int
 
 	// costStore is the optional per-agent token-cost store (Task #32). When
 	// nil, usage is not persisted. Set via SetCostStore after construction.
@@ -804,6 +809,24 @@ type deadLetterStore interface {
 
 // SetTracer installs a telemetry tracer. Safe to call once at startup.
 func (e *Engine) SetTracer(t telemetryTracer) { e.tracer = t }
+
+// SetLLMObservability controls durable prompt/response content capture.
+// Metadata, hashes, usage, latency, and routing decisions remain enabled even
+// when content capture is off.
+func (e *Engine) SetLLMObservability(captureContent bool, maxContentBytes int) {
+	if maxContentBytes <= 0 {
+		maxContentBytes = 262144
+	}
+	e.observabilityMu.Lock()
+	e.captureLLMContent, e.maxObservedContentBytes = captureContent, maxContentBytes
+	e.observabilityMu.Unlock()
+}
+
+func (e *Engine) llmObservability() (bool, int) {
+	e.observabilityMu.RLock()
+	defer e.observabilityMu.RUnlock()
+	return e.captureLLMContent, e.maxObservedContentBytes
+}
 
 // SetCostStore installs a cost store. Safe to call once at startup.
 func (e *Engine) SetCostStore(s agentCostStore) { e.costStore = s }

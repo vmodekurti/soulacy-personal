@@ -51,13 +51,13 @@
   .config-card { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elev); }
   .cf-field { display: flex; flex-direction: column; gap: 4px; }
   .cf-label { font-size: 11px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
-  .cf-req { color: var(--error, #ff6b81); }
-  .cf-missing { font-size: 10px; padding: 0 6px; border-radius: 999px; background: rgba(255,107,129,.16); color: #ff6b81; }
-  .cf-field.missing input, .cf-field.missing select, .cf-field.missing textarea { border-color: #ff6b81; }
+  .cf-req { color: var(--error, var(--sl-danger)); }
+  .cf-missing { font-size: 10px; padding: 0 6px; border-radius: 999px; background: rgba(255,107,129,.16); color: var(--sl-danger); }
+  .cf-field.missing input, .cf-field.missing select, .cf-field.missing textarea { border-color: var(--sl-danger); }
   .cf-field input, .cf-field select, .cf-field textarea {
     background: var(--bg-elev-2); border: 1px solid var(--border); border-radius: 6px;
     padding: 6px 8px; color: var(--text); font-size: 12px; width: 100%; box-sizing: border-box;
   }
   .cf-code { font-family: ui-monospace, Menlo, monospace; resize: vertical; }
-  .cf-suggest { align-self: flex-start; background: none; border: none; color: var(--accent, #6c8cff); font-size: 11px; cursor: pointer; padding: 0; }
+  .cf-suggest { align-self: flex-start; background: none; border: none; color: var(--accent, var(--sl-accent-ink)); font-size: 11px; cursor: pointer; padding: 0; }
 </style>

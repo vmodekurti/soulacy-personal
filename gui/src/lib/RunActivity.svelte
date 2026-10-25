@@ -121,7 +121,7 @@
   .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--sl-accent); animation: pulse 1.4s ease-in-out infinite; }
   @keyframes pulse { 0%, 100% { opacity: .35 } 50% { opacity: 1 } }
   @media (prefers-reduced-motion: reduce) { .dot { animation: none } }
-  .failed-badge { margin-left: .4rem; color: #ff8080; font-size: .7rem; }
+  .failed-badge { margin-left: .4rem; color: var(--sl-danger); font-size: .7rem; }
 
   /* The height cap is the whole point: the panel never grows the page. */
   .body { max-height: 260px; overflow-y: auto; padding: .1rem .7rem .5rem; border-top: 1px solid var(--sl-line); }
@@ -131,12 +131,12 @@
   .bullet { width: 7px; height: 7px; border-radius: 50%; margin-top: .42rem; flex: none; background: var(--sl-text-faint); }
   .step.tool .bullet { background: var(--sl-accent); }
   .step.model .bullet { background: var(--sl-text-faint); }
-  .step.failed .bullet, .step.err .bullet { background: #ff6b6b; }
+  .step.failed .bullet, .step.err .bullet { background: var(--sl-danger); }
   .step.pending .bullet { animation: pulse 1.4s ease-in-out infinite; }
   .what { min-width: 0; flex: 1; }
   .step-title { background: none; border: 0; padding: 0; font: inherit; font-size: .78rem; color: var(--sl-text); cursor: pointer; text-align: left; }
   .step-title[disabled] { cursor: default; }
-  .step.failed .step-title { color: #ff9c9c; }
+  .step.failed .step-title { color: var(--sl-danger); }
   .detail {
     color: var(--sl-text-faint); font-size: .72rem; margin-top: .1rem;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

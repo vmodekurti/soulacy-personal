@@ -21,6 +21,8 @@ func buildEvalCmd() *cobra.Command {
 	var tags []string
 	var repeat int
 	var failFast bool
+	var baselineFile string
+	var writeResults string
 
 	cmd := &cobra.Command{
 		Use:   "eval",
@@ -40,7 +42,9 @@ Examples:
   sy eval --agent my-agent --suite tests/smoke.json
   sy eval --agent my-agent --suite tests/smoke.json --json
   sy eval --agent my-agent --suite evals/golden --tag weather --repeat 3
-  sy eval --agent my-agent --suite evals/golden --tag channel --fail-fast`,
+  sy eval --agent my-agent --suite evals/golden --tag channel --fail-fast
+  sy eval --agent my-agent --suite evals/golden --write-results baseline.json
+  sy eval --agent my-agent --suite evals/golden --baseline baseline.json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if agentID == "" {
 				return fmt.Errorf("--agent is required")
@@ -52,7 +56,7 @@ Examples:
 				Tags:     tags,
 				Repeat:   repeat,
 				FailFast: failFast,
-			}, jsonOut)
+			}, jsonOut, baselineFile, writeResults)
 		},
 	}
 	cmd.Flags().StringVar(&agentID, "agent", "", "Agent ID to evaluate")
@@ -61,6 +65,8 @@ Examples:
 	cmd.Flags().StringArrayVar(&tags, "tag", nil, "Run only cases with this tag (repeatable or comma-separated)")
 	cmd.Flags().IntVar(&repeat, "repeat", 1, "Run each selected case N times to expose flakiness and latency variance")
 	cmd.Flags().BoolVar(&failFast, "fail-fast", false, "Stop after the first failed or errored case")
+	cmd.Flags().StringVar(&baselineFile, "baseline", "", "Compare this run with a saved JSON result snapshot")
+	cmd.Flags().StringVar(&writeResults, "write-results", "", "Write the complete JSON result snapshot to this file")
 	cmd.AddCommand(buildEvalGenerationCmd())
 	return cmd
 }
@@ -124,7 +130,7 @@ Examples:
 	return cmd
 }
 
-func runEval(agentID, suitePath string, opts eval.RunOptions, jsonOut bool) error {
+func runEval(agentID, suitePath string, opts eval.RunOptions, jsonOut bool, baselineFile, writeResults string) error {
 	suiteFiles, err := collectSuiteFiles(suitePath)
 	if err != nil {
 		return err
@@ -172,6 +178,38 @@ func runEval(agentID, suitePath string, opts eval.RunOptions, jsonOut bool) erro
 			return fmt.Errorf("failed to marshal results: %w", err)
 		}
 		fmt.Println(string(out))
+	}
+	if writeResults != "" {
+		out, err := json.MarshalIndent(allResults, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal result snapshot: %w", err)
+		}
+		if err := os.WriteFile(writeResults, append(out, '\n'), 0o600); err != nil {
+			return fmt.Errorf("write result snapshot %s: %w", writeResults, err)
+		}
+		if !jsonOut {
+			fmt.Printf("Saved result snapshot to %s\n", writeResults)
+		}
+	}
+	if baselineFile != "" {
+		data, err := os.ReadFile(baselineFile)
+		if err != nil {
+			return fmt.Errorf("read baseline %s: %w", baselineFile, err)
+		}
+		baseline, err := eval.LoadResults(data)
+		if err != nil {
+			return fmt.Errorf("baseline %s: %w", baselineFile, err)
+		}
+		comparison := eval.Compare(baseline, allResults)
+		if jsonOut {
+			out, _ := json.MarshalIndent(comparison, "", "  ")
+			fmt.Fprintln(os.Stderr, string(out))
+		} else {
+			eval.PrintComparison(comparison, os.Stdout)
+		}
+		if comparison.Regressions > 0 {
+			return fmt.Errorf("%d eval regression(s) against baseline", comparison.Regressions)
+		}
 	}
 
 	if failures > 0 {

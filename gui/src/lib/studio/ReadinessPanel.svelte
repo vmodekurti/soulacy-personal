@@ -182,9 +182,9 @@
   .rp-muted { font-size: .84rem; color: var(--text-dim, var(--sl-text-faint)); }
   .rp-error {
     padding: 8px 10px; border-radius: 6px; font-size: .82rem;
-    color: var(--danger, #e5484d);
-    background: color-mix(in srgb, var(--danger, #e5484d) 10%, transparent);
-    border: 1px solid color-mix(in srgb, var(--danger, #e5484d) 32%, transparent);
+    color: var(--danger, var(--sl-danger));
+    background: color-mix(in srgb, var(--danger, var(--sl-danger)) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--danger, var(--sl-danger)) 32%, transparent);
   }
 
   .rp-verdict {
@@ -203,7 +203,7 @@
 
   .rp-counts { display: flex; flex-wrap: wrap; gap: 6px; }
   .rp-count { padding: 2px 8px; border-radius: 999px; font-size: .72rem; }
-  .rp-count.block   { background: color-mix(in srgb, var(--danger, #e5484d) 16%, transparent); }
+  .rp-count.block   { background: color-mix(in srgb, var(--danger, var(--sl-danger)) 16%, transparent); }
   .rp-count.warn    { background: color-mix(in srgb, var(--warn, #f0ad4e) 20%, transparent); }
   .rp-count.ready   { background: color-mix(in srgb, var(--ok, #2ea043) 18%, transparent); }
   .rp-count.unknown { background: color-mix(in srgb, var(--text-dim, var(--sl-text-faint)) 20%, transparent); }
@@ -218,17 +218,17 @@
   .rp-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
   .rp-dot.ready   { background: var(--ok, #2ea043); }
   .rp-dot.warn    { background: var(--warn, #f0ad4e); }
-  .rp-dot.block   { background: var(--danger, #e5484d); }
+  .rp-dot.block   { background: var(--danger, var(--sl-danger)); }
   .rp-dot.unknown { background: var(--text-dim, var(--sl-text-faint)); }
   .rp-status { font-size: .72rem; color: var(--text-dim, var(--sl-text-faint)); }
-  .rp-status.block { color: var(--danger, #e5484d); }
+  .rp-status.block { color: var(--danger, var(--sl-danger)); }
   .rp-reason { margin: 4px 0 0; font-size: .78rem; font-style: italic; color: var(--text-dim, var(--sl-text-faint)); }
 
   .rp-item {
     display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
     margin-top: 6px; padding: 6px 8px; border-radius: 6px; font-size: .82rem;
   }
-  .rp-item.block { background: color-mix(in srgb, var(--danger, #e5484d) 10%, transparent); }
+  .rp-item.block { background: color-mix(in srgb, var(--danger, var(--sl-danger)) 10%, transparent); }
   .rp-item.warn  { background: color-mix(in srgb, var(--warn, #f0ad4e) 10%, transparent); }
   .rp-msg { flex: 1; min-width: 160px; }
   .rp-fix { font-size: .78rem; color: var(--text-dim, var(--sl-text-faint)); width: 100%; }

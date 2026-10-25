@@ -8,6 +8,7 @@ package llm
 
 import (
 	"context"
+	"time"
 
 	"github.com/soulacy/soulacy/sdk/message"
 )
@@ -57,6 +58,55 @@ type CompletionRequest struct {
 	// The caller (engine) is responsible for clearing this between turns so
 	// only turn 1 forces delegation; subsequent turns can synthesise freely.
 	ToolChoice string
+
+	// Routing carries optional, host-authored intent for the model router. The
+	// zero value preserves fixed provider/model behavior unless the gateway has
+	// enabled a default routing mode. Providers must ignore this field.
+	Routing RoutingHint
+}
+
+// RoutingHint describes execution requirements without exposing prompt text.
+// Mode is "auto", "fast", "strong", or "pinned". TaskClass is "simple",
+// "standard", "complex", or empty for deterministic classification.
+type RoutingHint struct {
+	Mode             string
+	TaskClass        string
+	Phase            string
+	AllowedProviders []string
+	AllowedModels    []string
+}
+
+// RouteAttempt is one governed provider/model attempt. ErrorCategory is a
+// stable machine value; Error contains a bounded provider error for operators.
+type RouteAttempt struct {
+	Provider      string        `json:"provider"`
+	Model         string        `json:"model"`
+	StartedAt     time.Time     `json:"started_at"`
+	Duration      time.Duration `json:"duration"`
+	Outcome       string        `json:"outcome"`
+	ErrorCategory string        `json:"error_category,omitempty"`
+	Error         string        `json:"error,omitempty"`
+	HTTPAttempts  int           `json:"http_attempts,omitempty"`
+	RequestIDs    []string      `json:"request_ids,omitempty"`
+}
+
+// RouteTrace is the prompt-free audit record for one logical completion.
+type RouteTrace struct {
+	ID               string            `json:"id"`
+	Mode             string            `json:"mode"`
+	TaskClass        string            `json:"task_class"`
+	Phase            string            `json:"phase,omitempty"`
+	Decision         string            `json:"decision"`
+	SelectedProvider string            `json:"selected_provider,omitempty"`
+	SelectedModel    string            `json:"selected_model,omitempty"`
+	Candidates       []string          `json:"candidates"`
+	Rejected         map[string]string `json:"rejected,omitempty"`
+	Attempts         []RouteAttempt    `json:"attempts"`
+	Fallbacks        int               `json:"fallbacks"`
+	Degraded         bool              `json:"degraded"`
+	FallbackFrom     string            `json:"fallback_from,omitempty"`
+	FallbackTo       string            `json:"fallback_to,omitempty"`
+	FallbackReason   string            `json:"fallback_reason,omitempty"`
 }
 
 // ChatMessage mirrors the role/content structure used by all major LLM APIs.
@@ -109,6 +159,9 @@ type CompletionResponse struct {
 	// If Stream is true, tokens arrive on this channel. Closed when done.
 	// Providers update the usage fields above before closing this channel.
 	Stream <-chan string
+	// Route records how this logical call selected and, when necessary,
+	// failed over between providers. It never contains prompt or response text.
+	Route RouteTrace
 }
 
 // Provider is the interface every LLM inference backend implements.

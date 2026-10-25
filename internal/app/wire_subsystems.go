@@ -372,9 +372,35 @@ func (a *App) wireLLMRouter() *llm.Router {
 		}
 		llmRouter.Register(p)
 	}
+	routes := make(map[string][]llm.RouteCandidate, len(cfg.LLM.Routing.Routes))
+	for class, configured := range cfg.LLM.Routing.Routes {
+		for _, candidate := range configured {
+			routes[class] = append(routes[class], llm.RouteCandidate{Provider: candidate.Provider, Model: candidate.Model})
+		}
+	}
+	fallbacks := make([]llm.RouteCandidate, 0, len(cfg.LLM.Routing.Fallbacks))
+	for _, candidate := range cfg.LLM.Routing.Fallbacks {
+		fallbacks = append(fallbacks, llm.RouteCandidate{Provider: candidate.Provider, Model: candidate.Model})
+	}
+	localProviders := make(map[string]bool, len(cfg.LLM.Providers))
+	providerRegions := make(map[string]string, len(cfg.LLM.Providers))
+	for id, provider := range cfg.LLM.Providers {
+		localProviders[id] = provider.Local || id == "ollama"
+		providerRegions[id] = provider.Region
+	}
+	cooldown, _ := time.ParseDuration(cfg.LLM.Routing.Cooldown)
+	llmRouter.SetRoutePolicy(llm.RoutePolicy{
+		Enabled: cfg.LLM.Routing.Enabled, DefaultMode: cfg.LLM.Routing.DefaultMode,
+		Preset: cfg.LLM.Routing.Preset, MaxFailovers: cfg.LLM.Routing.MaxFailovers,
+		FailureThreshold: cfg.LLM.Routing.FailureThreshold, Cooldown: cooldown,
+		Routes: routes, Fallbacks: fallbacks, LocalProviders: localProviders,
+		AllowedProviders: cfg.LLM.AllowedProviders, AllowedModels: cfg.LLM.AllowedModels,
+		AllowedRegions: cfg.LLM.AllowedRegions, ProviderRegions: providerRegions,
+	})
 	log.Info("llm providers registered",
 		zap.Strings("ids", llmRouter.ProviderIDs()),
 		zap.String("default", llmRouter.DefaultProvider()),
+		zap.Bool("smart_routing", cfg.LLM.Routing.Enabled),
 	)
 	return llmRouter
 }
@@ -878,6 +904,7 @@ func (a *App) wireRBAC(ws config.Paths, stack *closerStack) *rbac.Manager {
 // stack. Returns the opened cost store (or nil) for the gateway's /costs routes.
 func (a *App) wireEngineExtras(ctx context.Context, ws config.Paths, engine *runtime.Engine, llmRouter *llm.Router, stack *closerStack) *costs.Store {
 	cfg, log := a.cfg, a.log
+	engine.SetLLMObservability(cfg.Observability.CaptureLLMContent, cfg.Observability.MaxContentBytes)
 
 	// ── Workflow Checkpoint Store (E5) ────────────────────────────────────────
 	checkpointPath := ws.DB("checkpoints")
