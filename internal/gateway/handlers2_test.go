@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/soulacy/soulacy/internal/buildinfo"
 	"github.com/soulacy/soulacy/internal/secrets"
 )
 
@@ -24,6 +25,24 @@ func TestGatewayHealthHandler(t *testing.T) {
 	}
 	if body["status"] == nil {
 		t.Fatalf("health: missing status field, body=%v", body)
+	}
+}
+
+// The portal's build badge and `sy version` read the running build from
+// /health; it must match the process's own identity.
+func TestGatewayHandleHealth_ReportsRunningBuild(t *testing.T) {
+	s := newTestGateway(t, "secret")
+	status, body := gatewayJSON(t, s, http.MethodGet, "/api/v1/health", "secret", "")
+	if status != http.StatusOK {
+		t.Fatalf("health status = %d body=%v", status, body)
+	}
+	build, ok := body["build"].(map[string]any)
+	if !ok {
+		t.Fatalf("health: missing build object, body=%v", body)
+	}
+	want := buildinfo.Current()
+	if build["label"] != want.Label || build["build_id"] != want.BuildID || build["instance_id"] != want.InstanceID {
+		t.Fatalf("health build = %v, want label=%s build_id=%s instance_id=%s", build, want.Label, want.BuildID, want.InstanceID)
 	}
 }
 

@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte'
+  import { derived } from 'svelte/store'
   import BrandMark from './lib/BrandMark.svelte'
   import { apiKey, connected, authRequired, navLevel } from './lib/stores.js'
   import ShareView from './pages/ShareView.svelte'
@@ -13,6 +14,9 @@
   import Walkthrough from './lib/walkthrough/Walkthrough.svelte'
   import AskGenie from './lib/AskGenie.svelte'
   import GenieMark from './lib/GenieMark.svelte'
+  import BuildBadge from './lib/BuildBadge.svelte'
+  import BuildChangeNotice from './lib/BuildChangeNotice.svelte'
+  import { startBuildWatch } from './lib/buildwatch.js'
   import {
     loadWalkthroughState, startWalkthrough, shouldAutoStart,
   } from './lib/walkthrough/store.js'
@@ -217,6 +221,8 @@
   }
 
   onMount(() => {
+    // Which runtime build is live; announces redeploys and restarts.
+    startBuildWatch({ probe: api.health, triggers: [connected, derived(authRequired, needsLogin => !needsLogin)] })
     const applyHash = () => {
       const h = location.hash.slice(1)
       const route = h.split('?')[0]
@@ -485,6 +491,7 @@
     </div>
     <div class="topbar-actions">
       <button class="topbar-search" on:click={openLauncher} aria-label="Find a Soulacy screen"><span>⌕</span> Search anything... <kbd>⌘K</kbd></button>
+      <BuildBadge />
       <span class="topbar-connection" class:live={$connected}>
         <i></i>{$connected ? 'Connected' : 'Reconnecting'}
       </span>
@@ -599,6 +606,7 @@
           {$connected ? '● Live' : '○ Offline'}
         </span>
       {/if}
+      <span class="sidebar-build"><BuildBadge compact /></span>
       <button class="icon-btn" on:click={toggleTheme} title={theme === 'light' ? 'Switch to night' : 'Switch to day'} aria-label="Toggle light and dark">{theme === 'light' ? '☾' : '☀︎'}</button>
       <button class="icon-btn" on:click={openKeyModal} title="Change browser login">🔑</button>
     </div>
@@ -642,6 +650,7 @@
 
   <!-- Main content -->
   <main class="content">
+    <BuildChangeNotice />
     {#if pageLoadError}
       <div class="page-loading err">
         <strong>{pageLoadStale ? 'Soulacy updated while this tab was open.' : 'Could not load this page.'}</strong>
@@ -934,6 +943,7 @@
 
   /* ── Mobile top bar + drawer (≤768px) ───────────────────────────── */
   .topbar { display: none; }
+  .sidebar-build { display: none; }
   .backdrop { display: none; }
   .mobile-tabs { display: none; }
   .drawer-close { display: none; }
@@ -974,6 +984,7 @@
   @media (max-width: 768px) {
     .layout { display: flex; flex-direction: column; }
     .desktop-topbar { display: none; }
+    .sidebar-build { display: inline-flex; }
 
     /* Chat owns its navigation bar on phones. Keeping the shell command bar as
        well produced a web-dashboard-style double header; the More tab remains

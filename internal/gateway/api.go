@@ -34,6 +34,7 @@ import (
 	"github.com/soulacy/soulacy/internal/auth"
 	"github.com/soulacy/soulacy/internal/autopilot"
 	"github.com/soulacy/soulacy/internal/builder"
+	"github.com/soulacy/soulacy/internal/buildinfo"
 	"github.com/soulacy/soulacy/internal/channels"
 	wawebchan "github.com/soulacy/soulacy/internal/channels/whatsappweb"
 	"github.com/soulacy/soulacy/internal/config"
@@ -151,6 +152,7 @@ func (s *Server) handleHealth(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"status":     status,
 		"version":    config.Version,
+		"build":      buildinfo.Current(),
 		"timestamp":  time.Now().UTC(),
 		"deps":       deps,
 		"request_id": c.Locals("request_id"),
