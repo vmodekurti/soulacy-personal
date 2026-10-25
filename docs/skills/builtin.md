@@ -18,9 +18,32 @@ marker, and the Skills page shows them with a **built-in** badge.
 | `shopping-research` | compare products across connected shopping services and hand checkout to the person |
 | `event-finder` | find and compare events through connected event services, then open provider ticket selection |
 | `food-product-check` | explain barcode, ingredient, nutrition, allergen and label data with uncertainty |
+| `find-skills` | find, vet (audits, source, license, fit) and, on your yes, install a skill Soulacy lacks |
+| `skill-creator` | turn a repeated workflow into a skill with an `eval.md`, test it, and tune its description |
+| `grill-me` | stress-test a plan in rounds of questions, each with a recommended answer |
+| `teach` | a multi-session course: mission, sourced lessons, retrieval practice and spaced reviews |
+| `weather` | current conditions and forecasts with no API key, answered as a decision |
+| `community-pulse` | what people said in the last 30 days on Hacker News, Reddit, GitHub and the web, with dated quotes |
+| `humanizer` | remove AI writing patterns from a draft while keeping every fact |
 
 Every skill has a `references/eval.md` with a handful of prompts and the
 expected behaviour, so it can be checked by hand (and, later, automatically).
+
+## Third-party credits
+
+Some built-in skills are adapted from popular open-source skills. Each of
+these folders keeps the upstream license as `LICENSE.upstream.txt` and
+lists its changes in a **Credits** section at the end of `SKILL.md`.
+
+| Skill | Based on | License |
+|---|---|---|
+| `find-skills` | [vercel-labs/skills](https://github.com/vercel-labs/skills) `find-skills`, Vercel, Inc. | MIT |
+| `skill-creator` | [anthropics/skills](https://github.com/anthropics/skills) `skill-creator`, Anthropic | Apache-2.0 |
+| `grill-me` | [mattpocock/skills](https://github.com/mattpocock/skills) `grilling`, Matt Pocock | MIT |
+| `teach` | [mattpocock/skills](https://github.com/mattpocock/skills) `teach`, Matt Pocock | MIT |
+| `weather` | [openclaw/openclaw](https://github.com/openclaw/openclaw) `weather`, OpenClaw Foundation | MIT |
+| `humanizer` | [blader/humanizer](https://github.com/blader/humanizer), Siqi Chen | MIT |
+| `community-pulse` | inspired by [mvanhorn/last30days-skill](https://github.com/mvanhorn/last30days-skill), Matt Van Horn (no code or text reused) | MIT |
 
 ## Upgrades never clobber your edits
 
