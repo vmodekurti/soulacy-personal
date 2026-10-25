@@ -13,7 +13,7 @@ func TestNewWithVolumes_TrimsAndStores(t *testing.T) {
 }
 
 func TestDockerRunArgs_IncludesVolumeMounts(t *testing.T) {
-	args := dockerRunArgs("none", "python:3.12-slim", "python3", []string{"/host:/c:ro", "/a:/b"}, "print(1)")
+	args := NewWithVolumes("python:3.12-slim", "python3", "none", []string{"/host:/c:ro", "/a:/b"}).runArgs("print(1)")
 	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, "-v /host:/c:ro") || !strings.Contains(joined, "-v /a:/b") {
 		t.Fatalf("expected both volume mounts, got: %s", joined)
@@ -28,7 +28,7 @@ func TestDockerRunArgs_IncludesVolumeMounts(t *testing.T) {
 }
 
 func TestDockerRunArgs_NoVolumesIsClean(t *testing.T) {
-	args := dockerRunArgs("none", "img", "python3", nil, "x")
+	args := New("img", "python3", "none").runArgs("x")
 	for _, a := range args {
 		if a == "-v" {
 			t.Fatalf("did not expect any -v flag: %#v", args)

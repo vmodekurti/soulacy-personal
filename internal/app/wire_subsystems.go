@@ -633,12 +633,30 @@ func (a *App) buildDockerExecutor() executor.Backend {
 	if network == "" {
 		network = "none"
 	}
+	// Containerised tools get the same caps as privileged builtins
+	// (runtime.sandbox) behind the shared hardened profile.
+	sbx := cfg.Runtime.Sandbox
+	user := sandbox.ContainerUser(cfg.Executor.DockerUser)
 	log.Info("python executor: docker",
 		zap.String("image", image),
 		zap.String("network", network),
 		zap.Int("volumes", len(cfg.Executor.DockerVolumes)),
+		zap.String("user", user),
 		zap.String("python_bin", cfg.Runtime.PythonBin))
-	return executordocker.NewWithVolumes(image, cfg.Runtime.PythonBin, network, cfg.Executor.DockerVolumes)
+	return executordocker.NewWithOptions(executordocker.Options{
+		Image:     image,
+		PythonBin: cfg.Runtime.PythonBin,
+		Network:   network,
+		Volumes:   cfg.Executor.DockerVolumes,
+		Limits: sandbox.Limits{
+			CPUSeconds: sbx.CPUSeconds,
+			MemoryMB:   sbx.MemoryMB,
+			OpenFiles:  sbx.OpenFiles,
+			FileSizeMB: sbx.FileSizeMB,
+		},
+		PIDs: sbx.PIDs,
+		User: user,
+	})
 }
 
 // buildSSHExecutor constructs the ssh backend. When executor.ssh_identity_credential

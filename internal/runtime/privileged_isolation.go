@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/soulacy/soulacy/internal/processutil"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -117,37 +116,25 @@ func (r DockerPrivilegedRunner) Run(ctx context.Context, req PrivilegedCommand) 
 	if rel != "." {
 		containerWork = filepath.ToSlash(filepath.Join(containerWork, rel))
 	}
-	argv := translateWorkspaceArgs(req.Argv, root)
-	args := []string{"run", "--rm", "-i", "--network", "none", "--read-only",
-		"--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", strconv.Itoa(defaultInt(r.PIDs, 128)),
-		"--tmpfs", "/tmp:rw,noexec,nosuid,size=64m", "-v", root + ":/workspace:rw", "-w", containerWork,
-	}
-	if r.Limits.MemoryMB > 0 {
-		args = append(args, "--memory", strconv.Itoa(r.Limits.MemoryMB)+"m")
-	}
-	if r.Limits.CPUSeconds > 0 {
-		args = append(args, "--cpus", "1")
-	}
-	if r.Limits.OpenFiles > 0 {
-		n := strconv.Itoa(r.Limits.OpenFiles)
-		args = append(args, "--ulimit", "nofile="+n+":"+n)
-	}
-	if r.Limits.FileSizeMB > 0 {
-		n := strconv.FormatInt(int64(r.Limits.FileSizeMB)<<20, 10)
-		args = append(args, "--ulimit", "fsize="+n+":"+n)
-	}
 	// Only the already-filtered, non-secret environment is copied, and host
 	// workspace path hints are translated into their container equivalent.
+	var env []string
 	for _, pair := range req.Env {
 		parts := strings.SplitN(pair, "=", 2)
 		if len(parts) != 2 {
 			continue
 		}
-		value := strings.ReplaceAll(parts[1], root, "/workspace")
-		args = append(args, "-e", parts[0]+"="+value)
+		env = append(env, parts[0]+"="+strings.ReplaceAll(parts[1], root, "/workspace"))
 	}
-	args = append(args, image)
-	args = append(args, argv...)
+	profile := sandbox.ContainerProfile{
+		Network: "none",
+		Limits:  r.Limits,
+		PIDs:    r.PIDs,
+		Mounts:  []string{root + ":/workspace:rw"},
+		Workdir: containerWork,
+		Env:     env,
+	}
+	args := profile.RunArgs(image, translateWorkspaceArgs(req.Argv, root)...)
 	binary := strings.TrimSpace(r.Binary)
 	if binary == "" {
 		binary = "docker"
@@ -167,13 +154,6 @@ func translateWorkspaceArgs(argv []string, root string) []string {
 		out[i] = strings.ReplaceAll(arg, root, "/workspace")
 	}
 	return out
-}
-
-func defaultInt(v, fallback int) int {
-	if v > 0 {
-		return v
-	}
-	return fallback
 }
 
 func (e *Engine) SetPrivilegedCommandRunner(r PrivilegedCommandRunner) {
