@@ -37,7 +37,17 @@ func ensureGeniePortalInstructions(prompt string) string {
 }
 
 func (e *Engine) buildPortalBuiltins() []BuiltinTool {
-	result := []BuiltinTool{{Name: "portal_actions", Gate: "portal", Description: "Discover Soulacy Portal actions and their exact parameters. Search by topic such as runs podcast agents settings providers schedule knowledge channels skills or updates. Call before using an unfamiliar action. Credentials stay in the secure Portal.", Parameters: map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}}, Handler: func(ctx context.Context, args map[string]any) (string, error) {
+	result := []BuiltinTool{{Name: "connect_agensi", Gate: "agensi", Description: "Start Soulacy's secure Agensi browser sign-in. Return the authorization_url to the user and wait for them to sign in and click Allow. Never request an account token or API key.", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}, Handler: func(ctx context.Context, _ map[string]any) (string, error) {
+		if portalAccess(ctx) == nil {
+			return "", fmt.Errorf("agensi connection requires signed-in Soulacy chat")
+		}
+		v, err := portalAccess(ctx).PortalAction(ctx, "update", "skills.agensi_connect", nil, nil)
+		if err != nil {
+			return "", err
+		}
+		b, err := json.Marshal(v)
+		return string(b), err
+	}}, {Name: "portal_actions", Gate: "portal", Description: "Discover Soulacy Portal actions and their exact parameters. Search by topic such as runs podcast agents settings providers schedule knowledge channels skills or updates. Call before using an unfamiliar action. Credentials stay in the secure Portal.", Parameters: map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}}, Handler: func(ctx context.Context, args map[string]any) (string, error) {
 		if ActiveAgentFromContext(ctx) != GenieAgentID || portalAccess(ctx) == nil {
 			return "", fmt.Errorf("portal access requires signed-in Genie chat")
 		}

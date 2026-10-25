@@ -420,6 +420,12 @@ func (s *Server) wireBuilderTools(u *runtime.BuilderUnderstanding, def *agent.De
 	if len(res.MCPTools) > 0 {
 		m := append([]string{}, res.MCPTools...)
 		def.MCPTools = &m
+		for _, tool := range m {
+			if strings.HasPrefix(strings.ToLower(tool), "mcp__agensi__") {
+				def.SystemPrompt = runtime.EnsureAgensiInstructions(def.SystemPrompt)
+				break
+			}
+		}
 	}
 	return res.Unknown
 }

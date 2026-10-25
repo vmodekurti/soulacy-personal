@@ -1098,6 +1098,31 @@ func (e *Engine) dynamicConfirm(ctx context.Context, def *agent.Definition, call
 	}
 }
 
+// requiredHumanConfirm is for actions where an unattended agent may never
+// stand in for a person. Unlike the general guardrail confirmation path, this
+// deliberately ignores def.Unattended and fails closed without a live GUI.
+func (e *Engine) requiredHumanConfirm(ctx context.Context, def *agent.Definition, call message.ToolCall, reason string) error {
+	sender, ok := confirmSenderFrom(ctx)
+	if !ok {
+		e.log.Warn("explicit human confirmation required but no confirm channel is available",
+			zap.String("agent", agentIDOf(def)), zap.String("tool", call.Name), zap.String("reason", reason))
+		return fmt.Errorf("this action requires explicit user approval in Soulacy: %s", reason)
+	}
+	callID := uuid.New().String()
+	resultCh := sender(ConfirmRequest{CallID: callID, Tool: call.Name, Args: call.Arguments, Reason: reason})
+	defer e.Broker().Forget(callID)
+	select {
+	case approved := <-resultCh:
+		if !approved {
+			e.logAudit(ctx, def, call, "", time.Now(), true, nil)
+			return fmt.Errorf("tool %q was denied by the user", call.Name)
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func isSideEffectingTool(name string) bool {
 	if name == "portal_update" || name == "portal_confirm" || name == "learning.propose" || name == "safe_undo.prepare" || toolSecurityClasses[name].SideEffecting {
 		return true

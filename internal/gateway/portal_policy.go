@@ -131,7 +131,7 @@ func (p *portalSession) allowPortalMutation(a portalActionSpec, params, body map
 		return nil
 	case a.Name == "providers.pull":
 		return nil
-	case strings.HasPrefix(a.Name, "knowledge."), strings.HasPrefix(a.Name, "workboard."), strings.HasPrefix(a.Name, "memory."), strings.HasPrefix(a.Name, "person."), strings.HasPrefix(a.Name, "schedule."), a.Name == "skills.rescan":
+	case strings.HasPrefix(a.Name, "knowledge."), strings.HasPrefix(a.Name, "workboard."), strings.HasPrefix(a.Name, "memory."), strings.HasPrefix(a.Name, "person."), strings.HasPrefix(a.Name, "schedule."), a.Name == "skills.rescan", a.Name == "skills.agensi_connect":
 		return nil
 	default:
 		return deny(a.Name)

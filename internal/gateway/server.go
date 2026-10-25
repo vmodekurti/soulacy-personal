@@ -225,6 +225,8 @@ type Server struct {
 	packageInstallRunner  packageInstallRunner
 	packageInstallPolicy  func(PackageInstallRequest) error
 	mcpRegistrationPolicy func(transport, endpoint, command string) error
+	mcpOAuthMu            sync.Mutex
+	mcpOAuthPending       map[string]mcpOAuthPending
 }
 
 // New creates and configures the Fiber server but does not start listening.
@@ -266,6 +268,7 @@ func New(
 		generationProofs:   make(map[string]generationProofRecord),
 		preferenceJobs:     make(chan preferenceMineJob, 128),
 		packageInstallJobs: make(map[string]*packageInstallJob),
+		mcpOAuthPending:    make(map[string]mcpOAuthPending),
 	}
 	go s.runPreferenceMiner()
 	s.liveActivities = newLiveActivityTracker(mobilechan.DefaultAdapter, func(id string) string {
@@ -777,6 +780,9 @@ func (s *Server) buildApp() *fiber.App {
 	app.Get("/api/v1/shared/:token", s.handleShareView)
 	// Audio capabilities are validated by the handler before any upstream access.
 	app.Get("/api/v1/media/podcast", s.handlePodcastAudio)
+	// OAuth callbacks carry an unguessable, one-time state value and cannot use
+	// the gateway API credential because they are opened by the provider.
+	app.Get(agensiOAuthCallbackPath, s.handleAgensiOAuthCallback)
 
 	// --- Plugin GUI mounts (Story E8) ---
 	// Static plugin UIs — no auth, same policy as the main GUI bundle below.
@@ -1027,6 +1033,9 @@ func (s *Server) buildApp() *fiber.App {
 	api.Post("/skills/install", s.rbacMW(rbac.ResourceSkills, rbac.ActionWrite), s.handleInstallRegistrySkill)
 	api.Post("/skills/provision-agenticskills", s.rbacMW(rbac.ResourceSkills, rbac.ActionWrite), s.handleProvisionAgenticSkill)
 	api.Post("/skills/rescan", s.rbacMW(rbac.ResourceSkills, rbac.ActionWrite), s.handleRescanSkills)
+	api.Get("/skills/agensi/status", s.rbacMW(rbac.ResourceSkills, rbac.ActionRead), s.handleAgensiStatus)
+	api.Post("/skills/agensi/connect", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleAgensiConnect)
+	api.Post("/skills/agensi/search", s.rbacMW(rbac.ResourceSkills, rbac.ActionRead), s.handleAgensiSearch)
 	api.Get("/marketplace/status", s.rbacMW(rbac.ResourceSkills, rbac.ActionRead), s.handleMarketplaceStatus)
 
 	// MCP (Model Context Protocol) — configured external servers + their tools

@@ -241,8 +241,8 @@ system_prompt: customized prompt
 	if !sys.Enabled {
 		t.Fatal("system agent should remain enabled")
 	}
-	if sys.SystemPrompt != "customized prompt" {
-		t.Fatalf("system prompt = %q, want customized prompt", sys.SystemPrompt)
+	if !strings.HasPrefix(sys.SystemPrompt, "customized prompt") || !strings.Contains(sys.SystemPrompt, "## Agensi live skill catalog") {
+		t.Fatalf("system prompt = %q, want customization plus the enforced Agensi contract", sys.SystemPrompt)
 	}
 	if sys.SourcePath == builtinSourcePath {
 		t.Fatal("system SourcePath should point to on-disk file, not builtin sentinel")
