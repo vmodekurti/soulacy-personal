@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/living-core-blue-v1.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
     
     
       
@@ -31,10 +31,10 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
       
       
 
@@ -4704,6 +4704,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#confirm-the-new-build-is-running" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Confirm the new build is running
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#verify-a-systemd-service-uses-the-intended-config" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5296,6 +5307,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#confirm-the-new-build-is-running" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Confirm the new build is running
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#verify-a-systemd-service-uses-the-intended-config" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5692,8 +5714,26 @@ your service manager's restart.</p>
 <p>Do not mix a source checkout upgrade with <code>sy update install</code> unless you intend
 to replace the source-built binaries with release binaries. Stores upgrade
 their own schemas at boot; there is no separate migration command.</p>
-<p>Source builds now require <strong>Go 1.26.9 or newer</strong>. Binary release installs do
+<p>Source builds now require <strong>Go 1.26.10 or newer</strong>. Binary release installs do
 not require a local Go toolchain.</p>
+<h2 id="confirm-the-new-build-is-running">Confirm the new build is running<a class="headerlink" href="#confirm-the-new-build-is-running" title="Permanent link">&para;</a></h2>
+<p>Every build of the gateway has a codename, such as <code>lively-lynx</code>, derived from a
+hash of the running binary. It changes whenever the code changes, so after a
+redeploy you only need to check that the name is different.</p>
+<ul>
+<li><strong>Portal:</strong> the badge in the top bar shows the current codename, marked
+  <strong>new</strong> for 15 minutes after the runtime starts. Click it for the build ID,
+  version, commit, and start time. When the runtime changes while the portal is
+  open, a banner names the new and previous builds; reload to load the matching
+  interface. A restart of the same build keeps the name and is reported as a
+  restart.</li>
+<li><strong>CLI:</strong> <code>sy version</code> prints the running build and its details.</li>
+<li><strong>API:</strong> <code>GET /api/v1/health</code> includes a <code>build</code> object with <code>label</code>,
+  <code>build_id</code>, <code>version</code>, <code>commit</code>, <code>started_at</code>, and <code>instance_id</code>.</li>
+<li><strong>Logs:</strong> the <code>Soulacy starting</code> line records <code>build</code> and <code>build_id</code>.</li>
+</ul>
+<p>Rebuilding identical source produces an identical binary, so it keeps the same
+codename.</p>
 <h2 id="verify-a-systemd-service-uses-the-intended-config">Verify a systemd service uses the intended config<a class="headerlink" href="#verify-a-systemd-service-uses-the-intended-config" title="Permanent link">&para;</a></h2>
 <p>An interactive <code>soulacy serve</code> runs as your shell user; a system service often
 runs as the dedicated <code>soulacy</code> user with home <code>/var/lib/soulacy</code>. Those two
@@ -5990,10 +6030,10 @@ consistent previous state.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.path", "navigation.top", "navigation.footer", "toc.follow", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate", "content.tabs.link", "content.action.edit"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.path", "navigation.top", "navigation.footer", "toc.follow", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate", "content.tabs.link", "content.action.edit"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
       
     
   </body>
