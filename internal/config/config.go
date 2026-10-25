@@ -1085,7 +1085,7 @@ type MCPServerConfig struct {
 // SecretRef names a value in Soulacy's encrypted global secret store; the
 // credential itself is deliberately never serialized into config.yaml.
 type MCPAuthConfig struct {
-	Type            string   `mapstructure:"type"` // none | bearer | api_key | oauth_client_credentials
+	Type            string   `mapstructure:"type"` // none | bearer | api_key | oauth_client_credentials | oauth_authorization_code
 	Header          string   `mapstructure:"header"`
 	Scheme          string   `mapstructure:"scheme"`
 	SecretRef       string   `mapstructure:"secret_ref"`
@@ -1094,6 +1094,7 @@ type MCPAuthConfig struct {
 	ClientSecretRef string   `mapstructure:"client_secret_ref"`
 	Scopes          []string `mapstructure:"scopes"`
 	Audience        string   `mapstructure:"audience"`
+	Resource        string   `mapstructure:"resource"`
 }
 
 // RegistryConfig describes one package registry for skill/plugin installs

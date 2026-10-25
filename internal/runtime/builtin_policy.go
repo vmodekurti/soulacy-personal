@@ -20,6 +20,8 @@ func (e *Engine) builtinAllowed(ctx context.Context, def *agent.Definition, tool
 	switch tool.Gate {
 	case "portal":
 		return def != nil && def.ID == GenieAgentID && portalAccess(ctx) != nil
+	case "agensi":
+		return def != nil && (def.ID == GenieAgentID || def.ID == SystemAgentID) && portalAccess(ctx) != nil
 	case "genie":
 		return websiteRoute || (def != nil && def.Builtins != nil && containsExactString(*def.Builtins, tool.Name))
 	case "mobile", "safe_undo", "person":

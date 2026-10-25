@@ -700,6 +700,11 @@ export const api = {
     provisionAgenticSkills: (body) => apiFetch('/skills/provision-agenticskills', {
       method: 'POST', body: JSON.stringify(body),
     }),
+    agensiStatus:  ()      => apiFetch('/skills/agensi/status'),
+    connectAgensi: ()      => apiFetch('/skills/agensi/connect', { method: 'POST', body: '{}' }),
+    searchAgensi:  (query) => apiFetch('/skills/agensi/search', {
+      method: 'POST', body: JSON.stringify({ query }),
+    }),
   },
 
   // Skill sources / package registries (Story E26)
