@@ -1,4 +1,4 @@
-# Container Sandbox for Tool Code — Design Memo
+# Container Sandbox for Tool Code: Design Memo
 
 **Status:** proposed. Phase 1 ships in the PR that adds this memo.
 **Date:** 2026-10-25
