@@ -3534,6 +3534,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../model-routing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model Routing & Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../LLM_COST_CONTROLS/" class="md-nav__link">
         
   
@@ -5253,6 +5281,31 @@ releases. Full contract: <a href="https://github.com/vmodekurti/soulacy-personal
 <td><code>llm.result</code></td>
 <td>one LLM turn completes</td>
 <td><code>model</code>, <code>input_tokens</code>, <code>output_tokens</code>, <code>duration_ms</code>, <code>tool_calls</code></td>
+</tr>
+<tr>
+<td><code>llm.route.decision</code></td>
+<td>the router evaluates candidates</td>
+<td>task class, candidates, rejected routes, decision</td>
+</tr>
+<tr>
+<td><code>llm.route.fallback</code></td>
+<td>a provider/model fails over</td>
+<td>source, destination, categorized reason</td>
+</tr>
+<tr>
+<td><code>context.prepared</code></td>
+<td>prompt context is ready</td>
+<td>sources, role counts, model limit, estimated tokens</td>
+</tr>
+<tr>
+<td><code>context.compacted</code></td>
+<td>old evidence is compressed or removed to fit</td>
+<td>same as <code>context.prepared</code> + dropped count</td>
+</tr>
+<tr>
+<td><code>lifecycle.*</code></td>
+<td>a compiled-in lifecycle hook runs</td>
+<td>stage, denied state, reason/error when present</td>
 </tr>
 <tr>
 <td><code>error</code></td>
