@@ -15,6 +15,7 @@ import (
 	"github.com/soulacy/soulacy/internal/processutil"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +30,7 @@ import (
 	"github.com/soulacy/soulacy/internal/sandbox"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
+	sdkhooks "github.com/soulacy/soulacy/sdk/hooks"
 )
 
 // EventSink receives structured events as they happen during agent execution.
@@ -36,7 +38,20 @@ func (e *Engine) runTool(ctx context.Context, def *agent.Definition, sessionID s
 	if err := progressGuardFrom(ctx).failure(); err != nil {
 		return "", err
 	}
+	agentID := agentIDOf(def)
+	if err := e.runLifecycleHook(ctx, sdkhooks.ToolBefore, agentID, sessionID, map[string]any{"tool": call.Name, "argument_keys": sortedArgumentKeys(call.Arguments)}); err != nil {
+		return "", err
+	}
+	started := time.Now()
 	out, err := e.runToolDispatch(ctx, def, sessionID, call)
+	after := lifecycleAfterData("success", err)
+	after["tool"] = call.Name
+	after["duration_ms"] = time.Since(started).Milliseconds()
+	after["output_chars"] = len(out)
+	if err != nil {
+		after["outcome"] = "error"
+	}
+	_ = e.runLifecycleHook(context.WithoutCancel(ctx), sdkhooks.ToolAfter, agentID, sessionID, after)
 	evidence := out
 	if err != nil {
 		evidence = err.Error()
@@ -44,15 +59,20 @@ func (e *Engine) runTool(ctx context.Context, def *agent.Definition, sessionID s
 	progressGuardFrom(ctx).observe(call, evidence, err != nil)
 
 	e.observeLearningTool(ctx, def, call, out, err)
-	agentID := ""
-	if def != nil {
-		agentID = def.ID
-	}
 	e.observeTaskTool(ctx, agentID, sessionID, call, evidence, err != nil)
 	if obs := toolObserverFrom(ctx); obs != nil {
 		obs(call, out, err != nil)
 	}
 	return out, err
+}
+
+func sortedArgumentKeys(args map[string]any) []string {
+	keys := make([]string, 0, len(args))
+	for key := range args {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func (e *Engine) runToolDispatch(ctx context.Context, def *agent.Definition, sessionID string, call message.ToolCall) (string, error) {

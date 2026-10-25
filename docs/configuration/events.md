@@ -42,6 +42,11 @@ releases. Full contract: [`docs/EVENTS.md`](https://github.com/vmodekurti/soulac
 | `tool.call` | the LLM requests a tool | `name`, `arguments` |
 | `tool.result` | a tool returns | `name`, `content`, `is_error` |
 | `llm.result` | one LLM turn completes | `model`, `input_tokens`, `output_tokens`, `duration_ms`, `tool_calls` |
+| `llm.route.decision` | the router evaluates candidates | task class, candidates, rejected routes, decision |
+| `llm.route.fallback` | a provider/model fails over | source, destination, categorized reason |
+| `context.prepared` | prompt context is ready | sources, role counts, model limit, estimated tokens |
+| `context.compacted` | old evidence is compressed or removed to fit | same as `context.prepared` + dropped count |
+| `lifecycle.*` | a compiled-in lifecycle hook runs | stage, denied state, reason/error when present |
 | `error` | a run errors (incl. plugin load failures at boot, `stage: plugin-load`) | `stage`, `error` |
 | `run.started` | a Workboard run begins | `task_id`, `task_title`, `run_id`, `attempt` |
 | `run.finished` | a Workboard run succeeds | same as `run.started` |

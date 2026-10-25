@@ -32,6 +32,13 @@
   {#if result}
     <div class="identity">{#if result.strategy === 'workflow'}Models selected per workflow step{:else if result.strategy === 'router'}No model needed for message routing{:else}{result.profile.provider || 'No provider'} · {result.profile.model || 'Provider chooses at runtime'}{/if}</div>
     <p>{strategyLabel(result.strategy)} · Your goal, permissions and spending limits stay unchanged.</p>
+    {#if result.routing?.selected_provider}
+      <div class="routing-preview">
+        <strong>{result.routing.mode === 'pinned' ? 'Assigned model' : 'Smart route preview'}</strong>
+        <span>{result.routing.selected_provider} · {result.routing.selected_model || 'provider default'}</span>
+        {#if result.routing.mode !== 'pinned'}<small>{result.routing.task_class} work · {(result.routing.candidates || []).length} compatible/configured candidate(s)</small>{/if}
+      </div>
+    {/if}
     {#if executionLimitRows(result.limits).length}
       <div class="execution-policy" aria-label="Run allowances">
         <strong>Run allowances</strong>
@@ -61,9 +68,11 @@
   header { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
   p { line-height:1.5; color:var(--text-muted, #909cad); margin:8px 0; }
   .identity { margin-top:12px; font-weight:600; }
+  .routing-preview { display:flex; flex-direction:column; gap:3px; margin:10px 0; padding:10px 12px; border-radius:9px; background:color-mix(in srgb, var(--sl-accent, var(--sl-accent-ink)) 8%, transparent); border:1px solid color-mix(in srgb, var(--sl-accent, var(--sl-accent-ink)) 24%, var(--border, #394150)); }
+  .routing-preview small { color:var(--text-muted, #909cad); }
   summary { cursor:pointer; margin-top:10px; }
   dl { display:grid; grid-template-columns: minmax(80px, 1fr) 2fr; gap:8px; }
   dd { margin:0; } li { margin:8px 0; line-height:1.5; }
-  [role=alert], .warning { color:var(--warning, #d3a451); }
+  [role=alert], .warning { color:var(--warning, var(--sl-warning)); }
   button { font:inherit; cursor:pointer; }
 </style>

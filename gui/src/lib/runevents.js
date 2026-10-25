@@ -19,6 +19,10 @@
 export const RUN_EVENT_TYPES = [
   'llm.call', 'llm.result', 'tool.call', 'tool.result', 'tool.log',
   'error', 'reasoning.start', 'reasoning.step', 'reasoning.result',
+  'context.prepared', 'context.compacted',
+  'llm.route.decision', 'llm.route.fallback', 'llm.route.completed',
+  'lifecycle.run.before', 'lifecycle.run.after', 'lifecycle.context.after',
+  'lifecycle.llm.before', 'lifecycle.llm.after', 'lifecycle.tool.before', 'lifecycle.tool.after',
 ]
 
 export function isRunEvent(ev) {
@@ -48,6 +52,18 @@ export function eventTitle(ev) {
     case 'reasoning.start': return `Planning (${p.strategy || 'steps'})`
     case 'reasoning.step': return `${p.recovery ? 'Recovering' : 'Step'} ${p.index ?? ''}`.trim()
     case 'reasoning.result': return `Planning done — ${p.steps ?? 0} step${p.steps === 1 ? '' : 's'}`
+    case 'context.prepared': return 'Prepared context'
+    case 'context.compacted': return 'Compacted context to fit'
+    case 'llm.route.decision': return `Routing ${p.task_class || 'standard'} work`
+    case 'llm.route.fallback': return 'Switching model provider'
+    case 'llm.route.completed': return p.selected_provider ? `Selected ${p.selected_provider}` : 'Routing finished'
+    case 'lifecycle.run.before':
+    case 'lifecycle.run.after':
+    case 'lifecycle.context.after':
+    case 'lifecycle.llm.before':
+    case 'lifecycle.llm.after':
+    case 'lifecycle.tool.before':
+    case 'lifecycle.tool.after': return `Hook · ${p.stage || ev.type.replace('lifecycle.', '')}`
     case 'error': return `Problem${p.stage ? ` in ${p.stage}` : ''}`
     default: return ev?.type || 'event'
   }
@@ -62,6 +78,11 @@ export function eventDetail(ev) {
     case 'error': return snippet(p.error || p.message || JSON.stringify(p), 240)
     case 'llm.result': return `${p.duration_ms ?? 0}ms · ${p.input_tokens ?? 0} in / ${p.output_tokens ?? 0} out`
     case 'reasoning.step': return snippet(p.recovery ? p.observation || p.thought || '' : p.thought || '', 240)
+    case 'context.prepared':
+    case 'context.compacted': return `${p.estimated_tokens_after ?? 0} / ${p.input_budget_tokens ?? '?'} tokens · ${p.dropped_messages || 0} dropped`
+    case 'llm.route.decision': return `${(p.candidates || []).length} candidate(s)`
+    case 'llm.route.fallback': return `${p.fallback_from || 'provider'} → ${p.fallback_to || 'next provider'} · ${p.fallback_reason || 'provider error'}`
+    case 'llm.route.completed': return `${p.selected_provider || 'none'} / ${p.selected_model || 'default'}`
     default: return ''
   }
 }
@@ -77,6 +98,11 @@ export function eventFullDetail(ev) {
     case 'reasoning.step': return String(p.thought || '')
     case 'llm.call':
     case 'llm.result': return JSON.stringify(p, null, 2)
+    case 'context.prepared':
+    case 'context.compacted':
+    case 'llm.route.decision':
+    case 'llm.route.fallback':
+    case 'llm.route.completed': return JSON.stringify(p, null, 2)
     default: return ''
   }
 }
@@ -87,6 +113,7 @@ export function eventKind(ev) {
   if (type.includes('error')) return 'err'
   if (type.startsWith('tool.')) return 'tool'
   if (type.startsWith('llm.')) return 'llm'
+  if (type.startsWith('context.') || type.startsWith('lifecycle.')) return 'decision'
   return ''
 }
 

@@ -934,18 +934,18 @@
   .param-schema {
     margin: 8px 0 4px;
     padding: 8px;
-    background: var(--bg-elev-2, #1b2235);
+    background: var(--bg-elev-2, var(--sl-surface-muted));
     border: 1px solid var(--border, #2a3350);
     border-radius: 8px;
   }
   .ps-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
-  .ps-tool { font-size: 11px; color: var(--text-muted, #8b93ab); font-family: ui-monospace, Menlo, monospace; }
+  .ps-tool { font-size: 11px; color: var(--text-muted, var(--sl-text-faint)); font-family: ui-monospace, Menlo, monospace; }
   .ps-chips { display: flex; flex-wrap: wrap; gap: 6px; }
   .ps-chip {
     display: inline-flex; align-items: center; gap: 5px;
     border: 1px solid var(--border, #2a3350);
-    background: var(--bg, #0f1420);
-    color: var(--text, #e6e9ef);
+    background: var(--bg, var(--sl-surface-inset));
+    color: var(--text, var(--sl-text));
     border-radius: 999px; padding: 3px 9px; font-size: 12px; cursor: pointer;
     transition: border-color 120ms ease, background 120ms ease;
   }
@@ -953,14 +953,14 @@
   .ps-chip.set { background: color-mix(in srgb, var(--ok, #38c172) 16%, transparent); border-color: var(--ok, #38c172); }
   .ps-chip.req .ps-name { font-weight: 600; }
   .ps-name { white-space: nowrap; }
-  .ps-type { font-size: 10.5px; color: var(--text-muted, #8b93ab); }
-  .ps-star { color: var(--error, #ff6b81); }
+  .ps-type { font-size: 10.5px; color: var(--text-muted, var(--sl-text-faint)); }
+  .ps-star { color: var(--error, var(--sl-danger)); }
   .ps-check { color: var(--ok, #38c172); font-size: 11px; }
   .ps-add { display: flex; gap: 6px; margin-top: 8px; }
   .ps-add-input {
     flex: 1; min-width: 0; font-size: 12px; padding: 4px 8px;
-    background: var(--bg, #0f1420); border: 1px solid var(--border, #2a3350);
-    border-radius: 6px; color: var(--text, #e6e9ef);
+    background: var(--bg, var(--sl-surface-inset)); border: 1px solid var(--border, #2a3350);
+    border-radius: 6px; color: var(--text, var(--sl-text));
   }
   .ps-add-input:focus { outline: none; border-color: var(--accent, #4f7cff); }
 
@@ -995,7 +995,7 @@
   }
   @keyframes insp-spin { to { transform: rotate(360deg); } }
   .refine-msg { font-size: 12px; margin: 8px 0 0; }
-  .refine-err { color: var(--error, #ff6b81); }
+  .refine-err { color: var(--error, var(--sl-danger)); }
   .refine-ok { color: var(--ok, #36d399); }
 
   /* Edges list */

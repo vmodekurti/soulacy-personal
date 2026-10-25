@@ -200,7 +200,11 @@ func TestPairReachProbe_AcceptsOwnCert(t *testing.T) {
 	if !pairReachProbe(fp)(ctx, "http://"+addr) {
 		t.Fatal("must accept plain http")
 	}
-	if pairReachProbe("00"+fp[2:])(ctx, "https://"+addr) {
+	wrongFP := "0" + fp[1:]
+	if fp[0] == '0' {
+		wrongFP = "1" + fp[1:]
+	}
+	if pairReachProbe(wrongFP)(ctx, "https://"+addr) {
 		t.Fatal("must refuse a self-signed certificate that is not ours")
 	}
 }

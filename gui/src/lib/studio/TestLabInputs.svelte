@@ -157,8 +157,8 @@
     background: color-mix(in srgb, var(--accent, #6d5efc) 20%, transparent);
   }
   .tl-badge.bad {
-    background: color-mix(in srgb, var(--danger, #e5484d) 24%, transparent);
-    color: var(--danger, #e5484d);
+    background: color-mix(in srgb, var(--danger, var(--sl-danger)) 24%, transparent);
+    color: var(--danger, var(--sl-danger));
   }
 
   .tl-field { display: flex; flex-direction: column; gap: 4px; font-size: .82rem; }
@@ -168,5 +168,5 @@
   }
   .tl-mono { font-family: var(--mono, monospace); font-size: .8rem; }
   .tl-note { margin: 0; font-size: .8rem; color: var(--text-dim, var(--sl-text-faint)); }
-  .tl-err { font-size: .78rem; color: var(--danger, #e5484d); }
+  .tl-err { font-size: .78rem; color: var(--danger, var(--sl-danger)); }
 </style>

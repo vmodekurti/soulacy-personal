@@ -37,6 +37,9 @@ type Router struct {
 	controller        Controller
 	profileGeneration uint64
 	modelProfiles     profileCache
+	routeMu           sync.Mutex
+	routing           RoutePolicy
+	health            map[routeKey]*routeHealth
 }
 
 // SetController installs the process-wide LLM admission and accounting
@@ -87,6 +90,7 @@ func NewRouter(defaultProviderID string) *Router {
 	return &Router{
 		providers: make(map[string]Provider),
 		defaultID: defaultProviderID,
+		health:    make(map[routeKey]*routeHealth),
 	}
 }
 
@@ -107,8 +111,10 @@ func (r *Router) Unregister(id string) {
 	r.profileGeneration++
 }
 
-// Complete routes a request to the named provider (or the default if providerID is "").
-func (r *Router) Complete(ctx context.Context, providerID string, req CompletionRequest) (*CompletionResponse, error) {
+// completeOne performs one governed provider/model attempt. Complete in
+// routing.go owns candidate selection and failover and calls this method for
+// every attempt so admission, settlement and retry accounting remain exact.
+func (r *Router) completeOne(ctx context.Context, providerID string, req CompletionRequest) (*CompletionResponse, error) {
 	p, key, controller, snapshotErr := r.modelSnapshot(providerID, req.Model)
 	if snapshotErr != nil {
 		return nil, snapshotErr
@@ -177,6 +183,13 @@ func (r *Router) Complete(ctx context.Context, providerID string, req Completion
 	providerCtx, retryStats := withRetryStats(ctx)
 	resp, callErr := p.Complete(providerCtx, req)
 	attemptCount, requestIDs := retryStats.snapshot()
+	if resp == nil && callErr == nil {
+		callErr = fmt.Errorf("llm: provider_down: provider %q returned no response", providerID)
+	}
+	returnedErr := callErr
+	if callErr != nil {
+		returnedErr = &providerAttemptError{err: callErr, attempts: max(1, attemptCount), requestIDs: requestIDs}
+	}
 	if resp != nil {
 		// Exact provider usage wins. Only missing dimensions use the shared,
 		// conservative fallback so admission, context trimming and accounting
@@ -202,7 +215,7 @@ func (r *Router) Complete(ctx context.Context, providerID string, req Completion
 		execution.settle(resp, callErr)
 	}
 	if controller == nil && (resp == nil || resp.Stream == nil || execution == nil || callErr != nil) {
-		return resp, callErr
+		return resp, returnedErr
 	}
 	if callErr != nil || resp == nil || resp.Stream == nil {
 		accountingResp := resp
@@ -213,7 +226,7 @@ func (r *Router) Complete(ctx context.Context, providerID string, req Completion
 			}
 		}
 		controller.After(context.WithoutCancel(ctx), reservation, providerID, req, accountingResp, callErr)
-		return resp, callErr
+		return resp, returnedErr
 	}
 
 	// A stream is not billable-accounting complete until its provider channel

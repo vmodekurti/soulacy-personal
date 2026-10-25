@@ -135,6 +135,11 @@ type Config struct {
 	// Telemetry configures OpenTelemetry tracing.
 	Telemetry TelemetryConfig `mapstructure:"telemetry"`
 
+	// Observability controls durable LLM request/response evidence. Metadata,
+	// hashes, decisions, usage, and latency are always recorded. Full content is
+	// opt-in because prompts can contain private or regulated data.
+	Observability ObservabilityConfig `mapstructure:"observability"`
+
 	// Costs configures token usage cost estimation. Usage is always recorded
 	// when the cost store is available; pricing entries are optional and only
 	// affect the estimated cost_usd fields.
@@ -241,6 +246,11 @@ type TelemetryConfig struct {
 	Exporter     string `mapstructure:"exporter"`      // "otlp_grpc" | "otlp_http" | "stdout"
 	OTLPEndpoint string `mapstructure:"otlp_endpoint"` // e.g. "localhost:4317"
 	ServiceName  string `mapstructure:"service_name"`  // default "soulacy"
+}
+
+type ObservabilityConfig struct {
+	CaptureLLMContent bool `mapstructure:"capture_llm_content"`
+	MaxContentBytes   int  `mapstructure:"max_content_bytes"`
 }
 
 // CostConfig controls estimated dollar costs for recorded token usage.
@@ -847,6 +857,7 @@ type LLMConfig struct {
 	AllowedProviders []string                  `mapstructure:"allowed_providers"`
 	AllowedModels    []string                  `mapstructure:"allowed_models"`
 	AllowedRegions   []string                  `mapstructure:"allowed_regions"`
+	Routing          LLMRoutingConfig          `mapstructure:"routing"`
 
 	// Studio optionally overrides which provider/model the Studio visual
 	// builder uses for its COMPILE reasoning (turning a plain-language intent
@@ -872,6 +883,26 @@ type LLMConfig struct {
 	//	    provider: anthropic
 	//	    model: claude-opus-4-8
 	Reasoner StudioLLMConfig `mapstructure:"reasoner"`
+}
+
+// LLMRoutingConfig enables phase-aware model selection and bounded failover.
+// Routes are ordered candidate chains keyed by simple, standard, or complex.
+// The feature is disabled by default so existing fixed assignments remain
+// unchanged until an operator opts in from the normal Settings experience.
+type LLMRoutingConfig struct {
+	Enabled          bool                           `mapstructure:"enabled"`
+	DefaultMode      string                         `mapstructure:"default_mode"`
+	Preset           string                         `mapstructure:"preset"`
+	MaxFailovers     int                            `mapstructure:"max_failovers"`
+	FailureThreshold int                            `mapstructure:"failure_threshold"`
+	Cooldown         string                         `mapstructure:"cooldown"`
+	Routes           map[string][]LLMRouteCandidate `mapstructure:"routes"`
+	Fallbacks        []LLMRouteCandidate            `mapstructure:"fallbacks"`
+}
+
+type LLMRouteCandidate struct {
+	Provider string `mapstructure:"provider" json:"provider" yaml:"provider"`
+	Model    string `mapstructure:"model" json:"model" yaml:"model"`
 }
 
 // StudioLLMConfig overrides the provider/model used for Studio workflow
@@ -1141,6 +1172,14 @@ func Load(cfgPath string) (*Config, string, error) {
 	v.SetDefault("runtime.default_budget.max_llm_calls", 0)
 	v.SetDefault("runtime.max_budget.max_tokens", 0)
 	v.SetDefault("runtime.max_budget.max_llm_calls", 0)
+	v.SetDefault("llm.routing.enabled", false)
+	v.SetDefault("llm.routing.default_mode", "auto")
+	v.SetDefault("llm.routing.preset", "balanced")
+	v.SetDefault("llm.routing.max_failovers", 2)
+	v.SetDefault("llm.routing.failure_threshold", 3)
+	v.SetDefault("llm.routing.cooldown", "30s")
+	v.SetDefault("observability.capture_llm_content", false)
+	v.SetDefault("observability.max_content_bytes", 262144)
 	// PRODUCTION_AUDIT → F1: sandbox defaults ON with conservative caps
 	// suitable for typical agent tools. Disable per-deployment by setting
 	// runtime.sandbox.enabled=false. Limits = 0 means "no cap for that knob"

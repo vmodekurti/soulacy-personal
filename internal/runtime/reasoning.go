@@ -52,6 +52,11 @@ func (rc routerCompleter) Complete(ctx context.Context, model, system, user stri
 	if responseFormat == "" {
 		responseFormat = "json"
 	}
+	phase := reasoning.RouterPhaseFromContext(ctx)
+	taskClass := "complex"
+	if phase == "think" {
+		taskClass = "simple"
+	}
 	resp, err := rc.router.Complete(ctx, rc.provider, llm.CompletionRequest{
 		Model: model,
 		Messages: []llm.ChatMessage{
@@ -64,6 +69,7 @@ func (rc routerCompleter) Complete(ctx context.Context, model, system, user stri
 		// Best-effort structured output: providers that support it return JSON;
 		// the rest ignore the hint and the strict prompt + lenient parse cover it.
 		ResponseFormat: responseFormat,
+		Routing:        llm.RoutingHint{Phase: phase, TaskClass: taskClass},
 	})
 	if err != nil {
 		return "", err

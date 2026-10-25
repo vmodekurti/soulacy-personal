@@ -3,6 +3,7 @@ package gateway
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/url"
 	"sort"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"golang.org/x/net/publicsuffix"
 
 	"github.com/soulacy/soulacy/internal/authconnections"
 	"github.com/soulacy/soulacy/internal/credentials"
@@ -390,8 +392,15 @@ func validateBrowserStorageState(raw json.RawMessage, allowed []string) error {
 		return errors.New("storage_state contains too many records")
 	}
 	for _, cookie := range state.Cookies {
-		if strings.TrimSpace(cookie.Name) == "" || !cookieDomainAllowed(cookie.Domain, allowed) {
-			return errors.New("storage_state contains a cookie outside allowed_domains")
+		if strings.TrimSpace(cookie.Name) == "" {
+			return errors.New("website session contains a cookie without a name")
+		}
+		if !cookieDomainAllowed(cookie.Domain, allowed) {
+			domain := normalizeDomain(cookie.Domain)
+			if domain == "" {
+				domain = "an empty domain"
+			}
+			return fmt.Errorf("website session contains a cookie for %s outside the approved domains (%s)", domain, strings.Join(allowed, ", "))
 		}
 	}
 	for _, origin := range state.Origins {
@@ -403,14 +412,24 @@ func validateBrowserStorageState(raw json.RawMessage, allowed []string) error {
 	return nil
 }
 
-// cookieDomainAllowed accepts a parent-domain cookie only when it would be
-// sent to an explicitly approved host. It does not expand the navigation
-// boundary. For example, a .google.com cookie may be restored for
-// notebook.google.com, while accounts.google.com remains unreachable.
+// cookieDomainAllowed accepts both cookies scoped below an approved boundary
+// (www.gartner.com for gartner.com) and parent-domain cookies that are needed
+// by an approved host (google.com for notebook.google.com). It does not expand
+// the navigation boundary: the managed browser still cannot leave the
+// explicitly approved hosts.
 func cookieDomainAllowed(cookieDomain string, allowed []string) bool {
 	cookieDomain = normalizeDomain(cookieDomain)
+	cookieSite, err := publicsuffix.EffectiveTLDPlusOne(cookieDomain)
+	if err != nil {
+		return false
+	}
 	for _, boundary := range allowed {
-		if hostWithinBoundary(normalizeDomain(boundary), cookieDomain) {
+		boundary = normalizeDomain(boundary)
+		boundarySite, err := publicsuffix.EffectiveTLDPlusOne(boundary)
+		if err != nil || boundarySite != cookieSite {
+			continue
+		}
+		if hostWithinBoundary(cookieDomain, boundary) || hostWithinBoundary(boundary, cookieDomain) {
 			return true
 		}
 	}

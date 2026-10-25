@@ -89,10 +89,10 @@
   .published-files { margin: 0 20px 20px; padding: 18px; border: 1px solid var(--border, #313448); border-radius: 12px; }
   header, nav { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
   h2 { margin:0; font-size:1rem; } h3 { font-size:.95rem; overflow-wrap:anywhere; }
-  p, small { color:var(--text-secondary, #989bac); font-size:.8rem; line-height:1.5; }
+  p, small { color:var(--text-secondary, var(--sl-text-dim)); font-size:.8rem; line-height:1.5; }
   nav { margin:12px 0; font-size:.85rem; overflow-wrap:anywhere; }
   ul { list-style:none; padding:0; margin:12px 0; }
   .file-row { display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; text-align:left; padding:12px 4px; background:none; color:inherit; border:0; border-bottom:1px solid var(--border,#313448); cursor:pointer; }
   .file-row span { overflow-wrap:anywhere; } button:disabled { opacity:.5; cursor:default; }
-  article { margin:12px 0; } pre { max-height:460px; overflow:auto; padding:12px; background:var(--bg-secondary,#11131c); border-radius:8px; font-size:.8rem; }
+  article { margin:12px 0; } pre { max-height:460px; overflow:auto; padding:12px; background:var(--bg-secondary,var(--sl-surface-muted)); border-radius:8px; font-size:.8rem; }
 </style>

@@ -809,11 +809,19 @@
     --sl-bg: #f5f7fb;
     --sl-surface: #ffffff;
     --sl-surface-raised: #f8f9fd;
-    --sl-line: #e5e8f0;
-    --sl-line-strong: #8793a7;
-    --sl-text: #202636;
-    --sl-text-dim: #596277;
-    --sl-text-faint: #697386;
+    --sl-surface-muted: #eef1f7;
+    --sl-surface-inset: #f3f5f9;
+    --sl-line: #dde2ec;
+    --sl-line-strong: #7c899e;
+    --sl-text: #1d2433;
+    --sl-text-dim: #515d72;
+    --sl-text-faint: #667287;
+    --sl-code-bg: #e9edf5;
+    --sl-code-text: #35405a;
+    --sl-success: #167a55;
+    --sl-warning: #94600d;
+    --sl-danger: #c33d55;
+    --sl-info: #246cae;
     --sl-radius: 12px;
     --sl-radius-lg: 18px;
     --sl-shadow-sm: 0 1px 2px rgba(31, 38, 54, .05), 0 6px 18px rgba(31, 38, 54, .04);
@@ -841,21 +849,29 @@
     --sl-accent-soft: rgba(129, 140, 248, 0.13);
     --sl-accent-soft-strong: rgba(129, 140, 248, 0.25);
     --sl-bg: #111522;
-    --sl-surface: #191f2f;
-    --sl-surface-raised: #22293b;
-    --sl-line: #30384c;
-    --sl-line-strong: #5e6a86;
-    --sl-text: #f4f6fb;
-    --sl-text-dim: #b8c0d0;
-    --sl-text-faint: #8892a8;
+    --sl-surface: #181e2b;
+    --sl-surface-raised: #202837;
+    --sl-surface-muted: #252e40;
+    --sl-surface-inset: #0d121d;
+    --sl-line: #323c50;
+    --sl-line-strong: #63708a;
+    --sl-text: #f1f4f9;
+    --sl-text-dim: #bac3d2;
+    --sl-text-faint: #929daf;
+    --sl-code-bg: #111722;
+    --sl-code-text: #dce4f1;
+    --sl-success: #68d5a5;
+    --sl-warning: #f1c56e;
+    --sl-danger: #ff8798;
+    --sl-info: #7dbcf0;
     --sl-shadow-sm: 0 8px 22px rgba(0,0,0,.14);
     --sl-shadow-lg: 0 22px 62px rgba(0,0,0,.28);
     --bg: #111522;
-    --bg-elev-1: #191f2f;
-    --bg-elev-2: #22293b;
-    --border: #30384c;
-    --text: #f4f6fb;
-    --muted: #8892a8;
+    --bg-elev-1: #181e2b;
+    --bg-elev-2: #202837;
+    --border: #323c50;
+    --text: #f1f4f9;
+    --muted: #929daf;
     --accent: #818cf8;
     --radius: 12px;
   }
@@ -1131,7 +1147,7 @@
   }
   .restart-card {
     text-align: center; color: #e8eaf6;
-    background: #14172a; border: 1px solid #2a2f4a;
+    background: var(--sl-surface); border: 1px solid var(--sl-line);
     border-radius: 12px; padding: 1.75rem 2.25rem;
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
   }
@@ -1154,7 +1170,7 @@
     .sidebar-footer .icon-btn { display: none; }
   }
   .conn-dot { font-size: 0.72rem; font-family: monospace; color: #5a3030; }
-  .conn-dot.live { color: #4caf82; }
+  .conn-dot.live { color: var(--sl-success); }
   .conn-dot.auth-required {
     background: none; color: #f0a060; padding: 0;
     font-size: 0.72rem; font-family: monospace; text-align: left;
@@ -1218,13 +1234,13 @@
     z-index: 100;
   }
   .modal {
-    background: var(--sl-surface); border: 1px solid #2a2f4a; border-radius: 12px;
+    background: var(--sl-surface); border: 1px solid var(--sl-line); border-radius: 12px;
     padding: 1.5rem; width: 420px; max-width: 92vw; max-height: 88vh; overflow-y: auto;
     display: flex; flex-direction: column; gap: 1rem;
   }
   .modal h2 { font-size: 1rem; font-weight: 600; }
-  .modal p  { color: #7b82a8; font-size: 0.85rem; line-height: 1.6; }
-  .modal p code { background: #1c1f35; padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.8rem; }
+  .modal p  { color: var(--sl-text-dim); font-size: 0.85rem; line-height: 1.6; }
+  .modal p code { background: var(--sl-code-bg); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.8rem; }
   .modal-row { display: flex; gap: 0.75rem; justify-content: flex-end; }
 
   /* ── Custom Tooltips ────────────────────────────────────────────────────── */

@@ -104,6 +104,26 @@ search:
 # ── LLM providers ─────────────────────────────────────────────────────────────
 llm:
     default_provider: ollama
+    # Smart routing is opt-in and creates no token or spend limits. Each list is
+    # ordered: Soulacy chooses the first compatible, healthy model and moves to
+    # the next only for provider availability failures. Agent/global allowlists,
+    # data-classification policy and cost governance remain hard boundaries.
+    # routing:
+    #     enabled: true
+    #     default_mode: auto       # auto | fast | strong | pinned
+    #     preset: balanced         # balanced | fast | quality | local
+    #     max_failovers: 2
+    #     failure_threshold: 3
+    #     cooldown: 30s
+    #     routes:
+    #         simple:
+    #           - { provider: ollama, model: qwen3:8b }
+    #         standard:
+    #           - { provider: openai, model: gpt-5-mini }
+    #         complex:
+    #           - { provider: anthropic, model: claude-sonnet-4-6 }
+    #     fallbacks:
+    #       - { provider: openai, model: gpt-5 }
     # studio: overrides the model that BUILDS workflows in Studio (independent of
     # the model agents run on). learning (default: true) lets Studio record
     # lessons from repairs you accept after a Run Live and inject them into future
@@ -141,6 +161,14 @@ log:
     file: /Users/yourname/.soulacy/logs/soulacy.log
     format: console
     level: info
+
+# Every LLM call records prompt/response hashes, routing decisions, retries,
+# provider request IDs, token usage and latency. Full content is opt-in because
+# prompts may contain private data; persisted values still pass through Soulacy's
+# secret redactor and the ordinary action-log retention policy.
+observability:
+    capture_llm_content: false
+    max_content_bytes: 262144
 
 # ── MCP servers ───────────────────────────────────────────────────────────────
 # Connected servers are not automatically a security boundary. By default,
