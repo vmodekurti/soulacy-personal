@@ -18,6 +18,7 @@ import (
 
 	"github.com/soulacy/soulacy/internal/autopilot"
 	"github.com/soulacy/soulacy/internal/browserlibs"
+	"github.com/soulacy/soulacy/internal/buildinfo"
 	"github.com/soulacy/soulacy/internal/channels"
 	httpchan "github.com/soulacy/soulacy/internal/channels/http"
 	"github.com/soulacy/soulacy/internal/config"
@@ -43,7 +44,12 @@ func (a *App) Run(parent context.Context) error {
 	cfg, log := a.cfg, a.log
 	defer log.Sync() //nolint:errcheck
 
-	log.Info("Soulacy starting", zap.String("version", config.Version))
+	build := buildinfo.Current()
+	log.Info("Soulacy starting",
+		zap.String("version", config.Version),
+		zap.String("build", build.Label),
+		zap.String("build_id", build.BuildID),
+		zap.String("instance_id", build.InstanceID))
 
 	// ── Ordered shutdown stack (Story ARCH-4) ────────────────────────────────
 	// Subsystems register their resource closers here as they come up; the
