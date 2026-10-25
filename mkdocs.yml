@@ -198,6 +198,7 @@ nav:
     - Browser Automation: agents/browser-automation.md
   - Skills & Plugins:
     - Connectors: extend/connectors.md
+    - Agensi Skill Catalog: extend/agensi.md
     - Installing Skills: extend/installing-skills.md
     - Skill Sources: extend/skill-sources.md
     - MCP Servers: extend/mcp.md

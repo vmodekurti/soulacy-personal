@@ -382,13 +382,13 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	// Retrieve or create session
 	sess := e.getOrCreateSession(msg.SessionID, msg.AgentID)
 
-	// PERF-1: mark the session as actively in use for the duration of this
-	// Handle call so the eviction sweep never reclaims a mid-conversation
+	// Mark the session active so eviction never reclaims a mid-conversation
 	// session. lastAccess was already bumped by getOrCreateSession.
 	sess.mu.Lock()
 	sess.inUse++
 	sess.mu.Unlock()
 	defer func() {
+		redactAgensiSkillHistory(sess)
 		sess.mu.Lock()
 		sess.inUse--
 		sess.lastAccess = time.Now().UTC()

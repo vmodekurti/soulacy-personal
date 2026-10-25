@@ -15,12 +15,12 @@ import (
 )
 
 type portalSession struct {
-	server                      *Server
-	authorization, cookie, host string
+	server                              *Server
+	authorization, cookie, host, scheme string
 }
 
 func (s *Server) withPortalAccess(c *fiber.Ctx, ctx context.Context, agentID string) context.Context {
-	if agentID != runtime.GenieAgentID {
+	if agentID != runtime.GenieAgentID && agentID != runtime.SystemAgentID {
 		return ctx
 	}
 	if _, ok := requestPrincipal(c); !ok {
@@ -36,12 +36,13 @@ func (s *Server) withPortalAccess(c *fiber.Ctx, ctx context.Context, agentID str
 	if authorization == "" && cookie == "" {
 		return ctx
 	}
-	return runtime.WithPortalAccess(ctx, &portalSession{server: s, authorization: authorization, cookie: cookie, host: strings.Clone(c.Get("Host"))})
+	return runtime.WithPortalAccess(ctx, &portalSession{server: s, authorization: authorization, cookie: cookie, host: strings.Clone(c.Get("Host")), scheme: strings.Clone(c.Protocol())})
 }
 
 func (p *portalSession) PortalActions(ctx context.Context, query string) (any, error) {
-	if runtime.ActiveAgentFromContext(ctx) != runtime.GenieAgentID {
-		return nil, fmt.Errorf("only Genie may use portal access")
+	active := runtime.ActiveAgentFromContext(ctx)
+	if active != runtime.GenieAgentID && active != runtime.SystemAgentID {
+		return nil, fmt.Errorf("portal access requires Genie or System")
 	}
 	terms := strings.Fields(strings.ToLower(query))
 	results := []portalActionSpec{}
@@ -62,8 +63,9 @@ func (p *portalSession) PortalActions(ctx context.Context, query string) (any, e
 }
 
 func (p *portalSession) PortalAction(ctx context.Context, mode, name string, params, body map[string]any) (any, error) {
-	if runtime.ActiveAgentFromContext(ctx) != runtime.GenieAgentID {
-		return nil, fmt.Errorf("only Genie may use portal access")
+	active := runtime.ActiveAgentFromContext(ctx)
+	if active != runtime.GenieAgentID && active != runtime.SystemAgentID {
+		return nil, fmt.Errorf("portal access requires Genie or System")
 	}
 	var action *portalActionSpec
 	for i := range portalCatalog {
@@ -111,6 +113,9 @@ func (p *portalSession) PortalAction(ctx context.Context, mode, name string, par
 	}
 	req.Host = p.host
 	req.Header.Set("Content-Type", "application/json")
+	if p.scheme != "" {
+		req.Header.Set("X-Forwarded-Proto", p.scheme)
+	}
 	if p.authorization != "" {
 		req.Header.Set("Authorization", p.authorization)
 	}

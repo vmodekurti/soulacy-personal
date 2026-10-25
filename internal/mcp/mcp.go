@@ -35,6 +35,7 @@ const FullNamePrefix = "mcp__"
 type Config struct {
 	Servers       map[string]ServerConfig
 	ResolveSecret func(context.Context, string) (string, error)
+	PersistSecret func(context.Context, string, string) error
 }
 
 // ServerConfig describes one MCP server connection.
@@ -73,6 +74,7 @@ type AuthConfig struct {
 	ClientSecretRef string   `json:"client_secret_ref,omitempty"`
 	Scopes          []string `json:"scopes,omitempty"`
 	Audience        string   `json:"audience,omitempty"`
+	Resource        string   `json:"resource,omitempty"`
 }
 
 // Tool is one tool exposed by an MCP server.
@@ -180,6 +182,7 @@ type Client struct {
 	addLocks      map[string]*sync.Mutex // per-id AddServer serialization
 	mu            sync.RWMutex
 	resolveSecret func(context.Context, string) (string, error)
+	persistSecret func(context.Context, string, string) error
 }
 
 // New connects to every configured server. Failures are logged but never fatal —
@@ -191,7 +194,7 @@ type Client struct {
 // no longer blocks every other MCP — and by extension the rest of the
 // gateway boot. Total wait is capped by the slowest server, not the sum.
 func New(cfg Config, log *zap.Logger) *Client {
-	c := &Client{log: log, resolveSecret: cfg.ResolveSecret}
+	c := &Client{log: log, resolveSecret: cfg.ResolveSecret, persistSecret: cfg.PersistSecret}
 	ids := make([]string, 0, len(cfg.Servers))
 	for id := range cfg.Servers {
 		ids = append(ids, id)
@@ -237,7 +240,7 @@ func (c *Client) start(s *server) error {
 		}
 		s.tx = tx
 	case "http", "https":
-		s.tx = newHTTP(s.cfg, c.resolveSecret)
+		s.tx = newHTTP(s.cfg, c.resolveSecret, c.persistSecret)
 	default:
 		return fmt.Errorf("unknown transport %q (expected stdio or http)", s.cfg.Transport)
 	}

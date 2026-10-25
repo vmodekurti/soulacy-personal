@@ -159,6 +159,13 @@ func (e *Engine) executeOneToolCall(ctx context.Context, def *agent.Definition, 
 			scanBody = env.Body
 		}
 		scanReport = injection.ScanTrusted(scanBody, tc.Name)
+		if isTransientAgensiSkillResult(tc.Name) {
+			// Preserve the security signal without copying licensed instruction
+			// excerpts into the durable finding ledger.
+			for i := range scanReport.Findings {
+				scanReport.Findings[i].Snippet = "[licensed Agensi content redacted]"
+			}
+		}
 		if scanReport.MaxSeverity != injection.SeverityNone {
 			agentID := ""
 			if def != nil {
@@ -199,7 +206,10 @@ func (e *Engine) executeOneToolCall(ctx context.Context, def *agent.Definition, 
 	// (The ToolObserver fires inside runTool so it captures both reasoning-loop
 	// and fixed-workflow tool calls uniformly.)
 
-	eventPayload := any(out)
+	// Emit an execution receipt for Agensi skill loads without placing the
+	// licensed instruction body in the durable event ledger.
+	eventOut := redactAgensiToolResultForEvent(out)
+	eventPayload := any(eventOut)
 	if scanReport.MaxSeverity != injection.SeverityNone {
 		// Enrich the event payload with the scan report so Activity /
 		// Studio have first-class access without re-scanning. We keep
@@ -207,7 +217,7 @@ func (e *Engine) executeOneToolCall(ctx context.Context, def *agent.Definition, 
 		// consumers can still pull it, and expose the report under
 		// `injection` for the S2 UI surface.
 		eventPayload = map[string]any{
-			"tool_result": out,
+			"tool_result": eventOut,
 			"injection": map[string]any{
 				"max_severity": scanReport.MaxSeverity.String(),
 				"findings":     scanReport.Findings,

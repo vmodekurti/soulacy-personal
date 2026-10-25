@@ -12,11 +12,11 @@ import (
 )
 
 func TestPublicOnlyHTTPUsesGuardedTransport(t *testing.T) {
-	tx := newHTTP(ServerConfig{URL: "https://1.1.1.1/mcp", PublicOnly: true}, nil)
+	tx := newHTTP(ServerConfig{URL: "https://1.1.1.1/mcp", PublicOnly: true}, nil, nil)
 	if _, ok := tx.client.Transport.(*netguard.GuardedTransport); !ok {
 		t.Fatalf("transport = %T, want *netguard.GuardedTransport", tx.client.Transport)
 	}
-	plain := newHTTP(ServerConfig{URL: "http://127.0.0.1/mcp"}, nil)
+	plain := newHTTP(ServerConfig{URL: "http://127.0.0.1/mcp"}, nil, nil)
 	if plain.client.Transport != nil && plain.client.Transport != http.DefaultTransport {
 		t.Fatalf("ordinary configured transport unexpectedly changed: %T", plain.client.Transport)
 	}

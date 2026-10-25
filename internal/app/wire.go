@@ -190,7 +190,10 @@ func (a *App) Run(parent context.Context) error {
 		}
 		return "", fmt.Errorf("MCP secret %q is not set", name)
 	}
-	mcpClient := mcp.New(mcp.Config{Servers: mcpServers, ResolveSecret: resolveMCPSecret}, log)
+	persistMCPSecret := func(ctx context.Context, name, value string) error {
+		return secrets.New(credVault).Set(ctx, name, value)
+	}
+	mcpClient := mcp.New(mcp.Config{Servers: mcpServers, ResolveSecret: resolveMCPSecret, PersistSecret: persistMCPSecret}, log)
 	stack.pushClose("mcp-client", mcpClient)
 
 	// ── Knowledge (RAG) — SQLite + sqlite-vec + Ollama embeddings ─────────────
