@@ -3,6 +3,8 @@
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
   import { searchSkills } from '../lib/skillsearch.js'
+  import { genieAsk } from '../lib/stores.js'
+  import { genieRequest } from '../lib/genie.js'
 
   let skills        = []
   let selected      = null
@@ -45,6 +47,24 @@
   let installError = ''
   let marketplace = null
   let marketplaceError = ''
+  let agensi = null
+  let agensiBusy = false
+  let agensiError = ''
+  let agensiQuery = ''
+  let agensiResults = null
+  let agensiSearchBusy = false
+  let agensiPoll = null
+  let agensiWindow = null
+
+  $: agensiItems = normaliseAgensiResults(agensiResults)
+
+  function normaliseAgensiResults(value) {
+    if (Array.isArray(value)) return value
+    for (const key of ['skills', 'results', 'items', 'matches']) {
+      if (Array.isArray(value?.[key])) return value[key]
+    }
+    return []
+  }
 
   async function load() {
     loading = true
@@ -52,12 +72,85 @@
     try {
       const res = await api.skills.list()
       skills = res.skills || []
-      await loadMarketplace()
+      await Promise.all([loadMarketplace(), loadAgensi()])
     } catch (e) {
       error = e.message
     } finally {
       loading = false
     }
+  }
+
+  async function loadAgensi() {
+    agensiError = ''
+    try {
+      agensi = await api.skills.agensiStatus()
+    } catch (e) {
+      agensiError = e.message
+    }
+  }
+
+  function stopAgensiPoll() {
+    if (agensiPoll) clearTimeout(agensiPoll)
+    agensiPoll = null
+  }
+
+  async function pollAgensi(attempt = 0) {
+    await loadAgensi()
+    if (agensi?.connected) {
+      agensiBusy = false
+      stopAgensiPoll()
+      return
+    }
+    if (attempt >= 400) {
+      agensiBusy = false
+      agensiError = 'Sign-in did not finish. Try Connect again when you are ready.'
+      return
+    }
+    agensiPoll = setTimeout(() => pollAgensi(attempt + 1), 1500)
+  }
+
+  async function connectAgensi() {
+    agensiBusy = true
+    agensiError = ''
+    stopAgensiPoll()
+    // Open immediately so browser popup protection does not discard the
+    // OAuth page while the gateway discovers and registers the client.
+    agensiWindow = window.open('', 'soulacy-agensi-oauth', 'popup,width=620,height=760')
+    try {
+      const result = await api.skills.connectAgensi()
+      if (!result.authorization_url) throw new Error('Agensi did not return a sign-in link.')
+      if (agensiWindow) agensiWindow.location = result.authorization_url
+      else window.location.assign(result.authorization_url)
+      pollAgensi()
+    } catch (e) {
+      if (agensiWindow) agensiWindow.close()
+      agensiBusy = false
+      agensiError = e.message
+    }
+  }
+
+  async function searchAgensi() {
+    if (!agensiQuery.trim()) return
+    agensiSearchBusy = true
+    agensiError = ''
+    agensiResults = null
+    try {
+      const response = await api.skills.searchAgensi(agensiQuery.trim())
+      agensiResults = response.result
+    } catch (e) {
+      agensiError = e.message
+    } finally {
+      agensiSearchBusy = false
+    }
+  }
+
+  function openGenie(item = null) {
+    const identity = item && (item.id || item.slug || item.name || item.title)
+    const question = identity
+      ? `Use the Agensi skill "${identity}" for me. Load it fresh with get_skill, follow its instructions for this run only, and ask what outcome I want.`
+      : 'Help me find and use the right Agensi skill for what I want to do.'
+    genieAsk.set(genieRequest(question))
+    window.location.hash = '#chat'
   }
 
   async function loadMarketplace() {
@@ -234,7 +327,22 @@
     ? 'The search source answered, but it requires authentication before it can return skills.'
     : (findWarnings.length > 0 ? 'No installable results were returned by the available sources.' : 'No skills matched.')
 
-  onMount(load)
+  onMount(() => {
+    load()
+    const onOAuth = (event) => {
+      if (event.origin !== window.location.origin || event.data?.type !== 'soulacy:agensi-oauth') return
+      if (event.data.success) pollAgensi()
+      else {
+        agensiBusy = false
+        agensiError = 'Agensi sign-in was not completed.'
+      }
+    }
+    window.addEventListener('message', onOAuth)
+    return () => {
+      stopAgensiPoll()
+      window.removeEventListener('message', onOAuth)
+    }
+  })
 </script>
 
 <div class="page">
@@ -477,6 +585,78 @@
   {#if error}
     <div class="banner err">{error}</div>
   {/if}
+
+  <section class="agensi-card" class:connected={agensi?.connected}>
+    <div class="agensi-mark" aria-hidden="true">A</div>
+    <div class="agensi-main">
+      <div class="agensi-heading">
+        <div>
+          <div class="agensi-title-row">
+            <h2>Agensi skill catalog</h2>
+            <span class:live={agensi?.connected} class="agensi-status">
+              {agensi?.connected ? 'Connected' : agensi?.authenticated ? 'Reconnect needed' : 'Sign-in required'}
+            </span>
+          </div>
+          <p>Give Genie and System live access to Agensi skills without downloading or saving their instructions.</p>
+        </div>
+        {#if agensi?.connected}
+          <button class="btn-secondary" on:click={openGenie}>Ask Genie</button>
+        {:else}
+          <button class="btn-primary" on:click={connectAgensi} disabled={agensiBusy}>
+            {agensiBusy ? 'Waiting for sign-in…' : 'Connect Agensi'}
+          </button>
+        {/if}
+      </div>
+
+      <div class="agensi-rules">
+        <span>✓ Secure browser sign-in</span>
+        <span>✓ Latest version loaded each time</span>
+        <span>✓ Payment always needs your approval</span>
+      </div>
+
+      {#if agensiError}<div class="as-err" role="alert">{agensiError}</div>{/if}
+
+      {#if agensi?.connected}
+        <div class="agensi-search">
+          <input
+            type="search"
+            placeholder="What do you want help with?"
+            aria-label="Search Agensi skills"
+            bind:value={agensiQuery}
+            on:keydown={(event) => event.key === 'Enter' && searchAgensi()}
+          />
+          <button class="btn-primary" on:click={searchAgensi} disabled={agensiSearchBusy || !agensiQuery.trim()}>
+            {agensiSearchBusy ? 'Searching…' : 'Find skills'}
+          </button>
+        </div>
+      {/if}
+
+      {#if agensiResults !== null}
+        <div class="agensi-results" aria-live="polite">
+          {#if agensiItems.length}
+            {#each agensiItems.slice(0, 12) as item}
+              <article class="agensi-result">
+                <div>
+                  <strong>{item.name || item.title || item.slug || item.id || 'Agensi skill'}</strong>
+                  <p>{item.best_for || item.description || item.summary || 'Open this skill to see what it provides.'}</p>
+                </div>
+                <div class="agensi-result-meta">
+                  <span>{item.price_display || item.price || item.payment || (item.free ? 'Free' : '')}</span>
+                  {#if item.url || item.link}
+                    <a href={item.url || item.link} target="_blank" rel="noreferrer">View</a>
+                  {/if}
+                  <button class="btn-secondary agensi-use" on:click={() => openGenie(item)}>Use with Genie</button>
+                </div>
+              </article>
+            {/each}
+          {:else}
+            <pre>{typeof agensiResults === 'string' ? agensiResults : JSON.stringify(agensiResults, null, 2)}</pre>
+          {/if}
+        </div>
+      {/if}
+    </div>
+  </section>
+
   {#if marketplaceError}
     <div class="banner err">Marketplace readiness unavailable: {marketplaceError}</div>
   {:else if marketplace}
@@ -669,6 +849,45 @@
   .as-ok  { background: rgba(80,200,120,.1); border: 1px solid rgba(80,200,120,.3); color: #50c878; padding: .6rem .8rem; border-radius: 7px; font-size: .82rem; }
   .banner { padding: .7rem 1rem; border-radius: 8px; font-size: .85rem; flex-shrink: 0; }
   .err    { background: color-mix(in srgb, var(--sl-danger) 10%, transparent); border: 1px solid color-mix(in srgb, var(--sl-danger) 30%, transparent); color: var(--sl-danger); }
+  .agensi-card {
+    display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 1rem;
+    padding: 1rem; border: 1px solid var(--sl-line); border-radius: 12px;
+    background: var(--sl-surface); box-shadow: var(--sl-shadow-sm);
+  }
+  .agensi-card.connected { border-color: color-mix(in srgb, var(--sl-success) 42%, var(--sl-line)); }
+  .agensi-mark {
+    width: 44px; height: 44px; display: grid; place-items: center; border-radius: 12px;
+    background: linear-gradient(145deg, var(--sl-accent), #22c7a9); color: #fff; font-weight: 800; font-size: 1.05rem;
+  }
+  .agensi-main { min-width: 0; display: flex; flex-direction: column; gap: .8rem; }
+  .agensi-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+  .agensi-heading h2 { margin: 0; font-size: .98rem; }
+  .agensi-heading p { margin: .25rem 0 0; color: var(--sl-text-faint); font-size: .8rem; line-height: 1.45; }
+  .agensi-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: .55rem; }
+  .agensi-status {
+    padding: .15rem .45rem; border: 1px solid var(--sl-line); border-radius: 999px;
+    background: var(--sl-surface-inset); color: var(--sl-text-faint); font-size: .68rem; font-weight: 700;
+  }
+  .agensi-status.live { color: var(--sl-success); border-color: color-mix(in srgb, var(--sl-success) 38%, var(--sl-line)); }
+  .agensi-rules { display: flex; flex-wrap: wrap; gap: .4rem 1rem; color: var(--sl-text-dim); font-size: .75rem; }
+  .agensi-rules span::first-letter { color: var(--sl-success); }
+  .agensi-search { display: flex; gap: .55rem; }
+  .agensi-search input {
+    flex: 1; min-width: 0; padding: .62rem .75rem; border: 1px solid var(--sl-line); border-radius: 8px;
+    background: var(--sl-surface-inset); color: var(--sl-text); outline: none;
+  }
+  .agensi-search input:focus { border-color: var(--sl-accent); }
+  .agensi-results { display: grid; gap: .45rem; max-height: 320px; overflow-y: auto; }
+  .agensi-results pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--sl-text-dim); font-size: .75rem; }
+  .agensi-result {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem;
+    padding: .65rem .75rem; border: 1px solid var(--sl-line); border-radius: 8px; background: var(--sl-surface-inset);
+  }
+  .agensi-result strong { color: var(--sl-text); font-size: .82rem; }
+  .agensi-result p { margin: .18rem 0 0; color: var(--sl-text-faint); font-size: .74rem; line-height: 1.4; }
+  .agensi-result-meta { display: flex; align-items: center; gap: .55rem; white-space: nowrap; color: var(--sl-success); font-size: .75rem; }
+  .agensi-result-meta a { color: var(--sl-accent-ink); }
+  .agensi-use { padding: .34rem .55rem; font-size: .72rem; }
   .marketplace-card {
     display: grid; grid-template-columns: 92px 1fr; gap: .85rem;
     background: var(--sl-surface); border: 1px solid var(--sl-line); border-radius: 10px;
@@ -812,6 +1031,10 @@
   @media (max-width: 768px) {
     .layout { flex-direction: column; overflow: visible; }
     .layout > :first-child { width: 100%; max-height: 240px; }
+    .agensi-card { grid-template-columns: 1fr; }
+    .agensi-mark { width: 38px; height: 38px; }
+    .agensi-heading, .agensi-result { flex-direction: column; }
+    .agensi-search { flex-direction: column; }
   }
 
   /* Story E26: skill sources modal */

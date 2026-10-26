@@ -56,12 +56,20 @@ func (e *Engine) runTool(ctx context.Context, def *agent.Definition, sessionID s
 	if err != nil {
 		evidence = err.Error()
 	}
+	observableOut := agensiObservableResult(call, out, err != nil)
+	if err == nil {
+		evidence = observableOut
+	}
 	progressGuardFrom(ctx).observe(call, evidence, err != nil)
 
-	e.observeLearningTool(ctx, def, call, out, err)
+	// Agensi get_skill bodies are run-scoped licensed instructions. They may be
+	// used by the current model invocation, but are never copied into learning.
+	if !isTransientAgensiSkillResult(call.Name) {
+		e.observeLearningTool(ctx, def, call, out, err)
+	}
 	e.observeTaskTool(ctx, agentID, sessionID, call, evidence, err != nil)
 	if obs := toolObserverFrom(ctx); obs != nil {
-		obs(call, out, err != nil)
+		obs(call, observableOut, err != nil)
 	}
 	return out, err
 }
@@ -152,6 +160,15 @@ func (e *Engine) runToolDispatch(ctx context.Context, def *agent.Definition, ses
 	// tools while leaving read/search/list operations autonomous.
 	if isGenieDefinition(def) && highImpactExternalCall(call) {
 		if err := e.dynamicConfirm(ctx, def, call, "Genie is requesting a potentially high-impact external write action"); err != nil {
+			return "", err
+		}
+	}
+
+	// Agensi's purchase contract is deliberately narrower than its tool name:
+	// get_skill is an ordinary read unless confirm=true. That one flag spends
+	// account credit, so enforce approval for every agent at the runtime edge.
+	if agensiCreditPurchase(call) {
+		if err := e.requiredHumanConfirm(ctx, def, call, "Buy this Agensi skill with account credit"); err != nil {
 			return "", err
 		}
 	}
@@ -504,6 +521,14 @@ func highImpactExternalCall(call message.ToolCall) bool {
 		}
 	}
 	return false
+}
+
+func agensiCreditPurchase(call message.ToolCall) bool {
+	if !strings.EqualFold(call.Name, "mcp__agensi__get_skill") {
+		return false
+	}
+	confirmed, ok := call.Arguments["confirm"].(bool)
+	return ok && confirmed
 }
 
 func (e *Engine) runPythonToolOnce(tctx, auditCtx context.Context, def *agent.Definition, sessionID string, call message.ToolCall, script string, argsJSON []byte) (string, error) {

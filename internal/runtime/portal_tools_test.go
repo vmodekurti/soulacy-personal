@@ -56,6 +56,20 @@ func TestPortalAccessStaysWithInteractiveGenie(t *testing.T) {
 	if _, err := tool.Handler(WithActiveAgent(context.Background(), GenieAgentID), nil); err == nil {
 		t.Fatal("unauthenticated direct invocation succeeded")
 	}
+
+	// System gets only the narrow Agensi sign-in bridge, not Genie's general
+	// portal administration catalog.
+	systemNames := toolSchemaNameSet(e.allToolSchemasForContext(granted, builtinSystemAgent(), "http"))
+	if !systemNames["connect_agensi"] || systemNames["portal_update"] {
+		t.Fatalf("System portal tools = connect_agensi:%v portal_update:%v", systemNames["connect_agensi"], systemNames["portal_update"])
+	}
+	connect := builtinByName(t, e.builtins, "connect_agensi")
+	if _, err := connect.Handler(WithActiveAgent(granted, SystemAgentID), nil); err != nil {
+		t.Fatalf("System could not start Agensi sign-in: %v", err)
+	}
+	if access.calls[len(access.calls)-1] != "update:skills.agensi_connect" {
+		t.Fatalf("Agensi bridge calls = %v", access.calls)
+	}
 }
 
 func TestPortalToolRunsThroughModelLoop(t *testing.T) {

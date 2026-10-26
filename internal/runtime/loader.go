@@ -108,7 +108,7 @@ func (l *Loader) seedBuiltins() {
 }
 
 func builtinGenieAgent() *agent.Definition {
-	builtins := []string{"portal_actions", "portal_read", "portal_update", "portal_confirm", "web_search", "list_skills", "read_skill", "read_skill_file", "list_mcp_tools", "list_agents", "build_agent", "plan_connector", "create_connector", "list_connectors", "plan_action", "prepare_website_access", "start_website_action", "inspect_website_action", "act_on_website", "commit_website_action", "close_website_action", "plan_mission", "create_mission", "list_missions", "get_mission", "update_mission", "cancel_mission", "create_monitor", "list_monitors", "pause_monitor", "cancel_monitor", "channel.send", "channel.status"}
+	builtins := []string{"connect_agensi", "portal_actions", "portal_read", "portal_update", "portal_confirm", "web_search", "list_skills", "read_skill", "read_skill_file", "list_mcp_tools", "list_agents", "build_agent", "plan_connector", "create_connector", "list_connectors", "plan_action", "prepare_website_access", "start_website_action", "inspect_website_action", "act_on_website", "commit_website_action", "close_website_action", "plan_mission", "create_mission", "list_missions", "get_mission", "update_mission", "cancel_mission", "create_monitor", "list_monitors", "pause_monitor", "cancel_monitor", "channel.send", "channel.status"}
 	mcpServers := []string{"*"}
 	return &agent.Definition{
 		ID: GenieAgentID, Name: "Genie",
@@ -139,7 +139,7 @@ For a real-world goal, use plan_action before claiming you can do it. A connecto
 
 You operate as an operator, never as a deployment administrator. You cannot change gateway configuration, restart or upgrade the service, access host credentials, run shell commands, write host files, or bypass confirmations. If work requires an unavailable or administrative capability, explain the exact boundary and ask an administrator to perform that step. Never claim a delegated action succeeded until its returned evidence shows that it did.
 
-Say what is true about your own work, even when it disappoints. Announcing an intention is not doing the thing: never say you are installing, creating, sending, scheduling or fixing something unless a tool has already done it and returned evidence that it worked. If you cannot do what was asked, say so in the same reply you discovered it — name the specific boundary you hit, say what you did manage, and give the person the step that would actually work. Never promise to continue after this message; this reply is the last thing you will say in this turn, so anything you leave as a promise simply will not happen. A person who is told plainly that something is impossible is better served than one who is told it is under way.`,
+Say what is true about your own work, even when it disappoints. Announcing an intention is not doing the thing: never say you are installing, creating, sending, scheduling or fixing something unless a tool has already done it and returned evidence that it worked. If you cannot do what was asked, say so in the same reply you discovered it — name the specific boundary you hit, say what you did manage, and give the person the step that would actually work. Never promise to continue after this message; this reply is the last thing you will say in this turn, so anything you leave as a promise simply will not happen. A person who is told plainly that something is impossible is better served than one who is told it is under way.` + agensiAgentInstructions,
 		SourcePath: builtinSourcePath,
 	}
 }
@@ -149,6 +149,7 @@ Say what is true about your own work, even when it disappoints. Announcing an in
 func genieWithContract() *agent.Definition {
 	def := builtinGenieAgent()
 	def.SystemPrompt = agentprompt.EnsureShared(ensureGeniePortalInstructions(def.SystemPrompt))
+	def.SystemPrompt = EnsureAgensiInstructions(def.SystemPrompt)
 	return def
 }
 
@@ -177,6 +178,7 @@ func hardenGenieDefinition(def *agent.Definition) {
 	// It has to live under it too (#234) — that contract is where "never
 	// assume an action succeeded unless a tool confirms it" is written down.
 	def.SystemPrompt = agentprompt.EnsureShared(ensureGeniePortalInstructions(def.SystemPrompt))
+	def.SystemPrompt = EnsureAgensiInstructions(def.SystemPrompt)
 	if def.Budget == nil {
 		def.Budget = base.Budget
 	}
@@ -337,11 +339,27 @@ When adding an MCP server: read the existing config, insert the new block under 
 2. **Show your work** — display stdout/stderr/exit codes and file paths so the user can verify each step.
 3. **State intent before destructive ops** — one sentence before deleting, overwriting, or modifying system files.
 4. **Verify success** — after installs/config changes, run a quick check (e.g. node --version, curl localhost:PORT/health) and report the result.
-5. **Stay concise** — lead with the outcome, add details only if useful.`,
+5. **Stay concise** — lead with the outcome, add details only if useful.` + agensiAgentInstructions,
 
 		// SourcePath uses the builtin sentinel so LoadAll never prunes this agent.
 		SourcePath: builtinSourcePath,
 	}
+}
+
+const agensiAgentInstructions = `
+
+## Agensi live skill catalog
+When the connected Agensi MCP tools are available, use search_skills when a marketplace skill could materially improve the task. Before applying a chosen skill, call get_skill during this run even if it was used before, because Agensi serves the current approved version on demand. Follow the returned instructions in memory for this task only. Never save, copy, export, cache, or install Agensi skill content on disk.
+
+Every Agensi tool requires the user's OAuth sign-in. If it is not connected, call connect_agensi and show the returned authorization_url, or direct the user to Skills > Agensi. Wait for the user to sign in and click Allow before using Agensi. Never ask for an account token or API key, and never switch to anonymous access.
+
+Free and already-owned skills may be loaded immediately. When get_skill returns a price or checkout option, show the skill name, price, why it fits, and the returned payment or top-up link. Do not purchase it yet. Only after the user explicitly approves that exact purchase may you call get_skill again with confirm=true. Soulacy also enforces that credit purchase with a runtime approval gate.`
+
+func EnsureAgensiInstructions(prompt string) string {
+	if strings.Contains(prompt, "## Agensi live skill catalog") {
+		return prompt
+	}
+	return strings.TrimSpace(prompt) + agensiAgentInstructions
 }
 
 // LoadAll scans all configured directories and loads every valid SOUL.yaml it finds.
@@ -380,6 +398,7 @@ func (l *Loader) LoadAll() []error {
 				def.Enabled = true
 				def.SystemTools = true
 				def.Channels = []string{"http"}
+				def.SystemPrompt = EnsureAgensiInstructions(def.SystemPrompt)
 				if len(def.ConfirmTools) == 0 {
 					def.ConfirmTools = []string{"package_install", "mcp_register_remote", "shell_exec", "run_script", "write_file", "http_request", "download_file", "install_library"}
 				} else {

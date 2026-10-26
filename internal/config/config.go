@@ -786,6 +786,12 @@ type ExecutorConfig struct {
 	// listed here, so the operator fully controls container disk access.
 	DockerVolumes []string `mapstructure:"docker_volumes"`
 
+	// DockerUser is the container user for the docker backend: "auto"
+	// (default — the gateway's own uid:gid, so the tool is not root and files
+	// it writes to allowlisted volumes belong to the operator), "image" (the
+	// image's default user, usually root), or an explicit "uid:gid".
+	DockerUser string `mapstructure:"docker_user"`
+
 	// SSHIdentityCredential, when set, names a secret in the encrypted vault
 	// holding the SSH private key. It is resolved at startup and written to a
 	// 0600 temp file used as the ssh identity — keeping the key out of config
@@ -1079,7 +1085,7 @@ type MCPServerConfig struct {
 // SecretRef names a value in Soulacy's encrypted global secret store; the
 // credential itself is deliberately never serialized into config.yaml.
 type MCPAuthConfig struct {
-	Type            string   `mapstructure:"type"` // none | bearer | api_key | oauth_client_credentials
+	Type            string   `mapstructure:"type"` // none | bearer | api_key | oauth_client_credentials | oauth_authorization_code
 	Header          string   `mapstructure:"header"`
 	Scheme          string   `mapstructure:"scheme"`
 	SecretRef       string   `mapstructure:"secret_ref"`
@@ -1088,6 +1094,7 @@ type MCPAuthConfig struct {
 	ClientSecretRef string   `mapstructure:"client_secret_ref"`
 	Scopes          []string `mapstructure:"scopes"`
 	Audience        string   `mapstructure:"audience"`
+	Resource        string   `mapstructure:"resource"`
 }
 
 // RegistryConfig describes one package registry for skill/plugin installs
@@ -1230,6 +1237,7 @@ func Load(cfgPath string) (*Config, string, error) {
 	v.SetDefault("executor.workers", 4)
 	v.SetDefault("executor.docker_image", "python:3.12-slim")
 	v.SetDefault("executor.docker_network", "none")
+	v.SetDefault("executor.docker_user", "auto")
 	v.SetDefault("executor.ssh_python_bin", "python3")
 	v.SetDefault("queue.backend", "memory")
 	v.SetDefault("queue.nats_url", "nats://localhost:4222")

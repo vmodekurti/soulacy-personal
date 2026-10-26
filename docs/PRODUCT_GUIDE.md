@@ -74,7 +74,7 @@ Soulacy is meant to be trusted with real work, so high-risk actions are gated.
 By default tool code runs locally in a sandboxed subprocess. Per agent you can select a different backend with an `execution.backend` value:
 
 - `local` — sandboxed subprocess (default).
-- `docker` — a short-lived container; mounts are limited to an explicit volume allowlist.
+- `docker` — a short-lived, hardened container (read-only root, no capabilities, no network by default, non-root); mounts are limited to an explicit volume allowlist. See [Tool isolation](security/sandbox.md).
 - `ssh` — a remote host; the private key can be pulled from the encrypted vault instead of a file.
 - `modal` / `runpod` / `daytona` — cloud sandbox presets (the provider CLI must be installed and authenticated on the host).
 
