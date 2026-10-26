@@ -4002,10 +4002,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#ordinary-python-tools-resource-limits-only" class="md-nav__link">
+  <a href="#ordinary-python-tools-resource-limits-by-default" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Ordinary Python tools: resource limits only
+        Ordinary Python tools: resource limits by default
       
     </span>
   </a>
@@ -5075,10 +5075,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#ordinary-python-tools-resource-limits-only" class="md-nav__link">
+  <a href="#ordinary-python-tools-resource-limits-by-default" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Ordinary Python tools: resource limits only
+        Ordinary Python tools: resource limits by default
       
     </span>
   </a>
@@ -5196,12 +5196,38 @@ warning on every startup. Do not use it on shared or production systems.</p>
 process after the chokepoint, but their targets pass the same symlink-aware
 workspace containment policy used by all filesystem tools. They cannot write
 outside configured roots.</p>
-<h2 id="ordinary-python-tools-resource-limits-only">Ordinary Python tools: resource limits only<a class="headerlink" href="#ordinary-python-tools-resource-limits-only" title="Permanent link">&para;</a></h2>
+<h2 id="ordinary-python-tools-resource-limits-by-default">Ordinary Python tools: resource limits by default<a class="headerlink" href="#ordinary-python-tools-resource-limits-by-default" title="Permanent link">&para;</a></h2>
 <p>Agent/plugin Python execution still uses the <code>__exec-sandbox</code> POSIX rlimit
-wrapper. It caps CPU, address space, open descriptors, and single-file size and
-filters the environment. This wrapper is a resource-exhaustion guard, not a
-filesystem or network boundary. Use a Docker executor for untrusted ordinary
-Python tools as well.</p>
+wrapper by default. It caps CPU, address space, open descriptors, and
+single-file size and filters the environment. This wrapper is a
+resource-exhaustion guard, not a filesystem or network boundary.</p>
+<p>For untrusted agent tools, select the Docker backend per agent:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># SOUL.yaml</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nt">execution</span><span class="p">:</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">backend</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker</span>
+</span></code></pre></div>
+<p>Each tool call then runs in a disposable container with the same hardened
+profile as privileged builtins: read-only root, all capabilities dropped,
+<code>no-new-privileges</code>, no network by default, a <code>noexec</code> tmpfs <code>/tmp</code> (also
+<code>HOME</code>), and the <code>runtime.sandbox</code> CPU, memory, PID, file-descriptor and
+file-size caps. No gateway environment is forwarded, and only the volumes you
+list are mounted. If Docker is unreachable, the call fails; it never falls back
+to the host.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># config.yaml</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">executor</span><span class="p">:</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="nt">docker_image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">python:3.12-slim</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="nt">docker_network</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">none</span><span class="w">        </span><span class="c1"># an explicit choice; "none" also blocks cloud metadata</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="nt">docker_user</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span><span class="w">           </span><span class="c1"># auto (gateway uid:gid) | image | "uid:gid"</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span><span class="nt">docker_volumes</span><span class="p">:</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/srv/agent-data:/data:rw</span>
+</span></code></pre></div>
+<p><code>docker_user: auto</code> runs the tool as the gateway's own user, so it is not
+root inside the container and files it writes to a volume belong to you. Use
+<code>image</code> to keep the image's default user.</p>
+<p>Current limits: tools defined with <code>python_file</code> load from a host path, so
+they only work in Docker if that directory is mounted at the same path. Plugin
+tools don't honour <code>execution.backend</code> yet. Both are planned; see
+<a href="../../CONTAINER_SANDBOX_DESIGN/">the design memo</a>.</p>
 <p>On macOS <code>RLIMIT_AS</code> is advisory; on non-Unix systems the rlimit wrapper is a
 no-op. These limitations do not weaken the Docker boundary for privileged
 builtins.</p>
